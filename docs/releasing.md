@@ -71,8 +71,10 @@ an in-progress release.
    before choosing a new version or resuming the newest tag's peeled commit. It records the
    previous tag, full SHA and whether this is a resume, uploads the notes and writes the Actions
    summary.
-2. **verify** checks that SHA with `pnpm verify` on Node 24 and 26. `SYNC_BASE` is the previous
-   release tag, so the sync check covers all commits being released.
+2. **verify** checks that SHA through the shared verify workflow: `verify:static`, `verify:test`,
+   `verify:timing`, `verify:build` and `verify:harness` run in parallel on Node 24 and 26, with
+   4 Vitest shards per Node version. These are the same checks as the local `pnpm verify` gate.
+   `SYNC_BASE` is the previous release tag, so the sync check covers all commits being released.
 3. **build** installs from the frozen lockfile on Node 26, stamps the version into the build
    checkout, builds and packs with pnpm. The root pnpmfile strips private development dependencies;
    the prepack hook refuses npm packing. `check:package --tarball` checks that exact tarball. The

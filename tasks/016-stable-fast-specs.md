@@ -25,7 +25,7 @@ One commit per step, in the plan's order (D2):
 
 - [x] Quick stability: batched seeds, races and sleeps, row counters instead of ratios. No
       production change.
-- [ ] CI fan-out: the `verify:*` scripts, a reusable verify workflow, 4 Vitest shards on both
+- [x] CI fan-out: the `verify:*` scripts, a reusable verify workflow, 4 Vitest shards on both
       Node versions, static checks on both Node versions (D1), and the guard test.
 - [ ] Pacing hook: `pacing.ts` at the yield sites, behaviour unchanged.
 - [ ] New yields in the import pipeline, with one work-unit test per phase.
@@ -40,7 +40,9 @@ One commit per step, in the plan's order (D2):
 - [ ] `tailscale-process` and `serve-signals` onto fake timers and fake children; no deadline
       seam for `emend serve` (D3).
 - [ ] The `core` budgets become work counts; their speed checks move to the bench.
-- [ ] The web sleeps go onto fake timers.
+- [ ] The web sleeps go onto fake timers. Also: happy-dom follows a clicked `target=_blank` link
+      for real, so a web test makes a DNS lookup of `example.test` (logged as `ENOTFOUND` in every
+      run); no test may reach the network.
 - [ ] Split the biggest test files only if the shards are still uneven.
 - [ ] Reviews per step: emend-reviewer, a read-only Codex review, and emend-security-reviewer on
       every server, CI or hook change.

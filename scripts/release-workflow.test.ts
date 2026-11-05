@@ -39,6 +39,14 @@ test("release jobs keep the verification, publishing and marking dependency grap
   }
 });
 
+test("build requires successful verification without a job condition override", () => {
+  const build = jobs.get("build");
+  assert(build, "missing build job");
+  const keys = [...build.matchAll(/^    (?:"([^"]+)"|'([^']+)'|([\w-]+))[ \t]*:/gm)]
+    .map((match) => match[1] ?? match[2] ?? match[3]);
+  assert(!keys.includes("if"), "build must use the default success condition for its plan and verify dependencies");
+});
+
 test("every needs output reference names a declared output of a direct dependency", () => {
   const outputs = new Map(
     [...jobs].map(([job, body]) => {
@@ -143,8 +151,9 @@ test("run scripts receive expressions only through env", () => {
 test("the workflow gates the selected SHA and keeps dry runs free of remote mutations", () => {
   assert.match(jobs.get("plan") ?? "", /if: github.ref == 'refs\/heads\/main' && github.repository == 'shllg\/emend'/);
   assert.match(jobs.get("plan") ?? "", /^    if: .*&& vars\.RELEASE_ENABLED == 'true'$/m);
-  assert.match(jobs.get("verify") ?? "", /node: \[24, 26\]/);
-  assert.match(jobs.get("verify") ?? "", /SYNC_BASE: \$\{\{ needs.plan.outputs.previous \}\}/);
+  assert.match(jobs.get("verify") ?? "", /^    uses: \.\/\.github\/workflows\/verify\.yml$/m);
+  assert.match(jobs.get("verify") ?? "", /^      ref: \$\{\{ needs.plan.outputs.sha \}\}$/m);
+  assert.match(jobs.get("verify") ?? "", /^      sync-base: \$\{\{ needs.plan.outputs.previous \}\}$/m);
   for (const name of ["tag", "publish", "mark"]) {
     assert.match(jobs.get(name) ?? "", /^    if: \$\{\{ !inputs.dry_run && vars\.RELEASE_ENABLED == 'true' \}\}$/m);
     assert(!(jobs.get(name) ?? "").includes("actions/checkout"));

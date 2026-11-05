@@ -32,8 +32,9 @@ The work queue is `tasks/`. When asked "what now?", "what's next?" or similar, f
 
 ## Commands
 
-- `pnpm verify`: the completion gate: `lint`, `typecheck`, `test`, `build`, `check:package`, `check:budget`,
-  `check:sync` and `test:harness`, in that order.
+- `pnpm verify`: the local gate chains `verify:static` (lint, typecheck, check:sync), `verify:test`
+  (Vitest), `verify:timing` (strict timing passes), `verify:build` (build, check:package, check:budget)
+  and `verify:harness` (test:harness). CI runs them in parallel on Node 24 and 26 with 4 Vitest shards.
 - `pnpm lint`: Biome checks formatting and lint. `pnpm typecheck`: TypeScript project references.
 - `pnpm test`: Vitest (Node for packages and CLI, happy-dom for the web app), with temporary state.
 - `pnpm build`: builds the web app, then bundles the CLI and copies the web build into its dist.

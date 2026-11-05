@@ -31,6 +31,8 @@ Claude Code reads the skills from the checkout's `plugin/` folder, uncommitted c
 pulled change takes effect at the next session start or after `/reload-plugins`. For other agents,
 run `emend skills install` once; its links point into the installed package.
 
-`pnpm verify` runs every check. [AGENTS.md](https://github.com/shllg/emend/blob/main/AGENTS.md)
-holds the working rules. Maintainers: [releasing.md](../releasing.md)
-holds the release policy and checklist.
+`pnpm verify` is the single local gate. It runs `verify:static`, `verify:test`, `verify:timing`,
+`verify:build` and `verify:harness` in order. CI runs those same checks in parallel on Node 24
+and 26, with 4 Vitest shards per Node version. [AGENTS.md](https://github.com/shllg/emend/blob/main/AGENTS.md)
+holds the working rules. Maintainers: [releasing.md](../releasing.md) holds the release policy
+and checklist.
