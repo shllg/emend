@@ -36,15 +36,15 @@ export function ReadingGroup({
   const body = useRef<HTMLDivElement>(null);
   const folds = useContext(ReadingFoldContext);
   const foldKey = JSON.stringify([folds?.reviewId, folds?.revision, group.key]);
-  const [open, setOpen] = useState(
-    () =>
-      folds?.choices.get(foldKey) ??
-      (changedIn !== undefined || (group.presentation !== "glossary" && group.topic?.attention !== "skim")),
-  );
+  const defaultOpen =
+    changedIn !== undefined || (group.presentation !== "glossary" && group.topic?.attention !== "skim");
+  const [choice, setChoice] = useState({ open: defaultOpen });
+  // Read the active entry during render; switching fold maps needs no extra render cycle.
+  const open = folds ? (folds.choices.get(foldKey) ?? defaultOpen) : choice.open;
   const rememberOpen = useCallback(
     (next: boolean) => {
       folds?.choices.set(foldKey, next);
-      setOpen(next);
+      setChoice({ open: next });
     },
     [folds, foldKey],
   );

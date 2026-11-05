@@ -1,6 +1,7 @@
 export { htmlAssetReferences } from "./assets.ts";
 export { htmlHeadings, markdownHeadings } from "./doc-headings.ts";
 export { cleanDocTitle, inferDocTitle, markdownTitle } from "./doc-title.ts";
+export { headingLookups } from "./heading-lookups.ts";
 export { type DocLinks, resolveDocLink } from "./links.ts";
 export { docText, placeHtmlSpan } from "./place/html.ts";
 export { lineMap } from "./place/linemap.ts";

@@ -17,14 +17,131 @@
     font: var(--type-path);
   }
   .em-doc-view {
-    /* A sole doc has only the path line; otherwise the small button sets the bar height. */
-    --doc-bar-height: calc(var(--text-12) * var(--lh-snug) + 2 * var(--space-1-5) + var(--space-px));
-  }
-  .em-doc-view[data-multiple-docs] {
-    --doc-bar-height: calc(var(--space-10) + var(--space-px));
+    --doc-bar-height: 112px;
+    container-type: inline-size;
+    container-name: doc;
   }
   .em-doc-bar {
     top: 0;
+    padding: 8px 12px;
+  }
+  .em-doc-title {
+    min-width: 0;
+  }
+  .em-doc-title h2 {
+    font: 600 16px / 1.4 var(--font-sans);
+  }
+  .em-doc-title h2,
+  .em-doc-title .em-doc-path {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    unicode-bidi: isolate;
+  }
+  .em-doc-title .em-doc-path {
+    color: var(--fg-3);
+  }
+  .em-doc-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .em-doc-control {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .em-doc-control-label {
+    max-width: 25ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .em-doc-body {
+    min-width: 0;
+  }
+  .em-doc-contents-rail {
+    display: none;
+  }
+  .em-reading-popover {
+    position: absolute;
+    inset-inline-end: 12px;
+    top: 100%;
+    z-index: 2;
+    width: min(360px, calc(100% - 24px));
+    max-height: 60vh;
+    overflow: auto;
+    padding: 12px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-1);
+    border-radius: 8px;
+    box-shadow: var(--shadow-3);
+  }
+  .em-doc-filter {
+    width: 100%;
+    margin-block: 8px;
+    padding: 8px;
+    border: 1px solid var(--border-1);
+  }
+  .em-doc-options button {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+    min-height: 44px;
+    padding: 8px;
+    text-align: start;
+  }
+  .em-doc-options small {
+    display: block;
+    color: var(--fg-3);
+  }
+  .em-doc-options button > span:first-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .em-doc-options button > span:last-child {
+    flex-shrink: 0;
+    font-size: 12px;
+  }
+  .em-doc-contents button {
+    width: 100%;
+    min-height: 44px;
+    padding: 8px;
+    text-align: start;
+    overflow-wrap: anywhere;
+  }
+  .em-doc-contents [data-level="3"] {
+    padding-inline-start: 20px;
+  }
+  .em-doc-options [aria-current],
+  .em-doc-contents [aria-current] {
+    background: var(--accent-tint);
+    color: var(--accent-text);
+  }
+  @container doc (min-width: 960px) {
+    .em-doc-body:has(.em-doc-contents-rail) {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 220px;
+    }
+    .em-doc-contents-control {
+      display: none;
+    }
+    .em-doc-contents-rail {
+      display: block;
+      position: sticky;
+      top: calc(var(--doc-bar-height) + 48px);
+      align-self: start;
+      max-height: calc(100dvh - var(--doc-bar-height) - 68px);
+      overflow: auto;
+      padding: 12px;
+    }
+  }
+  @media (max-width: 767px) {
+    .em-doc-control-label {
+      display: none;
+    }
   }
   .em-doc-view :is([id], h1, h2, h3, h4, h5, h6) {
     scroll-margin-top: var(--doc-bar-height);

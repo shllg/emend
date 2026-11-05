@@ -6,7 +6,10 @@ import { type Executor, executeWork, serializeRendered } from "./work.ts";
 
 vi.mock("@emend/contract", async (original) => {
   const contract = await original<typeof import("@emend/contract")>();
-  return { ...contract, LIMITS: { ...contract.LIMITS, renderedBytesPerRevision: 600 } };
+  return {
+    ...contract,
+    LIMITS: { ...contract.LIMITS, renderedBytesPerRevision: 600, headingLookupBytesPerRevision: 47 },
+  };
 });
 const input: PublishRequest = {
   reviewKey: "a".repeat(64),
@@ -85,4 +88,67 @@ test("doc metadata is bounded before storing any rendered blobs", async () => {
     ),
   ).rejects.toMatchObject({ code: "too_large" });
   expect(put).not.toHaveBeenCalled();
+});
+
+test("lookup bytes have an independent budget even when metadata fits", async () => {
+  const put = vi.fn(async () => "stored");
+  await expect(
+    renderRevision(
+      { ...input, files: input.files.slice(0, 1) },
+      async (work) =>
+        work.kind === "doc-metadata"
+          ? {
+              kind: "doc-metadata",
+              headings: [{ level: 2, text: "a".repeat(200), id: `user-content-${"b".repeat(187)}` }],
+            }
+          : executeWork(work),
+      async () => new ArrayBuffer(0),
+      put,
+    ),
+  ).rejects.toMatchObject({ code: "too_large" });
+  expect(put).not.toHaveBeenCalled();
+});
+
+test.each(["distinct lists", "UTF-8 name"])(
+  "R1.8 the dedicated lookup budget counts overhead and %s before writeup work",
+  async (kind) => {
+    const put = vi.fn(async () => "stored");
+    const execute = vi.fn<Executor>(async (work) =>
+      work.kind === "doc-metadata"
+        ? {
+            kind: "doc-metadata",
+            headings: [{ level: 2, text: "", id: kind === "UTF-8 name" ? "user-content-é" : "user-content-a" }],
+          }
+        : work.kind === "writeup"
+          ? { kind: "writeup", ...serializeRendered({ sections: [] }) }
+          : { kind: "doc", ...serializeRendered([]) },
+    );
+    const files = kind === "distinct lists" ? [input.files[0], input.files[2]] : [input.files[0]];
+    await expect(
+      renderRevision(
+        { ...input, files: files.filter((file) => file !== undefined) },
+        execute,
+        async () => new ArrayBuffer(0),
+        put,
+      ),
+    ).rejects.toMatchObject({ code: "too_large" });
+    expect(execute.mock.calls.some(([work]) => work.kind === "writeup")).toBe(false);
+    expect(put).not.toHaveBeenCalled();
+  },
+);
+
+test("R1.8 exactly the lookup cap is accepted and a shared heading list is charged once", async () => {
+  const execute: Executor = async (work) =>
+    work.kind === "doc-metadata"
+      ? { kind: "doc-metadata", headings: [{ level: 2, text: "", id: "user-content-a" }] }
+      : work.kind === "writeup"
+        ? { kind: "writeup", ...serializeRendered({ sections: [] }) }
+        : { kind: "doc", ...serializeRendered([]) };
+  const result = await renderRevision(
+    { ...input, files: input.files.slice(0, 2) },
+    execute,
+    async () => new ArrayBuffer(0),
+    async () => "stored",
+  );
+  expect(result.docBlobs.size).toBe(2);
 });

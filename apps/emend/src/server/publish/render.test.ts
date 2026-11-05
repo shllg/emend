@@ -30,7 +30,7 @@ test("writeup work reports doc-base use without inspecting serialized HTML", asy
     source: { overview: "[go](target.md)", tldr: "", decisions: null, topics: {} },
     topics: [],
     media: [],
-    docs: new Map([["target.md", new Set()]]),
+    docs: new Map([["target.md", new Map()]]),
   });
   expect(rendered).toMatchObject({ kind: "writeup", pathDependent: true });
 });
@@ -282,4 +282,51 @@ test.each(["failure", "budget"])("unrendered docs keep titles but no headings af
   } finally {
     Object.assign(LIMITS, { blocksPerRevision: original });
   }
+});
+
+test.each(["identical", "collision chain"])(
+  "5,000 headings publish with bounded lookup work: %s",
+  async (kind) => {
+    const source = Array.from(
+      { length: 5_000 },
+      (_, i) => `## ${kind === "identical" || i < 2 ? "a" : `a-${i}`}\n`,
+    ).join("\n");
+    const stored = new Map<string, Buffer>();
+    const result = await renderRevision(
+      input(["a.md"]),
+      async (work) => {
+        if (work.kind === "writeup" || work.kind === "doc")
+          expect(work.docs?.get("a.md")?.size).toBeLessThanOrEqual(3 * LIMITS.headingsPerDoc);
+        return executeWork(work);
+      },
+      async (hash) => Uint8Array.from(stored.get(hash) ?? Buffer.from(source)).buffer,
+      async (bytes) => {
+        const key = String(stored.size);
+        stored.set(key, bytes);
+        return key;
+      },
+    );
+    expect(result.metadata.get("a.md")?.headings).toHaveLength(LIMITS.headingsPerDoc);
+    const blocks = JSON.parse(stored.get(result.docBlobs.get("a.md") ?? "")?.toString() ?? "[]") as Block[];
+    const ids = new Set(blocks.flatMap((block) => [...block.html.matchAll(/ id="([^"]+)"/g)].map((match) => match[1])));
+    for (const heading of result.metadata.get("a.md")?.headings ?? []) expect(ids.has(heading.id)).toBe(true);
+  },
+  10_000,
+);
+
+test("shared heading lists share their lookup map across paths", async () => {
+  const execute = vi.fn(executeWork);
+  const stored = new Map<string, Buffer>();
+  await renderRevision(
+    input(["a.md", "b.md"]),
+    execute,
+    async (hash) => Uint8Array.from(stored.get(hash) ?? Buffer.from("## Setup")).buffer,
+    async (bytes) => {
+      const key = String(stored.size);
+      stored.set(key, bytes);
+      return key;
+    },
+  );
+  const work = execute.mock.calls.find(([work]) => work.kind === "writeup")?.[0];
+  expect(work?.kind === "writeup" && work.docs?.get("a.md")).toBe(work?.kind === "writeup" && work.docs?.get("b.md"));
 });

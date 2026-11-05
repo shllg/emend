@@ -1,13 +1,20 @@
 import { expect, test, vi } from "vitest";
 import { markdownHeadings } from "../doc-headings.ts";
+import { headingLookups } from "../heading-lookups.ts";
 import type { HtmlRoot } from "./blocks.ts";
 import { renderCommentHtml, renderDoc } from "./markdown.ts";
 import { hardenLinks } from "./sanitize.ts";
 import { renderWriteup } from "./writeup.ts";
 
 const docs = new Map([
-  ["docs/b.md", new Set(["user-content-part", "user-content-thread-unsafe"])],
-  ["a b&c.html", new Set<string>()],
+  [
+    "docs/b.md",
+    new Map([
+      ["part", "user-content-part"],
+      ["thread-unsafe", "user-content-thread-unsafe"],
+    ]),
+  ],
+  ["a b&c.html", new Map<string, string>()],
 ]);
 const html = (blocks: { html: string }[]) => blocks.map((b) => b.html).join("");
 test("doc links use only declared paths and heading ids, dropping queries and other fragments", async () => {
@@ -51,7 +58,7 @@ test("doc context cannot bypass hostile content isolation, including glossary an
 
 test("author fragments resolve only to declared sanitized headings", async () => {
   const target = await renderDoc('<h2 id="x">Author</h2>', "docs/b.md");
-  const declared = new Map([["docs/b.md", new Set(markdownHeadings(target).flatMap((h) => (h.id ? [h.id] : [])))]]);
+  const declared = new Map([["docs/b.md", headingLookups(markdownHeadings(target))]]);
   const rendered = html(await renderDoc("[yes](b.md#x) [no](b.md#absent)", "docs/a.md", undefined, declared));
   expect(rendered).toContain('href="?tab=docs&#x26;doc=docs%2Fb.md#h-user-content-x">yes');
   expect(rendered).toContain('href="?tab=docs&#x26;doc=docs%2Fb.md">no');
@@ -59,7 +66,7 @@ test("author fragments resolve only to declared sanitized headings", async () =>
 });
 
 test("HTML doc links discard fragments", async () => {
-  expect(docs.get("a b&c.html")).toEqual(new Set());
+  expect(docs.get("a b&c.html")).toEqual(new Map());
   expect(html(await renderDoc("[html](a%20b%26c.html#author)", "a.md", undefined, docs))).toContain(
     'href="?tab=docs&#x26;doc=a+b%26c.html">html',
   );
@@ -71,7 +78,7 @@ test("author fragments map only to their own prefixed id, never generated headin
   expect(headings.slice(0, 2).map((heading) => heading.id)).toEqual(["user-content-x", "user-content-user-content-x"]);
   const generated = headings[2]?.id;
   expect(generated).toMatch(/^heading-/);
-  const declared = new Map([["docs/b.md", new Set(headings.flatMap((h) => (h.id ? [h.id] : [])))]]);
+  const declared = new Map([["docs/b.md", headingLookups(headings)]]);
   const rendered = html(
     await renderDoc(
       `[one](b.md#x) [two](b.md#user-content-x) [generated](b.md#${generated})`,
@@ -100,8 +107,14 @@ test("rendering without links does no per-path work on the doc map", async () =>
 
 test("footnote markers and links with block children receive no doc rewrite", async () => {
   const declared = new Map([
-    ["docs/a.md", new Set(["user-content-fn-1", "user-content-fnref-1"])],
-    ["docs/b.md", new Set<string>()],
+    [
+      "docs/a.md",
+      new Map([
+        ["fn-1", "user-content-fn-1"],
+        ["fnref-1", "user-content-fnref-1"],
+      ]),
+    ],
+    ["docs/b.md", new Map<string, string>()],
   ]);
   const rendered = html(
     await renderDoc(
@@ -116,8 +129,8 @@ test("footnote markers and links with block children receive no doc rewrite", as
 
 test("nested docs and writeup resolve identical links against their own bases", async () => {
   const declared = new Map([
-    ["target.md", new Set<string>()],
-    ["docs/nested/target.md", new Set<string>()],
+    ["target.md", new Map<string, string>()],
+    ["docs/nested/target.md", new Map<string, string>()],
   ]);
   const writeup = await renderWriteup({ overview: "[go](target.md)", tldr: "", decisions: null, topics: {} }, [], {
     docs: declared,
@@ -138,4 +151,27 @@ test("the hardener records path dependence in file data", () => {
   const file = { data: { docs, docBase: "docs/a.md" } as Record<string, unknown> };
   hardenLinks()(tree, file);
   expect(file.data.docBaseUsed).toBe(true);
+});
+
+test("lookup keys never become emitted fragments, including hostile and noncanonical names", async () => {
+  const blocks = await renderDoc('<h2 id="x">Author</h2>\n\n## Setup\n\n## Café', "target.md");
+  const headings = markdownHeadings(blocks);
+  const names = headingLookups(headings);
+  const docs = new Map([["target.md", names]]);
+  for (const fragment of [
+    "constructor",
+    "__proto__",
+    headings[1]?.id ?? "",
+    "user-content-x",
+    "cafe\u0301",
+    "setup\u200b",
+  ]) {
+    const rendered = html(
+      await renderDoc(`[miss](target.md#${encodeURIComponent(fragment)})`, "start.md", undefined, docs),
+    );
+    expect(rendered).toBe('<p><a href="?tab=docs&#x26;doc=target.md">miss</a></p>');
+  }
+  const rendered = html(await renderDoc("[go](#setup)", "target.md", undefined, docs));
+  expect(rendered).toContain(`#h-${headings[1]?.id}`);
+  expect(rendered).not.toContain("#setup");
 });

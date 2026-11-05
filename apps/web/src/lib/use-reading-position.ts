@@ -1,4 +1,6 @@
 import { useLayoutEffect, useRef } from "react";
+import { appElementId, docHeading, type HeadingDoc } from "./doc-navigation.ts";
+import { focusReadingTarget, isReadingFocusMove } from "./reading-focus.ts";
 import {
   applyAnchor,
   findAnchor,
@@ -6,10 +8,18 @@ import {
   type ReadingAnchor,
   saveReadingPosition,
 } from "./reading-position.ts";
+import type { ReadingEntry } from "./use-reading-trail.ts";
 
 export const restoreDelays = [0, 100, 300, 800, 1500] as const;
 const saveInterval = 250;
-const lastKeys = new WeakMap<Element, string>();
+const captureEvent = "emend:capture-reading-position";
+
+/** The route calls this after a completed jump, while the destination's DOM is mounted. */
+export function captureReadingPosition() {
+  document.querySelector<HTMLElement>("[data-reading-scroll]")?.dispatchEvent(new Event(captureEvent));
+}
+
+const lastVisits = new WeakMap<Element, { key: string; entry?: ReadingEntry }>();
 // Only keys that scroll the pane count as reader input, and not while typing in a text field.
 const scrollKeys = new Set(["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "]);
 const textEntry = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
@@ -27,9 +37,9 @@ export type IntentState = {
  * The scroller is shared by every reading tab, so this lives in the tab content.
  *
  * Rules:
- * - Only the reader saves. A scroll event counts only after reader input (wheel, touch, pointer, key) since
- *   this hook started for its key. Clamping after a shorter tab replaces the content, scroll anchoring, the
- *   last retry and intent jumps are programmatic and neither save nor stop a restore.
+ * - Reader scrolling, focus and completed jumps save the live pane. A scroll event counts after reader input since
+ *   this hook started for its key. Clamping, scroll anchoring and restore retries are programmatic
+ *   and neither save nor stop a restore.
  * - Reader input stops the retries at once.
  * - Navigation wins: no restore when the current navigation has a scrolling intent, and the retries stop for
  *   good when a new one appears. A stale hash or an intent that was never fulfilled does not block.
@@ -41,12 +51,21 @@ export function useReadingPosition({
   selector,
   active,
   intentState,
+  entry,
+  doc,
+  preserve = false,
 }: {
   storageKey: string;
   selector: string;
   active: boolean;
   intentState: () => IntentState;
+  entry?: ReadingEntry;
+  doc?: HeadingDoc;
+  /** A diff-only navigation leaves the mounted reading pane in place. */
+  preserve?: boolean;
 }) {
+  const latestDoc = useRef(doc);
+  latestDoc.current = doc;
   const latestIntentState = useRef(intentState);
   latestIntentState.current = intentState;
   useLayoutEffect(() => {
@@ -56,9 +75,11 @@ export function useReadingPosition({
     const timers = new Set<ReturnType<typeof setTimeout>>();
     const startEpoch = latestIntentState.current().epoch;
     // The scroller outlives every tab and doc, so it remembers which content it last showed.
-    const lastKey = lastKeys.get(scroller);
-    const keyChanged = lastKey !== undefined && lastKey !== storageKey;
-    lastKeys.set(scroller, storageKey);
+    const lastVisit = lastVisits.get(scroller);
+    const keyChanged = lastVisit !== undefined && lastVisit.key !== storageKey;
+    const entryChanged = lastVisit !== undefined && lastVisit.entry !== entry;
+    const keepOffset = preserve && entryChanged && lastVisit?.key === storageKey;
+    lastVisits.set(scroller, { key: storageKey, entry });
     let restoring = false;
     let reader = false;
     let dirty = false;
@@ -74,10 +95,19 @@ export function useReadingPosition({
       dirty = false;
       saveReadingPosition(storageKey, latest);
     };
+    const capture = () => {
+      latest = findAnchor(scroller, selector);
+      entry?.positions.set(storageKey, latest);
+      dirty = true;
+    };
+    const onJump = () => {
+      stopRestore();
+      capture();
+      write();
+    };
     const onScroll = () => {
       if (!reader) return;
-      latest = findAnchor(scroller, selector);
-      dirty = true;
+      capture();
       if (throttle === undefined) {
         write();
         throttle = setTimeout(() => {
@@ -94,6 +124,7 @@ export function useReadingPosition({
       if (document.visibilityState === "hidden") write();
     };
     scroller.addEventListener("scroll", onScroll, { passive: true });
+    scroller.addEventListener(captureEvent, onJump);
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || !scrollKeys.has(event.key)) return;
       const target = event.target;
@@ -110,8 +141,14 @@ export function useReadingPosition({
     window.addEventListener("pagehide", write);
     document.addEventListener("visibilitychange", onVisibility);
 
-    const saved = loadReadingPosition(storageKey);
-    restoring = true;
+    const saved = keepOffset
+      ? undefined
+      : entry?.positions.has(storageKey)
+        ? entry.positions.get(storageKey)
+        : loadReadingPosition(storageKey);
+    // Entry snapshots describe the live pane, never a storage value awaiting a restore.
+    if (keepOffset) onJump();
+    restoring = !keepOffset;
     const attempt = (first: boolean) => {
       if (!restoring) return;
       const state = latestIntentState.current();
@@ -119,24 +156,69 @@ export function useReadingPosition({
         stopRestore();
         return;
       }
-      const placed = saved ? applyAnchor(scroller, saved) : undefined;
+      const placed = saved ? applyAnchor(scroller, saved, latestDoc.current) : undefined;
       // Another doc in the same scroller must not inherit the previous doc's offset: take the anchor or the top.
-      // Showing the same content again (a hidden pane, a remount) keeps whatever offset the scroller has.
-      if (first && placed === undefined && keyChanged) scroller.scrollTop = 0;
+      // A different entry can explicitly restore top even on the same key. A remount keeps the live offset.
+      if (first && placed === undefined && (keyChanged || (entryChanged && saved !== undefined)))
+        scroller.scrollTop = 0;
+      // A present null is an explicit top snapshot. A pending intent never reaches this point.
+      entry?.positions.set(storageKey, findAnchor(scroller, selector));
+      if (first && entry?.focus) {
+        const focus = entry.focus;
+        const heading =
+          focus.id.startsWith("h-") && latestDoc.current
+            ? docHeading(scroller, latestDoc.current, focus.id.slice(2))
+            : undefined;
+        if (heading) heading.tabIndex = -1;
+        let element = heading ?? (appElementId(focus.id) ? document.getElementById(focus.id) : undefined);
+        for (const index of focus.children) element = element?.children[index] as HTMLElement | undefined;
+        if (element && scroller.contains(element)) focusReadingTarget(element);
+      }
     };
-    restoreDelays.forEach((delay, index) => {
-      const timer = setTimeout(() => {
-        timers.delete(timer);
-        if (saved || index === 0) attempt(index === 0);
-        if (index === restoreDelays.length - 1) stopRestore();
-      }, delay);
-      timers.add(timer);
-    });
+    // Set the initial position in the commit, before doc-bar navigation moves focus.
+    // The route's intent state includes new navigations even before its passive effect runs.
+    if (!keepOffset) attempt(true);
+    if (restoring)
+      restoreDelays.slice(1).forEach((delay, index) => {
+        const timer = setTimeout(() => {
+          timers.delete(timer);
+          if (saved) attempt(false);
+          if (index === restoreDelays.length - 2) stopRestore();
+        }, delay);
+        timers.add(timer);
+      });
+    const rememberFocus = () => {
+      if (
+        isReadingFocusMove(document.activeElement) ||
+        !(document.activeElement instanceof HTMLElement) ||
+        !scroller.contains(document.activeElement)
+      )
+        return;
+      onInput();
+      onScroll();
+      if (!entry) return;
+      const active = document.activeElement;
+      const appRoot = active.closest<HTMLElement>('[id^="block-"], [id^="thread-"], [id^="topic-"]');
+      const heading =
+        latestDoc.current && docHeading(scroller, latestDoc.current, active.id) === active ? active : undefined;
+      const root = heading ?? (appRoot && appElementId(appRoot.id) && scroller.contains(appRoot) ? appRoot : undefined);
+      if (!root) {
+        entry.focus = undefined;
+        return;
+      }
+      const children: number[] = [];
+      for (let child: Element = active; child !== root && child.parentElement; child = child.parentElement)
+        children.unshift(Array.from(child.parentElement.children).indexOf(child));
+      entry.focus = { id: heading ? `h-${heading.id}` : root.id, children };
+    };
+    scroller.addEventListener("focusin", rememberFocus);
     return () => {
       write();
+      scroller.removeEventListener("focusin", rememberFocus);
       stopRestore();
       clearTimeout(throttle);
       scroller.removeEventListener("scroll", onScroll);
+      scroller.removeEventListener(captureEvent, onJump);
       scroller.removeEventListener("wheel", onInput);
       scroller.removeEventListener("touchstart", onInput);
       scroller.removeEventListener("touchmove", onInput);
@@ -145,5 +227,5 @@ export function useReadingPosition({
       window.removeEventListener("pagehide", write);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [active, storageKey, selector]);
+  }, [active, storageKey, selector, entry, preserve]);
 }

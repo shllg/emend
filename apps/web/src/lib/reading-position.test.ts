@@ -149,3 +149,77 @@ test("applying a missing anchor changes nothing", () => {
   expect(applyAnchor(scroller, { id: "block-gone", fraction: 0.5 })).toBeUndefined();
   expect(scroller.scrollTop).toBe(0);
 });
+
+test("restore rejects an arbitrary hash even if that element exists", () => {
+  const scroller = scene({ "user-content-x": 100 }, 0);
+  const lookup = vi.spyOn(document, "getElementById");
+  expect(applyAnchor(scroller, { id: "user-content-x", fraction: 0 })).toBeUndefined();
+  expect(lookup).not.toHaveBeenCalled();
+});
+test("heading restore validates and scopes the heading to its doc", () => {
+  const outside = document.createElement("h2");
+  outside.id = "thread-pretend";
+  document.body.append(outside);
+  const scroller = scene({}, 0);
+  const doc = document.createElement("section");
+  scroller.dataset.readingScroll = "";
+  doc.dataset.readingDoc = "doc.md";
+  const target = document.createElement("h2");
+  target.id = outside.id;
+  const block = document.createElement("div");
+  block.id = "block-doc-heading";
+  block.dataset.blockId = "doc-heading";
+  block.dataset.blockKind = "heading";
+  block.append(target);
+  doc.append(block);
+  scroller.append(doc);
+  vi.spyOn(target, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 150, 100, 100));
+  const lookup = vi.spyOn(document, "getElementById");
+  expect(
+    applyAnchor(
+      scroller,
+      { id: "h-thread-pretend", fraction: 0.5 },
+      {
+        path: "doc.md",
+        blocks: [{ id: "doc-heading", kind: "heading" }],
+        headings: [{ level: 2, text: "Secret heading", id: target.id }],
+      },
+    ),
+  ).toBe(150);
+  expect(lookup).not.toHaveBeenCalled();
+});
+test("position keys separate revisions and views and storage strips content fields", () => {
+  const key = readingPositionKey("r", "docs", "a.md", 2);
+  expect(key).not.toBe(readingPositionKey("r", "docs", "a.md", 1));
+  saveReadingPosition(key, {
+    id: "block-a",
+    fraction: 0.5,
+    text: "Secret quote",
+    contentUrl: "/content/private",
+  } as never);
+  expect(localStorage.getItem(readingKey)).not.toMatch(/Secret|content|quote/);
+});
+
+test("passage offsets account for the sticky doc bar", () => {
+  const scroller = scene({ "block-a": 0, "block-b": 100, "block-c": 200 }, 0);
+  const bar = document.createElement("div");
+  bar.className = "em-doc-bar";
+  scroller.prepend(bar);
+  vi.spyOn(bar, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 50, 300, 100));
+  expect(applyAnchor(scroller, { id: "block-c", fraction: 0.25 })).toBe(125);
+  expect(findAnchor(scroller, '[id^="block-"]')).toEqual({ id: "block-c", fraction: 0.25 });
+});
+
+test("R1.2 existing saved HTML frame anchors remain readable; topics are never saved", () => {
+  const key = readingPositionKey("r", "docs", "page.html", 1);
+  localStorage.setItem(readingKey, JSON.stringify({ [key]: { id: "html-doc-page.html", fraction: 0.25, at: 1 } }));
+  expect(loadReadingPosition(key)).toEqual({ id: "html-doc-page.html", fraction: 0.25 });
+  saveReadingPosition("topic", { id: "topic-seed", fraction: 0.5 });
+  expect(loadReadingPosition("topic")).toBeUndefined();
+});
+
+test("R2.2 existing Comments thread anchors remain readable", () => {
+  const key = readingPositionKey("r", "comments", "", 1);
+  localStorage.setItem(readingKey, JSON.stringify({ [key]: { id: "thread-synthetic", fraction: 0.25, at: 1 } }));
+  expect(loadReadingPosition(key)).toEqual({ id: "thread-synthetic", fraction: 0.25 });
+});

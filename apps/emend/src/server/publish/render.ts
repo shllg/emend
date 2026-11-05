@@ -1,5 +1,5 @@
 import { LIMITS, type PublishRequest } from "@emend/contract";
-import { cleanDocTitle, type DocLinks } from "@emend/core";
+import { cleanDocTitle, type DocLinks, headingLookups } from "@emend/core";
 import { ApiError } from "../http/errors.ts";
 import { yieldToLoop } from "../pacing.ts";
 import { WorkTimeout } from "./executor.ts";
@@ -50,17 +50,23 @@ export async function renderRevision(
     metadata.set(file.path, doc);
     await yieldToLoop("publish-render");
   }
-  const headingIds = new Map<DocMetadata["headings"], ReadonlySet<string>>();
-  const docs: DocLinks = new Map(
-    [...metadata].map(([path, doc]) => {
-      let ids = headingIds.get(doc.headings);
-      if (!ids) {
-        ids = new Set(doc.headings.flatMap((h) => (h.id ? [h.id] : [])));
-        headingIds.set(doc.headings, ids);
+  const lookupCache = new Map<DocMetadata["headings"], ReadonlyMap<string, string>>();
+  const docs = new Map<string, ReadonlyMap<string, string>>() satisfies DocLinks;
+  let lookupBytes = 0;
+  for (const [path, doc] of metadata) {
+    checkPublishSignal(signal);
+    let names = lookupCache.get(doc.headings);
+    if (!names) {
+      names = headingLookups(doc.headings);
+      for (const [name, id] of names) {
+        lookupBytes += Buffer.byteLength(name) + Buffer.byteLength(id) + 32;
+        if (lookupBytes > LIMITS.headingLookupBytesPerRevision) throw new ApiError("too_large");
       }
-      return [path, ids];
-    }),
-  );
+      lookupCache.set(doc.headings, names);
+    }
+    docs.set(path, names);
+    await setImmediate();
+  }
   let rendered: RenderedBytes;
   try {
     const media: [string, string][] = [];

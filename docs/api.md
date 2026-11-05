@@ -1058,6 +1058,7 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `headingsPerDoc` | 1024 h2/h3 entries per doc |
 | `headingTextChars` | 200 characters per cleaned heading label |
 | `headingIdChars` | 256 characters per declared Markdown heading ID, including its prefix |
+| `headingLookupBytesPerRevision` | 33554432 bytes (32 MiB) across distinct heading lookup maps: UTF-8 name and target ID bytes plus 32 bytes per entry |
 | `diffSideBytes` | 1048576 bytes shown per side |
 | `markdownDocBytes` | 1048576 bytes |
 | `htmlDocBytes` | 8388608 bytes |
@@ -1188,9 +1189,21 @@ schema discards supplied `headings`. The hub cleans titles and recomputes headin
 when rendering, preserving compatibility with older exports.
 
 After sanitize, writeup and Markdown links that resolve to a doc in the revision become
-`?tab=docs&doc=<manifest path>` using `URLSearchParams`. A fragment `f` keeps `#h-user-content-<f>`
-(URL-encoded) only when `user-content-<f>` is a declared heading ID of the target doc. A fragment is
-never compared with a declared ID directly, so generated `heading-` IDs are never link targets.
+`?tab=docs&doc=<manifest path>` using `URLSearchParams`. A once-decoded fragment is looked up
+exactly among the target's declared h2/h3 headings: author IDs (without `user-content-`) first,
+then hunk-review slugs, then GitHub slugs; first match wins. A match emits only
+`#h-<URL-encoded declared ID>`. A fragment is never compared with a declared ID directly.
+Hunk-review slugs lowercase text, replace runs outside ASCII letters/digits with `-`, trim edge
+hyphens and number repeats from `-2`. GitHub slugs lowercase text, retain only Unicode letters,
+marks, numbers, hyphens, underscores and ASCII spaces, replace each space with `-`, and number
+repeats from `-1`. Each kind skips previously taken names independently. Neither normalizes Unicode.
+Lookup names come from cleaned, capped heading text. Empty names and names over
+`LIMITS.headingIdChars` are skipped; at most one name per kind per declared heading is registered.
+Maps are built once per distinct heading list, yielding after each doc. Each entry counts the UTF-8
+bytes of its name and target ID plus 32 bytes of overhead, once per distinct list, against
+`LIMITS.headingLookupBytesPerRevision` (32 MiB, below the publish worker's 256 MiB heap).
+Overflow fails with `too_large` before rendering the writeup. This separate budget does not change
+the stored rendered-byte total. Names are never stored or emitted.
 Author queries and undeclared fragments are discarded. Links to HTML docs keep
 no fragment. Markdown docs that fail rendering or exceed its budget declare no headings, but
 keep their title. Links into such a doc may keep a fragment, which the app then ignores.

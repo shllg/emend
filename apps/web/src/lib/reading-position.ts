@@ -1,4 +1,5 @@
 import { z } from "@emend/contract/browser";
+import { appElementId, docHeading, type HeadingDoc } from "./doc-navigation.ts";
 
 export const readingKey = "emend.reading.v1";
 export const readingCap = 200;
@@ -6,34 +7,38 @@ export type ReadingAnchor = { id: string; fraction: number };
 type Entry = ReadingAnchor & { at: number };
 
 const entrySchema = z.object({
-  id: z.string().min(1).max(600),
+  id: z
+    .string()
+    .min(1)
+    .max(600)
+    .regex(/^(?:block-|thread-|h-|html-doc-).+/),
   fraction: z.number().min(0).max(1),
   at: z.number().finite(),
 });
 const storeSchema = z.record(z.string(), z.unknown());
 
-export function readingPositionKey(reviewId: string, tab: string, doc = "") {
-  return [reviewId, tab, doc].join("\n");
+export function readingPositionKey(reviewId: string, tab: string, doc = "", revision?: number, view = "reading") {
+  return [reviewId, tab, doc, ...(tab === "docs" && revision !== undefined ? [revision, view] : [])].join("\n");
 }
 
 // Storage may be missing, full or hold anything; every failure leaves the reader at the top.
-function readAll(): Record<string, Entry> {
+function readAll(): Map<string, Entry> {
   try {
     const parsed = storeSchema.safeParse(JSON.parse(localStorage.getItem(readingKey) ?? "{}"));
-    if (!parsed.success) return {};
-    const entries: Record<string, Entry> = {};
+    if (!parsed.success) return new Map();
+    const entries = new Map<string, Entry>();
     for (const [key, value] of Object.entries(parsed.data)) {
       const entry = entrySchema.safeParse(value);
-      if (entry.success) entries[key] = entry.data;
+      if (entry.success) entries.set(key, entry.data);
     }
     return entries;
   } catch {
-    return {};
+    return new Map();
   }
 }
 
 export function loadReadingPosition(key: string): ReadingAnchor | undefined {
-  const entry = readAll()[key];
+  const entry = readAll().get(key);
   return entry ? { id: entry.id, fraction: entry.fraction } : undefined;
 }
 
@@ -41,11 +46,16 @@ export function loadReadingPosition(key: string): ReadingAnchor | undefined {
 export function saveReadingPosition(key: string, anchor: ReadingAnchor | null, now = Date.now()) {
   try {
     const entries = readAll();
-    if (anchor) entries[key] = { id: anchor.id, fraction: Math.min(1, Math.max(0, anchor.fraction)), at: now };
-    else delete entries[key];
-    const kept = Object.entries(entries)
-      .sort((a, b) => b[1].at - a[1].at)
-      .slice(0, readingCap);
+    if (anchor) {
+      const parsed = entrySchema.safeParse({
+        id: anchor.id,
+        fraction: Math.min(1, Math.max(0, anchor.fraction)),
+        at: now,
+      });
+      if (!parsed.success) return;
+      entries.set(key, parsed.data);
+    } else entries.delete(key);
+    const kept = [...entries].sort((a, b) => b[1].at - a[1].at).slice(0, readingCap);
     localStorage.setItem(readingKey, JSON.stringify(Object.fromEntries(kept)));
   } catch {
     // Reading still works without a remembered position.
@@ -53,6 +63,12 @@ export function saveReadingPosition(key: string, anchor: ReadingAnchor | null, n
 }
 
 const hidden = (rect: DOMRect) => rect.width === 0 && rect.height === 0;
+const readingTop = (scroller: HTMLElement) =>
+  Math.max(
+    scroller.getBoundingClientRect().top,
+    scroller.querySelector(".em-doc-bar")?.getBoundingClientRect().bottom ?? 0,
+    scroller.querySelector(".em-review-tabs")?.getBoundingClientRect().bottom ?? 0,
+  );
 
 /**
  * The first anchorable element whose bottom is below the scroller's top edge. Anchors are in document order,
@@ -62,7 +78,7 @@ const hidden = (rect: DOMRect) => rect.width === 0 && rect.height === 0;
  */
 export function findAnchor(scroller: HTMLElement, selector: string): ReadingAnchor | null {
   if (scroller.scrollTop <= 0) return null;
-  const top = scroller.getBoundingClientRect().top;
+  const top = readingTop(scroller);
   const list = Array.from(scroller.querySelectorAll<HTMLElement>(selector));
   const at = (index: number) => list[index] as HTMLElement;
   let found: { element: HTMLElement; rect: DOMRect } | undefined;
@@ -93,11 +109,15 @@ export function findAnchor(scroller: HTMLElement, selector: string): ReadingAnch
 }
 
 /** Scrolls so the anchor sits at the scroller's top. Returns the new scrollTop, or undefined when the element is gone. */
-export function applyAnchor(scroller: HTMLElement, anchor: ReadingAnchor): number | undefined {
-  const element = document.getElementById(anchor.id);
+export function applyAnchor(scroller: HTMLElement, anchor: ReadingAnchor, doc?: HeadingDoc): number | undefined {
+  const element = anchor.id.startsWith("h-")
+    ? doc && docHeading(scroller, doc, anchor.id.slice(2))
+    : appElementId(anchor.id)
+      ? document.getElementById(anchor.id)
+      : undefined;
   if (!element || !scroller.contains(element)) return undefined;
   const rect = element.getBoundingClientRect();
-  const delta = rect.top + anchor.fraction * rect.height - scroller.getBoundingClientRect().top;
+  const delta = rect.top + anchor.fraction * rect.height - readingTop(scroller);
   if (Math.abs(delta) >= 1) scroller.scrollTop += delta;
   return scroller.scrollTop;
 }

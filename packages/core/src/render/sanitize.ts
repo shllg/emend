@@ -274,8 +274,7 @@ export function hardenLinks() {
           const link = resolveDocLink(base, lookup, docs);
           if (link) {
             const params = new URLSearchParams({ tab: "docs", doc: link.path });
-            const ids = docs.get(link.path);
-            const id = link.fragment && ids?.has(`${prefix}${link.fragment}`) ? `${prefix}${link.fragment}` : undefined;
+            const id = link.fragment ? docs.get(link.path)?.get(link.fragment) : undefined;
             const heading = id ? `#h-${encodeURIComponent(id)}` : "";
             element.properties.href = `?${params}${heading}`;
           }

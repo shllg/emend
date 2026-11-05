@@ -41,4 +41,4 @@ export function resolveDocLink(
   return docs.has(resolved) ? { path: resolved, ...(fragment ? { fragment } : {}) } : null;
 }
 
-export type DocLinks = ReadonlyMap<string, ReadonlySet<string>>;
+export type DocLinks = ReadonlyMap<string, ReadonlyMap<string, string>>;

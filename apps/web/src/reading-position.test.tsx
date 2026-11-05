@@ -2,8 +2,9 @@
 import type { RenderedBlock, ReviewView, RevisionView, ThreadView } from "@emend/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { Window } from "happy-dom";
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
 import { layoutStore } from "./lib/layout-store.ts";
@@ -13,6 +14,23 @@ import { restoreDelays } from "./lib/use-reading-position.ts";
 vi.mock("./components/diff/LazyDiffPane.tsx", () => ({
   LazyDiffPane: () => <p>Diff stub</p>,
 }));
+
+const presentation = vi.hoisted(() => ({ collapsedDocCards: false }));
+vi.mock("./components/reading/BlockReader.tsx", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./components/reading/BlockReader.tsx")>();
+  return {
+    ...actual,
+    // Exercise the existing collapsed-card mode without changing DocView's display defaults.
+    BlockReader: (props: ComponentProps<typeof actual.BlockReader>) => (
+      <actual.BlockReader
+        {...props}
+        focus={
+          props.focus || (presentation.collapsedDocCards && props.groups.some((group) => group.path !== undefined))
+        }
+      />
+    ),
+  };
+});
 
 const id = "11111111-1111-4111-8111-111111111111";
 const review: ReviewView = {
@@ -98,7 +116,7 @@ const revisionWith = (seq: number, blocks: RenderedBlock[], threads: ThreadView[
     },
   ],
   writeup: { sections: [{ key: "overview", label: "Body", topic: null, blocks }] },
-  docs,
+  docs: structuredClone(docs),
   threads,
   changedBlocks: [],
 });
@@ -108,9 +126,10 @@ let revisions: Record<number, RevisionView>;
 let client: QueryClient;
 let width = 390;
 const originalBounds = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "getBoundingClientRect");
-const writeupKey = readingPositionKey(id, "writeup");
+const writeupKey = readingPositionKey(id, "writeup", "", 1);
 
 beforeEach(() => {
+  presentation.collapsedDocCards = false;
   const bounds = HTMLElement.prototype.getBoundingClientRect;
   Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
     configurable: true,
@@ -242,7 +261,7 @@ test("a scroll by the reviewer during the retry window stops the retries", async
   await screen.findByText("Diff stub");
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   await go(history, "?tab=writeup&rev=1");
-  expect(pane().scrollTop).toBe(0);
+  expect(pane().scrollTop).toBe(150);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(restoreDelays[1] - 1);
   });
@@ -260,12 +279,13 @@ test("touching the pane stops the retries", async () => {
   await go(history, "?tab=diff&rev=1");
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   await go(history, "?tab=writeup&rev=1");
-  expect(pane().scrollTop).toBe(0);
+  expect(pane().scrollTop).toBe(150);
   fireEvent.touchStart(pane());
+  pane().scrollTop = 40;
   await act(async () => {
     await vi.advanceTimersByTimeAsync(restoreDelays.at(-1) ?? 0);
   });
-  expect(pane().scrollTop).toBe(0);
+  expect(pane().scrollTop).toBe(40);
 });
 
 const tick = (ms: number) =>
@@ -273,7 +293,7 @@ const tick = (ms: number) =>
     await vi.advanceTimersByTimeAsync(ms);
   });
 const fakeTimers = () => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-const keyOf = (tab: string, doc = "") => readingPositionKey(id, tab, doc);
+const keyOf = (tab: string, doc = "") => readingPositionKey(id, tab, doc, 1);
 
 test("single-pane Writeup, Docs, Writeup keeps and restores the Writeup entry through a clamp scroll", async () => {
   width = 1280;
@@ -350,6 +370,7 @@ test("an intent that was never fulfilled does not block a later restore after a 
   await tick(restoreDelays.at(-1) ?? 0);
   expect(pane().scrollTop).toBe(0);
   await go(history, "?tab=diff&rev=1");
+  saveReadingPosition(readingPositionKey(id, "writeup", "", 2), { id: `block-${b.id}`, fraction: 0.5 });
   await go(history, "?tab=writeup&rev=2");
   await tick(1);
   expect(pane().scrollTop).toBe(150);
@@ -460,4 +481,408 @@ test("reading works when storage throws", async () => {
   pane().scrollTop = 150;
   expect(() => fireEvent.scroll(pane())).not.toThrow();
   expect(pane().scrollTop).toBe(150);
+});
+
+test("Back and Forward restore each visit to a doc independently of its latest position", async () => {
+  const { history } = mount("?tab=docs&doc=a.md&rev=1");
+  await screen.findByText("Doc a1a1a1a1 2222");
+  readerScroll(125);
+  await go(history, "?tab=docs&doc=b.md&rev=1");
+  await screen.findByText("Doc b2b2b2b2 2222");
+  readerScroll(175);
+  await go(history, "?tab=docs&doc=a.md&rev=1");
+  await screen.findByText("Doc a1a1a1a1 2222");
+  await waitFor(() => expect(pane().scrollTop).toBe(125));
+  readerScroll(225);
+  await act(async () => history.back());
+  await screen.findByText("Doc b2b2b2b2 2222");
+  await waitFor(() => expect(pane().scrollTop).toBe(175));
+  await act(async () => history.back());
+  await screen.findByText("Doc a1a1a1a1 2222");
+  await waitFor(() => expect(pane().scrollTop).toBe(125));
+  await act(async () => history.forward());
+  await waitFor(() => expect(pane().scrollTop).toBe(175));
+  await act(async () => history.forward());
+  await waitFor(() => expect(pane().scrollTop).toBe(225));
+});
+
+test("R2.3 Back restores the scrolled-on passage ahead of the original heading target", async () => {
+  const first = docs[0];
+  if (first?.kind !== "markdown") throw new Error("missing doc");
+  const firstBlock = docA[0];
+  const otherDoc = docs[1];
+  if (!firstBlock || !otherDoc || !revisions[1]) throw new Error("missing fixture");
+  revisions[1] = {
+    ...revisions[1],
+    docs: [
+      {
+        ...first,
+        headings: [{ level: 2, id: "heading-start", text: "Start" }],
+        blocks: [{ ...firstBlock, kind: "heading", html: '<h2 id="heading-start">Start</h2>' }, ...docA.slice(1)],
+      },
+      otherDoc,
+    ],
+  };
+  const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (this: HTMLElement) {
+    if (this.id === "heading-start") pane().scrollTop = 0;
+  });
+  const { history } = mount("?tab=docs&doc=a.md&rev=1#h-heading-start");
+  await screen.findByRole("heading", { name: "Start" });
+  readerScroll(175);
+  await go(history, "?tab=docs&doc=b.md&rev=1");
+  await screen.findByText("Doc b2b2b2b2 2222");
+  await act(async () => history.back());
+  await screen.findByRole("heading", { name: "Start" });
+  await waitFor(() => expect(pane().scrollTop).toBe(175));
+  expect(scroll.mock.instances).not.toContain(screen.getByRole("heading", { name: "Start" }));
+});
+
+test("a visit restored from storage keeps its own position even without another scroll", async () => {
+  const firstBlock = docA[1];
+  if (!firstBlock) throw new Error("missing block");
+  saveReadingPosition(readingPositionKey(id, "docs", "a.md", 1), { id: `block-${firstBlock.id}`, fraction: 0.25 });
+  const { history } = mount("?tab=docs&doc=a.md&rev=1");
+  await screen.findByText("Doc a1a1a1a1 2222");
+  await waitFor(() => expect(pane().scrollTop).toBe(125));
+  await go(history, "?tab=docs&doc=b.md&rev=1");
+  await screen.findByText("Doc b2b2b2b2 2222");
+  await go(history, "?tab=docs&doc=a.md&rev=1");
+  await screen.findByText("Doc a1a1a1a1 2222");
+  readerScroll(225);
+  await act(async () => history.go(-2));
+  await waitFor(() => expect(pane().scrollTop).toBe(125));
+});
+
+test("R1.2 an HTML doc's reading position survives a reload", async () => {
+  if (!revisions[1]) throw new Error("missing revision");
+  revisions[1].docs = [{ kind: "html", path: "page.html", contentUrl: "/content/synthetic/page.html" }];
+  const bounds = HTMLElement.prototype.getBoundingClientRect;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    if (this.id === "html-doc-page.html") return new DOMRect(0, 100 - pane().scrollTop, 390, 400);
+    return bounds.call(this);
+  });
+  const key = readingPositionKey(id, "docs", "page.html", 1);
+  const first = mount("?tab=docs&doc=page.html&rev=1");
+  await screen.findByRole("heading", { name: "page.html" });
+  readerScroll(200);
+  expect(loadReadingPosition(key)).toEqual({ id: "html-doc-page.html", fraction: 0.25 });
+  first.unmount();
+  mount("?tab=docs&doc=page.html&rev=1");
+  await screen.findByRole("heading", { name: "page.html" });
+  await waitFor(() => expect(pane().scrollTop).toBe(200));
+});
+
+test.each(["heading-middle", "missing"])("R2.3 Back restores its own position even with target %s", async (target) => {
+  const first = docs[0];
+  const middle = docA[1];
+  const other = docs[1];
+  if (!revisions[1] || first?.kind !== "markdown" || !middle || !other) throw new Error("missing fixture");
+  revisions[1].docs = [
+    {
+      ...first,
+      headings: [{ level: 2, id: "heading-middle", text: "Middle" }],
+      blocks: first.blocks.map((block) =>
+        block === middle ? { ...block, kind: "heading", html: '<h2 id="heading-middle">Middle</h2>' } : block,
+      ),
+    },
+    other,
+  ];
+  vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (this: HTMLElement) {
+    if (this.id === "heading-middle") pane().scrollTop = 100;
+  });
+  const { history } = mount(`?tab=docs&doc=a.md&rev=1#h-${target}`);
+  await screen.findByRole("heading", { name: "Middle" });
+  readerScroll(175);
+  await go(history, "?tab=docs&doc=b.md&rev=1");
+  await screen.findByText("Doc b2b2b2b2 2222");
+  fakeTimers();
+  await act(async () => history.back());
+  await tick(restoreDelays.at(-1) ?? 0);
+  expect(pane().scrollTop).toBe(175);
+  expect(screen.queryByText("Heading not found. Showing the top of the document.")).toBeNull();
+});
+
+test("R2.2 Comments reading position survives a reload", async () => {
+  revisions[1] = revisionWith(1, [a, b, c], [thread]);
+  const bounds = HTMLElement.prototype.getBoundingClientRect;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    if (this.id === `thread-${thread.id}`) return new DOMRect(0, 100 - pane().scrollTop, 390, 400);
+    return bounds.call(this);
+  });
+  const key = readingPositionKey(id, "comments", "", 1);
+  const first = mount("?tab=comments&rev=1");
+  await screen.findByText("A synthetic question");
+  readerScroll(200);
+  expect(loadReadingPosition(key)).toEqual({ id: `thread-${thread.id}`, fraction: 0.25 });
+  first.unmount();
+  mount("?tab=comments&rev=1");
+  await screen.findByText("A synthetic question");
+  await waitFor(() => expect(pane().scrollTop).toBe(200));
+});
+
+test.each(["heading-middle", "missing"])("R2.3 Back to an unvisited entry follows target %s", async (target) => {
+  const middle = docA[1];
+  if (!revisions[1] || !middle) throw new Error("missing fixture");
+  revisions[1].docs[0] = {
+    kind: "markdown",
+    path: "a.md",
+    headings: [{ level: 2, id: "heading-middle", text: "Middle" }],
+    blocks: docA.map((block) =>
+      block === middle ? { ...block, kind: "heading", html: '<h2 id="heading-middle">Middle</h2>' } : block,
+    ),
+  };
+  const history = createMemoryHistory({
+    initialEntries: [`/r/${id}?tab=docs&doc=a.md&rev=1#h-${target}`, `/r/${id}?tab=docs&doc=b.md&rev=1`],
+    initialIndex: 1,
+  });
+  saveReadingPosition(keyOf("docs", "a.md"), { id: `block-${middle.id}`, fraction: 0.75 });
+  vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (this: HTMLElement) {
+    if (this.id === "heading-middle") pane().scrollTop = 100;
+  });
+  render(<App queryClient={client} history={history} />);
+  await screen.findByText("Doc b2b2b2b2 2222");
+  await act(async () => history.back());
+  await screen.findByRole("heading", { name: "Middle" });
+  await waitFor(() => expect(pane().scrollTop).toBe(target === "missing" ? 0 : 100));
+});
+
+test.each(["topic", "block", "thread"])(
+  "R3.1 Back restores the live target after a %s jump without reader scrolling",
+  async (kind) => {
+    const target = kind === "topic" ? "topic-seed" : kind === "block" ? `block-${c.id}` : `thread-${thread.id}`;
+    const tab = kind === "thread" ? "comments" : "writeup";
+    const source = { ...a, html: `<p><a href="/r/${id}?tab=${tab}&amp;rev=1#${target}">Jump to target</a></p>` };
+    const current = revisionWith(1, [source, b], [thread]);
+    current.topics = [{ slug: "seed", title: "Plant a seed", summary: "Synthetic topic", importance: 1 }];
+    current.writeup.sections.push({ key: "t-seed-body", label: "Details", topic: "seed", blocks: [c] });
+    revisions[1] = current;
+    const bounds = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.id === `thread-${thread.id}`) return new DOMRect(0, 200 - pane().scrollTop, 390, 100);
+      return bounds.call(this);
+    });
+    vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (this: HTMLElement) {
+      if (this.id === target) pane().scrollTop = 250;
+    });
+    saveReadingPosition(keyOf("writeup"), { id: `block-${a.id}`, fraction: 0.25 });
+    saveReadingPosition(keyOf("comments"), { id: `thread-${thread.id}`, fraction: 0 });
+    const { history } = mount();
+    const link = await screen.findByRole("link", { name: "Jump to target" });
+    await waitFor(() => expect(pane().scrollTop).toBe(25));
+    fireEvent.click(link);
+    await waitFor(() => expect(pane().scrollTop).toBe(250));
+    await go(history, "?tab=docs&doc=a.md&rev=1");
+    await screen.findByText("Doc a1a1a1a1 2222");
+    await act(async () => history.back());
+    await waitFor(() => expect(pane().scrollTop).toBe(250));
+    expect(loadReadingPosition(keyOf(tab))).toEqual({
+      id: kind === "thread" ? target : `block-${c.id}`,
+      fraction: 0.5,
+    });
+  },
+);
+
+test.each(["writeup", "comments"])("R3.3 restores %s positions saved under the literal HEAD key", async (tab) => {
+  revisions[1] = revisionWith(1, [a, b, c], [thread]);
+  const bounds = HTMLElement.prototype.getBoundingClientRect;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    if (this.id === `thread-${thread.id}`) return new DOMRect(0, 100 - pane().scrollTop, 390, 100);
+    return bounds.call(this);
+  });
+  const anchor = { id: tab === "writeup" ? `block-${b.id}` : `thread-${thread.id}`, fraction: 0.5, at: 1 };
+  localStorage.setItem(readingKey, JSON.stringify({ [`${id}\n${tab}\n`]: anchor }));
+  mount(`?tab=${tab}&rev=1`);
+  await screen.findByText(tab === "writeup" ? "Paragraph cccc" : "A synthetic question");
+  await waitFor(() => expect(pane().scrollTop).toBe(150));
+});
+
+test("R3.4 Tab to an offscreen link stops retries and restores both passage and focus on Back", async () => {
+  const last = { ...c, html: `<p><a href="/r/${id}?tab=docs&amp;doc=a.md&amp;rev=1">Offscreen doc link</a></p>` };
+  revisions[1] = revisionWith(1, [a, b, last]);
+  saveReadingPosition(writeupKey, { id: `block-${b.id}`, fraction: 0.25 });
+  const { history } = mount();
+  const link = await screen.findByRole("link", { name: "Offscreen doc link" });
+  await waitFor(() => expect(pane().scrollTop).toBe(125));
+  fakeTimers();
+  const focus = link.focus.bind(link);
+  vi.spyOn(link, "focus").mockImplementation(() => {
+    pane().scrollTop = 250;
+    focus();
+  });
+  fireEvent.keyDown(document.body, { key: "Tab" });
+  act(() => link.focus());
+  fireEvent.scroll(pane());
+  await tick(restoreDelays.at(-1) ?? 0);
+  expect(pane().scrollTop).toBe(250);
+  fireEvent.click(link);
+  await tick(1);
+  expect(screen.getByText("Doc a1a1a1a1 2222")).toBeTruthy();
+  await act(async () => history.back());
+  await tick(1);
+  expect(pane().scrollTop).toBe(250);
+  expect(document.activeElement).toBe(screen.getByRole("link", { name: "Offscreen doc link" }));
+});
+
+test("R3.5 Back refocuses a keyboard-activated Comments Show in place link", async () => {
+  revisions[1] = revisionWith(1, [a, b, c], [thread]);
+  const { history } = mount("?tab=comments&rev=1");
+  const link = await screen.findByRole("link", { name: "Show in place" });
+  fireEvent.keyDown(document.body, { key: "Tab" });
+  act(() => link.focus());
+  fireEvent.keyDown(link, { key: "Enter" });
+  fireEvent.click(link);
+  await screen.findByText("Paragraph cccc");
+  await act(async () => history.back());
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("link", { name: "Show in place" })));
+});
+
+test("R3.3 a shared writeup key falls to top when the saved block is absent in the new revision", async () => {
+  width = 1280;
+  const { history } = await readWriteup();
+  revisions[2] = revisionWith(2, [a, c, block("dddd")]);
+  await go(history, "?tab=writeup&rev=2");
+  await screen.findByText("Paragraph dddd");
+  expect(pane().scrollTop).toBe(0);
+});
+
+test.each(
+  ["switcher", "All docs", "link", "Back"].flatMap((via) => ["layout", "frame"].map((settling) => ({ via, settling }))),
+)(
+  "R4.1 $via keeps restoring the saved passage after a late $settling change and title focus",
+  async ({ via, settling }) => {
+    width = 1280;
+    const current = revisions[1];
+    const target = docA[1];
+    if (!current || !target) throw new Error("missing fixture");
+    const doc = current.docs[0];
+    if (doc?.kind !== "markdown" || !doc.blocks[0]) throw new Error("missing doc");
+    if (settling === "frame") doc.blocks[0] = { ...doc.blocks[0], kind: "diagram", source: "graph TD; A-->B" };
+    const source = current.docs[1];
+    if (source?.kind !== "markdown" || !source.blocks[0]) throw new Error("missing source doc");
+    source.blocks[0] = { ...source.blocks[0], html: `<p><a href="/r/${id}?tab=docs&amp;doc=a.md">Open doc</a></p>` };
+    let shift = 0;
+    const bounds = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const index = docA.findIndex((block) => this.id === `block-${block.id}`);
+      if (index > 0) {
+        const frame = document.querySelector<HTMLIFrameElement>('iframe[title="Diagram"]');
+        const delta = settling === "frame" ? Number.parseFloat(frame?.style.height ?? "160") - 160 : shift;
+        return new DOMRect(0, index * 100 + delta - pane().scrollTop, 390, 100);
+      }
+      return bounds.call(this);
+    });
+    const key = keyOf("docs", "a.md");
+    const anchor = { id: `block-${target.id}`, fraction: 0.5 };
+    saveReadingPosition(key, anchor);
+    const start = via === "All docs" ? "?tab=docs&rev=1" : `?tab=docs&doc=${via === "Back" ? "a.md" : "b.md"}&rev=1`;
+    const { history } = mount(start);
+    await screen.findByRole(via === "link" ? "link" : "heading", {
+      name: via === "All docs" ? "Docs" : via === "link" ? "Open doc" : via === "Back" ? "a.md" : "b.md",
+    });
+    fakeTimers();
+    if (via === "switcher") {
+      fireEvent.click(screen.getByRole("button", { name: "Docs" }));
+      await tick(1);
+      fireEvent.click(within(screen.getByRole("dialog", { name: "Docs" })).getByRole("button", { name: /a\.md/ }));
+    } else if (via === "All docs") {
+      fireEvent.click(screen.getByRole("link", { name: /a\.md/ }));
+    } else if (via === "link") {
+      fireEvent.click(screen.getByRole("link", { name: "Open doc" }));
+    } else {
+      await go(history, "?tab=docs&doc=b.md&rev=1");
+      await tick(1);
+      const back = screen.getByRole("button", { name: "Back to a.md" });
+      act(() => back.focus());
+      fireEvent.click(back);
+    }
+    await tick(1);
+    const title = screen.getByRole("heading", { name: "a.md" });
+    expect(document.activeElement).toBe(title);
+    expect(pane().scrollTop).toBe(150);
+    await tick(300);
+    if (settling === "frame") {
+      const frame = document.querySelector<HTMLIFrameElement>('iframe[title="Diagram"]');
+      if (!frame) throw new Error("missing diagram frame");
+      // happy-dom does not load iframe pages; keep the real frame and its message-source check.
+      Object.defineProperty(frame, "contentWindow", { value: { postMessage: vi.fn() } });
+      act(() =>
+        window.dispatchEvent(
+          new MessageEvent("message", { source: frame.contentWindow, data: { type: "size", height: 360 } }),
+        ),
+      );
+      expect(frame.style.height).toBe("360px");
+    } else shift = 200;
+    // A clamp caused by layout is not input, even though the app focused the title.
+    pane().scrollTop = 10;
+    fireEvent.scroll(pane());
+    expect(loadReadingPosition(key)).toEqual(anchor);
+    await tick(restoreDelays.at(-1) ?? 0);
+    expect(pane().scrollTop).toBe(350);
+    expect(document.activeElement).toBe(title);
+    pane().scrollTop += 20;
+    fireEvent.scroll(pane());
+    expect(loadReadingPosition(key)).toEqual(anchor);
+  },
+);
+
+test.each(["Show in place", "click", "collapsed"])(
+  "R4.2 Back keeps Markdown comment cards after %s without replaying the thread jump",
+  async (action) => {
+    width = 1280;
+    presentation.collapsedDocCards = true;
+    const target = docA[1];
+    if (!target) throw new Error("missing target");
+    const placed: ThreadView = {
+      ...thread,
+      target: { kind: "doc-span", path: "a.md", blockId: target.id, quote: target.text, prefix: "", suffix: "" },
+      placement: {
+        status: "placed",
+        location: { kind: "doc-span", path: "a.md", blockId: target.id, start: 0, end: target.text.length },
+      },
+    };
+    revisions[1] = revisionWith(1, [a, b, c], [placed]);
+    const jump = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (this: HTMLElement) {
+      if (this.id === `thread-${thread.id}`) pane().scrollTop = 125;
+    });
+    const { history } = mount(action === "click" ? "?tab=docs&doc=a.md&rev=1" : "?tab=comments&rev=1");
+    if (action === "click") fireEvent.click(await screen.findByRole("button", { name: "1 comment", expanded: false }));
+    else fireEvent.click(await screen.findByRole("link", { name: "Show in place" }));
+    await screen.findByRole("button", { name: "Hide", expanded: true });
+    expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
+    if (action === "collapsed") fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+    readerScroll(175);
+    await go(history, "?tab=docs&doc=b.md&rev=1");
+    await screen.findByText("Doc b2b2b2b2 2222");
+    jump.mockClear();
+    await act(async () => history.back());
+    await screen.findByRole("heading", { name: "a.md" });
+    await waitFor(() => expect(pane().scrollTop).toBe(175));
+    expect(
+      screen.getByRole("button", { name: action === "collapsed" ? "1 comment" : "Hide" }).getAttribute("aria-expanded"),
+    ).toBe(String(action !== "collapsed"));
+    expect(!!document.getElementById(`thread-${thread.id}`)).toBe(action !== "collapsed");
+    expect(jump).not.toHaveBeenCalled();
+    expect(localStorage.getItem(readingKey)).not.toContain(`thread-${thread.id}`);
+  },
+);
+
+test("R4.1 a reply composer's focus still captures the position for Back", async () => {
+  width = 1280;
+  revisions[1] = revisionWith(1, [a, b, c], [thread]);
+  saveReadingPosition(writeupKey, { id: `block-${a.id}`, fraction: 0.5 });
+  const focus = HTMLTextAreaElement.prototype.focus;
+  vi.spyOn(HTMLTextAreaElement.prototype, "focus").mockImplementation(function (this: HTMLTextAreaElement, options) {
+    pane().scrollTop = 175;
+    focus.call(this, options);
+  });
+  const { history } = mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Reply" }));
+  const composer = await screen.findByRole("textbox", { name: "Reply" });
+  await waitFor(() => expect(document.activeElement).toBe(composer));
+  expect(loadReadingPosition(writeupKey)).toEqual({ id: `block-${b.id}`, fraction: 0.75 });
+  await go(history, "?tab=docs&doc=a.md&rev=1");
+  await screen.findByRole("heading", { name: "a.md" });
+  await act(async () => history.back());
+  await screen.findByText("Paragraph cccc");
+  await waitFor(() => expect(pane().scrollTop).toBe(175));
 });

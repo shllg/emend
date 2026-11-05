@@ -75,7 +75,7 @@ test("many docs post one heading map per worker and a later publish replaces it"
 test.each(["timeout", "failure"])("a doc after worker %s still gets its links", async (reason) => {
   const timeouts = { render: 10000, place: 30000 };
   const execute = workerExecutor(timeouts);
-  const docs = new Map([["target.md", new Set(["user-content-part"])]]);
+  const docs = new Map([["target.md", new Map([["part", "user-content-part"]])]]);
   const work = (): Extract<Work, { kind: "doc" }> => ({
     kind: "doc",
     path: "source.md",

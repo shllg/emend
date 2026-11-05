@@ -27,13 +27,16 @@ import { Button } from "../components/ui/Button.tsx";
 import { claimDraft } from "../lib/composer-owner.ts";
 import { useDiffCounts } from "../lib/diff-counts.ts";
 import type { NavigateDiff } from "../lib/diff-navigation.ts";
+import { appElementId, docHeading, docTitle } from "../lib/doc-navigation.ts";
 import { draftKey, hasDraft, type SavedDraft, saveDraft, subscribeDrafts } from "../lib/drafts.ts";
 import { usePublishedRevision } from "../lib/events.tsx";
 import { useInboxCollapsed, useLayout, usePaneMode } from "../lib/layout.ts";
 import { openingView } from "../lib/opening-view.ts";
+import { focusReadingTarget } from "../lib/reading-focus.ts";
 import { readingPositionKey } from "../lib/reading-position.ts";
 import { revealReadingTarget } from "../lib/reading-reveal.ts";
-import { type IntentState, useReadingPosition } from "../lib/use-reading-position.ts";
+import { captureReadingPosition, type IntentState, useReadingPosition } from "../lib/use-reading-position.ts";
+import { type ReadingEntry, useReadingTrail } from "../lib/use-reading-trail.ts";
 import { useWakeTimer } from "../lib/wake-timer.ts";
 import { type ReviewSearch, validateReviewSearch } from "../router.tsx";
 
@@ -56,6 +59,10 @@ function Reading({
   onNote,
   visible,
   intentState,
+  entry,
+  back,
+  onHeading,
+  preservePosition,
 }: {
   reviewId: string;
   revision: RevisionView;
@@ -75,11 +82,18 @@ function Reading({
   onNote: (id: string) => void;
   visible: boolean;
   intentState: () => IntentState;
+  entry: ReadingEntry;
+  back?: { title: string; go: () => void };
+  onHeading: (id: string) => void;
+  preservePosition: boolean;
 }) {
   useReadingPosition({
-    storageKey: readingPositionKey(reviewId, tab, tab === "docs" ? (openDoc?.path ?? "") : ""),
+    storageKey: readingPositionKey(reviewId, tab, tab === "docs" ? (openDoc?.path ?? "") : "", revision.seq),
     selector: tab === "comments" ? '[id^="thread-"]' : '[id^="block-"], [id^="html-doc-"]',
     active: visible,
+    preserve: preservePosition,
+    entry,
+    doc: tab === "docs" ? openDoc : undefined,
     intentState,
   });
   const props = {
@@ -100,6 +114,8 @@ function Reading({
         openDoc={openDoc}
         search={search}
         targeted={targeted}
+        onHeading={onHeading}
+        back={back}
         onOpenDoc={onOpenDoc}
         navigation={htmlNavigation}
         composingPath={composingPath}
@@ -135,17 +151,31 @@ function draftPlacement(draft: SavedDraft, revision: RevisionView) {
   return undefined;
 }
 function readingIntent(search: ReviewSearch, hash: string, seq: number) {
-  const reply = search.tab === "comments" && !!search.thread;
+  let headingId: string | undefined;
+  if (hash.startsWith("h-")) {
+    try {
+      headingId = decodeURIComponent(hash.slice(2));
+    } catch {
+      headingId = "";
+    }
+  }
+  const reply = headingId === undefined && search.tab === "comments" && !!search.thread;
   return {
     navigation: JSON.stringify([seq, search.tab, search.doc, search.thread, hash]),
-    elementId: reply ? `thread-${search.thread}` : hash,
+    elementId: reply ? `thread-${search.thread}` : appElementId(hash) ? hash : "",
+    headingId,
     reply,
-    threadId: search.thread ?? (hash.startsWith("thread-") ? hash.slice(7) : undefined),
+    threadId:
+      headingId !== undefined ? undefined : (search.thread ?? (hash.startsWith("thread-") ? hash.slice(7) : undefined)),
     routeThread: true,
     block: "center" as ScrollLogicalPosition,
   };
 }
-type PendingReadingIntent = ReturnType<typeof readingIntent> & { token: object; jumpThread: boolean };
+type PendingReadingIntent = ReturnType<typeof readingIntent> & {
+  token: object;
+  jumpThread: boolean;
+  restoreEntry?: boolean;
+};
 function resolveOpenDoc(
   revision: RevisionView,
   search: ReviewSearch,
@@ -155,6 +185,7 @@ function resolveOpenDoc(
 ) {
   const selected = revision.docs.find((doc) => doc.path === search.doc);
   if (selected) return selected;
+  if (search.doc !== undefined) return undefined;
   const thread = revision.threads.find((thread) => thread.id === intent.threadId);
   const placement = thread?.placement.status === "placed" ? thread.placement.location : undefined;
   const target = revision.docs.find(
@@ -191,10 +222,6 @@ function LoadedReview({
   const hash = location.hash;
   const [initialRevision] = useState(review.newestRevision);
   const seq = search.rev ?? initialRevision;
-  const readingFolds = useMemo(
-    () => ({ reviewId: review.id, revision: seq, choices: new Map<string, boolean>() }),
-    [review.id, seq],
-  );
   const query = useQuery(revisionQuery(review.id, seq));
   const viewedMutation = useViewedMutation(review.id);
   const viewedErrors = useViewedErrors(review.id);
@@ -257,6 +284,40 @@ function LoadedReview({
   const openDoc = revision
     ? resolveOpenDoc(revision, search, currentIntent, useOpening ? opening.doc : undefined, docsVisible)
     : undefined;
+  const trail = useReadingTrail(
+    tab === "diff"
+      ? "Diff"
+      : readingTab === "docs"
+        ? openDoc
+          ? docTitle(openDoc)
+          : "All docs"
+        : readingTab === "writeup"
+          ? "Writeup"
+          : readingTab === "comments"
+            ? "Comments"
+            : "Files",
+    seq,
+  );
+  const readingFolds = useMemo(
+    () => ({ reviewId: review.id, revision: seq, choices: trail.entry.folds }),
+    [review.id, seq, trail.entry],
+  );
+  const missingDoc = docsVisible && search.doc !== undefined && !openDoc;
+  const positionKey = readingPositionKey(
+    review.id,
+    readingTab,
+    readingTab === "docs" ? (openDoc?.path ?? "") : "",
+    seq,
+  );
+  const restoreEntry = trail.returning && trail.entry.positions.has(positionKey);
+  const [failedHeading, setFailedHeading] = useState<string>();
+  const missingHeading =
+    !restoreEntry &&
+    docsVisible &&
+    !!openDoc &&
+    currentIntent.headingId !== undefined &&
+    (failedHeading === currentIntent.navigation ||
+      !openDoc.headings?.some((heading) => heading.id === currentIntent.headingId));
   const setRevision = (rev: number) => {
     void navigate({ search: { ...search, tab, rev } });
   };
@@ -269,6 +330,7 @@ function LoadedReview({
     elementId: string;
     threadId?: string;
     requested: typeof requested;
+    entry: ReadingEntry;
   } | null>(null);
   // The reading position yields to a navigation that scrolls (a new hash or thread, a link, a Resume), never to
   // a hash that stayed in the URL or to an older intent that was never fulfilled: those have another navigation.
@@ -277,18 +339,29 @@ function LoadedReview({
   const navigationCount = useRef(0);
   const scrollIntentAt = useRef(-1);
   const scrollIntentEpoch = useRef(0);
-  const intentState = useCallback(
-    (): IntentState => ({
-      current: scrollIntentAt.current === navigationCount.current,
+  const intentState = useCallback((): IntentState => {
+    const explicit = requested && requested !== previous.current?.requested;
+    const changed =
+      currentIntent.navigation !== previous.current?.navigation || trail.entry !== previous.current?.entry;
+    const candidate = explicit ? requested : changed ? currentIntent : undefined;
+    const scrolling =
+      candidate &&
+      (explicit || !restoreEntry) &&
+      (candidate.headingId !== undefined ||
+        ((explicit ||
+          candidate.elementId !== previous.current?.elementId ||
+          candidate.threadId !== previous.current?.threadId) &&
+          !!(candidate.elementId || candidate.threadId)));
+    return {
+      current: candidate ? !!scrolling : scrollIntentAt.current === navigationCount.current,
       epoch: scrollIntentEpoch.current,
-    }),
-    [],
-  );
+    };
+  }, [currentIntent, requested, restoreEntry, trail.entry]);
   const navigateReading = useCallback(
-    (next: ReviewSearch, nextHash = "") => {
+    (next: ReviewSearch, nextHash = "", replace = false) => {
       // A repeated Resume or link click is a new intent even when the URL is unchanged.
       setRequested({ ...readingIntent(next, nextHash, next.rev ?? initialRevision), token: {}, jumpThread: true });
-      void navigate({ search: next, hash: nextHash });
+      void navigate({ search: next, hash: nextHash, replace });
     },
     [initialRevision, navigate],
   );
@@ -303,11 +376,9 @@ function LoadedReview({
   const followReadingLink = (event: MouseEvent) => {
     if (
       event.defaultPrevented ||
-      event.button !== 0 ||
-      event.metaKey ||
-      event.ctrlKey ||
-      event.shiftKey ||
-      event.altKey
+      event.altKey ||
+      (event.button !== 0 && event.button !== 1) ||
+      (event.type === "auxclick" && event.button !== 1)
     )
       return;
     const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
@@ -319,9 +390,26 @@ function LoadedReview({
       return;
     const url = new URL(link.href);
     if (url.origin !== window.location.origin || url.pathname !== `/r/${encodeURIComponent(review.id)}`) return;
-    event.preventDefault();
     const next = validateReviewSearch(Object.fromEntries(url.searchParams));
-    navigateReading({ ...next, rev: next.rev ?? search.rev }, url.hash.slice(1));
+    const modified = event.button === 1 || event.metaKey || event.ctrlKey || event.shiftKey;
+    if (modified && next.tab !== "docs") return;
+    event.preventDefault();
+    const destination = { ...next, rev: next.tab === "docs" ? seq : (next.rev ?? search.rev) };
+    if (modified) {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(destination)) if (value !== undefined) params.set(key, String(value));
+      window.open(`${url.pathname}?${params}${url.hash}`, "_blank", "noopener");
+    } else {
+      navigateReading(destination, url.hash.slice(1), docsVisible && next.tab === "docs" && next.doc === openDoc?.path);
+    }
+  };
+  const onHeading = (id: string) => {
+    if (!openDoc?.headings?.some((heading) => heading.id === id)) return;
+    navigateReading(
+      { ...search, rev: seq, tab: "docs", doc: openDoc.path, thread: undefined },
+      `h-${encodeURIComponent(id)}`,
+      true,
+    );
   };
   const resume = (draft: SavedDraft) => {
     if (draft.commentId && revision) {
@@ -401,12 +489,13 @@ function LoadedReview({
       pending.current = { ...requested };
       created = true;
     } else if (
-      current.navigation !== previous.current?.navigation &&
+      (current.navigation !== previous.current?.navigation || trail.entry !== previous.current?.entry) &&
       pending.current?.navigation !== current.navigation
     ) {
       pending.current = {
         ...current,
         token: {},
+        restoreEntry,
         // A carried-over hash on a tab, doc or revision change is not a new thread jump.
         jumpThread:
           current.elementId !== previous.current?.elementId || current.threadId !== previous.current?.threadId,
@@ -415,7 +504,12 @@ function LoadedReview({
     }
     if (created) {
       navigationCount.current += 1;
-      if (pending.current?.jumpThread && (pending.current.elementId || pending.current.threadId)) {
+      if (
+        pending.current &&
+        !pending.current.restoreEntry &&
+        (pending.current.headingId !== undefined ||
+          (pending.current.jumpThread && (pending.current.elementId || pending.current.threadId)))
+      ) {
         scrollIntentAt.current = navigationCount.current;
         scrollIntentEpoch.current += 1;
       }
@@ -425,10 +519,11 @@ function LoadedReview({
       elementId: current.elementId,
       threadId: current.threadId,
       requested,
+      entry: trail.entry,
     };
     const intent = pending.current;
     if (!intent || intent.navigation !== current.navigation) return;
-    const complete = () => {
+    const complete = (capture = false) => {
       // A fulfilled jump no longer holds back the reading position; the epoch still stops retries in flight.
       // Completing it also bumps the epoch, so a restore that started before the jump finished stops. Only a
       // scrolling intent counts: completing an empty one at mount must not stop the restore.
@@ -438,7 +533,13 @@ function LoadedReview({
       }
       pending.current = null;
       setThreadJump(undefined);
+      if (capture) captureReadingPosition();
     };
+    // Back/Forward owns its passage, folds and focus. Its URL target is only a fallback.
+    if (intent.restoreEntry && !intent.elementId.startsWith("diff-")) {
+      complete();
+      return;
+    }
     const opensThread =
       intent.jumpThread && !intent.reply && intent.threadId && intent.elementId === `thread-${intent.threadId}`;
     if (opensThread && intent.threadId) {
@@ -452,7 +553,7 @@ function LoadedReview({
       return;
     }
     if (!revision) return;
-    if (docsVisible && search.doc !== openDoc?.path) {
+    if (docsVisible && !missingDoc && search.doc !== openDoc?.path) {
       const next: ReviewSearch = { ...search, doc: openDoc?.path };
       intent.navigation = readingIntent(next, hash, seq).navigation;
       void navigate({ search: next, hash, replace: true });
@@ -487,6 +588,27 @@ function LoadedReview({
         }
       }
     }
+    if (intent.headingId !== undefined || missingDoc) {
+      const scroller = document.querySelector<HTMLElement>("[data-reading-scroll]");
+      if (!scroller || (docsVisible && !missingDoc && !openDoc)) return;
+      const element =
+        docsVisible && openDoc && scroller && intent.headingId !== undefined
+          ? docHeading(scroller, openDoc, intent.headingId)
+          : undefined;
+      setFailedHeading(element ? undefined : current.navigation);
+      if (element && openDoc) {
+        revealReadingTarget(element);
+        element.scrollIntoView?.({ block: "start" });
+        element.tabIndex = -1;
+        // The validated navigation target belongs to this entry; its focus event is not reader input.
+        trail.entry.focus = { id: `h-${element.id}`, children: [] };
+        focusReadingTarget(element);
+      } else if (docsVisible && scroller) {
+        scroller.scrollTop = 0;
+      }
+      complete(true);
+      return;
+    }
     if (!intent.elementId) {
       complete();
       return;
@@ -504,14 +626,14 @@ function LoadedReview({
         void navigate({ search: next, hash, replace: true });
         return;
       }
-      if (navigateDiff.current?.({ elementId: intent.elementId })) complete();
+      if (navigateDiff.current?.({ elementId: intent.elementId })) complete(intent.jumpThread);
       return;
     }
-    const element = document.getElementById(intent.elementId);
+    const element = appElementId(intent.elementId) ? document.getElementById(intent.elementId) : null;
     if (!element) return;
-    complete();
     revealReadingTarget(element);
     element.scrollIntoView?.({ block: intent.block });
+    complete(intent.jumpThread);
   });
   const tabProps = {
     id: review.id,
@@ -526,7 +648,7 @@ function LoadedReview({
   const ready = Math.max(published, review.newestRevision);
   return (
     <AppFrame isReview onCommentReview={revision ? commentOnReview : undefined}>
-      <div className="contents" onClickCapture={followReadingLink}>
+      <div className="contents" onClickCapture={followReadingLink} onAuxClickCapture={followReadingLink}>
         <Panes
           inbox={<ReviewInbox currentReviewId={review.id} collapsed={collapsed} onCollapsedChange={setCollapsed} />}
           tab={tab}
@@ -614,6 +736,13 @@ function LoadedReview({
                     <Button onClick={() => void query.refetch()}>Retry</Button>
                   </div>
                 )}
+                {(missingDoc || missingHeading) && (
+                  <p role="status" className="px-4 py-2">
+                    {missingDoc
+                      ? "Document not found. Showing all docs."
+                      : "Heading not found. Showing the top of the document."}
+                  </p>
+                )}
                 {revision && (
                   <ReadingFoldContext value={readingFolds}>
                     {readingTab === "files" ? (
@@ -636,12 +765,22 @@ function LoadedReview({
                         tab={readingTab}
                         visible={paneMode === "split" || tab !== "diff" || !hasDiff}
                         intentState={intentState}
+                        entry={trail.entry}
+                        preservePosition={!trail.returning && currentIntent.elementId.startsWith("diff-")}
+                        back={trail.back}
+                        onHeading={onHeading}
                         search={search}
                         openDoc={openDoc}
-                        targeted={!!hash || !!search.thread}
+                        targeted={!!hash || !!search.thread || (trail.returning && !!trail.entry.focus)}
                         activeThreadId={currentIntent.threadId}
                         threadJump={threadJump?.navigation === currentIntent.navigation ? threadJump : undefined}
-                        onOpenDoc={(path) => navigateReading({ ...search, tab: "docs", doc: path, thread: undefined })}
+                        onOpenDoc={(path) =>
+                          navigateReading(
+                            { ...search, rev: seq, tab: "docs", doc: path, thread: undefined },
+                            "",
+                            docsVisible && path === openDoc?.path,
+                          )
+                        }
                         phone={layout === "phone"}
                         onResume={resume}
                         htmlNavigation={htmlNavigation}

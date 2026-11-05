@@ -1,8 +1,9 @@
 import type { RevisionView } from "@emend/contract";
-import { type ReactNode, useCallback, useId, useMemo, useState, useSyncExternalStore } from "react";
+import { type ReactNode, useCallback, useContext, useId, useMemo, useState, useSyncExternalStore } from "react";
 import { isEditComposerOpen } from "../../lib/composer-owner.ts";
 import { plural } from "../../lib/count.ts";
 import { draftKey, editDraftKey, hasDraft, hasDraftText, subscribeDrafts } from "../../lib/drafts.ts";
+import { ReadingFoldContext } from "./ReadingGroup.tsx";
 import { ThreadComposerContext } from "./ThreadComposerContext.ts";
 
 export type ThreadJump = { threadId: string; token: object };
@@ -49,16 +50,25 @@ export function BlockThreads({
     composers > 0 ||
     saved ||
     threads.some((thread) => thread.comments.some((comment) => comment.author === "user" && !comment.sent));
-  const [expanded, setExpanded] = useState(forced);
+  const folds = useContext(ReadingFoldContext);
+  const [choice, setChoice] = useState({ open: forced });
+  // Read this entry's choices before restoration measures the cards, including when the group stays mounted.
+  const expanded =
+    folds && threads.length ? threads.some((thread) => folds.choices.get(`thread-${thread.id}`)) : choice.open;
+  const rememberOpen = (open: boolean) => {
+    // One pill controls all cards at this block. Only app thread ids enter the in-memory trail.
+    for (const thread of threads) folds?.choices.set(`thread-${thread.id}`, open);
+    setChoice({ open });
+  };
   const [handledJump, setHandledJump] = useState<object>();
   if (jump && handledJump !== jump.token && threads.some((thread) => thread.id === jump.threadId)) {
     // A pending jump is consumed only once its thread is placed in this block.
     setHandledJump(jump.token);
-    setExpanded(true);
+    rememberOpen(true);
   }
   // Forced opening is sticky: saving, sending or closing an editor must not remove
   // the card (or its focused control) until the reviewer explicitly presses Hide.
-  if (forced && !expanded) setExpanded(true);
+  if (forced && !expanded) rememberOpen(true);
   const open = !focus || expanded || forced;
   const state = threads.every((thread) => thread.state === "resolved")
     ? " · resolved"
@@ -80,7 +90,7 @@ export function BlockThreads({
             aria-expanded={open}
             aria-controls={open ? id : undefined}
             onClick={(event) => {
-              setExpanded(!open);
+              rememberOpen(!open);
               if (open) event.currentTarget.focus();
             }}
           >

@@ -1,7 +1,7 @@
 ---
 id: 015
 title: Reading docs, slice A
-status: open
+status: in-progress
 owner: agent + your approval
 depends_on: [005]
 done_on:
@@ -19,7 +19,7 @@ is slice B.
 
 - [x] Checkpoint 1: doc titles, headings and links to other docs (contract, API docs, core,
       server, the doc-navigation rule text).
-- [ ] Checkpoint 2: the doc bar, the Docs switcher, Contents, links, history and Back, and
+- [x] Checkpoint 2: the doc bar, the Docs switcher, Contents, links, history and Back, and
       position memory.
 - [ ] Checkpoint 3: HTML docs in the full reading pane, the Comments drawer and the frame
       messages.
@@ -35,3 +35,6 @@ several docs on the phone.
 ## Notes
 
 - 2026-11-05: Opened after you approved slice A's design and rule text.
+- 2026-11-05: Checkpoint 2 passed five review rounds. You chose lookup names for heading links
+  (author id, hunk-review slug, GitHub slug) over readable ids, and approved four rule lines in
+  `doc-navigation.md`.

@@ -16,6 +16,7 @@ import { blockLink } from "./components/threads/ThreadCard.tsx";
 import { claimDraft } from "./lib/composer-owner.ts";
 import { draftKey, editDraftKey, saveDraft } from "./lib/drafts.ts";
 import { layoutKey, layoutStore } from "./lib/layout-store.ts";
+import * as readingPosition from "./lib/reading-position.ts";
 import { cancelThreadActionFocus } from "./lib/thread-action-focus.ts";
 import { validateReviewSearch } from "./router.tsx";
 
@@ -256,9 +257,16 @@ test.each([
       expect(span.hasAttribute("role")).toBe(false);
       expect(span.hasAttribute("tabindex")).toBe(false);
     }
+    // R2.9 Diff-only navigation must not re-read storage to restore the unchanged reading pane.
+    const restoreRead = vi.spyOn(readingPosition, "loadReadingPosition");
     if (key === "click") fireEvent.click(chip);
     else fireEvent.keyDown(chip, { key });
-    await act(async () => loaded.resolve());
+    await act(async () => {
+      loaded.resolve();
+      // Release the test gate and await the cold lazy import before timing DOM placement.
+      await import("./components/diff/DiffPane.tsx");
+    });
+    if (pane === "split") expect(restoreRead).not.toHaveBeenCalled();
     await waitFor(() =>
       expect(scroll.mock.calls.some(([element]) => element.id === `diff-note-${note.id}`)).toBe(true),
     );
@@ -565,7 +573,7 @@ test.each(["row", "rail"])(
     await waitFor(() => expect(inboxLink()).toBeTruthy());
     expect(new URL((inboxLink() as HTMLAnchorElement).href).search).toBe("?rev=1");
     fireEvent.click(inboxLink());
-    await screen.findByRole("heading", { name: gardenDoc.path });
+    await screen.findByRole("heading", { name: "z garden.md" });
     expect(screen.getByRole("tab", { name: "Docs 4" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.queryByText("Keep growing")).toBeNull();
     expect(searchParams(history).get("rev")).toBe("1");
@@ -583,7 +591,7 @@ test.each(["row", "rail"])(
     fireEvent.click(inboxLink());
     await waitFor(() => expect(searchParams(history).get("rev")).toBe("2"));
     await screen.findByRole("button", { name: "Approve revision 2" });
-    expect(screen.getByRole("heading", { name: gardenDoc.path })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "z garden.md" })).toBeTruthy();
   },
 );
 
@@ -605,7 +613,7 @@ test.each([1280, 390])(
     const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
     mount("?tab=comments&rev=1");
     fireEvent.click(await screen.findByRole("link", { name: "Show in place" }));
-    await screen.findByRole("heading", { name: htmlDoc.path });
+    await screen.findByRole("heading", { name: "seed.html" });
     const outer = document.getElementById(`html-doc-${htmlDoc.path}`);
     await waitFor(() => expect(scroll.mock.instances).toContain(outer));
     if (!outer) throw new Error("Missing HTML doc container");
@@ -664,14 +672,14 @@ test.each([1280, 768, 390])("doc list and open doc navigate, focus and reset scr
   const panel = within(screen.getByTestId("reading-pane"));
   const list = panel.getByRole("list");
   const names = [
-    "Garden plan docs/z garden.md",
+    "z garden.md docs/z garden.md",
     "a plain.md docs/a plain.md",
     "seed.html docs/seed.html",
     "water.html docs/water.html",
   ];
   const links = within(list).getAllByRole("link");
   expect(links.map((link) => link.textContent)).toEqual([
-    "Garden plandocs/z garden.md",
+    "z garden.mddocs/z garden.md",
     "a plain.mddocs/a plain.md",
     "seed.htmldocs/seed.html",
     "water.htmldocs/water.html",
@@ -686,7 +694,7 @@ test.each([1280, 768, 390])("doc list and open doc navigate, focus and reset scr
   const pane = screen.getByTestId("reading-pane");
   pane.scrollTop = 300;
   fireEvent.click(within(list).getByRole("link", { name: names[0] }));
-  const heading = await screen.findByRole("heading", { name: gardenDoc.path });
+  const heading = await screen.findByRole("heading", { name: "z garden.md" });
   await waitFor(() => expect(document.activeElement).toBe(heading));
   expect(heading.getAttribute("title")).toBe(gardenDoc.path);
   expect(pane.scrollTop).toBe(0);
@@ -701,7 +709,7 @@ test.each([1280, 768, 390])("doc list and open doc navigate, focus and reset scr
   expect(searchParams(history).get("doc")).toBeNull();
   expect(searchParams(history).get("rev")).toBe("1");
   fireEvent.click(screen.getByRole("link", { name: names[2] }));
-  await screen.findByRole("heading", { name: htmlDoc.path });
+  await screen.findByRole("heading", { name: "seed.html" });
   expect(container.querySelectorAll("iframe")).toHaveLength(1);
   expect(container.querySelector("[data-block-id]")).toBeNull();
   expect(screen.getByText("Shown in a sandbox. Scripts in this doc never run.")).toBeTruthy();
@@ -710,20 +718,20 @@ test.each([1280, 768, 390])("doc list and open doc navigate, focus and reset scr
   await waitFor(() => expect(document.activeElement).toBe(htmlRow));
   expect(scroll.mock.instances).toContain(htmlRow);
   act(() => history.forward());
-  const returnedHeading = await screen.findByRole("heading", { name: htmlDoc.path });
+  const returnedHeading = await screen.findByRole("heading", { name: "seed.html" });
   await waitFor(() => expect(document.activeElement).toBe(returnedHeading));
   fireEvent.click(screen.getByRole("link", { name: "All docs" }));
   await screen.findByRole("link", { name: names[2] });
   act(() => history.back());
-  await screen.findByRole("heading", { name: htmlDoc.path });
-  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("heading", { name: htmlDoc.path })));
+  await screen.findByRole("heading", { name: "seed.html" });
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("heading", { name: "seed.html" })));
 });
 
 test.each([gardenDoc, htmlDoc])("a sole $kind doc opens directly without All docs", async (doc) => {
   docsFixture();
   currentRevision.docs = [doc];
   const { history } = mount("?tab=docs");
-  await screen.findByRole("heading", { name: doc.path });
+  await screen.findByRole("heading", { name: doc.path.split("/").at(-1) });
   await waitFor(() => expect(searchParams(history).get("doc")).toBe(doc.path));
   expect(screen.queryByRole("heading", { name: "Docs" })).toBeNull();
   expect(screen.queryByRole("link", { name: "All docs" })).toBeNull();
@@ -763,12 +771,12 @@ test.each(["block", "heading", "doc", "html-doc", "doc-thread", "html-thread"])(
     }
     const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
     const { history } = mount(`?tab=docs#${elementId}`);
-    await screen.findByRole("heading", { name: path });
+    await screen.findByRole("heading", { name: path.split("/").at(-1) });
     await waitFor(() => expect(searchParams(history).get("doc")).toBe(path));
     const scrollTarget = kind === "html-thread" ? `html-doc-${path}` : elementId;
     await waitFor(() => expect(scroll.mock.instances).toContain(document.getElementById(scrollTarget)));
     expect(history.length).toBe(1);
-    expect(document.activeElement).not.toBe(screen.getByRole("heading", { name: path }));
+    expect(document.activeElement).not.toBe(screen.getByRole("heading", { name: path.split("/").at(-1) }));
   },
 );
 
@@ -785,7 +793,7 @@ test.each(["doc-span", "html-span"] as const)(
     const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
     const { history } = mount("?tab=comments&doc=docs%2Fa%20plain.md");
     fireEvent.click(await screen.findByRole("button", { name: "Resume" }));
-    await screen.findByRole("heading", { name: path });
+    await screen.findByRole("heading", { name: path.split("/").at(-1) });
     expect(searchParams(history).get("doc")).toBe(path);
     const elementId = kind === "doc-span" ? `block-${docBlock.id}` : `html-doc-${path}`;
     await waitFor(() => expect(scroll.mock.instances).toContain(document.getElementById(elementId)));
@@ -819,32 +827,32 @@ test("a resumed Markdown editor leaves All docs and row navigation free to move 
   expect(document.activeElement).toBe(editor);
 
   fireEvent.click(screen.getByRole("link", { name: "All docs" }));
-  const row = await screen.findByRole("link", { name: "Garden plan docs/z garden.md" });
+  const row = await screen.findByRole("link", { name: "z garden.md docs/z garden.md" });
   await waitFor(() => expect(document.activeElement).toBe(row));
   expect(scroll.mock.instances).toContain(row);
   expect(within(screen.getByRole("region", { name: "Resumed comment" })).getByLabelText("Comment")).toBe(editor);
 
   fireEvent.click(screen.getByRole("link", { name: "a plain.md docs/a plain.md" }));
-  const heading = await screen.findByRole("heading", { name: plainDoc.path });
+  const heading = await screen.findByRole("heading", { name: "a plain.md" });
   await waitFor(() => expect(document.activeElement).toBe(heading));
   expect(within(screen.getByRole("region", { name: "Resumed comment" })).getByLabelText("Comment")).toBe(editor);
   expect(editor.value).toBe("Keep this editor open");
 });
 
-test("an unknown doc with no other target shows the list and drops the stale path", async () => {
+test("an unknown doc shows the index with a non-echoing notice", async () => {
   docsFixture();
   const { history, container } = mount("?tab=docs&doc=absent.md");
-  await screen.findByRole("link", { name: "Garden plan docs/z garden.md" });
-  await waitFor(() => expect(searchParams(history).has("doc")).toBe(false));
+  await screen.findByRole("link", { name: "z garden.md docs/z garden.md" });
+  expect(await screen.findByText("Document not found. Showing all docs.")).toBeTruthy();
   expect(container.querySelector("iframe, [data-block-id]")).toBeNull();
   expect(history.length).toBe(1);
 });
 
-test("an unknown doc falls through to a block target and replaces the stale path", async () => {
+test("an unknown doc stays at the index even with an unrelated block target", async () => {
   docsFixture();
   const { history } = mount(`?tab=docs&doc=absent.md#block-${docBlock.id}`);
-  await screen.findByRole("heading", { name: gardenDoc.path });
-  await waitFor(() => expect(searchParams(history).get("doc")).toBe(gardenDoc.path));
+  await screen.findByText("Document not found. Showing all docs.");
+  expect(screen.queryByText("Water the seedlings")).toBeNull();
   expect(history.location.hash).toBe(`#block-${docBlock.id}`);
   expect(history.length).toBe(1);
 });
@@ -852,7 +860,7 @@ test("an unknown doc falls through to a block target and replaces the stale path
 test("an explicit doc takes precedence over a different doc's reading target", async () => {
   docsFixture();
   mount(`?tab=docs&doc=${encodeURIComponent(plainDoc.path)}#block-${docBlock.id}`);
-  await screen.findByRole("heading", { name: plainDoc.path });
+  await screen.findByRole("heading", { name: "a plain.md" });
   expect(screen.queryByText("Water the seedlings")).toBeNull();
 });
 
@@ -861,8 +869,8 @@ test("opening several docs with an empty writeup opens the first doc and writes 
   currentRevision.main = null;
   currentRevision.writeupEmpty = true;
   currentRevision.writeup = { sections: [] };
-  const { history } = mount("?doc=absent.md");
-  await screen.findByRole("heading", { name: gardenDoc.path });
+  const { history } = mount("");
+  await screen.findByRole("heading", { name: "z garden.md" });
   await waitFor(() => expect(searchParams(history).get("doc")).toBe(gardenDoc.path));
   expect(searchParams(history).has("tab")).toBe(false);
   expect(history.length).toBe(1);
@@ -873,16 +881,16 @@ test("doc selection survives tabs and revision changes without moving focus on r
   currentReview.revisions.push({ seq: 2, createdAt: "2026-01-02T00:00:00.000Z" });
   currentReview.newestRevision = 2;
   const { history } = mount(`?rev=1&tab=docs&doc=${encodeURIComponent(plainDoc.path)}`);
-  await screen.findByRole("heading", { name: plainDoc.path });
+  await screen.findByRole("heading", { name: "a plain.md" });
   fireEvent.click(screen.getByRole("tab", { name: "Writeup" }));
   await screen.findByRole("heading", { name: "Topic 1: Plant a seed" });
   expect(searchParams(history).get("doc")).toBe(plainDoc.path);
   fireEvent.click(screen.getByRole("tab", { name: "Docs 4" }));
-  await screen.findByRole("heading", { name: plainDoc.path });
+  await screen.findByRole("heading", { name: "a plain.md" });
   fireEvent.keyDown(screen.getByRole("button", { name: /^Revision 1/ }), { key: "ArrowDown" });
   fireEvent.click(await screen.findByRole("menuitemradio", { name: /^Revision 2/ }));
   await waitFor(() => expect(searchParams(history).get("rev")).toBe("2"));
-  const heading = await screen.findByRole("heading", { name: plainDoc.path });
+  const heading = await screen.findByRole("heading", { name: "a plain.md" });
   expect(searchParams(history).get("doc")).toBe(plainDoc.path);
   const instructions = screen.getByLabelText("Instructions");
   act(() => instructions.focus());
@@ -892,7 +900,7 @@ test("doc selection survives tabs and revision changes without moving focus on r
   });
   expect(document.activeElement).toBe(instructions);
   expect(screen.getByTestId("reading-pane").scrollTop).toBe(180);
-  expect(screen.getByRole("heading", { name: plainDoc.path })).toBe(heading);
+  expect(screen.getByRole("heading", { name: "a plain.md" })).toBe(heading);
 });
 
 test("doc block links encode the path alongside the Docs tab", () => {
@@ -905,11 +913,11 @@ test("doc block links encode the path alongside the Docs tab", () => {
 test("HTML doc messages navigate with history and fragment hand-off, and old windows lose authority", async () => {
   docsFixture();
   const { history, container } = mount(`?tab=docs&rev=1&doc=${encodeURIComponent(htmlDoc.path)}`);
-  await screen.findByRole("heading", { name: htmlDoc.path });
+  await screen.findByRole("heading", { name: "seed.html" });
   const { frame: first } = prepareFrame(htmlDoc.path);
   const fragment = "part é%#";
   frameMessage(first, { type: "emend:navigate", path: otherHtmlDoc.path, fragment });
-  const nextHeading = await screen.findByRole("heading", { name: otherHtmlDoc.path });
+  const nextHeading = await screen.findByRole("heading", { name: "water.html" });
   await waitFor(() => expect(document.activeElement).toBe(nextHeading));
   await waitFor(() =>
     expect(container.querySelector("iframe")?.getAttribute("src")).toBe(
@@ -927,19 +935,19 @@ test("HTML doc messages navigate with history and fragment hand-off, and old win
   expect(screen.queryByRole("button", { name: "Comment on selection" })).toBeNull();
   expect(searchParams(history).get("doc")).toBe(otherHtmlDoc.path);
   act(() => history.back());
-  await screen.findByRole("heading", { name: htmlDoc.path });
+  await screen.findByRole("heading", { name: "seed.html" });
   expect(container.querySelectorAll("iframe")).toHaveLength(1);
   expect(second.isConnected).toBe(false);
   const { frame: returned } = prepareFrame(htmlDoc.path);
   frameMessage(returned, { type: "emend:navigate", path: gardenDoc.path, fragment: "heading" });
-  await screen.findByRole("heading", { name: gardenDoc.path });
+  await screen.findByRole("heading", { name: "z garden.md" });
   expect(container.querySelector("iframe")).toBeNull();
 });
 
 test("HTML navigation rejects foreign windows, other revisions, malformed messages and departed frames", async () => {
   docsFixture();
   const { history, container } = mount(`?tab=docs&doc=${encodeURIComponent(htmlDoc.path)}`);
-  await screen.findByRole("heading", { name: htmlDoc.path });
+  await screen.findByRole("heading", { name: "seed.html" });
   const { frame } = prepareFrame(htmlDoc.path);
   const valid = { type: "emend:navigate", path: otherHtmlDoc.path, fragment: "seed" };
   frameMessage(frame, valid, window);
@@ -965,11 +973,11 @@ test("hostile doc titles and paths stay text in the list and doc bar", async () 
   const hostile = '<img onerror="evil()"><svg onload="evil()">';
   const path = `docs/${hostile}.md`;
   const heading = { ...docBlock, kind: "heading" as const, text: hostile, html: "<h2>Safe synthetic heading</h2>" };
-  currentRevision.docs = [{ kind: "markdown", path, blocks: [heading] }, htmlDoc];
+  currentRevision.docs = [{ kind: "markdown", path, title: hostile, blocks: [heading] }, htmlDoc];
   const { container } = mount("?tab=docs");
   fireEvent.click(await screen.findByRole("link", { name: `${hostile} ${path}` }));
-  const bar = await screen.findByRole("heading", { name: path });
-  expect(bar.textContent).toBe(path);
+  const bar = await screen.findByRole("heading", { name: hostile });
+  expect(bar.textContent).toBe(hostile);
   expect(bar.getAttribute("title")).toBe(path);
   expect(container.querySelector("script, [onerror], [onload], a[href^='javascript:']")).toBeNull();
 });
@@ -987,7 +995,7 @@ test("an unknown doc falls through to an HTML thread target", async () => {
     },
   ];
   const { history, container } = mount(`?tab=docs&doc=absent.html#thread-${id}`);
-  await screen.findByRole("heading", { name: htmlDoc.path });
+  await screen.findByRole("heading", { name: "seed.html" });
   await waitFor(() => expect(searchParams(history).get("doc")).toBe(htmlDoc.path));
   expect(container.querySelector("iframe")?.title).toBe(htmlDoc.path);
   expect(history.location.hash).toBe(`#thread-${id}`);
@@ -1009,21 +1017,21 @@ test("an unplaced Markdown draft still opens its doc", async () => {
   );
   const { history } = mount("?tab=comments");
   fireEvent.click(await screen.findByRole("button", { name: "Resume" }));
-  await screen.findByRole("heading", { name: gardenDoc.path });
+  await screen.findByRole("heading", { name: "z garden.md" });
   expect(searchParams(history).get("doc")).toBe(gardenDoc.path);
   expect(screen.getByRole("region", { name: "Resumed comment" })).toBeTruthy();
 });
 
-test("a revision without the open doc drops its stale URL path", async () => {
+test("a revision without the open doc shows the index and a missing-doc notice", async () => {
   docsFixture();
   currentReview.revisions.push({ seq: 2, createdAt: "2026-01-02T00:00:00.000Z" });
   const { history } = mount(`?rev=1&tab=docs&doc=${encodeURIComponent(plainDoc.path)}`);
-  await screen.findByRole("heading", { name: plainDoc.path });
+  await screen.findByRole("heading", { name: "a plain.md" });
   currentRevision.docs = [gardenDoc, htmlDoc];
   fireEvent.keyDown(screen.getByRole("button", { name: /^Revision 1/ }), { key: "ArrowDown" });
   fireEvent.click(await screen.findByRole("menuitemradio", { name: /^Revision 2/ }));
-  await screen.findByRole("link", { name: "Garden plan docs/z garden.md" });
-  await waitFor(() => expect(searchParams(history).has("doc")).toBe(false));
+  await screen.findByRole("link", { name: "z garden.md docs/z garden.md" });
+  expect(await screen.findByText("Document not found. Showing all docs.")).toBeTruthy();
   expect(searchParams(history).get("tab")).toBe("docs");
   expect(searchParams(history).get("rev")).toBe("2");
   expect(history.length).toBe(2);
@@ -1064,7 +1072,7 @@ test.each(["block", "doc-thread", "html-thread"])("a Comments URL with a %s hash
 test.each([gardenDoc, htmlDoc])("a direct $kind doc load does not take heading focus", async (doc) => {
   docsFixture();
   const { history } = mount(`?tab=docs&doc=${encodeURIComponent(doc.path)}`);
-  const heading = await screen.findByRole("heading", { name: doc.path });
+  const heading = await screen.findByRole("heading", { name: doc.path.split("/").at(-1) });
   expect(document.activeElement).not.toBe(heading);
   await waitFor(() => expect(client.isFetching()).toBe(0));
   expect(document.activeElement).not.toBe(heading);
@@ -1077,18 +1085,18 @@ test("switching from Writeup to Docs keeps focus on the tab", async () => {
   const writeup = await screen.findByRole("tab", { name: "Writeup" });
   await screen.findByRole("heading", { name: "Topic 1: Plant a seed" });
   fireEvent.keyDown(writeup, { key: "ArrowRight" });
-  await screen.findByRole("heading", { name: gardenDoc.path });
+  await screen.findByRole("heading", { name: "z garden.md" });
   expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Docs 4" }));
 });
 
 test("a target inside the shown Docs tab does not take heading focus", async () => {
   docsFixture();
   const { history } = mount("?tab=docs");
-  await screen.findByRole("link", { name: "Garden plan docs/z garden.md" });
+  await screen.findByRole("link", { name: "z garden.md docs/z garden.md" });
   const instructions = screen.getByLabelText("Instructions");
   act(() => instructions.focus());
   act(() => history.push(`/r/${id}?tab=docs#block-${docBlock.id}`));
-  await screen.findByRole("heading", { name: gardenDoc.path });
+  await screen.findByRole("heading", { name: "z garden.md" });
   await waitFor(() => expect(searchParams(history).get("doc")).toBe(gardenDoc.path));
   expect(document.activeElement).toBe(instructions);
 });
@@ -1096,13 +1104,13 @@ test("a target inside the shown Docs tab does not take heading focus", async () 
 test("a data refresh that opens a sole doc does not take heading focus", async () => {
   docsFixture();
   mount("?tab=docs");
-  await screen.findByRole("link", { name: "Garden plan docs/z garden.md" });
+  await screen.findByRole("link", { name: "z garden.md docs/z garden.md" });
   const instructions = screen.getByLabelText("Instructions");
   act(() => instructions.focus());
   await act(async () => {
     client.setQueryData(["revision", id, 1], { ...currentRevision, docs: [plainDoc] });
   });
-  await screen.findByRole("heading", { name: plainDoc.path });
+  await screen.findByRole("heading", { name: "a plain.md" });
   expect(document.activeElement).toBe(instructions);
 });
 
@@ -2311,7 +2319,7 @@ test("Tabs preserves reading scroll, expanded regions and selection through Writ
   await waitFor(() => expect(reading.hidden).toBe(true));
   expect(screen.getByTestId("reading-pane")).toBe(reading);
   expect(diff.hidden).toBe(false);
-  const collapse = within(diff).getByRole("button", { name: "Collapse topic" });
+  const collapse = await within(diff).findByRole("button", { name: "Collapse topic" });
   fireEvent.click(collapse);
   diff.scrollTop = 240;
   fireEvent.click(screen.getByRole("tab", { name: "Writeup" }));
@@ -2580,4 +2588,478 @@ test("a fulfilled Focus jump does not reopen a hidden pill when the block remoun
   expect(document.getElementById(`thread-${id}`)).toBeNull();
   expect(history.location.href).toBe(url);
   expect(scroll).not.toHaveBeenCalled();
+});
+
+function navigationDocs() {
+  currentRevision.docs = ["seed.md", "water.md"].map((path) => ({
+    kind: "markdown",
+    path,
+    title: path === "seed.md" ? "Seeds" : "Water",
+    headings: ["thread-pretend", "diff-pretend", "heading-third"].map((id, i) => ({
+      level: i === 1 ? 3 : 2,
+      id,
+      text: `Section ${i}`,
+    })),
+    blocks: ["thread-pretend", "diff-pretend", "heading-third"].map((heading, i) => ({
+      id: `doc-${path === "seed.md" ? "11111111" : "22222222"}-${String(i).padStart(8, "0")}`,
+      section: `doc-${path === "seed.md" ? "11111111" : "22222222"}`,
+      kind: "heading",
+      text: `Section ${i}`,
+      html: `<h${i === 1 ? 3 : 2} id="${heading}">Section ${i}</h${i === 1 ? 3 : 2}>`,
+    })),
+  }));
+  const block = currentRevision.writeup.sections[0]?.blocks[0];
+  if (block)
+    block.html = `<h2 id="thread-pretend">Shared id</h2><p><a href="/r/${id}?tab=docs&amp;doc=seed.md#h-thread-pretend">Read seeds</a></p>`;
+}
+test("doc links push, Contents replaces, Back follows the real entry", async () => {
+  navigationDocs();
+  const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+  const { history } = mount();
+  const initial = history.length;
+  fireEvent.click(await screen.findByRole("link", { name: "Read seeds" }));
+  await screen.findByRole("button", { name: "Back to Writeup" });
+  expect(history.length).toBe(initial + 1);
+  const doc = document.querySelector('[data-reading-section="seed.md"]');
+  await waitFor(() => expect(scroll.mock.instances).toContain(doc?.querySelector("h2")));
+  fireEvent.click(screen.getByRole("button", { name: "Contents" }));
+  fireEvent.click(
+    within(await screen.findByRole("dialog", { name: "Contents" })).getByRole("button", { name: "Section 1" }),
+  );
+  await waitFor(() => expect(history.location.hash).toBe("#h-diff-pretend"));
+  expect(history.length).toBe(initial + 1);
+  fireEvent.click(screen.getByRole("button", { name: "Back to Writeup" }));
+  await screen.findByRole("link", { name: "Read seeds" });
+});
+test.each([{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { button: 1 }])(
+  "modified doc link keeps shown rev: %j",
+  async (modifier) => {
+    navigationDocs();
+    const opened = vi.spyOn(window, "open").mockReturnValue(null);
+    mount();
+    const link = await screen.findByRole("link", { name: "Read seeds" });
+    if ("button" in modifier)
+      fireEvent(link, new MouseEvent("auxclick", { bubbles: true, cancelable: true, ...modifier }));
+    else fireEvent.click(link, modifier);
+    expect(opened).toHaveBeenCalledWith(expect.stringContaining("rev=1"), "_blank", "noopener");
+  },
+);
+test.each(["?tab=docs&doc=SECRET.md", "?tab=docs&doc=seed.md#h-SECRET"])(
+  "missing targets never echo the value: %s",
+  async (query) => {
+    navigationDocs();
+    mount(query);
+    await screen.findByText(/(?:Document|Heading) not found/);
+    expect(document.body.textContent).not.toContain("SECRET");
+  },
+);
+test("phone sheets close to their trigger or focus the selected heading", async () => {
+  width = 390;
+  navigationDocs();
+  mount("?tab=docs&doc=seed.md&rev=1");
+  const contents = await screen.findByRole("button", { name: "Contents" });
+  fireEvent.click(contents);
+  const sheet = await screen.findByRole("dialog", { name: "Contents" });
+  expect(
+    sheet.querySelector("[data-sheet-grab]") ?? sheet.parentElement?.querySelector("[data-sheet-grab]"),
+  ).toBeTruthy();
+  fireEvent.click(within(sheet).getByRole("button", { name: "Close" }));
+  await waitFor(() => expect(document.activeElement).toBe(contents));
+  fireEvent.click(contents);
+  fireEvent.click(await screen.findByRole("button", { name: "Section 2" }));
+  await waitFor(() => expect(document.activeElement?.id).toBe("heading-third"));
+  fireEvent.click(screen.getByRole("button", { name: "Docs" }));
+  const docs = await screen.findByRole("dialog", { name: "Docs" });
+  fireEvent.click(within(docs).getByRole("button", { name: /Water/ }));
+  await waitFor(() => expect(document.activeElement?.textContent).toBe("Water"));
+});
+
+test("same-doc links replace history and Back to a doc names its server title", async () => {
+  navigationDocs();
+  const doc = currentRevision.docs[0];
+  if (doc?.kind !== "markdown") throw new Error("missing doc");
+  doc.blocks.push({
+    id: "doc-11111111-99999999",
+    section: "doc-11111111",
+    kind: "paragraph",
+    text: "Next heading",
+    html: `<p><a href="/r/${id}?tab=docs&amp;doc=seed.md#h-heading-third">Next heading</a></p>`,
+  });
+  const { history } = mount("?tab=docs&doc=seed.md&rev=1");
+  const initial = history.length;
+  fireEvent.click(await screen.findByRole("link", { name: "Next heading" }));
+  await waitFor(() => expect(history.location.hash).toBe("#h-heading-third"));
+  expect(history.length).toBe(initial);
+  expect(screen.queryByRole("button", { name: /Back to/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Docs" }));
+  fireEvent.click(within(await screen.findByRole("dialog", { name: "Docs" })).getByRole("button", { name: /Water/ }));
+  await screen.findByRole("button", { name: "Back to Seeds" });
+  expect(history.length).toBe(initial + 1);
+});
+test("an unfinished doc comment survives the phone switcher", async () => {
+  width = 390;
+  navigationDocs();
+  const doc = currentRevision.docs[0];
+  if (doc?.kind !== "markdown") throw new Error("missing doc");
+  doc.blocks.push({ ...docBlock, text: "A synthetic passage", html: "<p>A synthetic passage</p>" });
+  mount("?tab=docs&doc=seed.md&rev=1");
+  fireEvent.click(await screen.findByRole("button", { name: "Comment on block" }));
+  fireEvent.change(await screen.findByRole("textbox", { name: "Comment" }), {
+    target: { value: "Keep this unfinished thought" },
+  });
+  // Close the composer sheet; its draft remains attached to the original doc.
+  const close = screen.queryByRole("button", { name: "Close" });
+  if (close) fireEvent.click(close);
+  fireEvent.click(screen.getByRole("button", { name: "Docs" }));
+  fireEvent.click(within(await screen.findByRole("dialog", { name: "Docs" })).getByRole("button", { name: /Water/ }));
+  await screen.findByRole("button", { name: "Back to Seeds" });
+  fireEvent.click(screen.getByRole("button", { name: "Back to Seeds" }));
+  const editor = screen.queryByRole("textbox", { name: "Comment" });
+  if (!editor) fireEvent.click(await screen.findByRole("button", { name: "Comment on block" }));
+  await waitFor(() =>
+    expect((screen.getByRole("textbox", { name: "Comment" }) as HTMLTextAreaElement).value).toBe(
+      "Keep this unfinished thought",
+    ),
+  );
+});
+test("old revisions use filenames, with no inferred title or Contents", async () => {
+  currentRevision.docs = [{ ...gardenDoc }];
+  currentRevision.main = null;
+  currentRevision.writeupEmpty = true;
+  mount("");
+  await screen.findByRole("heading", { name: "z garden.md" });
+  expect(screen.queryByRole("button", { name: "Contents" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Docs" })).toBeNull();
+  expect(screen.queryByRole("link", { name: "All docs" })).toBeNull();
+});
+
+test("switcher keeps manifest order, disambiguates paths, marks the open doc and filters above eight", async () => {
+  navigationDocs();
+  const original = currentRevision.docs[0];
+  if (!original) throw new Error("missing doc");
+  currentRevision.docs = Array.from({ length: 9 }, (_, i) => ({
+    ...original,
+    path: `${i}/guide.md`,
+    title: i < 2 ? "Guide" : `Guide ${i}`,
+  }));
+  currentRevision.threads = [
+    {
+      ...placedWriteupThread(),
+      state: "open",
+      target: {
+        kind: "doc-span",
+        path: "0/guide.md",
+        blockId: "doc-11111111-00000000",
+        quote: "Section 0",
+        prefix: "",
+        suffix: "",
+      },
+      placement: {
+        status: "placed",
+        location: { kind: "doc-span", path: "0/guide.md", blockId: "doc-11111111-00000000", start: 0, end: 9 },
+      },
+    },
+  ];
+  mount("?tab=docs&doc=0%2Fguide.md&rev=1");
+  fireEvent.click(await screen.findByRole("button", { name: "Docs" }));
+  const dialog = within(await screen.findByRole("dialog", { name: "Docs" }));
+  const options = dialog.getAllByRole("button").filter((button) => button.textContent?.includes("open comment"));
+  expect(options.map((option) => option.querySelector("small")?.textContent)).toEqual(
+    Array.from({ length: 9 }, (_, i) => `${i}/guide.md`),
+  );
+  expect(options[0]?.getAttribute("aria-current")).toBe("page");
+  expect(options[0]?.textContent).toContain("1 open comment");
+  expect(options[1]?.textContent).toContain("0 open comments");
+  fireEvent.change(dialog.getByRole("textbox", { name: "Filter docs" }), { target: { value: "Guide 8" } });
+  expect(dialog.queryByRole("button", { name: /Guide 7/ })).toBeNull();
+  expect(dialog.getByRole("button", { name: /Guide 8/ })).toBeTruthy();
+});
+
+test("scrolling updates Contents without adding history or moving focus", async () => {
+  navigationDocs();
+  const { history } = mount("?tab=docs&doc=seed.md&rev=1");
+  const trigger = await screen.findByRole("button", { name: "Contents" });
+  const pane = screen.getByTestId("reading-pane");
+  const doc = document.querySelector('[data-reading-section="seed.md"]');
+  if (!doc) throw new Error("missing doc");
+  const headings = [...doc.querySelectorAll("h2, h3")];
+  headings.forEach((heading, i) => {
+    vi.spyOn(heading, "getBoundingClientRect").mockImplementation(
+      () => new DOMRect(0, i * 100 - pane.scrollTop, 300, 50),
+    );
+  });
+  act(() => trigger.focus());
+  const before = history.location.href;
+  pane.scrollTop = 150;
+  fireEvent.scroll(pane);
+  await waitFor(() =>
+    expect(document.querySelector('.em-doc-contents [aria-current="location"]')?.textContent).toBe("Section 1"),
+  );
+  expect(document.activeElement).toBe(trigger);
+  expect(history.location.href).toBe(before);
+});
+
+test.each([`thread-${id}`, `diff-thread-${id}`])(
+  "a declared heading %s never becomes an app target",
+  async (headingId) => {
+    navigationDocs();
+    currentRevision.threads = [placedWriteupThread()];
+    const doc = currentRevision.docs[0];
+    if (doc?.kind !== "markdown" || !doc.blocks[0]) throw new Error("missing doc");
+    doc.headings = [{ level: 2, id: headingId, text: "A heading" }];
+    doc.blocks[0] = { ...doc.blocks[0], html: `<h2 id="${headingId}">A heading</h2>` };
+    const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+    const { history } = mount(`?tab=docs&doc=seed.md&rev=1#h-${headingId}`);
+    const heading = await screen.findByRole("heading", { name: "A heading" });
+    await waitFor(() => expect(scroll.mock.instances).toContain(heading));
+    expect(searchParams(history).get("tab")).toBe("docs");
+    expect(screen.queryByRole("textbox", { name: "Reply" })).toBeNull();
+  },
+);
+
+test("Back restores the source link's focus", async () => {
+  navigationDocs();
+  mount();
+  const link = await screen.findByRole("link", { name: "Read seeds" });
+  act(() => link.focus());
+  fireEvent.click(link);
+  fireEvent.click(await screen.findByRole("button", { name: "Back to Writeup" }));
+  const returned = await screen.findByRole("link", { name: "Read seeds" });
+  await waitFor(() => expect(document.activeElement).toBe(returned));
+});
+
+test("picking the already-open doc on the phone closes the sheet and focuses its title", async () => {
+  width = 390;
+  vi.stubGlobal("innerHeight", 844);
+  navigationDocs();
+  const { history } = mount("?tab=docs&doc=seed.md&rev=1");
+  fireEvent.click(await screen.findByRole("button", { name: "Docs" }));
+  const sheet = await screen.findByRole("dialog", { name: "Docs" });
+  fireEvent.click(within(sheet).getByRole("button", { name: /Seeds/ }));
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Seeds" })));
+  expect(history.length).toBe(1);
+});
+
+test("R1.1 existing topic hashes still scroll to their section", async () => {
+  const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+  mount("?tab=writeup&rev=1#topic-seed");
+  const heading = await screen.findByRole("heading", { name: "Topic 1: Plant a seed" });
+  const section = heading.closest("section");
+  expect(section?.id).toBe("topic-seed");
+  await waitFor(() => expect(scroll.mock.instances).toContain(section));
+});
+
+test("R2.1 Alt-click leaves the doc link to the browser", async () => {
+  navigationDocs();
+  const open = vi.spyOn(window, "open").mockReturnValue(null);
+  const { history } = mount();
+  const href = history.location.href;
+  expect(fireEvent.click(await screen.findByRole("link", { name: "Read seeds" }), { altKey: true })).toBe(true);
+  expect(open).not.toHaveBeenCalled();
+  expect(history.location.href).toBe(href);
+});
+
+test("R3.2 a missing declared heading completes in the commit without a timer", async () => {
+  navigationDocs();
+  const ready = structuredClone(currentRevision);
+  const doc = currentRevision.docs[0];
+  if (doc?.kind !== "markdown") throw new Error("missing doc");
+  doc.blocks = [];
+  const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+  const { history } = mount("?tab=docs&doc=seed.md&rev=1");
+  await screen.findByRole("heading", { name: "Seeds" });
+  await waitFor(() => expect(client.isFetching()).toBe(0));
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  await act(async () => history.push(`/r/${id}?tab=docs&doc=seed.md&rev=1#h-heading-third`));
+  expect(screen.getByText("Heading not found. Showing the top of the document.")).toBeTruthy();
+  await act(async () => {
+    client.setQueryData(["revision", id, 1], ready);
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByRole("heading", { name: "Section 2" })).toBeTruthy();
+  expect(scroll).not.toHaveBeenCalled();
+});
+
+test("R1.6 Back restores a collapsed topic while the writeup stays mounted", async () => {
+  currentRevision.topics = currentRevision.topics.map((topic) => ({ ...topic, attention: "skim" }));
+  const { history } = mount();
+  const folded = await screen.findByRole("button", { name: "Topic 1: Plant a seed", expanded: false });
+  const section = folded.closest("section");
+  fireEvent.click(screen.getByRole("link", { name: "Plant a seed" }));
+  await screen.findByRole("button", { name: "Topic 1: Plant a seed", expanded: true });
+  await act(async () => history.back());
+  const returned = await screen.findByRole("button", { name: "Topic 1: Plant a seed", expanded: false });
+  expect(returned.closest("section")).toBe(section);
+  expect(section?.querySelector('[hidden="until-found"]')).toBeTruthy();
+});
+
+test("R1.7 Back focuses the remounted heading when navigation preserves focus", async () => {
+  navigationDocs();
+  const { history } = mount("?tab=docs&doc=seed.md&rev=1");
+  fireEvent.click(await screen.findByRole("button", { name: "Contents" }));
+  fireEvent.click(
+    within(await screen.findByRole("dialog", { name: "Contents" })).getByRole("button", { name: "Section 2" }),
+  );
+  const first = await screen.findByRole("heading", { name: "Section 2" });
+  await waitFor(() => expect(document.activeElement).toBe(first));
+  await act(async () => history.push(`/r/${id}?tab=docs&doc=water.md&rev=1`));
+  await screen.findByRole("heading", { name: "Water" });
+  await act(async () => history.back());
+  const returned = await screen.findByRole("heading", { name: "Section 2" });
+  expect(returned).not.toBe(first);
+  await waitFor(() => expect(returned.getAttribute("tabindex")).toBe("-1"));
+  expect(document.activeElement).toBe(returned);
+});
+
+test("R3.5 a doc switcher control clears the earlier heading focus before Back", async () => {
+  navigationDocs();
+  const { history } = mount("?tab=docs&doc=seed.md&rev=1");
+  fireEvent.click(await screen.findByRole("button", { name: "Contents" }));
+  fireEvent.click(
+    within(await screen.findByRole("dialog", { name: "Contents" })).getByRole("button", { name: "Section 2" }),
+  );
+  const first = await screen.findByRole("heading", { name: "Section 2" });
+  await waitFor(() => expect(document.activeElement).toBe(first));
+  fireEvent.click(screen.getByRole("button", { name: "Docs" }));
+  fireEvent.click(within(await screen.findByRole("dialog", { name: "Docs" })).getByRole("button", { name: /Water/ }));
+  await screen.findByRole("heading", { name: "Water" });
+  await act(async () => history.back());
+  const returned = await screen.findByRole("heading", { name: "Section 2" });
+  expect(returned).not.toBe(first);
+  expect(returned.getAttribute("tabindex")).toBeNull();
+  expect(document.activeElement).not.toBe(returned);
+});
+
+test("R2.4 Back to the writeup entry left at its top resets the shared scroller", async () => {
+  vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (this: HTMLElement) {
+    if (this.id === "topic-seed") screen.getByTestId("reading-pane").scrollTop = 400;
+  });
+  const { history } = mount();
+  const link = await screen.findByRole("link", { name: "Plant a seed" });
+  expect(screen.getByTestId("reading-pane").scrollTop).toBe(0);
+  fireEvent.click(link);
+  await waitFor(() => expect(screen.getByTestId("reading-pane").scrollTop).toBe(400));
+  await act(async () => history.back());
+  await waitFor(() => expect(screen.getByTestId("reading-pane").scrollTop).toBe(0));
+});
+
+test("R2.5 Back restores the second link after keyboard focus moves without a scroll", async () => {
+  navigationDocs();
+  const block = currentRevision.writeup.sections[0]?.blocks[0];
+  if (!block) throw new Error("missing block");
+  block.html += `<p><a href="/r/${id}?tab=docs&amp;doc=water.md">Read water</a></p>`;
+  const { history } = mount();
+  const first = await screen.findByRole("link", { name: "Read seeds" });
+  act(() => first.focus());
+  fireEvent.keyDown(first, { key: "Tab" });
+  const second = screen.getByRole("link", { name: "Read water" });
+  act(() => second.focus());
+  fireEvent.keyDown(second, { key: "Enter" });
+  fireEvent.click(second);
+  await screen.findByRole("heading", { name: "Water" });
+  await act(async () => history.back());
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("link", { name: "Read water" })));
+});
+
+test.each(["empty", "wrong tag", "wrong id"])(
+  "R2.6 a declared heading that never renders completes: %s",
+  async (kind) => {
+    navigationDocs();
+    const doc = currentRevision.docs[0];
+    if (doc?.kind !== "markdown") throw new Error("missing doc");
+    doc.blocks =
+      kind === "empty"
+        ? []
+        : doc.blocks.map((block) => ({
+            ...block,
+            html: kind === "wrong tag" ? '<p id="heading-third">Wrong tag</p>' : '<h2 id="other">Wrong id</h2>',
+          }));
+    const { history } = mount("?tab=docs&doc=seed.md&rev=1");
+    await screen.findByRole("heading", { name: "Seeds" });
+    const pane = screen.getByTestId("reading-pane");
+    pane.scrollTop = 300;
+    await act(async () => history.push(`/r/${id}?tab=docs&doc=seed.md&rev=1#h-heading-third`));
+    await screen.findByText("Heading not found. Showing the top of the document.");
+    expect(pane.scrollTop).toBe(0);
+    // A later data render cannot re-activate a completed navigation.
+    const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+    navigationDocs();
+    await act(async () => client.setQueryData(["revision", id, 1], structuredClone(currentRevision)));
+    await screen.findByRole("heading", { name: "Section 2" });
+    expect(scroll).not.toHaveBeenCalled();
+  },
+);
+
+test.each(["link", "Contents", "restore"])("R2.7 %s ignores a placed comment's duplicate heading", async (mode) => {
+  navigationDocs();
+  const doc = currentRevision.docs[0];
+  if (doc?.kind !== "markdown" || !doc.blocks[0] || !doc.blocks[2] || !doc.headings?.[2])
+    throw new Error("missing doc");
+  const setup = "user-content-setup";
+  doc.headings[2].id = setup;
+  doc.blocks[2].html = `<h2 id="${setup}">Section 2</h2>`;
+  currentRevision.threads = [
+    {
+      id,
+      createdOn: 1,
+      state: "sent",
+      target: {
+        kind: "doc-span",
+        path: doc.path,
+        blockId: doc.blocks[0].id,
+        quote: "Section 0",
+        prefix: "",
+        suffix: "",
+      },
+      placement: {
+        status: "placed",
+        location: { kind: "doc-span", path: doc.path, blockId: doc.blocks[0].id, start: 0, end: 9 },
+      },
+      comments: [
+        {
+          id,
+          author: "user",
+          body: "Synthetic reply heading",
+          html: `<h2 id="${setup}">Reply heading</h2>`,
+          sent: true,
+          sentOn: 1,
+        },
+      ],
+    },
+  ];
+  const bounds = HTMLElement.prototype.getBoundingClientRect;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    if (this.matches("[data-reading-scroll]")) return new DOMRect(0, 0, 600, 600);
+    const scroll = document.querySelector<HTMLElement>("[data-reading-scroll]")?.scrollTop ?? 0;
+    if (this.id === setup) return new DOMRect(0, (this.closest(".em-comment-html") ? 100 : 300) - scroll, 400, 50);
+    if (this.id === "diff-pretend") return new DOMRect(0, 200 - scroll, 400, 50);
+    return bounds.call(this);
+  });
+  if (mode === "restore")
+    readingPosition.saveReadingPosition(readingPosition.readingPositionKey(id, "docs", doc.path, 1), {
+      id: `h-${setup}`,
+      fraction: 0,
+    });
+  const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+  const { history } = mount(`?tab=docs&doc=seed.md&rev=1${mode === "link" ? `#h-${setup}` : ""}`);
+  const heading = await screen.findByRole("heading", { name: "Section 2" });
+  const reply = screen.getByRole("heading", { name: "Reply heading" });
+  if (mode === "Contents") {
+    fireEvent.click(screen.getByRole("button", { name: "Contents" }));
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "Contents" })).getByRole("button", { name: "Section 2" }),
+    );
+  }
+  if (mode === "restore") await waitFor(() => expect(screen.getByTestId("reading-pane").scrollTop).toBe(300));
+  else await waitFor(() => expect(scroll.mock.instances).toContain(heading));
+  expect(scroll.mock.instances).not.toContain(reply);
+  // At 250 the doc's second heading is current; the earlier reply must not mark Setup current.
+  const pane = screen.getByTestId("reading-pane");
+  fireEvent.wheel(pane);
+  pane.scrollTop = 250;
+  fireEvent.scroll(pane);
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Section 1" }).getAttribute("aria-current")).toBe("location"),
+  );
+  expect(history.length).toBe(1);
 });
