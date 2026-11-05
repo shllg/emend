@@ -1,7 +1,7 @@
-import { setImmediate } from "node:timers/promises";
 import { LIMITS, type PublishRequest } from "@emend/contract";
 import { cleanDocTitle, type DocLinks } from "@emend/core";
 import { ApiError } from "../http/errors.ts";
+import { yieldToLoop } from "../pacing.ts";
 import { WorkTimeout } from "./executor.ts";
 import { checkPublishSignal } from "./lifecycle.ts";
 import { mediaType } from "./media.ts";
@@ -48,7 +48,7 @@ export async function renderRevision(
     onRendered?.(size);
     if (metadataBytes > LIMITS.renderedBytesPerRevision) throw new ApiError("too_large");
     metadata.set(file.path, doc);
-    await setImmediate();
+    await yieldToLoop("publish-render");
   }
   const headingIds = new Map<DocMetadata["headings"], ReadonlySet<string>>();
   const docs: DocLinks = new Map(
@@ -91,10 +91,10 @@ export async function renderRevision(
     throw new ApiError("too_large", "writeup_blocks");
   // Give the worker reply's allocation/GC turn back before hashing and persisting
   // its bytes; those two individually bounded stretches must not run together.
-  await setImmediate();
+  await yieldToLoop("publish-render");
   checkPublishSignal(signal);
   const renderedBlob = await put(renderedBytes);
-  await setImmediate();
+  await yieldToLoop("publish-render");
   checkPublishSignal(signal);
   // The source blob keeps the publish-level fields beside the writeup so an export and import carry them.
   const sourceBlob = await put(
@@ -155,7 +155,7 @@ export async function renderRevision(
     }
     count += result.count;
     bytes += json.length;
-    await setImmediate();
+    await yieldToLoop("publish-render");
     checkPublishSignal(signal);
     const blob = await put(json);
     docBlobs.set(file.path, blob);

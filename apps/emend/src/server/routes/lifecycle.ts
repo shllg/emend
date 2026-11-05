@@ -1,4 +1,3 @@
-import { setImmediate } from "node:timers/promises";
 import { RetireRequest, SnoozeRequest } from "@emend/contract";
 import type { Hono } from "hono";
 import { removeUnreferencedBlob } from "../../db/repo/blob-removal.ts";
@@ -6,8 +5,9 @@ import { deleteReview, reopenReview, retireReview, snoozeReview, unsnoozeReview 
 import type { AppDeps } from "../app.ts";
 import type { AppEnv } from "../auth/principal.ts";
 import { parseBody } from "../http/body.ts";
+import { yieldToLoop } from "../pacing.ts";
 
-const CLEANUP_BATCH = 16;
+export const CLEANUP_BATCH = 16;
 
 /**
  * Free the blobs nothing of this owner uses any more, a batch at a time with a yield between
@@ -22,7 +22,7 @@ async function cleanBlobs(deps: AppDeps, ownerId: string, candidates: readonly s
           const { removed } = await removeUnreferencedBlob(deps.db, ownerId, hash);
           if (removed) await deps.blobs.unlinkIfUnheld(hash);
         });
-      await setImmediate();
+      await yieldToLoop("lifecycle-blob-cleanup");
     }
   } catch {
     console.error("emend: blob cleanup after a review delete failed");

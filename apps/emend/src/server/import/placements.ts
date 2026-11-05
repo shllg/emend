@@ -1,4 +1,3 @@
-import { setImmediate } from "node:timers/promises";
 import {
   type ImportBundle,
   type ImportRevisionIndex,
@@ -8,6 +7,7 @@ import {
 } from "@emend/contract";
 import type { placements } from "../../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
+import { yieldToLoop } from "../pacing.ts";
 import { WorkTimeout } from "../publish/executor.ts";
 import { mediaType } from "../publish/media.ts";
 import { revisionTransition } from "../publish/transitions.ts";
@@ -179,7 +179,7 @@ export function importPlacements() {
       if (!copied) {
         copied = { ...doc, bytes: doc.bytes.slice(0) };
         copies.set(doc, copied);
-        await setImmediate();
+        await yieldToLoop("import-placement-copy");
         checkImportSignal(signal);
       }
       return copied;

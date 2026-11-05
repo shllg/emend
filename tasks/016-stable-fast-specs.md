@@ -27,7 +27,7 @@ One commit per step, in the plan's order (D2):
       production change.
 - [x] CI fan-out: the `verify:*` scripts, a reusable verify workflow, 4 Vitest shards on both
       Node versions, static checks on both Node versions (D1), and the guard test.
-- [ ] Pacing hook: `pacing.ts` at the yield sites, behaviour unchanged.
+- [x] Pacing hook: `pacing.ts` at the yield sites, behaviour unchanged.
 - [ ] New yields in the import pipeline, with one work-unit test per phase.
 - [ ] Bench: the `bench` project and `pnpm bench`; the timing assertions and both
       `EMEND_TIMING_STRICT` passes go. Single synchronous steps get bench coverage only (D4).
@@ -56,3 +56,7 @@ runs outside it. CI runs the sharded layout, and the plan's T.1 entry records th
 
 - Flaky or timing-dependent tests are bugs to fix at the root: never retry, loosen or skip them.
 - Changes under `.github/` and the pacing hook need emend-security-reviewer.
+- Found in step 3, out of this task's scope: main-thread loops in the publish path that never
+  yield (snapshot and history loops, placement preparation, file and asset validation and
+  indexing, topic insertion, render metadata construction). Revision limits bound them; a
+  follow-up task should measure them with the bench and add yields where they stall.

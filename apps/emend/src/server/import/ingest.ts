@@ -1,5 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { setImmediate } from "node:timers/promises";
 import type { ImportBundle } from "@emend/contract";
 import { and, eq, type InferInsertModel, sql } from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
@@ -9,6 +8,7 @@ import type { AppDeps } from "../app.ts";
 import { machineDevice } from "../auth/machines.ts";
 import type { Principal } from "../auth/principal.ts";
 import { ApiError } from "../http/errors.ts";
+import { yieldToLoop } from "../pacing.ts";
 import { mediaType } from "../publish/media.ts";
 import { checkImportSignal } from "./lifecycle.ts";
 import { prepareImport } from "./prepare.ts";
@@ -102,7 +102,7 @@ async function checkIds(ownerId: string, q: Queries, bundle: ImportBundle, signa
       .where(eq(t.owners.id, ownerId))
       .get();
     if (collision?.yes) throw new ApiError("invalid_request");
-    await setImmediate();
+    await yieldToLoop("import-check-ids");
   }
 }
 
@@ -121,7 +121,7 @@ export async function importReview(principal: Principal, bundle: ImportBundle, d
             checkImportSignal(signal);
             const statement = q.insert(table).values(rows.slice(offset, offset + 500));
             await (ignoreConflict ? statement.onConflictDoNothing() : statement);
-            await setImmediate();
+            await yieldToLoop("import-insert");
           }
         }
         const now = deps.now();

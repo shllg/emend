@@ -1,5 +1,4 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { setImmediate } from "node:timers/promises";
 import { LIMITS, type PublishRequest, type PublishResponse } from "@emend/contract";
 import { composeRenames } from "@emend/core";
 import { and, desc, eq, isNull } from "drizzle-orm";
@@ -20,6 +19,7 @@ import {
 } from "../../db/schema.ts";
 import type { BlobStore } from "../../store/blobs.ts";
 import { ApiError } from "../http/errors.ts";
+import { yieldToLoop } from "../pacing.ts";
 import { insertChangedBlocks } from "./changed.ts";
 import { WorkTimeout, workerExecutor } from "./executor.ts";
 import { abortable, checkPublishSignal, PublishAborted, publishSlots } from "./lifecycle.ts";
@@ -512,7 +512,7 @@ async function computePublish(
               ref: note.ref,
               ord: noteOrd,
             });
-          if (++inserted % 100 === 0) await setImmediate();
+          if (++inserted % 100 === 0) await yieldToLoop("publish-files");
         }
         let associations: (typeof docAssets.$inferInsert)[] = [];
         for (const file of input.files) {
@@ -527,7 +527,7 @@ async function computePublish(
               checkPublishSignal(deps.signal);
               await q.insert(docAssets).values(associations);
               associations = [];
-              await setImmediate();
+              await yieldToLoop("publish-doc-assets");
             }
           }
         }
@@ -545,7 +545,7 @@ async function computePublish(
             reason: placement.status === "unplaced" ? placement.reason : null,
             carried: carriedRows.get(id),
           });
-          if (++inserted % 100 === 0) await setImmediate();
+          if (++inserted % 100 === 0) await yieldToLoop("publish-placements");
         }
         // A new revision reopens the review and ends any snooze; released_at stays as history.
         await q
@@ -560,7 +560,7 @@ async function computePublish(
             updatedAt: Date.now(),
           })
           .where(and(eq(reviews.ownerId, ownerId), eq(reviews.id, review.id)));
-        await setImmediate();
+        await yieldToLoop("publish-finalize");
         checkPublishSignal(deps.signal);
         return {
           reviewId: review.id,

@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { setImmediate } from "node:timers/promises";
 import { sql } from "drizzle-orm";
 import type { Queries } from "../../db/client.ts";
 import { changedBlocks } from "../../db/schema.ts";
+import { yieldToLoop } from "../pacing.ts";
 import { checkPublishSignal } from "./lifecycle.ts";
 
 /** Stream packed JSON-string IDs into bounded inserts, without per-ID objects. */
@@ -34,6 +34,6 @@ export async function insertChangedBlocks(
     // UUID array for every ID. The entire JSON batch remains a bound parameter.
     await q.run(sql`INSERT INTO ${changedBlocks} (id, owner_id, revision_id, block_id)
       SELECT json_extract(value, '$[0]'), ${ownerId}, ${revisionId}, json_extract(value, '$[1]') FROM json_each(${batch})`);
-    await setImmediate();
+    await yieldToLoop("publish-changed");
   }
 }
