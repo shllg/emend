@@ -159,6 +159,22 @@ async function fixture(
 ) {
   const phase = options.phase ?? "status";
   const watches = new Set<AbortController>();
+  const pendingWaits = new Set<{ label: string }>();
+  async function track<T>(label: string, promise: Promise<T>): Promise<T> {
+    const pending = { label };
+    pendingWaits.add(pending);
+    try {
+      return await promise;
+    } finally {
+      pendingWaits.delete(pending);
+    }
+  }
+  let launcherPid: number | undefined;
+  function rememberLauncher(text: string) {
+    const pid = Number(text);
+    launcherPid ??= pid;
+    return pid;
+  }
   let running: ChildProcess | undefined;
   let closed: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | undefined;
   let stdoutReader: FileHandle | undefined;
@@ -184,6 +200,73 @@ async function fixture(
   const escalationAwaitedPath = join(dir, "escalation-awaited");
   const escalationReleasePath = join(dir, "escalation-release");
   const handlerRemovedPath = join(dir, "handler-removed-while-held");
+  // Finished hooks run in reverse registration order: capture evidence before cleanup.
+  onTestFinished(async (context) => {
+    if (context.task.result?.state !== "fail") return;
+    const pending = [...pendingWaits].map(({ label }) => label);
+    const exitCode = running ? running.exitCode : "unknown";
+    const signalCode = running ? running.signalCode : "unknown";
+    const read = (path: string) => readFile(path, "utf8").catch(() => undefined);
+    const markers = [
+      "cleanup-started",
+      "escalation-armed",
+      "escalation-awaited",
+      "escalation-release",
+      "handler-removed-while-held",
+      "release-cleanup",
+      "hold-cleanup",
+      "descendant",
+      "socket-closed",
+      "listen-error",
+      "stdout-error",
+    ];
+    const [markerStates, signals, callRecords, descendant, launcher] = await Promise.all([
+      Promise.all(
+        markers.map(async (marker) => {
+          const present = await stat(join(dir, marker)).then(
+            () => true,
+            () => false,
+          );
+          return `${marker}: ${present ? "present" : "absent"}`;
+        }),
+      ),
+      read(signalsPath),
+      read(callsPath),
+      read(descendantPath),
+      read(enteredPath),
+    ]);
+    if (launcher !== undefined) rememberLauncher(launcher);
+    const processState = async (pid: number | undefined) => {
+      if (pid === undefined || !Number.isSafeInteger(pid) || pid <= 0) return "unknown";
+      return promisify(execFile)("/bin/ps", ["-o", "pid=,ppid=,pgid=,stat=", "-p", String(pid)], {
+        env: { PATH: process.env.PATH, LC_ALL: "C" },
+        timeout: 2000,
+      }).then(
+        ({ stdout }) => stdout.trim() || "gone",
+        (error: { code?: string | number }) => (error.code === 1 ? "gone" : "unknown"),
+      );
+    };
+    const processes = await Promise.all(
+      (
+        [
+          ["emend", running?.pid],
+          ["launcher", launcherPid],
+          ["descendant", descendant === undefined ? undefined : Number(descendant)],
+        ] as const
+      ).map(async ([name, pid]) => `${name} (pid ${pid ?? "unknown"}): ${await processState(pid)}`),
+    );
+    throw new Error(
+      [
+        "serve-signals failure report:",
+        `pending waits: ${pending.join(", ") || "none"}`,
+        ...markerStates,
+        `signals: ${signals?.trim() || "none"}`,
+        `calls: ${(callRecords ?? "").split("\n").filter(Boolean).length} lines`,
+        ...processes,
+        `emend exitCode: ${exitCode}; signalCode: ${signalCode}`,
+      ].join("\n"),
+    );
+  });
   async function cleanup() {
     if (cleaned) return;
     cleaned = true;
@@ -313,9 +396,7 @@ process.stderr.write = () => {
   await writeFile(
     join(dir, "tailscale"),
     `#!/bin/sh
-trap 'exit 0' TERM
-trap ${quote(`/bin/rm -f ${quote(enteredPath)}`)} EXIT
-printf '%s %s\\n' "$$" "$*" >> ${quote(callsPath)}
+${options.holdEscalation ? "" : `trap 'exit 0' TERM\ntrap ${quote(`/bin/rm -f ${quote(enteredPath)}`)} EXIT\n`}printf '%s %s\\n' "$$" "$*" >> ${quote(callsPath)}
 if [ "$1" = status ]; then
   ${
     options.stubbornDescendant
@@ -422,42 +503,65 @@ fi
     child,
     exited,
     closed,
-    cleanup,
-    logOldPid: (pid: number) => appendFile(callsPath, `${pid} old completed call\n`),
-    reports: async () =>
-      (await readFile(reportPath, "utf8"))
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line)),
-    startedPid: async () => Number(await readFile(enteredPath, "utf8")),
-    calls,
+    track,
+    cleanup: () => track("cleanup", cleanup()),
+    logOldPid: (pid: number) => track("logOldPid", appendFile(callsPath, `${pid} old completed call\n`)),
+    reports: () =>
+      track(
+        "reports",
+        readFile(reportPath, "utf8").then((text) =>
+          text
+            .trim()
+            .split("\n")
+            .map((line) => JSON.parse(line)),
+        ),
+      ),
+    startedPid: () => track("startedPid", readFile(enteredPath, "utf8").then(rememberLauncher)),
+    calls: () => track("calls", calls()),
     configPath,
     stateDir,
-    stderr: () => readFile(stderrPath, "utf8"),
-    async stdoutError() {
-      await waitForFile(stdoutErrorPath);
-      return readFile(stdoutErrorPath, "utf8");
-    },
-    descendantPid: async () => Number(await readFile(descendantPath, "utf8")),
-    socketClosed: () => readFile(socketClosedPath, "utf8"),
-    gateEntered: () => waitForFile(enteredPath),
-    gateLeft: () => waitForFile(enteredPath, (text) => text === undefined),
-    handlerRemovedWhileHeld: () => stat(handlerRemovedPath),
-    escalationArmed: () => waitForFile(escalationArmedPath),
-    escalationAwaited: () => waitForFile(escalationAwaitedPath),
-    releaseEscalation: () => writeFile(escalationReleasePath, ""),
-    async ready() {
-      expect(await waitWhileRunning(readyLine.promise)).toBe(`emend: serving https://${name}\n`);
-    },
-    async signal(signal: NodeJS.Signals, target: "process" | "group" = "process") {
+    stderr: () => track("stderr", readFile(stderrPath, "utf8")),
+    stdoutError: () =>
+      track(
+        "stdoutError",
+        waitForFile(stdoutErrorPath).then(() => readFile(stdoutErrorPath, "utf8")),
+      ),
+    descendantPid: () => track("descendantPid", readFile(descendantPath, "utf8").then(Number)),
+    socketClosed: () => track("socketClosed", readFile(socketClosedPath, "utf8")),
+    gateEntered: () =>
+      track(
+        "gateEntered",
+        waitForFile(enteredPath, (text) => {
+          if (text === undefined) return false;
+          rememberLauncher(text);
+          return true;
+        }),
+      ),
+    handlerRemovedWhileHeld: () => track("handlerRemovedWhileHeld", stat(handlerRemovedPath)),
+    escalationArmed: () => track("escalationArmed", waitForFile(escalationArmedPath)),
+    escalationAwaited: () => track("escalationAwaited", waitForFile(escalationAwaitedPath)),
+    releaseEscalation: () => track("releaseEscalation", writeFile(escalationReleasePath, "")),
+    ready: () =>
+      track(
+        "ready",
+        waitWhileRunning(readyLine.promise).then((line) => {
+          expect(line).toBe(`emend: serving https://${name}\n`);
+        }),
+      ),
+    signal(signal: NodeJS.Signals, target: "process" | "group" = "process") {
       const count = ++signalCount;
-      const records = (text: string | undefined) => (text ?? "").split("\n").slice(0, -1);
-      process.kill(target === "group" ? -(child.pid as number) : (child.pid as number), signal);
-      await waitForFile(signalsPath, (text) => records(text).length >= count);
-      expect(records(await readFile(signalsPath, "utf8"))[count - 1]).toBe(signal);
+      return track(
+        `signal ${signal} #${count} acknowledged`,
+        (async () => {
+          const records = (text: string | undefined) => (text ?? "").split("\n").slice(0, -1);
+          process.kill(target === "group" ? -(child.pid as number) : (child.pid as number), signal);
+          await waitForFile(signalsPath, (text) => records(text).length >= count);
+          expect(records(await readFile(signalsPath, "utf8"))[count - 1]).toBe(signal);
+        })(),
+      );
     },
-    holdCleanup: () => writeFile(holdPath, ""),
-    releaseCleanup: () => writeFile(releasePath, ""),
+    holdCleanup: () => track("holdCleanup", writeFile(holdPath, "")),
+    releaseCleanup: () => track("releaseCleanup", writeFile(releasePath, "")),
   };
 }
 
@@ -530,17 +634,25 @@ test.each(["SIGTERM", "SIGHUP"] as const)(
   async (second) => {
     const f = await fixture({ timeout: true, stubbornDescendant: true, holdEscalation: true });
     await f.gateEntered();
+    const launcher = await f.startedPid();
     const descendant = await f.descendantPid();
     await f.signal("SIGTERM");
     await f.escalationArmed();
-    await f.gateLeft();
-    expect(await stopped(descendant)).toBe(false);
+    // The launcher's default SIGTERM disposition stops its pid while the descendant ignores TERM.
+    await f.track(
+      "launcher stopped",
+      pollUntil(async () => expect(await stopped(launcher)).toBe(true)),
+    );
+    expect(await f.track("descendant alive check", stopped(descendant))).toBe(false);
     // If production stops awaiting through Promise.all, this marker wait fails at the test timeout.
     await f.escalationAwaited();
     await f.signal(second);
     await f.releaseEscalation();
-    expect(await f.closed).toEqual({ code: 143, signal: null });
-    await pollUntil(async () => expect(await stopped(descendant)).toBe(true));
+    expect(await f.track("emend closed", f.closed)).toEqual({ code: 143, signal: null });
+    await f.track(
+      "descendant stopped",
+      pollUntil(async () => expect(await stopped(descendant)).toBe(true)),
+    );
     expect(await f.stderr()).toBe("");
     expect((await f.calls()).map((call) => call.args)).toEqual(["status --json"]);
     await expect(stat(join(f.stateDir, "server.json"))).rejects.toMatchObject({ code: "ENOENT" });
