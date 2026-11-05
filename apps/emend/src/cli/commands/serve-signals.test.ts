@@ -1,13 +1,43 @@
-import { execFile, spawn } from "node:child_process";
-import { constants } from "node:fs";
-import { appendFile, mkdtemp, open, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { once } from "node:events";
+import { constants, watch } from "node:fs";
+import { appendFile, type FileHandle, mkdtemp, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { build } from "esbuild";
-import { afterAll, beforeAll, expect, onTestFinished, test, vi } from "vitest";
+import { afterAll, beforeAll, expect, onTestFinished, test } from "vitest";
+import { pollUntil } from "../../test/poll-until.ts";
+
+async function watchFileUntil(path: string, matches: (text: string | undefined) => boolean, signal: AbortSignal) {
+  const changed = Promise.withResolvers<void>();
+  const check = async () => {
+    try {
+      const text = await readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return undefined;
+        throw error;
+      });
+      if (matches(text)) changed.resolve();
+    } catch (error) {
+      changed.reject(error);
+    }
+  };
+  // Watch the parent before reading: gates are created by atomic rename and may
+  // already exist by the time the test starts waiting.
+  const watcher = watch(dirname(path), () => void check());
+  watcher.on("error", changed.reject);
+  const abort = () => changed.reject(signal.reason);
+  signal.addEventListener("abort", abort, { once: true });
+  if (signal.aborted) abort();
+  void check();
+  try {
+    await changed.promise;
+  } finally {
+    watcher.close();
+    signal.removeEventListener("abort", abort);
+  }
+}
 
 const name = "hub.example.ts.net";
 let entryDir: string;
@@ -46,7 +76,18 @@ beforeAll(async () => {
           builder.onLoad({ filter: /.*/, namespace: "socket-double" }, () => ({
             contents: `
 import { EventEmitter } from "node:events";
-import { existsSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, renameSync, watch, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+function onRelease(done) {
+  const release = process.env.EMEND_TEST_RELEASE;
+  const watcher = watch(dirname(release), check);
+  function check() {
+    if (!existsSync(release)) return;
+    watcher.close();
+    done();
+  }
+  check();
+}
 class Socket extends EventEmitter {
   listening = false;
   listen(options, ready) {
@@ -56,11 +97,7 @@ class Socket extends EventEmitter {
     if (!marker) { queueMicrotask(ready); return; }
     writeFileSync(marker + ".tmp", String(process.pid));
     renameSync(marker + ".tmp", marker);
-    const timer = setInterval(() => {
-      if (!existsSync(process.env.EMEND_TEST_RELEASE)) return;
-      clearInterval(timer);
-      ready();
-    }, 5);
+    onRelease(ready);
   }
   address() { return { address: "127.0.0.1", port: 41999 }; }
   closeAllConnections() {}
@@ -70,13 +107,11 @@ class Socket extends EventEmitter {
     if (!marker) { clearInterval(this.keepAlive); this.listening = false; done(); return; }
     writeFileSync(marker + ".tmp", String(process.pid));
     renameSync(marker + ".tmp", marker);
-    const timer = setInterval(() => {
-      if (!existsSync(process.env.EMEND_TEST_RELEASE)) return;
-      clearInterval(timer);
+    onRelease(() => {
       clearInterval(this.keepAlive);
       this.listening = false;
       done();
-    }, 5);
+    });
   }
 }
 export const createServer = () => new Socket();
@@ -119,10 +154,19 @@ async function fixture(
     closedStdout?: boolean;
     stubbornDescendant?: boolean;
     keepAlive?: boolean;
+    holdEscalation?: boolean;
   } = {},
 ) {
   const phase = options.phase ?? "status";
+  const watches = new Set<AbortController>();
+  let running: ChildProcess | undefined;
+  let closed: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | undefined;
+  let stdoutReader: FileHandle | undefined;
+  let stdoutFile: FileHandle | undefined;
+  let stderrFile: FileHandle | undefined;
+  let cleaned = false;
   const dir = await mkdtemp(join(tmpdir(), "emend-serve-signals-"));
+  onTestFinished(cleanup);
   const stateDir = join(dir, "state");
   const configPath = join(dir, "config.json");
   const callsPath = join(dir, "calls");
@@ -135,14 +179,112 @@ async function fixture(
   const stdoutErrorPath = join(dir, "stdout-error");
   const descendantPath = join(dir, "descendant");
   const socketClosedPath = join(dir, "socket-closed");
+  const signalsPath = join(dir, "signals");
+  const escalationArmedPath = join(dir, "escalation-armed");
+  const escalationAwaitedPath = join(dir, "escalation-awaited");
+  const escalationReleasePath = join(dir, "escalation-release");
+  const handlerRemovedPath = join(dir, "handler-removed-while-held");
+  async function cleanup() {
+    if (cleaned) return;
+    cleaned = true;
+    try {
+      for (const abort of watches) abort.abort();
+      // Release only the currently held fakes; never replay historical pids.
+      await writeFile(releasePath, "");
+      if (running?.pid && running.exitCode === null && running.signalCode === null) killIfPresent(-running.pid);
+      await closed;
+      if (options.stubbornDescendant) {
+        const descendant = await readFile(descendantPath, "utf8").catch(() => "");
+        if (descendant) await pollUntil(async () => expect(await stopped(Number(descendant))).toBe(true));
+      }
+    } finally {
+      try {
+        await Promise.all([stdoutReader?.close(), stdoutFile?.close(), stderrFile?.close()]);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    }
+  }
   await writeFile(
     bootstrap,
     `
-import { existsSync, writeFileSync, appendFileSync } from "node:fs";
+import { existsSync, writeFileSync, appendFileSync, renameSync, watch } from "node:fs";
 import { Server } from "node:http";
 import { errorMonitor } from "node:events";
 ${options.keepAlive ? "setInterval(() => {}, 1000);" : ""}
-process.stdout.on(errorMonitor, (error) => writeFileSync(${JSON.stringify(stdoutErrorPath)}, error.code));
+${
+  options.holdEscalation
+    ? `
+const nativeSetTimeout = globalThis.setTimeout;
+const nativeWithResolvers = Promise.withResolvers;
+const nativePromiseAll = Promise.all;
+let lastPromise;
+let escalationPromise;
+let held = false;
+Promise.withResolvers = function (...args) {
+  const deferred = nativeWithResolvers.apply(this, args);
+  lastPromise = deferred.promise;
+  return deferred;
+};
+Promise.all = function (iterable) {
+  if (!held) return nativePromiseAll.call(this, iterable);
+  const promises = Array.from(iterable);
+  if (promises.includes(escalationPromise)) {
+    writeFileSync(${JSON.stringify(`${escalationAwaitedPath}.tmp`)}, "awaited");
+    renameSync(${JSON.stringify(`${escalationAwaitedPath}.tmp`)}, ${JSON.stringify(escalationAwaitedPath)});
+  }
+  return nativePromiseAll.call(this, promises);
+};
+// Production must remove its signal handlers only after the escalation wait ends.
+// Record any removal that happens while the escalation timer is held.
+function noteRemoval(event) {
+  if (!held || (event !== undefined && !["SIGINT", "SIGTERM", "SIGHUP"].includes(event))) return;
+  writeFileSync(${JSON.stringify(`${handlerRemovedPath}.tmp`)}, String(event));
+  renameSync(${JSON.stringify(`${handlerRemovedPath}.tmp`)}, ${JSON.stringify(handlerRemovedPath)});
+}
+for (const method of ["off", "removeListener", "removeAllListeners"]) {
+  const original = process[method];
+  process[method] = function (...args) {
+    noteRemoval(args[0]);
+    return original.apply(this, args);
+  };
+}
+globalThis.setTimeout = function (fn, delay, ...args) {
+  if (delay !== 1000 || !String(fn).includes("SIGKILL")) return nativeSetTimeout(fn, delay, ...args);
+  escalationPromise = lastPromise;
+  let released = false;
+  // This referenced watcher belongs to emend: an incorrect early process.exit
+  // must lose the callback and leave the detached descendant alive.
+  const watcher = watch(${JSON.stringify(dir)}, check);
+  function check() {
+    if (released || !existsSync(${JSON.stringify(escalationReleasePath)})) return;
+    released = true;
+    held = false;
+    watcher.close();
+    fn(...args);
+  }
+  held = true;
+  writeFileSync(${JSON.stringify(`${escalationArmedPath}.tmp`)}, "armed");
+  renameSync(${JSON.stringify(`${escalationArmedPath}.tmp`)}, ${JSON.stringify(escalationArmedPath)});
+  check();
+  return watcher;
+};`
+    : ""
+}
+// A later event-loop turn proves an unhandled stdout error did not terminate us.
+process.stdout.on(errorMonitor, (error) => setImmediate(() => {
+  writeFileSync(${JSON.stringify(`${stdoutErrorPath}.tmp`)}, error.code);
+  renameSync(${JSON.stringify(`${stdoutErrorPath}.tmp`)}, ${JSON.stringify(stdoutErrorPath)});
+}));
+// Observe completed signal dispatch without adding a listener that could mask
+// missing production handlers or change the default signal disposition.
+const emit = process.emit;
+process.emit = function (event, ...args) {
+  const handled = emit.call(this, event, ...args);
+  if (["SIGINT", "SIGTERM", "SIGHUP"].includes(event))
+    appendFileSync(${JSON.stringify(signalsPath)}, event + "\\n");
+  return handled;
+};
 const listen = Server.prototype.listen;
 Server.prototype.listen = function (...args) {
   this.once("error", (error) => writeFileSync(${JSON.stringify(listenErrorPath)}, error.code ?? "unknown"));
@@ -163,7 +305,7 @@ process.stderr.write = () => {
   const gate = `
     printf '%s' "$$" > ${quote(`${enteredPath}.tmp`)}
     /bin/mv ${quote(`${enteredPath}.tmp`)} ${quote(enteredPath)}
-    while [ ! -f ${quote(releasePath)} ]; do :; done
+    while [ ! -f ${quote(releasePath)} ] && [ -d ${quote(dir)} ]; do :; done
     /bin/rm -f ${quote(enteredPath)}
   `;
   await writeFile(configPath, "{}");
@@ -177,8 +319,8 @@ printf '%s %s\\n' "$$" "$*" >> ${quote(callsPath)}
 if [ "$1" = status ]; then
   ${
     options.stubbornDescendant
-      ? `/bin/sh -c ${quote(`trap '' TERM\nprintf '%s' "$$" > ${quote(`${descendantPath}.tmp`)}\n/bin/mv ${quote(`${descendantPath}.tmp`)} ${quote(descendantPath)}\nwhile [ ! -f ${quote(releasePath)} ]; do :; done`)} &
-  while [ ! -f ${quote(descendantPath)} ]; do :; done`
+      ? `/bin/sh -c ${quote(`trap '' TERM\nprintf '%s' "$$" > ${quote(`${descendantPath}.tmp`)}\n/bin/mv ${quote(`${descendantPath}.tmp`)} ${quote(descendantPath)}\nwhile [ ! -f ${quote(releasePath)} ] && [ -d ${quote(dir)} ]; do :; done`)} &
+  while [ ! -f ${quote(descendantPath)} ] && [ -d ${quote(dir)} ]; do :; done`
       : ""
   }
   ${options.timeout ? gate : `printf '%s\\n' '${JSON.stringify({ BackendState: "Running", Self: { DNSName: name } })}'`}
@@ -208,12 +350,10 @@ fi
   // Own both ends of an OS pipe so closing the reader reaches the writer itself.
   if (options.closedStdout)
     await promisify(execFile)("/usr/bin/mkfifo", [stdoutPath], { env: { PATH: process.env.PATH, LC_ALL: "C" } });
-  const stdoutReader = options.closedStdout
-    ? await open(stdoutPath, constants.O_RDONLY | constants.O_NONBLOCK)
-    : undefined;
-  const stdoutFile = await open(stdoutPath, "w");
-  const stderrFile = await open(stderrPath, "w");
-  // Files also preserve writes when the terminal's pipe has gone away.
+  stdoutReader = options.closedStdout ? await open(stdoutPath, constants.O_RDONLY | constants.O_NONBLOCK) : undefined;
+  stdoutFile = options.closedStdout ? await open(stdoutPath, "w") : undefined;
+  stderrFile = await open(stderrPath, "w");
+  // Preserve stderr even when the terminal's pipe has gone away.
   // A separate group lets the test signal the entire job without signalling Vitest.
   const child = spawn(
     process.execPath,
@@ -221,7 +361,7 @@ fi
     {
       cwd: dir,
       detached: true,
-      stdio: ["ignore", stdoutFile.fd, stderrFile.fd],
+      stdio: ["ignore", stdoutFile?.fd ?? "pipe", stderrFile.fd],
       env: {
         EMEND_HOME: stateDir,
         HOME: dir,
@@ -239,46 +379,48 @@ fi
       },
     },
   );
-  let spawnError: Error | undefined;
-  child.on("error", (error) => {
-    spawnError = error;
-  });
-  const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+  running = child;
+  const exited = once(child, "exit").then(([code, signal]) => ({ code, signal }));
+  // Some cases only await close; still observe spawn failures immediately.
+  void exited.catch(() => {});
+  closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
     child.once("close", (code, signal) => resolve({ code, signal }));
+    child.once("error", () => resolve({ code: child.exitCode, signal: child.signalCode }));
   });
-  await stdoutReader?.close();
-  let cleaned = false;
-  const cleanup = async () => {
-    if (cleaned) return;
-    cleaned = true;
-    await writeFile(releasePath, "");
-    if (child.pid && child.exitCode === null && child.signalCode === null) killIfPresent(-child.pid);
-    // Release the fake we still hold at the gate. Never replay historical pids:
-    // an exited fake's pid may now belong to an unrelated process.
-    if (phase !== "close" && phase !== "listen") {
-      await vi.waitFor(
-        async () => {
-          await expect(stat(enteredPath)).rejects.toMatchObject({ code: "ENOENT" });
-        },
-        { timeout: 2_000, interval: 5 },
-      );
+  const readyLine = Promise.withResolvers<string>();
+  let stdout = "";
+  child.stdout?.on("data", (chunk: Buffer) => {
+    stdout += chunk.toString("utf8");
+    if (stdout.includes("\n")) readyLine.resolve(stdout);
+  });
+  const waitWhileRunning = async <T>(pending: Promise<T>): Promise<T> =>
+    Promise.race([
+      pending,
+      exited.then(async ({ code, signal }) => {
+        const stderr = await readFile(stderrPath, "utf8");
+        const listenError = await readFile(listenErrorPath, "utf8").catch(() => "");
+        throw new Error(`emend exited before readiness: ${code}/${signal}: ${stderr} (listen ${listenError})`);
+      }),
+    ]);
+  const waitForFile = async (
+    path: string,
+    matches: (text: string | undefined) => boolean = (text) => text !== undefined,
+  ) => {
+    const abort = new AbortController();
+    watches.add(abort);
+    try {
+      await waitWhileRunning(watchFileUntil(path, matches, abort.signal));
+    } finally {
+      abort.abort();
+      watches.delete(abort);
     }
-    await closed;
-    if (options.stubbornDescendant) {
-      const descendant = await readFile(descendantPath, "utf8").catch(() => "");
-      if (descendant)
-        await vi.waitFor(async () => expect(await stopped(Number(descendant))).toBe(true), {
-          timeout: 2_000,
-          interval: 10,
-        });
-    }
-    await stdoutFile.close();
-    await stderrFile.close();
-    await rm(dir, { recursive: true, force: true });
   };
-  onTestFinished(cleanup);
+  await stdoutReader?.close();
+  stdoutReader = undefined;
+  let signalCount = 0;
   return {
     child,
+    exited,
     closed,
     cleanup,
     logOldPid: (pid: number) => appendFile(callsPath, `${pid} old completed call\n`),
@@ -292,36 +434,29 @@ fi
     configPath,
     stateDir,
     stderr: () => readFile(stderrPath, "utf8"),
-    stdoutError: () => readFile(stdoutErrorPath, "utf8"),
+    async stdoutError() {
+      await waitForFile(stdoutErrorPath);
+      return readFile(stdoutErrorPath, "utf8");
+    },
     descendantPid: async () => Number(await readFile(descendantPath, "utf8")),
     socketClosed: () => readFile(socketClosedPath, "utf8"),
-    async gateEntered() {
-      await vi.waitFor(
-        async () => {
-          if (spawnError) throw spawnError;
-          const listenError = await readFile(listenErrorPath, "utf8").catch(() => "");
-          expect(child.exitCode, `${await readFile(stderrPath, "utf8")} (listen ${listenError})`).toBeNull();
-          await stat(enteredPath);
-        },
-        { timeout: 3_000, interval: 5 },
-      );
-    },
+    gateEntered: () => waitForFile(enteredPath),
+    gateLeft: () => waitForFile(enteredPath, (text) => text === undefined),
+    handlerRemovedWhileHeld: () => stat(handlerRemovedPath),
+    escalationArmed: () => waitForFile(escalationArmedPath),
+    escalationAwaited: () => waitForFile(escalationAwaitedPath),
+    releaseEscalation: () => writeFile(escalationReleasePath, ""),
     async ready() {
-      await vi.waitFor(
-        async () => {
-          if (spawnError) throw spawnError;
-          const stderr = await readFile(stderrPath, "utf8");
-          const listenError = await readFile(listenErrorPath, "utf8").catch(() => "");
-          expect(
-            await readFile(stdoutPath, "utf8"),
-            `${stderr} (listen ${listenError}, exit ${child.exitCode}, signal ${child.signalCode})`,
-          ).toBe(`emend: serving https://${name}\n`);
-        },
-        { timeout: 3_000, interval: 5 },
-      );
+      expect(await waitWhileRunning(readyLine.promise)).toBe(`emend: serving https://${name}\n`);
+    },
+    async signal(signal: NodeJS.Signals, target: "process" | "group" = "process") {
+      const count = ++signalCount;
+      const records = (text: string | undefined) => (text ?? "").split("\n").slice(0, -1);
+      process.kill(target === "group" ? -(child.pid as number) : (child.pid as number), signal);
+      await waitForFile(signalsPath, (text) => records(text).length >= count);
+      expect(records(await readFile(signalsPath, "utf8"))[count - 1]).toBe(signal);
     },
     holdCleanup: () => writeFile(holdPath, ""),
-    cleanupStarted: () => stat(enteredPath),
     releaseCleanup: () => writeFile(releasePath, ""),
   };
 }
@@ -335,13 +470,11 @@ test.each([
   const f = await fixture();
   await f.ready();
   expect(f.child.pid).toBeTypeOf("number");
-  const pid = f.child.pid as number;
   await f.holdCleanup();
-  process.kill(target === "group" ? -pid : pid, first);
+  await f.signal(first, target);
   // The fake holds the cleanup status call so the next real signal lands during it.
-  await vi.waitFor(() => f.cleanupStarted(), { timeout: 2_000, interval: 5 });
-  await delay(10);
-  process.kill(target === "group" ? -pid : pid, second);
+  await f.gateEntered();
+  await f.signal(second, target);
   await f.releaseCleanup();
   expect(await f.closed).toEqual({ code: 0, signal: null });
   expect(await f.stderr()).toBe("");
@@ -354,19 +487,14 @@ test.each([
 });
 
 test("a detached Tailscale child is still killed by the ten-second timeout", async () => {
-  const started = performance.now();
   const f = await fixture({ timeout: true });
-  await vi.waitFor(async () => expect(await f.calls(), await f.stderr()).toHaveLength(1), {
-    timeout: 3_000,
-    interval: 5,
-  });
+  await f.gateEntered();
+  expect(await f.calls(), await f.stderr()).toHaveLength(1);
   const pid = (await f.calls())[0]?.pid;
   expect(pid).toBeTypeOf("number");
   // A negative pid addresses the group: this must be the fake's own group, not emend's.
   expect(() => process.kill(-(pid as number), 0)).not.toThrow();
   expect(await f.closed).toEqual({ code: 1, signal: null });
-  expect(performance.now() - started).toBeGreaterThanOrEqual(9_900);
-  expect(performance.now() - started).toBeLessThan(12_000);
   expect(await f.stderr()).toBe("emend: tailscale did not answer within 10 seconds.\n");
   expect(() => process.kill(pid as number, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
 }, 15_000);
@@ -375,12 +503,9 @@ test("startup SIGTERM waits for the referenced escalation after the launcher exi
   const f = await fixture({ timeout: true, stubbornDescendant: true });
   await f.gateEntered();
   const descendant = await f.descendantPid();
-  const started = performance.now();
   process.kill(f.child.pid as number, "SIGTERM");
   expect(await f.closed).toEqual({ code: 143, signal: null });
-  expect(performance.now() - started).toBeGreaterThanOrEqual(900);
-  expect(performance.now() - started).toBeLessThan(1_500);
-  await vi.waitFor(async () => expect(await stopped(descendant)).toBe(true), { timeout: 500, interval: 10 });
+  await pollUntil(async () => expect(await stopped(descendant)).toBe(true));
   expect(await f.stderr()).toBe("");
   expect((await f.calls()).map((call) => call.args)).toEqual(["status --json"]);
   await expect(stat(join(f.stateDir, "server.json"))).rejects.toMatchObject({ code: "ENOENT" });
@@ -389,10 +514,9 @@ test("startup SIGTERM waits for the referenced escalation after the launcher exi
 test("SIGTERM during listen closes the late server and exits 143", async () => {
   const f = await fixture({ phase: "listen", socketDouble: true });
   await f.gateEntered();
-  process.kill(f.child.pid as number, "SIGTERM");
-  await delay(100);
+  await f.signal("SIGTERM");
   await f.releaseCleanup();
-  await vi.waitFor(() => expect(f.child.exitCode).toBe(143), { timeout: 2_000, interval: 10 });
+  expect(await f.exited).toEqual({ code: 143, signal: null });
   expect(await f.closed).toEqual({ code: 143, signal: null });
   expect(await f.socketClosed()).toBe("closed");
   expect(await f.stderr()).toBe("");
@@ -404,24 +528,23 @@ test("SIGTERM during listen closes the late server and exits 143", async () => {
 test.each(["SIGTERM", "SIGHUP"] as const)(
   "a second %s while startup escalation is pending cannot leave a descendant alive",
   async (second) => {
-    const f = await fixture({ timeout: true, stubbornDescendant: true });
+    const f = await fixture({ timeout: true, stubbornDescendant: true, holdEscalation: true });
     await f.gateEntered();
     const descendant = await f.descendantPid();
-    const started = performance.now();
-    process.kill(f.child.pid as number, "SIGTERM");
-    await vi.waitFor(() => expect(f.cleanupStarted()).rejects.toMatchObject({ code: "ENOENT" }), {
-      timeout: 500,
-      interval: 5,
-    });
-    await delay(100);
+    await f.signal("SIGTERM");
+    await f.escalationArmed();
+    await f.gateLeft();
     expect(await stopped(descendant)).toBe(false);
-    process.kill(f.child.pid as number, second);
+    // If production stops awaiting through Promise.all, this marker wait fails at the test timeout.
+    await f.escalationAwaited();
+    await f.signal(second);
+    await f.releaseEscalation();
     expect(await f.closed).toEqual({ code: 143, signal: null });
-    expect(performance.now() - started).toBeLessThan(1_500);
-    await vi.waitFor(async () => expect(await stopped(descendant)).toBe(true), { timeout: 500, interval: 10 });
+    await pollUntil(async () => expect(await stopped(descendant)).toBe(true));
     expect(await f.stderr()).toBe("");
     expect((await f.calls()).map((call) => call.args)).toEqual(["status --json"]);
     await expect(stat(join(f.stateDir, "server.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(f.handlerRemovedWhileHeld()).rejects.toMatchObject({ code: "ENOENT" });
   },
 );
 
@@ -434,7 +557,7 @@ test.each([
   await f.gateEntered();
   const launcher = await f.startedPid();
   process.kill(f.child.pid as number, signal);
-  await vi.waitFor(() => expect(f.child.exitCode).toBe(code), { timeout: 2_500, interval: 10 });
+  expect(await f.exited).toEqual({ code, signal: null });
   expect(await f.closed).toEqual({ code, signal: null });
   expect(await stopped(launcher)).toBe(true);
   expect(await f.stderr()).toBe("");
@@ -449,8 +572,7 @@ test.each([false, true])(
     await f.gateEntered();
     const config = JSON.parse(await readFile(f.configPath, "utf8"));
     expect(config.Web[`${name}:443`].Handlers["/"].Proxy).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
-    process.kill(f.child.pid as number, "SIGTERM");
-    await delay(25);
+    await f.signal("SIGTERM");
     await f.releaseCleanup();
     expect(await f.closed).toEqual({ code: 0, signal: null });
     expect(await f.stderr()).toBe("");
@@ -475,9 +597,7 @@ test.each([false, true])(
     const f = await fixture({ phase: "bg", socketDouble, closedStdout: true });
     await f.gateEntered();
     await f.releaseCleanup();
-    await vi.waitFor(async () => expect(await f.stdoutError()).toBe("EPIPE"), { timeout: 2_000, interval: 5 });
-    // The error event is asynchronous; give an uncaught exception time to exit.
-    await delay(100);
+    expect(await f.stdoutError()).toBe("EPIPE");
     expect(f.child.exitCode, await f.stderr()).toBeNull();
     expect((await stat(join(f.stateDir, "server.json"))).isFile()).toBe(true);
     process.kill(f.child.pid as number, "SIGTERM");
@@ -495,20 +615,12 @@ test.each([
   ["SIGHUP", 129],
 ] as const)("%s before listening exits %s and kills the detached status call", async (signal, code) => {
   const f = await fixture({ timeout: true });
-  let fakePid = 0;
-  await vi.waitFor(
-    async () => {
-      fakePid = await f.startedPid();
-      expect(fakePid).toBeGreaterThan(0);
-    },
-    { timeout: 3_000, interval: 5 },
-  );
+  await f.gateEntered();
+  const fakePid = await f.startedPid();
+  expect(fakePid).toBeGreaterThan(0);
   process.kill(f.child.pid as number, signal);
   expect(await f.closed).toEqual({ code, signal: null });
-  await vi.waitFor(() => expect(() => process.kill(fakePid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" })), {
-    timeout: 2_000,
-    interval: 5,
-  });
+  await pollUntil(() => expect(() => process.kill(fakePid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" })));
   expect(await f.stderr()).toBe("");
   expect((await f.calls()).map((call) => call.args)).toEqual(["status --json"]);
   await expect(stat(join(f.stateDir, "server.json"))).rejects.toMatchObject({ code: "ENOENT" });
@@ -522,11 +634,9 @@ test.each([
 ] as const)("a second signal during %s (%s then %s) lets cleanup finish", async (phase, first, second) => {
   const f = await fixture({ phase, socketDouble: true });
   await f.ready();
-  const pid = f.child.pid as number;
-  process.kill(-pid, first);
-  await vi.waitFor(() => f.cleanupStarted(), { timeout: 2_000, interval: 5 });
-  await delay(10);
-  process.kill(-pid, second);
+  await f.signal(first, "group");
+  await f.gateEntered();
+  await f.signal(second, "group");
   await f.releaseCleanup();
   expect(await f.closed).toEqual({ code: 0, signal: null });
   expect(await f.stderr()).toBe("");
@@ -552,8 +662,8 @@ test("teardown never signals a completed call's old pid", async () => {
   const f = await fixture({ socketDouble: true });
   await f.ready();
   // This owned sentinel stands in for a pid reused since an earlier fake exited.
-  const sentinel = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
-    stdio: "ignore",
+  const sentinel = spawn(process.execPath, ["-e", 'process.stdin.on("data", () => process.stdout.write("alive\\n"))'], {
+    stdio: ["pipe", "pipe", "ignore"],
     env: { PATH: process.env.PATH, HOME: entryDir, LC_ALL: "C" },
   });
   const done = new Promise<void>((resolve) => sentinel.once("close", () => resolve()));
@@ -565,8 +675,10 @@ test("teardown never signals a completed call's old pid", async () => {
   process.kill(f.child.pid as number, "SIGTERM");
   await f.closed;
   await f.cleanup();
-  // Let close events from any erroneous teardown kill arrive.
-  await delay(50);
+  // An answer after teardown proves the owned sentinel is still running.
+  const alive = once(sentinel.stdout, "data");
+  sentinel.stdin.write("ping\n");
+  expect((await alive)[0].toString()).toBe("alive\n");
   expect(sentinel.signalCode).toBeNull();
   expect(() => process.kill(sentinel.pid as number, 0)).not.toThrow();
 });

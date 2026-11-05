@@ -7,11 +7,7 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const helper = "apps/emend/src/test/poll-until.ts";
 const webSetup = "apps/web/src/test/setup.ts";
-const rawWaitAllowed = new Set([
-  helper,
-  "apps/emend/src/cli/tailscale-process.test.ts",
-  "apps/emend/src/cli/commands/serve-signals.test.ts",
-]);
+const rawWaitAllowed = new Set([helper]);
 const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
 // Keep literals atomic so punctuation in strings, regexes and comments cannot end a call.
@@ -79,7 +75,7 @@ function check(path: string, source: string): void {
     const computed = parts[i - 1] === "[" && parts[i + 1] === "]";
     const receiver = parts[i - 2];
     const owner = aliases.get(receiver) ?? receiver;
-    // vi.waitFor, vi.waitUntil and expect.poll default to 1000 ms; only the helper and step-7 files may call them.
+    // vi.waitFor, vi.waitUntil and expect.poll default to 1000 ms; only the helper may call them.
     const raw =
       (["waitFor", "waitUntil"].includes(identifier) && ["vi", "vitest"].includes(owner)) ||
       (identifier === "poll" && owner === "expect");
@@ -172,12 +168,14 @@ test("the guard accepts inherited deadlines and only the named exceptions", () =
     "self.addEventListener('install', (event) => event.waitUntil(ready()));",
     "const pollers = { poll: 1 }; pollers.poll(); waiter.waitUntil;",
   ]) check("apps/web/src/synthetic.test.tsx", source);
-  for (const path of rawWaitAllowed) {
-    for (const source of [
-      "vi.waitFor(() => ready(), { timeout: 1000 });",
-      "await expect.poll(() => value).toBe(1);",
-      "await vi.waitUntil(() => ready());",
-    ]) check(path, source);
+  for (const source of [
+    "vi.waitFor(() => ready(), { timeout: 1000 });",
+    "await expect.poll(() => value).toBe(1);",
+    "await vi.waitUntil(() => ready());",
+  ]) {
+    check(helper, source);
+    assert.throws(() => check("apps/emend/src/cli/tailscale-process.test.ts", source));
+    assert.throws(() => check("apps/emend/src/cli/commands/serve-signals.test.ts", source));
   }
   check(webSetup, "beforeEach(({ task }) => configure({ asyncUtilTimeout: task.timeout }));");
   for (const source of ["vi.waitFor(() => ready());", "expect.poll(() => value);", "vi.waitUntil(() => ready());"])
