@@ -108,10 +108,8 @@ test("built JS worker highlights TypeScript and a language loaded late without i
         <DiffView fileDiff={ts} diffStyle="split" annotations={[]} selected={null} onSelect={() => {}} />
       </DiffWorkers>,
     );
-    await waitFor(
-      () =>
-        expect(responses.some((response) => response.type === "success" && response.requestType === "diff")).toBe(true),
-      { timeout: 10000 },
+    await waitFor(() =>
+      expect(responses.some((response) => response.type === "success" && response.requestType === "diff")).toBe(true),
     );
     await waitFor(() =>
       expect(
@@ -128,14 +126,12 @@ test("built JS worker highlights TypeScript and a language loaded late without i
         <DiffView fileDiff={late} diffStyle="unified" annotations={[]} selected={null} onSelect={() => {}} />
       </DiffWorkers>,
     );
-    await waitFor(
-      () =>
-        expect(
-          responses
-            .slice(initialResponses)
-            .some((response) => response.type === "success" && response.requestType === "diff"),
-        ).toBe(true),
-      { timeout: 10000 },
+    await waitFor(() =>
+      expect(
+        responses
+          .slice(initialResponses)
+          .some((response) => response.type === "success" && response.requestType === "diff"),
+      ).toBe(true),
     );
     await waitFor(() => {
       const shadow = view.container.querySelector("diffs-container")?.shadowRoot;

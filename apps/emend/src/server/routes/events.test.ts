@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DeviceList, type ReviewEvent as EventPayload, PublishResponse, ReviewEvent } from "@emend/contract";
 import { and, eq } from "drizzle-orm";
-import { expect, test, vi } from "vitest";
+import { expect, onTestFinished, test, vi } from "vitest";
 import { deliveries, devices } from "../../db/schema.ts";
 import { createToken, SESSION_MS } from "../auth/tokens.ts";
 import { error, mailboxFixture } from "../mailbox/test-support.ts";
@@ -170,7 +170,9 @@ test.each([0, 25])(
     const f = await mailboxFixture();
     const observations: Promise<void>[] = [];
     const received: EventPayload[] = [];
+    const waiting = Promise.withResolvers<void>();
     const unsubscribe = f.deps.events?.subscribe(f.ownerId, null, (event) => {
+      if (event.type === "waiting" && event.reviewId === f.reviewId) waiting.resolve();
       if (event.type !== "claimed" && event.type !== "confirmed") return;
       received.push(event);
       observations.push(
@@ -184,37 +186,38 @@ test.each([0, 25])(
         }),
       );
     });
-    try {
-      const send = () => f.send({ revision: 1, kind: "go", instruction: "Synthetic instruction" });
-      if (!waitSeconds) await send();
-      const take = f.take(waitSeconds);
-      if (waitSeconds) {
-        await vi.waitFor(() => expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true));
-        await send();
-      }
-      const result = await take;
-      if (result.kind === "pending") throw new Error("missing delivery");
-      expect(await f.take()).toMatchObject({ kind: "pending" });
-      await error(
-        await f.request(`/deliveries/${result.deliveryId}/confirm`, "POST", undefined, "stranger"),
-        404,
-        "not_found",
-      );
-      const confirm = await f.request(`/deliveries/${result.deliveryId}/confirm`, "POST", undefined, "agent");
-      expect(confirm.status).toBe(204);
-      await error(
-        await f.request(`/deliveries/${result.deliveryId}/confirm`, "POST", undefined, "agent"),
-        404,
-        "not_found",
-      );
-      expect(received).toEqual([
-        { type: "claimed", reviewId: f.reviewId, revision: 1 },
-        { type: "confirmed", reviewId: f.reviewId, revision: 1, deliveryId: result.deliveryId },
-      ]);
-      await Promise.all(observations);
-    } finally {
+    // A waiting event that never arrives ends the test by timeout without unwinding; onTestFinished still runs.
+    onTestFinished(async () => {
       unsubscribe?.();
       await f.cleanup();
+    });
+    const send = () => f.send({ revision: 1, kind: "go", instruction: "Synthetic instruction" });
+    if (!waitSeconds) await send();
+    const take = f.take(waitSeconds);
+    if (waitSeconds) {
+      await waiting.promise;
+      expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
+      await send();
     }
+    const result = await take;
+    if (result.kind === "pending") throw new Error("missing delivery");
+    expect(await f.take()).toMatchObject({ kind: "pending" });
+    await error(
+      await f.request(`/deliveries/${result.deliveryId}/confirm`, "POST", undefined, "stranger"),
+      404,
+      "not_found",
+    );
+    const confirm = await f.request(`/deliveries/${result.deliveryId}/confirm`, "POST", undefined, "agent");
+    expect(confirm.status).toBe(204);
+    await error(
+      await f.request(`/deliveries/${result.deliveryId}/confirm`, "POST", undefined, "agent"),
+      404,
+      "not_found",
+    );
+    expect(received).toEqual([
+      { type: "claimed", reviewId: f.reviewId, revision: 1 },
+      { type: "confirmed", reviewId: f.reviewId, revision: 1, deliveryId: result.deliveryId },
+    ]);
+    await Promise.all(observations);
   },
 );

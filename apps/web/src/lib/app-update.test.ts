@@ -91,7 +91,9 @@ function setup({ controlled = true, production = true, clock = 1_000_000 } = {})
     },
     async started() {
       store.start();
-      await vi.waitFor(() => expect(container.registration.update).toHaveBeenCalled());
+      await container.register.mock.results[0]?.value;
+      expect(container.registration.update).toHaveBeenCalled();
+      await container.registration.update.mock.results[0]?.value.catch(() => {});
       await new Promise((resolve) => setTimeout(resolve, 0));
     },
   };
@@ -132,8 +134,14 @@ test("updates are unsupported without a service worker", () => {
 test("a registration failure keeps the app usable and reports an error", async () => {
   const t = setup();
   t.container.register.mockRejectedValueOnce(new Error("blocked"));
+  const failed = Promise.withResolvers<void>();
+  const unsubscribe = t.store.subscribe(() => {
+    if (t.store.getSnapshot().state === "error") failed.resolve();
+  });
   t.store.start();
-  await vi.waitFor(() => expect(t.store.getSnapshot().state).toBe("error"));
+  await failed.promise;
+  unsubscribe();
+  expect(t.store.getSnapshot().state).toBe("error");
   expect(t.store.getSnapshot().reason).toBe("the update worker could not be registered");
 });
 
@@ -152,11 +160,11 @@ test("returning to the tab checks at most once every 60 seconds", async () => {
   expect(t.registration.update).toHaveBeenCalledTimes(1);
   t.document.visibilityState = "visible";
   t.document.dispatchEvent(new Event("visibilitychange"));
-  await vi.waitFor(() => expect(t.registration.update).toHaveBeenCalledTimes(2));
+  expect(t.registration.update).toHaveBeenCalledTimes(2);
   await flush();
   t.time.now += RETURN_CHECK_INTERVAL_MS;
   t.page.dispatchEvent(pageshow(true));
-  await vi.waitFor(() => expect(t.registration.update).toHaveBeenCalledTimes(3));
+  expect(t.registration.update).toHaveBeenCalledTimes(3);
 });
 
 test("checkForUpdate runs on demand, once at a time", async () => {
@@ -180,7 +188,7 @@ test("a failing start or return check stays silent; only the button shows the er
   t.time.now += RETURN_CHECK_INTERVAL_MS;
   t.registration.update.mockRejectedValueOnce(new Error("offline"));
   t.page.dispatchEvent(pageshow(true));
-  await vi.waitFor(() => expect(t.registration.update).toHaveBeenCalledTimes(3));
+  expect(t.registration.update).toHaveBeenCalledTimes(3);
   await flush();
   expect(t.store.getSnapshot()).toEqual({ state: "current", reason: null, checkedAt: 1_000_000 });
   expect(t.states).not.toContain("error");
@@ -217,8 +225,14 @@ test("a worker waiting at start is available at once, before the check ends", as
   const t = setup();
   t.registration.waiting = new FakeWorker();
   t.registration.update.mockImplementation(() => new Promise(() => {}));
+  const available = Promise.withResolvers<void>();
+  const unsubscribe = t.store.subscribe(() => {
+    if (t.store.getSnapshot().state === "available") available.resolve();
+  });
   t.store.start();
-  await vi.waitFor(() => expect(t.store.getSnapshot().state).toBe("available"));
+  await available.promise;
+  unsubscribe();
+  expect(t.store.getSnapshot().state).toBe("available");
   expect(t.states).not.toContain("checking");
 });
 

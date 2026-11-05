@@ -16,7 +16,7 @@
     "check:package": "node scripts/check-package.ts",
     "check:budget": "node scripts/check-budget.ts",
     "check:sync": "node scripts/check-sync.ts",
-    "test:harness": "node --test scripts/check-budget.test.ts scripts/check-sync.test.ts scripts/enforce-subagent-model.test.ts scripts/install-local.test.ts scripts/release.test.ts scripts/release-workflow.test.ts scripts/verify-layout.test.ts bin/lib/wt/*.test.ts",
+    "test:harness": "node --test scripts/check-budget.test.ts scripts/check-sync.test.ts scripts/enforce-subagent-model.test.ts scripts/install-local.test.ts scripts/release.test.ts scripts/release-workflow.test.ts scripts/verify-layout.test.ts scripts/polling-waits.test.ts bin/lib/wt/*.test.ts",
     "verify:static": "pnpm lint && pnpm typecheck && pnpm check:sync",
     "verify:test": "vitest run",
     "verify:build": "pnpm build && pnpm check:package && pnpm check:budget",

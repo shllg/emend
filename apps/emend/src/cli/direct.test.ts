@@ -9,6 +9,7 @@ import * as client from "../db/client.ts";
 import { instances, owners, reviews, revisions } from "../db/schema.ts";
 import { run } from "../main.ts";
 import { startServer } from "../server/serve.ts";
+import { pollUntil } from "../test/poll-until.ts";
 import { deliverFeedback, takeFeedback } from "./commands/wait.ts";
 import { directFixture } from "./direct-test-support.ts";
 import { resolveTarget } from "./target.ts";
@@ -140,7 +141,7 @@ test("two direct waits claim a later reviewer Send only once and clear their wai
     server.db.read((q) =>
       q.values(sql`select id from agent_waiters where owner_id = ${server.ownerId} and review_id = ${result.reviewId}`),
     );
-  await vi.waitFor(async () => expect(await rows()).toHaveLength(2));
+  await pollUntil(async () => expect(await rows()).toHaveLength(2));
   const inbox = InboxList.parse(await (await server.request("/reviews")).json());
   expect(inbox.items[0]?.agentWaiting).toBe(true);
   expect(
@@ -282,13 +283,13 @@ test("direct wait renews every ten seconds, reports progress, and removes its ro
         q.values<[number]>(sql`select expires_at from agent_waiters where owner_id = ${server.ownerId}`),
       )
     )[0]?.[0];
-  await vi.waitFor(async () => expect(await expiry()).toEqual(expect.any(Number)));
+  await pollUntil(async () => expect(await expiry()).toEqual(expect.any(Number)));
   try {
     const initial = await expiry();
-    await vi.waitFor(() => expect(vi.getTimerCount()).toBeGreaterThan(0));
+    await pollUntil(() => expect(vi.getTimerCount()).toBeGreaterThan(0));
     for (let i = 0; i < 25; i++) {
       await vi.advanceTimersByTimeAsync(1000);
-      await vi.waitFor(() => expect(vi.getTimerCount()).toBeGreaterThan(0), { interval: 1 });
+      await pollUntil(() => expect(vi.getTimerCount()).toBeGreaterThan(0), { interval: 1 });
     }
     expect(await expiry()).toBeGreaterThan(initial ?? 0);
     expect(progress).toHaveBeenCalledWith(25);
@@ -372,7 +373,7 @@ test("a listening server started after a direct wait records the claimed Send th
     signal: controller.signal,
   }).catch((error: unknown) => error);
   try {
-    await vi.waitFor(async () =>
+    await pollUntil(async () =>
       expect(
         await reviewer.db.read((q) => q.values(sql`select id from agent_waiters where owner_id = ${reviewer.ownerId}`)),
       ).toHaveLength(1),

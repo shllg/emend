@@ -590,7 +590,7 @@ test("Refresh retries a failed immutable file query and skips a loaded one", asy
   await waitFor(() => expect(failing).toHaveBeenCalledOnce());
   fireEvent.keyDown(screen.getByRole("button", { name: "More" }), { key: "ArrowDown" });
   fireEvent.click(within(await screen.findByRole("menu", { name: "More" })).getByRole("menuitem", { name: "Refresh" }));
-  await waitFor(() => expect(failing).toHaveBeenCalledTimes(2), { timeout: 5000 });
+  await waitFor(() => expect(failing).toHaveBeenCalledTimes(2));
   expect(loadedFetch).not.toHaveBeenCalled();
   stopFailed();
   stopLoaded();
@@ -605,7 +605,7 @@ test("Refresh refetches by itself when the new stream does not open", async () =
   const before = reviewCalls();
   fireEvent.keyDown(screen.getByRole("button", { name: "More" }), { key: "ArrowDown" });
   fireEvent.click(within(await screen.findByRole("menu", { name: "More" })).getByRole("menuitem", { name: "Refresh" }));
-  await waitFor(() => expect(reviewCalls()).toBe(before + 1), { timeout: 5000 });
+  await waitFor(() => expect(reviewCalls()).toBe(before + 1));
 });
 
 test("the desktop header has a Refresh button on every page that has the frame", async () => {
@@ -1238,6 +1238,18 @@ test("resuming a placed reply focuses its single thread composer and save clears
   expect(localStorage.getItem(draftKey(id, draftTarget, id))).toBeNull();
 });
 
+function queriesIdle() {
+  if (client.isFetching() === 0) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const unsubscribe = client.getQueryCache().subscribe(() => {
+      if (client.isFetching() === 0) {
+        unsubscribe();
+        resolve();
+      }
+    });
+  });
+}
+
 function navigationFixture({ cold = false, threads = true, unplaced = false } = {}) {
   let refresh = 0;
   const delayed = cold ? Promise.withResolvers<Response>() : undefined;
@@ -1260,9 +1272,11 @@ function navigationFixture({ cold = false, threads = true, unplaced = false } = 
   });
   const fallback = fetchMock.getMockImplementation();
   let requests = 0;
+  let requested = Promise.withResolvers<void>();
   fetchMock.mockImplementation(async (path: string, init?: RequestInit) => {
     if (path.endsWith("/revisions/1")) {
       requests++;
+      requested.resolve();
       if (requests === 1 && delayed) return delayed.promise;
       return Response.json(current());
     }
@@ -1274,10 +1288,13 @@ function navigationFixture({ cold = false, threads = true, unplaced = false } = 
     async update() {
       refresh++;
       const before = requests;
+      requested = Promise.withResolvers<void>();
       await act(async () => {
         Events.opened[0]?.emit("thread", { reviewId: id, revision: 1, threadId: id });
-        await vi.waitFor(() => expect(requests).toBeGreaterThan(before));
-        await vi.waitFor(() => expect(client.isFetching()).toBe(0));
+        await requested.promise;
+        expect(requests).toBeGreaterThan(before);
+        await queriesIdle();
+        expect(client.isFetching()).toBe(0);
       });
       expect(
         client.getQueryData<{ writeup: { sections: { label: string }[] } }>(["revision", id, 1])?.writeup.sections[0]
@@ -1401,7 +1418,8 @@ test.each([false, true])(
     }
     await act(async () => {
       response.resolve(Response.json({ ...cached, threads: [thread] }));
-      await vi.waitFor(() => expect(client.isFetching()).toBe(0));
+      await queriesIdle();
+      expect(client.isFetching()).toBe(0);
     });
     if (switchTab) {
       expect(history.location.search).toContain("tab=comments");
@@ -1419,7 +1437,7 @@ test.each([false, true])(
         expect(scroll.mock.instances.some((node) => (node as HTMLElement).id === "html-doc-seed.html")).toBe(true),
       );
     }
-    expect(document.getElementById(`thread-${id}`)).not.toBeNull();
+    await waitFor(() => expect(document.getElementById(`thread-${id}`)).not.toBeNull());
   },
 );
 

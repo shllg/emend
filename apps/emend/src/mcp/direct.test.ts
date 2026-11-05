@@ -2,8 +2,9 @@ import { ThreadCreated } from "@emend/contract";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { sql } from "drizzle-orm";
-import { expect, test, vi } from "vitest";
+import { expect, test } from "vitest";
 import { directFixture } from "../cli/direct-test-support.ts";
+import { pollUntil } from "../test/poll-until.ts";
 import { createMcpServer } from "./server.ts";
 
 test("MCP waits, takes, confirms after transport delivery, and replies without a server", async () => {
@@ -32,7 +33,7 @@ test("MCP waits, takes, confirms after transport delivery, and replies without a
   await reviewer.request(`/reviews/${reviewId}/sends`, { revision: 1, kind: "go" });
   const feedback = await client.callTool({ name: "get_feedback", arguments: { reviewId } });
   expect(feedback.structuredContent).toMatchObject({ kind: "go", comments: [{ id: thread.commentId }] });
-  await vi.waitFor(async () =>
+  await pollUntil(async () =>
     expect(
       await reviewer.db.read((q) =>
         q.values(sql`select confirmed_at from deliveries where owner_id = ${reviewer.ownerId}`),

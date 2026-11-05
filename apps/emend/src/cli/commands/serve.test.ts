@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, expect, onTestFinished, test, vi } from "vitest";
 import { run } from "../../main.ts";
 import { startServer } from "../../server/serve.ts";
 import { stopLocalServer } from "../service/takeover.ts";
@@ -27,26 +27,29 @@ test.each([
     server = await actual.startServer(options);
     return server;
   });
-  const stdout = vi.fn();
+  const printed = Promise.withResolvers<void>();
+  const stdout = vi.fn(() => printed.resolve());
   const stderr = vi.fn();
   const result = run(["serve", "--port", "0", ...(tailscale ? ["--tailscale"] : [])], {
     env: { ...process.env, EMEND_HOME: stateDir },
     stdout,
     stderr,
   });
-  try {
-    await vi.waitFor(() => expect(stdout).toHaveBeenCalledOnce());
-    expect(await stopLocalServer(stateDir)).toBe(server?.url);
-    expect(await result).toBe(0);
-    await expect(readFile(join(stateDir, "server.json"))).rejects.toMatchObject({ code: "ENOENT" });
-    expect(remove).toHaveBeenCalledTimes(tailscale && created ? 1 : 0);
-    expect(stderr).not.toHaveBeenCalled();
-  } finally {
+  // A server that never prints leaves `printed` pending. The test timeout then ends the test without
+  // unwinding this function, so a `finally` would not run; onTestFinished also runs after a timeout.
+  onTestFinished(async () => {
     stop?.();
     await result;
     await server?.close();
     await rm(stateDir, { recursive: true, force: true });
-  }
+  });
+  await printed.promise;
+  expect(stdout).toHaveBeenCalledOnce();
+  expect(await stopLocalServer(stateDir)).toBe(server?.url);
+  expect(await result).toBe(0);
+  await expect(readFile(join(stateDir, "server.json"))).rejects.toMatchObject({ code: "ENOENT" });
+  expect(remove).toHaveBeenCalledTimes(tailscale && created ? 1 : 0);
+  expect(stderr).not.toHaveBeenCalled();
 });
 test("serve defaults to loopback, allows explicit host and port zero, and rejects bad flags", async () => {
   expect(parseServeArgs([])).toEqual({ host: "127.0.0.1", port: 3636 });
@@ -83,8 +86,17 @@ test.each(["SIGINT", "SIGTERM"] as const)("serve prints once and closes cleanly 
   });
   const stdout: string[] = [];
   const stderr: string[] = [];
-  const result = run(["serve"], { stdout: (s) => stdout.push(s), stderr: (s) => stderr.push(s), env: process.env });
-  await vi.waitFor(() => expect(stdout).toEqual(["emend is serving http://127.0.0.1:3636\n"]));
+  const printed = Promise.withResolvers<void>();
+  const result = run(["serve"], {
+    stdout: (s) => {
+      stdout.push(s);
+      printed.resolve();
+    },
+    stderr: (s) => stderr.push(s),
+    env: process.env,
+  });
+  await printed.promise;
+  expect(stdout).toEqual(["emend is serving http://127.0.0.1:3636\n"]);
   process.emit(signal);
   expect(await result).toBe(0);
   expect(close).toHaveBeenCalledTimes(1);
@@ -126,12 +138,17 @@ test("tailscale setup follows startup, uses the bound port, and prints only the 
     return { created: true, otherHttpsPorts: false };
   });
   const stdout: string[] = [];
+  const printed = Promise.withResolvers<void>();
   const result = run(["serve", "--port", "0", "--tailscale"], {
     env: process.env,
-    stdout: (s) => stdout.push(s),
+    stdout: (s) => {
+      stdout.push(s);
+      printed.resolve();
+    },
     stderr: () => {},
   });
-  await vi.waitFor(() => expect(stdout).toEqual(["emend: serving https://hub.example.ts.net\n"]));
+  await printed.promise;
+  expect(stdout).toEqual(["emend: serving https://hub.example.ts.net\n"]);
   expect(calls).toEqual(["self", "start", "serve"]);
   process.emit("SIGTERM");
   expect(await result).toBe(0);
@@ -285,13 +302,18 @@ test.each([
     close: vi.fn(async () => {}),
   });
   const stdout: string[] = [];
+  const printed = Promise.withResolvers<void>();
   const result = run(["serve", "--tailscale", "--port", String(requested)], {
     env: process.env,
-    stdout: (line) => stdout.push(line),
+    stdout: (line) => {
+      stdout.push(line);
+      printed.resolve();
+    },
     stderr: () => {},
   });
   try {
-    await vi.waitFor(() => expect(stdout).toHaveLength(1));
+    await printed.promise;
+    expect(stdout).toHaveLength(1);
     expect(setup.mock.calls[0]?.[0]).toBe(bound);
     expect(setup.mock.calls[0]?.[4]).toEqual({ fixedPort: requested !== 0 });
   } finally {

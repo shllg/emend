@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { constants, runInNewContext } from "node:vm";
 import { Window } from "happy-dom";
 import { build } from "vite";
-import { expect, test, vi } from "vitest";
+import { expect, onTestFinished, test, vi } from "vitest";
 
 test("built frame rejects diagram theme overrides without dynamic code generation", async () => {
   const workerModules = new Map<string, string[]>();
@@ -268,12 +268,19 @@ test("built frame rejects diagram theme overrides without dynamic code generatio
       '---\nconfig:\n  themeVariables:\n    fontSize: ["16px;} text{fill:rgb(7,8,9) !important} .z{color:x"]\n---\nflowchart LR\n  B05a --> B05b',
     ]) {
       root.replaceChildren();
+      const rendered = Promise.withResolvers<void>();
+      const observer = new window.MutationObserver(() => {
+        if (root.firstElementChild?.localName === "svg") rendered.resolve();
+      });
+      observer.observe(root, { childList: true });
+      // A render that never happens ends the test by timeout without unwinding; onTestFinished still runs.
+      onTestFinished(() => observer.disconnect());
       window.dispatchEvent(
         new window.MessageEvent("message", { source: window.parent, data: { type: "render", source } }),
       );
-      await vi.waitFor(() => expect(root.firstElementChild?.localName, root.textContent).toBe("svg"), {
-        timeout: 3000,
-      });
+      await rendered.promise;
+      expect(root.firstElementChild?.localName, root.textContent).toBe("svg");
+      observer.disconnect();
       expect(root.querySelector("script, foreignObject, [onclick], [href], [onload]")).toBeNull();
       const nodes = /([FBC]\d+a) --> ([FBC]\d+b)/.exec(source);
       if (nodes) {

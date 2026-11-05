@@ -6,10 +6,15 @@ import { error, mailboxFixture } from "./mailbox/test-support.ts";
 
 let f: Awaited<ReturnType<typeof mailboxFixture>>;
 let emitted: string[];
+let started: ReturnType<typeof Promise.withResolvers<void>>;
 beforeEach(async () => {
   f = await mailboxFixture();
   emitted = [];
-  f.deps.events?.subscribe(f.ownerId, null, (event) => emitted.push(event.type));
+  started = Promise.withResolvers<void>();
+  f.deps.events?.subscribe(f.ownerId, null, (event) => {
+    emitted.push(event.type);
+    if (event.type === "waiting" && event.reviewId === f.reviewId) started.resolve();
+  });
 });
 afterEach(async () => {
   vi.useRealTimers();
@@ -39,7 +44,8 @@ test.each(["revokedAt", "expiresAt"] as const)(
     const controller = new AbortController();
     const waiting = f.request(`/reviews/${f.reviewId}/take`, "POST", { waitSeconds: 10 }, "agent", controller.signal);
     try {
-      await vi.waitFor(() => expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true));
+      await started.promise;
+      expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
       await invalidate("agent", field);
       await f.send({ revision: 1, kind: "go", instruction: "Do not expose this instruction" });
       await error(await waiting, 401, "unauthorized");
@@ -54,7 +60,8 @@ test("the final credential check releases an unreturned claim", async () => {
   const controller = new AbortController();
   const waiting = f.request(`/reviews/${f.reviewId}/take`, "POST", { waitSeconds: 10 }, "agent", controller.signal);
   try {
-    await vi.waitFor(() => expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true));
+    await started.promise;
+    expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
     const transaction = f.db.transaction;
     f.db.transaction = async (operation, options) => {
       const result = await transaction(operation, options);
@@ -77,7 +84,8 @@ test("a token revoked while the second take queues cannot start a claim", async 
   const waiting = f.request(`/reviews/${f.reviewId}/take`, "POST", { waitSeconds: 10 }, "agent", controller.signal);
   let claims = 0;
   try {
-    await vi.waitFor(() => expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true));
+    await started.promise;
+    expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
     const transaction = f.db.transaction;
     let calls = 0;
     f.db.transaction = async (operation, options) => {
@@ -139,13 +147,20 @@ test.each(
 test("only 32 takes per owner may wait and abort releases their slots", async () => {
   const events = f.deps.events;
   if (!events) throw new Error("missing events");
-  const begin = vi.spyOn(events, "beginWaiting");
+  const full = Promise.withResolvers<void>();
+  const beginWaiting = events.beginWaiting.bind(events);
+  const begin = vi.spyOn(events, "beginWaiting").mockImplementation((...args) => {
+    const end = beginWaiting(...args);
+    if (begin.mock.calls.length === 32) full.resolve();
+    return end;
+  });
   const controller = new AbortController();
   const waiting = Array.from({ length: 32 }, () =>
     f.request(`/reviews/${f.reviewId}/take`, "POST", { waitSeconds: 25 }, "agent", controller.signal),
   );
   try {
-    await vi.waitFor(() => expect(begin).toHaveBeenCalledTimes(32));
+    await full.promise;
+    expect(begin).toHaveBeenCalledTimes(32);
     await error(
       await f.request(`/reviews/${f.reviewId}/take`, "POST", { waitSeconds: 0.01 }, "agent"),
       429,

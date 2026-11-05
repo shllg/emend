@@ -52,7 +52,6 @@ test("worker termination rolls back, rejects a paused transaction and releases q
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   let escaped: Queries | undefined;
-  let settled = false;
   try {
     const failed = f.db.transaction(
       async (q) => {
@@ -63,20 +62,15 @@ test("worker termination rolls back, rejects a paused transaction and releases q
       },
       { offThread: true },
     );
-    const outcome = failed
-      .then(
-        () => ({ error: undefined }),
-        (error: unknown) => ({ error }),
-      )
-      .finally(() => {
-        settled = true;
-      });
+    const outcome = failed.then(
+      () => ({ error: undefined }),
+      (error: unknown) => ({ error }),
+    );
     await entered.promise;
     const queuedRead = f.db.query((q) => q.select().from(owners).where(eq(owners.id, inserted)).get());
     const replacement = f.db.transaction((q) => q.insert(owners).values({ id: inserted }).run(), { offThread: true });
     const queued = Promise.allSettled([queuedRead, replacement]);
     await injection.workers[0]?.terminate();
-    await vi.waitFor(() => expect(settled).toBe(true));
     expect((await outcome).error).toMatchObject({ message: "Database worker closed" });
     expect(await queued).toMatchObject([{ status: "fulfilled", value: undefined }, { status: "fulfilled" }]);
     expect(injection.workers).toHaveLength(2);

@@ -231,10 +231,18 @@ test.each([
   const server = await f.reviewer();
   const out = f.output();
   const before = process.listenerCount(signal);
+  const started = Promise.withResolvers<void>();
+  const beginWait = waiters.beginWait;
+  vi.spyOn(waiters, "beginWait").mockImplementation(async (...args) => {
+    const id = await beginWait(...args);
+    started.resolve();
+    return id;
+  });
   const command = run(["wait", result.reviewId], out.io);
   const rows = () =>
     server.db.read((q) => q.values(sql`select id from agent_waiters where owner_id = ${server.ownerId}`));
-  await vi.waitFor(async () => expect(await rows()).toHaveLength(1));
+  await started.promise;
+  expect(await rows()).toHaveLength(1);
   process.emit(signal);
   expect(await command).toBe(code);
   expect(out.stdout).toEqual([]);

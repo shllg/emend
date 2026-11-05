@@ -33,14 +33,12 @@ test("a file under the cap highlights", async () => {
 
 test("a file between 1001 lines and the cap highlights", async () => {
   const view = renderFile(1500);
-  await waitFor(() => expect(styledSpan(view.container)).toBeTruthy(), { timeout: 10000 });
+  await waitFor(() => expect(styledSpan(view.container)).toBeTruthy());
 }, 20000);
 
 test("a file one line over the cap renders without highlighting, as the note says", async () => {
   const view = renderFile(TOKENIZE_MAX_LINES + 1);
-  await waitFor(() => expect(shadowOf(view.container)?.querySelector("[data-line]")).toBeTruthy(), {
-    timeout: 10000,
-  });
+  await waitFor(() => expect(shadowOf(view.container)?.querySelector("[data-line]")).toBeTruthy());
   await new Promise((resolve) => setTimeout(resolve, 500));
   expect(styledSpan(view.container)).toBeFalsy();
 }, 20000);

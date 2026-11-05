@@ -218,7 +218,7 @@ test("a timed snooze that ends while the inbox is open refetches the inbox and t
   const before = inboxCalls();
   // The server ends the snooze by the clock alone and sends no event.
   inbox = [{ ...item, id: other(1), title: "About to wake", list: "active" }];
-  await waitFor(() => expect(inboxCalls()).toBeGreaterThan(before), { timeout: 3000 });
+  await waitFor(() => expect(inboxCalls()).toBeGreaterThan(before));
   await waitFor(() =>
     expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Active1"]),
   );

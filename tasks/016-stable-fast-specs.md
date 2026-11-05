@@ -39,7 +39,7 @@ One commit per step, in the plan's order (D2):
       any request", 6.2 s in a locked gate at load 25, with the file at 106 s against 36 s alone).
       That file also makes a real DNS lookup (`getaddrinfo ENOTFOUND example.test`); no test may
       reach the network.
-- [ ] Polling waits: `vi.waitFor` and Testing Library `waitFor` default to a 1 s deadline, a load
+- [x] Polling waits: `vi.waitFor` and Testing Library `waitFor` default to a 1 s deadline, a load
       bet in about 550 places. No polling wait gets a deadline shorter than the test's own.
 - [ ] `tailscale-process` and `serve-signals` onto fake timers and fake children; no deadline
       seam for `emend serve` (D3).
