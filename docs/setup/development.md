@@ -50,5 +50,5 @@ runs `tailscale`, and its tests reach a fake one only:
 - The tailscale-process tests stub both the lookup and the process spawn. Their one real child
   runs a fake from the test's folder, with a fixed platform and a missing app path.
 - The serve-signals tests run emend in a child whose `PATH` holds only the test's folder and its
-  fake `tailscale`. Their cleanup kills the child's process group if the child still runs, and
-  waits for the child to close before it removes that folder.
+  fake `tailscale`. Their cleanup first kills the child's process group if the child still runs.
+  Only then can it remove that folder; normally it also waits for the child to close first.
