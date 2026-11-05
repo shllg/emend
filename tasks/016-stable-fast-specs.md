@@ -101,6 +101,11 @@ runs outside it. CI runs the sharded layout, and the plan's T.1 entry records th
   CI's shard on 4 CPUs with dash as `/bin/sh`. As you chose, the held-escalation tests no longer
   depend on the fake shell's TERM and EXIT traps. A failed serve-signals test now reports its
   pending waits, its markers and the process states of emend, the launcher and the descendant.
+  Left for the second branch: in the socket-double fixtures (`phase: "listen"` and `"close"`)
+  the gate marker holds emend's own pid, so the report labels emend's pid as the launcher. The
+  report also lacks labels for raw `closed` and `exited` waits outside the held-escalation tests.
+  And "teardown never signals a completed call's old pid" runs the cleanup inside its body, so a
+  later failure in that test reports no markers.
 - Resuming a release that was tagged before this branch runs the new `verify.yml` on the old
   commit. That commit's `package.json` has no `verify:*` scripts, so the run fails without
   publishing anything. No release is unfinished today.
