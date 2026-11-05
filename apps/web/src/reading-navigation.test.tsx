@@ -1,9 +1,13 @@
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { runInNewContext } from "node:vm";
 import type { RenderedBlock, ReviewView, RevisionView, ThreadView } from "@emend/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { Window } from "happy-dom";
+import { type Element as BridgeElement, Window as BridgeWindow } from "happy-dom";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, onTestFinished, test, vi } from "vitest";
 import { App } from "./App.tsx";
@@ -712,7 +716,7 @@ test.each([1280, 768, 390])("doc list and open doc navigate, focus and reset scr
   await screen.findByRole("heading", { name: "seed.html" });
   expect(container.querySelectorAll("iframe")).toHaveLength(1);
   expect(container.querySelector("[data-block-id]")).toBeNull();
-  expect(screen.getByText("Shown in a sandbox. Scripts in this doc never run.")).toBeTruthy();
+  expect(screen.getByText("Sandboxed, scripts off")).toBeTruthy();
   act(() => history.back());
   const htmlRow = await screen.findByRole("link", { name: names[2] });
   await waitFor(() => expect(document.activeElement).toBe(htmlRow));
@@ -3062,4 +3066,452 @@ test.each(["link", "Contents", "restore"])("R2.7 %s ignores a placed comment's d
     expect(screen.getByRole("button", { name: "Section 1" }).getAttribute("aria-current")).toBe("location"),
   );
   expect(history.length).toBe(1);
+});
+
+const htmlReadingDoc = {
+  kind: "html" as const,
+  path: "seed.html",
+  title: "Seed guide",
+  contentUrl: `/content/${"c".repeat(75)}/seed.html`,
+  headings: [
+    { level: 2 as const, text: "First" },
+    { level: 3 as const, text: "Second" },
+    { level: 2 as const, text: "Third" },
+  ],
+};
+function htmlReadingFixture() {
+  currentRevision.docs = [structuredClone(htmlReadingDoc), { kind: "markdown", path: "water.md", blocks: [] }];
+  currentRevision.files = [];
+}
+
+test.each(["reading", "original", "invalid", "", 1, null])("C3 validates view %j", (view) => {
+  expect(validateReviewSearch({ view }).view).toBe(view === "reading" || view === "original" ? view : undefined);
+});
+
+test.each([390, 1280])("C3 HTML fills the pane with app-owned controls and drawers at %s px", async (pixels) => {
+  width = pixels;
+  htmlReadingFixture();
+  mount("?tab=docs&doc=seed.html&rev=1&view=reading");
+  await screen.findByRole("heading", { name: "Seed guide" });
+  const { frame } = prepareFrame("seed.html");
+  expect(frame.style.height).not.toBe("70vh");
+  expect(screen.getByTestId("reading-pane").getAttribute("data-reading-layout")).toBe("original");
+  expect(screen.getByTestId("reading-pane").classList.contains("overflow-y-auto")).toBe(false);
+  expect(screen.getByText("Sandboxed, scripts off").closest(".em-doc-bar")).toBeTruthy();
+  for (const name of ["Docs", "Contents", "Comments (0)"]) {
+    const button = screen.getByRole("button", { name });
+    fireEvent.click(button);
+    const dialog = await screen.findByRole("dialog", { name: name.startsWith("Comments") ? "Comments" : name });
+    expect(dialog.contains(frame)).toBe(false);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(document.activeElement).toBe(button));
+  }
+});
+
+test("C3 HTML Contents gates goto on ready, replaces history and marks position without changing the URL", async () => {
+  width = 1280;
+  htmlReadingFixture();
+  const { history } = mount("?tab=docs&doc=seed.html&rev=1&view=original");
+  await screen.findByRole("heading", { name: "Seed guide" });
+  const { frame, post } = prepareFrame("seed.html");
+  const length = history.length;
+  fireEvent.click(screen.getByRole("button", { name: "Contents" }));
+  fireEvent.click(
+    within(await screen.findByRole("dialog", { name: "Contents" })).getByRole("button", { name: "Second" }),
+  );
+  await waitFor(() => expect(history.location.hash).toBe("#h-1"));
+  expect(history.length).toBe(length);
+  expect(post.mock.calls.some(([data]) => data.type === "emend:goto")).toBe(false);
+  frameMessage(frame, { type: "emend:ready" });
+  await waitFor(() => expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 1, label: "Second" }, "*"));
+  const href = history.location.href;
+  frameMessage(frame, { type: "emend:position", heading: 2, fraction: 0.25 });
+  expect(history.location.href).toBe(href);
+  fireEvent.click(screen.getByRole("button", { name: "Contents" }));
+  expect(
+    within(await screen.findByRole("dialog", { name: "Contents" }))
+      .getByRole("button", { name: "Third" })
+      .getAttribute("aria-current"),
+  ).toBe("location");
+});
+
+test("C3 HTML positions reject untrusted messages and survive Back and reload without stored text", async () => {
+  width = 1280;
+  htmlReadingFixture();
+  let app = mount("?tab=docs&doc=seed.html&rev=1&view=original");
+  await screen.findByRole("heading", { name: "Seed guide" });
+  const key = readingPosition.readingPositionKey(id, "docs", "seed.html", 1, "original");
+  let { frame, post } = prepareFrame("seed.html");
+  const message = { type: "emend:position", heading: 1, fraction: 0.4 };
+  frameMessage(frame, message);
+  expect(readingPosition.loadReadingPosition(key)).toBeUndefined();
+  frameMessage(frame, { type: "emend:ready" });
+  for (const invalid of [
+    { ...message, heading: -1 },
+    { ...message, heading: 3 },
+    { ...message, heading: 0.5 },
+    { ...message, fraction: 2 },
+    { ...message, fraction: NaN },
+    { ...message, quote: "secret" },
+  ])
+    frameMessage(frame, invalid);
+  frameMessage(frame, message, window);
+  expect(readingPosition.loadReadingPosition(key)).toBeUndefined();
+  frameMessage(frame, message);
+  expect(readingPosition.loadReadingPosition(key)).toEqual({ id: "h-1", fraction: 0.4 });
+  const stored = localStorage.getItem(readingPosition.readingKey);
+  for (const forbidden of ["Second", "Seed guide", "/content/", "quote"]) expect(stored).not.toContain(forbidden);
+  fireEvent.load(frame);
+  frameMessage(frame, { type: "emend:position", heading: 0, fraction: 0 });
+  frameMessage(frame, { type: "emend:ready" });
+  expect(localStorage.getItem(readingPosition.readingKey)).toBe(stored);
+  fireEvent.click(screen.getByRole("button", { name: "Docs" }));
+  fireEvent.click(
+    within(await screen.findByRole("dialog", { name: "Docs" })).getByRole("button", { name: /water.md/ }),
+  );
+  await screen.findByRole("heading", { name: "water.md" });
+  expect(searchParams(app.history).get("view")).toBe("original");
+  await act(async () => app.history.back());
+  await screen.findByRole("heading", { name: "Seed guide" });
+  const stale = frame;
+  ({ frame, post } = prepareFrame("seed.html"));
+  frameMessage(stale, { type: "emend:position", heading: 0, fraction: 0 });
+  frameMessage(frame, { type: "emend:ready" });
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 1, label: "Second", fraction: 0.4 }, "*"),
+  );
+  app.unmount();
+  app = mount("?tab=docs&doc=seed.html&rev=1&view=original");
+  await screen.findByRole("heading", { name: "Seed guide" });
+  ({ frame, post } = prepareFrame("seed.html"));
+  frameMessage(frame, { type: "emend:ready" });
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 1, label: "Second", fraction: 0.4 }, "*"),
+  );
+});
+
+test.each([390, 1280])("C3 HTML selection draft survives drawer close and Back at %s px", async (pixels) => {
+  width = pixels;
+  htmlReadingFixture();
+  const { history } = mount("?tab=docs&doc=seed.html&rev=1");
+  await screen.findByRole("heading", { name: "Seed guide" });
+  const { frame } = prepareFrame("seed.html");
+  frameMessage(frame, { type: "emend:ready" });
+  frameMessage(frame, { type: "emend:anchor", quote: "A seed", prefix: "", suffix: "" });
+  fireEvent.click(await screen.findByRole("button", { name: "Comment on selection" }));
+  fireEvent.change(await screen.findByRole("textbox", { name: "Comment" }), { target: { value: "Keep this draft" } });
+  // A phone composer is its own sheet above the Comments sheet.
+  if (pixels === 390)
+    fireEvent.click(within(screen.getByRole("dialog", { name: "New comment" })).getByRole("button", { name: "Close" }));
+  const comments = await screen.findByRole("dialog", { name: "Comments" });
+  fireEvent.click(within(comments).getByRole("button", { name: "Close" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Comments" })).toBeNull());
+  fireEvent.click(screen.getByRole("button", { name: "Comments (0)" }));
+  await screen.findByRole("dialog", { name: "Comments" });
+  if (pixels === 390) fireEvent.click(screen.getByRole("button", { name: "Resume selection comment" }));
+  expect(((await screen.findByRole("textbox", { name: "Comment" })) as HTMLTextAreaElement).value).toBe(
+    "Keep this draft",
+  );
+  await act(async () => history.push(`/r/${id}?tab=docs&doc=water.md&rev=1`));
+  await screen.findByRole("heading", { name: "water.md" });
+  await act(async () => history.back());
+  await screen.findByRole("heading", { name: "Seed guide" });
+  fireEvent.click(screen.getByRole("button", { name: "Comments (0)" }));
+  await screen.findByRole("dialog", { name: "Comments" });
+  fireEvent.click(screen.getByRole("button", { name: "Resume selection comment" }));
+  expect(((await screen.findByRole("textbox", { name: "Comment" })) as HTMLTextAreaElement).value).toBe(
+    "Keep this draft",
+  );
+});
+
+test("C3 HTML heading targets beat storage, but Back keeps the entry passage without repeating its target", async () => {
+  width = 1280;
+  htmlReadingFixture();
+  const key = readingPosition.readingPositionKey(id, "docs", "seed.html", 1, "original");
+  readingPosition.saveReadingPosition(key, { id: "h-0", fraction: 0.2 });
+  const { history } = mount("?tab=docs&doc=seed.html&rev=1#h-1");
+  await screen.findByRole("heading", { name: "Seed guide" });
+  let { frame, post } = prepareFrame("seed.html");
+  frameMessage(frame, { type: "emend:ready" });
+  await waitFor(() => expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 1, label: "Second" }, "*"));
+  frameMessage(frame, { type: "emend:position", heading: 2, fraction: 0.6 });
+  post.mockClear();
+  frameMessage(frame, { type: "emend:position", heading: 2, fraction: 0.6 });
+  expect(post.mock.calls.filter(([message]) => message.type === "emend:goto")).toEqual([]);
+  await act(async () => history.push(`/r/${id}?tab=docs&doc=water.md&rev=1`));
+  await screen.findByRole("heading", { name: "water.md" });
+  await act(async () => history.back());
+  await screen.findByRole("heading", { name: "Seed guide" });
+  ({ frame, post } = prepareFrame("seed.html"));
+  frameMessage(frame, { type: "emend:ready" });
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 2, label: "Third", fraction: 0.6 }, "*"),
+  );
+});
+
+test.each([390, 1280])(
+  "C3 HTML drawer keeps replies and unsent comments; Show in place reaches the frame at %s px",
+  async (pixels) => {
+    width = pixels;
+    htmlReadingFixture();
+    const thread: ThreadView = {
+      id,
+      createdOn: 1,
+      state: "open",
+      target: { kind: "html-span", path: "seed.html", quote: "seed", prefix: "", suffix: "" },
+      placement: { status: "placed", location: { kind: "html-span", path: "seed.html", start: 0, end: 4 } },
+      comments: [
+        { id, author: "user", body: "Sent seed question", sent: true, sentOn: 1 },
+        {
+          id: "22222222-2222-4222-8222-222222222222",
+          author: "user",
+          body: "Unsent seed question",
+          sent: false,
+          sentOn: null,
+        },
+      ],
+    };
+    currentRevision.threads = [thread];
+    mount("?tab=comments&rev=1&view=reading");
+    fireEvent.click(await screen.findByRole("link", { name: "Show in place" }));
+    await screen.findByRole("heading", { name: "Seed guide" });
+    const { frame, post } = prepareFrame("seed.html");
+    frameMessage(frame, { type: "emend:ready" });
+    await waitFor(() => expect(post).toHaveBeenCalledWith({ type: "emend:scroll", threadId: id }, "*"));
+    fireEvent.click(screen.getByRole("button", { name: "Comments (1)" }));
+    const drawer = await screen.findByRole("dialog", { name: "Comments" });
+    expect(within(drawer).getByText("Unsent seed question")).toBeTruthy();
+    fireEvent.click(within(drawer).getByRole("button", { name: "Reply" }));
+    const reply = await screen.findByRole("textbox", { name: "Reply" });
+    fireEvent.change(reply, { target: { value: "Keep this reply" } });
+    if (pixels === 390)
+      fireEvent.click(within(screen.getByRole("dialog", { name: "Reply" })).getByRole("button", { name: "Close" }));
+    fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Comments" })).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Comments (1)" }));
+    // Remounting the thread resumes its saved reply, in a sheet above Comments on phones.
+    expect(((await screen.findByRole("textbox", { name: "Reply" })) as HTMLTextAreaElement).value).toBe(
+      "Keep this reply",
+    );
+  },
+);
+
+test("C3 HTML restore rejects an undeclared saved index and keeps view positions separate", async () => {
+  width = 1280;
+  htmlReadingFixture();
+  const original = readingPosition.readingPositionKey(id, "docs", "seed.html", 1, "original");
+  const reading = readingPosition.readingPositionKey(id, "docs", "seed.html", 1, "reading");
+  readingPosition.saveReadingPosition(original, { id: "h-999", fraction: 0.8 });
+  readingPosition.saveReadingPosition(reading, { id: "h-1", fraction: 0.3 });
+  const { history } = mount("?tab=docs&doc=seed.html&rev=1");
+  await screen.findByRole("heading", { name: "Seed guide" });
+  const { frame, post } = prepareFrame("seed.html");
+  frameMessage(frame, { type: "emend:ready" });
+  expect(post.mock.calls.some(([message]) => message.type === "emend:goto")).toBe(false);
+  await act(async () => history.push(`/r/${id}?tab=docs&doc=seed.html&rev=1&view=reading`));
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 1, label: "Second", fraction: 0.3 }, "*"),
+  );
+  fireEvent.load(frame);
+  post.mockClear();
+  await act(async () => history.push(`/r/${id}?tab=docs&doc=seed.html&rev=1&view=reading#h-2`));
+  expect(post).not.toHaveBeenCalled();
+});
+
+test("C3 R1.3 returning to the introduction clears position and Contents, including Back and reload", async () => {
+  width = 1280;
+  htmlReadingFixture();
+  const key = readingPosition.readingPositionKey(id, "docs", "seed.html", 1, "original");
+  readingPosition.saveReadingPosition(key, { id: "h-1", fraction: 0.4 });
+  let app = mount("?tab=docs&doc=seed.html&rev=1");
+  await screen.findByRole("heading", { name: "Seed guide" });
+  let { frame, post } = prepareFrame("seed.html");
+  frameMessage(frame, { type: "emend:ready" });
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 1, label: "Second", fraction: 0.4 }, "*"),
+  );
+  frameMessage(frame, { type: "emend:position", heading: 1, fraction: 0.4 });
+  fireEvent.click(screen.getByRole("button", { name: "Contents" }));
+  const contents = await screen.findByRole("dialog", { name: "Contents" });
+  expect(within(contents).getByRole("button", { name: "Second" }).getAttribute("aria-current")).toBe("location");
+  frameMessage(frame, { type: "emend:position", heading: null, fraction: 0 });
+  expect(readingPosition.loadReadingPosition(key)).toBeUndefined();
+  expect(contents.querySelector('[aria-current="location"]')).toBeNull();
+  fireEvent.click(within(contents).getByRole("button", { name: "Close" }));
+  await act(async () => app.history.push(`/r/${id}?tab=docs&doc=water.md&rev=1`));
+  await screen.findByRole("heading", { name: "water.md" });
+  await act(async () => app.history.back());
+  await screen.findByRole("heading", { name: "Seed guide" });
+  ({ frame, post } = prepareFrame("seed.html"));
+  frameMessage(frame, { type: "emend:ready" });
+  expect(post.mock.calls.some(([message]) => message.type === "emend:goto")).toBe(false);
+  expect(document.querySelector('.em-doc-view [aria-current="location"]')).toBeNull();
+  app.unmount();
+  app = mount("?tab=docs&doc=seed.html&rev=1");
+  await screen.findByRole("heading", { name: "Seed guide" });
+  ({ frame, post } = prepareFrame("seed.html"));
+  frameMessage(frame, { type: "emend:ready" });
+  expect(post.mock.calls.some(([message]) => message.type === "emend:goto")).toBe(false);
+  expect(document.querySelector('.em-doc-view [aria-current="location"]')).toBeNull();
+});
+
+test.each(["Contents", "restore"])("C3 R1.4 %s posts nothing after an unexpected frame load", async (kind) => {
+  width = 1280;
+  htmlReadingFixture();
+  const { history } = mount("?tab=docs&doc=seed.html&rev=1");
+  await screen.findByRole("heading", { name: "Seed guide" });
+  const { frame, post } = prepareFrame("seed.html");
+  frameMessage(frame, { type: "emend:ready" });
+  fireEvent.load(frame);
+  post.mockClear();
+  frameMessage(frame, { type: "emend:ready" });
+  if (kind === "Contents") {
+    fireEvent.click(screen.getByRole("button", { name: "Contents" }));
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "Contents" })).getByRole("button", { name: "Second" }),
+    );
+    await waitFor(() => expect(history.location.hash).toBe("#h-1"));
+  } else {
+    readingPosition.saveReadingPosition(readingPosition.readingPositionKey(id, "docs", "seed.html", 1, "reading"), {
+      id: "h-1",
+      fraction: 0.4,
+    });
+    await act(async () => history.push(`/r/${id}?tab=docs&doc=seed.html&rev=1&view=reading`));
+  }
+  expect(post).not.toHaveBeenCalled();
+});
+
+test.each(["Contents", "restore"])(
+  "R2.4 a second ready locks %s and all messages before the next load",
+  async (kind) => {
+    width = 1280;
+    htmlReadingFixture();
+    const { history } = mount("?tab=docs&doc=seed.html&rev=1");
+    await screen.findByRole("heading", { name: "Seed guide" });
+    const { frame, post } = prepareFrame("seed.html");
+    const key = readingPosition.readingPositionKey(id, "docs", "seed.html", 1, "original");
+    frameMessage(frame, { type: "emend:ready" });
+    frameMessage(frame, { type: "emend:position", heading: 1, fraction: 0.4 });
+    frameMessage(frame, { type: "emend:anchor", quote: "seed", prefix: "", suffix: "" });
+    expect(screen.getByRole("button", { name: "Comment on selection" })).toBeTruthy();
+    post.mockClear();
+    // No load event: the replacement document's bridge runs before its resources finish loading.
+    frameMessage(frame, { type: "emend:ready" });
+    frameMessage(frame, { type: "emend:position", heading: 2, fraction: 0.8 });
+    expect(readingPosition.loadReadingPosition(key)).toEqual({ id: "h-1", fraction: 0.4 });
+    frameMessage(frame, { type: "emend:anchor", quote: "replacement", prefix: "", suffix: "" });
+    frameMessage(frame, { type: "emend:navigate", path: "water.md", fragment: "" });
+    frameMessage(frame, { type: "emend:ready" });
+    expect(screen.getByText("This doc navigated away.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Comment on selection" })).toBeNull();
+    expect(searchParams(history).get("doc")).toBe("seed.html");
+    if (kind === "Contents") {
+      fireEvent.click(screen.getByRole("button", { name: "Contents" }));
+      fireEvent.click(
+        within(await screen.findByRole("dialog", { name: "Contents" })).getByRole("button", { name: "Third" }),
+      );
+      await waitFor(() => expect(history.location.hash).toBe("#h-2"));
+    } else {
+      readingPosition.saveReadingPosition(readingPosition.readingPositionKey(id, "docs", "seed.html", 1, "reading"), {
+        id: "h-2",
+        fraction: 0.5,
+      });
+      await act(async () => history.push(`/r/${id}?tab=docs&doc=seed.html&rev=1&view=reading`));
+    }
+    expect(post).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Reload seed.html" }));
+    const next = prepareFrame("seed.html");
+    expect(next.frame).not.toBe(frame);
+    frameMessage(next.frame, { type: "emend:ready" });
+    expect(screen.queryByText("This doc navigated away.")).toBeNull();
+    expect(next.post).toHaveBeenCalledWith({ type: "emend:docs", paths: ["seed.html", "water.md"] }, "*");
+    frameMessage(frame, { type: "emend:position", heading: 0, fraction: 0 });
+    expect(readingPosition.loadReadingPosition(key)).toEqual({ id: "h-1", fraction: 0.4 });
+  },
+);
+
+test("R4 an actual inset bridge report keeps the picked Contents marker and saved position", async () => {
+  width = 1280;
+  htmlReadingFixture();
+  mount("?tab=docs&doc=seed.html&rev=1");
+  await screen.findByRole("heading", { name: "Seed guide" });
+  const { frame, post } = prepareFrame("seed.html");
+  const content = new BridgeWindow({ settings: { enableJavaScriptEvaluation: false } });
+  content.document.write("<main><h2>First</h2><h3>Second</h3><h2>Third</h2></main>");
+  Object.defineProperty(content, "innerHeight", { value: 400 });
+  const headings = [...content.document.querySelectorAll("h2,h3")];
+  const offsets = [300, 900, 1500];
+  let scrollTop = 0;
+  const rect = content.Element.prototype.getBoundingClientRect;
+  const scroll = content.Element.prototype.scrollIntoView;
+  const visible = content.Element.prototype.checkVisibility;
+  const slot = Object.getOwnPropertyDescriptor(content.Element.prototype, "assignedSlot");
+  if (!slot) Object.defineProperty(content.Element.prototype, "assignedSlot", { configurable: true, get: () => null });
+  vi.spyOn(content.Element.prototype, "getBoundingClientRect").mockImplementation(function (this: BridgeElement) {
+    const index = headings.indexOf(this);
+    return index < 0 ? rect.call(this) : new content.DOMRect(0, (offsets[index] ?? 0) - scrollTop + 43, 400, 20);
+  });
+  vi.spyOn(content.Element.prototype, "scrollIntoView").mockImplementation(function (this: BridgeElement, options) {
+    const index = headings.indexOf(this);
+    if (index < 0) scroll.call(this, options);
+    else scrollTop = offsets[index] ?? 0;
+  });
+  vi.spyOn(content.Element.prototype, "checkVisibility").mockImplementation(function (this: BridgeElement) {
+    return headings.includes(this) || visible.call(this);
+  });
+  const parent = { postMessage: (data: unknown) => frameMessage(frame, data) };
+  Object.defineProperty(content, "parent", { value: parent });
+  post.mockImplementation((data) =>
+    content.dispatchEvent(new content.MessageEvent("message", { data, source: parent as unknown as BridgeWindow })),
+  );
+  try {
+    const source = readFileSync(join(import.meta.dirname, "../../emend/src/server/content/bridge.ts"), "utf8");
+    const script = runInNewContext(`${source.replace("export const", "const")}; BRIDGE_SOURCE;`);
+    runInNewContext(script, { window: content, document: content.document });
+    content.document.dispatchEvent(new content.Event("DOMContentLoaded"));
+    await act(async () => content.happyDOM.waitUntilComplete());
+    fireEvent.click(screen.getByRole("button", { name: "Contents" }));
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "Contents" })).getByRole("button", { name: "First" }),
+    );
+    await waitFor(() => expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 0, label: "First" }, "*"));
+    await act(async () => content.happyDOM.waitUntilComplete());
+    fireEvent.click(screen.getByRole("button", { name: "Contents" }));
+    const contents = await screen.findByRole("dialog", { name: "Contents" });
+    expect(within(contents).getByRole("button", { name: "First" }).getAttribute("aria-current")).toBe("location");
+    const key = readingPosition.readingPositionKey(id, "docs", "seed.html", 1, "original");
+    expect(readingPosition.loadReadingPosition(key)).toEqual({ id: "h-0", fraction: 0 });
+    // The view moves with no input event (Show in doc, find-in-page): the pin ends at the new heading.
+    scrollTop = 900;
+    content.dispatchEvent(new content.Event("scroll"));
+    await waitFor(() => expect(readingPosition.loadReadingPosition(key)?.id).toBe("h-1"));
+    expect(readingPosition.loadReadingPosition(key)?.fraction).toBeCloseTo(57 / 600);
+  } finally {
+    await content.happyDOM.close();
+    if (!slot) Reflect.deleteProperty(content.Element.prototype, "assignedSlot");
+  }
+});
+
+test("R5.1 stored zero fraction is explicitly sent on reload and Back", async () => {
+  width = 1280;
+  htmlReadingFixture();
+  const key = readingPosition.readingPositionKey(id, "docs", "seed.html", 1, "original");
+  readingPosition.saveReadingPosition(key, { id: "h-0", fraction: 0 });
+  const { history } = mount("?tab=docs&doc=seed.html&rev=1");
+  await screen.findByRole("heading", { name: "Seed guide" });
+  let { frame, post } = prepareFrame("seed.html");
+  frameMessage(frame, { type: "emend:ready" });
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 0, label: "First", fraction: 0 }, "*"),
+  );
+  frameMessage(frame, { type: "emend:position", heading: 0, fraction: 0 });
+  await act(async () => history.push(`/r/${id}?tab=docs&doc=water.md&rev=1`));
+  await screen.findByRole("heading", { name: "water.md" });
+  await act(async () => history.back());
+  await screen.findByRole("heading", { name: "Seed guide" });
+  ({ frame, post } = prepareFrame("seed.html"));
+  frameMessage(frame, { type: "emend:ready" });
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 0, label: "First", fraction: 0 }, "*"),
+  );
 });

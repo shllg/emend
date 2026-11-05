@@ -317,16 +317,97 @@ another HTML or Markdown doc under this doc key send
 are decoded; the fragment excludes `#` and is at most 1024 characters. The parent accepts this
 strict message only from the current trusted frame and only for another doc in the same revision.
 It opens that doc as a new history entry. For an HTML target with a fragment, the newly mounted frame's src is its own
-content URL plus `#` and the percent-encoded fragment. Same-doc fragment links remain
-normal hash navigation. The app's `frame-src 'self'` blocks a clicked external link or a meta
+content URL plus `#` and the percent-encoded fragment. Same-doc HTML `a` and `area` links and SVG
+`a` links (`href` or `xlink:href`), in the document or an open shadow root, are handled by the bridge
+without changing `location` or browser history. It prevents browser navigation even when the
+resolver refuses the href: accepted fragments scroll to their targets, empty or absent fragments
+scroll to the top, and refused fragments or missing targets do nothing. A fragment matches a
+document id, then an id in the link's shadow root, then the first HTML anchor with that exact
+`name` (in the document before the shadow root). These link elements also use bridge handling for
+cross-doc navigation. Links in closed shadow roots, SVG links shown through `<use>`, and
+`<meta http-equiv="refresh">` fall back to the browser. Fragment and Contents targets open ancestor
+`details`, following assigned slots in open shadow roots and shadow hosts. Slots in closed shadow
+roots are not exposed to the bridge.
+The app's `frame-src 'self'` blocks a clicked external link or a meta
 refresh to an outside URL; the frame then shows `This doc navigated away.` with Reload. An asset
 link opens the asset in the frame and triggers the same state.
 
-A parent-initiated src change or Reload establishes a fresh load baseline. A further unexpected
-load disables the frame's bridge and shows `This doc navigated away.` with Reload. Directly
+A parent-initiated src change or Reload mounts a fresh frame generation. A further unexpected
+load or a second `emend:ready` in that generation disables the frame's bridge and shows
+`This doc navigated away.` with Reload. The second ready locks it immediately, before load;
+no further messages or commands are accepted until a parent-initiated reload or navigation. Directly
 navigating to another doc under the current doc's key still returns 404 and triggers that state.
 Other frame messages carry ready notifications, proposed quotes, quote highlights and thread
 scroll requests; saving a comment requires the reviewer's explicit action.
+
+After `emend:ready`, the parent sends `{ type: "emend:docs", paths: FilePath[] }`, the exact doc
+paths in this revision. Bridge links resolve against the existing document base, decode each
+segment once, and use the same rejection rules as the core resolver. The parent validates the
+destination again before navigating.
+
+HTML Contents addresses the server's h2/h3 list by zero-based index. The parent sends
+`{ type: "emend:goto", heading: number, label: string }` for a pick; a restore also includes
+`fraction: number`, including when it is zero. Messages go only to the current ready frame. The
+bridge checks an integer index in its matching heading list, the server-cleaned label, and, when
+present, a finite fraction in [0, 1]. It scrolls without changing location. Position is measured
+against a reading line at one quarter of the frame's viewport height, rounded to a whole pixel
+and read once per measurement. The current heading is the last laid-out heading whose viewport top
+is at or above that line. Its fraction is `(line - heading top) / span`, where the span runs to the
+next laid-out heading or to the document's end as seen from the viewport. The section distance has a
+1px minimum for degenerate layouts, and the fraction is clamped to [0, 1].
+Picks and restores first scroll the heading into view. A pick makes no further move. A restore
+makes up to sixteen measured passes, searching in total distance moved from that landing. It keeps
+the largest measured distance below the saved fraction and the smallest above it as a bracket.
+The first move targets `line - fraction * span`; later proposals use the slope between the last two
+measurements (a secant step). With both bounds known, a proposal outside the open bracket or a
+non-positive slope uses the bracket's midpoint instead. Until an upper bound is found, the next
+step doubles; if only an upper bound exists and the secant cannot advance toward the target, the
+step doubles backwards to find a lower bound. Each move is the difference between the proposed
+total distance and the current measured total.
+New movement walks rendered ancestors from the inside out, then the document scroller. Each takes
+what it can, passing the remainder outward based on the heading's actual movement. Backtracking
+undoes earlier moves in reverse order, so a total distance stays on the same scroll path.
+Ineffective attempts are undone. Passes stop when the measured heading matches and its fraction
+differs by 0.002 or less, when a pass moves nothing, or after the sixteenth pass. A restore that
+stops without reaching the tolerance can leave a larger error. Movement can be negative; browsers
+clamp at scroll limits.
+All moves use instant behavior that ignores smooth-scroll CSS; measurement never guesses the scroller.
+After a goto lands (its last restore pass), the bridge takes one measurement and keeps it as the
+landing measurement. Until the view moves, reports carry the requested heading and fraction (zero
+for a pick). The pin ends at the first measurement that differs from the landing measurement (another
+heading, or a fraction more than 0.002 away), whatever moved the view: a wheel, a scrollbar drag,
+find-in-page, `emend:scroll` or a link scroll. `emend:scroll` and the bridge's own link scrolls also
+end it explicitly. Input events alone, and clicks that move nothing, do not end the pin. A same-doc
+fragment link with no matching target does not scroll or end the pin.
+The bridge throttles `{ type: "emend:position", heading: number, fraction: number }` to one message
+per 200 ms and posts only when the reported position differs from the last one posted (same heading
+and a fraction within 0.002 is not a change). Window resize and composed `wheel`, `touchmove`,
+`touchend`, `keydown`, `pointerdown` and `pointerup` events start up to five samples. A `scroll`
+event (window or captured document scroll) starts sampling only when the measured position moved
+since the last sample, and restarts the budget of a running chain only when a check sees such a
+move. Posts stop when the position stops changing, and momentum scrolling still reports its final
+position. An element that keeps changing height between the current heading and the reading line
+changes the position and can keep posting at most five times a second while it does. There are at
+most five samples after the latest trigger, stopping early when a trailing check sees no movement,
+to cover momentum and scrolls inside open shadow roots. A hidden document
+element (native prototype `checkVisibility()` is false, or no client rects in the fallback) skips
+measurement and posting, preserving the parent's saved position; the bridge then forgets its last
+posted position, so the next visible measurement reports again. Scrolling inside a closed shadow root that
+no input event reaches may not report. The parent validates it with the message schema and the open
+doc's list, only after ready and before any unexpected load. Labels and quote text never enter position storage.
+When no laid-out heading has reached the reading line, the bridge instead sends
+`{ type: "emend:position", heading: null, fraction: 0 }`. This strict shape clears the stored
+position and current Contents marker; it never stores a pseudo-heading. Back and reload return
+to the document's top. A heading is laid out when the native `checkVisibility()` returns true;
+where that method is unavailable, the bridge falls back to having client rects. Each measurement
+visits the heading list once and reads each laid-out heading's viewport rect once.
+HTML positions use `h-<decimal index>` plus the fraction in the existing position store; restoration
+checks that index against the current doc's declared list before sending the freshly looked-up label.
+
+The app's optional `view` search parameter accepts `reading` or `original`; other values are ignored.
+Doc positions are keyed by review, doc, revision and view. Without `view`, HTML uses `original` and
+Markdown uses `reading`. In slice A, HTML always renders Original layout and Markdown renders its
+blocks, regardless of the requested view. The link hardener never emits `view`.
 
 `ThreadView = { id, target: Target, state: ThreadState, placement: Placement, createdOn,
 comments: { id, author: "user" | "agent", body, html?: string | null, outcome?: Outcome, sent: boolean,

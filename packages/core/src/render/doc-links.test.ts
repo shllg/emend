@@ -175,3 +175,11 @@ test("lookup keys never become emitted fragments, including hostile and noncanon
   expect(rendered).toContain(`#h-${headings[1]?.id}`);
   expect(rendered).not.toContain("#setup");
 });
+
+test("C3 the hardener never emits an author's view parameter", async () => {
+  const rendered = html(
+    await renderDoc("[doc](b.md?view=original#part) [plain](b.md#part)", "docs/a.md", undefined, docs),
+  );
+  expect(rendered).toContain('href="?tab=docs&#x26;doc=docs%2Fb.md#h-user-content-part"');
+  expect(rendered).not.toContain("view=");
+});

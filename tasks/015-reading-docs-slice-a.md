@@ -21,7 +21,7 @@ is slice B.
       server, the doc-navigation rule text).
 - [x] Checkpoint 2: the doc bar, the Docs switcher, Contents, links, history and Back, and
       position memory.
-- [ ] Checkpoint 3: HTML docs in the full reading pane, the Comments drawer and the frame
+- [x] Checkpoint 3: HTML docs in the full reading pane, the Comments drawer and the frame
       messages.
 - [ ] Reviews pass for each checkpoint: emend-reviewer, the Codex review and
       emend-security-reviewer.
@@ -38,3 +38,7 @@ several docs on the phone.
 - 2026-11-05: Checkpoint 2 passed five review rounds. You chose lookup names for heading links
   (author id, hunk-review slug, GitHub slug) over readable ids, and approved four rule lines in
   `doc-navigation.md`.
+- 2026-11-05: Checkpoint 3 passed seven review rounds. Most findings were in HTML position memory.
+  It now measures against a reading line in the frame's viewport, and a restore is a bracketed
+  search over the distance moved. The bridge reads every DOM property through its prototype and
+  handles every same-doc link itself.

@@ -13,6 +13,7 @@ export function Panes({
   tab,
   hasDiff,
   tabs,
+  readingLayout,
 }: {
   inbox: ReactNode;
   header: ReactNode;
@@ -23,6 +24,7 @@ export function Panes({
   tab: string;
   hasDiff: boolean;
   tabs?: ReactNode;
+  readingLayout?: "original";
 }) {
   const layout = useLayout();
   const preferences = useLayoutPreferences();
@@ -89,9 +91,10 @@ export function Panes({
               aria-label="Reading"
               data-testid="reading-pane"
               data-reading-scroll
+              data-reading-layout={readingLayout}
               hidden={!split && hasDiff && tab === "diff"}
               tabIndex={-1}
-              className="relative min-w-0 flex-1 overflow-y-auto"
+              className={`relative min-w-0 flex-1 ${readingLayout === "original" ? "overflow-hidden" : "overflow-y-auto"}`}
               style={showReadingHandle ? { flex: `0 0 ${readingWidth}px` } : undefined}
             >
               {split && tabs}

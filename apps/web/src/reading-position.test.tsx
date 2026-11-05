@@ -553,23 +553,33 @@ test("a visit restored from storage keeps its own position even without another 
   await waitFor(() => expect(pane().scrollTop).toBe(125));
 });
 
-test("R1.2 an HTML doc's reading position survives a reload", async () => {
+test("C3 HTML positions use the frame's declared headings rather than the outer pane", async () => {
   if (!revisions[1]) throw new Error("missing revision");
-  revisions[1].docs = [{ kind: "html", path: "page.html", contentUrl: "/content/synthetic/page.html" }];
-  const bounds = HTMLElement.prototype.getBoundingClientRect;
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-    if (this.id === "html-doc-page.html") return new DOMRect(0, 100 - pane().scrollTop, 390, 400);
-    return bounds.call(this);
-  });
-  const key = readingPositionKey(id, "docs", "page.html", 1);
-  const first = mount("?tab=docs&doc=page.html&rev=1");
-  await screen.findByRole("heading", { name: "page.html" });
-  readerScroll(200);
-  expect(loadReadingPosition(key)).toEqual({ id: "html-doc-page.html", fraction: 0.25 });
-  first.unmount();
+  revisions[1].docs = [
+    {
+      kind: "html",
+      path: "page.html",
+      contentUrl: "/content/synthetic/page.html",
+      headings: [{ level: 2, text: "First" }],
+    },
+  ];
+  const key = readingPositionKey(id, "docs", "page.html", 1, "original");
   mount("?tab=docs&doc=page.html&rev=1");
   await screen.findByRole("heading", { name: "page.html" });
-  await waitFor(() => expect(pane().scrollTop).toBe(200));
+  const frame = document.querySelector("iframe");
+  if (!frame) throw new Error("missing frame");
+  Object.defineProperty(frame, "contentWindow", { value: { postMessage: vi.fn() } });
+  fireEvent.load(frame);
+  fireEvent(window, new MessageEvent("message", { source: frame.contentWindow, data: { type: "emend:ready" } }));
+  fireEvent(
+    window,
+    new MessageEvent("message", {
+      source: frame.contentWindow,
+      data: { type: "emend:position", heading: 0, fraction: 0.25 },
+    }),
+  );
+  readerScroll(200);
+  expect(loadReadingPosition(key)).toEqual({ id: "h-0", fraction: 0.25 });
 });
 
 test.each(["heading-middle", "missing"])("R2.3 Back restores its own position even with target %s", async (target) => {

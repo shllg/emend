@@ -12,3 +12,18 @@ export const DocHeading = z.object({
 });
 export type DocHeading = z.infer<typeof DocHeading>;
 export const DocHeadings = z.array(DocHeading).max(LIMITS.headingsPerDoc);
+
+/** The bridge and parent validate the index again against the current doc's declared heading list. */
+export const HtmlDocPosition = z
+  .object({
+    heading: z
+      .number()
+      .int()
+      .min(0)
+      .max(LIMITS.headingsPerDoc - 1)
+      .nullable(),
+    fraction: z.number().finite().min(0).max(1),
+  })
+  .strict()
+  .refine((position) => position.heading !== null || position.fraction === 0, "the introduction has zero fraction");
+export type HtmlDocPosition = z.infer<typeof HtmlDocPosition>;

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { ThreadView } from "@emend/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { HtmlDocFrame } from "./components/reading/HtmlDocFrame.tsx";
 import { draftKey } from "./lib/drafts.ts";
@@ -41,19 +42,35 @@ function frameByTitle() {
   if (!frame) throw new Error("Missing titled frame");
   return frame;
 }
+function FrameContent({
+  values,
+  docNavigation,
+  navigation,
+}: {
+  values: ThreadView[];
+  docNavigation?: DocNavigation;
+  navigation?: { threadId: string; intent: unknown };
+}) {
+  const [open, setOpen] = useState(values.length > 0);
+  return (
+    <HtmlDocFrame
+      reviewId={id}
+      revision={2}
+      changedBlocks={[]}
+      path={path}
+      contentUrl={doc.contentUrl}
+      threads={values}
+      navigation={navigation}
+      docNavigation={docNavigation}
+      commentsOpen={open}
+      onCommentsOpenChange={setOpen}
+    />
+  );
+}
 function mount(threads: ThreadView[] = [], navigation?: { threadId: string; intent: unknown }) {
   const ui = (values: ThreadView[], docNavigation?: DocNavigation) => (
     <QueryClientProvider client={client}>
-      <HtmlDocFrame
-        reviewId={id}
-        revision={2}
-        changedBlocks={[]}
-        path={path}
-        contentUrl={doc.contentUrl}
-        threads={values}
-        navigation={navigation}
-        docNavigation={docNavigation}
-      />
+      <FrameContent values={values} docNavigation={docNavigation} navigation={navigation} />
     </QueryClientProvider>
   );
   const view = render(ui(threads));
@@ -86,8 +103,9 @@ test("all production web frames use the exact sandbox without DOM string inserti
   expect(frame.getAttribute("title")).toBe(path);
   expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
   expect(frame.hasAttribute("allow")).toBe(false);
-  expect(frame.style.height).toBe("70vh");
-  expect(frame.style.minHeight).toBe("320px");
+  expect(frame.classList.contains("h-full")).toBe(true);
+  expect(frame.style.height).toBe("");
+  expect(frame.style.minHeight).toBe("");
 });
 test("closed strict message schemas enforce every contract limit", () => {
   for (const data of [
@@ -114,6 +132,24 @@ test("closed strict message schemas enforce every contract limit", () => {
   expect(ParentToFrame.safeParse({ type: "emend:scroll", threadId: id }).success).toBe(true);
   for (const fragment of ["", "x".repeat(1024)])
     expect(FrameToParent.safeParse({ type: "emend:navigate", path: "other.html", fragment }).success).toBe(true);
+});
+
+test("the drawer includes this doc's unplaced threads without offering a frame jump", () => {
+  const unplaced: ThreadView = { ...thread, placement: { status: "unplaced", reason: "block-gone" } };
+  const other: ThreadView = {
+    ...unplaced,
+    id: "22222222-2222-4222-8222-222222222222",
+    target: { kind: "html-span", path: "other.html", ...anchor },
+    comments: [{ id, author: "user", body: "Another doc's comment", sent: true, sentOn: 1 }],
+  };
+  const { message, post } = mount([unplaced, other]);
+  message({ type: "emend:ready" });
+  expect(screen.getByText("Private synthetic comment")).toBeTruthy();
+  expect(screen.getByText(/The block this comment was on is gone\./)).toBeTruthy();
+  expect(screen.queryByText("Another doc's comment")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Show in doc" })).toBeNull();
+  expect(screen.queryByText("No comments on this doc yet.")).toBeNull();
+  expect(post).toHaveBeenCalledWith({ type: "emend:highlight", anchors: [] }, "*");
 });
 
 test("parent fragment changes and Reload establish fresh baselines; unexpected loads still lock the frame", () => {
@@ -205,18 +241,15 @@ test("ready and changed threads post only placed anchors for this doc; Show in d
   const { message, post, update } = mount([other, thread, unplaced]);
   expect(post).not.toHaveBeenCalled();
   message({ type: "emend:ready" });
-  expect(post).toHaveBeenLastCalledWith({ type: "emend:highlight", anchors: [{ threadId: id, ...anchor }] }, "*");
+  expect(post).toHaveBeenCalledWith({ type: "emend:highlight", anchors: [{ threadId: id, ...anchor }] }, "*");
   expect(JSON.stringify(post.mock.calls)).not.toContain("Private synthetic comment");
   expect(JSON.stringify(post.mock.calls)).not.toContain("state");
   fireEvent.click(screen.getByText("Show in doc"));
-  expect(outerScroll.mock.instances).toEqual([document.getElementById(`html-doc-${path}`)]);
-  expect(outerScroll).toHaveBeenCalledExactlyOnceWith({ block: "start" });
-  expect(outerScroll.mock.invocationCallOrder[0]).toBeLessThan(post.mock.invocationCallOrder.at(-1) ?? 0);
+  expect(outerScroll).not.toHaveBeenCalled();
   expect(post).toHaveBeenLastCalledWith({ type: "emend:scroll", threadId: id }, "*");
   update([]);
   expect(post).toHaveBeenLastCalledWith({ type: "emend:highlight", anchors: [] }, "*");
-  message({ type: "emend:ready" });
-  expect(post.mock.calls.filter(([data]) => data.type === "emend:highlight")).toHaveLength(3);
+  expect(post.mock.calls.filter(([data]) => data.type === "emend:highlight")).toHaveLength(2);
 });
 test("a second load permanently stops messages and anchors until explicit Reload mounts a fresh frame", () => {
   const { frame, message, post, container, update } = mount([thread]);
@@ -245,9 +278,23 @@ test("HTML cards use placement order", () => {
     id: "22222222-2222-4222-8222-222222222222",
     placement: { status: "placed" as const, location: { kind: "html-span" as const, path, start: 50, end: 55 } },
   };
-  const { container } = mount([late, thread]);
-  expect([...container.querySelectorAll("[data-thread-card]")].map((node) => node.id)).toEqual([
+  mount([late, thread]);
+  expect([...document.querySelectorAll("[data-thread-card]")].map((node) => node.id)).toEqual([
     `thread-${id}`,
     `thread-${late.id}`,
   ]);
+});
+
+test("R1.3 only position messages accept the introduction; goto still requires a heading", () => {
+  expect(FrameToParent.safeParse({ type: "emend:position", heading: null, fraction: 0 }).success).toBe(true);
+  expect(ParentToFrame.safeParse({ type: "emend:goto", heading: null, fraction: 0, label: "" }).success).toBe(false);
+});
+
+test("R5.1 goto distinguishes a pick without fraction from a restore including zero", () => {
+  const pick = { type: "emend:goto", heading: 0, label: "First" };
+  expect(ParentToFrame.parse(pick)).toEqual(pick);
+  for (const fraction of [0, 0.5, 1]) expect(ParentToFrame.parse({ ...pick, fraction })).toEqual({ ...pick, fraction });
+  for (const fraction of [null, -1, 2, NaN, Infinity, "0"])
+    expect(ParentToFrame.safeParse({ ...pick, fraction }).success).toBe(false);
+  expect(ParentToFrame.safeParse({ ...pick, extra: true }).success).toBe(false);
 });

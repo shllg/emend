@@ -8,7 +8,6 @@ import { layoutStore } from "../../lib/layout-store.ts";
 import { blockAnchor } from "../../lib/selection.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
 import { DocView } from "./DocView.tsx";
-import { HtmlDocFrame } from "./HtmlDocFrame.tsx";
 import { Writeup } from "./Writeup.tsx";
 
 const reviewId = "11111111-1111-4111-8111-111111111111";
@@ -261,14 +260,26 @@ test.each(["writeup", "doc"])(
   },
 );
 
-test("an HTML doc keeps its sandbox note under the frame", () => {
-  const { container } = mount(<HtmlDocFrame {...props} path="one.html" contentUrl="/content/synthetic/one.html" />);
-  expect(screen.getAllByText("Shown in a sandbox. Scripts in this doc never run.")).toHaveLength(1);
+test("an HTML doc keeps its sandbox note in the doc bar above the frame", () => {
+  const doc = { kind: "html" as const, path: "one.html", contentUrl: "/content/synthetic/one.html" };
+  const { container } = mount(
+    <DocView
+      {...props}
+      docs={[doc]}
+      openDoc={doc}
+      targeted={false}
+      search={{ tab: "docs", doc: doc.path }}
+      onOpenDoc={() => {}}
+      onHeading={() => {}}
+    />,
+  );
+  const note = screen.getByText("Sandboxed, scripts off");
+  expect(note.closest(".em-doc-bar")).not.toBeNull();
   for (const frame of container.querySelectorAll("iframe")) {
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
     expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
     expect(frame.className).toContain("bg-[#fff]");
-    expect(frame.nextElementSibling?.textContent).toBe("Shown in a sandbox. Scripts in this doc never run.");
+    expect(note.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   }
 });
 

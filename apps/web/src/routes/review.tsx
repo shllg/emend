@@ -63,6 +63,9 @@ function Reading({
   back,
   onHeading,
   preservePosition,
+  returning,
+  headingTarget,
+  visit,
 }: {
   reviewId: string;
   revision: RevisionView;
@@ -86,11 +89,20 @@ function Reading({
   back?: { title: string; go: () => void };
   onHeading: (id: string) => void;
   preservePosition: boolean;
+  returning: boolean;
+  headingTarget?: string;
+  visit: unknown;
 }) {
   useReadingPosition({
-    storageKey: readingPositionKey(reviewId, tab, tab === "docs" ? (openDoc?.path ?? "") : "", revision.seq),
+    storageKey: readingPositionKey(
+      reviewId,
+      tab,
+      tab === "docs" ? (openDoc?.path ?? "") : "",
+      revision.seq,
+      search.view ?? (openDoc?.kind === "html" ? "original" : "reading"),
+    ),
     selector: tab === "comments" ? '[id^="thread-"]' : '[id^="block-"], [id^="html-doc-"]',
-    active: visible,
+    active: visible && !(tab === "docs" && openDoc?.kind === "html"),
     preserve: preservePosition,
     entry,
     doc: tab === "docs" ? openDoc : undefined,
@@ -110,6 +122,10 @@ function Reading({
     return (
       <DocView
         {...props}
+        entry={entry}
+        returning={returning}
+        headingTarget={headingTarget}
+        visit={visit}
         docs={revision.docs}
         openDoc={openDoc}
         search={search}
@@ -161,7 +177,7 @@ function readingIntent(search: ReviewSearch, hash: string, seq: number) {
   }
   const reply = headingId === undefined && search.tab === "comments" && !!search.thread;
   return {
-    navigation: JSON.stringify([seq, search.tab, search.doc, search.thread, hash]),
+    navigation: JSON.stringify([seq, search.tab, search.doc, search.thread, search.view, hash]),
     elementId: reply ? `thread-${search.thread}` : appElementId(hash) ? hash : "",
     headingId,
     reply,
@@ -308,6 +324,7 @@ function LoadedReview({
     readingTab,
     readingTab === "docs" ? (openDoc?.path ?? "") : "",
     seq,
+    search.view ?? (openDoc?.kind === "html" ? "original" : "reading"),
   );
   const restoreEntry = trail.returning && trail.entry.positions.has(positionKey);
   const [failedHeading, setFailedHeading] = useState<string>();
@@ -317,7 +334,9 @@ function LoadedReview({
     !!openDoc &&
     currentIntent.headingId !== undefined &&
     (failedHeading === currentIntent.navigation ||
-      !openDoc.headings?.some((heading) => heading.id === currentIntent.headingId));
+      !(openDoc.kind === "html"
+        ? /^(0|[1-9]\d*)$/.test(currentIntent.headingId) && openDoc.headings?.[Number(currentIntent.headingId)]
+        : openDoc.headings?.some((heading) => heading.id === currentIntent.headingId)));
   const setRevision = (rev: number) => {
     void navigate({ search: { ...search, tab, rev } });
   };
@@ -394,7 +413,11 @@ function LoadedReview({
     const modified = event.button === 1 || event.metaKey || event.ctrlKey || event.shiftKey;
     if (modified && next.tab !== "docs") return;
     event.preventDefault();
-    const destination = { ...next, rev: next.tab === "docs" ? seq : (next.rev ?? search.rev) };
+    const destination = {
+      ...next,
+      view: next.view ?? search.view,
+      rev: next.tab === "docs" ? seq : (next.rev ?? search.rev),
+    };
     if (modified) {
       const params = new URLSearchParams();
       for (const [key, value] of Object.entries(destination)) if (value !== undefined) params.set(key, String(value));
@@ -404,7 +427,13 @@ function LoadedReview({
     }
   };
   const onHeading = (id: string) => {
-    if (!openDoc?.headings?.some((heading) => heading.id === id)) return;
+    if (
+      !openDoc ||
+      !(openDoc.kind === "html"
+        ? /^(0|[1-9]\d*)$/.test(id) && openDoc.headings?.[Number(id)]
+        : openDoc.headings?.some((heading) => heading.id === id))
+    )
+      return;
     navigateReading(
       { ...search, rev: seq, tab: "docs", doc: openDoc.path, thread: undefined },
       `h-${encodeURIComponent(id)}`,
@@ -588,6 +617,12 @@ function LoadedReview({
         }
       }
     }
+    if (intent.headingId !== undefined && docsVisible && openDoc?.kind === "html") {
+      const valid = /^(0|[1-9]\d*)$/.test(intent.headingId) && openDoc.headings?.[Number(intent.headingId)];
+      setFailedHeading(valid ? undefined : current.navigation);
+      complete();
+      return;
+    }
     if (intent.headingId !== undefined || missingDoc) {
       const scroller = document.querySelector<HTMLElement>("[data-reading-scroll]");
       if (!scroller || (docsVisible && !missingDoc && !openDoc)) return;
@@ -653,6 +688,7 @@ function LoadedReview({
           inbox={<ReviewInbox currentReviewId={review.id} collapsed={collapsed} onCollapsedChange={setCollapsed} />}
           tab={tab}
           hasDiff={hasDiff}
+          readingLayout={docsVisible && openDoc?.kind === "html" ? "original" : undefined}
           phoneTabs={<PhoneTabs {...tabProps} />}
           tabs={<ReviewTabs {...tabProps} docsCount={revision?.docs.length ?? 0} idBase={readingId} />}
           sendBar={
@@ -717,6 +753,7 @@ function LoadedReview({
           reading={
             <div className="contents">
               <div
+                className={docsVisible && openDoc?.kind === "html" ? "em-original-panel" : undefined}
                 {...(layout !== "phone"
                   ? {
                       role: "tabpanel" as const,
@@ -766,6 +803,9 @@ function LoadedReview({
                         visible={paneMode === "split" || tab !== "diff" || !hasDiff}
                         intentState={intentState}
                         entry={trail.entry}
+                        returning={trail.returning}
+                        headingTarget={currentIntent.headingId}
+                        visit={requested?.token ?? currentIntent.navigation}
                         preservePosition={!trail.returning && currentIntent.elementId.startsWith("diff-")}
                         back={trail.back}
                         onHeading={onHeading}

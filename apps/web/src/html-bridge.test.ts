@@ -14,12 +14,17 @@ function bridge(html: string, customHighlights = true) {
     settings: { enableJavaScriptEvaluation: false },
   });
   window.document.write(html);
+  // Unlike browsers, happy-dom's Node baseURI getter cannot run on a Document.
+  const baseURI = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(window.Document.prototype), "baseURI")?.get;
+  if (!baseURI) throw new Error("Missing document baseURI getter");
+  vi.spyOn(window.Node.prototype, "baseURI", "get").mockImplementation(() => baseURI.call(window.document));
   const post = vi.fn();
   const parent = { postMessage: post };
   Object.defineProperty(window, "parent", { value: parent });
   const source = readFileSync(new URL("../../emend/src/server/content/bridge.ts", import.meta.url), "utf8");
   const script = runInNewContext(`${source.replace("export const", "const")}; BRIDGE_SOURCE;`);
   const highlights = new Map();
+  Object.defineProperty(window, "HighlightRegistry", { value: Map });
   class Highlight {
     range: Range;
     constructor(range: Range) {
@@ -49,6 +54,10 @@ function bridge(html: string, customHighlights = true) {
     window.document.dispatchEvent(new window.Event("mouseup"));
     return post.mock.calls.findLast(([data]) => data.type === "emend:anchor")?.[0];
   };
+  message({
+    type: "emend:docs",
+    paths: ["docs/seed.html", "docs/other.html", "docs/a #é.html", "docs/plan.md", "docs/plan.markdown"],
+  });
   return { window, post, highlights, message, select, replaceSync };
 }
 test.each(corpus)("bridge text equals server docText for corpus $name", async (entry) => {
@@ -137,9 +146,6 @@ test.each([
 );
 
 test.each([
-  ["#heading", {}],
-  ["seed.html#heading", {}],
-  ["seed.html", {}],
   ["seed.svg", {}],
   ["shared.css", {}],
   ["module.mjs", {}],
@@ -196,6 +202,22 @@ test("selection normalizes across nodes, skips omitted subtrees, and supplies 32
     await b.window.happyDOM.close();
   }
 });
+test("highlight registry methods are called through their prototype", async () => {
+  const b = bridge("<body><p>seed</p></body>");
+  const shadow = vi.fn(() => {
+    throw new Error("shadowed method");
+  });
+  b.highlights.set = shadow;
+  b.highlights.delete = shadow;
+  try {
+    b.message({ type: "emend:highlight", anchors: [{ threadId: "one", quote: "seed", prefix: "", suffix: "" }] });
+    expect(shadow).not.toHaveBeenCalled();
+    expect(b.highlights.size).toBe(1);
+  } finally {
+    await b.window.happyDOM.close();
+  }
+});
+
 test("overlong selections post nothing and highlights require unique exact context, including overlaps", async () => {
   const b = bridge(`<body><p>${"x".repeat(2001)}</p><div>aaa red seed blue</div></body>`);
   try {
@@ -228,8 +250,7 @@ test("without Custom Highlights, no DOM fallback is used and matching quotes sti
   try {
     const paragraph = b.window.document.querySelector("p");
     if (!paragraph) throw new Error("Missing paragraph");
-    const scroll = vi.fn();
-    paragraph.scrollIntoView = scroll;
+    const scroll = vi.spyOn(b.window.Element.prototype, "scrollIntoView").mockImplementation(() => {});
     const children = [...b.window.document.body.childNodes];
     b.message({ type: "emend:highlight", anchors: [{ threadId: "one", quote: "seed", prefix: "", suffix: "" }] });
     expect(b.highlights.size).toBe(0);

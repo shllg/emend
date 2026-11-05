@@ -1,10 +1,22 @@
 import type { RevisionView } from "@emend/contract";
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft, ChevronRight, FileCode, Files, FileText, LayoutList, List } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  ChevronRight,
+  FileCode,
+  Files,
+  FileText,
+  LayoutList,
+  List,
+  MessageSquare,
+  ShieldCheck,
+} from "lucide-react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { docFilename, docTitle } from "../../lib/doc-navigation.ts";
-import type { DocNavigation } from "../../lib/frame-messages.ts";
+import type { DocNavigation, HtmlPosition } from "../../lib/frame-messages.ts";
 import { focusReadingTarget } from "../../lib/reading-focus.ts";
+import { readingPositionKey } from "../../lib/reading-position.ts";
+import type { ReadingEntry } from "../../lib/use-reading-trail.ts";
 import type { ReviewSearch } from "../../router.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -23,8 +35,16 @@ export function DocView({
   composingPath,
   onHeading = () => {},
   back,
+  entry,
+  returning = false,
+  headingTarget,
+  visit,
   ...props
 }: ReaderProps & {
+  entry?: ReadingEntry;
+  returning?: boolean;
+  headingTarget?: string;
+  visit?: unknown;
   docs: RevisionView["docs"];
   openDoc?: RevisionView["docs"][number];
   search: ReviewSearch;
@@ -48,8 +68,49 @@ export function DocView({
     return () => resize.disconnect();
   }, [openDoc?.path]);
   const [filter, setFilter] = useState("");
-  const currentHeading = useCurrentHeading(root, openDoc);
-  const headings = openDoc?.kind === "markdown" ? (openDoc.headings?.filter((heading) => heading.id) ?? []) : [];
+  const markdownHeading = useCurrentHeading(root, openDoc);
+  const [htmlHeading, setHtmlHeading] = useState<{ path: string; heading: number | null }>();
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const commentsButton = useRef<HTMLButtonElement>(null);
+  const onPosition = useCallback(
+    (position: HtmlPosition) => {
+      if (openDoc) setHtmlHeading({ path: openDoc.path, heading: position.heading });
+    },
+    [openDoc],
+  );
+  const currentHeading =
+    openDoc?.kind === "html"
+      ? htmlHeading?.path === openDoc.path && htmlHeading.heading !== null
+        ? String(htmlHeading.heading)
+        : undefined
+      : markdownHeading;
+  const headings = useMemo(
+    () =>
+      openDoc?.kind === "html"
+        ? (openDoc.headings ?? []).map((heading, index) => ({ ...heading, id: String(index) }))
+        : (openDoc?.headings?.filter((heading) => heading.id) ?? []),
+    [openDoc],
+  );
+  const frameReading = useMemo(
+    () =>
+      entry && openDoc
+        ? {
+            key: readingPositionKey(props.reviewId, "docs", openDoc.path, props.revision, search.view ?? "original"),
+            entry,
+            returning,
+            target: headingTarget,
+            visit,
+          }
+        : undefined,
+    [entry, openDoc, props.reviewId, props.revision, search.view, returning, headingTarget, visit],
+  );
+  const commentCount = props.threads.filter(
+    (thread) =>
+      thread.state !== "resolved" &&
+      (thread.placement.status === "placed" && "path" in thread.placement.location
+        ? thread.placement.location.path === openDoc?.path
+        : "path" in thread.target && thread.target.path === openDoc?.path),
+  ).length;
   const hasContents = headings.length >= 3;
   const headingId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -60,6 +121,7 @@ export function DocView({
   useEffect(() => {
     const last = previous.current;
     previous.current = { path, doc: search.doc };
+    if (last && last.path !== path) setCommentsOpen(false);
     if (last && path === last.path) return;
     const focusNavigation = last && last.doc !== search.doc && !targeted;
     setDestination((current) => (current?.path === path ? current : undefined));
@@ -88,6 +150,13 @@ export function DocView({
         docNavigation={destination?.path === openDoc.path ? destination : undefined}
         onNavigate={follow}
         composerOpen={composingPath === openDoc.path}
+        headings={openDoc.headings}
+        docPaths={docs.map((doc) => doc.path)}
+        reading={frameReading}
+        onPosition={onPosition}
+        commentsOpen={commentsOpen}
+        onCommentsOpenChange={setCommentsOpen}
+        returnFocus={() => commentsButton.current}
       />
     ) : undefined;
   const groups = useMemo<ReaderGroup[]>(
@@ -144,7 +213,12 @@ export function DocView({
       </>
     );
   return (
-    <div ref={root} className="em-doc-view" data-contents={hasContents ? "" : undefined}>
+    <div
+      ref={root}
+      className="em-doc-view"
+      data-layout={openDoc.kind === "html" ? "original" : undefined}
+      data-contents={hasContents ? "" : undefined}
+    >
       <div ref={bar} className="em-doc-bar sticky z-(--z-sticky) border-b border-line-1 bg-surface">
         <div className="em-doc-title">
           <h2 ref={heading} id={headingId} title={openDoc.path} tabIndex={-1} dir="auto">
@@ -218,6 +292,20 @@ export function DocView({
               )}
             </ReadingMenu>
           )}
+          {openDoc.kind === "html" && (
+            <Button
+              ref={commentsButton}
+              variant="ghost"
+              className="em-doc-control"
+              aria-label={`Comments (${commentCount})`}
+              aria-haspopup="dialog"
+              aria-expanded={commentsOpen}
+              onClick={() => setCommentsOpen(true)}
+            >
+              <Icon icon={MessageSquare} />
+              <span className="em-doc-control-label">Comments ({commentCount})</span>
+            </Button>
+          )}
           {hasContents && (
             <span className="em-doc-contents-control">
               <ReadingMenu label="Contents" icon={List}>
@@ -246,9 +334,15 @@ export function DocView({
             </Button>
           )}
         </div>
+        {openDoc.kind === "html" && (
+          <p className="flex items-center gap-1.5 text-fg-3 [font:var(--type-meta)]">
+            <Icon icon={ShieldCheck} size={13} />
+            Sandboxed, scripts off
+          </p>
+        )}
       </div>
       <div className="em-doc-body" data-reading-doc={openDoc.path}>
-        <BlockReader key={openDoc.path} {...props} groups={groups} />
+        {openDoc.kind === "html" ? content : <BlockReader key={openDoc.path} {...props} groups={groups} />}
         {hasContents && (
           <aside className="em-doc-contents-rail">
             <DocContents headings={headings} current={currentHeading} onPick={onHeading} />
