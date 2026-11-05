@@ -81,3 +81,26 @@ runs outside it. CI runs the sharded layout, and the plan's T.1 entry records th
   a network guard for web tests. Steps 8 to 11 follow on a second branch, together with a
   Node-side network guard (it needs a `setupFiles` entry in `vitest.config.ts`) and a real-worker
   test for the comment renderer's default worker (`server/routes/comment-html.ts:128-129`).
+- Also for the second branch, from the part-1 reviews. Most of these matter only after a test has
+  already failed:
+  - `pollUntil` checks the test's lifecycle before an async assertion runs, not after it settles,
+    so an expired test body can resume once.
+  - In `comment-html.test.ts` (about :354), a failed timer assertion skips `gate.resolve()`. The
+    module's `tail` stays blocked, and later tests time out.
+  - The web `asyncWrapper` never settles a late wait. That strands cleanup that sits only in a
+    `finally` (`worker-render.test.tsx`, about :167). Rejecting instead would let it run.
+  - The verify-layout guard should also pin `verify:static` and `verify:build`, and the state
+    isolation (`globalSetup`) of the bench project.
+  - `poll-until.test.ts:7` sets `{ timeout: 10000 }`, which it does not need.
+  - happy-dom prints an "Iframe page loading is disabled" trace to stderr for each iframe in the web
+    tests (about 69 per gate). Silence or stub them, so real failures stay visible.
+  - Step 9 also covers the real sleeps in `reading-position.test.tsx` (:203, :223, :235) and
+    `pair-device.test.tsx` (:321).
+- CI hung once at `575e6f0` in serve-signals, "a second SIGTERM while startup escalation is
+  pending…", until its 5 s timeout. The local runs never reproduced it: about 140, including
+  CI's shard on 4 CPUs with dash as `/bin/sh`. As you chose, the held-escalation tests no longer
+  depend on the fake shell's TERM and EXIT traps. A failed serve-signals test now reports its
+  pending waits, its markers and the process states of emend, the launcher and the descendant.
+- Resuming a release that was tagged before this branch runs the new `verify.yml` on the old
+  commit. That commit's `package.json` has no `verify:*` scripts, so the run fails without
+  publishing anything. No release is unfinished today.
