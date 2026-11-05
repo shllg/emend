@@ -123,6 +123,10 @@ test("direct feedback and reply share API output, and confirm only after stdout 
     await flush.promise;
   };
   const command = run(["feedback", result.reviewId], out.io);
+  onTestFinished(async () => {
+    flush.resolve();
+    await command;
+  });
   await writing.promise;
   const confirmed = () =>
     server.db.read((q) => q.values(sql`select confirmed_at from deliveries where owner_id = ${server.ownerId}`));
@@ -158,8 +162,15 @@ test("two direct waits claim a later reviewer Send only once and clear their wai
     vi.useRealTimers();
   });
   const pauses = trackPauses(pauseModule);
-  const first = takeFeedback(f.stateDir, target, result.reviewId, 2);
-  const second = takeFeedback(f.stateDir, target, result.reviewId, 2);
+  const controller = new AbortController();
+  const first = takeFeedback(f.stateDir, target, result.reviewId, 2, { signal: controller.signal });
+  const second = takeFeedback(f.stateDir, target, result.reviewId, 2, { signal: controller.signal });
+  // Observe both rejections immediately; teardown aborts and drains before restoring timers/spies.
+  const settled = Promise.allSettled([first, second]);
+  onTestFinished(async () => {
+    controller.abort();
+    await settled;
+  });
   const rows = () =>
     server.db.read((q) =>
       q.values(sql`select id from agent_waiters where owner_id = ${server.ownerId} and review_id = ${result.reviewId}`),
@@ -211,6 +222,11 @@ test("SIGTERM before stdout flush prevents confirmation", async () => {
     await flush.promise;
   };
   const command = run(["wait", result.reviewId], out.io);
+  onTestFinished(async () => {
+    process.emit("SIGTERM");
+    flush.resolve();
+    await command;
+  });
   await writing.promise;
   process.emit("SIGTERM");
   flush.resolve();

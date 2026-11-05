@@ -1,56 +1,84 @@
-import { expect, onTestFinished, test, vi } from "vitest";
-import { pollUntil } from "./poll-until.ts";
+import { expect, onTestFinished, TestRunner, test, vi } from "vitest";
+import { pollUntil, pollUntilForTask } from "./poll-until.ts";
 
 // Spy on the helper's options; all polling still goes through pollUntil.
 const pollingApi = vi;
 
-test("each poll gets the test's remaining time, even above Vitest's default wait deadline", { timeout: 10000 }, async ({
+test("each poll gets the test's full timeout, above Vitest's default wait deadline", { timeout: 10000 }, async ({
   task,
 }) => {
-  const start = task.result?.startTime;
-  if (start === undefined) throw new Error("missing test start");
-  const now = vi.spyOn(vi, "getRealSystemTime");
-  onTestFinished(() => now.mockRestore());
   const wait = vi.spyOn(pollingApi, "waitFor").mockResolvedValue("ready");
   onTestFinished(() => wait.mockRestore());
-  for (const elapsed of [250, 4000, 9999]) {
-    now.mockReturnValue(start + elapsed);
-    expect(await pollUntil(() => "ready", { interval: 7 })).toBe("ready");
-    expect(wait).toHaveBeenLastCalledWith(expect.any(Function), { interval: 7, timeout: task.timeout - elapsed });
-  }
+  expect(await pollUntil(() => "ready", { interval: 7 })).toBe("ready");
+  expect(wait).toHaveBeenCalledWith(expect.any(Function), { interval: 7, timeout: task.timeout });
 });
 
-test.for([0, 1])("a poll starting %s ms past the deadline fails before calling its assertion", (past, { task }) => {
-  const start = task.result?.startTime;
-  if (start === undefined) throw new Error("missing test start");
-  const now = vi.spyOn(vi, "getRealSystemTime").mockReturnValue(start + task.timeout + past);
-  onTestFinished(() => now.mockRestore());
-  const wait = vi.spyOn(pollingApi, "waitFor");
-  onTestFinished(() => wait.mockRestore());
+test("calling outside a test returns a rejected promise", async () => {
+  const current = vi.spyOn(TestRunner, "getCurrentTest").mockReturnValue(undefined);
+  onTestFinished(() => current.mockRestore());
   const assertion = vi.fn();
-  expect(() => pollUntil(assertion)).toThrow("at or after the test's deadline");
-  expect(wait).not.toHaveBeenCalled();
+  const result = pollUntil(assertion);
+  expect(result).toBeInstanceOf(Promise);
+  await expect(result).rejects.toThrow("pollUntil must run inside a test");
   expect(assertion).not.toHaveBeenCalled();
 });
 
-test("fake Date and performance clocks do not change the poll's real deadline", async ({ task }) => {
-  vi.useFakeTimers();
-  onTestFinished(() => {
-    vi.useRealTimers();
+// Drive waitFor's attempts directly: Vitest's polling scheduler uses safe (real) timers,
+// even when application timers are faked. These lifecycle checks need no clock at all.
+function pollingAttempts() {
+  let attempt: () => unknown = () => {
+    throw new Error("poll has not started");
+  };
+  const done = Promise.withResolvers<unknown>();
+  const wait = vi.spyOn(pollingApi, "waitFor").mockImplementation((assertion) => {
+    attempt = assertion;
+    return done.promise;
   });
-  vi.setSystemTime(0);
-  const wait = vi.spyOn(pollingApi, "waitFor").mockResolvedValue("ready");
   onTestFinished(() => wait.mockRestore());
-  const start = task.result?.startTime;
-  if (start === undefined) throw new Error("missing test start");
-  const before = vi.getRealSystemTime();
-  await pollUntil(() => "ready");
-  const after = vi.getRealSystemTime();
-  const options = wait.mock.calls[0]?.[1];
-  if (typeof options !== "object") throw new Error("missing polling options");
-  expect(options.timeout).toBeGreaterThanOrEqual(start + task.timeout - after);
-  expect(options.timeout).toBeLessThanOrEqual(start + task.timeout - before);
+  return {
+    pending: () => expect(attempt).toThrow("not yet"),
+    finish: () => done.resolve(attempt()),
+  };
+}
+
+test.each(["fail", "pass", "next test"] as const)("a body poll stops on %s", async (end) => {
+  const attempts = pollingAttempts();
+  const task: NonNullable<Parameters<typeof pollUntilForTask>[0]> = { timeout: 5000, result: { state: "run" } };
+  let current = task;
+  const assertion = vi.fn(() => {
+    throw new Error("not yet");
+  });
+  const result = pollUntilForTask(task, () => current, assertion);
+  const rejected = expect(result).rejects.toThrow("the test finished before the condition held");
+  attempts.pending();
+  expect(assertion).toHaveBeenCalledOnce();
+  if (end === "next test") current = { ...task };
+  else task.result = { state: end };
+  attempts.finish();
+  await rejected;
+  expect(assertion).toHaveBeenCalledOnce();
 });
+
+test.each(["pass", "fail"] as const)(
+  "a cleanup poll after %s stops only when Vitest leaves the test",
+  async (state) => {
+    const attempts = pollingAttempts();
+    const task: NonNullable<Parameters<typeof pollUntilForTask>[0]> = { timeout: 5000, result: { state } };
+    let current: typeof task | undefined = task;
+    const assertion = vi.fn(() => {
+      throw new Error("not yet");
+    });
+    const result = pollUntilForTask(task, () => current, assertion);
+    const rejected = expect(result).rejects.toThrow("the test finished before the condition held");
+    attempts.pending();
+    attempts.pending();
+    expect(assertion).toHaveBeenCalledTimes(2);
+    current = undefined;
+    attempts.finish();
+    await rejected;
+    expect(assertion).toHaveBeenCalledTimes(2);
+  },
+);
 
 test("polling under an unlimited test timeout keeps polling until the condition holds", { timeout: 0 }, async () => {
   let calls = 0;

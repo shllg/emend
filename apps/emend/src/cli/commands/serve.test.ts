@@ -8,6 +8,13 @@ import { stopLocalServer } from "../service/takeover.ts";
 import { parseServeArgs } from "./serve.ts";
 
 vi.mock("../../server/serve.ts", () => ({ startServer: vi.fn() }));
+// These tests fake the Tailscale API. A late continuation must never resolve a host binary,
+// including the macOS app fallback, after those API spies have been restored.
+vi.mock("../executable.ts", () => ({
+  async findExecutable() {
+    throw new Error("no real executables in serve tests");
+  },
+}));
 let env: NodeJS.ProcessEnv;
 beforeEach(async () => {
   // Finished hooks run in reverse registration order, after afterEach: restore spies last.

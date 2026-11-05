@@ -10,8 +10,20 @@ import { Duplex } from "node:stream";
 import { expect, onTestFinished, test, vi } from "vitest";
 import { run } from "../../main.ts";
 import * as serverModule from "../../server/serve.ts";
+import { waitForTailscaleEscalations } from "../tailscale.ts";
 
 vi.mock("node:child_process", async (original) => ({ ...(await original<typeof import("node:child_process")>()) }));
+const executablePaths = new Set<string>();
+vi.mock("../executable.ts", async (original) => {
+  const actual = await original<typeof import("../executable.ts")>();
+  return {
+    // The CLI cannot pass RunOptions: refuse the real macOS app fallback, even after teardown.
+    async findExecutable(name: string, searchPath: string) {
+      if (!executablePaths.has(searchPath)) throw new Error("executable lookup outside the test fixtures");
+      return actual.findExecutable(name, searchPath);
+    },
+  };
+});
 
 // Exercise real server state and CLI lifecycle without reserving a privileged TCP port.
 vi.mock("node:http", async (original) => {
@@ -88,8 +100,17 @@ async function fixture(
   initial: "empty" | "same" | "occupied" | "other-port" | "tls-port" = "empty",
   failure: "setup" | "stop" | "setup-after-write" | "setup-timeout" | undefined = undefined,
 ) {
+  // Finished hooks run in reverse order: drains and timer restoration precede mock restoration.
+  onTestFinished(() => {
+    vi.restoreAllMocks();
+    vi.mocked(createServer).mockClear();
+  });
   const dir = await mkdtemp(join(tmpdir(), "emend-serve-fix1-"));
-  onTestFinished(() => rm(dir, { force: true, recursive: true }));
+  executablePaths.add(dir);
+  onTestFinished(async () => {
+    executablePaths.delete(dir);
+    await rm(dir, { force: true, recursive: true });
+  });
   const configPath = join(dir, "config.json");
   const callsPath = join(dir, "calls");
   const own = {
@@ -129,24 +150,60 @@ fi
   const start = vi.spyOn(serverModule, "startServer");
   const setupReady = Promise.withResolvers<void>();
   const setupExited = Promise.withResolvers<void>();
-  if (failure === "setup-timeout") {
+  const fakeTimers = failure === "setup-timeout";
+  if (fakeTimers) {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     onTestFinished(() => {
       vi.useRealTimers();
     });
-    const spawn = childProcess.spawn;
-    vi.spyOn(childProcess, "spawn").mockImplementation((...args) => {
-      const child = spawn(...args);
-      if (Array.isArray(args[1]) && args[1].includes("--bg")) {
-        let output = "";
-        child.stdout?.on("data", (chunk) => {
-          output += String(chunk);
-          if (output.includes("setup-ready\n")) setupReady.resolve();
-        });
-        child.once("exit", () => setupExited.resolve());
+  }
+  const children = new Set<childProcess.ChildProcess>();
+  const commands = new Set<Promise<number>>();
+  let changed = Promise.withResolvers<void>();
+  const notify = () => {
+    changed.resolve();
+    changed = Promise.withResolvers<void>();
+  };
+  let draining: Promise<void> | undefined;
+  const drain = () => {
+    draining ??= (async () => {
+      // A command can still be starting or spawning cleanup children. Track their actual events;
+      // fake deadlines and group escalations must finish before the command can remove its handlers.
+      while (commands.size || children.size) {
+        const progress = changed.promise;
+        process.emit("SIGTERM");
+        for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+        if (fakeTimers) await vi.runAllTimersAsync();
+        if (commands.size || children.size) await progress;
       }
-      return child;
+      if (fakeTimers) await vi.runAllTimersAsync();
+      await waitForTailscaleEscalations();
+      for (const result of start.mock.results)
+        if (result.type === "return") await result.value.then((server) => server.close());
+    })();
+    return draining;
+  };
+  onTestFinished(drain);
+  const spawn = childProcess.spawn;
+  vi.spyOn(childProcess, "spawn").mockImplementation((...args) => {
+    const child = spawn(...args);
+    children.add(child);
+    notify();
+    child.once("close", () => {
+      children.delete(child);
+      notify();
     });
+    if (Array.isArray(args[1]) && args[1].includes("--bg")) {
+      let output = "";
+      child.stdout?.on("data", (chunk) => {
+        output += String(chunk);
+        if (output.includes("setup-ready\n")) setupReady.resolve();
+      });
+      child.once("exit", () => setupExited.resolve());
+    }
+    return child;
+  });
+  if (fakeTimers) {
     const tailscale = await import("../tailscale.ts");
     const ensure = tailscale.ensureTailscaleServe;
     vi.spyOn(tailscale, "ensureTailscaleServe").mockImplementation((port, env, name, onSetup, options) =>
@@ -166,21 +223,22 @@ fi
       stderr.push(line);
     },
   };
-  onTestFinished(async () => {
-    try {
-      process.emit("SIGTERM");
-      for (const result of start.mock.results)
-        if (result.type === "return") await result.value.then((server) => server.close());
-    } finally {
-      // Removing the fixture also ends fake processes if their fake deadline never fired.
-      await rm(dir, { force: true, recursive: true });
-      vi.useRealTimers();
-      vi.restoreAllMocks();
-      vi.mocked(createServer).mockClear();
-    }
-  });
   return {
     dir,
+    drain,
+    setupReady: setupReady.promise,
+    setupExited: setupExited.promise,
+    run(args: string[]) {
+      if (draining) throw new Error("fixture is already draining");
+      const command = run(args, io);
+      commands.add(command);
+      const finished = () => {
+        commands.delete(command);
+        notify();
+      };
+      void command.then(finished, finished);
+      return command;
+    },
     serving: serving.promise,
     async expireSetup() {
       await setupReady.promise;
@@ -212,7 +270,7 @@ test.each(["occupied", "permission"] as const)(
       failure === "permission" ? "setup" : undefined,
     );
     await writeFile(join(f.dir, "server-url.json"), JSON.stringify({ baseUrl: `https://${name}` }));
-    expect(await run(["serve", "--tailscale", "--port", "0"], f.io)).toBe(1);
+    expect(await f.run(["serve", "--tailscale", "--port", "0"])).toBe(1);
     expect(await f.saved()).toEqual({ baseUrl: "http://127.0.0.1:41999" });
     await expect(stat(join(f.dir, "server.json"))).rejects.toMatchObject({ code: "ENOENT" });
     expect(await f.calls()).not.toContain("serve --https=443 off");
@@ -228,7 +286,7 @@ test.each(["setup-after-write", "setup-timeout"] as const)(
   "a failed setup (%s) removes a half-applied handler and preserves the original error",
   async (failure) => {
     const f = await fixture("empty", failure);
-    const result = run(["serve", "--tailscale", "--port", "0"], f.io);
+    const result = f.run(["serve", "--tailscale", "--port", "0"]);
     if (failure === "setup-timeout") await f.expireSetup();
     expect(await result).toBe(1);
     expect(f.stdout).toEqual([]);
@@ -253,7 +311,7 @@ test.each(["setup-after-write", "setup-timeout"] as const)(
 test("a failed setup without a write rechecks status and leaves the config untouched", async () => {
   const f = await fixture("tls-port", "setup");
   const before = await readFile(f.configPath, "utf8");
-  expect(await run(["serve", "--tailscale", "--port", "41999"], f.io)).toBe(1);
+  expect(await f.run(["serve", "--tailscale", "--port", "41999"])).toBe(1);
   expect(f.stderr).toEqual([
     "emend: Could not configure Tailscale Serve. Run `sudo tailscale serve --bg --https=443 http://127.0.0.1:41999` once as root, then try again. emend uses that route and never removes it.\n",
   ]);
@@ -271,7 +329,7 @@ test.each(["empty", "same"] as const)(
   async (initial) => {
     const f = await fixture(initial);
     const before = await readFile(f.configPath, "utf8");
-    const result = run(["serve", "--tailscale", "--port", "0"], f.io);
+    const result = f.run(["serve", "--tailscale", "--port", "0"]);
     await f.serving;
     expect(f.stdout).toEqual([`emend: serving https://${name}\n`]);
     expect(await f.saved()).toEqual({ baseUrl: `https://${name}` });
@@ -292,11 +350,7 @@ test.each(["empty", "same"] as const)(
 );
 test("SIGHUP removes the matching handler and discovery file, retaining the public address", async () => {
   const f = await fixture();
-  const result = run(["serve", "--tailscale", "--port", "0"], f.io);
-  onTestFinished(async () => {
-    process.emit("SIGTERM");
-    await result;
-  });
+  const result = f.run(["serve", "--tailscale", "--port", "0"]);
   try {
     await f.serving;
     expect(f.stdout).toHaveLength(1);
@@ -315,7 +369,7 @@ test("SIGHUP removes the matching handler and discovery file, retaining the publ
 });
 test("a handler replaced before shutdown is never removed", async () => {
   const f = await fixture();
-  const result = run(["serve", "--tailscale", "--port", "0"], f.io);
+  const result = f.run(["serve", "--tailscale", "--port", "0"]);
   await f.serving;
   expect(f.stdout).toHaveLength(1);
   await writeFile(f.configPath, JSON.stringify(occupied));
@@ -325,7 +379,7 @@ test("a handler replaced before shutdown is never removed", async () => {
 });
 test("cleanup failure prints one stderr line and keeps a successful exit code", async () => {
   const f = await fixture("empty", "stop");
-  const result = run(["serve", "--tailscale", "--port", "0"], f.io);
+  const result = f.run(["serve", "--tailscale", "--port", "0"]);
   await f.serving;
   expect(f.stdout).toHaveLength(1);
   process.emit("SIGTERM");
@@ -340,7 +394,7 @@ test("a throwing shutdown stderr writer cannot change the exit code or run befor
     discoveryAtReport.push(existsSync(join(f.dir, "server.json")));
     throw Object.assign(new Error("write EIO"), { code: "EIO" });
   };
-  const result = run(["serve", "--tailscale", "--port", "0"], f.io);
+  const result = f.run(["serve", "--tailscale", "--port", "0"]);
   await f.serving;
   expect(f.stdout).toHaveLength(1);
   process.emit("SIGHUP");
@@ -356,13 +410,9 @@ test("a throwing stdout writer keeps serving until a signal cleans up", async ()
     throw new Error("synthetic stdout failure");
   };
   let settled = false;
-  const result = run(["serve", "--tailscale", "--port", "0"], f.io).then((code) => {
+  const result = f.run(["serve", "--tailscale", "--port", "0"]).then((code) => {
     settled = true;
     return code;
-  });
-  onTestFinished(async () => {
-    process.emit("SIGTERM");
-    await result;
   });
   try {
     await attempted.promise;
@@ -386,11 +436,7 @@ test.each(["other-port", "tls-port"] as const)(
   "another HTTPS port (%s) on the same name warns once and startup continues",
   async (initial) => {
     const f = await fixture(initial);
-    const result = run(["serve", "--tailscale", "--port", "0"], f.io);
-    onTestFinished(async () => {
-      process.emit("SIGTERM");
-      await result;
-    });
+    const result = f.run(["serve", "--tailscale", "--port", "0"]);
     try {
       await f.serving;
       expect(f.stdout).toHaveLength(1);
@@ -403,3 +449,20 @@ test.each(["other-port", "tls-port"] as const)(
     }
   },
 );
+
+test.each(["running", "escalating"] as const)("teardown drains a %s setup before restoring timers", async (phase) => {
+  const listeners = ["SIGINT", "SIGTERM", "SIGHUP"].map((signal) => process.listenerCount(signal));
+  const f = await fixture("empty", "setup-timeout");
+  const command = f.run(["serve", "--tailscale", "--port", "0"]);
+  await f.setupReady;
+  if (phase === "escalating") {
+    await vi.advanceTimersByTimeAsync(1_000);
+    await f.setupExited;
+  }
+  expect(vi.getTimerCount()).toBeGreaterThan(0);
+  await f.drain();
+  expect(await command).toBe(1);
+  await waitForTailscaleEscalations();
+  expect(vi.getTimerCount()).toBe(0);
+  expect(["SIGINT", "SIGTERM", "SIGHUP"].map((signal) => process.listenerCount(signal))).toEqual(listeners);
+});

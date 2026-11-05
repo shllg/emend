@@ -260,7 +260,10 @@ wait
     { mode: 0o700 },
   );
   const abort = new AbortController();
-  const result = tailscaleSelf({ PATH: dir, HOME: dir }, abort.signal);
+  const result = tailscaleSelf({ PATH: dir, HOME: dir }, abort.signal, {
+    platform: "linux",
+    appPath: join(dir, "missing-app"),
+  });
   const assertion = expect(result).rejects.toThrow("synthetic abort");
   const child = await spawned.promise;
   await once(child.stderr as NodeJS.ReadableStream, "data");

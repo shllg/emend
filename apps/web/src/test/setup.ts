@@ -1,7 +1,7 @@
 import dns from "node:dns";
 import { isIP } from "node:net";
-import { configure } from "@testing-library/react";
-import { afterAll, afterEach, beforeEach, expect, vi } from "vitest";
+import { configure, getConfig } from "@testing-library/react";
+import { afterAll, afterEach, beforeEach, expect, TestRunner, vi } from "vitest";
 import { Channel, Events, Locks } from "./events.ts";
 
 // A web test never reaches the network. The guard records every attempt it refuses, with the test
@@ -117,8 +117,35 @@ const failOnBlocked = () => {
 let restoreLocks = () => {};
 // Vitest treats a test timeout of 0 as unlimited, and a timer given 0 or Infinity fires at once.
 const LONGEST_TIMER_DELAY = 2_147_483_647;
+type WaitTask = Pick<NonNullable<ReturnType<typeof TestRunner.getCurrentTest>>, "result">;
+type AsyncWrapper = ReturnType<typeof getConfig>["asyncWrapper"];
+
+/** Preserve React's wrapper and its cleanup, but never resume a wait's expired caller. */
+export function guardAsyncWrapper(
+  wrapper: AsyncWrapper,
+  currentTest: () => WaitTask | undefined = () => TestRunner.getCurrentTest(),
+): AsyncWrapper {
+  return async (callback) => {
+    const task = currentTest();
+    const body = task?.result?.state === "run";
+    let outcome: { value: unknown } | { error: unknown };
+    try {
+      outcome = { value: await wrapper(callback) };
+    } catch (error) {
+      outcome = { error };
+    }
+    if (task && (currentTest() !== task || (body && task.result?.state !== "run"))) {
+      // The underlying wait and React wrapper have settled and cleaned up. Leave only the expired
+      // caller pending: neither a late match nor a late rejection may run its remaining body.
+      return new Promise<never>(() => {});
+    }
+    if ("error" in outcome) throw outcome.error;
+    return outcome.value;
+  };
+}
+configure({ asyncWrapper: guardAsyncWrapper(getConfig().asyncWrapper) });
 // Testing Library's config is global, so this is wrong for concurrent tests; the polling guard bans them.
-// There is no supported per-call timeout hook here, so a waitFor started late can run past the test's deadline.
+// Waits keep the full test timeout; asyncWrapper prevents a late settlement from resuming an expired test body.
 beforeEach(({ task }) => configure({ asyncUtilTimeout: task.timeout || LONGEST_TIMER_DELAY }));
 beforeEach(() => {
   // Some web tests deliberately use the Node environment instead of happy-dom.

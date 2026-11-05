@@ -2,18 +2,36 @@ import { TestRunner, vi } from "vitest";
 
 // Vitest treats a test timeout of 0 as unlimited, and a timer given 0 or Infinity fires at once.
 const LONGEST_TIMER_DELAY = 2_147_483_647;
+const STOP = Symbol("test finished");
+type PollTask = Pick<NonNullable<ReturnType<typeof TestRunner.getCurrentTest>>, "timeout" | "result">;
 
 /**
- * For state without a completion event. Each poll gets only the running test's remaining real time.
- * An expired deadline fails immediately; a test timeout of 0 uses the longest supported timer delay.
- * Not for concurrent tests: Vitest keeps a single current-test variable, so the deadline would be the wrong test's.
+ * For state without a completion event. Each poll gets the test's full timeout from its own start;
+ * timeout 0 uses the longest supported timer delay. Body polls stop calling the assertion when the
+ * body finishes, and cleanup polls when Vitest leaves the test. Both reject if stopped before success.
+ * Not for concurrent tests: Vitest keeps a single current-test variable.
  */
-export function pollUntil<T>(assertion: () => T | Promise<T>, options: { interval?: number } = {}): Promise<T> {
-  const task = TestRunner.getCurrentTest();
+export async function pollUntil<T>(assertion: () => T | Promise<T>, options: { interval?: number } = {}): Promise<T> {
+  return pollUntilForTask(TestRunner.getCurrentTest(), () => TestRunner.getCurrentTest(), assertion, options);
+}
+
+/** Lifecycle inputs are explicit so the stop rules can be tested without timing out a real test. */
+export async function pollUntilForTask<T>(
+  task: PollTask | undefined,
+  currentTest: () => PollTask | undefined,
+  assertion: () => T | Promise<T>,
+  options: { interval?: number } = {},
+): Promise<T> {
   if (!task) throw new Error("pollUntil must run inside a test");
-  const start = task.result?.startTime;
-  if (start === undefined) throw new Error("pollUntil requires the running test's start time");
-  const timeout = task.timeout === 0 ? LONGEST_TIMER_DELAY : start + task.timeout - vi.getRealSystemTime();
-  if (timeout <= 0) throw new Error("pollUntil cannot start at or after the test's deadline");
-  return vi.waitFor(assertion, { ...options, timeout });
+  const body = task.result?.state === "run";
+  const timeout = task.timeout === 0 ? LONGEST_TIMER_DELAY : task.timeout;
+  const result = await vi.waitFor(
+    () => {
+      if (currentTest() !== task || (body && task.result?.state !== "run")) return STOP;
+      return assertion();
+    },
+    { ...options, timeout },
+  );
+  if (result === STOP) throw new Error("pollUntil: the test finished before the condition held");
+  return result;
 }
