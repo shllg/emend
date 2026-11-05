@@ -106,6 +106,12 @@ runs outside it. CI runs the sharded layout, and the plan's T.1 entry records th
   report also lacks labels for raw `closed` and `exited` waits outside the held-escalation tests.
   And "teardown never signals a completed call's old pid" runs the cleanup inside its body, so a
   later failure in that test reports no markers.
+- Also left for the second branch, from the part-1 security review: if the Vitest worker dies
+  without running its hooks (a hard Ctrl-C, a crash or an OOM kill) while a held-escalation test
+  holds emend's SIGKILL escalation, emend stays alive and the stubborn descendant spins at full
+  CPU forever. Before `290442d`, the real 1 s escalation bounded this. Bound the hold and the
+  descendant's loop by the worker's life, for example through a change of `process.ppid` and
+  `kill -0` on the worker pid.
 - Resuming a release that was tagged before this branch runs the new `verify.yml` on the old
   commit. That commit's `package.json` has no `verify:*` scripts, so the run fails without
   publishing anything. No release is unfinished today.
