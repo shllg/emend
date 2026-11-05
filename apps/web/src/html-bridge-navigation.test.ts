@@ -181,22 +181,31 @@ const fixtures = [
   { name: "excess nesting", html: `${"<div>".repeat(512)}<h2>too deep</h2>${"</div>".repeat(512)}` },
   { name: "heading count cap", html: "<h2>Repeated</h2>".repeat(1030) },
 ];
-test.each(fixtures)("C3 bridge/server heading parity: $name", async ({ html }) => {
+test.each(fixtures)("C3 bridge/server heading parity: $name", async ({ name, html }) => {
   const b = bridge(html);
   try {
     const headings = htmlHeadings(html);
-    for (const [heading, value] of headings.entries()) {
-      b.message({ type: "emend:goto", heading, label: value.text });
-      expect(b.scroll).toHaveBeenCalledTimes(heading + 1);
+    const elements = [...b.window.document.querySelectorAll("h2,h3")];
+    const capped = name === "heading count cap";
+    if (capped) {
+      expect(headings).toHaveLength(1024);
+      expect(elements).toHaveLength(1030);
     }
-    const candidateLabels = new Set([
-      "",
-      ...[...b.window.document.querySelectorAll("h2,h3")].map((element) => cleanDocTitle(element.textContent)),
-    ]);
+    // Each goto measures every heading. Sample this uniform cap fixture's boundaries and
+    // midpoint by element; every other fixture still visits all declared headings.
+    const indexes = capped ? [0, 512, 1023] : [...headings.keys()];
+    for (const [call, heading] of indexes.entries()) {
+      const value = required(headings[heading]);
+      b.message({ type: "emend:goto", heading, label: value.text });
+      expect(b.scroll).toHaveBeenCalledTimes(call + 1);
+      if (capped) expect(b.scroll.mock.instances[call]).toBe(required(elements[heading]));
+    }
+    const candidateLabels = new Set(["", ...elements.map((element) => cleanDocTitle(element.textContent))]);
     for (const label of candidateLabels) b.message({ type: "emend:goto", heading: headings.length, label });
-    expect(b.scroll).toHaveBeenCalledTimes(headings.length);
+    expect(b.scroll).toHaveBeenCalledTimes(indexes.length);
+    if (capped) expect(b.scroll.mock.instances).not.toContain(required(elements[1024]));
     b.message({ type: "emend:goto", heading: 0, label: "wrong label" });
-    expect(b.scroll).toHaveBeenCalledTimes(headings.length);
+    expect(b.scroll).toHaveBeenCalledTimes(indexes.length);
   } finally {
     await b.close();
   }
