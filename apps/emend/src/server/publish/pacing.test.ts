@@ -175,8 +175,9 @@ test("publish-finalize: each publish yields after its final review update", asyn
   const updates = (event: PacingEvent | undefined) =>
     Number(event?.kind === "statement" && /^update "reviews"/.test(event.sql));
   expect(expectPaced(log.events, "publish-finalize", updates, 1)).toBe(2);
-  const finalYields = log.events.flatMap((event, index) =>
+  const work = log.events.filter((event) => event.kind !== "turn");
+  const finalYields = work.flatMap((event, index) =>
     event.kind === "yield" && event.phase === "publish-finalize" ? [index] : [],
   );
-  for (const index of finalYields) expect(updates(log.events[index - 1])).toBe(1);
+  for (const index of finalYields) expect(updates(work[index - 1])).toBe(1);
 });

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { type ImportBundle, importRowCount, LIMITS } from "@emend/contract";
 import { and, eq } from "drizzle-orm";
-import { beforeEach, expect, test, vi } from "vitest";
+import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { comments, reviews } from "../db/schema.ts";
 import { run } from "../main.ts";
 import * as executors from "../server/publish/executor.ts";
@@ -912,17 +912,23 @@ try {
 `,
   );
   const release = lockAttach(f.stateDir);
+  onTestFinished(release);
   try {
     expect(() => lockAttach(f.stateDir)).toThrow("another emend attach is running. Nothing was changed.");
     const child = spawn(process.execPath, [script], {
       env: { PATH: process.env.PATH, HOME: f.stateDir, EMEND_HOME: f.stateDir, LC_ALL: "C" },
       stdio: ["ignore", "ignore", "pipe"],
     });
+    const exited = once(child, "exit");
+    onTestFinished(async () => {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      await exited;
+    });
     let stderr = "";
     child.stderr?.on("data", (chunk) => {
       stderr += chunk;
     });
-    expect(await once(child, "exit"), stderr).toEqual([0, null]);
+    expect(await exited, stderr).toEqual([0, null]);
   } finally {
     release();
   }
@@ -977,6 +983,10 @@ process.send("locked");
       stderr += chunk;
     });
     const exited = once(child, "exit");
+    onTestFinished(async () => {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      await exited;
+    });
     try {
       expect(
         await Promise.race([

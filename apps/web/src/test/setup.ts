@@ -118,6 +118,7 @@ let restoreLocks = () => {};
 // Vitest treats a test timeout of 0 as unlimited, and a timer given 0 or Infinity fires at once.
 const LONGEST_TIMER_DELAY = 2_147_483_647;
 // Testing Library's config is global, so this is wrong for concurrent tests; the polling guard bans them.
+// There is no supported per-call timeout hook here, so a waitFor started late can run past the test's deadline.
 beforeEach(({ task }) => configure({ asyncUtilTimeout: task.timeout || LONGEST_TIMER_DELAY }));
 beforeEach(() => {
   // Some web tests deliberately use the Node environment instead of happy-dom.

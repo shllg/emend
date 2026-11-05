@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { expect, test, vi } from "vitest";
+import { expect, onTestFinished, test, vi } from "vitest";
 import { removeUnreferencedBlob } from "../db/repo/blob-removal.ts";
 import { testDb } from "../db/test-support.ts";
 import { BlobStore, STAGE_PIN_MS } from "./blobs.ts";
@@ -24,6 +24,10 @@ function pausedRemoval(f: Awaited<ReturnType<typeof fixture>>, ownerId: string, 
     order.push("removal ended");
     return unlinked;
   });
+  onTestFinished(async () => {
+    gate.resolve();
+    await done;
+  });
   return { done, rowGone: rowGone.promise, release: () => gate.resolve() };
 }
 
@@ -43,79 +47,84 @@ function observeQueuedPut(store: BlobStore, order: string[]) {
 
 test("a put of the same content queues behind a removal, so its file and row survive together", async () => {
   const f = await fixture();
-  try {
-    await f.store.put(f.ownerId, bytes, "text/plain");
-    const order: string[] = [];
-    const removal = pausedRemoval(f, f.ownerId, order);
-    expect(await removal.rowGone).toBe(true);
-    // The other owner's put arrives while the removal holds the lock: it must not run yet.
-    const queued = observeQueuedPut(f.store, order);
-    const putting = f.store.put(f.otherOwnerId, bytes, "text/plain");
-    await queued;
+  onTestFinished(() => f.cleanup());
+  await f.store.put(f.ownerId, bytes, "text/plain");
+  const order: string[] = [];
+  const removal = pausedRemoval(f, f.ownerId, order);
+  expect(await removal.rowGone).toBe(true);
+  // The other owner's put arrives while the removal holds the lock: it must not run yet.
+  const queued = observeQueuedPut(f.store, order);
+  const putting = f.store.put(f.otherOwnerId, bytes, "text/plain");
+  onTestFinished(async () => {
     removal.release();
-    const removed = await removal.done;
+    await removal.done;
     await putting;
-    expect(order).toEqual(["removal ended", "put entered"]);
-    expect(removed).toBe(true);
-    expect(await f.store.has(f.otherOwnerId, sha)).toBe(true);
-    expect(await f.fileThere()).toBe(true);
-    expect(await f.store.get(f.otherOwnerId, sha)).toEqual(bytes);
-  } finally {
-    await f.cleanup();
-  }
+  });
+  await queued;
+  removal.release();
+  const removed = await removal.done;
+  await putting;
+  expect(order).toEqual(["removal ended", "put entered"]);
+  expect(removed).toBe(true);
+  expect(await f.store.has(f.otherOwnerId, sha)).toBe(true);
+  expect(await f.fileThere()).toBe(true);
+  expect(await f.store.get(f.otherOwnerId, sha)).toEqual(bytes);
 });
 
 test("a put queued first is whole before the removal checks for rows, so the file stays", async () => {
   const f = await fixture();
-  try {
-    await f.store.put(f.ownerId, bytes, "text/plain");
-    let rowWhenRemovalStarted: boolean | undefined;
-    // Hold the lock, queue a put, queue the removal behind it, then let them run in order.
-    const gate = Promise.withResolvers<void>();
-    const order: string[] = [];
-    const holder = f.store.exclusive(sha, async () => {
-      await gate.promise;
-      order.push("holder ended");
-    });
-    const queued = observeQueuedPut(f.store, order);
-    const putting = f.store.put(f.otherOwnerId, bytes, "text/plain");
-    await queued;
-    const removal = f.store.exclusive(sha, async () => {
-      order.push("removal entered");
-      rowWhenRemovalStarted = await f.store.has(f.otherOwnerId, sha);
-      await removeUnreferencedBlob(f.db, f.ownerId, sha);
-      return f.store.unlinkIfUnheld(sha);
-    });
+  onTestFinished(() => f.cleanup());
+  await f.store.put(f.ownerId, bytes, "text/plain");
+  let rowWhenRemovalStarted: boolean | undefined;
+  // Hold the lock, queue a put, queue the removal behind it, then let them run in order.
+  const gate = Promise.withResolvers<void>();
+  const order: string[] = [];
+  const holder = f.store.exclusive(sha, async () => {
+    await gate.promise;
+    order.push("holder ended");
+  });
+  onTestFinished(async () => {
+    gate.resolve();
+    await holder;
+  });
+  const queued = observeQueuedPut(f.store, order);
+  const putting = f.store.put(f.otherOwnerId, bytes, "text/plain");
+  onTestFinished(async () => {
     gate.resolve();
     await holder;
     await putting;
-    expect(await removal).toBe(false);
-    expect(order).toEqual(["holder ended", "put entered", "removal entered"]);
-    // The put's file and row were both committed when the removal looked.
-    expect(rowWhenRemovalStarted).toBe(true);
-    expect(await f.store.get(f.otherOwnerId, sha)).toEqual(bytes);
-  } finally {
-    await f.cleanup();
-  }
+  });
+  await queued;
+  const removal = f.store.exclusive(sha, async () => {
+    order.push("removal entered");
+    rowWhenRemovalStarted = await f.store.has(f.otherOwnerId, sha);
+    await removeUnreferencedBlob(f.db, f.ownerId, sha);
+    return f.store.unlinkIfUnheld(sha);
+  });
+  gate.resolve();
+  await holder;
+  await putting;
+  expect(await removal).toBe(false);
+  expect(order).toEqual(["holder ended", "put entered", "removal entered"]);
+  // The put's file and row were both committed when the removal looked.
+  expect(rowWhenRemovalStarted).toBe(true);
+  expect(await f.store.get(f.otherOwnerId, sha)).toEqual(bytes);
 });
 
 test("a stage between the row delete and the unlink pins the file; release lets a later removal go", async () => {
   const f = await fixture();
-  try {
-    await f.store.put(f.ownerId, bytes, "text/plain");
-    const removal = pausedRemoval(f, f.ownerId);
-    expect(await removal.rowGone).toBe(true);
-    // An import stages the same bytes: no row exists yet, only the file and the pin.
-    f.store.stage(bytes);
-    removal.release();
-    expect(await removal.done).toBe(false);
-    expect(await f.fileThere()).toBe(true);
-    f.store.release([sha]);
-    expect(await f.store.exclusive(sha, () => f.store.unlinkIfUnheld(sha))).toBe(true);
-    expect(await f.fileThere()).toBe(false);
-  } finally {
-    await f.cleanup();
-  }
+  onTestFinished(() => f.cleanup());
+  await f.store.put(f.ownerId, bytes, "text/plain");
+  const removal = pausedRemoval(f, f.ownerId);
+  expect(await removal.rowGone).toBe(true);
+  // An import stages the same bytes: no row exists yet, only the file and the pin.
+  f.store.stage(bytes);
+  removal.release();
+  expect(await removal.done).toBe(false);
+  expect(await f.fileThere()).toBe(true);
+  f.store.release([sha]);
+  expect(await f.store.exclusive(sha, () => f.store.unlinkIfUnheld(sha))).toBe(true);
+  expect(await f.fileThere()).toBe(false);
 });
 
 test("pins are reference-counted: one import's release leaves another import's hold", async () => {
@@ -179,23 +188,25 @@ test("another owner's row keeps the file; the owner's own unreferenced row goes"
 
 test("the lock runs callers in order and keeps going after one throws", async () => {
   const f = await fixture();
-  try {
-    const order: number[] = [];
-    const release = Promise.withResolvers<void>();
-    const first = f.store.exclusive(sha, async () => {
-      await release.promise;
-      order.push(1);
-      throw new Error("first failed");
-    });
-    const second = f.store.exclusive(sha, async () => order.push(2));
-    const third = f.store.exclusive("0".repeat(64), async () => order.push(3));
-    const failed = expect(first).rejects.toThrow("first failed");
-    await third;
+  onTestFinished(() => f.cleanup());
+  const order: number[] = [];
+  const release = Promise.withResolvers<void>();
+  const first = f.store.exclusive(sha, async () => {
+    await release.promise;
+    order.push(1);
+    throw new Error("first failed");
+  });
+  const second = f.store.exclusive(sha, async () => order.push(2));
+  const third = f.store.exclusive("0".repeat(64), async () => order.push(3));
+  const failed = expect(first).rejects.toThrow("first failed");
+  onTestFinished(async () => {
     release.resolve();
     await failed;
     await second;
-    expect(order).toEqual([3, 1, 2]);
-  } finally {
-    await f.cleanup();
-  }
+  });
+  await third;
+  release.resolve();
+  await failed;
+  await second;
+  expect(order).toEqual([3, 1, 2]);
 });

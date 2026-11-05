@@ -1,20 +1,32 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, onTestFinished, test, vi } from "vitest";
+import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { run } from "../../main.ts";
 import { startServer } from "../../server/serve.ts";
 import { stopLocalServer } from "../service/takeover.ts";
 import { parseServeArgs } from "./serve.ts";
 
 vi.mock("../../server/serve.ts", () => ({ startServer: vi.fn() }));
-afterEach(() => vi.restoreAllMocks());
+let env: NodeJS.ProcessEnv;
+beforeEach(async () => {
+  // Finished hooks run in reverse registration order, after afterEach: restore spies last.
+  onTestFinished(() => {
+    vi.restoreAllMocks();
+  });
+  const dir = await mkdtemp(join(tmpdir(), "emend-serve-test-"));
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
+  const bin = join(dir, "bin");
+  await mkdir(bin);
+  env = { EMEND_HOME: dir, HOME: dir, PATH: bin };
+});
 
 test.each([
   { name: "loopback only", tailscale: false, created: false },
   { name: "new Serve route", tailscale: true, created: true },
   { name: "existing Serve route", tailscale: true, created: false },
 ])("a stop request cleans up only its own route: $name", async ({ tailscale, created }) => {
-  const stateDir = await mkdtemp(join(process.env.EMEND_HOME as string, "serve-stop-"));
+  const stateDir = env.EMEND_HOME as string;
   const actual = await vi.importActual<typeof import("../../server/serve.ts")>("../../server/serve.ts");
   const proxy = await import("../tailscale.ts");
   vi.spyOn(proxy, "tailscaleSelf").mockResolvedValue({ dnsName: "review.example.ts.net" });
@@ -31,7 +43,7 @@ test.each([
   const stdout = vi.fn(() => printed.resolve());
   const stderr = vi.fn();
   const result = run(["serve", "--port", "0", ...(tailscale ? ["--tailscale"] : [])], {
-    env: { ...process.env, EMEND_HOME: stateDir },
+    env,
     stdout,
     stderr,
   });
@@ -67,9 +79,9 @@ test("serve defaults to loopback, allows explicit host and port zero, and reject
   ]) {
     const stderr: string[] = [];
     const stdout: string[] = [];
-    expect(
-      await run(["serve", ...args], { stdout: (s) => stdout.push(s), stderr: (s) => stderr.push(s), env: process.env }),
-    ).toBe(2);
+    expect(await run(["serve", ...args], { stdout: (s) => stdout.push(s), stderr: (s) => stderr.push(s), env })).toBe(
+      2,
+    );
     expect(stderr).toHaveLength(1);
     expect(stderr[0]?.split("\n")).toHaveLength(2);
     expect(stdout).toEqual([]);
@@ -93,7 +105,11 @@ test.each(["SIGINT", "SIGTERM"] as const)("serve prints once and closes cleanly 
       printed.resolve();
     },
     stderr: (s) => stderr.push(s),
-    env: process.env,
+    env,
+  });
+  onTestFinished(async () => {
+    process.emit("SIGTERM");
+    await result;
   });
   await printed.promise;
   expect(stdout).toEqual(["emend is serving http://127.0.0.1:3636\n"]);
@@ -140,12 +156,16 @@ test("tailscale setup follows startup, uses the bound port, and prints only the 
   const stdout: string[] = [];
   const printed = Promise.withResolvers<void>();
   const result = run(["serve", "--port", "0", "--tailscale"], {
-    env: process.env,
+    env,
     stdout: (s) => {
       stdout.push(s);
       printed.resolve();
     },
     stderr: () => {},
+  });
+  onTestFinished(async () => {
+    process.emit("SIGTERM");
+    await result;
   });
   await printed.promise;
   expect(stdout).toEqual(["emend: serving https://hub.example.ts.net\n"]);
@@ -175,7 +195,7 @@ test("tailscale setup failure closes the started server and exits one", async ()
   const stderr: string[] = [];
   expect(
     await run(["serve", "--tailscale"], {
-      env: process.env,
+      env,
       stdout: (s) => stdout.push(s),
       stderr: (s) => stderr.push(s),
     }),
@@ -185,6 +205,38 @@ test("tailscale setup failure closes the started server and exits one", async ()
   expect(stderr).toEqual([
     "emend: port 443 of Tailscale Serve already has a setup emend did not make or cannot read; inspect it with `tailscale serve status`.\n",
   ]);
+});
+
+test("teardown stops a serving command before restoring its Tailscale spies", async () => {
+  const tailscale = await import("../tailscale.ts");
+  vi.spyOn(tailscale, "tailscaleSelf").mockResolvedValue({ dnsName: "hub.example.ts.net" });
+  vi.spyOn(tailscale, "ensureTailscaleServe").mockResolvedValue({ created: true, otherHttpsPorts: false });
+  const remove = vi.spyOn(tailscale, "removeTailscaleServe").mockResolvedValue(undefined);
+  const close = vi.fn(async () => {});
+  vi.mocked(startServer).mockResolvedValue({
+    url: "http://127.0.0.1:41999",
+    port: 41999,
+    setPublicOriginReady: vi.fn(),
+    close,
+  });
+  onTestFinished(() => {
+    expect(remove).toHaveBeenCalledExactlyOnceWith(41999, env, "hub.example.ts.net");
+    expect(close).toHaveBeenCalledOnce();
+    expect(vi.isMockFunction(tailscale.removeTailscaleServe)).toBe(true);
+  });
+  const printed = Promise.withResolvers<void>();
+  const result = run(["serve", "--tailscale", "--port", "0"], {
+    env,
+    stdout: () => printed.resolve(),
+    stderr: () => {},
+  });
+  onTestFinished(async () => {
+    process.emit("SIGTERM");
+    expect(await result).toBe(0);
+  });
+  await printed.promise;
+  expect(remove).not.toHaveBeenCalled();
+  expect(close).not.toHaveBeenCalled();
 });
 
 test("a setup attempt that throws still removes its route during shutdown", async () => {
@@ -205,8 +257,8 @@ test("a setup attempt that throws still removes its route during shutdown", asyn
   });
   const stdout = vi.fn();
   const stderr = vi.fn();
-  expect(await run(["serve", "--tailscale", "--port", "0"], { env: process.env, stdout, stderr })).toBe(1);
-  expect(remove).toHaveBeenCalledExactlyOnceWith(41999, process.env, "hub.example.ts.net");
+  expect(await run(["serve", "--tailscale", "--port", "0"], { env, stdout, stderr })).toBe(1);
+  expect(remove).toHaveBeenCalledExactlyOnceWith(41999, env, "hub.example.ts.net");
   expect(close).toHaveBeenCalledOnce();
   expect(stdout).not.toHaveBeenCalled();
   expect(stderr).toHaveBeenCalledExactlyOnceWith("emend: synthetic setup failure\n");
@@ -234,7 +286,7 @@ test("a stop after startServer resolves skips Tailscale setup and closes normall
   });
   const stdout = vi.fn();
   const stderr = vi.fn();
-  expect(await run(["serve", "--tailscale"], { env: process.env, stdout, stderr })).toBe(0);
+  expect(await run(["serve", "--tailscale"], { env, stdout, stderr })).toBe(0);
   expect(setup).not.toHaveBeenCalled();
   expect(remove).not.toHaveBeenCalled();
   expect(advertise).not.toHaveBeenCalled();
@@ -264,9 +316,14 @@ test.each([
   const stdout = vi.fn();
   const stderr = vi.fn();
   let returned = false;
-  const result = run(["serve", "--tailscale"], { env: process.env, stdout, stderr }).then((code) => {
+  const result = run(["serve", "--tailscale"], { env, stdout, stderr }).then((code) => {
     returned = true;
     return code;
+  });
+  onTestFinished(async () => {
+    process.emit("SIGTERM");
+    starting.resolve({ url: "http://127.0.0.1:41999", port: 41999, setPublicOriginReady: advertise, close });
+    await result;
   });
   await entered.promise;
   process.emit(signal);
@@ -304,12 +361,16 @@ test.each([
   const stdout: string[] = [];
   const printed = Promise.withResolvers<void>();
   const result = run(["serve", "--tailscale", "--port", String(requested)], {
-    env: process.env,
+    env,
     stdout: (line) => {
       stdout.push(line);
       printed.resolve();
     },
     stderr: () => {},
+  });
+  onTestFinished(async () => {
+    process.emit("SIGTERM");
+    await result;
   });
   try {
     await printed.promise;

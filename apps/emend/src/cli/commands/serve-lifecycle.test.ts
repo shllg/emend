@@ -89,6 +89,7 @@ async function fixture(
   failure: "setup" | "stop" | "setup-after-write" | "setup-timeout" | undefined = undefined,
 ) {
   const dir = await mkdtemp(join(tmpdir(), "emend-serve-fix1-"));
+  onTestFinished(() => rm(dir, { force: true, recursive: true }));
   const configPath = join(dir, "config.json");
   const callsPath = join(dir, "calls");
   const own = {
@@ -118,7 +119,7 @@ if [ "$1" = status ]; then printf '%s\\n' '${JSON.stringify({ BackendState: "Run
 elif [ "$2" = status ]; then /bin/cat ${quote(configPath)}
 elif [ "$2" = --bg ]; then
   ${failure === "setup" ? "printf 'permission denied' >&2; exit 1" : `printf '%s' ${quote(JSON.stringify(own))} > ${quote(configPath)}`}
-  ${failure === "setup-after-write" ? "printf 'synthetic configuration failed' >&2; exit 1" : failure === "setup-timeout" ? "printf 'setup-ready\\n'; while :; do :; done" : ":"}
+  ${failure === "setup-after-write" ? "printf 'synthetic configuration failed' >&2; exit 1" : failure === "setup-timeout" ? `printf 'setup-ready\\n'; while [ -d ${quote(dir)} ]; do :; done` : ":"}
 elif [ "$2" = --https=443 ] && [ "$3" = off ]; then ${failure === "stop" ? "printf 'permission denied' >&2; exit 1" : `printf '{}' > ${quote(configPath)}`}
 else exit 7
 fi
@@ -130,6 +131,9 @@ fi
   const setupExited = Promise.withResolvers<void>();
   if (failure === "setup-timeout") {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const spawn = childProcess.spawn;
     vi.spyOn(childProcess, "spawn").mockImplementation((...args) => {
       const child = spawn(...args);
@@ -163,13 +167,17 @@ fi
     },
   };
   onTestFinished(async () => {
-    process.emit("SIGTERM");
-    for (const result of start.mock.results)
-      if (result.type === "return") await result.value.then((server) => server.close());
-    vi.useRealTimers();
-    vi.restoreAllMocks();
-    vi.mocked(createServer).mockClear();
-    await rm(dir, { force: true, recursive: true });
+    try {
+      process.emit("SIGTERM");
+      for (const result of start.mock.results)
+        if (result.type === "return") await result.value.then((server) => server.close());
+    } finally {
+      // Removing the fixture also ends fake processes if their fake deadline never fired.
+      await rm(dir, { force: true, recursive: true });
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+      vi.mocked(createServer).mockClear();
+    }
   });
   return {
     dir,
@@ -285,6 +293,10 @@ test.each(["empty", "same"] as const)(
 test("SIGHUP removes the matching handler and discovery file, retaining the public address", async () => {
   const f = await fixture();
   const result = run(["serve", "--tailscale", "--port", "0"], f.io);
+  onTestFinished(async () => {
+    process.emit("SIGTERM");
+    await result;
+  });
   try {
     await f.serving;
     expect(f.stdout).toHaveLength(1);
@@ -348,6 +360,10 @@ test("a throwing stdout writer keeps serving until a signal cleans up", async ()
     settled = true;
     return code;
   });
+  onTestFinished(async () => {
+    process.emit("SIGTERM");
+    await result;
+  });
   try {
     await attempted.promise;
     await capabilities(f.dir);
@@ -371,6 +387,10 @@ test.each(["other-port", "tls-port"] as const)(
   async (initial) => {
     const f = await fixture(initial);
     const result = run(["serve", "--tailscale", "--port", "0"], f.io);
+    onTestFinished(async () => {
+      process.emit("SIGTERM");
+      await result;
+    });
     try {
       await f.serving;
       expect(f.stdout).toHaveLength(1);

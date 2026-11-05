@@ -9,6 +9,7 @@ export type PacingUnit = "comment-bytes" | "changed-block-bytes" | "row-date";
 
 export type PacingEvent =
   | { kind: "yield"; phase: PacingPhase }
+  | { kind: "turn" }
   | { kind: "statement"; sql: string; method: string; table?: string; rows: number; checkedIds: number }
   | { kind: "executor"; work: Work["kind"] }
   | { kind: "work"; unit: PacingUnit }
@@ -26,16 +27,20 @@ export const unitsOf =
   (event) =>
     Number(event.kind === "work" ? event.unit === kind : event.kind === kind);
 
-/** Include the leading and trailing runs, and reset only at an actual probe event of any phase. */
+/** Include leading and trailing work; a probe only ends a run once an independent loop turn follows it. */
 export function expectPaced(events: PacingEvent[], phase: PacingPhase, units: Units, bound: number) {
   let run = 0;
   let max = 0;
   let total = 0;
   let yields = 0;
+  const pending = new Set<PacingPhase>();
   for (const event of events) {
     if (event.kind === "yield") {
-      if (event.phase === phase) yields++;
-      run = 0;
+      pending.add(event.phase);
+    } else if (event.kind === "turn") {
+      if (pending.has(phase)) yields++;
+      if (pending.size) run = 0;
+      pending.clear();
     } else {
       const count = units(event);
       total += count;
@@ -75,6 +80,11 @@ export function observePacing(deps: AppDeps) {
   const execute = deps.publishExecutor;
   if (!execute) throw new Error("Pacing tests require an explicit executor");
   const events: PacingEvent[] = [];
+  const markTurn = () => {
+    events.push({ kind: "turn" });
+    turn = setImmediate(markTurn);
+  };
+  let turn = setImmediate(markTurn);
   const previousProbe = pacing.probe;
   pacing.probe = (phase) => events.push({ kind: "yield", phase });
   const prepare = SQLiteRemoteSession.prototype.prepareQuery;
@@ -121,6 +131,7 @@ export function observePacing(deps: AppDeps) {
       events.push({ kind: "work", unit });
     },
     restore() {
+      clearImmediate(turn);
       pacing.probe = previousProbe;
       deps.publishExecutor = execute;
       sqlSpy.mockRestore();

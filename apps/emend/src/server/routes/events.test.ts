@@ -16,120 +16,120 @@ test.each(["device", "logout"])(
   "%s revocation immediately closes both stream kinds and preserves another device's session",
   async (kind) => {
     const f = await mailboxFixture();
+    onTestFinished(() => f.cleanup());
     const controller = new AbortController();
+    onTestFinished(() => controller.abort());
     const readers: ReadableStreamDefaultReader<Uint8Array>[] = [];
-    try {
-      const current = DeviceList.parse(await (await f.request("/devices", "GET")).json()).items.find(
-        (item) => item.current,
-      );
-      if (!current) throw new Error("missing device");
-      const deviceId = randomUUID();
-      await f.db.query((q) =>
-        q.insert(devices).values({ id: deviceId, ownerId: f.ownerId, kind: "browser", name: "Second browser" }),
-      );
-      const sibling = await createToken(f.db, f.ownerId, "reviewer", {
-        deviceId: current.id,
-        expiresAt: f.deps.now() + SESSION_MS,
-      });
-      const separate = await createToken(f.db, f.ownerId, "reviewer", {
-        deviceId,
-        expiresAt: f.deps.now() + SESSION_MS,
-      });
-      for (const path of ["/events", `/reviews/${f.reviewId}/events`]) {
-        const response = await f.request(path, "GET", undefined, "reviewer", controller.signal);
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error("missing stream");
-        readers.push(reader);
-        await reader.read();
-      }
-      for (const token of [sibling, separate]) {
-        const response = await f.app.request(
-          f.keep(
-            new Request("http://127.0.0.1:3636/api/v1/events", {
-              signal: controller.signal,
-              headers: { Host: "127.0.0.1:3636", Cookie: `emend_session=${token.secret}` },
-            }),
-          ),
-        );
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error("missing stream");
-        readers.push(reader);
-        await reader.read();
-      }
-      expect((await f.request(kind === "device" ? `/devices/${current.id}` : "/session", "DELETE")).status).toBe(204);
-      f.deps.events?.emit(f.ownerId, { type: "publish", reviewId: f.reviewId, revision: 2 });
-      for (const reader of readers.slice(0, 3)) expect(await reader.read()).toEqual({ done: true, value: undefined });
-      const survivor = readers[3];
-      if (!survivor) throw new Error("missing survivor");
-      expect(await readEvent(survivor)).toEqual({ type: "publish", reviewId: f.reviewId, revision: 2 });
-    } finally {
+    onTestFinished(async () => {
       controller.abort();
       await Promise.all(readers.map((reader) => reader.cancel()));
-      await f.cleanup();
-    }
-  },
-);
-
-test("owner-wide streams receive two owned reviews and never another owner's events", async () => {
-  const f = await mailboxFixture();
-  const controller = new AbortController();
-  const readers: ReadableStreamDefaultReader<Uint8Array>[] = [];
-  try {
-    for (const [path, who] of [
-      ["/events", "reviewer"],
-      ["/events", "foreign"],
-      [`/reviews/${f.reviewId}/events`, "reviewer"],
-    ] as const) {
-      const response = await f.request(path, "GET", undefined, who, controller.signal);
-      expect(response.status).toBe(200);
+    });
+    const current = DeviceList.parse(await (await f.request("/devices", "GET")).json()).items.find(
+      (item) => item.current,
+    );
+    if (!current) throw new Error("missing device");
+    const deviceId = randomUUID();
+    await f.db.query((q) =>
+      q.insert(devices).values({ id: deviceId, ownerId: f.ownerId, kind: "browser", name: "Second browser" }),
+    );
+    const sibling = await createToken(f.db, f.ownerId, "reviewer", {
+      deviceId: current.id,
+      expiresAt: f.deps.now() + SESSION_MS,
+    });
+    const separate = await createToken(f.db, f.ownerId, "reviewer", {
+      deviceId,
+      expiresAt: f.deps.now() + SESSION_MS,
+    });
+    for (const path of ["/events", `/reviews/${f.reviewId}/events`]) {
+      const response = await f.request(path, "GET", undefined, "reviewer", controller.signal);
       const reader = response.body?.getReader();
       if (!reader) throw new Error("missing stream");
       readers.push(reader);
       await reader.read();
     }
-    const [own, foreign, perReview] = readers;
-    if (!own || !foreign || !perReview) throw new Error("missing readers");
-    const published: EventPayload[] = [];
-    for (const [reviewKey, who, reviewId] of [
-      ["a", "agent", f.reviewId],
-      ["b", "agent", undefined],
-      ["c", "stranger", undefined],
-    ] as const) {
-      const response = await f.request(
-        "/publish",
-        "POST",
-        {
-          reviewId,
-          reviewKey: reviewKey.repeat(64),
-          repo: null,
-          branch: null,
-          title: "Synthetic",
-          base: null,
-          head: null,
-          topics: [],
-          files: [],
-          writeup: { overview: "Overview", tldr: "Summary", decisions: null, topics: {} },
-        },
-        who,
+    for (const token of [sibling, separate]) {
+      const response = await f.app.request(
+        f.keep(
+          new Request("http://127.0.0.1:3636/api/v1/events", {
+            signal: controller.signal,
+            headers: { Host: "127.0.0.1:3636", Cookie: `emend_session=${token.secret}` },
+          }),
+        ),
       );
-      expect(response.status).toBe(200);
-      const result = PublishResponse.parse(await response.json());
-      published.push({ type: "publish", reviewId: result.reviewId, revision: result.revision });
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("missing stream");
+      readers.push(reader);
+      await reader.read();
     }
-    // Closing drains queued frames and lets the test prove no extra foreign frame arrived.
-    controller.abort();
-    expect(await readEvent(own)).toEqual(published[0]);
-    expect(await readEvent(own)).toEqual(published[1]);
-    expect((await own.read()).done).toBe(true);
-    expect(await readEvent(foreign)).toEqual(published[2]);
-    expect((await foreign.read()).done).toBe(true);
-    expect(await readEvent(perReview)).toEqual(published[0]);
-    expect((await perReview.read()).done).toBe(true);
-  } finally {
+    expect((await f.request(kind === "device" ? `/devices/${current.id}` : "/session", "DELETE")).status).toBe(204);
+    f.deps.events?.emit(f.ownerId, { type: "publish", reviewId: f.reviewId, revision: 2 });
+    for (const reader of readers.slice(0, 3)) expect(await reader.read()).toEqual({ done: true, value: undefined });
+    const survivor = readers[3];
+    if (!survivor) throw new Error("missing survivor");
+    expect(await readEvent(survivor)).toEqual({ type: "publish", reviewId: f.reviewId, revision: 2 });
+  },
+);
+
+test("owner-wide streams receive two owned reviews and never another owner's events", async () => {
+  const f = await mailboxFixture();
+  onTestFinished(() => f.cleanup());
+  const controller = new AbortController();
+  onTestFinished(() => controller.abort());
+  const readers: ReadableStreamDefaultReader<Uint8Array>[] = [];
+  onTestFinished(async () => {
     controller.abort();
     await Promise.all(readers.map((reader) => reader.cancel()));
-    await f.cleanup();
+  });
+  for (const [path, who] of [
+    ["/events", "reviewer"],
+    ["/events", "foreign"],
+    [`/reviews/${f.reviewId}/events`, "reviewer"],
+  ] as const) {
+    const response = await f.request(path, "GET", undefined, who, controller.signal);
+    expect(response.status).toBe(200);
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("missing stream");
+    readers.push(reader);
+    await reader.read();
   }
+  const [own, foreign, perReview] = readers;
+  if (!own || !foreign || !perReview) throw new Error("missing readers");
+  const published: EventPayload[] = [];
+  for (const [reviewKey, who, reviewId] of [
+    ["a", "agent", f.reviewId],
+    ["b", "agent", undefined],
+    ["c", "stranger", undefined],
+  ] as const) {
+    const response = await f.request(
+      "/publish",
+      "POST",
+      {
+        reviewId,
+        reviewKey: reviewKey.repeat(64),
+        repo: null,
+        branch: null,
+        title: "Synthetic",
+        base: null,
+        head: null,
+        topics: [],
+        files: [],
+        writeup: { overview: "Overview", tldr: "Summary", decisions: null, topics: {} },
+      },
+      who,
+    );
+    expect(response.status).toBe(200);
+    const result = PublishResponse.parse(await response.json());
+    published.push({ type: "publish", reviewId: result.reviewId, revision: result.revision });
+  }
+  // Closing drains queued frames and lets the test prove no extra foreign frame arrived.
+  controller.abort();
+  expect(await readEvent(own)).toEqual(published[0]);
+  expect(await readEvent(own)).toEqual(published[1]);
+  expect((await own.read()).done).toBe(true);
+  expect(await readEvent(foreign)).toEqual(published[2]);
+  expect((await foreign.read()).done).toBe(true);
+  expect(await readEvent(perReview)).toEqual(published[0]);
+  expect((await perReview.read()).done).toBe(true);
 });
 
 test("owner-wide HEAD allocates no stream and GET and HEAD require reviewer scope", async () => {

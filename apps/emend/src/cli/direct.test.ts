@@ -303,6 +303,10 @@ test("direct wait renews every ten seconds, reports progress, and removes its ro
     signal: controller.signal,
     progress,
   }).catch((error: unknown) => error);
+  onTestFinished(async () => {
+    controller.abort();
+    await wait;
+  });
   const expiry = async () =>
     (
       await server.db.read((q) =>
@@ -404,6 +408,10 @@ test("a listening server started after a direct wait records the claimed Send th
   const wait = takeFeedback(f.stateDir, target, result.reviewId, 3, {
     signal: controller.signal,
   }).catch((error: unknown) => error);
+  onTestFinished(async () => {
+    controller.abort();
+    await wait;
+  });
   try {
     await untilReal("the waiter row", async () =>
       expect(

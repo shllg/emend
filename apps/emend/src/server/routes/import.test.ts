@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { ImportBundle, importRowCount, indexImportBundle, LIMITS, RevisionView } from "@emend/contract";
 import * as core from "@emend/core";
 import { and, eq, sql } from "drizzle-orm";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import * as tables from "../../db/schema.ts";
 import { chargePlacementMetadata } from "../import/placement-budget.ts";
 import { importPlacements } from "../import/placements.ts";
@@ -32,11 +32,11 @@ import {
 
 let f: Awaited<ReturnType<typeof importFixture>>;
 beforeEach(async () => {
+  onTestFinished(() => {
+    vi.restoreAllMocks();
+  });
   f = await importFixture();
-});
-afterEach(async () => {
-  vi.restoreAllMocks();
-  await f.cleanup();
+  onTestFinished(() => f.cleanup());
 });
 test("copies ids and history atomically, releases unconfirmed Sends, rotates content keys and skips retries", async () => {
   const input = await bundle(f);
@@ -401,6 +401,10 @@ test("revocation during rendering prevents the copy from committing", async () =
     return execute(work);
   };
   const pending = f.importRequest("/import", input);
+  onTestFinished(async () => {
+    resume.resolve();
+    await pending;
+  });
   await entered.promise;
   try {
     const device = await f.db.read((q) =>
@@ -539,12 +543,18 @@ test("a running import rejects another import immediately without occupying publ
     return execute(work);
   };
   const pending = f.importRequest("/import", input);
+  onTestFinished(async () => {
+    resume.resolve();
+    await pending;
+  });
   await entered.promise;
   try {
     await error(await f.importRequest("/import", input), 429, "rate_limited");
     // Both publishing slots remain immediately available while import is paused.
-    const releases = await Promise.all([publishSlots.acquire(), publishSlots.acquire()]);
-    for (const release of releases) release();
+    const releaseOne = await publishSlots.acquire();
+    onTestFinished(releaseOne);
+    const releaseTwo = await publishSlots.acquire();
+    onTestFinished(releaseTwo);
   } finally {
     resume.resolve();
     await pending;
@@ -567,6 +577,11 @@ test("aborting an import releases its slot before rendering resumes and creates 
   };
   const abort = new AbortController();
   const pending = f.importRequest("/import", input, abort.signal);
+  onTestFinished(async () => {
+    abort.abort();
+    resume.resolve();
+    await pending;
+  });
   await entered.promise;
   abort.abort();
   try {
@@ -1049,6 +1064,11 @@ test.each(["place", "placement-doc"])(
     const before = await snapshot(f);
     const abort = new AbortController();
     const pending = f.importRequest("/import", input, abort.signal);
+    onTestFinished(async () => {
+      abort.abort();
+      resume.resolve();
+      await pending;
+    });
     await entered.promise;
     abort.abort();
     try {

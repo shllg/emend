@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { promisify } from "node:util";
-import { afterEach, expect, onTestFinished, test, vi } from "vitest";
+import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { pollUntil } from "../test/poll-until.ts";
 import { findExecutable } from "./executable.ts";
 import { CliError } from "./http.ts";
@@ -17,20 +17,17 @@ vi.mock("node:child_process", async (original) => {
 });
 vi.mock("./executable.ts", () => ({ findExecutable: vi.fn() }));
 let assertKillPids: (() => void) | undefined;
-afterEach(async () => {
-  try {
-    if (vi.isFakeTimers()) {
-      await vi.runAllTimersAsync();
-      await waitForTailscaleEscalations();
+beforeEach(() => {
+  onTestFinished(() => {
+    try {
+      assertKillPids?.();
+    } finally {
+      assertKillPids = undefined;
+      vi.restoreAllMocks();
+      vi.mocked(spawn).mockReset();
+      vi.mocked(findExecutable).mockReset();
     }
-    assertKillPids?.();
-  } finally {
-    assertKillPids = undefined;
-    vi.useRealTimers();
-    vi.restoreAllMocks();
-    vi.mocked(spawn).mockReset();
-    vi.mocked(findExecutable).mockReset();
-  }
+  });
 });
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const status = JSON.stringify({ BackendState: "Running", Self: { DNSName: "hub.example.ts.net" } });
@@ -73,6 +70,13 @@ class FakeChild extends EventEmitter {
 
 function fixture() {
   vi.useFakeTimers();
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  onTestFinished(async () => {
+    await vi.runAllTimersAsync();
+    await waitForTailscaleEscalations();
+  });
   const child = new FakeChild();
   const spawned = Promise.withResolvers<void>();
   vi.mocked(findExecutable).mockResolvedValue({ file: "/synthetic/bin/tailscale", path: "/synthetic/bin" });
@@ -243,7 +247,7 @@ test("the descendant dies", async () => {
     `trap '' TERM
 printf '%s' "$$" > ${quote(join(dir, "descendant"))}
 printf ready >&2
-while [ ! -f ${quote(join(dir, "release"))} ]; do :; done
+while [ ! -f ${quote(join(dir, "release"))} ] && [ -d ${quote(dir)} ]; do :; done
 `,
   );
   await writeFile(

@@ -202,6 +202,10 @@ test("built frame rejects diagram theme overrides without dynamic code generatio
     if (file.type === "chunk") expect(file.code).not.toContain("maxTextSize");
   }
   const window = new Window();
+  onTestFinished(() => {
+    vi.restoreAllMocks();
+  });
+  onTestFinished(() => window.happyDOM.close());
   // Happy DOM's base Node getter returns an empty name. DOMPurify uses that
   // native getter directly; delegate to the concrete node's getter as browsers do.
   const nodeName = Object.getOwnPropertyDescriptor(window.Node.prototype, "nodeName")?.get;
@@ -251,65 +255,59 @@ test("built frame rejects diagram theme overrides without dynamic code generatio
   }
   sandbox.window = window;
   sandbox.self = window;
-  let stop: (() => void) | undefined;
-  try {
-    runInNewContext(code, sandbox, { contextCodeGeneration: { strings: false, wasm: false } });
-    const frame = Reflect.get(sandbox, "EmendMermaidFrame") as { startFrame: (root: unknown) => () => void };
-    stop = frame.startFrame(root);
-    for (const source of [
-      'graph TD\n A\n click A evil "click"',
-      '%%{init: {"themeCSS": ".probeThemeInit { fill: rgb(1, 2, 3); }"}}%%\nflowchart LR\nA',
-      '---\nconfig:\n  themeCSS: ".probeThemeInit { fill: rgb(1, 2, 3); }"\n---\nflowchart LR\nA',
-      '%%{initialize: {"themeCSS": ".probeThemeInitialize { fill: rgb(1, 2, 3); }"}}%%\nflowchart LR\nA',
-      '%%{init: {"fontFamily": "x; .probeFontInit{fill:rgb(7,8,9)}"}}%%\nflowchart LR\n  F01a --> F01b',
-      '---\nconfig:\n  fontFamily: "x; .probeFontFm{fill:rgb(7,8,9)}"\n---\nflowchart LR\n  F01a --> F01b',
-      "flowchart LR\n C01a --> C01b\n classDef synthetic fill:#123456,stroke:#654321;\n class C01a synthetic;\n style C01b fill:#abcdef,stroke:#fedcba;",
-      '%%{init: {"themeVariables": {"fontSize": ["16px;} text{fill:rgb(7,8,9) !important} .z{color:x"]}}}%%\nflowchart LR\n  B05a --> B05b',
-      '%%{initialize: {"themeVariables": {"fontSize": ["16px;} text{fill:rgb(7,8,9) !important} .z{color:x"]}}}%%\nflowchart LR\n  B05a --> B05b',
-      '---\nconfig:\n  themeVariables:\n    fontSize: ["16px;} text{fill:rgb(7,8,9) !important} .z{color:x"]\n---\nflowchart LR\n  B05a --> B05b',
-    ]) {
-      root.replaceChildren();
-      const rendered = Promise.withResolvers<void>();
-      const observer = new window.MutationObserver(() => {
-        if (root.firstElementChild?.localName === "svg") rendered.resolve();
-      });
-      observer.observe(root, { childList: true });
-      // A render that never happens ends the test by timeout without unwinding; onTestFinished still runs.
-      onTestFinished(() => observer.disconnect());
-      window.dispatchEvent(
-        new window.MessageEvent("message", { source: window.parent, data: { type: "render", source } }),
-      );
-      await rendered.promise;
-      expect(root.firstElementChild?.localName, root.textContent).toBe("svg");
-      observer.disconnect();
-      expect(root.querySelector("script, foreignObject, [onclick], [href], [onload]")).toBeNull();
-      const nodes = /([FBC]\d+a) --> ([FBC]\d+b)/.exec(source);
-      if (nodes) {
-        expect(root.textContent).toContain(nodes[1]);
-        expect(root.textContent).toContain(nodes[2]);
-        const edge = root.querySelector("path[data-edge]")?.getAttribute("d");
-        expect(edge).toBeTruthy();
-        expect(edge).not.toContain("NaN");
-      }
-      if (source.includes("classDef synthetic")) {
-        expect(root.querySelector(".node.synthetic rect")?.getAttribute("style")).toMatch(/fill:\s*#123456/);
-        const styled = [...root.querySelectorAll(".node")].find((node) => node.textContent.includes("C01b"));
-        expect(styled?.querySelector("rect")?.getAttribute("style")).toMatch(/fill:\s*#abcdef/);
-      }
-      const styles = [...root.querySelectorAll("svg style")];
-      expect(styles.length).toBeGreaterThan(0);
-      for (const style of styles) {
-        expect
-          .soft(style.textContent.match(/\.probe(?:ThemeInit|ThemeInitialize|FontInit|FontFm)\b/g) ?? [], source)
-          .toEqual([]);
-        expect
-          .soft(style.textContent.match(/text\s*\{\s*fill:\s*rgb\(7,\s*8,\s*9\)\s*!important\s*;?\s*\}/g) ?? [], source)
-          .toEqual([]);
-      }
+  runInNewContext(code, sandbox, { contextCodeGeneration: { strings: false, wasm: false } });
+  const bridge = Reflect.get(sandbox, "EmendMermaidFrame") as { startFrame: (root: unknown) => () => void };
+  const stop = bridge.startFrame(root);
+  onTestFinished(stop);
+  for (const source of [
+    'graph TD\n A\n click A evil "click"',
+    '%%{init: {"themeCSS": ".probeThemeInit { fill: rgb(1, 2, 3); }"}}%%\nflowchart LR\nA',
+    '---\nconfig:\n  themeCSS: ".probeThemeInit { fill: rgb(1, 2, 3); }"\n---\nflowchart LR\nA',
+    '%%{initialize: {"themeCSS": ".probeThemeInitialize { fill: rgb(1, 2, 3); }"}}%%\nflowchart LR\nA',
+    '%%{init: {"fontFamily": "x; .probeFontInit{fill:rgb(7,8,9)}"}}%%\nflowchart LR\n  F01a --> F01b',
+    '---\nconfig:\n  fontFamily: "x; .probeFontFm{fill:rgb(7,8,9)}"\n---\nflowchart LR\n  F01a --> F01b',
+    "flowchart LR\n C01a --> C01b\n classDef synthetic fill:#123456,stroke:#654321;\n class C01a synthetic;\n style C01b fill:#abcdef,stroke:#fedcba;",
+    '%%{init: {"themeVariables": {"fontSize": ["16px;} text{fill:rgb(7,8,9) !important} .z{color:x"]}}}%%\nflowchart LR\n  B05a --> B05b',
+    '%%{initialize: {"themeVariables": {"fontSize": ["16px;} text{fill:rgb(7,8,9) !important} .z{color:x"]}}}%%\nflowchart LR\n  B05a --> B05b',
+    '---\nconfig:\n  themeVariables:\n    fontSize: ["16px;} text{fill:rgb(7,8,9) !important} .z{color:x"]\n---\nflowchart LR\n  B05a --> B05b',
+  ]) {
+    root.replaceChildren();
+    const rendered = Promise.withResolvers<void>();
+    const observer = new window.MutationObserver(() => {
+      if (root.firstElementChild?.localName === "svg") rendered.resolve();
+    });
+    observer.observe(root, { childList: true });
+    // A render that never happens ends the test by timeout without unwinding; onTestFinished still runs.
+    onTestFinished(() => observer.disconnect());
+    window.dispatchEvent(
+      new window.MessageEvent("message", { source: window.parent, data: { type: "render", source } }),
+    );
+    await rendered.promise;
+    expect(root.firstElementChild?.localName, root.textContent).toBe("svg");
+    observer.disconnect();
+    expect(root.querySelector("script, foreignObject, [onclick], [href], [onload]")).toBeNull();
+    const nodes = /([FBC]\d+a) --> ([FBC]\d+b)/.exec(source);
+    if (nodes) {
+      expect(root.textContent).toContain(nodes[1]);
+      expect(root.textContent).toContain(nodes[2]);
+      const edge = root.querySelector("path[data-edge]")?.getAttribute("d");
+      expect(edge).toBeTruthy();
+      expect(edge).not.toContain("NaN");
     }
-  } finally {
-    stop?.();
-    await window.happyDOM.close();
-    vi.restoreAllMocks();
+    if (source.includes("classDef synthetic")) {
+      expect(root.querySelector(".node.synthetic rect")?.getAttribute("style")).toMatch(/fill:\s*#123456/);
+      const styled = [...root.querySelectorAll(".node")].find((node) => node.textContent.includes("C01b"));
+      expect(styled?.querySelector("rect")?.getAttribute("style")).toMatch(/fill:\s*#abcdef/);
+    }
+    const styles = [...root.querySelectorAll("svg style")];
+    expect(styles.length).toBeGreaterThan(0);
+    for (const style of styles) {
+      expect
+        .soft(style.textContent.match(/\.probe(?:ThemeInit|ThemeInitialize|FontInit|FontFm)\b/g) ?? [], source)
+        .toEqual([]);
+      expect
+        .soft(style.textContent.match(/text\s*\{\s*fill:\s*rgb\(7,\s*8,\s*9\)\s*!important\s*;?\s*\}/g) ?? [], source)
+        .toEqual([]);
+    }
   }
 }, 30000);

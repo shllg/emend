@@ -3,7 +3,7 @@ import { chmod, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { and, eq, sql } from "drizzle-orm";
-import { expect, test } from "vitest";
+import { expect, onTestFinished, test } from "vitest";
 import { StateDirModeError } from "../state/files.ts";
 import { NestedDbCallError, openDb, type Queries } from "./client.ts";
 import { owners, reviews, revisions, threads } from "./schema.ts";
@@ -89,42 +89,43 @@ test("positional rows preserve duplicate column names, JSON, returning and missi
 
 test("a failing transaction rolls back and unrelated statements wait outside it", async () => {
   const ctx = await testDb();
+  onTestFinished(() => ctx.cleanup());
   const insertedId = randomUUID();
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
-  try {
-    const transaction = ctx.db.transaction(async (q) => {
-      await q.insert(owners).values({ id: insertedId });
-      entered.resolve();
-      await release.promise;
-      throw new Error("synthetic rollback");
-    });
-    const rejection = expect(transaction).rejects.toThrow("synthetic rollback");
-    await entered.promise;
-    let ran = false;
-    const unrelated = ctx.db.query(async (q) => {
-      ran = true;
-      return q.select().from(owners).where(eq(owners.id, insertedId)).get();
-    });
-    await Promise.resolve();
-    expect(ran).toBe(false);
+  const transaction = ctx.db.transaction(async (q) => {
+    await q.insert(owners).values({ id: insertedId });
+    entered.resolve();
+    await release.promise;
+    throw new Error("synthetic rollback");
+  });
+  const rejection = expect(transaction).rejects.toThrow("synthetic rollback");
+  onTestFinished(async () => {
     release.resolve();
     await rejection;
-    expect(await unrelated).toBeUndefined();
-    await ctx.db.transaction(async (q) => {
-      await q.insert(owners).values({ id: insertedId });
-    });
-    expect(await ctx.db.query((q) => q.select().from(owners).where(eq(owners.id, insertedId)).get())).toEqual({
-      id: insertedId,
-    });
-  } finally {
-    release.resolve();
-    await ctx.cleanup();
-  }
+  });
+  await entered.promise;
+  let ran = false;
+  const unrelated = ctx.db.query(async (q) => {
+    ran = true;
+    return q.select().from(owners).where(eq(owners.id, insertedId)).get();
+  });
+  await Promise.resolve();
+  expect(ran).toBe(false);
+  release.resolve();
+  await rejection;
+  expect(await unrelated).toBeUndefined();
+  await ctx.db.transaction(async (q) => {
+    await q.insert(owners).values({ id: insertedId });
+  });
+  expect(await ctx.db.query((q) => q.select().from(owners).where(eq(owners.id, insertedId)).get())).toEqual({
+    id: insertedId,
+  });
 });
 
 test("read-only WAL queries stay responsive, hide uncommitted rows and reject writes", async () => {
   const ctx = await testDb();
+  onTestFinished(() => ctx.cleanup());
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   const id = randomUUID();
@@ -133,18 +134,16 @@ test("read-only WAL queries stay responsive, hide uncommitted rows and reject wr
     entered.resolve();
     await release.promise;
   });
-  try {
-    await entered.promise;
-    expect(await ctx.db.read((q) => q.select().from(owners).where(eq(owners.id, id)).get())).toBeUndefined();
-    await expect(ctx.db.read((q) => q.insert(owners).values({ id: randomUUID() }).run())).rejects.toThrow();
+  onTestFinished(async () => {
     release.resolve();
     await transaction;
-    expect(await ctx.db.read((q) => q.select().from(owners).where(eq(owners.id, id)).get())).toEqual({ id });
-  } finally {
-    release.resolve();
-    await transaction;
-    await ctx.cleanup();
-  }
+  });
+  await entered.promise;
+  expect(await ctx.db.read((q) => q.select().from(owners).where(eq(owners.id, id)).get())).toBeUndefined();
+  await expect(ctx.db.read((q) => q.insert(owners).values({ id: randomUUID() }).run())).rejects.toThrow();
+  release.resolve();
+  await transaction;
+  expect(await ctx.db.read((q) => q.select().from(owners).where(eq(owners.id, id)).get())).toEqual({ id });
 });
 
 test("query scopes cannot escape the queue and close drains pending work", async () => {

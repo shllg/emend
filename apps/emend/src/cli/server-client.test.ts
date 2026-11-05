@@ -5,7 +5,7 @@ import { once } from "node:events";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { testDb } from "../db/test-support.ts";
 import { startServer } from "../server/serve.ts";
 import { writeSecretFile } from "../state/files.ts";
@@ -20,21 +20,28 @@ function observeChildExit() {
   vi.spyOn(childProcess, "spawn").mockImplementationOnce((...args) => {
     const child = spawn(...args);
     void once(child, "exit").then(exited.resolve, exited.reject);
+    onTestFinished(async () => {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      await exited.promise;
+    });
     return child;
   });
   return exited.promise;
 }
 
 beforeEach(() => {
+  onTestFinished(() => {
+    try {
+      expect(vi.mocked(process.kill).mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
   const kill = process.kill;
   vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
     if (signal !== 0) throw new Error("Only process existence probes are allowed.");
     return kill(pid, signal);
   });
-});
-afterEach(() => {
-  expect(vi.mocked(process.kill).mock.calls.every(([, signal]) => signal === 0)).toBe(true);
-  vi.restoreAllMocks();
 });
 
 test.each([
@@ -65,6 +72,7 @@ test.each([
 
 test("a wrong proof never reads an endless capabilities body", async () => {
   const stateDir = await mkdtemp(join(process.env.EMEND_HOME as string, "discovery-proof-"));
+  onTestFinished(() => rm(stateDir, { recursive: true, force: true }));
   try {
     await writeFile(
       join(stateDir, "server.json"),
@@ -88,14 +96,16 @@ test("a wrong proof never reads an endless capabilities body", async () => {
 
 test("ensureServer reuses a live server with valid capabilities", async () => {
   const fixture = await testDb();
+  onTestFinished(() => fixture.cleanup());
   let server: Awaited<ReturnType<typeof startServer>> | undefined;
   try {
     const stateDir = join(fixture.dir, "state-server");
     server = await startServer({ stateDir, port: 0 });
+    const running = server;
+    onTestFinished(() => running.close());
     expect(await ensureServer(stateDir)).toEqual({ url: server.url });
   } finally {
     await server?.close();
-    await fixture.cleanup();
   }
 });
 
@@ -103,6 +113,10 @@ async function withLaunchEnv<T>(dir: string, launch: () => Promise<T>): Promise<
   const home = join(dir, "home");
   await mkdir(home, { mode: 0o700 });
   const previous = { ...process.env };
+  onTestFinished(() => {
+    for (const key of Object.keys(process.env)) delete process.env[key];
+    Object.assign(process.env, previous);
+  });
   const env = {
     ...(previous.PATH !== undefined ? { PATH: previous.PATH } : {}),
     ...(previous.TMPDIR !== undefined ? { TMPDIR: previous.TMPDIR } : {}),
@@ -121,6 +135,7 @@ async function withLaunchEnv<T>(dir: string, launch: () => Promise<T>): Promise<
 
 test("ensureServer starts a detached server after a dead discovery pid", async () => {
   const fixture = await testDb();
+  onTestFinished(() => fixture.cleanup());
   const stateDir = join(fixture.dir, "spawned");
   const exited = observeChildExit();
   let pid: number | undefined;
@@ -157,13 +172,17 @@ test("ensureServer starts a detached server after a dead discovery pid", async (
       expect(await exited).toEqual([0, null]);
       await expect(readFile(join(stateDir, "server.json"))).rejects.toMatchObject({ code: "ENOENT" });
     }
-    await fixture.cleanup();
   }
 });
 
 test("a detached child that exits before discovery ignores the caller's NODE_OPTIONS preload", async () => {
   const fixture = await testDb();
+  onTestFinished(() => fixture.cleanup());
   const previous = process.env.NODE_OPTIONS;
+  onTestFinished(() => {
+    if (previous === undefined) delete process.env.NODE_OPTIONS;
+    else process.env.NODE_OPTIONS = previous;
+  });
   try {
     const entry = join(fixture.dir, "exit.mjs");
     const started = join(fixture.dir, "entry-ran");
@@ -185,6 +204,5 @@ test("a detached child that exits before discovery ignores the caller's NODE_OPT
   } finally {
     if (previous === undefined) delete process.env.NODE_OPTIONS;
     else process.env.NODE_OPTIONS = previous;
-    await fixture.cleanup();
   }
 });

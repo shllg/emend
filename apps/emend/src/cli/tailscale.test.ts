@@ -5,6 +5,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { run } from "../main.ts";
 import { ensureTailscaleServe, tailscaleSelf } from "./tailscale.ts";
 
+const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const dirs: string[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -15,7 +16,6 @@ async function fake(status: unknown, config: unknown = {}, denied: boolean | "st
   const dir = await mkdtemp(join(tmpdir(), "emend-tailscale-"));
   dirs.push(dir);
   const log = join(dir, "calls.jsonl");
-  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
   await writeFile(
     join(dir, "tailscale"),
     `#!/bin/sh
@@ -306,7 +306,7 @@ test("malformed status JSON prints the specific failure line", async () => {
 });
 test("a timed-out call prints the failure line for its internal deadline", async () => {
   const f = await fake(running);
-  await writeFile(join(f.dir, "tailscale"), "#!/bin/sh\nwhile :; do :; done\n", { mode: 0o700 });
+  await writeFile(join(f.dir, "tailscale"), `#!/bin/sh\nwhile [ -d ${quote(f.dir)} ]; do :; done\n`, { mode: 0o700 });
   const tailscale = await import("./tailscale.ts");
   const self = tailscale.tailscaleSelf;
   vi.spyOn(tailscale, "tailscaleSelf").mockImplementation((env, signal) => self(env, signal, { deadlineMs: 1_000 }));

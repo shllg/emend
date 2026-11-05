@@ -508,6 +508,11 @@ describe.each(["HTTP", "in-process"])("%s transport", (mode) => {
         expect(await response.clone().json()).toMatchObject({ error: { code: "rate_limited" } });
         return response;
       });
+      onTestFinished(async () => {
+        resume.resolve();
+        transport.mockRestore();
+        await pending;
+      });
       try {
         const out = await f.command(["attach", f.pairing.url]);
         expect(out.code).toBe(1);

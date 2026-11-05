@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Worker } from "node:worker_threads";
 import { eq, sql } from "drizzle-orm";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, expect, onTestFinished, test, vi } from "vitest";
 import type { Queries } from "./client.ts";
 import { owners } from "./schema.ts";
 import { testDb } from "./test-support.ts";
@@ -48,41 +48,41 @@ afterEach(async () => {
 
 test("worker termination rolls back, rejects a paused transaction and releases queued work to a fresh writer", async () => {
   const f = await testDb();
+  onTestFinished(() => f.cleanup());
   const inserted = randomUUID();
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   let escaped: Queries | undefined;
-  try {
-    const failed = f.db.transaction(
-      async (q) => {
-        escaped = q;
-        await q.insert(owners).values({ id: inserted });
-        entered.resolve();
-        await release.promise;
-      },
-      { offThread: true },
-    );
-    const outcome = failed.then(
-      () => ({ error: undefined }),
-      (error: unknown) => ({ error }),
-    );
-    await entered.promise;
-    const queuedRead = f.db.query((q) => q.select().from(owners).where(eq(owners.id, inserted)).get());
-    const replacement = f.db.transaction((q) => q.insert(owners).values({ id: inserted }).run(), { offThread: true });
-    const queued = Promise.allSettled([queuedRead, replacement]);
-    await injection.workers[0]?.terminate();
-    expect((await outcome).error).toMatchObject({ message: "Database worker closed" });
-    expect(await queued).toMatchObject([{ status: "fulfilled", value: undefined }, { status: "fulfilled" }]);
-    expect(injection.workers).toHaveLength(2);
-    expect(await f.db.read((q) => q.select().from(owners).where(eq(owners.id, inserted)).get())).toEqual({
-      id: inserted,
-    });
-    if (!escaped) throw new Error("missing query scope");
-    await expect(escaped.exec("SELECT 1")).rejects.toThrow("Database query scope has ended");
-  } finally {
+  const failed = f.db.transaction(
+    async (q) => {
+      escaped = q;
+      await q.insert(owners).values({ id: inserted });
+      entered.resolve();
+      await release.promise;
+    },
+    { offThread: true },
+  );
+  const outcome = failed.then(
+    () => ({ error: undefined }),
+    (error: unknown) => ({ error }),
+  );
+  onTestFinished(async () => {
     release.resolve();
-    await f.cleanup();
-  }
+    await outcome;
+  });
+  await entered.promise;
+  const queuedRead = f.db.query((q) => q.select().from(owners).where(eq(owners.id, inserted)).get());
+  const replacement = f.db.transaction((q) => q.insert(owners).values({ id: inserted }).run(), { offThread: true });
+  const queued = Promise.allSettled([queuedRead, replacement]);
+  await injection.workers[0]?.terminate();
+  expect((await outcome).error).toMatchObject({ message: "Database worker closed" });
+  expect(await queued).toMatchObject([{ status: "fulfilled", value: undefined }, { status: "fulfilled" }]);
+  expect(injection.workers).toHaveLength(2);
+  expect(await f.db.read((q) => q.select().from(owners).where(eq(owners.id, inserted)).get())).toEqual({
+    id: inserted,
+  });
+  if (!escaped) throw new Error("missing query scope");
+  await expect(escaped.exec("SELECT 1")).rejects.toThrow("Database query scope has ended");
 });
 
 test.each(["constructor", "startup"] as const)(

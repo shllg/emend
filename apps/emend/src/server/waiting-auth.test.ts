@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { deliveries, devices, reviews, revisions, sends, tokens } from "../db/schema.ts";
 import { error, mailboxFixture } from "./mailbox/test-support.ts";
 
@@ -8,18 +8,17 @@ let f: Awaited<ReturnType<typeof mailboxFixture>>;
 let emitted: string[];
 let started: ReturnType<typeof Promise.withResolvers<void>>;
 beforeEach(async () => {
+  onTestFinished(() => {
+    vi.restoreAllMocks();
+  });
   f = await mailboxFixture();
+  onTestFinished(() => f.cleanup());
   emitted = [];
   started = Promise.withResolvers<void>();
   f.deps.events?.subscribe(f.ownerId, null, (event) => {
     emitted.push(event.type);
     if (event.type === "waiting" && event.reviewId === f.reviewId) started.resolve();
   });
-});
-afterEach(async () => {
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-  await f.cleanup();
 });
 const invalidate = (kind: "agent" | "reviewer", field: "revokedAt" | "expiresAt") =>
   f.db.query((q) =>
@@ -42,7 +41,12 @@ test.each(["revokedAt", "expiresAt"] as const)(
   "a waiting take whose token becomes %s claims nothing",
   async (field) => {
     const controller = new AbortController();
+    onTestFinished(() => controller.abort());
     const waiting = f.request(`/reviews/${f.reviewId}/take`, "POST", { waitSeconds: 10 }, "agent", controller.signal);
+    onTestFinished(async () => {
+      controller.abort();
+      await waiting;
+    });
     try {
       await started.promise;
       expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
@@ -58,7 +62,12 @@ test.each(["revokedAt", "expiresAt"] as const)(
 );
 test("the final credential check releases an unreturned claim", async () => {
   const controller = new AbortController();
+  onTestFinished(() => controller.abort());
   const waiting = f.request(`/reviews/${f.reviewId}/take`, "POST", { waitSeconds: 10 }, "agent", controller.signal);
+  onTestFinished(async () => {
+    controller.abort();
+    await waiting;
+  });
   try {
     await started.promise;
     expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
@@ -79,9 +88,15 @@ test("the final credential check releases an unreturned claim", async () => {
 });
 test("a token revoked while the second take queues cannot start a claim", async () => {
   const controller = new AbortController();
+  onTestFinished(() => controller.abort());
   const queued = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   const waiting = f.request(`/reviews/${f.reviewId}/take`, "POST", { waitSeconds: 10 }, "agent", controller.signal);
+  onTestFinished(async () => {
+    release.resolve();
+    controller.abort();
+    await waiting;
+  });
   let claims = 0;
   try {
     await started.promise;
@@ -116,7 +131,11 @@ test.each(
   ),
 )("$scope SSE ends at the keepalive after session $field", async ({ field, scope }) => {
   vi.useFakeTimers();
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
   const controller = new AbortController();
+  onTestFinished(() => controller.abort());
   const response = await f.request(
     scope === "owner" ? "/events" : `/reviews/${f.reviewId}/events`,
     "GET",
@@ -126,6 +145,10 @@ test.each(
   );
   const reader = response.body?.getReader();
   if (!reader) throw new Error("missing body");
+  onTestFinished(async () => {
+    controller.abort();
+    await reader.cancel();
+  });
   try {
     await reader.read();
     if (field === "device")
@@ -155,9 +178,14 @@ test("only 32 takes per owner may wait and abort releases their slots", async ()
     return end;
   });
   const controller = new AbortController();
+  onTestFinished(() => controller.abort());
   const waiting = Array.from({ length: 32 }, () =>
     f.request(`/reviews/${f.reviewId}/take`, "POST", { waitSeconds: 25 }, "agent", controller.signal),
   );
+  onTestFinished(async () => {
+    controller.abort();
+    await Promise.all(waiting);
+  });
   try {
     await full.promise;
     expect(begin).toHaveBeenCalledTimes(32);

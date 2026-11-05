@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { sql } from "drizzle-orm";
-import { beforeEach, expect, test, vi } from "vitest";
+import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import * as client from "../db/client.ts";
 import * as waiters from "../db/repo/waiters.ts";
 import { run } from "../main.ts";
@@ -84,6 +84,10 @@ test("concurrent bootstraps leave both token files authenticating as their kind"
     };
   });
   const initial = initializeServerState(f.stateDir);
+  onTestFinished(async () => {
+    release.resolve();
+    await (await initial).db.close();
+  });
   await committed.promise;
   try {
     const others = await Promise.all(Array.from({ length: 3 }, () => initializeServerState(f.stateDir)));
@@ -92,7 +96,6 @@ test("concurrent bootstraps leave both token files authenticating as their kind"
     release.resolve();
   }
   const state = await initial;
-  f.cleanup.push(() => state.db.close());
   for (const kind of ["agent", "admin"]) {
     const secret = await readFile(join(f.stateDir, `${kind}.token`), "utf8");
     expect((await verifyBearer(state.db, `Bearer ${secret}`, Date.now()))?.kind).toBe(kind);
@@ -328,6 +331,11 @@ test.each(["wait", "feedback"])(
         await flush.promise;
       };
       const pending = run([command, result.reviewId], out.io);
+      onTestFinished(async () => {
+        process.emit(signal);
+        flush.resolve();
+        await pending;
+      });
       await writing.promise;
       process.emit(signal);
       try {

@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { afterEach, expect, test, vi } from "vitest";
+import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { ReviewEvents } from "./events.ts";
 import { error, mailboxFixture, nextWaiting } from "./mailbox/test-support.ts";
 
-afterEach(() => {
-  vi.useRealTimers();
-  vi.restoreAllMocks();
+beforeEach(() => {
+  onTestFinished(() => {
+    vi.restoreAllMocks();
+  });
 });
+
 test("repeated unsubscribe cannot detach a newer listener for the same review", () => {
   const events = new ReviewEvents(Date.now);
   const reviewId = randomUUID();
@@ -25,26 +27,23 @@ test("owner subscriptions and Send waiters cannot hear a different owner even fo
   const owner = vi.fn();
   const review = vi.fn();
   const stopOwner = events.subscribe("owner", null, owner);
+  onTestFinished(stopOwner);
   const stopReview = events.subscribe("owner", reviewId, review);
+  onTestFinished(stopReview);
   const wait = events.waitForSend("owner", reviewId, 25);
+  onTestFinished(() => wait.cancel());
   const woke = vi.fn();
   void wait.promise.then(woke);
-  try {
-    events.emit("foreign", { type: "send", reviewId, revision: 1, sendId: randomUUID() });
-    await Promise.resolve();
-    expect(owner).not.toHaveBeenCalled();
-    expect(review).not.toHaveBeenCalled();
-    expect(woke).not.toHaveBeenCalled();
-    events.emit("owner", { type: "send", reviewId, revision: 1, sendId: randomUUID() });
-    await wait.promise;
-    expect(owner).toHaveBeenCalledOnce();
-    expect(review).toHaveBeenCalledOnce();
-    expect(woke).toHaveBeenCalledOnce();
-  } finally {
-    wait.cancel();
-    stopOwner();
-    stopReview();
-  }
+  events.emit("foreign", { type: "send", reviewId, revision: 1, sendId: randomUUID() });
+  await Promise.resolve();
+  expect(owner).not.toHaveBeenCalled();
+  expect(review).not.toHaveBeenCalled();
+  expect(woke).not.toHaveBeenCalled();
+  events.emit("owner", { type: "send", reviewId, revision: 1, sendId: randomUUID() });
+  await wait.promise;
+  expect(owner).toHaveBeenCalledOnce();
+  expect(review).toHaveBeenCalledOnce();
+  expect(woke).toHaveBeenCalledOnce();
 });
 test.each(["snooze", "retire", "delete"] as const)(
   "a Send waiter also wakes on %s, and not on another owner's event",
@@ -52,6 +51,7 @@ test.each(["snooze", "retire", "delete"] as const)(
     const events = new ReviewEvents(Date.now);
     const reviewId = randomUUID();
     const wait = events.waitForSend("owner", reviewId, 25);
+    onTestFinished(() => wait.cancel());
     const woke = vi.fn();
     void wait.promise.then(woke);
     events.emit("foreign", { type, reviewId, revision: 1 });
@@ -66,6 +66,9 @@ test.each(["snooze", "retire", "delete"] as const)(
 );
 test("waiting covers concurrent takes and 35 seconds of grace, emitting only transitions", async () => {
   vi.useFakeTimers();
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
   const events = new ReviewEvents(Date.now);
   const id = randomUUID();
   const changes: unknown[] = [];
@@ -94,6 +97,9 @@ test("waiting covers concurrent takes and 35 seconds of grace, emitting only tra
 });
 test("a viewed event without a revision preserves the waiting revision through expiry", async () => {
   vi.useFakeTimers();
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
   const events = new ReviewEvents(Date.now);
   const reviewId = randomUUID();
   const listener = vi.fn();
@@ -108,32 +114,35 @@ test("a viewed event without a revision preserves the waiting revision through e
 });
 test("both stream kinds share the 32-stream owner cap and release slots on cancellation and abort", async () => {
   const f = await mailboxFixture();
+  onTestFinished(() => f.cleanup());
   const responses: Response[] = [];
-  try {
-    for (let i = 0; i < 32; i++) {
-      const response = await f.request(i % 2 ? `/reviews/${f.reviewId}/events` : "/events", "GET");
-      expect(response.status).toBe(200);
-      expect(response.headers.get("Content-Type")).toContain("text/event-stream");
-      expect(response.headers.get("Cache-Control")).toBe("no-store");
-      responses.push(response);
-    }
-    await error(await f.request(`/reviews/${f.reviewId}/events`, "GET"), 429, "rate_limited");
-    await error(await f.request("/events", "GET"), 429, "rate_limited");
-    await responses.pop()?.body?.cancel();
-    const controller = new AbortController();
-    const response = await f.request(`/reviews/${f.reviewId}/events`, "GET", undefined, "reviewer", controller.signal);
-    expect(response.status).toBe(200);
-    controller.abort();
-    const replacement = await f.request(`/reviews/${f.reviewId}/events`, "GET");
-    expect(replacement.status).toBe(200);
-    responses.push(replacement);
-  } finally {
+  onTestFinished(async () => {
     await Promise.all(responses.map((r) => r.body?.cancel()));
-    await f.cleanup();
+  });
+  for (let i = 0; i < 32; i++) {
+    const response = await f.request(i % 2 ? `/reviews/${f.reviewId}/events` : "/events", "GET");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toContain("text/event-stream");
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    responses.push(response);
   }
+  await error(await f.request(`/reviews/${f.reviewId}/events`, "GET"), 429, "rate_limited");
+  await error(await f.request("/events", "GET"), 429, "rate_limited");
+  await responses.pop()?.body?.cancel();
+  const controller = new AbortController();
+  onTestFinished(() => controller.abort());
+  const response = await f.request(`/reviews/${f.reviewId}/events`, "GET", undefined, "reviewer", controller.signal);
+  expect(response.status).toBe(200);
+  controller.abort();
+  const replacement = await f.request(`/reviews/${f.reviewId}/events`, "GET");
+  expect(replacement.status).toBe(200);
+  responses.push(replacement);
 });
 test("waiting state and expiry are independent for the same review id under two owners", async () => {
   vi.useFakeTimers();
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
   const events = new ReviewEvents(Date.now);
   const id = randomUUID();
   const a = vi.fn();
@@ -170,6 +179,9 @@ test.each(["review", "owner"])(
   "%s streams drop after 100 buffered events; keepalives run every 25 seconds",
   async (scope) => {
     vi.useFakeTimers();
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const events = new ReviewEvents(Date.now);
     const id = randomUUID();
     const stream = events.stream("owner", scope === "owner" ? null : id, "session");
@@ -191,7 +203,12 @@ test.each(["review", "owner"])(
 async function expectPendingAfterWait(f: Awaited<ReturnType<typeof mailboxFixture>>) {
   const registered = nextWaiting(f.deps.events, f.ownerId, f.reviewId);
   const settled = vi.fn();
-  const take = f.take(0.02);
+  const controller = new AbortController();
+  const take = f.take(0.02, controller.signal);
+  onTestFinished(async () => {
+    controller.abort();
+    await take;
+  });
   void take.then(settled);
   await registered;
   await vi.advanceTimersByTimeAsync(19);
@@ -202,140 +219,151 @@ async function expectPendingAfterWait(f: Awaited<ReturnType<typeof mailboxFixtur
 
 test("empty take polls do not wait behind the writer queue", async () => {
   const f = await mailboxFixture();
+  onTestFinished(() => f.cleanup());
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   const writer = f.db.transaction(async () => {
     entered.resolve();
     await release.promise;
   });
-  try {
-    await entered.promise;
-    await expectPendingAfterWait(f);
-  } finally {
+  onTestFinished(async () => {
     release.resolve();
     await writer;
-    await f.cleanup();
-  }
+  });
+  await entered.promise;
+  const pending = expectPendingAfterWait(f);
+  // Finish the held writer before draining the take if registration never arrives.
+  onTestFinished(() => release.resolve());
+  await pending;
 });
 
 test("a Send arriving between the empty read and wait is not missed", async () => {
   const f = await mailboxFixture();
-  try {
-    const read = f.db.read;
-    let sent = false;
-    f.db.read = async (operation) => {
-      const result = await read(operation);
-      if (result === undefined && !sent) {
-        sent = true;
-        await f.send({ revision: 1, kind: "go", instruction: "Between read and wait" });
-      }
-      return result;
-    };
-    const result = await f.take(25);
-    expect(result).toMatchObject({ kind: "go", instructions: ["Between read and wait"] });
-  } finally {
-    await f.cleanup();
-  }
+  onTestFinished(() => f.cleanup());
+  const read = f.db.read;
+  let sent = false;
+  f.db.read = async (operation) => {
+    const result = await read(operation);
+    if (result === undefined && !sent) {
+      sent = true;
+      await f.send({ revision: 1, kind: "go", instruction: "Between read and wait" });
+    }
+    return result;
+  };
+  const controller = new AbortController();
+  onTestFinished(() => controller.abort());
+  const taking = f.take(25, controller.signal);
+  onTestFinished(async () => {
+    controller.abort();
+    await taking;
+  });
+  const result = await taking;
+  expect(result).toMatchObject({ kind: "go", instructions: ["Between read and wait"] });
 });
 test("a 25-second take wakes on Send, without blocking other work", async () => {
   const f = await mailboxFixture();
-  try {
-    const events = f.deps.events;
-    expect(events).toBeDefined();
-    const registered = nextWaiting(events, f.ownerId, f.reviewId);
-    const waiting = f.take(25);
-    await registered;
-    expect(events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
-    await f.send({ revision: 1, kind: "go", instruction: "Wake" });
-    expect(await waiting).toMatchObject({ kind: "go", instructions: ["Wake"] });
-    expect(events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
-    f.advance(35000);
-    expect(events?.agentWaiting(f.ownerId, f.reviewId)).toBe(false);
-  } finally {
-    await f.cleanup();
-  }
+  onTestFinished(() => f.cleanup());
+  const events = f.deps.events;
+  expect(events).toBeDefined();
+  const registered = nextWaiting(events, f.ownerId, f.reviewId);
+  const controller = new AbortController();
+  const waiting = f.take(25, controller.signal);
+  onTestFinished(async () => {
+    controller.abort();
+    await waiting;
+  });
+  await registered;
+  expect(events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
+  await f.send({ revision: 1, kind: "go", instruction: "Wake" });
+  expect(await waiting).toMatchObject({ kind: "go", instructions: ["Wake"] });
+  expect(events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
+  f.advance(35000);
+  expect(events?.agentWaiting(f.ownerId, f.reviewId)).toBe(false);
 });
 test("a take timeout returns pending and an aborted take releases waiting state", async () => {
   const f = await mailboxFixture();
-  try {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    await expectPendingAfterWait(f);
-    // Expire the first take's grace period so the predicate observes the new take's registration.
-    f.advance(35000);
-    expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(false);
-    const abort = new AbortController();
-    const registered = nextWaiting(f.deps.events, f.ownerId, f.reviewId);
-    const waiting = f.request(`/reviews/${f.reviewId}/take`, "POST", { waitSeconds: 25 }, "agent", abort.signal);
-    await registered;
-    expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
+  onTestFinished(() => f.cleanup());
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  await expectPendingAfterWait(f);
+  // Expire the first take's grace period so the predicate observes the new take's registration.
+  f.advance(35000);
+  expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(false);
+  const abort = new AbortController();
+  onTestFinished(() => abort.abort());
+  const registered = nextWaiting(f.deps.events, f.ownerId, f.reviewId);
+  const waiting = f.request(`/reviews/${f.reviewId}/take`, "POST", { waitSeconds: 25 }, "agent", abort.signal);
+  onTestFinished(async () => {
     abort.abort();
     await waiting;
-    f.advance(35000);
-    expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(false);
-  } finally {
-    await f.cleanup();
-  }
+  });
+  await registered;
+  expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
+  abort.abort();
+  await waiting;
+  f.advance(35000);
+  expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(false);
 });
 test("all six SSE events carry ids and revisions, never comments or instructions", async () => {
   const f = await mailboxFixture();
+  onTestFinished(() => f.cleanup());
   const controller = new AbortController();
+  onTestFinished(() => controller.abort());
   const takeController = new AbortController();
-  try {
-    const response = await f.request(`/reviews/${f.reviewId}/events`, "GET", undefined, "reviewer", controller.signal);
-    expect(response.status).toBe(200);
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error("missing stream");
-    await reader.read();
-    const t = await f.thread("Secret comment text");
-    const threadEvent = new TextDecoder().decode((await reader.read()).value);
-    expect(threadEvent).toContain("event: thread");
-    expect(threadEvent).toContain(t.threadId);
-    expect(threadEvent).not.toContain("Secret");
-    await f.send({ revision: 1, kind: "go", instruction: "Secret instruction text" });
-    const sendEvent = new TextDecoder().decode((await reader.read()).value);
-    expect(sendEvent).toContain("event: send");
-    expect(sendEvent).not.toContain("Secret");
-    const taken = await f.take();
-    expect(new TextDecoder().decode((await reader.read()).value)).toContain("event: claimed");
-    if (taken.kind === "pending") throw new Error("missing delivery");
-    expect((await f.request(`/deliveries/${taken.deliveryId}/confirm`, "POST", undefined, "agent")).status).toBe(204);
-    const confirmed = new TextDecoder().decode((await reader.read()).value);
-    expect(confirmed).toContain("event: confirmed");
-    expect(confirmed).toContain(taken.deliveryId);
-    expect(confirmed).not.toContain("Secret");
-    const waiting = f.request(
-      `/reviews/${f.reviewId}/take`,
-      "POST",
-      { waitSeconds: 25 },
-      "agent",
-      takeController.signal,
-    );
-    expect(new TextDecoder().decode((await reader.read()).value)).toContain("event: waiting");
+  onTestFinished(() => takeController.abort());
+  const response = await f.request(`/reviews/${f.reviewId}/events`, "GET", undefined, "reviewer", controller.signal);
+  expect(response.status).toBe(200);
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("missing stream");
+  await reader.read();
+  const t = await f.thread("Secret comment text");
+  const threadEvent = new TextDecoder().decode((await reader.read()).value);
+  expect(threadEvent).toContain("event: thread");
+  expect(threadEvent).toContain(t.threadId);
+  expect(threadEvent).not.toContain("Secret");
+  await f.send({ revision: 1, kind: "go", instruction: "Secret instruction text" });
+  const sendEvent = new TextDecoder().decode((await reader.read()).value);
+  expect(sendEvent).toContain("event: send");
+  expect(sendEvent).not.toContain("Secret");
+  const taken = await f.take();
+  expect(new TextDecoder().decode((await reader.read()).value)).toContain("event: claimed");
+  if (taken.kind === "pending") throw new Error("missing delivery");
+  expect((await f.request(`/deliveries/${taken.deliveryId}/confirm`, "POST", undefined, "agent")).status).toBe(204);
+  const confirmed = new TextDecoder().decode((await reader.read()).value);
+  expect(confirmed).toContain("event: confirmed");
+  expect(confirmed).toContain(taken.deliveryId);
+  expect(confirmed).not.toContain("Secret");
+  const waiting = f.request(`/reviews/${f.reviewId}/take`, "POST", { waitSeconds: 25 }, "agent", takeController.signal);
+  onTestFinished(async () => {
     takeController.abort();
     await waiting;
-    const published = await f.request(
-      "/publish",
-      "POST",
-      {
-        reviewId: f.reviewId,
-        reviewKey: "a".repeat(64),
-        repo: null,
-        branch: null,
-        title: "Synthetic",
-        base: null,
-        head: null,
-        topics: [],
-        files: [],
-        writeup: { overview: "Overview", tldr: "Summary", decisions: null, topics: {} },
-      },
-      "agent",
-    );
-    expect(published.status).toBe(200);
-    expect(new TextDecoder().decode((await reader.read()).value)).toContain("event: publish");
-  } finally {
-    takeController.abort();
-    controller.abort();
-    await f.cleanup();
-  }
+  });
+  expect(new TextDecoder().decode((await reader.read()).value)).toContain("event: waiting");
+  takeController.abort();
+  await waiting;
+  const published = await f.request(
+    "/publish",
+    "POST",
+    {
+      reviewId: f.reviewId,
+      reviewKey: "a".repeat(64),
+      repo: null,
+      branch: null,
+      title: "Synthetic",
+      base: null,
+      head: null,
+      topics: [],
+      files: [],
+      writeup: { overview: "Overview", tldr: "Summary", decisions: null, topics: {} },
+    },
+    "agent",
+  );
+  expect(published.status).toBe(200);
+  expect(new TextDecoder().decode((await reader.read()).value)).toContain("event: publish");
 });
