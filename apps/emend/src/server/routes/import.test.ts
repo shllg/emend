@@ -1,15 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
-import { monitorEventLoopDelay } from "node:perf_hooks";
-import { setTimeout as delay } from "node:timers/promises";
-import {
-  ImportBundle,
-  importRowCount,
-  indexImportBundle,
-  LIMITS,
-  MachineRegistered,
-  PairingCreated,
-  RevisionView,
-} from "@emend/contract";
+import { randomUUID } from "node:crypto";
+import { ImportBundle, importRowCount, indexImportBundle, LIMITS, RevisionView } from "@emend/contract";
 import * as core from "@emend/core";
 import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -17,215 +7,40 @@ import * as tables from "../../db/schema.ts";
 import { chargePlacementMetadata } from "../import/placement-budget.ts";
 import { importPlacements } from "../import/placements.ts";
 import * as payload from "../mailbox/payload.ts";
-import { error, mailboxFixture } from "../mailbox/test-support.ts";
+import { error } from "../mailbox/test-support.ts";
 import { WorkTimeout, workerExecutor } from "../publish/executor.ts";
 import { publishSlots } from "../publish/lifecycle.ts";
 import { executeWork, serializeRendered } from "../publish/work.ts";
+import {
+  bundle,
+  capsBundle,
+  escapedHtmlBundle,
+  importFixture,
+  longPath,
+  metadataBundle,
+  metadataShapes,
+  multibyteCapsBundle,
+  nestedSourceBundle,
+  placementStorage,
+  replayBundle,
+  required,
+  sharedTargetBundle,
+  snapshot,
+  unchangedSideShapes,
+  unchangedSidesBundle,
+} from "./import-test-support.ts";
 
-let f: Awaited<ReturnType<typeof mailboxFixture>>;
-let token: string;
-let origin: string;
+let f: Awaited<ReturnType<typeof importFixture>>;
 beforeEach(async () => {
-  f = await mailboxFixture();
-  origin = randomUUID();
-  const pairing = PairingCreated.parse(await (await f.request("/pairings", "POST", { purpose: "machine" })).json());
-  const registered = await f.request("/machines", "POST", {
-    secret: new URL(pairing.url).hash.slice(1),
-    instance: { id: origin, name: "Synthetic laptop" },
-  });
-  expect(registered.status).toBe(201);
-  token = MachineRegistered.parse(await registered.json()).token;
+  f = await importFixture();
 });
 afterEach(async () => {
   vi.restoreAllMocks();
   await f.cleanup();
 });
-function request(path: string, body: unknown, signal?: AbortSignal) {
-  const url = `http://127.0.0.1:3636/api/v1${path}`;
-  const init = {
-    method: "POST",
-    headers: { Host: "127.0.0.1:3636", "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify(body),
-  };
-  // A Request follows its signal only weakly; keep it alive so an abort is not lost to garbage collection.
-  return signal ? f.app.request(f.keep(new Request(url, { ...init, signal }))) : f.app.request(url, init);
-}
-async function bundle() {
-  const now = new Date(f.deps.now() - 1000).toISOString();
-  const id = randomUUID();
-  const revisionIds = [randomUUID(), randomUUID()];
-  const threadId = randomUUID();
-  const sendIds = [randomUUID(), randomUUID()];
-  const deliveryIds = [randomUUID(), randomUUID()];
-  const blob = await f.deps.blobs.put(
-    f.ownerId,
-    Buffer.from(JSON.stringify({ overview: "Synthetic writeup", tldr: "", decisions: null, topics: {} })),
-    "application/json",
-  );
-  const html = await f.deps.blobs.put(f.ownerId, Buffer.from("<h1>Synthetic doc</h1>"), "text/html");
-  return {
-    review: {
-      id,
-      originInstanceId: origin,
-      reviewKey: "b".repeat(64),
-      repo: { key: "c".repeat(64), name: "Synthetic repo" },
-      branch: "main",
-      title: "Copied review",
-      state: "open",
-      approvedRevision: null,
-      createdAt: now,
-      updatedAt: now,
-      movedTo: "https://unused.example",
-    },
-    revisions: revisionIds
-      .map((id, i) => ({
-        id,
-        reviewId: "",
-        seq: i + 1,
-        base: null,
-        head: null,
-        main: null,
-        writeupEmpty: false,
-        contentKey: "A".repeat(43),
-        createdAt: now,
-      }))
-      .map((r) => ({ ...r, reviewId: id })),
-    topics: revisionIds.map((revisionId) => ({
-      id: randomUUID(),
-      revisionId,
-      slug: "synthetic",
-      title: "Synthetic topic",
-      importance: 20,
-      summary: "Synthetic summary",
-    })),
-    files: [
-      {
-        id: randomUUID(),
-        revisionId: revisionIds[0],
-        path: "doc.html",
-        oldPath: null,
-        role: "doc",
-        status: null,
-        topicSlug: null,
-        ord: 0,
-        mediaType: "text/html",
-        oldBlob: null,
-        newBlob: html,
-        renderedBlob: null,
-        flag: null,
-        parentDocId: null,
-      },
-    ],
-    docAssets: [],
-    writeups: revisionIds.map((revisionId) => ({ id: randomUUID(), revisionId, sourceBlob: blob, renderedBlob: blob })),
-    changedBlocks: revisionIds.map((revisionId) => ({
-      id: randomUUID(),
-      revisionId,
-      blockId: `overview-${createHash("sha256").update("Synthetic writeup").digest("hex").slice(0, 8)}`,
-    })),
-    threads: [
-      {
-        id: threadId,
-        reviewId: id,
-        target: { kind: "review" },
-        state: "sent",
-        createdRevisionId: revisionIds[0],
-        createdAt: now,
-        updatedAt: now,
-      },
-    ],
-    placements: revisionIds.map((revisionId) => ({
-      reviewId: id,
-      threadId,
-      revisionId,
-      status: "placed",
-      location: { kind: "review" },
-      reason: null,
-      carried: null,
-    })),
-    comments: [
-      {
-        id: randomUUID(),
-        reviewId: id,
-        threadId,
-        author: "user",
-        body: "First feedback",
-        outcome: null,
-        sendId: sendIds[0],
-        createdAt: now,
-        updatedAt: now,
-      },
-      {
-        id: randomUUID(),
-        reviewId: id,
-        threadId,
-        author: "agent",
-        body: "Explained",
-        outcome: "explained",
-        sendId: null,
-        createdAt: now,
-        updatedAt: now,
-      },
-      {
-        id: randomUUID(),
-        reviewId: id,
-        threadId,
-        author: "user",
-        body: "Second feedback",
-        outcome: null,
-        sendId: sendIds[1],
-        createdAt: now,
-        updatedAt: now,
-      },
-    ],
-    sends: sendIds
-      .map((id, i) => ({
-        id,
-        reviewId: "",
-        revisionId: revisionIds[i],
-        kind: "go",
-        mode: "fix-clear",
-        instruction: null,
-        deliveryId: deliveryIds[i],
-        setAsideAt: i ? now : null,
-        createdAt: now,
-      }))
-      .map((s) => ({ ...s, reviewId: id })),
-    deliveries: deliveryIds.map((deliveryId, i) => ({
-      id: deliveryId,
-      reviewId: id,
-      leaseUntil: now,
-      confirmedAt: i ? null : now,
-      createdAt: now,
-    })),
-  };
-}
-async function snapshot() {
-  return f.db.read(async (q) => {
-    const result = [];
-    for (const table of [
-      tables.reviews,
-      tables.revisions,
-      tables.topics,
-      tables.files,
-      tables.docAssets,
-      tables.writeups,
-      tables.changedBlocks,
-      tables.threads,
-      tables.placements,
-      tables.comments,
-      tables.sends,
-      tables.deliveries,
-      tables.blobs,
-      tables.repos,
-    ])
-      result.push(await q.select({ n: sql<number>`count(*)` }).from(table).get());
-    return result;
-  });
-}
 test("copies ids and history atomically, releases unconfirmed Sends, rotates content keys and skips retries", async () => {
-  const input = await bundle();
-  const response = await request("/import", input);
+  const input = await bundle(f);
+  const response = await f.importRequest("/import", input);
   expect(response.status).toBe(201);
   expect(await response.json()).toEqual({ skipped: false });
   await f.db.read(async (q) => {
@@ -246,7 +61,7 @@ test("copies ids and history atomically, releases unconfirmed Sends, rotates con
   expect(view).toMatchObject({
     importedAt: new Date(f.deps.now()).toISOString(),
     movedTo: null,
-    origin: { id: origin, name: "Synthetic laptop" },
+    origin: { id: f.origin, name: "Synthetic laptop" },
     revisions: [{ seq: 1 }, { seq: 2 }],
   });
   const revision = RevisionView.parse(await (await f.request(`/reviews/${input.review.id}/revisions/1`, "GET")).json());
@@ -261,17 +76,17 @@ test("copies ids and history atomically, releases unconfirmed Sends, rotates con
       .where(and(eq(tables.deliveries.ownerId, f.ownerId), eq(tables.deliveries.reviewId, input.review.id))),
   );
   expect(deliveries.map((d) => d.id)).toEqual([input.deliveries[0]?.id]);
-  const taken = await request(`/reviews/${input.review.id}/take`, {});
+  const taken = await f.importRequest(`/reviews/${input.review.id}/take`, {});
   expect(taken.status).toBe(200);
   expect(await taken.json()).toMatchObject({
     kind: "go",
     comments: [{ id: input.comments[2]?.id, body: "Second feedback" }],
   });
-  const before = await snapshot();
-  const retry = await request("/import", input);
+  const before = await snapshot(f);
+  const retry = await f.importRequest("/import", input);
   expect(retry.status).toBe(200);
   expect(await retry.json()).toEqual({ skipped: true });
-  expect(await snapshot()).toEqual(before);
+  expect(await snapshot(f)).toEqual(before);
 });
 test.each([
   "origin",
@@ -284,7 +99,7 @@ test.each([
   "path",
   "body",
 ])("rejects %s and writes nothing", async (kind) => {
-  const input = await bundle();
+  const input = await bundle(f);
   if (kind === "origin") input.review.originInstanceId = f.instanceId;
   if (kind === "review collision") input.review.id = f.reviewId;
   if (kind === "foreign review collision") {
@@ -293,7 +108,7 @@ test.each([
       q.insert(tables.reviews).values({
         id: input.review.id,
         ownerId: f.otherOwnerId,
-        originInstanceId: origin,
+        originInstanceId: f.origin,
         reviewKey: "e".repeat(64),
         title: "Foreign",
       }),
@@ -316,9 +131,9 @@ test.each([
       input.deliveries,
     ])
       for (const row of rows) row.reviewId = input.review.id;
-  const before = await snapshot();
+  const before = await snapshot(f);
   await error(
-    await request("/import", input),
+    await f.importRequest("/import", input),
     400,
     kind.includes("origin") || kind.includes("review collision")
       ? "wrong_origin"
@@ -326,26 +141,26 @@ test.each([
         ? "blob_missing"
         : "invalid_request",
   );
-  expect(await snapshot()).toEqual(before);
+  expect(await snapshot(f)).toEqual(before);
 });
 test("local agents cannot import; oversized bodies fail before writing", async () => {
-  const input = await bundle();
-  const before = await snapshot();
+  const input = await bundle(f);
+  const before = await snapshot(f);
   await error(await f.request("/import", "POST", input, "agent"), 404, "not_found");
-  await error(await request("/import", { padding: "x".repeat(LIMITS.publishJsonBytes) }), 413, "too_large");
-  expect(await snapshot()).toEqual(before);
+  await error(await f.importRequest("/import", { padding: "x".repeat(LIMITS.publishJsonBytes) }), 413, "too_large");
+  expect(await snapshot(f)).toEqual(before);
 });
 test("machine cannot publish, take or reply across origins", async () => {
   const thread = await f.thread();
   await f.send();
-  await error(await request(`/reviews/${f.reviewId}/take`, {}), 404, "unknown_review");
+  await error(await f.importRequest(`/reviews/${f.reviewId}/take`, {}), 404, "unknown_review");
   await error(
-    await request(`/comments/${thread.commentId}/reply`, { outcome: "explained", body: "No" }),
+    await f.importRequest(`/comments/${thread.commentId}/reply`, { outcome: "explained", body: "No" }),
     404,
     "not_found",
   );
   await error(
-    await request("/publish", {
+    await f.importRequest("/publish", {
       reviewId: f.reviewId,
       reviewKey: "a".repeat(64),
       repo: null,
@@ -363,7 +178,7 @@ test("machine cannot publish, take or reply across origins", async () => {
 });
 
 test("regenerates hostile rendered content from source and preserves doc asset associations", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   const hostile = await f.deps.blobs.put(
     f.ownerId,
     Buffer.from(
@@ -400,7 +215,7 @@ test("regenerates hostile rendered content from source and preserves doc asset a
       { ...doc, id: assetId, path: "style.css", role: "asset", newBlob: asset, parentDocId: doc.id, ord: 1 },
     ],
   };
-  expect((await request("/import", withAssets)).status).toBe(201);
+  expect((await f.importRequest("/import", withAssets)).status).toBe(201);
   const revision = RevisionView.parse(await (await f.request(`/reviews/${input.review.id}/revisions/1`, "GET")).json());
   const html = revision.writeup.sections
     .flatMap((s) => s.blocks)
@@ -418,13 +233,13 @@ test("regenerates hostile rendered content from source and preserves doc asset a
 });
 
 test("a round trip keeps links and repoUrl from the source blob and links issue numbers again", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   const link = { url: "https://example.test/o/r/pull/7", label: "PR 7", kind: "pr" };
   const writeup = { overview: "Fixes #5", tldr: "", decisions: null, topics: {} };
   const put = (value: unknown) => f.deps.blobs.put(f.ownerId, Buffer.from(JSON.stringify(value)), "application/json");
   const source = await put({ ...writeup, links: [link], repoUrl: "https://github.com/owner/name" });
   for (const w of input.writeups) w.sourceBlob = source;
-  expect((await request("/import", input)).status).toBe(201);
+  expect((await f.importRequest("/import", input)).status).toBe(201);
   const revision = RevisionView.parse(await (await f.request(`/reviews/${input.review.id}/revisions/1`, "GET")).json());
   expect(revision.links).toEqual([link]);
   expect(revision.repoUrl).toBe("https://github.com/owner/name");
@@ -434,19 +249,19 @@ test("a round trip keeps links and repoUrl from the source blob and links issue 
 
 test("a source blob with a hostile link or repoUrl is refused", async () => {
   for (const extra of [{ links: [{ url: "javascript:alert(1)", label: "x" }] }, { repoUrl: "http://github.com/o/r" }]) {
-    const input = await bundle();
+    const input = await bundle(f);
     const source = await f.deps.blobs.put(
       f.ownerId,
       Buffer.from(JSON.stringify({ overview: "x", tldr: "", decisions: null, topics: {}, ...extra })),
       "application/json",
     );
     for (const w of input.writeups) w.sourceBlob = source;
-    expect((await request("/import", input)).status).toBe(400);
+    expect((await f.importRequest("/import", input)).status).toBe(400);
   }
 });
 
 test("imports writeup media as parentless assets and the writeup renders the image", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   const source = await f.deps.blobs.put(
     f.ownerId,
     Buffer.from(JSON.stringify({ overview: "![Before](media/a.png)", tldr: "", decisions: null, topics: {} })),
@@ -464,7 +279,7 @@ test("imports writeup media as parentless assets and the writeup renders the ima
       { ...doc, id: randomUUID(), path: "media/a.png", role: "asset", mediaType: "image/png", newBlob: hash, ord: 1 },
     ],
   };
-  expect((await request("/import", withMedia)).status).toBe(201);
+  expect((await f.importRequest("/import", withMedia)).status).toBe(201);
   const revision = RevisionView.parse(await (await f.request(`/reviews/${input.review.id}/revisions/1`, "GET")).json());
   const html = revision.writeup.sections.flatMap((s) => s.blocks.map((b) => b.html)).join("");
   expect(html).toContain(`src="/api/v1/media/${hash}"`);
@@ -475,7 +290,7 @@ test("imports writeup media as parentless assets and the writeup renders the ima
 });
 
 test("preserves approval records and permits retry after a busy response", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   const approvalId = randomUUID();
   const approved = {
     ...input,
@@ -495,9 +310,9 @@ test("preserves approval records and permits retry after a busy response", async
       },
     ],
   };
-  const responses = await Promise.all([request("/import", approved), request("/import", approved)]);
+  const responses = await Promise.all([f.importRequest("/import", approved), f.importRequest("/import", approved)]);
   expect(responses.map((r) => r.status).sort()).toEqual([201, 429]);
-  expect((await request("/import", approved)).status).toBe(200);
+  expect((await f.importRequest("/import", approved)).status).toBe(200);
   const saved = await f.db.read((q) =>
     q
       .select()
@@ -513,7 +328,7 @@ test("preserves approval records and permits retry after a busy response", async
 test.each(["revision", "send", "delivery", "asset", "writeup", "target", "file size"])(
   "rejects invalid %s with no partial writes",
   async (kind) => {
-    const input = await bundle();
+    const input = await bundle(f);
     if (kind === "revision") required(input.files[0]).revisionId = randomUUID();
     if (kind === "send") required(input.comments[0]).sendId = randomUUID();
     if (kind === "delivery") required(input.sends[0]).deliveryId = randomUUID();
@@ -528,55 +343,50 @@ test.each(["revision", "send", "delivery", "asset", "writeup", "target", "file s
         "text/markdown",
       );
     }
-    const before = await snapshot();
+    const before = await snapshot(f);
     await error(
-      await request("/import", input),
+      await f.importRequest("/import", input),
       kind === "file size" ? 413 : 400,
       kind === "file size" ? "too_large" : "invalid_request",
     );
-    expect(await snapshot()).toEqual(before);
+    expect(await snapshot(f)).toEqual(before);
   },
 );
 
 test("a late storage constraint failure rolls back the whole copy", async () => {
-  const first = await bundle();
-  expect((await request("/import", first)).status).toBe(201);
-  const second = await bundle();
-  const before = await snapshot(); // same owner/origin/review key, different ids
-  await error(await request("/import", second), 400, "invalid_request");
-  expect(await snapshot()).toEqual(before);
+  const first = await bundle(f);
+  expect((await f.importRequest("/import", first)).status).toBe(201);
+  const second = await bundle(f);
+  const before = await snapshot(f); // same owner/origin/review key, different ids
+  await error(await f.importRequest("/import", second), 400, "invalid_request");
+  expect(await snapshot(f)).toEqual(before);
 });
 
-function required<T>(value: T | undefined): T {
-  if (value === undefined) throw new Error("Missing fixture row");
-  return value;
-}
-
 test("ignores supplied placements referring outside a revision", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   const changed = {
     ...input,
     threads: input.threads.map((t) => ({ ...t, target: { kind: "file", path: "doc.html" } })),
     placements: input.placements.map((p) => ({ ...p, location: { kind: "file", path: "missing.html" } })),
   };
-  expect((await request("/import", changed)).status).toBe(201);
+  expect((await f.importRequest("/import", changed)).status).toBe(201);
 });
 
 test("another owner's uploaded blob cannot satisfy an import reference", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   required(input.files[0]).newBlob = await f.deps.blobs.put(
     f.otherOwnerId,
     Buffer.from("<p>Foreign synthetic bytes</p>"),
     "text/html",
   );
-  const before = await snapshot();
-  await error(await request("/import", input), 400, "blob_missing");
-  expect(await snapshot()).toEqual(before);
+  const before = await snapshot(f);
+  await error(await f.importRequest("/import", input), 400, "blob_missing");
+  expect(await snapshot(f)).toEqual(before);
 });
 
 test("revocation during rendering prevents the copy from committing", async () => {
-  const input = await bundle();
-  const before = await snapshot();
+  const input = await bundle(f);
+  const before = await snapshot(f);
   const entered = Promise.withResolvers<void>();
   const resume = Promise.withResolvers<void>();
   const execute = f.deps.publishExecutor;
@@ -590,14 +400,14 @@ test("revocation during rendering prevents the copy from committing", async () =
     }
     return execute(work);
   };
-  const pending = request("/import", input);
+  const pending = f.importRequest("/import", input);
   await entered.promise;
   try {
     const device = await f.db.read((q) =>
       q
         .select()
         .from(tables.devices)
-        .where(and(eq(tables.devices.ownerId, f.ownerId), eq(tables.devices.instanceId, origin)))
+        .where(and(eq(tables.devices.ownerId, f.ownerId), eq(tables.devices.instanceId, f.origin)))
         .get(),
     );
     expect(device).toBeDefined();
@@ -606,14 +416,14 @@ test("revocation during rendering prevents the copy from committing", async () =
     resume.resolve();
   }
   await error(await pending, 401, "unauthorized");
-  expect(await snapshot()).toEqual(before);
+  expect(await snapshot(f)).toEqual(before);
 });
 
 // Fix round 1 regression cases.
 test("computes placements when the supplied list is incomplete", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   input.placements.pop();
-  expect((await request("/import", input)).status).toBe(201);
+  expect((await f.importRequest("/import", input)).status).toBe(201);
   const rows = await f.db.read((q) =>
     q
       .select()
@@ -623,9 +433,9 @@ test("computes placements when the supplied list is incomplete", async () => {
   expect(rows).toHaveLength(2);
 });
 test("a review-key conflict is refused before rendering", async () => {
-  const first = await bundle();
-  expect((await request("/import", first)).status).toBe(201);
-  const second = await bundle();
+  const first = await bundle(f);
+  expect((await f.importRequest("/import", first)).status).toBe(201);
+  const second = await bundle(f);
   let renders = 0;
   const execute = f.deps.publishExecutor;
   if (!execute) throw new Error("Missing renderer");
@@ -633,16 +443,16 @@ test("a review-key conflict is refused before rendering", async () => {
     renders++;
     return execute(work);
   };
-  await error(await request("/import", second), 400, "invalid_request");
+  await error(await f.importRequest("/import", second), 400, "invalid_request");
   expect(renders).toBe(0);
 });
 test("diff and Markdown doc at the same path retain distinct rendered fields", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   const doc = required(input.files[0]);
   doc.path = "doc.md";
   doc.newBlob = await f.deps.blobs.put(f.ownerId, Buffer.from("Synthetic doc"), "text/markdown");
   const diff = { ...doc, id: randomUUID(), role: "diff", status: "added", ord: 1 };
-  expect((await request("/import", { ...input, files: [...input.files, diff] })).status).toBe(201);
+  expect((await f.importRequest("/import", { ...input, files: [...input.files, diff] })).status).toBe(201);
   const row = await f.db.read((q) =>
     q
       .select()
@@ -653,12 +463,12 @@ test("diff and Markdown doc at the same path retain distinct rendered fields", a
   expect(row?.renderedBlob).toBeNull();
 });
 test("an asset cannot adopt a diff as its parent doc", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   const doc = required(input.files[0]);
   const diff = { ...doc, id: randomUUID(), role: "diff", status: "added", ord: 1 };
   const asset = { ...doc, id: randomUUID(), path: "style.css", role: "asset", ord: 2, parentDocId: diff.id };
   await error(
-    await request("/import", {
+    await f.importRequest("/import", {
       ...input,
       files: [...input.files, diff, asset],
       docAssets: [{ revisionId: doc.revisionId, docId: doc.id, assetId: asset.id }],
@@ -668,7 +478,7 @@ test("an asset cannot adopt a diff as its parent doc", async () => {
   );
 });
 test("clamps every copied timestamp to the hub clock", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   const future = "2099-01-01T00:00:00.000Z";
   for (const row of [
     input.review,
@@ -681,7 +491,7 @@ test("clamps every copied timestamp to the hub clock", async () => {
     for (const key of ["createdAt", "updatedAt", "leaseUntil", "confirmedAt", "setAsideAt"])
       if (Reflect.get(row, key) != null) Reflect.set(row, key, future);
   }
-  expect((await request("/import", input)).status).toBe(201);
+  expect((await f.importRequest("/import", input)).status).toBe(201);
   await f.db.read(async (q) => {
     for (const table of [
       tables.reviews,
@@ -701,7 +511,7 @@ test("clamps every copied timestamp to the hub clock", async () => {
   });
 });
 test.each([false, true])("placement worker failure maps to the publish error (timeout: %s)", async (timeout) => {
-  const input = await bundle();
+  const input = await bundle(f);
   const execute = f.deps.publishExecutor;
   if (!execute) throw new Error("Missing renderer");
   f.deps.publishExecutor = async (work) => {
@@ -711,10 +521,10 @@ test.each([false, true])("placement worker failure maps to the publish error (ti
     }
     return execute(work);
   };
-  await error(await request("/import", input), timeout ? 413 : 400, timeout ? "too_large" : "invalid_request");
+  await error(await f.importRequest("/import", input), timeout ? 413 : 400, timeout ? "too_large" : "invalid_request");
 });
 test("a running import rejects another import immediately without occupying publish slots", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   const entered = Promise.withResolvers<void>(),
     resume = Promise.withResolvers<void>();
   const execute = f.deps.publishExecutor;
@@ -728,10 +538,10 @@ test("a running import rejects another import immediately without occupying publ
     }
     return execute(work);
   };
-  const pending = request("/import", input);
+  const pending = f.importRequest("/import", input);
   await entered.promise;
   try {
-    await error(await request("/import", input), 429, "rate_limited");
+    await error(await f.importRequest("/import", input), 429, "rate_limited");
     // Both publishing slots remain immediately available while import is paused.
     const releases = await Promise.all([publishSlots.acquire(), publishSlots.acquire()]);
     for (const release of releases) release();
@@ -741,7 +551,7 @@ test("a running import rejects another import immediately without occupying publ
   }
 });
 test("aborting an import releases its slot before rendering resumes and creates no review", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   const entered = Promise.withResolvers<void>(),
     resume = Promise.withResolvers<void>();
   const execute = f.deps.publishExecutor;
@@ -756,14 +566,14 @@ test("aborting an import releases its slot before rendering resumes and creates 
     return execute(work);
   };
   const abort = new AbortController();
-  const pending = request("/import", input, abort.signal);
+  const pending = f.importRequest("/import", input, abort.signal);
   await entered.promise;
   abort.abort();
   try {
     await error(await pending, 400, "invalid_request");
-    const other = await bundle();
+    const other = await bundle(f);
     other.review.reviewKey = "e".repeat(64);
-    expect((await request("/import", other)).status).toBe(201);
+    expect((await f.importRequest("/import", other)).status).toBe(201);
   } finally {
     resume.resolve();
   }
@@ -777,78 +587,25 @@ test("aborting an import releases its slot before rendering resumes and creates 
 });
 
 test("imports a bundle at all five count ceilings and exactly 50000 inserted rows without exceeding the JSON byte ceiling", async () => {
-  const input = ImportBundle.parse(await bundle());
-  const revision = required(input.revisions[0]),
-    writeup = required(input.writeups[0]),
-    thread = required(input.threads[0]);
-  const comment = required(input.comments[0]),
-    send = required(input.sends[0]),
-    delivery = required(input.deliveries[0]);
-  input.revisions = Array.from({ length: LIMITS.importRevisions }, (_, i) => ({
-    ...revision,
-    id: randomUUID(),
-    seq: i + 1,
-  }));
-  writeup.sourceBlob = await f.deps.blobs.put(
-    f.ownerId,
-    Buffer.from(
-      JSON.stringify({ overview: "Synthetic boundary writeup", tldr: "", decisions: null, topics: {} }, null, 2),
-    ),
-    "application/json",
-  );
-  input.writeups = input.revisions.map((r) => ({ ...writeup, id: randomUUID(), revisionId: r.id }));
-  input.topics = [];
-  input.files = [];
-  input.docAssets = [];
-  const last = required(input.revisions.at(-1));
-  const creation = required(input.revisions.at(-35));
-  input.threads = Array.from({ length: LIMITS.importThreads }, (_, i) => ({
-    ...thread,
-    id: randomUUID(),
-    createdRevisionId: i < 4 ? required(input.revisions.at(-34)).id : creation.id,
-  }));
-  input.deliveries = Array.from({ length: LIMITS.importDeliveries }, () => ({ ...delivery, id: randomUUID() }));
-  input.sends = input.deliveries.map((d) => ({ ...send, id: randomUUID(), revisionId: last.id, deliveryId: d.id }));
-  input.comments = Array.from({ length: LIMITS.importComments }, (_, i) => ({
-    ...comment,
-    id: randomUUID(),
-    body: "x",
-    threadId: required(input.threads[i % input.threads.length]).id,
-    sendId: required(input.sends[i % input.sends.length]).id,
-  }));
+  const { input, creation } = await capsBundle(f);
   expect(Buffer.byteLength(JSON.stringify(input))).toBeLessThanOrEqual(LIMITS.publishJsonBytes);
-  let writerMs = 0;
-  const transaction = f.db.transaction.bind(f.db);
-  const spy = vi.spyOn(f.db, "transaction").mockImplementation(async (fn, options) => {
-    let entered = 0;
-    const result = await transaction((q) => {
-      entered = performance.now();
-      return fn(q);
-    }, options);
-    writerMs += performance.now() - entered;
-    return result;
-  });
-  const before = await snapshot();
+  const spy = vi.spyOn(f.db, "transaction");
+  const before = await snapshot(f);
   const over = { ...input, threads: input.threads.map((t, i) => (i ? t : { ...t, createdRevisionId: creation.id })) };
-  await error(await request("/import", over), 400, "invalid_request");
+  await error(await f.importRequest("/import", over), 400, "invalid_request");
   expect(spy).not.toHaveBeenCalled();
-  expect(await snapshot()).toEqual(before);
-  const started = performance.now();
-  expect((await request("/import", input)).status).toBe(201);
+  expect(await snapshot(f)).toEqual(before);
+  expect((await f.importRequest("/import", input)).status).toBe(201);
   expect(spy).toHaveBeenCalledTimes(1);
-  const after = await snapshot();
+  const after = await snapshot(f);
   const inserted = after.reduce((sum, row, i) => sum + (row?.n ?? 0) - (before[i]?.n ?? 0), 0);
   expect(inserted).toBe(LIMITS.importRows);
-  process.stdout.write(
-    `import writer at caps: ${JSON.stringify({ writerMs, rows: inserted, bodyBytes: Buffer.byteLength(JSON.stringify(input)) })}\n`,
-  );
-  expect(performance.now() - started).toBeLessThan(60_000);
 }, 90_000);
 
 test.each(["revisions", "threads", "comments", "sends", "deliveries"] as const)(
   "one extra %s row gets invalid_request",
   async (key) => {
-    const input = ImportBundle.parse(await bundle());
+    const input = ImportBundle.parse(await bundle(f));
     const caps = {
       revisions: LIMITS.importRevisions,
       threads: LIMITS.importThreads,
@@ -858,15 +615,15 @@ test.each(["revisions", "threads", "comments", "sends", "deliveries"] as const)(
     };
     const body = { ...input, [key]: Array.from({ length: caps[key] + 1 }, () => input[key][0]) };
     expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThanOrEqual(LIMITS.publishJsonBytes);
-    const before = await snapshot();
-    await error(await request("/import", body), 400, "invalid_request");
-    expect(await snapshot()).toEqual(before);
+    const before = await snapshot(f);
+    await error(await f.importRequest("/import", body), 400, "invalid_request");
+    expect(await snapshot(f)).toEqual(before);
   },
 );
 
 // Fix round 2 regressions, written before implementation.
 test.each([false, true])("fix2: line placement is independent of doc/diff order (%s)", async (docFirst) => {
-  const input = await bundle();
+  const input = await bundle(f);
   const doc = {
     ...required(input.files[0]),
     path: "doc.md",
@@ -895,7 +652,7 @@ test.each([false, true])("fix2: line placement is independent of doc/diff order 
       location: i ? null : { kind: "lines", path: doc.path, side: "new", start: 2, end: 2 },
     })),
   };
-  expect((await request("/import", body)).status).toBe(201);
+  expect((await f.importRequest("/import", body)).status).toBe(201);
   const rows = await f.db.read((q) =>
     q
       .select()
@@ -911,7 +668,7 @@ test.each([false, true])("fix2: line placement is independent of doc/diff order 
   });
 });
 test.each([false, true])("fix2: supplied placements cannot redirect or hide a thread (%s)", async (hidden) => {
-  const input = await bundle();
+  const input = await bundle(f);
   const doc = required(input.files[0]);
   const body = {
     ...input,
@@ -925,7 +682,7 @@ test.each([false, true])("fix2: supplied placements cannot redirect or hide a th
       carried: { path: null },
     })),
   };
-  expect((await request("/import", body)).status).toBe(201);
+  expect((await f.importRequest("/import", body)).status).toBe(201);
   const rows = await f.db.read((q) =>
     q
       .select()
@@ -939,17 +696,17 @@ test.each([false, true])("fix2: supplied placements cannot redirect or hide a th
   });
 });
 test("fix2: derived fields are stripped and changed blocks come from consecutive hub renderings", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   expect(ImportBundle.parse(input)).not.toHaveProperty("placements");
   expect(ImportBundle.parse(input)).not.toHaveProperty("changedBlocks");
-  expect((await request("/import", input)).status).toBe(201);
+  expect((await f.importRequest("/import", input)).status).toBe(201);
   const rows = await f.db.read((q) =>
     q.select().from(tables.changedBlocks).where(eq(tables.changedBlocks.ownerId, f.ownerId)),
   );
   expect(rows).toEqual([]);
 });
 test("import skips first-revision change work and stores exactly the second revision's new blocks", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   const jobs = vi.fn(required(f.deps.publishExecutor));
   f.deps.publishExecutor = jobs;
   const source = { overview: "Synthetic writeup\n\nNew paragraph", tldr: "", decisions: null, topics: {} };
@@ -958,7 +715,7 @@ test("import skips first-revision change work and stores exactly the second revi
     Buffer.from(JSON.stringify(source)),
     "application/json",
   );
-  expect((await request("/import", input)).status).toBe(201);
+  expect((await f.importRequest("/import", input)).status).toBe(201);
   expect(jobs.mock.calls.filter(([work]) => work.kind === "changed")).toHaveLength(1);
   const expected = (await core.renderWriteup(source, [])).sections
     .flatMap((section) => section.blocks)
@@ -974,7 +731,7 @@ test("import skips first-revision change work and stores exactly the second revi
   expect(rows).toEqual(expected);
 });
 test("fix2: abort during blob size lookup stops before the next lookup", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   const abort = new AbortController();
   const read = f.db.read.bind(f.db);
   let lookups = 0;
@@ -996,22 +753,22 @@ test("fix2: abort during blob size lookup stops before the next lookup", async (
       return fn(q);
     }),
   );
-  const response = await request("/import", input, abort.signal);
+  const response = await f.importRequest("/import", input, abort.signal);
   expect(response.status).toBe(400);
   expect(lookups).toBe(1);
   expect(await response.json()).toMatchObject({ error: { message: "The import was cancelled." } });
 });
 test("fix2: final presence sweep does not read unused supplied rendered blobs", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   const unused = await f.deps.blobs.put(f.ownerId, Buffer.from("unused derived bytes"), "application/json");
   for (const w of input.writeups) w.renderedBlob = unused;
   const get = vi.spyOn(f.deps.blobs, "get");
-  expect((await request("/import", input)).status).toBe(201);
+  expect((await f.importRequest("/import", input)).status).toBe(201);
   expect(get.mock.calls.some(([, hash]) => hash === unused)).toBe(false);
 });
 test("fix2: generated placements over importRows fail before a writer transaction", async () => {
   expect(LIMITS.importRows).toBe(50000);
-  const input = await bundle();
+  const input = await bundle(f);
   const rev = required(input.revisions[0]),
     writeup = required(input.writeups[0]),
     thread = required(input.threads[0]);
@@ -1028,17 +785,17 @@ test("fix2: generated placements over importRows fail before a writer transactio
   input.comments = [];
   input.deliveries = [];
   const transaction = vi.spyOn(f.db, "transaction");
-  const before = await snapshot();
+  const before = await snapshot(f);
   await error(
-    await request("/import", { ...input, placements: undefined, changedBlocks: undefined }),
+    await f.importRequest("/import", { ...input, placements: undefined, changedBlocks: undefined }),
     400,
     "invalid_request",
   );
   expect(transaction).not.toHaveBeenCalled();
-  expect(await snapshot()).toEqual(before);
+  expect(await snapshot(f)).toEqual(before);
 });
 test("fix2: abort between insert batches rolls back and stops at the next batch", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   const thread = required(input.threads[0]);
   input.threads = Array.from({ length: 1000 }, () => ({ ...thread, id: randomUUID() }));
   input.sends = [];
@@ -1066,32 +823,32 @@ test("fix2: abort between insert batches rolls back and stops at the next batch"
       return fn(q);
     }, options),
   );
-  const before = await snapshot();
-  const response = await request("/import", input, abort.signal);
+  const before = await snapshot(f);
+  const response = await f.importRequest("/import", input, abort.signal);
   expect(response.status).toBe(400);
   expect(await response.json()).toMatchObject({ error: { message: "The import was cancelled." } });
   expect(batches).toEqual([500]);
-  expect(await snapshot()).toEqual(before);
+  expect(await snapshot(f)).toEqual(before);
 });
 test("fix2: total rendered output budget stops before staging excess bytes or writing rows", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   const original = Reflect.get(LIMITS, "importRenderedBytes");
   expect(original).toBe(1073741824);
-  const before = await snapshot();
+  const before = await snapshot(f);
   const stage = vi.spyOn(f.deps.blobs, "stage");
   // Scale the same cumulative boundary down so the regression needs no GiB allocation.
   Object.assign(LIMITS, { importRenderedBytes: 1 });
   try {
-    await error(await request("/import", input), 413, "too_large");
+    await error(await f.importRequest("/import", input), 413, "too_large");
     expect(stage).not.toHaveBeenCalled();
-    expect(await snapshot()).toEqual(before);
+    expect(await snapshot(f)).toEqual(before);
   } finally {
     Object.assign(LIMITS, { importRenderedBytes: original });
   }
 });
 
 test("fix2: carries a rename through an unplaced revision using the last successful line anchor", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   const first = required(input.revisions[0]);
   input.revisions.push({ ...first, id: randomUUID(), seq: 3 });
   input.writeups.push({
@@ -1122,9 +879,12 @@ test("fix2: carries a rename through an unplaced revision using the last success
     before: [],
     after: [],
   };
-  expect(
-    (await request("/import", { ...input, files, threads: input.threads.map((t) => ({ ...t, target })) })).status,
-  ).toBe(201);
+  const response = await f.importRequest("/import", {
+    ...input,
+    files,
+    threads: input.threads.map((t) => ({ ...t, target })),
+  });
+  expect(response.status).toBe(201);
   const rows = await f.db.read((q) =>
     q
       .select()
@@ -1149,7 +909,7 @@ test("fix2: carries a rename through an unplaced revision using the last success
 });
 
 test("fix2: rendered-byte budget is cumulative across repeated revisions", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   input.files = []; // Isolate repeated writeup output from the separate doc metadata budget.
   const original = LIMITS.importRenderedBytes;
   const run = f.deps.publishExecutor;
@@ -1161,24 +921,21 @@ test("fix2: rendered-byte budget is cumulative across repeated revisions", async
       Object.assign(LIMITS, { importRenderedBytes: result.bytes.byteLength });
     return result;
   };
-  const before = await snapshot();
+  const before = await snapshot(f);
   const stage = vi.spyOn(f.deps.blobs, "stage");
   try {
-    await error(await request("/import", input), 413, "too_large");
+    await error(await f.importRequest("/import", input), 413, "too_large");
     expect(rendered).toBe(2);
     expect(stage).toHaveBeenCalledTimes(2); // Only the first writeup rendering and its source.
-    expect(await snapshot()).toEqual(before);
+    expect(await snapshot(f)).toEqual(before);
   } finally {
     Object.assign(LIMITS, { importRenderedBytes: original });
   }
 });
 
 // Fix round 3: long paths amplify stored placements; HTML replay must reuse parsed text.
-function longPath(extension: string) {
-  return `${Array.from({ length: 15 }, () => "界".repeat(255)).join("/")}/${"界".repeat(255 - extension.length)}${extension}`;
-}
 test("fix3: refuses 47 long-path file threads across 1000 revisions without database writes", async () => {
-  const input = ImportBundle.parse(await bundle());
+  const input = ImportBundle.parse(await bundle(f));
   const revision = required(input.revisions[0]),
     writeup = required(input.writeups[0]),
     thread = required(input.threads[0]);
@@ -1205,13 +962,13 @@ test("fix3: refuses 47 long-path file threads across 1000 revisions without data
   input.sends = [];
   input.deliveries = [];
   const transaction = vi.spyOn(f.db, "transaction");
-  const before = await snapshot();
-  await error(await request("/import", input), 413, "too_large");
+  const before = await snapshot(f);
+  await error(await f.importRequest("/import", input), 413, "too_large");
   expect(transaction).not.toHaveBeenCalled();
-  expect(await snapshot()).toEqual(before);
+  expect(await snapshot(f)).toEqual(before);
 });
 async function htmlReplay() {
-  const input = ImportBundle.parse(await bundle());
+  const input = ImportBundle.parse(await bundle(f));
   const doc = required(input.files[0]);
   input.files = input.revisions.map((r) => ({ ...doc, id: randomUUID(), revisionId: r.id }));
   for (const thread of input.threads)
@@ -1221,7 +978,7 @@ async function htmlReplay() {
 test("fix3: an unchanged HTML doc is parsed once across revisions", async () => {
   const input = await htmlReplay();
   const parse = vi.spyOn(core, "docText");
-  expect((await request("/import", input)).status).toBe(201);
+  expect((await f.importRequest("/import", input)).status).toBe(201);
   expect(parse).toHaveBeenCalledTimes(1);
 });
 test("fix3: placement byte overflow writes no rows", async () => {
@@ -1258,17 +1015,17 @@ test("fix3: placement byte overflow writes no rows", async () => {
   expect(budget).toBeGreaterThan(withoutCachedCharges);
   expect(budget).toBeLessThan(fullCost);
   const original = Reflect.get(LIMITS, "importPlacementBytes");
-  const before = await snapshot();
+  const before = await snapshot(f);
   // The first parse, scan and job metadata fit; the second cached scan/job must
   // still be charged. Cached source bytes alone would fit indefinitely.
   const jobs = vi.fn(required(f.deps.publishExecutor));
   f.deps.publishExecutor = jobs;
   Object.assign(LIMITS, { importPlacementBytes: budget });
   try {
-    await error(await request("/import", input), 413, "too_large");
+    await error(await f.importRequest("/import", input), 413, "too_large");
     expect(jobs.mock.calls.filter(([work]) => work.kind === "place")).toHaveLength(1);
     expect(jobs.mock.calls.filter(([work]) => work.kind === "placement-doc")).toHaveLength(1);
-    expect(await snapshot()).toEqual(before);
+    expect(await snapshot(f)).toEqual(before);
   } finally {
     if (original === undefined) Reflect.deleteProperty(LIMITS, "importPlacementBytes");
     else Object.assign(LIMITS, { importPlacementBytes: original });
@@ -1289,219 +1046,35 @@ test.each(["place", "placement-doc"])(
       }
       return run(work);
     };
-    const before = await snapshot();
+    const before = await snapshot(f);
     const abort = new AbortController();
-    const pending = request("/import", input, abort.signal);
+    const pending = f.importRequest("/import", input, abort.signal);
     await entered.promise;
     abort.abort();
     try {
       const response = await pending;
       expect(response.status).toBe(400);
       expect(await response.json()).toMatchObject({ error: { message: "The import was cancelled." } });
-      expect(await snapshot()).toEqual(before);
+      expect(await snapshot(f)).toEqual(before);
     } finally {
       resume.resolve();
     }
   },
 );
 
-/** Every collection cap, 50000 inserts, 8 MiB JSON and within two bytes of 64 MiB
- * stored derived rows. Both long multibyte and escaped paths, all four target kinds,
- * and file/line renames run through the production insertion path. */
-async function multibyteCapsBundle() {
-  const input = ImportBundle.parse(await bundle());
-  const revision = required(input.revisions[0]),
-    writeup = required(input.writeups[0]),
-    thread = required(input.threads[0]);
-  const comment = required(input.comments[0]),
-    send = required(input.sends[0]),
-    delivery = required(input.deliveries[0]),
-    file = required(input.files[0]);
-  input.revisions = Array.from({ length: 1000 }, (_, i) => ({ ...revision, id: randomUUID(), seq: i + 1 }));
-  const source = { overview: "Synthetic multibyte boundary", tldr: "", decisions: null, topics: {} };
-  const hash = await f.deps.blobs.put(f.ownerId, Buffer.from(JSON.stringify(source, null, 2)), "application/json");
-  input.writeups = input.revisions.map((r) => ({ ...writeup, id: randomUUID(), revisionId: r.id, sourceBlob: hash }));
-  const markdown = await f.deps.blobs.put(f.ownerId, Buffer.from("needle"), "text/markdown");
-  const html = await f.deps.blobs.put(f.ownerId, Buffer.from("<p>needle</p>"), "text/html");
-  const paths = [longPath(".md"), longPath(".md").replaceAll("界", '"')];
-  const htmlPaths = [longPath(".html"), longPath(".html").replaceAll("界", '"')];
-  const shortPaths = ["a.md", "q.md"];
-  const blocks = await Promise.all(paths.map(async (path) => required((await core.renderDoc("needle", path))[0])));
-  input.files = input.revisions.slice(-50).flatMap((r, i) =>
-    paths.flatMap((path, j) => [
-      {
-        ...file,
-        id: randomUUID(),
-        revisionId: r.id,
-        path: i ? path : required(shortPaths[j]),
-        role: "diff" as const,
-        status: i ? ("renamed" as const) : ("added" as const),
-        oldPath: i ? required(shortPaths[j]) : null,
-        newBlob: markdown,
-        ord: j * 3,
-      },
-      { ...file, id: randomUUID(), revisionId: r.id, path, newBlob: markdown, ord: j * 3 + 1 },
-      { ...file, id: randomUUID(), revisionId: r.id, path: required(htmlPaths[j]), newBlob: html, ord: j * 3 + 2 },
-    ]),
-  );
-  const targets: ImportBundle["threads"][number]["target"][] = paths.flatMap((path, i) => [
-    { kind: "file", path },
-    { kind: "lines", path, side: "new", start: 1, end: 1, lines: ["needle"], before: [], after: [] },
-    { kind: "doc-span", path, blockId: required(blocks[i]).id, quote: "needle", prefix: "", suffix: "" },
-    { kind: "html-span", path: required(htmlPaths[i]), quote: "needle", prefix: "", suffix: "" },
-  ]);
-  input.topics = [];
-  input.docAssets = [];
-  const last = required(input.revisions.at(-1));
-  input.threads = Array.from({ length: 1000 }, (_, i) => ({
-    ...thread,
-    id: randomUUID(),
-    createdRevisionId: last.id,
-    target:
-      i < 4
-        ? { ...required(targets[i < 2 ? i : i + 2]), path: required(shortPaths[Math.floor(i / 2)]) }
-        : i < 64
-          ? required(targets[i % 8])
-          : i === 64
-            ? { kind: "file" as const, path: "z" }
-            : { kind: "review" as const },
-  }));
-  const tuningFile = {
-    ...file,
-    id: randomUUID(),
-    revisionId: last.id,
-    role: "diff" as const,
-    status: "added" as const,
-    path: "z",
-    newBlob: markdown,
-    ord: 6,
-  };
-  input.files.push(tuningFile);
-  input.deliveries = Array.from({ length: 1000 }, () => ({ ...delivery, id: randomUUID() }));
-  input.sends = input.deliveries.map((d) => ({ ...send, id: randomUUID(), revisionId: last.id, deliveryId: d.id }));
-  input.comments = Array.from({ length: 10000 }, (_, i) => ({
-    ...comment,
-    id: randomUUID(),
-    body: "x",
-    threadId: required(input.threads[i % 1000]).id,
-    sendId: required(input.sends[i % 1000]).id,
-  }));
-  const changed = blocks;
-  const generatedRows = 4 + changed.length; // Writeup source/rendering and two doc renderings.
-  const withoutPlacements = importRowCount(input) - input.threads.length;
-  const lengths: number[] = Array.from({ length: 65 }, (_, i) => (i < 4 ? 50 : 1));
-  const location = (
-    target: ImportBundle["threads"][number]["target"],
-    path?: string,
-  ): NonNullable<typeof tables.placements.$inferSelect.location> => {
-    if (target.kind === "file") return { kind: "file", path: path ?? target.path };
-    if (target.kind === "lines") return { kind: "lines", path: path ?? target.path, side: "new", start: 1, end: 1 };
-    if (target.kind === "doc-span")
-      return { kind: "doc-span", path: target.path, blockId: target.blockId, start: 0, end: 6 };
-    if (target.kind === "html-span") return { kind: "html-span", path: target.path, start: 0, end: 6 };
-    throw new Error("Unexpected cap target");
-  };
-  const price = (target: ImportBundle["threads"][number]["target"], path?: string) => {
-    const loc = location(target, path);
-    return placementStorage(loc, {
-      path: "path" in loc ? loc.path : null,
-      ...(target.kind === "lines" ? { side: "new" as const } : {}),
-    });
-  };
-  const prices = input.threads.slice(0, 65).map((t) => price(t.target));
-  const renamedPrices = input.threads.slice(0, 4).map((t, i) => price(t.target, required(paths[Math.floor(i / 2)])));
-  const balance = () => {
-    const shortCount = 50000 - withoutPlacements - generatedRows - lengths.reduce((sum, n) => sum + n, 0);
-    for (const [i, t] of input.threads.entries()) {
-      const count = i < 65 ? required(lengths[i]) : Math.floor(shortCount / 935) + Number(i - 65 < shortCount % 935);
-      t.createdRevisionId = required(input.revisions.at(-count)).id;
-    }
-    let bytes =
-      changed.reduce((n, b) => n + 64 + 3 * 36 + Buffer.byteLength(b.id), 0) +
-      shortCount * placementStorage({ kind: "review" }, { path: null });
-    for (let i = 0; i < 65; i++) {
-      bytes +=
-        i < 4 ? required(prices[i]) + 49 * required(renamedPrices[i]) : required(lengths[i]) * required(prices[i]);
-    }
-    return bytes;
-  };
-  for (let i = 4; i < 64; i++) {
-    while (required(lengths[i]) < 49) {
-      lengths[i] = required(lengths[i]) + 1;
-      if (balance() >= LIMITS.importDerivedBytes) {
-        lengths[i] = required(lengths[i]) - 1;
-        break;
-      }
-    }
-  }
-  // One final file placement fills the remaining even number of bytes. Path separators
-  // cost one byte; CJK costs three. Keep every segment and the full path within its cap.
-  const extra = Math.floor((LIMITS.importDerivedBytes - 1 - balance()) / 2);
-  const pathBytes = extra + 1;
-  for (let length = 1; length <= 4095; length++) {
-    const multibyte = (pathBytes - length) / 2;
-    const chars: string[] = Array.from({ length }, (_, i) => (i % 256 === 255 ? "/" : "z"));
-    if (
-      !Number.isInteger(multibyte) ||
-      multibyte < 0 ||
-      multibyte > length - Math.floor(length / 256) ||
-      chars.at(-1) === "/"
-    )
-      continue;
-    let left = multibyte;
-    for (let i = 0; i < chars.length && left; i++)
-      if (chars[i] !== "/") {
-        chars[i] = "界";
-        left--;
-      }
-    tuningFile.path = chars.join("");
-    break;
-  }
-  expect(Buffer.byteLength(tuningFile.path)).toBe(pathBytes);
-  required(input.threads[64]).target = { kind: "file", path: tuningFile.path };
-  prices[64] = price(required(input.threads[64]).target);
-  const derivedBytes = balance();
-  expect(importRowCount(input) + generatedRows).toBe(50000);
-  expect(LIMITS.importDerivedBytes - derivedBytes).toBeGreaterThan(0);
-  expect(LIMITS.importDerivedBytes - derivedBytes).toBeLessThanOrEqual(2);
-  let remaining = LIMITS.publishJsonBytes - Buffer.byteLength(JSON.stringify(input));
-  expect(remaining).toBeGreaterThan(0);
-  for (const comment of input.comments) {
-    const added = Math.min(remaining, LIMITS.commentBodyChars - comment.body.length);
-    comment.body += "x".repeat(added);
-    remaining -= added;
-    if (!remaining) break;
-  }
-  expect(remaining).toBe(0);
-  expect(ImportBundle.safeParse(input).success).toBe(true);
-  return { input, derivedBytes };
-}
 test("fix4: the multibyte caps fixture just under derivedBytes imports with the production writer", async () => {
-  const { input, derivedBytes } = await multibyteCapsBundle();
-  const before = await snapshot();
-  const transaction = f.db.transaction.bind(f.db);
-  let writerMs = 0;
-  const spy = vi.spyOn(f.db, "transaction").mockImplementation(async (fn, options) => {
-    let entered = 0;
-    const result = await transaction((q) => {
-      entered = performance.now();
-      return fn(q);
-    }, options);
-    writerMs += performance.now() - entered;
-    return result;
-  });
-  expect((await request("/import", input)).status).toBe(201);
+  const { input, derivedBytes } = await multibyteCapsBundle(f);
+  const before = await snapshot(f);
+  const spy = vi.spyOn(f.db, "transaction");
+  expect((await f.importRequest("/import", input)).status).toBe(201);
   expect(spy).toHaveBeenCalledTimes(1);
-  const after = await snapshot();
+  const after = await snapshot(f);
   expect(after.reduce((sum, row, i) => sum + (row?.n ?? 0) - (before[i]?.n ?? 0), 0)).toBe(50000);
   expect(await storedDerivedBytes(input.review.id)).toBe(derivedBytes);
-  console.info(
-    `multibyte import writer: ${JSON.stringify({ writerMs, rows: 50000, derivedBytes, bodyBytes: Buffer.byteLength(JSON.stringify(input)) })}`,
-  );
 }, 90_000);
 
 test("fix3: changed-block bytes are checked after rendering and before a writer transaction", async () => {
-  const input = ImportBundle.parse(await bundle());
+  const input = ImportBundle.parse(await bundle(f));
   input.threads = [];
   input.comments = [];
   input.sends = [];
@@ -1513,14 +1086,14 @@ test("fix3: changed-block bytes are checked after rendering and before a writer 
   );
   const original = LIMITS.importDerivedBytes;
   Object.assign(LIMITS, { importDerivedBytes: 128 }); // Less than even one changed-block row including its ids.
-  const before = await snapshot();
+  const before = await snapshot(f);
   const transaction = vi.spyOn(f.db, "transaction");
   const stage = vi.spyOn(f.deps.blobs, "stage");
   try {
-    await error(await request("/import", input), 413, "too_large");
+    await error(await f.importRequest("/import", input), 413, "too_large");
     expect(stage).toHaveBeenCalled();
     expect(transaction).not.toHaveBeenCalled();
-    expect(await snapshot()).toEqual(before);
+    expect(await snapshot(f)).toEqual(before);
   } finally {
     Object.assign(LIMITS, { importDerivedBytes: original });
   }
@@ -1537,7 +1110,7 @@ test("fix3: parsed documents are evicted after leaving the current/previous revi
   }
   input.files = [doc, { ...doc, id: randomUUID(), revisionId: required(input.revisions[3]).id }];
   const parse = vi.spyOn(core, "docText");
-  expect((await request("/import", input)).status).toBe(201);
+  expect((await f.importRequest("/import", input)).status).toBe(201);
   expect(parse).toHaveBeenCalledTimes(2);
 });
 
@@ -1559,12 +1132,12 @@ test("fix3: production placement budget rejects repeated scans before placing th
   if (!run) throw new Error("Missing executor");
   const execute = vi.fn(run);
   f.deps.publishExecutor = execute;
-  const before = await snapshot();
+  const before = await snapshot(f);
   expect(LIMITS.importPlacementBytes).toBe(1073741824);
-  await error(await request("/import", input), 413, "too_large");
+  await error(await f.importRequest("/import", input), 413, "too_large");
   expect(execute.mock.calls.filter(([work]) => work.kind === "placement-doc")).toHaveLength(1);
   expect(execute.mock.calls.filter(([work]) => work.kind === "place")).toHaveLength(0);
-  expect(await snapshot()).toEqual(before);
+  expect(await snapshot(f)).toEqual(before);
 });
 
 // Fix round 4 regressions. Read the stored SQLite values independently of the budget code.
@@ -1601,52 +1174,22 @@ async function storedDerivedBytes(reviewId: string) {
     return required(placements).bytes + required(changed).bytes;
   });
 }
-function placementStorage(
-  location: NonNullable<typeof tables.placements.$inferSelect.location>,
-  carried: NonNullable<typeof tables.placements.$inferSelect.carried>,
-) {
-  return (
-    64 +
-    4 * 36 +
-    Buffer.byteLength("placed") +
-    Buffer.byteLength(JSON.stringify(location)) +
-    Buffer.byteLength(JSON.stringify(carried))
-  );
-}
-async function replayBundle(revisions: number, threads: number) {
-  const input = ImportBundle.parse(await bundle());
-  const revision = required(input.revisions[0]),
-    writeup = required(input.writeups[0]),
-    thread = required(input.threads[0]);
-  input.revisions = Array.from({ length: revisions }, (_, i) => ({ ...revision, id: randomUUID(), seq: i + 1 }));
-  input.writeups = input.revisions.map((r) => ({ ...writeup, id: randomUUID(), revisionId: r.id }));
-  input.threads = Array.from({ length: threads }, () => ({
-    ...thread,
-    id: randomUUID(),
-    createdRevisionId: required(input.revisions[0]).id,
-  }));
-  input.topics = [];
-  input.comments = [];
-  input.sends = [];
-  input.deliveries = [];
-  return input;
-}
 async function refuseBeforeWriter(input: ImportBundle) {
   expect(ImportBundle.safeParse(input).success).toBe(true);
   expect(Buffer.byteLength(JSON.stringify(input))).toBeLessThanOrEqual(LIMITS.publishJsonBytes);
   expect(importRowCount(input)).toBeLessThan(LIMITS.importRows);
-  const before = await snapshot();
+  const before = await snapshot(f);
   // A broken budget must fail the test without actually writing a gigabyte.
   const writer = vi.spyOn(f.db, "transaction").mockRejectedValue(new Error("Unexpected writer entry"));
-  await error(await request("/import", input), 413, "too_large");
+  await error(await f.importRequest("/import", input), 413, "too_large");
   expect(writer).not.toHaveBeenCalled();
-  expect(await snapshot()).toEqual(before);
+  expect(await snapshot(f)).toEqual(before);
 }
 test.each(["rename", "rename history", "quotes"] as const)(
   "fix4: exact derived bytes reject the %s amplification shape before the writer",
   async (shape) => {
     const renamed = shape !== "quotes";
-    const input = await replayBundle(shape === "rename" ? 642 : 1000, shape === "rename" ? 74 : renamed ? 47 : 46);
+    const input = await replayBundle(f, shape === "rename" ? 642 : 1000, shape === "rename" ? 74 : renamed ? 47 : 46);
     const path = renamed ? longPath(".md") : `${'"'.repeat(230)}/${'"'.repeat(230)}/${'"'.repeat(230)}.md`;
     const blob = await f.deps.blobs.put(f.ownerId, Buffer.from("needle"), "text/plain");
     const file = required(input.files[0]);
@@ -1672,7 +1215,7 @@ test.each(["rename", "rename history", "quotes"] as const)(
 test.each([0, -1])(
   "fix4: a long-to-short rename counts the stored paths and every column (budget offset %i)",
   async (offset) => {
-    const input = await replayBundle(3, 1);
+    const input = await replayBundle(f, 3, 1);
     const path = longPath(".md"),
       file = required(input.files[0]);
     const blob = await f.deps.blobs.put(f.ownerId, Buffer.from("needle"), "text/plain");
@@ -1695,7 +1238,7 @@ test.each([0, -1])(
     try {
       if (offset) await refuseBeforeWriter(input);
       else {
-        expect((await request("/import", input)).status).toBe(201);
+        expect((await f.importRequest("/import", input)).status).toBe(201);
         expect(await storedDerivedBytes(input.review.id)).toBe(bytes);
       }
     } finally {
@@ -1707,7 +1250,7 @@ test.each([0, -1])(
 test.each(["writeup", "lines"] as const)(
   "fix4: production placement budget rejects repeated %s work without rows",
   async (kind) => {
-    const input = await replayBundle(kind === "writeup" ? 25 : 14, kind === "writeup" ? 50 : 40);
+    const input = await replayBundle(f, kind === "writeup" ? 25 : 14, kind === "writeup" ? 50 : 40);
     if (kind === "writeup") {
       const source = { overview: `needle${"x".repeat(1024 * 1024 - 6)}`, tldr: "", decisions: null, topics: {} };
       const rendered = await core.renderWriteup(source, []);
@@ -1769,7 +1312,7 @@ test.each(["writeup", "lines"] as const)(
 test.each(["file metadata", "target metadata", "topic metadata", "decoded sides"] as const)(
   "fix4: placement charges %s before worker dispatch",
   async (kind) => {
-    const input = await replayBundle(1, kind === "decoded sides" ? 2 : 1);
+    const input = await replayBundle(f, 1, kind === "decoded sides" ? 2 : 1);
     const file = required(input.files[0]);
     input.files = [];
     if (kind === "file metadata")
@@ -1828,46 +1371,8 @@ test.each(["file metadata", "target metadata", "topic metadata", "decoded sides"
   },
 );
 
-test("breaker: 10000 comments share one large target (event loop)", async () => {
-  const input = await replayBundle(1, 1);
-  const revision = required(input.revisions[0]);
-  const thread = required(input.threads[0]);
-  const line = "\\".repeat(65536);
-  input.files = [
-    {
-      ...required(input.files[0]),
-      revisionId: revision.id,
-      path: "a.txt",
-      role: "diff",
-      status: "added",
-      newBlob: await f.deps.blobs.put(f.ownerId, Buffer.from(line), "text/plain"),
-    },
-  ];
-  thread.target = { kind: "lines", path: "a.txt", side: "new", start: 1, end: 1, lines: [line], before: [], after: [] };
-  input.sends = Array.from({ length: 100 }, () => ({
-    id: randomUUID(),
-    reviewId: input.review.id,
-    revisionId: revision.id,
-    kind: "go",
-    mode: "fix-clear",
-    instruction: null,
-    deliveryId: null,
-    setAsideAt: null,
-    createdAt: revision.createdAt,
-  }));
-  input.comments = input.sends.flatMap((send) =>
-    Array.from({ length: 100 }, () => ({
-      id: randomUUID(),
-      reviewId: input.review.id,
-      threadId: thread.id,
-      author: "user",
-      body: "x",
-      outcome: null,
-      sendId: send.id,
-      createdAt: revision.createdAt,
-      updatedAt: revision.createdAt,
-    })),
-  );
+test("breaker: 10000 comments share one large target", async () => {
+  const { input, thread } = await sharedTargetBundle(f);
   expect(ImportBundle.safeParse(input).success).toBe(true);
   const bodyBytes = Buffer.byteLength(JSON.stringify(input));
   expect(bodyBytes).toBeLessThan(LIMITS.publishJsonBytes);
@@ -1875,20 +1380,11 @@ test("breaker: 10000 comments share one large target (event loop)", async () => 
   const execute = workerExecutor();
   f.deps.publishExecutor = execute;
   const reserve = vi.spyOn(payload, "commentTargetReserve");
-  const loop = monitorEventLoopDelay({ resolution: 1 });
   try {
-    loop.enable();
-    await delay(5);
-    const response = await request("/import", input);
-    await delay(5);
-    loop.disable();
-    const eventLoopMaxMs = loop.max / 1e6;
-    console.info(`breaker comments: ${JSON.stringify({ bodyBytes, eventLoopMaxMs })}`);
+    const response = await f.importRequest("/import", input);
     expect(response.status).toBe(201);
-    if (process.env.EMEND_TIMING_STRICT === "1") expect(eventLoopMaxMs).toBeLessThan(1000);
     expect(reserve).toHaveBeenCalledTimes(1);
   } finally {
-    loop.disable();
     await execute.close();
   }
 }, 60_000);
@@ -1897,7 +1393,7 @@ test.each([
   { sequence: "aaaaaa", parsed: ["a"] },
   { sequence: "aabacca", parsed: ["a", "b", "c", "a"] },
 ])("breaker: source cache retains only current and previous revisions ($sequence)", async ({ sequence, parsed }) => {
-  const input = await replayBundle(sequence.length, 0);
+  const input = await replayBundle(f, sequence.length, 0);
   input.files = [];
   const hashes = new Map<string, string>();
   for (const key of new Set(sequence))
@@ -1928,14 +1424,14 @@ test.each([
     }
     return result;
   };
-  expect((await request("/import", input)).status).toBe(201);
+  expect((await f.importRequest("/import", input)).status).toBe(201);
   expect(sources).toEqual(parsed);
 });
 
 test.each(["malformed", "invalid", "timeout", "worker failure", "cancelled"])(
   "breaker: invalid writeup source leaves no rows (%s)",
   async (kind) => {
-    const input = await replayBundle(1, 0);
+    const input = await replayBundle(f, 1, 0);
     input.files = [];
     if (kind === "malformed" || kind === "invalid")
       required(input.writeups[0]).sourceBlob = await f.deps.blobs.put(
@@ -1953,9 +1449,9 @@ test.each(["malformed", "invalid", "timeout", "worker failure", "cancelled"])(
       }
       return run(work);
     };
-    const before = await snapshot();
+    const before = await snapshot(f);
     const writer = vi.spyOn(f.db, "transaction");
-    const response = await request("/import", input, abort.signal);
+    const response = await f.importRequest("/import", input, abort.signal);
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({
       error: {
@@ -1964,87 +1460,36 @@ test.each(["malformed", "invalid", "timeout", "worker failure", "cancelled"])(
       },
     });
     expect(writer).not.toHaveBeenCalled();
-    expect(await snapshot()).toEqual(before);
+    expect(await snapshot(f)).toEqual(before);
   },
 );
 
-test("breaker: repeated nested-array writeup source (event loop)", async () => {
-  const input = await replayBundle(20, 0);
-  input.files = [];
-  const prefix = '{"overview":"Synthetic","tldr":"","decisions":null,"topics":{},"junk":';
-  const depth = Math.floor((LIMITS.publishJsonBytes - prefix.length - 2) / 2);
-  const source = Buffer.from(`${prefix}${"[".repeat(depth)}0${"]".repeat(depth)}}`.padEnd(LIMITS.publishJsonBytes));
-  expect(source.byteLength).toBe(8 * 1024 * 1024);
-  const hash = await f.deps.blobs.put(f.ownerId, source, "application/json");
-  for (const row of input.writeups) row.sourceBlob = hash;
+test("breaker: repeated nested-array writeup source", async () => {
+  const input = await nestedSourceBundle(f);
   const execute = workerExecutor();
   let parses = 0;
   f.deps.publishExecutor = (work) => {
     if (work.kind === "writeup-source") parses++;
     return execute(work);
   };
-  const before = await snapshot();
+  const before = await snapshot(f);
   const writer = vi.spyOn(f.db, "transaction");
-  const loop = monitorEventLoopDelay({ resolution: 1 });
   try {
-    loop.enable();
-    await delay(5);
-    const start = performance.now();
-    const response = await request("/import", input);
-    await delay(5);
-    loop.disable();
-    const eventLoopMaxMs = loop.max / 1e6;
-    console.info(
-      `breaker writeup: ${JSON.stringify({
-        revisions: input.revisions.length,
-        sourceBytes: source.byteLength,
-        status: response.status,
-        parses,
-        elapsedMs: performance.now() - start,
-        eventLoopMaxMs,
-      })}`,
-    );
+    const response = await f.importRequest("/import", input);
     expect([201, 400]).toContain(response.status);
     if (response.status === 400) {
       expect(await response.json()).toMatchObject({ error: { code: "invalid_request" } });
       expect(writer).not.toHaveBeenCalled();
-      expect(await snapshot()).toEqual(before);
+      expect(await snapshot(f)).toEqual(before);
     }
-    if (process.env.EMEND_TIMING_STRICT === "1") expect(eventLoopMaxMs).toBeLessThan(500);
     expect(parses).toBe(1);
   } finally {
-    loop.disable();
     await execute.close();
   }
 }, 60_000);
 
-async function escapedHtmlBundle(count: number, controls: number) {
-  const input = await replayBundle(1, count);
-  const file = required(input.files[0]);
-  input.files = [];
-  for (const [i, thread] of input.threads.entries()) {
-    const path = `${i}.html`;
-    const quote = `needle-${i}-`;
-    const hash = await f.deps.blobs.put(
-      f.ownerId,
-      Buffer.from(`<p>${quote}${"\x01".repeat(controls)}</p>`),
-      "text/html",
-    );
-    input.files.push({
-      ...file,
-      id: randomUUID(),
-      revisionId: required(input.revisions[0]).id,
-      path,
-      newBlob: hash,
-      ord: i,
-    });
-    thread.target = { kind: "html-span", path, quote, prefix: "", suffix: "" };
-  }
-  return input;
-}
-
 test("breaker: cancellation between payload copies stops before copying or dispatching more", async () => {
-  const input = await escapedHtmlBundle(2, 10);
+  const input = await escapedHtmlBundle(f, 2, 10);
   const abort = new AbortController();
   const cached = new Set<ArrayBuffer>();
   const run = required(f.deps.publishExecutor);
@@ -2061,19 +1506,19 @@ test("breaker: cancellation between payload copies stops before copying or dispa
     if (cached.has(this) && ++copies === 1) setImmediate(() => abort.abort());
     return copied;
   });
-  const before = await snapshot();
+  const before = await snapshot(f);
   const writer = vi.spyOn(f.db, "transaction");
-  const response = await request("/import", input, abort.signal);
+  const response = await f.importRequest("/import", input, abort.signal);
   expect(response.status).toBe(400);
   expect(await response.json()).toMatchObject({ error: { message: "The import was cancelled." } });
   expect(copies).toBe(1);
   expect(jobs.mock.calls.filter(([work]) => work.kind === "place")).toHaveLength(0);
   expect(writer).not.toHaveBeenCalled();
-  expect(await snapshot()).toEqual(before);
+  expect(await snapshot(f)).toEqual(before);
 });
 
-test("breaker: 26 escaped-control HTML docs yield between payload copies (event loop)", async () => {
-  const input = await escapedHtmlBundle(26, 5_000_000);
+test("breaker: 26 escaped-control HTML docs yield between payload copies", async () => {
+  const input = await escapedHtmlBundle(f, 26, 5_000_000);
   const execute = workerExecutor();
   const cached = new Set<ArrayBuffer>();
   f.deps.publishExecutor = async (work) => {
@@ -2095,71 +1540,21 @@ test("breaker: 26 escaped-control HTML docs yield between payload copies (event 
     }
     return slice.apply(this, args);
   });
-  const loop = monitorEventLoopDelay({ resolution: 1 });
   try {
-    loop.enable();
-    await delay(5);
-    const start = performance.now();
-    const response = await request("/import", input);
-    await delay(5);
-    loop.disable();
-    const eventLoopMaxMs = loop.max / 1e6;
-    console.info(
-      `breaker HTML: ${JSON.stringify({
-        docs: 26,
-        controls: 5_000_000,
-        status: response.status,
-        eventLoopMaxMs,
-        elapsedMs: performance.now() - start,
-      })}`,
-    );
+    const response = await f.importRequest("/import", input);
     expect(response.status).toBe(201);
     expect(copies).toBe(26);
     expect(awaitingYield).toBe(false);
-    if (process.env.EMEND_TIMING_STRICT === "1") expect(eventLoopMaxMs).toBeLessThan(1000);
   } finally {
-    loop.disable();
     await execute.close();
   }
 }, 120_000);
 
 // Round 5: these histories used to expand a shared deletion map once per thread.
-function metadataPath(index: number, length: number, character: string) {
-  const prefix = `${index}/`;
-  const segments: string[] = [];
-  let left = length - prefix.length;
-  while (left > 255) {
-    segments.push(character.repeat(255));
-    left -= 256;
-  }
-  segments.push(character.repeat(left));
-  return prefix + segments.join("/");
-}
-test.each([
-  { label: "600 long multibyte paths", files: 600, length: 2815, character: "界", threads: 1000 },
-  { label: "1899 body-capped paths", files: 1899, length: 4000, character: "x", threads: 1000 },
-  { label: "3000 ordinary paths", files: 3000, length: 60, character: "x", threads: 300 },
-])(
-  "fix5: shared metadata imports $label (event loop)",
+test.each(metadataShapes)(
+  "fix5: shared metadata imports $label",
   async (shape) => {
-    const input = await replayBundle(2, shape.threads);
-    const file = required(input.files[0]);
-    const first = required(input.revisions[0]).id;
-    input.files = Array.from({ length: shape.files }, (_, i) => ({
-      ...file,
-      id: randomUUID(),
-      revisionId: first,
-      role: "diff",
-      status: "added",
-      path: metadataPath(i, shape.length, shape.character),
-      newBlob: null,
-      flag: "binary",
-      ord: i,
-    }));
-    input.files.push({ ...required(input.files[0]), id: randomUUID(), path: "x", ord: shape.files });
-    for (const thread of input.threads) thread.target = { kind: "file", path: "x" };
-    // ISO timestamps without fractional seconds keep the 1899-file reproduction inside 8 MiB.
-    for (const thread of input.threads) thread.createdAt = thread.updatedAt = "2026-01-01T00:00:00Z";
+    const input = await metadataBundle(f, shape);
     expect(ImportBundle.safeParse(input).success).toBe(true);
     const bodyBytes = Buffer.byteLength(JSON.stringify(input));
     expect(bodyBytes).toBeLessThanOrEqual(LIMITS.publishJsonBytes);
@@ -2172,23 +1567,13 @@ test.each([
         });
       return execute(work);
     };
-    const loop = monitorEventLoopDelay({ resolution: 1 });
     const original = LIMITS.importPlacementBytes;
     try {
       // Far below the old per-thread expansion, comfortably above two shared maps.
       Object.assign(LIMITS, { importPlacementBytes: 32 * 1024 * 1024 });
-      loop.enable();
-      await delay(5);
-      const response = await request("/import", input);
-      await delay(5);
-      loop.disable();
-      const eventLoopMaxMs = loop.max / 1e6;
-      console.info(
-        `fix5 metadata: ${JSON.stringify({ shape: shape.label, bodyBytes, metadataBytes, eventLoopMaxMs })}`,
-      );
+      const response = await f.importRequest("/import", input);
       expect(response.status).toBe(201);
       expect(metadataBytes).toBeLessThan(32 * 1024 * 1024);
-      if (process.env.EMEND_TIMING_STRICT === "1") expect(eventLoopMaxMs).toBeLessThan(1000);
       // The very same shape must fail before entering the writer if its shared metadata cannot fit.
       input.review.id = randomUUID();
       input.review.reviewKey = "d".repeat(64);
@@ -2196,7 +1581,6 @@ test.each([
       Object.assign(LIMITS, { importPlacementBytes: 100 });
       await refuseBeforeWriter(input);
     } finally {
-      loop.disable();
       Object.assign(LIMITS, { importPlacementBytes: original });
       await execute.close();
     }
@@ -2204,64 +1588,14 @@ test.each([
   60_000,
 );
 
-test.each([
-  { threads: 60, sideBytes: 316_000 },
-  { threads: 300, sideBytes: 72_000 },
-])(
+test.each(unchangedSideShapes)(
   "fix5: unchanged sides import 40 revisions with $threads threads on ten $sideBytes-byte files",
   async (shape) => {
-    const input = await replayBundle(40, shape.threads);
-    const file = required(input.files[0]);
-    const hashes = await Promise.all(
-      Array.from({ length: 10 }, (_, i) =>
-        f.deps.blobs.put(f.ownerId, Buffer.from(`needle\n${String(i).repeat(shape.sideBytes - 7)}`), "text/plain"),
-      ),
-    );
-    input.files = input.revisions.flatMap((r) =>
-      hashes.map((hash, i) => ({
-        ...file,
-        id: randomUUID(),
-        revisionId: r.id,
-        role: "diff",
-        status: "added",
-        path: `${i}.txt`,
-        newBlob: hash,
-        ord: i,
-      })),
-    );
-    for (const [i, thread] of input.threads.entries())
-      thread.target = {
-        kind: "lines",
-        path: `${i % 10}.txt`,
-        side: "new",
-        start: 1,
-        end: 1,
-        lines: ["needle"],
-        before: [],
-        after: [],
-      };
+    const input = await unchangedSidesBundle(f, shape);
     const execute = workerExecutor();
-    let metadataBytes = 0;
-    f.deps.publishExecutor = (work) => {
-      if (work.kind === "place")
-        chargePlacementMetadata(work, (bytes) => {
-          metadataBytes += bytes;
-        });
-      return execute(work);
-    };
+    f.deps.publishExecutor = execute;
     try {
-      const start = performance.now();
-      const response = await request("/import", input);
-      console.info(
-        `fix5 unchanged sides: ${JSON.stringify({
-          ...shape,
-          revisions: 40,
-          elapsedMs: performance.now() - start,
-          sideCharge: 40 * (10 + shape.threads) * shape.sideBytes,
-          metadataBytes,
-          placementCharge: 40 * (10 + shape.threads) * shape.sideBytes + metadataBytes,
-        })}`,
-      );
+      const response = await f.importRequest("/import", input);
       expect(response.status).toBe(201);
     } finally {
       await execute.close();
@@ -2273,7 +1607,7 @@ test.each([
 test.each([8, 6])(
   "fix5: shared parsed payloads pay once per job, including cache hits (%i MiB budget)",
   async (mib) => {
-    const input = await replayBundle(2, 2);
+    const input = await replayBundle(f, 2, 2);
     const hash = await f.deps.blobs.put(
       f.ownerId,
       Buffer.from(`<p>needle${"x".repeat(1024 * 1024 - 6)}</p>`),
@@ -2320,7 +1654,7 @@ test.each([8, 6])(
     const original = LIMITS.importPlacementBytes;
     Object.assign(LIMITS, { importPlacementBytes: mib * 1024 * 1024 });
     try {
-      if (mib === 8) expect((await request("/import", input)).status).toBe(201);
+      if (mib === 8) expect((await f.importRequest("/import", input)).status).toBe(201);
       else await refuseBeforeWriter(input);
       expect(parses).toBe(1);
       expect(places).toBe(mib === 8 ? 2 : 1);
@@ -2331,202 +1665,20 @@ test.each([8, 6])(
   },
 );
 
-// Opt-in measurement: real rendering, storage, worker transfers, placement and insertion.
-// Fill renderedBytesPerRevision, with a maximum writeup and HTML doc alongside Markdown docs.
-test.runIf(process.env.EMEND_IMPORT_TIMING === "1")(
-  "fix5: maximum content import responsiveness",
-  async () => {
-    const input = await replayBundle(1, 1);
-    const revisionId = required(input.revisions[0]).id;
-    const template = required(input.files[0]);
-    const thread = required(input.threads[0]);
-    input.files = [];
-    input.threads = [];
-    const source = {
-      overview: `needle${"w".repeat(LIMITS.writeupSectionBytes - 6)}`,
-      tldr: "t".repeat(LIMITS.writeupSectionBytes),
-      decisions: null,
-      topics: {},
-    };
-    // Multibyte text fills the same encoded byte cap with fewer worker string code units.
-    const content = (size: number) => `needle${"界".repeat(Math.floor((size - 6) / 3))}${"x".repeat((size - 6) % 3)}`;
-    const markdown = content(LIMITS.markdownDocBytes);
-    const html = `<p>${content(LIMITS.htmlDocBytes - 7)}</p>`;
-    expect(Buffer.byteLength(html)).toBe(LIMITS.htmlDocBytes);
-    const worker = workerExecutor();
-    const loop = monitorEventLoopDelay({ resolution: 1 });
-    let monitoring = false;
-    let monitor: Promise<void> | undefined;
-    let phase = "idle";
-    let worstTick = { ms: 0, before: "", after: "" };
-    let copyStart = 0,
-      copyEnd = 0,
-      copyMs = 0,
-      copiedBytes = 0;
-    const synchronous: Record<string, number> = {};
-    const failures: { kind: string; format?: string; message: string }[] = [];
-    try {
-      // Calibration uses the same worker renderer outside the measured request.
-      const writeup = await worker({ kind: "writeup", source, topics: [], media: [] });
-      const doc = await worker({ kind: "doc", path: "0.md", source: new TextEncoder().encode(markdown).buffer });
-      if (writeup.kind !== "writeup" || doc.kind !== "doc") throw new Error("Missing calibration");
-      const hash = await f.deps.blobs.put(f.ownerId, Buffer.from(markdown), "text/markdown");
-      const sourceHash = await f.deps.blobs.put(f.ownerId, Buffer.from(JSON.stringify(source)), "application/json");
-      for (const row of input.writeups) row.sourceBlob = sourceHash;
-      input.threads.push({
-        ...thread,
-        id: randomUUID(),
-        target: {
-          kind: "writeup-span",
-          blockId: `overview-${await core.blockHash(source.overview)}`,
-          quote: "needle",
-          prefix: "",
-          suffix: "",
-        },
-      });
-      let remaining = LIMITS.renderedBytesPerRevision - writeup.bytes.byteLength;
-      const overhead = doc.bytes.byteLength - 2 * Buffer.byteLength(markdown);
-      for (let i = 0; remaining > overhead + 12; i++) {
-        const size = Math.min(LIMITS.markdownDocBytes, Math.floor((remaining - overhead) / 2));
-        const text = content(size);
-        const path = `${i}.md`;
-        const newBlob =
-          size === LIMITS.markdownDocBytes
-            ? hash
-            : await f.deps.blobs.put(f.ownerId, Buffer.from(text), "text/markdown");
-        input.files.push({ ...template, id: randomUUID(), revisionId, ord: i, path, newBlob });
-        input.threads.push({
-          ...thread,
-          id: randomUUID(),
-          target: {
-            kind: "doc-span",
-            path,
-            blockId: `doc-${await core.blockHash(path)}-${await core.blockHash(text)}`,
-            quote: "needle",
-            prefix: "",
-            suffix: "",
-          },
-        });
-        remaining -= 2 * size + overhead;
-      }
-      expect(remaining).toBeLessThanOrEqual(1);
-      const htmlHash = await f.deps.blobs.put(f.ownerId, Buffer.from(html), "text/html");
-      input.files.push({
-        ...template,
-        id: randomUUID(),
-        revisionId,
-        ord: input.files.length,
-        path: "doc.html",
-        newBlob: htmlHash,
-      });
-      input.threads.push({
-        ...thread,
-        id: randomUUID(),
-        target: { kind: "html-span", path: "doc.html", quote: "needle", prefix: "", suffix: "" },
-      });
-      const stage = f.deps.blobs.stage.bind(f.deps.blobs);
-      vi.spyOn(f.deps.blobs, "stage").mockImplementation((...args) => {
-        const start = performance.now();
-        phase = "blob-stage";
-        try {
-          return stage(...args);
-        } finally {
-          synchronous["blob-stage"] = Math.max(synchronous["blob-stage"] ?? 0, performance.now() - start);
-          phase = "prepare";
-        }
-      });
-      const slice = ArrayBuffer.prototype.slice;
-      vi.spyOn(ArrayBuffer.prototype, "slice").mockImplementation(function (this: ArrayBuffer, ...args) {
-        const start = performance.now();
-        copyStart ||= start;
-        const result = slice.apply(this, args);
-        copyEnd = performance.now();
-        copyMs += copyEnd - start;
-        copiedBytes += result.byteLength;
-        return result;
-      });
-      f.deps.publishExecutor = async (work) => {
-        phase = work.kind;
-        const start = performance.now();
-        const pending = worker(work);
-        synchronous[`${work.kind}-dispatch`] = Math.max(
-          synchronous[`${work.kind}-dispatch`] ?? 0,
-          performance.now() - start,
-        );
-        try {
-          return await pending;
-        } catch (error) {
-          failures.push({
-            kind: work.kind,
-            ...(work.kind === "placement-doc" ? { format: work.format } : {}),
-            message: String(error),
-          });
-          throw error;
-        } finally {
-          phase = "prepare";
-        }
-      };
-      loop.enable();
-      monitoring = true;
-      monitor = (async () => {
-        while (monitoring) {
-          const start = performance.now(),
-            before = phase;
-          await delay(1);
-          const ms = performance.now() - start;
-          if (ms > worstTick.ms) worstTick = { ms, before, after: phase };
-        }
-      })();
-      await delay(5);
-      phase = "request";
-      const start = performance.now();
-      const response = await request("/import", input);
-      await delay(5);
-      loop.disable();
-      monitoring = false;
-      await monitor;
-      console.info(
-        `fix5 import responsiveness: ${JSON.stringify({
-          status: response.status,
-          elapsedMs: performance.now() - start,
-          eventLoopMaxMs: loop.max / 1e6,
-          worstTick,
-          synchronous,
-          failures,
-          copyMs,
-          copyBatchMs: copyEnd - copyStart,
-          copiedBytes,
-          writeupSourceBytes: LIMITS.writeupBytes,
-          htmlBytes: LIMITS.htmlDocBytes,
-          markdownDocs: input.files.length - 1,
-          renderedBytes: LIMITS.renderedBytesPerRevision - remaining,
-        })}`,
-      );
-      expect(response.status).toBe(201);
-    } finally {
-      loop.disable();
-      monitoring = false;
-      await monitor;
-      await worker.close();
-    }
-  },
-  120_000,
-);
-
 test("a repeated import of a review deleted on the hub is skipped as deleted and brings nothing back", async () => {
-  const input = await bundle();
-  expect((await request("/import", input)).status).toBe(201);
+  const input = await bundle(f);
+  expect((await f.importRequest("/import", input)).status).toBe(201);
   expect((await f.request(`/reviews/${input.review.id}`, "DELETE")).status).toBe(204);
-  const before = await snapshot();
-  const retry = await request("/import", input);
+  const before = await snapshot(f);
+  const retry = await f.importRequest("/import", input);
   expect(retry.status).toBe(200);
   expect(await retry.json()).toEqual({ skipped: true, deleted: true });
-  expect(await snapshot()).toEqual(before);
+  expect(await snapshot(f)).toEqual(before);
   await error(await f.request(`/reviews/${input.review.id}`, "GET"), 404, "unknown_review");
 });
 
 test("import carries cleaned doc titles and derives headings from source instead of copied declarations", async () => {
-  const input = await bundle();
+  const input = await bundle(f);
   const doc = required(input.files[0]);
   const newBlob = await f.deps.blobs.put(f.ownerId, Buffer.from("<h1>Own title</h1><h2>Real part</h2>"), "text/html");
   const row = {
@@ -2535,7 +1687,7 @@ test("import carries cleaned doc titles and derives headings from source instead
     title: " Named\u200b\u202e\u0007 doc ",
     headings: [{ level: 9, text: "Forged", id: "thread-foreign" }],
   };
-  const response = await request("/import", { ...input, files: [row] });
+  const response = await f.importRequest("/import", { ...input, files: [row] });
   expect(response.status).toBe(201);
   const stored = await f.db.read((q) =>
     q

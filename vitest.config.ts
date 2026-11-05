@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 const globalSetup = fileURLToPath(new URL("./test/global-setup.ts", import.meta.url));
 const isolationTest = fileURLToPath(new URL("./test/state-isolation.test.ts", import.meta.url));
@@ -8,7 +8,24 @@ const skillsTest = fileURLToPath(new URL("./test/skills.test.ts", import.meta.ur
 
 export default defineConfig({
   test: {
+    fileParallelism: process.env.EMEND_BENCH !== "1",
     projects: [
+      // Only pnpm bench opts in; ordinary and sharded runs never discover this project.
+      ...(process.env.EMEND_BENCH === "1"
+        ? [
+            {
+              test: {
+                name: "bench",
+                environment: "node",
+                globalSetup,
+                include: ["apps/**/*.bench.test.ts", "packages/**/*.bench.test.ts"],
+                testTimeout: 300_000,
+                hookTimeout: 300_000,
+                disableConsoleIntercept: true,
+              },
+            },
+          ]
+        : []),
       ...["packages/contract", "packages/core", "apps/emend"].map((root) => ({
         test: {
           name: root,
@@ -16,6 +33,7 @@ export default defineConfig({
           environment: "node",
           globalSetup,
           include: ["src/**/*.test.ts", isolationTest, ...(root === "apps/emend" ? [launcherTest, skillsTest] : [])],
+          exclude: [...configDefaults.exclude, "**/*.bench.test.ts"],
         },
       })),
       {
@@ -28,6 +46,7 @@ export default defineConfig({
           globalSetup,
           setupFiles: [fileURLToPath(new URL("./apps/web/src/test/setup.ts", import.meta.url))],
           include: ["src/**/*.test.{ts,tsx}", isolationTest],
+          exclude: [...configDefaults.exclude, "**/*.bench.test.ts"],
         },
       },
     ],

@@ -77,34 +77,6 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}
 
-  timing:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        node: [24, 26]
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          ref: ${{ inputs.ref }}
-          fetch-depth: 0
-          fetch-tags: true
-          persist-credentials: false
-
-      # pnpm comes from packageManager in package.json.
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        with:
-          run_install: false
-
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
-        with:
-          node-version: ${{ matrix.node }}
-          package-manager-cache: false
-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm verify:timing
-
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15

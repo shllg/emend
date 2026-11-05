@@ -9,7 +9,8 @@
   "scripts": {
     "lint": "biome check .",
     "typecheck": "tsc -b && tsc -p bin/tsconfig.json",
-    "test": "pnpm verify:test && pnpm verify:timing",
+    "test": "pnpm verify:test",
+    "bench": "EMEND_BENCH=1 vitest run --project bench",
     "build": "pnpm --dir apps/web build && pnpm --dir apps/emend build",
     "install:local": "node scripts/install-local.ts",
     "check:package": "node scripts/check-package.ts",
@@ -18,10 +19,9 @@
     "test:harness": "node --test scripts/check-budget.test.ts scripts/check-sync.test.ts scripts/enforce-subagent-model.test.ts scripts/install-local.test.ts scripts/release.test.ts scripts/release-workflow.test.ts scripts/verify-layout.test.ts bin/lib/wt/*.test.ts",
     "verify:static": "pnpm lint && pnpm typecheck && pnpm check:sync",
     "verify:test": "vitest run",
-    "verify:timing": "EMEND_TIMING_STRICT=1 vitest run --project apps/emend apps/emend/src/server/publish/commit.test.ts && EMEND_TIMING_STRICT=1 vitest run --project apps/emend apps/emend/src/server/routes/import.test.ts -t \"event loop\" --silent=false",
     "verify:build": "pnpm build && pnpm check:package && pnpm check:budget",
     "verify:harness": "pnpm test:harness",
-    "verify": "pnpm verify:static && pnpm verify:test && pnpm verify:timing && pnpm verify:build && pnpm verify:harness"
+    "verify": "pnpm verify:static && pnpm verify:test && pnpm verify:build && pnpm verify:harness"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.3",

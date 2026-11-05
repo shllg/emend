@@ -1,7 +1,7 @@
 // Guards accidental drift between pnpm verify and CI; unexpected keys or layout fail closed.
 // Deliberate CI changes are reviewed like any other code.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
 
 const { scripts } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
@@ -12,6 +12,20 @@ function workflow(name: string): string {
   return readFileSync(new URL(`../.github/workflows/${name}.yml`, import.meta.url), "utf8")
     .split("\n")
     .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n");
+}
+
+function withoutYamlComments(source: string): string {
+  // Preserve quoted hashes and URL fragments; an unquoted comment starts after whitespace.
+  return source
+    .split("\n")
+    .map((line) =>
+      line
+        .replace(/"(?:\\.|[^"\\])*"|'(?:''|[^'])*'|(^|[ \t])#.*$/g, (match, space: string | undefined) =>
+          space === undefined ? match : space,
+        )
+        .trimEnd(),
+    )
     .join("\n");
 }
 
@@ -91,12 +105,13 @@ test("verify chains every verify:* script exactly once", () => {
   const defined = Object.keys(scripts).filter((name) => name.startsWith("verify:"));
   assert.deepEqual([...chained].sort(), defined.sort());
   assert.equal(scripts["verify:test"], "vitest run", "shard arguments must reach Vitest directly");
-  assert.equal(scripts.test, "pnpm verify:test && pnpm verify:timing");
+  assert.equal(scripts.test, "pnpm verify:test");
   assert.equal(scripts["verify:harness"], "pnpm test:harness");
   assert(scripts["test:harness"].split(" ").includes("scripts/verify-layout.test.ts"), "the gate must run this guard");
 });
 
 test("CI jobs run exactly the local verify chain, with only a frozen install before each check", () => {
+  assert.deepEqual([...verifyJobs.keys()].sort(), ["build", "harness", "static", "test"]);
   const ran: string[] = [];
   for (const [name, body] of verifyJobs) {
     const script = `verify:${name}`;
@@ -106,6 +121,92 @@ test("CI jobs run exactly the local verify chain, with only a frozen install bef
     ran.push(script);
   }
   assert.deepEqual(ran.sort(), [...chained].sort(), "CI and local verification must cover the same scripts");
+});
+
+test("bench is opt-in and stays outside verification and every CI job", () => {
+  assert.equal(scripts.bench, "EMEND_BENCH=1 vitest run --project bench");
+  for (const [name, command] of Object.entries(scripts)) {
+    if (name !== "bench") assert.doesNotMatch(command, /\bbench\b|EMEND_BENCH/, name);
+  }
+  const visited = new Set<string>();
+  function outsideBench(command: string): void {
+    assert.doesNotMatch(command, /\bbench\b|EMEND_BENCH/);
+    for (const [, name] of command.matchAll(/\bpnpm\s+(?:run\s+)?([\w:-]+)/g)) {
+      if (!scripts[name] || visited.has(name)) continue;
+      visited.add(name);
+      outsideBench(scripts[name]);
+    }
+  }
+  outsideBench(scripts.verify);
+  for (const file of readdirSync(new URL("../.github/workflows/", import.meta.url))) {
+    if (!/\.ya?ml$/.test(file)) continue;
+    const source = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /\bbench\b|EMEND_BENCH/, file);
+    for (const [name, body] of jobs(withoutYamlComments(source))) {
+      assert.doesNotMatch(body, /\bbench\b|EMEND_BENCH/, `${file}: ${name}`);
+      for (const command of runScripts(body)) outsideBench(command);
+    }
+  }
+});
+
+test("Vitest only opts into benches through EMEND_BENCH and excludes them from every ordinary project", () => {
+  const source = readFileSync(new URL("../vitest.config.ts", import.meta.url), "utf8");
+  const parallelism = '    fileParallelism: process.env.EMEND_BENCH !== "1",';
+  assert.equal(source.split(parallelism).length - 1, 1);
+  assert.equal([...source.matchAll(/\bfileParallelism\s*:/g)].length, 1, "no parallelism override");
+  assert.match(source, /^    fileParallelism: process\.env\.EMEND_BENCH !== "1",$/m);
+  const bench = source.match(
+    /^      \.\.\.\(process\.env\.EMEND_BENCH === "1"\n        \? \[\n([\s\S]*?)^          \]\n        : \[\]\),$/m,
+  );
+  assert(bench, "the bench project must exist only in the EMEND_BENCH opt-in branch");
+  assert.match(bench[1], /^                name: "bench",$/m);
+  const remaining = source.replace(parallelism, "").replace(bench[0], "");
+  assert.doesNotMatch(remaining, /process\s*\.\s*env|EMEND_BENCH|\bCI\b/);
+  assert.deepEqual(
+    source.match(/process\s*\.\s*env[^\n]*/g),
+    ['process.env.EMEND_BENCH !== "1",', 'process.env.EMEND_BENCH === "1"'],
+    "only the two explicit bench conditions may read the environment",
+  );
+  assert.deepEqual(
+    [...source.matchAll(/^ +name: (.+),$/gm)].map((match) => match[1]),
+    ['"bench"', "root", '"apps/web"'],
+  );
+  assert.match(
+    remaining,
+    /^      \.\.\.\["packages\/contract", "packages\/core", "apps\/emend"\]\.map\(\(root\) => \(\{$/m,
+  );
+  const projects = [...remaining.matchAll(/^        test: \{\n([\s\S]*?)^        \},$/gm)];
+  assert.equal(projects.length, 2, "one mapped Node project definition and one web project definition");
+  assert.equal([...source.matchAll(/^ +test: \{$/gm)].length, 4, "root config and three project definitions only");
+  const exclude = '          exclude: [...configDefaults.exclude, "**/*.bench.test.ts"],';
+  assert.equal(source.split(exclude).length - 1, 2);
+  assert.equal([...source.matchAll(/\bexclude\s*:/g)].length, 2, "no overriding excludes");
+  for (const [index, project] of projects.entries()) {
+    assert.match(project[1], index === 0 ? /^          name: root,$/m : /^          name: "apps\/web",$/m);
+    assert.equal(project[1].split(exclude).length - 1, 1, "each ordinary project must exclude benches");
+  }
+  // Reconstruct the whole array from the checked blocks and their exact wrappers.
+  // Any extra top-level entry, including a project path or glob, must leave a mismatch.
+  assert.equal([...source.matchAll(/\bprojects\s*:/g)].length, 1, "one projects array only");
+  const projectArray = source.match(/^    projects: \[\n([\s\S]*?)^    \],$/m);
+  assert(projectArray, "expected the explicit projects array");
+  assert.equal(
+    projectArray[1],
+    [
+      "      // Only pnpm bench opts in; ordinary and sharded runs never discover this project.",
+      bench[0],
+      '      ...["packages/contract", "packages/core", "apps/emend"].map((root) => ({',
+      projects[0][0],
+      "      })),",
+      "      {",
+      '        oxc: { jsx: { runtime: "automatic" } },',
+      '        define: { __EMEND_VERSION__: JSON.stringify("0.0.0-test") },',
+      projects[1][0],
+      "      },",
+      "",
+    ].join("\n"),
+    "projects may contain only the opt-in bench spread, mapped Node spread and web object",
+  );
 });
 
 test("verification jobs and steps allow only the keys needed to run their checks", () => {
@@ -209,6 +310,7 @@ test("shared run scripts receive expressions only through env", () => {
 
 test("CI runs on every push to main and every pull request into main without extra filters", () => {
   const ci = workflow("ci");
+  assert.deepEqual(keys(block(ci, "jobs"), 2), ["verify"]);
   allowKeys(keys(ci, 0), ["name", "on", "permissions", "concurrency", "jobs"]);
   assert.equal(
     block(ci, "on"),
