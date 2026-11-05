@@ -16,10 +16,9 @@ import {
 const owner = "owner-a";
 let f: Awaited<ReturnType<typeof mailboxFixture>>;
 beforeEach(async () => {
-  Object.assign(commentTiming, { renderMs: 2000, failedMs: 10 * 60 * 1000, deadlineMs: 2500, maxQueue: 64 });
+  // Real renders are bounded by the test timeout. Only timer specs use shorter limits, with fake timers.
+  Object.assign(commentTiming, { renderMs: 60_000, failedMs: 10 * 60 * 1000, deadlineMs: 60_000, maxQueue: 64 });
   clearCommentHtmlCache();
-  // The first render of the process pays the pipeline's cold start; the timing tests must not.
-  await executeWork({ kind: "comment-md", bodies: ["x"] });
   f = await mailboxFixture();
   const blob = await f.deps.blobs.put(f.ownerId, Buffer.from(JSON.stringify({ sections: [] })), "application/json");
   await f.db.query((q) =>
@@ -27,6 +26,7 @@ beforeEach(async () => {
   );
 });
 afterEach(async () => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   await f.cleanup();
 });
@@ -113,6 +113,7 @@ test("a comment that times out is plain text, is not retried, and does not blank
 });
 
 test("an executor that never answers is cut off at the limit and marked failed", async () => {
+  vi.useFakeTimers();
   commentTiming.renderMs = 30;
   let calls = 0;
   const deps = {
@@ -121,7 +122,9 @@ test("an executor that never answers is cut off at the limit and marked failed",
       return new Promise<never>(() => {});
     },
   };
-  expect(await commentHtml(deps, owner, ["hang"], undefined)).toEqual([null]);
+  const read = commentHtml(deps, owner, ["hang"], undefined);
+  await vi.advanceTimersByTimeAsync(commentTiming.renderMs + 500);
+  expect(await read).toEqual([null]);
   expect(await commentHtml(deps, owner, ["hang"], undefined)).toEqual([null]);
   expect(calls).toBe(1);
 });
@@ -156,15 +159,18 @@ test("closing the renderer during a render does not mark the comment failed, and
     release = resolve;
   });
   const started: string[] = [];
+  const running = Promise.withResolvers<void>();
   const deps = {
     publishExecutor: async (work: Work) => {
       if (work.kind === "comment-md") started.push(work.bodies.join());
+      running.resolve();
       await gate;
       throw new Error("Worker failed");
     },
   };
   const read = commentHtml(deps, owner, ["running", "queued"], undefined);
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  await running.promise;
+  expect(started).toEqual(["running"]);
   await closeCommentRenderer();
   release();
   expect(await read).toEqual([null, null]);
@@ -204,9 +210,11 @@ test("comment jobs run one at a time", async () => {
     publishExecutor: async (work: Work) => {
       running += 1;
       most = Math.max(most, running);
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      running -= 1;
-      return executeWork(work);
+      try {
+        return await executeWork(work);
+      } finally {
+        running -= 1;
+      }
     },
   };
   await Promise.all([
@@ -322,39 +330,43 @@ test("a body that expands past 256 Ki of HTML is null, marked failed and not ren
   expect((await commentHtml(deps, owner, [links], undefined))[0]).toContain("<a ");
 });
 
-test("a body whose references would expand past 32 Ki of URL text fails in the worker without reaching the limit", async () => {
+test("a body whose references would expand past 32 Ki of URL text fails in the worker", async () => {
   // Under 21000 characters, but the 10000-character URL would be encoded 2500 times.
   const body = `[a]: https://x.test/${"€".repeat(10_000)}\n\n${"[a] ".repeat(2500)}`;
-  const started = Date.now();
   expect(await executeWork({ kind: "comment-md", bodies: [body, "fine"] })).toEqual({
     kind: "comment-md",
     html: [null, "<p>fine</p>"],
   });
-  expect(Date.now() - started).toBeLessThan(commentTiming.renderMs);
   const fine = `[a]: https://x.test/${"p".repeat(200)}\n\n${"[a] ".repeat(50)}`;
   const out = await executeWork({ kind: "comment-md", bodies: [fine] });
   expect(out.kind === "comment-md" && out.html[0]).toContain("<a ");
 });
 
 test("a read returns at its deadline while a job hangs, and a later read gets the finished HTML", async () => {
+  vi.useFakeTimers();
   Object.assign(commentTiming, { deadlineMs: 40, renderMs: 2000 });
-  let release: () => void = () => {};
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
+  const gate = Promise.withResolvers<void>();
   const deps = {
-    publishExecutor: async (work: Work) => {
-      await gate;
+    publishExecutor: vi.fn(async (work: Work) => {
+      await gate.promise;
       return executeWork(work);
-    },
+    }),
   };
-  const started = Date.now();
-  expect(await commentHtml(deps, owner, ["slow one"], undefined)).toEqual([null]);
-  expect(Date.now() - started).toBeLessThan(1000);
-  release();
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  const later = { publishExecutor: async () => Promise.reject(new Error("must come from the cache")) };
+  const read = commentHtml(deps, owner, ["slow one"], undefined);
+  const settled = vi.fn();
+  void read.then(settled);
+  await vi.advanceTimersByTimeAsync(39);
+  expect(settled).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(await read).toEqual([null]);
+  // This read joins the actual pending job and settles only after it has populated the cache.
+  const finished = commentHtml(deps, owner, ["slow one"], undefined);
+  gate.resolve();
+  expect(await finished).toEqual(["<p>slow one</p>"]);
+  expect(deps.publishExecutor).toHaveBeenCalledOnce();
+  const later = { publishExecutor: vi.fn(async () => Promise.reject(new Error("must come from the cache"))) };
   expect(await commentHtml(later, owner, ["slow one"], undefined)).toEqual(["<p>slow one</p>"]);
+  expect(later.publishExecutor).not.toHaveBeenCalled();
 });
 
 test("a full queue gives null without queueing and without marking the comment failed", async () => {
@@ -370,12 +382,9 @@ test("a full queue gives null without queueing and without marking the comment f
     },
   };
   // "first" runs, "second" is the one job waiting behind it, "third" finds the queue full.
-  setTimeout(release, 20);
-  expect(await commentHtml(deps, owner, ["first", "second", "third"], undefined)).toEqual([
-    "<p>first</p>",
-    "<p>second</p>",
-    null,
-  ]);
+  const read = commentHtml(deps, owner, ["first", "second", "third"], undefined);
+  release();
+  expect(await read).toEqual(["<p>first</p>", "<p>second</p>", null]);
   expect(await commentHtml(deps, owner, ["first", "second", "third"], undefined)).toEqual([
     "<p>first</p>",
     "<p>second</p>",

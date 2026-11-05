@@ -267,16 +267,16 @@ test("import byte preflight measures UTF-8 and restores the mark without any upl
   const created = (await response.json()) as { threadId: string };
   expect(response.status).toBe(201);
   await state.db.transaction(
-    async (q) => {
-      for (let i = 0; i < 150; i++)
-        await q.insert(comments).values({
+    (q) =>
+      q.insert(comments).values(
+        Array.from({ length: 150 }, () => ({
           ownerId: state.ownerId,
           reviewId: published.result.reviewId,
           threadId: created.threadId,
-          author: "user",
+          author: "user" as const,
           body: "界".repeat(20000),
-        });
-    },
+        })),
+      ),
     { offThread: true },
   );
   const out = await f.command();

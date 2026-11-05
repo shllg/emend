@@ -216,18 +216,10 @@ test("slow doc computation leaves capabilities and authenticated blob requests r
   };
   const publishing = request("/publish", "POST", JSON.stringify(body), { "Content-Type": "application/json" });
   await started.promise;
-  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const deadline = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error("database blocked")), 200);
-    });
-    const responses = await Promise.race([
-      Promise.all([request("/capabilities", "GET"), request(`/blobs/${hash}`, "HEAD")]),
-      deadline,
-    ]);
+    const responses = await Promise.all([request("/capabilities", "GET"), request(`/blobs/${hash}`, "HEAD")]);
     expect(responses.map((r) => r.status)).toEqual([200, 204]);
   } finally {
-    clearTimeout(timer);
     release.resolve();
     expect((await publishing).status).toBe(200);
   }

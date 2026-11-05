@@ -2,9 +2,12 @@ import { mkdir, mkdtemp, rm, symlink, truncate, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LIMITS } from "@emend/contract";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type { GitRunner } from "../git.ts";
 import { collectChanges } from "./collect.ts";
+import * as worktree from "./worktree.ts";
+
+vi.mock("./worktree.ts", async (original) => ({ ...(await original<typeof import("./worktree.ts")>()) }));
 
 const oid = "a".repeat(40);
 test.each([".git/config", ".GIT/x", ".git./x", "git~1/x", ".g\u206ait/x"])(
@@ -94,12 +97,13 @@ test.each(["120000 blob", "100644 blob"])(
       await writeFile(join(root, "huge.txt"), "");
       await truncate(join(root, "huge.txt"), 2 * 1024 ** 3);
       const tree = Buffer.from(`${entry} ${oid} ${entry.startsWith("120000") ? "10" : "BAD"}\thuge.txt\0`);
-      const start = performance.now();
+      const hash = vi.spyOn(worktree, "hashWorktreeFile");
       expect(await collectChanges(root, oid, "worktree", listings(tree, Buffer.alloc(0)))).toMatchObject([
         { path: "huge.txt", status: "modified", newOversized: true, newOid: undefined },
       ]);
-      expect(performance.now() - start).toBeLessThan(1000);
+      expect(hash).not.toHaveBeenCalled();
     } finally {
+      vi.restoreAllMocks();
       await rm(root, { recursive: true, force: true });
     }
   },

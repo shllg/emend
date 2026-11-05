@@ -1,5 +1,7 @@
+import * as childProcess from "node:child_process";
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { once } from "node:events";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -8,6 +10,20 @@ import { testDb } from "../db/test-support.ts";
 import { startServer } from "../server/serve.ts";
 import { writeSecretFile } from "../state/files.ts";
 import { discover, ensureServer } from "./server-client.ts";
+
+vi.mock("node:child_process", async (original) => ({ ...(await original<typeof import("node:child_process")>()) }));
+
+function observeChildExit() {
+  const spawn = childProcess.spawn;
+  const exited = Promise.withResolvers<unknown[]>();
+  void exited.promise.catch(() => {});
+  vi.spyOn(childProcess, "spawn").mockImplementationOnce((...args) => {
+    const child = spawn(...args);
+    void once(child, "exit").then(exited.resolve, exited.reject);
+    return child;
+  });
+  return exited.promise;
+}
 
 beforeEach(() => {
   const kill = process.kill;
@@ -106,6 +122,7 @@ async function withLaunchEnv<T>(dir: string, launch: () => Promise<T>): Promise<
 test("ensureServer starts a detached server after a dead discovery pid", async () => {
   const fixture = await testDb();
   const stateDir = join(fixture.dir, "spawned");
+  const exited = observeChildExit();
   let pid: number | undefined;
   let url: string | undefined;
   try {
@@ -120,12 +137,15 @@ test("ensureServer starts a detached server after a dead discovery pid", async (
       entry,
       `import { createServer } from 'node:http';\nimport { randomBytes, createHmac } from 'node:crypto';\nconst key = randomBytes(32).toString('base64url');\nimport { writeFileSync, unlinkSync } from 'node:fs';\nimport { join } from 'node:path';\nif (process.argv[2] !== 'serve') process.exit(2);\nconst path = join(process.env.EMEND_HOME, 'server.json');\nconst server = createServer((req,res) => { if (req.url === '/stop') { res.once('finish', () => { server.closeAllConnections(); server.close(() => { unlinkSync(path); process.exit(0); }); }); res.end(); return; } const challenge = req.headers['x-emend-challenge']; if (typeof challenge === 'string') res.setHeader('X-Emend-Proof',createHmac('sha256',Buffer.from(key,'base64url')).update(challenge).digest('base64url')); res.setHeader('Content-Type','application/json'); res.end(JSON.stringify({api:1,version:'0.1.0',features:[]})); });\nserver.on('error', (error) => { writeFileSync(join(process.env.EMEND_HOME, 'listen-error'), error.code); process.exit(1); });\nserver.listen(0,'127.0.0.1', () => { const port = server.address().port; writeFileSync(path, JSON.stringify({key,pid:process.pid,url:'http://127.0.0.1:'+port,port,startedAt:new Date().toISOString()}), {mode:0o600}); });\nprocess.on('SIGTERM', () => { server.closeAllConnections(); server.close(() => { unlinkSync(path); process.exit(0); }); });\nsetTimeout(() => process.exit(0), 10000).unref();\n`,
     );
-    const result = await withLaunchEnv(fixture.dir, () => ensureServer(stateDir, { entry, timeoutMs: 4000 })).catch(
-      async (error) => {
-        const code = await readFile(join(stateDir, "listen-error"), "utf8").catch(() => "");
-        if (["EPERM", "EACCES"].includes(code)) throw new Error(`Synthetic child listen ${code}`);
-        throw error;
-      },
+    const result = await withLaunchEnv(fixture.dir, () =>
+      Promise.race([
+        ensureServer(stateDir, { entry, timeoutMs: 60_000 }),
+        exited.then(async ([code, signal]) => {
+          const listenError = await readFile(join(stateDir, "listen-error"), "utf8").catch(() => "");
+          if (listenError) throw new Error(`Synthetic child listen ${listenError}`);
+          throw new Error(`Synthetic child exited before discovery (${code ?? signal})`);
+        }),
+      ]),
     );
     pid = JSON.parse(await readFile(join(stateDir, "server.json"), "utf8")).pid;
     url = result.url;
@@ -134,9 +154,8 @@ test("ensureServer starts a detached server after a dead discovery pid", async (
   } finally {
     if (url) {
       await fetch(`${url}/stop`, { method: "POST" });
-      await vi.waitFor(async () => {
-        await expect(readFile(join(stateDir, "server.json"))).rejects.toMatchObject({ code: "ENOENT" });
-      });
+      expect(await exited).toEqual([0, null]);
+      await expect(readFile(join(stateDir, "server.json"))).rejects.toMatchObject({ code: "ENOENT" });
     }
     await fixture.cleanup();
   }
@@ -156,10 +175,12 @@ test("a detached child that exits before discovery ignores the caller's NODE_OPT
     );
     await writeFile(preload, `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n`);
     process.env.NODE_OPTIONS = `--require ${JSON.stringify(preload)}`;
+    const exited = observeChildExit();
     await expect(
       withLaunchEnv(fixture.dir, () => ensureServer(join(fixture.dir, "failed"), { entry, timeoutMs: 150 })),
     ).rejects.toThrow("Could not start the emend server.");
-    await vi.waitFor(() => access(started));
+    expect(await exited).toEqual([1, null]);
+    await access(started);
     await expect(access(marker)).rejects.toMatchObject({ code: "ENOENT" });
   } finally {
     if (previous === undefined) delete process.env.NODE_OPTIONS;

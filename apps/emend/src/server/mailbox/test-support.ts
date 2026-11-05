@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { CommentCreated, SendCreated, type Target, ThreadCreated, WaitResult } from "@emend/contract";
-import { and, eq } from "drizzle-orm";
-import { expect } from "vitest";
+import { and, eq, sql } from "drizzle-orm";
+import { expect, vi } from "vitest";
 import { devices, instances, reviews, revisions } from "../../db/schema.ts";
 import { testDb } from "../../db/test-support.ts";
 import { BlobStore } from "../../store/blobs.ts";
 import { type AppDeps, createApp } from "../app.ts";
 import { createToken, SESSION_MS } from "../auth/tokens.ts";
+import type { ReviewEvents } from "../events.ts";
 import { executeWork } from "../publish/work.ts";
 
 export async function mailboxFixture() {
@@ -156,4 +158,148 @@ export async function mailboxFixture() {
 export async function error(response: Response, status: number, code: string) {
   expect(response.status).toBe(status);
   expect(await response.json()).toMatchObject({ error: { code } });
+}
+
+/** Seed an ordered comment series in one statement, without thousands of writer-queue round trips. */
+export async function seedComments(
+  f: Awaited<ReturnType<typeof mailboxFixture>>,
+  threadIds: string | string[],
+  count: number,
+  {
+    author = "user",
+    body = "Feedback",
+    digits,
+    offset = 0,
+    reviewId = f.reviewId,
+  }: {
+    author?: "user" | "agent";
+    body?: string;
+    digits?: number;
+    offset?: number;
+    reviewId?: string;
+  } = {},
+) {
+  if (count === 0) return;
+  const suffix = digits === undefined ? sql`` : sql` || printf(${`%0${digits}d`}, n + ${offset})`;
+  await f.db.query((q) =>
+    q.run(sql`
+    with recursive numbers(n) as (select 1 union all select n + 1 from numbers where n < ${count})
+    insert into comments (id, owner_id, review_id, thread_id, author, body, outcome, created_at, updated_at)
+    select ${randomUUID().slice(0, 24)} || printf('%012x', t.key * ${count} + n),
+      ${f.ownerId}, ${reviewId}, t.value, ${author}, ${body}${suffix},
+      ${author === "agent" ? "held" : null}, ${f.deps.now()}, ${f.deps.now()}
+    from json_each(${JSON.stringify(typeof threadIds === "string" ? [threadIds] : threadIds)}) t
+    cross join numbers order by t.key, n
+  `),
+  );
+}
+
+/** Resolve after the real registration has set waiting state, without a polling deadline. */
+export function nextWaiting(events: ReviewEvents | undefined, ownerId: string, reviewId: string) {
+  if (!events) throw new Error("Missing review events");
+  const registered = Promise.withResolvers<void>();
+  const begin = events.beginWaiting.bind(events);
+  const spy = vi.spyOn(events, "beginWaiting").mockImplementation((owner, review, revision) => {
+    const end = begin(owner, review, revision);
+    if (owner === ownerId && review === reviewId) {
+      spy.mockRestore();
+      registered.resolve();
+    }
+    return end;
+  });
+  return registered.promise;
+}
+
+type TakePlan = { query: string; steps: { id: number; parent: number; detail: string }[] };
+
+/** Observe only work done by the operation, including positional Drizzle rows and iterators. */
+export async function observeTake<T>(operation: () => Promise<T>) {
+  const reads: { query: string; rows: number }[] = [];
+  const plans: TakePlan[] = [];
+  const prepare = DatabaseSync.prototype.prepare;
+  const spy = vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementation(function (
+    this: DatabaseSync,
+    query: string,
+  ) {
+    const statement = prepare.call(this, query);
+    const explain = (...params: Parameters<typeof statement.all>) => {
+      if (/\b(comments|sends)\b/i.test(query)) {
+        plans.push({
+          query,
+          steps: prepare
+            .call(this, `EXPLAIN QUERY PLAN ${query}`)
+            .all(...params)
+            .map((row) => ({
+              id: Number(row.id),
+              parent: Number(row.parent),
+              detail: String(row.detail),
+            })),
+        });
+      }
+    };
+    const all = statement.all.bind(statement);
+    vi.spyOn(statement, "all").mockImplementation((...params) => {
+      explain(...params);
+      const rows = all(...params);
+      reads.push({ query, rows: rows.length });
+      return rows;
+    });
+    const get = statement.get.bind(statement);
+    vi.spyOn(statement, "get").mockImplementation((...params) => {
+      explain(...params);
+      const row = get(...params);
+      reads.push({ query, rows: row === undefined ? 0 : 1 });
+      return row;
+    });
+    const iterate = statement.iterate.bind(statement);
+    vi.spyOn(statement, "iterate").mockImplementation(function* (...params) {
+      explain(...params);
+      for (const row of iterate(...params)) {
+        reads.push({ query, rows: 1 });
+        yield row;
+      }
+      return undefined;
+    });
+    const run = statement.run.bind(statement);
+    vi.spyOn(statement, "run").mockImplementation((...params) => {
+      explain(...params);
+      return run(...params);
+    });
+    return statement;
+  });
+  try {
+    const result = await operation();
+    return { result, reads, plans, rows: reads.reduce((sum, read) => sum + read.rows, 0) };
+  } finally {
+    spy.mockRestore();
+  }
+}
+
+export function expectIndexedTake(plans: TakePlan[]) {
+  const details = plans.flatMap(({ steps }) => steps.map(({ detail }) => detail));
+  // c and s are the aliases in the claim's pending-comments and FIFO subqueries.
+  expect(details.some((line) => /^SEARCH (?:comments|c)\b/.test(line))).toBe(true);
+  expect(details.some((line) => /^SEARCH (?:sends|s)\b/.test(line))).toBe(true);
+  expect(details.filter((line) => /^SCAN (?:comments|sends|c|s)\b/.test(line))).toEqual([]);
+  for (const detail of details.filter((line) => /^SEARCH (?:comments|sends|c|s)\b/.test(line))) {
+    const constraints = detail.match(/\(([^)]*)\)/)?.[1]?.trim() ?? "";
+    // Primary-key equality fetches individual rows; every other lookup must stay within the review.
+    const pointLookup =
+      /\bUSING (?:INTEGER )?PRIMARY KEY\b/.test(detail) && /^(?:rowid|id)\s*=\s*\?$/.test(constraints);
+    if (!pointLookup) expect(constraints, detail).toMatch(/\breview_id\s*=/);
+  }
+  const history = plans.filter(({ query }) => /from\s+"?comments"?\s/i.test(query));
+  expect(history.length).toBeGreaterThan(0);
+  for (const { steps } of history) expect(steps.filter(({ detail }) => /USE TEMP B-TREE/.test(detail))).toEqual([]);
+  // The claim groups pending comments and sorts pending Sends; delivered rows are sorted too.
+  // Those sorts are intentional. Its indexed pending-comment lookup, like history, must not sort.
+  const claim = plans.find(({ query }) => query.includes("with pending_comments as materialized"));
+  const pending = claim?.steps.find(({ detail }) => /MATERIALIZE pending_comments\b/.test(detail));
+  expect(pending).toBeDefined();
+  if (!claim || !pending) throw new Error("Missing pending-comments claim plan");
+  const descendants = new Set([pending.id]);
+  for (const step of claim.steps) {
+    if (descendants.has(step.parent)) descendants.add(step.id);
+  }
+  expect(claim.steps.filter(({ id, detail }) => descendants.has(id) && /USE TEMP B-TREE/.test(detail))).toEqual([]);
 }

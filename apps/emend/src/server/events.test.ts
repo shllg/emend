@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, expect, test, vi } from "vitest";
 import { ReviewEvents } from "./events.ts";
-import { error, mailboxFixture } from "./mailbox/test-support.ts";
+import { error, mailboxFixture, nextWaiting } from "./mailbox/test-support.ts";
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 test("repeated unsubscribe cannot detach a newer listener for the same review", () => {
   const events = new ReviewEvents(Date.now);
@@ -187,8 +188,21 @@ test.each(["review", "owner"])(
   },
 );
 
+async function expectPendingAfterWait(f: Awaited<ReturnType<typeof mailboxFixture>>) {
+  const registered = nextWaiting(f.deps.events, f.ownerId, f.reviewId);
+  const settled = vi.fn();
+  const take = f.take(0.02);
+  void take.then(settled);
+  await registered;
+  await vi.advanceTimersByTimeAsync(19);
+  expect(settled).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(await take).toMatchObject({ kind: "pending" });
+}
+
 test("empty take polls do not wait behind the writer queue", async () => {
   const f = await mailboxFixture();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   const writer = f.db.transaction(async () => {
@@ -197,9 +211,7 @@ test("empty take polls do not wait behind the writer queue", async () => {
   });
   try {
     await entered.promise;
-    const take = f.take(0.02);
-    const result = await Promise.race([take, new Promise((resolve) => setTimeout(() => resolve("blocked"), 1000))]);
-    expect(result).toMatchObject({ kind: "pending" });
+    await expectPendingAfterWait(f);
   } finally {
     release.resolve();
     await writer;
@@ -220,26 +232,23 @@ test("a Send arriving between the empty read and wait is not missed", async () =
       }
       return result;
     };
-    const result = await Promise.race([
-      f.take(25),
-      new Promise((resolve) => setTimeout(() => resolve("missed"), 1000)),
-    ]);
+    const result = await f.take(25);
     expect(result).toMatchObject({ kind: "go", instructions: ["Between read and wait"] });
   } finally {
     await f.cleanup();
   }
 });
-test("a 25-second take wakes within one second of Send, without blocking other work", async () => {
+test("a 25-second take wakes on Send, without blocking other work", async () => {
   const f = await mailboxFixture();
   try {
     const events = f.deps.events;
     expect(events).toBeDefined();
+    const registered = nextWaiting(events, f.ownerId, f.reviewId);
     const waiting = f.take(25);
-    await vi.waitFor(() => expect(events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true));
-    const start = performance.now();
+    await registered;
+    expect(events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
     await f.send({ revision: 1, kind: "go", instruction: "Wake" });
     expect(await waiting).toMatchObject({ kind: "go", instructions: ["Wake"] });
-    expect(performance.now() - start).toBeLessThan(1000);
     expect(events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
     f.advance(35000);
     expect(events?.agentWaiting(f.ownerId, f.reviewId)).toBe(false);
@@ -250,10 +259,16 @@ test("a 25-second take wakes within one second of Send, without blocking other w
 test("a take timeout returns pending and an aborted take releases waiting state", async () => {
   const f = await mailboxFixture();
   try {
-    expect(await f.take(0.02)).toMatchObject({ kind: "pending" });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await expectPendingAfterWait(f);
+    // Expire the first take's grace period so the predicate observes the new take's registration.
+    f.advance(35000);
+    expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(false);
     const abort = new AbortController();
+    const registered = nextWaiting(f.deps.events, f.ownerId, f.reviewId);
     const waiting = f.request(`/reviews/${f.reviewId}/take`, "POST", { waitSeconds: 25 }, "agent", abort.signal);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await registered;
+    expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
     abort.abort();
     await waiting;
     f.advance(35000);
@@ -265,6 +280,7 @@ test("a take timeout returns pending and an aborted take releases waiting state"
 test("all six SSE events carry ids and revisions, never comments or instructions", async () => {
   const f = await mailboxFixture();
   const controller = new AbortController();
+  const takeController = new AbortController();
   try {
     const response = await f.request(`/reviews/${f.reviewId}/events`, "GET", undefined, "reviewer", controller.signal);
     expect(response.status).toBe(200);
@@ -288,8 +304,15 @@ test("all six SSE events carry ids and revisions, never comments or instructions
     expect(confirmed).toContain("event: confirmed");
     expect(confirmed).toContain(taken.deliveryId);
     expect(confirmed).not.toContain("Secret");
-    const waiting = f.take(0.05);
+    const waiting = f.request(
+      `/reviews/${f.reviewId}/take`,
+      "POST",
+      { waitSeconds: 25 },
+      "agent",
+      takeController.signal,
+    );
     expect(new TextDecoder().decode((await reader.read()).value)).toContain("event: waiting");
+    takeController.abort();
     await waiting;
     const published = await f.request(
       "/publish",
@@ -311,6 +334,7 @@ test("all six SSE events carry ids and revisions, never comments or instructions
     expect(published.status).toBe(200);
     expect(new TextDecoder().decode((await reader.read()).value)).toContain("event: publish");
   } finally {
+    takeController.abort();
     controller.abort();
     await f.cleanup();
   }

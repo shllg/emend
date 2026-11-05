@@ -21,7 +21,10 @@ import { expect, test, vi } from "vitest";
 import { collectChanges } from "./collect.ts";
 import { resolvePublish } from "./resolve.ts";
 import { readSides, readWorktree } from "./sides.ts";
+import * as worktree from "./worktree.ts";
 import { hashWorktreeFile, statWorktree } from "./worktree.ts";
+
+vi.mock("./worktree.ts", async (original) => ({ ...(await original<typeof import("./worktree.ts")>()) }));
 
 const exec = promisify(execFile);
 test("worktree stat and hashing refuse nested metadata before opening", async () => {
@@ -52,7 +55,7 @@ test("a sparse 2 GiB untracked file is oversized without hashing or uploading it
   try {
     await writeFile(join(f.root, "huge.txt"), "");
     await truncate(join(f.root, "huge.txt"), 2 * 1024 ** 3);
-    const start = performance.now();
+    const hash = vi.spyOn(worktree, "hashWorktreeFile");
     const result = await resolvePublish(
       {
         version: 1,
@@ -71,8 +74,9 @@ test("a sparse 2 GiB untracked file is oversized without hashing or uploading it
     );
     expect(result.request.files).toMatchObject([{ path: "huge.txt", flag: "oversized", oldBlob: null, newBlob: null }]);
     expect(result.blobs.size).toBe(0);
-    expect(performance.now() - start).toBeLessThan(3000);
+    expect(hash.mock.calls.filter(([, path]) => path === "huge.txt")).toEqual([]);
   } finally {
+    vi.restoreAllMocks();
     await f.cleanup();
   }
 });

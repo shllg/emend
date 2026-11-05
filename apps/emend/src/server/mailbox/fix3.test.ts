@@ -1,12 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { DEFAULT_MODE, LIMITS, MODE_LABELS, type WaitResult } from "@emend/contract";
-import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { reviews, revisions } from "../../db/schema.ts";
 import { jsonBytes } from "./payload.ts";
 import { takeDelivery } from "./take.ts";
-import { error, mailboxFixture } from "./test-support.ts";
+import { error, expectIndexedTake, mailboxFixture, observeTake, seedComments } from "./test-support.ts";
 
 let f: Awaited<ReturnType<typeof mailboxFixture>>;
 beforeEach(async () => {
@@ -20,18 +19,16 @@ type Go = Extract<WaitResult, { kind: "go" }>;
 const replyBody = (n: number, length = 7) => `${"r".repeat(length - 6)}${String(n).padStart(6, "0")}`;
 const agentEntry = (body: string) => ({ author: "agent" as const, body, outcome: "held" as const });
 async function seed(threadId: string, count: number, offset = 0, length = 7, reviewId = f.reviewId) {
-  await f.db.query((q) =>
-    q.run(sql`
-    with recursive numbers(n) as (select 1 union all select n + 1 from numbers where n < ${count})
-    insert into comments (id, owner_id, review_id, thread_id, author, body, outcome, created_at, updated_at)
-    select ${randomUUID().slice(0, 24)} || printf('%012x', n), ${f.ownerId}, ${reviewId}, ${threadId},
-      'agent', ${"r".repeat(length - 6)} || printf('%06d', n + ${offset}), 'held', ${f.deps.now()}, ${f.deps.now()}
-    from numbers
-  `),
-  );
+  await seedComments(f, threadId, count, {
+    author: "agent",
+    body: "r".repeat(length - 6),
+    digits: 6,
+    offset,
+    reviewId,
+  });
 }
+
 async function take() {
-  const start = performance.now();
   const result = await takeDelivery(
     f.db,
     {
@@ -44,9 +41,8 @@ async function take() {
     f.reviewId,
     f.deps.now(),
   );
-  const elapsed = performance.now() - start;
   if (result?.kind !== "go") throw new Error("not go");
-  return { result, elapsed };
+  return { result };
 }
 async function confirm(result: Go) {
   expect((await f.request(`/deliveries/${result.deliveryId}/confirm`, "POST", undefined, "agent")).status).toBe(204);
@@ -87,28 +83,30 @@ function comment(
   };
 }
 
-test("200,000 replies take within three times 2,000 replies plus 50ms, keeping the newest 500", async () => {
+test("200,000 replies read the same bounded history as 2,000 replies, keeping the newest 500", async () => {
   const t = await sentThread();
   await seed(t.threadId, 2000);
   await f.comment(t.threadId, "Small history feedback");
   await f.send();
-  const small = await take();
+  const small = await observeTake(async () => (await take()).result);
   await confirm(small.result);
   await seed(t.threadId, 198000, 2000);
   await f.comment(t.threadId, "Large history feedback");
   await f.send();
-  const large = await take();
-  console.info("mailbox history timing:", { smallMs: small.elapsed, largeMs: large.elapsed });
-  expect(large.elapsed).toBeLessThan(3 * small.elapsed + 50);
+  const large = await observeTake(async () => (await take()).result);
+  expect(large.rows).toBe(small.rows);
+  expectIndexedTake(small.plans);
+  expectIndexedTake(large.plans);
   const delivered = large.result.comments[0];
   expect(delivered?.history.map((h) => h.body)).toEqual(Array.from({ length: 500 }, (_, i) => replyBody(199501 + i)));
   expect(delivered?.historyTrimmed).toBe(true);
 }, 15000);
 
-test("200,000 replies in another review of the owner leave this take within three times baseline plus 50ms", async () => {
-  const t = await f.thread();
+test("200,000 replies in another review of the owner do not increase rows read by take", async () => {
+  const t = await sentThread();
+  await f.comment(t.threadId, "Baseline feedback");
   await f.send();
-  const small = await take();
+  const small = await observeTake(async () => (await take()).result);
   await confirm(small.result);
   const otherReview = randomUUID();
   await f.db.query(async (q) => {
@@ -132,11 +130,13 @@ test("200,000 replies in another review of the owner leave this take within thre
   const otherThread = (await response.json()) as { threadId: string };
   expect((await f.request(`/reviews/${otherReview}/sends`, "POST", { revision: 1, kind: "go" })).status).toBe(201);
   await seed(otherThread.threadId, 200000, 0, 7, otherReview);
-  await f.comment(t.threadId, "This review's feedback");
+  const target = await sentThread();
+  await f.comment(target.threadId, "This review's feedback");
   await f.send();
-  const large = await take();
-  console.info("mailbox other-review timing:", { smallMs: small.elapsed, largeMs: large.elapsed });
-  expect(large.elapsed).toBeLessThan(3 * small.elapsed + 50);
+  const large = await observeTake(async () => (await take()).result);
+  expect(large.rows).toBe(small.rows);
+  expectIndexedTake(small.plans);
+  expectIndexedTake(large.plans);
   expect(large.result.comments).toHaveLength(1);
   expect(large.result.comments[0]?.body).toBe("This review's feedback");
 }, 15000);

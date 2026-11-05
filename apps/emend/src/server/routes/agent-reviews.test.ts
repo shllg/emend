@@ -81,7 +81,19 @@ test("the list never carries comment bodies or any other field", async () => {
 });
 
 test("the list is capped at the agent review limit", async () => {
-  for (let i = 0; i < LIMITS.agentReviews + 5; i++) await insert(f.ownerId, f.instanceId, `Review ${i}`, 10_000 + i);
+  await f.db.query((q) =>
+    q.insert(reviews).values(
+      Array.from({ length: LIMITS.agentReviews + 5 }, (_, i) => ({
+        id: randomUUID(),
+        ownerId: f.ownerId,
+        originInstanceId: f.instanceId,
+        reviewKey: randomUUID().replaceAll("-", "").repeat(2),
+        title: `Review ${i}`,
+        createdAt: 10_000 + i,
+        updatedAt: 10_000 + i,
+      })),
+    ),
+  );
   const items = AgentReviewList.parse(
     await (await f.request("/agent/reviews", "GET", undefined, "agent")).json(),
   ).items;

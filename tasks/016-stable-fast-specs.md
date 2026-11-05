@@ -1,0 +1,56 @@
+---
+id: 016
+title: Stable and fast specs
+status: in-progress
+owner: agent + your approval
+depends_on: []
+done_on:
+---
+
+# 016 — Stable and fast specs
+
+## Why
+
+Plan task 6.3 T.1. The specs must be stable: about 60 timing-dependent assertions and sleeps get
+deterministic replacements. A `yieldToLoop` work-unit check in the gate and a non-gating
+`pnpm bench` replace the wall-clock budgets. CI fans out into parallel jobs and Vitest shards.
+Detail and order are in the plan "emend: stable and fast specs", linked from the T.1 entry of the
+plan of record. You decided D1 to D4 as recommended on 2026-11-05: static checks on both Node
+versions, the plan's order of work, no deadline seam for `emend serve`, and bench-only coverage
+for single synchronous steps.
+
+## Steps
+
+One commit per step, in the plan's order (D2):
+
+- [x] Quick stability: batched seeds, races and sleeps, row counters instead of ratios. No
+      production change.
+- [ ] CI fan-out: the `verify:*` scripts, a reusable verify workflow, 4 Vitest shards on both
+      Node versions, static checks on both Node versions (D1), and the guard test.
+- [ ] Pacing hook: `pacing.ts` at the yield sites, behaviour unchanged.
+- [ ] New yields in the import pipeline, with one work-unit test per phase.
+- [ ] Bench: the `bench` project and `pnpm bench`; the timing assertions and both
+      `EMEND_TIMING_STRICT` passes go. Single synchronous steps get bench coverage only (D4).
+- [ ] Slow fixtures and the 15 to 30 s timeout group. Also the real-render tests in
+      `comment-html.test.ts` ("the HTML budget nulls…" renders 200,000-character bodies) and every
+      test that passes alone but hits the 5 s timeout when two suites run at once (seen:
+      `cli/direct.test.ts` "feedback refuses a newer database…", also reported from the 015 branch).
+- [ ] Polling waits: `vi.waitFor` and Testing Library `waitFor` default to a 1 s deadline, a load
+      bet in about 550 places. No polling wait gets a deadline shorter than the test's own.
+- [ ] `tailscale-process` and `serve-signals` onto fake timers and fake children; no deadline
+      seam for `emend serve` (D3).
+- [ ] The `core` budgets become work counts; their speed checks move to the bench.
+- [ ] The web sleeps go onto fake timers.
+- [ ] Split the biggest test files only if the shards are still uneven.
+- [ ] Reviews per step: emend-reviewer, a read-only Codex review, and emend-security-reviewer on
+      every server, CI or hook change.
+
+## Done when
+
+`pnpm verify` passes with no wall-clock assertion or real sleep left in the gate, and `pnpm bench`
+runs outside it. CI runs the sharded layout, and the plan's T.1 entry records the outcome.
+
+## Notes
+
+- Flaky or timing-dependent tests are bugs to fix at the root: never retry, loosen or skip them.
+- Changes under `.github/` and the pacing hook need emend-security-reviewer.

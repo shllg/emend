@@ -1,13 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { WaitResult } from "@emend/contract";
 import { sql } from "drizzle-orm";
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { run } from "../../main.ts";
 import { directFixture } from "../direct-test-support.ts";
 import { CliError } from "../http.ts";
 import { deletedError } from "../moved.ts";
+import * as pauses from "../pause.ts";
 import { commandFixture } from "../test-support.ts";
 import { takeFeedback } from "./wait.ts";
+
+vi.mock("../pause.ts", async (original) => ({ ...(await original<typeof import("../pause.ts")>()) }));
+
+afterEach(() => vi.restoreAllMocks());
 
 const hub = { url: "https://hub.example", token: `em_${"a".repeat(43)}`, via: "hub" } as const;
 const reviewId = randomUUID();
@@ -48,9 +53,9 @@ test("direct wait on a snoozed review prints closed with the wake time at once",
   const until = new Date(Date.now() + 3_600_000).toISOString();
   expect((await server.request(`/reviews/${result.reviewId}/snooze`, { until })).status).toBe(204);
   const out = f.output();
-  const started = performance.now();
+  const pause = vi.spyOn(pauses, "pause");
   expect(await run(["wait", result.reviewId, "--timeout", "30"], out.io)).toBe(0);
-  expect(performance.now() - started).toBeLessThan(5000);
+  expect(pause).not.toHaveBeenCalled();
   expect(JSON.parse(out.stdout[0] ?? "")).toMatchObject({ kind: "closed", reason: "snoozed", until });
 });
 

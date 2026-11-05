@@ -4,7 +4,7 @@ import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { reviews, revisions } from "../../db/schema.ts";
 import { takeDelivery } from "./take.ts";
-import { mailboxFixture } from "./test-support.ts";
+import { expectIndexedTake, mailboxFixture, observeTake, seedComments } from "./test-support.ts";
 
 let f: Awaited<ReturnType<typeof mailboxFixture>>;
 beforeEach(async () => {
@@ -16,49 +16,41 @@ afterEach(async () => {
 });
 
 async function take() {
-  const started = performance.now();
   const result = await takeDelivery(
     f.db,
     { ownerId: f.ownerId, tokenId: randomUUID(), kind: "agent", instanceId: f.instanceId, scopes: ["take"] },
     f.reviewId,
     f.deps.now(),
   );
-  const elapsed = performance.now() - started;
   if (result?.kind !== "go") throw new Error("not go");
-  return { result, elapsed };
-}
-
-async function seedComments(threadId: string, count: number) {
-  await f.db.query((q) =>
-    q.run(sql`with recursive numbers(n) as (select 1 union all select n + 1 from numbers where n < ${count})
-      insert into comments (id, owner_id, review_id, thread_id, author, body, created_at, updated_at)
-      select ${randomUUID().slice(0, 24)} || printf('%012x', n), ${f.ownerId}, ${f.reviewId}, ${threadId},
-        'user', 'Feedback', ${f.deps.now()}, ${f.deps.now()} from numbers`),
-  );
+  return { result };
 }
 
 async function sendComments(count: number) {
   const t = await f.thread("Feedback");
-  await seedComments(t.threadId, count - 1);
+  await seedComments(f, t.threadId, count - 1);
   await f.send();
 }
 
-test("5,000 comments in one Send take within 25 times 500 comments plus 100ms", async () => {
+test("5,000 comments in one Send read only delivered rows plus constant overhead", async () => {
   await sendComments(500);
-  const small = await take();
+  const small = await observeTake(async () => (await take()).result);
   await sendComments(5000);
-  const large = await take();
-  console.info("reviewer-comment take timing:", { smallMs: small.elapsed, largeMs: large.elapsed });
-  expect(large.elapsed).toBeLessThan(25 * small.elapsed + 100);
+  const large = await observeTake(async () => (await take()).result);
+  for (const measured of [small, large]) {
+    expect(measured.rows).toBeGreaterThanOrEqual(measured.result.comments.length);
+    expect(measured.rows).toBeLessThanOrEqual(measured.result.comments.length + 10);
+    expectIndexedTake(measured.plans);
+  }
   expect(small.result.comments).toHaveLength(500);
   expect(large.result.comments).toHaveLength(5000);
   expect(large.result.comments.every((c) => c.history.length === 0 && !c.historyTrimmed)).toBe(true);
 }, 15000);
 
-test("200,000 Sends in another review leave a take within three times baseline plus 50ms", async () => {
+test("200,000 Sends in another review do not increase rows read by take", async () => {
   await f.thread();
   await f.send();
-  const small = await take();
+  const small = await observeTake(async () => (await take()).result);
   const reviewId = randomUUID();
   const revisionId = randomUUID();
   await f.db.query(async (q) => {
@@ -79,9 +71,10 @@ test("200,000 Sends in another review leave a take within three times baseline p
   });
   await f.thread();
   await f.send();
-  const large = await take();
-  console.info("other-review Send timing:", { smallMs: small.elapsed, largeMs: large.elapsed });
-  expect(large.elapsed).toBeLessThan(3 * small.elapsed + 50);
+  const large = await observeTake(async () => (await take()).result);
+  expect(large.rows).toBe(small.rows);
+  expectIndexedTake(small.plans);
+  expectIndexedTake(large.plans);
   expect(large.result.comments).toHaveLength(1);
 }, 15000);
 

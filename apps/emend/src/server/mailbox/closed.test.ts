@@ -5,13 +5,14 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { deliveries, reviews } from "../../db/schema.ts";
 import { ReviewEvents } from "../events.ts";
 import { publishReview, takeAs, takeClosed } from "./lifecycle-support.ts";
-import { error, mailboxFixture } from "./test-support.ts";
+import { error, mailboxFixture, nextWaiting } from "./test-support.ts";
 
 let f: Awaited<ReturnType<typeof mailboxFixture>>;
 beforeEach(async () => {
   f = await mailboxFixture();
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   await f.cleanup();
 });
 
@@ -146,9 +147,12 @@ test("a wait started on a still-snoozed review returns at once; after the wake t
   const { reviewId } = await publishReview(f);
   const until = iso(f.deps.now() + 5000);
   expect((await act(reviewId, "snooze", { until })).status).toBe(204);
-  const started = performance.now();
+  const events = f.deps.events;
+  if (!events) throw new Error("Missing review events");
+  const beginWaiting = vi.spyOn(events, "beginWaiting");
   expect(await takeClosed(f, reviewId, 25)).toMatchObject({ kind: "closed", reason: "snoozed" });
-  expect(performance.now() - started).toBeLessThan(2000);
+  expect(beginWaiting).not.toHaveBeenCalled();
+  expect(events.agentWaiting(f.ownerId, reviewId)).toBe(false);
   f.advance(6000);
   expect(await takeClosed(f, reviewId, 0)).toMatchObject({ kind: "pending" });
 });
@@ -157,8 +161,10 @@ test("a waiting take is ended once by a retire, with closed", async () => {
   const events = new ReviewEvents(f.deps.now);
   f.deps.events = events;
   const { reviewId } = await publishReview(f);
+  const registered = nextWaiting(f.deps.events, f.ownerId, reviewId);
   const waiting = takeClosed(f, reviewId, 25);
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await registered;
+  expect(f.deps.events?.agentWaiting(f.ownerId, reviewId)).toBe(true);
   expect(events.agentWaiting(f.ownerId, reviewId)).toBe(true);
   expect((await act(reviewId, "retire", {})).status).toBe(204);
   expect(await waiting).toMatchObject({ kind: "closed", reason: "retired" });
@@ -169,8 +175,10 @@ test("a waiting take is ended once by a retire, with closed", async () => {
 test("a waiting take is ended by a snooze with closed", async () => {
   f.deps.events = new ReviewEvents(f.deps.now);
   const { reviewId } = await publishReview(f);
+  const registered = nextWaiting(f.deps.events, f.ownerId, reviewId);
   const waiting = takeClosed(f, reviewId, 25);
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await registered;
+  expect(f.deps.events?.agentWaiting(f.ownerId, reviewId)).toBe(true);
   expect((await act(reviewId, "snooze", { untilRevision: true })).status).toBe(204);
   expect(await waiting).toMatchObject({ kind: "closed", reason: "snoozed", until: null });
 });
@@ -178,8 +186,10 @@ test("a waiting take is ended by a snooze with closed", async () => {
 test("a waiting take on a deleted review gets 404", async () => {
   f.deps.events = new ReviewEvents(f.deps.now);
   const { reviewId } = await publishReview(f);
+  const registered = nextWaiting(f.deps.events, f.ownerId, reviewId);
   const waiting = takeAs(f, reviewId, ["closed"], 25);
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await registered;
+  expect(f.deps.events?.agentWaiting(f.ownerId, reviewId)).toBe(true);
   expect((await f.request(`/reviews/${reviewId}`, "DELETE")).status).toBe(204);
   await error(await waiting, 404, "unknown_review");
   await error(await takeAs(f, reviewId, ["closed"]), 404, "unknown_review");

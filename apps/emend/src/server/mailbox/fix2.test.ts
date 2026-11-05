@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { LIMITS, ReplyCreated } from "@emend/contract";
-import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { comments, placements, threads } from "../../db/schema.ts";
 import { takeDelivery } from "./take.ts";
-import { mailboxFixture } from "./test-support.ts";
+import { mailboxFixture, observeTake, seedComments } from "./test-support.ts";
 
 let f: Awaited<ReturnType<typeof mailboxFixture>>;
 beforeEach(async () => {
@@ -16,16 +16,9 @@ afterEach(async () => {
 });
 
 async function seed(threadId: string, count: number, body: string, author: "agent" | "user" = "agent") {
-  await f.db.query((q) =>
-    q.run(sql`
-    with recursive numbers(n) as (select 1 union all select n + 1 from numbers where n < ${count})
-    insert into comments (id, owner_id, review_id, thread_id, author, body, outcome, created_at, updated_at)
-    select ${randomUUID().slice(0, 24)} || printf('%012x', n), ${f.ownerId}, ${f.reviewId}, ${threadId},
-      ${author}, ${body} || printf('%05d', n), ${author === "agent" ? "held" : null}, ${f.deps.now()}, ${f.deps.now()}
-    from numbers
-  `),
-  );
+  await seedComments(f, threadId, count, { body, author, digits: 5 });
 }
+
 async function take() {
   const result = await takeDelivery(
     f.db,
@@ -41,17 +34,18 @@ async function confirm() {
   expect((await f.request(`/deliveries/${delivery.deliveryId}/confirm`, "POST", undefined, "agent")).status).toBe(204);
 }
 
-test("20,000 agent replies take under one second in the parallel suite", async () => {
+test("20,000 agent replies load only the bounded history window", async () => {
   const t = await f.thread();
   await f.send();
   await confirm();
   await seed(t.threadId, 20000, "r");
   await f.comment(t.threadId, "New feedback");
   await f.send();
-  const start = performance.now();
-  const result = await take();
-  const elapsed = performance.now() - start;
-  expect(elapsed).toBeLessThan(1000);
+  const { result, reads } = await observeTake(take);
+  // History is read twice: at most 501 sizes (including the trim sentinel), then 500 kept bodies.
+  const history = reads.filter(({ query }) => /from comments (?:indexed|not indexed)/.test(query));
+  expect(history).toHaveLength(2);
+  expect(history.map(({ rows }) => rows)).toEqual([LIMITS.historyPerComment + 1, LIMITS.historyPerComment]);
   expect(result.comments[0]?.history).toHaveLength(LIMITS.historyPerComment);
 });
 
@@ -96,14 +90,45 @@ test("each delivered comment gets only its own prefix, bounded by the thread's l
 });
 
 test("100 threads load history bodies only within the handoff budget", async () => {
-  const threadIds: string[] = [];
-  for (let i = 0; i < 100; i++) threadIds.push((await f.thread()).threadId);
+  const threadIds = Array.from({ length: 100 }, () => randomUUID());
+  await f.db.query(async (q) => {
+    await q.insert(threads).values(
+      threadIds.map((id) => ({
+        id,
+        ownerId: f.ownerId,
+        reviewId: f.reviewId,
+        createdRevisionId: f.revisionId,
+        target: { kind: "review" as const },
+        createdAt: f.deps.now(),
+        updatedAt: f.deps.now(),
+      })),
+    );
+    await q.insert(placements).values(
+      threadIds.map((threadId) => ({
+        ownerId: f.ownerId,
+        reviewId: f.reviewId,
+        threadId,
+        revisionId: f.revisionId,
+        status: "placed" as const,
+        location: { kind: "review" as const },
+      })),
+    );
+    await q.insert(comments).values(
+      threadIds.map((threadId) => ({
+        ownerId: f.ownerId,
+        reviewId: f.reviewId,
+        threadId,
+        author: "user" as const,
+        body: "Please explain.",
+        createdAt: f.deps.now(),
+        updatedAt: f.deps.now(),
+      })),
+    );
+  });
   await f.send();
   await confirm();
-  for (const id of threadIds) {
-    await seed(id, 40, "history-body:".padEnd(19995, "r"));
-    await f.comment(id, "New feedback");
-  }
+  await seedComments(f, threadIds, 40, { author: "agent", body: "history-body:".padEnd(19995, "r"), digits: 5 });
+  await seedComments(f, threadIds, 1, { body: "New feedback" });
   await f.send();
   let loaded = 0;
   const prepare = DatabaseSync.prototype.prepare;
@@ -125,7 +150,7 @@ test("100 threads load history bodies only within the handoff budget", async () 
   expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(LIMITS.handoffBytes);
   expect(result.comments[0]).toMatchObject({ history: [], historyTrimmed: true });
   expect(result.comments.at(-1)?.history.at(-1)?.body.endsWith("00040")).toBe(true);
-}, 15000);
+});
 
 test("approve A, Go B, approve C on revision 2 leaves the review open", async () => {
   await f.revision(2);

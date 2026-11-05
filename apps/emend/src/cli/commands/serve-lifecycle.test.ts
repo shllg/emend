@@ -1,10 +1,17 @@
+import * as childProcess from "node:child_process";
+import { once } from "node:events";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createServer, IncomingMessage, ServerResponse } from "node:http";
+import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Duplex } from "node:stream";
 import { expect, onTestFinished, test, vi } from "vitest";
 import { run } from "../../main.ts";
 import * as serverModule from "../../server/serve.ts";
+
+vi.mock("node:child_process", async (original) => ({ ...(await original<typeof import("node:child_process")>()) }));
 
 // Exercise real server state and CLI lifecycle without reserving a privileged TCP port.
 vi.mock("node:http", async (original) => {
@@ -27,8 +34,50 @@ vi.mock("node:http", async (original) => {
       done();
     }
   }
-  return { ...actual, createServer: () => new Socket() };
+  return { ...actual, createServer: vi.fn(() => new Socket()) };
 });
+/** Send a real HTTP request through the listening test socket's installed handler. */
+async function capabilities(stateDir: string) {
+  const discovery = JSON.parse(await readFile(join(stateDir, "server.json"), "utf8")) as { url: string };
+  const port = Number(new URL(discovery.url).port);
+  const server = vi
+    .mocked(createServer)
+    .mock.results.map((result) => result.value)
+    .find((server) => {
+      const address = server.address();
+      return server.listening && address && typeof address !== "string" && address.port === port;
+    });
+  if (!server) throw new Error("Discovery has no listening server");
+  const chunks: Buffer[] = [];
+  const sink = new Duplex({
+    read() {},
+    write(chunk, _encoding, done) {
+      chunks.push(Buffer.from(chunk));
+      done();
+    },
+  });
+  const incoming = new IncomingMessage(new Socket());
+  incoming.method = "GET";
+  incoming.url = "/api/v1/capabilities";
+  incoming.headers = { host: new URL(discovery.url).host };
+  incoming.rawHeaders = ["Host", incoming.headers.host as string];
+  incoming.httpVersion = "1.1";
+  incoming.httpVersionMajor = 1;
+  incoming.httpVersionMinor = 1;
+  const outgoing = new ServerResponse(incoming);
+  outgoing.assignSocket(sink as Socket);
+  const finished = once(outgoing, "finish");
+  try {
+    expect(server.emit("request", incoming, outgoing)).toBe(true);
+    await finished;
+    expect(outgoing.statusCode).toBe(200);
+    expect(Buffer.concat(chunks).toString("utf8")).toContain('"api":1');
+  } finally {
+    incoming.destroy();
+    sink.destroy();
+  }
+}
+
 const name = "hub.example.ts.net";
 const occupied = {
   TCP: { "443": { HTTPS: true } },
@@ -69,7 +118,7 @@ if [ "$1" = status ]; then printf '%s\\n' '${JSON.stringify({ BackendState: "Run
 elif [ "$2" = status ]; then /bin/cat ${quote(configPath)}
 elif [ "$2" = --bg ]; then
   ${failure === "setup" ? "printf 'permission denied' >&2; exit 1" : `printf '%s' ${quote(JSON.stringify(own))} > ${quote(configPath)}`}
-  ${failure === "setup-after-write" ? "printf 'synthetic configuration failed' >&2; exit 1" : failure === "setup-timeout" ? "while :; do :; done" : ":"}
+  ${failure === "setup-after-write" ? "printf 'synthetic configuration failed' >&2; exit 1" : failure === "setup-timeout" ? "printf 'setup-ready\\n'; while :; do :; done" : ":"}
 elif [ "$2" = --https=443 ] && [ "$3" = off ]; then ${failure === "stop" ? "printf 'permission denied' >&2; exit 1" : `printf '{}' > ${quote(configPath)}`}
 else exit 7
 fi
@@ -77,19 +126,37 @@ fi
     { mode: 0o700 },
   );
   const start = vi.spyOn(serverModule, "startServer");
+  const setupReady = Promise.withResolvers<void>();
+  const setupExited = Promise.withResolvers<void>();
   if (failure === "setup-timeout") {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const spawn = childProcess.spawn;
+    vi.spyOn(childProcess, "spawn").mockImplementation((...args) => {
+      const child = spawn(...args);
+      if (Array.isArray(args[1]) && args[1].includes("--bg")) {
+        let output = "";
+        child.stdout?.on("data", (chunk) => {
+          output += String(chunk);
+          if (output.includes("setup-ready\n")) setupReady.resolve();
+        });
+        child.once("exit", () => setupExited.resolve());
+      }
+      return child;
+    });
     const tailscale = await import("../tailscale.ts");
     const ensure = tailscale.ensureTailscaleServe;
     vi.spyOn(tailscale, "ensureTailscaleServe").mockImplementation((port, env, name, onSetup, options) =>
       ensure(port, env, name, onSetup, { ...options, deadlineMs: 1_000 }),
     );
   }
+  const serving = Promise.withResolvers<void>();
   const stdout: string[] = [];
   const stderr: string[] = [];
   const io = {
     env: { EMEND_HOME: dir, PATH: dir, HOME: dir },
     stdout: (line: string) => {
       stdout.push(line);
+      serving.resolve();
     },
     stderr: (line: string) => {
       stderr.push(line);
@@ -99,11 +166,21 @@ fi
     process.emit("SIGTERM");
     for (const result of start.mock.results)
       if (result.type === "return") await result.value.then((server) => server.close());
+    vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.mocked(createServer).mockClear();
     await rm(dir, { force: true, recursive: true });
   });
   return {
     dir,
+    serving: serving.promise,
+    async expireSetup() {
+      await setupReady.promise;
+      await vi.advanceTimersByTimeAsync(1_000);
+      await setupExited.promise;
+      // Finish the process-group cleanup timer after the actual child exit.
+      await vi.advanceTimersByTimeAsync(1_000);
+    },
     io,
     stdout,
     stderr,
@@ -143,7 +220,9 @@ test.each(["setup-after-write", "setup-timeout"] as const)(
   "a failed setup (%s) removes a half-applied handler and preserves the original error",
   async (failure) => {
     const f = await fixture("empty", failure);
-    expect(await run(["serve", "--tailscale", "--port", "0"], f.io)).toBe(1);
+    const result = run(["serve", "--tailscale", "--port", "0"], f.io);
+    if (failure === "setup-timeout") await f.expireSetup();
+    expect(await result).toBe(1);
     expect(f.stdout).toEqual([]);
     expect(f.stderr).toEqual([
       failure === "setup-timeout"
@@ -185,7 +264,8 @@ test.each(["empty", "same"] as const)(
     const f = await fixture(initial);
     const before = await readFile(f.configPath, "utf8");
     const result = run(["serve", "--tailscale", "--port", "0"], f.io);
-    await vi.waitFor(() => expect(f.stdout).toEqual([`emend: serving https://${name}\n`]));
+    await f.serving;
+    expect(f.stdout).toEqual([`emend: serving https://${name}\n`]);
     expect(await f.saved()).toEqual({ baseUrl: `https://${name}` });
     process.emit(initial === "empty" ? "SIGINT" : "SIGTERM");
     expect(await result).toBe(0);
@@ -206,11 +286,12 @@ test("SIGHUP removes the matching handler and discovery file, retaining the publ
   const f = await fixture();
   const result = run(["serve", "--tailscale", "--port", "0"], f.io);
   try {
-    await vi.waitFor(() => expect(f.stdout).toHaveLength(1));
+    await f.serving;
+    expect(f.stdout).toHaveLength(1);
     expect((await stat(join(f.dir, "server.json"))).isFile()).toBe(true);
     process.emit("SIGHUP");
-    await vi.waitFor(async () => expect(await f.calls()).toContain("serve --https=443 off"));
     expect(await result).toBe(0);
+    expect(await f.calls()).toContain("serve --https=443 off");
     expect(JSON.parse(await readFile(f.configPath, "utf8"))).toEqual({});
     await expect(stat(join(f.dir, "server.json"))).rejects.toMatchObject({ code: "ENOENT" });
     expect(await f.saved()).toEqual({ baseUrl: `https://${name}` });
@@ -223,7 +304,8 @@ test("SIGHUP removes the matching handler and discovery file, retaining the publ
 test("a handler replaced before shutdown is never removed", async () => {
   const f = await fixture();
   const result = run(["serve", "--tailscale", "--port", "0"], f.io);
-  await vi.waitFor(() => expect(f.stdout).toHaveLength(1));
+  await f.serving;
+  expect(f.stdout).toHaveLength(1);
   await writeFile(f.configPath, JSON.stringify(occupied));
   process.emit("SIGTERM");
   expect(await result).toBe(0);
@@ -232,7 +314,8 @@ test("a handler replaced before shutdown is never removed", async () => {
 test("cleanup failure prints one stderr line and keeps a successful exit code", async () => {
   const f = await fixture("empty", "stop");
   const result = run(["serve", "--tailscale", "--port", "0"], f.io);
-  await vi.waitFor(() => expect(f.stdout).toHaveLength(1));
+  await f.serving;
+  expect(f.stdout).toHaveLength(1);
   process.emit("SIGTERM");
   expect(await result).toBe(0);
   expect(f.stderr).toHaveLength(1);
@@ -246,7 +329,8 @@ test("a throwing shutdown stderr writer cannot change the exit code or run befor
     throw Object.assign(new Error("write EIO"), { code: "EIO" });
   };
   const result = run(["serve", "--tailscale", "--port", "0"], f.io);
-  await vi.waitFor(() => expect(f.stdout).toHaveLength(1));
+  await f.serving;
+  expect(f.stdout).toHaveLength(1);
   process.emit("SIGHUP");
   await expect(result).resolves.toBe(0);
   expect(discoveryAtReport).toEqual([false]);
@@ -254,9 +338,9 @@ test("a throwing shutdown stderr writer cannot change the exit code or run befor
 });
 test("a throwing stdout writer keeps serving until a signal cleans up", async () => {
   const f = await fixture();
-  let attempted = false;
+  const attempted = Promise.withResolvers<void>();
   f.io.stdout = () => {
-    attempted = true;
+    attempted.resolve();
     throw new Error("synthetic stdout failure");
   };
   let settled = false;
@@ -265,7 +349,8 @@ test("a throwing stdout writer keeps serving until a signal cleans up", async ()
     return code;
   });
   try {
-    await vi.waitFor(() => expect(attempted).toBe(true));
+    await attempted.promise;
+    await capabilities(f.dir);
     expect(settled).toBe(false);
     expect(await f.saved()).toEqual({ baseUrl: `https://${name}` });
     expect(existsSync(join(f.dir, "server.json"))).toBe(true);
@@ -287,7 +372,8 @@ test.each(["other-port", "tls-port"] as const)(
     const f = await fixture(initial);
     const result = run(["serve", "--tailscale", "--port", "0"], f.io);
     try {
-      await vi.waitFor(() => expect(f.stdout).toHaveLength(1));
+      await f.serving;
+      expect(f.stdout).toHaveLength(1);
       expect(f.stderr).toEqual([
         `emend: warning: Tailscale Serve also serves other HTTPS ports on ${name}; pages there receive emend's sign-in cookie.\n`,
       ]);

@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { setTimeout as delay } from "node:timers/promises";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { removeUnreferencedBlob } from "../db/repo/blob-removal.ts";
 import { testDb } from "../db/test-support.ts";
 import { BlobStore, STAGE_PIN_MS } from "./blobs.ts";
@@ -14,31 +13,50 @@ async function fixture() {
   return { ...ctx, store, fileThere: async () => (await store.readStaged(sha, bytes.length)) !== null };
 }
 /** A removal that stops after its row delete, holding the sha's lock until `release` is called. */
-function pausedRemoval(f: Awaited<ReturnType<typeof fixture>>, ownerId: string) {
+function pausedRemoval(f: Awaited<ReturnType<typeof fixture>>, ownerId: string, order: string[] = []) {
   const gate = Promise.withResolvers<void>();
   const rowGone = Promise.withResolvers<boolean>();
   const done = f.store.exclusive(sha, async () => {
     const { removed } = await removeUnreferencedBlob(f.db, ownerId, sha);
     rowGone.resolve(removed);
     await gate.promise;
-    return f.store.unlinkIfUnheld(sha);
+    const unlinked = await f.store.unlinkIfUnheld(sha);
+    order.push("removal ended");
+    return unlinked;
   });
   return { done, rowGone: rowGone.promise, release: () => gate.resolve() };
+}
+
+function observeQueuedPut(store: BlobStore, order: string[]) {
+  const queued = Promise.withResolvers<void>();
+  const exclusive = store.exclusive.bind(store);
+  vi.spyOn(store, "exclusive").mockImplementationOnce((sha, operation) => {
+    const result = exclusive(sha, () => {
+      order.push("put entered");
+      return operation();
+    });
+    queued.resolve();
+    return result;
+  });
+  return queued.promise;
 }
 
 test("a put of the same content queues behind a removal, so its file and row survive together", async () => {
   const f = await fixture();
   try {
     await f.store.put(f.ownerId, bytes, "text/plain");
-    const removal = pausedRemoval(f, f.ownerId);
+    const order: string[] = [];
+    const removal = pausedRemoval(f, f.ownerId, order);
     expect(await removal.rowGone).toBe(true);
     // The other owner's put arrives while the removal holds the lock: it must not run yet.
+    const queued = observeQueuedPut(f.store, order);
     const putting = f.store.put(f.otherOwnerId, bytes, "text/plain");
-    await delay(50);
-    expect(await f.store.has(f.otherOwnerId, sha)).toBe(false);
+    await queued;
     removal.release();
-    expect(await removal.done).toBe(true);
+    const removed = await removal.done;
     await putting;
+    expect(order).toEqual(["removal ended", "put entered"]);
+    expect(removed).toBe(true);
     expect(await f.store.has(f.otherOwnerId, sha)).toBe(true);
     expect(await f.fileThere()).toBe(true);
     expect(await f.store.get(f.otherOwnerId, sha)).toEqual(bytes);
@@ -54,10 +72,16 @@ test("a put queued first is whole before the removal checks for rows, so the fil
     let rowWhenRemovalStarted: boolean | undefined;
     // Hold the lock, queue a put, queue the removal behind it, then let them run in order.
     const gate = Promise.withResolvers<void>();
-    const holder = f.store.exclusive(sha, () => gate.promise);
+    const order: string[] = [];
+    const holder = f.store.exclusive(sha, async () => {
+      await gate.promise;
+      order.push("holder ended");
+    });
+    const queued = observeQueuedPut(f.store, order);
     const putting = f.store.put(f.otherOwnerId, bytes, "text/plain");
-    await delay(20);
+    await queued;
     const removal = f.store.exclusive(sha, async () => {
+      order.push("removal entered");
       rowWhenRemovalStarted = await f.store.has(f.otherOwnerId, sha);
       await removeUnreferencedBlob(f.db, f.ownerId, sha);
       return f.store.unlinkIfUnheld(sha);
@@ -66,6 +90,7 @@ test("a put queued first is whole before the removal checks for rows, so the fil
     await holder;
     await putting;
     expect(await removal).toBe(false);
+    expect(order).toEqual(["holder ended", "put entered", "removal entered"]);
     // The put's file and row were both committed when the removal looked.
     expect(rowWhenRemovalStarted).toBe(true);
     expect(await f.store.get(f.otherOwnerId, sha)).toEqual(bytes);
@@ -156,16 +181,19 @@ test("the lock runs callers in order and keeps going after one throws", async ()
   const f = await fixture();
   try {
     const order: number[] = [];
+    const release = Promise.withResolvers<void>();
     const first = f.store.exclusive(sha, async () => {
-      await delay(20);
+      await release.promise;
       order.push(1);
       throw new Error("first failed");
     });
     const second = f.store.exclusive(sha, async () => order.push(2));
     const third = f.store.exclusive("0".repeat(64), async () => order.push(3));
-    await expect(first).rejects.toThrow("first failed");
-    await second;
+    const failed = expect(first).rejects.toThrow("first failed");
     await third;
+    release.resolve();
+    await failed;
+    await second;
     expect(order).toEqual([3, 1, 2]);
   } finally {
     await f.cleanup();

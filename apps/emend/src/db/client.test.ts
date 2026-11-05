@@ -199,17 +199,7 @@ test("nested query and transaction calls reject immediately instead of deadlocki
     for (const outer of ["query", "transaction"] as const) {
       for (const inner of ["query", "transaction"] as const) {
         await ctx.db[outer](async () => {
-          let timeout: ReturnType<typeof setTimeout> | undefined;
-          const deadline = new Promise<never>((_, reject) => {
-            timeout = setTimeout(() => reject(new Error("Nested call deadlocked")), 100);
-          });
-          try {
-            await expect(
-              Promise.race([ctx.db[inner]((q) => q.values(sql`select 1`)), deadline]),
-            ).rejects.toBeInstanceOf(NestedDbCallError);
-          } finally {
-            clearTimeout(timeout);
-          }
+          await expect(ctx.db[inner]((q) => q.values(sql`select 1`))).rejects.toBeInstanceOf(NestedDbCallError);
         });
       }
     }

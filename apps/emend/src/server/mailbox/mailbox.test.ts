@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { comments, deliveries, placements, reviews, sends, threads } from "../../db/schema.ts";
 import { takeDelivery } from "./take.ts";
-import { error, mailboxFixture } from "./test-support.ts";
+import { error, mailboxFixture, seedComments } from "./test-support.ts";
 
 let f: Awaited<ReturnType<typeof mailboxFixture>>;
 beforeEach(async () => {
@@ -275,17 +275,7 @@ test("instruction cap leaves whole Sends for the next take", async () => {
 });
 test("comment cap leaves a whole Send queued and history is the newest suffix, oldest first", async () => {
   const t = await f.thread("First");
-  await f.db.query(async (q) => {
-    for (let i = 1; i < LIMITS.commentsPerHandoff - 1; i++)
-      await q.insert(comments).values({
-        ownerId: f.ownerId,
-        reviewId: f.reviewId,
-        threadId: t.threadId,
-        author: "user",
-        body: `Comment ${i}`,
-        createdAt: f.deps.now(),
-      });
-  });
+  await seedComments(f, t.threadId, LIMITS.commentsPerHandoff - 2, { body: "Comment ", digits: 0 });
   await f.send();
   await f.comment(t.threadId, "Next send");
   await f.comment(t.threadId, "Also next send");
@@ -303,15 +293,10 @@ test("comment cap leaves a whole Send queued and history is the newest suffix, o
   );
   expect(next.comments[0]?.history.at(-1)?.body).toBe(`Comment ${LIMITS.commentsPerHandoff - 2}`);
   expect(next.comments.every((c) => c.historyTrimmed)).toBe(true);
-}, 20000);
+});
 test("a single oversized Send is refused without binding any comments", async () => {
   const t = await f.thread();
-  await f.db.query(async (q) => {
-    for (let i = 0; i < LIMITS.commentsPerHandoff; i++)
-      await q
-        .insert(comments)
-        .values({ ownerId: f.ownerId, reviewId: f.reviewId, threadId: t.threadId, author: "user", body: "Synthetic" });
-  });
+  await seedComments(f, t.threadId, LIMITS.commentsPerHandoff, { body: "Synthetic" });
   await error(await f.request(`/reviews/${f.reviewId}/sends`, "POST", go()), 413, "too_large");
   expect((await rows()).comments.every((c) => c.sendId === null)).toBe(true);
   expect((await rows()).sends).toHaveLength(0);
