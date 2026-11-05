@@ -43,10 +43,12 @@ The tests never touch your own emend state or your Tailscale setup. Vitest's glo
 each run a temporary `EMEND_HOME`, home folder and XDG folders. Only `emend serve --tailscale`
 runs `tailscale`, and its tests reach a fake one only:
 
-- Each call under test gets its own environment, platform and macOS app path, never the live
-  `PATH`. A test that times out therefore cannot hand a later call your real `PATH`.
-- The serve, serve-lifecycle and tailscale tests replace the executable lookup. A lookup outside
-  the test's own folder throws, also after the test ended and also for the macOS app fallback.
+- Tests that call the Tailscale helpers directly pass their own environment, platform and macOS
+  app path, never the live `PATH`. A test that times out therefore cannot hand a later call your
+  real `PATH`.
+- The serve, serve-lifecycle and tailscale tests also replace the executable lookup, and the
+  tests that run the `serve` command rely on it. A lookup outside the test's own folder throws,
+  also after the test ended and also for the macOS app fallback.
 - The serve-signals tests run emend in a child whose `PATH` holds only the test's folder and its
-  fake `tailscale`. The folder is removed only after the child's process group was killed and
-  has exited.
+  fake `tailscale`. Their cleanup kills the child's process group if the child still runs, and
+  waits for the child to close before it removes that folder.
