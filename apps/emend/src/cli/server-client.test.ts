@@ -11,24 +11,45 @@ import { startServer } from "../server/serve.ts";
 import { writeSecretFile } from "../state/files.ts";
 import { discover, ensureServer } from "./server-client.ts";
 
-const launchEnvs = new Map<string, NodeJS.ProcessEnv>();
+const launchEnvs = new Map<string, { confinedEnv: NodeJS.ProcessEnv; suppliedEnvs: NodeJS.ProcessEnv[] }>();
 vi.mock("node:child_process", async (original) => {
   const actual = await original<typeof import("node:child_process")>();
   return {
     ...actual,
     // ensureServer has no env option. Keep fixture confinement after spies are restored too.
     spawn(node: string, args: string[], options: childProcess.SpawnOptions) {
-      const env = launchEnvs.get(args[0] ?? "");
-      if (node !== process.execPath || !env) throw new Error("unregistered test child");
-      return actual.spawn(node, args, { ...options, env });
+      const launch = launchEnvs.get(args[0] ?? "");
+      if (node !== process.execPath || !launch) throw new Error("unregistered test child");
+      launch.suppliedEnvs.push({ ...options.env });
+      return actual.spawn(node, args, {
+        ...options,
+        env: {
+          ...launch.confinedEnv,
+          EMEND_HOME: options.env?.EMEND_HOME,
+        },
+      });
     },
   };
 });
 
-function observeChildExit(entry: string, stateDir: string) {
-  launchEnvs.set(entry, { PATH: stateDir, HOME: stateDir, EMEND_HOME: stateDir, LC_ALL: "C" });
+function observeChildExit(entry: string, stateDir: string, nodeOptions = "--no-warnings") {
+  // Observe production forwarding caller options; the child's allowlist must still exclude them.
+  vi.stubEnv("NODE_OPTIONS", nodeOptions);
+  onTestFinished(() => {
+    vi.unstubAllEnvs();
+  });
+  const expectedEnv = { ...process.env, EMEND_HOME: stateDir };
+  const suppliedEnvs: NodeJS.ProcessEnv[] = [];
+  launchEnvs.set(entry, { confinedEnv: { PATH: stateDir, HOME: stateDir, LC_ALL: "C" }, suppliedEnvs });
   onTestFinished(() => {
     launchEnvs.delete(entry);
+    expect(suppliedEnvs.length).toBe(1);
+    const [suppliedEnv] = suppliedEnvs;
+    expect(suppliedEnv?.EMEND_HOME).toBe(stateDir);
+    expect(suppliedEnv?.NODE_OPTIONS).toBe(nodeOptions);
+    // Production inherits every other variable unchanged; never print caller values on failure.
+    expect(Object.keys(suppliedEnv ?? {}).sort()).toEqual(Object.keys(expectedEnv).sort());
+    expect(Object.entries(expectedEnv).every(([key, value]) => suppliedEnv?.[key] === value)).toBe(true);
   });
   const spawn = childProcess.spawn;
   const exited = Promise.withResolvers<unknown[]>();
@@ -169,31 +190,19 @@ test("ensureServer starts a detached server after a dead discovery pid", async (
 test("a detached child that exits before discovery ignores the caller's NODE_OPTIONS preload", async () => {
   const fixture = await testDb();
   onTestFinished(() => fixture.cleanup());
-  const previous = process.env.NODE_OPTIONS;
-  onTestFinished(() => {
-    if (previous === undefined) delete process.env.NODE_OPTIONS;
-    else process.env.NODE_OPTIONS = previous;
-  });
-  try {
-    const entry = join(fixture.dir, "exit.mjs");
-    const started = join(fixture.dir, "entry-ran");
-    const marker = join(fixture.dir, "preload-ran");
-    const preload = join(fixture.dir, "preload.cjs");
-    await writeFile(
-      entry,
-      `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(started)}, "ran"); process.exit(1);\n`,
-    );
-    await writeFile(preload, `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n`);
-    process.env.NODE_OPTIONS = `--require ${JSON.stringify(preload)}`;
-    const exited = observeChildExit(entry, join(fixture.dir, "failed"));
-    await expect(ensureServer(join(fixture.dir, "failed"), { entry, timeoutMs: 150 })).rejects.toThrow(
-      "Could not start the emend server.",
-    );
-    expect(await exited).toEqual([1, null]);
-    await access(started);
-    await expect(access(marker)).rejects.toMatchObject({ code: "ENOENT" });
-  } finally {
-    if (previous === undefined) delete process.env.NODE_OPTIONS;
-    else process.env.NODE_OPTIONS = previous;
-  }
+  const stateDir = join(fixture.dir, "failed");
+  const entry = join(fixture.dir, "exit.mjs");
+  const started = join(stateDir, "entry-ran");
+  const marker = join(fixture.dir, "preload-ran");
+  const preload = join(fixture.dir, "preload.cjs");
+  await writeFile(
+    entry,
+    `import { writeFileSync } from "node:fs"; import { join } from "node:path"; writeFileSync(join(process.env.EMEND_HOME, "entry-ran"), "ran"); process.exit(1);\n`,
+  );
+  await writeFile(preload, `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n`);
+  const exited = observeChildExit(entry, stateDir, `--require ${JSON.stringify(preload)}`);
+  await expect(ensureServer(stateDir, { entry, timeoutMs: 150 })).rejects.toThrow("Could not start the emend server.");
+  expect(await exited).toEqual([1, null]);
+  await access(started);
+  await expect(access(marker)).rejects.toMatchObject({ code: "ENOENT" });
 });
