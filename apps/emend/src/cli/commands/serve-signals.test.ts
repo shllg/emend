@@ -272,9 +272,9 @@ async function fixture(
     cleaned = true;
     try {
       for (const abort of watches) abort.abort();
+      if (running?.pid && running.exitCode === null && running.signalCode === null) killIfPresent(-running.pid);
       // Release only the currently held fakes; never replay historical pids.
       await writeFile(releasePath, "");
-      if (running?.pid && running.exitCode === null && running.signalCode === null) killIfPresent(-running.pid);
       await closed;
       if (options.stubbornDescendant) {
         const descendant = await readFile(descendantPath, "utf8").catch(() => "");
