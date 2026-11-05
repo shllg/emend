@@ -38,3 +38,15 @@ temporary state and prints JSON lines; it has no timing assertions and does not 
 [AGENTS.md](https://github.com/shllg/emend/blob/main/AGENTS.md)
 holds the working rules. Maintainers: [releasing.md](../releasing.md) holds the release policy
 and checklist.
+
+The tests never touch your own emend state or your Tailscale setup. Vitest's global setup gives
+each run a temporary `EMEND_HOME`, home folder and XDG folders. Only `emend serve --tailscale`
+runs `tailscale`, and its tests reach a fake one only:
+
+- Each call under test gets its own environment, platform and macOS app path, never the live
+  `PATH`. A test that times out therefore cannot hand a later call your real `PATH`.
+- The serve, serve-lifecycle and tailscale tests replace the executable lookup. A lookup outside
+  the test's own folder throws, also after the test ended and also for the macOS app fallback.
+- The serve-signals tests run emend in a child whose `PATH` holds only the test's folder and its
+  fake `tailscale`. The folder is removed only after the child's process group was killed and
+  has exited.
