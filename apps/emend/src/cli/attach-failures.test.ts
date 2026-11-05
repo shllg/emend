@@ -6,12 +6,14 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { type ImportBundle, importRowCount, LIMITS } from "@emend/contract";
 import { and, eq } from "drizzle-orm";
-import { expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import { comments, reviews } from "../db/schema.ts";
 import { run } from "../main.ts";
+import * as executors from "../server/publish/executor.ts";
 import { initializeServerState } from "../server/state.ts";
 import { writeSecretFile } from "../state/files.ts";
 import * as tokens from "../state/token-file.ts";
+import { workInThread } from "../test/in-thread-worker.ts";
 import { prepareBundle } from "./attach/bundle.ts";
 import { canClearCopyMark, copyReviews } from "./attach/copy.ts";
 import { lockAttach } from "./attach/lock.ts";
@@ -22,6 +24,15 @@ import { apiRequest, CliApiError, CliConnectionError, CliError, CliHttpError, Cl
 import { movedError } from "./moved.ts";
 import * as pauses from "./pause.ts";
 import * as targets from "./target.ts";
+
+vi.mock("../server/publish/executor.ts", async (original) => ({
+  ...(await original<typeof import("../server/publish/executor.ts")>()),
+}));
+
+// The failures under test are in the attach flow, not in the publish worker; attach.test.ts keeps the real one.
+beforeEach(() => {
+  workInThread(executors);
+});
 
 const origin = "https://hub.example.test";
 const link = `${origin}/pair#emp_${"s".repeat(43)}`;
@@ -467,7 +478,7 @@ test.each(["key", "id"])("attached publish by %s refuses an uncopied local revie
     `emend: review ${review.result.reviewId} is still on this machine. Run emend attach again to copy it.\n`,
   );
   expect(f.calls).toEqual([]);
-  expect(await readFile(join(f.stateDir, "emend.db"))).toEqual(before);
+  expect((await readFile(join(f.stateDir, "emend.db"))).equals(before)).toBe(true);
 });
 
 test.each(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ECONNRESET", "timeout"])(
@@ -1371,6 +1382,6 @@ test.each(["missing", "directory", "{", "null", "{}", '{"id":"not-an-id","name":
       text: "emend: could not read this machine's identity. Nothing was changed.\n",
     });
     expect(f.calls).toEqual([]);
-    expect(await readFile(join(f.stateDir, "emend.db"))).toEqual(before);
+    expect((await readFile(join(f.stateDir, "emend.db"))).equals(before)).toBe(true);
   },
 );

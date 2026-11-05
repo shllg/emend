@@ -5,7 +5,7 @@ import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { Window } from "happy-dom";
 import type { ComponentProps, ReactNode } from "react";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, onTestFinished, test, vi } from "vitest";
 import { App } from "./App.tsx";
 import type { DiffPaneProps } from "./components/diff/DiffPane.tsx";
 import type { ParsedDiff } from "./components/diff/FileDiff.tsx";
@@ -2492,6 +2492,16 @@ test("an external _blank link is left to the browser while a same-review link st
   block.html = `<p><a href="https://example.test/x" target="_blank" rel="noopener noreferrer nofollow">Out</a> <a href="/r/${id}?tab=writeup&amp;rev=1#thread-${id}">In</a></p>`;
   block.text = "Out In";
   vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+  // Happy DOM would open the _blank link as a popup page and fetch it from the network; the test
+  // only needs the click to stay unprevented, so the popup is switched off for this test.
+  const navigation = (
+    window as unknown as { happyDOM: { settings: { navigation: Record<string, boolean | undefined> } } }
+  ).happyDOM.settings.navigation;
+  const popups = navigation.disableChildPageNavigation;
+  navigation.disableChildPageNavigation = true;
+  onTestFinished(() => {
+    navigation.disableChildPageNavigation = popups;
+  });
   const { history } = mount();
   const out = await screen.findByRole("link", { name: "Out" });
   const before = history.location.href;

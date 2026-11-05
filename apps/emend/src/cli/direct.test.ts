@@ -1,17 +1,20 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { InboxList, PublishResponse, ReplyCreated, RevisionView, ThreadCreated, WaitResult } from "@emend/contract";
 import { sql } from "drizzle-orm";
-import { expect, test, vi } from "vitest";
+import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import * as client from "../db/client.ts";
 import { instances, owners, reviews, revisions } from "../db/schema.ts";
 import { run } from "../main.ts";
+import * as executors from "../server/publish/executor.ts";
 import { startServer } from "../server/serve.ts";
-import { pollUntil } from "../test/poll-until.ts";
+import { advanceWhilePaused, trackPauses, untilReal } from "../test/advance-until-settled.ts";
+import { workInThread } from "../test/in-thread-worker.ts";
 import { deliverFeedback, takeFeedback } from "./commands/wait.ts";
 import { directFixture } from "./direct-test-support.ts";
+import * as pauseModule from "./pause.ts";
 import { resolveTarget } from "./target.ts";
 import { provenTestServer } from "./test-support.ts";
 
@@ -21,9 +24,22 @@ vi.mock("node:child_process", async (original) => ({
     throw new Error("agent must not spawn");
   }),
 }));
+vi.mock("./pause.ts", async (original) => ({ ...(await original<typeof import("./pause.ts")>()) }));
 vi.mock("../db/client.ts", async (original) => ({ ...(await original<typeof import("../db/client.ts")>()) }));
+vi.mock("../server/publish/executor.ts", async (original) => ({
+  ...(await original<typeof import("../server/publish/executor.ts")>()),
+}));
+
+let inThread: ReturnType<typeof workInThread>;
+beforeEach(() => {
+  inThread = workInThread(executors);
+});
+// A comparison of two Buffers through toEqual walks every byte; a digest says the same, faster.
+const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
 test("publish without a server never spawns, renders documents, and is visible to a later reviewer", async () => {
+  // The default wiring of a direct publish, its own worker thread, stays covered here.
+  inThread.mockRestore();
   const f = await directFixture();
   vi.mocked(spawn).mockClear();
   const out = await f.publish();
@@ -135,20 +151,27 @@ test("two direct waits claim a later reviewer Send only once and clear their wai
   const { result } = await f.publish();
   const target = await resolveTarget(f.stateDir);
   const server = await f.reviewer();
+  // The loser of the claim waits out its whole timeout and each wait polls once a second: fake those
+  // timers, but not Date, so leases and waiter expiry keep real time.
+  vi.useFakeTimers({ toFake: ["performance", "setTimeout", "clearTimeout"] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  const pauses = trackPauses(pauseModule);
   const first = takeFeedback(f.stateDir, target, result.reviewId, 2);
   const second = takeFeedback(f.stateDir, target, result.reviewId, 2);
   const rows = () =>
     server.db.read((q) =>
       q.values(sql`select id from agent_waiters where owner_id = ${server.ownerId} and review_id = ${result.reviewId}`),
     );
-  await pollUntil(async () => expect(await rows()).toHaveLength(2));
+  await untilReal("both waiter rows", async () => expect(await rows()).toHaveLength(2));
   const inbox = InboxList.parse(await (await server.request("/reviews")).json());
   expect(inbox.items[0]?.agentWaiting).toBe(true);
   expect(
     (await server.request(`/reviews/${result.reviewId}/sends`, { revision: 1, kind: "go", instruction: "Continue" }))
       .status,
   ).toBe(201);
-  const results = await Promise.all([first, second]);
+  const results = await advanceWhilePaused(Promise.all([first, second]), pauses);
   expect(results.map((value) => value.kind).sort()).toEqual(["go", "pending"]);
   for (const value of results) await deliverFeedback(f.stateDir, target, value, f.output().io);
   expect(await rows()).toEqual([]);
@@ -273,6 +296,9 @@ test("direct wait renews every ten seconds, reports progress, and removes its ro
   const controller = new AbortController();
   const progress = vi.fn(async () => {});
   vi.useFakeTimers({ toFake: ["Date", "performance", "setTimeout", "clearTimeout"] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
   const wait = takeFeedback(f.stateDir, await resolveTarget(f.stateDir), result.reviewId, 60, {
     signal: controller.signal,
     progress,
@@ -283,13 +309,13 @@ test("direct wait renews every ten seconds, reports progress, and removes its ro
         q.values<[number]>(sql`select expires_at from agent_waiters where owner_id = ${server.ownerId}`),
       )
     )[0]?.[0];
-  await pollUntil(async () => expect(await expiry()).toEqual(expect.any(Number)));
+  await untilReal("the waiter row", async () => expect(await expiry()).toEqual(expect.any(Number)));
   try {
     const initial = await expiry();
-    await pollUntil(() => expect(vi.getTimerCount()).toBeGreaterThan(0));
+    await untilReal("the wait's pause timer", () => expect(vi.getTimerCount()).toBeGreaterThan(0));
     for (let i = 0; i < 25; i++) {
       await vi.advanceTimersByTimeAsync(1000);
-      await pollUntil(() => expect(vi.getTimerCount()).toBeGreaterThan(0), { interval: 1 });
+      await untilReal("the wait's next pause timer", () => expect(vi.getTimerCount()).toBeGreaterThan(0));
     }
     expect(await expiry()).toBeGreaterThan(initial ?? 0);
     expect(progress).toHaveBeenCalledWith(25);
@@ -359,7 +385,7 @@ test.each(["feedback", "serve", "publish"])(
     expect(await run(args, out.io)).toBe(1);
     expect(out.stdout).toEqual([]);
     expect(out.stderr).toEqual(["The emend database is newer than this emend. Update emend, then try again.\n"]);
-    expect(await readFile(join(f.stateDir, "emend.db"))).toEqual(before);
+    expect(digest(await readFile(join(f.stateDir, "emend.db")))).toBe(digest(before));
   },
 );
 
@@ -369,11 +395,17 @@ test("a listening server started after a direct wait records the claimed Send th
   const reviewer = await f.reviewer();
   const controller = new AbortController();
   const target = await resolveTarget(f.stateDir);
+  // The wait polls once a second: fake its timers (not Date) and step them once the Send is stored.
+  vi.useFakeTimers({ toFake: ["performance", "setTimeout", "clearTimeout"] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  const pauses = trackPauses(pauseModule);
   const wait = takeFeedback(f.stateDir, target, result.reviewId, 3, {
     signal: controller.signal,
   }).catch((error: unknown) => error);
   try {
-    await pollUntil(async () =>
+    await untilReal("the waiter row", async () =>
       expect(
         await reviewer.db.read((q) => q.values(sql`select id from agent_waiters where owner_id = ${reviewer.ownerId}`)),
       ).toHaveLength(1),
@@ -388,7 +420,7 @@ test("a listening server started after a direct wait records the claimed Send th
       body: JSON.stringify({ revision: 1, kind: "go", instruction: "Continue" }),
     });
     expect(response.status).toBe(201);
-    const delivery = await wait;
+    const delivery = await advanceWhilePaused(wait, pauses);
     expect(delivery).toMatchObject({ kind: "go" });
     await deliverFeedback(f.stateDir, target, WaitResult.parse(delivery), f.output().io);
     expect(

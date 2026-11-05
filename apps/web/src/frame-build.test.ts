@@ -8,6 +8,7 @@ import { Window } from "happy-dom";
 import { build } from "vite";
 import { expect, onTestFinished, test, vi } from "vitest";
 
+// The real web build and ten Mermaid renders under a code-generation ban are the subject.
 test("built frame rejects diagram theme overrides without dynamic code generation", async () => {
   const workerModules = new Map<string, string[]>();
   const result = await build({

@@ -4,14 +4,24 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentReviewList } from "@emend/contract";
 import { eq } from "drizzle-orm";
-import { expect, onTestFinished, test, vi } from "vitest";
+import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { reviews } from "../../db/schema.ts";
 import { run } from "../../main.ts";
+import * as executors from "../../server/publish/executor.ts";
 import { writeSecretFile } from "../../state/files.ts";
+import { workInThread } from "../../test/in-thread-worker.ts";
 import { VERSION } from "../../version.ts";
 import { directFixture } from "../direct-test-support.ts";
 import { sandboxHint } from "../http.ts";
 import { commandFixture } from "../test-support.ts";
+
+vi.mock("../../server/publish/executor.ts", async (original) => ({
+  ...(await original<typeof import("../../server/publish/executor.ts")>()),
+}));
+
+beforeEach(() => {
+  workInThread(executors);
+});
 
 const token = `em_${"a".repeat(43)}`;
 const hubToken = `em_${"b".repeat(43)}`;

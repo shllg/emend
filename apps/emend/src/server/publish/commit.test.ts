@@ -16,6 +16,7 @@ vi.mock("node:worker_threads", async (original) => {
   };
 });
 
+// Cap-sized previous/current revisions exercise real worker transfers and every publish phase.
 test("publishing at the block cap over a cap-sized previous revision serves bearer GET and HEAD in every phase", async () => {
   let probing = false;
   const preparations: Promise<void>[] = [];

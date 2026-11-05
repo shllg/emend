@@ -1,8 +1,18 @@
 import { ImportBundle } from "@emend/contract";
-import { expect, test } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import { run } from "../main.ts";
+import * as executors from "../server/publish/executor.ts";
+import { workInThread } from "../test/in-thread-worker.ts";
 import { snapshot } from "./attach/bundle.ts";
 import { directFixture } from "./direct-test-support.ts";
+
+vi.mock("../server/publish/executor.ts", async (original) => ({
+  ...(await original<typeof import("../server/publish/executor.ts")>()),
+}));
+
+beforeEach(() => {
+  workInThread(executors);
+});
 
 test("an attach snapshot leaves out a send-less closed delivery, so the bundle stays valid", async () => {
   const f = await directFixture();

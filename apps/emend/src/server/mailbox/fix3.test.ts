@@ -83,6 +83,7 @@ function comment(
   };
 }
 
+// Seeding 200,000 indexed replies is required to compare bounded history reads at both scales.
 test("200,000 replies read the same bounded history as 2,000 replies, keeping the newest 500", async () => {
   const t = await sentThread();
   await seed(t.threadId, 2000);
@@ -102,6 +103,7 @@ test("200,000 replies read the same bounded history as 2,000 replies, keeping th
   expect(delivered?.historyTrimmed).toBe(true);
 }, 15000);
 
+// Seeding 200,000 indexed replies in the other review is the isolation workload.
 test("200,000 replies in another review of the owner do not increase rows read by take", async () => {
   const t = await sentThread();
   await f.comment(t.threadId, "Baseline feedback");

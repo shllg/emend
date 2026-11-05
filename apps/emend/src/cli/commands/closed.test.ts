@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { WaitResult } from "@emend/contract";
 import { sql } from "drizzle-orm";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { run } from "../../main.ts";
+import * as executors from "../../server/publish/executor.ts";
+import { workInThread } from "../../test/in-thread-worker.ts";
 import { directFixture } from "../direct-test-support.ts";
 import { CliError } from "../http.ts";
 import { deletedError } from "../moved.ts";
@@ -11,6 +13,14 @@ import { commandFixture } from "../test-support.ts";
 import { takeFeedback } from "./wait.ts";
 
 vi.mock("../pause.ts", async (original) => ({ ...(await original<typeof import("../pause.ts")>()) }));
+
+vi.mock("../../server/publish/executor.ts", async (original) => ({
+  ...(await original<typeof import("../../server/publish/executor.ts")>()),
+}));
+
+beforeEach(() => {
+  workInThread(executors);
+});
 
 afterEach(() => vi.restoreAllMocks());
 

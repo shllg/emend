@@ -4,7 +4,7 @@ import { focusManager, QueryClient, QueryObserver } from "@tanstack/react-query"
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { Window } from "happy-dom";
-import { afterEach, beforeEach, expect, expectTypeOf, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, expectTypeOf, onTestFinished, test, vi } from "vitest";
 import { App } from "./App.tsx";
 import { inboxQuery, reviewQuery } from "./api/queries.ts";
 import type { PhoneTabs } from "./components/layout/PhoneTabs.tsx";
@@ -570,6 +570,24 @@ test("the phone menu starts with Refresh, which refetches and reconnects without
   expect(history.location.pathname).toBe(`/r/${id}`);
 });
 
+// Refresh waits up to three seconds for the new stream to open, and the test stream never does: run
+// that wait on a fake clock, then hand the rest back to real timers for Testing Library's polling.
+async function clickRefreshWithoutStream() {
+  const refresh = within(await screen.findByRole("menu", { name: "More" })).getByRole("menuitem", { name: "Refresh" });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  try {
+    fireEvent.click(refresh);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 test("Refresh retries a failed immutable file query and skips a loaded one", async () => {
   width = 390;
   mount(`/r/${id}`);
@@ -589,7 +607,7 @@ test("Refresh retries a failed immutable file query and skips a loaded one", asy
   const stopLoaded = loaded.subscribe(() => {});
   await waitFor(() => expect(failing).toHaveBeenCalledOnce());
   fireEvent.keyDown(screen.getByRole("button", { name: "More" }), { key: "ArrowDown" });
-  fireEvent.click(within(await screen.findByRole("menu", { name: "More" })).getByRole("menuitem", { name: "Refresh" }));
+  await clickRefreshWithoutStream();
   await waitFor(() => expect(failing).toHaveBeenCalledTimes(2));
   expect(loadedFetch).not.toHaveBeenCalled();
   stopFailed();
@@ -604,7 +622,7 @@ test("Refresh refetches by itself when the new stream does not open", async () =
   const reviewCalls = () => fetchMock.mock.calls.filter(([path]) => path === `/api/v1/reviews/${id}`).length;
   const before = reviewCalls();
   fireEvent.keyDown(screen.getByRole("button", { name: "More" }), { key: "ArrowDown" });
-  fireEvent.click(within(await screen.findByRole("menu", { name: "More" })).getByRole("menuitem", { name: "Refresh" }));
+  await clickRefreshWithoutStream();
   await waitFor(() => expect(reviewCalls()).toBe(before + 1));
 });
 

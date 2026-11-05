@@ -2,10 +2,23 @@ import { ThreadCreated } from "@emend/contract";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { sql } from "drizzle-orm";
-import { expect, test } from "vitest";
+import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { directFixture } from "../cli/direct-test-support.ts";
+import * as pauseModule from "../cli/pause.ts";
+import * as executors from "../server/publish/executor.ts";
+import { advanceWhilePaused, trackPauses } from "../test/advance-until-settled.ts";
+import { workInThread } from "../test/in-thread-worker.ts";
 import { pollUntil } from "../test/poll-until.ts";
 import { createMcpServer } from "./server.ts";
+
+vi.mock("../cli/pause.ts", async (original) => ({ ...(await original<typeof import("../cli/pause.ts")>()) }));
+vi.mock("../server/publish/executor.ts", async (original) => ({
+  ...(await original<typeof import("../server/publish/executor.ts")>()),
+}));
+
+beforeEach(() => {
+  workInThread(executors);
+});
 
 test("MCP waits, takes, confirms after transport delivery, and replies without a server", async () => {
   const f = await directFixture();
@@ -19,7 +32,17 @@ test("MCP waits, takes, confirms after transport delivery, and replies without a
   await client.connect(clientTransport);
   f.cleanup.push(() => client.close());
   const reviewId = published.reviewId;
-  const pending = await client.callTool({ name: "wait_for_review", arguments: { reviewId, timeoutSeconds: 1 } });
+  // The one-second wait sleeps in pause(): fake the timers, not Date, and run them only while it sleeps.
+  vi.useFakeTimers({ toFake: ["performance", "setTimeout", "clearTimeout"] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  const pauses = trackPauses(pauseModule);
+  const pending = await advanceWhilePaused(
+    client.callTool({ name: "wait_for_review", arguments: { reviewId, timeoutSeconds: 1 } }),
+    pauses,
+  );
+  vi.useRealTimers();
   expect(pending.structuredContent).toEqual({ kind: "pending", reviewId, waitedSeconds: 1 });
   const thread = ThreadCreated.parse(
     await (

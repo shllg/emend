@@ -148,7 +148,6 @@ test("notes survive publish, revision view, export and import as immutable plain
 });
 
 test("range errors identify the file and note index and leave no partial revision", async () => {
-  f.deps.publishExecutor = undefined;
   const body = await input();
   const file = body.files[0];
   if (!file) throw new Error("Missing file");

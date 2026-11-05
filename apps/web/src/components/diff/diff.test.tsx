@@ -933,7 +933,7 @@ test("counts-only loading respects the line limit, lockfiles and flagged content
 
 test("counts wait for visible diffs and never exceed three concurrent background loads", async () => {
   const visible = file("visible.ts");
-  const background = Array.from({ length: 40 }, (_, index) =>
+  const background = Array.from({ length: 12 }, (_, index) =>
     file(`file-${index}.ts`, { viewed: "viewed", viewedOn: 2 }),
   );
   const visibleLoads: (() => void)[] = [];

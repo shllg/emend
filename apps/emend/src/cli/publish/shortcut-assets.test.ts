@@ -68,7 +68,7 @@ test("64 docs read their shared 1 MiB asset once per phase", async () => {
   expect(
     resolved.request.files.filter((file) => file.role === "doc").every((file) => file.assets?.[0] === "logo.png"),
   ).toBe(true);
-}, 30000);
+});
 
 test("distinct asset paths with equal bytes each read once but upload one blob", async () => {
   const f = await fixture();
@@ -107,14 +107,15 @@ test.each([false, true])("different walked boundaries remain merged (inner first
   await expect(collect()).rejects.toThrow("symlink leaves the published folder: outer/inner");
 });
 
+// Resolving the cap-sized HTML reference lists exercises the publish JSON budget.
 test("reference budget refuses a tree before any asset read", async () => {
   const f = await fixture();
   const names = Array.from({ length: 600 }, (_, i) => `asset-${i}-${"x".repeat(200)}.png`);
-  for (const name of names) await f.file(`bundle/${name}`, "synthetic");
+  await Promise.all(names.map((name) => f.file(`bundle/${name}`, "synthetic")));
   const html = names.map((name) => `<img src="${name}">`).join("");
   const referenceBytes = Buffer.byteLength(JSON.stringify(names));
   const docs = Math.ceil(LIMITS.publishJsonBytes / referenceBytes) + 1;
-  for (let i = 0; i < docs; i++) await f.file(`bundle/doc-${i}.html`, html);
+  await Promise.all(Array.from({ length: docs }, (_, i) => f.file(`bundle/doc-${i}.html`, html)));
   const collect = await f.prepare(["bundle"]);
   const original = reads.readRegular;
   let assetReads = 0;
@@ -209,52 +210,48 @@ test("manifest shared-asset request, blob bytes and read counts match HEAD", asy
   });
 });
 
-test.each([false, true])(
-  "growing assets respect every doc budget during reads (shared: %s)",
-  async (shared) => {
-    const f = await fixture();
-    const names = Array.from({ length: shared ? 3 : 64 }, (_, i) => `image-${i}.png`);
-    const sources = await Promise.all(names.map((name) => f.file(name, "x")));
-    await f.file(
-      "a.html",
-      names
-        .slice(0, shared ? 1 : names.length)
-        .map((name) => `<img src="${name}">`)
-        .join(""),
-    );
-    if (shared) await f.file("b.html", names.map((name) => `<img src="${name}">`).join(""));
-    const collect = await f.prepare(shared ? ["a.html", "b.html"] : ["a.html"]);
-    const original = reads.readRegular;
-    let grown = false;
-    let bytesRead = 0;
-    let completedReads = 0;
-    const probe = vi.spyOn(reads, "readRegular").mockImplementation(async (...args) => {
-      const asset = sources.includes(args[0]);
-      if (asset && !grown) {
-        grown = true;
-        await Promise.all(sources.map((source) => fs.truncate(source, LIMITS.assetBytes)));
-      }
-      const bytes = await original(...args);
-      if (asset) {
-        bytesRead += bytes.length;
-        completedReads++;
-        // Measure the bytes without retaining large returned buffers in the spy.
-        probe.mockClear();
-      }
-      return bytes;
-    });
-    const result = await collect().then(
-      () => "published",
-      (error: Error) => error.message,
-    );
-    expect({ result, bytesRead, completedReads }).toEqual({
-      result: "HTML doc and assets exceed their size limit",
-      bytesRead: 2 * LIMITS.assetBytes,
-      completedReads: 2,
-    });
-  },
-  30000,
-);
+test.each([false, true])("growing assets respect every doc budget during reads (shared: %s)", async (shared) => {
+  const f = await fixture();
+  const names = Array.from({ length: shared ? 3 : 64 }, (_, i) => `image-${i}.png`);
+  const sources = await Promise.all(names.map((name) => f.file(name, "x")));
+  await f.file(
+    "a.html",
+    names
+      .slice(0, shared ? 1 : names.length)
+      .map((name) => `<img src="${name}">`)
+      .join(""),
+  );
+  if (shared) await f.file("b.html", names.map((name) => `<img src="${name}">`).join(""));
+  const collect = await f.prepare(shared ? ["a.html", "b.html"] : ["a.html"]);
+  const original = reads.readRegular;
+  let grown = false;
+  let bytesRead = 0;
+  let completedReads = 0;
+  const probe = vi.spyOn(reads, "readRegular").mockImplementation(async (...args) => {
+    const asset = sources.includes(args[0]);
+    if (asset && !grown) {
+      grown = true;
+      await Promise.all(sources.map((source) => fs.truncate(source, LIMITS.assetBytes)));
+    }
+    const bytes = await original(...args);
+    if (asset) {
+      bytesRead += bytes.length;
+      completedReads++;
+      // Measure the bytes without retaining large returned buffers in the spy.
+      probe.mockClear();
+    }
+    return bytes;
+  });
+  const result = await collect().then(
+    () => "published",
+    (error: Error) => error.message,
+  );
+  expect({ result, bytesRead, completedReads }).toEqual({
+    result: "HTML doc and assets exceed their size limit",
+    bytesRead: 2 * LIMITS.assetBytes,
+    completedReads: 2,
+  });
+});
 
 test.each([false, true])(
   "a shared asset outside one doc boundary is skipped for both (inner first: %s)",

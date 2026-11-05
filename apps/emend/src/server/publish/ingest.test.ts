@@ -381,21 +381,27 @@ test("duplicate HTML is read once for metadata; binary and asset content stay un
   const html = await blobs.put(f.ownerId, Buffer.alloc(8388608, 32), "text/html");
   const asset = await blobs.put(f.ownerId, Buffer.from([0, 1, 2]), "image/png");
   const get = vi.spyOn(blobs, "get");
-  await publish({
-    ...input(),
-    files: [
-      ...Array.from({ length: 24 }, (_, i) => ({
-        path: `${i}.html`,
-        role: "doc" as const,
-        oldPath: null,
-        oldBlob: null,
-        newBlob: html,
-        flag: null,
-      })),
-      { path: "a.png", role: "asset", parent: "0.html", oldPath: null, oldBlob: null, newBlob: asset, flag: null },
-      { path: "binary.bin", role: "diff", oldPath: null, oldBlob: null, newBlob: null, flag: "binary" },
-    ],
-  });
+  await publish(
+    {
+      ...input(),
+      files: [
+        ...Array.from({ length: 24 }, (_, i) => ({
+          path: `${i}.html`,
+          role: "doc" as const,
+          oldPath: null,
+          oldBlob: null,
+          newBlob: html,
+          flag: null,
+        })),
+        { path: "a.png", role: "asset", parent: "0.html", oldPath: null, oldBlob: null, newBlob: asset, flag: null },
+        { path: "binary.bin", role: "diff", oldPath: null, oldBlob: null, newBlob: null, flag: "binary" },
+      ],
+    },
+    f.instanceId,
+    f.ownerId,
+    // The subject is how often the blob is read, not what the metadata of 8 MiB of spaces says.
+    async (work) => (work.kind === "doc-metadata" ? { kind: "doc-metadata", headings: [] } : executeWork(work)),
+  );
   expect(get.mock.calls.map(([, hash]) => hash)).toEqual([html]);
 });
 

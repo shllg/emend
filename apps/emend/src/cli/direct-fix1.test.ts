@@ -2,14 +2,16 @@ import { randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { sql } from "drizzle-orm";
-import { expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import * as client from "../db/client.ts";
 import * as waiters from "../db/repo/waiters.ts";
 import { run } from "../main.ts";
 import { verifyBearer } from "../server/auth/tokens.ts";
+import * as executors from "../server/publish/executor.ts";
 import { startServer } from "../server/serve.ts";
 import { initializeServerState } from "../server/state.ts";
 import * as tokenFiles from "../state/token-file.ts";
+import { workInThread } from "../test/in-thread-worker.ts";
 import { takeFeedback } from "./commands/wait.ts";
 import { directFixture } from "./direct-test-support.ts";
 import { sandboxHint } from "./http.ts";
@@ -22,7 +24,14 @@ vi.mock("../db/repo/waiters.ts", async (original) => ({
 vi.mock("../state/token-file.ts", async (original) => ({
   ...(await original<typeof import("../state/token-file.ts")>()),
 }));
+vi.mock("../server/publish/executor.ts", async (original) => ({
+  ...(await original<typeof import("../server/publish/executor.ts")>()),
+}));
 vi.mock("./pause.ts", async (original) => ({ ...(await original<typeof import("./pause.ts")>()) }));
+
+beforeEach(() => {
+  workInThread(executors);
+});
 
 test("direct publish leaves missing tokens absent; the next server bootstrap creates both", async () => {
   const f = await directFixture();

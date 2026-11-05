@@ -265,10 +265,16 @@ test("one comment that fails to render is null while the others render", async (
 });
 
 test("the HTML budget nulls a comment past it, and the source budget stops rendering new bodies", async () => {
+  // The subject is the budget accounting, not Markdown: plain paragraphs stand in for the renderer,
+  // and the 256 Ki expansion test below keeps the real one.
+  const paragraphs = async (work: Work) =>
+    work.kind === "comment-md"
+      ? ({ kind: "comment-md", html: work.bodies.map((body) => `<p>${body}</p>`) } as const)
+      : executeWork(work);
   // Six cached 200000-character bodies together pass the 1 MiB HTML budget; the sixth is null.
   const bodies6 = Array.from({ length: 6 }, (_, index) => `${index}${"x".repeat(200_000)}`);
-  for (const body of bodies6) await commentHtml({ publishExecutor: executeWork }, owner, [body], undefined);
-  const out = await commentHtml({ publishExecutor: executeWork }, owner, [...bodies6, "small"], undefined);
+  for (const body of bodies6) await commentHtml({ publishExecutor: paragraphs }, owner, [body], undefined);
+  const out = await commentHtml({ publishExecutor: paragraphs }, owner, [...bodies6, "small"], undefined);
   expect(out.slice(0, 5).every((html) => typeof html === "string")).toBe(true);
   expect(out[5]).toBeNull();
   expect(out[6]).toBeNull();
@@ -281,7 +287,7 @@ test("the HTML budget nulls a comment past it, and the source budget stops rende
     {
       publishExecutor: async (work) => {
         calls.push(work);
-        return executeWork(work);
+        return paragraphs(work);
       },
     },
     owner,

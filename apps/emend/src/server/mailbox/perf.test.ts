@@ -45,8 +45,9 @@ test("5,000 comments in one Send read only delivered rows plus constant overhead
   expect(small.result.comments).toHaveLength(500);
   expect(large.result.comments).toHaveLength(5000);
   expect(large.result.comments.every((c) => c.history.length === 0 && !c.historyTrimmed)).toBe(true);
-}, 15000);
+});
 
+// Seeding 200,000 indexed Sends is required to test reads amid another review's backlog.
 test("200,000 Sends in another review do not increase rows read by take", async () => {
   await f.thread();
   await f.send();

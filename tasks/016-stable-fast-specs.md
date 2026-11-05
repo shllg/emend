@@ -31,7 +31,7 @@ One commit per step, in the plan's order (D2):
 - [x] New yields in the import pipeline, with one work-unit test per phase.
 - [x] Bench: the `bench` project and `pnpm bench`; the timing assertions and both
       `EMEND_TIMING_STRICT` passes go. Single synchronous steps get bench coverage only (D4).
-- [ ] Slow fixtures and the 15 to 30 s timeout group. Also the real-render tests in
+- [x] Slow fixtures and the 15 to 30 s timeout group. Also the real-render tests in
       `comment-html.test.ts` ("the HTML budget nulls…" renders 200,000-character bodies) and every
       test that passes alone but hits the 5 s timeout when two suites run at once (seen:
       `cli/direct.test.ts` "feedback refuses a newer database…" and its "serve" variant (:341,
@@ -39,16 +39,16 @@ One commit per step, in the plan's order (D2):
       errors identify the file and note index…" (5173 ms);
       `cli/attach-failures.test.ts` "attached publish by id refuses an uncopied local review before
       any request", 6.2 s in a locked gate at load 25, with the file at 106 s against 36 s alone).
-      That file also makes a real DNS lookup (`getaddrinfo ENOTFOUND example.test`); no test may
-      reach the network.
+      Also no test may reach the network: the `ENOTFOUND example.test` lookup came from a happy-dom
+      popup in a `reading-navigation.test.tsx` `_blank` test, and the web setup now refuses any
+      request, WebSocket or lookup for a host that is not loopback.
 - [x] Polling waits: `vi.waitFor` and Testing Library `waitFor` default to a 1 s deadline, a load
       bet in about 550 places. No polling wait gets a deadline shorter than the test's own.
 - [x] `tailscale-process` and `serve-signals` onto fake timers and fake children; no deadline
       seam for `emend serve` (D3).
 - [ ] The `core` budgets become work counts; their speed checks move to the bench.
-- [ ] The web sleeps go onto fake timers. Also: happy-dom follows a clicked `target=_blank` link
-      for real, so a web test makes a DNS lookup of `example.test` (logged as `ENOTFOUND` in every
-      run); no test may reach the network.
+- [ ] The web sleeps go onto fake timers, including the real absence waits in `App.test.tsx`
+      (about :567, 700 ms) and `components/diff/diff.test.tsx` (about :962, 20 ms).
 - [ ] Split the biggest test files only if the shards are still uneven.
 - [ ] Reviews per step: emend-reviewer, a read-only Codex review, and emend-security-reviewer on
       every server, CI or hook change.

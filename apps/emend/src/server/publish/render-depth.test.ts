@@ -38,6 +38,7 @@ async function render(execute: WorkerExecutor, kind: "doc" | "writeup", source: 
   throw new Error("Missing rendered blocks");
 }
 
+// Real rendering and reparsing on production-sized worker stacks are the depth regression.
 test.each(["doc", "writeup"] as const)(
   "%s worker renders 2000 nested divs without overflowing the stack",
   async (kind) => {
@@ -54,6 +55,7 @@ test.each(["doc", "writeup"] as const)(
   30000,
 );
 
+// Cold real workers render shallow markup and 2,000 nested containers on production-sized stacks.
 test.each(["doc", "writeup"] as const)(
   "%s worker preserves sanitized markup, escaped text and identity in 2000 nested containers",
   async (kind) => {
@@ -74,6 +76,7 @@ test.each(["doc", "writeup"] as const)(
   30000,
 );
 
+// Both real worker passes must handle 4,000 nested containers on the production-sized stack.
 test("doc worker renders 4000 nested divs with stack headroom", async () => {
   const execute = workerExecutor();
   try {

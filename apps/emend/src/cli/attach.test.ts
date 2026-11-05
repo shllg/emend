@@ -1,17 +1,21 @@
 import { randomUUID } from "node:crypto";
-import { readFile, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxList, PairingCreated, PublishResponse, WaitResult } from "@emend/contract";
 import { and, eq } from "drizzle-orm";
-import { describe, expect, test, vi } from "vitest";
-import { comments, deliveries, devices, docAssets, instances, reviews, sends, threads } from "../db/schema.ts";
+import { afterAll, beforeAll, describe, expect, onTestFinished, test, vi } from "vitest";
+import { openDb } from "../db/client.ts";
+import { comments, deliveries, devices, docAssets, instances, owners, reviews, sends, threads } from "../db/schema.ts";
 import { run } from "../main.ts";
 import { createApp } from "../server/app.ts";
 import { createToken, SESSION_MS } from "../server/auth/tokens.ts";
+import * as executors from "../server/publish/executor.ts";
 import * as rendering from "../server/publish/render.ts";
 import { initializeServerState, serverConfig, startServer } from "../server/serve.ts";
 import { writeSecretFile } from "../state/files.ts";
 import { BlobStore } from "../store/blobs.ts";
+import { workInThread } from "../test/in-thread-worker.ts";
 import { lockAttach } from "./attach/lock.ts";
 import { publishCommand } from "./commands/publish.ts";
 import { confirmDirect, takeDirect } from "./direct/index.ts";
@@ -20,10 +24,30 @@ import { apiRequest } from "./http.ts";
 import * as pauses from "./pause.ts";
 import { localTarget, resolveTarget } from "./target.ts";
 
-describe.each(["HTTP", "in-process"])("%s transport", { timeout: 30000 }, (mode) => {
+vi.mock("../server/publish/executor.ts", async (original) => ({
+  ...(await original<typeof import("../server/publish/executor.ts")>()),
+}));
+
+let templates: string;
+beforeAll(async () => {
+  templates = await mkdtemp(join(tmpdir(), "emend-attach-seed-"));
+  // Separate identities for laptop and hub; close SQLite before copying its state per case.
+  for (const name of ["laptop", "hub"]) {
+    const state = await initializeServerState(join(templates, name));
+    await state.db.close();
+  }
+});
+afterAll(async () => {
+  await rm(templates, { recursive: true, force: true });
+});
+
+describe.each(["HTTP", "in-process"])("%s transport", (mode) => {
   async function fixture() {
     const f = await directFixture();
+    workInThread(executors);
     const hubDir = join(f.dir, "hub");
+    await cp(join(templates, "laptop"), f.stateDir, { recursive: true });
+    await cp(join(templates, "hub"), hubDir, { recursive: true });
     const apps = new Map<string, ReturnType<typeof createApp>>();
     if (mode === "in-process")
       vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
@@ -75,7 +99,8 @@ describe.each(["HTTP", "in-process"])("%s transport", { timeout: 30000 }, (mode)
       }
       return { ...out, code, text: out.stderr.join("") };
     }
-    return { ...f, hub, hubDir, laptop, pairing, command };
+    let reviewer: ReturnType<typeof f.reviewer> | undefined;
+    return { ...f, hub, hubDir, laptop, pairing, command, reviewer: () => (reviewer ??= f.reviewer()) };
   }
 
   async function feedback(f: Awaited<ReturnType<typeof fixture>>, reviewId: string) {
@@ -201,101 +226,109 @@ describe.each(["HTTP", "in-process"])("%s transport", { timeout: 30000 }, (mode)
     },
   );
 
-  test("attach copies whole reviews once, preserves ids, publishes and opens on the hub, then detaches", async () => {
-    const f = await fixture();
-    const first = await f.publish("first");
-    const second = await f.publish("second");
-    const local = await feedback(f, first.result.reviewId);
-    await feedback(f, second.result.reviewId);
-    const before = await local.db.read(async (q) => ({
-      threads: await q.select().from(threads).where(eq(threads.ownerId, local.ownerId)),
-      comments: await q.select().from(comments).where(eq(comments.ownerId, local.ownerId)),
-      sends: await q.select().from(sends).where(eq(sends.ownerId, local.ownerId)),
-    }));
-    const attached = await f.command(["attach", f.pairing.url]);
-    expect(attached.code).toBe(0);
-    expect(attached.text).toContain("copied 2 reviews, skipped 0.");
-    const token = await readFile(join(f.stateDir, "hub.token"), "utf8");
-    for (const name of ["hub.token", "attach.json"])
-      expect((await stat(join(f.stateDir, name))).mode & 0o777).toBe(0o600);
-    expect(attached.text + attached.stdout.join("")).not.toContain(token.trim());
-    // Simulate a prior response loss: the hub has this id, but its local mark was cleared.
-    await local.db.query((q) =>
-      q
-        .update(reviews)
-        .set({ movedToUrl: null })
-        .where(and(eq(reviews.ownerId, local.ownerId), eq(reviews.id, first.result.reviewId))),
-    );
-    const repeat = await f.command(["attach", f.pairing.url]);
-    expect(repeat.code).toBe(0);
-    expect(repeat.text).toContain("copied 0 reviews, skipped 2.");
-    expect(await readFile(join(f.stateDir, "hub.token"), "utf8")).toBe(token);
-    const hubState = await import("../server/state.ts").then((m) => m.initializeServerState(f.hubDir));
-    f.cleanup.push(() => hubState.db.close());
-    for (const [table, rows] of [
-      [threads, before.threads],
-      [comments, before.comments],
-      [sends, before.sends],
-    ] as const) {
-      const copied = await hubState.db.read((q) =>
-        q.select({ id: table.id }).from(table).where(eq(table.ownerId, hubState.ownerId)),
+  // HTTP runs two real servers through copying two reviews, reconciliation, publishing and detaching.
+  test(
+    "attach copies whole reviews once, preserves ids, publishes and opens on the hub, then detaches",
+    async () => {
+      const f = await fixture();
+      const first = await f.publish("first");
+      const second = await f.publish("second");
+      const local = await feedback(f, first.result.reviewId);
+      await feedback(f, second.result.reviewId);
+      const before = await local.db.read(async (q) => ({
+        threads: await q.select().from(threads).where(eq(threads.ownerId, local.ownerId)),
+        comments: await q.select().from(comments).where(eq(comments.ownerId, local.ownerId)),
+        sends: await q.select().from(sends).where(eq(sends.ownerId, local.ownerId)),
+      }));
+      const attached = await f.command(["attach", f.pairing.url]);
+      expect(attached.code).toBe(0);
+      expect(attached.text).toContain("copied 2 reviews, skipped 0.");
+      const token = await readFile(join(f.stateDir, "hub.token"), "utf8");
+      for (const name of ["hub.token", "attach.json"])
+        expect((await stat(join(f.stateDir, name))).mode & 0o777).toBe(0o600);
+      expect(attached.text + attached.stdout.join("")).not.toContain(token.trim());
+      // Simulate a prior response loss: the hub has this id, but its local mark was cleared.
+      await local.db.query((q) =>
+        q
+          .update(reviews)
+          .set({ movedToUrl: null })
+          .where(and(eq(reviews.ownerId, local.ownerId), eq(reviews.id, first.result.reviewId))),
       );
-      expect(copied.map((r) => r.id).sort()).toEqual(rows.map((r) => r.id).sort());
-    }
-    writeSecretFile(join(f.stateDir, "config.json"), JSON.stringify({ docRoots: [f.source], openBrowser: true }));
-    const open = f.output();
-    open.io.openUrl = vi.fn().mockResolvedValue(true);
-    expect(await run([], open.io)).toBe(0);
-    expect(open.io.openUrl).toHaveBeenCalledWith(f.hub.url);
-    const headless = f.output();
-    headless.io.openUrl = vi.fn().mockResolvedValue(false);
-    expect(await run([], headless.io)).toBe(0);
-    expect(headless.stdout.join("")).toBe(`${f.hub.url}\n`);
-    const pub = await f.command(["publish", "--manifest", f.manifest, "--review", first.result.reviewId]);
-    expect(pub.code, pub.text).toBe(0);
-    expect(PublishResponse.parse(JSON.parse(pub.stdout.join("")))).toMatchObject({
-      reviewId: first.result.reviewId,
-      revision: 2,
-      url: `${f.hub.url}/r/${first.result.reviewId}`,
-    });
-    const fresh = await f.publish("fresh");
-    expect(fresh.result.url).toBe(`${f.hub.url}/r/${fresh.result.reviewId}`);
-    const origin = await hubState.db.read((q) =>
-      q
-        .select()
-        .from(reviews)
-        .where(and(eq(reviews.ownerId, hubState.ownerId), eq(reviews.id, fresh.result.reviewId)))
-        .get(),
-    );
-    expect(origin?.originInstanceId).toBe(local.instance.id);
-    const target = await resolveTarget(f.stateDir);
-    expect((await f.command(["detach"])).code).toBe(0);
-    await expect(
-      apiRequest(f.stateDir, target, `/reviews/${first.result.reviewId}/take`, {
-        method: "POST",
-        body: { waitSeconds: 0 },
-      }),
-    ).rejects.toThrow("rejected this machine's credential");
-    const moved = await f.command(["publish", "--manifest", f.manifest, "--review", first.result.reviewId]);
-    expect(moved.code).toBe(1);
-    expect(moved.text).toBe(
-      `emend: This review moved to ${f.hub.url}. Attach again, or pass --key for a new review.\n`,
-    );
-    await f.laptop.close();
-    const directMoved = await f.command(["publish", "--manifest", f.manifest, "--key", "first"]);
-    expect(directMoved.text).toBe(
-      `emend: This review moved to ${f.hub.url}. Attach again, or pass --key for a new review.\n`,
-    );
-    for (const args of [
-      ["feedback", first.result.reviewId],
-      ["wait", first.result.reviewId],
-      ["reply", before.comments[0]?.id ?? "", "--status", "fixed", "--body", "Synthetic reply"],
-    ]) {
-      const out = await f.command(args);
-      expect(out.code).toBe(1);
-      expect(out.text).toBe(`emend: This review moved to ${f.hub.url}. Attach again.\n`);
-    }
-  });
+      const repeat = await f.command(["attach", f.pairing.url]);
+      expect(repeat.code).toBe(0);
+      expect(repeat.text).toContain("copied 0 reviews, skipped 2.");
+      expect(await readFile(join(f.stateDir, "hub.token"), "utf8")).toBe(token);
+      // The hub is already initialized; these assertions only need a connection to read it.
+      const hubDb = openDb(join(f.hubDir, "emend.db"));
+      f.cleanup.push(() => hubDb.close());
+      const hubOwner = await hubDb.read((q) => q.select({ id: owners.id }).from(owners).get());
+      if (!hubOwner) throw new Error("Missing hub owner");
+      for (const [table, rows] of [
+        [threads, before.threads],
+        [comments, before.comments],
+        [sends, before.sends],
+      ] as const) {
+        const copied = await hubDb.read((q) =>
+          q.select({ id: table.id }).from(table).where(eq(table.ownerId, hubOwner.id)),
+        );
+        expect(copied.map((r) => r.id).sort()).toEqual(rows.map((r) => r.id).sort());
+      }
+      writeSecretFile(join(f.stateDir, "config.json"), JSON.stringify({ docRoots: [f.source], openBrowser: true }));
+      const open = f.output();
+      open.io.openUrl = vi.fn().mockResolvedValue(true);
+      expect(await run([], open.io)).toBe(0);
+      expect(open.io.openUrl).toHaveBeenCalledWith(f.hub.url);
+      const headless = f.output();
+      headless.io.openUrl = vi.fn().mockResolvedValue(false);
+      expect(await run([], headless.io)).toBe(0);
+      expect(headless.stdout.join("")).toBe(`${f.hub.url}\n`);
+      const pub = await f.command(["publish", "--manifest", f.manifest, "--review", first.result.reviewId]);
+      expect(pub.code, pub.text).toBe(0);
+      expect(PublishResponse.parse(JSON.parse(pub.stdout.join("")))).toMatchObject({
+        reviewId: first.result.reviewId,
+        revision: 2,
+        url: `${f.hub.url}/r/${first.result.reviewId}`,
+      });
+      const fresh = await f.publish("fresh");
+      expect(fresh.result.url).toBe(`${f.hub.url}/r/${fresh.result.reviewId}`);
+      const origin = await hubDb.read((q) =>
+        q
+          .select()
+          .from(reviews)
+          .where(and(eq(reviews.ownerId, hubOwner.id), eq(reviews.id, fresh.result.reviewId)))
+          .get(),
+      );
+      expect(origin?.originInstanceId).toBe(local.instance.id);
+      const target = await resolveTarget(f.stateDir);
+      expect((await f.command(["detach"])).code).toBe(0);
+      await expect(
+        apiRequest(f.stateDir, target, `/reviews/${first.result.reviewId}/take`, {
+          method: "POST",
+          body: { waitSeconds: 0 },
+        }),
+      ).rejects.toThrow("rejected this machine's credential");
+      const moved = await f.command(["publish", "--manifest", f.manifest, "--review", first.result.reviewId]);
+      expect(moved.code).toBe(1);
+      expect(moved.text).toBe(
+        `emend: This review moved to ${f.hub.url}. Attach again, or pass --key for a new review.\n`,
+      );
+      await f.laptop.close();
+      const directMoved = await f.command(["publish", "--manifest", f.manifest, "--key", "first"]);
+      expect(directMoved.text).toBe(
+        `emend: This review moved to ${f.hub.url}. Attach again, or pass --key for a new review.\n`,
+      );
+      for (const args of [
+        ["feedback", first.result.reviewId],
+        ["wait", first.result.reviewId],
+        ["reply", before.comments[0]?.id ?? "", "--status", "fixed", "--body", "Synthetic reply"],
+      ]) {
+        const out = await f.command(args);
+        expect(out.code).toBe(1);
+        expect(out.text).toBe(`emend: This review moved to ${f.hub.url}. Attach again.\n`);
+      }
+    },
+    mode === "HTTP" ? 30000 : undefined,
+  );
 
   test("expired leases copy with feedback available; live unconfirmed leases remain local", async () => {
     const f = await fixture();
@@ -356,7 +389,11 @@ describe.each(["HTTP", "in-process"])("%s transport", { timeout: 30000 }, (mode)
     if (!delivery) throw new Error("Missing confirmed delivery");
     expect(delivery.confirmedAt).not.toBeNull();
     vi.spyOn(Date, "now").mockReturnValue(delivery.leaseUntil - 60000);
+    // Keep import's default executor wiring covered by a real worker on both transports.
+    vi.mocked(executors.workerExecutor).mockRestore();
+    const worker = vi.spyOn(executors, "workerExecutor");
     expect((await f.command(["attach", f.pairing.url])).code).toBe(0);
+    expect(worker).toHaveBeenCalled();
     const after = await f.command(["feedback", review.result.reviewId]);
     expect(after.code).toBe(0);
     expect(JSON.parse(after.stdout.join(""))).toMatchObject({ kind: "pending" });
@@ -625,6 +662,10 @@ describe.each(["HTTP", "in-process"])("%s transport", { timeout: 30000 }, (mode)
     vi.spyOn(pauses, "pause").mockResolvedValue();
     const fetcher = vi.spyOn(globalThis, "fetch");
     const first = f.command(["attach", f.pairing.url]);
+    onTestFinished(async () => {
+      resume.resolve();
+      await first;
+    });
     await entered.promise;
     try {
       fetcher.mockClear();
@@ -650,7 +691,12 @@ describe.each(["HTTP", "in-process"])("%s transport", { timeout: 30000 }, (mode)
   test("machine scope isolates the hub's reviews and its inbox identifies the laptop", async () => {
     const f = await fixture();
     const out = f.output();
+    // Keep server publish's default executor wiring covered by a real worker too.
+    vi.mocked(executors.workerExecutor).mockRestore();
+    const worker = vi.spyOn(executors, "workerExecutor");
     await publishCommand(f.hubDir, ["--manifest", f.manifest, "--key", "hub-review"], out.io, f.source);
+    expect(worker).toHaveBeenCalled();
+    workInThread(executors);
     const hubReview = PublishResponse.parse(JSON.parse(out.stdout.join("")));
     expect((await f.command(["attach", f.pairing.url])).code).toBe(0);
     const target = await resolveTarget(f.stateDir);
@@ -749,7 +795,7 @@ describe.each(["HTTP", "in-process"])("%s transport", { timeout: 30000 }, (mode)
       expect(out.stdout).toEqual([]);
       expect(out.text).toBe(`emend: cannot reach the hub at ${f.hub.url}: connection refused. Nothing was changed.\n`);
     }
-    expect(await readFile(join(f.stateDir, "emend.db"))).toEqual(before);
+    expect((await readFile(join(f.stateDir, "emend.db"))).equals(before)).toBe(true);
     await expect(stat(join(f.stateDir, "server.json"))).rejects.toMatchObject({ code: "ENOENT" });
     const out = await f.command(["detach"]);
     expect(out.code).toBe(0);

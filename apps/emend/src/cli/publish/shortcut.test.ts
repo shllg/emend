@@ -11,6 +11,7 @@ import { expect, test, vi } from "vitest";
 import { reviews, revisions } from "../../db/schema.ts";
 import { run } from "../../main.ts";
 import * as executors from "../../server/publish/executor.ts";
+import { workInThread } from "../../test/in-thread-worker.ts";
 import { directFixture } from "../direct-test-support.ts";
 import { escapeReference } from "../escape.ts";
 import { provenTestServer } from "../test-support.ts";
@@ -28,8 +29,9 @@ vi.mock("../../server/publish/executor.ts", async (original) => ({
   ...(await original<typeof import("../../server/publish/executor.ts")>()),
 }));
 
-async function fixture() {
+async function fixture(realWorker = false) {
   const f = await directFixture();
+  if (!realWorker) workInThread(executors);
   await rm(f.manifest);
   await rm(join(f.source, "plan.md"));
   vi.spyOn(process, "cwd").mockReturnValue(f.source);
@@ -97,8 +99,9 @@ test.each(["md", "html"])("failed %s title inference falls back and closes the w
   expect(close).toHaveBeenCalledOnce();
 });
 
+// Real worker startup and bounded rendering of reference-expanding Markdown are the subject.
 test("reference-expansion main doc publishes with a bounded worker title", async () => {
-  const f = await fixture();
+  const f = await fixture(true);
   await f.file(
     "expansion.md",
     `# Reference title\n\n${"[x][r] ".repeat(1000)}\n\n[r]: https://example.test/${"x".repeat(20000)}`,
@@ -138,7 +141,7 @@ test("one doc publishes directly, prints only its URL, and republishes to one re
   const server = await f.reviewer();
   expect(await server.db.read((q) => q.select().from(reviews).all())).toHaveLength(1);
   expect(await server.db.read((q) => q.select().from(revisions).all())).toHaveLength(2);
-}, 15000);
+});
 
 test("--new creates separate reviews and --key keeps a review across regenerated paths", async () => {
   const f = await fixture();
@@ -160,7 +163,7 @@ test("--new creates separate reviews and --key keeps a review across regenerated
   expect(results[3]?.revision).toBe(2);
   const server = await f.reviewer();
   expect(await server.db.read((q) => q.select().from(reviews).all())).toHaveLength(3);
-}, 15000);
+});
 
 test("--review explicitly updates the named review from another path", async () => {
   const f = await fixture();
@@ -172,7 +175,7 @@ test("--review explicitly updates the named review from another path", async () 
   const second = await f.publish("second.md", "--review", result.reviewId, "--json");
   expect(second.code, second.stderr.join("")).toBe(0);
   expect(JSON.parse(second.stdout.join(""))).toMatchObject({ reviewId: result.reviewId, revision: 2, url: result.url });
-}, 15000);
+});
 
 test.each(["local", "hub"] as const)(
   "the %s HTTP path gets the existing docs manifest and instance-scoped path key",
@@ -400,7 +403,7 @@ test("size limits and invalid main selections fail before creating state", async
   expect(main.stdout).toEqual([]);
   expect(main.stderr).toEqual(["emend: --main must name a published doc\n"]);
   await expect(stat(join(f.stateDir, "emend.db"))).rejects.toMatchObject({ code: "ENOENT" });
-}, 30000);
+});
 
 test("-- permits a filename beginning with a dash", async () => {
   const f = await fixture();
@@ -414,6 +417,7 @@ test("-- permits a filename beginning with a dash", async () => {
 test("git metadata is refused and worktree sources need no configured doc root", async () => {
   const f = await fixture();
   vi.restoreAllMocks();
+  workInThread(executors);
   vi.spyOn(process, "cwd").mockReturnValue(f.source);
   await promisify(execFile)("git", ["-c", "init.templateDir=", "init", f.source], {
     env: { PATH: process.env.PATH, HOME: f.source, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
@@ -447,7 +451,7 @@ test("the manifest form still prints the result JSON", async () => {
   const out = await f.publish("--manifest", manifest, "--key", "manifest");
   expect(out.code, out.stderr.join("")).toBe(0);
   expect(PublishResponse.safeParse(JSON.parse(out.stdout.join(""))).success).toBe(true);
-}, 15000);
+});
 
 test("a closed stdout produces one diagnostic for URL output", async () => {
   const f = await fixture();
@@ -560,7 +564,7 @@ test("thousands of unrelated files need no per-file metadata and at most 21 warn
   expect(warnings.at(-1)).toBe("emend: and 2980 more files skipped\n");
   for (const spy of [realpath, lstat])
     expect(spy.mock.calls.filter(([path]) => String(path).includes("junk-"))).toHaveLength(0);
-}, 30000);
+});
 
 test("folder walk errors name only the caller's argument", async () => {
   const f = await fixture();
@@ -604,8 +608,9 @@ test("a listing exceeding the entry cap stops enumeration and reports only the c
   expect(visited).toBe(SHORTCUT_LIMITS.entries + 1);
   expect(closed).toBe(true);
   await expect(stat(join(f.stateDir, "emend.db"))).rejects.toMatchObject({ code: "ENOENT" });
-}, 30000);
+});
 
+// Creating and walking 2,001 real directories exercises the directory cap.
 test("a tree exceeding the directory cap is refused before publication", async () => {
   const f = await fixture();
   await f.file("bundle/index.md");
@@ -658,6 +663,7 @@ test.each(["linux", "darwin"] as const)(
   },
 );
 
+// Sweeps every code point through escapeReference and cleanDocTitle.
 test("title cleaning covers every code point escaped by terminal references", () => {
   const missed: number[] = [];
   for (let code = 0; code <= 0x10ffff; code++) {
@@ -735,6 +741,7 @@ test("other platforms refuse folders but continue to publish file arguments", as
   expect((await f.publish("bundle/index.md")).code).toBe(0);
 });
 
+// Creating and enumerating 10,001 real document files exercises the file cap.
 test("a folder exceeding the file limit keeps the real refusal", async () => {
   const f = await fixture();
   for (let start = 0; start <= LIMITS.filesPerRevision; start += 100)
