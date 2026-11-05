@@ -19,6 +19,7 @@ export interface Repo {
 /**
  * Settings on every git call: no filesystem monitor hook, and no work in submodules. The repository under
  * review is agent-written, so nothing configured there may run.
+ * Output bin/wt parses or applies never carries color from the user's config.
  */
 export const GIT_BASE = [
   "-c",
@@ -34,6 +35,28 @@ export const GIT_BASE = [
   // a configured diff.submodule=diff would run a child diff inside an agent-written nested repository
   "-c",
   "diff.submodule=short",
+  "-c",
+  "color.ui=never",
+  "-c",
+  "color.advice=never",
+  "-c",
+  "color.branch=never",
+  "-c",
+  "color.diff=never",
+  "-c",
+  "color.grep=never",
+  "-c",
+  "color.interactive=never",
+  "-c",
+  "color.push=never",
+  "-c",
+  "color.remote=never",
+  "-c",
+  "color.showBranch=never",
+  "-c",
+  "color.status=never",
+  "-c",
+  "color.transport=never",
 ];
 
 function rawGit(args: string[], cwd: string, input?: string, timeoutMs?: number): RunResult {

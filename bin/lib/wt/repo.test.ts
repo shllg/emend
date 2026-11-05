@@ -143,6 +143,14 @@ test("every git call carries the submodule and monitor settings", () =>
     assert.ok(GIT_BASE.join(" ").includes("-c diff.submodule=short"));
   }));
 
+test("every git call overrides the configured color settings", () =>
+  scenario({}, ({ fx, repo }) => {
+    gitIn(fx.main, "config", "color.ui", "always");
+    gitIn(fx.main, "config", "color.diff", "always");
+    assert.equal(git(repo, ["config", "--get", "color.diff"]), "never");
+    assert.equal(git(repo, ["config", "--get", "color.ui"]), "never");
+  }));
+
 test("assertNoGitlinks refuses a gitlink in the index and in HEAD", () =>
   scenario({}, ({ fx, repo }) => {
     assertNoGitlinks(repo, fx.main);

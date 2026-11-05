@@ -141,6 +141,7 @@ function replay(repo: Repo, top: string, old: string, target: string, backup: st
       [
         "diff",
         "--binary",
+        "--no-color",
         "--full-index",
         "--no-ext-diff",
         "--no-textconv",

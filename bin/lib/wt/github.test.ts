@@ -138,6 +138,28 @@ test("push sets upstream; lease adds force-if-includes", () =>
     assert.equal(gitIn(ctx.fx.origin, "rev-parse", BRANCH), gitIn(ctx.fx.main, "rev-parse", "HEAD"));
   }));
 
+test("a rejected push reports a plain error under a colored git config", () =>
+  scenario((ctx) => {
+    for (const key of ["color.ui", "color.push", "color.transport", "color.advice"]) {
+      gitIn(ctx.fx.main, "config", key, "always");
+    }
+    commitFile(ctx.fx.main, "a.txt", "a\n");
+    push(ctx.repo, ctx.fx.main, { forceWithLease: false });
+    gitIn(ctx.fx.main, "commit", "--quiet", "--amend", "-m", "rewritten");
+
+    assert.throws(
+      () => push(ctx.repo, ctx.fx.main, { forceWithLease: false }),
+      (e: unknown) => {
+        assert.ok(e instanceof WtError);
+        assert.equal(e.code, 1);
+        assert.ok(e.message.startsWith("git push failed: "));
+        assert.ok(!e.message.includes("\x1b"), "push failure must not contain ANSI escape codes");
+        assert.ok(e.message.slice("git push failed: ".length).trim().length > 0);
+        return true;
+      },
+    );
+  }));
+
 test("push refuses main and a detached HEAD with exit 2", () =>
   scenario(
     (ctx) => {
@@ -518,6 +540,40 @@ test("pr merge still reports MERGED when the remote branch cannot be deleted", (
       process.stderr.write = write;
     }
     assert.equal(lines.filter((l) => l.startsWith("remote branch kept: ")).length, 1);
+    assert.ok(remoteHas(ctx));
+  }));
+
+test("pr merge reports a plain deletion failure under a colored git config", () =>
+  mscenario((ctx) => {
+    for (const key of ["color.ui", "color.push", "color.transport", "color.advice"]) {
+      gitIn(ctx.fx.main, "config", key, "always");
+    }
+    gitIn(ctx.fx.main, "push", "--quiet", "origin", `${headSha}:refs/heads/${BRANCH}`);
+    gitIn(ctx.fx.origin, "config", "receive.denyDeletes", "true");
+    installFake(
+      ctx.env,
+      "gh",
+      mergeRules({}, [
+        { match: ["pr", "merge", "7"], stdout: "merged\n" },
+        { match: READ_BACK_ARGS, stdout: MERGED_STATE },
+      ]),
+    );
+    const lines: string[] = [];
+    const write = process.stderr.write;
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      lines.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      assert.equal(prMerge(ctx.repo, MERGE_ARGS), `MERGED ${MERGE_SHA}`);
+    } finally {
+      process.stderr.write = write;
+    }
+    const kept = lines.filter((l) => l.startsWith("remote branch kept: "));
+    assert.equal(kept.length, 1);
+    const message = kept[0] as string;
+    assert.ok(!message.includes("\x1b"), "deletion failure must not contain ANSI escape codes");
+    assert.match(message, /failed to push|deletion prohibited|denying/);
     assert.ok(remoteHas(ctx));
   }));
 

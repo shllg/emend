@@ -121,6 +121,42 @@ test("conflict restacks with no operation in progress", () =>
     assert.match(backups, new RegExp(`^refs/wt-backup/feat-a/\\d{8}T\\d{6}Z ${oldTip}$`));
   }));
 
+test("a conflict restacks under a colored git config", () =>
+  scenario(({ env, fx, repo }) => {
+    commitFile(fx.main, "c.txt", "one\n");
+    gitIn(fx.main, "push", "--quiet", "origin", "main");
+    const wt = worktree(repo, "feat-a");
+    const wtRepo = resolveRepo(wt);
+    commitFile(wt, "c.txt", "branch\n");
+    commitFile(wt, "extra.txt", "extra\n");
+    advanceOrigin(env, fx, "c.txt", "main\n");
+    gitIn(fx.main, "config", "color.ui", "always");
+    gitIn(fx.main, "config", "color.diff", "always");
+
+    const r = rebase(wtRepo, wt, "origin/main");
+    assert.equal(r.result, "restacked");
+    assert.deepEqual(r.conflicts, ["c.txt"]);
+    assert.match(readFileSync(join(wt, "c.txt"), "utf8"), /<<<<<<</);
+    assert.equal(readFileSync(join(wt, "extra.txt"), "utf8"), "extra\n");
+    assert.equal(gitIn(wt, "rev-parse", "HEAD"), gitIn(wt, "rev-parse", "origin/main"));
+    gitIn(wt, "diff", "--cached", "--quiet");
+    idle(wt);
+  }));
+
+test("restack directly reports conflicts under a colored git config", () =>
+  scenario(({ env, fx, repo }) => {
+    commitFile(fx.main, "c.txt", "one\n");
+    gitIn(fx.main, "push", "--quiet", "origin", "main");
+    const wt = worktree(repo, "feat-a");
+    commitFile(wt, "c.txt", "branch\n");
+    advanceOrigin(env, fx, "c.txt", "main\n");
+    gitIn(fx.main, "config", "color.ui", "always");
+    gitIn(fx.main, "config", "color.diff", "always");
+
+    assert.deepEqual(restack(resolveRepo(wt), wt, "origin/main").conflicts, ["c.txt"]);
+    idle(wt);
+  }));
+
 test("restack works directly and reports no conflicts for a clean replay", () =>
   scenario(({ env, fx, repo }) => {
     const wt = worktree(repo, "feat-a");
