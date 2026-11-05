@@ -149,8 +149,12 @@ test("bench is opt-in and stays outside verification and every CI job", () => {
   }
 });
 
-test("Vitest only opts into benches through EMEND_BENCH and excludes them from every ordinary project", () => {
-  const source = readFileSync(new URL("../vitest.config.ts", import.meta.url), "utf8");
+function checkVitestConfig(source: string): void {
+  const execArgv = 'const execArgv = process.versions.node.split(".")[0] === "24" ? ["--no-wasm-code-gc"] : [];';
+  assert.equal(source.split("\n").filter((line) => line === execArgv).length, 1, "pin the Node 24 execArgv expression");
+  assert.equal([...source.matchAll(/^ +execArgv,$/gm)].length, 3, "exactly three project execArgv shorthands");
+  assert.equal([...source.matchAll(/\bexecArgv\b/g)].length, 4, "one definition and three project shorthands only");
+  assert.doesNotMatch(source, /\b(?:execArgv|env|pool|poolOptions)["']?\s*:|NODE_OPTIONS/, "no worker overrides");
   const parallelism = '    fileParallelism: process.env.EMEND_BENCH !== "1",';
   assert.equal(source.split(parallelism).length - 1, 1);
   assert.equal([...source.matchAll(/\bfileParallelism\s*:/g)].length, 1, "no parallelism override");
@@ -160,6 +164,9 @@ test("Vitest only opts into benches through EMEND_BENCH and excludes them from e
   );
   assert(bench, "the bench project must exist only in the EMEND_BENCH opt-in branch");
   assert.match(bench[1], /^                name: "bench",$/m);
+  const benchTest = bench[1].match(/^              test: \{\n([\s\S]*?)^              \},$/m);
+  assert(benchTest, "expected the bench test block");
+  assert.equal([...benchTest[1].matchAll(/^                execArgv,$/gm)].length, 1, "bench must set execArgv");
   const remaining = source.replace(parallelism, "").replace(bench[0], "");
   assert.doesNotMatch(remaining, /process\s*\.\s*env|EMEND_BENCH|\bCI\b/);
   assert.deepEqual(
@@ -183,6 +190,7 @@ test("Vitest only opts into benches through EMEND_BENCH and excludes them from e
   assert.equal([...source.matchAll(/\bexclude\s*:/g)].length, 2, "no overriding excludes");
   for (const [index, project] of projects.entries()) {
     assert.match(project[1], index === 0 ? /^          name: root,$/m : /^          name: "apps\/web",$/m);
+    assert.equal([...project[1].matchAll(/^          execArgv,$/gm)].length, 1, "each ordinary project must set execArgv");
     assert.equal(project[1].split(exclude).length - 1, 1, "each ordinary project must exclude benches");
   }
   // Reconstruct the whole array from the checked blocks and their exact wrappers.
@@ -206,6 +214,43 @@ test("Vitest only opts into benches through EMEND_BENCH and excludes them from e
       "",
     ].join("\n"),
     "projects may contain only the opt-in bench spread, mapped Node spread and web object",
+  );
+}
+
+test("Vitest only opts into benches through EMEND_BENCH and excludes them from every ordinary project", () => {
+  checkVitestConfig(readFileSync(new URL("../vitest.config.ts", import.meta.url), "utf8"));
+});
+
+test("the Vitest guard rejects changed worker flags, missing project flags and pool overrides", () => {
+  const source = readFileSync(new URL("../vitest.config.ts", import.meta.url), "utf8");
+  for (const flag of ["--env-file=synthetic.env", "--import=./synthetic.mjs", "--inspect"]) {
+    assert.throws(
+      () => checkVitestConfig(source.replace('["--no-wasm-code-gc"]', `["--no-wasm-code-gc", "${flag}"]`)),
+      /pin the Node 24 execArgv expression/,
+    );
+  }
+  let shorthands = 0;
+  for (const match of source.matchAll(/^ +execArgv,\n/gm)) {
+    shorthands++;
+    assert.throws(
+      () => checkVitestConfig(source.slice(0, match.index) + source.slice(match.index + match[0].length)),
+      /exactly three project execArgv shorthands/,
+    );
+  }
+  assert.equal(shorthands, 3, "the shorthand loop must not pass vacuously");
+  const execArgvLine = source.match(/^const execArgv = .*\n/m);
+  assert(execArgvLine, "expected the execArgv definition");
+  const mutations = [
+    source.replace(execArgvLine[0], `${execArgvLine[0]}execArgv.push("--inspect");\n`),
+    source.replace(/^( {8}test: \{\n)/m, '$1          ["execArgv"]: ["--inspect"],\n'),
+  ];
+  for (const mutated of mutations) {
+    assert.notEqual(mutated, source, "the mutation must change the source");
+    assert.throws(() => checkVitestConfig(mutated), /one definition and three project shorthands only/);
+  }
+  assert.throws(
+    () => checkVitestConfig(source.replace("  test: {", '  test: {\n    pool: "forks",')),
+    /no worker overrides/,
   );
 });
 
