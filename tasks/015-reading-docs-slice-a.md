@@ -23,7 +23,7 @@ is slice B.
       position memory.
 - [x] Checkpoint 3: HTML docs in the full reading pane, the Comments drawer and the frame
       messages.
-- [ ] Reviews pass for each checkpoint: emend-reviewer, the Codex review and
+- [x] Reviews pass for each checkpoint: emend-reviewer, the Codex review and
       emend-security-reviewer.
 - [ ] You: check it on the laptop and the phone after checkpoint 3.
 
@@ -42,3 +42,8 @@ several docs on the phone.
   It now measures against a reading line in the frame's viewport, and a restore is a bracketed
   search over the distance moved. The bridge reads every DOM property through its prototype and
   handles every same-doc link itself.
+- 2026-11-06: Rebased onto main after the stable-specs work. One heading-lookup yield now goes
+  through the pacing hook. The heading-cap parity test checks the cap's edges by element instead of
+  sending a goto for each of its 1024 headings, which took over 5 s on a busy machine. You chose to
+  merge this chain without an emend approval. Your check on the laptop and the phone stays open
+  after the merge, so this task stays in progress until you have done it.
