@@ -65,7 +65,7 @@ export async function renderRevision(
       lookupCache.set(doc.headings, names);
     }
     docs.set(path, names);
-    await setImmediate();
+    await yieldToLoop("publish-render");
   }
   let rendered: RenderedBytes;
   try {
