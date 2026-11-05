@@ -5,10 +5,13 @@ import type { AppDeps } from "./app.ts";
 import { type PacingPhase, pacing } from "./pacing.ts";
 import type { Work } from "./publish/work.ts";
 
+export type PacingUnit = "comment-bytes" | "changed-block-bytes" | "row-date";
+
 export type PacingEvent =
   | { kind: "yield"; phase: PacingPhase }
   | { kind: "statement"; sql: string; method: string; table?: string; rows: number; checkedIds: number }
   | { kind: "executor"; work: Work["kind"] }
+  | { kind: "work"; unit: PacingUnit }
   | { kind: "blob-put" | "payload-copy" | "blob-removal" };
 
 type Units = (event: PacingEvent) => number;
@@ -19,9 +22,9 @@ export const insertedRows =
 export const checkedIds: Units = (event) => (event.kind === "statement" ? event.checkedIds : 0);
 export const renderUnits: Units = (event) => Number(event.kind === "executor" || event.kind === "blob-put");
 export const unitsOf =
-  (kind: "payload-copy" | "blob-removal"): Units =>
+  (kind: "payload-copy" | "blob-removal" | PacingUnit): Units =>
   (event) =>
-    Number(event.kind === kind);
+    Number(event.kind === "work" ? event.unit === kind : event.kind === kind);
 
 /** Include the leading and trailing runs, and reset only at an actual probe event of any phase. */
 export function expectPaced(events: PacingEvent[], phase: PacingPhase, units: Units, bound: number) {
@@ -114,6 +117,9 @@ export function observePacing(deps: AppDeps) {
   });
   return {
     events,
+    record(unit: PacingUnit) {
+      events.push({ kind: "work", unit });
+    },
     restore() {
       pacing.probe = previousProbe;
       deps.publishExecutor = execute;

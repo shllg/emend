@@ -116,10 +116,15 @@ export async function importReview(principal: Principal, bundle: ImportBundle, d
     return await deps.db.transaction(
       async (q) => {
         checkImportSignal(signal);
-        async function insert<T extends SQLiteTable>(table: T, rows: InferInsertModel<T>[], ignoreConflict = false) {
-          for (let offset = 0; offset < rows.length; offset += 500) {
+        async function insert<T extends SQLiteTable, Row>(
+          table: T,
+          source: Row[],
+          mapRow: (row: Row) => InferInsertModel<T>,
+          ignoreConflict = false,
+        ) {
+          for (let offset = 0; offset < source.length; offset += 500) {
             checkImportSignal(signal);
-            const statement = q.insert(table).values(rows.slice(offset, offset + 500));
+            const statement = q.insert(table).values(source.slice(offset, offset + 500).map(mapRow));
             await (ignoreConflict ? statement.onConflictDoNothing() : statement);
             await yieldToLoop("import-insert");
           }
@@ -143,10 +148,12 @@ export async function importReview(principal: Principal, bundle: ImportBundle, d
             .get();
           if (!repo) throw new Error("Missing repository");
           repoId = repo.id;
+          await yieldToLoop("import-insert");
         }
         await insert(
           t.blobs,
-          [...prepared.staged].map(([sha256, size]) => ({ ownerId, sha256, size, mediaType: "application/json" })),
+          [...prepared.staged],
+          ([sha256, size]) => ({ ownerId, sha256, size, mediaType: "application/json" }),
           true,
         );
         await q.insert(t.reviews).values({
@@ -159,106 +166,83 @@ export async function importReview(principal: Principal, bundle: ImportBundle, d
           createdAt: at(bundle.review.createdAt),
           updatedAt: at(bundle.review.updatedAt),
         });
-        await insert(
-          t.revisions,
-          bundle.revisions.map((r) => ({
-            ...r,
-            ownerId,
-            writeupEmpty: prepared.empty.get(r.id),
-            contentKey: randomBytes(32).toString("base64url"),
-            createdAt: at(r.createdAt),
-          })),
-        );
-        await insert(
-          t.topics,
-          bundle.topics.map((r) => ({
-            ...r,
-            ownerId,
-            attention: r.attention,
-            blastScope: r.blastRadius?.scope,
-            blastNote: r.blastRadius?.note,
-          })),
-        );
-        await insert(
-          t.writeups,
-          bundle.writeups.map((r) => {
-            const rendered = prepared.rendered.get(r.revisionId);
-            if (!rendered) throw new Error("Missing rendering");
-            return { ...r, ownerId, sourceBlob: rendered.sourceBlob, renderedBlob: rendered.renderedBlob };
-          }),
-        );
+        await yieldToLoop("import-insert");
+        await insert(t.revisions, bundle.revisions, (r) => ({
+          ...r,
+          ownerId,
+          writeupEmpty: prepared.empty.get(r.id),
+          contentKey: randomBytes(32).toString("base64url"),
+          createdAt: at(r.createdAt),
+        }));
+        await insert(t.topics, bundle.topics, (r) => ({
+          ...r,
+          ownerId,
+          attention: r.attention,
+          blastScope: r.blastRadius?.scope,
+          blastNote: r.blastRadius?.note,
+        }));
+        await insert(t.writeups, bundle.writeups, (r) => {
+          const rendered = prepared.rendered.get(r.revisionId);
+          if (!rendered) throw new Error("Missing rendering");
+          return { ...r, ownerId, sourceBlob: rendered.sourceBlob, renderedBlob: rendered.renderedBlob };
+        });
         // Parent documents precede assets even across batch boundaries.
         await insert(
           t.files,
-          [...bundle.files]
-            .sort((a, b) => Number(a.role === "asset") - Number(b.role === "asset"))
-            .map((r) => ({
-              ...r,
-              ownerId,
-              title:
-                r.role === "doc" ? (prepared.rendered.get(r.revisionId)?.metadata.get(r.path)?.title ?? null) : null,
-              headings:
-                r.role === "doc" ? (prepared.rendered.get(r.revisionId)?.metadata.get(r.path)?.headings ?? null) : null,
-              mediaType: r.role === "diff" ? "text/plain" : mediaType(r.path),
-              renderedBlob:
-                r.role === "doc" ? (prepared.rendered.get(r.revisionId)?.docBlobs.get(r.path) ?? null) : null,
-            })),
-        );
-        await insert(
-          t.agentNotes,
-          (bundle.agentNotes ?? []).map((note) => ({
-            ...note,
+          [...bundle.files].sort((a, b) => Number(a.role === "asset") - Number(b.role === "asset")),
+          (r) => ({
+            ...r,
             ownerId,
-            startLine: note.start,
-            endLine: note.end,
-          })),
+            title: r.role === "doc" ? (prepared.rendered.get(r.revisionId)?.metadata.get(r.path)?.title ?? null) : null,
+            headings:
+              r.role === "doc" ? (prepared.rendered.get(r.revisionId)?.metadata.get(r.path)?.headings ?? null) : null,
+            mediaType: r.role === "diff" ? "text/plain" : mediaType(r.path),
+            renderedBlob: r.role === "doc" ? (prepared.rendered.get(r.revisionId)?.docBlobs.get(r.path) ?? null) : null,
+          }),
         );
-        await insert(
-          t.docAssets,
-          bundle.docAssets.map((r) => ({ ...r, ownerId })),
-        );
-        await insert(
-          t.changedBlocks,
-          prepared.changedBlocks.map((r) => ({ ...r, ownerId })),
-        );
-        await insert(
-          t.threads,
-          bundle.threads.map((r) => ({ ...r, ownerId, createdAt: at(r.createdAt), updatedAt: at(r.updatedAt) })),
-        );
-        await insert(
-          t.placements,
-          prepared.placements.map((r) => ({ ...r, ownerId })),
-        );
+        await insert(t.agentNotes, bundle.agentNotes ?? [], (note) => ({
+          ...note,
+          ownerId,
+          startLine: note.start,
+          endLine: note.end,
+        }));
+        await insert(t.docAssets, bundle.docAssets, (r) => ({ ...r, ownerId }));
+        await insert(t.changedBlocks, prepared.changedBlocks, (r) => ({ ...r, ownerId }));
+        await insert(t.threads, bundle.threads, (r) => ({
+          ...r,
+          ownerId,
+          createdAt: at(r.createdAt),
+          updatedAt: at(r.updatedAt),
+        }));
+        await insert(t.placements, prepared.placements, (r) => ({ ...r, ownerId }));
         const confirmed = new Set(bundle.deliveries.filter((d) => d.confirmedAt !== null).map((d) => d.id));
         await insert(
           t.deliveries,
-          bundle.deliveries
-            .filter((r) => r.confirmedAt !== null)
-            .map((r) => ({
-              ...r,
-              ownerId,
-              leaseUntil: at(r.leaseUntil),
-              confirmedAt: nullableAt(r.confirmedAt),
-              createdAt: at(r.createdAt),
-            })),
-        );
-        await insert(
-          t.sends,
-          bundle.sends.map((r) => {
-            const released = r.deliveryId !== null && !confirmed.has(r.deliveryId);
-            return {
-              ...r,
-              ownerId,
-              deliveryId: released ? null : r.deliveryId,
-              setAsideAt: released ? null : nullableAt(r.setAsideAt),
-              createdAt: at(r.createdAt),
-            };
+          bundle.deliveries.filter((r) => r.confirmedAt !== null),
+          (r) => ({
+            ...r,
+            ownerId,
+            leaseUntil: at(r.leaseUntil),
+            confirmedAt: nullableAt(r.confirmedAt),
+            createdAt: at(r.createdAt),
           }),
         );
-        await insert(
-          t.comments,
-          bundle.comments.map((r) => ({ ...r, ownerId, createdAt: at(r.createdAt), updatedAt: at(r.updatedAt) })),
-        );
+        await insert(t.sends, bundle.sends, (r) => {
+          const released = r.deliveryId !== null && !confirmed.has(r.deliveryId);
+          return {
+            ...r,
+            ownerId,
+            deliveryId: released ? null : r.deliveryId,
+            setAsideAt: released ? null : nullableAt(r.setAsideAt),
+            createdAt: at(r.createdAt),
+          };
+        });
+        await insert(t.comments, bundle.comments, (r) => ({
+          ...r,
+          ownerId,
+          createdAt: at(r.createdAt),
+          updatedAt: at(r.updatedAt),
+        }));
         await q
           .update(t.reviews)
           .set({ approvedRevision: bundle.review.approvedRevision })

@@ -28,7 +28,7 @@ One commit per step, in the plan's order (D2):
 - [x] CI fan-out: the `verify:*` scripts, a reusable verify workflow, 4 Vitest shards on both
       Node versions, static checks on both Node versions (D1), and the guard test.
 - [x] Pacing hook: `pacing.ts` at the yield sites, behaviour unchanged.
-- [ ] New yields in the import pipeline, with one work-unit test per phase.
+- [x] New yields in the import pipeline, with one work-unit test per phase.
 - [ ] Bench: the `bench` project and `pnpm bench`; the timing assertions and both
       `EMEND_TIMING_STRICT` passes go. Single synchronous steps get bench coverage only (D4).
 - [ ] Slow fixtures and the 15 to 30 s timeout group. Also the real-render tests in
@@ -60,3 +60,13 @@ runs outside it. CI runs the sharded layout, and the plan's T.1 entry records th
   yield (snapshot and history loops, placement preparation, file and asset validation and
   indexing, topic insertion, render metadata construction). Revision limits bound them; a
   follow-up task should measure them with the bench and add yields where they stall.
+- Found in step 4, same follow-up: import loops over bundle-sized arrays that still never yield
+  (bundle indexing, id and hash collection, the file sort and delivery filter, file and asset
+  validation, the placements byte check, placement preparation and the placement budget walk).
+  Import limits bound them.
+- Found in the step-4 security review, older than this task and left for the owner: when
+  `prepareImport` throws after rendering (a row, byte or blob check, or an abort), its staged
+  blob holds are never released. `importReview` releases them only after `prepareImport`
+  returns, so the staged files outlive their pin with no `blobs` row and no cleanup. Also, the
+  repo insert in `import/ingest.ts` spreads the bundle's repo after `ownerId`; zod strips
+  unknown keys today, but spreading first would keep it safe.

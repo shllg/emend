@@ -12,6 +12,7 @@ import { blobs, changedBlocks as changedTable, placements as placementTable } fr
 import type { AppDeps } from "../app.ts";
 import { ApiError } from "../http/errors.ts";
 import { commentTargetReserve, envelopeBytes, jsonBytes } from "../mailbox/payload.ts";
+import { yieldToLoop } from "../pacing.ts";
 import { workerExecutor } from "../publish/executor.ts";
 import { abortable } from "../publish/lifecycle.ts";
 import { mediaType } from "../publish/media.ts";
@@ -103,6 +104,7 @@ export async function prepareImport(ownerId: string, bundle: ImportBundle, deps:
   const empty = new Map<string, boolean>();
   try {
     const targetReserves = new Map<string, number>();
+    let checkedComments = 0;
     for (const send of bundle.sends) {
       let bytes = envelopeBytes + (send.instruction?.trim() ? jsonBytes(send.instruction) + 1 : 0);
       for (const comment of index.commentsBySend.get(send.id) ?? []) {
@@ -115,6 +117,7 @@ export async function prepareImport(ownerId: string, bundle: ImportBundle, deps:
         }
         bytes += targetBytes + jsonBytes(comment.body) - 2;
         if (bytes > LIMITS.handoffBytes) throw new ApiError("too_large");
+        if (++checkedComments % 500 === 0) await yieldToLoop("import-prepare-comments");
       }
     }
     let previous: { renderedBlob: string; docBlobs: Map<string, string> } | undefined;
@@ -187,12 +190,14 @@ export async function prepareImport(ownerId: string, bundle: ImportBundle, deps:
         const changed = await execute({ kind: "changed", previous: previousBlobs, next: result.ids });
         if (changed.kind !== "changed") throw new ApiError("invalid_request");
         const packed = Buffer.from(changed.bytes).toString("utf8");
+        let changedLines = 0;
         for (const line of packed ? packed.split("\n") : []) {
           addRows(1);
           const blockId = JSON.parse(line) as string;
           const row = { id: randomUUID(), ownerId, revisionId: revision.id, blockId };
           addDerivedBytes(derivedRowBytes(changedTable, row));
           changedBlocks.push(row);
+          if (++changedLines % 500 === 0) await yieldToLoop("import-prepare-changed");
         }
       }
       previous = { renderedBlob: result.renderedBlob, docBlobs: result.docBlobs };

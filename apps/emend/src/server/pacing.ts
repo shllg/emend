@@ -10,6 +10,8 @@ export type PacingPhase =
   | "import-insert"
   | "import-check-ids"
   | "import-placement-copy"
+  | "import-prepare-comments"
+  | "import-prepare-changed"
   | "lifecycle-blob-cleanup";
 
 /** Test seam for counting work between main-thread yields; production leaves the probe unset. */
