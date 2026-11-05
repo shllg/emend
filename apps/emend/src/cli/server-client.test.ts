@@ -47,9 +47,13 @@ function observeChildExit(entry: string, stateDir: string, nodeOptions = "--no-w
     const [suppliedEnv] = suppliedEnvs;
     expect(suppliedEnv?.EMEND_HOME).toBe(stateDir);
     expect(suppliedEnv?.NODE_OPTIONS).toBe(nodeOptions);
-    // Production inherits every other variable unchanged; never print caller values on failure.
-    expect(Object.keys(suppliedEnv ?? {}).sort()).toEqual(Object.keys(expectedEnv).sort());
-    expect(Object.entries(expectedEnv).every(([key, value]) => suppliedEnv?.[key] === value)).toBe(true);
+    // Production inherits every other variable unchanged; never print caller names or values on failure.
+    expect(Object.keys(suppliedEnv ?? {}).length).toBe(Object.keys(expectedEnv).length);
+    expect(
+      Object.entries(expectedEnv).every(
+        ([key, value]) => Object.hasOwn(suppliedEnv ?? {}, key) && suppliedEnv?.[key] === value,
+      ),
+    ).toBe(true);
   });
   const spawn = childProcess.spawn;
   const exited = Promise.withResolvers<unknown[]>();
@@ -187,7 +191,7 @@ test("ensureServer starts a detached server after a dead discovery pid", async (
   }
 });
 
-test("a detached child that exits before discovery ignores the caller's NODE_OPTIONS preload", async () => {
+test("the confined test child of a detached launch never runs the caller's NODE_OPTIONS preload", async () => {
   const fixture = await testDb();
   onTestFinished(() => fixture.cleanup());
   const stateDir = join(fixture.dir, "failed");
