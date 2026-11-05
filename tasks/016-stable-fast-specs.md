@@ -1,7 +1,7 @@
 ---
 id: 016
 title: Stable and fast specs
-status: in-progress
+status: open
 owner: agent + your approval
 depends_on: []
 done_on:
@@ -76,3 +76,8 @@ runs outside it. CI runs the sharded layout, and the plan's T.1 entry records th
   returns, so the staged files outlive their pin with no `blobs` row and no cleanup. Also, the
   repo insert in `import/ingest.ts` spreads the bundle's repo after `ownerId`; zod strips
   unknown keys today, but spreading first would keep it safe.
+- Part 1 (2026-11-05, branch `016-stable-fast-specs`) covers steps 1 to 7, plus `--no-wasm-code-gc`
+  on Node 24 test workers against nodejs/node#66366 (drop it once nodejs/node#66376 ships) and
+  a network guard for web tests. Steps 8 to 11 follow on a second branch, together with a
+  Node-side network guard (it needs a `setupFiles` entry in `vitest.config.ts`) and a real-worker
+  test for the comment renderer's default worker (`server/routes/comment-html.ts:128-129`).
