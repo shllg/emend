@@ -29,6 +29,33 @@ const IN_PROGRESS = [
 /** History-changing git calls run with repository hooks switched off: no hook of the reviewed repo runs. */
 const NO_HOOKS = ["-c", "core.hooksPath=/dev/null"];
 
+/** Each pin keeps one config key from changing the rebase's steps, the commits it replays, their messages, the refs it moves or how a pick resolves. */
+const REBASE_PINS = [
+  "-c",
+  "rebase.instructionFormat=%s", // Keep formats from adding todo lines.
+  "-c",
+  "core.commentChar=#", // Also overrides core.commentString so todo lines stay uncommented.
+  "-c",
+  "core.abbrev=no", // Full todo ids keep refs from standing in for commits.
+  "-c",
+  "commit.cleanup=verbatim", // Keep replayed messages byte for byte.
+  "-c",
+  "i18n.commitEncoding=UTF-8", // Keep message bytes without an encoding header.
+  "-c",
+  "notes.rewrite.rebase=false", // Leave notes refs unchanged.
+  "-c",
+  "rerere.enabled=false", // Keep conflicts even when an rr-cache directory already exists.
+  // Git's merge defaults keep config from changing how a pick resolves.
+  "-c",
+  "merge.renames=true",
+  "-c",
+  "merge.renameLimit=7000", // Git's default merge rename limit.
+  "-c",
+  "merge.directoryRenames=conflict",
+  "-c",
+  "merge.renormalize=false",
+];
+
 function hg(repo: Repo, top: string, args: string[], input?: string): string {
   return git(repo, [...NO_HOOKS, ...args], { cwd: top, input });
 }
@@ -58,6 +85,11 @@ function currentBranch(repo: Repo, top: string): string {
   return r.stdout;
 }
 
+function operationInProgress(repo: Repo, top: string): boolean {
+  const dir = gitTry(repo, ["rev-parse", "--path-format=absolute", "--git-dir"], { cwd: top });
+  return dir.code !== 0 || dir.stdout === "" || IN_PROGRESS.some((name) => existsSync(join(dir.stdout, name)));
+}
+
 /** Exit 1 unless the tree is clean (untracked files included) and no operation is in progress. */
 function assertClean(repo: Repo, top: string): void {
   const st = gitTry(repo, ["status", "--porcelain", "--untracked-files=all", "--ignore-submodules=all"], {
@@ -67,8 +99,7 @@ function assertClean(repo: Repo, top: string): void {
   if (st.stdout.trim() !== "") {
     throw new WtError(1, "The working tree is not clean (untracked files count). Commit or remove them first.");
   }
-  const dir = gitTry(repo, ["rev-parse", "--path-format=absolute", "--git-dir"], { cwd: top });
-  if (dir.code !== 0 || IN_PROGRESS.some((name) => existsSync(join(dir.stdout, name)))) {
+  if (operationInProgress(repo, top)) {
     throw new WtError(1, "A git operation is in progress. Finish or abort it first.");
   }
 }
@@ -172,7 +203,16 @@ function replay(repo: Repo, top: string, old: string, target: string, backup: st
   if (!hasChange) return { conflicts: [] };
   const applied = gitBytes(
     repo,
-    [...NO_HOOKS, "-c", "apply.ignoreWhitespace=no", "apply", "--3way", "--whitespace=nowarn"],
+    [
+      ...NO_HOOKS,
+      "-c",
+      "apply.ignoreWhitespace=no",
+      "-c",
+      "rerere.enabled=false", // The restack also leaves conflicts as conflicts.
+      "apply",
+      "--3way",
+      "--whitespace=nowarn",
+    ],
     { cwd: top, input: patch.stdout },
   );
   const conflicts = unmergedPaths(repo, top);
@@ -188,6 +228,21 @@ function replay(repo: Repo, top: string, old: string, target: string, backup: st
   return { conflicts };
 }
 
+/** Checks a successful rebase without changing the repository state git left behind. */
+export function checkRebased(repo: Repo, top: string, branch: string, target: string, backup: string): void {
+  let why: string | undefined;
+  if (operationInProgress(repo, top)) {
+    why = "a git operation is still in progress";
+  } else {
+    const head = gitTry(repo, ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: top });
+    if (head.code !== 0 || head.stdout !== branch) why = `HEAD is not attached to ${branch}`;
+    else if (!isAncestor(repo, top, target, "HEAD")) why = "the target is not an ancestor of HEAD";
+  }
+  if (why !== undefined) {
+    throw new WtError(1, `The rebase exited 0 but did not finish: ${why}. backup: ${backup}`);
+  }
+}
+
 export function rebase(repo: Repo, top: string, onto: Onto): RebaseResult {
   const branch = currentBranch(repo, top);
   assertNoGitlinks(repo, top);
@@ -198,17 +253,30 @@ export function rebase(repo: Repo, top: string, onto: Onto): RebaseResult {
   if (isAncestor(repo, top, target, old)) return { result: "up-to-date", conflicts: [], backups: [] };
 
   const backup = writeBackup(repo, branch, old);
-  // Use the merge backend so rebase.backend=apply and its apply settings cannot turn a conflict into a silent change.
-  const r = hgTry(repo, top, ["rebase", "--merge", "--no-autostash", "--no-update-refs", target]);
-  if (r.code === 0) return { result: "rebased", conflicts: [], backups: [backup] };
+  // Use the merge backend and ort, with flags and pins controlling the steps, commits replayed,
+  // their messages and how each pick resolves.
+  const r = hgTry(repo, top, [
+    ...REBASE_PINS,
+    "rebase",
+    "--merge",
+    "--strategy=ort",
+    "--no-autostash",
+    "--no-autosquash",
+    "--no-fork-point",
+    "--no-update-refs",
+    "--no-rebase-merges",
+    target,
+  ]);
+  if (r.code === 0) {
+    checkRebased(repo, top, branch, target, backup);
+    return { result: "rebased", conflicts: [], backups: [backup] };
+  }
 
   // Only a content conflict leads to a restack. Read the index before the abort removes the evidence.
   const conflicted = gitTry(repo, ["ls-files", "--unmerged", "-z"], { cwd: top }).stdout !== "";
-  const dir = gitTry(repo, ["rev-parse", "--path-format=absolute", "--git-dir"], { cwd: top }).stdout;
-  const busy = () => dir === "" || IN_PROGRESS.some((name) => existsSync(join(dir, name)));
-  if (busy()) hgTry(repo, top, ["rebase", "--abort"]);
+  if (operationInProgress(repo, top)) hgTry(repo, top, ["rebase", "--abort"]);
   const head = gitTry(repo, ["rev-parse", "--verify", "HEAD"], { cwd: top }).stdout;
-  if (busy() || head !== old) {
+  if (operationInProgress(repo, top) || head !== old) {
     throw new WtError(
       1,
       `The rebase failed and could not be aborted cleanly. The backup ref holds the old tip. backup: ${backup}`,
