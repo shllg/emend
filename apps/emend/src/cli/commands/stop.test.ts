@@ -8,6 +8,7 @@ import { writeSecretFile } from "../../state/files.ts";
 import { CliError } from "../http.ts";
 import { probeServer, serverRecord } from "../server-client.ts";
 import type { ServiceRunner } from "../service/common.ts";
+import * as markers from "../tailscale-marker.ts";
 import { provenTestServer } from "../test-support.ts";
 
 // A missing fixture helper must never fall back to the host Tailscale app.
@@ -145,6 +146,32 @@ test("missing server.json leaves the existing state folder empty", async () => {
   expect(stdout).toEqual([noServer]);
   expect(stderr).toEqual([]);
   expect(await readdir(state)).toEqual([]);
+});
+
+test("stop refuses a loose state folder with a stale route and no recorded server", async () => {
+  const marker = { target: "http://127.0.0.1:3636", dnsName: "hub.example.ts.net", pid: 2_000_000_000 };
+  await mkdir(state, { mode: 0o700 });
+  const path = join(state, "tailscale-serve.json");
+  const contents = JSON.stringify(marker);
+  writeSecretFile(path, contents);
+  await chmod(state, 0o770);
+  vi.spyOn(markers, "loopbackState").mockResolvedValue("refused");
+  const kill = process.kill;
+  vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+    if (pid !== marker.pid) return kill(pid, signal);
+    throw Object.assign(new Error("synthetic dead process"), { code: "ESRCH" });
+  });
+  const fetcher = vi.spyOn(globalThis, "fetch");
+  expect(await run(["stop"], io)).toBe(1);
+  expect(stdout).toEqual([]);
+  expect(stderr).toEqual([
+    `State directory ${state} has group or other permissions; fix it with chmod 700 '${state}'\n`,
+  ]);
+  expect(await readFile(path, "utf8")).toBe(contents);
+  expect(await readdir(state)).toEqual(["tailscale-serve.json"]);
+  await expect(stat(join(state, "tailscale-serve.lock"))).rejects.toMatchObject({ code: "ENOENT" });
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(runner).not.toHaveBeenCalled();
 });
 
 test("a dead recorded pid reports no server and leaves files unchanged", async () => {
@@ -400,6 +427,7 @@ test("stop keeps the marker and warns the route may still exist when Tailscale i
   const marker = { target: "http://127.0.0.1:3636", dnsName: "hub.example.ts.net", pid: 2_000_000_000 };
   await mkdir(state, { recursive: true, mode: 0o700 });
   writeSecretFile(join(state, "tailscale-serve.json"), JSON.stringify(marker));
+  vi.spyOn(markers, "loopbackState").mockResolvedValue("refused");
   const kill = process.kill;
   vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
     if (pid !== marker.pid) return kill(pid, signal);

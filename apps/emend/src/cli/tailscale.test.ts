@@ -8,7 +8,7 @@ import { LIMITS } from "@emend/contract";
 import { afterEach, expect, onTestFinished, test, vi } from "vitest";
 import { run } from "../main.ts";
 import * as stateFiles from "../state/files.ts";
-import { StateFolderWriteError, writeSecretFile } from "../state/files.ts";
+import { StateDirModeError, StateFolderWriteError, writeSecretFile } from "../state/files.ts";
 import * as executables from "./executable.ts";
 import { CliError } from "./http.ts";
 import * as reads from "./publish/read.ts";
@@ -287,8 +287,8 @@ const dnsName = "hub.example.ts.net";
 const ownership = (port = 3636, pid = process.pid) => ({ target: `http://127.0.0.1:${port}`, dnsName, pid });
 function markerPid(state: "running" | "ESRCH" | "EPERM" = "ESRCH") {
   const owner = 2_000_000_000;
-  // A live pid counts as the owner only while its port answers; tests set other answers.
-  vi.spyOn(markers, "loopbackState").mockResolvedValue("open");
+  // Recovery fixtures use closed ports; live-owner fixtures use open ports.
+  vi.spyOn(markers, "loopbackState").mockResolvedValue(state === "ESRCH" ? "refused" : "open");
   const kill = process.kill;
   vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
     if (pid !== owner) return kill(pid, signal);
@@ -358,6 +358,71 @@ async function stopState(env: NodeJS.ProcessEnv) {
   });
   return { code, stdout, stderr };
 }
+
+test("stale-route cleanup refuses a loose state folder before reading its marker", async () => {
+  const f = await ownedFake(route(), ownership(3636, markerPid()));
+  const before = await readFile(f.path);
+  await chmod(f.stateDir, 0o770);
+  const readMarker = vi.spyOn(markers, "readTailscaleMarker");
+  await expect(removeStaleTailscaleServe(f.stateDir, f.env)).rejects.toBeInstanceOf(StateDirModeError);
+  expect(readMarker).not.toHaveBeenCalled();
+  expect(await readFile(f.path)).toEqual(before);
+  expect((await stat(f.stateDir)).mode & 0o777).toBe(0o770);
+  await expect(lstat(join(f.stateDir, "tailscale-serve.lock"))).rejects.toMatchObject({ code: "ENOENT" });
+  await expect(f.calls()).rejects.toMatchObject({ code: "ENOENT" });
+  expect(JSON.parse(await readFile(f.configPath, "utf8"))).toEqual(route());
+});
+
+test("stale-route cleanup leaves a missing state folder absent", async () => {
+  const f = await ownedFake({}, null);
+  await rm(f.stateDir, { recursive: true });
+  expect(await removeStaleTailscaleServe(f.stateDir, f.env)).toEqual({ removed: false });
+  await expect(lstat(f.stateDir)).rejects.toMatchObject({ code: "ENOENT" });
+  await expect(f.calls()).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test.each(["open", "unknown", "refused"] as const)(
+  "stale-route cleanup checks a dead pid's %s port before removing its route",
+  async (answer) => {
+    const f = await ownedFake(route(), ownership(3636, markerPid()));
+    const before = await readFile(f.path);
+    const probe = vi.mocked(markers.loopbackState).mockResolvedValue(answer);
+    expect(await removeStaleTailscaleServe(f.stateDir, f.env)).toEqual(
+      answer === "refused" ? { removed: true, dnsName } : { removed: false },
+    );
+    expect(probe).toHaveBeenCalledWith(3636);
+    if (answer === "refused") {
+      expect(await f.args()).toEqual([
+        ["serve", "status", "--json"],
+        ["serve", "--https=443", "off"],
+      ]);
+      await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(JSON.parse(await readFile(f.configPath, "utf8"))).toEqual({});
+    } else {
+      await expect(f.calls()).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(lstat(join(f.stateDir, "tailscale-serve.lock"))).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await readFile(f.path)).toEqual(before);
+      expect(JSON.parse(await readFile(f.configPath, "utf8"))).toEqual(route());
+    }
+  },
+);
+
+test.each(["open", "unknown"] as const)(
+  "startup preserves another target with a dead pid while its port is %s",
+  async (answer) => {
+    const owner = markerPid();
+    const f = await ownedFake(route(4000), ownership(4000, owner));
+    const before = await readFile(f.path);
+    const probe = vi.mocked(markers.loopbackState).mockResolvedValue(answer);
+    await expect(f.setup()).rejects.toThrow(
+      `another emend server (process ${owner}) serves port 443 of Tailscale Serve; stop that server, then try again.`,
+    );
+    expect(probe).toHaveBeenCalledWith(4000);
+    expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+    expect(await readFile(f.path)).toEqual(before);
+    expect(JSON.parse(await readFile(f.configPath, "utf8"))).toEqual(route(4000));
+  },
+);
 
 test("stop removes a crashed server route when no server runs", async () => {
   const f = await ownedFake(route(), ownership(3636, markerPid()));
@@ -1058,6 +1123,7 @@ test("stop waits for the route lock and skips off when a server adopted the rout
   const adopted = ownership();
   const clock = waiting(() => {
     writeSecretFile(f.path, JSON.stringify(adopted));
+    vi.mocked(markers.loopbackState).mockResolvedValue("open");
     unlock();
   });
   expect(await removeStaleTailscaleServe(f.stateDir, f.env, clock)).toEqual({ removed: false });
@@ -1091,6 +1157,7 @@ test("startup recovery of another target waits for the route lock and yields to 
   const adopted = ownership(4000);
   const clock = waiting(() => {
     writeSecretFile(f.path, JSON.stringify(adopted));
+    vi.mocked(markers.loopbackState).mockResolvedValue("open");
     unlock();
   });
   await expect(

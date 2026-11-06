@@ -1,5 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { basename, delimiter, dirname, isAbsolute } from "node:path";
+import { stat } from "node:fs/promises";
+import { basename, delimiter, dirname, isAbsolute, resolve } from "node:path";
+import { StateDirModeError, stateAccessError } from "../state/files.ts";
 import { escapeReference } from "./escape.ts";
 import { findExecutable } from "./executable.ts";
 import { CliError } from "./http.ts";
@@ -291,16 +293,8 @@ function otherHttpsPorts(config: unknown, dnsName?: string): boolean {
 function markerPort(route: TailscaleRoute): number {
   return Number(new URL(route.target).port) || 80;
 }
-/**
- * A pid alone proves nothing after a reboot. A server listens on its marker's port for as long
- * as its route exists, so a live pid counts only while that port still accepts a connection.
- */
+// Another state folder can own the same port even after the recorded pid exits.
 async function ownerRunning(route: TailscaleRoute): Promise<boolean> {
-  try {
-    process.kill(route.pid, 0);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
-  }
   return (await loopbackState(markerPort(route))) !== "refused";
 }
 const sameMarker = (a: TailscaleRoute, b: TailscaleRoute) =>
@@ -408,7 +402,14 @@ export async function removeStaleTailscaleServe(
 ): Promise<
   { removed: false } | { removed: true; dnsName: string } | { removed: false; notInstalled: true; dnsName: string }
 > {
-  // No marker, an invalid one or a live owner means nothing to do: no lock file, no tailscale call.
+  const dir = resolve(stateDir);
+  try {
+    if ((await stat(dir)).mode & 0o077) throw new StateDirModeError(dir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { removed: false };
+    throw stateAccessError(stateDir, error);
+  }
+  // No valid marker or a port still in use means no lock file and no tailscale call.
   const marker = await readTailscaleMarker(stateDir);
   if (marker.kind !== "valid" || (await ownerRunning(marker.route))) return { removed: false };
   const route = marker.route;
