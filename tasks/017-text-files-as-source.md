@@ -59,7 +59,6 @@ text into the next revision; the tests above pass in `pnpm verify`, and the thre
 - Rules to read first: `AGENTS.md`, `.claude/rules/content-isolation.md`,
   `.claude/rules/api-and-auth.md`, `.claude/rules/cli.md`.
 - No new dependency without the owner's approval.
-- Never write anything about a hosted or commercial emend service into this repository.
 - Done 2026-11-05: source docs are Shiki tokens (never HTML) in `text/plain` doc rows, with a
   `source-lines` target, per-revision line, byte and highlight budgets, progressive line mounting
   and a folder walk that skips secret-looking, binary, oversized and unreadable files. Follow-ups:
