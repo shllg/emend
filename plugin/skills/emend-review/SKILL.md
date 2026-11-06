@@ -172,7 +172,7 @@ A writeup can show images, such as before and after screenshots of a UI change.
 - List it under `media` in the manifest with a `path` and a `source`.
 - Reference it from any writeup section with `![Alt](path)`. The alt text becomes the caption.
 - Put a before and an after image in one paragraph, with alt text "Before" and "After", to show them side by side.
-- Use PNG, JPEG, GIF, WebP or AVIF only. Each file is at most 8 MiB. A review holds at most 50.
+- Use PNG, JPEG, GIF, WebP or AVIF only. Each file is at most 25 MiB. A review holds at most 50.
 - Only listed paths render. Any other image reference in the writeup is dropped.
 - Remote image URLs do not show. List the file under `media` instead.
 - Images do not render in Markdown docs.

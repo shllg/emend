@@ -133,7 +133,7 @@ export function createApp(deps: AppDeps) {
         ? LIMITS.publicJsonBytes
         : LIMITS.requestJsonBytes;
     if (json) checkContentLength(c, limit);
-    if (blobUpload) checkContentLength(c, LIMITS.htmlDocBytes);
+    if (blobUpload) checkContentLength(c, LIMITS.assetBytes);
     if (endpoint?.scope !== "public") {
       const authorization = c.req.header("Authorization");
       let principal = authorization !== undefined ? await verifyBearer(deps.db, authorization, deps.now()) : null;

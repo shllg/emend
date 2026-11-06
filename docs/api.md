@@ -726,9 +726,9 @@ diffs have no blobs. Source filenames never leave the CLI.
 
 `HEAD /api/v1/blobs/:sha256` returns 204 for an owner's blob whose content is stored at the recorded
 size, otherwise 404 `not_found` (a row without its file counts as missing, so the client uploads it again).
-`PUT` takes raw bytes with a required nonnegative integer `Content-Length`, at most
-`htmlDocBytes`, and returns 204. Missing/malformed length or hash is 400 `invalid_request`;
-hash or actual length mismatch is 400 `blob_mismatch`; excess size is 413 `too_large`.
+`PUT` takes raw bytes with a required nonnegative integer `Content-Length`, at most `assetBytes`,
+the largest limit for a doc, asset or diff side, and returns 204. Missing/malformed length or hash is
+400 `invalid_request`; hash or actual length mismatch is 400 `blob_mismatch`; excess size is 413 `too_large`.
 Content-Length is checked first; credentials and scope are checked before reading any body bytes.
 Blob lookups never expose another owner's content.
 
@@ -746,6 +746,8 @@ reuse rendered results and retry snapshot/placement at most three times. A disco
 is abandoned before commit and its workers are stopped. The CLI publish deadline is 30 seconds
 for a slot, plus 15 seconds, plus 10 seconds per writeup/Markdown/source doc, plus three 30-second
 placement attempts. A timeout reports "the server did not answer in time; nothing was published".
+Each blob upload of a CLI publish allows 5 seconds plus 1 second per MiB, rounded up (30 seconds for a
+25 MiB asset); an attach copy allows 30 seconds per blob.
 Placement exceeding 30 seconds returns 413 `too_large` with "The placement timed out."
 Other placement failures return 400 `invalid_request` with "The comments could not be placed."
 These failures never leave a partial revision.
@@ -769,7 +771,7 @@ and cannot contain NUL, C0 controls or DEL.
 SVG and video are refused), has no segment starting with `.`, is unique among media, and never
 equals a doc's path. `source` follows the doc `source` rules. The CLI resolves `source ?? path`
 exactly like a doc source (the worktree or a `docRoots` folder, regular files only, no symlink
-out, none in the git folder), and reads at most `assetBytes` (8 MiB) from each. The real source's
+out, none in the git folder), and reads at most `assetBytes` (25 MiB) from each. The real source's
 extension must equal the path's extension, ignoring case. Each image is published as a
 parentless `asset` file and counts toward `filesPerRevision` and `revisionBytes`. A media path
 that equals an HTML doc's asset path is refused. The writeup embeds an image with
@@ -1147,8 +1149,8 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `diffSideBytes` | 1048576 bytes shown per side |
 | `markdownDocBytes` | 1048576 bytes |
 | `htmlDocBytes` | 8388608 bytes |
-| `assetBytes` | 8388608 bytes per asset |
-| `htmlDocWithAssetsBytes` | 20971520 bytes combined |
+| `assetBytes` | 26214400 bytes per asset |
+| `htmlDocWithAssetsBytes` | 52428800 bytes combined |
 | `revisionBytes` | 268435456 bytes for writeup source JSON and unique referenced blobs; checked before reading content |
 | `blocksPerRevision` | 100000 rendered blocks across every path, including the writeup |
 | `renderedBytesPerRevision` | 268435456 rendered JSON bytes across every path, including the writeup |

@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { LIMITS } from "@emend/contract";
 import { beforeEach, expect, onTestFinished, test } from "vitest";
+import { blobs as metadata } from "../../db/schema.ts";
 import { testDb } from "../../db/test-support.ts";
 import { BlobStore } from "../../store/blobs.ts";
 import { createApp } from "../app.ts";
@@ -100,6 +101,51 @@ test("blob upload checks hash and actual size; HEAD is owner scoped; publish use
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({ revision: 1, placed: 0, unplaced: 0 });
 });
+test("blob upload accepts the asset byte limit and refuses one byte over", async () => {
+  const bytes = new Uint8Array(LIMITS.assetBytes);
+  const path = `/blobs/${sha(bytes)}`;
+  expect((await request(path, "PUT", bytes, { "Content-Length": String(LIMITS.assetBytes) })).status).toBe(204);
+  expect((await request(path, "HEAD")).status).toBe(204);
+  const response = await request(path, "PUT", undefined, { "Content-Length": String(LIMITS.assetBytes + 1) });
+  expect(response.status).toBe(413);
+  expect(await response.json()).toMatchObject({ error: { code: "too_large" } });
+});
+
+test("blob upload refuses streamed bytes over the asset limit despite an allowed declared length", async () => {
+  const hash = "e".repeat(64);
+  const path = `/blobs/${hash}`;
+  const chunk = new Uint8Array(64 * 1024);
+  let remaining = LIMITS.assetBytes + 1;
+  const body = new ReadableStream(
+    {
+      pull(controller) {
+        const length = Math.min(remaining, chunk.length);
+        controller.enqueue(chunk.subarray(0, length));
+        remaining -= length;
+        if (remaining === 0) controller.close();
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  const raw = new Request(`${origin}/api/v1${path}`, {
+    method: "PUT",
+    headers: {
+      Host: "127.0.0.1:3636",
+      Authorization: `Bearer ${agent}`,
+      "Content-Length": String(LIMITS.assetBytes),
+    },
+    body,
+    duplex: "half",
+  } as RequestInit);
+  const response = await app.request(raw);
+  expect(response.status).toBe(413);
+  expect(await response.json()).toMatchObject({ error: { code: "too_large" } });
+  expect(remaining).toBe(0);
+  expect((await request(path, "HEAD")).status).toBe(404);
+  // Temporary uploads live beside the final blob, without a separate staging folder.
+  expect(await readdir(join(f.dir, "state", "blobs", hash.slice(0, 2)))).toEqual([]);
+});
+
 test("raw upload validates length and hash and authenticates before pulling bytes", async () => {
   for (const length of [undefined, "-1", "1.5", "bad"]) {
     const response = await request(
@@ -117,7 +163,7 @@ test("raw upload validates length and hash and authenticates before pulling byte
         `/blobs/${"a".repeat(64)}`,
         "PUT",
         undefined,
-        { "Content-Length": String(LIMITS.htmlDocBytes + 1) },
+        { "Content-Length": String(LIMITS.assetBytes + 1) },
         "invalid",
       )
     ).status,
@@ -144,11 +190,21 @@ test("raw upload validates length and hash and authenticates before pulling byte
 });
 
 test("shared assets count against each HTML doc's bundle limit", async () => {
-  const store = new BlobStore(f.db, join(f.dir, "state"));
-  const small = await store.put(f.ownerId, Buffer.alloc(1024, 32), "text/html");
-  const large = await store.put(f.ownerId, Buffer.alloc(8 * 1024 ** 2, 32), "text/html");
-  const a = await store.put(f.ownerId, Buffer.alloc(8 * 1024 ** 2, 65), "image/png");
-  const b = await store.put(f.ownerId, Buffer.alloc(8 * 1024 ** 2, 66), "image/png");
+  const [small, large, a, b] = ["a".repeat(64), "b".repeat(64), "c".repeat(64), "d".repeat(64)];
+  // The first doc fits exactly; the shared assets put the second doc one byte over.
+  await f.db.query((q) =>
+    q.insert(metadata).values([
+      { ownerId: f.ownerId, sha256: small, size: LIMITS.htmlDocBytes - 1, mediaType: "text/html" },
+      { ownerId: f.ownerId, sha256: large, size: LIMITS.htmlDocBytes, mediaType: "text/html" },
+      { ownerId: f.ownerId, sha256: a, size: LIMITS.assetBytes, mediaType: "image/png" },
+      {
+        ownerId: f.ownerId,
+        sha256: b,
+        size: LIMITS.htmlDocWithAssetsBytes - LIMITS.assetBytes - (LIMITS.htmlDocBytes - 1),
+        mediaType: "image/png",
+      },
+    ]),
+  );
   const base = { oldPath: null, oldBlob: null, flag: null };
   const response = await request(
     "/publish",

@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { mkdir, truncate, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { ImportBundle, importRowCount, indexImportBundle, LIMITS, RevisionView } from "@emend/contract";
 import * as core from "@emend/core";
 import { and, eq, sql } from "drizzle-orm";
@@ -230,6 +232,64 @@ test("regenerates hostile rendered content from source and preserves doc asset a
   const response = await f.app.request(`http://127.0.0.1:3636${assetUrl}`, { headers: { Host: "127.0.0.1:3636" } });
   expect(response.status).toBe(200);
   expect(await response.text()).toBe("body { color: blue; }");
+});
+
+test.each([
+  ["asset", 0],
+  ["asset", 1],
+  ["HTML doc and assets", 0],
+  ["HTML doc and assets", 1],
+] as const)("import enforces the %s byte limit plus %i", async (kind, over) => {
+  const input = await bundle(f);
+  const doc = required(input.files[0]);
+  const html = await f.deps.blobs.get(f.ownerId, doc.newBlob);
+  if (!html) throw new Error("Missing HTML fixture");
+  const sizes =
+    kind === "asset"
+      ? [LIMITS.assetBytes + over]
+      : [LIMITS.assetBytes, LIMITS.htmlDocWithAssetsBytes - html.length - LIMITS.assetBytes + over];
+  const assets = sizes.map((size, i) => ({
+    ownerId: f.ownerId,
+    sha256: String(i).repeat(64),
+    size,
+    mediaType: "image/png",
+  }));
+  // Import checks asset sizes and file presence without reading their bytes.
+  await f.deps.db.query((q) => q.insert(tables.blobs).values(assets));
+  for (const asset of assets) {
+    const folder = join(f.dir, "state", "blobs", asset.sha256.slice(0, 2));
+    const path = join(folder, asset.sha256);
+    await mkdir(folder, { recursive: true, mode: 0o700 });
+    await writeFile(path, "", { mode: 0o600 });
+    await truncate(path, asset.size);
+  }
+  const assetFiles = assets.map((asset, i) => ({
+    ...doc,
+    id: randomUUID(),
+    path: `asset-${i}.png`,
+    role: "asset",
+    mediaType: "image/png",
+    newBlob: asset.sha256,
+    parentDocId: doc.id,
+    ord: i + 1,
+  }));
+  const withAssets = {
+    ...input,
+    files: [...input.files, ...assetFiles],
+    docAssets: assetFiles.map((asset) => ({ revisionId: doc.revisionId, docId: doc.id, assetId: asset.id })),
+  };
+  const before = await snapshot(f);
+  const get = vi.spyOn(f.deps.blobs, "get");
+  const response = await f.importRequest("/import", withAssets);
+  if (over) {
+    await error(response, 413, "too_large");
+    expect(await snapshot(f)).toEqual(before);
+    expect(get.mock.calls.some(([, hash]) => hash === doc.newBlob)).toBe(false);
+  } else {
+    expect(response.status).toBe(201);
+    expect(get.mock.calls.some(([, hash]) => hash === doc.newBlob)).toBe(true);
+  }
+  expect(get.mock.calls.some(([, hash]) => assets.some((asset) => asset.sha256 === hash))).toBe(false);
 });
 
 test("a round trip keeps links and repoUrl from the source blob and links issue numbers again", async () => {

@@ -47,8 +47,8 @@ test("exports the v1 API, limits, file vocabulary and reserved fallback", () => 
     sourceLinesPerRevision: 200000,
     sourceBytesPerRevision: 16777216,
     htmlDocBytes: 8388608,
-    assetBytes: 8388608,
-    htmlDocWithAssetsBytes: 20971520,
+    assetBytes: 26214400,
+    htmlDocWithAssetsBytes: 52428800,
     revisionBytes: 268435456,
     blocksPerRevision: 100000,
     renderedBytesPerRevision: 268435456,
@@ -83,6 +83,18 @@ test("exports the v1 API, limits, file vocabulary and reserved fallback", () => 
   expect(FileStatus.options).toEqual(["added", "modified", "deleted", "renamed", "mode-changed"]);
   expect(FileFlag.options).toEqual(["binary", "oversized"]);
   expect(OTHER_TOPIC).toEqual({ slug: "other", title: "Other changes" });
+});
+
+test.each([
+  ["diff side", LIMITS.diffSideBytes],
+  ["Markdown doc", LIMITS.markdownDocBytes],
+  ["HTML doc", LIMITS.htmlDocBytes],
+  ["publish JSON", LIMITS.publishJsonBytes],
+  // Import caps the serialized writeup source blob at publishJsonBytes.
+  ["writeup source", LIMITS.publishJsonBytes],
+  ["writeup strings", LIMITS.writeupBytes],
+] as const)("the asset upload ceiling covers the %s blob limit", (_role, limit) => {
+  expect(LIMITS.assetBytes).toBeGreaterThanOrEqual(limit);
 });
 
 test("assigns only the specified scopes to each token kind", () => {

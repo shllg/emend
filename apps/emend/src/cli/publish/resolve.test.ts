@@ -68,14 +68,24 @@ test("HTML and each asset and their cumulative bytes have pre-read limits", asyn
     const input = { ...manifest(), files: [{ path: "plan.html", role: "doc" as const }] };
     const collect = () =>
       resolvePublish(input, { manifest: "synthetic", key: "plan" }, join(dir, "state"), "instance", root, () => {});
-    await writeFile(join(root, "plan.html"), '<img src="a.png"><img src="b.png"><img src="c.png">');
-    for (const name of ["a.png", "b.png", "c.png"]) {
-      await writeFile(join(root, name), "");
-      await truncate(join(root, name), LIMITS.assetBytes);
-    }
-    await expect(collect()).rejects.toThrow("HTML doc and assets exceed");
+    await writeFile(join(root, "plan.html"), '<img src="a.png">');
+    await writeFile(join(root, "a.png"), "");
+    await truncate(join(root, "a.png"), LIMITS.assetBytes);
+    const single = await collect();
+    const asset = single.request.files.find((file) => file.role === "asset");
+    expect(single.blobs.get(asset?.newBlob ?? "")?.size).toBe(LIMITS.assetBytes);
     await truncate(join(root, "a.png"), LIMITS.assetBytes + 1);
     await expect(collect()).rejects.toThrow("asset exceeds");
+    await truncate(join(root, "a.png"), LIMITS.assetBytes);
+    const html = '<img src="a.png"><img src="b.png">';
+    await writeFile(join(root, "plan.html"), html);
+    await writeFile(join(root, "b.png"), "");
+    const remaining = LIMITS.htmlDocWithAssetsBytes - Buffer.byteLength(html) - LIMITS.assetBytes;
+    await truncate(join(root, "b.png"), remaining);
+    const combined = await collect();
+    expect([...combined.blobs.values()].reduce((sum, blob) => sum + blob.size, 0)).toBe(LIMITS.htmlDocWithAssetsBytes);
+    await truncate(join(root, "b.png"), remaining + 1);
+    await expect(collect()).rejects.toThrow("HTML doc and assets exceed");
     await truncate(join(root, "plan.html"), LIMITS.htmlDocBytes + 1);
     await expect(collect()).rejects.toThrow("size limit");
   } finally {

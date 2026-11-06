@@ -303,10 +303,34 @@ test("manifest shared-asset request, blob bytes and read counts match HEAD", asy
   });
 });
 
+test("shortcut assets accept exact per-file and combined limits and refuse one byte over", async () => {
+  const f = await fixture();
+  const doc = await f.file("plan.html", '<img src="a.png">');
+  const a = await f.file("a.png", "");
+  await fs.truncate(a, LIMITS.assetBytes);
+  const collect = await f.prepare(["plan.html"]);
+  const single = await collect();
+  const asset = single.request.files.find((file) => file.role === "asset");
+  expect(single.blobs.get(asset?.newBlob ?? "")?.size).toBe(LIMITS.assetBytes);
+  await fs.truncate(a, LIMITS.assetBytes + 1);
+  await expect(collect()).rejects.toThrow("asset exceeds its size limit");
+  await fs.truncate(a, LIMITS.assetBytes);
+  const html = '<img src="a.png"><img src="b.png">';
+  await fs.writeFile(doc, html);
+  const b = await f.file("b.png", "");
+  const remaining = LIMITS.htmlDocWithAssetsBytes - Buffer.byteLength(html) - LIMITS.assetBytes;
+  await fs.truncate(b, remaining);
+  const combined = await collect();
+  expect([...combined.blobs.values()].reduce((sum, blob) => sum + blob.size, 0)).toBe(LIMITS.htmlDocWithAssetsBytes);
+  await fs.truncate(b, remaining + 1);
+  await expect(collect()).rejects.toThrow("HTML doc and assets exceed their size limit");
+});
+
 test.each([false, true])("growing assets respect every doc budget during reads (shared: %s)", async (shared) => {
   const f = await fixture();
   const names = Array.from({ length: shared ? 3 : 64 }, (_, i) => `image-${i}.png`);
   const sources = await Promise.all(names.map((name) => f.file(name, "x")));
+  const html = names.map((name) => `<img src="${name}">`).join("");
   await f.file(
     "a.html",
     names
@@ -314,7 +338,7 @@ test.each([false, true])("growing assets respect every doc budget during reads (
       .map((name) => `<img src="${name}">`)
       .join(""),
   );
-  if (shared) await f.file("b.html", names.map((name) => `<img src="${name}">`).join(""));
+  if (shared) await f.file("b.html", html);
   const collect = await f.prepare(shared ? ["a.html", "b.html"] : ["a.html"]);
   const original = reads.readRegular;
   let grown = false;
@@ -339,10 +363,11 @@ test.each([false, true])("growing assets respect every doc budget during reads (
     () => "published",
     (error: Error) => error.message,
   );
+  const fittingAssets = Math.floor((LIMITS.htmlDocWithAssetsBytes - Buffer.byteLength(html)) / LIMITS.assetBytes);
   expect({ result, bytesRead, completedReads }).toEqual({
     result: "HTML doc and assets exceed their size limit",
-    bytesRead: 2 * LIMITS.assetBytes,
-    completedReads: 2,
+    bytesRead: fittingAssets * LIMITS.assetBytes,
+    completedReads: fittingAssets,
   });
 });
 

@@ -39,7 +39,7 @@ export function blobRoutes(app: Hono<AppEnv>, deps: AppDeps) {
       }
     }
     try {
-      await deps.blobs.putStream(c.get("principal").ownerId, chunks(), sha.data, Number(length), LIMITS.htmlDocBytes);
+      await deps.blobs.putStream(c.get("principal").ownerId, chunks(), sha.data, Number(length), LIMITS.assetBytes);
     } catch (error) {
       if (error instanceof BlobMismatchError) throw new ApiError("blob_mismatch");
       if (error instanceof BlobTooLargeError) throw new ApiError("too_large");

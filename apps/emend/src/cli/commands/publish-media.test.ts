@@ -135,6 +135,17 @@ test("a missing source names the source", async () => {
   );
 });
 
+test("an image at the asset byte limit publishes", async () => {
+  const f = await fixture();
+  await mkdir(join(f.root, "media"));
+  await writeFile(join(f.root, "media", "before.png"), png);
+  await truncate(join(f.root, "media", "before.png"), LIMITS.assetBytes);
+  expect(await f.publish({ media: [{ path: "media/before.png" }] })).toBe(0);
+  expect(f.stderr).toEqual([expect.stringMatching(/^emend: published revision 1:/)]);
+  expect(f.uploaded).toHaveLength(1);
+  expect(f.published[0]?.files).toEqual([expect.objectContaining({ path: "media/before.png", role: "asset" })]);
+});
+
 test("an oversized file is refused", async () => {
   const f = await fixture();
   await mkdir(join(f.root, "media"));

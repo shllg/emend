@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { PublishRequest } from "@emend/contract";
+import { LIMITS, type PublishRequest } from "@emend/contract";
 import { renderDoc, renderWriteup } from "@emend/core";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -207,24 +207,65 @@ test("places renamed lines across an unplaced revision and records only newly ch
   ).toEqual([]);
 });
 
-test("server rejects per-role and cumulative sizes before reading blob bytes", async () => {
+test.each([
+  ["plan.md", LIMITS.markdownDocBytes],
+  ["plan.html", LIMITS.htmlDocBytes],
+] as const)("server rejects oversized %s before reading blob bytes", async (path, limit) => {
   const { blobs: metadata } = await import("../../db/schema.ts");
   const hash = "c".repeat(64);
   await f.db.query((q) =>
-    q.insert(metadata).values({ ownerId: f.ownerId, sha256: hash, size: 1048577, mediaType: "text/plain" }),
+    q.insert(metadata).values({ ownerId: f.ownerId, sha256: hash, size: limit + 1, mediaType: "text/plain" }),
   );
-  const doc = { path: "plan.md", role: "doc" as const, oldPath: null, oldBlob: null, newBlob: hash, flag: null };
+  const get = vi.spyOn(blobs, "get");
+  const doc = { path, role: "doc" as const, oldPath: null, oldBlob: null, newBlob: hash, flag: null };
   await expect(publish({ ...input(), files: [doc] })).rejects.toMatchObject({ code: "too_large" });
-  await f.db.query((q) => q.update(metadata).set({ size: 8388608 }).where(eq(metadata.ownerId, f.ownerId)));
-  await expect(
-    publish({
-      ...input(),
-      files: [
-        { ...doc, path: "plan.html", assets: ["a.png", "b.png"] },
-        ...["a.png", "b.png"].map((path) => ({ ...doc, path, role: "asset" as const, parent: "plan.html" })),
-      ],
-    }),
-  ).rejects.toMatchObject({ code: "too_large" });
+  expect(get).not.toHaveBeenCalled();
+});
+
+test.each([
+  ["asset", 0],
+  ["asset", 1],
+  ["HTML doc and assets", 0],
+  ["HTML doc and assets", 1],
+] as const)("server enforces the %s byte limit plus %i before reading blob bytes", async (kind, over) => {
+  const { blobs: metadata } = await import("../../db/schema.ts");
+  const html = Buffer.from('<img src="a.png"><img src="b.png">');
+  const hash = await blobs.put(f.ownerId, html, "text/html");
+  const sizes =
+    kind === "asset"
+      ? [LIMITS.assetBytes + over]
+      : [LIMITS.assetBytes, LIMITS.htmlDocWithAssetsBytes - html.length - LIMITS.assetBytes + over];
+  // Assets need only metadata; a content read would fail because no files exist.
+  const assets = sizes.map((size, i) => ({
+    ownerId: f.ownerId,
+    sha256: String(i).repeat(64),
+    size,
+    mediaType: "image/png",
+  }));
+  await f.db.query((q) => q.insert(metadata).values(assets));
+  const paths = sizes.map((_, i) => `${String.fromCharCode(97 + i)}.png`);
+  const get = vi.spyOn(blobs, "get");
+  const base = { oldPath: null, oldBlob: null, flag: null };
+  const publishing = publish({
+    ...input(),
+    files: [
+      { ...base, path: "plan.html", role: "doc", newBlob: hash, assets: paths },
+      ...assets.map((asset, i) => ({
+        ...base,
+        path: paths[i] ?? "",
+        role: "asset" as const,
+        parent: "plan.html",
+        newBlob: asset.sha256,
+      })),
+    ],
+  });
+  if (over) {
+    await expect(publishing).rejects.toMatchObject({ code: "too_large" });
+    expect(get).not.toHaveBeenCalled();
+  } else {
+    await expect(publishing).resolves.toMatchObject({ revision: 1 });
+    expect(get.mock.calls.map(([, sha]) => sha)).toEqual([hash]);
+  }
 });
 test("render failure rolls back a writeup, doc failure degrades, placement timeout refuses", async () => {
   const hash = await blobs.put(f.ownerId, Buffer.from("markdown"), "text/plain");
@@ -355,7 +396,7 @@ test("revision byte budget rejects unique metadata before any blob read", async 
       hashes.map((sha256) => ({
         ownerId: f.ownerId,
         sha256,
-        size: 8388608,
+        size: LIMITS.htmlDocBytes,
         mediaType: "text/html",
       })),
     ),
@@ -378,7 +419,7 @@ test("revision byte budget rejects unique metadata before any blob read", async 
 });
 
 test("duplicate HTML is read once for metadata; binary and asset content stay unread", async () => {
-  const html = await blobs.put(f.ownerId, Buffer.alloc(8388608, 32), "text/html");
+  const html = await blobs.put(f.ownerId, Buffer.alloc(LIMITS.htmlDocBytes, 32), "text/html");
   const asset = await blobs.put(f.ownerId, Buffer.from([0, 1, 2]), "image/png");
   const get = vi.spyOn(blobs, "get");
   await publish(
