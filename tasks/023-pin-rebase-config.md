@@ -55,10 +55,13 @@ the fix and passes after, `pnpm verify` is green, and the reviews are clean.
   resolves as with git's merge defaults).
 - Pinned with a test: the flags `--strategy=ort` (the sequencer reads its default strategy from
   `pull.twohead`, where the first value wins, so `-c` cannot pin it), `--no-rebase-merges`,
-  `--no-update-refs` and `--reapply-cherry-picks` with `--empty=drop` (no branch commit is skipped
-  by a whitespace-insensitive patch match; a commit that becomes empty is dropped).
+  `--no-update-refs` and `--reapply-cherry-picks` (no branch commit is skipped by a
+  whitespace-insensitive patch match). This one departs from git's default on purpose: a branch
+  commit that upstream already holds is replayed, so a change upstream later reverted stays in the
+  branch's diff against main, where review sees it.
 - Pinned without a test; each restates git's default as defence in depth: `merge.renameLimit=7000`,
-  `merge.renormalize=false`, `--no-autostash`, `--no-autosquash` and `--no-fork-point`.
+  `merge.renormalize=false`, `--empty=drop` (a commit that becomes empty is dropped),
+  `--no-autostash`, `--no-autosquash` and `--no-fork-point`.
 - Not pinned, no effect on a non-interactive rebase with an explicit upstream: `rebase.autoSquash`
   (interactive only), `rebase.forkPoint` (off when an upstream is given), `rebase.missingCommitsCheck`
   (todo edits only), `rebase.rescheduleFailedExec` (the todo holds only picks),

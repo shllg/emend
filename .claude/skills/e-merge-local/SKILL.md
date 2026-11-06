@@ -67,7 +67,9 @@ restate them here.
    1. Run `<main>/bin/wt digest --base main` and keep the printed value.
    2. Run `<main>/bin/wt rebase --onto main`. The first stdout line is `up-to-date`, `rebased` or
       `restacked`; `backup:` and `conflict:` lines follow. A non-conflict failure exits 1 and leaves
-      the branch at its old tip: report it and stop.
+      the branch at its old tip: report it and stop. One exception: an error that says the rebase
+      exited 0 with a wrong result means the branch may already be rewritten. The `backup:` ref in
+      that error holds the old tip. Report it and stop.
    3. Run `<main>/bin/wt digest --base main` again.
    4. Digests equal and the result was `rebased`: the change itself is unchanged and the approval
       still covers it. The new head (`git rev-parse HEAD`) replaces the approved head for this

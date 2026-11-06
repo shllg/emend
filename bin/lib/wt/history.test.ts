@@ -329,11 +329,11 @@ test("a rebase replays no todo line hidden in a subject under i18n.logOutputEnco
 
 test("a rebase does not skip a branch commit that matches an upstream one apart from whitespace", () =>
   scenario(({ env, fx, repo }) => {
-    commitFile(fx.main, "c.txt", 'cmd = "old"\n');
+    commitFile(fx.main, "c.txt", 'value = "old"\n');
     gitIn(fx.main, "push", "--quiet", "origin", "main");
     const wt = worktree(repo, "feat-a");
-    commitFile(wt, "c.txt", 'cmd = "rm -rf build"\n');
-    advanceOrigin(env, fx, "c.txt", 'cmd = "rm -rfbuild"\n');
+    commitFile(wt, "c.txt", 'value = "a b"\n');
+    advanceOrigin(env, fx, "c.txt", 'value = "ab"\n');
 
     const r = rebase(resolveRepo(wt), wt, "origin/main");
     assert.equal(r.result, "restacked");
