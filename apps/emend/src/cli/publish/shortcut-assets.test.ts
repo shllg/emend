@@ -176,15 +176,28 @@ test.each([false, true])("different walked boundaries remain merged (inner first
   const source = await f.file("outer/inner/logo.png", "synthetic image");
   const target = await f.file("outer/other.png", "synthetic image");
   const collect = await f.prepare(innerFirst ? ["outer/inner", "outer"] : ["outer", "outer/inner"]);
+  await fs.rm(source);
+  await fs.symlink(target, source);
+  const read = vi.spyOn(reads, "readRegular");
+  await expect(collect()).rejects.toThrow("symlink leaves the published folder: outer/inner");
+  expect(read.mock.calls.some(([path]) => path === source || path === target)).toBe(false);
+});
+
+test("a resolved shared asset uploads its retained bytes after a symlink swap", async () => {
+  const f = await fixture();
+  await f.file("outer/a.html", '<img src="inner/logo.png">');
+  await f.file("outer/inner/b.html", '<img src="logo.png">');
+  const source = await f.file("outer/inner/logo.png", "synthetic image");
+  const target = await f.file("outer/other.png", "synthetic replacement image");
+  const collect = await f.prepare(["outer", "outer/inner"]);
   const resolved = await collect();
   await fs.rm(source);
   await fs.symlink(target, source);
+  const read = vi.spyOn(reads, "readRegular");
   const blob = resolved.blobs.get(hash("synthetic image"));
   if (!blob) throw new Error("missing shared image");
   expect((await readBlob(hash("synthetic image"), blob)).toString()).toBe("synthetic image");
-  await expect(f.prepare(innerFirst ? ["outer/inner", "outer"] : ["outer", "outer/inner"])).rejects.toThrow(
-    "symlink leaves the published folder: outer/inner",
-  );
+  expect(read).not.toHaveBeenCalled();
 });
 
 // Resolving the cap-sized HTML reference lists exercises the publish JSON budget.

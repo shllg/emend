@@ -232,10 +232,9 @@ export async function resolvePublish(
     // Check the written alias here; sourcePath also checks its resolved target.
     outsideGitSegments(original, root);
     const sourceView = docViewOf(file) === "source";
-    const retained =
-      sourceView && options.docFolders?.has(file.path) && !options.docArguments?.has(file.path)
-        ? options.retainedSources?.get(original)
-        : undefined;
+    const walkedSource = sourceView && options.docFolders?.has(file.path) && !options.docArguments?.has(file.path);
+    const retained = walkedSource ? options.retainedSources?.get(original) : undefined;
+    if (walkedSource && !retained) throw new CliError("source changed before publish");
     const source = retained ? original : await sourcePath(original, roots, gitDirs, publishedFolders).catch(docError);
     const html = isRenderedHtmlDoc(file);
     const checkExtension = (path: string) => {

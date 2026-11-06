@@ -4,8 +4,12 @@ import { PublishResponse, RevisionView } from "@emend/contract";
 import { expect, it, vi } from "vitest";
 import { run } from "../../main.ts";
 import { directFixture } from "../direct-test-support.ts";
+import * as reads from "./read.ts";
 import { publishContext, resolvePublish } from "./resolve.ts";
+import { RetainedSources } from "./retained.ts";
 import { shortcutManifest } from "./shortcut.ts";
+
+vi.mock("./read.ts", async (original) => ({ ...(await original<typeof import("./read.ts")>()) }));
 
 it.each([
   ["config.yaml", [], "source"],
@@ -81,6 +85,39 @@ it("source aliases match exact extensions, case-insensitively, including extensi
   await expect(resolve("README", "LICENSE.txt")).rejects.toThrow("same extension");
 });
 
+it.each(["absent", "empty"])("a walked source doc refuses an %s retained cache without reading it", async (cache) => {
+  const f = await directFixture();
+  const source = join(f.source, "notes.txt");
+  await writeFile(source, "Synthetic public text");
+  const context = await publishContext(f.source, f.stateDir);
+  const read = vi.spyOn(reads, "readRegular");
+  const path = vi.spyOn(reads, "sourcePath");
+  await expect(
+    resolvePublish(
+      {
+        version: 1,
+        title: "Synthetic source",
+        topics: [],
+        files: [{ path: "notes.txt", role: "doc" }],
+        writeup: { overview: "", tldr: "", decisions: null, topics: {} },
+      },
+      {
+        key: "source",
+        docFolders: new Map([["notes.txt", [{ root: f.source, argument: "." }]]]),
+        docArguments: new Map(),
+        retainedSources: cache === "empty" ? new RetainedSources() : undefined,
+      },
+      f.stateDir,
+      null,
+      f.source,
+      () => {},
+      context,
+    ),
+  ).rejects.toThrow("source changed before publish");
+  expect(read.mock.calls.some(([file]) => file === source)).toBe(false);
+  expect(path.mock.calls.some(([file]) => file === source)).toBe(false);
+});
+
 it("a walked CSS or JS asset is also a source doc; source HTML pulls no assets", async () => {
   const f = await directFixture();
   await mkdir(join(f.source, "bundle"));
@@ -95,7 +132,7 @@ it("a walked CSS or JS asset is also a source doc; source HTML pulls no assets",
     const shortcut = await shortcutManifest({ paths: ["bundle"], source }, f.stateDir, f.source, context);
     const resolved = await resolvePublish(
       shortcut.manifest,
-      { key: "assets", docFolders: shortcut.docFolders },
+      { key: "assets", docFolders: shortcut.docFolders, retainedSources: shortcut.retainedSources },
       f.stateDir,
       null,
       f.source,
