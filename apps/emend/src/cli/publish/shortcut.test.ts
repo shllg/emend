@@ -1069,6 +1069,24 @@ test("the opened-file callback refuses a hidden real path before content reads",
 });
 
 const secretNameGroups = [
+  [
+    "deploy_key",
+    "ssh_host_ed25519_key",
+    "github_rsa",
+    "wg0.conf",
+    "keystore.properties",
+    "local.settings.json",
+    "auth.json",
+    "token.txt",
+    "api_key.txt",
+    "apiKeys.json",
+    "access_token",
+    "session.har",
+    "cookies.txt",
+    "my.cnf",
+    "rclone.conf",
+  ],
+  ["AUTH-TOKENS.json", "refresh token.txt", "tokens.txt", "github_dsa", "github_ecdsa", "github_ed25519", "wg.conf"],
   "pem key p12 pfx p8 jks keystore bks ppk der keytab kdbx".split(" ").map((ext) => `private.${ext}`),
   "gpg pgp asc ovpn tfvars tfstate kubeconfig env secret secrets".split(" ").map((ext) => `private.${ext}`),
   [
@@ -1137,6 +1155,8 @@ test.each(secretNameGroups.map((names) => [names]))(
 test("rendered doc names are exempt from secret skips, with and without source", async () => {
   const f = await fixture();
   const names = [
+    "api_keys.md",
+    "auth.md",
     "secret.MD",
     "credentials.markdown",
     "client_secret.HTML",
@@ -1161,6 +1181,69 @@ test("rendered doc names are exempt from secret skips, with and without source",
         .sort(),
     ).toEqual(names.sort());
   }
+});
+
+test("design token files still publish in folder walks", async () => {
+  const f = await fixture();
+  for (const name of ["tokens.json", "design-tokens.json"]) await f.file(`bundle/${name}`, "{}");
+  const capture = await f.capture();
+  const out = await f.publish("bundle");
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(out.stderr.filter((line) => line.includes("skipped"))).toEqual([]);
+  expect(capture.requests[0]?.files.map((file) => file.path)).toEqual(["design-tokens.json", "tokens.json"]);
+});
+
+test.each([
+  ["notes.txt", "-----BEGIN OPENSSH PRIVATE KEY-----"],
+  ["notes.txt", "-----BEGIN PRIVATE KEY-----"],
+  ["notes.txt", "PuTTY-User-Key-File-3: ssh-ed25519"],
+  ["notes.txt", "-----BEGIN RSA PRIVATE KEY-----"],
+])("walk skips a private-key header in %s (%s), but an explicit file publishes", async (name, header) => {
+  const f = await fixture();
+  await f.file(`bundle/${name}`, `Synthetic fixture\n${header}\nNot a real key\n`);
+  await f.file("bundle/readme.txt", "Synthetic public text");
+  const capture = await f.capture();
+  const walked = await f.publish("bundle");
+  expect(walked.code, walked.stderr.join("")).toBe(0);
+  expect(capture.requests.at(-1)?.files.map((file) => file.path)).toEqual(["readme.txt"]);
+  expect(walked.stderr.filter((line) => line.includes("skipped"))).toEqual([
+    `emend: skipped ${escapeReference(name)}: may hold a secret\n`,
+  ]);
+  for (const paths of [[`bundle/${name}`], ["bundle", `bundle/${name}`], [`bundle/${name}`, "bundle"]]) {
+    const explicit = await f.publish(...paths);
+    expect(explicit.code, explicit.stderr.join("")).toBe(0);
+    expect(capture.requests.at(-1)?.files.map((file) => file.path)).toContain(name);
+    expect(explicit.stderr.filter((line) => line.includes("skipped"))).toEqual([]);
+  }
+});
+
+test("private-key content warnings escape the listed path", async () => {
+  const f = await fixture();
+  await f.file("bundle/notes\u202e.txt", "-----BEGIN OPENSSH PRIVATE KEY-----\nNot a real key");
+  await f.file("bundle/readme.txt", "Synthetic public text");
+  const capture = await f.capture();
+  const out = await f.publish("bundle");
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(capture.requests[0]?.files.map((file) => file.path)).toEqual(["readme.txt"]);
+  expect(out.stderr.filter((line) => line.includes("skipped"))).toEqual([
+    "emend: skipped notes\\u{202e}.txt: may hold a secret\n",
+  ]);
+});
+
+test("private-key content skips share the warning cap with name skips", async () => {
+  const f = await fixture();
+  await f.file("bundle/readme.txt", "Synthetic public text");
+  await f.file("bundle/token.txt", "Synthetic placeholder");
+  for (let i = 0; i < SHORTCUT_LIMITS.warnings; i++)
+    await f.file(`bundle/notes-${i}.txt`, "-----BEGIN OPENSSH PRIVATE KEY-----\nNot a real key");
+  const capture = await f.capture();
+  const out = await f.publish("bundle");
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(capture.requests[0]?.files.map((file) => file.path)).toEqual(["readme.txt"]);
+  const warnings = out.stderr.filter((line) => line.includes("skipped"));
+  expect(warnings).toHaveLength(SHORTCUT_LIMITS.warnings + 1);
+  expect(warnings.slice(0, -1).every((line) => line.endsWith(": may hold a secret\n"))).toBe(true);
+  expect(warnings.at(-1)).toBe("emend: and 1 more files skipped\n");
 });
 
 test.each([

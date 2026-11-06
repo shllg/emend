@@ -48,7 +48,7 @@ The CLI runs inside repos under review, so treat those repos as hostile.
 - A source doc is UTF-8 without NUL; a named file that is not is refused, naming the argument. A
   walked file is skipped with a warning when its name looks binary or secret (keys, credentials,
   passwords, tfvars; Markdown and HTML names exempt), when it is too large or unreadable, or, shown
-  as source, not text. Folders named exactly `secret(s)` or `credential(s)`, in any case, below the
+  as source, not text or holding a private key. Folders named exactly `secret(s)` or `credential(s)`, in any case, below the
   argument are not entered. HTML assets keep their web-extension rule. A named file or folder still publishes.
   Never shrink the secret-name list.
 - The listing skips dotfiles and `node_modules`, checks each entry's type, and a regular file's

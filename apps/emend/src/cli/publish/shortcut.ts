@@ -149,7 +149,11 @@ export async function shortcutManifest(
     }
     if (!options.source && docViewOf({ path: actual }) === "rendered") continue;
     try {
-      decodeText(bytes);
+      const text = decodeText(bytes);
+      if (argument === undefined && /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----|PuTTY-User-Key-File-/.test(text)) {
+        docs.delete(actual);
+        skipped.set(actual, "may hold a secret");
+      }
     } catch {
       if (argument !== undefined) throw new CliError(`not a text file: ${escapeReference(argument)}`);
       docs.delete(actual);

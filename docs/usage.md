@@ -31,7 +31,7 @@ source, including Markdown and HTML, in the path shortcut only. It cannot combin
 without NUL and at most 1 MiB; explicitly named binary files are refused. A folder walk skips names
 that look like secrets (Markdown and HTML files publish whatever their name), folders named exactly
 `secret`, `secrets`, `credential` or `credentials` in any case below the folder argument, binary
-files, and files that are too large or unreadable. A file or folder named explicitly is published
+files, files that are too large or unreadable, and text files holding a private key. A file or folder named explicitly is published
 as named, so never name a credential file or a secrets folder explicitly. Name a public file the
 walk skipped, such as `passwords.ts`, to publish it. Skip warnings stop after 20 (`SHORTCUT_LIMITS.warnings`), followed by a count of
 additional skips. Each folder argument still gets a summary line counting the published files.
