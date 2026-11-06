@@ -6,6 +6,7 @@ import { and, eq } from "drizzle-orm";
 import type { Db, Queries } from "../db/client.ts";
 import { blobs } from "../db/schema.ts";
 import { ensurePrivateDir, ensureStateDir, syncDirectory, tightenSecretFile, writeSecretFile } from "../state/files.ts";
+import { type BlobRead, BlobReadCache } from "./blob-read.ts";
 
 export class BlobMismatchError extends Error {
   constructor() {
@@ -21,6 +22,7 @@ export const STAGE_PIN_MS = 15 * 60 * 1000;
 export class BlobStore {
   private readonly db: Db;
   private readonly dir: string;
+  private readonly reads = new BlobReadCache();
   // Per-sha queue, in this process only: file writes and the blobs row go in together, and the
   // removal of a file waits for them. Each tail never rejects.
   private readonly locks = new Map<string, Promise<unknown>>();
@@ -150,6 +152,21 @@ export class BlobStore {
     );
     if (!row) return null;
     return this.readStaged(sha, row.size);
+  }
+
+  async open(ownerId: string, sha: string, signal?: AbortSignal): Promise<BlobRead | null> {
+    if (!/^[0-9a-f]{64}$/.test(sha)) return null;
+    const row = await this.db.read((q) =>
+      q
+        .select({ size: blobs.size })
+        .from(blobs)
+        .where(and(eq(blobs.ownerId, ownerId), eq(blobs.sha256, sha)))
+        .get(),
+    );
+    if (!row) return null;
+    const file = this.path(sha);
+    ensurePrivateDir(dirname(file), this.dir);
+    return this.reads.open(file, sha, row.size, signal);
   }
 
   /** Trusted callers must hold metadata for bytes they staged themselves; no owner access is granted. */

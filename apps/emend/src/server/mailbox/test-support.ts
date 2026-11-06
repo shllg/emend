@@ -6,11 +6,31 @@ import { and, eq, sql } from "drizzle-orm";
 import { expect, vi } from "vitest";
 import { devices, instances, reviews, revisions } from "../../db/schema.ts";
 import { testDb } from "../../db/test-support.ts";
+import type { BlobRead } from "../../store/blob-read.ts";
 import { BlobStore } from "../../store/blobs.ts";
 import { type AppDeps, createApp } from "../app.ts";
 import { createToken, SESSION_MS } from "../auth/tokens.ts";
 import type { ReviewEvents } from "../events.ts";
 import { executeWork } from "../publish/work.ts";
+
+export function guardBlobReads(store: BlobStore): () => Promise<void> {
+  const reads = new Set<BlobRead>();
+  const open = store.open.bind(store);
+  // A plain wrapper survives restoreAllMocks, which many fixtures run before cleanup.
+  store.open = async (...args) => {
+    const read = await open(...args);
+    if (read) reads.add(read);
+    return read;
+  };
+  return async () => {
+    const leaked = [...reads].filter((read) => !read.closed);
+    reads.clear();
+    if (leaked.length === 0) return;
+    // Report the leak only after every close has settled, including any that reject.
+    await Promise.allSettled(leaked.map((read) => read.close()));
+    throw new Error(`${leaked.length} BlobRead${leaked.length === 1 ? "" : "s"} left open at fixture cleanup`);
+  };
+}
 
 export async function mailboxFixture() {
   const f = await testDb();
@@ -47,6 +67,7 @@ export async function mailboxFixture() {
       serverKey: "A".repeat(43),
     },
   };
+  const checkBlobReads = guardBlobReads(deps.blobs);
   const app = createApp(deps);
   const reviewId = randomUUID();
   await f.db.query((q) =>
@@ -130,8 +151,12 @@ export async function mailboxFixture() {
   return {
     ...f,
     async cleanup() {
-      liveRequests.length = 0;
-      await f.cleanup();
+      try {
+        await checkBlobReads();
+      } finally {
+        liveRequests.length = 0;
+        await f.cleanup();
+      }
     },
     deps,
     app,

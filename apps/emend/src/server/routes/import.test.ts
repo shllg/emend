@@ -287,6 +287,7 @@ test("imports writeup media as parentless assets and the writeup renders the ima
   const image = await f.request(`/media/${hash}`, "GET");
   expect(image.status).toBe(200);
   expect(image.headers.get("Content-Type")).toBe("image/png");
+  expect(Buffer.from(await image.arrayBuffer())).toEqual(png);
 });
 
 test("preserves approval records and permits retry after a busy response", async () => {

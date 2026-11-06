@@ -1,9 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
+import { once } from "node:events";
+import { type FileHandle, open, rename, truncate, utimes, writeFile } from "node:fs/promises";
+import { type ClientRequest, createServer, request as httpRequest } from "node:http";
+import { join } from "node:path";
 import { RevisionView } from "@emend/contract";
 import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { devices, files, reviews, revisions } from "../../db/schema.ts";
 import { mailboxFixture } from "../mailbox/test-support.ts";
+import { nodeRequestHandler } from "../serve.ts";
 import { BRIDGE_SOURCE } from "./bridge.ts";
 
 let f: Awaited<ReturnType<typeof mailboxFixture>>;
@@ -18,6 +23,8 @@ const docCsp = csp.replace(
 );
 const source =
   '<body><p>Synthetic seeds</p><link rel="stylesheet" href="shared.css"><script src="classic.js"></script><img src="seed.svg"></body>';
+const bigCss = "/* synthetic */\n".padEnd(200 * 1024, " ");
+const bigSha = createHash("sha256").update(bigCss).digest("hex");
 beforeEach(async () => {
   f = await mailboxFixture();
   const entries = [
@@ -27,6 +34,7 @@ beforeEach(async () => {
     ["docs/classic.js", "asset", "window.synthetic = true;"],
     ["docs/seed.svg", "asset", '<svg xmlns="http://www.w3.org/2000/svg"/>'],
     ["docs/data.css", "asset", '{"synthetic":true}'],
+    ["docs/big.css", "asset", bigCss],
     ["docs/unlisted.css", "asset", "p {}"],
     ["docs/change.html", "diff", "<script>synthetic()</script>"],
   ];
@@ -41,7 +49,9 @@ beforeEach(async () => {
       oldBlob: null,
       newBlob: hash,
       flag: null,
-      ...(role === "doc" ? { assets: ["docs/shared.css", "docs/classic.js", "docs/seed.svg", "docs/data.css"] } : {}),
+      ...(role === "doc"
+        ? { assets: ["docs/shared.css", "docs/classic.js", "docs/seed.svg", "docs/data.css", "docs/big.css"] }
+        : {}),
       ...(role === "asset" ? { parent: "docs/a #é.html" } : {}),
     });
   }
@@ -92,6 +102,308 @@ function headers(response: Response, asset = false) {
   expect(response.headers.has("X-Frame-Options")).toBe(false);
   expect(response.headers.get("Access-Control-Allow-Origin")).toBe(asset ? "*" : null);
 }
+
+async function assetHandlePrototype() {
+  const handle = await open(join(f.dir, "state", "blobs", bigSha.slice(0, 2), bigSha), "r");
+  const prototype: FileHandle = Object.getPrototypeOf(handle);
+  await handle.close();
+  return prototype;
+}
+
+async function assetDescriptors() {
+  const stats = vi.spyOn(await assetHandlePrototype(), "stat");
+  const opens = vi.spyOn(f.deps.blobs, "open");
+  const handles = () => [...new Set(stats.mock.contexts as FileHandle[])];
+  return {
+    opens,
+    handles,
+    expectClosed(count: number) {
+      expect(opens).toHaveBeenCalledTimes(count);
+      expect(handles()).toHaveLength(count);
+      expect(handles().filter((handle) => handle.fd === -1)).toHaveLength(count);
+    },
+  };
+}
+
+test("large assets stream byte-exact with their isolation headers and content length", async () => {
+  const descriptors = await assetDescriptors();
+  const get = vi.spyOn(f.deps.blobs, "get");
+  const response = await request(new URL("big.css", origin + docUrl).pathname);
+  expect(response.status).toBe(200);
+  headers(response, true);
+  expect(response.headers.get("Content-Type")).toBe("text/css; charset=utf-8");
+  expect(response.headers.get("Content-Length")).toBe(String(Buffer.byteLength(bigCss)));
+  expect(Buffer.from(await response.arrayBuffer())).toEqual(Buffer.from(bigCss));
+  expect(get).not.toHaveBeenCalled();
+  descriptors.expectClosed(1);
+});
+
+test("parallel query variants verify an asset once before any response body is pulled", async () => {
+  const descriptors = await assetDescriptors();
+  const reads = vi.spyOn(await assetHandlePrototype(), "read");
+  const path = new URL("big.css", origin + docUrl).pathname;
+  const responses = await Promise.all(Array.from({ length: 20 }, (_, i) => request(`${path}?${i + 1}`)));
+  expect(reads).toHaveBeenCalledTimes(Math.ceil(Buffer.byteLength(bigCss) / (64 * 1024)) + 1);
+  await Promise.all(
+    responses.map(async (response) => {
+      expect(response.status).toBe(200);
+      headers(response, true);
+      expect(Buffer.from(await response.arrayBuffer()).equals(Buffer.from(bigCss))).toBe(true);
+    }),
+  );
+  descriptors.expectClosed(20);
+});
+
+test("cancelling twenty parallel asset responses after one chunk closes every descriptor", async () => {
+  const descriptors = await assetDescriptors();
+  const path = new URL("big.css", origin + docUrl).pathname;
+  const responses = await Promise.all(Array.from({ length: 20 }, (_, i) => request(`${path}?${i + 1}`)));
+  const readers = responses.map((response) => {
+    expect(response.status).toBe(200);
+    headers(response, true);
+    if (!response.body) throw new Error("Missing asset body");
+    return response.body.getReader();
+  });
+  const chunks = await Promise.all(readers.map((reader) => reader.read()));
+  for (const chunk of chunks) {
+    expect(chunk.done).toBe(false);
+    expect(chunk.value?.byteLength).toBe(64 * 1024);
+  }
+  expect(descriptors.handles().filter((handle) => handle.fd !== -1)).toHaveLength(20);
+  await Promise.all(readers.map((reader) => reader.cancel()));
+  descriptors.expectClosed(20);
+});
+
+test("aborting while an asset open is awaiting returns only an isolated error and closes the descriptor", async () => {
+  const gate = Promise.withResolvers<void>();
+  const entered = Promise.withResolvers<AbortSignal | undefined>();
+  const controller = new AbortController();
+  const originalOpen = f.deps.blobs.open.bind(f.deps.blobs);
+  const descriptors = await assetDescriptors();
+  descriptors.opens.mockImplementation(async (owner, sha, signal) => {
+    entered.resolve(signal);
+    await gate.promise;
+    return originalOpen(owner, sha, signal);
+  });
+  const pending = f.app.request(
+    f.keep(
+      new Request(new URL("big.css", origin + docUrl), {
+        headers: { Host: "127.0.0.1:3636" },
+        signal: controller.signal,
+      }),
+    ),
+  );
+  try {
+    const signal = await entered.promise;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    controller.abort();
+    expect(signal?.aborted).toBe(true);
+    gate.resolve();
+    const response = await pending;
+    expect(response.status).toBe(404);
+    headers(response);
+    expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
+    expect(await descriptors.opens.mock.results[0]?.value).toBeNull();
+    descriptors.expectClosed(1);
+  } finally {
+    gate.resolve();
+    await pending;
+    const read = await descriptors.opens.mock.results[0]?.value;
+    await read?.close();
+  }
+});
+
+test("disconnecting while an asset open is awaiting closes the descriptor before returning a body", async () => {
+  const gate = Promise.withResolvers<void>();
+  const entered = Promise.withResolvers<AbortSignal | undefined>();
+  const closed = Promise.withResolvers<FileHandle>();
+  const handled = Promise.withResolvers<void>();
+  const prototype = await assetHandlePrototype();
+  const originalStat = prototype.stat;
+  const closes: FileHandle[] = [];
+  const stats = vi.spyOn(prototype, "stat").mockImplementationOnce(function (this: FileHandle, ...args) {
+    const originalClose = this.close.bind(this);
+    vi.spyOn(this, "close").mockImplementation(async () => {
+      await originalClose();
+      closes.push(this);
+      closed.resolve(this);
+    });
+    return originalStat.apply(this, args);
+  });
+  const originalOpen = f.deps.blobs.open.bind(f.deps.blobs);
+  const openBlob = vi.spyOn(f.deps.blobs, "open").mockImplementation(async (owner, sha, signal?: AbortSignal) => {
+    entered.resolve(signal);
+    await gate.promise;
+    return originalOpen(owner, sha, signal);
+  });
+  const handler = nodeRequestHandler(f.app, f.deps.config);
+  const server = createServer((incoming, outgoing) => {
+    void handler(incoming, outgoing).then(handled.resolve, handled.reject);
+  });
+  let client: ClientRequest | undefined;
+  try {
+    const listening = once(server, "listening");
+    server.listen(0, "127.0.0.1");
+    await listening;
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Missing server address");
+    client = httpRequest({
+      hostname: "127.0.0.1",
+      port: address.port,
+      path: new URL("big.css", origin + docUrl).pathname,
+      headers: { Host: "127.0.0.1:3636" },
+      agent: false,
+    });
+    // Destroying the client intentionally emits ECONNRESET; failures before entry must unblock the test.
+    client.on("error", entered.reject);
+    client.end();
+    const signal = await entered.promise;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    if (!signal) throw new Error("Missing request signal");
+    const aborted = once(signal, "abort");
+    client.destroy();
+    await aborted;
+    expect(signal.aborted).toBe(true);
+    gate.resolve();
+    expect(await openBlob.mock.results[0]?.value).toBeNull();
+    const handle = await closed.promise;
+    await handled.promise;
+    expect(handle.fd).toBe(-1);
+    expect(closes).toEqual([handle]);
+    expect([...new Set(stats.mock.contexts as FileHandle[])]).toEqual([handle]);
+  } finally {
+    client?.destroy();
+    gate.resolve();
+    const read = await openBlob.mock.results[0]?.value;
+    await read?.close();
+    server.closeAllConnections();
+    if (server.listening)
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  }
+});
+
+test("an asset truncated after open errors its response body and closes its descriptor", async () => {
+  const descriptors = await assetDescriptors();
+  const response = await request(new URL("big.css", origin + docUrl).pathname);
+  expect(response.status).toBe(200);
+  expect(descriptors.handles().filter((handle) => handle.fd !== -1)).toHaveLength(1);
+  await truncate(join(f.dir, "state", "blobs", bigSha.slice(0, 2), bigSha), 0);
+  await expect(response.arrayBuffer()).rejects.toThrow("Blob ended before its verified size");
+  descriptors.expectClosed(1);
+});
+
+test("HEAD verifies an asset and closes its descriptor without creating a body stream", async () => {
+  const descriptors = await assetDescriptors();
+  const response = await request(new URL("big.css", origin + docUrl).pathname, "HEAD");
+  expect(response.status).toBe(200);
+  headers(response, true);
+  expect(response.headers.get("Content-Type")).toBe("text/css; charset=utf-8");
+  expect(response.headers.get("Content-Length")).toBe(String(Buffer.byteLength(bigCss)));
+  expect(await response.text()).toBe("");
+  descriptors.expectClosed(1);
+  const read = await descriptors.opens.mock.results[0]?.value;
+  expect(() => read?.stream()).toThrow();
+});
+
+test.each(["HEAD", "GET"])("%s setup failures retain content error headers and close the asset", async (method) => {
+  const originalOpen = f.deps.blobs.open.bind(f.deps.blobs);
+  const opens = vi.spyOn(f.deps.blobs, "open").mockImplementation(async (...args) => {
+    const read = await originalOpen(...args);
+    if (!read) throw new Error("Missing blob");
+    if (method === "HEAD") {
+      const close = read.close.bind(read);
+      vi.spyOn(read, "close").mockImplementation(async () => {
+        await close();
+        throw new Error("Synthetic close failure");
+      });
+    } else {
+      vi.spyOn(read, "stream").mockImplementation(() => {
+        throw new Error("Synthetic stream failure");
+      });
+    }
+    return read;
+  });
+  const response = await request(new URL("big.css", origin + docUrl).pathname, method);
+  const read = await opens.mock.results[0]?.value;
+  try {
+    expect(response.status).toBe(500);
+    headers(response);
+    expect(response.headers.has("Content-Length")).toBe(false);
+    expect(response.headers.has("Content-Disposition")).toBe(false);
+    expect(response.headers.get("Content-Type")).toContain("application/json");
+    expect(read?.closed).toBe(true);
+    if (method === "HEAD") expect(await response.text()).toBe("");
+    else expect(await response.json()).toMatchObject({ error: { code: "internal" } });
+  } finally {
+    await read?.close().catch(() => {});
+  }
+});
+
+test("HTML doc reads stay on the read-only database scope", async () => {
+  const query = vi.spyOn(f.deps.db, "query");
+  const get = vi.spyOn(f.deps.blobs, "get");
+  const response = await request(docUrl);
+  expect(response.status).toBe(200);
+  expect(await response.text()).toContain("<p>Synthetic seeds</p>");
+  expect(get).toHaveBeenCalledTimes(1);
+  expect(get.mock.calls[0]?.[2]).toBeDefined();
+  expect(query).not.toHaveBeenCalled();
+});
+
+test.each(["hash", "size"])("an asset with a mismatched %s returns only an isolated error", async (mismatch) => {
+  const descriptors = await assetDescriptors();
+  const wrong = Buffer.alloc(mismatch === "hash" ? Buffer.byteLength(bigCss) : 100, "Z");
+  await writeFile(join(f.dir, "state", "blobs", bigSha.slice(0, 2), bigSha), wrong);
+  const response = await request(new URL("big.css", origin + docUrl).pathname);
+  expect(response.status).toBe(404);
+  headers(response);
+  expect(response.headers.get("Content-Type")).not.toContain("text/css");
+  expect(response.headers.has("Content-Length")).toBe(false);
+  const body = await response.text();
+  expect(body).not.toContain("Z");
+  expect(body).not.toContain("synthetic");
+  expect(JSON.parse(body)).toMatchObject({ error: { code: "not_found" } });
+  expect(await descriptors.opens.mock.results[0]?.value).toBeNull();
+  descriptors.expectClosed(1);
+});
+
+test.each(["rename", "in-place rewrite"])(
+  "a verified asset corrupted by %s is reverified and never served",
+  async (change) => {
+    const descriptors = await assetDescriptors();
+    const reads = vi.spyOn(await assetHandlePrototype(), "read");
+    const path = new URL("big.css", origin + docUrl).pathname;
+    const original = await request(path);
+    expect(original.status).toBe(200);
+    expect(await original.text()).toBe(bigCss);
+    descriptors.expectClosed(1);
+    const file = join(f.dir, "state", "blobs", bigSha.slice(0, 2), bigSha);
+    const wrong = Buffer.alloc(Buffer.byteLength(bigCss), "Z");
+    if (change === "rename") {
+      await writeFile(`${file}.replacement`, wrong, { mode: 0o600 });
+      await rename(`${file}.replacement`, file);
+    } else {
+      await writeFile(file, wrong);
+      await utimes(file, 1000, 1000);
+    }
+    reads.mockClear();
+    const response = await request(path);
+    expect(response.status).toBe(404);
+    headers(response);
+    expect(reads).toHaveBeenCalledTimes(Math.ceil(wrong.length / (64 * 1024)) + 1);
+    const body = await response.text();
+    expect(body).not.toContain("Z");
+    expect(JSON.parse(body)).toMatchObject({ error: { code: "not_found" } });
+    descriptors.expectClosed(2);
+  },
+);
+
+test("an asset that cannot be opened retains content error headers without CORS", async () => {
+  vi.spyOn(f.deps.blobs, "open").mockResolvedValue(null);
+  const response = await request(new URL("big.css", origin + docUrl).pathname);
+  expect(response.status).toBe(404);
+  headers(response);
+});
 test("doc key names one HTML doc; GET/HEAD serve injected docs and byte-exact relative assets", async () => {
   expect(docUrl).toMatch(/^\/content\/[A-Za-z0-9_-]{43}[0-9a-f]{32}\/docs\/a%20%23%C3%A9.html$/);
   for (const method of ["GET", "HEAD"]) {
@@ -127,7 +439,9 @@ test("doc key names one HTML doc; GET/HEAD serve injected docs and byte-exact re
 });
 test("shared asset loads under both doc keys, but other docs, diff files and unlisted assets never do", async () => {
   for (const url of [docUrl, secondUrl]) {
-    expect((await request(new URL("shared.css", origin + url).pathname)).status).toBe(200);
+    const shared = await request(new URL("shared.css", origin + url).pathname);
+    expect(shared.status).toBe(200);
+    expect(await shared.text()).toBe("p { color: green; }");
     for (const path of ["unlisted.css", "change.html", "missing.css", url === docUrl ? "b.html" : "a%20%23%C3%A9.html"])
       expect((await request(new URL(path, origin + url).pathname)).status).toBe(404);
   }
@@ -308,10 +622,13 @@ test("publishing more than 500 associations retains every shared asset under bot
   const view = RevisionView.parse(await (await f.request(`/reviews/${f.reviewId}/revisions/3`, "GET")).json());
   for (const doc of view.docs) {
     if (doc.kind !== "html") throw new Error("Missing HTML doc");
-    for (const name of ["0.css", "499.css", "500.css"])
-      expect((await request(new URL(name, origin + doc.contentUrl).pathname)).status).toBe(200);
+    for (const name of ["0.css", "499.css", "500.css"]) {
+      const response = await request(new URL(name, origin + doc.contentUrl).pathname);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("p {}");
+    }
   }
   expect(await f.db.read((q) => q.values(sql`SELECT count(*) FROM doc_assets WHERE owner_id = ${f.ownerId}`))).toEqual([
-    [1010],
+    [1012],
   ]);
 });

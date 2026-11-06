@@ -13,7 +13,7 @@ export function mediaRoutes(app: Hono<AppEnv>, deps: AppDeps) {
     const ownerId = c.get("principal").ownerId;
     const hash = c.req.param("sha256");
     if (!/^[0-9a-f]{64}$/.test(hash)) throw new ApiError("not_found");
-    const { type, bytes } = await deps.db.read(async (q) => {
+    const type = await deps.db.read(async (q) => {
       const file = await q
         .select({ mediaType: files.mediaType })
         .from(files)
@@ -32,10 +32,20 @@ export function mediaRoutes(app: Hono<AppEnv>, deps: AppDeps) {
         .limit(1)
         .get();
       if (!file) throw new ApiError("not_found");
-      const bytes = await deps.blobs.get(ownerId, hash, q);
-      if (!bytes) throw new ApiError("not_found");
-      return { type: file.mediaType, bytes };
+      return file.mediaType;
     });
+    const read = await deps.blobs.open(ownerId, hash, c.req.raw.signal);
+    if (!read) throw new ApiError("not_found");
+    let body: ReadableStream<Uint8Array> | null = null;
+    if (c.req.method === "HEAD") await read.close();
+    else {
+      try {
+        body = read.stream();
+      } catch (error) {
+        await read.close();
+        throw error;
+      }
+    }
     // The app-wide middleware set its defaults earlier; these replace them for this route only.
     c.header("Content-Type", type);
     c.header("X-Content-Type-Options", "nosniff");
@@ -43,6 +53,7 @@ export function mediaRoutes(app: Hono<AppEnv>, deps: AppDeps) {
     c.header("Cache-Control", "no-store");
     c.header("Content-Security-Policy", "sandbox; default-src 'none'");
     c.header("Content-Disposition", "inline");
-    return c.body(new Uint8Array(bytes));
+    c.header("Content-Length", String(read.size));
+    return body === null ? c.body(null) : c.body(body);
   });
 }

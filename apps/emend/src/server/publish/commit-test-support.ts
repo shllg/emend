@@ -8,6 +8,7 @@ import { testDb } from "../../db/test-support.ts";
 import { BlobStore } from "../../store/blobs.ts";
 import { createApp } from "../app.ts";
 import { createToken } from "../auth/tokens.ts";
+import { guardBlobReads } from "../mailbox/test-support.ts";
 import { workerExecutor } from "./executor.ts";
 
 export const publishPhases = [
@@ -30,15 +31,20 @@ export async function commitFixture(during: During) {
   const f = await testDb();
   const execute = workerExecutor();
   const writer = { transaction: f.db.transaction.bind(f.db) };
+  const store = new BlobStore(f.db, join(f.dir, "state"));
+  const checkBlobReads = guardBlobReads(store);
   const cleanup = async () => {
     try {
-      await execute.close();
+      await checkBlobReads();
     } finally {
-      await f.cleanup();
+      try {
+        await execute.close();
+      } finally {
+        await f.cleanup();
+      }
     }
   };
   try {
-    const store = new BlobStore(f.db, join(f.dir, "state"));
     const hash = await store.put(f.ownerId, Buffer.from("first"), "text/markdown");
     const nextHash = await store.put(f.ownerId, Buffer.from("second"), "text/markdown");
     const token = (await createToken(f.db, f.ownerId, "agent", { instanceId: f.instanceId })).secret;

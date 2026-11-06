@@ -1,8 +1,9 @@
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import * as fs from "node:fs";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
-import { StateDirModeError, writeSecretFile } from "./files.ts";
+import { StateDirModeError, tightenSecretFile, writeSecretFile } from "./files.ts";
 
 const writes = vi.hoisted(() => [] as string[]);
 vi.mock("node:fs", async (importOriginal) => {
@@ -75,6 +76,43 @@ test("secret replacement fsyncs the file before rename and the directory afterwa
     writes.length = 0;
     writeSecretFile(join(dir, "secret"), "synthetic");
     expect(writes).toEqual(["sync file", "rename", "sync directory"]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("tightening preserves a private file's ctime and chmods only a public file", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "emend-file-mode-"));
+  const file = join(dir, "synthetic");
+  writeSecretFile(file, "Synthetic content", dir);
+  const chmodFile = vi.spyOn(fs, "chmodSync");
+  try {
+    const before = await stat(file, { bigint: true });
+    expect(tightenSecretFile(file)).toBe(true);
+    expect((await stat(file, { bigint: true })).ctimeNs).toBe(before.ctimeNs);
+    expect(chmodFile).not.toHaveBeenCalled();
+    await chmod(file, 0o644);
+    expect(tightenSecretFile(file)).toBe(true);
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect(chmodFile).toHaveBeenCalledExactlyOnceWith(file, 0o600);
+  } finally {
+    chmodFile.mockRestore();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("tightening follows symlinks, returns false for missing paths and propagates other errors", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "emend-file-path-"));
+  try {
+    const file = join(dir, "synthetic");
+    writeSecretFile(file, "Synthetic content", dir);
+    await chmod(file, 0o644);
+    const link = join(dir, "link");
+    await symlink(file, link);
+    expect(tightenSecretFile(link)).toBe(true);
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect(tightenSecretFile(join(dir, "missing"))).toBe(false);
+    expect(() => tightenSecretFile(join(file, "child"))).toThrow(expect.objectContaining({ code: "ENOTDIR" }));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

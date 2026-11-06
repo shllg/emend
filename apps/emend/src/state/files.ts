@@ -143,7 +143,8 @@ export function ensurePrivateDir(dir: string, stateDirectory: string): void {
 
 export function tightenSecretFile(path: string): boolean {
   try {
-    chmodSync(path, 0o600);
+    // A no-op chmod still advances ctime and invalidates verified blob identities.
+    if ((statSync(path).mode & 0o777) !== 0o600) chmodSync(path, 0o600);
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;

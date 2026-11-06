@@ -143,10 +143,11 @@ the number of queries is bounded independently of revision size.
 lowercase hex characters returns `404 not_found`. The server looks up one file of the
 authenticated owner with `role` `asset` and no parent doc, `newBlob` equal to the hash and a
 stored media type of `image/png`, `image/jpeg`, `image/gif`, `image/webp` or `image/avif`. No such
-row, a diff side, an SVG, an HTML doc's own asset or any other asset, a foreign owner's row or a
-missing stored blob returns `404 not_found`.
-Otherwise it returns `200` with the stored bytes, `Content-Type` set to the row's stored media type,
-`X-Content-Type-Options: nosniff`, `Cross-Origin-Resource-Policy: same-origin`,
+row, a diff side, an SVG, an HTML doc's own asset or any other asset, a foreign owner's row, a
+missing stored blob, or one whose size or bytes do not match its hash returns `404 not_found`
+before any byte is sent.
+Otherwise it returns `200` with the stored bytes, `Content-Length`, `Content-Type` set to the
+row's stored media type, `X-Content-Type-Options: nosniff`, `Cross-Origin-Resource-Policy: same-origin`,
 `Cache-Control: no-store`, `Content-Disposition: inline` and
 `Content-Security-Policy: sandbox; default-src 'none'`. That CSP replaces the app CSP on this
 route only. `HEAD` applies the same authorization and headers, with no body.
@@ -281,7 +282,9 @@ lowercase hex characters); its exact shape is `^[A-Za-z0-9_-]{43}[0-9a-f]{32}$`.
 GET and HEAD serve only that HTML doc and the assets it lists in the same owner and revision.
 The key is the capability: neither cookies nor Authorization are read, and the owner comes from
 the revision. Wrong keys, missing files, other docs, diff files, unlisted assets and invalid paths
-receive 404. The doc receives an inline selection/highlight bridge; assets retain their bytes.
+receive 404, and so does a stored blob whose size or bytes do not match its hash, before any byte
+is sent. The doc receives an inline selection/highlight bridge; assets retain their bytes and send
+`Content-Length`.
 Content-Type is the stored media type, with `; charset=utf-8` for `text/*`, `application/json`
 and `image/svg+xml`; the doc is `text/html; charset=utf-8`.
 
