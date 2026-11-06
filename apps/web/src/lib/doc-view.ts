@@ -6,9 +6,17 @@ export const docKey = (doc: Doc) => `${doc.kind}:${doc.path}`;
 
 export function threadOnDoc(thread: ThreadView, doc: Doc) {
   const location = thread.placement.status === "placed" ? thread.placement.location : thread.target;
-  return (
-    "path" in location && location.path === doc.path && (location.kind === "source-lines") === (doc.kind === "source")
-  );
+  if (!("path" in location) || location.path !== doc.path) return false;
+  switch (location.kind) {
+    case "source-lines":
+      return doc.kind === "source";
+    case "doc-span":
+      return doc.kind === "markdown";
+    case "html-span":
+      return doc.kind === "html";
+    default:
+      return false;
+  }
 }
 
 /** Carry display modes between docs, but source belongs only to a source entry. */

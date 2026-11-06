@@ -151,6 +151,75 @@ test.each(["placed", "unplaced"] as const)(
   },
 );
 
+test.each(["placed", "unplaced"] as const)(
+  "excludes %s diff and Markdown threads from an HTML doc row and badge",
+  async (status) => {
+    if (thread.target.kind !== "source-lines") throw new Error("missing source target");
+    revision.docs = [
+      source,
+      { kind: "html", path, title: "Rendered notes", contentUrl: `/content/${"a".repeat(75)}/notes.md` },
+    ];
+    const others: ThreadView[] = [
+      {
+        ...thread,
+        target: { ...thread.target, kind: "lines", side: "new" },
+        placement: { status: "placed", location: { kind: "lines", side: "new", path, start: 4, end: 6 } },
+      },
+      {
+        ...thread,
+        id: "22222222-2222-4222-8222-222222222222",
+        target: { kind: "file", path },
+        placement: { status: "placed", location: { kind: "file", path } },
+      },
+      {
+        ...thread,
+        id: "33333333-3333-4333-8333-333333333333",
+        target: {
+          kind: "doc-span",
+          path,
+          blockId: "doc-12345678-12345678",
+          quote: "Rendered paragraph",
+          prefix: "",
+          suffix: "",
+        },
+        placement: {
+          status: "placed",
+          location: { kind: "doc-span", path, blockId: "doc-12345678-12345678", start: 0, end: 18 },
+        },
+      },
+    ];
+    revision.threads = others.map((item) =>
+      status === "placed" ? item : { ...item, placement: { status: "unplaced", reason: "file-gone" } },
+    );
+    mount(`?tab=docs&doc=${path}`);
+    await screen.findByRole("button", { name: "Comments (0)" });
+    fireEvent.click(screen.getByRole("button", { name: "Docs" }));
+    expect(within(screen.getByRole("dialog", { name: "Docs" })).getAllByText("0 open comments")).toHaveLength(2);
+  },
+);
+
+test.each(["placed", "unplaced"] as const)("resolved %s threads do not count on doc rows or badges", async (status) => {
+  revision.docs = [
+    source,
+    { kind: "html", path, title: "Rendered notes", contentUrl: `/content/${"a".repeat(75)}/notes.md` },
+  ];
+  const renderedThread: ThreadView = {
+    ...thread,
+    id: "22222222-2222-4222-8222-222222222222",
+    target: { kind: "html-span", path, quote: "Rendered paragraph", prefix: "", suffix: "" },
+    placement: { status: "placed", location: { kind: "html-span", path, start: 0, end: 18 } },
+  };
+  revision.threads = [thread, renderedThread].map((item) => ({
+    ...item,
+    state: "resolved",
+    placement: status === "placed" ? item.placement : { status: "unplaced", reason: "file-gone" },
+  }));
+  mount(`?tab=docs&doc=${path}`);
+  await screen.findByRole("button", { name: "Comments (0)" });
+  fireEvent.click(screen.getByRole("button", { name: "Docs" }));
+  expect(within(screen.getByRole("dialog", { name: "Docs" })).getAllByText("0 open comments")).toHaveLength(2);
+});
+
 test("lists rendered and source rows for one path and opens each view", async () => {
   const { history } = mount("?tab=docs");
   const link = await screen.findByRole("link", { name: /Source notes.*notes.md.*Source/ });
