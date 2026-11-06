@@ -121,12 +121,12 @@ test("conflict restacks with no operation in progress", () =>
     assert.match(backups, new RegExp(`^refs/wt-backup/feat-a/\\d{8}T\\d{6}Z ${oldTip}$`));
   }));
 
-test("a restack refuses a symlinked restack folder", () =>
+test("a restack writes nothing through a symlinked restack folder", () =>
   scenario(({ env, fx, repo }) => {
     commitFile(fx.main, "c.txt", "one\n");
     gitIn(fx.main, "push", "--quiet", "origin", "main");
     const wt = worktree(repo, "feat-a");
-    const oldTip = commitFile(wt, "c.txt", "branch\n");
+    commitFile(wt, "c.txt", "branch\n");
     advanceOrigin(env, fx, "c.txt", "main\n");
     const elsewhere = join(env.root, "elsewhere");
     mkdirSync(elsewhere);
@@ -134,8 +134,8 @@ test("a restack refuses a symlinked restack folder", () =>
     rmSync(dir, { recursive: true, force: true });
     symlinkSync(elsewhere, dir);
 
-    expectCode(() => restack(resolveRepo(wt), wt, "origin/main"), 69);
-    assert.equal(gitIn(wt, "rev-parse", "HEAD"), oldTip);
+    assert.deepEqual(restack(resolveRepo(wt), wt, "origin/main").conflicts, ["c.txt"]);
+    assert.equal(gitIn(wt, "rev-parse", "HEAD"), gitIn(wt, "rev-parse", "origin/main"));
     assert.deepEqual(readdirSync(elsewhere), []);
     idle(wt);
   }));
@@ -153,6 +153,69 @@ test("a restack ignores a planted file at the old patch path", () =>
 
     assert.deepEqual(restack(resolveRepo(wt), wt, "origin/main").conflicts, []);
     assert.equal(readFileSync(target, "utf8"), "keep\n");
+    idle(wt);
+  }));
+
+test("a restack keeps non-UTF-8 text and binary files byte for byte", () =>
+  scenario(({ env, fx, repo }) => {
+    writeFileSync(join(fx.main, "latin1.txt"), Buffer.from("caf\xe9\nna\xefve\n", "latin1"));
+    gitIn(fx.main, "add", "latin1.txt");
+    gitIn(fx.main, "commit", "--quiet", "-m", "add latin1 text");
+    gitIn(fx.main, "push", "--quiet", "origin", "main");
+    const wt = worktree(repo, "feat-a");
+    const latin1 = Buffer.from("caf\xe9 changed\nna\xefve\n", "latin1");
+    const binary = Buffer.from([0, 1, 2, 255, 254, 0, 10, 13, 200]);
+    writeFileSync(join(wt, "latin1.txt"), latin1);
+    writeFileSync(join(wt, "blob.bin"), binary);
+    gitIn(wt, "add", "latin1.txt", "blob.bin");
+    gitIn(wt, "commit", "--quiet", "-m", "change text and add binary");
+    advanceOrigin(env, fx, "other.txt", "other\n");
+
+    assert.deepEqual(restack(resolveRepo(wt), wt, "origin/main").conflicts, []);
+    assert.ok(readFileSync(join(wt, "latin1.txt")).equals(latin1));
+    assert.ok(readFileSync(join(wt, "blob.bin")).equals(binary));
+    idle(wt);
+  }));
+
+test("a failed apply after HEAD moved names the backup and restores the branch", () =>
+  scenario(({ env, fx, repo }) => {
+    commitFile(fx.main, "c.txt", "base\n");
+    gitIn(fx.main, "push", "--quiet", "origin", "main");
+    const wt = worktree(repo, "feat-a");
+    gitIn(wt, "rm", "c.txt");
+    gitIn(wt, "commit", "--quiet", "-m", "delete c");
+    const oldTip = gitIn(wt, "rev-parse", "HEAD");
+    advanceOrigin(env, fx, "c.txt", "main changed\n");
+
+    assert.throws(
+      () => restack(resolveRepo(wt), wt, "origin/main"),
+      (e: unknown) =>
+        e instanceof WtError &&
+        e.code === 1 &&
+        /could not be replayed/.test(e.message) &&
+        /backup: refs\/wt-backup\/feat-a\//.test(e.message),
+    );
+    assert.equal(gitIn(wt, "rev-parse", "HEAD"), oldTip);
+    idle(wt);
+  }));
+
+test("a restack that cannot read the change leaves the branch unchanged", () =>
+  scenario(({ env, fx, repo }) => {
+    commitFile(fx.main, "shared.txt", "a unique base blob for this replay\n");
+    gitIn(fx.main, "push", "--quiet", "origin", "main");
+    const oid = gitIn(fx.main, "rev-parse", "HEAD:shared.txt");
+    const wt = worktree(repo, "feat-a");
+    const oldTip = commitFile(wt, "shared.txt", "branch content\n");
+    rmSync(join(fx.main, ".git", "objects", oid.slice(0, 2), oid.slice(2)));
+    advanceOrigin(env, fx, "other.txt", "other\n");
+
+    assert.throws(
+      () => restack(resolveRepo(wt), wt, "origin/main"),
+      (e: unknown) =>
+        e instanceof WtError && e.code === 1 && /could not be read/.test(e.message) && /backup: /.test(e.message),
+    );
+    assert.equal(gitIn(wt, "rev-parse", "HEAD"), oldTip);
+    assert.equal(readFileSync(join(wt, "shared.txt"), "utf8"), "branch content\n");
     idle(wt);
   }));
 

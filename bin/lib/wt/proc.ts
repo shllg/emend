@@ -24,19 +24,29 @@ export interface RunResult {
   stderr: string;
 }
 
+export interface RunBytesResult {
+  code: number;
+  stdout: Buffer;
+  stderr: string;
+}
+
+function childEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env, ...FIXED };
+  // GIT_DIFF_OPTS would override the diff context bin/wt pins.
+  delete env.GIT_DIFF_OPTS;
+  return env;
+}
+
 /**
  * Runs a program without a shell, with the caller's environment plus FIXED (no prompts, no pager),
  * excluding GIT_DIFF_OPTS. Exit code 127 means the program was not found; 124 means it ran past the timeout.
  */
 export function run(cmd: string, args: string[], opts: RunOptions): RunResult {
   const useInput = opts.input !== undefined;
-  const env = { ...process.env, ...FIXED };
-  // GIT_DIFF_OPTS would override the diff context bin/wt pins.
-  delete env.GIT_DIFF_OPTS;
   const r = spawnSync(cmd, args, {
     cwd: opts.cwd,
     input: opts.input,
-    env,
+    env: childEnv(),
     encoding: "utf8",
     timeout: opts.timeoutMs,
     killSignal: "SIGKILL",
@@ -45,6 +55,35 @@ export function run(cmd: string, args: string[], opts: RunOptions): RunResult {
   });
   const stdout = typeof r.stdout === "string" ? r.stdout : "";
   const stderr = typeof r.stderr === "string" ? r.stderr : "";
+  if (r.error) {
+    const code = (r.error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "EACCES" || code === "ENOTDIR") {
+      return { code: 127, stdout, stderr: stderr || "command not found" };
+    }
+    if (code === "ETIMEDOUT") return { code: 124, stdout, stderr: stderr || "timed out" };
+    return { code: 1, stdout, stderr: stderr || r.error.message };
+  }
+  return { code: r.status ?? 1, stdout, stderr };
+}
+
+/** Like run(), but passes input and stdout as bytes and always captures both output streams. */
+export function runBytes(
+  cmd: string,
+  args: string[],
+  opts: { cwd: string; input?: Buffer; timeoutMs?: number },
+): RunBytesResult {
+  const r = spawnSync(cmd, args, {
+    cwd: opts.cwd,
+    input: opts.input,
+    env: childEnv(),
+    encoding: "buffer",
+    timeout: opts.timeoutMs,
+    killSignal: "SIGKILL",
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: "pipe",
+  });
+  const stdout = Buffer.isBuffer(r.stdout) ? r.stdout : Buffer.alloc(0);
+  const stderr = Buffer.isBuffer(r.stderr) ? r.stderr.toString("utf8") : "";
   if (r.error) {
     const code = (r.error as NodeJS.ErrnoException).code;
     if (code === "ENOENT" || code === "EACCES" || code === "ENOTDIR") {

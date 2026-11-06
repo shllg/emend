@@ -1,6 +1,6 @@
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { type RunResult, run } from "./proc.ts";
+import { type RunBytesResult, type RunResult, run, runBytes } from "./proc.ts";
 import { WtError } from "./validate.ts";
 
 export interface Repo {
@@ -163,6 +163,11 @@ export function git(repo: Repo, args: string[], opts: { cwd?: string; input?: st
 export function gitTry(repo: Repo, args: string[], opts: { cwd?: string; input?: string } = {}): RunResult {
   const r = rawGit(args, opts.cwd ?? repo.mainRoot, opts.input);
   return { ...r, stdout: r.stdout.replace(/\n$/, "") };
+}
+
+/** Runs git with byte input and output, returning failures without throwing. */
+export function gitBytes(repo: Repo, args: string[], opts: { cwd?: string; input?: Buffer } = {}): RunBytesResult {
+  return runBytes("git", [...GIT_BASE, ...args], { cwd: opts.cwd ?? repo.mainRoot, input: opts.input });
 }
 
 const GITLINK_MESSAGE = "A gitlink (submodule) entry is in HEAD or the index; bin/wt refuses it.";
