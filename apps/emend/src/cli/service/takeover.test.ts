@@ -2,13 +2,14 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { SERVER_CHALLENGE_HEADER, SERVER_PROOF_HEADER } from "@emend/contract";
+import { LIMITS, SERVER_CHALLENGE_HEADER, SERVER_PROOF_HEADER } from "@emend/contract";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { testDb } from "../../db/test-support.ts";
 import { serverProof } from "../../server/auth/server-proof.ts";
 import { startServer } from "../../server/serve.ts";
 import { StateDirModeError } from "../../state/files.ts";
 import { CliError } from "../http.ts";
+import * as publishRead from "../publish/read.ts";
 import { discover } from "../server-client.ts";
 import { stopLocalServer, waitForServer } from "./takeover.ts";
 
@@ -20,9 +21,36 @@ beforeEach(() => {
   });
 });
 afterEach(() => {
-  expect(vi.mocked(process.kill).mock.calls.every(([, signal]) => signal === 0)).toBe(true);
-  vi.restoreAllMocks();
+  try {
+    expect(vi.mocked(process.kill).mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+  } finally {
+    vi.restoreAllMocks();
+  }
 });
+
+function spyOnFetchWithoutSignal() {
+  const fetch = globalThis.fetch;
+  const calls: {
+    url: string;
+    headers: Headers;
+    outcome?: { status: number } | { error: unknown };
+  }[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const call: (typeof calls)[number] = { url: String(input), headers: new Headers(init?.headers) };
+    calls.push(call);
+    // Injected clocks govern retries; real probe timers must not govern network responses.
+    const { signal: _signal, ...options } = init ?? {};
+    try {
+      const response = await fetch(input, options);
+      call.outcome = { status: response.status };
+      return response;
+    } catch (error) {
+      call.outcome = { error };
+      throw error;
+    }
+  });
+  return calls;
+}
 
 async function withSyntheticServer(mode: string, run: (stateDir: string, url: string) => Promise<void>) {
   const stateDir = await mkdtemp(join(process.env.EMEND_HOME as string, "server-client-"));
@@ -172,6 +200,7 @@ describe("server takeover by request", () => {
     "verified %s capabilities retry until the deadline without sending a credential",
     async (mode) => {
       await withSyntheticServer(mode, async (stateDir, url) => {
+        const calls = spyOnFetchWithoutSignal();
         let elapsed = 0;
         await expect(
           stopLocalServer(stateDir, {
@@ -184,6 +213,12 @@ describe("server takeover by request", () => {
         ).rejects.toEqual(
           new CliError(`the emend server at ${url} did not answer; stop it, then run emend service install again.`),
         );
+        expect(calls).toHaveLength(3);
+        for (const call of calls) {
+          expect(call.url).toBe(`${url}/api/v1/capabilities`);
+          expect(call.headers.has("Authorization")).toBe(false);
+          expect(call.outcome).toEqual({ status: mode === "non-ok" ? 503 : 200 });
+        }
         expect(elapsed).toBe(250);
         const requests = (await readFile(join(stateDir, "requests.jsonl"), "utf8"))
           .trim()
@@ -293,6 +328,7 @@ describe("server takeover by request", () => {
 
   test("waitForServer follows the manager's current pid and waits for Tailscale readiness", async () => {
     await withSyntheticServer("verified", async (stateDir, url) => {
+      const calls = spyOnFetchWithoutSignal();
       const { pid } = JSON.parse(await readFile(join(stateDir, "server.json"), "utf8"));
       let elapsed = 0;
       const mainPid = vi.fn(async () => (elapsed === 0 ? pid + 1 : pid));
@@ -310,11 +346,13 @@ describe("server takeover by request", () => {
       expect(elapsed).toBe(400);
       expect(sleep.mock.calls).toEqual([[200], [200]]);
       expect(mainPid).toHaveBeenCalledTimes(3);
+      expect(calls.map((call) => call.outcome)).toEqual([{ status: 200 }, { status: 200 }]);
     });
   });
 
   test.each([0, 2147483647])("waitForServer refuses a verified server when the main pid is %s", async (mainPid) => {
     await withSyntheticServer("verified", async (stateDir) => {
+      const calls = spyOnFetchWithoutSignal();
       let elapsed = 0;
       const queryPid = vi.fn(async () => mainPid);
       const sleep = vi.fn(async (ms: number) => {
@@ -331,6 +369,7 @@ describe("server takeover by request", () => {
       expect(elapsed).toBe(120);
       expect(sleep.mock.calls).toEqual([[120]]);
       expect(queryPid).toHaveBeenCalledOnce();
+      expect(calls).toHaveLength(0);
     });
   });
 
@@ -355,6 +394,8 @@ describe("server takeover by request", () => {
     "tailscale refuses an unsafe %s public origin record",
     async (kind) => {
       await withSyntheticServer("verified", async (stateDir) => {
+        const calls = spyOnFetchWithoutSignal();
+        const read = vi.spyOn(publishRead, "readRegular");
         const path = join(stateDir, "server-url.json");
         const valid = JSON.stringify({ baseUrl: "https://review.example.test" });
         if (kind === "symlink") {
@@ -380,6 +421,8 @@ describe("server takeover by request", () => {
             },
           }),
         ).toBeNull();
+        expect(calls.map((call) => call.outcome)).toEqual([{ status: 200 }]);
+        expect(read.mock.calls).toEqual([[path, LIMITS.publicJsonBytes]]);
       });
     },
   );
