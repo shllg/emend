@@ -136,6 +136,34 @@ test("tasks shows the furthest source", () =>
     assert.match(formatTasks(rows), /^# +STATUS +OWNER +TITLE +WHERE/);
   }));
 
+for (const branch of ["011-thing", "emend-011-thing", "emend-task-011-thing"]) {
+  test(`tasks maps the in-progress task from ${branch} to the unprefixed task file`, () =>
+    scenario(({ env, repo, fx }) => {
+      commitFile(fx.main, "tasks/011-thing.md", taskText("011", "open"));
+      gitIn(fx.main, "push", "--quiet", "origin", "main");
+      let path: string;
+      if (branch === "emend-011-thing") {
+        assert.throws(
+          () => setup(repo, { branch }),
+          (e: unknown) => e instanceof WtError && e.code === 2 && /require --issue/.test(e.message),
+        );
+        // Preserve coverage of pre-existing numeric task worktrees without allowing setup to create them.
+        path = join(env.root, "legacy-task");
+        gitIn(fx.main, "worktree", "add", "--quiet", "-b", branch, path, "main");
+      } else path = setup(repo, { branch }).path;
+      writeFileSync(join(path, "tasks/011-thing.md"), taskText("011", "in-progress"));
+      const [row] = scanTasks(repo);
+      assert.equal(row?.number, "011");
+      assert.equal(row?.file, "011-thing.md");
+      assert.equal(row?.where, branch);
+      assert.equal(row?.status, "in-progress");
+      assert.equal(
+        withRegistry(repo, (r) => nextTaskNumber(repo, r)),
+        "012",
+      );
+    }));
+}
+
 test("task text is stripped of control characters", () =>
   scenario(({ repo, fx }) => {
     mkdirSync(join(fx.main, "tasks"), { recursive: true });

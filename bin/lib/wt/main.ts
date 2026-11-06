@@ -17,6 +17,8 @@ const OWNERS: Record<string, string> = {
   cleanup: "worktree.ts",
   gc: "worktree.ts",
   tasks: "tasks.ts",
+  issues: "issues.ts",
+  issue: "issues.ts",
   spawn: "herdr.ts",
   notify: "herdr.ts",
   fetch: "github.ts",
@@ -32,7 +34,8 @@ const OWNERS: Record<string, string> = {
 const HELP = `bin/wt: worktrees and the pull request lifecycle
 
 Local:
-  setup [<branch>] [--from <ref>] [--task <NNN>]   create a worktree with a port and an EMEND_HOME;
+  setup [<branch>] [--from <ref>] [--task <NNN> | --issue <n>]
+                                               create a worktree with a port and an EMEND_HOME;
                                                    copies the gitignored files .worktreeinclude lists
   list [--json]  (alias: status)                   one row per worktree
   cleanup [--discard] [--close-workspace] [<branch|path>]
@@ -41,15 +44,25 @@ Local:
 
 herdr:
   spawn --brief <text> | --brief-file <path> --slug <slug> [--mode github|local] [--model <m>] [--effort <e>]
+  spawn --issue <n> [--mode github] [--model <m>] [--effort <e>]
   notify ...
 
 Remote:
+  issues [--json]                                  the ready GitHub issue queue
+  issue show <n> [--taken]                         print the approved issue snapshot; --taken allows claimed issues
+  issue check                                     validate the current issue against its snapshot
   fetch
   push [--force-with-lease] [--accept-new-markers (owner only)]
-  pr create | pr edit | pr merge
+  pr number [--branch <b>] [--state open|merged]
+  pr create (--title <text> | --title-file <path>) (--body <text> | --body-file <path>) [--draft]
+  pr edit [--pr <n>] [--title <text> | --title-file <path>] [--body <text> | --body-file <path>]
+  pr merge [--pr <n>] --match-head <sha> (--subject <text> | --subject-file <path>)
+           (--body <text> | --body-file <path>)
 
 History:
-  rebase  restack  land  sync-main  digest
+  rebase  restack  sync-main  digest
+  land --match-head <sha> (--subject <text> | --subject-file <path>)
+       (--body <text> | --body-file <path>)
 
 No arguments: an action menu on a terminal with fzf, otherwise "list".
 Exit codes: 0 done, 1 failed or unconfirmed, 2 invalid input, 3 already exists,

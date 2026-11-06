@@ -4,13 +4,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
+  BRANCH_PREFIX,
   branchName,
   commitSha,
+  issueFromBranch,
+  issueNumber,
   oneLine,
   parseFlags,
   prNumber,
   refName,
   slug,
+  TASK_BRANCH_PREFIX,
+  taskFromBranch,
   taskNumber,
   textArg,
   WtError,
@@ -61,6 +66,26 @@ test("validators accept the documented forms", () => {
   assert.equal(taskNumber("001"), "001");
   assert.equal(taskNumber("098"), "098");
   assert.equal(refName("origin/main"), "origin/main");
+});
+
+test("task branch parsing accepts the task namespace and legacy prefixes without confusing issue numbers", () => {
+  assert.equal(BRANCH_PREFIX, "emend-");
+  assert.equal(TASK_BRANCH_PREFIX, "emend-task-");
+  for (const prefix of ["", BRANCH_PREFIX, TASK_BRANCH_PREFIX]) {
+    for (const n of ["001", "014", "098"]) assert.equal(taskFromBranch(`${prefix}${n}-some-task`), n);
+  }
+  for (const branch of [
+    "emend-14-some-issue",
+    "emend-100-some-issue",
+    "emend-099-some-issue",
+    "emend-000-no-task",
+    "other-014-task",
+    "emend-014-",
+    "emend-014-x/y",
+  ])
+    assert.equal(taskFromBranch(branch), null);
+  assert.equal(issueNumber("42"), 42);
+  for (const s of ["0", "042", "1.2", "-1", "1x", ""]) refuses(() => issueNumber(s), s || "<empty>");
 });
 
 test("parseFlags handles the three flag forms and refuses the rest, naming the option but not the value", () => {
@@ -129,7 +154,7 @@ test("textArg returns text, reads a file, and refuses bad combinations", () => {
     );
     const link = join(dir, "link.md");
     symlinkSync(file, link);
-    assert.equal(textArg(undefined, link, "body", true), "from file\n");
+    assert.throws(() => textArg(undefined, link, "body", true), WtError);
     for (const bad of [join(dir, "missing.md"), dir]) {
       assert.throws(
         () => textArg(undefined, bad, "body", true),
@@ -155,4 +180,15 @@ test("textArg returns text, reads a file, and refuses bad combinations", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("issue branch parsing treats an unrepresentable number as no inferred issue", () => {
+  for (const digits of ["99999999999999999999", "9007199254740992"]) {
+    assert.equal(issueFromBranch(`emend-${digits}-x`), null);
+    refuses(() => issueNumber(digits), digits);
+  }
+  assert.equal(issueFromBranch("emend-42-x"), 42);
+  assert.equal(issueFromBranch("emend-9007199254740991-x"), Number.MAX_SAFE_INTEGER);
+  assert.equal(issueFromBranch("emend-042-x"), null);
+  assert.equal(issueFromBranch("emend-task-042-x"), null);
 });

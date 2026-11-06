@@ -893,6 +893,58 @@ test("land makes one signed commit on main", () =>
     assert.equal(readFileSync(join(fx.main, "a.txt"), "utf8"), "a2\n", "the main checkout follows");
   }));
 
+test("land refuses issue branches before creating a commit, even without closing text or metadata", () =>
+  scenario(({ env, fx, repo }) => {
+    const branch = "emend-42-x";
+    // Model a pre-existing, unregistered worktree; setup now requires --issue for this name.
+    const wt = join(env.root, "unregistered-issue");
+    gitIn(fx.main, "worktree", "add", "--quiet", "-b", branch, wt, "main");
+    assert.equal(existsSync(join(wt, ".wt")), false);
+    const head = commitFile(wt, "a.txt", "a\n");
+    const main = gitIn(fx.main, "rev-parse", "main");
+    const objects = gitIn(wt, "count-objects", "-v");
+    const registry = readRegistry(repo);
+    // The checked-out branch governs, even if the supplied Repo describes a different checkout.
+    assert.throws(
+      () => land(repo, wt, "feat: a", "Body", head),
+      (e: unknown) =>
+        e instanceof WtError && e.code === 1 && /issue branches must land through a pull request/i.test(e.message),
+    );
+    assert.equal(gitIn(fx.main, "rev-parse", "main"), main);
+    assert.equal(gitIn(wt, "rev-parse", "HEAD"), head);
+    assert.equal(gitIn(wt, "for-each-ref", "refs/wt-backup/"), "");
+    assert.equal(gitIn(wt, "count-objects", "-v"), objects);
+    assert.deepEqual(readRegistry(repo), registry);
+  }));
+
+for (const [subject, body, message] of [
+  ["Fixes #9", "Body", "Only issue branches may close issues."],
+  ["feat: a", "Closes #9", "Only issue branches may close issues."],
+  [
+    "feat: a",
+    "Fixes [#9][1]",
+    "Text after a closing keyword looks like an issue reference. Reword it or close only this branch's issue.",
+  ],
+] as const) {
+  test(`land refuses closing references before creating a commit: ${subject} / ${body}`, () =>
+    scenario(({ fx, repo }) => {
+      const wt = worktree(repo, "feat-a");
+      const head = commitFile(wt, "a.txt", "a\n");
+      const main = gitIn(fx.main, "rev-parse", "main");
+      const objects = gitIn(wt, "count-objects", "-v");
+      const registry = readRegistry(repo);
+      assert.throws(
+        () => land(resolveRepo(wt), wt, subject, body, head),
+        (e: unknown) => e instanceof WtError && e.code === 2 && e.message === message,
+      );
+      assert.equal(gitIn(fx.main, "rev-parse", "main"), main);
+      assert.equal(gitIn(wt, "rev-parse", "HEAD"), head);
+      assert.equal(gitIn(wt, "for-each-ref", "refs/wt-backup/"), "");
+      assert.equal(gitIn(wt, "count-objects", "-v"), objects);
+      assert.deepEqual(readRegistry(repo), registry);
+    }));
+}
+
 test("land refuses a branch behind main", () =>
   scenario(({ fx, repo }) => {
     const wt = worktree(repo, "feat-a");
@@ -1185,12 +1237,15 @@ test("land prints its backups, then landed <sha> as the last line", () =>
         }),
       (e: unknown) => e instanceof WtError && e.code === 2,
     );
+    const subjectFile = join(env.root, "subject.txt");
+    writeFileSync(subjectFile, "feat: a\n");
     const text = await capture(() =>
       commands.land?.({
         repo: wtRepo,
-        args: ["--match-head", head, "--subject", "feat: a", "--body-file", bodyFile],
+        args: ["--match-head", head, "--subject-file", subjectFile, "--body-file", bodyFile],
       }),
     );
+    assert.equal(gitIn(fx.main, "log", "-1", "--format=%s", "main"), "feat: a");
     const lines = text.trimEnd().split("\n");
     assert.equal(lines.length, 3);
     assert.match(lines[0] as string, /^backup: refs\/wt-backup\/feat-a\//);
@@ -1296,3 +1351,12 @@ for (const scope of ["--local", "--worktree"]) {
       }));
   }
 }
+
+test("land accepts prose mentioning an issue without a closing instruction", () =>
+  scenario(({ fx, repo }) => {
+    const wt = worktree(repo, "feat-a");
+    const head = commitFile(wt, "a.txt", "a\n");
+    const { commit } = land(resolveRepo(wt), wt, "Fixes see #9", "Body", head);
+    assert.equal(gitIn(fx.main, "rev-parse", "main"), commit);
+    assert.equal(gitIn(fx.main, "log", "-1", "--format=%s", commit), "Fixes see #9");
+  }));

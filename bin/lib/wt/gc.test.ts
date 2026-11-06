@@ -100,6 +100,24 @@ test("gc keeps a branch that has a registered worktree or a reservation", () =>
     assert.notEqual(gitIn(fx.main, "branch", "--list", "reserved-b"), "");
   }));
 
+test("gc handles legacy and prefixed task reservations and branches", () =>
+  scenario(({ repo, fx }) => {
+    const old = "2020-01-01T00:00:00Z";
+    for (const branch of ["014-old-task", "emend-015-new-task", "emend-16-issue-work"])
+      gitIn(fx.main, "branch", branch);
+    withRegistry(repo, (r) => {
+      r.reservations["014"] = { branch: "014-old-task", slug: "old-task", reservedAt: old };
+      r.reservations["015"] = { branch: "emend-015-new-task", slug: "new-task", reservedAt: old };
+      r.reservations["016"] = { branch: "emend-016-missing-task", slug: "missing-task", reservedAt: old };
+    });
+    const report = gc(repo, true);
+    assert.equal(find(report.items, "stale-reservation", "016")?.state, "removed");
+    assert.equal(find(report.items, "merged-branch", "emend-16-issue-work")?.state, "removed");
+    assert.deepEqual(Object.keys(readRegistry(repo).reservations), ["014", "015"]);
+    for (const branch of ["014-old-task", "emend-015-new-task"])
+      assert.notEqual(gitIn(fx.main, "branch", "--list", branch), "");
+  }));
+
 test("gc --prune keeps a merged branch that a concurrent setup claimed after the scan", () =>
   scenario(({ repo, fx }) => {
     for (const b of ["late-registered", "late-reserved", "late-checked-out", "plain-merged"]) {

@@ -112,3 +112,21 @@ test("R9.3: every process helper removes Git config override variables", (t) => 
     }
   }
 });
+
+for (const execute of [run, runBytes]) {
+  test(`${execute.name} strips GH_REPO from the child without changing the parent`, () => {
+    const previous = process.env.GH_REPO;
+    try {
+      process.env.GH_REPO = "synthetic/wrong-repository";
+      const result = execute(process.execPath, ["-e", 'process.stdout.write(process.env.GH_REPO ?? "unset")'], {
+        cwd: "/",
+      });
+      assert.equal(result.code, 0);
+      assert.equal(result.stdout.toString(), "unset");
+      assert.equal(process.env.GH_REPO, "synthetic/wrong-repository");
+    } finally {
+      if (previous === undefined) delete process.env.GH_REPO;
+      else process.env.GH_REPO = previous;
+    }
+  });
+}

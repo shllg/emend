@@ -44,6 +44,7 @@ export interface WorktreeEntry {
   path: string;
   port: number;
   task: string | null;
+  issue?: number;
   mode: "github" | "local";
   createdAt: string;
   /** Commit that landed this branch on local main (set by `land`). */

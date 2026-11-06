@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { checkPublicChange } from "../../../scripts/check-public.ts";
 import type { CommandTable } from "./command.ts";
 import { localDiagnostic } from "./diagnostics.ts";
+import { closingGuard } from "./github.ts";
 import { requirePublic, requirePublicText } from "./public.ts";
 import { withRegistry } from "./registry.ts";
 import {
@@ -16,7 +17,15 @@ import {
   type Repo,
   requireGlobalIdentity,
 } from "./repo.ts";
-import { oneLine as checkOneLine, commitSha, parseFlags, refName, textArg, WtError } from "./validate.ts";
+import {
+  oneLine as checkOneLine,
+  commitSha,
+  issueFromBranch,
+  parseFlags,
+  refName,
+  textArg,
+  WtError,
+} from "./validate.ts";
 
 export type Onto = "origin/main" | "main";
 
@@ -383,11 +392,13 @@ export function land(
 ): { commit: string; backups: string[] } {
   requireGlobalIdentity(repo, top);
   const branch = currentBranch(repo, top);
+  if (issueFromBranch(branch) !== null) throw new WtError(1, "Issue branches must land through a pull request.");
   const approved = commitSha(matchHead);
   const head = requireRef(repo, top, "HEAD");
   if (head !== approved) throw new WtError(1, "HEAD is not the approved head commit.");
   const message = checkMessage(subject, body);
   requirePublicText(repo, { message, branch });
+  closingGuard(repo, branch, message);
   assertNoGitlinks(repo, top);
   assertClean(repo, top);
   const main = requireRef(repo, top, "refs/heads/main");
@@ -513,13 +524,19 @@ export const commands: CommandTable = {
     const { flags } = parseFlags(args, {
       "match-head": "string",
       subject: "string",
+      "subject-file": "string",
       body: "string",
       "body-file": "string",
     });
     const matchHead = flags["match-head"];
-    const subjectText = flags.subject;
+    const subjectText = textArg(
+      typeof flags.subject === "string" ? flags.subject : undefined,
+      typeof flags["subject-file"] === "string" ? flags["subject-file"] : undefined,
+      "subject",
+      true,
+    ) as string;
     if (typeof matchHead !== "string" || typeof subjectText !== "string") {
-      throw new WtError(2, "land needs --match-head, --subject and --body or --body-file.");
+      throw new WtError(2, "land needs --match-head, --subject or --subject-file, and --body or --body-file.");
     }
     commitSha(matchHead);
     const body = textArg(
@@ -528,8 +545,9 @@ export const commands: CommandTable = {
       "body",
       true,
     ) as string;
+    const subject = checkOneLine(subjectText, "subject");
     const top = linkedTop(repo);
-    const { commit, backups } = land(repo, top, subjectText.trim(), body, matchHead);
+    const { commit, backups } = land(repo, top, subject, body, matchHead);
     process.stdout.write(`${backupLines(backups)}landed ${commit}\n`);
   },
   "sync-main": ({ repo, args }) => {

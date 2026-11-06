@@ -1,6 +1,10 @@
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from "node:fs";
+import { join } from "node:path";
 
 export type Exit = 0 | 1 | 2 | 3 | 69 | 124;
+
+export const BRANCH_PREFIX = "emend-";
+export const TASK_BRANCH_PREFIX = "emend-task-";
 
 /** A failure with an exit code. The message never contains a refused argument. */
 export class WtError extends Error {
@@ -50,6 +54,22 @@ export function prNumber(s: string): number {
   return Number(s);
 }
 
+export function issueNumber(s: string): number {
+  if (typeof s !== "string" || !/^[1-9][0-9]*$/.test(s) || !Number.isSafeInteger(Number(s))) invalid("issue number");
+  return Number(s);
+}
+
+/** Explicit task namespace plus legacy task branches; unpadded issue numbers never match. */
+export function taskFromBranch(branch: string): string | null {
+  const name = branch.startsWith(TASK_BRANCH_PREFIX)
+    ? branch.slice(TASK_BRANCH_PREFIX.length)
+    : branch.startsWith(BRANCH_PREFIX)
+      ? branch.slice(BRANCH_PREFIX.length)
+      : branch;
+  const number = /^(0\d{2})-[a-z0-9][a-z0-9._-]*$/.exec(name)?.[1];
+  return number && Number(number) > 0 && Number(number) < 99 ? number : null;
+}
+
 export function commitSha(s: string): string {
   if (typeof s !== "string" || !SHA_RE.test(s)) invalid("commit id");
   return s;
@@ -84,19 +104,71 @@ export function textArg(
     if (required) throw new WtError(2, `Give --${label} or --${label}-file.`);
     return null;
   }
-  let st: ReturnType<typeof statSync>;
   try {
-    st = statSync(file);
+    return readTextFile(file);
   } catch {
-    throw new WtError(2, `The --${label}-file could not be read.`);
+    throw new WtError(2, `The --${label}-file must be a readable regular UTF-8 file of at most 1 MiB (no symlinks).`);
   }
-  if (!st.isFile() || st.size > MAX_TEXT_FILE_BYTES) {
-    throw new WtError(2, `The --${label}-file must be a regular file of at most 1 MiB.`);
-  }
+}
+
+/** Bound the read itself, even if a file grows after fstat. Never open a FIFO or follow a leaf symlink. */
+export function readFileBytes(file: string, max = MAX_TEXT_FILE_BYTES): Buffer {
+  const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(file));
-  } catch {
-    throw new WtError(2, `The --${label}-file could not be read as UTF-8 text.`);
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.size > max) throw new Error("not a bounded regular file");
+    const bytes = Buffer.alloc(max + 1);
+    let size = 0;
+    for (;;) {
+      const n = readSync(fd, bytes, size, bytes.length - size, null);
+      size += n;
+      if (size > max) throw new Error("file too large");
+      if (n === 0) return bytes.subarray(0, size);
+    }
+  } finally {
+    closeSync(fd);
+  }
+}
+
+export function readTextFile(file: string, max = MAX_TEXT_FILE_BYTES): string {
+  return new TextDecoder("utf-8", { fatal: true }).decode(readFileBytes(file, max));
+}
+
+export function issueFromBranch(branch: string): number | null {
+  const n = /^emend-([1-9][0-9]*)-/.exec(branch)?.[1];
+  // A name discovered among claims is data, not an explicit issue-number argument.
+  // Keep user input strict while treating unparseable branch numbers as no inferred issue.
+  return n !== undefined && Number.isSafeInteger(Number(n)) ? Number(n) : null;
+}
+
+/** Numeric emend names are reserved for explicitly registered issues, including padded numbers. */
+export function requireIssueBranch(branch: string, issue?: number): void {
+  if (/^emend-[0-9]+-/u.test(branch) && issue === undefined)
+    throw new WtError(2, "Numeric emend branch names require --issue; use emend-task- names for tasks.");
+  if (issue !== undefined && issueFromBranch(branch) !== issue)
+    throw new WtError(2, "The branch number must match --issue.");
+}
+
+/** Local state must be a regular file inside a real .wt directory. */
+export function readWtJson(top: string, name: string): Record<string, unknown> {
+  const dir = join(top, ".wt");
+  if (!lstatSync(dir).isDirectory()) throw new Error("not a directory");
+  const info: unknown = JSON.parse(
+    readTextFile(join(dir, name), name === "worktree.json" ? 65_536 : MAX_TEXT_FILE_BYTES),
+  );
+  if (typeof info !== "object" || info === null || Array.isArray(info)) throw new Error("invalid metadata");
+  return info as Record<string, unknown>;
+}
+
+export function worktreeIssue(top: string): number | null {
+  try {
+    const issue = readWtJson(top, "worktree.json").issue;
+    if (issue === undefined || issue === null) return null;
+    if (typeof issue !== "number" || !Number.isSafeInteger(issue) || issue < 1) throw new Error("invalid issue");
+    return issue;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw new WtError(2, "Could not read .wt/worktree.json.");
   }
 }
 

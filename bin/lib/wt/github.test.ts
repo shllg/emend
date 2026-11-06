@@ -15,14 +15,18 @@ import {
 } from "./github.ts";
 import { type Repo, resolveRepo } from "./repo.ts";
 import {
+  branchPrPage,
   commitFile,
   type FakeRule,
   type Fixture,
   fakeCalls,
+  fakeGithubOrigin,
   gitIn,
   installFake,
+  issueRules,
   makeFixture,
   makeTestEnv,
+  readyIssue,
   runWt,
   type TestEnv,
 } from "./test-support.ts";
@@ -33,6 +37,7 @@ const SHA = "a".repeat(40);
 const OTHER_SHA = "b".repeat(40);
 const MERGE_SHA = "c".repeat(40);
 const BRANCH = "feat-a";
+const CREATED_URL = "https://github.com/owner/repo/pull/7";
 
 interface Ctx {
   env: TestEnv;
@@ -48,6 +53,7 @@ async function scenario(
   const env = makeTestEnv();
   try {
     const fx = makeFixture(env, { withBin: o.withBin });
+    fakeGithubOrigin(env, fx);
     if (o.branch !== null) gitIn(fx.main, "checkout", "--quiet", "-b", o.branch ?? BRANCH);
     await fn({ env, fx, repo: resolveRepo(fx.main) });
   } finally {
@@ -112,9 +118,8 @@ function capturedBodies(log: string): string[] {
 }
 
 const NO_PR: FakeRule = {
-  match: ["pr", "view", BRANCH],
-  stderr: `no pull requests found for branch "${BRANCH}"\n`,
-  code: 1,
+  match: ["api", "graphql", `head=${BRANCH}`],
+  stdout: branchPrPage([]),
 };
 
 function prJson(extra: Record<string, unknown> = {}): string {
@@ -122,9 +127,15 @@ function prJson(extra: Record<string, unknown> = {}): string {
     number: 7,
     state: "OPEN",
     headRefName: BRANCH,
+    title: "Fix pane",
+    body: "Review description",
     isCrossRepository: false,
     ...extra,
   });
+}
+
+function branchPrJson(extra: Record<string, unknown> = {}, nameWithOwner = "owner/repo"): string {
+  return branchPrPage([JSON.parse(prJson(extra))], nameWithOwner);
 }
 
 function mergeCalls(env: TestEnv): string[][] {
@@ -583,15 +594,39 @@ test("an all-digit branch is refused before gh is asked", () =>
     { branch: "123" },
   ));
 
+function closingRule(nodes: unknown[] = [], more = false): FakeRule {
+  return {
+    match: ["api", "graphql"],
+    queryIncludes: "closingIssuesReferences(first: 20)",
+    stdout: JSON.stringify({
+      data: {
+        repository: {
+          nameWithOwner: "owner/repo",
+          pullRequest: { closingIssuesReferences: { nodes, pageInfo: { hasNextPage: more } } },
+        },
+      },
+    }),
+  };
+}
+
+function createRules(stdout: string, branch = BRANCH): FakeRule[] {
+  return [
+    { match: ["api", "graphql", `head=${branch}`], stdout: branchPrPage([]), times: 1 },
+    { match: ["api", "graphql", `head=${branch}`], stdout: branchPrJson({ headRefName: branch }), times: 1 },
+    { match: ["pr", "create"], stdout },
+    closingRule(),
+  ];
+}
+
 // ---------------------------------------------------------------------------------------------
 // pr create
 
 test("pr create passes head, base, title and the body on stdin", () =>
   scenario((ctx) => {
-    installFake(ctx.env, "gh", [NO_PR, { match: ["pr", "create"], stdout: "https://example.invalid/pr/9\n" }]);
+    installFake(ctx.env, "gh", createRules(`${CREATED_URL}\n`));
     const bodies = captureBodies(ctx.env);
     const out = prCreate(ctx.repo, { title: "Add the thing\n", body: "## Summary\n\nDoes it.\n", draft: true });
-    assert.equal(out.trim(), "https://example.invalid/pr/9");
+    assert.equal(out.trim(), CREATED_URL);
     const create = fakeCalls(ctx.env, "gh").find((a) => a[1] === "create") as string[];
     assert.deepEqual(create, [
       "pr",
@@ -610,15 +645,92 @@ test("pr create passes head, base, title and the body on stdin", () =>
 
 test("pr create without --draft passes no --draft", () =>
   scenario((ctx) => {
-    installFake(ctx.env, "gh", [NO_PR, { match: ["pr", "create"], stdout: "u\n" }]);
+    installFake(ctx.env, "gh", createRules(`${CREATED_URL}\n`));
     prCreate(ctx.repo, { title: "T", body: "B", draft: false });
     const create = fakeCalls(ctx.env, "gh").find((a) => a[1] === "create") as string[];
     assert.ok(!create.includes("--draft"));
   }));
 
+test("issue PRs require the exact issue and one of GitHub's closing keywords", () =>
+  scenario(({ env, fx, repo }) => {
+    const branch = "emend-42-fix-pane";
+    gitIn(fx.main, "checkout", "--quiet", "-b", branch);
+    repo.callerBranch = branch;
+    mkdirSync(join(fx.main, ".wt"));
+    writeFileSync(join(fx.main, ".wt/worktree.json"), JSON.stringify({ issue: 42, task: null }));
+    installFake(env, "gh", createRules(`${CREATED_URL}\n`, branch));
+    for (const body of [
+      "",
+      "References #42",
+      "Closes #4",
+      "Closes #420",
+      "Closes #42abc",
+      "Discloses #42",
+      "Closes #0042",
+    ]) {
+      assert.throws(
+        () => prCreate(repo, { title: "T", body, draft: false }),
+        (e: unknown) => {
+          assert.ok(e instanceof WtError);
+          assert.equal(e.code, 2);
+          assert.equal(e.message, 'The PR body must close issue #42: add "Closes #42".');
+          return true;
+        },
+      );
+    }
+    assert.deepEqual(fakeCalls(env, "gh"), []);
+    for (const keyword of ["close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved"]) {
+      installFake(env, "gh", createRules(`${CREATED_URL}\n`, branch));
+      assert.equal(
+        prCreate(repo, { title: "T", body: `Summary.\n\n${keyword.toUpperCase()} #42.\n`, draft: false }).trim(),
+        CREATED_URL,
+      );
+    }
+    installFake(env, "gh", createRules(`${CREATED_URL}\n`, branch));
+    assert.equal(prCreate(repo, { title: "T", body: "_Closes #42_", draft: false }).trim(), CREATED_URL);
+    assert.equal(fakeCalls(env, "gh").filter((c) => c[1] === "create").length, 1);
+  }));
+
+test("pr create checks the body file against its own linked worktree's issue", () =>
+  scenario(
+    async ({ env, fx, repo }) => {
+      installFake(env, "gh", issueRules([readyIssue(42)]));
+      const wt = setup(repo, { branch: "emend-42-fix-pane", issue: 42 });
+      installFake(env, "gh", createRules(`${CREATED_URL}\n`, "emend-42-fix-pane"));
+      // Conflicting main-checkout metadata must not win.
+      mkdirSync(join(fx.main, ".wt"));
+      writeFileSync(join(fx.main, ".wt/worktree.json"), JSON.stringify({ issue: 99 }));
+      const body = join(wt.path, "body.md");
+      writeFileSync(body, "Closes #99\n");
+      const run = () =>
+        runWt(join(fx.main, "bin/wt"), ["pr", "create", "--title", "Fix pane", "--body-file", body], { cwd: wt.path });
+      const bad = await run();
+      assert.equal(bad.code, 2, bad.stderr);
+      assert.match(bad.stderr, /The PR body must close issue #42/);
+      assert.deepEqual(fakeCalls(env, "gh"), []);
+      writeFileSync(body, "Fixes #42\n");
+      const good = await run();
+      assert.equal(good.code, 0, good.stderr);
+      assert.equal(good.stdout, `${CREATED_URL}\n`);
+    },
+    { withBin: true },
+  ));
+
+test("invalid worktree issue metadata cannot bypass the PR body guard", () =>
+  scenario(({ fx, repo, env }) => {
+    repo.callerBranch = "emend-42-fix-pane";
+    mkdirSync(join(fx.main, ".wt"));
+    installFake(env, "gh", [NO_PR]);
+    for (const text of ["{", "null", JSON.stringify({ issue: "42" }), JSON.stringify({ issue: -42 })]) {
+      writeFileSync(join(fx.main, ".wt/worktree.json"), text);
+      expectCode(() => prCreate(repo, { title: "T", body: "B", draft: false }), 2);
+    }
+    assert.deepEqual(fakeCalls(env, "gh"), []);
+  }));
+
 test("pr create refuses when an open PR exists (3) and fails with 1 when gh fails", () =>
   scenario((ctx) => {
-    installFake(ctx.env, "gh", [{ match: ["pr", "view", BRANCH], stdout: prJson() }]);
+    installFake(ctx.env, "gh", [{ match: ["api", "graphql", `head=${BRANCH}`], stdout: branchPrJson() }]);
     expectCode(() => prCreate(ctx.repo, { title: "T", body: "B", draft: false }), 3);
     assert.equal(fakeCalls(ctx.env, "gh").filter((a) => a[1] === "create").length, 0);
 
@@ -629,7 +741,7 @@ test("pr create refuses when an open PR exists (3) and fails with 1 when gh fail
 test("pr create reads --body-file and refuses both body flags or none (end to end)", () =>
   scenario(
     async (ctx) => {
-      installFake(ctx.env, "gh", [NO_PR, { match: ["pr", "create"], stdout: "https://example.invalid/pr/9\n" }]);
+      installFake(ctx.env, "gh", createRules(`${CREATED_URL}\n`));
       const bodies = captureBodies(ctx.env);
       const bodyFile = join(ctx.env.root, "body.md");
       writeFileSync(bodyFile, "from a file\n");
@@ -655,8 +767,9 @@ test("pr create reads --body-file and refuses both body flags or none (end to en
 test("pr edit changes the title and sends the body on stdin", () =>
   scenario((ctx) => {
     installFake(ctx.env, "gh", [
-      { match: ["pr", "view", BRANCH], stdout: prJson() },
+      { match: ["api", "graphql", `head=${BRANCH}`], stdout: branchPrJson() },
       { match: ["pr", "edit"], stdout: "https://example.invalid/pr/7\n" },
+      closingRule(),
     ]);
     const bodies = captureBodies(ctx.env);
     prEdit(ctx.repo, { title: "New title", body: "New body" });
@@ -667,19 +780,39 @@ test("pr edit changes the title and sends the body on stdin", () =>
     expectCode(() => prEdit(ctx.repo, { title: "two\nlines" }), 2);
   }));
 
-test("pr edit --pr works from a linked worktree, for an open same-repo PR into main only", () =>
+test("pr edit --pr from a linked worktree requires its own open same-repo PR into main", () =>
   scenario(
     (ctx) => {
       const wt = setup(ctx.repo, { branch: "feat-b", busy: new Set<number>() }).path;
       const repo = resolveRepo(wt);
-      const viewArgs = ["pr", "view", "7", "--json", "number,state,headRefName,isCrossRepository,baseRefName"];
+      const viewArgs = [
+        "pr",
+        "view",
+        "7",
+        "--json",
+        "number,state,headRefName,isCrossRepository,baseRefName,title,body",
+      ];
       const edit: FakeRule = { match: ["pr", "edit", "7"], stdout: "ok\n" };
-      installFake(ctx.env, "gh", [{ match: viewArgs, stdout: prJson({ baseRefName: "main" }) }, edit]);
+      installFake(ctx.env, "gh", [
+        { match: viewArgs, stdout: prJson({ baseRefName: "main", headRefName: "feat-b" }) },
+        edit,
+        closingRule(),
+      ]);
       prEdit(repo, { pr: "7", title: "T" });
       assert.equal(fakeCalls(ctx.env, "gh").filter((a) => a[1] === "edit").length, 1);
 
-      for (const extra of [{ baseRefName: "release" }, { state: "CLOSED" }, { isCrossRepository: true }]) {
-        installFake(ctx.env, "gh", [{ match: viewArgs, stdout: prJson({ baseRefName: "main", ...extra }) }, edit]);
+      for (const extra of [
+        { baseRefName: "release" },
+        { state: "CLOSED" },
+        { isCrossRepository: true },
+        { headRefName: BRANCH },
+        { headRefName: null },
+        { headRefName: undefined },
+      ]) {
+        installFake(ctx.env, "gh", [
+          { match: viewArgs, stdout: prJson({ baseRefName: "main", headRefName: "feat-b", ...extra }) },
+          edit,
+        ]);
         expectCode(() => prEdit(repo, { pr: "7", title: "T" }), 1);
         assert.equal(fakeCalls(ctx.env, "gh").filter((a) => a[1] === "edit").length, 0);
       }
@@ -696,7 +829,7 @@ const MERGE_VIEW_ARGS = [
   "view",
   "7",
   "--json",
-  "number,baseRefName,headRefName,isCrossRepository,state,headRefOid",
+  "number,baseRefName,headRefName,isCrossRepository,state,headRefOid,title,body",
 ];
 const READ_BACK_ARGS = ["pr", "view", "7", "--json", "state,mergeCommit"];
 const MERGED_STATE = JSON.stringify({ state: "MERGED", mergeCommit: { oid: MERGE_SHA } });
@@ -712,10 +845,13 @@ function mergeRules(view: Record<string, unknown>, rest: FakeRule[] = []): FakeR
         isCrossRepository: false,
         state: "OPEN",
         headRefOid: headSha,
+        title: "Fix pane",
+        body: "Review description",
         ...view,
       }),
     },
     ...rest,
+    closingRule(),
   ];
 }
 
@@ -962,14 +1098,14 @@ test("pr merge reports a plain deletion failure under a colored git config", () 
     assert.ok(remoteHas(ctx));
   }));
 
-test("pr merge --pr works from a linked worktree", () =>
+test("pr merge --pr works from a matching linked worktree", () =>
   mscenario(
     (ctx) => {
       const wt = setup(ctx.repo, { branch: "feat-b", busy: new Set<number>() }).path;
       installFake(
         ctx.env,
         "gh",
-        mergeRules({}, [
+        mergeRules({ headRefName: "feat-b" }, [
           { match: ["pr", "merge", "7"], stdout: "merged\n" },
           { match: READ_BACK_ARGS, stdout: MERGED_STATE },
         ]),
@@ -983,7 +1119,7 @@ test("pr merge --pr works from a linked worktree", () =>
 test("pr merge defaults to the caller's PR and prints QUEUED for a queued merge", () =>
   mscenario((ctx) => {
     installFake(ctx.env, "gh", [
-      { match: ["pr", "view", BRANCH], stdout: prJson() },
+      { match: ["api", "graphql", `head=${BRANCH}`], stdout: branchPrJson() },
       ...mergeRules({}, [
         { match: ["pr", "merge", "7"], stdout: "queued\n" },
         { match: READ_BACK_ARGS, stdout: JSON.stringify({ state: "OPEN", mergeCommit: null }) },
@@ -1056,7 +1192,7 @@ test("pr create and pr merge refuse a branch built on unpushed local main, and p
     (ctx) => {
       const repo = branchOnLocalMain(ctx);
       publishHead(ctx);
-      installFake(ctx.env, "gh", [NO_PR, { match: ["pr", "create"], stdout: "u\n" }, ...mergeOkRules()]);
+      installFake(ctx.env, "gh", [...createRules(`${CREATED_URL}\n`), ...mergeOkRules()]);
       for (const [fn, word] of [
         [() => prCreate(repo, { title: "T", body: "B", draft: false }), "created"],
         [() => prMerge(repo, MERGE_ARGS), "merged"],
@@ -1074,8 +1210,8 @@ test("pr create and pr merge refuse a branch built on unpushed local main, and p
       assert.equal(gitIn(ctx.fx.origin, "rev-parse", "main") === gitIn(ctx.fx.main, "rev-parse", "main"), false);
 
       gitIn(ctx.fx.main, "push", "--quiet", "origin", "main");
-      installFake(ctx.env, "gh", [NO_PR, { match: ["pr", "create"], stdout: "u\n" }, ...mergeOkRules()]);
-      assert.equal(prCreate(repo, { title: "T", body: "B", draft: false }).trim(), "u");
+      installFake(ctx.env, "gh", [...createRules(`${CREATED_URL}\n`), ...mergeOkRules()]);
+      assert.equal(prCreate(repo, { title: "T", body: "B", draft: false }).trim(), CREATED_URL);
       assert.equal(prMerge(repo, MERGE_ARGS), `MERGED ${MERGE_SHA}`);
     },
     { branch: null },
@@ -1088,8 +1224,8 @@ test("a branch started from origin/main is fine while local main is ahead", () =
       gitIn(ctx.fx.main, "checkout", "--quiet", "-b", BRANCH, "origin/main");
       const repo = resolveRepo(ctx.fx.main);
       publishHead(ctx);
-      installFake(ctx.env, "gh", [NO_PR, { match: ["pr", "create"], stdout: "u\n" }, ...mergeOkRules()]);
-      assert.equal(prCreate(repo, { title: "T", body: "B", draft: false }).trim(), "u");
+      installFake(ctx.env, "gh", [...createRules(`${CREATED_URL}\n`), ...mergeOkRules()]);
+      assert.equal(prCreate(repo, { title: "T", body: "B", draft: false }).trim(), CREATED_URL);
       assert.equal(prMerge(repo, MERGE_ARGS), `MERGED ${MERGE_SHA}`);
     },
     { branch: null },
@@ -1213,8 +1349,9 @@ test("i: PR launcher ignores environment allowed phrases and accepts file allowe
   scenario(
     async (ctx) => {
       installFake(ctx.env, "gh", [
-        { match: ["pr", "view"], stdout: prJson() },
+        { match: ["api", "graphql", `head=${BRANCH}`], stdout: branchPrJson() },
         { match: ["pr", "edit"], stdout: "updated\n" },
+        closingRule(),
       ]);
       const env = { EMEND_PRIVATE_TERMS: "fixturecorp\n!fixturecorp/public-tool" };
       const wt = join(ctx.fx.main, "bin", "wt");
@@ -1599,6 +1736,8 @@ test("R9.6: remote deletion errors redact private text before reporting a kept b
     const url = join(ctx.env.root, "alice-example");
     symlinkSync(ctx.fx.origin, url);
     gitIn(ctx.fx.main, "remote", "set-url", "origin", url);
+    // Keep the GitHub identity while the transport still reports the private-named alias.
+    fakeGithubOrigin(ctx.env, { ...ctx.fx, origin: url });
     gitIn(ctx.fx.origin, "config", "receive.denyDeletes", "true");
     installFake(
       ctx.env,
@@ -1652,3 +1791,142 @@ test("R10.A: refusal and owner confirmation identify both commits at the same ma
     assert.equal(output.join(""), notes);
     assert.equal(gitIn(fx.origin, "rev-parse", BRANCH), second);
   }));
+
+test("pr create and edit guard registered issue branches and refuse mismatched issue metadata", () =>
+  scenario(
+    ({ env, fx, repo }) => {
+      const branch = "emend-42-fix-pane";
+      mkdirSync(join(fx.main, ".wt"));
+      writeFileSync(join(fx.main, ".wt/worktree.json"), JSON.stringify({ issue: 42 }));
+      for (const body of [
+        "Missing",
+        "Closes #42\n<!-- Closes #9 -->",
+        "Closes #42\n```\nCloses #9\n```",
+        "Closes #42\nFixes: #99",
+        "Closes #42\nCloses https://github.com/owner/repo/issues/99",
+      ]) {
+        installFake(env, "gh", [
+          { match: ["api", "graphql", `head=${branch}`], stdout: branchPrJson({ headRefName: branch }) },
+        ]);
+        expectCode(() => prCreate(repo, { title: "T", body, draft: false }), 2);
+        expectCode(() => prEdit(repo, { body }), 2);
+        assert.ok(!fakeCalls(env, "gh").some((c) => c[1] === "create" || c[1] === "edit"));
+      }
+      installFake(env, "gh", [
+        { match: ["api", "graphql", `head=${branch}`], stdout: branchPrJson({ headRefName: branch }) },
+        { match: ["pr", "edit"], stdout: "edited" },
+        closingRule(),
+      ]);
+      assert.equal(prEdit(repo, { body: "Resolves: #42" }), "edited");
+      writeFileSync(join(fx.main, ".wt/worktree.json"), JSON.stringify({ issue: 99 }));
+      expectCode(() => prCreate(repo, { title: "T", body: "Closes #42", draft: false }), 2);
+      expectCode(() => prEdit(repo, { body: "Closes #42" }), 2);
+    },
+    { branch: "emend-42-fix-pane" },
+  ));
+
+test("issue branch closing guards recognize Markdown emphasis and ignore word fragments", () =>
+  scenario(
+    ({ env, fx, repo }) => {
+      const branch = "emend-42-fix-pane";
+      mkdirSync(join(fx.main, ".wt"));
+      writeFileSync(join(fx.main, ".wt/worktree.json"), JSON.stringify({ issue: 42 }));
+      gitIn(fx.main, "remote", "set-url", "origin", "https://github.com/current/project.git");
+      installFake(env, "gh", [
+        {
+          match: ["api", "graphql", `head=${branch}`],
+          stdout: branchPrJson({ headRefName: branch }, "current/project"),
+        },
+      ]);
+      for (const reference of [
+        "_Fixes #9_",
+        "__Closes owner/repo#9__",
+        "*Fixes #9*",
+        "~~Fixes #9~~",
+        "**Resolves https://github.com/other/repo/issues/9**",
+      ]) {
+        const body = `Closes #42\n${reference}`;
+        for (const action of [() => prCreate(repo, { title: "T", body, draft: false }), () => prEdit(repo, { body })]) {
+          assert.throws(
+            action,
+            (e: unknown) =>
+              e instanceof WtError &&
+              e.code === 2 &&
+              e.message === "The PR text must not close an issue other than #42.",
+            reference,
+          );
+        }
+      }
+      assert.ok(!fakeCalls(env, "gh").some((c) => c[1] === "create" || c[1] === "edit"));
+      gitIn(fx.main, "remote", "set-url", "origin", fx.origin);
+      for (const body of ["_Closes #42_", "Closes #42\nprefixes #9", "Closes #42\nsuffix#9"]) {
+        installFake(env, "gh", createRules(CREATED_URL, branch));
+        assert.equal(prCreate(repo, { title: "T", body, draft: false }), CREATED_URL, body);
+        installFake(env, "gh", [
+          { match: ["api", "graphql", `head=${branch}`], stdout: branchPrJson({ headRefName: branch }) },
+          { match: ["pr", "edit"], stdout: "edited" },
+          closingRule(),
+        ]);
+        assert.equal(prEdit(repo, { body }), "edited", body);
+      }
+    },
+    { branch: "emend-42-fix-pane" },
+  ));
+
+test("pr merge accepts a subject file and strips one final newline", () =>
+  mscenario(async (ctx) => {
+    installFake(
+      ctx.env,
+      "gh",
+      mergeRules({}, [
+        { match: ["pr", "merge", "7"], stdout: "merged\n" },
+        { match: READ_BACK_ARGS, stdout: MERGED_STATE },
+      ]),
+    );
+    const subject = join(ctx.env.root, "subject.txt");
+    const body = join(ctx.env.root, "body.md");
+    writeFileSync(subject, "fix: reviewed change\r\n");
+    writeFileSync(body, "Body\n");
+    await commands.pr?.({
+      repo: ctx.repo,
+      args: ["merge", "--pr", "7", "--match-head", headSha, "--subject-file", subject, "--body-file", body],
+    });
+    assert.ok(mergeCalls(ctx.env)[0]?.includes("--subject=fix: reviewed change"));
+  }));
+
+for (const state of ["open", "merged"] as const) {
+  test(`pr number --branch from main prints only a ${state} number or a one-line refusal`, () =>
+    scenario(
+      async ({ env, fx }) => {
+        const wt = join(fx.main, "bin/wt");
+        const args = ["pr", "number", "--branch", BRANCH, "--state", state];
+        const pr = { number: 7, state: state.toUpperCase(), headRefName: BRANCH };
+        const rule = (nodes: Record<string, unknown>[]) => ({
+          match: ["api", "graphql", `head=${BRANCH}`],
+          stdout: branchPrPage(nodes),
+        });
+        installFake(env, "gh", [
+          rule([
+            { ...pr, number: 8, headRefName: `${BRANCH}-prefix` },
+            { ...pr, number: 9, isCrossRepository: true },
+            { ...pr, number: 10, author: { login: "other" } },
+            pr,
+          ]),
+        ]);
+        assert.deepEqual(await runWt(wt, args, { cwd: fx.main }), { code: 0, stdout: "7\n", stderr: "" });
+        installFake(env, "gh", [rule([])]);
+        assert.deepEqual(await runWt(wt, args, { cwd: fx.main }), {
+          code: 1,
+          stdout: "",
+          stderr: `No ${state} pull request for this branch.\n`,
+        });
+        installFake(env, "gh", [rule([pr, { ...pr, number: 11 }])]);
+        assert.deepEqual(await runWt(wt, args, { cwd: fx.main }), {
+          code: 1,
+          stdout: "",
+          stderr: `More than one ${state} pull request matches this branch.\n`,
+        });
+      },
+      { withBin: true, branch: null },
+    ));
+}

@@ -15,14 +15,18 @@ import { test } from "node:test";
 import { PORT_MAX, PORT_MIN, readRegistry, withRegistry } from "./registry.ts";
 import { gitTry, type Repo, resolveRepo } from "./repo.ts";
 import {
+  branchPrPage,
   commitFile,
   type Fixture,
   fakeCalls,
+  fakeGithubOrigin,
   gitIn,
   installFake,
+  issueRules,
   listenOn,
   makeFixture,
   makeTestEnv,
+  readyIssue,
   runWt,
   setFakeRules,
   type TestEnv,
@@ -76,6 +80,28 @@ test("setup creates worktree, port and EMEND_HOME", () =>
     assert.equal(r.port, P0);
     assert.equal(gitIn(r.path, "symbolic-ref", "--short", "HEAD"), "feat-a");
     assert.equal(gitIn(r.path, "rev-parse", "HEAD"), gitIn(fx.main, "rev-parse", "origin/main"));
+  }));
+
+test("setup, metadata, list and cleanup accept both task branch forms and preserve explicit names", () =>
+  scenario({}, ({ repo, fx, env }) => {
+    for (const branch of ["014-some-task", "emend-task-014-some-task"]) {
+      const wt = setup(repo, { branch });
+      assert.equal(wt.branch, branch);
+      const info = JSON.parse(readFileSync(join(wt.path, ".wt/worktree.json"), "utf8"));
+      assert.equal(info.task, "014");
+      assert.equal(info.issue, undefined);
+      assert.equal(readRegistry(repo).worktrees[branch]?.task, "014");
+      assert.equal(list(repo).find((r) => r.branch === branch)?.task, "014");
+      assert.match(formatList(list(repo)), /014-some-task\s+014\s/);
+      cleanup(repo, { target: branch, discard: false, closeWorkspace: false });
+      assert.equal(existsSync(wt.path), false);
+      assert.equal(readRegistry(repo).worktrees[branch], undefined);
+      assert.equal(gitIn(fx.main, "branch", "--list", branch), "");
+    }
+    fakeGithubOrigin(env, fx);
+    installFake(env, "gh", issueRules([readyIssue(14)]));
+    const issueBranch = setup(repo, { branch: "emend-14-an-issue", issue: 14 });
+    assert.equal(readRegistry(repo).worktrees[issueBranch.branch]?.task, null);
   }));
 
 test("setup writes .wt/worktree.json and private directories", () =>
@@ -248,7 +274,13 @@ test("list reports ahead, behind, dirty, PR and agent", () =>
     gitIn(fx.main, "push", "--quiet", "origin", "main");
     gitIn(fx.main, "fetch", "--quiet", "origin");
     writeFileSync(join(r.path, "dirty.txt"), "x");
-    installFake(env, "gh", [{ match: ["pr", "view"], stdout: '{"number":5,"state":"OPEN"}' }]);
+    fakeGithubOrigin(env, fx);
+    installFake(env, "gh", [
+      {
+        match: ["api", "graphql", "head=feat-a"],
+        stdout: branchPrPage([{ number: 5, state: "OPEN", headRefName: "feat-a" }]),
+      },
+    ]);
     installFake(env, "herdr", [
       {
         match: ["agent", "list"],
@@ -335,8 +367,12 @@ test("guard: squash-merged branch passes through the PR head", () =>
     const r = newWorktree(repo, "feat-sq");
     const head = commitFile(r.path, "sq.txt", "sq\n");
     gitIn(r.path, "push", "--quiet", "origin", `${head}:refs/pull/7/head`);
+    fakeGithubOrigin(env, fx);
     installFake(env, "gh", [
-      { match: ["pr", "view"], stdout: JSON.stringify({ number: 7, state: "MERGED", headRefOid: head }) },
+      {
+        match: ["api", "graphql", "head=feat-sq"],
+        stdout: branchPrPage([{ number: 7, state: "MERGED", headRefName: "feat-sq", headRefOid: head }]),
+      },
     ]);
     // HEAD is not in origin/main, so only the PR head can clear it
     assert.throws(() => gitIn(fx.main, "merge-base", "--is-ancestor", head, "origin/main"));
@@ -345,11 +381,17 @@ test("guard: squash-merged branch passes through the PR head", () =>
 
     // an open PR does not clear it; a PR head that differs does not either
     installFake(env, "gh", [
-      { match: ["pr", "view"], stdout: JSON.stringify({ number: 7, state: "OPEN", headRefOid: head }) },
+      {
+        match: ["api", "graphql", "head=feat-sq"],
+        stdout: branchPrPage([{ number: 7, state: "OPEN", headRefName: "feat-sq", headRefOid: head }]),
+      },
     ]);
     assert.deepEqual(guard(repo, "feat-sq"), { ok: false, failed: "unmerged" });
     installFake(env, "gh", [
-      { match: ["pr", "view"], stdout: JSON.stringify({ number: 7, state: "MERGED", headRefOid: "a".repeat(40) }) },
+      {
+        match: ["api", "graphql", "head=feat-sq"],
+        stdout: branchPrPage([{ number: 7, state: "MERGED", headRefName: "feat-sq", headRefOid: "a".repeat(40) }]),
+      },
     ]);
     assert.deepEqual(guard(repo, "feat-sq"), { ok: false, failed: "unmerged" });
   }));
@@ -515,6 +557,8 @@ test("the removed run subcommand is unknown and help does not list it", () =>
     const help = await runWt(wt, ["help"], { cwd: fx.main });
     assert.doesNotMatch(help.stdout, /run view/);
     assert.match(help.stdout, /--brief-file/);
+    assert.match(help.stdout, /issues \[--json\]/);
+    assert.match(help.stdout, /spawn --issue <n>/);
   }));
 
 test("list and gc output carry no control character from outside", () => {

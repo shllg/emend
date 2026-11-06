@@ -79,6 +79,21 @@ test("wizard offers branches but not main or the caller's branch", () =>
     assert.ok(!withMain.includes("origin/main"), "an origin branch with a local twin is listed once");
   }));
 
+test("interactive choices preserve task names and existing numeric remote branches", () =>
+  scenario({}, ({ env, repo, fx }) => {
+    for (const branch of ["014-old-task", "emend-task-015-new-task"]) {
+      const wt = setup(repo, { branch });
+      assert.ok(branchChoices(repo, false).includes(branch));
+      installFake(env, "fzf", [{ stdout: `\n${branch}\n` }]);
+      assert.deepEqual(setupWizard(repo), { branch });
+      installFake(env, "fzf", [{ stdout: `${branch}\t${wt.path}\n` }]);
+      assert.equal(cleanupPicker(repo), branch);
+    }
+    // Older numeric task branches remain discoverable even though setup cannot create them without --issue.
+    gitIn(fx.main, "update-ref", "refs/remotes/origin/emend-016-origin-task", "HEAD");
+    assert.ok(branchChoices(repo, false).includes("origin/emend-016-origin-task"));
+  }));
+
 test("no TTY or no fzf: wizard, picker and menu return null without calling fzf", () =>
   scenario({ tty: false }, ({ env, repo }) => {
     installFake(env, "fzf", [{ stdout: "x\n", code: 0 }]);
@@ -105,6 +120,8 @@ test("cleanup picker returns the picked registered branch", () =>
 
 test("menu returns the picked action", () =>
   scenario({}, ({ env, repo }) => {
+    installFake(env, "fzf", [{ stdout: "issues\tshow the ready issue queue\n", code: 0 }]);
+    assert.equal(menu(repo), "issues");
     installFake(env, "fzf", [{ stdout: "tasks\tshow the task queue\n", code: 0 }]);
     assert.equal(menu(repo), "tasks");
     installFake(env, "fzf", [{ stdout: "rm -rf\n", code: 0 }]);

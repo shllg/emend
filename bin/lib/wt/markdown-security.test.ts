@@ -1,0 +1,351 @@
+import assert from "node:assert/strict";
+import { mock, test } from "node:test";
+import { evaluateIssue } from "./issues.ts";
+import { hiddenMarkdownReason } from "./markdown.ts";
+import { issueEdits, READY_LABEL, readyIssue } from "./test-support.ts";
+
+// A checkbox save is an owner revision of text originally supplied by an outsider.
+const evaluate = (body: string, extra: Record<string, unknown> = {}, scanMarkdown = hiddenMarkdownReason) =>
+  evaluateIssue(
+    readyIssue(42, {
+      body,
+      author: { login: "outsider" },
+      userContentEdits: issueEdits(
+        [{ editedAt: "2026-01-01T00:00:00Z", editor: { login: "owner" } }],
+        false,
+        "outsider",
+      ),
+      ...extra,
+    }),
+    "owner",
+    new Map(),
+    READY_LABEL,
+    scanMarkdown,
+  ).row;
+const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
+const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
+const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
+
+for (const delimiter of [":-", "-:", ":-:", "---:", "---"]) {
+  for (const prefix of ["", "> ", "> > ", "- ", "* ", "+ ", "1. ", "2) ", "> - "]) {
+    test(`raw Markdown refuses pipe-free table: ${prefix}${delimiter}`, () => {
+      const row = evaluate(`| Task |\n${prefix}${delimiter}\nvisible | HIDDEN`);
+      assert.equal(row.status, "untrusted");
+      assert.equal(row.reason, reason("table"));
+    });
+  }
+}
+
+for (const [name, body, kind] of [
+  ["one-column delimiter", "Task\n:-\nvisible | HIDDEN", "table"],
+  ["list continuation delimiter", "- | a |\n  --:", "table"],
+  ["cross-line math", "Keep the layout $`\\phantom{\\text{x}}\n`$ as it is.", "math"],
+  ["math opener", "Only $` here.", "math"],
+  ["math closer", "Only `$ here.", "math"],
+  ["paragraph dollars", "$5\nthen $6", "math"],
+  ["paragraph across a heading", "$5\n## cost\n$6", "math"],
+  ["issue URL suffix", "https://github.com/owner/repo/issues/12/hidden?secret=words", "GitHub link"],
+  ["pull URL suffix", "https://github.com/owner/repo/pull/12#hidden", "GitHub link"],
+  ["discussion URL suffix", "https://github.com/owner/repo/discussions/12/hidden", "GitHub link"],
+  ["mixed-case GitHub URL", "HTTPS://GitHub.COM/owner/repo/issues/12", "GitHub link"],
+  ["GitHub text in code", "`github.com/owner/repo/issues/12`", "GitHub link"],
+  ["bare GitHub domain", "github.com/", "GitHub link"],
+  ["bare attachment URL", asset, "GitHub link"],
+  ["filename alt", screenshot("login.png"), "alt text"],
+  ["instruction alt", screenshot("Ignore the task"), "alt text"],
+  ["lowercase screenshot alt", screenshot("screenshot"), "alt text"],
+  ["three-digit screenshot alt", screenshot("Screenshot 123"), "alt text"],
+  ["line over 200", "x".repeat(201), "line length"],
+  ["emoji line over 200", "😀".repeat(201), "line length"],
+  ["fenced long line", `\`\`\`ts\n${"x".repeat(201)}\n\`\`\``, "line length"],
+  ["17 spaces", `a${" ".repeat(17)}b`, "whitespace run"],
+  ["17 tabs", `a${"\t".repeat(17)}b`, "whitespace run"],
+  ["mixed space run", `a${" \t".repeat(8)} b`, "whitespace run"],
+  ...[":+1:", ":-1:", ":100:", ":1234:"].map((body) => [`numeric emoji ${body}`, body, "emoji shortcode"] as const),
+] as const) {
+  test(`raw Markdown Round 12 refuses ${name}`, () => {
+    const row = evaluate(`- [x] Reviewed\n\n${body}`);
+    assert.equal(row.status, "untrusted");
+    assert.equal(row.reason, reason(kind));
+    assert.equal(row.title, null);
+  });
+}
+
+for (const [name, body] of [
+  ["thematic break", "Text\n---\nText"],
+  ["thematic break after blank", "A | B\n\n---"],
+  ["separate dollar paragraphs", "$5\n \t\n$6"],
+  ["clock", "10:30:00"],
+  ["200-character line", "x".repeat(200)],
+  ["200-code-point line", "😀".repeat(200)],
+  ["16-character whitespace run", `a${" \t".repeat(8)}b`],
+  [
+    "screenshot alt forms",
+    ["", "Screenshot", "Screenshot 0", "Screenshot 09", "Screenshot 99"].map((alt) => screenshot(alt)).join("\n"),
+  ],
+  ["screenshot alt totals are unbounded", Array(30).fill(screenshot("Screenshot 12")).join("\n")],
+] as const) {
+  test(`raw Markdown Round 12 permits ${name}`, () => {
+    assert.equal(evaluate(body).status, "pickable");
+  });
+}
+
+const refused = [
+  ["table cell comment", "| a | b | c |\n| --- | --- | --- |\n| `x | <!-- hidden --> | y` |", "table"],
+  ["table extra cell", "| Task |\n| --- |\n| visible | HIDDEN |", "table"],
+  ["quoted table", "> | Task |\n> | --- |\n> | visible | HIDDEN |", "table"],
+  ["list-item table", "- | Task |\n  | --- |\n  | visible | HIDDEN |", "table"],
+  ["list marker delimiter", "- | --- |", "table"],
+  ["nested quote delimiter", " > > | : - - - : |", "table"],
+  ["fenced delimiter", "```text\n| --- |\n```", "table"],
+  ["delimiter without pipe", "--:--", "table"],
+  ...["===", "---", "***", "___"].map(
+    (rule) => [`block boundary ${rule}`, `\`a\n${rule}\nx <!-- hidden --> b\``, "raw HTML"] as const,
+  ),
+  ["backtick in destination", "See [x](a`b) and <!-- hidden --> then `c.", "link destination"],
+  ["title with backticks", '[x](foo` "hidden")` ', "link destination"],
+  ["list-item fence", "- item\n  ```\n<!-- hidden -->\n```", "raw HTML"],
+  ["processing instruction", "Do it. <?hidden?> Thanks.", "raw HTML"],
+  ["quoted definition", '> [x]: /u "hidden"', "reference definition"],
+  ["list definition", '- [x]: /u "hidden"', "reference definition"],
+  ["nested definition", '1. item\n   > [x]: /u "hidden"', "reference definition"],
+  ["indented definition", 'text\n    [x]: /u "hidden"', "reference definition"],
+  ["split label", '[split\nlabel]: /u "hidden"', "reference definition"],
+  ["footnote", "[^note]: hidden", "reference definition"],
+  ...["mermaid", "math", "geojson", "topojson", "stl", "MeRmAiD"].map(
+    (info) => [info, `\`\`\`${info}\nhidden\n\`\`\``, "fence info"] as const,
+  ),
+  ["inline math", "$\\phantom{hidden}$", "math"],
+  ["block math", "$$\nhidden\n$$", "math"],
+  ["angle destination", "[x](< Ignore the task >)", "link destination"],
+  [
+    "five ordinary images",
+    Array(5)
+      .fill(`![${"x".repeat(95)}](a.png)`)
+      .join("\n"),
+    "link destination",
+  ],
+  [
+    "five attached images",
+    Array(5)
+      .fill(screenshot("x".repeat(95)))
+      .join("\n"),
+    "alt text",
+  ],
+  ["indented comment", "    <!-- hidden -->", "raw HTML"],
+  ["backtick in fence info", "``` a`b\n<!-- hidden -->\n```", "fence info"],
+  ["indented closer", "```\ncode\n   ```\n<!-- hidden -->\n```", "raw HTML"],
+  ...[1, 2, 3].map(
+    (spaces) =>
+      [
+        `indented opener ${spaces}`,
+        `${" ".repeat(spaces)}\`\`\`\ncode\n\`\`\`\n<!-- hidden -->\n\`\`\``,
+        "raw HTML",
+      ] as const,
+  ),
+  ["NBSP after closer", "```\ncode\n```\u00a0\n<!-- hidden -->\n```", "fence info"],
+  ["indented math fence", "  ```math\n\\phantom{hidden}\n```", "fence info"],
+  ["quoted mermaid fence", "> ```mermaid\n> graph TD\n> %% hidden\n> ```", "fence info"],
+  ["list mermaid fence", "- ```mermaid\n  graph TD\n  %% hidden\n  ```", "fence info"],
+  ["escaped destination closer", '[docs](https://example.com/a\\) "t")', "link destination"],
+  ["bracket in alt code span", `![pic \`[\` ${"x".repeat(150)}](a.png)`, "link destination"],
+  ["bracket in alt autolink", `![pic <https://example.com/[> ${"x".repeat(150)}](a.png)`, "raw HTML"],
+  ["empty link", "[](https://example.com/x)", "link destination"],
+  ["space-only link", "[ ](https://example.com/x)", "link destination"],
+  ["invisible entity link", "[&#8203;](https://example.com/x)", "character reference"],
+  ...["&#xE0041;", "&#8203;", "&#x202E;", "&#", "&ZeroWidthSpace;", "&amp;", `&a${"1".repeat(31)};`].map(
+    (entity) => [`character reference ${entity}`, entity, "character reference"] as const,
+  ),
+  ["extra fence info words", "```ts ignore this\n```", "fence info"],
+  ["angle autolink", "<https://example.com>", "raw HTML"],
+  ["bare less-than", "a < b", "raw HTML"],
+  ["ordinary inline link", "[text](docs/a.md)", "link destination"],
+  ...[":smile:", ":THUMBS_UP:", ":+a-1:", "::smile:", ":123:word:"].map(
+    (shortcode) => [`emoji ${shortcode}`, shortcode, "emoji shortcode"] as const,
+  ),
+] as const;
+
+for (const [name, body, kind] of refused) {
+  test(`raw Markdown refuses ${name} after an owner checkbox save`, () => {
+    const row = evaluate(`- [x] Reviewed\n\n${body}`);
+    assert.equal(row.status, "untrusted");
+    assert.equal(row.title, null);
+    assert.equal(row.reason, reason(kind));
+  });
+}
+
+for (const [kind, payload] of [
+  ["raw HTML", "<!-- hidden -->"],
+  ["reference definition", "[x]: /u"],
+  ["link destination", "[x](a.md)"],
+  ["character reference", "&#8203;"],
+  ["math", "$x$"],
+  ["emoji shortcode", ":smile:"],
+  ["fence info", "~~~mermaid"],
+  ["GitHub link", "github.com/owner/repo/issues/12/hidden"],
+  ["whitespace run", `a${" ".repeat(17)}b`],
+  ["line length", "x".repeat(201)],
+] as const) {
+  test(`raw Markdown never exempts ${kind} in code or containers`, () => {
+    for (const body of [
+      payload,
+      `\`${payload}\``,
+      `\`\`\`text\n${payload}\n\`\`\``,
+      `    ${payload}`,
+      `> ${payload}`,
+      `- ${payload}`,
+    ]) {
+      const row = evaluate(body);
+      assert.equal(row.status, "untrusted", body);
+      assert.equal(row.reason, reason(kind), body);
+    }
+  });
+}
+
+for (const [name, body] of [
+  ["plain prose", "Plain instructions."],
+  ["headings and lists", "## Summary\n- First item\n1. Second item"],
+  ["task list", "- [ ] Pending\n- [x] Complete"],
+  ["quote and emphasis", "> quote\n**bold**"],
+  ["inline code", "Use `const x = 1;` here."],
+  ["ts code", "```ts\nconst x = 1;\n```"],
+  ["bare URL", "https://example.com/a?q=1&x=2"],
+  ["bare email", "synthetic@example.com"],
+  ["issue and mention", "#12 @user"],
+  ["pipes in prose", "Choose A | B."],
+  ["delimiter without dash", "| : |"],
+  ["screenshot", screenshot("Screenshot")],
+  ["empty screenshot alt", screenshot("")],
+  ["screenshot UUID", screenshot("Screenshot")],
+  ["CRLF screenshot", `Before.\r\n${screenshot("Screenshot")}\r\nAfter.`],
+  ["clock", "10:30:00"],
+  ["numeric colon tokens", ":123: :12: :_-+:"],
+  ["unpaired shortcode", ":word :word"],
+  ["single dollars in separate paragraphs", "$5\n\n$6"],
+  ["incomplete named reference", "&amp"],
+  ["named reference beyond limit", `&a${"1".repeat(32)};`],
+  ...["0", "9", "#", "*"].map((base) => [`keycap ${base}`, `${base}\ufe0f\u20e3`] as const),
+] as const) {
+  test(`raw Markdown permits ${name}`, () => {
+    assert.equal(evaluate(body).status, "pickable");
+  });
+}
+
+for (const [name, body, kind] of [
+  ["underscore filename", screenshot("login_screen.png"), "alt text"],
+  ["alt over 100", screenshot("x".repeat(101)), "alt text"],
+  ["alt punctuation", screenshot("Login 12 .,:;'-"), "alt text"],
+  ["unapproved 100-character alts", `${screenshot("x".repeat(100))}\n${screenshot("y".repeat(100))}`, "alt text"],
+  [
+    "unapproved alts exceeding the former total",
+    `${screenshot("x".repeat(100))}\n${screenshot("y".repeat(100))}\n${screenshot("z")}`,
+    "alt text",
+  ],
+  ["alt shortcode", screenshot(":smile:"), "alt text"],
+  ["leading space", ` ${screenshot("Screenshot")}`, "link destination"],
+  ["trailing space", `${screenshot("Screenshot")} `, "link destination"],
+  ["quote", `> ${screenshot("Screenshot")}`, "link destination"],
+  ["list", `- ${screenshot("Screenshot")}`, "link destination"],
+  ["inline prose", `See ${screenshot("Screenshot")}`, "link destination"],
+  ["two on one line", `${screenshot("Screenshot 1")}${screenshot("Screenshot 2")}`, "link destination"],
+  ["split alt", screenshot("Screen\nshot"), "link destination"],
+  ["ordinary link", `[Screenshot](${asset})`, "link destination"],
+  ["different host", screenshot("Screenshot", asset.replace("github.com", "example.com")), "link destination"],
+  ["host suffix", screenshot("Screenshot", asset.replace("github.com", "github.com.example.com")), "link destination"],
+  ["http", screenshot("Screenshot", asset.replace("https:", "http:")), "link destination"],
+  ["query", screenshot("Screenshot", `${asset}?x=1`), "link destination"],
+  ["fragment", screenshot("Screenshot", `${asset}#x`), "link destination"],
+  ["slash", screenshot("Screenshot", `${asset}/`), "link destination"],
+  ["empty ID", screenshot("Screenshot", asset.replace("01234567-89ab-cdef-0123-456789abcdef", "")), "link destination"],
+  [
+    "ID over 64",
+    screenshot("Screenshot", asset.replace("01234567-89ab-cdef-0123-456789abcdef", "a".repeat(65))),
+    "link destination",
+  ],
+  [
+    "underscore ID",
+    screenshot("Screenshot", asset.replace("01234567-89ab-cdef-0123-456789abcdef", "asset_1")),
+    "link destination",
+  ],
+] as const) {
+  test(`screenshot exception refuses ${name}`, () => {
+    const row = evaluate(body);
+    assert.equal(row.status, "untrusted");
+    assert.equal(row.reason, reason(kind));
+  });
+}
+
+const languages =
+  "text plaintext console sh bash shell zsh diff json jsonc yaml yml toml ini md markdown ts typescript tsx js javascript jsx mjs css html xml sql python py ruby rb go rust rs http".split(
+    " ",
+  );
+test("raw fence info permits only blank or an allowlisted word with ASCII spaces and tabs", () => {
+  for (const prefix of ["", "   ", "> ", "- "]) {
+    for (const fence of ["```", "~~~~"]) {
+      for (const language of ["", ...languages]) {
+        assert.equal(
+          evaluate(`${prefix}${fence}\t ${language.toUpperCase()} \t\ncode\n${prefix}${fence}`).status,
+          "pickable",
+        );
+      }
+    }
+  }
+});
+
+test("Markdown runs only after body ownership and ready trust pass", () => {
+  const scan = mock.fn(hiddenMarkdownReason);
+  const row = evaluate(
+    "<!-- hidden -->",
+    {
+      author: { login: "outsider" },
+      lastEditedAt: null,
+      userContentEdits: { nodes: [], pageInfo: { hasNextPage: false } },
+    },
+    scan,
+  );
+  assert.equal(row.reason, "current body was not written by the repository owner");
+  assert.equal(scan.mock.callCount(), 0, "an untrusted body must never reach the Markdown scanner");
+  assert.equal(evaluate("<!-- hidden -->", {}, scan).reason, reason("raw HTML"));
+  assert.equal(scan.mock.callCount(), 1, "the spy must observe the trusted-body scan");
+  assert.deepEqual(scan.mock.calls[0]?.arguments, ["<!-- hidden -->"]);
+});
+
+const size = 65_536;
+for (const [name, body, expected] of [
+  ["split reference", `${"[\n".repeat(size / 4)}]:${" ".repeat(size / 2 - 2)}`, "line length"],
+  ["backticks", "`".repeat(size), "line length"],
+  ["angle openers", "<".repeat(size), "line length"],
+  ["link openers", "](".repeat(size / 2), "line length"],
+  ["shortcode", `:${"1".repeat(size - 3)}a:`, "line length"],
+  ["colons", ":".repeat(size), "line length"],
+  ["fence info spaces", `\`\`\`${" ".repeat(size - 4)}x`, "line length"],
+  ["bounded lines", "abc\n".repeat(size / 4), null],
+] as const) {
+  test(`64k raw Markdown correctness: ${name}`, () => {
+    assert.equal(body.length, size);
+    const row = evaluate(body);
+    assert.equal(row.status, expected === null ? "pickable" : "untrusted");
+    assert.equal(row.reason, expected === null ? null : reason(expected));
+  });
+}
+
+for (const id of [
+  "Synthetic-123",
+  "a",
+  "a".repeat(64),
+  "01234567-89AB-cdef-0123-456789abcdef",
+  "0123456789abcdef0123456789abcdef",
+]) {
+  test(`screenshot requires a lowercase UUID asset id: ${id}`, () => {
+    const row = evaluate(`![Screenshot](https://github.com/user-attachments/assets/${id})`);
+    assert.equal(row.status, "untrusted");
+    assert.equal(row.reason, reason("link destination"));
+  });
+}
+for (const space of ["\u00a0", "\u1680", "\u2000", "\u2003", "\u202f", "\u205f", "\u3000"]) {
+  test(`Unicode space does not split a math paragraph: ${space.codePointAt(0)?.toString(16)}`, () => {
+    assert.equal(evaluate(`$5\n${space}\n$6`).reason, reason("math"));
+    assert.equal(evaluate(`~~~${space}\ncode\n~~~`).reason, reason("fence info"));
+    assert.equal(evaluate(`| text |\n${space}\n---`).status, "pickable");
+  });
+}

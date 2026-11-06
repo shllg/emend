@@ -151,7 +151,7 @@ export function testPortRange(): { min: number; max: number } {
 
 let current: TestEnv | null = null;
 
-export function makeTestEnv(): TestEnv {
+export function makeTestEnv(o: { ports?: boolean } = {}): TestEnv {
   const realPath = process.env.PATH ?? "";
   const root = realpathSync(mkdtempSync(join(os.tmpdir(), "wt-test-")));
   const saved = new Map<string, string | undefined>();
@@ -222,7 +222,8 @@ export function makeTestEnv(): TestEnv {
     process.env.HOME = home;
     process.env.PATH = fakeBin;
     process.env.TERM = "dumb";
-    setPortRangeForTests(testPortRange());
+    // Tool-only tests need no listeners or repository and can run without probing sockets.
+    if (o.ports !== false) setPortRangeForTests(testPortRange());
     current = { root, home, fakeBin, realPath, cleanup };
     return current;
   } catch (e) {
@@ -237,6 +238,7 @@ export function makeTestEnv(): TestEnv {
 export interface FakeRule {
   /** Argv tokens that must appear in this order (not necessarily adjacent). Empty or absent: always matches. */
   match?: string[];
+  queryIncludes?: string;
   stdout?: string;
   stderr?: string;
   code?: number;
@@ -256,6 +258,7 @@ const stateFile = path.join(dir, "." + name + ".state.json");
 let state = {};
 try { state = JSON.parse(fs.readFileSync(stateFile, "utf8")); } catch {}
 function matches(rule) {
+  if (rule.queryIncludes && !argv.some(a => a.startsWith("query=") && a.includes(rule.queryIncludes))) return false;
   let at = 0;
   for (const token of rule.match || []) {
     const i = argv.indexOf(token, at);
@@ -303,6 +306,125 @@ export function fakeCalls(env: TestEnv, name: string): string[][] {
     .split("\n")
     .filter((l) => l !== "")
     .map((l) => JSON.parse(l) as string[]);
+}
+
+/** Synthetic GitHub queue data shared by queue and spawn tests. */
+export const READY_AT = "2026-01-02T00:00:00Z";
+export const CREATED_AT = "2025-12-30T00:00:00Z";
+export const READY_LABEL = { id: "label-ready", updatedAt: "2026-01-01T00:00:00Z" };
+export function issueEdits(
+  edits: { editedAt: string; editor: { login: string } | null }[],
+  more = false,
+  author = "owner",
+  createdAt = CREATED_AT,
+) {
+  return {
+    nodes: [...edits, ...(more || edits.length === 0 ? [] : [{ editedAt: createdAt, editor: { login: author } }])].sort(
+      (a, b) => Date.parse(b.editedAt) - Date.parse(a.editedAt),
+    ),
+    pageInfo: { hasNextPage: more },
+  };
+}
+export function issueEvent(
+  actor: string | null = "owner",
+  type = "LabeledEvent",
+  createdAt = READY_AT,
+  label = "ready",
+) {
+  return {
+    __typename: type,
+    createdAt,
+    label: { id: `label-${label}`, name: label },
+    actor: actor === null ? null : { login: actor },
+  };
+}
+export function readyIssue(number: number, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  const edits = extra.userContentEdits as ReturnType<typeof issueEdits> | undefined;
+  const createdAt = extra.createdAt ?? CREATED_AT;
+  const newest = edits?.nodes?.[0];
+  return {
+    number,
+    title: "Fix the review pane",
+    body: "Approved task.\n",
+    state: "OPEN",
+    author: { login: "owner" },
+    lastEditedAt: newest?.editedAt ?? null,
+    url: `https://example.invalid/test/issues/${number}`,
+    createdAt,
+    labels: { nodes: [{ name: "ready" }], pageInfo: { hasNextPage: false } },
+    blockedBy: { nodes: [], pageInfo: { hasNextPage: false } },
+    timelineItems: { nodes: [issueEvent()], pageInfo: { hasPreviousPage: false } },
+    userContentEdits: {
+      nodes: [],
+      pageInfo: { hasNextPage: false },
+    },
+    ...extra,
+  };
+}
+export function githubPage(fields: Record<string, unknown>, nameWithOwner = "owner/repo"): string {
+  return JSON.stringify({
+    data: {
+      repository: { nameWithOwner, owner: { login: nameWithOwner.split("/")[0] }, label: READY_LABEL, ...fields },
+    },
+  });
+}
+export function issuePage(nodes: Record<string, unknown>[], endCursor: string | null = null): string {
+  return githubPage({ issues: { nodes, pageInfo: { hasNextPage: endCursor !== null, endCursor } } });
+}
+export function prPage(
+  prs: { number: number; headRefName: string; isCrossRepository?: boolean; closingIssuesReferences?: unknown }[],
+  endCursor: string | null = null,
+): string {
+  return githubPage({
+    pullRequests: {
+      nodes: prs.map((pr) => ({
+        isCrossRepository: false,
+        closingIssuesReferences: { nodes: [], pageInfo: { hasNextPage: false } },
+        ...pr,
+      })),
+      pageInfo: { hasNextPage: endCursor !== null, endCursor },
+    },
+  });
+}
+/** Exact branch-lookup response, distinct from the repository-wide claim query. */
+export function branchPrPage(prs: Record<string, unknown>[], nameWithOwner = "owner/repo"): string {
+  return JSON.stringify({
+    data: {
+      viewer: { login: "owner" },
+      repository: {
+        nameWithOwner,
+        pullRequests: {
+          nodes: prs.map((pr) => ({ isCrossRepository: false, author: { login: "owner" }, ...pr })),
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    },
+  });
+}
+export function issueRules(nodes: Record<string, unknown>[], prs: Parameters<typeof prPage>[0] = []): FakeRule[] {
+  return [
+    ...nodes.map((n) => ({ match: ["api", "graphql", `number=${n.number}`], stdout: githubPage({ issue: n }) })),
+    { match: ["api", "graphql"], queryIncludes: "issues(states:", stdout: issuePage(nodes) },
+    { match: ["api", "graphql"], queryIncludes: "pullRequests(states:", stdout: prPage(prs) },
+    { match: ["api", "graphql"], stdout: githubPage({ issue: null }) },
+  ];
+}
+
+/** Monotonic time advances only when a test asks it to. No wall-clock waiting. */
+export function fakeClock() {
+  let time = 0;
+  const sleeps: number[] = [];
+  return {
+    sleeps,
+    now: () => time,
+    async sleep(ms: number) {
+      sleeps.push(ms);
+      time += ms;
+    },
+    advance(ms: number) {
+      time += ms;
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -450,4 +572,38 @@ export function listenOn(port: number): Promise<{ close(): Promise<void> }> {
       });
     });
   });
+}
+
+/** Present a synthetic GitHub identity while git still talks only to the local bare fixture. */
+export function fakeGithubOrigin(env: TestEnv, fx: Fixture): void {
+  const file = join(env.fakeBin, "git");
+  const realGit = realpathSync(file);
+  // Keep git as a symlink so tests can temporarily replace it and restore its target.
+  const wrapper = join(mkdtempSync(join(env.root, "github-origin-")), "git");
+  writeFileSync(
+    wrapper,
+    `#!${process.execPath}
+const {spawnSync} = require("node:child_process");
+const args = process.argv.slice(2);
+const remote = args.lastIndexOf("remote");
+const query = args.slice(remote);
+const originUrl = remote >= 0 && query[1] === "get-url" && query.at(-1) === "origin" &&
+  query.slice(2, -1).every(arg => arg === "--push" || arg === "--all");
+// Inherit streams for every other command: batch input and blob bytes must be unchanged.
+const result = spawnSync(${JSON.stringify(realGit)}, args, {stdio: originUrl ? ["inherit", "pipe", "inherit"] : "inherit"});
+if (originUrl) {
+  let output = result.stdout || Buffer.alloc(0);
+  if (result.status === 0) {
+    const local = Buffer.from(${JSON.stringify(fx.origin)}).toString("latin1");
+    output = Buffer.from(output.toString("latin1").split("\\n")
+      .map(url => url === local ? "https://github.com/owner/repo.git" : url).join("\\n"), "latin1");
+  }
+  process.stdout.write(output);
+}
+process.exitCode = result.status ?? 1;
+`,
+  );
+  chmodSync(wrapper, 0o755);
+  rmSync(file);
+  symlinkSync(wrapper, file);
 }

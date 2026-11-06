@@ -18,7 +18,9 @@ import { isAbsolute, join, resolve, sep } from "node:path";
 import { isatty } from "node:tty";
 import { pathToFileURL } from "node:url";
 import type { Command, CommandTable } from "./command.ts";
-import { closeWorkspace, herdrLocatedAgents } from "./herdr.ts";
+import { prForBranch } from "./github.ts";
+import { closeWorkspace, herdrLocatedAgents, writeIssueSnapshot } from "./herdr.ts";
+import { branchClaims, indexClaims, type PickedIssue, pickIssue } from "./issues.ts";
 import { run } from "./proc.ts";
 import { allocatePort, busyPorts, readRegistry, type WorktreeEntry, withRegistry } from "./registry.ts";
 import {
@@ -33,7 +35,17 @@ import {
   refExists,
 } from "./repo.ts";
 import { hasTerminal, readTerminalLine } from "./terminal.ts";
-import { branchName, commitSha, parseFlags, refName, taskNumber, WtError } from "./validate.ts";
+import {
+  branchName,
+  commitSha,
+  issueNumber,
+  parseFlags,
+  refName,
+  requireIssueBranch,
+  taskFromBranch,
+  taskNumber,
+  WtError,
+} from "./validate.ts";
 
 // ---------------------------------------------------------------------------------------------
 // Output and terminal access. Tests may replace the terminal.
@@ -68,6 +80,8 @@ export interface SetupOptions {
   branch: string;
   from?: string;
   task?: string;
+  /** A number is approved here; spawn supplies its freshly approved issue to share the same snapshot. */
+  issue?: number | PickedIssue;
   mode?: "github" | "local";
   /** Ports with a listener, from busyPorts(), taken before the lock. Default: none. */
   busy?: ReadonlySet<number>;
@@ -121,7 +135,7 @@ export function writeWtFiles(entry: WorktreeEntry, branch: string): string {
   ensureRealDir(emendHome, 0o700);
   // .wt holds this checkout's private state; ignore it even where the repository's .gitignore does not.
   createNew(join(wt, ".gitignore"), "*\n", 0o600);
-  const info = { branch, port: entry.port, emendHome, task: entry.task, mode: entry.mode };
+  const info = { branch, port: entry.port, emendHome, task: entry.task, issue: entry.issue, mode: entry.mode };
   createNew(join(wt, "worktree.json"), `${JSON.stringify(info, null, 2)}\n`, 0o600);
   return emendHome;
 }
@@ -268,9 +282,16 @@ function fromLinkedWorktree(repo: Repo): boolean {
 export function setup(repo: Repo, o: SetupOptions): SetupResult {
   const branch = branchName(o.branch);
   const from = o.from === undefined ? undefined : refName(o.from);
-  const task = o.task === undefined ? null : taskNumber(o.task);
+  const prepared = typeof o.issue === "object" && o.issue !== null ? o.issue : undefined;
+  const issue = o.issue === undefined ? undefined : issueNumber(String(prepared?.number ?? o.issue));
+  requireIssueBranch(branch, issue);
+  if (issue !== undefined && o.task !== undefined) throw new WtError(2, "Give a task or an issue, not both.");
+  const task = issue !== undefined ? null : o.task === undefined ? taskFromBranch(branch) : taskNumber(o.task);
   const mode = o.mode ?? "github";
+  if (issue !== undefined && mode === "local")
+    throw new WtError(2, "A local landing does not close the issue; use the github mode.");
   if (mode !== "github" && mode !== "local") throw new WtError(2, "Invalid mode.");
+  const approved = issue === undefined ? undefined : (prepared ?? pickIssue(repo, issue));
   assertRefFormat(repo, branch);
 
   const path = join(repo.worktreesDir, worktreeDirName(branch));
@@ -278,7 +299,7 @@ export function setup(repo: Repo, o: SetupOptions): SetupResult {
   let originExists = false;
   if (!localExists) {
     fetchOrigin(repo);
-    originExists = refExists(repo, `refs/remotes/origin/${branch}`);
+    originExists = issue === undefined && refExists(repo, `refs/remotes/origin/${branch}`);
   }
   if ((localExists || originExists) && from !== undefined) {
     throw new WtError(2, "--from applies only to a new branch. Nothing was created.");
@@ -314,6 +335,9 @@ export function setup(repo: Repo, o: SetupOptions): SetupResult {
   }
 
   const outcome = withRegistry(repo, (r) => {
+    if (issue !== undefined && indexClaims(branchClaims(repo, r)).has(issue)) {
+      throw new WtError(3, `Issue #${issue} is already taken. Nothing was created.`);
+    }
     if (Object.hasOwn(r.worktrees, branch)) {
       throw new WtError(3, "A worktree is already registered for this branch. Nothing was created.");
     }
@@ -344,10 +368,12 @@ export function setup(repo: Repo, o: SetupOptions): SetupResult {
       git(repo, ["branch", "--quiet", `--set-upstream-to=origin/${branch}`, branch]);
     }
 
-    const entry: WorktreeEntry = { path, port, task, mode, createdAt: new Date().toISOString() };
+    const entry: WorktreeEntry = { path, port, task, issue, mode, createdAt: new Date().toISOString() };
     r.worktrees[branch] = entry;
     try {
-      return { entry, emendHome: writeWtFiles(entry, branch), failure: null as WtError | null };
+      const emendHome = writeWtFiles(entry, branch);
+      if (approved) writeIssueSnapshot(join(path, ".wt"), approved);
+      return { entry, emendHome, failure: null as WtError | null };
     } catch (e) {
       const why = e instanceof Error ? e.message : "unknown error";
       const failure = new WtError(
@@ -370,6 +396,7 @@ export interface ListRow {
   branch: string;
   path: string;
   task: string | null;
+  issue?: number;
   port: number;
   mode: "github" | "local";
   /** Commits on the branch that its base lacks (local main for a local-mode entry, origin/main otherwise), or null when unknown. */
@@ -406,15 +433,11 @@ function plainBranch(branch: string): boolean {
 
 function lookupPr(repo: Repo, branch: string): { number: number; state: string } | null {
   if (!plainBranch(branch)) return null;
-  const r = run("gh", ["pr", "view", branch, "--json", "number,state"], { cwd: repo.mainRoot, timeoutMs: 15_000 });
-  if (r.code !== 0) return null;
   try {
-    const data = JSON.parse(r.stdout) as { number?: unknown; state?: unknown };
-    if (typeof data.number === "number" && typeof data.state === "string") {
-      return { number: data.number, state: data.state };
-    }
+    const pr = prForBranch(repo, branch, ["OPEN", "MERGED", "CLOSED"], [], 15_000);
+    if (pr && typeof pr.data.state === "string") return { number: pr.number, state: pr.data.state };
   } catch {
-    // not JSON: no PR information
+    // Optional PR information is unavailable or ambiguous.
   }
   return null;
 }
@@ -452,7 +475,8 @@ export function list(repo: Repo): ListRow[] {
     rows.push({
       branch,
       path: entry.path,
-      task: entry.task,
+      task: entry.task ?? (entry.issue === undefined ? taskFromBranch(branch) : null),
+      issue: entry.issue,
       port: entry.port,
       mode: entry.mode,
       ahead,
@@ -468,13 +492,13 @@ export function list(repo: Repo): ListRow[] {
 
 export function formatList(rows: ListRow[]): string {
   if (rows.length === 0) return "No worktrees.";
-  const head = ["BRANCH", "TASK", "PORT", "AHEAD/BEHIND", "DIRTY", "PR", "AGENT"];
+  const head = ["BRANCH", "TASK/ISSUE", "PORT", "AHEAD/BEHIND", "DIRTY", "PR", "AGENT"];
   // Branch names, the PR state and the agent status come from outside: no control character (C0, DEL, C1) shows.
   const safe = (s: string) => s.replace(/\p{Cc}/gu, "?");
   const body = rows.map((r) =>
     [
       r.missing ? `${r.branch} (missing)` : r.branch,
-      r.task ?? "-",
+      r.issue === undefined ? (r.task ?? "-") : `#${r.issue}`,
       String(r.port),
       r.ahead === null || r.behind === null ? "-" : `+${r.ahead}/-${r.behind}`,
       r.dirty === null ? "-" : r.dirty ? "yes" : "no",
@@ -518,14 +542,11 @@ function portListening(port: number): boolean {
 
 function containedInMergedPr(repo: Repo, branch: string, path: string): boolean {
   if (!plainBranch(branch)) return false;
-  const gh = run("gh", ["pr", "view", branch, "--json", "number,state,headRefOid"], {
-    cwd: repo.mainRoot,
-    timeoutMs: 30_000,
-  });
-  if (gh.code !== 0) return false;
-  let data: { number?: unknown; state?: unknown; headRefOid?: unknown };
+  let data: Record<string, unknown>;
   try {
-    data = JSON.parse(gh.stdout);
+    const pr = prForBranch(repo, branch, ["MERGED"], ["headRefOid"], 30_000);
+    if (!pr) return false;
+    data = pr.data;
   } catch {
     return false;
   }
@@ -904,17 +925,19 @@ async function loadInteractive(): Promise<InteractiveModule | null> {
 }
 
 const setupCommand: Command = async ({ repo, args }) => {
-  const { flags, positionals } = parseFlags(args, { from: "string", task: "string" }, 1);
+  const { flags, positionals } = parseFlags(args, { from: "string", task: "string", issue: "string" }, 1);
   let branch = positionals[0];
   let from = flags.from as string | undefined;
   if (branch === undefined) {
     const picked = (await loadInteractive())?.setupWizard?.(repo) ?? null;
-    if (!picked) throw new WtError(2, "Usage: bin/wt setup <branch> [--from <ref>] [--task <NNN>]");
+    if (!picked) throw new WtError(2, "Usage: bin/wt setup <branch> [--from <ref>] [--task <NNN> | --issue <n>]");
     branch = picked.branch;
     from = picked.from ?? from;
   }
+  const issue = typeof flags.issue === "string" ? issueNumber(flags.issue) : undefined;
+  requireIssueBranch(branchName(branch), issue);
   const busy = await busyPorts();
-  const r = setup(repo, { branch, from, task: flags.task as string | undefined, busy });
+  const r = setup(repo, { branch, from, task: flags.task as string | undefined, issue, busy });
   say(`worktree: ${r.path}`);
   say(`branch: ${r.branch}`);
   say(`port: ${r.port}`);
