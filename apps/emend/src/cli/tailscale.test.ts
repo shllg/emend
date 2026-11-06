@@ -303,8 +303,9 @@ const route = (port = 3636) => ({
   Web: { [`${dnsName}:443`]: { Handlers: { "/": { Proxy: ownership(port).target } } } },
 });
 
-async function ownedFake(config: unknown = {}, marker: unknown = ownership()) {
-  const f = await fake(running, config);
+async function ownedFake(config: unknown = {}, marker: unknown = ownership(), currentDnsName = dnsName) {
+  const status = { ...running, Self: { DNSName: currentDnsName } };
+  const f = await fake(status, config);
   const stateDir = join(f.dir, "state");
   await mkdir(stateDir, { mode: 0o700 });
   const path = join(stateDir, "tailscale-serve.json");
@@ -316,7 +317,8 @@ async function ownedFake(config: unknown = {}, marker: unknown = ownership()) {
     join(f.dir, "tailscale"),
     `#!/bin/sh
 printf '%s\\n' "$*" >> ${quote(join(f.dir, "calls.jsonl"))}
-if [ "$2" = status ]; then
+if [ "$1" = status ]; then printf '%s\\n' ${quote(JSON.stringify(status))}
+elif [ "$2" = status ]; then
   /bin/cat ${quote(configPath)}
   if [ -f ${quote(join(f.dir, "next-marker.json"))} ]; then
     /bin/cp ${quote(join(f.dir, "next-marker.json"))} ${quote(path)}
@@ -328,7 +330,7 @@ if [ "$2" = status ]; then
 elif [ "$2" = --bg ]; then
   /bin/cp ${quote(path)} ${quote(join(f.dir, "marker-at-setup.json"))} 2>/dev/null || :
   if [ -f ${quote(join(f.dir, "deny-setup"))} ]; then printf 'Access denied: operator required' >&2; exit 1; fi
-  printf '{"TCP":{"443":{"HTTPS":true}},"Web":{"${dnsName}:443":{"Handlers":{"/":{"Proxy":"%s"}}}}}' "$4" > ${quote(configPath)}
+  printf '{"TCP":{"443":{"HTTPS":true}},"Web":{"${currentDnsName}:443":{"Handlers":{"/":{"Proxy":"%s"}}}}}' "$4" > ${quote(configPath)}
   if [ -f ${quote(join(f.dir, "fail-setup"))} ]; then exit 1; fi
 elif [ "$3" = off ]; then
   if [ -f ${quote(join(f.dir, "fail-off"))} ]; then exit 1; fi
@@ -342,8 +344,8 @@ fi
     stateDir,
     path,
     configPath,
-    setup: () => ensureTailscaleServe(3636, f.env, dnsName, undefined, { ...f.options, stateDir }),
-    stop: (port = 3636) => removeTailscaleServe(port, f.env, dnsName, stateDir),
+    setup: () => ensureTailscaleServe(3636, f.env, currentDnsName, undefined, { ...f.options, stateDir }),
+    stop: (port = 3636) => removeTailscaleServe(port, f.env, currentDnsName, stateDir),
     args: async () => (await f.calls()).map((call) => call.args),
   };
 }
@@ -552,6 +554,41 @@ test("the same route without a marker remains unowned", async () => {
   expect(await f.setup()).toMatchObject({ created: false, owned: false });
   expect(await f.args()).toEqual([["serve", "status", "--json"]]);
   await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("restart on the same port under a new DNS name replaces the old route without probing its own listener", async () => {
+  const previous = { ...ownership(3636, markerPid()), dnsName: "old.example.ts.net" };
+  const currentDnsName = "new.example.ts.net";
+  const f = await ownedFake(
+    {
+      TCP: { "443": { HTTPS: true } },
+      Web: { [`${previous.dnsName}:443`]: { Handlers: { "/": { Proxy: previous.target } } } },
+    },
+    previous,
+    currentDnsName,
+  );
+  const probe = vi.mocked(markers.loopbackState).mockResolvedValue("open");
+  const self = await tailscaleSelf(f.env, undefined, f.options);
+  expect(self).toEqual({ dnsName: currentDnsName });
+  expect(
+    await ensureTailscaleServe(3636, f.env, self?.dnsName, undefined, { ...f.options, stateDir: f.stateDir }),
+  ).toEqual({ created: true, owned: true, otherHttpsPorts: false });
+  expect(probe).not.toHaveBeenCalled();
+  expect(await f.args()).toEqual([
+    ["status", "--json"],
+    ["serve", "status", "--json"],
+    ["serve", "status", "--json"],
+    ["serve", "--https=443", "off"],
+    ["serve", "status", "--json"],
+    ["serve", "--bg", "--https=443", previous.target],
+  ]);
+  const current = { target: previous.target, dnsName: currentDnsName, pid: process.pid };
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(current);
+  expect(JSON.parse(await readFile(join(f.dir, "marker-at-setup.json"), "utf8"))).toEqual(current);
+  expect(JSON.parse(await readFile(f.configPath, "utf8"))).toEqual({
+    TCP: { "443": { HTTPS: true } },
+    Web: { [`${currentDnsName}:443`]: { Handlers: { "/": { Proxy: previous.target } } } },
+  });
 });
 
 test("a marker for another port removes only that exact stale route before setup", async () => {

@@ -335,12 +335,14 @@ async function ensureLocked(
         writeTailscaleMarker(stateDir, { ...previous, pid: process.pid });
         adopted = true;
       } else {
-        if (await ownerRunning(previous))
+        const previousPort = markerPort(previous);
+        // This server already owns its listening port, even after a DNS rename.
+        if (previousPort !== port && (await ownerRunning(previous)))
           throw new CliError(
             `another emend server (process ${previous.pid}) serves port 443 of Tailscale Serve; stop that server, then try again.`,
           );
         // Removal re-reads Serve before touching the old route.
-        await removeLocked(markerPort(previous), env, previous.dnsName, stateDir, previous.pid);
+        await removeLocked(previousPort, env, previous.dnsName, stateDir, previous.pid);
         config = await serveConfig(env, options);
       }
     } else await removeTailscaleMarker(stateDir, previous);
