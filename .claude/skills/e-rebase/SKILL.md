@@ -40,7 +40,8 @@ stdout line is exactly `up-to-date`, `rebased` or `restacked`. Then come `backup
 - `restacked`: the replay conflicted. The tool aborted it and rebuilt the branch as one change on
   top of the new base. The `conflict:` lines name the conflicted files. Go to step 3.
 - Exit 1 for any other failure: the branch stays at its old tip and nothing was restacked. Report the
-  error and stop.
+  error and stop. One exception: an error that says the rebase exited 0 with a wrong result means the
+  branch may already be rewritten. The `backup:` ref in that error holds the old tip. Report it and stop.
 
 Never run `git rebase`, `git merge`, `git reset` or `git stash` yourself.
 

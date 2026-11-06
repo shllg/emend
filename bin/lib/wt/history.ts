@@ -42,6 +42,8 @@ const REBASE_PINS = [
   "-c",
   "i18n.commitEncoding=UTF-8", // Keep message bytes without an encoding header.
   "-c",
+  "i18n.logOutputEncoding=UTF-8", // Git builds the todo in the log encoding; subjects must not become extra todo lines.
+  "-c",
   "notes.rewrite.rebase=false", // Leave notes refs unchanged.
   "-c",
   "rerere.enabled=false", // Keep conflicts even when an rr-cache directory already exists.
@@ -228,18 +230,48 @@ function replay(repo: Repo, top: string, old: string, target: string, backup: st
   return { conflicts };
 }
 
-/** Checks a successful rebase without changing the repository state git left behind. */
-export function checkRebased(repo: Repo, top: string, branch: string, target: string, backup: string): void {
-  let why: string | undefined;
+/** Aborts an unfinished rebase back to `old`; reports a finished wrong result without changing it. */
+export function checkRebased(
+  repo: Repo,
+  top: string,
+  branch: string,
+  target: string,
+  old: string,
+  backup: string,
+): void {
   if (operationInProgress(repo, top)) {
-    why = "a git operation is still in progress";
-  } else {
-    const head = gitTry(repo, ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: top });
-    if (head.code !== 0 || head.stdout !== branch) why = `HEAD is not attached to ${branch}`;
-    else if (!isAncestor(repo, top, target, "HEAD")) why = "the target is not an ancestor of HEAD";
+    const why = "a git operation is still in progress";
+    const aborted = hgTry(repo, top, [...REBASE_PINS, "rebase", "--abort"]);
+    const attached = gitTry(repo, ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: top });
+    const head = gitTry(repo, ["rev-parse", "--verify", "HEAD"], { cwd: top });
+    if (
+      aborted.code === 0 &&
+      !operationInProgress(repo, top) &&
+      attached.code === 0 &&
+      attached.stdout === branch &&
+      head.code === 0 &&
+      head.stdout === old
+    ) {
+      throw new WtError(
+        1,
+        `The rebase exited 0 but did not finish: ${why}. It was aborted and the branch is unchanged. backup: ${backup}`,
+      );
+    }
+    throw new WtError(
+      1,
+      `The rebase exited 0 but did not finish: ${why}, and it could not be aborted. The repository is mid-rebase: do not continue it by hand. backup: ${backup}`,
+    );
   }
+
+  let why: string | undefined;
+  const head = gitTry(repo, ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: top });
+  if (head.code !== 0 || head.stdout !== branch) why = `HEAD is not attached to ${branch}`;
+  else if (!isAncestor(repo, top, target, "HEAD")) why = "the target is not an ancestor of HEAD";
   if (why !== undefined) {
-    throw new WtError(1, `The rebase exited 0 but did not finish: ${why}. backup: ${backup}`);
+    throw new WtError(
+      1,
+      `The rebase exited 0 with a wrong result: ${why}. The branch may already be rewritten; the backup ref holds the old tip. backup: ${backup}`,
+    );
   }
 }
 
@@ -260,6 +292,8 @@ export function rebase(repo: Repo, top: string, onto: Onto): RebaseResult {
     "rebase",
     "--merge",
     "--strategy=ort",
+    "--reapply-cherry-picks", // Do not skip commits by a whitespace-insensitive patch match.
+    "--empty=drop", // Drop commits that become empty.
     "--no-autostash",
     "--no-autosquash",
     "--no-fork-point",
@@ -268,13 +302,13 @@ export function rebase(repo: Repo, top: string, onto: Onto): RebaseResult {
     target,
   ]);
   if (r.code === 0) {
-    checkRebased(repo, top, branch, target, backup);
+    checkRebased(repo, top, branch, target, old, backup);
     return { result: "rebased", conflicts: [], backups: [backup] };
   }
 
   // Only a content conflict leads to a restack. Read the index before the abort removes the evidence.
   const conflicted = gitTry(repo, ["ls-files", "--unmerged", "-z"], { cwd: top }).stdout !== "";
-  if (operationInProgress(repo, top)) hgTry(repo, top, ["rebase", "--abort"]);
+  if (operationInProgress(repo, top)) hgTry(repo, top, [...REBASE_PINS, "rebase", "--abort"]);
   const head = gitTry(repo, ["rev-parse", "--verify", "HEAD"], { cwd: top }).stdout;
   if (operationInProgress(repo, top) || head !== old) {
     throw new WtError(

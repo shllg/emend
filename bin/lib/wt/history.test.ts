@@ -309,11 +309,57 @@ test("a rebase keeps every commit under a core.commentChar that starts a todo li
     idle(wt);
   }));
 
-test("checkRebased refuses a rebase left in progress", () =>
+test("a rebase replays no todo line hidden in a subject under i18n.logOutputEncoding", () =>
+  scenario(({ env, fx, repo }) => {
+    const wt = worktree(repo, "feat-a");
+    const base = gitIn(wt, "rev-parse", "HEAD");
+    gitIn(wt, "switch", "-c", "side", base);
+    const x = commitFile(wt, "x.txt", "x\n");
+    gitIn(wt, "switch", "feat-a");
+    const b = commitFile(wt, "b.txt", "b\n", `add b◙pick ${x}`);
+    advanceOrigin(env, fx, "unrelated.txt", "u\n");
+    gitIn(fx.main, "config", "i18n.logOutputEncoding", "CP922");
+    assert.ok(gitIn(wt, "log", "-1", "--format=%s", b).includes(`\npick ${x}`));
+
+    assert.equal(rebase(resolveRepo(wt), wt, "origin/main").result, "rebased");
+    assert.equal(existsSync(join(wt, "x.txt")), false);
+    assert.equal(gitIn(wt, "rev-list", "--count", "origin/main..HEAD"), "1");
+    idle(wt);
+  }));
+
+test("a rebase does not skip a branch commit that matches an upstream one apart from whitespace", () =>
+  scenario(({ env, fx, repo }) => {
+    commitFile(fx.main, "c.txt", 'cmd = "old"\n');
+    gitIn(fx.main, "push", "--quiet", "origin", "main");
+    const wt = worktree(repo, "feat-a");
+    commitFile(wt, "c.txt", 'cmd = "rm -rf build"\n');
+    advanceOrigin(env, fx, "c.txt", 'cmd = "rm -rfbuild"\n');
+
+    const r = rebase(resolveRepo(wt), wt, "origin/main");
+    assert.equal(r.result, "restacked");
+    assert.deepEqual(r.conflicts, ["c.txt"]);
+    assert.match(readFileSync(join(wt, "c.txt"), "utf8"), /<<<<<<</);
+    idle(wt);
+  }));
+
+test("a rebase drops a branch commit that is already upstream", () =>
+  scenario(({ env, fx, repo }) => {
+    const wt = worktree(repo, "feat-a");
+    commitFile(wt, "dup.txt", "same\n", "add duplicate");
+    commitFile(wt, "e.txt", "e\n", "add e");
+    advanceOrigin(env, fx, "dup.txt", "same\n");
+
+    assert.equal(rebase(resolveRepo(wt), wt, "origin/main").result, "rebased");
+    assert.equal(gitIn(wt, "log", "--format=%s", "origin/main..HEAD"), "add e");
+    assert.equal(readFileSync(join(wt, "dup.txt"), "utf8"), "same\n");
+    idle(wt);
+  }));
+
+test("checkRebased aborts a rebase left in progress", () =>
   scenario(({ env, fx, repo }) => {
     const wt = worktree(repo, "feat-a");
     commitFile(wt, "a.txt", "a\n");
-    commitFile(wt, "b.txt", "b\n");
+    const old = commitFile(wt, "b.txt", "b\n");
     advanceOrigin(env, fx, "unrelated.txt", "u\n");
     gitIn(wt, "fetch", "--quiet", "origin");
     const target = gitIn(wt, "rev-parse", "origin/main");
@@ -328,65 +374,81 @@ test("checkRebased refuses a rebase left in progress", () =>
       "--merge",
       "origin/main",
     );
-    const head = gitIn(wt, "rev-parse", "HEAD");
     const gitDir = gitIn(wt, "rev-parse", "--path-format=absolute", "--git-dir");
-
-    assert.throws(
-      () => checkRebased(resolveRepo(wt), wt, "feat-a", target, backup),
-      (e: unknown) =>
-        e instanceof WtError &&
-        e.code === 1 &&
-        /rebase exited 0 but did not finish: .*operation.*in progress/.test(e.message) &&
-        e.message.endsWith(`backup: ${backup}`),
-    );
     assert.equal(existsSync(join(gitDir, "rebase-merge")), true);
-    assert.equal(gitIn(wt, "rev-parse", "HEAD"), head);
-    gitIn(wt, "rebase", "--abort");
-    idle(wt);
-  }));
-
-test("checkRebased refuses a HEAD that is not on the target", () =>
-  scenario(({ env, fx, repo }) => {
-    const wt = worktree(repo, "feat-a");
-    const head = commitFile(wt, "a.txt", "a\n");
-    advanceOrigin(env, fx, "unrelated.txt", "u\n");
-    gitIn(wt, "fetch", "--quiet", "origin");
-    const target = gitIn(wt, "rev-parse", "origin/main");
-    const backup = "refs/wt-backup/feat-a/test";
 
     assert.throws(
-      () => checkRebased(resolveRepo(wt), wt, "feat-a", target, backup),
+      () => checkRebased(resolveRepo(wt), wt, "feat-a", target, old, backup),
       (e: unknown) =>
         e instanceof WtError &&
         e.code === 1 &&
-        /rebase exited 0 but did not finish: .*target.*not an ancestor/.test(e.message) &&
+        e.message.includes("aborted and the branch is unchanged") &&
         e.message.endsWith(`backup: ${backup}`),
     );
-    assert.equal(gitIn(wt, "rev-parse", "HEAD"), head);
+    assert.equal(existsSync(join(gitDir, "rebase-merge")), false);
     assert.equal(gitIn(wt, "symbolic-ref", "--quiet", "--short", "HEAD"), "feat-a");
+    assert.equal(gitIn(wt, "rev-parse", "HEAD"), old);
     idle(wt);
   }));
 
-test("checkRebased refuses a detached HEAD", () =>
+test("checkRebased reports an operation it cannot abort", () =>
   scenario(({ repo }) => {
     const wt = worktree(repo, "feat-a");
-    const head = commitFile(wt, "a.txt", "a\n");
-    gitIn(wt, "switch", "--detach");
+    const old = commitFile(wt, "a.txt", "a\n");
     const target = gitIn(wt, "rev-parse", "origin/main");
     const backup = "refs/wt-backup/feat-a/test";
+    const gitDir = gitIn(wt, "rev-parse", "--path-format=absolute", "--git-dir");
+    const marker = join(gitDir, "BISECT_LOG");
+    writeFileSync(marker, "");
 
     assert.throws(
-      () => checkRebased(resolveRepo(wt), wt, "feat-a", target, backup),
+      () => checkRebased(resolveRepo(wt), wt, "feat-a", target, old, backup),
       (e: unknown) =>
         e instanceof WtError &&
         e.code === 1 &&
-        /rebase exited 0 but did not finish: HEAD is not attached to feat-a/.test(e.message) &&
+        e.message.includes("do not continue it by hand") &&
         e.message.endsWith(`backup: ${backup}`),
     );
-    assert.equal(gitIn(wt, "rev-parse", "HEAD"), head);
-    assert.equal(run("git", ["symbolic-ref", "--quiet", "HEAD"], { cwd: wt }).code, 1);
+    assert.equal(existsSync(marker), true);
+    assert.equal(gitIn(wt, "rev-parse", "HEAD"), old);
+    rmSync(marker);
     idle(wt);
   }));
+
+test("checkRebased leaves a finished but wrong result alone", async () => {
+  for (const detached of [false, true]) {
+    await scenario(({ env, fx, repo }) => {
+      const wt = worktree(repo, "feat-a");
+      const old = commitFile(wt, "a.txt", "a\n");
+      if (detached) {
+        gitIn(wt, "switch", "--detach");
+      } else {
+        advanceOrigin(env, fx, "unrelated.txt", "u\n");
+        gitIn(wt, "fetch", "--quiet", "origin");
+      }
+      const target = gitIn(wt, "rev-parse", "origin/main");
+      const backup = "refs/wt-backup/feat-a/test";
+      const refs = gitIn(wt, "for-each-ref", "--format=%(refname) %(objectname)");
+
+      assert.throws(
+        () => checkRebased(resolveRepo(wt), wt, "feat-a", target, old, backup),
+        (e: unknown) =>
+          e instanceof WtError &&
+          e.code === 1 &&
+          e.message.includes("wrong result") &&
+          e.message.endsWith(`backup: ${backup}`),
+      );
+      assert.equal(gitIn(wt, "rev-parse", "HEAD"), old);
+      assert.equal(gitIn(wt, "for-each-ref", "--format=%(refname) %(objectname)"), refs);
+      if (detached) {
+        assert.equal(run("git", ["symbolic-ref", "--quiet", "HEAD"], { cwd: wt }).code, 1);
+      } else {
+        assert.equal(gitIn(wt, "symbolic-ref", "--quiet", "--short", "HEAD"), "feat-a");
+      }
+      idle(wt);
+    });
+  }
+});
 
 test("context-only shift keeps the digest; a content change does not", () =>
   scenario(({ env, fx, repo }) => {
