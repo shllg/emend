@@ -1,6 +1,7 @@
 import {
   type ImportBundle,
   type ImportRevisionIndex,
+  isRenderedHtmlDoc,
   LIMITS,
   type Placement,
   type PlacementLocation,
@@ -9,7 +10,6 @@ import type { placements } from "../../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
 import { yieldToLoop } from "../pacing.ts";
 import { WorkTimeout } from "../publish/executor.ts";
-import { mediaType } from "../publish/media.ts";
 import { revisionTransition } from "../publish/transitions.ts";
 import type { EncodedPlacementDoc, Executor, SharedSides, Work, WorkLast } from "../publish/work.ts";
 import { checkImportSignal } from "./lifecycle.ts";
@@ -112,6 +112,7 @@ export function importPlacements() {
     };
     // File membership and diff sides have separate passes: a doc cannot erase diff hashes.
     const files = new Map<string, SharedSides>(revision.files.map((f) => [f.path, {}]));
+    const sources = new Map<string, string>();
     const docs: Extract<Work, { kind: "place" }>["docs"] = new Map();
     const workThreads: Extract<Work, { kind: "place" }>["threads"] = [];
     const nextCarried = new Map<string, Carried>();
@@ -124,6 +125,18 @@ export function importPlacements() {
       const next = { ...state.carried, path: mapped === undefined ? state.carried.path : mapped };
       nextCarried.set(id, next);
       let last: WorkLast = state.last ? { location: state.last } : null;
+      if (target.kind === "source-lines") {
+        const current = next.path === null ? undefined : revision.sourcePaths.get(next.path);
+        if (created.has(id)) {
+          state.anchor = current;
+          state.last = { kind: "source-lines", path: target.path, start: target.start, end: target.end };
+        }
+        const previousHash = sideHash(state.anchor, "new");
+        const nextHash = sideHash(current, "new");
+        if (state.last)
+          last = { location: state.last, sides: await sides(previousHash, "new", previousHash !== nextHash) };
+        if (current && nextHash) sources.set(current.path, await include(nextHash, true));
+      }
       if (target.kind === "lines") {
         const current = next.path === null ? undefined : revision.diffPaths.get(next.path);
         if (created.has(id)) {
@@ -141,7 +154,7 @@ export function importPlacements() {
         const doc = revision.docPaths.get(target.path);
         if (doc?.role === "doc" && doc.newBlob) {
           if (!parsedDocs.has(doc.path) && !docs.has(doc.path)) {
-            const html = mediaType(doc.path) === "text/html";
+            const html = isRenderedHtmlDoc(doc);
             const hash = html ? doc.newBlob : rendered.docBlobs.get(doc.path);
             const parsed = hash ? await loadParsed(hash, html ? "html" : "markdown") : undefined;
             if (parsed) parsedDocs.set(doc.path, parsed);
@@ -161,6 +174,7 @@ export function importPlacements() {
       writeup: null,
       parsedWriteup: writeup,
       docs,
+      sources,
       parsedDocs,
       texts,
       files,
@@ -215,7 +229,12 @@ export function importPlacements() {
       });
       if (placement.status === "placed") {
         state.last = placement.location;
-        state.anchor = carried.path === null ? undefined : revision.diffPaths.get(carried.path);
+        state.anchor =
+          carried.path === null
+            ? undefined
+            : (state.thread.target.kind === "source-lines" ? revision.sourcePaths : revision.diffPaths).get(
+                carried.path,
+              );
       }
       state.carried = carried;
     }

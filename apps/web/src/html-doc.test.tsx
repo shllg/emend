@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ThreadView } from "@emend/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { HtmlDocFrame } from "./components/reading/HtmlDocFrame.tsx";
@@ -89,6 +89,31 @@ function mount(threads: ThreadView[] = [], navigation?: { threadId: string; inte
     fragment: (fragment: string) => view.rerender(ui(threads, { type: "emend:navigate", path, fragment })),
   };
 }
+test.each(["reply", "edit"])(
+  "HTML docs retain draft-based %s restoration after dismissal and remount",
+  async (kind) => {
+    vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
+    const placed = {
+      ...thread,
+      comments: thread.comments.map((comment) => ({
+        ...comment,
+        sent: kind === "reply",
+        sentOn: kind === "reply" ? 1 : null,
+      })),
+    };
+    const first = mount([placed]);
+    fireEvent.click(screen.getByRole("button", { name: kind === "reply" ? "Reply" : "Edit" }));
+    const label = kind === "reply" ? "Reply" : "Edit comment";
+    const editor = screen.getByRole("textbox", { name: label });
+    fireEvent.change(editor, { target: { value: "Retained HTML draft" } });
+    if (kind === "reply") fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    else fireEvent.keyDown(editor, { key: "Escape" });
+    expect(screen.queryByRole("textbox", { name: label })).toBeNull();
+    await act(async () => first.unmount());
+    mount([placed]);
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: label }).value).toBe("Retained HTML draft");
+  },
+);
 test("all production web frames use the exact sandbox without DOM string insertion", () => {
   for (const file of readdirSync(import.meta.dirname, { recursive: true, encoding: "utf8" }).filter(
     (file) => /\.[jt]sx?$/.test(file) && !file.includes(".test."),

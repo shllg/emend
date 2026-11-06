@@ -1,0 +1,70 @@
+@layer components {
+  .em-source {
+    --source-line-height: 24px;
+    min-width: 0;
+    max-width: 100%;
+    padding-block: 16px 32px;
+  }
+  .em-source-scroll {
+    width: 100%;
+    overflow-x: auto;
+  }
+  .em-source-show {
+    position: sticky;
+    left: 12px;
+    margin: 12px;
+    color: var(--accent-text);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .em-source-line {
+    display: flex;
+    width: max-content;
+    min-width: 100%;
+    font: var(--type-code);
+    font-stretch: var(--mono-stretch);
+    color: var(--fg-1);
+    height: var(--source-line-height);
+    line-height: var(--source-line-height);
+    white-space: pre;
+  }
+  .em-source-number {
+    position: sticky;
+    left: 0;
+    flex: none;
+    width: 7ch;
+    height: var(--source-line-height);
+    padding-inline: 8px;
+    background: var(--bg-surface);
+    color: var(--fg-3);
+    text-align: right;
+    cursor: pointer;
+  }
+  .em-source-number:hover,
+  .em-source-number:focus-visible {
+    color: var(--accent-text);
+    background: var(--accent-tint);
+  }
+  .em-source-code {
+    padding-inline: 12px;
+    white-space: pre;
+    font: inherit;
+  }
+  .em-source-line[data-commented] {
+    background: var(--mark-bg);
+    box-shadow: inset 3px 0 var(--mark-line);
+  }
+  .em-source-line[data-active],
+  .em-source-line[data-selected] {
+    background: var(--accent-tint);
+    box-shadow: inset 3px 0 var(--accent);
+  }
+  .em-source-discussion {
+    position: sticky;
+    left: 0;
+    width: 100%;
+    padding: 12px;
+    display: grid;
+    gap: 12px;
+  }
+}

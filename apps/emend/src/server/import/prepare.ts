@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  docViewOf,
   type ImportBundle,
   importPublishInput,
   importRowCount,
@@ -7,6 +8,7 @@ import {
   LIMITS,
   PublishRequest,
 } from "@emend/contract";
+import { decodeText } from "@emend/core";
 import { and, eq } from "drizzle-orm";
 import { blobs, changedBlocks as changedTable, placements as placementTable } from "../../db/schema.ts";
 import type { AppDeps } from "../app.ts";
@@ -15,7 +17,7 @@ import { commentTargetReserve, envelopeBytes, jsonBytes } from "../mailbox/paylo
 import { yieldToLoop } from "../pacing.ts";
 import { workerExecutor } from "../publish/executor.ts";
 import { abortable } from "../publish/lifecycle.ts";
-import { mediaType } from "../publish/media.ts";
+import { fileMediaType } from "../publish/media.ts";
 import { validateNoteRanges } from "../publish/notes.ts";
 import { renderRevision } from "../publish/render.ts";
 import type { Executor, Work, WorkResult } from "../publish/work.ts";
@@ -99,7 +101,10 @@ export async function prepareImport(ownerId: string, bundle: ImportBundle, deps:
   signal?.addEventListener("abort", stop, { once: true });
   const rendered = new Map<
     string,
-    Pick<Awaited<ReturnType<typeof renderRevision>>, "sourceBlob" | "renderedBlob" | "docBlobs" | "metadata">
+    Pick<
+      Awaited<ReturnType<typeof renderRevision>>,
+      "sourceBlob" | "renderedBlob" | "docBlobs" | "metadata" | "sourceBlobs" | "sourceMetadata"
+    >
   >();
   const empty = new Map<string, boolean>();
   try {
@@ -122,6 +127,7 @@ export async function prepareImport(ownerId: string, bundle: ImportBundle, deps:
     }
     let previous: { renderedBlob: string; docBlobs: Map<string, string> } | undefined;
     const writeupSources = new Map<string, Extract<WorkResult, { kind: "writeup-source" }>>();
+    const checkedSources = new Set<string>();
     let previousSourceHash: string | undefined;
     for (const revision of bundle.revisions) {
       checkImportSignal(signal);
@@ -159,9 +165,7 @@ export async function prepareImport(ownerId: string, bundle: ImportBundle, deps:
       )
         throw new ApiError("too_large");
       for (const file of input.files) {
-        const type = file.role === "diff" ? "text/plain" : mediaType(file.path);
-        if (file.role === "doc" && type !== "text/html" && type !== "text/markdown")
-          throw new ApiError("invalid_request");
+        const type = fileMediaType(file);
         const limit =
           file.role === "diff"
             ? LIMITS.diffSideBytes
@@ -172,6 +176,15 @@ export async function prepareImport(ownerId: string, bundle: ImportBundle, deps:
                 : LIMITS.markdownDocBytes;
         for (const hash of [file.oldBlob, file.newBlob])
           if (hash && (sizes.get(hash) ?? 0) > limit) throw new ApiError("too_large");
+        if (file.role === "doc" && docViewOf(file) === "source" && file.newBlob && !checkedSources.has(file.newBlob)) {
+          const bytes = await read(file.newBlob);
+          try {
+            decodeText(new Uint8Array(bytes));
+            checkedSources.add(file.newBlob);
+          } catch {
+            throw new ApiError("invalid_request");
+          }
+        }
         if (file.assets) {
           const total = file.assets.reduce(
             (sum, path) => sum + (sizes.get(rows?.docPaths.get(path)?.newBlob ?? "") ?? 0),
@@ -210,6 +223,8 @@ export async function prepareImport(ownerId: string, bundle: ImportBundle, deps:
         renderedBlob: result.renderedBlob,
         docBlobs: result.docBlobs,
         metadata: result.metadata,
+        sourceBlobs: result.sourceBlobs,
+        sourceMetadata: result.sourceMetadata,
       });
       empty.set(
         revision.id,

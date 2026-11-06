@@ -1720,3 +1720,20 @@ test("import carries cleaned doc titles and derives headings from source instead
   const view = RevisionView.parse(await (await f.request(`/reviews/${input.review.id}/revisions/1`, "GET")).json());
   expect(view.docs[0]).toMatchObject({ title: "Named doc", headings: [{ level: 2, text: "Real part" }] });
 });
+
+test.each([new Uint8Array([255]), new Uint8Array([97, 0])])("import refuses non-text source blobs", async (bytes) => {
+  const input = await bundle(f);
+  const hash = await f.deps.blobs.put(f.ownerId, Buffer.from(bytes), "text/plain");
+  const response = await f.importRequest("/import", {
+    ...input,
+    files: input.files.map((file) => ({
+      ...file,
+      path: "sample.ts",
+      view: "source",
+      mediaType: "text/plain",
+      newBlob: hash,
+    })),
+  });
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ error: { code: "invalid_request", message: "The request is invalid." } });
+});

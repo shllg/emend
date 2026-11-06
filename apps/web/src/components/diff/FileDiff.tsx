@@ -23,6 +23,7 @@ import { splitLines } from "../../../../../packages/core/src/place/linemap.ts";
 import { getText } from "../../api/client.ts";
 import { plural } from "../../lib/count.ts";
 import { diffLoads } from "../../lib/diff-loads.ts";
+import { linesErrorMessage } from "../../lib/line-context.ts";
 import { useStickyHeight } from "../../lib/sticky-stack.ts";
 import { Composer } from "../threads/Composer.tsx";
 import { ThreadCard } from "../threads/ThreadCard.tsx";
@@ -549,13 +550,7 @@ function FileBody({
     );
     if ("error" in result) {
       context.onActive(null);
-      setError(
-        result.error === "too-many-lines"
-          ? "Select at most 1000 lines."
-          : result.error === "too-long"
-            ? "This selection is too long. Select fewer lines."
-            : "Select valid lines.",
-      );
+      setError(linesErrorMessage(result.error));
     } else context.onActive(result);
   };
   const grouped = new Map<

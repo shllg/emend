@@ -75,7 +75,7 @@ export function workerExecutor(timeouts = { render: 10000, place: 30000 }): Work
       current.ref();
       try {
         const buffers =
-          work.kind === "doc"
+          work.kind === "doc" || work.kind === "source"
             ? [work.source]
             : work.kind === "doc-metadata" ||
                 work.kind === "resection" ||

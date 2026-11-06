@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AgentNotes, validateAgentNotes } from "./agent-note.ts";
-import { DocTitle } from "./doc.ts";
+import { DocTitle, DocView, docViewOf, isRenderedHtmlDoc, validateDocView } from "./doc.ts";
 import { LIMITS } from "./limits.ts";
 import { PublishLinks, RepoUrl } from "./links.ts";
 import { MEDIA_EXTENSIONS, PublishManifest, WriteupInput } from "./manifest.ts";
@@ -21,6 +21,7 @@ export const PublishFile = z
   .object({
     path: FilePath,
     title: DocTitle.optional(),
+    view: DocView.optional(),
     oldPath: FilePath.nullable(),
     role: FileRole,
     status: FileStatus.optional(),
@@ -32,6 +33,7 @@ export const PublishFile = z
     assets: z.array(FilePath).max(LIMITS.filesPerRevision).optional(),
     notes: AgentNotes.optional(),
   })
+  .superRefine(validateDocView)
   .refine((file) => file.role === "doc" || file.title === undefined, {
     path: ["title"],
     message: "only doc files have titles",
@@ -75,14 +77,23 @@ export const PublishRequest = z
     const other = request.topics.find((t) => t.slug === OTHER_TOPIC.slug);
     if (other && (other.importance !== 100 || other.title !== OTHER_TOPIC.title || request.topics.at(-1) !== other))
       issue("Other changes must rank last");
-    const keys = new Set(request.files.map((file) => `${file.role === "diff" ? "diff" : "doc"}:${file.path}`));
-    const paths = new Map(request.files.filter((file) => file.role !== "diff").map((file) => [file.path, file]));
+    const keys = new Set(
+      request.files.map(
+        (file) =>
+          `${file.role === "diff" ? "diff" : file.role === "doc" && docViewOf(file) === "source" ? "source" : "doc"}:${file.path}`,
+      ),
+    );
+    const paths = new Map(
+      request.files
+        .filter((file) => file.role !== "diff" && !(file.role === "doc" && docViewOf(file) === "source"))
+        .map((file) => [file.path, file]),
+    );
     if (keys.size !== request.files.length) issue("duplicate file path in namespace");
     const listed = new Set(request.files.flatMap((file) => file.assets ?? []));
     let mediaCount = 0;
     for (const file of request.files) {
       if (file.topic && !topics.has(file.topic)) issue("file topic is not declared");
-      if (file.role === "doc" && /\.html?$/i.test(file.path)) {
+      if (isRenderedHtmlDoc(file)) {
         if (!file.assets) issue("HTML docs must list their assets");
         const folder = file.path.slice(0, file.path.lastIndexOf("/") + 1);
         if (new Set(file.assets).size !== file.assets?.length) issue("duplicate HTML asset reference");
@@ -92,6 +103,8 @@ export const PublishRequest = z
       } else if (file.assets !== undefined) issue("only HTML docs list assets");
       if (file.role === "asset" && file.parent === undefined) {
         // A parentless asset is writeup media.
+        if (request.files.some((doc) => doc.role === "doc" && doc.path === file.path))
+          issue("media path is already a doc");
         mediaCount++;
         if (
           !MEDIA_EXTENSIONS.has(file.path.split(".").at(-1)?.toLowerCase() ?? "") ||
@@ -104,7 +117,7 @@ export const PublishRequest = z
         if (listed.has(file.path)) issue("media is already a doc asset");
       } else if (file.role === "asset") {
         const parent = file.parent ? paths.get(file.parent) : undefined;
-        if (parent?.role !== "doc" || !/\.html?$/i.test(parent.path)) issue("asset parent must be an HTML doc");
+        if (!parent || !isRenderedHtmlDoc(parent)) issue("asset parent must be an HTML doc");
         const folder = parent?.path.slice(0, parent.path.lastIndexOf("/") + 1);
         if (
           !ASSET_EXTENSIONS.has(file.path.split(".").at(-1)?.toLowerCase() ?? "") ||

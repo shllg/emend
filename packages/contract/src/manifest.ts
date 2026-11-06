@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AgentNotes, validateAgentNotes } from "./agent-note.ts";
-import { DocTitle } from "./doc.ts";
+import { DocTitle, DocView, docViewOf, validateDocView } from "./doc.ts";
 import { LIMITS } from "./limits.ts";
 import { PublishLinks, RepoUrl } from "./links.ts";
 import { FilePath, OTHER_TOPIC, TopicMeta, TopicSlug } from "./review.ts";
@@ -68,8 +68,10 @@ export const PublishManifest = z
             topic: TopicSlug.optional(),
             source: source.optional(),
             title: DocTitle.optional(),
+            view: DocView.optional(),
             notes: AgentNotes.optional(),
           })
+          .superRefine(validateDocView)
           .refine((file) => file.role === "doc" || file.title === undefined, {
             path: ["title"],
             message: "only doc files have titles",
@@ -118,7 +120,7 @@ export const PublishManifest = z
     }
     const paths = new Set<string>();
     for (const [index, file] of manifest.files.entries()) {
-      const key = `${file.role}:${file.path}`;
+      const key = `${file.role}:${file.role === "doc" ? docViewOf(file) : ""}:${file.path}`;
       if (paths.has(key)) {
         ctx.addIssue({ code: "custom", path: ["files", index, "path"], message: "duplicate file path" });
       }

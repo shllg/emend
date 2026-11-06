@@ -1,6 +1,6 @@
 import { lstat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { LIMITS, PublishManifest, PublishResponse } from "@emend/contract";
+import { type DocView, isRenderedHtmlDoc, LIMITS, PublishManifest, PublishResponse } from "@emend/contract";
 import type { Io } from "../../main.ts";
 import { publishDirect } from "../direct/index.ts";
 import { escapeReference } from "../escape.ts";
@@ -16,7 +16,7 @@ import { readAttachmentPair, resolveTarget } from "../target.ts";
 
 type PublishArgs = ShortcutOptions & { manifest?: string; json?: boolean };
 const publishUsage =
-  "usage: emend publish <path>... [--title T] [--key K | --new] [--review ID] [--main PATH] [--json], or emend publish --manifest <file> [--review <id>] [--key <name>]";
+  "usage: emend publish <path>... [--title T] [--key K | --new] [--review ID] [--main PATH] [--source] [--json], or emend publish --manifest <file> [--review <id>] [--key <name>]";
 
 export function parsePublishArgs(args: string[]): PublishArgs {
   const opts: PublishArgs = { paths: [] };
@@ -38,8 +38,8 @@ export function parsePublishArgs(args: string[]): PublishArgs {
       opts.paths.push(name);
       continue;
     }
-    if (name === "--new" || name === "--json") {
-      const key = name === "--new" ? "new" : "json";
+    if (name === "--new" || name === "--json" || name === "--source") {
+      const key = name === "--new" ? "new" : name === "--source" ? "source" : "json";
       if (opts[key]) throw new CliError("duplicate publish option");
       opts[key] = true;
       continue;
@@ -54,7 +54,7 @@ export function parsePublishArgs(args: string[]): PublishArgs {
   }
   if (
     opts.manifest &&
-    (opts.paths.length || opts.title !== undefined || opts.main !== undefined || opts.new || opts.json)
+    (opts.paths.length || opts.title !== undefined || opts.main !== undefined || opts.new || opts.json || opts.source)
   )
     throw new CliError(publishUsage);
   if (!opts.manifest && !opts.paths.length) throw new CliError(publishUsage);
@@ -63,10 +63,10 @@ export function parsePublishArgs(args: string[]): PublishArgs {
     throw new CliError("invalid review id");
   return opts;
 }
-export const publishTimeoutMs = (files: { role: string; path: string }[]) =>
+export const publishTimeoutMs = (files: { role: string; path: string; view?: DocView }[]) =>
   30000 +
   15000 +
-  10000 * (1 + files.filter((file) => file.role === "doc" && /\.(md|markdown)$/i.test(file.path)).length) +
+  10000 * (1 + files.filter((file) => file.role === "doc" && !isRenderedHtmlDoc(file)).length) +
   3 * 30000;
 
 export function manifestJsonError(error: SyntaxError, text: string): string {
@@ -141,6 +141,7 @@ export async function publishCommand(stateDir: string, args: string[], io: Io, c
     skipNodeModules: shortcut !== undefined,
     titleFromMain: shortcut?.titleFromMain,
     docFolders: shortcut?.docFolders,
+    docArguments: shortcut?.docArguments,
   };
   if (!manifest.base && !options.key && !options.review) throw new CliError("pass --review or --key");
   // Resolve all paths and unchanged-file checks before creating any server state.
@@ -151,11 +152,11 @@ export async function publishCommand(stateDir: string, args: string[], io: Io, c
     else warnings.push(line);
   };
   for (const argument of shortcut?.skippedArguments ?? [])
-    warn(`emend: skipped ${escapeReference(argument)}: not a visible Markdown or HTML doc\n`);
+    warn(`emend: skipped ${escapeReference(argument)}: not a visible text doc\n`);
   const collected = await resolvePublish(manifest, options, stateDir, null, cwd, warn, context);
   const published = new Set(collected.request.files.map((file) => file.path));
-  for (const path of shortcut?.skipped ?? [])
-    if (!published.has(path)) warn(`emend: skipped ${escapeReference(path)}: not a doc or referenced HTML asset\n`);
+  for (const { path, reason } of shortcut?.skipped ?? [])
+    if (!published.has(path)) warn(`emend: skipped ${escapeReference(path)}: ${reason}\n`);
   const pair = await readAttachmentPair(stateDir);
   const localReviewId = pair
     ? await refuseUncopiedReview(
@@ -211,6 +212,10 @@ export async function publishCommand(stateDir: string, args: string[], io: Io, c
   }
   for (const warning of warnings) io.stderr(warning);
   if (moreSkipped) io.stderr(`emend: and ${moreSkipped} more files skipped\n`);
+  for (const folder of shortcut?.folderArguments ?? []) {
+    const count = [...published].filter((path) => !folder.path || path.startsWith(`${folder.path}/`)).length;
+    io.stderr(`emend: published ${count} files from ${escapeReference(folder.argument)}\n`);
+  }
   for (const path of result.data.unrendered) io.stderr(`emend: could not render ${escapeReference(path)}\n`);
   io.stderr(`emend: published revision ${result.data.revision}: ${escapeReference(result.data.url)}\n`);
   if (target.via === "direct")

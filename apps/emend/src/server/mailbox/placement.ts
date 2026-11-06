@@ -65,25 +65,40 @@ export async function computePlacements(
         texts.set(hash, Uint8Array.from(bytes).buffer);
       };
       const sides = async (file: typeof files.$inferSelect | undefined): Promise<SharedSides> => {
-        if (target.kind !== "lines" || file?.flag) return {};
-        const hash = target.side === "old" ? file?.oldBlob : file?.newBlob;
+        if ((target.kind !== "lines" && target.kind !== "source-lines") || file?.flag) return {};
+        const hash = target.kind === "lines" && target.side === "old" ? file?.oldBlob : file?.newBlob;
         if (!hash) return {};
         await read(hash);
-        return target.side === "old" ? { oldHash: hash } : { newHash: hash };
+        return target.kind === "lines" && target.side === "old" ? { oldHash: hash } : { newHash: hash };
       };
-      const current = snapshot.files.find((f) => f.role === "diff" && f.path === next.path);
-      if (index === 0 && target.kind === "lines") {
+      const current = snapshot.files.find(
+        (f) =>
+          (target.kind === "source-lines" ? f.role === "doc" && f.mediaType === "text/plain" : f.role === "diff") &&
+          f.path === next.path,
+      );
+      if (index === 0 && (target.kind === "lines" || target.kind === "source-lines")) {
         last = {
-          location: { kind: "lines", path: target.path, side: target.side, start: target.start, end: target.end },
+          location:
+            target.kind === "lines"
+              ? { kind: "lines", path: target.path, side: target.side, start: target.start, end: target.end }
+              : { kind: "source-lines", path: target.path, start: target.start, end: target.end },
           sides: await sides(current),
         };
         anchor = current;
-      } else if (last?.location.kind === "lines") last = { location: last.location, sides: await sides(anchor) };
+      } else if (last?.location.kind === "lines" || last?.location.kind === "source-lines")
+        last = { location: last.location, sides: await sides(anchor) };
       const fileMap = new Map<string, SharedSides>(snapshot.files.map((f) => [f.path, {}]));
       if (current) fileMap.set(current.path, await sides(current));
+      const sources = new Map<string, string>();
+      if (target.kind === "source-lines" && current?.newBlob) {
+        await read(current.newBlob);
+        sources.set(current.path, current.newBlob);
+      }
       const docs: Extract<Work, { kind: "place" }>["docs"] = new Map();
       if (target.kind === "doc-span" || target.kind === "html-span") {
-        const doc = snapshot.files.find((f) => f.role === "doc" && f.path === target.path);
+        const doc = snapshot.files.find(
+          (f) => f.role === "doc" && f.mediaType !== "text/plain" && f.path === target.path,
+        );
         if (doc?.mediaType === "text/html" && doc.newBlob) {
           await read(doc.newBlob);
           docs.set(doc.path, { kind: "html", hash: doc.newBlob });
@@ -101,6 +116,7 @@ export async function computePlacements(
             kind: "place",
             writeup,
             docs,
+            sources,
             texts,
             files: fileMap,
             topics: new Set(snapshot.topics.map((t) => t.slug)),

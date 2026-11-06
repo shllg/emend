@@ -278,6 +278,28 @@ test("typing in a reply does not reconcile all cards or scan gutter rows", async
   expect(marked(view.root)).toHaveLength(2);
 });
 
+test.each(["reply", "edit"])("diffs retain draft-based %s restoration after dismissal and remount", async (kind) => {
+  const placed = thread("new", 3, 4);
+  placed.comments = placed.comments.map((comment) => ({
+    ...comment,
+    sent: kind === "reply",
+    sentOn: kind === "reply" ? 1 : null,
+  }));
+  const first = mount("split", [placed]);
+  await waitFor(() => expect(first.root.querySelector("[data-line]")).toBeTruthy());
+  fireEvent.click(first.getByRole("button", { name: kind === "reply" ? "Reply" : "Edit" }));
+  const label = kind === "reply" ? "Reply" : "Edit comment";
+  const editor = first.getByRole("textbox", { name: label });
+  fireEvent.change(editor, { target: { value: "Retained diff draft" } });
+  if (kind === "reply") fireEvent.click(first.getByRole("button", { name: "Cancel" }));
+  else fireEvent.keyDown(editor, { key: "Escape" });
+  expect(first.queryByRole("textbox", { name: label })).toBeNull();
+  await act(async () => first.unmount());
+  const second = mount("split", [placed]);
+  await waitFor(() => expect(second.root.querySelector("[data-line]")).toBeTruthy());
+  expect((second.getByRole("textbox", { name: label }) as HTMLTextAreaElement).value).toBe("Retained diff draft");
+});
+
 test("touch entry cannot start a line bar; mouse hover and control focus still can", async () => {
   const view = mount("split", [thread("new", 3, 4)]);
   await waitFor(() => expect(view.root.querySelector("[data-line]")).toBeTruthy());

@@ -1,5 +1,5 @@
 import type { Target } from "@emend/contract";
-import { useContext, useId, useLayoutEffect, useRef, useSyncExternalStore } from "react";
+import { createContext, useContext, useId, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { DiffNavigation } from "./diff-navigation.ts";
 import { hasDraft, hasDraftText, isDraftSaving, subscribeDrafts } from "./drafts.ts";
 
@@ -14,6 +14,9 @@ type Entry = {
 };
 const entries = new Map<string, Entry>();
 const edits = new Map<string, { dismissed: boolean; cards: Set<string> }>();
+// Source chunks retain visibility while their cards are virtualized. Other surfaces
+// keep their usual draft-based restoration when the last copy unmounts.
+export const ComposerVisibilityContext = createContext<Map<string, boolean> | null>(null);
 const listeners = new Set<() => void>();
 let version = 0;
 function notify() {
@@ -88,14 +91,15 @@ function closeReply(key: string) {
 /** Cards share visibility; ownership still selects the one editable copy. */
 export function useReplyComposer(key: string) {
   const id = useId();
+  const visibility = useContext(ComposerVisibilityContext);
   useSyncExternalStore(subscribe, snapshot, snapshot);
   const value = entries.get(key);
-  const open = value?.replyOpen ?? hasDraftText(key);
+  const open = value?.replyOpen ?? visibility?.get(key) ?? hasDraftText(key);
   useLayoutEffect(() => {
     const value = entry(key);
     value.release = undefined;
     value.cards.add(id);
-    value.replyOpen ??= hasDraftText(key);
+    value.replyOpen ??= visibility?.get(key) ?? hasDraftText(key);
     notify();
     // Close every copy as soon as a successful save clears its draft, even if
     // query refreshes unmount the submitting composer before its onSaved runs.
@@ -104,6 +108,7 @@ export function useReplyComposer(key: string) {
     });
     return () => {
       unsubscribe();
+      if (value.replyOpen !== undefined) visibility?.set(key, value.replyOpen);
       value.cards.delete(id);
       if (!value.cards.size) {
         // A card may move from a loading fallback into its inline slot in this
@@ -120,7 +125,7 @@ export function useReplyComposer(key: string) {
       }
       notify();
     };
-  }, [key, id]);
+  }, [key, id, visibility]);
   return { open, close: () => closeReply(key) };
 }
 export function isEditComposerOpen(key: string) {
@@ -129,18 +134,25 @@ export function isEditComposerOpen(key: string) {
 /** Dismissing an edit hides every copy without changing its draft or ownership handoff. */
 export function useEditComposer(key: string) {
   const id = useId();
+  const visibility = useContext(ComposerVisibilityContext);
   useSyncExternalStore(subscribe, snapshot, snapshot);
+  const edit = edits.get(key);
+  const open = edit ? !edit.dismissed : entries.get(key)?.claim ? true : (visibility?.get(key) ?? true);
   useLayoutEffect(() => {
-    const edit = edits.get(key) ?? { dismissed: false, cards: new Set<string>() };
+    const edit = edits.get(key) ?? {
+      dismissed: !entries.get(key)?.claim && visibility?.get(key) === false,
+      cards: new Set<string>(),
+    };
     edits.set(key, edit);
     edit.cards.add(id);
     return () => {
+      visibility?.set(key, !edit.dismissed);
       edit.cards.delete(id);
       if (!edit.cards.size) edits.delete(key);
     };
-  }, [key, id]);
+  }, [key, id, visibility]);
   return {
-    open: isEditComposerOpen(key),
+    open,
     close: () => {
       const edit = edits.get(key);
       if (edit) edit.dismissed = true;

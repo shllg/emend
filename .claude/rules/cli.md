@@ -42,10 +42,17 @@ The CLI runs inside repos under review, so treat those repos as hostile.
   limits. A path behind a symlinked folder is absent, as git sees it, and no read or listing
   lands inside the git folder or the common git folder.
 - `emend publish <path>...` builds that manifest from its arguments: each file argument, and the
-  Markdown and HTML docs found by listing each folder argument. `--main` only picks one of those
-  docs. Every source still sits in the worktree or a `docRoots` folder.
+  text files found by listing each folder argument. Markdown and HTML render; every other text file,
+  and every doc under `--source`, is a doc shown as source. `--main` only picks one of those docs.
+  Every source still sits in the worktree or a `docRoots` folder.
+- A source doc is UTF-8 without NUL; a named file that is not is refused, naming the argument. A
+  walked file is skipped with a warning when its name looks binary or secret (keys, credentials,
+  passwords, tfvars; Markdown and HTML names exempt), when it is too large or unreadable, or, shown
+  as source, not text. Folders named exactly `secret(s)` or `credential(s)`, in any case, below the
+  argument are not entered. HTML assets keep their web-extension rule. A named file or folder still publishes.
+  Never shrink the secret-name list.
 - The listing skips dotfiles and `node_modules`, checks each entry's type, and a regular file's
-  extension, before any other call on it, and stops at the entry and folder limits; an asset
+  name and extension, before any other call on it, and stops at the entry and folder limits; an asset
   whose reference or real path passes through `node_modules` is skipped too. It opens each folder
   with `O_DIRECTORY | O_NOFOLLOW`, checks device and inode against `lstat`, and lists only that
   descriptor: `/proc/self/fd/<fd>` on Linux, `/dev/fd/<fd>` on macOS. After listing, it checks
@@ -54,8 +61,9 @@ The CLI runs inside repos under review, so treat those repos as hostile.
 - A listed symlink is resolved only to check confinement and is never followed: it is skipped
   with a warning, and one that resolves outside the folder refuses the publish. A walked doc keeps
   its folder as a boundary at the read and at the upload recheck. In the shortcut, an asset must
-  satisfy every doc that references it, at the preflight and on the opened file. Walk errors name
-  only the caller's argument or a fixed reason.
+  satisfy every doc that references it, at the preflight and on the opened file. Errors raised
+  while listing name only the caller's argument or a fixed reason; skip warnings and the
+  nothing-to-publish error list listed paths, escaped, with a fixed reason each.
 - stdout is a contract: `emend publish --manifest` prints one JSON line; `emend publish <path>...`
   prints the review URL alone, escaped, or that JSON line with `--json`; `emend wait` and
   `emend feedback` print one JSON object with `kind` `go`, `approve`, `closed` or `pending` and

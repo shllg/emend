@@ -15,5 +15,8 @@ export { blockHash } from "./render/hash.ts";
 export { HIGHLIGHT_FENCE_BYTES, HIGHLIGHT_LINE_CHARS, HIGHLIGHT_RENDER_BYTES } from "./render/highlight.ts";
 export { renderCommentHtml, renderDoc, renderMarkdown, renderMetadataBlocks } from "./render/markdown.ts";
 export { normalizeText } from "./render/normalize.ts";
+export * from "./render/source.ts";
 export { type RenderedWriteup, renderWriteup } from "./render/writeup.ts";
+
+export * from "./text.ts";
 export { type ChangedPath, UnchangedFilesError, withOtherChanges } from "./topics.ts";

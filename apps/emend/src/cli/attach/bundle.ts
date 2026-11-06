@@ -152,7 +152,10 @@ export async function snapshot(
       blastRadius:
         t.blastScope === null || t.blastNote === null ? undefined : { scope: t.blastScope, note: t.blastNote },
     })),
-    files: fileRows.map(({ headings: _headings, ...file }) => file),
+    files: fileRows.map(({ headings: _headings, ...file }) => ({
+      ...file,
+      ...(file.role === "doc" && file.mediaType === "text/plain" ? { view: "source" } : {}),
+    })),
     agentNotes: noteRows.map(({ note }) => ({ ...noteView(note), fileId: note.fileId, ord: note.ord })),
     docAssets: assetRows,
     writeups: writeupRows,

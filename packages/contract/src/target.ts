@@ -25,33 +25,35 @@ export type DocSpanTarget = z.infer<typeof DocSpanTarget>;
 export const HtmlSpanTarget = z.object({ kind: z.literal("html-span"), path: FilePath, ...span });
 export type HtmlSpanTarget = z.infer<typeof HtmlSpanTarget>;
 
+const lineFields = {
+  path: FilePath,
+  start: z.int().positive(),
+  end: z.int().positive(),
+  lines: z.array(z.string().max(LIMITS.targetTextChars)).max(LIMITS.targetLines),
+  before: z.array(z.string().max(LIMITS.contextLineChars)).max(LIMITS.diffContextLines),
+  after: z.array(z.string().max(LIMITS.contextLineChars)).max(LIMITS.diffContextLines),
+};
+function refineLines(target: z.infer<z.ZodObject<typeof lineFields>>, ctx: z.RefinementCtx) {
+  if (target.end < target.start) {
+    ctx.addIssue({ code: "custom", path: ["end"], message: "end must be at least start" });
+  }
+  if (target.lines.length !== target.end - target.start + 1) {
+    ctx.addIssue({ code: "custom", path: ["lines"], message: "lines must match the inclusive range length" });
+  }
+  const textChars = [target.lines, target.before, target.after].reduce(
+    (total, lines) => total + lines.reduce((chars, line) => chars + line.length, 0),
+    0,
+  );
+  if (textChars > LIMITS.targetTextChars) {
+    ctx.addIssue({ code: "custom", path: ["lines"], message: "target text exceeds the combined character limit" });
+  }
+}
 export const LinesTarget = z
-  .object({
-    kind: z.literal("lines"),
-    path: FilePath,
-    side: z.enum(["old", "new"]),
-    start: z.int().positive(),
-    end: z.int().positive(),
-    lines: z.array(z.string().max(LIMITS.targetTextChars)).max(LIMITS.targetLines),
-    before: z.array(z.string().max(LIMITS.contextLineChars)).max(LIMITS.diffContextLines),
-    after: z.array(z.string().max(LIMITS.contextLineChars)).max(LIMITS.diffContextLines),
-  })
-  .superRefine((target, ctx) => {
-    if (target.end < target.start) {
-      ctx.addIssue({ code: "custom", path: ["end"], message: "end must be at least start" });
-    }
-    if (target.lines.length !== target.end - target.start + 1) {
-      ctx.addIssue({ code: "custom", path: ["lines"], message: "lines must match the inclusive range length" });
-    }
-    const textChars = [target.lines, target.before, target.after].reduce(
-      (total, lines) => total + lines.reduce((chars, line) => chars + line.length, 0),
-      0,
-    );
-    if (textChars > LIMITS.targetTextChars) {
-      ctx.addIssue({ code: "custom", path: ["lines"], message: "target text exceeds the combined character limit" });
-    }
-  });
+  .object({ kind: z.literal("lines"), side: z.enum(["old", "new"]), ...lineFields })
+  .superRefine(refineLines);
 export type LinesTarget = z.infer<typeof LinesTarget>;
+export const SourceLinesTarget = z.object({ kind: z.literal("source-lines"), ...lineFields }).superRefine(refineLines);
+export type SourceLinesTarget = z.infer<typeof SourceLinesTarget>;
 
 export const FileTarget = z.object({ kind: z.literal("file"), path: FilePath });
 export type FileTarget = z.infer<typeof FileTarget>;
@@ -67,6 +69,7 @@ export const Target = z.discriminatedUnion("kind", [
   DocSpanTarget,
   HtmlSpanTarget,
   LinesTarget,
+  SourceLinesTarget,
   FileTarget,
   TopicTarget,
   ReviewTarget,

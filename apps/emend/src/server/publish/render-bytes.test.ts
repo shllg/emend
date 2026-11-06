@@ -152,3 +152,28 @@ test("R1.8 exactly the lookup cap is accepted and a shared heading list is charg
   );
   expect(result.docBlobs.size).toBe(2);
 });
+
+test("source docs share the rendered-byte budget and skip metadata parsing", async () => {
+  const execute = vi.fn<Executor>(async (work) => {
+    if (work.kind === "writeup") return { kind: "writeup", ...serializeRendered({ sections: [] }) };
+    if (work.kind === "source")
+      return {
+        kind: "source",
+        bytes: new TextEncoder().encode(JSON.stringify({ language: "text", lines: [[{ text: "x".repeat(300) }]] }))
+          .buffer,
+        ids: new ArrayBuffer(0),
+        count: 0,
+      };
+    return executeWork(work);
+  });
+  const result = await renderRevision(
+    { ...input, files: input.files.map((f) => ({ ...f, view: "source" })) },
+    execute,
+    async () => new ArrayBuffer(0),
+    async () => "stored",
+  );
+  expect([...result.sourceBlobs.keys()]).toEqual(["a.md"]);
+  expect(result.unrendered).toEqual(["b.md", "c.md"]);
+  expect(execute.mock.calls.filter(([work]) => work.kind === "doc-metadata")).toEqual([]);
+  expect(result.metadata.size).toBe(0);
+});

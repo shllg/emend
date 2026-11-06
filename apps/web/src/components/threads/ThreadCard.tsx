@@ -70,13 +70,15 @@ export function threadPlaceLink(reviewId: string, thread: ThreadView, search: Re
   if (search.rev !== undefined) params.set("rev", String(search.rev));
   let hash = `thread-${thread.id}`;
   if (location.kind === "writeup-span") params.set("tab", "writeup");
-  else if (location.kind === "doc-span" || location.kind === "html-span") {
+  else if (location.kind === "doc-span" || location.kind === "html-span" || location.kind === "source-lines") {
     params.set("tab", "docs");
     params.set("doc", location.path);
     if (location.kind === "html-span") params.set("thread", thread.id);
+    if (location.kind === "source-lines") params.set("view", "source");
   } else {
     params.set("tab", phone ? "diff" : (search.tab ?? "comments"));
     if (search.doc) params.set("doc", search.doc);
+    if (search.view) params.set("view", search.view);
     hash = `diff-thread-${thread.id}`;
   }
   return `/r/${encodeURIComponent(reviewId)}?${params}#${encodeURIComponent(hash)}`;

@@ -5,6 +5,7 @@ import {
   ChevronRight,
   FileCode,
   Files,
+  FileTerminal,
   FileText,
   LayoutList,
   List,
@@ -13,6 +14,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { docFilename, docTitle } from "../../lib/doc-navigation.ts";
+import { docKey, docView, findDoc } from "../../lib/doc-view.ts";
 import type { DocNavigation, HtmlPosition } from "../../lib/frame-messages.ts";
 import { focusReadingTarget } from "../../lib/reading-focus.ts";
 import { readingPositionKey } from "../../lib/reading-position.ts";
@@ -24,6 +26,7 @@ import { BlockReader, type ReaderGroup, type ReaderProps } from "./BlockReader.t
 import { DocContents, useCurrentHeading } from "./DocContents.tsx";
 import { HtmlDocFrame, type HtmlNavigation } from "./HtmlDocFrame.tsx";
 import { ReadingMenu } from "./ReadingMenu.tsx";
+import { SourceView } from "./SourceView.tsx";
 
 export function DocView({
   docs,
@@ -49,7 +52,7 @@ export function DocView({
   openDoc?: RevisionView["docs"][number];
   search: ReviewSearch;
   targeted: boolean;
-  onOpenDoc: (path: string) => void;
+  onOpenDoc: (doc: RevisionView["docs"][number]) => void;
   navigation?: HtmlNavigation;
   composingPath?: string;
   onHeading?: (id: string) => void;
@@ -86,16 +89,24 @@ export function DocView({
       : markdownHeading;
   const headings = useMemo(
     () =>
-      openDoc?.kind === "html"
-        ? (openDoc.headings ?? []).map((heading, index) => ({ ...heading, id: String(index) }))
-        : (openDoc?.headings?.filter((heading) => heading.id) ?? []),
+      openDoc?.kind === "source"
+        ? []
+        : openDoc?.kind === "html"
+          ? (openDoc.headings ?? []).map((heading, index) => ({ ...heading, id: String(index) }))
+          : (openDoc?.headings?.filter((heading) => heading.id) ?? []),
     [openDoc],
   );
   const frameReading = useMemo(
     () =>
-      entry && openDoc
+      entry && openDoc?.kind === "html"
         ? {
-            key: readingPositionKey(props.reviewId, "docs", openDoc.path, props.revision, search.view ?? "original"),
+            key: readingPositionKey(
+              props.reviewId,
+              "docs",
+              openDoc.path,
+              props.revision,
+              docView(openDoc, search.view) ?? "original",
+            ),
             entry,
             returning,
             target: headingTarget,
@@ -118,12 +129,14 @@ export function DocView({
   const previous = useRef<{ path?: string; doc?: string } | null>(null);
   const [destination, setDestination] = useState<DocNavigation>();
   const path = openDoc?.path;
+  const key = openDoc ? docKey(openDoc) : undefined;
+  const selectedKey = `${search.view ?? "rendered"}:${search.doc ?? ""}`;
   useEffect(() => {
     const last = previous.current;
-    previous.current = { path, doc: search.doc };
-    if (last && last.path !== path) setCommentsOpen(false);
-    if (last && path === last.path) return;
-    const focusNavigation = last && last.doc !== search.doc && !targeted;
+    previous.current = { path: key, doc: selectedKey };
+    if (last && last.path !== key) setCommentsOpen(false);
+    if (last && key === last.path) return;
+    const focusNavigation = last && last.doc !== selectedKey && !targeted;
     setDestination((current) => (current?.path === path ? current : undefined));
     if (path) {
       if (focusNavigation) focusReadingTarget(heading.current);
@@ -132,12 +145,12 @@ export function DocView({
       focusReadingTarget(row);
       row?.scrollIntoView?.({ block: "nearest" });
     }
-  }, [path, search.doc, targeted]);
+  }, [path, key, selectedKey, targeted]);
   const follow = (next: DocNavigation) => {
-    const doc = docs.find((doc) => doc.path === next.path);
-    if (!doc || doc.path === path) return;
+    const doc = findDoc(docs, next.path);
+    if (!doc || docKey(doc) === key) return;
     setDestination(doc.kind === "html" && next.fragment ? next : undefined);
-    onOpenDoc(doc.path);
+    onOpenDoc(doc);
   };
   const content =
     openDoc?.kind === "html" ? (
@@ -151,7 +164,7 @@ export function DocView({
         onNavigate={follow}
         composerOpen={composingPath === openDoc.path}
         headings={openDoc.headings}
-        docPaths={docs.map((doc) => doc.path)}
+        docPaths={docs.filter((doc) => doc.kind !== "source").map((doc) => doc.path)}
         reading={frameReading}
         onPosition={onPosition}
         commentsOpen={commentsOpen}
@@ -183,19 +196,22 @@ export function DocView({
           {docs.map((doc) => {
             const title = docTitle(doc);
             return (
-              <li key={doc.path}>
+              <li key={docKey(doc)}>
                 <Link
                   ref={(node) => {
-                    if (node) rows.current.set(doc.path, node);
-                    else rows.current.delete(doc.path);
+                    if (node) rows.current.set(docKey(doc), node);
+                    else rows.current.delete(docKey(doc));
                   }}
                   to="/r/$reviewId"
                   params={{ reviewId: props.reviewId }}
-                  search={{ ...search, tab: "docs", doc: doc.path, thread: undefined }}
+                  search={{ ...search, tab: "docs", doc: doc.path, view: docView(doc, search.view), thread: undefined }}
                   hash=""
                   className="em-doc-row grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-line-1 bg-surface px-3.5 py-3 text-fg-2 no-underline hover:border-line-2 hover:bg-sunken"
                 >
-                  <Icon icon={doc.kind === "html" ? FileCode : FileText} size={18} />
+                  <Icon
+                    icon={doc.kind === "source" ? FileTerminal : doc.kind === "html" ? FileCode : FileText}
+                    size={18}
+                  />
                   <span className="flex min-w-0 flex-col gap-[3px]">
                     <span dir="auto" className="truncate font-sans text-14 leading-[1.3] font-semibold text-fg-1">
                       {title}
@@ -203,6 +219,7 @@ export function DocView({
                     <span dir="auto" className="em-doc-path truncate font-stretch-mono text-fg-3">
                       {doc.path}
                     </span>
+                    {doc.kind === "source" && <span className="text-fg-3 [font:var(--type-meta)]">Source</span>}
                   </span>
                   <Icon icon={ChevronRight} size={16} />
                 </Link>
@@ -264,21 +281,22 @@ export function DocView({
                                 thread.target.path === doc.path)),
                         ).length;
                         return (
-                          <li key={doc.path}>
+                          <li key={docKey(doc)}>
                             <button
                               type="button"
-                              aria-current={doc.path === openDoc.path ? "page" : undefined}
+                              aria-current={docKey(doc) === key ? "page" : undefined}
                               onClick={() =>
                                 pick(() => {
                                   setFilter("");
-                                  onOpenDoc(doc.path);
-                                  if (doc.path === openDoc.path) focusReadingTarget(heading.current);
+                                  onOpenDoc(doc);
+                                  if (docKey(doc) === key) focusReadingTarget(heading.current);
                                 })
                               }
                             >
                               <span>
                                 <span dir="auto">{docTitle(doc)}</span>
                                 <small dir="auto">{docFilename(doc, docs)}</small>
+                                {doc.kind === "source" && <small>Source</small>}
                               </span>
                               <span>
                                 {count} open {count === 1 ? "comment" : "comments"}
@@ -325,7 +343,13 @@ export function DocView({
                 to="/r/$reviewId"
                 aria-label="All docs"
                 params={{ reviewId: props.reviewId }}
-                search={{ ...search, tab: "docs", doc: undefined, thread: undefined }}
+                search={{
+                  ...search,
+                  tab: "docs",
+                  doc: undefined,
+                  view: docView(undefined, search.view),
+                  thread: undefined,
+                }}
                 hash=""
               >
                 <Icon icon={LayoutList} />
@@ -342,7 +366,13 @@ export function DocView({
         )}
       </div>
       <div className="em-doc-body" data-reading-doc={openDoc.path}>
-        {openDoc.kind === "html" ? content : <BlockReader key={openDoc.path} {...props} groups={groups} />}
+        {openDoc.kind === "source" ? (
+          <SourceView key={docKey(openDoc)} {...props} doc={openDoc} />
+        ) : openDoc.kind === "html" ? (
+          content
+        ) : (
+          <BlockReader key={docKey(openDoc)} {...props} groups={groups} />
+        )}
         {hasContents && (
           <aside className="em-doc-contents-rail">
             <DocContents headings={headings} current={currentHeading} onPick={onHeading} />

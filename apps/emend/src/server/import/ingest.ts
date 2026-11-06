@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { ImportBundle } from "@emend/contract";
+import { docViewOf } from "@emend/contract";
 import { and, eq, type InferInsertModel, sql } from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import type { Queries } from "../../db/client.ts";
@@ -9,7 +10,7 @@ import { machineDevice } from "../auth/machines.ts";
 import type { Principal } from "../auth/principal.ts";
 import { ApiError } from "../http/errors.ts";
 import { yieldToLoop } from "../pacing.ts";
-import { mediaType } from "../publish/media.ts";
+import { fileMediaType } from "../publish/media.ts";
 import { checkImportSignal } from "./lifecycle.ts";
 import { prepareImport } from "./prepare.ts";
 
@@ -193,11 +194,25 @@ export async function importReview(principal: Principal, bundle: ImportBundle, d
           (r) => ({
             ...r,
             ownerId,
-            title: r.role === "doc" ? (prepared.rendered.get(r.revisionId)?.metadata.get(r.path)?.title ?? null) : null,
+            title:
+              r.role === "doc"
+                ? (prepared.rendered
+                    .get(r.revisionId)
+                    ?.[docViewOf(r) === "source" ? "sourceMetadata" : "metadata"].get(r.path)?.title ?? null)
+                : null,
             headings:
-              r.role === "doc" ? (prepared.rendered.get(r.revisionId)?.metadata.get(r.path)?.headings ?? null) : null,
-            mediaType: r.role === "diff" ? "text/plain" : mediaType(r.path),
-            renderedBlob: r.role === "doc" ? (prepared.rendered.get(r.revisionId)?.docBlobs.get(r.path) ?? null) : null,
+              r.role === "doc"
+                ? (prepared.rendered
+                    .get(r.revisionId)
+                    ?.[docViewOf(r) === "source" ? "sourceMetadata" : "metadata"].get(r.path)?.headings ?? null)
+                : null,
+            mediaType: fileMediaType(r),
+            renderedBlob:
+              r.role === "doc"
+                ? (prepared.rendered
+                    .get(r.revisionId)
+                    ?.[docViewOf(r) === "source" ? "sourceBlobs" : "docBlobs"].get(r.path) ?? null)
+                : null,
           }),
         );
         await insert(t.agentNotes, bundle.agentNotes ?? [], (note) => ({

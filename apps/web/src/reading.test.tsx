@@ -529,6 +529,59 @@ test("an open Markdown doc renders its blocks under the doc bar", () => {
   expect(screen.getByRole("heading", { name: "plan.md" })).toBeTruthy();
   expect(container.querySelector("iframe")).toBeNull();
 });
+test.each([
+  ["writeup", "reply"],
+  ["writeup", "edit"],
+  ["markdown", "reply"],
+  ["markdown", "edit"],
+])("%s retains its draft-based %s restoration after dismissal and remount", async (surface, kind) => {
+  vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
+  const doc = { path: "plan.md", kind: "markdown" as const, blocks: [block] };
+  const placed: ThreadView = {
+    ...thread,
+    target: surface === "markdown" ? { ...target, kind: "doc-span", path: doc.path } : target,
+    placement: {
+      status: "placed",
+      location:
+        surface === "markdown"
+          ? { kind: "doc-span", path: doc.path, blockId: block.id, start: 0, end: 4 }
+          : { kind: "writeup-span", blockId: block.id, start: 0, end: 4 },
+    },
+    comments: thread.comments.map((comment) => ({
+      ...comment,
+      sent: kind === "reply",
+      sentOn: kind === "reply" ? 1 : null,
+    })),
+  };
+  const props = { reviewId: id, revision: 2, changedBlocks: [], threads: [placed] };
+  const reader =
+    surface === "writeup" ? (
+      <Writeup
+        {...props}
+        writeup={{ sections: [{ key: "overview", label: "Overview", topic: null, blocks: [block] }] }}
+      />
+    ) : (
+      <DocView
+        {...props}
+        docs={[doc]}
+        openDoc={doc}
+        search={{ tab: "docs", doc: doc.path }}
+        targeted={false}
+        onOpenDoc={() => {}}
+      />
+    );
+  const first = mount(reader);
+  fireEvent.click(screen.getByRole("button", { name: kind === "reply" ? "Reply" : "Edit" }));
+  const label = kind === "reply" ? "Reply" : "Edit comment";
+  const editor = screen.getByRole("textbox", { name: label });
+  fireEvent.change(editor, { target: { value: "Retained surface draft" } });
+  if (kind === "reply") fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  else fireEvent.keyDown(editor, { key: "Escape" });
+  expect(screen.queryByRole("textbox", { name: label })).toBeNull();
+  await act(async () => first.unmount());
+  mount(reader);
+  expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: label }).value).toBe("Retained surface draft");
+});
 test("thread groups are ordered, unplaced quotes link to their original revision, and answered changes link to the block", async () => {
   const answered = {
     ...thread,

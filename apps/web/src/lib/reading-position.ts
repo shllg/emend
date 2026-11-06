@@ -17,7 +17,13 @@ const entrySchema = z.object({
 });
 const storeSchema = z.record(z.string(), z.unknown());
 
-export function readingPositionKey(reviewId: string, tab: string, doc = "", revision?: number, view = "reading") {
+export function readingPositionKey(
+  reviewId: string,
+  tab: string,
+  doc = "",
+  revision?: number,
+  view: "reading" | "original" | "source" = "reading",
+) {
   return [reviewId, tab, doc, ...(tab === "docs" && revision !== undefined ? [revision, view] : [])].join("\n");
 }
 

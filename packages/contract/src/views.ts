@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AgentNoteView } from "./agent-note.ts";
-import { DocHeadings, DocTitle } from "./doc.ts";
+import { DocHeadings, DocTitle, SourceContent } from "./doc.ts";
 import { LIMITS } from "./limits.ts";
 import { PublishLinks, RepoUrl } from "./links.ts";
 import { Placement } from "./placement.ts";
@@ -115,25 +115,31 @@ export const RenderedWriteup = z
     "writeup exceeds the rendered JSON byte budget",
   );
 export type RenderedWriteup = z.infer<typeof RenderedWriteup>;
-export const FileView = z.object({
-  id: z.uuid(),
-  path: FilePath,
-  oldPath: FilePath.nullable(),
-  role: FileRole,
-  status: FileStatus.nullable(),
-  topic: TopicSlug.nullable(),
-  order: z
-    .int()
-    .min(0)
-    .max(LIMITS.filesPerRevision - 1),
-  mediaType: z.string(),
-  flag: FileFlag.nullable(),
-  hasOld: z.boolean(),
-  hasNew: z.boolean(),
-  viewed: z.enum(["viewed", "stale"]).optional(),
-  viewedOn: z.int().positive().optional(),
-  notes: z.array(AgentNoteView).max(LIMITS.agentNotesPerFile).optional(),
-});
+export const FileView = z
+  .object({
+    view: z.literal("source").optional(),
+    id: z.uuid(),
+    path: FilePath,
+    oldPath: FilePath.nullable(),
+    role: FileRole,
+    status: FileStatus.nullable(),
+    topic: TopicSlug.nullable(),
+    order: z
+      .int()
+      .min(0)
+      .max(LIMITS.filesPerRevision - 1),
+    mediaType: z.string(),
+    flag: FileFlag.nullable(),
+    hasOld: z.boolean(),
+    hasNew: z.boolean(),
+    viewed: z.enum(["viewed", "stale"]).optional(),
+    viewedOn: z.int().positive().optional(),
+    notes: z.array(AgentNoteView).max(LIMITS.agentNotesPerFile).optional(),
+  })
+  .refine(
+    (file) => file.view === undefined || (file.role === "doc" && file.mediaType === "text/plain"),
+    "only source doc rows have a view",
+  );
 export type FileView = z.infer<typeof FileView>;
 export const ThreadView = z.object({
   id: z.uuid(),
@@ -182,6 +188,12 @@ export const RevisionView = z
     docs: z
       .array(
         z.discriminatedUnion("kind", [
+          SourceContent.extend({
+            path: FilePath,
+            kind: z.literal("source"),
+            title: DocTitle.optional(),
+            unrendered: z.literal(true).optional(),
+          }),
           z.object({
             path: FilePath,
             kind: z.literal("markdown"),
@@ -218,10 +230,12 @@ export const RevisionView = z
   .refine((view) => {
     let bytes = renderedBytes(view.writeup);
     for (const doc of view.docs) {
-      if (doc.title !== undefined || doc.headings !== undefined)
-        bytes += renderedBytes({ title: doc.title, headings: doc.headings });
+      if (doc.title !== undefined || ("headings" in doc && doc.headings !== undefined))
+        bytes += renderedBytes({ title: doc.title, headings: "headings" in doc ? doc.headings : undefined });
       // An empty array also represents an unrendered doc, which has no stored JSON bytes.
       if (doc.kind === "markdown" && doc.blocks.length) bytes += renderedBytes(doc.blocks);
+      if (doc.kind === "source" && doc.lines.length)
+        bytes += renderedBytes({ language: doc.language, lines: doc.lines });
       if (bytes > LIMITS.renderedBytesPerRevision) return false;
     }
     return bytes <= LIMITS.renderedBytesPerRevision;

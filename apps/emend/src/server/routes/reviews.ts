@@ -1,4 +1,12 @@
-import { InboxList, LIMITS, PublishMeta, ReviewView, RevisionView, type ThreadView } from "@emend/contract";
+import {
+  InboxList,
+  LIMITS,
+  PublishMeta,
+  ReviewView,
+  RevisionView,
+  SourceContent,
+  type ThreadView,
+} from "@emend/contract";
 import {
   and,
   asc,
@@ -302,7 +310,18 @@ async function revisionView(ownerId: string, q: Queries, deps: AppDeps, reviewId
       ...(file.title !== null ? { title: file.title } : {}),
       ...(file.headings !== null ? { headings: file.headings } : {}),
     };
-    if (file.mediaType === "text/html") {
+    if (file.mediaType === "text/plain") {
+      const stored = file.renderedBlob ? await readJson(file.renderedBlob).catch(() => undefined) : undefined;
+      const content = SourceContent.safeParse(stored);
+      docs.push({
+        path: file.path,
+        kind: "source",
+        ...(file.title ? { title: file.title } : {}),
+        language: content.success ? content.data.language : "text",
+        lines: content.success ? content.data.lines : [],
+        ...(!content.success ? { unrendered: true } : {}),
+      });
+    } else if (file.mediaType === "text/html") {
       docs.push({
         ...metadata,
         path: file.path,
@@ -433,6 +452,7 @@ async function revisionView(ownerId: string, q: Queries, deps: AppDeps, reviewId
         topic: file.topicSlug,
         order: file.ord,
         mediaType: file.mediaType,
+        ...(file.role === "doc" && file.mediaType === "text/plain" ? { view: "source" } : {}),
         flag: file.flag,
         hasOld: file.oldBlob !== null,
         hasNew: file.newBlob !== null,

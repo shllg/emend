@@ -56,12 +56,13 @@ test("publish stores and serves doc metadata, cleans manifest titles, and resolv
     expect(viewResponse.status).toBe(200);
     const view = RevisionView.parse(await viewResponse.json());
     expect(view.docs.map((d) => d.title)).toEqual(["Visible", "Named doc", "plain.md", "Own HTML title"]);
-    expect(view.docs[1]?.headings).toEqual([
+    expect(view.docs[1] && "headings" in view.docs[1] ? view.docs[1].headings : undefined).toEqual([
       { level: 2, text: "Part" },
       { level: 3, text: "Child" },
     ]);
     const md = view.docs[0];
-    expect(md?.headings).toEqual([{ level: 2, text: "Section", id: expect.any(String) }]);
+    if (md?.kind !== "markdown") throw new Error("missing markdown");
+    expect(md.headings).toEqual([{ level: 2, text: "Section", id: expect.any(String) }]);
     if (md?.kind !== "markdown") throw new Error("missing markdown");
     expect(md.blocks.some((b) => b.html.includes(`id="${md.headings?.[0]?.id}"`))).toBe(true);
     expect(md.blocks.map((b) => b.html).join("")).toContain('href="?tab=docs&#x26;doc=docs%2Fb.html"');

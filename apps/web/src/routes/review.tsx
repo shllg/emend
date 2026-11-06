@@ -28,6 +28,7 @@ import { claimDraft } from "../lib/composer-owner.ts";
 import { useDiffCounts } from "../lib/diff-counts.ts";
 import type { NavigateDiff } from "../lib/diff-navigation.ts";
 import { appElementId, docHeading, docTitle } from "../lib/doc-navigation.ts";
+import { docKey, docView, findDoc } from "../lib/doc-view.ts";
 import { draftKey, hasDraft, type SavedDraft, saveDraft, subscribeDrafts } from "../lib/drafts.ts";
 import { usePublishedRevision } from "../lib/events.tsx";
 import { useInboxCollapsed, useLayout, usePaneMode } from "../lib/layout.ts";
@@ -80,7 +81,7 @@ function Reading({
   phone: boolean;
   openDoc?: RevisionView["docs"][number];
   targeted: boolean;
-  onOpenDoc: (path: string) => void;
+  onOpenDoc: (doc: RevisionView["docs"][number]) => void;
   onCurrentTopic?: (slug: string | undefined) => void;
   onNote: (id: string) => void;
   visible: boolean;
@@ -99,10 +100,10 @@ function Reading({
       tab,
       tab === "docs" ? (openDoc?.path ?? "") : "",
       revision.seq,
-      search.view ?? (openDoc?.kind === "html" ? "original" : "reading"),
+      docView(openDoc, search.view) ?? (openDoc?.kind === "html" ? "original" : "reading"),
     ),
     selector: tab === "comments" ? '[id^="thread-"]' : '[id^="block-"], [id^="html-doc-"]',
-    active: visible && !(tab === "docs" && openDoc?.kind === "html"),
+    active: visible && !(tab === "docs" && (openDoc?.kind === "html" || openDoc?.kind === "source")),
     preserve: preservePosition,
     entry,
     doc: tab === "docs" ? openDoc : undefined,
@@ -161,7 +162,7 @@ function draftPlacement(draft: SavedDraft, revision: RevisionView) {
       target,
     );
   if (target?.kind === "doc-span") {
-    const doc = revision.docs.find((doc) => doc.path === target.path);
+    const doc = revision.docs.find((doc) => doc.kind === "markdown" && doc.path === target.path);
     return placeSpan(doc?.kind === "markdown" ? doc.blocks : [], target);
   }
   return undefined;
@@ -199,23 +200,25 @@ function resolveOpenDoc(
   openingDoc: string | undefined,
   docsVisible: boolean,
 ) {
-  const selected = revision.docs.find((doc) => doc.path === search.doc);
+  const selected = findDoc(revision.docs, search.doc, search.view);
   if (selected) return selected;
   if (search.doc !== undefined) return undefined;
   const thread = revision.threads.find((thread) => thread.id === intent.threadId);
   const placement = thread?.placement.status === "placed" ? thread.placement.location : undefined;
   const target = revision.docs.find(
     (doc) =>
-      intent.elementId === `doc-${doc.path}` ||
-      intent.elementId === `html-doc-${doc.path}` ||
+      (doc.kind === "source" && intent.elementId === `source-doc-${doc.path}`) ||
+      (doc.kind !== "source" && intent.elementId === `doc-${doc.path}`) ||
+      (doc.kind === "html" && intent.elementId === `html-doc-${doc.path}`) ||
       (doc.kind === "markdown" && doc.blocks.some((block) => intent.elementId === `block-${block.id}`)) ||
-      ((placement?.kind === "doc-span" || placement?.kind === "html-span") &&
+      ((placement?.kind === "doc-span" || placement?.kind === "html-span" || placement?.kind === "source-lines") &&
         placement.path === doc.path &&
-        doc.kind === (placement.kind === "html-span" ? "html" : "markdown")),
+        doc.kind ===
+          (placement.kind === "source-lines" ? "source" : placement.kind === "html-span" ? "html" : "markdown")),
   );
   return (
     target ??
-    revision.docs.find((doc) => doc.path === openingDoc) ??
+    findDoc(revision.docs, openingDoc) ??
     (docsVisible && revision.docs.length === 1 ? revision.docs[0] : undefined)
   );
 }
@@ -324,9 +327,10 @@ function LoadedReview({
     readingTab,
     readingTab === "docs" ? (openDoc?.path ?? "") : "",
     seq,
-    search.view ?? (openDoc?.kind === "html" ? "original" : "reading"),
+    docView(openDoc, search.view) ?? (openDoc?.kind === "html" ? "original" : "reading"),
   );
-  const restoreEntry = trail.returning && trail.entry.positions.has(positionKey);
+  const restoreEntry =
+    !(readingTab === "docs" && openDoc?.kind === "source") && trail.returning && trail.entry.positions.has(positionKey);
   const [failedHeading, setFailedHeading] = useState<string>();
   const missingHeading =
     !restoreEntry &&
@@ -336,7 +340,7 @@ function LoadedReview({
     (failedHeading === currentIntent.navigation ||
       !(openDoc.kind === "html"
         ? /^(0|[1-9]\d*)$/.test(currentIntent.headingId) && openDoc.headings?.[Number(currentIntent.headingId)]
-        : openDoc.headings?.some((heading) => heading.id === currentIntent.headingId)));
+        : openDoc.kind === "markdown" && openDoc.headings?.some((heading) => heading.id === currentIntent.headingId)));
   const setRevision = (rev: number) => {
     void navigate({ search: { ...search, tab, rev } });
   };
@@ -415,7 +419,7 @@ function LoadedReview({
     event.preventDefault();
     const destination = {
       ...next,
-      view: next.view ?? search.view,
+      view: docView(findDoc(revision?.docs ?? [], next.doc, next.view), next.view ?? search.view),
       rev: next.tab === "docs" ? seq : (next.rev ?? search.rev),
     };
     if (modified) {
@@ -423,7 +427,11 @@ function LoadedReview({
       for (const [key, value] of Object.entries(destination)) if (value !== undefined) params.set(key, String(value));
       window.open(`${url.pathname}?${params}${url.hash}`, "_blank", "noopener");
     } else {
-      navigateReading(destination, url.hash.slice(1), docsVisible && next.tab === "docs" && next.doc === openDoc?.path);
+      navigateReading(
+        destination,
+        url.hash.slice(1),
+        docsVisible && next.tab === "docs" && next.doc === openDoc?.path && destination.view === search.view,
+      );
     }
   };
   const onHeading = (id: string) => {
@@ -431,7 +439,7 @@ function LoadedReview({
       !openDoc ||
       !(openDoc.kind === "html"
         ? /^(0|[1-9]\d*)$/.test(id) && openDoc.headings?.[Number(id)]
-        : openDoc.headings?.some((heading) => heading.id === id))
+        : openDoc.kind === "markdown" && openDoc.headings?.some((heading) => heading.id === id))
     )
       return;
     navigateReading(
@@ -461,6 +469,10 @@ function LoadedReview({
         ...search,
         tab: "comments",
         doc: location?.kind === "doc-span" || location?.kind === "html-span" ? location.path : search.doc,
+        view:
+          location?.kind === "doc-span" || location?.kind === "html-span"
+            ? docView(undefined, search.view)
+            : search.view,
         thread: draft.threadId,
       });
       return;
@@ -472,10 +484,18 @@ function LoadedReview({
       return;
     }
     claimDraft(draft.key, "resumed");
+    if (draft.target.kind === "source-lines") {
+      setResumed({ ...draft, tab: "docs" });
+      navigateReading(
+        { ...search, tab: "docs", doc: draft.target.path, view: "source", thread: undefined },
+        `source-doc-${draft.target.path}`,
+      );
+      return;
+    }
     if (draft.target.kind === "html-span") {
       setResumed({ ...draft, tab: "docs" });
       navigateReading(
-        { ...search, tab: "docs", doc: draft.target.path, thread: undefined },
+        { ...search, tab: "docs", doc: draft.target.path, view: docView(undefined, search.view), thread: undefined },
         `html-doc-${draft.target.path}`,
       );
       return;
@@ -489,6 +509,7 @@ function LoadedReview({
           ...search,
           tab: destination,
           doc: draft.target.kind === "doc-span" ? draft.target.path : search.doc,
+          view: draft.target.kind === "doc-span" ? docView(undefined, search.view) : search.view,
           thread: undefined,
         },
         `block-${placement.location.blockId}`,
@@ -500,6 +521,7 @@ function LoadedReview({
         ...search,
         tab: destination,
         doc: draft.target.kind === "doc-span" ? draft.target.path : search.doc,
+        view: draft.target.kind === "doc-span" ? docView(undefined, search.view) : search.view,
         thread: undefined,
       });
     }
@@ -582,8 +604,8 @@ function LoadedReview({
       return;
     }
     if (!revision) return;
-    if (docsVisible && !missingDoc && search.doc !== openDoc?.path) {
-      const next: ReviewSearch = { ...search, doc: openDoc?.path };
+    if (docsVisible && !missingDoc && (search.doc !== openDoc?.path || search.view !== docView(openDoc, search.view))) {
+      const next: ReviewSearch = { ...search, doc: openDoc?.path, view: docView(openDoc, search.view) };
       intent.navigation = readingIntent(next, hash, seq).navigation;
       void navigate({ search: next, hash, replace: true });
       return;
@@ -594,6 +616,23 @@ function LoadedReview({
       // Placement selects the destination once for this navigation, never on a refetch.
       intent.routeThread = false;
       setHtmlNavigation(undefined);
+      if (thread?.target.kind === "source-lines" && (search.tab !== "comments" || search.thread)) {
+        const location = thread.placement.status === "placed" ? thread.placement.location : undefined;
+        const placed = location?.kind === "source-lines" && findDoc(revision.docs, location.path, "source");
+        const next: ReviewSearch = {
+          ...search,
+          tab: placed ? "docs" : "comments",
+          doc: placed ? placed.path : search.doc,
+          view: placed ? "source" : search.view,
+        };
+        const nextHash = `thread-${thread.id}`;
+        intent.elementId = nextHash;
+        if (search.tab !== next.tab || search.doc !== next.doc || search.view !== next.view || hash !== nextHash) {
+          intent.navigation = readingIntent(next, nextHash, seq).navigation;
+          void navigate({ search: next, hash: nextHash, replace: true });
+          return;
+        }
+      }
       if (thread?.target.kind === "html-span" && (search.tab !== "comments" || search.thread)) {
         const location = thread.placement.status === "placed" ? thread.placement.location : undefined;
         const placed =
@@ -603,13 +642,14 @@ function LoadedReview({
           ...search,
           tab: placed ? "docs" : "comments",
           doc: placed ? (openDoc?.path ?? location.path) : search.doc,
+          view: placed ? docView(undefined, search.view) : search.view,
         };
         const nextHash = `thread-${thread.id}`;
         intent.elementId = placed ? `html-doc-${location.path}` : nextHash;
         if (placed) intent.block = "start";
         intent.reply ||= !placed;
         if (placed) setHtmlNavigation({ threadId: thread.id, intent });
-        if (search.tab !== next.tab || search.doc !== next.doc || hash !== nextHash) {
+        if (search.tab !== next.tab || search.doc !== next.doc || search.view !== next.view || hash !== nextHash) {
           // The redirect continues this intent; it does not create another one.
           intent.navigation = readingIntent(next, nextHash, seq).navigation;
           void navigate({ search: next, hash: nextHash, replace: true });
@@ -669,6 +709,10 @@ function LoadedReview({
     revealReadingTarget(element);
     element.scrollIntoView?.({ block: intent.block });
     complete(intent.jumpThread);
+    if (element.hasAttribute("data-thread-card") && element.closest(".em-source")) {
+      element.tabIndex = -1;
+      element.focus({ preventScroll: true });
+    }
   });
   const tabProps = {
     id: review.id,
@@ -814,11 +858,18 @@ function LoadedReview({
                         targeted={!!hash || !!search.thread || (trail.returning && !!trail.entry.focus)}
                         activeThreadId={currentIntent.threadId}
                         threadJump={threadJump?.navigation === currentIntent.navigation ? threadJump : undefined}
-                        onOpenDoc={(path) =>
+                        onOpenDoc={(doc) =>
                           navigateReading(
-                            { ...search, rev: seq, tab: "docs", doc: path, thread: undefined },
+                            {
+                              ...search,
+                              rev: seq,
+                              tab: "docs",
+                              doc: doc.path,
+                              view: docView(doc, search.view),
+                              thread: undefined,
+                            },
                             "",
-                            docsVisible && path === openDoc?.path,
+                            docsVisible && !!openDoc && docKey(doc) === docKey(openDoc),
                           )
                         }
                         phone={layout === "phone"}

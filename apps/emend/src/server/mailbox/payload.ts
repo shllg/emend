@@ -58,6 +58,7 @@ function placementReserve(target: Target) {
     case "doc-span":
       location = { kind: target.kind, path, blockId, ...range };
       break;
+    case "source-lines":
     case "html-span":
       location = { kind: target.kind, path, ...range };
       break;

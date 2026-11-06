@@ -44,6 +44,8 @@ test("exports the v1 API, limits, file vocabulary and reserved fallback", () => 
     headingLookupBytesPerRevision: 33554432,
     diffSideBytes: 1048576,
     markdownDocBytes: 1048576,
+    sourceLinesPerRevision: 200000,
+    sourceBytesPerRevision: 16777216,
     htmlDocBytes: 8388608,
     assetBytes: 8388608,
     htmlDocWithAssetsBytes: 20971520,

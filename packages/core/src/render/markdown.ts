@@ -7,13 +7,12 @@ import rehypeStringify from "rehype-stringify";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
-import { createHighlighterCore } from "shiki/core";
-import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import { unified } from "unified";
 import type { DocLinks } from "../links.ts";
 import { type Block, blocksFromTree, type HtmlRoot, renderData, visitElements } from "./blocks.ts";
 import { blockHash } from "./hash.ts";
 import { HIGHLIGHT_LINE_CHARS, type HighlightBudget, limitHighlighting } from "./highlight.ts";
+import { sharedHighlighter } from "./highlighter.ts";
 import { linkIssueRefs } from "./issue-refs.ts";
 import { commentLineBreaks } from "./line-breaks.ts";
 import { limitReferences } from "./reference-limit.ts";
@@ -68,27 +67,7 @@ function sanitizedPipeline(lineBreaks = false) {
 }
 
 async function createProcessor() {
-  // Explicit imports keep the server bundle to these grammars and the JavaScript engine.
-  const highlighter = await createHighlighterCore({
-    engine: createJavaScriptRegexEngine(),
-    themes: [import("shiki/themes/github-light.mjs"), import("shiki/themes/github-dark.mjs")],
-    langs: [
-      import("shiki/langs/ts.mjs"),
-      import("shiki/langs/tsx.mjs"),
-      import("shiki/langs/js.mjs"),
-      import("shiki/langs/jsx.mjs"),
-      import("shiki/langs/json.mjs"),
-      import("shiki/langs/css.mjs"),
-      import("shiki/langs/html.mjs"),
-      import("shiki/langs/md.mjs"),
-      import("shiki/langs/yaml.mjs"),
-      import("shiki/langs/sh.mjs"),
-      import("shiki/langs/go.mjs"),
-      import("shiki/langs/py.mjs"),
-      import("shiki/langs/sql.mjs"),
-      import("shiki/langs/diff.mjs"),
-    ],
-  });
+  const highlighter = await sharedHighlighter();
   return sanitizedPipeline()
     .use(isolateDiagrams)
     .use(limitHighlighting, highlighter.getLoadedLanguages())

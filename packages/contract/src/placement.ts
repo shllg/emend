@@ -29,6 +29,9 @@ export const PlacementLocation = z.discriminatedUnion("kind", [
       end: z.int().positive(),
     })
     .refine((range) => range.end >= range.start, { path: ["end"], message: "line end must be at least start" }),
+  z
+    .object({ kind: z.literal("source-lines"), path: FilePath, start: z.int().positive(), end: z.int().positive() })
+    .refine((range) => range.end >= range.start, { path: ["end"], message: "line end must be at least start" }),
   FileTarget,
   TopicTarget,
   ReviewTarget,

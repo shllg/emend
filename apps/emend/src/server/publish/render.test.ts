@@ -1,5 +1,11 @@
 import { LIMITS, type PublishRequest } from "@emend/contract";
-import { type Block, blockHash, renderMarkdown } from "@emend/core";
+import {
+  type Block,
+  blockHash,
+  HIGHLIGHT_SOURCE_BYTES,
+  HIGHLIGHT_SOURCE_REVISION_BYTES,
+  renderMarkdown,
+} from "@emend/core";
 import { expect, test, vi } from "vitest";
 import { WorkTimeout } from "./executor.ts";
 import { renderRevision } from "./render.ts";
@@ -330,3 +336,77 @@ test("shared heading lists share their lookup map across paths", async () => {
   const work = execute.mock.calls.find(([work]) => work.kind === "writeup")?.[0];
   expect(work?.kind === "writeup" && work.docs?.get("a.md")).toBe(work?.kind === "writeup" && work.docs?.get("b.md"));
 });
+
+test("source aliases reuse one render per language and highlight mode", async () => {
+  const paths = Array.from({ length: 6 }, (_, i) => `alias-${i}.ts`);
+  paths.push("alias.js");
+  const source = `//${"x".repeat(256 * 1024 - 3)}\n`;
+  const stored = new Map<string, Buffer>();
+  const execute = vi.fn(executeWork);
+  const result = await renderRevision(
+    input(paths),
+    execute,
+    async () => new TextEncoder().encode(source).buffer,
+    async (bytes) => {
+      const key = String(stored.size);
+      stored.set(key, bytes);
+      return key;
+    },
+  );
+  expect(result.unrendered).toEqual([]);
+  const jobs = execute.mock.calls.flatMap(([work]) => (work.kind === "source" ? [work] : []));
+  expect(jobs.map(({ path, highlight }) => ({ path, highlight }))).toEqual([
+    { path: "alias-0.ts", highlight: true },
+    { path: "alias-4.ts", highlight: false },
+    { path: "alias.js", highlight: false },
+  ]);
+  const doc = (path: string) => JSON.parse(stored.get(result.sourceBlobs.get(path) ?? "")?.toString() ?? "null");
+  expect(doc("alias-0.ts").language).toBe("ts");
+  expect(doc("alias-4.ts")).toEqual({ language: "text", lines: [[{ text: source.slice(0, -1) }]] });
+  expect(result.sourceBlobs.get("alias-0.ts")).toBe(result.sourceBlobs.get("alias-3.ts"));
+  expect(result.sourceBlobs.get("alias-4.ts")).toBe(result.sourceBlobs.get("alias-5.ts"));
+});
+
+test.each(["failure", "timeout"])(
+  "failed source highlighting still consumes the revision budget: %s",
+  async (reason) => {
+    const attempts = Math.floor(HIGHLIGHT_SOURCE_REVISION_BYTES / HIGHLIGHT_SOURCE_BYTES);
+    const body = input(Array.from({ length: attempts + 3 }, (_, i) => `source-${i}.ts`));
+    const sources = new Map<string, ArrayBuffer>();
+    for (const [index, file] of body.files.entries()) {
+      file.newBlob = index.toString(16).padStart(64, "0");
+      sources.set(
+        file.newBlob,
+        new TextEncoder().encode(`//${String(index).padEnd(HIGHLIGHT_SOURCE_BYTES - 3, "x")}\n`).buffer,
+      );
+    }
+    // Failed aliases reuse the negative cache without dispatching or spending again.
+    const first = body.files[0];
+    if (!first) throw new Error("missing source");
+    body.files.splice(1, 0, { ...first, path: "alias.ts" });
+    const execute = vi.fn(async (work: Parameters<typeof executeWork>[0]) => {
+      if (work.kind === "source" && work.highlight)
+        throw reason === "timeout" ? new WorkTimeout() : new Error("synthetic failure");
+      return executeWork(work);
+    });
+    const result = await renderRevision(
+      body,
+      execute,
+      async (hash) => {
+        const source = sources.get(hash);
+        if (!source) throw new Error("missing source");
+        return source;
+      },
+      async () => "stored",
+    );
+    const jobs = execute.mock.calls.flatMap(([work]) => (work.kind === "source" ? [work] : []));
+    const highlighted = jobs.filter((work) => work.highlight);
+    expect(highlighted).toHaveLength(attempts);
+    expect(highlighted.reduce((sum, work) => sum + work.source.byteLength, 0)).toBeLessThanOrEqual(
+      HIGHLIGHT_SOURCE_REVISION_BYTES,
+    );
+    expect(jobs.filter((work) => !work.highlight)).toHaveLength(3);
+    expect(result.unrendered).toEqual(body.files.slice(0, attempts + 1).map((file) => file.path));
+    expect(result.sourceBlobs.size).toBe(3);
+  },
+);

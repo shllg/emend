@@ -12,7 +12,7 @@ export type ReviewSearch = {
   tab?: "writeup" | "files" | "diff" | "docs" | "comments";
   thread?: string;
   doc?: string;
-  view?: "reading" | "original";
+  view?: "reading" | "original" | "source";
 };
 export function validateReviewSearch(input: Record<string, unknown>): ReviewSearch {
   const rev = typeof input.rev === "string" || typeof input.rev === "number" ? Number(input.rev) : NaN;
@@ -26,7 +26,7 @@ export function validateReviewSearch(input: Record<string, unknown>): ReviewSear
       : undefined;
   return {
     tab,
-    view: input.view === "reading" || input.view === "original" ? input.view : undefined,
+    view: input.view === "reading" || input.view === "original" || input.view === "source" ? input.view : undefined,
     // Router merges validation over the raw search: explicitly clear rejected values.
     rev: Number.isSafeInteger(rev) && rev > 0 ? rev : undefined,
     doc: FilePath.safeParse(input.doc).data,

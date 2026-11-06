@@ -1,3 +1,4 @@
+import { docViewOf } from "./doc.ts";
 import type { ImportBundle } from "./import.ts";
 
 type Row<K extends keyof ImportBundle> = ImportBundle[K] extends (infer T)[] ? T : never;
@@ -24,6 +25,7 @@ function buildIndex(bundle: ImportBundle) {
         writeups: [] as Row<"writeups">[],
         threads: [] as Row<"threads">[],
         diffPaths: new Map<string, Row<"files">>(),
+        sourcePaths: new Map<string, Row<"files">>(),
         docPaths: new Map<string, Row<"files">>(),
         anyPaths: new Map<string, Row<"files">>(),
         topicSlugs: new Set<string>(),
@@ -40,7 +42,12 @@ function buildIndex(bundle: ImportBundle) {
     if (!r) continue;
     r.files.push(row);
     r.anyPaths.set(row.path, row);
-    (row.role === "diff" ? r.diffPaths : r.docPaths).set(row.path, row);
+    (row.role === "diff"
+      ? r.diffPaths
+      : row.role === "doc" && docViewOf(row) === "source"
+        ? r.sourcePaths
+        : r.docPaths
+    ).set(row.path, row);
   }
   for (const row of bundle.writeups) revisions.get(row.revisionId)?.writeups.push(row);
   for (const row of bundle.threads) revisions.get(row.createdRevisionId)?.threads.push(row);

@@ -103,7 +103,8 @@
     background-color: var(--shiki-light-bg, var(--bg-sunken));
   }
   .em-prose .shiki,
-  .em-prose .shiki span {
+  .em-prose .shiki span,
+  .em-source .em-source-code span {
     color: var(--shiki-light, inherit);
   }
   @media (prefers-color-scheme: dark) {
@@ -111,7 +112,8 @@
       background-color: var(--shiki-dark-bg, var(--bg-sunken));
     }
     .em-prose .shiki,
-    .em-prose .shiki span {
+    .em-prose .shiki span,
+    .em-source .em-source-code span {
       color: var(--shiki-dark, inherit);
     }
   }
@@ -119,7 +121,8 @@
     background-color: var(--shiki-dark-bg, var(--bg-sunken));
   }
   [data-theme="dark"] .em-prose .shiki,
-  [data-theme="dark"] .em-prose .shiki span {
+  [data-theme="dark"] .em-prose .shiki span,
+  [data-theme="dark"] .em-source .em-source-code span {
     color: var(--shiki-dark, inherit);
   }
   .em-prose blockquote {

@@ -3084,8 +3084,10 @@ function htmlReadingFixture() {
   currentRevision.files = [];
 }
 
-test.each(["reading", "original", "invalid", "", 1, null])("C3 validates view %j", (view) => {
-  expect(validateReviewSearch({ view }).view).toBe(view === "reading" || view === "original" ? view : undefined);
+test.each(["reading", "original", "source", "invalid", "", 1, null])("C3 validates view %j", (view) => {
+  expect(validateReviewSearch({ view }).view).toBe(
+    view === "reading" || view === "original" || view === "source" ? view : undefined,
+  );
 });
 
 test.each([390, 1280])("C3 HTML fills the pane with app-owned controls and drawers at %s px", async (pixels) => {

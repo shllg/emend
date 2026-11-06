@@ -198,7 +198,10 @@ Each ref must be unique within its topic.
 
 Read [the manifest example](references/manifest.md) before creating the manifest. Replace the
 synthetic values with the review's paths, commit hashes and text. Docs use `source` only when
-their local filename differs from the published path.
+their local filename differs from the published path. Choose each doc's optional `view`:
+`"rendered"` (the default for Markdown and HTML) or `"source"` for literal text with line comments.
+Any other UTF-8 text file is a doc shown as source with line comments. One path may appear once
+rendered and once as source; you decide per file.
 When the work has a pull request, fixes an issue or opened one, add each URL to `links` with a
 short label such as `PR #42`. Use only URLs you have seen; never guess one. The review header
 shows them. When emend knows the repository's web address (see `repoUrl` in the manifest

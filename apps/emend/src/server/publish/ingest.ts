@@ -1,6 +1,13 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { LIMITS, type PublishRequest, type PublishResponse } from "@emend/contract";
-import { composeRenames } from "@emend/core";
+import {
+  type DocView,
+  docViewOf,
+  isRenderedHtmlDoc,
+  LIMITS,
+  type PublishRequest,
+  type PublishResponse,
+} from "@emend/contract";
+import { composeRenames, decodeText } from "@emend/core";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import type { Db, Queries } from "../../db/client.ts";
 import { DuplicateReviewKeyError } from "../../db/repo/reviews.ts";
@@ -23,7 +30,7 @@ import { yieldToLoop } from "../pacing.ts";
 import { insertChangedBlocks } from "./changed.ts";
 import { WorkTimeout, workerExecutor } from "./executor.ts";
 import { abortable, checkPublishSignal, PublishAborted, publishSlots } from "./lifecycle.ts";
-import { mediaType } from "./media.ts";
+import { fileMediaType } from "./media.ts";
 import { validateNoteRanges } from "./notes.ts";
 import { renderRevision } from "./render.ts";
 import { revisionTransition } from "./transitions.ts";
@@ -197,7 +204,7 @@ async function computePublish(
         }
         const location = latest?.placement.location ?? thread.target;
         const anchor =
-          location.kind === "lines"
+          location.kind === "lines" || location.kind === "source-lines"
             ? await q
                 .select({ oldBlob: files.oldBlob, newBlob: files.newBlob })
                 .from(files)
@@ -205,7 +212,8 @@ async function computePublish(
                   and(
                     eq(files.ownerId, ownerId),
                     eq(files.revisionId, from.id),
-                    eq(files.role, "diff"),
+                    eq(files.role, location.kind === "source-lines" ? "doc" : "diff"),
+                    eq(files.mediaType, "text/plain"),
                     eq(files.path, location.path),
                     isNull(files.flag),
                   ),
@@ -248,9 +256,7 @@ async function computePublish(
       throw new ApiError("too_large");
     // Inspect metadata before reading any referenced blob, including cumulative HTML assets.
     for (const file of input.files) {
-      const type = mediaType(file.path);
-      if (file.role === "doc" && type !== "text/html" && type !== "text/markdown")
-        throw new ApiError("invalid_request");
+      const type = fileMediaType(file);
       const limit =
         file.role === "diff"
           ? LIMITS.diffSideBytes
@@ -268,7 +274,7 @@ async function computePublish(
     }
     const assets = new Map(input.files.filter((file) => file.role === "asset").map((file) => [file.path, file]));
     for (const file of input.files)
-      if (file.role === "doc" && mediaType(file.path) === "text/html") {
+      if (isRenderedHtmlDoc(file)) {
         let size = sizes.get(file.newBlob ?? "") ?? 0;
         for (const path of file.assets ?? []) {
           const asset = assets.get(path);
@@ -276,6 +282,19 @@ async function computePublish(
           size += sizes.get(asset.newBlob) ?? 0;
         }
         if (size > LIMITS.htmlDocWithAssetsBytes) throw new ApiError("too_large");
+      }
+    const checkedSources = new Set<string>();
+    if (!prepared)
+      for (const file of input.files) {
+        if (file.role !== "doc" || docViewOf(file) !== "source" || !file.newBlob || checkedSources.has(file.newBlob))
+          continue;
+        const bytes = await read(file.newBlob);
+        try {
+          decodeText(new Uint8Array(bytes));
+          checkedSources.add(file.newBlob);
+        } catch {
+          throw new ApiError("invalid_request");
+        }
       }
     if (!prepared) await validateNoteRanges(input.files, read, execute);
     prepared ??= await renderRevision(
@@ -285,7 +304,7 @@ async function computePublish(
       (bytes) => deps.blobs.put(ownerId, bytes, "application/json"),
       deps.signal,
     );
-    const { ids, renderedBlob, sourceBlob, docBlobs, unrendered, metadata } = prepared;
+    const { ids, renderedBlob, sourceBlob, docBlobs, unrendered, metadata, sourceBlobs, sourceMetadata } = prepared;
     const sideTexts = new Map<string, ArrayBuffer>();
     const sideText = async (sha: string) => {
       let value = sideTexts.get(sha);
@@ -295,6 +314,7 @@ async function computePublish(
       }
       return value;
     };
+    const sources = new Map<string, string>();
     const docs: Extract<Work, { kind: "place" }>["docs"] = new Map();
     const docTargets = new Set(
       threadSnapshots.flatMap(({ thread, latest }) => {
@@ -304,7 +324,16 @@ async function computePublish(
     );
     for (const file of input.files)
       if (file.role === "doc" && file.newBlob) {
-        if (mediaType(file.path) === "text/html") {
+        if (docViewOf(file) === "source") {
+          if (
+            threadSnapshots.some(
+              ({ thread }) => thread.target.kind === "source-lines" && thread.target.path === file.path,
+            )
+          ) {
+            await sideText(file.newBlob);
+            sources.set(file.path, file.newBlob);
+          }
+        } else if (isRenderedHtmlDoc(file)) {
           if (docTargets.has(file.path)) {
             await sideText(file.newBlob);
             docs.set(file.path, { kind: "html", hash: file.newBlob });
@@ -346,6 +375,10 @@ async function computePublish(
     const carriedRows = new Map<string, NonNullable<typeof placements.$inferSelect.carried>>();
     for (const { thread, latest, from, carried, anchor } of threadSnapshots) {
       let last: WorkLast = latest?.placement.location ? { location: latest.placement.location } : null;
+      if (thread.target.kind === "source-lines") {
+        const location = last?.location.kind === "source-lines" ? last.location : thread.target;
+        last = { location, sides: await sides(anchor, "new") };
+      }
       if (thread.target.kind === "lines") {
         const location = last?.location.kind === "lines" ? last.location : thread.target;
         last = { location, sides: await sides(anchor, location.side) };
@@ -388,6 +421,7 @@ async function computePublish(
           kind: "place",
           writeup: needsWriteup ? renderedBlob : null,
           docs,
+          sources,
           texts: sideTexts,
           files: currentSides,
           topics: new Set(input.topics.map((t) => t.slug)),
@@ -405,7 +439,8 @@ async function computePublish(
       const previousBlobs: Extract<Work, { kind: "changed" }>["previous"] = [];
       if (writeup) previousBlobs.push({ format: "writeup", bytes: await read(writeup.renderedBlob) });
       for (const file of getFiles(previous.id))
-        if (file.renderedBlob) previousBlobs.push({ format: "doc", bytes: await read(file.renderedBlob) });
+        if (file.renderedBlob && file.mediaType === "text/markdown")
+          previousBlobs.push({ format: "doc", bytes: await read(file.renderedBlob) });
       // Rendering survives retries. Copy only the packed IDs before transferring them;
       // previous rendered bytes are read fresh from the current snapshot each attempt.
       const changed = await execute({
@@ -470,8 +505,8 @@ async function computePublish(
           sourceBlob,
           renderedBlob,
         });
-        const fileKey = (file: { role: string; path: string }) =>
-          `${file.role === "diff" ? "diff" : "doc"}:${file.path}`;
+        const fileKey = (file: { role: string; path: string; view?: DocView }) =>
+          `${file.role === "diff" ? "diff" : file.role === "doc" && docViewOf(file) === "source" ? "source" : "doc"}:${file.path}`;
         const ids = new Map(input.files.map((file) => [fileKey(file), randomUUID()]));
         const ordered = input.files
           .map((file, ord) => ({ file, ord }))
@@ -491,14 +526,23 @@ async function computePublish(
             status: file.status,
             topicSlug: file.topic,
             ord,
-            mediaType: file.role === "diff" ? "text/plain" : mediaType(file.path),
+            mediaType: fileMediaType(file),
             oldBlob: file.oldBlob,
             newBlob: file.newBlob,
             flag: file.flag,
             parentDocId: file.parent ? ids.get(`doc:${file.parent}`) : null,
-            title: file.role === "doc" ? (metadata.get(file.path)?.title ?? null) : null,
-            headings: file.role === "doc" ? (metadata.get(file.path)?.headings ?? null) : null,
-            renderedBlob: file.role === "doc" ? (docBlobs.get(file.path) ?? null) : null,
+            title:
+              file.role === "doc"
+                ? ((docViewOf(file) === "source" ? sourceMetadata : metadata).get(file.path)?.title ?? null)
+                : null,
+            headings:
+              file.role === "doc"
+                ? ((docViewOf(file) === "source" ? sourceMetadata : metadata).get(file.path)?.headings ?? null)
+                : null,
+            renderedBlob:
+              file.role === "doc"
+                ? ((docViewOf(file) === "source" ? sourceBlobs : docBlobs).get(file.path) ?? null)
+                : null,
           });
           for (const [noteOrd, note] of (file.notes ?? []).entries())
             await q.insert(agentNotes).values({
@@ -516,7 +560,7 @@ async function computePublish(
         }
         let associations: (typeof docAssets.$inferInsert)[] = [];
         for (const file of input.files) {
-          if (file.role !== "doc" || mediaType(file.path) !== "text/html") continue;
+          if (!isRenderedHtmlDoc(file)) continue;
           const docId = ids.get(fileKey(file));
           if (!docId) throw new Error("Missing doc id");
           for (const path of file.assets ?? []) {

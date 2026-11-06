@@ -13,6 +13,7 @@ declare global {
   }
 
   class TextDecoder {
+    constructor(label?: "utf-8", options?: { fatal?: boolean; ignoreBOM?: boolean });
     decode(input: Uint8Array): string;
   }
 

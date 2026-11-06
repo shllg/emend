@@ -1,10 +1,17 @@
-import { LIMITS, type PublishRequest } from "@emend/contract";
-import { cleanDocTitle, type DocLinks, headingLookups } from "@emend/core";
+import { docViewOf, isRenderedHtmlDoc, LIMITS, type PublishRequest } from "@emend/contract";
+import {
+  cleanDocTitle,
+  type DocLinks,
+  decodeText,
+  HIGHLIGHT_SOURCE_BYTES,
+  HIGHLIGHT_SOURCE_REVISION_BYTES,
+  headingLookups,
+  sourceLanguage,
+} from "@emend/core";
 import { ApiError } from "../http/errors.ts";
 import { yieldToLoop } from "../pacing.ts";
 import { WorkTimeout } from "./executor.ts";
 import { checkPublishSignal } from "./lifecycle.ts";
-import { mediaType } from "./media.ts";
 import type { DocMetadata, Executor, RenderedBytes } from "./work.ts";
 
 export async function renderRevision(
@@ -17,18 +24,21 @@ export async function renderRevision(
 ) {
   // Two passes let forward links resolve headings before any writeup/doc is rendered.
   // The worker parses hostile sources; only bounded metadata crosses back to the server.
+  const sourceMetadata = new Map<string, DocMetadata>();
+  const sourceBlobs = new Map<string, string>();
   const metadata = new Map<string, DocMetadata>();
   const metadataCache = new Map<string, DocMetadata>();
   let metadataBytes = 0;
   for (const file of input.files) {
     checkPublishSignal(signal);
     if (file.role !== "doc") continue;
-    const format = mediaType(file.path) === "text/html" ? "html" : "markdown";
+    const source = docViewOf(file) === "source";
+    const format = isRenderedHtmlDoc(file) ? "html" : "markdown";
     const key = `${format}:${file.newBlob}`;
-    let own = metadataCache.get(key);
+    let own = source ? { headings: [] } : metadataCache.get(key);
     if (!own) {
       own = { headings: [] };
-      if (file.newBlob)
+      if (file.newBlob && !source)
         try {
           const result = await execute({ kind: "doc-metadata", format, bytes: await read(file.newBlob) });
           if (result.kind !== "doc-metadata") throw new Error("wrong result");
@@ -47,7 +57,7 @@ export async function renderRevision(
     metadataBytes += size;
     onRendered?.(size);
     if (metadataBytes > LIMITS.renderedBytesPerRevision) throw new ApiError("too_large");
-    metadata.set(file.path, doc);
+    (source ? sourceMetadata : metadata).set(file.path, doc);
     await yieldToLoop("publish-render");
   }
   const lookupCache = new Map<DocMetadata["headings"], ReadonlyMap<string, string>>();
@@ -121,10 +131,89 @@ export async function renderRevision(
     const doc = metadata.get(path);
     if (doc) doc.headings = [];
   };
+  const sourceCounts = new Map<string, { lines: number; bytes: number }>();
+  const sourceCache = new Map<string, { blob: string; bytes: number } | null>();
+  let sourceLines = 0;
+  let sourceBytes = 0;
+  let highlightBytes = 0;
   let exhausted = false;
   for (const file of input.files) {
     checkPublishSignal(signal);
-    if (file.role !== "doc" || !file.newBlob || mediaType(file.path) !== "text/markdown") continue;
+    if (file.role !== "doc" || !file.newBlob || isRenderedHtmlDoc(file)) continue;
+    if (docViewOf(file) === "source") {
+      if (exhausted) {
+        unrendered.push(file.path);
+        continue;
+      }
+      let key: string | undefined;
+      try {
+        let content: ArrayBuffer | undefined;
+        let size = sourceCounts.get(file.newBlob);
+        if (!size) {
+          content = await read(file.newBlob);
+          const text = decodeText(new Uint8Array(content));
+          let lines = text.length && !text.endsWith("\n") ? 1 : 0;
+          for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) lines++;
+          size = { lines, bytes: Buffer.byteLength(text) };
+          sourceCounts.set(file.newBlob, size);
+        }
+        if (
+          sourceLines + size.lines > LIMITS.sourceLinesPerRevision ||
+          sourceBytes + size.bytes > LIMITS.sourceBytesPerRevision
+        ) {
+          unrendered.push(file.path);
+          continue;
+        }
+        const language = sourceLanguage(file.path);
+        const highlight =
+          language !== "text" &&
+          size.bytes <= HIGHLIGHT_SOURCE_BYTES &&
+          highlightBytes + size.bytes <= HIGHLIGHT_SOURCE_REVISION_BYTES;
+        key = `${language}:${file.newBlob}:${highlight}`;
+        let shared = sourceCache.get(key);
+        if (shared === null) {
+          unrendered.push(file.path);
+          continue;
+        }
+        // Charge before dispatch: failed/timed-out work consumes the budget too.
+        // Successful aliases still count per row, even when reusing cached tokens.
+        if (highlight) highlightBytes += size.bytes;
+        let json: Buffer | undefined;
+        if (!shared) {
+          const result = await execute({
+            kind: "source",
+            path: file.path,
+            source: content ?? (await read(file.newBlob)),
+            highlight,
+          });
+          if (result.kind !== "source") throw new Error("wrong result");
+          json = Buffer.from(result.bytes);
+        }
+        const renderedSize = shared?.bytes ?? json?.length ?? 0;
+        onRendered?.(renderedSize);
+        if (bytes + renderedSize > LIMITS.renderedBytesPerRevision) {
+          exhausted = true;
+          unrendered.push(file.path);
+          continue;
+        }
+        bytes += renderedSize;
+        sourceLines += size.lines;
+        sourceBytes += size.bytes;
+        await yieldToLoop("publish-render");
+        checkPublishSignal(signal);
+        if (!shared && json) {
+          shared = { blob: await put(json), bytes: renderedSize };
+          sourceCache.set(key, shared);
+        }
+        if (shared) sourceBlobs.set(file.path, shared.blob);
+      } catch (error) {
+        checkPublishSignal(signal);
+        if (error instanceof ApiError) throw error;
+        if (key) sourceCache.set(key, null);
+        unrendered.push(file.path);
+      }
+      continue;
+    }
     if (exhausted) {
       markUnrendered(file.path);
       continue;
@@ -171,5 +260,5 @@ export async function renderRevision(
     }
     ids.push(result.ids);
   }
-  return { ids, renderedBlob, sourceBlob, docBlobs, count, unrendered, metadata };
+  return { ids, renderedBlob, sourceBlob, docBlobs, count, unrendered, metadata, sourceMetadata, sourceBlobs };
 }

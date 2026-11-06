@@ -33,9 +33,10 @@ export function targetLabel(target: Target, topics: TopicMeta[] = []) {
     case "doc-span":
     case "html-span":
       return { label: target.path, icon: TextSelect };
+    case "source-lines":
     case "lines":
       return {
-        label: `${target.path} · ${plural(target.end - target.start + 1, "line")} ${target.start === target.end ? target.start : `${target.start}–${target.end}`}${target.side === "old" ? " (old)" : ""}`,
+        label: `${target.path} · ${plural(target.end - target.start + 1, "line")} ${target.start === target.end ? target.start : `${target.start}–${target.end}`}${target.kind === "source-lines" ? " (source)" : target.side === "old" ? " (old)" : ""}`,
         icon: FileCode,
       };
     case "file":

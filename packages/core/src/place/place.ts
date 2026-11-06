@@ -13,6 +13,7 @@ import { placeSpan } from "./span.ts";
 export type PlaceContext = {
   writeup: Block[];
   docs: Map<string, { kind: "markdown"; blocks: Block[] } | { kind: "html"; text: string | null }>;
+  sources?: Map<string, { text: string; hash?: string }>;
   files: Map<string, FileSides>;
   renamedFrom: Map<string, string | null>;
   topics: Set<string>;
@@ -42,6 +43,15 @@ export function placeThread(target: Target, ctx: PlaceContext): Placement {
         return ctx.files.has(path)
           ? { status: "placed", location: { kind: "file", path } }
           : { status: "unplaced", reason: "file-gone" };
+      }
+      if (target.kind === "source-lines") {
+        const previous = last?.kind === "source-lines" ? last : target;
+        const source = ctx.sources?.get(path);
+        return placeLines(
+          { ...target, path },
+          { start: previous.start, end: previous.end, sides: ctx.last?.sides ?? {} },
+          source ? { newText: source.text, newHash: source.hash } : null,
+        );
       }
       if (target.kind === "lines") {
         const previous = last?.kind === "lines" && last.side === target.side ? last : target;

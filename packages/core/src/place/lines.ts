@@ -1,4 +1,4 @@
-import type { LinesTarget, Placement } from "@emend/contract";
+import type { LinesTarget, Placement, SourceLinesTarget } from "@emend/contract";
 import { lineMap, splitLines } from "./linemap.ts";
 import { firstTwoMatches } from "./search.ts";
 
@@ -13,18 +13,27 @@ function matches(lines: string[], start: number, quote: string[]): boolean {
   );
 }
 
-export function placeLines(target: LinesTarget, last: LastLines, next: FileSides | null): Placement {
+export function placeLines(
+  target: LinesTarget | SourceLinesTarget,
+  last: LastLines,
+  next: FileSides | null,
+): Placement {
   if (next === null) return { status: "unplaced", reason: "file-gone" };
-  const hashKey = target.side === "old" ? "oldHash" : "newHash";
-  const textKey = target.side === "old" ? "oldText" : "newText";
+  const side = target.kind === "lines" ? target.side : "new";
+  const hashKey = side === "old" ? "oldHash" : "newHash";
+  const textKey = side === "old" ? "oldText" : "newText";
   const previousText = last.sides[textKey];
   const nextText = next[textKey];
   if (nextText === undefined) return { status: "unplaced", reason: "file-gone" };
   const lines = splitLines(nextText);
-  const placed = (start: number): Placement => ({
-    status: "placed",
-    location: { kind: "lines", path: target.path, side: target.side, start, end: start + target.lines.length - 1 },
-  });
+  const placed = (start: number): Placement => {
+    const range = { path: target.path, start, end: start + target.lines.length - 1 };
+    return {
+      status: "placed",
+      location:
+        target.kind === "lines" ? { kind: "lines", side: target.side, ...range } : { kind: "source-lines", ...range },
+    };
+  };
   const validRange = last.start > 0 && last.end - last.start + 1 === target.lines.length;
 
   // Tier 0: even equal hashes must read the quote back from the new side.

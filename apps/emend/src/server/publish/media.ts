@@ -1,4 +1,5 @@
 import { extname } from "node:path";
+import { type DocView, docViewOf, isRenderedHtmlDoc } from "@emend/contract";
 export function mediaType(path: string): string {
   const types: Record<string, string> = {
     md: "text/markdown",
@@ -31,4 +32,10 @@ export function mediaType(path: string): string {
   };
   const extension = extname(path).slice(1).toLowerCase();
   return Object.hasOwn(types, extension) ? (types[extension] ?? "text/plain") : "text/plain";
+}
+
+export function fileMediaType(file: { role: string; path: string; view?: DocView }): string {
+  if (file.role === "diff" || (file.role === "doc" && docViewOf(file) === "source")) return "text/plain";
+  if (file.role === "doc") return isRenderedHtmlDoc(file) ? "text/html" : "text/markdown";
+  return mediaType(file.path);
 }

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AgentNoteView, validateAgentNotes } from "./agent-note.ts";
-import { DocTitle } from "./doc.ts";
+import { DocTitle, DocView, isRenderedHtmlDoc, validateDocView } from "./doc.ts";
 import { indexImportBundle } from "./import-index.ts";
 import { LIMITS } from "./limits.ts";
 import { PublishRequest, Sha256 } from "./publish.ts";
@@ -43,24 +43,27 @@ const ImportRows = z.object({
     .min(1),
   topics: z.array(TopicMeta.extend(revisionRow)),
   files: z.array(
-    z.object({
-      ...revisionRow,
-      path: FilePath,
-      oldPath: FilePath.nullable(),
-      role: FileRole,
-      status: FileStatus.nullable(),
-      topicSlug: TopicSlug.nullable(),
-      ord: z
-        .int()
-        .min(0)
-        .max(LIMITS.filesPerRevision - 1),
-      oldBlob: Sha256.nullable(),
-      newBlob: Sha256.nullable(),
-      renderedBlob: Sha256.nullable(),
-      title: DocTitle.nullable().optional(),
-      flag: FileFlag.nullable(),
-      parentDocId: id.nullable(),
-    }),
+    z
+      .object({
+        ...revisionRow,
+        path: FilePath,
+        oldPath: FilePath.nullable(),
+        role: FileRole,
+        status: FileStatus.nullable(),
+        topicSlug: TopicSlug.nullable(),
+        ord: z
+          .int()
+          .min(0)
+          .max(LIMITS.filesPerRevision - 1),
+        oldBlob: Sha256.nullable(),
+        newBlob: Sha256.nullable(),
+        renderedBlob: Sha256.nullable(),
+        title: DocTitle.nullable().optional(),
+        view: DocView.optional(),
+        flag: FileFlag.nullable(),
+        parentDocId: id.nullable(),
+      })
+      .superRefine(validateDocView),
   ),
   docAssets: z.array(z.object({ revisionId: id, docId: id, assetId: id })),
   agentNotes: z
@@ -176,7 +179,7 @@ export const ImportBundle = BundleRows.superRefine((bundle, ctx) => {
       doc?.revisionId !== a.revisionId ||
       asset?.revisionId !== a.revisionId ||
       doc?.role !== "doc" ||
-      !/\.html?$/i.test(doc.path) ||
+      !isRenderedHtmlDoc(doc) ||
       asset?.role !== "asset"
     )
       issue("invalid doc asset association");
@@ -185,10 +188,7 @@ export const ImportBundle = BundleRows.superRefine((bundle, ctx) => {
     const parent = f.parentDocId === null ? undefined : files.get(f.parentDocId);
     if (
       f.parentDocId !== null &&
-      (f.role !== "asset" ||
-        parent?.role !== "doc" ||
-        parent.revisionId !== f.revisionId ||
-        !/\.html?$/i.test(parent.path))
+      (f.role !== "asset" || parent?.role !== "doc" || parent.revisionId !== f.revisionId || !isRenderedHtmlDoc(parent))
     )
       issue("invalid parent doc");
   }
@@ -241,10 +241,9 @@ export function importPublishInput(
       topic: f.topicSlug ?? undefined,
       notes: index.notesByFile.get(f.id)?.toSorted((a, b) => a.ord - b.ord),
       parent: f.parentDocId === null ? undefined : index.files.get(f.parentDocId)?.path,
-      assets:
-        f.role === "doc" && /\.html?$/i.test(f.path)
-          ? (index.assetsByDoc.get(f.id) ?? []).map((a) => index.files.get(a.assetId)?.path)
-          : undefined,
+      assets: isRenderedHtmlDoc(f)
+        ? (index.assetsByDoc.get(f.id) ?? []).map((a) => index.files.get(a.assetId)?.path)
+        : undefined,
     })),
   };
 }

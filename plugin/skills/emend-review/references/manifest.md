@@ -136,7 +136,10 @@ It must end in the same kind of extension as `path`.
 A doc's `source` must be inside the repository's worktree or inside a folder the user listed in
 `docRoots` in emend's own configuration.
 When publish prints `source is outside the allowed doc roots`, stop and ask the user to run `emend config add docRoots <folder>` for that folder, or to move the doc into the repository. Never run `emend config` or edit emend's configuration yourself.
-Markdown docs render as safe blocks. Use Markdown for the writeup, not an HTML page.
+A doc's optional `view` is `"rendered"` or `"source"`. Markdown and HTML render by default;
+use `"source"` to read their literal text with line comments. Any other UTF-8 text file is a doc
+shown as source with line comments. One path may appear once rendered and once as source.
+Choose the view per file. Markdown renders as safe blocks; the writeup stays Markdown.
 
 Set optional `main` to `"writeup"` or a declared doc path to choose the opening page, even with an empty writeup.
 Without `main`, the app opens a nonempty writeup, then the first doc in manifest order, then the diff, or Writeup if nothing exists.

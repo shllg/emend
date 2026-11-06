@@ -29,6 +29,8 @@ export const LIMITS = {
   revisionBytes: 268435456,
   blocksPerRevision: 100000,
   renderedBytesPerRevision: 268435456,
+  sourceLinesPerRevision: 200000,
+  sourceBytesPerRevision: 16777216,
   filesPerRevision: 10000,
   mediaPerRevision: 50,
   agentNotesPerFile: 8,

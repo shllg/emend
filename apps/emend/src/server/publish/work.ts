@@ -13,6 +13,7 @@ import {
   blockHash,
   composeRenames,
   type DocLinks,
+  decodeText,
   docText,
   type FileSides,
   htmlHeadings,
@@ -25,6 +26,7 @@ import {
   renderCommentHtml,
   renderDoc,
   renderMetadataBlocks,
+  renderSource,
   renderWriteup,
   resectionBlocks,
 } from "@emend/core";
@@ -38,6 +40,7 @@ export type PlacementDoc = PlaceContext["docs"] extends Map<string, infer T> ? T
 /** Import caches opaque worker output; parsed content never crosses by structured clone. */
 export type EncodedPlacementDoc = { bytes: ArrayBuffer; textBytes: number; encodedBytes: number };
 export type Work =
+  | { kind: "source"; path: string; source: ArrayBuffer; highlight?: boolean }
   | { kind: "doc-metadata"; format: "html" | "markdown"; bytes: ArrayBuffer }
   | { kind: "line-count"; bytes: ArrayBuffer }
   | { kind: "writeup-source"; bytes: ArrayBuffer }
@@ -59,6 +62,7 @@ export type Work =
       kind: "place";
       writeup: string | null;
       docs: Map<string, { kind: "markdown"; hash: string | null } | { kind: "html"; hash: string }>;
+      sources?: Map<string, string>;
       parsedDocs?: Map<string, EncodedPlacementDoc>;
       parsedWriteup?: EncodedPlacementDoc;
       texts: Map<string, ArrayBuffer>;
@@ -78,7 +82,7 @@ export type WorkResult =
   | { kind: "line-count"; count: number }
   | { kind: "writeup-source"; source: WriteupInput; links?: PublishLinks; repoUrl?: string }
   | ({ kind: "placement-doc" } & EncodedPlacementDoc)
-  | ({ kind: "writeup" | "doc" } & RenderedBytes)
+  | ({ kind: "writeup" | "doc" | "source" } & RenderedBytes)
   | { kind: "changed"; bytes: ArrayBuffer }
   | { kind: "comment-md"; html: (string | null)[] }
   | { kind: "place"; placements: { id: string; placement: Placement }[] };
@@ -105,6 +109,15 @@ export function serializeRendered(value: RenderedWriteup | Block[], pathDependen
 }
 export type Executor = (work: Work) => Promise<WorkResult>;
 export const executeWork: Executor = async (work) => {
+  if (work.kind === "source") {
+    const content = await renderSource(decodeText(new Uint8Array(work.source)), work.path, work.highlight);
+    return {
+      kind: "source",
+      bytes: new TextEncoder().encode(JSON.stringify(content)).buffer,
+      ids: new ArrayBuffer(0),
+      count: 0,
+    };
+  }
   if (work.kind === "doc-metadata") {
     if (work.format === "html")
       return {
@@ -222,10 +235,18 @@ export const executeWork: Executor = async (work) => {
     decoded.set(hash, value);
     return value;
   };
-  const sides = (value: SharedSides): FileSides =>
+  const sourceText = (hash: string) => {
+    const bytes = work.texts.get(hash);
+    if (!bytes) throw new Error("Missing source text");
+    return decodeText(new Uint8Array(bytes));
+  };
+  const sources = new Map([...(work.sources ?? [])].map(([path, hash]) => [path, { text: sourceText(hash), hash }]));
+  const sides = (value: SharedSides, source = false): FileSides =>
     ({
       ...(value.oldHash ? { oldHash: value.oldHash, oldText: text(value.oldHash) } : {}),
-      ...(value.newHash ? { newHash: value.newHash, newText: text(value.newHash) } : {}),
+      ...(value.newHash
+        ? { newHash: value.newHash, newText: source ? sourceText(value.newHash) : text(value.newHash) }
+        : {}),
     }) as FileSides;
   const htmlTexts = new Map<string, string | null>();
   for (const [path, doc] of work.docs) {
@@ -263,11 +284,17 @@ export const executeWork: Executor = async (work) => {
         placement: placeThread(target, {
           writeup,
           docs,
+          sources,
           files,
           topics: work.topics,
           last:
             thread.last && carriedLocation
-              ? { location: carriedLocation, sides: thread.last.sides ? sides(thread.last.sides) : undefined }
+              ? {
+                  location: carriedLocation,
+                  sides: thread.last.sides
+                    ? sides(thread.last.sides, thread.target.kind === "source-lines")
+                    : undefined,
+                }
               : null,
           renamedFrom: thread.renames.length === 1 ? (thread.renames[0] ?? new Map()) : composeRenames(thread.renames),
         }),

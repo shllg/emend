@@ -17,7 +17,7 @@ Also use it when the user asks to publish or share a document, or to read one on
 A document the user asks you to publish may live in the repository.
 Do not publish unasked a file the task adds to the repository, such as docs, specs or tasks.
 Do not use it for source code, for a hunk-review HTML writeup (see "Publish") or for anything the user wants kept out of emend.
-If you already wrote the document elsewhere, such as in a temporary folder, copy it into a doc root as step 1 says.
+If you wrote it elsewhere, copy it into a doc root as step 1 says.
 
 ## Steps
 
@@ -27,9 +27,9 @@ If you already wrote the document elsewhere, such as in a temporary folder, copy
    emend renders Markdown on its server: GFM tables, code colours, and ```` ```mermaid ```` fences become diagrams.
    An HTML document's own scripts never run, and nothing loads from other hosts.
    Use no CDN scripts, styles or fonts.
-   In an HTML document, keep images and styles beside the file and reference them with relative paths.
-   Markdown documents show no local images yet, so use HTML when the document needs images.
-   Keep the document out of hidden folders, because a folder publish skips dotfiles and hidden folders.
+   For HTML, keep images and styles beside the file, using relative paths.
+   Markdown shows no local images yet; use HTML for images.
+   Keep it out of hidden folders: folder publishing skips dotfiles and hidden folders.
    Tell the user the path of the file you wrote.
 2. Publish it with the command under "Publish" below.
    Stdout is the review URL alone.
@@ -45,9 +45,16 @@ If you already wrote the document elsewhere, such as in a temporary folder, copy
 
 ## Publish
 
-Run the command from the repository that holds the document.
-Or give a path under a folder the user allowed as a doc root.
-Use a short, plain title. A title that starts with `--` is refused.
+Run from the document's repository, or name a path under a doc root the user allowed.
+Use a short, plain title; titles starting with `--` are refused.
+
+`emend publish <file>` also takes any UTF-8 text file: config, script, SQL or log.
+It shows these as source with line comments. Add `--source` to show Markdown or HTML as source.
+A folder walk skips secret-looking filenames (not Markdown or HTML), binary, oversized or unreadable
+files, and folders named `secret(s)` or `credential(s)` in any case below the folder argument.
+Explicit file or folder arguments publish as named; never name a credential file or secrets folder.
+Warnings stop after 20 (`SHORTCUT_LIMITS.warnings`), then count further skips.
+Each folder argument gets a published-file count.
 
 If an emend error line mentions an agent sandbox, show the user that line and stop.
 Do not run emend another way, retry it outside the sandbox, ask for escalated permissions,

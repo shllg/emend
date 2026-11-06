@@ -8,6 +8,7 @@ test.each<Target>([
   { kind: "topic", slug: "synthetic" },
   { kind: "file", path: "文.md" },
   { kind: "lines", path: "a.ts", side: "new", start: 1, end: 1, lines: ["\\".repeat(65536)], before: [], after: [] },
+  { kind: "source-lines", path: "a.ts", start: 1, end: 1, lines: ["\\".repeat(65536)], before: [], after: [] },
   { kind: "writeup-span", blockId: "overview-00000000", quote: "needle", prefix: "", suffix: "" },
   { kind: "doc-span", path: "文.md", blockId: "doc-00000000", quote: "needle", prefix: "", suffix: "" },
   { kind: "html-span", path: "a.html", quote: "needle", prefix: "", suffix: "" },

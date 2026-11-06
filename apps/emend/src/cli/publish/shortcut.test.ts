@@ -239,7 +239,7 @@ test("folder publication bundles linked docs and a referenced image, skipping in
   await f.file("bundle/details.md", "# Details\n[Back](index.html)\n");
   await f.file("bundle/image.png", "synthetic image");
   await f.file("bundle/unused.png", "unused image");
-  await f.file("bundle/notes.txt", "not a doc");
+  await f.file("bundle/notes.txt", "a text doc");
   for (const path of [
     ".git/config",
     ".hidden.md",
@@ -257,9 +257,10 @@ test("folder publication bundles linked docs and a referenced image, skipping in
     ["details.md", "doc"],
     ["index.html", "doc"],
     ["image.png", "asset"],
+    ["notes.txt", "doc"],
   ]);
   expect(capture.requests[0]?.files.find((file) => file.path === "index.html")?.assets).toEqual(["image.png"]);
-  expect(out.stderr.filter((line) => line.includes("notes.txt"))).toHaveLength(1);
+  expect(out.stderr.filter((line) => line.includes("notes.txt"))).toHaveLength(0);
   expect(out.stderr.filter((line) => line.includes("unused.png"))).toHaveLength(1);
   expect(out.stderr.join("")).not.toContain("hidden.md");
 });
@@ -383,7 +384,7 @@ test("a sparse 2 GiB doc is refused without opening or reading it", async () => 
   const result = await f.publish("huge.md");
   expect(result.code).toBe(1);
   expect(result.stdout).toEqual([]);
-  expect(result.stderr).toEqual(["emend: file exceeds its size limit\n"]);
+  expect(result.stderr).toEqual(["emend: file exceeds its size limit: huge.md\n"]);
   expect(checkedRead.mock.calls.some(([path]) => path === source)).toBe(true);
   expect(open.mock.calls.filter(([path]) => path === source)).toEqual([]);
 });
@@ -395,7 +396,7 @@ test("size limits and invalid main selections fail before creating state", async
   const large = await f.publish("plan.md");
   expect(large.code).toBe(1);
   expect(large.stdout).toEqual([]);
-  expect(large.stderr).toEqual(["emend: file exceeds its size limit\n"]);
+  expect(large.stderr).toEqual(["emend: file exceeds its size limit: plan.md\n"]);
   await f.file("plan.md");
   await f.file("other.md");
   const main = await f.publish("plan.md", "--main", "other.md");
@@ -553,7 +554,7 @@ test("thousands of unrelated files need no per-file metadata and at most 21 warn
   const f = await fixture();
   await f.file("bundle/index.md");
   for (let batch = 0; batch < 30; batch++)
-    await Promise.all(Array.from({ length: 100 }, (_, i) => f.file(`bundle/junk-${batch * 100 + i}.txt`, "unused")));
+    await Promise.all(Array.from({ length: 100 }, (_, i) => f.file(`bundle/junk-${batch * 100 + i}.png`, "unused")));
   const realpath = vi.spyOn(fs, "realpath");
   const lstat = vi.spyOn(fs, "lstat");
   await f.capture();
@@ -1065,4 +1066,310 @@ test("the opened-file callback refuses a hidden real path before content reads",
   expect(hiddenBytesRead).toBe(0);
   expect(capture.fetcher.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(false);
   expect(capture.requests).toEqual([]);
+});
+
+const secretNameGroups = [
+  "pem key p12 pfx p8 jks keystore bks ppk der keytab kdbx".split(" ").map((ext) => `private.${ext}`),
+  "gpg pgp asc ovpn tfvars tfstate kubeconfig env secret secrets".split(" ").map((ext) => `private.${ext}`),
+  [
+    "id_rsa",
+    "ID_Ed25519-Backup",
+    "identity",
+    "master.key",
+    "htpasswd",
+    "_netrc",
+    "_pgpass",
+    "pgpass.conf",
+    "kubeconfig",
+  ],
+  ["secret", "secrets", "Secrets.local.json", "app_secret.yaml", "app-Secrets-backup", "my.secret.config"],
+  ["passwd", "PASSWORD", "db_passwd.txt", "db.password.json", "old-PASSWORD-backup"],
+  ["privatekey", "PRIVATE-KEY", "private_key", "app.privatekey.json", "my-Private_Key-backup"],
+  ["token.json", "TOKEN.JSON", "firebase-adminsdk.json", "app-firebase-adminsdk-backup.JSON"],
+  ["credential", "credentials", "my_credentials.json", "my-credential-backup", "my.credential.json"],
+  ["client_secret.json", "CLIENT_SECRET-backup.JSON"],
+  ["serviceaccount.json", "service_account-dev.json", "SERVICE-ACCOUNT.JSON"],
+  ["user_accessKeys.CSV", "terraform.tfstate.backup", "local.TFVARS.JSON"],
+  [
+    "passwords.txt",
+    "Chrome Passwords.csv",
+    "password1.txt",
+    "db password.txt",
+    "AWS credentials.txt",
+    "my secrets.yaml",
+    "secret2.json",
+    "private_keys.txt",
+    "privatekeys.txt",
+    "private keys.txt",
+    "private key.txt",
+    "passwds.txt",
+    "1password.txt",
+    "1credential2.txt",
+    "1secret2.txt",
+    "1private-key2.txt",
+    "backup(password).txt",
+  ],
+];
+test.each(secretNameGroups.map((names) => [names]))(
+  "walk skips secret names before filesystem access: %j",
+  async (names) => {
+    const f = await fixture();
+    await f.file("bundle/readme.txt", "Synthetic public text");
+    for (const name of names) await f.file(`bundle/${name}`, "Synthetic credential placeholder");
+    const capture = await f.capture();
+    const realpath = vi.spyOn(fs, "realpath");
+    const lstat = vi.spyOn(fs, "lstat");
+    const open = vi.spyOn(fs, "open");
+    for (const flags of [[], ["--source"]]) {
+      const out = await f.publish("bundle", ...flags);
+      expect(out.code, out.stderr.join("")).toBe(0);
+      expect(out.stderr.filter((line) => line.includes("skipped"))).toEqual(
+        [...names].sort().map((name) => `emend: skipped ${name}: may hold a secret\n`),
+      );
+      expect(capture.requests.at(-1)?.files.map((file) => file.path)).toEqual(["readme.txt"]);
+    }
+    const secretPaths = new Set(names.map((name) => join(f.source, "bundle", name)));
+    for (const spy of [realpath, lstat, open])
+      expect(spy.mock.calls.some(([path]) => secretPaths.has(String(path)))).toBe(false);
+  },
+);
+
+test("rendered doc names are exempt from secret skips, with and without source", async () => {
+  const f = await fixture();
+  const names = [
+    "secret.MD",
+    "credentials.markdown",
+    "client_secret.HTML",
+    "id_rsa.HTM",
+    "password.md",
+    "private-key.html",
+    "Chrome Passwords.MARKDOWN",
+    "private keys.HTM",
+    "secret2.md",
+    "AWS credentials.html",
+  ];
+  for (const name of names) await f.file(`bundle/${name}`, "Synthetic text");
+  const capture = await f.capture();
+  for (const flags of [[], ["--source"]]) {
+    const out = await f.publish("bundle", ...flags, "--title", "Synthetic");
+    expect(out.code, out.stderr.join("")).toBe(0);
+    expect(out.stderr.filter((line) => line.includes("skipped"))).toEqual([]);
+    expect(
+      capture.requests
+        .at(-1)
+        ?.files.map((file) => file.path)
+        .sort(),
+    ).toEqual(names.sort());
+  }
+});
+
+test.each([
+  "private.PEM",
+  "app_secret.yaml",
+  "db.password.json",
+  "app_private-key.txt",
+  "TOKEN.JSON",
+  "app-firebase-adminsdk-test.json",
+  "Chrome Passwords.csv",
+])("explicit secret-looking file %s publishes before or after a folder argument", async (name) => {
+  const f = await fixture();
+  await f.file(`bundle/${name}`, "Synthetic credential placeholder");
+  await f.file("bundle/readme.txt", "Synthetic public text");
+  const capture = await f.capture();
+  for (const paths of [
+    [`bundle/${name}`, "bundle"],
+    ["bundle", `bundle/${name}`],
+  ]) {
+    for (const flags of [[], ["--source"]]) {
+      const out = await f.publish(...paths, ...flags);
+      expect(out.code, out.stderr.join("")).toBe(0);
+      expect(capture.requests.at(-1)?.files.map((file) => file.path)).toEqual([name, "readme.txt"].sort());
+      expect(out.stderr.filter((line) => line.includes("skipped"))).toEqual([]);
+    }
+  }
+});
+
+test.each(["too large", "EACCES", "EPERM"])("walk skips %s files and explicit arguments fail once", async (reason) => {
+  const f = await fixture();
+  await f.file("bundle/readme.txt", "Synthetic public text");
+  const refused = await f.file("bundle/refused.txt", "Synthetic text");
+  if (reason === "too large") await truncate(refused, LIMITS.markdownDocBytes + 1);
+  else {
+    const read = sourceReads.readRegular;
+    vi.spyOn(sourceReads, "readRegular").mockImplementation(async (path, ...args) => {
+      if (path === refused) throw Object.assign(new Error("Synthetic permission failure"), { code: reason });
+      return read(path, ...args);
+    });
+  }
+  await f.capture();
+  const diagnostic = reason === "too large" ? reason : "unreadable";
+  const out = await f.publish("bundle");
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(out.stderr.filter((line) => line.includes("skipped"))).toEqual([
+    `emend: skipped refused.txt: ${diagnostic}\n`,
+  ]);
+  expect(out.stderr).toContain("emend: published 1 files from bundle\n");
+  for (const paths of [
+    ["./bundle/refused.txt"],
+    ["./bundle/refused.txt", "bundle"],
+    ["bundle", "./bundle/refused.txt"],
+  ]) {
+    const explicit = await f.publish(...paths);
+    expect(explicit.code).toBe(1);
+    expect(explicit.stdout).toEqual([]);
+    expect(explicit.stderr).toEqual([
+      `emend: ${reason === "too large" ? "file exceeds its size limit" : diagnostic}: ./bundle/refused.txt\n`,
+    ]);
+  }
+});
+
+test("walked non-UTF-8 HTML keeps rendered rules, while source skips it", async () => {
+  const f = await fixture();
+  await f.file("bundle/readme.txt", "Synthetic public text");
+  await writeFile(await f.file("bundle/page.html"), Buffer.from([60, 112, 62, 255]));
+  const capture = await f.capture();
+  const rendered = await f.publish("bundle", "--title", "Synthetic");
+  expect(rendered.code, rendered.stderr.join("")).toBe(0);
+  expect(capture.requests.at(-1)?.files.map((file) => file.path)).toEqual(["page.html", "readme.txt"]);
+  const source = await f.publish("bundle", "--source");
+  expect(source.code, source.stderr.join("")).toBe(0);
+  expect(capture.requests.at(-1)?.files.map((file) => file.path)).toEqual(["readme.txt"]);
+  expect(source.stderr).toContain("emend: skipped page.html: not a text file\n");
+});
+
+test("folder summaries are per argument, escaped, uncapped, and keep JSON stdout", async () => {
+  const f = await fixture();
+  await f.file("bundle/a.txt", "Synthetic text");
+  await f.file("other/b.txt", "Synthetic text");
+  await symlink(join(f.source, "other"), join(f.source, "other\u202e"));
+  for (let i = 0; i < 25; i++) await f.file(`bundle/secret.${i}`, "Synthetic credential placeholder");
+  await f.capture();
+  const out = await f.publish("./bundle", "other\u202e", "bundle", "--json");
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(out.stdout).toHaveLength(1);
+  PublishResponse.parse(JSON.parse(out.stdout[0] ?? ""));
+  expect(out.stderr.filter((line) => /published \d+ files/.test(line))).toEqual([
+    "emend: published 1 files from ./bundle\n",
+    "emend: published 1 files from other\\u{202e}\n",
+    "emend: published 1 files from bundle\n",
+  ]);
+  expect(out.stderr.filter((line) => line.includes("skipped"))).toHaveLength(SHORTCUT_LIMITS.warnings + 1);
+});
+
+test("a refused symlink names the written argument instead of the target basename", async () => {
+  const f = await fixture();
+  await writeFile(await f.file("other.bin"), Buffer.from([0]));
+  await symlink(join(f.source, "other.bin"), join(f.source, "link\u202e.txt"));
+  const out = await f.publish("./link\u202e.txt");
+  expect(out.code).toBe(1);
+  expect(out.stdout).toEqual([]);
+  expect(out.stderr).toEqual(["emend: not a text file: ./link\\u{202e}.txt\n"]);
+});
+
+test.each([
+  "bin dat npy npz pkl pickle parquet onnx pt pth safetensors gguf h5",
+  "docx xlsx pptx odt iso dmg apk whl deb rpm msi pyc",
+])("walk skips the additional binary extensions: %s", async (extensions) => {
+  const f = await fixture();
+  await f.file("bundle/readme.txt", "Synthetic public text");
+  const names = extensions.split(" ").map((ext) => `sample.${ext.toUpperCase()}`);
+  for (const name of names) await f.file(`bundle/${name}`, "Synthetic binary placeholder");
+  await f.capture();
+  const out = await f.publish("bundle");
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(out.stderr.filter((line) => line.includes("skipped"))).toEqual(
+    names.sort().map((name) => `emend: skipped ${name}: binary file\n`),
+  );
+});
+
+test("secret folders are skipped by entry name before opening or checking their contents", async () => {
+  const f = await fixture();
+  const names = ["secret", "SECRETS", "Credential", "credentials"];
+  for (const name of names) await f.file(`bundle/${name}/nested/readme.md`, "Synthetic placeholder");
+  await f.file("bundle/readme.txt", "Synthetic public text");
+  const publicFolders = ["secrets-guide", "my secrets", "secret2", "AWS credentials", "passwords", "private_keys"];
+  for (const name of publicFolders) await f.file(`bundle/${name}/note.txt`, "Public guide");
+  const capture = await f.capture();
+  const calls = [vi.spyOn(fs, "realpath"), vi.spyOn(fs, "lstat"), vi.spyOn(fs, "open")];
+  const out = await f.publish("bundle");
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(out.stderr.filter((line) => line.includes("skipped"))).toEqual(
+    [...names].sort().map((name) => `emend: skipped ${name}: may hold a secret\n`),
+  );
+  expect(capture.requests.at(-1)?.files.map((file) => file.path)).toEqual(
+    ["readme.txt", ...publicFolders.map((name) => `${name}/note.txt`)].sort(),
+  );
+  const skipped = names.map((name) => join(f.source, "bundle", name));
+  for (const spy of calls)
+    expect(
+      spy.mock.calls.some(([path]) =>
+        skipped.some((folder) => String(path) === folder || String(path).startsWith(`${folder}/`)),
+      ),
+    ).toBe(false);
+});
+
+test.each(["secret", "secrets", "credential", "credentials"])(
+  "an explicitly named %s folder is walked as the argument",
+  async (name) => {
+    const f = await fixture();
+    await f.file(`${name}/note.txt`, "Synthetic public text");
+    await f.file(`${name}/secrets/nested.txt`, "Synthetic placeholder");
+    const capture = await f.capture();
+    const out = await f.publish(name);
+    expect(out.code, out.stderr.join("")).toBe(0);
+    expect(capture.requests.at(-1)?.files.map((file) => file.path)).toEqual(["note.txt"]);
+    expect(out.stderr.filter((line) => line.includes("skipped"))).toEqual([
+      "emend: skipped secrets: may hold a secret\n",
+    ]);
+  },
+);
+
+test("secret patterns respect delimiters and do not suppress tokens or referenced HTML assets", async () => {
+  const f = await fixture();
+  const names = ["token.ts", "tokens.json", "mytoken.json", "secretary.txt", "passwordless.txt", "privatekeynotes.txt"];
+  for (const name of names) await f.file(`bundle/${name}`, "Synthetic public text");
+  await f.file(
+    "bundle/index.html",
+    '<title>Synthetic</title><script src="private-key.js"></script><script src="credentials/client.js"></script>',
+  );
+  await f.file("bundle/private-key.js", "const synthetic = true;");
+  await f.file("bundle/credentials/client.js", "const synthetic = false;");
+  const capture = await f.capture();
+  const out = await f.publish("bundle");
+  expect(out.code, out.stderr.join("")).toBe(0);
+  const files = capture.requests.at(-1)?.files ?? [];
+  expect(
+    files
+      .filter((file) => file.role === "doc")
+      .map((file) => file.path)
+      .sort(),
+  ).toEqual([...names, "index.html"].sort());
+  expect(
+    files
+      .filter((file) => file.role === "asset")
+      .map((file) => file.path)
+      .sort(),
+  ).toEqual(["credentials/client.js", "private-key.js"]);
+});
+
+test("an entirely skipped walk reports escaped paths and reasons in its one capped error line", async () => {
+  const f = await fixture();
+  await f.file("bundle/00-password-\u202e.json", "Synthetic placeholder");
+  await f.file("bundle/01.png", "Synthetic binary name");
+  await f.file("bundle/02.txt", "nul\0text");
+  for (let i = 0; i < 22; i++)
+    await f.file(`bundle/z-secret-${String(i).padStart(2, "0")}.json`, "Synthetic placeholder");
+  const out = await f.publish("bundle");
+  expect(out.code).toBe(1);
+  expect(out.stdout).toEqual([]);
+  expect(out.stderr).toHaveLength(1);
+  const line = out.stderr[0] ?? "";
+  expect(line).toContain("no text docs to publish; skipped ");
+  expect(line).toContain("bundle/00-password-\\u{202e}.json: may hold a secret");
+  expect(line).toContain("bundle/01.png: binary file");
+  expect(line).toContain("bundle/02.txt: not a text file");
+  expect(line.match(/: (may hold a secret|binary file|not a text file)/g)).toHaveLength(SHORTCUT_LIMITS.warnings);
+  expect(line).toContain(" and 5 more files");
+  expect(line).not.toContain("z-secret-17");
+  expect(line.split("\n")).toHaveLength(2);
 });

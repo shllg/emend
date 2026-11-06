@@ -67,3 +67,20 @@ test("rendered block counts are shared across writeup sections and docs", () => 
       .success,
   ).toBe(false);
 });
+
+test("source tokens share the serialized revision budget, including colors and escaping", () => {
+  const content = { language: "text", lines: [[{ text: '"\né', light: "#abc", dark: "#123456" }]] };
+  const token = content.lines[0]?.[0];
+  if (!token) throw new Error("missing token");
+  token.text += "x".repeat(LIMITS.renderedBytesPerRevision - bytes(revision.writeup) - bytes(content));
+  const view = {
+    ...revision,
+    docs: [
+      { path: "a.txt", kind: "source", ...content },
+      { path: "b.txt", kind: "source", language: "text", lines: [] },
+    ],
+  };
+  expect(RevisionView.safeParse(view).success).toBe(true);
+  token.text += "x";
+  expect(RevisionView.safeParse(view).success).toBe(false);
+});

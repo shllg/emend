@@ -258,7 +258,7 @@ these fields read as `main: null`, `writeupEmpty: false` and keep opening on Wri
 Without an explicit visible `tab` in the URL, the app opens the main page when set; otherwise
 it opens Writeup if it has text, the first doc in manifest order, Diff if any file has role
 `diff`, or Writeup when there is nothing. A main doc opens Docs scrolled to that document.
-`FileView = { id, path, oldPath, role, status, topic, order, mediaType, flag, hasOld, hasNew, viewed?, viewedOn?, notes? }`.
+`FileView = { id, path, oldPath, role, status, topic, order, mediaType, flag, hasOld, hasNew, viewed?, viewedOn?, notes?, view?: "source" }`.
 `notes` is present only for files with agent notes. Each `AgentNoteView` adds a UUID `id` to
 `AgentNote` below. Notes are read-only revision content, separate from reviewer comments.
 `oldPath`, `status`, `topic` and `flag` are nullable. Files are in their stored order; assets
@@ -633,7 +633,7 @@ Unknown keys, including owner ids, moved-to URLs, content keys, media types, `pl
 | `review` | `id, originInstanceId, reviewKey: Sha256, repo: {key: Sha256, name} or null, branch, title, state, approvedRevision: UUID or null, createdAt, updatedAt` |
 | `revisions` | `id, reviewId, seq, base, head, main, writeupEmpty, createdAt` |
 | `topics` | `id, revisionId` plus `TopicMeta` (optional door and blastRadius) |
-| `files` | `id, revisionId, path, oldPath, role, status, topicSlug, ord, oldBlob, newBlob, renderedBlob, flag, parentDocId`; nullable sides, status, topic, flag, parent |
+| `files` | `id, revisionId, path, oldPath, role, status, topicSlug, ord, oldBlob, newBlob, renderedBlob, flag, parentDocId, title?, view?: DocView`; nullable sides, status, topic, flag, parent |
 | `docAssets` | `revisionId, docId, assetId` |
 | `agentNotes` | `id, fileId, ord` plus `AgentNote`; optional array, ordered per file, at most 8 per file and 64 per revision |
 | `writeups` | `id, revisionId, sourceBlob, renderedBlob` |
@@ -706,10 +706,10 @@ The keys are lowercase 64-character SHA-256 hex; `reviewId` is a UUID. Repo name
 `titleChars`, branches `pathChars`, and title, commits and writeup obey the manifest limits.
 There are at most `topicsPerReview` declared topics plus the optional generated Other changes
 topic (importance 100, last); at most `filesPerRevision` files. Base and head are null together.
-`PublishFile = { path, oldPath: FilePath | null, role, status?, topic?, oldBlob: sha256 | null,
+`PublishFile = { path, oldPath: FilePath | null, role, status?, topic?, title?, view?: DocView, oldBlob: sha256 | null,
 newBlob: sha256 | null, flag: FileFlag | null, parent?: FilePath, assets?: FilePath[], notes?: AgentNote[] }`. Paths and topic slugs are
-unique within their namespaces (diffs; docs and assets); file and writeup topics must be declared.
-`assets` is required for HTML docs (including an empty array) and must be absent on all other files.
+unique within their namespaces (diffs; rendered docs and assets; source docs); file and writeup topics must be declared.
+`assets` is required for rendered HTML docs (including an empty array) and must be absent on all other files.
 Assets name a declared HTML doc in `parent`, stay inside its folder and have no hidden or dot
 segments. Allowed extensions are js, mjs, css, png, jpg, jpeg, gif, svg, webp, avif, ico, bmp,
 woff, woff2, ttf, otf, mp4, webm, ogg, mp3, wav and m4a (case insensitive). Shared assets are
@@ -741,7 +741,7 @@ At most two publishes compute at once per server process. Further publishes wait
 then receive 429 `rate_limited`, "The server is busy publishing; try again." Conflicting attempts
 reuse rendered results and retry snapshot/placement at most three times. A disconnected request
 is abandoned before commit and its workers are stopped. The CLI publish deadline is 30 seconds
-for a slot, plus 15 seconds, plus 10 seconds per writeup/Markdown doc, plus three 30-second
+for a slot, plus 15 seconds, plus 10 seconds per writeup/Markdown/source doc, plus three 30-second
 placement attempts. A timeout reports "the server did not answer in time; nothing was published".
 Placement exceeding 30 seconds returns 413 `too_large` with "The placement timed out."
 Other placement failures return 400 `invalid_request` with "The comments could not be placed."
@@ -756,7 +756,7 @@ manifest with `role: "doc"`; otherwise validation issues `["main"]` with the mes
 `main is not a doc of this revision`. `"writeup"` opens Writeup even if its Markdown is empty.
 `base` and `head` appear together or neither appears. Commits are fully resolved lowercase hex
 object ids (40 characters for SHA-1 or 64 for SHA-256); `head` also accepts `"worktree"`.
-Docs-only reviews can omit both. Manifest files are `{ path, role: "diff" | "doc", topic?, source?, notes?: AgentNote[] }`;
+Docs-only reviews can omit both. Manifest files are `{ path, role: "diff" | "doc", topic?, source?, title?, view?: DocView, notes?: AgentNote[] }`;
 `source` is a non-empty local filename from which the CLI reads a doc, separate from its published
 path. It may be absolute or relative, has at most `pathChars` characters, must be well-formed UTF-16,
 and cannot contain NUL, C0 controls or DEL.
@@ -869,6 +869,7 @@ open `links` the same way, after checking again that each URL is https, and show
 | `doc-span` | `path`, `blockId`, `quote`, `prefix`, `suffix` |
 | `html-span` | `path`, `quote`, `prefix`, `suffix` |
 | `lines` | `path`, `side: "old" | "new"`, `start`, `end`, `lines`, `before`, `after` |
+| `source-lines` | `path`, `start`, `end`, `lines`, `before`, `after` |
 | `file` | `path` |
 | `topic` | `slug` |
 | `review` | No additional fields. |
@@ -897,7 +898,7 @@ Locations use the target's `kind`. Span locations contain `start` and `end`
 instead of quote/context; offsets are zero-based UTF-16 indices with an exclusive end greater than
 start, within the normalized block text or HTML document text. Writeup spans retain `blockId`;
 doc spans retain `path` and `blockId`; HTML spans retain `path`. Line locations contain `path`,
-`side`, `start`, `end`, using the same 1-based inclusive convention. File, topic and review locations
+`side`, `start`, `end`, using the same 1-based inclusive convention. Source-line locations omit `side`. File, topic and review locations
 use the same fields as their targets. Placement describes the newest revision; a thread keeps its
 original target separately.
 
@@ -1292,3 +1293,49 @@ The shared resolver decodes each segment once and rejects encoded separators, co
 network or root-relative paths, queries and traversal above the manifest root. Writeup paths
 start at that root; doc paths start at the linking doc's directory. Paths match exactly.
 Other relative links retain no href. Comment HTML receives no doc context and stays unchanged.
+
+### Source docs
+
+Manifest and publish file entries accept `view?: "rendered" | "source"` on doc rows only.
+Markdown (`.md`, `.markdown`) and HTML (`.html`, `.htm`), case-insensitively, default to rendered;
+other paths default to source. `DocView` is `"rendered" | "source"`. Explicit rendered is refused for other extensions. One path can
+appear once in each doc view and once as a diff. `main` continues to name a doc path.
+Source docs have their own path namespace; rendered docs and assets share the existing namespace.
+Source docs cannot list assets or parent assets, and media cannot collide with either doc view.
+
+Source bytes must be valid UTF-8 without NUL, otherwise publishing/import refuses them with
+`invalid_request`. Decoding strips one leading UTF-8 BOM consistently for rendering and placement.
+For a CLI source alias, its extension must match the doc path case-insensitively, including no extension.
+The size limit is `LIMITS.markdownDocBytes` (1048576 bytes, 1 MiB). The server stores source docs
+as role `doc`, media type `text/plain`; source HTML never has a content URL or content-route access.
+
+`RevisionView.docs[]` includes `{ path, kind: "source", title?, language, lines, unrendered?: true }`, where `lines`
+is `SourceToken[][]` and a token is `{ text: string, light?: Color, dark?: Color }`. Colors strictly
+match `^#[0-9a-fA-F]{3,8}$`; light/dark come from github-light/github-dark. Text is raw data, never HTML. `language` is a loaded Shiki language id
+(`ts`, `tsx`, `js`, `jsx`, `json`, `css`, `html`, `md`, `yaml`, `sh`, `go`, `py`, `sql`, `diff`), or
+`text` for unknown extensions, files above the 256 KiB highlighting budget, or docs past the
+1 MiB per-revision highlighting budget. Highlighting also
+caps each line at 400 characters; longer lines retain their text. Each array is bounded by
+`markdownDocBytes`; serialized source content counts against the revision rendered-byte budget.
+Lines are numbered from 1, CRLF is treated as LF, a terminal newline adds no line, and empty files
+have zero lines and omit `unrendered`. Source doc rows together are limited to
+`LIMITS.sourceLinesPerRevision` (200000 lines) and `LIMITS.sourceBytesPerRevision`
+(16777216 bytes, 16 MiB), which counts the UTF-8 byte length of decoded source text, not its
+token JSON. Stored source token JSON, including escaping and structure, counts against
+`LIMITS.renderedBytesPerRevision`. Aliases count once per row against these source limits
+and the rendered-byte budget. A doc that would exceed either source budget is unrendered.
+Unrendered source docs, including missing or invalid rendered content, have `unrendered: true`,
+language `text` and empty lines; publish lists rendering failures in its `unrendered` array. Source titles use the manifest title or the cleaned filename, with no headings.
+Source docs are excluded from navigable doc links; a rendered view of the same path remains navigable.
+`FileView.view?: "source"` is set only on source doc rows, distinguishing two doc rows of the same path.
+
+`SourceLinesTarget = { kind: "source-lines", path, start, end, lines, before, after }` has exactly
+the line target's inclusive range, array, context and combined character limits, without a diff side.
+Its placement location is `{ kind: "source-lines", path, start, end }`, with positive line numbers
+and `end >= start`. It follows renames and surviving text using the same line placement tiers;
+unplaced reasons are `file-gone`, `lines-gone` or `ambiguous`. New targets must name a source doc.
+Hand-offs retain the target's path, range and quoted lines; wait/feedback JSON remains additive.
+
+Import/export file rows accept `view?: "rendered" | "source"` on docs only. Export sets `source`
+on source rows; absent retains the extension-based default. Import carries the view into publish
+validation, revalidates raw text and re-renders tokens and source-line placements.
