@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { CommandTable } from "./command.ts";
 import { withRegistry } from "./registry.ts";
@@ -133,8 +133,18 @@ function replay(repo: Repo, top: string, old: string, target: string, backup: st
     throw new WtError(1, `The branch and its target share no history. The branch is unchanged. backup: ${backup}`);
   }
 
-  mkdirSync(join(repo.commonDir, "emend-wt"), { recursive: true, mode: 0o700 });
-  const patch = join(repo.commonDir, "emend-wt", `restack-${process.pid}.patch`);
+  const dir = join(repo.commonDir, "emend-wt");
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const stat = lstatSync(dir);
+  const uid = process.getuid?.();
+  if (!stat.isDirectory() || (uid !== undefined && stat.uid !== uid)) {
+    throw new WtError(
+      69,
+      `The restack folder ${dir} is not a private directory of this user. Remove it and run again. The branch is unchanged. backup: ${backup}`,
+    );
+  }
+  const runDir = mkdtempSync(join(dir, "restack-"));
+  const patch = join(runDir, "change.patch");
   try {
     // Use plumbing so the user's and the repo's diff settings do not shape the patch.
     // The pins cover what plumbing still reads.
@@ -188,7 +198,7 @@ function replay(repo: Repo, top: string, old: string, target: string, backup: st
     hg(repo, top, ["reset", "--quiet"]);
     return { conflicts };
   } finally {
-    rmSync(patch, { force: true });
+    rmSync(runDir, { recursive: true, force: true });
   }
 }
 

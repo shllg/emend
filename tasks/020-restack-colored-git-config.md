@@ -39,6 +39,8 @@ every conflicting rebase fails for such a user. `changeDigest()` in the same fil
       settings plumbing still reads are pinned: context, prefixes, rename detection and limit,
       `diff.suppressBlankEmpty`. `git apply` runs with `apply.ignoreWhitespace=no`, `run()`
       drops `GIT_DIFF_OPTS`, and `bin/wt rebase` uses the merge backend.
+- [x] Found by the security review: the restack writes its patch in a fresh private folder and
+      refuses a restack folder that is not a plain directory of this user.
 
 ## Done when
 

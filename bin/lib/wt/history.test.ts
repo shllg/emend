@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { changeDigest, commands, conflictLines, land, rebase, restack, syncMain } from "./history.ts";
@@ -119,6 +119,41 @@ test("conflict restacks with no operation in progress", () =>
     assert.equal(readFileSync(join(wt, "extra.txt"), "utf8"), "extra\n");
     const backups = gitIn(wt, "for-each-ref", "--format=%(refname) %(objectname)", "refs/wt-backup/feat-a/");
     assert.match(backups, new RegExp(`^refs/wt-backup/feat-a/\\d{8}T\\d{6}Z ${oldTip}$`));
+  }));
+
+test("a restack refuses a symlinked restack folder", () =>
+  scenario(({ env, fx, repo }) => {
+    commitFile(fx.main, "c.txt", "one\n");
+    gitIn(fx.main, "push", "--quiet", "origin", "main");
+    const wt = worktree(repo, "feat-a");
+    const oldTip = commitFile(wt, "c.txt", "branch\n");
+    advanceOrigin(env, fx, "c.txt", "main\n");
+    const elsewhere = join(env.root, "elsewhere");
+    mkdirSync(elsewhere);
+    const dir = join(fx.main, ".git", "emend-wt");
+    rmSync(dir, { recursive: true, force: true });
+    symlinkSync(elsewhere, dir);
+
+    expectCode(() => restack(resolveRepo(wt), wt, "origin/main"), 69);
+    assert.equal(gitIn(wt, "rev-parse", "HEAD"), oldTip);
+    assert.deepEqual(readdirSync(elsewhere), []);
+    idle(wt);
+  }));
+
+test("a restack ignores a planted file at the old patch path", () =>
+  scenario(({ env, fx, repo }) => {
+    const wt = worktree(repo, "feat-a");
+    commitFile(wt, "a.txt", "a\n");
+    advanceOrigin(env, fx, "other.txt", "other\n");
+    const dir = join(fx.main, ".git", "emend-wt");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const target = join(env.root, "kept.txt");
+    writeFileSync(target, "keep\n");
+    symlinkSync(target, join(dir, `restack-${process.pid}.patch`));
+
+    assert.deepEqual(restack(resolveRepo(wt), wt, "origin/main").conflicts, []);
+    assert.equal(readFileSync(target, "utf8"), "keep\n");
+    idle(wt);
   }));
 
 test("a conflict restacks under a colored git config", () =>
