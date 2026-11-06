@@ -1,10 +1,10 @@
 ---
 id: 020
 title: Restack under a colored git config
-status: in-progress
+status: done
 owner: agent + your approval
 depends_on: []
-done_on:
+done_on: 2026-11-06
 ---
 
 # 020 — Restack under a colored git config
@@ -23,14 +23,14 @@ every conflicting rebase fails for such a user. `changeDigest()` in the same fil
 
 ## Steps
 
-- [ ] Write a regression test in `bin/lib/wt` first. It restacks a conflicting branch with
+- [x] Write a regression test in `bin/lib/wt` first. It restacks a conflicting branch with
       `color.ui=always` and `color.diff=always` set in the fixture repo's own config. It must fail
       before the fix.
-- [ ] Add `--no-color` to `replay()`'s diff.
-- [ ] Check every other git call in `bin/lib/wt` whose output is parsed, digested or applied for
+- [x] Add `--no-color` to `replay()`'s diff.
+- [x] Check every other git call in `bin/lib/wt` whose output is parsed, digested or applied for
       the same gap, and close each one found.
-- [ ] Reviews: emend-reviewer and the read-only Codex review.
-- [ ] One commit, `fix(harness): ...`, with the sync outcome in the body.
+- [x] Reviews: emend-reviewer and the read-only Codex review.
+- [x] One commit, `fix(harness): ...`, with the sync outcome in the body.
 
 ## Done when
 
@@ -41,3 +41,9 @@ The new test fails without the fix and passes with it, `pnpm verify` is green, a
 
 - Never change the user's git config, in a test or anywhere else. Set the color keys only in the
   fixture repo's config.
+- Done on 2026-11-06 in two commits. The color fix also covers push and remote-delete error text
+  through `GIT_BASE`. At the coordinating session's request, a second fix makes
+  `bin/wt push --force-with-lease` push `refs/heads/<branch>` instead of a bare commit id, which a
+  pre-push guard that checks the local branch's reflog refuses. Left open: `makeTestEnv()` does
+  not isolate `XDG_CONFIG_HOME` or set `GIT_CONFIG_NOSYSTEM`, so the bin/wt tests read the
+  developer's XDG and system git config.
