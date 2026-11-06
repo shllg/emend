@@ -30,6 +30,7 @@ import {
   sourcePath,
 } from "./read.ts";
 import { remoteToRepoUrl } from "./repo-url.ts";
+import type { RetainedSources } from "./retained.ts";
 import { gitFolders, worktreeRoot } from "./root.ts";
 import { ShortcutAssets } from "./shortcut-assets.ts";
 import { readSkipReason } from "./shortcut-walk.ts";
@@ -46,6 +47,7 @@ export type PublishOptions = {
   docFolders?: ReadonlyMap<string, readonly PublishedFolder[]>;
   /** Absolute paths rejected by the walked-doc private-key content check. */
   excludedAssets?: ReadonlySet<string>;
+  retainedSources?: RetainedSources;
   /** Real paths of shortcut folder arguments and explicitly named files. */
   folderRoots?: readonly string[];
   namedFiles?: ReadonlySet<string>;
@@ -159,7 +161,14 @@ export async function resolvePublish(
   let assetCount = 0;
   const assetPaths = new Set<string>();
   const shortcutAssets = options.docFolders
-    ? new ShortcutAssets(gitDirs, warn, options.excludedAssets, options.folderRoots, options.namedFiles)
+    ? new ShortcutAssets(
+        gitDirs,
+        warn,
+        options.excludedAssets,
+        options.folderRoots,
+        options.namedFiles,
+        options.retainedSources,
+      )
     : undefined;
   const roots = [...(worktree ? [worktree] : []), ...(await readDocRoots(stateDir))];
   for (const file of grouped.files) {
@@ -222,8 +231,12 @@ export async function resolvePublish(
     };
     // Check the written alias here; sourcePath also checks its resolved target.
     outsideGitSegments(original, root);
-    const source = await sourcePath(original, roots, gitDirs, publishedFolders).catch(docError);
     const sourceView = docViewOf(file) === "source";
+    const retained =
+      sourceView && options.docFolders?.has(file.path) && !options.docArguments?.has(file.path)
+        ? options.retainedSources?.get(original)
+        : undefined;
+    const source = retained ? original : await sourcePath(original, roots, gitDirs, publishedFolders).catch(docError);
     const html = isRenderedHtmlDoc(file);
     const checkExtension = (path: string) => {
       if (sourceView) {
@@ -246,11 +259,12 @@ export async function resolvePublish(
         (_info, opened) => checkPublishedFolders(opened, publishedFolders),
       ).catch(docError);
     const readDoc = async () => {
+      if (retained) return retained;
       const actual = await sourcePath(original, roots, gitDirs, publishedFolders).catch(docError);
       checkExtension(actual);
       return readResolvedDoc(actual);
     };
-    const bytes = await readResolvedDoc(source);
+    const bytes = retained ?? (await readResolvedDoc(source));
     if (sourceView) {
       try {
         decodeText(bytes);

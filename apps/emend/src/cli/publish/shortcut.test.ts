@@ -706,7 +706,7 @@ test.each(["doc", "asset"] as const)(
 );
 
 test.each(["doc", "asset"] as const)(
-  "a %s swapped outside its walked folder before upload is refused",
+  "a %s swapped before upload uses its rendered-doc or retained-asset policy",
   async (kind) => {
     const f = await fixture();
     const path = kind === "doc" ? "plan.md" : "logo.png";
@@ -723,7 +723,18 @@ test.each(["doc", "asset"] as const)(
       }
       return respond?.(url, init);
     });
+    const read = vi.spyOn(sourceReads, "readRegular");
     const out = await f.publish("bundle");
+    if (kind === "asset") {
+      expect(out.code, out.stderr.join("")).toBe(0);
+      expect(read.mock.calls.filter(([path]) => path === source)).toHaveLength(1);
+      expect(read.mock.calls.some(([path]) => path === target)).toBe(false);
+      const uploaded = capture.fetcher.mock.calls
+        .filter(([, init]) => init?.method === "PUT")
+        .map(([, init]) => Buffer.from(init?.body as Uint8Array).toString());
+      expect(uploaded).toContain("synthetic same bytes");
+      return;
+    }
     expect(out.code).toBe(1);
     expect(out.stdout).toEqual([]);
     expect(out.stderr).toEqual(["emend: symlink leaves the published folder: bundle\n"]);
@@ -821,7 +832,7 @@ test.each([
   ["upload", false],
   ["upload", true],
 ] as const)(
-  "shared asset confinement survives deduplication before %s (folder first: %s)",
+  "shared assets check boundaries at resolution and retain bytes for %s (folder first: %s)",
   async (stage, folderFirst) => {
     const f = await fixture();
     await f.file("a.html", '<title>Explicit</title><img src="bundle/logo.png">');
@@ -848,7 +859,18 @@ test.each([
         return respond?.(url, init);
       });
     }
+    const read = vi.spyOn(sourceReads, "readRegular");
     const out = await f.publish(...(folderFirst ? ["bundle", "a.html"] : ["a.html", "bundle"]));
+    if (stage === "upload") {
+      expect(out.code, out.stderr.join("")).toBe(0);
+      expect(read.mock.calls.filter(([path]) => path === source)).toHaveLength(1);
+      expect(read.mock.calls.some(([path]) => path === target)).toBe(false);
+      const uploaded = capture.fetcher.mock.calls
+        .filter(([, init]) => init?.method === "PUT")
+        .map(([, init]) => Buffer.from(init?.body as Uint8Array).toString());
+      expect(uploaded).toContain("synthetic shared image");
+      return;
+    }
     expect(out.code).toBe(1);
     expect(out.stdout).toEqual([]);
     expect(out.stderr).toEqual(["emend: symlink leaves the published folder: bundle\n"]);
@@ -879,7 +901,7 @@ test("shared explicit assets retain every referencing doc's folder at upload", a
   expect(capture.requests).toEqual([]);
 });
 
-test("assets with identical bytes retain their boundaries after blob deduplication", async () => {
+test("blob deduplication keeps scoped assets retained and other assets on their read path", async () => {
   const f = await fixture();
   await f.file("a.html", '<title>Explicit</title><img src="first.png">');
   await f.file("bundle/index.html", '<title>Walked</title><img src="logo.png">');
@@ -895,22 +917,28 @@ test("assets with identical bytes retain their boundaries after blob deduplicati
     }
     return respond?.(url, init);
   });
+  const read = vi.spyOn(sourceReads, "readRegular");
   const out = await f.publish("a.html", "bundle");
-  expect(out.code).toBe(1);
-  expect(out.stdout).toEqual([]);
-  expect(out.stderr).toEqual(["emend: symlink leaves the published folder: bundle\n"]);
-  expect(capture.requests).toEqual([]);
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(read.mock.calls.filter(([path]) => path === source)).toHaveLength(1);
+  expect(read.mock.calls.filter(([path]) => path === target)).toHaveLength(2);
+  const uploaded = capture.fetcher.mock.calls
+    .filter(([, init]) => init?.method === "PUT")
+    .map(([, init]) => Buffer.from(init?.body as Uint8Array).toString());
+  expect(uploaded.filter((text) => text === "synthetic shared image")).toHaveLength(1);
 });
 
-test("a shared asset changed after its resolution read is refused at upload", async () => {
+test("a shared asset changed after its resolution read uploads the retained bytes", async () => {
   const f = await fixture();
   await f.file("a.html", '<title>Explicit</title><img src="bundle/logo.png">');
   await f.file("bundle/index.html", '<title>Walked</title><img src="logo.png">');
   const source = await f.file("bundle/logo.png", "synthetic original image");
   const read = sourceReads.readRegular;
   let changed = false;
+  let assetReads = 0;
   vi.spyOn(sourceReads, "readRegular").mockImplementation(async (...args) => {
     const bytes = await read(...args);
+    if (args[0] === source) assetReads++;
     if (args[0] === source && !changed) {
       changed = true;
       await writeFile(source, "synthetic replacement image");
@@ -920,14 +948,13 @@ test("a shared asset changed after its resolution read is refused at upload", as
   const capture = await f.capture();
   const out = await f.publish("a.html", "bundle");
   expect(changed).toBe(true);
-  expect(out.code).toBe(1);
-  expect(out.stdout).toEqual([]);
-  expect(out.stderr).toEqual(["emend: blob changed before upload\n"]);
-  expect(capture.requests).toEqual([]);
-  const hash = createHash("sha256").update("synthetic original image").digest("hex");
-  expect(capture.fetcher.mock.calls.some(([url, init]) => init?.method === "PUT" && String(url).endsWith(hash))).toBe(
-    false,
-  );
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(assetReads).toBe(1);
+  const uploaded = capture.fetcher.mock.calls
+    .filter(([, init]) => init?.method === "PUT")
+    .map(([, init]) => Buffer.from(init?.body as Uint8Array).toString());
+  expect(uploaded).toContain("synthetic original image");
+  expect(uploaded).not.toContain("synthetic replacement image");
 });
 
 test.each(["resolution", "upload"] as const)(
@@ -1091,6 +1118,7 @@ const secretNameGroups = [
   ],
   ["AUTH-TOKENS.json", "refresh token.txt", "tokens.txt", "github_dsa", "github_ecdsa", "github_ed25519", "wg.conf"],
   ["github-token.txt", "bot_token.txt", "slack token", "slack-token", "github_tokens", "token", "github.token"],
+  ["prod.slack_token", "ci.github-token", "staging.deploy-token", "my.app_tokens"],
   "pem key p12 pfx p8 jks keystore bks ppk der keytab kdbx".split(" ").map((ext) => `private.${ext}`),
   "gpg pgp asc ovpn tfvars tfstate kubeconfig env secret secrets".split(" ").map((ext) => `private.${ext}`),
   [
@@ -1191,18 +1219,16 @@ test("rendered doc names are exempt from secret skips, with and without source",
   }
 });
 
-test("design token files still publish in folder walks", async () => {
+test("dotted token names are skipped while JSON design token files publish", async () => {
   const f = await fixture();
   for (const name of ["tokens.json", "design-tokens.json", "colors.tokens"]) await f.file(`bundle/${name}`, "{}");
   const capture = await f.capture();
   const out = await f.publish("bundle");
   expect(out.code, out.stderr.join("")).toBe(0);
-  expect(out.stderr.filter((line) => line.includes("skipped"))).toEqual([]);
-  expect(capture.requests[0]?.files.map((file) => file.path)).toEqual([
-    "colors.tokens",
-    "design-tokens.json",
-    "tokens.json",
+  expect(out.stderr.filter((line) => line.includes("skipped"))).toEqual([
+    "emend: skipped colors.tokens: may hold a secret\n",
   ]);
+  expect(capture.requests[0]?.files.map((file) => file.path)).toEqual(["design-tokens.json", "tokens.json"]);
 });
 
 test.each([
@@ -1217,6 +1243,32 @@ test.each([
   [
     "PGP armor headers",
     `-----BEGIN PGP PRIVATE KEY BLOCK-----\nVersion: Synthetic fixture\n\n${"A".repeat(64)}\n-----END PGP PRIVATE KEY BLOCK-----`,
+  ],
+  ["indented PEM", `  ${syntheticPrivateKey().replaceAll("\n", "\n  ")}`],
+  ["YAML block scalar", `key: |\n  ${syntheticPrivateKey().replaceAll("\n", "\n  ")}`],
+  ["Terraform heredoc", `key = <<-EOT\n    ${syntheticPrivateKey().replaceAll("\n", "\n    ")}EOT\n`],
+  ["Ruby heredoc", `key = <<~KEY\n    ${syntheticPrivateKey().replaceAll("\n", "\n    ")}KEY\n`],
+  ["Python indentation", `key = """\n    ${syntheticPrivateKey().replaceAll("\n", "\n    ")}"""\n`],
+  ["XML indentation", `<key>\n    ${syntheticPrivateKey().replaceAll("\n", "\n    ")}</key>\n`],
+  [
+    "JS string array",
+    `const key = ${JSON.stringify(syntheticPrivateKey().trimEnd().split("\n"), null, 2)}.join("\\n");`,
+  ],
+  [
+    "JS concatenated strings",
+    `const key = ${syntheticPrivateKey()
+      .split("\n")
+      .map((line) => JSON.stringify(line))
+      .join(" +\n")};`,
+  ],
+  ["flattened PEM", syntheticPrivateKey().replaceAll("\n", " ")],
+  [
+    "PGP long Comment header",
+    `-----BEGIN PGP PRIVATE KEY BLOCK-----\nComment: ${"synthetic ".repeat(200)}\n\n${"A".repeat(64)}\n-----END PGP PRIVATE KEY BLOCK-----`,
+  ],
+  [
+    "PuTTY in JSON",
+    JSON.stringify({ key: `PuTTY-User-Key-File-3: ssh-ed25519\nPrivate-Lines: 1\n${"A".repeat(64)}\n` }),
   ],
 ])("walk skips %s key material, but an explicit file publishes", async (_kind, text) => {
   const f = await fixture();
@@ -1245,15 +1297,99 @@ test.each([
     'const header = "-----BEGIN PRIVATE KEY-----";\nexport function headerText() {\n  return header;\n}\n',
   ],
   ["putty-marker.ts", 'const marker = "PuTTY-User-Key-File-3: ssh-ed25519";\n'],
+  ["putty-template.ts", "const marker = `\nPuTTY-User-Key-File-3: ssh-ed25519\n`;\n"],
   ["pgp-prose.txt", "Look for -----BEGIN PGP PRIVATE KEY BLOCK----- in an armored key.\nThis is ordinary prose.\n"],
-])("a harmless private-key marker in %s publishes as source", async (name, text) => {
+])("a private-key marker in %s is skipped even without material", async (name, text) => {
   const f = await fixture();
   await f.file(`bundle/${name}`, text);
+  await f.file("bundle/readme.txt", "Synthetic public text");
   const capture = await f.capture();
   const out = await f.publish("bundle");
   expect(out.code, out.stderr.join("")).toBe(0);
-  expect(capture.requests[0]?.files).toEqual([expect.objectContaining({ path: name, role: "doc", view: "source" })]);
+  expect(capture.requests[0]?.files.map((file) => file.path)).toEqual(["readme.txt"]);
+  expect(out.stderr.filter((line) => line.includes("skipped"))).toEqual([
+    `emend: skipped ${name}: may hold a secret\n`,
+  ]);
+});
+
+test("a UTF-16LE key is excluded as both a walked doc and an HTML asset", async () => {
+  const f = await fixture();
+  const html = '<title>Synthetic</title><script src="notes.js"></script>';
+  await f.file("bundle/index.html", html);
+  await f.file("bundle/notes.js", Buffer.from(syntheticPrivateKey(), "utf16le"));
+  const capture = await f.capture();
+  const out = await f.publish("bundle");
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(capture.requests[0]?.files).toEqual([
+    expect.objectContaining({ path: "index.html", role: "doc", assets: [] }),
+  ]);
+  expect(out.stderr).toContain("emend: skipped notes.js: may hold a secret\n");
+  const uploaded = capture.fetcher.mock.calls
+    .filter(([, init]) => init?.method === "PUT")
+    .map(([, init]) => Buffer.from(init?.body as Uint8Array).toString());
+  expect(uploaded).toEqual([html]);
+});
+
+test.each(["md", "markdown", "html", "htm"])("rendered walked %s docs remain unscanned", async (extension) => {
+  const f = await fixture();
+  const text = syntheticPrivateKey();
+  await f.file(`bundle/notes.${extension}`, text);
+  const capture = await f.capture();
+  const out = await f.publish("bundle");
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(capture.requests[0]?.files.map((file) => file.path)).toEqual([`notes.${extension}`]);
   expect(out.stderr.filter((line) => line.includes("skipped"))).toEqual([]);
+  const uploaded = capture.fetcher.mock.calls
+    .filter(([, init]) => init?.method === "PUT")
+    .map(([, init]) => Buffer.from(init?.body as Uint8Array).toString());
+  expect(uploaded).toEqual([text]);
+});
+
+test.each([["txt"], ["md", "--source"], ["html", "--source"]])(
+  "a walked source %s uploads its one scanned read after replacement",
+  async (extension, option?: string) => {
+    const f = await fixture();
+    const text = "Synthetic public text";
+    const source = await f.file(`bundle/notes.${extension}`, text);
+    const read = sourceReads.readRegular;
+    let sourceReadsCount = 0;
+    vi.spyOn(sourceReads, "readRegular").mockImplementation(async (...args) => {
+      const bytes = await read(...args);
+      if (args[0] === source && ++sourceReadsCount === 1) await writeFile(source, syntheticPrivateKey());
+      return bytes;
+    });
+    const capture = await f.capture();
+    const out = await f.publish("bundle", ...(option ? [option] : []));
+    expect(out.code, out.stderr.join("")).toBe(0);
+    expect(sourceReadsCount).toBe(1);
+    const uploaded = capture.fetcher.mock.calls
+      .filter(([, init]) => init?.method === "PUT")
+      .map(([, init]) => Buffer.from(init?.body as Uint8Array).toString());
+    expect(uploaded).toEqual([text]);
+  },
+);
+
+test("a walked source doc referenced as an asset shares its one scanned buffer", async () => {
+  const f = await fixture();
+  const original = "const synthetic = true;";
+  const source = await f.file("bundle/app.js", original);
+  await f.file("bundle/index.html", '<title>Synthetic</title><script src="app.js"></script>');
+  const read = sourceReads.readRegular;
+  let reads = 0;
+  vi.spyOn(sourceReads, "readRegular").mockImplementation(async (...args) => {
+    const bytes = await read(...args);
+    if (args[0] === source && ++reads === 1) await writeFile(source, syntheticPrivateKey());
+    return bytes;
+  });
+  const capture = await f.capture();
+  const out = await f.publish("bundle");
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(reads).toBe(1);
+  const uploaded = capture.fetcher.mock.calls
+    .filter(([, init]) => init?.method === "PUT")
+    .map(([, init]) => Buffer.from(init?.body as Uint8Array).toString());
+  expect(uploaded).toContain(original);
+  expect(uploaded.some((text) => text.includes(syntheticPrivateKey()))).toBe(false);
 });
 
 test.each(["notes.js", "alias.js"])("a walked private key is never uploaded as the HTML asset %s", async (ref) => {
@@ -1331,6 +1467,108 @@ test.each(["alias.js", "big-key.js"])(
     expect(out.stderr).toContain(`emend: skipped bundle/${ref}: may hold a secret\n`);
   },
 );
+
+test("a secret reference folder cannot alias a key outside the folder argument", async () => {
+  const f = await fixture();
+  const ref = "bundle/credentials/alias.js";
+  const html = `<title>Synthetic</title><script src="${ref}"></script>`;
+  await f.file("index.html", html);
+  const target = await f.file("outside.js", syntheticPrivateKey());
+  await mkdir(join(f.source, "bundle/credentials"), { recursive: true });
+  await symlink(target, join(f.source, ref));
+  const read = vi.spyOn(sourceReads, "readRegular");
+  const capture = await f.capture();
+  const out = await f.publish("index.html", "bundle");
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(capture.requests[0]?.files).toEqual([
+    expect.objectContaining({ path: "index.html", role: "doc", assets: [] }),
+  ]);
+  expect(out.stderr).toContain(`emend: skipped ${ref}: may hold a secret\n`);
+  expect(read.mock.calls.some(([path]) => path === target)).toBe(false);
+  const uploaded = capture.fetcher.mock.calls
+    .filter(([, init]) => init?.method === "PUT")
+    .map(([, init]) => Buffer.from(init?.body as Uint8Array).toString());
+  expect(uploaded).toEqual([html]);
+});
+
+test("an asset alias introduced after walking stays in scope through its reference path", async () => {
+  const f = await fixture();
+  const html = '<title>Synthetic</title><script src="bundle/alias.js"></script>';
+  await f.file("index.html", html);
+  await mkdir(join(f.source, "bundle"));
+  const target = await f.file("outside.js", syntheticPrivateKey());
+  const prepare = shortcuts.shortcutManifest;
+  vi.spyOn(shortcuts, "shortcutManifest").mockImplementationOnce(async (...args) => {
+    const result = await prepare(...args);
+    await symlink(target, join(f.source, "bundle/alias.js"));
+    return result;
+  });
+  const capture = await f.capture();
+  const out = await f.publish("index.html", "bundle");
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(capture.requests[0]?.files).toEqual([
+    expect.objectContaining({ path: "index.html", role: "doc", assets: [] }),
+  ]);
+  expect(out.stderr).toContain("emend: skipped bundle/alias.js: may hold a secret\n");
+  const uploaded = capture.fetcher.mock.calls
+    .filter(([, init]) => init?.method === "PUT")
+    .map(([, init]) => Buffer.from(init?.body as Uint8Array).toString());
+  expect(uploaded).toEqual([html]);
+});
+
+test("an in-scope asset uploads its one scanned read after replacement with a key", async () => {
+  const f = await fixture();
+  await f.file("index.html", '<title>Synthetic</title><img src="bundle/logo.png">');
+  const source = await f.file("bundle/logo.png", "synthetic image");
+  const key = syntheticPrivateKey();
+  const read = sourceReads.readRegular;
+  let assetReads = 0;
+  vi.spyOn(sourceReads, "readRegular").mockImplementation(async (...args) => {
+    const bytes = await read(...args);
+    if (args[0] === source && ++assetReads === 1) await writeFile(source, key);
+    return bytes;
+  });
+  const capture = await f.capture();
+  const out = await f.publish("index.html", "bundle");
+  expect(assetReads).toBe(1);
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(capture.requests).toHaveLength(1);
+  const uploaded = capture.fetcher.mock.calls
+    .filter(([, init]) => init?.method === "PUT")
+    .map(([, init]) => Buffer.from(init?.body as Uint8Array).toString());
+  expect(uploaded).toContain("synthetic image");
+  expect(uploaded.some((text) => text.includes(key))).toBe(false);
+});
+
+test("an in-scope asset alias uploads retained bytes after its target changes", async () => {
+  const f = await fixture();
+  const html = '<title>Synthetic</title><script src="bundle/alias.js"></script>';
+  await f.file("index.html", html);
+  const original = "const synthetic = true;";
+  const source = await f.file("bundle/api-key.js", original);
+  const target = await f.file("outside.js", syntheticPrivateKey());
+  const alias = join(f.source, "bundle/alias.js");
+  await symlink(source, alias);
+  const read = sourceReads.readRegular;
+  const assetReads: string[] = [];
+  vi.spyOn(sourceReads, "readRegular").mockImplementation(async (...args) => {
+    const bytes = await read(...args);
+    if (args[0] === source || args[0] === target) assetReads.push(args[0]);
+    if (args[0] === source) {
+      await rm(alias);
+      await symlink(target, alias);
+    }
+    return bytes;
+  });
+  const capture = await f.capture();
+  const out = await f.publish("index.html", "bundle");
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(assetReads).toEqual([source]);
+  const uploaded = capture.fetcher.mock.calls
+    .filter(([, init]) => init?.method === "PUT")
+    .map(([, init]) => Buffer.from(init?.body as Uint8Array).toString());
+  expect(uploaded).toEqual([html, original]);
+});
 
 test.each([["credentials"], [".", "credentials"], ["credentials", "."]])(
   "a named credentials root admits key-free assets through any containing folder: %j",

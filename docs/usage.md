@@ -31,12 +31,12 @@ source, including Markdown and HTML, in the path shortcut only. It cannot combin
 without NUL and at most 1 MiB; explicitly named binary files are refused. A folder walk skips names
 that look like secrets (Markdown and HTML files publish whatever their name), folders named exactly
 `secret`, `secrets`, `credential` or `credentials` in any case below the folder argument, binary
-files, files that are too large or unreadable, and text files holding a private key. Below a folder
-argument, an HTML asset inside such a folder or holding a private key is not uploaded either. A
-file or folder named explicitly is published as named, so never name a credential file or a
-secrets folder explicitly. Name a public file the walk skipped, such as `passwords.ts`, to publish
-it. Skip warnings stop after 20 (`SHORTCUT_LIMITS.warnings`), followed by a count of
-additional skips. Each folder argument still gets a summary line counting the published files.
+files, files that are too large or unreadable, and files shown as source that hold a private key
+(walked Markdown and HTML that render are not scanned). Below a folder argument, an HTML asset
+inside such a folder or holding a private key is not uploaded either. A file or folder named
+explicitly is published as named, so never name a credential file or a secrets folder explicitly.
+Name a public file the walk skipped, such as `passwords.ts`, to publish it. Skip warnings stop
+after 20 (`SHORTCUT_LIMITS.warnings`), followed by a count of additional skips. Each folder argument still gets a summary line counting the published files.
 CSS and JavaScript files in a folder also appear as source docs, even when an HTML doc
 uses them as assets.
 

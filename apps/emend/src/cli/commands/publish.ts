@@ -142,6 +142,7 @@ export async function publishCommand(stateDir: string, args: string[], io: Io, c
     titleFromMain: shortcut?.titleFromMain,
     docFolders: shortcut?.docFolders,
     excludedAssets: shortcut?.excludedAssets,
+    retainedSources: shortcut?.retainedSources,
     folderRoots: shortcut?.folderRoots,
     namedFiles: shortcut?.namedFiles,
     docArguments: shortcut?.docArguments,

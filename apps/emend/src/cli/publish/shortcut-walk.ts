@@ -28,7 +28,7 @@ const secretNames = [
   /(^|[^a-z])(api|access|auth|refresh)[-_ ]?(keys?|tokens?)([^a-z]|$)/i,
   /^tokens?\.txt$/i,
   /(^|[-_. ])tokens?\.txt$/i,
-  /^(?:[^.]*[-_ ])?tokens?$/i,
+  /(^|[-_. ])tokens?$/i,
   /_key$/i,
   /_(rsa|dsa|ecdsa|ed25519)$/i,
   /\.har$/i,
@@ -47,13 +47,10 @@ const secretNames = [
   /\.tfstate\.backup$/i,
   /\.tfvars\.json$/i,
 ];
-export function holdsPrivateKey(text: string): boolean {
-  return (
-    /(?:-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?-----|---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----)[\s\S]{0,256}?(?:\r?\n|\\n)[A-Za-z0-9+/]{32}/.test(
-      text,
-    ) ||
-    /AGE-SECRET-KEY-1[QPZRY9X8GF2TVDW0S3JN54KHCE6MUA7L]{58}/.test(text) ||
-    /^PuTTY-User-Key-File-\d+: /m.test(text)
+export function holdsPrivateKey(bytes: Uint8Array): boolean {
+  const text = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("latin1").replaceAll("\0", "");
+  return /-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|PuTTY-User-Key-File-|AGE-SECRET-KEY-1|---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----/.test(
+    text,
   );
 }
 export const isSecretPath = (name: string) =>

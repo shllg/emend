@@ -15,6 +15,7 @@ import {
   readRegular,
   sourcePath,
 } from "./read.ts";
+import { RetainedSources } from "./retained.ts";
 import { holdsPrivateKey } from "./shortcut-walk.ts";
 import type { BlobSource } from "./upload.ts";
 
@@ -44,6 +45,7 @@ export class ShortcutAssets {
   private excludedAssets: ReadonlySet<string>;
   private folderRoots: readonly string[];
   private namedFiles: ReadonlySet<string>;
+  private retainedSources: RetainedSources;
 
   constructor(
     gitDirs: string[],
@@ -51,12 +53,14 @@ export class ShortcutAssets {
     excludedAssets: ReadonlySet<string> = new Set(),
     folderRoots: readonly string[] = [],
     namedFiles: ReadonlySet<string> = new Set(),
+    retainedSources = new RetainedSources(),
   ) {
     this.gitDirs = gitDirs;
     this.warn = warn;
     this.excludedAssets = excludedAssets;
     this.folderRoots = folderRoots;
     this.namedFiles = namedFiles;
+    this.retainedSources = retainedSources;
   }
 
   add(doc: PublishFile, realSource: string, bytes: Buffer, folders: readonly PublishedFolder[]) {
@@ -89,8 +93,10 @@ export class ShortcutAssets {
     }
   }
 
-  private containingFolders(actual: string) {
-    return this.namedFiles.has(actual) ? [] : this.folderRoots.filter((root) => inside(root, actual));
+  private inScope(asset: AssetSource, actual: string) {
+    return (
+      !this.namedFiles.has(actual) && this.folderRoots.some((root) => inside(root, asset.file) || inside(root, actual))
+    );
   }
 
   private pathIssue(asset: AssetSource, actual: string) {
@@ -109,26 +115,35 @@ export class ShortcutAssets {
     }
     if (Array.from(actual).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127))
       return "target leaves the visible doc folder";
-    const folders = this.containingFolders(actual);
-    if (
-      folders.length &&
-      folders.every((folder) =>
-        relative(folder, actual)
-          .split(sep)
-          .slice(0, -1)
-          .some((segment) => /^(secrets?|credentials?)$/i.test(segment)),
-      )
-    )
-      return "may hold a secret";
+    if (!this.namedFiles.has(actual)) {
+      for (const path of [asset.file, actual]) {
+        const folders = this.folderRoots.filter((root) => inside(root, path));
+        if (
+          folders.length &&
+          folders.every((folder) =>
+            relative(folder, path)
+              .split(sep)
+              .slice(0, -1)
+              .some((segment) => /^(secrets?|credentials?)$/i.test(segment)),
+          )
+        )
+          return "may hold a secret";
+      }
+    }
   }
 
   private async inspect(asset: AssetSource) {
     const folders = [...asset.docFolders].sort((a, b) => a.length - b.length);
     try {
-      const actual = await realpath(asset.file);
+      const retained = this.inScope(asset, asset.file) ? this.retainedSources.get(asset.file) : undefined;
+      const actual = retained ? asset.file : await realpath(asset.file);
       const issue = this.pathIssue(asset, actual);
       if (issue)
         return issue === "source is outside the allowed doc roots" ? "target leaves the visible doc folder" : issue;
+      if (retained) {
+        asset.size = retained.length;
+        return;
+      }
       if (asset.walkedFolders.size && !(await lstat(asset.file)).isFile()) return "not a regular file";
       // After pathIssue passes, every doc folder is an ancestor of the source.
       // Checking only the outermost (folders[0]) therefore covers all leading components.
@@ -165,16 +180,28 @@ export class ShortcutAssets {
       if (asset.skipped) continue;
       const folders = [...asset.docFolders].sort((a, b) => a.length - b.length);
       const walked = [...asset.walkedFolders.values()];
+      let firstRead = true;
       let scanPrivateKey = false;
-      const check = (actual: string) => {
-        const issue = this.pathIssue(asset, actual);
-        if (issue)
-          throw new CliError(issue === "target is in node_modules" ? "asset target changed into node_modules" : issue);
-        scanPrivateKey = this.containingFolders(actual).length > 0;
-      };
+      let retainedPath = asset.file;
       const read = async (limit: number = LIMITS.assetBytes) => {
-        const actual = await sourcePath(asset.file, folders, this.gitDirs, walked);
+        const check = (actual: string) => {
+          const issue = this.pathIssue(asset, actual);
+          if (issue)
+            throw new CliError(
+              issue === "target is in node_modules" ? "asset target changed into node_modules" : issue,
+            );
+          scanPrivateKey = this.inScope(asset, actual);
+          retainedPath = actual;
+        };
+        const snapshot =
+          firstRead && this.inScope(asset, asset.file) ? this.retainedSources.get(asset.file) : undefined;
+        const actual = snapshot ? asset.file : await sourcePath(asset.file, folders, this.gitDirs, walked);
         check(actual);
+        const retained = firstRead && scanPrivateKey ? this.retainedSources.get(actual) : undefined;
+        if (retained) {
+          if (retained.length > limit) throw new OversizedFile();
+          return retained;
+        }
         return readRegular(
           walked.length ? asset.file : actual,
           limit,
@@ -190,7 +217,7 @@ export class ShortcutAssets {
       let bytes: Buffer;
       try {
         bytes = await read(limit);
-        if (scanPrivateKey && holdsPrivateKey(bytes.toString("latin1"))) {
+        if (scanPrivateKey && holdsPrivateKey(bytes)) {
           asset.skipped = "may hold a secret";
           continue;
         }
@@ -199,12 +226,16 @@ export class ShortcutAssets {
           throw new CliError("HTML doc and assets exceed their size limit");
         throw error;
       }
+      firstRead = false;
       for (const doc of asset.docs) {
         doc.remaining -= bytes.length;
         if (doc.remaining < 0) throw new CliError("HTML doc and assets exceed their size limit");
       }
       asset.size = bytes.length;
-      asset.hash = add(bytes, read);
+      if (scanPrivateKey) {
+        bytes = this.retainedSources.keep(retainedPath, bytes);
+        asset.hash = add(bytes, async () => bytes);
+      } else asset.hash = add(bytes, read);
     }
     const emitted = new Set<string>();
     const result = new Map<string, PublishFile[]>();

@@ -34,8 +34,10 @@ async function fixture() {
           key: shortcut.key,
           docFolders: shortcut.docFolders,
           excludedAssets: shortcut.excludedAssets,
+          retainedSources: shortcut.retainedSources,
           folderRoots: shortcut.folderRoots,
           namedFiles: shortcut.namedFiles,
+          docArguments: shortcut.docArguments,
           skipNodeModules: true,
         },
         f.stateDir,
@@ -48,7 +50,7 @@ async function fixture() {
   return { ...f, file, prepare };
 }
 
-test("64 docs read their shared 1 MiB asset once per phase", async () => {
+test("64 docs share one retained read of their 1 MiB asset", async () => {
   const f = await fixture();
   const image = Buffer.alloc(1024 * 1024, 65);
   const source = await f.file("bundle/logo.png", image);
@@ -64,8 +66,8 @@ test("64 docs read their shared 1 MiB asset once per phase", async () => {
   const upload = read.mock.calls.filter(([path]) => path === source).length;
   expect({ resolution, upload, bytes: (resolution + upload) * image.length, stats }).toEqual({
     resolution: 1,
-    upload: 1,
-    bytes: 2 * image.length,
+    upload: 0,
+    bytes: image.length,
     stats: 1,
   });
   expect(resolved.request.files.filter((file) => file.role === "asset")).toHaveLength(1);
@@ -89,7 +91,7 @@ test("distinct asset paths with equal bytes each read once but upload one blob",
   read.mockClear();
   const uploaded = [];
   for (const [id, blob] of resolved.blobs) uploaded.push((await readBlob(id, blob)).toString());
-  expect({ resolution, upload: counts() }).toEqual({ resolution: [1, 1], upload: [1, 1] });
+  expect({ resolution, upload: counts() }).toEqual({ resolution: [1, 1], upload: [0, 0] });
   expect(uploaded.filter((bytes) => bytes === "synthetic image")).toHaveLength(1);
 });
 
@@ -179,10 +181,10 @@ test.each([false, true])("different walked boundaries remain merged (inner first
   await fs.symlink(target, source);
   const blob = resolved.blobs.get(hash("synthetic image"));
   if (!blob) throw new Error("missing shared image");
-  await expect(readBlob(hash("synthetic image"), blob)).rejects.toThrow(
+  expect((await readBlob(hash("synthetic image"), blob)).toString()).toBe("synthetic image");
+  await expect(f.prepare(innerFirst ? ["outer/inner", "outer"] : ["outer", "outer/inner"])).rejects.toThrow(
     "symlink leaves the published folder: outer/inner",
   );
-  await expect(collect()).rejects.toThrow("symlink leaves the published folder: outer/inner");
 });
 
 // Resolving the cap-sized HTML reference lists exercises the publish JSON budget.

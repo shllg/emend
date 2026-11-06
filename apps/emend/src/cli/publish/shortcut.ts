@@ -19,6 +19,7 @@ import {
   sourcePath,
 } from "./read.ts";
 import type { publishContext } from "./resolve.ts";
+import { RetainedSources } from "./retained.ts";
 import {
   holdsPrivateKey,
   readSkipReason,
@@ -80,6 +81,7 @@ export async function shortcutManifest(
   const folderArguments: PublishedFolder[] = [];
   const skipped = new Map<string, SkipReason>();
   const excludedAssets = new Set<string>();
+  const retainedSources = new RetainedSources();
   const skippedArguments: string[] = [];
   const add = (actual: string, source: string) => {
     if (!visible(basename(actual))) {
@@ -156,18 +158,21 @@ export async function shortcutManifest(
       continue;
     }
     if (!options.source && docViewOf({ path: actual }) === "rendered") continue;
+    if (argument === undefined && holdsPrivateKey(bytes)) {
+      docs.delete(actual);
+      excludedAssets.add(actual);
+      skipped.set(actual, "may hold a secret");
+      continue;
+    }
     try {
-      const text = decodeText(bytes);
-      if (argument === undefined && holdsPrivateKey(text)) {
-        docs.delete(actual);
-        excludedAssets.add(actual);
-        skipped.set(actual, "may hold a secret");
-      }
+      decodeText(bytes);
     } catch {
       if (argument !== undefined) throw new CliError(`not a text file: ${escapeReference(argument)}`);
       docs.delete(actual);
       skipped.set(actual, "not a text file");
+      continue;
     }
+    if (argument === undefined) retainedSources.keep(actual, bytes);
   }
   if (!docs.size) {
     const skips = [
@@ -251,6 +256,7 @@ export async function shortcutManifest(
     titleFromMain,
     docFolders,
     excludedAssets,
+    retainedSources,
     folderRoots: folderArguments.map(({ root }) => root),
     namedFiles: new Set(explicit.keys()),
     skippedArguments,
