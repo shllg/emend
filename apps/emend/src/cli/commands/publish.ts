@@ -141,6 +141,7 @@ export async function publishCommand(stateDir: string, args: string[], io: Io, c
     skipNodeModules: shortcut !== undefined,
     titleFromMain: shortcut?.titleFromMain,
     docFolders: shortcut?.docFolders,
+    excludedAssets: shortcut?.excludedAssets,
     docArguments: shortcut?.docArguments,
   };
   if (!manifest.base && !options.key && !options.review) throw new CliError("pass --review or --key");

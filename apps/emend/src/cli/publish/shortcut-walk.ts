@@ -27,6 +27,8 @@ const secretNames = [
   /(^|[^a-z])private[-_ ]?keys?([^a-z]|$)/i,
   /(^|[^a-z])(api|access|auth|refresh)[-_ ]?(keys?|tokens?)([^a-z]|$)/i,
   /^tokens?\.txt$/i,
+  /(^|[-_. ])tokens?\.txt$/i,
+  /(^|[-_.])tokens?$/i,
   /_key$/i,
   /_(rsa|dsa|ecdsa|ed25519)$/i,
   /\.har$/i,

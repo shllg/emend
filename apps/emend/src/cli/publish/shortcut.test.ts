@@ -1087,6 +1087,7 @@ const secretNameGroups = [
     "rclone.conf",
   ],
   ["AUTH-TOKENS.json", "refresh token.txt", "tokens.txt", "github_dsa", "github_ecdsa", "github_ed25519", "wg.conf"],
+  ["github-token.txt", "bot_token.txt", "slack-token", "token"],
   "pem key p12 pfx p8 jks keystore bks ppk der keytab kdbx".split(" ").map((ext) => `private.${ext}`),
   "gpg pgp asc ovpn tfvars tfstate kubeconfig env secret secrets".split(" ").map((ext) => `private.${ext}`),
   [
@@ -1167,6 +1168,10 @@ test("rendered doc names are exempt from secret skips, with and without source",
     "private keys.HTM",
     "secret2.md",
     "AWS credentials.html",
+    "github-token.md",
+    "bot_token.markdown",
+    "slack-token.html",
+    "token.htm",
   ];
   for (const name of names) await f.file(`bundle/${name}`, "Synthetic text");
   const capture = await f.capture();
@@ -1198,6 +1203,9 @@ test.each([
   ["notes.txt", "-----BEGIN PRIVATE KEY-----"],
   ["notes.txt", "PuTTY-User-Key-File-3: ssh-ed25519"],
   ["notes.txt", "-----BEGIN RSA PRIVATE KEY-----"],
+  ["notes.txt", "-----BEGIN PGP PRIVATE KEY BLOCK-----"],
+  ["notes.txt", "AGE-SECRET-KEY-1SYNTHETIC"],
+  ["notes.txt", "---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----"],
 ])("walk skips a private-key header in %s (%s), but an explicit file publishes", async (name, header) => {
   const f = await fixture();
   await f.file(`bundle/${name}`, `Synthetic fixture\n${header}\nNot a real key\n`);
@@ -1214,6 +1222,43 @@ test.each([
     expect(explicit.code, explicit.stderr.join("")).toBe(0);
     expect(capture.requests.at(-1)?.files.map((file) => file.path)).toContain(name);
     expect(explicit.stderr.filter((line) => line.includes("skipped"))).toEqual([]);
+  }
+});
+
+test.each(["notes.js", "alias.js"])("a walked private key is never uploaded as the HTML asset %s", async (ref) => {
+  const f = await fixture();
+  const html = `<title>Synthetic</title><script src="${ref}"></script>`;
+  await f.file("bundle/index.html", html);
+  const secret = await f.file("bundle/notes.js", "-----BEGIN OPENSSH PRIVATE KEY-----\nNot a real key\n");
+  if (ref !== "notes.js") await symlink(secret, join(f.source, "bundle", ref));
+  const capture = await f.capture();
+  const out = await f.publish("bundle");
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(capture.requests[0]?.files.map((file) => [file.path, file.role, file.assets])).toEqual([
+    ["index.html", "doc", []],
+  ]);
+  const uploads = capture.fetcher.mock.calls.filter(([, init]) => init?.method === "PUT");
+  expect(uploads).toHaveLength(1);
+  expect(Buffer.from(uploads[0]?.[1]?.body as Uint8Array).toString()).toBe(html);
+  expect(out.stderr).toContain("emend: skipped notes.js: may hold a secret\n");
+});
+
+test("explicitly named private-key content still publishes beside a referencing HTML doc", async () => {
+  const f = await fixture();
+  await f.file("bundle/index.html", '<title>Synthetic</title><script src="notes.js"></script>');
+  const text = "-----BEGIN OPENSSH PRIVATE KEY-----\nNot a real key\n";
+  await f.file("bundle/notes.js", text);
+  const capture = await f.capture();
+  for (const paths of [["bundle/notes.js"], ["bundle", "bundle/notes.js"], ["bundle/notes.js", "bundle"]]) {
+    capture.fetcher.mockClear();
+    const out = await f.publish(...paths);
+    expect(out.code, out.stderr.join("")).toBe(0);
+    expect(capture.requests.at(-1)?.files).toContainEqual(expect.objectContaining({ path: "notes.js", role: "doc" }));
+    if (paths.length > 1)
+      expect(capture.requests.at(-1)?.files.find((file) => file.path === "index.html")?.assets).toEqual(["notes.js"]);
+    const uploads = capture.fetcher.mock.calls.filter(([, init]) => init?.method === "PUT");
+    expect(uploads.some(([, init]) => Buffer.from(init?.body as Uint8Array).toString() === text)).toBe(true);
+    expect(out.stderr.filter((line) => line.includes("skipped"))).toEqual([]);
   }
 });
 

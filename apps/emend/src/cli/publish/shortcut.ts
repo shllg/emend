@@ -72,6 +72,7 @@ export async function shortcutManifest(
   const explicit = new Map<string, string>();
   const folderArguments: PublishedFolder[] = [];
   const skipped = new Map<string, SkipReason>();
+  const excludedAssets = new Set<string>();
   const skippedArguments: string[] = [];
   const add = (actual: string, source: string) => {
     if (!visible(basename(actual))) {
@@ -150,8 +151,14 @@ export async function shortcutManifest(
     if (!options.source && docViewOf({ path: actual }) === "rendered") continue;
     try {
       const text = decodeText(bytes);
-      if (argument === undefined && /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----|PuTTY-User-Key-File-/.test(text)) {
+      if (
+        argument === undefined &&
+        /-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|PuTTY-User-Key-File-|AGE-SECRET-KEY-1|---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----/.test(
+          text,
+        )
+      ) {
         docs.delete(actual);
+        excludedAssets.add(actual);
         skipped.set(actual, "may hold a secret");
       }
     } catch {
@@ -241,6 +248,7 @@ export async function shortcutManifest(
     key,
     titleFromMain,
     docFolders,
+    excludedAssets,
     skippedArguments,
     skipped: [...skipped].map(([file, reason]) => ({ path: reviewPath(file), reason })),
     docArguments: new Map([...explicit].map(([file, argument]) => [reviewPath(file), argument])),

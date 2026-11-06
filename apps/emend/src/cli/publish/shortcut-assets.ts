@@ -40,10 +40,12 @@ export class ShortcutAssets {
   private referenceBytes = 0;
   private gitDirs: string[];
   private warn: (line: string) => void;
+  private excludedAssets: ReadonlySet<string>;
 
-  constructor(gitDirs: string[], warn: (line: string) => void) {
+  constructor(gitDirs: string[], warn: (line: string) => void, excludedAssets: ReadonlySet<string> = new Set()) {
     this.gitDirs = gitDirs;
     this.warn = warn;
+    this.excludedAssets = excludedAssets;
   }
 
   add(doc: PublishFile, realSource: string, bytes: Buffer, folders: readonly PublishedFolder[]) {
@@ -57,6 +59,8 @@ export class ShortcutAssets {
     const seen = new Set<string>();
     this.referenceBytes += 2; // Brackets for the assets array.
     for (const candidate of assetCandidates(realSource, bytes.toString(), this.warn, true)) {
+      // The shortcut reports these skips once, using their walked paths.
+      if (this.excludedAssets.has(candidate.file)) continue;
       const path = posix.join(posix.dirname(doc.path), candidate.ref);
       if (seen.has(path)) continue;
       seen.add(path);
@@ -76,6 +80,7 @@ export class ShortcutAssets {
 
   private pathIssue(asset: AssetSource, actual: string) {
     checkPublishedFolders(actual, [...asset.walkedFolders.values()]);
+    if (this.excludedAssets.has(actual)) return "may hold a secret";
     if (actual.split(sep).includes("node_modules")) return "target is in node_modules";
     for (const folder of asset.docFolders) outsideGit(actual, this.gitDirs, [folder]);
     for (const folder of asset.docFolders) {
