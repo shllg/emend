@@ -54,12 +54,12 @@ attached to their hub, or all of them. The first outside user starts on 2026-11-
       publishing now requires 2FA and disallows tokens).
 - [ ] N.1: `emend serve --public-url <origin>` for a hub behind your own address;
       `docs/setup/hub-network.md`.
-- [ ] S.1: `emend` and `emend service status` say when the running server is another version.
-- [ ] S.2: `emend stop`.
-- [ ] S.3: `publish`, `wait`, `feedback`, `reply` and `mcp` refuse an `emend` that resolves inside
+- [x] S.1: `emend` and `emend service status` say when the running server is another version.
+- [x] S.2: `emend stop`.
+- [x] S.3: `publish`, `wait`, `feedback`, `reply` and `mcp` refuse an `emend` that resolves inside
       the current repository, as `emend service install` already does. Under mise, a repo's own
       tool config can point `emend` at its code, and agents run these commands with full rights.
-- [ ] S.4: emend remembers the Tailscale Serve route it created, so a route left by a crash is
+- [x] S.4: emend remembers the Tailscale Serve route it created, so a route left by a crash is
       still removed on the next stop (open owner item 31).
 
 ## Done when

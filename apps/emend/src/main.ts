@@ -1,7 +1,7 @@
 import type { SkillsOptions } from "./cli/commands/skills.ts";
 import type { ServiceOptions } from "./cli/service/common.ts";
 import { NewerDatabaseError } from "./db/migrate.ts";
-import { StateDirModeError, StateFolderWriteError, stateAccessError } from "./state/files.ts";
+import { isStateModeError, StateFolderWriteError, stateAccessError } from "./state/files.ts";
 import { defaultStateDir } from "./state/paths.ts";
 import { VERSION } from "./version.ts";
 
@@ -21,6 +21,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     io.stdout(`Usage:
   emend                         Open the review inbox
   emend serve [--tailscale]      Run the local server
+  emend stop                     Stop the server emend started
   emend pair [--machine]        Pair a device or machine
   emend attach <link>            Attach this machine to a hub
   emend detach                   Detach this machine
@@ -51,6 +52,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       "reply",
       "ls",
       "status",
+      "stop",
       "mcp",
       "service",
       "skills",
@@ -73,6 +75,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
         reply: () => import("./cli/commands/reply.ts").then((m) => m.replyCommand),
         ls: () => import("./cli/commands/ls.ts").then((m) => m.lsCommand),
         status: () => import("./cli/commands/status.ts").then((m) => m.statusCommand),
+        stop: () => import("./cli/commands/stop.ts").then((m) => m.stopCommand),
         mcp: () => import("./cli/commands/mcp.ts").then((m) => m.mcpCommand),
         service: () => import("./cli/commands/service.ts").then((m) => m.serviceCommand),
         skills: () => import("./cli/commands/skills.ts").then((m) => m.skillsCommand),
@@ -97,7 +100,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       const error = stateAccessError(defaultStateDir(io.env), caught);
       io.stderr(
         error instanceof NewerDatabaseError ||
-          error instanceof StateDirModeError ||
+          isStateModeError(error) ||
           error instanceof StateFolderWriteError ||
           error instanceof CliError
           ? errorLine(error, "publish")
@@ -127,9 +130,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     const error = stateAccessError(defaultStateDir(io.env), caught);
     if (error instanceof CliSignalExit) return error.exitCode;
     io.stderr(
-      error instanceof NewerDatabaseError ||
-        error instanceof StateDirModeError ||
-        error instanceof StateFolderWriteError
+      error instanceof NewerDatabaseError || isStateModeError(error) || error instanceof StateFolderWriteError
         ? errorLine(error)
         : `emend: ${error instanceof UsageError || error instanceof CliError ? error.message : "Could not start the emend server."}\n`,
     );

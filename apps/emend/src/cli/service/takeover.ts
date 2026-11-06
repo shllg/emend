@@ -5,7 +5,7 @@ import { ensureStateDir, StateFolderWriteError, stateAccessError } from "../../s
 import { escapeReference } from "../escape.ts";
 import { apiRequest, CliError } from "../http.ts";
 import { readRegular } from "../publish/read.ts";
-import { probeServer, serverRecord } from "../server-client.ts";
+import { probeServer, type ServerRecord, serverRecord } from "../server-client.ts";
 import { localTarget } from "../target.ts";
 
 interface ServerWaitOptions {
@@ -18,16 +18,36 @@ export interface ServerReadyOptions extends ServerWaitOptions {
   tailscale?: boolean;
 }
 
+interface ServerStopOptions extends ServerWaitOptions {
+  beforeProbe?: (record: ServerRecord) => Promise<void>;
+  messages?: (reference: string) => {
+    unanswered: string;
+    changed: string;
+    unsupported: string;
+    notStopped: string;
+  };
+}
+
 export async function stopLocalServer(stateDir: string, opts: ServerWaitOptions = {}): Promise<string | undefined> {
   ensureStateDir(stateDir);
+  return requestServerStop(stateDir, opts);
+}
+
+export async function requestServerStop(stateDir: string, opts: ServerStopOptions = {}): Promise<string | undefined> {
   const now = opts.now ?? (() => performance.now());
   const sleep = opts.sleep ?? delay;
   const deadline = now() + (opts.timeoutMs ?? 15000);
   const record = await serverRecord(stateDir);
   if (!record) return undefined;
+  await opts.beforeProbe?.(record);
   const reference = escapeReference(record.url);
-  const unanswered = () =>
-    new CliError(`the emend server at ${reference} did not answer; stop it, then run emend service install again.`);
+  const messages = opts.messages?.(reference) ?? {
+    unanswered: `the emend server at ${reference} did not answer; stop it, then run emend service install again.`,
+    changed: `the emend server at ${reference} changed while emend asked it to stop; run emend service install again.`,
+    unsupported: `the emend server at ${reference} is from an older emend and cannot be asked to stop; stop it, then run emend service install again.`,
+    notStopped: `the emend server at ${reference} did not stop; stop it, then run emend service install again.`,
+  };
+  const unanswered = () => new CliError(messages.unanswered);
   const authenticate = async (rechecking = false) => {
     while (now() < deadline) {
       if (rechecking) {
@@ -40,10 +60,7 @@ export async function stopLocalServer(stateDir: string, opts: ServerWaitOptions 
       const result = await probeServer(record, Math.min(500, deadline - now()));
       if (result.kind === "absent") return null;
       if (result.kind === "unverified") {
-        if (rechecking)
-          throw new CliError(
-            `the emend server at ${reference} changed while emend asked it to stop; run emend service install again.`,
-          );
+        if (rechecking) throw new CliError(messages.changed);
         return null;
       }
       if (result.kind === "verified" && result.capabilities) return result.capabilities;
@@ -53,10 +70,7 @@ export async function stopLocalServer(stateDir: string, opts: ServerWaitOptions 
   };
   const capabilities = await authenticate();
   if (!capabilities) return undefined;
-  if (!capabilities.features.includes("server-stop"))
-    throw new CliError(
-      `the emend server at ${reference} is from an older emend and cannot be asked to stop; stop it, then run emend service install again.`,
-    );
+  if (!capabilities.features.includes("server-stop")) throw new CliError(messages.unsupported);
   const target = await localTarget(stateDir, record.url, "admin");
   if (now() >= deadline) throw unanswered();
   const timeoutMs = Math.max(1, Math.ceil(deadline - now()));
@@ -88,7 +102,7 @@ export async function stopLocalServer(stateDir: string, opts: ServerWaitOptions 
     if (result.kind === "absent" || result.kind === "unverified") return record.url;
     await sleep(Math.min(100, Math.max(1, deadline - now())));
   }
-  throw new CliError(`the emend server at ${reference} did not stop; stop it, then run emend service install again.`);
+  throw new CliError(messages.notStopped);
 }
 
 async function publicOriginReady(stateDir: string): Promise<boolean> {

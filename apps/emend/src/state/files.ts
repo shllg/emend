@@ -88,6 +88,21 @@ export class StateDirModeError extends Error {
   }
 }
 
+export class TokenFileModeError extends Error {
+  readonly path: string;
+  constructor(path: string) {
+    super(
+      `Token file ${escapeReference(path)} has group or other permissions; fix it with chmod 600 ${quoteShellArgument(path)}`,
+    );
+    this.name = "TokenFileModeError";
+    this.path = path;
+  }
+}
+
+export function isStateModeError(error: unknown): error is StateDirModeError | TokenFileModeError {
+  return error instanceof StateDirModeError || error instanceof TokenFileModeError;
+}
+
 // Only chmod directories this call creates. Existing ancestors are not emend's to change.
 function createPrivateDir(dir: string): void {
   try {

@@ -1,7 +1,7 @@
 import { lstat, realpath } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { CliError } from "../error.ts";
 import type { GitRunner } from "../git.ts";
-import { CliError } from "../http.ts";
 import { readRegular } from "./read.ts";
 
 export async function gitFolders(root: string, run: GitRunner): Promise<string[]> {

@@ -1,7 +1,9 @@
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import type { Io } from "../../main.ts";
-import { StateDirModeError, StateFolderWriteError } from "../../state/files.ts";
+import { isStateModeError, StateFolderWriteError } from "../../state/files.ts";
+import { checkTokenFileMode } from "../../state/token-file.ts";
 import { CliError, CliUsageError } from "../http.ts";
 import { cliRuntime } from "../runtime.ts";
 import {
@@ -15,6 +17,7 @@ import {
 import { launchdService } from "../service/launchd.ts";
 import { systemdService } from "../service/systemd.ts";
 import { stopLocalServer, waitForServer } from "../service/takeover.ts";
+import { localVersionNotice, printVersionNotice } from "../version-notice.ts";
 import { parseServeArgs, UsageError } from "./serve.ts";
 
 export async function serviceCommand(stateDir: string, args: string[], io: Io) {
@@ -35,6 +38,7 @@ export async function serviceCommand(stateDir: string, args: string[], io: Io) {
     if (action === "install") {
       validatePaths(runtime.node, runtime.entry, stateDir);
       await validateServiceRuntime(runtime, options.cwd ?? process.cwd());
+      await checkTokenFileMode(join(stateDir, "admin.token"));
     }
     const now = options.now ?? (() => performance.now());
     const sleep = options.sleep ?? setTimeout;
@@ -50,15 +54,16 @@ export async function serviceCommand(stateDir: string, args: string[], io: Io) {
       stopLocalServer: options.stopLocalServer ?? (() => stopLocalServer(stateDir, { now, sleep })),
       waitForServer: options.waitForServer ?? ((ready) => waitForServer(stateDir, { ...ready, now, sleep })),
     };
-    if (platform === "linux") await systemdService(action, context, options.username);
+    let running: boolean | undefined;
+    if (platform === "linux") running = await systemdService(action, context, options.username);
     else {
       if (uid === undefined) throw new CliError("Could not determine the service user.");
-      await launchdService(action, context, uid);
+      running = await launchdService(action, context, uid);
     }
+    if (action === "status" && running) printVersionNotice(io, await localVersionNotice(stateDir, io));
   } catch (error) {
     if (error instanceof UsageError) throw new CliUsageError(error.message);
-    if (error instanceof CliError || error instanceof StateDirModeError || error instanceof StateFolderWriteError)
-      throw error;
+    if (error instanceof CliError || isStateModeError(error) || error instanceof StateFolderWriteError) throw error;
     throw new CliError("Could not manage the emend service.");
   }
 }

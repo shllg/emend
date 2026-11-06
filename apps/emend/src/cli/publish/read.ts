@@ -2,8 +2,8 @@ import { constants, type Stats } from "node:fs";
 import { lstat, open, stat as pathStat, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { stateFileError } from "../../state/files.ts";
+import { CliError } from "../error.ts";
 import { escapeReference } from "../escape.ts";
-import { CliError } from "../http.ts";
 
 export class OversizedFile extends CliError {
   constructor() {

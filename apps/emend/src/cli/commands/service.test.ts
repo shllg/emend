@@ -4,6 +4,7 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   realpath,
   stat,
@@ -18,10 +19,13 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { type Io, run } from "../../main.ts";
 import { startServer } from "../../server/serve.ts";
 import * as stateFiles from "../../state/files.ts";
+import * as credentials from "../../state/token-file.ts";
+import { VERSION } from "../../version.ts";
 import { CliError } from "../http.ts";
 import type { ServiceOptions, ServiceResult, ServiceRunner } from "../service/common.ts";
 import { writeService } from "../service/common.ts";
 import { waitForServer as waitForManagedServer } from "../service/takeover.ts";
+import { provenTestServer } from "../test-support.ts";
 
 vi.mock("../service/common.ts", async (original) => {
   const actual = await original<typeof import("../service/common.ts")>();
@@ -52,6 +56,13 @@ let stopLocalServer: ReturnType<typeof vi.fn<NonNullable<ServiceOptions["stopLoc
 let waitForServer: ReturnType<typeof vi.fn<NonNullable<ServiceOptions["waitForServer"]>>>;
 let elapsed: number;
 let sleep: ReturnType<typeof vi.fn<(ms: number) => Promise<void>>>;
+
+async function gitDirectory(directory: string) {
+  const git = join(directory, ".git");
+  await mkdir(join(git, "objects"), { recursive: true });
+  await mkdir(join(git, "refs"));
+  await writeFile(join(git, "HEAD"), "ref: refs/heads/main\n");
+}
 
 beforeEach(async () => {
   root = await realpath(await mkdtemp(join(process.env.EMEND_HOME as string, "service-")));
@@ -86,7 +97,7 @@ beforeEach(async () => {
   });
   const cwd = join(root, "cwd");
   await mkdir(cwd);
-  await mkdir(join(cwd, ".git"));
+  await gitDirectory(cwd);
   await writeFile(join(home, "node"), "synthetic node");
   await writeFile(join(home, "emend.mjs"), "synthetic entry");
   options = {
@@ -159,6 +170,38 @@ function resetOutput() {
 async function invoke(...args: string[]) {
   return run(["service", ...args], io);
 }
+
+test.each(["linux", "darwin"])(
+  "%s service install refuses a loose admin token before changing files",
+  async (platform) => {
+    options.platform = platform;
+    delete options.stopLocalServer;
+    const path = join(state, "admin.token");
+    stateFiles.writeSecretFile(path, `em_${"a".repeat(43)}`);
+    const proof = provenTestServer(state);
+    await chmod(path, 0o644);
+    const before = await readdir(state);
+    const fetcher = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const response = proof(url, init);
+      return response
+        ? Response.json({ api: 1, version: "0.1.0", features: ["server-stop"] }, { headers: response.headers })
+        : Response.json({});
+    });
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      expect(await invoke("install")).toBe(1);
+      expect(stderr).toEqual([`Token file ${path} has group or other permissions; fix it with chmod 600 '${path}'\n`]);
+      expect(stdout).toEqual([]);
+      expect(calls()).toEqual([]);
+      expect(fetcher.mock.calls.every(([, init]) => !new Headers(init?.headers).has("Authorization"))).toBe(true);
+      expect(await readdir(state)).toEqual(before);
+      expect((await stat(path)).mode & 0o777).toBe(0o644);
+      await expect(lstat(platform === "linux" ? unitPath() : plistPath())).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  },
+);
 
 test("Linux writes the exact unit with port 4000, spaces, percent, and the resolved state directory", async () => {
   expect(await invoke("install", "--port", "4000")).toBe(0);
@@ -699,6 +742,89 @@ describe.each(["linux", "darwin"])("%s service lifecycle", (platform) => {
       );
     },
   );
+
+  test.each(["older", "equal", "no-record", "unverified", "probe-failed", "query-failed"])(
+    "running service version notice (%s)",
+    async (kind) => {
+      const order: string[] = [];
+      const writeOut = io.stdout;
+      const writeErr = io.stderr;
+      io.stdout = (line) => {
+        order.push("stdout");
+        writeOut(line);
+      };
+      io.stderr = (line) => {
+        order.push("stderr");
+        writeErr(line);
+      };
+      await put(
+        path(),
+        platform === "linux"
+          ? "# written by emend\n"
+          : '<?xml version="1.0" encoding="UTF-8"?>\n<!-- written by emend -->\n',
+      );
+      const proof = kind === "no-record" ? undefined : provenTestServer(state);
+      recorded.mockImplementation(async (_file, args) => {
+        if (args.includes("is-active")) return ok;
+        return kind === "query-failed" && recorded.mock.calls.length > 1
+          ? failed
+          : {
+              ...ok,
+              stdout:
+                platform === "linux" ? `${process.pid}\n` : `target = {\n state = running\n pid = ${process.pid}\n}\n`,
+            };
+      });
+      const fetcher = vi.fn(async (url: string | URL, init?: RequestInit) => {
+        if (kind === "probe-failed") throw new TypeError("synthetic probe failure");
+        const response = proof?.(url, init);
+        return Response.json(
+          { api: 1, version: kind === "equal" ? VERSION : "0.0.9", features: [] },
+          { headers: kind === "unverified" ? {} : response?.headers },
+        );
+      });
+      const readCredential = vi.spyOn(credentials, "readTokenFile");
+      vi.stubGlobal("fetch", fetcher);
+      try {
+        expect(await invoke("status")).toBe(0);
+        expect(stdout).toEqual([`emend: service running (${path()})\n`]);
+        expect(order).toEqual(kind === "older" ? ["stdout", "stderr"] : ["stdout"]);
+        expect(stderr).toEqual(
+          kind === "older"
+            ? [
+                `emend: the emend server at http://127.0.0.1:3636 runs emend 0.0.9; this is emend ${VERSION}. Run emend service install to restart it on emend ${VERSION}.\n`,
+              ]
+            : [],
+        );
+        expect(readCredential).not.toHaveBeenCalled();
+        if (kind === "no-record") expect(fetcher).not.toHaveBeenCalled();
+        else expect(fetcher).toHaveBeenCalledOnce();
+        expect(fetcher.mock.calls.every(([, init]) => !new Headers(init?.headers).has("Authorization"))).toBe(true);
+      } finally {
+        vi.unstubAllGlobals();
+        readCredential.mockRestore();
+      }
+    },
+  );
+
+  test.each(["absent", "stopped"])("%s service never probes a server version", async (status) => {
+    if (status === "stopped") await put(path(), "# written by emend\n");
+    provenTestServer(state);
+    recorded.mockResolvedValue(failed);
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      expect(await invoke("status")).toBe(0);
+      expect(stdout).toEqual([
+        status === "absent"
+          ? "emend: service not installed\n"
+          : `emend: service installed but not running (${path()})\n`,
+      ]);
+      expect(stderr).toEqual([]);
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 test("an identical but unloaded launch agent is bootstrapped without rewriting", async () => {
@@ -989,7 +1115,7 @@ describe.each(["linux", "darwin"])("%s install boundaries", (platform) => {
     const repo = join(root, "reviewed");
     options.cwd = join(repo, "nested");
     await mkdir(options.cwd, { recursive: true });
-    await mkdir(join(repo, ".git"));
+    await gitDirectory(repo);
     const target = join(repo, "node_modules/@shllg/emend/dist", key);
     await put(target, "synthetic runtime");
     const link = join(home, `${key}-link`);
@@ -1016,6 +1142,7 @@ describe.each(["linux", "darwin"])("%s install boundaries", (platform) => {
     ] as const)(`from ${nested}, refuses $key in the outer repository (symlink=$linked)`, async ({ key, linked }) => {
       const repo = join(root, "reviewed");
       const inner = join(repo, nested);
+      await gitDirectory(repo);
       await mkdir(join(repo, ".git", nested === "sub" ? "modules/sub" : "worktrees/feat"), { recursive: true });
       await put(
         join(inner, ".git"),
@@ -1065,7 +1192,7 @@ describe.each(["linux", "darwin"])("%s install boundaries", (platform) => {
     async (kind) => {
       const repo = join(root, "reviewed");
       options.cwd = join(repo, "sub");
-      await mkdir(join(options.cwd, ".git"), { recursive: true });
+      await gitDirectory(options.cwd);
       if (kind === "malformed file") await writeFile(join(repo, ".git"), "not a repository\n");
       else await symlink(kind === "symlink" ? home : join(root, "missing"), join(repo, ".git"));
       expect(await invoke("install")).toBe(1);

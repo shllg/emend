@@ -101,7 +101,7 @@ test("publish stdout is exactly one JSON line and unchanged docs upload nothing 
         GIT_CONFIG_NOSYSTEM: "1",
       },
     });
-    await writeFile(join(state, "agent.token"), `em_${"a".repeat(43)}`);
+    await writeFile(join(state, "agent.token"), `em_${"a".repeat(43)}`, { mode: 0o600 });
     await writeFile(join(state, "instance.json"), JSON.stringify({ id: randomUUID() }));
     await writeFile(join(state, "config.json"), JSON.stringify({ docRoots: [docs] }));
     const input: PublishManifest = {
@@ -176,7 +176,7 @@ test("docs-only without a key, malformed manifests and unknown reviews fail with
       }),
     );
     const proof = provenTestServer(dir);
-    await writeFile(join(dir, "agent.token"), `em_${"a".repeat(43)}`);
+    await writeFile(join(dir, "agent.token"), `em_${"a".repeat(43)}`, { mode: 0o600 });
     await writeFile(join(dir, "instance.json"), JSON.stringify({ id: randomUUID() }));
     vi.stubGlobal(
       "fetch",
@@ -294,7 +294,7 @@ test("a 200 with an invalid publish response reports possible publication on one
         writeup: { overview: "", tldr: "", decisions: null, topics: {} },
       }),
     );
-    await writeFile(join(dir, "agent.token"), `em_${"a".repeat(43)}`);
+    await writeFile(join(dir, "agent.token"), `em_${"a".repeat(43)}`, { mode: 0o600 });
     await writeFile(join(dir, "instance.json"), JSON.stringify({ id: randomUUID() }));
     const proof = provenTestServer(dir);
     vi.stubGlobal(

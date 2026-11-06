@@ -6,6 +6,7 @@ import { findExecutable } from "../executable.ts";
 import { apiRequest, CliError } from "../http.ts";
 import { ensureServer } from "../server-client.ts";
 import { localTarget, readAttachment } from "../target.ts";
+import { hubVersionNotice, localVersionNotice, printVersionNotice } from "../version-notice.ts";
 
 export async function findBrowserOpener(env = process.env) {
   if (process.platform === "linux" && !env.DISPLAY && !env.WAYLAND_DISPLAY) return null;
@@ -45,6 +46,7 @@ export async function openCommand(stateDir: string, io: Io) {
   const openUrl = io.openUrl ?? ((url: string) => openBrowser(url, io.env));
   const attachment = await readAttachment(stateDir);
   if (attachment) {
+    const notice = hubVersionNotice(attachment.hubUrl);
     let opened = false;
     if (config.openBrowser) {
       try {
@@ -54,6 +56,7 @@ export async function openCommand(stateDir: string, io: Io) {
       }
     }
     io.stdout(opened ? "Opening emend in your browser.\n" : `${attachment.hubUrl}\n`);
+    printVersionNotice(io, await notice);
     return;
   }
   let url: string;
@@ -62,9 +65,11 @@ export async function openCommand(stateDir: string, io: Io) {
   } catch {
     throw new CliError("Could not start the emend server.");
   }
+  const notice = await localVersionNotice(stateDir, io, url);
   const terminalHint = `emend is running at ${url}. Run emend in a terminal to get a sign-in link.\n`;
   if (!io.isTTY && (!config.openBrowser || (!io.openUrl && !(await findBrowserOpener(io.env))))) {
     io.stdout(terminalHint);
+    printVersionNotice(io, notice);
     return;
   }
   const response = PairingCreated.safeParse(
@@ -95,4 +100,5 @@ export async function openCommand(stateDir: string, io: Io) {
         ? `Open this link within 10 minutes: ${browserUrl}\n`
         : terminalHint,
   );
+  printVersionNotice(io, notice);
 }

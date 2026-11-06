@@ -24,7 +24,7 @@ devices yourself, give me the command instead;
 never run claude plugin commands yourself, give them to me for my own terminal; never pass --host or any flag this page does not
 name; never retry a command through another program (for example script) to get a terminal; never
 list the devices on my tailnet; outside your sandbox run only emend service install (no new flags),
-emend service status and emend skills install, and no other command; run no process listing
+emend service status, emend stop and emend skills install, and no other command; run no process listing
 yourself, ask me to run pgrep in my own terminal (Linux: pgrep -af '[e]mend.mjs serve'; macOS: pgrep
 -lf '[e]mend.mjs serve').
 Update emend on this machine. Follow
@@ -98,33 +98,41 @@ You should see `emend: keeping the service options ...` when the service has opt
 
 Run it again after every Node.js upgrade, as the note at the top says.
 
-Without the service, the server that `emend` started keeps running the old version. Stop it. Find
-it in your own terminal and end the process it lists. The next `emend` starts the new version. On
-Linux:
+Without the service, the server that `emend` started keeps running the old version. Stop it:
 
 ```sh
-pgrep -af '[e]mend.mjs serve'
+emend stop
 ```
 
-On macOS:
+You should see `emend: stopped the emend server at <url>`, or `emend: no emend server is running.`
+The next `emend` starts the new version.
 
-```sh
-pgrep -lf '[e]mend.mjs serve'
+Until the server runs the new version, `emend` and `emend service status` print one line that
+names both versions and the command that fixes it, for example:
+
+```text
+emend: the emend server at http://127.0.0.1:3636 runs emend 0.2.0; this is emend 0.3.0. Run emend stop, then emend, to start emend 0.3.0.
 ```
 
-If `emend service install` says a server is too old to be asked to stop, see
+Run the command that line names. See
+[troubleshooting.md](troubleshooting.md#emend-says-the-server-runs-another-version) for the other
+forms of the line.
+
+If `emend service install` or `emend stop` says a server is from an older emend and cannot be asked
+to stop, see
 [troubleshooting.md](troubleshooting.md#a-server-from-an-older-emend-cannot-be-asked-to-stop).
 
 ```text
 Rules: show me each change and wait for my yes; never read secrets (tokens, .env files, credential
-stores) or emend's state folder; outside your sandbox run only emend service install (no new flags)
-and emend service status, and no other command; never pass --host or any flag this page does not
-name; never retry a command through another program (for example script) to get a terminal; run no
-process listing yourself, ask me to run pgrep in my own terminal (Linux: pgrep -af '[e]mend.mjs
-serve'; macOS: pgrep -lf '[e]mend.mjs serve').
+stores) or emend's state folder; outside your sandbox run only emend service install (no new flags),
+emend service status and emend stop, and no other command; never pass --host or any flag this page
+does not name; never retry a command through another program (for example script) to get a
+terminal; run no process listing yourself, ask me to run pgrep in my own terminal (Linux: pgrep -af
+'[e]mend.mjs serve'; macOS: pgrep -lf '[e]mend.mjs serve').
 If I installed the emend service, run emend service install and emend service status and show me
-both outputs; it keeps its options and restarts the server. If I did not, ask me to run the pgrep
-command for my system and to end any emend server it lists; the next emend starts the new version.
+both outputs; it keeps its options and restarts the server. If I did not, run emend stop and show
+me the output; the next emend starts the new version. If emend stop says the server is from an
+older emend, ask me to run the pgrep command for my system and to end the process it lists.
 If I upgraded Node.js (brew upgrade node, mise upgrade node), the service install must run again.
 ```
 
@@ -190,7 +198,8 @@ section, tap Check for update, then Update now, then Reload. Do not try to do th
 ## Check that it works
 
 1. `emend --version` prints the new version on every machine you updated.
-2. `emend service status` prints `emend: service running (<path>)` where you use the service.
+2. `emend service status` prints `emend: service running (<path>)` where you use the service, and
+   no line that the server runs another version.
 3. Open the web app, then Devices. The App section shows the new `emend <version>`. This is the
    version of the server that serves the page. If it shows the old one, the old server still runs:
    repeat step 3.
@@ -222,6 +231,7 @@ the newer version.
 
 ## When something goes wrong
 
+- [emend says the server runs another version](troubleshooting.md#emend-says-the-server-runs-another-version)
 - [A server from an older emend cannot be asked to stop](troubleshooting.md#a-server-from-an-older-emend-cannot-be-asked-to-stop)
 - [The service does not start](troubleshooting.md#the-service-does-not-start)
 - [The client needs an update](troubleshooting.md#the-client-needs-an-update)

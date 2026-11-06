@@ -1,13 +1,13 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readFile, realpath, rename, unlink } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
+import { dirname, isAbsolute, join } from "node:path";
 import type { Io } from "../../main.ts";
 import { escapeReference } from "../escape.ts";
 import { findExecutable } from "../executable.ts";
 import { CliError } from "../http.ts";
-import { isWorktreeRoot } from "../publish/root.ts";
 import type { CliRuntime } from "../runtime.ts";
+import { runtimeInRepository } from "../runtime-repository.ts";
 import type { ServerReadyOptions } from "./takeover.ts";
 
 export interface ServiceResult {
@@ -89,25 +89,10 @@ export function validatePaths(...paths: string[]) {
 }
 
 export async function validateServiceRuntime(runtime: CliRuntime, cwd: string) {
-  const roots: string[] = [];
-  let directory = await realpath(cwd);
-  for (;;) {
-    if (await isWorktreeRoot(directory)) roots.push(directory);
-    const parent = dirname(directory);
-    if (parent === directory) break;
-    directory = parent;
-  }
-  if (roots.length === 0) return;
-  const paths = await Promise.all([realpath(runtime.node), realpath(runtime.entry)]);
-  for (const root of roots) {
-    for (const path of paths) {
-      const fromRoot = relative(root, path);
-      if (fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`) && !isAbsolute(fromRoot))
-        throw new CliError(
-          "this emend runs from inside the current repository; run emend service install from outside it.",
-        );
-    }
-  }
+  if (await runtimeInRepository(runtime, cwd))
+    throw new CliError(
+      "this emend runs from inside the current repository; run emend service install from outside it.",
+    );
 }
 
 export async function serviceFile(path: string) {
@@ -119,10 +104,13 @@ export async function serviceFile(path: string) {
   }
 }
 
+export class ServiceFileNotOwned extends CliError {}
+
 export async function readOwnedService(path: string, prefix: string): Promise<string | undefined> {
   const info = await serviceFile(path);
   if (!info) return undefined;
-  const refuse = () => new CliError(`${escapeReference(path)} was not written by emend; move it away, then try again.`);
+  const refuse = () =>
+    new ServiceFileNotOwned(`${escapeReference(path)} was not written by emend; move it away, then try again.`);
   if (!info.isFile()) throw refuse();
   const content = await readFile(path, "utf8");
   if (!content.startsWith(prefix) && content !== prefix.slice(0, -1)) throw refuse();

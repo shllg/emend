@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { chmod, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -30,6 +30,21 @@ async function connected(withServer = true) {
 }
 const reviewId = randomUUID();
 const approve = { kind: "approve", reviewId, deliveryId: randomUUID(), revision: 1 };
+
+test.each(["folder", "token"])("MCP returns the precise permission error for a loose %s", async (kind) => {
+  const f = await connected();
+  const path = kind === "folder" ? f.dir : join(f.dir, "agent.token");
+  await chmod(path, kind === "folder" ? 0o755 : 0o644);
+  const result = await f.client.callTool({ name: "get_feedback", arguments: { reviewId } });
+  expect(result.isError).toBe(true);
+  expect(result.content).toEqual([
+    {
+      type: "text",
+      text: `${kind === "folder" ? "State directory" : "Token file"} ${path} has group or other permissions; fix it with chmod ${kind === "folder" ? "700" : "600"} '${path}'\n`,
+    },
+  ]);
+  expect(f.fetcher.mock.calls.every(([, init]) => !new Headers(init?.headers).has("Authorization"))).toBe(true);
+});
 
 test("MCP lists three schema-bearing tools without resolving a target, then discovers a later server", async () => {
   const f = await connected(false);

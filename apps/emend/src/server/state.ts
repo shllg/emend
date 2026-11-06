@@ -49,7 +49,7 @@ export async function initializeServerState(stateDir: string, options: { tokens?
           .where(and(eq(tokens.ownerId, ownerId), eq(tokens.kind, "admin"), isNull(tokens.instanceId)));
         for (const kind of ["admin", "agent"] as const) {
           const path = join(stateDir, `${kind}.token`);
-          const secret = await readTokenFile(path, true);
+          const secret = await readTokenFile(path, { tighten: true });
           const token = secret && BEARER_SHAPE.test(secret) ? await liveToken(q, secret, now) : null;
           if (!token || token.ownerId !== ownerId || token.kind !== kind || token.instanceId !== instance.id) {
             const replacement =

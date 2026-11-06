@@ -18,9 +18,11 @@ vi.mock("../executable.ts", async (original) => {
   const actual = await original<typeof import("../executable.ts")>();
   return {
     // The CLI cannot pass RunOptions: refuse the real macOS app fallback, even after teardown.
-    async findExecutable(name: string, searchPath: string) {
-      if (!executablePaths.has(searchPath)) throw new Error("executable lookup outside the test fixtures");
-      return actual.findExecutable(name, searchPath);
+    async findExecutable(...args: Parameters<typeof actual.findExecutable>) {
+      const searchPath = args[1];
+      if (searchPath === undefined || !executablePaths.has(searchPath))
+        throw new Error("executable lookup outside the test fixtures");
+      return actual.findExecutable(...args);
     },
   };
 });
@@ -308,7 +310,7 @@ test.each(["setup-after-write", "setup-timeout"] as const)(
   },
   5_000,
 );
-test("a failed setup without a write rechecks status and leaves the config untouched", async () => {
+test("a denied setup leaves the config untouched and runs no cleanup", async () => {
   const f = await fixture("tls-port", "setup");
   const before = await readFile(f.configPath, "utf8");
   expect(await f.run(["serve", "--tailscale", "--port", "41999"])).toBe(1);
@@ -319,10 +321,10 @@ test("a failed setup without a write rechecks status and leaves the config untou
     "status --json",
     "serve status --json",
     "serve --bg --https=443 http://127.0.0.1:41999",
-    "serve status --json",
   ]);
   expect(await readFile(f.configPath, "utf8")).toBe(before);
   expect(await f.saved()).toEqual({ baseUrl: "http://127.0.0.1:41999" });
+  await expect(stat(join(f.dir, "tailscale-serve.json"))).rejects.toMatchObject({ code: "ENOENT" });
 });
 test.each(["empty", "same"] as const)(
   "a stop after %s setup removes only a Serve route created by this process",

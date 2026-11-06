@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { LIMITS } from "@emend/contract";
 import { expect, test, vi } from "vitest";
 import { run } from "../main.ts";
+import { writeSecretFile } from "../state/files.ts";
 import * as tokens from "../state/token-file.ts";
 import { apiRequest } from "./http.ts";
 import * as discovery from "./server-client.ts";
@@ -11,6 +12,41 @@ import { readAttachmentPair, resolveTarget } from "./target.ts";
 import { commandFixture } from "./test-support.ts";
 
 const hub = { hubUrl: "https://hub.example", hubId: randomUUID(), hubName: "Synthetic hub" };
+
+test.each(["folder", "agent", "admin"])("CLI refuses loose %s permissions without changes", async (kind) => {
+  const f = await commandFixture();
+  const path = kind === "folder" ? f.dir : join(f.dir, `${kind}.token`);
+  if (kind === "admin") await writeFile(path, `em_${"b".repeat(43)}`, { mode: 0o600 });
+  const before = await readdir(f.dir);
+  const bytes = kind === "folder" ? undefined : await readFile(path);
+  const mode = kind === "folder" ? 0o755 : 0o644;
+  await chmod(path, mode);
+  f.io.isTTY = true;
+  expect(await run(kind === "admin" ? [] : ["ls"], f.io)).toBe(1);
+  expect(f.stderr).toEqual([
+    `${kind === "folder" ? "State directory" : "Token file"} ${path} has group or other permissions; fix it with chmod ${kind === "folder" ? "700" : "600"} '${path}'\n`,
+  ]);
+  expect(f.stdout).toEqual([]);
+  expect(f.fetcher.mock.calls.every(([, init]) => !new Headers(init?.headers).has("Authorization"))).toBe(true);
+  expect((await stat(path)).mode & 0o777).toBe(mode);
+  expect(await readdir(f.dir)).toEqual(before);
+  if (bytes) expect(await readFile(path)).toEqual(bytes);
+});
+
+test.each(["folder", "token"])(
+  "an attached wait refuses loose %s permissions before contacting the hub",
+  async (kind) => {
+    const f = await attached();
+    const path = kind === "folder" ? f.dir : join(f.dir, "hub.token");
+    await chmod(path, kind === "folder" ? 0o755 : 0o644);
+    expect(await run(["wait", randomUUID()], f.io)).toBe(1);
+    expect(f.stderr).toEqual([
+      `${kind === "folder" ? "State directory" : "Token file"} ${path} has group or other permissions; fix it with chmod ${kind === "folder" ? "700" : "600"} '${path}'\n`,
+    ]);
+    expect(f.stdout).toEqual([]);
+    expect(f.fetcher).not.toHaveBeenCalled();
+  },
+);
 
 test("a thrown discovery error never selects direct mode", async () => {
   const f = await commandFixture();
@@ -21,7 +57,7 @@ test("a thrown discovery error never selects direct mode", async () => {
 async function attached() {
   const f = await commandFixture();
   await writeFile(join(f.dir, "attach.json"), JSON.stringify(hub));
-  await writeFile(join(f.dir, "hub.token"), `em_${"b".repeat(43)}`);
+  writeSecretFile(join(f.dir, "hub.token"), `em_${"b".repeat(43)}`);
   return f;
 }
 
@@ -41,7 +77,7 @@ test.each(["another hub", "same fields, different bytes", "removed", "removed wi
             ? JSON.stringify({ ...hub, hubUrl: "https://other.example.test" })
             : `${JSON.stringify(hub)}\n`,
         );
-        await writeFile(join(f.dir, "hub.token"), `em_${"y".repeat(43)}`);
+        writeSecretFile(join(f.dir, "hub.token"), `em_${"y".repeat(43)}`);
       }
       return read(...args);
     });
@@ -56,7 +92,7 @@ test("target resolution preserves both values from an earlier attachment pair", 
   const f = await attached();
   const pair = await readAttachmentPair(f.dir);
   await writeFile(join(f.dir, "attach.json"), JSON.stringify({ ...hub, hubUrl: "https://other.example.test" }));
-  await writeFile(join(f.dir, "hub.token"), `em_${"y".repeat(43)}`);
+  writeSecretFile(join(f.dir, "hub.token"), `em_${"y".repeat(43)}`);
   const target = await resolveTarget(f.dir, pair);
   expect(target).toEqual({ via: "hub", url: hub.hubUrl, token: `em_${"b".repeat(43)}` });
   expect(f.fetcher).toHaveBeenCalledExactlyOnceWith(`${hub.hubUrl}/api/v1/capabilities`, expect.anything());
@@ -73,7 +109,7 @@ test("an A -> B -> A registration change refuses the captured B token before any
     // Detach A, register B, and capture B's credential.
     await rm(path);
     await rm(tokenPath);
-    await writeFile(tokenPath, `em_${"y".repeat(43)}`);
+    writeSecretFile(tokenPath, `em_${"y".repeat(43)}`);
     await writeFile(
       path,
       JSON.stringify({
@@ -86,7 +122,7 @@ test("an A -> B -> A registration change refuses the captured B token before any
     // Detach B and register A again; only A's registration id differs.
     await rm(path);
     await rm(tokenPath);
-    await writeFile(tokenPath, `em_${"z".repeat(43)}`);
+    writeSecretFile(tokenPath, `em_${"z".repeat(43)}`);
     await writeFile(path, JSON.stringify({ ...first, registration: Buffer.alloc(16, 3).toString("base64url") }));
     return captured;
   });
@@ -158,7 +194,7 @@ test.each(["malformed", "directory", "dangling", "missing-token", "bad-token", "
     if (kind === "directory") await mkdir(path);
     else if (kind === "dangling") await symlink(join(f.dir, "absent"), path);
     else await writeFile(path, kind === "malformed" ? "{" : JSON.stringify(hub));
-    if (kind === "bad-token") await writeFile(join(f.dir, "hub.token"), "invalid");
+    if (kind === "bad-token") writeSecretFile(join(f.dir, "hub.token"), "invalid");
     if (kind === "token-directory") await mkdir(join(f.dir, "hub.token"));
     expect(await run(["feedback", randomUUID()], f.io)).toBe(1);
     expect(f.fetcher).not.toHaveBeenCalled();

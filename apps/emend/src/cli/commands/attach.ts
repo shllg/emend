@@ -4,6 +4,7 @@ import { LIMITS, MachineRegistered, MachineRegistration } from "@emend/contract"
 import type { Io } from "../../main.ts";
 import { initializeServerState } from "../../server/state.ts";
 import { stateAccessError, writeSecretFile } from "../../state/files.ts";
+import { checkTokenFileMode } from "../../state/token-file.ts";
 import { copyReviews, safeMessage } from "../attach/copy.ts";
 import { cleanupAttachment, removeAttachment, removePendingAttachment, revokeMachine } from "../attach/files.ts";
 import { lockAttach } from "../attach/lock.ts";
@@ -39,6 +40,7 @@ export function pairingLink(value: string) {
 export async function attachCommand(stateDir: string, args: string[], io: Io) {
   if (args.length !== 1) throw new CliUsageError("Invalid pairing link.");
   const link = pairingLink(args[0] ?? "");
+  await checkTokenFileMode(join(stateDir, "hub.token"));
   const release = lockAttach(stateDir);
   try {
     await withAttachSignals((signal) => attach(stateDir, link, io, signal));

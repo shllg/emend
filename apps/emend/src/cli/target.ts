@@ -2,7 +2,7 @@ import { lstat } from "node:fs/promises";
 import { isIP } from "node:net";
 import { join } from "node:path";
 import { Capabilities, LIMITS, ReplyCreated } from "@emend/contract";
-import { StateFolderWriteError, stateAccessError } from "../state/files.ts";
+import { isStateModeError, StateFolderWriteError, stateAccessError } from "../state/files.ts";
 import { readTokenFile } from "../state/token-file.ts";
 import { VERSION } from "../version.ts";
 import { CliError, hubFailure, hubFailureReason } from "./http.ts";
@@ -43,6 +43,7 @@ async function credential(stateDir: string, kind: "agent" | "admin" | "hub"): Pr
   try {
     token = await readTokenFile(join(stateDir, `${kind}.token`));
   } catch (error) {
+    if (isStateModeError(error)) throw error;
     const mapped = stateAccessError(stateDir, error);
     if (mapped instanceof StateFolderWriteError) throw mapped;
     throw new CliError("Could not read the emend credential.");
@@ -132,7 +133,7 @@ export async function readAttachmentPair(stateDir: string): Promise<AttachmentPa
     throw new AttachmentChangedError();
   }
   if (before === null ? after !== null : after === null || !before.equals(after)) throw new AttachmentChangedError();
-  if (tokenError instanceof StateFolderWriteError) throw tokenError;
+  if (tokenError instanceof StateFolderWriteError || isStateModeError(tokenError)) throw tokenError;
   if (attachment && tokenError) throw new AttachmentCredentialError(attachment, tokenError);
   return attachment && token ? { attachment, token } : null;
 }

@@ -8,6 +8,7 @@ import {
   readOwnedService,
   type ServiceAction,
   type ServiceContext,
+  type ServiceTool,
   serviceFile,
   serviceStatus,
   unsupportedService,
@@ -15,6 +16,25 @@ import {
   writeService,
 } from "./common.ts";
 import { markServicePending, removeServiceOptions, saveServiceOptions, serviceInstallOptions } from "./options.ts";
+
+const prefix = "# written by emend\n";
+
+function unitPath(home: string, config: string | undefined) {
+  return join(config && isAbsolute(config) ? config : join(home, ".config"), "systemd/user/emend.service");
+}
+
+async function systemdMainPid(systemctl: ServiceTool, failure: "throw" | "ignore" = "ignore"): Promise<number> {
+  const result = await systemctl(["--user", "show", "--property=MainPID", "--value", "emend"], failure);
+  const pid = Number(result.stdout.trim());
+  return result.code === 0 && Number.isSafeInteger(pid) && pid > 0 ? pid : 0;
+}
+
+export async function systemdServerPid(context: Pick<ServiceContext, "home" | "io" | "tool">): Promise<number> {
+  const path = unitPath(context.home, context.io.env.XDG_CONFIG_HOME);
+  validatePaths(path);
+  if ((await readOwnedService(path, prefix)) === undefined) return 0;
+  return systemdMainPid(await context.tool("systemctl"), "throw");
+}
 
 export function systemdWord(word: string, execStart: boolean): string {
   let escaped = word.replaceAll("%", "%%");
@@ -24,8 +44,7 @@ export function systemdWord(word: string, execStart: boolean): string {
 
 function unit(context: ServiceContext): string {
   const { node, entry, flags, stateDir } = context;
-  return `# written by emend
-[Unit]
+  return `${prefix}[Unit]
 Description=emend review server
 
 [Service]
@@ -50,15 +69,18 @@ export async function systemdService(action: ServiceAction, context: ServiceCont
       throw new CliError(unsupportedService);
     throw error;
   });
-  const config = io.env.XDG_CONFIG_HOME;
-  const path = join(config && isAbsolute(config) ? config : join(home, ".config"), "systemd/user/emend.service");
+  const path = unitPath(home, io.env.XDG_CONFIG_HOME);
   validatePaths(path);
   if (action === "status") {
     if (!(await serviceFile(path))) io.stdout("emend: service not installed\n");
-    else serviceStatus(io, path, (await systemctl(["--user", "is-active", "emend"], "ignore")).code === 0);
+    else {
+      const running = (await systemctl(["--user", "is-active", "emend"], "ignore")).code === 0;
+      serviceStatus(io, path, running);
+      return running;
+    }
     return;
   }
-  const previous = await readOwnedService(path, "# written by emend\n");
+  const previous = await readOwnedService(path, prefix);
   if (action === "uninstall") {
     if (previous === undefined) {
       await removeServiceOptions(stateDir);
@@ -95,9 +117,7 @@ export async function systemdService(action: ServiceAction, context: ServiceCont
   const found = await context.waitForServer({
     tailscale: flags.includes("--tailscale"),
     mainPid: async () => {
-      const result = await systemctl(["--user", "show", "--property=MainPID", "--value", "emend"], "ignore");
-      const pid = Number(result.stdout.trim());
-      mainPid = result.code === 0 && Number.isSafeInteger(pid) && pid > 0 ? pid : 0;
+      mainPid = await systemdMainPid(systemctl);
       return mainPid;
     },
   });

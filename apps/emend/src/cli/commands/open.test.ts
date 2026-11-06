@@ -1,10 +1,12 @@
-import { access } from "node:fs/promises";
+import { access, chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import { testDb } from "../../db/test-support.ts";
 import { run } from "../../main.ts";
 import { writeSecretFile } from "../../state/files.ts";
 import * as credentials from "../../state/token-file.ts";
+import { VERSION } from "../../version.ts";
+import { escapeReference } from "../escape.ts";
 import { ensureServer } from "../server-client.ts";
 import { commandFixture, provenTestServer } from "../test-support.ts";
 
@@ -16,6 +18,226 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.clearAllMocks();
+});
+
+const updateUrl = "https://github.com/shllg/emend/blob/release/docs/setup/update.md";
+const localUrl = "http://127.0.0.1:3636";
+
+async function versionFixture(version: string) {
+  const f = await commandFixture();
+  writeSecretFile(join(f.dir, "config.json"), JSON.stringify({ openBrowser: false }));
+  f.io.service = { platform: "linux", home: f.dir, uid: 501 };
+  const proof = provenTestServer(f.dir);
+  f.fetcher.mockImplementation(async (url, init) => {
+    const response = proof(url, init);
+    return response
+      ? Response.json({ api: 1, version, features: [] }, { headers: response.headers })
+      : Response.json({ items: [] });
+  });
+  return f;
+}
+
+async function attach(f: Awaited<ReturnType<typeof commandFixture>>) {
+  const url = "https://hub.example.test";
+  writeSecretFile(
+    join(f.dir, "attach.json"),
+    JSON.stringify({
+      hubId: "11111111-1111-4111-8111-111111111111",
+      hubName: "Synthetic hub",
+      hubUrl: url,
+    }),
+  );
+  return url;
+}
+
+test.each([VERSION, "0.0.9", "0.10.0", "0.1.0-dev", "00.1.0", "0.1.0\n\u001b[31m"])(
+  "bare emend reports local version %j without changing stdout",
+  async (version) => {
+    const f = await versionFixture(version);
+    const readCredential = vi.spyOn(credentials, "readTokenFile");
+    expect(await run([], f.io)).toBe(0);
+    expect(f.stdout).toEqual([`emend is running at ${localUrl}. Run emend in a terminal to get a sign-in link.\n`]);
+    expect(f.stderr).toEqual(
+      version === VERSION
+        ? []
+        : [
+            version === "0.10.0"
+              ? `emend: the emend server at ${localUrl} runs emend ${version}, newer than this emend ${VERSION}; update emend: ${updateUrl}\n`
+              : `emend: the emend server at ${localUrl} runs emend ${escapeReference(version)}; this is emend ${VERSION}. Run emend stop, then emend, to start emend ${VERSION}.\n`,
+          ],
+    );
+    expect(readCredential).not.toHaveBeenCalled();
+    expect(f.fetcher.mock.calls.every(([, init]) => !new Headers(init?.headers).has("Authorization"))).toBe(true);
+  },
+);
+
+test.each(["matching", "failed-query", "missing-tool"])(
+  "bare emend checks service ownership (%s) before advising a restart",
+  async (kind) => {
+    const f = await versionFixture("0.0.9");
+    const directory = join(f.dir, ".config/systemd/user");
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, "emend.service"), "# written by emend\n");
+    await writeFile(join(f.dir, "systemctl"), "synthetic executable\n", { mode: 0o755 });
+    f.io.env.PATH = kind === "missing-tool" ? "" : f.dir;
+    const runner = vi.fn(async () => ({
+      code: kind === "failed-query" ? 1 : 0,
+      stdout: `${process.pid}\n`,
+      stderr: "",
+    }));
+    if (f.io.service) f.io.service.runner = runner;
+    expect(await run([], f.io)).toBe(0);
+    expect(f.stdout).toEqual([`emend is running at ${localUrl}. Run emend in a terminal to get a sign-in link.\n`]);
+    expect(f.stderr).toEqual(
+      kind === "matching"
+        ? [
+            `emend: the emend server at ${localUrl} runs emend 0.0.9; this is emend ${VERSION}. Run emend service install to restart it on emend ${VERSION}.\n`,
+          ]
+        : [],
+    );
+  },
+);
+
+test.each(["unverified", "unreachable"])("bare emend ignores a %s version probe", async (kind) => {
+  const f = await versionFixture("0.0.9");
+  f.fetcher.mockImplementation(async () => {
+    if (kind === "unreachable") throw new TypeError("synthetic unavailable server");
+    return Response.json({ api: 1, version: "0.0.9", features: [] });
+  });
+  expect(await run([], f.io)).toBe(0);
+  expect(f.stderr).toEqual([]);
+  expect(f.stdout).toEqual([`emend is running at ${localUrl}. Run emend in a terminal to get a sign-in link.\n`]);
+});
+
+test.each([
+  [VERSION, ""],
+  ["0.0.9", "Update the hub"],
+  ["0.10.0", "Update this machine"],
+  ["snapshot\n\u001b[31m", "Update both to the same version"],
+  ["0.1.0\n", "Update both to the same version"],
+])("attached emend reports hub version %j", async (version, action) => {
+  const f = await versionFixture(version);
+  const url = await attach(f);
+  const readCredential = vi.spyOn(credentials, "readTokenFile");
+  expect(await run([], f.io)).toBe(0);
+  expect(f.stdout).toEqual([`${url}\n`]);
+  expect(f.stderr).toEqual(
+    action
+      ? [
+          `emend: the hub at ${url} runs emend ${escapeReference(version)}; this machine runs emend ${VERSION}. ${action}: ${updateUrl}\n`,
+        ]
+      : [],
+  );
+  expect(readCredential).not.toHaveBeenCalled();
+  expect(f.fetcher).toHaveBeenCalledOnce();
+  expect(f.fetcher.mock.calls[0]?.[0]).toBe(`${url}/api/v1/capabilities`);
+  expect(new Headers(f.fetcher.mock.calls[0]?.[1]?.headers).has("Authorization")).toBe(false);
+});
+
+test.each(["unreachable", "timeout", "invalid-json"])("attached emend ignores a hub %s", async (kind) => {
+  const f = await versionFixture("0.0.9");
+  const url = await attach(f);
+  f.fetcher.mockImplementation(async () => {
+    if (kind === "timeout") throw new DOMException("synthetic timeout", "TimeoutError");
+    if (kind === "unreachable") throw new TypeError("synthetic unreachable hub");
+    return new Response("{");
+  });
+  expect(await run([], f.io)).toBe(0);
+  expect(f.stdout).toEqual([`${url}\n`]);
+  expect(f.stderr).toEqual([]);
+});
+
+test("attached emend opens the browser while the version probe is pending", async () => {
+  const f = await versionFixture("0.0.9");
+  const url = await attach(f);
+  writeSecretFile(join(f.dir, "config.json"), JSON.stringify({ openBrowser: true }));
+  const opened = Promise.withResolvers<void>();
+  f.fetcher.mockImplementation(async () => {
+    await opened.promise;
+    return Response.json({ api: 1, version: "0.0.9", features: [] });
+  });
+  f.io.openUrl = async () => {
+    opened.resolve();
+    return true;
+  };
+  expect(await run([], f.io)).toBe(0);
+  expect(f.stdout).toEqual(["Opening emend in your browser.\n"]);
+  expect(f.stderr).toEqual([
+    `emend: the hub at ${url} runs emend 0.0.9; this machine runs emend ${VERSION}. Update the hub: ${updateUrl}\n`,
+  ]);
+});
+
+test("ls against an older server prints no version notice", async () => {
+  const f = await versionFixture("0.0.9");
+  expect(await run(["ls", "--json"], f.io)).toBe(0);
+  expect(f.stderr).toEqual([]);
+  expect(f.stdout).toEqual(['{"items":[]}\n']);
+});
+
+test.each(["pairing", "token-mode"])("an older server plus a %s failure prints only the error", async (failure) => {
+  const f = await versionFixture("0.0.9");
+  const path = join(f.dir, "admin.token");
+  writeSecretFile(path, `em_${"a".repeat(43)}`);
+  if (failure === "token-mode") await chmod(path, 0o644);
+  const normal = f.fetcher.getMockImplementation();
+  f.fetcher.mockImplementation(async (url, init) => {
+    if (String(url).endsWith("/pairings")) throw new TypeError("synthetic pairing failure");
+    if (!normal) throw new Error("Missing fixture response");
+    return normal(url, init);
+  });
+  expect(await run([], { ...f.io, isTTY: true })).toBe(1);
+  expect(f.stdout).toEqual([]);
+  expect(f.stderr).toEqual([
+    failure === "pairing"
+      ? "emend: Could not contact the emend server.\n"
+      : `Token file ${path} has group or other permissions; fix it with chmod 600 '${path}'\n`,
+  ]);
+});
+
+test("bare emend prints version advice after its successful stdout line", async () => {
+  const f = await versionFixture("0.0.9");
+  const order: string[] = [];
+  const stdout = f.io.stdout;
+  const stderr = f.io.stderr;
+  f.io.stdout = (line) => {
+    order.push("stdout");
+    stdout(line);
+  };
+  f.io.stderr = (line) => {
+    order.push("stderr");
+    stderr(line);
+  };
+  expect(await run([], f.io)).toBe(0);
+  expect(order).toEqual(["stdout", "stderr"]);
+});
+
+test("an unanswered hub version probe uses a one-second abort signal", async () => {
+  const f = await versionFixture("0.0.9");
+  const url = await attach(f);
+  const controller = new AbortController();
+  const timeout = AbortSignal.timeout;
+  const deadlines = vi
+    .spyOn(AbortSignal, "timeout")
+    .mockImplementation((ms) => (ms === 1000 ? controller.signal : timeout(ms)));
+  const entered = Promise.withResolvers<void>();
+  const answer = Promise.withResolvers<Response>();
+  f.fetcher.mockImplementation(async (_url, init) => {
+    init?.signal?.addEventListener("abort", () => answer.reject(init.signal?.reason), { once: true });
+    entered.resolve();
+    return answer.promise;
+  });
+  const command = run([], f.io);
+  await entered.promise;
+  try {
+    expect(deadlines).toHaveBeenCalledWith(1000);
+    controller.abort(new DOMException("synthetic deadline", "TimeoutError"));
+    expect(await command).toBe(0);
+    expect(f.stdout).toEqual([`${url}\n`]);
+    expect(f.stderr).toEqual([]);
+  } finally {
+    answer.reject(new DOMException("fixture cleanup", "AbortError"));
+    await command;
+  }
 });
 test.each(
   [true, false, undefined].flatMap((isTTY) => [
@@ -171,7 +393,9 @@ test.each(
     if (openBrowser) expect(openUrl).toHaveBeenCalledExactlyOnceWith(hubUrl);
     else expect(openUrl).not.toHaveBeenCalled();
     expect(ensureServer).not.toHaveBeenCalled();
-    expect(f.fetcher).not.toHaveBeenCalled();
+    expect(f.fetcher).toHaveBeenCalledOnce();
+    expect(f.fetcher.mock.calls[0]?.[0]).toBe(`${hubUrl}/api/v1/capabilities`);
+    expect(new Headers(f.fetcher.mock.calls[0]?.[1]?.headers).has("Authorization")).toBe(false);
   },
 );
 
@@ -202,7 +426,9 @@ test.each([false, undefined])(
     expect(f.stderr).toEqual([]);
     expect(ensureServer).toHaveBeenCalledWith(f.dir);
     expect(readCredential).not.toHaveBeenCalled();
-    expect(f.fetcher).not.toHaveBeenCalled();
+    expect(f.fetcher).toHaveBeenCalledOnce();
+    expect(f.fetcher.mock.calls[0]?.[0]).toBe(`${localUrl}/api/v1/capabilities`);
+    expect(new Headers(f.fetcher.mock.calls[0]?.[1]?.headers).has("Authorization")).toBe(false);
     expect(openUrl).not.toHaveBeenCalled();
   },
 );
@@ -232,6 +458,8 @@ test.each(
     expect(f.stderr).toEqual([]);
     expect(ensureServer).toHaveBeenCalledWith(f.dir);
     expect(readCredential).not.toHaveBeenCalled();
-    expect(f.fetcher).not.toHaveBeenCalled();
+    expect(f.fetcher).toHaveBeenCalledOnce();
+    expect(f.fetcher.mock.calls[0]?.[0]).toBe(`${localUrl}/api/v1/capabilities`);
+    expect(new Headers(f.fetcher.mock.calls[0]?.[1]?.headers).has("Authorization")).toBe(false);
   },
 );

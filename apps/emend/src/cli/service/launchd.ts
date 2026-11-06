@@ -18,6 +18,33 @@ import {
 import { markServicePending, removeServiceOptions, saveServiceOptions, serviceInstallOptions } from "./options.ts";
 
 const declaration = '<?xml version="1.0" encoding="UTF-8"?>';
+const prefix = `${declaration}\n<!-- written by emend -->\n`;
+
+function plistPath(home: string) {
+  return join(home, "Library/LaunchAgents/dev.emend.server.plist");
+}
+
+async function launchdMainPid(
+  launchctl: ServiceTool,
+  target: string,
+  failure: "throw" | "ignore" = "ignore",
+): Promise<number> {
+  const result = await launchctl(["print", target], failure === "throw" ? "ignore" : failure);
+  if (failure === "throw" && result.code !== 0 && result.code !== 113) {
+    const detail = result.stderr.split(/[\r\n]/, 1)[0] || `exit ${result.code}`;
+    throw new CliError(`launchctl print ${target}: ${escapeReference(detail)}`);
+  }
+  const pid = Number(serviceField(result.stdout, "pid"));
+  return result.code === 0 && Number.isSafeInteger(pid) && pid > 0 ? pid : 0;
+}
+
+export async function launchdServerPid(context: Pick<ServiceContext, "home" | "tool">, uid: number): Promise<number> {
+  const path = plistPath(context.home);
+  validatePaths(path);
+  if ((await readOwnedService(path, prefix)) === undefined) return 0;
+  return launchdMainPid(await context.tool("launchctl"), `gui/${uid}/dev.emend.server`, "throw");
+}
+
 function xml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -29,9 +56,7 @@ function xml(value: string): string {
 function plist(context: ServiceContext): string {
   const { home, node, entry, flags, stateDir } = context;
   const log = xml(join(home, "Library/Logs/emend.log"));
-  return `${declaration}
-<!-- written by emend -->
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+  return `${prefix}<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
@@ -70,7 +95,7 @@ export async function launchdService(action: ServiceAction, context: ServiceCont
       throw new CliError(unsupportedService);
     throw error;
   });
-  const path = join(home, "Library/LaunchAgents/dev.emend.server.plist");
+  const path = plistPath(home);
   const domain = `gui/${uid}`;
   const target = `${domain}/dev.emend.server`;
   validatePaths(path);
@@ -78,11 +103,13 @@ export async function launchdService(action: ServiceAction, context: ServiceCont
     if (!(await serviceFile(path))) io.stdout("emend: service not installed\n");
     else {
       const result = await launchctl(["print", target], "ignore");
-      serviceStatus(io, path, result.code === 0 && serviceField(result.stdout, "state") === "running");
+      const running = result.code === 0 && serviceField(result.stdout, "state") === "running";
+      serviceStatus(io, path, running);
+      return running;
     }
     return;
   }
-  const previous = await readOwnedService(path, `${declaration}\n<!-- written by emend -->\n`);
+  const previous = await readOwnedService(path, prefix);
   if (action === "uninstall") {
     if (previous === undefined) {
       await removeServiceOptions(stateDir);
@@ -118,9 +145,7 @@ export async function launchdService(action: ServiceAction, context: ServiceCont
   const found = await context.waitForServer({
     tailscale: flags.includes("--tailscale"),
     mainPid: async () => {
-      const result = await launchctl(["print", target], "ignore");
-      const pid = Number(serviceField(result.stdout, "pid"));
-      mainPid = result.code === 0 && Number.isSafeInteger(pid) && pid > 0 ? pid : 0;
+      mainPid = await launchdMainPid(launchctl, target);
       return mainPid;
     },
   });

@@ -52,7 +52,8 @@ test("direct publish leaves missing tokens absent; the next server bootstrap cre
 
 test("direct publish never reads or repairs existing token files", async () => {
   const f = await directFixture();
-  for (const kind of ["agent", "admin"]) await writeFile(join(f.stateDir, `${kind}.token`), "synthetic-invalid");
+  for (const kind of ["agent", "admin"])
+    await writeFile(join(f.stateDir, `${kind}.token`), "synthetic-invalid", { mode: 0o600 });
   const read = vi.spyOn(tokenFiles, "readTokenFile");
   await f.publish();
   expect(read).not.toHaveBeenCalled();

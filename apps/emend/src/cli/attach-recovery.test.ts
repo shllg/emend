@@ -1,17 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
-import { chmod, mkdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { LIMITS } from "@emend/contract";
 import { expect, test, vi } from "vitest";
 import { run } from "../main.ts";
 import * as stateFiles from "../state/files.ts";
 import { writeSecretFile } from "../state/files.ts";
-import { removeAttachment } from "./attach/files.ts";
+import * as tokens from "../state/token-file.ts";
+import { cleanupAttachment, removeAttachment } from "./attach/files.ts";
 import { lockAttach } from "./attach/lock.ts";
 import { directFixture } from "./direct-test-support.ts";
 import { escapeReference } from "./escape.ts";
+import { errorLine } from "./http.ts";
 import * as reader from "./publish/read.ts";
 
 vi.mock("node:fs/promises", async (original) => ({ ...(await original<typeof import("node:fs/promises")>()) }));
@@ -65,6 +67,99 @@ async function fixture() {
   };
   return { ...f, pending, tokenPath, attachment, calls, handler, command, leftover, absent };
 }
+
+test.each(
+  ["attach", "detach"].flatMap((command) =>
+    [0o004, 0o040, 0o044].flatMap((mode) => [false, true].map((completed) => ({ command, mode, completed }))),
+  ),
+)(
+  "$command refuses hub.token mode $mode without deleting state (completed=$completed)",
+  async ({ command, mode, completed }) => {
+    const f = await fixture();
+    f.leftover();
+    if (completed)
+      writeSecretFile(
+        f.attachment,
+        JSON.stringify({ hubUrl: previousHub, hubId: randomUUID(), hubName: "Synthetic hub" }),
+      );
+    const names = await readdir(f.stateDir);
+    const contents = await Promise.all(names.map((name) => readFile(join(f.stateDir, name))));
+    await chmod(f.tokenPath, mode);
+    try {
+      expect(await f.command(command)).toEqual({
+        code: 1,
+        text: `Token file ${f.tokenPath} has group or other permissions; fix it with chmod 600 '${f.tokenPath}'\n`,
+      });
+      expect(f.calls).toEqual([]);
+      expect(await readdir(f.stateDir)).toEqual(names);
+      expect((await stat(f.tokenPath)).mode & 0o777).toBe(mode);
+    } finally {
+      await chmod(f.tokenPath, 0o600).catch(() => {});
+    }
+    expect(await Promise.all(names.map((name) => readFile(join(f.stateDir, name))))).toEqual(contents);
+  },
+);
+
+test.each(["cleanup", "cleanup completed", "attach", "detach", "publish"])(
+  "%s refuses a loose hub token without changing state",
+  async (command) => {
+    const f = await fixture();
+    f.leftover();
+    if (command === "cleanup completed" || command === "detach" || command === "publish") {
+      writeSecretFile(
+        f.attachment,
+        JSON.stringify({ hubUrl: previousHub, hubId: randomUUID(), hubName: "Synthetic hub" }),
+      );
+    }
+    await chmod(f.tokenPath, 0o644);
+    const names = await readdir(f.stateDir);
+    const contents = await Promise.all(names.map((name) => readFile(join(f.stateDir, name))));
+    const line = `Token file ${f.tokenPath} has group or other permissions; fix it with chmod 600 '${f.tokenPath}'\n`;
+    const out = f.output();
+    if (command.startsWith("cleanup")) {
+      const error = await cleanupAttachment(f.stateDir, out.io).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(errorLine(error)).toBe(line);
+      expect(out.stderr).toEqual([]);
+    } else if (command === "publish") {
+      vi.spyOn(process, "cwd").mockReturnValue(f.source);
+      expect(await run(["publish", "--manifest", f.manifest, "--key", "synthetic"], out.io)).toBe(1);
+      expect(out.stderr).toEqual([line]);
+    } else {
+      expect(await run(command === "attach" ? [command, link] : [command], out.io)).toBe(1);
+      expect(out.stderr).toEqual([line]);
+    }
+    expect(out.stdout).toEqual([]);
+    expect(f.calls).toEqual([]);
+    expect(await readdir(f.stateDir)).toEqual(names);
+    expect(await Promise.all(names.map((name) => readFile(join(f.stateDir, name))))).toEqual(contents);
+    expect((await stat(f.tokenPath)).mode & 0o777).toBe(0o644);
+  },
+);
+
+test("detach preserves an attachment when its token becomes loose after the preflight", async () => {
+  const f = await fixture();
+  const attachment = JSON.stringify({ hubUrl: previousHub, hubId: randomUUID(), hubName: "Synthetic hub" });
+  writeSecretFile(f.attachment, attachment);
+  writeSecretFile(f.tokenPath, oldToken);
+  lockAttach(f.stateDir)();
+  const before = await readdir(f.stateDir);
+  const read = tokens.readTokenFile;
+  vi.spyOn(tokens, "readTokenFile").mockImplementationOnce(async (...args) => {
+    await chmod(f.tokenPath, 0o644);
+    return read(...args);
+  });
+  expect(await f.command("detach")).toEqual({
+    code: 1,
+    text: `Token file ${f.tokenPath} has group or other permissions; fix it with chmod 600 '${f.tokenPath}'\n`,
+  });
+  expect(f.calls).toEqual([]);
+  expect(await readdir(f.stateDir)).toEqual(before);
+  expect(await readFile(f.attachment, "utf8")).toBe(attachment);
+  expect(await readFile(f.tokenPath, "utf8")).toBe(oldToken);
+});
 
 test.each(["detach", "attach"])(
   "%s revokes a crash token only at its recorded hub, before continuing",

@@ -1,31 +1,219 @@
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import * as childProcesses from "node:child_process";
+import { EventEmitter } from "node:events";
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join, sep } from "node:path";
+import { PassThrough } from "node:stream";
 import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { run } from "../../main.ts";
 import { startServer } from "../../server/serve.ts";
+import { writeSecretFile } from "../../state/files.ts";
+import * as executables from "../executable.ts";
 import { stopLocalServer } from "../service/takeover.ts";
 import { parseServeArgs } from "./serve.ts";
 
 vi.mock("../../server/serve.ts", () => ({ startServer: vi.fn() }));
-// These tests fake the Tailscale API. A late continuation must never resolve a host binary,
-// including the macOS app fallback, after those API spies have been restored.
-vi.mock("../executable.ts", () => ({
-  async findExecutable() {
-    throw new Error("no real executables in serve tests");
-  },
+vi.mock("node:child_process", async (original) => ({
+  ...(await original<typeof import("node:child_process")>()),
 }));
+// Keep fixture-only lookup active after API spies are restored, including the macOS fallback.
+const executableDirs = new Set<string>();
+vi.mock("../executable.ts", async (original) => {
+  const actual = await original<typeof import("../executable.ts")>();
+  return {
+    async findExecutable(...args: Parameters<typeof actual.findExecutable>) {
+      const searchPath = args[1];
+      if (
+        searchPath === undefined ||
+        searchPath
+          .split(delimiter)
+          .filter(Boolean)
+          .some((entry) => ![...executableDirs].some((dir) => entry === dir || entry.startsWith(`${dir}${sep}`)))
+      )
+        throw new Error("executable lookup outside the test fixtures");
+      return actual.findExecutable(...args);
+    },
+  };
+});
 let env: NodeJS.ProcessEnv;
 beforeEach(async () => {
   // Finished hooks run in reverse registration order, after afterEach: restore spies last.
   onTestFinished(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
   const dir = await mkdtemp(join(tmpdir(), "emend-serve-test-"));
-  onTestFinished(() => rm(dir, { recursive: true, force: true }));
+  executableDirs.add(dir);
+  onTestFinished(async () => {
+    executableDirs.delete(dir);
+    await rm(dir, { recursive: true, force: true });
+  });
   const bin = join(dir, "bin");
   await mkdir(bin);
-  env = { EMEND_HOME: dir, HOME: dir, PATH: bin };
+  env = { EMEND_HOME: dir, HOME: dir, PATH: bin, NODE_OPTIONS: "--this-must-not-be-inherited" };
+});
+
+test.each(["owned", "unowned", "failed-off"])("serve recovers a route left by a crash (%s)", async (kind) => {
+  const root = env.EMEND_HOME as string;
+  const stateDir = root;
+  const bin = env.PATH as string;
+  const path = join(stateDir, "tailscale-serve.json");
+  const dnsName = "hub.example.ts.net";
+  const target = "http://127.0.0.1:3636";
+  if (kind !== "unowned") writeSecretFile(path, JSON.stringify({ target, dnsName, pid: process.pid }));
+  const config = join(root, "config.json");
+  await writeFile(
+    config,
+    JSON.stringify({
+      TCP: { "443": { HTTPS: true } },
+      Web: {
+        [`${dnsName}:443`]: { Handlers: { "/": { Proxy: target } } },
+      },
+    }),
+  );
+  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+  const log = join(root, "calls.jsonl");
+  await writeFile(
+    join(bin, "tailscale"),
+    `#!/bin/sh
+printf '%s\\n' "$*" >> ${quote(log)}
+if [ "$2" = status ]; then /bin/cat ${quote(config)}
+elif [ "$3" = off ]; then ${kind === "failed-off" ? "exit 1" : `printf '{}' > ${quote(config)}`}
+else exit 1
+fi
+`,
+    { mode: 0o700 },
+  );
+  const tailscale = await import("../tailscale.ts");
+  vi.spyOn(tailscale, "tailscaleSelf").mockResolvedValue({ dnsName });
+  let stop: (() => void) | undefined;
+  const close = vi.fn(async () => {});
+  vi.mocked(startServer).mockImplementation(async (options) => {
+    stop = options.onStopRequest;
+    return { url: target, port: 3636, setPublicOriginReady: vi.fn(), close };
+  });
+  const stdout = vi.fn(() => stop?.());
+  const stderr = vi.fn();
+  const result = run(["serve", "--tailscale"], { env, stdout, stderr });
+  onTestFinished(async () => {
+    stop?.();
+    await result;
+  });
+  try {
+    expect(await result).toBe(0);
+    expect(stdout).toHaveBeenCalledExactlyOnceWith(`emend: serving https://${dnsName}\n`);
+    expect(close).toHaveBeenCalledOnce();
+    const calls = (await readFile(log, "utf8")).trim().split("\n");
+    expect(calls).toEqual(
+      kind === "unowned"
+        ? ["serve status --json"]
+        : ["serve status --json", "serve status --json", "serve --https=443 off"],
+    );
+    if (kind === "failed-off") {
+      expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ target, dnsName, pid: process.pid });
+      expect(stderr).toHaveBeenCalledExactlyOnceWith("emend: Could not configure Tailscale Serve.\n");
+    } else {
+      await expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(stderr).not.toHaveBeenCalled();
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test.each(["permission", "timeout"])("a %s setup failure cleans up only possible ownership", async (kind) => {
+  const stateDir = env.EMEND_HOME as string;
+  const path = join(stateDir, "tailscale-serve.json");
+  const dnsName = "hub.example.ts.net";
+  const target = "http://127.0.0.1:3636";
+  const marker = { target, dnsName, pid: process.pid };
+  let config: unknown = {};
+  const matching = {
+    TCP: { "443": { HTTPS: true } },
+    Web: { [`${dnsName}:443`]: { Handlers: { "/": { Proxy: target } } } },
+  };
+  const calls: string[][] = [];
+  const started = Promise.withResolvers<void>();
+  let bg: (EventEmitter & { stdout: PassThrough; stderr: PassThrough }) | undefined;
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  vi.spyOn(executables, "findExecutable").mockResolvedValue({
+    file: join(env.PATH as string, "tailscale"),
+    path: env.PATH as string,
+  });
+  vi.spyOn(childProcesses, "spawn").mockImplementation((_file, args) => {
+    if (!Array.isArray(args)) throw new Error("expected helper arguments");
+    calls.push(args);
+    const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() });
+    if (args[1] === "--bg") {
+      bg = child;
+      // A timeout may apply the route; a denied user may see a root-owned route.
+      config = matching;
+      if (kind === "timeout") child.stdout.once("close", () => child.emit("close", 1, null));
+      started.resolve();
+    } else
+      queueMicrotask(() => {
+        if (args[1] === "status") child.stdout.write(JSON.stringify(config));
+        else if (args[2] === "off") config = {};
+        child.emit("close", 0, null);
+      });
+    return child as unknown as childProcesses.ChildProcess;
+  });
+  const tailscale = await import("../tailscale.ts");
+  vi.spyOn(tailscale, "tailscaleSelf").mockResolvedValue({ dnsName });
+  const remove = tailscale.removeTailscaleServe;
+  let markerAtCleanup: unknown;
+  const cleanup = vi.spyOn(tailscale, "removeTailscaleServe").mockImplementation(async (...args) => {
+    markerAtCleanup = JSON.parse(await readFile(path, "utf8"));
+    return remove(...args);
+  });
+  const close = vi.fn(async () => {});
+  vi.mocked(startServer).mockResolvedValue({ url: target, port: 3636, setPublicOriginReady: vi.fn(), close });
+  const stdout = vi.fn();
+  const stderr = vi.fn();
+  const result = run(["serve", "--tailscale"], { env, stdout, stderr });
+  onTestFinished(async () => {
+    bg?.emit("close", 1, null);
+    await result;
+    vi.useRealTimers();
+  });
+  try {
+    await started.promise;
+    const stored = JSON.parse(await readFile(path, "utf8"));
+    expect(stored).toMatchObject({ target, dnsName });
+    if (kind === "timeout") await vi.advanceTimersByTimeAsync(10_000);
+    else {
+      bg?.stderr.write("Access denied: operator required");
+      bg?.emit("close", 1, null);
+    }
+    expect(await result).toBe(1);
+    expect(cleanup).toHaveBeenCalledTimes(kind === "timeout" ? 1 : 0);
+    expect(stored).toEqual(marker);
+    if (kind === "timeout") expect(markerAtCleanup).toEqual(marker);
+    expect(calls).toEqual([
+      ["serve", "status", "--json"],
+      ["serve", "--bg", "--https=443", target],
+      ...(kind === "timeout"
+        ? [
+            ["serve", "status", "--json"],
+            ["serve", "--https=443", "off"],
+          ]
+        : []),
+    ]);
+    expect(config).toEqual(kind === "timeout" ? {} : matching);
+    await expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(close).toHaveBeenCalledOnce();
+    expect(stdout).not.toHaveBeenCalled();
+    expect(stderr).toHaveBeenCalledExactlyOnceWith(
+      kind === "timeout"
+        ? "emend: tailscale did not answer within 10 seconds.\n"
+        : `emend: Could not configure Tailscale Serve. Run \`sudo tailscale serve --bg --https=443 ${target}\` once as root, then try again. emend uses that route and never removes it.\n`,
+    );
+  } finally {
+    bg?.emit("close", 1, null);
+    await result;
+    vi.useRealTimers();
+    await rm(stateDir, { recursive: true, force: true });
+  }
 });
 
 test.each([
@@ -227,7 +415,7 @@ test("teardown stops a serving command before restoring its Tailscale spies", as
     close,
   });
   onTestFinished(() => {
-    expect(remove).toHaveBeenCalledExactlyOnceWith(41999, env, "hub.example.ts.net");
+    expect(remove).toHaveBeenCalledExactlyOnceWith(41999, env, "hub.example.ts.net", env.EMEND_HOME);
     expect(close).toHaveBeenCalledOnce();
     expect(vi.isMockFunction(tailscale.removeTailscaleServe)).toBe(true);
   });
@@ -250,8 +438,8 @@ test("a setup attempt that throws still removes its route during shutdown", asyn
   const tailscale = await import("../tailscale.ts");
   const { CliError } = await import("../http.ts");
   vi.spyOn(tailscale, "tailscaleSelf").mockResolvedValue({ dnsName: "hub.example.ts.net" });
-  vi.spyOn(tailscale, "ensureTailscaleServe").mockImplementation(async (_port, _env, _name, onSetupAttempt) => {
-    onSetupAttempt?.();
+  vi.spyOn(tailscale, "ensureTailscaleServe").mockImplementation(async (_port, _env, _name, onOwnershipChange) => {
+    onOwnershipChange?.(true);
     throw new CliError("synthetic setup failure");
   });
   const remove = vi.spyOn(tailscale, "removeTailscaleServe").mockResolvedValue(undefined);
@@ -265,7 +453,7 @@ test("a setup attempt that throws still removes its route during shutdown", asyn
   const stdout = vi.fn();
   const stderr = vi.fn();
   expect(await run(["serve", "--tailscale", "--port", "0"], { env, stdout, stderr })).toBe(1);
-  expect(remove).toHaveBeenCalledExactlyOnceWith(41999, env, "hub.example.ts.net");
+  expect(remove).toHaveBeenCalledExactlyOnceWith(41999, env, "hub.example.ts.net", env.EMEND_HOME);
   expect(close).toHaveBeenCalledOnce();
   expect(stdout).not.toHaveBeenCalled();
   expect(stderr).toHaveBeenCalledExactlyOnceWith("emend: synthetic setup failure\n");
@@ -383,7 +571,7 @@ test.each([
     await printed.promise;
     expect(stdout).toHaveLength(1);
     expect(setup.mock.calls[0]?.[0]).toBe(bound);
-    expect(setup.mock.calls[0]?.[4]).toEqual({ fixedPort: requested !== 0 });
+    expect(setup.mock.calls[0]?.[4]).toEqual({ fixedPort: requested !== 0, stateDir: env.EMEND_HOME });
   } finally {
     process.emit("SIGTERM");
     await result;

@@ -2,8 +2,8 @@ import { lstat, rm, rmdir } from "node:fs/promises";
 import { join } from "node:path";
 import { LIMITS } from "@emend/contract";
 import type { Io } from "../../main.ts";
-import { StateFolderWriteError, stateAccessError } from "../../state/files.ts";
-import { readTokenFile } from "../../state/token-file.ts";
+import { isStateModeError, StateFolderWriteError, stateAccessError } from "../../state/files.ts";
+import { checkTokenFileMode, readTokenFile } from "../../state/token-file.ts";
 import { VERSION } from "../../version.ts";
 import { escapeReference } from "../escape.ts";
 import { OversizedFile, readRegular } from "../publish/read.ts";
@@ -84,7 +84,10 @@ export async function revokeMachine(hubUrl: string, token: string): Promise<bool
 /** The caller must hold the attach lock throughout cleanup and any new registration. */
 export async function cleanupAttachment(stateDir: string, io: Io): Promise<boolean> {
   if (await present(stateDir, "attach.json", true)) {
-    if (await present(stateDir, "attach.pending")) await removePendingAttachment(stateDir);
+    if (await present(stateDir, "attach.pending")) {
+      await checkTokenFileMode(join(stateDir, "hub.token"));
+      await removePendingAttachment(stateDir);
+    }
     return false;
   }
   const pending = await present(stateDir, "attach.pending");
@@ -97,6 +100,7 @@ export async function cleanupAttachment(stateDir: string, io: Io): Promise<boole
     try {
       token = await readTokenFile(join(stateDir, "hub.token"));
     } catch (error) {
+      if (isStateModeError(error)) throw error;
       const mapped = stateAccessError(stateDir, error);
       if (mapped instanceof StateFolderWriteError) throw mapped;
     }

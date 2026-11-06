@@ -81,7 +81,7 @@ test.skipIf(process.getuid?.() === 0).each(["probe", "request"])(
       join(f.dir, "attach.json"),
       JSON.stringify({ hubUrl: "https://hub.example", hubId: randomUUID(), hubName: "Synthetic" }),
     );
-    await fs.writeFile(join(f.dir, "hub.token"), `em_${"b".repeat(43)}`);
+    await fs.writeFile(join(f.dir, "hub.token"), `em_${"b".repeat(43)}`, { mode: 0o600 });
     vi.stubGlobal("fetch", async (url: string | URL) => {
       if (stage === "request" && String(url).endsWith("/capabilities"))
         return Response.json({ api: 1, version: "0.1.0", features: [] });

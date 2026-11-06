@@ -1,10 +1,22 @@
-import { chmod, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { EventEmitter } from "node:events";
+import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import * as net from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, join, sep } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { LIMITS } from "@emend/contract";
 import { afterEach, expect, onTestFinished, test, vi } from "vitest";
 import { run } from "../main.ts";
-import { findExecutable } from "./executable.ts";
-import { ensureTailscaleServe, tailscaleSelf } from "./tailscale.ts";
+import * as stateFiles from "../state/files.ts";
+import { StateFolderWriteError, writeSecretFile } from "../state/files.ts";
+import * as executables from "./executable.ts";
+import { CliError } from "./http.ts";
+import * as reads from "./publish/read.ts";
+import { ensureTailscaleServe, removeStaleTailscaleServe, removeTailscaleServe, tailscaleSelf } from "./tailscale.ts";
+import * as markers from "./tailscale-marker.ts";
+import { loopbackState, readTailscaleMarker } from "./tailscale-marker.ts";
+
+vi.mock("node:net", async (original) => ({ ...(await original<typeof import("node:net")>()) }));
 
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const dirs: string[] = [];
@@ -13,8 +25,10 @@ const dirs: string[] = [];
 vi.mock("./executable.ts", async (original) => {
   const actual = await original<typeof import("./executable.ts")>();
   return {
-    async findExecutable(name: string, searchPath: string) {
+    async findExecutable(...args: Parameters<typeof actual.findExecutable>) {
+      const searchPath = args[1];
       if (
+        searchPath === undefined ||
         searchPath
           .split(delimiter)
           .filter(Boolean)
@@ -22,12 +36,13 @@ vi.mock("./executable.ts", async (original) => {
       ) {
         throw new Error("executable lookup outside the test fixtures");
       }
-      return actual.findExecutable(name, searchPath);
+      return actual.findExecutable(...args);
     },
   };
 });
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 async function fake(status: unknown, config: unknown = {}, denied: boolean | "status" = false) {
@@ -91,12 +106,43 @@ test("status normalizes DNS and runs with only the minimal environment", async (
   expect(call?.args).toEqual(["status", "--json"]);
   expect(await f.childEnv()).toEqual({ PATH: f.dir, HOME: f.env.HOME, LC_ALL: "C" });
 });
+
+test("a Tailscale wrapper receives only the safe PATH and never runs repository bash", async () => {
+  const f = await fake(running);
+  const repo = join(f.dir, "repo");
+  const bin = join(repo, "bin");
+  await mkdir(bin, { recursive: true });
+  await mkdir(join(repo, ".git/objects"), { recursive: true });
+  await mkdir(join(repo, ".git/refs"));
+  await writeFile(join(repo, ".git/HEAD"), "ref: refs/heads/main\n");
+  const marker = join(f.dir, "repository-bash-ran");
+  await writeFile(join(bin, "bash"), `#!/bin/sh\nprintf ran > '${marker.replaceAll("'", "'\\''")}'\nexit 1\n`, {
+    mode: 0o700,
+  });
+  await symlink("/bin/bash", join(f.dir, "bash"));
+  const wrapper = join(f.dir, "tailscale");
+  await writeFile(wrapper, (await readFile(wrapper, "utf8")).replace("#!/bin/sh", "#!/usr/bin/env bash"));
+  vi.spyOn(process, "cwd").mockReturnValue(repo);
+  const env = { ...f.env, PATH: `${bin}:${f.dir}` };
+  expect(await tailscaleSelf(env, undefined, f.options)).toEqual({ dnsName: "hub.example.ts.net" });
+  expect(await f.childEnv()).toEqual({ PATH: f.dir, HOME: f.env.HOME, LC_ALL: "C" });
+  await expect(lstat(marker)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("an empty filtered helper PATH uses the fixed default", async () => {
+  const f = await fake(running);
+  vi.spyOn(executables, "findExecutable").mockResolvedValue({ file: join(f.dir, "tailscale"), path: "" });
+  expect(await tailscaleSelf(f.env, undefined, f.options)).toEqual({ dnsName: "hub.example.ts.net" });
+  expect(await f.childEnv()).toEqual({ PATH: "/usr/bin:/bin:/usr/sbin:/sbin", HOME: f.env.HOME, LC_ALL: "C" });
+});
+
 test.each([true, false])(
-  "darwin runs the app with the caller's filtered PATH (absolute entries: %s)",
+  "darwin runs the app with the fixed system PATH (caller absolute entries: %s)",
   async (absolute) => {
     const app = await fakeApp();
     const searchPath = absolute ? `${join(app.dir, "first")}:${join(app.dir, "second")}` : "";
     const env = {
+      ...app.env,
       PATH: `.:relative:${searchPath}:`,
       HOME: join(app.dir, "home"),
       LC_ALL: "fr_FR.UTF-8",
@@ -107,21 +153,24 @@ test.each([true, false])(
     });
     expect(await app.calls()).toEqual([{ args: ["status", "--json"] }]);
     expect(await app.childEnv()).toEqual({
-      PATH: absolute ? searchPath : "/usr/bin:/bin:/usr/sbin:/sbin",
+      PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
       HOME: env.HOME,
       LC_ALL: "C",
     });
   },
 );
-test.each([undefined, ""])("darwin uses a fixed spawn PATH when the caller's PATH is %j", async (path) => {
-  const app = await fakeApp();
-  const env = { PATH: path, HOME: join(app.dir, "home") };
-  expect(await tailscaleSelf(env, undefined, { platform: "darwin", appPath: app.appPath })).toEqual({
-    dnsName: "hub.example.ts.net",
-  });
-  expect(await app.calls()).toEqual([{ args: ["status", "--json"] }]);
-  expect(await app.childEnv()).toEqual({ PATH: "/usr/bin:/bin:/usr/sbin:/sbin", HOME: env.HOME, LC_ALL: "C" });
-});
+test.each([undefined, ""])(
+  "darwin runs the app with the fixed system PATH when the caller's PATH is %j",
+  async (path) => {
+    const app = await fakeApp();
+    const env = { ...app.env, PATH: path, HOME: join(app.dir, "home") };
+    expect(await tailscaleSelf(env, undefined, { platform: "darwin", appPath: app.appPath })).toEqual({
+      dnsName: "hub.example.ts.net",
+    });
+    expect(await app.calls()).toEqual([{ args: ["status", "--json"] }]);
+    expect(await app.childEnv()).toEqual({ PATH: "/usr/bin:/bin:/usr/sbin:/sbin", HOME: env.HOME, LC_ALL: "C" });
+  },
+);
 test("darwin prefers tailscale on PATH over the app", async () => {
   const app = await fakeApp();
   const path = await fake(running);
@@ -138,6 +187,37 @@ test("linux never uses the app even when it is executable", async () => {
     "tailscale is not installed or not on PATH.",
   );
   await expect(app.calls()).rejects.toMatchObject({ code: "ENOENT" });
+});
+const lookupRefusals = [
+  (name: string) => `${name} on PATH sits inside the current repository; emend does not run it.`,
+  (name: string) => `Could not check where ${name} on PATH runs; emend does not run it.`,
+];
+test.each(["linux", "darwin"] as const)(
+  "%s preserves helper lookup refusals without trying the app",
+  async (platform) => {
+    const f = await fake(running);
+    const lookup = vi.spyOn(executables, "findExecutable");
+    for (const message of lookupRefusals) {
+      const refusal = new CliError(message("tailscale"));
+      lookup.mockClear().mockRejectedValue(refusal);
+      await expect(tailscaleSelf(f.env, undefined, { ...f.options, platform })).rejects.toBe(refusal);
+      expect(lookup).toHaveBeenCalledExactlyOnceWith("tailscale", f.dir);
+    }
+  },
+);
+test("darwin preserves helper lookup refusals from the app fallback", async () => {
+  const app = await fakeApp();
+  const lookup = vi.spyOn(executables, "findExecutable");
+  for (const message of lookupRefusals) {
+    const refusal = new CliError(message("Tailscale"));
+    lookup
+      .mockClear()
+      .mockRejectedValueOnce(new CliError("tailscale was not found on PATH"))
+      .mockRejectedValueOnce(refusal);
+    await expect(tailscaleSelf(app.env, undefined, { platform: "darwin", appPath: app.appPath })).rejects.toBe(refusal);
+    expect(lookup).toHaveBeenCalledTimes(2);
+    expect(lookup).toHaveBeenLastCalledWith("Tailscale", join(app.dir, "app"));
+  }
 });
 test.each(["missing", "non-executable", "directory"])("darwin rejects a %s app binary", async (kind) => {
   const app = await fakeApp();
@@ -202,6 +282,525 @@ const proxy = {
   TCP: { "443": { HTTPS: true } },
   Web: { "hub.example.ts.net:443": { Handlers: { "/": { Proxy: "http://127.0.0.1:3636" } } } },
 };
+
+const dnsName = "hub.example.ts.net";
+const ownership = (port = 3636, pid = process.pid) => ({ target: `http://127.0.0.1:${port}`, dnsName, pid });
+function markerPid(state: "running" | "ESRCH" | "EPERM" = "ESRCH") {
+  const owner = 2_000_000_000;
+  // A live pid counts as the owner only while its port answers; tests set other answers.
+  vi.spyOn(markers, "loopbackState").mockResolvedValue("open");
+  const kill = process.kill;
+  vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+    if (pid !== owner) return kill(pid, signal);
+    expect(signal).toBe(0);
+    if (state === "running") return true;
+    throw Object.assign(new Error("synthetic owner state"), { code: state });
+  });
+  return owner;
+}
+const route = (port = 3636) => ({
+  TCP: { "443": { HTTPS: true } },
+  Web: { [`${dnsName}:443`]: { Handlers: { "/": { Proxy: ownership(port).target } } } },
+});
+
+async function ownedFake(config: unknown = {}, marker: unknown = ownership()) {
+  const f = await fake(running, config);
+  const stateDir = join(f.dir, "state");
+  await mkdir(stateDir, { mode: 0o700 });
+  const path = join(stateDir, "tailscale-serve.json");
+  if (marker !== null) writeSecretFile(path, JSON.stringify(marker));
+  const configPath = join(f.dir, "config.json");
+  await writeFile(configPath, JSON.stringify(config));
+  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+  await writeFile(
+    join(f.dir, "tailscale"),
+    `#!/bin/sh
+printf '%s\\n' "$*" >> ${quote(join(f.dir, "calls.jsonl"))}
+if [ "$2" = status ]; then
+  /bin/cat ${quote(configPath)}
+  if [ -f ${quote(join(f.dir, "next-marker.json"))} ]; then
+    /bin/cp ${quote(join(f.dir, "next-marker.json"))} ${quote(path)}
+  fi
+  if [ -f ${quote(join(f.dir, "next-config.json"))} ]; then
+    /bin/cp ${quote(join(f.dir, "next-config.json"))} ${quote(configPath)}
+    /bin/rm ${quote(join(f.dir, "next-config.json"))}
+  fi
+elif [ "$2" = --bg ]; then
+  /bin/cp ${quote(path)} ${quote(join(f.dir, "marker-at-setup.json"))} 2>/dev/null || :
+  if [ -f ${quote(join(f.dir, "deny-setup"))} ]; then printf 'Access denied: operator required' >&2; exit 1; fi
+  printf '{"TCP":{"443":{"HTTPS":true}},"Web":{"${dnsName}:443":{"Handlers":{"/":{"Proxy":"%s"}}}}}' "$4" > ${quote(configPath)}
+  if [ -f ${quote(join(f.dir, "fail-setup"))} ]; then exit 1; fi
+elif [ "$3" = off ]; then
+  if [ -f ${quote(join(f.dir, "fail-off"))} ]; then exit 1; fi
+  printf '{}' > ${quote(configPath)}
+fi
+`,
+    { mode: 0o700 },
+  );
+  return {
+    ...f,
+    stateDir,
+    path,
+    configPath,
+    setup: () => ensureTailscaleServe(3636, f.env, dnsName, undefined, { ...f.options, stateDir }),
+    stop: (port = 3636) => removeTailscaleServe(port, f.env, dnsName, stateDir),
+    args: async () => (await f.calls()).map((call) => call.args),
+  };
+}
+
+async function stopState(env: NodeJS.ProcessEnv) {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const code = await run(["stop"], {
+    env,
+    stdout: (line) => stdout.push(line),
+    stderr: (line) => stderr.push(line),
+  });
+  return { code, stdout, stderr };
+}
+
+test("stop removes a crashed server route when no server runs", async () => {
+  const f = await ownedFake(route(), ownership(3636, markerPid()));
+  const fetcher = vi.spyOn(globalThis, "fetch");
+  expect(await stopState(f.env)).toEqual({
+    code: 0,
+    stdout: [
+      `emend: no emend server is running; removed the Tailscale Serve route a stopped emend server left at https://${dnsName}\n`,
+    ],
+    stderr: [],
+  });
+  expect(await f.args()).toEqual([
+    ["serve", "status", "--json"],
+    ["serve", "--https=443", "off"],
+  ]);
+  await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+test.each(["missing", "invalid", "running", "EPERM"] as const)(
+  "stop makes no Tailscale call with a %s marker",
+  async (kind) => {
+    const marker = kind === "missing" ? null : kind === "invalid" ? {} : ownership(3636, markerPid(kind));
+    const f = await ownedFake(route(), marker);
+    expect(await stopState(f.env)).toEqual({
+      code: 0,
+      stdout: ["emend: no emend server is running.\n"],
+      stderr: [],
+    });
+    await expect(f.calls()).rejects.toMatchObject({ code: "ENOENT" });
+    if (marker) expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(marker);
+  },
+);
+
+test.each(["target", "dnsName", "pid", "invalid"])(
+  "stop leaves a replaced marker alone when its %s changes before off",
+  async (key) => {
+    const original = ownership(3636, markerPid());
+    const f = await ownedFake(route(), original);
+    const changed =
+      key === "invalid"
+        ? {}
+        : {
+            ...original,
+            ...(key === "target"
+              ? { target: ownership(4000).target }
+              : key === "dnsName"
+                ? { dnsName: "other.example.ts.net" }
+                : { pid: process.pid }),
+          };
+    await writeFile(join(f.dir, "next-marker.json"), JSON.stringify(changed));
+    expect(await stopState(f.env)).toEqual({
+      code: 0,
+      stdout: ["emend: no emend server is running.\n"],
+      stderr: [],
+    });
+    expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+    expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(changed);
+    expect(JSON.parse(await readFile(f.configPath, "utf8"))).toEqual(route());
+  },
+);
+
+test.each([{}, route(4000)])(
+  "stop discards a stale marker without changing a different Serve config: %j",
+  async (config) => {
+    const f = await ownedFake(config, ownership(3636, markerPid()));
+    expect(await stopState(f.env)).toEqual({
+      code: 0,
+      stdout: ["emend: no emend server is running.\n"],
+      stderr: [],
+    });
+    expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+    await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(JSON.parse(await readFile(f.configPath, "utf8"))).toEqual(config);
+  },
+);
+
+test.each(["off", "unreadable"])(
+  "stop reports a stale-route %s failure on stderr and keeps its marker",
+  async (kind) => {
+    const marker = ownership(3636, markerPid());
+    const f = await ownedFake(route(), marker);
+    if (kind === "off") await writeFile(join(f.dir, "fail-off"), "");
+    else await writeFile(f.configPath, "{");
+    const reason =
+      kind === "off" ? "Could not configure Tailscale Serve." : "could not read the output of tailscale status.";
+    expect(await stopState(f.env)).toEqual({
+      code: 1,
+      stdout: [],
+      stderr: [
+        `emend: no emend server is running, but removing the Tailscale Serve route it left at https://${dnsName} failed: ${reason}\n`,
+      ],
+    });
+    expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(marker);
+  },
+);
+
+test("stop escapes a stale-route failure reason as one stderr line", async () => {
+  const marker = ownership(3636, markerPid());
+  const f = await ownedFake(route(), marker);
+  vi.spyOn(executables, "findExecutable").mockRejectedValue(new CliError("synthetic failure\nsecond line\u001b"));
+  const result = await stopState(f.env);
+  expect(result.code).toBe(1);
+  expect(result.stdout).toEqual([]);
+  expect(result.stderr).toEqual([
+    `emend: no emend server is running, but removing the Tailscale Serve route it left at https://${dnsName} failed: synthetic failure\\u{a}second line\\u{1b}\n`,
+  ]);
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(marker);
+});
+
+test("a crash marker adopts the same route without setup and stop removes it", async () => {
+  const f = await ownedFake(route(), ownership(3636, markerPid()));
+  expect(await f.setup()).toMatchObject({ created: false, owned: true });
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownership());
+  expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+  await f.stop();
+  expect(await f.args()).toEqual([
+    ["serve", "status", "--json"],
+    ["serve", "status", "--json"],
+    ["serve", "--https=443", "off"],
+  ]);
+  await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("the same route without a marker remains unowned", async () => {
+  const f = await ownedFake(route(), null);
+  expect(await f.setup()).toMatchObject({ created: false, owned: false });
+  expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+  await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("a marker for another port removes only that exact stale route before setup", async () => {
+  const f = await ownedFake(route(4000), ownership(4000, markerPid()));
+  expect(await f.setup()).toMatchObject({ created: true, owned: true });
+  expect(await f.args()).toEqual([
+    ["serve", "status", "--json"],
+    ["serve", "status", "--json"],
+    ["serve", "--https=443", "off"],
+    ["serve", "status", "--json"],
+    ["serve", "--bg", "--https=443", ownership().target],
+  ]);
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownership());
+  expect(JSON.parse(await readFile(join(f.dir, "marker-at-setup.json"), "utf8"))).toEqual(ownership());
+  expect((await stat(f.path)).mode & 0o777).toBe(0o600);
+});
+
+test.each((["running", "EPERM"] as const).map((state) => ({ port: 4000, state })))(
+  "a live marker for port $port is refused without touching its route or marker ($state)",
+  async ({ port, state }) => {
+    const f = await ownedFake(route(port), ownership(port, markerPid(state)));
+    const before = await readFile(f.path);
+    await expect(f.setup()).rejects.toThrow(
+      `another emend server (process 2000000000) serves port 443 of Tailscale Serve; stop that server, then try again.`,
+    );
+    expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+    expect(await readFile(f.path)).toEqual(before);
+    expect(JSON.parse(await readFile(f.configPath, "utf8"))).toEqual(route(port));
+  },
+);
+
+test.each(["running", "EPERM"] as const)(
+  "after reboot, the same route is adopted when the marker pid belongs to an unrelated live process (%s)",
+  async (state) => {
+    const owner = markerPid(state);
+    const f = await ownedFake(route(), ownership(3636, owner));
+    expect(await f.setup()).toMatchObject({ created: false, owned: true });
+    expect(process.kill).not.toHaveBeenCalledWith(owner, 0);
+    expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownership());
+    expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+    await f.stop();
+    expect(await f.args()).toEqual([
+      ["serve", "status", "--json"],
+      ["serve", "status", "--json"],
+      ["serve", "--https=443", "off"],
+    ]);
+    await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+  },
+);
+
+test.each(["running", "EPERM"] as const)(
+  "a live marker for another port whose route is gone permits fresh setup (%s)",
+  async (state) => {
+    const owner = markerPid(state);
+    const f = await ownedFake({}, ownership(4000, owner));
+    expect(await f.setup()).toMatchObject({ created: true, owned: true });
+    expect(process.kill).not.toHaveBeenCalledWith(owner, 0);
+    expect(await f.args()).toEqual([
+      ["serve", "status", "--json"],
+      ["serve", "--bg", "--https=443", ownership().target],
+    ]);
+    expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownership());
+    expect(JSON.parse(await readFile(join(f.dir, "marker-at-setup.json"), "utf8"))).toEqual(ownership());
+    await removeTailscaleServe(4000, f.env, dnsName, f.stateDir, owner);
+    expect((await f.args()).at(-1)).toEqual(["serve", "status", "--json"]);
+    expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownership());
+    expect(JSON.parse(await readFile(f.configPath, "utf8"))).toEqual(route());
+  },
+);
+
+test("this process cannot replace its live marker for another port", async () => {
+  const f = await ownedFake(route(4000), ownership(4000));
+  const probe = vi.spyOn(markers, "loopbackState").mockResolvedValue("open");
+  await expect(f.setup()).rejects.toThrow(
+    `another emend server (process ${process.pid}) serves port 443 of Tailscale Serve; stop that server, then try again.`,
+  );
+  expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownership(4000));
+  expect(probe).toHaveBeenCalledWith(4000);
+});
+
+test("this process recovers a marker with its own reused pid when the old port is closed", async () => {
+  const f = await ownedFake(route(4000), ownership(4000));
+  const probe = vi.spyOn(markers, "loopbackState").mockResolvedValue("refused");
+  expect(await f.setup()).toMatchObject({ created: true, owned: true });
+  expect(probe).toHaveBeenCalledWith(4000);
+  expect(await f.args()).toEqual([
+    ["serve", "status", "--json"],
+    ["serve", "status", "--json"],
+    ["serve", "--https=443", "off"],
+    ["serve", "status", "--json"],
+    ["serve", "--bg", "--https=443", ownership().target],
+  ]);
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownership());
+});
+
+test("a live owner on port 80 is refused without removing its route or marker", async () => {
+  const f = await ownedFake(route(80), ownership(80, markerPid("running")));
+  const before = await readFile(f.path);
+  const probe = vi
+    .spyOn(markers, "loopbackState")
+    .mockImplementation(async (port) => (port === 80 ? "open" : "refused"));
+  await expect(f.setup()).rejects.toThrow(
+    "another emend server (process 2000000000) serves port 443 of Tailscale Serve; stop that server, then try again.",
+  );
+  expect(probe).toHaveBeenCalledWith(80);
+  expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+  expect(await readFile(f.path)).toEqual(before);
+  expect(JSON.parse(await readFile(f.configPath, "utf8"))).toEqual(route(80));
+});
+
+test("stale-route recovery rechecks before off and preserves a replacement route", async () => {
+  const f = await ownedFake(route(4000), ownership(4000, markerPid()));
+  await writeFile(join(f.dir, "next-config.json"), JSON.stringify(route(9999)));
+  await expect(f.setup()).rejects.toThrow(
+    "port 443 of Tailscale Serve already has a setup emend did not make or cannot read",
+  );
+  expect((await f.args()).every((args) => args.join(" ") === "serve status --json")).toBe(true);
+  expect(JSON.parse(await readFile(f.configPath, "utf8"))).toEqual(route(9999));
+  await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("a changed occupied route discards the marker without an off call", async () => {
+  const f = await ownedFake(route(9999));
+  await expect(f.setup()).rejects.toThrow(
+    "port 443 of Tailscale Serve already has a setup emend did not make or cannot read; inspect it with `tailscale serve status`.",
+  );
+  await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+  expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+});
+
+test("an empty Serve config replaces a stale marker before normal setup", async () => {
+  const f = await ownedFake({}, ownership(4000, markerPid()));
+  expect(await f.setup()).toMatchObject({ created: true, owned: true });
+  expect(await f.args()).toEqual([
+    ["serve", "status", "--json"],
+    ["serve", "--bg", "--https=443", ownership().target],
+  ]);
+  expect(JSON.parse(await readFile(join(f.dir, "marker-at-setup.json"), "utf8"))).toEqual(ownership());
+});
+
+test("a failed bg call retains ownership for recovery on the next run", async () => {
+  const f = await ownedFake({}, null);
+  await writeFile(join(f.dir, "fail-setup"), "");
+  await expect(f.setup()).rejects.toThrow("Could not configure Tailscale Serve.");
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownership());
+  expect(await f.setup()).toMatchObject({ created: false, owned: true });
+  await f.stop();
+  expect((await f.args()).filter((args) => args.includes("--bg"))).toHaveLength(1);
+  expect((await f.args()).at(-1)).toEqual(["serve", "--https=443", "off"]);
+  await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("permission-denied setup discards its marker and never adopts a later root route", async () => {
+  const f = await ownedFake({}, null);
+  await writeFile(join(f.dir, "deny-setup"), "");
+  await expect(f.setup()).rejects.toThrow("Could not configure Tailscale Serve. Run `sudo tailscale serve");
+  await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+  await writeFile(f.configPath, JSON.stringify(route()));
+  expect(await f.setup()).toMatchObject({ created: false, owned: false });
+  expect((await f.args()).some((args) => args.includes("off"))).toBe(false);
+  await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("a failed removal retains the marker for a later retry", async () => {
+  const f = await ownedFake(route());
+  await writeFile(join(f.dir, "fail-off"), "");
+  await expect(f.stop()).rejects.toThrow("Could not configure Tailscale Serve.");
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownership());
+});
+
+test.each([{}, route(9999)])("stop discards the marker when the route is no longer the same: %j", async (config) => {
+  const f = await ownedFake(config);
+  await f.stop();
+  await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+  expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+});
+
+test.each(["json", "port-zero", "port-large", "dns", "extra-key", "symlink", "dangling-symlink", "oversized"])(
+  "an invalid %s marker is left in place and never grants ownership",
+  async (kind) => {
+    const f = await ownedFake(route());
+    if (kind.endsWith("symlink")) {
+      await rm(f.path);
+      const target = join(f.stateDir, "target.json");
+      if (kind === "symlink") await writeFile(target, JSON.stringify(ownership()));
+      await symlink(target, f.path);
+    } else
+      await writeFile(
+        f.path,
+        kind === "json"
+          ? "{"
+          : kind === "oversized"
+            ? " ".repeat(LIMITS.publicJsonBytes + 1)
+            : JSON.stringify(
+                kind === "dns"
+                  ? { ...ownership(), dnsName: "bad/name.example" }
+                  : kind === "extra-key"
+                    ? { ...ownership(), extra: true }
+                    : ownership(kind === "port-zero" ? 0 : 65536),
+              ),
+      );
+    const before = await lstat(f.path);
+    expect(await f.setup()).toMatchObject({ created: false, owned: false });
+    expect((await lstat(f.path)).ino).toBe(before.ino);
+    expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+  },
+);
+
+test.each([undefined, null, 0, -1, 1.5, "7", Number.MAX_SAFE_INTEGER + 1])(
+  "a marker with pid %j is invalid and never adopted",
+  async (pid) => {
+    const marker = pid === undefined ? { target: ownership().target, dnsName } : { ...ownership(), pid };
+    const f = await ownedFake(route(), marker);
+    expect(await readTailscaleMarker(f.stateDir)).toEqual({ kind: "invalid" });
+    expect(await f.setup()).toMatchObject({ created: false, owned: false });
+    expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(marker);
+    expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+  },
+);
+
+test("a missing state directory is not created to store a marker", async () => {
+  const f = await ownedFake({}, null);
+  await rm(f.stateDir, { recursive: true });
+  await expect(f.setup()).rejects.toMatchObject({ code: "ENOENT" });
+  await expect(lstat(f.stateDir)).rejects.toMatchObject({ code: "ENOENT" });
+  expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+});
+
+test("a state-folder permission failure while reading the marker is reported", async () => {
+  const f = await ownedFake(route());
+  const readRegular = reads.readRegular;
+  vi.spyOn(reads, "readRegular").mockImplementation(async (...args) => {
+    if (args[0] === f.path) throw Object.assign(new Error("synthetic denial"), { code: "EPERM", path: f.stateDir });
+    return readRegular(...args);
+  });
+  await expect(f.setup()).rejects.toBeInstanceOf(StateFolderWriteError);
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownership());
+});
+
+test("an unreadable marker is not adopted or removed when its folder is accessible", async () => {
+  const f = await ownedFake(route());
+  const readRegular = reads.readRegular;
+  vi.spyOn(reads, "readRegular").mockImplementation(async (...args) => {
+    if (args[0] === f.path)
+      throw Object.assign(new Error("synthetic unreadable file"), { code: "EACCES", path: f.path });
+    return readRegular(...args);
+  });
+  expect(await f.setup()).toMatchObject({ created: false, owned: false });
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownership());
+  expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+});
+
+test("a marker-write permission failure prevents the bg call", async () => {
+  const f = await ownedFake({}, null);
+  vi.spyOn(stateFiles, "writeSecretFile").mockImplementation(() => {
+    throw Object.assign(new Error("synthetic denial"), { code: "EACCES", path: f.path });
+  });
+  await expect(f.setup()).rejects.toBeInstanceOf(StateFolderWriteError);
+  expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+  await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test.each(["json", "unreadable", "symlink"])(
+  "an invalid %s marker is replaced before setup and supports crash recovery",
+  async (kind) => {
+    const f = await ownedFake({});
+    await writeFile(f.path, "{");
+    const other = join(f.dir, "other.json");
+    if (kind === "symlink") {
+      await rename(f.path, other);
+      await symlink(other, f.path);
+    } else if (kind === "unreadable") {
+      const readRegular = reads.readRegular;
+      let denied = false;
+      vi.spyOn(reads, "readRegular").mockImplementation(async (...args) => {
+        if (args[0] === f.path && !denied) {
+          denied = true;
+          throw Object.assign(new Error("synthetic denial"), { code: "EACCES", path: f.path });
+        }
+        return readRegular(...args);
+      });
+    }
+    expect(await f.setup()).toMatchObject({ created: true, owned: true });
+    expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownership());
+    expect(JSON.parse(await readFile(join(f.dir, "marker-at-setup.json"), "utf8"))).toEqual(ownership());
+    if (kind === "symlink") expect(await readFile(other, "utf8")).toBe("{");
+    writeSecretFile(f.path, JSON.stringify(ownership(3636, markerPid())));
+    expect(await f.setup()).toMatchObject({ created: false, owned: true });
+    expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownership());
+    await f.stop();
+    expect((await f.args()).filter((args) => args.includes("--bg"))).toHaveLength(1);
+    expect((await f.args()).at(-1)).toEqual(["serve", "--https=443", "off"]);
+    await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+  },
+);
+
+test("failure to replace an invalid marker refuses before setup", async () => {
+  const f = await ownedFake({});
+  await writeFile(f.path, "{");
+  vi.spyOn(stateFiles, "writeSecretFile").mockImplementation(() => {
+    throw Object.assign(new Error("synthetic denial"), { code: "EACCES", path: f.path });
+  });
+  await expect(f.setup()).rejects.toBeInstanceOf(StateFolderWriteError);
+  expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+  expect(await readFile(f.path, "utf8")).toBe("{");
+});
+
+test("a marker for another DNS name does not own the current route", async () => {
+  const f = await ownedFake(route(), { ...ownership(3636, markerPid()), dnsName: "other.example.ts.net" });
+  expect(await f.setup()).toMatchObject({ created: false, owned: false });
+  await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+  expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+});
 test("empty config configures exact Serve argv", async () => {
   const f = await fake(running);
   const onSetup = vi.fn();
@@ -418,7 +1017,7 @@ test("the executable boundary survives mock restoration and refuses an unregiste
   onTestFinished(() => rm(dir, { recursive: true, force: true }));
   await writeFile(join(dir, "Tailscale"), "#!/bin/sh\nexit 0\n", { mode: 0o700 });
   vi.restoreAllMocks();
-  await expect(findExecutable("Tailscale", dir)).rejects.toThrow("outside the test fixtures");
+  await expect(executables.findExecutable("Tailscale", dir)).rejects.toThrow("outside the test fixtures");
 });
 
 test("later Serve calls keep their owned environment after fixture removal", async () => {
@@ -428,4 +1027,165 @@ test("later Serve calls keep their owned environment after fixture removal", asy
   await rm(f.dir, { recursive: true, force: true });
   await expect(ensureTailscaleServe(3636, f.env, undefined, undefined, f.options)).rejects.toThrow("not installed");
   await expect(removeTailscaleServe(3636, f.env)).rejects.toThrow("not installed");
+});
+
+function holdLock(stateDir: string) {
+  const holder = new DatabaseSync(join(stateDir, "tailscale-serve.lock"));
+  holder.exec("PRAGMA locking_mode = EXCLUSIVE");
+  holder.exec("BEGIN EXCLUSIVE");
+  return () => {
+    holder.exec("ROLLBACK");
+    holder.close();
+  };
+}
+function waiting(onFirstWait: () => void) {
+  let at = 0;
+  let waits = 0;
+  return {
+    waits: () => waits,
+    now: () => at,
+    sleep: async (ms: number) => {
+      at += ms;
+      waits += 1;
+      if (waits === 1) onFirstWait();
+    },
+  };
+}
+
+test("stop waits for the route lock and skips off when a server adopted the route meanwhile", async () => {
+  const f = await ownedFake(route(), ownership(3636, markerPid()));
+  const unlock = holdLock(f.stateDir);
+  const adopted = ownership();
+  const clock = waiting(() => {
+    writeSecretFile(f.path, JSON.stringify(adopted));
+    unlock();
+  });
+  expect(await removeStaleTailscaleServe(f.stateDir, f.env, clock)).toEqual({ removed: false });
+  expect(clock.waits()).toBe(1);
+  await expect(f.calls()).rejects.toMatchObject({ code: "ENOENT" });
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(adopted);
+  expect(JSON.parse(await readFile(f.configPath, "utf8"))).toEqual(route());
+});
+
+test("stop rechecks an unchanged marker whose reused pid opened its port while the lock was held", async () => {
+  const f = await ownedFake(route(), ownership(3636, markerPid("running")));
+  const before = await readFile(f.path);
+  const probe = vi.spyOn(markers, "loopbackState").mockResolvedValue("refused");
+  const unlock = holdLock(f.stateDir);
+  const clock = waiting(() => {
+    probe.mockResolvedValue("open");
+    unlock();
+  });
+  expect(await removeStaleTailscaleServe(f.stateDir, f.env, clock)).toEqual({ removed: false });
+  expect(clock.waits()).toBe(1);
+  expect(probe).toHaveBeenCalledTimes(2);
+  expect(probe).toHaveBeenLastCalledWith(3636);
+  await expect(f.calls()).rejects.toMatchObject({ code: "ENOENT" });
+  expect(await readFile(f.path)).toEqual(before);
+  expect(JSON.parse(await readFile(f.configPath, "utf8"))).toEqual(route());
+});
+
+test("startup recovery of another target waits for the route lock and yields to an adopting server", async () => {
+  const f = await ownedFake(route(4000), ownership(4000, markerPid()));
+  const unlock = holdLock(f.stateDir);
+  const adopted = ownership(4000);
+  const clock = waiting(() => {
+    writeSecretFile(f.path, JSON.stringify(adopted));
+    unlock();
+  });
+  await expect(
+    ensureTailscaleServe(3636, f.env, dnsName, undefined, { ...f.options, stateDir: f.stateDir, lock: clock }),
+  ).rejects.toThrow(
+    `another emend server (process ${process.pid}) serves port 443 of Tailscale Serve; stop that server, then try again.`,
+  );
+  expect(clock.waits()).toBe(1);
+  expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(adopted);
+  expect(JSON.parse(await readFile(f.configPath, "utf8"))).toEqual(route(4000));
+});
+
+test("a route change refuses with the lock message when another emend holds the lock past the deadline", async () => {
+  const f = await ownedFake(route(), ownership(3636, markerPid()));
+  const unlock = holdLock(f.stateDir);
+  let at = 0;
+  const lock = {
+    now: () => at,
+    sleep: async (ms: number) => {
+      at += ms;
+    },
+    timeoutMs: 100,
+  };
+  const message = "another emend is changing the Tailscale Serve route; try again.";
+  await expect(removeStaleTailscaleServe(f.stateDir, f.env, lock)).rejects.toThrow(message);
+  await expect(removeTailscaleServe(3636, f.env, dnsName, f.stateDir, undefined, lock)).rejects.toThrow(message);
+  await expect(
+    ensureTailscaleServe(3636, f.env, dnsName, undefined, { ...f.options, stateDir: f.stateDir, lock }),
+  ).rejects.toThrow(message);
+  unlock();
+  await expect(f.calls()).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test.each(["missing", "invalid", "live"] as const)("a %s marker creates no lock file", async (kind) => {
+  const marker = kind === "missing" ? null : kind === "invalid" ? {} : ownership(3636, markerPid("running"));
+  const f = await ownedFake(route(), marker);
+  expect(await removeStaleTailscaleServe(f.stateDir, f.env)).toEqual({ removed: false });
+  await expect(lstat(join(f.stateDir, "tailscale-serve.lock"))).rejects.toMatchObject({ code: "ENOENT" });
+  await expect(f.calls()).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("a reused pid with a closed port on another port is recovered, then this route is created", async () => {
+  const f = await ownedFake(route(4000), ownership(4000, markerPid("running")));
+  const probe = vi.spyOn(markers, "loopbackState").mockResolvedValue("refused");
+  expect(await f.setup()).toMatchObject({ created: true, owned: true });
+  expect(probe).toHaveBeenCalledWith(4000);
+  expect(await f.args()).toEqual([
+    ["serve", "status", "--json"],
+    ["serve", "status", "--json"],
+    ["serve", "--https=443", "off"],
+    ["serve", "status", "--json"],
+    ["serve", "--bg", "--https=443", ownership().target],
+  ]);
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownership());
+});
+
+test("stop removes the route of a reused pid whose port is closed", async () => {
+  const f = await ownedFake(route(), ownership(3636, markerPid("EPERM")));
+  const probe = vi.spyOn(markers, "loopbackState").mockResolvedValue("refused");
+  expect(await stopState(f.env)).toEqual({
+    code: 0,
+    stdout: [
+      `emend: no emend server is running; removed the Tailscale Serve route a stopped emend server left at https://${dnsName}\n`,
+    ],
+    stderr: [],
+  });
+  expect(probe).toHaveBeenCalledWith(3636);
+  expect((await f.args()).at(-1)).toEqual(["serve", "--https=443", "off"]);
+  await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test.each(["open", "unknown"] as const)("a live pid whose port answers %s is a running owner", async (answer) => {
+  const f = await ownedFake(route(4000), ownership(4000, markerPid("running")));
+  vi.spyOn(markers, "loopbackState").mockResolvedValue(answer);
+  await expect(f.setup()).rejects.toThrow("another emend server (process 2000000000) serves port 443");
+  expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+  expect(JSON.parse(await readFile(f.configPath, "utf8"))).toEqual(route(4000));
+});
+
+test.each([
+  { event: "timeout", state: "unknown" },
+  { event: "EHOSTUNREACH", state: "unknown" },
+  { event: "ECONNREFUSED", state: "refused" },
+  { event: "connect", state: "open" },
+])("the loopback probe reports $state after $event and destroys its socket", async ({ event, state }) => {
+  vi.useFakeTimers();
+  const socket = Object.assign(new EventEmitter(), { destroy: vi.fn() });
+  const connect = vi.spyOn(net, "connect").mockReturnValue(socket as unknown as net.Socket);
+  const result = loopbackState(3636);
+  expect(connect).toHaveBeenCalledWith({ host: "127.0.0.1", port: 3636 });
+  if (event === "timeout") await vi.advanceTimersByTimeAsync(500);
+  else if (event === "connect") socket.emit("connect");
+  else socket.emit("error", Object.assign(new Error("synthetic connection error"), { code: event }));
+  expect(await result).toBe(state);
+  expect(socket.destroy).toHaveBeenCalledTimes(1);
+  expect(vi.getTimerCount()).toBe(0);
 });

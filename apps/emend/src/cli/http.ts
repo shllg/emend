@@ -1,12 +1,17 @@
-import { ERROR_STATUS, ErrorBody, type ErrorCode } from "@emend/contract";
+import { ERROR_STATUS, ErrorBody, type ErrorCode, LIMITS } from "@emend/contract";
 import { NewerDatabaseError } from "../db/migrate.ts";
 import type { Io } from "../main.ts";
 import { ApiError } from "../server/http/errors.ts";
-import { StateDirModeError, StateFolderWriteError, stateFolderWritable } from "../state/files.ts";
+import { StateDirModeError, StateFolderWriteError, stateFolderWritable, TokenFileModeError } from "../state/files.ts";
 import { VERSION } from "../version.ts";
+import { CliError } from "./error.ts";
 import { escapeJson, escapeReference, quoteShellArgument } from "./escape.ts";
 import { discover } from "./server-client.ts";
 import type { Target } from "./target.ts";
+
+export { CliError } from "./error.ts";
+
+const MAX_REPLY_BYTES = 4 * LIMITS.handoffBytes;
 
 export class CliSignalExit extends Error {
   readonly exitCode: number;
@@ -18,13 +23,6 @@ export class CliSignalExit extends Error {
 export const sandboxHint =
   "If an agent sandbox runs emend, let emend run outside it: https://github.com/shllg/emend/blob/release/docs/setup/troubleshooting.md#an-agents-sandbox-blocks-emend";
 
-export class CliError extends Error {
-  readonly sandboxStateDir?: string;
-  constructor(message: string, sandboxStateDir?: string) {
-    super(message);
-    this.sandboxStateDir = sandboxStateDir;
-  }
-}
 export class CliUsageError extends CliError {}
 export class CliConnectionError extends CliError {}
 function hubUnanswered(url: string): string {
@@ -58,6 +56,11 @@ export function errorLine(error: unknown, command?: string): string {
     const dir = escapeReference(error.dir);
     const quoted = quoteShellArgument(error.dir);
     return `State directory ${dir} has group or other permissions; fix it with chmod 700 ${quoted}\n`;
+  }
+  if (error instanceof TokenFileModeError) {
+    const path = escapeReference(error.path);
+    const quoted = quoteShellArgument(error.path);
+    return `Token file ${path} has group or other permissions; fix it with chmod 600 ${quoted}\n`;
   }
   if (error instanceof NewerDatabaseError) return `${error.message}\n`;
   if (
@@ -108,6 +111,35 @@ export class CliApiError extends CliHttpError {
     this.serverMessage = serverMessage;
   }
 }
+
+class ReplyTooLarge extends Error {}
+
+async function readReplyJson(response: Response): Promise<unknown> {
+  if (Number(response.headers.get("Content-Length")) > MAX_REPLY_BYTES) {
+    void response.body?.cancel().catch(() => {});
+    throw new ReplyTooLarge();
+  }
+  const reader = response.body?.getReader();
+  if (!reader) throw new SyntaxError("Unexpected end of JSON input");
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_REPLY_BYTES) {
+        void reader.cancel().catch(() => {});
+        throw new ReplyTooLarge();
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return JSON.parse(new TextDecoder().decode(Buffer.concat(chunks)));
+}
+
 export async function apiRequest(
   stateDir: string,
   target: Target,
@@ -187,9 +219,18 @@ export async function apiRequest(
   }
   let body: unknown;
   try {
-    body = response.status === 204 ? null : await response.json();
+    body = response.status === 204 ? null : await readReplyJson(response);
   } catch (error) {
     opts.signal?.throwIfAborted();
+    if (error instanceof ReplyTooLarge) {
+      if (path === "/publish" && response.status === 200) throw new CliError(publishAnswerIncomplete);
+      if (target.via === "hub" && !["GET", "HEAD"].includes(opts.method))
+        throw new CliUnansweredError(target.url, response.status);
+      throw new CliHttpError(
+        response.status,
+        `the emend server's answer was larger than ${MAX_REPLY_BYTES / (1024 * 1024)} MiB.`,
+      );
+    }
     if (
       target.via === "hub" &&
       !["GET", "HEAD"].includes(opts.method) &&

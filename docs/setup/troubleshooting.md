@@ -27,6 +27,9 @@ Related lines:
   the same cause. Outside one, see [emend is not running](#emend-is-not-running).
 - `State directory <folder> has group or other permissions; fix it with chmod 700 '<folder>'`
   Run the `chmod` it prints. The state folder must be private to you.
+- `Token file <path> has group or other permissions; fix it with chmod 600 '<path>'` Run the
+  `chmod` it prints. emend reads no token that other users could read, and changes nothing until
+  you fix it.
 
 ## emend is not running
 
@@ -84,9 +87,10 @@ On macOS:
 lsof -nP -iTCP:3636 -sTCP:LISTEN
 ```
 
-If it is an old emend server, end it (find it with the `pgrep` commands in
-[A server from an older emend cannot be asked to stop](#a-server-from-an-older-emend-cannot-be-asked-to-stop)).
-If it is another program, move emend to another port:
+If it is an emend server that `emend` started, stop it with `emend stop`. If that says the server
+is from an older emend, end it as
+[A server from an older emend cannot be asked to stop](#a-server-from-an-older-emend-cannot-be-asked-to-stop)
+says. If it is another program, move emend to another port:
 
 ```sh
 emend serve --port 3700
@@ -143,9 +147,9 @@ If the problem stays, [Run without the service](#run-without-the-service).
 - `emend service supports systemd on Linux and launchd on macOS; run emend serve yourself.`
   Your machine has neither `systemctl` nor `launchctl` on its `PATH`. See
   [Run without the service](#run-without-the-service).
-- `this emend runs from inside the current repository; run emend service install from outside it.`
-  Change to a folder outside that repository, then run the command again. The service must not run
-  code that a repository can change.
+- `emend: this emend runs from inside the current repository (<path>); run emend from an install
+  outside the repository.` The service must not run code that a repository can change. See
+  [emend refuses to run from inside a repository](#emend-refuses-to-run-from-inside-a-repository).
 - `<path> was not written by emend; move it away, then try again.` The unit or plist file at
   that path exists and emend did not make it. Move it away, then run the command again.
 - `the node path contains $, quotes or a backslash, which a systemd unit cannot run; use a node
@@ -156,6 +160,100 @@ If the problem stays, [Run without the service](#run-without-the-service).
 - `no saved service options; the service now uses the defaults` is not an error. It tells you
   that an installed service had no saved options, so it now uses `127.0.0.1:3636`.
 
+## emend says the server runs another version
+
+`emend` or `emend service status` prints one of:
+
+```text
+emend: the emend server at <url> runs emend <old>; this is emend <new>. Run emend stop, then emend, to start emend <new>.
+emend: the emend server at <url> runs emend <old>; this is emend <new>. Run emend service install to restart it on emend <new>.
+emend: the emend server at <url> runs emend <newer>, newer than this emend <version>; update emend: https://github.com/shllg/emend/blob/release/docs/setup/update.md
+```
+
+On an attached machine, `emend` prints this instead, ending in `Update the hub`,
+`Update this machine` or `Update both to the same version`, and a link to update.md:
+
+```text
+emend: the hub at <url> runs emend <hub version>; this machine runs emend <version>. Update the hub: <link>
+```
+
+Why: a server keeps the version it started with. After an update, the server that `emend` or the
+service started still runs the old version until it restarts. Agent commands never print this line.
+
+Fix: run the command the line names.
+
+- `Run emend stop, then emend`: the server is one that bare `emend` started. `emend stop` stops it,
+  and the next `emend` starts the new version.
+- `Run emend service install`: the service runs the server. The install keeps its options and
+  restarts it.
+- `newer than this emend`: the `emend` you ran is older than the server. Update it as
+  [update.md](update.md) says. Check that `emend --version` prints the version you expect; an
+  older install earlier on your `PATH` can hide the new one.
+- On an attached machine, update the side the line names, the hub first.
+
+`emend stop` refuses to stop the service's server and prints:
+
+```text
+emend: the emend server at <url> runs as the emend service; run emend service install to restart it, or emend service uninstall to stop it.
+```
+
+Run one of the two commands it names. The service manages that server, so it changes nothing else.
+
+`emend stop` can also print:
+
+```text
+emend: could not check whether the emend service runs the server at <url>; nothing was changed. Run emend service status, then try again.
+```
+
+Why: emend's own service file exists, but `systemctl` or `launchctl` did not say which process the
+service runs, so emend cannot tell whether the server is the service's. It stops nothing rather
+than stop the service's server by mistake.
+
+Fix: run `emend service status` and fix what it reports. If the service runs the server, use
+`emend service install` or `emend service uninstall` instead of `emend stop`.
+
+## emend refuses to run from inside a repository
+
+`emend publish`, `wait`, `feedback`, `reply`, `mcp`, `stop`, `service` or `skills` prints one of:
+
+```text
+emend: this emend runs from inside the current repository (<path>); run emend from an install outside the repository.
+emend: could not check where this emend runs; nothing was changed.
+```
+
+Any command that runs `git`, `tailscale`, `systemctl`, `launchctl` or the program that opens your
+browser can print one of these instead, with that program's name:
+
+```text
+emend: git on PATH sits inside the current repository; emend does not run it.
+emend: Could not check where git on PATH runs; emend does not run it.
+```
+
+Why: these commands refuse an `emend` whose Node.js or code sits inside the repository you run
+them in, and emend runs those programs only from `PATH` folders outside it. A `PATH` folder or a
+program whose path passes through the repository, for example through a symlink in it, counts as
+inside. emend skips a `PATH` folder written with `.` or `..`, so a program found only there is
+reported as not found on `PATH`. A repository's own tool config (a `mise.toml`, or its
+`node_modules/.bin` on your `PATH`) can point `emend` or `git` at code that the repository controls,
+and agents run these commands with your rights. A repository whose top folder is your home folder
+itself, such as a dotfiles repository, does not count, and neither does a `.git` folder without a
+`HEAD`, such as the empty one some sandboxes create; git does not count it either. A line that says
+emend could not check means a path it checks could not be resolved, so it refused: a `.git` in a
+folder above your working folder that it cannot read, a `.git` that is a symlink, a `.git` file
+that is not a single `gitdir:` line, or a home folder, working folder or emend install that does not
+resolve. emend skips a `PATH` folder, or a program in it, that it cannot check and keeps searching;
+when no other folder has the program, it is reported as not found on `PATH`.
+
+This check catches a copy inside the repository. It is not a security boundary: what keeps a
+repository's code out is an emend installed outside every repository, and no repository config that
+changes the `PATH` or environment emend runs with, for example by putting its own `emend`, `node`
+or `git` first, or by setting `NODE_OPTIONS`.
+
+Fix: run `command -v emend` (or `command -v git`) in that repository to see which one runs. Install
+emend outside any repository as [local.md](local.md) says, and remove the repository config that
+puts its own program first. For a checkout of emend itself, install it with `pnpm install:local`
+([development.md](development.md)).
+
 ## A server from an older emend cannot be asked to stop
 
 `emend service install` prints:
@@ -164,8 +262,14 @@ If the problem stays, [Run without the service](#run-without-the-service).
 the emend server at <url> is from an older emend and cannot be asked to stop; stop it, then run emend service install again.
 ```
 
-Why: `emend service install` asks the running server to stop, so the service can take over. A
-server from an older emend does not understand the request.
+`emend stop` prints:
+
+```text
+emend: the emend server at <url> is from an older emend and cannot be asked to stop; end its process yourself: https://github.com/shllg/emend/blob/release/docs/setup/troubleshooting.md#a-server-from-an-older-emend-cannot-be-asked-to-stop
+```
+
+Why: both commands ask the running server to stop. A server from an older emend does not
+understand the request.
 
 Fix: stop that process yourself. Find it in your own terminal. On Linux:
 
@@ -179,9 +283,14 @@ On macOS:
 pgrep -lf '[e]mend.mjs serve'
 ```
 
-End the process it lists with `kill <pid>`, then run `emend service install` again.
+End the process it lists with `kill <pid>`. Then run `emend service install` again, or run `emend`
+to start the new version.
 
-Related lines from the same command:
+`emend stop` can also print `did not answer; try again.`, `did not stop; try again.` or
+`changed while emend asked it to stop; try again.` after `the emend server at <url>`. Run it again;
+if the line comes back, use the fix above.
+
+Related lines from `emend service install`:
 
 - `the emend server at <url> did not answer; stop it, then run emend service install again.`
   Same fix.
@@ -235,9 +344,51 @@ Fix:
 - For the third line, run `tailscale serve status` and decide whether that route is yours. If you
   keep it, emend cannot serve the hub on port 443 of this machine.
 
+Three more lines come from emend itself:
+
+- `another emend server (process <pid>) serves port 443 of Tailscale Serve; stop that server, then
+  try again.` Another `emend serve --tailscale` or the service already serves the hub on this
+  machine. Use that server, or stop it first: Ctrl-C in its terminal, or
+  `emend service uninstall` for the service.
+- `another emend is changing the Tailscale Serve route; try again.` Another emend command is
+  setting up or removing the route. Wait until it finishes, then run the command again.
+- `could not use the lock file <path>. If no emend server or emend stop is running, including one
+  started with sudo, remove that file and try again.` emend cannot open the file it locks while it
+  changes the route, often because an emend run with `sudo` created it. Check that no emend runs,
+  also none started with `sudo`, then delete that file and run the command again.
+
 One more line is a warning, not an error: `emend: warning: Tailscale Serve also serves other HTTPS
 ports on <hub>.<tailnet>.ts.net; pages there receive emend's sign-in cookie.` Remove the other
 HTTPS routes, or accept that pages there see the cookie.
+
+## emend stop cannot remove a Tailscale route
+
+When no server runs, `emend stop` removes a Tailscale Serve route that a crashed
+`emend serve --tailscale` left, and prints
+`emend: no emend server is running; removed the Tailscale Serve route a stopped emend server left at https://<hub>.<tailnet>.ts.net`.
+If that fails, it prints:
+
+```text
+emend: no emend server is running, but removing the Tailscale Serve route it left at https://<hub>.<tailnet>.ts.net failed: <reason>
+```
+
+Why: emend remembers each route it creates, so it can remove the route after a crash. It removes
+the route only when the server that made it has stopped and Serve still has exactly that route.
+
+Fix: fix the reason the line names (see
+[Tailscale is not installed or not running](#tailscale-is-not-installed-or-not-running)), then run
+`emend stop` again. The next `emend serve --tailscale` also removes or reuses the route.
+
+When `tailscale` is not on the `PATH` that `emend stop` sees, it keeps its record of the route and
+prints:
+
+```text
+emend: no emend server is running; tailscale was not found on PATH, so the Tailscale Serve route at https://<hub>.<tailnet>.ts.net may still exist.
+```
+
+Run `emend stop` again in a terminal where `command -v tailscale` finds it. If you stopped using
+Tailscale on this machine for good, delete the file `tailscale-serve.json` in emend's state folder
+(where that folder lives: [local.md](local.md#undo), step 5).
 
 ## The hub is unreachable
 
@@ -455,9 +606,9 @@ pages works except the start at login.
   ```
 
   It prints `emend: serving https://<hub>.<tailnet>.ts.net`. Stop it with Ctrl-C. When it stops, it
-  removes the Tailscale route it created.
+  removes the Tailscale route it created. If it crashed instead, the next `emend serve --tailscale`
+  or `emend stop` removes the route it left.
 - Plain loopback: `emend serve` prints `emend is serving http://127.0.0.1:3636`.
 
 A server that `emend` started keeps running after your terminal closes, and keeps the version it
-started with. After an update, stop it. Find it with `pgrep -af '[e]mend.mjs serve'` on Linux or
-`pgrep -lf '[e]mend.mjs serve'` on macOS. The next `emend` starts the new version.
+started with. After an update, stop it with `emend stop`. The next `emend` starts the new version.

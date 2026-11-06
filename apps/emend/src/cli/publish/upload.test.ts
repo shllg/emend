@@ -9,7 +9,7 @@ import { upload } from "./upload.ts";
 test("second publish uploads no blobs and every upload proves the server", async () => {
   const dir = await mkdtemp(join(tmpdir(), "emend-upload-"));
   try {
-    await writeFile(join(dir, "agent.token"), `em_${"a".repeat(43)}`);
+    await writeFile(join(dir, "agent.token"), `em_${"a".repeat(43)}`, { mode: 0o600 });
     const proof = provenTestServer(dir);
     const known = new Set<string>();
     let puts = 0;
