@@ -72,3 +72,10 @@ the hub name when attached, this machine's instance name, whether the server or 
 the `emend` version. Add `--json` for the same fields as JSON, where `address: none` and
 `instance: none` in the human form are `null`. It prints no token, creates no file, and reports a
 server or hub that does not answer instead of failing.
+
+## Stop the server
+
+`emend stop` stops the server that `emend` started on this machine, for example after an update so
+the next `emend` runs the new version. It does not stop a server the service runs: run
+`emend service install` to restart that one, or `emend service uninstall` to stop it. When no
+server runs, it removes a Tailscale Serve route that a crashed `emend serve --tailscale` left.

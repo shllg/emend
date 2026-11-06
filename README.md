@@ -74,7 +74,8 @@ claude plugin update emend@emend
 ```
 
 With mise, run `mise upgrade npm:@shllg/emend` instead of the `npm` line. If you installed the
-service, run `emend service install` again; it keeps its options. If you ran `emend skills install`
+service, run `emend service install` again; it keeps its options. Without the service, run
+`emend stop`; the next `emend` starts the new version. If you ran `emend skills install`
 before, run it again. Then restart Claude Code. After `brew upgrade node` or `mise upgrade node`,
 run `emend service install` again too.
 

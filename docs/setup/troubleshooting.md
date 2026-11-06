@@ -205,8 +205,9 @@ Run one of the two commands it names. The service manages that server, so it cha
 emend: could not check whether the emend service runs the server at <url>; nothing was changed. Run emend service status, then try again.
 ```
 
-Why: emend's own service file exists, but `systemctl` or `launchctl` did not say which process the
-service runs, so emend cannot tell whether the server is the service's. It stops nothing rather
+Why: emend's own service file exists, but emend could not ask `systemctl` or `launchctl` which
+process the service runs: the program did not say, is missing, or sits inside the repository you
+run emend in. So emend cannot tell whether the server is the service's. It stops nothing rather
 than stop the service's server by mistake.
 
 Fix: run `emend service status` and fix what it reports. If the service runs the server, use
@@ -221,8 +222,10 @@ emend: this emend runs from inside the current repository (<path>); run emend fr
 emend: could not check where this emend runs; nothing was changed.
 ```
 
-Any command that runs `git`, `tailscale`, `systemctl`, `launchctl` or the program that opens your
-browser can print one of these instead, with that program's name:
+Any command that runs `git`, `tailscale`, `systemctl` or `launchctl` can print one of these
+instead, with that program's name. Two places check quietly: `emend stop` then prints the "could
+not check whether the emend service runs" line above, and `emend` prints its sign-in link instead
+of opening your browser.
 
 ```text
 emend: git on PATH sits inside the current repository; emend does not run it.
@@ -240,14 +243,17 @@ itself, such as a dotfiles repository, does not count, and neither does a `.git`
 `HEAD`, such as the empty one some sandboxes create; git does not count it either. A line that says
 emend could not check means a path it checks could not be resolved, so it refused: a `.git` in a
 folder above your working folder that it cannot read, a `.git` that is a symlink, a `.git` file
-that is not a single `gitdir:` line, or a home folder, working folder or emend install that does not
-resolve. emend skips a `PATH` folder, or a program in it, that it cannot check and keeps searching;
+that is not a single `gitdir:` line, a working folder or emend install that does not resolve, or a
+home folder that exists but does not resolve (with no home folder at all, every repository
+counts). emend skips a `PATH` folder, or a program in it, that it cannot check and keeps searching;
 when no other folder has the program, it is reported as not found on `PATH`.
 
 This check catches a copy inside the repository. It is not a security boundary: what keeps a
 repository's code out is an emend installed outside every repository, and no repository config that
 changes the `PATH` or environment emend runs with, for example by putting its own `emend`, `node`
-or `git` first, or by setting `NODE_OPTIONS`.
+or `git` first, or by setting `NODE_OPTIONS`. A `PATH` with version-manager shims, such as those of
+mise or asdf, counts as one the repository controls: the shim sits outside the repository, but it
+picks its tool from the repository's own config.
 
 Fix: run `command -v emend` (or `command -v git`) in that repository to see which one runs. Install
 emend outside any repository as [local.md](local.md) says, and remove the repository config that
@@ -373,7 +379,8 @@ emend: no emend server is running, but removing the Tailscale Serve route it lef
 ```
 
 Why: emend remembers each route it creates, so it can remove the route after a crash. It removes
-the route only when the server that made it has stopped and Serve still has exactly that route.
+the route only when nothing answers on the route's local port any more, so no emend server still
+uses it, and Serve still has exactly that route.
 
 Fix: fix the reason the line names (see
 [Tailscale is not installed or not running](#tailscale-is-not-installed-or-not-running)), then run

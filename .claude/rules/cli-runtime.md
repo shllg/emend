@@ -31,7 +31,9 @@ checks catch a copy inside the repo.
 - This is a tripwire for a genuine copy inside the repo, not a boundary: the launcher still finds
   `node` and its shell tools on `PATH`, so only an install outside every repo, run with a `PATH`
   and an environment (such as `NODE_OPTIONS`) the repo does not control, keeps the repo's code
-  out.
-- A test that reaches a helper never uses the live `PATH`: it passes its own environment, and a
+  out. A `PATH` with version-manager shims (mise, asdf) is one the repo controls: the shim lies
+  outside the repo but picks its tool from the repo's config.
+- A test that reaches tailscale never uses the live `PATH`: it passes its own environment, and a
   mock of `executable.ts` refuses any lookup outside the test's own folders, so no test can reach a
-  real `tailscale` or, on macOS, the Tailscale app.
+  real `tailscale` or, on macOS, the Tailscale app. Tests of git run the system git with the
+  fenced config above; tests of systemctl and launchctl use a fixture `PATH` and a mocked runner.
