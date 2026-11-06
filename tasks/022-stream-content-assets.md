@@ -1,10 +1,10 @@
 ---
 id: 022
 title: Stream content-path assets
-status: in-progress
+status: done
 owner: agent + your approval
 depends_on: []
-done_on:
+done_on: 2026-11-06
 ---
 
 # 022 — Stream content-path assets
@@ -28,23 +28,23 @@ requests than loopback HTTP/1.1.
 
 ## Steps
 
-- [ ] Failing tests first: an asset response and a writeup image response are streamed (peak
+- [x] Failing tests first: an asset response and a writeup image response are streamed (peak
       memory does not scale with the number of parallel requests for a large blob), the size is
       checked with `fstat` before any byte is sent, and a blob whose content does not match its
       hash never reaches the client, not even in part.
-- [ ] Put the streaming read in `BlobStore`, so the content route and `media.ts` share it. Hash
+- [x] Put the streaming read in `BlobStore`, so the content route and `media.ts` share it. Hash
       without whole-file copies and without synchronous hashing on the main thread. A hash checked
       only while streaming sends bytes before the mismatch is known, so decide how a mismatch
       stays unsent: for example, verify once with a streamed hash and remember the result keyed by
       the blob's hash and its file identity (inode, size, mtime, ctime), checked again from
       `fstat` on the open descriptor before each response. Record the choice in Notes.
-- [ ] Consider a server-wide cap on concurrent blob reads. Record the call in Notes.
-- [ ] Keep every header and rule in `.claude/rules/content-isolation.md` exactly as it is:
+- [x] Consider a server-wide cap on concurrent blob reads. Record the call in Notes.
+- [x] Keep every header and rule in `.claude/rules/content-isolation.md` exactly as it is:
       server-chosen `Content-Type`, `nosniff`, the CSP, owner isolation, `404` for a missing or
       foreign blob.
-- [ ] Reviews: emend-reviewer, the read-only Codex review and emend-security-reviewer (content
+- [x] Reviews: emend-reviewer, the read-only Codex review and emend-security-reviewer (content
       path and rendering of agent content).
-- [ ] One commit: `perf(api): stream html doc assets and writeup images from disk`.
+- [x] One commit: `perf(api): stream html doc assets and writeup images from disk`.
 
 ## Done when
 
@@ -78,3 +78,7 @@ green, and the reviews are clean.
   `O_NONBLOCK`, so a FIFO at a blob path is refused instead of blocking a file thread.
 - Follow-up, out of scope: the HTML doc itself stays buffered, because the bridge injection needs
   the whole text.
+- Done: assets and writeup images stream from a checked descriptor; three reviews ran with no
+  blocking finding, and their fixes are in. Follow-ups: off-thread hashing, an admission cap that
+  also frees waiting requests on abort, slow-consumer tests through the adapter, and streaming the
+  HTML doc itself.
