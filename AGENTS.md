@@ -81,6 +81,8 @@ Each line prevents a real failure. "Before you touch" names the rule file with t
   start or re-run it.
 - The lifecycle skills: `/e-spawn`, `/e-work`, `/e-pr`, `/e-pr-finalize`, `/e-pr-merge`, `/e-rebase`,
   `/e-merge-local`.
+- `/e-issue` turns an idea, an improvement or a bug into a GitHub issue. Issues are public. Only the
+  owner's command sets the `ready` label.
 - Tests never touch emend's real state directory, which holds client diffs: the Vitest setup
   sets a temporary `EMEND_HOME`, and every test that needs state uses its own.
 - Changing `.claude/settings.json`, `.claude/hooks/` or `.codex/` needs the owner's approval
