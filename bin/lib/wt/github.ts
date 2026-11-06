@@ -88,7 +88,7 @@ export function push(repo: Repo, top: string, o: { forceWithLease: boolean; befo
   }
   o.beforePush?.();
   if (o.forceWithLease) {
-    const current = gitTry(repo, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}^{commit}`], { cwd: top });
+    const current = gitTry(repo, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: top });
     if (current.code !== 0 || current.stdout !== sha.stdout) {
       throw new WtError(1, "The branch moved after HEAD was resolved. Nothing was pushed.");
     }

@@ -177,6 +177,29 @@ test("a lease push refuses a branch that moved after HEAD was resolved", () =>
     assert.equal(gitIn(ctx.fx.origin, "rev-parse", BRANCH), pushed);
   }));
 
+test("a lease push refuses a branch ref that holds a tag object", () =>
+  scenario((ctx) => {
+    const pushed = commitFile(ctx.fx.main, "a.txt", "a\n");
+    push(ctx.repo, ctx.fx.main, { forceWithLease: false });
+    gitIn(ctx.fx.main, "commit", "--quiet", "--amend", "-m", "rewritten");
+    gitIn(ctx.fx.main, "tag", "-a", "-m", "t", "t1", "HEAD");
+    const tagId = gitIn(ctx.fx.main, "rev-parse", "t1");
+
+    assert.throws(
+      () =>
+        push(ctx.repo, ctx.fx.main, {
+          forceWithLease: true,
+          beforePush: () => {
+            const refs = join(ctx.fx.main, ".git", "refs", "heads");
+            mkdirSync(refs, { recursive: true });
+            writeFileSync(join(refs, BRANCH), `${tagId}\n`);
+          },
+        }),
+      (e: unknown) => e instanceof WtError && e.code === 1 && /branch moved/.test(e.message),
+    );
+    assert.equal(gitIn(ctx.fx.origin, "rev-parse", BRANCH), pushed);
+  }));
+
 test("a lease push still refuses a remote change that was fetched but never integrated", () =>
   scenario((ctx) => {
     commitFile(ctx.fx.main, "a.txt", "a\n");
