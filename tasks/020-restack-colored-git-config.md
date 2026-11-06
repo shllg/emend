@@ -41,9 +41,12 @@ The new test fails without the fix and passes with it, `pnpm verify` is green, a
 
 - Never change the user's git config, in a test or anywhere else. Set the color keys only in the
   fixture repo's config.
-- Done on 2026-11-06 in two commits. The color fix also covers push and remote-delete error text
-  through `GIT_BASE`. At the coordinating session's request, a second fix makes
+- Done on 2026-11-06. The color fix also covers push and remote-delete error text through
+  `GIT_BASE`. At the coordinating session's request, a second fix makes
   `bin/wt push --force-with-lease` push `refs/heads/<branch>` instead of a bare commit id, which a
-  pre-push guard that checks the local branch's reflog refuses. Left open: `makeTestEnv()` does
+  pre-push guard that checks the local branch's reflog refuses. The final review found the same
+  root cause in the patch's shape, so a third fix pins its context and path prefixes:
+  `diff.context=0` failed every restack, and `diff.noprefix=true` put a new nested file at the
+  wrong path. Left open: `makeTestEnv()` does
   not isolate `XDG_CONFIG_HOME` or set `GIT_CONFIG_NOSYSTEM`, so the bin/wt tests read the
   developer's XDG and system git config.

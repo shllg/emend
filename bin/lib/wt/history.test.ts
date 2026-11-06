@@ -157,6 +157,35 @@ test("restack directly reports conflicts under a colored git config", () =>
     idle(wt);
   }));
 
+test("a restack ignores a zero diff context in the git config", () =>
+  scenario(({ env, fx, repo }) => {
+    const base = numbered(12);
+    commitFile(fx.main, "f.txt", base);
+    gitIn(fx.main, "push", "--quiet", "origin", "main");
+    const wt = worktree(repo, "feat-a");
+    commitFile(wt, "f.txt", base.replace("line 10\n", "branch\n"));
+    const main = base.replace("line 2\n", "main\n");
+    advanceOrigin(env, fx, "f.txt", main);
+    gitIn(fx.main, "config", "diff.context", "0");
+
+    assert.deepEqual(restack(resolveRepo(wt), wt, "origin/main").conflicts, []);
+    assert.equal(readFileSync(join(wt, "f.txt"), "utf8"), main.replace("line 10\n", "branch\n"));
+    idle(wt);
+  }));
+
+test("a restack keeps nested paths under diff.noprefix", () =>
+  scenario(({ env, fx, repo }) => {
+    const wt = worktree(repo, "feat-a");
+    commitFile(wt, "docs/deep/n.md", "nested\n");
+    advanceOrigin(env, fx, "other.txt", "other\n");
+    gitIn(fx.main, "config", "diff.noprefix", "true");
+
+    assert.deepEqual(restack(resolveRepo(wt), wt, "origin/main").conflicts, []);
+    assert.equal(readFileSync(join(wt, "docs/deep/n.md"), "utf8"), "nested\n");
+    assert.equal(existsSync(join(wt, "deep/n.md")), false);
+    idle(wt);
+  }));
+
 test("restack works directly and reports no conflicts for a clean replay", () =>
   scenario(({ env, fx, repo }) => {
     const wt = worktree(repo, "feat-a");
