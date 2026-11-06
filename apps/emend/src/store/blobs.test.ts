@@ -33,6 +33,16 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 
 afterEach(() => vi.restoreAllMocks());
 
+function expectBytesEqual(actual: Uint8Array, expected: Uint8Array): void {
+  if (Buffer.compare(actual, expected) === 0) return;
+  let index = 0;
+  const sharedLength = Math.min(actual.length, expected.length);
+  while (index < sharedLength && actual[index] === expected[index]) index++;
+  throw new Error(
+    `Byte arrays differ: actual length ${actual.length}, expected length ${expected.length}, first differing index ${index}`,
+  );
+}
+
 test("blobs share content-addressed files but require a separate owner row", async () => {
   const ctx = await testDb();
   const store = new BlobStore(ctx.db, ctx.dir);
@@ -351,7 +361,7 @@ test("open streams bounded, independent chunks and closes the descriptor at EOF"
       chunks.push(chunk);
     }
     expect(chunks.length).toBeGreaterThan(1);
-    expect(Buffer.concat(chunks)).toEqual(Buffer.from(f.bytes));
+    expectBytesEqual(Buffer.concat(chunks), f.bytes);
     f.expectClosed(1);
     await read.close();
   } finally {
@@ -448,7 +458,7 @@ test("changed identities invalidate verification and failed verification does no
     const restored = await f.store.open(f.ownerId, f.sha);
     if (!restored) throw new Error("Missing restored blob");
     expect(f.reads).toHaveBeenCalledTimes(verificationReads);
-    expect(new Uint8Array(await new Response(restored.stream()).arrayBuffer())).toEqual(f.bytes);
+    expectBytesEqual(new Uint8Array(await new Response(restored.stream()).arrayBuffer()), f.bytes);
     f.expectClosed(4);
   } finally {
     await f.cleanup();
@@ -549,21 +559,26 @@ test("a renamed replacement cannot reuse the previous inode's verification", asy
     f.reads.mockClear();
     expect(await f.store.open(f.ownerId, f.sha)).toBeNull();
     expect(f.reads).toHaveBeenCalledTimes(Math.ceil(f.bytes.length / (64 * 1024)) + 1);
-    expect(new Uint8Array(await new Response(original.stream()).arrayBuffer())).toEqual(f.bytes);
+    expectBytesEqual(new Uint8Array(await new Response(original.stream()).arrayBuffer()), f.bytes);
     f.expectClosed(2);
   } finally {
     await f.cleanup();
   }
 });
 
+test("verified identities use the production cache limit by default", () => {
+  expect(VERIFIED_LIMIT).toBeGreaterThan(0);
+  expect(new BlobReadCache().verifiedLimit).toBe(VERIFIED_LIMIT);
+});
+
 test("verified identities stay within the cache limit and evict the oldest first", async () => {
   const f = await streamFixture(new Uint8Array([1, 2, 3]));
   try {
-    expect(VERIFIED_LIMIT).toBeGreaterThan(0);
-    const cache = new BlobReadCache();
+    const limit = 4;
+    const cache = new BlobReadCache({ verifiedLimit: limit });
     const inserted: string[] = [];
     expect(cache.verifiedKeysForTesting()).toEqual([]);
-    for (let i = 0; i < VERIFIED_LIMIT + 2; i++) {
+    for (let i = 0; i < limit + 2; i++) {
       // Distinct timestamps give this one file a new identity without relying on clock resolution.
       await utimes(f.file, i + 1, i + 1);
       const read = await cache.open(f.file, f.sha, f.bytes.length);
@@ -573,15 +588,15 @@ test("verified identities stay within the cache limit and evict the oldest first
       const newest = keys.at(-1);
       if (newest === undefined) throw new Error("Missing verified identity");
       inserted.push(newest);
-      expect(keys).toHaveLength(Math.min(inserted.length, VERIFIED_LIMIT));
-      expect(keys[0]).toBe(inserted[Math.max(0, inserted.length - VERIFIED_LIMIT)]);
+      expect(keys).toHaveLength(Math.min(inserted.length, limit));
+      expect(keys[0]).toBe(inserted[Math.max(0, inserted.length - limit)]);
     }
-    expect(new Set(inserted).size).toBe(VERIFIED_LIMIT + 2);
+    expect(new Set(inserted).size).toBe(limit + 2);
     expect(cache.verifiedKeysForTesting()).toEqual(inserted.slice(2));
-    expect(f.reads).toHaveBeenCalledTimes(2 * (VERIFIED_LIMIT + 2));
+    expect(f.reads).toHaveBeenCalledTimes(2 * (limit + 2));
     const handles = [...new Set(f.stats.mock.contexts as FileHandle[])];
-    expect(handles).toHaveLength(VERIFIED_LIMIT + 2);
-    expect(handles.filter((handle) => handle.fd === -1)).toHaveLength(VERIFIED_LIMIT + 2);
+    expect(handles).toHaveLength(limit + 2);
+    expect(handles.filter((handle) => handle.fd === -1)).toHaveLength(limit + 2);
   } finally {
     await f.cleanup();
   }
@@ -637,7 +652,7 @@ test("a stream never yields bytes appended beyond its verified size", async () =
     const read = await f.store.open(f.ownerId, f.sha);
     if (!read) throw new Error("Missing blob");
     await appendFile(f.file, "Synthetic appended bytes");
-    expect(Buffer.from(await new Response(read.stream()).arrayBuffer()).equals(Buffer.from(f.bytes))).toBe(true);
+    expectBytesEqual(new Uint8Array(await new Response(read.stream()).arrayBuffer()), f.bytes);
     expect((f.stats.mock.contexts[0] as FileHandle).fd).toBe(-1);
   } finally {
     await f.cleanup();

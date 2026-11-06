@@ -34,6 +34,11 @@ async function verify(handle: FileHandle, sha: string, size: number, key: string
 export class BlobReadCache {
   private readonly verified = new Set<string>();
   private readonly verifying = new Map<string, Promise<boolean>>();
+  readonly verifiedLimit: number;
+
+  constructor({ verifiedLimit = VERIFIED_LIMIT }: { verifiedLimit?: number } = {}) {
+    this.verifiedLimit = verifiedLimit;
+  }
 
   /** Tests inspect FIFO eviction through a snapshot so they cannot mutate the live cache. */
   verifiedKeysForTesting(): readonly string[] {
@@ -66,7 +71,7 @@ export class BlobReadCache {
             .then((valid) => {
               if (valid) {
                 this.verified.add(key);
-                if (this.verified.size > VERIFIED_LIMIT) {
+                if (this.verified.size > this.verifiedLimit) {
                   const oldest = this.verified.values().next().value;
                   if (oldest !== undefined) this.verified.delete(oldest);
                 }
