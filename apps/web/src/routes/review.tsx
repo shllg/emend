@@ -207,7 +207,6 @@ function resolveOpenDoc(
   const placement = thread?.placement.status === "placed" ? thread.placement.location : undefined;
   const target = revision.docs.find(
     (doc) =>
-      (doc.kind === "source" && intent.elementId === `source-doc-${doc.path}`) ||
       (doc.kind !== "source" && intent.elementId === `doc-${doc.path}`) ||
       (doc.kind === "html" && intent.elementId === `html-doc-${doc.path}`) ||
       (doc.kind === "markdown" && doc.blocks.some((block) => intent.elementId === `block-${block.id}`)) ||
@@ -486,10 +485,7 @@ function LoadedReview({
     claimDraft(draft.key, "resumed");
     if (draft.target.kind === "source-lines") {
       setResumed({ ...draft, tab: "docs" });
-      navigateReading(
-        { ...search, tab: "docs", doc: draft.target.path, view: "source", thread: undefined },
-        `source-doc-${draft.target.path}`,
-      );
+      navigateReading({ ...search, tab: "docs", doc: draft.target.path, view: "source", thread: undefined }, "");
       return;
     }
     if (draft.target.kind === "html-span") {
@@ -618,7 +614,9 @@ function LoadedReview({
       setHtmlNavigation(undefined);
       if (thread?.target.kind === "source-lines" && (search.tab !== "comments" || search.thread)) {
         const location = thread.placement.status === "placed" ? thread.placement.location : undefined;
-        const placed = location?.kind === "source-lines" && findDoc(revision.docs, location.path, "source");
+        const placed =
+          location?.kind === "source-lines" &&
+          revision.docs.find((doc) => doc.kind === "source" && doc.path === location.path && !doc.unrendered);
         const next: ReviewSearch = {
           ...search,
           tab: placed ? "docs" : "comments",

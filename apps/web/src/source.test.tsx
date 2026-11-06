@@ -122,6 +122,35 @@ function mount(search = `?tab=docs&doc=${path}&view=source`) {
   return { ...render(<App queryClient={client} history={history} />), history };
 }
 
+test.each(["placed", "unplaced"] as const)(
+  "counts %s comments separately for rendered and source twins",
+  async (status) => {
+    revision.docs = [
+      source,
+      { kind: "html", path, title: "Rendered notes", contentUrl: `/content/${"a".repeat(75)}/notes.md` },
+    ];
+    const renderedThread: ThreadView = {
+      ...thread,
+      id: "22222222-2222-4222-8222-222222222222",
+      target: { kind: "html-span", path, quote: "Rendered paragraph", prefix: "", suffix: "" },
+      placement: { status: "placed", location: { kind: "html-span", path, start: 0, end: 18 } },
+      comments: [],
+    };
+    revision.threads = [thread, renderedThread].map((item) =>
+      status === "placed" ? item : { ...item, placement: { status: "unplaced", reason: "file-gone" } },
+    );
+    mount(`?tab=docs&doc=${path}`);
+    await screen.findByRole("button", { name: "Comments (1)" });
+    fireEvent.click(screen.getByRole("button", { name: "Docs" }));
+    const menu = within(screen.getByRole("dialog", { name: "Docs" }));
+    expect(menu.getByRole("button", { name: /Rendered notes.*1 open comment$/ })).toBeTruthy();
+    fireEvent.click(menu.getByRole("button", { name: /Source notes.*Source 1 open comment$/ }));
+    await screen.findByRole("button", { name: "Comment on line 3" });
+    fireEvent.click(screen.getByRole("button", { name: "Docs" }));
+    expect(within(screen.getByRole("dialog", { name: "Docs" })).getAllByText("1 open comment")).toHaveLength(2);
+  },
+);
+
 test("lists rendered and source rows for one path and opens each view", async () => {
   const { history } = mount("?tab=docs");
   const link = await screen.findByRole("link", { name: /Source notes.*notes.md.*Source/ });
@@ -254,6 +283,17 @@ test("resumes a saved source draft on its source doc", async () => {
   await screen.findByRole("button", { name: "Comment on line 5" });
   expect((screen.getByRole("textbox", { name: "Comment" }) as HTMLTextAreaElement).value).toBe("Saved source draft");
   expect(history.location.search).toContain("view=source");
+  expect(new URLSearchParams(history.location.search).get("doc")).toBe(path);
+  expect(history.location.hash).toBe("");
+});
+test.each(["direct", "Show in place"])("an unrendered source thread stays visible in Comments via %s", async (jump) => {
+  revision.docs = [{ ...source, lines: [], unrendered: true }];
+  revision.threads = [thread];
+  const { history } = mount(jump === "direct" ? `?tab=docs&doc=${path}&view=source#thread-${id}` : "?tab=comments");
+  if (jump === "Show in place") fireEvent.click(await screen.findByRole("link", { name: jump }));
+  await waitFor(() => expect(new URLSearchParams(history.location.search).get("tab")).toBe("comments"));
+  expect(within(screen.getByTestId("reading-pane")).getByText("Check these lines")).toBeTruthy();
+  expect(screen.queryByText("This file could not be shown.")).toBeNull();
 });
 test("shows a short fallback for unrendered source", async () => {
   revision.docs = [{ ...source, lines: [], unrendered: true }];
@@ -392,6 +432,58 @@ test("source docs never load or save reading positions", async () => {
   await screen.findByRole("link", { name: /Rendered notes.*notes.md/ });
   expect(load.mock.calls.some(([storageKey]) => storageKey === key)).toBe(false);
   expect(save.mock.calls.some(([storageKey]) => storageKey === key)).toBe(false);
+});
+
+test.each([false, true])(
+  "switching source docs resets scroll only without a thread target (targeted: %s)",
+  async (targeted) => {
+    if (thread.target.kind !== "source-lines") throw new Error("missing source target");
+    revision.docs = [source, { ...source, path: "other.txt", title: "Other source" }];
+    revision.threads = [
+      {
+        ...thread,
+        target: { ...thread.target, path: "other.txt" },
+        placement: { status: "placed", location: { kind: "source-lines", path: "other.txt", start: 4, end: 6 } },
+      },
+    ];
+    vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+    const { history } = mount();
+    await screen.findByRole("button", { name: "Comment on line 3" });
+    const scroller = screen.getByTestId("reading-pane");
+    scroller.scrollTop = 1000;
+    if (targeted) {
+      await act(async () => history.push(`/r/${id}?tab=docs&doc=other.txt&view=source#thread-${id}`));
+    } else {
+      fireEvent.click(screen.getByRole("button", { name: "Docs" }));
+      fireEvent.click(screen.getByRole("button", { name: /Other source.*other.txt.*Source/ }));
+    }
+    await screen.findByRole("heading", { name: "Other source" });
+    if (targeted) await waitFor(() => expect(document.activeElement?.id).toBe(`thread-${id}`));
+    expect(scroller.scrollTop).toBe(targeted ? 1000 : 0);
+  },
+);
+
+test("a frame navigate message cannot open a source-only doc", async () => {
+  revision.docs = [source, { kind: "html", path: "page.html", contentUrl: `/content/${"a".repeat(75)}/page.html` }];
+  const { container, history } = mount("?tab=docs&doc=page.html");
+  await screen.findByRole("heading", { name: "page.html" });
+  const frame = container.querySelector("iframe");
+  if (!frame) throw new Error("missing content frame");
+  Object.defineProperty(frame, "contentWindow", { value: { postMessage: vi.fn() } });
+  fireEvent.load(frame);
+  const href = history.location.href;
+  await act(async () => {
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        source: frame.contentWindow,
+        data: { type: "emend:navigate", path, fragment: "" },
+      }),
+    );
+  });
+  expect(history.location.href).toBe(href);
+  expect(history.length).toBe(1);
+  expect(container.querySelector("iframe")).toBe(frame);
+  expect(container.querySelector(".em-source")).toBeNull();
 });
 
 test("a jump to a distant source thread mounts its chunk before scrolling the card", async () => {

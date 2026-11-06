@@ -74,7 +74,7 @@ export const SourceView = memo(function SourceView({
   }, []);
   const returnFocus = useCallback(() => (opener.current?.isConnected ? opener.current : root.current), []);
   return (
-    <div ref={root} id={`source-doc-${doc.path}`} className="em-source" tabIndex={-1}>
+    <div ref={root} className="em-source" tabIndex={-1}>
       {error && (
         <p role="alert" className="p-3">
           {error}

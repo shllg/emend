@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { docFilename, docTitle } from "../../lib/doc-navigation.ts";
-import { docKey, docView, findDoc } from "../../lib/doc-view.ts";
+import { docKey, docView, threadOnDoc } from "../../lib/doc-view.ts";
 import type { DocNavigation, HtmlPosition } from "../../lib/frame-messages.ts";
 import { focusReadingTarget } from "../../lib/reading-focus.ts";
 import { readingPositionKey } from "../../lib/reading-position.ts";
@@ -116,11 +116,7 @@ export function DocView({
     [entry, openDoc, props.reviewId, props.revision, search.view, returning, headingTarget, visit],
   );
   const commentCount = props.threads.filter(
-    (thread) =>
-      thread.state !== "resolved" &&
-      (thread.placement.status === "placed" && "path" in thread.placement.location
-        ? thread.placement.location.path === openDoc?.path
-        : "path" in thread.target && thread.target.path === openDoc?.path),
+    (thread) => thread.state !== "resolved" && openDoc && threadOnDoc(thread, openDoc),
   ).length;
   const hasContents = headings.length >= 3;
   const headingId = useId();
@@ -139,15 +135,19 @@ export function DocView({
     const focusNavigation = last && last.doc !== selectedKey && !targeted;
     setDestination((current) => (current?.path === path ? current : undefined));
     if (path) {
+      if (last && openDoc?.kind === "source" && !targeted) {
+        const scroller = root.current?.closest<HTMLElement>("[data-reading-scroll]");
+        if (scroller) scroller.scrollTop = 0;
+      }
       if (focusNavigation) focusReadingTarget(heading.current);
     } else if (last?.path && focusNavigation) {
       const row = rows.current.get(last.path);
       focusReadingTarget(row);
       row?.scrollIntoView?.({ block: "nearest" });
     }
-  }, [path, key, selectedKey, targeted]);
+  }, [path, key, selectedKey, targeted, openDoc?.kind]);
   const follow = (next: DocNavigation) => {
-    const doc = findDoc(docs, next.path);
+    const doc = docs.find((doc) => doc.path === next.path && doc.kind !== "source");
     if (!doc || docKey(doc) === key) return;
     setDestination(doc.kind === "html" && next.fragment ? next : undefined);
     onOpenDoc(doc);
@@ -271,14 +271,7 @@ export function DocView({
                       .filter((doc) => `${docTitle(doc)} ${doc.path}`.toLowerCase().includes(filter.toLowerCase()))
                       .map((doc) => {
                         const count = props.threads.filter(
-                          (thread) =>
-                            thread.state !== "resolved" &&
-                            ((thread.placement.status === "placed" &&
-                              "path" in thread.placement.location &&
-                              thread.placement.location.path === doc.path) ||
-                              (thread.placement.status !== "placed" &&
-                                "path" in thread.target &&
-                                thread.target.path === doc.path)),
+                          (thread) => thread.state !== "resolved" && threadOnDoc(thread, doc),
                         ).length;
                         return (
                           <li key={docKey(doc)}>
