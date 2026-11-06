@@ -61,7 +61,8 @@ working tree holds the branch's change, with conflict markers in the listed file
 
 ## 4. Push
 
-Run `<main>/bin/wt push --force-with-lease`. It pushes exactly the checked HEAD commit. A refusal means the remote moved; fetch with
+Run `<main>/bin/wt push --force-with-lease`. It pushes the branch after checking that it still points at the checked HEAD commit.
+A refusal means the remote moved, or a new commit landed on the branch ("The branch moved after HEAD was resolved"); fetch with
 `<main>/bin/wt fetch`, look at what changed, and stop to report. Do not retry blindly.
 
 ## 5. Report

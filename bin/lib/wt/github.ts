@@ -62,24 +62,36 @@ export function fetch(repo: Repo): void {
 
 /**
  * The git push argument list: a full refspec (no DWIM resolution to a tag), no tags followed.
+ * A force push names the local branch as its source, so a pre-push guard can check the update against
+ * that branch's reflog; a plain push sends the resolved commit id.
  * `--force-if-includes` goes with `--force-with-lease`, never alone.
  */
 export function pushArgs(sha: string, branch: string, forceWithLease: boolean): string[] {
   const args = ["push", "-u", "--no-follow-tags"];
   if (forceWithLease) args.push("--force-with-lease", "--force-if-includes");
-  args.push("origin", `${sha}:refs/heads/${branch}`);
+  const source = forceWithLease ? `refs/heads/${branch}` : sha;
+  args.push("origin", `${source}:refs/heads/${branch}`);
   return args;
 }
 
-export function push(repo: Repo, top: string, o: { forceWithLease: boolean }): void {
+export function push(repo: Repo, top: string, o: { forceWithLease: boolean; beforePush?: () => void }): void {
   const head = gitTry(repo, ["symbolic-ref", "--quiet", "HEAD"], { cwd: top });
   if (head.code !== 0 || head.stdout === "") throw new WtError(2, "HEAD is detached. Nothing was pushed.");
   if (!head.stdout.startsWith("refs/heads/")) throw new WtError(2, "HEAD is not a local branch. Nothing was pushed.");
   const branch = branchName(head.stdout.slice("refs/heads/".length));
-  // HEAD is resolved once; the push uses this commit, so a commit made during the push cannot go out.
+  // HEAD is resolved once. A plain push sends that commit id. A lease push sends the branch, so it first
+  // checks that the branch still points at that commit. Git reads the branch once when the push starts, so
+  // a commit made after that read cannot go out; one that lands between the check and the read would.
   const sha = gitTry(repo, ["rev-parse", "--verify", "HEAD^{commit}"], { cwd: top });
   if (sha.code !== 0 || !/^[0-9a-f]{40}$/.test(sha.stdout)) {
     throw new WtError(1, "Could not resolve HEAD. Nothing was pushed.");
+  }
+  o.beforePush?.();
+  if (o.forceWithLease) {
+    const current = gitTry(repo, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}^{commit}`], { cwd: top });
+    if (current.code !== 0 || current.stdout !== sha.stdout) {
+      throw new WtError(1, "The branch moved after HEAD was resolved. Nothing was pushed.");
+    }
   }
   const r = gitTry(repo, pushArgs(sha.stdout, branch, o.forceWithLease), { cwd: top });
   if (r.code !== 0) {
@@ -92,7 +104,7 @@ export function push(repo: Repo, top: string, o: { forceWithLease: boolean }): v
     }
     throw new WtError(1, `git push failed: ${r.stderr.trim().split("\n").slice(-1)[0] || `exit ${r.code}`}`);
   }
-  // `-u` does nothing for a commit id source, so set the upstream here (the push updated origin/<branch>).
+  // `-u` does nothing for a plain push's commit id source, so set the upstream here (the push updated origin/<branch>).
   gitTry(repo, ["branch", "--set-upstream-to", `origin/${branch}`, branch], { cwd: top });
 }
 
