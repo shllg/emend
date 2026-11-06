@@ -145,6 +145,7 @@ function replay(repo: Repo, top: string, old: string, target: string, backup: st
         "--unified=3",
         "--src-prefix=a/",
         "--dst-prefix=b/",
+        "--find-renames",
         "--full-index",
         "--no-ext-diff",
         "--no-textconv",
@@ -161,7 +162,14 @@ function replay(repo: Repo, top: string, old: string, target: string, backup: st
         cwd: top,
       }).code !== 0;
     if (!hasChange) return { conflicts: [] };
-    const applied = hgTry(repo, top, ["apply", "--3way", "--whitespace=nowarn", patch]);
+    const applied = hgTry(repo, top, [
+      "-c",
+      "apply.ignoreWhitespace=no",
+      "apply",
+      "--3way",
+      "--whitespace=nowarn",
+      patch,
+    ]);
     const conflicts = unmergedPaths(repo, top);
     if (applied.code !== 0 && conflicts.length === 0) {
       // Nothing usable was written. Put the branch back exactly as it was.

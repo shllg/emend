@@ -47,6 +47,8 @@ The new test fails without the fix and passes with it, `pnpm verify` is green, a
   pre-push guard that checks the local branch's reflog refuses. The final review found the same
   root cause in the patch's shape, so a third fix pins its context and path prefixes:
   `diff.context=0` failed every restack, and `diff.noprefix=true` put a new nested file at the
-  wrong path. Left open: `makeTestEnv()` does
+  wrong path. A fourth pins rename detection and `apply.ignoreWhitespace=no`, and drops
+  `GIT_DIFF_OPTS` from the environment: `apply.ignoreWhitespace=change` let a deletion drop an
+  upstream re-indent silently. Left open: `makeTestEnv()` does
   not isolate `XDG_CONFIG_HOME` or set `GIT_CONFIG_NOSYSTEM`, so the bin/wt tests read the
   developer's XDG and system git config.

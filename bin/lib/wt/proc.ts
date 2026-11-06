@@ -25,15 +25,18 @@ export interface RunResult {
 }
 
 /**
- * Runs a program without a shell, with the caller's environment plus FIXED (no prompts, no pager). Exit code 127 means the program was
- * not found; 124 means it ran past the timeout.
+ * Runs a program without a shell, with the caller's environment plus FIXED (no prompts, no pager),
+ * excluding GIT_DIFF_OPTS. Exit code 127 means the program was not found; 124 means it ran past the timeout.
  */
 export function run(cmd: string, args: string[], opts: RunOptions): RunResult {
   const useInput = opts.input !== undefined;
+  const env = { ...process.env, ...FIXED };
+  // GIT_DIFF_OPTS would override the diff context bin/wt pins.
+  delete env.GIT_DIFF_OPTS;
   const r = spawnSync(cmd, args, {
     cwd: opts.cwd,
     input: opts.input,
-    env: { ...process.env, ...FIXED },
+    env,
     encoding: "utf8",
     timeout: opts.timeoutMs,
     killSignal: "SIGKILL",

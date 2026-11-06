@@ -27,6 +27,19 @@ test("run passes input, keeps the caller's environment and fixes prompts and pag
   }
 });
 
+test("run does not pass GIT_DIFF_OPTS to the child", () => {
+  try {
+    process.env.GIT_DIFF_OPTS = "--unified=0";
+    const r = run(process.execPath, ["-e", 'process.stdout.write(process.env.GIT_DIFF_OPTS ?? "unset")'], {
+      cwd: "/",
+    });
+    assert.equal(r.code, 0);
+    assert.equal(r.stdout, "unset");
+  } finally {
+    delete process.env.GIT_DIFF_OPTS;
+  }
+});
+
 test("run reports a missing program as 127 and a timeout as 124", () => {
   assert.equal(run("wt-no-such-program", [], { cwd: "/" }).code, 127);
   const slow = run(process.execPath, ["-e", "setTimeout(() => {}, 5000)"], { cwd: "/", timeoutMs: 200 });
