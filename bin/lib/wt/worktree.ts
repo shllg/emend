@@ -11,11 +11,11 @@ import {
   openSync,
   readdirSync,
   readFileSync,
-  readSync,
   realpathSync,
   writeSync,
 } from "node:fs";
 import { isAbsolute, join, resolve, sep } from "node:path";
+import { isatty } from "node:tty";
 import { pathToFileURL } from "node:url";
 import type { Command, CommandTable } from "./command.ts";
 import { closeWorkspace, herdrLocatedAgents } from "./herdr.ts";
@@ -32,6 +32,7 @@ import {
   type Repo,
   refExists,
 } from "./repo.ts";
+import { hasTerminal, readTerminalLine } from "./terminal.ts";
 import { branchName, commitSha, parseFlags, refName, taskNumber, WtError } from "./validate.ts";
 
 // ---------------------------------------------------------------------------------------------
@@ -41,26 +42,17 @@ function say(line: string): void {
   process.stdout.write(`${line}\n`);
 }
 
+// The terminal check is friction against agents, not proof that the owner is present.
 export const terminal = {
   isTTY(): boolean {
-    return process.stdin.isTTY === true && process.stdout.isTTY === true;
+    return isatty(0) && isatty(1) && hasTerminal();
   },
-  /** Reads one line from stdin, synchronously. */
   readLine(prompt: string): string {
-    process.stderr.write(prompt);
-    const chunk = Buffer.alloc(1);
-    let line = "";
-    for (;;) {
-      let n = 0;
-      try {
-        n = readSync(0, chunk, 0, 1, null);
-      } catch {
-        break;
-      }
-      if (n === 0 || chunk[0] === 0x0a) break;
-      line += String.fromCharCode(chunk[0] as number);
+    try {
+      return readTerminalLine(prompt);
+    } catch {
+      throw new WtError(2, "--discard needs a terminal. Nothing was removed.");
     }
-    return line.trim();
   },
 };
 

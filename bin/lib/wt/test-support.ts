@@ -45,7 +45,16 @@ export interface TestEnv {
 }
 
 const PATCHED = ["HOME", "PATH", "TERM"] as const;
-const SCRUBBED_PREFIXES = ["GIT_", "HERDR_", "GH_", "GITHUB_", "CLAUDECODE", "NODE_OPTIONS", "WT_"];
+const SCRUBBED_PREFIXES = [
+  "GIT_",
+  "HERDR_",
+  "GH_",
+  "GITHUB_",
+  "CLAUDECODE",
+  "NODE_OPTIONS",
+  "WT_",
+  "EMEND_PRIVATE_TERMS",
+];
 
 function findOnPath(name: string, pathValue: string): string | null {
   for (const dir of pathValue.split(delimiter)) {
@@ -331,6 +340,8 @@ export interface Fixture {
 const BIN_DIR = join(import.meta.dirname, "..", "..");
 
 function copyBin(destRoot: string): void {
+  mkdirSync(join(destRoot, "scripts"), { recursive: true });
+  copyFileSync(join(BIN_DIR, "..", "scripts", "check-public.ts"), join(destRoot, "scripts", "check-public.ts"));
   const libDest = join(destRoot, "bin", "lib", "wt");
   mkdirSync(libDest, { recursive: true });
   copyFileSync(join(BIN_DIR, "wt"), join(destRoot, "bin", "wt"));
@@ -353,8 +364,9 @@ export function makeFixture(env: TestEnv, o: { withBin?: boolean } = {}): Fixtur
   mkdirSync(main);
   gitIn(origin, "init", "--quiet", "--bare", "-b", "main");
   gitIn(main, "init", "--quiet", "-b", "main");
-  writeFileSync(join(main, ".gitignore"), ".claude/worktrees/\n.wt/\n");
+  writeFileSync(join(main, ".gitignore"), ".claude/worktrees/\n.wt/\n.private-terms\n");
   writeFileSync(join(main, "README.md"), "fixture\n");
+  writeFileSync(join(main, ".private-terms"), "unused-synthetic-term\n");
   if (o.withBin) copyBin(main);
   gitIn(main, "add", "-A");
   gitIn(main, "commit", "--quiet", "-m", "init");

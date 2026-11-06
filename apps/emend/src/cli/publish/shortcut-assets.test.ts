@@ -97,7 +97,7 @@ test("distinct asset paths with equal bytes each read once but upload one blob",
 
 test("read-time key skips leave every doc's references and uploaded blobs", async () => {
   const f = await fixture();
-  const key = `-----BEGIN PRIVATE KEY-----\n${"A".repeat(64)}\n-----END PRIVATE KEY-----`;
+  const key = `-----BEGIN PRIVATE KEY-----\n${"A".repeat(64)}\n-----END PRIVATE KEY-----`; // check-public: allow
   await f.file("bundle/secrets.js", key.padEnd(LIMITS.assetBytes, " "));
   const safeSize = 5 * 1024 * 1024;
   await f.file("bundle/a.png", Buffer.alloc(safeSize, 65));

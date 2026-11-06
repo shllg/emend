@@ -96,7 +96,11 @@ owner's private plan. Write nothing to GitHub until the owner picks one.
 Answer what the repository can answer yourself. Ask the owner only what it cannot.
 
 1. **Duplicates.** Run `gh issue list --state all --search '<keywords>' --json number,title,state,labels --limit 20`
-   with two or three keyword sets.
+   with two or three keyword sets. Search words leave the machine too: check each set first with
+   `node '<main>/scripts/check-public.ts' --root '<main>' --text '<keywords>' --text '<word 1>' --text '<word 2>' ...`:
+   the whole set as the first `--text`, then one `--text` per word. A hit on `--text #<k>` for
+   `<k>` of 2 or more names the word to drop. A hit on `--text #1` alone means words that are
+   private only together: use a different set of words.
    - An open match: propose to refine that issue instead of creating a new one, with its number
      and URL. It becomes the issue this run may edit only when the owner picks "Refine #<n>"; then
      go on as in step 1.3.
@@ -189,6 +193,18 @@ review, email addresses, secrets and tokens, and anything about a hosted or paid
 `VISION.md` does not already say. Replace each with a neutral placeholder (`<state folder>`,
 `example.com`), or drop it.
 
+Then write the body file (step 7.1), and write the title and every alt text, one per line, to
+`<top>/.wt/issue-<slug>-title.txt` with the Write tool. Run the gate on both:
+`node '<main>/scripts/check-public.ts' --root '<main>' --file '<top>/.wt/issue-<slug>-title.txt' --file '<top>/.wt/issue-<slug>.md'`,
+where `<main>` is the parent of `git rev-parse --path-format=absolute --git-common-dir`. It prints
+only locations and rule names, never the matched text. Fix every hit and run it again until it
+exits 0. It also checks the owner's private terms from `<main>/.private-terms`. When no terms list
+exists it refuses: stop and ask the owner to create that file. Never read, create, edit or remove
+`.private-terms`, and never set `EMEND_PRIVATE_TERMS`: a hit names the place to fix.
+Run it again on the final files, after every change from step 6 and after step 7.4 merges a
+concurrent edit, right before each create or edit, and on any other text this skill sends to
+GitHub.
+
 **Screenshots.** Look at each screenshot you would attach. List anything in it that could be
 private: an address bar with a host name, paths, file names or code from a private repository, a
 review of private code, names, email addresses, tokens. You cannot edit what an image shows. An
@@ -253,7 +269,7 @@ when the owner says so.
    the create again. Name the image that failed; on the owner's OK, retry it with
    `gh issue edit <n> --attach '<copy>#<alt text>'`.
 7. Check the result with `gh issue view <n> --json number,url,labels,blockedBy,blocking`. Once no
-   upload is left to retry, delete the body file and the stripped image copies.
+   upload is left to retry, delete the body file, the title file and the stripped image copies.
 
 ## 8. Set `ready` on an existing issue
 

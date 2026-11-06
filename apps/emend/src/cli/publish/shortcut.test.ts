@@ -1242,7 +1242,7 @@ test.each([
   ["JSON service account", JSON.stringify({ private_key: syntheticPrivateKey("PRIVATE KEY") })],
   [
     "PGP armor headers",
-    `-----BEGIN PGP PRIVATE KEY BLOCK-----\nVersion: Synthetic fixture\n\n${"A".repeat(64)}\n-----END PGP PRIVATE KEY BLOCK-----`,
+    `-----BEGIN PGP PRIVATE KEY BLOCK-----\nVersion: Synthetic fixture\n\n${"A".repeat(64)}\n-----END PGP PRIVATE KEY BLOCK-----`, // check-public: allow
   ],
   ["indented PEM", `  ${syntheticPrivateKey().replaceAll("\n", "\n  ")}`],
   ["YAML block scalar", `key: |\n  ${syntheticPrivateKey().replaceAll("\n", "\n  ")}`],
@@ -1264,7 +1264,7 @@ test.each([
   ["flattened PEM", syntheticPrivateKey().replaceAll("\n", " ")],
   [
     "PGP long Comment header",
-    `-----BEGIN PGP PRIVATE KEY BLOCK-----\nComment: ${"synthetic ".repeat(200)}\n\n${"A".repeat(64)}\n-----END PGP PRIVATE KEY BLOCK-----`,
+    `-----BEGIN PGP PRIVATE KEY BLOCK-----\nComment: ${"synthetic ".repeat(200)}\n\n${"A".repeat(64)}\n-----END PGP PRIVATE KEY BLOCK-----`, // check-public: allow
   ],
   [
     "PuTTY in JSON",
@@ -1294,11 +1294,11 @@ test.each([
   ["age-prefix.ts", 'export const AGE_PREFIX = "AGE-SECRET-KEY-1";\n'],
   [
     "pem-header.ts",
-    'const header = "-----BEGIN PRIVATE KEY-----";\nexport function headerText() {\n  return header;\n}\n',
+    'const header = "-----BEGIN PRIVATE KEY-----";\nexport function headerText() {\n  return header;\n}\n', // check-public: allow
   ],
   ["putty-marker.ts", 'const marker = "PuTTY-User-Key-File-3: ssh-ed25519";\n'],
   ["putty-template.ts", "const marker = `\nPuTTY-User-Key-File-3: ssh-ed25519\n`;\n"],
-  ["pgp-prose.txt", "Look for -----BEGIN PGP PRIVATE KEY BLOCK----- in an armored key.\nThis is ordinary prose.\n"],
+  ["pgp-prose.txt", "Look for -----BEGIN PGP PRIVATE KEY BLOCK----- in an armored key.\nThis is ordinary prose.\n"], // check-public: allow
 ])("a private-key marker in %s is skipped even without material", async (name, text) => {
   const f = await fixture();
   await f.file(`bundle/${name}`, text);

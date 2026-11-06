@@ -32,7 +32,10 @@ pulled change takes effect at the next session start or after `/reload-plugins`.
 run `emend skills install` once; its links point into the installed package.
 
 `pnpm verify` is the single local gate. It runs `verify:static`, `verify:test`,
-`verify:build` and `verify:harness` in order. CI runs those same checks in parallel on Node 24
+`verify:build` and `verify:harness` in order. `verify:static` includes `pnpm check:public`, which
+keeps home paths, private addresses and host names, email addresses outside reserved domains,
+secret shapes and attribution lines out of tracked files, file names and commit messages; a hit
+names only the place and the rule. CI runs those same checks in parallel on Node 24
 and 26, with 4 Vitest shards per Node version. `pnpm bench` runs non-gating measurements with
 temporary state and prints JSON lines; it has no timing assertions and does not run in CI.
 [AGENTS.md](https://github.com/shllg/emend/blob/main/AGENTS.md)

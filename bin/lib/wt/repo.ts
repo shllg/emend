@@ -1,5 +1,6 @@
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { localDiagnostic, repoDiagnostic } from "./diagnostics.ts";
 import { type RunBytesResult, type RunResult, run, runBytes } from "./proc.ts";
 import { WtError } from "./validate.ts";
 
@@ -61,6 +62,31 @@ export const GIT_BASE = [
 
 function rawGit(args: string[], cwd: string, input?: string, timeoutMs?: number): RunResult {
   return run("git", [...GIT_BASE, ...args], { cwd, input, timeoutMs });
+}
+
+/** Only the owner's global/system identity may exempt commit identities from the public gate. */
+export function requireGlobalIdentity(repo: Repo, top: string): void {
+  const refuse = (scope: string): never => {
+    throw new WtError(1, `a git identity with ${scope} scope is set; bin/wt checks only global and system identities.`);
+  };
+  // Git children strip command-scope injection. Refuse an attempted identity override as well.
+  if (
+    /user\.(?:name|email)(?:[=\s'"]|$)/i.test(process.env.GIT_CONFIG_PARAMETERS ?? "") ||
+    Object.entries(process.env).some(
+      ([key, value]) => /^GIT_CONFIG_KEY_[0-9]+$/.test(key) && /^(?:user\.name|user\.email)$/i.test(value ?? ""),
+    )
+  )
+    refuse("command");
+  for (const key of ["user.name", "user.email"]) {
+    const result = gitTry(repo, ["config", "--includes", "--show-scope", "--get-all", key], { cwd: top });
+    if (result.code === 1) continue;
+    if (result.code !== 0 || !result.stdout)
+      throw new WtError(1, "Could not check the scope of the git identity. Nothing was changed.");
+    for (const entry of result.stdout.split("\n")) {
+      const scope = /^(system|global|local|worktree|command)\t/.exec(entry)?.[1];
+      if (scope !== "system" && scope !== "global") refuse(scope ?? "unknown");
+    }
+  }
 }
 
 const WORKTREE_ID_RE = /^[A-Za-z0-9._-]{1,100}$/;
@@ -154,7 +180,10 @@ export function resolveRepo(cwd: string): Repo {
 export function git(repo: Repo, args: string[], opts: { cwd?: string; input?: string } = {}): string {
   const r = gitTry(repo, args, opts);
   if (r.code !== 0) {
-    throw new WtError(1, `git ${args[0] ?? ""} failed: ${r.stderr.trim() || `exit ${r.code}`}`);
+    const diagnostic = ["push", "fetch", "ls-remote"].includes(args[0] ?? "")
+      ? repoDiagnostic(repo, r.stderr)
+      : localDiagnostic(r.stderr);
+    throw new WtError(1, `git ${args[0] ?? ""} failed: ${diagnostic || `exit ${r.code}`}`);
   }
   return r.stdout;
 }
@@ -215,7 +244,7 @@ export function assertRefFormat(repo: Repo, branch: string): void {
 export function fetchOrigin(repo: Repo): void {
   const r = rawGit(["fetch", "--quiet", "origin"], repo.mainRoot, undefined, 120_000);
   if (r.code !== 0) {
-    throw new WtError(69, `Could not fetch from origin: ${r.stderr.trim() || `exit ${r.code}`}`);
+    throw new WtError(69, `Could not fetch from origin: ${repoDiagnostic(repo, r.stderr) || `exit ${r.code}`}`);
   }
 }
 

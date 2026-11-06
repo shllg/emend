@@ -32,7 +32,7 @@ The work queue is `tasks/`. When asked "what now?", "what's next?" or similar, f
 
 ## Commands
 
-- `pnpm verify`: the local gate chains `verify:static` (lint, typecheck, check:sync), `verify:test`
+- `pnpm verify`: the local gate chains `verify:static` (lint, typecheck, check:sync, check:public), `verify:test`
   (Vitest), `verify:build` (build, check:package, check:budget)
   and `verify:harness` (test:harness). CI runs them in parallel on Node 24 and 26 with 4 Vitest shards.
 - `pnpm lint`: Biome checks formatting and lint. `pnpm typecheck`: TypeScript project references.
@@ -45,7 +45,21 @@ The work queue is `tasks/`. When asked "what now?", "what's next?" or similar, f
 Each line prevents a real failure. "Before you touch" names the rule file with the detail.
 
 1. **Public by default.** Never add personal paths, private hostnames, private repository names,
-   client content, secrets, or notes about anyone's infrastructure.
+   client content, secrets, or notes about anyone's infrastructure. `pnpm check:public` holds it for
+   files, file names and commit messages, and `bin/wt push`, `pr`, `land`, `/e-issue` and
+   `/e-pr-finalize` run it on the names and text they send. The owner's private terms live in the
+   gitignored `.private-terms` of the main checkout (one case-insensitive term per line, `#`
+   comments, `!` lines for allowed phrases; a space in a term also matches a line break, `-`, `_` or
+   nothing) and are checked only locally, before anything leaves the machine; CI runs the generic
+   rules. Without that file bin/wt refuses to send. Only the owner manages it: agents never read,
+   create, edit or remove it, and never set `EMEND_PRIVATE_TERMS`. Agents push only with
+   `bin/wt push`. Other text for GitHub (an issue, a comment, a reply) goes out only after
+   `node '<main>/scripts/check-public.ts' --root '<main>' --file <file>` (the main checkout's copy)
+   passed on the exact file sent. A trailing `// check-public: allow` comment skips the generic
+   rules on its line in files only, never secret shapes other than a bare private-key header and
+   never the private terms. A new one needs the owner's OK: `bin/wt push` refuses it and names its
+   line, and only the owner pushes it, from a terminal, with `bin/wt push --accept-new-markers`.
+   Agents never pass that flag.
 2. **The server binds loopback unless told otherwise.** `127.0.0.1:3636`; only `--host` or
    `--tailscale` widen it. No telemetry.
 3. **Never serve agent-written HTML, scripts or styles on the app origin.** Markdown renders on

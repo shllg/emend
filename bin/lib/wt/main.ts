@@ -45,7 +45,7 @@ herdr:
 
 Remote:
   fetch
-  push [--force-with-lease]
+  push [--force-with-lease] [--accept-new-markers (owner only)]
   pr create | pr edit | pr merge
 
 History:

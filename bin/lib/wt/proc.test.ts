@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 import { test } from "node:test";
 import { run, runBytes } from "./proc.ts";
 
@@ -53,4 +55,60 @@ test("run reports a missing program as 127 and a timeout as 124", () => {
   assert.equal(run("wt-no-such-program", [], { cwd: "/" }).code, 127);
   const slow = run(process.execPath, ["-e", "setTimeout(() => {}, 5000)"], { cwd: "/", timeoutMs: 200 });
   assert.equal(slow.code, 124);
+});
+
+test("regression: every process helper strips the private terms environment", (t) => {
+  const previous = process.env.EMEND_PRIVATE_TERMS;
+  process.env.EMEND_PRIVATE_TERMS = "fixturecorp";
+  const spy = t.mock.method(childProcess, "spawnSync", (...args: unknown[]) => {
+    const options = args[2] as { env: NodeJS.ProcessEnv; encoding: string };
+    assert.equal(Object.hasOwn(options.env, "EMEND_PRIVATE_TERMS"), false);
+    assert.equal(options.env.GIT_TERMINAL_PROMPT, "0");
+    return { status: 0, stdout: options.encoding === "buffer" ? Buffer.alloc(0) : "", stderr: "" };
+  });
+  syncBuiltinESMExports();
+  try {
+    for (const execute of [run, runBytes]) {
+      const result = execute("fixture-command", [], { cwd: "/" });
+      assert.equal(result.code, 0);
+    }
+    assert.equal(spy.mock.callCount(), 2);
+    assert.equal(process.env.EMEND_PRIVATE_TERMS, "fixturecorp");
+  } finally {
+    spy.mock.restore();
+    syncBuiltinESMExports();
+    if (previous === undefined) delete process.env.EMEND_PRIVATE_TERMS;
+    else process.env.EMEND_PRIVATE_TERMS = previous;
+  }
+});
+
+test("R9.3: every process helper removes Git config override variables", (t) => {
+  const values = {
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "user.name",
+    GIT_CONFIG_VALUE_0: "Synthetic User",
+    GIT_CONFIG_PARAMETERS: "'user.name=Synthetic User'",
+    GIT_CONFIG_GLOBAL: "/nonexistent",
+    GIT_CONFIG_SYSTEM: "/nonexistent",
+    GIT_CONFIG_NOSYSTEM: "1",
+  };
+  const previous = { ...process.env };
+  Object.assign(process.env, values);
+  const spy = t.mock.method(childProcess, "spawnSync", (...args: unknown[]) => {
+    const options = args[2] as { env: NodeJS.ProcessEnv; encoding: string };
+    for (const key of Object.keys(values)) assert.equal(Object.hasOwn(options.env, key), false);
+    return { status: 0, stdout: options.encoding === "buffer" ? Buffer.alloc(0) : "", stderr: "" };
+  });
+  syncBuiltinESMExports();
+  try {
+    for (const execute of [run, runBytes]) assert.equal(execute("git", [], { cwd: "/" }).code, 0);
+    assert.equal(spy.mock.callCount(), 2);
+  } finally {
+    spy.mock.restore();
+    syncBuiltinESMExports();
+    for (const key of Object.keys(values)) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+  }
 });

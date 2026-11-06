@@ -1,11 +1,11 @@
 import { expect, test } from "vitest";
 import { holdsPrivateKey } from "./shortcut-walk.ts";
 
-const header = "-----BEGIN PRIVATE KEY-----";
+const header = "-----BEGIN PRIVATE KEY-----"; // check-public: allow
 
 test.each([
   header,
-  "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+  "-----BEGIN PGP PRIVATE KEY BLOCK-----", // check-public: allow
   "---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----",
   "PuTTY-User-Key-File-",
   "AGE-SECRET-KEY-1",

@@ -1202,3 +1202,97 @@ test("conflict lines replace C0, DEL and C1 control characters", () => {
   const text = conflictLines(["a\u0085b\u009bc\u0007d\u007fe\u0080f\u009fg.txt", "plain é.txt"]);
   assert.equal(text, "conflict: a?b?c?d?e?f?g.txt\nconflict: plain é.txt\n");
 });
+
+test("regression: land checks subject and body before creating a commit", () =>
+  scenario(({ fx, repo }) => {
+    const wt = worktree(repo, "feat-a");
+    const head = commitFile(wt, "a.txt", "a\n");
+    const main = gitIn(fx.main, "rev-parse", "main");
+    const objects = gitIn(fx.main, "count-objects", "-v");
+    writeFileSync(join(fx.main, ".private-terms"), "fixturecorp");
+    const privateHost = ["fixture", "ts", "net"].join(".");
+    for (const value of ["fixturecorp", privateHost, `${privateHost} ${["check-public:", " allow"].join("")}`]) {
+      for (const [subject, body] of [
+        [value, ""],
+        ["feat: public", value],
+      ] as const) {
+        assert.throws(
+          () => land(resolveRepo(wt), wt, subject, body, head),
+          (error: unknown) => error instanceof WtError && /private term|tailnet host name/.test(error.message),
+        );
+      }
+    }
+    rmSync(join(fx.main, ".private-terms"));
+    assert.throws(
+      () => land(resolveRepo(wt), wt, "feat: public", "public", head),
+      (error: unknown) =>
+        error instanceof WtError && error.message.startsWith("check:public: private terms list required;"),
+    );
+    assert.equal(gitIn(fx.main, "count-objects", "-v"), objects);
+    assert.equal(gitIn(fx.main, "rev-parse", "main"), main);
+    assert.equal(gitIn(wt, "for-each-ref", "refs/wt-backup/"), "");
+  }));
+
+test("R7.F: land checks terms across the subject-body boundary before creating objects", () =>
+  scenario(({ fx, repo }) => {
+    const wt = worktree(repo, "feat-a");
+    const head = commitFile(wt, "public.txt", "public", "public file");
+    writeFileSync(join(fx.main, ".private-terms"), "alice example");
+    const objects = gitIn(fx.main, "count-objects", "-v");
+    const main = gitIn(fx.main, "rev-parse", "main");
+    assert.throws(
+      () => land(resolveRepo(wt), wt, "alice", "example", head),
+      (error: unknown) => error instanceof WtError && error.message === "message:1:1: private term (file line 1)",
+    );
+    assert.equal(gitIn(fx.main, "count-objects", "-v"), objects);
+    assert.equal(gitIn(fx.main, "rev-parse", "main"), main);
+    assert.equal(gitIn(wt, "for-each-ref", "refs/wt-backup/"), "");
+  }));
+
+for (const surface of ["content", "path", "branch"]) {
+  test(`10: land checks private ${surface} before commit-tree or backup refs`, () =>
+    scenario(({ fx, repo }) => {
+      const branch = surface === "branch" ? "fixturecorp-feature" : "feat-a";
+      const wt = worktree(repo, branch);
+      const head = commitFile(
+        wt,
+        surface === "path" ? "fixturecorp.txt" : "draft.txt",
+        surface === "content" ? "fixturecorp" : "public",
+        "public change",
+      );
+      writeFileSync(join(fx.main, ".private-terms"), "fixturecorp");
+      const objects = gitIn(fx.main, "count-objects", "-v");
+      const main = gitIn(fx.main, "rev-parse", "main");
+      assert.throws(
+        () => land(resolveRepo(wt), wt, "feat: public", "", head),
+        (error: unknown) =>
+          error instanceof WtError && /private term/.test(error.message) && !error.message.includes("fixturecorp"),
+      );
+      assert.equal(gitIn(fx.main, "count-objects", "-v"), objects);
+      assert.equal(gitIn(fx.main, "rev-parse", "main"), main);
+      assert.equal(gitIn(wt, "for-each-ref", "refs/wt-backup/"), "");
+    }));
+}
+
+for (const scope of ["--local", "--worktree"]) {
+  for (const key of ["user.name", "user.email"]) {
+    test(`R8.4: land refuses ${scope} ${key} before creating a commit or backup`, () =>
+      scenario(({ fx, repo }) => {
+        const wt = worktree(repo, "feat-a");
+        const head = commitFile(wt, "public.txt", "public", "public file");
+        const main = gitIn(fx.main, "rev-parse", "main");
+        gitIn(wt, "config", "extensions.worktreeConfig", "true");
+        gitIn(wt, "config", scope, key, "synthetic-identity");
+        assert.throws(
+          () => land(resolveRepo(wt), wt, "feat: public", "", head),
+          (e: unknown) =>
+            e instanceof WtError &&
+            e.message ===
+              `a git identity with ${scope.slice(2)} scope is set; bin/wt checks only global and system identities.`,
+        );
+        assert.equal(gitIn(fx.main, "rev-parse", "main"), main);
+        assert.equal(gitIn(wt, "rev-parse", "HEAD"), head);
+        assert.equal(gitIn(wt, "for-each-ref", "refs/wt-backup/"), "");
+      }));
+  }
+}

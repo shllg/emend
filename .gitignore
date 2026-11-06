@@ -9,6 +9,7 @@ dist
 # Machine-local files
 .mcp.json
 .sync-counterpart-path
+/.private-terms
 .claude/settings.local.json
 .claude/worktrees/
 # bin/wt state for each worktree

@@ -34,12 +34,16 @@ function childEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env, ...FIXED };
   // GIT_DIFF_OPTS would override the diff context bin/wt pins.
   delete env.GIT_DIFF_OPTS;
+  delete env.EMEND_PRIVATE_TERMS;
+  // The exempt identity must come from the user's own global or system config.
+  for (const key of Object.keys(env))
+    if (/^GIT_CONFIG_(?:PARAMETERS|COUNT|GLOBAL|SYSTEM|NOSYSTEM|KEY_.*|VALUE_.*)$/.test(key)) delete env[key];
   return env;
 }
 
 /**
  * Runs a program without a shell, with the caller's environment plus FIXED (no prompts, no pager),
- * excluding GIT_DIFF_OPTS. Exit code 127 means the program was not found; 124 means it ran past the timeout.
+ * excluding Git config overrides, GIT_DIFF_OPTS and EMEND_PRIVATE_TERMS. Exit code 127 means the program was not found; 124 means it ran past the timeout.
  */
 export function run(cmd: string, args: string[], opts: RunOptions): RunResult {
   const useInput = opts.input !== undefined;

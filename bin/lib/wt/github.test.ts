@@ -1,8 +1,18 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { commands, prCreate, prEdit, prMerge, push, pushArgs } from "./github.ts";
+import {
+  commands,
+  markerTerminal,
+  prCreate,
+  prEdit,
+  prMerge,
+  push,
+  pushArgs,
+  pushDiagnostic,
+  requireCheckedPush,
+} from "./github.ts";
 import { type Repo, resolveRepo } from "./repo.ts";
 import {
   commitFile,
@@ -42,6 +52,26 @@ async function scenario(
     await fn({ env, fx, repo: resolveRepo(fx.main) });
   } finally {
     env.cleanup();
+  }
+}
+
+/** The owner confirmation seam is available only to tests in this process. */
+function withMarkerTerminal<T>(input: boolean, error: boolean, answer: string, fn: (prompts: string[]) => T): T {
+  const saved = { ...markerTerminal };
+  const prompts: string[] = [];
+  Object.assign(markerTerminal, {
+    stdinTTY: () => input,
+    available: () => true,
+    stderrTTY: () => error,
+    readLine: (prompt: string) => {
+      prompts.push(prompt);
+      return answer;
+    },
+  });
+  try {
+    return fn(prompts);
+  } finally {
+    Object.assign(markerTerminal, saved);
   }
 }
 
@@ -117,20 +147,88 @@ test("titles must be one line of 1 to 72 characters", () =>
 //
 // push
 
-test("push sets upstream; lease adds force-if-includes", () =>
+test("R6.6: post-push comparison distinguishes a different commit from unavailable confirmation", () => {
+  assert.doesNotThrow(() => requireCheckedPush(SHA, { code: 0, stdout: SHA, stderr: "" }));
+  assert.throws(
+    () => requireCheckedPush(SHA, { code: 0, stdout: OTHER_SHA, stderr: "" }),
+    (error: unknown) =>
+      error instanceof WtError &&
+      error.code === 1 &&
+      error.message === "origin received a commit other than the checked one. Check the branch on GitHub.",
+  );
+  for (const received of [
+    { code: 0, stdout: "", stderr: "" },
+    { code: 0, stdout: "malformed", stderr: "" },
+    { code: 1, stdout: "", stderr: "synthetic git error" },
+    { code: 1, stdout: SHA, stderr: "synthetic git error" },
+  ]) {
+    assert.throws(
+      () => requireCheckedPush(SHA, received),
+      (error: unknown) =>
+        error instanceof WtError &&
+        error.code === 1 &&
+        error.message === "Could not confirm what origin received. Check the branch on GitHub.",
+    );
+  }
+});
+
+test("R6.6: a single-branch clone confirms its push through the named remote", () =>
+  scenario(({ fx, env }) => {
+    const clone = join(env.root, "single-branch");
+    gitIn(env.root, "clone", "--quiet", "--single-branch", "--branch", "main", fx.origin, clone);
+    writeFileSync(join(clone, ".private-terms"), "unused-synthetic-term");
+    gitIn(clone, "checkout", "--quiet", "-b", BRANCH);
+    const head = commitFile(clone, "public.txt", "public\n", "public file");
+    const refspec = "+refs/heads/main:refs/remotes/origin/main";
+    assert.equal(gitIn(clone, "config", "--get-all", "remote.origin.fetch"), refspec);
+    push(resolveRepo(clone), clone, { forceWithLease: false });
+    assert.equal(gitIn(fx.origin, "rev-parse", `refs/heads/${BRANCH}`), head);
+    assert.equal(gitIn(clone, "config", "--get-all", "remote.origin.fetch"), refspec);
+    assert.equal(gitIn(clone, "for-each-ref", "--format=%(objectname)", `refs/remotes/origin/${BRANCH}`), "");
+  }));
+
+test("R8.3: a piped owner flag refuses without pushing new markers", () =>
+  scenario(
+    async ({ fx }) => {
+      const marker = ["check-public:", " allow"].join("");
+      const mail = ["person", "mail.fixture"].join("@");
+      const head = commitFile(fx.main, "draft.txt", `${mail} // ${marker}\npublic // ${marker}\n`, "new markers");
+      const wt = join(fx.main, "bin", "wt");
+      const refused = await runWt(wt, ["push"], { cwd: fx.main });
+      assert.equal(refused.code, 1);
+      assert.equal(
+        refused.stderr,
+        `note: new check-public allow marker at draft.txt:1 in commit ${head.slice(0, 12)}\nnote: new check-public allow marker at draft.txt:2 in commit ${head.slice(0, 12)}\nOnly the owner may push new allow markers. Nothing was pushed.\n`,
+      );
+      assert.ok(!refused.stderr.includes(mail));
+      assert.equal(gitIn(fx.origin, "for-each-ref", `refs/heads/${BRANCH}`), "");
+      const result = await runWt(wt, ["push", "--accept-new-markers"], { cwd: fx.main });
+      assert.equal(result.code, 1);
+      assert.equal(result.stderr, "--accept-new-markers needs an interactive terminal: the owner runs it there.\n");
+      assert.equal(gitIn(fx.origin, "for-each-ref", `refs/heads/${BRANCH}`), "");
+    },
+    { withBin: true },
+  ));
+
+test("push sets upstream; lease pins the expected remote tip", () =>
   scenario((ctx) => {
     commitFile(ctx.fx.main, "a.txt", "a\n");
-    const plain = pushArgs(SHA, BRANCH, false);
-    const leased = pushArgs(SHA, BRANCH, true);
+    const plain = pushArgs(BRANCH, false);
+    const leased = pushArgs(BRANCH, true, OTHER_SHA);
     for (const flag of ["--force-with-lease", "--force-if-includes"]) {
       assert.ok(!plain.includes(flag), flag);
-      assert.ok(leased.includes(flag), flag);
+      assert.ok(!leased.includes(flag), flag);
     }
+    assert.ok(leased.includes(`--force-with-lease=refs/heads/${BRANCH}:${OTHER_SHA}`));
     assert.deepEqual(plain.slice(0, 2), ["push", "-u"]);
     assert.ok(plain.includes("origin"));
     push(ctx.repo, ctx.fx.main, { forceWithLease: false });
     assert.equal(gitIn(ctx.fx.origin, "rev-parse", BRANCH), gitIn(ctx.fx.main, "rev-parse", "HEAD"));
     assert.equal(gitIn(ctx.fx.main, "rev-parse", "--abbrev-ref", `${BRANCH}@{upstream}`), `origin/${BRANCH}`);
+    assert.equal(
+      gitIn(ctx.fx.main, "rev-parse", `refs/remotes/origin/${BRANCH}`),
+      gitIn(ctx.fx.main, "rev-parse", "HEAD"),
+    );
     // Rewrite the commit and push with the lease.
     gitIn(ctx.fx.main, "commit", "--quiet", "--amend", "-m", "rewritten");
     expectCode(() => push(ctx.repo, ctx.fx.main, { forceWithLease: false }), 1);
@@ -138,21 +236,167 @@ test("push sets upstream; lease adds force-if-includes", () =>
     assert.equal(gitIn(ctx.fx.origin, "rev-parse", BRANCH), gitIn(ctx.fx.main, "rev-parse", "HEAD"));
   }));
 
-test("a lease push names the local branch as its source", () =>
+test("R7.A: a marker already on origin main passes even when that tree is absent locally", () =>
+  scenario(({ fx, env, repo }) => {
+    const marker = `public // ${["check-public:", " allow"].join("")}\n`;
+    const other = join(env.root, "owner");
+    gitIn(env.root, "clone", "--quiet", fx.origin, other);
+    commitFile(other, "draft.txt", marker, "owner marker");
+    gitIn(other, "push", "--quiet", "origin", "main");
+    const head = commitFile(fx.main, "draft.txt", marker, "same marker");
+    push(repo, fx.main, { forceWithLease: false });
+    assert.equal(gitIn(fx.origin, "rev-parse", BRANCH), head);
+    commitFile(fx.main, "other.txt", marker, "different file");
+    assert.throws(() => push(repo, fx.main, { forceWithLease: false }), /Only the owner may push/);
+    assert.equal(gitIn(fx.origin, "rev-parse", BRANCH), head);
+  }));
+
+test("R7.A: a marker on the remote branch survives a clean rebase and lease push", () =>
+  scenario(
+    async ({ fx, env }) => {
+      const marker = `public // ${["check-public:", " allow"].join("")}\n`;
+      commitFile(fx.main, "draft.txt", marker, "owner marker");
+      const wt = join(fx.main, "bin", "wt");
+      withMarkerTerminal(true, true, "1", () =>
+        push(resolveRepo(fx.main), fx.main, { forceWithLease: false, acceptNewMarkers: true }),
+      );
+      const other = join(env.root, "owner");
+      gitIn(env.root, "clone", "--quiet", fx.origin, other);
+      commitFile(other, "main.txt", "public", "advance main");
+      gitIn(other, "push", "--quiet", "origin", "main");
+      gitIn(fx.main, "fetch", "--quiet", "origin");
+      gitIn(fx.main, "rebase", "origin/main");
+      const rebased = gitIn(fx.main, "rev-parse", "HEAD");
+      const result = await runWt(wt, ["push", "--force-with-lease"], { cwd: fx.main });
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(result.stderr, "");
+      assert.equal(gitIn(fx.origin, "rev-parse", BRANCH), rebased);
+    },
+    { withBin: true },
+  ));
+
+test("R7.F: PR merge checks the joined commit message before any GitHub call", () =>
+  scenario(({ fx, repo, env }) => {
+    writeFileSync(join(fx.main, ".private-terms"), "alice example");
+    installFake(env, "gh", [{ stdout: "unexpected call" }]);
+    assert.throws(
+      () => prMerge(repo, { pr: "7", matchHead: SHA, subject: "alice", body: "example" }),
+      (error: unknown) => error instanceof WtError && error.message === "message:1:1: private term (file line 1)",
+    );
+    assert.deepEqual(fakeCalls(env, "gh"), []);
+  }));
+
+test("R7.H: PR edit and merge check a different remote head name before side effects", () =>
+  scenario(({ fx, repo, env }) => {
+    writeFileSync(join(fx.main, ".private-terms"), "alice example");
+    const realGit = realpathSync(join(env.fakeBin, "git"));
+    rmSync(join(env.fakeBin, "git"));
+    installFake(env, "git", [{ code: 128, stderr: "unexpected git call" }]);
+    for (const action of ["edit", "merge"]) {
+      installFake(env, "gh", [
+        {
+          match: ["pr", "view", "7"],
+          stdout: prJson({ baseRefName: "main", headRefName: "alice-example", headRefOid: SHA }),
+        },
+        { stdout: "unexpected side effect" },
+      ]);
+      assert.throws(
+        () =>
+          action === "edit"
+            ? prEdit(repo, { pr: "7", title: "public" })
+            : prMerge(repo, { pr: "7", matchHead: SHA, subject: "public", body: "public" }),
+        (error: unknown) => error instanceof WtError && error.message === "branch:1:1: private term (file line 1)",
+      );
+      assert.equal(fakeCalls(env, "gh").length, 1);
+      assert.deepEqual(fakeCalls(env, "gh")[0]?.slice(0, 3), ["pr", "view", "7"]);
+      assert.deepEqual(fakeCalls(env, "git"), []);
+    }
+    rmSync(join(env.fakeBin, "git"));
+    symlinkSync(realGit, join(env.fakeBin, "git"));
+    assert.equal(gitIn(fx.main, "for-each-ref", "refs/wt-pr-merge/"), "");
+  }));
+
+test("R7.G: push preserves the pre-push guard reason after the fixed failure message", () =>
+  scenario(({ fx, repo }) => {
+    commitFile(fx.main, "public.txt", "public", "public file");
+    const hook = join(fx.main, ".git", "hooks", "pre-push");
+    for (const [reason, code] of [
+      ["synthetic owner guard refusal", 1],
+      ["network is unreachable", 69],
+    ] as const) {
+      writeFileSync(hook, `#!/bin/sh\nprintf '%s\\n' '${reason}' >&2\nexit 1\n`);
+      chmodSync(hook, 0o755);
+      assert.throws(
+        () => push(repo, fx.main, { forceWithLease: false }),
+        (error: unknown) =>
+          error instanceof WtError &&
+          error.code === code &&
+          error.message.startsWith("git push failed: could not publish the checked commit.\n") &&
+          error.message.includes(reason),
+      );
+    }
+    assert.equal(gitIn(fx.origin, "for-each-ref", `refs/heads/${BRANCH}`), "");
+  }));
+
+for (const failure of ["reflog", "merge-base"]) {
+  test(`R7.G: lease ${failure} failures are git errors`, () =>
+    scenario(({ fx, repo, env }) => {
+      rmSync(join(env.fakeBin, "git"));
+      installFake(env, "git", [
+        { match: ["symbolic-ref"], stdout: `refs/heads/${BRANCH}\n` },
+        { match: ["rev-parse"], stdout: `${SHA}\n` },
+        { match: ["remote", "get-url"], stdout: "synthetic-origin\n" },
+        { match: ["ls-remote"], stdout: `${OTHER_SHA}\trefs/heads/${BRANCH}\n` },
+        { match: ["cat-file"], stdout: `${OTHER_SHA} commit\n` },
+        { match: ["rev-list"], stdout: "" },
+        { match: ["config", "--show-scope", "--get-all"], code: 1 },
+        { match: ["config"], stdout: "" },
+        { match: [failure], stderr: "synthetic git failure\n", code: 128 },
+        { match: ["reflog"], stdout: `${SHA}\n` },
+      ]);
+      assert.throws(
+        () => push(repo, fx.main, { forceWithLease: true }),
+        (error: unknown) =>
+          error instanceof WtError && error.message === `git ${failure} failed: synthetic git failure`,
+      );
+      assert.ok(fakeCalls(env, "git").every((args) => !args.includes("push")));
+    }));
+}
+
+test("a: bin/wt push sets the tracking ref and upstream", () =>
+  scenario(
+    async ({ fx }) => {
+      const head = commitFile(fx.main, "public.txt", "public", "public file");
+      const result = await runWt(join(fx.main, "bin", "wt"), ["push"], { cwd: fx.main });
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(gitIn(fx.main, "rev-parse", `refs/remotes/origin/${BRANCH}`), head);
+      assert.equal(gitIn(fx.main, "rev-parse", "--abbrev-ref", `${BRANCH}@{upstream}`), `origin/${BRANCH}`);
+      assert.equal(gitIn(fx.origin, "rev-parse", `refs/heads/${BRANCH}`), head);
+    },
+    { withBin: true },
+  ));
+
+test("normal and lease pushes give the hook origin and a local branch ref", () =>
   scenario((ctx) => {
     const old = commitFile(ctx.fx.main, "a.txt", "a\n");
-    push(ctx.repo, ctx.fx.main, { forceWithLease: false });
-    gitIn(ctx.fx.main, "commit", "--quiet", "--amend", "-m", "rewritten");
-    const amended = gitIn(ctx.fx.main, "rev-parse", "HEAD");
     const hook = join(ctx.fx.main, ".git", "hooks", "pre-push");
     mkdirSync(join(ctx.fx.main, ".git", "hooks"), { recursive: true });
     writeFileSync(
       hook,
-      "#!/bin/sh\nwhile IFS= read -r line; do\n  printf '%s\\n' \"$line\"\ndone >> ../pre-push-input\n",
+      "#!/bin/sh\nprintf '%s\\n' \"$1\" > ../pre-push-remote\nwhile IFS= read -r line; do\n  printf '%s\\n' \"$line\"\ndone > ../pre-push-input\n",
     );
     chmodSync(hook, 0o755);
 
+    push(ctx.repo, ctx.fx.main, { forceWithLease: false });
+    assert.equal(readFileSync(join(ctx.env.root, "pre-push-remote"), "utf8"), "origin\n");
+    assert.equal(
+      readFileSync(join(ctx.env.root, "pre-push-input"), "utf8"),
+      `refs/heads/${BRANCH} ${old} refs/heads/${BRANCH} ${"0".repeat(40)}\n`,
+    );
+    gitIn(ctx.fx.main, "commit", "--quiet", "--amend", "-m", "rewritten");
+    const amended = gitIn(ctx.fx.main, "rev-parse", "HEAD");
     push(ctx.repo, ctx.fx.main, { forceWithLease: true });
+    assert.equal(readFileSync(join(ctx.env.root, "pre-push-remote"), "utf8"), "origin\n");
     assert.equal(
       readFileSync(join(ctx.env.root, "pre-push-input"), "utf8"),
       `refs/heads/${BRANCH} ${amended} refs/heads/${BRANCH} ${old}\n`,
@@ -160,20 +404,25 @@ test("a lease push names the local branch as its source", () =>
     assert.equal(gitIn(ctx.fx.origin, "rev-parse", BRANCH), amended);
   }));
 
-test("a lease push refuses a branch that moved after HEAD was resolved", () =>
+test("normal and lease pushes refuse a branch that moved after HEAD was resolved", () =>
   scenario((ctx) => {
     const pushed = commitFile(ctx.fx.main, "a.txt", "a\n");
     push(ctx.repo, ctx.fx.main, { forceWithLease: false });
     gitIn(ctx.fx.main, "commit", "--quiet", "--amend", "-m", "rewritten");
 
-    assert.throws(
-      () =>
-        push(ctx.repo, ctx.fx.main, {
-          forceWithLease: true,
-          beforePush: () => commitFile(ctx.fx.main, "late.txt", "late\n"),
-        }),
-      (e: unknown) => e instanceof WtError && e.code === 1 && /branch moved/.test(e.message),
-    );
+    for (const forceWithLease of [false, true]) {
+      assert.throws(
+        () =>
+          push(ctx.repo, ctx.fx.main, {
+            forceWithLease,
+            beforePush: () => commitFile(ctx.fx.main, "late.txt", `late ${forceWithLease}\n`),
+          }),
+        (e: unknown) =>
+          e instanceof WtError &&
+          e.code === 1 &&
+          e.message === "The branch moved after HEAD was resolved. Nothing was pushed.",
+      );
+    }
     assert.equal(gitIn(ctx.fx.origin, "rev-parse", BRANCH), pushed);
   }));
 
@@ -307,18 +556,17 @@ test("a lease push sends exactly the commit it resolved, even when a commit land
     assert.equal(gitIn(ctx.fx.origin, "rev-parse", `refs/heads/${BRANCH}`), amended);
   }));
 
-test("push argv sends the checked sha; a lease push names the local branch", () => {
-  const sha = "d".repeat(40);
-  const spec = `${sha}:refs/heads/${BRANCH}`;
-  assert.deepEqual(pushArgs(sha, BRANCH, false), ["push", "-u", "--no-follow-tags", "origin", spec]);
-  assert.deepEqual(pushArgs(sha, BRANCH, true), [
+test("push argv always names origin and the full local branch ref", () => {
+  const spec = `refs/heads/${BRANCH}:refs/heads/${BRANCH}`;
+  assert.deepEqual(pushArgs(BRANCH, false), ["push", "-u", "--no-follow-tags", "--", "origin", spec]);
+  assert.deepEqual(pushArgs(BRANCH, true), [
     "push",
     "-u",
     "--no-follow-tags",
-    "--force-with-lease",
-    "--force-if-includes",
+    `--force-with-lease=refs/heads/${BRANCH}:`,
+    "--",
     "origin",
-    `refs/heads/${BRANCH}:refs/heads/${BRANCH}`,
+    spec,
   ]);
 });
 
@@ -496,6 +744,46 @@ const MERGE_ARGS = {
   subject: "Add the thing",
   body: "Squash body",
 };
+
+test("e: pr merge scans the reviewed head tree even when origin already has its private file", () =>
+  scenario((ctx) => {
+    writeFileSync(join(ctx.fx.main, ".private-terms"), "alice example");
+    commitFile(ctx.fx.main, "draft.txt", "alice-example", "draft");
+    publishHead(ctx);
+    gitIn(ctx.fx.main, "reset", "--hard", "main");
+    installFake(ctx.env, "gh", mergeOkRules());
+    assert.throws(
+      () => prMerge(ctx.repo, MERGE_ARGS),
+      (error: unknown) => error instanceof WtError && error.message === "draft.txt:1: private term (file line 1)",
+    );
+    assert.equal(mergeCalls(ctx.env).length, 0);
+    assert.equal(gitIn(ctx.fx.main, "for-each-ref", "refs/wt-pr-merge/"), "");
+  }));
+
+test("e: pr merge scans the merge-base difference and permits a removed draft", () =>
+  scenario((ctx) => {
+    writeFileSync(join(ctx.fx.main, ".private-terms"), "alice example");
+    commitFile(ctx.fx.main, "draft.txt", "alice-example", "draft");
+    gitIn(ctx.fx.main, "rm", "draft.txt");
+    gitIn(ctx.fx.main, "commit", "--quiet", "-m", "remove draft");
+    publishHead(ctx);
+    installFake(ctx.env, "gh", mergeOkRules());
+    assert.equal(prMerge(ctx.repo, MERGE_ARGS), `MERGED ${MERGE_SHA}`);
+    assert.equal(mergeCalls(ctx.env).length, 1);
+  }));
+
+test("e: pr merge refuses a head unavailable locally with a clear message", () =>
+  scenario((ctx) => {
+    installFake(ctx.env, "gh", mergeRules({ headRefOid: SHA }));
+    assert.throws(
+      () => prMerge(ctx.repo, { ...MERGE_ARGS, matchHead: SHA }),
+      (error: unknown) =>
+        error instanceof WtError &&
+        error.message === "The reviewed head commit is not available locally. Nothing was merged.",
+    );
+    assert.equal(mergeCalls(ctx.env).length, 0);
+    assert.equal(gitIn(ctx.fx.main, "for-each-ref", "refs/wt-pr-merge/"), "");
+  }));
 
 test("pr merge refusals never reach gh pr merge", () =>
   scenario((ctx) => {
@@ -827,3 +1115,540 @@ test("gh missing exits 69", () =>
 test("the command table has only fetch, push and pr", () => {
   assert.deepEqual(Object.keys(commands).sort(), ["fetch", "pr", "push"]);
 });
+
+// Synthetic fixtures are assembled so the source passes the repository's own hygiene checks.
+const PRIVATE_FIXTURE_HOST = ["fixture-host", "ts", "net"].join(".");
+const ATTRIBUTION_FIXTURE = ["Co-Auth", "ored-By: Test"].join("");
+
+test("push refuses private committed file contents even with a clean replacement in the working tree", () =>
+  scenario((ctx) => {
+    commitFile(ctx.fx.main, "draft.md", `public\n${PRIVATE_FIXTURE_HOST}\n`);
+    writeFileSync(join(ctx.fx.main, "draft.md"), "public\n");
+    for (const forceWithLease of [false, true]) {
+      assert.throws(
+        () => push(ctx.repo, ctx.fx.main, { forceWithLease }),
+        (error: unknown) =>
+          error instanceof WtError && error.code === 1 && error.message === "draft.md:2: tailnet host name",
+      );
+    }
+    assert.equal(gitIn(ctx.fx.origin, "for-each-ref", "refs/heads/feat-a"), "");
+  }));
+
+test("push refuses attribution in a commit message before any push", () =>
+  scenario((ctx) => {
+    const head = commitFile(ctx.fx.main, "draft.md", "public\n", `update\n\n${ATTRIBUTION_FIXTURE}`);
+    assert.throws(
+      () => push(ctx.repo, ctx.fx.main, { forceWithLease: false }),
+      (error: unknown) =>
+        error instanceof WtError &&
+        error.code === 1 &&
+        error.message === `commit ${head.slice(0, 7)} message:3:1: attribution`,
+    );
+    assert.equal(gitIn(ctx.fx.origin, "for-each-ref", "refs/heads/feat-a"), "");
+  }));
+
+test("PR create, edit and merge refuse each title or body before even looking up a PR", () =>
+  scenario((ctx) => {
+    installFake(ctx.env, "gh", [{ stdout: "unexpected call" }]);
+    for (const value of [PRIVATE_FIXTURE_HOST, ATTRIBUTION_FIXTURE]) {
+      const calls = [
+        () => prCreate(ctx.repo, { title: value, body: "public", draft: false }),
+        () => prCreate(ctx.repo, { title: "public", body: value, draft: false }),
+        () => prEdit(ctx.repo, { title: value }),
+        () => prEdit(ctx.repo, { body: value }),
+        () => prMerge(ctx.repo, { matchHead: SHA, subject: value, body: "public" }),
+        () => prMerge(ctx.repo, { matchHead: SHA, subject: "public", body: value }),
+      ];
+      for (const call of calls) {
+        assert.throws(call, (error: unknown) => {
+          assert.ok(error instanceof WtError);
+          assert.equal(error.code, 1);
+          assert.match(error.message, /^(title|body|message):[13]:1: (tailnet host name|attribution)$/);
+          assert.ok(!error.message.includes(value));
+          return true;
+        });
+      }
+    }
+    assert.deepEqual(fakeCalls(ctx.env, "gh"), []);
+  }));
+
+test("PR commands refuse body files through the launcher without invoking gh", () =>
+  scenario(
+    async (ctx) => {
+      installFake(ctx.env, "gh", [{ stdout: "unexpected call" }]);
+      const file = join(ctx.env.root, "body.md");
+      writeFileSync(file, PRIVATE_FIXTURE_HOST);
+      for (const args of [
+        ["pr", "create", "--title", "public", "--body-file", file],
+        ["pr", "edit", "--body-file", file],
+        ["pr", "merge", "--match-head", SHA, "--subject", "public", "--body-file", file],
+      ]) {
+        const result = await runWt(join(ctx.fx.main, "bin", "wt"), args, { cwd: ctx.fx.main });
+        assert.equal(result.code, 1);
+        assert.match(result.stderr, /(?:body|message):[13]:1: tailnet host name/);
+        assert.ok(!result.stderr.includes(PRIVATE_FIXTURE_HOST));
+        assert.equal(result.stdout, "");
+      }
+      assert.deepEqual(fakeCalls(ctx.env, "gh"), []);
+    },
+    { withBin: true },
+  ));
+
+test("push launcher checks the worktree's commit and main checkout's private list", () =>
+  scenario(
+    async (ctx) => {
+      const linked = join(ctx.env.root, "linked");
+      gitIn(ctx.fx.main, "worktree", "add", "--quiet", "-b", "linked", linked);
+      writeFileSync(join(ctx.fx.main, ".private-terms"), "fixture-private-term\n");
+      const head = commitFile(linked, "draft.md", "public", "fixture-private-term");
+      const result = await runWt(join(ctx.fx.main, "bin", "wt"), ["push"], { cwd: linked });
+      assert.equal(result.code, 1);
+      assert.equal(result.stderr, `commit ${head.slice(0, 7)} message:1:1: private term (file line 1)\n`);
+      assert.equal(gitIn(ctx.fx.origin, "for-each-ref", "refs/heads/linked"), "");
+    },
+    { withBin: true },
+  ));
+
+test("i: PR launcher ignores environment allowed phrases and accepts file allowed phrases", () =>
+  scenario(
+    async (ctx) => {
+      installFake(ctx.env, "gh", [
+        { match: ["pr", "view"], stdout: prJson() },
+        { match: ["pr", "edit"], stdout: "updated\n" },
+      ]);
+      const env = { EMEND_PRIVATE_TERMS: "fixturecorp\n!fixturecorp/public-tool" };
+      const wt = join(ctx.fx.main, "bin", "wt");
+      const bad = await runWt(wt, ["pr", "edit", "--title", "fixturecorp"], { cwd: ctx.fx.main, env });
+      assert.equal(bad.code, 1);
+      const note = "check:public: allowed phrases in EMEND_PRIVATE_TERMS are ignored\n";
+      assert.equal(bad.stderr, `${note}title:1:1: private term (env line 1)\n`);
+      assert.deepEqual(fakeCalls(ctx.env, "gh"), []);
+      const ignored = await runWt(wt, ["pr", "edit", "--title", "fixturecorp/public-tool"], { cwd: ctx.fx.main, env });
+      assert.equal(ignored.code, 1);
+      assert.equal(ignored.stderr, `${note}title:1:1: private term (env line 1)\n`);
+      assert.deepEqual(fakeCalls(ctx.env, "gh"), []);
+      writeFileSync(join(ctx.fx.main, ".private-terms"), "unused-synthetic-term\n!fixturecorp/public-tool\n");
+      const good = await runWt(wt, ["pr", "edit", "--title", "fixturecorp/public-tool"], { cwd: ctx.fx.main, env });
+      assert.equal(good.code, 0);
+      assert.equal(good.stdout, "updated\n");
+    },
+    { withBin: true },
+  ));
+
+for (const branch of ["fixturecorp-feature", PRIVATE_FIXTURE_HOST]) {
+  test("regression: branch checks precede every network call", () =>
+    scenario(
+      (ctx) => {
+        writeFileSync(join(ctx.fx.main, ".private-terms"), "fixturecorp");
+        installFake(ctx.env, "gh", [{ stdout: "unexpected call" }]);
+        rmSync(join(ctx.env.fakeBin, "git"));
+        installFake(ctx.env, "git", [
+          { match: ["symbolic-ref"], stdout: `refs/heads/${branch}\n` },
+          { match: ["rev-parse"], stdout: `${SHA}\n` },
+        ]);
+        for (const call of [
+          () => push(ctx.repo, ctx.fx.main, { forceWithLease: false }),
+          () => push(ctx.repo, ctx.fx.main, { forceWithLease: true }),
+          () => prCreate(ctx.repo, { title: "public", body: "public", draft: false }),
+          () => prEdit(ctx.repo, { title: "public" }),
+          () => prEdit(ctx.repo, { pr: "7", body: "public" }),
+          () => prMerge(ctx.repo, { matchHead: SHA, subject: "public", body: "public" }),
+          () => prMerge(ctx.repo, { pr: "7", matchHead: SHA, subject: "public", body: "public" }),
+        ]) {
+          assert.throws(
+            call,
+            (error: unknown) => error instanceof WtError && /private term|tailnet host name/.test(error.message),
+          );
+        }
+        assert.deepEqual(fakeCalls(ctx.env, "gh"), []);
+        assert.deepEqual(
+          fakeCalls(ctx.env, "git").filter((args) => args.some((arg) => ["push", "fetch", "ls-remote"].includes(arg))),
+          [],
+        );
+      },
+      { branch },
+    ));
+}
+
+test("regression: missing terms fail closed before network calls", () =>
+  scenario((ctx) => {
+    rmSync(join(ctx.fx.main, ".private-terms"), { force: true });
+    installFake(ctx.env, "gh", [{ stdout: "unexpected call" }]);
+    rmSync(join(ctx.env.fakeBin, "git"));
+    installFake(ctx.env, "git", [
+      { match: ["symbolic-ref"], stdout: `refs/heads/${BRANCH}\n` },
+      { match: ["rev-parse"], stdout: `${SHA}\n` },
+    ]);
+    for (const call of [
+      () => push(ctx.repo, ctx.fx.main, { forceWithLease: false }),
+      () => prCreate(ctx.repo, { title: "public", body: "public", draft: false }),
+      () => prEdit(ctx.repo, { title: "public" }),
+      () => prMerge(ctx.repo, { matchHead: SHA, subject: "public", body: "public" }),
+    ])
+      assert.throws(
+        call,
+        (error: unknown) =>
+          error instanceof WtError && error.message.startsWith("check:public: private terms list required;"),
+      );
+    assert.deepEqual(fakeCalls(ctx.env, "gh"), []);
+    assert.deepEqual(
+      fakeCalls(ctx.env, "git").filter((args) => args.some((arg) => ["push", "fetch", "ls-remote"].includes(arg))),
+      [],
+    );
+  }));
+
+test("regression: PR and merge text cannot use file exemptions", () =>
+  scenario((ctx) => {
+    installFake(ctx.env, "gh", [{ stdout: "unexpected call" }]);
+    const body = `${PRIVATE_FIXTURE_HOST} ${["check-public:", " allow"].join("")}`;
+    for (const call of [
+      () => prCreate(ctx.repo, { title: "public", body, draft: false }),
+      () => prEdit(ctx.repo, { body }),
+      () => prMerge(ctx.repo, { matchHead: SHA, subject: "public", body }),
+    ])
+      assert.throws(call, (error: unknown) => error instanceof WtError && /tailnet host name/.test(error.message));
+    assert.deepEqual(fakeCalls(ctx.env, "gh"), []);
+  }));
+
+test("9: force push names a local branch and pins the lease to an object id", () => {
+  const args = pushArgs(BRANCH, true, OTHER_SHA);
+  assert.ok(args.includes(`refs/heads/${BRANCH}:refs/heads/${BRANCH}`));
+  assert.ok(args.includes(`--force-with-lease=refs/heads/${BRANCH}:${OTHER_SHA}`));
+  assert.ok(args.includes("origin"));
+});
+
+test("8: a different push URL is refused before sending", () =>
+  scenario(({ fx, repo, env }) => {
+    writeFileSync(join(fx.main, ".private-terms"), "fixturecorp");
+    commitFile(fx.main, "draft.txt", "fixturecorp", "public");
+    gitIn(fx.main, "push", "--quiet", "origin", "HEAD:main");
+    const destination = join(env.root, "destination.git");
+    gitIn(env.root, "init", "--quiet", "--bare", destination);
+    gitIn(fx.main, "remote", "set-url", "--push", "origin", destination);
+    assert.throws(
+      () => push(repo, fx.main, { forceWithLease: false }),
+      (error: unknown) => error instanceof WtError && error.code === 69,
+    );
+    assert.equal(gitIn(destination, "for-each-ref"), "");
+  }));
+
+test("8: unreadable push destination exits 69 without sending or disclosing git errors", () =>
+  scenario(({ fx, repo, env }) => {
+    gitIn(fx.main, "remote", "set-url", "--push", "origin", join(env.root, "missing-fixturecorp"));
+    assert.throws(
+      () => push(repo, fx.main, { forceWithLease: false }),
+      (error: unknown) =>
+        error instanceof WtError &&
+        error.code === 69 &&
+        error.message === "check:public: could not read destination refs",
+    );
+    assert.equal(gitIn(fx.origin, "for-each-ref", `refs/heads/${BRANCH}`), "");
+  }));
+
+test("8: changing only the push URL after the check refuses the push", () =>
+  scenario(({ fx, repo, env }) => {
+    commitFile(fx.main, "draft.txt", "public", "public");
+    const other = join(env.root, "other.git");
+    gitIn(env.root, "init", "--quiet", "--bare", other);
+    expectCode(
+      () =>
+        push(repo, fx.main, {
+          forceWithLease: false,
+          beforePush: () => gitIn(fx.main, "remote", "set-url", "--push", "origin", other),
+        }),
+      69,
+    );
+    assert.equal(gitIn(fx.origin, "for-each-ref", `refs/heads/${BRANCH}`), "");
+    assert.equal(gitIn(other, "for-each-ref"), "");
+  }));
+
+test("A: normal and lease pushes refuse an origin URL changed after the check", () =>
+  scenario(({ fx, repo, env }) => {
+    commitFile(fx.main, "draft.txt", "public", "public");
+    const other = join(env.root, "other.git");
+    gitIn(env.root, "init", "--quiet", "--bare", other);
+    for (const forceWithLease of [false, true]) {
+      gitIn(fx.main, "remote", "set-url", "origin", fx.origin);
+      assert.throws(
+        () =>
+          push(repo, fx.main, {
+            forceWithLease,
+            beforePush: () => gitIn(fx.main, "remote", "set-url", "origin", other),
+          }),
+        (error: unknown) =>
+          error instanceof WtError &&
+          error.code === 1 &&
+          error.message === "origin changed after the check. Nothing was pushed.",
+      );
+      assert.equal(gitIn(fx.origin, "for-each-ref", `refs/heads/${BRANCH}`), "");
+      assert.equal(gitIn(other, "for-each-ref"), "");
+    }
+  }));
+
+test("9: force push refuses a destination tip changed after advertisement", () =>
+  scenario(({ fx, repo }) => {
+    const first = commitFile(fx.main, "draft.txt", "public", "public");
+    push(repo, fx.main, { forceWithLease: false });
+    const second = commitFile(fx.main, "draft.txt", "another public change", "public");
+    gitIn(fx.main, "push", "--quiet", "origin", `${second}:refs/heads/side`);
+    gitIn(fx.main, "reset", "--hard", first);
+    gitIn(fx.main, "commit", "--quiet", "--amend", "-m", "rewritten");
+    expectCode(
+      () =>
+        push(repo, fx.main, {
+          forceWithLease: true,
+          beforePush: () => gitIn(fx.origin, "update-ref", `refs/heads/${BRANCH}`, second),
+        }),
+      1,
+    );
+    assert.equal(gitIn(fx.origin, "rev-parse", BRANCH), second);
+  }));
+
+test("R8.3: owner approval requires both TTYs and an exact marker count", (t) =>
+  scenario(({ fx, repo }) => {
+    const marker = ["check-public:", " allow"].join("");
+    const head = commitFile(fx.main, "draft.txt", `first // ${marker}\nsecond // ${marker}\n`, "new markers");
+    for (const [input, error] of [
+      [false, true],
+      [true, false],
+      [false, false],
+    ]) {
+      withMarkerTerminal(input ?? false, error ?? false, "2", (prompts) => {
+        assert.throws(
+          () => push(repo, fx.main, { forceWithLease: false, acceptNewMarkers: true }),
+          (e: unknown) =>
+            e instanceof WtError &&
+            e.code === 1 &&
+            e.message === "--accept-new-markers needs an interactive terminal: the owner runs it there.",
+        );
+        assert.deepEqual(prompts, []);
+      });
+      assert.equal(gitIn(fx.origin, "for-each-ref", `refs/heads/${BRANCH}`), "");
+    }
+    for (const answer of ["", "yes", "1", "02"]) {
+      withMarkerTerminal(true, true, answer, (prompts) => {
+        assert.throws(
+          () => push(repo, fx.main, { forceWithLease: false, acceptNewMarkers: true }),
+          (e: unknown) =>
+            e instanceof WtError && e.message === "The new allow marker count was not confirmed. Nothing was pushed.",
+        );
+        assert.deepEqual(prompts, [
+          "Only the owner may approve new allow markers. Type the number of new allow marker notes printed above to push: ",
+        ]);
+      });
+      assert.equal(gitIn(fx.origin, "for-each-ref", `refs/heads/${BRANCH}`), "");
+    }
+    const stderr: string[] = [];
+    const output = t.mock.method(process.stderr, "write", (chunk: string | Uint8Array) => {
+      stderr.push(String(chunk));
+      return true;
+    });
+    try {
+      withMarkerTerminal(true, true, "2", (prompts) => {
+        push(repo, fx.main, { forceWithLease: false, acceptNewMarkers: true });
+        assert.equal(prompts.length, 1);
+      });
+    } finally {
+      output.mock.restore();
+    }
+    assert.equal(
+      stderr.join(""),
+      `note: new check-public allow marker at draft.txt:1 in commit ${head.slice(0, 12)}\nnote: new check-public allow marker at draft.txt:2 in commit ${head.slice(0, 12)}\n`,
+    );
+    assert.equal(gitIn(fx.origin, "rev-parse", BRANCH), head);
+  }));
+
+for (const scope of ["--local", "--worktree"]) {
+  for (const key of ["user.name", "user.email"]) {
+    test(`R8.4: push refuses ${scope} ${key} without exposing its value`, () =>
+      scenario(({ fx, repo }) => {
+        commitFile(fx.main, "public.txt", "public", "public file");
+        gitIn(fx.main, "config", "extensions.worktreeConfig", "true");
+        gitIn(fx.main, "config", scope, key, "synthetic-identity");
+        for (const forceWithLease of [false, true])
+          assert.throws(
+            () => push(repo, fx.main, { forceWithLease }),
+            (e: unknown) =>
+              e instanceof WtError &&
+              e.message ===
+                `a git identity with ${scope.slice(2)} scope is set; bin/wt checks only global and system identities.`,
+          );
+        assert.equal(gitIn(fx.origin, "for-each-ref", `refs/heads/${BRANCH}`), "");
+      }));
+  }
+}
+
+test("R10.F: HOME global identity works while a malformed system override is stripped", () =>
+  scenario(({ fx, repo, env }) => {
+    const head = commitFile(fx.main, "public.txt", "public", "public file");
+    const system = join(env.root, "system.gitconfig");
+    writeFileSync(system, "[malformed synthetic config\n");
+
+    process.env.GIT_CONFIG_SYSTEM = system;
+    try {
+      push(repo, fx.main, { forceWithLease: false });
+      assert.equal(gitIn(fx.origin, "rev-parse", BRANCH), head);
+    } finally {
+      delete process.env.GIT_CONFIG_SYSTEM;
+    }
+  }));
+
+test("R8.6: push diagnostics strip terminal escapes and controls and cap both dimensions", () => {
+  assert.equal(pushDiagnostic("\x1b[31mguard\x1b[0m\r\0\x07\b\x7f\x85\n\treason\n"), "guard\n\treason");
+  assert.equal(
+    pushDiagnostic("\x1b]0;synthetic-title\x07guard\x1b]8;;https://example.com\x1b\\reason\x1b]8;;\x1b\\"),
+    "guardreason",
+  );
+  assert.equal(pushDiagnostic(Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n")).split("\n").length, 20);
+  assert.equal(pushDiagnostic("x".repeat(3000)), "x".repeat(2000));
+});
+
+test("R8.6: a failed push prints only the bounded sanitized guard diagnostic", () =>
+  scenario(({ fx, repo }) => {
+    commitFile(fx.main, "public.txt", "public", "public file");
+    const hook = join(fx.main, ".git", "hooks", "pre-push");
+    const diagnostic = `\x1b[31mguard\x1b[0m\r\x07\n${"x".repeat(2100)}`;
+    writeFileSync(
+      hook,
+      `#!${process.execPath}\nprocess.stderr.write(${JSON.stringify(diagnostic)}); process.exit(1);\n`,
+    );
+    chmodSync(hook, 0o755);
+    assert.throws(
+      () => push(repo, fx.main, { forceWithLease: false }),
+      (e: unknown) =>
+        e instanceof WtError &&
+        e.message === `git push failed: could not publish the checked commit.\n${pushDiagnostic(diagnostic)}`,
+    );
+    assert.equal(gitIn(fx.origin, "for-each-ref", `refs/heads/${BRANCH}`), "");
+  }));
+
+test("R9.1: the owner flag refuses if both descriptors are TTYs but no controlling terminal exists", () =>
+  scenario(({ fx, repo }) => {
+    withMarkerTerminal(true, true, "0", (prompts) => {
+      markerTerminal.available = () => false;
+      assert.throws(
+        () => push(repo, fx.main, { forceWithLease: false, acceptNewMarkers: true }),
+        (error: unknown) =>
+          error instanceof WtError &&
+          error.message === "--accept-new-markers needs an interactive terminal: the owner runs it there.",
+      );
+      assert.deepEqual(prompts, []);
+      assert.equal(gitIn(fx.origin, "for-each-ref", `refs/heads/${BRANCH}`), "");
+    });
+  }));
+
+test("R9.6: GitHub errors with private text are withheld", () =>
+  scenario(({ fx, repo, env }) => {
+    writeFileSync(join(fx.main, ".private-terms"), "alice example");
+    installFake(env, "gh", [{ code: 1, stderr: "alice-example\u202e\n" }]);
+    assert.throws(
+      () => prEdit(repo, { pr: "7", title: "public" }),
+      (error: unknown) =>
+        error instanceof WtError && error.message === "gh pr view failed: [line withheld: private term (file line 1)]",
+    );
+  }));
+
+for (const failure of ["reflog", "merge-base"]) {
+  test(`R10.E: local lease ${failure} diagnostics preserve text after removing controls`, () =>
+    scenario(({ fx, repo, env }) => {
+      writeFileSync(join(fx.main, ".private-terms"), "alice example");
+      rmSync(join(env.fakeBin, "git"));
+      installFake(env, "git", [
+        { match: ["symbolic-ref"], stdout: `refs/heads/${BRANCH}\n` },
+        { match: ["rev-parse"], stdout: `${SHA}\n` },
+        { match: ["remote", "get-url"], stdout: "synthetic-origin\n" },
+        { match: ["ls-remote"], stdout: `${OTHER_SHA}\trefs/heads/${BRANCH}\n` },
+        { match: ["cat-file"], stdout: `${OTHER_SHA} commit\n` },
+        { match: ["rev-list"], stdout: "" },
+        { match: ["config", "--show-scope", "--get-all"], code: 1 },
+        { match: ["config"], stdout: "" },
+        { match: [failure], code: 128, stderr: "alice-example\u202e\n" },
+        { match: ["reflog"], stdout: `${SHA}\n` },
+      ]);
+      assert.throws(
+        () => push(repo, fx.main, { forceWithLease: true }),
+        (error: unknown) => error instanceof WtError && error.message === `git ${failure} failed: alice-example`,
+      );
+      assert.ok(fakeCalls(env, "git").every((args) => !args.includes("push")));
+    }));
+}
+
+test("R9.6: a failed push withholds a private pre-push hook diagnostic", () =>
+  scenario(({ fx, repo }) => {
+    writeFileSync(join(fx.main, ".private-terms"), "alice example");
+    commitFile(fx.main, "public.txt", "public", "public file");
+    const hook = join(fx.main, ".git", "hooks", "pre-push");
+    writeFileSync(hook, `#!${process.execPath}\nprocess.stderr.write("alice-example\\n"); process.exit(1);\n`);
+    chmodSync(hook, 0o755);
+    assert.throws(
+      () => push(repo, fx.main, { forceWithLease: false }),
+      (error: unknown) =>
+        error instanceof WtError &&
+        error.message.startsWith(
+          "git push failed: could not publish the checked commit.\n[line withheld: private term (file line 1)]\n",
+        ),
+    );
+    assert.equal(gitIn(fx.origin, "for-each-ref", `refs/heads/${BRANCH}`), "");
+  }));
+
+test("R9.6: remote deletion errors redact private text before reporting a kept branch", (t) =>
+  mscenario((ctx) => {
+    gitIn(ctx.fx.main, "push", "--quiet", "origin", `${headSha}:refs/heads/${BRANCH}`);
+    writeFileSync(join(ctx.fx.main, ".private-terms"), "alice example");
+    // The transport's error names its destination, so give that destination a synthetic private basename.
+    const url = join(ctx.env.root, "alice-example");
+    symlinkSync(ctx.fx.origin, url);
+    gitIn(ctx.fx.main, "remote", "set-url", "origin", url);
+    gitIn(ctx.fx.origin, "config", "receive.denyDeletes", "true");
+    installFake(
+      ctx.env,
+      "gh",
+      mergeRules({}, [
+        { match: ["pr", "merge", "7"], stdout: "merged\n" },
+        { match: READ_BACK_ARGS, stdout: MERGED_STATE },
+      ]),
+    );
+    const lines: string[] = [];
+    t.mock.method(process.stderr, "write", (chunk: string | Uint8Array) => {
+      lines.push(String(chunk));
+      return true;
+    });
+    assert.equal(prMerge(ctx.repo, MERGE_ARGS), `MERGED ${MERGE_SHA}`);
+    assert.deepEqual(
+      lines.filter((line) => line.startsWith("remote branch kept:")),
+      ["remote branch kept: [line withheld: private term (file line 1)]\n"],
+    );
+    assert.ok(remoteHas(ctx));
+  }));
+
+test("R10.A: refusal and owner confirmation identify both commits at the same marker location", (t) =>
+  scenario(({ fx, repo }) => {
+    const marker = ["check-public:", " allow"].join("");
+    const mail = ["person", "mail.fixture"].join("@");
+    const first = commitFile(fx.main, "notes.txt", `${mail} // ${marker}\n`, "first marker");
+    const second = commitFile(fx.main, "notes.txt", `synthetic fixture line // ${marker}\n`, "replace marker");
+    const notes = [second, first]
+      .map((sha) => `note: new check-public allow marker at notes.txt:1 in commit ${sha.slice(0, 12)}\n`)
+      .join("");
+    const output: string[] = [];
+    t.mock.method(process.stderr, "write", (chunk: string | Uint8Array) => {
+      output.push(String(chunk));
+      return true;
+    });
+    assert.throws(
+      () => push(repo, fx.main, { forceWithLease: false }),
+      (error: unknown) =>
+        error instanceof WtError && error.message === "Only the owner may push new allow markers. Nothing was pushed.",
+    );
+    assert.equal(output.join(""), notes);
+    assert.equal(gitIn(fx.origin, "for-each-ref", `refs/heads/${BRANCH}`), "");
+    output.length = 0;
+    withMarkerTerminal(true, true, "2", (prompts) => {
+      push(repo, fx.main, { forceWithLease: false, acceptNewMarkers: true });
+      assert.deepEqual(prompts, [
+        "Only the owner may approve new allow markers. Type the number of new allow marker notes printed above to push: ",
+      ]);
+    });
+    assert.equal(output.join(""), notes);
+    assert.equal(gitIn(fx.origin, "rev-parse", BRANCH), second);
+  }));

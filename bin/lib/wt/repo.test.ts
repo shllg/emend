@@ -11,8 +11,28 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { assertNoGitlinks, assertNoGitlinksInRef, GIT_BASE, git, type Repo, resolveRepo } from "./repo.ts";
-import { type Fixture, gitIn, makeFixture, makeTestEnv, runLauncher, runWt, type TestEnv } from "./test-support.ts";
+import {
+  assertNoGitlinks,
+  assertNoGitlinksInRef,
+  fetchOrigin,
+  GIT_BASE,
+  git,
+  gitTry,
+  type Repo,
+  requireGlobalIdentity,
+  resolveRepo,
+} from "./repo.ts";
+import {
+  type Fixture,
+  fakeCalls,
+  gitIn,
+  installFake,
+  makeFixture,
+  makeTestEnv,
+  runLauncher,
+  runWt,
+  type TestEnv,
+} from "./test-support.ts";
 import { WtError } from "./validate.ts";
 import { safetyGuard, setup } from "./worktree.ts";
 
@@ -32,6 +52,81 @@ async function scenario(
 function expectCode(fn: () => unknown, code: number): void {
   assert.throws(fn, (e: unknown) => e instanceof WtError && e.code === code, `expected exit ${code}`);
 }
+
+test("R8.4: global identity works in linked worktrees with the extension unset, false or true", () =>
+  scenario({}, ({ fx, repo }) => {
+    const linked = setup(repo, { branch: "identity-a", busy: new Set() }).path;
+    for (const enabled of [undefined, "false", "true"]) {
+      if (enabled !== undefined) gitIn(fx.main, "config", "--local", "extensions.worktreeConfig", enabled);
+      for (const top of [fx.main, linked]) {
+        for (const key of ["user.name", "user.email"])
+          assert.equal(gitTry(repo, ["config", "--local", "--get", key], { cwd: top }).code, 1);
+        assert.doesNotThrow(() => requireGlobalIdentity(repo, top));
+      }
+    }
+  }));
+
+test("R9.3: identity scope parsing allows global/system and refuses all other or unreadable scopes", () =>
+  scenario({}, ({ fx, repo, env }) => {
+    rmSync(join(env.fakeBin, "git"));
+    for (const scope of ["system", "global", "local", "worktree", "command", "unexpected"]) {
+      installFake(env, "git", [
+        { match: ["config", "--includes", "--show-scope", "--get-all"], stdout: `${scope}\tsynthetic identity\n` },
+      ]);
+      if (["system", "global"].includes(scope)) assert.doesNotThrow(() => requireGlobalIdentity(repo, fx.main));
+      else
+        assert.throws(
+          () => requireGlobalIdentity(repo, fx.main),
+          (error: unknown) =>
+            error instanceof WtError &&
+            error.message ===
+              `a git identity with ${scope === "unexpected" ? "unknown" : scope} scope is set; bin/wt checks only global and system identities.`,
+        );
+      assert.ok(fakeCalls(env, "git").every((args) => args.includes("--includes") && args.includes("--show-scope")));
+    }
+    installFake(env, "git", [{ code: 128 }]);
+    assert.throws(() => requireGlobalIdentity(repo, fx.main), /Could not check the scope/);
+    installFake(env, "git", [{ code: 1 }]);
+    assert.doesNotThrow(() => requireGlobalIdentity(repo, fx.main));
+  }));
+
+for (const conditional of [false, true]) {
+  test(`R9.3: local ${conditional ? "includeIf" : "include.path"} identities are refused`, () =>
+    scenario({}, ({ fx, repo, env }) => {
+      const included = join(env.root, "included.gitconfig");
+      writeFileSync(included, "[user]\nname = Synthetic User\nemail = synthetic@example.com\n");
+      gitIn(fx.main, "config", "--local", conditional ? `includeIf.gitdir:${fx.main}/.path` : "include.path", included);
+      assert.throws(
+        () => requireGlobalIdentity(repo, fx.main),
+        (error: unknown) =>
+          error instanceof WtError &&
+          error.message === "a git identity with local scope is set; bin/wt checks only global and system identities.",
+      );
+    }));
+}
+
+test("R9.3: an environment identity triple refuses before any Git call", () =>
+  scenario({}, ({ fx, repo, env }) => {
+    rmSync(join(env.fakeBin, "git"));
+    installFake(env, "git", [{ code: 128 }]);
+    process.env.GIT_CONFIG_COUNT = "1";
+    process.env.GIT_CONFIG_KEY_0 = "user.name";
+    process.env.GIT_CONFIG_VALUE_0 = "Synthetic User";
+    try {
+      assert.throws(
+        () => requireGlobalIdentity(repo, fx.main),
+        (error: unknown) =>
+          error instanceof WtError &&
+          error.message ===
+            "a git identity with command scope is set; bin/wt checks only global and system identities.",
+      );
+      assert.deepEqual(fakeCalls(env, "git"), []);
+    } finally {
+      delete process.env.GIT_CONFIG_COUNT;
+      delete process.env.GIT_CONFIG_KEY_0;
+      delete process.env.GIT_CONFIG_VALUE_0;
+    }
+  }));
 
 const GITLINK_SHA = "1111111111111111111111111111111111111111";
 
@@ -216,4 +311,25 @@ test("the launcher run in a forged directory exits 69 and runs nothing from it",
     assert.equal(r.code, 69, r.stderr);
     assert.equal(existsSync(marker), false);
     assert.equal(existsSync(launcherMarker), false);
+  }));
+
+test("R10.E: local git errors stay readable while fetch errors withhold hits", () =>
+  scenario({}, ({ fx, repo, env }) => {
+    writeFileSync(join(fx.main, ".private-terms"), "alice example");
+    rmSync(join(env.fakeBin, "git"));
+    for (const [text, label] of [
+      ["alice-example", "private term (file line 1)"],
+      [["person", "mail.fixture"].join("@"), "email address"],
+    ]) {
+      installFake(env, "git", [{ code: 128, stderr: `${text}\u202e\n` }]);
+      assert.throws(
+        () => git(repo, ["status"]),
+        (error: unknown) => error instanceof WtError && error.message === `git status failed: ${text}`,
+      );
+      assert.throws(
+        () => fetchOrigin(repo),
+        (error: unknown) =>
+          error instanceof WtError && error.message === `Could not fetch from origin: [line withheld: ${label}]`,
+      );
+    }
   }));
