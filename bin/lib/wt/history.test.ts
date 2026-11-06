@@ -204,6 +204,42 @@ test("a restack keeps a rename under diff.renames=false", () =>
     idle(wt);
   }));
 
+test("a restack keeps edited renames under diff.renameLimit=1", () =>
+  scenario(({ env, fx, repo }) => {
+    const one = numbered(30);
+    const two = numbered(30).replaceAll("line", "other");
+    commitFile(fx.main, "src/one.txt", one);
+    commitFile(fx.main, "src/two.txt", two);
+    gitIn(fx.main, "push", "--quiet", "origin", "main");
+    const wt = worktree(repo, "feat-a");
+    gitIn(wt, "mv", "src/one.txt", "lib-a.txt");
+    gitIn(wt, "mv", "src/two.txt", "lib-b.txt");
+    commitFile(wt, "lib-a.txt", one.replace("line 20\n", "branch one\n"));
+    const branchTwo = two.replace("other 20\n", "branch two\n");
+    commitFile(wt, "lib-b.txt", branchTwo);
+    const main = one.replace("line 6\n", "main\n");
+    advanceOrigin(env, fx, "src/one.txt", main);
+    gitIn(fx.main, "config", "diff.renameLimit", "1");
+
+    assert.deepEqual(restack(resolveRepo(wt), wt, "origin/main").conflicts, []);
+    assert.equal(existsSync(join(wt, "src/one.txt")), false);
+    assert.equal(readFileSync(join(wt, "lib-a.txt"), "utf8"), main.replace("line 20\n", "branch one\n"));
+    assert.equal(readFileSync(join(wt, "lib-b.txt"), "utf8"), branchTwo);
+    idle(wt);
+  }));
+
+test("a restack ignores a missing diff.orderFile", () =>
+  scenario(({ env, fx, repo }) => {
+    const wt = worktree(repo, "feat-a");
+    commitFile(wt, "a.txt", "a\n");
+    advanceOrigin(env, fx, "other.txt", "other\n");
+    gitIn(fx.main, "config", "diff.orderFile", "missing-order.txt");
+
+    assert.deepEqual(restack(resolveRepo(wt), wt, "origin/main").conflicts, []);
+    assert.equal(readFileSync(join(wt, "a.txt"), "utf8"), "a\n");
+    idle(wt);
+  }));
+
 test("a restack refuses a deletion against an upstream re-indent under apply.ignoreWhitespace", () =>
   scenario(({ env, fx, repo }) => {
     commitFile(fx.main, "p.txt", "  one\n  two\n");
@@ -223,6 +259,27 @@ test("a restack refuses a deletion against an upstream re-indent under apply.ign
     assert.equal(gitIn(wt, "rev-parse", "HEAD"), oldTip);
     assert.equal(existsSync(join(wt, "p.txt")), false);
     assert.equal(gitIn(wt, "show", "origin/main:p.txt"), main.trimEnd());
+    idle(wt);
+  }));
+
+test("a rebase keeps a conflict under rebase.backend=apply and apply.ignoreWhitespace", () =>
+  scenario(({ env, fx, repo }) => {
+    commitFile(fx.main, "p.txt", "  one\n  two\n");
+    gitIn(fx.main, "push", "--quiet", "origin", "main");
+    const wt = worktree(repo, "feat-a");
+    const wtRepo = resolveRepo(wt);
+    gitIn(wt, "rm", "p.txt");
+    gitIn(wt, "commit", "--quiet", "-m", "delete p");
+    const oldTip = gitIn(wt, "rev-parse", "HEAD");
+    advanceOrigin(env, fx, "p.txt", "    one\n    two\n");
+    gitIn(fx.main, "config", "rebase.backend", "apply");
+    gitIn(fx.main, "config", "apply.ignoreWhitespace", "change");
+
+    assert.throws(
+      () => rebase(wtRepo, wt, "origin/main"),
+      (e: unknown) => e instanceof WtError && e.code === 1 && /could not be replayed/.test(e.message),
+    );
+    assert.equal(gitIn(wt, "rev-parse", "HEAD"), oldTip);
     idle(wt);
   }));
 

@@ -136,16 +136,22 @@ function replay(repo: Repo, top: string, old: string, target: string, backup: st
   mkdirSync(join(repo.commonDir, "emend-wt"), { recursive: true, mode: 0o700 });
   const patch = join(repo.commonDir, "emend-wt", `restack-${process.pid}.patch`);
   try {
+    // Use plumbing so the user's and the repo's diff settings do not shape the patch.
+    // The pins cover what plumbing still reads.
     git(
       repo,
       [
-        "diff",
+        "-c",
+        "diff.suppressBlankEmpty=false",
+        "diff-tree",
+        "-p",
         "--binary",
         "--no-color",
         "--unified=3",
         "--src-prefix=a/",
         "--dst-prefix=b/",
         "--find-renames",
+        "-l1000",
         "--full-index",
         "--no-ext-diff",
         "--no-textconv",
@@ -196,7 +202,8 @@ export function rebase(repo: Repo, top: string, onto: Onto): RebaseResult {
   if (isAncestor(repo, top, target, old)) return { result: "up-to-date", conflicts: [], backups: [] };
 
   const backup = writeBackup(repo, branch, old);
-  const r = hgTry(repo, top, ["rebase", "--no-autostash", "--no-update-refs", target]);
+  // Use the merge backend so rebase.backend=apply and its apply settings cannot turn a conflict into a silent change.
+  const r = hgTry(repo, top, ["rebase", "--merge", "--no-autostash", "--no-update-refs", target]);
   if (r.code === 0) return { result: "rebased", conflicts: [], backups: [backup] };
 
   // Only a content conflict leads to a restack. Read the index before the abort removes the evidence.

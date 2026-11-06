@@ -31,6 +31,14 @@ every conflicting rebase fails for such a user. `changeDigest()` in the same fil
       the same gap, and close each one found.
 - [x] Reviews: emend-reviewer and the read-only Codex review.
 - [x] One commit, `fix(harness): ...`, with the sync outcome in the body.
+- [x] Added by the coordinating session: `bin/wt push --force-with-lease` pushes
+      `refs/heads/<branch>` instead of a bare commit id, checks right before the push that the
+      branch still points at the resolved HEAD, and keeps the lease as tight as before.
+- [x] Found by the reviews, same root cause as the color bug: `replay()`'s patch no longer
+      depends on the user's or the repo's diff settings. It is built with `git diff-tree`, and the
+      settings plumbing still reads are pinned: context, prefixes, rename detection and limit,
+      `diff.suppressBlankEmpty`. `git apply` runs with `apply.ignoreWhitespace=no`, `run()`
+      drops `GIT_DIFF_OPTS`, and `bin/wt rebase` uses the merge backend.
 
 ## Done when
 
@@ -41,14 +49,15 @@ The new test fails without the fix and passes with it, `pnpm verify` is green, a
 
 - Never change the user's git config, in a test or anywhere else. Set the color keys only in the
   fixture repo's config.
-- Done on 2026-11-06. The color fix also covers push and remote-delete error text through
-  `GIT_BASE`. At the coordinating session's request, a second fix makes
-  `bin/wt push --force-with-lease` push `refs/heads/<branch>` instead of a bare commit id, which a
-  pre-push guard that checks the local branch's reflog refuses. The final review found the same
-  root cause in the patch's shape, so a third fix pins its context and path prefixes:
-  `diff.context=0` failed every restack, and `diff.noprefix=true` put a new nested file at the
-  wrong path. A fourth pins rename detection and `apply.ignoreWhitespace=no`, and drops
-  `GIT_DIFF_OPTS` from the environment: `apply.ignoreWhitespace=change` let a deletion drop an
-  upstream re-indent silently. Left open: `makeTestEnv()` does
-  not isolate `XDG_CONFIG_HOME` or set `GIT_CONFIG_NOSYSTEM`, so the bin/wt tests read the
-  developer's XDG and system git config.
+- Done on 2026-11-06.
+- The color fix also keeps push and remote-delete error text plain, through `GIT_BASE`.
+- The lease push: a pre-push guard that checks the local branch's reflog refuses a bare commit id
+  as the source. A commit that lands in the milliseconds between bin/wt's branch check and git's
+  own read of the branch would still go out; the merge skills pin the merge to the approved head.
+- Two of the patch-shape cases gave a wrong result while reporting success: `diff.noprefix=true`
+  put a new nested file at the wrong path, and `apply.ignoreWhitespace=change` (also through
+  `rebase.backend=apply`) let a deletion drop a re-indent from main. The others failed closed:
+  `diff.context=0`, `diff.renames=false`, `diff.renameLimit`, a missing `diff.orderFile` and
+  `GIT_DIFF_OPTS`.
+- Left open: `makeTestEnv()` does not isolate `XDG_CONFIG_HOME` or set `GIT_CONFIG_NOSYSTEM`, so
+  the bin/wt tests read the developer's XDG and system git config.
