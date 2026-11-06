@@ -103,12 +103,12 @@ function isAncestor(repo: Repo, top: string, ancestor: string, of: string): bool
 // restack, rebase
 
 function unmergedPaths(repo: Repo, top: string): string[] {
-  const out = git(
-    repo,
-    ["diff", "--name-only", "--diff-filter=U", "-z", "--no-ext-diff", "--no-textconv", "--ignore-submodules=all"],
-    { cwd: top },
-  );
-  return out.split("\0").filter((p) => p !== "");
+  const out = git(repo, ["ls-files", "--unmerged", "-z"], { cwd: top });
+  const paths = new Set<string>();
+  for (const entry of out.split("\0")) {
+    if (entry !== "") paths.add(entry.slice(entry.indexOf("\t") + 1));
+  }
+  return [...paths];
 }
 
 /**

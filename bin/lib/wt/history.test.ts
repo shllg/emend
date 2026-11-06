@@ -338,6 +338,22 @@ test("a restack ignores a missing diff.orderFile", () =>
     idle(wt);
   }));
 
+test("a conflicting restack ignores a missing diff.orderFile", () =>
+  scenario(({ env, fx, repo }) => {
+    commitFile(fx.main, "c.txt", "one\n");
+    gitIn(fx.main, "push", "--quiet", "origin", "main");
+    const wt = worktree(repo, "feat-a");
+    commitFile(wt, "c.txt", "branch\n");
+    advanceOrigin(env, fx, "c.txt", "main\n");
+    gitIn(fx.main, "config", "diff.orderFile", "missing-order.txt");
+
+    assert.deepEqual(restack(resolveRepo(wt), wt, "origin/main").conflicts, ["c.txt"]);
+    assert.match(readFileSync(join(wt, "c.txt"), "utf8"), /<<<<<<</);
+    gitIn(wt, "diff", "--cached", "--quiet");
+    assert.equal(gitIn(wt, "rev-parse", "HEAD"), gitIn(wt, "rev-parse", "origin/main"));
+    idle(wt);
+  }));
+
 test("a restack refuses a deletion against an upstream re-indent under apply.ignoreWhitespace", () =>
   scenario(({ env, fx, repo }) => {
     commitFile(fx.main, "p.txt", "  one\n  two\n");

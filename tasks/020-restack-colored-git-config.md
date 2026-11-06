@@ -41,6 +41,9 @@ every conflicting rebase fails for such a user. `changeDigest()` in the same fil
       drops `GIT_DIFF_OPTS`, and `bin/wt rebase` uses the merge backend.
 - [x] Found by the security review: the restack writes no patch file. It reads the change with
       `git diff-tree` before the branch moves and passes it to `git apply` on stdin.
+- [x] Found by the same review: the restack lists conflicted paths with
+      `git ls-files --unmerged`, so a diff setting such as a missing `diff.orderFile` cannot break
+      the list after a conflicting restack.
 
 ## Done when
 
