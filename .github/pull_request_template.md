@@ -1,6 +1,8 @@
 ## Summary
 
-<!-- What changes for the owner, in 1–3 lines. Task: tasks/NNN-<slug>.md or plan task <id>. -->
+<!-- What changes for the owner, in 1–3 lines. For an issue, the first line is "Closes #<n>".
+     Otherwise name the task: tasks/NNN-<slug>.md or plan task <id>. Follow-ups outside the scope go
+     under "Follow-ups", one line each. -->
 
 ## Evidence
 

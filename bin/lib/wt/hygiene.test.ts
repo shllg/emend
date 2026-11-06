@@ -6,7 +6,17 @@ import { test } from "node:test";
 
 const root = resolve(import.meta.dirname, "..", "..", "..");
 
-const SKILLS = ["e-spawn", "e-work", "e-pr", "e-pr-finalize", "e-pr-merge", "e-rebase", "e-merge-local", "e-issue"];
+const SKILLS = [
+  "e-spawn",
+  "e-work",
+  "e-pr",
+  "e-pr-finalize",
+  "e-pr-merge",
+  "e-rebase",
+  "e-merge-local",
+  "e-issue",
+  "e-loop",
+];
 
 // Built from parts so this file does not match its own patterns.
 const FORBIDDEN: { label: string; pattern: RegExp }[] = [

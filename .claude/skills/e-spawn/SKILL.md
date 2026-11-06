@@ -1,6 +1,6 @@
 ---
 name: e-spawn
-description: Hand a change request to a new session in its own worktree and herdr workspace, without leaving this session. Use when the owner types /e-spawn with a plain description of what to build.
+description: Hand a change request or a GitHub issue to a new session in its own worktree and herdr workspace, without leaving this session. Use when the owner types /e-spawn with a plain description of what to build, or with an issue as #<n>.
 ---
 
 # /e-spawn
@@ -9,7 +9,11 @@ Request: $ARGUMENTS
 
 This session stays where it is and keeps the owner's focus. The new session does the work. When this
 skill reports success, the new session holds its prompt and is either working or waiting for an
-answer. The child runs `/loop /e-work …`; `/e-work` ends that loop itself. An empty request: print `Usage: /e-spawn <description>` and stop.
+answer. The child runs `/loop /e-work …`; `/e-work` ends that loop itself. An empty request: print `Usage: /e-spawn <description | #issue>` and stop.
+
+An issue (`#<n>` or its URL on this repository) skips steps 2 and 3: run
+`<main>/bin/wt spawn --issue <n>` in step 4. It refuses an issue that is not `ready` from the owner,
+is blocked, or is already taken, and creates nothing; relay its message.
 
 ## Rules every e-* skill follows
 
@@ -84,8 +88,8 @@ Wait for the completion notification, then read the output. Setup takes time.
 ## 5. Report
 
 - Exit 0: open with the last line of the output as it stands. It says whether the agent is working
-  or waiting for an answer. Then give the task, the branch, the port and the workspace, from the
-  lines `Task:`, `Branch:`, `Port:` and `Worktree:` and from the last line.
+  or waiting for an answer. Then give the task or the issue, the branch, the port and the workspace,
+  from the lines `Task:` or `Issue:`, `Branch:`, `Port:` and `Worktree:` and from the last line.
 - Any other exit: relay the message as it stands, including any cleanup command it prints. Never run
   that cleanup yourself.
 

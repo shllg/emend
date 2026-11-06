@@ -14,7 +14,8 @@ local `main` as one signed commit. The owner pushes `main` later.
   parent of the printed path. Call the main checkout's copy as `<main>/bin/wt`: `bin/wt` is not on
   PATH, and one copy keeps one registry. Bash calls do not share shell variables, so write every
   captured value (path, PR number, commit, branch) literally into later commands.
-- Titles and subjects go in as plain text (`--title`, `--subject`). A body goes in with
+- Titles and subjects never go on the command line: write each with the Write tool to a one-line
+  file under `<top>/.wt/` and pass it with `--title-file` or `--subject-file`. A body goes in with
   `--body-file <path>`, the file written by the Write tool under `<top>/.wt/` (gitignored), where
   `<top>` is `git rev-parse --show-toplevel`; `--body <text>` (it may start with `-`) suits a body of one line.
 - Commit with plain `git commit` on your own feature branch; the git config signs it. Never use
@@ -31,7 +32,8 @@ local `main` as one signed commit. The owner pushes `main` later.
 ## 1. Preflight
 
 1. Run `git status --short` and `git symbolic-ref --quiet --short HEAD`. The branch is not `main`, the
-   session runs in a worktree under `<main>/.claude/worktrees/`, and the tree is clean.
+   session runs in a worktree under `<main>/.claude/worktrees/`, and the tree is clean. When
+   `.wt/worktree.json` names an issue, stop: issue branches land only through a PR (`/e-pr`).
    `git ls-files -- .wt` must print nothing: tracked files under `.wt` must never count as approval.
 2. `pnpm verify` must be green at exactly this HEAD. Run it unless a green run on this HEAD is on record.
 3. Get the commit: `git rev-parse HEAD`.
@@ -87,7 +89,8 @@ restate them here.
    characters. The body has `## Summary` with one to three bullets, then every distinct `Sync:`
    trailer from the branch's commits. No attribution.
 3. Run
-   `<main>/bin/wt land --match-head <approved head> --subject "<subject>" --body-file <top>/.wt/land-body.md`.
+   `<main>/bin/wt land --match-head <approved head> --subject-file <top>/.wt/land-subject.txt --body-file <top>/.wt/land-body.md`,
+   with the subject written to `<top>/.wt/land-subject.txt` by the Write tool.
    It refuses with "HEAD is not the approved head commit." when HEAD differs. Otherwise it makes one
    signed commit on `main` with the branch's tree, prints `backup:` lines, and prints `landed <sha>`
    last. It never pushes. `land` signs through git's configured signer with piped stdio, so a signer that
