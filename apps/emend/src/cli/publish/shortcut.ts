@@ -19,7 +19,14 @@ import {
   sourcePath,
 } from "./read.ts";
 import type { publishContext } from "./resolve.ts";
-import { readSkipReason, SHORTCUT_LIMITS, type SkipReason, visible, walkDocs } from "./shortcut-walk.ts";
+import {
+  holdsPrivateKey,
+  readSkipReason,
+  SHORTCUT_LIMITS,
+  type SkipReason,
+  visible,
+  walkDocs,
+} from "./shortcut-walk.ts";
 
 export interface ShortcutOptions {
   paths: string[];
@@ -151,12 +158,7 @@ export async function shortcutManifest(
     if (!options.source && docViewOf({ path: actual }) === "rendered") continue;
     try {
       const text = decodeText(bytes);
-      if (
-        argument === undefined &&
-        /-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|PuTTY-User-Key-File-|AGE-SECRET-KEY-1|---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----/.test(
-          text,
-        )
-      ) {
+      if (argument === undefined && holdsPrivateKey(text)) {
         docs.delete(actual);
         excludedAssets.add(actual);
         skipped.set(actual, "may hold a secret");
@@ -249,6 +251,8 @@ export async function shortcutManifest(
     titleFromMain,
     docFolders,
     excludedAssets,
+    folderRoots: folderArguments.map(({ root }) => root),
+    namedFiles: new Set(explicit.keys()),
     skippedArguments,
     skipped: [...skipped].map(([file, reason]) => ({ path: reviewPath(file), reason })),
     docArguments: new Map([...explicit].map(([file, argument]) => [reviewPath(file), argument])),

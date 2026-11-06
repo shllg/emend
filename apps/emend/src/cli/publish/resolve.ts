@@ -46,6 +46,9 @@ export type PublishOptions = {
   docFolders?: ReadonlyMap<string, readonly PublishedFolder[]>;
   /** Absolute paths rejected by the walked-doc private-key content check. */
   excludedAssets?: ReadonlySet<string>;
+  /** Real paths of shortcut folder arguments and explicitly named files. */
+  folderRoots?: readonly string[];
+  namedFiles?: ReadonlySet<string>;
   docArguments?: ReadonlyMap<string, string>;
 };
 const sha256 = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
@@ -155,7 +158,9 @@ export async function resolvePublish(
   let title = manifest.title;
   let assetCount = 0;
   const assetPaths = new Set<string>();
-  const shortcutAssets = options.docFolders ? new ShortcutAssets(gitDirs, warn, options.excludedAssets) : undefined;
+  const shortcutAssets = options.docFolders
+    ? new ShortcutAssets(gitDirs, warn, options.excludedAssets, options.folderRoots, options.namedFiles)
+    : undefined;
   const roots = [...(worktree ? [worktree] : []), ...(await readDocRoots(stateDir))];
   for (const file of grouped.files) {
     if (file.role === "diff") {

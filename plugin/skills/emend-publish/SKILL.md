@@ -52,6 +52,7 @@ Use a short, plain title; titles starting with `--` are refused.
 It shows these as source with line comments. Add `--source` to show Markdown or HTML as source.
 A folder walk skips secret-looking filenames (not Markdown or HTML), binary, oversized or unreadable
 files, text holding a private key, and folders named `secret(s)` or `credential(s)` in any case below the folder argument.
+HTML assets in those folders or holding a private key are skipped too.
 Explicit file or folder arguments publish as named; never name a credential file or secrets folder.
 Warnings stop after 20 (`SHORTCUT_LIMITS.warnings`), then count further skips.
 Each folder argument gets a published-file count.

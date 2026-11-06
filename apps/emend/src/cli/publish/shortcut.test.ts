@@ -29,13 +29,16 @@ vi.mock("../../server/publish/executor.ts", async (original) => ({
   ...(await original<typeof import("../../server/publish/executor.ts")>()),
 }));
 
+const syntheticPrivateKey = (kind = "OPENSSH PRIVATE KEY") =>
+  `-----BEGIN ${kind}-----\n${"A".repeat(64)}\n-----END ${kind}-----\n`;
+
 async function fixture(realWorker = false) {
   const f = await directFixture();
   if (!realWorker) workInThread(executors);
   await rm(f.manifest);
   await rm(join(f.source, "plan.md"));
   vi.spyOn(process, "cwd").mockReturnValue(f.source);
-  async function file(path: string, text = "# Synthetic document\n") {
+  async function file(path: string, text: string | Buffer = "# Synthetic document\n") {
     const source = join(f.source, path);
     await mkdir(join(source, ".."), { recursive: true });
     await writeFile(source, text, { mode: 0o644 });
@@ -1087,7 +1090,7 @@ const secretNameGroups = [
     "rclone.conf",
   ],
   ["AUTH-TOKENS.json", "refresh token.txt", "tokens.txt", "github_dsa", "github_ecdsa", "github_ed25519", "wg.conf"],
-  ["github-token.txt", "bot_token.txt", "slack-token", "token"],
+  ["github-token.txt", "bot_token.txt", "slack token", "slack-token", "github_tokens", "token", "github.token"],
   "pem key p12 pfx p8 jks keystore bks ppk der keytab kdbx".split(" ").map((ext) => `private.${ext}`),
   "gpg pgp asc ovpn tfvars tfstate kubeconfig env secret secrets".split(" ").map((ext) => `private.${ext}`),
   [
@@ -1190,25 +1193,35 @@ test("rendered doc names are exempt from secret skips, with and without source",
 
 test("design token files still publish in folder walks", async () => {
   const f = await fixture();
-  for (const name of ["tokens.json", "design-tokens.json"]) await f.file(`bundle/${name}`, "{}");
+  for (const name of ["tokens.json", "design-tokens.json", "colors.tokens"]) await f.file(`bundle/${name}`, "{}");
   const capture = await f.capture();
   const out = await f.publish("bundle");
   expect(out.code, out.stderr.join("")).toBe(0);
   expect(out.stderr.filter((line) => line.includes("skipped"))).toEqual([]);
-  expect(capture.requests[0]?.files.map((file) => file.path)).toEqual(["design-tokens.json", "tokens.json"]);
+  expect(capture.requests[0]?.files.map((file) => file.path)).toEqual([
+    "colors.tokens",
+    "design-tokens.json",
+    "tokens.json",
+  ]);
 });
 
 test.each([
-  ["notes.txt", "-----BEGIN OPENSSH PRIVATE KEY-----"],
-  ["notes.txt", "-----BEGIN PRIVATE KEY-----"],
-  ["notes.txt", "PuTTY-User-Key-File-3: ssh-ed25519"],
-  ["notes.txt", "-----BEGIN RSA PRIVATE KEY-----"],
-  ["notes.txt", "-----BEGIN PGP PRIVATE KEY BLOCK-----"],
-  ["notes.txt", "AGE-SECRET-KEY-1SYNTHETIC"],
-  ["notes.txt", "---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----"],
-])("walk skips a private-key header in %s (%s), but an explicit file publishes", async (name, header) => {
+  ["OpenSSH", syntheticPrivateKey()],
+  ["PEM", syntheticPrivateKey("PRIVATE KEY")],
+  ["PuTTY", `PuTTY-User-Key-File-3: ssh-ed25519\n${"A".repeat(64)}\n`],
+  ["RSA", syntheticPrivateKey("RSA PRIVATE KEY")],
+  ["PGP", syntheticPrivateKey("PGP PRIVATE KEY BLOCK")],
+  ["age", `AGE-SECRET-KEY-1${"Q".repeat(58)}`],
+  ["SSH2", `---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----\n${"A".repeat(64)}\n---- END SSH2 ENCRYPTED PRIVATE KEY ----`],
+  ["JSON service account", JSON.stringify({ private_key: syntheticPrivateKey("PRIVATE KEY") })],
+  [
+    "PGP armor headers",
+    `-----BEGIN PGP PRIVATE KEY BLOCK-----\nVersion: Synthetic fixture\n\n${"A".repeat(64)}\n-----END PGP PRIVATE KEY BLOCK-----`,
+  ],
+])("walk skips %s key material, but an explicit file publishes", async (_kind, text) => {
   const f = await fixture();
-  await f.file(`bundle/${name}`, `Synthetic fixture\n${header}\nNot a real key\n`);
+  const name = "notes.txt";
+  await f.file(`bundle/${name}`, `Synthetic fixture\n${text}`);
   await f.file("bundle/readme.txt", "Synthetic public text");
   const capture = await f.capture();
   const walked = await f.publish("bundle");
@@ -1225,11 +1238,29 @@ test.each([
   }
 });
 
+test.each([
+  ["age-prefix.ts", 'export const AGE_PREFIX = "AGE-SECRET-KEY-1";\n'],
+  [
+    "pem-header.ts",
+    'const header = "-----BEGIN PRIVATE KEY-----";\nexport function headerText() {\n  return header;\n}\n',
+  ],
+  ["putty-marker.ts", 'const marker = "PuTTY-User-Key-File-3: ssh-ed25519";\n'],
+  ["pgp-prose.txt", "Look for -----BEGIN PGP PRIVATE KEY BLOCK----- in an armored key.\nThis is ordinary prose.\n"],
+])("a harmless private-key marker in %s publishes as source", async (name, text) => {
+  const f = await fixture();
+  await f.file(`bundle/${name}`, text);
+  const capture = await f.capture();
+  const out = await f.publish("bundle");
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(capture.requests[0]?.files).toEqual([expect.objectContaining({ path: name, role: "doc", view: "source" })]);
+  expect(out.stderr.filter((line) => line.includes("skipped"))).toEqual([]);
+});
+
 test.each(["notes.js", "alias.js"])("a walked private key is never uploaded as the HTML asset %s", async (ref) => {
   const f = await fixture();
   const html = `<title>Synthetic</title><script src="${ref}"></script>`;
   await f.file("bundle/index.html", html);
-  const secret = await f.file("bundle/notes.js", "-----BEGIN OPENSSH PRIVATE KEY-----\nNot a real key\n");
+  const secret = await f.file("bundle/notes.js", syntheticPrivateKey());
   if (ref !== "notes.js") await symlink(secret, join(f.source, "bundle", ref));
   const capture = await f.capture();
   const out = await f.publish("bundle");
@@ -1243,10 +1274,123 @@ test.each(["notes.js", "alias.js"])("a walked private key is never uploaded as t
   expect(out.stderr).toContain("emend: skipped notes.js: may hold a secret\n");
 });
 
+test("folder assets cannot bypass private-key skips from names, folders, size or encoding", async () => {
+  const f = await fixture();
+  const key = syntheticPrivateKey();
+  const rejected = ["notes.js", "secrets.js", "credentials/app.js", "big.js", "latin.js"];
+  const accepted = ["api-key.js", "password.css"];
+  const html = `<title>Synthetic</title>${[...rejected, ...accepted]
+    .map((name) => `<script src="${name}"></script>`)
+    .join("")}`;
+  await f.file("bundle/index.html", html);
+  for (const name of rejected.slice(0, 3)) await f.file(`bundle/${name}`, key);
+  await f.file("bundle/big.js", key.padEnd(1.5 * 1024 * 1024, " "));
+  await f.file("bundle/latin.js", Buffer.concat([Buffer.from(key), Buffer.from([0xa9])]));
+  await f.file("bundle/api-key.js", "const synthetic = true;");
+  await f.file("bundle/password.css", "body { color: blue; }");
+  const read = vi.spyOn(sourceReads, "readRegular");
+  const capture = await f.capture();
+  const out = await f.publish("bundle");
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(capture.requests[0]?.files.map((file) => [file.path, file.role])).toEqual([
+    ["index.html", "doc"],
+    ...accepted.map((name) => [name, "asset"]),
+  ]);
+  expect(capture.requests[0]?.files[0]?.assets).toEqual(accepted);
+  const uploads = capture.fetcher.mock.calls.filter(([, init]) => init?.method === "PUT");
+  expect(uploads).toHaveLength(3);
+  for (const [, init] of uploads) expect(Buffer.from(init?.body as Uint8Array).includes(Buffer.from(key))).toBe(false);
+  for (const name of rejected) expect(out.stderr).toContain(`emend: skipped ${name}: may hold a secret\n`);
+  for (const name of ["index.html", ...accepted]) expect(out.stderr.join("")).not.toContain(`skipped ${name}:`);
+  expect(out.stderr.filter((line) => line.includes("skipped notes.js:"))).toHaveLength(1);
+  expect(read.mock.calls.filter(([path]) => path === join(f.source, "bundle/notes.js"))).toHaveLength(1);
+  expect(read.mock.calls.some(([path]) => path === join(f.source, "bundle/credentials/app.js"))).toBe(false);
+});
+
+test.each(["alias.js", "big-key.js"])(
+  "a named HTML outside a folder cannot upload its private-key asset bundle/%s",
+  async (ref) => {
+    const f = await fixture();
+    const key = syntheticPrivateKey();
+    const html = `<title>Synthetic</title><script src="bundle/${ref}"></script>`;
+    await f.file("index.html", html);
+    if (ref === "alias.js") {
+      const target = await f.file("bundle/key.js", key);
+      await symlink(target, join(f.source, "bundle/alias.js"));
+    } else await f.file("bundle/big-key.js", key.padEnd(1.5 * 1024 * 1024, " "));
+    const capture = await f.capture();
+    const out = await f.publish("index.html", "bundle");
+    expect(out.code, out.stderr.join("")).toBe(0);
+    expect(capture.requests[0]?.files).toEqual([
+      expect.objectContaining({ path: "index.html", role: "doc", assets: [] }),
+    ]);
+    const uploaded = capture.fetcher.mock.calls
+      .filter(([, init]) => init?.method === "PUT")
+      .map(([, init]) => Buffer.from(init?.body as Uint8Array).toString());
+    expect(uploaded).toEqual([html]);
+    expect(out.stderr).toContain(`emend: skipped bundle/${ref}: may hold a secret\n`);
+  },
+);
+
+test.each([["credentials"], [".", "credentials"], ["credentials", "."]])(
+  "a named credentials root admits key-free assets through any containing folder: %j",
+  async (...paths) => {
+    const f = await fixture();
+    await f.file("index.html", '<title>Outer</title><img src="credentials/password.svg">');
+    await f.file("credentials/index.html", '<title>Inner</title><img src="password.svg">');
+    const asset = '<svg xmlns="http://www.w3.org/2000/svg"></svg>';
+    await f.file("credentials/password.svg", asset);
+    const capture = await f.capture();
+    const out = await f.publish(...paths);
+    expect(out.code, out.stderr.join("")).toBe(0);
+    const files = capture.requests[0]?.files ?? [];
+    const assetPath = paths.length === 1 ? "password.svg" : "credentials/password.svg";
+    expect(files.filter((file) => file.role === "asset").map((file) => file.path)).toEqual([assetPath]);
+    expect(files.filter((file) => file.role === "doc").every((file) => file.assets?.includes(assetPath))).toBe(true);
+    expect(out.stderr.join("")).not.toContain("password.svg");
+    const uploaded = capture.fetcher.mock.calls
+      .filter(([, init]) => init?.method === "PUT")
+      .map(([, init]) => Buffer.from(init?.body as Uint8Array).toString());
+    expect(uploaded).toContain(asset);
+  },
+);
+
+test.each(["shortcut", "manifest"])("named HTML keeps key assets without folder arguments (%s)", async (mode) => {
+  const f = await fixture();
+  await f.file("index.html", '<title>Synthetic</title><script src="credentials/secrets.js"></script>');
+  const key = syntheticPrivateKey();
+  await f.file("credentials/secrets.js", key);
+  const capture = await f.capture();
+  const args = ["index.html"];
+  if (mode === "manifest") {
+    await f.file(
+      "review.json",
+      JSON.stringify({
+        version: 1,
+        title: "Synthetic",
+        topics: [],
+        files: [{ path: "index.html", role: "doc" }],
+        writeup: { overview: "", tldr: "", decisions: null, topics: {} },
+      }),
+    );
+    args.splice(0, 1, "--manifest", "review.json", "--key", "synthetic");
+  }
+  const out = await f.publish(...args);
+  expect(out.code, out.stderr.join("")).toBe(0);
+  expect(capture.requests[0]?.files.map((file) => [file.path, file.role])).toEqual([
+    ["index.html", "doc"],
+    ["credentials/secrets.js", "asset"],
+  ]);
+  expect(capture.requests[0]?.files[0]?.assets).toEqual(["credentials/secrets.js"]);
+  const uploads = capture.fetcher.mock.calls.filter(([, init]) => init?.method === "PUT");
+  expect(uploads.some(([, init]) => Buffer.from(init?.body as Uint8Array).toString() === key)).toBe(true);
+  expect(out.stderr.filter((line) => line.includes("skipped"))).toEqual([]);
+});
+
 test("explicitly named private-key content still publishes beside a referencing HTML doc", async () => {
   const f = await fixture();
   await f.file("bundle/index.html", '<title>Synthetic</title><script src="notes.js"></script>');
-  const text = "-----BEGIN OPENSSH PRIVATE KEY-----\nNot a real key\n";
+  const text = syntheticPrivateKey();
   await f.file("bundle/notes.js", text);
   const capture = await f.capture();
   for (const paths of [["bundle/notes.js"], ["bundle", "bundle/notes.js"], ["bundle/notes.js", "bundle"]]) {
@@ -1262,9 +1406,25 @@ test("explicitly named private-key content still publishes beside a referencing 
   }
 });
 
+test("a named key file inside a secret folder remains a doc and a referenced asset", async () => {
+  const f = await fixture();
+  await f.file("bundle/index.html", '<title>Synthetic</title><script src="credentials/notes.js"></script>');
+  const key = syntheticPrivateKey();
+  await f.file("bundle/credentials/notes.js", key);
+  const capture = await f.capture();
+  const out = await f.publish("bundle", "bundle/credentials/notes.js");
+  expect(out.code, out.stderr.join("")).toBe(0);
+  const files = capture.requests[0]?.files ?? [];
+  expect(files).toContainEqual(expect.objectContaining({ path: "credentials/notes.js", role: "doc" }));
+  expect(files.find((file) => file.path === "index.html")?.assets).toEqual(["credentials/notes.js"]);
+  const uploads = capture.fetcher.mock.calls.filter(([, init]) => init?.method === "PUT");
+  expect(uploads.some(([, init]) => Buffer.from(init?.body as Uint8Array).toString() === key)).toBe(true);
+  expect(out.stderr.join("")).not.toContain("skipped credentials/notes.js:");
+});
+
 test("private-key content warnings escape the listed path", async () => {
   const f = await fixture();
-  await f.file("bundle/notes\u202e.txt", "-----BEGIN OPENSSH PRIVATE KEY-----\nNot a real key");
+  await f.file("bundle/notes\u202e.txt", syntheticPrivateKey());
   await f.file("bundle/readme.txt", "Synthetic public text");
   const capture = await f.capture();
   const out = await f.publish("bundle");
@@ -1279,8 +1439,7 @@ test("private-key content skips share the warning cap with name skips", async ()
   const f = await fixture();
   await f.file("bundle/readme.txt", "Synthetic public text");
   await f.file("bundle/token.txt", "Synthetic placeholder");
-  for (let i = 0; i < SHORTCUT_LIMITS.warnings; i++)
-    await f.file(`bundle/notes-${i}.txt`, "-----BEGIN OPENSSH PRIVATE KEY-----\nNot a real key");
+  for (let i = 0; i < SHORTCUT_LIMITS.warnings; i++) await f.file(`bundle/notes-${i}.txt`, syntheticPrivateKey());
   const capture = await f.capture();
   const out = await f.publish("bundle");
   expect(out.code, out.stderr.join("")).toBe(0);
@@ -1452,7 +1611,7 @@ test.each(["secret", "secrets", "credential", "credentials"])(
   },
 );
 
-test("secret patterns respect delimiters and do not suppress tokens or referenced HTML assets", async () => {
+test("secret patterns respect delimiters and asset names, but exclude assets below secret folders", async () => {
   const f = await fixture();
   const names = ["token.ts", "tokens.json", "mytoken.json", "secretary.txt", "passwordless.txt", "privatekeynotes.txt"];
   for (const name of names) await f.file(`bundle/${name}`, "Synthetic public text");
@@ -1477,7 +1636,10 @@ test("secret patterns respect delimiters and do not suppress tokens or reference
       .filter((file) => file.role === "asset")
       .map((file) => file.path)
       .sort(),
-  ).toEqual(["credentials/client.js", "private-key.js"]);
+  ).toEqual(["private-key.js"]);
+  expect(files.find((file) => file.path === "index.html")?.assets).toEqual(["private-key.js"]);
+  expect(out.stderr).toContain("emend: skipped credentials/client.js: may hold a secret\n");
+  expect(out.stderr.join("")).not.toContain("skipped private-key.js");
 });
 
 test("an entirely skipped walk reports escaped paths and reasons in its one capped error line", async () => {
