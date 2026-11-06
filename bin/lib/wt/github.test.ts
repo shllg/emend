@@ -265,6 +265,25 @@ test("push sends exactly the commit it resolved, even when a commit lands during
     assert.equal(gitIn(ctx.fx.origin, "rev-parse", `refs/heads/${BRANCH}`), checked);
   }));
 
+test("a lease push sends exactly the commit it resolved, even when a commit lands during the push", () =>
+  scenario((ctx) => {
+    commitFile(ctx.fx.main, "a.txt", "a\n");
+    push(ctx.repo, ctx.fx.main, { forceWithLease: false });
+    gitIn(ctx.fx.main, "commit", "--quiet", "--amend", "-m", "rewritten");
+    const amended = gitIn(ctx.fx.main, "rev-parse", "HEAD");
+    const hook = join(ctx.fx.main, ".git", "hooks", "pre-push");
+    mkdirSync(join(ctx.fx.main, ".git", "hooks"), { recursive: true });
+    writeFileSync(
+      hook,
+      "#!/bin/sh\nunset GIT_DIR GIT_INDEX_FILE\necho late > late.txt\ngit add late.txt\ngit commit --quiet -m late\n",
+    );
+    chmodSync(hook, 0o755);
+
+    push(ctx.repo, ctx.fx.main, { forceWithLease: true });
+    assert.notEqual(gitIn(ctx.fx.main, "rev-parse", "HEAD"), amended, "a later commit exists locally");
+    assert.equal(gitIn(ctx.fx.origin, "rev-parse", `refs/heads/${BRANCH}`), amended);
+  }));
+
 test("push argv sends the checked sha; a lease push names the local branch", () => {
   const sha = "d".repeat(40);
   const spec = `${sha}:refs/heads/${BRANCH}`;
