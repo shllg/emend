@@ -30,8 +30,16 @@ export interface RunBytesResult {
   stderr: string;
 }
 
-function childEnv(): NodeJS.ProcessEnv {
+function childEnv(cmd: string): NodeJS.ProcessEnv {
   const env = { ...process.env, ...FIXED };
+  if (cmd === "gh" || cmd === "git") {
+    // Status text and JSON must stay plain even when the parent forces terminal output.
+    delete env.GH_FORCE_TTY;
+    delete env.CLICOLOR_FORCE;
+    delete env.FORCE_COLOR;
+    env.NO_COLOR = "1";
+    env.CLICOLOR = "0";
+  }
   // GIT_DIFF_OPTS would override the diff context bin/wt pins.
   delete env.GIT_DIFF_OPTS;
   delete env.EMEND_PRIVATE_TERMS;
@@ -48,6 +56,7 @@ function childEnv(): NodeJS.ProcessEnv {
 /**
  * Runs a program without a shell, with the caller's environment plus FIXED (no prompts, no pager),
  * excluding Git config overrides, GIT_DIFF_OPTS, GH_REPO, GH_HOST and EMEND_PRIVATE_TERMS.
+ * Git and gh children also disable color and discard forced-color/terminal overrides.
  * Exit 127 means not found; 124 means it ran past the timeout.
  */
 export function run(cmd: string, args: string[], opts: RunOptions): RunResult {
@@ -55,7 +64,7 @@ export function run(cmd: string, args: string[], opts: RunOptions): RunResult {
   const r = spawnSync(cmd, args, {
     cwd: opts.cwd,
     input: opts.input,
-    env: childEnv(),
+    env: childEnv(cmd),
     encoding: "utf8",
     timeout: opts.timeoutMs,
     killSignal: "SIGKILL",
@@ -84,7 +93,7 @@ export function runBytes(
   const r = spawnSync(cmd, args, {
     cwd: opts.cwd,
     input: opts.input,
-    env: childEnv(),
+    env: childEnv(cmd),
     encoding: "buffer",
     timeout: opts.timeoutMs,
     killSignal: "SIGKILL",

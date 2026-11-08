@@ -485,10 +485,7 @@ for (const command of ["create", "edit", "merge"] as const) {
           [[ownClosingIssue, { number: 9, repository: { nameWithOwner: "Owner/Repo" } }], false],
           [[ownClosingIssue], true],
           [[], true],
-          [
-            Array.from({ length: 21 }, (_, i) => ({ number: i + 1, repository: { nameWithOwner: "Owner/Repo" } })),
-            false,
-          ],
+          [Array.from({ length: 21 }, () => ownClosingIssue), false],
         ] as const) {
           state.closing = { stdout: closingResponse([...nodes], more) };
           assert.throws(invoke, { code: 1, message: closingMismatch });
@@ -2769,13 +2766,7 @@ for (const command of ["create", "edit", "merge"] as const) {
 for (const command of ["create", "edit", "merge"] as const) {
   for (const [kind, response, message] of [
     ["has another page", closingResponse([ownClosingIssue], true), closingMismatch],
-    [
-      "more than 20 nodes",
-      closingResponse(
-        Array.from({ length: 21 }, (_, i) => ({ number: i + 1, repository: { nameWithOwner: "owner/repo" } })),
-      ),
-      closingMismatch,
-    ],
+    ["more than 20 nodes", closingResponse(Array.from({ length: 21 }, () => ownClosingIssue)), closingMismatch],
     ["different repository", closingResponse([ownClosingIssue], false, "other/repo"), closingRepositoryMismatch],
   ]) {
     test(`round 14 closing diagnostics for ${command}: ${kind}`, () =>
@@ -2825,5 +2816,33 @@ for (const stream of ["stdout", "stderr"] as const) {
       const pushes = calls.filter((call) => call.command === "git" && call.args.includes("push"));
       assert.equal(pushes.length, 1);
       assert.ok(pushes[0]?.args.includes("--delete"));
+    }));
+}
+
+for (const stream of ["stdout", "stderr"] as const) {
+  test(`round 15 colored already-merged line warns and keeps the branch: ${stream}`, (t) =>
+    boundary(({ repo, state, calls }) => {
+      prepareMergeIssue(repo);
+      state.remoteBranches = [state.prBranch];
+      state.closing = { stdout: closingResponse([ownClosingIssue]) };
+      state.mergeReply = {
+        status: 0,
+        [stream]: "\x1b[33m!\x1b[0m Pull request owner/repo#7 was already merged\n",
+      };
+      const stdout: string[] = [];
+      t.mock.method(process.stdout, "write", (chunk: string | Uint8Array) => {
+        stdout.push(String(chunk));
+        return true;
+      });
+      calls.length = 0;
+      assert.throws(() => prMerge(repo, SETTLE_MERGE, () => SETTLE_NOW), {
+        code: 1,
+        message:
+          "Warning: gh reported that the PR was already merged. This squash message was not used. Check the result.",
+      });
+      assert.deepEqual(stdout, [`MERGED ${"c".repeat(40)}\n`]);
+      assertNoBranchDeletion(calls);
+      assert.equal(calls.filter(isClosingQuery).length, 2);
+      assert.equal(calls.filter((call) => call.command === "gh" && call.args[1] === "merge").length, 1);
     }));
 }

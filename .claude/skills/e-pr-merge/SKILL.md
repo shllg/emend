@@ -189,9 +189,10 @@ Run, from the PR's own worktree:
 ```
 
 If it refuses because "GitHub may not have parsed the body yet", wait until the named UTC retry
-time. Do not poll more often than once a minute. Rerun step 2 in full (readiness and all feedback
-surfaces), without editing the PR body when Evidence already records the same difference; another
-edit would restart the settle window. On any retry, BEHIND stops with
+time. Do not poll more often than once a minute. Rerun step 1's PR read to refresh the PR fields,
+including `mergeStateStatus`, then step 2 in full (readiness and all feedback surfaces). Keep the
+retained head and approval unchanged. Do not edit the PR body when Evidence already records the
+same difference; another edit would restart the settle window. On any retry, BEHIND stops with
 `<main>/bin/wt notify blocked`, including when no approval was carried over a rebase.
 Step 7 never runs step 4.
 

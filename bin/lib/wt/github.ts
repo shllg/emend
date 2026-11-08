@@ -1,4 +1,5 @@
 import { isatty } from "node:tty";
+import { stripVTControlCharacters } from "node:util";
 import {
   checkPublicChange,
   checkPublicPush,
@@ -1225,7 +1226,10 @@ export function prMerge(
     else if (state.headRefOid !== sha)
       warnings.push("Warning: the merged head is not the approved one. Check the merged changes with the owner.");
     const alreadyMerged = /^\W*Pull request\b.*\bwas already merged\W*$/mu;
-    if (alreadyMerged.test(merge.stdout) || alreadyMerged.test(merge.stderr))
+    if (
+      alreadyMerged.test(stripVTControlCharacters(merge.stdout)) ||
+      alreadyMerged.test(stripVTControlCharacters(merge.stderr))
+    )
       warnings.push(
         "Warning: gh reported that the PR was already merged. This squash message was not used. Check the result.",
       );

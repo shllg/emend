@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import childProcess from "node:child_process";
+import childProcess, { type SpawnSyncOptions } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
 import { test } from "node:test";
 import { run, runBytes } from "./proc.ts";
@@ -129,4 +129,47 @@ for (const execute of [run, runBytes]) {
       else process.env.GH_REPO = previous;
     }
   });
+}
+
+for (const execute of [run, runBytes]) {
+  for (const command of ["gh", "git"]) {
+    test(`${execute.name} gives ${command} a plain-output environment`, (t) => {
+      const parent = {
+        GH_FORCE_TTY: "120",
+        CLICOLOR_FORCE: "1",
+        FORCE_COLOR: "3",
+        NO_COLOR: "0",
+        CLICOLOR: "1",
+      };
+      const previous = Object.keys(parent).map((key) => [key, process.env[key]] as const);
+      const spy = t.mock.method(
+        childProcess,
+        "spawnSync",
+        (receivedCommand: string, args: string[], options: SpawnSyncOptions) => {
+          assert.equal(receivedCommand, command);
+          assert.deepEqual(args, ["--version"]);
+          assert.ok(options.env);
+          for (const key of ["GH_FORCE_TTY", "CLICOLOR_FORCE", "FORCE_COLOR"])
+            assert.equal(Object.hasOwn(options.env, key), false, `${key} must not reach ${command}`);
+          assert.equal(options.env.NO_COLOR, "1");
+          assert.equal(options.env.CLICOLOR, "0");
+          return { status: 0, stdout: options.encoding === "buffer" ? Buffer.alloc(0) : "", stderr: "" };
+        },
+      );
+      syncBuiltinESMExports();
+      try {
+        Object.assign(process.env, parent);
+        assert.equal(execute(command, ["--version"], { cwd: "/" }).code, 0);
+        assert.equal(spy.mock.callCount(), 1);
+        for (const [key, value] of Object.entries(parent)) assert.equal(process.env[key], value);
+      } finally {
+        spy.mock.restore();
+        syncBuiltinESMExports();
+        for (const [key, value] of previous) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+      }
+    });
+  }
 }
