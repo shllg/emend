@@ -96,10 +96,10 @@ Use the survey's `items` for PR lookups. For each worker, and each journal issue
   review shows the wait: journal `in-review` once and leave it. Otherwise ask it for its state, and
   report a worker that stays stuck to the owner.
 - **Merged:** find its PR with `<main>/bin/wt pr number --branch '<branch>' --state merged`, then
-  `gh pr view --repo github.com/<owner>/<name> <n> --json number,mergeCommit`.
+  `gh pr view --repo github.com/<owner>/<name> <pr-number> --json number,mergeCommit`.
   When the journal names a PR number for the issue, only that PR counts. The worker cleans up
   itself. The merge closes the issue through the PR's closing reference. Check the state once with
-  `gh issue view --repo github.com/<owner>/<name> <n> --json state` and journal `merged`, then `closed` or `still-open`. On
+  `gh issue view --repo github.com/<owner>/<name> <issue-number> --json state` and journal `merged`, then `closed` or `still-open`. On
   `still-open`, tell the owner the issue number once; never close or reopen it yourself.
 - **Merge refused by a permission check:** the worker prints the merge command for the owner. Tell
   the owner the workspace to run it in; never compose the command yourself.

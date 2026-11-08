@@ -65,9 +65,14 @@ body as it is. Otherwise record the difference in Evidence: write the updated bo
 to `<top>/.wt/pr-body.md` and run `<main>/bin/wt pr edit --body-file <top>/.wt/pr-body.md` (add `--pr <n>`
 in the main checkout). Immediately after this edit succeeds, start one `sleep 660` command with
 `run_in_background: true` to wait out the ten-minute settle window. Wait for that background task to
-finish, then restart at step 1 in this run, rerunning the approval and readiness gates with fresh PR
-fields and feedback. The second pass finds the same difference already in Evidence and does not edit
-again. Never use a foreground sleep or poll the merge command; do not call it during the window.
+finish. Then, before any gate, fetch an answer the owner may have sent in emend during the window:
+run `emend feedback <review-id> --save "<top>/.wt/review"` as `emend-feedback` says, with the review id
+from the `approve` result (it returns at once; delete a `pending` result). Then restart at step 1 in
+this run, rerunning the approval and readiness gates with fresh PR fields and feedback; a newer `go`
+or `closed` ends the approval in step 3. When the edit happened in step 4's post-rebase rerun
+(4.4.5), resume at 4.4.5 instead, as it says. A run makes at most one Evidence edit: if a later pass
+would edit again, run `<main>/bin/wt notify blocked`, report the changed gate, and stop. Never use a
+foreground sleep or poll the merge command; do not call it during the window.
 A body edit never changes the head; the restarted gates read the head afresh for the approval
 comparison and step 7's `--match-head`. Continue with the committed copy's list and filters; never
 use a working tree's list or filters. A failed fetch or read stops readiness.
@@ -148,14 +153,20 @@ unchanged.
       unresolved threads (including outdated ones), standalone findings and later counted answers.
       Recheck that `headRefOid` still equals the rebased head. Any change from READY stops the merge
       as in step 2; hand findings back to `/e-pr-finalize`. Earlier feedback files or a green watch
-      alone do not satisfy this gate.
+      alone do not satisfy this gate. If this rerun edits Evidence (allowed only when this run made no
+      edit before), wait out the settle window and fetch any answer as step 2 says, then run this item
+      again instead of restarting at step 1: keep the approved head, the rebased head and the two
+      equal digests, recheck that the newest saved emend result is still the same handled `approve`
+      (step 3, items 1 to 3), and that `headRefOid` still equals the rebased head. Any change stops the merge and hands back to `/e-pr-finalize`.
 5. Otherwise (a restack, or different digests): the content changed. Return to the hand-off in
    `/e-pr-finalize` (its step 8) for a new review and a new approval. Do not merge.
 
 ## 5. Squash message
 
-The squash message is guarded only by `closingGuard`'s raw reading. GitHub reads it as plain text
-at merge time, and no API reports its closing set beforehand.
+The squash message is guarded only by `closingGuard`. It reads the message as written, with
+character references decoded and with markup stripped, and refuses a foreign closing reference in any
+of these readings, so `Fixes &num;57.` is refused too. GitHub reads the message as plain text at merge
+time, and no API reports its closing set beforehand.
 
 - Subject: the PR title, one line.
 - Body: `## Summary`, then one to three bullets of what shipped, then a blank line. When

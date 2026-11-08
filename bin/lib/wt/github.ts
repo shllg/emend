@@ -897,8 +897,9 @@ function normalizeClosingText(decoded: string): string {
  * closingGuard is an early warning that runs before GitHub sees the text. It is not the boundary:
  * GitHub's own closing set (githubClosingGuard, closingIssuesReferences) is authoritative and runs
  * right before every merge, pinned to the head. Renderer differences in a PR body that the readings
- * miss are caught there. The squash message is guarded only by the raw reading: GitHub reads it as
- * plain text at merge time, and no API reports its closing set beforehand. Keep the readings cheap
+ * miss are caught there. The squash message is guarded only by these readings (as written, decoded
+ * and stripped of markup): GitHub reads it as plain text at merge time, and no API reports its
+ * closing set beforehand, so the extra readings only make the guard stricter. Keep the readings cheap
  * and conservative; do not model CommonMark or HTML in full.
  */
 export function closingGuard(repo: Repo, branch: string, body: string, requireOwn = true): void {
