@@ -12,6 +12,9 @@
 // cmark also accepts digit-plus-any-character task markers and sets checked state
 // from any [x]/[X] on the raw line. remark models neither; explicit raw refusals
 // cover those cases instead of treating an oracle pass as GitHub equivalence.
+// The later-line box guards also cover that rendered-text model, including code
+// inside a non-one ordered item. Nested roman/alpha marker width is a raw limit;
+// remark's tree retains only the numeric start and cannot measure that width.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createRequire, stripTypeScriptTypes } from "node:module";
@@ -263,7 +266,7 @@ const hostile = [
   ["empty code block", "   ```ts"],
   ["list number", "1234. [\t] Done"],
   ["task marker", "2.    [\t] Done"],
-  ["task marker", "- 12. [\t] a"],
+  ["list number", "- 12. [\t] a"],
   ["list number", "- 987654. [\t] Done"],
   ["list number", "12345678. [\t] Done"],
   ["task marker", "2. [\n   ] Done"],
@@ -301,7 +304,26 @@ const hostile = [
   ["task marker", "2. a\n\n   9x [ ] b", "checker only"],
   ["task marker", "1. Steps\n\n   1h [ ] a\n\n   1i [ ] b", "checker only"],
   ["task marker", "2.\n   12 [ ] b", "checker only"],
-  ["task marker", "2. a\n\n   1234567890. [ ] b", "checker only"],
+  ["list number", "2. a\n\n   1234567890. [ ] b", "checker only"],
+  ...["2. Steps\n\n   1h [ ]\n\n   1i [ ]", "- a\n\n  1h [x]\n\nend"].flatMap((body) =>
+    [body, body.replaceAll("\n", "\r\n")].map((input) => ["task marker", input, "checker only"] as const),
+  ),
+  ["list number", "2. a\n\n   1234567890. [ ]\n\nx", "checker only"],
+  ["list number", "2. a\r\n\r\n   1234567890. [ ]\r\n\r\nx", "checker only"],
+  ["list number", "- 1234567890.[ ] x", "checker only"],
+  ["list number", `- ${"9".repeat(190)}.[ ] x`, "checker only"],
+  ["list number", "1. 104101108108111032.[x] x", "checker only"],
+  ["list number", "-\n  1234567890.[ ] x", "checker only"],
+  ["task marker", "2. 1234567890.\n   [\n   ] x", "checker only"],
+  ["task marker", "104. a\n     \\- [ ] x", "checker only"],
+  ["task marker", "104. a\n     1\\. [ ] x", "checker only"],
+  ["task marker", "104. a\n         - [ ] x", "checker only"],
+  ["task marker", "104. a\n     ```text\n     x\n     - [ ] bar\n     ```", "checker only"],
+  ["task marker", "104. a\n     [\n     ] Done", "checker only"],
+  ["list number", "- 888. x", "checker only"],
+  ["list number", "- 999. a", "checker only"],
+  ["list number", "- 10. x", "checker only"],
+  ["list number", "1. 100. x", "checker only"],
   ["task marker", "- a\n\n  1h [ ] b", "checker only"],
   ["task marker", "> - Steps\n>\n>   9x [ ] Continue", "checker only"],
   ["task marker", "> 1. Steps\n>\n>   9x [ ] Continue", "checker only"],
@@ -343,6 +365,17 @@ const containerFences = [
 // These owner forms must stay accepted; markdown-security.test.ts also asserts
 // them through issue evaluation. The mixed corpus below retains refusal cases too.
 const ownerBodies = [
+  "Steps\n\n1. a\n2. b\n\n## Expected\n\n- [ ] Pending",
+  "2. a\n   - [ ] b",
+  "104. a\n     - [ ] b",
+  "104. a\n        - [ ] b",
+  "```text\n104. a\n     - [ ] b\n```",
+  "104. a\n\n```text\n- [ ] b\n```",
+  "104. a\n\n## Expected\n\n```json\n[\n1\n]\n```",
+  "```text\n104. a\n     [\n     ] x\n```",
+  "104. a\n\t\t- [ ] b",
+  "2.    a\n         - [ ] b",
+  "2. a\n1. b\n   [\n   ] x",
   "> - [ ] Pending",
   "> 1. [x] Done",
   "> - 1) [ ] Pending",
@@ -883,10 +916,80 @@ test("each individual rule has a mutation witness", async (t) => {
   const checkerSource = await readFile(new URL("./markdown.ts", import.meta.url), "utf8");
   const mutations = [
     {
+      name: "end-of-line scanner box",
+      from: String.raw`\[[ xX]\](?:[ \t]|$)`,
+      to: String.raw`\[[ xX]\][ \t]`,
+      body: "- a\n\n  1h [x]\n\nend",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "long task chain",
+      from: String.raw`/^((?:[\s>]|[-*+]|\d+[.)])*)\[(?:([\sxX])\]|\s*$)/u`,
+      to: String.raw`/^((?:[\s>]|[-*+]|\d{1,9}[.)])*)\[(?:([\sxX])\]|\s*$)/u`,
+      body: "- 1234567890.[ ] x",
+      kind: "list number",
+      checkerOnly: true,
+    },
+    {
+      name: "escaped box chain",
+      from: String.raw`line.slice(0, line.indexOf("[")).includes("\\")`,
+      to: "false",
+      body: "104. a\n     \\- [ ] x",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "later bare split box",
+      from: " || orderedItem)",
+      to: ")",
+      body: "104. a\n     [\n     ] Done",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "later indented box",
+      from: " || indent >= orderedItem.contentColumn + 4",
+      to: "",
+      body: "104. a\n         - [ ] x",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "later fenced box",
+      from: " || taskFence?.inItem",
+      to: "",
+      body: "104. a\n     ```text\n     x\n     - [ ] bar\n     ```",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "ordered item boundary",
+      from: "orderedItem && index > 0 &&",
+      to: "false &&",
+      body: "104. a\n\n## Expected\n\n```json\n[\n1\n]\n```",
+      kind: null,
+    },
+    {
+      name: "literal code numbers",
+      from: "if (!taskFence)",
+      to: "if (true)",
+      body: "```text\n104. a\n     [\n     ] x\n```",
+      kind: null,
+    },
+    {
+      name: "nested number width",
+      from: String.raw`/^(?:[\s>]|[-*+]|\d{1,9}[.)])+\d{2,9}[.)](?=[ \t]|$)/u`,
+      to: "/a^/u",
+      body: "- 888. x",
+      kind: "list number",
+      checkerOnly: true,
+    },
+    {
       name: "nested-chain zero",
       from: String.raw`/^(?:[\s>]|[-*+]|\d{1,9}[.)])*0\d{0,8}[.)](?=[ \t]|$)/u`,
       to: String.raw`/^[\s>]*0\d{0,8}[.)](?=[ \t]|$)/u`,
-      body: "- 007. x",
+      body: "- 0. x",
       kind: "list number",
     },
     { name: "onesOnly", from: "onesOnly || ", to: "", body: "1.\n1.\n2.", kind: "list number" },
@@ -895,9 +998,11 @@ test("each individual rule has a mutation witness", async (t) => {
       name: "numbered task item",
       from: 'number[1] !== "1"',
       to: "false",
-      // A continued box is a task without the scanner's same-line trailing space.
-      body: "- 12. [x]\n      a",
+      // The inner literal-one marker is exempt from the cmark scanner; the
+      // rendered-text policy still forbids a non-one number earlier in the chain.
+      body: "2. 1. [x] a",
       kind: "list number",
+      checkerOnly: true,
     },
     {
       name: "task box alphabet",
@@ -910,12 +1015,13 @@ test("each individual rule has a mutation witness", async (t) => {
       name: "marker-only box continuation",
       from: "if (followsMarker)",
       to: "if (false)",
-      body: "2.\n   [\n   ] Done",
+      body: "1.\n   [\n   ] Done",
       kind: "task marker",
+      checkerOnly: true,
     },
     {
       name: "cmark digit task scanner",
-      from: String.raw`/^(?:[\s>]|[-*+]|\d{1,9}[.)])*\d+[^\n][ \t]+\[[ xX]\][ \t]/u`,
+      from: String.raw`/^(?:[\s>]|[-*+]|\d{1,9}[.)])*\d+[^\n][ \t]+\[[ xX]\](?:[ \t]|$)/u`,
       to: "/a^/u",
       body: "2. a\n\n   9x [ ] b",
       kind: "task marker",
@@ -923,8 +1029,8 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "cmark task container prefixes",
-      from: String.raw`/^(?:[\s>]|[-*+]|\d{1,9}[.)])*\d+[^\n][ \t]+\[[ xX]\][ \t]/u`,
-      to: String.raw`/^[ \t]*\d+[^\n][ \t]+\[[ xX]\][ \t]/u`,
+      from: String.raw`/^(?:[\s>]|[-*+]|\d{1,9}[.)])*\d+[^\n][ \t]+\[[ xX]\](?:[ \t]|$)/u`,
+      to: String.raw`/^[ \t]*\d+[^\n][ \t]+\[[ xX]\](?:[ \t]|$)/u`,
       body: "> - Steps\n>\n>   9x [ ] Continue",
       kind: "task marker",
       checkerOnly: true,
@@ -960,8 +1066,8 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "restart requires Markdown blank",
-      from: String.raw`/^[ \t]*$/u.test(lines[index - 1] ?? "")`,
-      to: String.raw`/^\s*$/u.test(lines[index - 1] ?? "")`,
+      from: String.raw`const followsBlank = index > 0 && /^[ \t]*$/u.test(lines[index - 1] ?? "")`,
+      to: String.raw`const followsBlank = index > 0 && /^\s*$/u.test(lines[index - 1] ?? "")`,
       body: "1. a\n\u00a0\nb\n1.\n2.",
       kind: "list number",
     },

@@ -26,6 +26,61 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+for (const [name, body, kind] of [
+  ["end-of-line boxes after numbered paragraphs", "2. Steps\n\n   1h [ ]\n\n   1i [ ]", "task marker"],
+  ["end-of-line checked box after bullet paragraph", "- a\n\n  1h [x]\n\nend", "task marker"],
+  ["end-of-line box after ten-digit marker", "2. a\n\n   1234567890. [ ]\n\nx", "list number"],
+] as const) {
+  for (const ending of ["LF", "CRLF"] as const) {
+    test(`raw Markdown refuses ${name} with ${ending}`, () => {
+      const input = ending === "LF" ? body : body.replaceAll("\n", "\r\n");
+      assert.equal(evaluate(input).reason, reason(kind), input);
+    });
+  }
+}
+
+for (const [name, body, kind] of [
+  ["ten-digit unspaced box prefix", "- 1234567890.[ ] x", "list number"],
+  ["190-digit unspaced box prefix", `- ${"9".repeat(190)}.[ ] x`, "list number"],
+  ["long box prefix after another number", "1. 104101108108111032.[x] x", "list number"],
+  ["long box prefix after marker-only line", "-\n  1234567890.[ ] x", "list number"],
+  ["split box after long marker chain", "2. 1234567890.\n   [\n   ] x", "task marker"],
+  ["escaped bullet before later box", "104. a\n     \\- [ ] x", "task marker"],
+  ["escaped delimiter before later box", "104. a\n     1\\. [ ] x", "task marker"],
+  ["later box four columns beyond item content", "104. a\n         - [ ] x", "task marker"],
+  ["later box inside item fence", "104. a\n     ```text\n     x\n     - [ ] bar\n     ```", "task marker"],
+  ["later bare split box", "104. a\n     [\n     ] Done", "task marker"],
+  ["tab-expanded later box indentation", "104. a\n\t\t - [ ] x", "task marker"],
+  ["later box after four-column item padding", "2.    a\n          - [ ] x", "task marker"],
+  ["later box in a fence opened on the item line", "104. ```text\n     - [ ] x\n     ```", "task marker"],
+  ["later split box after leaving a quoted fence", "> ```text\n104. a\n     [\n     ] Done", "task marker"],
+  ["later split box after leaving a list fence", "- ```text\n104. a\n     [\n     ] Done", "task marker"],
+  ["later split box after literal indented fence text", "    ```text\n104. a\n     [\n     ] Done", "task marker"],
+  ["wide nested roman number", "- 888. x", "list number"],
+] as const) {
+  test(`raw Markdown refuses ${name}`, () => {
+    assert.equal(evaluate(body).reason, reason(kind), body);
+  });
+}
+
+for (const [name, body] of [
+  ["bug template with checklist after heading", "Steps\n\n1. a\n2. b\n\n## Expected\n\n- [ ] Pending"],
+  ["checklist at ordered item content column", "2. a\n   - [ ] b"],
+  ["checklist at three-digit item content column", "104. a\n     - [ ] b"],
+  ["checklist three columns beyond item content", "104. a\n        - [ ] b"],
+  ["literal numbered code and checklist", "```text\n104. a\n     - [ ] b\n```"],
+  ["top-level fence after list boundary", "104. a\n\n```text\n- [ ] b\n```"],
+  ["tab-expanded checklist below code indentation", "104. a\n\t\t- [ ] b"],
+  ["checklist after four-column item padding", "2.    a\n         - [ ] b"],
+  ["bare code box after heading boundary", "104. a\n\n## Expected\n\n```json\n[\n1\n]\n```"],
+  ["literal split code box after code number", "```text\n104. a\n     [\n     ] x\n```"],
+  ["literal-one sibling ends earlier numbered item", "2. a\n1. b\n   [\n   ] x"],
+] as const) {
+  test(`raw Markdown permits ${name}`, () => {
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+
 for (const [name, body] of [
   ["digit task scanner in quoted bullet", "> - Steps\n>\n>   9x [ ] Continue"],
   ["digit task scanner in quoted ordered item", "> 1. Steps\n>\n>   9x [ ] Continue"],
@@ -54,7 +109,6 @@ for (const [name, body] of [
   ["digit and letter task scanner", "2. a\n\n   9x [ ] b"],
   ["repeated digit and letter task scanner", "1. Steps\n\n   1h [ ] a\n\n   1i [ ] b"],
   ["digit-only task scanner after marker", "2.\n   12 [ ] b"],
-  ["ten-digit task scanner", "2. a\n\n   1234567890. [ ] b"],
   ["digit and letter task scanner in bullet", "- a\n\n  1h [ ] b"],
   ["tabbed digit and letter task scanner", "- a\n\n\t1h\t[ ]\tb"],
   ["unchecked task with later lowercase box", "- [ ] Remove the auth check [x]"],
@@ -97,7 +151,11 @@ for (const [name, body, kind] of [
   ["tab box after four-digit marker", "1234. [\t] Done", "list number"],
   ["tab box after eight-digit marker", "12345678. [\t] Done", "list number"],
   ["tab box after aligned spaces", "2.    [\t] Done", "task marker"],
-  ["tab box after nested two-digit marker", "- 12. [\t] a", "task marker"],
+  ["tab box after nested two-digit marker", "- 12. [\t] a", "list number"],
+  ["ten-digit task scanner", "2. a\n\n   1234567890. [ ] b", "list number"],
+  ["nested three-digit start boundary", "- 999. a", "list number"],
+  ["nested ten", "- 10. x", "list number"],
+  ["nested hundred", "1. 100. x", "list number"],
   ["tab box after nested six-digit marker", "- 987654. [\t] Done", "list number"],
   ["tab boxes after restarted long markers", "Steps\n\n104101108. [\t] a\n\ntext\n\n108111032. [\t] b", "list number"],
   ["tab box missed by remark", "2. [\t] Done", "task marker"],
@@ -150,7 +208,6 @@ for (const [name, body] of [
   ["indented opening bracket", "  [ \t"],
   ["quoted opening bracket", "> ["],
   ["three-digit start boundary", "999. a"],
-  ["nested three-digit start boundary", "- 999. a"],
   ["long digits after text", "Text 123456789. a"],
 ] as const) {
   test(`raw Markdown permits ${name}`, () => {
@@ -264,8 +321,6 @@ for (const [name, body] of [
   ["nonzero nested list start", "- 7. x"],
   ["nonzero start after ordered marker", "1. 7. x"],
   ["nonzero start after quote and bullet", "> - 9. x"],
-  ["nested ten", "- 10. x"],
-  ["nested hundred", "1. 100. x"],
   ["zero-led digits after text", "Text 01. x"],
   ["tilde content in backtick fence", "```go\n~~~"],
   ["backtick content in tilde fence", "~~~go\n```"],

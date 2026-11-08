@@ -33,12 +33,21 @@ function allowedFenceInfo(line: string, start: number): boolean {
   return start === end || FENCE_WORDS.has(line.slice(start, end).toLowerCase());
 }
 
+function columns(text: string): number {
+  let column = 0;
+  for (const char of text) column += char === "\t" ? 4 - (column % 4) : 1;
+  return column;
+}
+
 /** Conservative raw-line rules, without reconstructing CommonMark containers. */
 function hiddenLineReason(lines: string[]): string | null {
   // Long starts can be drawn outside the comment box, including nested starts.
   if (lines.some((line) => /^(?:[\s>]|[-*+]|\d{1,9}[.)])*\d{4,9}[.)](?=[ \t]|$)/u.test(line)))
     return refusal("list number");
   if (lines.some((line) => /^(?:[\s>]|[-*+]|\d{1,9}[.)])*0\d{0,8}[.)](?=[ \t]|$)/u.test(line)))
+    return refusal("list number");
+  // Nested starts use roman/alpha markers on GitHub; keep their width bounded.
+  if (lines.some((line) => /^(?:[\s>]|[-*+]|\d{1,9}[.)])+\d{2,9}[.)](?=[ \t]|$)/u.test(line)))
     return refusal("list number");
   // A nonzero, non-task marker later in a leading chain opens a new nested list
   // as its first item, whose number is shown. Task numbers are checked below.
@@ -88,7 +97,49 @@ function hiddenLineReason(lines: string[]): string | null {
   // holding a literal empty fence example may still be refused (fail closed).
   let needsContent: string | null = null;
   let openerIndent = 0;
+  let orderedItem: { markerColumn: number; contentColumn: number } | null = null;
+  let taskFence: { run: string; column: number; inItem: boolean; quoteDepth: number; minColumn: number } | null = null;
   for (const [index, line] of lines.entries()) {
+    let contentStart = 0;
+    let indent = 0;
+    while (line[contentStart] === " " || line[contentStart] === "\t") {
+      indent += line[contentStart] === "\t" ? 4 - (indent % 4) : 1;
+      contentStart++;
+    }
+    // Strip only ASCII indentation: a leading > remains code content.
+    const content = line.slice(contentStart);
+    const containerPrefix = /^[ \t>]*/u.exec(line)?.[0] ?? "";
+    const quoteDepth = containerPrefix.match(/>/gu)?.length ?? 0;
+    // Leaving a quote or list closes its fence. Do not let the old fence hide
+    // the start of a later ordered item from this context check.
+    if (
+      taskFence &&
+      content.trim() &&
+      (quoteDepth < taskFence.quoteDepth || columns(containerPrefix) < taskFence.minColumn)
+    )
+      taskFence = null;
+    // A blank followed by column-zero text ends the earlier item. A sibling
+    // literal-one item ends it too; nested checklists at its content column do not.
+    if (orderedItem && index > 0 && /^[ \t]*$/u.test(lines[index - 1] ?? "") && /^\S/u.test(line)) {
+      orderedItem = null;
+      if (taskFence?.inItem) taskFence = null;
+    }
+    if (!taskFence) {
+      const chain = /^(?:[\s>]|[-*+]|\d{1,9}[.)])*/u.exec(line)?.[0] ?? "";
+      for (const marker of chain.matchAll(/(\d{1,9})[.)]([ \t]*)/gu)) {
+        const end = marker.index + marker[0].length;
+        if (!marker[2] && end < line.length) continue;
+        const markerColumn = columns(line.slice(0, marker.index));
+        if (marker[1] === "1") {
+          if (orderedItem && markerColumn <= orderedItem.markerColumn) orderedItem = null;
+        } else {
+          const markerEnd = columns(line.slice(0, end - (marker[2]?.length ?? 0)));
+          const padding = columns(line.slice(0, end)) - markerEnd;
+          // CommonMark uses one column when padding is absent or exceeds four.
+          orderedItem = { markerColumn, contentColumn: markerEnd + (padding > 0 && padding <= 4 ? padding : 1) };
+        }
+      }
+    }
     // GitHub may find boxes in rendered text and hide their list numbers. Strip
     // escapes before checking the whole leading chain; only canonical boxes and
     // literal-one numbers are safe. A split box needs a marker, so JSON's bare
@@ -98,22 +149,24 @@ function hiddenLineReason(lines: string[]): string | null {
     // A marker-only line can start an item whose first paragraph is on this line.
     // Check that combined chain too, so a split box cannot hide the item's number.
     const previousLine = (lines[index - 1] ?? "").replaceAll("\\", "");
-    const followsMarker = /^(?:[\s>]|[-*+]|\d{1,9}[.)])*(?:[-*+]|\d{1,9}[.)])[ \t]*$/u.test(previousLine);
+    const followsMarker = /^(?:[\s>]|[-*+]|\d+[.)])*(?:[-*+]|\d+[.)])[ \t]*$/u.test(previousLine);
     const taskLines = [t];
     if (followsMarker) taskLines.push(previousLine + t.replace(/^[\s>]+/u, ""));
     for (const text of taskLines) {
-      const task = /^((?:[\s>]|[-*+]|\d{1,9}[.)])*)\[(?:([\sxX])\]|\s*$)/u.exec(text);
+      const task = /^((?:[\s>]|[-*+]|\d+[.)])*)\[(?:([\sxX])\]|\s*$)/u.exec(text);
       if (task) {
         const prefix = task[1] ?? "";
         const split = task[2] === undefined;
-        if (!split || /[-*+]|\d{1,9}[.)]/u.test(prefix)) {
+        if (!split || /[-*+]|\d+[.)]/u.test(prefix) || orderedItem) {
+          if (orderedItem && (split || taskFence?.inItem || indent >= orderedItem.contentColumn + 4))
+            return refusal("task marker");
           if (task[2] !== " " && task[2] !== "x") return refusal("task marker");
           // cmark sets checked state from any literal [x]/[X] on the raw line.
           if (task[2] === " " && /\[[xX]\]/u.test(line)) return refusal("task marker");
-          if ([...prefix.matchAll(/(\d{1,9})[.)]/gu)].some((number) => number[1] !== "1"))
-            return refusal("list number");
+          if ([...prefix.matchAll(/(\d+)[.)]/gu)].some((number) => number[1] !== "1")) return refusal("list number");
+          if (line.slice(0, line.indexOf("[")).includes("\\")) return refusal("task marker");
           // All ordered markers above are 1; require a final marker and spacing.
-          if (!/(?:[-*+]|\d{1,9}[.)])[ \t]+$/u.test(prefix)) return refusal("task marker");
+          if (!/(?:[-*+]|\d+[.)])[ \t]+$/u.test(prefix)) return refusal("task marker");
         }
       }
     }
@@ -121,18 +174,40 @@ function hiddenLineReason(lines: string[]): string | null {
     // drops source bytes after consuming quote/list containers. The marker right
     // before the box must be a normal literal-one marker, even inside a chain.
     if (
-      /^(?:[\s>]|[-*+]|\d{1,9}[.)])*\d+[^\n][ \t]+\[[ xX]\][ \t]/u.test(line) &&
+      /^(?:[\s>]|[-*+]|\d{1,9}[.)])*\d+[^\n][ \t]+\[[ xX]\](?:[ \t]|$)/u.test(line) &&
       !/^(?:[\s>]|[-*+]|\d{1,9}[.)])*1[.)][ \t]+\[/u.test(line)
     )
       return refusal("task marker");
-    let contentStart = 0;
-    let indent = 0;
-    while (line[contentStart] === " " || line[contentStart] === "\t") {
-      indent += line[contentStart] === "\t" ? 4 - (indent % 4) : 1;
-      contentStart++;
+    const fence = /^([ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+[ \t>]*)*)(`{3,}|~{3,})([ \t]*[A-Za-z]*[ \t]*)$/u.exec(line);
+    if (fence?.[2]) {
+      const column = columns(fence[1] ?? "");
+      if (taskFence) {
+        if (
+          !fence[3]?.trim() &&
+          /^[ \t>]*$/u.test(fence[1] ?? "") &&
+          quoteDepth === taskFence.quoteDepth &&
+          fence[2][0] === taskFence.run[0] &&
+          fence[2].length >= taskFence.run.length &&
+          column <= taskFence.column + 3
+        )
+          taskFence = null;
+      } else {
+        const inItem = orderedItem !== null && column >= orderedItem.contentColumn;
+        const fenceQuoteDepth = fence[1]?.match(/>/gu)?.length ?? 0;
+        const listPrefix = [...(fence[1] ?? "").matchAll(/(?:[-*+]|\d{1,9}[.)])([ \t]+)/gu)].at(-1);
+        let minColumn = inItem ? (orderedItem?.contentColumn ?? 0) : 0;
+        if (listPrefix) {
+          const markerEnd = columns(
+            line.slice(0, listPrefix.index + listPrefix[0].length - (listPrefix[1]?.length ?? 0)),
+          );
+          const padding = columns(line.slice(0, listPrefix.index + listPrefix[0].length)) - markerEnd;
+          minColumn = Math.max(minColumn, markerEnd + (padding <= 4 ? padding : 1));
+        }
+        // Four-space code at the top level is literal, not a fence opener.
+        if (inItem || listPrefix || fenceQuoteDepth > 0 || column <= 3)
+          taskFence = { run: fence[2], column, inItem, quoteDepth: fenceQuoteDepth, minColumn };
+      }
     }
-    // Strip only ASCII indentation: a leading > remains code content.
-    const content = line.slice(contentStart);
     if (needsContent && content.trim()) {
       const closer = /^(`{3,}|~{3,})[ \t]*$/u.exec(content)?.[1];
       if (closer && indent <= openerIndent + 3) {
