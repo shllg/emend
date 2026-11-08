@@ -39,6 +39,17 @@ function columns(text: string): number {
   return column;
 }
 
+function thematicBreak(content: string): boolean {
+  return /^(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/u.test(content);
+}
+
+function endsList(line: string, contentColumn: number): boolean {
+  const prefix = /^ {0,3}(?=\S)/u.exec(line)?.[0];
+  if (prefix === undefined || prefix.length >= contentColumn) return false;
+  const content = line.slice(prefix.length);
+  return /^#{1,6}(?:[ \t]|$)/u.test(content) || thematicBreak(content);
+}
+
 /** Conservative raw-line rules, without reconstructing CommonMark containers. */
 function hiddenLineReason(lines: string[]): string | null {
   // Long starts can be drawn outside the comment box, including nested starts.
@@ -56,6 +67,7 @@ function hiddenLineReason(lines: string[]): string | null {
   let previous: number | undefined;
   let delimiter: string | undefined;
   let onesOnly = false;
+  let sequenceContentColumn = 0;
   // Within a run of same-delimiter, column-zero markers, strict k, k+1, ...
   // renders as written whether a line continues the list, restarts it (its start
   // is shown), or stays paragraph text. A literal 1 is a bounded allowance:
@@ -64,15 +76,17 @@ function hiddenLineReason(lines: string[]): string | null {
   // spell anything. In the flat case every item's content is indented at least
   // two columns. After a Markdown blank line (spaces/tabs only), a column-zero
   // non-marker line is never lazy continuation or inside an item, so it ends the
-  // open list and resets the run.
+  // open list and resets the run. An ATX heading or thematic break with at most
+  // three leading spaces also ends it when below the item's content column.
   // Inside a top-level fence, the digits are code text the page shows.
   for (const [index, line] of lines.entries()) {
     const marker = markers[index];
     const followsBlank = index > 0 && /^[ \t]*$/u.test(lines[index - 1] ?? "");
-    if (flat && followsBlank && /^\S/u.test(line) && !marker) {
+    if ((flat && followsBlank && /^\S/u.test(line) && !marker) || (flat && endsList(line, sequenceContentColumn))) {
       previous = undefined;
       delimiter = undefined;
       onesOnly = false;
+      sequenceContentColumn = 0;
     }
     if (!marker) continue;
     if (marker[3] !== delimiter) {
@@ -85,6 +99,10 @@ function hiddenLineReason(lines: string[]): string | null {
       return refusal("list number");
     if (previous !== undefined && number === 1) onesOnly = true;
     previous = number;
+    const markerEnd = columns(marker[0]);
+    const spacing = /^[ \t]*/u.exec(line.slice(marker[0].length))?.[0] ?? "";
+    const padding = columns(marker[0] + spacing) - markerEnd;
+    sequenceContentColumn = markerEnd + (padding > 0 && padding <= 4 ? padding : 1);
   }
 
   // Check openers with zero to three leading ASCII spaces, no tab or >. This is
@@ -97,7 +115,7 @@ function hiddenLineReason(lines: string[]): string | null {
   // holding a literal empty fence example may still be refused (fail closed).
   let needsContent: string | null = null;
   let openerIndent = 0;
-  let orderedItem: { markerColumn: number; contentColumn: number; lastContentColumn: number } | null = null;
+  let orderedItem: { markerColumn: number; contentColumn: number; levels: number[] } | null = null;
   let taskFence: { run: string; column: number; inItem: boolean; quoteDepth: number; minColumn: number } | null = null;
   for (const [index, line] of lines.entries()) {
     let contentStart = 0;
@@ -124,6 +142,12 @@ function hiddenLineReason(lines: string[]): string | null {
       orderedItem = null;
       if (taskFence?.inItem) taskFence = null;
     }
+    if (orderedItem && endsList(line, orderedItem.contentColumn)) orderedItem = null;
+    // Retire every child level below which nonblank content has dedented.
+    // This includes block boundaries and conservatively retires unsure lazy text.
+    if (orderedItem && content) {
+      while (indent < (orderedItem.levels.at(-1) ?? 0)) orderedItem.levels.pop();
+    }
     if (!taskFence) {
       const chain = /^(?:[\s>]|[-*+]|\d{1,9}[.)])*/u.exec(line)?.[0] ?? "";
       for (const marker of chain.matchAll(/(\d{1,9})[.)]([ \t]*)/gu)) {
@@ -137,7 +161,7 @@ function hiddenLineReason(lines: string[]): string | null {
           const padding = columns(line.slice(0, end)) - markerEnd;
           // CommonMark uses one column when padding is absent or exceeds four.
           const contentColumn = markerEnd + (padding > 0 && padding <= 4 ? padding : 1);
-          orderedItem = { markerColumn, contentColumn, lastContentColumn: contentColumn };
+          orderedItem = { markerColumn, contentColumn, levels: [] };
         }
       }
     }
@@ -160,7 +184,10 @@ function hiddenLineReason(lines: string[]): string | null {
         const split = task[2] === undefined;
         if (split && !/^[\s>]*\]/u.test(lines[index + 1] ?? "")) continue;
         if (!split || /[-*+]|\d{1,9}[.)]/u.test(prefix) || orderedItem) {
-          if (orderedItem && (split || taskFence?.inItem || indent >= orderedItem.lastContentColumn + 4))
+          if (
+            orderedItem &&
+            (split || taskFence?.inItem || indent >= (orderedItem.levels.at(-1) ?? orderedItem.contentColumn) + 4)
+          )
             return refusal("task marker");
           if (task[2] !== " " && task[2] !== "x") return refusal("task marker");
           // cmark sets checked state from any literal [x]/[X] on the raw line.
@@ -184,20 +211,22 @@ function hiddenLineReason(lines: string[]): string | null {
       return refusal("task marker");
     // Only a list-item line advances the reference column, after its own box
     // check. Plain text, thematic breaks and code cannot authorize deeper boxes.
-    const listItem = /^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]+|$)/u.exec(line);
+    const listItem = /^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]+)(?=\S)/u.exec(line);
     if (
       orderedItem &&
       !taskFence &&
       listItem &&
       indent >= orderedItem.contentColumn &&
-      indent < orderedItem.lastContentColumn + 4 &&
-      !/^(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,})$/u.test(content)
+      indent < (orderedItem.levels.at(-1) ?? orderedItem.contentColumn) + 4 &&
+      !thematicBreak(content)
     ) {
       const markerEnd = columns((listItem[1] ?? "") + (listItem[2] ?? ""));
       const padding = columns(listItem[0]) - markerEnd;
-      orderedItem.lastContentColumn = markerEnd + (padding > 0 && padding <= 4 ? padding : 1);
+      orderedItem.levels.push(markerEnd + (padding > 0 && padding <= 4 ? padding : 1));
     }
-    const fence = /^([ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+[ \t>]*)*)(`{3,}|~{3,})([ \t]*[A-Za-z]*[ \t]*)$/u.exec(line);
+    // Prefix tokens are disjoint: only the whitespace branch consumes spacing;
+    // markers look ahead for it. A nonempty info word separates its two space runs.
+    const fence = /^((?:[ \t>]|(?:[-*+]|\d{1,9}[.)])(?=[ \t]))*)(`{3,}|~{3,})([ \t]*(?:[A-Za-z]+[ \t]*)?)$/u.exec(line);
     if (fence?.[2]) {
       const column = columns(fence[1] ?? "");
       if (taskFence) {
@@ -212,7 +241,6 @@ function hiddenLineReason(lines: string[]): string | null {
           taskFence = null;
       } else {
         const inItem = orderedItem !== null && column >= orderedItem.contentColumn;
-        if (!inItem) orderedItem = null;
         const fenceQuoteDepth = fence[1]?.match(/>/gu)?.length ?? 0;
         const listPrefix = [...(fence[1] ?? "").matchAll(/(?:[-*+]|\d{1,9}[.)])([ \t]+)/gu)].at(-1);
         let minColumn = inItem ? (orderedItem?.contentColumn ?? 0) : 0;
@@ -224,8 +252,10 @@ function hiddenLineReason(lines: string[]): string | null {
           minColumn = Math.max(minColumn, markerEnd + (padding <= 4 ? padding : 1));
         }
         // Four-space code at the top level is literal, not a fence opener.
-        if (inItem || listPrefix || fenceQuoteDepth > 0 || column <= 3)
+        if (inItem || listPrefix || fenceQuoteDepth > 0 || column <= 3) {
+          if (!inItem) orderedItem = null;
           taskFence = { run: fence[2], column, inItem, quoteDepth: fenceQuoteDepth, minColumn };
+        }
       }
     }
     if (needsContent && content.trim()) {

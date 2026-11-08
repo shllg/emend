@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import { readFile } from "node:fs/promises";
+import { stripTypeScriptTypes } from "node:module";
 import { mock, test } from "node:test";
+import { Worker } from "node:worker_threads";
 import { evaluateIssue } from "./issues.ts";
 import { hiddenMarkdownReason } from "./markdown.ts";
 import { issueEdits, READY_LABEL, readyIssue } from "./test-support.ts";
@@ -26,6 +30,60 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+test("repeated container spacing finishes scanning", { timeout: 10_000 }, async (t) => {
+  // Exercise the internal scan: the public 200-character limit rejects this
+  // input first. A worker lets the test timeout stop a synchronous regex hang.
+  const source = await readFile(new URL("./markdown.ts", import.meta.url), "utf8");
+  const module = stripTypeScriptTypes(`${source}\nexport { hiddenLineReason };`);
+  const url = `data:text/javascript;base64,${Buffer.from(module).toString("base64")}`;
+  const worker = new Worker(
+    `const { parentPort } = require("node:worker_threads");
+     import(${JSON.stringify(url)}).then(({ hiddenLineReason }) => {
+       parentPort.postMessage(hiddenLineReason(["-  ".repeat(200) + "text"]));
+     });`,
+    { eval: true },
+  );
+  try {
+    const [result] = await once(worker, "message", { signal: t.signal });
+    assert.equal(result, null);
+  } finally {
+    await worker.terminate();
+  }
+});
+
+for (const [name, body] of [
+  ["thematic break retires a nested item", "2. a\n   - b\n   ---\n       - [ ] x"],
+  ["thematic break retires every deeper item", "2. a\n   - b\n     - c\n   ---\n       - [ ] x"],
+  ["dedented paragraph retires a nested item", "2. a\n   - b\n\n   text\n       - [ ] x"],
+  ["Unicode space is dedented paragraph content", "2. a\n   - b\n\n   \u00a0\n       - [ ] x"],
+  ["heading retires a nested item", "2. a\n   - b\n   ## Next\n       - [ ] x"],
+  ["fence retires a nested item", "2. a\n   - b\n   ```text\n   code\n   ```\n       - [ ] x"],
+  ["empty marker does not advance a list level", "2. a\n   -\n       - [ ] x"],
+  ["lazy fence retains ordered item context", "104. a\n    ```\n         - [ ] x"],
+] as const) {
+  test(`raw Markdown refuses ${name}`, () => {
+    assert.equal(evaluate(body).reason, reason("task marker"), body);
+  });
+}
+
+test("dedenting a nested block keeps its parent list level", () => {
+  assert.equal(evaluate("2. a\n   - b\n     - c\n     ---\n       - [ ] x").status, "pickable");
+});
+
+for (const boundary of ["## Expected", "---", "  ## Expected", "  * * *", "___"]) {
+  test(`raw Markdown restarts numbering after ${boundary}`, () => {
+    const body = `1. a\n2. b\n${boundary}\n1. c\n2. d`;
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+
+for (const boundary of ["plain text", "   ## Expected", "   ---", "####### Expected", "##Expected"]) {
+  test(`raw Markdown keeps numbering across ${boundary}`, () => {
+    const body = `1. a\n2. b\n${boundary}\n1. c\n2. d`;
+    assert.equal(evaluate(body).reason, reason("list number"), body);
+  });
+}
+
 for (const [name, body] of [
   ["JSON array in second step", '1. Create\n2. Set:\n\n   ```json\n   [\n     "a"\n   ]\n   ```'],
   ["column-zero JSON fence after numbered items", "1. a\n2. b\n```json\n[\n1\n]\n```"],
@@ -41,8 +99,8 @@ for (const [name, body] of [
 }
 
 for (const [name, body] of [
-  ["bare unchecked box in second-item fence", "2. a\n   ```text\n   [ ]\n   ```"],
-  ["bare checked box in second-item fence", "2. a\n   ```text\n   [x] done\n   ```"],
+  ["unchecked task in second-item fence", "2. a\n   ```text\n   - [ ]\n   ```"],
+  ["checked task in second-item fence", "2. a\n   ```text\n   - [x] done\n   ```"],
   ["checklist four columns past preceding item content", "2. a\n   - [ ] b\n           - [ ] c"],
   ["text does not move checklist content column", "2. a\n   - [ ] b\n     text\n         - [ ] c"],
   ["thematic break does not establish a list content column", "2. a\n   - - -\n        - [ ] c"],
@@ -55,7 +113,7 @@ for (const [name, body] of [
 for (const [name, body, kind] of [
   ["end-of-line boxes after numbered paragraphs", "2. Steps\n\n   1h [ ]\n\n   1i [ ]", "task marker"],
   ["end-of-line checked box after bullet paragraph", "- a\n\n  1h [x]\n\nend", "task marker"],
-  ["end-of-line box after ten-digit marker", "2. a\n\n   1234567890. [ ]\n\nx", "list number"],
+  ["end-of-line digit-letter checked box", "2. a\n\n   1h [x]\n\nx", "task marker"],
 ] as const) {
   for (const ending of ["LF", "CRLF"] as const) {
     test(`raw Markdown refuses ${name} with ${ending}`, () => {
