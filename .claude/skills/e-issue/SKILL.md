@@ -286,10 +286,11 @@ inline code included, and refuses an issue whose body holds anywhere:
 - a code block with a language word and nothing in it, since the page hides the word; a fence line
   inside another fence can count as such a block, so show fence examples without a language word;
 - a list number or checkbox the Body rules above do not allow: a number that does not count up as
-  they say, one that starts with `0` or has four or more digits, a nested, quoted or indented number with two
-  or more digits, a numbered checkbox other than `1.`, an uppercase `[X]`, a box written another way
-  than the Body rules show, a checkbox on a later line of a numbered item other than `1.` that is not
-  a list at the item's text column, or an empty box on a line that also holds `[x]` or `[X]`;
+  they say, one that starts with `0` or has four or more digits, a nested, quoted or indented number
+  with two or more digits, a numbered checkbox other than `1.`, an uppercase `[X]`, a box written
+  another way than the Body rules show, a checkbox on a later line of a numbered item other than `1.`
+  that is not in a checklist placed as the Body rules say, or an empty box on a line that also holds
+  `[x]` or `[X]`;
 - a line, code blocks included, that starts with digits and one more character before a checkbox,
   also after a list marker or `>`, as in `12 [ ] Pending` or `- 12 [ ] a`; put a word before the
   digits.
