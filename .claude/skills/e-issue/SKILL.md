@@ -260,7 +260,8 @@ other issue. Point out every HTML comment, raw HTML tag, link reference definiti
 permalink in the body, above all in text kept from someone else: GitHub's page hides or expands
 them, but the worker reads them as written. `bin/wt issues` checks the raw body, code blocks and
 inline code included, and refuses an issue whose body holds anywhere:
-- `<`, so no HTML, no comment and no `<n>` placeholder;
+- `<`, so no HTML, no comment and no `<n>` placeholder, in code too: write a comparison or a
+  generic type in words ("less than", "a map from string to number");
 - `](` or `]:`, so no Markdown link, image or definition, except an attached screenshot line;
 - a character reference such as `&#8203;` or `&amp;`;
 - `$$`, `` $` `` or `` `$ ``, or two `$` in one paragraph, code blocks included: leave out shell
@@ -273,8 +274,15 @@ inline code included, and refuses an issue whose body holds anywhere:
 - `github.com/`, because GitHub turns an issue or PR address into `#n` and drops what follows it;
   write `#n` instead;
 - a line over 200 characters, or more than 16 spaces or tabs in a row;
-- after three or more backticks or tildes, anything but one common language word such as `ts`,
-  `sh`, `json` or `text`, so no mermaid or math fence and no words after the language.
+- after three or more backticks or tildes, anything but one of these words: `text`, `plaintext`,
+  `console`, `sh`, `bash`, `shell`, `zsh`, `diff`, `json`, `jsonc`, `yaml`, `yml`, `toml`, `ini`,
+  `md`, `markdown`, `ts`, `typescript`, `tsx`, `js`, `javascript`, `jsx`, `mjs`, `css`, `html`,
+  `xml`, `sql`, `python`, `py`, `ruby`, `rb`, `go`, `rust`, `rs`, `http`; for any other language
+  write no word, so no mermaid or math fence and no words after the language;
+- a code block with nothing in it;
+- a list number or checkbox the Body rules above do not allow: a number that does not count up as
+  they say, one that starts with `0` or has four or more digits, a numbered checkbox other than
+  `1.`, an uppercase `[X]`, or `[x]` later on a line that starts with `[ ]`.
 
 Other bare URLs, `#12` and `@name` still become links. Wrap lines at about 100 characters. Offer to remove whatever the queue refuses before
 `ready`, write none of it yourself, and write placeholders as plain words (`N`, "the issue number").
