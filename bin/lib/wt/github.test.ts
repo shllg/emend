@@ -302,7 +302,10 @@ test("R7.H: PR edit and merge check a different remote head name before side eff
     writeFileSync(join(fx.main, ".private-terms"), "alice example");
     const realGit = realpathSync(join(env.fakeBin, "git"));
     rmSync(join(env.fakeBin, "git"));
-    installFake(env, "git", [{ code: 128, stderr: "unexpected git call" }]);
+    installFake(env, "git", [
+      { match: ["remote", "get-url", "origin"], stdout: "https://github.com/owner/repo.git" },
+      { code: 128, stderr: "unexpected git call" },
+    ]);
     for (const action of ["edit", "merge"]) {
       installFake(env, "gh", [
         {
@@ -320,7 +323,7 @@ test("R7.H: PR edit and merge check a different remote head name before side eff
       );
       assert.equal(fakeCalls(env, "gh").length, 1);
       assert.deepEqual(fakeCalls(env, "gh")[0]?.slice(0, 3), ["pr", "view", "7"]);
-      assert.deepEqual(fakeCalls(env, "git"), []);
+      assert.ok(fakeCalls(env, "git").every((args) => args.slice(-3).join(" ") === "remote get-url origin"));
     }
     rmSync(join(env.fakeBin, "git"));
     symlinkSync(realGit, join(env.fakeBin, "git"));
@@ -598,11 +601,17 @@ function closingRule(nodes: unknown[] = [], more = false): FakeRule {
   return {
     match: ["api", "graphql"],
     queryIncludes: "closingIssuesReferences(first: 20)",
+    graphqlRepository: "owner/repo",
     stdout: JSON.stringify({
       data: {
         repository: {
           nameWithOwner: "owner/repo",
-          pullRequest: { closingIssuesReferences: { nodes, pageInfo: { hasNextPage: more } } },
+          pullRequest: {
+            body: "Description",
+            createdAt: "2026-01-01T00:00:00Z",
+            lastEditedAt: null,
+            closingIssuesReferences: { nodes, pageInfo: { hasNextPage: more } },
+          },
         },
       },
     }),
@@ -639,6 +648,8 @@ test("pr create passes head, base, title and the body on stdin", () =>
       "--draft",
       "--body-file",
       "-",
+      "--repo",
+      "github.com/owner/repo",
     ]);
     assert.deepEqual(capturedBodies(bodies), ["## Summary\n\nDoes it.\n"]);
   }));
@@ -774,7 +785,16 @@ test("pr edit changes the title and sends the body on stdin", () =>
     const bodies = captureBodies(ctx.env);
     prEdit(ctx.repo, { title: "New title", body: "New body" });
     const edit = fakeCalls(ctx.env, "gh").find((a) => a[1] === "edit") as string[];
-    assert.deepEqual(edit, ["pr", "edit", "7", "--title=New title", "--body-file", "-"]);
+    assert.deepEqual(edit, [
+      "pr",
+      "edit",
+      "7",
+      "--title=New title",
+      "--body-file",
+      "-",
+      "--repo",
+      "github.com/owner/repo",
+    ]);
     assert.deepEqual(capturedBodies(bodies), ["New body"]);
     expectCode(() => prEdit(ctx.repo, {}), 2);
     expectCode(() => prEdit(ctx.repo, { title: "two\nlines" }), 2);
@@ -966,6 +986,8 @@ test("pr merge happy path squashes with the reviewed head", () =>
       "--subject=Add the thing",
       "--body-file",
       "-",
+      "--repo",
+      "github.com/owner/repo",
     ]);
     assert.deepEqual(capturedBodies(bodies), ["Squash body"]);
   }));
@@ -1248,8 +1270,8 @@ test("gh missing exits 69", () =>
     expectCode(() => prCreate(ctx.repo, { title: "T", body: "B", draft: false }), 69);
   }));
 
-test("the command table has only fetch, push and pr", () => {
-  assert.deepEqual(Object.keys(commands).sort(), ["fetch", "pr", "push"]);
+test("the command table has only repo, fetch, push and pr", () => {
+  assert.deepEqual(Object.keys(commands).sort(), ["fetch", "pr", "push", "repo"]);
 });
 
 // Synthetic fixtures are assembled so the source passes the repository's own hygiene checks.
@@ -1928,5 +1950,43 @@ for (const state of ["open", "merged"] as const) {
         });
       },
       { withBin: true, branch: null },
+    ));
+}
+
+for (const failure of ["foreign issue", "failed read"] as const) {
+  test(`merge launcher preserves stdout and exits 1 after a post-merge ${failure}`, () =>
+    scenario(
+      async (ctx) => {
+        publishHead(ctx);
+        const post = closingRule([{ number: 57, repository: { nameWithOwner: "owner/repo" } }]);
+        if (failure === "failed read") Object.assign(post, { code: 1, stdout: "", stderr: "synthetic read failure" });
+        installFake(
+          ctx.env,
+          "gh",
+          mergeRules({}, [
+            { ...closingRule(), times: 1 },
+            post,
+            { match: ["pr", "merge", "7"], stdout: "merged\n" },
+            { match: READ_BACK_ARGS, stdout: MERGED_STATE },
+          ]),
+        );
+        const result = await runWt(
+          join(ctx.fx.main, "bin/wt"),
+          ["pr", "merge", "--pr", "7", "--match-head", headSha, "--subject", "Fix pane", "--body", "Description"],
+          { cwd: ctx.fx.main },
+        );
+        assert.equal(result.code, 1);
+        assert.equal(result.stdout, `MERGED ${MERGE_SHA}\n`);
+        assert.match(result.stderr, /Warning:/);
+        if (failure === "foreign issue") {
+          assert.match(result.stderr, /owner\/repo#57/);
+          assert.match(result.stderr, /Check and reopen/);
+        } else assert.match(result.stderr, /post-merge closing check could not run/);
+        assert.equal(
+          fakeCalls(ctx.env, "gh").filter((args) => args.some((a) => a.includes("closingIssuesReferences"))).length,
+          2,
+        );
+      },
+      { withBin: true },
     ));
 }

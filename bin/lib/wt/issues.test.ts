@@ -175,13 +175,14 @@ test("issues order bugs first, then priority, age and number and tidy terminal t
     );
   }));
 
-test("issues page past 100 with the same query and -F variables, never a query per issue", () =>
+test("issues page past 100 with raw string variables, never a query per issue", () =>
   scenario(({ env, repo }) => {
-    const cursor = "opaque-cursor";
+    const cursor = "@synthetic-not-a-file";
     installFake(env, "gh", [
       {
-        match: ["api", "graphql", "cursor=null"],
+        match: ["api", "graphql"],
         queryIncludes: "issues(states:",
+        times: 1,
         stdout: issuePage(
           Array.from({ length: 100 }, (_, i) => readyIssue(i + 1)),
           cursor,
@@ -208,8 +209,8 @@ test("issues page past 100 with the same query and -F variables, never a query p
     ])
       assert.match(query, pattern);
     for (const call of calls)
-      for (const variable of ["owner={owner}", "name={repo}", call.at(-1) as string])
-        assert.equal(call[call.indexOf(variable) - 1], "-F");
+      for (const variable of ["owner=owner", "name=repo", ...call.filter((arg) => arg.startsWith("cursor="))])
+        assert.equal(call[call.indexOf(variable) - 1], "-f");
   }));
 
 test("pickIssue shares the queue preflight and distinguishes missing, blocked, untrusted and taken", () =>
@@ -368,7 +369,7 @@ test("cross-repository PRs are skipped, while same-repository closing references
 test("PR pagination and incomplete closing references fail closed", () =>
   scenario(({ env, repo }) => {
     installFake(env, "gh", [
-      { queryIncludes: "pullRequests(states:", match: ["cursor=null"], stdout: prPage([], "more") },
+      { queryIncludes: "pullRequests(states:", times: 1, stdout: prPage([], "more") },
       {
         queryIncludes: "pullRequests(states:",
         match: ["cursor=more"],

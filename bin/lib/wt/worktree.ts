@@ -18,7 +18,7 @@ import { isAbsolute, join, resolve, sep } from "node:path";
 import { isatty } from "node:tty";
 import { pathToFileURL } from "node:url";
 import type { Command, CommandTable } from "./command.ts";
-import { prForBranch } from "./github.ts";
+import { PrLookupPrivacyError, prForBranch } from "./github.ts";
 import { closeWorkspace, herdrLocatedAgents, writeIssueSnapshot } from "./herdr.ts";
 import { branchClaims, indexClaims, type PickedIssue, pickIssue } from "./issues.ts";
 import { run } from "./proc.ts";
@@ -404,7 +404,7 @@ export interface ListRow {
   /** Commits on its base that the branch lacks, or null when unknown. */
   behind: number | null;
   dirty: boolean | null;
-  pr: { number: number; state: string } | null;
+  pr: { number: number; state: string } | "?" | null;
   /** herdr status of an agent working inside the worktree, or null. */
   agent: string | null;
   /** The registry lists the worktree but its directory is gone. */
@@ -431,13 +431,26 @@ function plainBranch(branch: string): boolean {
   }
 }
 
-function lookupPr(repo: Repo, branch: string): { number: number; state: string } | null {
+function localBranchHead(repo: Repo, branch: string): string | null {
+  const result = gitTry(repo, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}^{commit}`]);
+  return result.code === 0 && /^[0-9a-f]{40}$/.test(result.stdout) ? result.stdout : null;
+}
+
+function noteSkippedPr(): void {
+  process.stderr.write("note: PR lookup skipped: a branch failed the public check or the terms list is unavailable.\n");
+}
+
+function lookupPr(repo: Repo, branch: string, skipped: () => void): ListRow["pr"] {
   if (!plainBranch(branch)) return null;
   try {
-    const pr = prForBranch(repo, branch, ["OPEN", "MERGED", "CLOSED"], [], 15_000);
+    const pr = prForBranch(repo, branch, ["OPEN", "MERGED", "CLOSED"], [], 15_000, localBranchHead(repo, branch));
     if (pr && typeof pr.data.state === "string") return { number: pr.number, state: pr.data.state };
-  } catch {
-    // Optional PR information is unavailable or ambiguous.
+  } catch (error) {
+    if (error instanceof PrLookupPrivacyError) {
+      skipped();
+      return "?";
+    }
+    // Optional PR information is unavailable.
   }
   return null;
 }
@@ -447,6 +460,11 @@ export function list(repo: Repo): ListRow[] {
   const reg = readRegistry(repo);
   const agents = herdrLocatedAgents();
   const rows: ListRow[] = [];
+  let noted = false;
+  const skipped = () => {
+    if (!noted) noteSkippedPr();
+    noted = true;
+  };
   for (const [branch, entry] of Object.entries(reg.worktrees)) {
     const missing = !existsSync(entry.path);
     let ahead: number | null = null;
@@ -482,7 +500,7 @@ export function list(repo: Repo): ListRow[] {
       ahead,
       behind,
       dirty,
-      pr: lookupPr(repo, branch),
+      pr: lookupPr(repo, branch, skipped),
       agent: inside[0]?.status ?? null,
       missing,
     });
@@ -502,7 +520,7 @@ export function formatList(rows: ListRow[]): string {
       String(r.port),
       r.ahead === null || r.behind === null ? "-" : `+${r.ahead}/-${r.behind}`,
       r.dirty === null ? "-" : r.dirty ? "yes" : "no",
-      r.pr ? `#${r.pr.number} ${r.pr.state}` : "-",
+      r.pr === "?" ? "?" : r.pr ? `#${r.pr.number} ${r.pr.state}` : "-",
       r.agent ?? "-",
     ].map(safe),
   );
@@ -542,12 +560,15 @@ function portListening(port: number): boolean {
 
 function containedInMergedPr(repo: Repo, branch: string, path: string): boolean {
   if (!plainBranch(branch)) return false;
+  const tip = localBranchHead(repo, branch);
+  if (tip === null) return false;
   let data: Record<string, unknown>;
   try {
-    const pr = prForBranch(repo, branch, ["MERGED"], ["headRefOid"], 30_000);
+    const pr = prForBranch(repo, branch, ["MERGED"], [], 30_000, tip);
     if (!pr) return false;
     data = pr.data;
-  } catch {
+  } catch (error) {
+    if (error instanceof PrLookupPrivacyError) noteSkippedPr();
     return false;
   }
   if (data.state !== "MERGED" || typeof data.number !== "number" || !Number.isInteger(data.number)) return false;
@@ -558,12 +579,15 @@ function containedInMergedPr(repo: Repo, branch: string, path: string): boolean 
   } catch {
     return false;
   }
+  if (head !== tip) return false;
   const ref = `refs/wt-pr/${data.number}`;
   const fetched = gitTry(repo, ["fetch", "--quiet", "origin", `+refs/pull/${data.number}/head:${ref}`]);
   if (fetched.code !== 0) return false;
   try {
-    if (gitTry(repo, ["rev-parse", "--verify", ref]).stdout !== head) return false;
-    return gitTry(repo, ["merge-base", "--is-ancestor", "HEAD", ref], { cwd: path }).code === 0;
+    const fetchedHead = gitTry(repo, ["rev-parse", "--verify", ref]);
+    if (fetchedHead.code !== 0 || fetchedHead.stdout !== head) return false;
+    const current = gitTry(repo, ["rev-parse", "--verify", "HEAD"], { cwd: path });
+    return current.code === 0 && current.stdout === head;
   } finally {
     gitTry(repo, ["update-ref", "-d", ref]);
   }

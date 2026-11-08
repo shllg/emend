@@ -25,9 +25,11 @@ Arguments: $ARGUMENTS (`draft` opens the PR as a draft)
   never set `EMEND_PRIVATE_TERMS`: a hit names the place to fix. When `bin/wt push` refuses a new
   `check-public: allow` marker, remove the marker, or run `<main>/bin/wt notify blocked` and ask the
   owner to push; never pass `--accept-new-markers` yourself.
-- `gh` and `bin/wt` must read the same repository, and `bin/wt` ignores `GH_REPO`. Before the
-  first `gh` call, run `test -z "${GH_REPO-}"`; when it fails, stop and tell the owner that `GH_REPO`
-  is set.
+- `gh` and `bin/wt` must use origin on github.com; `bin/wt` ignores `GH_REPO` and `GH_HOST`.
+  Read `<owner>/<name>` once with `<main>/bin/wt repo`; stop on failure. `<main>` is the parent of
+  `git rev-parse --path-format=absolute --git-common-dir`. Write the captured owner and name
+  literally into every later command. Pin repository calls with `--repo github.com/<owner>/<name>`
+  and API calls with `--hostname github.com`.
 
 ## 1. Preflight
 
@@ -38,7 +40,7 @@ Arguments: $ARGUMENTS (`draft` opens the PR as a draft)
    `<main>/.claude/worktrees/`, or when the count is 0 (nothing to open). Uncommitted changes: say so
    and stop; commit them first through `/e-work`'s commit step.
 4. Existing PR: run `<main>/bin/wt pr number`. When it prints a number `<n>`, run
-   `gh pr view <n> --json number,url,state,isDraft`. When it says there is no open PR, continue and
+   `gh pr view --repo github.com/<owner>/<name> <n> --json number,url,state,isDraft`. When it says there is no open PR, continue and
    create one. Any other failure: stop and report its message. If an open PR exists for this
    branch, do not create a second one. With a closing answer from `/e-spawn` or `/e-work`, update that
    PR (`pr edit`, step 5) and go on to the report. Otherwise offer to update it instead, and wait for
@@ -100,6 +102,6 @@ Without one, run `<main>/bin/wt notify question`, show the title and body, and a
 
 ## 6. Report
 
-Print the PR URL (from `gh pr view <n> --json url`, with `<n>` from `<main>/bin/wt pr number`, run
+Print the PR URL (from `gh pr view --repo github.com/<owner>/<name> <n> --json url`, with `<n>` from `<main>/bin/wt pr number`, run
 again now). Say whether it is ready or a draft. Then continue
 with `/e-pr-finalize` if a closing answer asked for it; otherwise stop.

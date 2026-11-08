@@ -132,22 +132,27 @@ export function githubRepository(url: string): { owner: string; nameWithOwner: s
   return { owner: match[1], nameWithOwner: `${match[1]}/${name}` };
 }
 
-/** gh placeholders can resolve a different repository (for example GH_REPO). Never trust that identity. */
-function repository(repo: Repo, query: string, variables: string[]): Record<string, unknown> {
+/** The checkout origin is the only source of GitHub repository identity. */
+export function originRepository(repo: Repo): { owner: string; nameWithOwner: string } {
   const remote = gitTry(repo, ["remote", "get-url", "origin"]);
   if (remote.code !== 0) throw new WtError(2, "Could not read git origin's repository identity.");
-  const expected = githubRepository(remote.stdout);
+  return githubRepository(remote.stdout);
+}
+
+/** gh placeholders can resolve a different repository (for example GH_REPO). Never trust that identity. */
+function repository(repo: Repo, query: string, variables: string[]): Record<string, unknown> {
+  const expected = originRepository(repo);
   const response = object(
     remoteJson(repo, [
       "api",
       "graphql",
       "-f",
       `query=${query}`,
-      "-F",
-      "owner={owner}",
-      "-F",
-      "name={repo}",
-      ...variables.flatMap((v) => ["-F", v]),
+      "-f",
+      `owner=${expected.owner}`,
+      "-f",
+      `name=${expected.nameWithOwner.slice(expected.owner.length + 1)}`,
+      ...variables.flatMap((v) => [v.startsWith("number=") ? "-F" : "-f", v]),
     ]),
   );
   if (response.errors !== undefined) unavailable();
@@ -170,7 +175,7 @@ function pages(
   const seen = new Set<string>();
   let cursor: string | null = null;
   for (;;) {
-    const r = repository(repo, query, [`cursor=${cursor ?? "null"}`]);
+    const r = repository(repo, query, cursor === null ? [] : [`cursor=${cursor}`]);
     const c = connection(r[field], "hasNextPage");
     for (const data of c.nodes)
       out.push({ data, owner: string(object(r.owner).login), name: string(r.nameWithOwner), label: r.label });

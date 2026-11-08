@@ -40,12 +40,14 @@ function childEnv(): NodeJS.ProcessEnv {
     if (/^GIT_CONFIG_(?:PARAMETERS|COUNT|GLOBAL|SYSTEM|NOSYSTEM|KEY_.*|VALUE_.*)$/.test(key)) delete env[key];
   // Repository selection must come from the checkout's origin, never a caller override.
   delete env.GH_REPO;
+  // Host selection must stay on github.com, never a caller override.
+  delete env.GH_HOST;
   return env;
 }
 
 /**
  * Runs a program without a shell, with the caller's environment plus FIXED (no prompts, no pager),
- * excluding Git config overrides, GIT_DIFF_OPTS, GH_REPO and EMEND_PRIVATE_TERMS.
+ * excluding Git config overrides, GIT_DIFF_OPTS, GH_REPO, GH_HOST and EMEND_PRIVATE_TERMS.
  * Exit 127 means not found; 124 means it ran past the timeout.
  */
 export function run(cmd: string, args: string[], opts: RunOptions): RunResult {

@@ -21,6 +21,7 @@ const OWNERS: Record<string, string> = {
   issue: "issues.ts",
   spawn: "herdr.ts",
   notify: "herdr.ts",
+  repo: "github.ts",
   fetch: "github.ts",
   push: "github.ts",
   pr: "github.ts",
@@ -38,9 +39,11 @@ Local:
                                                create a worktree with a port and an EMEND_HOME;
                                                    copies the gitignored files .worktreeinclude lists
   list [--json]  (alias: status)                   one row per worktree
+                                                   JSON pr: {number,state}, "?" (lookup skipped), or null (no PR)
   cleanup [--discard] [--close-workspace] [<branch|path>]
   tasks [--json]                                   the task queue
   gc [--prune]                                     report or remove orphans
+  repo                                            print origin's GitHub owner/name
 
 herdr:
   spawn --brief <text> | --brief-file <path> --slug <slug> [--mode github|local] [--model <m>] [--effort <e>]

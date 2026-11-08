@@ -186,7 +186,9 @@ const VERBATIM_FLAGS = new Set(["title", "subject", "body", "brief"]);
 export function oneLine(text: string, what: string): string {
   const line = text.replace(/\r?\n$/, "");
   // biome-ignore lint/suspicious/noControlCharactersInRegex: refusing control characters is the point
-  if (/[\u0000-\u001f\u007f]/.test(line)) throw new WtError(2, `The ${what} must be a single line.`);
+  if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(line))
+    throw new WtError(2, `The ${what} must be a single line.`);
+  if (/\p{Cf}/u.test(line)) throw new WtError(2, `The ${what} must not contain invisible formatting characters.`);
   const length = [...line].length;
   if (length < 1 || length > 72) throw new WtError(2, `The ${what} must be 1 to 72 characters.`);
   return line;

@@ -189,8 +189,12 @@ export function git(repo: Repo, args: string[], opts: { cwd?: string; input?: st
 }
 
 /** Like git(), but returns the exit code and output instead of throwing. */
-export function gitTry(repo: Repo, args: string[], opts: { cwd?: string; input?: string } = {}): RunResult {
-  const r = rawGit(args, opts.cwd ?? repo.mainRoot, opts.input);
+export function gitTry(
+  repo: Repo,
+  args: string[],
+  opts: { cwd?: string; input?: string; timeoutMs?: number } = {},
+): RunResult {
+  const r = rawGit(args, opts.cwd ?? repo.mainRoot, opts.input, opts.timeoutMs);
   return { ...r, stdout: r.stdout.replace(/\n$/, "") };
 }
 

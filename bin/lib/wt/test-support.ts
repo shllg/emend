@@ -239,6 +239,8 @@ export interface FakeRule {
   /** Argv tokens that must appear in this order (not necessarily adjacent). Empty or absent: always matches. */
   match?: string[];
   queryIncludes?: string;
+  /** The canned GraphQL response belongs to these literal query variables. */
+  graphqlRepository?: string;
   stdout?: string;
   stderr?: string;
   code?: number;
@@ -258,6 +260,10 @@ const stateFile = path.join(dir, "." + name + ".state.json");
 let state = {};
 try { state = JSON.parse(fs.readFileSync(stateFile, "utf8")); } catch {}
 function matches(rule) {
+  if (rule.graphqlRepository) {
+    const variable = key => argv.find(arg => arg.startsWith(key + "="))?.slice(key.length + 1);
+    if ((variable("owner") + "/" + variable("name")).toLowerCase() !== rule.graphqlRepository.toLowerCase()) return false;
+  }
   if (rule.queryIncludes && !argv.some(a => a.startsWith("query=") && a.includes(rule.queryIncludes))) return false;
   let at = 0;
   for (const token of rule.match || []) {
@@ -401,12 +407,35 @@ export function branchPrPage(prs: Record<string, unknown>[], nameWithOwner = "ow
     },
   });
 }
+
+/** Branch fixtures expose the head commit only when the query selects it. */
+export function branchPrRules(prs: Record<string, unknown>[], branch?: string): FakeRule[] {
+  const match = ["api", "graphql", ...(branch === undefined ? [] : [`head=${branch}`])];
+  return [
+    { match, queryIncludes: "headRefOid", stdout: branchPrPage(prs) },
+    { match, stdout: branchPrPage(prs.map(({ headRefOid: _head, ...pr }) => pr)) },
+  ];
+}
 export function issueRules(nodes: Record<string, unknown>[], prs: Parameters<typeof prPage>[0] = []): FakeRule[] {
   return [
-    ...nodes.map((n) => ({ match: ["api", "graphql", `number=${n.number}`], stdout: githubPage({ issue: n }) })),
-    { match: ["api", "graphql"], queryIncludes: "issues(states:", stdout: issuePage(nodes) },
-    { match: ["api", "graphql"], queryIncludes: "pullRequests(states:", stdout: prPage(prs) },
-    { match: ["api", "graphql"], stdout: githubPage({ issue: null }) },
+    ...nodes.map((n) => ({
+      graphqlRepository: "owner/repo",
+      match: ["api", "graphql", `number=${n.number}`],
+      stdout: githubPage({ issue: n }),
+    })),
+    {
+      graphqlRepository: "owner/repo",
+      match: ["api", "graphql"],
+      queryIncludes: "issues(states:",
+      stdout: issuePage(nodes),
+    },
+    {
+      graphqlRepository: "owner/repo",
+      match: ["api", "graphql"],
+      queryIncludes: "pullRequests(states:",
+      stdout: prPage(prs),
+    },
+    { graphqlRepository: "owner/repo", match: ["api", "graphql"], stdout: githubPage({ issue: null }) },
   ];
 }
 

@@ -15,7 +15,7 @@ import { test } from "node:test";
 import { PORT_MAX, PORT_MIN, readRegistry, withRegistry } from "./registry.ts";
 import { gitTry, type Repo, resolveRepo } from "./repo.ts";
 import {
-  branchPrPage,
+  branchPrRules,
   commitFile,
   type Fixture,
   fakeCalls,
@@ -275,12 +275,7 @@ test("list reports ahead, behind, dirty, PR and agent", () =>
     gitIn(fx.main, "fetch", "--quiet", "origin");
     writeFileSync(join(r.path, "dirty.txt"), "x");
     fakeGithubOrigin(env, fx);
-    installFake(env, "gh", [
-      {
-        match: ["api", "graphql", "head=feat-a"],
-        stdout: branchPrPage([{ number: 5, state: "OPEN", headRefName: "feat-a" }]),
-      },
-    ]);
+    installFake(env, "gh", branchPrRules([{ number: 5, state: "OPEN", headRefName: "feat-a" }], "feat-a"));
     installFake(env, "herdr", [
       {
         match: ["agent", "list"],
@@ -368,31 +363,28 @@ test("guard: squash-merged branch passes through the PR head", () =>
     const head = commitFile(r.path, "sq.txt", "sq\n");
     gitIn(r.path, "push", "--quiet", "origin", `${head}:refs/pull/7/head`);
     fakeGithubOrigin(env, fx);
-    installFake(env, "gh", [
-      {
-        match: ["api", "graphql", "head=feat-sq"],
-        stdout: branchPrPage([{ number: 7, state: "MERGED", headRefName: "feat-sq", headRefOid: head }]),
-      },
-    ]);
+    installFake(
+      env,
+      "gh",
+      branchPrRules([{ number: 7, state: "MERGED", headRefName: "feat-sq", headRefOid: head }], "feat-sq"),
+    );
     // HEAD is not in origin/main, so only the PR head can clear it
     assert.throws(() => gitIn(fx.main, "merge-base", "--is-ancestor", head, "origin/main"));
     assert.deepEqual(guard(repo, "feat-sq"), { ok: true });
     assert.equal(gitIn(fx.main, "for-each-ref", "refs/wt-pr"), "", "the temporary ref is removed");
 
     // an open PR does not clear it; a PR head that differs does not either
-    installFake(env, "gh", [
-      {
-        match: ["api", "graphql", "head=feat-sq"],
-        stdout: branchPrPage([{ number: 7, state: "OPEN", headRefName: "feat-sq", headRefOid: head }]),
-      },
-    ]);
+    installFake(
+      env,
+      "gh",
+      branchPrRules([{ number: 7, state: "OPEN", headRefName: "feat-sq", headRefOid: head }], "feat-sq"),
+    );
     assert.deepEqual(guard(repo, "feat-sq"), { ok: false, failed: "unmerged" });
-    installFake(env, "gh", [
-      {
-        match: ["api", "graphql", "head=feat-sq"],
-        stdout: branchPrPage([{ number: 7, state: "MERGED", headRefName: "feat-sq", headRefOid: "a".repeat(40) }]),
-      },
-    ]);
+    installFake(
+      env,
+      "gh",
+      branchPrRules([{ number: 7, state: "MERGED", headRefName: "feat-sq", headRefOid: "a".repeat(40) }], "feat-sq"),
+    );
     assert.deepEqual(guard(repo, "feat-sq"), { ok: false, failed: "unmerged" });
   }));
 

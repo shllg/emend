@@ -10,7 +10,7 @@ import { spawn, writeIssueSnapshot } from "./herdr.ts";
 import { commands as historyCommands } from "./history.ts";
 import { checkIssue, commands, evaluateIssue, issueSnapshotText, pickIssue, scanIssues, sha256 } from "./issues.ts";
 import { registryPath } from "./registry.ts";
-import type { Repo } from "./repo.ts";
+import { GIT_BASE, type Repo } from "./repo.ts";
 import { githubPage, issueEvent, prPage, READY_AT, READY_LABEL, readyIssue } from "./test-support.ts";
 import { WtError } from "./validate.ts";
 import { setup, commands as worktreeCommands } from "./worktree.ts";
@@ -35,6 +35,8 @@ async function boundary(
       mergeView: Record<string, unknown>;
       extraPrs: Record<string, unknown>[];
       closing: Reply | null;
+      closingReplies: Reply[];
+      merged: boolean;
       label: unknown;
       queue: Record<string, unknown>[] | null;
       branches: string[] | null;
@@ -75,6 +77,8 @@ async function boundary(
     mergeView: {} as Record<string, unknown>,
     extraPrs: [] as Record<string, unknown>[],
     closing: null as Reply | null,
+    closingReplies: [] as Reply[],
+    merged: false,
     queue: null as Record<string, unknown>[] | null,
     branches: null as string[] | null,
     claimPrs: [] as Parameters<typeof prPage>[0],
@@ -115,7 +119,13 @@ async function boundary(
     if (command === "gh") {
       if (state.unavailable) return { status: 1, stderr: "network is unreachable" };
       const query = args.find((arg) => arg.startsWith("query="));
-      if (query?.includes("pullRequest(number:")) return state.closing ?? { stdout: closingResponse() };
+      if (query) {
+        const variable = (key: string) => args.find((arg) => arg.startsWith(`${key}=`))?.slice(key.length + 1);
+        if (`${variable("owner")}/${variable("name")}`.toLowerCase() !== "owner/repo")
+          return { status: 1, stderr: "synthetic repository variable mismatch" };
+      }
+      if (query?.includes("pullRequest(number:"))
+        return state.closingReplies.shift() ?? state.closing ?? { stdout: closingResponse() };
       if (query?.includes("pullRequests(states:")) return { stdout: prPage(state.claimPrs) };
       let issue = state.issue;
       if (issue && state.versions && query) {
@@ -138,7 +148,11 @@ async function boundary(
       if (query?.includes("issue(number:")) return { stdout: githubPage({ issue, label: state.label }) };
       if (args.includes("state,mergeCommit"))
         return {
-          stdout: JSON.stringify({ state: "OPEN", mergeCommit: null }),
+          stdout: JSON.stringify(
+            state.merged
+              ? { state: "MERGED", mergeCommit: { oid: "c".repeat(40) } }
+              : { state: "OPEN", mergeCommit: null },
+          ),
         };
       const ownPr = {
         number: 7,
@@ -154,7 +168,7 @@ async function boundary(
       if (query?.includes("pullRequests(headRefName:")) {
         if (state.lookupFailure) return state.lookupFailure;
         const cursor = args.find((a) => a.startsWith("cursor="))?.slice(7);
-        const at = cursor === "null" ? 0 : Number(cursor);
+        const at = cursor === undefined ? 0 : Number(cursor);
         const next = at + 100;
         return {
           stdout: JSON.stringify({
@@ -251,13 +265,22 @@ function readOnlyPrOrIssue(call: Call): boolean {
   );
 }
 
-function closingResponse(nodes: unknown[] = [], more = false, nameWithOwner = "Owner/Repo"): string {
+function closingResponse(
+  nodes: unknown[] = [],
+  more = false,
+  nameWithOwner = "Owner/Repo",
+  fields: Record<string, unknown> = {},
+): string {
   return JSON.stringify({
     data: {
       repository: {
         nameWithOwner,
         pullRequest: {
+          body: "Description",
+          createdAt: "2026-01-01T00:00:00Z",
+          lastEditedAt: null,
           closingIssuesReferences: { nodes, pageInfo: { hasNextPage: more } },
+          ...fields,
         },
       },
     },
@@ -268,6 +291,18 @@ const ownClosingIssue = { number: 42, repository: { nameWithOwner: "OWNER/REPO" 
 const closingMismatch = "GitHub's closing issues do not match this branch. Fix the PR body with bin/wt pr edit.";
 const unparsedClosingReference =
   "Text after a closing keyword looks like an issue reference. Reword it or close only this branch's issue.";
+
+/** Refusals may inspect the PR and origin; every other subprocess is forbidden. */
+function assertReadOnlyPrLookups(calls: Call[]): void {
+  for (const { command, args } of calls) {
+    if (command === "gh") {
+      assert.deepEqual(args.slice(0, 2), ["pr", "view"]);
+    } else {
+      assert.equal(command, "git");
+      assert.deepEqual(args, [...GIT_BASE, "remote", "get-url", "origin"]);
+    }
+  }
+}
 
 for (const [name, headRefName] of [
   ["missing", undefined],
@@ -431,7 +466,16 @@ for (const command of ["create", "edit", "merge"] as const) {
             (c) => c.command === "gh" && c.args.some((arg) => arg.includes("closingIssuesReferences(first: 20)")),
           );
           assert.ok(query);
-          assert.deepEqual(query.args.slice(-6), ["-F", "owner={owner}", "-F", "name={repo}", "-F", "number=7"]);
+          assert.deepEqual(query.args.slice(-8), [
+            "-f",
+            "owner=owner",
+            "-f",
+            "name=repo",
+            "-F",
+            "number=7",
+            "--hostname",
+            "github.com",
+          ]);
           assert.match(query.args.find((a) => a.startsWith("query=")) ?? "", /closingIssuesReferences\(first: 20\)/);
           const queryIndex = calls.indexOf(query);
           const mutation = calls.findIndex((c) => c.command === "gh" && c.args[1] === command);
@@ -1187,7 +1231,7 @@ for (const text of [
     }));
 }
 
-for (const entity of ["&#35;", "&#00035;", "&#x23;", "&#X00023;", "&num;"]) {
+for (const entity of ["&#35;", "&#00035;", "&#x23;", "&#X00023;"]) {
   test(`closing references decode number-sign entity ${entity}`, () =>
     boundary(({ repo }) => {
       assert.throws(
@@ -1222,7 +1266,7 @@ for (const [name, headRefName] of [
         () => prEdit(repo, { pr: "7", body: "Description without a closing reference" }),
         (e: unknown) => e instanceof WtError && e.code === 1 && /head branch/.test(e.message),
       );
-      assert.ok(calls.every((c) => c.command === "gh" && c.args[1] === "view"));
+      assertReadOnlyPrLookups(calls);
     }));
 }
 
@@ -1231,7 +1275,7 @@ test("pr edit --pr permits another valid head only from the main checkout", () =
     repo.callerTop = join(repo.worktreesDir, "emend-42-fix");
     state.mergeView = { headRefName: "emend-task-062-other" };
     assert.throws(() => prEdit(repo, { pr: "7", body: "Body" }), /head branch does not match the caller/);
-    assert.ok(calls.every((c) => c.command === "gh" && c.args[1] === "view"));
+    assertReadOnlyPrLookups(calls);
     repo.callerTop = repo.mainRoot;
     assert.equal(prEdit(repo, { pr: "7", body: "Body" }), "changed");
   }));
@@ -1374,11 +1418,11 @@ test("indexed closing references preserve emphasis around qualified references",
     }
   }));
 
-function prepareMergeIssue(repo: Repo): void {
+function prepareMergeIssue(repo: Repo, issue = 42): void {
   const dir = join(repo.callerTop ?? repo.mainRoot, ".wt");
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "worktree.json"), JSON.stringify({ issue: 42 }));
-  writeIssueSnapshot(dir, pickIssue(repo, 42, repo.callerBranch ?? undefined));
+  writeFileSync(join(dir, "worktree.json"), JSON.stringify({ issue }));
+  writeIssueSnapshot(dir, pickIssue(repo, issue, repo.callerBranch ?? undefined));
 }
 
 for (const [failure, message] of [
@@ -1674,7 +1718,7 @@ test("caller PR lookup requests the current author and ignores a full page of fo
     const lookups = calls.filter((c) => c.command === "gh" && exactPrLookup(c));
     assert.equal(lookups.length, 2);
     assert.ok(lookups[0]?.args.some((a) => a.includes("viewer { login }") && a.includes("author { login }")));
-    assert.ok(lookups[0]?.args.includes("cursor=null"));
+    assert.ok(!lookups[0]?.args.some((arg) => arg.startsWith("cursor=")));
     assert.ok(lookups[1]?.args.includes("cursor=100"));
     assert.ok(!calls.some((c) => c.args[1] === "list"));
   }));
@@ -2001,7 +2045,16 @@ for (const command of ["edit", "merge"] as const) {
               : prMerge(repo, { matchHead: "a".repeat(40), subject: "Synthetic title", body: "Body" }),
           { code: 1, message: `${field}:1:1: private term (file line 1)` },
         );
-        assert.ok(calls.every(readOnlyPrOrIssue));
+        for (const call of calls) {
+          if (readOnlyPrOrIssue(call)) continue;
+          assert.equal(call.command, "git");
+          assert.deepEqual(call.args.slice(0, GIT_BASE.length), GIT_BASE);
+          assert.ok(
+            ["for-each-ref\0--format=%(refname)\0refs/heads/", "ls-remote\0--heads\0origin"].includes(
+              call.args.slice(GIT_BASE.length).join("\0"),
+            ),
+          );
+        }
       }));
   }
 }
@@ -2030,3 +2083,329 @@ test("exact GraphQL lookup redacts GitHub diagnostics", () =>
       message: "gh api pull requests failed: [line withheld: private term (file line 1)]",
     });
   }));
+
+for (const attack of [
+  "fix(cli): closes #1&#50;",
+  "fix(ui): x&#97;closes #1",
+  "fix(ui): ｘcloses #1",
+  "fix(ui): ²closes #1",
+]) {
+  for (const location of [
+    "create title",
+    "create body",
+    "edit title",
+    "edit body",
+    "merge PR title",
+    "merge PR body",
+    "merge subject",
+    "merge body",
+  ]) {
+    test(`plain closing instruction survives decoding and NFKC: ${location}: ${attack}`, () =>
+      boundary(({ repo, state, calls }) => {
+        repo.callerBranch = state.prBranch = "emend-12-x";
+        state.issue = readyIssue(12);
+        state.prBody = "Closes #12";
+        state.closing = { stdout: closingResponse([{ number: 12, repository: { nameWithOwner: "owner/repo" } }]) };
+        prepareMergeIssue(repo, 12);
+        state.pr = !location.startsWith("create");
+        calls.length = 0;
+        const invoke = () => {
+          if (location.startsWith("create"))
+            return prCreate(repo, {
+              title: location.endsWith("title") ? attack : "Fix pane",
+              body: location.endsWith("body") ? `Closes #12\n${attack}` : "Closes #12",
+              draft: false,
+            });
+          if (location.startsWith("edit"))
+            return prEdit(repo, location.endsWith("title") ? { title: attack } : { body: `Closes #12\n${attack}` });
+          if (location === "merge PR title") state.prTitle = attack;
+          if (location === "merge PR body") state.prBody += `\n${attack}`;
+          return prMerge(repo, {
+            pr: "7",
+            matchHead: "a".repeat(40),
+            subject: location === "merge subject" ? attack : "Fix pane",
+            body: location === "merge body" ? attack : "Description",
+          });
+        };
+        assert.throws(invoke, (error: unknown) => error instanceof WtError && error.code === 2);
+        for (const call of calls) {
+          if (readOnlyPrOrIssue(call)) continue;
+          assert.equal(call.command, "git");
+          assert.deepEqual(call.args.slice(0, GIT_BASE.length), GIT_BASE);
+          assert.ok(
+            ["for-each-ref\0--format=%(refname)\0refs/heads/", "ls-remote\0--heads\0origin"].includes(
+              call.args.slice(GIT_BASE.length).join("\0"),
+            ),
+          );
+        }
+      }));
+  }
+}
+
+for (const text of [
+  "fix(ui): render &copy; in footer (#42)",
+  "Fixes escaping of &lt;b&gt; and &hellip; (#7)",
+  "Fixes escaping of x&y; (#7)",
+  "a&fix; b&mask;",
+  "AT&T; Q&A; R&D;",
+  "Use `x&y;` in the example.",
+]) {
+  test(`named references in prose pass PR title and body gates: ${text}`, () =>
+    boundary(({ repo, state }) => {
+      const body = `Closes #42\n\n${text}`;
+      state.closing = { stdout: closingResponse([ownClosingIssue]) };
+      state.pr = false;
+      assert.equal(prCreate(repo, { title: text, body, draft: false }), "https://github.com/Owner/Repo/pull/7\n");
+      state.pr = true;
+      assert.equal(prEdit(repo, { title: text, body }), "changed");
+      prepareMergeIssue(repo);
+      state.prTitle = text;
+      state.prBody = body;
+      assert.equal(prMerge(repo, { pr: "7", matchHead: "a".repeat(40), subject: text, body }), "QUEUED");
+    }));
+}
+
+for (const attack of [
+  "Cl**oses** #57",
+  "Closes <span>#57</span>",
+  "Closes [#57](https://x.test)",
+  "Clos_es_ #57",
+  "Closes `#57`",
+  "Fixes &num;57",
+  "Fixes &num;&#53;7",
+  "Fixes&num;57",
+  "Fixes Owner&sol;Repo#57",
+  "Fixes GH&hyphen;57",
+  "Fixes GH‐57",
+  "Fixes&num;#57",
+  "Fixes ##57",
+  "Fixes https:&sol;&sol;github.com/Owner/Repo/issues/57",
+  "Fixes https://github&period;com/Owner/Repo/issues/57",
+  "Fixes [see this](https:&sol;&sol;github.com/Owner/Repo/issues/57)",
+  "Fixes <https:&sol;&sol;github.com/Owner/Repo/issues/57>",
+  "Fixes **&num;57**",
+  "&Copf;loses &num;57",
+  "&Copf;loses #57",
+  "Fixes&colon; #57",
+  "Fixes&NonBreakingSpace;#57",
+  "Fixes &NonBreakingSpace; #57",
+  "Fixes #57&nbsp",
+  "Fixes&#10;&num;57",
+  "Closes #42 &comma; #57",
+  "Fixes&NewLine;&num;57",
+  "Fixes &#x23;57",
+  "Fixes&nbsp;#57",
+  "Fi**xes**&nbsp#57",
+  "Fixes&nbsp#&nbsp57",
+  "Fixes\n&num;57",
+  "Fi[xe][tag]s #57\n\n[tag]: https://example.com",
+  "Fi[xe][]s #57\n\n[xe]: https://example.com",
+  "Fixes\n[tag]: https://example.com\n#57",
+  "Fixes\n  [tag]: https://example.com\n&num;57",
+  'Fi<span title="&QUOT;">x</span>es #57',
+  "Fi[x](https://example.com/a&lpar;b)es #57",
+  "Fi<!-- > -->xes #57",
+  "Fi<!-- > --><!-- > -->xes #57",
+  "<div>Fixes&#32#57</div>",
+  "<div>Fixes&#00000032;#57</div>",
+  "<div>Fixes&#x0000020#57</div>",
+  "[Fi][xes] #57",
+  "[Fi][x&#101;s] #57",
+  "[Fi][xes]&nbsp#57",
+  "[tag]: Fi**xes** #57",
+  "Paragraph\n[tag]: Fi**xes** #57",
+  '[tag]: Fi<span title="&QUOT;">x</span>es #57',
+  "Fixes `&num;57`",
+  "Fixes &lt;tag&gt; #57",
+]) {
+  for (const location of [
+    "create title",
+    "create body",
+    "edit title",
+    "edit body",
+    "merge PR title",
+    "merge PR body",
+    "merge subject",
+    "merge body",
+  ]) {
+    // Literal line breaks belong in bodies; title validation rejects them before the closing scanner.
+    if (attack.includes("\n") && !location.endsWith("body")) continue;
+    test(`inline markup or named references cannot hide a foreign closing instruction: ${location}: ${attack}`, () =>
+      boundary(({ repo, state, calls }) => {
+        prepareMergeIssue(repo);
+        state.closing = { stdout: closingResponse([ownClosingIssue]) };
+        state.pr = !location.startsWith("create");
+        calls.length = 0;
+        const invoke = () => {
+          if (location.startsWith("create"))
+            return prCreate(repo, {
+              title: location.endsWith("title") ? attack : "Fix pane",
+              body: location.endsWith("body") ? `Closes #42\n\n${attack}` : "Closes #42",
+              draft: false,
+            });
+          if (location.startsWith("edit"))
+            return prEdit(repo, location.endsWith("title") ? { title: attack } : { body: `Closes #42\n\n${attack}` });
+          if (location === "merge PR title") state.prTitle = attack;
+          if (location === "merge PR body") state.prBody += `\n\n${attack}`;
+          return prMerge(repo, {
+            pr: "7",
+            matchHead: "a".repeat(40),
+            subject: location === "merge subject" ? attack : "Fix pane",
+            body: location === "merge body" ? attack : "Description",
+          });
+        };
+        assert.throws(invoke, (error: unknown) => error instanceof WtError && error.code === 2);
+        for (const call of calls) {
+          if (readOnlyPrOrIssue(call)) continue;
+          assert.equal(call.command, "git");
+          assert.deepEqual(call.args.slice(0, GIT_BASE.length), GIT_BASE);
+          assert.ok(
+            ["for-each-ref\0--format=%(refname)\0refs/heads/", "ls-remote\0--heads\0origin"].includes(
+              call.args.slice(GIT_BASE.length).join("\0"),
+            ),
+          );
+        }
+      }));
+  }
+}
+
+const SETTLE_NOW = Date.parse("2026-02-01T12:00:00Z");
+const SETTLE_MERGE = { pr: "7", matchHead: "a".repeat(40), subject: "Fix pane", body: "Closes #42" };
+const isClosingQuery = (call: Call) =>
+  call.command === "gh" && call.args.some((arg) => arg.includes("closingIssuesReferences(first: 20)"));
+
+for (const [name, dates, retry] of [
+  ["edited one minute ago", { lastEditedAt: "2026-02-01T11:59:00Z" }, "2026-02-01T12:09:00.000Z"],
+  [
+    "never edited and created two minutes ago",
+    { lastEditedAt: null, createdAt: "2026-02-01T11:58:00Z" },
+    "2026-02-01T12:08:00.000Z",
+  ],
+] as const) {
+  test(`merge settle window refuses a PR ${name}`, () =>
+    boundary(({ repo, state, calls }) => {
+      prepareMergeIssue(repo);
+      state.closing = { stdout: closingResponse([ownClosingIssue], false, "Owner/Repo", dates) };
+      calls.length = 0;
+      assert.throws(() => prMerge(repo, SETTLE_MERGE, () => SETTLE_NOW), {
+        code: 1,
+        message: `GitHub may not have parsed the body yet. Retry at ${retry} (UTC). Nothing was merged.`,
+      });
+      assert.ok(!calls.some((call) => call.command === "gh" && call.args[1] === "merge"));
+      const query = calls.find(isClosingQuery)?.args.find((arg) => arg.startsWith("query="));
+      assert.ok(query);
+      for (const field of ["body", "createdAt", "lastEditedAt"]) assert.match(query, new RegExp(`\\b${field}\\b`));
+    }));
+}
+
+test("merge settle window permits an eleven-minute-old edit and opens at exactly ten minutes", () =>
+  boundary(({ repo, state, calls }) => {
+    prepareMergeIssue(repo);
+    state.closing = {
+      stdout: closingResponse([ownClosingIssue], false, "Owner/Repo", { lastEditedAt: "2026-02-01T11:49:00Z" }),
+    };
+    assert.equal(
+      prMerge(repo, SETTLE_MERGE, () => SETTLE_NOW),
+      "QUEUED",
+    );
+    const retry = Date.parse("2026-02-01T11:59:00Z");
+    calls.length = 0;
+    assert.throws(() => prMerge(repo, SETTLE_MERGE, () => retry - 1), { code: 1 });
+    assert.ok(!calls.some((call) => call.command === "gh" && call.args[1] === "merge"));
+    assert.equal(
+      prMerge(repo, SETTLE_MERGE, () => retry),
+      "QUEUED",
+    );
+  }));
+
+test("merge settle window refuses unreadable edit times", () =>
+  boundary(({ repo, state, calls }) => {
+    prepareMergeIssue(repo);
+    for (const dates of [{ lastEditedAt: "invalid" }, { lastEditedAt: 123 }, { createdAt: null, lastEditedAt: null }]) {
+      state.closing = { stdout: closingResponse([ownClosingIssue], false, "Owner/Repo", dates) };
+      calls.length = 0;
+      assert.throws(() => prMerge(repo, SETTLE_MERGE, () => SETTLE_NOW), {
+        code: 1,
+        message: "Could not read when the pull request body last changed. Nothing was merged.",
+      });
+      assert.ok(!calls.some((call) => call.command === "gh" && call.args[1] === "merge"));
+    }
+  }));
+
+for (const [title, body] of [
+  ["Fix pane", "Closes #42\nFixes #57"],
+  ["Fixes", "#57\nCloses #42"],
+]) {
+  test(`merge scans the closing query body together with title ${title}`, () =>
+    boundary(({ repo, state, calls }) => {
+      prepareMergeIssue(repo);
+      state.prTitle = title as string;
+      state.closing = { stdout: closingResponse([ownClosingIssue], false, "Owner/Repo", { body }) };
+      calls.length = 0;
+      assert.throws(() => prMerge(repo, SETTLE_MERGE, () => SETTLE_NOW), {
+        code: 2,
+        message: "The PR text must not close an issue other than #42.",
+      });
+      assert.ok(!calls.some((call) => call.command === "gh" && call.args[1] === "merge"));
+    }));
+}
+
+for (const outcome of ["foreign", "own", "failed read", "incomplete read"] as const) {
+  test(`post-merge closing check preserves the merged result: ${outcome}`, (t) =>
+    boundary(async ({ repo, state, calls }) => {
+      prepareMergeIssue(repo);
+      state.merged = true;
+      state.closingReplies = [
+        { stdout: closingResponse([ownClosingIssue]) },
+        outcome === "failed read"
+          ? { status: 1, stderr: "synthetic post-merge read failure" }
+          : {
+              stdout: closingResponse(
+                outcome === "foreign"
+                  ? [
+                      ownClosingIssue,
+                      { number: 57, repository: { nameWithOwner: "owner/repo" } },
+                      { number: 42, repository: { nameWithOwner: "other/project" } },
+                    ]
+                  : [ownClosingIssue],
+                outcome === "incomplete read",
+              ),
+            },
+      ];
+      t.mock.method(Date, "now", () => SETTLE_NOW);
+      const stdout: string[] = [];
+      t.mock.method(process.stdout, "write", (chunk: string | Uint8Array) => {
+        stdout.push(String(chunk));
+        return true;
+      });
+      const invoke = () =>
+        githubCommands.pr?.({
+          repo,
+          args: ["merge", "--pr", "7", "--match-head", "a".repeat(40), "--subject", "Fix pane", "--body", "Closes #42"],
+        });
+      calls.length = 0;
+      if (outcome === "own") assert.equal((await invoke()) ?? 0, 0);
+      else
+        await assert.rejects(
+          async () => invoke(),
+          (error: unknown) => {
+            assert.ok(error instanceof WtError);
+            assert.equal(error.code, 1);
+            assert.match(error.message, /^Warning:/);
+            if (outcome === "foreign") {
+              assert.match(error.message, /owner\/repo#57/);
+              assert.match(error.message, /other\/project#42/);
+              assert.match(error.message, /Check and reopen each issue/);
+            } else assert.match(error.message, /post-merge closing check could not run/);
+            return true;
+          },
+        );
+      assert.deepEqual(stdout, [`MERGED ${"c".repeat(40)}\n`]);
+      const queries = calls.filter(isClosingQuery);
+      assert.equal(queries.length, 2);
+      const merge = calls.findIndex((call) => call.command === "gh" && call.args[1] === "merge");
+      assert.ok(calls.indexOf(queries[0] as Call) < merge);
+      assert.ok(calls.indexOf(queries[1] as Call) > merge);
+      if (outcome !== "own") assert.ok(!calls.some((call) => call.command === "git" && call.args.includes("push")));
+    }));
+}
