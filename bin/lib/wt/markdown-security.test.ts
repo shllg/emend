@@ -30,6 +30,53 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+// Structural fence rules intentionally refuse these formerly accepted code examples.
+for (const [name, body] of [
+  ["fence before blank bullet content", "-\n ```text\n2. a\n   [\n   ] x\n ```"],
+  ["fence outside quoted blank bullet", ">-\n   ```text\n2. a\n   [\n   ] x\n```"],
+  ["literal split box in fence before item content column", "1. a\n2. b\n ```text\n [\n ] literal\n ```"],
+  ["literal numbered code and checklist", "```text\n104. a\n     - [ ] b\n```"],
+  ["literal split code box after code number", "```text\n104. a\n     [\n     ] x\n```"],
+] as const) {
+  test(`structural Markdown policy refuses ${name}`, () => {
+    assert.equal(evaluate(body).reason, reason("task marker"), body);
+  });
+}
+
+for (const [name, body] of [
+  ["ordinary bullet fence cannot hide ordered context", "- a\n  ```\n2. a\n   [\n   ] x"],
+  ["quoted fence cannot switch off later boxes", "2. a\n   >- ```\n   >  ```\n   > - [ ] x"],
+  ["overindented closer cannot switch off later boxes", "2. a\n      ```\n        ```\n   - [ ] x"],
+  ["box after a closed step fence", "2. a\n   ```\n   code\n   ```\n   - [ ] x"],
+  ["escaped closing bracket in task", "- [x\\] Done"],
+  ["escaped task contents", "- [\\x] Done"],
+  ["escaped split closing bracket", "- [\n  \\] Done"],
+] as const) {
+  test(`raw Markdown refuses structural case: ${name}`, () => {
+    assert.equal(evaluate(body).reason, reason("task marker"), body);
+  });
+}
+
+for (const [name, body] of [
+  ["fence after an empty child item", "2. a\n   -\n       ```\n   [\n   ] x"],
+  ["empty child marker with trailing space", "2. a\n   - \n       - [ ] x"],
+  ["deeper checklist after margin wrap", "2. a\n   - b\nwrapped\n       - [ ] x"],
+] as const) {
+  test(`raw Markdown keeps refusing ${name}`, () => {
+    assert.equal(evaluate(body).reason, reason("task marker"), body);
+  });
+}
+
+for (const [name, body] of [
+  ["step fence without later box", "1. a\n2. b\n   ```text\n   code\n   ```\n   More text"],
+  ["escape after the task box", "- [x] path\\name"],
+  ["closed step fence before heading checklist", "2. a\n   ```\n   code\n   ```\n## Expected\n- [ ] x"],
+] as const) {
+  test(`raw Markdown permits ${name}`, () => {
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+
 for (const [name, body] of [
   ["bullet", "-\n  ```\n2. a\n   [\n   ] x"],
   ["padded bullet", "-    \n  ```\n2. a\n   [\n   ] x"],
@@ -45,7 +92,7 @@ for (const [name, body] of [
   });
 }
 
-test("quoted blank line keeps a blank-item fence open", () => {
+test("quoted blank line does not permit a later box", () => {
   const body = "2. a\n   > -\n   >   ```\n   >\n   >   - [ ] x\n   >   ```";
   assert.equal(evaluate(body).reason, reason("task marker"), body);
 });
@@ -53,8 +100,6 @@ test("quoted blank line keeps a blank-item fence open", () => {
 for (const [name, body] of [
   ["code stays in blank bullet", "-\n  ```text\n  code\n  - [ ] x\n  ```"],
   ["code stays in blank ordered item", "1.\n   ```text\n   code\n   - [x] x\n   ```"],
-  ["fence before blank bullet content", "-\n ```text\n2. a\n   [\n   ] x\n ```"],
-  ["fence outside quoted blank bullet", ">-\n   ```text\n2. a\n   [\n   ] x\n```"],
   ["code stays in quoted blank bullet", ">-\n>   ```text\n>   code\n>   - [ ] x\n>   ```"],
 ] as const) {
   test(`raw Markdown permits ${name}`, () => {
@@ -151,7 +196,6 @@ for (const [name, body] of [
   ["JSON array in second step", '1. Create\n2. Set:\n\n   ```json\n   [\n     "a"\n   ]\n   ```'],
   ["column-zero JSON fence after numbered items", "1. a\n2. b\n```json\n[\n1\n]\n```"],
   ["column-zero literal split box outside item", "1. a\n2. b\n```text\n[\n] literal\n```"],
-  ["literal split box in fence before item content column", "1. a\n2. b\n ```text\n [\n ] literal\n ```"],
   ["three-level checklist under second item", "1. a\n2. Step\n   - [ ] a\n     - [ ] b\n       - [ ] c"],
   ["checklist child beyond ordered content indentation", "2. Step\n    - [ ] a\n        - [ ] b"],
   ["literal split box after heading boundary", "104. a\n\n## Expected\n\n[\n] literal"],
@@ -217,12 +261,10 @@ for (const [name, body] of [
   ["checklist at ordered item content column", "2. a\n   - [ ] b"],
   ["checklist at three-digit item content column", "104. a\n     - [ ] b"],
   ["checklist three columns beyond item content", "104. a\n        - [ ] b"],
-  ["literal numbered code and checklist", "```text\n104. a\n     - [ ] b\n```"],
   ["top-level fence after list boundary", "104. a\n\n```text\n- [ ] b\n```"],
   ["tab-expanded checklist below code indentation", "104. a\n\t\t- [ ] b"],
   ["checklist after four-column item padding", "2.    a\n         - [ ] b"],
   ["bare code box after heading boundary", "104. a\n\n## Expected\n\n```json\n[\n1\n]\n```"],
-  ["literal split code box after code number", "```text\n104. a\n     [\n     ] x\n```"],
   ["literal-one sibling ends earlier numbered item", "2. a\n1. b\n   [\n   ] x"],
 ] as const) {
   test(`raw Markdown permits ${name}`, () => {
@@ -375,7 +417,7 @@ for (const [name, body, kind] of [
   ["hidden uppercase task number", "2. [X] Done", "task marker"],
   ["hidden task number after tab", "2.\t[x] Done", "list number"],
   ["hidden sequential task number", "1. [x] a\n2. [ ] b", "list number"],
-  ["numbered task inside code", "```text\n2. [x] Done\n```", "list number"],
+  ["numbered task inside code", "```text\n2. [x] Done\n```", "task marker"],
   ["tabbed closer inside list", "- a\n  ```go\n\t```", "empty code block"],
   ["five-space closer inside list", "- a\n  ```go\n     ```", "empty code block"],
   ["space then tab closer inside list", "- a\n  ```go\n \t```", "empty code block"],

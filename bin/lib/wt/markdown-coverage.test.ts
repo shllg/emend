@@ -8,13 +8,15 @@
 // the raw tab. GitHub may also find boxes in rendered text after escape handling,
 // which the raw checker refuses conservatively without claiming renderer parity.
 // GitHub's text filters skip code: a canonical box-shaped line inside a fence
-// stays literal and accepted. This oracle does not apply task transforms to code.
+// stays literal. This oracle does not apply task transforms to code.
 // cmark also accepts digit-plus-any-character task markers and sets checked state
 // from any [x]/[X] on the raw line. remark models neither; explicit raw refusals
 // cover those cases instead of treating an oracle pass as GitHub equivalence.
 // The later-line box guards also cover that rendered-text model, including code
 // inside a non-one ordered item. Nested roman/alpha marker width is a raw limit;
 // remark's tree retains only the numeric start and cannot measure that width.
+// Ordered context is detected even in code; any fence-shaped line in that
+// context makes later boxes fail closed until a structural boundary ends it.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createRequire, stripTypeScriptTypes } from "node:module";
@@ -217,7 +219,31 @@ function checkCoverage(body: string): void {
   assert.equal(lettersAndDigits(visible.join("")), lettersAndDigits(expected.join("")), "visible-text coverage");
 }
 
+// The structural policy also applies to literal numbered code examples.
+const newlyRefusedBodies = [
+  "-\n ```text\n2. a\n   [\n   ] x\n ```",
+  ">-\n   ```text\n2. a\n   [\n   ] x\n```",
+  "1. a\n2. b\n ```text\n [\n ] literal\n ```",
+  "```text\n104. a\n     - [ ] b\n```",
+  "```text\n104. a\n     [\n     ] x\n```",
+];
+
 const hostile = [
+  ...newlyRefusedBodies.map((body) => ["task marker", body, "checker only"] as const),
+  ...[
+    "- a\n  ```\n2. a\n   [\n   ] x",
+    "2. a\n   >- ```\n   >  ```\n   > - [ ] x",
+    "2. a\n      ```\n        ```\n   - [ ] x",
+    "2. a\n   ```\n   code\n   ```\n   - [ ] x",
+    "2. a\n   -\n       ```\n   [\n   ] x",
+    "2. a\n   - \n       - [ ] x",
+    "2. a\n   - b\nwrapped\n       - [ ] x",
+    "2. a\n   ```\n   code\n   ```\n\n text\n   - [ ] x",
+    "2. a\n   ```\n   code\n   ```\n> # h\n> - [ ] x",
+    "- [x\\] Done",
+    "- [\\x] Done",
+    "- [\n  \\] Done",
+  ].map((body) => ["task marker", body, "checker only"] as const),
   ["link destination", "[abc](def)"],
   ["alt text", screenshot("Hidden")],
   ["alt text", screenshot("Screenshot 99")],
@@ -403,10 +429,11 @@ const containerFences = [
 // These owner forms must stay accepted; markdown-security.test.ts also asserts
 // them through issue evaluation. The mixed corpus below retains refusal cases too.
 const ownerBodies = [
+  "1. a\n2. b\n   ```text\n   code\n   ```\n   More text",
+  "- [x] path\\name",
+  "2. a\n   ```\n   code\n   ```\n## Expected\n- [ ] x",
   "-\n  ```text\n  code\n  - [ ] x\n  ```",
   "1.\n   ```text\n   code\n   - [x] x\n   ```",
-  "-\n ```text\n2. a\n   [\n   ] x\n ```",
-  ">-\n   ```text\n2. a\n   [\n   ] x\n```",
   ">-\n>   ```text\n>   code\n>   - [ ] x\n>   ```",
   "1. a\n2. b\n## h\n1. c",
   "1.  a\n2.  b\n   ## H\n3.  c",
@@ -424,7 +451,6 @@ const ownerBodies = [
   '1. Create\n2. Set:\n\n   ```json\n   [\n     "a"\n   ]\n   ```',
   "1. a\n2. b\n```json\n[\n1\n]\n```",
   "1. a\n2. b\n```text\n[\n] literal\n```",
-  "1. a\n2. b\n ```text\n [\n ] literal\n ```",
   "1. a\n2. Step\n   - [ ] a\n     - [ ] b\n       - [ ] c",
   "2. Step\n    - [ ] a\n        - [ ] b",
   "104. a\n\n## Expected\n\n[\n] literal",
@@ -432,10 +458,8 @@ const ownerBodies = [
   "2. a\n   - [ ] b",
   "104. a\n     - [ ] b",
   "104. a\n        - [ ] b",
-  "```text\n104. a\n     - [ ] b\n```",
   "104. a\n\n```text\n- [ ] b\n```",
   "104. a\n\n## Expected\n\n```json\n[\n1\n]\n```",
-  "```text\n104. a\n     [\n     ] x\n```",
   "104. a\n\t\t- [ ] b",
   "2.    a\n         - [ ] b",
   "2. a\n1. b\n   [\n   ] x",
@@ -979,43 +1003,83 @@ test("each individual rule has a mutation witness", async (t) => {
   const checkerSource = await readFile(new URL("./markdown.ts", import.meta.url), "utf8");
   const mutations = [
     {
-      name: "quoted blank line preserves blank-item fence",
-      from: "line.length > containerPrefix.length &&",
-      to: "",
-      body: "2. a\n   > -\n   >   ```\n   >\n   >   - [ ] x\n   >   ```",
+      name: "ordered markers ignore fence guesses",
+      from: "const markerColumn = columns(line.slice(0, marker.index));",
+      to: "if (fenceRun) break; const markerColumn = columns(line.slice(0, marker.index));",
+      body: "- a\n  ```\n2. a\n   [\n   ] x",
       kind: "task marker",
       checkerOnly: true,
     },
-    ...[
-      ["bullet", "-\n  ```\n2. a\n   [\n   ] x"],
-      ["padded bullet", "-    \n  ```\n2. a\n   [\n   ] x"],
-      ["ordered item", "1.\n   ```\n2. a\n   [\n   ] x"],
-      ["parenthesized ordered item", "1)    \n   ```\n2) a\n   [\n   ] x"],
-      ["quoted bullet", "2. a\n   > -\n   >   ```\n   > ```\n   > - [ ] x"],
-      ["nested quote bullet", "2. a\n   >> -\n   >>   ```\n   >> ```\n   >> - [ ] x"],
-      ["quote spacing changes", "2. a\n   >-\n   >   ```\n   >  ```\n   > - [ ] x"],
-      ["spacing between nested quotes changes", "2. a\n   >>-\n   > >   ```\n   >>  ```\n   >> - [ ] x"],
-    ].map(([container, body]) => ({
-      name: `blank-item fence minimum for ${container}`,
-      from: "if (inBlankItem) {",
-      to: "if (false) {",
-      body: body as string,
+    {
+      name: "fence flag survives apparent closers",
+      from: "orderedItem?.sawFence || ",
+      to: "",
+      body: "2. a\n   ```\n   code\n   ```\n   - [ ] x",
       kind: "task marker",
       checkerOnly: true,
-    })),
+    },
     {
-      name: "blank-item fence must reach content column",
-      from: "fenceIndent >= blankIndent &&",
+      name: "context beginning inside a fence",
+      from: " || fenceRun !== null",
       to: "",
-      body: "-\n ```text\n2. a\n   [\n   ] x\n ```",
+      body: "```text\n104. a\n     - [ ] b\n```",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "ordered boundary needs column zero",
+      from: "/^\\S/u.test(boundaryLine) &&",
+      to: "",
+      body: "2. a\n   ```\n   code\n   ```\n\n text\n   - [ ] x",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "deeper quote cannot end context",
+      from: "quoteDepth <= orderedItem.quoteDepth &&",
+      to: "",
+      body: "2. a\n   ```\n   code\n   ```\n> # h\n> - [ ] x",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "literal-one sibling ends context",
+      from: "markerColumn <= orderedItem.markerColumn",
+      to: "false",
+      body: "2. a\n1. b\n   [\n   ] x",
       kind: null,
     },
     {
-      name: "blank-item fence keeps quote depth",
-      from: "(blankMarker[1]?.match(/>/gu)?.length ?? 0) === fenceQuoteDepth &&",
-      to: "",
-      body: ">-\n   ```text\n2. a\n   [\n   ] x\n```",
-      kind: null,
+      name: "escape before closing bracket",
+      from: 'line.slice(0, boxEnd < 0 ? line.length : boxEnd + 1).includes("\\\\")',
+      to: 'line.slice(0, line.indexOf("[")).includes("\\\\")',
+      body: "- [x\\] Done",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "escaped split closing bracket",
+      from: '(lines[index + 1] ?? "").replaceAll("\\\\", "")',
+      to: 'lines[index + 1] ?? ""',
+      body: "- [\n  \\] Done",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "empty marker content lookahead",
+      from: "([ \\t]+)(?=\\S)/u.exec(line)",
+      to: "([ \\t]+)/u.exec(line)",
+      body: "2. a\n   - \n       - [ ] x",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "margin wrap retires nested levels",
+      from: "if (orderedItem && content)",
+      to: "if (orderedItem && content && indent > 0)",
+      body: "2. a\n   - b\nwrapped\n       - [ ] x",
+      kind: "task marker",
+      checkerOnly: true,
     },
     {
       name: "blank-start numbering padding",
@@ -1075,7 +1139,6 @@ test("each individual rule has a mutation witness", async (t) => {
       ["thematic break", "2. a\n   - b\n   ---\n       - [ ] x"],
       ["dedented paragraph", "2. a\n   - b\n\n   text\n       - [ ] x"],
       ["heading", "2. a\n   - b\n   ## Next\n       - [ ] x"],
-      ["fence", "2. a\n   - b\n   ```text\n   code\n   ```\n       - [ ] x"],
     ].map(([boundary, body]) => ({
       name: `retire nested level at ${boundary}`,
       from: "while (indent < (orderedItem.levels.at(-1) ?? 0)) orderedItem.levels.pop();",
@@ -1089,14 +1152,6 @@ test("each individual rule has a mutation witness", async (t) => {
       from: String.raw`/^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]+)(?=\S)/u`,
       to: String.raw`/^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]+|$)/u`,
       body: "2. a\n   -\n       - [ ] x",
-      kind: "task marker",
-      checkerOnly: true,
-    },
-    {
-      name: "lazy fence retains item context",
-      from: "const inItem = orderedItem !== null && column >= orderedItem.contentColumn;",
-      to: "const inItem = orderedItem !== null && column >= orderedItem.contentColumn; if (!inItem) orderedItem = null;",
-      body: "104. a\n    ```\n         - [ ] x",
       kind: "task marker",
       checkerOnly: true,
     },
@@ -1123,15 +1178,15 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "block boundary clears task context",
-      from: "if (orderedItem && endsList(line, orderedItem.contentColumn)) orderedItem = null;",
-      to: "",
+      from: "headingOrBreak(boundaryLine)",
+      to: "false",
       body: "104. a\n## Expected\n[\n] literal",
       kind: null,
     },
     ...["- [ ]", "- [x] done"].map((box) => ({
       name: `canonical fenced task ${box}`,
-      from: " || taskFence?.inItem",
-      to: "",
+      from: "const fencedContext = orderedItem?.sawFence || fenceRun !== null;",
+      to: "const fencedContext = false;",
       body: `2. a\n   \`\`\`text\n   ${box}\n   \`\`\``,
       kind: "task marker",
       checkerOnly: true,
@@ -1146,15 +1201,15 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "split box closing line",
-      from: String.raw`if (split && !/^[\s>]*\]/u.test(lines[index + 1] ?? "")) continue;`,
+      from: String.raw`if (split && !/^[\s>]*\]/u.test((lines[index + 1] ?? "").replaceAll("\\", ""))) continue;`,
       to: "",
       body: '1. Create\n2. Set:\n\n   ```json\n   [\n     "a"\n   ]\n   ```',
       kind: null,
     },
     {
-      name: "fence outside ordered item",
-      from: "if (!inItem) orderedItem = null;",
-      to: "",
+      name: "column-zero fence ends ordered context",
+      from: "(fence !== null && /^[`~]/u.test(boundaryLine))",
+      to: "false",
       body: "1. a\n2. b\n```text\n[\n] literal\n```",
       kind: null,
     },
@@ -1206,7 +1261,7 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "escaped box chain",
-      from: String.raw`line.slice(0, line.indexOf("[")).includes("\\")`,
+      from: 'line.slice(0, boxEnd < 0 ? line.length : boxEnd + 1).includes("\\\\")',
       to: "false",
       body: "104. a\n     \\- [ ] x",
       kind: "task marker",
@@ -1230,24 +1285,17 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "later fenced box",
-      from: " || taskFence?.inItem",
-      to: "",
+      from: "const fencedContext = orderedItem?.sawFence || fenceRun !== null;",
+      to: "const fencedContext = false;",
       body: "104. a\n     ```text\n     x\n     - [ ] bar\n     ```",
       kind: "task marker",
       checkerOnly: true,
     },
     {
       name: "ordered item boundary",
-      from: "orderedItem && index > 0 &&",
-      to: "false &&",
+      from: " || followsContextBlank",
+      to: "",
       body: "104. a\n\nExpected\n\n[\n] literal",
-      kind: null,
-    },
-    {
-      name: "literal code numbers",
-      from: "if (!taskFence)",
-      to: "if (true)",
-      body: "```text\n104. a\n     [\n     ] x\n```",
       kind: null,
     },
     {
