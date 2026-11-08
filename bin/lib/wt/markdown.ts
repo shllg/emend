@@ -33,110 +33,52 @@ function allowedFenceInfo(line: string, start: number): boolean {
   return start === end || FENCE_WORDS.has(line.slice(start, end).toLowerCase());
 }
 
-/** Read only raw container prefixes; this never exempts code or escaped text. */
-function containerPrefix(line: string) {
-  let offset = 0;
-  let continuation = "";
-  let container = "";
-  let afterList = false;
-  const ordered: { digits: string; key: string }[] = [];
-  while (offset < line.length) {
-    const spaces = /^[ \t]+/u.exec(line.slice(offset));
-    if (spaces) {
-      continuation += spaces[0];
-      offset += spaces[0].length;
-      continue;
+/** Conservative raw-line rules, without reconstructing CommonMark containers. */
+function hiddenLineReason(lines: string[]): string | null {
+  const markers = lines.flatMap((line) => {
+    const marker = /^([\s>]*)(\d{1,9})([.)])(?=[ \t]|$)/u.exec(line);
+    return marker ? [marker] : [];
+  });
+  const flat = markers.every((marker) => marker[1] === "");
+  let previous: number | undefined;
+  let delimiter: string | undefined;
+  let onesOnly = false;
+  // Within a run of same-delimiter, column-zero markers, strict k, k+1, ...
+  // renders as written whether a line continues the list, restarts it (its start
+  // is shown), or stays paragraph text. A 1 is always determined. But after a 1
+  // that follows another marker, continuation and restart diverge, so only 1
+  // stays safe. Intervening non-marker lines do not reset a sequence.
+  for (const marker of markers) {
+    if (marker[3] !== delimiter) {
+      delimiter = marker[3];
+      previous = undefined;
+      onesOnly = false;
     }
-    if (line[offset] === ">") {
-      continuation += ">";
-      container = continuation;
-      offset++;
-      afterList = false;
-      continue;
-    }
-    const marker = /^([-+*]|(\d{1,9})([.)]))([ \t]+|$)/u.exec(line.slice(offset));
-    if (!marker) break;
-    if (marker[2]) ordered.push({ digits: marker[2], key: `${line.slice(0, offset)}|${marker[3]}` });
-    continuation += " ".repeat(marker[1]?.length ?? 1) + (marker[4] || " ");
-    container = continuation;
-    offset += marker[0].length;
-    afterList = true;
+    const digits = marker[2] ?? "";
+    const number = Number(digits);
+    if (
+      digits.startsWith("0") ||
+      (number !== 1 && (!flat || (previous !== undefined && (onesOnly || number !== previous + 1))))
+    )
+      return refusal("list number");
+    if (previous !== undefined && number === 1) onesOnly = true;
+    previous = number;
   }
-  return { content: line.slice(offset), container, ordered, afterList };
-}
 
-function expandTabs(line: string): string {
-  let expanded = "";
-  for (const char of line) expanded += char === "\t" ? " ".repeat(4 - (expanded.length % 4)) : char;
-  return expanded;
-}
-
-function hiddenStructureReason(lines: string[]): string | null {
-  let seenOrdered = false;
-  let previousKey = "";
-  let nextNumber: number | null = null;
-  let pendingTask: string | null = null;
-  let fence: { container: string; close: RegExp; content: boolean } | null = null;
+  // Only column-zero openers need content. Container fences have the bounded
+  // info-word allowance even when empty; their boundaries are not modelled here.
+  let needsContent = false;
   for (const line of lines) {
-    const prefix = containerPrefix(line);
-    for (const { digits, key } of prefix.ordered) {
-      if (digits.startsWith("0")) return refusal("list number");
-      const number = Number(digits);
-      if (!seenOrdered) {
-        nextNumber = number + 1;
-      } else if (key === previousKey && nextNumber !== null) {
-        if (number !== 1 && number !== nextNumber) return refusal("list number");
-        nextNumber++;
-      } else {
-        // Only an uninterrupted run at one prefix/indent proves a rendered
-        // counter. Across possible boundaries or containers, fail closed to 1.
-        if (number !== 1) return refusal("list number");
-        nextNumber = null;
-      }
-      seenOrdered = true;
-      previousKey = key;
+    if (/^[\s>]*\[[xX ]\]/u.test(line) || /^(?:[\s>]|[-*+]|\d{1,9}[.)])*\[X\]/u.test(line))
+      return refusal("task marker");
+    const content = line.trimStart();
+    if (needsContent && content) {
+      if (/^(?:`{3,}|~{3,})/u.test(content)) return refusal("empty code block");
+      needsContent = false;
     }
-    if (prefix.ordered.length === 0) nextNumber = null;
-    if (prefix.afterList && /^\[X\](?:[ \t]|$)/u.test(prefix.content)) return refusal("task marker");
-    if (pendingTask !== null) {
-      if (line.startsWith(pendingTask)) {
-        const continuation = line.slice(pendingTask.length).trimStart();
-        if (/^\[X\](?:[ \t]|$)/u.test(continuation)) return refusal("task marker");
-        if (continuation) pendingTask = null;
-      } else if (line.trim() || pendingTask.includes(">")) pendingTask = null;
-    }
-    if (prefix.afterList && !prefix.content) pendingTask = prefix.container;
-
-    if (fence) {
-      const expanded = expandTabs(line);
-      const content = expanded.startsWith(fence.container)
-        ? expanded.slice(fence.container.length)
-        : !expanded.trim() && !fence.container.includes(">")
-          ? ""
-          : null;
-      if (content === null) {
-        // Leaving the quote/list closes an unterminated fenced block too.
-        if (!fence.content) return refusal("empty code block");
-        fence = null;
-      } else if (fence.close.test(content)) {
-        if (!fence.content) return refusal("empty code block");
-        fence = null;
-        continue;
-      } else {
-        if (content.trim()) fence.content = true;
-        continue;
-      }
-    }
-    const opening = /^(`{3,}|~{3,})[ \t]*[A-Za-z]*[ \t]*$/u.exec(prefix.content);
-    if (opening?.[1]) {
-      fence = {
-        container: expandTabs(prefix.container),
-        close: new RegExp(`^[ \\t]{0,3}${opening[1][0]}{${opening[1].length},}[ \\t]*$`, "u"),
-        content: false,
-      };
-    }
+    if (/^(?:`{3,}|~{3,})[ \t]*[A-Za-z]+[ \t]*$/u.test(line)) needsContent = true;
   }
-  return fence && !fence.content ? refusal("empty code block") : null;
+  return needsContent ? refusal("empty code block") : null;
 }
 
 /** Raw-text rules only: code, fences, escapes and containers never exempt their contents. */
@@ -193,5 +135,5 @@ export function hiddenMarkdownReason(body: string): string | null {
     }
     if (!screenshot && /github\.com\//iu.test(line)) return refusal("GitHub link");
   }
-  return hiddenStructureReason(lines);
+  return hiddenLineReason(lines);
 }

@@ -165,6 +165,8 @@ Conventional Commits prefix and no issue number.
 
 **Body**, in this order. The text in angle brackets below is guidance to replace, never to copy:
 
+Use `1., 2., 3.` only in flat lists at the left margin; nested or quoted lists use `1.` for every item, because the queue refuses other numbers there. A second numbered list uses only `1.` or the `)` delimiter, because the queue refuses a restart that counts up again. Checkboxes use lowercase `[x]`.
+
 ```markdown
 ## Why
 

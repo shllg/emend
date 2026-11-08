@@ -76,9 +76,13 @@ const lettersAndDigits = (text: string) => text.match(/[\p{L}\p{N}]/gu)?.join(""
  * A checked item's visible check mark contributes the canonical source x; X is
  * refused in that position, while literal a[X] remains text. Screenshots and list
  * markers inside code keep their source letters rather than these deductions.
- * One bounded allowance remains: a NON-EMPTY fenced block may hide one fixed,
- * allowlisted info word. It changes only highlighting and cannot form an
- * instruction. Empty/whitespace-only fences have no such allowance.
+ * One bounded allowance remains: a fenced code block may hide its one allowlisted
+ * info word; for an opener inside a container (any > or leading whitespace on its
+ * line) this holds even when the block ends up empty, because the empty code box
+ * stays visible on the page and the word comes from the fixed allowlist. The
+ * parser position identifies the opener's line prefix, including list markers.
+ * A column-zero opener with an info word still requires non-whitespace content;
+ * an empty fence without an info word hides no letters or digits.
  * Visible text is text/inlineCode/code values and literal autolink text, plus
  * canonical checked state. Whitespace and punctuation are outside this invariant.
  */
@@ -135,9 +139,6 @@ function checkCoverage(body: string): void {
     }
     if (node.type === "code") {
       const raw = source(node);
-      if (node.lang || /^[ \t]{0,3}(?:`{3,}|~{3,})/u.test(raw)) {
-        assert.ok(node.value?.trim(), "non-empty fenced code block");
-      }
       assert.ok(!node.meta, "code meta must be empty");
       assert.ok(!node.lang || languages.includes(node.lang.toLowerCase()), "code language must be allowlisted");
       if (node.lang) {
@@ -145,6 +146,10 @@ function checkCoverage(body: string): void {
         assert.ok(opening, "fence info source");
         assert.equal(opening[1], node.lang, "literal fence language");
         assert.ok(node.position, "fence position");
+        const fenceStart = node.position.start.offset + opening[0].search(/[`~]/u);
+        const lineStart = body.lastIndexOf("\n", fenceStart - 1) + 1;
+        const containerPrefix = body.slice(lineStart, fenceStart);
+        assert.ok(node.value?.trim() || /[\s>]/u.test(containerPrefix), "non-empty column-zero fenced code block");
         const start = node.position.start.offset + opening[0].indexOf(node.lang);
         omitted.push([start, start + node.lang.length]);
       }
@@ -194,18 +199,68 @@ const hostile = [
   ["list number", "1. a\n9. b"],
   ["list number", "00001. a"],
   ["list number", "- 1. a\n- 1. b\n  3. c"],
+  ["list number", "a\n2. b\n1. c\n4. d"],
+  ["list number", "1.\n1.\n2."],
   ["task marker", "- [X] done"],
+  ["task marker", "> -\n >   [X] done"],
+  ["task marker", "> -\n>\t[X] done"],
+  ["task marker", "-\n[x] e"],
   ["empty code block", "```go\n```"],
+  ["empty code block", "```ts\n\n```"],
+  ["empty code block", "> outside\n\n```ts\n```"],
 ] as const;
+
+const containerFences = [
+  ">```ts\ne",
+  ">```ts\n\n>a",
+  ">```ts\n    >a",
+  "1. a\n   ```ts\ncode",
+  "- ```ts\ne",
+  ">> ```ts\n> code",
+  ">   ```ts\n> code",
+  "- > ```ts\n> code",
+  "> ~~~go\n>    ~~~~",
+  "> ```go\n>    ````",
+  ">> ~~~go\n>>    ~~~~",
+  "- > ~~~go\n  >    ~~~~",
+  "> ~~~go\n>\t~~~~",
+  "> ```ts\noutside",
+  "- ```ts\noutside",
+  "   ```ts",
+  "> ```ts\n> \t\n> ```",
+  "1. ```ts",
+  " > ```ts\r\n\r\n>a",
+];
 
 // Accepted examples from markdown-security.test.ts, including its fence matrix,
 // size boundary and Unicode-space cases. Keep historical inputs here if a newly
 // discovered gap moves one from acceptance to refusal in the raw-rule tests.
 const examples = [
   ...hostile.map(([, body]) => body),
+  ...containerFences,
   "1. a\n1. b\n1. c",
   "1. a\n2. b\n3. c",
   "7. a\n8. b\n9. c",
+  "5.\n1.\n1.",
+  "1.\n2.\n\ntext\n\n3.",
+  "1. a\n2. b\n\ntext\n\n1. c\n2. d",
+  "1. a\n2. b\n\ntext\n\n1) c\n2) d",
+  "> ```ts\n> code\n> ```",
+  "1. a\n   ```ts\n   code\n   ```",
+  "- > ```ts\n  > code\n  > ```",
+  "1. [ ] step",
+  "-\n[X] e",
+  "-\n[ ] e",
+  "-\n  [x] done",
+  "> -\n>   [x] done",
+  "> -\n>\t[x] done",
+  "1. a\n1. b\n2. c",
+  "-\n[x] e",
+  "1. a\n\n2. b",
+  "1. a\n   ```ts\n   code\n   ```\n2. b",
+  "1. a\n   1. b\n   2. c",
+  "1. a\n   1. b\n   1. c",
+  "```\n```",
   screenshot("Screenshot 1"),
   ["", "Screenshot", "Screenshot 3"].map((alt) => screenshot(alt)).join("\n"),
   "Text\n---\nText",
@@ -260,7 +315,7 @@ const examples = [
 for (const prefix of ["", "   ", "> ", "- "]) {
   for (const fence of ["```", "~~~~"]) {
     for (const language of ["", ...languages]) {
-      const continuation = prefix === "- " ? "  " : prefix === "   " ? "" : prefix;
+      const continuation = prefix === "- " ? "  " : prefix;
       examples.push(`${prefix}${fence}\t ${language.toUpperCase()} \t\n${continuation}code\n${continuation}${fence}`);
     }
   }
@@ -346,23 +401,23 @@ function generatedBodies(): string[] {
     bodies.push(body);
     // Correlated lines reach block constructs that independent punctuation
     // almost never produces: nested tables, task boxes and fenced paragraphs.
-    if (i % 8 === 0) {
+    if (i % 12 === 0) {
       const prefix = pick(prefixes);
       bodies.push(`${prefix}| a |\n${prefix}${pick(["---", ":-", "| --- |"])}\n${prefix}visible | HIDDEN`);
-    } else if (i % 8 === 1) {
+    } else if (i % 12 === 1) {
       bodies.push(`${pick(prefixes)}- ${pick(["[ ]", "[x]", "[X]"])} ${pick(["a", "é1", "task"])}\n${body}`);
-    } else if (i % 8 === 2) {
+    } else if (i % 12 === 2) {
       const fence = pick(["```", "~~~"]);
       const prefix = pick(["", "> ", "- "]);
       const continuation = prefix === "- " ? "  " : prefix;
       bodies.push(
         `${prefix}${fence}${pick(["", "ts", "TEXT", "math", "ts hidden"])}\n${continuation}${pick(["", " \t", "code", "const x = 1;"])}\n${continuation}${fence}`,
       );
-    } else if (i % 8 === 3) {
+    } else if (i % 12 === 3) {
       bodies.push(
         `${pick(prefixes)}${pick(["[abc](def)", "![abc](def)", "[abc][def]\n\n[def]: /hidden", '[abc](def "hidden")'])}`,
       );
-    } else if (i % 8 === 4) {
+    } else if (i % 12 === 4) {
       bodies.push(
         pick([
           screenshot("Hidden"),
@@ -373,12 +428,37 @@ function generatedBodies(): string[] {
           screenshot("Screenshot", asset.replace("abcdef", "ABCDEF")),
         ]),
       );
-    } else if (i % 8 === 5) {
+    } else if (i % 12 === 5) {
       const prefix = pick(["", "> ", "  "]);
       const markers = pick(["1,2,3", "1,1,1", "7,8,9", "1,9,3", "00001,2,3", "1,1,2"]).split(",");
       bodies.push(markers.map((marker) => `${prefix}${marker}. visible`).join("\n"));
-    } else if (i % 8 === 6) {
+    } else if (i % 12 === 6) {
       bodies.push(pick(["Plain text.", "- [x] done", "- [ ] pending", "a[X]", "https://example.com/a", "#12 @user"]));
+    } else if (i % 12 === 8) {
+      const prefix = pick(["", "> ", "  "]);
+      const delimiter = pick([".", ")"]);
+      bodies.push(`${prefix}a\n${prefix}2${delimiter} b\n${prefix}1${delimiter} c\n${prefix}4${delimiter} d`);
+    } else if (i % 12 === 9) {
+      const fence = pick(["```", "~~~"]);
+      const prefix = pick(["", ">", "> ", ">> ", "- > ", "   "]);
+      const continuation = pick(["", ">", "> ", ">   ", ">\t", ">>    ", "  >    ", "    "]);
+      const content = pick(["", "\n", `${continuation} \t\n`, `${continuation}code\n`]);
+      bodies.push(`${prefix}${fence}${pick(["go", "ts", "text"])}\n${content}${continuation}${fence}${fence[0]}`);
+    } else if (i % 12 === 10) {
+      bodies.push(
+        `${pick(["-", "> -", ">> -", "- > -"])}\n${pick(["", " ", "\t", "> ", " >   ", ">\t", ">>    "])}${pick(["[X]", "[x]", "[ ]"])} done`,
+      );
+    } else if (i % 12 === 11) {
+      bodies.push(
+        pick([
+          "1. a\n   1. b\n   2. c",
+          "1. a\n   1. b\n   1. c",
+          "> 1. a\n> 2. b",
+          "1. a\n2) b\n3) c",
+          "1. a\n\n2. b",
+          "1. a\n   ```ts\n   code\n   ```\n2. b",
+        ]),
+      );
     } else {
       bodies.push(`${pick(prefixes)}${pick(pieces)}\n${body}\n${pick(pieces)}`);
     }
@@ -448,13 +528,19 @@ test("coverage oracle detects lost text and unsafe structure independently of th
     checkCoverage(body);
 });
 
+test("container fences retain the bounded info-word allowance even when empty", () => {
+  for (const body of containerFences) {
+    assert.equal(hiddenMarkdownReason(body), null, JSON.stringify(body));
+    assert.doesNotThrow(() => checkCoverage(body), JSON.stringify(body));
+  }
+});
+
 test("checked task state covers canonical x while literal X remains text", () => {
   for (const body of [
     "- [x] done",
     "- [x]\n~",
-    "> 12. [x] done\n>     - [x] nested",
-    "-\n  [x] done",
-    "> -\n>   [x] done",
+    "> 1. [x] done\n>    - [x] nested",
+    "1. [ ] step",
     "- [x] a[x]",
     "- [ ] a[x]",
     "`a[x]`",

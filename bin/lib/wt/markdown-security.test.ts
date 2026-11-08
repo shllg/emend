@@ -26,6 +26,107 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+// Bounded container-fence allowance: its empty code box stays visible, and the
+// hidden info word comes from the fixed allowlist even when the container ends.
+for (const [name, body] of [
+  ["leaving tight quote fence", ">```ts\ne"],
+  ["blank line ends quote fence", ">```ts\n\n>a"],
+  ["indented line ends quote fence", ">```ts\n    >a"],
+  ["leaving indented list fence", "1. a\n   ```ts\ncode"],
+  ["leaving list opener fence", "- ```ts\ne"],
+  ["losing one quote marker", ">> ```ts\n> code"],
+  ["losing quote indentation", ">   ```ts\n> code"],
+  ["losing list before quote", "- > ```ts\n> code"],
+  ["quoted empty tilde fence", "> ~~~go\n>    ~~~~"],
+  ["quoted empty backtick fence", "> ```go\n>    ````"],
+  ["nested quoted empty fence", ">> ~~~go\n>>    ~~~~"],
+  ["list quote empty fence", "- > ~~~go\n  >    ~~~~"],
+  ["tabbed quote empty fence", "> ~~~go\n>\t~~~~"],
+  ["empty quote fence", "> ```ts\noutside"],
+  ["empty list fence", "- ```ts\noutside"],
+  ["indented fence at EOF", "   ```ts"],
+  ["whitespace-only quote fence", "> ```ts\n> \t\n> ```"],
+  ["ordered opener at EOF", "1. ```ts"],
+  ["CRLF quote fence", " > ```ts\r\n\r\n>a"],
+] as const) {
+  test(`raw Markdown Round 3c permits ${name}`, () => {
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+
+for (const [name, body] of [
+  ["empty column-zero go fence", "```go\n```"],
+  ["blank column-zero ts fence", "```ts\n\n```"],
+  ["empty column-zero fence after quote", "> outside\n\n```ts\n```"],
+] as const) {
+  test(`raw Markdown Round 3c refuses ${name}`, () => {
+    assert.equal(evaluate(body).reason, reason("empty code block"), body);
+  });
+}
+
+for (const [name, body, kind] of [
+  ["increment after repeated one", "1.\n1.\n2.", "list number"],
+  ["same-delimiter restart then increment", "1. a\n2. b\n\ntext\n\n1. c\n2. d", "list number"],
+  ["bare lowercase task marker", "-\n[x] e", "task marker"],
+  ["bare uppercase task marker", "-\n[X] e", "task marker"],
+  ["bare unchecked task marker", "-\n[ ] e", "task marker"],
+  ["indented task continuation", "-\n  [x] done", "task marker"],
+  ["quoted task continuation", "> -\n>   [x] done", "task marker"],
+  ["tabbed lowercase continuation", "> -\n>\t[x] done", "task marker"],
+] as const) {
+  test(`raw Markdown Round 3b refuses ${name}`, () => {
+    assert.equal(evaluate(body).reason, reason(kind), body);
+  });
+}
+
+for (const [name, body] of [
+  ["ones after free start", "5.\n1.\n1."],
+  ["sequential numbers across text", "1.\n2.\n\ntext\n\n3."],
+  ["changed-delimiter restart then increment", "1. a\n2. b\n\ntext\n\n1) c\n2) d"],
+  ["non-one first marker", "7. a\n8. b\n9. c"],
+  ["retained quote fence", "> ```ts\n> code\n> ```"],
+  ["retained indented list fence", "1. a\n   ```ts\n   code\n   ```"],
+  ["retained list before quote", "- > ```ts\n  > code\n  > ```"],
+  ["checked list marker", "- [x] done"],
+  ["unchecked ordered marker", "1. [ ] step"],
+] as const) {
+  test(`raw Markdown Round 3b permits ${name}`, () => {
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+
+for (const [name, body, kind] of [
+  ["shifted quote task continuation", "> -\n >   [X] done", "task marker"],
+  ["tabbed quote task continuation", "> -\n>\t[X] done", "task marker"],
+  ["nested task continuation", "> > -\n > >   [X] done", "task marker"],
+  ["paragraph then list", "a\n2. b\n1. c\n4. d", "list number"],
+  ["parenthesized paragraph then list", "a\n2) b\n1) c\n4) d", "list number"],
+  ["quoted paragraph then list", "> a\n> 2. b\n> 1. c\n> 4. d", "list number"],
+  ["nested paragraph then list", "- a\n  2. b\n  1. c\n  4. d", "list number"],
+  ["nested sequential numbers", "1. a\n   1. b\n   2. c", "list number"],
+  ["later quoted marker", "1. a\n2. b\n> 1. c", "list number"],
+  ["indented marker inside code", "1. a\n2. b\n```text\n  1. code\n```", "list number"],
+  ["uppercase marker without list prefix", "[X]", "task marker"],
+] as const) {
+  test(`raw Markdown Round 3 refuses ${name}`, () => {
+    assert.equal(evaluate(body).reason, reason(kind), body);
+  });
+}
+
+for (const [name, body] of [
+  ["loose sequential list", "1. a\n\n2. b"],
+  ["list after indented fence", "1. a\n   ```ts\n   code\n   ```\n2. b"],
+  ["nested all-one list", "1. a\n   1. b\n   1. c"],
+  ["quoted all-one list", "> 1. a\n> 1. b"],
+  ["mixed delimiters", "1. a\n2) b\n3) c"],
+  ["uppercase after text", "> text [X]\n- text [X]\n    a[X]"],
+  ["empty fence without info", "```\n```"],
+] as const) {
+  test(`raw Markdown Round 3 permits ${name}`, () => {
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+
 for (const [name, body, kind] of [
   ["skipping list number", "1. visible\n987654321. visible", "list number"],
   ["leading-zero list number", "00001. visible", "list number"],
@@ -40,10 +141,7 @@ for (const [name, body, kind] of [
   ["repeated screenshot ordinal", `${screenshot("Screenshot 1")}\n${screenshot("Screenshot 1")}`, "alt text"],
   ["empty word fences", "```go\n```\n```sh\n```", "empty code block"],
   ["whitespace-only fence", "```ts\n \t\n```", "empty code block"],
-  ["empty blank-info fence", "```\n```", "empty code block"],
   ["empty unclosed fence", "~~~ts", "empty code block"],
-  ["empty quote fence", "> ```ts\noutside", "empty code block"],
-  ["empty list fence", "- ```ts\noutside", "empty code block"],
   ["uppercase task marker", "- [X] done", "task marker"],
   ["uppercase empty task marker", "- [X]", "task marker"],
   ["uppercase ordered task marker", "1. [X] done", "task marker"],
@@ -58,10 +156,9 @@ for (const [name, body, kind] of [
 for (const [name, body] of [
   ["all-one list", "1. a\n1. b\n1. c"],
   ["sequential list", "1. a\n2. b\n3. c"],
-  ["visible list start", "7. a\n8. b\n9. c"],
   ["checked task", "- [x] done"],
   ["unchecked task", "- [ ] done"],
-  ["literal uppercase brackets", "a[X] [X]\n`a[X]`\n    [X]"],
+  ["literal uppercase brackets", "a[X] [X]\n`a[X]`\n    a[X]"],
   ["numbered screenshot", screenshot("Screenshot 1")],
   ["mixed screenshot labels", ["", "Screenshot", "Screenshot 3"].map((alt) => screenshot(alt)).join("\n")],
   ["non-empty ts fence", "```ts\nconst x = 1;\n```"],
@@ -335,7 +432,7 @@ test("raw fence info permits only blank or an allowlisted word with ASCII spaces
   for (const prefix of ["", "   ", "> ", "- "]) {
     for (const fence of ["```", "~~~~"]) {
       for (const language of ["", ...languages]) {
-        const continuation = prefix === "- " ? "  " : prefix === "   " ? "" : prefix;
+        const continuation = prefix === "- " ? "  " : prefix;
         assert.equal(
           evaluate(`${prefix}${fence}\t ${language.toUpperCase()} \t\n${continuation}code\n${continuation}${fence}`)
             .status,
