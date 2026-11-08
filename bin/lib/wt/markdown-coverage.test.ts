@@ -68,21 +68,24 @@ const lettersAndDigits = (text: string) => text.match(/[\p{L}\p{N}]/gu)?.join(""
 
 /**
  * Every source letter/number the tree does not show must be determined by what
- * it does show. Compare Unicode letters/numbers in order and count after these
+ * it does show, subject to the two bounded allowances below. Compare Unicode
+ * letters/numbers in order and count after these
  * AST-positioned deductions: list digits must be the rendered start + item index
- * or the canonical marker 1, with no leading zero; a loaded screenshot's unseen
+ * or use the marker-1 allowance, with no leading zero; a loaded screenshot's unseen
  * alt must be empty, Screenshot, or Screenshot <its 1-based screenshot-line
  * ordinal>. The exact approved image envelope is excluded, never arbitrary URLs.
  * A checked item's visible check mark contributes the canonical source x; X is
  * refused in that position, while literal a[X] remains text. Screenshots and list
  * markers inside code keep their source letters rather than these deductions.
- * One bounded allowance remains: a fenced code block may hide its one allowlisted
- * info word; for an opener inside a container (any > or leading whitespace on its
- * line) this holds even when the block ends up empty, because the empty code box
- * stays visible on the page and the word comes from the fixed allowlist. The
- * parser position identifies the opener's line prefix, including list markers.
- * A column-zero opener with an info word still requires non-whitespace content;
+ * The first allowance: a fenced code block may hide its one allowlisted info
+ * word. Inside a quote or list item this holds even when empty, because the code
+ * box stays visible and the word comes from the fixed allowlist. The tree and
+ * parser position identify the container and opener's prefix. Top-level fences,
+ * including those with up to three leading spaces, need non-whitespace content;
  * an empty fence without an info word hides no letters or digits.
+ * The second allowance: an ordered marker may be 1 even when the page shows n.
+ * The hidden digits are only 1s, at most one per marker, and after the first such
+ * 1 a run accepts only 1s, so they cannot spell anything.
  * Visible text is text/inlineCode/code values and literal autolink text, plus
  * canonical checked state. Whitespace and punctuation are outside this invariant.
  */
@@ -149,7 +152,11 @@ function checkCoverage(body: string): void {
         const fenceStart = node.position.start.offset + opening[0].search(/[`~]/u);
         const lineStart = body.lastIndexOf("\n", fenceStart - 1) + 1;
         const containerPrefix = body.slice(lineStart, fenceStart);
-        assert.ok(node.value?.trim() || /[\s>]/u.test(containerPrefix), "non-empty column-zero fenced code block");
+        const inContainer = parent?.type === "blockquote" || parent?.type === "listItem";
+        assert.ok(
+          node.value?.trim() || (inContainer && /[\s>]/u.test(containerPrefix)),
+          "non-empty top-level fenced code block",
+        );
         const start = node.position.start.offset + opening[0].indexOf(node.lang);
         omitted.push([start, start + node.lang.length]);
       }
@@ -201,6 +208,13 @@ const hostile = [
   ["list number", "- 1. a\n- 1. b\n  3. c"],
   ["list number", "a\n2. b\n1. c\n4. d"],
   ["list number", "1.\n1.\n2."],
+  ["list number", "- 00000001. x"],
+  ["list number", "1. 007. x"],
+  ["list number", "> - 0009. x"],
+  ["list number", "- 0."],
+  ["list number", "1. 01) a"],
+  ["list number", "* 011. "],
+  ["list number", "+ 01. x"],
   ["task marker", "- [X] done"],
   ["task marker", "> -\n >   [X] done"],
   ["task marker", "> -\n>\t[X] done"],
@@ -208,6 +222,9 @@ const hostile = [
   ["empty code block", "```go\n```"],
   ["empty code block", "```ts\n\n```"],
   ["empty code block", "> outside\n\n```ts\n```"],
+  ["empty code block", " ```go\n ``` "],
+  ["empty code block", "   ```go\n   ``` "],
+  ["empty code block", "   ```ts"],
 ] as const;
 
 const containerFences = [
@@ -226,7 +243,6 @@ const containerFences = [
   "> ~~~go\n>\t~~~~",
   "> ```ts\noutside",
   "- ```ts\noutside",
-  "   ```ts",
   "> ```ts\n> \t\n> ```",
   "1. ```ts",
   " > ```ts\r\n\r\n>a",
@@ -238,6 +254,28 @@ const containerFences = [
 const examples = [
   ...hostile.map(([, body]) => body),
   ...containerFences,
+  "10. x",
+  "100. x",
+  "- 7. x",
+  "1. 7. x",
+  "> - 9. x",
+  "- 10. x",
+  "1. 100. x",
+  "Text 01. x",
+  "```go\n~~~",
+  "~~~go\n```",
+  "````go\n```",
+  "~~~~go\n~~~",
+  "```go\n```text\ncode",
+  "> ```go\n> ```",
+  "1. a\n    ```ts\n    ```",
+  "1. Steps\n2. More\n\nExpected\n\n1. c\n1. d",
+  "1. Steps\n2. More\n\nExpected\n\n1. c\n2. d",
+  "1. a\n2. b\n\n- x\n  1. y\n  1. z",
+  "```text\n- 01. x\n```",
+  "1. a\n   ```ts\n   ```",
+  "```go\n```` \t",
+  "~~~go\n~~~~",
   "1. a\n1. b\n1. c",
   "1. a\n2. b\n3. c",
   "7. a\n8. b\n9. c",
@@ -344,6 +382,11 @@ function generatedBodies(): string[] {
     "+ ",
     "1. ",
     "2) ",
+    "- 0",
+    "01. ",
+    "1. 007. ",
+    "* 011. ",
+    "+ 01. ",
     "> ",
     "> > ",
     "> - ",

@@ -35,6 +35,10 @@ function allowedFenceInfo(line: string, start: number): boolean {
 
 /** Conservative raw-line rules, without reconstructing CommonMark containers. */
 function hiddenLineReason(lines: string[]): string | null {
+  if (lines.some((line) => /^(?:[\s>]|[-*+]|\d{1,9}[.)])*0\d{0,8}[.)](?=[ \t]|$)/u.test(line)))
+    return refusal("list number");
+  // A nonzero marker later in a leading chain opens a new nested list as its
+  // first item, whose number is shown. Only zero-led markers there are refused.
   const markers = lines.flatMap((line) => {
     const marker = /^([\s>]*)(\d{1,9})([.)])(?=[ \t]|$)/u.exec(line);
     return marker ? [marker] : [];
@@ -45,38 +49,40 @@ function hiddenLineReason(lines: string[]): string | null {
   let onesOnly = false;
   // Within a run of same-delimiter, column-zero markers, strict k, k+1, ...
   // renders as written whether a line continues the list, restarts it (its start
-  // is shown), or stays paragraph text. A 1 is always determined. But after a 1
-  // that follows another marker, continuation and restart diverge, so only 1
-  // stays safe. Intervening non-marker lines do not reset a sequence.
+  // is shown), or stays paragraph text. A literal 1 is a bounded allowance:
+  // hidden digits are only 1s, at most one per marker. After a later 1,
+  // continuation and restart diverge, so the run accepts only 1s; they cannot
+  // spell anything. Intervening non-marker lines do not reset a sequence.
   for (const marker of markers) {
     if (marker[3] !== delimiter) {
       delimiter = marker[3];
       previous = undefined;
       onesOnly = false;
     }
-    const digits = marker[2] ?? "";
-    const number = Number(digits);
-    if (
-      digits.startsWith("0") ||
-      (number !== 1 && (!flat || (previous !== undefined && (onesOnly || number !== previous + 1))))
-    )
+    const number = Number(marker[2]);
+    if (number !== 1 && (!flat || (previous !== undefined && (onesOnly || number !== previous + 1))))
       return refusal("list number");
     if (previous !== undefined && number === 1) onesOnly = true;
     previous = number;
   }
 
-  // Only column-zero openers need content. Container fences have the bounded
-  // info-word allowance even when empty; their boundaries are not modelled here.
-  let needsContent = false;
+  // Check openers with zero to three leading ASCII spaces, no tab or >. This is
+  // exact at the top level and refuses some empty list-item fences (fail closed).
+  // Openers behind > or indented further keep the bounded info-word allowance:
+  // their boundaries need structure, which this raw-line rule does not model.
+  let needsContent: string | null = null;
   for (const line of lines) {
     if (/^[\s>]*\[[xX ]\]/u.test(line) || /^(?:[\s>]|[-*+]|\d{1,9}[.)])*\[X\]/u.test(line))
       return refusal("task marker");
     const content = line.trimStart();
     if (needsContent && content) {
-      if (/^(?:`{3,}|~{3,})/u.test(content)) return refusal("empty code block");
-      needsContent = false;
+      const closer = /^(`{3,}|~{3,})[ \t]*$/u.exec(content)?.[1];
+      if (closer && closer[0] === needsContent[0] && closer.length >= needsContent.length)
+        return refusal("empty code block");
+      needsContent = null;
     }
-    if (/^(?:`{3,}|~{3,})[ \t]*[A-Za-z]+[ \t]*$/u.test(line)) needsContent = true;
+    const opener = /^ {0,3}(`{3,}|~{3,})[ \t]*[A-Za-z]+[ \t]*$/u.exec(line);
+    if (opener?.[1]) needsContent = opener[1];
   }
   return needsContent ? refusal("empty code block") : null;
 }

@@ -26,6 +26,53 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+for (const [name, body, kind] of [
+  ["zero-led marker after dash", "- 00000001. x", "list number"],
+  ["zero-led marker after ordered marker", "1. 007. x", "list number"],
+  ["zero-led marker after quote and bullet", "> - 0009. x", "list number"],
+  ["zero-only nested marker", "- 0.", "list number"],
+  ["zero-led parenthesized nested marker", "1. 01) a", "list number"],
+  ["zero-led marker after star", "* 011. ", "list number"],
+  ["zero-led marker after plus", "+ 01. x", "list number"],
+  ["zero-led marker inside code", "```text\n- 01. x\n```", "list number"],
+  ["one-space empty fence", " ```go\n ``` ", "empty code block"],
+  ["three-space empty fence", "   ```go\n   ``` ", "empty code block"],
+  ["three-space empty fence at EOF", "   ```ts", "empty code block"],
+  ["indented empty fence in list", "1. a\n   ```ts\n   ```", "empty code block"],
+  ["longer matching fence closer", "```go\n```` \t", "empty code block"],
+  ["matching tilde closer", "~~~go\n~~~~", "empty code block"],
+  ["counting restart in later list", "1. Steps\n2. More\n\nExpected\n\n1. c\n2. d", "list number"],
+  ["flat counts with later nesting", "1. a\n2. b\n\n- x\n  1. y\n  1. z", "list number"],
+] as const) {
+  test(`raw Markdown Round 4 refuses ${name}`, () => {
+    assert.equal(evaluate(body).reason, reason(kind), body);
+  });
+}
+
+for (const [name, body] of [
+  ["ten as list start", "10. x"],
+  ["hundred as list start", "100. x"],
+  ["nonzero nested list start", "- 7. x"],
+  ["nonzero start after ordered marker", "1. 7. x"],
+  ["nonzero start after quote and bullet", "> - 9. x"],
+  ["nested ten", "- 10. x"],
+  ["nested hundred", "1. 100. x"],
+  ["zero-led digits after text", "Text 01. x"],
+  ["tilde content in backtick fence", "```go\n~~~"],
+  ["backtick content in tilde fence", "~~~go\n```"],
+  ["short backtick run as content", "````go\n```"],
+  ["short tilde run as content", "~~~~go\n~~~"],
+  ["fence run with info as content", "```go\n```text\ncode"],
+  ["quoted empty fence allowance", "> ```go\n> ```"],
+  ["list fence with content", "1. a\n   ```ts\n   code\n   ```"],
+  ["deep list fence allowance", "1. a\n    ```ts\n    ```"],
+  ["ones in later list", "1. Steps\n2. More\n\nExpected\n\n1. c\n1. d"],
+] as const) {
+  test(`raw Markdown Round 4 permits ${name}`, () => {
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+
 // Bounded container-fence allowance: its empty code box stays visible, and the
 // hidden info word comes from the fixed allowlist even when the container ends.
 for (const [name, body] of [
@@ -44,7 +91,6 @@ for (const [name, body] of [
   ["tabbed quote empty fence", "> ~~~go\n>\t~~~~"],
   ["empty quote fence", "> ```ts\noutside"],
   ["empty list fence", "- ```ts\noutside"],
-  ["indented fence at EOF", "   ```ts"],
   ["whitespace-only quote fence", "> ```ts\n> \t\n> ```"],
   ["ordered opener at EOF", "1. ```ts"],
   ["CRLF quote fence", " > ```ts\r\n\r\n>a"],
