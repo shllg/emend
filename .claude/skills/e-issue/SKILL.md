@@ -172,10 +172,12 @@ A later flat list may count up again after a heading, after a `---` line, or aft
 a sentence at the left margin; otherwise use `1.` throughout. A numbered item with a checkbox uses
 `1.`. Write a checkbox right after its list marker and one space, on one line: `- [ ] text`,
 `- [x] text`. It uses lowercase `[x]`, and an empty box holds one space, never a tab or another space
-character. Never write a box without the space after the marker (`-[x]`), escaped (`\[x]`), split over
-two lines, or bare at the start of a line. Under a numbered item other than `1.`, a checklist starts
-at the item's text column, and a nested checkbox's `-` sits under its parent's `[`, never inside a
-code block:
+character. Never write a box without the space after the marker (`-[x]`), with a backslash anywhere
+in it (`\[x]`, `[x\]`), split over two lines, or bare at the start of a line. Inside a list, never wrap
+a line back to the left margin; continue it at the item's text column. Under a numbered item other
+than `1.`, a checklist starts at the item's text column, comes before any code block in that item,
+and a nested checkbox's `-` sits under its parent's `[`, never inside a code block. A checklist that
+must follow a code block goes under a list numbered `1.` throughout:
 
 ```text
 2. Step
@@ -299,8 +301,9 @@ inline code included, and refuses an issue whose body holds anywhere:
   up as they say, one that starts with `0` or has four or more digits, a nested, quoted or indented
   number with two or more digits, a numbered checkbox other than `1.`, an uppercase `[X]`, a box
   written another way than the Body rules show, a checkbox on a later line of a numbered item other
-  than `1.` that is not in a checklist placed as the Body rules say, or an empty box on a line that
-  also holds `[x]` or `[X]`;
+  than `1.` that is not in a checklist placed as the Body rules say, a checkbox after a code block
+  under a numbered item other than `1.` (until a heading, a `---` line or a new `1.` item), or an
+  empty box on a line that also holds `[x]` or `[X]`;
 - a line, code blocks included, that starts with digits and one more character before a checkbox,
   also after a list marker or `>`, as in `12 [ ] Pending` or `- 12 [ ] a`, other than `1.` or `1)`
   and a space; put a word before the digits.
