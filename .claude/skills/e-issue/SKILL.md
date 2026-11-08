@@ -169,9 +169,13 @@ Number a list `1., 2., 3.` only when every numbered line in the body, code block
 the left margin. If any is nested, quoted or indented, every numbered item in the body uses `1.`.
 A later flat list may count up again after a blank line and a line of text at the left margin, such
 as a heading or a sentence; otherwise use `1.` throughout. A numbered item with a checkbox uses
-`1.`. Checkboxes use lowercase `[x]`; an empty box holds one space, never a tab. Never start a line
-with a bare `[ ]`, `[x]` or `[X]`.
-Never start a line with four or more digits followed by `.` or `)`; rewrap instead, even for `2025.`.
+`1.`. Write a checkbox right after its list marker and one space, on one line: `- [ ] text`,
+`- [x] text`. It uses lowercase `[x]`, and an empty box holds one space, never a tab or another space
+character. Never write a box without the space after the marker (`-[x]`), escaped (`\[x]`), split over
+two lines, or bare at the start of a line. Under a numbered item other than `1.`, a checklist goes only
+at the item's text column (`2. Step`, then `   - [ ] check`), never inside a code block or further
+indented. Never put four or more digits followed by `.` or `)` at the start of a line or right after
+a list marker or `>`; rewrap instead, even for `2025.`.
 
 ```markdown
 ## Why
@@ -282,10 +286,13 @@ inline code included, and refuses an issue whose body holds anywhere:
 - a code block with a language word and nothing in it, since the page hides the word; a fence line
   inside another fence can count as such a block, so show fence examples without a language word;
 - a list number or checkbox the Body rules above do not allow: a number that does not count up as
-  they say, one that starts with `0` or has four or more digits, a numbered checkbox other than
-  `1.`, an uppercase `[X]`, or `[x]` later on a line that starts with `[ ]`;
+  they say, one that starts with `0` or has four or more digits, a nested or quoted number with two
+  or more digits, a numbered checkbox other than `1.`, an uppercase `[X]`, a box written another way
+  than the Body rules show, a checkbox on a later line of a numbered item other than `1.` that is not
+  a list at the item's text column, or an empty box on a line that also holds `[x]` or `[X]`;
 - a line, code blocks included, that starts with digits and one more character before a checkbox,
-  as in `12 [ ] Pending`; put a word before the digits.
+  also after a list marker or `>`, as in `12 [ ] Pending` or `- 12 [ ] a`; put a word before the
+  digits.
 
 Other bare URLs, `#12` and `@name` still become links. Wrap lines at about 100 characters. Offer to remove whatever the queue refuses before
 `ready`, write none of it yourself, and write placeholders as plain words (`N`, "the issue number").
