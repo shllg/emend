@@ -118,8 +118,12 @@ function hiddenLineReason(lines: string[]): string | null {
       }
     }
     // cmark's task scanner accepts digits plus any character as a marker and
-    // drops source bytes. Only the normal literal-one marker is safe here.
-    if (/^[ \t]*\d+[^\n][ \t]+\[[ xX]\][ \t]/u.test(line) && !/^[ \t]*1[.)][ \t]+\[/u.test(line))
+    // drops source bytes after consuming quote/list containers. The marker right
+    // before the box must be a normal literal-one marker, even inside a chain.
+    if (
+      /^(?:[\s>]|[-*+]|\d{1,9}[.)])*\d+[^\n][ \t]+\[[ xX]\][ \t]/u.test(line) &&
+      !/^(?:[\s>]|[-*+]|\d{1,9}[.)])*1[.)][ \t]+\[/u.test(line)
+    )
       return refusal("task marker");
     let contentStart = 0;
     let indent = 0;

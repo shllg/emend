@@ -27,6 +27,16 @@ const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-012
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
 for (const [name, body] of [
+  ["digit task scanner in quoted bullet", "> - Steps\n>\n>   9x [ ] Continue"],
+  ["digit task scanner in quoted ordered item", "> 1. Steps\n>\n>   9x [ ] Continue"],
+  ["digit task scanner after bullet paragraph", "- Steps\n\n   9x [ ] Continue"],
+  ["digit task scanner after bullet prefix", "- 9x [ ] Continue"],
+  ["digit task scanner after quote and bullet prefixes", "> - 9x [ ] Continue"],
+  ["digit task scanner after ordered prefix", "1. 9x [ ] Continue"],
+  ["outer literal-one marker does not exempt inner scanner", "> 1. 9x [ ] Continue"],
+  ["digit task scanner after mixed nested prefixes", "- > 1. 1h [ ] Continue"],
+  ["digit task scanner with quote and tabs", ">\t9x\t[ ]\tContinue"],
+  ["digit task scanner with quoted CRLF", "> - Steps\r\n>\r\n>   9x [ ] Continue"],
   ["split box after marker-only line", "2.\n   [\n   ] Done"],
   ["split box after parenthesized marker-only line", "2)\n   [\n   ] Done"],
   ["split box with unindented closing bracket", "2.\n   [\n] Done"],
@@ -59,6 +69,10 @@ for (const [name, body] of [
 }
 
 for (const [name, body] of [
+  ["quoted pending task", "> - [ ] Pending"],
+  ["quoted literal-one checked task", "> 1. [x] Done"],
+  ["quoted nested parenthesized task", "> - 1) [ ] Pending"],
+  ["mixed nested literal-one task", "- > 1. [ ] Pending"],
   ["pending task", "- [ ] Pending"],
   ["completed task", "- [x] Done"],
   ["mixed literal-one tasks", "1. [x] Done\n1. [ ] Pending"],

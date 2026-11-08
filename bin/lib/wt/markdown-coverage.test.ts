@@ -303,6 +303,14 @@ const hostile = [
   ["task marker", "2.\n   12 [ ] b", "checker only"],
   ["task marker", "2. a\n\n   1234567890. [ ] b", "checker only"],
   ["task marker", "- a\n\n  1h [ ] b", "checker only"],
+  ["task marker", "> - Steps\n>\n>   9x [ ] Continue", "checker only"],
+  ["task marker", "> 1. Steps\n>\n>   9x [ ] Continue", "checker only"],
+  ["task marker", "- Steps\n\n   9x [ ] Continue", "checker only"],
+  ["task marker", "- 9x [ ] Continue", "checker only"],
+  ["task marker", "> - 9x [ ] Continue", "checker only"],
+  ["task marker", "1. 9x [ ] Continue", "checker only"],
+  ["task marker", "> 1. 9x [ ] Continue", "checker only"],
+  ["task marker", "- > 1. 1h [ ] Continue", "checker only"],
   ["task marker", "- [ ] Remove the auth check [x]", "checker only"],
   ["task marker", "1. [ ] Ship it [X]", "checker only"],
   ["task marker", "- [ ] a\\[x]", "checker only"],
@@ -335,6 +343,10 @@ const containerFences = [
 // These owner forms must stay accepted; markdown-security.test.ts also asserts
 // them through issue evaluation. The mixed corpus below retains refusal cases too.
 const ownerBodies = [
+  "> - [ ] Pending",
+  "> 1. [x] Done",
+  "> - 1) [ ] Pending",
+  "- > 1. [ ] Pending",
   "- [ ] Pending",
   "- [x] Done",
   "1. [x] Done\n1. [ ] Pending",
@@ -592,7 +604,26 @@ function generatedBodies(): string[] {
     screenshot("Screenshot", asset.replace("01234567-89ab-cdef-0123-456789abcdef", "bad-id")),
     screenshot("Screenshot", asset.replace("abcdef", "ABCDEF")),
   ];
-  const prefixes = ["", "> ", "> > ", "- ", "* ", "+ ", "1. ", "2) ", "> - ", "- > ", "- - ", "  ", "\t"];
+  const prefixes = [
+    "",
+    "> ",
+    "> > ",
+    ">   ",
+    "- ",
+    "* ",
+    "+ ",
+    "1. ",
+    "2) ",
+    "> - ",
+    "> 1. ",
+    "> 1) ",
+    "> - 1. ",
+    "- 1. ",
+    "- > ",
+    "- - ",
+    "  ",
+    "\t",
+  ];
   const pick = (values: string[]): string => {
     const value = values[next(values.length)];
     assert.ok(value !== undefined, "generator choices must not be empty");
@@ -645,6 +676,8 @@ function generatedBodies(): string[] {
     } else if (i % 13 === 6) {
       bodies.push(pick(["Plain text.", "- [x] done", "- [ ] pending", "a[X]", "https://example.com/a", "#12 @user"]));
     } else if (i % 13 === 7) {
+      const container = pick(["> -", "> 1.", "-"]);
+      const quote = container.startsWith(">") ? ">" : "";
       bodies.push(
         pick([
           "2. a\n-[x] b",
@@ -656,6 +689,7 @@ function generatedBodies(): string[] {
           "2.\n   12 [ ] b",
           "2. a\n\n   1234567890. [ ] b",
           "- a\n\n  1h [ ] b",
+          `${container} Steps\n${quote}\n${quote}   ${pick(["9x", "1h", "12", "1234567890."])} [ ] Continue`,
           `- [ ] text ${pick(["[x]", "[X]", "a\\[x]"])}`,
           "```text\n- [x] Done\n1. [ ] Pending\n```",
           "```json\n[\n  1,\n  2\n]\n```",
@@ -861,7 +895,8 @@ test("each individual rule has a mutation witness", async (t) => {
       name: "numbered task item",
       from: 'number[1] !== "1"',
       to: "false",
-      body: "- 12. [x] Done",
+      // A continued box is a task without the scanner's same-line trailing space.
+      body: "- 12. [x]\n      a",
       kind: "list number",
     },
     {
@@ -880,11 +915,26 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "cmark digit task scanner",
-      from: String.raw`/^[ \t]*\d+[^\n][ \t]+\[[ xX]\][ \t]/u`,
+      from: String.raw`/^(?:[\s>]|[-*+]|\d{1,9}[.)])*\d+[^\n][ \t]+\[[ xX]\][ \t]/u`,
       to: "/a^/u",
       body: "2. a\n\n   9x [ ] b",
       kind: "task marker",
       checkerOnly: true,
+    },
+    {
+      name: "cmark task container prefixes",
+      from: String.raw`/^(?:[\s>]|[-*+]|\d{1,9}[.)])*\d+[^\n][ \t]+\[[ xX]\][ \t]/u`,
+      to: String.raw`/^[ \t]*\d+[^\n][ \t]+\[[ xX]\][ \t]/u`,
+      body: "> - Steps\n>\n>   9x [ ] Continue",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "cmark task container exception",
+      from: String.raw`/^(?:[\s>]|[-*+]|\d{1,9}[.)])*1[.)][ \t]+\[/u`,
+      to: String.raw`/^[ \t]*1[.)][ \t]+\[/u`,
+      body: "> 1. [x] Done",
+      kind: null,
     },
     {
       name: "raw-line checked state",
