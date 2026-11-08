@@ -37,8 +37,8 @@ function allowedFenceInfo(line: string, start: number): boolean {
 function hiddenLineReason(lines: string[]): string | null {
   if (lines.some((line) => /^(?:[\s>]|[-*+]|\d{1,9}[.)])*0\d{0,8}[.)](?=[ \t]|$)/u.test(line)))
     return refusal("list number");
-  // A nonzero marker later in a leading chain opens a new nested list as its
-  // first item, whose number is shown. Only zero-led markers there are refused.
+  // A nonzero, non-task marker later in a leading chain opens a new nested list
+  // as its first item, whose number is shown. Task numbers are checked below.
   const markers = lines.map((line) => /^([\s>]*)(\d{1,9})([.)])(?=[ \t]|$)/u.exec(line));
   const flat = markers.every((marker) => !marker || marker[1] === "");
   let previous: number | undefined;
@@ -79,19 +79,38 @@ function hiddenLineReason(lines: string[]): string | null {
   // exact at the top level and refuses some empty list-item fences (fail closed).
   // Openers behind > or indented further keep the bounded info-word allowance:
   // their boundaries need structure, which this raw-line rule does not model.
+  // A closer must be in the opener's container, whose content offset is at most
+  // the opener's indentation. CommonMark permits a closer up to that offset + 3,
+  // so using opener indentation + 3 never under-detects a closer. An outer fence
+  // holding a literal empty fence example may still be refused (fail closed).
   let needsContent: string | null = null;
+  let openerIndent = 0;
   for (const line of lines) {
+    // GitHub hides a task item's ordered number, whether checked or unchecked.
+    const numberedTask = /^(?:[\s>]|[-*+]|\d{1,9}[.)])*(\d{1,9})[.)][ \t]+\[[ xX]\]/u.exec(line);
+    if (numberedTask && numberedTask[1] !== "1") return refusal("list number");
     if (/^[\s>]*\[[xX ]\]/u.test(line) || /^(?:[\s>]|[-*+]|\d{1,9}[.)])*\[X\]/u.test(line))
       return refusal("task marker");
-    const content = line.trimStart();
-    if (needsContent && content) {
+    let contentStart = 0;
+    let indent = 0;
+    while (line[contentStart] === " " || line[contentStart] === "\t") {
+      indent += line[contentStart] === "\t" ? 4 - (indent % 4) : 1;
+      contentStart++;
+    }
+    // Strip only ASCII indentation: a leading > remains code content.
+    const content = line.slice(contentStart);
+    if (needsContent && content.trim()) {
       const closer = /^(`{3,}|~{3,})[ \t]*$/u.exec(content)?.[1];
-      if (closer && closer[0] === needsContent[0] && closer.length >= needsContent.length)
-        return refusal("empty code block");
+      if (closer && indent <= openerIndent + 3) {
+        if (closer[0] === needsContent[0] && closer.length >= needsContent.length) return refusal("empty code block");
+      }
       needsContent = null;
     }
     const opener = /^ {0,3}(`{3,}|~{3,})[ \t]*[A-Za-z]+[ \t]*$/u.exec(line);
-    if (opener?.[1]) needsContent = opener[1];
+    if (opener?.[1]) {
+      needsContent = opener[1];
+      openerIndent = indent;
+    }
   }
   return needsContent ? refusal("empty code block") : null;
 }

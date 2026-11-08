@@ -1,6 +1,9 @@
 // remark is not GitHub's renderer (cmark-gfm plus extensions such as math, emoji
 // shortcodes and alerts). Those need raw checker rules of their own; this oracle
 // covers CommonMark and GFM structure only, without contacting a renderer service.
+// GitHub also shortens recognized commit hashes, which remark does not model.
+// Only hashes naming real commits are shortened, so an author cannot choose the
+// hidden suffix beyond the few bits a brute-forced commit buys. No refusal is needed.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createRequire, stripTypeScriptTypes } from "node:module";
@@ -72,7 +75,8 @@ const lettersAndDigits = (text: string) => text.match(/[\p{L}\p{N}]/gu)?.join(""
  * it does show, subject to the two bounded allowances below. Compare Unicode
  * letters/numbers in order and count after these AST-positioned deductions:
  * list digits must be the rendered start + item index or use the allowance for 1,
- * with no leading zero; a loaded screenshot's unseen
+ * with no leading zero. GitHub hides a task item's ordered number, checked or
+ * unchecked, so only literal 1 is allowed there. A loaded screenshot's unseen
  * alt must be empty, Screenshot, or Screenshot <its 1-based screenshot-line
  * ordinal>. The exact approved image envelope is excluded, never arbitrary URLs.
  * The ordinal counts screenshot lines, fenced ones included: their source line
@@ -86,7 +90,8 @@ const lettersAndDigits = (text: string) => text.match(/[\p{L}\p{N}]/gu)?.join(""
  * parser position identify the container and opener's prefix. Top-level fences,
  * including those with up to three leading spaces, need non-whitespace content;
  * an empty fence without an info word hides no letters or digits.
- * The second allowance: an ordered marker may be 1 even when the page shows n.
+ * The second allowance: an ordered marker may be 1 even when the page shows n
+ * or hides the marker for a task item.
  * The hidden digits are only 1s, at most one per marker, and after the first such
  * 1 a run accepts only 1s, so they cannot spell anything.
  * Visible text is text/inlineCode/code values and literal autolink text, plus
@@ -168,7 +173,11 @@ function checkCoverage(body: string): void {
       const marker = /^(\d{1,9})[.)](?:[ \t\r\n]|$)/u.exec(source(node));
       assert.ok(marker?.[1], "ordered marker source");
       assert.match(marker[1], /^[1-9]\d{0,8}$/u, "canonical list number");
-      assert.ok(marker[1] === "1" || Number(marker[1]) === (parent.start ?? 1) + index, "rendered list number");
+      if (typeof node.checked === "boolean") {
+        assert.equal(marker[1], "1", "task list number must be 1");
+      } else {
+        assert.ok(marker[1] === "1" || Number(marker[1]) === (parent.start ?? 1) + index, "rendered list number");
+      }
       assert.ok(node.position, "list marker position");
       omitted.push([node.position.start.offset, node.position.start.offset + marker[1].length]);
     }
@@ -224,6 +233,16 @@ const hostile = [
   ["list number", "1. 01) a"],
   ["list number", "* 011. "],
   ["list number", "+ 01. x"],
+  ["list number", "987654321. [x] Done"],
+  ["list number", "- 987654321. [x] Done"],
+  ["list number", "987654321. [ ] Done"],
+  ["list number", "- 987654321. [ ] Done"],
+  ["list number", "2) [ ] step"],
+  ["list number", "1. 9. [x] Done"],
+  ["list number", "> - 9. [ ] Done"],
+  ["list number", "2. [X] Done"],
+  ["list number", "2.\t[x] Done"],
+  ["list number", "1. [x] a\n2. [ ] b"],
   ["task marker", "- [X] done"],
   ["task marker", "> -\n >   [X] done"],
   ["task marker", "> -\n>\t[X] done"],
@@ -260,6 +279,14 @@ const containerFences = [
 // These owner forms must stay accepted; markdown-security.test.ts also asserts
 // them through issue evaluation. The mixed corpus below retains refusal cases too.
 const ownerBodies = [
+  "1. [x] Done",
+  "- 1. [ ] a",
+  "1) [ ] step",
+  "```text\n\t```\n```",
+  "```text\n    ```\n```",
+  "```text\n \t```\n```",
+  "- a\n  ```text\n      ```\n  ```",
+  "```text\n> ```\n```",
   "Steps\n\n1. a\n2. b\n\nExpected\n\n1. c\n2. d\n3. e",
   "1. a\n2. b\n\n```text\n1. first\n2. second\n```",
   "1. Steps\n2. More\n\nExpected\n\n1. c\n2. d",
@@ -279,6 +306,11 @@ const examples = [
   ...hostile.map(([, body]) => body),
   ...containerFences,
   ...ownerBodies,
+  "```text\n2. [x] Done\n```",
+  "- a\n  ```go\n\t```",
+  "- a\n  ```go\n     ```",
+  "- a\n  ```go\n \t```",
+  "````text\n```go\n```\n````",
   "10. x",
   "100. x",
   "- 7. x",
@@ -411,6 +443,12 @@ function generatedBodies(): string[] {
     "1. 007. ",
     "* 011. ",
     "+ 01. ",
+    "1. [x] ",
+    "2. [ ] ",
+    "1) [ ] ",
+    "2) [x] ",
+    "987654321. [x] ",
+    "- 987654321. [x] ",
     "> ",
     "> > ",
     "> - ",
@@ -472,7 +510,9 @@ function generatedBodies(): string[] {
       const prefix = pick(prefixes);
       bodies.push(`${prefix}| a |\n${prefix}${pick(["---", ":-", "| --- |"])}\n${prefix}visible | HIDDEN`);
     } else if (i % 13 === 1) {
-      bodies.push(`${pick(prefixes)}- ${pick(["[ ]", "[x]", "[X]"])} ${pick(["a", "é1", "task"])}\n${body}`);
+      bodies.push(
+        `${pick(prefixes)}${pick(["-", "1.", "2.", "987654321."])} ${pick(["[ ]", "[x]", "[X]"])} ${pick(["a", "é1", "task"])}\n${body}`,
+      );
     } else if (i % 13 === 2) {
       const fence = pick(["```", "~~~"]);
       const prefix = pick(["", "> ", "- "]);
@@ -508,7 +548,20 @@ function generatedBodies(): string[] {
     } else if (i % 13 === 9) {
       const fence = pick(["```", "~~~"]);
       const prefix = pick(["", ">", "> ", ">> ", "- > ", "   "]);
-      const continuation = pick(["", ">", "> ", ">   ", ">\t", ">>    ", "  >    ", "    "]);
+      const continuation = pick([
+        "",
+        ">",
+        "> ",
+        ">   ",
+        ">\t",
+        ">>    ",
+        "  >    ",
+        "    ",
+        "\t",
+        " \t",
+        "     ",
+        "      ",
+      ]);
       const content = pick(["", "\n", `${continuation} \t\n`, `${continuation}code\n`]);
       bodies.push(`${prefix}${fence}${pick(["go", "ts", "text"])}\n${content}${continuation}${fence}${fence[0]}`);
     } else if (i % 13 === 10) {
@@ -686,6 +739,13 @@ test("each individual rule has a mutation witness", async (t) => {
     { name: "onesOnly", from: "onesOnly || ", to: "", body: "1.\n1.\n2.", kind: "list number" },
     { name: "flat numbering", from: "!flat || ", to: "", body: "1. a\n   2. b\n3. c", kind: "list number" },
     {
+      name: "numbered task item",
+      from: 'numberedTask && numberedTask[1] !== "1"',
+      to: "false",
+      body: "- 987654321. [x] Done",
+      kind: "list number",
+    },
+    {
       name: "restart availability",
       from: "flat && followsBlank",
       to: "false",
@@ -739,6 +799,13 @@ test("each individual rule has a mutation witness", async (t) => {
       from: String.raw`[ \t]*$/u.exec(content)`,
       to: "/u.exec(content)",
       body: "```go\n```text\ncode",
+      kind: null,
+    },
+    {
+      name: "closer indentation",
+      from: " && indent <= openerIndent + 3",
+      to: "",
+      body: "```text\n\t```\n```",
       kind: null,
     },
     {

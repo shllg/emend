@@ -26,6 +26,43 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+for (const [name, body, kind] of [
+  ["hidden checked task number", "987654321. [x] Done", "list number"],
+  ["hidden nested checked task number", "- 987654321. [x] Done", "list number"],
+  ["hidden unchecked task number", "987654321. [ ] Done", "list number"],
+  ["hidden nested unchecked task number", "- 987654321. [ ] Done", "list number"],
+  ["hidden parenthesized task number", "2) [ ] step", "list number"],
+  ["hidden task number after ordered marker", "1. 9. [x] Done", "list number"],
+  ["hidden task number after quote and bullet", "> - 9. [ ] Done", "list number"],
+  ["hidden uppercase task number", "2. [X] Done", "list number"],
+  ["hidden task number after tab", "2.\t[x] Done", "list number"],
+  ["hidden sequential task number", "1. [x] a\n2. [ ] b", "list number"],
+  ["numbered task inside code", "```text\n2. [x] Done\n```", "list number"],
+  ["tabbed closer inside list", "- a\n  ```go\n\t```", "empty code block"],
+  ["five-space closer inside list", "- a\n  ```go\n     ```", "empty code block"],
+  ["space then tab closer inside list", "- a\n  ```go\n \t```", "empty code block"],
+  ["literal empty fence inside outer fence", "````text\n```go\n```\n````", "empty code block"],
+] as const) {
+  test(`raw Markdown refuses ${name}`, () => {
+    assert.equal(evaluate(body).reason, reason(kind), body);
+  });
+}
+
+for (const [name, body] of [
+  ["literal one for checked task", "1. [x] Done"],
+  ["literal one for nested unchecked task", "- 1. [ ] a"],
+  ["literal one for parenthesized task", "1) [ ] step"],
+  ["tab-indented fence run as content", "```text\n\t```\n```"],
+  ["four-space fence run as content", "```text\n    ```\n```"],
+  ["space then tab fence run as content", "```text\n \t```\n```"],
+  ["six-space fence run in list content", "- a\n  ```text\n      ```\n  ```"],
+  ["quote-prefixed fence run as content", "```text\n> ```\n```"],
+] as const) {
+  test(`raw Markdown permits ${name}`, () => {
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+
 for (const [name, body] of [
   ["bug report with separate Steps and Expected lists", "Steps\n\n1. a\n2. b\n\nExpected\n\n1. c\n2. d\n3. e"],
   ["list followed by numbered code", "1. a\n2. b\n\n```text\n1. first\n2. second\n```"],

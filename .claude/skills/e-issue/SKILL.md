@@ -168,8 +168,8 @@ Conventional Commits prefix and no issue number.
 Number a list `1., 2., 3.` only when every numbered line in the body, code blocks included, starts at
 the left margin. If any is nested, quoted or indented, every numbered item in the body uses `1.`.
 A later flat list may count up again after a blank line and a line of text at the left margin, such
-as a heading or a sentence; otherwise use `1.` throughout. Checkboxes use lowercase `[x]`. Never
-start a line with a bare `[ ]`, `[x]` or `[X]`.
+as a heading or a sentence; otherwise use `1.` throughout. A numbered item with a checkbox uses
+`1.`. Checkboxes use lowercase `[x]`. Never start a line with a bare `[ ]`, `[x]` or `[X]`.
 
 ```markdown
 ## Why
@@ -243,11 +243,11 @@ is installed:
    comment may remain. Look at the copy itself; it is the file step 6 shows and step 7 uploads.
 
 Without `magick`, or when a check fails, describe the image in text and attach nothing. Always
-write the alt text yourself, so the file name never becomes it: exactly `Screenshot <k>`.
+write the alt text yourself, so the file name never becomes it: `Screenshot <k>`.
 `<k>` is the image's 1-based position among the body's screenshot lines, in body order.
 Count kept and new images together. The queue refuses any other number.
-The page hides alt text, so the description belongs in the
-"Screenshots" section, and the queue refuses any other alt text.
+An empty alt or plain `Screenshot` also passes; anything else is refused.
+The page hides alt text, so the description belongs in the "Screenshots" section.
 
 ## 6. Confirm
 
