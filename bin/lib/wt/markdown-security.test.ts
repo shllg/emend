@@ -26,6 +26,55 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+for (const [name, body, kind] of [
+  ["skipping list number", "1. visible\n987654321. visible", "list number"],
+  ["leading-zero list number", "00001. visible", "list number"],
+  ["zero list start", "0. visible", "list number"],
+  ["mixed list numbering", "1. a\n1. b\n2. c", "list number"],
+  ["ambiguous list boundary", "1. a\n\nprose\n\n1. b\n3. c", "list number"],
+  ["changed list indentation", "1. a\n  9. b", "list number"],
+  ["numbering across parent items", "- 1. a\n- 1. b\n  3. c", "list number"],
+  ["wrong screenshot ordinal", screenshot("Screenshot 99"), "alt text"],
+  ["zero screenshot ordinal", screenshot("Screenshot 0"), "alt text"],
+  ["padded screenshot ordinal", screenshot("Screenshot 01"), "alt text"],
+  ["repeated screenshot ordinal", `${screenshot("Screenshot 1")}\n${screenshot("Screenshot 1")}`, "alt text"],
+  ["empty word fences", "```go\n```\n```sh\n```", "empty code block"],
+  ["whitespace-only fence", "```ts\n \t\n```", "empty code block"],
+  ["empty blank-info fence", "```\n```", "empty code block"],
+  ["empty unclosed fence", "~~~ts", "empty code block"],
+  ["empty quote fence", "> ```ts\noutside", "empty code block"],
+  ["empty list fence", "- ```ts\noutside", "empty code block"],
+  ["uppercase task marker", "- [X] done", "task marker"],
+  ["uppercase empty task marker", "- [X]", "task marker"],
+  ["uppercase ordered task marker", "1. [X] done", "task marker"],
+  ["uppercase nested task marker", "> - [X] done", "task marker"],
+  ["uppercase continued task marker", "> -\n>   [X] done", "task marker"],
+] as const) {
+  test(`raw Markdown Round 2 refuses ${name}`, () => {
+    assert.equal(evaluate(body).reason, reason(kind), body);
+  });
+}
+
+for (const [name, body] of [
+  ["all-one list", "1. a\n1. b\n1. c"],
+  ["sequential list", "1. a\n2. b\n3. c"],
+  ["visible list start", "7. a\n8. b\n9. c"],
+  ["checked task", "- [x] done"],
+  ["unchecked task", "- [ ] done"],
+  ["literal uppercase brackets", "a[X] [X]\n`a[X]`\n    [X]"],
+  ["numbered screenshot", screenshot("Screenshot 1")],
+  ["mixed screenshot labels", ["", "Screenshot", "Screenshot 3"].map((alt) => screenshot(alt)).join("\n")],
+  ["non-empty ts fence", "```ts\nconst x = 1;\n```"],
+  ["non-empty unclosed fence", "~~~ts\ncode"],
+  ["non-empty quote fence", "> ```ts\n> code\n> ```"],
+  ["non-empty list fence", "- ```ts\n  code\n  ```"],
+  ["non-empty list fence with tabs", "- ```ts\n\tcode\n  ```"],
+] as const) {
+  test(`raw Markdown Round 2 permits ${name}`, () => {
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+
 for (const delimiter of [":-", "-:", ":-:", "---:", "---"]) {
   for (const prefix of ["", "> ", "> > ", "- ", "* ", "+ ", "1. ", "2) ", "> - "]) {
     test(`raw Markdown refuses pipe-free table: ${prefix}${delimiter}`, () => {
@@ -81,9 +130,12 @@ for (const [name, body] of [
   ["16-character whitespace run", `a${" \t".repeat(8)}b`],
   [
     "screenshot alt forms",
-    ["", "Screenshot", "Screenshot 0", "Screenshot 09", "Screenshot 99"].map((alt) => screenshot(alt)).join("\n"),
+    ["", "Screenshot", "Screenshot 3", "Screenshot 4", "Screenshot 5"].map((alt) => screenshot(alt)).join("\n"),
   ],
-  ["screenshot alt totals are unbounded", Array(30).fill(screenshot("Screenshot 12")).join("\n")],
+  [
+    "screenshot ordinals exceed two digits",
+    Array.from({ length: 120 }, (_, i) => screenshot(`Screenshot ${i + 1}`)).join("\n"),
+  ],
 ] as const) {
   test(`raw Markdown Round 12 permits ${name}`, () => {
     assert.equal(evaluate(body).status, "pickable");
@@ -283,8 +335,10 @@ test("raw fence info permits only blank or an allowlisted word with ASCII spaces
   for (const prefix of ["", "   ", "> ", "- "]) {
     for (const fence of ["```", "~~~~"]) {
       for (const language of ["", ...languages]) {
+        const continuation = prefix === "- " ? "  " : prefix === "   " ? "" : prefix;
         assert.equal(
-          evaluate(`${prefix}${fence}\t ${language.toUpperCase()} \t\ncode\n${prefix}${fence}`).status,
+          evaluate(`${prefix}${fence}\t ${language.toUpperCase()} \t\n${continuation}code\n${continuation}${fence}`)
+            .status,
           "pickable",
         );
       }

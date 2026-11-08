@@ -28,7 +28,8 @@ file's status current as work lands.
 - `packages/core`: pure logic (Markdown to safe blocks, block ids, placing comments, topics). No
   Node-only and no browser-only API; WebCrypto is fine.
 - `bin/`: `bin/wt`, the worktree and pull-request lifecycle CLI (node only, no dependencies, tests
-  in `bin/lib/wt/`), and `.claude/skills/e-*`, its skills.
+  in `bin/lib/wt/`), and `.claude/skills/e-*`, its skills. Tests may borrow packages/core's installed
+  Markdown parser; bin/wt itself stays dependency-free.
 - `plugin/`: the Claude Code plugin. `plugin/skills/` holds the review skills, their only copy;
   `plugin/` holds nothing else but `.claude-plugin/plugin.json`. `docs/api.md`: the v1 contract.
   `sync/`: surfaces shared with hunk-review-skill, and synthetic fixtures. `tasks/`: the older

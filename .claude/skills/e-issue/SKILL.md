@@ -83,8 +83,11 @@ owner's OK.
    This run refines that issue (step 7 edits it) instead of creating a new one. Keep its body: an
    edit replaces the whole body, so the new body carries the earlier text and every existing image.
    Write each kept image as its own line, `![Screenshot <k>](<its URL>)`, with the URL unchanged; an
-   image shown as an HTML `img` tag becomes such a line too. The queue refuses other alt text and
-   any HTML, and step 6 shows the change. Kept text passes step 5's public check too; step 6 shows anything you propose to
+   image shown as an HTML `img` tag becomes such a line too.
+   `<k>` is the image's 1-based position among the body's screenshot lines, in body order.
+   Count kept and new images together. The queue refuses any other number.
+   It also refuses other alt text and any HTML. Step 6 shows the change.
+   Kept text passes step 5's public check too; step 6 shows anything you propose to
    remove. Leave out invisible characters (zero-width and bidi controls, tag and private-use
    characters): `bin/wt` refuses an issue that holds them. Tell the owner where they were.
 4. Several topics in one input: list them, propose one issue per topic, and ask the owner to
@@ -234,8 +237,10 @@ is installed:
    comment may remain. Look at the copy itself; it is the file step 6 shows and step 7 uploads.
 
 Without `magick`, or when a check fails, describe the image in text and attach nothing. Always
-write the alt text yourself, so the file name never becomes it: exactly `Screenshot <k>`, where
-`<k>` numbers the images. The page hides alt text, so the description belongs in the
+write the alt text yourself, so the file name never becomes it: exactly `Screenshot <k>`.
+`<k>` is the image's 1-based position among the body's screenshot lines, in body order.
+Count kept and new images together. The queue refuses any other number.
+The page hides alt text, so the description belongs in the
 "Screenshots" section, and the queue refuses any other alt text.
 
 ## 6. Confirm
