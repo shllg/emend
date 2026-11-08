@@ -279,10 +279,13 @@ inline code included, and refuses an issue whose body holds anywhere:
   `md`, `markdown`, `ts`, `typescript`, `tsx`, `js`, `javascript`, `jsx`, `mjs`, `css`, `html`,
   `xml`, `sql`, `python`, `py`, `ruby`, `rb`, `go`, `rust`, `rs`, `http`; for any other language
   write no word, so no mermaid or math fence and no words after the language;
-- a code block with nothing in it;
+- a code block with a language word and nothing in it, since the page hides the word; a fence line
+  inside another fence can count as such a block, so show fence examples without a language word;
 - a list number or checkbox the Body rules above do not allow: a number that does not count up as
   they say, one that starts with `0` or has four or more digits, a numbered checkbox other than
-  `1.`, an uppercase `[X]`, or `[x]` later on a line that starts with `[ ]`.
+  `1.`, an uppercase `[X]`, or `[x]` later on a line that starts with `[ ]`;
+- a line, code blocks included, that starts with digits and one more character before a checkbox,
+  as in `12 [ ] Pending`; put a word before the digits.
 
 Other bare URLs, `#12` and `@name` still become links. Wrap lines at about 100 characters. Offer to remove whatever the queue refuses before
 `ready`, write none of it yourself, and write placeholders as plain words (`N`, "the issue number").
