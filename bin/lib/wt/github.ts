@@ -391,6 +391,7 @@ function resolvePr(repo: Repo, prArg: string | undefined, extraFields: string[] 
 const CLOSING_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     nameWithOwner
+    mergeQueue(branch: "main") { id }
     pullRequest(number: $number) {
       body createdAt lastEditedAt
       closingIssuesReferences(first: 20) {
@@ -402,12 +403,14 @@ const CLOSING_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
 }`;
 const CLOSING_MISMATCH = "GitHub's closing issues do not match this branch. Fix the PR body with bin/wt pr edit.";
 // GitHub documents no parsing bound; field reports range from seconds to over an hour.
-// Ten minutes narrows the race; the post-merge closing check detects the remaining foreign closes.
+// The window compares the local clock with GitHub's timestamps and narrows the race.
+// The post-merge check covers only the PR's closing set; the squash message rests on the pre-merge text scan.
 const CLOSING_SETTLE_MS = 10 * 60 * 1000;
 
 interface ClosingState {
   pr: Record<string, unknown>;
   repository: string;
+  mergeQueue: unknown;
   issues: { number: number; repository: string }[];
 }
 
@@ -461,7 +464,7 @@ function readGithubClosing(repo: Repo, number: number, identity?: ReturnType<typ
       refuse();
     issues.push({ number: ref.number, repository: owner });
   }
-  return { pr, repository: expected, issues };
+  return { pr, repository: expected, mergeQueue: repository.mergeQueue, issues };
 }
 
 function foreignClosingIssues(closing: ClosingState, branch: string): string[] {
@@ -481,12 +484,14 @@ function githubClosingGuard(
   now: () => number = Date.now,
 ): Record<string, unknown> {
   const closing = readGithubClosing(repo, number, identity);
-  if (requireOwn) requireSettledClosing(closing.pr, now);
-  if (
-    foreignClosingIssues(closing, branch).length ||
-    (requireOwn && issueFromBranch(branch) !== null && closing.issues.length === 0)
-  )
-    throw new WtError(1, CLOSING_MISMATCH);
+  if (foreignClosingIssues(closing, branch).length) throw new WtError(1, CLOSING_MISMATCH);
+  if (requireOwn) {
+    if (closing.mergeQueue === undefined)
+      throw new WtError(1, "Could not read the repository's merge queue. Nothing was merged.");
+    if (closing.mergeQueue !== null) throw new WtError(1, "Merge queues are not supported. Nothing was merged.");
+    requireSettledClosing(closing.pr, now);
+    if (issueFromBranch(branch) !== null && closing.issues.length === 0) throw new WtError(1, CLOSING_MISMATCH);
+  }
   return closing.pr;
 }
 
@@ -845,9 +850,10 @@ function normalizeClosingText(decoded: string): string {
 /**
  * closingGuard is an early warning that runs before GitHub sees the text. It is not the boundary:
  * GitHub's own closing set (githubClosingGuard, closingIssuesReferences) is authoritative and runs
- * right before every merge, pinned to the head; the squash message is read by GitHub as plain text,
- * which the raw reading covers exactly. Renderer differences in a PR body that the readings miss
- * are caught there. Keep the readings cheap and conservative; do not model CommonMark or HTML in full.
+ * right before every merge, pinned to the head. Renderer differences in a PR body that the readings
+ * miss are caught there. The squash message is guarded only by the raw reading: GitHub reads it as
+ * plain text at merge time, and no API reports its closing set beforehand. Keep the readings cheap
+ * and conservative; do not model CommonMark or HTML in full.
  */
 export function closingGuard(repo: Repo, branch: string, body: string, requireOwn = true): void {
   const branchIssue = issueFromBranch(branch);
@@ -1116,7 +1122,7 @@ function deleteRemoteBranch(repo: Repo, head: unknown, mergedHead: string, ident
 
 /**
  * Squash-merges the PR. Requires base `main`, a same-repository head, state OPEN and a head commit equal to
- * `matchHead`. Returns `MERGED <mergeCommit>` or `QUEUED`.
+ * `matchHead`. Returns `MERGED <mergeCommit>`; uncertain outcomes print their state and throw a warning.
  */
 export function prMerge(
   repo: Repo,
@@ -1168,7 +1174,7 @@ export function prMerge(
   // gh can fail after the merge succeeded (for example when the merge is queued or the read races), so read the state back.
   const after = ghTry(
     repo,
-    ["pr", "view", String(n), "--json", "state,mergeCommit"],
+    ["pr", "view", String(n), "--json", "state,mergeCommit,headRefOid"],
     undefined,
     identity.nameWithOwner,
   );
@@ -1187,24 +1193,38 @@ export function prMerge(
         : undefined;
     if (typeof oid !== "string" || !/^[0-9a-f]{40}$/.test(oid))
       throw new WtError(1, "The pull request is merged, but its merge commit could not be read.");
-    let warning: string | undefined;
+    const warnings: string[] = [];
+    if (merge.code !== 0 || state.headRefOid !== sha)
+      warnings.push("Warning: the merged head is not the approved one. Check the merged changes with the owner.");
     try {
-      const foreign = foreignClosingIssues(readGithubClosing(repo, n, identity), branch);
+      const closingAfter = readGithubClosing(repo, n, identity);
+      if (closingAfter.pr.lastEditedAt !== closingPr.lastEditedAt)
+        warnings.push(
+          "Warning: the PR body was edited during the merge. Check its closed issues and reopen any foreign ones.",
+        );
+      const foreign = foreignClosingIssues(closingAfter, branch);
       if (foreign.length)
-        warning = `Warning: the merge may have closed ${foreign.join(", ")}. Check and reopen each issue.`;
+        warnings.push(`Warning: the merge may have closed ${foreign.join(", ")}. Check and reopen each issue.`);
     } catch {
-      warning =
-        "Warning: the post-merge closing check could not run. Check the PR's closed issues and reopen any foreign ones.";
+      warnings.push(
+        "Warning: the post-merge closing check could not run. Check the PR's closed issues and reopen any foreign ones.",
+      );
     }
-    if (warning) {
+    if (warnings.length) {
       print(`MERGED ${oid}`);
-      throw new WtError(1, warning);
+      throw new WtError(1, warnings.join("\n"));
     }
     deleteRemoteBranch(repo, pr.headRefName, sha, identity.nameWithOwner);
     return `MERGED ${oid}`;
   }
   if (merge.code !== 0) ghFailure(repo, merge, "gh pr merge");
-  if (state.state === "OPEN") return "QUEUED";
+  if (state.state === "OPEN") {
+    print("QUEUED");
+    throw new WtError(
+      1,
+      "Warning: the eventual queued merge is not checked. The owner must check the PR's closed issues after it merges.",
+    );
+  }
   throw new WtError(1, "The pull request was closed without a merge.");
 }
 

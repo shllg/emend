@@ -29,9 +29,8 @@ repeats after every push until every item below holds.
   `check-public: allow` marker, remove the marker, or run `<main>/bin/wt notify blocked` and ask the
   owner to push; never pass `--accept-new-markers` yourself.
 - `gh` and `bin/wt` must use origin on github.com; `bin/wt` ignores `GH_REPO` and `GH_HOST`.
-  Read `<owner>/<name>` once with `<main>/bin/wt repo`; stop on failure. `<main>` is the parent of
-  `git rev-parse --path-format=absolute --git-common-dir`. Write the captured owner and name
-  literally into every later command. Pin repository calls with `--repo github.com/<owner>/<name>`
+  Read `<owner>/<name>` once with `<main>/bin/wt repo`; stop on failure. Write the captured owner
+  and name literally into every later command. Pin repository calls with `--repo github.com/<owner>/<name>`
   and API calls with `--hostname github.com`.
 
 ## Autonomy

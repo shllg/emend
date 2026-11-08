@@ -80,6 +80,7 @@ const closingRule = (): FakeRule => ({
     data: {
       repository: {
         nameWithOwner: "owner/repo",
+        mergeQueue: null,
         pullRequest: {
           body: "Description",
           createdAt: "2026-01-01T00:00:00Z",
@@ -142,8 +143,8 @@ function mergeOkRules(): FakeRule[] {
     },
     { match: ["pr", "merge", "7"], stdout: "merged\n" },
     {
-      match: ["pr", "view", "7", "--json", "state,mergeCommit"],
-      stdout: JSON.stringify({ state: "MERGED", mergeCommit: { oid: MERGE_SHA } }),
+      match: ["pr", "view", "7", "--json", "state,mergeCommit,headRefOid"],
+      stdout: JSON.stringify({ state: "MERGED", mergeCommit: { oid: MERGE_SHA }, headRefOid: headSha }),
     },
     closingRule(),
   ];
@@ -355,7 +356,10 @@ test("unknown feedback times exclude bots rather than assuming an order", jqOpti
 
 test("loop survey reports the unfiltered count even when every PR is filtered out", jqOptions, () => {
   const text = readFileSync(new URL("../../../.claude/loop.md", import.meta.url), "utf8");
-  const filter = /--jq '([^']+)'/.exec(text)?.[1] as string;
+  const listing = /`(gh pr list [^`]+)`/u.exec(text)?.[1];
+  assert.ok(listing, "loop.md must contain its PR listing command");
+  assert.doesNotMatch(listing, /(?:^|\s)--(?:search|author)(?:[=\s]|$)/u);
+  const filter = /--jq '([^']+)'/.exec(listing)?.[1] as string;
   const prs = Array.from({ length: 100 }, () => ({ author: { login: "outsider" }, isCrossRepository: false }));
   assert.deepEqual(jq(filter, prs), [{ fetched: 100, items: [] }]);
 });

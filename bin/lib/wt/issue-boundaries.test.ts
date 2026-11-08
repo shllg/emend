@@ -37,6 +37,8 @@ async function boundary(
       closing: Reply | null;
       closingReplies: Reply[];
       merged: boolean;
+      mergedHead: unknown;
+      mergeReply: Reply;
       label: unknown;
       queue: Record<string, unknown>[] | null;
       branches: string[] | null;
@@ -78,7 +80,9 @@ async function boundary(
     extraPrs: [] as Record<string, unknown>[],
     closing: null as Reply | null,
     closingReplies: [] as Reply[],
-    merged: false,
+    merged: true,
+    mergedHead: "a".repeat(40) as unknown,
+    mergeReply: {} as Reply,
     queue: null as Record<string, unknown>[] | null,
     branches: null as string[] | null,
     claimPrs: [] as Parameters<typeof prPage>[0],
@@ -111,7 +115,14 @@ async function boundary(
             (state.taken ? "refs/heads/emend-42-other\n" : ""),
         };
       if (args.includes("ls-remote"))
-        return { stdout: state.remoteBranches.map((branch) => `${"a".repeat(40)}\trefs/heads/${branch}`).join("\n") };
+        return {
+          stdout: state.remoteBranches
+            .filter(
+              (branch) => !args.some((arg) => arg.startsWith("refs/heads/")) || args.includes(`refs/heads/${branch}`),
+            )
+            .map((branch) => `${"a".repeat(40)}\trefs/heads/${branch}`)
+            .join("\n"),
+        };
       if (args.includes("fetch")) return {};
       if (args.includes("refs/wt-pr-merge/7")) return { stdout: "a".repeat(40) };
       if (args.includes("rev-parse")) return { status: 1 };
@@ -146,11 +157,11 @@ async function boundary(
           }),
         };
       if (query?.includes("issue(number:")) return { stdout: githubPage({ issue, label: state.label }) };
-      if (args.includes("state,mergeCommit"))
+      if (args.includes("state,mergeCommit,headRefOid") || args.includes("state,mergeCommit"))
         return {
           stdout: JSON.stringify(
             state.merged
-              ? { state: "MERGED", mergeCommit: { oid: "c".repeat(40) } }
+              ? { state: "MERGED", mergeCommit: { oid: "c".repeat(40) }, headRefOid: state.mergedHead }
               : { state: "OPEN", mergeCommit: null },
           ),
         };
@@ -214,7 +225,7 @@ async function boundary(
         return { stdout: state.createOutput };
       }
       if (args[1] === "edit") return { stdout: "changed" };
-      if (args[1] === "merge") return {};
+      if (args[1] === "merge") return state.mergeReply;
     }
     throw new Error(`Unexpected subprocess: ${command} ${args.join(" ")}`);
   };
@@ -270,11 +281,13 @@ function closingResponse(
   more = false,
   nameWithOwner = "Owner/Repo",
   fields: Record<string, unknown> = {},
+  mergeQueue: unknown = null,
 ): string {
   return JSON.stringify({
     data: {
       repository: {
         nameWithOwner,
+        mergeQueue,
         pullRequest: {
           body: "Description",
           createdAt: "2026-01-01T00:00:00Z",
@@ -345,7 +358,7 @@ test("pr merge requires the caller's branch except with --pr from the main check
     state.prBody = "Closes #42";
     state.closing = { stdout: closingResponse([ownClosingIssue]) };
     prepareMergeIssue(repo);
-    assert.equal(merge("7"), "QUEUED");
+    assert.equal(merge("7"), `MERGED ${"c".repeat(40)}`);
     repo.callerTop = repo.mainRoot;
     repo.callerBranch = "main";
     assert.throws(merge.bind(null, "7"), /Run issue check inside/);
@@ -353,7 +366,7 @@ test("pr merge requires the caller's branch except with --pr from the main check
     state.closing = { stdout: closingResponse() };
     assert.throws(merge.bind(null, "7"), /Run issue check inside/);
     state.mergeView = { headRefName: "emend-task-062-other" };
-    assert.equal(merge("7"), "QUEUED");
+    assert.equal(merge("7"), `MERGED ${"c".repeat(40)}`);
   }));
 
 for (const text of [
@@ -455,7 +468,7 @@ for (const command of ["create", "edit", "merge"] as const) {
           if (allowed)
             assert.equal(
               invoke(),
-              command === "merge" ? "QUEUED" : command === "create" ? state.createOutput : "changed",
+              command === "merge" ? `MERGED ${"c".repeat(40)}` : command === "create" ? state.createOutput : "changed",
             );
           else
             assert.throws(
@@ -1062,7 +1075,10 @@ for (const command of ["create", "edit", "merge"] as const) {
           : command === "edit"
             ? prEdit(repo, { title: "T" })
             : prMerge(repo, { matchHead: "a".repeat(40), subject: "T", body: "Body" });
-      assert.equal(result, command === "merge" ? "QUEUED" : command === "create" ? state.createOutput : "changed");
+      assert.equal(
+        result,
+        command === "merge" ? `MERGED ${"c".repeat(40)}` : command === "create" ? state.createOutput : "changed",
+      );
       const lookup = calls.find((c) => c.command === "gh" && exactPrLookup(c));
       assert.ok(lookup?.args.includes(`head=${state.prBranch}`));
       assert.ok(lookup?.args.some((a) => a.includes("states: [OPEN]")));
@@ -1193,7 +1209,10 @@ for (const text of [
         state.pr = false;
         assert.equal(prCreate(repo, { title: text, body, draft: false }), "https://github.com/Owner/Repo/pull/7\n");
         assert.equal(prEdit(repo, { title: text, body }), "changed");
-        assert.equal(prMerge(repo, { matchHead: "a".repeat(40), subject: text, body: text }), "QUEUED");
+        assert.equal(
+          prMerge(repo, { matchHead: "a".repeat(40), subject: text, body: text }),
+          `MERGED ${"c".repeat(40)}`,
+        );
       }
     }));
 }
@@ -1459,7 +1478,7 @@ test("issue PR merge accepts the same live snapshot as issue check", () =>
     prepareMergeIssue(repo);
     state.closing = { stdout: closingResponse([ownClosingIssue]) };
     assert.equal(checkIssue(repo), 42);
-    assert.equal(prMerge(repo, { matchHead: "a".repeat(40), subject: "T", body: "Body" }), "QUEUED");
+    assert.equal(prMerge(repo, { matchHead: "a".repeat(40), subject: "T", body: "Body" }), `MERGED ${"c".repeat(40)}`);
   }));
 
 for (const metadata of [undefined, {}, { issue: null }, { task: "042" }]) {
@@ -1965,7 +1984,10 @@ for (const source of ["local", "remote", "registry", "PR"]) {
       prepareMergeIssue(repo);
       assert.equal(checkIssue(repo), 42);
       state.closing = { stdout: closingResponse([ownClosingIssue]) };
-      assert.equal(prMerge(repo, { matchHead: "a".repeat(40), subject: "Synthetic title", body: "Body" }), "QUEUED");
+      assert.equal(
+        prMerge(repo, { matchHead: "a".repeat(40), subject: "Synthetic title", body: "Body" }),
+        `MERGED ${"c".repeat(40)}`,
+      );
     }));
 }
 
@@ -2161,7 +2183,10 @@ for (const text of [
       prepareMergeIssue(repo);
       state.prTitle = text;
       state.prBody = body;
-      assert.equal(prMerge(repo, { pr: "7", matchHead: "a".repeat(40), subject: text, body }), "QUEUED");
+      assert.equal(
+        prMerge(repo, { pr: "7", matchHead: "a".repeat(40), subject: text, body }),
+        `MERGED ${"c".repeat(40)}`,
+      );
     }));
 }
 
@@ -2306,7 +2331,7 @@ test("merge settle window permits an eleven-minute-old edit and opens at exactly
     };
     assert.equal(
       prMerge(repo, SETTLE_MERGE, () => SETTLE_NOW),
-      "QUEUED",
+      `MERGED ${"c".repeat(40)}`,
     );
     const retry = Date.parse("2026-02-01T11:59:00Z");
     calls.length = 0;
@@ -2314,7 +2339,7 @@ test("merge settle window permits an eleven-minute-old edit and opens at exactly
     assert.ok(!calls.some((call) => call.command === "gh" && call.args[1] === "merge"));
     assert.equal(
       prMerge(repo, SETTLE_MERGE, () => retry),
-      "QUEUED",
+      `MERGED ${"c".repeat(40)}`,
     );
   }));
 
@@ -2407,5 +2432,120 @@ for (const outcome of ["foreign", "own", "failed read", "incomplete read"] as co
       assert.ok(calls.indexOf(queries[0] as Call) < merge);
       assert.ok(calls.indexOf(queries[1] as Call) > merge);
       if (outcome !== "own") assert.ok(!calls.some((call) => call.command === "git" && call.args.includes("push")));
+    }));
+}
+
+for (const queue of [{ id: "synthetic-queue" }, undefined]) {
+  test(`round 11 refuses a configured or unreadable merge queue: ${JSON.stringify(queue)}`, () =>
+    boundary(({ repo, state, calls }) => {
+      prepareMergeIssue(repo);
+      // Explicitly remove the field for the unreadable-query case (the helper defaults to null).
+      const response = JSON.parse(closingResponse([ownClosingIssue]));
+      response.data.repository.mergeQueue = queue;
+      state.closing = { stdout: JSON.stringify(response) };
+      calls.length = 0;
+      assert.throws(() => prMerge(repo, SETTLE_MERGE, () => SETTLE_NOW), {
+        code: 1,
+        message: queue
+          ? "Merge queues are not supported. Nothing was merged."
+          : "Could not read the repository's merge queue. Nothing was merged.",
+      });
+      assert.ok(!calls.some((call) => call.command === "gh" && call.args[1] === "merge"));
+      const query = calls.find(isClosingQuery);
+      assert.ok(query);
+      assert.match(query.args.find((arg) => arg.startsWith("query=")) ?? "", /mergeQueue\(branch: "main"\)\s*\{ id \}/);
+      assert.ok(query.args.includes("owner=owner") && query.args.includes("name=repo"));
+    }));
+}
+
+test("round 11 queued result exits 1 and warns that the eventual merge is unchecked", (t) =>
+  boundary(({ repo, state, calls }) => {
+    prepareMergeIssue(repo);
+    state.merged = false;
+    state.closing = { stdout: closingResponse([ownClosingIssue]) };
+    const stdout: string[] = [];
+    t.mock.method(process.stdout, "write", (chunk: string | Uint8Array) => {
+      stdout.push(String(chunk));
+      return true;
+    });
+    calls.length = 0;
+    assert.throws(() => prMerge(repo, SETTLE_MERGE, () => SETTLE_NOW), {
+      code: 1,
+      message:
+        "Warning: the eventual queued merge is not checked. The owner must check the PR's closed issues after it merges.",
+    });
+    assert.deepEqual(stdout, ["QUEUED\n"]);
+    assert.equal(calls.filter((call) => call.command === "gh" && call.args[1] === "merge").length, 1);
+    assert.equal(calls.filter(isClosingQuery).length, 1);
+    assert.ok(!calls.some((call) => call.command === "git" && call.args.includes("push")));
+  }));
+
+test("round 11 foreign closing issues refuse before the settle clock is consulted", () =>
+  boundary(({ repo, state, calls }) => {
+    prepareMergeIssue(repo);
+    state.closing = {
+      stdout: closingResponse(
+        [ownClosingIssue, { number: 57, repository: { nameWithOwner: "owner/repo" } }],
+        false,
+        "Owner/Repo",
+        { lastEditedAt: "2026-02-01T11:59:00Z" },
+      ),
+    };
+    let clockReads = 0;
+    calls.length = 0;
+    assert.throws(
+      () =>
+        prMerge(repo, SETTLE_MERGE, () => {
+          clockReads++;
+          return SETTLE_NOW;
+        }),
+      {
+        code: 1,
+        message: closingMismatch,
+      },
+    );
+    assert.equal(clockReads, 0);
+    assert.ok(!calls.some((call) => call.command === "gh" && call.args[1] === "merge"));
+  }));
+
+for (const change of ["body edited", "head changed", "head missing", "merge call failed"] as const) {
+  test(`round 11 merged result warns and keeps the branch: ${change}`, (t) =>
+    boundary(({ repo, state, calls }) => {
+      prepareMergeIssue(repo);
+      state.closingReplies = [
+        { stdout: closingResponse([ownClosingIssue], false, "Owner/Repo", { lastEditedAt: "2026-02-01T11:00:00Z" }) },
+        {
+          stdout: closingResponse([ownClosingIssue], false, "Owner/Repo", {
+            lastEditedAt: change === "body edited" ? "2026-02-01T12:00:00Z" : "2026-02-01T11:00:00Z",
+          }),
+        },
+      ];
+      if (change === "head changed") state.mergedHead = "b".repeat(40);
+      if (change === "head missing") state.mergedHead = undefined;
+      if (change === "merge call failed") state.mergeReply = { status: 1, stderr: "synthetic merge failure" };
+      const stdout: string[] = [];
+      t.mock.method(process.stdout, "write", (chunk: string | Uint8Array) => {
+        stdout.push(String(chunk));
+        return true;
+      });
+      calls.length = 0;
+      assert.throws(
+        () => prMerge(repo, SETTLE_MERGE, () => SETTLE_NOW),
+        (error: unknown) => {
+          assert.ok(error instanceof WtError);
+          assert.equal(error.code, 1);
+          assert.match(
+            error.message,
+            change === "body edited" ? /PR body was edited during the merge/ : /merged head is not the approved one/,
+          );
+          return true;
+        },
+      );
+      assert.deepEqual(stdout, [`MERGED ${"c".repeat(40)}\n`]);
+      const queries = calls.filter(isClosingQuery);
+      assert.equal(queries.length, 2);
+      assert.equal(calls.at(-1), queries[1], "no remote-branch cleanup after the warning");
+      const merge = calls.findIndex((call) => call.command === "gh" && call.args[1] === "merge");
+      assert.ok(calls.slice(merge + 1).some((call) => call.args.includes("state,mergeCommit,headRefOid")));
     }));
 }

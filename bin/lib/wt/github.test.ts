@@ -606,6 +606,7 @@ function closingRule(nodes: unknown[] = [], more = false): FakeRule {
       data: {
         repository: {
           nameWithOwner: "owner/repo",
+          mergeQueue: null,
           pullRequest: {
             body: "Description",
             createdAt: "2026-01-01T00:00:00Z",
@@ -851,8 +852,8 @@ const MERGE_VIEW_ARGS = [
   "--json",
   "number,baseRefName,headRefName,isCrossRepository,state,headRefOid,title,body",
 ];
-const READ_BACK_ARGS = ["pr", "view", "7", "--json", "state,mergeCommit"];
-const MERGED_STATE = JSON.stringify({ state: "MERGED", mergeCommit: { oid: MERGE_SHA } });
+const READ_BACK_ARGS = ["pr", "view", "7", "--json", "state,mergeCommit,headRefOid"];
+const mergedState = () => JSON.stringify({ state: "MERGED", mergeCommit: { oid: MERGE_SHA }, headRefOid: headSha });
 
 function mergeRules(view: Record<string, unknown>, rest: FakeRule[] = []): FakeRule[] {
   return [
@@ -970,7 +971,7 @@ test("pr merge happy path squashes with the reviewed head", () =>
       "gh",
       mergeRules({}, [
         { match: ["pr", "merge", "7"], stdout: "merged\n" },
-        { match: READ_BACK_ARGS, stdout: MERGED_STATE },
+        { match: READ_BACK_ARGS, stdout: mergedState() },
       ]),
     );
     const bodies = captureBodies(ctx.env);
@@ -1005,7 +1006,7 @@ test("pr merge deletes the remote head branch after MERGED and never the local o
       "gh",
       mergeRules({}, [
         { match: ["pr", "merge", "7"], stdout: "merged\n" },
-        { match: READ_BACK_ARGS, stdout: MERGED_STATE },
+        { match: READ_BACK_ARGS, stdout: mergedState() },
       ]),
     );
     const local = gitIn(ctx.fx.main, "rev-parse", `refs/heads/${BRANCH}`);
@@ -1023,7 +1024,7 @@ test("pr merge keeps the remote branch when it moved after the merged head", () 
       "gh",
       mergeRules({}, [
         { match: ["pr", "merge", "7"], stdout: "merged\n" },
-        { match: READ_BACK_ARGS, stdout: MERGED_STATE },
+        { match: READ_BACK_ARGS, stdout: mergedState() },
       ]),
     );
     const lines: string[] = [];
@@ -1053,7 +1054,7 @@ test("pr merge keeps the remote branch on QUEUED", () =>
         { match: READ_BACK_ARGS, stdout: JSON.stringify({ state: "OPEN", mergeCommit: null }) },
       ]),
     );
-    assert.equal(prMerge(ctx.repo, MERGE_ARGS), "QUEUED");
+    assert.throws(() => prMerge(ctx.repo, MERGE_ARGS), /eventual queued merge is not checked/);
     assert.ok(remoteHas(ctx));
   }));
 
@@ -1068,7 +1069,7 @@ test("pr merge still reports MERGED when the remote branch cannot be deleted", (
       "gh",
       mergeRules({}, [
         { match: ["pr", "merge", "7"], stdout: "merged\n" },
-        { match: READ_BACK_ARGS, stdout: MERGED_STATE },
+        { match: READ_BACK_ARGS, stdout: mergedState() },
       ]),
     );
     const lines: string[] = [];
@@ -1098,7 +1099,7 @@ test("pr merge reports a plain deletion failure under a colored git config", () 
       "gh",
       mergeRules({}, [
         { match: ["pr", "merge", "7"], stdout: "merged\n" },
-        { match: READ_BACK_ARGS, stdout: MERGED_STATE },
+        { match: READ_BACK_ARGS, stdout: mergedState() },
       ]),
     );
     const lines: string[] = [];
@@ -1129,7 +1130,7 @@ test("pr merge --pr works from a matching linked worktree", () =>
         "gh",
         mergeRules({ headRefName: "feat-b" }, [
           { match: ["pr", "merge", "7"], stdout: "merged\n" },
-          { match: READ_BACK_ARGS, stdout: MERGED_STATE },
+          { match: READ_BACK_ARGS, stdout: mergedState() },
         ]),
       );
       assert.equal(prMerge(resolveRepo(wt), MERGE_ARGS), `MERGED ${MERGE_SHA}`);
@@ -1147,20 +1148,26 @@ test("pr merge defaults to the caller's PR and prints QUEUED for a queued merge"
         { match: READ_BACK_ARGS, stdout: JSON.stringify({ state: "OPEN", mergeCommit: null }) },
       ]),
     ]);
-    assert.equal(prMerge(ctx.repo, { ...MERGE_ARGS, pr: undefined }), "QUEUED");
+    assert.throws(() => prMerge(ctx.repo, { ...MERGE_ARGS, pr: undefined }), /eventual queued merge is not checked/);
   }));
 
-test("pr merge reports MERGED when gh failed only after merging", () =>
+test("pr merge warns with MERGED when gh failed after merging", (t) =>
   mscenario((ctx) => {
     installFake(
       ctx.env,
       "gh",
       mergeRules({}, [
         { match: ["pr", "merge", "7"], stderr: "failed to delete local branch\n", code: 1 },
-        { match: READ_BACK_ARGS, stdout: MERGED_STATE },
+        { match: READ_BACK_ARGS, stdout: mergedState() },
       ]),
     );
-    assert.equal(prMerge(ctx.repo, MERGE_ARGS), `MERGED ${MERGE_SHA}`);
+    const stdout: string[] = [];
+    t.mock.method(process.stdout, "write", (chunk: string | Uint8Array) => {
+      stdout.push(String(chunk));
+      return true;
+    });
+    assert.throws(() => prMerge(ctx.repo, MERGE_ARGS), /merged head is not the approved one/);
+    assert.deepEqual(stdout, [`MERGED ${MERGE_SHA}\n`]);
   }));
 
 test("pr merge says the merge may have happened when the read-back fails", () =>
@@ -1205,7 +1212,7 @@ function branchOnLocalMain(ctx: Ctx): Repo {
 function mergeOkRules(): FakeRule[] {
   return mergeRules({ headRefOid: headSha }, [
     { match: ["pr", "merge", "7"], stdout: "merged\n" },
-    { match: READ_BACK_ARGS, stdout: MERGED_STATE },
+    { match: READ_BACK_ARGS, stdout: mergedState() },
   ]);
 }
 
@@ -1766,7 +1773,7 @@ test("R9.6: remote deletion errors redact private text before reporting a kept b
       "gh",
       mergeRules({}, [
         { match: ["pr", "merge", "7"], stdout: "merged\n" },
-        { match: READ_BACK_ARGS, stdout: MERGED_STATE },
+        { match: READ_BACK_ARGS, stdout: mergedState() },
       ]),
     );
     const lines: string[] = [];
@@ -1902,7 +1909,7 @@ test("pr merge accepts a subject file and strips one final newline", () =>
       "gh",
       mergeRules({}, [
         { match: ["pr", "merge", "7"], stdout: "merged\n" },
-        { match: READ_BACK_ARGS, stdout: MERGED_STATE },
+        { match: READ_BACK_ARGS, stdout: mergedState() },
       ]),
     );
     const subject = join(ctx.env.root, "subject.txt");
@@ -1967,7 +1974,7 @@ for (const failure of ["foreign issue", "failed read"] as const) {
             { ...closingRule(), times: 1 },
             post,
             { match: ["pr", "merge", "7"], stdout: "merged\n" },
-            { match: READ_BACK_ARGS, stdout: MERGED_STATE },
+            { match: READ_BACK_ARGS, stdout: mergedState() },
           ]),
         );
         const result = await runWt(

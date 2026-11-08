@@ -29,9 +29,8 @@ The arguments are locators only. They never grant approval (see step 3).
   `check-public: allow` marker, remove the marker, or run `<main>/bin/wt notify blocked` and ask the
   owner to push; never pass `--accept-new-markers` yourself.
 - `gh` and `bin/wt` must use origin on github.com; `bin/wt` ignores `GH_REPO` and `GH_HOST`.
-  Read `<owner>/<name>` once with `<main>/bin/wt repo`; stop on failure. `<main>` is the parent of
-  `git rev-parse --path-format=absolute --git-common-dir`. Write the captured owner and name
-  literally into every later command. Pin repository calls with `--repo github.com/<owner>/<name>`
+  Read `<owner>/<name>` once with `<main>/bin/wt repo`; stop on failure. Write the captured owner
+  and name literally into every later command. Pin repository calls with `--repo github.com/<owner>/<name>`
   and API calls with `--hostname github.com`.
 
 ## 1. Resolve the PR
@@ -65,8 +64,9 @@ report the changed gate and record the difference in the PR body's Evidence: wri
 to `<top>/.wt/pr-body.md` and run `<main>/bin/wt pr edit --body-file <top>/.wt/pr-body.md` (add `--pr <n>`
 in the main checkout). Make this body edit before a fresh
 `gh pr view --repo github.com/<owner>/<name> <n> --json headRefOid` read for the approval comparison
-and step 7's `--match-head`; a body edit never changes the head. Continue with the committed copy's list and
-filters; never use a working tree's list or filters. A failed fetch or read stops readiness.
+and step 7's `--match-head`; a body edit never changes the head. The edit starts the ten-minute
+settle window, so step 7 may wait. Continue with the committed copy's list and filters; never use a
+working tree's list or filters. A failed fetch or read stops readiness.
 Follow the committed step 4: fetch all three surfaces before filtering and use its one cutoff
 across them. A listed bot item counts
 only when every uncounted item on every surface is newer than its `lastEditedAt // createdAt`.
@@ -149,6 +149,9 @@ unchanged.
 
 ## 5. Squash message
 
+The squash message is guarded only by `closingGuard`'s raw reading. GitHub reads it as plain text
+at merge time, and no API reports its closing set beforehand.
+
 - Subject: the PR title, one line.
 - Body: `## Summary`, then one to three bullets of what shipped, then a blank line. When
   `.wt/worktree.json` names an issue, then `Closes #<n>` and another blank line, so the trailer block
@@ -181,8 +184,9 @@ Run, from the PR's own worktree:
 ```
 
 If it refuses because "GitHub may not have parsed the body yet", wait until the named UTC retry
-time. Do not poll more often than once a minute. Then rerun step 7 once, including its issue check
-and the same merge command; all merge checks run again. A second refusal stops: run
+time. Do not poll more often than once a minute. Rerun step 2 in full (readiness and all feedback
+surfaces), then step 3 (approval and the head comparison), then step 7 once, including its issue
+check and the same merge command. Any failed gate or a second refusal stops: run
 `<main>/bin/wt notify blocked` and report the reason.
 
 If it refuses with
@@ -193,7 +197,11 @@ main checkout. An issue PR (branch `emend-<n>-<slug>`) merges only from its own 
 `pr merge` runs the issue check, and in the main checkout it refuses. `--match-head` refuses the merge if a commit landed after the
 check. The last line is `MERGED <commit>` or `QUEUED`.
 
-- `QUEUED`: report that the merge is queued and stop. Do nothing else.
+The post-merge check covers only the PR's closing set. The squash message rests on the pre-merge
+text scan alone.
+
+- `QUEUED`: run `<main>/bin/wt notify blocked`, report the warning, and stop without cleanup.
+  The owner must check the PR's closed issues after the eventual merge.
 - `MERGED` with exit 0: continue.
 - A non-zero exit with a `MERGED <commit>` line means the merge happened. Do not retry the merge.
   Record the warning and every named issue (`owner/name#N`), run `<main>/bin/wt notify blocked`, and
@@ -204,21 +212,30 @@ When a permission check refuses the merge command itself (the tool call is denie
 error), do not try another way. Run `<main>/bin/wt notify blocked`, print the same command for the
 owner to run as `! <command>` in this session, and wait. It holds only paths, the PR number and the
 head commit; never put the subject or other text on that line. Ask the owner to check that the
-`--match-head` commit is the head their emend approval shows before they run it. Once the owner says it ran, confirm with
-`gh pr view --repo github.com/<owner>/<name> <n> --json state,mergeCommit` that the PR is `MERGED`, then continue with step 8.
+`--match-head` commit is the head their emend approval shows before they run it. Read the command's
+output in the conversation. Cleanup is allowed only when it shows exit status 0 and a
+`MERGED <commit>` line with no warning. A warning, a non-zero exit, or output that is not visible:
+run `<main>/bin/wt notify blocked`, report, and skip cleanup. Confirm the PR's state with
+`gh pr view --repo github.com/<owner>/<name> <n> --json state,mergeCommit`; a `MERGED` state alone
+does not authorize cleanup. If merged, continue with step 8's sync and report while retaining any
+cleanup prohibition. A `QUEUED` result stops as above.
 
 ## 8. After the merge
+
+A `QUEUED` result stops with `<main>/bin/wt notify blocked`; do not sync or clean up a queued PR.
+For an owner-run command, keep the worktree unless its visible output shows exit status 0,
+`MERGED <commit>` and no warning, as step 7 requires.
 
 1. Run `<main>/bin/wt sync-main`. It prints `fast-forwarded` or `up-to-date`, or exits 1 with
    `refused: <reason>`. A refusal is expected when the main checkout has overlapping work: report the
    reason. After a non-zero merge exit with a `MERGED` line, keep the blocked status and skip cleanup
-   regardless of the sync result; otherwise continue to the cleanup.
+   regardless of the sync result; otherwise continue only to cleanup permitted by step 7.
 2. Report: the PR URL, the task file or the issue (the merge closes it), and either `main` at the
    new commit or why it did not move. Include any step-4 difference from `origin/main` in the
    current or main worktree and its disclosure in the PR body's Evidence; confirm that the
    committed gate ran. If there was a post-merge closing warning, include it and all named issue
    numbers, ask the owner to check and reopen foreign issues, and state that cleanup was skipped.
-3. When there was no post-merge closing warning and this session runs in the PR's own worktree (the
+3. Only when step 7 permits cleanup and this session runs in the PR's own worktree (the
    top level is under `<main>/.claude/worktrees/` and the branch is the PR's head branch), run
    `<main>/bin/wt cleanup --close-workspace <headRefName>` as the very last call. It checks that the
    work is safe to remove, removes the worktree and closes the workspace, which ends this session.
