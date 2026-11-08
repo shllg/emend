@@ -404,6 +404,9 @@ const CLOSING_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
 }`;
 const CLOSING_MISMATCH = "GitHub's closing issues do not match this branch. Fix the PR body with bin/wt pr edit.";
 const CLOSING_UNREADABLE = "Could not read GitHub's closing issues.";
+/** A readable mismatch must keep its diagnostic when the caller handles query failures. */
+class ClosingMismatchError extends WtError {}
+
 // GitHub documents no parsing bound; field reports range from seconds to over an hour.
 // The window compares the local clock with GitHub's timestamps and narrows the race.
 // The post-merge check covers only the PR's closing set; the squash message rests on the pre-merge text scan.
@@ -447,11 +450,15 @@ function readGithubClosing(repo: Repo, number: number, identity?: ReturnType<typ
   const response = asObject(parseJson(result, what), what);
   if (response.errors !== undefined) refuse();
   const repository = asObject(asObject(response.data, what).repository, what);
-  if (typeof repository.nameWithOwner !== "string" || repository.nameWithOwner.toLowerCase() !== expected) refuse();
+  if (typeof repository.nameWithOwner !== "string" || !/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/iu.test(repository.nameWithOwner))
+    refuse();
+  if (repository.nameWithOwner.toLowerCase() !== expected)
+    throw new ClosingMismatchError(1, "GitHub's closing query returned a different repository than origin.");
   const pr = asObject(repository.pullRequest, what);
   const connection = asObject(pr.closingIssuesReferences, what);
-  if (asObject(connection.pageInfo, what).hasNextPage !== false || !Array.isArray(connection.nodes)) refuse();
-  if (connection.nodes.length > 20) refuse();
+  const hasNextPage = asObject(connection.pageInfo, what).hasNextPage;
+  if (typeof hasNextPage !== "boolean" || !Array.isArray(connection.nodes)) refuse();
+  if (hasNextPage || connection.nodes.length > 20) throw new ClosingMismatchError(1, CLOSING_MISMATCH);
   const issues: ClosingState["issues"] = [];
   for (const node of connection.nodes) {
     const ref = asObject(node, what);
@@ -489,6 +496,7 @@ function githubClosingGuard(
   try {
     closing = readGithubClosing(repo, number, identity);
   } catch (error) {
+    if (error instanceof ClosingMismatchError) throw error;
     throw new WtError(
       error instanceof WtError ? error.code : 1,
       phase === "merge"
@@ -1216,7 +1224,8 @@ export function prMerge(
       warnings.push("Warning: the merged head could not be read. Check the merged changes with the owner.");
     else if (state.headRefOid !== sha)
       warnings.push("Warning: the merged head is not the approved one. Check the merged changes with the owner.");
-    if (/was already merged/i.test(merge.stdout) || /was already merged/i.test(merge.stderr))
+    const alreadyMerged = /^\W*Pull request\b.*\bwas already merged\W*$/mu;
+    if (alreadyMerged.test(merge.stdout) || alreadyMerged.test(merge.stderr))
       warnings.push(
         "Warning: gh reported that the PR was already merged. This squash message was not used. Check the result.",
       );

@@ -191,8 +191,9 @@ Run, from the PR's own worktree:
 If it refuses because "GitHub may not have parsed the body yet", wait until the named UTC retry
 time. Do not poll more often than once a minute. Rerun step 2 in full (readiness and all feedback
 surfaces), without editing the PR body when Evidence already records the same difference; another
-edit would restart the settle window. If readiness is BEHIND after a carried-over rebase, stop
-with `<main>/bin/wt notify blocked`; do not rebase again.
+edit would restart the settle window. On any retry, BEHIND stops with
+`<main>/bin/wt notify blocked`, including when no approval was carried over a rebase.
+Step 7 never runs step 4.
 
 Rerun step 3 in full: the tracked-file and folder checks, newest saved result, handled delivery,
 and head mapping. The saved approval record must be unchanged; a newer `go` or `closed` ends the
@@ -221,8 +222,8 @@ text scan alone.
 - `MERGED` with exit 0: continue.
 - A non-zero exit with a `MERGED <commit>` line means the merge happened. Do not retry the merge.
   Run `<main>/bin/wt notify blocked` and report each warning to the owner as written, including
-  head, body-edit and merge-call warnings. Only the closing-set warning names issues: include
-  every issue it names (`owner/name#N`). If the closing check could not run, report that warning.
+  head, body-edit, merge-call and "already merged" warnings. Only the closing-set warning names
+  issues: include every issue it names (`owner/name#N`). If the closing check could not run, report that warning.
   Continue to step 8's `sync-main`, but skip cleanup and leave the worktree for investigation.
 
 When a permission check refuses the merge command itself (the tool call is denied, not a `bin/wt`
