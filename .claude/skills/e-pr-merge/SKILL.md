@@ -185,8 +185,11 @@ Run, from the PR's own worktree:
 
 If it refuses because "GitHub may not have parsed the body yet", wait until the named UTC retry
 time. Do not poll more often than once a minute. Rerun step 2 in full (readiness and all feedback
-surfaces), then step 3 (approval and the head comparison), then step 7 once, including its issue
-check and the same merge command. Any failed gate or a second refusal stops: run
+surfaces), then re-check that the saved approval record from step 3 is unchanged. Compare the
+fresh PR head with the head to merge: the approved head, or the rebased head when step 4 carried
+the approval over. Keep that carried-over head; do not reload the approved head as the only
+allowed head. Then rerun step 7 once, including its issue check and the same merge command.
+Any failed gate, changed approval record or second refusal stops: run
 `<main>/bin/wt notify blocked` and report the reason.
 
 If it refuses with
@@ -195,7 +198,7 @@ If it refuses with
 Without `--pr` it acts on the caller branch's PR. Add `--pr <n>` when this skill runs in the
 main checkout. An issue PR (branch `emend-<n>-<slug>`) merges only from its own worktree: there
 `pr merge` runs the issue check, and in the main checkout it refuses. `--match-head` refuses the merge if a commit landed after the
-check. The last line is `MERGED <commit>` or `QUEUED`.
+check. The last line is `MERGED <commit>` or `QUEUED` (`QUEUED` exits 1 with a warning).
 
 The post-merge check covers only the PR's closing set. The squash message rests on the pre-merge
 text scan alone.
@@ -204,8 +207,9 @@ text scan alone.
   The owner must check the PR's closed issues after the eventual merge.
 - `MERGED` with exit 0: continue.
 - A non-zero exit with a `MERGED <commit>` line means the merge happened. Do not retry the merge.
-  Record the warning and every named issue (`owner/name#N`), run `<main>/bin/wt notify blocked`, and
-  report the issue numbers with that blocked result (or that the closing check could not run).
+  Run `<main>/bin/wt notify blocked` and report each warning to the owner as written, including
+  head, body-edit and merge-call warnings. Only the closing-set warning names issues: include
+  every issue it names (`owner/name#N`). If the closing check could not run, report that warning.
   Continue to step 8's `sync-main`, but skip cleanup and leave the worktree for investigation.
 
 When a permission check refuses the merge command itself (the tool call is denied, not a `bin/wt`

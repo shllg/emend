@@ -124,6 +124,8 @@ async function boundary(
             .join("\n"),
         };
       if (args.includes("fetch")) return {};
+      if (args.includes("push") && args.includes("--delete") && args.at(-1) === `refs/heads/${state.prBranch}`)
+        return {};
       if (args.includes("refs/wt-pr-merge/7")) return { stdout: "a".repeat(40) };
       if (args.includes("rev-parse")) return { status: 1 };
     }
@@ -274,6 +276,20 @@ function readOnlyPrOrIssue(call: Call): boolean {
           arg.startsWith("query=query(") && (arg.includes("issue(number:") || arg.includes("pullRequests(states:")),
       ))
   );
+}
+
+function assertNoBranchDeletion(calls: Call[]): void {
+  for (const call of calls.filter((call) => call.command === "git")) {
+    assert.ok(!call.args.includes("push"), "no push, including delete refspecs, before or after a warning");
+    assert.ok(!call.args.includes("branch"), "no local branch deletion on a warning");
+    const update = call.args.indexOf("update-ref");
+    if (update !== -1)
+      assert.deepEqual(
+        call.args.slice(update),
+        ["update-ref", "-d", "refs/wt-pr-merge/7"],
+        "only the temporary merge-check ref may be deleted",
+      );
+  }
 }
 
 function closingResponse(
@@ -2379,6 +2395,7 @@ for (const outcome of ["foreign", "own", "failed read", "incomplete read"] as co
   test(`post-merge closing check preserves the merged result: ${outcome}`, (t) =>
     boundary(async ({ repo, state, calls }) => {
       prepareMergeIssue(repo);
+      state.remoteBranches = [state.prBranch];
       state.merged = true;
       state.closingReplies = [
         { stdout: closingResponse([ownClosingIssue]) },
@@ -2431,7 +2448,19 @@ for (const outcome of ["foreign", "own", "failed read", "incomplete read"] as co
       const merge = calls.findIndex((call) => call.command === "gh" && call.args[1] === "merge");
       assert.ok(calls.indexOf(queries[0] as Call) < merge);
       assert.ok(calls.indexOf(queries[1] as Call) > merge);
-      if (outcome !== "own") assert.ok(!calls.some((call) => call.command === "git" && call.args.includes("push")));
+      if (outcome !== "own") assertNoBranchDeletion(calls);
+      else {
+        const pushes = calls.filter((call) => call.command === "git" && call.args.includes("push"));
+        assert.equal(pushes.length, 1, "a clean merge deletes the existing remote branch");
+        assert.deepEqual(pushes[0]?.args.slice(GIT_BASE.length), [
+          "push",
+          `--force-with-lease=refs/heads/${state.prBranch}:${"a".repeat(40)}`,
+          "origin",
+          "--delete",
+          `refs/heads/${state.prBranch}`,
+        ]);
+        assert.ok(calls.indexOf(pushes[0] as Call) > calls.indexOf(queries[1] as Call));
+      }
     }));
 }
 
@@ -2461,6 +2490,7 @@ for (const queue of [{ id: "synthetic-queue" }, undefined]) {
 test("round 11 queued result exits 1 and warns that the eventual merge is unchecked", (t) =>
   boundary(({ repo, state, calls }) => {
     prepareMergeIssue(repo);
+    state.remoteBranches = [state.prBranch];
     state.merged = false;
     state.closing = { stdout: closingResponse([ownClosingIssue]) };
     const stdout: string[] = [];
@@ -2477,7 +2507,7 @@ test("round 11 queued result exits 1 and warns that the eventual merge is unchec
     assert.deepEqual(stdout, ["QUEUED\n"]);
     assert.equal(calls.filter((call) => call.command === "gh" && call.args[1] === "merge").length, 1);
     assert.equal(calls.filter(isClosingQuery).length, 1);
-    assert.ok(!calls.some((call) => call.command === "git" && call.args.includes("push")));
+    assertNoBranchDeletion(calls);
   }));
 
 test("round 11 foreign closing issues refuse before the settle clock is consulted", () =>
@@ -2508,10 +2538,35 @@ test("round 11 foreign closing issues refuse before the settle clock is consulte
     assert.ok(!calls.some((call) => call.command === "gh" && call.args[1] === "merge"));
   }));
 
-for (const change of ["body edited", "head changed", "head missing", "merge call failed"] as const) {
+for (const [change, mergedHead, warning] of [
+  [
+    "body edited",
+    "a".repeat(40),
+    "Warning: the PR body was edited during the merge. Check its closed issues and reopen any foreign ones.",
+  ],
+  [
+    "head changed",
+    "b".repeat(40),
+    "Warning: the merged head is not the approved one. Check the merged changes with the owner.",
+  ],
+  ...[undefined, null, 123, "invalid"].map(
+    (head) =>
+      [
+        `head unreadable: ${JSON.stringify(head)}`,
+        head,
+        "Warning: the merged head could not be read. Check the merged changes with the owner.",
+      ] as const,
+  ),
+  [
+    "merge call failed",
+    "a".repeat(40),
+    "Warning: gh pr merge reported an error, but the PR is merged. Check the result.",
+  ],
+] as const) {
   test(`round 11 merged result warns and keeps the branch: ${change}`, (t) =>
     boundary(({ repo, state, calls }) => {
       prepareMergeIssue(repo);
+      state.remoteBranches = [state.prBranch];
       state.closingReplies = [
         { stdout: closingResponse([ownClosingIssue], false, "Owner/Repo", { lastEditedAt: "2026-02-01T11:00:00Z" }) },
         {
@@ -2520,8 +2575,7 @@ for (const change of ["body edited", "head changed", "head missing", "merge call
           }),
         },
       ];
-      if (change === "head changed") state.mergedHead = "b".repeat(40);
-      if (change === "head missing") state.mergedHead = undefined;
+      state.mergedHead = mergedHead;
       if (change === "merge call failed") state.mergeReply = { status: 1, stderr: "synthetic merge failure" };
       const stdout: string[] = [];
       t.mock.method(process.stdout, "write", (chunk: string | Uint8Array) => {
@@ -2534,14 +2588,12 @@ for (const change of ["body edited", "head changed", "head missing", "merge call
         (error: unknown) => {
           assert.ok(error instanceof WtError);
           assert.equal(error.code, 1);
-          assert.match(
-            error.message,
-            change === "body edited" ? /PR body was edited during the merge/ : /merged head is not the approved one/,
-          );
+          assert.equal(error.message, warning);
           return true;
         },
       );
       assert.deepEqual(stdout, [`MERGED ${"c".repeat(40)}\n`]);
+      assertNoBranchDeletion(calls);
       const queries = calls.filter(isClosingQuery);
       assert.equal(queries.length, 2);
       assert.equal(calls.at(-1), queries[1], "no remote-branch cleanup after the warning");

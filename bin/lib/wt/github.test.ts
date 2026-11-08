@@ -1166,7 +1166,10 @@ test("pr merge warns with MERGED when gh failed after merging", (t) =>
       stdout.push(String(chunk));
       return true;
     });
-    assert.throws(() => prMerge(ctx.repo, MERGE_ARGS), /merged head is not the approved one/);
+    assert.throws(() => prMerge(ctx.repo, MERGE_ARGS), {
+      code: 1,
+      message: "Warning: gh pr merge reported an error, but the PR is merged. Check the result.",
+    });
     assert.deepEqual(stdout, [`MERGED ${MERGE_SHA}\n`]);
   }));
 

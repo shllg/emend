@@ -486,6 +486,8 @@ function githubClosingGuard(
   const closing = readGithubClosing(repo, number, identity);
   if (foreignClosingIssues(closing, branch).length) throw new WtError(1, CLOSING_MISMATCH);
   if (requireOwn) {
+    // GitHub returns null for no queue or one the token cannot see, so refusal relies on token visibility.
+    // The QUEUED path still stops the workflow if the merge is queued after submission.
     if (closing.mergeQueue === undefined)
       throw new WtError(1, "Could not read the repository's merge queue. Nothing was merged.");
     if (closing.mergeQueue !== null) throw new WtError(1, "Merge queues are not supported. Nothing was merged.");
@@ -1194,8 +1196,12 @@ export function prMerge(
     if (typeof oid !== "string" || !/^[0-9a-f]{40}$/.test(oid))
       throw new WtError(1, "The pull request is merged, but its merge commit could not be read.");
     const warnings: string[] = [];
-    if (merge.code !== 0 || state.headRefOid !== sha)
+    if (typeof state.headRefOid !== "string" || !/^[0-9a-f]{40}$/.test(state.headRefOid))
+      warnings.push("Warning: the merged head could not be read. Check the merged changes with the owner.");
+    else if (state.headRefOid !== sha)
       warnings.push("Warning: the merged head is not the approved one. Check the merged changes with the owner.");
+    else if (merge.code !== 0)
+      warnings.push("Warning: gh pr merge reported an error, but the PR is merged. Check the result.");
     try {
       const closingAfter = readGithubClosing(repo, n, identity);
       if (closingAfter.pr.lastEditedAt !== closingPr.lastEditedAt)
