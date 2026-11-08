@@ -30,6 +30,69 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+for (const [name, body] of [
+  ["bullet", "-\n  ```\n2. a\n   [\n   ] x"],
+  ["padded bullet", "-    \n  ```\n2. a\n   [\n   ] x"],
+  ["ordered item", "1.\n   ```\n2. a\n   [\n   ] x"],
+  ["parenthesized ordered item", "1)    \n   ```\n2) a\n   [\n   ] x"],
+  ["quoted bullet", "2. a\n   > -\n   >   ```\n   > ```\n   > - [ ] x"],
+  ["nested quote bullet", "2. a\n   >> -\n   >>   ```\n   >> ```\n   >> - [ ] x"],
+  ["quote spacing changes", "2. a\n   >-\n   >   ```\n   >  ```\n   > - [ ] x"],
+  ["spacing between nested quotes changes", "2. a\n   >>-\n   > >   ```\n   >>  ```\n   >> - [ ] x"],
+] as const) {
+  test(`raw Markdown refuses blank-item fence exit for ${name}`, () => {
+    assert.equal(evaluate(body).reason, reason("task marker"), body);
+  });
+}
+
+test("quoted blank line keeps a blank-item fence open", () => {
+  const body = "2. a\n   > -\n   >   ```\n   >\n   >   - [ ] x\n   >   ```";
+  assert.equal(evaluate(body).reason, reason("task marker"), body);
+});
+
+for (const [name, body] of [
+  ["code stays in blank bullet", "-\n  ```text\n  code\n  - [ ] x\n  ```"],
+  ["code stays in blank ordered item", "1.\n   ```text\n   code\n   - [x] x\n   ```"],
+  ["fence before blank bullet content", "-\n ```text\n2. a\n   [\n   ] x\n ```"],
+  ["fence outside quoted blank bullet", ">-\n   ```text\n2. a\n   [\n   ] x\n```"],
+  ["code stays in quoted blank bullet", ">-\n>   ```text\n>   code\n>   - [ ] x\n>   ```"],
+] as const) {
+  test(`raw Markdown permits ${name}`, () => {
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+
+for (const [name, body, kind] of [
+  ["blank-start heading with trailing spaces", "1. a\n2.    \n   ## h\n1. c", "list number"],
+  ["blank-start thematic break with trailing spaces", "1. a\n2.    \n   ***\n1. c", "list number"],
+  ["blank-start heading without trailing spaces", "1. a\n2.\n   ## h\n1. c", "list number"],
+  ["blank-start heading cannot reset numbering", "1. a\n2.    \n   ## h\n2. c", "list number"],
+  ["blank-start item keeps its code indentation", "2.    \n   text\n       - [ ] x", "task marker"],
+  ["blank-start item keeps its fence", "2.    \n   ```text\n   - [ ] x\n   ```", "task marker"],
+  ["blank-start tab does not widen the item", "1. a\n2.\t\n   ## h\n1. c", "list number"],
+  ["blank-start tab keeps code indentation", "2.\t\n   text\n       - [ ] x", "task marker"],
+  ["blank-start heading with CRLF", "1. a\r\n2.    \r\n   ## h\r\n1. c", "list number"],
+] as const) {
+  test(`raw Markdown refuses ${name}`, () => {
+    assert.equal(evaluate(body).reason, reason(kind), body);
+  });
+}
+
+for (const [name, body] of [
+  ["heading outside ordinary item", "1. a\n2. b\n## h\n1. c"],
+  ["heading outside padded ordinary item", "1.  a\n2.  b\n   ## H\n3.  c"],
+  ["blank-start item with nested checklist", "2.    \n   text\n   - [ ] x"],
+  ["blank-start item with outside heading", "1. a\n2.    \n## h\n1. c"],
+  ["blank-start item with different next delimiter", "1. a\n2.    \n   ## h\n1) c"],
+  ["blank-start item with literal heading in code", "1. a\n2.    \n       ## h\n1. c"],
+  ["blank bullet with following text", "-\n  text"],
+  ["padded blank bullet with following text", "-    \n  text"],
+] as const) {
+  test(`raw Markdown permits ${name}`, () => {
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+
 test("repeated container spacing finishes scanning", { timeout: 10_000 }, async (t) => {
   // Exercise the internal scan: the public 200-character limit rejects this
   // input first. A worker lets the test timeout stop a synchronous regex hang.
