@@ -169,7 +169,8 @@ Number a list `1., 2., 3.` only when every numbered line in the body, code block
 the left margin. If any is nested, quoted or indented, every numbered item in the body uses `1.`.
 A later flat list may count up again after a blank line and a line of text at the left margin, such
 as a heading or a sentence; otherwise use `1.` throughout. A numbered item with a checkbox uses
-`1.`. Checkboxes use lowercase `[x]`. Never start a line with a bare `[ ]`, `[x]` or `[X]`.
+`1.`. Checkboxes use lowercase `[x]`; an empty box holds one space, never a tab. Never start a line
+with a bare `[ ]`, `[x]` or `[X]`.
 
 ```markdown
 ## Why

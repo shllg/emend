@@ -4,6 +4,11 @@
 // GitHub also shortens recognized commit hashes, which remark does not model.
 // Only hashes naming real commits are shortened, so an author cannot choose the
 // hidden suffix beyond the few bits a brute-forced commit buys. No refusal is needed.
+// remark expands a tab inside a task box according to its column; GitHub reads
+// the raw tab. GitHub may also find boxes in rendered text after escape handling,
+// which the raw checker refuses conservatively without claiming renderer parity.
+// GitHub's text filters skip code: a canonical box-shaped line inside a fence
+// stays literal and accepted. This oracle does not apply task transforms to code.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createRequire, stripTypeScriptTypes } from "node:module";
@@ -240,7 +245,7 @@ const hostile = [
   ["list number", "2) [ ] step"],
   ["list number", "1. 9. [x] Done"],
   ["list number", "> - 9. [ ] Done"],
-  ["list number", "2. [X] Done"],
+  ["task marker", "2. [X] Done"],
   ["list number", "2.\t[x] Done"],
   ["list number", "1. [x] a\n2. [ ] b"],
   ["task marker", "- [X] done"],
@@ -253,7 +258,35 @@ const hostile = [
   ["empty code block", " ```go\n ``` "],
   ["empty code block", "   ```go\n   ``` "],
   ["empty code block", "   ```ts"],
+  ["list number", "1234. [\t] Done"],
+  ["task marker", "2.    [\t] Done"],
+  ["task marker", "- 12. [\t] a"],
+  ["list number", "- 987654. [\t] Done"],
+  ["list number", "12345678. [\t] Done"],
+  ["task marker", "2. [\n   ] Done"],
+  // These are required raw refusals beyond remark's model. Keep them in the
+  // hostile corpus and assert refusals, without claiming the oracle detects them.
+  ["list number", "Steps\n\n104101108. [\t] a\n\ntext\n\n108111032. [\t] b", "checker only"],
+  ["task marker", "2. [\t] Done", "checker only"],
+  ["list number", "- 987654321. [\t] Done", "checker only"],
+  ["task marker", "1. [\t] a\n2. [\t] b", "checker only"],
+  ["list number", "2. -[x] Done", "checker only"],
+  ["list number", "987654321. +[x] Done", "checker only"],
+  ["list number", "2. 3.[x] Done", "checker only"],
+  ["list number", "2. 1.[x] Done", "checker only"],
+  ["list number", "2. \\[x] Done", "checker only"],
+  ["list number", "2. [x\\] Done", "checker only"],
+  ["task marker", "2. [\u00a0] Done", "checker only"],
+  ["task marker", "2. [\u3000] Done", "checker only"],
+  ["task marker", "2. a\n-[x] b", "checker only"],
+  ["task marker", "-[x] Done", "checker only"],
+  ["task marker", "1.[x] Done", "checker only"],
+  ["task marker", "1. [\n   ] Done", "checker only"],
+  ["task marker", "\\[x]", "checker only"],
+  ["list number", "1000. a", "checker only"],
+  ["list number", "- 1234. a", "checker only"],
 ] as const;
+const oracleHostile = hostile.filter(([, , scope]) => scope !== "checker only");
 
 const containerFences = [
   ">```ts\ne",
@@ -279,9 +312,20 @@ const containerFences = [
 // These owner forms must stay accepted; markdown-security.test.ts also asserts
 // them through issue evaluation. The mixed corpus below retains refusal cases too.
 const ownerBodies = [
+  "- [a] item",
+  "1. [1] reference",
+  "[!] Note",
+  "2. [a] b",
+  "```text\n[1] 42\n```",
+  "- [😀] Done",
   "1. [x] Done",
   "- 1. [ ] a",
   "1) [ ] step",
+  "> - [ ] quoted",
+  "- [ ] Pending\n- [x] Complete",
+  "```text\n- [x] Done\n1. [ ] Pending\n```",
+  "```json\n[\n  1,\n  2\n]\n```",
+  "999. a",
   "```text\n\t```\n```",
   "```text\n    ```\n```",
   "```text\n \t```\n```",
@@ -438,6 +482,9 @@ function generatedBodies(): string[] {
     "+ ",
     "1. ",
     "2) ",
+    "1234. ",
+    "12345678. ",
+    "- 12. ",
     "- 0",
     "01. ",
     "1. 007. ",
@@ -472,6 +519,19 @@ function generatedBodies(): string[] {
     "[x]",
     "[X]",
     "[ ]",
+    "[a]",
+    "[1]",
+    "[!]",
+    "[\t]",
+    "[\u00a0]",
+    "[\u3000]",
+    "\\[x]",
+    "[x\\]",
+    "-[x]",
+    "+[x]",
+    "3.[x]",
+    "1.[x]",
+    "[\n   ]",
     "[a]: /b",
     "](",
     "[abc](",
@@ -510,8 +570,11 @@ function generatedBodies(): string[] {
       const prefix = pick(prefixes);
       bodies.push(`${prefix}| a |\n${prefix}${pick(["---", ":-", "| --- |"])}\n${prefix}visible | HIDDEN`);
     } else if (i % 13 === 1) {
+      const marker = pick(["-", "1.", "2.", "1234.", "12345678.", "- 12.", "987654321."]);
+      const spacing = pick([" ", "    ", "\t"]);
+      const box = pick(["[ ]", "[x]", "[X]", "[\t]", "[\u00a0]", "[\u3000]", "\\[x]", "[x\\]", "[\n   ]"]);
       bodies.push(
-        `${pick(prefixes)}${pick(["-", "1.", "2.", "987654321."])} ${pick(["[ ]", "[x]", "[X]"])} ${pick(["a", "é1", "task"])}\n${body}`,
+        `${pick(prefixes)}${marker}${spacing}${pick(["", "-", "+", "3.", "1."])}${box} ${pick(["a", "é1", "task"])}\n${body}`,
       );
     } else if (i % 13 === 2) {
       const fence = pick(["```", "~~~"]);
@@ -541,6 +604,18 @@ function generatedBodies(): string[] {
       bodies.push(markers.map((marker) => `${prefix}${marker}. visible`).join("\n"));
     } else if (i % 13 === 6) {
       bodies.push(pick(["Plain text.", "- [x] done", "- [ ] pending", "a[X]", "https://example.com/a", "#12 @user"]));
+    } else if (i % 13 === 7) {
+      bodies.push(
+        pick([
+          "2. a\n-[x] b",
+          "1. [\t] a\n2. [\t] b",
+          "Steps\n\n104101108. [\t] a\n\ntext\n\n108111032. [\t] b",
+          "2. [\n   ] Done",
+          "```text\n- [x] Done\n1. [ ] Pending\n```",
+          "```json\n[\n  1,\n  2\n]\n```",
+          `${pick(prefixes)}${pick(pieces)}\n${body}\n${pick(pieces)}`,
+        ]),
+      );
     } else if (i % 13 === 8) {
       const prefix = pick(["", "> ", "  "]);
       const delimiter = pick([".", ")"]);
@@ -591,8 +666,6 @@ function generatedBodies(): string[] {
         "\n\n```text\ncode\n```\n",
       ]);
       bodies.push(`1. a\n2. b${between}1. c\n2. d`);
-    } else {
-      bodies.push(`${pick(prefixes)}${pick(pieces)}\n${body}\n${pick(pieces)}`);
     }
   }
   return bodies;
@@ -626,7 +699,7 @@ function minimize(body: string, reason: string): string {
 
 test("coverage oracle detects lost text and unsafe structure independently of the checker", () => {
   for (const body of [
-    ...hostile.map(([, body]) => body),
+    ...oracleHostile.map(([, body]) => body),
     "<!-- hidden -->",
     "[a]: /hidden",
     "[a]\n\n[a]: /hidden",
@@ -684,7 +757,7 @@ test("checked task state covers canonical x while literal X remains text", () =>
     "- [ ] a[x]",
     "`a[x]`",
     "    a[X]",
-    "\\[x]",
+    "a\\[x]",
   ]) {
     assert.equal(hiddenMarkdownReason(body), null, JSON.stringify(body));
     assert.doesNotThrow(() => checkCoverage(body), JSON.stringify(body));
@@ -708,16 +781,17 @@ test("missing parser install has an actionable error", async () => {
 
 // math, emoji shortcode, GitHub link, whitespace run and line length are not
 // observable by this CommonMark/GFM oracle; markdown-security.test.ts owns them.
+// The checker-only hostile cases likewise cover GitHub text filters and clipping.
 test("coverage catches each observable refusal-class mutation", (t) => {
   for (const [kind, body] of hostile) {
     assert.equal(hiddenMarkdownReason(body), `hidden Markdown in the body: ${kind}`, body);
   }
-  for (const kind of new Set(hostile.map(([kind]) => kind))) {
+  for (const kind of new Set(oracleHostile.map(([kind]) => kind))) {
     const mutated = (body: string) => {
       const reason = hiddenMarkdownReason(body);
       return reason === `hidden Markdown in the body: ${kind}` ? null : reason;
     };
-    const released = hostile.map(([, body]) => body).filter((body) => mutated(body) === null);
+    const released = oracleHostile.map(([, body]) => body).filter((body) => mutated(body) === null);
     assert.ok(released.length > 0, `${kind}: mutation must release a hostile body`);
     for (const body of released) assert.notEqual(violation(body), null, `${kind}: ${JSON.stringify(body)}`);
     t.diagnostic(`mutation ${kind}: caught=yes`);
@@ -740,10 +814,17 @@ test("each individual rule has a mutation witness", async (t) => {
     { name: "flat numbering", from: "!flat || ", to: "", body: "1. a\n   2. b\n3. c", kind: "list number" },
     {
       name: "numbered task item",
-      from: 'numberedTask && numberedTask[1] !== "1"',
+      from: 'number[1] !== "1"',
       to: "false",
-      body: "- 987654321. [x] Done",
+      body: "- 12. [x] Done",
       kind: "list number",
+    },
+    {
+      name: "task box alphabet",
+      from: String.raw`[\sxX]`,
+      to: String.raw`[\s\S]`,
+      body: "- [a] item",
+      kind: null,
     },
     {
       name: "restart availability",
@@ -832,8 +913,8 @@ test("each individual rule has a mutation witness", async (t) => {
       const mutated = (input: string): string | null => module.hiddenMarkdownReason(input);
       assert.equal(hiddenMarkdownReason(body), kind === null ? null : `hidden Markdown in the body: ${kind}`, name);
       if (kind === null) {
-        // Removing an acceptance guard (restart or closer precision) makes the
-        // checker stricter. An oracle-approved owner form must catch that loss.
+        // Broadening a refusal or removing an acceptance guard makes the checker
+        // stricter. An oracle-approved owner form must catch that loss.
         assert.equal(violation(body), null, `${name}: witness must preserve coverage`);
         assert.notEqual(mutated(body), null, `${name}: mutation must falsely refuse its witness`);
       } else {

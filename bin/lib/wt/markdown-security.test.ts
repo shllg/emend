@@ -27,6 +27,71 @@ const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-012
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
 for (const [name, body, kind] of [
+  ["tab box after four-digit marker", "1234. [\t] Done", "list number"],
+  ["tab box after eight-digit marker", "12345678. [\t] Done", "list number"],
+  ["tab box after aligned spaces", "2.    [\t] Done", "task marker"],
+  ["tab box after nested two-digit marker", "- 12. [\t] a", "task marker"],
+  ["tab box after nested six-digit marker", "- 987654. [\t] Done", "list number"],
+  ["tab boxes after restarted long markers", "Steps\n\n104101108. [\t] a\n\ntext\n\n108111032. [\t] b", "list number"],
+  ["tab box missed by remark", "2. [\t] Done", "task marker"],
+  ["nested tab box missed by remark", "- 987654321. [\t] Done", "list number"],
+  ["sequential tab boxes", "1. [\t] a\n2. [\t] b", "task marker"],
+  ["tab in literal-one box", "1. [\t] a", "task marker"],
+  ["box split across lines", "2. [\n   ] Done", "task marker"],
+  ["literal-one box split across lines", "1. [\n   ] Done", "task marker"],
+  ["bullet box split across lines", "- [ \n  ] Done", "task marker"],
+  ["nonbreaking-space box", "2. [\u00a0] Done", "task marker"],
+  ["ideographic-space box", "2. [\u3000] Done", "task marker"],
+  ["unspaced bullet before box", "2. -[x] Done", "list number"],
+  ["unspaced plus before box", "987654321. +[x] Done", "list number"],
+  ["unspaced nested number before box", "2. 3.[x] Done", "list number"],
+  ["outer number before literal-one box", "2. 1.[x] Done", "list number"],
+  ["outer number before spaced literal-one box", "2. 1. [x] Done", "list number"],
+  ["outer number before bullet box", "2. - [x] Done", "list number"],
+  ["escaped opening bracket", "2. \\[x] Done", "list number"],
+  ["escaped closing bracket", "2. [x\\] Done", "list number"],
+  ["escaped ordered delimiter", "2\\. [x] Done", "list number"],
+  ["escaped bare box", "\\[x]", "task marker"],
+  ["lazy line box", "2. a\n-[x] b", "task marker"],
+  ["unspaced bare bullet box", "-[x] Done", "task marker"],
+  ["unspaced literal-one box", "1.[x] Done", "task marker"],
+  ["quoted box without marker", "> [x] Done", "task marker"],
+  ["four-digit list start", "1000. a", "list number"],
+  ["nested four-digit list start", "- 1234. a", "list number"],
+  ["four-digit start after another number", "1. 1234) a", "list number"],
+  ["nine-digit list start", "123456789. a", "list number"],
+  ["long marker inside code", "```text\n1000. a\n```", "list number"],
+] as const) {
+  test(`raw Markdown refuses ${name}`, () => {
+    assert.equal(evaluate(body).reason, reason(kind), body);
+  });
+}
+
+for (const [name, body] of [
+  ["bracketed letter after bullet", "- [a] item"],
+  ["bracketed digit after ordered marker", "1. [1] reference"],
+  ["bracketed punctuation", "[!] Note"],
+  ["bracketed letter after non-one marker", "2. [a] b"],
+  ["R output in code", "```text\n[1] 42\n```"],
+  ["bracketed code point after bullet", "- [😀] Done"],
+  ["quoted unchecked task", "> - [ ] quoted"],
+  ["mixed task states", "- [ ] Pending\n- [x] Complete"],
+  ["tab between marker and canonical box", "1.\t[ ] Pending"],
+  ["literal canonical boxes in code", "```text\n- [x] Done\n1. [ ] Pending\n```"],
+  ["JSON array in code", "```json\n[\n  1,\n  2\n]\n```"],
+  ["bare opening bracket", "["],
+  ["indented opening bracket", "  [ \t"],
+  ["quoted opening bracket", "> ["],
+  ["three-digit start boundary", "999. a"],
+  ["nested three-digit start boundary", "- 999. a"],
+  ["long digits after text", "Text 123456789. a"],
+] as const) {
+  test(`raw Markdown permits ${name}`, () => {
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+
+for (const [name, body, kind] of [
   ["hidden checked task number", "987654321. [x] Done", "list number"],
   ["hidden nested checked task number", "- 987654321. [x] Done", "list number"],
   ["hidden unchecked task number", "987654321. [ ] Done", "list number"],
@@ -34,7 +99,7 @@ for (const [name, body, kind] of [
   ["hidden parenthesized task number", "2) [ ] step", "list number"],
   ["hidden task number after ordered marker", "1. 9. [x] Done", "list number"],
   ["hidden task number after quote and bullet", "> - 9. [ ] Done", "list number"],
-  ["hidden uppercase task number", "2. [X] Done", "list number"],
+  ["hidden uppercase task number", "2. [X] Done", "task marker"],
   ["hidden task number after tab", "2.\t[x] Done", "list number"],
   ["hidden sequential task number", "1. [x] a\n2. [ ] b", "list number"],
   ["numbered task inside code", "```text\n2. [x] Done\n```", "list number"],

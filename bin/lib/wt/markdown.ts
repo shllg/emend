@@ -35,6 +35,9 @@ function allowedFenceInfo(line: string, start: number): boolean {
 
 /** Conservative raw-line rules, without reconstructing CommonMark containers. */
 function hiddenLineReason(lines: string[]): string | null {
+  // Long starts can be drawn outside the comment box, including nested starts.
+  if (lines.some((line) => /^(?:[\s>]|[-*+]|\d{1,9}[.)])*\d{4,9}[.)](?=[ \t]|$)/u.test(line)))
+    return refusal("list number");
   if (lines.some((line) => /^(?:[\s>]|[-*+]|\d{1,9}[.)])*0\d{0,8}[.)](?=[ \t]|$)/u.test(line)))
     return refusal("list number");
   // A nonzero, non-task marker later in a leading chain opens a new nested list
@@ -86,11 +89,23 @@ function hiddenLineReason(lines: string[]): string | null {
   let needsContent: string | null = null;
   let openerIndent = 0;
   for (const line of lines) {
-    // GitHub hides a task item's ordered number, whether checked or unchecked.
-    const numberedTask = /^(?:[\s>]|[-*+]|\d{1,9}[.)])*(\d{1,9})[.)][ \t]+\[[ xX]\]/u.exec(line);
-    if (numberedTask && numberedTask[1] !== "1") return refusal("list number");
-    if (/^[\s>]*\[[xX ]\]/u.test(line) || /^(?:[\s>]|[-*+]|\d{1,9}[.)])*\[X\]/u.test(line))
-      return refusal("task marker");
+    // GitHub may find boxes in rendered text and hide their list numbers. Strip
+    // escapes before checking the whole leading chain; only canonical boxes and
+    // literal-one numbers are safe. A split box needs a marker, so JSON's bare
+    // opening bracket remains text. Only whitespace and x/X can form a box;
+    // other bracketed characters stay text. Closed bare boxes can be lazy continuations.
+    const t = line.replaceAll("\\", "");
+    const task = /^((?:[\s>]|[-*+]|\d{1,9}[.)])*)\[(?:([\sxX])\]|\s*$)/u.exec(t);
+    if (task) {
+      const prefix = task[1] ?? "";
+      const split = task[2] === undefined;
+      if (!split || /[-*+]|\d{1,9}[.)]/u.test(prefix)) {
+        if (task[2] !== " " && task[2] !== "x") return refusal("task marker");
+        if ([...prefix.matchAll(/(\d{1,9})[.)]/gu)].some((number) => number[1] !== "1")) return refusal("list number");
+        // All ordered markers above are 1; require a final marker and spacing.
+        if (!/(?:[-*+]|\d{1,9}[.)])[ \t]+$/u.test(prefix)) return refusal("task marker");
+      }
+    }
     let contentStart = 0;
     let indent = 0;
     while (line[contentStart] === " " || line[contentStart] === "\t") {
