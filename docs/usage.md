@@ -85,9 +85,10 @@ server runs, it removes a Tailscale Serve route that a crashed `emend serve --ta
 The inbox lists every review and published doc, with the ones that need you first. A phone shows
 the same groups as a desktop.
 
-| Desktop | Phone |
-| --- | --- |
-| ![The inbox on a desktop, with six reviews and docs](images/inbox-desktop.png) | ![The inbox on a phone](images/inbox-phone.png) |
+<p>
+  <img src="images/inbox-desktop.png" alt="The inbox on a desktop, with six reviews and docs" width="76%">
+  <img src="images/inbox-phone.png" alt="The inbox on a phone" width="22%">
+</p>
 
 A plan or other doc that comes with a review opens next to its diff, with its diagrams drawn and
 your comments beside the text.

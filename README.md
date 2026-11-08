@@ -6,8 +6,8 @@ feedback. emend starts on your machine with one command. Machines can attach to 
 review from any device, your phone included.
 
 <p>
-  <img src="https://raw.githubusercontent.com/shllg/emend/main/docs/images/review-desktop.png" alt="An emend review on a desktop: the agent's writeup and topics next to the diff, with a reviewer comment and the agent's reply" width="74%">
-  <img src="https://raw.githubusercontent.com/shllg/emend/main/docs/images/review-phone.png" alt="The same review on a phone" width="24%">
+  <img src="https://raw.githubusercontent.com/shllg/emend/main/docs/images/review-desktop.png" alt="An emend review on a desktop: the agent's writeup and topics next to the diff, with a reviewer comment and the agent's reply" width="76%">
+  <img src="https://raw.githubusercontent.com/shllg/emend/main/docs/images/review-phone.png" alt="The same review on a phone" width="22%">
 </p>
 
 [VISION.md](https://github.com/shllg/emend/blob/main/VISION.md) says what emend is for, and what it
