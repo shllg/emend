@@ -165,7 +165,11 @@ Conventional Commits prefix and no issue number.
 
 **Body**, in this order. The text in angle brackets below is guidance to replace, never to copy:
 
-Number a list `1., 2., 3.` only when every numbered line in the body, code blocks included, starts at the left margin. If any is nested, quoted or indented, every numbered item in the body uses `1.`. A later numbered list uses only `1.`, unless it uses the other delimiter than the list before it (`)` after `.`), because the queue refuses a restart that counts up again. Checkboxes use lowercase `[x]`.
+Number a list `1., 2., 3.` only when every numbered line in the body, code blocks included, starts at
+the left margin. If any is nested, quoted or indented, every numbered item in the body uses `1.`.
+A later flat list may count up again after a blank line and a line of text at the left margin, such
+as a heading or a sentence; otherwise use `1.` throughout. Checkboxes use lowercase `[x]`. Never
+start a line with a bare `[ ]`, `[x]` or `[X]`.
 
 ```markdown
 ## Why

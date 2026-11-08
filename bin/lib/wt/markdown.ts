@@ -39,11 +39,8 @@ function hiddenLineReason(lines: string[]): string | null {
     return refusal("list number");
   // A nonzero marker later in a leading chain opens a new nested list as its
   // first item, whose number is shown. Only zero-led markers there are refused.
-  const markers = lines.flatMap((line) => {
-    const marker = /^([\s>]*)(\d{1,9})([.)])(?=[ \t]|$)/u.exec(line);
-    return marker ? [marker] : [];
-  });
-  const flat = markers.every((marker) => marker[1] === "");
+  const markers = lines.map((line) => /^([\s>]*)(\d{1,9})([.)])(?=[ \t]|$)/u.exec(line));
+  const flat = markers.every((marker) => !marker || marker[1] === "");
   let previous: number | undefined;
   let delimiter: string | undefined;
   let onesOnly = false;
@@ -52,8 +49,20 @@ function hiddenLineReason(lines: string[]): string | null {
   // is shown), or stays paragraph text. A literal 1 is a bounded allowance:
   // hidden digits are only 1s, at most one per marker. After a later 1,
   // continuation and restart diverge, so the run accepts only 1s; they cannot
-  // spell anything. Intervening non-marker lines do not reset a sequence.
-  for (const marker of markers) {
+  // spell anything. In the flat case every item's content is indented at least
+  // two columns. After a Markdown blank line (spaces/tabs only), a column-zero
+  // non-marker line is never lazy continuation or inside an item, so it ends the
+  // open list and resets the run.
+  // Inside a top-level fence, the digits are code text the page shows.
+  for (const [index, line] of lines.entries()) {
+    const marker = markers[index];
+    const followsBlank = index > 0 && /^[ \t]*$/u.test(lines[index - 1] ?? "");
+    if (flat && followsBlank && /^\S/u.test(line) && !marker) {
+      previous = undefined;
+      delimiter = undefined;
+      onesOnly = false;
+    }
+    if (!marker) continue;
     if (marker[3] !== delimiter) {
       delimiter = marker[3];
       previous = undefined;

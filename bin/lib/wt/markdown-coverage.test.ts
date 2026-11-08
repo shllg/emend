@@ -2,7 +2,8 @@
 // shortcodes and alerts). Those need raw checker rules of their own; this oracle
 // covers CommonMark and GFM structure only, without contacting a renderer service.
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
+import { readFile } from "node:fs/promises";
+import { createRequire, stripTypeScriptTypes } from "node:module";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { hiddenMarkdownReason } from "./markdown.ts";
@@ -69,11 +70,13 @@ const lettersAndDigits = (text: string) => text.match(/[\p{L}\p{N}]/gu)?.join(""
 /**
  * Every source letter/number the tree does not show must be determined by what
  * it does show, subject to the two bounded allowances below. Compare Unicode
- * letters/numbers in order and count after these
- * AST-positioned deductions: list digits must be the rendered start + item index
- * or use the marker-1 allowance, with no leading zero; a loaded screenshot's unseen
+ * letters/numbers in order and count after these AST-positioned deductions:
+ * list digits must be the rendered start + item index or use the allowance for 1,
+ * with no leading zero; a loaded screenshot's unseen
  * alt must be empty, Screenshot, or Screenshot <its 1-based screenshot-line
  * ordinal>. The exact approved image envelope is excluded, never arbitrary URLs.
+ * The ordinal counts screenshot lines, fenced ones included: their source line
+ * order is visible in the code block, so the digit remains determined.
  * A checked item's visible check mark contributes the canonical source x; X is
  * refused in that position, while literal a[X] remains text. Screenshots and list
  * markers inside code keep their source letters rather than these deductions.
@@ -198,6 +201,8 @@ const hostile = [
   ["link destination", "[abc](def)"],
   ["alt text", screenshot("Hidden")],
   ["alt text", screenshot("Screenshot 99")],
+  ["alt text", Array(30).fill(screenshot("Screenshot 12")).join("\n")],
+  ["alt text", `\`\`\`md\n${screenshot("Screenshot 1")}\n\`\`\`\n${screenshot("Screenshot 1")}`],
   ["reference definition", "[abc]: def"],
   ["character reference", "&amp;"],
   ["table", "| a |\n| - |\n| a | HIDDEN |"],
@@ -208,6 +213,10 @@ const hostile = [
   ["list number", "- 1. a\n- 1. b\n  3. c"],
   ["list number", "a\n2. b\n1. c\n4. d"],
   ["list number", "1.\n1.\n2."],
+  ["list number", "1. a\n2. b\nlazy\n1. c\n2. d"],
+  ["list number", "1. a\n2. b\n\n   indented\n1. c\n2. d"],
+  ["list number", "1. a\n\u00a0\nb\n1.\n2."],
+  ["list number", "1. a\n\n9. b"],
   ["list number", "- 00000001. x"],
   ["list number", "1. 007. x"],
   ["list number", "> - 0009. x"],
@@ -248,12 +257,28 @@ const containerFences = [
   " > ```ts\r\n\r\n>a",
 ];
 
-// Accepted examples from markdown-security.test.ts, including its fence matrix,
-// size boundary and Unicode-space cases. Keep historical inputs here if a newly
-// discovered gap moves one from acceptance to refusal in the raw-rule tests.
+// These owner forms must stay accepted; markdown-security.test.ts also asserts
+// them through issue evaluation. The mixed corpus below retains refusal cases too.
+const ownerBodies = [
+  "Steps\n\n1. a\n2. b\n\nExpected\n\n1. c\n2. d\n3. e",
+  "1. a\n2. b\n\n```text\n1. first\n2. second\n```",
+  "1. Steps\n2. More\n\nExpected\n\n1. c\n2. d",
+  "1. a\n2. b\n\ntext\n\n1. c\n2. d",
+  "1. a\n2. b\n\n## Expected\n\n1. c\n2. d",
+  "1. a\n2. b\n \t\nExpected\n1. c\n2. d",
+  "1. a\n2. b\n\n- divider\n1. c\n2. d",
+  "1. a\n2. b\n\n> divider\n1. c\n2. d",
+  "1. a\n2. b\n\n```text\ncode\n```\n1. c\n2. d",
+  Array.from({ length: 30 }, (_, i) => screenshot(`Screenshot ${i + 1}`)).join("\n"),
+  `\`\`\`md\n${screenshot("Screenshot 1")}\n\`\`\`\n${screenshot("Screenshot 2")}`,
+];
+
+// Mixed accepted, refused and historical fixtures, including the raw-rule fence
+// matrix and size boundaries. Acceptance is asserted separately for owner forms.
 const examples = [
   ...hostile.map(([, body]) => body),
   ...containerFences,
+  ...ownerBodies,
   "10. x",
   "100. x",
   "- 7. x",
@@ -309,7 +334,6 @@ const examples = [
   "😀".repeat(200),
   `a${" \t".repeat(8)}b`,
   ["", "Screenshot", "Screenshot 0", "Screenshot 09", "Screenshot 99"].map((alt) => screenshot(alt)).join("\n"),
-  Array(30).fill(screenshot("Screenshot 12")).join("\n"),
   "Plain instructions.",
   "## Summary\n- First item\n1. Second item",
   "- [ ] Pending\n- [x] Complete",
@@ -444,23 +468,23 @@ function generatedBodies(): string[] {
     bodies.push(body);
     // Correlated lines reach block constructs that independent punctuation
     // almost never produces: nested tables, task boxes and fenced paragraphs.
-    if (i % 12 === 0) {
+    if (i % 13 === 0) {
       const prefix = pick(prefixes);
       bodies.push(`${prefix}| a |\n${prefix}${pick(["---", ":-", "| --- |"])}\n${prefix}visible | HIDDEN`);
-    } else if (i % 12 === 1) {
+    } else if (i % 13 === 1) {
       bodies.push(`${pick(prefixes)}- ${pick(["[ ]", "[x]", "[X]"])} ${pick(["a", "é1", "task"])}\n${body}`);
-    } else if (i % 12 === 2) {
+    } else if (i % 13 === 2) {
       const fence = pick(["```", "~~~"]);
       const prefix = pick(["", "> ", "- "]);
       const continuation = prefix === "- " ? "  " : prefix;
       bodies.push(
         `${prefix}${fence}${pick(["", "ts", "TEXT", "math", "ts hidden"])}\n${continuation}${pick(["", " \t", "code", "const x = 1;"])}\n${continuation}${fence}`,
       );
-    } else if (i % 12 === 3) {
+    } else if (i % 13 === 3) {
       bodies.push(
         `${pick(prefixes)}${pick(["[abc](def)", "![abc](def)", "[abc][def]\n\n[def]: /hidden", '[abc](def "hidden")'])}`,
       );
-    } else if (i % 12 === 4) {
+    } else if (i % 13 === 4) {
       bodies.push(
         pick([
           screenshot("Hidden"),
@@ -471,27 +495,27 @@ function generatedBodies(): string[] {
           screenshot("Screenshot", asset.replace("abcdef", "ABCDEF")),
         ]),
       );
-    } else if (i % 12 === 5) {
+    } else if (i % 13 === 5) {
       const prefix = pick(["", "> ", "  "]);
       const markers = pick(["1,2,3", "1,1,1", "7,8,9", "1,9,3", "00001,2,3", "1,1,2"]).split(",");
       bodies.push(markers.map((marker) => `${prefix}${marker}. visible`).join("\n"));
-    } else if (i % 12 === 6) {
+    } else if (i % 13 === 6) {
       bodies.push(pick(["Plain text.", "- [x] done", "- [ ] pending", "a[X]", "https://example.com/a", "#12 @user"]));
-    } else if (i % 12 === 8) {
+    } else if (i % 13 === 8) {
       const prefix = pick(["", "> ", "  "]);
       const delimiter = pick([".", ")"]);
       bodies.push(`${prefix}a\n${prefix}2${delimiter} b\n${prefix}1${delimiter} c\n${prefix}4${delimiter} d`);
-    } else if (i % 12 === 9) {
+    } else if (i % 13 === 9) {
       const fence = pick(["```", "~~~"]);
       const prefix = pick(["", ">", "> ", ">> ", "- > ", "   "]);
       const continuation = pick(["", ">", "> ", ">   ", ">\t", ">>    ", "  >    ", "    "]);
       const content = pick(["", "\n", `${continuation} \t\n`, `${continuation}code\n`]);
       bodies.push(`${prefix}${fence}${pick(["go", "ts", "text"])}\n${content}${continuation}${fence}${fence[0]}`);
-    } else if (i % 12 === 10) {
+    } else if (i % 13 === 10) {
       bodies.push(
         `${pick(["-", "> -", ">> -", "- > -"])}\n${pick(["", " ", "\t", "> ", " >   ", ">\t", ">>    "])}${pick(["[X]", "[x]", "[ ]"])} done`,
       );
-    } else if (i % 12 === 11) {
+    } else if (i % 13 === 11) {
       bodies.push(
         pick([
           "1. a\n   1. b\n   2. c",
@@ -502,6 +526,18 @@ function generatedBodies(): string[] {
           "1. a\n   ```ts\n   code\n   ```\n2. b",
         ]),
       );
+    } else if (i % 13 === 12) {
+      const between = pick([
+        "\n\nExpected\n\n",
+        "\nExpected\n\n",
+        "\nlazy\n",
+        "\n\u00a0\nlazy\n",
+        "\n\n   indented\n",
+        "\n\n- divider\n",
+        "\n\n> divider\n",
+        "\n\n```text\ncode\n```\n",
+      ]);
+      bodies.push(`1. a\n2. b${between}1. c\n2. d`);
     } else {
       bodies.push(`${pick(prefixes)}${pick(pieces)}\n${body}\n${pick(pieces)}`);
     }
@@ -571,6 +607,13 @@ test("coverage oracle detects lost text and unsafe structure independently of th
     checkCoverage(body);
 });
 
+test("owner bodies remain accepted and preserve renderer coverage", () => {
+  for (const body of ownerBodies) {
+    assert.equal(hiddenMarkdownReason(body), null, JSON.stringify(body));
+    assert.doesNotThrow(() => checkCoverage(body), JSON.stringify(body));
+  }
+});
+
 test("container fences retain the bounded info-word allowance even when empty", () => {
   for (const body of containerFences) {
     assert.equal(hiddenMarkdownReason(body), null, JSON.stringify(body));
@@ -625,6 +668,113 @@ test("coverage catches each observable refusal-class mutation", (t) => {
     assert.ok(released.length > 0, `${kind}: mutation must release a hostile body`);
     for (const body of released) assert.notEqual(violation(body), null, `${kind}: ${JSON.stringify(body)}`);
     t.diagnostic(`mutation ${kind}: caught=yes`);
+  }
+});
+
+test("each individual rule has a mutation witness", async (t) => {
+  // Mutate this checkout's checker in memory, without runtime test switches or
+  // editing its file. Each replacement must name exactly one existing guard.
+  const checkerSource = await readFile(new URL("./markdown.ts", import.meta.url), "utf8");
+  const mutations = [
+    {
+      name: "nested-chain zero",
+      from: String.raw`/^(?:[\s>]|[-*+]|\d{1,9}[.)])*0\d{0,8}[.)](?=[ \t]|$)/u`,
+      to: String.raw`/^[\s>]*0\d{0,8}[.)](?=[ \t]|$)/u`,
+      body: "- 007. x",
+      kind: "list number",
+    },
+    { name: "onesOnly", from: "onesOnly || ", to: "", body: "1.\n1.\n2.", kind: "list number" },
+    { name: "flat numbering", from: "!flat || ", to: "", body: "1. a\n   2. b\n3. c", kind: "list number" },
+    {
+      name: "restart availability",
+      from: "flat && followsBlank",
+      to: "false",
+      body: "Steps\n\n1. a\n2. b\n\nExpected\n\n1. c\n2. d\n3. e",
+      kind: null,
+    },
+    {
+      name: "restart requires blank line",
+      from: "followsBlank && ",
+      to: "",
+      body: "1. a\n2. b\nlazy\n1. c\n2. d",
+      kind: "list number",
+    },
+    {
+      name: "restart requires Markdown blank",
+      from: String.raw`/^[ \t]*$/u.test(lines[index - 1] ?? "")`,
+      to: String.raw`/^\s*$/u.test(lines[index - 1] ?? "")`,
+      body: "1. a\n\u00a0\nb\n1.\n2.",
+      kind: "list number",
+    },
+    {
+      name: "restart requires column zero",
+      from: String.raw`/^\S/u.test(line) && `,
+      to: "",
+      body: "1. a\n2. b\n\n   indented\n1. c\n2. d",
+      kind: "list number",
+    },
+    {
+      name: "restart excludes ordered markers",
+      from: " && !marker",
+      to: "",
+      body: "1. a\n\n9. b",
+      kind: "list number",
+    },
+    {
+      name: "closer character",
+      from: "closer[0] === needsContent[0] && ",
+      to: "",
+      body: "```go\n~~~",
+      kind: null,
+    },
+    {
+      name: "closer length",
+      from: " && closer.length >= needsContent.length",
+      to: "",
+      body: "````go\n```",
+      kind: null,
+    },
+    {
+      name: "closer suffix",
+      from: String.raw`[ \t]*$/u.exec(content)`,
+      to: "/u.exec(content)",
+      body: "```go\n```text\ncode",
+      kind: null,
+    },
+    {
+      name: "opener indentation",
+      from: "^ {0,3}",
+      to: "^",
+      body: " ```go\n ``` ",
+      kind: "empty code block",
+    },
+    {
+      name: "empty fence at EOF",
+      from: 'return needsContent ? refusal("empty code block") : null;',
+      to: "return null;",
+      body: "```ts",
+      kind: "empty code block",
+    },
+  ] as const;
+  for (const { name, from, to, body, kind } of mutations) {
+    await t.test(name, async (caseTest) => {
+      const parts = checkerSource.split(from);
+      assert.equal(parts.length, 2, `${name}: exactly one mutation target must exist`);
+      const source = stripTypeScriptTypes(parts.join(to));
+      const module = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
+      const mutated = (input: string): string | null => module.hiddenMarkdownReason(input);
+      assert.equal(hiddenMarkdownReason(body), kind === null ? null : `hidden Markdown in the body: ${kind}`, name);
+      if (kind === null) {
+        // Removing an acceptance guard (restart or closer precision) makes the
+        // checker stricter. An oracle-approved owner form must catch that loss.
+        assert.equal(violation(body), null, `${name}: witness must preserve coverage`);
+        assert.notEqual(mutated(body), null, `${name}: mutation must falsely refuse its witness`);
+      } else {
+        assert.equal(mutated(body), null, `${name}: mutation must release its hostile witness`);
+        assert.notEqual(violation(body), null, `${name}: oracle must flag the released witness`);
+      }
+      caseTest.diagnostic(`rule mutation ${name}: caught=yes (${kind === null ? "acceptance" : "oracle"})`);
+    });
   }
 });
 

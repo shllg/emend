@@ -26,6 +26,47 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+for (const [name, body] of [
+  ["bug report with separate Steps and Expected lists", "Steps\n\n1. a\n2. b\n\nExpected\n\n1. c\n2. d\n3. e"],
+  ["list followed by numbered code", "1. a\n2. b\n\n```text\n1. first\n2. second\n```"],
+  ["counting restart after a paragraph", "1. Steps\n2. More\n\nExpected\n\n1. c\n2. d"],
+  ["same-delimiter restart after text", "1. a\n2. b\n\ntext\n\n1. c\n2. d"],
+  ["restart after a heading", "1. a\n2. b\n\n## Expected\n\n1. c\n2. d"],
+  ["restart after a whitespace-only blank", "1. a\n2. b\n \t\nExpected\n1. c\n2. d"],
+  ["restart after a bullet", "1. a\n2. b\n\n- divider\n1. c\n2. d"],
+  ["restart after a quote", "1. a\n2. b\n\n> divider\n1. c\n2. d"],
+  ["restart after a fenced block", "1. a\n2. b\n\n```text\ncode\n```\n1. c\n2. d"],
+  [
+    "thirty consecutive screenshot ordinals",
+    Array.from({ length: 30 }, (_, i) => screenshot(`Screenshot ${i + 1}`)).join("\n"),
+  ],
+  [
+    "screenshot ordinal includes fenced lines",
+    `\`\`\`md\n${screenshot("Screenshot 1")}\n\`\`\`\n${screenshot("Screenshot 2")}`,
+  ],
+] as const) {
+  test(`owner body permits ${name}`, () => {
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+
+for (const [name, body, kind] of [
+  ["restart after lazy text", "1. a\n2. b\nlazy\n1. c\n2. d", "list number"],
+  ["restart after an indented continuation", "1. a\n2. b\n\n   indented\n1. c\n2. d", "list number"],
+  ["restart after a non-breaking space", "1. a\n\u00a0\nb\n1.\n2.", "list number"],
+  ["restart on an ordered marker after blank", "1. a\n\n9. b", "list number"],
+  ["thirty repeated screenshot ordinals", Array(30).fill(screenshot("Screenshot 12")).join("\n"), "alt text"],
+  [
+    "screenshot ordinal skips a fenced line",
+    `\`\`\`md\n${screenshot("Screenshot 1")}\n\`\`\`\n${screenshot("Screenshot 1")}`,
+    "alt text",
+  ],
+] as const) {
+  test(`raw Markdown refuses ${name}`, () => {
+    assert.equal(evaluate(body).reason, reason(kind), body);
+  });
+}
+
 for (const [name, body, kind] of [
   ["zero-led marker after dash", "- 00000001. x", "list number"],
   ["zero-led marker after ordered marker", "1. 007. x", "list number"],
@@ -41,10 +82,9 @@ for (const [name, body, kind] of [
   ["indented empty fence in list", "1. a\n   ```ts\n   ```", "empty code block"],
   ["longer matching fence closer", "```go\n```` \t", "empty code block"],
   ["matching tilde closer", "~~~go\n~~~~", "empty code block"],
-  ["counting restart in later list", "1. Steps\n2. More\n\nExpected\n\n1. c\n2. d", "list number"],
   ["flat counts with later nesting", "1. a\n2. b\n\n- x\n  1. y\n  1. z", "list number"],
 ] as const) {
-  test(`raw Markdown Round 4 refuses ${name}`, () => {
+  test(`raw Markdown refuses ${name}`, () => {
     assert.equal(evaluate(body).reason, reason(kind), body);
   });
 }
@@ -68,7 +108,7 @@ for (const [name, body] of [
   ["deep list fence allowance", "1. a\n    ```ts\n    ```"],
   ["ones in later list", "1. Steps\n2. More\n\nExpected\n\n1. c\n1. d"],
 ] as const) {
-  test(`raw Markdown Round 4 permits ${name}`, () => {
+  test(`raw Markdown permits ${name}`, () => {
     assert.equal(evaluate(body).status, "pickable", body);
   });
 }
@@ -95,7 +135,7 @@ for (const [name, body] of [
   ["ordered opener at EOF", "1. ```ts"],
   ["CRLF quote fence", " > ```ts\r\n\r\n>a"],
 ] as const) {
-  test(`raw Markdown Round 3c permits ${name}`, () => {
+  test(`raw Markdown permits ${name}`, () => {
     assert.equal(evaluate(body).status, "pickable", body);
   });
 }
@@ -105,14 +145,13 @@ for (const [name, body] of [
   ["blank column-zero ts fence", "```ts\n\n```"],
   ["empty column-zero fence after quote", "> outside\n\n```ts\n```"],
 ] as const) {
-  test(`raw Markdown Round 3c refuses ${name}`, () => {
+  test(`raw Markdown refuses ${name}`, () => {
     assert.equal(evaluate(body).reason, reason("empty code block"), body);
   });
 }
 
 for (const [name, body, kind] of [
   ["increment after repeated one", "1.\n1.\n2.", "list number"],
-  ["same-delimiter restart then increment", "1. a\n2. b\n\ntext\n\n1. c\n2. d", "list number"],
   ["bare lowercase task marker", "-\n[x] e", "task marker"],
   ["bare uppercase task marker", "-\n[X] e", "task marker"],
   ["bare unchecked task marker", "-\n[ ] e", "task marker"],
@@ -120,7 +159,7 @@ for (const [name, body, kind] of [
   ["quoted task continuation", "> -\n>   [x] done", "task marker"],
   ["tabbed lowercase continuation", "> -\n>\t[x] done", "task marker"],
 ] as const) {
-  test(`raw Markdown Round 3b refuses ${name}`, () => {
+  test(`raw Markdown refuses ${name}`, () => {
     assert.equal(evaluate(body).reason, reason(kind), body);
   });
 }
@@ -136,7 +175,7 @@ for (const [name, body] of [
   ["checked list marker", "- [x] done"],
   ["unchecked ordered marker", "1. [ ] step"],
 ] as const) {
-  test(`raw Markdown Round 3b permits ${name}`, () => {
+  test(`raw Markdown permits ${name}`, () => {
     assert.equal(evaluate(body).status, "pickable", body);
   });
 }
@@ -154,7 +193,7 @@ for (const [name, body, kind] of [
   ["indented marker inside code", "1. a\n2. b\n```text\n  1. code\n```", "list number"],
   ["uppercase marker without list prefix", "[X]", "task marker"],
 ] as const) {
-  test(`raw Markdown Round 3 refuses ${name}`, () => {
+  test(`raw Markdown refuses ${name}`, () => {
     assert.equal(evaluate(body).reason, reason(kind), body);
   });
 }
@@ -168,7 +207,7 @@ for (const [name, body] of [
   ["uppercase after text", "> text [X]\n- text [X]\n    a[X]"],
   ["empty fence without info", "```\n```"],
 ] as const) {
-  test(`raw Markdown Round 3 permits ${name}`, () => {
+  test(`raw Markdown permits ${name}`, () => {
     assert.equal(evaluate(body).status, "pickable", body);
   });
 }
@@ -194,7 +233,7 @@ for (const [name, body, kind] of [
   ["uppercase nested task marker", "> - [X] done", "task marker"],
   ["uppercase continued task marker", "> -\n>   [X] done", "task marker"],
 ] as const) {
-  test(`raw Markdown Round 2 refuses ${name}`, () => {
+  test(`raw Markdown refuses ${name}`, () => {
     assert.equal(evaluate(body).reason, reason(kind), body);
   });
 }
@@ -213,7 +252,7 @@ for (const [name, body] of [
   ["non-empty list fence", "- ```ts\n  code\n  ```"],
   ["non-empty list fence with tabs", "- ```ts\n\tcode\n  ```"],
 ] as const) {
-  test(`raw Markdown Round 2 permits ${name}`, () => {
+  test(`raw Markdown permits ${name}`, () => {
     assert.equal(evaluate(body).status, "pickable", body);
   });
 }
@@ -255,7 +294,7 @@ for (const [name, body, kind] of [
   ["mixed space run", `a${" \t".repeat(8)} b`, "whitespace run"],
   ...[":+1:", ":-1:", ":100:", ":1234:"].map((body) => [`numeric emoji ${body}`, body, "emoji shortcode"] as const),
 ] as const) {
-  test(`raw Markdown Round 12 refuses ${name}`, () => {
+  test(`raw Markdown refuses ${name}`, () => {
     const row = evaluate(`- [x] Reviewed\n\n${body}`);
     assert.equal(row.status, "untrusted");
     assert.equal(row.reason, reason(kind));
@@ -280,7 +319,7 @@ for (const [name, body] of [
     Array.from({ length: 120 }, (_, i) => screenshot(`Screenshot ${i + 1}`)).join("\n"),
   ],
 ] as const) {
-  test(`raw Markdown Round 12 permits ${name}`, () => {
+  test(`raw Markdown permits ${name}`, () => {
     assert.equal(evaluate(body).status, "pickable");
   });
 }
@@ -543,6 +582,7 @@ for (const space of ["\u00a0", "\u1680", "\u2000", "\u2003", "\u202f", "\u205f",
   test(`Unicode space does not split a math paragraph: ${space.codePointAt(0)?.toString(16)}`, () => {
     assert.equal(evaluate(`$5\n${space}\n$6`).reason, reason("math"));
     assert.equal(evaluate(`~~~${space}\ncode\n~~~`).reason, reason("fence info"));
+    assert.equal(evaluate(`1. a\n${space}\nb\n1.\n2.`).reason, reason("list number"));
     assert.equal(evaluate(`| text |\n${space}\n---`).status, "pickable");
   });
 }
