@@ -292,8 +292,8 @@ inline code included, and refuses an issue whose body holds anywhere:
   `md`, `markdown`, `ts`, `typescript`, `tsx`, `js`, `javascript`, `jsx`, `mjs`, `css`, `html`,
   `xml`, `sql`, `python`, `py`, `ruby`, `rb`, `go`, `rust`, `rs`, `http`; for any other language
   write no word, so no mermaid or math fence and no words after the language;
-- a code block at the left margin with a language word and nothing in it, since the page hides the
-  word (write none anywhere); a fence line inside another fence can count as such a block, so show
+- a code block with a language word and nothing in it whose fence line starts with at most three
+  spaces, since the page hides the word (write none anywhere); a fence line inside another fence can count as such a block, so show
   fence examples without a language word;
 - many list numbers and checkboxes the Body rules above do not allow: a number that does not count
   up as they say, one that starts with `0` or has four or more digits, a nested, quoted or indented
