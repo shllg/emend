@@ -172,9 +172,9 @@ as a heading or a sentence; otherwise use `1.` throughout. A numbered item with 
 `1.`. Write a checkbox right after its list marker and one space, on one line: `- [ ] text`,
 `- [x] text`. It uses lowercase `[x]`, and an empty box holds one space, never a tab or another space
 character. Never write a box without the space after the marker (`-[x]`), escaped (`\[x]`), split over
-two lines, or bare at the start of a line. Under a numbered item other than `1.`, a checklist goes only
-at the item's text column (`2. Step`, then `   - [ ] check`), never inside a code block or further
-indented. Never put four or more digits followed by `.` or `)` at the start of a line or right after
+two lines, or bare at the start of a line. Under a numbered item other than `1.`, a checklist starts
+at the item's text column (`2. Step`, then `   - [ ] check`); a nested checkbox starts at its parent's
+text, never further in, and never inside a code block. Never put four or more digits followed by `.` or `)` at the start of a line or right after
 a list marker or `>`; rewrap instead, even for `2025.`.
 
 ```markdown
@@ -286,7 +286,7 @@ inline code included, and refuses an issue whose body holds anywhere:
 - a code block with a language word and nothing in it, since the page hides the word; a fence line
   inside another fence can count as such a block, so show fence examples without a language word;
 - a list number or checkbox the Body rules above do not allow: a number that does not count up as
-  they say, one that starts with `0` or has four or more digits, a nested or quoted number with two
+  they say, one that starts with `0` or has four or more digits, a nested, quoted or indented number with two
   or more digits, a numbered checkbox other than `1.`, an uppercase `[X]`, a box written another way
   than the Body rules show, a checkbox on a later line of a numbered item other than `1.` that is not
   a list at the item's text column, or an empty box on a line that also holds `[x]` or `[X]`;
