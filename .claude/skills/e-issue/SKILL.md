@@ -165,17 +165,26 @@ Conventional Commits prefix and no issue number.
 
 **Body**, in this order. The text in angle brackets below is guidance to replace, never to copy:
 
+These list rules are stricter than the check in step 6; follow them as written.
 Number a list `1., 2., 3.` only when every numbered line in the body, code blocks included, starts at
 the left margin. If any is nested, quoted or indented, every numbered item in the body uses `1.`.
-A later flat list may count up again after a blank line and a line of text at the left margin, such
-as a heading or a sentence; otherwise use `1.` throughout. A numbered item with a checkbox uses
+A later flat list may count up again after a heading, after a `---` line, or after a blank line and
+a sentence at the left margin; otherwise use `1.` throughout. A numbered item with a checkbox uses
 `1.`. Write a checkbox right after its list marker and one space, on one line: `- [ ] text`,
 `- [x] text`. It uses lowercase `[x]`, and an empty box holds one space, never a tab or another space
 character. Never write a box without the space after the marker (`-[x]`), escaped (`\[x]`), split over
 two lines, or bare at the start of a line. Under a numbered item other than `1.`, a checklist starts
-at the item's text column (`2. Step`, then `   - [ ] check`); a nested checkbox starts at its parent's
-text, never further in, and never inside a code block. Never put four or more digits followed by `.` or `)` at the start of a line or right after
-a list marker or `>`; rewrap instead, even for `2025.`.
+at the item's text column, and a nested checkbox's `-` sits under its parent's `[`, never inside a
+code block:
+
+```text
+2. Step
+   - [ ] Parent
+     - [ ] Child
+```
+
+Never put four or more digits followed by `.` or `)` at the start of a line or right after a list
+marker or `>`; rewrap instead, even for `2025.`.
 
 ```markdown
 ## Why
@@ -283,17 +292,18 @@ inline code included, and refuses an issue whose body holds anywhere:
   `md`, `markdown`, `ts`, `typescript`, `tsx`, `js`, `javascript`, `jsx`, `mjs`, `css`, `html`,
   `xml`, `sql`, `python`, `py`, `ruby`, `rb`, `go`, `rust`, `rs`, `http`; for any other language
   write no word, so no mermaid or math fence and no words after the language;
-- a code block with a language word and nothing in it, since the page hides the word; a fence line
-  inside another fence can count as such a block, so show fence examples without a language word;
-- a list number or checkbox the Body rules above do not allow: a number that does not count up as
-  they say, one that starts with `0` or has four or more digits, a nested, quoted or indented number
-  with two or more digits, a numbered checkbox other than `1.`, an uppercase `[X]`, a box written
-  another way than the Body rules show, a checkbox on a later line of a numbered item other than `1.`
-  that is not in a checklist placed as the Body rules say, or an empty box on a line that also holds
-  `[x]` or `[X]`;
+- a code block at the left margin with a language word and nothing in it, since the page hides the
+  word (write none anywhere); a fence line inside another fence can count as such a block, so show
+  fence examples without a language word;
+- many list numbers and checkboxes the Body rules above do not allow: a number that does not count
+  up as they say, one that starts with `0` or has four or more digits, a nested, quoted or indented
+  number with two or more digits, a numbered checkbox other than `1.`, an uppercase `[X]`, a box
+  written another way than the Body rules show, a checkbox on a later line of a numbered item other
+  than `1.` that is not in a checklist placed as the Body rules say, or an empty box on a line that
+  also holds `[x]` or `[X]`;
 - a line, code blocks included, that starts with digits and one more character before a checkbox,
-  also after a list marker or `>`, as in `12 [ ] Pending` or `- 12 [ ] a`; put a word before the
-  digits.
+  also after a list marker or `>`, as in `12 [ ] Pending` or `- 12 [ ] a`, other than `1.` or `1)`
+  and a space; put a word before the digits.
 
 Other bare URLs, `#12` and `@name` still become links. Wrap lines at about 100 characters. Offer to remove whatever the queue refuses before
 `ready`, write none of it yourself, and write placeholders as plain words (`N`, "the issue number").
