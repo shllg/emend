@@ -88,24 +88,39 @@ function hiddenLineReason(lines: string[]): string | null {
   // holding a literal empty fence example may still be refused (fail closed).
   let needsContent: string | null = null;
   let openerIndent = 0;
-  for (const line of lines) {
+  for (const [index, line] of lines.entries()) {
     // GitHub may find boxes in rendered text and hide their list numbers. Strip
     // escapes before checking the whole leading chain; only canonical boxes and
     // literal-one numbers are safe. A split box needs a marker, so JSON's bare
     // opening bracket remains text. Only whitespace and x/X can form a box;
     // other bracketed characters stay text. Closed bare boxes can be lazy continuations.
     const t = line.replaceAll("\\", "");
-    const task = /^((?:[\s>]|[-*+]|\d{1,9}[.)])*)\[(?:([\sxX])\]|\s*$)/u.exec(t);
-    if (task) {
-      const prefix = task[1] ?? "";
-      const split = task[2] === undefined;
-      if (!split || /[-*+]|\d{1,9}[.)]/u.test(prefix)) {
-        if (task[2] !== " " && task[2] !== "x") return refusal("task marker");
-        if ([...prefix.matchAll(/(\d{1,9})[.)]/gu)].some((number) => number[1] !== "1")) return refusal("list number");
-        // All ordered markers above are 1; require a final marker and spacing.
-        if (!/(?:[-*+]|\d{1,9}[.)])[ \t]+$/u.test(prefix)) return refusal("task marker");
+    // A marker-only line can start an item whose first paragraph is on this line.
+    // Check that combined chain too, so a split box cannot hide the item's number.
+    const previousLine = (lines[index - 1] ?? "").replaceAll("\\", "");
+    const followsMarker = /^(?:[\s>]|[-*+]|\d{1,9}[.)])*(?:[-*+]|\d{1,9}[.)])[ \t]*$/u.test(previousLine);
+    const taskLines = [t];
+    if (followsMarker) taskLines.push(previousLine + t.replace(/^[\s>]+/u, ""));
+    for (const text of taskLines) {
+      const task = /^((?:[\s>]|[-*+]|\d{1,9}[.)])*)\[(?:([\sxX])\]|\s*$)/u.exec(text);
+      if (task) {
+        const prefix = task[1] ?? "";
+        const split = task[2] === undefined;
+        if (!split || /[-*+]|\d{1,9}[.)]/u.test(prefix)) {
+          if (task[2] !== " " && task[2] !== "x") return refusal("task marker");
+          // cmark sets checked state from any literal [x]/[X] on the raw line.
+          if (task[2] === " " && /\[[xX]\]/u.test(line)) return refusal("task marker");
+          if ([...prefix.matchAll(/(\d{1,9})[.)]/gu)].some((number) => number[1] !== "1"))
+            return refusal("list number");
+          // All ordered markers above are 1; require a final marker and spacing.
+          if (!/(?:[-*+]|\d{1,9}[.)])[ \t]+$/u.test(prefix)) return refusal("task marker");
+        }
       }
     }
+    // cmark's task scanner accepts digits plus any character as a marker and
+    // drops source bytes. Only the normal literal-one marker is safe here.
+    if (/^[ \t]*\d+[^\n][ \t]+\[[ xX]\][ \t]/u.test(line) && !/^[ \t]*1[.)][ \t]+\[/u.test(line))
+      return refusal("task marker");
     let contentStart = 0;
     let indent = 0;
     while (line[contentStart] === " " || line[contentStart] === "\t") {

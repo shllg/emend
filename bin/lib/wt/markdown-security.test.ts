@@ -26,6 +26,59 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+for (const [name, body] of [
+  ["split box after marker-only line", "2.\n   [\n   ] Done"],
+  ["split box after parenthesized marker-only line", "2)\n   [\n   ] Done"],
+  ["split box with unindented closing bracket", "2.\n   [\n] Done"],
+  ["split box after nested marker-only line", "- 2.\n     [\n     ] Done"],
+  ["split box after ordered marker chain", "1. 2.\n      [\n      ] Done"],
+  ["split box after quoted marker chain", "> - 2.\n>      [\n>      ] Done"],
+  [
+    "split boxes after restarted marker-only lists",
+    "Steps\n\n104.\n     [\n     ] a\n\ntext\n\n101.\n     [\n     ] b\n\ntext\n\n108.\n     [\n     ] c",
+  ],
+  ["split box after escaped marker", "2\\.\n   [\n   ] Done"],
+  ["split box after marker with trailing space", "2. \n   [\n   ] Done"],
+  ["split box with CRLF", "2.\r\n   [\r\n   ] Done"],
+  ["closed box after marker with trailing space", "- \n  [ ] Done"],
+  ["digit and letter task scanner", "2. a\n\n   9x [ ] b"],
+  ["repeated digit and letter task scanner", "1. Steps\n\n   1h [ ] a\n\n   1i [ ] b"],
+  ["digit-only task scanner after marker", "2.\n   12 [ ] b"],
+  ["ten-digit task scanner", "2. a\n\n   1234567890. [ ] b"],
+  ["digit and letter task scanner in bullet", "- a\n\n  1h [ ] b"],
+  ["tabbed digit and letter task scanner", "- a\n\n\t1h\t[ ]\tb"],
+  ["unchecked task with later lowercase box", "- [ ] Remove the auth check [x]"],
+  ["unchecked task with later uppercase box", "1. [ ] Ship it [X]"],
+  ["unchecked task with escaped later box", "- [ ] a\\[x]"],
+  ["unchecked task with bracketed suffix", "- [ ] a[x]"],
+  ["uppercase after unchecked text", "> - [ ] text [X]\n- [ ] text [X]"],
+] as const) {
+  test(`raw Markdown refuses ${name}`, () => {
+    assert.equal(evaluate(body).reason, reason("task marker"), body);
+  });
+}
+
+for (const [name, body] of [
+  ["pending task", "- [ ] Pending"],
+  ["completed task", "- [x] Done"],
+  ["mixed literal-one tasks", "1. [x] Done\n1. [ ] Pending"],
+  ["digit reference in text", "[1] ref"],
+  ["optional item", "- [Optional]"],
+  ["architecture name in brackets", "- [x86]"],
+  ["array in brackets", "- [ 1, 2 ]"],
+  ["nested mixed tasks", "- [x] Done\n  - [ ] Pending"],
+  ["quoted mixed tasks", "> - [x] Done\n> - [ ] Pending"],
+  ["Python list in code", "```python\nprint([1, 2])\n```"],
+  ["shell commands in code", "```sh\nprintf '%s\\n' pending\n```"],
+  ["bare JSON opening after blank", "```json\n\n[\n  1\n]\n```"],
+  ["parenthesized literal-one unchecked task", "1) [ ] Pending"],
+  ["unchecked task without a raw checked substring", "- [ ] a[x\\]"],
+] as const) {
+  test(`raw Markdown permits ${name}`, () => {
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+
 for (const [name, body, kind] of [
   ["tab box after four-digit marker", "1234. [\t] Done", "list number"],
   ["tab box after eight-digit marker", "12345678. [\t] Done", "list number"],

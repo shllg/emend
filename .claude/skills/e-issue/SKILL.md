@@ -171,6 +171,7 @@ A later flat list may count up again after a blank line and a line of text at th
 as a heading or a sentence; otherwise use `1.` throughout. A numbered item with a checkbox uses
 `1.`. Checkboxes use lowercase `[x]`; an empty box holds one space, never a tab. Never start a line
 with a bare `[ ]`, `[x]` or `[X]`.
+Never start a line with four or more digits followed by `.` or `)`; rewrap instead, even for `2025.`.
 
 ```markdown
 ## Why

@@ -9,6 +9,9 @@
 // which the raw checker refuses conservatively without claiming renderer parity.
 // GitHub's text filters skip code: a canonical box-shaped line inside a fence
 // stays literal and accepted. This oracle does not apply task transforms to code.
+// cmark also accepts digit-plus-any-character task markers and sets checked state
+// from any [x]/[X] on the raw line. remark models neither; explicit raw refusals
+// cover those cases instead of treating an oracle pass as GitHub equivalence.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createRequire, stripTypeScriptTypes } from "node:module";
@@ -264,6 +267,16 @@ const hostile = [
   ["list number", "- 987654. [\t] Done"],
   ["list number", "12345678. [\t] Done"],
   ["task marker", "2. [\n   ] Done"],
+  ["task marker", "2.\n   [\n   ] Done"],
+  ["task marker", "2)\n   [\n   ] Done"],
+  ["task marker", "2.\n   [\n] Done"],
+  ["task marker", "- 2.\n     [\n     ] Done"],
+  ["task marker", "1. 2.\n      [\n      ] Done"],
+  ["task marker", "> - 2.\n>      [\n>      ] Done"],
+  [
+    "task marker",
+    "Steps\n\n104.\n     [\n     ] a\n\ntext\n\n101.\n     [\n     ] b\n\ntext\n\n108.\n     [\n     ] c",
+  ],
   // These are required raw refusals beyond remark's model. Keep them in the
   // hostile corpus and assert refusals, without claiming the oracle detects them.
   ["list number", "Steps\n\n104101108. [\t] a\n\ntext\n\n108111032. [\t] b", "checker only"],
@@ -285,6 +298,16 @@ const hostile = [
   ["task marker", "\\[x]", "checker only"],
   ["list number", "1000. a", "checker only"],
   ["list number", "- 1234. a", "checker only"],
+  ["task marker", "2. a\n\n   9x [ ] b", "checker only"],
+  ["task marker", "1. Steps\n\n   1h [ ] a\n\n   1i [ ] b", "checker only"],
+  ["task marker", "2.\n   12 [ ] b", "checker only"],
+  ["task marker", "2. a\n\n   1234567890. [ ] b", "checker only"],
+  ["task marker", "- a\n\n  1h [ ] b", "checker only"],
+  ["task marker", "- [ ] Remove the auth check [x]", "checker only"],
+  ["task marker", "1. [ ] Ship it [X]", "checker only"],
+  ["task marker", "- [ ] a\\[x]", "checker only"],
+  ["task marker", "- [ ] a[x]", "checker only"],
+  ["task marker", "> - [ ] text [X]\n- [ ] text [X]", "checker only"],
 ] as const;
 const oracleHostile = hostile.filter(([, , scope]) => scope !== "checker only");
 
@@ -312,6 +335,17 @@ const containerFences = [
 // These owner forms must stay accepted; markdown-security.test.ts also asserts
 // them through issue evaluation. The mixed corpus below retains refusal cases too.
 const ownerBodies = [
+  "- [ ] Pending",
+  "- [x] Done",
+  "1. [x] Done\n1. [ ] Pending",
+  "[1] ref",
+  "- [Optional]",
+  "- [x86]",
+  "- [ 1, 2 ]",
+  "- [x] Done\n  - [ ] Pending",
+  "> - [x] Done\n> - [ ] Pending",
+  "```python\nprint([1, 2])\n```",
+  "```sh\nprintf '%s\\n' pending\n```",
   "- [a] item",
   "1. [1] reference",
   "[!] Note",
@@ -482,6 +516,9 @@ function generatedBodies(): string[] {
     "+ ",
     "1. ",
     "2) ",
+    "2.\n",
+    "9x [ ] ",
+    "1h [ ] ",
     "1234. ",
     "12345678. ",
     "- 12. ",
@@ -522,6 +559,9 @@ function generatedBodies(): string[] {
     "[a]",
     "[1]",
     "[!]",
+    "[Optional]",
+    "[x86]",
+    "[ ] a[x]",
     "[\t]",
     "[\u00a0]",
     "[\u3000]",
@@ -611,6 +651,12 @@ function generatedBodies(): string[] {
           "1. [\t] a\n2. [\t] b",
           "Steps\n\n104101108. [\t] a\n\ntext\n\n108111032. [\t] b",
           "2. [\n   ] Done",
+          "2. a\n\n   9x [ ] b",
+          "1. Steps\n\n   1h [ ] a\n\n   1i [ ] b",
+          "2.\n   12 [ ] b",
+          "2. a\n\n   1234567890. [ ] b",
+          "- a\n\n  1h [ ] b",
+          `- [ ] text ${pick(["[x]", "[X]", "a\\[x]"])}`,
           "```text\n- [x] Done\n1. [ ] Pending\n```",
           "```json\n[\n  1,\n  2\n]\n```",
           `${pick(prefixes)}${pick(pieces)}\n${body}\n${pick(pieces)}`,
@@ -641,7 +687,7 @@ function generatedBodies(): string[] {
       bodies.push(`${prefix}${fence}${pick(["go", "ts", "text"])}\n${content}${continuation}${fence}${fence[0]}`);
     } else if (i % 13 === 10) {
       bodies.push(
-        `${pick(["-", "> -", ">> -", "- > -"])}\n${pick(["", " ", "\t", "> ", " >   ", ">\t", ">>    "])}${pick(["[X]", "[x]", "[ ]"])} done`,
+        `${pick(["-", "> -", ">> -", "- > -", "2.", "2)", "- 2.", "1. 2.", "> - 2."])}\n${pick(["", " ", "   ", "\t", "> ", " >   ", ">\t", ">>    "])}${pick(["[X]", "[x]", "[ ]", "[\n   ]"])} done`,
       );
     } else if (i % 13 === 11) {
       bodies.push(
@@ -754,7 +800,6 @@ test("checked task state covers canonical x while literal X remains text", () =>
     "> 1. [x] done\n>    - [x] nested",
     "1. [ ] step",
     "- [x] a[x]",
-    "- [ ] a[x]",
     "`a[x]`",
     "    a[X]",
     "a\\[x]",
@@ -825,6 +870,29 @@ test("each individual rule has a mutation witness", async (t) => {
       to: String.raw`[\s\S]`,
       body: "- [a] item",
       kind: null,
+    },
+    {
+      name: "marker-only box continuation",
+      from: "if (followsMarker)",
+      to: "if (false)",
+      body: "2.\n   [\n   ] Done",
+      kind: "task marker",
+    },
+    {
+      name: "cmark digit task scanner",
+      from: String.raw`/^[ \t]*\d+[^\n][ \t]+\[[ xX]\][ \t]/u`,
+      to: "/a^/u",
+      body: "2. a\n\n   9x [ ] b",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "raw-line checked state",
+      from: String.raw`task[2] === " " && /\[[xX]\]/u.test(line)`,
+      to: "false",
+      body: "- [ ] a[x]",
+      kind: "task marker",
+      checkerOnly: true,
     },
     {
       name: "restart availability",
@@ -904,7 +972,9 @@ test("each individual rule has a mutation witness", async (t) => {
       kind: "empty code block",
     },
   ] as const;
-  for (const { name, from, to, body, kind } of mutations) {
+  for (const mutation of mutations) {
+    const { name, from, to, body, kind } = mutation;
+    const checkerOnly = "checkerOnly" in mutation && mutation.checkerOnly;
     await t.test(name, async (caseTest) => {
       const parts = checkerSource.split(from);
       assert.equal(parts.length, 2, `${name}: exactly one mutation target must exist`);
@@ -919,9 +989,14 @@ test("each individual rule has a mutation witness", async (t) => {
         assert.notEqual(mutated(body), null, `${name}: mutation must falsely refuse its witness`);
       } else {
         assert.equal(mutated(body), null, `${name}: mutation must release its hostile witness`);
-        assert.notEqual(violation(body), null, `${name}: oracle must flag the released witness`);
+        if (checkerOnly) {
+          assert.equal(violation(body), null, `${name}: remark does not model this cmark behavior`);
+        } else {
+          assert.notEqual(violation(body), null, `${name}: oracle must flag the released witness`);
+        }
       }
-      caseTest.diagnostic(`rule mutation ${name}: caught=yes (${kind === null ? "acceptance" : "oracle"})`);
+      const evidence = kind === null ? "acceptance" : checkerOnly ? "raw refusal" : "oracle";
+      caseTest.diagnostic(`rule mutation ${name}: caught=yes (${evidence})`);
     });
   }
 });
