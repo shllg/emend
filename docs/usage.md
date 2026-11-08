@@ -79,3 +79,22 @@ server or hub that does not answer instead of failing.
 the next `emend` runs the new version. It does not stop a server the service runs: run
 `emend service install` to restart that one, or `emend service uninstall` to stop it. When no
 server runs, it removes a Tailscale Serve route that a crashed `emend serve --tailscale` left.
+
+## A look around
+
+The inbox lists every review and published doc, with the ones that need you first. A phone shows
+the same groups as a desktop.
+
+| Desktop | Phone |
+| --- | --- |
+| ![The inbox on a desktop, with six reviews and docs](images/inbox-desktop.png) | ![The inbox on a phone](images/inbox-phone.png) |
+
+A plan or other doc that comes with a review opens next to its diff, with its diagrams drawn and
+your comments beside the text.
+
+![A plan doc with a state diagram and a comment thread](images/doc-desktop.png)
+
+Comments stay unsent until you press Send. The Comments tab lists them, and the Send bar lets you
+pick how the agent should act on them.
+
+![The Comments tab with three unsent comments and the Send button](images/send-desktop.png)
