@@ -25,6 +25,27 @@ const HIDE_CARET_AND_MOTION =
   "animation: none !important; transition: none !important; }'; (document.head || document.documentElement).append(s); }; " +
   "if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', add); else add(); })();";
 
+// Sockets, layer by layer (checked against real Chromium with a TCP listener on a free loopback port):
+// - Network.setBlockedURLs with ws/wss patterns is sent in every session as the requested seal, but
+//   it does NOT stop a WebSocket handshake here: the listener still got a connection from a page
+//   without the stub and from a dedicated worker.
+// - In pages and in frames (Page.enable, then Page.addScriptToEvaluateOnNewDocument) the stub below
+//   replaces the constructors before any script runs; frames need their own Page.enable, or an
+//   out-of-process frame skips the script.
+// - In dedicated workers, also nested ones, the same stub is evaluated with Runtime.evaluate while
+//   the worker is paused on start, before the resume; the listener got no handshake.
+// - Service and shared workers have no stub hook: the app's CSP (connect-src) stops their sockets,
+//   and Network.webSocketCreated / webTransportCreated records a violation as a backstop, which fails
+//   the run after the handshake went out (to the sealed origin at most, with the app's CSP).
+export const SOCKET_BLOCKED_URLS = ["ws://*", "wss://*"];
+const SOCKET_NAMES = ["WebSocket", "WebSocketStream", "WebTransport", "RTCPeerConnection", "webkitRTCPeerConnection"];
+export const BLOCK_SOCKETS =
+  "(() => { const names = " +
+  JSON.stringify(SOCKET_NAMES) +
+  "; for (const name of names) { " +
+  "const blocked = function () { throw new TypeError('Network sockets are unavailable'); }; " +
+  "try { Object.defineProperty(globalThis, name, { value: blocked, writable: false, configurable: false }); } catch {} } })();";
+
 // The Chromium lookup is the only place the parent environment is read.
 export function findChromium(explicit: string | undefined, platform: string): string {
   const env = process.env;
@@ -268,35 +289,38 @@ export class Browser {
     const autoAttach = () =>
       this.rawSend("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, sessionId);
 
-    if (info.type === "worker") {
-      // A dedicated worker has no Fetch domain ("'Fetch.enable' wasn't found"); its requests are
-      // paused through its parent's Fetch session (checked against real Chromium: a worker that
-      // fetched a foreign host was blocked by the page session). It does accept Network.enable and
-      // Target.setAutoAttach (checked too), and it can host nested workers, so both are required: a
-      // nested worker's sockets are seen through them. The setup goes out in one batch with the
-      // resume last, then every result is awaited. A worker terminated during setup (the diff
-      // parsers are) reports a detach, and its lost commands are not a gap in the seal.
-      void this.rawSend("Fetch.enable", { patterns: [{ urlPattern: "*" }] }, sessionId).catch(() => undefined);
-      const batch = [this.rawSend("Network.enable", {}, sessionId), autoAttach()];
-      if (waiting) batch.push(resume());
-      const results = await Promise.allSettled(batch);
-      const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
-      if (rejected && this.sessions.has(sessionId))
-        throw new Error(`Could not seal a worker target (${reason(rejected.reason)})`);
-      return;
-    }
+    const blockSockets = () =>
+      this.rawSend("Network.setBlockedURLs", { urls: SOCKET_BLOCKED_URLS }, sessionId);
 
-    // Everything else is sealed before it runs: a paused target answers these commands at once, so
-    // waiting for them cannot deadlock, and a target that fails any of them is never resumed.
+    // Every target is sealed before it runs: a paused target answers these commands at once, so
+    // waiting for them cannot deadlock, and a target that fails any of them is never resumed. A
+    // dedicated worker differs in two places. It has no Fetch domain ("'Fetch.enable' wasn't found";
+    // its requests are paused through its parent's Fetch session, checked against real Chromium), so
+    // that command is fire-and-forget. And it has no script hook, so the socket stub is evaluated in
+    // it before the resume. It can host nested workers, so Network.enable and Target.setAutoAttach
+    // are required: a nested worker is attached, sealed and stubbed the same way. A worker terminated
+    // during setup (the diff parsers are) reports a detach, and its lost commands are no gap.
+    const worker = info.type === "worker";
     let resumed = false;
     try {
-      await this.rawSend("Fetch.enable", { patterns: [{ urlPattern: "*" }] }, sessionId);
+      const fetchEnable = this.rawSend("Fetch.enable", { patterns: [{ urlPattern: "*" }] }, sessionId);
+      if (worker) void fetchEnable.catch(() => undefined);
+      else await fetchEnable;
       await this.rawSend("Network.enable", {}, sessionId);
-      if (info.type === "page" || info.type === "iframe") await autoAttach();
+      await blockSockets();
+      if (info.type === "page" || info.type === "iframe" || worker) await autoAttach();
       else await autoAttach().catch(() => undefined); // Service and shared workers may refuse it.
-      if (info.type === "page") {
+      if (info.type === "page" || info.type === "iframe") {
+        // Without Page.enable an out-of-process frame does not run the injected script.
         await this.rawSend("Page.enable", {}, sessionId);
-        await this.rawSend("Page.addScriptToEvaluateOnNewDocument", { source: HIDE_CARET_AND_MOTION }, sessionId);
+        const source = info.type === "page" ? `${BLOCK_SOCKETS}\n${HIDE_CARET_AND_MOTION}` : BLOCK_SOCKETS;
+        await this.rawSend("Page.addScriptToEvaluateOnNewDocument", { source }, sessionId);
+      }
+      if (worker) {
+        const stub = (await this.rawSend("Runtime.evaluate", { expression: BLOCK_SOCKETS }, sessionId)) as {
+          exceptionDetails?: unknown;
+        };
+        if (stub.exceptionDetails) throw new Error("the socket stub failed");
       }
       if (waiting) {
         resumed = true;

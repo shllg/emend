@@ -64,6 +64,39 @@ export function assertSealedPaths(paths: SealedPaths, canonicalize: (path: strin
   }
 }
 
+/** Before anything is created: the temporary parent must not equal, contain or sit inside real state. */
+export function assertTempParent(
+  tmpDir: string,
+  realStateDirs: readonly string[],
+  canonicalize: (path: string) => string,
+): void {
+  if (!isAbsolute(tmpDir)) throw new Error("The temporary directory must be absolute");
+  const parent = canonicalize(tmpDir);
+  for (const state of realStateDirs)
+    if (overlaps(parent, canonicalize(state))) throw new Error("The temporary directory overlaps real emend state");
+}
+
+/**
+ * Chromium creates `SingletonLock` (a symlink, hence lstat) in its `--user-data-dir` before it
+ * serves anything, so it exists once the first CDP command is answered. A Chromium that ignores the
+ * folder (a snap or flatpak build) leaves it out, and the run must not go on with the user's own
+ * profile.
+ */
+export function assertProfileUsed(profile: string): void {
+  try {
+    lstatSync(join(profile, "SingletonLock"));
+  } catch {
+    throw new Error(
+      "Chromium did not use the throwaway profile folder. Use a Chromium from your system packages, or pass --chromium <path>.",
+    );
+  }
+}
+
+/** A process group may be signalled only while its leader has not exited and it is not swept yet. */
+export function maySignalGroup(child: { exitCode: number | null; signalCode: string | null }, swept: boolean): boolean {
+  return !swept && child.exitCode === null && child.signalCode === null;
+}
+
 // Deliberately takes no parent environment. Keep every child, including git and Chromium, on this list.
 export function childEnvironment(root: string, platform: string): Record<string, string> {
   if (!isAbsolute(root)) throw new Error("The sealed root must be absolute");

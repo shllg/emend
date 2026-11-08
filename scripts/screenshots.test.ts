@@ -12,16 +12,17 @@ import {
 } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { Browser } from "./screenshots/browser.ts";
+import { BLOCK_SOCKETS, Browser, SOCKET_BLOCKED_URLS } from "./screenshots/browser.ts";
 import { applyFixture } from "./screenshots/content.ts";
 import { writeImages } from "./screenshots/images.ts";
 import {
   acceptsLoopbackConnection,
   assertInsideRoot,
+  assertProfileUsed,
   assertOutputFolder,
   assertPortAvailable,
   assertRequestAllowed,
@@ -31,7 +32,9 @@ import {
   childEnvironment,
   chromiumArgs,
   classifyTarget,
+  assertTempParent,
   filterPng,
+  maySignalGroup,
   parsePairingLink,
   portProbeFailed,
   protectedStateDirs,
@@ -559,6 +562,9 @@ test("targets are sealed before they resume; a failed seal closes the target and
     ["page", "Target.setAutoAttach"],
     ["iframe", "Fetch.enable"],
     ["iframe", "Target.setAutoAttach"],
+    ["page", "Network.setBlockedURLs"],
+    ["iframe", "Network.setBlockedURLs"],
+    ["service_worker", "Network.setBlockedURLs"],
     ["service_worker", "Fetch.enable"],
     ["shared_worker", "Network.enable"],
   ] as const) {
@@ -572,9 +578,29 @@ test("targets are sealed before they resume; a failed seal closes the target and
 
   // The seal is in place before the resume, in this order.
   for (const [type, expected] of [
-    ["page", ["Fetch.enable", "Network.enable", "Target.setAutoAttach", "Page.enable", "Page.addScriptToEvaluateOnNewDocument"]],
-    ["iframe", ["Fetch.enable", "Network.enable", "Target.setAutoAttach"]],
-    ["service_worker", ["Fetch.enable", "Network.enable", "Target.setAutoAttach"]],
+    [
+      "page",
+      [
+        "Fetch.enable",
+        "Network.enable",
+        "Network.setBlockedURLs",
+        "Target.setAutoAttach",
+        "Page.enable",
+        "Page.addScriptToEvaluateOnNewDocument",
+      ],
+    ],
+    [
+      "iframe",
+      [
+        "Fetch.enable",
+        "Network.enable",
+        "Network.setBlockedURLs",
+        "Target.setAutoAttach",
+        "Page.enable",
+        "Page.addScriptToEvaluateOnNewDocument",
+      ],
+    ],
+    ["service_worker", ["Fetch.enable", "Network.enable", "Network.setBlockedURLs", "Target.setAutoAttach"]],
   ] as const) {
     const fake = fakeChromium();
     await attach(fake, type);
@@ -598,13 +624,43 @@ test("targets are sealed before they resume; a failed seal closes the target and
   assert.deepEqual(methodsOf(dedicated), [
     "Fetch.enable",
     "Network.enable",
+    "Network.setBlockedURLs",
     "Target.setAutoAttach",
+    "Runtime.evaluate",
     "Runtime.runIfWaitingForDebugger",
   ]);
-  for (const failing of ["Network.enable", "Target.setAutoAttach"]) {
-    const fake = fakeChromium(reject(failing));
+  const stub = dedicated.sent.find((entry) => entry.method === "Runtime.evaluate");
+  assert.equal(stub?.params.expression, BLOCK_SOCKETS);
+  assert.equal(stub?.sessionId, "s2");
+  // Every awaited seal command failing, or the stub throwing inside the worker, means no resume, a
+  // closeTarget and a recorded violation.
+  const stubThrew = { result: { exceptionDetails: { text: "synthetic" } } };
+  for (const [failing, reply] of [
+    ["Network.enable", { error: { message: "synthetic" } }],
+    ["Network.setBlockedURLs", { error: { message: "synthetic" } }],
+    ["Target.setAutoAttach", { error: { message: "synthetic" } }],
+    ["Runtime.evaluate", { error: { message: "synthetic" } }],
+    ["Runtime.evaluate", stubThrew],
+  ] as const) {
+    const fake = fakeChromium((method) => (method === failing ? reply : undefined));
     await attach(fake, "worker");
     assert.throws(() => fake.browser.check(), /Could not seal a worker target/, failing);
+    assert(!methodsOf(fake).includes("Runtime.runIfWaitingForDebugger"), `worker ${failing} resumed`);
+    assert.equal(fake.sent.find((entry) => entry.method === "Target.closeTarget")?.params.targetId, "t2", failing);
+  }
+  // The resume waits for every awaited seal command: held answers keep the worker paused.
+  for (const held of ["Network.enable", "Network.setBlockedURLs", "Target.setAutoAttach", "Runtime.evaluate"]) {
+    const fake = fakeChromium((method) => (method === held ? "hold" : undefined));
+    fake.emit("Target.attachedToTarget", target("worker"));
+    await fake.yieldOnce();
+    await fake.yieldOnce();
+    assert(methodsOf(fake).includes(held), `${held} was sent`);
+    assert(!methodsOf(fake).includes("Runtime.runIfWaitingForDebugger"), `resumed before ${held} answered`);
+    fake.release();
+    await fake.yieldOnce();
+    await fake.browser.idle();
+    assert.doesNotThrow(() => fake.browser.check());
+    assert.equal(methodsOf(fake).at(-1), "Runtime.runIfWaitingForDebugger", held);
   }
 
   // Only a worker may be discounted for terminating during setup; any other target that fails is a violation.
@@ -818,4 +874,71 @@ test("the parent's environment is read only to find Chromium, and every child ge
   assert(/process\s*\[\s*["'`]env["'`]\s*\]/.test('process["env"].PATH'));
   assert(/\{[^}]*\benv\b[^}]*\}\s*=\s*process\b/.test("const { env } = process;"));
   assert(/import\s*\{[^}]*\benv\b[^}]*\}\s*from\s*["'](?:node:)?process["']/.test('import { env } from "node:process";'));
+});
+
+test("sockets are blocked before the resume, in every controlled session and in the page source", async () => {
+  assert.deepEqual(SOCKET_BLOCKED_URLS, ["ws://*", "wss://*"]);
+  for (const name of ["WebSocket", "WebSocketStream", "WebTransport", "RTCPeerConnection", "webkitRTCPeerConnection"])
+    assert(BLOCK_SOCKETS.includes(`"${name}"`), name);
+  assert(BLOCK_SOCKETS.includes("writable: false") && BLOCK_SOCKETS.includes("configurable: false"));
+  for (const type of ["page", "iframe", "service_worker", "shared_worker", "worker"]) {
+    const fake = fakeChromium();
+    fake.emit("Target.attachedToTarget", {
+      sessionId: "s2",
+      targetInfo: { targetId: "t2", type, url: "http://127.0.0.1:49231/" },
+      waitingForDebugger: true,
+    });
+    await fake.yieldOnce();
+    await fake.browser.idle();
+    const methods = fake.sent.map((entry) => entry.method);
+    const blocked = fake.sent.find((entry) => entry.method === "Network.setBlockedURLs");
+    assert.deepEqual(blocked?.params, { urls: SOCKET_BLOCKED_URLS }, type);
+    assert(methods.indexOf("Network.setBlockedURLs") < methods.indexOf("Runtime.runIfWaitingForDebugger"), type);
+    if (type === "page" || type === "iframe") {
+      const script = fake.sent.find((entry) => entry.method === "Page.addScriptToEvaluateOnNewDocument");
+      assert((script?.params.source as string).includes(BLOCK_SOCKETS), type);
+    }
+  }
+});
+
+test("the temporary parent must not overlap real state, and nothing is created for it", () => {
+  const state = ["/synthetic/state/emend"];
+  assert.doesNotThrow(() => assertTempParent("/synthetic/tmp", state, resolve));
+  for (const tmp of ["/synthetic/state/emend", "/synthetic/state/emend/tmp", "/synthetic/state"])
+    assert.throws(() => assertTempParent(tmp, state, resolve), /temporary directory overlaps/, tmp);
+  assert.throws(() => assertTempParent("relative", state, resolve), /absolute/);
+  // A missing leaf inside a state directory is refused too, without creating it.
+  assert.throws(() => assertTempParent(join(tmpdir(), "synthetic-missing"), [tmpdir()], canonicalPath));
+});
+
+test("a process group is signalled only while its leader runs and before its sweep", () => {
+  assert.equal(maySignalGroup({ exitCode: null, signalCode: null }, false), true);
+  assert.equal(maySignalGroup({ exitCode: 0, signalCode: null }, false), false);
+  assert.equal(maySignalGroup({ exitCode: null, signalCode: "SIGKILL" }, false), false);
+  assert.equal(maySignalGroup({ exitCode: null, signalCode: null }, true), false);
+});
+
+test("the run fails when Chromium did not create its lock in the throwaway profile", (t) => {
+  const profile = mkdtempSync(join(tmpdir(), "screenshots-profile-"));
+  t.after(() => rmSync(profile, { recursive: true, force: true }));
+  assert.throws(() => assertProfileUsed(profile), /did not use the throwaway profile folder/);
+  assert.throws(() => assertProfileUsed(join(profile, "missing")), /--chromium <path>/);
+  // Chromium's lock is a dangling symlink (host-pid), so it counts as present.
+  symlinkSync("synthetic-host-1", join(profile, "SingletonLock"));
+  assert.doesNotThrow(() => assertProfileUsed(profile));
+});
+
+test("the runner imports every safety guard it calls", () => {
+  const dir = dirname(fileURLToPath(import.meta.url));
+  const exported = [...readFileSync(join(dir, "screenshots", "safety.ts"), "utf8").matchAll(/^export (?:async )?function (\w+)/gm)].map(
+    (match) => match[1] as string,
+  );
+  const runner = readFileSync(join(dir, "screenshots.ts"), "utf8");
+  const imported = runner.match(/import\s*\{([^}]*)\}\s*from\s*"\.\/screenshots\/safety\.ts"/)?.[1] ?? "";
+  const names = new Set(imported.split(",").map((name) => name.trim()));
+  assert(exported.length > 5 && names.size > 5);
+  for (const name of exported) {
+    const body = runner.replace(/import[^;]*;/g, "");
+    if (new RegExp(`\\b${name}\\(`).test(body)) assert(names.has(name), `${name} is called but not imported`);
+  }
 });

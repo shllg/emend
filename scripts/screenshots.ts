@@ -37,12 +37,15 @@ import {
 } from "./screenshots/content.ts";
 import {
   assertOutputFolder,
+  assertTempParent,
   assertPortAvailable,
+  assertProfileUsed,
   assertSealedPaths,
   canonicalPath,
   childEnvironment,
   currentProtectedStateDirs,
   filterPng,
+  maySignalGroup,
   parsePairingLink,
   sealedOrigin,
 } from "./screenshots/safety.ts";
@@ -83,14 +86,31 @@ function assertRunning(): void {
 
 function track(child: ChildProcess, group = false): void {
   children.set(child, group);
+  // The kernel keeps the group number reserved while members remain, so one sweep from the leader's
+  // own exit reaches helpers left behind; after it the group is never signalled again. If no member
+  // is left, the number is free after the reap, but the sweep runs in the same tick and process ids
+  // are handed out in rising order, so a reuse would need a full wrap first.
+  if (group)
+    child.once("exit", () => {
+      try {
+        if (child.pid) process.kill(-child.pid, "SIGKILL");
+      } catch {
+        // No member left.
+      }
+      sweptGroups.add(child);
+    });
   // A child that appears after cleanup began is never left running.
   if (aborted) signalChild(child, "SIGKILL");
 }
 
+// Groups already swept from their leader's exit: never signalled again (the number may be reused).
+const sweptGroups = new WeakSet<ChildProcess>();
+
 function signalChild(child: ChildProcess, signal: NodeJS.Signals): void {
   try {
-    if (children.get(child) && child.pid) process.kill(-child.pid, signal);
-    else if (child.exitCode === null && child.signalCode === null) child.kill(signal);
+    if (children.get(child) && child.pid) {
+      if (maySignalGroup(child, sweptGroups.has(child))) process.kill(-child.pid, signal);
+    } else if (child.exitCode === null && child.signalCode === null) child.kill(signal);
   } catch {
     // Already gone.
   }
@@ -161,8 +181,9 @@ for (const [signal, code] of [
   process.on(signal, () => terminate(code));
 }
 for (const event of ["uncaughtException", "unhandledRejection"] as const) {
-  process.on(event, () => {
-    console.error(`screenshots: ${event}`);
+  process.on(event, (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`screenshots: ${event}: ${message}`);
     terminate(1);
   });
 }
@@ -236,6 +257,7 @@ async function main(): Promise<void> {
   const realStateDirs = currentProtectedStateDirs();
   assertOutputFolder(options.out, realStateDirs, canonicalPath);
   const tmpDir = realpathSync(tmpdir());
+  assertTempParent(tmpDir, realStateDirs, canonicalPath);
   root = mkdtempSync(join(tmpDir, "emend-screenshots-"));
   const sealedRoot = root;
   const env = childEnvironment(sealedRoot, process.platform);
@@ -390,6 +412,9 @@ async function main(): Promise<void> {
     platform: process.platform,
     onSpawn: (child) => track(child, true),
   });
+  // Chromium answered on the pipe, so it has started; before any page opens the sealed origin, it
+  // must have used the throwaway profile folder.
+  assertProfileUsed(join(sealedRoot, "chromium"));
   const desktop = await browser.newPage(DESKTOP);
   await desktop.goto(link);
   await desktop.waitFor("location.pathname === '/'", "the signed-in inbox");

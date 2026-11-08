@@ -60,5 +60,8 @@ runs `tailscale`, and its tests reach a fake one only:
 sealed demo round. It needs Chromium (`--chromium <path>` or `CHROMIUM_PATH` names it) and
 `script(1)` from util-linux or macOS. It runs its own server, state and browser profile in a
 throwaway folder, never reaches your own emend server or state, and removes the folder at the end.
+Run it as `pnpm screenshots`, which rebuilds first; `node scripts/screenshots.ts` alone uses whatever
+build is there. Prefer a Chromium installed from your system packages or `--chromium <path>`: a snap
+or flatpak build may ignore the throwaway profile folder.
 Pass `--keep` to keep that folder for debugging. Every run changes timestamps and commit hashes in
 the images, so commit only the images you want to change.
