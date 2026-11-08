@@ -55,3 +55,10 @@ runs `tailscale`, and its tests reach a fake one only:
 - The serve-signals tests run emend in a child whose `PATH` holds only the test's folder and its
   fake `tailscale`. Their cleanup first kills the child's process group if the child still runs.
   Only then can it remove that folder; normally it also waits for the child to close first.
+
+`pnpm screenshots` rebuilds the checkout and regenerates the pictures in `docs/images/` from a
+sealed demo round. It needs Chromium (`--chromium <path>` or `CHROMIUM_PATH` names it) and
+`script(1)` from util-linux or macOS. It runs its own server, state and browser profile in a
+throwaway folder, never reaches your own emend server or state, and removes the folder at the end.
+Pass `--keep` to keep that folder for debugging. Every run changes timestamps and commit hashes in
+the images, so commit only the images you want to change.

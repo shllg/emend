@@ -1,0 +1,24 @@
+import { createHash } from "node:crypto";
+import { mkdir, open, rename, rm } from "node:fs/promises";
+import { dirname } from "node:path";
+import { BlobReader } from "./read.ts";
+
+export class BlobWriter extends BlobReader {
+  async write(ownerId: string, sha256: string, bytes: Buffer): Promise<void> {
+    if (createHash("sha256").update(bytes).digest("hex") !== sha256) throw new Error("Blob hash mismatch");
+    const target = this.path(ownerId, sha256);
+    await mkdir(dirname(target), { recursive: true });
+    const temporary = `${target}.tmp`;
+    const handle = await open(temporary, "w", 0o600);
+    try {
+      await handle.writeFile(bytes);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, target).catch(async (error) => {
+      await rm(temporary, { force: true });
+      throw error;
+    });
+  }
+}

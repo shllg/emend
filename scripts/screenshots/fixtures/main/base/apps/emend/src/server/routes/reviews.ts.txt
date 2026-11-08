@@ -1,0 +1,44 @@
+import { and, eq } from "drizzle-orm";
+import type { Hono } from "hono";
+import { reviews } from "../../db/schema.ts";
+import type { AppDeps } from "../app.ts";
+import type { AppEnv } from "../auth/principal.ts";
+import { ApiError } from "../http/errors.ts";
+
+export function mountReviewRoutes(app: Hono<AppEnv>, deps: AppDeps) {
+  app.post("/api/v1/reviews/:id/retire", async (c) => {
+    const { ownerId } = c.get("principal");
+    const id = c.req.param("id");
+    await deps.db.transaction(async (tx) => {
+      const [review] = await tx
+        .select({ state: reviews.state })
+        .from(reviews)
+        .where(and(eq(reviews.id, id), eq(reviews.ownerId, ownerId)));
+      if (!review) throw new ApiError(404, "unknown_review", "Unknown review");
+      if (review.state !== "open") throw new ApiError(409, "invalid_state", "Only an open review can be retired");
+      await tx
+        .update(reviews)
+        .set({ state: "settled", updatedAt: deps.now() })
+        .where(and(eq(reviews.id, id), eq(reviews.ownerId, ownerId)));
+    });
+    return c.body(null, 204);
+  });
+
+  app.post("/api/v1/reviews/:id/approve", async (c) => {
+    const { ownerId } = c.get("principal");
+    const id = c.req.param("id");
+    await deps.db.transaction(async (tx) => {
+      const [review] = await tx
+        .select({ state: reviews.state })
+        .from(reviews)
+        .where(and(eq(reviews.id, id), eq(reviews.ownerId, ownerId)));
+      if (!review) throw new ApiError(404, "unknown_review", "Unknown review");
+      if (review.state !== "open") throw new ApiError(409, "invalid_state", "Only an open review can be approved");
+      await tx
+        .update(reviews)
+        .set({ state: "approved", updatedAt: deps.now() })
+        .where(and(eq(reviews.id, id), eq(reviews.ownerId, ownerId)));
+    });
+    return c.body(null, 204);
+  });
+}

@@ -1,0 +1,33 @@
+import type { InboxRow } from "@emend/contract";
+import { Link } from "@tanstack/react-router";
+import { Pin } from "lucide-react";
+import { usePinReview } from "../../api/mutations.ts";
+import { relativeTime } from "../../lib/time.ts";
+
+export function ReviewRow({ row, now }: { row: InboxRow; now: number }) {
+  const pin = usePinReview(row.id);
+  const pinned = row.pinnedAt !== null;
+  return (
+    <li className="group flex items-center border-b border-line-1">
+      <Link
+        to="/r/$reviewId"
+        params={{ reviewId: row.id }}
+        className="grid min-w-0 flex-1 gap-1 px-3 py-2 text-fg-1 no-underline hover:bg-hover"
+      >
+        <span className="truncate font-medium">{row.title}</span>
+        <span className="text-12 text-fg-3">{relativeTime(row.updatedAt, now)}</span>
+      </Link>
+      {row.state === "open" && (
+        <button
+          type="button"
+          aria-pressed={pinned}
+          aria-label={pinned ? "Unpin review" : "Pin review"}
+          className="mr-2 rounded p-1 text-fg-3 hover:text-fg-1 aria-pressed:text-accent"
+          onClick={() => pin.mutate(pinned ? "unpin" : "pin")}
+        >
+          <Pin size={14} />
+        </button>
+      )}
+    </li>
+  );
+}

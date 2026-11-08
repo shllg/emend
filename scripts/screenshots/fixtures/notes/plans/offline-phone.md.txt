@@ -1,0 +1,25 @@
+# Plan: read reviews offline on the phone
+
+Issue #211. A reviewer on a train opens a review and finds nothing. This plan lets the phone keep the
+reviews it opened last.
+
+## Goal
+
+Reviews opened on the phone stay readable without a connection. Comments written offline wait on the
+phone and are saved when the connection returns.
+
+## Approach
+
+- The service worker caches each opened review's revision and its blobs.
+- Drafts are already kept in the browser; they only need to survive a restart of the app.
+- A banner says when the phone shows saved data.
+
+## Risks
+
+- A cached review can be old. The banner must say so.
+- The cache must stay inside the device and never leave it.
+
+## Open questions
+
+- How many reviews should the phone keep?
+- Should a Send wait for the connection or refuse?

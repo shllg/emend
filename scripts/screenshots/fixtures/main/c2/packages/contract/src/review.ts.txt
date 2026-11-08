@@ -1,0 +1,20 @@
+import { z } from "zod";
+
+export const ReviewState = z.enum(["open", "approved", "settled"]);
+export type ReviewState = z.infer<typeof ReviewState>;
+
+export const InboxRow = z.object({
+  id: z.uuid(),
+  title: z.string().min(1).max(200),
+  state: ReviewState,
+  unsentCount: z.number().int().nonnegative(),
+  openThreads: z.number().int().nonnegative(),
+  agentWaiting: z.boolean(),
+  snoozedUntil: z.iso.datetime().nullable(),
+  pinnedAt: z.iso.datetime().nullable(),
+  updatedAt: z.iso.datetime(),
+});
+export type InboxRow = z.infer<typeof InboxRow>;
+
+export const PinRequest = z.object({}).strict();
+export type PinRequest = z.infer<typeof PinRequest>;

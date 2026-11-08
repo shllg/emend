@@ -1,0 +1,17 @@
+import type { InboxRow } from "@emend/contract";
+
+export type InboxGroup = "needs-you" | "open" | "snoozed" | "done";
+
+export function groupOf(row: InboxRow): InboxGroup {
+  if (row.state !== "open") return "done";
+  if (row.snoozedUntil) return "snoozed";
+  return row.agentWaiting || row.unsentCount > 0 ? "needs-you" : "open";
+}
+
+export function byNewest(a: InboxRow, b: InboxRow): number {
+  return b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id);
+}
+
+export function sortInbox(rows: InboxRow[]): InboxRow[] {
+  return [...rows].sort(byNewest);
+}

@@ -1,0 +1,18 @@
+import type { InboxRow } from "@emend/contract";
+import { Link } from "@tanstack/react-router";
+import { relativeTime } from "../../lib/time.ts";
+
+export function ReviewRow({ row, now }: { row: InboxRow; now: number }) {
+  return (
+    <li className="border-b border-line-1">
+      <Link
+        to="/r/$reviewId"
+        params={{ reviewId: row.id }}
+        className="grid gap-1 px-3 py-2 text-fg-1 no-underline hover:bg-hover"
+      >
+        <span className="truncate font-medium">{row.title}</span>
+        <span className="text-12 text-fg-3">{relativeTime(row.updatedAt, now)}</span>
+      </Link>
+    </li>
+  );
+}

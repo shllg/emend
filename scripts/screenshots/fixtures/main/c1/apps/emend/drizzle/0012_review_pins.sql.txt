@@ -1,0 +1,3 @@
+ALTER TABLE reviews ADD COLUMN pinned_at integer;
+--> statement-breakpoint
+CREATE INDEX reviews_owner_pinned_idx ON reviews (owner_id, pinned_at);

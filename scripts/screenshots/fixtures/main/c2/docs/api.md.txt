@@ -1,0 +1,11 @@
+# API
+
+## Endpoints
+
+| Method | Path | Who | Purpose |
+| --- | --- | --- | --- |
+| GET | `/api/v1/reviews` | Reviewer | List reviews in the inbox. |
+| POST | `/api/v1/reviews/:id/pin` | Reviewer | Pin an open review to the top of the Open group (204). `409 pin_limit` at ten pins. |
+| POST | `/api/v1/reviews/:id/unpin` | Reviewer | Remove the pin (204); idempotent. |
+| POST | `/api/v1/reviews/:id/retire` | Reviewer | Mark an open review done without an approval. |
+| POST | `/api/v1/reviews/:id/approve` | Reviewer | Approve the revision on screen. |

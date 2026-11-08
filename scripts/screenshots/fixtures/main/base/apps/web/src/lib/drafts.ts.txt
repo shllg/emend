@@ -1,0 +1,32 @@
+export interface SavedDraft {
+  key: string;
+  reviewId: string;
+  revision: number;
+  body: string;
+}
+
+const PREFIX = "emend:draft:";
+
+export function draftKey(reviewId: string, revision: number, slot: string): string {
+  return `${PREFIX}${reviewId}:${revision}:${slot}`;
+}
+
+export function saveDraft(key: string, body: string): void {
+  if (body.trim() === "") localStorage.removeItem(key);
+  else localStorage.setItem(key, body);
+}
+
+export function loadDraft(key: string): string {
+  return localStorage.getItem(key) ?? "";
+}
+
+export function listDrafts(reviewId: string): SavedDraft[] {
+  const drafts: SavedDraft[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key?.startsWith(`${PREFIX}${reviewId}:`)) continue;
+    const [, , revision] = key.split(":");
+    drafts.push({ key, reviewId, revision: Number(revision), body: loadDraft(key) });
+  }
+  return drafts;
+}

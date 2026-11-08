@@ -1,0 +1,46 @@
+import { and, count, eq, isNotNull } from "drizzle-orm";
+import type { Hono } from "hono";
+import { reviews } from "../../db/schema.ts";
+import type { AppDeps } from "../app.ts";
+import type { AppEnv } from "../auth/principal.ts";
+import { ApiError } from "../http/errors.ts";
+import { requireScope } from "../auth/scopes.ts";
+
+const PIN_LIMIT = 10;
+
+export function mountPinRoutes(app: Hono<AppEnv>, deps: AppDeps) {
+  app.post("/api/v1/reviews/:id/pin", requireScope("send"), async (c) => {
+    const { ownerId } = c.get("principal");
+    const id = c.req.param("id");
+    await deps.db.transaction(async (tx) => {
+      const [review] = await tx
+        .select({ pinnedAt: reviews.pinnedAt })
+        .from(reviews)
+        .where(and(eq(reviews.id, id), eq(reviews.ownerId, ownerId)));
+      if (!review) throw new ApiError(404, "unknown_review", "Unknown review");
+      if (review.pinnedAt) return;
+      const [{ pinned }] = await tx
+        .select({ pinned: count() })
+        .from(reviews)
+        .where(and(eq(reviews.ownerId, ownerId), isNotNull(reviews.pinnedAt)));
+      if (pinned >= PIN_LIMIT) throw new ApiError(409, "pin_limit", `At most ${PIN_LIMIT} reviews can be pinned`);
+      await tx
+        .update(reviews)
+        .set({ pinnedAt: deps.now() })
+        .where(and(eq(reviews.id, id), eq(reviews.ownerId, ownerId)));
+    });
+    return c.body(null, 204);
+  });
+
+  app.post("/api/v1/reviews/:id/unpin", requireScope("send"), async (c) => {
+    const { ownerId } = c.get("principal");
+    const id = c.req.param("id");
+    const updated = await deps.db
+      .update(reviews)
+      .set({ pinnedAt: null })
+      .where(and(eq(reviews.id, id), eq(reviews.ownerId, ownerId)))
+      .returning({ id: reviews.id });
+    if (updated.length === 0) throw new ApiError(404, "unknown_review", "Unknown review");
+    return c.body(null, 204);
+  });
+}

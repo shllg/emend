@@ -1,0 +1,9 @@
+# API
+
+## Endpoints
+
+| Method | Path | Who | Purpose |
+| --- | --- | --- | --- |
+| GET | `/api/v1/reviews` | Reviewer | List reviews in the inbox. |
+| POST | `/api/v1/reviews/:id/retire` | Reviewer | Mark an open review done without an approval. |
+| POST | `/api/v1/reviews/:id/approve` | Reviewer | Approve the revision on screen. |

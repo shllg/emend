@@ -1,0 +1,21 @@
+import { readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
+
+export class BlobReader {
+  constructor(protected readonly root: string) {}
+
+  protected path(ownerId: string, sha256: string): string {
+    return join(this.root, ownerId, sha256.slice(0, 2), sha256);
+  }
+
+  async has(ownerId: string, sha256: string): Promise<boolean> {
+    return stat(this.path(ownerId, sha256)).then(
+      (info) => info.isFile(),
+      () => false,
+    );
+  }
+
+  async read(ownerId: string, sha256: string): Promise<Buffer> {
+    return readFile(this.path(ownerId, sha256));
+  }
+}

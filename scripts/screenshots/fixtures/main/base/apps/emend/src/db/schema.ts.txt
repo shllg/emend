@@ -1,0 +1,31 @@
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+
+export const reviews = sqliteTable(
+  "reviews",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    title: text("title").notNull(),
+    state: text("state", { enum: ["open", "approved", "settled"] })
+      .notNull()
+      .default("open"),
+    snoozedUntil: integer("snoozed_until", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("reviews_owner_updated_idx").on(table.ownerId, table.updatedAt),
+    index("reviews_owner_snooze_idx").on(table.ownerId, table.snoozedUntil),
+  ],
+);
+
+export const threads = sqliteTable("threads", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  reviewId: text("review_id")
+    .notNull()
+    .references(() => reviews.id, { onDelete: "cascade" }),
+  state: text("state", { enum: ["open", "sent", "answered", "resolved"] })
+    .notNull()
+    .default("open"),
+});

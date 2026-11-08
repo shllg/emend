@@ -1,0 +1,42 @@
+export interface SavedDraft {
+  key: string;
+  reviewId: string;
+  revision: number;
+  body: string;
+}
+
+const PREFIX = "emend:draft:";
+
+export function draftKey(reviewId: string, revision: number, slot: string): string {
+  return `${PREFIX}${reviewId}:${revision}:${slot}`;
+}
+
+export function saveDraft(key: string, body: string): void {
+  if (body.trim() === "") localStorage.removeItem(key);
+  else localStorage.setItem(key, body);
+}
+
+export function loadDraft(key: string): string {
+  return localStorage.getItem(key) ?? "";
+}
+
+/** A new revision keeps the drafts of the older ones; they move to the newest revision's slot. */
+export function carryDrafts(reviewId: string, newest: number): void {
+  for (const draft of listDrafts(reviewId)) {
+    if (draft.revision >= newest) continue;
+    const [, , , slot] = draft.key.split(":");
+    saveDraft(draftKey(reviewId, newest, slot ?? "0"), draft.body);
+    localStorage.removeItem(draft.key);
+  }
+}
+
+export function listDrafts(reviewId: string): SavedDraft[] {
+  const drafts: SavedDraft[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key?.startsWith(`${PREFIX}${reviewId}:`)) continue;
+    const [, , revision] = key.split(":");
+    drafts.push({ key, reviewId, revision: Number(revision), body: loadDraft(key) });
+  }
+  return drafts;
+}

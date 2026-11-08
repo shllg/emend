@@ -1,0 +1,16 @@
+# Release notes for 0.9
+
+## Highlights
+
+- **Pinned reviews.** Pin an open review and it stays at the top of the inbox until you unpin, approve or retire it.
+- **Drafts survive new revisions.** A comment you are still writing moves to the newest revision instead of being lost.
+- **Faster diffs.** Large diffs open without blocking the page.
+
+## Fixes
+
+- Retiring a review no longer leaves stale snooze times behind.
+- The phone layout keeps the Send button in reach when the keyboard is open.
+
+## Upgrading
+
+Run `emend update` on every machine. The database migrates on the first start, and old reviews open as before.

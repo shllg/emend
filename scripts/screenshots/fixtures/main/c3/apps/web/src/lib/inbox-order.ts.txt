@@ -1,0 +1,31 @@
+import type { InboxRow } from "@emend/contract";
+
+export type InboxGroup = "needs-you" | "open" | "snoozed" | "done";
+
+export function groupOf(row: InboxRow): InboxGroup {
+  if (row.state !== "open") return "done";
+  if (row.snoozedUntil) return "snoozed";
+  return row.agentWaiting || row.unsentCount > 0 ? "needs-you" : "open";
+}
+
+export function byNewest(a: InboxRow, b: InboxRow): number {
+  return b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id);
+}
+
+/** Pinned rows first, newest pin on top. Only the Open group sorts this way. */
+export function byPin(a: InboxRow, b: InboxRow): number {
+  if (a.pinnedAt && b.pinnedAt) return b.pinnedAt.localeCompare(a.pinnedAt);
+  if (a.pinnedAt) return -1;
+  if (b.pinnedAt) return 1;
+  return byNewest(a, b);
+}
+
+const GROUP_RANK: Record<InboxGroup, number> = { "needs-you": 0, open: 1, snoozed: 2, done: 3 };
+
+export function sortInbox(rows: InboxRow[]): InboxRow[] {
+  return [...rows].sort((a, b) => {
+    const [ga, gb] = [groupOf(a), groupOf(b)];
+    if (ga !== gb) return GROUP_RANK[ga] - GROUP_RANK[gb];
+    return ga === "open" ? byPin(a, b) : byNewest(a, b);
+  });
+}

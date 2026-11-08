@@ -1,0 +1,31 @@
+import { describe, expect, test } from "vitest";
+import { createTestApp } from "../test-support.ts";
+
+describe("pins", () => {
+  test("pin and unpin are idempotent", async () => {
+    const app = await createTestApp();
+    const review = await app.seedReview();
+    expect((await app.reviewer.post(`/api/v1/reviews/${review.id}/pin`)).status).toBe(204);
+    expect((await app.reviewer.post(`/api/v1/reviews/${review.id}/pin`)).status).toBe(204);
+    expect((await app.reviewer.post(`/api/v1/reviews/${review.id}/unpin`)).status).toBe(204);
+    expect((await app.reviewer.post(`/api/v1/reviews/${review.id}/unpin`)).status).toBe(204);
+  });
+
+  test("the eleventh pin is refused with pin_limit", async () => {
+    const app = await createTestApp();
+    for (let i = 0; i < 10; i++) {
+      const review = await app.seedReview();
+      expect((await app.reviewer.post(`/api/v1/reviews/${review.id}/pin`)).status).toBe(204);
+    }
+    const extra = await app.seedReview();
+    const response = await app.reviewer.post(`/api/v1/reviews/${extra.id}/pin`);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: "pin_limit" } });
+  });
+
+  test("a foreign review is not found", async () => {
+    const app = await createTestApp();
+    const foreign = await app.seedReview({ owner: "other" });
+    expect((await app.reviewer.post(`/api/v1/reviews/${foreign.id}/pin`)).status).toBe(404);
+  });
+});
