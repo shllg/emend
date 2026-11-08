@@ -394,6 +394,7 @@ const CLOSING_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
     mergeQueue(branch: "main") { id }
     pullRequest(number: $number) {
       body createdAt lastEditedAt
+      autoMergeRequest { enabledAt }
       closingIssuesReferences(first: 20) {
         nodes { number repository { nameWithOwner } }
         pageInfo { hasNextPage }
@@ -402,6 +403,7 @@ const CLOSING_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   }
 }`;
 const CLOSING_MISMATCH = "GitHub's closing issues do not match this branch. Fix the PR body with bin/wt pr edit.";
+const CLOSING_UNREADABLE = "Could not read GitHub's closing issues.";
 // GitHub documents no parsing bound; field reports range from seconds to over an hour.
 // The window compares the local clock with GitHub's timestamps and narrows the race.
 // The post-merge check covers only the PR's closing set; the squash message rests on the pre-merge text scan.
@@ -417,7 +419,7 @@ interface ClosingState {
 /** Read the body and parsed closing set together, pinned to the original repository through a merge. */
 function readGithubClosing(repo: Repo, number: number, identity?: ReturnType<typeof originRepository>): ClosingState {
   function refuse(): never {
-    throw new WtError(1, CLOSING_MISMATCH);
+    throw new WtError(1, CLOSING_UNREADABLE);
   }
   let expected: string;
   try {
@@ -479,18 +481,32 @@ function githubClosingGuard(
   repo: Repo,
   branch: string,
   number: number,
-  requireOwn: boolean,
+  phase: "merge" | "created" | "edited",
   identity?: ReturnType<typeof originRepository>,
   now: () => number = Date.now,
 ): Record<string, unknown> {
-  const closing = readGithubClosing(repo, number, identity);
+  let closing: ClosingState;
+  try {
+    closing = readGithubClosing(repo, number, identity);
+  } catch (error) {
+    throw new WtError(
+      error instanceof WtError ? error.code : 1,
+      phase === "merge"
+        ? `${CLOSING_UNREADABLE} Nothing was merged.`
+        : `Pull request #${number} was ${phase}, but its closing check could not be read. Check it before retrying.`,
+    );
+  }
   if (foreignClosingIssues(closing, branch).length) throw new WtError(1, CLOSING_MISMATCH);
-  if (requireOwn) {
+  if (phase === "merge") {
     // GitHub returns null for no queue or one the token cannot see, so refusal relies on token visibility.
     // The QUEUED path still stops the workflow if the merge is queued after submission.
     if (closing.mergeQueue === undefined)
       throw new WtError(1, "Could not read the repository's merge queue. Nothing was merged.");
     if (closing.mergeQueue !== null) throw new WtError(1, "Merge queues are not supported. Nothing was merged.");
+    if (closing.pr.autoMergeRequest === undefined)
+      throw new WtError(1, "Could not read whether auto-merge is enabled. Nothing was merged.");
+    if (closing.pr.autoMergeRequest !== null)
+      throw new WtError(1, "Auto-merge is enabled on this PR. Nothing was merged.");
     requireSettledClosing(closing.pr, now);
     if (issueFromBranch(branch) !== null && closing.issues.length === 0) throw new WtError(1, CLOSING_MISMATCH);
   }
@@ -549,7 +565,7 @@ export function prCreate(repo: Repo, o: { title: string; body: string; draft: bo
       1,
       `Pull request #${number} was created, but its exact branch lookup could not confirm it. Check it before retrying.`,
     );
-  githubClosingGuard(repo, branch, number, false);
+  githubClosingGuard(repo, branch, number, "created");
   return out;
 }
 
@@ -1025,7 +1041,7 @@ export function prEdit(repo: Repo, o: { pr?: string; title?: string; body?: stri
   if (o.body !== undefined) args.push("--body-file", "-");
   const out = gh(repo, args, "gh pr edit", o.body);
   // This read may precede GitHub parsing the edit; the merge re-reads under the settle window.
-  githubClosingGuard(repo, branch, pr.number, false);
+  githubClosingGuard(repo, branch, pr.number, "edited");
   return out;
 }
 
@@ -1162,7 +1178,7 @@ export function prMerge(
   closingGuard(repo, branch, `${prText(pr, "title")}\n\n${prText(pr, "body")}`, false);
   closingGuard(repo, branch, `${subject}\n\n${o.body}`, false);
   checkMergeBase(repo, n, sha);
-  const closingPr = githubClosingGuard(repo, branch, n, true, identity, now);
+  const closingPr = githubClosingGuard(repo, branch, n, "merge", identity, now);
   const closingBody = prText(closingPr, "body");
   requirePublicText(repo, { title: prText(pr, "title"), body: closingBody, branch });
   closingGuard(repo, branch, `${prText(pr, "title")}\n\n${closingBody}`, false);
@@ -1200,7 +1216,11 @@ export function prMerge(
       warnings.push("Warning: the merged head could not be read. Check the merged changes with the owner.");
     else if (state.headRefOid !== sha)
       warnings.push("Warning: the merged head is not the approved one. Check the merged changes with the owner.");
-    else if (merge.code !== 0)
+    if (/was already merged/i.test(merge.stdout) || /was already merged/i.test(merge.stderr))
+      warnings.push(
+        "Warning: gh reported that the PR was already merged. This squash message was not used. Check the result.",
+      );
+    else if (merge.code !== 0 && state.headRefOid === sha)
       warnings.push("Warning: gh pr merge reported an error, but the PR is merged. Check the result.");
     try {
       const closingAfter = readGithubClosing(repo, n, identity);

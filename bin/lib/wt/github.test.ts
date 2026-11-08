@@ -611,6 +611,7 @@ function closingRule(nodes: unknown[] = [], more = false): FakeRule {
             body: "Description",
             createdAt: "2026-01-01T00:00:00Z",
             lastEditedAt: null,
+            autoMergeRequest: null,
             closingIssuesReferences: { nodes, pageInfo: { hasNextPage: more } },
           },
         },

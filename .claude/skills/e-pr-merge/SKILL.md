@@ -60,7 +60,8 @@ Read checks with `gh pr checks --repo github.com/<owner>/<name> <n> --json name,
 Run `<main>/bin/wt fetch`, then read the trusted review-bot list and filters from
 `git -C '<main>' show origin/main:.claude/skills/e-pr-finalize/SKILL.md`, step 4.
 Compare step 4 in the current worktree and in `<main>` with that committed copy. If either differs,
-report the changed gate and record the difference in the PR body's Evidence: write the updated body
+report the changed gate. If the PR body's Evidence already records the same difference, leave the
+body as it is. Otherwise record the difference in Evidence: write the updated body
 to `<top>/.wt/pr-body.md` and run `<main>/bin/wt pr edit --body-file <top>/.wt/pr-body.md` (add `--pr <n>`
 in the main checkout). Make this body edit before a fresh
 `gh pr view --repo github.com/<owner>/<name> <n> --json headRefOid` read for the approval comparison
@@ -104,6 +105,9 @@ nothing: tracked files under `.wt` must never count as approval. Otherwise no ap
 3. Read the review id and the revision the `approve` names. Find the line in the same folder's
    `heads.txt` that matches both (written by this session, `<reviewId> <revision> <head>`). That head is the approved head.
 4. The approval is on record only when the approved head equals the PR's `headRefOid`.
+   On a step-7 retry after step 4 carried the approval over, confirm that the saved mapping still
+   names the original approved head, then compare the fresh PR head with the retained rebased head
+   instead. The saved approval record must be unchanged.
 
 No approval on record:
 
@@ -121,8 +125,9 @@ unchanged.
 2. Run `<main>/bin/wt fetch`. Read the old base with `git merge-base HEAD origin/main`, and keep it
    (`<old base>`). Run `<main>/bin/wt digest --base <old base> --head <approved head>` and keep the
    printed value.
-3. Run `/e-rebase` (it pushes with a lease). Then run `<main>/bin/wt digest --base origin/main`, which
-   digests the rebased local HEAD, and keep the rebased head (`git rev-parse HEAD`).
+3. Run `/e-rebase` (it pushes with a lease). Immediately keep `git rev-parse HEAD` as the rebased
+   head, then run `<main>/bin/wt digest --base origin/main --head <rebased head>` and keep its value.
+   Use that exact commit through the poll, the checks and step 7; a later HEAD is a different head.
 4. Digests equal and the result was `rebased` (not `restacked`): the earlier approval covers the
    rebased head, and only that head; no new review. Then:
    1. Poll `gh pr view --repo github.com/<owner>/<name> <n> --json headRefOid,statusCheckRollup` about every 15 seconds, for at most 10
@@ -185,10 +190,17 @@ Run, from the PR's own worktree:
 
 If it refuses because "GitHub may not have parsed the body yet", wait until the named UTC retry
 time. Do not poll more often than once a minute. Rerun step 2 in full (readiness and all feedback
-surfaces), then re-check that the saved approval record from step 3 is unchanged. Compare the
-fresh PR head with the head to merge: the approved head, or the rebased head when step 4 carried
-the approval over. Keep that carried-over head; do not reload the approved head as the only
-allowed head. Then rerun step 7 once, including its issue check and the same merge command.
+surfaces), without editing the PR body when Evidence already records the same difference; another
+edit would restart the settle window. If readiness is BEHIND after a carried-over rebase, stop
+with `<main>/bin/wt notify blocked`; do not rebase again.
+
+Rerun step 3 in full: the tracked-file and folder checks, newest saved result, handled delivery,
+and head mapping. The saved approval record must be unchanged; a newer `go` or `closed` ends the
+merge. Only saved results are read: an answer sent in emend after the approval is not seen here
+unless it has been saved. Compare the fresh PR head with the retained head to merge: the approved
+head, or the rebased head when step 4 carried the approval over, as step 3 allows for this retry.
+A fresh PR head other than that head stops with `<main>/bin/wt notify blocked`.
+Then rerun step 7 once, including its issue check and the same merge command.
 Any failed gate, changed approval record or second refusal stops: run
 `<main>/bin/wt notify blocked` and report the reason.
 
@@ -198,7 +210,8 @@ If it refuses with
 Without `--pr` it acts on the caller branch's PR. Add `--pr <n>` when this skill runs in the
 main checkout. An issue PR (branch `emend-<n>-<slug>`) merges only from its own worktree: there
 `pr merge` runs the issue check, and in the main checkout it refuses. `--match-head` refuses the merge if a commit landed after the
-check. The last line is `MERGED <commit>` or `QUEUED` (`QUEUED` exits 1 with a warning).
+check. The status line on stdout is `MERGED <commit>` or `QUEUED` (`QUEUED` exits 1 with a warning).
+Warnings go to stderr after it; read both stdout and stderr.
 
 The post-merge check covers only the PR's closing set. The squash message rests on the pre-merge
 text scan alone.
@@ -215,9 +228,11 @@ text scan alone.
 When a permission check refuses the merge command itself (the tool call is denied, not a `bin/wt`
 error), do not try another way. Run `<main>/bin/wt notify blocked`, print the same command for the
 owner to run as `! <command>` in this session, and wait. It holds only paths, the PR number and the
-head commit; never put the subject or other text on that line. Ask the owner to check that the
-`--match-head` commit is the head their emend approval shows before they run it. Read the command's
-output in the conversation. Cleanup is allowed only when it shows exit status 0 and a
+head commit; never put the subject or other text on that line. When step 4 carried the approval
+over, show the approved head, the retained rebased head and the two equal digests. Ask the owner
+to confirm that pair and that `--match-head` names the retained rebased head before running it.
+Otherwise ask the owner to check that `--match-head` names the head their emend approval shows.
+Read the command's output in the conversation. Cleanup is allowed only when it shows exit status 0 and a
 `MERGED <commit>` line with no warning. A warning, a non-zero exit, or output that is not visible:
 run `<main>/bin/wt notify blocked`, report, and skip cleanup. Confirm the PR's state with
 `gh pr view --repo github.com/<owner>/<name> <n> --json state,mergeCommit`; a `MERGED` state alone

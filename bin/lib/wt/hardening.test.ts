@@ -85,6 +85,7 @@ const closingRule = (): FakeRule => ({
           body: "Description",
           createdAt: "2026-01-01T00:00:00Z",
           lastEditedAt: null,
+          autoMergeRequest: null,
           closingIssuesReferences: { nodes: [], pageInfo: { hasNextPage: false } },
         },
       },
@@ -359,7 +360,7 @@ test("loop survey reports the unfiltered count even when every PR is filtered ou
   const listing = /`(gh pr list [^`]+)`/u.exec(text)?.[1];
   assert.ok(listing, "loop.md must contain its PR listing command");
   assert.doesNotMatch(listing, /(?:^|\s)--(?:search|author)(?:[=\s]|$)/u);
-  assert.doesNotMatch(listing, /(?:^|\s)-[SA]/u);
+  assert.doesNotMatch(listing, /(?:^|\s)-[a-zA-Z]*[AS]/u);
   const filter = /--jq '([^']+)'/.exec(listing)?.[1] as string;
   const prs = Array.from({ length: 100 }, () => ({ author: { login: "outsider" }, isCrossRepository: false }));
   assert.deepEqual(jq(filter, prs), [{ fetched: 100, items: [] }]);

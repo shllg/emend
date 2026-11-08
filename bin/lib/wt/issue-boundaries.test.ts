@@ -279,6 +279,27 @@ function readOnlyPrOrIssue(call: Call): boolean {
 }
 
 function assertNoBranchDeletion(calls: Call[]): void {
+  for (const call of calls.filter((call) => call.command === "gh")) {
+    if (call.args[0] === "pr" && call.args[1] === "merge")
+      assert.ok(
+        !call.args.some((arg) => /^(?:--delete-branch|-d)(?:=|$)/u.test(arg)),
+        "no branch deletion through gh pr merge",
+      );
+    if (call.args[0] === "api") {
+      assert.ok(
+        !call.args.some(
+          (arg, i) =>
+            /^(?:--method=|-X=?)delete$/iu.test(arg) ||
+            ((arg === "--method" || arg === "-X") && call.args[i + 1]?.toUpperCase() === "DELETE"),
+        ),
+        "no DELETE request through gh api",
+      );
+      assert.ok(
+        !call.args.some((arg) => /(?:^|\/)(?:refs?|matching-refs)(?:\/|[?#]|$)/u.test(arg)),
+        "no refs path through gh api",
+      );
+    }
+  }
   for (const call of calls.filter((call) => call.command === "git")) {
     assert.ok(!call.args.includes("push"), "no push, including delete refspecs, before or after a warning");
     assert.ok(!call.args.includes("branch"), "no local branch deletion on a warning");
@@ -308,6 +329,7 @@ function closingResponse(
           body: "Description",
           createdAt: "2026-01-01T00:00:00Z",
           lastEditedAt: null,
+          autoMergeRequest: null,
           closingIssuesReferences: { nodes, pageInfo: { hasNextPage: more } },
           ...fields,
         },
@@ -459,7 +481,12 @@ for (const command of ["create", "edit", "merge"] as const) {
           [[], true],
         ] as const) {
           state.closing = { stdout: closingResponse([...nodes], more) };
-          assert.throws(invoke, (e: unknown) => e instanceof WtError && e.code === 1 && e.message === closingMismatch);
+          const message = more
+            ? command === "merge"
+              ? "Could not read GitHub's closing issues. Nothing was merged."
+              : `Pull request #7 was ${command === "create" ? "created" : "edited"}, but its closing check could not be read. Check it before retrying.`
+            : closingMismatch;
+          assert.throws(invoke, (e: unknown) => e instanceof WtError && e.code === 1 && e.message === message);
           assert.equal(
             calls.some((c) => c.command === "gh" && c.args[1] === command),
             command !== "merge",
@@ -2600,4 +2627,104 @@ for (const [change, mergedHead, warning] of [
       const merge = calls.findIndex((call) => call.command === "gh" && call.args[1] === "merge");
       assert.ok(calls.slice(merge + 1).some((call) => call.args.includes("state,mergeCommit,headRefOid")));
     }));
+}
+
+for (const autoMergeRequest of [{ enabledAt: "2026-01-01T00:00:00Z" }, undefined]) {
+  test(`round 13 refuses enabled or unreadable auto-merge: ${JSON.stringify(autoMergeRequest)}`, () =>
+    boundary(({ repo, state, calls }) => {
+      prepareMergeIssue(repo);
+      state.remoteBranches = [state.prBranch];
+      state.closing = { stdout: closingResponse([ownClosingIssue], false, "Owner/Repo", { autoMergeRequest }) };
+      calls.length = 0;
+      assert.throws(() => prMerge(repo, SETTLE_MERGE, () => SETTLE_NOW), {
+        code: 1,
+        message: autoMergeRequest
+          ? "Auto-merge is enabled on this PR. Nothing was merged."
+          : "Could not read whether auto-merge is enabled. Nothing was merged.",
+      });
+      assert.ok(!calls.some((call) => call.command === "gh" && call.args[1] === "merge"));
+      assertNoBranchDeletion(calls);
+      const query = calls.find(isClosingQuery);
+      assert.ok(query);
+      assert.match(query.args.find((arg) => arg.startsWith("query=")) ?? "", /autoMergeRequest\s*\{ enabledAt \}/u);
+    }));
+}
+
+for (const stream of ["stdout", "stderr"] as const) {
+  for (const status of [0, 1]) {
+    test(`round 13 already-merged warning keeps the branch: ${stream}, exit ${status}`, (t) =>
+      boundary(({ repo, state, calls }) => {
+        prepareMergeIssue(repo);
+        state.remoteBranches = [state.prBranch];
+        state.closing = { stdout: closingResponse([ownClosingIssue]) };
+        state.mergeReply = { status, [stream]: "Pull request #7 was already merged\n" };
+        const stdout: string[] = [];
+        t.mock.method(process.stdout, "write", (chunk: string | Uint8Array) => {
+          stdout.push(String(chunk));
+          return true;
+        });
+        calls.length = 0;
+        assert.throws(() => prMerge(repo, SETTLE_MERGE, () => SETTLE_NOW), {
+          code: 1,
+          message:
+            "Warning: gh reported that the PR was already merged. This squash message was not used. Check the result.",
+        });
+        assert.deepEqual(stdout, [`MERGED ${"c".repeat(40)}\n`]);
+        assertNoBranchDeletion(calls);
+        assert.equal(calls.filter(isClosingQuery).length, 2);
+        assert.equal(calls.filter((call) => call.command === "gh" && call.args[1] === "merge").length, 1);
+      }));
+  }
+}
+
+for (const command of ["create", "edit", "merge"] as const) {
+  for (const [failure, reply, code] of [
+    ["GraphQL errors", { stdout: JSON.stringify({ errors: [{ message: "field is unavailable" }] }) }, 1],
+    [
+      "partial data with errors",
+      {
+        stdout: JSON.stringify({
+          ...JSON.parse(closingResponse([ownClosingIssue])),
+          errors: [{ message: "field is unavailable" }],
+        }),
+      },
+      1,
+    ],
+    ["transport", { status: 1, stderr: "network is unreachable" }, 69],
+    ["invalid JSON", { stdout: "not JSON" }, 1],
+    [
+      "missing PR",
+      { stdout: JSON.stringify({ data: { repository: { nameWithOwner: "Owner/Repo", pullRequest: null } } }) },
+      1,
+    ],
+  ] as const) {
+    test(`round 13 closing query failure reports ${command} outcome: ${failure}`, () =>
+      boundary(({ repo, state, calls }) => {
+        if (command === "merge") prepareMergeIssue(repo);
+        state.pr = command !== "create";
+        state.closing = reply;
+        calls.length = 0;
+        const invoke = () => {
+          if (command === "create") return prCreate(repo, { title: "Fix pane", body: "Closes #42", draft: false });
+          if (command === "edit") return prEdit(repo, { body: "Closes #42" });
+          return prMerge(repo, SETTLE_MERGE, () => SETTLE_NOW);
+        };
+        assert.throws(invoke, {
+          code,
+          message:
+            command === "merge"
+              ? "Could not read GitHub's closing issues. Nothing was merged."
+              : `Pull request #7 was ${command === "create" ? "created" : "edited"}, but its closing check could not be read. Check it before retrying.`,
+        });
+        const mutations = calls.filter(
+          (call) => call.command === "gh" && ["create", "edit", "merge"].includes(call.args[1] ?? ""),
+        );
+        assert.equal(mutations.length, command === "merge" ? 0 : 1);
+        if (command !== "merge") {
+          assert.equal(mutations[0]?.args[1], command);
+          assert.ok(calls.indexOf(mutations[0] as Call) < calls.findIndex(isClosingQuery));
+        }
+        assertNoBranchDeletion(calls);
+      }));
+  }
 }
