@@ -315,6 +315,13 @@ const hostile = [
   ["list number", "1. 104101108108111032.[x] x", "checker only"],
   ["list number", "-\n  1234567890.[ ] x", "checker only"],
   ["task marker", "2. 1234567890.\n   [\n   ] x", "checker only"],
+  ["task marker", "1234567890.\n   [\n   ] x", "checker only"],
+  ["task marker", "1234567890. 1.\n   [\n   ] x", "checker only"],
+  ["task marker", "2. a\n   ```text\n   [ ]\n   ```", "checker only"],
+  ["task marker", "2. a\n   ```text\n   [x] done\n   ```", "checker only"],
+  ["task marker", "2. a\n   - [ ] b\n           - [ ] c", "checker only"],
+  ["task marker", "2. a\n   - [ ] b\n     text\n         - [ ] c", "checker only"],
+  ["task marker", "2. a\n   - - -\n        - [ ] c", "checker only"],
   ["task marker", "104. a\n     \\- [ ] x", "checker only"],
   ["task marker", "104. a\n     1\\. [ ] x", "checker only"],
   ["task marker", "104. a\n         - [ ] x", "checker only"],
@@ -365,6 +372,13 @@ const containerFences = [
 // These owner forms must stay accepted; markdown-security.test.ts also asserts
 // them through issue evaluation. The mixed corpus below retains refusal cases too.
 const ownerBodies = [
+  '1. Create\n2. Set:\n\n   ```json\n   [\n     "a"\n   ]\n   ```',
+  "1. a\n2. b\n```json\n[\n1\n]\n```",
+  "1. a\n2. b\n```text\n[\n] literal\n```",
+  "1. a\n2. b\n ```text\n [\n ] literal\n ```",
+  "1. a\n2. Step\n   - [ ] a\n     - [ ] b\n       - [ ] c",
+  "2. Step\n    - [ ] a\n        - [ ] b",
+  "104. a\n\n## Expected\n\n[\n] literal",
   "Steps\n\n1. a\n2. b\n\n## Expected\n\n- [ ] Pending",
   "2. a\n   - [ ] b",
   "104. a\n     - [ ] b",
@@ -916,6 +930,50 @@ test("each individual rule has a mutation witness", async (t) => {
   const checkerSource = await readFile(new URL("./markdown.ts", import.meta.url), "utf8");
   const mutations = [
     {
+      name: "split box closing line",
+      from: String.raw`if (split && !/^[\s>]*\]/u.test(lines[index + 1] ?? "")) continue;`,
+      to: "",
+      body: '1. Create\n2. Set:\n\n   ```json\n   [\n     "a"\n   ]\n   ```',
+      kind: null,
+    },
+    {
+      name: "fence outside ordered item",
+      from: "if (!inItem) orderedItem = null;",
+      to: "",
+      body: "1. a\n2. b\n```text\n[\n] literal\n```",
+      kind: null,
+    },
+    {
+      name: "nearest list content column",
+      from: "indent >= orderedItem.lastContentColumn + 4",
+      to: "indent >= orderedItem.contentColumn + 4",
+      body: "1. a\n2. Step\n   - [ ] a\n     - [ ] b\n       - [ ] c",
+      kind: null,
+    },
+    {
+      name: "list content column advances",
+      from: "orderedItem.lastContentColumn = markerEnd + (padding > 0 && padding <= 4 ? padding : 1);",
+      to: "",
+      body: "2. Step\n    - [ ] a\n        - [ ] b",
+      kind: null,
+    },
+    {
+      name: "thematic break is not a list item",
+      from: String.raw`!/^(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,})$/u.test(content)`,
+      to: "true",
+      body: "2. a\n   - - -\n        - [ ] c",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "long marker-only predecessor",
+      from: String.raw`/^(?:[\s>]|[-*+]|\d+[.)])*(?:[-*+]|\d+[.)])[ \t]*$/u`,
+      to: String.raw`/^(?:[\s>]|[-*+]|\d{1,9}[.)])*(?:[-*+]|\d{1,9}[.)])[ \t]*$/u`,
+      body: "1234567890.\n   [\n   ] x",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
       name: "end-of-line scanner box",
       from: String.raw`\[[ xX]\](?:[ \t]|$)`,
       to: String.raw`\[[ xX]\][ \t]`,
@@ -949,7 +1007,7 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "later indented box",
-      from: " || indent >= orderedItem.contentColumn + 4",
+      from: " || indent >= orderedItem.lastContentColumn + 4",
       to: "",
       body: "104. a\n         - [ ] x",
       kind: "task marker",
@@ -967,7 +1025,7 @@ test("each individual rule has a mutation witness", async (t) => {
       name: "ordered item boundary",
       from: "orderedItem && index > 0 &&",
       to: "false &&",
-      body: "104. a\n\n## Expected\n\n```json\n[\n1\n]\n```",
+      body: "104. a\n\n## Expected\n\n[\n] literal",
       kind: null,
     },
     {

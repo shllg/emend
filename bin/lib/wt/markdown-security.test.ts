@@ -26,6 +26,32 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+for (const [name, body] of [
+  ["JSON array in second step", '1. Create\n2. Set:\n\n   ```json\n   [\n     "a"\n   ]\n   ```'],
+  ["column-zero JSON fence after numbered items", "1. a\n2. b\n```json\n[\n1\n]\n```"],
+  ["column-zero literal split box outside item", "1. a\n2. b\n```text\n[\n] literal\n```"],
+  ["literal split box in fence before item content column", "1. a\n2. b\n ```text\n [\n ] literal\n ```"],
+  ["three-level checklist under second item", "1. a\n2. Step\n   - [ ] a\n     - [ ] b\n       - [ ] c"],
+  ["checklist child beyond ordered content indentation", "2. Step\n    - [ ] a\n        - [ ] b"],
+  ["literal split box after heading boundary", "104. a\n\n## Expected\n\n[\n] literal"],
+] as const) {
+  test(`raw Markdown permits ${name}`, () => {
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+
+for (const [name, body] of [
+  ["bare unchecked box in second-item fence", "2. a\n   ```text\n   [ ]\n   ```"],
+  ["bare checked box in second-item fence", "2. a\n   ```text\n   [x] done\n   ```"],
+  ["checklist four columns past preceding item content", "2. a\n   - [ ] b\n           - [ ] c"],
+  ["text does not move checklist content column", "2. a\n   - [ ] b\n     text\n         - [ ] c"],
+  ["thematic break does not establish a list content column", "2. a\n   - - -\n        - [ ] c"],
+] as const) {
+  test(`raw Markdown refuses ${name}`, () => {
+    assert.equal(evaluate(body).reason, reason("task marker"), body);
+  });
+}
+
 for (const [name, body, kind] of [
   ["end-of-line boxes after numbered paragraphs", "2. Steps\n\n   1h [ ]\n\n   1i [ ]", "task marker"],
   ["end-of-line checked box after bullet paragraph", "- a\n\n  1h [x]\n\nend", "task marker"],
@@ -45,6 +71,8 @@ for (const [name, body, kind] of [
   ["long box prefix after another number", "1. 104101108108111032.[x] x", "list number"],
   ["long box prefix after marker-only line", "-\n  1234567890.[ ] x", "list number"],
   ["split box after long marker chain", "2. 1234567890.\n   [\n   ] x", "task marker"],
+  ["split box after ten-digit marker-only line", "1234567890.\n   [\n   ] x", "task marker"],
+  ["split box after long then literal-one markers", "1234567890. 1.\n   [\n   ] x", "task marker"],
   ["escaped bullet before later box", "104. a\n     \\- [ ] x", "task marker"],
   ["escaped delimiter before later box", "104. a\n     1\\. [ ] x", "task marker"],
   ["later box four columns beyond item content", "104. a\n         - [ ] x", "task marker"],

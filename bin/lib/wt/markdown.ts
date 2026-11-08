@@ -97,7 +97,7 @@ function hiddenLineReason(lines: string[]): string | null {
   // holding a literal empty fence example may still be refused (fail closed).
   let needsContent: string | null = null;
   let openerIndent = 0;
-  let orderedItem: { markerColumn: number; contentColumn: number } | null = null;
+  let orderedItem: { markerColumn: number; contentColumn: number; lastContentColumn: number } | null = null;
   let taskFence: { run: string; column: number; inItem: boolean; quoteDepth: number; minColumn: number } | null = null;
   for (const [index, line] of lines.entries()) {
     let contentStart = 0;
@@ -136,7 +136,8 @@ function hiddenLineReason(lines: string[]): string | null {
           const markerEnd = columns(line.slice(0, end - (marker[2]?.length ?? 0)));
           const padding = columns(line.slice(0, end)) - markerEnd;
           // CommonMark uses one column when padding is absent or exceeds four.
-          orderedItem = { markerColumn, contentColumn: markerEnd + (padding > 0 && padding <= 4 ? padding : 1) };
+          const contentColumn = markerEnd + (padding > 0 && padding <= 4 ? padding : 1);
+          orderedItem = { markerColumn, contentColumn, lastContentColumn: contentColumn };
         }
       }
     }
@@ -157,16 +158,19 @@ function hiddenLineReason(lines: string[]): string | null {
       if (task) {
         const prefix = task[1] ?? "";
         const split = task[2] === undefined;
-        if (!split || /[-*+]|\d+[.)]/u.test(prefix) || orderedItem) {
-          if (orderedItem && (split || taskFence?.inItem || indent >= orderedItem.contentColumn + 4))
+        if (split && !/^[\s>]*\]/u.test(lines[index + 1] ?? "")) continue;
+        if (!split || /[-*+]|\d{1,9}[.)]/u.test(prefix) || orderedItem) {
+          if (orderedItem && (split || taskFence?.inItem || indent >= orderedItem.lastContentColumn + 4))
             return refusal("task marker");
           if (task[2] !== " " && task[2] !== "x") return refusal("task marker");
           // cmark sets checked state from any literal [x]/[X] on the raw line.
           if (task[2] === " " && /\[[xX]\]/u.test(line)) return refusal("task marker");
-          if ([...prefix.matchAll(/(\d+)[.)]/gu)].some((number) => number[1] !== "1")) return refusal("list number");
+          if ([...prefix.matchAll(/(\d{1,9})[.)]/gu)].some((number) => number[1] !== "1"))
+            return refusal("list number");
+          // line.indexOf("[") finds the box because the task regex matched a marker-only prefix.
           if (line.slice(0, line.indexOf("[")).includes("\\")) return refusal("task marker");
           // All ordered markers above are 1; require a final marker and spacing.
-          if (!/(?:[-*+]|\d+[.)])[ \t]+$/u.test(prefix)) return refusal("task marker");
+          if (!/(?:[-*+]|\d{1,9}[.)])[ \t]+$/u.test(prefix)) return refusal("task marker");
         }
       }
     }
@@ -178,6 +182,21 @@ function hiddenLineReason(lines: string[]): string | null {
       !/^(?:[\s>]|[-*+]|\d{1,9}[.)])*1[.)][ \t]+\[/u.test(line)
     )
       return refusal("task marker");
+    // Only a list-item line advances the reference column, after its own box
+    // check. Plain text, thematic breaks and code cannot authorize deeper boxes.
+    const listItem = /^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]+|$)/u.exec(line);
+    if (
+      orderedItem &&
+      !taskFence &&
+      listItem &&
+      indent >= orderedItem.contentColumn &&
+      indent < orderedItem.lastContentColumn + 4 &&
+      !/^(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,})$/u.test(content)
+    ) {
+      const markerEnd = columns((listItem[1] ?? "") + (listItem[2] ?? ""));
+      const padding = columns(listItem[0]) - markerEnd;
+      orderedItem.lastContentColumn = markerEnd + (padding > 0 && padding <= 4 ? padding : 1);
+    }
     const fence = /^([ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+[ \t>]*)*)(`{3,}|~{3,})([ \t]*[A-Za-z]*[ \t]*)$/u.exec(line);
     if (fence?.[2]) {
       const column = columns(fence[1] ?? "");
@@ -193,6 +212,7 @@ function hiddenLineReason(lines: string[]): string | null {
           taskFence = null;
       } else {
         const inItem = orderedItem !== null && column >= orderedItem.contentColumn;
+        if (!inItem) orderedItem = null;
         const fenceQuoteDepth = fence[1]?.match(/>/gu)?.length ?? 0;
         const listPrefix = [...(fence[1] ?? "").matchAll(/(?:[-*+]|\d{1,9}[.)])([ \t]+)/gu)].at(-1);
         let minColumn = inItem ? (orderedItem?.contentColumn ?? 0) : 0;
