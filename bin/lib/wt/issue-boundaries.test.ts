@@ -2383,7 +2383,7 @@ const SETTLE_MERGE = { pr: "7", matchHead: "a".repeat(40), subject: "Fix pane", 
 const isClosingQuery = (call: Call) =>
   call.command === "gh" && call.args.some((arg) => arg.includes("closingIssuesReferences(first: 20)"));
 
-test("round 16 exit-zero stderr warns, while empty stderr permits cleanup", async (t) => {
+test("round 16 exit-zero stderr warns, while exactly empty stderr permits cleanup", async (t) => {
   for (const stderr of ["Pull Request wurde bereits zusammengeführt\n", "Synthetic merge notice\n", "\n", ""]) {
     await boundary(({ repo, state, calls }) => {
       prepareMergeIssue(repo);

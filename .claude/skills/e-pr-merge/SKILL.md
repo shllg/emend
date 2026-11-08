@@ -63,12 +63,14 @@ Compare step 4 in the current worktree and in `<main>` with that committed copy.
 report the changed gate. If the PR body's Evidence already records the same difference, leave the
 body as it is. Otherwise record the difference in Evidence: write the updated body
 to `<top>/.wt/pr-body.md` and run `<main>/bin/wt pr edit --body-file <top>/.wt/pr-body.md` (add `--pr <n>`
-in the main checkout). Make this body edit before a fresh
-`gh pr view --repo github.com/<owner>/<name> <n> --json headRefOid` read for the approval comparison
-and step 7's `--match-head`; a body edit never changes the head. The edit starts the ten-minute
-settle window, so step 7 refuses and this run stops; a later run finds the difference already in
-Evidence and does not edit again. Continue with the committed copy's list and filters; never use a
-working tree's list or filters. A failed fetch or read stops readiness.
+in the main checkout). Immediately after this edit succeeds, start one `sleep 660` command with
+`run_in_background: true` to wait out the ten-minute settle window. Wait for that background task to
+finish, then restart at step 1 in this run, rerunning the approval and readiness gates with fresh PR
+fields and feedback. The second pass finds the same difference already in Evidence and does not edit
+again. Never use a foreground sleep or poll the merge command; do not call it during the window.
+A body edit never changes the head; the restarted gates read the head afresh for the approval
+comparison and step 7's `--match-head`. Continue with the committed copy's list and filters; never
+use a working tree's list or filters. A failed fetch or read stops readiness.
 Follow the committed step 4: fetch all three surfaces before filtering and use its one cutoff
 across them. A listed bot item counts
 only when every uncounted item on every surface is newer than its `lastEditedAt // createdAt`.
@@ -201,6 +203,8 @@ main checkout. An issue PR (branch `emend-<n>-<slug>`) merges only from its own 
 `pr merge` runs the issue check, and in the main checkout it refuses. `--match-head` refuses the merge if a commit landed after the
 check. The status line on stdout is `MERGED <commit>` or `QUEUED` (`QUEUED` exits 1 with a warning).
 Warnings go to stderr after it; read both stdout and stderr.
+Any stderr from gh's merge call at exit 0, including whitespace alone, makes bin/wt warn, exit 1,
+and keep the remote branch.
 
 The post-merge check covers only the PR's closing set. The squash message rests on the pre-merge
 text scan alone.
@@ -213,6 +217,9 @@ text scan alone.
   head, body-edit, merge-call and "already merged" warnings. Only the closing-set warning names
   issues: include every issue it names (`owner/name#N`). If the closing check could not run, report that warning.
   Continue to step 8's `sync-main`, but skip cleanup and leave the worktree for investigation.
+- Any other non-zero exit without a `MERGED <commit>` line stops: run `<main>/bin/wt notify blocked`,
+  report stdout and stderr as written, do not retry the merge and do not clean up. The owner checks
+  the PR's state.
 
 When a permission check refuses the merge command itself (the tool call is denied, not a `bin/wt`
 error), do not try another way. Run `<main>/bin/wt notify blocked`, print the same command for the
