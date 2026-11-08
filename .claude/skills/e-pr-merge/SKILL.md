@@ -66,7 +66,8 @@ to `<top>/.wt/pr-body.md` and run `<main>/bin/wt pr edit --body-file <top>/.wt/p
 in the main checkout). Make this body edit before a fresh
 `gh pr view --repo github.com/<owner>/<name> <n> --json headRefOid` read for the approval comparison
 and step 7's `--match-head`; a body edit never changes the head. The edit starts the ten-minute
-settle window, so step 7 may wait. Continue with the committed copy's list and filters; never use a
+settle window, so step 7 refuses and this run stops; a later run finds the difference already in
+Evidence and does not edit again. Continue with the committed copy's list and filters; never use a
 working tree's list or filters. A failed fetch or read stops readiness.
 Follow the committed step 4: fetch all three surfaces before filtering and use its one cutoff
 across them. A listed bot item counts
@@ -105,9 +106,6 @@ nothing: tracked files under `.wt` must never count as approval. Otherwise no ap
 3. Read the review id and the revision the `approve` names. Find the line in the same folder's
    `heads.txt` that matches both (written by this session, `<reviewId> <revision> <head>`). That head is the approved head.
 4. The approval is on record only when the approved head equals the PR's `headRefOid`.
-   On a step-7 retry after step 4 carried the approval over, confirm that the saved mapping still
-   names the original approved head, then compare the fresh PR head with the retained rebased head
-   instead. The saved approval record must be unchanged.
 
 No approval on record:
 
@@ -188,23 +186,12 @@ Run, from the PR's own worktree:
 <main>/bin/wt pr merge --match-head <head to merge> --subject-file <top>/.wt/merge-subject.txt --body-file <top>/.wt/merge-body.md
 ```
 
-If it refuses because "GitHub may not have parsed the body yet", wait until the named UTC retry
-time. Do not poll more often than once a minute. Rerun step 1's PR read to refresh the PR fields,
-including `mergeStateStatus`, then step 2 in full (readiness and all feedback surfaces). Keep the
-retained head and approval unchanged. Do not edit the PR body when Evidence already records the
-same difference; another edit would restart the settle window. On any retry, BEHIND stops with
-`<main>/bin/wt notify blocked`, including when no approval was carried over a rebase.
-Step 7 never runs step 4.
+Any `bin/wt pr merge` refusal ending in "Nothing was merged." stops, including enabled or unreadable
+auto-merge, a merge queue, or a closing-check refusal. Run `<main>/bin/wt notify blocked`, report the
+refusal as written, and stop. Changing auto-merge or the PR's settings is the owner's step.
 
-Rerun step 3 in full: the tracked-file and folder checks, newest saved result, handled delivery,
-and head mapping. The saved approval record must be unchanged; a newer `go` or `closed` ends the
-merge. Only saved results are read: an answer sent in emend after the approval is not seen here
-unless it has been saved. Compare the fresh PR head with the retained head to merge: the approved
-head, or the rebased head when step 4 carried the approval over, as step 3 allows for this retry.
-A fresh PR head other than that head stops with `<main>/bin/wt notify blocked`.
-Then rerun step 7 once, including its issue check and the same merge command.
-Any failed gate, changed approval record or second refusal stops: run
-`<main>/bin/wt notify blocked` and report the reason.
+If the refusal says "GitHub may not have parsed the body yet", report its UTC retry time as written
+and stop as above. A later invocation must rerun the approval and readiness gates before merging.
 
 If it refuses with
 "This branch holds commits of local main that origin/main lacks. Push main first.", stop and run
@@ -231,8 +218,16 @@ When a permission check refuses the merge command itself (the tool call is denie
 error), do not try another way. Run `<main>/bin/wt notify blocked`, print the same command for the
 owner to run as `! <command>` in this session, and wait. It holds only paths, the PR number and the
 head commit; never put the subject or other text on that line. When step 4 carried the approval
-over, show the approved head, the retained rebased head and the two equal digests. Ask the owner
-to confirm that pair and that `--match-head` names the retained rebased head before running it.
+over, show the approved head, the retained rebased head and the two equal digests. Next to the merge
+command, print these two read-only commands with the retained values filled in, so the owner can
+see equality from bin/wt's own output:
+
+```
+<main>/bin/wt digest --base <old base> --head <approved head>
+<main>/bin/wt digest --base origin/main --head <rebased head>
+```
+
+Ask the owner to confirm that pair and that `--match-head` names the retained rebased head before running it.
 Otherwise ask the owner to check that `--match-head` names the head their emend approval shows.
 Read the command's output in the conversation. Cleanup is allowed only when it shows exit status 0 and a
 `MERGED <commit>` line with no warning. A warning, a non-zero exit, or output that is not visible:

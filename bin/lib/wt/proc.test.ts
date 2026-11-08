@@ -58,8 +58,8 @@ test("run reports a missing program as 127 and a timeout as 124", () => {
 });
 
 test("regression: every process helper strips the private terms environment", (t) => {
-  const previous = process.env.EMEND_PRIVATE_TERMS;
-  process.env.EMEND_PRIVATE_TERMS = "fixturecorp";
+  const parent = { EMEND_PRIVATE_TERMS: "fixturecorp" };
+  t.mock.property(process, "env", parent);
   const spy = t.mock.method(childProcess, "spawnSync", (...args: unknown[]) => {
     const options = args[2] as { env: NodeJS.ProcessEnv; encoding: string };
     assert.equal(Object.hasOwn(options.env, "EMEND_PRIVATE_TERMS"), false);
@@ -73,12 +73,10 @@ test("regression: every process helper strips the private terms environment", (t
       assert.equal(result.code, 0);
     }
     assert.equal(spy.mock.callCount(), 2);
-    assert.equal(process.env.EMEND_PRIVATE_TERMS, "fixturecorp");
+    assert.deepEqual(parent, { EMEND_PRIVATE_TERMS: "fixturecorp" });
   } finally {
     spy.mock.restore();
     syncBuiltinESMExports();
-    if (previous === undefined) delete process.env.EMEND_PRIVATE_TERMS;
-    else process.env.EMEND_PRIVATE_TERMS = previous;
   }
 });
 
@@ -140,8 +138,15 @@ for (const execute of [run, runBytes]) {
         FORCE_COLOR: "3",
         NO_COLOR: "0",
         CLICOLOR: "1",
+        GH_NO_UPDATE_NOTIFIER: "0",
+        GH_REPO: "synthetic/wrong-repository",
+        GH_HOST: "example.invalid",
+        EMEND_PRIVATE_TERMS: "fixturecorp",
+        GIT_CONFIG_PARAMETERS: "'user.name=Synthetic User'",
+        GIT_DIFF_OPTS: "--unified=0",
       };
-      const previous = Object.keys(parent).map((key) => [key, process.env[key]] as const);
+      const original = { ...parent };
+      t.mock.property(process, "env", parent);
       const spy = t.mock.method(
         childProcess,
         "spawnSync",
@@ -149,26 +154,31 @@ for (const execute of [run, runBytes]) {
           assert.equal(receivedCommand, command);
           assert.deepEqual(args, ["--version"]);
           assert.ok(options.env);
-          for (const key of ["GH_FORCE_TTY", "CLICOLOR_FORCE", "FORCE_COLOR"])
+          for (const key of [
+            "GH_FORCE_TTY",
+            "CLICOLOR_FORCE",
+            "FORCE_COLOR",
+            "GH_REPO",
+            "GH_HOST",
+            "EMEND_PRIVATE_TERMS",
+            "GIT_CONFIG_PARAMETERS",
+            "GIT_DIFF_OPTS",
+          ])
             assert.equal(Object.hasOwn(options.env, key), false, `${key} must not reach ${command}`);
           assert.equal(options.env.NO_COLOR, "1");
           assert.equal(options.env.CLICOLOR, "0");
+          assert.equal(options.env.GH_NO_UPDATE_NOTIFIER, "1");
           return { status: 0, stdout: options.encoding === "buffer" ? Buffer.alloc(0) : "", stderr: "" };
         },
       );
       syncBuiltinESMExports();
       try {
-        Object.assign(process.env, parent);
         assert.equal(execute(command, ["--version"], { cwd: "/" }).code, 0);
         assert.equal(spy.mock.callCount(), 1);
-        for (const [key, value] of Object.entries(parent)) assert.equal(process.env[key], value);
+        assert.deepEqual(parent, original);
       } finally {
         spy.mock.restore();
         syncBuiltinESMExports();
-        for (const [key, value] of previous) {
-          if (value === undefined) delete process.env[key];
-          else process.env[key] = value;
-        }
       }
     });
   }

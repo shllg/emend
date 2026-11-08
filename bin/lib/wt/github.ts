@@ -406,7 +406,14 @@ const CLOSING_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
 const CLOSING_MISMATCH = "GitHub's closing issues do not match this branch. Fix the PR body with bin/wt pr edit.";
 const CLOSING_UNREADABLE = "Could not read GitHub's closing issues.";
 /** A readable mismatch must keep its diagnostic when the caller handles query failures. */
-class ClosingMismatchError extends WtError {}
+class ClosingMismatchError extends WtError {
+  readonly pr: Record<string, unknown> | undefined;
+  constructor(message: string, pr: unknown) {
+    super(1, message);
+    // Preserve readable body metadata even when the closing set itself cannot be trusted.
+    if (typeof pr === "object" && pr !== null && !Array.isArray(pr)) this.pr = pr as Record<string, unknown>;
+  }
+}
 
 // GitHub documents no parsing bound; field reports range from seconds to over an hour.
 // The window compares the local clock with GitHub's timestamps and narrows the race.
@@ -454,12 +461,16 @@ function readGithubClosing(repo: Repo, number: number, identity?: ReturnType<typ
   if (typeof repository.nameWithOwner !== "string" || !/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/iu.test(repository.nameWithOwner))
     refuse();
   if (repository.nameWithOwner.toLowerCase() !== expected)
-    throw new ClosingMismatchError(1, "GitHub's closing query returned a different repository than origin.");
+    throw new ClosingMismatchError(
+      "GitHub's closing query returned a different repository than origin.",
+      repository.pullRequest,
+    );
   const pr = asObject(repository.pullRequest, what);
   const connection = asObject(pr.closingIssuesReferences, what);
   const hasNextPage = asObject(connection.pageInfo, what).hasNextPage;
   if (typeof hasNextPage !== "boolean" || !Array.isArray(connection.nodes)) refuse();
-  if (hasNextPage || connection.nodes.length > 20) throw new ClosingMismatchError(1, CLOSING_MISMATCH);
+  if (hasNextPage || connection.nodes.length > 20)
+    throw new ClosingMismatchError("GitHub's closing query returned more than 20 closing issues.", pr);
   const issues: ClosingState["issues"] = [];
   for (const node of connection.nodes) {
     const ref = asObject(node, what);
@@ -493,11 +504,19 @@ function githubClosingGuard(
   identity?: ReturnType<typeof originRepository>,
   now: () => number = Date.now,
 ): Record<string, unknown> {
+  function refuseMismatch(message: string): never {
+    throw new WtError(
+      1,
+      phase === "merge"
+        ? `${message} Nothing was merged.`
+        : `Pull request #${number} was ${phase}, but its closing check failed. ${message} Check it before retrying.`,
+    );
+  }
   let closing: ClosingState;
   try {
     closing = readGithubClosing(repo, number, identity);
   } catch (error) {
-    if (error instanceof ClosingMismatchError) throw error;
+    if (error instanceof ClosingMismatchError) refuseMismatch(error.message);
     throw new WtError(
       error instanceof WtError ? error.code : 1,
       phase === "merge"
@@ -505,7 +524,7 @@ function githubClosingGuard(
         : `Pull request #${number} was ${phase}, but its closing check could not be read. Check it before retrying.`,
     );
   }
-  if (foreignClosingIssues(closing, branch).length) throw new WtError(1, CLOSING_MISMATCH);
+  if (foreignClosingIssues(closing, branch).length) refuseMismatch(CLOSING_MISMATCH);
   if (phase === "merge") {
     // GitHub returns null for no queue or one the token cannot see, so refusal relies on token visibility.
     // The QUEUED path still stops the workflow if the merge is queued after submission.
@@ -517,7 +536,7 @@ function githubClosingGuard(
     if (closing.pr.autoMergeRequest !== null)
       throw new WtError(1, "Auto-merge is enabled on this PR. Nothing was merged.");
     requireSettledClosing(closing.pr, now);
-    if (issueFromBranch(branch) !== null && closing.issues.length === 0) throw new WtError(1, CLOSING_MISMATCH);
+    if (issueFromBranch(branch) !== null && closing.issues.length === 0) refuseMismatch(CLOSING_MISMATCH);
   }
   return closing.pr;
 }
@@ -1235,20 +1254,29 @@ export function prMerge(
       );
     else if (merge.code !== 0 && state.headRefOid === sha)
       warnings.push("Warning: gh pr merge reported an error, but the PR is merged. Check the result.");
+    else if (merge.code === 0 && merge.stderr !== "")
+      warnings.push("Warning: gh pr merge reported a warning, but the PR is merged. Check the result.");
+    let closingAfterPr: Record<string, unknown> | undefined;
     try {
       const closingAfter = readGithubClosing(repo, n, identity);
-      if (closingAfter.pr.lastEditedAt !== closingPr.lastEditedAt)
-        warnings.push(
-          "Warning: the PR body was edited during the merge. Check its closed issues and reopen any foreign ones.",
-        );
+      closingAfterPr = closingAfter.pr;
       const foreign = foreignClosingIssues(closingAfter, branch);
       if (foreign.length)
         warnings.push(`Warning: the merge may have closed ${foreign.join(", ")}. Check and reopen each issue.`);
-    } catch {
-      warnings.push(
-        "Warning: the post-merge closing check could not run. Check the PR's closed issues and reopen any foreign ones.",
-      );
+    } catch (error) {
+      if (error instanceof ClosingMismatchError) {
+        closingAfterPr = error.pr;
+        warnings.push(`Warning: ${error.message} Check the PR's closed issues and reopen any foreign ones.`);
+      } else {
+        warnings.push(
+          "Warning: the post-merge closing check could not run. Check the PR's closed issues and reopen any foreign ones.",
+        );
+      }
     }
+    if (closingAfterPr && closingAfterPr.lastEditedAt !== closingPr.lastEditedAt)
+      warnings.push(
+        "Warning: the PR body was edited during the merge. Check its closed issues and reopen any foreign ones.",
+      );
     if (warnings.length) {
       print(`MERGED ${oid}`);
       throw new WtError(1, warnings.join("\n"));
