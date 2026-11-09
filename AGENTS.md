@@ -103,11 +103,9 @@ Each line prevents a real failure. "Before you touch" names the rule file with t
   `/e-merge-local`.
 - `/e-issue` turns an idea, an improvement or a bug into a GitHub issue. Issues are public. Only the
   owner's command sets the `ready` label.
-- A hook guards Claude Code's Bash and Monitor: issue/label writes ask in main and are refused in
-  worktrees; token/`.private-terms` access and guard/settings/git-metadata tampering are denied.
-  It checks commands as written, not as a sandbox. Workers change worktrees only through `bin/wt`;
-  hook changes take effect in main. Until main has the hook, every Bash call is blocked: land and
-  fast-forward main before rebasing worktrees onto it. Codex's sandbox has no network or gh credentials.
+- A hook guards Bash and Monitor: issue and label writes ask in main and are refused in worktrees;
+  secret reads and guard, settings or git metadata edits are denied. It runs from main, so
+  fast-forward main to a hook change before rebasing worktrees onto it.
 - A bare `/loop` in the main checkout runs the work loop in `.claude/loop.md`: it keeps up to
   three workers on pickable issues that do not collide and steers them to finish. `/loop /e-loop`
   runs the same file. Each worker merges only after the owner approved its head in emend, and the
@@ -115,7 +113,7 @@ Each line prevents a real failure. "Before you touch" names the rule file with t
 - Tests never touch emend's real state directory, which holds client diffs: the Vitest setup
   sets a temporary `EMEND_HOME`, and every test that needs state uses its own.
 - Changing `.claude/settings.json`, `.claude/hooks/` or `.codex/` needs the owner's approval
-  and `emend-security-reviewer`. Hooks run from the main checkout's copy.
+  and `emend-security-reviewer`.
 
 ## Who does what
 
