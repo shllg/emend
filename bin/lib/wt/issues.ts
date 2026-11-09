@@ -353,7 +353,7 @@ function hasInvisibleText(text: string): boolean {
     }
     if (char === "\n" || char === "\t") return false;
     // biome-ignore lint/suspicious/noMisleadingCharacterClass: these ranges reject individual selectors and tags
-    return /[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Co}\p{Cn}\p{Cc}\u{e0000}-\u{e007f}\ufe00-\ufe0f\u{e0100}-\u{e01ef}]/u.test(
+    return /[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Co}\p{Cn}\p{Cc}\u2028\u2029\u2800\u{e0000}-\u{e007f}\ufe00-\ufe0f\u{e0100}-\u{e01ef}]/u.test(
       char,
     );
   });

@@ -11,6 +11,7 @@ type HiddenClass =
   | "line length"
   | "whitespace run"
   | "list number"
+  | "invisible character"
   | "task marker"
   | "empty code block"
   | "fence info";
@@ -476,9 +477,9 @@ function hiddenLineReason(lines: string[]): string | null {
 
 /** Raw-text rules only: code, fences, escapes and containers never exempt their contents. */
 export function hiddenMarkdownReason(body: string): string | null {
-  // JavaScript treats these as line ends; CommonMark does not. Refuse them
-  // everywhere before line scanning can mistake literal text for a task item.
-  if (/[\u2028\u2029]/u.test(body)) return refusal("task marker");
+  // JavaScript-only line separators and braille blank can make literal text
+  // look like a task. Keep this guard even when the caller checks invisible text.
+  if (/[\u2028\u2029\u2800]/u.test(body)) return refusal("invisible character");
   let previousPipe = false;
   let dollars = 0;
   let screenshots = 0;

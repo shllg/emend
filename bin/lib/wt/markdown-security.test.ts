@@ -30,6 +30,20 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+// Round 20: braille blank can disguise task syntax without forming a task.
+const brailleBoxRefusals = [
+  "-\u2800[x] Check",
+  "- \u2800[x] Check",
+  "- [\u2800] Check",
+  "1. [\u2800x] Check",
+  "1.\u2800 [x] Check",
+  "> -\u2800[x] Check",
+  "2. Step\n   - [\u2800] Check",
+  "- [ ] Do A\n-\u2800[x] Do B",
+];
+// Already refused as malformed prefixes; now diagnosed as invisible characters.
+const invisiblePrefixRefusals = ["⠀- [x] Check", "- a\n  ⠀- [x] Check"];
+
 // Round 19: JavaScript-only line separators and lone CR cannot bypass the
 // standalone checker. These bodies were accepted before line normalization.
 const lineSeparatorRefusals = [
@@ -46,11 +60,18 @@ const loneCrRefusals = [
 ] as const;
 
 for (const [name, body, kind] of [
-  ...lineSeparatorRefusals.map(([name, body]) => [name, body, "task marker"] as const),
+  ...lineSeparatorRefusals.map(([name, body]) => [name, body, "invisible character"] as const),
   ...loneCrRefusals,
 ]) {
   test(`round 19 standalone checker refuses ${name}`, () => {
     assert.equal(hiddenMarkdownReason(body), reason(kind), JSON.stringify(body));
+  });
+}
+
+for (const body of [...brailleBoxRefusals, ...invisiblePrefixRefusals]) {
+  test(`round 20 invisible braille box is refused: ${JSON.stringify(body)}`, () => {
+    assert.equal(hiddenMarkdownReason(body), reason("invisible character"), body);
+    assert.equal(evaluate(body).reason, "invisible characters in the title or body", body);
   });
 }
 
@@ -116,15 +137,7 @@ const setextBoxRefusals = [
   "  1) a\n * [ ] T\n   - [ ] T\n * [x] T\n       ```\n      -",
 ];
 
-const boxShapeRefusals = [
-  "- [ ] a\n  ---",
-  "- [ ] a\n  ===",
-  "1. [ ] a\n   ---",
-  "- [ ] a\n  -",
-  "Text\n- [ ] a\n  -",
-  "⠀- [x] Check",
-  "- a\n  ⠀- [x] Check",
-];
+const boxShapeRefusals = ["- [ ] a\n  ---", "- [ ] a\n  ===", "1. [ ] a\n   ---", "- [ ] a\n  -", "Text\n- [ ] a\n  -"];
 
 const malformedBoxRefusals = [
   "- [  ] Pending",
@@ -213,7 +226,13 @@ const nonAsciiIndentRefusals = [
   0x0c,
 ].flatMap((code) => {
   const space = String.fromCodePoint(code);
-  return [`${space}- [x] Check`, `> ${space}- [x] Check`, `- Parent\n ${space} - [ ] Child`, `${space}1. [x] Check`];
+  const kind = code === 0x2028 || code === 0x2029 ? "invisible character" : "task marker";
+  return [
+    `${space}- [x] Check`,
+    `> ${space}- [x] Check`,
+    `- Parent\n ${space} - [ ] Child`,
+    `${space}1. [x] Check`,
+  ].map((body) => [kind, body] as const);
 });
 
 const realListControls = [
@@ -266,9 +285,9 @@ for (const body of realListRefusals) {
     assert.equal(evaluate(body).reason, reason("task marker"), body);
   });
 }
-for (const body of nonAsciiIndentRefusals) {
+for (const [kind, body] of nonAsciiIndentRefusals) {
   test(`raw Markdown requires ASCII task indentation: ${JSON.stringify(body)}`, () => {
-    assert.equal(hiddenMarkdownReason(body), reason("task marker"), body);
+    assert.equal(hiddenMarkdownReason(body), reason(kind), body);
     assert.equal(evaluate(body).status, "untrusted", body);
   });
 }

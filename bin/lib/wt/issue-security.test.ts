@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { stripTypeScriptTypes } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -130,6 +131,33 @@ for (const [name, character] of [
       const row = evaluate({ [field]: `Visible ${character} text` });
       assert.equal(row.status, "untrusted");
       assert.equal(row.reason, "invisible characters in the title or body");
+    });
+  }
+}
+
+for (const [name, character, escapedCharacter] of [
+  ["line separator", "\u2028", String.raw`\u2028`],
+  ["paragraph separator", "\u2029", String.raw`\u2029`],
+  ["braille blank", "\u2800", String.raw`\u2800`],
+] as const) {
+  for (const field of ["title", "body"]) {
+    test(`round 20 invisible ${name} in ${field} is untrusted`, async () => {
+      const text = `Visible ${character} text`;
+      const row = evaluate({ [field]: text });
+      assert.equal(row.status, "untrusted");
+      assert.equal(row.reason, "invisible characters in the title or body");
+      assert.equal(row.title, null);
+      // Mutate only this character's membership in the actual invisible-text
+      // function. The Markdown guard must not mask a missing caller check.
+      const source = readFileSync(new URL("./issues.ts", import.meta.url), "utf8");
+      const start = source.indexOf("function hasInvisibleText(");
+      const end = source.indexOf("\n/** The single eligibility", start);
+      assert.ok(start >= 0 && end > start);
+      const parts = source.slice(start, end).split(escapedCharacter);
+      assert.equal(parts.length, 2, "exactly one invisible-character mutation target");
+      const mutated = stripTypeScriptTypes(`${parts.join("")}\nexport { hasInvisibleText };`);
+      const module = await import(`data:text/javascript;base64,${Buffer.from(mutated).toString("base64")}`);
+      assert.equal(module.hasInvisibleText(text), false, "removing this character must release the witness");
     });
   }
 }

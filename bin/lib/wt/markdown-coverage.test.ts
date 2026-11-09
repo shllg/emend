@@ -401,6 +401,20 @@ const rawContextRefusals = [
   "> > Note\n2. Step\n   * [ ] Check",
 ];
 
+// Round 20: braille blank can disguise task syntax without forming a task.
+const brailleBoxRefusals = [
+  "-\u2800[x] Check",
+  "- \u2800[x] Check",
+  "- [\u2800] Check",
+  "1. [\u2800x] Check",
+  "1.\u2800 [x] Check",
+  "> -\u2800[x] Check",
+  "2. Step\n   - [\u2800] Check",
+  "- [ ] Do A\n-\u2800[x] Do B",
+];
+// Already refused as malformed prefixes; now diagnosed as invisible characters.
+const invisiblePrefixRefusals = ["⠀- [x] Check", "- a\n  ⠀- [x] Check"];
+
 // Round 19: JavaScript-only line separators and lone CR cannot bypass the
 // standalone checker. These bodies were accepted before line normalization.
 const lineSeparatorRefusals = [
@@ -434,15 +448,7 @@ const setextBoxRefusals = [
   "  1) a\n * [ ] T\n   - [ ] T\n * [x] T\n       ```\n      -",
 ];
 
-const boxShapeRefusals = [
-  "- [ ] a\n  ---",
-  "- [ ] a\n  ===",
-  "1. [ ] a\n   ---",
-  "- [ ] a\n  -",
-  "Text\n- [ ] a\n  -",
-  "⠀- [x] Check",
-  "- a\n  ⠀- [x] Check",
-];
+const boxShapeRefusals = ["- [ ] a\n  ---", "- [ ] a\n  ===", "1. [ ] a\n   ---", "- [ ] a\n  -", "Text\n- [ ] a\n  -"];
 
 const malformedBoxRefusals = [
   "- [  ] Pending",
@@ -532,7 +538,13 @@ const nonAsciiIndentRefusals = [
   0x0c,
 ].flatMap((code) => {
   const space = String.fromCodePoint(code);
-  return [`${space}- [x] Check`, `> ${space}- [x] Check`, `- Parent\n ${space} - [ ] Child`, `${space}1. [x] Check`];
+  const kind = code === 0x2028 || code === 0x2029 ? "invisible character" : "task marker";
+  return [
+    `${space}- [x] Check`,
+    `> ${space}- [x] Check`,
+    `- Parent\n ${space} - [ ] Child`,
+    `${space}1. [x] Check`,
+  ].map((body) => [kind, body] as const);
 });
 
 const realListControls = [
@@ -583,7 +595,9 @@ const sourceBoxWitnesses = [
 ];
 
 const hostile = [
-  ...lineSeparatorRefusals.map(([, body]) => ["task marker", body, "checker only"] as const),
+  ...[...lineSeparatorRefusals.map(([, body]) => body), ...brailleBoxRefusals, ...invisiblePrefixRefusals].map(
+    (body) => ["invisible character", body, "checker only"] as const,
+  ),
   ...loneCrRefusals.map(([, body, kind]) => [kind, body] as const),
   // Preserve the raw ordered-context guard when an earlier marker was paragraph text.
   ["task marker", "Text\n2) Step\n* 2. Step\n\t  - [x] T"],
@@ -595,7 +609,7 @@ const hostile = [
   ].map((body) => ["task marker", body, "checker only"] as const),
   // A bare split box four columns beyond its container also fails closed.
   ["task marker", "    [\n    ] text", "checker only"],
-  ...nonAsciiIndentRefusals.map((body) => ["task marker", body, "checker only"] as const),
+  ...nonAsciiIndentRefusals.map(([kind, body]) => [kind, body, "checker only"] as const),
   ...markerPaddingRefusals.map((body) => ["task marker", body, "checker only"] as const),
   ...oracleStructureWitnesses,
   ...sourceBoxWitnesses.map((body) => ["task marker", body] as const),
@@ -1613,12 +1627,20 @@ test("each individual rule has a mutation witness", async (t) => {
   // editing its file. Each replacement must name exactly one existing guard.
   const checkerSource = await readFile(new URL("./markdown.ts", import.meta.url), "utf8");
   const mutations = [
-    ...lineSeparatorRefusals.map(([name, body]) => ({
-      name: `round 19 ${name}`,
-      from: String.raw`if (/[\u2028\u2029]/u.test(body)) return refusal("task marker");`,
+    ...brailleBoxRefusals.map((body) => ({
+      name: `round 20 braille box ${JSON.stringify(body)}`,
+      from: String.raw`\u2800`,
       to: "",
       body,
-      kind: "task marker",
+      kind: "invisible character",
+      checkerOnly: true,
+    })),
+    ...lineSeparatorRefusals.map(([name, body]) => ({
+      name: `round 19 ${name}`,
+      from: String.raw`if (/[\u2028\u2029\u2800]/u.test(body)) return refusal("invisible character");`,
+      to: "",
+      body,
+      kind: "invisible character",
       checkerOnly: true,
     })),
     ...loneCrRefusals.map(([name, body, kind]) => ({
