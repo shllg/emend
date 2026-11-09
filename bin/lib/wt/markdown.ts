@@ -11,6 +11,7 @@ type HiddenClass =
   | "line length"
   | "whitespace run"
   | "list number"
+  | "look-alike task box"
   | "invisible character"
   | "task marker"
   | "empty code block"
@@ -19,8 +20,9 @@ const refusal = (kind: HiddenClass) => `hidden Markdown in the body: ${kind}`;
 
 // Blank glyphs missed by both \s and Default_Ignorable_Code_Point:
 // U+2800 is braille blank; U+1D159 is a null notehead; U+13441/U+13442
-// are Egyptian full/half blanks. Each occupies space without a visible mark.
-export const BLANK_GLYPHS = /[\u2800\u{1d159}\u{13441}\u{13442}]/u;
+// are Egyptian full/half blanks; U+16FE4 is the Khitan small script filler.
+// Each occupies space or has zero width without a visible mark.
+export const BLANK_GLYPHS = /[\u2800\u{1d159}\u{13441}\u{13442}\u{16fe4}]/u;
 
 // The only permitted ]( is a whole-line screenshot with a determined alt label.
 const SCREENSHOT =
@@ -477,7 +479,17 @@ function hiddenLineReason(lines: string[]): string | null {
       openerIndent = indent;
     }
   }
-  return needsContent ? refusal("empty code block") : null;
+  if (needsContent) return refusal("empty code block");
+  // Preserve earlier refusal reasons. A short bracket group after a prefix
+  // without ASCII letters can disguise a task through non-ASCII glyphs in
+  // either the prefix or the group, even when the parser sees only text.
+  for (const line of lines) {
+    const box = /\[[^[\]]{1,3}\]/u.exec(line);
+    if (!box) continue;
+    const prefix = line.slice(0, box.index);
+    if (!/[A-Za-z]/u.test(prefix) && /\P{ASCII}/u.test(prefix + box[0])) return refusal("look-alike task box");
+  }
+  return null;
 }
 
 /** Raw-text rules only: code, fences, escapes and containers never exempt their contents. */

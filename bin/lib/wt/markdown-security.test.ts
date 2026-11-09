@@ -30,6 +30,54 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+// Round 22: the structural rule replaces per-glyph guesses around short boxes.
+const lookAlikeBoxRefusals = [
+  ["H1-hyphen-2010-lazy", "- [ ] Do A\n\u2010 [x] Do B"],
+  ["H2-minus-2212-lazy", "- [ ] Do A\n\u2212 [x] Do B"],
+  ["H3-nbhyphen-2011-lazy", "- [ ] Do A\n\u2011 [x] Do B"],
+  ["H4-cyrillic-x-box", "- [\u0445] Check"],
+  ["H5-roman-ten-box", "- [\u2179] Check"],
+  ["H6-greek-chi-box", "- [\u03c7] Check"],
+  ["H9-two-items-cyrillic", "- [ ] Do A\n- [\u0445] Do B"],
+  ["W10-bamum-inside-box", "- [\u{16910}] Check"],
+  ["W11-bamum-lazy", "- [ ] Do A\n-\u{16910}[x] Do B"],
+  ["ER1 U+303F adjacent", "-\u303f[x] Check"],
+  ["ER1 U+303F padded", "- \u303f[x] Check"],
+  ["ER1 U+1DA7F adjacent", "-\u{1da7f}[x] Check"],
+  ["ER1 U+1DA7F padded", "- \u{1da7f}[x] Check"],
+  ["ER1 U+1DA80 adjacent", "-\u{1da80}[x] Check"],
+  ["ER1 U+1DA80 padded", "- \u{1da80}[x] Check"],
+] as const;
+
+// Earlier acceptances withdrawn by the exact OP1 prefix/group condition.
+const lookAlikeCorpusRefusals = [
+  ["old corpus 1", "- [\u{1f600}] Done"],
+  ["old corpus 2", "0[\u3000]"],
+  ["old corpus 3", "=:[\u00a0]9"],
+  ["old corpus 4", "!=[\u3000]^"],
+  ["old corpus 5", "0\u00e9[x]"],
+  ["old corpus 6", "\u00e9[^1]"],
+  ["old corpus 7", "~a[\n   ][\u3000]3.[x]- - -`9x [ ] [ ]a@(abc)"],
+  ["old corpus 8", ["\u0661[x\\]1234. 8www.example.comsynthetic", "example.coma[a]"].join("@")],
+  ["old corpus 9", "\u4e2d>[\t]$5"],
+  ["old corpus 10", "- 0[\u3000]~"],
+  ["old corpus 11", "![\u00a0]~~~"],
+  ["old corpus 12", ":&[\u3000][!][ ]- 081```"],
+  ["old corpus 13", "---=[\u00a0]synthetic@example.com[x86]"],
+  ["old corpus 14", "\u00e9[x]---+ 01. [Optional]2.\n- @- 0[a]www.example.com[X]c"],
+] as const;
+
+const khitanRefusals = [
+  ["W1-filler-lazy-second-box", "- [ ] Do A\n-\u{16fe4} [x] Do B"],
+  ["W2-filler-inside-box", "- [ \u{16fe4}] Check"],
+  ["W4-filler-after-ordered", "1.\u{16fe4} [x] Check"],
+  ["W6-filler-under-step2", "2. Step\n   -\u{16fe4} [ ] Check"],
+  ["W7-filler-x-in-box", "- [\u{16fe4}x] Check"],
+  ["W9-filler-prose", "Visible \u{16fe4} text"],
+  ["ER1 U+16FE4 padded", "- \u{16fe4}[x] Check"],
+  ["ER1 U+16FE4 adjacent", "-\u{16fe4}[x] Check"],
+] as const;
+
 // Round 21: the other blank glyphs disguise boxes in the same way as braille.
 const blankGlyphBoxRefusals = (
   [
@@ -92,6 +140,43 @@ for (const body of [...brailleBoxRefusals, ...invisiblePrefixRefusals]) {
     assert.equal(evaluate(body).reason, "invisible characters in the title or body", body);
   });
 }
+
+for (const [name, body] of [...lookAlikeBoxRefusals, ...lookAlikeCorpusRefusals]) {
+  test(`round 22 OP1 refuses ${name}`, () => {
+    assert.equal(hiddenMarkdownReason(body), reason("look-alike task box"), body);
+    assert.equal(evaluate(body).reason, reason("look-alike task box"), body);
+  });
+}
+for (const [name, body] of khitanRefusals) {
+  test(`round 22 standalone Khitan refusal: ${name}`, () => {
+    assert.equal(hiddenMarkdownReason(body), reason("invisible character"), body);
+  });
+}
+test("round 22 look-alike guard keeps ordinary text", () => {
+  assert.equal(hiddenMarkdownReason("- [х] Check"), reason("look-alike task box"));
+  assert.equal(hiddenMarkdownReason("- [😀😀] Check"), reason("look-alike task box"));
+  assert.equal(hiddenMarkdownReason("- [😀😀😀] Check"), reason("look-alike task box"));
+  for (const body of [
+    "é[]",
+    "- [éééé] text",
+    "[1] é[x]",
+    "- [ ] Do A",
+    "- [x] Done",
+    "1. [ ] Step",
+    "> [!NOTE]",
+    "- [ ] \u5b8c\u6210 the docs",
+    "\u00dcn\u00efcode [x] works",
+    "See [1] and [2].",
+    "\u{1f469}\u200d\u{1f4bb}",
+    "\u{1f44d}\u{1f3fd}",
+    "#\ufe0f\u20e3",
+    "`const x = 1;`",
+    "```ts\nconst x = 1;\n```",
+    "- [long\u5b57] text",
+    "label [\u03c7] text",
+  ])
+    assert.equal(evaluate(body).status, "pickable", JSON.stringify(body));
+});
 
 // Round 18: previously accepted bodies now refused, plus restored acceptances.
 const containerRefusals = [
@@ -774,7 +859,6 @@ for (const [name, body] of [
   ["bracketed punctuation", "[!] Note"],
   ["bracketed letter after non-one marker", "2. [a] b"],
   ["R output in code", "```text\n[1] 42\n```"],
-  ["bracketed code point after bullet", "- [😀] Done"],
   ["quoted unchecked task", "> - [ ] quoted"],
   ["mixed task states", "- [ ] Pending\n- [x] Complete"],
   ["literal canonical boxes in code", "```text\n- [x] Done\n1. [ ] Pending\n```"],

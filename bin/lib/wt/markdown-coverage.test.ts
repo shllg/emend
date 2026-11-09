@@ -401,6 +401,54 @@ const rawContextRefusals = [
   "> > Note\n2. Step\n   * [ ] Check",
 ];
 
+// Round 22: the structural rule replaces per-glyph guesses around short boxes.
+const lookAlikeBoxRefusals = [
+  ["H1-hyphen-2010-lazy", "- [ ] Do A\n\u2010 [x] Do B"],
+  ["H2-minus-2212-lazy", "- [ ] Do A\n\u2212 [x] Do B"],
+  ["H3-nbhyphen-2011-lazy", "- [ ] Do A\n\u2011 [x] Do B"],
+  ["H4-cyrillic-x-box", "- [\u0445] Check"],
+  ["H5-roman-ten-box", "- [\u2179] Check"],
+  ["H6-greek-chi-box", "- [\u03c7] Check"],
+  ["H9-two-items-cyrillic", "- [ ] Do A\n- [\u0445] Do B"],
+  ["W10-bamum-inside-box", "- [\u{16910}] Check"],
+  ["W11-bamum-lazy", "- [ ] Do A\n-\u{16910}[x] Do B"],
+  ["ER1 U+303F adjacent", "-\u303f[x] Check"],
+  ["ER1 U+303F padded", "- \u303f[x] Check"],
+  ["ER1 U+1DA7F adjacent", "-\u{1da7f}[x] Check"],
+  ["ER1 U+1DA7F padded", "- \u{1da7f}[x] Check"],
+  ["ER1 U+1DA80 adjacent", "-\u{1da80}[x] Check"],
+  ["ER1 U+1DA80 padded", "- \u{1da80}[x] Check"],
+] as const;
+
+// Earlier acceptances withdrawn by the exact OP1 prefix/group condition.
+const lookAlikeCorpusRefusals = [
+  ["old corpus 1", "- [\u{1f600}] Done"],
+  ["old corpus 2", "0[\u3000]"],
+  ["old corpus 3", "=:[\u00a0]9"],
+  ["old corpus 4", "!=[\u3000]^"],
+  ["old corpus 5", "0\u00e9[x]"],
+  ["old corpus 6", "\u00e9[^1]"],
+  ["old corpus 7", "~a[\n   ][\u3000]3.[x]- - -`9x [ ] [ ]a@(abc)"],
+  ["old corpus 8", ["\u0661[x\\]1234. 8www.example.comsynthetic", "example.coma[a]"].join("@")],
+  ["old corpus 9", "\u4e2d>[\t]$5"],
+  ["old corpus 10", "- 0[\u3000]~"],
+  ["old corpus 11", "![\u00a0]~~~"],
+  ["old corpus 12", ":&[\u3000][!][ ]- 081```"],
+  ["old corpus 13", "---=[\u00a0]synthetic@example.com[x86]"],
+  ["old corpus 14", "\u00e9[x]---+ 01. [Optional]2.\n- @- 0[a]www.example.com[X]c"],
+] as const;
+
+const khitanRefusals = [
+  ["W1-filler-lazy-second-box", "- [ ] Do A\n-\u{16fe4} [x] Do B"],
+  ["W2-filler-inside-box", "- [ \u{16fe4}] Check"],
+  ["W4-filler-after-ordered", "1.\u{16fe4} [x] Check"],
+  ["W6-filler-under-step2", "2. Step\n   -\u{16fe4} [ ] Check"],
+  ["W7-filler-x-in-box", "- [\u{16fe4}x] Check"],
+  ["W9-filler-prose", "Visible \u{16fe4} text"],
+  ["ER1 U+16FE4 padded", "- \u{16fe4}[x] Check"],
+  ["ER1 U+16FE4 adjacent", "-\u{16fe4}[x] Check"],
+] as const;
+
 // Round 21: the other blank glyphs disguise boxes in the same way as braille.
 const blankGlyphBoxRefusals = (
   [
@@ -606,6 +654,10 @@ const sourceBoxWitnesses = [
 ];
 
 const hostile = [
+  ...[...lookAlikeBoxRefusals, ...lookAlikeCorpusRefusals].map(
+    ([, body]) => ["look-alike task box", body, "checker only"] as const,
+  ),
+  ...khitanRefusals.map(([, body]) => ["invisible character", body, "checker only"] as const),
   ...blankGlyphBoxRefusals.map(({ body }) => ["invisible character", body, "checker only"] as const),
   ...[...lineSeparatorRefusals.map(([, body]) => body), ...brailleBoxRefusals, ...invisiblePrefixRefusals].map(
     (body) => ["invisible character", body, "checker only"] as const,
@@ -911,7 +963,6 @@ const ownerBodies = [
   "[!] Note",
   "2. [a] b",
   "```text\n[1] 42\n```",
-  "- [😀] Done",
   "1. [x] Done",
   "- 1. [ ] a",
   "1) [ ] step",
@@ -1639,12 +1690,38 @@ test("each individual rule has a mutation witness", async (t) => {
   // editing its file. Each replacement must name exactly one existing guard.
   const checkerSource = await readFile(new URL("./markdown.ts", import.meta.url), "utf8");
   const mutations = [
+    {
+      name: "round 22 short boxes count code points",
+      from: String.raw`/\[[^[\]]{1,3}\]/u.exec(line)`,
+      to: String.raw`/\[[^[\]]{1,3}\]/.exec(line)`,
+      body: "- [😀😀] Check",
+      kind: "look-alike task box",
+      checkerOnly: true,
+    },
+    ...[...lookAlikeBoxRefusals, ...lookAlikeCorpusRefusals].map(([name, body]) => ({
+      name: `round 22 OP1 ${name}`,
+      from: String.raw`!/[A-Za-z]/u.test(prefix) && /\P{ASCII}/u.test(prefix + box[0])`,
+      to: "false",
+      body,
+      kind: "look-alike task box",
+      checkerOnly: true,
+    })),
+    ...khitanRefusals.map(([name, body]) => ({
+      name: `round 22 Khitan ${name}`,
+      from: String.raw`\u{16fe4}`,
+      to: "",
+      body,
+      kind: "invisible character",
+      fallbackKind: name.startsWith("W9") ? null : "look-alike task box",
+      checkerOnly: true,
+    })),
     ...blankGlyphBoxRefusals.map(({ name, body, escapedCharacter }) => ({
       name: `round 21 ${name} ${JSON.stringify(body)}`,
       from: escapedCharacter,
       to: "",
       body,
       kind: "invisible character",
+      fallbackKind: "look-alike task box",
       checkerOnly: true,
     })),
     ...brailleBoxRefusals.map((body) => ({
@@ -1653,6 +1730,7 @@ test("each individual rule has a mutation witness", async (t) => {
       to: "",
       body,
       kind: "invisible character",
+      fallbackKind: "look-alike task box",
       checkerOnly: true,
     })),
     ...lineSeparatorRefusals.map(([name, body]) => ({
@@ -1661,6 +1739,7 @@ test("each individual rule has a mutation witness", async (t) => {
       to: "false",
       body,
       kind: "invisible character",
+      fallbackKind: name.includes("braille") ? "look-alike task box" : null,
       checkerOnly: true,
     })),
     ...loneCrRefusals.map(([name, body, kind]) => ({
@@ -2305,8 +2384,8 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "empty fence at EOF",
-      from: 'return needsContent ? refusal("empty code block") : null;',
-      to: "return null;",
+      from: 'if (needsContent) return refusal("empty code block");',
+      to: "",
       body: "```ts",
       kind: "empty code block",
     },
@@ -2327,7 +2406,12 @@ test("each individual rule has a mutation witness", async (t) => {
         assert.equal(violation(body), null, `${name}: witness must preserve coverage`);
         assert.notEqual(mutated(body), null, `${name}: mutation must falsely refuse its witness`);
       } else {
-        assert.equal(mutated(body), null, `${name}: mutation must release its hostile witness`);
+        const fallbackKind = "fallbackKind" in mutation ? mutation.fallbackKind : null;
+        assert.equal(
+          mutated(body),
+          fallbackKind ? `hidden Markdown in the body: ${fallbackKind}` : null,
+          `${name}: mutation must release this guard, preserving any independent fallback`,
+        );
         if (checkerOnly) {
           assert.equal(violation(body), null, `${name}: remark does not model this cmark behavior`);
         } else {
