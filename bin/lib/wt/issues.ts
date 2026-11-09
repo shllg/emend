@@ -359,10 +359,12 @@ function hasInvisibleText(text: string): boolean {
     if (char === "\n" || char === "\t") return false;
     if (BLANK_GLYPHS.test(char)) return true;
     if (/\p{M}/u.test(char)) {
-      // Keycaps also take # or * as a base. Variation selectors were checked
-      // above; every other combining mark needs a letter, number or mark.
+      // Keycaps also take # or * as a base. Other enclosing marks and marks
+      // directly after an emoji selector can draw misleading boxes.
       const base = chars[i - 1] === "\ufe0f" ? i - 2 : i - 1;
       const keycap = char === "\u20e3" && /^[0-9#*]$/u.test(chars[base] ?? "");
+      if (!keycap && /\p{Me}/u.test(char)) return true;
+      if (!keycap && chars[i - 1] === "\ufe0f") return true;
       if (!keycap && !/[\p{L}\p{N}\p{M}]/u.test(chars[i - 1] ?? "")) return true;
     }
     // biome-ignore lint/suspicious/noMisleadingCharacterClass: these ranges reject individual selectors and tags

@@ -158,6 +158,46 @@ function invisibleCheckerWithout(escapedCharacter: string) {
   return invisibleCheckerMutating([[escapedCharacter, ""]]);
 }
 
+const enclosingMarkGuard = String.raw`if (!keycap && /\p{Me}/u.test(char)) return true;`;
+const postSelectorMarkGuard = String.raw`if (!keycap && chars[i - 1] === "\ufe0f") return true;`;
+const markControls = ["1️⃣", "#️⃣", "*️⃣", "1⃣", "#⃣", "*⃣", "👩🏽‍💻", "🫱🏻‍🫲🏿", "a\u0301", "का", "1️⃣\u0336"];
+
+for (const [name, text] of [
+  ["F2a enclosing square", "- x\u20de Check"],
+  ["keycap on letter", "- a\u20e3 Check"],
+  ["enclosing circle", "- x\u20dd Check"],
+  ["enclosing circle without following text", "- x\u20dd"],
+] as const) {
+  for (const field of ["title", "body"]) {
+    test(`round 24 OP2a ${name} in ${field}`, async () => {
+      assert.equal(evaluate({ [field]: text }).reason, "invisible characters in the title or body");
+      const mutated = await invisibleCheckerMutating([[enclosingMarkGuard, ""]]);
+      assert.equal(mutated(text), false, "removing the enclosing-mark guard must release the witness");
+      for (const control of markControls) assert.equal(evaluate({ [field]: control }).status, "pickable", control);
+    });
+  }
+}
+
+for (const [name, text, enclosing] of [
+  ["Mn after selector", "- 😀\ufe0f\u0301 Do B", false],
+  ["Mc after selector", "- 😀\ufe0f\u093e Do B", false],
+  ["D13 enclosing square after selector", "- 😀\ufe0f\u20de Do B", true],
+  ["keycap on emoji after selector", "- 😀\ufe0f\u20e3 Do B", true],
+] as const) {
+  for (const field of ["title", "body"]) {
+    test(`round 24 OP2b ${name} in ${field}`, async () => {
+      assert.equal(evaluate({ [field]: text }).reason, "invisible characters in the title or body");
+      // Enclosing marks also trip OP2a, so both independent guards must be
+      // removed to release those witnesses. Mn/Mc isolate the selector rule.
+      const mutations: [string, string][] = [[postSelectorMarkGuard, ""]];
+      if (enclosing) mutations.push([enclosingMarkGuard, ""]);
+      const mutated = await invisibleCheckerMutating(mutations);
+      assert.equal(mutated(text), false, "removing the applicable mark guards must release the witness");
+      for (const control of markControls) assert.equal(evaluate({ [field]: control }).status, "pickable", control);
+    });
+  }
+}
+
 const khitanRefusals = [
   ["W1-filler-lazy-second-box", "- [ ] Do A\n-\u{16fe4} [x] Do B"],
   ["W2-filler-inside-box", "- [ \u{16fe4}] Check"],
@@ -195,7 +235,10 @@ for (const [category, mark] of [
       test(`round 22 orphan ${category} after ${JSON.stringify(base)} in ${field}`, async () => {
         const text = `${base}${mark}text`;
         assert.equal(evaluate({ [field]: text }).reason, "invisible characters in the title or body");
-        const mutated = await invisibleCheckerMutating([[orphanMarkGuard, ""]]);
+        const mutations: [string, string][] = [[orphanMarkGuard, ""]];
+        // OP2a now independently refuses every non-keycap Me, even orphaned.
+        if (category === "Me") mutations.push([enclosingMarkGuard, ""]);
+        const mutated = await invisibleCheckerMutating(mutations);
         assert.equal(mutated(text), false, "removing the base check must release the mark");
         for (const valid of ["a\u0301", "中\u0301", "1\u0301", "a\u0301\u0302", "#\u20e3", "*\ufe0f\u20e3", "❤️"])
           assert.equal(evaluate({ [field]: valid }).status, "pickable", valid);

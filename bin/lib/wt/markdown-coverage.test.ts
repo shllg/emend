@@ -401,6 +401,98 @@ const rawContextRefusals = [
   "> > Note\n2. Step\n   * [ ] Check",
 ];
 
+// Round 24: B symbols bound boxes; only lazy lines can disguise list starts.
+const symbolBoxRefusals = [
+  ["F1a upper pieces after real task", "- [ ] Do A\n- ⎡ ⎤ Do B"],
+  ["F1b upper pieces checked", "- ⎡x⎤ Check"],
+  ["F1c lazy hyphen with pieces", "- [ ] Do A\n‐ ⎡x⎤ Do B"],
+  ["F1d lower pieces", "- ⎣x⎦ Check"],
+  ["F1e square image", "- ⊏x⊐ Check"],
+  ["F1f eighth blocks", "- ▏x▕ Check"],
+  ["F1g corners", "- ⌜ ⌟ Check"],
+  ["vertical bars", "- │x│ Check"],
+  ["reversed B delimiters", "- ⎤x⎡ Check"],
+  ["B ends content", "- ⎡ab★cd⎤ Check"],
+  ["accepted cost: stars", "★ 5 ★"],
+  ["accepted cost: multiplication", "2 × 3 × 4"],
+] as const;
+
+const lazyMarkerRefusals = [
+  ["hyphen without box", "- [ ] Do A\n‐ Do B"],
+  ["F2b ballot box", "- [ ] Do A\n‐ ☐ Do B"],
+  ["B math symbol", "- [ ] Do A\n⎡ Do B"],
+  ["B other symbol", "- [ ] Do A\n│ Do B"],
+  ["Po bullet", "- [ ] Do A\n• Do B"],
+  ["tab after dash", "- [ ] Do A\n‐\tDo B"],
+  ["quoted lazy item", "> - [ ] Do A\n> ‐ Do B"],
+  ["nested lazy item", "- Outer\n  - [ ] Do A\n  ‐ Do B"],
+] as const;
+
+const round24Controls = [
+  "- [ ] Do A",
+  "- [x] Done",
+  "1. [ ] Step",
+  "> [!NOTE]",
+  "- [ ] 完成 the docs",
+  "Ünïcode [x] works",
+  "See [1] and [2].",
+  "See (1) and (2).",
+  "- [ ] café — ok",
+  "He wrote: […] and left",
+  "• Done [x]",
+  "- (é) Check",
+  "- {é} Check",
+  "- ［］ Check",
+  "- [ ] [х] Check",
+  "- [[x]] B",
+  "é[]",
+  "- [éééé] text",
+  "[1] é[x]",
+  "- [long字] text",
+  "label [χ] text",
+  "- ✅ Done",
+  "- ⚠️ Risk: data loss",
+  "→ Next: ship it",
+  "• one • two",
+  "– item",
+  "“Save” fails on Linux",
+  "- “a” and “b”",
+  "1 → 2 → 3",
+  "200 → 404",
+  "★★★☆☆",
+  "👍 👍",
+  "🎉 🎉 🎉 release",
+  "- «a» quote",
+  "- © 2026",
+  "- ±3 ms",
+  "- 5 € fee",
+  "— Note — text",
+  "· a · b",
+  "- ½ cup",
+  "1️⃣",
+  "#️⃣",
+  "*️⃣",
+  "1⃣",
+  "👩🏽‍💻",
+  "🫱🏻‍🫲🏿",
+  "- ☐ Check",
+  "- ☒ Check",
+  "- one\n- two",
+  "- one\ntext",
+  "- one\n2 words",
+  "- one\n😀 emoji",
+  "- one\n→ next",
+  "- one\n⟶ next",
+  "- one\n⤀ next",
+  "- one\n\n‐ Do B",
+  "- one\n  ‐ Do B",
+  "- one\n‐Do B",
+  "- one\n```text\n‐ Do B\n```",
+  "1 ⟶ 2 ⟶ 3",
+  "1 ⤀ 2 ⤀ 3",
+  "Press 1️⃣̶ ok",
+];
+
 // Round 23: bracket categories and grapheme counts define the same short box.
 const unicodeBracketRefusals = [
   ["full-width brackets", "- ［x］ Check"],
@@ -691,6 +783,8 @@ const sourceBoxWitnesses = [
 ];
 
 const hostile = [
+  ...symbolBoxRefusals.map(([, body]) => ["look-alike task box", body, "checker only"] as const),
+  ...lazyMarkerRefusals.map(([, body]) => ["look-alike list marker", body, "checker only"] as const),
   ...[...unicodeBracketRefusals, ...graphemeBoxRefusals].map(
     ([, body]) => ["look-alike task box", body, "checker only"] as const,
   ),
@@ -942,6 +1036,7 @@ const containerFences = [
 // These owner forms must stay accepted; markdown-security.test.ts also asserts
 // them through issue evaluation. The mixed corpus below retains refusal cases too.
 const ownerBodies = [
+  ...round24Controls,
   ...round23Controls,
   ...restoredBodies,
   ...realListControls,
@@ -1731,10 +1826,48 @@ test("each individual rule has a mutation witness", async (t) => {
   // editing its file. Each replacement must name exactly one existing guard.
   const checkerSource = await readFile(new URL("./markdown.ts", import.meta.url), "utf8");
   const mutations = [
+    ...symbolBoxRefusals.map(([name, body]) => ({
+      name: `round 24 OP1 ${name}`,
+      from: name === "B ends content" ? `(?![\\[\\]]|\${BRACKET_LIKE})` : String.raw`\p{Sm}\p{So}`,
+      to: name === "B ends content" ? String.raw`(?![\[\]])` : "",
+      body,
+      kind: "look-alike task box",
+      fallbackKind: name.startsWith("F1c") ? "look-alike list marker" : null,
+      checkerOnly: true,
+    })),
+    ...lazyMarkerRefusals.map(([name, body]) => ({
+      name: `round 24 OP2c ${name}`,
+      from: "LOOK_ALIKE_LIST_MARKER.test(rest)",
+      to: "false",
+      body,
+      kind: "look-alike list marker",
+      checkerOnly: true,
+    })),
+    ...["1 → 2 → 3", "1 ⟶ 2 ⟶ 3", "1 ⤀ 2 ⤀ 3"].map((body) => ({
+      name: `round 24 arrows stay outside B: ${body}`,
+      from: String.raw`|[\u2190-\u21ff\u27f0-\u27ff\u2900-\u297f]`,
+      to: "",
+      body,
+      kind: null,
+    })),
+    {
+      name: "round 24 pictographs stay outside B",
+      from: String.raw`\p{Extended_Pictographic}|`,
+      to: "",
+      body: "👍 👍",
+      kind: null,
+    },
+    {
+      name: "round 24 ASCII parentheses stay outside B",
+      from: String.raw`(?=\P{ASCII})(?!`,
+      to: "(?!",
+      body: "- (é) Check",
+      kind: null,
+    },
     ...unicodeBracketRefusals.map(([name, body]) => ({
       name: `round 23 Unicode brackets ${name}`,
-      from: String.raw`(?:\[|(?=\P{ASCII})\p{Ps})((?:[^\p{Ps}\p{Pe}]|[(){}])*)(?:\]|(?=\P{ASCII})\p{Pe})`,
-      to: String.raw`\[([^[\]]*)\]`,
+      from: String.raw`(?=\P{ASCII})(?!\p{Extended_Pictographic}|[\u2190-\u21ff\u27f0-\u27ff\u2900-\u297f])[\p{Ps}\p{Pe}\p{Sm}\p{So}]`,
+      to: "(?!)",
       body,
       kind: "look-alike task box",
       checkerOnly: true,
@@ -1780,6 +1913,7 @@ test("each individual rule has a mutation witness", async (t) => {
       to: "false",
       body,
       kind: "look-alike task box",
+      fallbackKind: /^H[123]-/u.test(name) ? "look-alike list marker" : null,
       checkerOnly: true,
     })),
     ...khitanRefusals.map(([name, body]) => ({
@@ -1797,7 +1931,8 @@ test("each individual rule has a mutation witness", async (t) => {
       to: "",
       body,
       kind: "invisible character",
-      fallbackKind: "look-alike task box",
+      // A B glyph inside [] now bounds empty groups; outside it remains a prefix.
+      fallbackKind: body.includes("[\u{1d159}") ? null : "look-alike task box",
       checkerOnly: true,
     })),
     ...brailleBoxRefusals.map((body) => ({
@@ -1806,7 +1941,7 @@ test("each individual rule has a mutation witness", async (t) => {
       to: "",
       body,
       kind: "invisible character",
-      fallbackKind: "look-alike task box",
+      fallbackKind: body.includes("[\u2800") ? null : "look-alike task box",
       checkerOnly: true,
     })),
     ...lineSeparatorRefusals.map(([name, body]) => ({

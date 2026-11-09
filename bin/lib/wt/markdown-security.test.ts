@@ -30,6 +30,98 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+// Round 24: B symbols bound boxes; only lazy lines can disguise list starts.
+const symbolBoxRefusals = [
+  ["F1a upper pieces after real task", "- [ ] Do A\n- ⎡ ⎤ Do B"],
+  ["F1b upper pieces checked", "- ⎡x⎤ Check"],
+  ["F1c lazy hyphen with pieces", "- [ ] Do A\n‐ ⎡x⎤ Do B"],
+  ["F1d lower pieces", "- ⎣x⎦ Check"],
+  ["F1e square image", "- ⊏x⊐ Check"],
+  ["F1f eighth blocks", "- ▏x▕ Check"],
+  ["F1g corners", "- ⌜ ⌟ Check"],
+  ["vertical bars", "- │x│ Check"],
+  ["reversed B delimiters", "- ⎤x⎡ Check"],
+  ["B ends content", "- ⎡ab★cd⎤ Check"],
+  ["accepted cost: stars", "★ 5 ★"],
+  ["accepted cost: multiplication", "2 × 3 × 4"],
+] as const;
+
+const lazyMarkerRefusals = [
+  ["hyphen without box", "- [ ] Do A\n‐ Do B"],
+  ["F2b ballot box", "- [ ] Do A\n‐ ☐ Do B"],
+  ["B math symbol", "- [ ] Do A\n⎡ Do B"],
+  ["B other symbol", "- [ ] Do A\n│ Do B"],
+  ["Po bullet", "- [ ] Do A\n• Do B"],
+  ["tab after dash", "- [ ] Do A\n‐\tDo B"],
+  ["quoted lazy item", "> - [ ] Do A\n> ‐ Do B"],
+  ["nested lazy item", "- Outer\n  - [ ] Do A\n  ‐ Do B"],
+] as const;
+
+const round24Controls = [
+  "- [ ] Do A",
+  "- [x] Done",
+  "1. [ ] Step",
+  "> [!NOTE]",
+  "- [ ] 完成 the docs",
+  "Ünïcode [x] works",
+  "See [1] and [2].",
+  "See (1) and (2).",
+  "- [ ] café — ok",
+  "He wrote: […] and left",
+  "• Done [x]",
+  "- (é) Check",
+  "- {é} Check",
+  "- ［］ Check",
+  "- [ ] [х] Check",
+  "- [[x]] B",
+  "é[]",
+  "- [éééé] text",
+  "[1] é[x]",
+  "- [long字] text",
+  "label [χ] text",
+  "- ✅ Done",
+  "- ⚠️ Risk: data loss",
+  "→ Next: ship it",
+  "• one • two",
+  "– item",
+  "“Save” fails on Linux",
+  "- “a” and “b”",
+  "1 → 2 → 3",
+  "200 → 404",
+  "★★★☆☆",
+  "👍 👍",
+  "🎉 🎉 🎉 release",
+  "- «a» quote",
+  "- © 2026",
+  "- ±3 ms",
+  "- 5 € fee",
+  "— Note — text",
+  "· a · b",
+  "- ½ cup",
+  "1️⃣",
+  "#️⃣",
+  "*️⃣",
+  "1⃣",
+  "👩🏽‍💻",
+  "🫱🏻‍🫲🏿",
+  "- ☐ Check",
+  "- ☒ Check",
+  "- one\n- two",
+  "- one\ntext",
+  "- one\n2 words",
+  "- one\n😀 emoji",
+  "- one\n→ next",
+  "- one\n⟶ next",
+  "- one\n⤀ next",
+  "- one\n\n‐ Do B",
+  "- one\n  ‐ Do B",
+  "- one\n‐Do B",
+  "- one\n```text\n‐ Do B\n```",
+  "1 ⟶ 2 ⟶ 3",
+  "1 ⤀ 2 ⤀ 3",
+  "Press 1️⃣̶ ok",
+];
+
 // Round 23: bracket categories and grapheme counts define the same short box.
 const unicodeBracketRefusals = [
   ["full-width brackets", "- ［x］ Check"],
@@ -177,6 +269,23 @@ for (const body of [...brailleBoxRefusals, ...invisiblePrefixRefusals]) {
     assert.equal(evaluate(body).reason, "invisible characters in the title or body", body);
   });
 }
+
+for (const [name, body, kind] of [
+  ...symbolBoxRefusals.map(([name, body]) => [name, body, "look-alike task box"] as const),
+  ...lazyMarkerRefusals.map(([name, body]) => [name, body, "look-alike list marker"] as const),
+]) {
+  test(`round 24 refuses ${name}`, () => {
+    assert.equal(hiddenMarkdownReason(body), reason(kind), body);
+    assert.equal(evaluate(body).reason, reason(kind), body);
+  });
+}
+test("round 24 bracket and lazy-marker exclusions preserve the controls", () => {
+  assert.equal(hiddenMarkdownReason("- ⎡x⎤ Check"), reason("look-alike task box"));
+  for (const body of round24Controls) {
+    assert.equal(hiddenMarkdownReason(body), null, body);
+    assert.equal(evaluate(body).status, "pickable", body);
+  }
+});
 
 for (const [name, body] of [...unicodeBracketRefusals, ...graphemeBoxRefusals]) {
   test(`round 23 look-alike box refuses ${name}`, () => {

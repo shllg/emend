@@ -90,12 +90,16 @@ owner's OK.
    Kept text passes step 5's public check too; step 6 shows anything you propose to
    remove. Leave out invisible characters (zero-width and bidi controls, tag and private-use
    characters, the Unicode line and paragraph separators, blank glyphs such as the braille blank,
-   combining marks with no letter or number before them): `bin/wt` refuses an issue that holds
-   them. Emoji keep their joiners, skin tones, keycaps and emoji selectors; tag sequences such as
-   subdivision flags are refused. Write task boxes in ASCII only, `- [ ]` and `- [x]`: a bracket
-   group of one to three characters after text with no ASCII letter is refused when that text or
-   the group holds any non-ASCII character. Full-width and CJK brackets count as brackets, so this
-   also refuses CJK citations such as `参考[1]` and a line that starts with `[…]`. Tell the owner
+   combining marks with no letter or number before them, enclosing marks other than a keycap):
+   `bin/wt` refuses an issue that holds them. Emoji keep their joiners, skin tones, keycaps and
+   emoji selectors; tag sequences such as subdivision flags are refused. Write task boxes in ASCII
+   only, `- [ ]` and `- [x]`: a bracket group of one to three characters after text with no ASCII
+   letter is refused when that text or the group holds any non-ASCII character. Full-width and
+   CJK brackets, and symbols other than emoji and arrows, count as brackets, so this also refuses
+   CJK citations such as `参考[1]`, a line that starts with `[…]`, and lines such as `★ 5 ★` or
+   `2 × 3 × 4`. Start list items with ASCII `-`, `*`, `+` or a number: a line that continues a
+   list item or quote and starts with a non-ASCII dash, bullet or symbol and a space is refused.
+   A box glyph such as `☐` after `- ` passes but is not a task GitHub counts. Tell the owner
    where they were.
 4. Several topics in one input: list them, propose one issue per topic, and ask the owner to
    confirm the split before you go on.

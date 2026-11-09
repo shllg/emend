@@ -12,6 +12,7 @@ type HiddenClass =
   | "whitespace run"
   | "list number"
   | "look-alike task box"
+  | "look-alike list marker"
   | "invisible character"
   | "task marker"
   | "empty code block"
@@ -24,6 +25,13 @@ const refusal = (kind: HiddenClass) => `hidden Markdown in the body: ${kind}`;
 // Each occupies space or has zero width without a visible mark.
 export const BLANK_GLYPHS = /[\u2800\u{1d159}\u{13441}\u{13442}\u{16fe4}]/u;
 const BOX_GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+// B: non-ASCII bracket punctuation or symbols, excluding pictographs and arrows.
+const BRACKET_LIKE = String.raw`(?=\P{ASCII})(?!\p{Extended_Pictographic}|[\u2190-\u21ff\u27f0-\u27ff\u2900-\u297f])[\p{Ps}\p{Pe}\p{Sm}\p{So}]`;
+const LOOK_ALIKE_BOXES = new RegExp(
+  String.raw`(?:\[|${BRACKET_LIKE})((?:(?![\[\]]|${BRACKET_LIKE}).)*)(?:\]|${BRACKET_LIKE})`,
+  "gu",
+);
+const LOOK_ALIKE_LIST_MARKER = new RegExp(String.raw`^(?:${BRACKET_LIKE}|(?=\P{ASCII})[\p{Pd}\p{Po}])[ \t]`, "u");
 
 // The only permitted ]( is a whole-line screenshot with a determined alt label.
 const SCREENSHOT =
@@ -115,7 +123,12 @@ function listStarts() {
     if (lazy) {
       // Lazy text stays in this paragraph, but cannot be a setext underline or
       // authorize a new list marker: it did not continue every container.
-      return { markers: [] as number[], overIndented: spaceEnd() - cursor > 3, paragraph: previousScope.paragraph };
+      return {
+        markers: [] as number[],
+        overIndented: spaceEnd() - cursor > 3,
+        paragraph: previousScope.paragraph,
+        lookAlikeMarker: LOOK_ALIKE_LIST_MARKER.test(rest),
+      };
     }
     containers = containers.slice(0, kept);
     if (fence && kept < fence.depth) fence = null;
@@ -484,12 +497,10 @@ function hiddenLineReason(lines: string[]): string | null {
   // Preserve earlier refusal reasons. A short bracket group after a prefix
   // without ASCII letters can disguise a task through non-ASCII glyphs in
   // either the prefix or the group, even when the parser sees only text.
-  // Count visible graphemes, including overlays. Non-ASCII opening/closing
-  // punctuation also bounds a group; ASCII parentheses and braces do not.
+  // Count visible graphemes, including overlays. B symbols can open or close
+  // a group, but cannot occur inside one. ASCII parentheses/braces stay text.
   for (const line of lines) {
-    for (const box of line.matchAll(
-      /(?:\[|(?=\P{ASCII})\p{Ps})((?:[^\p{Ps}\p{Pe}]|[(){}])*)(?:\]|(?=\P{ASCII})\p{Pe})/gu,
-    )) {
+    for (const box of line.matchAll(LOOK_ALIKE_BOXES)) {
       const content = box[1] ?? "";
       const count = [...BOX_GRAPHEMES.segment(content)].length;
       if (count < 1 || count > 3) continue;
@@ -498,6 +509,8 @@ function hiddenLineReason(lines: string[]): string | null {
       break; // Only the first short group is judged.
     }
   }
+  // Preserve the earlier refusal reason when a box also disguises a lazy item.
+  if (structure.some((line) => line.lookAlikeMarker)) return refusal("look-alike list marker");
   return null;
 }
 
