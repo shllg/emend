@@ -168,16 +168,17 @@ Conventional Commits prefix and no issue number.
 These list rules are stricter than the check in step 6; follow them as written.
 Number a list `1., 2., 3.` only when every numbered line in the body, code blocks included, starts at
 the left margin. If any is nested, quoted or indented, every numbered item in the body uses `1.`.
-A later flat list may count up again after a heading, after a `---` line, or after a blank line and
-a sentence at the left margin; otherwise use `1.` throughout. A numbered item with a checkbox uses
-`1.`. Write a checkbox right after its list marker and one space, on one line: `- [ ] text`,
+A later flat list may count up again after a heading or a `---` line at the left margin, or after a
+blank line and a sentence at the left margin; otherwise use `1.` throughout. A numbered item with a
+checkbox uses `1.`. Write a checkbox right after its list marker and one space, on one line: `- [ ] text`,
 `- [x] text`. It uses lowercase `[x]`, and an empty box holds one space, never a tab or another space
 character. Never write a box without the space after the marker (`-[x]`), with a backslash anywhere
-in it (`\[x]`, `[x\]`), split over two lines, or bare at the start of a line. Inside a list, never wrap
-a line back to the left margin; continue it at the item's text column. Under a numbered item other
-than `1.`, a checklist starts at the item's text column, comes before any code block in that item,
-and a nested checkbox's `-` sits under its parent's `[`, never inside a code block. A checklist that
-must follow a code block goes under a list numbered `1.` throughout:
+in it (`\[x]`, `[x\]`), split over two lines, bare at the start of a line, or with no space or no
+text after its `]`. Inside a list, never wrap a line back to the left margin; continue it at the
+item's text column. Under a numbered item other than `1.`, a checklist is indented with spaces only,
+never quoted, starts at the item's text column, comes before any code block in that item, and a
+nested checkbox's `-` sits under its parent's `[`, never inside a code block. A checklist that must
+follow a code block goes under a list numbered `1.` throughout:
 
 ```text
 2. Step
@@ -302,7 +303,8 @@ inline code included, and refuses an issue whose body holds anywhere:
   number with two or more digits, a numbered checkbox other than `1.`, an uppercase `[X]`, a box
   written another way than the Body rules show, a checkbox on a later line of a numbered item other
   than `1.` that is not in a checklist placed as the Body rules say, a checkbox after a code block
-  under a numbered item other than `1.` (until a heading, a `---` line or a new `1.` item), or an
+  under a numbered item other than `1.` (until a heading or a `---` line at the left margin, or a
+  new `1.` item at that item's level or further left), or an
   empty box on a line that also holds `[x]` or `[X]`;
 - a line, code blocks included, that starts with digits and one more character before a checkbox,
   also after a list marker or `>`, as in `12 [ ] Pending` or `- 12 [ ] a`, other than `1.` or `1)`
