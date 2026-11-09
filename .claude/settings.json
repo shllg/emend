@@ -4,12 +4,20 @@
       "Read(/.env)",
       "Read(/**/.env)",
       "Read(/**/.env.*)",
+      "Read(//**/.private-terms)",
+      "Edit(//**/.private-terms)",
+      "Edit(//**/.claude/hooks/**)",
+      "Edit(//**/.claude/settings.json)",
+      "Edit(//**/.claude/settings.local.json)",
+      "Edit(//**/.git)",
+      "Edit(//**/.git/**)",
       "Read(~/.local/share/emend/**)",
       "Read(~/Library/Application Support/emend/**)",
       "Read(~/.ssh/**)",
       "Read(~/.gnupg/**)",
       "Read(~/.aws/**)",
       "Read(~/.config/gh/**)",
+      "Edit(~/.config/gh/**)",
       "Read(~/.npmrc)",
       "Read(~/.docker/**)",
       "Read(~/.config/.wrangler/**)",
@@ -29,7 +37,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/enforce-subagent-model.sh\" || exit 2",
+            "command": "bash \"$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir)/../.claude/hooks/enforce-subagent-model.sh\" || exit 2",
+            "timeout": 5,
+            "onFailure": "block"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Monitor",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir)/../.claude/hooks/guard-github-writes.ts\" || exit 2",
             "timeout": 5,
             "onFailure": "block"
           }

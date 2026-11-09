@@ -11,9 +11,9 @@ The input is the owner's text, with optional screenshots, or an existing issue a
 The text may be empty when the screenshots say it all. With no text, no screenshot and no issue, ask
 the owner what the issue is about, and wait.
 
-This skill changes no tracked file and makes no commit. It runs in the main checkout or in any
-worktree. It writes drafts under the gitignored `.wt/`. It writes to GitHub only after the owner's
-OK in step 6, or on the owner's `ready` command in step 8.
+This skill changes no tracked file and makes no commit. It runs in the main checkout: in a worktree,
+a hook refuses every issue or label change (step 7). It writes drafts under the gitignored `.wt/`.
+It writes to GitHub only after the owner's OK in step 6, or on the owner's `ready` command in step 8.
 
 ## Rules
 
@@ -348,6 +348,9 @@ owner names exceptions. `ready` goes only on the issues the owner names for it, 
 when the owner says so.
 
 ## 7. Create or update
+
+Every issue or label change prompts the owner to confirm, through the hook in
+`.claude/settings.json`. In a worktree the hook refuses it.
 
 1. Write the body to `<top>/.wt/issue-<slug>.md` with the Write tool, which creates `.wt/` when it
    is missing.
