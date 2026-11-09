@@ -41,7 +41,8 @@ to it. Any change here needs `emend-security-reviewer`.
 - Titles and Contents labels pass `cleanDocTitle` on the server and render as isolated text
   (`dir="auto"`). The filename always shows.
 - Position memory holds only the app's own block, thread and HTML-doc frame ids or declared
-  headings, with fractions, never quote text, heading text or a content URL. Remembered focus names
+  headings, with fractions including an optional gap fraction, and the Files tab keeps only a pixel
+  offset in memory, never quote text, heading text or a content URL. Remembered focus names
   only the app's own block, thread or writeup topic ids or a declared heading, and stays in memory
   only.
 - The doc bar and its sandbox label stay outside the frame and visible.

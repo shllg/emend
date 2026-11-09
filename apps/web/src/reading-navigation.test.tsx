@@ -251,7 +251,7 @@ test.each([
     client.setQueryData(["file", id, "old"], large ? "before\n".repeat(10001) : "before\nsecond\n");
     client.setQueryData(["file", id, "new"], large ? "after\n".repeat(10001) : "after\nsecond\n");
     loading.parser = vi.fn(parsePair);
-    const scroll = vi.spyOn(diffPresentation, "scrollDiffTarget");
+    const scroll = vi.spyOn(diffPresentation, "holdDiffTarget");
     const { history } = mount();
     const chip = await screen.findByRole("button", { name: `Go to agent note A in ${path}` });
     expect(chip.getAttribute("tabindex")).toBe("0");
@@ -300,7 +300,7 @@ test.each([
 
 test.each([1280, 768, 390])("Files in diff waits for lazy rendering and scrolls its topic at %s px", async (pixels) => {
   width = pixels;
-  const scroll = vi.spyOn(diffPresentation, "scrollDiffTarget");
+  const scroll = vi.spyOn(diffPresentation, "holdDiffTarget");
   const { history, container } = mount();
   const link = await screen.findByRole("link", { name: "Files in diff: Plant a seed" });
   const href = new URL((link as HTMLAnchorElement).href);
@@ -419,7 +419,7 @@ test.each(
     });
     const expectedTab = destination !== "map" && pixels < 768 ? "diff" : "writeup";
     const targetId = destination === "map" ? "topic-seed" : "diff-topic-seed";
-    const diffScroll = vi.spyOn(diffPresentation, "scrollDiffTarget");
+    const diffScroll = vi.spyOn(diffPresentation, "holdDiffTarget");
     const href = new URL((link as HTMLAnchorElement).href);
     expect([...href.searchParams.keys()].sort()).toEqual(["rev", "tab"]);
     expect(href.searchParams.get("tab")).toBe(expectedTab);
@@ -1445,7 +1445,7 @@ test.each([1280, 390])("Show in place reaches a line thread, using the phone Dif
   };
   currentRevision.files = currentRevision.files.map((file) => ({ ...file, hasNew: true }));
   currentRevision.threads = [{ ...placedWriteupThread(), target, placement: { status: "placed", location: target } }];
-  const scroll = vi.spyOn(diffPresentation, "scrollDiffTarget");
+  const scroll = vi.spyOn(diffPresentation, "holdDiffTarget");
   const { history } = mount("?tab=comments&rev=1");
   fireEvent.click(await screen.findByRole("link", { name: "Show in place" }));
   await act(async () => loaded.resolve());
@@ -1628,7 +1628,7 @@ test("fix1 a removed phone selection prompt returns focus to the reading pane", 
 });
 
 test("R8 Files in diff expands a collapsed topic before scrolling, including a repeated link intent", async () => {
-  const scroll = vi.spyOn(diffPresentation, "scrollDiffTarget");
+  const scroll = vi.spyOn(diffPresentation, "holdDiffTarget");
   mount();
   await act(async () => loaded.resolve());
   const diff = within(await screen.findByTestId("diff-pane"));
@@ -1657,7 +1657,7 @@ test.each(["file", "lines"] as const)(
     currentRevision.files = currentRevision.files.map((file) => ({ ...file, hasNew: true }));
     currentRevision.threads = [{ ...placedWriteupThread(), target, placement: { status: "placed", location: target } }];
     const scrolled: { id: string; hidden: boolean; expanded: string | null | undefined }[] = [];
-    vi.spyOn(diffPresentation, "scrollDiffTarget").mockImplementation((element) => {
+    vi.spyOn(diffPresentation, "holdDiffTarget").mockImplementation((element) => {
       scrolled.push({
         id: element.id,
         hidden: !!element.closest("[hidden]"),
@@ -1666,6 +1666,7 @@ test.each(["file", "lines"] as const)(
           ?.querySelector('[aria-label="Collapse file"]')
           ?.getAttribute("aria-expanded"),
       });
+      return () => {};
     });
     mount("?tab=comments&rev=1");
     await act(async () => loaded.resolve());
@@ -1683,7 +1684,7 @@ test.each(["file", "lines"] as const)(
 );
 
 test("R8 a file header URL expands its topic and file through the same route intent", async () => {
-  const scroll = vi.spyOn(diffPresentation, "scrollDiffTarget");
+  const scroll = vi.spyOn(diffPresentation, "holdDiffTarget");
   const { history } = mount();
   await act(async () => loaded.resolve());
   const diff = within(await screen.findByTestId("diff-pane"));
@@ -1835,7 +1836,7 @@ test.each(["Show in place", "hash", "claim", "edit claim", "phone edit claim", "
       if (!fetchPrevious) throw new Error("Missing request handler");
       return fetchPrevious(path, init);
     });
-    const scroll = vi.spyOn(diffPresentation, "scrollDiffTarget");
+    const scroll = vi.spyOn(diffPresentation, "holdDiffTarget");
     const focused: { input: HTMLElement; pending: boolean }[] = [];
     const originalFocus = HTMLElement.prototype.focus;
     vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(function (this: HTMLElement, options) {
@@ -1921,7 +1922,7 @@ test("R8 fix1 Resume reveals an already-mounted file composer before consuming i
     hiddenAtFocus.push(!!input.closest("[hidden]"));
     focus(options);
   });
-  const scroll = vi.spyOn(diffPresentation, "scrollDiffTarget");
+  const scroll = vi.spyOn(diffPresentation, "holdDiffTarget");
   fireEvent.click(resume);
   await waitFor(() => expect(document.activeElement).toBe(input));
   expect(hiddenAtFocus).toEqual([false]);
@@ -1966,7 +1967,7 @@ test.each(["binary", "oversized", "lockfile", "large", "identical", "missing-lin
       if (!fetchPrevious) throw new Error("Missing request handler");
       return fetchPrevious(path, init);
     });
-    const scroll = vi.spyOn(diffPresentation, "scrollDiffTarget");
+    const scroll = vi.spyOn(diffPresentation, "holdDiffTarget");
     mount("?tab=comments&rev=1");
     await act(async () => loaded.resolve());
     fireEvent.click(
@@ -2008,7 +2009,7 @@ test.each(["Comment on review", "Comment on file", "input", "textarea"])(
     mount();
     await act(async () => loaded.resolve());
     const diff = within(await screen.findByTestId("diff-pane"));
-    const scroll = vi.spyOn(diffPresentation, "scrollDiffTarget");
+    const scroll = vi.spyOn(diffPresentation, "holdDiffTarget");
     const replyButton = await diff.findByRole("button", { name: "Reply" });
     const fallback = document.getElementById(`diff-thread-${id}`) as HTMLElement;
     fireEvent.click(replyButton);
@@ -2075,7 +2076,7 @@ test("R8 fix2 a rendered diff with no annotation slot completes its intent at th
     if (!fetchPrevious) throw new Error("Missing request handler");
     return fetchPrevious(path, init);
   });
-  const scroll = vi.spyOn(diffPresentation, "scrollDiffTarget");
+  const scroll = vi.spyOn(diffPresentation, "holdDiffTarget");
   mount("?tab=comments&rev=1");
   await act(async () => loaded.resolve());
   fireEvent.click(
@@ -2149,7 +2150,7 @@ test.each([false, true])(
       newer = await within(screen.getByTestId("reading-pane")).findByRole("textbox", { name: "Comment" });
       expect(document.activeElement).toBe(newer);
     }
-    const scroll = vi.spyOn(diffPresentation, "scrollDiffTarget");
+    const scroll = vi.spyOn(diffPresentation, "holdDiffTarget");
     await act(async () =>
       parsed.resolve(
         parsePair({

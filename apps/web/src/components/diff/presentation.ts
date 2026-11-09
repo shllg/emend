@@ -1,5 +1,6 @@
 import { type RefObject, useLayoutEffect, useState } from "react";
 import { layoutStore, useLayoutPreferences } from "../../lib/layout-store.ts";
+import { onReaderInput } from "../../lib/reader-input.ts";
 import type { ParsedDiff } from "./FileDiff.tsx";
 
 export type DiffStyle = "split" | "unified";
@@ -52,9 +53,7 @@ export function useNarrowDiffPane(root: RefObject<HTMLElement | null>) {
   return narrow;
 }
 
-export function scrollDiffTarget(target: HTMLElement) {
-  const pane = target.closest<HTMLElement>("[data-diff-scroll]");
-  if (!pane) return;
+function diffTargetTop(target: HTMLElement, pane: HTMLElement): number {
   const toolbar = pane.querySelector("[data-diff-toolbar]");
   const section = target.closest("[data-topic]");
   // The phone topic header scrolls away with its section, so it takes no room in the stack.
@@ -66,6 +65,51 @@ export function scrollDiffTarget(target: HTMLElement) {
   const stack = (toolbar?.getBoundingClientRect().height ?? 0) + height(topic) + height(file);
   const destination =
     pane.scrollTop + target.getBoundingClientRect().top - pane.getBoundingClientRect().top - pane.clientTop - stack - 8;
-  const top = Math.max(0, Math.min(destination, Math.max(0, pane.scrollHeight - pane.clientHeight)));
-  pane.scrollTo({ top, behavior: "instant" });
+  return Math.max(0, Math.min(destination, Math.max(0, pane.scrollHeight - pane.clientHeight)));
+}
+
+export function scrollDiffTarget(target: HTMLElement) {
+  const pane = target.closest<HTMLElement>("[data-diff-scroll]");
+  if (pane) pane.scrollTo({ top: diffTargetTop(target, pane), behavior: "instant" });
+}
+
+export const diffHoldQuietMs = 2000;
+export const diffHoldMaxMs = 10000;
+const diffHolds = new WeakMap<HTMLElement, () => void>();
+
+export function holdDiffTarget(target: HTMLElement): () => void {
+  const pane = target.closest<HTMLElement>("[data-diff-scroll]");
+  if (!pane) return () => {};
+  diffHolds.get(pane)?.();
+  const start = performance.now();
+  let lastMoved = start;
+  let height = pane.scrollHeight;
+  let frame: number;
+  const cancel = () => {
+    cancelAnimationFrame(frame);
+    stopInput();
+    if (diffHolds.get(pane) === cancel) diffHolds.delete(pane);
+  };
+  const stopInput = onReaderInput(pane, cancel);
+  diffHolds.set(pane, cancel);
+  scrollDiffTarget(target);
+  const tick = () => {
+    const now = performance.now();
+    if (!target.isConnected || target.closest("[hidden]") || now - start >= diffHoldMaxMs) {
+      cancel();
+      return;
+    }
+    const top = diffTargetTop(target, pane);
+    const moved = Math.abs(pane.scrollTop - top) >= 1;
+    if (moved || height !== pane.scrollHeight) lastMoved = now;
+    height = pane.scrollHeight;
+    if (moved) pane.scrollTo({ top, behavior: "instant" });
+    if (now - lastMoved >= diffHoldQuietMs) {
+      cancel();
+      return;
+    }
+    frame = requestAnimationFrame(tick);
+  };
+  frame = requestAnimationFrame(tick);
+  return cancel;
 }

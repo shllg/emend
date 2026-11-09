@@ -1,7 +1,17 @@
 import type { ReviewView, RevisionView } from "@emend/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
-import { type MouseEvent, type Ref, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  type ComponentProps,
+  type MouseEvent,
+  type Ref,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { placeSpan } from "../../../../packages/core/src/place/span.ts";
 import { ApiError } from "../api/client.ts";
 import { mutationMessage, useViewedErrors, useViewedMutation, useViewedRevision } from "../api/mutations.ts";
@@ -36,10 +46,24 @@ import { openingView } from "../lib/opening-view.ts";
 import { focusReadingTarget } from "../lib/reading-focus.ts";
 import { readingPositionKey } from "../lib/reading-position.ts";
 import { revealReadingTarget } from "../lib/reading-reveal.ts";
-import { captureReadingPosition, type IntentState, useReadingPosition } from "../lib/use-reading-position.ts";
+import {
+  captureReadingPosition,
+  type IntentState,
+  useFilesPosition,
+  useReadingPosition,
+} from "../lib/use-reading-position.ts";
 import { type ReadingEntry, useReadingTrail } from "../lib/use-reading-trail.ts";
 import { useWakeTimer } from "../lib/wake-timer.ts";
 import { type ReviewSearch, validateReviewSearch } from "../router.tsx";
+
+function Files({
+  reviewId,
+  visible,
+  ...props
+}: ComponentProps<typeof FilesView> & { reviewId: string; visible: boolean }) {
+  useFilesPosition({ storageKey: readingPositionKey(reviewId, "files"), active: visible });
+  return <FilesView {...props} />;
+}
 
 function Reading({
   reviewId,
@@ -825,7 +849,9 @@ function LoadedReview({
                 {revision && (
                   <ReadingFoldContext value={readingFolds}>
                     {readingTab === "files" ? (
-                      <FilesView
+                      <Files
+                        reviewId={review.id}
+                        visible={paneMode === "split" || tab !== "diff" || !hasDiff}
                         revision={revision}
                         counts={diffCounts}
                         onViewed={onViewed}

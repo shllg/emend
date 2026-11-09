@@ -7,6 +7,7 @@ import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } fr
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { NavigateDiff } from "../../lib/diff-navigation.ts";
 import { draftKey } from "../../lib/drafts.ts";
 import { layoutStore } from "../../lib/layout-store.ts";
 import { Panes } from "../layout/Panes.tsx";
@@ -200,6 +201,7 @@ afterEach(() => {
   if (boundsDescriptor) Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", boundsDescriptor);
   else Reflect.deleteProperty(HTMLElement.prototype, "getBoundingClientRect");
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 test("topics sort ascending stably, Other last, files by order, empty headers and metadata are text", async () => {
   const files = [
@@ -493,10 +495,12 @@ test("toolbar counts exclude Other, pluralize, and jump menu reveals a collapsed
   const toolbar = document.querySelector("[data-diff-toolbar]");
   const topicHeader = topic.querySelector("[data-topic-header]");
   const pane = screen.getByTestId("diff-pane");
-  const offset = vi.spyOn(pane, "scrollTo").mockImplementation(() => {});
+  const offset = vi.spyOn(pane, "scrollTo").mockImplementation((options?: number | ScrollToOptions) => {
+    if (options && typeof options === "object") pane.scrollTop = options.top ?? 0;
+  });
   Object.defineProperties(pane, { scrollHeight: { value: 3000 }, clientHeight: { value: 600 } });
   if (!header) throw new Error("Missing file header");
-  vi.spyOn(header, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 1200, 400, 40));
+  vi.spyOn(header, "getBoundingClientRect").mockImplementation(() => new DOMRect(0, 1200 - pane.scrollTop, 400, 40));
   if (!toolbar || !topicHeader) throw new Error("Missing toolbar/topic");
   vi.spyOn(toolbar, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 400, 41));
   vi.spyOn(topicHeader, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 41, 400, 110));
@@ -1176,4 +1180,51 @@ test("the phone leaves the topic height at zero because that header does not sti
   });
   await mount(detailed());
   expect(screen.getByRole("region", { name: /^Topic / }).style.getPropertyValue("--em-topic-height")).toBe("0px");
+});
+
+test.each(["toolbar", "navigator"])("a %s file jump follows late layout growth and cancels on unmount", async (via) => {
+  const above = file("above.ts");
+  const destination = file("destination.ts", { flag: "binary", order: 1 });
+  let navigate: NavigateDiff | null = null;
+  const { unmount } = await mount(revision([above, destination]), {
+    onNavigator: (value) => {
+      navigate = value;
+    },
+  });
+  const pane = screen.getByTestId("diff-pane");
+  const header = document.getElementById(`diff-file-${destination.id}`);
+  const toolbar = pane.querySelector("[data-diff-toolbar]");
+  const topicHeader = pane.querySelector("[data-topic-header]");
+  if (!header || !toolbar || !topicHeader) throw new Error("Missing jump destination");
+  let targetTop = 1300;
+  Object.defineProperties(pane, { scrollHeight: { value: 10000 }, clientHeight: { value: 600 } });
+  vi.spyOn(pane, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 900, 600));
+  vi.spyOn(header, "getBoundingClientRect").mockImplementation(
+    () => new DOMRect(0, targetTop - pane.scrollTop, 900, 40),
+  );
+  vi.spyOn(toolbar, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 900, 41));
+  vi.spyOn(topicHeader, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 41, 900, 100));
+  const scroll = vi.spyOn(pane, "scrollTo").mockImplementation((options?: number | ScrollToOptions) => {
+    if (options && typeof options === "object") pane.scrollTop = options.top ?? 0;
+  });
+  vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"] });
+  if (via === "toolbar") {
+    fireEvent.keyDown(screen.getByRole("button", { name: "1 topic · 2 files" }), { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "destination.ts" }));
+  } else {
+    act(() => expect(navigate?.({ elementId: header.id })).toBe(false));
+    act(() => expect(navigate?.({ elementId: header.id })).toBe(true));
+  }
+  expect(header.getBoundingClientRect().top).toBe(149);
+  near("above.ts");
+  await screen.findByTestId("rendered-diff");
+  targetTop += 1800;
+  act(() => vi.advanceTimersToNextFrame());
+  expect(header.getBoundingClientRect().top).toBe(149);
+  expect(scroll).toHaveBeenLastCalledWith({ top: 2951, behavior: "instant" });
+  unmount();
+  scroll.mockClear();
+  targetTop += 1800;
+  act(() => vi.advanceTimersToNextFrame());
+  expect(scroll).not.toHaveBeenCalled();
 });

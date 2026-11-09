@@ -15,7 +15,7 @@ import { Composer } from "../threads/Composer.tsx";
 import { ThreadCard } from "../threads/ThreadCard.tsx";
 import { DiffToolbar } from "./DiffToolbar.tsx";
 import type { DiffParser } from "./parse-client.ts";
-import { type DiffCounts, scrollDiffTarget, useDiffStyle, useDiffWrap, useNarrowDiffPane } from "./presentation.ts";
+import { type DiffCounts, holdDiffTarget, useDiffStyle, useDiffWrap, useNarrowDiffPane } from "./presentation.ts";
 import { TopicSection } from "./TopicSection.tsx";
 import { type FileLocation, isDiffTarget, resolveFile } from "./targets.ts";
 
@@ -63,6 +63,8 @@ export function DiffPane({
     onRendered?.();
   }, [onRendered]);
   const root = useRef<HTMLDivElement>(null);
+  const cancelHold = useRef<(() => void) | undefined>(undefined);
+  useLayoutEffect(() => () => cancelHold.current?.(), []);
   const narrow = useNarrowDiffPane(root);
   const diffStyle = layout === "phone" || narrow ? "unified" : style;
   const onParsed = useCallback(
@@ -160,7 +162,8 @@ export function DiffPane({
       (thread ? `diff-thread-${thread.id}` : file ? `diff-file-${file.id}` : topic ? `diff-topic-${topic}` : undefined);
     const anchor = element && root.current?.contains(element) ? element : id ? document.getElementById(id) : undefined;
     if (!anchor || !root.current?.contains(anchor) || anchor.closest("[hidden], [data-slot-pending]")) return false;
-    scrollDiffTarget(anchor);
+    cancelHold.current?.();
+    cancelHold.current = holdDiffTarget(anchor);
     return true;
   };
   useLayoutEffect(() => {

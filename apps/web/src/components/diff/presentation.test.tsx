@@ -1,10 +1,11 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { scrollDiffTarget } from "./presentation.ts";
+import { diffHoldMaxMs, diffHoldQuietMs, holdDiffTarget, scrollDiffTarget } from "./presentation.ts";
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 function scene(height: number, contentHeight: number, targetTop: number, targetHeight: number) {
   const { container } = render(
@@ -23,7 +24,7 @@ function scene(height: number, contentHeight: number, targetTop: number, targetH
   const topic = pane.querySelector<HTMLElement>("[data-topic]") as HTMLElement;
   const heading = pane.querySelector<HTMLElement>("[data-topic-header]") as HTMLElement;
   const card = pane.querySelector<HTMLElement>("article") as HTMLElement;
-  Object.defineProperties(pane, { clientHeight: { value: height }, scrollHeight: { value: contentHeight } });
+  Object.defineProperties(pane, { clientHeight: { value: height }, scrollHeight: { get: () => contentHeight } });
   vi.spyOn(pane, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 100, 500, height));
   vi.spyOn(toolbar, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 100, 500, 41));
   vi.spyOn(heading, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 141, 500, 100));
@@ -36,7 +37,22 @@ function scene(height: number, contentHeight: number, targetTop: number, targetH
   const scroll = vi.spyOn(pane, "scrollTo").mockImplementation((options?: ScrollToOptions | number) => {
     if (options && typeof options === "object") pane.scrollTop = options.top ?? 0;
   });
-  return { pane, card, topic, toolbar, scroll, into, by };
+  return {
+    pane,
+    card,
+    topic,
+    toolbar,
+    scroll,
+    into,
+    by,
+    shift: (delta: number) => {
+      targetTop += delta;
+      contentHeight += delta;
+    },
+    grow: (delta: number) => {
+      contentHeight += delta;
+    },
+  };
 }
 
 test("a short last file clamps once at the end of the pane and stays inside the viewport", () => {
@@ -135,4 +151,137 @@ test("a file header destination does not count its own header", () => {
   scrollDiffTarget(header);
   // 1300 - toolbar 41 - topic 100 - 8, from the header's own rect at 1400 - 100
   expect(scroll).toHaveBeenCalledExactlyOnceWith({ top: 1151, behavior: "instant" });
+});
+
+function holdScene(phone = false) {
+  vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"] });
+  const value = scene(500, 5000, 1300, 320);
+  if (phone) value.topic.setAttribute("data-phone", "");
+  return value;
+}
+
+test.each([false, true])("a held target follows layout growth below the sticky stack (phone=%s)", (phone) => {
+  const { pane, card, scroll, shift } = holdScene(phone);
+  const cancel = holdDiffTarget(card);
+  const inset = (phone ? 41 : 141) + 8;
+  expect(card.getBoundingClientRect().top - pane.getBoundingClientRect().top).toBe(inset);
+  shift(1800);
+  vi.advanceTimersToNextFrame();
+  expect(card.getBoundingClientRect().top - pane.getBoundingClientRect().top).toBe(inset);
+  expect(scroll).toHaveBeenCalledTimes(2);
+  expect(scroll).toHaveBeenLastCalledWith({ top: 3100 - inset, behavior: "instant" });
+  vi.advanceTimersToNextFrame();
+  expect(scroll).toHaveBeenCalledTimes(2);
+  cancel();
+  shift(300);
+  vi.advanceTimersToNextFrame();
+  expect(scroll).toHaveBeenCalledTimes(2);
+});
+
+test.each(["wheel", "touchstart", "touchmove", "pointerdown", "keydown"])(
+  "%s on the diff pane stops corrections before the next frame",
+  (type) => {
+    const { pane, card, scroll, shift } = holdScene();
+    holdDiffTarget(card);
+    if (type === "keydown") fireEvent.keyDown(pane, { key: "PageDown" });
+    else fireEvent(pane, new Event(type, { bubbles: true }));
+    shift(1800);
+    vi.advanceTimersToNextFrame();
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  },
+);
+
+test("scroll keys elsewhere, typing and prevented keys leave a hold running", () => {
+  const { pane, card, scroll, shift } = holdScene();
+  const other = document.createElement("button");
+  document.body.append(other);
+  const input = document.createElement("textarea");
+  pane.append(input);
+  const cancel = holdDiffTarget(card);
+  fireEvent.keyDown(other, { key: "PageDown" });
+  fireEvent.keyDown(input, { key: "ArrowDown" });
+  fireEvent.keyDown(pane, { key: "a" });
+  const prevented = new KeyboardEvent("keydown", { key: "PageDown", bubbles: true, cancelable: true });
+  prevented.preventDefault();
+  fireEvent(pane, prevented);
+  shift(500);
+  vi.advanceTimersToNextFrame();
+  expect(scroll).toHaveBeenCalledTimes(2);
+  fireEvent.keyDown(document.body, { key: " " });
+  shift(500);
+  vi.advanceTimersToNextFrame();
+  expect(scroll).toHaveBeenCalledTimes(2);
+  cancel();
+  other.remove();
+});
+
+test("a newer hold replaces the old target on the same pane", () => {
+  const { pane, card, topic, scroll, shift } = holdScene();
+  const cancelOld = holdDiffTarget(card);
+  const reads = vi.mocked(card.getBoundingClientRect);
+  reads.mockClear();
+  let topicTop = 800;
+  vi.spyOn(topic, "getBoundingClientRect").mockImplementation(
+    () => new DOMRect(0, 100 + topicTop - pane.scrollTop, 500, 1000),
+  );
+  const cancelNew = holdDiffTarget(topic);
+  cancelOld();
+  shift(1500);
+  topicTop += 300;
+  vi.advanceTimersToNextFrame();
+  expect(reads).not.toHaveBeenCalled();
+  expect(scroll).toHaveBeenLastCalledWith({ top: 1051, behavior: "instant" });
+  cancelNew();
+});
+
+test("a hold ends after two quiet seconds", () => {
+  const { card, scroll, shift } = holdScene();
+  holdDiffTarget(card);
+  vi.advanceTimersByTime(diffHoldQuietMs);
+  expect(vi.getTimerCount()).toBe(0);
+  shift(1000);
+  vi.advanceTimersToNextFrame();
+  expect(scroll).toHaveBeenCalledTimes(1);
+});
+
+test.each(["correction", "height"])("a %s restarts the quiet window", (change) => {
+  const { card, scroll, shift, grow } = holdScene();
+  holdDiffTarget(card);
+  vi.advanceTimersByTime(diffHoldQuietMs - 500);
+  if (change === "correction") shift(500);
+  else grow(500);
+  vi.advanceTimersToNextFrame();
+  vi.advanceTimersByTime(600);
+  shift(500);
+  vi.advanceTimersToNextFrame();
+  expect(scroll).toHaveBeenCalledTimes(change === "correction" ? 3 : 2);
+  vi.advanceTimersByTime(diffHoldQuietMs);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+test("the ten second cap ends a hold even while layout keeps moving", () => {
+  const { card, scroll, shift } = holdScene();
+  holdDiffTarget(card);
+  for (let elapsed = 1000; elapsed < diffHoldMaxMs; elapsed += 1000) {
+    shift(100);
+    vi.advanceTimersByTime(1000);
+  }
+  expect(scroll).toHaveBeenCalledTimes(10);
+  vi.advanceTimersByTime(1000);
+  expect(vi.getTimerCount()).toBe(0);
+  shift(1000);
+  vi.advanceTimersToNextFrame();
+  expect(scroll).toHaveBeenCalledTimes(10);
+});
+
+test.each(["removed", "hidden"])("a %s target ends the hold", (state) => {
+  const { card, topic, scroll, shift } = holdScene();
+  holdDiffTarget(card);
+  if (state === "removed") card.remove();
+  else topic.hidden = true;
+  shift(1000);
+  vi.advanceTimersToNextFrame();
+  expect(scroll).toHaveBeenCalledTimes(1);
+  expect(vi.getTimerCount()).toBe(0);
 });

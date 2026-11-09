@@ -32,7 +32,7 @@ vi.mock("./components/reading/BlockReader.tsx", async (importOriginal) => {
   };
 });
 
-const id = "11111111-1111-4111-8111-111111111111";
+let id = "11111111-1111-4111-8111-111111111111";
 const review: ReviewView = {
   id,
   title: "Synthetic garden",
@@ -126,9 +126,12 @@ let revisions: Record<number, RevisionView>;
 let client: QueryClient;
 let width = 390;
 const originalBounds = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "getBoundingClientRect");
-const writeupKey = readingPositionKey(id, "writeup", "", 1);
+let writeupKey = readingPositionKey(id, "writeup", "", 1);
 
 beforeEach(() => {
+  id = crypto.randomUUID();
+  review.id = id;
+  writeupKey = readingPositionKey(id, "writeup", "", 1);
   presentation.collapsedDocCards = false;
   const bounds = HTMLElement.prototype.getBoundingClientRect;
   Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
@@ -896,3 +899,95 @@ test("R4.1 a reply composer's focus still captures the position for Back", async
   await screen.findByText("Paragraph cccc");
   await waitFor(() => expect(pane().scrollTop).toBe(175));
 });
+
+const filesLayouts = [
+  { width: 1280, mode: "split" },
+  { width: 1280, mode: "tabs" },
+  { width: 390, mode: "tabs" },
+] as const;
+
+test.each(filesLayouts.flatMap((layout) => [0, 150].map((top) => ({ ...layout, top }))))(
+  "Files keeps its own offset with Writeup at $top ($width px, $mode)",
+  async ({ width: nextWidth, mode, top }) => {
+    width = nextWidth;
+    layoutStore.update({ pane: { desktop: mode, tablet: mode } });
+    const { history } = mount();
+    await screen.findByText("Paragraph bbbb");
+    if (top) readerScroll(top);
+    await go(history, "?tab=files&rev=1");
+    await screen.findByRole("button", { name: /Open diff for seed.txt/ });
+    expect(pane().scrollTop).toBe(0);
+    readerScroll(225);
+    expect(loadReadingPosition(readingPositionKey(id, "files"))).toBeUndefined();
+    await go(history, "?tab=writeup&rev=1");
+    expect(pane().scrollTop).toBe(top);
+    await go(history, "?tab=files&rev=1");
+    expect(pane().scrollTop).toBe(225);
+    if (mode === "split") {
+      fireEvent.click(screen.getByRole("button", { name: /Open diff for seed.txt/ }));
+      await waitFor(() => expect(history.location.hash).toBe(`#diff-file-${id}`));
+      expect(pane().scrollTop).toBe(225);
+    } else {
+      await go(history, "?tab=diff&rev=1");
+      if (width === 390) expect(document.querySelector("[data-reading-scroll]")).toBeNull();
+      else {
+        expect(pane().hidden).toBe(true);
+        pane().scrollTop = 0;
+        fireEvent.scroll(pane());
+      }
+      await go(history, "?tab=files&rev=1");
+      expect(pane().scrollTop).toBe(225);
+    }
+    // Clamping after activation must not replace the saved reader offset.
+    pane().scrollTop = 10;
+    fireEvent.scroll(pane());
+    await go(history, "?tab=writeup&rev=1");
+    expect(pane().scrollTop).toBe(top);
+    await go(history, "?tab=files&rev=1");
+    expect(pane().scrollTop).toBe(225);
+  },
+);
+
+test.each(filesLayouts.flatMap((layout) => ["gap", "heading"].map((between) => ({ ...layout, between }))))(
+  "Writeup, Files, Writeup restores a line in a $between exactly ($width px, $mode)",
+  async ({ width: nextWidth, mode, between }) => {
+    width = nextWidth;
+    layoutStore.update({ pane: { desktop: mode, tablet: mode } });
+    const gap = between === "gap" ? 6 : 400;
+    const top = 100 + gap / 2;
+    offsets.set(b.id, 100 + gap).set(c.id, 200 + gap);
+    if (between === "heading") {
+      const value = revisions[1];
+      if (!value) throw new Error("Missing revision");
+      value.writeup.sections = [
+        { key: "overview", label: "Body", topic: null, blocks: [a] },
+        { key: "t-garden-body", label: "Garden details", topic: null, blocks: [b, c] },
+      ];
+      const bounds = HTMLElement.prototype.getBoundingClientRect;
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        return this.tagName === "H2" && this.textContent === "Garden details"
+          ? new DOMRect(0, 100 - pane().scrollTop, 390, gap)
+          : bounds.call(this);
+      });
+    }
+    const { history } = mount();
+    await screen.findByText("Paragraph bbbb");
+    readerScroll(top);
+    const anchor = { id: `block-${a.id}`, fraction: 1, gap: 0.5 };
+    expect(loadReadingPosition(writeupKey)).toEqual(anchor);
+    if (between === "heading") {
+      const rect = screen.getByRole("heading", { name: "Garden details" }).getBoundingClientRect();
+      expect(rect.top).toBeLessThan(0);
+      expect(rect.bottom).toBeGreaterThan(0);
+    }
+    await go(history, "?tab=files&rev=1");
+    readerScroll(225);
+    await go(history, "?tab=writeup&rev=1");
+    expect(pane().scrollTop).toBe(top);
+    await act(async () => history.back());
+    await act(async () => history.back());
+    expect(screen.getByText("Paragraph bbbb")).toBeTruthy();
+    expect(pane().scrollTop).toBe(top);
+    expect(loadReadingPosition(writeupKey)).toEqual(anchor);
+  },
+);

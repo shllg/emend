@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from "react";
 import { appElementId, docHeading, type HeadingDoc } from "./doc-navigation.ts";
+import { onReaderInput } from "./reader-input.ts";
 import { focusReadingTarget, isReadingFocusMove } from "./reading-focus.ts";
 import {
   applyAnchor,
@@ -20,9 +21,29 @@ export function captureReadingPosition() {
 }
 
 const lastVisits = new WeakMap<Element, { key: string; entry?: ReadingEntry }>();
-// Only keys that scroll the pane count as reader input, and not while typing in a text field.
-const scrollKeys = new Set(["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "]);
-const textEntry = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
+const filesPositions = new Map<string, number>();
+
+export function useFilesPosition({ storageKey, active }: { storageKey: string; active: boolean }) {
+  useLayoutEffect(() => {
+    if (!active) return;
+    const scroller = document.querySelector<HTMLElement>("[data-reading-scroll]");
+    if (!scroller) return;
+    scroller.scrollTop = filesPositions.get(storageKey) ?? 0;
+    lastVisits.set(scroller, { key: storageKey });
+    let reader = false;
+    const stopInput = onReaderInput(scroller, () => {
+      reader = true;
+    });
+    const onScroll = () => {
+      if (reader) filesPositions.set(storageKey, scroller.scrollTop);
+    };
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      stopInput();
+      scroller.removeEventListener("scroll", onScroll);
+    };
+  }, [active, storageKey]);
+}
 
 /** What the route knows about navigation intents that scroll (a link, a thread jump, a Resume). */
 export type IntentState = {
@@ -125,19 +146,7 @@ export function useReadingPosition({
     };
     scroller.addEventListener("scroll", onScroll, { passive: true });
     scroller.addEventListener(captureEvent, onJump);
-    const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || !scrollKeys.has(event.key)) return;
-      const target = event.target;
-      // Keys aimed at another pane, the inbox or a control elsewhere do not scroll this pane.
-      if (!(target instanceof Node) || (target !== document.body && !scroller.contains(target))) return;
-      if (target instanceof HTMLElement && target.closest(textEntry)) return;
-      onInput();
-    };
-    scroller.addEventListener("wheel", onInput, { passive: true });
-    scroller.addEventListener("touchstart", onInput, { passive: true });
-    scroller.addEventListener("touchmove", onInput, { passive: true });
-    scroller.addEventListener("pointerdown", onInput, { passive: true });
-    window.addEventListener("keydown", onKey);
+    const stopInput = onReaderInput(scroller, onInput);
     window.addEventListener("pagehide", write);
     document.addEventListener("visibilitychange", onVisibility);
 
@@ -156,7 +165,7 @@ export function useReadingPosition({
         stopRestore();
         return;
       }
-      const placed = saved ? applyAnchor(scroller, saved, latestDoc.current) : undefined;
+      const placed = saved ? applyAnchor(scroller, saved, latestDoc.current, selector) : undefined;
       // Another doc in the same scroller must not inherit the previous doc's offset: take the anchor or the top.
       // A different entry can explicitly restore top even on the same key. A remount keeps the live offset.
       if (first && placed === undefined && (keyChanged || (entryChanged && saved !== undefined)))
@@ -219,11 +228,7 @@ export function useReadingPosition({
       clearTimeout(throttle);
       scroller.removeEventListener("scroll", onScroll);
       scroller.removeEventListener(captureEvent, onJump);
-      scroller.removeEventListener("wheel", onInput);
-      scroller.removeEventListener("touchstart", onInput);
-      scroller.removeEventListener("touchmove", onInput);
-      scroller.removeEventListener("pointerdown", onInput);
-      window.removeEventListener("keydown", onKey);
+      stopInput();
       window.removeEventListener("pagehide", write);
       document.removeEventListener("visibilitychange", onVisibility);
     };
