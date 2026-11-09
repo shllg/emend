@@ -907,6 +907,41 @@ const filesLayouts = [
   { width: 390, mode: "tabs" },
 ] as const;
 
+test.each(filesLayouts)(
+  "Writeup, Files, Writeup restores a line in the Topics map exactly ($width px, $mode)",
+  async ({ width: nextWidth, mode }) => {
+    width = nextWidth;
+    layoutStore.update({ pane: { desktop: mode, tablet: mode } });
+    const value = revisions[1];
+    if (!value) throw new Error("Missing revision");
+    value.topics = [{ slug: "garden", title: "Garden", importance: 1, summary: "Synthetic garden changes" }];
+    value.writeup.sections = [{ key: "t-garden-body", label: "Details", topic: "garden", blocks: [a, b, c] }];
+    offsets.set(a.id, 400).set(b.id, 500).set(c.id, 600);
+    const bounds = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.readingSection === "topics-map"
+        ? new DOMRect(0, -pane().scrollTop, 390, 400)
+        : bounds.call(this);
+    });
+    const { history } = mount();
+    const map = await screen.findByRole("region", { name: "Topics" });
+    readerScroll(200);
+    const anchor = { id: `block-${a.id}`, fraction: 0, gap: 0.5 };
+    expect(loadReadingPosition(writeupKey)).toEqual(anchor);
+    expect(map.getBoundingClientRect().top).toBe(-200);
+    expect(map.getBoundingClientRect().bottom).toBe(200);
+    await go(history, "?tab=files&rev=1");
+    readerScroll(225);
+    await go(history, "?tab=writeup&rev=1");
+    expect(pane().scrollTop).toBe(200);
+    await act(async () => history.back());
+    await act(async () => history.back());
+    expect(screen.getByRole("region", { name: "Topics" }).getBoundingClientRect().top).toBe(-200);
+    expect(pane().scrollTop).toBe(200);
+    expect(loadReadingPosition(writeupKey)).toEqual(anchor);
+  },
+);
+
 test.each(filesLayouts.flatMap((layout) => [false, true].map((programmatic) => ({ ...layout, programmatic }))))(
   "Files saves focus scrolling only for reader focus ($width px, $mode, programmatic=$programmatic)",
   async ({ width: nextWidth, mode, programmatic }) => {

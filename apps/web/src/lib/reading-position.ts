@@ -3,6 +3,7 @@ import { appElementId, docHeading, type HeadingDoc } from "./doc-navigation.ts";
 
 export const readingKey = "emend.reading.v1";
 export const readingCap = 200;
+/** A gap fraction spans two anchors, the start to the first (fraction 0), or the last to the end (fraction 1). */
 export type ReadingAnchor = { id: string; fraction: number; gap?: number };
 type Entry = ReadingAnchor & { at: number };
 
@@ -85,6 +86,7 @@ const readingTop = (scroller: HTMLElement) =>
  * so a binary search reads O(log n) rects. An element with an all-zero rect (display: none, a collapsed fold)
  * is never an anchor. Anchors never nest: BlockView renders a leaf div (ids inside block HTML get the
  * user-content- prefix), thread cards are siblings of their block, and an HTML doc holds only its frame.
+ * Gap fractions preserve lines between anchors, before the first, or after the last shown anchor.
  */
 export function findAnchor(scroller: HTMLElement, selector: string): ReadingAnchor | null {
   if (scroller.scrollTop <= 0) return null;
@@ -120,17 +122,35 @@ export function findAnchor(scroller: HTMLElement, selector: string): ReadingAnch
           gap: span > 0 ? Math.min(1, Math.max(0, (top - rect.bottom) / span)) : 0,
         };
       }
+      const fTop = scroller.scrollTop + found.rect.top - top;
+      return {
+        id: at(found.index).id,
+        fraction: 0,
+        ...(fTop > 0 ? { gap: Math.min(1, Math.max(0, scroller.scrollTop / fTop)) } : {}),
+      };
     }
     const fraction = found.rect.height > 0 ? (top - found.rect.top) / found.rect.height : 0;
     return { id: at(found.index).id, fraction: Math.min(1, Math.max(0, fraction)) };
   }
   // Scrolled past every anchor: the last one that is shown.
-  for (let index = list.length - 1; index >= 0; index--)
-    if (!hidden(at(index).getBoundingClientRect())) return { id: at(index).id, fraction: 1 };
+  for (let index = list.length - 1; index >= 0; index--) {
+    const rect = at(index).getBoundingClientRect();
+    if (hidden(rect)) continue;
+    const lBottom = scroller.scrollTop + rect.bottom - top;
+    const max = scroller.scrollHeight - scroller.clientHeight;
+    return {
+      id: at(index).id,
+      fraction: 1,
+      ...(max > lBottom ? { gap: Math.min(1, Math.max(0, (scroller.scrollTop - lBottom) / (max - lBottom))) } : {}),
+    };
+  }
   return null;
 }
 
-/** Scrolls so the anchor sits at the scroller's top. Returns the new scrollTop, or undefined when the element is gone. */
+/**
+ * Scrolls the anchor to the reading line, including gaps between anchors, before the first, or after the last.
+ * Returns the new scrollTop, or undefined when the element is gone.
+ */
 export function applyAnchor(
   scroller: HTMLElement,
   anchor: ReadingAnchor,
@@ -144,21 +164,32 @@ export function applyAnchor(
       : undefined;
   if (!element || !scroller.contains(element)) return undefined;
   const rect = element.getBoundingClientRect();
+  const top = readingTop(scroller);
   let line = rect.top + anchor.fraction * rect.height;
-  if (anchor.gap !== undefined) {
+  if (anchor.gap !== undefined && anchor.fraction === 0) {
+    const fTop = scroller.scrollTop + rect.top - top;
+    line = top + anchor.gap * fTop - scroller.scrollTop;
+  } else if (anchor.gap !== undefined) {
     line = rect.bottom;
     const list = selector ? Array.from(scroller.querySelectorAll<HTMLElement>(selector)) : [];
     const index = list.indexOf(element);
     if (index !== -1) {
+      let hasNext = false;
       for (const next of list.slice(index + 1)) {
         const nextRect = next.getBoundingClientRect();
         if (hidden(nextRect)) continue;
         line += anchor.gap * (nextRect.top - rect.bottom);
+        hasNext = true;
         break;
+      }
+      if (!hasNext && anchor.fraction === 1) {
+        const lBottom = scroller.scrollTop + rect.bottom - top;
+        const max = scroller.scrollHeight - scroller.clientHeight;
+        line += anchor.gap * Math.max(0, max - lBottom);
       }
     }
   }
-  const delta = line - readingTop(scroller);
+  const delta = line - top;
   if (Math.abs(delta) >= 1) scroller.scrollTop += delta;
   return scroller.scrollTop;
 }

@@ -349,7 +349,8 @@ export function FileDiff({
           !topicCollapsed &&
           !file.flag &&
           (!lockfile || expanded) &&
-          (bodyState.loading ?? true)) ||
+          ((bodyState.loading ?? true) ||
+            (!!bodyState.diff && !bodyState.blocked && bodyState.diff.hunks.length > 0 && !slotState.rendered))) ||
         undefined
       }
       aria-label={`File ${file.path}`}

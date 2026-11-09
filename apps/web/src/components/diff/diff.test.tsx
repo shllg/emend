@@ -12,13 +12,20 @@ import { draftKey } from "../../lib/drafts.ts";
 import { layoutStore } from "../../lib/layout-store.ts";
 import { Panes } from "../layout/Panes.tsx";
 import { DiffPane, type DiffPaneProps } from "./DiffPane.tsx";
+import type { DiffPostRender, ParsedDiff } from "./FileDiff.tsx";
 import { parsePair } from "./parse.worker.ts";
 import type { DiffParser } from "./parse-client.ts";
 
 type Selection = { side?: "additions" | "deletions"; endSide?: "additions" | "deletions"; start: number; end: number };
 type Annotation = { side: string; lineNumber: number; metadata: ReactNode };
 type RenderProps = {
-  options: { diffStyle: string; overflow: string; onLineSelectionEnd: (range: Selection | null) => void };
+  fileDiff: ParsedDiff;
+  options: {
+    diffStyle: string;
+    overflow: string;
+    onLineSelectionEnd: (range: Selection | null) => void;
+    onPostRender: DiffPostRender;
+  };
   lineAnnotations: Annotation[];
   renderAnnotation: (annotation: Annotation) => ReactNode;
   renderGutterUtility: (getHoveredLine: () => GetHoveredLineResult<"diff">) => ReactNode;
@@ -54,6 +61,20 @@ vi.mock("@pierre/diffs/react", () => ({
     );
   },
 }));
+function postRender(rendered: boolean) {
+  const host = screen.getByTestId("rendered-diff");
+  const phase = host.shadowRoot ? "update" : "mount";
+  const shadow = host.shadowRoot ?? host.attachShadow({ mode: "open" });
+  if (rendered) {
+    const line = document.createElement("div");
+    line.dataset.line = "1";
+    shadow.append(line);
+  }
+  const props = renderer.props.at(-1);
+  if (!props) throw new Error("Missing renderer props");
+  const instance = { expandHunk: vi.fn(), getLineIndex: vi.fn() } as unknown as Parameters<DiffPostRender>[1];
+  act(() => props.options.onPostRender(host, instance, phase));
+}
 const reviewId = "11111111-1111-4111-8111-111111111111";
 const file = (path = "source.ts", values: Partial<FileView> = {}): FileView => ({
   id: crypto.randomUUID(),
@@ -308,7 +329,31 @@ test("a file marks its mounted body while fetching and parsing, then clears the 
   expect(section.hasAttribute("data-diff-loading")).toBe(true);
   parsed.resolve(parsePair({ oldFile: null, newFile: { name: "loading.ts", contents: "one\ntwo\n" } }));
   await screen.findByTestId("rendered-diff");
+  postRender(true);
   await waitFor(() => expect(section.hasAttribute("data-diff-loading")).toBe(false));
+});
+test("a parsed diff stays marked as loading until Pierre draws its first lines", async () => {
+  await mount(revision([file("delayed.ts", { hasOld: false, status: "added" })]));
+  near("delayed.ts");
+  const host = await screen.findByTestId("rendered-diff");
+  const section = screen.getByRole("region", { name: "File delayed.ts" });
+  expect(renderer.props.at(-1)?.fileDiff.hunks.length).toBeGreaterThan(0);
+  postRender(false);
+  expect(host.shadowRoot?.querySelector("[data-line]")).toBeNull();
+  expect(section.hasAttribute("data-diff-loading")).toBe(true);
+  postRender(true);
+  expect(host.shadowRoot?.querySelector("[data-line]")).toBeTruthy();
+  expect(section.hasAttribute("data-diff-loading")).toBe(false);
+});
+test("a parsed diff with no hunks clears its loading marker without drawing lines", async () => {
+  await mount(revision([file("identical.ts")]));
+  near("identical.ts");
+  const host = await screen.findByTestId("rendered-diff");
+  const section = screen.getByRole("region", { name: "File identical.ts" });
+  expect(renderer.props.at(-1)?.fileDiff.hunks).toHaveLength(0);
+  postRender(false);
+  expect(host.shadowRoot?.querySelector("[data-line]")).toBeNull();
+  expect(section.hasAttribute("data-diff-loading")).toBe(false);
 });
 test.each([
   "pnpm-lock.yaml",
