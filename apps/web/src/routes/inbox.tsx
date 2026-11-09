@@ -1,8 +1,8 @@
 import type { InboxItem } from "@emend/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, PanelLeftClose, Search } from "lucide-react";
-import { useState } from "react";
-import { inboxQuery } from "../api/queries.ts";
+import { useEffect, useState } from "react";
+import { inboxQuery, serverNow } from "../api/queries.ts";
 import { needsAttention, ReviewRow } from "../components/inbox/ReviewRow.tsx";
 import { AppFrame } from "../components/layout/AppFrame.tsx";
 import { Button } from "../components/ui/Button.tsx";
@@ -11,7 +11,6 @@ import { IconButton } from "../components/ui/IconButton.tsx";
 import { SegmentedControl } from "../components/ui/SegmentedControl.tsx";
 import { Select } from "../components/ui/Select.tsx";
 import { TextField } from "../components/ui/TextField.tsx";
-import { useClockJump } from "../lib/clock-jump.ts";
 import { plural } from "../lib/count.ts";
 import { useInboxArrivals } from "../lib/inbox-arrivals.tsx";
 import { useWakeTimer } from "../lib/wake-timer.ts";
@@ -64,15 +63,16 @@ export function Inbox({
   };
   const [now, setNow] = useState(Date.now);
   const [doneOpen, setDoneOpen] = useState(false);
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
   const items = query.data?.items ?? [];
-  const clockOffset = query.data?.clockOffset ?? 0;
+  const wall = Date.now();
+  const estimate = query.data ? serverNow(query.data, wall) : wall;
   const approvalWake = (review: InboxItem) =>
-    review.activeUntil === null ? null : new Date(Date.parse(review.activeUntil) - clockOffset).toISOString();
+    review.activeUntil === null ? null : new Date(wall + (Date.parse(review.activeUntil) - estimate)).toISOString();
   const client = useQueryClient();
-  useClockJump(() => {
-    setNow(Date.now());
-    void client.invalidateQueries({ queryKey: ["inbox"] });
-  }, setNow);
   // Snoozes and approval windows end without an event: ask again when either time passes.
   // Until the refetch lands, a passed snooze reads "waking up".
   useWakeTimer(
@@ -200,13 +200,13 @@ export function Inbox({
           items.length > 0 &&
           filtered.length > 0 &&
           lists.map(({ list, title }) => {
-            const rows = filtered.filter((review) => effectiveList(review, now + clockOffset) === list);
+            const rows = filtered.filter((review) => effectiveList(review, estimate) === list);
             if (list === "done")
               rows.sort(
                 (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
               );
             const nothingActive =
-              list === "active" && !items.some((review) => effectiveList(review, now + clockOffset) === "active");
+              list === "active" && !items.some((review) => effectiveList(review, estimate) === "active");
             if (rows.length === 0 && !nothingActive) return null;
             // A filter that matches only Done rows would otherwise show nothing.
             const expanded = list !== "done" || doneOpen || needle !== "";

@@ -3,8 +3,23 @@ import { queryOptions } from "@tanstack/react-query";
 import { viewedState } from "../lib/viewed-state.ts";
 import { get } from "./client.ts";
 
-/** Inbox cache data includes the server clock's offset from this browser, in milliseconds. */
-export type InboxData = InboxList & { clockOffset: number };
+/** Inbox cache data records both browser clocks when the response arrived, in milliseconds. */
+export type InboxData = InboxList & { receivedAt: number; receivedMono: number };
+
+// Use the larger elapsed time: wall time counts sleep, monotonic time survives a backward wall-clock change.
+// A forward wall-clock change looks like sleep and can move a row early until the next refetch.
+export function serverNow(data: Partial<InboxData> | undefined, wall = Date.now(), mono = performance.now()) {
+  if (
+    !data ||
+    typeof data.receivedAt !== "number" ||
+    typeof data.receivedMono !== "number" ||
+    !Number.isFinite(data.receivedAt) ||
+    !Number.isFinite(data.receivedMono)
+  )
+    return wall;
+  const estimate = Date.parse(data.serverTime ?? "") + Math.max(wall - data.receivedAt, mono - data.receivedMono);
+  return Number.isFinite(estimate) ? estimate : wall;
+}
 
 export const inboxQuery = () =>
   queryOptions({
@@ -12,7 +27,8 @@ export const inboxQuery = () =>
     queryFn: async ({ signal }): Promise<InboxData> => {
       const list = await get("/api/v1/reviews", InboxList, signal);
       const receivedAt = Date.now();
-      return { ...list, clockOffset: Date.parse(list.serverTime) - receivedAt };
+      const receivedMono = performance.now();
+      return { ...list, receivedAt, receivedMono };
     },
   });
 export const reviewQuery = (id: string) =>

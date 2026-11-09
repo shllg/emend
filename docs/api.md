@@ -213,9 +213,9 @@ kind: "review" | "publish" }`. `repo` is the repository key, and
 Active's cap; an approved review is `active` until then if it has a place. An open review is
 `snoozed` while its snooze is in effect, `active` otherwise.
 `activeUntil` is when an approved review in Active moves to Done; it is null otherwise. The server
-sends no event when an approval's window ends. A client corrects its own clock with `serverTime`,
-refetches when `activeUntil` passes on the server's clock, and may show the row under Done from
-that moment.
+sends no event when an approval's window ends. A client estimates the server's clock from
+`serverTime` and the time elapsed since the response, refetches when `activeUntil` passes on that
+clock, and may show the row under Done from that moment.
 The approval time is recorded when the review is approved; a later comment, reply or Send does
 not move it. A new revision clears it when it reopens the review. A review approved before this
 version or copied in by attach has no approval time and is in Done.

@@ -123,7 +123,7 @@ async function mountTimed(path = "/") {
   await tick();
 }
 function fixedClock() {
-  vi.useFakeTimers();
+  vi.useFakeTimers({ toFake: ["Date", "performance", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
   vi.setSystemTime(new Date("2026-11-04T12:00:00.000Z"));
 }
 function recentApproval(): InboxItem {
@@ -160,7 +160,7 @@ function inboxItems(): InboxItem[] {
 }
 
 test("the inbox shows Active, Snoozed and Done in order with counts, wake times and a collapsed Done", async () => {
-  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.useFakeTimers({ toFake: ["Date", "performance"] });
   vi.setSystemTime(new Date("2026-11-04T12:00:00.000Z"));
   inbox = inboxItems();
   mount();
@@ -255,7 +255,11 @@ test.each([
     inbox = [approved];
     const invalidate = vi.spyOn(client, "invalidateQueries");
     await mountTimed();
-    expect(client.getQueryData<InboxData>(["inbox"])?.clockOffset).toBe(serverOffset);
+    expect(client.getQueryData<InboxData>(["inbox"])).toMatchObject({
+      serverTime: new Date(Date.now() + serverOffset).toISOString(),
+      receivedAt: Date.now(),
+      receivedMono: performance.now(),
+    });
     const inboxCalls = () => fetchMock.mock.calls.filter(([path]) => path === "/api/v1/reviews").length;
     const before = inboxCalls();
     await tick(remaining / 2);
@@ -284,6 +288,8 @@ test("an accepted approval expires even when every following inbox refetch fails
   serverOffset = 2 * 3_600_000;
   const windowMs = APPROVED_ACTIVE_HOURS * 3_600_000;
   const activeUntil = new Date(Date.now() + serverOffset + windowMs).toISOString();
+  const receivedAt = Date.now();
+  const receivedMono = performance.now();
   const fallback = fetchMock.getMockImplementation();
   let approved = false;
   fetchMock.mockImplementation(async (path, init) => {
@@ -306,7 +312,11 @@ test("an accepted approval expires even when every following inbox refetch fails
   await tick();
   expect(approved).toBe(true);
   const cached = client.getQueryData<InboxData>(["inbox"]);
-  expect(cached?.clockOffset).toBe(serverOffset);
+  expect(cached).toMatchObject({
+    serverTime: new Date(receivedAt + serverOffset).toISOString(),
+    receivedAt,
+    receivedMono,
+  });
   expect(cached?.items[0]).toMatchObject({ state: "approved", list: "active", activeUntil });
   expect(client.getQueryData<ReviewView>(["review", id])?.activeUntil).toBe(activeUntil);
   const active = within(screen.getByRole("region", { name: "Active" })).getByRole("link", { name: /Synthetic review/ });
@@ -377,26 +387,67 @@ test("an approval that expires while refetches fail joins Done in updatedAt and 
   expect(client.getQueryData<InboxData>(["inbox"])?.items[0]).toEqual(approved);
 });
 
-test("a wall-clock jump refetches the server clock and keeps an unexpired approval in Active", async () => {
-  fixedClock();
-  inbox = [{ ...recentApproval(), activeUntil: new Date(Date.now() + 90 * 60_000).toISOString() }];
-  await mountTimed();
-  const inboxCalls = () => fetchMock.mock.calls.filter(([path]) => path === "/api/v1/reviews").length;
-  const before = inboxCalls();
-  expect(client.getQueryData<InboxData>(["inbox"])?.clockOffset).toBe(0);
-  const jump = 2 * 3_600_000;
-  const monotonic = performance.now();
-  vi.setSystemTime(Date.now() + jump);
-  expect(performance.now()).toBe(monotonic);
-  serverOffset -= jump;
-  await tick(60_000);
+async function failInboxRefetches() {
+  const fallback = fetchMock.getMockImplementation();
+  fetchMock.mockImplementation(async (path, init) => {
+    if (path === "/api/v1/reviews")
+      return Response.json({ error: { code: "internal_error", message: "Synthetic failure" } }, { status: 500 });
+    if (!fallback) throw new Error("Missing fetch fixture");
+    return fallback(path, init);
+  });
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["inbox"] });
+  });
   await tick();
-  expect(inboxCalls()).toBe(before + 1);
-  expect(client.getQueryData<InboxData>(["inbox"])?.clockOffset).toBe(-jump);
+  expect(screen.getByText("Could not load reviews.")).toBeTruthy();
+}
+
+test("an approval expires on monotonic time after the wall clock moves back and refetches fail", async () => {
+  fixedClock();
+  const remaining = 90 * 60_000;
+  inbox = [{ ...recentApproval(), activeUntil: new Date(Date.now() + remaining).toISOString() }];
+  await mountTimed();
+  const cached = client.getQueryData<InboxData>(["inbox"]);
+  const monotonic = performance.now();
+  vi.setSystemTime(Date.now() - 2 * 3_600_000);
+  expect(performance.now()).toBe(monotonic);
+  // A failed resync after the change must leave expiry running from the original response's clocks.
+  await failInboxRefetches();
+  await tick(remaining - 1);
   expect(
     within(screen.getByRole("region", { name: "Active" })).getByRole("link", { name: /Recently approved/ }),
   ).toBeTruthy();
-  expect(screen.queryByRole("region", { name: "Done" })).toBeNull();
+  await tick(501);
+  await tick();
+  expect(performance.now() - monotonic).toBe(remaining + 500);
+  expect(client.getQueryData<InboxData>(["inbox"])).toEqual(cached);
+  expect(screen.getByText("No active reviews.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Done 1" }).getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(screen.getByRole("button", { name: "Done 1" }));
+  expect(
+    within(screen.getByRole("region", { name: "Done" })).getByRole("link", { name: /Recently approved/ }),
+  ).toBeTruthy();
+});
+
+test("an approval expires at the next minute tick after sleep even when refetches fail", async () => {
+  fixedClock();
+  inbox = [{ ...recentApproval(), activeUntil: new Date(Date.now() + 90 * 60_000).toISOString() }];
+  await mountTimed();
+  const cached = client.getQueryData<InboxData>(["inbox"]);
+  await failInboxRefetches();
+  const monotonic = performance.now();
+  vi.setSystemTime(Date.now() + 10 * 3_600_000);
+  expect(performance.now()).toBe(monotonic);
+  await tick(60_000);
+  await tick();
+  expect(performance.now() - monotonic).toBe(60_000);
+  expect(client.getQueryData<InboxData>(["inbox"])).toEqual(cached);
+  expect(screen.getByText("No active reviews.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Done 1" }).getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(screen.getByRole("button", { name: "Done 1" }));
+  expect(
+    within(screen.getByRole("region", { name: "Done" })).getByRole("link", { name: /Recently approved/ }),
+  ).toBeTruthy();
 });
 
 test("a non-empty filter shows Done expanded under a plain heading; clearing it restores the reader's choice", async () => {
@@ -505,7 +556,7 @@ test.each([
   ["a snooze until the next revision", null],
 ])("the header names %s", async (_name, snoozedUntil) => {
   if (snoozedUntil) {
-    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.useFakeTimers({ toFake: ["Date", "performance"] });
     vi.setSystemTime(new Date("2026-11-04T12:00:00.000Z"));
   }
   review = { ...item, list: "snoozed", snoozed: true, snoozedUntil };

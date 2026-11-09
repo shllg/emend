@@ -21,7 +21,7 @@ import {
 import { refreshQueries } from "../lib/query-refresh.ts";
 import { viewedState } from "../lib/viewed-state.ts";
 import { ApiError, change } from "./client.ts";
-import type { InboxData } from "./queries.ts";
+import { type InboxData, serverNow } from "./queries.ts";
 
 function applyViewed(view: RevisionView, body: ViewedRequest): RevisionView {
   if (view.seq !== body.revision) return view;
@@ -116,8 +116,8 @@ export function useLifecycleMutation(reviewId: string) {
 
 /** Shows an accepted Send or Approve in the cached review and inbox item before the refetch lands. */
 function applyAccepted(client: QueryClient, reviewId: string, kind: "send" | "approve") {
-  const clockOffset = client.getQueryData<InboxData>(["inbox"])?.clockOffset ?? 0;
-  const activeUntil = new Date(Date.now() + clockOffset + APPROVED_ACTIVE_HOURS * 3_600_000).toISOString();
+  const estimate = serverNow(client.getQueryData<InboxData>(["inbox"]));
+  const activeUntil = new Date(estimate + APPROVED_ACTIVE_HOURS * 3_600_000).toISOString();
   const change = <T extends InboxItem>(item: T): T =>
     kind === "approve"
       ? { ...item, state: "approved", list: "active", snoozed: false, snoozedUntil: null, activeUntil }

@@ -593,7 +593,8 @@ test.each(["row", "rail"])(
       client.setQueryData(["review", id], currentReview);
       client.setQueryData<InboxData>(["inbox"], {
         serverTime: new Date(Date.now()).toISOString(),
-        clockOffset: 0,
+        receivedAt: Date.now(),
+        receivedMono: performance.now(),
         items: [currentReview],
       });
     });

@@ -52,7 +52,7 @@ let client: QueryClient;
 let serverOffset: number;
 
 beforeEach(() => {
-  vi.useFakeTimers();
+  vi.useFakeTimers({ toFake: ["Date", "performance", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
   vi.mocked(reconnectReviewEvents).mockReset().mockResolvedValue(false);
   localStorage.clear();
   mode = "ok";
@@ -268,6 +268,12 @@ test.each(["Send", "Approve"] as const)("a fetch that started before the accepte
   server = before;
   serverOffset = 2 * 3_600_000;
   await mount(<Inbox />);
+  const received = client.getQueryData<InboxData>(["inbox"]);
+  expect(received).toMatchObject({
+    serverTime: new Date(Date.now() + serverOffset).toISOString(),
+    receivedAt: Date.now(),
+    receivedMono: performance.now(),
+  });
   mode = "held";
   act(() => {
     void client.invalidateQueries({ queryKey: ["review", reviewId] });
@@ -297,7 +303,11 @@ test.each(["Send", "Approve"] as const)("a fetch that started before the accepte
   const expected = kind === "Send" ? [0, true] : ["approved", "active", false, null, activeUntil];
   expect(accepted(client.getQueryData<ReviewView>(["review", reviewId]))).toEqual(expected);
   expect(accepted(client.getQueryData<InboxData>(["inbox"])?.items[0])).toEqual(expected);
-  expect(client.getQueryData<InboxData>(["inbox"])?.clockOffset).toBe(serverOffset);
+  expect(client.getQueryData<InboxData>(["inbox"])).toMatchObject({
+    receivedAt: received?.receivedAt,
+    receivedMono: received?.receivedMono,
+    serverTime: received?.serverTime,
+  });
   // The background refetch then brings the server's own data.
   const after =
     kind === "Send"

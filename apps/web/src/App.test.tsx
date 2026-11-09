@@ -760,7 +760,8 @@ test("the first inbox response establishes the baseline even when a stale cache 
   const arrival = { ...item, id: "22222222-2222-4222-8222-222222222222", title: "Already present at first response" };
   client.setQueryData<InboxData>(["inbox"], {
     serverTime: new Date(Date.now()).toISOString(),
-    clockOffset: 0,
+    receivedAt: Date.now(),
+    receivedMono: performance.now(),
     items: [item],
   });
   const response = Promise.withResolvers<Response>();
@@ -819,7 +820,8 @@ test("an arrival hidden by a filter consumes its highlight before the filter is 
     await act(async () => {
       client.setQueryData<InboxData>(["inbox"], {
         serverTime: new Date(Date.now()).toISOString(),
-        clockOffset: 0,
+        receivedAt: Date.now(),
+        receivedMono: performance.now(),
         items: [item, arrival],
       });
       await vi.advanceTimersByTimeAsync(0);
@@ -859,7 +861,8 @@ test.each([false, true])(
         await act(async () => {
           client.setQueryData<InboxData>(["inbox"], {
             serverTime: new Date(Date.now()).toISOString(),
-            clockOffset: 0,
+            receivedAt: Date.now(),
+            receivedMono: performance.now(),
             items: values,
           });
           await vi.advanceTimersByTimeAsync(0);
@@ -2629,7 +2632,8 @@ test("a row with an invalid cached timestamp has no time text", async () => {
   client.setQueryDefaults(["inbox"], { staleTime: Infinity });
   client.setQueryData<InboxData>(["inbox"], {
     serverTime: new Date(Date.now()).toISOString(),
-    clockOffset: 0,
+    receivedAt: Date.now(),
+    receivedMono: performance.now(),
     items: [{ ...item, updatedAt: "invalid" }],
   });
   mount();
