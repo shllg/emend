@@ -135,6 +135,40 @@ for (const [name, character] of [
   }
 }
 
+async function invisibleCheckerWithout(escapedCharacter: string) {
+  const source = readFileSync(new URL("./issues.ts", import.meta.url), "utf8");
+  const markdown = readFileSync(new URL("./markdown.ts", import.meta.url), "utf8");
+  const glyphs = /^export const BLANK_GLYPHS = .*;$/mu.exec(markdown)?.[0];
+  assert.ok(glyphs, "shared blank-glyph set");
+  const start = source.indexOf("function hasInvisibleText(");
+  const end = source.indexOf("\n/** The single eligibility", start);
+  assert.ok(start >= 0 && end > start);
+  const parts = `${glyphs}\n${source.slice(start, end)}`.split(escapedCharacter);
+  assert.equal(parts.length, 2, "exactly one invisible-character mutation target");
+  const mutated = stripTypeScriptTypes(`${parts.join("")}\nexport { hasInvisibleText };`);
+  const module = await import(`data:text/javascript;base64,${Buffer.from(mutated).toString("base64")}`);
+  return module.hasInvisibleText as (text: string) => boolean;
+}
+
+for (const [name, character, escapedCharacter] of [
+  ["Egyptian full blank", "\u{13441}", String.raw`\u{13441}`],
+  ["Egyptian half blank", "\u{13442}", String.raw`\u{13442}`],
+  ["null notehead", "\u{1d159}", String.raw`\u{1d159}`],
+] as const) {
+  for (const text of [`- ${character}[x] Check`, `- [${character}] Check`]) {
+    for (const field of ["title", "body"]) {
+      test(`round 21 ${name} in ${field} is untrusted: ${JSON.stringify(text)}`, async () => {
+        const row = evaluate({ [field]: text });
+        assert.equal(row.status, "untrusted");
+        assert.equal(row.reason, "invisible characters in the title or body");
+        assert.equal(row.title, null);
+        const mutated = await invisibleCheckerWithout(escapedCharacter);
+        assert.equal(mutated(text), false, "removing the glyph must release the witness");
+      });
+    }
+  }
+}
+
 for (const [name, character, escapedCharacter] of [
   ["line separator", "\u2028", String.raw`\u2028`],
   ["paragraph separator", "\u2029", String.raw`\u2029`],
@@ -149,15 +183,8 @@ for (const [name, character, escapedCharacter] of [
       assert.equal(row.title, null);
       // Mutate only this character's membership in the actual invisible-text
       // function. The Markdown guard must not mask a missing caller check.
-      const source = readFileSync(new URL("./issues.ts", import.meta.url), "utf8");
-      const start = source.indexOf("function hasInvisibleText(");
-      const end = source.indexOf("\n/** The single eligibility", start);
-      assert.ok(start >= 0 && end > start);
-      const parts = source.slice(start, end).split(escapedCharacter);
-      assert.equal(parts.length, 2, "exactly one invisible-character mutation target");
-      const mutated = stripTypeScriptTypes(`${parts.join("")}\nexport { hasInvisibleText };`);
-      const module = await import(`data:text/javascript;base64,${Buffer.from(mutated).toString("base64")}`);
-      assert.equal(module.hasInvisibleText(text), false, "removing this character must release the witness");
+      const mutated = await invisibleCheckerWithout(escapedCharacter);
+      assert.equal(mutated(text), false, "removing this character must release the witness");
     });
   }
 }

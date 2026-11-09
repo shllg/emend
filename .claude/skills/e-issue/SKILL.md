@@ -89,8 +89,9 @@ owner's OK.
    It also refuses other alt text and any HTML. Step 6 shows the change.
    Kept text passes step 5's public check too; step 6 shows anything you propose to
    remove. Leave out invisible characters (zero-width and bidi controls, tag and private-use
-   characters, the Unicode line and paragraph separators, the braille blank): `bin/wt` refuses an
-   issue that holds them. Tell the owner where they were.
+   characters, the Unicode line and paragraph separators, blank glyphs such as the braille blank):
+   `bin/wt` refuses an issue that holds them. Emoji keep their joiners and variation selectors.
+   Tell the owner where they were.
 4. Several topics in one input: list them, propose one issue per topic, and ask the owner to
    confirm the split before you go on.
 

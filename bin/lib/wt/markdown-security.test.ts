@@ -30,6 +30,17 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+// Round 21: the other blank glyphs disguise boxes in the same way as braille.
+const blankGlyphBoxRefusals = (
+  [
+    ["Egyptian full blank", "\u{13441}", String.raw`\u{13441}`],
+    ["Egyptian half blank", "\u{13442}", String.raw`\u{13442}`],
+    ["null notehead", "\u{1d159}", String.raw`\u{1d159}`],
+  ] as const
+).flatMap(([name, character, escapedCharacter]) =>
+  [`- ${character}[x] Check`, `- [${character}] Check`].map((body) => ({ name, body, escapedCharacter })),
+);
+
 // Round 20: braille blank can disguise task syntax without forming a task.
 const brailleBoxRefusals = [
   "-\u2800[x] Check",
@@ -65,6 +76,13 @@ for (const [name, body, kind] of [
 ]) {
   test(`round 19 standalone checker refuses ${name}`, () => {
     assert.equal(hiddenMarkdownReason(body), reason(kind), JSON.stringify(body));
+  });
+}
+
+for (const { name, body } of blankGlyphBoxRefusals) {
+  test(`round 21 ${name} box is refused: ${JSON.stringify(body)}`, () => {
+    assert.equal(hiddenMarkdownReason(body), reason("invisible character"), body);
+    assert.equal(evaluate(body).reason, "invisible characters in the title or body", body);
   });
 }
 

@@ -17,6 +17,11 @@ type HiddenClass =
   | "fence info";
 const refusal = (kind: HiddenClass) => `hidden Markdown in the body: ${kind}`;
 
+// Blank glyphs missed by both \s and Default_Ignorable_Code_Point:
+// U+2800 is braille blank; U+1D159 is a null notehead; U+13441/U+13442
+// are Egyptian full/half blanks. Each occupies space without a visible mark.
+export const BLANK_GLYPHS = /[\u2800\u{1d159}\u{13441}\u{13442}]/u;
+
 // The only permitted ]( is a whole-line screenshot with a determined alt label.
 const SCREENSHOT =
   /^!\[([^\]]*)\]\(https:\/\/github\.com\/user-attachments\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\)$/u;
@@ -477,9 +482,9 @@ function hiddenLineReason(lines: string[]): string | null {
 
 /** Raw-text rules only: code, fences, escapes and containers never exempt their contents. */
 export function hiddenMarkdownReason(body: string): string | null {
-  // JavaScript-only line separators and braille blank can make literal text
+  // JavaScript-only line separators and blank glyphs can make literal text
   // look like a task. Keep this guard even when the caller checks invisible text.
-  if (/[\u2028\u2029\u2800]/u.test(body)) return refusal("invisible character");
+  if (/[\u2028\u2029]/u.test(body) || BLANK_GLYPHS.test(body)) return refusal("invisible character");
   let previousPipe = false;
   let dollars = 0;
   let screenshots = 0;

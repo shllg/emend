@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { Command, CommandTable } from "./command.ts";
 import { gh } from "./github.ts";
-import { hiddenMarkdownReason } from "./markdown.ts";
+import { BLANK_GLYPHS, hiddenMarkdownReason } from "./markdown.ts";
 import { type Registry, readRegistry } from "./registry.ts";
 import { gitTry, type Repo } from "./repo.ts";
 import {
@@ -352,8 +352,9 @@ function hasInvisibleText(text: string): boolean {
       return !keycap && !pictographic(i - 1);
     }
     if (char === "\n" || char === "\t") return false;
+    if (BLANK_GLYPHS.test(char)) return true;
     // biome-ignore lint/suspicious/noMisleadingCharacterClass: these ranges reject individual selectors and tags
-    return /[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Co}\p{Cn}\p{Cc}\u2028\u2029\u2800\u{e0000}-\u{e007f}\ufe00-\ufe0f\u{e0100}-\u{e01ef}]/u.test(
+    return /[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Co}\p{Cn}\p{Cc}\u2028\u2029\u{e0000}-\u{e007f}\ufe00-\ufe0f\u{e0100}-\u{e01ef}]/u.test(
       char,
     );
   });

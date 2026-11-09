@@ -401,6 +401,17 @@ const rawContextRefusals = [
   "> > Note\n2. Step\n   * [ ] Check",
 ];
 
+// Round 21: the other blank glyphs disguise boxes in the same way as braille.
+const blankGlyphBoxRefusals = (
+  [
+    ["Egyptian full blank", "\u{13441}", String.raw`\u{13441}`],
+    ["Egyptian half blank", "\u{13442}", String.raw`\u{13442}`],
+    ["null notehead", "\u{1d159}", String.raw`\u{1d159}`],
+  ] as const
+).flatMap(([name, character, escapedCharacter]) =>
+  [`- ${character}[x] Check`, `- [${character}] Check`].map((body) => ({ name, body, escapedCharacter })),
+);
+
 // Round 20: braille blank can disguise task syntax without forming a task.
 const brailleBoxRefusals = [
   "-\u2800[x] Check",
@@ -595,6 +606,7 @@ const sourceBoxWitnesses = [
 ];
 
 const hostile = [
+  ...blankGlyphBoxRefusals.map(({ body }) => ["invisible character", body, "checker only"] as const),
   ...[...lineSeparatorRefusals.map(([, body]) => body), ...brailleBoxRefusals, ...invisiblePrefixRefusals].map(
     (body) => ["invisible character", body, "checker only"] as const,
   ),
@@ -1627,6 +1639,14 @@ test("each individual rule has a mutation witness", async (t) => {
   // editing its file. Each replacement must name exactly one existing guard.
   const checkerSource = await readFile(new URL("./markdown.ts", import.meta.url), "utf8");
   const mutations = [
+    ...blankGlyphBoxRefusals.map(({ name, body, escapedCharacter }) => ({
+      name: `round 21 ${name} ${JSON.stringify(body)}`,
+      from: escapedCharacter,
+      to: "",
+      body,
+      kind: "invisible character",
+      checkerOnly: true,
+    })),
     ...brailleBoxRefusals.map((body) => ({
       name: `round 20 braille box ${JSON.stringify(body)}`,
       from: String.raw`\u2800`,
@@ -1637,8 +1657,8 @@ test("each individual rule has a mutation witness", async (t) => {
     })),
     ...lineSeparatorRefusals.map(([name, body]) => ({
       name: `round 19 ${name}`,
-      from: String.raw`if (/[\u2028\u2029\u2800]/u.test(body)) return refusal("invisible character");`,
-      to: "",
+      from: String.raw`/[\u2028\u2029]/u.test(body) || BLANK_GLYPHS.test(body)`,
+      to: "false",
       body,
       kind: "invisible character",
       checkerOnly: true,
