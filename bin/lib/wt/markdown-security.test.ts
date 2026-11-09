@@ -30,6 +30,57 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+for (const box of ["- [ ]", "- [x]", "* [ ]", "1. [ ]", "1) [x]"]) {
+  test(`raw Markdown refuses task without text: ${box}`, () => {
+    for (const prefix of ["", "> ", "\t", "- Parent\n  ", "> - Parent\n>   ", "- Parent\n  - Child\n    "]) {
+      for (const suffix of ["", " ", " \t"]) {
+        const body = prefix + box + suffix;
+        assert.equal(evaluate(body).reason, reason("task marker"), JSON.stringify(body));
+      }
+    }
+  });
+}
+
+test("raw Markdown refuses task text that begins on a later line", () => {
+  for (const body of ["- [x]\n~", "- [ ]\n  Later text", "> - [x]\n>   Later text"])
+    assert.equal(evaluate(body).reason, reason("task marker"), body);
+});
+
+for (const [name, body] of [
+  ["nested number retains fence history", "2. Step\n   ```\n   > ```\n   - 3. Nested\n   - [ ] Check\n   ```"],
+  ["nested one cannot end the outer context", "2. Step\n   ```\n   - 3. Nested\n   - 1. Next\n   - [ ] Check\n   ```"],
+  ["quoted box under a later step", "2. Step\n   >     - [ ] Check"],
+  ["padded box under a later step", "2. Step\n   -     [ ] Check"],
+  ["unchecked box without right spacing", "2. Step\n   - [ ]Check"],
+  ["checked box without right spacing", "2. Step\n   - [x]Check"],
+  ["top-level box without right spacing", "- [ ]Check"],
+] as const) {
+  test(`raw Markdown refuses canonical-checklist regression: ${name}`, () => {
+    assert.equal(evaluate(body).reason, reason("task marker"), body);
+  });
+}
+
+test("root fence ignores a quoted apparent closer before a checklist", () => {
+  const body = "```\n> ```\n```\n\n## Steps\n1. First\n2. Second\n   - [ ] Check";
+  assert.equal(evaluate(body).status, "pickable", body);
+});
+
+test("root fence ignores a list-marker apparent closer before a checklist", () => {
+  const body = "```\n- ```\n```\n\n## Steps\n1. First\n2. Second\n   - [ ] Check";
+  assert.equal(evaluate(body).status, "pickable", body);
+});
+
+for (const body of [
+  "2. Step\n    - [ ] a\n        - [ ] b",
+  "104. a\n        - [ ] b",
+  "104. a\n\t\t- [ ] b",
+  "2.    a\n         - [ ] b",
+]) {
+  test(`raw Markdown refuses noncanonical alignment: ${JSON.stringify(body)}`, () => {
+    assert.equal(evaluate(body).reason, reason("task marker"), body);
+  });
+}
+
 // Structural fence rules intentionally refuse these formerly accepted code examples.
 for (const [name, body] of [
   ["fence before blank bullet content", "-\n ```text\n2. a\n   [\n   ] x\n ```"],
@@ -174,8 +225,8 @@ for (const [name, body] of [
   });
 }
 
-test("dedenting a nested block keeps its parent list level", () => {
-  assert.equal(evaluate("2. a\n   - b\n     - c\n     ---\n       - [ ] x").status, "pickable");
+test("a nested checklist needs an immediately preceding canonical parent", () => {
+  assert.equal(evaluate("2. a\n   - b\n     - c\n     ---\n       - [ ] x").reason, reason("task marker"));
 });
 
 for (const boundary of ["## Expected", "---", "  ## Expected", "  * * *", "___"]) {
@@ -197,7 +248,6 @@ for (const [name, body] of [
   ["column-zero JSON fence after numbered items", "1. a\n2. b\n```json\n[\n1\n]\n```"],
   ["column-zero literal split box outside item", "1. a\n2. b\n```text\n[\n] literal\n```"],
   ["three-level checklist under second item", "1. a\n2. Step\n   - [ ] a\n     - [ ] b\n       - [ ] c"],
-  ["checklist child beyond ordered content indentation", "2. Step\n    - [ ] a\n        - [ ] b"],
   ["literal split box after heading boundary", "104. a\n\n## Expected\n\n[\n] literal"],
 ] as const) {
   test(`raw Markdown permits ${name}`, () => {
@@ -260,10 +310,7 @@ for (const [name, body] of [
   ["bug template with checklist after heading", "Steps\n\n1. a\n2. b\n\n## Expected\n\n- [ ] Pending"],
   ["checklist at ordered item content column", "2. a\n   - [ ] b"],
   ["checklist at three-digit item content column", "104. a\n     - [ ] b"],
-  ["checklist three columns beyond item content", "104. a\n        - [ ] b"],
   ["top-level fence after list boundary", "104. a\n\n```text\n- [ ] b\n```"],
-  ["tab-expanded checklist below code indentation", "104. a\n\t\t- [ ] b"],
-  ["checklist after four-column item padding", "2.    a\n         - [ ] b"],
   ["bare code box after heading boundary", "104. a\n\n## Expected\n\n```json\n[\n1\n]\n```"],
   ["literal-one sibling ends earlier numbered item", "2. a\n1. b\n   [\n   ] x"],
 ] as const) {

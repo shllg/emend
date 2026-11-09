@@ -17,6 +17,8 @@
 // remark's tree retains only the numeric start and cannot measure that width.
 // Ordered context is detected even in code; any fence-shaped line in that
 // context makes later boxes fail closed until a structural boundary ends it.
+// Outside literal code, a source marker and box must produce a task item at
+// that source position with the same checked state, not merely visible text.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createRequire, stripTypeScriptTypes } from "node:module";
@@ -114,6 +116,8 @@ function checkCoverage(body: string): void {
   const root: Node = parser.parse(body);
   const omitted: [number, number][] = [];
   const visible: string[] = [];
+  const taskBoxes = new Map<number, boolean>();
+  const codeRanges: [number, number][] = [];
   const screenshotOrdinals = new Map<number, number>();
   let lineOffset = 0;
   for (const line of body.split("\n")) {
@@ -163,6 +167,8 @@ function checkCoverage(body: string): void {
     }
     if (node.type === "code") {
       const raw = source(node);
+      assert.ok(node.position, "code position");
+      codeRanges.push([node.position.start.offset, node.position.end.offset]);
       assert.ok(!node.meta, "code meta must be empty");
       assert.ok(!node.lang || languages.includes(node.lang.toLowerCase()), "code language must be allowlisted");
       if (node.lang) {
@@ -194,19 +200,48 @@ function checkCoverage(body: string): void {
       assert.ok(node.position, "list marker position");
       omitted.push([node.position.start.offset, node.position.start.offset + marker[1].length]);
     }
-    if (node.type === "listItem" && node.checked === true) {
+    if (node.type === "listItem" && typeof node.checked === "boolean") {
       // Continuation lines can retain outer blockquote prefixes in this span.
-      const marker = /^(?:[-+*]|\d{1,9}[.)])[ \t\r\n>]*\[([xX])\]/u.exec(source(node));
-      assert.ok(marker, "checked task marker source");
-      assert.equal(marker[1], "x", "canonical task marker");
-      assert.ok(node.position, "checked task marker position");
-      const start = node.position.start.offset + marker[0].length - 2;
-      visible.push(body.slice(start, start + 1));
+      const marker = /^(?:[-+*]|\d{1,9}[.)])[ \t\r\n>]*\[([ xX])\]/u.exec(source(node));
+      assert.ok(node.position, "task marker position");
+      if (marker) taskBoxes.set(node.position.start.offset + marker[0].length - 3, node.checked);
+      if (node.checked) {
+        assert.ok(marker, "checked task marker source");
+        assert.equal(marker[1], "x", "canonical task marker");
+        const start = node.position.start.offset + marker[0].length - 2;
+        visible.push(body.slice(start, start + 1));
+      }
     }
     if (["text", "inlineCode", "code"].includes(node.type)) visible.push(node.value ?? "");
     for (const [childIndex, child] of (node.children ?? []).entries()) visit(child, node, childIndex);
   }
   visit(root);
+  lineOffset = 0;
+  for (const line of body.split("\n")) {
+    // Scan containers independently of the checker, without overlapping groups.
+    let cursor = 0;
+    let markerStart: number | undefined;
+    while (cursor < line.length) {
+      if (/[ \t>]/u.test(line[cursor] ?? "")) {
+        cursor++;
+        continue;
+      }
+      const marker = /^(?:[-+*]|\d{1,9}[.)])(?=[ \t])/u.exec(line.slice(cursor));
+      if (!marker) break;
+      markerStart = cursor;
+      cursor += marker[0].length;
+    }
+    const box = /^\[([ xX])\]/u.exec(line.slice(cursor));
+    if (box && markerStart !== undefined) {
+      const markerOffset = lineOffset + markerStart;
+      // A marker inside a parsed code span is literal. A list marker whose
+      // *content* becomes code still needs a task at its box's source position.
+      if (!codeRanges.some(([start, end]) => markerOffset >= start && markerOffset < end)) {
+        assert.equal(taskBoxes.get(lineOffset + cursor), box[1] !== " ", "source box must become the same task");
+      }
+    }
+    lineOffset += line.length + 1;
+  }
   omitted.sort(([a], [b]) => a - b);
   let offset = 0;
   const expected: string[] = [];
@@ -228,7 +263,30 @@ const newlyRefusedBodies = [
   "```text\n104. a\n     [\n     ] x\n```",
 ];
 
+const canonicalRefusals = [
+  "2. a\n   - b\n     - c\n     ---\n       - [ ] x",
+  "2. Step\n    - [ ] a\n        - [ ] b",
+  "104. a\n        - [ ] b",
+  "104. a\n\t\t- [ ] b",
+  "2.    a\n         - [ ] b",
+];
+
+// Earlier acceptance withdrawn by the same-line task-text rule.
+const sameLineTextRefusals = ["- [x]\n~"];
+
 const hostile = [
+  ...sameLineTextRefusals.map((body) => ["task marker", body, "checker only"] as const),
+  ...["- [ ]", "- [x]", "* [ ]", "1. [ ]", "1) [x]"].flatMap((box) =>
+    ["", " ", " \t"].map((suffix) => ["task marker", box + suffix] as const),
+  ),
+  ...canonicalRefusals.map((body) => ["task marker", body, "checker only"] as const),
+  ["task marker", "2. Step\n   ```\n   > ```\n   - 3. Nested\n   - [ ] Check\n   ```", "checker only"],
+  ["task marker", "2. Step\n   ```\n   - 3. Nested\n   - 1. Next\n   - [ ] Check\n   ```", "checker only"],
+  ["task marker", "2. Step\n   >     - [ ] Check", "checker only"],
+  ["task marker", "2. Step\n   -     [ ] Check"],
+  ["task marker", "2. Step\n   - [ ]Check"],
+  ["task marker", "2. Step\n   - [x]Check"],
+  ["task marker", "- [ ]Check"],
   ...newlyRefusedBodies.map((body) => ["task marker", body, "checker only"] as const),
   ...[
     "- a\n  ```\n2. a\n   [\n   ] x",
@@ -354,8 +412,8 @@ const hostile = [
   ...["2. Steps\n\n   1h [ ]\n\n   1i [ ]", "- a\n\n  1h [x]\n\nend"].flatMap((body) =>
     [body, body.replaceAll("\n", "\r\n")].map((input) => ["task marker", input, "checker only"] as const),
   ),
-  ["list number", "2. a\n\n   1234567890. [ ]\n\nx", "checker only"],
-  ["list number", "2. a\r\n\r\n   1234567890. [ ]\r\n\r\nx", "checker only"],
+  ["task marker", "2. a\n\n   1234567890. [ ]\n\nx", "checker only"],
+  ["task marker", "2. a\r\n\r\n   1234567890. [ ]\r\n\r\nx", "checker only"],
   ["list number", "- 1234567890.[ ] x", "checker only"],
   ["list number", `- ${"9".repeat(190)}.[ ] x`, "checker only"],
   ["list number", "1. 104101108108111032.[x] x", "checker only"],
@@ -429,6 +487,9 @@ const containerFences = [
 // These owner forms must stay accepted; markdown-security.test.ts also asserts
 // them through issue evaluation. The mixed corpus below retains refusal cases too.
 const ownerBodies = [
+  "1. a\n2. Step\n   - [ ] Parent\n     - [ ] Child",
+  "```\n- ```\n```\n\n## Steps\n1. First\n2. Second\n   - [ ] Check",
+  "```\n> ```\n```\n\n## Steps\n1. First\n2. Second\n   - [ ] Check",
   "1. a\n2. b\n   ```text\n   code\n   ```\n   More text",
   "- [x] path\\name",
   "2. a\n   ```\n   code\n   ```\n## Expected\n- [ ] x",
@@ -443,7 +504,6 @@ const ownerBodies = [
   "1. a\n2.    \n       ## h\n1. c",
   "-\n  text",
   "-    \n  text",
-  "2. a\n   - b\n     - c\n     ---\n       - [ ] x",
   ...["## Expected", "---", "  ## Expected", "  * * *", "___"].map((boundary) => `1. a\n2. b\n${boundary}\n1. c\n2. d`),
   "104. a\n   ## Expected\n1. c\n2. d",
   "104. a\n## Expected\n[\n] literal",
@@ -452,16 +512,12 @@ const ownerBodies = [
   "1. a\n2. b\n```json\n[\n1\n]\n```",
   "1. a\n2. b\n```text\n[\n] literal\n```",
   "1. a\n2. Step\n   - [ ] a\n     - [ ] b\n       - [ ] c",
-  "2. Step\n    - [ ] a\n        - [ ] b",
   "104. a\n\n## Expected\n\n[\n] literal",
   "Steps\n\n1. a\n2. b\n\n## Expected\n\n- [ ] Pending",
   "2. a\n   - [ ] b",
   "104. a\n     - [ ] b",
-  "104. a\n        - [ ] b",
   "104. a\n\n```text\n- [ ] b\n```",
   "104. a\n\n## Expected\n\n```json\n[\n1\n]\n```",
-  "104. a\n\t\t- [ ] b",
-  "2.    a\n         - [ ] b",
   "2. a\n1. b\n   [\n   ] x",
   "> - [ ] Pending",
   "> 1. [x] Done",
@@ -933,6 +989,13 @@ test("coverage oracle detects lost text and unsafe structure independently of th
     checkCoverage(body);
 });
 
+test("source boxes must map to tasks at their own positions", () => {
+  for (const body of ["- [ ]Check", "- [x]Check", "-     [ ] Check", "- [x] Real\n\n- [x]Literal", "> - [ ]Check"])
+    assert.throws(() => checkCoverage(body), /source box must become the same task/u, JSON.stringify(body));
+  for (const body of ["- [ ] Pending\n- [x] Done", "literal [x]", "`[x]`", "```text\n- [x]Literal\n```"])
+    assert.doesNotThrow(() => checkCoverage(body), JSON.stringify(body));
+});
+
 test("owner bodies remain accepted and preserve renderer coverage", () => {
   for (const body of ownerBodies) {
     assert.equal(hiddenMarkdownReason(body), null, JSON.stringify(body));
@@ -950,7 +1013,6 @@ test("container fences retain the bounded info-word allowance even when empty", 
 test("checked task state covers canonical x while literal X remains text", () => {
   for (const body of [
     "- [x] done",
-    "- [x]\n~",
     "> 1. [x] done\n>    - [x] nested",
     "1. [ ] step",
     "- [x] a[x]",
@@ -1003,6 +1065,90 @@ test("each individual rule has a mutation witness", async (t) => {
   const checkerSource = await readFile(new URL("./markdown.ts", import.meta.url), "utf8");
   const mutations = [
     {
+      name: "nested markers retain the outer context",
+      from: "} else if (!orderedItem || markerColumn <= orderedItem.markerColumn) {",
+      to: "} else {",
+      body: "2. Step\n   ```\n   - 3. Nested\n   - 1. Next\n   - [ ] Check\n   ```",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "later siblings retain fence history",
+      from: "orderedItem = {",
+      to: "sawFence = false; orderedItem = {",
+      body: "2. Step\n   ```\n   ```\n3. Next\n   - [ ] Check",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "only canonical checklist syntax in ordered context",
+      from: "!canonicalBox || ",
+      to: "",
+      body: "2. Step\n   -     [ ] Check",
+      kind: "task marker",
+    },
+    {
+      name: "canonical prefix uses spaces only",
+      from: "/^( *)- \\[[ x]\\] \\S/u",
+      to: "/^([ \\t]*)- \\[[ x]\\] \\S/u",
+      body: "2.  Step\n\t- [ ] Check",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "canonical boxes exclude quote containers",
+      from: "/^( *)- \\[[ x]\\] \\S/u",
+      to: "/^([ >]*)- \\[[ x]\\] \\S/u",
+      body: "2. Step\n   > - [ ] Check",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "canonical dash has exactly one space",
+      from: "/^( *)- \\[[ x]\\] \\S/u",
+      to: "/^( *)- +\\[[ x]\\] \\S/u",
+      body: "2. Step\n   -  [ ] Check",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "canonical box needs exactly one space before text",
+      from: "/^( *)- \\[[ x]\\] \\S/u",
+      to: "/^( *)- \\[[ x]\\] +\\S/u",
+      body: "2. Step\n   - [ ]  Check",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "canonical child needs the immediately preceding box",
+      from: "previousBoxColumn = orderedItem && canonicalBox ? indent + 2 : null;",
+      to: "previousBoxColumn = orderedItem && canonicalBox ? indent + 2 : previousBoxColumn;",
+      body: "2. Step\n   - [ ] Parent\nwrapped\n     - [ ] Child",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "box right edge needs whitespace",
+      from: 'if (/\\S/u.test(text[task[0].length] ?? "")) return refusal("task marker");',
+      to: "",
+      body: "- [ ]Check",
+      kind: "task marker",
+    },
+    {
+      name: "task box needs same-line text",
+      from: 'if (!/\\S/u.test(text.slice(task[0].length))) return refusal("task marker");',
+      to: "",
+      body: "- [x]",
+      kind: "task marker",
+    },
+    {
+      name: "root fence ignores container-shaped closers",
+      from: '(fenceHasContainers || /^[ \\t]*$/u.test(fence[1] ?? "")) &&',
+      to: "",
+      body: "```\n> ```\n```\n\n## Steps\n1. First\n2. Second\n   - [ ] Check",
+      kind: null,
+    },
+    {
       name: "ordered markers ignore fence guesses",
       from: "const markerColumn = columns(line.slice(0, marker.index));",
       to: "if (fenceRun) break; const markerColumn = columns(line.slice(0, marker.index));",
@@ -1012,7 +1158,7 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "fence flag survives apparent closers",
-      from: "orderedItem?.sawFence || ",
+      from: "sawFence || ",
       to: "",
       body: "2. a\n   ```\n   code\n   ```\n   - [ ] x",
       kind: "task marker",
@@ -1044,8 +1190,8 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "literal-one sibling ends context",
-      from: "markerColumn <= orderedItem.markerColumn",
-      to: "false",
+      from: "if (orderedItem && markerColumn <= orderedItem.markerColumn)",
+      to: "if (false)",
       body: "2. a\n1. b\n   [\n   ] x",
       kind: null,
     },
@@ -1066,22 +1212,6 @@ test("each individual rule has a mutation witness", async (t) => {
       checkerOnly: true,
     },
     {
-      name: "empty marker content lookahead",
-      from: "([ \\t]+)(?=\\S)/u.exec(line)",
-      to: "([ \\t]+)/u.exec(line)",
-      body: "2. a\n   - \n       - [ ] x",
-      kind: "task marker",
-      checkerOnly: true,
-    },
-    {
-      name: "margin wrap retires nested levels",
-      from: "if (orderedItem && content)",
-      to: "if (orderedItem && content && indent > 0)",
-      body: "2. a\n   - b\nwrapped\n       - [ ] x",
-      kind: "task marker",
-      checkerOnly: true,
-    },
-    {
       name: "blank-start numbering padding",
       from: "blankStart ? 1 : columns(marker[0] + spacing) - markerEnd",
       to: "columns(marker[0] + spacing) - markerEnd",
@@ -1092,7 +1222,7 @@ test("each individual rule has a mutation witness", async (t) => {
       name: "blank-start ordered context padding",
       from: "end === line.length ? 1 : columns(line.slice(0, end)) - markerEnd",
       to: "columns(line.slice(0, end)) - markerEnd",
-      body: "2.    \n   text\n       - [ ] x",
+      body: "2.    \n   text\n      - [ ] x",
       kind: "task marker",
       checkerOnly: true,
     },
@@ -1112,49 +1242,7 @@ test("each individual rule has a mutation witness", async (t) => {
       kind: "list number",
       checkerOnly: true,
     },
-    {
-      name: "only ASCII whitespace is a blank line",
-      from: "if (orderedItem && content)",
-      to: "if (orderedItem && content.trim())",
-      body: "2. a\n   - b\n\n   \u00a0\n       - [ ] x",
-      kind: "task marker",
-      checkerOnly: true,
-    },
-    {
-      name: "retire every ended level",
-      from: "while (indent < (orderedItem.levels.at(-1) ?? 0))",
-      to: "if (indent < (orderedItem.levels.at(-1) ?? 0))",
-      body: "2. a\n   - b\n     - c\n   ---\n       - [ ] x",
-      kind: "task marker",
-      checkerOnly: true,
-    },
-    {
-      name: "retain the open parent level",
-      from: "orderedItem.levels.pop();",
-      to: "orderedItem.levels.length = 0;",
-      body: "2. a\n   - b\n     - c\n     ---\n       - [ ] x",
-      kind: null,
-    },
-    ...[
-      ["thematic break", "2. a\n   - b\n   ---\n       - [ ] x"],
-      ["dedented paragraph", "2. a\n   - b\n\n   text\n       - [ ] x"],
-      ["heading", "2. a\n   - b\n   ## Next\n       - [ ] x"],
-    ].map(([boundary, body]) => ({
-      name: `retire nested level at ${boundary}`,
-      from: "while (indent < (orderedItem.levels.at(-1) ?? 0)) orderedItem.levels.pop();",
-      to: "",
-      body: body as string,
-      kind: "task marker",
-      checkerOnly: true,
-    })),
-    {
-      name: "nested marker needs content",
-      from: String.raw`/^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]+)(?=\S)/u`,
-      to: String.raw`/^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]+|$)/u`,
-      body: "2. a\n   -\n       - [ ] x",
-      kind: "task marker",
-      checkerOnly: true,
-    },
+
     {
       name: "block boundary resets numbering",
       from: "flat && endsList(line, sequenceContentColumn)",
@@ -1183,9 +1271,9 @@ test("each individual rule has a mutation witness", async (t) => {
       body: "104. a\n## Expected\n[\n] literal",
       kind: null,
     },
-    ...["- [ ]", "- [x] done"].map((box) => ({
+    ...["- [ ] done", "- [x] done"].map((box) => ({
       name: `canonical fenced task ${box}`,
-      from: "const fencedContext = orderedItem?.sawFence || fenceRun !== null;",
+      from: "const fencedContext = sawFence || fenceRun !== null;",
       to: "const fencedContext = false;",
       body: `2. a\n   \`\`\`text\n   ${box}\n   \`\`\``,
       kind: "task marker",
@@ -1214,26 +1302,18 @@ test("each individual rule has a mutation witness", async (t) => {
       kind: null,
     },
     {
-      name: "nearest list content column",
-      from: "indent >= (orderedItem.levels.at(-1) ?? orderedItem.contentColumn) + 4",
-      to: "indent >= orderedItem.contentColumn + 4",
+      name: "canonical child follows its parent box column",
+      from: " && indent !== previousBoxColumn",
+      to: "",
       body: "1. a\n2. Step\n   - [ ] a\n     - [ ] b\n       - [ ] c",
       kind: null,
     },
     {
-      name: "list content column advances",
-      from: "orderedItem.levels.push(markerEnd + (padding > 0 && padding <= 4 ? padding : 1));",
-      to: "",
-      body: "2. Step\n    - [ ] a\n        - [ ] b",
+      name: "canonical box establishes child column",
+      from: "previousBoxColumn = orderedItem && canonicalBox ? indent + 2 : null;",
+      to: "previousBoxColumn = null;",
+      body: "2. Step\n   - [ ] a\n     - [ ] b",
       kind: null,
-    },
-    {
-      name: "thematic break is not a list item",
-      from: "!thematicBreak(content)",
-      to: "true",
-      body: "2. a\n   - - -\n        - [ ] c",
-      kind: "task marker",
-      checkerOnly: true,
     },
     {
       name: "long marker-only predecessor",
@@ -1263,7 +1343,7 @@ test("each individual rule has a mutation witness", async (t) => {
       name: "escaped box chain",
       from: 'line.slice(0, boxEnd < 0 ? line.length : boxEnd + 1).includes("\\\\")',
       to: "false",
-      body: "104. a\n     \\- [ ] x",
+      body: "- \\- [ ] x",
       kind: "task marker",
       checkerOnly: true,
     },
@@ -1276,16 +1356,15 @@ test("each individual rule has a mutation witness", async (t) => {
       checkerOnly: true,
     },
     {
-      name: "later indented box",
-      from: " || indent >= (orderedItem.levels.at(-1) ?? orderedItem.contentColumn) + 4",
-      to: "",
+      name: "canonical box needs an authorized column",
+      from: "(indent !== orderedItem.contentColumn && indent !== previousBoxColumn)",
+      to: "false",
       body: "104. a\n         - [ ] x",
       kind: "task marker",
-      checkerOnly: true,
     },
     {
       name: "later fenced box",
-      from: "const fencedContext = orderedItem?.sawFence || fenceRun !== null;",
+      from: "const fencedContext = sawFence || fenceRun !== null;",
       to: "const fencedContext = false;",
       body: "104. a\n     ```text\n     x\n     - [ ] bar\n     ```",
       kind: "task marker",
@@ -1321,7 +1400,7 @@ test("each individual rule has a mutation witness", async (t) => {
       to: "false",
       // The inner literal-one marker is exempt from the cmark scanner; the
       // rendered-text policy still forbids a non-one number earlier in the chain.
-      body: "2. 1. [x] a",
+      body: "2.1. [x] a",
       kind: "list number",
       checkerOnly: true,
     },
