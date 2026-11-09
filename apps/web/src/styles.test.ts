@@ -53,6 +53,11 @@ test("change bars define their base and continuation offsets in the components s
   expect(continuation).toMatch(/\btop:\s*calc\(-1\s*\*\s*var\(--reading-block-gap\)\)\s*;/);
 });
 
+test("changed files keep the unviewed checkbox look", () => {
+  const css = readFileSync(join(webSource, "styles/files.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  expect(css).not.toMatch(/\[data-stale[^\]]*\][^{}]*\.em-viewed-mark__box\b[^{}]*\{/);
+});
+
 test("the reading column grows with the pane up to 1000px on desktop and keeps its phone measure", () => {
   const css = readFileSync(join(webSource, "styles/reading.css"), "utf8");
   expect(/\.em-reading-column\s*\{([^}]+)\}/.exec(css)?.[1]).toMatch(/--reading-max:\s*68ch\s*;/);

@@ -3116,6 +3116,49 @@ test.each([false, true])("viewed mutation collapses optimistically and handles f
   }
 });
 
+test.each(["diff file header", "Files tab"])("stale viewed mark in the %s can be checked once", async (place) => {
+  const fallback = fetchMock.getMockImplementation();
+  let viewed = false;
+  fetchMock.mockImplementation(async (path, init) => {
+    if (path.endsWith("/viewed") && init?.method === "PUT") {
+      viewed = JSON.parse(String(init.body)).viewed === true;
+      return new Response(null, { status: 204 });
+    }
+    if (path.includes("/revisions/"))
+      return Response.json({
+        ...revision,
+        files: [{ ...diffFile, viewed: viewed ? "viewed" : "stale", viewedOn: 1 }],
+      });
+    return fallback?.(path, init) as Promise<Response>;
+  });
+  mount(`/r/${id}${place === "Files tab" ? "?tab=files" : ""}`);
+  await screen.findByRole("tab", { name: "Files 0/1" });
+  const area = within(
+    place === "diff file header"
+      ? await screen.findByRole("region", { name: "File new.txt" })
+      : await screen.findByTestId("reading-pane"),
+  );
+  const toggle = area.getByRole("button", {
+    name: "Viewed in revision 1; this revision differs. Mark new.txt as viewed",
+  });
+  const box = toggle.querySelector(".em-viewed-mark__box");
+  expect(box?.childElementCount).toBe(0);
+  expect(box?.querySelector("svg")).toBeNull();
+  expect(within(toggle).getByText("changed")).toBeTruthy();
+  if (place === "diff file header") expect(within(toggle).getByText("Viewed")).toBeTruthy();
+  fireEvent.click(toggle);
+  await screen.findByRole("tab", { name: "Files 1/1" });
+  expect(area.getByRole("button", { name: "Unmark new.txt as viewed" }).getAttribute("aria-pressed")).toBe("true");
+  expect(fetchMock.mock.calls.filter(([path]) => path.endsWith("/viewed"))).toHaveLength(1);
+  expect(fetchMock).toHaveBeenCalledWith(
+    `/api/v1/reviews/${id}/viewed`,
+    expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({ revision: 1, paths: ["new.txt"], viewed: true }),
+    }),
+  );
+});
+
 test("topic viewed box sends every file in one request and marks them all", async () => {
   const fallback = fetchMock.getMockImplementation();
   const paths = ["new.txt", "second.txt"];

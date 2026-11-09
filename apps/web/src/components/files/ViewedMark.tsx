@@ -1,5 +1,5 @@
 import type { FileView } from "@emend/contract";
-import { Check, History } from "lucide-react";
+import { Check } from "lucide-react";
 import { Icon } from "../ui/Icon.tsx";
 
 export function ViewedMark({
@@ -31,10 +31,11 @@ export function ViewedMark({
       disabled={disabled}
       onClick={onToggle}
     >
+      {stale ? <span className="em-viewed-mark__stale">changed</span> : null}
       <span className="em-viewed-mark__box" aria-hidden="true">
-        {viewed ? <Icon icon={Check} size={11} /> : stale ? <Icon icon={History} size={10} /> : null}
+        {viewed ? <Icon icon={Check} size={11} /> : null}
       </span>
-      {stale ? <span className="em-viewed-mark__stale">changed</span> : showLabel ? <span>Viewed</span> : null}
+      {showLabel ? <span>Viewed</span> : null}
     </button>
   );
 }

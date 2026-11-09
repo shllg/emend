@@ -83,6 +83,14 @@ test("Files groups match diff order, render counts, old-side threads, stale mark
   expect(toggle.hasAttribute("data-stale")).toBe(true);
   expect(toggle.title).toBe(`Viewed in revision 1; this revision differs. Mark ${hostile} as viewed`);
   expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  const box = toggle.querySelector(".em-viewed-mark__box");
+  const unviewed = screen.getByRole("button", { name: "Mark misc.ts as viewed" });
+  expect(box?.childElementCount).toBe(0);
+  expect(box?.querySelector("svg")).toBeNull();
+  expect(box?.className).toBe(unviewed.querySelector(".em-viewed-mark__box")?.className);
+  const hint = within(toggle).getByText("changed");
+  expect(box?.compareDocumentPosition(hint)).toBe(Node.DOCUMENT_POSITION_PRECEDING);
+  expect(within(toggle).queryByText("Viewed")).toBeNull();
   expect(screen.getByText("1 of 3 viewed")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Open diff for misc.ts, modified" })).toBeTruthy();
   expect(screen.getByRole("progressbar").getAttribute("value")).toBe("1");
