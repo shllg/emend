@@ -401,6 +401,21 @@ const rawContextRefusals = [
   "> > Note\n2. Step\n   * [ ] Check",
 ];
 
+// Round 19: JavaScript-only line separators and lone CR cannot bypass the
+// standalone checker. These bodies were accepted before line normalization.
+const lineSeparatorRefusals = [
+  ["braille then LS", "⠀\u2028- [x] Check"],
+  ["braille then PS", "⠀\u2029- [x] Check"],
+  ["text then LS", "a\u2028- [x] Check"],
+  ["nested braille then LS", "- a\n  ⠀\u2028- [x] Check"],
+  ["LS in plain text", "before\u2028after"],
+  ["PS in fenced code", "```text\nbefore\u2029after\n```"],
+] as const;
+const loneCrRefusals = [
+  ["setext task after lone CR", "- [ ] T\r  ---", "task marker"],
+  ["table after lone CR", "a | b\r--- | ---", "table"],
+] as const;
+
 // Round 18b: earlier acceptances withdrawn when the whole task paragraph
 // becomes a heading. The immediate beta/--- case was already refused.
 const setextBoxRefusals = [
@@ -568,6 +583,8 @@ const sourceBoxWitnesses = [
 ];
 
 const hostile = [
+  ...lineSeparatorRefusals.map(([, body]) => ["task marker", body, "checker only"] as const),
+  ...loneCrRefusals.map(([, body, kind]) => [kind, body] as const),
   // Preserve the raw ordered-context guard when an earlier marker was paragraph text.
   ["task marker", "Text\n2) Step\n* 2. Step\n\t  - [x] T"],
   ...[
@@ -1140,6 +1157,8 @@ function generatedBodies(seed = 0x5eedc0de, count = 4_000): string[] {
     "\t",
     "\n",
     "\r\n",
+    "\u2028",
+    "\u2029",
     "\n\n",
     "é",
     "中",
@@ -1594,6 +1613,47 @@ test("each individual rule has a mutation witness", async (t) => {
   // editing its file. Each replacement must name exactly one existing guard.
   const checkerSource = await readFile(new URL("./markdown.ts", import.meta.url), "utf8");
   const mutations = [
+    ...lineSeparatorRefusals.map(([name, body]) => ({
+      name: `round 19 ${name}`,
+      from: String.raw`if (/[\u2028\u2029]/u.test(body)) return refusal("task marker");`,
+      to: "",
+      body,
+      kind: "task marker",
+      checkerOnly: true,
+    })),
+    ...loneCrRefusals.map(([name, body, kind]) => ({
+      name: `round 19 ${name}`,
+      from: String.raw`body.split(/\r\n|[\r\n]/u)`,
+      to: String.raw`body.replaceAll("\r\n", "\n").split("\n")`,
+      body,
+      kind,
+    })),
+    ...(
+      [
+        ["setext task keeps CRLF atomic", "- [ ] T\r\n  ---", "task marker"],
+        ["table keeps CRLF atomic", "| T |\r\n---", "table"],
+      ] as const
+    ).map(([name, body, kind]) => ({
+      name: `round 19 ${name}`,
+      from: String.raw`body.split(/\r\n|[\r\n]/u)`,
+      to: String.raw`body.split(/[\r\n]/u)`,
+      body,
+      kind,
+      // The pipe-free table delimiter is a conservative raw refusal.
+      checkerOnly: kind === "table",
+    })),
+    ...(
+      [
+        ["fenced code strips CRLF", "```ts\r\ncode\r\n```"],
+        ["screenshot strips CRLF", `Before.\r\n${screenshot("Screenshot")}\r\nAfter.`],
+      ] as const
+    ).map(([name, body]) => ({
+      name: `round 19 ${name}`,
+      from: String.raw`body.split(/\r\n|[\r\n]/u)`,
+      to: String.raw`body.split("\n")`,
+      body,
+      kind: null,
+    })),
     {
       name: "setext headings cannot retain source boxes",
       from: 'if (current.paragraph?.setext) return refusal("task marker");',

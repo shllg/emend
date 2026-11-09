@@ -476,10 +476,13 @@ function hiddenLineReason(lines: string[]): string | null {
 
 /** Raw-text rules only: code, fences, escapes and containers never exempt their contents. */
 export function hiddenMarkdownReason(body: string): string | null {
+  // JavaScript treats these as line ends; CommonMark does not. Refuse them
+  // everywhere before line scanning can mistake literal text for a task item.
+  if (/[\u2028\u2029]/u.test(body)) return refusal("task marker");
   let previousPipe = false;
   let dollars = 0;
   let screenshots = 0;
-  const lines = body.replaceAll("\r\n", "\n").split("\n");
+  const lines = body.split(/\r\n|[\r\n]/u);
   for (const line of lines) {
     if ([...line].length > 200) return refusal("line length");
     if (/[ \t]{17}/u.test(line)) return refusal("whitespace run");

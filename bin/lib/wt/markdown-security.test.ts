@@ -30,6 +30,30 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+// Round 19: JavaScript-only line separators and lone CR cannot bypass the
+// standalone checker. These bodies were accepted before line normalization.
+const lineSeparatorRefusals = [
+  ["braille then LS", "⠀\u2028- [x] Check"],
+  ["braille then PS", "⠀\u2029- [x] Check"],
+  ["text then LS", "a\u2028- [x] Check"],
+  ["nested braille then LS", "- a\n  ⠀\u2028- [x] Check"],
+  ["LS in plain text", "before\u2028after"],
+  ["PS in fenced code", "```text\nbefore\u2029after\n```"],
+] as const;
+const loneCrRefusals = [
+  ["setext task after lone CR", "- [ ] T\r  ---", "task marker"],
+  ["table after lone CR", "a | b\r--- | ---", "table"],
+] as const;
+
+for (const [name, body, kind] of [
+  ...lineSeparatorRefusals.map(([name, body]) => [name, body, "task marker"] as const),
+  ...loneCrRefusals,
+]) {
+  test(`round 19 standalone checker refuses ${name}`, () => {
+    assert.equal(hiddenMarkdownReason(body), reason(kind), JSON.stringify(body));
+  });
+}
+
 // Round 18: previously accepted bodies now refused, plus restored acceptances.
 const containerRefusals = [
   "- \n\n    - [x] b",
