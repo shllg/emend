@@ -93,9 +93,16 @@ export function holdDiffTarget(target: HTMLElement): () => void {
   const cancel = () => {
     cancelAnimationFrame(frame);
     stopInput();
+    window.removeEventListener("keydown", onTab);
     if (diffHolds.get(pane) === cancel) diffHolds.delete(pane);
   };
+  const onTab = (event: KeyboardEvent) => {
+    if (event.defaultPrevented || event.key !== "Tab") return;
+    const source = event.target;
+    if (source instanceof Node && (source === document.body || pane.contains(source))) cancel();
+  };
   const stopInput = onReaderInput(pane, cancel);
+  window.addEventListener("keydown", onTab);
   diffHolds.set(pane, cancel);
   scrollDiffTarget(target);
   let lastScrollTop = pane.scrollTop;
@@ -108,8 +115,8 @@ export function holdDiffTarget(target: HTMLElement): () => void {
     }
     const offset = diffTargetOffset(target, pane);
     const shifted = Math.abs(offset - lastOffset) >= 1;
-    // A scroll without a content shift belongs to the reader.
-    if (Math.abs(pane.scrollTop - lastScrollTop) >= 1 && !shifted) {
+    // A scroll without a layout change belongs to the reader.
+    if (Math.abs(pane.scrollTop - lastScrollTop) >= 1 && !shifted && height === pane.scrollHeight) {
       cancel();
       return;
     }

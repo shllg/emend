@@ -850,6 +850,7 @@ function LoadedReview({
                   <ReadingFoldContext value={readingFolds}>
                     {readingTab === "files" ? (
                       <Files
+                        key={`${seq}:files`}
                         reviewId={review.id}
                         visible={paneMode === "split" || tab !== "diff" || !hasDiff}
                         revision={revision}

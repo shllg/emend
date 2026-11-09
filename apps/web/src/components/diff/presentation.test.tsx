@@ -237,6 +237,86 @@ test.each([200, 500])("layout growth with %s px of scroll anchoring keeps the ho
   cancel();
 });
 
+test("clamping after content below the target shrinks keeps the hold", () => {
+  vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"] });
+  const { pane, card, scroll, shift, grow } = scene(600, 3000, 2500, 100);
+  const cancel = holdDiffTarget(card);
+  expect(pane.scrollTop).toBe(2351);
+  grow(-200);
+  pane.scrollTop = pane.scrollHeight - pane.clientHeight;
+  vi.advanceTimersToNextFrame();
+  expect(pane.scrollTop).toBe(2200);
+  expect(vi.getTimerCount()).toBe(1);
+  shift(300);
+  vi.advanceTimersToNextFrame();
+  expect(pane.scrollTop).toBe(2500);
+  expect(scroll).toHaveBeenCalledTimes(2);
+  cancel();
+});
+
+test("growth below the target with scroll anchoring keeps the hold", () => {
+  const { pane, card, scroll, shift, grow } = holdScene();
+  const cancel = holdDiffTarget(card);
+  grow(500);
+  pane.scrollTop += 200;
+  vi.advanceTimersToNextFrame();
+  expect(pane.scrollTop).toBe(1151);
+  expect(scroll).toHaveBeenCalledTimes(2);
+  shift(300);
+  vi.advanceTimersToNextFrame();
+  expect(pane.scrollTop).toBe(1451);
+  expect(scroll).toHaveBeenCalledTimes(3);
+  cancel();
+});
+
+test.each(["pane", "body"].flatMap((from) => [false, true].map((shiftKey) => ({ from, shiftKey }))))(
+  "Tab from $from ends the hold during a layout shift (shift=$shiftKey)",
+  ({ from, shiftKey }) => {
+    const { pane, card, scroll, shift } = holdScene();
+    const input = document.createElement("textarea");
+    pane.append(input);
+    holdDiffTarget(card);
+    fireEvent.keyDown(from === "body" ? document.body : input, { key: "Tab", shiftKey });
+    pane.scrollTop += 200;
+    shift(500);
+    vi.advanceTimersToNextFrame();
+    expect(pane.scrollTop).toBe(1351);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+    shift(300);
+    vi.advanceTimersToNextFrame();
+    expect(pane.scrollTop).toBe(1351);
+    expect(scroll).toHaveBeenCalledTimes(1);
+  },
+);
+
+test.each([false, true])("Tab outside the pane keeps the hold (shift=%s)", (shiftKey) => {
+  const { card, scroll, shift } = holdScene();
+  const other = document.createElement("button");
+  document.body.append(other);
+  const cancel = holdDiffTarget(card);
+  fireEvent.keyDown(other, { key: "Tab", shiftKey });
+  shift(500);
+  vi.advanceTimersToNextFrame();
+  expect(scroll).toHaveBeenCalledTimes(2);
+  expect(scroll).toHaveBeenLastCalledWith({ top: 1651, behavior: "instant" });
+  cancel();
+  other.remove();
+});
+
+test.each([false, true])("a prevented Tab keeps the hold (shift=%s)", (shiftKey) => {
+  const { pane, card, scroll, shift } = holdScene();
+  const cancel = holdDiffTarget(card);
+  const event = new KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true, cancelable: true });
+  event.preventDefault();
+  fireEvent(pane, event);
+  shift(500);
+  vi.advanceTimersToNextFrame();
+  expect(scroll).toHaveBeenCalledTimes(2);
+  expect(scroll).toHaveBeenLastCalledWith({ top: 1651, behavior: "instant" });
+  cancel();
+});
+
 test("focus with preventScroll keeps the hold", () => {
   const { pane, card, scroll, shift } = holdScene();
   const input = document.createElement("textarea");

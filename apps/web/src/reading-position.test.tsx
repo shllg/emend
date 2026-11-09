@@ -973,6 +973,24 @@ test.each(filesLayouts.flatMap((layout) => [0, 150].map((top) => ({ ...layout, t
   },
 );
 
+test.each(filesLayouts)(
+  "Files keeps its offset across a cached revision clamp ($width px, $mode)",
+  async ({ width: nextWidth, mode }) => {
+    width = nextWidth;
+    layoutStore.update({ pane: { desktop: mode, tablet: mode } });
+    client.setQueryData(["revision", id, 2], revisions[2]);
+    const { history } = mount("?tab=files&rev=1");
+    await screen.findByRole("button", { name: /Open diff for seed.txt/ });
+    readerScroll(225);
+    await go(history, "?tab=files&rev=2");
+    expect(pane().scrollTop).toBe(225);
+    pane().scrollTop = 10;
+    fireEvent.scroll(pane());
+    await go(history, "?tab=files&rev=1");
+    expect(pane().scrollTop).toBe(225);
+  },
+);
+
 test.each(filesLayouts.flatMap((layout) => ["gap", "heading"].map((between) => ({ ...layout, between }))))(
   "Writeup, Files, Writeup restores a line in a $between exactly ($width px, $mode)",
   async ({ width: nextWidth, mode, between }) => {
