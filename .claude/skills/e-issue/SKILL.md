@@ -96,11 +96,13 @@ owner's OK.
    only, `- [ ]` and `- [x]`: a bracket group of one to three characters after text with no ASCII
    letter is refused when that text or the group holds any non-ASCII character. Full-width and
    CJK brackets, and symbols other than emoji and arrows, count as brackets, so this also refuses
-   CJK citations such as `参考[1]`, a line that starts with `[…]`, and lines such as `★ 5 ★` or
-   `2 × 3 × 4`. Start list items with ASCII `-`, `*`, `+` or a number: a line that continues a
-   list item or quote and starts with a non-ASCII dash, bullet or symbol and a space is refused.
-   A box glyph such as `☐` after `- ` passes but is not a task GitHub counts. Tell the owner
-   where they were.
+   CJK citations such as `参考[1]`, a line that starts with `[…]`, and lines that start like
+   `★ 5 ★`, `2 × 3 × 4` or `0 ≤ x ≤ 9`; text inside code blocks is exempt, so pasted tables with
+   box-drawing lines are fine there. Start list items with ASCII `-`, `*`, `+` or a number: a
+   line that continues a list item or quote and starts with a non-ASCII dash, punctuation mark or
+   symbol followed by any space is refused, such as `— Author` under a quote or `… more` under a
+   list item. A box glyph such as `☐` after `- ` passes but is not a task GitHub counts. Tell the
+   owner where they were.
 4. Several topics in one input: list them, propose one issue per topic, and ask the owner to
    confirm the split before you go on.
 

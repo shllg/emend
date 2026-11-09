@@ -25,13 +25,37 @@ const refusal = (kind: HiddenClass) => `hidden Markdown in the body: ${kind}`;
 // Each occupies space or has zero width without a visible mark.
 export const BLANK_GLYPHS = /[\u2800\u{1d159}\u{13441}\u{13442}\u{16fe4}]/u;
 const BOX_GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-// B: non-ASCII bracket punctuation or symbols, excluding pictographs and arrows.
-const BRACKET_LIKE = String.raw`(?=\P{ASCII})(?!\p{Extended_Pictographic}|[\u2190-\u21ff\u27f0-\u27ff\u2900-\u297f])[\p{Ps}\p{Pe}\p{Sm}\p{So}]`;
-const LOOK_ALIKE_BOXES = new RegExp(
-  String.raw`(?:\[|${BRACKET_LIKE})((?:(?![\[\]]|${BRACKET_LIKE}).)*)(?:\]|${BRACKET_LIKE})`,
-  "gu",
-);
-const LOOK_ALIKE_LIST_MARKER = new RegExp(String.raw`^(?:${BRACKET_LIKE}|(?=\P{ASCII})[\p{Pd}\p{Po}])[ \t]`, "u");
+// B: non-ASCII bracket punctuation or symbols, excluding emoji and arrows.
+const BRACKET_LIKE = String.raw`(?=\P{ASCII})(?!\p{Extended_Pictographic}|\p{Emoji_Modifier}|[\u2190-\u21ff\u2794-\u27bf\u27f0-\u27ff\u2900-\u297f\u2b00-\u2b0d\u2b30-\u2b4f\u2b5a-\u2b95\u2b98-\u2bb8\uffe9-\uffec\u{1f800}-\u{1f8ff}])[\p{Ps}\p{Pe}\p{Sm}\p{So}\p{Sk}]`;
+const BOX_DELIMITER = new RegExp(String.raw`^(?:[\[\]]|${BRACKET_LIKE})$`, "u");
+const LOOK_ALIKE_LIST_MARKER = new RegExp(String.raw`^(?:${BRACKET_LIKE}|(?=\P{ASCII})[\p{Pd}\p{Po}])\s`, "u");
+
+/** Each opener examines at most three content clusters and one closer. */
+function* lookAlikeGroups(line: string) {
+  const clusters = [...BOX_GRAPHEMES.segment(line)];
+  for (let start = 0; start < clusters.length; start++) {
+    const opener = clusters[start];
+    if (!opener || opener.segment === "]" || !BOX_DELIMITER.test(opener.segment)) continue;
+    const content: string[] = [];
+    for (let end = start + 1; end < clusters.length && end <= start + 4; end++) {
+      const closer = clusters[end];
+      if (!closer) break;
+      if (
+        closer.segment !== "[" &&
+        BOX_DELIMITER.test(closer.segment) &&
+        content.length >= 1 &&
+        !content.includes(opener.segment) &&
+        !content.includes(closer.segment)
+      ) {
+        yield { index: opener.index, 0: line.slice(opener.index, closer.index + closer.segment.length) };
+        break;
+      }
+      // An invalid closer is content. The next opener is still tried, even
+      // when this window reaches its limit without finding a group.
+      content.push(closer.segment);
+    }
+  }
+}
 
 // The only permitted ]( is a whole-line screenshot with a determined alt label.
 const SCREENSHOT =
@@ -158,7 +182,7 @@ function listStarts() {
         cursor = end + marker.length;
         if (line[cursor] === " ") cursor++;
       }
-      return { markers: starts, overIndented, paragraph: scope.paragraph };
+      return { markers: starts, overIndented, paragraph: scope.paragraph, codeContent: true };
     }
     if (!rest) {
       scope.paragraph = null;
@@ -217,13 +241,26 @@ function listStarts() {
     const end = spaceEnd();
     const remaining = line.slice(end);
     const opener = /^(?:`{3,}|~{3,})/u.exec(remaining)?.[0];
+    const codeContent = end - cursor > 3 && !scope.paragraph;
+    let lookAlikeMarker = false;
     if (end - cursor <= 3 && opener) {
       fence = { run: opener, depth: containers.length };
       scope.paragraph = null;
     } else if (!remaining || (end - cursor <= 3 && headingOrBreak(remaining))) scope.paragraph = null;
-    else if (end - cursor <= 3) scope.paragraph ??= { setext: false };
+    else {
+      // Top-level prose has no item or quote whose continuation can be disguised.
+      lookAlikeMarker = containers.length > 0 && !!scope.paragraph && LOOK_ALIKE_LIST_MARKER.test(remaining);
+      if (end - cursor <= 3) scope.paragraph ??= { setext: false };
+    }
     // Indented code opens no paragraph; over-indented paragraph text keeps one.
-    return { markers: starts, overIndented: end - cursor > 3, paragraph: scope.paragraph, paragraphMarker };
+    return {
+      markers: starts,
+      overIndented: end - cursor > 3,
+      paragraph: scope.paragraph,
+      paragraphMarker,
+      codeContent,
+      lookAlikeMarker,
+    };
   };
 }
 
@@ -497,13 +534,11 @@ function hiddenLineReason(lines: string[]): string | null {
   // Preserve earlier refusal reasons. A short bracket group after a prefix
   // without ASCII letters can disguise a task through non-ASCII glyphs in
   // either the prefix or the group, even when the parser sees only text.
-  // Count visible graphemes, including overlays. B symbols can open or close
-  // a group, but cannot occur inside one. ASCII parentheses/braces stay text.
-  for (const line of lines) {
-    for (const box of line.matchAll(LOOK_ALIKE_BOXES)) {
-      const content = box[1] ?? "";
-      const count = [...BOX_GRAPHEMES.segment(content)].length;
-      if (count < 1 || count > 3) continue;
+  // Code blocks show these symbols verbatim. Other raw-text guards above still
+  // apply in code; only this look-alike group scan skips code content.
+  for (const [index, line] of lines.entries()) {
+    if (structure[index]?.codeContent) continue;
+    for (const box of lookAlikeGroups(line)) {
       const prefix = line.slice(0, box.index);
       if (!/[A-Za-z]/u.test(prefix) && /\P{ASCII}/u.test(prefix + box[0])) return refusal("look-alike task box");
       break; // Only the first short group is judged.
@@ -514,7 +549,7 @@ function hiddenLineReason(lines: string[]): string | null {
   return null;
 }
 
-/** Raw-text rules only: code, fences, escapes and containers never exempt their contents. */
+/** Raw-text guards apply in code too, except for the look-alike group scan. */
 export function hiddenMarkdownReason(body: string): string | null {
   // JavaScript-only line separators and blank glyphs can make literal text
   // look like a task. Keep this guard even when the caller checks invisible text.

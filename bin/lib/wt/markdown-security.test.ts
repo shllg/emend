@@ -30,7 +30,74 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
-// Round 24: B symbols bound boxes; only lazy lines can disguise list starts.
+// Round 25: groups try every opener; code contents keep their literal symbols.
+const clusterGroupRefusals = [
+  ["ER1 stars after long group", "- ★12345★x★ Check"],
+  ["ER1 bars after long group", "- │12345│x│ Check"],
+  ["ER1 ASCII long group before stars", "- [12345]★x★ Check"],
+  ["CX1 check inside ASCII box", "- [✓] Check"],
+  ["CX1 multiplication inside ASCII box", "- [×] Check"],
+  ["CX1 double full-width opener", "- ［［x］ Check"],
+  ["CX1 check inside symbol box", "- ⎡✓⎤ Check"],
+  ["Sk box", "- ˗x˗ Check"],
+  ["dotted square remains B", "- ⬚x⬚ Check"],
+  ["accepted cost: inequality", "0 ≤ x ≤ 9"],
+] as const;
+
+// CX3 withdraws the old indented-continuation allowance: it is still paragraph text.
+const continuationMarkerRefusals = [
+  ["ER2 NBSP", "- [ ] Do A\n‐ Do B", "space"],
+  ["ER2 em space", "- [ ] Do A\n‐ Do B", "space"],
+  ["ER2 ideographic space", "- [ ] Do A\n‐　Do B", "space"],
+  ["CX2b modifier minus", "- [ ] Do A\n˗ Do B", "Sk"],
+  ["CX3 continued task", "- [ ] Do A\n  ‐ Do B", "continued"],
+  ["CX3 old round-24 pin", "- one\n  ‐ Do B", "continued"],
+  ["CX3 over-indented paragraph", "- [ ] Do A\n      ‐ Do B", "continued"],
+  ["CX3 quoted continuation", "> - [ ] Do A\n>   ‐ Do B", "continued"],
+  ["ellipsis continuation", "- one\n… more", "lazy"],
+] as const;
+
+// Round 25.1 MS2: root paragraph continuations have no list or quote to disguise.
+const rootParagraphControls = [
+  ["plain prose", "Text\n‐ Do B"],
+  ["prose steps", "Steps:\n– one\n– two"],
+] as const;
+
+const codeGroupControls = [
+  ["MS1 fenced table", "Output:\n\n```\n│ a │ b │\n─────────\n```\n"],
+  ["MS1 indented table", "Output:\n\n    │ a │ b │\n"],
+  ["quoted fenced table", "> ```text\n> │ a │ b │\n> ```"],
+  ["list fenced table", "- Output:\n\n  ```text\n  │ a │ b │\n  ```"],
+  ["quoted indented table", "> Output:\n>\n>     │ a │ b │"],
+] as const;
+
+const round25Controls = [
+  "★★★☆☆",
+  "════════════",
+  "─────────",
+  "👍🏽👍🏽",
+  "[[x]]",
+  "Output:\n\n```\n════════════\n```\n",
+  "Title\n\n════════════\n",
+  "• a • b",
+  "≠",
+  "°",
+  "™",
+  "1 → 2 → 3",
+  "1 ⭢ 2 ⭢ 3",
+  "1 ⮕ 2 ⮕ 3",
+  "1 🡺 2 🡺 3",
+  "1⃣",
+  "1️⃣",
+  "👩🏽‍💻",
+  "🫱🏻‍🫲🏿",
+  "Café 完成",
+  "- [ ] Do A\n  ‐Do B",
+  "- [ ] Do A\n‐Do B",
+  "- one\n🏽 next",
+];
+
+// Round 24 witnesses; round 25 also checks continuations inside their containers.
 const symbolBoxRefusals = [
   ["F1a upper pieces after real task", "- [ ] Do A\n- ⎡ ⎤ Do B"],
   ["F1b upper pieces checked", "- ⎡x⎤ Check"],
@@ -114,7 +181,6 @@ const round24Controls = [
   "- one\n⟶ next",
   "- one\n⤀ next",
   "- one\n\n‐ Do B",
-  "- one\n  ‐ Do B",
   "- one\n‐Do B",
   "- one\n```text\n‐ Do B\n```",
   "1 ⟶ 2 ⟶ 3",
@@ -269,6 +335,35 @@ for (const body of [...brailleBoxRefusals, ...invisiblePrefixRefusals]) {
     assert.equal(evaluate(body).reason, "invisible characters in the title or body", body);
   });
 }
+
+for (const [name, body, kind] of [
+  ...clusterGroupRefusals.map(([name, body]) => [name, body, "look-alike task box"] as const),
+  ...continuationMarkerRefusals.map(([name, body]) => [name, body, "look-alike list marker"] as const),
+]) {
+  test(`round 25 refuses ${name}`, () => {
+    assert.equal(hiddenMarkdownReason(body), reason(kind), body);
+    assert.equal(evaluate(body).reason, reason(kind), body);
+  });
+}
+for (const [name, body] of rootParagraphControls) {
+  test(`round 25.1 MS2 accepts ${name}`, () => {
+    assert.equal(hiddenMarkdownReason(body), null, body);
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+for (const [name, body] of codeGroupControls) {
+  test(`round 25 accepts ${name}`, () => {
+    assert.equal(hiddenMarkdownReason(body), null, body);
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+test("round 25 controls preserve literal symbols and clusters", () => {
+  assert.equal(hiddenMarkdownReason("- ★12345★x★ Check"), reason("look-alike task box"));
+  for (const body of round25Controls) {
+    assert.equal(hiddenMarkdownReason(body), null, body);
+    assert.equal(evaluate(body).status, "pickable", body);
+  }
+});
 
 for (const [name, body, kind] of [
   ...symbolBoxRefusals.map(([name, body]) => [name, body, "look-alike task box"] as const),
