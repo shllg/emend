@@ -25,8 +25,8 @@ const refusal = (kind: HiddenClass) => `hidden Markdown in the body: ${kind}`;
 // Each occupies space or has zero width without a visible mark.
 export const BLANK_GLYPHS = /[\u2800\u{1d159}\u{13441}\u{13442}\u{16fe4}]/u;
 const BOX_GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-// B: non-ASCII bracket punctuation or symbols, excluding emoji and arrows.
-const BRACKET_LIKE = String.raw`(?=\P{ASCII})(?!\p{Extended_Pictographic}|\p{Emoji_Modifier}|[\u2190-\u21ff\u2794-\u27bf\u27f0-\u27ff\u2900-\u297f\u2b00-\u2b0d\u2b0e-\u2b11\u2b30-\u2b4f\u2b5a-\u2b95\u2b98-\u2bb8\u2bec-\u2bef\uffe9-\uffec\u{1f800}-\u{1f8ff}])[\p{Ps}\p{Pe}\p{Sm}\p{So}\p{Sk}]`;
+// B: non-ASCII bracket punctuation or symbols, excluding emoji, regional indicators and arrows.
+const BRACKET_LIKE = String.raw`(?=\P{ASCII})(?!\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|[\u2190-\u21ff\u2794-\u27bf\u27f0-\u27ff\u2900-\u297f\u2b00-\u2b0d\u2b0e-\u2b11\u2b30-\u2b4f\u2b5a-\u2b95\u2b98-\u2bb8\u2bec-\u2bef\uffe9-\uffec\u{1f800}-\u{1f8ff}])[\p{Ps}\p{Pe}\p{Sm}\p{So}\p{Sk}]`;
 const BOX_DELIMITER = new RegExp(String.raw`^(?:[\[\]]|${BRACKET_LIKE})$`, "u");
 // Used only for paragraph continuations inside lists or quotes. Numeric
 // look-alikes need text after their whitespace; bare number markers stay literal.

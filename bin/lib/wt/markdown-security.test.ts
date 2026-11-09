@@ -30,6 +30,9 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+// Regional indicators form flag emoji, not bracket-like symbols.
+const flagControls = ["- 🇩🇪 🇬🇧", "## 🇩🇪 🇬🇧", "> 🇩🇪 🇬🇧", "🇩🇪🇬🇧 switcher", "支持语言：🇨🇳 🇺🇸", "🇩🇪 ✅ 🇬🇧 ❌"];
+
 // Round 26: code-point delimiters cannot disappear into Extend/Prepend clusters.
 const pointDelimiterRefusals = [
   ["ER1 Extend after opener", "- [\u{1f3fb}] x"],
@@ -370,6 +373,12 @@ for (const [name, body, kind] of [
   test(`round 26 refuses ${name}`, () => {
     assert.equal(hiddenMarkdownReason(body), reason(kind), body);
     assert.equal(evaluate(body).reason, reason(kind), body);
+  });
+}
+for (const body of flagControls) {
+  test(`accepts regional-indicator flags: ${body}`, () => {
+    assert.equal(hiddenMarkdownReason(body), null, body);
+    assert.equal(evaluate(body).status, "pickable", body);
   });
 }
 for (const body of round26Controls) {

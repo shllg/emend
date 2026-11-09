@@ -401,6 +401,9 @@ const rawContextRefusals = [
   "> > Note\n2. Step\n   * [ ] Check",
 ];
 
+// Regional indicators form flag emoji, not bracket-like symbols.
+const flagControls = ["- 🇩🇪 🇬🇧", "## 🇩🇪 🇬🇧", "> 🇩🇪 🇬🇧", "🇩🇪🇬🇧 switcher", "支持语言：🇨🇳 🇺🇸", "🇩🇪 ✅ 🇬🇧 ❌"];
+
 // Round 26: code-point delimiters cannot disappear into Extend/Prepend clusters.
 const pointDelimiterRefusals = [
   ["ER1 Extend after opener", "- [\u{1f3fb}] x"],
@@ -1156,6 +1159,7 @@ const containerFences = [
 // These owner forms must stay accepted; markdown-security.test.ts also asserts
 // them through issue evaluation. The mixed corpus below retains refusal cases too.
 const ownerBodies = [
+  ...flagControls,
   ...round26Controls,
   ...rootParagraphControls.map(([, body]) => body),
   ...codeGroupControls.map(([, body]) => body),
@@ -1995,6 +1999,13 @@ test("each individual rule has a mutation witness", async (t) => {
   // editing its file. Each replacement must name exactly one existing guard.
   const checkerSource = await readFile(new URL("./markdown.ts", import.meta.url), "utf8");
   const mutations = [
+    ...flagControls.map((body) => ({
+      name: `regional indicators remain outside B: ${body}`,
+      from: String.raw`\p{Regional_Indicator}|`,
+      to: "",
+      body,
+      kind: null,
+    })),
     ...pointDelimiterRefusals.map(([name, body]) => ({
       name: `round 26 ${name}: round-25 cluster delimiters`,
       from: "Array.from(line.matchAll(/./gu), (match) => ({ point: match[0], index: match.index }))",
@@ -2147,7 +2158,7 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     ...unicodeBracketRefusals.map(([name, body]) => ({
       name: `round 23 Unicode brackets ${name}`,
-      from: String.raw`(?=\P{ASCII})(?!\p{Extended_Pictographic}|\p{Emoji_Modifier}|[\u2190-\u21ff\u2794-\u27bf\u27f0-\u27ff\u2900-\u297f\u2b00-\u2b0d\u2b0e-\u2b11\u2b30-\u2b4f\u2b5a-\u2b95\u2b98-\u2bb8\u2bec-\u2bef\uffe9-\uffec\u{1f800}-\u{1f8ff}])[\p{Ps}\p{Pe}\p{Sm}\p{So}\p{Sk}]`,
+      from: String.raw`(?=\P{ASCII})(?!\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|[\u2190-\u21ff\u2794-\u27bf\u27f0-\u27ff\u2900-\u297f\u2b00-\u2b0d\u2b0e-\u2b11\u2b30-\u2b4f\u2b5a-\u2b95\u2b98-\u2bb8\u2bec-\u2bef\uffe9-\uffec\u{1f800}-\u{1f8ff}])[\p{Ps}\p{Pe}\p{Sm}\p{So}\p{Sk}]`,
       to: "(?!)",
       body,
       kind: "look-alike task box",
