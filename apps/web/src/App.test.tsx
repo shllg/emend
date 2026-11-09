@@ -3145,7 +3145,8 @@ test.each(["diff file header", "Files tab"])("stale viewed mark in the %s can be
   expect(box?.childElementCount).toBe(0);
   expect(box?.querySelector("svg")).toBeNull();
   expect(within(toggle).getByText("changed")).toBeTruthy();
-  if (place === "diff file header") expect(within(toggle).getByText("Viewed")).toBeTruthy();
+  if (place === "diff file header")
+    expect(within(toggle).getByText("Viewed").classList.contains("em-viewed-mark__label")).toBe(true);
   fireEvent.click(toggle);
   await screen.findByRole("tab", { name: "Files 1/1" });
   expect(area.getByRole("button", { name: "Unmark new.txt as viewed" }).getAttribute("aria-pressed")).toBe("true");

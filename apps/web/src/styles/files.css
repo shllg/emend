@@ -160,5 +160,8 @@
     .em-viewed-mark {
       min-width: 40px;
     }
+    .em-viewed-mark[data-stale] .em-viewed-mark__label {
+      display: none;
+    }
   }
 }

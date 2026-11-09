@@ -35,7 +35,7 @@ export function ViewedMark({
       <span className="em-viewed-mark__box" aria-hidden="true">
         {viewed ? <Icon icon={Check} size={11} /> : null}
       </span>
-      {showLabel ? <span>Viewed</span> : null}
+      {showLabel ? <span className="em-viewed-mark__label">Viewed</span> : null}
     </button>
   );
 }
