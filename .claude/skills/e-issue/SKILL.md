@@ -310,7 +310,11 @@ inline code included, and refuses an issue whose body holds anywhere:
   empty box on a line that also holds `[x]` or `[X]`;
 - a line, code blocks included, that starts with digits and one more character before a checkbox,
   also after a list marker or `>`, as in `12 [ ] Pending` or `- 12 [ ] a`, other than `1.` or `1)`
-  and a space; put a word before the digits.
+  and a space; put a word before the digits;
+- a checkbox GitHub shows as text, code or a heading: one indented four or more columns past the
+  item or quote it continues (code blocks included), one with a no-break or other non-ASCII space
+  before its marker, one after an empty list item and a blank line, and one whose paragraph a
+  `===`, `---` or lone `-` line further down turns into a heading.
 
 Other bare URLs, `#12` and `@name` still become links. Wrap lines at about 100 characters. Offer to remove whatever the queue refuses before
 `ready`, write none of it yourself, and write placeholders as plain words (`N`, "the issue number").
