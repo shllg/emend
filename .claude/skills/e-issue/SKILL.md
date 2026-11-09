@@ -173,18 +173,20 @@ blank line and a sentence at the left margin; otherwise use `1.` throughout. A n
 checkbox uses `1.`. Write a checkbox right after its list marker and one space, on one line: `- [ ] text`,
 `- [x] text`. It uses lowercase `[x]`, and an empty box holds one space, never a tab or another space
 character. Never write a box without the space after the marker (`-[x]`), with a backslash anywhere
-in it (`\[x]`, `[x\]`), split over two lines, bare at the start of a line, or with no space or no
-text after its `]`. Inside a list, never wrap a line back to the left margin; continue it at the
-item's text column. Under a numbered item other than `1.`, a checklist is indented with spaces only,
-never quoted, starts at the item's text column, comes before any code block in that item, and a
-nested checkbox's `-` sits under its parent's `[`, never inside a code block. A checklist that must
-follow a code block goes under a list numbered `1.` throughout:
+in it (`\[x]`, `[x\]`), split over two lines, bare at the start of a line, or with anything but one
+plain space and text after its `]`. Inside a list, never wrap a line back to the left margin;
+continue it at the item's text column. Under a numbered item other than `1.`, a checklist is indented
+with spaces only, never quoted, starts at the item's text column, comes before any code block in that
+item and in the items before it in the same list, keeps its lines together with no blank or text line
+between them, and a nested checkbox's `-` sits under its parent's `[`, never inside a code block:
 
 ```text
 2. Step
    - [ ] Parent
      - [ ] Child
 ```
+
+A checklist that must follow a code block goes under a list numbered `1.` throughout.
 
 Never put four or more digits followed by `.` or `)` at the start of a line or right after a list
 marker or `>`; rewrap instead, even for `2025.`.
