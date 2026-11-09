@@ -26,33 +26,48 @@ const refusal = (kind: HiddenClass) => `hidden Markdown in the body: ${kind}`;
 export const BLANK_GLYPHS = /[\u2800\u{1d159}\u{13441}\u{13442}\u{16fe4}]/u;
 const BOX_GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 // B: non-ASCII bracket punctuation or symbols, excluding emoji and arrows.
-const BRACKET_LIKE = String.raw`(?=\P{ASCII})(?!\p{Extended_Pictographic}|\p{Emoji_Modifier}|[\u2190-\u21ff\u2794-\u27bf\u27f0-\u27ff\u2900-\u297f\u2b00-\u2b0d\u2b30-\u2b4f\u2b5a-\u2b95\u2b98-\u2bb8\uffe9-\uffec\u{1f800}-\u{1f8ff}])[\p{Ps}\p{Pe}\p{Sm}\p{So}\p{Sk}]`;
+const BRACKET_LIKE = String.raw`(?=\P{ASCII})(?!\p{Extended_Pictographic}|\p{Emoji_Modifier}|[\u2190-\u21ff\u2794-\u27bf\u27f0-\u27ff\u2900-\u297f\u2b00-\u2b0d\u2b0e-\u2b11\u2b30-\u2b4f\u2b5a-\u2b95\u2b98-\u2bb8\u2bec-\u2bef\uffe9-\uffec\u{1f800}-\u{1f8ff}])[\p{Ps}\p{Pe}\p{Sm}\p{So}\p{Sk}]`;
 const BOX_DELIMITER = new RegExp(String.raw`^(?:[\[\]]|${BRACKET_LIKE})$`, "u");
-const LOOK_ALIKE_LIST_MARKER = new RegExp(String.raw`^(?:${BRACKET_LIKE}|(?=\P{ASCII})[\p{Pd}\p{Po}])\s`, "u");
+// Used only for paragraph continuations inside lists or quotes. Numeric
+// look-alikes need text after their whitespace; bare number markers stay literal.
+const LOOK_ALIKE_LIST_MARKER = new RegExp(
+  String.raw`^(?:(?:${BRACKET_LIKE}|(?=\P{ASCII})[\p{Pd}\p{Po}])\s|(?=\P{ASCII})\p{N}[.)]?\s+(?=\S)|(?:[-*+]|[0-9]{1,9}[.)])(?=\P{ASCII})\s)`,
+  "u",
+);
+const BOX_CONTENT_LIMIT = 3;
 
-/** Each opener examines at most three content clusters and one closer. */
+/** Delimiters are code points; content is independently segmented after each opener. */
 function* lookAlikeGroups(line: string) {
-  const clusters = [...BOX_GRAPHEMES.segment(line)];
-  for (let start = 0; start < clusters.length; start++) {
-    const opener = clusters[start];
-    if (!opener || opener.segment === "]" || !BOX_DELIMITER.test(opener.segment)) continue;
+  const points = Array.from(line.matchAll(/./gu), (match) => ({ point: match[0], index: match.index }));
+  const delimiters = new Set(points.filter(({ point }) => BOX_DELIMITER.test(point)).map(({ index }) => index));
+  for (const opener of points) {
+    // ASCII brackets are oriented on purpose: [ only opens and ] only closes.
+    if (opener.point === "]" || !delimiters.has(opener.index)) continue;
+    const offset = opener.index + opener.point.length;
     const content: string[] = [];
-    for (let end = start + 1; end < clusters.length && end <= start + 4; end++) {
-      const closer = clusters[end];
-      if (!closer) break;
-      if (
-        closer.segment !== "[" &&
-        BOX_DELIMITER.test(closer.segment) &&
-        content.length >= 1 &&
-        !content.includes(opener.segment) &&
-        !content.includes(closer.segment)
-      ) {
-        yield { index: opener.index, 0: line.slice(opener.index, closer.index + closer.segment.length) };
-        break;
+    let found = false;
+    for (const cluster of BOX_GRAPHEMES.segment(line.slice(offset))) {
+      if (content.length > BOX_CONTENT_LIMIT) break;
+      let within = 0;
+      for (const closer of cluster.segment) {
+        if (content.length === BOX_CONTENT_LIMIT && within > 0) break;
+        const end = offset + cluster.index + within;
+        if (closer !== "[" && delimiters.has(end)) {
+          // A Prepend character may share the closer's cluster. Removing that
+          // closer leaves its nonempty prefix as one content cluster.
+          const partial = cluster.segment.slice(0, within);
+          const between = partial ? [...content, partial] : content;
+          if (between.length >= 1 && !between.includes(opener.point) && !between.includes(closer)) {
+            yield { index: opener.index, 0: line.slice(opener.index, end + closer.length) };
+            found = true;
+            break;
+          }
+        }
+        within += closer.length;
       }
-      // An invalid closer is content. The next opener is still tried, even
-      // when this window reaches its limit without finding a group.
-      content.push(closer.segment);
+      if (found) break;
+      // An invalid closer remains content; every later opener is still tried.
+      content.push(cluster.segment);
     }
   }
 }
@@ -541,7 +556,7 @@ function hiddenLineReason(lines: string[]): string | null {
     for (const box of lookAlikeGroups(line)) {
       const prefix = line.slice(0, box.index);
       if (!/[A-Za-z]/u.test(prefix) && /\P{ASCII}/u.test(prefix + box[0])) return refusal("look-alike task box");
-      break; // Only the first short group is judged.
+      break; // Only the first short group is judged, by design: [1] [✓] Check is not a task either.
     }
   }
   // Preserve the earlier refusal reason when a box also disguises a lazy item.

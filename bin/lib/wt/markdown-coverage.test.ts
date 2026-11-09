@@ -401,11 +401,59 @@ const rawContextRefusals = [
   "> > Note\n2. Step\n   * [ ] Check",
 ];
 
+// Round 26: code-point delimiters cannot disappear into Extend/Prepend clusters.
+const pointDelimiterRefusals = [
+  ["ER1 Extend after opener", "- [\u{1f3fb}] x"],
+  ["ER1 Prepend before opener", "- \u0d4e[ ] x"],
+  ["ER1 Prepend before check box", "- \u0d4e[✓] x"],
+  ["ER1 Prepend before closer", "- [ \u0d4e] x"],
+] as const;
+
+const round26MarkerRefusals = [
+  ["ER4 full-width number", "> a\n> １. b", "number"],
+  ["ER4 circled number", "- a\n  ① b", "number"],
+  ["ER4 lazy number", "- a\n１) b", "number"],
+  ["ER4 Arabic-Indic number", "> a\n> ١ b", "number"],
+  ["CX1 lazy hyphen NBSP", "- [ ] Do A\n-\u00a0Do B", "space"],
+  ["CX1 continued star em space", "- a\n  *\u2003b", "space"],
+  ["CX1 quoted plus ideographic space", "> a\n> +\u3000b", "space"],
+  ["CX1 continued ordered dot", "- a\n  1.\u00a0b", "space"],
+  ["CX1 lazy nine-digit ordered parenthesis", "- a\n123456789)\u2003b", "space"],
+] as const;
+
+const round26Costs = ["- (−1, −2)", "20° 25° are warm", "± 1 ± 2", "∑ x ≤ y"];
+const round26Arrows = [
+  ["1 ⬎ 2 ⬎ 3", String.raw`\u2b0e-\u2b11`],
+  ["1 ⯬ 2 ⯬ 3", String.raw`\u2bec-\u2bef`],
+  ["- one\n⯮ next", String.raw`\u2bec-\u2bef`],
+] as const;
+const round26Controls = [
+  ...round26Arrows.map(([body]) => body),
+  "[1] [✓] Check",
+  "- [1] [х] Check",
+  "- ]х[ Check",
+  "- one\n€ 5",
+  "- a\n  ①",
+  "- a\n  ①   ",
+  "> a\n> １.",
+  "> a\n> １.\u00a0",
+  "- a\n１)\t",
+  "- a\n  ①b",
+  "> a\n> １.b",
+  "- a\n١word",
+  "Text\n１. b",
+  "Text\n-\u00a0b",
+  "- a\n1234567890)\u00a0b",
+  "- a\nأكمل ١ خطوة",
+  "Café terminé",
+  "完成步骤",
+];
+
 // Round 25: groups try every opener; code contents keep their literal symbols.
 const clusterGroupRefusals = [
   ["ER1 stars after long group", "- ★12345★x★ Check"],
   ["ER1 bars after long group", "- │12345│x│ Check"],
-  ["ER1 ASCII long group before stars", "- [12345]★x★ Check"],
+  ["retained control: ASCII long group before stars", "- [12345]★x★ Check"],
   ["CX1 check inside ASCII box", "- [✓] Check"],
   ["CX1 multiplication inside ASCII box", "- [×] Check"],
   ["CX1 double full-width opener", "- ［［x］ Check"],
@@ -849,6 +897,10 @@ const sourceBoxWitnesses = [
 ];
 
 const hostile = [
+  ...pointDelimiterRefusals.map(([, body]) => ["look-alike task box", body, "checker only"] as const),
+  ...round26MarkerRefusals.map(([, body]) => ["look-alike list marker", body, "checker only"] as const),
+  ...round26Costs.map((body) => ["look-alike task box", body, "checker only"] as const),
+  ["look-alike task box", "- ]1[ [х] Check", "checker only"],
   ...clusterGroupRefusals.map(([, body]) => ["look-alike task box", body, "checker only"] as const),
   ...continuationMarkerRefusals.map(([, body]) => ["look-alike list marker", body, "checker only"] as const),
   ...symbolBoxRefusals.map(([, body]) => ["look-alike task box", body, "checker only"] as const),
@@ -1104,6 +1156,7 @@ const containerFences = [
 // These owner forms must stay accepted; markdown-security.test.ts also asserts
 // them through issue evaluation. The mixed corpus below retains refusal cases too.
 const ownerBodies = [
+  ...round26Controls,
   ...rootParagraphControls.map(([, body]) => body),
   ...codeGroupControls.map(([, body]) => body),
   ...round25Controls,
@@ -1892,7 +1945,7 @@ test("coverage catches each observable refusal-class mutation", (t) => {
   }
 });
 
-test("round 25 group scanning has a bounded number of steps", async (t) => {
+test("group scanning has a bounded number of steps", async (t) => {
   const source = await readFile(new URL("./markdown.ts", import.meta.url), "utf8");
   const instrument = async (unbounded: boolean) => {
     let changed = source;
@@ -1905,11 +1958,11 @@ test("round 25 group scanning has a bounded number of steps", async (t) => {
       "function* lookAlikeGroups(line: string) {",
       "let openerSteps = 0; let candidateSteps = 0;\nfunction* lookAlikeGroups(line: string) {",
     );
-    const outer = "for (let start = 0; start < clusters.length; start++) {";
-    const inner = "for (let end = start + 1; end < clusters.length && end <= start + 4; end++) {";
+    const outer = "for (const opener of points) {";
+    const inner = "for (const closer of cluster.segment) {";
     replace(outer, `${outer}\n    openerSteps++;`);
     replace(inner, `${inner}\n      candidateSteps++;`);
-    if (unbounded) replace(" && end <= start + 4", "");
+    if (unbounded) replace("const BOX_CONTENT_LIMIT = 3;", "const BOX_CONTENT_LIMIT = Infinity;");
     changed += `
 export function scanGroupSteps(line) {
   openerSteps = 0; candidateSteps = 0;
@@ -1931,7 +1984,7 @@ export function scanGroupSteps(line) {
       assert.ok(result.candidateSteps <= 4 * 200, "at most four candidate visits per opener");
       assert.ok(unbounded.scanGroupSteps(line).candidateSteps > 4 * 200, "removing the window must violate the bound");
       caseTest.diagnostic(
-        `200 clusters: ${result.openerSteps} opener visits, ${result.candidateSteps} candidate visits`,
+        `200 code points: ${result.openerSteps} opener visits, ${result.candidateSteps} candidate visits`,
       );
     });
   }
@@ -1942,6 +1995,47 @@ test("each individual rule has a mutation witness", async (t) => {
   // editing its file. Each replacement must name exactly one existing guard.
   const checkerSource = await readFile(new URL("./markdown.ts", import.meta.url), "utf8");
   const mutations = [
+    ...pointDelimiterRefusals.map(([name, body]) => ({
+      name: `round 26 ${name}: round-25 cluster delimiters`,
+      from: "Array.from(line.matchAll(/./gu), (match) => ({ point: match[0], index: match.index }))",
+      to: "Array.from(BOX_GRAPHEMES.segment(line), ({ segment, index }) => ({ point: segment, index }))",
+      body,
+      kind: "look-alike task box",
+      checkerOnly: true,
+    })),
+    ...round26MarkerRefusals.map(([name, body, rule]) => ({
+      name: `round 26 ${name}`,
+      from:
+        rule === "number"
+          ? String.raw`|(?=\P{ASCII})\p{N}[.)]?\s+(?=\S)`
+          : String.raw`|(?:[-*+]|[0-9]{1,9}[.)])(?=\P{ASCII})\s`,
+      to: "",
+      body,
+      kind: "look-alike list marker",
+      checkerOnly: true,
+    })),
+    ...round26Arrows.map(([body, from]) => ({
+      name: `round 26 CX3 arrow exclusion: ${body}`,
+      from,
+      to: "",
+      body,
+      kind: null,
+    })),
+    ...["[1] [✓] Check", "- [1] [х] Check"].map((body) => ({
+      name: `round 26 ER5 first group by design: ${body}`,
+      from: "break; // Only the first short group is judged, by design: [1] [✓] Check is not a task either.",
+      to: "",
+      body,
+      kind: null,
+    })),
+    {
+      name: "round 26 CX2 reversed ASCII cannot shield a real box",
+      from: 'closer !== "[" && ',
+      to: "",
+      body: "- ]1[ [х] Check",
+      kind: "look-alike task box",
+      checkerOnly: true,
+    },
     ...rootParagraphControls.map(([name, body]) => ({
       name: `round 25.1 MS2 ${name}`,
       from: "containers.length > 0 && !!scope.paragraph",
@@ -1954,16 +2048,16 @@ test("each individual rule has a mutation witness", async (t) => {
       return {
         name: `round 25 group ${name}`,
         from: onlyFirst
-          ? "      content.push(closer.segment);\n    }"
+          ? "      content.push(cluster.segment);\n    }"
           : name.startsWith("CX1")
-            ? "content.push(closer.segment);"
+            ? "within += closer.length;"
             : name === "Sk box"
               ? String.raw`\p{Sk}`
               : String.raw`\p{Sm}\p{So}`,
         to: onlyFirst
-          ? "      content.push(closer.segment);\n    }\n    return;"
+          ? "      content.push(cluster.segment);\n    }\n    return;"
           : name.startsWith("CX1")
-            ? "if (BOX_DELIMITER.test(closer.segment)) { start = end; break; }\n      content.push(closer.segment);"
+            ? "if (delimiters.has(end)) return;\n        within += closer.length;"
             : "",
         body,
         kind: "look-alike task box",
@@ -2008,7 +2102,7 @@ test("each individual rule has a mutation witness", async (t) => {
     })),
     ...["★★★☆☆", "════════════", "─────────"].map((body) => ({
       name: `round 25 delimiter runs stay literal: ${body}`,
-      from: "!content.includes(opener.segment) &&\n        !content.includes(closer.segment)",
+      from: "!between.includes(opener.point) && !between.includes(closer)",
       to: "true",
       body,
       kind: null,
@@ -2032,7 +2126,7 @@ test("each individual rule has a mutation witness", async (t) => {
     })),
     ...["1 → 2 → 3", "1 ⟶ 2 ⟶ 3", "1 ⤀ 2 ⤀ 3"].map((body) => ({
       name: `round 24 arrows stay outside B: ${body}`,
-      from: String.raw`|[\u2190-\u21ff\u2794-\u27bf\u27f0-\u27ff\u2900-\u297f\u2b00-\u2b0d\u2b30-\u2b4f\u2b5a-\u2b95\u2b98-\u2bb8\uffe9-\uffec\u{1f800}-\u{1f8ff}]`,
+      from: String.raw`|[\u2190-\u21ff\u2794-\u27bf\u27f0-\u27ff\u2900-\u297f\u2b00-\u2b0d\u2b0e-\u2b11\u2b30-\u2b4f\u2b5a-\u2b95\u2b98-\u2bb8\u2bec-\u2bef\uffe9-\uffec\u{1f800}-\u{1f8ff}]`,
       to: "",
       body,
       kind: null,
@@ -2053,7 +2147,7 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     ...unicodeBracketRefusals.map(([name, body]) => ({
       name: `round 23 Unicode brackets ${name}`,
-      from: String.raw`(?=\P{ASCII})(?!\p{Extended_Pictographic}|\p{Emoji_Modifier}|[\u2190-\u21ff\u2794-\u27bf\u27f0-\u27ff\u2900-\u297f\u2b00-\u2b0d\u2b30-\u2b4f\u2b5a-\u2b95\u2b98-\u2bb8\uffe9-\uffec\u{1f800}-\u{1f8ff}])[\p{Ps}\p{Pe}\p{Sm}\p{So}\p{Sk}]`,
+      from: String.raw`(?=\P{ASCII})(?!\p{Extended_Pictographic}|\p{Emoji_Modifier}|[\u2190-\u21ff\u2794-\u27bf\u27f0-\u27ff\u2900-\u297f\u2b00-\u2b0d\u2b0e-\u2b11\u2b30-\u2b4f\u2b5a-\u2b95\u2b98-\u2bb8\u2bec-\u2bef\uffe9-\uffec\u{1f800}-\u{1f8ff}])[\p{Ps}\p{Pe}\p{Sm}\p{So}\p{Sk}]`,
       to: "(?!)",
       body,
       kind: "look-alike task box",
@@ -2066,33 +2160,33 @@ test("each individual rule has a mutation witness", async (t) => {
       from:
         points <= 3
           ? String.raw`!/[A-Za-z]/u.test(prefix) && /\P{ASCII}/u.test(prefix + box[0])`
-          : "[...BOX_GRAPHEMES.segment(line)]",
+          : "BOX_GRAPHEMES.segment(line.slice(offset))",
       to:
         points <= 3
           ? "false"
-          : "Array.from(line.matchAll(/./gu), (match) => ({ segment: match[0], index: match.index }))",
+          : "Array.from(line.slice(offset).matchAll(/./gu), (match) => ({ segment: match[0], index: match.index }))",
       body,
       kind: "look-alike task box",
       checkerOnly: true,
     })),
     {
       name: "round 23 only the first short group is judged",
-      from: "break; // Only the first short group is judged.",
+      from: "break; // Only the first short group is judged, by design: [1] [✓] Check is not a task either.",
       to: "",
       body: "- [ ] [х] Check",
       kind: null,
     },
     ...round23Controls.slice(-2).map((body) => ({
       name: `round 23 four graphemes stay outside the bound: ${body}`,
-      from: "end <= start + 4",
-      to: "end <= start + 5",
+      from: "const BOX_CONTENT_LIMIT = 3;",
+      to: "const BOX_CONTENT_LIMIT = 4;",
       body,
       kind: null,
     })),
     {
       name: "round 22 supplementary characters count once",
-      from: "[...BOX_GRAPHEMES.segment(line)]",
-      to: "Array.from(line.matchAll(/./g), (match) => ({ segment: match[0], index: match.index }))",
+      from: "BOX_GRAPHEMES.segment(line.slice(offset))",
+      to: "Array.from(line.slice(offset).matchAll(/./g), (match) => ({ segment: match[0], index: match.index }))",
       body: "- [😀😀] Check",
       kind: "look-alike task box",
       checkerOnly: true,
@@ -2112,8 +2206,8 @@ test("each individual rule has a mutation witness", async (t) => {
       to: "",
       body,
       kind: "invisible character",
-      // W7's filler joins the opening bracket's cluster, so it is not a delimiter.
-      fallbackKind: /^W[79]/u.test(name) ? null : "look-alike task box",
+      // Code-point delimiters still expose W7's box if the blank-glyph guard is removed.
+      fallbackKind: /^W9/u.test(name) ? null : "look-alike task box",
       checkerOnly: true,
     })),
     ...blankGlyphBoxRefusals.map(({ name, body, escapedCharacter }) => ({

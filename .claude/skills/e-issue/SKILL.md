@@ -95,14 +95,16 @@ owner's OK.
    emoji selectors; tag sequences such as subdivision flags are refused. Write task boxes in ASCII
    only, `- [ ]` and `- [x]`: a bracket group of one to three characters after text with no ASCII
    letter is refused when that text or the group holds any non-ASCII character. Full-width and
-   CJK brackets, and symbols other than emoji and arrows, count as brackets, so this also refuses
-   CJK citations such as `参考[1]`, a line that starts with `[…]`, and lines that start like
-   `★ 5 ★`, `2 × 3 × 4` or `0 ≤ x ≤ 9`; text inside code blocks is exempt, so pasted tables with
-   box-drawing lines are fine there. Start list items with ASCII `-`, `*`, `+` or a number: a
-   line that continues a list item or quote and starts with a non-ASCII dash, punctuation mark or
-   symbol followed by any space is refused, such as `— Author` under a quote or `… more` under a
-   list item. A box glyph such as `☐` after `- ` passes but is not a task GitHub counts. Tell the
-   owner where they were.
+   CJK brackets, and math, other and modifier symbols (not currency, emoji or arrows), count as
+   brackets; only the first such group on a line is judged. This also refuses CJK citations such
+   as `参考[1]`, a line that starts with `[…]`, and lines that start like `★ 5 ★`, `2 × 3 × 4`,
+   `0 ≤ x ≤ 9`, `- (−1, −2)` or `20° 25°`; write such math after a word or in ASCII. Text inside
+   code blocks is exempt, so pasted tables with box-drawing lines are fine there. Start list items
+   with ASCII `-`, `*`, `+` or a number, followed by an ASCII space: a line that continues a list
+   item or quote and starts with a non-ASCII dash, punctuation mark, number or symbol followed by
+   any space, or with an ASCII marker followed by a non-ASCII space, is refused, such as
+   `— Author` under a quote, `… more` or `① b` under a list item. A box glyph such as `☐` after
+   `- ` passes but is not a task GitHub counts. Tell the owner where they were.
 4. Several topics in one input: list them, propose one issue per topic, and ask the owner to
    confirm the split before you go on.
 

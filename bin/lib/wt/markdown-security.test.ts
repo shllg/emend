@@ -30,11 +30,59 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+// Round 26: code-point delimiters cannot disappear into Extend/Prepend clusters.
+const pointDelimiterRefusals = [
+  ["ER1 Extend after opener", "- [\u{1f3fb}] x"],
+  ["ER1 Prepend before opener", "- \u0d4e[ ] x"],
+  ["ER1 Prepend before check box", "- \u0d4e[✓] x"],
+  ["ER1 Prepend before closer", "- [ \u0d4e] x"],
+] as const;
+
+const round26MarkerRefusals = [
+  ["ER4 full-width number", "> a\n> １. b", "number"],
+  ["ER4 circled number", "- a\n  ① b", "number"],
+  ["ER4 lazy number", "- a\n１) b", "number"],
+  ["ER4 Arabic-Indic number", "> a\n> ١ b", "number"],
+  ["CX1 lazy hyphen NBSP", "- [ ] Do A\n-\u00a0Do B", "space"],
+  ["CX1 continued star em space", "- a\n  *\u2003b", "space"],
+  ["CX1 quoted plus ideographic space", "> a\n> +\u3000b", "space"],
+  ["CX1 continued ordered dot", "- a\n  1.\u00a0b", "space"],
+  ["CX1 lazy nine-digit ordered parenthesis", "- a\n123456789)\u2003b", "space"],
+] as const;
+
+const round26Costs = ["- (−1, −2)", "20° 25° are warm", "± 1 ± 2", "∑ x ≤ y"];
+const round26Arrows = [
+  ["1 ⬎ 2 ⬎ 3", String.raw`\u2b0e-\u2b11`],
+  ["1 ⯬ 2 ⯬ 3", String.raw`\u2bec-\u2bef`],
+  ["- one\n⯮ next", String.raw`\u2bec-\u2bef`],
+] as const;
+const round26Controls = [
+  ...round26Arrows.map(([body]) => body),
+  "[1] [✓] Check",
+  "- [1] [х] Check",
+  "- ]х[ Check",
+  "- one\n€ 5",
+  "- a\n  ①",
+  "- a\n  ①   ",
+  "> a\n> １.",
+  "> a\n> １.\u00a0",
+  "- a\n１)\t",
+  "- a\n  ①b",
+  "> a\n> １.b",
+  "- a\n١word",
+  "Text\n１. b",
+  "Text\n-\u00a0b",
+  "- a\n1234567890)\u00a0b",
+  "- a\nأكمل ١ خطوة",
+  "Café terminé",
+  "完成步骤",
+];
+
 // Round 25: groups try every opener; code contents keep their literal symbols.
 const clusterGroupRefusals = [
   ["ER1 stars after long group", "- ★12345★x★ Check"],
   ["ER1 bars after long group", "- │12345│x│ Check"],
-  ["ER1 ASCII long group before stars", "- [12345]★x★ Check"],
+  ["retained control: ASCII long group before stars", "- [12345]★x★ Check"],
   ["CX1 check inside ASCII box", "- [✓] Check"],
   ["CX1 multiplication inside ASCII box", "- [×] Check"],
   ["CX1 double full-width opener", "- ［［x］ Check"],
@@ -312,6 +360,24 @@ const loneCrRefusals = [
   ["setext task after lone CR", "- [ ] T\r  ---", "task marker"],
   ["table after lone CR", "a | b\r--- | ---", "table"],
 ] as const;
+
+for (const [name, body, kind] of [
+  ...pointDelimiterRefusals.map(([name, body]) => [name, body, "look-alike task box"] as const),
+  ...round26MarkerRefusals.map(([name, body]) => [name, body, "look-alike list marker"] as const),
+  ...round26Costs.map((body) => [`ER3 accepted cost: ${body}`, body, "look-alike task box"] as const),
+  ["CX2 reversed ASCII cannot shield the box", "- ]1[ [х] Check", "look-alike task box"],
+]) {
+  test(`round 26 refuses ${name}`, () => {
+    assert.equal(hiddenMarkdownReason(body), reason(kind), body);
+    assert.equal(evaluate(body).reason, reason(kind), body);
+  });
+}
+for (const body of round26Controls) {
+  test(`round 26 accepts ${JSON.stringify(body)}`, () => {
+    assert.equal(hiddenMarkdownReason(body), null, body);
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
 
 for (const [name, body, kind] of [
   ...lineSeparatorRefusals.map(([name, body]) => [name, body, "invisible character"] as const),
