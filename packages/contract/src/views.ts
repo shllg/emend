@@ -42,6 +42,7 @@ export const InboxItem = z.object({
   list: ReviewList,
   snoozed: z.boolean(),
   snoozedUntil: z.iso.datetime().nullable(),
+  activeUntil: z.iso.datetime().nullable(),
   releasedAt: z.iso.datetime().nullable(),
   pickedUpAt: z.iso.datetime().nullable(),
   kind: z.enum(["review", "publish"]),

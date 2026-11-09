@@ -116,7 +116,9 @@ export function useLifecycleMutation(reviewId: string) {
 /** Shows an accepted Send or Approve in the cached review and inbox item before the refetch lands. */
 function applyAccepted(client: QueryClient, reviewId: string, kind: "send" | "approve") {
   const change = <T extends InboxItem>(item: T): T =>
-    kind === "approve" ? { ...item, state: "approved", list: "done" } : { ...item, unsentCount: 0, pendingSend: true };
+    kind === "approve"
+      ? { ...item, state: "approved", list: "active", snoozed: false, snoozedUntil: null }
+      : { ...item, unsentCount: 0, pendingSend: true };
   // Only a loaded item changes; anything else in the cache is left to the refetch.
   client.setQueryData<ReviewView>(["review", reviewId], (view) => (view?.id === reviewId ? change(view) : view));
   client.setQueryData<InboxList>(["inbox"], (list) =>

@@ -111,9 +111,13 @@ test("go plus approve sets approval aside and reopens the review", async () => {
   await f.thread();
   await f.send();
   await f.send({ revision: 1, kind: "approve" });
-  expect(await f.review()).toMatchObject({ state: "approved", approvedRevision: f.revisionId });
+  expect(await f.review()).toMatchObject({
+    state: "approved",
+    approvedRevision: f.revisionId,
+    approvedAt: f.deps.now(),
+  });
   expect(await f.take()).toMatchObject({ kind: "go", approvalSetAside: true });
-  expect(await f.review()).toMatchObject({ state: "open", approvedRevision: null });
+  expect(await f.review()).toMatchObject({ state: "open", approvedRevision: null, approvedAt: null });
   expect((await rows()).sends.find((s) => s.kind === "approve")?.setAsideAt).toBeTypeOf("number");
 });
 test("an approval for an older revision is set aside without a delivery", async () => {

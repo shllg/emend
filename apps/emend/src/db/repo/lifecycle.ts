@@ -113,7 +113,7 @@ export function reopenReview(ownerId: string, db: Db, reviewId: string, now: num
   return db.transaction(async (q) => {
     const review = await requireReview(ownerId, q, reviewId);
     if (review.state !== "settled") throw new ApiError("invalid_state");
-    await touch(ownerId, q, reviewId, { state: "open", updatedAt: now });
+    await touch(ownerId, q, reviewId, { state: "open", approvedAt: null, updatedAt: now });
     return (await newestRevision(ownerId, q, reviewId)).seq;
   });
 }

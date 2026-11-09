@@ -92,6 +92,7 @@ export const reviews = sqliteTable(
       .notNull()
       .default("open"),
     approvedRevision: text("approved_revision"),
+    approvedAt: integer("approved_at"),
     movedToUrl: text("moved_to_url"),
     importedAt: integer("imported_at"),
     // A snooze is in effect while snoozed_at is set and snoozed_until is null or in the future.

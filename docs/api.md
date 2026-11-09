@@ -206,10 +206,16 @@ retired review; clients label it "Retired".
 `InboxItem = { id, title, origin: { id, name }, repo: string | null, branch: string | null,
 state: ReviewState, newestRevision, unsentCount, openThreads, agentWaiting, pendingSend,
 updatedAt, movedTo: string | null, list: "active" | "snoozed" | "done", snoozed: boolean,
-snoozedUntil: string | null, releasedAt: string | null, pickedUpAt: string | null,
+snoozedUntil: string | null, activeUntil: string | null, releasedAt: string | null, pickedUpAt: string | null,
 kind: "review" | "publish" }`. `repo` is the repository key, and
-`movedTo` is the review's destination URL. `list` places the review: `done` for `approved` and
-`settled`, `snoozed` for an open review whose snooze is in effect, `active` otherwise.
+`movedTo` is the review's destination URL. `list` places the review: `done` for `settled`, and for
+`approved` once `APPROVED_ACTIVE_HOURS` (12) hours have passed since approval; an approved review
+is `active` until then. An open review is `snoozed` while its snooze is in effect, `active` otherwise.
+`activeUntil` is when an approved review in Active moves to Done; it is null otherwise. A client
+may move the row at that time by its own clock and refetch, since the server sends no event.
+The approval time is recorded when the review is approved; a later comment, reply or Send does
+not move it. A new revision clears it when it reopens the review. A review approved before this
+version or copied in by attach has no approval time and is in Done.
 `snoozed` is true while a snooze is in effect; `snoozedUntil` is its wake time, null for a snooze
 that lasts until the next revision (and null when not snoozed). `releasedAt` is the last time an
 agent confirmed a `closed` answer, so emend ended a wait; it is null when that never happened. Timestamps are ISO 8601 UTC strings; sequences are positive integers.
@@ -236,10 +242,13 @@ period) or an unexpired direct-wait row for the same owner and review. Direct wa
 30-second expiry every 10 seconds and delete their row when they end. They emit no live event;
 views reflect direct writes on their next load.
 
-`GET /api/v1/reviews` returns `InboxList = { items: InboxItem[] }`: the Active list (a review with a
-waiting agent first, then newest activity: `updatedAt`, or the wake time of a timed snooze that has
-passed when that is later), then the Snoozed list (soonest wake first, a snooze
-until the next revision last), then the Done list (newest `updatedAt` first). Review id is the
+`GET /api/v1/reviews` returns `InboxList = { items: InboxItem[] }`: the Active list holds open reviews
+whose snooze is not in effect and reviews approved in the last 12 hours. A review with a waiting
+agent comes first, then newest activity: an open review uses `updatedAt`, or the wake time of a
+timed snooze that has passed when that is later; an approved review sorts by `updatedAt`.
+Next is the Snoozed list (soonest wake first, a snooze until the next revision last), then the Done
+list (retired reviews and approvals at least 12 hours old or with no approval time, newest
+`updatedAt` first). Review id is the
 stable tie breaker in each. At most `inboxItems` (200) rows per list, so at most 600 in all.
 `GET /api/v1/reviews/:id` returns `ReviewView = InboxItem & { revisions: { seq, createdAt }[], importedAt: string | null }`,
 with revisions ascending by sequence. Both are reviewer-only, as is the revision endpoint below.

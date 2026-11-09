@@ -12,5 +12,7 @@ export type RetireRequest = z.infer<typeof RetireRequest>;
 
 /** A snooze may end at most this many days out. */
 export const MAX_SNOOZE_DAYS = 366;
+/** An approved review stays in Active for this many hours after approval. */
+export const APPROVED_ACTIVE_HOURS = 12;
 /** Capabilities feature that announces snooze, retire, reopen and delete. */
 export const REVIEW_LIFECYCLE_FEATURE = "review-lifecycle";

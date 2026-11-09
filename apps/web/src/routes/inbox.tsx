@@ -1,3 +1,4 @@
+import type { InboxItem } from "@emend/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, PanelLeftClose, Search } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -19,6 +20,10 @@ const lists = [
   { list: "snoozed", title: "Snoozed" },
   { list: "done", title: "Done" },
 ] as const;
+
+function effectiveList(review: InboxItem, now: number) {
+  return review.activeUntil !== null && new Date(review.activeUntil).getTime() <= now ? "done" : review.list;
+}
 
 type Kind = "" | "review" | "publish";
 // A per-browser convenience: the inbox unmounts whenever a review opens.
@@ -64,15 +69,17 @@ export function Inbox({
   }, []);
   const items = query.data?.items ?? [];
   const client = useQueryClient();
-  // A timed snooze ends on the server without an event: ask again when one passes. Until the
-  // refetch lands the row says "waking up" instead of a time in the past.
+  // Snoozes and approval windows end without an event: ask again when either time passes.
   useWakeTimer(
-    items.map((review) => review.snoozedUntil),
+    items.flatMap((review) => [review.snoozedUntil, review.activeUntil]),
     (passed) => {
       setNow(Date.now());
       void client.invalidateQueries({ queryKey: ["inbox"] });
       for (const review of items)
-        if (review.snoozedUntil && passed.includes(review.snoozedUntil))
+        if (
+          (review.snoozedUntil && passed.includes(review.snoozedUntil)) ||
+          (review.activeUntil && passed.includes(review.activeUntil))
+        )
           void client.invalidateQueries({ queryKey: ["review", review.id] });
     },
   );
@@ -186,8 +193,8 @@ export function Inbox({
           items.length > 0 &&
           filtered.length > 0 &&
           lists.map(({ list, title }) => {
-            const rows = filtered.filter((review) => review.list === list);
-            const nothingActive = list === "active" && !items.some((review) => review.list === "active");
+            const rows = filtered.filter((review) => effectiveList(review, now) === list);
+            const nothingActive = list === "active" && !items.some((review) => effectiveList(review, now) === "active");
             if (rows.length === 0 && !nothingActive) return null;
             // A filter that matches only Done rows would otherwise show nothing.
             const expanded = list !== "done" || doneOpen || needle !== "";

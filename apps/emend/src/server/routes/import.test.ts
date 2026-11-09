@@ -383,7 +383,15 @@ test("preserves approval records and permits retry after a busy response", async
   );
   expect(saved).toMatchObject({ kind: "approve", revisionId: required(input.revisions[1]).id });
   const view = await (await f.request(`/reviews/${input.review.id}`, "GET")).json();
-  expect(view).toMatchObject({ state: "approved" });
+  expect(view).toMatchObject({ state: "approved", list: "done", activeUntil: null });
+  const imported = await f.db.read((q) =>
+    q
+      .select()
+      .from(tables.reviews)
+      .where(and(eq(tables.reviews.ownerId, f.ownerId), eq(tables.reviews.id, input.review.id)))
+      .get(),
+  );
+  expect(imported?.approvedAt).toBeNull();
 });
 
 test.each(["revision", "send", "delivery", "asset", "writeup", "target", "file size"])(

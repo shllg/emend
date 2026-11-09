@@ -32,6 +32,7 @@ const base: ReviewView = {
   list: "active",
   snoozed: false,
   snoozedUntil: null,
+  activeUntil: null,
   releasedAt: null,
   pickedUpAt: null,
   kind: "review",
@@ -257,7 +258,11 @@ test("the window's refetch joins the Send's own refetch instead of cancelling it
 });
 
 test.each(["Send", "Approve"] as const)("a fetch that started before the accepted %s cannot undo it", async (kind) => {
-  const before = { ...base, unsentCount: kind === "Send" ? 1 : 0 };
+  const before: ReviewView = {
+    ...base,
+    unsentCount: kind === "Send" ? 1 : 0,
+    ...(kind === "Approve" ? { list: "snoozed", snoozed: true, snoozedUntil: "2026-11-05T09:00:00.000Z" } : {}),
+  };
   server = before;
   await mount(<Inbox />);
   mode = "held";
@@ -276,13 +281,24 @@ test.each(["Send", "Approve"] as const)("a fetch that started before the accepte
     fetch.resolve(Response.json(fetch.url === "/api/v1/reviews" ? { items: [before] } : before));
   await settle();
   const accepted = (item: ReviewView | undefined) =>
-    kind === "Send" ? [item?.unsentCount, item?.pendingSend] : [item?.state, item?.list];
-  const expected = kind === "Send" ? [0, true] : ["approved", "done"];
+    kind === "Send"
+      ? [item?.unsentCount, item?.pendingSend]
+      : [item?.state, item?.list, item?.snoozed, item?.snoozedUntil, item?.activeUntil];
+  const expected = kind === "Send" ? [0, true] : ["approved", "active", false, null, null];
   expect(accepted(client.getQueryData<ReviewView>(["review", reviewId]))).toEqual(expected);
   expect(accepted(client.getQueryData<{ items: ReviewView[] }>(["inbox"])?.items[0])).toEqual(expected);
   // The background refetch then brings the server's own data.
   const after =
-    kind === "Send" ? { ...before, unsentCount: 0, pendingSend: true } : { ...before, state: "approved" as const };
+    kind === "Send"
+      ? { ...before, unsentCount: 0, pendingSend: true }
+      : {
+          ...before,
+          state: "approved" as const,
+          list: "active" as const,
+          snoozed: false,
+          snoozedUntil: null,
+          activeUntil: "2026-11-05T21:00:00.000Z",
+        };
   for (const fetch of held.filter((item) => !stale.includes(item)))
     fetch.resolve(Response.json(fetch.url === "/api/v1/reviews" ? { items: [after] } : after));
   await settle();

@@ -77,6 +77,7 @@ const review: ReviewView = {
   list: "active",
   snoozed: false,
   snoozedUntil: null,
+  activeUntil: null,
   releasedAt: null,
   pickedUpAt: null,
   kind: "review",

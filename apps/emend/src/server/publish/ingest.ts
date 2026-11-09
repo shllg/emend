@@ -597,6 +597,7 @@ async function computePublish(
           .set({
             state: "open",
             approvedRevision: null,
+            approvedAt: null,
             snoozedAt: null,
             snoozedUntil: null,
             title: input.title,

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { InboxList, LIMITS, MAX_SNOOZE_DAYS } from "@emend/contract";
+import { APPROVED_ACTIVE_HOURS, InboxList, LIMITS, MAX_SNOOZE_DAYS, ReviewView } from "@emend/contract";
 import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import * as t from "../../db/schema.ts";
@@ -16,6 +16,7 @@ afterEach(async () => {
 });
 
 const day = 86_400_000;
+const approvedWindow = APPROVED_ACTIVE_HOURS * 3_600_000;
 const iso = (ms: number) => new Date(ms).toISOString();
 const row = (id: string) =>
   f.db.read((q) =>
@@ -34,6 +35,23 @@ async function userThread(id: string, body = "Please explain.") {
   const response = await f.request(`/reviews/${id}/threads`, "POST", { revision: 1, target: { kind: "review" }, body });
   expect(response.status).toBe(201);
   return (await response.json()) as { threadId: string; commentId: string };
+}
+
+const stamp = (id: string, updatedAt: number) =>
+  f.db.query((q) =>
+    q
+      .update(t.reviews)
+      .set({ updatedAt })
+      .where(and(eq(t.reviews.ownerId, f.ownerId), eq(t.reviews.id, id))),
+  );
+async function approve(id: string) {
+  expect((await post(id, "sends", { kind: "approve", revision: 1 })).status).toBe(201);
+}
+async function expectBoth(id: string, fields: Partial<ReviewView>) {
+  expect((await inbox()).find((item) => item.id === id)).toMatchObject(fields);
+  const response = await f.request(`/reviews/${id}`, "GET");
+  expect(response.status).toBe(200);
+  expect(ReviewView.parse(await response.json())).toMatchObject(fields);
 }
 
 const routes = [
@@ -123,6 +141,57 @@ test("a snooze ends at its time and on a new revision", async () => {
   expect((await row(reviewId))?.snoozedAt).toBeNull();
 });
 
+test("approval stays Active for exactly 12 hours in the inbox and single-review view", async () => {
+  const { reviewId } = await publishReview(f);
+  await approve(reviewId);
+  const approvedAt = f.deps.now();
+  const active = {
+    state: "approved",
+    list: "active",
+    snoozed: false,
+    activeUntil: iso(approvedAt + approvedWindow),
+  } as const;
+  expect(await row(reviewId)).toMatchObject({ approvedAt });
+  await expectBoth(reviewId, active);
+  f.advance(approvedWindow - 1);
+  await expectBoth(reviewId, active);
+  f.advance(1);
+  await expectBoth(reviewId, { state: "approved", list: "done", snoozed: false, activeUntil: null });
+});
+
+test("later activity does not extend the approval window", async () => {
+  const { reviewId } = await publishReview(f);
+  await approve(reviewId);
+  const approvedAt = f.deps.now();
+  f.advance(3_600_000);
+  await stamp(reviewId, f.deps.now());
+  await expectBoth(reviewId, { list: "active", activeUntil: iso(approvedAt + approvedWindow) });
+  f.advance(approvedWindow - 3_600_000);
+  await expectBoth(reviewId, { list: "done", activeUntil: null });
+  expect(await row(reviewId)).toMatchObject({ approvedAt, updatedAt: approvedAt + 3_600_000 });
+});
+
+test("a new revision clears the approval time and reopens the review", async () => {
+  const { reviewId } = await publishReview(f);
+  await approve(reviewId);
+  expect((await row(reviewId))?.approvedAt).toBe(f.deps.now());
+  await publishReview(f);
+  await expectBoth(reviewId, { state: "open", list: "active", activeUntil: null, newestRevision: 2 });
+  expect(await row(reviewId)).toMatchObject({ approvedRevision: null, approvedAt: null });
+});
+
+test("an approval with no recorded approval time stays in Done", async () => {
+  const { reviewId } = await publishReview(f);
+  await approve(reviewId);
+  await f.db.query((q) =>
+    q
+      .update(t.reviews)
+      .set({ approvedAt: null })
+      .where(and(eq(t.reviews.ownerId, f.ownerId), eq(t.reviews.id, reviewId))),
+  );
+  await expectBoth(reviewId, { state: "approved", list: "done", snoozed: false, activeUntil: null });
+});
+
 test("retire refuses unsent comments unless they are discarded, and does not mark a release", async () => {
   const { reviewId } = await publishReview(f);
   const first = await userThread(reviewId);
@@ -143,7 +212,7 @@ test("retire refuses unsent comments unless they are discarded, and does not mar
   }));
   expect(counts).toEqual({ comments: 0, threads: 0 });
   expect(first.threadId).toBeTruthy();
-  expect(await inbox()).toMatchObject([{ list: "done", state: "settled", releasedAt: null }]);
+  await expectBoth(reviewId, { list: "done", state: "settled", releasedAt: null, activeUntil: null });
 });
 
 test("retire keeps sent comments, accepts no empty body variants but a missing one, and needs an open review", async () => {
@@ -208,8 +277,6 @@ test("the inbox orders Active (waiting first), Snoozed (soonest first, revision 
   const e = await publishReview(f, { key: "5", title: "E" });
   const g = await publishReview(f, { key: "6", title: "G" });
   const h = await publishReview(f, { key: "7", title: "H" });
-  const stamp = (id: string, updatedAt: number) =>
-    f.db.query((q) => q.update(t.reviews).set({ updatedAt }).where(eq(t.reviews.id, id)));
   const now = f.deps.now();
   // Active by update: b newest, then a. Snoozed: c at +2h, d at +1h, e until revision.
   await stamp(a.reviewId, now - 3000);
@@ -239,12 +306,37 @@ test("the inbox orders Active (waiting first), Snoozed (soonest first, revision 
   ]);
 });
 
+test("recent approvals sort by update among open rows, ignoring stale snoozes and keeping waiting agents first", async () => {
+  const a = await publishReview(f, { key: "1", title: "Older open" });
+  const b = await publishReview(f, { key: "2", title: "Newer open" });
+  const c = await publishReview(f, { key: "3", title: "Approved with a snooze" });
+  const d = await publishReview(f, { key: "4", title: "Approved and waiting" });
+  const now = f.deps.now();
+  const until = now + day;
+  expect((await post(c.reviewId, "snooze", { until: iso(until) })).status).toBe(204);
+  await approve(c.reviewId);
+  await approve(d.reviewId);
+  await stamp(a.reviewId, now - 3000);
+  await stamp(b.reviewId, now - 1000);
+  await stamp(c.reviewId, now - 2000);
+  await stamp(d.reviewId, now - 4000);
+  await f.db.query((q) =>
+    q.insert(t.agentWaiters).values({ ownerId: f.ownerId, reviewId: d.reviewId, expiresAt: now + 30_000 }),
+  );
+  expect((await inbox()).map((item) => [item.title, item.list])).toEqual([
+    ["Approved and waiting", "active"],
+    ["Newer open", "active"],
+    ["Approved with a snooze", "active"],
+    ["Older open", "active"],
+  ]);
+  await expectBoth(c.reviewId, { snoozed: false, snoozedUntil: null, activeUntil: iso(now + approvedWindow) });
+  expect(await row(c.reviewId)).toMatchObject({ snoozedUntil: until });
+});
+
 test("an unsnoozed review sorts as updated at the unsnooze, and a passed timed snooze sorts by its wake time", async () => {
   const a = await publishReview(f, { key: "1", title: "A" });
   const b = await publishReview(f, { key: "2", title: "B" });
   const c = await publishReview(f, { key: "3", title: "C" });
-  const stamp = (id: string, updatedAt: number) =>
-    f.db.query((q) => q.update(t.reviews).set({ updatedAt }).where(eq(t.reviews.id, id)));
   const start = f.deps.now();
   await stamp(a.reviewId, start - 5000);
   await stamp(b.reviewId, start - 3000);
@@ -266,7 +358,7 @@ test("the per-list cap applies to each list on its own", async () => {
   const { reviewId } = await publishReview(f);
   const base = await row(reviewId);
   if (!base) throw new Error("missing review");
-  const rows = (state: "open" | "approved", count: number, snoozed: boolean) =>
+  const rows = (state: "open" | "approved", count: number, snoozed: boolean, approvedAt: number | null = null) =>
     Array.from({ length: count }, (_, i) => ({
       id: randomUUID(),
       ownerId: f.ownerId,
@@ -274,11 +366,14 @@ test("the per-list cap applies to each list on its own", async () => {
       reviewKey: randomUUID().replaceAll("-", "").repeat(2),
       title: `${state}-${snoozed}-${i}`,
       state,
+      approvedAt,
       snoozedAt: snoozed ? 1 : null,
       createdAt: 1,
-      updatedAt: 1 + i,
+      updatedAt: (approvedAt ?? 1) + i,
     }));
-  const all = [...rows("open", LIMITS.inboxItems + 5, false), ...rows("approved", 3, false), ...rows("open", 2, true)];
+  const recent = rows("approved", 3, false, f.deps.now());
+  const older = rows("approved", 3, false, f.deps.now() - approvedWindow);
+  const all = [...rows("open", LIMITS.inboxItems + 5, false), ...recent, ...older, ...rows("open", 2, true)];
   await f.db.transaction(async (q) => {
     for (const review of all) {
       await q.insert(t.reviews).values(review);
@@ -296,6 +391,23 @@ test("the per-list cap applies to each list on its own", async () => {
   const items = InboxList.parse(await (await f.request("/reviews", "GET")).json()).items;
   const by = (list: string) => items.filter((item) => item.list === list).length;
   expect([by("active"), by("snoozed"), by("done")]).toEqual([LIMITS.inboxItems, 2, 3]);
+  expect(
+    items
+      .filter((item) => item.list === "active" && item.state === "approved")
+      .map((item) => item.id)
+      .sort(),
+  ).toEqual(recent.map((item) => item.id).sort());
+  expect(
+    items
+      .filter((item) => item.list === "done")
+      .map((item) => item.id)
+      .sort(),
+  ).toEqual(older.map((item) => item.id).sort());
+  f.advance(approvedWindow);
+  const later = InboxList.parse(await (await f.request("/reviews", "GET")).json()).items;
+  expect(later.filter((item) => item.list === "active")).toHaveLength(LIMITS.inboxItems);
+  expect(later.filter((item) => item.list === "active").every((item) => item.state === "open")).toBe(true);
+  expect(later.filter((item) => item.list === "done")).toHaveLength(6);
 });
 
 test("delete removes every row of the review and only the blobs no other review uses", async () => {

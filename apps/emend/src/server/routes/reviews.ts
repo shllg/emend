@@ -1,4 +1,5 @@
 import {
+  APPROVED_ACTIVE_HOURS,
   InboxList,
   LIMITS,
   PublishMeta,
@@ -68,6 +69,8 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, reviewId?: stri
     .groupBy(revisions.reviewId)
     .as("latest");
   const now = deps.now();
+  const approvedWindow = APPROVED_ACTIVE_HOURS * 3_600_000;
+  const cutoff = now - approvedWindow;
   const select = (where: SQL | undefined, order: SQL[], limit: number) =>
     q
       .select({
@@ -86,14 +89,26 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, reviewId?: stri
       .all();
   const asleep = and(isNotNull(reviews.snoozedAt), or(isNull(reviews.snoozedUntil), gt(reviews.snoozedUntil, now)));
   const isOpen = eq(reviews.state, "open");
+  const recentlyApproved = and(
+    eq(reviews.state, "approved"),
+    isNotNull(reviews.approvedAt),
+    gt(reviews.approvedAt, cutoff),
+  );
+  const isDone = or(
+    eq(reviews.state, "settled"),
+    and(eq(reviews.state, "approved"), or(isNull(reviews.approvedAt), lte(reviews.approvedAt, cutoff))),
+  );
   // The cap applies to each list: Active and Done by update, Snoozed by wake time.
   const rows =
     reviewId === undefined
       ? [
-          // A timed snooze that has passed counts as an update at its wake time.
+          // Only open reviews count a passed timed snooze as an update at its wake time.
           ...(await select(
-            and(isOpen, not(asleep as SQL)),
-            [sql`max(${reviews.updatedAt}, coalesce(${reviews.snoozedUntil}, 0)) desc`, asc(reviews.id)],
+            or(and(isOpen, not(asleep as SQL)), recentlyApproved),
+            [
+              sql`case when ${isOpen} then max(${reviews.updatedAt}, coalesce(${reviews.snoozedUntil}, 0)) else ${reviews.updatedAt} end desc`,
+              asc(reviews.id),
+            ],
             LIMITS.inboxItems,
           )),
           ...(await select(
@@ -101,7 +116,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, reviewId?: stri
             [asc(sql`${reviews.snoozedUntil} is null`), asc(reviews.snoozedUntil), asc(reviews.id)],
             LIMITS.inboxItems,
           )),
-          ...(await select(ne(reviews.state, "open"), [desc(reviews.updatedAt), asc(reviews.id)], LIMITS.inboxItems)),
+          ...(await select(isDone, [desc(reviews.updatedAt), asc(reviews.id)], LIMITS.inboxItems)),
         ]
       : await select(eq(reviews.id, reviewId), [asc(reviews.id)], 1);
   if (!rows.length) return [];
@@ -198,6 +213,10 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, reviewId?: stri
   const waitingIds = new Set(directWaits.map((row) => row.reviewId));
   const items = rows.map(({ review, origin, repo, newestRevision }) => {
     const snoozed = review.state === "open" && snoozeInEffect(review, now);
+    const activeUntil =
+      review.state === "approved" && review.approvedAt !== null && review.approvedAt > cutoff
+        ? new Date(review.approvedAt + approvedWindow).toISOString()
+        : null;
     return {
       id: review.id,
       title: review.title,
@@ -213,8 +232,14 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, reviewId?: stri
       updatedAt: new Date(review.updatedAt).toISOString(),
       movedTo: review.movedToUrl,
       importedAt: review.importedAt === null ? null : new Date(review.importedAt).toISOString(),
-      list: review.state !== "open" ? ("done" as const) : snoozed ? ("snoozed" as const) : ("active" as const),
+      list:
+        review.state === "settled" || (review.state === "approved" && activeUntil === null)
+          ? ("done" as const)
+          : snoozed
+            ? ("snoozed" as const)
+            : ("active" as const),
       snoozed,
+      activeUntil,
       snoozedUntil: snoozed && review.snoozedUntil !== null ? new Date(review.snoozedUntil).toISOString() : null,
       releasedAt: review.releasedAt === null ? null : new Date(review.releasedAt).toISOString(),
       kind: publishIds.has(review.id) ? ("publish" as const) : ("review" as const),

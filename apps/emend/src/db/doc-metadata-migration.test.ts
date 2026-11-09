@@ -37,7 +37,7 @@ test("doc metadata migration preserves existing files and leaves their metadata 
         sql`INSERT INTO files (id,owner_id,revision_id,path,role,ord,media_type) VALUES (${file},${owner},${revision},'doc.md','doc',0,'text/markdown')`,
       );
     });
-    expect(await migrate(db)).toBe(1);
+    expect(await migrate(db)).toBe(MIGRATIONS.filter((m) => m.tag >= "0012").length);
     expect(await migrate(db)).toBe(0);
     expect(
       await db.read((q) =>

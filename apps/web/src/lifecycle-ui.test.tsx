@@ -4,6 +4,7 @@ import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
+import { doneDimmed } from "./components/inbox/ReviewRow.tsx";
 import { defaultLayout, layoutStore } from "./lib/layout-store.ts";
 import { wakeTime } from "./lib/time.ts";
 import { Events } from "./test/events.ts";
@@ -27,6 +28,7 @@ const item: InboxItem = {
   list: "active",
   snoozed: false,
   snoozedUntil: null,
+  activeUntil: null,
   releasedAt: null,
   pickedUpAt: null,
   kind: "review",
@@ -97,12 +99,40 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  client.clear();
   vi.useRealTimers();
 });
 
 function mount(path = "/") {
   const history = createMemoryHistory({ initialEntries: [path] });
   return { ...render(<App queryClient={client} history={history} />), history };
+}
+async function tick(ms = 0) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
+async function mountTimed(path = "/") {
+  await act(async () => {
+    mount(path);
+  });
+  await tick();
+}
+function fixedClock() {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-11-04T12:00:00.000Z"));
+}
+function recentApproval(): InboxItem {
+  return {
+    ...item,
+    title: "Recently approved",
+    state: "approved",
+    list: "active",
+    activeUntil: new Date(Date.now() + 2 * 3_600_000).toISOString(),
+  };
+}
+function expectDimmed(link: HTMLElement) {
+  for (const name of doneDimmed.split(" ")) expect(link.classList.contains(name)).toBe(true);
 }
 function row(title: string) {
   return screen.getByRole("link", { name: new RegExp(title) });
@@ -172,6 +202,66 @@ test("done rows are dimmed until hover or focus; active and snoozed rows keep fu
     expect(row(title).className).not.toContain("opacity-");
 });
 
+test.each([390, 1280])(
+  "an approved review stays under Active with its badge and Done dimming at %s px",
+  async (size) => {
+    fixedClock();
+    width = size;
+    inbox = [recentApproval(), { ...item, id: other(1), title: "Retired review", state: "settled", list: "done" }];
+    await mountTimed();
+    const active = within(screen.getByRole("region", { name: "Active" }));
+    const approved = active.getByRole("link", { name: /Recently approved/ });
+    expect(within(approved).getByText("Approved")).toBeTruthy();
+    expectDimmed(approved);
+    fireEvent.click(screen.getByRole("button", { name: /Done/ }));
+    expectDimmed(row("Retired review"));
+  },
+);
+
+test("the collapsed inbox rail dims a recent approval like a Done row", async () => {
+  fixedClock();
+  inbox = [
+    { ...recentApproval(), id: other(1) },
+    { ...item, id: other(2), title: "Retired review", state: "settled", list: "done" },
+    item,
+  ];
+  await mountTimed(`/r/${id}`);
+  fireEvent.click(screen.getByRole("button", { name: "Collapse inbox" }));
+  const rail = within(screen.getByRole("complementary", { name: "Inbox" }));
+  expectDimmed(rail.getByRole("link", { name: "Recently approved" }));
+  expectDimmed(rail.getByRole("link", { name: "Retired review" }));
+  expect(rail.getByRole("link", { name: item.title }).className).not.toContain("opacity-");
+});
+
+test.each(["done", "active"] as const)(
+  "an approval expires on an open inbox even when the refetch returns %s",
+  async (serverList) => {
+    fixedClock();
+    const approved = recentApproval();
+    inbox = [approved];
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    await mountTimed();
+    expect(
+      within(screen.getByRole("region", { name: "Active" })).getByRole("link", { name: /Recently approved/ }),
+    ).toBeTruthy();
+    const inboxCalls = () => fetchMock.mock.calls.filter(([path]) => path === "/api/v1/reviews").length;
+    const before = inboxCalls();
+    // A server behind the browser may still return Active and the same expiry.
+    inbox = [{ ...approved, list: serverList, activeUntil: serverList === "done" ? null : approved.activeUntil }];
+    await tick(2 * 3_600_000 + 500);
+    await tick();
+    expect(inboxCalls()).toBe(before + 1);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["inbox"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["review", id] });
+    expect(screen.getByText("No active reviews.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Done 1" }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("link", { name: /Recently approved/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Done 1" }));
+    const done = within(screen.getByRole("region", { name: "Done" }));
+    expect(done.getByRole("link", { name: /Recently approved/ })).toBeTruthy();
+  },
+);
+
 test("a non-empty filter shows Done expanded under a plain heading; clearing it restores the reader's choice", async () => {
   inbox = inboxItems();
   mount();
@@ -209,19 +299,21 @@ test("the review header says waking up for a snooze that has passed", async () =
 });
 
 test("a timed snooze that ends while the inbox is open refetches the inbox and the row moves to Active", async () => {
-  const wake = new Date(Date.now() + 700).toISOString();
+  fixedClock();
+  const wake = new Date(Date.now() + 3_600_000).toISOString();
   inbox = [{ ...item, id: other(1), title: "About to wake", list: "snoozed", snoozed: true, snoozedUntil: wake }];
-  mount();
-  const row = await screen.findByRole("link", { name: /About to wake/ });
-  expect(within(row).getByText(/^until /)).toBeTruthy();
+  await mountTimed();
+  expect(within(row("About to wake")).getByText(/^until /)).toBeTruthy();
   const inboxCalls = () => fetchMock.mock.calls.filter(([path]) => path === "/api/v1/reviews").length;
   const before = inboxCalls();
+  const invalidate = vi.spyOn(client, "invalidateQueries");
   // The server ends the snooze by the clock alone and sends no event.
   inbox = [{ ...item, id: other(1), title: "About to wake", list: "active" }];
-  await waitFor(() => expect(inboxCalls()).toBeGreaterThan(before));
-  await waitFor(() =>
-    expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Active1"]),
-  );
+  await tick(3_600_000 + 500);
+  await tick();
+  expect(inboxCalls()).toBe(before + 1);
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: ["review", other(1)] });
+  expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Active1"]);
 });
 
 test("snoozed rows do not count as needing you", async () => {

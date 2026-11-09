@@ -162,6 +162,7 @@ export async function importReview(principal: Principal, bundle: ImportBundle, d
           ownerId,
           repoId,
           approvedRevision: null,
+          approvedAt: null,
           movedToUrl: null,
           importedAt: deps.now(),
           createdAt: at(bundle.review.createdAt),

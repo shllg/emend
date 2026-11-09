@@ -6,7 +6,7 @@ import { OriginBadge } from "../status/OriginBadge.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Tooltip } from "../ui/Tooltip.tsx";
 import { cn } from "../ui/utils.ts";
-import { doneDimmed, needsAttention } from "./ReviewRow.tsx";
+import { doneDimmed, looksDone, needsAttention } from "./ReviewRow.tsx";
 
 export function InboxRail({ onShow }: { onShow: () => void }) {
   // The collapsed rail ignores kind and machine filters; the expanded inbox applies its kind choice.
@@ -33,7 +33,7 @@ export function InboxRail({ onShow }: { onShow: () => void }) {
                     activeProps={{ "aria-current": "page" }}
                     className={cn(
                       "relative grid h-8 w-9 place-items-center rounded-[6px] no-underline hover:bg-hover aria-[current=page]:bg-selected [&>span[role=img]]:size-2.5",
-                      review.list === "done" && doneDimmed,
+                      looksDone(review) && doneDimmed,
                     )}
                   >
                     <OriginBadge origin={review.origin} dot />

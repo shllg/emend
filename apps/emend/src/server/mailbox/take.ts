@@ -22,7 +22,7 @@ async function reopen(ownerId: string, q: Queries, reviewId: string, now: number
   if (!approvedRevisions.length) return;
   await q
     .update(reviews)
-    .set({ state: "open", approvedRevision: null, updatedAt: now })
+    .set({ state: "open", approvedRevision: null, approvedAt: null, updatedAt: now })
     .where(
       and(eq(reviews.ownerId, ownerId), eq(reviews.id, reviewId), inArray(reviews.approvedRevision, approvedRevisions)),
     );

@@ -79,7 +79,7 @@ export function createSend(ownerId: string, db: Db, reviewId: string, request: S
     } else {
       await q
         .update(reviews)
-        .set({ state: "approved", approvedRevision: newest.id, updatedAt: now })
+        .set({ state: "approved", approvedRevision: newest.id, approvedAt: now, updatedAt: now })
         .where(and(eq(reviews.ownerId, ownerId), eq(reviews.id, reviewId)));
     }
     return { reviewId, revision: newest.seq, sendId };

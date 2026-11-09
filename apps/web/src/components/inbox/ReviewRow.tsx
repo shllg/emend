@@ -9,8 +9,12 @@ import { StateBadge } from "../status/StateBadge.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { cn } from "../ui/utils.ts";
 
-/** Done reviews need no work: dim them until the reviewer points at or focuses one. */
+/** Approved and Done reviews need no work: dim them until the reviewer points at or focuses one. */
 export const doneDimmed = "opacity-60 hover:opacity-100 focus-within:opacity-100 aria-[current=page]:opacity-100";
+
+export function looksDone(review: InboxItem) {
+  return review.list === "done" || review.state === "approved";
+}
 
 export function needsAttention(review: InboxItem) {
   return (
@@ -138,7 +142,7 @@ export function ReviewRow({
           className={cn(
             className,
             "hover:bg-hover hover:text-fg-2 aria-[current=page]:bg-active",
-            review.list === "done" && doneDimmed,
+            looksDone(review) && doneDimmed,
           )}
         >
           {contents}

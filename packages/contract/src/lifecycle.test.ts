@@ -32,6 +32,7 @@ const item = {
   list: "active",
   snoozed: false,
   snoozedUntil: null,
+  activeUntil: null,
   releasedAt: null,
   pickedUpAt: null,
   kind: "review",
@@ -78,10 +79,17 @@ test("the inbox item carries its list, snooze and release fields", () => {
   const snoozed = { ...item, list: "snoozed", snoozed: true, snoozedUntil: "2026-11-05T09:00:00.000Z" };
   expect(InboxItem.parse(snoozed)).toEqual(snoozed);
   expect(InboxItem.safeParse({ ...item, list: "pinned" }).success).toBe(false);
-  for (const field of ["list", "snoozed", "snoozedUntil", "releasedAt"]) {
+  for (const field of ["list", "snoozed", "snoozedUntil", "activeUntil", "releasedAt"]) {
     const { [field]: _, ...rest } = item as Record<string, unknown>;
     expect(InboxItem.safeParse(rest).success).toBe(false);
   }
+});
+
+test("activeUntil is a required nullable ISO datetime", () => {
+  for (const activeUntil of [null, "2026-11-05T09:00:00.000Z"])
+    expect(InboxItem.parse({ ...item, activeUntil }).activeUntil).toBe(activeUntil);
+  for (const activeUntil of [undefined, "tomorrow", "2026-11-05", 0])
+    expect(InboxItem.safeParse({ ...item, activeUntil }).success).toBe(false);
 });
 
 test("the inbox cap applies per list", () => {

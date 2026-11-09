@@ -204,5 +204,13 @@ export const MIGRATIONS: readonly { tag: string; when: number; hash: string; sta
       "ALTER TABLE `files` ADD `title` text;",
       "ALTER TABLE `files` ADD `headings` text;"
     ]
+  },
+  {
+    "tag": "0013_green_rachel_grey",
+    "when": 1794243862769,
+    "hash": "20bbd8e25532c7a7a01579028d736c3c2b7a9baf9c1dc2afb3a73b133fcea2c6",
+    "statements": [
+      "ALTER TABLE `reviews` ADD `approved_at` integer;"
+    ]
   }
 ];

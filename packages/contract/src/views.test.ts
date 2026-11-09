@@ -22,6 +22,7 @@ test("review views validate their states, limits, rendered blocks and doc varian
     list: "active",
     snoozed: false,
     snoozedUntil: null,
+    activeUntil: null,
     releasedAt: null,
     pickedUpAt: null,
     kind: "review",
