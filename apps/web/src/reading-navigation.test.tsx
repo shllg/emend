@@ -11,6 +11,7 @@ import { type Element as BridgeElement, Window as BridgeWindow } from "happy-dom
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, onTestFinished, test, vi } from "vitest";
 import { App } from "./App.tsx";
+import type { InboxData } from "./api/queries.ts";
 import type { DiffPaneProps } from "./components/diff/DiffPane.tsx";
 import type { ParsedDiff } from "./components/diff/FileDiff.tsx";
 import { parsePair } from "./components/diff/parse.worker.ts";
@@ -170,7 +171,8 @@ beforeEach(() => {
       if (path === `/api/v1/reviews/${id}/threads` && init?.method === "POST")
         return Response.json({ threadId: id, commentId: id }, { status: 201 });
       if (path === "/api/v1/session") return new Response(null, { status: 204 });
-      if (path === "/api/v1/reviews") return Response.json({ items: [review] });
+      if (path === "/api/v1/reviews")
+        return Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [review] });
       if (path === `/api/v1/reviews/${id}`) return Response.json(currentReview);
       if (path === `/api/v1/reviews/${id}/revisions/1`) return revisionReply ?? Response.json(currentRevision);
       if (path === `/api/v1/reviews/${id}/revisions/2`) return Response.json({ ...currentRevision, seq: 2 });
@@ -589,7 +591,11 @@ test.each(["row", "rail"])(
     };
     await act(async () => {
       client.setQueryData(["review", id], currentReview);
-      client.setQueryData(["inbox"], { items: [currentReview] });
+      client.setQueryData<InboxData>(["inbox"], {
+        serverTime: new Date(Date.now()).toISOString(),
+        clockOffset: 0,
+        items: [currentReview],
+      });
     });
     expect(searchParams(history).get("rev")).toBe("1");
     await waitFor(() => expect(new URL((inboxLink() as HTMLAnchorElement).href).search).toBe("?rev=2"));

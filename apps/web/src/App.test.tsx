@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import type { Window } from "happy-dom";
 import { afterEach, beforeEach, expect, expectTypeOf, onTestFinished, test, vi } from "vitest";
 import { App } from "./App.tsx";
-import { inboxQuery, reviewQuery } from "./api/queries.ts";
+import { type InboxData, inboxQuery, reviewQuery } from "./api/queries.ts";
 import type { PhoneTabs } from "./components/layout/PhoneTabs.tsx";
 import type { ReviewTabs, ReviewTabsProps } from "./components/layout/ReviewTabs.tsx";
 import { draftKey, editDraftKey } from "./lib/drafts.ts";
@@ -143,7 +143,8 @@ beforeEach(() => {
   );
   fetchMock = vi.fn(async (path: string) => {
     if (path === "/api/v1/session") return new Response(null, { status: 204 });
-    if (path === "/api/v1/reviews") return Response.json({ items: [item] });
+    if (path === "/api/v1/reviews")
+      return Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [item] });
     if (path === `/api/v1/reviews/${id}`)
       return Response.json({
         ...item,
@@ -388,7 +389,7 @@ test.each(["127.0.0.1", "localhost", "[::1]"])(
         expect(JSON.parse(String(init?.body))).toEqual({ secret });
         return new Response(null, { status: 204 });
       }
-      return Response.json({ items: [] });
+      return Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [] });
     });
     const { history } = mount("/pair");
     await screen.findByRole("heading", { name: "Inbox" });
@@ -438,7 +439,12 @@ test("inbox shows the origin and pending Send without a waiting agent", async ()
   expect(screen.getByRole("link", { name: /Synthetic review/ }).getAttribute("href")).toContain(`/r/${id}`);
 });
 test("moved inbox rows show the destination host without a navigable link", async () => {
-  fetchMock.mockResolvedValue(Response.json({ items: [{ ...item, movedTo: "https://hub.example/r/new" }] }));
+  fetchMock.mockResolvedValue(
+    Response.json({
+      serverTime: new Date(Date.now()).toISOString(),
+      items: [{ ...item, movedTo: "https://hub.example/r/new" }],
+    }),
+  );
   mount();
   expect(await screen.findByText("Moved to hub.example")).toBeTruthy();
   expect(screen.queryByRole("link", { name: /Synthetic review/ })).toBeNull();
@@ -658,7 +664,8 @@ test("phone inbox menu offers Devices and Pair a device", async () => {
 test("hides Docs without docs, defaults bad search values, and keeps diff visible on desktop", async () => {
   fetchMock.mockImplementation(async (path: string) => {
     if (path.endsWith("/revisions/1")) return Response.json({ ...revision, docs: [] });
-    if (path === "/api/v1/reviews") return Response.json({ items: [item] });
+    if (path === "/api/v1/reviews")
+      return Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [item] });
     return Response.json({ ...item, revisions: [{ seq: 1, createdAt: item.updatedAt }] });
   });
   const { history } = mount(`/r/${id}?rev=-1&tab=diff&thread=bad`);
@@ -737,7 +744,7 @@ test("the first stream open recovers a publication after the initial inbox snaps
   const fallback = fetchMock.getMockImplementation();
   fetchMock.mockImplementation((path, init) =>
     path === "/api/v1/reviews"
-      ? Promise.resolve(Response.json({ items }))
+      ? Promise.resolve(Response.json({ serverTime: new Date(Date.now()).toISOString(), items }))
       : (fallback?.(path, init) as Promise<Response>),
   );
   mount();
@@ -751,7 +758,11 @@ test("the first stream open recovers a publication after the initial inbox snaps
 
 test("the first inbox response establishes the baseline even when a stale cache was shown first", async () => {
   const arrival = { ...item, id: "22222222-2222-4222-8222-222222222222", title: "Already present at first response" };
-  client.setQueryData(["inbox"], { items: [item] });
+  client.setQueryData<InboxData>(["inbox"], {
+    serverTime: new Date(Date.now()).toISOString(),
+    clockOffset: 0,
+    items: [item],
+  });
   const response = Promise.withResolvers<Response>();
   const fallback = fetchMock.getMockImplementation();
   fetchMock.mockImplementation((path, init) =>
@@ -760,7 +771,9 @@ test("the first inbox response establishes the baseline even when a stale cache 
   const { container } = mount();
   await screen.findByText(item.title);
   expect(container.querySelector(".em-inbox-new")).toBeNull();
-  await act(async () => response.resolve(Response.json({ items: [item, arrival] })));
+  await act(async () =>
+    response.resolve(Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [item, arrival] })),
+  );
   await screen.findByText(arrival.title);
   expect(container.querySelector(".em-inbox-new")).toBeNull();
 });
@@ -771,7 +784,7 @@ test("a review published while away highlights once on return, including after a
   const fallback = fetchMock.getMockImplementation();
   fetchMock.mockImplementation((path, init) =>
     path === "/api/v1/reviews"
-      ? Promise.resolve(Response.json({ items }))
+      ? Promise.resolve(Response.json({ serverTime: new Date(Date.now()).toISOString(), items }))
       : (fallback?.(path, init) as Promise<Response>),
   );
   const { history, container } = mount();
@@ -804,7 +817,11 @@ test("an arrival hidden by a filter consumes its highlight before the filter is 
   vi.useFakeTimers();
   try {
     await act(async () => {
-      client.setQueryData(["inbox"], { items: [item, arrival] });
+      client.setQueryData<InboxData>(["inbox"], {
+        serverTime: new Date(Date.now()).toISOString(),
+        clockOffset: 0,
+        items: [item, arrival],
+      });
       await vi.advanceTimersByTimeAsync(0);
     });
     expect(screen.queryByText(arrival.title)).toBeNull();
@@ -826,7 +843,7 @@ test.each([false, true])(
       const fallback = fetchMock.getMockImplementation();
       fetchMock.mockImplementation((path, init) =>
         path === "/api/v1/reviews"
-          ? Promise.resolve(Response.json({ items: [] }))
+          ? Promise.resolve(Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [] }))
           : (fallback?.(path, init) as Promise<Response>),
       );
     }
@@ -840,7 +857,11 @@ test.each([false, true])(
     try {
       async function items(values: InboxItem[]) {
         await act(async () => {
-          client.setQueryData(["inbox"], { items: values });
+          client.setQueryData<InboxData>(["inbox"], {
+            serverTime: new Date(Date.now()).toISOString(),
+            clockOffset: 0,
+            items: values,
+          });
           await vi.advanceTimersByTimeAsync(0);
         });
       }
@@ -908,7 +929,8 @@ test("review route saves a selected doc span, refreshes its thread, sends it, th
       return Response.json({ threadId: id, commentId: id, sendId: id }, { status: 201 });
     }
     const current = { ...item, unsentCount: saved && !sent ? 1 : 0 };
-    if (path === "/api/v1/reviews") return Response.json({ items: [current] });
+    if (path === "/api/v1/reviews")
+      return Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [current] });
     if (path.endsWith("/revisions/1"))
       return Response.json({
         ...revision,
@@ -1048,7 +1070,8 @@ test("saved reply clears before delayed metadata while revision refresh regroups
       saved = true;
       return Response.json({ commentId: id }, { status: 201 });
     }
-    if (path === "/api/v1/reviews") return Response.json({ items: [item] });
+    if (path === "/api/v1/reviews")
+      return Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [item] });
     if (path.includes("/revisions/"))
       return Response.json({
         ...revision,
@@ -1991,7 +2014,9 @@ test.each([null, "2026-01-02T00:00:00.000Z"])("shows provenance only for copied 
 function withInbox(items: InboxItem[]) {
   const fallback = fetchMock.getMockImplementation();
   fetchMock.mockImplementation(async (path, init) =>
-    path === "/api/v1/reviews" ? Response.json({ items }) : (fallback?.(path, init) as Promise<Response>),
+    path === "/api/v1/reviews"
+      ? Response.json({ serverTime: new Date(Date.now()).toISOString(), items })
+      : (fallback?.(path, init) as Promise<Response>),
   );
 }
 const secondItem: InboxItem = {
@@ -2602,7 +2627,11 @@ test("in-memory collapsed preference survives the phone layout with unavailable 
 
 test("a row with an invalid cached timestamp has no time text", async () => {
   client.setQueryDefaults(["inbox"], { staleTime: Infinity });
-  client.setQueryData(["inbox"], { items: [{ ...item, updatedAt: "invalid" }] });
+  client.setQueryData<InboxData>(["inbox"], {
+    serverTime: new Date(Date.now()).toISOString(),
+    clockOffset: 0,
+    items: [{ ...item, updatedAt: "invalid" }],
+  });
   mount();
   const row = await screen.findByRole("link", { name: /Synthetic review/ });
   expect(row.querySelector("time")?.textContent).toBe("");

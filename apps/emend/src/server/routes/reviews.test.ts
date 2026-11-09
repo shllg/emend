@@ -48,7 +48,11 @@ test("all three GETs parse their schemas and enforce reviewer scope and owner is
     expect(schema.safeParse(await response.json()).success).toBe(true);
     await error(await get(path, "agent"), 403, "forbidden");
     if (path) await error(await get(path, "foreign"), 404, "unknown_review");
-    else expect(await (await get(path, "foreign")).json()).toEqual({ items: [] });
+    else
+      expect(await (await get(path, "foreign")).json()).toEqual({
+        items: [],
+        serverTime: new Date(f.deps.now()).toISOString(),
+      });
   }
   await error(await get(`/${randomUUID()}`), 404, "unknown_review");
   await error(await get(`/${randomUUID()}/revisions/1`), 404, "unknown_review");
@@ -507,7 +511,10 @@ test("kind follows the newest revision's writeup: publish when empty, review oth
   await publishReview(f, { key: "d", writeup: { ...empty, tldr: "Now a review" } });
   await publishReview(f, { key: "e", writeup: empty });
   expect(await kinds()).toEqual(["review", "publish"]);
-  expect(await (await get("", "foreign")).json()).toEqual({ items: [] });
+  expect(await (await get("", "foreign")).json()).toEqual({
+    items: [],
+    serverTime: new Date(f.deps.now()).toISOString(),
+  });
 });
 
 test("links and repoUrl come back on the revision, link issue numbers in the writeup and docs, and keep a doc publish a publish", async () => {

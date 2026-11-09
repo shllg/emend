@@ -29,8 +29,11 @@ const row = (id: string) =>
 const post = (id: string, action: string, body?: unknown, who: "reviewer" | "foreign" | "agent" = "reviewer") =>
   f.request(`/reviews/${id}/${action}`, "POST", body, who);
 // The fixture seeds one review of its own; leave it out so each test sees only what it publishes.
-const inbox = async () =>
-  InboxList.parse(await (await f.request("/reviews", "GET")).json()).items.filter((item) => item.id !== f.reviewId);
+const inbox = async () => {
+  const list = InboxList.parse(await (await f.request("/reviews", "GET")).json());
+  expect(list.serverTime).toBe(iso(f.deps.now()));
+  return list.items.filter((item) => item.id !== f.reviewId);
+};
 async function userThread(id: string, body = "Please explain.") {
   const response = await f.request(`/reviews/${id}/threads`, "POST", { revision: 1, target: { kind: "review" }, body });
   expect(response.status).toBe(201);
@@ -169,6 +172,38 @@ test("later activity does not extend the approval window", async () => {
   f.advance(approvedWindow - 3_600_000);
   await expectBoth(reviewId, { list: "done", activeUntil: null });
   expect(await row(reviewId)).toMatchObject({ approvedAt, updatedAt: approvedAt + 3_600_000 });
+});
+
+test("comments, Sends and agent replies keep the original approval time", async () => {
+  const { reviewId } = await publishReview(f);
+  await approve(reviewId);
+  const approvedAt = f.deps.now();
+  const unchanged = async () => {
+    expect((await row(reviewId))?.approvedAt).toBe(approvedAt);
+    await expectBoth(reviewId, { state: "approved", list: "active", activeUntil: iso(approvedAt + approvedWindow) });
+  };
+  f.advance(3_600_000);
+  const thread = await userThread(reviewId);
+  await unchanged();
+  // An agent can reply only to a sent comment, so send it before replying.
+  f.advance(3_600_000);
+  expect((await post(reviewId, "sends", { kind: "go", revision: 1 })).status).toBe(201);
+  await unchanged();
+  f.advance(3_600_000);
+  expect(
+    (
+      await f.request(
+        `/comments/${thread.commentId}/reply`,
+        "POST",
+        { outcome: "held", body: "Please discuss this." },
+        "agent",
+      )
+    ).status,
+  ).toBe(201);
+  await unchanged();
+  f.advance(approvedWindow - 3 * 3_600_000);
+  await expectBoth(reviewId, { state: "approved", list: "done", activeUntil: null });
+  expect((await row(reviewId))?.approvedAt).toBe(approvedAt);
 });
 
 test("a new revision clears the approval time and reopens the review", async () => {
@@ -354,6 +389,65 @@ test("an unsnoozed review sorts as updated at the unsnooze, and a passed timed s
   ]);
 });
 
+async function seedReviews(rows: (typeof t.reviews.$inferInsert & { id: string })[]) {
+  await f.db.transaction(async (q) => {
+    await q.insert(t.reviews).values(rows);
+    await q.insert(t.revisions).values(
+      rows.map((review) => ({
+        id: randomUUID(),
+        ownerId: f.ownerId,
+        reviewId: review.id,
+        seq: 1,
+        contentKey: randomUUID(),
+        createdAt: 1,
+      })),
+    );
+  });
+}
+
+test("approvals fill the remaining Active places and interleave with open reviews by activity", async () => {
+  const now = f.deps.now();
+  const make = (state: "open" | "approved", updatedAt: number) => ({
+    id: randomUUID(),
+    ownerId: f.ownerId,
+    originInstanceId: f.instanceId,
+    reviewKey: randomUUID().replaceAll("-", "").repeat(2),
+    title: "Synthetic capped review",
+    state,
+    approvedAt: state === "approved" ? now : null,
+    createdAt: 1,
+    updatedAt,
+    snoozedAt: null as number | null,
+    snoozedUntil: null as number | null,
+  });
+  // A passed snooze controls the first open row's position; a future snooze on an approval does not.
+  const open = [
+    { ...make("open", now - 10_000), snoozedAt: now - 20_000, snoozedUntil: now - 1500 },
+    make("open", now - 500),
+    make("open", now - 2000),
+  ];
+  const approvals = Array.from({ length: LIMITS.inboxItems }, (_, i) => ({
+    ...make("approved", now - i * 1000),
+    ...(i === 2 ? { snoozedAt: now - 10_000, snoozedUntil: now + day } : {}),
+  }));
+  await seedReviews([...open, ...approvals]);
+  const list = InboxList.parse(await (await f.request("/reviews", "GET")).json());
+  const active = list.items.filter((item) => item.list === "active");
+  expect(active).toHaveLength(LIMITS.inboxItems);
+  // The fixture's own review takes one open place too.
+  const kept = [...open, ...approvals.slice(0, LIMITS.inboxItems - open.length - 1)];
+  const activity = (review: (typeof open)[number]) =>
+    review.state === "open" ? Math.max(review.updatedAt, review.snoozedUntil ?? 0) : review.updatedAt;
+  kept.sort((a, b) => activity(b) - activity(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  expect(active.filter((item) => item.id !== f.reviewId).map((item) => item.id)).toEqual(kept.map((item) => item.id));
+  expect(
+    active
+      .filter((item) => item.id !== f.reviewId)
+      .slice(0, 4)
+      .map((item) => item.state),
+  ).toEqual(["approved", "open", "approved", "open"]);
+});
+
 test("the per-list cap applies to each list on its own", async () => {
   const { reviewId } = await publishReview(f);
   const base = await row(reviewId);
@@ -374,29 +468,12 @@ test("the per-list cap applies to each list on its own", async () => {
   const recent = rows("approved", 3, false, f.deps.now());
   const older = rows("approved", 3, false, f.deps.now() - approvedWindow);
   const all = [...rows("open", LIMITS.inboxItems + 5, false), ...recent, ...older, ...rows("open", 2, true)];
-  await f.db.transaction(async (q) => {
-    for (const review of all) {
-      await q.insert(t.reviews).values(review);
-      await q.insert(t.revisions).values({
-        id: randomUUID(),
-        ownerId: f.ownerId,
-        reviewId: review.id,
-        seq: 1,
-        contentKey: randomUUID(),
-        createdAt: 1,
-      });
-    }
-  });
+  await seedReviews(all);
   // Unfiltered: the fixture's own review is one of the Active rows.
   const items = InboxList.parse(await (await f.request("/reviews", "GET")).json()).items;
   const by = (list: string) => items.filter((item) => item.list === list).length;
   expect([by("active"), by("snoozed"), by("done")]).toEqual([LIMITS.inboxItems, 2, 3]);
-  expect(
-    items
-      .filter((item) => item.list === "active" && item.state === "approved")
-      .map((item) => item.id)
-      .sort(),
-  ).toEqual(recent.map((item) => item.id).sort());
+  expect(items.filter((item) => item.list === "active").every((item) => item.state === "open")).toBe(true);
   expect(
     items
       .filter((item) => item.list === "done")

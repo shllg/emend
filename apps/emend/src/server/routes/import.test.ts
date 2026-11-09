@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ImportBundle, importRowCount, indexImportBundle, LIMITS, RevisionView } from "@emend/contract";
+import { ImportBundle, InboxList, importRowCount, indexImportBundle, LIMITS, RevisionView } from "@emend/contract";
 import * as core from "@emend/core";
 import { and, eq, sql } from "drizzle-orm";
 import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
@@ -350,49 +350,62 @@ test("imports writeup media as parentless assets and the writeup renders the ima
   expect(Buffer.from(await image.arrayBuffer())).toEqual(png);
 });
 
-test("preserves approval records and permits retry after a busy response", async () => {
-  const input = await bundle(f);
-  const approvalId = randomUUID();
-  const approved = {
-    ...input,
-    review: { ...input.review, state: "approved", approvedRevision: required(input.revisions[1]).id },
-    sends: [
-      ...input.sends,
-      {
-        id: approvalId,
-        reviewId: input.review.id,
-        revisionId: required(input.revisions[1]).id,
-        kind: "approve",
-        mode: null,
-        instruction: null,
-        deliveryId: null,
-        setAsideAt: null,
-        createdAt: input.review.updatedAt,
+test.each(["number", "ISO"])(
+  "preserves approval records and permits retry after a busy response, ignoring a forged %s approval time",
+  async (format) => {
+    const input = await bundle(f);
+    const approvalId = randomUUID();
+    const approved = {
+      ...input,
+      review: {
+        ...input.review,
+        state: "approved",
+        approvedRevision: required(input.revisions[1]).id,
+        approvedAt:
+          format === "number"
+            ? f.deps.now() + 10 * 365 * 86_400_000
+            : new Date(f.deps.now() + 10 * 365 * 86_400_000).toISOString(),
       },
-    ],
-  };
-  const responses = await Promise.all([f.importRequest("/import", approved), f.importRequest("/import", approved)]);
-  expect(responses.map((r) => r.status).sort()).toEqual([201, 429]);
-  expect((await f.importRequest("/import", approved)).status).toBe(200);
-  const saved = await f.db.read((q) =>
-    q
-      .select()
-      .from(tables.sends)
-      .where(and(eq(tables.sends.ownerId, f.ownerId), eq(tables.sends.id, approvalId)))
-      .get(),
-  );
-  expect(saved).toMatchObject({ kind: "approve", revisionId: required(input.revisions[1]).id });
-  const view = await (await f.request(`/reviews/${input.review.id}`, "GET")).json();
-  expect(view).toMatchObject({ state: "approved", list: "done", activeUntil: null });
-  const imported = await f.db.read((q) =>
-    q
-      .select()
-      .from(tables.reviews)
-      .where(and(eq(tables.reviews.ownerId, f.ownerId), eq(tables.reviews.id, input.review.id)))
-      .get(),
-  );
-  expect(imported?.approvedAt).toBeNull();
-});
+      sends: [
+        ...input.sends,
+        {
+          id: approvalId,
+          reviewId: input.review.id,
+          revisionId: required(input.revisions[1]).id,
+          kind: "approve",
+          mode: null,
+          instruction: null,
+          deliveryId: null,
+          setAsideAt: null,
+          createdAt: input.review.updatedAt,
+        },
+      ],
+    };
+    const responses = await Promise.all([f.importRequest("/import", approved), f.importRequest("/import", approved)]);
+    expect(responses.map((r) => r.status).sort()).toEqual([201, 429]);
+    expect((await f.importRequest("/import", approved)).status).toBe(200);
+    const saved = await f.db.read((q) =>
+      q
+        .select()
+        .from(tables.sends)
+        .where(and(eq(tables.sends.ownerId, f.ownerId), eq(tables.sends.id, approvalId)))
+        .get(),
+    );
+    expect(saved).toMatchObject({ kind: "approve", revisionId: required(input.revisions[1]).id });
+    const view = await (await f.request(`/reviews/${input.review.id}`, "GET")).json();
+    expect(view).toMatchObject({ state: "approved", list: "done", activeUntil: null });
+    const imported = await f.db.read((q) =>
+      q
+        .select()
+        .from(tables.reviews)
+        .where(and(eq(tables.reviews.ownerId, f.ownerId), eq(tables.reviews.id, input.review.id)))
+        .get(),
+    );
+    expect(imported?.approvedAt).toBeNull();
+    const inbox = InboxList.parse(await (await f.request("/reviews", "GET")).json());
+    expect(inbox.items.find((item) => item.id === input.review.id)).toMatchObject({ list: "done", activeUntil: null });
+  },
+);
 
 test.each(["revision", "send", "delivery", "asset", "writeup", "target", "file size"])(
   "rejects invalid %s with no partial writes",

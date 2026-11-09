@@ -1,9 +1,10 @@
-import type { InboxItem } from "@emend/contract";
+import { APPROVED_ACTIVE_HOURS, type InboxItem, type ReviewView } from "@emend/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
+import { type InboxData, revisionQuery } from "./api/queries.ts";
 import { doneDimmed } from "./components/inbox/ReviewRow.tsx";
 import { defaultLayout, layoutStore } from "./lib/layout-store.ts";
 import { wakeTime } from "./lib/time.ts";
@@ -56,6 +57,7 @@ function matchesWidth(query: string) {
 let inbox: InboxItem[];
 let review: InboxItem;
 let gone: boolean;
+let serverOffset: number;
 let fetchMock: ReturnType<typeof vi.fn<(path: string, init?: RequestInit) => Promise<Response>>>;
 let client: QueryClient;
 beforeEach(() => {
@@ -78,6 +80,7 @@ beforeEach(() => {
   review = item;
   inbox = [item];
   gone = false;
+  serverOffset = 0;
   fetchMock = vi.fn(async (path: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
     if (method === "DELETE") {
@@ -86,7 +89,8 @@ beforeEach(() => {
       return new Response(null, { status: 204 });
     }
     if (method === "POST") return new Response(null, { status: 204 });
-    if (path === "/api/v1/reviews") return Response.json({ items: inbox });
+    if (path === "/api/v1/reviews")
+      return Response.json({ items: inbox, serverTime: new Date(Date.now() + serverOffset).toISOString() });
     if (path === `/api/v1/reviews/${id}`)
       return gone
         ? Response.json({ error: { code: "unknown_review", message: "Unknown review." } }, { status: 404 })
@@ -233,22 +237,34 @@ test("the collapsed inbox rail dims a recent approval like a Done row", async ()
   expect(rail.getByRole("link", { name: item.title }).className).not.toContain("opacity-");
 });
 
-test.each(["done", "active"] as const)(
-  "an approval expires on an open inbox even when the refetch returns %s",
-  async (serverList) => {
+test.each([
+  { offsetHours: -2, remainingHours: 2 },
+  { offsetHours: -2, remainingHours: 4 },
+  { offsetHours: 2, remainingHours: 2 },
+  { offsetHours: 0, remainingHours: 2 },
+])(
+  "approval expiry follows the server clock (offset $offsetHours h, $remainingHours h remaining)",
+  async ({ offsetHours, remainingHours }) => {
     fixedClock();
-    const approved = recentApproval();
+    serverOffset = offsetHours * 3_600_000;
+    const remaining = remainingHours * 3_600_000;
+    const approved = {
+      ...recentApproval(),
+      activeUntil: new Date(Date.now() + serverOffset + remaining).toISOString(),
+    };
     inbox = [approved];
     const invalidate = vi.spyOn(client, "invalidateQueries");
     await mountTimed();
+    expect(client.getQueryData<InboxData>(["inbox"])?.clockOffset).toBe(serverOffset);
+    const inboxCalls = () => fetchMock.mock.calls.filter(([path]) => path === "/api/v1/reviews").length;
+    const before = inboxCalls();
+    await tick(remaining / 2);
     expect(
       within(screen.getByRole("region", { name: "Active" })).getByRole("link", { name: /Recently approved/ }),
     ).toBeTruthy();
-    const inboxCalls = () => fetchMock.mock.calls.filter(([path]) => path === "/api/v1/reviews").length;
-    const before = inboxCalls();
-    // A server behind the browser may still return Active and the same expiry.
-    inbox = [{ ...approved, list: serverList, activeUntil: serverList === "done" ? null : approved.activeUntil }];
-    await tick(2 * 3_600_000 + 500);
+    expect(inboxCalls()).toBe(before);
+    inbox = [{ ...approved, list: "done", activeUntil: null }];
+    await tick(remaining / 2 + 500);
     await tick();
     expect(inboxCalls()).toBe(before + 1);
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["inbox"] });
@@ -257,10 +273,59 @@ test.each(["done", "active"] as const)(
     expect(screen.getByRole("button", { name: "Done 1" }).getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByRole("link", { name: /Recently approved/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Done 1" }));
-    const done = within(screen.getByRole("region", { name: "Done" }));
-    expect(done.getByRole("link", { name: /Recently approved/ })).toBeTruthy();
+    expect(
+      within(screen.getByRole("region", { name: "Done" })).getByRole("link", { name: /Recently approved/ }),
+    ).toBeTruthy();
   },
 );
+
+test("an accepted approval expires even when every following inbox refetch fails", async () => {
+  fixedClock();
+  serverOffset = 2 * 3_600_000;
+  const windowMs = APPROVED_ACTIVE_HOURS * 3_600_000;
+  const activeUntil = new Date(Date.now() + serverOffset + windowMs).toISOString();
+  const fallback = fetchMock.getMockImplementation();
+  let approved = false;
+  fetchMock.mockImplementation(async (path, init) => {
+    if (path === `/api/v1/reviews/${id}/sends` && init?.method === "POST") {
+      expect(JSON.parse(String(init.body))).toMatchObject({ kind: "approve" });
+      approved = true;
+      review = { ...item, state: "approved", activeUntil };
+      return new Response(null, { status: 201 });
+    }
+    if (approved && path === "/api/v1/reviews")
+      return Response.json({ error: { code: "internal_error", message: "Synthetic failure" } }, { status: 500 });
+    if (!fallback) throw new Error("Missing fetch fixture");
+    return fallback(path, init);
+  });
+  // Load the revision before clicking: Approve stays disabled while that query is pending.
+  await client.fetchQuery(revisionQuery(id, 1));
+  await mountTimed(`/r/${id}`);
+  fireEvent.click(screen.getByRole("button", { name: /^Approve/ }));
+  fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Approve" }));
+  await tick();
+  expect(approved).toBe(true);
+  const cached = client.getQueryData<InboxData>(["inbox"]);
+  expect(cached?.clockOffset).toBe(serverOffset);
+  expect(cached?.items[0]).toMatchObject({ state: "approved", list: "active", activeUntil });
+  expect(client.getQueryData<ReviewView>(["review", id])?.activeUntil).toBe(activeUntil);
+  const active = within(screen.getByRole("region", { name: "Active" })).getByRole("link", { name: /Synthetic review/ });
+  expectDimmed(active);
+  expect(within(active).getByText("Approved")).toBeTruthy();
+  expect(screen.getByText("Could not load reviews.")).toBeTruthy();
+  await tick(windowMs - 1);
+  expect(
+    within(screen.getByRole("region", { name: "Active" })).getByRole("link", { name: /Synthetic review/ }),
+  ).toBeTruthy();
+  await tick(501);
+  await tick();
+  expect(screen.getByText("No active reviews.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Done 1" }).getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(screen.getByRole("button", { name: "Done 1" }));
+  const done = within(screen.getByRole("region", { name: "Done" })).getByRole("link", { name: /Synthetic review/ });
+  expectDimmed(done);
+  expect(within(done).getByText("Approved")).toBeTruthy();
+});
 
 test("a non-empty filter shows Done expanded under a plain heading; clearing it restores the reader's choice", async () => {
   inbox = inboxItems();

@@ -95,7 +95,7 @@ test.each(["/pair", "/pair/", "/Pair"])(
         expect(JSON.parse(String(init?.body))).toEqual({ secret });
         return new Response(null, { status: 204 });
       }
-      return Response.json({ items: [] });
+      return Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [] });
     });
     vi.stubGlobal("fetch", fetch);
     await boot();
@@ -137,7 +137,7 @@ test.each([
       expect(JSON.parse(String(init?.body))).toEqual({ secret });
       return pending;
     }
-    return Promise.resolve(Response.json({ items: [] }));
+    return Promise.resolve(Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [] }));
   });
   vi.stubGlobal("fetch", fetch);
   await boot();
@@ -178,7 +178,9 @@ test("a failed secret is not posted again, and a different arriving secret can p
   const fetch = vi.fn(async (path: string, init?: RequestInit) => {
     if (path === "/api/v1/session" && JSON.parse(String(init?.body)).secret === first)
       return Response.json({ error: { code: "unauthorized", message: "Invalid pairing" } }, { status: 401 });
-    return path === "/api/v1/session" ? new Response(null, { status: 204 }) : Response.json({ items: [] });
+    return path === "/api/v1/session"
+      ? new Response(null, { status: 204 })
+      : Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [] });
   });
   vi.stubGlobal("fetch", fetch);
   await boot();
@@ -198,7 +200,9 @@ test("a failed secret is not posted again, and a different arriving secret can p
 
 test.each(["hashchange", "popstate"] as const)("%s leaves fragments on another path alone", async (event) => {
   window.history.replaceState(null, "", "/devices");
-  const fetch = vi.fn(async (_path: string, _init?: RequestInit) => Response.json({ items: [] }));
+  const fetch = vi.fn(async (_path: string, _init?: RequestInit) =>
+    Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [] }),
+  );
   vi.stubGlobal("fetch", fetch);
   await boot();
   await screen.findByRole("heading", { name: "Devices" });
@@ -212,7 +216,7 @@ test.each(["hashchange", "popstate"] as const)("%s leaves fragments on another p
 test.each(["/pairs#x", "/pair/x#y"])("startup and navigation leave %s alone", async (path) => {
   const expectedHash = path.slice(path.indexOf("#"));
   window.history.replaceState(null, "", path);
-  const fetch = vi.fn(async () => Response.json({ items: [] }));
+  const fetch = vi.fn(async () => Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [] }));
   vi.stubGlobal("fetch", fetch);
   await boot();
   await screen.findByRole("heading", { name: "Page not found" });

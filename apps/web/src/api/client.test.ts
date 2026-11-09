@@ -23,6 +23,11 @@ test("read requests keep credentials same-origin, parse errors, and send 401 to 
   expect(fetch).toHaveBeenCalledWith("/api/v1/reviews", expect.objectContaining({ credentials: "same-origin" }));
 });
 test("a successful response still has to satisfy its schema", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ items: [{ id: "invalid" }] })));
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [{ id: "invalid" }] })),
+  );
   await expect(get("/api/v1/reviews", InboxList)).rejects.toThrow();
 });

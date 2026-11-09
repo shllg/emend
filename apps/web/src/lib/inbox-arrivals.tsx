@@ -1,6 +1,8 @@
-import type { InboxItem, InboxList } from "@emend/contract";
+import type { InboxItem } from "@emend/contract";
 import { useQueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
+
+import type { InboxData } from "../api/queries.ts";
 
 function createArrivals() {
   let seen: Set<string> | null = null;
@@ -60,7 +62,7 @@ export function InboxArrivalsProvider({ children, enabled }: { children: ReactNo
     const unsubscribe = client.getQueryCache().subscribe((event) => {
       if (event.type !== "updated" || event.action.type !== "success" || event.action.manual) return;
       if (event.query.queryKey.length !== 1 || event.query.queryKey[0] !== "inbox") return;
-      const data = client.getQueryData<InboxList>(["inbox"]);
+      const data = client.getQueryData<InboxData>(["inbox"]);
       if (data) store.baseline(data.items);
     });
     return () => {

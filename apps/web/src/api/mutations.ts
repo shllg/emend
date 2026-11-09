@@ -1,11 +1,11 @@
-import type {
-  InboxItem,
-  InboxList,
-  RetireRequest,
-  ReviewView,
-  RevisionView,
-  SnoozeRequest,
-  ViewedRequest,
+import {
+  APPROVED_ACTIVE_HOURS,
+  type InboxItem,
+  type RetireRequest,
+  type ReviewView,
+  type RevisionView,
+  type SnoozeRequest,
+  type ViewedRequest,
 } from "@emend/contract";
 import { type QueryClient, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useSyncExternalStore } from "react";
@@ -21,6 +21,7 @@ import {
 import { refreshQueries } from "../lib/query-refresh.ts";
 import { viewedState } from "../lib/viewed-state.ts";
 import { ApiError, change } from "./client.ts";
+import type { InboxData } from "./queries.ts";
 
 function applyViewed(view: RevisionView, body: ViewedRequest): RevisionView {
   if (view.seq !== body.revision) return view;
@@ -115,13 +116,15 @@ export function useLifecycleMutation(reviewId: string) {
 
 /** Shows an accepted Send or Approve in the cached review and inbox item before the refetch lands. */
 function applyAccepted(client: QueryClient, reviewId: string, kind: "send" | "approve") {
+  const clockOffset = client.getQueryData<InboxData>(["inbox"])?.clockOffset ?? 0;
+  const activeUntil = new Date(Date.now() + clockOffset + APPROVED_ACTIVE_HOURS * 3_600_000).toISOString();
   const change = <T extends InboxItem>(item: T): T =>
     kind === "approve"
-      ? { ...item, state: "approved", list: "active", snoozed: false, snoozedUntil: null }
+      ? { ...item, state: "approved", list: "active", snoozed: false, snoozedUntil: null, activeUntil }
       : { ...item, unsentCount: 0, pendingSend: true };
   // Only a loaded item changes; anything else in the cache is left to the refetch.
   client.setQueryData<ReviewView>(["review", reviewId], (view) => (view?.id === reviewId ? change(view) : view));
-  client.setQueryData<InboxList>(["inbox"], (list) =>
+  client.setQueryData<InboxData>(["inbox"], (list) =>
     Array.isArray(list?.items)
       ? { ...list, items: list.items.map((item) => (item.id === reviewId ? change(item) : item)) }
       : list,

@@ -35,7 +35,9 @@ afterEach(async () => {
 test("Pair this device explains code entry, requires eight characters, and submits once while busy", async () => {
   const pending = Promise.withResolvers<Response>();
   const fetcher = vi.fn(async (path: string, _init?: RequestInit) =>
-    path === "/api/v1/session" ? pending.promise : Response.json({ items: [] }),
+    path === "/api/v1/session"
+      ? pending.promise
+      : Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [] }),
   );
   vi.stubGlobal("fetch", fetcher);
   const { history, client } = mount();

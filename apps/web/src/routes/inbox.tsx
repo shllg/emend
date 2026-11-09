@@ -68,19 +68,25 @@ export function Inbox({
     return () => window.clearInterval(interval);
   }, []);
   const items = query.data?.items ?? [];
+  const clockOffset = query.data?.clockOffset ?? 0;
+  const approvalWake = (review: InboxItem) =>
+    review.activeUntil === null ? null : new Date(Date.parse(review.activeUntil) - clockOffset).toISOString();
   const client = useQueryClient();
   // Snoozes and approval windows end without an event: ask again when either time passes.
+  // Until the refetch lands, a passed snooze reads "waking up".
   useWakeTimer(
-    items.flatMap((review) => [review.snoozedUntil, review.activeUntil]),
+    items.flatMap((review) => [review.snoozedUntil, approvalWake(review)]),
     (passed) => {
       setNow(Date.now());
       void client.invalidateQueries({ queryKey: ["inbox"] });
-      for (const review of items)
+      for (const review of items) {
+        const activeUntil = approvalWake(review);
         if (
           (review.snoozedUntil && passed.includes(review.snoozedUntil)) ||
-          (review.activeUntil && passed.includes(review.activeUntil))
+          (activeUntil && passed.includes(activeUntil))
         )
           void client.invalidateQueries({ queryKey: ["review", review.id] });
+      }
     },
   );
   const origins = [...new Map(items.map(({ origin }) => [origin.id, origin])).values()].sort((a, b) =>
@@ -193,8 +199,9 @@ export function Inbox({
           items.length > 0 &&
           filtered.length > 0 &&
           lists.map(({ list, title }) => {
-            const rows = filtered.filter((review) => effectiveList(review, now) === list);
-            const nothingActive = list === "active" && !items.some((review) => effectiveList(review, now) === "active");
+            const rows = filtered.filter((review) => effectiveList(review, now + clockOffset) === list);
+            const nothingActive =
+              list === "active" && !items.some((review) => effectiveList(review, now + clockOffset) === "active");
             if (rows.length === 0 && !nothingActive) return null;
             // A filter that matches only Done rows would otherwise show nothing.
             const expanded = list !== "done" || doneOpen || needle !== "";

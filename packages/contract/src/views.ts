@@ -48,7 +48,10 @@ export const InboxItem = z.object({
   kind: z.enum(["review", "publish"]),
 });
 export type InboxItem = z.infer<typeof InboxItem>;
-export const InboxList = z.object({ items: z.array(InboxItem).max(LIMITS.inboxItems * ReviewList.options.length) });
+export const InboxList = z.object({
+  items: z.array(InboxItem).max(LIMITS.inboxItems * ReviewList.options.length),
+  serverTime: z.iso.datetime(),
+});
 export type InboxList = z.infer<typeof InboxList>;
 /** One row of the agent's own list: no comments, writeup, docs or other owners' ids. */
 export const AgentReviewItem = z.object({

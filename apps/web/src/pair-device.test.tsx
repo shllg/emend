@@ -44,7 +44,7 @@ async function createCode() {
 function serve(create: () => Response | Promise<Response> = () => Response.json(pairing())) {
   const fetcher = vi.fn(async (path: string) => {
     if (path === "/api/v1/pairings") return create();
-    if (path !== "/api/v1/devices") return Response.json({ items: [] });
+    if (path !== "/api/v1/devices") return Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [] });
     return Response.json({
       items: [
         {

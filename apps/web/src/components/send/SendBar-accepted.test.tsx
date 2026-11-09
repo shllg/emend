@@ -1,8 +1,8 @@
-import type { ReviewView } from "@emend/contract";
+import { APPROVED_ACTIVE_HOURS, type InboxItem, type ReviewView } from "@emend/contract";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { inboxQuery, reviewQuery } from "../../api/queries.ts";
+import { type InboxData, inboxQuery, reviewQuery } from "../../api/queries.ts";
 import { reconnectReviewEvents } from "../../lib/event-stream.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
 import { HANDOFF_REFETCH_MS, HANDOFF_WAIT_MS } from "./HandOver.tsx";
@@ -49,12 +49,14 @@ let posts: number;
 let reviewGets: number;
 let postAnswer: () => Response;
 let client: QueryClient;
+let serverOffset: number;
 
 beforeEach(() => {
   vi.useFakeTimers();
   vi.mocked(reconnectReviewEvents).mockReset().mockResolvedValue(false);
   localStorage.clear();
   mode = "ok";
+  serverOffset = 0;
   server = base;
   posts = 0;
   reviewGets = 0;
@@ -70,7 +72,7 @@ beforeEach(() => {
       }
       if (url === "/api/v1/reviews") {
         if (mode === "held") return new Promise<Response>((resolve) => held.push({ url, resolve }));
-        return Response.json({ items: [server] });
+        return Response.json({ items: [server], serverTime: new Date(Date.now() + serverOffset).toISOString() });
       }
       if (url === `/api/v1/reviews/${reviewId}`) {
         reviewGets += 1;
@@ -264,6 +266,7 @@ test.each(["Send", "Approve"] as const)("a fetch that started before the accepte
     ...(kind === "Approve" ? { list: "snoozed", snoozed: true, snoozedUntil: "2026-11-05T09:00:00.000Z" } : {}),
   };
   server = before;
+  serverOffset = 2 * 3_600_000;
   await mount(<Inbox />);
   mode = "held";
   act(() => {
@@ -273,20 +276,28 @@ test.each(["Send", "Approve"] as const)("a fetch that started before the accepte
   await settle();
   const stale = [...held];
   expect(stale.map((fetch) => fetch.url).sort()).toEqual(["/api/v1/reviews", `/api/v1/reviews/${reviewId}`]);
+  const activeUntil = new Date(Date.now() + serverOffset + APPROVED_ACTIVE_HOURS * 3_600_000).toISOString();
   if (kind === "Send") fireEvent.click(button("Send 1"));
   else approve("Approve revision 3");
   await settle();
   // Both stale fetches now answer with the data from before the write.
   for (const fetch of stale)
-    fetch.resolve(Response.json(fetch.url === "/api/v1/reviews" ? { items: [before] } : before));
+    fetch.resolve(
+      Response.json(
+        fetch.url === "/api/v1/reviews"
+          ? { items: [before], serverTime: new Date(Date.now() + serverOffset).toISOString() }
+          : before,
+      ),
+    );
   await settle();
-  const accepted = (item: ReviewView | undefined) =>
+  const accepted = (item: InboxItem | undefined) =>
     kind === "Send"
       ? [item?.unsentCount, item?.pendingSend]
       : [item?.state, item?.list, item?.snoozed, item?.snoozedUntil, item?.activeUntil];
-  const expected = kind === "Send" ? [0, true] : ["approved", "active", false, null, null];
+  const expected = kind === "Send" ? [0, true] : ["approved", "active", false, null, activeUntil];
   expect(accepted(client.getQueryData<ReviewView>(["review", reviewId]))).toEqual(expected);
-  expect(accepted(client.getQueryData<{ items: ReviewView[] }>(["inbox"])?.items[0])).toEqual(expected);
+  expect(accepted(client.getQueryData<InboxData>(["inbox"])?.items[0])).toEqual(expected);
+  expect(client.getQueryData<InboxData>(["inbox"])?.clockOffset).toBe(serverOffset);
   // The background refetch then brings the server's own data.
   const after =
     kind === "Send"
@@ -300,7 +311,13 @@ test.each(["Send", "Approve"] as const)("a fetch that started before the accepte
           activeUntil: "2026-11-05T21:00:00.000Z",
         };
   for (const fetch of held.filter((item) => !stale.includes(item)))
-    fetch.resolve(Response.json(fetch.url === "/api/v1/reviews" ? { items: [after] } : after));
+    fetch.resolve(
+      Response.json(
+        fetch.url === "/api/v1/reviews"
+          ? { items: [after], serverTime: new Date(Date.now() + serverOffset).toISOString() }
+          : after,
+      ),
+    );
   await settle();
   expect(client.getQueryData<ReviewView>(["review", reviewId])).toMatchObject(after);
 });

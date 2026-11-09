@@ -104,7 +104,8 @@ beforeEach(() => {
       if (url === `/api/v1/reviews/${id}/threads` && init?.method === "POST")
         return Response.json({ threadId: id, commentId: id }, { status: 201 });
       if (url === "/api/v1/session") return new Response(null, { status: 204 });
-      if (url === "/api/v1/reviews") return Response.json({ items: [review] });
+      if (url === "/api/v1/reviews")
+        return Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [review] });
       if (url === `/api/v1/reviews/${id}`) return Response.json(review);
       if (url === `/api/v1/reviews/${id}/revisions/1`) return Response.json(revision);
       throw new Error(`Unexpected synthetic request: ${url}`);
