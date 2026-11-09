@@ -150,7 +150,7 @@ function hiddenLineReason(lines: string[]): string | null {
   // restores an item; the context's fence flag survives apparent closers.
   let fenceRun: string | null = null;
   let fenceHasContainers = false;
-  let previousBoxColumn: number | null = null;
+  const boxColumns: number[] = [];
   for (const [index, line] of lines.entries()) {
     let contentStart = 0;
     let indent = 0;
@@ -205,8 +205,12 @@ function hiddenLineReason(lines: string[]): string | null {
     const fencedContext = sawFence || fenceRun !== null;
     // Under a later step, only the taught checklist form is accepted: spaces,
     // one dash and space, a canonical box, then one space and non-space text.
-    // A child aligns with the preceding canonical box's opening bracket.
+    // Children and siblings align with an open parent's box. Dedenting retires
+    // deeper boxes; any intervening non-checklist line ends the whole stack.
     const canonicalBox = /^( *)- \[[ x]\] \S/u.exec(line);
+    if (canonicalBox) {
+      while (indent < (boxColumns.at(-1) ?? 0)) boxColumns.pop();
+    }
     // GitHub may find boxes in rendered text and hide their list numbers. Strip
     // escapes before checking the whole leading chain; only canonical boxes and
     // literal-one numbers are safe. A split box needs a marker, so JSON's bare
@@ -228,7 +232,7 @@ function hiddenLineReason(lines: string[]): string | null {
         if (!split || /[-*+]|\d{1,9}[.)]/u.test(prefix) || orderedItem) {
           if (orderedItem && fencedContext) return refusal("task marker");
           if (task[2] !== " " && task[2] !== "x") return refusal("task marker");
-          if (/\S/u.test(text[task[0].length] ?? "")) return refusal("task marker");
+          if (/[^ \t]/u.test(text[task[0].length] ?? "")) return refusal("task marker");
           // Task text must start on this line; later text cannot rescue a bare box.
           if (!/\S/u.test(text.slice(task[0].length))) return refusal("task marker");
           // cmark sets checked state from any literal [x]/[X] on the raw line.
@@ -238,11 +242,12 @@ function hiddenLineReason(lines: string[]): string | null {
           // The task regex matched a marker-only prefix, so the first [ and ]
           // delimit this box; escapes later in its text remain ordinary text.
           const boxEnd = line.indexOf("]", line.indexOf("["));
-          if (line.slice(0, boxEnd < 0 ? line.length : boxEnd + 1).includes("\\")) return refusal("task marker");
-          if (orderedItem && (!canonicalBox || (indent !== orderedItem.contentColumn && indent !== previousBoxColumn)))
+          if (line.slice(0, boxEnd + 1).includes("\\")) return refusal("task marker");
+          if (orderedItem && (!canonicalBox || (indent !== orderedItem.contentColumn && !boxColumns.includes(indent))))
             return refusal("task marker");
-          // All ordered markers above are 1; require a final marker and spacing.
-          if (!/(?:[-*+]|\d{1,9}[.)])[ \t]+$/u.test(prefix)) return refusal("task marker");
+          // All ordered markers above are 1; require a final marker and 1-4 ASCII spaces.
+          const padding = /(?:[-*+]|\d{1,9}[.)])([ \t]+)$/u.exec(prefix)?.[1];
+          if (!padding || padding.includes("\t") || padding.length > 4) return refusal("task marker");
         }
       }
     }
@@ -254,7 +259,8 @@ function hiddenLineReason(lines: string[]): string | null {
       !/^(?:[\s>]|[-*+]|\d{1,9}[.)])*1[.)][ \t]+\[/u.test(line)
     )
       return refusal("task marker");
-    previousBoxColumn = orderedItem && canonicalBox ? indent + 2 : null;
+    if (orderedItem && canonicalBox) boxColumns.push(indent + 2);
+    else boxColumns.length = 0;
     if (fence?.[2]) {
       if (!fenceRun) {
         fenceRun = fence[2];

@@ -274,7 +274,54 @@ const canonicalRefusals = [
 // Earlier acceptance withdrawn by the same-line task-text rule.
 const sameLineTextRefusals = ["- [x]\n~"];
 
+// Earlier acceptance withdrawn by the ban on tabs after a task's list marker.
+const markerPaddingRefusals = ["1.\t[ ] Pending"];
+
+// Shared by direct oracle assertions and the checker corpus.
+const oracleStructureWitnesses = [
+  ["raw HTML", "<!-- hidden -->"],
+  ["reference definition", "[a]: /hidden"],
+  ["reference definition", "[a]\n\n[a]: /hidden"],
+  ["reference definition", "![a]\n\n[a]: /hidden"],
+  ["reference definition", "[^1]\n\n[^1]: hidden"],
+  ["table", "| a |\n| - |\n| a | HIDDEN |"],
+  ["link destination", "[a](hidden)"],
+  ["link destination", "[https://example.com](https://example.com)"],
+  ["raw HTML", "<https://example.com>"],
+  ["link destination", "![hidden](image.png)"],
+  ["fence info", "```ts hidden\na\n```"],
+  ["fence info", "```mermaid\na\n```"],
+  ["character reference", "&amp;"],
+] as const;
+const sourceBoxWitnesses = [
+  "- [ ]Check",
+  "- [x]Check",
+  "-     [ ] Check",
+  "1.     [x] Check",
+  "- [x] Real\n\n- [x]Literal",
+  "> - [ ]Check",
+  ...[0x00a0, ...Array.from({ length: 11 }, (_, i) => 0x2000 + i), 0x202f, 0x3000, 0xfeff].flatMap((code) =>
+    ["[ ]", "[x]"].map((box) => `- ${box}${String.fromCodePoint(code)}Check`),
+  ),
+];
+
 const hostile = [
+  ...markerPaddingRefusals.map((body) => ["task marker", body, "checker only"] as const),
+  ...oracleStructureWitnesses,
+  ...sourceBoxWitnesses.map((body) => ["task marker", body] as const),
+  ["task marker", "-\t[x] Check", "checker only"],
+  ["task marker", "1.\t[ ] Check", "checker only"],
+  ["task marker", "> -     [x] Check", "checker only"],
+  ["task marker", "- -     [ ] Check", "checker only"],
+  ["task marker", "> 1.\t[x] Check", "checker only"],
+  ["task marker", "- \t[ ] Check", "checker only"],
+  ["task marker", "2. Step\n   - [ ] Parent\n\n     - [ ] Child", "checker only"],
+  ["task marker", "2. Step\n   - [ ] Parent\n     text\n     - [ ] Child", "checker only"],
+  [
+    "task marker",
+    "2. Step\n   - [ ] Parent\n     - [ ] Child\n       - [ ] Grandchild\n   - [ ] Next\n       - [ ] Wrong",
+    "checker only",
+  ],
   ...sameLineTextRefusals.map((body) => ["task marker", body, "checker only"] as const),
   ...["- [ ]", "- [x]", "* [ ]", "1. [ ]", "1) [x]"].flatMap((box) =>
     ["", " ", " \t"].map((suffix) => ["task marker", box + suffix] as const),
@@ -487,6 +534,13 @@ const containerFences = [
 // These owner forms must stay accepted; markdown-security.test.ts also asserts
 // them through issue evaluation. The mixed corpus below retains refusal cases too.
 const ownerBodies = [
+  "2. Step\n   - [ ] Parent\n     - [ ] First\n     - [ ] Second",
+  "2. Step\n   - [ ] Parent\n     - [ ] First\n       - [x] Child\n     - [ ] Second\n   - [ ] Next",
+  "2. Step\n   - [ ] Parent\n     - [ ] First\n       - [ ] Child\n         - [x] Deep\n       - [ ] Sibling",
+  "-    [ ] Check",
+  "1.    [x] Check",
+  "> -    [x] Check",
+  "- [x]\tCheck",
   "1. a\n2. Step\n   - [ ] Parent\n     - [ ] Child",
   "```\n- ```\n```\n\n## Steps\n1. First\n2. Second\n   - [ ] Check",
   "```\n> ```\n```\n\n## Steps\n1. First\n2. Second\n   - [ ] Check",
@@ -954,23 +1008,10 @@ function minimize(body: string, reason: string): string {
 }
 
 test("coverage oracle detects lost text and unsafe structure independently of the checker", () => {
-  for (const body of [
-    ...oracleHostile.map(([, body]) => body),
-    "<!-- hidden -->",
-    "[a]: /hidden",
-    "[a]\n\n[a]: /hidden",
-    "![a]\n\n[a]: /hidden",
-    "[^1]\n\n[^1]: hidden",
-    "| a |\n| - |\n| a | HIDDEN |",
-    "[a](hidden)",
-    "[https://example.com](https://example.com)",
-    "<https://example.com>",
-    "![hidden](image.png)",
-    "```ts hidden\na\n```",
-    "```mermaid\na\n```",
-    "&amp;",
-  ])
+  for (const [kind, body] of oracleHostile) {
+    assert.equal(hiddenMarkdownReason(body), `hidden Markdown in the body: ${kind}`, JSON.stringify(body));
     assert.notEqual(violation(body), null, JSON.stringify(body));
+  }
   for (const body of [
     "123. a\n124. b",
     "> 123. a",
@@ -990,8 +1031,10 @@ test("coverage oracle detects lost text and unsafe structure independently of th
 });
 
 test("source boxes must map to tasks at their own positions", () => {
-  for (const body of ["- [ ]Check", "- [x]Check", "-     [ ] Check", "- [x] Real\n\n- [x]Literal", "> - [ ]Check"])
+  for (const body of sourceBoxWitnesses) {
+    assert.equal(hiddenMarkdownReason(body), "hidden Markdown in the body: task marker", JSON.stringify(body));
     assert.throws(() => checkCoverage(body), /source box must become the same task/u, JSON.stringify(body));
+  }
   for (const body of ["- [ ] Pending\n- [x] Done", "literal [x]", "`[x]`", "```text\n- [x]Literal\n```"])
     assert.doesNotThrow(() => checkCoverage(body), JSON.stringify(body));
 });
@@ -1065,6 +1108,50 @@ test("each individual rule has a mutation witness", async (t) => {
   const checkerSource = await readFile(new URL("./markdown.ts", import.meta.url), "utf8");
   const mutations = [
     {
+      name: "task marker padding has at most four columns",
+      from: " || padding.length > 4",
+      to: "",
+      body: "-     [ ] Check",
+      kind: "task marker",
+    },
+    {
+      name: "task marker padding excludes tabs",
+      from: 'padding.includes("\\t") || ',
+      to: "",
+      body: "-\t[x] Check",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "four spaces of task marker padding stay accepted",
+      from: "padding.length > 4",
+      to: "padding.length >= 4",
+      body: "-    [ ] Check",
+      kind: null,
+    },
+    {
+      name: "task right edge is ASCII whitespace",
+      from: '/[^ \\t]/u.test(text[task[0].length] ?? "")',
+      to: '/\\S/u.test(text[task[0].length] ?? "")',
+      body: "- [x] Check",
+      kind: "task marker",
+    },
+    {
+      name: "checklist keeps parent columns for siblings",
+      from: "boxColumns.push(indent + 2);",
+      to: "boxColumns.splice(0, boxColumns.length, indent + 2);",
+      body: "2. Step\n   - [ ] Parent\n     - [ ] First\n     - [ ] Second",
+      kind: null,
+    },
+    {
+      name: "shallower checklist retires every deeper column",
+      from: "while (indent < (boxColumns.at(-1) ?? 0))",
+      to: "if (indent < (boxColumns.at(-1) ?? 0))",
+      body: "2. Step\n   - [ ] Parent\n     - [ ] Child\n       - [ ] Grandchild\n   - [ ] Next\n       - [ ] Wrong",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
       name: "nested markers retain the outer context",
       from: "} else if (!orderedItem || markerColumn <= orderedItem.markerColumn) {",
       to: "} else {",
@@ -1084,8 +1171,9 @@ test("each individual rule has a mutation witness", async (t) => {
       name: "only canonical checklist syntax in ordered context",
       from: "!canonicalBox || ",
       to: "",
-      body: "2. Step\n   -     [ ] Check",
+      body: "2. Step\n   * [ ] Check",
       kind: "task marker",
+      checkerOnly: true,
     },
     {
       name: "canonical prefix uses spaces only",
@@ -1120,16 +1208,16 @@ test("each individual rule has a mutation witness", async (t) => {
       checkerOnly: true,
     },
     {
-      name: "canonical child needs the immediately preceding box",
-      from: "previousBoxColumn = orderedItem && canonicalBox ? indent + 2 : null;",
-      to: "previousBoxColumn = orderedItem && canonicalBox ? indent + 2 : previousBoxColumn;",
+      name: "intervening text ends the checklist stack",
+      from: "else boxColumns.length = 0;",
+      to: "",
       body: "2. Step\n   - [ ] Parent\nwrapped\n     - [ ] Child",
       kind: "task marker",
       checkerOnly: true,
     },
     {
       name: "box right edge needs whitespace",
-      from: 'if (/\\S/u.test(text[task[0].length] ?? "")) return refusal("task marker");',
+      from: 'if (/[^ \\t]/u.test(text[task[0].length] ?? "")) return refusal("task marker");',
       to: "",
       body: "- [ ]Check",
       kind: "task marker",
@@ -1197,7 +1285,7 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "escape before closing bracket",
-      from: 'line.slice(0, boxEnd < 0 ? line.length : boxEnd + 1).includes("\\\\")',
+      from: 'line.slice(0, boxEnd + 1).includes("\\\\")',
       to: 'line.slice(0, line.indexOf("[")).includes("\\\\")',
       body: "- [x\\] Done",
       kind: "task marker",
@@ -1303,15 +1391,15 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "canonical child follows its parent box column",
-      from: " && indent !== previousBoxColumn",
+      from: " && !boxColumns.includes(indent)",
       to: "",
       body: "1. a\n2. Step\n   - [ ] a\n     - [ ] b\n       - [ ] c",
       kind: null,
     },
     {
       name: "canonical box establishes child column",
-      from: "previousBoxColumn = orderedItem && canonicalBox ? indent + 2 : null;",
-      to: "previousBoxColumn = null;",
+      from: "if (orderedItem && canonicalBox) boxColumns.push(indent + 2);",
+      to: "if (false) boxColumns.push(indent + 2);",
       body: "2. Step\n   - [ ] a\n     - [ ] b",
       kind: null,
     },
@@ -1341,7 +1429,7 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "escaped box chain",
-      from: 'line.slice(0, boxEnd < 0 ? line.length : boxEnd + 1).includes("\\\\")',
+      from: 'line.slice(0, boxEnd + 1).includes("\\\\")',
       to: "false",
       body: "- \\- [ ] x",
       kind: "task marker",
@@ -1357,7 +1445,7 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "canonical box needs an authorized column",
-      from: "(indent !== orderedItem.contentColumn && indent !== previousBoxColumn)",
+      from: "(indent !== orderedItem.contentColumn && !boxColumns.includes(indent))",
       to: "false",
       body: "104. a\n         - [ ] x",
       kind: "task marker",

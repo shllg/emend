@@ -30,6 +30,58 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+for (const body of [
+  "-     [ ] Check",
+  "1.     [x] Check",
+  "-\t[x] Check",
+  "1.\t[ ] Check",
+  "1.\t[ ] Pending",
+  "> -     [x] Check",
+  "- -     [ ] Check",
+  "> 1.\t[x] Check",
+  "- \t[ ] Check",
+]) {
+  test(`raw Markdown refuses excessive task marker padding: ${JSON.stringify(body)}`, () => {
+    assert.equal(evaluate(body).reason, reason("task marker"), body);
+  });
+}
+
+for (const code of [0x00a0, ...Array.from({ length: 11 }, (_, i) => 0x2000 + i), 0x202f, 0x3000, 0xfeff]) {
+  test(`raw Markdown refuses non-ASCII task right edge: ${code.toString(16)}`, () => {
+    for (const box of ["[ ]", "[x]"]) {
+      const body = `- ${box}${String.fromCodePoint(code)}Check`;
+      assert.equal(hiddenMarkdownReason(body), reason("task marker"), body);
+      assert.equal(evaluate(body).status, "untrusted", body);
+    }
+  });
+}
+
+for (const body of [
+  "2. Step\n   - [ ] Parent\n     - [ ] First\n     - [ ] Second",
+  "2. Step\n   - [ ] Parent\n     - [ ] First\n       - [x] Child\n     - [ ] Second\n   - [ ] Next",
+  "2. Step\n   - [ ] Parent\n     - [ ] First\n       - [ ] Child\n         - [x] Deep\n       - [ ] Sibling",
+]) {
+  test(`raw Markdown permits checklist siblings: ${JSON.stringify(body)}`, () => {
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+
+for (const body of [
+  "2. Step\n   - [ ] Parent\n\n     - [ ] Child",
+  "2. Step\n   - [ ] Parent\n     text\n     - [ ] Child",
+  "2. Step\n   - [ ] Parent\n     - [ ] Child\n       - [ ] Grandchild\n   - [ ] Next\n       - [ ] Wrong",
+]) {
+  test(`raw Markdown refuses an ended checklist level: ${JSON.stringify(body)}`, () => {
+    assert.equal(evaluate(body).reason, reason("task marker"), body);
+  });
+}
+
+for (const body of ["-    [ ] Check", "1.    [x] Check", "> -    [x] Check", "- [x]\tCheck"]) {
+  test(`raw Markdown keeps ASCII task spacing: ${JSON.stringify(body)}`, () => {
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+
 for (const box of ["- [ ]", "- [x]", "* [ ]", "1. [ ]", "1) [x]"]) {
   test(`raw Markdown refuses task without text: ${box}`, () => {
     for (const prefix of ["", "> ", "\t", "- Parent\n  ", "> - Parent\n>   ", "- Parent\n  - Child\n    "]) {
@@ -439,7 +491,6 @@ for (const [name, body] of [
   ["bracketed code point after bullet", "- [😀] Done"],
   ["quoted unchecked task", "> - [ ] quoted"],
   ["mixed task states", "- [ ] Pending\n- [x] Complete"],
-  ["tab between marker and canonical box", "1.\t[ ] Pending"],
   ["literal canonical boxes in code", "```text\n- [x] Done\n1. [ ] Pending\n```"],
   ["JSON array in code", "```json\n[\n  1,\n  2\n]\n```"],
   ["bare opening bracket", "["],
