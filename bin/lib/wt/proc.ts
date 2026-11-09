@@ -33,6 +33,15 @@ export interface RunBytesResult {
 function childEnv(cmd: string): NodeJS.ProcessEnv {
   const env = { ...process.env, ...FIXED };
   if (cmd === "gh" || cmd === "git") {
+    // Select the repository from cwd, including git calls made internally by gh.
+    delete env.GIT_DIR;
+    delete env.GIT_WORK_TREE;
+    delete env.GIT_COMMON_DIR;
+    delete env.GIT_INDEX_FILE;
+    delete env.GIT_OBJECT_DIRECTORY;
+    delete env.GIT_ALTERNATE_OBJECT_DIRECTORIES;
+    delete env.GIT_NAMESPACE;
+    delete env.GIT_CEILING_DIRECTORIES;
     // Status text and JSON must stay plain even when the parent forces terminal output.
     delete env.GH_FORCE_TTY;
     delete env.CLICOLOR_FORCE;
@@ -56,7 +65,7 @@ function childEnv(cmd: string): NodeJS.ProcessEnv {
 /**
  * Runs a program without a shell, with the caller's environment plus FIXED (no prompts, no pager),
  * excluding Git config overrides, GIT_DIFF_OPTS, GH_REPO, GH_HOST and EMEND_PRIVATE_TERMS.
- * Git and gh children also disable color and discard forced-color/terminal overrides.
+ * Git and gh children also discard repository-selection overrides and disable forced color/terminal output.
  * Exit 127 means not found; 124 means it ran past the timeout.
  */
 export function run(cmd: string, args: string[], opts: RunOptions): RunResult {
