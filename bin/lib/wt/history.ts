@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { checkPublicChange } from "../../../scripts/check-public.ts";
 import type { CommandTable } from "./command.ts";
-import { localDiagnostic } from "./diagnostics.ts";
+import { gitLocalDiagnostic, repoDiagnostic } from "./diagnostics.ts";
 import { closingGuard } from "./github.ts";
 import { requirePublic, requirePublicText } from "./public.ts";
 import { withRegistry } from "./registry.ts";
@@ -215,7 +215,7 @@ function replay(repo: Repo, top: string, old: string, target: string, backup: st
   if (patch.code !== 0) {
     throw new WtError(
       1,
-      `The change could not be read: ${oneLine(localDiagnostic(patch.stderr))}. The branch is unchanged. backup: ${backup}`,
+      `The change could not be read: ${oneLine(gitLocalDiagnostic(repo, patch.stderr, top))}. The branch is unchanged. backup: ${backup}`,
     );
   }
   hg(repo, top, ["reset", "--hard", "--quiet", target]);
@@ -244,7 +244,7 @@ function replay(repo: Repo, top: string, old: string, target: string, backup: st
     hg(repo, top, ["reset", "--hard", "--quiet", old]);
     throw new WtError(
       1,
-      `The change could not be replayed: ${oneLine(localDiagnostic(applied.stderr))}. The branch is unchanged. backup: ${backup}`,
+      `The change could not be replayed: ${oneLine(gitLocalDiagnostic(repo, applied.stderr, top))}. The branch is unchanged. backup: ${backup}`,
     );
   }
   hg(repo, top, ["reset", "--quiet"]);
@@ -338,7 +338,7 @@ export function rebase(repo: Repo, top: string, onto: Onto): RebaseResult {
     );
   }
   if (!conflicted) {
-    const why = lastLine(localDiagnostic(r.stderr || r.stdout), `git exited ${r.code}`);
+    const why = lastLine(repoDiagnostic(repo, r.stderr || r.stdout), `git exited ${r.code}`);
     throw new WtError(1, `The rebase failed: ${why}. The branch is unchanged. backup: ${backup}`);
   }
   return { result: "restacked", conflicts: replay(repo, top, old, target, backup).conflicts, backups: [backup] };
@@ -359,8 +359,11 @@ function moveMain(repo: Repo, target: string): SyncResult {
   const r = checkedOut
     ? hgTry(repo, checkedOut.path, ["merge", "--ff-only", "--no-autostash", "--no-overwrite-ignore", target])
     : hgTry(repo, repo.mainRoot, ["fetch", "--quiet", ".", `${target}:refs/heads/main`]);
-  if (r.code !== 0)
-    return { result: "refused", reason: oneLine(localDiagnostic(r.stderr || r.stdout)) || `git exited ${r.code}` };
+  if (r.code !== 0) {
+    const output = r.stderr || r.stdout;
+    const diagnostic = repoDiagnostic(repo, output);
+    return { result: "refused", reason: oneLine(diagnostic) || `git exited ${r.code}` };
+  }
   return { result: "fast-forwarded" };
 }
 
@@ -415,7 +418,7 @@ export function land(
   const made = hgTry(repo, top, ["commit-tree", "-S", tree, "-p", main], message);
   const commit = made.stdout.trim();
   if (made.code !== 0 || !/^[0-9a-f]{40}$/.test(commit)) {
-    const why = lastLine(localDiagnostic(made.stderr), `exit ${made.code}`);
+    const why = lastLine(gitLocalDiagnostic(repo, made.stderr, top), `exit ${made.code}`);
     throw new WtError(1, `git did not make the commit: ${why}. Nothing was changed. backup: ${names}`);
   }
   // Record the commit before main moves. The safety guard needs landedAs to be an ancestor of main, so an

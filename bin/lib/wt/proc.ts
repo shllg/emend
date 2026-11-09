@@ -10,12 +10,28 @@ const FIXED: Record<string, string> = {
   LC_ALL: "C.UTF-8",
 };
 
+export const gitRuntime = {
+  supportsNoLazyFetch(cwd: string): boolean {
+    // Probe only after a local failure, using the same cwd and sanitized local-command environment.
+    // Even an unchanged PATH can resolve to a replaced executable.
+    const result = run("git", ["--version"], { cwd, gitNoLazyFetch: true, timeoutMs: 5000 });
+    const version = /^git version (\d+)\.(\d+)(?:[.\s-]|$)/.exec(result.stdout);
+    const supported =
+      result.code === 0 &&
+      version !== null &&
+      (Number(version[1]) > 2 || (Number(version[1]) === 2 && Number(version[2]) >= 44));
+    return supported;
+  },
+};
+
 export interface RunOptions {
   cwd: string;
   input?: string;
   /** Inherit stdin and stderr so the child can talk to the terminal. Stdout is still captured. */
   tty?: boolean;
   timeoutMs?: number;
+  /** True forbids implicit Git fetches; false removes an inherited setting for remote commands. */
+  gitNoLazyFetch?: boolean;
 }
 
 export interface RunResult {
@@ -30,7 +46,7 @@ export interface RunBytesResult {
   stderr: string;
 }
 
-function childEnv(cmd: string): NodeJS.ProcessEnv {
+function childEnv(cmd: string, gitNoLazyFetch?: boolean): NodeJS.ProcessEnv {
   const env = { ...process.env, ...FIXED };
   if (cmd === "gh" || cmd === "git") {
     // Select the repository from cwd, including git calls made internally by gh.
@@ -59,6 +75,8 @@ function childEnv(cmd: string): NodeJS.ProcessEnv {
   delete env.GH_REPO;
   // Host selection must stay on github.com, never a caller override.
   delete env.GH_HOST;
+  if (gitNoLazyFetch === true) env.GIT_NO_LAZY_FETCH = "1";
+  else if (gitNoLazyFetch === false) delete env.GIT_NO_LAZY_FETCH;
   return env;
 }
 
@@ -66,6 +84,7 @@ function childEnv(cmd: string): NodeJS.ProcessEnv {
  * Runs a program without a shell, with the caller's environment plus FIXED (no prompts, no pager),
  * excluding Git config overrides, GIT_DIFF_OPTS, GH_REPO, GH_HOST and EMEND_PRIVATE_TERMS.
  * Git and gh children also discard repository-selection overrides and disable forced color/terminal output.
+ * gitNoLazyFetch pins local Git reads or clears the inherited setting for remote commands.
  * Exit 127 means not found; 124 means it ran past the timeout.
  */
 export function run(cmd: string, args: string[], opts: RunOptions): RunResult {
@@ -73,7 +92,7 @@ export function run(cmd: string, args: string[], opts: RunOptions): RunResult {
   const r = spawnSync(cmd, args, {
     cwd: opts.cwd,
     input: opts.input,
-    env: childEnv(cmd),
+    env: childEnv(cmd, opts.gitNoLazyFetch),
     encoding: "utf8",
     timeout: opts.timeoutMs,
     killSignal: "SIGKILL",
@@ -97,12 +116,12 @@ export function run(cmd: string, args: string[], opts: RunOptions): RunResult {
 export function runBytes(
   cmd: string,
   args: string[],
-  opts: { cwd: string; input?: Buffer; timeoutMs?: number },
+  opts: { cwd: string; input?: Buffer; timeoutMs?: number; gitNoLazyFetch?: boolean },
 ): RunBytesResult {
   const r = spawnSync(cmd, args, {
     cwd: opts.cwd,
     input: opts.input,
-    env: childEnv(cmd),
+    env: childEnv(cmd, opts.gitNoLazyFetch),
     encoding: "buffer",
     timeout: opts.timeoutMs,
     killSignal: "SIGKILL",

@@ -9,7 +9,7 @@ import {
   readPushRemote,
 } from "../../../scripts/check-public.ts";
 import type { Command, CommandTable } from "./command.ts";
-import { localDiagnostic, repoDiagnostic } from "./diagnostics.ts";
+import { gitLocalDiagnostic, repoDiagnostic } from "./diagnostics.ts";
 import { htmlEntityNames, legacyEntities, legacyEntityNames, namedEntities } from "./entities.ts";
 import { checkIssue, githubRepository, originRepository } from "./issues.ts";
 import { type RunResult, run } from "./proc.ts";
@@ -118,12 +118,15 @@ function requireIntegrated(repo: Repo, top: string, branch: string, expected: st
     { cwd: top },
   );
   if (reflog.code !== 0)
-    throw new WtError(1, `git reflog failed: ${localDiagnostic(reflog.stderr) || `exit ${reflog.code}`}`);
+    throw new WtError(1, `git reflog failed: ${gitLocalDiagnostic(repo, reflog.stderr, top) || `exit ${reflog.code}`}`);
   for (const sha of new Set(reflog.stdout.split("\n").filter(Boolean))) {
     const result = gitTry(repo, [...pins, "merge-base", "--is-ancestor", expected, sha], { cwd: top });
     if (result.code === 0) return;
     if (result.code !== 1)
-      throw new WtError(1, `git merge-base failed: ${localDiagnostic(result.stderr) || `exit ${result.code}`}`);
+      throw new WtError(
+        1,
+        `git merge-base failed: ${gitLocalDiagnostic(repo, result.stderr, top) || `exit ${result.code}`}`,
+      );
   }
   throw new WtError(1, "The destination branch has changes that were never integrated. Nothing was pushed.");
 }

@@ -1,6 +1,6 @@
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { localDiagnostic, repoDiagnostic } from "./diagnostics.ts";
+import { gitLocalDiagnostic, repoDiagnostic } from "./diagnostics.ts";
 import { type RunBytesResult, type RunResult, run, runBytes } from "./proc.ts";
 import { WtError } from "./validate.ts";
 
@@ -61,7 +61,7 @@ export const GIT_BASE = [
 ];
 
 function rawGit(args: string[], cwd: string, input?: string, timeoutMs?: number): RunResult {
-  return run("git", [...GIT_BASE, ...args], { cwd, input, timeoutMs });
+  return run("git", [...GIT_BASE, ...args], { cwd, input, timeoutMs, gitNoLazyFetch: localCommand(args) });
 }
 
 /** Only the owner's global/system identity may exempt commit identities from the public gate. */
@@ -176,14 +176,97 @@ export function resolveRepo(cwd: string): Repo {
   return { mainRoot, commonDir, worktreesDir: join(mainRoot, ".claude", "worktrees"), callerTop, callerBranch };
 }
 
+// These commands must be able to fetch missing blobs in partial clones; filter their diagnostics.
+const BLOB_COMMANDS = new Set(["worktree", "checkout", "switch", "reset", "restore", "rebase", "merge", "cherry-pick"]);
+// An unknown option or subcommand must also take the filtered diagnostic path.
+const LOCAL_COMMANDS = new Set([
+  "status",
+  "diff",
+  "diff-tree",
+  "log",
+  "reflog",
+  "show",
+  "rev-parse",
+  "rev-list",
+  "cat-file",
+  "ls-files",
+  "ls-tree",
+  "symbolic-ref",
+  "config",
+  "branch",
+  "update-ref",
+  "update-index",
+  "read-tree",
+  "write-tree",
+  "merge-tree",
+  "commit-tree",
+  "hash-object",
+  "for-each-ref",
+  "show-ref",
+  "merge-base",
+  "check-ref-format",
+  "check-attr",
+  "check-ignore",
+  "add",
+  "apply",
+  "commit",
+]);
+function gitCommand(args: string[]): string | undefined {
+  const values = ["-c", "-C", "--git-dir", "--work-tree", "--namespace", "--config-env", "--super-prefix"];
+  const flags = [
+    "--no-pager",
+    "--paginate",
+    "-P",
+    "-p",
+    "--bare",
+    "--no-replace-objects",
+    "--literal-pathspecs",
+    "--no-literal-pathspecs",
+    "--glob-pathspecs",
+    "--noglob-pathspecs",
+    "--icase-pathspecs",
+    "--no-optional-locks",
+    "--no-lazy-fetch",
+    "--no-advice",
+  ];
+  for (let at = 0; at < args.length; at++) {
+    const arg = args[at] ?? "";
+    if (!arg.startsWith("-")) return arg;
+    if (values.includes(arg)) {
+      if (args[++at] === undefined) return undefined;
+    } else if (
+      values.some((option) => option.startsWith("--") && arg.startsWith(`${option}=`)) ||
+      /^-[cC].+/.test(arg) ||
+      flags.includes(arg)
+    )
+      continue;
+    else return undefined;
+  }
+  return undefined;
+}
+
+function localCommand(args: string[]): boolean {
+  const command = gitCommand(args);
+  return command !== undefined && LOCAL_COMMANDS.has(command);
+}
+
 /** Runs git (never through a shell) and returns stdout without its final newline. Throws WtError(1). */
 export function git(repo: Repo, args: string[], opts: { cwd?: string; input?: string } = {}): string {
   const r = gitTry(repo, args, opts);
   if (r.code !== 0) {
-    const diagnostic = ["push", "fetch", "ls-remote"].includes(args[0] ?? "")
-      ? repoDiagnostic(repo, r.stderr)
-      : localDiagnostic(r.stderr);
-    throw new WtError(1, `git ${args[0] ?? ""} failed: ${diagnostic || `exit ${r.code}`}`);
+    const command = gitCommand(args);
+    const diagnostic =
+      command && LOCAL_COMMANDS.has(command)
+        ? gitLocalDiagnostic(repo, r.stderr, opts.cwd)
+        : repoDiagnostic(repo, r.stderr);
+    const name =
+      command &&
+      (LOCAL_COMMANDS.has(command) ||
+        BLOB_COMMANDS.has(command) ||
+        ["fetch", "push", "pull", "clone", "ls-remote", "remote", "submodule"].includes(command))
+        ? command
+        : "command";
+    throw new WtError(1, `git ${name} failed: ${diagnostic || `exit ${r.code}`}`);
   }
   return r.stdout;
 }
@@ -200,7 +283,11 @@ export function gitTry(
 
 /** Runs git with byte input and output, returning failures without throwing. */
 export function gitBytes(repo: Repo, args: string[], opts: { cwd?: string; input?: Buffer } = {}): RunBytesResult {
-  return runBytes("git", [...GIT_BASE, ...args], { cwd: opts.cwd ?? repo.mainRoot, input: opts.input });
+  return runBytes("git", [...GIT_BASE, ...args], {
+    cwd: opts.cwd ?? repo.mainRoot,
+    input: opts.input,
+    gitNoLazyFetch: localCommand(args),
+  });
 }
 
 const GITLINK_MESSAGE = "A gitlink (submodule) entry is in HEAD or the index; bin/wt refuses it.";

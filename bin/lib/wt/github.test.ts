@@ -50,7 +50,8 @@ async function scenario(
   fn: (ctx: Ctx) => void | Promise<void>,
   o: { withBin?: boolean; branch?: string | null } = {},
 ): Promise<void> {
-  const env = makeTestEnv();
+  // These Git/GitHub fixtures use local repositories and fake executables, never listeners.
+  const env = makeTestEnv({ ports: false });
   try {
     const fx = makeFixture(env, { withBin: o.withBin });
     fakeGithubOrigin(env, fx);
@@ -357,6 +358,7 @@ for (const failure of ["reflog", "merge-base"]) {
     scenario(({ fx, repo, env }) => {
       rmSync(join(env.fakeBin, "git"));
       installFake(env, "git", [
+        { match: ["--version"], stdout: "git version 2.44.0\n" },
         { match: ["symbolic-ref"], stdout: `refs/heads/${BRANCH}\n` },
         { match: ["rev-parse"], stdout: `${SHA}\n` },
         { match: ["remote", "get-url"], stdout: "synthetic-origin\n" },
@@ -1724,6 +1726,7 @@ for (const failure of ["reflog", "merge-base"]) {
       writeFileSync(join(fx.main, ".private-terms"), "alice example");
       rmSync(join(env.fakeBin, "git"));
       installFake(env, "git", [
+        { match: ["--version"], stdout: "git version 2.44.0\n" },
         { match: ["symbolic-ref"], stdout: `refs/heads/${BRANCH}\n` },
         { match: ["rev-parse"], stdout: `${SHA}\n` },
         { match: ["remote", "get-url"], stdout: "synthetic-origin\n" },
