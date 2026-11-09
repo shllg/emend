@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import * as fs from "node:fs";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { devNull, tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { runInNewContext } from "node:vm";
+import { runInNewContext, Script } from "node:vm";
 
 const hook = fileURLToPath(new URL("../.claude/hooks/guard-github-writes.ts", import.meta.url));
 const temp = mkdtempSync(path.join(tmpdir(), "github-guard-"));
@@ -13306,4 +13307,365 @@ test("R21 differential and no lost-denial invariant against f11fa3b and 06fc8a8"
   assert.equal(historical.reduce((sum, group) => sum + group.cases.length, 0), 1730);
   assert.equal(counts[0].rows, 1888, "all historical and final-round rows remain");
   t.diagnostic(JSON.stringify({ roundTwentyOneDifferential: counts, changes }));
+});
+
+// Strict input exception: only synthetic files and fixed git lookups; commands remain inert data.
+const strictQueries = {
+  reply: "mutation { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: \"T\", body: \"Synthetic\"}) { clientMutationId } }",
+  resolve: "mutation { resolveReviewThread(input: {threadId: \"T\"}) { clientMutationId } }",
+  read: "query { viewer { login } }",
+  issue: "mutation { updateIssue(input: {id: \"I\"}) { clientMutationId } }",
+  label: "mutation { createLabel(input: {name: \"synthetic\"}) { clientMutationId } }",
+  other: "mutation { closePullRequest(input: {pullRequestId: \"P\"}) { clientMutationId } }",
+  issueText: 'query { node(id: "updateIssue") { id } }',
+};
+const strictReady = new Set<string>();
+function strictFixtures(root: string): void {
+  if (strictReady.has(root)) return;
+  mkdirSync(`${root}/.wt/nested`, { recursive: true });
+  mkdirSync(`${root}/src`, { recursive: true });
+  for (const [name, query] of Object.entries(strictQueries))
+    writeFileSync(`${root}/.wt/${name}.json`, JSON.stringify({ query }));
+  const valid = JSON.stringify({ query: strictQueries.reply, variables: { input: { body: "Synthetic" }, query: { variables: "data" } } });
+  for (const file of ["variables.json", "nested/reply.json", "-reply.json", ".reply.json", "reply.txt", `${"a".repeat(100)}.json`, `${"a".repeat(101)}.json`])
+    writeFileSync(`${root}/.wt/${file}`, valid);
+  writeFileSync(`${root}/outside.json`, valid);
+  writeFileSync(`${root}/.wt/exact.json`, valid.padEnd(64 * 1024, " "));
+  writeFileSync(`${root}/.wt/oversize.json`, valid.padEnd(64 * 1024 + 1, " "));
+  writeFileSync(`${root}/.wt/extra.json`, JSON.stringify({ query: strictQueries.read, operationName: "Read" }));
+  writeFileSync(`${root}/.wt/invalid.json`, "{invalid JSON");
+  writeFileSync(`${root}/.wt/numeric.json`, '{"query":17}');
+  writeFileSync(`${root}/.wt/missing-query.json`, '{"variables":{}}');
+  writeFileSync(`${root}/.wt/array.json`, "[]");
+  writeFileSync(`${root}/.wt/null.json`, "null");
+  writeFileSync(`${root}/.wt/utf8.json`, Buffer.concat([Buffer.from('{"query":"query { viewer { login } }","variables":{"text":"'), Buffer.from([0xff]), Buffer.from('"}}')]));
+  const query = JSON.stringify(strictQueries.read);
+  for (const [name, json] of Object.entries({
+    "duplicate-query": `{"query":"mutation { updateIssue { id } }","query":${query}}`,
+    "duplicate-variables": `{"query":${query},"variables":{},"variables":{}}`,
+    "escaped-duplicate": `{"query":${query},"quer\\u0079":${query}}`,
+  })) writeFileSync(`${root}/.wt/${name}.json`, json);
+  fs.symlinkSync("reply.json", `${root}/.wt/link.json`);
+  fs.symlinkSync("../src", `${root}/.wt/linkdir`);
+  strictReady.add(root);
+}
+
+function strictChecker(source = hookSource, overrides: Record<string, unknown> = {}) {
+  const declarations = source.slice(0, source.indexOf("function decide(")).replace(/^import .*;\n/gm, "");
+  return runInNewContext(`${stripTypeScriptTypes(declarations)}\nstrictGraphqlInput`, {
+    ...fs, Buffer, TextDecoder, path, devNull, process: { env: { PATH: process.env.PATH } },
+    spawnSync: (program: string, args: string[], options: object) => {
+      assert.equal(program, "git");
+      assert.deepEqual(Array.from(args.filter((_, i) => i !== 1)), ["-C", "rev-parse", "--show-toplevel"]);
+      return spawnSync(program, args, options);
+    },
+    ...overrides,
+  }) as (command: string, cwd: unknown) => boolean;
+}
+const strictMatchLine = hookSource.split("\n").find(line => line.startsWith("  const match = /^gh api graphql "))!;
+const ignoreRawShape: [string, string][] = [[strictMatchLine, '  const match = [command, ".wt/reply.json"];']];
+const ignoreOperand: [string, string][] = [[
+  'if (!/^\\.wt\\/[A-Za-z0-9][A-Za-z0-9._-]{0,99}\\.json$/.test(relative)) return false;', "",
+]];
+const ignoreSchema: [string, string][] = [["const body = JSON.parse(json);", `const body = {query: ${JSON.stringify(strictQueries.read)}};`]];
+
+const strictRawCases: [string, string[]][] = [
+  ["compound command", ["; ", " && ", " || ", "\n", " | ", " & "].flatMap(separator => [
+    `node writer.js${separator}gh api graphql --input .wt/reply.json`,
+    `gh api graphql --input .wt/reply.json${separator}node writer.js`,
+  ])],
+  ["assignments and wrappers", ["A=1 ", "env ", "sudo "].map(prefix => `${prefix}gh api graphql --input .wt/reply.json`)],
+  ["expansion prefixes", ["$PWD", "${PWD}", "$(pwd)", "$HOME", "~"].flatMap(prefix => [
+    `gh api graphql --input ${prefix}/.wt/reply.json`, `gh api graphql --input '${prefix}/.wt/reply.json'`,
+  ])],
+  ["quoting and escapes", [
+    'gh api graphql --input ".wt/reply.json"', "gh api graphql --input .wt/repl\\y.json",
+    "gh api graphql --input '.wt/rep'ly.json'", "gh api graphql --input .wt/reply.json # comment",
+    "(gh api graphql --input .wt/reply.json)", "gh api graphql --input `pwd`/.wt/reply.json",
+    "gh api graphql --input .wt/reply.json > output", "gh api graphql --input .wt/reply.json < input",
+  ]],
+  ["extra flags", ["--input .wt/read.json", "-f query=x", "-F query=x", "-X POST", "--paginate", "-H x:y", "--other"].map(flag => `gh api graphql --input .wt/reply.json ${flag}`)],
+  ["hostname and spacing", [
+    "gh api graphql --input .wt/reply.json --hostname example.com",
+    "gh api graphql --hostname github.com --input .wt/reply.json --hostname github.com",
+    " gh api graphql --input .wt/reply.json", "gh  api graphql --input .wt/reply.json",
+    "gh api graphql --input .wt/reply.json ", "gh api graphql --input .wt/reply.json\n",
+    "gh api graphql\t--input .wt/reply.json",
+  ]],
+];
+
+for (const [layout, root] of [["main", main], ["worktree", worker]] as const) {
+  test(`Strict input ${layout}: allowed forms (mutation: remove the exception)`, () => {
+    strictFixtures(root);
+    const check = strictChecker();
+    const mutant = strictChecker(mutate(hookSource, [["return !issueMutation.test(body.query) && !graphqlWrite(body.query);", "return false;"]]));
+    let count = 0;
+    for (const file of ["reply", "resolve", "read", "variables", "exact", "a".repeat(100)])
+      for (const operand of [`.wt/${file}.json`, `${root}/.wt/${file}.json`])
+        for (const quoted of [operand, `'${operand}'`])
+          for (const separator of [" ", "="])
+            for (const parts of [
+              `--input${separator}${quoted}`, `--hostname github.com --input${separator}${quoted}`,
+              `--input${separator}${quoted} --hostname=github.com`,
+              `--hostname=github.com --input${separator}${quoted}`, `--input${separator}${quoted} --hostname github.com`,
+            ]) {
+              const command = `gh api graphql ${parts}`;
+              assert.equal(check(command, root), true, command);
+              assert.equal(mutant(command, root), false, command);
+              count++;
+            }
+    assert.equal(count, 240);
+    assert.equal(check(`gh api graphql --input '${root}/.wt/reply.json'`, `${root}/src`), true);
+  });
+  for (const [name, commands] of strictRawCases) test(`Strict input ${layout}: ${name} (mutation: bypass raw pattern)`, () => {
+    strictFixtures(root);
+    const check = strictChecker();
+    const mutant = strictChecker(mutate(hookSource, ignoreRawShape));
+    for (const command of commands) {
+      assert.equal(check(command, root), false, command);
+      assert.equal(mutant(command, root), true, command);
+    }
+    // Raw failures must not even run the git lookup.
+    let lookups = 0;
+    const noLookup = strictChecker(hookSource, { spawnSync: () => { lookups++; throw new Error("raw failure reached git"); } });
+    for (const command of commands) assert.equal(noLookup(command, root), false);
+    assert.equal(lookups, 0);
+  });
+  const pins: { name: string; operand: string; mutation: [string, string][]; cwd?: string; overrides?: Record<string, unknown> }[] = [
+    ...["nested/reply.json", "nested/../reply.json", "./reply.json", "-reply.json", ".reply.json", "reply.txt", `${"a".repeat(101)}.json`].map(file => ({
+      name: `literal file shape ${file}`, operand: `.wt/${file}`, mutation: ignoreOperand,
+    })),
+    { name: "outside .wt", operand: "outside.json", mutation: ignoreOperand },
+    { name: "relative from subfolder", operand: ".wt/reply.json", cwd: `${root}/src`, mutation: [["if (relative === operand && cwd !== root) return false;", ""]] },
+    { name: "symlinked file", operand: ".wt/link.json", mutation: [[" | constants.O_NOFOLLOW", ""]] },
+    { name: "oversize", operand: ".wt/oversize.json", mutation: [["const limit = 64 * 1024;", "const limit = 128 * 1024;"]] },
+    { name: "growth", operand: ".wt/oversize.json", overrides: { fstatSync: () => ({ size: 0, isFile: () => true }) }, mutation: [["if (length > limit) return false;", ""]] },
+    { name: "extra key", operand: ".wt/extra.json", mutation: [["key !== \"query\" && key !== \"variables\"", "key !== \"query\" && key !== \"variables\" && key !== \"operationName\""]] },
+    ...["duplicate-query", "duplicate-variables", "escaped-duplicate"].map(file => ({ name: file, operand: `.wt/${file}.json`, mutation: [["if (keys.has(key)) return false;", ""]] as [string, string][] })),
+    ...["invalid", "numeric", "missing-query", "null", "array"].map(file => ({ name: `${file} JSON body`, operand: `.wt/${file}.json`, mutation: ignoreSchema })),
+    { name: "UTF-8", operand: ".wt/utf8.json", mutation: [["{ fatal: true }", "{ fatal: false }"]] },
+    ...["issue", "label"].map(file => ({ name: `${file} mutation`, operand: `.wt/${file}.json`, mutation: [["return !issueMutation.test(body.query) && !graphqlWrite(body.query);", "return true;"]] as [string, string][] })),
+    { name: "issue text", operand: ".wt/issueText.json", mutation: [["!issueMutation.test(body.query) && ", ""]] },
+    { name: "other mutation", operand: ".wt/other.json", mutation: [["!graphqlWrite(body.query)", "true"]] },
+    { name: "regular file", operand: ".wt/reply.json", overrides: { fstatSync: () => ({ size: 0, isFile: () => false }) }, mutation: [["!stat.isFile() || ", ""]] },
+  ];
+  for (const pin of pins) test(`Strict input ${layout}: ${pin.name} (mutation: remove its restriction)`, () => {
+    strictFixtures(root);
+    const command = `gh api graphql --input ${pin.operand}`;
+    assert.equal(strictChecker(hookSource, pin.overrides)(command, pin.cwd ?? root), false);
+    assert.equal(strictChecker(mutate(hookSource, pin.mutation), pin.overrides)(command, pin.cwd ?? root), true);
+  });
+  test(`Strict input ${layout}: stdin, wrong root, repeated slash, symlink traversal (mutation: normalize operands)`, () => {
+    strictFixtures(root);
+    const check = strictChecker();
+    const mutant = strictChecker(mutate(hookSource, [["const operand = raw.startsWith(\"'\") ? raw.slice(1, -1) : raw;", 'const operand = ".wt/reply.json";']]));
+    for (const operand of ["-", "../.wt/reply.json", `${noRepo}/.wt/reply.json`, `${root}//.wt/reply.json`, ".wt/linkdir/../reply.json"])
+      for (const separator of [" ", "="]) {
+        const command = `gh api graphql --input${separator}${operand}`;
+        assert.equal(check(command, root), false, command);
+        assert.equal(mutant(command, root), true, command);
+      }
+  });
+}
+
+test("Strict input: root characters and dot segments (mutations: drop root validation)", () => {
+  strictFixtures(main);
+  for (const root of ["/synthetic/root space", "/synthetic/root@name", "/synthetic/root\n", "relative-root", "/synthetic/./root", "/synthetic/../root"]) {
+    const overrides = {
+      spawnSync: () => ({ status: 0, stdout: `${root}\n` }),
+      lstatSync: () => fs.lstatSync(`${main}/.wt`),
+      realpathSync: (value: string) => value === root ? main : `${main}/.wt`,
+      openSync: (_file: string, flags: number) => fs.openSync(`${main}/.wt/reply.json`, flags),
+    };
+    const mutation: [string, string][] = [[
+      'if (!/^\\/[A-Za-z0-9._/-]+(?![\\s\\S])/.test(root) || root.split("/").some(part => part === "." || part === "..") || operand.includes("//")) return false;', "",
+    ]];
+    assert.equal(strictChecker(hookSource, overrides)("gh api graphql --input .wt/reply.json", root), false);
+    assert.equal(strictChecker(mutate(hookSource, mutation), overrides)("gh api graphql --input .wt/reply.json", root), true);
+  }
+});
+
+test("Strict input: directory links and realpath containment (mutations: follow links / omit containment)", () => {
+  strictFixtures(main);
+  const root = `${temp}/directory-link`;
+  mkdirSync(root);
+  fs.symlinkSync(`${main}/.wt`, `${root}/.wt`);
+  const directoryGuard = 'if (!lstatSync(directory).isDirectory() || realpathSync(directory) !== `${realpathSync(root)}/.wt`) return false;';
+  const command = "gh api graphql --input .wt/reply.json";
+  const overrides = { spawnSync: () => ({ status: 0, stdout: `${root}\n` }) };
+  assert.equal(strictChecker(hookSource, overrides)(command, root), false);
+  assert.equal(strictChecker(mutate(hookSource, [[directoryGuard, ""]]), overrides)(command, root), true);
+  const moved = { realpathSync: (value: string) => value.endsWith("/.wt") ? `${temp}/elsewhere` : main };
+  assert.equal(strictChecker(hookSource, moved)(command, main), false);
+  assert.equal(strictChecker(mutate(hookSource, [[directoryGuard, 'if (!lstatSync(directory).isDirectory()) return false;']]), moved)(command, main), true);
+});
+
+test("Strict input: bounded, nonblocking reads (mutations: allocate more / omit O_NONBLOCK)", () => {
+  strictFixtures(main);
+  const measure = (source: string) => {
+    const lengths: number[] = [];
+    let bytes = 0;
+    const check = strictChecker(source, {
+      fstatSync: () => ({ size: 0, isFile: () => true }),
+      readSync: (fd: number, buffer: Buffer, offset: number, length: number, position: number | null) => {
+        lengths.push(length);
+        const count = fs.readSync(fd, buffer, offset, length, position);
+        bytes += count;
+        return count;
+      },
+    });
+    assert.equal(check("gh api graphql --input .wt/oversize.json", main), false);
+    assert.ok(Math.max(...lengths) <= 65537);
+    assert.equal(bytes, 65537);
+  };
+  measure(hookSource);
+  assert.throws(() => measure(mutate(hookSource, [["Buffer.alloc(limit + 1)", "Buffer.alloc(limit * 2 + 1)"]])), assert.AssertionError);
+  const flags = { openSync: (file: string, value: number) => {
+    assert.ok(value & fs.constants.O_NONBLOCK);
+    return fs.openSync(file, value);
+  } };
+  assert.equal(strictChecker(hookSource, flags)("gh api graphql --input .wt/reply.json", main), true);
+  assert.equal(strictChecker(mutate(hookSource, [[" | constants.O_NONBLOCK", ""]]), flags)("gh api graphql --input .wt/reply.json", main), false);
+});
+
+test("Strict input: failures retain write (mutation: allow in catch)", () => {
+  strictFixtures(main);
+  const command = "gh api graphql --input .wt/reply.json";
+  const mutation: [string, string][] = [['  } catch {\n    return false;\n  }\n}\n\nfunction decide(', '  } catch {\n    return true;\n  }\n}\n\nfunction decide(']];
+  for (const method of ["spawnSync", "lstatSync", "realpathSync", "openSync", "fstatSync", "readSync", "closeSync"]) {
+    const overrides = { [method]: (...args: unknown[]) => {
+      if (method === "closeSync") fs.closeSync(args[0] as number);
+      throw new Error("synthetic I/O failure");
+    } };
+    assert.equal(strictChecker(hookSource, overrides)(command, main), false, method);
+    assert.equal(strictChecker(mutate(hookSource, mutation), overrides)(command, main), true, method);
+  }
+  assert.equal(strictChecker()("gh api graphql --input .wt/missing.json", main), false);
+  assert.equal(strictChecker()(command, noRepo), false);
+  assert.equal(strictChecker()(command, undefined), false);
+});
+
+test("Strict input: failed git result (mutation: ignore lookup status)", () => {
+  strictFixtures(main);
+  const mutation: [string, string][] = [['if (git.error || git.status !== 0 || typeof git.stdout !== "string") return false;', ""]];
+  for (const failure of [{ status: 1 }, { status: 0, error: new Error("synthetic lookup failure") }]) {
+    const overrides = { spawnSync: () => ({ stdout: `${main}\n`, ...failure }) };
+    const command = "gh api graphql --input .wt/reply.json";
+    assert.equal(strictChecker(hookSource, overrides)(command, main), false);
+    assert.equal(strictChecker(mutate(hookSource, mutation), overrides)(command, main), true);
+  }
+});
+
+let strictHead: string | undefined;
+function strictHeadSource(): string {
+  if (strictHead === undefined) {
+    const result = spawnSync("git", ["show", "HEAD:.claude/hooks/guard-github-writes.ts"], { encoding: "utf8", env, timeout: 5000 });
+    assert.equal(result.status, 0, result.error?.message ?? result.stderr);
+    strictHead = result.stdout;
+  }
+  return strictHead;
+}
+
+function strictEventRunner(source: string) {
+  const program = new Script(stripTypeScriptTypes(source.replace(/^import .*;\n/gm, "")));
+  return (root: string | undefined, input: string, extraEnv: Record<string, string> = {}) => {
+    let stdout = "";
+    program.runInNewContext({
+      ...fs, Buffer, TextDecoder, path, devNull, tmpdir: () => extraEnv.TMPDIR ?? tmpdir(),
+      spawnSync: (program: string, args: string[], options: object) => {
+        assert.equal(program, "git");
+        assert.equal(args[0], "-C");
+        assert.equal(args[2], "rev-parse");
+        assert.ok(["--show-toplevel", "--path-format=absolute"].includes(args[3]));
+        return spawnSync(program, args, options);
+      },
+      readFileSync: (file: unknown) => { assert.equal(file, 0); return input; },
+      process: {
+        env: { PATH: process.env.PATH, ...(root === undefined ? {} : { CLAUDE_PROJECT_DIR: root }), ...extraEnv },
+        stdout: { write: (text: string) => { stdout += text; } },
+        stderr: { write: (text: string) => assert.fail(text) },
+        exit: (code: number) => assert.fail(`unexpected exit ${code}`),
+      },
+    });
+    return { status: 0, stderr: "", stdout };
+  };
+}
+
+test("Strict input: hook decisions in both layouts (mutation: disconnect decision-point check)", () => {
+  const before = strictEventRunner(strictHeadSource());
+  const after = strictEventRunner(hookSource);
+  const mutant = strictEventRunner(mutate(hookSource, [[' && !strictGraphqlInput(command, input.cwd)', ""]]));
+  for (const root of [main, worker]) {
+    strictFixtures(root);
+    for (const file of ["reply", "resolve", "read", "exact"])
+      for (const operand of [`.wt/${file}.json`, `${root}/.wt/${file}.json`]) {
+        const input = call(`gh api graphql --hostname github.com --input '${operand}'`, root);
+        assert.equal(after(root, input).stdout, "");
+        assert.notEqual(mutant(root, input).stdout, "");
+      }
+    const negatives = [
+      ...strictRawCases.flatMap(([, commands]) => commands),
+      ...["issue", "label", "other", "link", "oversize", "extra", "duplicate-query", "duplicate-variables", "escaped-duplicate", "invalid", "numeric", "missing-query", "missing"].map(file => `gh api graphql --input .wt/${file}.json`),
+      ...["-", "../.wt/reply.json", ".wt/nested/reply.json", ".wt/./reply.json", ".wt/linkdir/../reply.json", "outside.json"].map(operand => `gh api graphql --input ${operand}`),
+      "gh api graphql --input=-",
+    ];
+    for (const command of negatives) {
+      const input = call(command, root);
+      assert.equal(after(root, input).stdout, before(root, input).stdout, command);
+    }
+    const input = call("gh api graphql --input .wt/reply.json", `${root}/src`);
+    assert.equal(after(root, input).stdout, before(root, input).stdout);
+  }
+});
+
+test("Strict input: every existing corpus decision equals HEAD", (t) => {
+  const head = strictHeadSource();
+  const analysis = (source: string) => source.slice(source.indexOf("type Finding ="), source.indexOf("function mainCheckout("));
+  assert.equal(analysis(hookSource), analysis(head), "all existing analysis must remain byte-for-byte unchanged");
+  const baseline = classifier(head);
+  const check = strictChecker();
+  const rows = new Map<string, string>();
+  const compare = (command: string, locations = classifierLocations) => {
+    const before = baseline(command, locations);
+    const finding = classify(command, locations);
+    const after = finding === "write" && check(command, locations.cwd) ? undefined : finding;
+    assert.equal(after, before, command);
+    rows.set(JSON.stringify([command, locations]), command);
+    return after;
+  };
+  // Replay the existing test registrations with in-memory hook calls. Mutant classifiers stay
+  // separate; only calls to the unchanged classifier contribute to the HEAD differential.
+  const pure = `${stripTypeScriptTypes(hookSource.slice(0, hookSource.indexOf("function mainCheckout(")).replace(/^import .*;\n/gm, ""))}\ninspect`;
+  const registered: { name: string; run: (t: { diagnostic: (message: string) => void }) => void }[] = [];
+  const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
+  const existing = source.slice(source.indexOf("const everydayEleven ="), source.indexOf("// Strict input exception:"));
+  const event = strictEventRunner(hookSource);
+  runInNewContext(stripTypeScriptTypes(existing.replaceAll("import.meta.url", JSON.stringify(import.meta.url))), {
+    assert, path, createHash, stripTypeScriptTypes, performance, hook, main, worker, noRepo, temp,
+    readFileSync: (file: string) => { assert.equal(file, hook); return hookSource; },
+    runInNewContext: (code: string, globals: object) => code === pure
+      ? (command: string, _depth: number, context: { locations?: typeof classifierLocations }) => compare(command, context.locations)
+      : runInNewContext(code, globals),
+    decision: (root: string, command: string) => {
+      const finding = compare(command, { cwd: root, projectDir: root, home: "/users/synthetic" });
+      return finding === undefined ? undefined : finding === "write" && root === main ? "ask" : "deny";
+    },
+    call,
+    run: (root: string | undefined, input: string, extraEnv: Record<string, string> = {}) => {
+      const parsed = JSON.parse(input);
+      compare(parsed.tool_input.command, { cwd: parsed.cwd, projectDir: root ?? parsed.cwd, home: extraEnv.HOME ?? "/users/synthetic" });
+      return event(root, input, extraEnv);
+    },
+    test: (name: string, run: (t: { diagnostic: (message: string) => void }) => void) => registered.push({ name, run }),
+  });
+  let tests = 0;
+  for (const entry of registered) {
+    if (!/^(R\d|no decision:|ask main \/ deny worker:|deny everywhere:)/.test(entry.name) ||
+        /^R7 settings/.test(entry.name) || /timing/.test(entry.name)) continue;
+    entry.run({ diagnostic: () => {} });
+    tests++;
+  }
+  assert.ok(tests > 2700);
+  assert.ok(new Set(rows.values()).size > 4000);
+  t.diagnostic(JSON.stringify({ baseline: "HEAD", tests, commands: new Set(rows.values()).size, contexts: rows.size, changedDecisions: 0 }));
 });

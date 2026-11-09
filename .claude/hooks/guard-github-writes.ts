@@ -54,9 +54,10 @@
 // characters, 32768 work units, 256 path ancestors, and 512 code/config bindings. Literal
 // values/brace products also have fixed bounds. No inspected command or probe is executed.
 // bin/wt is trusted code read from the main checkout. Never execute the inspected command.
+// Strict GraphQL --input allows .wt JSON; earlier background jobs can race the check and gh's read.
 // Requires Node with native type stripping (the repo requires Node 24 or newer).
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readSync, realpathSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import path from "node:path";
 
@@ -4195,6 +4196,65 @@ function mainCheckout(cwd: unknown): boolean {
   );
 }
 
+function strictGraphqlInput(command: string, cwd: unknown): boolean {
+  // Match raw text, without shell parsing, expansion, path normalization, or a newline-tolerant $.
+  const match = /^gh api graphql (?:(?:--hostname[ =]github\.com )?--input[ =]('[A-Za-z0-9._/-]+'|[A-Za-z0-9._/-]+)|--input[ =]('[A-Za-z0-9._/-]+'|[A-Za-z0-9._/-]+) --hostname[ =]github\.com)(?![\s\S])/.exec(command);
+  if (!match || typeof cwd !== "string") return false;
+  const raw = match[1] ?? match[2];
+  const operand = raw.startsWith("'") ? raw.slice(1, -1) : raw;
+  try {
+    const git = spawnSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 1500, maxBuffer: 64 * 1024,
+      env: { PATH: process.env.PATH, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: devNull },
+    });
+    if (git.error || git.status !== 0 || typeof git.stdout !== "string") return false;
+    const root = git.stdout.replace(/\n$/, "");
+    if (!/^\/[A-Za-z0-9._/-]+(?![\s\S])/.test(root) || root.split("/").some(part => part === "." || part === "..") || operand.includes("//")) return false;
+    const relative = operand.startsWith(`${root}/`) ? operand.slice(root.length + 1) : operand;
+    if (!/^\.wt\/[A-Za-z0-9][A-Za-z0-9._-]{0,99}\.json$/.test(relative)) return false;
+    if (relative === operand && cwd !== root) return false;
+    const directory = `${root}/.wt`;
+    if (!lstatSync(directory).isDirectory() || realpathSync(directory) !== `${realpathSync(root)}/.wt`) return false;
+    const fd = openSync(`${root}/${relative}`, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const limit = 64 * 1024;
+      const stat = fstatSync(fd);
+      if (!stat.isFile() || stat.size > limit) return false;
+      const buffer = Buffer.alloc(limit + 1);
+      let length = 0;
+      while (length < buffer.length) {
+        const count = readSync(fd, buffer, length, buffer.length - length, null);
+        if (!count) break;
+        length += count;
+      }
+      if (length > limit) return false;
+      const json = new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, length));
+      const body = JSON.parse(json);
+      if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.query !== "string" ||
+          Object.keys(body).some(key => key !== "query" && key !== "variables")) return false;
+      // JSON.parse validates syntax; scan its string/structural tokens to retain top-level duplicates.
+      const tokens = json.match(/"(?:\\.|[^"\\])*"|[{}[\]:]/g) ?? [];
+      const keys = new Set<string>();
+      let depth = 0;
+      for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+        if (token === "{" || token === "[") depth++;
+        else if (token === "}" || token === "]") depth--;
+        else if (depth === 1 && tokens[i + 1] === ":") {
+          const key = JSON.parse(token);
+          if (keys.has(key)) return false;
+          keys.add(key);
+        }
+      }
+      return !issueMutation.test(body.query) && !graphqlWrite(body.query);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return false;
+  }
+}
+
 function decide(permissionDecision: "ask" | "deny", permissionDecisionReason: string): void {
   process.stdout.write(
     `${JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision, permissionDecisionReason } })}\n`,
@@ -4234,7 +4294,7 @@ if (typeof command === "string") {
       "deny",
       "Agents never change guard hooks, Claude settings, or git metadata used to locate the hooks. Workers change worktrees only through bin/wt. These direct changes are denied in the main checkout too; the owner maintains the guard.",
     );
-  } else if (finding === "write") {
+  } else if (finding === "write" && !strictGraphqlInput(command, input.cwd)) {
     if (mainCheckout(input.cwd)) {
       decide(
         "ask",
