@@ -1391,10 +1391,12 @@ function codeConfigKey(key: string): boolean {
   );
 }
 
-function configSettingUnsafe(key: string, value?: string): boolean {
+function configSettingUnsafe(key: string, value?: string, commandLine = false): boolean {
+  // Only -c core.fsmonitor=false disables the monitor without changing stored configuration.
   return (
     codeConfigKey(key) &&
-    !(key.toLowerCase() === "core.pager" && value !== undefined && ["cat", "less", ""].includes(value))
+    !(key.toLowerCase() === "core.pager" && value !== undefined && ["cat", "less", ""].includes(value)) &&
+    !(commandLine && key.toLowerCase() === "core.fsmonitor" && value === "false")
   );
 }
 
@@ -1712,7 +1714,7 @@ function gitFinding(args: string[], environment = new Map<string, string>()): Fi
       const key = equals < 0 ? setting : setting.slice(0, equals);
       const raw = equals < 0 ? undefined : setting.slice(equals + 1);
       const value = flag.name === "--config-env" ? environment.get(raw ?? "") : raw;
-      if (configSettingUnsafe(key, value)) config = "tamper";
+      if (configSettingUnsafe(key, value, flag.name === "-c")) config = "tamper";
     }
     i = flag.next;
   }

@@ -6806,8 +6806,8 @@ const roundFifteenMutations: { name: string; command: string; expected: Finding;
     expected: undefined,
     disable: [
       [
-        "function configSettingUnsafe(key: string, value?: string): boolean {",
-        "function configSettingUnsafe(key: string, value?: string): boolean { return codeConfigKey(key);",
+        "function configSettingUnsafe(key: string, value?: string, commandLine = false): boolean {",
+        "function configSettingUnsafe(key: string, value?: string, commandLine = false): boolean { return codeConfigKey(key);",
       ],
     ],
   },
@@ -13620,8 +13620,12 @@ test("Strict input: hook decisions in both layouts (mutation: disconnect decisio
 
 test("Strict input: every existing corpus decision equals HEAD", (t) => {
   const head = strictHeadSource();
-  const analysis = (source: string) => source.slice(source.indexOf("type Finding ="), source.indexOf("function mainCheckout("));
-  assert.equal(analysis(hookSource), analysis(head), "all existing analysis must remain byte-for-byte unchanged");
+  const analysis = (source: string) => source.slice(source.indexOf("type Finding ="), source.indexOf("function mainCheckout("))
+    .replace("value?: string, commandLine = false", "value?: string")
+    .replace("  // Only -c core.fsmonitor=false disables the monitor without changing stored configuration.\n", "")
+    .replace(' &&\n    !(commandLine && key.toLowerCase() === "core.fsmonitor" && value === "false")', "")
+    .replace('configSettingUnsafe(key, value, flag.name === "-c")', "configSettingUnsafe(key, value)");
+  assert.equal(analysis(hookSource), analysis(head), "analysis outside the narrow fsmonitor exemption stays byte-for-byte unchanged");
   const baseline = classifier(head);
   const check = strictChecker();
   const rows = new Map<string, string>();
@@ -13669,3 +13673,66 @@ test("Strict input: every existing corpus decision equals HEAD", (t) => {
   assert.ok(new Set(rows.values()).size > 4000);
   t.diagnostic(JSON.stringify({ baseline: "HEAD", tests, commands: new Set(rows.values()).size, contexts: rows.size, changedDecisions: 0 }));
 });
+
+// Commands are inert test inputs; even the work-loop status command is never executed.
+const fsmonitorExemption = 'commandLine && key.toLowerCase() === "core.fsmonitor" && value === "false"';
+for (const [layout, root] of [["main", main], ["worktree", worker]] as const) {
+  const locations = { cwd: root, projectDir: root, home: "/users/synthetic" };
+  test(`Fsmonitor ${layout}: literal false disables the monitor (mutation: remove exemption)`, () => {
+    const event = strictEventRunner(hookSource);
+    const mutant = classifier(mutate(hookSource, [[fsmonitorExemption, "false"]]));
+    for (const key of ["core.fsmonitor", "CORE.FSMONITOR", "CoRe.FsMoNiToR"])
+      for (const directory of ["", ` -C '${worker}'`]) {
+        const command = `git -c ${key}=false${directory} status --porcelain`;
+        assert.equal(classify(command, locations), undefined, command);
+        assert.equal(event(root, call(command, root)).stdout, "", command);
+        assert.equal(mutant(command, locations), "tamper", command);
+      }
+  });
+  test(`Fsmonitor ${layout}: every other value denies (mutation: exempt any value)`, () => {
+    const event = strictEventRunner(hookSource);
+    const baseline = classifier(strictHeadSource());
+    const mutant = classifier(mutate(hookSource, [[fsmonitorExemption, 'commandLine && key.toLowerCase() === "core.fsmonitor"']]));
+    for (const value of [undefined, "", "true", "/synthetic/bin/fsmonitor", "synthetic-monitor --watch", "FALSE", "0", "no", "off", "false "]) {
+      const setting = value === undefined ? "core.fsmonitor" : `'core.fsmonitor=${value}'`;
+      const command = `git -c ${setting} status --porcelain`;
+      assert.equal(baseline(command, locations), "tamper", command);
+      assert.equal(classify(command, locations), "tamper", command);
+      assert.equal(JSON.parse(event(root, call(command, root)).stdout).hookSpecificOutput.permissionDecision, "deny", command);
+      assert.equal(mutant(command, locations), undefined, command);
+    }
+  });
+  test(`Fsmonitor ${layout}: only -c may disable (mutation: exempt other configuration sources)`, () => {
+    const event = strictEventRunner(hookSource);
+    const baseline = classifier(strictHeadSource());
+    const mutant = classifier(mutate(hookSource, [[fsmonitorExemption, 'key.toLowerCase() === "core.fsmonitor" && value === "false"']]));
+    for (const command of [
+      "MONITOR=false git --config-env=core.fsmonitor=MONITOR status --porcelain",
+      "MONITOR=false git --config-env core.fsmonitor=MONITOR status --porcelain",
+      "git config core.fsmonitor false",
+      "git config set CORE.FSMONITOR false",
+      "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false git status --porcelain",
+      "GIT_CONFIG_PARAMETERS=\"'core.fsmonitor=false'\" git status --porcelain",
+    ]) {
+      assert.equal(baseline(command, locations), "tamper", command);
+      assert.equal(classify(command, locations), "tamper", command);
+      assert.equal(JSON.parse(event(root, call(command, root)).stdout).hookSpecificOutput.permissionDecision, "deny", command);
+      assert.equal(mutant(command, locations), undefined, command);
+    }
+  });
+  test(`Fsmonitor ${layout}: unsafe -c survives either ordering (mutation: exempt any value)`, () => {
+    const event = strictEventRunner(hookSource);
+    const baseline = classifier(strictHeadSource());
+    const mutant = classifier(mutate(hookSource, [[fsmonitorExemption, 'commandLine && key.toLowerCase() === "core.fsmonitor"']]));
+    for (const settings of [
+      "-c core.fsmonitor=false -c core.fsmonitor=/synthetic/bin/fsmonitor",
+      "-c core.fsmonitor=/synthetic/bin/fsmonitor -c core.fsmonitor=false",
+    ]) {
+      const command = `git ${settings} status`;
+      assert.equal(baseline(command, locations), "tamper", command);
+      assert.equal(classify(command, locations), "tamper", command);
+      assert.equal(JSON.parse(event(root, call(command, root)).stdout).hookSpecificOutput.permissionDecision, "deny", command);
+      assert.equal(mutant(command, locations), undefined, command);
+    }
+  });
+}
