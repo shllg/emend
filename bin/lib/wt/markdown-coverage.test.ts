@@ -401,6 +401,43 @@ const rawContextRefusals = [
   "> > Note\n2. Step\n   * [ ] Check",
 ];
 
+// Round 23: bracket categories and grapheme counts define the same short box.
+const unicodeBracketRefusals = [
+  ["full-width brackets", "- ［x］ Check"],
+  ["CJK brackets", "- 【x】 Do"],
+  ["look-alike hyphen and brackets", "‐ ［ ］ Do"],
+  ["mixed opening bracket", "- ［x] Check"],
+  ["mixed closing bracket", "- [x］ Check"],
+  ["full-width parentheses", "- （x） Check"],
+  ["full-width braces", "- ｛x｝ Check"],
+  ["CJK quote accepted cost", "日本「は」"],
+] as const;
+
+const graphemeBoxRefusals = [
+  ["1 grapheme with 2 overlays", "- [x\u0338\u0338] Check", 3],
+  ["1 grapheme with 3 overlays", "- [x\u0338\u0338\u0338] Check", 4],
+  ["2 graphemes with 2 overlays each", "- [x\u0338\u0338x\u0338\u0338] Check", 6],
+  ["2 graphemes with 3 overlays each", "- [x\u0338\u0338\u0338x\u0338\u0338\u0338] Check", 8],
+  ["3 graphemes with 2 overlays each", "- [x\u0338\u0338x\u0338\u0338x\u0338\u0338] Check", 9],
+  ["3 graphemes with 3 overlays each", "- [x\u0338\u0338\u0338x\u0338\u0338\u0338x\u0338\u0338\u0338] Check", 12],
+] as const;
+
+const round23Controls = [
+  "See (1) and (2).",
+  "- [ ] café — ok",
+  "He wrote: […] and left",
+  "• Done [x]",
+  "- (é) Check",
+  "- {é} Check",
+  "- ［］ Check",
+  "- [ ] [х] Check",
+  "‐ [link] [x] Do B",
+  "‐ [abcd] [x] Do B",
+  "- [[x]] B",
+  "- [x\u0338\u0338x\u0338\u0338x\u0338\u0338x\u0338\u0338] Check",
+  "- [x\u0338\u0338\u0338x\u0338\u0338\u0338x\u0338\u0338\u0338x\u0338\u0338\u0338] Check",
+];
+
 // Round 22: the structural rule replaces per-glyph guesses around short boxes.
 const lookAlikeBoxRefusals = [
   ["H1-hyphen-2010-lazy", "- [ ] Do A\n\u2010 [x] Do B"],
@@ -654,6 +691,9 @@ const sourceBoxWitnesses = [
 ];
 
 const hostile = [
+  ...[...unicodeBracketRefusals, ...graphemeBoxRefusals].map(
+    ([, body]) => ["look-alike task box", body, "checker only"] as const,
+  ),
   ...[...lookAlikeBoxRefusals, ...lookAlikeCorpusRefusals].map(
     ([, body]) => ["look-alike task box", body, "checker only"] as const,
   ),
@@ -902,6 +942,7 @@ const containerFences = [
 // These owner forms must stay accepted; markdown-security.test.ts also asserts
 // them through issue evaluation. The mixed corpus below retains refusal cases too.
 const ownerBodies = [
+  ...round23Controls,
   ...restoredBodies,
   ...realListControls,
   "2. Step\n   - [ ] Parent\n     - [ ] First\n     - [ ] Second",
@@ -1690,10 +1731,45 @@ test("each individual rule has a mutation witness", async (t) => {
   // editing its file. Each replacement must name exactly one existing guard.
   const checkerSource = await readFile(new URL("./markdown.ts", import.meta.url), "utf8");
   const mutations = [
+    ...unicodeBracketRefusals.map(([name, body]) => ({
+      name: `round 23 Unicode brackets ${name}`,
+      from: String.raw`(?:\[|(?=\P{ASCII})\p{Ps})((?:[^\p{Ps}\p{Pe}]|[(){}])*)(?:\]|(?=\P{ASCII})\p{Pe})`,
+      to: String.raw`\[([^[\]]*)\]`,
+      body,
+      kind: "look-alike task box",
+      checkerOnly: true,
+    })),
+    ...graphemeBoxRefusals.map(([name, body, points]) => ({
+      name: `round 23 grapheme count ${name}`,
+      // The two-overlay, one-grapheme case already fit the old code-point
+      // bound. It pins the existing predicate; the others kill point counting.
+      from:
+        points <= 3
+          ? String.raw`!/[A-Za-z]/u.test(prefix) && /\P{ASCII}/u.test(prefix + box[0])`
+          : "[...BOX_GRAPHEMES.segment(content)].length",
+      to: points <= 3 ? "false" : "[...content].length",
+      body,
+      kind: "look-alike task box",
+      checkerOnly: true,
+    })),
     {
-      name: "round 22 short boxes count code points",
-      from: String.raw`/\[[^[\]]{1,3}\]/u.exec(line)`,
-      to: String.raw`/\[[^[\]]{1,3}\]/.exec(line)`,
+      name: "round 23 only the first short group is judged",
+      from: "break; // Only the first short group is judged.",
+      to: "",
+      body: "- [ ] [х] Check",
+      kind: null,
+    },
+    ...round23Controls.slice(-2).map((body) => ({
+      name: `round 23 four graphemes stay outside the bound: ${body}`,
+      from: "count > 3",
+      to: "count > 4",
+      body,
+      kind: null,
+    })),
+    {
+      name: "round 22 supplementary characters count once",
+      from: "[...BOX_GRAPHEMES.segment(content)].length",
+      to: "content.length",
       body: "- [😀😀] Check",
       kind: "look-alike task box",
       checkerOnly: true,

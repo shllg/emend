@@ -94,7 +94,9 @@ owner's OK.
    them. Emoji keep their joiners, skin tones, keycaps and emoji selectors; tag sequences such as
    subdivision flags are refused. Write task boxes in ASCII only, `- [ ]` and `- [x]`: a bracket
    group of one to three characters after text with no ASCII letter is refused when that text or
-   the group holds any non-ASCII character. Tell the owner where they were.
+   the group holds any non-ASCII character. Full-width and CJK brackets count as brackets, so this
+   also refuses CJK citations such as `参考[1]` and a line that starts with `[…]`. Tell the owner
+   where they were.
 4. Several topics in one input: list them, propose one issue per topic, and ask the owner to
    confirm the split before you go on.
 

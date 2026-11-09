@@ -23,6 +23,7 @@ const refusal = (kind: HiddenClass) => `hidden Markdown in the body: ${kind}`;
 // are Egyptian full/half blanks; U+16FE4 is the Khitan small script filler.
 // Each occupies space or has zero width without a visible mark.
 export const BLANK_GLYPHS = /[\u2800\u{1d159}\u{13441}\u{13442}\u{16fe4}]/u;
+const BOX_GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 // The only permitted ]( is a whole-line screenshot with a determined alt label.
 const SCREENSHOT =
@@ -483,11 +484,19 @@ function hiddenLineReason(lines: string[]): string | null {
   // Preserve earlier refusal reasons. A short bracket group after a prefix
   // without ASCII letters can disguise a task through non-ASCII glyphs in
   // either the prefix or the group, even when the parser sees only text.
+  // Count visible graphemes, including overlays. Non-ASCII opening/closing
+  // punctuation also bounds a group; ASCII parentheses and braces do not.
   for (const line of lines) {
-    const box = /\[[^[\]]{1,3}\]/u.exec(line);
-    if (!box) continue;
-    const prefix = line.slice(0, box.index);
-    if (!/[A-Za-z]/u.test(prefix) && /\P{ASCII}/u.test(prefix + box[0])) return refusal("look-alike task box");
+    for (const box of line.matchAll(
+      /(?:\[|(?=\P{ASCII})\p{Ps})((?:[^\p{Ps}\p{Pe}]|[(){}])*)(?:\]|(?=\P{ASCII})\p{Pe})/gu,
+    )) {
+      const content = box[1] ?? "";
+      const count = [...BOX_GRAPHEMES.segment(content)].length;
+      if (count < 1 || count > 3) continue;
+      const prefix = line.slice(0, box.index);
+      if (!/[A-Za-z]/u.test(prefix) && /\P{ASCII}/u.test(prefix + box[0])) return refusal("look-alike task box");
+      break; // Only the first short group is judged.
+    }
   }
   return null;
 }

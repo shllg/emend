@@ -30,6 +30,43 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+// Round 23: bracket categories and grapheme counts define the same short box.
+const unicodeBracketRefusals = [
+  ["full-width brackets", "- ［x］ Check"],
+  ["CJK brackets", "- 【x】 Do"],
+  ["look-alike hyphen and brackets", "‐ ［ ］ Do"],
+  ["mixed opening bracket", "- ［x] Check"],
+  ["mixed closing bracket", "- [x］ Check"],
+  ["full-width parentheses", "- （x） Check"],
+  ["full-width braces", "- ｛x｝ Check"],
+  ["CJK quote accepted cost", "日本「は」"],
+] as const;
+
+const graphemeBoxRefusals = [
+  ["1 grapheme with 2 overlays", "- [x\u0338\u0338] Check", 3],
+  ["1 grapheme with 3 overlays", "- [x\u0338\u0338\u0338] Check", 4],
+  ["2 graphemes with 2 overlays each", "- [x\u0338\u0338x\u0338\u0338] Check", 6],
+  ["2 graphemes with 3 overlays each", "- [x\u0338\u0338\u0338x\u0338\u0338\u0338] Check", 8],
+  ["3 graphemes with 2 overlays each", "- [x\u0338\u0338x\u0338\u0338x\u0338\u0338] Check", 9],
+  ["3 graphemes with 3 overlays each", "- [x\u0338\u0338\u0338x\u0338\u0338\u0338x\u0338\u0338\u0338] Check", 12],
+] as const;
+
+const round23Controls = [
+  "See (1) and (2).",
+  "- [ ] café — ok",
+  "He wrote: […] and left",
+  "• Done [x]",
+  "- (é) Check",
+  "- {é} Check",
+  "- ［］ Check",
+  "- [ ] [х] Check",
+  "‐ [link] [x] Do B",
+  "‐ [abcd] [x] Do B",
+  "- [[x]] B",
+  "- [x\u0338\u0338x\u0338\u0338x\u0338\u0338x\u0338\u0338] Check",
+  "- [x\u0338\u0338\u0338x\u0338\u0338\u0338x\u0338\u0338\u0338x\u0338\u0338\u0338] Check",
+];
+
 // Round 22: the structural rule replaces per-glyph guesses around short boxes.
 const lookAlikeBoxRefusals = [
   ["H1-hyphen-2010-lazy", "- [ ] Do A\n\u2010 [x] Do B"],
@@ -140,6 +177,20 @@ for (const body of [...brailleBoxRefusals, ...invisiblePrefixRefusals]) {
     assert.equal(evaluate(body).reason, "invisible characters in the title or body", body);
   });
 }
+
+for (const [name, body] of [...unicodeBracketRefusals, ...graphemeBoxRefusals]) {
+  test(`round 23 look-alike box refuses ${name}`, () => {
+    assert.equal(hiddenMarkdownReason(body), reason("look-alike task box"), body);
+    assert.equal(evaluate(body).reason, reason("look-alike task box"), body);
+  });
+}
+test("round 23 bracket and grapheme boundaries keep ordinary text", () => {
+  assert.equal(hiddenMarkdownReason("- ［x］ Check"), reason("look-alike task box"));
+  for (const body of round23Controls) {
+    assert.equal(hiddenMarkdownReason(body), null, body);
+    assert.equal(evaluate(body).status, "pickable", body);
+  }
+});
 
 for (const [name, body] of [...lookAlikeBoxRefusals, ...lookAlikeCorpusRefusals]) {
   test(`round 22 OP1 refuses ${name}`, () => {
