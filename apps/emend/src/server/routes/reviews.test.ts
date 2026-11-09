@@ -38,6 +38,10 @@ const get = (suffix = "", who: "reviewer" | "foreign" | "agent" = "reviewer") =>
   f.request(`/reviews${suffix}`, "GET", undefined, who);
 
 test("all three GETs parse their schemas and enforce reviewer scope and owner isolation", async () => {
+  const approved = await f.request(`/reviews/${f.reviewId}/sends`, "POST", { kind: "approve", revision: 1 });
+  expect(approved.status).toBe(201);
+  const own = contract.InboxList.parse(await (await get()).json());
+  expect(own.items).toMatchObject([{ id: f.reviewId, state: "approved", list: "active" }]);
   for (const [path, schema] of [
     ["", contract.InboxList],
     [`/${f.reviewId}`, contract.ReviewView],

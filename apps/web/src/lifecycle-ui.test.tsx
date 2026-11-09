@@ -327,6 +327,78 @@ test("an accepted approval expires even when every following inbox refetch fails
   expect(within(done).getByText("Approved")).toBeTruthy();
 });
 
+test("an approval that expires while refetches fail joins Done in updatedAt and id order", async () => {
+  fixedClock();
+  serverOffset = -2 * 3_600_000;
+  const now = Date.now() + serverOffset;
+  const approved = {
+    ...recentApproval(),
+    id: other(2),
+    updatedAt: new Date(now).toISOString(),
+    activeUntil: new Date(now + 2 * 3_600_000).toISOString(),
+  };
+  const retired = (n: number, title: string, updatedAt: number): InboxItem => ({
+    ...item,
+    id: other(n),
+    title,
+    state: "settled",
+    list: "done",
+    updatedAt: new Date(updatedAt).toISOString(),
+  });
+  inbox = [
+    approved,
+    retired(3, "Newer retired", now + 1000),
+    retired(1, "Same-time retired", now),
+    retired(4, "Older retired", now - 1000),
+  ];
+  await mountTimed();
+  expect(
+    within(screen.getByRole("region", { name: "Active" })).getByRole("link", { name: /Recently approved/ }),
+  ).toBeTruthy();
+  const fallback = fetchMock.getMockImplementation();
+  fetchMock.mockImplementation(async (path, init) => {
+    if (path === "/api/v1/reviews")
+      return Response.json({ error: { code: "internal_error", message: "Synthetic failure" } }, { status: 500 });
+    if (!fallback) throw new Error("Missing fetch fixture");
+    return fallback(path, init);
+  });
+  await tick(2 * 3_600_000 + 500);
+  await tick();
+  expect(screen.getByText("Could not load reviews.")).toBeTruthy();
+  expect(screen.getByText("No active reviews.")).toBeTruthy();
+  const toggle = screen.getByRole("button", { name: "Done 4" });
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(toggle);
+  const done = within(screen.getByRole("region", { name: "Done" }));
+  expect(done.getAllByRole("link")).toEqual(
+    ["Newer retired", "Same-time retired", "Recently approved", "Older retired"].map(row),
+  );
+  // The cache still has the old Active row: the displayed grouping and order handle expiry.
+  expect(client.getQueryData<InboxData>(["inbox"])?.items[0]).toEqual(approved);
+});
+
+test("a wall-clock jump refetches the server clock and keeps an unexpired approval in Active", async () => {
+  fixedClock();
+  inbox = [{ ...recentApproval(), activeUntil: new Date(Date.now() + 90 * 60_000).toISOString() }];
+  await mountTimed();
+  const inboxCalls = () => fetchMock.mock.calls.filter(([path]) => path === "/api/v1/reviews").length;
+  const before = inboxCalls();
+  expect(client.getQueryData<InboxData>(["inbox"])?.clockOffset).toBe(0);
+  const jump = 2 * 3_600_000;
+  const monotonic = performance.now();
+  vi.setSystemTime(Date.now() + jump);
+  expect(performance.now()).toBe(monotonic);
+  serverOffset -= jump;
+  await tick(60_000);
+  await tick();
+  expect(inboxCalls()).toBe(before + 1);
+  expect(client.getQueryData<InboxData>(["inbox"])?.clockOffset).toBe(-jump);
+  expect(
+    within(screen.getByRole("region", { name: "Active" })).getByRole("link", { name: /Recently approved/ }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "Done" })).toBeNull();
+});
+
 test("a non-empty filter shows Done expanded under a plain heading; clearing it restores the reader's choice", async () => {
   inbox = inboxItems();
   mount();

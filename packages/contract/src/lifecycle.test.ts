@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import {
+  APPROVED_ACTIVE_HOURS,
   ERROR_STATUS,
   ImportResult,
   InboxItem,
@@ -37,6 +38,10 @@ const item = {
   pickedUpAt: null,
   kind: "review",
 };
+
+test("approvals stay Active for a fixed 12 hours", () => {
+  expect(APPROVED_ACTIVE_HOURS).toBe(12);
+});
 
 test("snooze takes exactly one strict end condition", () => {
   expect(SnoozeRequest.parse({ until: "2026-11-05T09:00:00.000Z" })).toEqual({ until: "2026-11-05T09:00:00.000Z" });

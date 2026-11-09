@@ -145,6 +145,7 @@ test("a snooze ends at its time and on a new revision", async () => {
 });
 
 test("approval stays Active for exactly 12 hours in the inbox and single-review view", async () => {
+  const windowMs = 12 * 3_600_000;
   const { reviewId } = await publishReview(f);
   await approve(reviewId);
   const approvedAt = f.deps.now();
@@ -152,11 +153,11 @@ test("approval stays Active for exactly 12 hours in the inbox and single-review 
     state: "approved",
     list: "active",
     snoozed: false,
-    activeUntil: iso(approvedAt + approvedWindow),
+    activeUntil: iso(approvedAt + windowMs),
   } as const;
   expect(await row(reviewId)).toMatchObject({ approvedAt });
   await expectBoth(reviewId, active);
-  f.advance(approvedWindow - 1);
+  f.advance(windowMs - 1);
   await expectBoth(reviewId, active);
   f.advance(1);
   await expectBoth(reviewId, { state: "approved", list: "done", snoozed: false, activeUntil: null });
@@ -446,12 +447,25 @@ test("approvals fill the remaining Active places and interleave with open review
       .slice(0, 4)
       .map((item) => item.state),
   ).toEqual(["approved", "open", "approved", "open"]);
+  const keptApprovals = active.filter((item) => item.state === "approved");
+  expect(keptApprovals).toHaveLength(LIMITS.inboxItems - open.length - 1);
+  for (const item of keptApprovals) expect(item.activeUntil).toBe(iso(now + approvedWindow));
+  const overflow = approvals.slice(keptApprovals.length);
+  expect(list.items.filter((item) => item.list === "done").map((item) => item.id)).toEqual(
+    overflow.map((item) => item.id),
+  );
+  for (const item of list.items.filter((item) => item.list === "done")) expect(item.activeUntil).toBeNull();
+  expect(list.items.map((item) => item.id).sort()).toEqual(
+    [f.reviewId, ...open.map((item) => item.id), ...approvals.map((item) => item.id)].sort(),
+  );
+  // The single-review view uses the time rule alone, independent of list capacity.
+  const firstOverflow = overflow[0];
+  if (!firstOverflow) throw new Error("missing overflow approval");
+  const single = ReviewView.parse(await (await f.request(`/reviews/${firstOverflow.id}`, "GET")).json());
+  expect(single).toMatchObject({ state: "approved", list: "active", activeUntil: iso(now + approvedWindow) });
 });
 
-test("the per-list cap applies to each list on its own", async () => {
-  const { reviewId } = await publishReview(f);
-  const base = await row(reviewId);
-  if (!base) throw new Error("missing review");
+test.each([0, 5])("the per-list cap keeps overflow approvals in Done with %s extra open reviews", async (extra) => {
   const rows = (state: "open" | "approved", count: number, snoozed: boolean, approvedAt: number | null = null) =>
     Array.from({ length: count }, (_, i) => ({
       id: randomUUID(),
@@ -467,19 +481,22 @@ test("the per-list cap applies to each list on its own", async () => {
     }));
   const recent = rows("approved", 3, false, f.deps.now());
   const older = rows("approved", 3, false, f.deps.now() - approvedWindow);
-  const all = [...rows("open", LIMITS.inboxItems + 5, false), ...recent, ...older, ...rows("open", 2, true)];
+  const all = [...rows("open", LIMITS.inboxItems - 1 + extra, false), ...recent, ...older, ...rows("open", 2, true)];
   await seedReviews(all);
   // Unfiltered: the fixture's own review is one of the Active rows.
   const items = InboxList.parse(await (await f.request("/reviews", "GET")).json()).items;
   const by = (list: string) => items.filter((item) => item.list === list).length;
-  expect([by("active"), by("snoozed"), by("done")]).toEqual([LIMITS.inboxItems, 2, 3]);
+  expect([by("active"), by("snoozed"), by("done")]).toEqual([LIMITS.inboxItems, 2, 6]);
   expect(items.filter((item) => item.list === "active").every((item) => item.state === "open")).toBe(true);
   expect(
     items
       .filter((item) => item.list === "done")
       .map((item) => item.id)
       .sort(),
-  ).toEqual(older.map((item) => item.id).sort());
+  ).toEqual([...recent, ...older].map((item) => item.id).sort());
+  for (const item of items.filter((item) => item.list === "done")) expect(item.activeUntil).toBeNull();
+  if (extra === 0)
+    expect(items.map((item) => item.id).sort()).toEqual([f.reviewId, ...all.map((item) => item.id)].sort());
   f.advance(approvedWindow);
   const later = InboxList.parse(await (await f.request("/reviews", "GET")).json()).items;
   expect(later.filter((item) => item.list === "active")).toHaveLength(LIMITS.inboxItems);

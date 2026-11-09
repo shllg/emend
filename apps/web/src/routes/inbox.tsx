@@ -1,7 +1,7 @@
 import type { InboxItem } from "@emend/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, PanelLeftClose, Search } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { inboxQuery } from "../api/queries.ts";
 import { needsAttention, ReviewRow } from "../components/inbox/ReviewRow.tsx";
 import { AppFrame } from "../components/layout/AppFrame.tsx";
@@ -11,6 +11,7 @@ import { IconButton } from "../components/ui/IconButton.tsx";
 import { SegmentedControl } from "../components/ui/SegmentedControl.tsx";
 import { Select } from "../components/ui/Select.tsx";
 import { TextField } from "../components/ui/TextField.tsx";
+import { useClockJump } from "../lib/clock-jump.ts";
 import { plural } from "../lib/count.ts";
 import { useInboxArrivals } from "../lib/inbox-arrivals.tsx";
 import { useWakeTimer } from "../lib/wake-timer.ts";
@@ -63,15 +64,15 @@ export function Inbox({
   };
   const [now, setNow] = useState(Date.now);
   const [doneOpen, setDoneOpen] = useState(false);
-  useEffect(() => {
-    const interval = window.setInterval(() => setNow(Date.now()), 60_000);
-    return () => window.clearInterval(interval);
-  }, []);
   const items = query.data?.items ?? [];
   const clockOffset = query.data?.clockOffset ?? 0;
   const approvalWake = (review: InboxItem) =>
     review.activeUntil === null ? null : new Date(Date.parse(review.activeUntil) - clockOffset).toISOString();
   const client = useQueryClient();
+  useClockJump(() => {
+    setNow(Date.now());
+    void client.invalidateQueries({ queryKey: ["inbox"] });
+  }, setNow);
   // Snoozes and approval windows end without an event: ask again when either time passes.
   // Until the refetch lands, a passed snooze reads "waking up".
   useWakeTimer(
@@ -200,6 +201,10 @@ export function Inbox({
           filtered.length > 0 &&
           lists.map(({ list, title }) => {
             const rows = filtered.filter((review) => effectiveList(review, now + clockOffset) === list);
+            if (list === "done")
+              rows.sort(
+                (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+              );
             const nothingActive =
               list === "active" && !items.some((review) => effectiveList(review, now + clockOffset) === "active");
             if (rows.length === 0 && !nothingActive) return null;
