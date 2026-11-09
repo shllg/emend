@@ -25,7 +25,7 @@ export function TopicsMap({
             <span className="mt-px">
               <TopicRank rank={rank} />
             </span>
-            <span className="wrap-anywhere text-[15px] font-medium leading-[1.35] text-fg-1">
+            <span className="wrap-anywhere text-[15px] font-medium leading-[1.35] text-fg-reading-strong">
               {target ? (
                 <a href={target} className="after:absolute after:inset-0 after:rounded-md after:content-['']">
                   {topic.title}

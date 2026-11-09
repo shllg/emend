@@ -24,11 +24,15 @@
   --color-selected: var(--bg-selected);
   --color-inverse: var(--bg-inverse);
   --color-overlay: var(--bg-overlay);
+  --color-reading: var(--bg-reading);
+  --color-reading-card: var(--bg-reading-card);
   --color-fg-1: var(--fg-1);
   --color-fg-2: var(--fg-2);
   --color-fg-3: var(--fg-3);
   --color-fg-disabled: var(--fg-disabled);
   --color-fg-inverse: var(--fg-inverse);
+  --color-fg-reading: var(--fg-reading);
+  --color-fg-reading-strong: var(--fg-reading-strong);
   --color-link: var(--fg-link);
   --color-link-hover: var(--fg-link-hover);
   --color-line-1: var(--border-1);

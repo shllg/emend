@@ -13,7 +13,7 @@
   }
   .em-prose {
     font: var(--type-prose);
-    color: var(--fg-3);
+    color: var(--fg-reading);
     max-width: var(--reading-max, 68ch);
     text-wrap: pretty;
     overflow-wrap: break-word;
@@ -37,12 +37,12 @@
     font-stretch: var(--mono-stretch);
     text-transform: uppercase;
     letter-spacing: var(--tracking-label);
-    color: var(--fg-3);
+    color: var(--fg-reading);
     margin: 0 0 6px;
   }
-  /* Body text uses the header bar's softer gray; headings, strong text and code keep full emphasis. */
+  /* Body text uses the reading colour; headings, strong text and code use the strong reading colour, a small step above it in dark mode. */
   .em-prose :is(h1, h2, h3, h5, h6, strong, code) {
-    color: var(--fg-1);
+    color: var(--fg-reading-strong);
   }
   /* Inside a link, strong text and code follow the link color and its hover. */
   .em-prose a :is(strong, code) {
@@ -71,7 +71,7 @@
     margin: 6px 0;
   }
   .em-prose li::marker {
-    color: var(--fg-3);
+    color: var(--fg-reading);
   }
   .em-prose code {
     font: 400 0.84em / 1 var(--font-mono);
@@ -129,7 +129,7 @@
     margin: 0 0 12px;
     padding: 0 0 0 14px;
     border-left: 2px solid var(--border-2);
-    color: var(--fg-3);
+    color: var(--fg-reading);
   }
   /* Wide tables scroll inside the block instead of widening the pane. */
   .em-prose table {
@@ -144,7 +144,7 @@
   .em-prose th {
     text-align: left;
     font-weight: 500;
-    color: var(--fg-3);
+    color: var(--fg-reading);
     padding: 6px 10px 8px;
     border-bottom: 1px solid var(--border-2);
   }

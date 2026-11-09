@@ -63,20 +63,20 @@ test("the reading column grows with the pane up to 1000px on desktop and keeps i
   expect(/\.em-prose\s*\{([^}]+)\}/.exec(prose)?.[1]).toMatch(/max-width:\s*var\(--reading-max,\s*68ch\)\s*;/);
 });
 
-test("reading prose uses the header bar gray and keeps headings, strong text and code at full emphasis", () => {
+test("reading prose uses reading colours and keeps strong text and code inside links in the link colour", () => {
   const prose = readFileSync(join(webSource, "styles/prose.css"), "utf8");
-  expect(/\.em-prose\s*\{([^}]+)\}/.exec(prose)?.[1]).toMatch(/\bcolor:\s*var\(--fg-3\)\s*;/);
+  expect(/\.em-prose\s*\{([^}]+)\}/.exec(prose)?.[1]).toMatch(/\bcolor:\s*var\(--fg-reading\)\s*;/);
   expect(/\.em-prose :is\(h1, h2, h3, h5, h6, strong, code\)\s*\{([^}]+)\}/.exec(prose)?.[1]).toMatch(
-    /\bcolor:\s*var\(--fg-1\)\s*;/,
+    /\bcolor:\s*var\(--fg-reading-strong\)\s*;/,
   );
   const linkRule = /\.em-prose a :is\(strong, code\)\s*\{([^}]+)\}/.exec(prose);
   expect(linkRule?.[1]).toMatch(/\bcolor:\s*inherit\s*;/);
   // The link rule must come after the emphasis rule to win at equal-or-higher specificity.
   expect(linkRule?.index).toBeGreaterThan(prose.indexOf(".em-prose :is(h1, h2, h3, h5, h6, strong, code)"));
-  expect(/\.em-prose blockquote\s*\{([^}]+)\}/.exec(prose)?.[1]).toMatch(/\bcolor:\s*var\(--fg-3\)\s*;/);
+  expect(/\.em-prose blockquote\s*\{([^}]+)\}/.exec(prose)?.[1]).toMatch(/\bcolor:\s*var\(--fg-reading\)\s*;/);
   const colors = readFileSync(join(webSource, "styles/colors.css"), "utf8");
-  // Both themes define --fg-3, so the token follows the theme.
-  expect(colors.match(/--fg-3:/g)?.length).toBeGreaterThanOrEqual(3);
+  // Both themes define --fg-reading, so the token follows the theme.
+  expect(colors.match(/--fg-reading:/g)?.length).toBeGreaterThanOrEqual(3);
 });
 
 test("web CSS loads only relative bundled fonts and never imports a remote stylesheet", () => {

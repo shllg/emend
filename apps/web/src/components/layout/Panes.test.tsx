@@ -56,6 +56,12 @@ function value(handle: HTMLElement) {
   return Number(handle.getAttribute("aria-valuenow"));
 }
 
+test("only the reading pane uses the reading background", () => {
+  mount();
+  expect(screen.getByTestId("reading-pane").classList.contains("bg-reading")).toBe(true);
+  expect(screen.getByTestId("diff-pane").classList.contains("bg-reading")).toBe(false);
+});
+
 test("inbox keyboard steps, limits and reset expose their widths", () => {
   mount();
   expect(value(inbox())).toBe(280);

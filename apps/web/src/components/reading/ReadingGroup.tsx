@@ -96,7 +96,7 @@ export function ReadingGroup({
             ? "em-topic-title"
             : group.presentation === "tldr" || group.presentation === "decisions"
               ? "em-writeup-kicker"
-              : "min-w-0 flex-1 wrap-anywhere text-fg-1 [font:var(--type-h2)]"
+              : "min-w-0 flex-1 wrap-anywhere text-fg-reading-strong [font:var(--type-h2)]"
         }
       >
         {group.heading}

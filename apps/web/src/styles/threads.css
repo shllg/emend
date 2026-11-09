@@ -164,6 +164,7 @@
     border-bottom: 1.5px solid var(--mark-line);
   }
   .em-thread__comments {
+    color: var(--fg-reading-strong);
     display: flex;
     flex-direction: column;
     gap: 14px;
@@ -238,7 +239,7 @@
     font-weight: var(--weight-semibold);
     text-transform: none;
     letter-spacing: normal;
-    color: var(--fg-1);
+    color: var(--fg-reading-strong);
     margin: 8px 0 4px;
   }
   /* A fence scrolls inside the card and never widens it. */

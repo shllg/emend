@@ -94,7 +94,7 @@ export function Panes({
               data-reading-layout={readingLayout}
               hidden={!split && hasDiff && tab === "diff"}
               tabIndex={-1}
-              className={`relative min-w-0 flex-1 ${readingLayout === "original" ? "overflow-hidden" : "overflow-y-auto"}`}
+              className={`relative min-w-0 flex-1 bg-reading ${readingLayout === "original" ? "overflow-hidden" : "overflow-y-auto"}`}
               style={showReadingHandle ? { flex: `0 0 ${readingWidth}px` } : undefined}
             >
               {split && tabs}
