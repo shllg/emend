@@ -65,12 +65,19 @@ body as it is. Otherwise record the difference in Evidence: write the updated bo
 to `<top>/.wt/pr-body.md` and run `<main>/bin/wt pr edit --body-file <top>/.wt/pr-body.md` (add `--pr <n>`
 in the main checkout). Immediately after this edit succeeds, start one `sleep 660` command with
 `run_in_background: true` to wait out the ten-minute settle window. Wait for that background task to
-finish. Then, before any gate, fetch an answer the owner may have sent in emend during the window:
-run `emend feedback <review-id> --save "<top>/.wt/review"` as `emend-feedback` says, with the review id
-from the `approve` result (it returns at once; delete a `pending` result). Then restart at step 1 in
-this run, rerunning the approval and readiness gates with fresh PR fields and feedback; a newer `go`
-or `closed` ends the approval in step 3. When the edit happened in step 4's post-rebase rerun
-(4.4.5), resume at 4.4.5 instead, as it says. A run makes at most one Evidence edit: if a later pass
+finish. Then, before any gate, look for an answer the owner may have sent in emend during the window.
+Only when `<top>/.wt/review` passes step 3's folder check and holds a saved `approve` result, run
+`emend feedback <review-id> --save "<top>/.wt/review"` as `emend-feedback` says, with the review id from
+that `approve` result. It returns at once. If the file it just saved is `pending`, delete that one file,
+as `emend-feedback` says for a `pending` result. Act on what it returned before any gate:
+- `closed`: report it as `emend-feedback` says and stop the whole flow: no merge, no hand-back.
+- `go`: do not merge; hand back to `/e-pr-finalize`, which handles the feedback (its step 9).
+- A new `approve` whose `deliveryId` is not in `handled.txt` does not count: hand back to
+  `/e-pr-finalize`.
+Without such a folder or a saved `approve`, skip the fetch: step 3 finds no approval, and an
+owner-typed run goes on to step 6's question. Then restart at step 1 in this run, rerunning the
+approval and readiness gates with fresh PR fields and feedback. When the edit happened in step 4's
+post-rebase rerun (4.4.5), resume at 4.4.5 instead, as it says. A run makes at most one Evidence edit: if a later pass
 would edit again, run `<main>/bin/wt notify blocked`, report the changed gate, and stop. Never use a
 foreground sleep or poll the merge command; do not call it during the window.
 A body edit never changes the head; the restarted gates read the head afresh for the approval
@@ -157,7 +164,9 @@ unchanged.
       edit before), wait out the settle window and fetch any answer as step 2 says, then run this item
       again instead of restarting at step 1: keep the approved head, the rebased head and the two
       equal digests, recheck that the newest saved emend result is still the same handled `approve`
-      (step 3, items 1 to 3), and that `headRefOid` still equals the rebased head. Any change stops the merge and hands back to `/e-pr-finalize`.
+      (step 3, items 1 to 3), and that `headRefOid` still equals the rebased head. A `closed` answer
+      stops the whole flow as step 2 says; any other change stops the merge and hands back to
+      `/e-pr-finalize`.
 5. Otherwise (a restack, or different digests): the content changed. Return to the hand-off in
    `/e-pr-finalize` (its step 8) for a new review and a new approval. Do not merge.
 
