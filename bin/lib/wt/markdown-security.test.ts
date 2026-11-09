@@ -30,6 +30,98 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+const realListRefusals = [
+  // 1: adjacent punctuation is not a chain of list markers.
+  "-2. Step\n    - [ ] Parent\n      - [ ] First\n      - [ ] Second",
+  "-2. Step\n    - [ ] Parent",
+  "*2) Step\n    - [ ] Parent\n      - [ ] First",
+  // 3: the unquoted checklist cannot continue a quoted ordered item.
+  "- > 2. Step\n       - [ ] A\n         - [ ] B\n           - [x] C\n         - [ ] D",
+  "> - 2. Step\n       - [ ] T\n         - [ ] T\n         - [x] T\n       - [ ] T",
+  "- > 2. Step\n       - [x] A",
+  "> - 2. Step\n       - [ ] A",
+  // 4: a non-one marker cannot interrupt the preceding paragraph.
+  "Text\n10. Step\n    - [ ] A\n      - [ ] B\n        - [x] C\n      - [ ] D",
+  "Text\n10. Step\n    - [ ] A",
+  "Text\n2.  Step\n    - [ ] A",
+  "Text\n    # H\n10. Step\n    - [ ] A",
+  "Text\n    ---\n10. Step\n    - [ ] A",
+  // 5: code and over-indented/lazy paragraph lines never open a task.
+  "    m\n2.  p\n    - [x] T",
+  "    ```\n    - [ ] x",
+  "- a\n\n      ```\n      - [ ] x",
+  ">     ```\n>     - [ ] x",
+  "    - [ ] x",
+  "Intro\n\n    - [ ] x",
+  "Intro\n    - [ ] x",
+  "\t- [ ] x",
+  "Text\n    - [x] Done",
+  "- a\n\n      - [ ] x",
+  "- a\n      - [ ] x",
+  "- Item\n      - [x] Done",
+  "1. a\n\n       - [ ] x",
+  "1. Step\n        - [ ] T",
+  "> Intro\n>\n>     - [ ] x",
+  "> Quote\n    - [x] Done",
+];
+
+// 2: the oracle intentionally scans ASCII containers only. These are raw rules.
+const nonAsciiIndentRefusals = [
+  0x00a0,
+  0x1680,
+  ...Array.from({ length: 11 }, (_, i) => 0x2000 + i),
+  0x2028,
+  0x2029,
+  0x202f,
+  0x205f,
+  0x3000,
+  0xfeff,
+  0x0b,
+  0x0c,
+].flatMap((code) => {
+  const space = String.fromCodePoint(code);
+  return [`${space}- [x] Check`, `> ${space}- [x] Check`, `- Parent\n ${space} - [ ] Child`, `${space}1. [x] Check`];
+});
+
+const realListControls = [
+  "1. a\n2. b\n   - [ ] x",
+  "Text\n\n2. Step\n   - [ ] A",
+  "Text\n- a\n  - [ ] x",
+  "- a\n  - b\n    - [ ] c",
+  "* a\n    * b\n      - [ ] c",
+  "1. a\n   - [ ] x",
+  "10. a\n    - [ ] x",
+  "- a\n\n  - [ ] x",
+  "> Quote\n- [x] Done",
+  "2. Step\n   - [ ] Parent\n\n   - [ ] Next",
+  "2. Step\n\n       code\n   - [ ] Check",
+];
+
+// Fail-closed preservation beyond the oracle's task-source scan: bare split
+// boxes and list items whose lazy continuation was already dedented.
+for (const body of ["    [\n    ] text", "- a\ntext\n    - [ ] x"]) {
+  test(`raw Markdown closes ambiguous task containers: ${JSON.stringify(body)}`, () => {
+    assert.equal(hiddenMarkdownReason(body), reason("task marker"), body);
+  });
+}
+
+for (const body of realListRefusals) {
+  test(`raw Markdown requires a real task item: ${JSON.stringify(body)}`, () => {
+    assert.equal(evaluate(body).reason, reason("task marker"), body);
+  });
+}
+for (const body of nonAsciiIndentRefusals) {
+  test(`raw Markdown requires ASCII task indentation: ${JSON.stringify(body)}`, () => {
+    assert.equal(hiddenMarkdownReason(body), reason("task marker"), body);
+    assert.equal(evaluate(body).status, "untrusted", body);
+  });
+}
+for (const body of realListControls) {
+  test(`raw Markdown preserves real list containers: ${JSON.stringify(body)}`, () => {
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+
 for (const body of [
   "-     [ ] Check",
   "1.     [x] Check",
@@ -66,6 +158,7 @@ for (const body of [
   });
 }
 
+// Preservation cases: all three already failed before the round-16 stack change.
 for (const body of [
   "2. Step\n   - [ ] Parent\n\n     - [ ] Child",
   "2. Step\n   - [ ] Parent\n     text\n     - [ ] Child",

@@ -8,7 +8,8 @@
 // the raw tab. GitHub may also find boxes in rendered text after escape handling,
 // which the raw checker refuses conservatively without claiming renderer parity.
 // GitHub's text filters skip code: a canonical box-shaped line inside a fence
-// stays literal. This oracle does not apply task transforms to code.
+// stays literal. Only fenced code exempts source boxes; indented box-shaped
+// lines are refused even when their source remains visible as code.
 // cmark also accepts digit-plus-any-character task markers and sets checked state
 // from any [x]/[X] on the raw line. remark models neither; explicit raw refusals
 // cover those cases instead of treating an oracle pass as GitHub equivalence.
@@ -17,7 +18,7 @@
 // remark's tree retains only the numeric start and cannot measure that width.
 // Ordered context is detected even in code; any fence-shaped line in that
 // context makes later boxes fail closed until a structural boundary ends it.
-// Outside literal code, a source marker and box must produce a task item at
+// Outside fenced code, a source marker and box must produce a task item at
 // that source position with the same checked state, not merely visible text.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -117,7 +118,7 @@ function checkCoverage(body: string): void {
   const omitted: [number, number][] = [];
   const visible: string[] = [];
   const taskBoxes = new Map<number, boolean>();
-  const codeRanges: [number, number][] = [];
+  const fencedCodeRanges: [number, number][] = [];
   const screenshotOrdinals = new Map<number, number>();
   let lineOffset = 0;
   for (const line of body.split("\n")) {
@@ -168,7 +169,8 @@ function checkCoverage(body: string): void {
     if (node.type === "code") {
       const raw = source(node);
       assert.ok(node.position, "code position");
-      codeRanges.push([node.position.start.offset, node.position.end.offset]);
+      if (/^ {0,3}(?:`{3,}|~{3,})/u.test(raw))
+        fencedCodeRanges.push([node.position.start.offset, node.position.end.offset]);
       assert.ok(!node.meta, "code meta must be empty");
       assert.ok(!node.lang || languages.includes(node.lang.toLowerCase()), "code language must be allowlisted");
       if (node.lang) {
@@ -234,9 +236,9 @@ function checkCoverage(body: string): void {
     const box = /^\[([ xX])\]/u.exec(line.slice(cursor));
     if (box && markerStart !== undefined) {
       const markerOffset = lineOffset + markerStart;
-      // A marker inside a parsed code span is literal. A list marker whose
+      // A marker inside a parsed fenced code span is literal. A list marker whose
       // *content* becomes code still needs a task at its box's source position.
-      if (!codeRanges.some(([start, end]) => markerOffset >= start && markerOffset < end)) {
+      if (!fencedCodeRanges.some(([start, end]) => markerOffset >= start && markerOffset < end)) {
         assert.equal(taskBoxes.get(lineOffset + cursor), box[1] !== " ", "source box must become the same task");
       }
     }
@@ -277,6 +279,76 @@ const sameLineTextRefusals = ["- [x]\n~"];
 // Earlier acceptance withdrawn by the ban on tabs after a task's list marker.
 const markerPaddingRefusals = ["1.\t[ ] Pending"];
 
+// Round 17: earlier checker acceptances withdrawn by real-list-start rules.
+// These include paragraph/lazy continuation and indented code, not fenced code.
+const realListRefusals = [
+  // 1: adjacent punctuation is not a chain of list markers.
+  "-2. Step\n    - [ ] Parent\n      - [ ] First\n      - [ ] Second",
+  "-2. Step\n    - [ ] Parent",
+  "*2) Step\n    - [ ] Parent\n      - [ ] First",
+  // 3: the unquoted checklist cannot continue a quoted ordered item.
+  "- > 2. Step\n       - [ ] A\n         - [ ] B\n           - [x] C\n         - [ ] D",
+  "> - 2. Step\n       - [ ] T\n         - [ ] T\n         - [x] T\n       - [ ] T",
+  "- > 2. Step\n       - [x] A",
+  "> - 2. Step\n       - [ ] A",
+  // 4: a non-one marker cannot interrupt the preceding paragraph.
+  "Text\n10. Step\n    - [ ] A\n      - [ ] B\n        - [x] C\n      - [ ] D",
+  "Text\n10. Step\n    - [ ] A",
+  "Text\n2.  Step\n    - [ ] A",
+  "Text\n    # H\n10. Step\n    - [ ] A",
+  "Text\n    ---\n10. Step\n    - [ ] A",
+  // 5: code and over-indented/lazy paragraph lines never open a task.
+  "    m\n2.  p\n    - [x] T",
+  "    ```\n    - [ ] x",
+  "- a\n\n      ```\n      - [ ] x",
+  ">     ```\n>     - [ ] x",
+  "    - [ ] x",
+  "Intro\n\n    - [ ] x",
+  "Intro\n    - [ ] x",
+  "\t- [ ] x",
+  "Text\n    - [x] Done",
+  "- a\n\n      - [ ] x",
+  "- a\n      - [ ] x",
+  "- Item\n      - [x] Done",
+  "1. a\n\n       - [ ] x",
+  "1. Step\n        - [ ] T",
+  "> Intro\n>\n>     - [ ] x",
+  "> Quote\n    - [x] Done",
+];
+
+// 2: earlier acceptances withdrawn by ASCII-only indentation. The oracle
+// intentionally scans ASCII containers only, so these are checker-only rules.
+const nonAsciiIndentRefusals = [
+  0x00a0,
+  0x1680,
+  ...Array.from({ length: 11 }, (_, i) => 0x2000 + i),
+  0x2028,
+  0x2029,
+  0x202f,
+  0x205f,
+  0x3000,
+  0xfeff,
+  0x0b,
+  0x0c,
+].flatMap((code) => {
+  const space = String.fromCodePoint(code);
+  return [`${space}- [x] Check`, `> ${space}- [x] Check`, `- Parent\n ${space} - [ ] Child`, `${space}1. [x] Check`];
+});
+
+const realListControls = [
+  "1. a\n2. b\n   - [ ] x",
+  "Text\n\n2. Step\n   - [ ] A",
+  "Text\n- a\n  - [ ] x",
+  "- a\n  - b\n    - [ ] c",
+  "* a\n    * b\n      - [ ] c",
+  "1. a\n   - [ ] x",
+  "10. a\n    - [ ] x",
+  "- a\n\n  - [ ] x",
+  "> Quote\n- [x] Done",
+  "2. Step\n   - [ ] Parent\n\n   - [ ] Next",
+  "2. Step\n\n       code\n   - [ ] Check",
+];
+
 // Shared by direct oracle assertions and the checker corpus.
 const oracleStructureWitnesses = [
   ["raw HTML", "<!-- hidden -->"],
@@ -294,6 +366,7 @@ const oracleStructureWitnesses = [
   ["character reference", "&amp;"],
 ] as const;
 const sourceBoxWitnesses = [
+  ...realListRefusals,
   "- [ ]Check",
   "- [x]Check",
   "-     [ ] Check",
@@ -306,6 +379,12 @@ const sourceBoxWitnesses = [
 ];
 
 const hostile = [
+  // A bare split box four columns beyond its container also fails closed.
+  ["task marker", "    [\n    ] text", "checker only"],
+  // Earlier acceptance withdrawn by closing an item at the first dedent,
+  // even when CommonMark could retain that item through lazy continuation.
+  ["task marker", "- a\ntext\n    - [ ] x", "checker only"],
+  ...nonAsciiIndentRefusals.map((body) => ["task marker", body, "checker only"] as const),
   ...markerPaddingRefusals.map((body) => ["task marker", body, "checker only"] as const),
   ...oracleStructureWitnesses,
   ...sourceBoxWitnesses.map((body) => ["task marker", body] as const),
@@ -534,6 +613,7 @@ const containerFences = [
 // These owner forms must stay accepted; markdown-security.test.ts also asserts
 // them through issue evaluation. The mixed corpus below retains refusal cases too.
 const ownerBodies = [
+  ...realListControls,
   "2. Step\n   - [ ] Parent\n     - [ ] First\n     - [ ] Second",
   "2. Step\n   - [ ] Parent\n     - [ ] First\n       - [x] Child\n     - [ ] Second\n   - [ ] Next",
   "2. Step\n   - [ ] Parent\n     - [ ] First\n       - [ ] Child\n         - [x] Deep\n       - [ ] Sibling",
@@ -735,8 +815,84 @@ for (const prefix of ["", "   ", "> ", "- "]) {
   }
 }
 
-function generatedBodies(): string[] {
-  let state = 0x5eedc0de;
+// Broad list/container shapes derived from the review probes. Keep the generator
+// here so seeds are reproducible without any external probe files.
+function broadBodies(seed: number, count: number): string[] {
+  let state = seed;
+  const random = () => {
+    state ^= state << 13;
+    state >>>= 0;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    state >>>= 0;
+    return state / 2 ** 32;
+  };
+  const pick = (values: string[]): string => values[Math.floor(random() * values.length)] ?? "";
+  const ordered = [
+    "2. Step",
+    "10. Step",
+    "2.  Step",
+    "2.\tStep",
+    "- 2. Step",
+    "- > 2. Step",
+    "> - 2. Step",
+    "1. Step",
+    "3. Next",
+    "* 2. Step",
+    "- - 2. Step",
+    "2. - Step",
+    "2. > Step",
+    "2) Step",
+    "1. - 2. Step",
+    "  - 2. Step",
+    "- 10. Step",
+  ];
+  const text = [
+    "Text",
+    "  text",
+    "   text",
+    "    text",
+    "     text",
+    "> text",
+    ">",
+    "",
+    "",
+    "# H",
+    "---",
+    "```",
+    "   ```",
+    "     ```",
+    "\ttext",
+    "  - item",
+    "     - item",
+    "1. one",
+    "- item",
+  ];
+  const box = () => {
+    const indent = Math.floor(random() * 13);
+    const choice = random();
+    const checked = random() < 0.3 ? "x" : " ";
+    if (choice < 0.75) return `${" ".repeat(indent)}- [${checked}] T`;
+    if (choice < 0.8) return `${" ".repeat(indent)}* [${checked}] T`;
+    if (choice < 0.85) return `${" ".repeat(indent)}> - [${checked}] T`;
+    if (choice < 0.9) return `${" ".repeat(Math.min(indent, 3))}1. [${checked}] T`;
+    if (choice < 0.95) return `${"\t".repeat(1 + Math.floor(random() * 2))}${" ".repeat(indent % 4)}- [${checked}] T`;
+    return `${" ".repeat(indent)}+ [${checked}] T`;
+  };
+  const bodies: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const lines: string[] = [];
+    if (random() < 0.3) lines.push(pick(text));
+    lines.push(pick(ordered));
+    const length = 1 + Math.floor(random() * 6);
+    for (let j = 0; j < length; j++) lines.push(random() < 0.8 ? box() : pick([...text, ...ordered]));
+    bodies.push(lines.join("\n"));
+  }
+  return bodies;
+}
+
+function generatedBodies(seed = 0x5eedc0de, count = 4_000): string[] {
+  let state = seed;
   const next = (limit: number) => {
     state ^= state << 13;
     state ^= state >>> 17;
@@ -860,7 +1016,7 @@ function generatedBodies(): string[] {
     return value;
   };
   const bodies: string[] = [];
-  for (let i = 0; i < 4_000; i++) {
+  for (let i = 0; i < count; i++) {
     let body = "";
     const count = 1 + next(24);
     for (let j = 0; j < count; j++) body += pick(pieces);
@@ -977,6 +1133,28 @@ function generatedBodies(): string[] {
       ]);
       bodies.push(`1. a\n2. b${between}1. c\n2. d`);
     }
+  }
+  // Lazy/quoted/over-indented boxes, plus aligned siblings with depth changes.
+  bodies.push(...broadBodies(seed, count));
+  for (let i = 0; i < count / 4; i++) {
+    const head = pick([
+      "2. Step",
+      "-2. Step",
+      "*2) Step",
+      "- > 2. Step",
+      "> - 2. Step",
+      "Text\n10. Step",
+      "Text\n    # H\n10. Step",
+      "Text\n    ---\n10. Step",
+    ]);
+    let depth = 0;
+    const lines = [head];
+    for (let j = 0; j < 2 + next(7); j++) {
+      depth = Math.max(0, Math.min(depth + next(4) - 2, 4));
+      const column = Math.max(0, 3 + 2 * depth + next(3) - 1);
+      lines.push(`${" ".repeat(column)}- [${pick([" ", "x"])}] Task`);
+    }
+    bodies.push(lines.join("\n"));
   }
   return bodies;
 }
@@ -1108,6 +1286,49 @@ test("each individual rule has a mutation witness", async (t) => {
   const checkerSource = await readFile(new URL("./markdown.ts", import.meta.url), "utf8");
   const mutations = [
     {
+      name: "indented block syntax cannot interrupt a paragraph",
+      from: "end - cursor > 3 || (!headingOrBreak",
+      to: "(!headingOrBreak",
+      body: "Text\n    # H\n10. Step\n    - [ ] A",
+      kind: "task marker",
+    },
+    {
+      name: "real markers require a whitespace boundary",
+      from: String.raw`/^(?:[-*+]|\d{1,9}[.)])(?= |$)/u`,
+      to: String.raw`/^(?:[-*+]|\d{1,9}[.)])/u`,
+      body: "-2. Step\n    - [ ] Parent",
+      kind: "task marker",
+    },
+    {
+      name: "non-one markers cannot interrupt paragraphs",
+      from: "if (paragraph && !isSibling && (blank || (marker.length > 1 && !/^1[.)]$/u.test(marker)))) break;",
+      to: "",
+      body: "Text\n10. Step\n    - [ ] A",
+      kind: "task marker",
+    },
+    {
+      name: "four columns past a container never opens an item",
+      from: "if (indent > 3) break;",
+      to: "",
+      body: "    - [ ] x",
+      kind: "task marker",
+    },
+    {
+      name: "dedenting closes list items",
+      from: "if (end - cursor < container.width)",
+      to: "if (false)",
+      body: "- a\ntext\n    - [ ] x",
+      kind: "task marker",
+      checkerOnly: true,
+    },
+    {
+      name: "sibling markers continue an existing list",
+      from: "!isSibling && ",
+      to: "",
+      body: "9. a\n10. b\n    - [ ] x",
+      kind: null,
+    },
+    {
       name: "task marker padding has at most four columns",
       from: " || padding.length > 4",
       to: "",
@@ -1169,7 +1390,7 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "only canonical checklist syntax in ordered context",
-      from: "!canonicalBox || ",
+      from: "!canonicalBox ||",
       to: "",
       body: "2. Step\n   * [ ] Check",
       kind: "task marker",
@@ -1211,7 +1432,7 @@ test("each individual rule has a mutation witness", async (t) => {
       name: "intervening text ends the checklist stack",
       from: "else boxColumns.length = 0;",
       to: "",
-      body: "2. Step\n   - [ ] Parent\nwrapped\n     - [ ] Child",
+      body: "2. Step\n   - [ ] Parent\n     wrapped\n     - [ ] Child",
       kind: "task marker",
       checkerOnly: true,
     },
@@ -1405,8 +1626,8 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "long marker-only predecessor",
-      from: String.raw`/^(?:[\s>]|[-*+]|\d+[.)])*(?:[-*+]|\d+[.)])[ \t]*$/u`,
-      to: String.raw`/^(?:[\s>]|[-*+]|\d{1,9}[.)])*(?:[-*+]|\d{1,9}[.)])[ \t]*$/u`,
+      from: String.raw`/^(?:[ \t>]|(?:[-*+]|\d+[.)])(?=[ \t]|$))*(?:[-*+]|\d+[.)])[ \t]*$/u`,
+      to: String.raw`/^(?:[ \t>]|(?:[-*+]|\d{1,9}[.)])(?=[ \t]|$))*(?:[-*+]|\d{1,9}[.)])[ \t]*$/u`,
       body: "1234567890.\n   [\n   ] x",
       kind: "task marker",
       checkerOnly: true,
@@ -1431,14 +1652,14 @@ test("each individual rule has a mutation witness", async (t) => {
       name: "escaped box chain",
       from: 'line.slice(0, boxEnd + 1).includes("\\\\")',
       to: "false",
-      body: "- \\- [ ] x",
+      body: "- [x\\] x",
       kind: "task marker",
       checkerOnly: true,
     },
     {
       name: "later bare split box",
-      from: " || orderedItem)",
-      to: ")",
+      from: " || orderedItem || overIndented)",
+      to: " || overIndented)",
       body: "104. a\n     [\n     ] Done",
       kind: "task marker",
       checkerOnly: true,
@@ -1447,8 +1668,9 @@ test("each individual rule has a mutation witness", async (t) => {
       name: "canonical box needs an authorized column",
       from: "(indent !== orderedItem.contentColumn && !boxColumns.includes(indent))",
       to: "false",
-      body: "104. a\n         - [ ] x",
+      body: "104. a\n      - [ ] x",
       kind: "task marker",
+      checkerOnly: true,
     },
     {
       name: "later fenced box",
@@ -1483,14 +1705,13 @@ test("each individual rule has a mutation witness", async (t) => {
     { name: "onesOnly", from: "onesOnly || ", to: "", body: "1.\n1.\n2.", kind: "list number" },
     { name: "flat numbering", from: "!flat || ", to: "", body: "1. a\n   2. b\n3. c", kind: "list number" },
     {
-      name: "numbered task item",
+      // Real-list-start validation now also refuses non-one marker chains.
+      // Isolate this guard's literal-one allowance instead of bypassing both.
+      name: "task number allows literal one",
       from: 'number[1] !== "1"',
-      to: "false",
-      // The inner literal-one marker is exempt from the cmark scanner; the
-      // rendered-text policy still forbids a non-one number earlier in the chain.
-      body: "2.1. [x] a",
-      kind: "list number",
-      checkerOnly: true,
+      to: 'number[1] !== "0"',
+      body: "1. [x] Done",
+      kind: null,
     },
     {
       name: "task box alphabet",
@@ -1509,7 +1730,7 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "cmark digit task scanner",
-      from: String.raw`/^(?:[\s>]|[-*+]|\d{1,9}[.)])*\d+[^\n][ \t]+\[[ xX]\](?:[ \t]|$)/u`,
+      from: String.raw`/^(?:[ \t>]|(?:[-*+]|\d{1,9}[.)])(?=[ \t]|$))*\d+[^\n][ \t]+\[[ xX]\](?:[ \t]|$)/u`,
       to: "/a^/u",
       body: "2. a\n\n   9x [ ] b",
       kind: "task marker",
@@ -1517,7 +1738,7 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "cmark task container prefixes",
-      from: String.raw`/^(?:[\s>]|[-*+]|\d{1,9}[.)])*\d+[^\n][ \t]+\[[ xX]\](?:[ \t]|$)/u`,
+      from: String.raw`/^(?:[ \t>]|(?:[-*+]|\d{1,9}[.)])(?=[ \t]|$))*\d+[^\n][ \t]+\[[ xX]\](?:[ \t]|$)/u`,
       to: String.raw`/^[ \t]*\d+[^\n][ \t]+\[[ xX]\](?:[ \t]|$)/u`,
       body: "> - Steps\n>\n>   9x [ ] Continue",
       kind: "task marker",
@@ -1525,7 +1746,7 @@ test("each individual rule has a mutation witness", async (t) => {
     },
     {
       name: "cmark task container exception",
-      from: String.raw`/^(?:[\s>]|[-*+]|\d{1,9}[.)])*1[.)][ \t]+\[/u`,
+      from: String.raw`/^(?:[ \t>]|(?:[-*+]|\d{1,9}[.)])(?=[ \t]|$))*1[.)][ \t]+\[/u`,
       to: String.raw`/^[ \t]*1[.)][ \t]+\[/u`,
       body: "> 1. [x] Done",
       kind: null,
