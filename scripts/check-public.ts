@@ -872,6 +872,7 @@ function matches(
   // All views share the budget; without escapes in text or configuration they are identical.
   const views: (boolean | "main")[] = TERM_ESCAPE.test(text) || terms.terms.some((term) => TERM_ESCAPE.test(term.value)) ||
     terms.allowed.some((value) => TERM_ESCAPE.test(value)) ? [false, "main", true] : [false];
+  const sourceAllowed: { start: number; end: number }[] = [];
   for (const decodeEscapes of views) {
     const normalized = normalizeText(text, undefined, budget, decodeEscapes, binaryView);
     if (!terms.terms.length) continue;
@@ -881,6 +882,12 @@ function matches(
     const allowedStarts = allowed.map((span) => span.start);
     const allowedEnds: number[] = [];
     for (const span of allowed) allowedEnds.push(Math.max(allowedEnds.at(-1) ?? 0, span.end));
+    for (const span of allowed) {
+      // A partial match inside an expanded character does not cover that whole source character.
+      if ((span.start > 0 && normalized.start(span.start - 1) === normalized.start(span.start)) ||
+        (span.end < normalized.text.length && normalized.end(span.end) === normalized.end(span.end + 1))) continue;
+      sourceAllowed.push({ start: normalized.start(span.start), end: normalized.end(span.end) });
+    }
     for (const term of terms.terms) {
       for (const span of occurrences(normalized.text, term.value, budget, decodeEscapes)) {
         if ((allowedEnds[preceding(allowedStarts, span.start)] ?? -1) >= span.end) continue;
@@ -892,7 +899,14 @@ function matches(
       }
     }
   }
-  return [...new Map(found.map((hit) => [`${hit.start}:${hit.end}:${hit.label}`, hit])).values()].sort((a, b) => a.start - b.start);
+  // An allowed phrase in any term view exempts only occurrences inside its original source span.
+  sourceAllowed.sort((a, b) => a.start - b.start);
+  const sourceAllowedStarts = sourceAllowed.map((span) => span.start);
+  const sourceAllowedEnds: number[] = [];
+  for (const span of sourceAllowed) sourceAllowedEnds.push(Math.max(sourceAllowedEnds.at(-1) ?? 0, span.end));
+  const uncovered = found.filter((hit) => !hit.label.startsWith("private term (") ||
+    (sourceAllowedEnds[preceding(sourceAllowedStarts, hit.start)] ?? -1) < hit.end);
+  return [...new Map(uncovered.map((hit) => [`${hit.start}:${hit.end}:${hit.label}`, hit])).values()].sort((a, b) => a.start - b.start);
 }
 
 /** Decode small overlapping windows, retaining source offsets without whole-file edit arrays. */
@@ -1413,7 +1427,7 @@ function checkFont(buffer: Buffer, file: string, terms: PrivateTerms, depth: num
     let dataEnd = header;
     const scan = (data: Buffer) => {
       // Font names may also contain private text in any supported raw encoding.
-      hits.push(...rawTermViews(data, file, terms, budget));
+      hits.push(...rawTermViews(data, file, terms, budget, true));
       hits.push(...binarySecrets(data, file, terms, budget));
     };
     if (!woff2) {
@@ -1502,7 +1516,7 @@ function checkFont(buffer: Buffer, file: string, terms: PrivateTerms, depth: num
 }
 
 /** Scan distinct byte-order/alignment views once; ASCII UTF-8 and Latin-1 share one view. */
-function rawTermViews(buffer: Buffer, file: string, terms: PrivateTerms, budget: ScanBudget): string[] {
+function rawTermViews(buffer: Buffer, file: string, terms: PrivateTerms, budget: ScanBudget, fontData = false): string[] {
   const ascii = isAscii(buffer);
   // Reserve all views before allocating or normalizing any of them.
   budget.spend(buffer.length * (ascii ? 5 : 6));
@@ -1511,8 +1525,8 @@ function rawTermViews(buffer: Buffer, file: string, terms: PrivateTerms, budget:
   const scan = (text: string) => {
     if (!seen.has(text)) {
       seen.add(text);
-      // Binary byte views are not rendered text. Secret scanning remains in binarySecrets.
-      hits.push(...checkText(text, file, terms, { lines: true, generic: false, binaryView: true, budget }));
+      // Only font byte views skip text-shape refusals. Secret scanning remains in binarySecrets.
+      hits.push(...checkText(text, file, terms, { lines: true, generic: false, binaryView: fontData, budget }));
     }
   };
   scan(buffer.toString("utf8"));
@@ -2366,11 +2380,12 @@ export function checkBuffer(
   if (buffer.includes(0)) {
     const binary = knownBinary(buffer, file);
     const hits = binary ? [] : [unknown];
-    hits.push(...rawTermViews(buffer, file, terms, budget));
+    const extension = path.extname(file).toLowerCase();
+    const fontData = binary && [".woff", ".woff2", ".ttf", ".otf"].includes(extension);
+    hits.push(...rawTermViews(buffer, file, terms, budget, fontData));
     if (binary) {
       if (buffer.length > ASSET_BYTES) hits.push(safeLocation(file, terms) + ": asset exceeds size limit");
       hits.push(...binarySecrets(buffer, file, terms, budget));
-      const extension = path.extname(file).toLowerCase();
       if (extension === ".woff" || extension === ".woff2") hits.push(...checkFont(buffer, file, terms, depth, budget));
       if (extension === ".ttf" || extension === ".otf") hits.push(...checkSfnt(buffer, file, terms, depth, budget));
     }

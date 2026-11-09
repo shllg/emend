@@ -607,7 +607,9 @@ test("final A: process helpers retain main sanitation and lazy-fetch controls", 
       for (const command of ["git", "gh", "synthetic-editor"])
         for (const gitNoLazyFetch of [true, false, undefined]) {
           execute(command, ["--version"], { cwd: "/synthetic", gitNoLazyFetch });
-          const options = child.mock.calls.at(-1)!.arguments[2] as { env: NodeJS.ProcessEnv };
+          const call = child.mock.calls.at(-1);
+          assert.ok(call);
+          const options = call.arguments[2] as { env: NodeJS.ProcessEnv };
           assert.equal(options.env.GH_HOST, undefined);
           assert.equal(
             options.env.GIT_NO_LAZY_FETCH,

@@ -5154,6 +5154,21 @@ test("final B: literal and decoded views keep allowed phrases and original offse
     ["fixture: private term (file line 1)"]);
 });
 
+for (const space of ["%20", "&nbsp;"])
+  test(`last 1: allowed phrases cover source spans across ${space} views`, () => {
+    const terms = { ...finalTerms, allowed: [finalTerm + " public"] };
+    const allowed = `${finalTerm}${space}public`;
+    for (const generic of [false, true]) assert.deepEqual(checkText(allowed, "fixture", terms, { generic }), []);
+    assert.deepEqual(checkTextSpans(allowed, terms), []);
+    for (const text of [allowed + " " + finalTerm, finalTerm + " " + allowed]) {
+      const start = text.startsWith(allowed) ? allowed.length + 1 : 0;
+      for (const generic of [false, true])
+        assert.deepEqual(checkText(text, "fixture", terms, { generic, columns: true }),
+          [`fixture:1:${start + 1}: private term (file line 1)`]);
+      assert.deepEqual(checkTextSpans(text, terms), [{ start, end: start + finalTerm.length, label: "private term (file line 1)" }]);
+    }
+  });
+
 test("final B: all normalized views reserve the shared budget without terms too", () => {
   const text = `100%${finalTerm}`;
   for (const terms of [empty, finalTerms])
@@ -5208,9 +5223,33 @@ for (const kind of ["woff", "woff2"] as const)
       assert.deepEqual(checkBuffer(bytes, `fixture.${kind}`, terms, false), []);
       assert.deepEqual(checkText(`${["data", `font/${kind};base64,`].join(":")}${bytes.toString("base64")}`, "fixture", terms), []);
     }
-    // The same byte views in other binary containers must not acquire text-shape refusals.
-    assert.deepEqual(checkBuffer(png(pngChunk("ruNs", finalGlyph)), "fixture.png", empty, false), []);
   });
+
+test("last 2: PNG and non-font byte views retain combining-mark refusals", () => {
+  const bytes = png(pngChunk("ruNs", finalGlyph));
+  for (const terms of [empty, finalTerms]) {
+    assert.deepEqual(checkBuffer(bytes, "fixture.png", terms, false), [
+      "fixture.png:1: combining-mark run", "fixture.png:2: combining-mark run",
+    ]);
+    for (const file of ["fixture.bin", "fixture.woff"])
+      assert.ok(checkBuffer(bytes, file, terms, false).some((hit) => hit.includes("combining-mark run")));
+    assert.ok(checkBuffer(finalGlyph, "fixture.bin", terms, false).some((hit) => hit.includes("combining-mark run")));
+    for (const mime of ["image/png", "font/woff"])
+      assert.ok(checkText(`${["data", mime + ";base64,"].join(":")}${bytes.toString("base64")}`, "fixture", terms)
+        .some((hit) => hit.includes("combining-mark run")));
+  }
+});
+
+test("last 2: uncompressed font bodies retain glyph exemptions", () => {
+  for (const kind of ["ttf", "otf"] as const) {
+    const bytes = sfntFixture(kind, finalGlyph);
+    bytes.write("glyf", 12);
+    for (const terms of [empty, finalTerms]) {
+      assert.deepEqual(checkBuffer(bytes, `fixture.${kind}`, terms, false), []);
+      assert.deepEqual(checkText(`${["data", `font/${kind};base64,`].join(":")}${bytes.toString("base64")}`, "fixture", terms), []);
+    }
+  }
+});
 
 test("final C: private terms and secrets survive combining runs in binary font views", () => {
   const table = Buffer.concat([finalGlyph, Buffer.from(` ${finalTerm} ${secret}`, "utf16le")]);
