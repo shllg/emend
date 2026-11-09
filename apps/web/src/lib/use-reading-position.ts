@@ -37,10 +37,20 @@ export function useFilesPosition({ storageKey, active }: { storageKey: string; a
     const onScroll = () => {
       if (reader) filesPositions.set(storageKey, scroller.scrollTop);
     };
+    const rememberFocus = () => {
+      if (
+        !isReadingFocusMove(document.activeElement) &&
+        document.activeElement instanceof HTMLElement &&
+        scroller.contains(document.activeElement)
+      )
+        reader = true;
+    };
     scroller.addEventListener("scroll", onScroll, { passive: true });
+    scroller.addEventListener("focusin", rememberFocus);
     return () => {
       stopInput();
       scroller.removeEventListener("scroll", onScroll);
+      scroller.removeEventListener("focusin", rememberFocus);
     };
   }, [active, storageKey]);
 }

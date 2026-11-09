@@ -293,6 +293,23 @@ test("near sections alone load, immutable sides cache across remount and absent 
   await screen.findByTestId("rendered-diff");
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
+test("a file marks its mounted body while fetching and parsing, then clears the loading mark", async () => {
+  const response = Promise.withResolvers<Response>();
+  const parsed = Promise.withResolvers<ReturnType<typeof parsePair>>();
+  fetchMock.mockReturnValue(response.promise);
+  parser.mockReturnValue(parsed.promise);
+  await mount(revision([file("loading.ts", { hasOld: false, status: "added" })]));
+  const section = screen.getByRole("region", { name: "File loading.ts" });
+  expect(section.hasAttribute("data-diff-loading")).toBe(false);
+  near("loading.ts");
+  expect(section.hasAttribute("data-diff-loading")).toBe(true);
+  response.resolve(new Response("one\ntwo\n"));
+  await waitFor(() => expect(parser).toHaveBeenCalledOnce());
+  expect(section.hasAttribute("data-diff-loading")).toBe(true);
+  parsed.resolve(parsePair({ oldFile: null, newFile: { name: "loading.ts", contents: "one\ntwo\n" } }));
+  await screen.findByTestId("rendered-diff");
+  await waitFor(() => expect(section.hasAttribute("data-diff-loading")).toBe(false));
+});
 test.each([
   "pnpm-lock.yaml",
   "package-lock.json",
@@ -500,7 +517,11 @@ test("toolbar counts exclude Other, pluralize, and jump menu reveals a collapsed
   });
   Object.defineProperties(pane, { scrollHeight: { value: 3000 }, clientHeight: { value: 600 } });
   if (!header) throw new Error("Missing file header");
-  vi.spyOn(header, "getBoundingClientRect").mockImplementation(() => new DOMRect(0, 1200 - pane.scrollTop, 400, 40));
+  const section = screen.getByRole("region", { name: "File src/nested/source.ts" });
+  vi.spyOn(section, "getBoundingClientRect").mockImplementation(() => new DOMRect(0, 1200 - pane.scrollTop, 400, 1000));
+  vi.spyOn(header, "getBoundingClientRect").mockImplementation(
+    () => new DOMRect(0, Math.max(151, section.getBoundingClientRect().top), 400, 40),
+  );
   if (!toolbar || !topicHeader) throw new Error("Missing toolbar/topic");
   vi.spyOn(toolbar, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 400, 41));
   vi.spyOn(topicHeader, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 41, 400, 110));
@@ -1182,7 +1203,7 @@ test("the phone leaves the topic height at zero because that header does not sti
   expect(screen.getByRole("region", { name: /^Topic / }).style.getPropertyValue("--em-topic-height")).toBe("0px");
 });
 
-test.each(["toolbar", "navigator"])("a %s file jump follows late layout growth and cancels on unmount", async (via) => {
+test.each(["toolbar", "navigator"])("a %s stuck file jump follows growth and cancels on unmount", async (via) => {
   const above = file("above.ts");
   const destination = file("destination.ts", { flag: "binary", order: 1 });
   let navigate: NavigateDiff | null = null;
@@ -1196,11 +1217,15 @@ test.each(["toolbar", "navigator"])("a %s file jump follows late layout growth a
   const toolbar = pane.querySelector("[data-diff-toolbar]");
   const topicHeader = pane.querySelector("[data-topic-header]");
   if (!header || !toolbar || !topicHeader) throw new Error("Missing jump destination");
+  const section = screen.getByRole("region", { name: "File destination.ts" });
   let targetTop = 1300;
   Object.defineProperties(pane, { scrollHeight: { value: 10000 }, clientHeight: { value: 600 } });
   vi.spyOn(pane, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 900, 600));
+  vi.spyOn(section, "getBoundingClientRect").mockImplementation(
+    () => new DOMRect(0, targetTop - pane.scrollTop, 900, 5000),
+  );
   vi.spyOn(header, "getBoundingClientRect").mockImplementation(
-    () => new DOMRect(0, targetTop - pane.scrollTop, 900, 40),
+    () => new DOMRect(0, Math.max(141, section.getBoundingClientRect().top), 900, 40),
   );
   vi.spyOn(toolbar, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 900, 41));
   vi.spyOn(topicHeader, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 41, 900, 100));
@@ -1208,6 +1233,8 @@ test.each(["toolbar", "navigator"])("a %s file jump follows late layout growth a
     if (options && typeof options === "object") pane.scrollTop = options.top ?? 0;
   });
   vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"] });
+  pane.scrollTop = 4000;
+  expect(header.getBoundingClientRect().top).toBe(141);
   if (via === "toolbar") {
     fireEvent.keyDown(screen.getByRole("button", { name: "1 topic · 2 files" }), { key: "ArrowDown" });
     fireEvent.click(await screen.findByRole("menuitem", { name: "destination.ts" }));
@@ -1216,6 +1243,9 @@ test.each(["toolbar", "navigator"])("a %s file jump follows late layout growth a
     act(() => expect(navigate?.({ elementId: header.id })).toBe(true));
   }
   expect(header.getBoundingClientRect().top).toBe(149);
+  expect(scroll).toHaveBeenCalledExactlyOnceWith({ top: 1151, behavior: "instant" });
+  act(() => vi.advanceTimersByTime(500));
+  expect(scroll).toHaveBeenCalledTimes(1);
   near("above.ts");
   await screen.findByTestId("rendered-diff");
   targetTop += 1800;

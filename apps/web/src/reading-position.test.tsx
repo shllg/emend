@@ -8,6 +8,7 @@ import type { ComponentProps } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
 import { layoutStore } from "./lib/layout-store.ts";
+import { focusReadingTarget } from "./lib/reading-focus.ts";
 import { loadReadingPosition, readingKey, readingPositionKey, saveReadingPosition } from "./lib/reading-position.ts";
 import { restoreDelays } from "./lib/use-reading-position.ts";
 
@@ -905,6 +906,30 @@ const filesLayouts = [
   { width: 1280, mode: "tabs" },
   { width: 390, mode: "tabs" },
 ] as const;
+
+test.each(filesLayouts.flatMap((layout) => [false, true].map((programmatic) => ({ ...layout, programmatic }))))(
+  "Files saves focus scrolling only for reader focus ($width px, $mode, programmatic=$programmatic)",
+  async ({ width: nextWidth, mode, programmatic }) => {
+    width = nextWidth;
+    layoutStore.update({ pane: { desktop: mode, tablet: mode } });
+    const { history } = mount("?tab=files&rev=1");
+    const row = await screen.findByRole("button", { name: /Open diff for seed.txt/ });
+    expect(pane().scrollTop).toBe(0);
+    act(() => {
+      if (programmatic) focusReadingTarget(row);
+      else row.focus();
+    });
+    expect(document.activeElement).toBe(row);
+    pane().scrollTop = 225;
+    fireEvent.scroll(pane());
+    pane().scrollTop = 275;
+    fireEvent.scroll(pane());
+    await go(history, "?tab=writeup&rev=1");
+    await screen.findByText("Paragraph bbbb");
+    await go(history, "?tab=files&rev=1");
+    expect(pane().scrollTop).toBe(programmatic ? 0 : 275);
+  },
+);
 
 test.each(filesLayouts.flatMap((layout) => [0, 150].map((top) => ({ ...layout, top }))))(
   "Files keeps its own offset with Writeup at $top ($width px, $mode)",

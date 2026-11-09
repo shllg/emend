@@ -343,6 +343,15 @@ export function FileDiff({
       ref={ref}
       data-diff-section
       data-diff-file
+      data-diff-loading={
+        (mounted &&
+          !collapsed &&
+          !topicCollapsed &&
+          !file.flag &&
+          (!lockfile || expanded) &&
+          (bodyState.loading ?? true)) ||
+        undefined
+      }
       aria-label={`File ${file.path}`}
       className="em-diff-file"
       style={{ minHeight: collapsed || topicCollapsed || mounted || file.flag ? undefined : height }}

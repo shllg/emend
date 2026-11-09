@@ -115,20 +115,29 @@ function fileScene(phone: boolean) {
   const rects: [string, number, number][] = [
     ["[data-diff-toolbar]", 100, 41],
     ["[data-topic-header]", 141, 100],
-    ["[data-file-header]", 241, 40],
   ];
   for (const [selector, top, height] of rects)
     vi.spyOn(pane.querySelector(selector) as HTMLElement, "getBoundingClientRect").mockReturnValue(
       new DOMRect(0, top, 500, height),
     );
   const card = pane.querySelector<HTMLElement>("article") as HTMLElement;
+  const file = pane.querySelector<HTMLElement>("[data-diff-file]") as HTMLElement;
+  const header = pane.querySelector<HTMLElement>("[data-file-header]") as HTMLElement;
   Object.defineProperties(pane, { clientHeight: { value: 500 }, scrollHeight: { value: 3000 } });
   vi.spyOn(pane, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 100, 500, 500));
+  vi.spyOn(file, "getBoundingClientRect").mockImplementation(
+    () => new DOMRect(0, 100 + 1300 - pane.scrollTop, 500, 1700),
+  );
+  vi.spyOn(header, "getBoundingClientRect").mockImplementation(
+    () => new DOMRect(0, Math.max(phone ? 141 : 241, file.getBoundingClientRect().top), 500, 40),
+  );
   vi.spyOn(card, "getBoundingClientRect").mockImplementation(
     () => new DOMRect(0, 100 + 1300 - pane.scrollTop, 500, 100),
   );
-  const scroll = vi.spyOn(pane, "scrollTo").mockImplementation(() => {});
-  return { card, header: pane.querySelector("[data-file-header]") as HTMLElement, scroll };
+  const scroll = vi.spyOn(pane, "scrollTo").mockImplementation((options?: ScrollToOptions | number) => {
+    if (options && typeof options === "object") pane.scrollTop = options.top ?? 0;
+  });
+  return { pane, card, file, header, scroll };
 }
 
 test("a line or thread inside a file also clears that file's sticky header", () => {
@@ -147,10 +156,32 @@ test("on the phone the topic header scrolls away, so only the file header counts
 
 test("a file header destination does not count its own header", () => {
   const { header, scroll } = fileScene(false);
-  vi.spyOn(header, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 1400, 500, 40));
   scrollDiffTarget(header);
-  // 1300 - toolbar 41 - topic 100 - 8, from the header's own rect at 1400 - 100
+  // 1300 - toolbar 41 - topic 100 - 8
   expect(scroll).toHaveBeenCalledExactlyOnceWith({ top: 1151, behavior: "instant" });
+});
+
+test.each([false, true])("a stuck file header jumps to its section's start in one scroll (phone=%s)", (phone) => {
+  const { pane, file, header, scroll } = fileScene(phone);
+  pane.scrollTop = 2200;
+  const stack = phone ? 41 : 141;
+  expect(header.getBoundingClientRect().top).toBe(100 + stack);
+  scrollDiffTarget(header);
+  expect(scroll).toHaveBeenCalledExactlyOnceWith({ top: 1300 - stack - 8, behavior: "instant" });
+  expect(file.getBoundingClientRect().top - pane.getBoundingClientRect().top).toBe(stack + 8);
+});
+
+test.each([false, true])("holding a stuck file header reaches its section without creeping (phone=%s)", (phone) => {
+  vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"] });
+  const { pane, header, scroll } = fileScene(phone);
+  pane.scrollTop = 2200;
+  const cancel = holdDiffTarget(header);
+  const top = 1300 - (phone ? 41 : 141) - 8;
+  expect(scroll).toHaveBeenCalledExactlyOnceWith({ top, behavior: "instant" });
+  vi.advanceTimersByTime(1000);
+  expect(pane.scrollTop).toBe(top);
+  expect(scroll).toHaveBeenCalledTimes(1);
+  cancel();
 });
 
 function holdScene(phone = false) {
@@ -176,6 +207,49 @@ test.each([false, true])("a held target follows layout growth below the sticky s
   shift(300);
   vi.advanceTimersToNextFrame();
   expect(scroll).toHaveBeenCalledTimes(2);
+});
+
+test.each([1, 250, -250])("an outside scroll of %s px stops the hold without a correction", (delta) => {
+  const { pane, card, scroll, shift } = holdScene();
+  holdDiffTarget(card);
+  const top = pane.scrollTop + delta;
+  pane.scrollTop = top;
+  vi.advanceTimersToNextFrame();
+  expect(scroll).toHaveBeenCalledTimes(1);
+  expect(vi.getTimerCount()).toBe(0);
+  shift(500);
+  vi.advanceTimersByTime(500);
+  expect(pane.scrollTop).toBe(top);
+  expect(scroll).toHaveBeenCalledTimes(1);
+});
+
+test.each([200, 500])("layout growth with %s px of scroll anchoring keeps the hold", (anchored) => {
+  const { pane, card, scroll, shift } = holdScene();
+  const cancel = holdDiffTarget(card);
+  shift(500);
+  pane.scrollTop += anchored;
+  vi.advanceTimersToNextFrame();
+  expect(pane.scrollTop).toBe(1651);
+  expect(scroll).toHaveBeenCalledTimes(anchored === 500 ? 1 : 2);
+  shift(300);
+  vi.advanceTimersToNextFrame();
+  expect(scroll).toHaveBeenLastCalledWith({ top: 1951, behavior: "instant" });
+  cancel();
+});
+
+test("focus with preventScroll keeps the hold", () => {
+  const { pane, card, scroll, shift } = holdScene();
+  const input = document.createElement("textarea");
+  pane.append(input);
+  const cancel = holdDiffTarget(card);
+  input.focus({ preventScroll: true });
+  expect(document.activeElement).toBe(input);
+  vi.advanceTimersToNextFrame();
+  shift(500);
+  vi.advanceTimersToNextFrame();
+  expect(scroll).toHaveBeenCalledTimes(2);
+  expect(scroll).toHaveBeenLastCalledWith({ top: 1651, behavior: "instant" });
+  cancel();
 });
 
 test.each(["wheel", "touchstart", "touchmove", "pointerdown", "keydown"])(
@@ -241,6 +315,42 @@ test("a hold ends after two quiet seconds", () => {
   vi.advanceTimersByTime(diffHoldQuietMs);
   expect(vi.getTimerCount()).toBe(0);
   shift(1000);
+  vi.advanceTimersToNextFrame();
+  expect(scroll).toHaveBeenCalledTimes(1);
+});
+
+test("loading keeps the hold through late growth, then the quiet window ends it", () => {
+  const { pane, card, scroll, shift } = holdScene();
+  const loading = document.createElement("section");
+  loading.setAttribute("data-diff-loading", "");
+  pane.prepend(loading);
+  holdDiffTarget(card);
+  vi.advanceTimersByTime(2500);
+  expect(vi.getTimerCount()).toBe(1);
+  shift(500);
+  vi.advanceTimersToNextFrame();
+  expect(scroll).toHaveBeenLastCalledWith({ top: 1651, behavior: "instant" });
+  loading.removeAttribute("data-diff-loading");
+  vi.advanceTimersByTime(diffHoldQuietMs - 100);
+  expect(vi.getTimerCount()).toBe(1);
+  vi.advanceTimersByTime(100);
+  expect(vi.getTimerCount()).toBe(0);
+  shift(500);
+  vi.advanceTimersToNextFrame();
+  expect(scroll).toHaveBeenCalledTimes(2);
+});
+
+test("the ten second cap ends a hold even while a file keeps loading", () => {
+  const { pane, card, scroll, shift } = holdScene();
+  const loading = document.createElement("section");
+  loading.setAttribute("data-diff-loading", "");
+  pane.prepend(loading);
+  holdDiffTarget(card);
+  vi.advanceTimersByTime(diffHoldMaxMs - 16);
+  expect(vi.getTimerCount()).toBe(1);
+  vi.advanceTimersToNextFrame();
+  expect(vi.getTimerCount()).toBe(0);
+  shift(500);
   vi.advanceTimersToNextFrame();
   expect(scroll).toHaveBeenCalledTimes(1);
 });
