@@ -45,7 +45,7 @@ export type ParsedDiff = FileDiffMetadata;
 export type DiffPostRender = NonNullable<FileDiffOptions<ReactElement, undefined>["onPostRender"]>;
 type Annotation = DiffLineAnnotation<ReactElement> & { startLine?: number };
 type BodyState = { diff?: ParsedDiff; blocked: boolean; loading?: boolean };
-type SlotState = { names: Set<string>; rendered: boolean };
+type SlotState = { names: Set<string>; rendered: boolean; failed: boolean };
 // Highlighting costs about 0.09 ms per line, so a 5000-line file takes about half a second on either path.
 export const TOKENIZE_MAX_LINES = 5000;
 const poolOptions = { workerFactory: () => new DiffWorker(), poolSize: 2 };
@@ -110,6 +110,7 @@ export function DiffView({
       // The initial mount callback can precede async rendering. Once code exists,
       // Pierre has committed its annotation slots in the same render as the lines.
       const rendered = phase !== "unmount" && !!node.shadowRoot?.querySelector("[data-line]");
+      const failed = phase !== "unmount" && !!node.shadowRoot?.querySelector("[data-error-wrapper]");
       if (rendered) {
         if (expansionState.current?.instance !== instance || expansionState.current.diff !== fileDiff)
           expansionState.current = { instance, diff: fileDiff, counts: new Map() };
@@ -126,6 +127,7 @@ export function DiffView({
       }
       onSlots?.({
         rendered,
+        failed,
         names: new Set(
           [...(rendered ? (node.shadowRoot?.querySelectorAll('slot[name^="annotation-"]') ?? []) : [])].map(
             (slot) => slot.getAttribute("name") ?? "",
@@ -264,7 +266,7 @@ export function FileDiff({
   const loads = diffLoads(useQueryClient());
   const [height, setHeight] = useState(200);
   const [expanded, setExpanded] = useState(false);
-  const [slotState, setSlots] = useState<SlotState>({ names: new Set(), rendered: false });
+  const [slotState, setSlots] = useState<SlotState>({ names: new Set(), rendered: false, failed: false });
   const slots = slotState.names;
   const [bodyState, setBodyState] = useState<BodyState>({ blocked: false });
   const onBodyState = useCallback((next: BodyState) => {
@@ -278,6 +280,7 @@ export function FileDiff({
     (next: SlotState) =>
       setSlots((previous) =>
         previous.rendered === next.rendered &&
+        previous.failed === next.failed &&
         previous.names.size === next.names.size &&
         [...previous.names].every((name) => next.names.has(name))
           ? previous
@@ -350,7 +353,11 @@ export function FileDiff({
           !file.flag &&
           (!lockfile || expanded) &&
           ((bodyState.loading ?? true) ||
-            (!!bodyState.diff && !bodyState.blocked && bodyState.diff.hunks.length > 0 && !slotState.rendered))) ||
+            (!!bodyState.diff &&
+              !bodyState.blocked &&
+              bodyState.diff.hunks.length > 0 &&
+              !slotState.rendered &&
+              !slotState.failed))) ||
         undefined
       }
       aria-label={`File ${file.path}`}

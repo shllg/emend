@@ -61,7 +61,7 @@ vi.mock("@pierre/diffs/react", () => ({
     );
   },
 }));
-function postRender(rendered: boolean) {
+function postRender(rendered: boolean, failed = false) {
   const host = screen.getByTestId("rendered-diff");
   const phase = host.shadowRoot ? "update" : "mount";
   const shadow = host.shadowRoot ?? host.attachShadow({ mode: "open" });
@@ -69,6 +69,11 @@ function postRender(rendered: boolean) {
     const line = document.createElement("div");
     line.dataset.line = "1";
     shadow.append(line);
+  }
+  if (failed) {
+    const error = document.createElement("div");
+    error.dataset.errorWrapper = "";
+    shadow.append(error);
   }
   const props = renderer.props.at(-1);
   if (!props) throw new Error("Missing renderer props");
@@ -343,6 +348,19 @@ test("a parsed diff stays marked as loading until Pierre draws its first lines",
   expect(section.hasAttribute("data-diff-loading")).toBe(true);
   postRender(true);
   expect(host.shadowRoot?.querySelector("[data-line]")).toBeTruthy();
+  expect(section.hasAttribute("data-diff-loading")).toBe(false);
+});
+test("a parsed diff clears its loading marker when Pierre fails to render", async () => {
+  await mount(revision([file("failed.ts", { hasOld: false, status: "added" })]));
+  near("failed.ts");
+  const host = await screen.findByTestId("rendered-diff");
+  const section = screen.getByRole("region", { name: "File failed.ts" });
+  expect(renderer.props.at(-1)?.fileDiff.hunks.length).toBeGreaterThan(0);
+  postRender(false);
+  expect(section.hasAttribute("data-diff-loading")).toBe(true);
+  postRender(false, true);
+  expect(host.shadowRoot?.querySelector("[data-error-wrapper]")).toBeTruthy();
+  expect(host.shadowRoot?.querySelector("[data-line]")).toBeNull();
   expect(section.hasAttribute("data-diff-loading")).toBe(false);
 });
 test("a parsed diff with no hunks clears its loading marker without drawing lines", async () => {
