@@ -54,24 +54,23 @@ function endsList(line: string, contentColumn: number): boolean {
   return headingOrBreak(content);
 }
 
-type Container = { kind: "quote" } | { kind: "item"; width: number; markerIndent: number; delimiter: string };
+type Paragraph = { setext: boolean };
+type Block = { paragraph: Paragraph | null };
+type Container = Block &
+  ({ kind: "quote" } | { kind: "item"; width: number; markerIndent: number; delimiter: string; blankStart: boolean });
 
-/** Open only real containers; losing a possible lazy continuation fails closed. */
+/** Paragraphs belong to the last continued container, never to the whole body. */
 function listStarts() {
+  const root: Block = { paragraph: null };
   let containers: Container[] = [];
-  let paragraph = false;
-  return (raw: string): { markers: number[]; overIndented: boolean } => {
-    // Expand tabs once, retaining raw offsets for the refusal rules below.
+  let fence: { run: string; depth: number } | null = null;
+  return (raw: string) => {
     let line = "";
     const offsets: number[] = [];
     for (let i = 0; i < raw.length; i++) {
       const width = raw[i] === "\t" ? 4 - (line.length % 4) : 1;
       line += raw[i] === "\t" ? " ".repeat(width) : raw[i];
       for (let j = 0; j < width; j++) offsets.push(i);
-    }
-    if (/^ *$/u.test(line)) {
-      paragraph = false;
-      return { markers: [], overIndented: false };
     }
     let cursor = 0;
     const spaceEnd = () => {
@@ -80,6 +79,7 @@ function listStarts() {
       return end;
     };
     let sibling: Extract<Container, { kind: "item" }> | undefined;
+    const previousScope = containers.at(-1) ?? root;
     let kept = 0;
     for (const container of containers) {
       const end = spaceEnd();
@@ -88,25 +88,77 @@ function listStarts() {
         cursor = end + 1;
         if (line[cursor] === " ") cursor++;
       } else {
-        if (end - cursor < container.width) {
+        if (end === line.length) {
+          if (container.blankStart) break;
+        } else if (end - cursor < container.width) {
           sibling = container;
           break;
         }
-        cursor += container.width;
+        cursor += Math.min(container.width, end - cursor);
       }
       kept++;
     }
+    const rest = line.slice(spaceEnd());
+    const blockStart =
+      spaceEnd() - cursor <= 3 &&
+      (headingOrBreak(rest) || /^(?:>|`{3,}|~{3,}|(?:[-*+]|\d{1,9}[.)])(?= |$))/u.test(rest));
+    const lazy = kept < containers.length && !!rest && previousScope.paragraph && !blockStart && !fence;
+    if (lazy) {
+      // Lazy text stays in this paragraph, but cannot be a setext underline or
+      // authorize a new list marker: it did not continue every container.
+      return { markers: [] as number[], overIndented: spaceEnd() - cursor > 3, paragraph: previousScope.paragraph };
+    }
     containers = containers.slice(0, kept);
+    if (fence && kept < fence.depth) fence = null;
+    let scope = containers.at(-1) ?? root;
     const starts: number[] = [];
+    let paragraphMarker: number | undefined;
+    if (fence) {
+      // Code cannot create containers. Judge literal boxes against the outside
+      // containers, without letting a code line change the next line's margin.
+      const run = /^ {0,3}(`{3,}|~{3,}) *$/u.exec(line.slice(cursor))?.[1];
+      if (run && run[0] === fence.run[0] && run.length >= fence.run.length) {
+        fence = null;
+        return { markers: starts, overIndented: false, paragraph: scope.paragraph };
+      }
+      const overIndented = spaceEnd() - cursor > 3;
+      while (cursor < line.length) {
+        const end = spaceEnd();
+        if (end - cursor > 3) break;
+        if (line[end] === ">") {
+          cursor = end + 1;
+          if (line[cursor] === " ") cursor++;
+          continue;
+        }
+        const marker = /^(?:[-*+]|\d{1,9}[.)])(?= |$)/u.exec(line.slice(end))?.[0];
+        if (!marker) break;
+        starts.push(offsets[end] ?? raw.length);
+        cursor = end + marker.length;
+        if (line[cursor] === " ") cursor++;
+      }
+      return { markers: starts, overIndented, paragraph: scope.paragraph };
+    }
+    if (!rest) {
+      scope.paragraph = null;
+      return { markers: starts, overIndented: false, paragraph: scope.paragraph };
+    }
+    for (const container of containers) if (container.kind === "item") container.blankStart = false;
     while (cursor < line.length) {
       const end = spaceEnd();
       const indent = end - cursor;
       if (indent > 3) break;
+      if (scope.paragraph && /^(?:=+|-+) *$/u.test(line.slice(end))) {
+        scope.paragraph.setext = true;
+        scope.paragraph = null;
+        return { markers: starts, overIndented: false, paragraph: scope.paragraph };
+      }
       if (line[end] === ">") {
-        containers.push({ kind: "quote" });
+        scope.paragraph = null;
+        const quote: Container = { kind: "quote", paragraph: null };
+        containers.push(quote);
+        scope = quote;
         cursor = end + 1;
         if (line[cursor] === " ") cursor++;
-        paragraph = false;
         sibling = undefined;
         continue;
       }
@@ -118,32 +170,46 @@ function listStarts() {
       const markerEnd = end + marker.length;
       const blank = /^ *$/u.test(line.slice(markerEnd));
       const isSibling = sibling?.delimiter === delimiter && sibling.markerIndent === indent;
-      // A sibling continues its list. A new item interrupts a paragraph only
-      // with a bullet or literal 1 and nonblank first-line content.
-      if (paragraph && !isSibling && (blank || (marker.length > 1 && !/^1[.)]$/u.test(marker)))) break;
+      if (scope.paragraph && !isSibling && (blank || (marker.length > 1 && !/^1[.)]$/u.test(marker)))) {
+        paragraphMarker = offsets[end];
+        break;
+      }
       starts.push(offsets[end] ?? raw.length);
+      scope.paragraph = null;
       const base = cursor;
       cursor = markerEnd;
       const padding = spaceEnd() - cursor;
       cursor += blank || padding > 4 ? 1 : padding;
-      containers.push({ kind: "item", width: cursor - base, markerIndent: indent, delimiter });
-      paragraph = false;
+      const item: Container = {
+        kind: "item",
+        width: cursor - base,
+        markerIndent: indent,
+        delimiter,
+        blankStart: blank,
+        paragraph: null,
+      };
+      containers.push(item);
+      scope = item;
       sibling = undefined;
     }
     const end = spaceEnd();
     const remaining = line.slice(end);
-    // Indented text cannot authorize a non-one list start on the next line.
-    // Only a block start within three columns can end this interruption guard.
-    paragraph =
-      !!remaining && (end - cursor > 3 || (!headingOrBreak(remaining) && !/^(?:`{3,}|~{3,})/u.test(remaining)));
-    return { markers: starts, overIndented: end - cursor > 3 };
+    const opener = /^(?:`{3,}|~{3,})/u.exec(remaining)?.[0];
+    if (end - cursor <= 3 && opener) {
+      fence = { run: opener, depth: containers.length };
+      scope.paragraph = null;
+    } else if (!remaining || (end - cursor <= 3 && headingOrBreak(remaining))) scope.paragraph = null;
+    else if (end - cursor <= 3) scope.paragraph ??= { setext: false };
+    // Indented code opens no paragraph; over-indented paragraph text keeps one.
+    return { markers: starts, overIndented: end - cursor > 3, paragraph: scope.paragraph, paragraphMarker };
   };
 }
 
 /** Conservative raw-line rules with a partial, fail-closed container tracker. */
 function hiddenLineReason(lines: string[]): string | null {
-  // These broad prefix scans only refuse numbers; they never open a container.
-  // Keep malformed/Unicode-spaced chains covered as a conservative raw limit.
+  // These broad scans impose raw number limits, including malformed prefixes.
+  // A separate raw leading-chain scan below opens ordered refusal contexts;
+  // the container tracker authorizes only boxes that can start actual items.
   // Long starts can be drawn outside the comment box, including nested starts.
   if (lines.some((line) => /^(?:[\s>]|[-*+]|\d{1,9}[.)])*\d{4,9}[.)](?=[ \t]|$)/u.test(line)))
     return refusal("list number");
@@ -232,6 +298,7 @@ function hiddenLineReason(lines: string[]): string | null {
     markerColumn: number;
     contentColumn: number;
     quoteDepth: number;
+    paragraphOnly: boolean;
   } | null = null;
   let sawFence = false;
   // This coarse tracker only adds refusals. It never hides ordered markers or
@@ -239,9 +306,14 @@ function hiddenLineReason(lines: string[]): string | null {
   let fenceRun: string | null = null;
   let fenceHasContainers = false;
   const boxColumns: number[] = [];
-  const startsOnLine = listStarts();
+  // Each line retains its paragraph object. A later continued underline marks
+  // that same object, including after lazy text or non-interrupting markers.
+  // Blank lines and new blocks retire it, so later paragraphs cannot taint it.
+  const structure = lines.map(listStarts());
   for (const [index, line] of lines.entries()) {
-    const { markers: starts, overIndented } = startsOnLine(line);
+    const current = structure[index];
+    if (!current) return refusal("task marker");
+    const { markers: starts, overIndented, paragraphMarker } = current;
     let contentStart = 0;
     let indent = 0;
     while (line[contentStart] === " " || line[contentStart] === "\t") {
@@ -267,10 +339,10 @@ function hiddenLineReason(lines: string[]): string | null {
       orderedItem = null;
       sawFence = false;
     }
-    for (const start of starts) {
-      const marker = /^(\d{1,9})[.)]([ \t]*)/u.exec(line.slice(start));
-      if (!marker) continue;
-      marker.index = start;
+    // Raw markers retain the ordered/fence refusals even when the paragraph
+    // reading cannot open the item. A definite paragraph only relaxes layout.
+    const chain = /^(?:[ \t>]|(?:[-*+]|\d{1,9}[.)])(?=[ \t]|$))*/u.exec(line)?.[0] ?? "";
+    for (const marker of chain.matchAll(/(\d{1,9})[.)]([ \t]*)/gu)) {
       const end = marker.index + marker[0].length;
       if (!marker[2] && end < line.length) continue;
       const markerColumn = columns(line.slice(0, marker.index));
@@ -279,7 +351,7 @@ function hiddenLineReason(lines: string[]): string | null {
           orderedItem = null;
           sawFence = false;
         }
-      } else if (!orderedItem || markerColumn <= orderedItem.markerColumn) {
+      } else if (!orderedItem || orderedItem.paragraphOnly || markerColumn <= orderedItem.markerColumn) {
         const markerEnd = columns(line.slice(0, end - (marker[2]?.length ?? 0)));
         const padding = end === line.length ? 1 : columns(line.slice(0, end)) - markerEnd;
         // Blank starts, absent padding and padding beyond four use one column.
@@ -290,6 +362,7 @@ function hiddenLineReason(lines: string[]): string | null {
           markerColumn,
           contentColumn,
           quoteDepth: line.slice(0, marker.index).match(/>/gu)?.length ?? 0,
+          paragraphOnly: paragraphMarker === marker.index,
         };
       }
     }
@@ -309,21 +382,28 @@ function hiddenLineReason(lines: string[]): string | null {
     // opening bracket remains text. Only whitespace and x/X can form a box;
     // other bracketed characters stay text. Closed bare boxes can be lazy continuations.
     const t = line.replaceAll("\\", "");
+    const boxShape = /^(.*?)\[([\sxX]+)\]/u.exec(t);
+    if (boxShape && /(?:[-*+]|\d+[.)])[ \t]*$/u.test(boxShape[1] ?? "") && /[^ \t>\d.*+)-]/u.test(boxShape[1] ?? ""))
+      return refusal("task marker");
     // A marker-only line can start an item whose first paragraph is on this line.
     // Check that combined chain too, so a split box cannot hide the item's number.
     const previousLine = (lines[index - 1] ?? "").replaceAll("\\", "");
     const followsMarker = /^(?:[ \t>]|(?:[-*+]|\d+[.)])(?=[ \t]|$))*(?:[-*+]|\d+[.)])[ \t]*$/u.test(previousLine);
-    const taskLines = [t];
-    if (followsMarker) taskLines.push(previousLine + t.replace(/^[\s>]+/u, ""));
-    for (const text of taskLines) {
+    const taskLines = [{ text: t, shift: 0 }];
+    if (followsMarker) {
+      const leading = /^[\s>]*/u.exec(t)?.[0].length ?? 0;
+      taskLines.push({ text: previousLine + t.slice(leading), shift: previousLine.length - leading });
+    }
+    for (const { text, shift } of taskLines) {
       // Deliberately recognize malformed and Unicode-spaced prefixes here too:
-      // this scan only refuses. Only startsOnLine can authorize an actual item.
-      const task = /^((?:[\s>]|[-*+]|\d+[.)])*)\[(?:([\sxX])\]|\s*$)/u.exec(text);
+      // this scan only refuses. Only the container reading can authorize an actual item.
+      const task = /^((?:[\s>]|[-*+]|\d+[.)])*)\[(?:([\sxX]+)\]|\s*$)/u.exec(text);
       if (task) {
         const prefix = task[1] ?? "";
         const split = task[2] === undefined;
         if (split && !/^[\s>]*\]/u.test((lines[index + 1] ?? "").replaceAll("\\", ""))) continue;
         if (!split || /[-*+]|\d{1,9}[.)]/u.test(prefix) || orderedItem || overIndented) {
+          // Defence in depth: real-list validation also rejects invalid prefixes.
           if (/[^ \t>\d.*+)-]/u.test(prefix)) return refusal("task marker");
           if (orderedItem && fencedContext) return refusal("task marker");
           if (task[2] !== " " && task[2] !== "x") return refusal("task marker");
@@ -340,6 +420,8 @@ function hiddenLineReason(lines: string[]): string | null {
           if (line.slice(0, boxEnd + 1).includes("\\")) return refusal("task marker");
           if (
             orderedItem &&
+            !orderedItem.paragraphOnly &&
+            // Defence in depth: uncontinued quotes also fail the item-start check.
             (orderedItem.quoteDepth > 0 ||
               !canonicalBox ||
               (indent !== orderedItem.contentColumn && !boxColumns.includes(indent)))
@@ -348,8 +430,9 @@ function hiddenLineReason(lines: string[]): string | null {
           // All ordered markers above are 1; require a final marker and 1-4 ASCII spaces.
           const padding = /(?:[-*+]|\d{1,9}[.)])([ \t]+)$/u.exec(prefix)?.[1];
           if (!padding || padding.includes("\t") || padding.length > 4) return refusal("task marker");
+          if (current.paragraph?.setext) return refusal("task marker");
           const finalMarker = /(?:[-*+]|\d{1,9}[.)])[ \t]+$/u.exec(prefix);
-          if (!finalMarker || !starts.includes(finalMarker.index)) return refusal("task marker");
+          if (!finalMarker || !starts.includes(finalMarker.index - shift)) return refusal("task marker");
         }
       }
     }

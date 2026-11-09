@@ -30,6 +30,116 @@ const reason = (kind: string) => `hidden Markdown in the body: ${kind}`;
 const asset = "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
 const screenshot = (alt: string, url = asset) => `![${alt}](${url})`;
 
+// Round 18: previously accepted bodies now refused, plus restored acceptances.
+const containerRefusals = [
+  "- \n\n    - [x] b",
+  "-\n\n    - [ ] a",
+  "1) \n\n      - [x] b",
+  "1. \n\n    - [ ] a",
+  "  - \n  \n    - [ ] a",
+  "10.\n\n    - [x] x",
+  "> - a\n\n>     - [x] x",
+  "~~~\n- a\n  ~~~\n    - [x] Done",
+];
+
+const rawContextRefusals = [
+  "> a\n2. Step\n   * [ ] Check",
+  "- a\n2. Step\n   * [ ] Check",
+  "Title\n===\n2. Step\n   * [ ] Check",
+  "    code\n2. Step\n   * [ ] Check",
+  "> Note\n2. Step\n   ```text\n   example\n       ```\n   - [ ] Check",
+  "> Note\n2. a\n   >- ```\n   >  ```\n   > - [ ] x",
+  "- Note\n2. a\n   >- ```\n   >  ```\n   > - [ ] x",
+  "Title\n=====\n2. a\n   >- ```\n   >  ```\n   > - [ ] x",
+  "Title\n-\n2. a\n   >- ```\n   >  ```\n   > - [ ] x",
+  "    code\n2. a\n   >- ```\n   >  ```\n   > - [ ] x",
+  "> > Note\n2. a\n   >- ```\n   >  ```\n   > - [ ] x",
+  "> Note\n2. a\n      ```\n        ```\n   - [ ] x",
+  "- Note\n2. a\n      ```\n        ```\n   - [ ] x",
+  "Title\n=====\n2. a\n      ```\n        ```\n   - [ ] x",
+  "Title\n-\n2. a\n      ```\n        ```\n   - [ ] x",
+  "    code\n2. a\n      ```\n        ```\n   - [ ] x",
+  "> > Note\n2. a\n      ```\n        ```\n   - [ ] x",
+  "> Note\n2. a\n   -\n       ```\n   [\n   ] x",
+  "- Note\n2. a\n   -\n       ```\n   [\n   ] x",
+  "Title\n=====\n2. a\n   -\n       ```\n   [\n   ] x",
+  "Title\n-\n2. a\n   -\n       ```\n   [\n   ] x",
+  "    code\n2. a\n   -\n       ```\n   [\n   ] x",
+  "> > Note\n2. a\n   -\n       ```\n   [\n   ] x",
+  "> Note\n2. Step\n   * [ ] Check",
+  "- Note\n2. Step\n   * [ ] Check",
+  "Title\n=====\n2. Step\n   * [ ] Check",
+  "Title\n-\n2. Step\n   * [ ] Check",
+  "    code\n2. Step\n   * [ ] Check",
+  "> > Note\n2. Step\n   * [ ] Check",
+];
+
+// Round 18b: earlier acceptances withdrawn when the whole task paragraph
+// becomes a heading. The immediate beta/--- case was already refused.
+const setextBoxRefusals = [
+  " - - [ ] T\n      1)\n      =",
+  "   - [x] T\n text\n      =\n   \n  * [ ] T\n       > - [ ] T",
+  "    [\n       ````\n***\n - [ ] T\ntext\n   -",
+  "     ````\n   > - [ ] T\n- 1. [x] T\n-  - [ ] T\n    text\n     -\n  1)",
+  "Text\n   - [x] T\n  * [x] T\n   - [ ] T\n      [\n     =\n1. [ ] T",
+  "     ***\n   - [ ] T\n       1)\n       --",
+  "- [x] Task\ncontinued\n  ===",
+  "- [ ] beta\n  ---",
+  " - - [ ] gamma\n      1)\n      =",
+  // Additional acceptances from round 18's default generated corpus.
+  "- - [ ] T\n     Text\n    =",
+  "  > - [x] T\n     > - a\n- [ ] T\n      - > a\n    --",
+  "  1) a\n * [ ] T\n   - [ ] T\n * [x] T\n       ```\n      -",
+];
+
+const boxShapeRefusals = [
+  "- [ ] a\n  ---",
+  "- [ ] a\n  ===",
+  "1. [ ] a\n   ---",
+  "- [ ] a\n  -",
+  "Text\n- [ ] a\n  -",
+  "⠀- [x] Check",
+  "- a\n  ⠀- [x] Check",
+];
+
+const malformedBoxRefusals = [
+  "- [  ] Pending",
+  "- [   ] Pending",
+  "- [ \t] Pending",
+  "- [\t ] Pending",
+  "- [  ] Pending",
+  "2. Step\n   - [  ] Pending",
+  "2. Step\n   - [   ] Pending",
+  "2. Step\n   - [ \t] Pending",
+  "2. Step\n   - [\t ] Pending",
+  "2. Step\n   - [  ] Pending",
+  "> - [  ] Pending",
+  "> - [   ] Pending",
+  "> - [ \t] Pending",
+  "> - [\t ] Pending",
+  "> - [  ] Pending",
+  "```text\n- [  ] Pending",
+  "```text\n- [   ] Pending",
+  "```text\n- [ \t] Pending",
+  "```text\n- [\t ] Pending",
+  "```text\n- [  ] Pending",
+];
+
+const restoredBodies = [
+  "- a\ntext\n    - [ ] x",
+  "Heading\n===\n2.  Step\n    - [ ] Parent\n      - [ ] Child",
+  "    m\n2.  p\n    - [x] T",
+  "1.\n   - [ ] Task",
+  "-\n- [ ] Task",
+];
+
+// ER3 preservation pins: already refused in round 17.
+const containerPins = ["  - T\n   +\n    - [x] T"];
+const fencedBoxPins = [
+  "Para\n\n```text\n    - [ ] x\n```\n\n- [ ] real",
+  "```markdown\n- [ ] a\n      - [ ] deep\n```",
+];
+
 const realListRefusals = [
   // 1: adjacent punctuation is not a chain of list markers.
   "-2. Step\n    - [ ] Parent\n      - [ ] First\n      - [ ] Second",
@@ -47,7 +157,6 @@ const realListRefusals = [
   "Text\n    # H\n10. Step\n    - [ ] A",
   "Text\n    ---\n10. Step\n    - [ ] A",
   // 5: code and over-indented/lazy paragraph lines never open a task.
-  "    m\n2.  p\n    - [x] T",
   "    ```\n    - [ ] x",
   "- a\n\n      ```\n      - [ ] x",
   ">     ```\n>     - [ ] x",
@@ -99,8 +208,31 @@ const realListControls = [
 
 // Fail-closed preservation beyond the oracle's task-source scan: bare split
 // boxes and list items whose lazy continuation was already dedented.
-for (const body of ["    [\n    ] text", "- a\ntext\n    - [ ] x"]) {
+for (const body of ["    [\n    ] text"]) {
   test(`raw Markdown closes ambiguous task containers: ${JSON.stringify(body)}`, () => {
+    assert.equal(hiddenMarkdownReason(body), reason("task marker"), body);
+  });
+}
+
+for (const body of [
+  ...setextBoxRefusals,
+  ...containerRefusals,
+  ...rawContextRefusals,
+  ...boxShapeRefusals,
+  ...malformedBoxRefusals,
+]) {
+  test(`round 18 refuses unsafe box structure: ${JSON.stringify(body)}`, () => {
+    assert.equal(hiddenMarkdownReason(body), reason("task marker"), body);
+    assert.equal(evaluate(body).status, "untrusted", body);
+  });
+}
+for (const body of restoredBodies) {
+  test(`round 18 restores a real task item: ${JSON.stringify(body)}`, () => {
+    assert.equal(evaluate(body).status, "pickable", body);
+  });
+}
+for (const body of [...fencedBoxPins, ...containerPins]) {
+  test(`preserve refusal of ambiguous containers: ${JSON.stringify(body)}`, () => {
     assert.equal(hiddenMarkdownReason(body), reason("task marker"), body);
   });
 }
