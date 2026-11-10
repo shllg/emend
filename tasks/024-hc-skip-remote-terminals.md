@@ -1,10 +1,10 @@
 ---
 id: 024
 title: bin/wt skips other machines' terminals under herdr desktop
-status: in-progress
+status: done
 owner: agent + your approval
 depends_on: []
-done_on:
+done_on: 2026-11-10
 ---
 
 # 024 — bin/wt skips other machines' terminals under herdr desktop
@@ -21,14 +21,14 @@ machine's terminals.
 
 ## Steps
 
-- [ ] In `hcTerminals()`, accept the local address shape `t…` and the other-machine shape
+- [x] In `hcTerminals()`, accept the local address shape `t…` and the other-machine shape
       `<machine>/t…`. Any other address shape still rejects the whole list, as today.
-- [ ] Leave other-machine terminals out of the agent listing. Never match them to a worktree: both
+- [x] Leave other-machine terminals out of the agent listing. Never match them to a worktree: both
       machines can share the same checkout path, and bin/wt must never read or type into a session
       on another machine.
-- [ ] Keep other-machine terminals in the name-shadow check of `assertHcTarget()`, so that check
+- [x] Keep other-machine terminals in the name-shadow check of `assertHcTarget()`, so that check
       stays fail-closed.
-- [ ] Tests in `bin/lib/wt/hc.test.ts`: a listing with an other-machine terminal gives only the local
+- [x] Tests in `bin/lib/wt/hc.test.ts`: a listing with an other-machine terminal gives only the local
       agents; a listing with a malformed address still fails.
 
 ## Done when
@@ -42,3 +42,5 @@ other-machine terminals, other-machine terminals never appear as agents, and `pn
   nothing else under `bin/`.
 - Synthetic machine names only, in tests and in every text that leaves the machine.
 - The owner wants this fast: keep the change minimal.
+- Done: hc listings accept `<machine>/t…`; those terminals never become agents and still shadow
+  local addresses. Follow-up: spawn's `waitForHc()` polls `hc get` without a shadow check.
