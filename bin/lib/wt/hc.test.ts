@@ -240,8 +240,14 @@ test("hc skips other-machine terminals even at registered folders but retains th
       ["t2"],
     );
     await assert.rejects(command(repo, "agent", ["read", "devbox/t10"]), failure(2, /No agent matches/));
+    const before = fakeCalls(env, "hc").length;
     setFakeRules(env, "hc", [hcList([terminal(), { ...remote, name: "t2" }]), localGet]);
     await assert.rejects(command(repo, "agent", ["read", "t2"]), failure(2, /shadowed/));
+    assert.ok(
+      !fakeCalls(env, "hc")
+        .slice(before)
+        .some((c) => ["get", "read", "send"].includes(c[0] ?? "")),
+    );
     assert.ok(!fakeCalls(env, "hc").some((c) => c[0] === "get" && c[1] === "devbox/t10"));
     assert.ok(!fakeCalls(env, "hc").some((c) => c[0] === "read" || c[0] === "send"));
   }, true));
