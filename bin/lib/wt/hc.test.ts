@@ -325,7 +325,14 @@ for (const state of ["working", "blocked"] as const)
     scenario(async ({ env, repo }) => {
       process.env.HC_TERMINAL_ID = "t1k";
       installFake(env, "herdr", [{ code: 1 }]);
-      installFake(env, "hc", launchRules(state, [{ ...get({ status: { state: "idle" } }, "t1m"), times: 1 }]));
+      installFake(
+        env,
+        "hc",
+        launchRules(state, [
+          hcList([terminal({ address: "devbox/t10", name: "remote-worker" })]),
+          { ...get({ status: { state: "idle" } }, "t1m"), times: 1 },
+        ]),
+      );
       const clock = fakeClock();
       const result = await spawn(repo, { ...options, model: "opus", effort: "high" }, clock);
       assert.equal(result.state, state);
@@ -636,7 +643,10 @@ test("agent read resolves herdr names and hc addresses, removes terminal sequenc
       "\u001b[31mred\u001b[0m\u009b32mgreen\u009b0m\n\tü\r\b\u0085\u007f\u0000" +
       "\u001b]0;title\u0007\u009dhidden\u009c\u001bPpayload\u001b\\end\u001b]unfinished";
     installFake(env, "hc", [
-      hcList([terminal()]),
+      hcList([
+        terminal({ cwd: worker.path }),
+        terminal({ address: "devbox/t10", name: "remote-worker", cwd: worker.path }),
+      ]),
       get({ foreground: { cwd: worker.path } }),
       { match: ["read"], stdout: screen },
     ]);
@@ -689,6 +699,7 @@ test("agent read resolves herdr names and hc addresses, removes terminal sequenc
     const ambiguousAddress = await read("t2");
     assert.equal(ambiguousAddress.code, 2, ambiguousAddress.stderr);
     assert.match(ambiguousAddress.stderr, /Several agents/);
+    assert.ok(!fakeCalls(env, "hc").some((c) => c.includes("devbox/t10")));
   }, true));
 
 test("agent prompt sends only the fixed reference from main, for either backend", () =>
@@ -699,7 +710,7 @@ test("agent prompt sends only the fixed reference from main, for either backend"
     const body = "Arbitrary body must never reach argv.\nUnicode: é\r\n";
     writeFileSync(join(dir, "message-42.md"), body);
     installFake(env, "hc", [
-      hcList([terminal()]),
+      hcList([terminal({ cwd: wt.path }), terminal({ address: "devbox/t10", name: "remote-worker", cwd: wt.path })]),
       get({ foreground: { cwd: wt.path } }),
       { match: ["send"], stdout: "{}" },
     ]);
@@ -716,8 +727,8 @@ test("agent prompt sends only the fixed reference from main, for either backend"
       assert.equal(result.code, 0, result.stderr);
     }
     assert.deepEqual(
-      fakeCalls(env, "hc").find((c) => c[0] === "send"),
-      ["send", "t2", sentence],
+      fakeCalls(env, "hc").filter((c) => c[0] === "send"),
+      [["send", "t2", sentence]],
     );
     assert.deepEqual(
       fakeCalls(env, "herdr").find((c) => c[1] === "prompt"),
@@ -725,6 +736,7 @@ test("agent prompt sends only the fixed reference from main, for either backend"
     );
     const read = await runWt(join(fx.main, "bin/wt"), ["agent", "read", "missing"], { cwd: fx.main });
     assert.equal(read.code, 2);
+    assert.ok(!fakeCalls(env, "hc").some((c) => c.includes("devbox/t10")));
   }, true));
 
 test("agent prompt refuses missing/symlink/non-file messages, foreign/unknown locations, ambiguity and extra text", () =>
