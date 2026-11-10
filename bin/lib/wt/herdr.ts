@@ -221,13 +221,23 @@ export function hcCall(args: string[], timeoutMs = 20_000): Record<string, unkno
   throw new WtError(1, "herdr desktop (hc) returned no valid JSON object; outcome unconfirmed.");
 }
 
+function isOtherMachineHcAddress(value: unknown): boolean {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/t[0-9a-z]+$/.test(value);
+}
+
 function hcTerminals(): Record<string, unknown>[] {
   const listed = hcCall(["ls", "--json"], 5000);
   if (
     !Array.isArray(listed.terminals) ||
-    !listed.terminals.every((t) => isRecord(t) && hcAddress(t.address) !== null && typeof t.state === "string")
+    !listed.terminals.every(
+      (t) =>
+        isRecord(t) &&
+        typeof t.state === "string" &&
+        (hcAddress(t.address) !== null || isOtherMachineHcAddress(t.address)),
+    )
   )
     throw new WtError(1, "Invalid herdr desktop (hc) terminal list.");
+  // Other-machine terminals stay in the list so their names still shadow local addresses.
   return listed.terminals.filter((t) => t.state === "live");
 }
 
@@ -320,7 +330,8 @@ function hcLocatedListing(): AgentListing<LocatedAgent> {
   } catch (e) {
     return e instanceof HcAbsent ? "absent" : "failed";
   }
-  return terminals.map((t) => {
+  const localTerminals = terminals.filter((t) => hcAddress(t.address) !== null);
+  return localTerminals.map((t) => {
     const address = hcAddress(t.address);
     let info: Record<string, unknown> = {};
     if (address !== null) {
