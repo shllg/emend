@@ -34,9 +34,13 @@ The old file is renamed `config.json.migrated`. When a global file already exist
 is kept under that name without merging, and the CLI prints a warning. A failed rename does not
 fail the command. If the global file cannot be created, the old values apply only for that run.
 
-Publish and bare `emend` ignore a global config file inside a repository that holds the working
-directory, including through links. They warn and use any old state config only in memory.
-`emend config` refuses there. A dotfiles repository rooted at the home folder does not count.
+For `docRoots` and `openBrowser`, publish and bare `emend` ignore a config file whose path or
+links lie inside a repository holding the working directory. They warn; `emend config` refuses
+that global file. An old state config inside such a repository is never read, copied or renamed.
+An old config outside it can still supply values in memory. A dotfiles repository rooted at the
+home folder does not count. The server reads only `approvedActiveHours` from the file and does
+not apply this check. Known limit: a config path set by a repository's environment is not detected
+when emend runs from a folder outside every repository.
 
 Settings have defaults. The config file's `approvedActiveHours` sets how long approved reviews
 stay in Active. A value set in Settings is stored per owner in that server's database and wins.

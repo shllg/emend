@@ -15,8 +15,12 @@ An old state-folder config is copied only when the global config is missing, the
 `config.json.migrated`. If the global config already exists, emend keeps the old file under that
 name and warns without merging it. `EMEND_HOME` moves only state; use `XDG_CONFIG_HOME` for config.
 The service records an absolute `XDG_CONFIG_HOME` at install time. Reinstall it after changing that value.
-A global config inside a repository that holds the working directory is ignored by publish and
-bare `emend`; `emend config` refuses there. A dotfiles repository at the home folder is allowed.
+For `docRoots` and `openBrowser`, publish and bare `emend` ignore a global config whose path or
+links lie inside a repository holding the working directory. `emend config` refuses there.
+An old state config inside such a repository is never read, copied or renamed.
+A dotfiles repository at the home folder is allowed. The server reads only `approvedActiveHours`
+from the file and does not apply this check. A config path set by a repository's environment
+is not detected when emend runs from a folder outside every repository.
 
 ## Set it up with an agent
 

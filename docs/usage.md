@@ -13,8 +13,12 @@ they change what your agents may publish.
 The old state-folder config is copied once, only if the global config is missing, then renamed
 `config.json.migrated`. An existing global config wins without merging the old file.
 `EMEND_HOME` moves only state; set `XDG_CONFIG_HOME` too for a separate config.
-Publish and bare `emend` ignore a global config inside a repository that holds the working
-directory and warn. `emend config` refuses there. A home-rooted dotfiles repository does not count.
+For `docRoots` and `openBrowser`, publish and bare `emend` ignore a global config whose path or
+links lie inside a repository holding the working directory, and warn. `emend config` refuses
+there. An old state config inside such a repository is never read, copied or renamed.
+A home-rooted dotfiles repository does not count. The server reads only `approvedActiveHours`
+from the file and does not apply this check. A config path set by a repository's environment
+is not detected when emend runs from a folder outside every repository.
 If `XDG_CONFIG_HOME` is absolute, `emend service install` records it at install time.
 Reinstall the service after changing it.
 

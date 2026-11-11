@@ -536,3 +536,29 @@ test.each([undefined, 24])("accepted approval uses zero settings hours before in
     activeUntil: null,
   });
 });
+
+test.each(["settings", "inbox"])("accepted approval uses the newer %s window", async (newer) => {
+  server = { ...base, unsentCount: 0 };
+  await mount(<Inbox />);
+  const now = Date.now();
+  client.setQueryData<InboxData>(["inbox"], (data) => data && { ...data, approvedActiveHours: 24 }, {
+    updatedAt: now - (newer === "inbox" ? 0 : 1_000),
+  });
+  client.setQueryData(
+    ["settings"],
+    {
+      approvedActiveHours: { value: 0, source: "override", default: 12, file: null, override: 0, fileError: false },
+    },
+    { updatedAt: now - (newer === "settings" ? 0 : 1_000) },
+  );
+  mode = "held";
+  approve("Approve revision 3");
+  await settle();
+  const expected = {
+    state: "approved",
+    list: newer === "settings" ? "done" : "active",
+    activeUntil: newer === "settings" ? null : new Date(now + 24 * 3_600_000).toISOString(),
+  };
+  expect(client.getQueryData<ReviewView>(["review", reviewId])).toMatchObject(expected);
+  expect(client.getQueryData<InboxData>(["inbox"])?.items[0]).toMatchObject(expected);
+});

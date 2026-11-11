@@ -121,12 +121,16 @@ type Accepted = { kind: "send" | "approve"; revision?: number };
 
 /** Shows an accepted Send or Approve in the cached review, inbox and revisions before the refetch lands. */
 function applyAccepted(client: QueryClient, reviewId: string, { kind, revision }: Accepted) {
-  const inbox = client.getQueryData<InboxData>(["inbox"]);
+  const inboxState = client.getQueryState<InboxData>(["inbox"]);
+  const settingsState = client.getQueryState<SettingsView>(["settings"]);
+  const inbox = inboxState?.data;
   const estimate = serverNow(inbox);
+  const settingsHours = settingsState?.data?.approvedActiveHours.value;
+  const inboxHours = inbox?.approvedActiveHours;
   const approvedActiveHours =
-    client.getQueryData<SettingsView>(["settings"])?.approvedActiveHours.value ??
-    inbox?.approvedActiveHours ??
-    APPROVED_ACTIVE_HOURS;
+    ((settingsState?.dataUpdatedAt ?? 0) >= (inboxState?.dataUpdatedAt ?? 0)
+      ? (settingsHours ?? inboxHours)
+      : (inboxHours ?? settingsHours)) ?? APPROVED_ACTIVE_HOURS;
   const activeUntil =
     approvedActiveHours === 0 ? null : new Date(estimate + approvedActiveHours * 3_600_000).toISOString();
   const change = <T extends InboxItem>(item: T): T =>

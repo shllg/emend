@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { link, lstat, mkdir, open, readlink, realpath, rename, unlink } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
-import { basename, dirname, isAbsolute, join, parse, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, parse, resolve, sep } from "node:path";
 import { LIMITS } from "@emend/contract";
-import { StateFolderWriteError, stateAccessError } from "../state/files.ts";
+import { StateFolderWriteError, stateAccessError, syncDirectory } from "../state/files.ts";
 import { readConfigJson } from "../state/read-config.ts";
 import { escapeReference, quoteShellArgument } from "./escape.ts";
 import { CliError, jsonLine } from "./http.ts";
@@ -184,11 +184,39 @@ async function checkedConfigPath(path: string, stateDir?: string): Promise<strin
   }
 }
 
-async function configRepository(path: string, actual: string, options: ConfigReadOptions) {
+async function configRepository(path: string, actual: string, options: ConfigReadOptions, stateDir?: string) {
   try {
     const roots = await repositoryRoots(options.cwd, options.home ?? homedir());
-    return roots.find((root) => pathInRepository(actual, [root]));
-  } catch {
+    const absolute = resolve(path);
+    const containing = (candidate: string) => roots.find((root) => pathInRepository(candidate, [root]));
+    const repository = containing(absolute) ?? containing(actual);
+    if (repository || roots.length === 0) return repository;
+    let parent = parse(absolute).root;
+    let pending = absolute.slice(parent.length).split(sep).filter(Boolean);
+    let hops = 0;
+    while (pending.length) {
+      const current = join(parent, pending.shift() as string);
+      const repository = containing(current);
+      if (repository) return repository;
+      const info = await lstat(current).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT" || error.code === "ENOTDIR") return undefined;
+        throw error;
+      });
+      if (!info) return containing(join(current, ...pending));
+      if (info.isSymbolicLink()) {
+        if (++hops > 40) throw new Error("too many symlink levels");
+        const target = await readlink(current);
+        if (isAbsolute(target)) parent = parse(target).root;
+        // Keep each hop, including folder links, instead of skipping to its real target.
+        pending = target.split(sep).filter(Boolean).concat(pending);
+      } else parent = current;
+    }
+    return undefined;
+  } catch (error) {
+    if (stateDir !== undefined) {
+      const mapped = stateAccessError(stateDir, error);
+      if (mapped instanceof StateFolderWriteError) throw mapped;
+    }
     throw new CliError(`cannot check emend configuration in ${escapeReference(path)}`);
   }
 }
@@ -216,18 +244,33 @@ async function writeConfigFile(actual: string, data: string, exclusive: boolean)
   await mkdir(dirname(actual), { recursive: true, mode: 0o700 });
   const temporary = join(dirname(actual), `.config-${randomUUID()}.tmp`);
   const handle = await open(temporary, "wx", 0o600);
+  let failed = false;
+  let failure: unknown;
+  const keepError = (error: unknown) => {
+    if (!failed) {
+      failed = true;
+      failure = error;
+    }
+  };
   try {
     await handle.writeFile(data);
     await handle.sync();
     await handle.close();
     if (exclusive) await link(temporary, actual);
     else await rename(temporary, actual);
+    syncDirectory(dirname(actual));
+  } catch (error) {
+    keepError(error);
   } finally {
-    await handle.close();
-    await unlink(temporary).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== "ENOENT") throw error;
-    });
+    try {
+      await handle.close().catch(keepError);
+    } finally {
+      await unlink(temporary).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") keepError(error);
+      });
+    }
   }
+  if (failed) throw failure;
 }
 
 /** Atomic replacement follows dotfile links without changing existing folder permissions. */
@@ -264,15 +307,17 @@ export async function readConfigDocument(
     throw new CliError(
       `the emend config file ${escapeReference(path)} sits inside the repository at ${escapeReference(repository)}; run emend config outside it`,
     );
-  const sameFile = actual === (await checkedConfigPath(oldPath, stateDir));
+  const oldActual = await checkedConfigPath(oldPath, stateDir);
+  const oldRepository = await configRepository(oldPath, oldActual, options, stateDir);
+  const sameFile = actual === oldActual;
   if (repository) {
     options.warn?.(
       `emend: ignoring ${escapeReference(path)}: it sits inside the repository at ${escapeReference(repository)}\n`,
     );
-    return withDefaults(sameFile ? {} : ((await readConfigFile(oldPath, stateDir, false)) ?? {}));
+    return withDefaults(sameFile || oldRepository ? {} : ((await readConfigFile(oldPath, stateDir, false)) ?? {}));
   }
   let document = await readConfigFile(path, stateDir, true);
-  if (sameFile) return withDefaults(document ?? {});
+  if (sameFile || oldRepository) return withDefaults(document ?? {});
   let copied = false;
   if (document === undefined) {
     const old = await readConfigFile(oldPath, stateDir, false);

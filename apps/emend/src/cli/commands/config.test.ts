@@ -532,6 +532,84 @@ test("an old config migrates once, keeping unknown keys and private modes", asyn
   expect(await f.run()).toEqual(success('{"docRoots":[],"openBrowser":true}'));
 });
 
+test("config list ignores an old file in the working repository without migrating it", async () => {
+  const f = await fixture();
+  await mkdir(join(f.stateDir, ".git"), { recursive: true });
+  await writeFile(join(f.stateDir, ".git", "HEAD"), "ref: refs/heads/main\n");
+  const old = await legacy(f, { docRoots: [f.docs], openBrowser: true });
+  vi.spyOn(process, "cwd").mockReturnValue(f.stateDir);
+  expect(await f.run(["list"])).toEqual(success('{"docRoots":[],"openBrowser":false}'));
+  expect(await readFile(old.path, "utf8")).toBe(old.text);
+  await expect(stat(`${old.path}.migrated`)).rejects.toMatchObject({ code: "ENOENT" });
+  await expect(stat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test.each([false, true])("config syncs the destination folder before success (migration=%s)", async (migration) => {
+  const f = await fixture();
+  const target = join(f.root, "dotfiles");
+  await mkdir(target);
+  await mkdir(f.configDir, { recursive: true });
+  await symlink(join(target, "config.json"), f.path);
+  const old = migration ? await legacy(f, { openBrowser: true }) : undefined;
+  const sync = vi.spyOn(stateFiles, "syncDirectory");
+  const rename = vi.spyOn(fs, "rename");
+  const link = vi.spyOn(fs, "link");
+  const stdout = vi.fn();
+  await configCommand(
+    f.stateDir,
+    f.configDir,
+    migration ? ["list"] : ["set", "openBrowser", "true"],
+    { env: {}, stdout, stderr: vi.fn() },
+    f.root,
+  );
+  expect(sync).toHaveBeenCalledExactlyOnceWith(target);
+  expect(sync.mock.invocationCallOrder[0]).toBeLessThan(stdout.mock.invocationCallOrder[0] as number);
+  if (old) {
+    expect(link.mock.invocationCallOrder[0]).toBeLessThan(sync.mock.invocationCallOrder[0] as number);
+    expect(rename).toHaveBeenCalledExactlyOnceWith(old.path, `${old.path}.migrated`);
+    expect(sync.mock.invocationCallOrder[0]).toBeLessThan(rename.mock.invocationCallOrder[0] as number);
+  } else expect(rename.mock.invocationCallOrder[0]).toBeLessThan(sync.mock.invocationCallOrder[0] as number);
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toMatchObject({ openBrowser: true });
+});
+
+test("a failed folder sync leaves the old config unarchived", async () => {
+  const f = await fixture();
+  const old = await legacy(f, { openBrowser: true });
+  vi.spyOn(stateFiles, "syncDirectory").mockImplementationOnce(() => {
+    throw Object.assign(new Error("synthetic sync failure"), { code: "EIO" });
+  });
+  expect(await f.run()).toEqual(success('{"docRoots":[],"openBrowser":true}'));
+  expect(await readFile(old.path, "utf8")).toBe(old.text);
+  await expect(stat(`${old.path}.migrated`)).rejects.toMatchObject({ code: "ENOENT" });
+  expect(await readdir(f.configDir)).toEqual(["config.json"]);
+});
+
+test.each([false, true])("a failed temp close still removes the temp file (writeFailed=%s)", async (writeFailed) => {
+  const f = await fixture();
+  const actualFs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+  vi.spyOn(fs, "open").mockImplementation(async (...args) => {
+    const handle = await actualFs.open(...args);
+    if (String(args[0]).endsWith(".tmp")) {
+      if (writeFailed)
+        vi.spyOn(handle, "writeFile").mockRejectedValueOnce(
+          Object.assign(new Error("synthetic write failure"), { code: "ENOSPC" }),
+        );
+      const close = handle.close.bind(handle);
+      vi.spyOn(handle, "close").mockImplementation(async () => {
+        await close();
+        throw Object.assign(new Error("synthetic close failure"), { code: "EIO" });
+      });
+    }
+    return handle;
+  });
+  expect(await f.run(["set", "openBrowser", "true"])).toEqual(
+    failure(
+      `cannot write emend configuration in ${f.path}: ${writeFailed ? "no space left on device" : "file could not be written"}`,
+    ),
+  );
+  expect(await readdir(f.configDir)).toEqual([]);
+});
+
 test.each([{}, { openBrowser: false }, { openBrowser: true }])(
   "an existing global file wins without merging legacy keys: %j",
   async (browser) => {

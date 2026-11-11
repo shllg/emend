@@ -1,4 +1,4 @@
-import { access, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, onTestFinished, test, vi } from "vitest";
@@ -499,4 +499,29 @@ test("bare emend ignores a repository's browser opt-in and warns once", async ()
   expect(f.stdout).toEqual([
     "emend is running at http://127.0.0.1:3636. Run emend in a terminal to get a sign-in link.\n",
   ]);
+});
+
+test.each([false, true])("bare emend ignores repository state config (linked=%s)", async (linked) => {
+  const f = await commandFixture();
+  await mkdir(join(f.dir, ".git"));
+  await writeFile(join(f.dir, ".git", "HEAD"), "ref: refs/heads/main\n");
+  const old = join(f.dir, "config.json");
+  const target = linked ? join(f.configDir, "legacy.json") : old;
+  if (linked) {
+    await mkdir(f.configDir);
+    await symlink(target, old);
+  }
+  const content = '{"docRoots":["/synthetic/docs"],"openBrowser":true}';
+  await writeFile(target, content);
+  vi.spyOn(process, "cwd").mockReturnValue(f.dir);
+  const openUrl = vi.fn(async () => true);
+  expect(await run([], { ...f.io, openUrl })).toBe(0);
+  expect(f.stderr).toEqual([]);
+  expect(openUrl).not.toHaveBeenCalled();
+  expect(f.stdout).toEqual([
+    "emend is running at http://127.0.0.1:3636. Run emend in a terminal to get a sign-in link.\n",
+  ]);
+  expect(await readFile(old, "utf8")).toBe(content);
+  await expect(access(`${old}.migrated`)).rejects.toMatchObject({ code: "ENOENT" });
+  await expect(access(join(f.configDir, "config.json"))).rejects.toMatchObject({ code: "ENOENT" });
 });

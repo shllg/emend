@@ -86,3 +86,97 @@ test("outside configuration and a home-rooted dotfiles repository remain usable"
   }
   expect(f.warn).not.toHaveBeenCalled();
 });
+
+test.each(["folder", "file", "intermediate folder", "intermediate file"])(
+  "a repository %s link pointing outside is ignored and config add refuses it",
+  async (kind) => {
+    const f = await fixture();
+    const outside = join(f.root, "outside");
+    await mkdir(outside);
+    const content = JSON.stringify({ docRoots: [outside], openBrowser: true });
+    const target = join(outside, "config.json");
+    await writeFile(target, content);
+    const folder = kind.endsWith("folder");
+    await mkdir(folder ? join(f.repo, ".config") : f.configDir, { recursive: true });
+    const link = folder ? f.configDir : f.file;
+    await symlink(folder ? outside : target, link);
+    let configDir = f.configDir;
+    if (kind.startsWith("intermediate")) {
+      configDir = join(f.root, "alias");
+      if (folder) await symlink(f.configDir, configDir);
+      else {
+        await mkdir(configDir);
+        await symlink(f.file, join(configDir, "config.json"));
+      }
+    }
+    const configured = join(configDir, "config.json");
+    expect(await readConfig(f.state, configDir, f.options)).toEqual({ docRoots: [], openBrowser: false });
+    expect(f.warn).toHaveBeenCalledExactlyOnceWith(
+      `emend: ignoring ${configured}: it sits inside the repository at ${f.repo}\n`,
+    );
+    const io = { env: {}, stdout: vi.fn(), stderr: vi.fn() };
+    await expect(configCommand(f.state, configDir, ["add", "docRoots", outside], io, f.repo)).rejects.toThrow(
+      `the emend config file ${configured} sits inside the repository at ${f.repo}; run emend config outside it`,
+    );
+    expect(await readFile(target, "utf8")).toBe(content);
+    // Even a dangling target must not receive a migration through the repository link.
+    await rm(target);
+    const old = join(f.state, "config.json");
+    await writeFile(old, '{"openBrowser":false}');
+    expect(await readConfig(f.state, configDir, f.options)).toEqual({ docRoots: [], openBrowser: false });
+    await expect(stat(target)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(old, "utf8")).toBe('{"openBrowser":false}');
+    await expect(stat(`${old}.migrated`)).rejects.toMatchObject({ code: "ENOENT" });
+  },
+);
+
+test("a home link into a dotfiles repository works from outside that repository", async () => {
+  const f = await fixture();
+  const target = join(f.repo, "emend");
+  await mkdir(target);
+  await writeFile(join(target, "config.json"), '{"openBrowser":true}');
+  const configDir = join(f.home, ".config", "emend");
+  await mkdir(join(f.home, ".config"));
+  await symlink(target, configDir);
+  expect(await readConfig(f.state, configDir, { ...f.options, cwd: f.home })).toEqual({
+    docRoots: [],
+    openBrowser: true,
+  });
+  expect(f.warn).not.toHaveBeenCalled();
+});
+
+test.each(["file", "folder link", "file link", "intermediate link"])(
+  "an old config with a repository %s is never read or archived",
+  async (kind) => {
+    const f = await fixture();
+    const repoState = join(f.repo, ".emend");
+    await mkdir(repoState);
+    let state = repoState;
+    let target = join(repoState, "config.json");
+    if (kind !== "file") {
+      target = join(f.state, "config.json");
+      if (kind === "folder link") {
+        await rm(repoState, { recursive: true });
+        await symlink(f.state, repoState);
+      } else await symlink(target, join(repoState, "config.json"));
+      if (kind === "intermediate link") {
+        state = join(f.root, "alias");
+        await symlink(repoState, state);
+      }
+    }
+    // Invalid JSON makes an accidental read fail, even if its values would be discarded.
+    await writeFile(target, "{");
+    const global = join(f.root, "global");
+    for (const existing of [false, true]) {
+      if (existing) {
+        await mkdir(global);
+        await writeFile(join(global, "config.json"), '{"openBrowser":true}');
+      }
+      expect(await readConfig(state, global, f.options)).toEqual({ docRoots: [], openBrowser: existing });
+      if (!existing) await expect(stat(global)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await readFile(target, "utf8")).toBe("{");
+      await expect(stat(join(state, "config.json.migrated"))).rejects.toMatchObject({ code: "ENOENT" });
+    }
+    expect(f.warn).not.toHaveBeenCalled();
+  },
+);

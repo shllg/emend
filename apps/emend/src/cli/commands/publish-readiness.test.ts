@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { expect, onTestFinished, test, vi } from "vitest";
 import { run } from "../../main.ts";
@@ -283,7 +283,9 @@ test.each(["local", "hub"])("publish through a %s server prints no stopped-serve
   expect(f.stderr).toEqual([`emend: published revision 1: ${url}\n`]);
 });
 
-test.each([false, true])("publish ignores committed repository config (shortcut=%s)", async (shortcut) => {
+test.each(
+  [false, true].flatMap((shortcut) => ["file", "folder link", "file link"].map((kind) => ({ shortcut, kind }))),
+)("publish ignores committed repository config ($kind, shortcut=$shortcut)", async ({ shortcut, kind }) => {
   const f = await fixture();
   const docs = await mkdtemp(join(tmpdir(), "emend-outside-docs-"));
   onTestFinished(() => rm(docs, { recursive: true, force: true }));
@@ -292,9 +294,20 @@ test.each([false, true])("publish ignores committed repository config (shortcut=
   const configHome = join(f.root, ".config");
   const configDir = join(configHome, "emend");
   const configFile = join(configDir, "config.json");
-  await mkdir(configDir, { recursive: true });
   const content = JSON.stringify({ docRoots: [docs], openBrowser: true });
-  await writeFile(configFile, content);
+  if (kind === "file") {
+    await mkdir(configDir, { recursive: true });
+    await writeFile(configFile, content);
+  } else {
+    const outside = join(docs, ".config");
+    await mkdir(join(outside, "emend"), { recursive: true });
+    await writeFile(join(outside, "emend", "config.json"), content);
+    if (kind === "folder link") await symlink(relative(dirname(configHome), outside), configHome);
+    else {
+      await mkdir(configDir, { recursive: true });
+      await symlink(relative(configDir, join(outside, "emend", "config.json")), configFile);
+    }
+  }
   const git = (args: string[]) =>
     promisify(execFile)(
       "git",
@@ -315,7 +328,7 @@ test.each([false, true])("publish ignores committed repository config (shortcut=
         env: { PATH: process.env.PATH, HOME: f.root, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
       },
     );
-  await git(["add", ".config/emend/config.json"]);
+  await git(["add", kind === "folder link" ? ".config" : ".config/emend/config.json"]);
   await git(["commit", "-m", "synthetic config"]);
   await writeFile(join(f.dir, "config.json"), '{"approvedActiveHours":24}');
   f.io.env.XDG_CONFIG_HOME = configHome;
