@@ -202,15 +202,33 @@ test("Snoozed starts collapsed with its count and toggles independently of Done"
   expect(snoozed.getAttribute("aria-expanded")).toBe("false");
   expect(screen.queryByRole("link", { name: /Snoozed/ })).toBeNull();
   expect(done.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(done);
+  expect(done.getAttribute("aria-expanded")).toBe("true");
+  expect(row("Done approved")).toBeTruthy();
+  expect(row("Done retired")).toBeTruthy();
   fireEvent.click(snoozed);
   expect(snoozed.getAttribute("aria-expanded")).toBe("true");
   expect(row("Snoozed timed")).toBeTruthy();
   expect(row("Snoozed revision")).toBeTruthy();
-  expect(done.getAttribute("aria-expanded")).toBe("false");
+  expect(done.getAttribute("aria-expanded")).toBe("true");
+  expect(row("Done approved")).toBeTruthy();
   fireEvent.click(snoozed);
   expect(snoozed.getAttribute("aria-expanded")).toBe("false");
   expect(screen.queryByRole("link", { name: /Snoozed/ })).toBeNull();
+  expect(done.getAttribute("aria-expanded")).toBe("true");
+  expect(row("Done approved")).toBeTruthy();
+  fireEvent.click(snoozed);
+  expect(snoozed.getAttribute("aria-expanded")).toBe("true");
+  expect(row("Snoozed timed")).toBeTruthy();
+  expect(row("Snoozed revision")).toBeTruthy();
+  expect(done.getAttribute("aria-expanded")).toBe("true");
+  expect(row("Done approved")).toBeTruthy();
+  fireEvent.click(done);
   expect(done.getAttribute("aria-expanded")).toBe("false");
+  expect(screen.queryByRole("link", { name: /Done approved/ })).toBeNull();
+  expect(snoozed.getAttribute("aria-expanded")).toBe("true");
+  expect(row("Snoozed timed")).toBeTruthy();
+  expect(row("Snoozed revision")).toBeTruthy();
 });
 
 test("done rows are dimmed until hover or focus; active and snoozed rows keep full opacity", async () => {
@@ -569,6 +587,23 @@ test("a timed snooze that ends while the inbox is open refetches the inbox and t
   expect(inboxCalls()).toBe(before + 1);
   expect(invalidate).toHaveBeenCalledWith({ queryKey: ["review", other(1)] });
   expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Active1"]);
+});
+
+test("a timed snooze that ends while Snoozed stays collapsed moves the row to Active", async () => {
+  fixedClock();
+  const wake = new Date(Date.now() + 3_600_000).toISOString();
+  inbox = [{ ...item, id: other(1), title: "About to wake", list: "snoozed", snoozed: true, snoozedUntil: wake }];
+  await mountTimed();
+  expect(screen.getByRole("button", { name: "Snoozed 1" }).getAttribute("aria-expanded")).toBe("false");
+  expect(screen.queryByRole("link", { name: /About to wake/ })).toBeNull();
+  inbox = [{ ...item, id: other(1), title: "About to wake", list: "active" }];
+  await tick(3_600_000 + 500);
+  await tick();
+  expect(
+    within(screen.getByRole("region", { name: "Active" })).getByRole("link", { name: /About to wake/ }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: /Snoozed/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /Snoozed/ })).toBeNull();
 });
 
 test("snoozed rows do not count as needing you", async () => {
