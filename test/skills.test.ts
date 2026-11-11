@@ -401,6 +401,13 @@ test("review guidance lists the opening fields in display order", () => {
   ]);
 });
 
+test("feedback guidance keeps Where to look current when edits are allowed", () => {
+  const text = read("plugin/skills/emend-feedback/SKILL.md").replace(/\s+/g, " ");
+  expect(text).toContain(
+    "Keep the TL;DR, Where to look, glossary, decisions and drift current when edits are allowed;",
+  );
+});
+
 test("the complete example is the synthetic manifest fixture, with no stripped or invented fields", () => {
   const blocks = [...read("plugin/skills/emend-review/references/manifest.md").matchAll(/```json\n([\s\S]*?)\n```/g)];
   expect(blocks).toHaveLength(1);
