@@ -44,9 +44,7 @@ export function FileHeader({
       />
       <FileStatusMark status={file.status} />
       <div className="min-w-0 flex-1 font-stretch-mono [font:var(--type-path)]">
-        <h4 className="em-file-path" title={file.path} aria-label={file.path}>
-          <FilePathMenu path={file.path} oldPath={file.oldPath} />
-        </h4>
+        <FilePathMenu path={file.path} oldPath={file.oldPath} />
         {file.oldPath && (
           <p className="em-file-path text-fg-3" title={`Renamed from ${file.oldPath}`}>
             <span className="em-file-from-label">Renamed from</span>{" "}

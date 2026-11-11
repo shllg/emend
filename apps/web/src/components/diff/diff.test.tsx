@@ -1187,10 +1187,28 @@ test.each([390, 800, 1280])("clicking a file path opens its full text and Copy p
   await mount(revision([file(path)]));
   const button = screen.getByRole("button", { name: path });
   fireEvent.pointerDown(button, { button: 0, pointerType: "mouse" });
-  fireEvent.click(button);
+  fireEvent.click(button, { detail: 1 });
   const menu = await screen.findByRole("menu");
-  expect(menu.querySelector("bdi")?.textContent).toBe(path);
-  expect(within(menu).getByRole("menuitem", { name: "Copy path" })).toBeTruthy();
+  const pathBlock = menu.querySelector("bdi")?.parentElement;
+  expect(pathBlock?.textContent).toBe(path);
+  expect(pathBlock?.classList.contains("[overflow-wrap:anywhere]")).toBe(true);
+  expect(pathBlock?.classList.contains("whitespace-pre-wrap")).toBe(true);
+  expect(menu.classList.contains("max-w-[min(36rem,var(--radix-dropdown-menu-content-available-width))]")).toBe(true);
+  const copy = within(menu).getByRole("menuitem", { name: "Copy path" });
+  expect(copy.getAttribute("aria-describedby")).toBe(pathBlock?.id);
+  expect(document.getElementById(copy.getAttribute("aria-describedby") ?? "")?.textContent).toBe(path);
+});
+
+test("a click without a pointer gesture opens the path menu", async () => {
+  await mount(detailed());
+  fireEvent.click(screen.getByRole("button", { name: "src/a.ts" }));
+  expect(await screen.findByRole("menu")).toBeTruthy();
+});
+
+test("an unarmed pointer click does not open the path menu", async () => {
+  await mount(detailed());
+  fireEvent.click(screen.getByRole("button", { name: "src/a.ts" }), { detail: 1 });
+  expect(screen.queryByRole("menu")).toBeNull();
 });
 
 test.each(["touch", "pen"])("a %s opens a file path only on click, not pointerdown", async (pointerType) => {
@@ -1202,7 +1220,7 @@ test.each(["touch", "pen"])("a %s opens a file path only on click, not pointerdo
   fireEvent.pointerCancel(button, { pointerType });
   expect(screen.queryByRole("menu")).toBeNull();
   fireEvent.pointerDown(button, { button: 0, pointerType });
-  fireEvent.click(button);
+  fireEvent.click(button, { detail: 1 });
   expect(await screen.findByRole("menu")).toBeTruthy();
 });
 
@@ -1217,9 +1235,13 @@ test("Copy path writes the exact path, announces success, stays open and resets 
   await act(async () => fireEvent.click(within(menu).getByRole("menuitem", { name: "Copy path" })));
   expect(writeText).toHaveBeenCalledExactlyOnceWith(path);
   expect(within(menu).getByRole("menuitem", { name: "Copied" })).toBeTruthy();
-  const status = within(menu).getByRole("status");
+  const status = screen.getByRole("status");
   expect(status.textContent).toBe("Path copied");
   expect(status.classList.contains("sr-only")).toBe(true);
+  expect(status.getAttribute("aria-live")).toBe("polite");
+  expect(status.closest('[aria-hidden="true"]')).toBeNull();
+  expect(menu.querySelector('[role="status"]')).toBeNull();
+  expect(document.querySelector("[data-file-header] h4")?.nextElementSibling).toBe(status);
   expect(screen.getByRole("menu")).toBe(menu);
   act(() => vi.advanceTimersByTime(1999));
   expect(within(menu).getByRole("menuitem", { name: "Copied" })).toBeTruthy();
@@ -1227,6 +1249,102 @@ test("Copy path writes the exact path, announces success, stays open and resets 
   expect(within(menu).getByRole("menuitem", { name: "Copy path" })).toBeTruthy();
   expect(status.textContent).toBe("");
 });
+
+test.each(["resolve", "reject"])("an older copy's late %s leaves the latest success intact", async (settlement) => {
+  const first = Promise.withResolvers<void>();
+  const second = Promise.withResolvers<void>();
+  const writeText = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+  const execCommand = vi.fn(() => false);
+  Object.defineProperty(document, "execCommand", { configurable: true, value: execCommand });
+  await mount(detailed());
+  fireEvent.click(screen.getByRole("button", { name: "src/a.ts" }));
+  const menu = await screen.findByRole("menu");
+  const copy = within(menu).getByRole("menuitem", { name: "Copy path" });
+  fireEvent.click(copy);
+  fireEvent.click(copy);
+  expect(writeText).toHaveBeenCalledTimes(2);
+  await act(async () => second.resolve());
+  await act(async () => {
+    if (settlement === "resolve") first.resolve();
+    else first.reject(new Error("denied"));
+  });
+  expect(within(menu).getByRole("menuitem", { name: "Copied" })).toBeTruthy();
+  expect(screen.getByRole("status").textContent).toBe("Path copied");
+  expect(execCommand).not.toHaveBeenCalled();
+  expect(window.getSelection()?.toString()).toBe("");
+});
+
+test("each successful copy keeps Copied for two seconds after its own completion", async () => {
+  const first = Promise.withResolvers<void>();
+  const second = Promise.withResolvers<void>();
+  const writeText = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+  await mount(detailed());
+  fireEvent.click(screen.getByRole("button", { name: "src/a.ts" }));
+  const menu = await screen.findByRole("menu");
+  const copy = within(menu).getByRole("menuitem", { name: "Copy path" });
+  vi.useFakeTimers();
+  fireEvent.click(copy);
+  await act(async () => first.resolve());
+  act(() => vi.advanceTimersByTime(1500));
+  fireEvent.click(copy);
+  await act(async () => second.resolve());
+  act(() => vi.advanceTimersByTime(500));
+  expect(within(menu).getByRole("menuitem", { name: "Copied" })).toBeTruthy();
+  act(() => vi.advanceTimersByTime(1499));
+  expect(within(menu).getByRole("menuitem", { name: "Copied" })).toBeTruthy();
+  expect(screen.getByRole("status").textContent).toBe("Path copied");
+  act(() => vi.advanceTimersByTime(1));
+  expect(within(menu).getByRole("menuitem", { name: "Copy path" })).toBeTruthy();
+  expect(screen.getByRole("status").textContent).toBe("");
+});
+
+test("closing a copied path clears its live region and reopening starts with Copy path", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+  await mount(detailed());
+  const button = screen.getByRole("button", { name: "src/a.ts" });
+  const status = screen.getByRole("status");
+  expect(status.textContent).toBe("");
+  fireEvent.click(button);
+  const menu = await screen.findByRole("menu");
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "Copy path" }));
+  await waitFor(() => expect(status.textContent).toBe("Path copied"));
+  fireEvent.keyDown(menu, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  expect(screen.getByRole("status")).toBe(status);
+  expect(status.textContent).toBe("");
+  fireEvent.click(button);
+  expect(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Copy path" })).toBeTruthy();
+  expect(status.textContent).toBe("");
+});
+
+test.each(["resolve", "reject"])(
+  "closing the menu ignores a pending copy's late %s after reopening",
+  async (settlement) => {
+    const pending = Promise.withResolvers<void>();
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: vi.fn(() => pending.promise) } });
+    const execCommand = vi.fn(() => false);
+    Object.defineProperty(document, "execCommand", { configurable: true, value: execCommand });
+    await mount(detailed());
+    const button = screen.getByRole("button", { name: "src/a.ts" });
+    fireEvent.click(button);
+    const menu = await screen.findByRole("menu");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Copy path" }));
+    fireEvent.keyDown(menu, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    fireEvent.click(button);
+    const reopened = await screen.findByRole("menu");
+    await act(async () => {
+      if (settlement === "resolve") pending.resolve();
+      else pending.reject(new Error("denied"));
+    });
+    expect(within(reopened).getByRole("menuitem", { name: "Copy path" })).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe("");
+    expect(execCommand).not.toHaveBeenCalled();
+  },
+);
 
 test.each(["missing", "throws", "rejects"])(
   "a clipboard that %s selects only the path and reports copy failure",
@@ -1243,18 +1361,27 @@ test.each(["missing", "throws", "rejects"])(
     fireEvent.pointerDown(button, { button: 0, pointerType: "mouse" });
     const menu = await screen.findByRole("menu");
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Copy path" }));
-    const status = within(menu).getByRole("status");
+    const status = screen.getByRole("status");
     await waitFor(() => expect(status.textContent).toBe("Select and copy the path"));
-    expect(status.classList.contains("sr-only")).toBe(false);
+    expect(status.classList.contains("sr-only")).toBe(true);
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(status.closest('[aria-hidden="true"]')).toBeNull();
+    expect(menu.querySelector('[role="status"]')).toBeNull();
+    const visibleFailure = within(menu).getByText("Select and copy the path");
+    expect(visibleFailure.hasAttribute("role")).toBe(false);
+    expect(visibleFailure.classList.contains("sr-only")).toBe(false);
     expect(window.getSelection()?.toString()).toBe("src/a.ts");
     expect(execCommand).toHaveBeenCalledExactlyOnceWith("copy");
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Copy path" }));
     await waitFor(() => expect(status.textContent).toBe(`Select and copy the path${String.fromCharCode(0xa0)}`));
+    expect(visibleFailure.textContent).toBe("Select and copy the path");
     fireEvent.keyDown(menu, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(screen.getByRole("status")).toBe(status);
+    expect(status.textContent).toBe("");
     fireEvent.pointerDown(button, { button: 0, pointerType: "mouse" });
-    const reopened = await screen.findByRole("menu");
-    expect(within(reopened).getByRole("status").textContent).toBe("");
+    await screen.findByRole("menu");
+    expect(status.textContent).toBe("");
   },
 );
 
@@ -1269,7 +1396,34 @@ test("a successful fallback copy selects only the new path and reports Copied", 
   expect(execCommand).toHaveBeenCalledExactlyOnceWith("copy");
   expect(window.getSelection()?.toString()).toBe("src/a.ts");
   expect(within(menu).getByRole("menuitem", { name: "Copied" })).toBeTruthy();
-  expect(within(menu).getByRole("status").textContent).toBe("Path copied");
+  expect(screen.getByRole("status").textContent).toBe("Path copied");
+});
+
+test("fallback copying preserves consecutive and leading spaces in the path", async () => {
+  const path = "src/a  b/ c.ts";
+  const oldPath = "src/old  dir/ previous.ts";
+  vi.stubGlobal("navigator", { ...navigator, clipboard: undefined });
+  let selected: string | undefined;
+  const execCommand = vi.fn(() => {
+    selected = window.getSelection()?.toString();
+    return false;
+  });
+  Object.defineProperty(document, "execCommand", { configurable: true, value: execCommand });
+  await mount(revision([file(path, { oldPath })]));
+  // Accessible names collapse spaces; the displayed and copied path must preserve them.
+  const button = screen.getByRole("button", { name: "src/a b/ c.ts" });
+  expect(button.getAttribute("aria-label")).toBe(path);
+  fireEvent.click(button);
+  const menu = await screen.findByRole("menu");
+  const paths = [...menu.querySelectorAll("bdi")];
+  expect(paths.map((node) => node.textContent)).toEqual([path, oldPath]);
+  for (const node of paths) {
+    expect(node.parentElement?.classList.contains("whitespace-pre-wrap")).toBe(true);
+    expect(node.parentElement?.classList.contains("[overflow-wrap:anywhere]")).toBe(true);
+  }
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "Copy path" }));
+  expect(execCommand).toHaveBeenCalledExactlyOnceWith("copy");
+  expect(selected).toBe(path);
 });
 
 test.each(["Enter", " ", "ArrowDown"])(
@@ -1295,11 +1449,25 @@ test("an outside tap closes the path menu and returns focus to the path", async 
   await mount(detailed());
   const button = screen.getByRole("button", { name: "src/a.ts" });
   fireEvent.pointerDown(button, { button: 0, pointerType: "touch" });
-  fireEvent.click(button);
+  fireEvent.click(button, { detail: 1 });
   await screen.findByRole("menu");
   fireEvent.pointerDown(document.body, { button: 0, pointerType: "touch" });
   fireEvent.click(document.body);
   await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(button));
+});
+
+test("an outside touch that closes the menu cannot reopen it when its click lands on the path", async () => {
+  stubWidth(390);
+  await mount(detailed());
+  const button = screen.getByRole("button", { name: "src/a.ts" });
+  fireEvent.pointerDown(button, { button: 0, pointerType: "touch" });
+  fireEvent.click(button, { detail: 1 });
+  await screen.findByRole("menu");
+  fireEvent.pointerDown(document.body, { button: 0, pointerType: "touch" });
+  fireEvent.click(button, { detail: 1 });
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  expect(button.getAttribute("aria-expanded")).toBe("false");
   await waitFor(() => expect(document.activeElement).toBe(button));
 });
 
