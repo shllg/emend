@@ -767,6 +767,7 @@ function LoadedReview({
     hasDocs,
     hasDiff,
     hasWriteup,
+    compactDoc: openDoc?.kind === "markdown",
     threadCounts: revision ? threadCounts(revision.threads) : undefined,
     filesCount: diffFiles.length,
     viewedCount: diffFiles.filter((file) => file.viewed === "viewed").length,

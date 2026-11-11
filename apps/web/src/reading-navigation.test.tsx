@@ -2626,7 +2626,13 @@ test.each([1280, 900, 390])("reading switches toggle independently on their tabs
   expect(saved()).toMatchObject({ contents: false, compact: true });
   expect(screen.queryByRole("navigation", { name: "Writeup outline" })).toBeNull();
   fireEvent.click(screen.getByRole("tab", { name: "Docs 2" }));
-  await waitFor(() => expect(screen.queryByRole("button", { name: "Contents" })).toBeNull());
+  await screen.findByRole("heading", { name: "Docs" });
+  expect(screen.queryByRole("button", { name: "Contents" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
+  expect(tabBar?.children).toHaveLength(1);
+  fireEvent.click(screen.getByRole("link", { name: "seed.md seed.md" }));
+  await screen.findByRole("heading", { name: "seed.md" });
+  expect(screen.queryByRole("button", { name: "Contents" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Compact comments", pressed: true }));
   expect(saved()).toMatchObject({ contents: false, compact: false });
   expect(screen.getByRole("button", { name: "Compact comments", pressed: false })).toBeTruthy();
@@ -2642,6 +2648,27 @@ test.each([1280, 900, 390])("reading switches toggle independently on their tabs
   fireEvent.click(screen.getByRole("tab", { name: "Writeup" }));
   await screen.findByRole("button", { name: "Contents", pressed: false });
   expect(screen.getByRole("button", { name: "Compact comments", pressed: false })).toBeTruthy();
+});
+
+test.each<RevisionView["docs"][number]>([
+  { kind: "source", path: "seed.txt", language: "text", lines: [[{ text: "Plant a seed" }]] },
+  htmlDoc,
+])("reading switches stay hidden for $kind docs", async (doc) => {
+  currentRevision.docs.push(doc);
+  layoutStore.update({ contents: true, compact: true });
+  mount(`?tab=docs&doc=${doc.path}&rev=1`);
+  await screen.findByRole("heading", { name: doc.path.split("/").at(-1) });
+  expect(screen.queryByRole("button", { name: "Contents" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
+  expect(document.querySelector(".em-review-tabs")?.children).toHaveLength(1);
+  fireEvent.click(screen.getByRole("link", { name: "All docs" }));
+  await screen.findByRole("heading", { name: "Docs" });
+  expect(screen.queryByRole("button", { name: "Contents" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
+  expect(document.querySelector(".em-review-tabs")?.children).toHaveLength(1);
+  fireEvent.click(screen.getByRole("tab", { name: "Writeup" }));
+  await screen.findByRole("button", { name: "Contents", pressed: true });
+  expect(screen.getByRole("button", { name: "Compact comments", pressed: true })).toBeTruthy();
 });
 
 test.each([

@@ -12,6 +12,7 @@ export interface ReviewTabsProps {
   hasDocs: boolean;
   hasWriteup: boolean;
   hasDiff: boolean;
+  compactDoc?: boolean;
   threadCounts?: ThreadCounts;
   filesCount?: number;
   viewedCount?: number;
@@ -23,6 +24,7 @@ export function ReviewTabs({
   hasDocs,
   hasWriteup,
   hasDiff,
+  compactDoc = false,
   threadCounts,
   filesCount = 0,
   viewedCount = 0,
@@ -73,7 +75,7 @@ export function ReviewTabs({
           });
         }}
       />
-      {!phone && (value === "writeup" || value === "docs") && (
+      {!phone && (value === "writeup" || (value === "docs" && compactDoc)) && (
         <div className="mx-2 flex shrink-0 gap-1">
           {hasWriteup && value === "writeup" && (
             <Button
