@@ -107,6 +107,7 @@ export function useLifecycleMutation(reviewId: string) {
     onError: (error) => {
       // Unsent comments appeared elsewhere: refetch so the dialog can name the new count.
       if (error instanceof ApiError && error.code === "unsent_comments") {
+        void client.invalidateQueries({ queryKey: ["revision", reviewId] });
         void client.invalidateQueries({ queryKey: ["review", reviewId] });
         void client.invalidateQueries({ queryKey: ["inbox"] });
       }
@@ -196,11 +197,14 @@ export function useReviewMutation(reviewId: string, key?: string) {
           } catch (error) {
             // A refused write usually means the bar was stale (empty_send, stale_revision): heal it.
             if (refresh === "background") {
+              void client.invalidateQueries({ queryKey: ["revision", reviewId] }).catch(() => undefined);
               void client.invalidateQueries({ queryKey: ["review", reviewId] }).catch(() => undefined);
               void client.invalidateQueries({ queryKey: ["inbox"] }).catch(() => undefined);
             }
             throw error;
           }
+          // Invalidation reuses a pending first revision fetch, which could restore pre-Send counts.
+          if (accepted?.kind === "send") await client.cancelQueries({ queryKey: ["revision", reviewId] });
           if (accepted) applyAccepted(client, reviewId, accepted);
           if (draft) clearDraftIfUnchanged(draft.key, draft.text);
           if (deleteDraft) clearDraft(deleteDraft);

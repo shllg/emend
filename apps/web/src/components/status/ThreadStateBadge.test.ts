@@ -41,7 +41,13 @@ test.each<{ name: string; thread: ThreadView; unsent: number; open: number }>([
   {
     name: "unplaced with an unsent user comment",
     thread: { ...base, placement: { status: "unplaced", reason: "file-gone" }, comments: unsent },
-    unsent: 1,
+    unsent: 0,
+    open: 1,
+  },
+  {
+    name: "unplaced and resolved with an unsent user comment",
+    thread: { ...base, state: "resolved", placement: { status: "unplaced", reason: "file-gone" }, comments: unsent },
+    unsent: 0,
     open: 1,
   },
 ])("counts a thread with $name", ({ thread, unsent, open }) => {

@@ -8,6 +8,10 @@ export function shownThreadState(thread: ThreadView): ShownThreadState {
     : thread.state;
 }
 
+export function threadListGroup(thread: ThreadView): ShownThreadState | "unplaced" {
+  return thread.placement.status === "unplaced" ? "unplaced" : shownThreadState(thread);
+}
+
 export interface ThreadCounts {
   unsent: number;
   open: number;
@@ -19,7 +23,7 @@ export function threadCounts(threads: ThreadView[]): ThreadCounts {
   let open = 0;
   for (const thread of threads) {
     const isUnsent = shownThreadState(thread) === "unsent";
-    if (isUnsent) unsent += 1;
+    if (threadListGroup(thread) === "unsent") unsent += 1;
     if (thread.state !== "resolved" || isUnsent) open += 1;
   }
   return { unsent, open, all: threads.length };

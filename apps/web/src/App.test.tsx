@@ -2699,6 +2699,13 @@ test.each([1280, 390])("Comments tab counts threads and updates before the Send 
   const bubble = within(comments).getByText("2 / 5 / 9");
   expect(bubble.getAttribute("aria-hidden")).toBe("true");
   expect(bubble.className).toContain("bg-accent");
+  if (size === 390) {
+    expect(bubble.classList.contains("translate-x-[min(0px,calc(34px-100%))]")).toBe(true);
+    fireEvent.pointerMove(bubble, { pointerType: "mouse" });
+    expect((await screen.findByRole("tooltip")).textContent).toBe("2 unsent, 5 not resolved, 9 threads in all");
+    expect(screen.getByRole("link", { name: beforeName })).toBe(comments);
+    fireEvent.pointerLeave(bubble, { pointerType: "mouse" });
+  }
   const reading = within(screen.getByRole("region", { name: "Reading" }));
   expect(within(reading.getByRole("region", { name: "Unsent" })).getAllByRole("article")).toHaveLength(2);
   expect(reading.getAllByRole("article")).toHaveLength(9);

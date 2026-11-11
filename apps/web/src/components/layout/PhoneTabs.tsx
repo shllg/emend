@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { FileDiff, Files, FileText, ListChecks, MessageSquare } from "lucide-react";
 import { formatThreadCounts } from "../status/ThreadStateBadge.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { Tooltip } from "../ui/Tooltip.tsx";
 import { cn } from "../ui/utils.ts";
 import type { ReviewTabsProps } from "./ReviewTabs.tsx";
 
@@ -54,15 +55,18 @@ export function PhoneTabs({
               <span>{tab.id === "files" ? `Files ${viewedCount}/${filesCount}` : tab.label}</span>
               {tab.id === "comments" && count && (
                 <>
-                  <span
-                    aria-hidden="true"
-                    className={cn(
-                      "absolute -top-1.5 left-[calc(50%+3px)] inline-grid h-[15px] min-w-[15px] place-items-center rounded-full px-1 text-[9.5px] font-semibold leading-none whitespace-nowrap tabular-nums [word-spacing:-0.2em]",
-                      threadCounts && threadCounts.unsent > 0 ? "bg-accent text-accent-fg" : "bg-active text-fg-2",
-                    )}
-                  >
-                    {count.text}
-                  </span>
+                  <Tooltip content={count.description}>
+                    {/* Grow right up to 34px, then shift left by the excess width. */}
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "absolute -top-1.5 left-[calc(50%+3px)] inline-grid h-[15px] min-w-[15px] translate-x-[min(0px,calc(34px-100%))] place-items-center rounded-full px-1 text-[9.5px] font-semibold leading-none whitespace-nowrap tabular-nums [word-spacing:-0.2em]",
+                        threadCounts && threadCounts.unsent > 0 ? "bg-accent text-accent-fg" : "bg-active text-fg-2",
+                      )}
+                    >
+                      {count.text}
+                    </span>
+                  </Tooltip>
                   <span className="sr-only"> {count.description}</span>
                 </>
               )}

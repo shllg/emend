@@ -193,6 +193,7 @@ function reviewView(unsentCount: number) {
 }
 
 test("a 409 unsent_comments refetches the review, shows the alert and the discard button, and never discards by itself", async () => {
+  const invalidate = vi.spyOn(client, "invalidateQueries");
   let serverCount = 0;
   let retires = 0;
   fetchMock.mockImplementation(async (path, init) => {
@@ -216,6 +217,7 @@ test("a 409 unsent_comments refetches the review, shows the alert and the discar
   fireEvent.click(plain);
   // The refetch lands through the real invalidation.
   const discard = await screen.findByRole("button", { name: "Discard 2 unsent comments and retire" });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: ["revision", reviewId] });
   expect(screen.getByRole("alert").textContent).toBe("2 new unsent comments arrived.");
   expect(screen.queryByText("The review has unsent comments.")).toBeNull();
   expect(retires).toBe(1);

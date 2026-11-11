@@ -2,7 +2,7 @@ import type { RevisionView } from "@emend/contract";
 import { useSyncExternalStore } from "react";
 import { listDrafts, type SavedDraft, subscribeDrafts } from "../../lib/drafts.ts";
 import type { ReviewSearch } from "../../router.tsx";
-import { shownThreadState } from "../status/ThreadStateBadge.tsx";
+import { threadListGroup } from "../status/ThreadStateBadge.tsx";
 import { DraftList } from "./DraftList.tsx";
 import { ThreadCard, threadPlaceLink } from "./ThreadCard.tsx";
 
@@ -39,9 +39,7 @@ export function ThreadList({
         </div>
       )}
       {(["unsent", "sent", "answered", "open", "unplaced", "resolved"] as const).map((state) => {
-        const group = threads.filter(
-          (thread) => (thread.placement.status === "unplaced" ? "unplaced" : shownThreadState(thread)) === state,
-        );
+        const group = threads.filter((thread) => threadListGroup(thread) === state);
         if (!group.length) return null;
         const label = state[0]?.toUpperCase() + state.slice(1);
         return (
