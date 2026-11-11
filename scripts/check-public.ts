@@ -1303,6 +1303,8 @@ function checkPng(buffer: Buffer, file: string, terms: PrivateTerms, depth: numb
 // Same per-asset and aggregate bounds as the publish contract.
 const ASSET_BYTES = 25 * 1024 * 1024;
 const EXPANDED_BYTES = 50 * 1024 * 1024;
+// Raw byte-order views cost 15–23 budget bytes per input byte on real images/fonts, about 28 on contrived content.
+const RAW_VIEW_COST = 32;
 
 class BudgetExceeded extends PublicCheckError {
   constructor() { super(1, "check:public: scan expansion budget exceeded"); }
@@ -1425,9 +1427,9 @@ function checkFont(buffer: Buffer, file: string, terms: PrivateTerms, depth: num
     const count = buffer.readUInt16BE(12);
     if (!count || buffer.readUInt32BE(16) > EXPANDED_BYTES) throw new Error();
     let dataEnd = header;
-    const scan = (data: Buffer) => {
+    const scan = (data: Buffer, views = assetTermViews) => {
       // Font names may also contain private text in any supported raw encoding.
-      hits.push(...rawTermViews(data, file, terms, budget, true));
+      hits.push(...views(data, file, terms, budget, true));
       hits.push(...binarySecrets(data, file, terms, budget));
     };
     if (!woff2) {
@@ -1505,7 +1507,7 @@ function checkFont(buffer: Buffer, file: string, terms: PrivateTerms, depth: num
       const bytes = buffer.subarray(offset, offset + compressed);
       const data = budget.inflate(bytes, woff2, original);
       if (data.length !== original) throw new Error();
-      scan(data);
+      scan(data, rawTermViews);
       hits.push(...checkText(data.toString("utf8"), file + " (metadata)", terms, { lines: true, lineExemptions: false, imageDepth: depth, budget }));
     }
   } catch (error) {
@@ -1513,6 +1515,12 @@ function checkFont(buffer: Buffer, file: string, terms: PrivateTerms, depth: num
     hits.push(safeLocation(file, terms) + ": invalid compressed font data");
   }
   return hits;
+}
+
+/** Raw views of a whole image or font run only while they fit the remaining budget;
+ * a larger asset keeps its parsed metadata, font name tables and binary secret scan. */
+function assetTermViews(buffer: Buffer, file: string, terms: PrivateTerms, budget: ScanBudget, fontData = false): string[] {
+  return buffer.length * RAW_VIEW_COST > budget.remaining ? [] : rawTermViews(buffer, file, terms, budget, fontData);
 }
 
 /** Scan distinct byte-order/alignment views once; ASCII UTF-8 and Latin-1 share one view. */
@@ -2382,7 +2390,7 @@ export function checkBuffer(
     const hits = binary ? [] : [unknown];
     const extension = path.extname(file).toLowerCase();
     const fontData = binary && [".woff", ".woff2", ".ttf", ".otf"].includes(extension);
-    hits.push(...rawTermViews(buffer, file, terms, budget, fontData));
+    hits.push(...assetTermViews(buffer, file, terms, budget, fontData));
     if (binary) {
       if (buffer.length > ASSET_BYTES) hits.push(safeLocation(file, terms) + ": asset exceeds size limit");
       hits.push(...binarySecrets(buffer, file, terms, budget));
