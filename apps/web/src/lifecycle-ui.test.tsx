@@ -160,7 +160,7 @@ function inboxItems(): InboxItem[] {
   ];
 }
 
-test("the inbox shows Active, Snoozed and Done in order with counts, wake times and a collapsed Done", async () => {
+test("the inbox shows Active, Snoozed and Done in order with counts, wake times and collapsed Snoozed and Done", async () => {
   vi.useFakeTimers({ toFake: ["Date", "performance"] });
   vi.setSystemTime(new Date("2026-11-04T12:00:00.000Z"));
   inbox = inboxItems();
@@ -168,6 +168,10 @@ test("the inbox shows Active, Snoozed and Done in order with counts, wake times 
   await screen.findByRole("link", { name: /Active one/ });
   const headings = screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent);
   expect(headings).toEqual(["Active2", "Snoozed2", "Done2"]);
+  const snoozed = screen.getByRole("button", { name: /Snoozed/ });
+  expect(snoozed.getAttribute("aria-expanded")).toBe("false");
+  expect(screen.queryByRole("link", { name: /Snoozed/ })).toBeNull();
+  fireEvent.click(snoozed);
   const links = screen.getAllByRole("link").map((link) => link.textContent ?? "");
   const order = ["Active one", "Active two", "Snoozed timed", "Snoozed revision"].map((title) =>
     links.findIndex((text) => text.includes(title)),
@@ -190,10 +194,30 @@ test("the inbox shows Active, Snoozed and Done in order with counts, wake times 
   expect(screen.queryByRole("link", { name: /Done approved/ })).toBeNull();
 });
 
+test("Snoozed starts collapsed with its count and toggles independently of Done", async () => {
+  inbox = inboxItems();
+  mount();
+  const snoozed = await screen.findByRole("button", { name: "Snoozed 2" });
+  const done = screen.getByRole("button", { name: "Done 2" });
+  expect(snoozed.getAttribute("aria-expanded")).toBe("false");
+  expect(screen.queryByRole("link", { name: /Snoozed/ })).toBeNull();
+  expect(done.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(snoozed);
+  expect(snoozed.getAttribute("aria-expanded")).toBe("true");
+  expect(row("Snoozed timed")).toBeTruthy();
+  expect(row("Snoozed revision")).toBeTruthy();
+  expect(done.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(snoozed);
+  expect(snoozed.getAttribute("aria-expanded")).toBe("false");
+  expect(screen.queryByRole("link", { name: /Snoozed/ })).toBeNull();
+  expect(done.getAttribute("aria-expanded")).toBe("false");
+});
+
 test("done rows are dimmed until hover or focus; active and snoozed rows keep full opacity", async () => {
   inbox = inboxItems();
   mount();
   await screen.findByRole("link", { name: /Active one/ });
+  fireEvent.click(screen.getByRole("button", { name: /Snoozed/ }));
   fireEvent.click(screen.getByRole("button", { name: /Done/ }));
   for (const title of ["Done approved", "Done retired"]) {
     const classes = row(title).classList;
@@ -236,6 +260,25 @@ test("the collapsed inbox rail dims a recent approval like a Done row", async ()
   expectDimmed(rail.getByRole("link", { name: "Recently approved" }));
   expectDimmed(rail.getByRole("link", { name: "Retired review" }));
   expect(rail.getByRole("link", { name: item.title }).className).not.toContain("opacity-");
+});
+
+test("the inbox sidebar starts Snoozed collapsed and supports toggling and filtering", async () => {
+  inbox = [item, ...inboxItems().filter((entry) => entry.list === "snoozed")];
+  mount(`/r/${id}`);
+  const pane = within(await screen.findByRole("complementary", { name: "Inbox" }));
+  const snoozed = await pane.findByRole("button", { name: "Snoozed 2" });
+  expect(snoozed.getAttribute("aria-expanded")).toBe("false");
+  expect(pane.queryByRole("link", { name: /Snoozed/ })).toBeNull();
+  fireEvent.click(snoozed);
+  expect(snoozed.getAttribute("aria-expanded")).toBe("true");
+  expect(pane.getByRole("link", { name: /Snoozed timed/ })).toBeTruthy();
+  expect(pane.getByRole("link", { name: /Snoozed revision/ })).toBeTruthy();
+  fireEvent.click(snoozed);
+  expect(snoozed.getAttribute("aria-expanded")).toBe("false");
+  expect(pane.queryByRole("link", { name: /Snoozed/ })).toBeNull();
+  fireEvent.change(pane.getByRole("textbox", { name: "Filter reviews" }), { target: { value: "Snoozed timed" } });
+  expect(pane.getByRole("link", { name: /Snoozed timed/ })).toBeTruthy();
+  expect(pane.queryByRole("button", { name: /Snoozed/ })).toBeNull();
 });
 
 test.each([
@@ -471,10 +514,32 @@ test("a non-empty filter shows Done expanded under a plain heading; clearing it 
   expect(screen.getByRole("link", { name: /Done approved/ })).toBeTruthy();
 });
 
+test("a non-empty filter shows Snoozed expanded under a plain heading; clearing it restores the reader's choice", async () => {
+  inbox = inboxItems();
+  mount();
+  await screen.findByRole("link", { name: /Active one/ });
+  const filter = screen.getByRole("textbox", { name: "Filter reviews" });
+  fireEvent.change(filter, { target: { value: "Snoozed timed" } });
+  expect(await screen.findByRole("link", { name: /Snoozed timed/ })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Snoozed/ })).toBeNull();
+  expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Snoozed1"]);
+  fireEvent.change(filter, { target: { value: "" } });
+  const toggle = await screen.findByRole("button", { name: /Snoozed/ });
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(screen.queryByRole("link", { name: /Snoozed/ })).toBeNull();
+  fireEvent.click(toggle);
+  fireEvent.change(filter, { target: { value: "Snoozed timed" } });
+  fireEvent.change(filter, { target: { value: "" } });
+  expect((await screen.findByRole("button", { name: /Snoozed/ })).getAttribute("aria-expanded")).toBe("true");
+  expect(row("Snoozed timed")).toBeTruthy();
+  expect(row("Snoozed revision")).toBeTruthy();
+});
+
 test("a wake time in the past shows waking up, never a date", async () => {
   const past = new Date(Date.now() - 3600_000).toISOString();
   inbox = [{ ...item, id: other(1), title: "Overdue", list: "snoozed", snoozed: true, snoozedUntil: past }];
   mount();
+  fireEvent.click(await screen.findByRole("button", { name: /Snoozed/ }));
   expect(within(await screen.findByRole("link", { name: /Overdue/ })).getByText("waking up")).toBeTruthy();
   expect(screen.queryByText(/^until /)).toBeNull();
 });
@@ -492,6 +557,7 @@ test("a timed snooze that ends while the inbox is open refetches the inbox and t
   const wake = new Date(Date.now() + 3_600_000).toISOString();
   inbox = [{ ...item, id: other(1), title: "About to wake", list: "snoozed", snoozed: true, snoozedUntil: wake }];
   await mountTimed();
+  fireEvent.click(screen.getByRole("button", { name: /Snoozed/ }));
   expect(within(row("About to wake")).getByText(/^until /)).toBeTruthy();
   const inboxCalls = () => fetchMock.mock.calls.filter(([path]) => path === "/api/v1/reviews").length;
   const before = inboxCalls();
@@ -523,7 +589,7 @@ test("empty Snoozed and Done lists are hidden, and nothing active keeps a note",
   client.clear();
   inbox = [{ ...item, id: other(1), title: "Snoozed only", list: "snoozed", snoozed: true }];
   mount();
-  await screen.findByRole("link", { name: /Snoozed only/ });
+  await screen.findByRole("button", { name: /Snoozed/ });
   expect(screen.getByText("No active reviews.")).toBeTruthy();
 });
 

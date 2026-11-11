@@ -61,7 +61,7 @@ export function Inbox({
     } catch {}
   };
   const [now, setNow] = useState(Date.now);
-  const [doneOpen, setDoneOpen] = useState(false);
+  const [open, setOpen] = useState({ snoozed: false, done: false });
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(interval);
@@ -225,8 +225,9 @@ export function Inbox({
             const nothingActive =
               list === "active" && !items.some((review) => effectiveList(review, estimate) === "active");
             if (rows.length === 0 && !nothingActive) return null;
-            // A filter that matches only Done rows would otherwise show nothing.
-            const expanded = list !== "done" || doneOpen || needle !== "";
+            const collapsible = list !== "active";
+            // A filter that matches only collapsed Snoozed or Done rows would otherwise show nothing.
+            const expanded = !collapsible || open[list] || needle !== "";
             const heading = (
               <>
                 {title}
@@ -238,12 +239,12 @@ export function Inbox({
             return (
               <section key={list} aria-label={title}>
                 <Heading className={headingClass}>
-                  {list === "done" && needle === "" ? (
+                  {collapsible && needle === "" ? (
                     <button
                       type="button"
                       aria-expanded={expanded}
                       className="inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 font-[inherit] text-[inherit] uppercase"
-                      onClick={() => setDoneOpen(!doneOpen)}
+                      onClick={() => setOpen((current) => ({ ...current, [list]: !current[list] }))}
                     >
                       <Icon icon={expanded ? ChevronDown : ChevronRight} size={12} />
                       {heading}
