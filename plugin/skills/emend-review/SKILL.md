@@ -161,6 +161,7 @@ Write the opening fields below. The app shows them in this order, with these wei
   It shows quieter, right under the overview.
 - `whereToLook`: two bullets, **Biggest risk** and **Check first**.
   Name the highest risk and the topic and file to inspect first.
+  A new or changed dependency is always one of them.
   It guides the review and does not summarize the change. Keep these current after fixes.
 - `context`: side information as a short list.
   Include the commit count and scope, renamed files, dependencies, unchanged areas and cited docs.

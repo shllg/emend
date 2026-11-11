@@ -401,6 +401,14 @@ test("review guidance lists the opening fields in display order", () => {
   ]);
 });
 
+test("review guidance always names new or changed dependencies in whereToLook", () => {
+  const text = read("plugin/skills/emend-review/SKILL.md");
+  const whereToLook = text.split("- `whereToLook`:")[1]?.split("\n- ")[0]?.replace(/\s+/g, " ");
+  expect(whereToLook).toContain(
+    "Name the highest risk and the topic and file to inspect first. A new or changed dependency is always one of them.",
+  );
+});
+
 test("feedback guidance keeps Where to look current when edits are allowed", () => {
   const text = read("plugin/skills/emend-feedback/SKILL.md").replace(/\s+/g, " ");
   expect(text).toContain(
