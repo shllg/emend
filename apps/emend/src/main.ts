@@ -2,7 +2,7 @@ import type { SkillsOptions } from "./cli/commands/skills.ts";
 import type { ServiceOptions } from "./cli/service/common.ts";
 import { NewerDatabaseError } from "./db/migrate.ts";
 import { isStateModeError, StateFolderWriteError, stateAccessError } from "./state/files.ts";
-import { defaultStateDir } from "./state/paths.ts";
+import { defaultConfigDir, defaultStateDir } from "./state/paths.ts";
 import { VERSION } from "./version.ts";
 
 export interface Io {
@@ -79,8 +79,12 @@ export async function run(argv: string[], io: Io): Promise<number> {
         mcp: () => import("./cli/commands/mcp.ts").then((m) => m.mcpCommand),
         service: () => import("./cli/commands/service.ts").then((m) => m.serviceCommand),
         skills: () => import("./cli/commands/skills.ts").then((m) => m.skillsCommand),
-        config: () => import("./cli/commands/config.ts").then((m) => m.configCommand),
       };
+      if (argv[0] === "config") {
+        const { configCommand } = await import("./cli/commands/config.ts");
+        await configCommand(defaultStateDir(io.env), defaultConfigDir(io.env), argv.slice(1), io);
+        return 0;
+      }
       const command = await commands[argv[0] as keyof typeof commands]();
       await command(defaultStateDir(io.env), argv.slice(1), io);
       return 0;
@@ -94,7 +98,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     const { publishCommand } = await import("./cli/commands/publish.ts");
     const { CliError, errorLine } = await import("./cli/http.ts");
     try {
-      await publishCommand(defaultStateDir(io.env), argv.slice(1), io);
+      await publishCommand(defaultStateDir(io.env), defaultConfigDir(io.env), argv.slice(1), io);
       return 0;
     } catch (caught) {
       const error = stateAccessError(defaultStateDir(io.env), caught);
@@ -123,7 +127,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       await serveCommand(defaultStateDir(io.env), options, io);
     } else {
       const { openCommand } = await import("./cli/commands/open.ts");
-      await openCommand(defaultStateDir(io.env), io);
+      await openCommand(defaultStateDir(io.env), defaultConfigDir(io.env), io);
     }
     return 0;
   } catch (caught) {

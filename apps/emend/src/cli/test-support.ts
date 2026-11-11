@@ -28,10 +28,13 @@ export function provenTestServer(stateDir: string): (url: string | URL, init?: R
 
 export async function commandFixture() {
   const dir = await mkdtemp(join(tmpdir(), "emend-handoff-"));
+  const configHome = await mkdtemp(join(tmpdir(), "emend-config-"));
+  const configDir = join(configHome, "emend");
   onTestFinished(async () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     await rm(dir, { recursive: true, force: true });
+    await rm(configHome, { recursive: true, force: true });
   });
   writeSecretFile(join(dir, "agent.token"), `em_${"a".repeat(43)}`);
   const proof = provenTestServer(dir);
@@ -47,10 +50,11 @@ export async function commandFixture() {
     stderr: (line) => {
       stderr.push(line);
     },
-    env: { EMEND_HOME: dir },
+    env: { EMEND_HOME: dir, XDG_CONFIG_HOME: configHome },
   };
   const f = {
     dir,
+    configDir,
     io,
     stdout,
     stderr,

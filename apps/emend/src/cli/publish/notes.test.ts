@@ -44,6 +44,7 @@ test("the CLI carries manifest notes into resolved and re-keyed publish requests
       },
       { manifest: "synthetic" },
       join(dir, "state"),
+      join(dir, "config", "emend"),
       "instance",
       root,
       () => {},

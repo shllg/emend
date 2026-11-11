@@ -55,15 +55,19 @@ test("an unchanged listed diff or invalid source starts no server, even without 
         files: [{ path: "unchanged.ts", role: "diff" }],
       }),
     );
-    await expect(publishCommand(state, ["--manifest", manifest], io, root)).rejects.toThrow("not changed in");
+    await expect(
+      publishCommand(state, join(dir, "config", "emend"), ["--manifest", manifest], io, root),
+    ).rejects.toThrow("not changed in");
     await writeFile(manifest, JSON.stringify({ ...common, files: [{ path: "missing.md", role: "doc" }] }));
-    await expect(publishCommand(state, ["--manifest", manifest, "--key", "plan"], io, root)).rejects.toThrow();
+    await expect(
+      publishCommand(state, join(dir, "config", "emend"), ["--manifest", manifest, "--key", "plan"], io, root),
+    ).rejects.toThrow();
     expect(discover).not.toHaveBeenCalled();
     await writeFile(join(root, "plan.md"), "# Valid");
     await writeFile(manifest, JSON.stringify({ ...common, files: [{ path: "plan.md", role: "doc" }] }));
-    await expect(publishCommand(state, ["--manifest", manifest, "--key", "plan"], io, root)).rejects.toThrow(
-      "server discovery reached",
-    );
+    await expect(
+      publishCommand(state, join(dir, "config", "emend"), ["--manifest", manifest, "--key", "plan"], io, root),
+    ).rejects.toThrow("server discovery reached");
     expect(discover).toHaveBeenCalledOnce();
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -82,6 +86,7 @@ test.each([".git/config", "alias/config"])("manifest read %s cannot expose Git m
     await expect(
       publishCommand(
         state,
+        join(dir, "config", "emend"),
         ["--manifest", join(root, path), "--key", "docs"],
         {
           stdout: vi.fn(),

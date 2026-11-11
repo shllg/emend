@@ -223,7 +223,8 @@ test.each([
   const docs = await realpath(await mkdtemp(join(tmpdir(), "emend-readiness-docs-")));
   onTestFinished(() => rm(docs, { recursive: true, force: true }));
   if (present) await writeFile(join(docs, "draft.md"), "# Synthetic plan\n");
-  if (allowed) await writeFile(join(f.dir, "config.json"), JSON.stringify({ docRoots: [docs] }));
+  await mkdir(f.configDir, { recursive: true, mode: 0o700 });
+  if (allowed) await writeFile(join(f.configDir, "config.json"), JSON.stringify({ docRoots: [docs] }));
   await rm(join(f.dir, "server.json"));
   await writeFile(
     f.path,

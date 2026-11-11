@@ -1,17 +1,15 @@
 import { realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
-import { LIMITS } from "@emend/contract";
+import { resolve } from "node:path";
 import type { Io } from "../../main.ts";
-import { writeSecretFile } from "../../state/files.ts";
-import { readConfigDocument, validateDocRoot } from "../config.ts";
+import { readConfigDocument, validateDocRoot, writeConfigDocument } from "../config.ts";
 import { escapeJson, escapeReference } from "../escape.ts";
-import { CliError, jsonLine } from "../http.ts";
+import { CliError } from "../http.ts";
 
 const usage =
   "Usage: emend config [list] | add docRoots <folder> | remove docRoots <folder> | set openBrowser true|false.";
 
-export async function configCommand(stateDir: string, args: string[], io: Io): Promise<void> {
+export async function configCommand(stateDir: string, configDir: string, args: string[], io: Io): Promise<void> {
   const [action = "list", key, value] = args;
   const list = action === "list" && args.length <= 1;
   const folder = (action === "add" || action === "remove") && key === "docRoots" && value !== "";
@@ -19,7 +17,7 @@ export async function configCommand(stateDir: string, args: string[], io: Io): P
   // Config's usage errors, like its other errors, exit 1.
   if (!list && (args.length !== 3 || (!folder && !setting))) throw new CliError(usage);
 
-  const config = await readConfigDocument(stateDir);
+  const config = await readConfigDocument(stateDir, configDir);
   if (list) {
     const json = escapeJson(JSON.stringify({ docRoots: config.docRoots, openBrowser: config.openBrowser }));
     try {
@@ -60,11 +58,7 @@ export async function configCommand(stateDir: string, args: string[], io: Io): P
       message = `emend: removed ${escapeReference(entry as string)} from docRoots`;
     }
   }
-  const data = jsonLine(config);
-  // A successful update must remain readable by readConfig's bounded reader.
-  if (Buffer.byteLength(data) > LIMITS.publicJsonBytes)
-    throw new CliError("emend configuration would exceed its size limit");
-  writeSecretFile(join(stateDir, "config.json"), data);
+  await writeConfigDocument(configDir, config);
   io.stdout(`${message}\n`);
 }
 

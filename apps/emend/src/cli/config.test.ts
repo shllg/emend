@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LIMITS } from "@emend/contract";
 import { expect, onTestFinished, test, vi } from "vitest";
-import { StateFolderWriteError } from "../state/files.ts";
 import { readConfig, validateDocRoot } from "./config.ts";
 import { escapeReference } from "./escape.ts";
 import * as reader from "./publish/read.ts";
@@ -31,7 +30,7 @@ async function fixture() {
 
 test("a missing configuration uses defaults", async () => {
   const { dir } = await fixture();
-  expect(await readConfig(dir)).toEqual({ docRoots: [], openBrowser: false });
+  expect(await readConfig(join(dir, "state"), dir)).toEqual({ docRoots: [], openBrowser: false });
 });
 
 test.each([{}, { openBrowser: true }, { openBrowser: false }, { unknown: "ignored" }])(
@@ -39,7 +38,10 @@ test.each([{}, { openBrowser: true }, { openBrowser: false }, { unknown: "ignore
   async (config) => {
     const { dir, path } = await fixture();
     await writeFile(path, JSON.stringify(config));
-    expect(await readConfig(dir)).toEqual({ docRoots: [], openBrowser: "openBrowser" in config && config.openBrowser });
+    expect(await readConfig(join(dir, "state"), dir)).toEqual({
+      docRoots: [],
+      openBrowser: "openBrowser" in config && config.openBrowser,
+    });
   },
 );
 
@@ -48,7 +50,7 @@ test("docRoots and openBrowser can be used together", async () => {
   await mkdir(join(dir, "docs"));
   const config = { docRoots: [join(dir, "docs")], openBrowser: true };
   await writeFile(path, JSON.stringify(config));
-  expect(await readConfig(dir)).toEqual(config);
+  expect(await readConfig(join(dir, "state"), dir)).toEqual(config);
 });
 
 test.each([
@@ -70,13 +72,18 @@ test.each([
 ])("invalid configuration is refused: %s", async (config) => {
   const { dir, path } = await fixture();
   await writeFile(path, config);
-  await expect(readConfig(dir)).rejects.toThrow(/^invalid emend configuration$/);
+  await expect(readConfig(join(dir, "state"), dir)).rejects.toThrow(
+    `invalid emend configuration in ${escapeReference(path)}`,
+  );
 });
 
-test.each(["EACCES", "EPERM", "EROFS"])("configuration retains the state-folder diagnostic for %s", async (code) => {
+test.each(["EACCES", "EPERM", "EROFS"])("configuration names the global file on %s", async (code) => {
   const { dir, path } = await fixture();
+  await writeFile(path, "{}");
   vi.spyOn(reader, "readRegular").mockRejectedValueOnce(Object.assign(new Error("synthetic denial"), { code, path }));
-  await expect(readConfig(dir)).rejects.toEqual(new StateFolderWriteError(dir));
+  await expect(readConfig(join(dir, "state"), dir)).rejects.toThrow(
+    `invalid emend configuration in ${escapeReference(path)}`,
+  );
 });
 
 test("configuration retains regular-file and size limits", async () => {
@@ -84,12 +91,14 @@ test("configuration retains regular-file and size limits", async () => {
   const source = join(dir, "source.json");
   await writeFile(source, "{}");
   await symlink(source, path);
-  await expect(readConfig(dir)).rejects.toThrow(/^invalid emend configuration$/);
+  expect(await readConfig(join(dir, "state"), dir)).toEqual({ docRoots: [], openBrowser: false });
   await rm(path);
   await writeFile(path, "{}".padEnd(LIMITS.publicJsonBytes, " "));
-  expect(await readConfig(dir)).toEqual({ docRoots: [], openBrowser: false });
+  expect(await readConfig(join(dir, "state"), dir)).toEqual({ docRoots: [], openBrowser: false });
   await appendFile(path, " ");
-  await expect(readConfig(dir)).rejects.toThrow(/^invalid emend configuration$/);
+  await expect(readConfig(join(dir, "state"), dir)).rejects.toThrow(
+    `invalid emend configuration in ${escapeReference(path)}`,
+  );
 });
 
 async function rootFixture() {

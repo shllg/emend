@@ -125,17 +125,21 @@ test.skipIf(process.getuid?.() === 0).each(["wait", "feedback", "reply", "publis
 );
 
 test.skipIf(process.getuid?.() === 0).each(["config.json", "attach.json", "server.json", "server-url.json"])(
-  "a denied %s read on the direct path reports the state folder",
+  "a denied %s read identifies its config file or state folder",
   async (name) => {
     const f = await directFixture();
     const out = f.output();
     vi.spyOn(process, "cwd").mockReturnValue(f.source);
-    const path = join(f.stateDir, name);
+    const path = name === "config.json" ? join(f.configDir, name) : join(f.stateDir, name);
     if (name !== "config.json") await fs.writeFile(path, "{}");
     await fs.chmod(path, 0o000);
     expect(await run(["publish", "--manifest", f.manifest, "--key", "synthetic"], out.io)).toBe(1);
     expect(out.stdout).toEqual([]);
-    expect(out.stderr).toEqual([errorLine(new StateFolderWriteError(f.stateDir), "feedback")]);
+    expect(out.stderr).toEqual([
+      name === "config.json"
+        ? `emend: invalid emend configuration in ${path}\n`
+        : errorLine(new StateFolderWriteError(f.stateDir), "feedback"),
+    ]);
   },
 );
 
@@ -267,12 +271,21 @@ test.each([false, true])("publish rejects a doc alias to a non-doc file (explici
   const manifest = JSON.parse(await fs.readFile(f.manifest, "utf8"));
   manifest.files = [{ path: source ? "plan.md" : "notes.md", role: "doc", ...(source ? { source: "notes.md" } : {}) }];
   await expect(
-    resolvePublish(manifest, { manifest: f.manifest, key: "synthetic" }, f.stateDir, null, f.source, () => {}, {
-      root: f.source,
-      worktree: f.source,
-      gitDirs: [join(f.source, ".git")],
-      git: vi.fn().mockResolvedValue(Buffer.alloc(0)),
-    }),
+    resolvePublish(
+      manifest,
+      { manifest: f.manifest, key: "synthetic" },
+      f.stateDir,
+      f.configDir,
+      null,
+      f.source,
+      () => {},
+      {
+        root: f.source,
+        worktree: f.source,
+        gitDirs: [join(f.source, ".git")],
+        git: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+      },
+    ),
   ).rejects.toThrow("doc source must end in .md, .markdown, .html or .htm, like its path.");
 });
 
@@ -290,6 +303,7 @@ test("doc upload rereads recheck the real extension while allowing dot folders",
     manifest,
     { manifest: f.manifest, key: "synthetic" },
     f.stateDir,
+    f.configDir,
     null,
     f.source,
     () => {},

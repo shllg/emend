@@ -15,10 +15,15 @@ export async function directFixture() {
   vi.spyOn(roots, "worktreeRoot").mockResolvedValue(null);
   const dir = await realpath(await mkdtemp(join(tmpdir(), "emend-direct-")));
   const stateDir = join(dir, "state");
+  const configHome = join(dir, "config");
+  const configDir = join(configHome, "emend");
   const source = join(dir, "source");
   await mkdir(source);
   await mkdir(stateDir, { mode: 0o700 });
-  await writeFile(join(stateDir, "config.json"), JSON.stringify({ docRoots: [source] }), { mode: 0o600 });
+  await mkdir(configDir, { recursive: true, mode: 0o700 });
+  await writeFile(join(configDir, "config.json"), JSON.stringify({ docRoots: [source] }), {
+    mode: 0o600,
+  });
   const manifest = join(source, "review.json");
   await writeFile(join(source, "plan.md"), "# Synthetic plan\n\nReview this plan.\n");
   await writeFile(
@@ -52,13 +57,13 @@ export async function directFixture() {
       stderr: (line) => {
         stderr.push(line);
       },
-      env: { EMEND_HOME: stateDir },
+      env: { EMEND_HOME: stateDir, XDG_CONFIG_HOME: configHome },
     };
     return { io, stdout, stderr };
   }
   async function publish(key = "synthetic") {
     const out = output();
-    await publishCommand(stateDir, ["--manifest", manifest, "--key", key], out.io, source);
+    await publishCommand(stateDir, configDir, ["--manifest", manifest, "--key", key], out.io, source);
     return { ...out, result: PublishResponse.parse(JSON.parse(out.stdout.join(""))) };
   }
   async function reviewer() {
@@ -89,5 +94,5 @@ export async function directFixture() {
       });
     return { ...state, ownerId: owner.id, app, request, headers };
   }
-  return { dir, stateDir, source, manifest, output, publish, reviewer, cleanup };
+  return { dir, stateDir, configDir, source, manifest, output, publish, reviewer, cleanup };
 }

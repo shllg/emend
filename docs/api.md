@@ -828,7 +828,7 @@ files with a topic; refs remain unique among files without a topic (shown as "Ot
 
 The CLI resolves `source` with `realpath` and reads it only when the resolved result is a regular
 file inside the repository's worktree root or inside a folder the reviewer listed in their own
-emend configuration (`docRoots`). Neither the repository nor the manifest can name an allowed
+global emend configuration (`docRoots`). Neither the repository nor the manifest can name an allowed
 folder. The worktree root follows the rules `docRoots` follow: the CLI refuses to publish from a
 repository whose root is the filesystem root, the home folder or a folder that holds it, or a
 folder that holds emend's state folder or sits inside it. A symlink leading outside these roots is

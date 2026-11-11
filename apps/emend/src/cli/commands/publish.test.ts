@@ -121,6 +121,8 @@ test("publish deadlines include the slot, one render pass and three placement at
 test("publish stdout is exactly one JSON line and unchanged docs upload nothing twice", async () => {
   const dir = await realpath(await mkdtemp(join(tmpdir(), "emend-command-")));
   const state = await mkdtemp(join(tmpdir(), "emend-command-state-"));
+  const configHome = await mkdtemp(join(tmpdir(), "emend-config-"));
+  const configDir = join(configHome, "emend");
   try {
     const docs = join(dir, "docs");
     await mkdir(docs);
@@ -135,7 +137,8 @@ test("publish stdout is exactly one JSON line and unchanged docs upload nothing 
     });
     await writeFile(join(state, "agent.token"), `em_${"a".repeat(43)}`, { mode: 0o600 });
     await writeFile(join(state, "instance.json"), JSON.stringify({ id: randomUUID() }));
-    await writeFile(join(state, "config.json"), JSON.stringify({ docRoots: [docs] }));
+    await mkdir(configDir, { recursive: true, mode: 0o700 });
+    await writeFile(join(configDir, "config.json"), JSON.stringify({ docRoots: [docs] }));
     const input: PublishManifest = {
       version: 1,
       title: "Synthetic",
@@ -177,8 +180,13 @@ test("publish stdout is exactly one JSON line and unchanged docs upload nothing 
       const stderr: string[] = [];
       await publishCommand(
         state,
+        configDir,
         ["--manifest", path, "--key", "plan", ...(i === 2 ? ["--project", "Synthetic project"] : [])],
-        { stdout: (s) => stdout.push(s), stderr: (s) => stderr.push(s), env: { EMEND_HOME: state } },
+        {
+          stdout: (s) => stdout.push(s),
+          stderr: (s) => stderr.push(s),
+          env: { EMEND_HOME: state, XDG_CONFIG_HOME: configHome },
+        },
         dir,
       );
       expect(stdout).toHaveLength(1);
@@ -192,6 +200,7 @@ test("publish stdout is exactly one JSON line and unchanged docs upload nothing 
     expect(puts).toBe(1);
   } finally {
     await rm(state, { recursive: true, force: true });
+    await rm(configHome, { recursive: true, force: true });
     await rm(dir, { recursive: true, force: true });
   }
 });

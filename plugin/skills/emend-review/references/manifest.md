@@ -134,7 +134,7 @@ Outside a git repository, every doc source must sit in a folder listed in `docRo
 If one does not, ask the user to run `emend config add docRoots <folder>`; never run `emend config` or edit emend's configuration yourself.
 It must end in the same kind of extension as `path`.
 A doc's `source` must be inside the repository's worktree or inside a folder the user listed in
-`docRoots` in emend's own configuration.
+`docRoots` in emend's global configuration.
 When publish prints `source is outside the allowed doc roots`, stop and ask the user to run `emend config add docRoots <folder>` for that folder, or to move the doc into the repository. Never run `emend config` or edit emend's configuration yourself.
 A doc's optional `view` is `"rendered"` or `"source"`. Markdown and HTML render by default;
 use `"source"` to read their literal text with line comments. Any other UTF-8 text file is a doc

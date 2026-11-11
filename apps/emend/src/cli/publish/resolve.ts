@@ -88,6 +88,7 @@ export async function resolvePublish(
   manifest: PublishManifest,
   options: PublishOptions,
   stateDir: string,
+  configDir: string,
   instanceId: string | null,
   cwd: string,
   warn: (line: string) => void,
@@ -197,7 +198,7 @@ export async function resolvePublish(
         options.retainedSources,
       )
     : undefined;
-  const roots = [...(worktree ? [worktree] : []), ...(await readDocRoots(stateDir))];
+  const roots = [...(worktree ? [worktree] : []), ...(await readDocRoots(stateDir, configDir))];
   for (const file of grouped.files) {
     if (file.role === "diff") {
       const change = changes.find((c) => c.path === file.path);

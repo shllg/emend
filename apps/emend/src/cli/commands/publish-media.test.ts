@@ -240,6 +240,7 @@ async function resolved(f: Awaited<ReturnType<typeof fixture>>, source: string) 
     },
     { manifest: "synthetic", key: "docs" },
     f.dir,
+    f.configDir,
     "instance",
     f.root,
     () => {},

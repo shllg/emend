@@ -2,6 +2,7 @@ import { statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, relative, sep } from "node:path";
 import { expect, test } from "vitest";
+import { defaultConfigDir } from "../apps/emend/src/state/paths.ts";
 
 test("state and home fallback paths share one private temporary root", () => {
   const home = process.env.EMEND_HOME;
@@ -30,6 +31,10 @@ test("state and home fallback paths share one private temporary root", () => {
     expect(withinRoot.split(sep)).not.toContain("..");
     expect(statSync(directory).isDirectory()).toBe(true);
   }
+  const config = relative(root, defaultConfigDir());
+  expect(isAbsolute(config)).toBe(false);
+  expect(config.split(sep)).not.toContain("..");
+  expect(config).not.toBe("");
   expect(statSync(home).isDirectory()).toBe(true);
   expect(statSync(home).mode & 0o777).toBe(0o700);
 });

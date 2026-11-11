@@ -75,6 +75,7 @@ it("source aliases match exact extensions, case-insensitively, including extensi
       { ...manifest, files: [{ path, source, role: "doc" }] },
       { key: "aliases" },
       f.stateDir,
+      f.configDir,
       null,
       f.source,
       () => {},
@@ -108,6 +109,7 @@ it.each(["absent", "empty"])("a walked source doc refuses an %s retained cache w
         retainedSources: cache === "empty" ? new RetainedSources() : undefined,
       },
       f.stateDir,
+      f.configDir,
       null,
       f.source,
       () => {},
@@ -129,11 +131,12 @@ it("a walked CSS or JS asset is also a source doc; source HTML pulls no assets",
   await writeFile(join(f.source, "bundle/script.js"), "const n = 1;");
   const context = await publishContext(f.source, f.stateDir);
   for (const source of [false, true]) {
-    const shortcut = await shortcutManifest({ paths: ["bundle"], source }, f.stateDir, f.source, context);
+    const shortcut = await shortcutManifest({ paths: ["bundle"], source }, f.stateDir, f.configDir, f.source, context);
     const resolved = await resolvePublish(
       shortcut.manifest,
       { key: "assets", docFolders: shortcut.docFolders, retainedSources: shortcut.retainedSources },
       f.stateDir,
+      f.configDir,
       null,
       f.source,
       () => {},
@@ -181,7 +184,15 @@ it("manifest non-text refusals name the escaped source, or the path when source 
     { path: source, role: "doc" as const },
   ]) {
     await expect(
-      resolvePublish({ ...manifest, files: [file] }, { key: "source" }, f.stateDir, null, f.source, () => {}),
+      resolvePublish(
+        { ...manifest, files: [file] },
+        { key: "source" },
+        f.stateDir,
+        f.configDir,
+        null,
+        f.source,
+        () => {},
+      ),
     ).rejects.toThrow("not a text file: input\\u{202e}.txt");
   }
 });

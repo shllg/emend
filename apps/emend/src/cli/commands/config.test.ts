@@ -1,5 +1,17 @@
 import * as fs from "node:fs/promises";
-import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
@@ -18,7 +30,9 @@ async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), "emend-config-command-")));
   const home = join(root, "home");
   const stateDir = join(root, "state");
-  const path = join(stateDir, "config.json");
+  const configHome = join(root, "config");
+  const configDir = join(configHome, "emend");
+  const path = join(configDir, "config.json");
   const docs = join(root, "docs");
   await mkdir(docs);
   await mkdir(home);
@@ -40,17 +54,18 @@ async function fixture() {
     root,
     home,
     stateDir,
+    configDir,
     path,
     docs,
     async seed(data: string) {
-      await mkdir(stateDir, { mode: 0o700, recursive: true });
+      await mkdir(configDir, { mode: 0o700, recursive: true });
       await writeFile(path, data);
     },
     async run(args: string[] = [], state = stateDir) {
       const stdout: string[] = [];
       const stderr: string[] = [];
       const io: Io = {
-        env: { EMEND_HOME: state, HOME: home, USERPROFILE: home },
+        env: { EMEND_HOME: state, XDG_CONFIG_HOME: configHome, HOME: home, USERPROFILE: home },
         stdout: (line) => {
           stdout.push(line);
         },
@@ -96,15 +111,15 @@ test("add succeeds when the home folder does not exist", async () => {
   vi.stubEnv("HOME", missing);
   vi.stubEnv("USERPROFILE", missing);
   expect(await f.run(["add", "docRoots", f.docs])).toEqual(success(`emend: added ${f.docs} to docRoots`));
-  expect(await readConfig(f.stateDir)).toEqual({ docRoots: [f.docs], openBrowser: false });
+  expect(await readConfig(f.stateDir, f.configDir)).toEqual({ docRoots: [f.docs], openBrowser: false });
 });
 
-test("add resolves relative paths, creates private state and writes readable settings without a server", async () => {
+test("add resolves relative paths, creates a private config folder and writes readable settings without a server", async () => {
   const f = await fixture();
   expect(await f.run(["add", "docRoots", "./docs"])).toEqual(success(`emend: added ${f.docs} to docRoots`));
-  expect(await readConfig(f.stateDir)).toEqual({ docRoots: [f.docs], openBrowser: false });
-  expect(await readdir(f.stateDir)).toEqual(["config.json"]);
-  expect((await stat(f.stateDir)).mode & 0o777).toBe(0o700);
+  expect(await readConfig(f.stateDir, f.configDir)).toEqual({ docRoots: [f.docs], openBrowser: false });
+  expect(await readdir(f.configDir)).toEqual(["config.json"]);
+  expect((await stat(f.configDir)).mode & 0o777).toBe(0o700);
   expect((await stat(f.path)).mode & 0o777).toBe(0o600);
 });
 
@@ -121,7 +136,7 @@ test("add stores a symlink's real path and duplicates through either spelling le
     const after = await stat(f.path);
     expect([after.ino, after.mtimeMs, after.ctimeMs]).toEqual([before.ino, before.mtimeMs, before.ctimeMs]);
   }
-  expect(await readConfig(f.stateDir)).toEqual({ docRoots: [f.docs], openBrowser: false });
+  expect(await readConfig(f.stateDir, f.configDir)).toEqual({ docRoots: [f.docs], openBrowser: false });
 });
 
 test.each(["relative", "symlink", "deleted"])("remove matches a %s folder", async (kind) => {
@@ -134,7 +149,7 @@ test.each(["relative", "symlink", "deleted"])("remove matches a %s folder", asyn
     await symlink(f.docs, path, "dir");
   } else if (kind === "deleted") await rm(f.docs, { recursive: true });
   expect(await f.run(["remove", "docRoots", path])).toEqual(success(`emend: removed ${f.docs} from docRoots`));
-  expect(await readConfig(f.stateDir)).toEqual({ docRoots: [other], openBrowser: true });
+  expect(await readConfig(f.stateDir, f.configDir)).toEqual({ docRoots: [other], openBrowser: true });
 });
 
 test("remove matches a listed absolute alias even after its target was deleted", async () => {
@@ -144,14 +159,14 @@ test("remove matches a listed absolute alias even after its target was deleted",
   await f.seed(JSON.stringify({ docRoots: [alias] }));
   await rm(f.docs, { recursive: true });
   expect(await f.run(["remove", "docRoots", "./alias"])).toEqual(success(`emend: removed ${alias} from docRoots`));
-  expect(await readConfig(f.stateDir)).toEqual({ docRoots: [], openBrowser: false });
+  expect(await readConfig(f.stateDir, f.configDir)).toEqual({ docRoots: [], openBrowser: false });
 });
 
 test("set accepts both boolean values and each invocation reads the latest file", async () => {
   const f = await fixture();
   for (const value of ["true", "false"]) {
     expect(await f.run(["set", "openBrowser", value])).toEqual(success(`emend: openBrowser is now ${value}`));
-    expect(await readConfig(f.stateDir)).toEqual({ docRoots: [], openBrowser: value === "true" });
+    expect(await readConfig(f.stateDir, f.configDir)).toEqual({ docRoots: [], openBrowser: value === "true" });
     expect(await f.run()).toEqual(success(`{"docRoots":[],"openBrowser":${value}}`));
   }
 });
@@ -162,18 +177,24 @@ test.each(["add", "remove", "set"])(
     const f = await fixture();
     const future = { enabled: true, list: [1, null, "synthetic"] };
     await f.seed(
-      JSON.stringify({ docRoots: action === "remove" ? [f.docs] : [], future, ["__proto__"]: { enabled: false } }),
+      JSON.stringify({
+        docRoots: action === "remove" ? [f.docs] : [],
+        approvedActiveHours: 24,
+        future,
+        ["__proto__"]: { enabled: false },
+      }),
     );
     await chmod(f.path, 0o644);
     const args = action === "set" ? ["set", "openBrowser", "true"] : [action, "docRoots", f.docs];
     expect((await f.run(args)).code).toBe(0);
     const document = JSON.parse(await readFile(f.path, "utf8"));
     expect(document.future).toEqual(future);
+    expect(document.approvedActiveHours).toBe(24);
     expect(Object.hasOwn(document, "__proto__")).toBe(true);
     expect(Object.getOwnPropertyDescriptor(document, "__proto__")?.value).toEqual({ enabled: false });
     expect((await stat(f.path)).mode & 0o777).toBe(0o600);
-    expect(await readdir(f.stateDir)).toEqual(["config.json"]);
-    expect(await readConfig(f.stateDir)).toEqual({
+    expect(await readdir(f.configDir)).toEqual(["config.json"]);
+    expect(await readConfig(f.stateDir, f.configDir)).toEqual({
       docRoots: action === "add" ? [f.docs] : [],
       openBrowser: action === "set",
     });
@@ -286,57 +307,73 @@ test.each([
     ["remove", "docRoots", f.docs],
     ["set", "openBrowser", "true"],
   ]) {
-    expect(await f.run(args)).toEqual(failure("invalid emend configuration"));
+    expect(await f.run(args)).toEqual(failure(`invalid emend configuration in ${escapeReference(f.path)}`));
     expect(await readFile(f.path, "utf8")).toBe(original);
   }
 });
 
-test.each(["symlink", "directory"])("a %s config is refused without replacement", async (kind) => {
+test("a directory config is refused without replacement", async () => {
   const f = await fixture();
-  await mkdir(f.stateDir, { mode: 0o700 });
-  if (kind === "symlink") {
-    const source = join(f.root, "source.json");
-    await writeFile(source, "{}");
-    await symlink(source, f.path);
-  } else await mkdir(f.path);
-  expect(await f.run(["set", "openBrowser", "true"])).toEqual(failure("invalid emend configuration"));
-  expect(await readdir(f.stateDir)).toEqual(["config.json"]);
-  if (kind === "symlink") expect(await readFile(join(f.root, "source.json"), "utf8")).toBe("{}");
-  else expect((await stat(f.path)).isDirectory()).toBe(true);
+  await mkdir(f.path, { recursive: true, mode: 0o700 });
+  expect(await f.run(["set", "openBrowser", "true"])).toEqual(failure(`invalid emend configuration in ${f.path}`));
+  expect((await stat(f.path)).isDirectory()).toBe(true);
 });
+
+test.each(["folder", "file", "dangling file"])(
+  "a symlinked config %s is read and updated without replacing the link",
+  async (kind) => {
+    const f = await fixture();
+    const target = join(f.root, "dotfiles");
+    await mkdir(target, { mode: 0o700 });
+    const targetFile = join(target, "config.json");
+    if (kind !== "dangling file") await writeFile(targetFile, '{"openBrowser":false,"approvedActiveHours":24}');
+    const link = kind === "folder" ? f.configDir : f.path;
+    await mkdir(kind === "folder" ? join(f.root, "config") : f.configDir, { recursive: true, mode: 0o700 });
+    await symlink(kind === "folder" ? target : targetFile, link);
+    expect(await f.run(["list"])).toEqual(success('{"docRoots":[],"openBrowser":false}'));
+    expect(await f.run(["set", "openBrowser", "true"])).toEqual(success("emend: openBrowser is now true"));
+    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+    expect(JSON.parse(await readFile(targetFile, "utf8"))).toEqual({
+      docRoots: [],
+      openBrowser: true,
+      ...(kind === "dangling file" ? {} : { approvedActiveHours: 24 }),
+    });
+    expect((await stat(targetFile)).mode & 0o777).toBe(0o600);
+  },
+);
 
 test("an update cannot grow the configuration beyond readConfig's size limit", async () => {
   const f = await fixture();
   const base = JSON.stringify({ docRoots: [], openBrowser: false, future: "" });
   const original = base.replace('"future":""', `"future":"${"x".repeat(LIMITS.publicJsonBytes - base.length)}"`);
   await f.seed(original);
-  expect(await readConfig(f.stateDir)).toEqual({ docRoots: [], openBrowser: false });
+  expect(await readConfig(f.stateDir, f.configDir)).toEqual({ docRoots: [], openBrowser: false });
   expect(await f.run(["add", "docRoots", f.docs])).toEqual(failure("emend configuration would exceed its size limit"));
   expect(await readFile(f.path, "utf8")).toBe(original);
 });
 
 test.skipIf(process.getuid?.() === 0)(
-  "an unwritable state folder fails without a sandbox exemption or partial write",
+  "an unwritable config folder fails without a sandbox exemption or partial write",
   async () => {
     const f = await fixture();
     const original = '{"openBrowser":false}';
     await f.seed(original);
-    await chmod(f.stateDir, 0o500);
+    await chmod(f.configDir, 0o500);
     try {
       expect(await f.run(["set", "openBrowser", "true"])).toEqual({
         code: 1,
         stdout: [],
-        stderr: [`emend cannot write its state folder ${f.stateDir}.\n`],
+        stderr: [`emend: cannot write emend configuration in ${escapeReference(f.path)}\n`],
       });
       expect(await readFile(f.path, "utf8")).toBe(original);
-      expect(await readdir(f.stateDir)).toEqual(["config.json"]);
+      expect(await readdir(f.configDir)).toEqual(["config.json"]);
     } finally {
-      await chmod(f.stateDir, 0o700);
+      await chmod(f.configDir, 0o700);
     }
   },
 );
 
-test.each(["EACCES", "EPERM", "EROFS"])("a %s state write uses the existing sandbox error path", async (code) => {
+test.each(["EACCES", "EPERM", "EROFS"])("a %s config write names the global file", async (code) => {
   const f = await fixture();
   vi.spyOn(stateFiles, "writeSecretFile").mockImplementationOnce(() => {
     throw Object.assign(new Error("synthetic denial"), { code, path: f.path });
@@ -344,7 +381,7 @@ test.each(["EACCES", "EPERM", "EROFS"])("a %s state write uses the existing sand
   expect(await f.run(["set", "openBrowser", "true"])).toEqual({
     code: 1,
     stdout: [],
-    stderr: [`emend cannot write its state folder ${f.stateDir}.\n`],
+    stderr: [`emend: cannot write emend configuration in ${escapeReference(f.path)}\n`],
   });
 });
 
@@ -385,7 +422,7 @@ test("add permits a docs folder inside the temporary home", async () => {
   const docs = join(f.home, "docs");
   await mkdir(docs);
   expect(await f.run(["add", "docRoots", docs])).toEqual(success(`emend: added ${docs} to docRoots`));
-  expect(await readConfig(f.stateDir)).toEqual({ docRoots: [docs], openBrowser: false });
+  expect(await readConfig(f.stateDir, f.configDir)).toEqual({ docRoots: [docs], openBrowser: false });
 });
 
 test.each(["EACCES", "ELOOP", "EPERM", "EIO"])("folder %s failures identify an escaped path", async (code) => {
@@ -420,21 +457,13 @@ test("add and remove report an actual symlink loop as unreadable", async () => {
   }
 });
 
-test("a public state folder with terminal controls produces one safe diagnostic and no write", async () => {
+test("config writes do not inspect an unrelated state folder's mode", async () => {
   const f = await fixture();
-  const state = join(f.root, "state\n\u001b[31m");
-  await mkdir(state);
-  await chmod(state, 0o755);
-  const escaped = escapeReference(state);
-  expect(await f.run(["set", "openBrowser", "true"], state)).toEqual({
-    code: 1,
-    stdout: [],
-    stderr: [
-      `State directory ${escaped} has group or other permissions; fix it with chmod 700 $'${f.root}/state\\x0a\\x1b[31m'\n`,
-    ],
-  });
-  expect(await readdir(state)).toEqual([]);
-  expect((await stat(state)).mode & 0o777).toBe(0o755);
+  await mkdir(f.stateDir, { mode: 0o755 });
+  await chmod(f.stateDir, 0o755);
+  expect(await f.run(["set", "openBrowser", "true"])).toEqual(success("emend: openBrowser is now true"));
+  expect(await readdir(f.stateDir)).toEqual([]);
+  expect((await stat(f.stateDir)).mode & 0o777).toBe(0o755);
 });
 
 test.each(["state", "ancestor"])("config add refuses a dangling %s symlink into its doc root", async (kind) => {
@@ -444,7 +473,7 @@ test.each(["state", "ancestor"])("config add refuses a dangling %s symlink into 
   const state = kind === "state" ? link : join(link, "share", "state");
   const io: Io = { env: { EMEND_HOME: state, HOME: f.home }, stdout: vi.fn(), stderr: vi.fn() };
   // The command receives explicit temporary state, without the test-only defaultStateDir symlink guard.
-  await expect(configCommand(state, ["add", "docRoots", f.docs], io)).rejects.toThrow(
+  await expect(configCommand(state, f.configDir, ["add", "docRoots", f.docs], io)).rejects.toThrow(
     /^docRoots cannot hold or sit inside emend's state folder$/,
   );
   expect(io.stdout).not.toHaveBeenCalled();
@@ -471,10 +500,140 @@ test("config add refuses a relative dangling state link against its real parent 
   const state = join(parent, "sub", "state");
   const io: Io = { env: { EMEND_HOME: state, HOME: f.home }, stdout: vi.fn(), stderr: vi.fn() };
   const write = vi.spyOn(stateFiles, "writeSecretFile");
-  await expect(configCommand(state, ["add", "docRoots", docs], io)).rejects.toThrow(
+  await expect(configCommand(state, f.configDir, ["add", "docRoots", docs], io)).rejects.toThrow(
     /^docRoots cannot hold or sit inside emend's state folder$/,
   );
   expect(write).not.toHaveBeenCalled();
   expect(io.stdout).not.toHaveBeenCalled();
   expect(await readdir(docs)).toEqual([]);
+});
+
+async function legacy(f: Awaited<ReturnType<typeof fixture>>, document: unknown) {
+  await mkdir(f.stateDir, { mode: 0o700, recursive: true });
+  const path = join(f.stateDir, "config.json");
+  const text = JSON.stringify(document);
+  await writeFile(path, text);
+  return { path, text };
+}
+
+test("an old config migrates once, keeping unknown keys and private modes", async () => {
+  const f = await fixture();
+  const document = { docRoots: [f.docs], openBrowser: true, approvedActiveHours: 24 };
+  const old = await legacy(f, document);
+  expect(await f.run()).toEqual(success(JSON.stringify({ docRoots: [f.docs], openBrowser: true })));
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(document);
+  expect(await readFile(`${old.path}.migrated`, "utf8")).toBe(old.text);
+  await expect(stat(old.path)).rejects.toMatchObject({ code: "ENOENT" });
+  expect((await stat(f.configDir)).mode & 0o777).toBe(0o700);
+  expect((await stat(f.path)).mode & 0o777).toBe(0o600);
+  expect(await f.run(["remove", "docRoots", f.docs])).toEqual(success(`emend: removed ${f.docs} from docRoots`));
+  expect(await f.run()).toEqual(success('{"docRoots":[],"openBrowser":true}'));
+});
+
+test.each([{}, { openBrowser: false }, { openBrowser: true }])(
+  "migration merges roots in order and prefers every present global key: %j",
+  async (browser) => {
+    const f = await fixture();
+    const other = join(f.root, "other");
+    await f.seed(JSON.stringify({ docRoots: [other, f.docs], approvedActiveHours: null, future: false, ...browser }));
+    const old = await legacy(f, {
+      docRoots: [f.docs, join(f.root, "old"), other, join(f.root, "old")],
+      openBrowser: true,
+      approvedActiveHours: 24,
+      future: true,
+      oldOnly: { keep: true },
+      ["__proto__"]: { keep: true },
+    });
+    const expected = {
+      docRoots: [other, f.docs, join(f.root, "old")],
+      openBrowser: browser.openBrowser ?? true,
+    };
+    expect(await f.run()).toEqual(success(JSON.stringify(expected)));
+    expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual({
+      ...expected,
+      approvedActiveHours: null,
+      future: false,
+      oldOnly: { keep: true },
+      ["__proto__"]: { keep: true },
+    });
+    expect(await readFile(`${old.path}.migrated`, "utf8")).toBe(old.text);
+  },
+);
+
+test.each(["EACCES", "EPERM", "EROFS"])(
+  "migration uses merged values when the global write fails with %s",
+  async (code) => {
+    const f = await fixture();
+    const original = JSON.stringify({ docRoots: [f.docs], future: false });
+    await f.seed(original);
+    const other = join(f.root, "other");
+    const old = await legacy(f, { docRoots: [other], openBrowser: true, future: true });
+    vi.spyOn(stateFiles, "writeSecretFile").mockImplementationOnce(() => {
+      throw Object.assign(new Error("synthetic denial"), { code, path: f.path });
+    });
+    expect(await f.run()).toEqual(success(JSON.stringify({ docRoots: [f.docs, other], openBrowser: true })));
+    expect(await readFile(old.path, "utf8")).toBe(old.text);
+    expect(await readFile(f.path, "utf8")).toBe(original);
+    await expect(stat(`${old.path}.migrated`)).rejects.toMatchObject({ code: "ENOENT" });
+  },
+);
+
+test.skipIf(process.getuid?.() === 0)("a read-only config folder leaves migration pending", async () => {
+  const f = await fixture();
+  await mkdir(f.configDir, { recursive: true, mode: 0o700 });
+  const old = await legacy(f, { openBrowser: true });
+  await chmod(f.configDir, 0o500);
+  try {
+    expect(await f.run()).toEqual(success('{"docRoots":[],"openBrowser":true}'));
+    expect(await readFile(old.path, "utf8")).toBe(old.text);
+    await expect(stat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    await chmod(f.configDir, 0o700);
+  }
+});
+
+test.each(["{", '{"docRoots":["relative"]}', '{"openBrowser":null}', "[]"])(
+  "an invalid old file refuses migration without changing either file: %s",
+  async (invalid) => {
+    const f = await fixture();
+    const original = '{"openBrowser":true}';
+    await f.seed(original);
+    const old = await legacy(f, {});
+    await writeFile(old.path, invalid);
+    expect(await f.run()).toEqual(failure(`invalid emend configuration in ${old.path}`));
+    expect(await readFile(f.path, "utf8")).toBe(original);
+    expect(await readFile(old.path, "utf8")).toBe(invalid);
+  },
+);
+
+test("migration tolerates another process renaming the old file first", async () => {
+  const f = await fixture();
+  const old = await legacy(f, { openBrowser: true });
+  const actualFs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+  vi.spyOn(fs, "rename").mockImplementationOnce(async () => {
+    await actualFs.rename(old.path, `${old.path}.migrated`);
+    throw Object.assign(new Error("already migrated"), { code: "ENOENT" });
+  });
+  expect(await f.run()).toEqual(success('{"docRoots":[],"openBrowser":true}'));
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual({ docRoots: [], openBrowser: true });
+});
+
+test("migration through a linked global file preserves its link", async () => {
+  const f = await fixture();
+  const target = join(f.root, "dotfile.json");
+  await f.seed("{}");
+  await rm(f.path);
+  await writeFile(target, '{"openBrowser":false}');
+  await symlink(target, f.path);
+  await legacy(f, { docRoots: [f.docs], openBrowser: true });
+  expect(await f.run()).toEqual(success(JSON.stringify({ docRoots: [f.docs], openBrowser: false })));
+  expect((await lstat(f.path)).isSymbolicLink()).toBe(true);
+  expect(JSON.parse(await readFile(target, "utf8"))).toEqual({ docRoots: [f.docs], openBrowser: false });
+});
+
+test("a state folder that is also the config folder does not migrate its own config", async () => {
+  const f = await fixture();
+  await f.seed('{"openBrowser":true}');
+  expect(await f.run([], f.configDir)).toEqual(success('{"docRoots":[],"openBrowser":true}'));
+  expect(await readFile(f.path, "utf8")).toBe('{"openBrowser":true}');
 });

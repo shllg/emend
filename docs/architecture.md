@@ -26,9 +26,15 @@ Node >=24.18.0; SQLite warning behavior has been verified on Node 24.18.0 and 26
 
 ## One machine
 
+The global config is a plain JSON object in `$XDG_CONFIG_HOME/emend/config.json` when
+`XDG_CONFIG_HOME` is absolute, else `~/.config/emend/config.json`, on Linux and macOS.
+The file or its folder may be a symlink. An old `config.json` in the state folder is merged into
+it once and renamed `config.json.migrated`. Global values win; old doc roots are appended without
+duplicates. If the global file cannot be written, the CLI uses the merged values and retries later.
+
 The default `emend` command starts a server if needed and prints a one-time sign-in link; it opens
-the browser only when the state folder's `config.json` sets `"openBrowser": true`. `emend config`
-lists and changes this file's `docRoots` and `openBrowser` settings; each publish or bare `emend`
+the browser only when the global `config.json` sets `"openBrowser": true`. `emend config`
+lists and changes this file's `docRoots` and `openBrowser`; each publish or bare `emend`
 call reads them again, so no server or restart is needed. Outside a terminal it prints no link or
 pairing code. This keeps links out of agent output; it does not stop a
 process that can open a terminal, read the state folder, or, with `openBrowser` on, choose the
@@ -71,7 +77,7 @@ reviewer privileges only.
 
 A laptop attaches with `emend attach <pairing-link>`, storing the hub URL and a machine token.
 Its CLI then publishes to and waits on the hub; it does not need a local server. The default
-command prints the hub address, or opens it when the state folder's `config.json` sets
+command prints the hub address, or opens it when the global `config.json` sets
 `"openBrowser": true`. An unpaired browser sees the pairing page.
 
 Attach records the pairing origin in a private `attach.pending` file before it asks the hub for

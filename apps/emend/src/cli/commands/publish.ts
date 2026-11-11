@@ -143,10 +143,16 @@ async function readManifest(path: string, cwd: string, context: Awaited<ReturnTy
   return parsed.data;
 }
 
-export async function publishCommand(stateDir: string, args: string[], io: Io, cwd = process.cwd()): Promise<void> {
+export async function publishCommand(
+  stateDir: string,
+  configDir: string,
+  args: string[],
+  io: Io,
+  cwd = process.cwd(),
+): Promise<void> {
   const parsed = parsePublishArgs(args);
   const context = await publishContext(cwd, stateDir);
-  const shortcut = parsed.manifest ? undefined : await shortcutManifest(parsed, stateDir, cwd, context);
+  const shortcut = parsed.manifest ? undefined : await shortcutManifest(parsed, stateDir, configDir, cwd, context);
   const manifest = shortcut?.manifest ?? (await readManifest(parsed.manifest ?? "", cwd, context));
   const options: PublishOptions = {
     manifest: parsed.manifest,
@@ -172,7 +178,7 @@ export async function publishCommand(stateDir: string, args: string[], io: Io, c
   };
   for (const argument of shortcut?.skippedArguments ?? [])
     warn(`emend: skipped ${escapeReference(argument)}: not a visible text doc\n`);
-  const collected = await resolvePublish(manifest, options, stateDir, null, cwd, warn, context);
+  const collected = await resolvePublish(manifest, options, stateDir, configDir, null, cwd, warn, context);
   const published = new Set(collected.request.files.map((file) => file.path));
   for (const { path, reason } of shortcut?.skipped ?? [])
     if (!published.has(path)) warn(`emend: skipped ${escapeReference(path)}: ${reason}\n`);

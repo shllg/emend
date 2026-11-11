@@ -1,8 +1,8 @@
 import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "vitest";
-import { defaultStateDir, stateDir } from "./paths.ts";
+import { expect, test, vi } from "vitest";
+import { configDir, defaultConfigDir, defaultStateDir, stateDir } from "./paths.ts";
 
 test("EMEND_HOME wins on every platform", () => {
   for (const platform of ["linux", "darwin", "win32"]) {
@@ -59,5 +59,34 @@ test("the test guard refuses a temporary symlink that resolves outside the tempo
     );
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test.each(["linux", "darwin"] as const)("global config uses XDG or .config on %s", (platform) => {
+  vi.spyOn(process, "platform", "get").mockReturnValue(platform);
+  try {
+    expect(configDir({ XDG_CONFIG_HOME: "/config" }, "/u")).toBe("/config/emend");
+    for (const XDG_CONFIG_HOME of [undefined, "", "relative", "../config"]) {
+      expect(configDir({ XDG_CONFIG_HOME }, "/u")).toBe("/u/.config/emend");
+    }
+    expect(defaultConfigDir()).toBe(join(process.env.XDG_CONFIG_HOME as string, "emend"));
+  } finally {
+    vi.restoreAllMocks();
+  }
+});
+
+test("the config guard rejects paths outside temp and symlinks escaping temp", async () => {
+  for (const XDG_CONFIG_HOME of ["/config", `${tmpdir()}-elsewhere`, join(tmpdir(), "..", "config")]) {
+    expect(() => defaultConfigDir({ VITEST: "true", XDG_CONFIG_HOME })).toThrow(/config folder/);
+    expect(() => defaultConfigDir({ XDG_CONFIG_HOME })).toThrow(/config folder/);
+  }
+  const root = await mkdtemp(join(tmpdir(), "emend-config-path-"));
+  try {
+    const link = join(root, "escape");
+    await symlink("/", link);
+    expect(() => defaultConfigDir({ XDG_CONFIG_HOME: join(link, "synthetic-config") })).toThrow(/resolve inside/);
+    expect(defaultConfigDir({ XDG_CONFIG_HOME: join(root, "missing") })).toBe(join(root, "missing", "emend"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });

@@ -26,7 +26,7 @@ async function fixture() {
   }
   async function prepare(paths: string[]) {
     const context = await publishContext(f.source, f.stateDir);
-    const shortcut = await shortcutManifest({ paths }, f.stateDir, f.source, context);
+    const shortcut = await shortcutManifest({ paths }, f.stateDir, f.configDir, f.source, context);
     return () =>
       resolvePublish(
         shortcut.manifest,
@@ -41,6 +41,7 @@ async function fixture() {
           skipNodeModules: true,
         },
         f.stateDir,
+        f.configDir,
         "instance",
         f.source,
         () => {},
@@ -247,6 +248,7 @@ test("manifest shared-asset request, blob bytes and read counts match HEAD", asy
     input,
     { manifest: "synthetic", key: "plan" },
     f.stateDir,
+    f.configDir,
     "instance",
     f.source,
     () => {},

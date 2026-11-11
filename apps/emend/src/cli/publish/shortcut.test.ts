@@ -435,7 +435,8 @@ test("git metadata is refused and worktree sources need no configured doc root",
   await promisify(execFile)("git", ["-c", "init.templateDir=", "init", f.source], {
     env: { PATH: process.env.PATH, HOME: f.source, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
   });
-  await writeFile(join(f.stateDir, "config.json"), JSON.stringify({ docRoots: [] }));
+  await mkdir(f.configDir, { recursive: true, mode: 0o700 });
+  await writeFile(join(f.configDir, "config.json"), JSON.stringify({ docRoots: [] }));
   await f.file("plan.md");
   await f.file(".git/hidden.md");
   const capture = await f.capture();
@@ -498,7 +499,13 @@ test("an explicit title does not read the main doc during shortcut preparation",
   const source = await f.file("plan.md");
   const context = await publishContext(f.source, f.stateDir);
   const read = vi.spyOn(sourceReads, "readRegular");
-  const shortcut = await shortcutManifest({ paths: [source], title: "Explicit" }, f.stateDir, f.source, context);
+  const shortcut = await shortcutManifest(
+    { paths: [source], title: "Explicit" },
+    f.stateDir,
+    f.configDir,
+    f.source,
+    context,
+  );
   expect(shortcut.manifest.title).toBe("Explicit");
   expect(read.mock.calls.filter(([file]) => file === source)).toHaveLength(0);
 });

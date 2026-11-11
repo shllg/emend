@@ -46,6 +46,7 @@ describe.each(["HTTP", "in-process"])("%s transport", (mode) => {
     const f = await directFixture();
     workInThread(executors);
     const hubDir = join(f.dir, "hub");
+    const hubConfigDir = join(f.dir, "hub-config", "emend");
     await cp(join(templates, "laptop"), f.stateDir, { recursive: true });
     await cp(join(templates, "hub"), hubDir, { recursive: true });
     const apps = new Map<string, ReturnType<typeof createApp>>();
@@ -81,7 +82,7 @@ describe.each(["HTTP", "in-process"])("%s transport", (mode) => {
     f.cleanup.push(laptop.close);
     const hub = await start(hubDir, 3638);
     f.cleanup.push(hub.close);
-    writeSecretFile(join(hubDir, "config.json"), JSON.stringify({ docRoots: [f.source] }));
+    writeSecretFile(join(hubConfigDir, "config.json"), JSON.stringify({ docRoots: [f.source] }));
     const pairing = PairingCreated.parse(
       await apiRequest(hubDir, await localTarget(hubDir, hub.url, "admin"), "/pairings", {
         method: "POST",
@@ -100,7 +101,7 @@ describe.each(["HTTP", "in-process"])("%s transport", (mode) => {
       return { ...out, code, text: out.stderr.join("") };
     }
     let reviewer: ReturnType<typeof f.reviewer> | undefined;
-    return { ...f, hub, hubDir, laptop, pairing, command, reviewer: () => (reviewer ??= f.reviewer()) };
+    return { ...f, hub, hubDir, hubConfigDir, laptop, pairing, command, reviewer: () => (reviewer ??= f.reviewer()) };
   }
 
   async function feedback(f: Awaited<ReturnType<typeof fixture>>, reviewId: string) {
@@ -273,7 +274,7 @@ describe.each(["HTTP", "in-process"])("%s transport", (mode) => {
         );
         expect(copied.map((r) => r.id).sort()).toEqual(rows.map((r) => r.id).sort());
       }
-      writeSecretFile(join(f.stateDir, "config.json"), JSON.stringify({ docRoots: [f.source], openBrowser: true }));
+      writeSecretFile(join(f.configDir, "config.json"), JSON.stringify({ docRoots: [f.source], openBrowser: true }));
       const open = f.output();
       open.io.openUrl = vi.fn().mockResolvedValue(true);
       expect(await run([], open.io)).toBe(0);
@@ -699,7 +700,7 @@ describe.each(["HTTP", "in-process"])("%s transport", (mode) => {
     // Keep server publish's default executor wiring covered by a real worker too.
     vi.mocked(executors.workerExecutor).mockRestore();
     const worker = vi.spyOn(executors, "workerExecutor");
-    await publishCommand(f.hubDir, ["--manifest", f.manifest, "--key", "hub-review"], out.io, f.source);
+    await publishCommand(f.hubDir, f.hubConfigDir, ["--manifest", f.manifest, "--key", "hub-review"], out.io, f.source);
     expect(worker).toHaveBeenCalled();
     workInThread(executors);
     const hubReview = PublishResponse.parse(JSON.parse(out.stdout.join("")));

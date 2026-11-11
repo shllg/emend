@@ -29,6 +29,7 @@ test("a configured external worktree cannot grant access to a docs-only source",
         },
         { manifest: "synthetic", key: "p" },
         f.state,
+        f.configDir,
         "instance",
         f.root,
         () => {},
@@ -58,7 +59,13 @@ async function repo(format = "sha1") {
     await run("init", `--object-format=${format}`, "-b", "main");
     await run("config", "user.name", "Synthetic");
     await run("config", "user.email", "synthetic@example.test");
-    return { root, state: join(dir, "state"), run, cleanup: () => rm(dir, { recursive: true, force: true }) };
+    return {
+      root,
+      state: join(dir, "state"),
+      configDir: join(dir, "config", "emend"),
+      run,
+      cleanup: () => rm(dir, { recursive: true, force: true }),
+    };
   } catch (error) {
     await rm(dir, { recursive: true, force: true });
     throw error;
@@ -153,6 +160,7 @@ test("runs no fsmonitor, textconv or clean filter program and collects raw bytes
       manifest,
       { manifest: "synthetic.json" },
       f.state,
+      f.configDir,
       "synthetic-instance",
       f.root,
       () => {},
@@ -213,7 +221,15 @@ test("flags binary and oversized sides, reading symlinks as link text", async ()
       topics: [],
       writeup: { overview: "", tldr: "", decisions: null, topics: {} },
     };
-    const result = await resolvePublish(manifest, { manifest: "synthetic" }, f.state, "instance", f.root, () => {});
+    const result = await resolvePublish(
+      manifest,
+      { manifest: "synthetic" },
+      f.state,
+      f.configDir,
+      "instance",
+      f.root,
+      () => {},
+    );
     expect(
       result.request.files.filter((file) => file.flag).every((file) => file.oldBlob === null && file.newBlob === null),
     ).toBe(true);
@@ -241,7 +257,7 @@ test("same-branch worktrees share repo identity but have distinct review keys; d
       writeup: { overview: "", tldr: "", decisions: null, topics: {} },
     };
     const collect = (cwd: string) =>
-      resolvePublish(manifest, { manifest: "synthetic" }, f.state, "instance", cwd, () => {});
+      resolvePublish(manifest, { manifest: "synthetic" }, f.state, f.configDir, "instance", cwd, () => {});
     const first = await collect(f.root);
     const second = await collect(sibling);
     expect(first.request.repo?.key).toBe(second.request.repo?.key);
@@ -252,6 +268,7 @@ test("same-branch worktrees share repo identity but have distinct review keys; d
         { ...manifest, files: [{ path: "file.txt", role: "diff" }] },
         { manifest: "synthetic" },
         f.state,
+        f.configDir,
         "instance",
         f.root,
         () => {},

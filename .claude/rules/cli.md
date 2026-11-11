@@ -6,11 +6,11 @@ paths:
 
 # The emend CLI
 
-The CLI runs inside repos under review, so treat those repos as hostile.
+The CLI runs in repos under review: treat them as hostile.
 
-- Config comes only from emend's own state directory (`EMEND_HOME`, else the XDG data directory)
-  and the environment. Never from files in the reviewed repo, from its git config or from its
-  `package.json`.
+- Config comes only from the global config file (`$XDG_CONFIG_HOME/emend/`, else
+  `~/.config/emend/`, also on macOS), the state directory and the environment, never from the
+  reviewed repo, its git config or package.json.
 - Never run code from the reviewed repo: no scripts, hooks or package managers. Call git with an
   argv array, never through a shell, by an absolute path resolved from the absolute `PATH`
   entries only, and only in the plumbing forms of the `GitCall` union in

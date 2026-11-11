@@ -44,23 +44,38 @@ test("doc sources resolve only inside the worktree or configured real doc roots"
     await writeFile(join(root, "plan.md"), "local doc");
     await writeFile(join(docs, "plan.md"), "external doc");
     const collect = (source?: string) =>
-      resolvePublish(manifest(source), { manifest: "synthetic", key: "plan" }, state, "instance", root, () => {});
+      resolvePublish(
+        manifest(source),
+        { manifest: "synthetic", key: "plan" },
+        state,
+        join(dir, "config", "emend"),
+        "instance",
+        root,
+        () => {},
+      );
     expect((await collect()).request.files[0]?.title).toBe("Named doc");
     expect((await [...(await collect()).blobs.values()][0]?.read())?.toString()).toBe("local doc");
-    await writeFile(join(state, "config.json"), JSON.stringify({ openBrowser: true }));
+    await mkdir(join(dir, "config", "emend"), { recursive: true, mode: 0o700 });
+    await writeFile(join(dir, "config", "emend", "config.json"), JSON.stringify({ openBrowser: true }));
     expect((await [...(await collect()).blobs.values()][0]?.read())?.toString()).toBe("local doc");
     await expect(collect(join(docs, "plan.md"))).rejects.toThrow("outside the allowed doc roots");
     await symlink(join(docs, "plan.md"), join(root, "escape.md"));
     await expect(collect("escape.md")).rejects.toThrow("outside the allowed doc roots");
     await writeFile(join(root, "config.json"), JSON.stringify({ docRoots: [docs] }));
     await expect(collect("escape.md")).rejects.toThrow("outside the allowed doc roots");
-    await writeFile(join(state, "config.json"), JSON.stringify({ docRoots: [docs] }));
+    await writeFile(join(dir, "config", "emend", "config.json"), JSON.stringify({ docRoots: [docs] }));
     expect((await [...(await collect("escape.md")).blobs.values()][0]?.read())?.toString()).toBe("external doc");
-    await writeFile(join(state, "config.json"), JSON.stringify({ docRoots: [docs], openBrowser: true }));
+    await writeFile(
+      join(dir, "config", "emend", "config.json"),
+      JSON.stringify({ docRoots: [docs], openBrowser: true }),
+    );
     expect((await [...(await collect("escape.md")).blobs.values()][0]?.read())?.toString()).toBe("external doc");
-    await writeFile(join(state, "config.json"), JSON.stringify({ docRoots: [docs], openBrowser: "true" }));
+    await writeFile(
+      join(dir, "config", "emend", "config.json"),
+      JSON.stringify({ docRoots: [docs], openBrowser: "true" }),
+    );
     await expect(collect("escape.md")).rejects.toThrow("invalid emend configuration");
-    await writeFile(join(state, "config.json"), JSON.stringify({ docRoots: [docs] }));
+    await writeFile(join(dir, "config", "emend", "config.json"), JSON.stringify({ docRoots: [docs] }));
     await truncate(join(docs, "plan.md"), LIMITS.markdownDocBytes + 1);
     await expect(collect("escape.md")).rejects.toThrow("size limit");
   } finally {
@@ -74,7 +89,15 @@ test("HTML and each asset and their cumulative bytes have pre-read limits", asyn
     await mkdir(join(root, ".git"), { recursive: true });
     const input = { ...manifest(), files: [{ path: "plan.html", role: "doc" as const }] };
     const collect = () =>
-      resolvePublish(input, { manifest: "synthetic", key: "plan" }, join(dir, "state"), "instance", root, () => {});
+      resolvePublish(
+        input,
+        { manifest: "synthetic", key: "plan" },
+        join(dir, "state"),
+        join(dir, "config", "emend"),
+        "instance",
+        root,
+        () => {},
+      );
     await writeFile(join(root, "plan.html"), '<img src="a.png">');
     await writeFile(join(root, "a.png"), "");
     await truncate(join(root, "a.png"), LIMITS.assetBytes);
@@ -118,6 +141,7 @@ test("HTML docs sharing an asset publish it once under its first parent", async 
       },
       { manifest: "synthetic", key: "plan" },
       join(dir, "state"),
+      join(dir, "config", "emend"),
       "instance",
       root,
       () => {},
@@ -166,6 +190,7 @@ test.each(["data", "first.html"])(
         { ...manifest(), files: [{ path: "notes.html", role: "doc" }] },
         { manifest: "synthetic", key: "docs" },
         join(dir, "state"),
+        join(dir, "config", "emend"),
         "instance",
         root,
         () => {},
@@ -204,6 +229,7 @@ test.each([".git/config", ".GIT./config", ".g\u206ait/config", "link/config", "l
           manifest(source),
           { manifest: "synthetic", key: "docs" },
           join(dir, "state"),
+          join(dir, "config", "emend"),
           "instance",
           root,
           () => {},
@@ -227,6 +253,7 @@ test("doc upload rereads recheck aliases for Git metadata", async () => {
       manifest("alias.md"),
       { manifest: "synthetic", key: "docs" },
       join(dir, "state"),
+      join(dir, "config", "emend"),
       "instance",
       root,
       () => {},
@@ -259,7 +286,8 @@ test.each(["nested worktree repo", "docRoot repo"])(
           GIT_CONFIG_NOSYSTEM: "1",
         },
       });
-      await writeFile(join(state, "config.json"), JSON.stringify({ docRoots: [nested] }));
+      await mkdir(join(dir, "config", "emend"), { recursive: true, mode: 0o700 });
+      await writeFile(join(dir, "config", "emend", "config.json"), JSON.stringify({ docRoots: [nested] }));
       await writeFile(join(root, "docs/safe.md"), "synthetic doc");
       const alias = join(root, "docs/n.md");
       await symlink("safe.md", alias);
@@ -268,6 +296,7 @@ test.each(["nested worktree repo", "docRoot repo"])(
           manifest("docs/n.md"),
           { manifest: "synthetic", key: "docs" },
           state,
+          join(dir, "config", "emend"),
           "instance",
           root,
           () => {},
@@ -299,6 +328,7 @@ test("HTML asset reads and upload rereads refuse a leaf alias into the Git folde
         { ...manifest(), files: [{ path: "plan.html", role: "doc" }] },
         { manifest: "synthetic", key: "docs" },
         join(dir, "state"),
+        join(dir, "config", "emend"),
         "instance",
         root,
         () => {},
@@ -328,6 +358,7 @@ test("links and a valid manifest repoUrl reach the request; no remote derives no
         { ...manifest(), ...extra },
         { manifest: "synthetic", key: "plan" },
         state,
+        join(dir, "config", "emend"),
         "instance",
         root,
         () => {},

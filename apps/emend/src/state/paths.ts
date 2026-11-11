@@ -15,12 +15,30 @@ export function stateDir(env: Env, platform: string, home: string): string {
   return join(dataHome, "emend");
 }
 
+export function configDir(env: Env, home: string): string {
+  const configHome =
+    env.XDG_CONFIG_HOME && isAbsolute(env.XDG_CONFIG_HOME) ? env.XDG_CONFIG_HOME : join(home, ".config");
+  return join(configHome, "emend");
+}
+
+export function defaultConfigDir(env: Env = process.env): string {
+  const dir = configDir(env, homedir());
+  if (process.env.VITEST || env.VITEST) {
+    if (!inside(resolve(tmpdir()), resolve(dir)))
+      throw new Error("Tests require the config folder inside the temporary directory");
+    if (!inside(realpathSync(tmpdir()), canonicalPath(resolve(dir))))
+      throw new Error("Tests require the config folder to resolve inside the temporary directory");
+  }
+  return dir;
+}
+
+const inside = (root: string, path: string) => {
+  const suffix = relative(root, path);
+  return suffix !== "" && suffix !== ".." && !suffix.startsWith(`..${sep}`) && !isAbsolute(suffix);
+};
+
 export function defaultStateDir(env: Env = process.env): string {
   if (process.env.VITEST || env.VITEST) {
-    const inside = (root: string, path: string) => {
-      const suffix = relative(root, path);
-      return suffix !== "" && suffix !== ".." && !suffix.startsWith(`..${sep}`) && !isAbsolute(suffix);
-    };
     if (!env.EMEND_HOME || !inside(resolve(tmpdir()), resolve(env.EMEND_HOME))) {
       throw new Error("Tests require EMEND_HOME inside the temporary directory");
     }

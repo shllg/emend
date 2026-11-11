@@ -53,6 +53,7 @@ test.each(["folder", "remote"])("a 230-character %s name is shortened for pubs a
         projectManifest(base),
         { key: "plan" },
         f.state,
+        f.configDir,
         "instance",
         f.root,
         () => {},
@@ -73,7 +74,7 @@ test("a pub falls back to the folder for an invalid remote while a code review s
     await f.run("config", "remote.origin.url", "https://example.invalid:99999/x");
     await writeFile(join(f.root, "plan.md"), "# Synthetic plan");
     const collect = (base?: string) =>
-      resolvePublish(projectManifest(base), { key: "plan" }, f.state, "instance", f.root, () => {});
+      resolvePublish(projectManifest(base), { key: "plan" }, f.state, f.configDir, "instance", f.root, () => {});
     expect((await collect()).request.repo).toEqual({
       key: createHash("sha256")
         .update(await realpath(join(f.root, ".git")))
@@ -113,6 +114,7 @@ test.each([
           projectManifest(base),
           { key: "plan" },
           f.state,
+          f.configDir,
           "instance",
           root,
           () => {},
@@ -149,7 +151,7 @@ test.each(["remote", "local", "linked"])(
           writeup: { overview: "", tldr: "", decisions: null, topics: {} },
         };
         const collect = (project?: string) =>
-          resolvePublish(manifest, { key: "plan", project }, f.state, "instance", root, () => {});
+          resolvePublish(manifest, { key: "plan", project }, f.state, f.configDir, "instance", root, () => {});
         const identity =
           kind === "remote" ? "https://example.test/org/remote-project" : await realpath(join(f.root, ".git"));
         const result = await collect();
@@ -175,7 +177,8 @@ test("a pub uses its working directory's repository even when its doc is in an e
     const docs = `${f.root}-docs`;
     await mkdir(docs);
     await mkdir(f.state);
-    await writeFile(join(f.state, "config.json"), JSON.stringify({ docRoots: [docs] }));
+    await mkdir(f.configDir, { recursive: true, mode: 0o700 });
+    await writeFile(join(f.configDir, "config.json"), JSON.stringify({ docRoots: [docs] }));
     await writeFile(join(docs, "plan.md"), "# Synthetic plan");
     const manifest: PublishManifest = {
       version: 1,
@@ -185,7 +188,7 @@ test("a pub uses its working directory's repository even when its doc is in an e
       writeup: { overview: "", tldr: "", decisions: null, topics: {} },
     };
     const collect = (cwd: string, project?: string) =>
-      resolvePublish(manifest, { key: "plan", project }, f.state, "instance", cwd, () => {});
+      resolvePublish(manifest, { key: "plan", project }, f.state, f.configDir, "instance", cwd, () => {});
     expect((await collect(f.root)).request.repo?.name).toBe(basename(f.root));
     // A sandbox may place a .git marker above the temporary folders.
     const noRepo = vi.spyOn(roots, "worktreeRoot").mockResolvedValue(null);
@@ -243,6 +246,7 @@ test("a sparse 2 GiB untracked file is oversized without hashing or uploading it
       },
       { manifest: "synthetic" },
       f.state,
+      f.configDir,
       "instance",
       f.root,
       () => {},
@@ -279,6 +283,7 @@ test("a later doc reserves bytes before 255 MiB of real collected diff sides", a
       },
       { manifest: "synthetic" },
       f.state,
+      f.configDir,
       "instance",
       f.root,
       () => {},
@@ -322,7 +327,14 @@ async function fixture(format = "sha1", content = "base\n", name = "repo") {
     await run("add", ".");
     await run("commit", "-m", "synthetic base");
     const base = (await run("rev-parse", "HEAD")).stdout.trim();
-    return { root, state: join(dir, "state"), run, base, cleanup: () => rm(dir, { recursive: true, force: true }) };
+    return {
+      root,
+      state: join(dir, "state"),
+      configDir: join(dir, "config", "emend"),
+      run,
+      base,
+      cleanup: () => rm(dir, { recursive: true, force: true }),
+    };
   } catch (error) {
     await rm(dir, { recursive: true, force: true });
     throw error;
@@ -612,6 +624,7 @@ test.each([".git", "visible"])("a committed leading symlink to %s makes former d
       },
       { manifest: "synthetic" },
       f.state,
+      f.configDir,
       "instance",
       f.root,
       () => {},
@@ -660,6 +673,7 @@ test("linked worktree doc sources cannot read either Git directory, even through
           },
           { manifest: "synthetic", key: "docs" },
           f.state,
+          f.configDir,
           "instance",
           linked,
           () => {},

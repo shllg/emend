@@ -24,6 +24,8 @@ async function fixture() {
   const repo = join(root, "repo");
   const stateParent = join(root, "data");
   const state = join(stateParent, "state");
+  const configHome = join(root, "config");
+  const configDir = join(configHome, "emend");
   const homeParent = join(root, "homes");
   const home = join(homeParent, "reviewer");
   const accountParent = join(root, "accounts");
@@ -57,13 +59,14 @@ async function fixture() {
     vi.unstubAllGlobals();
     await rm(root, { recursive: true, force: true });
   });
-  const config = join(state, "config.json");
+  await mkdir(configDir, { recursive: true, mode: 0o700 });
+  const config = join(configDir, "config.json");
   const manifest = join(repo, "review.json");
   async function command(args: string[]) {
     const stdout: string[] = [];
     const stderr: string[] = [];
     const io: Io = {
-      env: { EMEND_HOME: state, HOME: home },
+      env: { EMEND_HOME: state, XDG_CONFIG_HOME: configHome, HOME: home },
       stdout: (line) => {
         stdout.push(line);
       },
@@ -79,6 +82,7 @@ async function fixture() {
     root,
     repo,
     state,
+    configDir,
     stateParent,
     home,
     homeParent,
@@ -233,6 +237,7 @@ test("resolvePublish checks the worktree when no context is supplied", async () 
       },
       { manifest: f.manifest, key: "roots" },
       f.state,
+      f.configDir,
       null,
       f.home,
       () => {},
@@ -256,6 +261,7 @@ test("resolvePublish refuses a repository holding state when no context is suppl
       },
       { manifest: f.manifest, key: "roots" },
       f.state,
+      f.configDir,
       null,
       f.stateParent,
       () => {},
@@ -380,7 +386,7 @@ test.each(["ENOENT", "ENOTDIR"])("publish skips a %s entry and still publishes a
   if (code === "ENOTDIR") await writeFile(parent, "Synthetic non-directory");
   const missing = join(parent, "docs");
   await f.store([missing, f.docs]);
-  expect(await readDocRoots(f.state, f.home, () => f.account)).toEqual([f.docs]);
+  expect(await readDocRoots(f.state, f.configDir, f.home, () => f.account)).toEqual([f.docs]);
   const result = await f.publish();
   expect(result.code).toBe(0);
   expect(result.stdout).toHaveLength(1);

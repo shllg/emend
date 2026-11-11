@@ -281,7 +281,7 @@ To publish docs that live elsewhere, allow their folder. Run this yourself, once
 emend config add docRoots <folder>
 ```
 
-`emend config` lists the settings. `emend config remove docRoots <folder>` takes a folder back.
+`emend config` lists the global configuration. `emend config remove docRoots <folder>` takes a folder back.
 emend refuses the filesystem root, your home folder, any folder that holds your home folder, and
 emend's own state folder. A subfolder of your home folder is fine.
 
@@ -345,8 +345,8 @@ Remove what this page set up, in this order. Skip a line for a part you did not 
    - Linux: `~/.local/share/emend`, or `$XDG_DATA_HOME/emend` when that variable is set.
    - macOS: `~/Library/Application Support/emend`.
    - `EMEND_HOME` overrides both when it is set.
-   - Your `docRoots` folders and the `openBrowser` setting live there too. To drop only those,
-     run `emend config remove docRoots <folder>` and `emend config set openBrowser false`.
+   - `docRoots` and `openBrowser` live in the global config file, outside the state folder.
+     To clear them, run `emend config remove docRoots <folder>` and `emend config set openBrowser false`.
 6. The check folder: `rm -r ~/emend-check`.
 
 ## When something goes wrong
