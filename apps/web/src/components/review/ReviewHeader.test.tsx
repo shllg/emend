@@ -209,6 +209,50 @@ test("Copy title writes the exact text, announces success and resets after two s
   expect(status.textContent).toBe("");
 });
 
+test.each(["resolve", "reject"])("changing the phone title ignores a pending copy's late %s", async (settlement) => {
+  const pending = Promise.withResolvers<void>();
+  const writeText = vi.fn(() => pending.promise);
+  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+  const execCommand = vi.fn(() => false);
+  Object.defineProperty(document, "execCommand", { configurable: true, value: execCommand });
+  const { rerenderTitle } = mount({ phone: true, title: longTitle });
+  fireEvent.click(screen.getByRole("button", { name: titleName }));
+  const menu = await screen.findByRole("menu");
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "Copy title" }));
+  expect(writeText).toHaveBeenCalledExactlyOnceWith(longTitle);
+  const nextTitle = "Updated review title";
+  rerenderTitle(nextTitle);
+  await act(async () => {
+    if (settlement === "resolve") pending.resolve();
+    else pending.reject(new Error("denied"));
+  });
+  expect(screen.getByRole("menu")).toBe(menu);
+  expect(within(menu).getByRole("menuitem", { name: "Copy title" })).toBeTruthy();
+  expect(screen.getByRole("status").textContent).toBe("");
+  expect(within(menu).getByText(nextTitle).textContent).toBe(nextTitle);
+  expect(execCommand).not.toHaveBeenCalled();
+  expect(window.getSelection()?.toString()).toBe("");
+});
+
+test("changing the phone title clears Copied and its live region while keeping the menu open", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+  const { rerenderTitle } = mount({ phone: true, title: longTitle });
+  fireEvent.click(screen.getByRole("button", { name: titleName }));
+  const menu = await screen.findByRole("menu");
+  vi.useFakeTimers();
+  await act(async () => fireEvent.click(within(menu).getByRole("menuitem", { name: "Copy title" })));
+  expect(writeText).toHaveBeenCalledExactlyOnceWith(longTitle);
+  expect(within(menu).getByRole("menuitem", { name: "Copied" })).toBeTruthy();
+  expect(screen.getByRole("status").textContent).toBe("Title copied");
+  const nextTitle = "Updated review title";
+  rerenderTitle(nextTitle);
+  expect(screen.getByRole("menu")).toBe(menu);
+  expect(within(menu).getByRole("menuitem", { name: "Copy title" })).toBeTruthy();
+  expect(screen.getByRole("status").textContent).toBe("");
+  expect(within(menu).getByText(nextTitle).textContent).toBe(nextTitle);
+});
+
 test.each(["missing", "rejected"])(
   "a %s clipboard selects only the title and announces the fallback",
   async (clipboard) => {

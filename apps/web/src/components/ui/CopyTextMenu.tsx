@@ -41,6 +41,15 @@ export function CopyTextMenu({
   const attempt = useRef(0);
   const [result, setResult] = useState<"idle" | "copied" | "failed">("idle");
   const [failures, setFailures] = useState(0);
+  const previousCopyText = useRef(copyText);
+  useEffect(() => {
+    if (previousCopyText.current === copyText) return;
+    previousCopyText.current = copyText;
+    attempt.current += 1;
+    window.clearTimeout(timer.current);
+    setResult("idle");
+    setFailures(0);
+  }, [copyText]);
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
