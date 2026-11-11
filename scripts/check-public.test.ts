@@ -2714,11 +2714,12 @@ function nestedPng(): Buffer {
   return wrap((`<img src="${uri(middle)}">\n`).repeat(20));
 }
 
-test("R4.3: nested PNGs and expanded font metadata views share a bounded budget", () => {
+test("R4.3: nested PNGs and expanded font table and metadata views share a bounded budget", () => {
   assert.ok(checkBuffer(nestedPng(), "nested.png", empty, false).some((hit) => /budget|limit|oversized/.test(hit)));
-  const font = fontWithMetadata("woff2", Buffer.alloc(16 * 1024 * 1024, 97));
+  const body = Buffer.alloc(16 * 1024 * 1024, 97);
   const terms: PrivateTerms = {terms:[{value:"fixturephrase",line:1}],allowed:[],notes:[]};
-  assert.ok(checkBuffer(font, "fixture.woff2", terms, false).some((hit) => /budget|limit|oversized/.test(hit)));
+  for (const font of [fontFixture("woff2", body), fontWithMetadata("woff2", body)])
+    assert.ok(checkBuffer(font, "fixture.woff2", terms, false).some((hit) => /budget|limit|oversized/.test(hit)));
 });
 
 test("R4.3: inline nesting stops at depth two and long candidate lists remain public", () => {
@@ -3118,11 +3119,16 @@ function repeatedSfnt(entries: number, records: number): Buffer {
 }
 
 function sfntBudget(bytes: Buffer, parserBytes: number): ScanBudget {
-  // Skip raw views in both runs, leaving an exact parser allowance.
-  // The unknown extension scans the same bytes without walking the SFNT directory.
-  const preflight = new ScanBudget(bytes.length), initial = preflight.remaining;
-  checkBuffer(bytes, "fixture.bin", empty, false, false, 0, preflight);
-  return new ScanBudget(initial - preflight.remaining + parserBytes);
+  // These fixtures either have duplicate tags or one name table of empty records.
+  // Measure that table's raw views alone, without paying any directory or record visits.
+  const preflight = new ScanBudget(), initial = preflight.remaining;
+  if (bytes.readUInt16BE(4) === 1) {
+    const offset = bytes.readUInt32BE(20), length = bytes.readUInt32BE(24);
+    checkBuffer(bytes.subarray(offset, offset + length), "fixture.bin", empty, false, false, 0, preflight);
+  }
+  const budget = new ScanBudget(initial - preflight.remaining + parserBytes);
+  assert.ok(budget.remaining < 32 * bytes.length, "whole-asset views must skip in the parser check");
+  return budget;
 }
 
 test("R7.6: duplicate SFNT tags and overlapping ranges fail before visiting name records", () => {
@@ -5318,21 +5324,63 @@ function rgbPng(width: number, height: number): Buffer {
 }
 
 let largePng: Buffer | undefined, largeInlinePng: Buffer | undefined, largeGlyphs: Buffer | undefined;
+function fontChecksum(bytes: Buffer): number {
+  let sum = 0;
+  for (let at = 0; at < bytes.length; at += 4) {
+    let word = 0;
+    for (let i = 0; i < 4; i++) word = word * 256 + (bytes[at + i] ?? 0);
+    sum = (sum + word) >>> 0;
+  }
+  return sum;
+}
+
+function largeTtf(name: Buffer, post = Buffer.alloc(32)): Buffer {
+  if (!largeGlyphs) { largeGlyphs = seededAssetBytes(3 * 1024 * 1024); largeGlyphs.fill(0, 0, 12); }
+  const head = Buffer.alloc(54), hhea = Buffer.alloc(36), hmtx = Buffer.alloc(4), loca = Buffer.alloc(8);
+  const maxp = Buffer.alloc(32), os2 = Buffer.alloc(96), cmap = Buffer.alloc(44);
+  head.writeUInt32BE(0x00010000); head.writeUInt32BE(0x00010000, 4); head.writeUInt32BE(0x5f0f3cf5, 12);
+  head.writeUInt16BE(1000, 18); head.writeUInt16BE(8, 46); head.writeInt16BE(2, 48); head.writeInt16BE(1, 50);
+  hhea.writeUInt32BE(0x00010000); hhea.writeInt16BE(800, 4); hhea.writeInt16BE(-200, 6);
+  hhea.writeUInt16BE(1000, 10); hhea.writeInt16BE(1, 18); hhea.writeUInt16BE(1, 34);
+  hmtx.writeUInt16BE(1000); loca.writeUInt32BE(12, 4);
+  maxp.writeUInt32BE(0x00010000); maxp.writeUInt16BE(1, 4); maxp.writeUInt16BE(2, 14);
+  os2.writeUInt16BE(4); os2.writeInt16BE(500, 2); os2.writeUInt16BE(400, 4); os2.writeUInt16BE(5, 6);
+  os2.write("TEST", 58); os2.writeUInt16BE(64, 62); os2.writeUInt16BE(32, 64); os2.writeUInt16BE(32, 66);
+  os2.writeInt16BE(800, 68); os2.writeInt16BE(-200, 70); os2.writeUInt16BE(800, 74); os2.writeUInt16BE(200, 76);
+  os2.writeInt16BE(500, 86); os2.writeInt16BE(700, 88); os2.writeUInt16BE(32, 92); os2.writeUInt16BE(1, 94);
+  cmap.writeUInt16BE(1, 2); cmap.writeUInt16BE(3, 4); cmap.writeUInt16BE(1, 6); cmap.writeUInt32BE(12, 8);
+  cmap.writeUInt16BE(4, 12); cmap.writeUInt16BE(32, 14); cmap.writeUInt16BE(4, 18);
+  cmap.writeUInt16BE(4, 20); cmap.writeUInt16BE(1, 22);
+  cmap.writeUInt16BE(32, 26); cmap.writeUInt16BE(0xffff, 28);
+  cmap.writeUInt16BE(32, 32); cmap.writeUInt16BE(0xffff, 34); cmap.writeInt16BE(-32, 36); cmap.writeInt16BE(1, 38);
+  post.writeUInt32BE(0x00030000); post.writeInt16BE(-75, 8); post.writeUInt16BE(50, 10);
+  const tables: [string, Buffer][] = [
+    ["OS/2", os2], ["cmap", cmap], ["glyf", largeGlyphs], ["head", head], ["hhea", hhea],
+    ["hmtx", hmtx], ["loca", loca], ["maxp", maxp], ["name", name], ["post", post],
+  ];
+  const directory = Buffer.alloc(12 + tables.length * 16), parts: Buffer[] = [directory];
+  directory.writeUInt32BE(0x00010000); directory.writeUInt16BE(tables.length, 4);
+  directory.writeUInt16BE(128, 6); directory.writeUInt16BE(3, 8); directory.writeUInt16BE(32, 10);
+  let offset = directory.length, headOffset = 0;
+  for (const [i, [tag, table]] of tables.entries()) {
+    const at = 12 + i * 16, padding = Buffer.alloc((4 - table.length % 4) % 4);
+    directory.write(tag, at); directory.writeUInt32BE(fontChecksum(table), at + 4);
+    directory.writeUInt32BE(offset, at + 8); directory.writeUInt32BE(table.length, at + 12);
+    if (tag === "head") headOffset = offset;
+    parts.push(table, padding); offset += table.length + padding.length;
+  }
+  const bytes = Buffer.concat(parts);
+  bytes.writeUInt32BE((0xb1b0afba - fontChecksum(bytes)) >>> 0, headOffset + 8);
+  return bytes;
+}
+
 const largeAssetFixtures = new Map<string, Buffer>();
 function largeAssetFixture(kind: "PNG" | "TTF" | "inline PNG", value?: string): Buffer {
   const key = `${kind}:${value ?? ""}`, cached = largeAssetFixtures.get(key);
   if (cached) return cached;
   let bytes: Buffer;
   if (kind === "TTF") {
-    const name = fontNameTable(value ?? "Public Fixture Font", 3), header = Buffer.alloc(44);
-    const padding = Buffer.alloc((4 - name.length % 4) % 4);
-    largeGlyphs ??= seededAssetBytes(3 * 1024 * 1024);
-    header.writeUInt32BE(0x00010000); header.writeUInt16BE(2, 4);
-    header.writeUInt16BE(32, 6); header.writeUInt16BE(1, 8);
-    header.write("glyf", 12); header.writeUInt32BE(header.length + name.length + padding.length, 20);
-    header.writeUInt32BE(largeGlyphs.length, 24);
-    header.write("name", 28); header.writeUInt32BE(header.length, 36); header.writeUInt32BE(name.length, 40);
-    bytes = Buffer.concat([header, name, padding, largeGlyphs]);
+    bytes = largeTtf(fontNameTable(value ?? "Public Fixture Font", 3));
   } else {
     bytes = kind === "PNG" ? largePng ??= rgbPng(1100, 1100) : largeInlinePng ??= rgbPng(900, 900);
     if (value) bytes = Buffer.concat([bytes.subarray(0, 33), pngChunk("tEXt", Buffer.from(`Comment\0${value}`)), bytes.subarray(33)]);
@@ -5367,13 +5415,13 @@ test("issue 35: small PNG private ancillary bytes retain raw term checks", () =>
 });
 
 test("issue 35: whole-asset raw views start at exactly 32 budget bytes per input byte", () => {
-  const bytes = png(pngChunk("prVt", Buffer.from(assetTerm))), cost = 32 * bytes.length;
-  // Printable binary runs still spend budget even when the raw views are skipped.
-  const preflight = new ScanBudget(bytes.length);
+  const bytes = png(pngChunk("IDAT", Buffer.from(assetTerm))), cost = 32 * bytes.length;
+  // Fallback chunks and printable binary runs still spend budget when whole views skip.
+  const preflight = new ScanBudget(cost - 2);
   assert.deepEqual(checkBuffer(bytes, "fixture.png", assetTerms, false, true, 0, preflight), []);
   const skipped = new ScanBudget(cost - 1);
   assert.deepEqual(checkBuffer(bytes, "fixture.png", assetTerms, false, true, 0, skipped), []);
-  assert.equal(skipped.remaining, cost - 1 - (bytes.length - preflight.remaining));
+  assert.equal(skipped.remaining, preflight.remaining + 1);
   const fits = new ScanBudget(cost);
   assert.ok(checkBuffer(bytes, "fixture.png", assetTerms, false, true, 0, fits).some((hit) => hit.includes("private term")));
   assert.ok(fits.remaining < cost);
@@ -5408,3 +5456,121 @@ for (const kind of ["woff", "woff2"] as const) {
       assert.throws(() => checkBuffer(bytes, `fixture.${kind}`, terms, false, true, 0, new ScanBudget(table.length + metadata.length)), /budget/);
   });
 }
+
+let assetBudgetFixture: { bytes: Buffer; spend: number } | undefined;
+function rawBudgetFixture(): { bytes: Buffer; spend: number } {
+  if (!assetBudgetFixture) {
+    // Strict name views keep both scans present even under the measured (not estimated) allowance.
+    const bytes = fontFixture("woff", Buffer.concat([fontNameTable("Public Fixture Font", 3), seededAssetBytes(64 * 1024)]), "name");
+    const budget = new ScanBudget(), initial = budget.remaining;
+    assert.deepEqual(checkBuffer(bytes, "fixture.woff", empty, false, true, 0, budget), []);
+    assetBudgetFixture = { bytes, spend: initial - budget.remaining };
+  }
+  return assetBudgetFixture;
+}
+
+test("issue 35 round 1: measure the raw-view budget baseline", () => {
+  const { bytes, spend } = rawBudgetFixture();
+  assert.ok(spend >= 32 * bytes.length, "the measured allowance must retain whole views");
+});
+
+const assetEscapeTerms: PrivateTerms = { terms: [{ value: "synthetic%20unrelated%20phrase", line: 1 }], allowed: [], notes: [] };
+const assetAllowedTerms: PrivateTerms = { ...assetTerms, allowed: ["a&nbsp;b"] };
+for (const [label, terms] of [["no terms", empty], ["plain term", assetTerms], ["escaped term", assetEscapeTerms], ["escaped allowance", assetAllowedTerms]] as const)
+  test(`issue 35 round 1: raw-view cost is independent of ${label}`, () => {
+    const { bytes, spend } = rawBudgetFixture(), slack = 2048;
+    assert.ok(spend + slack >= 32 * bytes.length, "whole views must fit, so skipping cannot mask extra readings");
+    const budget = new ScanBudget(spend + slack);
+    assert.deepEqual(checkBuffer(bytes, "fixture.woff", terms, false, true, 0, budget), []);
+    assert.ok(budget.remaining <= slack, "both raw scans must still run");
+  });
+
+test("issue 35 round 1: text-file escape readings still follow configuration", () => {
+  const bytes = Buffer.from("public text ".repeat(256)), spends: number[] = [];
+  for (const terms of [empty, assetEscapeTerms, assetAllowedTerms]) {
+    const budget = new ScanBudget(), initial = budget.remaining;
+    assert.deepEqual(checkBuffer(bytes, "fixture.txt", terms, false, true, 0, budget), []);
+    spends.push(initial - budget.remaining);
+  }
+  for (const spend of spends.slice(1)) assert.ok(spend > 2 * (spends[0] ?? 0));
+});
+
+let fontBombBody: Buffer | undefined;
+const fontBombs = new Map<string, Buffer>();
+for (const kind of ["woff", "woff2"] as const) {
+  test(`issue 35 round 1: ${kind} high-ratio tables retain strict views`, () => {
+    if (!fontBombBody) {
+      fontBombBody = Buffer.alloc(8 * 1024 * 1024);
+      fontBombBody.write(assetTerm, fontBombBody.length / 2);
+    }
+    let bytes = fontBombs.get(kind);
+    if (!bytes) { bytes = fontFixture(kind, fontBombBody); fontBombs.set(kind, bytes); }
+    // DEFLATE needs roughly 8 KiB for this body; Brotli fits in a few hundred bytes.
+    assert.ok(bytes.length < (kind === "woff" ? 16 * 1024 : 256));
+    for (const terms of [empty, assetTerms]) {
+      const hits = checkBuffer(bytes, `fixture.${kind}`, terms, false, true);
+      assert.ok(hits.some((hit) => /budget|limit|oversized|private term/.test(hit)), hits.join("\n"));
+    }
+  });
+
+  test(`issue 35 round 1: ${kind} name storage stays strict below its estimate`, () => {
+    const table = Buffer.concat([fontNameTable("Public Fixture Font", 3), seededAssetBytes(512), Buffer.from(`\0${assetTerm}\0`)]);
+    const bytes = fontFixture(kind, table, "name"), allowance = Math.min(31 * table.length, 32 * bytes.length - 1);
+    for (const terms of [empty, assetTerms]) {
+      const hits = checkBuffer(bytes, `fixture.${kind}`, terms, false, true, 0, new ScanBudget(allowance));
+      if (terms === empty) assert.deepEqual(hits, []);
+      else assert.ok(hits.some((hit) => hit.includes("private term")), hits.join("\n"));
+      assert.throws(() => checkBuffer(bytes, `fixture.${kind}`, terms, false, true, 0, new ScanBudget(table.length + 1)), /budget/);
+    }
+  });
+}
+
+for (const encoding of ["sPLT", "prVt", "UTF-16LE", "UTF-16BE"] as const)
+  test(`issue 35 round 1: large PNG fallback finds ${encoding} metadata`, () => {
+    const base = largeAssetFixture("PNG");
+    const chunk = encoding === "sPLT" ? pngChunk("sPLT", Buffer.concat([Buffer.from(`${assetTerm}\0`), Buffer.from([8, 0, 0, 0, 255, 0, 1])])) :
+      encoding === "prVt" ? pngChunk("prVt", Buffer.from(assetTerm)) :
+      pngChunk("tEXt", Buffer.concat([Buffer.from("Comment\0"), encoding === "UTF-16LE" ? Buffer.from(assetTerm, "utf16le") : Buffer.from(assetTerm, "utf16le").swap16()]));
+    const bytes = Buffer.concat([base.subarray(0, 33), chunk, base.subarray(33)]);
+    assert.deepEqual(checkBuffer(bytes, "fixture.png", empty, false, true), []);
+    const hits = checkBuffer(bytes, "fixture.png", assetTerms, false, true);
+    assert.ok(hits.some((hit) => hit.includes("private term")), hits.join("\n"));
+    assert.ok(hits.every((hit) => hit.includes("private term")), hits.join("\n"));
+  });
+
+for (const location of ["language tag", "unreferenced storage", "ASCII Unicode record", "post table"] as const)
+  test(`issue 35 round 1: large TTF fallback finds ${location}`, () => {
+    let name = fontNameTable("Public Fixture Font", 3), post = Buffer.alloc(32);
+    if (location === "language tag") {
+      const value = Buffer.from(assetTerm, "utf16le").swap16(), tags = Buffer.alloc(6);
+      name.writeUInt16BE(1); name.writeUInt16BE(24, 4);
+      tags.writeUInt16BE(1); tags.writeUInt16BE(value.length, 2); tags.writeUInt16BE(name.length - 18, 4);
+      name = Buffer.concat([name.subarray(0, 18), tags, name.subarray(18), value]);
+    } else if (location === "unreferenced storage") name = Buffer.concat([name, Buffer.from(assetTerm)]);
+    else if (location === "ASCII Unicode record") {
+      name = fontNameTable(assetTerm, 1); name.writeUInt16BE(3, 6); name.writeUInt16BE(1, 8);
+    } else post = Buffer.concat([post, Buffer.from(assetTerm)]);
+    const bytes = largeTtf(name, post);
+    assert.deepEqual(checkBuffer(bytes, "fixture.ttf", empty, false, true), []);
+    const hits = checkBuffer(bytes, "fixture.ttf", assetTerms, false, true);
+    assert.ok(hits.some((hit) => hit.includes("private term")), hits.join("\n"));
+    assert.ok(hits.every((hit) => hit.includes("private term")), hits.join("\n"));
+  });
+
+test("issue 35 round 1: PNG fallback batches many small chunks once", (t) => {
+  const base = largeAssetFixture("PNG"), chunks = Array.from({ length: 2048 }, () => pngChunk("prVt", Buffer.alloc(8, 1)));
+  chunks.push(pngChunk("prVt", Buffer.from(assetTerm)));
+  const bytes = Buffer.concat([base.subarray(0, 33), ...chunks, base.subarray(33)]);
+  const decode = t.mock.method(TextDecoder.prototype, "decode");
+  const hits = checkBuffer(bytes, "fixture.png", assetTerms, false, true);
+  assert.ok(hits.some((hit) => hit.includes("private term")), hits.join("\n"));
+  assert.equal(decode.mock.callCount(), 2, "one joined buffer has two UTF-16BE alignments");
+});
+
+test("issue 35 round 1: malformed PNG and SFNT parts leave refusal to their parsers", () => {
+  const image = png(pngChunk("prVt", Buffer.from(assetTerm))).subarray(0, -3);
+  const font = sfntFixture("ttf", fontNameTable(assetTerm, 3));
+  font.writeUInt32BE(font.length, 20);
+  for (const [bytes, file, label] of [[image, "fixture.png", "invalid PNG text metadata"], [font, "fixture.ttf", "invalid SFNT font data"]] as const)
+    assert.deepEqual(checkBuffer(bytes, file, assetTerms, false, true, 0, new ScanBudget(16 * bytes.length)), [`${file}: ${label}`]);
+});
