@@ -8,7 +8,7 @@ import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { Window } from "happy-dom";
 import { type Element as BridgeElement, Window as BridgeWindow } from "happy-dom";
-import type { ComponentProps, ReactNode } from "react";
+import { type ComponentProps, Profiler, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, onTestFinished, test, vi } from "vitest";
 import { App } from "./App.tsx";
 import type { InboxData } from "./api/queries.ts";
@@ -23,6 +23,7 @@ import { draftKey, editDraftKey, saveDraft } from "./lib/drafts.ts";
 import { layoutKey, layoutStore } from "./lib/layout-store.ts";
 import * as readingPosition from "./lib/reading-position.ts";
 import { cancelThreadActionFocus } from "./lib/thread-action-focus.ts";
+import * as webRouter from "./router.tsx";
 import { validateReviewSearch } from "./router.tsx";
 
 const loading = vi.hoisted(() => ({
@@ -606,6 +607,103 @@ test.each([
     expect(paths).not.toContain("/r/undefined");
   },
 );
+
+test("leaving as a doc commits keeps the inbox address ahead of pending effects", async () => {
+  docsFixture();
+  currentRevision.main = gardenDoc.path;
+  const reply = Promise.withResolvers<Response>();
+  revisionReply = reply.promise;
+  const history = createMemoryHistory({ initialEntries: [`/r/${id}`] });
+  let searchAtClick: string | undefined;
+  // The commit callback runs after the doc enters the DOM and before passive effects.
+  render(
+    <Profiler
+      id="leave-on-doc-commit"
+      onRender={() => {
+        if (searchAtClick !== undefined || !screen.queryByText("Water the seedlings")) return;
+        searchAtClick = history.location.search;
+        screen.getByRole("link", { name: "emend" }).click();
+      }}
+    >
+      <App queryClient={client} history={history} />
+    </Profiler>,
+  );
+  await screen.findByRole("heading", { name: review.title, level: 1 });
+  expect(history.location.search).toBe("");
+  const paths: string[] = [];
+  onTestFinished(history.subscribe(({ location }) => paths.push(location.pathname)));
+  await act(async () => reply.resolve(Response.json(currentRevision)));
+  await waitFor(() => expect(searchAtClick).toBeDefined());
+  expect(searchAtClick).toBe("");
+  expect(history.location.pathname).toBe("/");
+  expect(history.location.search).toBe("");
+  await screen.findByRole("heading", { name: "Inbox", level: 1 });
+  expect(history.location.pathname).toBe("/");
+  expect(history.location.search).toBe("");
+  expect(paths).not.toContain("/r/undefined");
+  expect(
+    vi
+      .mocked(fetch)
+      .mock.calls.some(([path]) => typeof path === "string" && path.startsWith("/api/v1/reviews/undefined")),
+  ).toBe(false);
+  await act(async () => history.back());
+  await screen.findByText("Water the seedlings");
+  expect(history.location.pathname).toBe(`/r/${id}`);
+  expect(searchParams(history).get("doc")).toBe(gardenDoc.path);
+});
+
+test("a review first loaded during departure keeps the inbox address and Back returns to its doc", async () => {
+  width = 390;
+  docsFixture();
+  currentRevision.main = gardenDoc.path;
+  const reply = Promise.withResolvers<Response>();
+  const original = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation((path, init) => {
+    if (path === `/api/v1/reviews/${id}`) return reply.promise.then((response) => response.clone());
+    if (!original) throw new Error("Missing synthetic fetch");
+    return original(path, init);
+  });
+  const arrival = Promise.withResolvers<void>();
+  const createRouter = webRouter.createWebRouter;
+  vi.spyOn(webRouter, "createWebRouter").mockImplementation((history) => {
+    const router = createRouter(history);
+    const inbox = router.routesById["/"];
+    const beforeLoad = inbox.options.beforeLoad;
+    // Keep the outgoing route mounted while the inbox navigation is pending.
+    inbox.options.beforeLoad = () => arrival.promise;
+    onTestFinished(() => {
+      inbox.options.beforeLoad = beforeLoad;
+    });
+    return router;
+  });
+  const { history } = mount("");
+  await screen.findByText("Loading review…");
+  const paths: string[] = [];
+  onTestFinished(history.subscribe(({ location }) => paths.push(location.pathname)));
+
+  await act(async () => fireEvent.click(screen.getByRole("link", { name: "Inbox" })));
+  expect(history.location.pathname).toBe("/");
+  expect(history.location.search).toBe("");
+  await act(async () => reply.resolve(Response.json(currentReview)));
+  await screen.findByText("Water the seedlings");
+  expect(history.location.pathname).toBe("/");
+  expect(history.location.search).toBe("");
+  await act(async () => arrival.resolve());
+  await screen.findByRole("heading", { name: "Inbox", level: 1 });
+  expect(history.location.pathname).toBe("/");
+  expect(history.location.search).toBe("");
+  expect(paths).not.toContain("/r/undefined");
+  expect(
+    vi
+      .mocked(fetch)
+      .mock.calls.some(([path]) => typeof path === "string" && path.startsWith("/api/v1/reviews/undefined")),
+  ).toBe(false);
+
+  await act(async () => history.back());
+  await screen.findByText("Water the seedlings");
+  expect(history.location.pathname).toBe(`/r/${id}`);
+  expect(searchParams(history).get("doc")).toBe(gardenDoc.path);
+});
 
 test("a review sub-path keeps its address and empty search when leaving an open doc", async () => {
   docsFixture();

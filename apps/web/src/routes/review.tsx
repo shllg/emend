@@ -263,9 +263,14 @@ function LoadedReview({
   // Read search and hash from one location: route matches can lag during navigation.
   const router = useRouter();
   const liveLocation = useLocation();
-  const [, rawParams, foundRoute] = router.getMatchedRoutes(liveLocation.pathname);
-  const isOwnLocation =
-    foundRoute?.id === "/r/$reviewId" && rawParams.reviewId === routeId && rawParams["**"] === undefined;
+  const ownsAddress = useCallback(
+    (pathname: string) => {
+      const [, rawParams, foundRoute] = router.getMatchedRoutes(pathname);
+      return foundRoute?.id === "/r/$reviewId" && rawParams.reviewId === routeId && rawParams["**"] === undefined;
+    },
+    [router, routeId],
+  );
+  const isOwnLocation = ownsAddress(liveLocation.pathname);
   const [lastOwnLocation, setLastOwnLocation] = useState(() => (isOwnLocation ? liveLocation : undefined));
   if (isOwnLocation && lastOwnLocation !== liveLocation) setLastOwnLocation(liveLocation);
   const location = isOwnLocation ? liveLocation : lastOwnLocation;
@@ -568,6 +573,11 @@ function LoadedReview({
     // The router exposes the next page's address before this review unmounts.
     // Replacing here would overwrite that page's history entry.
     if (!isOwnLocation) return;
+    // Navigation may start after render, before this effect writes.
+    const replaceAddress = (search: ReviewSearch, hash: string) => {
+      if (!ownsAddress(router.latestLocation.pathname)) return;
+      void navigate({ to: "/r/$reviewId", params: { reviewId: routeId }, search, hash, replace: true });
+    };
     const current = currentIntent;
     let created = false;
     if (requested && requested !== previous.current?.requested) {
@@ -641,7 +651,7 @@ function LoadedReview({
     if (docsVisible && !missingDoc && (search.doc !== openDoc?.path || search.view !== docView(openDoc, search.view))) {
       const next: ReviewSearch = { ...search, doc: openDoc?.path, view: docView(openDoc, search.view) };
       intent.navigation = readingIntent(next, hash, seq).navigation;
-      void navigate({ search: next, hash, replace: true });
+      replaceAddress(next, hash);
       return;
     }
     const thread = revision.threads.find((thread) => thread.id === intent.threadId);
@@ -665,7 +675,7 @@ function LoadedReview({
         intent.elementId = nextHash;
         if (search.tab !== next.tab || search.doc !== next.doc || search.view !== next.view || hash !== nextHash) {
           intent.navigation = readingIntent(next, nextHash, seq).navigation;
-          void navigate({ search: next, hash: nextHash, replace: true });
+          replaceAddress(next, nextHash);
           return;
         }
       }
@@ -688,7 +698,7 @@ function LoadedReview({
         if (search.tab !== next.tab || search.doc !== next.doc || search.view !== next.view || hash !== nextHash) {
           // The redirect continues this intent; it does not create another one.
           intent.navigation = readingIntent(next, nextHash, seq).navigation;
-          void navigate({ search: next, hash: nextHash, replace: true });
+          replaceAddress(next, nextHash);
           return;
         }
       }
@@ -734,7 +744,7 @@ function LoadedReview({
       if (paneMode === "tabs" && hasDiff && tab !== "diff") {
         const next = { ...search, tab: "diff" as const };
         intent.navigation = readingIntent(next, hash, seq).navigation;
-        void navigate({ search: next, hash, replace: true });
+        replaceAddress(next, hash);
         return;
       }
       if (navigateDiff.current?.({ elementId: intent.elementId })) complete(intent.jumpThread);
