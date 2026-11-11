@@ -329,6 +329,11 @@
   }
   .em-writeup-quiet .em-prose {
     font-size: calc(var(--reader-prose-size, var(--type-prose-size)) - 1px);
+    color: var(--fg-reading-muted);
+  }
+  .em-writeup-quiet .em-prose :is(strong, h1, h2, h3, h4, h5, h6),
+  .em-writeup-quiet .em-prose li::marker {
+    color: var(--fg-reading);
   }
   .em-reading-group + .em-writeup-quiet {
     margin-top: 12px;
@@ -337,9 +342,13 @@
     font-size: calc(var(--reader-prose-size, var(--type-prose-size)) - 2px);
     color: var(--fg-reading-muted);
   }
-  .em-writeup-muted .em-prose :is(strong, code, h1, h2, h3, h4, h5, h6),
+  .em-writeup-muted .em-prose :is(strong, h1, h2, h3, h4, h5, h6),
   .em-writeup-muted .em-prose li::marker {
     color: var(--fg-reading-muted);
+  }
+  .em-writeup-quiet .em-prose :is(code, pre),
+  .em-writeup-muted .em-prose :is(code, pre) {
+    color: var(--fg-reading);
   }
   .em-writeup-why,
   .em-writeup-example,

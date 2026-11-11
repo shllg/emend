@@ -79,6 +79,14 @@ test.each([
   { name: "light", tokens: light },
   { name: "system dark", tokens: systemDark },
   { name: "explicit dark", tokens: explicitDark },
+])("$name code text keeps at least 4.5:1 contrast against the sunken background", ({ tokens }) => {
+  expect(contrast(luminance("--fg-reading", tokens), luminance("--bg-sunken", tokens))).toBeGreaterThanOrEqual(4.5);
+});
+
+test.each([
+  { name: "light", tokens: light },
+  { name: "system dark", tokens: systemDark },
+  { name: "explicit dark", tokens: explicitDark },
 ])("$name muted text keeps at least 4.5:1 contrast and is dimmer than body text", ({ tokens }) => {
   const page = luminance("--bg-reading", tokens);
   const mutedContrast = contrast(luminance("--fg-reading-muted", tokens), page);
@@ -129,23 +137,25 @@ test("reading rules use the reading colour tokens", () => {
   expect(/\.em-writeup-card\s*\{([^}]+)\}/.exec(reading)?.[1]).toMatch(/\bbackground:\s*var\(--bg-reading-card\)\s*;/);
   expect(/\.em-thread__comments\s*\{([^}]+)\}/.exec(threads)?.[1]).toMatch(/\bcolor:\s*var\(--fg-reading-strong\)\s*;/);
   expect(
-    /\.em-writeup-muted \.em-prose :is\(strong, code, h1, h2, h3, h4, h5, h6\),\s*\.em-writeup-muted \.em-prose li::marker\s*\{([^}]+)\}/.exec(
+    /\.em-writeup-quiet \.em-prose :is\(code, pre\),\s*\.em-writeup-muted \.em-prose :is\(code, pre\)\s*\{([^}]+)\}/.exec(
       reading,
     )?.[1],
-  ).toMatch(/\bcolor:\s*var\(--fg-reading-muted\)\s*;/);
+  ).toMatch(/\bcolor:\s*var\(--fg-reading\)\s*;/);
 });
 
 test.each([
-  { tone: "quiet", reduction: 1 },
-  { tone: "muted", reduction: 2 },
-])("$tone writeup prose follows the reader size and colour hierarchy", ({ tone, reduction }) => {
+  { tone: "quiet", reduction: 1, labelColor: "--fg-reading" },
+  { tone: "muted", reduction: 2, labelColor: "--fg-reading-muted" },
+])("$tone writeup prose follows the reader size and colour hierarchy", ({ tone, reduction, labelColor }) => {
   const reading = readFileSync(resolve(import.meta.dirname, "reading.css"), "utf8");
   const rule = new RegExp(`\\.em-writeup-${tone} \\.em-prose\\s*\\{([^}]+)\\}`).exec(reading)?.[1];
   expect(rule).toContain(`font-size: calc(var(--reader-prose-size, var(--type-prose-size)) - ${reduction}px);`);
   expect(rule).not.toMatch(/\bfont-size:\s*[\d.]+px\s*;/);
-  if (tone === "quiet") {
-    expect(rule).not.toMatch(/\bcolor\s*:/);
-  } else {
-    expect(rule).toMatch(/\bcolor:\s*var\(--fg-reading-muted\)\s*;/);
-  }
+  expect(rule).toMatch(/\bcolor:\s*var\(--fg-reading-muted\)\s*;/);
+
+  const labels = new RegExp(
+    `\\.em-writeup-${tone} \\.em-prose :is\\(([^)]+)\\),\\s*\\.em-writeup-${tone} \\.em-prose li::marker\\s*\\{([^}]+)\\}`,
+  ).exec(reading);
+  expect(labels?.[1]).toBe("strong, h1, h2, h3, h4, h5, h6");
+  expect(labels?.[2]).toContain(`color: var(${labelColor});`);
 });
