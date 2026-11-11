@@ -159,3 +159,32 @@ test.each([
   expect(labels?.[1]).toBe("strong, h1, h2, h3, h4, h5, h6");
   expect(labels?.[2]).toContain(`color: var(${labelColor});`);
 });
+
+test.each(["emend-comment", "emend-comment-active"])(
+  "%s highlights use body text colour throughout quiet and muted writeup prose",
+  (highlight) => {
+    const reading = readFileSync(resolve(import.meta.dirname, "reading.css"), "utf8");
+    const rules = [...reading.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+    for (const descendant of ["", " *"]) {
+      const selector = `:is(.em-writeup-quiet, .em-writeup-muted) .em-prose${descendant}::highlight(${highlight})`;
+      const rule = rules.find((match) => match[1]?.includes(selector));
+      expect(rule?.[2]?.trim(), selector).toBe("color: var(--fg-reading);");
+    }
+  },
+);
+
+test("quiet and muted writeup links inherit colour after the strong and code rules", () => {
+  const reading = readFileSync(resolve(import.meta.dirname, "reading.css"), "utf8");
+  const links =
+    /\.em-writeup-quiet \.em-prose a :is\(strong, code\),\s*\.em-writeup-muted \.em-prose a :is\(strong, code\)\s*\{([^}]+)\}/.exec(
+      reading,
+    );
+  expect(links?.[1]).toMatch(/\bcolor:\s*inherit\s*;/);
+  for (const tone of ["quiet", "muted"]) {
+    for (const elements of ["strong, h1, h2, h3, h4, h5, h6", "code, pre"]) {
+      const position = reading.indexOf(`.em-writeup-${tone} .em-prose :is(${elements})`);
+      expect(position).toBeGreaterThanOrEqual(0);
+      expect(links?.index).toBeGreaterThan(position);
+    }
+  }
+});

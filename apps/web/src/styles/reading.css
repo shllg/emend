@@ -350,6 +350,16 @@
   .em-writeup-muted .em-prose :is(code, pre) {
     color: var(--fg-reading);
   }
+  .em-writeup-quiet .em-prose a :is(strong, code),
+  .em-writeup-muted .em-prose a :is(strong, code) {
+    color: inherit;
+  }
+  :is(.em-writeup-quiet, .em-writeup-muted) .em-prose::highlight(emend-comment),
+  :is(.em-writeup-quiet, .em-writeup-muted) .em-prose *::highlight(emend-comment),
+  :is(.em-writeup-quiet, .em-writeup-muted) .em-prose::highlight(emend-comment-active),
+  :is(.em-writeup-quiet, .em-writeup-muted) .em-prose *::highlight(emend-comment-active) {
+    color: var(--fg-reading);
+  }
   .em-writeup-why,
   .em-writeup-example,
   .em-writeup-details {
