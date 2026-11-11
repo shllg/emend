@@ -31,6 +31,7 @@ import { ReadingFoldContext } from "../components/reading/ReadingGroup.tsx";
 import { Writeup } from "../components/reading/Writeup.tsx";
 import { ReviewHeader } from "../components/review/ReviewHeader.tsx";
 import { SendBar } from "../components/send/SendBar.tsx";
+import { threadCounts } from "../components/status/ThreadStateBadge.tsx";
 import { Composer } from "../components/threads/Composer.tsx";
 import { ThreadList } from "../components/threads/ThreadList.tsx";
 import { Button } from "../components/ui/Button.tsx";
@@ -766,7 +767,7 @@ function LoadedReview({
     hasDocs,
     hasDiff,
     hasWriteup,
-    unsentCount: review.unsentCount,
+    threadCounts: revision ? threadCounts(revision.threads) : undefined,
     filesCount: diffFiles.length,
     viewedCount: diffFiles.filter((file) => file.viewed === "viewed").length,
   };

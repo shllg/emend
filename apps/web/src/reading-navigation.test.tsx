@@ -359,8 +359,9 @@ test.each([1280, 768])(
     await screen.findByRole("heading", { name: "Topic 1: Plant a seed" });
     const writeup = tabs.getByRole("tab", { name: "Writeup" });
     const docs = tabs.getByRole("tab", { name: "Docs 2" });
-    const comments = tabs.getByRole("tab", { name: "Comments 2" });
-    expect(within(comments).getByText("2").className).toContain("bg-accent");
+    const comments = tabs.getByRole("tab", { name: "Comments" });
+    expect(comments.textContent).toBe("Comments");
+    expect(within(docs).getByText("2").className).toContain("bg-active");
     const files = tabs.getByRole("tab", { name: /^Files 0\// });
     expect(writeup.getAttribute("aria-controls")).toBe(screen.getByRole("tabpanel", { name: "Writeup" }).id);
     fireEvent.keyDown(writeup, { key: "ArrowRight" });
@@ -485,7 +486,7 @@ test.each(["writeup", "docs"].flatMap((tab) => ["Cancel", "Save comment"].map((c
     if (!first) throw new Error("Missing block control");
     fireEvent.click(first);
     fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "Keep this draft" } });
-    fireEvent.click(screen.getByRole("tab", { name: "Comments 2" }));
+    fireEvent.click(screen.getByRole("tab", { name: /^Comments/ }));
     const resume = await screen.findByRole("button", { name: "Resume" });
     // The original id has gone; quote placement must supply the new block id to the reader.
     const placedBlock = { ...block, id: `${block.section}-34567890` };
@@ -1272,7 +1273,7 @@ test.each(["block", "doc-thread", "html-thread"])("a Comments URL with a %s hash
   ];
   const hash = kind === "block" ? `block-${docBlock.id}` : `thread-${id}`;
   const { history, container } = mount(`?tab=comments#${hash}`);
-  await screen.findByRole("tabpanel", { name: "Comments 2" });
+  await screen.findByRole("tabpanel", { name: "Comments 0 unsent, 1 not resolved, 1 thread in all" });
   await waitFor(() => expect(document.getElementById(`thread-${id}`)).toBeTruthy());
   expect(screen.queryByRole("textbox", { name: "Reply" })).toBeNull();
   expect(searchParams(history).get("tab")).toBe("comments");
@@ -1726,7 +1727,7 @@ test("fix1 blank Comment on review cancellation leaves no draft or editor after 
   fireEvent.click(screen.getByRole("button", { name: "Comment on review" }));
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(localStorage.getItem(draftKey(id, { kind: "review" }))).toBeNull();
-  fireEvent.click(screen.getByRole("tab", { name: "Comments 2" }));
+  fireEvent.click(screen.getByRole("tab", { name: /^Comments/ }));
   await screen.findByText("No comments yet.");
   fireEvent.click(screen.getByRole("tab", { name: "Writeup" }));
   await screen.findByRole("heading", { name: "Topic 1: Plant a seed" });
@@ -1803,7 +1804,7 @@ test.each(["Cancel", "Save comment"])("fix1 Resume then %s closes replies in bot
   const diff = within(await screen.findByTestId("diff-pane"));
   fireEvent.click(await diff.findByRole("button", { name: "Reply" }));
   fireEvent.change(diff.getByRole("textbox", { name: "Reply" }), { target: { value: "A reply in two panes" } });
-  fireEvent.click(screen.getByRole("tab", { name: "Comments 2" }));
+  fireEvent.click(screen.getByRole("tab", { name: /^Comments/ }));
   fireEvent.click(await screen.findByRole("button", { name: "Resume" }));
   const comments = within(screen.getByTestId("reading-pane"));
   expect(document.activeElement).toBe(comments.getByRole("textbox", { name: "Reply" }));
@@ -1935,7 +1936,7 @@ test.each([1280, 768, 390])(
     await diff.findByRole("heading", { name: "Plant a seed" });
     if (pixels >= 1280) {
       expect(diff.queryByRole("link", { name: "Writeup" })).toBeNull();
-      fireEvent.click(screen.getByRole("tab", { name: "Comments 2" }));
+      fireEvent.click(screen.getByRole("tab", { name: /^Comments/ }));
     }
     const link = await diff.findByRole("link", { name: "Writeup" });
     expect(new URL((link as HTMLAnchorElement).href).searchParams.get("rev")).toBe("1");
@@ -1997,7 +1998,7 @@ test("R8 one writeup observer follows the top topic without scrolling the diff",
   expect(seedHeader?.hasAttribute("aria-current")).toBe(false);
   expect(waterHeader?.getAttribute("aria-current")).toBe("true");
   expect(scroll).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("tab", { name: "Comments 2" }));
+  fireEvent.click(screen.getByRole("tab", { name: /^Comments/ }));
   await screen.findByText("No comments yet.");
   expect(observer?.disconnected).toBe(true);
   expect(waterHeader?.hasAttribute("aria-current")).toBe(false);
@@ -2121,7 +2122,7 @@ test("R8 fix1 Resume reveals an already-mounted file composer before consuming i
   fireEvent.change(input, { target: { value: "Retain the existing editor" } });
   fireEvent.click(diff.getByRole("button", { name: "Collapse topic" }));
   expect(input.closest("[hidden]")).toBeTruthy();
-  fireEvent.click(screen.getByRole("tab", { name: "Comments 2" }));
+  fireEvent.click(screen.getByRole("tab", { name: /^Comments/ }));
   const resume = await within(screen.getByTestId("reading-pane")).findByRole("button", { name: "Resume" });
   act(() => resume.focus());
   const focus = input.focus.bind(input);
@@ -2589,7 +2590,7 @@ test.each([1280, 900, 390])(
     fireEvent.click(screen.getByRole("tab", { name: "Docs 2" }));
     await waitFor(() => expect(screen.queryByRole("radiogroup", { name: "Reading mode" })).toBeNull());
     expect(screen.queryByRole("navigation", { name: "Writeup outline" })).toBeNull();
-    fireEvent.click(screen.getByRole("tab", { name: "Comments 2" }));
+    fireEvent.click(screen.getByRole("tab", { name: /^Comments/ }));
     await screen.findByText("No comments yet.");
     expect(screen.queryByRole("radiogroup", { name: "Reading mode" })).toBeNull();
     if (pixels === 900) {

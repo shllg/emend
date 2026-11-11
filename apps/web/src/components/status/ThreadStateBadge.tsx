@@ -1,4 +1,5 @@
 import type { ThreadState, ThreadView } from "@emend/contract";
+import { plural } from "../../lib/count.ts";
 
 export type ShownThreadState = ThreadState | "unsent";
 export function shownThreadState(thread: ThreadView): ShownThreadState {
@@ -6,6 +7,31 @@ export function shownThreadState(thread: ThreadView): ShownThreadState {
     ? "unsent"
     : thread.state;
 }
+
+export interface ThreadCounts {
+  unsent: number;
+  open: number;
+  all: number;
+}
+
+export function threadCounts(threads: ThreadView[]): ThreadCounts {
+  let unsent = 0;
+  let open = 0;
+  for (const thread of threads) {
+    const isUnsent = shownThreadState(thread) === "unsent";
+    if (isUnsent) unsent += 1;
+    if (thread.state !== "resolved" || isUnsent) open += 1;
+  }
+  return { unsent, open, all: threads.length };
+}
+
+export function formatThreadCounts({ unsent, open, all }: ThreadCounts) {
+  return {
+    text: `${unsent} / ${open} / ${all}`,
+    description: `${unsent} unsent, ${open} not resolved, ${all} ${plural(all, "thread")} in all`,
+  };
+}
+
 const labels = { unsent: "Unsent", open: "Open", sent: "Sent", answered: "Answered", resolved: "Resolved" };
 const dots = {
   unsent: "border-[1.5px] border-dashed border-thread-open",

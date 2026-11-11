@@ -9,7 +9,7 @@ import { App } from "./App.tsx";
 import { type InboxData, inboxQuery, reviewQuery } from "./api/queries.ts";
 import type { PhoneTabs } from "./components/layout/PhoneTabs.tsx";
 import type { ReviewTabs, ReviewTabsProps } from "./components/layout/ReviewTabs.tsx";
-import { draftKey, editDraftKey } from "./lib/drafts.ts";
+import { clearDraft, draftKey, editDraftKey, saveDraft } from "./lib/drafts.ts";
 import { defaultLayout, layoutStore } from "./lib/layout-store.ts";
 import { rememberPairingSecret, takePairingSecret } from "./lib/pairing-secret.ts";
 import { validateReviewSearch } from "./router.tsx";
@@ -464,7 +464,7 @@ test.each([767, 768, 1279, 1280, 390])(
         "Writeup",
         "Files 0/1",
         "Docs",
-        "Comments 2 unsent",
+        "Comments",
         "Diff",
       ]);
       fireEvent.click(tabs.getByRole("link", { name: "Diff" }));
@@ -2621,13 +2621,19 @@ for (const size of [390, 768, 1280])
   }
 
 test.each([0, 2])(
-  "phone tabs show decorative icons, URL selection and only a positive unsent count (%s)",
-  async (unsentCount) => {
+  "phone tabs show decorative icons, URL selection and counts only for loaded threads (%s)",
+  async (count) => {
     width = 390;
     const fallback = fetchMock.getMockImplementation();
     fetchMock.mockImplementation(async (path, init) =>
-      path === `/api/v1/reviews/${id}`
-        ? Response.json({ ...item, unsentCount, revisions: [{ seq: 1, createdAt: item.updatedAt }] })
+      path.endsWith("/revisions/1")
+        ? Response.json({
+            ...revision,
+            threads: Array.from({ length: count }, (_, index) => ({
+              ...diffThread,
+              id: `22222222-2222-4222-8222-${String(index).padStart(12, "0")}`,
+            })),
+          })
         : (fallback?.(path, init) as Promise<Response>),
     );
     const { history } = mount(`/r/${id}?tab=writeup`);
@@ -2640,13 +2646,85 @@ test.each([0, 2])(
     for (const link of links) expect(link.querySelector('svg[aria-hidden="true"]')).toBeTruthy();
     expect(tabs.queryByRole("img")).toBeNull();
     expect(tabs.getByRole("link", { name: "Writeup" }).getAttribute("aria-current")).toBe("page");
-    const comments = tabs.getByRole("link", { name: unsentCount ? "Comments 2 unsent" : "Comments" });
-    expect(comments.textContent).toBe(unsentCount ? "Comments 2 unsent" : "Comments");
+    const comments = tabs.getByRole("link", {
+      name: count ? "Comments 2 unsent, 2 not resolved, 2 threads in all" : "Comments",
+    });
+    if (count) expect(within(comments).getByText("2 / 2 / 2").getAttribute("aria-hidden")).toBe("true");
+    else expect(comments.textContent).toBe("Comments");
     fireEvent.click(comments);
     await waitFor(() => expect(history.location.search).toContain("tab=comments"));
     expect(comments.getAttribute("aria-current")).toBe("page");
   },
 );
+
+test.each([1280, 390])("Comments tab counts threads and updates before the Send refetch at %s px", async (size) => {
+  width = size;
+  const threads: ThreadView[] = (
+    ["open", "open", "sent", "answered", "open", "resolved", "resolved", "resolved", "resolved"] as const
+  ).map((state, index) => ({
+    ...diffThread,
+    id: `22222222-2222-4222-8222-${String(index).padStart(12, "0")}`,
+    state,
+    comments: [{ id, author: "user", body: `Comment ${index}`, sent: index >= 2, sentOn: index >= 2 ? 1 : null }],
+  }));
+  const sentThreads = threads.map((thread, index) =>
+    index < 2
+      ? { ...thread, state: "sent" as const, comments: thread.comments.map((c) => ({ ...c, sent: true, sentOn: 1 })) }
+      : thread,
+  );
+  let sent = false;
+  let releaseRevision: ((response: Response) => void) | undefined;
+  const fallback = fetchMock.getMockImplementation();
+  fetchMock.mockImplementation(async (path, init) => {
+    if (path === `/api/v1/reviews/${id}/sends` && init?.method === "POST") {
+      expect(JSON.parse(String(init.body))).toMatchObject({ revision: 1, kind: "go" });
+      sent = true;
+      return Response.json({ sendId: id }, { status: 201 });
+    }
+    if (path.endsWith("/revisions/1")) {
+      if (sent)
+        return new Promise<Response>((resolve) => {
+          releaseRevision = resolve;
+        });
+      return Response.json({ ...revision, threads });
+    }
+    if (path === `/api/v1/reviews/${id}`)
+      return Response.json({ ...item, unsentCount: sent ? 0 : 2, revisions: [{ seq: 1, createdAt: item.updatedAt }] });
+    return fallback?.(path, init) as Promise<Response>;
+  });
+  mount(`/r/${id}?tab=comments`);
+  const role = size === 390 ? "link" : "tab";
+  const beforeName = "Comments 2 unsent, 5 not resolved, 9 threads in all";
+  const comments = await screen.findByRole(role, { name: beforeName });
+  const bubble = within(comments).getByText("2 / 5 / 9");
+  expect(bubble.getAttribute("aria-hidden")).toBe("true");
+  expect(bubble.className).toContain("bg-accent");
+  const reading = within(screen.getByRole("region", { name: "Reading" }));
+  expect(within(reading.getByRole("region", { name: "Unsent" })).getAllByRole("article")).toHaveLength(2);
+  expect(reading.getAllByRole("article")).toHaveLength(9);
+  fireEvent.click(screen.getByRole("button", { name: size === 390 ? "Send" : "Send 2" }));
+  if (size === 390) fireEvent.click(screen.getByRole("button", { name: "Send 2 comments on revision 1" }));
+  const dialog = await screen.findByRole(size === 390 ? "dialog" : "alertdialog", { name: "Sent" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+  const afterName = "Comments 0 unsent, 5 not resolved, 9 threads in all";
+  const updated = await screen.findByRole(role, { name: afterName });
+  const neutral = within(updated).getByText("0 / 5 / 9");
+  expect(neutral.className).toContain("bg-active");
+  expect(neutral.className).toContain("text-fg-2");
+  expect(neutral.className).not.toContain("bg-accent");
+  expect(reading.queryByRole("region", { name: "Unsent" })).toBeNull();
+  expect(reading.getAllByRole("article")).toHaveLength(9);
+  expect(releaseRevision).toBeTypeOf("function");
+  expect(client.getQueryState(["revision", id, 1])?.fetchStatus).toBe("fetching");
+  await act(async () => releaseRevision?.(Response.json({ ...revision, threads: sentThreads })));
+  await waitFor(() => expect(client.getQueryState(["revision", id, 1])?.fetchStatus).toBe("idle"));
+  expect(within(screen.getByRole(role, { name: afterName })).getByText("0 / 5 / 9")).toBeTruthy();
+  const key = draftKey(id, diffTarget);
+  act(() => saveDraft(key, "A local draft is not a thread"));
+  expect(screen.getByRole(role, { name: afterName })).toBe(updated);
+  expect(within(comments).getByText("0 / 5 / 9")).toBe(neutral);
+  act(() => clearDraft(key));
+});
 
 test("task 1.13 at 390 × 844 keeps Send outside the reading scroll area and before bottom tabs", async () => {
   width = 390;
@@ -3075,7 +3153,7 @@ test("pane defaults and choices are independent across desktop, tablet and phone
     "Writeup",
     "Files 0/1",
     "Docs1",
-    "Comments2",
+    "Comments",
     "Diff",
   ]);
   fireEvent.click(screen.getByRole("tab", { name: "Diff" }));

@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { FileDiff, Files, FileText, ListChecks, MessageSquare } from "lucide-react";
+import { formatThreadCounts } from "../status/ThreadStateBadge.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { cn } from "../ui/utils.ts";
 import type { ReviewTabsProps } from "./ReviewTabs.tsx";
@@ -18,10 +19,11 @@ export function PhoneTabs({
   hasDocs,
   hasWriteup,
   hasDiff,
-  unsentCount,
+  threadCounts,
   filesCount = 0,
   viewedCount = 0,
 }: ReviewTabsProps) {
+  const count = threadCounts && threadCounts.all > 0 ? formatThreadCounts(threadCounts) : undefined;
   return (
     <nav
       aria-label="Review tabs"
@@ -50,12 +52,19 @@ export function PhoneTabs({
             <span className="relative flex flex-col items-center gap-[3px]">
               <Icon icon={tab.icon} size={18} />
               <span>{tab.id === "files" ? `Files ${viewedCount}/${filesCount}` : tab.label}</span>
-              {tab.id === "comments" && unsentCount > 0 && (
-                <span className="absolute -top-1.5 left-[calc(50%+3px)] inline-grid h-[15px] min-w-[15px] place-items-center rounded-full bg-accent px-1 text-[9.5px] font-semibold leading-none text-accent-fg tabular-nums">
-                  <span className="sr-only"> </span>
-                  {unsentCount}
-                  <span className="sr-only"> unsent</span>
-                </span>
+              {tab.id === "comments" && count && (
+                <>
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "absolute -top-1.5 left-[calc(50%+3px)] inline-grid h-[15px] min-w-[15px] place-items-center rounded-full px-1 text-[9.5px] font-semibold leading-none whitespace-nowrap tabular-nums [word-spacing:-0.2em]",
+                      threadCounts && threadCounts.unsent > 0 ? "bg-accent text-accent-fg" : "bg-active text-fg-2",
+                    )}
+                  >
+                    {count.text}
+                  </span>
+                  <span className="sr-only"> {count.description}</span>
+                </>
               )}
             </span>
           </Link>

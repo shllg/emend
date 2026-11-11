@@ -1,6 +1,6 @@
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
 import { ok } from "node:assert/strict";
-import type { RenderedBlock, Target, ThreadView } from "@emend/contract";
+import type { RenderedBlock, RevisionView, Target, ThreadView } from "@emend/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -187,8 +187,21 @@ beforeEach(() => {
   localStorage.clear();
   window.dispatchEvent(new StorageEvent("storage", { key: null, storageArea: localStorage }));
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  for (const key of [["inbox"], ["review", id], ["revision", id, 1], ["revision", id, 2], ["revision", id, 3]])
-    client.setQueryData(key, {});
+  for (const key of [["inbox"], ["review", id]]) client.setQueryData(key, {});
+  for (const seq of [1, 2, 3])
+    client.setQueryData<RevisionView>(["revision", id, seq], {
+      seq,
+      base: null,
+      head: null,
+      main: null,
+      writeupEmpty: true,
+      writeup: { sections: [] },
+      docs: [],
+      files: [],
+      topics: [],
+      changedBlocks: [],
+      threads: [],
+    });
   fetchMock = vi.fn(async () => Response.json({ threadId: id, commentId: id, sendId: id }, { status: 201 }));
   vi.stubGlobal("fetch", fetchMock);
 });

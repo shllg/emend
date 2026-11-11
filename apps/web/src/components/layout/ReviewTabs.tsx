@@ -2,6 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useLayout, usePaneMode } from "../../lib/layout.ts";
 import { layoutStore, useLayoutPreferences } from "../../lib/layout-store.ts";
 import type { ReviewSearch } from "../../router.tsx";
+import { formatThreadCounts, type ThreadCounts } from "../status/ThreadStateBadge.tsx";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Tabs } from "../ui/Tabs.tsx";
 
@@ -11,7 +12,7 @@ export interface ReviewTabsProps {
   hasDocs: boolean;
   hasWriteup: boolean;
   hasDiff: boolean;
-  unsentCount: number;
+  threadCounts?: ThreadCounts;
   filesCount?: number;
   viewedCount?: number;
 }
@@ -22,7 +23,7 @@ export function ReviewTabs({
   hasDocs,
   hasWriteup,
   hasDiff,
-  unsentCount,
+  threadCounts,
   filesCount = 0,
   viewedCount = 0,
   docsCount,
@@ -41,6 +42,7 @@ export function ReviewTabs({
           : "comments"
       : search.tab;
   const value = active ?? (hasWriteup ? "writeup" : hasDocs ? "docs" : "comments");
+  const count = threadCounts && threadCounts.all > 0 ? formatThreadCounts(threadCounts) : undefined;
   return (
     <div className="em-review-tabs sticky top-0 z-(--z-sticky) flex shrink-0 items-center border-b border-line-1 bg-surface">
       <Tabs
@@ -52,7 +54,13 @@ export function ReviewTabs({
           { id: "writeup", label: "Writeup", hidden: !hasWriteup },
           { id: "files", label: `Files ${viewedCount}/${filesCount}`, hidden: !filesCount },
           { id: "docs", label: "Docs", hidden: !hasDocs, count: docsCount },
-          { id: "comments", label: "Comments", count: unsentCount, accent: true },
+          {
+            id: "comments",
+            label: "Comments",
+            count: count?.text,
+            countLabel: count?.description,
+            accent: !!threadCounts && threadCounts.unsent > 0,
+          },
           { id: "diff", label: "Diff", hidden: !showDiff },
         ].map((item) => ({ ...item, "aria-controls": `${idBase}-${item.id === "diff" ? "diff" : "reading"}-panel` }))}
         onChange={(tab) => {

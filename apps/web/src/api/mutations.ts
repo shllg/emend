@@ -114,8 +114,10 @@ export function useLifecycleMutation(reviewId: string) {
   });
 }
 
-/** Shows an accepted Send or Approve in the cached review and inbox item before the refetch lands. */
-function applyAccepted(client: QueryClient, reviewId: string, kind: "send" | "approve") {
+type Accepted = { kind: "send" | "approve"; revision?: number };
+
+/** Shows an accepted Send or Approve in the cached review, inbox and revisions before the refetch lands. */
+function applyAccepted(client: QueryClient, reviewId: string, { kind, revision }: Accepted) {
   const estimate = serverNow(client.getQueryData<InboxData>(["inbox"]));
   const activeUntil = new Date(estimate + APPROVED_ACTIVE_HOURS * 3_600_000).toISOString();
   const change = <T extends InboxItem>(item: T): T =>
@@ -129,6 +131,28 @@ function applyAccepted(client: QueryClient, reviewId: string, kind: "send" | "ap
       ? { ...list, items: list.items.map((item) => (item.id === reviewId ? change(item) : item)) }
       : list,
   );
+  if (kind === "send" && revision !== undefined) {
+    client.setQueriesData<RevisionView>({ queryKey: ["revision", reviewId] }, (view) =>
+      view
+        ? {
+            ...view,
+            threads: view.threads.map((thread) =>
+              thread.comments.some((comment) => comment.author === "user" && comment.sent === false)
+                ? {
+                    ...thread,
+                    state: "sent",
+                    comments: thread.comments.map((comment) =>
+                      comment.author === "user" && comment.sent === false
+                        ? { ...comment, sent: true, sentOn: revision }
+                        : comment,
+                    ),
+                  }
+                : thread,
+            ),
+          }
+        : view,
+    );
+  }
 }
 
 export function useReviewMutation(reviewId: string, key?: string) {
@@ -156,11 +180,11 @@ export function useReviewMutation(reviewId: string, key?: string) {
        */
       refresh?: "await" | "background";
       /**
-       * What the server did when it accepted this write: the cached review and inbox item show it
+       * What the server did when it accepted this write: the cached review, inbox and revisions show it
        * at once, the way the server will, until the refetch corrects them. This closes the gap in
        * which a second Send or Approve would still look possible.
        */
-      accepted?: "send" | "approve";
+      accepted?: Accepted;
     }) => {
       if (draft && !beginDraftSave(draft.key)) throw new Error("This draft is already saving.");
       const finishReviewSave = draft || deleteDraft ? trackReviewDraftSave(reviewId) : undefined;

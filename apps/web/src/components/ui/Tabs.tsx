@@ -1,10 +1,12 @@
 import { useId, useRef } from "react";
+import { Tooltip } from "./Tooltip.tsx";
 import { cn, selectionIndex } from "./utils.ts";
 
 export interface TabItem {
   id: string;
   label: string;
-  count?: number;
+  count?: number | string;
+  countLabel?: string;
   accent?: boolean;
   hidden?: boolean;
   "aria-controls"?: string;
@@ -16,6 +18,29 @@ export interface TabsProps {
   label: string;
   className?: string;
   idBase?: string;
+}
+
+function TabCount({ count, countLabel, accent }: Pick<TabItem, "count" | "countLabel" | "accent">) {
+  if (count == null || count === 0) return null;
+  const bubble = (
+    <span
+      aria-hidden={countLabel ? true : undefined}
+      className={cn(
+        "inline-grid h-[18px] min-w-[18px] place-items-center rounded-[9px] bg-active px-[5px] font-sans text-[10.5px] leading-none font-semibold text-fg-2 tabular-nums",
+        accent && "bg-accent text-accent-fg",
+      )}
+    >
+      {count}
+    </span>
+  );
+  return countLabel ? (
+    <>
+      <Tooltip content={countLabel}>{bubble}</Tooltip>
+      <span className="sr-only"> {countLabel}</span>
+    </>
+  ) : (
+    bubble
+  );
 }
 
 export function Tabs({ items, value, onChange, label, className, idBase }: TabsProps) {
@@ -60,16 +85,7 @@ export function Tabs({ items, value, onChange, label, className, idBase }: TabsP
           className="relative inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap border-0 bg-transparent px-2.5 font-sans text-13 font-medium leading-(--lh-snug) text-fg-3 [-webkit-tap-highlight-color:transparent] hover:text-fg-1 focus-visible:outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--ochre-500)] aria-selected:text-fg-1 aria-selected:after:absolute aria-selected:after:right-2 aria-selected:after:-bottom-px aria-selected:after:left-2 aria-selected:after:h-0.5 aria-selected:after:rounded-t-[2px] aria-selected:after:bg-(--ochre-500) aria-selected:after:content-['']"
         >
           {item.label}
-          {item.count != null && item.count !== 0 && (
-            <span
-              className={cn(
-                "inline-grid h-[18px] min-w-[18px] place-items-center rounded-[9px] bg-active px-[5px] font-sans text-[10.5px] leading-none font-semibold text-fg-2 tabular-nums",
-                item.accent && "bg-accent text-accent-fg",
-              )}
-            >
-              {item.count}
-            </span>
-          )}
+          <TabCount count={item.count} countLabel={item.countLabel} accent={item.accent} />
         </button>
       ))}
     </div>

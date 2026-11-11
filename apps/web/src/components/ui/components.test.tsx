@@ -306,6 +306,31 @@ test("Tabs generate unique ids across multiple panes", () => {
   expect(new Set(ids).size).toBe(2);
 });
 
+test("Tabs describe a text count with a tooltip and keep numeric counts unchanged", async () => {
+  const description = "2 unsent, 5 not resolved, 9 threads in all";
+  mount(
+    <Tabs
+      label="Reading pane"
+      value="comments"
+      items={[
+        { id: "docs", label: "Docs", count: 2 },
+        { id: "comments", label: "Comments", count: "2 / 5 / 9", countLabel: description, accent: true },
+      ]}
+    />,
+  );
+  const docs = screen.getByRole("tab", { name: "Docs 2" });
+  const numeric = within(docs).getByText("2");
+  expect(numeric.hasAttribute("aria-hidden")).toBe(false);
+  expect(numeric.className).toContain("bg-active");
+  const comments = screen.getByRole("tab", { name: `Comments ${description}` });
+  const bubble = within(comments).getByText("2 / 5 / 9");
+  expect(bubble.getAttribute("aria-hidden")).toBe("true");
+  expect(bubble.className).toContain("bg-accent");
+  fireEvent.pointerMove(bubble, { pointerType: "mouse" });
+  expect((await screen.findByRole("tooltip")).textContent).toBe(description);
+  expect(screen.getByRole("tab", { name: `Comments ${description}` })).toBe(comments);
+});
+
 test.each(["missing", "docs"])("Tabs keep a visible tab stop when value %s is not visible", (value) => {
   mount(
     <Tabs
