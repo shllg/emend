@@ -101,6 +101,16 @@ export function ReviewHeader({
           <OriginBadge origin={review.origin} dot className="size-[7px] opacity-85" />
           {review.origin.name}
         </span>
+        {review.project !== null && (
+          <>
+            <span aria-hidden="true" className="text-line-strong">
+              ·
+            </span>
+            <span dir="auto" className="min-w-0 wrap-anywhere">
+              {review.project}
+            </span>
+          </>
+        )}
         {review.state !== "open" && (
           <>
             <span aria-hidden="true" className="text-line-strong">

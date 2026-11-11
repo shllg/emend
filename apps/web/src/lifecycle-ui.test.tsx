@@ -17,6 +17,7 @@ const item: InboxItem = {
   title: "Synthetic review",
   origin: { id, name: "Workshop" },
   repo: "c".repeat(64),
+  project: null,
   branch: "main",
   state: "open",
   newestRevision: 1,

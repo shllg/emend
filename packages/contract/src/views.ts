@@ -30,6 +30,7 @@ export const InboxItem = z.object({
   title: PublishRequest.shape.title,
   origin: z.object({ id: z.uuid(), name: z.string() }),
   repo: Sha256.nullable(),
+  project: z.string().min(1).max(LIMITS.titleChars).nullable().default(null),
   branch: PublishRequest.shape.branch,
   state: ReviewState,
   newestRevision: z.int().positive(),

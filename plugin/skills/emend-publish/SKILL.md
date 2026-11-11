@@ -46,6 +46,7 @@ If you wrote it elsewhere, copy it into a doc root as step 1 says.
 ## Publish
 
 Run from the document's repository, or name a path under a doc root the user allowed.
+The review shows its repository's name; outside one, add `--project <name>`.
 Use a short, plain title; titles starting with `--` are refused.
 
 `emend publish <file>` also takes any UTF-8 text file: config, script, SQL or log.
@@ -54,7 +55,7 @@ A folder walk skips secret-looking filenames (not Markdown or HTML), binary, ove
 files, text shown as source holding a private key, and folders named `secret(s)` or `credential(s)` in any case below the folder argument.
 Below a folder argument, HTML assets in those folders or holding a private key are skipped too; other assets are not checked.
 Explicit file or folder arguments publish as named; never name a credential file or secrets folder.
-Warnings stop after 20 (`SHORTCUT_LIMITS.warnings`), then count further skips.
+Warnings stop after 20, then count further skips.
 Each folder argument gets a published-file count.
 
 If an emend error line mentions an agent sandbox, show the user that line and stop.
@@ -87,4 +88,3 @@ Ask the user first before publishing anything they marked confidential.
 No agent waits on this review.
 The reviewer's comments reach an agent later through the emend-feedback skill, with the review id.
 The review id is the last segment of the URL, `/r/<review-id>`.
-For example, `http://127.0.0.1:3636/r/<review-id>`.

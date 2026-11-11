@@ -271,7 +271,7 @@ test.each([false, true])("publish rejects a doc alias to a non-doc file (explici
       root: f.source,
       worktree: f.source,
       gitDirs: [join(f.source, ".git")],
-      git: vi.fn(),
+      git: vi.fn().mockResolvedValue(Buffer.alloc(0)),
     }),
   ).rejects.toThrow("doc source must end in .md, .markdown, .html or .htm, like its path.");
 });
@@ -293,7 +293,12 @@ test("doc upload rereads recheck the real extension while allowing dot folders",
     null,
     f.source,
     () => {},
-    { root: f.source, worktree: f.source, gitDirs: [join(f.source, ".git")], git: vi.fn() },
+    {
+      root: f.source,
+      worktree: f.source,
+      gitDirs: [join(f.source, ".git")],
+      git: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+    },
   );
   const blob = [...result.blobs.values()][0];
   expect((await blob?.read())?.toString()).toBe("Synthetic plan in a dot folder");

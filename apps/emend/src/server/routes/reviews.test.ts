@@ -37,6 +37,28 @@ async function seedWriteup(revisionId: string) {
 const get = (suffix = "", who: "reviewer" | "foreign" | "agent" = "reviewer") =>
   f.request(`/reviews${suffix}`, "GET", undefined, who);
 
+test.each([
+  { kind: "review", name: "Code project", project: "Code project" },
+  { kind: "publish", name: "Doc project", project: "Doc project" },
+  { kind: "publish", name: null, project: null },
+  { kind: "review", name: ".git", project: null },
+])("inbox and review metadata show project $project for $kind with repo $name", async ({ kind, name, project }) => {
+  const repo = name === null ? null : { key: "b".repeat(64), name };
+  const published = await publishReview(f, {
+    repo,
+    diff: kind === "review",
+    docs: { "plan.md": "# Synthetic plan" },
+    writeup: { overview: "", tldr: "", decisions: null, topics: {} },
+  });
+  const list = contract.InboxList.parse(await (await get()).json());
+  expect(list.items.find((item: contract.InboxItem) => item.id === published.reviewId)).toMatchObject({
+    repo: repo?.key ?? null,
+    project,
+    kind,
+  });
+  expect(await (await get(`/${published.reviewId}`)).json()).toMatchObject({ repo: repo?.key ?? null, project, kind });
+});
+
 test("all three GETs parse their schemas and enforce reviewer scope and owner isolation", async () => {
   const approved = await f.request(`/reviews/${f.reviewId}/sends`, "POST", { kind: "approve", revision: 1 });
   expect(approved.status).toBe(201);

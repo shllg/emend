@@ -21,6 +21,7 @@ const item = {
   title: "Synthetic",
   origin: { id, name: "Synthetic machine" },
   repo: null,
+  project: null,
   branch: null,
   state: "open",
   newestRevision: 1,

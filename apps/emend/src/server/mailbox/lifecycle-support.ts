@@ -1,4 +1,4 @@
-import type { WriteupInput } from "@emend/contract";
+import type { PublishRequest, WriteupInput } from "@emend/contract";
 import { PublishResponse, WaitResult } from "@emend/contract";
 import { expect } from "vitest";
 import type { mailboxFixture } from "./test-support.ts";
@@ -19,6 +19,7 @@ export async function publishReview(
     diff?: boolean;
     links?: unknown;
     repoUrl?: string;
+    repo?: PublishRequest["repo"];
   } = {},
 ) {
   const files = [];
@@ -36,7 +37,7 @@ export async function publishReview(
     "POST",
     {
       reviewKey: (options.key ?? "c").repeat(64),
-      repo: null,
+      repo: options.repo ?? null,
       branch: null,
       title: options.title ?? "Synthetic lifecycle review",
       base: options.diff ? "a".repeat(40) : null,

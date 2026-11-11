@@ -39,6 +39,7 @@ const review: ReviewView = {
   title: "Synthetic garden",
   origin: { id, name: "Workshop" },
   repo: null,
+  project: null,
   branch: null,
   state: "open",
   newestRevision: 1,

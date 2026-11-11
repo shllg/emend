@@ -10,6 +10,7 @@ const review: ReviewView = {
   title: "Synthetic review",
   origin: { id: "22222222-2222-4222-8222-222222222222", name: "Workshop" },
   repo: "c".repeat(64),
+  project: null,
   branch: "topic/synthetic",
   state: "open",
   newestRevision: 2,
@@ -62,6 +63,30 @@ function mount({ metadata = review, loaded = revision, phone = false, seq = 2 } 
   );
   return { ...result, onRevisionChange, titleRef };
 }
+
+test.each(["Orchard", "<img src=x onerror=alert(1)>"])(
+  "header project %s is isolated text after the machine",
+  (project) => {
+    const { container } = mount({ metadata: { ...review, project } });
+    const label = screen.getByText(project);
+    expect(label.getAttribute("dir")).toBe("auto");
+    expect(label.classList.contains("wrap-anywhere")).toBe(true);
+    expect(label.previousElementSibling?.textContent).toBe("·");
+    expect(label.previousElementSibling?.getAttribute("aria-hidden")).toBe("true");
+    expect(label.previousElementSibling?.previousElementSibling).toBe(screen.getByText("Workshop"));
+    expect(container.querySelector("img")).toBeNull();
+  },
+);
+
+test("a null project adds no metadata or separator after the machine", () => {
+  mount({ metadata: { ...review, project: null } });
+  const meta = screen.getByText("Workshop").parentElement;
+  expect(meta?.querySelector('[dir="auto"]')).toBeNull();
+  const count = meta?.children.length;
+  cleanup();
+  mount({ metadata: { ...review, project: "Orchard" } });
+  expect(screen.getByText("Workshop").parentElement?.children.length).toBe((count ?? 0) + 2);
+});
 
 test("links show as chips that open in a new tab, and nothing shows without links", () => {
   const { unmount } = mount();

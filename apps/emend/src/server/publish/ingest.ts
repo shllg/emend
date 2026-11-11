@@ -8,7 +8,7 @@ import {
   type PublishResponse,
 } from "@emend/contract";
 import { composeRenames, decodeText } from "@emend/core";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, notExists, sql } from "drizzle-orm";
 import type { Db, Queries } from "../../db/client.ts";
 import { DuplicateReviewKeyError } from "../../db/repo/reviews.ts";
 import {
@@ -38,7 +38,14 @@ import type { Executor, SharedSides, Work, WorkLast } from "./work.ts";
 
 type Deps = { db: Db; blobs: BlobStore; baseUrl: string; executor?: Executor; signal?: AbortSignal };
 type FileRow = typeof files.$inferSelect;
-async function findReview(ownerId: string, instanceId: string, input: PublishRequest, q: Queries, create = true) {
+async function findReview(
+  ownerId: string,
+  instanceId: string,
+  input: PublishRequest,
+  q: Queries,
+  create = true,
+  repoId: string | null = null,
+) {
   const owned = and(eq(reviews.ownerId, ownerId), eq(reviews.originInstanceId, instanceId));
   const existing = await q
     .select()
@@ -51,20 +58,6 @@ async function findReview(ownerId: string, instanceId: string, input: PublishReq
   }
   if (input.reviewId) throw new ApiError("unknown_review");
   if (!create) return undefined;
-  let repoId: string | null = null;
-  if (input.repo) {
-    await q
-      .insert(repos)
-      .values({ ownerId, ...input.repo })
-      .onConflictDoNothing({ target: [repos.ownerId, repos.key] });
-    const repo = await q
-      .select()
-      .from(repos)
-      .where(and(eq(repos.ownerId, ownerId), eq(repos.key, input.repo.key)))
-      .get();
-    if (!repo) throw new Error("Repository insert failed");
-    repoId = repo.id;
-  }
   const review = await q
     .insert(reviews)
     .values({
@@ -80,6 +73,24 @@ async function findReview(ownerId: string, instanceId: string, input: PublishReq
     .get();
   if (!review) throw new DuplicateReviewKeyError();
   return review;
+}
+async function publishRepo(ownerId: string, repo: NonNullable<PublishRequest["repo"]>, q: Queries) {
+  await q
+    .insert(repos)
+    .values({ ownerId, ...repo })
+    .onConflictDoNothing({ target: [repos.ownerId, repos.key] });
+  const stored = await q
+    .select()
+    .from(repos)
+    .where(and(eq(repos.ownerId, ownerId), eq(repos.key, repo.key)))
+    .get();
+  if (!stored) throw new Error("Repository insert failed");
+  if (stored.name === ".git" && repo.name !== ".git")
+    await q
+      .update(repos)
+      .set({ name: repo.name })
+      .where(and(eq(repos.ownerId, ownerId), eq(repos.id, stored.id), eq(repos.name, ".git")));
+  return stored.id;
 }
 export async function ingest(
   ownerId: string,
@@ -455,7 +466,8 @@ async function computePublish(
     return deps.db.transaction(
       async (q) => {
         checkPublishSignal(deps.signal);
-        const review = await findReview(ownerId, instanceId, input, q);
+        const incomingRepoId = input.repo ? await publishRepo(ownerId, input.repo, q) : null;
+        const review = await findReview(ownerId, instanceId, input, q, true, incomingRepoId);
         if (!review) throw new Error("Missing review");
         const newest = await q
           .select()
@@ -602,9 +614,23 @@ async function computePublish(
             snoozedUntil: null,
             title: input.title,
             branch: input.branch,
+            repoId: incomingRepoId ?? review.repoId,
             updatedAt: Date.now(),
           })
           .where(and(eq(reviews.ownerId, ownerId), eq(reviews.id, review.id)));
+        if (review.repoId && incomingRepoId && review.repoId !== incomingRepoId)
+          await q.delete(repos).where(
+            and(
+              eq(repos.ownerId, ownerId),
+              eq(repos.id, review.repoId),
+              notExists(
+                q
+                  .select({ one: sql`1` })
+                  .from(reviews)
+                  .where(and(eq(reviews.ownerId, ownerId), eq(reviews.repoId, review.repoId))),
+              ),
+            ),
+          );
         await yieldToLoop("publish-finalize");
         checkPublishSignal(deps.signal);
         return {

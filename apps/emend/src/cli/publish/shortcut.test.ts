@@ -15,7 +15,7 @@ import { workInThread } from "../../test/in-thread-worker.ts";
 import { directFixture } from "../direct-test-support.ts";
 import { escapeReference } from "../escape.ts";
 import { provenTestServer } from "../test-support.ts";
-import { docsKey } from "./key.ts";
+import { docsKey, projectKey } from "./key.ts";
 import * as sourceReads from "./read.ts";
 import { publishContext } from "./resolve.ts";
 import * as shortcuts from "./shortcut.ts";
@@ -85,6 +85,15 @@ async function fixture(realWorker = false) {
   }
   return { ...f, file, publish, capture };
 }
+
+test("path-form publishing sends the trimmed explicit project", async () => {
+  const f = await fixture();
+  await f.file("plan.md");
+  const capture = await f.capture();
+  const result = await f.publish("plan.md", "--project", "  Synthetic project  ");
+  expect(result.code, result.stderr.join("")).toBe(0);
+  expect(capture.requests[0]?.repo).toEqual({ key: projectKey("Synthetic project"), name: "Synthetic project" });
+});
 
 test.each(["md", "html"])("failed %s title inference falls back and closes the worker", async (extension) => {
   const f = await fixture();

@@ -20,6 +20,7 @@ const base: ReviewView = {
   title: "Synthetic review",
   origin: { id: reviewId, name: "Workshop" },
   repo: null,
+  project: null,
   branch: null,
   state: "open",
   newestRevision: 3,

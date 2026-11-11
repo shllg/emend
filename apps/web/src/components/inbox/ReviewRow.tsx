@@ -41,7 +41,17 @@ export function ReviewRow({
         <span aria-hidden="true" className="inline-flex [&>span]:size-[7px] [&>span]:opacity-85">
           <OriginBadge origin={review.origin} dot />
         </span>
-        <span className="truncate">{review.origin.name}</span>
+        <span className="min-w-0 truncate">{review.origin.name}</span>
+        {review.project !== null && (
+          <>
+            <span aria-hidden="true" className="shrink-0 text-fg-3">
+              ·
+            </span>
+            <span dir="auto" className="min-w-0 truncate">
+              {review.project}
+            </span>
+          </>
+        )}
       </span>
       <span className="col-start-2 row-start-1 inline-flex items-center whitespace-nowrap text-12 font-normal text-fg-3 tabular-nums">
         {review.snoozed ? (

@@ -31,6 +31,8 @@ test("review views validate their states, limits, rendered blocks and doc varian
   expect(contract.InboxItem.safeParse({ ...item, pickedUpAt: "yesterday" }).success).toBe(false);
   const { pickedUpAt: _omitted, ...withoutPickedUp } = item;
   expect(contract.InboxItem.safeParse(withoutPickedUp).success).toBe(false);
+  expect(contract.InboxItem.parse(item).project).toBeNull();
+  expect(contract.ReviewView.parse({ ...item, revisions: [] }).project).toBeNull();
   // The cap of 200 applies to each of the three lists.
   expect(
     contract.InboxList.safeParse({
@@ -76,6 +78,16 @@ test("review views validate their states, limits, rendered blocks and doc varian
       docs: [{ path: "a.html", kind: "html", contentUrl: "https://evil.example/a" }],
     }).success,
   ).toBe(false);
+});
+
+test("project names are nullable and bounded, with an absent name defaulting to null", () => {
+  for (const schema of [contract.InboxItem.shape.project, contract.ReviewView.shape.project]) {
+    expect(schema.parse(null)).toBeNull();
+    expect(schema.parse(undefined)).toBeNull();
+    expect(schema.parse("x".repeat(200))).toBe("x".repeat(200));
+    expect(schema.safeParse("").success).toBe(false);
+    expect(schema.safeParse("x".repeat(201)).success).toBe(false);
+  }
 });
 
 test("changed blocks retain validated IDs and positive revision sequences", () => {

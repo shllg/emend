@@ -5,7 +5,17 @@ import { LIMITS, type PublishRequest } from "@emend/contract";
 import { renderDoc, renderWriteup } from "@emend/core";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { changedBlocks, files, instances, placements, reviews, revisions, threads, writeups } from "../../db/schema.ts";
+import {
+  changedBlocks,
+  files,
+  instances,
+  placements,
+  repos,
+  reviews,
+  revisions,
+  threads,
+  writeups,
+} from "../../db/schema.ts";
 import { testDb } from "../../db/test-support.ts";
 import { BlobStore } from "../../store/blobs.ts";
 import { WorkTimeout, workerExecutor } from "./executor.ts";
@@ -40,6 +50,90 @@ function publish(
 ) {
   return ingest(ownerId, instanceId, body, { db: f.db, blobs, baseUrl: "http://127.0.0.1:3636", executor });
 }
+
+test("publishing repairs only legacy .git names and a null repo keeps the project", async () => {
+  const repo = { key: "b".repeat(64), name: ".git" };
+  const first = await publish({ ...input(), repo });
+  const repository = () => f.db.read((q) => q.select().from(repos).where(eq(repos.ownerId, f.ownerId)).get());
+  const original = await repository();
+  expect(original?.name).toBe(".git");
+  await publish({ ...input(), repo: { ...repo, name: "Synthetic project" } });
+  expect(await repository()).toMatchObject({ id: original?.id, name: "Synthetic project" });
+  await publish({ ...input(), repo: { ...repo, name: "Other name" } });
+  expect((await repository())?.name).toBe("Synthetic project");
+  await publish(input());
+  expect(
+    await f.db.read((q) =>
+      q
+        .select()
+        .from(reviews)
+        .where(and(eq(reviews.ownerId, f.ownerId), eq(reviews.id, first.reviewId)))
+        .get(),
+    ),
+  ).toMatchObject({ repoId: original?.id });
+  expect((await repository())?.name).toBe("Synthetic project");
+});
+
+test.each([false, true])("moving a review removes its old repo only when unreferenced (shared=%s)", async (shared) => {
+  const repo = { key: "b".repeat(64), name: "First project" };
+  const first = await publish({ ...input(), repo });
+  const allRepos = () => f.db.read((q) => q.select().from(repos).where(eq(repos.ownerId, f.ownerId)));
+  const oldRepo = (await allRepos())[0];
+  if (shared) await publish({ ...input(), reviewKey: "c".repeat(64), repo });
+  const next = { key: "d".repeat(64), name: "Next project" };
+  await publish({ ...input(), reviewId: first.reviewId, repo: next });
+  const rows = await allRepos();
+  expect(rows.some((row) => row.id === oldRepo?.id)).toBe(shared);
+  const newRepo = rows.find((row) => row.key === next.key);
+  expect(newRepo).toMatchObject(next);
+  expect(
+    await f.db.read((q) =>
+      q
+        .select()
+        .from(reviews)
+        .where(and(eq(reviews.ownerId, f.ownerId), eq(reviews.id, first.reviewId)))
+        .get(),
+    ),
+  ).toMatchObject({ repoId: newRepo?.id });
+});
+
+test("publishing never renames or links another owner's repo with the same key", async () => {
+  const key = "b".repeat(64);
+  await publish({ ...input(), repo: { key, name: ".git" } }, f.instanceId, f.otherOwnerId);
+  const otherRepo = () => f.db.read((q) => q.select().from(repos).where(eq(repos.ownerId, f.otherOwnerId)).get());
+  const foreign = await otherRepo();
+  const first = await publish(input());
+  await publish({ ...input(), repo: { key, name: "Own project" } });
+  const own = await f.db.read((q) => q.select().from(repos).where(eq(repos.ownerId, f.ownerId)).get());
+  expect(own).toMatchObject({ key, name: "Own project" });
+  expect(own?.id).not.toBe(foreign?.id);
+  expect(await otherRepo()).toEqual(foreign);
+  expect(
+    await f.db.read((q) =>
+      q
+        .select()
+        .from(reviews)
+        .where(and(eq(reviews.ownerId, f.ownerId), eq(reviews.id, first.reviewId)))
+        .get(),
+    ),
+  ).toMatchObject({ repoId: own?.id });
+});
+
+test("a failed render leaves repo creation and legacy-name repair untouched", async () => {
+  const repo = { key: "b".repeat(64), name: ".git" };
+  await publish({ ...input(), repo });
+  const repository = () => f.db.read((q) => q.select().from(repos).where(eq(repos.ownerId, f.ownerId)));
+  const before = await repository();
+  const fail: Executor = async () => {
+    throw new Error("synthetic render failure");
+  };
+  for (const key of [repo.key, "c".repeat(64)]) {
+    await expect(
+      publish({ ...input(), repo: { key, name: "New project" } }, f.instanceId, f.ownerId, fail),
+    ).rejects.toMatchObject({ code: "invalid_request", detail: "writeup_failed" });
+    expect(await repository()).toEqual(before);
+  }
+});
 test.each([false, true])("first publish skips changes; revision 2 compares against it (empty=%s)", async (empty) => {
   const executor = vi.fn(executeWork);
   const firstDoc = await blobs.put(f.ownerId, Buffer.from("Original doc"), "text/markdown");

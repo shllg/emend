@@ -21,6 +21,7 @@ const item: InboxItem = {
   title: "Synthetic review",
   origin: { id, name: "Workshop" },
   repo: "c".repeat(64),
+  project: null,
   branch: "main",
   state: "open",
   newestRevision: 1,
@@ -2037,6 +2038,7 @@ test("inbox row shows machine, title, branch, local time, counts and attention w
   mount();
   const row = await screen.findByRole("link", { name: /Synthetic review/ });
   expect(within(row).getByText("Workshop")).toBeTruthy();
+  expect(within(row).queryByText("·")).toBeNull();
   expect(screen.queryByRole("link", { name: /From Workshop/ })).toBeNull();
   expect(within(row).queryByRole("img", { name: "From Workshop" })).toBeNull();
   expect(within(row).getByText("main")).toBeTruthy();
@@ -2050,6 +2052,118 @@ test("inbox row shows machine, title, branch, local time, counts and attention w
   expect(within(row).getByText("Needs you.").className).toBe("sr-only");
   expect(row.querySelector('[aria-hidden="true"].bg-accent')).toBeTruthy();
 });
+
+test.each(["Orchard", "<img src=x onerror=alert(1)>"])(
+  "row project %s is isolated text beside the machine",
+  async (project) => {
+    withInbox([{ ...item, project }]);
+    mount();
+    const row = await screen.findByRole("link", { name: /Synthetic review/ });
+    const machine = within(row).getByText("Workshop");
+    const label = within(row).getByText(project);
+    expect(label.getAttribute("dir")).toBe("auto");
+    expect(label.parentElement).toBe(machine.parentElement);
+    expect(label.previousElementSibling?.textContent).toBe("·");
+    expect(label.previousElementSibling?.getAttribute("aria-hidden")).toBe("true");
+    expect(label.previousElementSibling?.previousElementSibling).toBe(machine);
+    expect(row.querySelector("img")).toBeNull();
+    for (const element of [machine, label]) {
+      expect(element.classList.contains("min-w-0")).toBe(true);
+      expect(element.classList.contains("truncate")).toBe(true);
+    }
+  },
+);
+
+test("project picker groups repository names, sorts them, filters and clears with text", async () => {
+  const shared = {
+    ...item,
+    id: "33333333-3333-4333-8333-333333333333",
+    title: "Shared project",
+    repo: "d".repeat(64),
+    project: "Orchard",
+  };
+  withInbox([
+    { ...item, project: "Orchard" },
+    { ...secondItem, project: "Atrium" },
+    shared,
+    { ...item, id: "44444444-4444-4444-8444-444444444444", title: "No project" },
+  ]);
+  mount();
+  const picker = await screen.findByRole("combobox", { name: "Project" });
+  expect(
+    within(picker)
+      .getAllByRole("option")
+      .map((option) => option.textContent),
+  ).toEqual(["All projects", "Atrium", "Orchard"]);
+  fireEvent.change(picker, { target: { value: "Orchard" } });
+  expect(screen.getByRole("link", { name: /Synthetic review/ })).toBeTruthy();
+  expect(screen.getByRole("link", { name: /Shared project/ })).toBeTruthy();
+  expect(screen.queryByRole("link", { name: /Another proposal/ })).toBeNull();
+  expect(screen.queryByRole("link", { name: /No project/ })).toBeNull();
+  fireEvent.change(screen.getByRole("textbox", { name: "Filter reviews" }), { target: { value: "Atrium" } });
+  expect(screen.getByText("No reviews match this filter.")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Clear filter" }));
+  expect((picker as HTMLSelectElement).value).toBe("");
+  expect(within(screen.getByRole("list")).getAllByRole("link")).toHaveLength(4);
+  fireEvent.change(screen.getByRole("textbox", { name: "Filter reviews" }), { target: { value: "oRCHard" } });
+  expect(within(screen.getByRole("list")).getAllByRole("link")).toHaveLength(2);
+  expect(screen.queryByRole("link", { name: /Another proposal/ })).toBeNull();
+});
+
+test("a project selection is ignored when it disappears from the inbox", async () => {
+  withInbox([
+    { ...item, project: "Orchard" },
+    { ...secondItem, project: "Atrium" },
+  ]);
+  mount();
+  const picker = await screen.findByRole("combobox", { name: "Project" });
+  fireEvent.change(picker, { target: { value: "Orchard" } });
+  const items = [
+    { ...item, project: "Courtyard" },
+    { ...secondItem, project: "Atrium" },
+  ];
+  withInbox(items);
+  act(() =>
+    client.setQueryData<InboxData>(["inbox"], {
+      serverTime: new Date().toISOString(),
+      receivedAt: Date.now(),
+      receivedMono: performance.now(),
+      items,
+    }),
+  );
+  await waitFor(() => expect((picker as HTMLSelectElement).value).toBe(""));
+  expect(screen.getByRole("link", { name: /Another proposal/ })).toBeTruthy();
+  expect(screen.getByRole("link", { name: /Synthetic review/ })).toBeTruthy();
+});
+
+test.each([null, "Orchard"])("one distinct project (%s) omits the picker", async (project) => {
+  withInbox([
+    { ...item, project },
+    { ...secondItem, project },
+  ]);
+  mount();
+  await screen.findByRole("link", { name: /Synthetic review/ });
+  expect(screen.queryByRole("combobox", { name: "Project" })).toBeNull();
+});
+
+test.each([1280, 900])(
+  "compact inbox shows projects and matches their text without a picker at %s px",
+  async (size) => {
+    width = size;
+    withInbox([
+      { ...item, project: "Orchard" },
+      { ...secondItem, project: "Atrium" },
+    ]);
+    mount(`/r/${id}`);
+    const sidebar = await openReviewInbox();
+    const row = await sidebar.findByRole("link", { name: /Synthetic review/ });
+    expect(within(row).getByText("Orchard").getAttribute("dir")).toBe("auto");
+    expect(sidebar.queryByRole("combobox", { name: "Project" })).toBeNull();
+    fireEvent.change(sidebar.getByRole("textbox", { name: "Filter reviews" }), { target: { value: "atrium" } });
+    expect(sidebar.queryByRole("link", { name: /Synthetic review/ })).toBeNull();
+    expect(sidebar.getByRole("link", { name: /Another proposal/ })).toBeTruthy();
+  },
+);
 
 test.each(["approved", "settled"] as const)(
   "%s row replaces time with state and has no attention mark",

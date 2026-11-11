@@ -53,6 +53,7 @@ export function Inbox({
   const query = useQuery(inboxQuery());
   const [filter, setFilter] = useState("");
   const [machine, setMachine] = useState("");
+  const [project, setProject] = useState("");
   const [kind, setKindState] = useState<Kind>(readKind);
   const setKind = (next: Kind) => {
     setKindState(next);
@@ -95,16 +96,23 @@ export function Inbox({
   );
   const machineFilter =
     !compact && origins.length > 1 && origins.some((origin) => origin.id === machine) ? machine : "";
+  const projects = [...new Set(items.flatMap((review) => (review.project === null ? [] : [review.project])))].sort(
+    (a, b) => a.localeCompare(b),
+  );
+  const projectFilter = !compact && projects.length > 1 && projects.includes(project) ? project : "";
   const needle = filter.toLocaleLowerCase();
   const filtered = items.filter(
     (review) =>
       (!machineFilter || review.origin.id === machineFilter) &&
+      (!projectFilter || review.project === projectFilter) &&
       // Keep the open sidebar review, and never hide an agent-waiting item under Reviews.
       (!kind ||
         review.kind === kind ||
         (kind === "review" && review.agentWaiting) ||
         (compact && review.id === currentReviewId)) &&
-      [review.title, review.branch, review.origin.name].some((value) => value?.toLocaleLowerCase().includes(needle)),
+      [review.title, review.branch, review.origin.name, review.project].some((value) =>
+        value?.toLocaleLowerCase().includes(needle),
+      ),
   );
   const highlighted = useInboxArrivals(items);
   const Heading = compact ? "h3" : "h2";
@@ -131,7 +139,7 @@ export function Inbox({
       <div className={compact ? "flex flex-col gap-2 px-2.5 pb-2" : "mb-3 flex flex-wrap items-center gap-2.5"}>
         <TextField
           aria-label="Filter reviews"
-          placeholder="Filter by title, branch, machine"
+          placeholder="Filter by title, branch, machine, project"
           icon={Search}
           size="sm"
           value={filter}
@@ -167,6 +175,17 @@ export function Inbox({
             ]}
           />
         )}
+        {!compact && projects.length > 1 && (
+          <Select
+            aria-label="Project"
+            dir="auto"
+            size="sm"
+            className="min-w-0 max-w-full"
+            value={projectFilter}
+            onChange={(event) => setProject(event.target.value)}
+            options={[{ value: "", label: "All projects" }, ...projects.map((name) => ({ value: name, label: name }))]}
+          />
+        )}
       </div>
       <div className={compact ? "relative min-h-0 flex-1 overflow-y-auto px-1.5 pt-1 pb-3" : "py-1"}>
         {query.isPending && (
@@ -189,6 +208,7 @@ export function Inbox({
               onClick={() => {
                 setFilter("");
                 setMachine("");
+                setProject("");
                 setKind("");
               }}
             >

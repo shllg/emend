@@ -13,6 +13,7 @@ function key(parts: string[]) {
 }
 export const reviewKey = (instanceId: string, root: string, branch: string) => key(["code", instanceId, root, branch]);
 export const docsKey = (instanceId: string, name: string) => key(["docs", instanceId, name]);
+export const projectKey = (name: string) => key(["project", name]);
 export function normalizeRemote(remote: string): string {
   let value = remote.trim();
   if (!value.includes("://") && /^(?:[^@/]+@)?[^/:]+:.+/.test(value)) value = `ssh://${value.replace(":", "/")}`;

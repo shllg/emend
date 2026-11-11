@@ -18,6 +18,7 @@ const review: ReviewView = {
   title: "Synthetic source",
   origin: { id, name: "Workshop" },
   repo: null,
+  project: null,
   branch: null,
   state: "open",
   newestRevision: 1,

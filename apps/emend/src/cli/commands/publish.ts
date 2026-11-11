@@ -14,9 +14,9 @@ import { SHORTCUT_LIMITS } from "../publish/shortcut-walk.ts";
 import { upload } from "../publish/upload.ts";
 import { readAttachmentPair, resolveTarget } from "../target.ts";
 
-type PublishArgs = ShortcutOptions & { manifest?: string; json?: boolean };
+type PublishArgs = ShortcutOptions & { manifest?: string; json?: boolean; project?: string };
 const publishUsage =
-  "usage: emend publish <path>... [--title T] [--key K | --new] [--review ID] [--main PATH] [--source] [--json], or emend publish --manifest <file> [--review <id>] [--key <name>]";
+  "usage: emend publish <path>... [--title T] [--key K | --new] [--review ID] [--main PATH] [--source] [--json] [--project NAME], or emend publish --manifest <file> [--review <id>] [--key <name>] [--project NAME]";
 
 export function parsePublishArgs(args: string[]): PublishArgs {
   const opts: PublishArgs = { paths: [] };
@@ -42,6 +42,20 @@ export function parsePublishArgs(args: string[]): PublishArgs {
       const key = name === "--new" ? "new" : name === "--source" ? "source" : "json";
       if (opts[key]) throw new CliError("duplicate publish option");
       opts[key] = true;
+      continue;
+    }
+    if (name === "--project") {
+      if (opts.project !== undefined) throw new CliError("duplicate publish option");
+      const value = args[++i];
+      if (value === undefined || value.startsWith("--")) throw new CliError(publishUsage);
+      const project = value.trim();
+      if (
+        !project ||
+        project.length > LIMITS.titleChars ||
+        Array.from(value).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
+      )
+        throw new CliError("invalid project name");
+      opts.project = project;
       continue;
     }
     if (!["--manifest", "--review", "--key", "--title", "--main"].includes(name)) throw new CliError(publishUsage);
@@ -138,6 +152,7 @@ export async function publishCommand(stateDir: string, args: string[], io: Io, c
     manifest: parsed.manifest,
     key: shortcut?.key ?? parsed.key,
     review: parsed.review,
+    project: parsed.project,
     skipNodeModules: shortcut !== undefined,
     titleFromMain: shortcut?.titleFromMain,
     docFolders: shortcut?.docFolders,
