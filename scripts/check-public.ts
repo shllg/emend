@@ -13,7 +13,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readlinkSync } from "node:fs";
 import { isIP } from "node:net";
 import path from "node:path";
-import { brotliDecompressSync, deflateSync, inflateSync } from "node:zlib";
+import { brotliDecompressSync, inflateSync } from "node:zlib";
 
 export interface PrivateTerms {
   terms: { value: string; line: number; source?: "file" | "env" }[];
@@ -1307,19 +1307,10 @@ const ASSET_BYTES = 25 * 1024 * 1024;
 const EXPANDED_BYTES = 50 * 1024 * 1024;
 // Raw views measure 15–23 budget bytes per input byte on real PNGs/fonts with and without terms, about 28 on contrived content.
 const RAW_VIEW_COST = 32;
-// Large real font tables measure 1.8–2.9x; above 4x, keep strict views of the expansion.
-const FONT_EXPANSION_RATIO = 4;
 const FONT_BULK_TAGS = new Set([
   "glyf", "loca", "CFF ", "CFF2", "gvar", "hmtx", "vmtx", "hdmx", "kern", "kerx", "morx", "GPOS", "GSUB", "GDEF",
   "CBDT", "CBLC", "EBDT", "EBLC", "sbix", "COLR", "cvt ", "fpgm", "prep", "HVAR", "VVAR",
 ]);
-const WOFF2_TAGS = [
-  "cmap", "head", "hhea", "hmtx", "maxp", "name", "OS/2", "post", "cvt ", "fpgm", "glyf", "loca", "prep", "CFF ",
-  "VORG", "EBDT", "EBLC", "gasp", "hdmx", "kern", "LTSH", "PCLT", "VDMX", "vhea", "vmtx", "BASE", "GDEF", "GPOS",
-  "GSUB", "EBSC", "JSTF", "MATH", "CBDT", "CBLC", "COLR", "CPAL", "SVG ", "sbix", "acnt", "avar", "bdat", "bloc",
-  "bsln", "cvar", "fdsc", "feat", "fmtx", "fvar", "gvar", "hsty", "just", "lcar", "mort", "morx", "opbd", "prop",
-  "trak", "Zapf", "Silf", "Glat", "Gloc", "Feat", "Sill",
-];
 
 function fontStrictPrefix(tag: string, length: number): number {
   return !FONT_BULK_TAGS.has(tag) ? length : tag === "CFF " ? Math.min(length, 64 * 1024) : 0;
@@ -1436,126 +1427,101 @@ function checkSfnt(buffer: Buffer, file: string, terms: PrivateTerms, depth: num
 }
 
 type ByteRange = [number, number];
-interface FontSpan { offset: number; length: number; compressed: number }
-interface FontTable extends FontSpan { tag: string }
 
-/** One charged directory walk for compressed ranges and decompressed table boundaries. */
-function fontLayout(buffer: Buffer, budget: ScanBudget): { woff2: boolean; tables: FontTable[]; stream?: FontSpan; metadata?: FontSpan } {
-  const woff2 = buffer.toString("ascii", 0, 4) === "wOF2", header = woff2 ? 48 : 44;
-  if (buffer.length < header || buffer.length > ASSET_BYTES || buffer.readUInt32BE(8) !== buffer.length) throw new Error();
-  const count = buffer.readUInt16BE(12), tables: FontTable[] = [], tags = new Set<string>();
-  if (!count || buffer.readUInt32BE(16) > EXPANDED_BYTES) throw new Error();
-  let dataEnd = header, stream: FontSpan | undefined;
-  if (!woff2) {
-    dataEnd = header + count * 20;
-    if (dataEnd > buffer.length) throw new Error();
-    for (let at = header; at < header + count * 20; at += 20) {
-      budget.spend(16);
-      const tag = buffer.toString("latin1", at, at + 4), offset = buffer.readUInt32BE(at + 4);
-      const compressed = buffer.readUInt32BE(at + 8), length = buffer.readUInt32BE(at + 12);
-      if (tags.has(tag) || !length || !compressed || compressed > length || offset < header + count * 20 || offset + compressed > buffer.length) throw new Error();
-      tags.add(tag); tables.push({ tag, offset, length, compressed });
-    }
-    for (const table of [...tables].sort((a, b) => a.offset - b.offset)) {
-      if (table.offset < dataEnd) throw new Error();
-      dataEnd = table.offset + table.compressed;
-    }
-  } else {
-    let at = header, expected = 0;
-    const uintBase128 = () => {
-      let value = 0;
-      for (let i = 0; i < 5; i++) {
-        if (at >= buffer.length) throw new Error();
-        const byte = buffer[at++] as number;
-        if ((!i && byte === 128) || value > 0x1ffffff) throw new Error();
-        value = value * 128 + (byte & 127);
-        if (!(byte & 128)) return value;
-      }
-      throw new Error();
-    };
-    for (let i = 0; i < count; i++) {
-      budget.spend(16);
-      if (at >= buffer.length) throw new Error();
-      const flags = buffer[at++] as number, index = flags & 63, version = flags >>> 6;
-      let tag = WOFF2_TAGS[index] ?? "";
-      if (index === 63) {
-        if (at + 4 > buffer.length) throw new Error();
-        tag = buffer.toString("latin1", at, at + 4); at += 4;
-      }
-      if (tags.has(tag)) throw new Error();
-      tags.add(tag);
-      const original = uintBase128(), transformed = tag === "glyf" || tag === "loca" ? version !== 3 : version !== 0;
-      const length = transformed ? uintBase128() : original;
-      if (tag === "name" && transformed) throw new Error();
-      tables.push({ tag, offset: expected, length, compressed: 0 }); expected += length;
-      if (expected > EXPANDED_BYTES || original > EXPANDED_BYTES) throw new Error();
-    }
-    const compressed = buffer.readUInt32BE(20);
-    if (!compressed || at + compressed > buffer.length) throw new Error();
-    stream = { offset: at, length: expected, compressed }; dataEnd = at + compressed;
-  }
-  const field = woff2 ? 28 : 24, offset = buffer.readUInt32BE(field);
-  const compressed = buffer.readUInt32BE(field + 4), length = buffer.readUInt32BE(field + 8);
-  const privateOffset = buffer.readUInt32BE(field + 12), privateLength = buffer.readUInt32BE(field + 16);
-  let metadata: FontSpan | undefined;
-  if (offset || compressed || length) {
-    if (offset < dataEnd || offset % 4 || !compressed || !length || offset + compressed > buffer.length) throw new Error();
-    metadata = { offset, length, compressed }; dataEnd = offset + compressed;
-  }
-  if ((privateOffset || privateLength) && (!privateOffset || !privateLength || privateOffset % 4 ||
-    privateOffset < dataEnd || privateOffset + privateLength > buffer.length)) throw new Error();
-  return { woff2, tables, stream, metadata };
-}
-
-/** Strict tables and metadata precede bulk views, sharing the same expansion budget. */
+/** Font tables and optional metadata share one bounded expansion budget. */
 function checkFont(buffer: Buffer, file: string, terms: PrivateTerms, depth: number, budget: ScanBudget): string[] {
   const hits: string[] = [];
   try {
-    const { woff2, tables, stream, metadata } = fontLayout(buffer, budget);
-    const inflate = ({ offset, length, compressed }: FontSpan, brotli: boolean, stored = false) => {
-      if (length > budget.remaining) throw new BudgetExceeded();
-      const bytes = buffer.subarray(offset, offset + compressed);
-      const plain = stored && compressed === length;
-      const data = plain ? bytes : budget.inflate(bytes, brotli, Math.max(1, length));
-      if (plain) budget.spend(length);
-      if (data.length !== length) throw new Error();
-      return data;
-    };
-    const scan = (data: Buffer, view = data, strict = true) => {
-      hits.push(...(strict ? rawTermViews : assetTermViews)(view, file, terms, budget, true));
+    const woff2 = buffer.toString("ascii", 0, 4) === "wOF2";
+    const header = woff2 ? 48 : 44;
+    if (buffer.length < header || buffer.length > ASSET_BYTES || buffer.readUInt32BE(8) !== buffer.length)
+      throw new Error();
+    const count = buffer.readUInt16BE(12);
+    if (!count || buffer.readUInt32BE(16) > EXPANDED_BYTES) throw new Error();
+    let dataEnd = header;
+    const scan = (data: Buffer) => {
+      // Font names may also contain private text in any supported raw encoding.
+      hits.push(...rawTermViews(data, file, terms, budget, true));
       hits.push(...binarySecrets(data, file, terms, budget));
     };
-    const data = stream ? inflate(stream, true) : undefined;
-    const canSkip = (table: FontTable) => fontStrictPrefix(table.tag, table.length) < table.length &&
-      (woff2 || table.length <= table.compressed * FONT_EXPANSION_RATIO);
-    const bulk: { data: Buffer; view: Buffer }[] = [];
-    for (const table of tables.sort((a, b) => Number(canSkip(a)) - Number(canSkip(b)))) {
-      const bytes = data ? data.subarray(table.offset, table.offset + table.length) : inflate(table, false, true);
-      if (!canSkip(table)) scan(bytes);
-      else {
-        const prefix = fontStrictPrefix(table.tag, table.length);
-        if (prefix) hits.push(...rawTermViews(bytes.subarray(0, prefix), file, terms, budget, true));
-        bulk.push({ data: bytes, view: bytes.subarray(prefix) });
+    if (!woff2) {
+      if (header + count * 20 > buffer.length) throw new Error();
+      dataEnd = header + count * 20;
+      for (let i = 0; i < count; i++) {
+        const at = header + i * 20;
+        const offset = buffer.readUInt32BE(at + 4);
+        const compressed = buffer.readUInt32BE(at + 8);
+        const original = buffer.readUInt32BE(at + 12);
+        if (!original || compressed > original ||
+          offset < header + count * 20 || offset + compressed > buffer.length) throw new Error();
+        if (original > budget.remaining) throw new BudgetExceeded();
+        const bytes = buffer.subarray(offset, offset + compressed);
+        dataEnd = Math.max(dataEnd, offset + compressed);
+        const data = compressed === original ? bytes : budget.inflate(bytes, false, original);
+        if (compressed === original) budget.spend(original);
+        if (data.length !== original) throw new Error();
+        scan(data);
+        if (buffer.toString("ascii", at, at + 4) === "name") hits.push(...checkFontNames(data, file, terms, depth, budget));
       }
-      if (table.tag === "name") hits.push(...checkFontNames(bytes, file, terms, depth, budget));
-    }
-    if (metadata) {
-      const bytes = inflate(metadata, woff2);
-      scan(bytes);
-      hits.push(...checkText(bytes.toString("utf8"), file + " (metadata)", terms, { lines: true, lineExemptions: false, imageDepth: depth, budget }));
-    }
-    const skippable: typeof bulk = [];
-    for (const part of bulk) {
-      if (!woff2) skippable.push(part);
-      else if (part.view.length * RAW_VIEW_COST <= budget.remaining) scan(part.data, part.view);
-      else {
-        // Estimate each table independently: an incompressible neighbour cannot dilute a bomb.
-        budget.spend(part.data.length);
-        if (part.data.length > deflateSync(part.data, { level: 1 }).length * FONT_EXPANSION_RATIO) scan(part.data, part.view);
-        else skippable.push(part);
+    } else {
+      let at = header, expected = 0;
+      const names: { offset: number; length: number }[] = [];
+      const uintBase128 = () => {
+        let value = 0;
+        for (let i = 0; i < 5; i++) {
+          if (at >= buffer.length) throw new Error();
+          const byte = buffer[at++] as number;
+          if ((!i && byte === 128) || value > 0x1ffffff) throw new Error();
+          value = value * 128 + (byte & 127);
+          if (!(byte & 128)) return value;
+        }
+        throw new Error();
+      };
+      for (let i = 0; i < count; i++) {
+        if (at >= buffer.length) throw new Error();
+        const flags = buffer[at++] as number;
+        const index = flags & 63, version = flags >>> 6;
+        let tag = index === 5 ? "name" : index === 10 ? "glyf" : index === 11 ? "loca" : "";
+        if (index === 63) {
+          if (at + 4 > buffer.length) throw new Error();
+          tag = buffer.toString("ascii", at, at + 4);
+          at += 4;
+        }
+        const original = uintBase128();
+        const transformed = tag === "glyf" || tag === "loca" ? version !== 3 : version !== 0;
+        const length = transformed ? uintBase128() : original;
+        if (tag === "name") {
+          if (transformed) throw new Error();
+          names.push({ offset: expected, length });
+        }
+        expected += length;
+        if (expected > EXPANDED_BYTES || original > EXPANDED_BYTES) throw new Error();
       }
+      const compressed = buffer.readUInt32BE(20);
+      if (expected > budget.remaining) throw new BudgetExceeded();
+      if (!compressed || at + compressed > buffer.length) throw new Error();
+      dataEnd = at + compressed;
+      const data = budget.inflate(buffer.subarray(at, at + compressed), true, Math.max(1, expected));
+      if (data.length !== expected) throw new Error();
+      scan(data);
+      for (const name of names) hits.push(...checkFontNames(data.subarray(name.offset, name.offset + name.length), file, terms, depth, budget));
     }
-    for (const part of skippable) scan(part.data, part.view, false);
+    const field = woff2 ? 28 : 24;
+    const offset = buffer.readUInt32BE(field);
+    const compressed = buffer.readUInt32BE(field + 4);
+    const original = buffer.readUInt32BE(field + 8);
+    if (offset || compressed || original) {
+      const privateOffset = buffer.readUInt32BE(field + 12);
+      if (offset < dataEnd || offset % 4 !== 0 || !compressed || !original ||
+        offset + compressed > buffer.length ||
+        (privateOffset && offset + compressed > privateOffset)) throw new Error();
+      if (original > budget.remaining) throw new BudgetExceeded();
+      const bytes = buffer.subarray(offset, offset + compressed);
+      const data = budget.inflate(bytes, woff2, original);
+      if (data.length !== original) throw new Error();
+      scan(data);
+      hits.push(...checkText(data.toString("utf8"), file + " (metadata)", terms, { lines: true, lineExemptions: false, imageDepth: depth, budget }));
+    }
   } catch (error) {
     if (error instanceof BudgetExceeded) throw error;
     hits.push(safeLocation(file, terms) + ": invalid compressed font data");
@@ -1563,12 +1529,12 @@ function checkFont(buffer: Buffer, file: string, terms: PrivateTerms, depth: num
   return hits;
 }
 
-/** Whole views remain skippable for kinds without a bulk model. */
+/** Whole views are optional when a caller permits skipping them within the budget. */
 function assetTermViews(buffer: Buffer, file: string, terms: PrivateTerms, budget: ScanBudget, fontData = false): string[] {
   return buffer.length * RAW_VIEW_COST > budget.remaining ? [] : rawTermViews(buffer, file, terms, budget, fontData);
 }
 
-/** Only structurally identified bulk is exempt; malformed structures retain every byte. */
+/** Only PNG/SFNT bulk is exempt; compressed fonts and malformed structures retain every byte. */
 function assetBulkRanges(buffer: Buffer, kind: string, budget: ScanBudget): ByteRange[] | undefined {
   if (![".png", ".ttf", ".otf", ".woff", ".woff2"].includes(kind)) return undefined;
   const ranges: ByteRange[] = [];
@@ -1605,10 +1571,8 @@ function assetBulkRanges(buffer: Buffer, kind: string, budget: ScanBudget): Byte
         if (prefix < length) ranges.push([offset + prefix, offset + length]);
       }
     } else {
-      const { tables, stream, metadata } = fontLayout(buffer, budget);
-      if (stream) ranges.push([stream.offset, stream.offset + stream.compressed]);
-      else for (const table of tables) if (table.compressed) ranges.push([table.offset, table.offset + table.compressed]);
-      if (metadata) ranges.push([metadata.offset, metadata.offset + metadata.compressed]);
+      // Compressed fonts have no bulk model, so every byte keeps strict views.
+      return [];
     }
     return ranges.sort((a, b) => a[0] - b[0]);
   } catch (error) {

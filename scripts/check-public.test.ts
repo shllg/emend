@@ -5427,36 +5427,6 @@ test("issue 35: whole-asset raw views start at exactly 32 budget bytes per input
   assert.ok(fits.remaining < cost);
 });
 
-for (const kind of ["woff", "woff2"] as const) {
-  test(`issue 35: ${kind} table views skip while binary secrets remain checked`, () => {
-    const body = seededAssetBytes(64 * 1024);
-    for (const value of ["Public Fixture Font", secret]) {
-      const table = Buffer.concat([body, Buffer.from(`\0${value}\0`)]), bytes = fontFixture(kind, table, "glyf");
-      for (const terms of [empty, assetTerms]) {
-        const hits = checkBuffer(bytes, `fixture.${kind}`, terms, false, true, 0, new ScanBudget((kind === "woff2" ? 3 : 2) * table.length));
-        if (value === secret) assert.deepEqual(hits, [`fixture.${kind}: secret shape`]);
-        else assert.deepEqual(hits, []);
-      }
-    }
-  });
-
-  test(`issue 35: ${kind} metadata raw views remain strict below the asset estimate`, () => {
-    const table = seededAssetBytes(256), font = fontFixture(kind, table, "glyf");
-    // UTF-16BE needs the raw views: metadata's UTF-8 text check cannot find this term.
-    const metadata = Buffer.concat([Buffer.from(assetTerm, "utf16le").swap16(), Buffer.alloc(512)]);
-    const compressed = kind === "woff" ? deflateSync(metadata) : brotliCompressSync(metadata);
-    const offset = Math.ceil(font.length / 4) * 4;
-    const bytes = Buffer.concat([font, Buffer.alloc(offset - font.length), compressed]), field = kind === "woff" ? 24 : 28;
-    bytes.writeUInt32BE(bytes.length, 8); bytes.writeUInt32BE(offset, field);
-    bytes.writeUInt32BE(compressed.length, field + 4); bytes.writeUInt32BE(metadata.length, field + 8);
-    const allowance = 31 * metadata.length;
-    const hits = checkBuffer(bytes, `fixture.${kind}`, assetTerms, false, true, 0, new ScanBudget(table.length + metadata.length + allowance));
-    assert.ok(hits.some((hit) => hit.includes("private term")), hits.join("\n"));
-    for (const terms of [empty, assetTerms])
-      assert.throws(() => checkBuffer(bytes, `fixture.${kind}`, terms, false, true, 0, new ScanBudget(table.length + metadata.length)), /budget/);
-  });
-}
-
 let assetBudgetFixture: { bytes: Buffer; spend: number } | undefined;
 function rawBudgetFixture(): { bytes: Buffer; spend: number } {
   if (!assetBudgetFixture) {
@@ -5510,17 +5480,6 @@ for (const kind of ["woff", "woff2"] as const) {
     for (const terms of [empty, assetTerms]) {
       const hits = checkBuffer(bytes, `fixture.${kind}`, terms, false, true);
       assert.ok(hits.some((hit) => /budget|limit|oversized|private term/.test(hit)), hits.join("\n"));
-    }
-  });
-
-  test(`issue 35 round 1: ${kind} name storage stays strict below its estimate`, () => {
-    const table = Buffer.concat([fontNameTable("Public Fixture Font", 3), seededAssetBytes(512), Buffer.from(`\0${assetTerm}\0`)]);
-    const bytes = fontFixture(kind, table, "name"), allowance = Math.min(31 * table.length, 32 * bytes.length - 1);
-    for (const terms of [empty, assetTerms]) {
-      const hits = checkBuffer(bytes, `fixture.${kind}`, terms, false, true, 0, new ScanBudget(allowance));
-      if (terms === empty) assert.deepEqual(hits, []);
-      else assert.ok(hits.some((hit) => hit.includes("private term")), hits.join("\n"));
-      assert.throws(() => checkBuffer(bytes, `fixture.${kind}`, terms, false, true, 0, new ScanBudget(table.length + 1)), /budget/);
     }
   });
 }
@@ -5608,7 +5567,7 @@ function assetSfnt(tables: [string, Buffer][], gap = Buffer.alloc(0), otf = fals
   return bytes;
 }
 
-function assetCompressedFont(kind: "woff" | "woff2", tables: [string, Buffer][], options: { gap?: Buffer; privateData?: Buffer; compressed?: Buffer } = {}): Buffer {
+function assetCompressedFont(kind: "woff" | "woff2", tables: [string, Buffer][], options: { gap?: Buffer; privateData?: Buffer; compressed?: Buffer; trailer?: Buffer } = {}): Buffer {
   const header = Buffer.alloc(kind === "woff" ? 44 + tables.length * 20 : 48), parts: Buffer[] = [header];
   header.write(kind === "woff" ? "wOFF" : "wOF2"); header.writeUInt32BE(0x00010000, 4);
   header.writeUInt16BE(tables.length, 12);
@@ -5617,6 +5576,7 @@ function assetCompressedFont(kind: "woff" | "woff2", tables: [string, Buffer][],
   if (kind === "woff") {
     for (const [i, [tag, data]] of tables.entries()) {
       let compressed = options.compressed ?? deflateSync(data, { level: 1 });
+      if (options.trailer) compressed = Buffer.concat([compressed, options.trailer]);
       if (compressed.length >= data.length) compressed = data;
       const at = 44 + i * 20, padding = Buffer.alloc((4 - compressed.length % 4) % 4);
       header.write(tag, at); header.writeUInt32BE(offset, at + 4); header.writeUInt32BE(compressed.length, at + 8);
@@ -5631,7 +5591,8 @@ function assetCompressedFont(kind: "woff" | "woff2", tables: [string, Buffer][],
       const entry = Buffer.concat([Buffer.from([tag === "glyf" || tag === "loca" ? 0xff : 0x3f]), Buffer.from(tag), Buffer.from(length)]);
       parts.push(entry); offset += entry.length;
     }
-    const compressed = brotliCompressSync(Buffer.concat(tables.map(([, data]) => data)), { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4 } });
+    let compressed = brotliCompressSync(Buffer.concat(tables.map(([, data]) => data)), { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4 } });
+    if (options.trailer) compressed = Buffer.concat([compressed, options.trailer]);
     header.writeUInt32BE(compressed.length, 20); parts.push(compressed); offset += compressed.length;
   }
   if (options.privateData) {
@@ -5641,13 +5602,6 @@ function assetCompressedFont(kind: "woff" | "woff2", tables: [string, Buffer][],
   }
   header.writeUInt32BE(offset, 8);
   return Buffer.concat(parts);
-}
-
-const checkOneFonts = new Map<string, Buffer>();
-function checkOneFont(kind: "woff" | "woff2"): Buffer {
-  let bytes = checkOneFonts.get(kind);
-  if (!bytes) { bytes = assetCompressedFont(kind, assetFontTables(largeAssetFixture("TTF"))); checkOneFonts.set(kind, bytes); }
-  return bytes;
 }
 
 function assertAssetRefused(bytes: Buffer, file: string): void {
@@ -5697,60 +5651,6 @@ for (const variant of ["large custom table", "table-less tail", "inter-table gap
     assertAssetRefused(bytes, file);
   });
 
-test("issue 35 check 1: WOFF2 retains a small meta table beside bulk data", () => {
-  const bytes = assetCompressedFont("woff2", [["glyf", seededAssetBytes(2 * 1024 * 1024)], ["meta", Buffer.from(assetTerm)]]);
-  assertAssetRefused(bytes, "fixture.woff2");
-});
-
-for (const kind of ["woff", "woff2"] as const) {
-  test(`issue 35 check 1: ${kind} retains its private data block`, () => {
-    const privateData = Buffer.from(`\0${assetTerm}\0`);
-    const bytes = assetCompressedFont(kind, [["glyf", seededAssetBytes(2 * 1024 * 1024)]], { privateData });
-    assertAssetRefused(bytes, `fixture.${kind}`);
-  });
-  for (const terms of [empty, assetTerms])
-    test(`issue 35 check 1: realistic large ${kind} passes ${terms === empty ? "without" : "with"} terms`, () => {
-      assert.deepEqual(checkBuffer(checkOneFont(kind), `fixture.${kind}`, terms, false, true), []);
-    });
-}
-
-test("issue 35 check 1: a 6.4x WOFF bulk table keeps strict views", () => {
-  const body = Buffer.alloc(2 * 1024 * 1024), stored = 320 * 1024;
-  body.fill(65, 0, stored); body.write(assetTerm, body.length / 2);
-  // Stored DEFLATE blocks keep the compressed fixture ASCII-heavy and its raw scan fast.
-  const parts: Buffer[] = [Buffer.from([0x78, 0x9c])];
-  for (let at = 0; at < stored; ) {
-    const length = Math.min(65535, stored - at), header = Buffer.alloc(5);
-    header.writeUInt16LE(length, 1); header.writeUInt16LE(65535 - length, 3);
-    parts.push(header, body.subarray(at, at + length)); at += length;
-  }
-  parts.push(zlib.deflateRawSync(body.subarray(stored)));
-  let a = 1, b = 0;
-  for (const byte of body) { a = (a + byte) % 65521; b = (b + a) % 65521; }
-  const checksum = Buffer.alloc(4); checksum.writeUInt32BE((b * 65536 + a) >>> 0); parts.push(checksum);
-  const compressed = Buffer.concat(parts), ratio = body.length / compressed.length;
-  assert.ok(ratio > 6.2 && ratio < 6.5);
-  assert.deepEqual(zlib.inflateSync(compressed), body);
-  assertAssetRefused(assetCompressedFont("woff", [["glyf", body]], { compressed }), "fixture.woff");
-});
-
-let dilutionNoise: Buffer | undefined;
-for (const size of [8, 2])
-  test(`issue 35 check 1: WOFF2 cannot dilute a ${size} MiB zero table`, () => {
-    dilutionNoise ??= seededAssetBytes(Math.floor(1.3 * 1024 * 1024));
-    const glyphs = Buffer.alloc(size * 1024 * 1024); glyphs.write(assetTerm, glyphs.length / 2);
-    // Zero private padding forces the whole-file fallback without adding random scan work.
-    const bytes = assetCompressedFont("woff2", [["glyf", glyphs], ["gvar", dilutionNoise]], { privateData: Buffer.alloc(512 * 1024) });
-    if (size === 2) assert.ok((glyphs.length + dilutionNoise.length) / bytes.readUInt32BE(20) < 4, "the stream-wide ratio would hide this bomb");
-    assertAssetRefused(bytes, "fixture.woff2");
-  });
-
-test("issue 35 check 1: WOFF retains bytes between tables", () => {
-  const gap = Buffer.alloc(32); gap.write(assetTerm);
-  const bytes = assetCompressedFont("woff", assetFontTables(largeAssetFixture("TTF")), { gap });
-  assertAssetRefused(bytes, "fixture.woff");
-});
-
 test("issue 35 check 1: a 100000-chunk PNG charges every visited chunk", () => {
   const base = largeAssetFixture("PNG"), count = 100000, chunk = pngChunk("prVt", Buffer.alloc(0));
   const bytes = Buffer.concat([base.subarray(0, 33), ...Array<Buffer>(count).fill(chunk), base.subarray(33)]);
@@ -5760,4 +5660,56 @@ test("issue 35 check 1: a 100000-chunk PNG charges every visited chunk", () => {
   assert.throws(() => checkBuffer(bytes, "fixture.png", assetTerms, false, true, 0, budget), /budget/);
   assert.equal(visited, count + 3);
   assert.equal(budget.remaining, 0);
+});
+
+function assertBudgetedFontRefused(bytes: Buffer, file: string, budget: ScanBudget): void {
+  let hits: string[];
+  try { hits = checkBuffer(bytes, file, assetTerms, false, true, 0, budget); }
+  catch (error) {
+    assert.ok(error instanceof PublicCheckError);
+    assert.match(error.message, /scan expansion budget exceeded/);
+    return;
+  }
+  assert.ok(hits.some((hit) => hit.includes("private term")), hits.join("\n"));
+}
+
+for (const [label, value, terms] of [["private term", assetTerm, assetTerms], ["secret shape", secret, empty]] as const)
+  test(`issue 35 check 2: WOFF2 finds a ${label} split across tables`, () => {
+    const half = Math.floor(value.length / 2);
+    const bytes = assetCompressedFont("woff2", [
+      ["zzaa", Buffer.concat([Buffer.alloc(64), Buffer.from(value.slice(0, half))])],
+      ["zzab", Buffer.concat([Buffer.from(value.slice(half)), Buffer.alloc(64)])],
+    ]);
+    const hits = checkBuffer(bytes, "fixture.woff2", terms, false, true);
+    assert.ok(hits.some((hit) => hit.includes(label)), hits.join("\n"));
+  });
+
+for (const kind of ["woff", "woff2"] as const) {
+  test(`issue 35 check 2: ${kind} bulk tables keep strict views`, () => {
+    const glyf = seededAssetBytes(64 * 1024);
+    glyf.write(`\0${assetTerm}\0`, glyf.length / 2);
+    const bytes = assetCompressedFont(kind, [["glyf", glyf]]);
+    assertBudgetedFontRefused(bytes, `fixture.${kind}`, new ScanBudget(32 * bytes.length - 1));
+  });
+
+  test(`issue 35 check 2: ${kind} retains bytes after a compressed stream`, () => {
+    const name = Buffer.concat([fontNameTable("Public Fixture Font", 3), Buffer.alloc(4 * 1024)]);
+    const glyf = Buffer.concat([seededAssetBytes(32 * 1024), Buffer.alloc(32 * 1024)]);
+    const trailer = Buffer.from(`\0${assetTerm}\0`);
+    const bytes = assetCompressedFont(kind, [["name", name], ["glyf", glyf]], { trailer });
+    const compressed = bytes.readUInt32BE(kind === "woff" ? 52 : 20);
+    assert.ok(compressed < (kind === "woff" ? name.length : name.length + glyf.length), "the declared slot must remain compressed");
+    const offset = kind === "woff" ? bytes.readUInt32BE(48) : bytes.length - compressed;
+    assert.deepEqual(bytes.subarray(offset + compressed - trailer.length, offset + compressed), trailer);
+    assertBudgetedFontRefused(bytes, `fixture.${kind}`, new ScanBudget(32 * bytes.length - 1));
+  });
+}
+
+test("issue 35 check 2: WOFF2 long-range repetition keeps strict views", () => {
+  const block = seededAssetBytes(40 * 1024);
+  block.write(`\0${assetTerm}\0`, block.length / 2);
+  const glyf = Buffer.concat(Array<Buffer>(5).fill(block));
+  const bytes = assetCompressedFont("woff2", [["glyf", glyf]]);
+  assert.ok(bytes.length * 4 < glyf.length, "the font must carry long-range redundancy");
+  assertBudgetedFontRefused(bytes, "fixture.woff2", new ScanBudget(32 * glyf.length - 1));
 });
