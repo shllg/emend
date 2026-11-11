@@ -5,6 +5,7 @@ import {
   classifyGesture,
   fitScale,
   fitView,
+  maxScale,
   panStep,
   pinchView,
   toggleZoom,
@@ -20,6 +21,26 @@ test("fit respects both stage axes and padding and never upscales small images",
   expect(fitScale({ ...bounds, stage: { width: 400, height: 600 } })).toBe(0.25);
   expect(fitScale({ ...bounds, image: { width: 40, height: 30 } })).toBe(1);
   expect(fitScale({ ...bounds, stage: { width: 1, height: 1 }, pad: 20 })).toBeGreaterThan(0);
+});
+
+test("vector fit can upscale to maxFit while screenshots still fit at most at natural size", () => {
+  const vector = { ...bounds, image: { width: 400, height: 200 }, maxFit: 3 };
+  expect(fitScale(vector)).toBe(2);
+  expect(fitScale({ ...vector, image: { width: 40, height: 30 } })).toBe(3);
+  expect(fitScale({ ...vector, maxFit: 1.5 })).toBe(1.5);
+  expect(fitScale({ ...vector, maxFit: undefined })).toBe(1);
+});
+
+test("upscaled vectors zoom to four times fit, and a tap doubles their fit scale", () => {
+  const vector = { ...bounds, image: { width: 400, height: 200 }, maxFit: 3 };
+  const point = { x: 400, y: 300 };
+  expect(maxScale(vector)).toBe(8);
+  expect(maxScale({ ...vector, image: { width: 40, height: 30 } })).toBe(12);
+  expect(zoomAt(fitView(vector), 99, point, vector).scale).toBe(8);
+  const twice = toggleZoom(fitView(vector), point, vector);
+  expect(twice.scale).toBe(4);
+  expect(toggleZoom(twice, point, vector)).toEqual(fitView(vector));
+  expect(maxScale(bounds)).toBe(4);
 });
 
 test("clamp centres each small axis and holds each large axis's edges", () => {

@@ -38,12 +38,17 @@ export function useLightboxView(item: LightboxItem | undefined, onStep: (delta: 
     setImage(null);
     setFailed(false);
   }, [item]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Item changes clear image; only a new size may initialize that item's bounds.
   useLayoutEffect(() => {
     if (!stage || !image) return;
     const measure = () => {
       const rect = stage.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
-      const bounds = { stage: { width: rect.width, height: rect.height }, image };
+      const bounds = {
+        stage: { width: rect.width, height: rect.height },
+        image,
+        maxFit: item?.kind === "diagram" ? 3 : 1,
+      };
       const previous = current.current;
       const view =
         !previous || isAtFit(previous.view, previous.bounds) ? fitView(bounds) : clampView(previous.view, bounds);
@@ -88,7 +93,7 @@ export function useLightboxView(item: LightboxItem | undefined, onStep: (delta: 
           maxDistance: 0,
           zoomed: !!state && !isAtFit(state.view, state.bounds),
           pinched: false,
-          onImage: event.target instanceof HTMLImageElement,
+          onImage: event.target instanceof Element && !!event.target.closest("[data-lightbox-subject]"),
         };
       } else if (gesture) gesture.pinched = true;
       // Capture on the stage so a drag continues outside the image or viewport.
@@ -141,7 +146,8 @@ export function useLightboxView(item: LightboxItem | undefined, onStep: (delta: 
       handledPointerAt = null;
       if (isControl(event.target)) return;
       if (release !== null && event.timeStamp >= release && event.timeStamp - release <= 500) return;
-      if (event.detail === 0) tap(point(event), event.target instanceof HTMLImageElement);
+      if (event.detail === 0)
+        tap(point(event), event.target instanceof Element && !!event.target.closest("[data-lightbox-subject]"));
     };
     const wheel = (event: WheelEvent) => {
       event.preventDefault();

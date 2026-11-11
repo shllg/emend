@@ -726,3 +726,306 @@ test.each([
   open(name);
   expect(within(dialog()).getByRole("heading", { name })).toBeTruthy();
 });
+
+const diagramBlock: RenderedBlock = {
+  id: "overview-44444444",
+  section: "overview",
+  kind: "diagram",
+  text: "graph TD; A-->B",
+  source: "graph TD; A-->B",
+  html: "",
+};
+const mixedGroups: ReaderGroup[] = [
+  {
+    key: "overview",
+    blocks: [
+      { ...row, text: "Before", html: `<p>${imageHtml("a", "Before")}</p>` },
+      diagramBlock,
+      { ...later, text: "After", html: `<p>${imageHtml("b", "After")}</p>` },
+    ],
+  },
+];
+function diagramFrame() {
+  const frame = dialog().querySelector("iframe");
+  if (!frame) throw new Error("Missing diagram frame");
+  const post = vi.fn();
+  Object.defineProperty(frame, "contentWindow", { value: { postMessage: post } });
+  return { frame, post };
+}
+function frameSize(frame: HTMLIFrameElement, data: unknown) {
+  fireEvent(window, new MessageEvent("message", { source: frame.contentWindow, data }));
+}
+function diagramSubject() {
+  const subject = dialog().querySelector<HTMLElement>("div[data-lightbox-subject]");
+  if (!subject) throw new Error("Missing diagram subject");
+  return subject;
+}
+function loadDiagram() {
+  const { frame, post } = diagramFrame();
+  fireEvent.load(frame);
+  frameSize(frame, { type: "size", height: 200, natural: { width: 400, height: 200 } });
+  return { frame, post, subject: diagramSubject() };
+}
+
+test("Enlarge joins screenshots and diagrams in DOM order, with mixed labels and arrow navigation", () => {
+  mount(mixedGroups);
+  const icon = button("Enlarge diagram").querySelector("svg");
+  if (!icon) throw new Error("Missing Enlarge icon");
+  fireEvent.click(icon);
+  expect(within(dialog()).getByText("2 of 3")).toBeTruthy();
+  expect(within(dialog()).getByRole("heading", { name: "Diagram" }).className).toBe("sr-only");
+  expect(dialog().querySelector("footer")).toBeNull();
+  expect(
+    within(dialog()).getByText(
+      "Diagram 2 of 3. Left and Right arrows move between screenshots and diagrams; when zoomed in, the arrow keys move the diagram. Escape closes.",
+    ),
+  ).toBeTruthy();
+  expect(button("Next")).toBeTruthy();
+  fireEvent.click(button("Previous"));
+  expect(within(dialog()).getByText("1 of 3")).toBeTruthy();
+  expect(within(dialog()).getByRole("heading", { name: "Before" })).toBeTruthy();
+  expect(dialog().querySelector("footer")).not.toBeNull();
+  expect(dialog().querySelector("iframe")).toBeNull();
+  expect(load().style.transform).toContain("scale(0.5)");
+  fireEvent.click(button("Next"));
+  expect(within(dialog()).getByText("2 of 3")).toBeTruthy();
+  const first = loadDiagram();
+  expect(first.subject.style.transform).toContain("scale(2)");
+  fireEvent.click(button("Next"));
+  expect(within(dialog()).getByText("3 of 3")).toBeTruthy();
+  expect(within(dialog()).getByRole("heading", { name: "After" })).toBeTruthy();
+  expect(load().style.transform).toContain("scale(0.5)");
+  fireEvent.keyDown(dialog(), { key: "ArrowLeft" });
+  expect(within(dialog()).getByText("2 of 3")).toBeTruthy();
+  expect(diagramSubject().style.visibility).toBe("hidden");
+  expect(loadDiagram().frame).not.toBe(first.frame);
+  fireEvent.keyDown(dialog(), { key: "ArrowLeft" });
+  expect(within(dialog()).getByText("1 of 3")).toBeTruthy();
+  fireEvent.keyDown(dialog(), { key: "ArrowRight" });
+  fireEvent.keyDown(dialog(), { key: "ArrowRight" });
+  expect(within(dialog()).getByText("3 of 3")).toBeTruthy();
+});
+
+test("lightbox frame sends only one render and accepts the first valid non-pending size from its own window", () => {
+  const { container } = mount(mixedGroups);
+  const inline = container.querySelector("iframe");
+  fireEvent.click(button("Enlarge diagram"));
+  const { frame, post } = diagramFrame();
+  expect(frame).not.toBe(inline);
+  expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+  expect(frame.getAttribute("src")).toBe("/mermaid-frame.html");
+  expect(frame.getAttribute("tabindex")).toBe("-1");
+  expect(frame.hasAttribute("loading")).toBe(false);
+  for (const className of ["pointer-events-none", "block", "h-full", "w-full", "border-0", "bg-transparent"])
+    expect(frame.classList.contains(className)).toBe(true);
+  expect(post).not.toHaveBeenCalled();
+  fireEvent.load(frame);
+  fireEvent.load(frame);
+  expect(post).toHaveBeenCalledExactlyOnceWith({ type: "render", source: diagramBlock.source }, "*");
+  const subject = diagramSubject();
+  const hidden = () => {
+    expect(subject.style.visibility).toBe("hidden");
+    expect(subject.style.width).toBe("100%");
+    expect(subject.style.height).toBe("100%");
+    expectUnavailable(button("Zoom in"));
+  };
+  hidden();
+  fireEvent(
+    window,
+    new MessageEvent("message", {
+      source: window,
+      data: { type: "size", height: 200, natural: { width: 400, height: 200 } },
+    }),
+  );
+  hidden();
+  for (const data of [
+    { type: "size", height: 200 },
+    { type: "size", height: 200, natural: undefined },
+    { type: "size", height: 200, natural: { width: 0, height: 200 } },
+    { type: "size", height: 200, natural: { width: 400, height: Infinity } },
+    { type: "size", height: 0, natural: { width: 400, height: 200 } },
+    { type: "navigate", height: 200, natural: { width: 400, height: 200 } },
+  ]) {
+    frameSize(frame, data);
+    hidden();
+  }
+  frameSize(frame, { type: "size", height: 200, natural: { width: 400, height: 200 } });
+  expect(subject.style.width).toBe("400px");
+  expect(subject.style.height).toBe("200px");
+  expect(subject.style.visibility).toBe("visible");
+  expect(subject.style.transform).toBe("translate(16px, 116px) scale(2)");
+  fireEvent.click(button("Zoom in"));
+  const zoomed = subject.style.transform;
+  expect(zoomed).toContain("scale(3)");
+  frameSize(frame, { type: "size", height: 400, natural: { width: 800, height: 400 } });
+  frameSize(frame, { type: "size", height: 42, natural: null });
+  expect(subject.style.transform).toBe(zoomed);
+  expect(subject.style.width).toBe("400px");
+  expect(subject.style.height).toBe("200px");
+  expect(within(dialog()).queryByRole("status")).toBeNull();
+  expect(post).toHaveBeenCalledTimes(1);
+});
+
+test("a failed diagram keeps its title, comment action and navigation", () => {
+  mount(mixedGroups);
+  fireEvent.click(button("Enlarge diagram"));
+  const { frame } = diagramFrame();
+  frameSize(frame, { type: "size", height: 42, natural: null });
+  expect(within(dialog()).getByRole("status").textContent).toBe("The diagram could not be drawn.");
+  expect(within(dialog()).getByRole("heading", { name: "Diagram" })).toBeTruthy();
+  expect(button("Comment on diagram")).toBeTruthy();
+  expectUnavailable(button("Zoom in"));
+  expectUnavailable(button("Zoom out"));
+  expectUnavailable(button(/^Fit to screen/));
+  fireEvent.click(button("Next"));
+  expect(within(dialog()).getByRole("heading", { name: "After" })).toBeTruthy();
+});
+
+test("diagram taps, clicks, wheel and toolbar zoom share fit, pan and navigation behavior", () => {
+  mount(mixedGroups);
+  fireEvent.click(button("Enlarge diagram"));
+  const { subject } = loadDiagram();
+  expectUnavailable(button("Zoom out"));
+  fireEvent.click(subject, { clientX: 400, clientY: 300, detail: 0 });
+  expect(subject.style.transform).toContain("scale(4)");
+  fireEvent.click(subject, { clientX: 400, clientY: 300, detail: 0 });
+  expect(subject.style.transform).toContain("scale(2)");
+  drag(subject, [400, 300], [400, 300]);
+  expect(subject.style.transform).toContain("scale(4)");
+  const beforePan = subject.style.transform;
+  drag(subject, [400, 300], [300, 250]);
+  expect(subject.style.transform).not.toBe(beforePan);
+  const beforeArrow = subject.style.transform;
+  fireEvent.keyDown(dialog(), { key: "ArrowRight" });
+  expect(subject.style.transform).not.toBe(beforeArrow);
+  expect(within(dialog()).getByText("2 of 3")).toBeTruthy();
+  fireEvent.click(button(/^Fit to screen/));
+  expect(subject.style.transform).toContain("scale(2)");
+  fireEvent.click(button("Zoom in"));
+  expect(subject.style.transform).toContain("scale(3)");
+  fireEvent.click(button("Zoom out"));
+  expect(subject.style.transform).toContain("scale(2)");
+  expect(fireEvent.wheel(subject, { deltaY: -100, clientX: 400, clientY: 300 })).toBe(false);
+  expect(subject.style.transform).not.toContain("scale(2)");
+  fireEvent.wheel(subject, { deltaY: -10000, clientX: 400, clientY: 300 });
+  expect(subject.style.transform).toContain("scale(8)");
+  expectUnavailable(button("Zoom in"));
+  fireEvent.click(button(/^Fit to screen/));
+  fireEvent.keyDown(dialog(), { key: "ArrowRight" });
+  expect(within(dialog()).getByText("3 of 3")).toBeTruthy();
+});
+
+test.each([undefined, "garden.md"])(
+  "diagram comment closes the gallery and saves its block target with path %s",
+  async (path) => {
+    const { container } = mount(mixedGroups.map((group) => ({ ...group, path })));
+    // Each open Markdown doc has its own reader; neither gallery includes the other's items.
+    mount([{ key: "other-doc", path: "other.md", blocks: [{ ...row, id: "other-11111111" }] }]);
+    const enlarge = within(container).getByRole("button", { name: "Enlarge diagram" });
+    act(() => enlarge.focus());
+    fireEvent.click(enlarge);
+    expect(within(dialog()).getByText("2 of 3")).toBeTruthy();
+    fireEvent.click(button("Previous"));
+    expect(within(dialog()).getByText("1 of 3")).toBeTruthy();
+    expectUnavailable(button("Previous"));
+    fireEvent.click(button("Next"));
+    fireEvent.click(button("Next"));
+    expect(within(dialog()).getByText("3 of 3")).toBeTruthy();
+    expectUnavailable(button("Next"));
+    fireEvent.click(button("Previous"));
+    fireEvent.click(button("Comment on diagram"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const input = screen.getByRole("textbox", { name: "Comment" });
+    expect(input.closest(".em-reading-block")?.querySelector("[data-block-id]")?.getAttribute("data-block-id")).toBe(
+      diagramBlock.id,
+    );
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    fireEvent.change(input, { target: { value: "A synthetic diagram note" } });
+    fireEvent.click(button("Save comment"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body).target).toEqual(
+      path
+        ? { kind: "doc-span", path, ...blockAnchor(diagramBlock) }
+        : { kind: "writeup-span", ...blockAnchor(diagramBlock) },
+    );
+    await waitFor(() => expect(document.activeElement).toBe(enlarge));
+  },
+);
+
+test("diagram-only galleries have diagram labels and an invisible title without a caption footer", () => {
+  mount([{ key: "overview", blocks: [diagramBlock, { ...diagramBlock, id: "overview-55555555", source: undefined }] }]);
+  fireEvent.click(screen.getAllByRole("button", { name: "Enlarge diagram" })[0] as HTMLElement);
+  expect(screen.getByRole("dialog", { name: "Diagram" })).toBeTruthy();
+  expect(within(dialog()).getByRole("heading").className).toBe("sr-only");
+  expect(dialog().querySelector("footer")).toBeNull();
+  expect(
+    within(dialog()).getByText(
+      "Diagram 1 of 2. Left and Right arrows move between diagrams; when zoomed in, the arrow keys move the diagram. Escape closes.",
+    ),
+  ).toBeTruthy();
+  expectUnavailable(button("Previous diagram"));
+  fireEvent.click(button("Next diagram"));
+  expect(within(dialog()).getByText("2 of 2")).toBeTruthy();
+  const { post } = loadDiagram();
+  expect(post).toHaveBeenCalledExactlyOnceWith({ type: "render", source: diagramBlock.text }, "*");
+  expectUnavailable(button("Next diagram"));
+});
+
+test.each(["Enter", " "])("native %s activates Enlarge once, through its click only", (key) => {
+  mount(mixedGroups);
+  const enlarge = button("Enlarge diagram");
+  act(() => enlarge.focus());
+  expect(fireEvent.keyDown(enlarge, { key })).toBe(true);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  fireEvent.click(enlarge, { detail: 0 });
+  const frame = dialog().querySelector("iframe");
+  fireEvent.keyUp(enlarge, { key });
+  expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  expect(dialog().querySelector("iframe")).toBe(frame);
+  expect(within(dialog()).getByText("2 of 3")).toBeTruthy();
+});
+
+test.each(["ctrlKey", "metaKey", "altKey", "shiftKey"])("modifier %s does not enlarge a diagram", (modifier) => {
+  mount(mixedGroups);
+  fireEvent.click(button("Enlarge diagram"), { [modifier]: true });
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test.each(["unmarked", "non-diagram", "unknown-block", "outside-reader", "not-a-button", "prevented"])(
+  "rejects %s diagram activation and excludes invalid entries from collection",
+  (kind) => {
+    const { container } = mount(mixedGroups);
+    const real = button("Enlarge diagram");
+    const block = real.closest("[data-block-id]");
+    if (!block) throw new Error("Missing diagram block");
+    const candidate = document.createElement(kind === "not-a-button" ? "span" : "button");
+    candidate.textContent = "Invalid enlarge";
+    if (kind !== "unmarked") candidate.setAttribute("data-lightbox-diagram", "");
+    if (kind === "non-diagram") container.querySelector(`[data-block-id="${row.id}"]`)?.append(candidate);
+    else if (kind === "unknown-block" || kind === "outside-reader") {
+      const wrapper = document.createElement("div");
+      wrapper.setAttribute("data-block-id", kind === "unknown-block" ? "unknown" : diagramBlock.id);
+      wrapper.setAttribute("data-block-kind", "diagram");
+      wrapper.append(candidate);
+      (kind === "outside-reader" ? container : block).append(wrapper);
+    } else block.append(candidate);
+    const target = kind === "prevented" ? real : candidate;
+    if (kind === "prevented") candidate.remove();
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    if (kind === "prevented") event.preventDefault();
+    fireEvent(target, event);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(real);
+    expect(within(dialog()).getByText("2 of 3")).toBeTruthy();
+  },
+);
+
+test("all-screenshot gallery description stays unchanged", () => {
+  mount();
+  open();
+  expect(
+    within(dialog()).getByText(
+      "Screenshot 1 of 3. Left and Right arrows move between screenshots; when zoomed in, the arrow keys move the image. Escape closes.",
+    ),
+  ).toBeTruthy();
+});

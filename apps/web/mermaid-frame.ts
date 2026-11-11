@@ -1,6 +1,30 @@
 import mermaid, { type MermaidConfig } from "mermaid";
 
 const MAX_SOURCE = 50000;
+export function naturalSize(svg: Element): { width: number; height: number } | null {
+  const viewBox = svg
+    .getAttribute("viewBox")
+    ?.trim()
+    .split(/[\s,]+/)
+    .map(Number);
+  let width = viewBox?.[2];
+  let height = viewBox?.[3];
+  if (
+    viewBox?.length !== 4 ||
+    !viewBox.every(Number.isFinite) ||
+    width === undefined ||
+    height === undefined ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    ({ width, height } = svg.getBoundingClientRect());
+  }
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  const scale = Math.min(1, 10000 / Math.max(width, height));
+  const clamp = (value: number) => Math.max(1, Math.min(10000, Math.ceil(value * scale)));
+  return { width: clamp(width), height: clamp(height) };
+}
+
 export function sanitizeSvg(source: string): SVGElement {
   const parsed = new DOMParser().parseFromString(source, "image/svg+xml");
   const svg = parsed.documentElement;
@@ -103,10 +127,11 @@ export function startFrame(root: HTMLElement) {
   let pending: string | undefined;
   let rendering = false;
   let sequence = 0;
+  let natural: ReturnType<typeof naturalSize> | undefined;
   const size = () => {
     const measured = root.getBoundingClientRect().height;
     const height = Number.isFinite(measured) ? Math.max(1, Math.min(10000, Math.ceil(measured))) : 1;
-    window.parent.postMessage({ type: "size", height }, "*");
+    window.parent.postMessage({ type: "size", height, ...(natural === undefined ? {} : { natural }) }, "*");
   };
   const fallback = (message: string, source: string) => {
     const label = document.createElement("p");
@@ -114,6 +139,7 @@ export function startFrame(root: HTMLElement) {
     const text = document.createElement("pre");
     text.textContent = source;
     root.replaceChildren(label, text);
+    natural = null;
   };
   const draw = async () => {
     if (rendering) return;
@@ -133,7 +159,11 @@ export function startFrame(root: HTMLElement) {
         root.append(staging);
         try {
           const result = await mermaid.render(`diagram-${++sequence}`, source, staging);
-          if (active && pending === undefined) root.replaceChildren(sanitizeSvg(result.svg));
+          if (active && pending === undefined) {
+            const svg = sanitizeSvg(result.svg);
+            root.replaceChildren(svg);
+            natural = naturalSize(svg);
+          }
         } catch {
           if (active && pending === undefined) fallback("This diagram could not be drawn.", source);
         } finally {

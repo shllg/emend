@@ -5,6 +5,7 @@ import { isAtFit, maxScale } from "../../lib/lightbox-view.ts";
 import { Button } from "../ui/Button.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { isToastInteraction } from "../ui/overlay.ts";
+import { LightboxDiagram } from "./MermaidBlock.tsx";
 import type { LightboxItem, ScreenshotGallery } from "./screenshots.ts";
 import { useLightboxView } from "./use-lightbox-view.ts";
 
@@ -64,6 +65,13 @@ export function Lightbox({
             imageView={imageView}
             index={index}
             count={gallery.items.length}
+            galleryNoun={
+              gallery.items.every((item) => item.kind === "image")
+                ? "screenshot"
+                : gallery.items.every((item) => item.kind === "diagram")
+                  ? "diagram"
+                  : undefined
+            }
             closeButton={closeButton}
             onStep={step}
             onComment={
@@ -87,6 +95,7 @@ function LightboxImage({
   imageView,
   index,
   count,
+  galleryNoun,
   closeButton,
   onStep,
   onComment,
@@ -95,6 +104,7 @@ function LightboxImage({
   imageView: ReturnType<typeof useLightboxView>;
   index: number;
   count: number;
+  galleryNoun?: "screenshot" | "diagram";
   closeButton: RefObject<HTMLButtonElement | null>;
   onStep: (delta: number) => void;
   onComment?: () => void;
@@ -105,6 +115,7 @@ function LightboxImage({
   const zoomOutUnavailable = atFit || failed;
   const zoomInUnavailable = !model || failed || model.view.scale >= maxScale(model.bounds);
   const zoomPercent = model ? `${Math.round(model.view.scale * 100)}%` : null;
+  const noun = item.kind === "image" ? "screenshot" : "diagram";
   // Keep unavailable controls focusable so reaching a limit or loading an image preserves arrow navigation.
   return (
     <>
@@ -145,7 +156,7 @@ function LightboxImage({
           }}
         />
         {onComment && (
-          <IconButton icon={MessageSquarePlus} label="Comment on screenshot" size="lg" onClick={onComment} />
+          <IconButton icon={MessageSquarePlus} label={`Comment on ${noun}`} size="lg" onClick={onComment} />
         )}
         <Primitive.Close asChild>
           <IconButton ref={closeButton} icon={X} label="Close" size="lg" tooltip={false} />
@@ -161,11 +172,12 @@ function LightboxImage({
             role="status"
             className="pointer-events-none absolute inset-0 grid place-items-center p-6 text-center text-fg-2"
           >
-            The screenshot could not load.
+            {item.kind === "image" ? "The screenshot could not load." : "The diagram could not be drawn."}
           </p>
-        ) : (
+        ) : item.kind === "image" ? (
           <img
             key={index}
+            data-lightbox-subject
             src={item.src}
             alt={item.caption}
             draggable={false}
@@ -185,12 +197,31 @@ function LightboxImage({
                 : undefined,
             }}
           />
+        ) : (
+          <div
+            key={index}
+            data-lightbox-subject
+            className={`absolute top-0 left-0 origin-top-left ${atFit ? "cursor-zoom-in" : "cursor-grab active:cursor-grabbing"}`}
+            style={{
+              width: image?.width ?? "100%",
+              height: image?.height ?? "100%",
+              visibility: model ? "visible" : "hidden",
+              transform: model
+                ? `translate(${model.view.x}px, ${model.view.y}px) scale(${model.view.scale})`
+                : undefined,
+            }}
+          >
+            <LightboxDiagram
+              source={item.source}
+              onSize={(natural) => (natural ? setImage(natural) : setFailed(true))}
+            />
+          </div>
         )}
         {count > 1 && (
           <>
             <IconButton
               icon={ChevronLeft}
-              label="Previous screenshot"
+              label={galleryNoun ? `Previous ${galleryNoun}` : "Previous"}
               size="lg"
               variant="secondary"
               className="absolute top-1/2 left-2 -translate-y-1/2"
@@ -201,7 +232,7 @@ function LightboxImage({
             />
             <IconButton
               icon={ChevronRight}
-              label="Next screenshot"
+              label={galleryNoun ? `Next ${galleryNoun}` : "Next"}
               size="lg"
               variant="secondary"
               className="absolute top-1/2 right-2 -translate-y-1/2"
@@ -213,15 +244,20 @@ function LightboxImage({
           </>
         )}
       </div>
-      <footer className="max-h-[25dvh] shrink-0 overflow-y-auto border-t border-line-1 px-4 py-3 text-center">
-        <Primitive.Title dir="auto" className="m-0 whitespace-pre-wrap break-words text-14 font-medium">
-          {item.caption}
-        </Primitive.Title>
-        <Primitive.Description className="sr-only">
-          Screenshot {index + 1} of {count}. Left and Right arrows move between screenshots; when zoomed in, the arrow
-          keys move the image. Escape closes.
-        </Primitive.Description>
-      </footer>
+      {item.kind === "image" ? (
+        <footer className="max-h-[25dvh] shrink-0 overflow-y-auto border-t border-line-1 px-4 py-3 text-center">
+          <Primitive.Title dir="auto" className="m-0 whitespace-pre-wrap break-words text-14 font-medium">
+            {item.caption}
+          </Primitive.Title>
+        </footer>
+      ) : (
+        <Primitive.Title className="sr-only">Diagram</Primitive.Title>
+      )}
+      <Primitive.Description className="sr-only">
+        {item.kind === "image" ? "Screenshot" : "Diagram"} {index + 1} of {count}. Left and Right arrows move between{" "}
+        {galleryNoun ? `${galleryNoun}s` : "screenshots and diagrams"}; when zoomed in, the arrow keys move the{" "}
+        {item.kind === "image" ? "image" : "diagram"}. Escape closes.
+      </Primitive.Description>
     </>
   );
 }

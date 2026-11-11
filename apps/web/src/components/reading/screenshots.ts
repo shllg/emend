@@ -1,14 +1,16 @@
 import { type RefObject, useCallback, useLayoutEffect, useState } from "react";
 
-// A discriminant leaves room for another visual kind without treating arbitrary HTML as an image.
-export type LightboxItem = {
-  kind: "image";
-  src: string;
-  caption: string;
-  blockId: string;
-  element: HTMLImageElement;
-};
+export type LightboxItem =
+  | {
+      kind: "image";
+      src: string;
+      caption: string;
+      blockId: string;
+      element: HTMLImageElement;
+    }
+  | { kind: "diagram"; source: string; blockId: string; element: HTMLButtonElement };
 export type ScreenshotGallery = { items: LightboxItem[]; index: number };
+type DiagramSource = (blockId: string) => string | undefined;
 
 function screenshot(element: EventTarget | null, root: HTMLElement): LightboxItem | undefined {
   if (!(element instanceof HTMLImageElement) || !root.contains(element)) return;
@@ -29,21 +31,41 @@ function screenshot(element: EventTarget | null, root: HTMLElement): LightboxIte
   return { kind: "image", src, caption, blockId: block.dataset.blockId ?? "", element };
 }
 
-function collect(root: HTMLElement) {
-  // Include folded groups: the gallery follows all screenshots in writeup order.
-  return [...root.querySelectorAll("span.emend-media > img")].flatMap((image) => {
-    const item = screenshot(image, root);
+function diagram(
+  element: EventTarget | null,
+  root: HTMLElement,
+  diagramSource: DiagramSource,
+): LightboxItem | undefined {
+  if (
+    !(element instanceof HTMLButtonElement) ||
+    !element.matches("button[data-lightbox-diagram]") ||
+    !root.contains(element)
+  )
+    return;
+  const block = element.closest<HTMLElement>("[data-block-id]");
+  if (!block || !root.contains(block) || block.dataset.blockKind !== "diagram") return;
+  const blockId = block.dataset.blockId ?? "";
+  const source = diagramSource(blockId);
+  if (typeof source !== "string") return;
+  return { kind: "diagram", source, blockId, element };
+}
+
+function collect(root: HTMLElement, diagramSource: DiagramSource) {
+  // Include folded groups: the gallery follows all screenshots and diagrams in reading order.
+  return [...root.querySelectorAll("span.emend-media > img, button[data-lightbox-diagram]")].flatMap((element) => {
+    const item = screenshot(element, root) ?? diagram(element, root, diagramSource);
     return item ? [item] : [];
   });
 }
 
-export function useScreenshots(root: RefObject<HTMLElement | null>, onOpen: () => void) {
+export function useScreenshots(root: RefObject<HTMLElement | null>, onOpen: () => void, diagramSource: DiagramSource) {
   const [gallery, setGallery] = useState<ScreenshotGallery | null>(null);
   // BlockView can replace its HTML without changing the block id or the groups' identity.
   useLayoutEffect(() => {
     const element = root.current;
     if (!element) return;
-    for (const item of collect(element)) {
+    for (const item of collect(element, diagramSource)) {
+      if (item.kind !== "image") continue;
       item.element.tabIndex = 0;
       item.element.setAttribute("role", "button");
       item.element.setAttribute("aria-haspopup", "dialog");
@@ -52,10 +74,15 @@ export function useScreenshots(root: RefObject<HTMLElement | null>, onOpen: () =
     const activate = (event: MouseEvent | KeyboardEvent) => {
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
       if (event instanceof KeyboardEvent && (event.repeat || (event.key !== "Enter" && event.key !== " "))) return;
-      if (!screenshot(event.target, element)) return;
+      const item =
+        screenshot(event.target, element) ??
+        (event.type === "click" && event.target instanceof Element
+          ? diagram(event.target.closest("button[data-lightbox-diagram]"), element, diagramSource)
+          : undefined);
+      if (!item) return;
       event.preventDefault();
-      const items = collect(element);
-      const index = items.findIndex((item) => item.element === event.target);
+      const items = collect(element, diagramSource);
+      const index = items.findIndex((entry) => entry.element === item.element);
       if (index < 0) return;
       window.getSelection()?.removeAllRanges();
       onOpen();

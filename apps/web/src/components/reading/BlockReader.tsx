@@ -84,12 +84,26 @@ export function BlockReader({
   const [error, setError] = useState("");
   const phone = useLayout() === "phone";
   const screenshotOpener = useRef<HTMLElement | null>(null);
-  const { gallery, closeGallery } = useScreenshots(root, () => {
-    latched.current = null;
-    guardUntil.current = 0;
-    if (!composing) setTarget(null);
-    setError("");
-  });
+  const screenshotBlocks = useMemo(
+    () =>
+      new Map(
+        groups.flatMap((group) => groupBlocks(group).map((block) => [block.id, { block, path: group.path }] as const)),
+      ),
+    [groups],
+  );
+  const { gallery, closeGallery } = useScreenshots(
+    root,
+    () => {
+      latched.current = null;
+      guardUntil.current = 0;
+      if (!composing) setTarget(null);
+      setError("");
+    },
+    (blockId) => {
+      const block = screenshotBlocks.get(blockId)?.block;
+      return block?.kind === "diagram" ? (block.source ?? block.text) : undefined;
+    },
+  );
   // biome-ignore lint/correctness/useExhaustiveDependencies: A gallery's DOM snapshot belongs to one review revision.
   useLayoutEffect(() => closeGallery(), [reviewId, revision, closeGallery]);
   const openComposer = (next: Target, from?: HTMLElement) => {
@@ -117,13 +131,6 @@ export function BlockReader({
   const changes = new Map(changedBlocks.map((block) => [block.blockId, block.revision]));
   const targets = useMemo(
     () => new Map(groups.flatMap((group) => groupBlocks(group).map((block) => [block.id, group.path] as const))),
-    [groups],
-  );
-  const screenshotBlocks = useMemo(
-    () =>
-      new Map(
-        groups.flatMap((group) => groupBlocks(group).map((block) => [block.id, { block, path: group.path }] as const)),
-      ),
     [groups],
   );
   const screenshotTarget = (item: LightboxItem): Target | undefined => {

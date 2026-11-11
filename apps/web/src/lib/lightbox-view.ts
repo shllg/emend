@@ -1,18 +1,18 @@
 export type Point = { x: number; y: number };
 export type Size = { width: number; height: number };
 export type View = Point & { scale: number };
-export type Bounds = { stage: Size; image: Size; pad?: number };
+export type Bounds = { stage: Size; image: Size; pad?: number; maxFit?: number };
 
-export function fitScale({ stage, image, pad = 16 }: Bounds) {
+export function fitScale({ stage, image, pad = 16, maxFit = 1 }: Bounds) {
   return Math.min(
-    1,
+    maxFit,
     Math.max(1, stage.width - 2 * pad) / image.width,
     Math.max(1, stage.height - 2 * pad) / image.height,
   );
 }
 
 export function maxScale(bounds: Bounds) {
-  return Math.max(4, fitScale(bounds));
+  return Math.max(4, 4 * fitScale(bounds));
 }
 
 function boundedScale(scale: number, bounds: Bounds) {
@@ -53,7 +53,12 @@ export function zoomAt(view: View, nextScale: number, point: Point, bounds: Boun
 }
 
 export function toggleZoom(view: View, point: Point, bounds: Bounds) {
-  return zoomAt(view, view.scale < 1 ? 1 : !isAtFit(view, bounds) ? fitScale(bounds) : 2, point, bounds);
+  return zoomAt(
+    view,
+    view.scale < 1 ? 1 : !isAtFit(view, bounds) ? fitScale(bounds) : 2 * fitScale(bounds),
+    point,
+    bounds,
+  );
 }
 
 export const distance = (a: Point, b: Point) => Math.hypot(b.x - a.x, b.y - a.y);
