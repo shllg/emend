@@ -15,6 +15,7 @@ import { OriginBadge } from "../status/OriginBadge.tsx";
 import { SnoozeBadge, StateBadge } from "../status/StateBadge.tsx";
 import { Banner } from "../ui/Banner.tsx";
 import { Button } from "../ui/Button.tsx";
+import { CopyTextMenu } from "../ui/CopyTextMenu.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { cn } from "../ui/utils.ts";
 import { LayoutControls } from "./LayoutControls.tsx";
@@ -78,13 +79,38 @@ export function ReviewHeader({
       )}
     >
       <div className="flex flex-wrap items-start gap-3">
-        <h1
-          ref={titleRef}
-          tabIndex={-1}
-          className="m-0 min-w-0 flex-[1_1_240px] text-pretty wrap-anywhere text-[17px] font-semibold leading-[1.3] tracking-[-0.01em] text-fg-1"
-        >
-          {review.title}
-        </h1>
+        {phone ? (
+          <CopyTextMenu
+            text={review.title}
+            noun="title"
+            heading={{
+              as: "h1",
+              ref: titleRef,
+              tabIndex: -1,
+              className:
+                "m-0 min-w-0 flex-[1_1_240px] text-[17px] font-semibold leading-[1.3] tracking-[-0.01em] text-fg-1",
+            }}
+            trigger={{
+              className: "block w-full border-0 bg-transparent p-0 text-start [font:inherit] [color:inherit]",
+              children: <span className="block truncate">{review.title}</span>,
+            }}
+            blocks={[
+              {
+                content: review.title,
+                className:
+                  "px-2.5 pt-2 pb-1 font-sans text-13 whitespace-pre-wrap text-fg-1 [overflow-wrap:anywhere] select-text",
+              },
+            ]}
+          />
+        ) : (
+          <h1
+            ref={titleRef}
+            tabIndex={-1}
+            className="m-0 min-w-0 flex-[1_1_240px] text-pretty wrap-anywhere text-[17px] font-semibold leading-[1.3] tracking-[-0.01em] text-fg-1"
+          >
+            {review.title}
+          </h1>
+        )}
         {!phone && (
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <Button variant="ghost" size="sm" icon={MessageSquarePlus} disabled={!revision} onClick={onCommentReview}>

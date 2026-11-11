@@ -1,5 +1,5 @@
 import type { ReviewView, RevisionView } from "@emend/contract";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { relativeTime, wakeTime } from "../../lib/time.ts";
@@ -46,23 +46,253 @@ const revision: RevisionView = {
   threads: [],
   changedBlocks: [],
 };
-afterEach(cleanup);
-function mount({ metadata = review, loaded = revision, phone = false, seq = 2 } = {}) {
+const execCommandDescriptor = Object.getOwnPropertyDescriptor(document, "execCommand");
+afterEach(() => {
+  cleanup();
+  window.getSelection()?.removeAllRanges();
+  if (execCommandDescriptor) Object.defineProperty(document, "execCommand", execCommandDescriptor);
+  else Reflect.deleteProperty(document, "execCommand");
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+function mount({
+  metadata = review,
+  loaded = revision,
+  phone = false,
+  seq = 2,
+  title = metadata.title,
+}: {
+  metadata?: ReviewView;
+  loaded?: RevisionView;
+  phone?: boolean;
+  seq?: number;
+  title?: string;
+} = {}) {
   const onRevisionChange = vi.fn();
   const titleRef = createRef<HTMLHeadingElement>();
-  const result = render(
+  const header = (title: string) => (
     <ReviewHeader
-      review={metadata}
+      review={{ ...metadata, title }}
       revision={loaded}
       seq={seq}
       ready={metadata.newestRevision}
       phone={phone}
       titleRef={titleRef}
       onRevisionChange={onRevisionChange}
-    />,
+    />
   );
-  return { ...result, onRevisionChange, titleRef };
+  const result = render(header(title));
+  return { ...result, onRevisionChange, titleRef, rerenderTitle: (title: string) => result.rerender(header(title)) };
 }
+
+const longTitle = 'Review the  "phone header" with a long title that keeps every word through the final trailing word';
+const titleName = longTitle.replace(/\s+/g, " ");
+
+test("phone keeps a focusable level-one heading with one full-title button and an ellipsis span", () => {
+  const { titleRef, rerenderTitle } = mount({ phone: true, title: longTitle });
+  const heading = screen.getByRole("heading", { level: 1, name: titleName });
+  expect(heading.tagName).toBe("H1");
+  expect(heading.getAttribute("tabindex")).toBe("-1");
+  expect(titleRef.current).toBe(heading);
+  expect(heading.classList.contains("wrap-anywhere")).toBe(false);
+  expect(heading.classList.contains("text-pretty")).toBe(false);
+  for (const name of [
+    "m-0",
+    "min-w-0",
+    "flex-[1_1_240px]",
+    "text-[17px]",
+    "font-semibold",
+    "leading-[1.3]",
+    "tracking-[-0.01em]",
+    "text-fg-1",
+  ])
+    expect(heading.classList.contains(name)).toBe(true);
+  const button = within(heading).getByRole("button", { name: titleName });
+  expect(within(heading).getAllByRole("button")).toHaveLength(1);
+  expect(button.textContent).toBe(longTitle);
+  for (const name of [
+    "block",
+    "w-full",
+    "text-start",
+    "p-0",
+    "border-0",
+    "bg-transparent",
+    "[font:inherit]",
+    "[color:inherit]",
+    "focus-visible:outline-none",
+    "focus-visible:shadow-(--focus-ring)",
+  ])
+    expect(button.classList.contains(name)).toBe(true);
+  const span = button.querySelector("span");
+  expect(span?.textContent).toBe(longTitle);
+  expect(span?.classList.contains("block")).toBe(true);
+  expect(span?.classList.contains("truncate")).toBe(true);
+  act(() => titleRef.current?.focus());
+  expect(document.activeElement).toBe(heading);
+  rerenderTitle("Next review after navigation");
+  const nextHeading = screen.getByRole("heading", { level: 1, name: "Next review after navigation" });
+  expect(titleRef.current).toBe(nextHeading);
+  act(() => titleRef.current?.focus());
+  expect(document.activeElement).toBe(nextHeading);
+  expect(screen.queryByRole("menu")).toBeNull();
+});
+
+test("tablet and desktop keep the full wrapping heading without a title menu", () => {
+  const { titleRef } = mount({ phone: false, title: longTitle });
+  const heading = screen.getByRole("heading", { level: 1, name: titleName });
+  expect(titleRef.current).toBe(heading);
+  expect(heading.getAttribute("tabindex")).toBe("-1");
+  expect(heading.textContent).toBe(longTitle);
+  expect(heading.classList.contains("text-pretty")).toBe(true);
+  expect(heading.classList.contains("wrap-anywhere")).toBe(true);
+  expect(within(heading).queryByRole("button")).toBeNull();
+  fireEvent.pointerDown(heading, { button: 0, pointerType: "mouse" });
+  fireEvent.click(heading);
+  fireEvent.keyDown(heading, { key: "Enter" });
+  expect(screen.queryByRole("menu")).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "Copy title" })).toBeNull();
+});
+
+test.each(["touch", "pen", "mouse"])(
+  "a phone %s opens the full title and its described Copy item",
+  async (pointerType) => {
+    mount({ phone: true, title: longTitle });
+    const button = screen.getByRole("button", { name: titleName });
+    const allowed = fireEvent.pointerDown(button, { button: 0, pointerType });
+    if (pointerType !== "mouse") {
+      expect(allowed).toBe(false);
+      expect(screen.queryByRole("menu")).toBeNull();
+      fireEvent.click(button, { detail: 1 });
+    }
+    const menu = await screen.findByRole("menu");
+    const block = within(menu).getByText(titleName);
+    expect(block.tagName).toBe("DIV");
+    expect(block.textContent).toBe(longTitle);
+    expect(block.getAttribute("aria-hidden")).toBe("true");
+    for (const name of ["whitespace-pre-wrap", "[overflow-wrap:anywhere]", "font-sans", "select-text"])
+      expect(block.classList.contains(name)).toBe(true);
+    expect(block.classList.contains("font-stretch-mono")).toBe(false);
+    const copy = within(menu).getByRole("menuitem", { name: "Copy title", description: titleName });
+    expect(copy.getAttribute("aria-describedby")).toBe(block.id);
+    expect(document.getElementById(block.id)).toBe(block);
+  },
+);
+
+test("even a short phone title opens on an assistive-technology click", async () => {
+  mount({ phone: true, title: "Short title" });
+  fireEvent.click(screen.getByRole("button", { name: "Short title" }), { detail: 0 });
+  expect(within(await screen.findByRole("menu")).getByText("Short title")).toBeTruthy();
+});
+
+test("Copy title writes the exact text, announces success and resets after two seconds", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+  mount({ phone: true, title: longTitle });
+  const heading = screen.getByRole("heading", { level: 1, name: titleName });
+  const status = screen.getByRole("status");
+  expect(heading.nextElementSibling).toBe(status);
+  fireEvent.click(within(heading).getByRole("button"));
+  const menu = await screen.findByRole("menu");
+  vi.useFakeTimers();
+  await act(async () => fireEvent.click(within(menu).getByRole("menuitem", { name: "Copy title" })));
+  expect(writeText).toHaveBeenCalledExactlyOnceWith(longTitle);
+  expect(within(menu).getByRole("menuitem", { name: "Copied" })).toBeTruthy();
+  expect(status.textContent).toBe("Title copied");
+  expect(status.classList.contains("sr-only")).toBe(true);
+  expect(status.getAttribute("aria-live")).toBe("polite");
+  expect(status.closest('[aria-hidden="true"]')).toBeNull();
+  expect(menu.contains(status)).toBe(false);
+  act(() => vi.advanceTimersByTime(1999));
+  expect(within(menu).getByRole("menuitem", { name: "Copied" })).toBeTruthy();
+  act(() => vi.advanceTimersByTime(1));
+  expect(within(menu).getByRole("menuitem", { name: "Copy title" })).toBeTruthy();
+  expect(status.textContent).toBe("");
+});
+
+test.each(["missing", "rejected"])(
+  "a %s clipboard selects only the title and announces the fallback",
+  async (clipboard) => {
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      clipboard: clipboard === "missing" ? undefined : { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+    });
+    let selected: string | undefined;
+    const execCommand = vi.fn(() => {
+      selected = window.getSelection()?.toString();
+      return false;
+    });
+    Object.defineProperty(document, "execCommand", { configurable: true, value: execCommand });
+    mount({ phone: true, title: longTitle });
+    const button = screen.getByRole("button", { name: titleName });
+    const status = screen.getByRole("status");
+    fireEvent.click(button);
+    const menu = await screen.findByRole("menu");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Copy title" }));
+    await waitFor(() => expect(status.textContent).toBe("Select and copy the title"));
+    expect(execCommand).toHaveBeenCalledExactlyOnceWith("copy");
+    expect(selected).toBe(longTitle);
+    expect(window.getSelection()?.toString()).toBe(longTitle);
+    const block = within(menu).getByText(titleName);
+    expect(window.getSelection()?.getRangeAt(0).commonAncestorContainer).toBe(block);
+    expect(within(menu).getByText("Select and copy the title").getAttribute("aria-hidden")).toBe("true");
+    fireEvent.keyDown(menu, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(status.textContent).toBe("");
+    fireEvent.click(button);
+    expect(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Copy title" })).toBeTruthy();
+    expect(status.textContent).toBe("");
+  },
+);
+
+test.each(["Enter", " ", "ArrowDown"])(
+  "%s opens the phone title menu; Escape returns focus to its trigger",
+  async (key) => {
+    mount({ phone: true, title: longTitle });
+    const button = screen.getByRole("button", { name: titleName });
+    act(() => button.focus());
+    expect(fireEvent.keyDown(button, { key })).toBe(false);
+    const menu = await screen.findByRole("menu");
+    const copy = within(menu).getByRole("menuitem", { name: "Copy title" });
+    await waitFor(() => expect(document.activeElement).toBe(copy));
+    fireEvent.keyDown(copy, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(button));
+  },
+);
+
+test("an outside tap closes the phone title menu and returns focus to its trigger", async () => {
+  mount({ phone: true, title: longTitle });
+  const button = screen.getByRole("button", { name: titleName });
+  fireEvent.pointerDown(button, { button: 0, pointerType: "touch" });
+  fireEvent.click(button, { detail: 1 });
+  await screen.findByRole("menu");
+  fireEvent.pointerDown(document.body, { button: 0, pointerType: "touch" });
+  fireEvent.click(document.body);
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(button));
+});
+
+test("a hostile title stays plain text in the phone heading and popover", async () => {
+  const title = "<img src=x onerror=alert(1)><script>alert(1)</script>";
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+  mount({ phone: true, title });
+  const heading = screen.getByRole("heading", { level: 1, name: title });
+  expect(heading.textContent).toBe(title);
+  const button = within(heading).getByRole("button", { name: title });
+  expect(button.textContent).toBe(title);
+  expect(heading.querySelector("img,script,[onerror]")).toBeNull();
+  expect(screen.queryByRole("menu")).toBeNull();
+  expect(document.querySelector("img,[onerror]")).toBeNull();
+  fireEvent.click(button);
+  const menu = await screen.findByRole("menu");
+  expect(within(menu).getByText(title).textContent).toBe(title);
+  expect(heading.querySelector("img,script,[onerror]")).toBeNull();
+  expect(menu.querySelector("img,script,[onerror]")).toBeNull();
+  expect(document.querySelector("img,[onerror]")).toBeNull();
+  await act(async () => fireEvent.click(within(menu).getByRole("menuitem", { name: "Copy title" })));
+  expect(writeText).toHaveBeenCalledExactlyOnceWith(title);
+});
 
 test.each(["Orchard", "<img src=x onerror=alert(1)>"])(
   "header project %s is isolated text after the machine",
