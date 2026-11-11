@@ -82,6 +82,18 @@ test("bundle strips authority and capability fields while preserving row identit
   expect(result).toEqual(expected);
 });
 
+test("bundle project is optional, nullable and bounded without adding import rows", () => {
+  const input = ImportBundle.parse(bundle());
+  expect(input.review).not.toHaveProperty("project");
+  for (const project of [null, "Orchard", "x".repeat(200)]) {
+    const parsed = ImportBundle.parse({ ...input, review: { ...input.review, project } });
+    expect(parsed.review.project).toBe(project);
+    expect(importRowCount(parsed)).toBe(importRowCount(input));
+  }
+  for (const project of ["", "x".repeat(201)])
+    expect(ImportBundle.safeParse({ ...input, review: { ...input.review, project } }).success).toBe(false);
+});
+
 test("import strips heading declarations while preserving a doc title", () => {
   const input = bundle();
   const file = {

@@ -40,6 +40,48 @@ beforeEach(async () => {
   f = await importFixture();
   onTestFinished(() => f.cleanup());
 });
+test.each([
+  { project: "Orchard", name: "Legacy", expected: "Orchard", existingRepo: true },
+  { project: undefined, name: "Legacy", expected: "Legacy", existingRepo: true },
+  { project: undefined, name: ".git", expected: null, existingRepo: true },
+  { project: ".git", name: "Legacy", expected: ".git", existingRepo: true },
+  { project: null, name: "Orchard", expected: "Orchard", existingRepo: true },
+  { project: null, name: "Orchard", expected: "Orchard", existingRepo: false },
+  { project: null, name: ".git", expected: null, existingRepo: false },
+  { project: null, name: null, expected: null, existingRepo: false },
+  { project: undefined, name: null, expected: null, existingRepo: false },
+])(
+  "import keeps project $project with repo $name as $expected (existing repo: $existingRepo)",
+  async ({ project, name, expected, existingRepo }) => {
+    const input = ImportBundle.parse(await bundle(f));
+    input.review.project = project;
+    input.review.repo = name === null ? null : { key: "b".repeat(64), name };
+    if (input.review.repo && existingRepo)
+      await f.db.query((q) =>
+        q.insert(tables.repos).values({
+          ownerId: f.ownerId,
+          key: "b".repeat(64),
+          name: "Hub original",
+        }),
+      );
+    expect((await f.importRequest("/import", input)).status).toBe(201);
+    const review = await f.db.read((q) =>
+      q
+        .select()
+        .from(tables.reviews)
+        .where(and(eq(tables.reviews.ownerId, f.ownerId), eq(tables.reviews.id, input.review.id)))
+        .get(),
+    );
+    expect(review?.project).toBe(expected);
+    if (expected !== null) {
+      const response = await f.request(`/reviews/${input.review.id}`, "GET");
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ project: expected });
+    }
+    const repo = await f.db.read((q) => q.select().from(tables.repos).where(eq(tables.repos.ownerId, f.ownerId)).get());
+    expect(repo?.name).toBe(name === null ? undefined : existingRepo ? "Hub original" : name);
+  },
+);
 test("copies ids and history atomically, releases unconfirmed Sends, rotates content keys and skips retries", async () => {
   const input = await bundle(f);
   const response = await f.importRequest("/import", input);

@@ -14,6 +14,19 @@ import { manifestJsonError, parsePublishArgs, publishCommand, publishTimeoutMs }
 
 afterEach(() => vi.unstubAllGlobals());
 
+test("help lists the project option for both publish forms", async () => {
+  const stdout: string[] = [];
+  const stderr = vi.fn();
+  expect(await run(["--help"], { stdout: (line) => stdout.push(line), stderr, env: {} })).toBe(0);
+  const forms = stdout
+    .join("")
+    .split("\n")
+    .filter((line) => line.includes("emend publish"));
+  expect(forms).toHaveLength(2);
+  expect(forms.every((line) => line.endsWith("[--project NAME]"))).toBe(true);
+  expect(stderr).not.toHaveBeenCalled();
+});
+
 test.each([["plan.md"], ["--manifest", "review.json"]])("project option works with %j", (...args) => {
   expect(parsePublishArgs([...args, "--project", "  Synthetic project  "]).project).toBe("Synthetic project");
   expect(parsePublishArgs([...args, "--project", "x".repeat(200)]).project).toHaveLength(200);

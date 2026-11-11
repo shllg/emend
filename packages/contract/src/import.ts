@@ -22,6 +22,7 @@ const ImportRows = z.object({
     originInstanceId: id,
     reviewKey: Sha256,
     repo: PublishRequest.shape.repo,
+    project: z.string().min(1).max(LIMITS.titleChars).nullable().optional(),
     branch: PublishRequest.shape.branch,
     title: PublishRequest.shape.title,
     state: z.enum(["open", "approved", "settled"]),

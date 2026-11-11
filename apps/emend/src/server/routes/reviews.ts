@@ -79,7 +79,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, reviewId?: stri
         review: reviews,
         origin: { id: instances.id, name: instances.name },
         repo: repos.key,
-        project: repos.name,
+        repoName: repos.name,
         newestRevision: latest.seq,
       })
       .from(reviews)
@@ -233,7 +233,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, reviewId?: stri
     )
     .groupBy(agentWaiters.reviewId);
   const waitingIds = new Set(directWaits.map((row) => row.reviewId));
-  const items = rows.map(({ review, origin, repo, project, newestRevision }) => {
+  const items = rows.map(({ review, origin, repo, repoName, newestRevision }) => {
     const snoozed = review.state === "open" && snoozeInEffect(review, now);
     const activeUntil =
       review.state === "approved" &&
@@ -246,7 +246,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, reviewId?: stri
       title: review.title,
       origin,
       repo,
-      project: project === ".git" ? null : project,
+      project: review.project ?? (repoName === ".git" ? null : repoName),
       branch: review.branch,
       state: review.state,
       newestRevision,

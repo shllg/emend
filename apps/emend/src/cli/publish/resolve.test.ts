@@ -6,9 +6,16 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { LIMITS, PublishManifest } from "@emend/contract";
 import { expect, test, vi } from "vitest";
-import { resolvePublish } from "./resolve.ts";
+import { resolvePublish, shortenRepoName } from "./resolve.ts";
 
 const { mkdir, mkdtemp, rm, symlink, truncate, writeFile } = fs;
+
+test("derived repo names fit the title limit without splitting a surrogate pair", () => {
+  expect(shortenRepoName("Orchard")).toBe("Orchard");
+  expect(shortenRepoName("x".repeat(230))).toBe("x".repeat(200));
+  expect(shortenRepoName(`${"x".repeat(199)}😀more`)).toBe("x".repeat(199));
+  expect(shortenRepoName(`${"x".repeat(198)}😀more`)).toBe(`${"x".repeat(198)}😀`);
+});
 
 // Expose configurable exports so the realpath spy can replace the built-in function.
 vi.mock("node:fs/promises", async (original) => ({ ...(await original<typeof import("node:fs/promises")>()) }));

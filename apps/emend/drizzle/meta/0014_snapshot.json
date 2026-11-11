@@ -1,0 +1,3055 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "6aa87cff-c249-45b9-88dc-166916923995",
+  "prevId": "a150ce83-e704-416b-9939-35b2d2815aa4",
+  "tables": {
+    "agent_notes": {
+      "name": "agent_notes",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "file_id": {
+          "name": "file_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "side": {
+          "name": "side",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "start_line": {
+          "name": "start_line",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "end_line": {
+          "name": "end_line",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "summary": {
+          "name": "summary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "rationale": {
+          "name": "rationale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "ref": {
+          "name": "ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "ord": {
+          "name": "ord",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "agent_notes_owner_idx": {
+          "name": "agent_notes_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        },
+        "agent_notes_owner_id_unique": {
+          "name": "agent_notes_owner_id_unique",
+          "columns": [
+            "owner_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "agent_notes_owner_file_ord_unique": {
+          "name": "agent_notes_owner_file_ord_unique",
+          "columns": [
+            "owner_id",
+            "file_id",
+            "ord"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "agent_notes_owner_id_owners_id_fk": {
+          "name": "agent_notes_owner_id_owners_id_fk",
+          "tableFrom": "agent_notes",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "agent_notes_owner_id_file_id_files_owner_id_id_fk": {
+          "name": "agent_notes_owner_id_file_id_files_owner_id_id_fk",
+          "tableFrom": "agent_notes",
+          "tableTo": "files",
+          "columnsFrom": [
+            "owner_id",
+            "file_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "agent_notes_side_check": {
+          "name": "agent_notes_side_check",
+          "value": "\"agent_notes\".\"side\" in ('old', 'new')"
+        },
+        "agent_notes_range_check": {
+          "name": "agent_notes_range_check",
+          "value": "\"agent_notes\".\"start_line\" >= 1 and \"agent_notes\".\"end_line\" >= \"agent_notes\".\"start_line\""
+        },
+        "agent_notes_ord_check": {
+          "name": "agent_notes_ord_check",
+          "value": "\"agent_notes\".\"ord\" between 0 and 7"
+        }
+      }
+    },
+    "agent_waiters": {
+      "name": "agent_waiters",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "review_id": {
+          "name": "review_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "agent_waiters_owner_idx": {
+          "name": "agent_waiters_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        },
+        "agent_waiters_owner_review_expiry_idx": {
+          "name": "agent_waiters_owner_review_expiry_idx",
+          "columns": [
+            "owner_id",
+            "review_id",
+            "expires_at"
+          ],
+          "isUnique": false
+        },
+        "agent_waiters_owner_id_unique": {
+          "name": "agent_waiters_owner_id_unique",
+          "columns": [
+            "owner_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "agent_waiters_owner_id_owners_id_fk": {
+          "name": "agent_waiters_owner_id_owners_id_fk",
+          "tableFrom": "agent_waiters",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "agent_waiters_owner_id_review_id_reviews_owner_id_id_fk": {
+          "name": "agent_waiters_owner_id_review_id_reviews_owner_id_id_fk",
+          "tableFrom": "agent_waiters",
+          "tableTo": "reviews",
+          "columnsFrom": [
+            "owner_id",
+            "review_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "blobs": {
+      "name": "blobs",
+      "columns": {
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sha256": {
+          "name": "sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "size": {
+          "name": "size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "media_type": {
+          "name": "media_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "blobs_owner_idx": {
+          "name": "blobs_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        },
+        "blobs_sha256_idx": {
+          "name": "blobs_sha256_idx",
+          "columns": [
+            "sha256"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "blobs_owner_id_owners_id_fk": {
+          "name": "blobs_owner_id_owners_id_fk",
+          "tableFrom": "blobs",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "blobs_owner_id_sha256_pk": {
+          "columns": [
+            "owner_id",
+            "sha256"
+          ],
+          "name": "blobs_owner_id_sha256_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "blobs_size_nonnegative": {
+          "name": "blobs_size_nonnegative",
+          "value": "\"blobs\".\"size\" >= 0"
+        }
+      }
+    },
+    "changed_blocks": {
+      "name": "changed_blocks",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision_id": {
+          "name": "revision_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "block_id": {
+          "name": "block_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "changed_blocks_owner_idx": {
+          "name": "changed_blocks_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        },
+        "changed_blocks_owner_id_unique": {
+          "name": "changed_blocks_owner_id_unique",
+          "columns": [
+            "owner_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "changed_blocks_revision_block_unique": {
+          "name": "changed_blocks_revision_block_unique",
+          "columns": [
+            "revision_id",
+            "block_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "changed_blocks_owner_id_owners_id_fk": {
+          "name": "changed_blocks_owner_id_owners_id_fk",
+          "tableFrom": "changed_blocks",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "changed_blocks_owner_id_revision_id_revisions_owner_id_id_fk": {
+          "name": "changed_blocks_owner_id_revision_id_revisions_owner_id_id_fk",
+          "tableFrom": "changed_blocks",
+          "tableTo": "revisions",
+          "columnsFrom": [
+            "owner_id",
+            "revision_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "comments": {
+      "name": "comments",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "review_id": {
+          "name": "review_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "author": {
+          "name": "author",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "send_id": {
+          "name": "send_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "comments_owner_idx": {
+          "name": "comments_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        },
+        "comments_owner_review_thread_idx": {
+          "name": "comments_owner_review_thread_idx",
+          "columns": [
+            "owner_id",
+            "review_id",
+            "thread_id"
+          ],
+          "isUnique": false
+        },
+        "comments_owner_review_send_idx": {
+          "name": "comments_owner_review_send_idx",
+          "columns": [
+            "owner_id",
+            "review_id",
+            "send_id"
+          ],
+          "isUnique": false
+        },
+        "comments_owner_id_unique": {
+          "name": "comments_owner_id_unique",
+          "columns": [
+            "owner_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "comments_owner_id_owners_id_fk": {
+          "name": "comments_owner_id_owners_id_fk",
+          "tableFrom": "comments",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "comments_owner_id_review_id_thread_id_threads_owner_id_review_id_id_fk": {
+          "name": "comments_owner_id_review_id_thread_id_threads_owner_id_review_id_id_fk",
+          "tableFrom": "comments",
+          "tableTo": "threads",
+          "columnsFrom": [
+            "owner_id",
+            "review_id",
+            "thread_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "review_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "comments_owner_id_review_id_send_id_sends_owner_id_review_id_id_fk": {
+          "name": "comments_owner_id_review_id_send_id_sends_owner_id_review_id_id_fk",
+          "tableFrom": "comments",
+          "tableTo": "sends",
+          "columnsFrom": [
+            "owner_id",
+            "review_id",
+            "send_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "review_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "comments_author_check": {
+          "name": "comments_author_check",
+          "value": "\"comments\".\"author\" in ('user', 'agent')"
+        },
+        "comments_outcome_check": {
+          "name": "comments_outcome_check",
+          "value": "\"comments\".\"outcome\" in ('fixed', 'explained', 'held', 'declined')"
+        }
+      }
+    },
+    "deliveries": {
+      "name": "deliveries",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "review_id": {
+          "name": "review_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lease_until": {
+          "name": "lease_until",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "confirmed_at": {
+          "name": "confirmed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "deliveries_owner_idx": {
+          "name": "deliveries_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        },
+        "deliveries_owner_id_unique": {
+          "name": "deliveries_owner_id_unique",
+          "columns": [
+            "owner_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "deliveries_owner_review_id_unique": {
+          "name": "deliveries_owner_review_id_unique",
+          "columns": [
+            "owner_id",
+            "review_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "deliveries_owner_id_owners_id_fk": {
+          "name": "deliveries_owner_id_owners_id_fk",
+          "tableFrom": "deliveries",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "deliveries_owner_id_review_id_reviews_owner_id_id_fk": {
+          "name": "deliveries_owner_id_review_id_reviews_owner_id_id_fk",
+          "tableFrom": "deliveries",
+          "tableTo": "reviews",
+          "columnsFrom": [
+            "owner_id",
+            "review_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "devices": {
+      "name": "devices",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "instance_id": {
+          "name": "instance_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "devices_owner_idx": {
+          "name": "devices_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        },
+        "devices_owner_id_unique": {
+          "name": "devices_owner_id_unique",
+          "columns": [
+            "owner_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "devices_owner_id_owners_id_fk": {
+          "name": "devices_owner_id_owners_id_fk",
+          "tableFrom": "devices",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "devices_instance_id_instances_id_fk": {
+          "name": "devices_instance_id_instances_id_fk",
+          "tableFrom": "devices",
+          "tableTo": "instances",
+          "columnsFrom": [
+            "instance_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "devices_kind_check": {
+          "name": "devices_kind_check",
+          "value": "\"devices\".\"kind\" in ('browser', 'machine')"
+        }
+      }
+    },
+    "doc_assets": {
+      "name": "doc_assets",
+      "columns": {
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision_id": {
+          "name": "revision_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "doc_id": {
+          "name": "doc_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "asset_id": {
+          "name": "asset_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "doc_assets_owner_idx": {
+          "name": "doc_assets_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        },
+        "doc_assets_owner_doc_asset_unique": {
+          "name": "doc_assets_owner_doc_asset_unique",
+          "columns": [
+            "owner_id",
+            "doc_id",
+            "asset_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "doc_assets_owner_id_owners_id_fk": {
+          "name": "doc_assets_owner_id_owners_id_fk",
+          "tableFrom": "doc_assets",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "doc_assets_owner_id_revision_id_doc_id_files_owner_id_revision_id_id_fk": {
+          "name": "doc_assets_owner_id_revision_id_doc_id_files_owner_id_revision_id_id_fk",
+          "tableFrom": "doc_assets",
+          "tableTo": "files",
+          "columnsFrom": [
+            "owner_id",
+            "revision_id",
+            "doc_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "revision_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "doc_assets_owner_id_revision_id_asset_id_files_owner_id_revision_id_id_fk": {
+          "name": "doc_assets_owner_id_revision_id_asset_id_files_owner_id_revision_id_id_fk",
+          "tableFrom": "doc_assets",
+          "tableTo": "files",
+          "columnsFrom": [
+            "owner_id",
+            "revision_id",
+            "asset_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "revision_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "files": {
+      "name": "files",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision_id": {
+          "name": "revision_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "path": {
+          "name": "path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "old_path": {
+          "name": "old_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "topic_slug": {
+          "name": "topic_slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "ord": {
+          "name": "ord",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "media_type": {
+          "name": "media_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "old_blob": {
+          "name": "old_blob",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "new_blob": {
+          "name": "new_blob",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "rendered_blob": {
+          "name": "rendered_blob",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "headings": {
+          "name": "headings",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "flag": {
+          "name": "flag",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "parent_doc_id": {
+          "name": "parent_doc_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "files_owner_idx": {
+          "name": "files_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        },
+        "files_owner_revision_path_idx": {
+          "name": "files_owner_revision_path_idx",
+          "columns": [
+            "owner_id",
+            "revision_id",
+            "path"
+          ],
+          "isUnique": false
+        },
+        "files_owner_old_blob_idx": {
+          "name": "files_owner_old_blob_idx",
+          "columns": [
+            "owner_id",
+            "old_blob"
+          ],
+          "isUnique": false
+        },
+        "files_owner_new_blob_idx": {
+          "name": "files_owner_new_blob_idx",
+          "columns": [
+            "owner_id",
+            "new_blob"
+          ],
+          "isUnique": false
+        },
+        "files_owner_rendered_blob_idx": {
+          "name": "files_owner_rendered_blob_idx",
+          "columns": [
+            "owner_id",
+            "rendered_blob"
+          ],
+          "isUnique": false
+        },
+        "files_owner_id_unique": {
+          "name": "files_owner_id_unique",
+          "columns": [
+            "owner_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "files_owner_revision_id_unique": {
+          "name": "files_owner_revision_id_unique",
+          "columns": [
+            "owner_id",
+            "revision_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "files_owner_id_owners_id_fk": {
+          "name": "files_owner_id_owners_id_fk",
+          "tableFrom": "files",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "files_owner_id_revision_id_revisions_owner_id_id_fk": {
+          "name": "files_owner_id_revision_id_revisions_owner_id_id_fk",
+          "tableFrom": "files",
+          "tableTo": "revisions",
+          "columnsFrom": [
+            "owner_id",
+            "revision_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "files_owner_id_revision_id_topic_slug_topics_owner_id_revision_id_slug_fk": {
+          "name": "files_owner_id_revision_id_topic_slug_topics_owner_id_revision_id_slug_fk",
+          "tableFrom": "files",
+          "tableTo": "topics",
+          "columnsFrom": [
+            "owner_id",
+            "revision_id",
+            "topic_slug"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "revision_id",
+            "slug"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "files_owner_id_revision_id_parent_doc_id_files_owner_id_revision_id_id_fk": {
+          "name": "files_owner_id_revision_id_parent_doc_id_files_owner_id_revision_id_id_fk",
+          "tableFrom": "files",
+          "tableTo": "files",
+          "columnsFrom": [
+            "owner_id",
+            "revision_id",
+            "parent_doc_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "revision_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "files_owner_id_old_blob_blobs_owner_id_sha256_fk": {
+          "name": "files_owner_id_old_blob_blobs_owner_id_sha256_fk",
+          "tableFrom": "files",
+          "tableTo": "blobs",
+          "columnsFrom": [
+            "owner_id",
+            "old_blob"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "sha256"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "files_owner_id_new_blob_blobs_owner_id_sha256_fk": {
+          "name": "files_owner_id_new_blob_blobs_owner_id_sha256_fk",
+          "tableFrom": "files",
+          "tableTo": "blobs",
+          "columnsFrom": [
+            "owner_id",
+            "new_blob"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "sha256"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "files_owner_id_rendered_blob_blobs_owner_id_sha256_fk": {
+          "name": "files_owner_id_rendered_blob_blobs_owner_id_sha256_fk",
+          "tableFrom": "files",
+          "tableTo": "blobs",
+          "columnsFrom": [
+            "owner_id",
+            "rendered_blob"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "sha256"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "files_role_check": {
+          "name": "files_role_check",
+          "value": "\"files\".\"role\" in ('diff', 'doc', 'asset')"
+        },
+        "files_status_check": {
+          "name": "files_status_check",
+          "value": "\"files\".\"status\" in ('added', 'modified', 'deleted', 'renamed', 'mode-changed')"
+        },
+        "files_flag_check": {
+          "name": "files_flag_check",
+          "value": "\"files\".\"flag\" in ('binary', 'oversized')"
+        }
+      }
+    },
+    "instances": {
+      "name": "instances",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "is_self": {
+          "name": "is_self",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "was_self": {
+          "name": "was_self",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "attached_at": {
+          "name": "attached_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "owners": {
+      "name": "owners",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "pairings": {
+      "name": "pairings",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "purpose": {
+          "name": "purpose",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'device'"
+        },
+        "secret_hash": {
+          "name": "secret_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "code_hash": {
+          "name": "code_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "used_at": {
+          "name": "used_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "pairings_owner_idx": {
+          "name": "pairings_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        },
+        "pairings_owner_id_unique": {
+          "name": "pairings_owner_id_unique",
+          "columns": [
+            "owner_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "pairings_secret_hash_unique": {
+          "name": "pairings_secret_hash_unique",
+          "columns": [
+            "secret_hash"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "pairings_owner_id_owners_id_fk": {
+          "name": "pairings_owner_id_owners_id_fk",
+          "tableFrom": "pairings",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "pairings_owner_id_created_by_tokens_owner_id_id_fk": {
+          "name": "pairings_owner_id_created_by_tokens_owner_id_id_fk",
+          "tableFrom": "pairings",
+          "tableTo": "tokens",
+          "columnsFrom": [
+            "owner_id",
+            "created_by"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "pairings_purpose_check": {
+          "name": "pairings_purpose_check",
+          "value": "\"pairings\".\"purpose\" in ('device', 'machine')"
+        }
+      }
+    },
+    "placements": {
+      "name": "placements",
+      "columns": {
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "review_id": {
+          "name": "review_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision_id": {
+          "name": "revision_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "location": {
+          "name": "location",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "carried": {
+          "name": "carried",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "placements_owner_idx": {
+          "name": "placements_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "placements_owner_id_owners_id_fk": {
+          "name": "placements_owner_id_owners_id_fk",
+          "tableFrom": "placements",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "placements_owner_id_review_id_thread_id_threads_owner_id_review_id_id_fk": {
+          "name": "placements_owner_id_review_id_thread_id_threads_owner_id_review_id_id_fk",
+          "tableFrom": "placements",
+          "tableTo": "threads",
+          "columnsFrom": [
+            "owner_id",
+            "review_id",
+            "thread_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "review_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "placements_owner_id_review_id_revision_id_revisions_owner_id_review_id_id_fk": {
+          "name": "placements_owner_id_review_id_revision_id_revisions_owner_id_review_id_id_fk",
+          "tableFrom": "placements",
+          "tableTo": "revisions",
+          "columnsFrom": [
+            "owner_id",
+            "review_id",
+            "revision_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "review_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "placements_thread_id_revision_id_pk": {
+          "columns": [
+            "thread_id",
+            "revision_id"
+          ],
+          "name": "placements_thread_id_revision_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "placements_status_check": {
+          "name": "placements_status_check",
+          "value": "\"placements\".\"status\" in ('placed', 'unplaced')"
+        },
+        "placements_reason_check": {
+          "name": "placements_reason_check",
+          "value": "\"placements\".\"reason\" in ('block-gone', 'ambiguous', 'topic-gone', 'file-gone', 'lines-gone')"
+        },
+        "placements_shape_check": {
+          "name": "placements_shape_check",
+          "value": "(\"placements\".\"status\" = 'placed' and \"placements\".\"location\" is not null and \"placements\".\"reason\" is null) or (\"placements\".\"status\" = 'unplaced' and \"placements\".\"location\" is null and \"placements\".\"reason\" is not null)"
+        }
+      }
+    },
+    "repos": {
+      "name": "repos",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "repos_owner_idx": {
+          "name": "repos_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        },
+        "repos_owner_id_unique": {
+          "name": "repos_owner_id_unique",
+          "columns": [
+            "owner_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "repos_owner_key_unique": {
+          "name": "repos_owner_key_unique",
+          "columns": [
+            "owner_id",
+            "key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "repos_owner_id_owners_id_fk": {
+          "name": "repos_owner_id_owners_id_fk",
+          "tableFrom": "repos",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "review_tombstones": {
+      "name": "review_tombstones",
+      "columns": {
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "review_id": {
+          "name": "review_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "review_tombstones_owner_idx": {
+          "name": "review_tombstones_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "review_tombstones_owner_id_owners_id_fk": {
+          "name": "review_tombstones_owner_id_owners_id_fk",
+          "tableFrom": "review_tombstones",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "review_tombstones_owner_id_review_id_pk": {
+          "columns": [
+            "owner_id",
+            "review_id"
+          ],
+          "name": "review_tombstones_owner_id_review_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "reviews": {
+      "name": "reviews",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "origin_instance_id": {
+          "name": "origin_instance_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "review_key": {
+          "name": "review_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "repo_id": {
+          "name": "repo_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "project": {
+          "name": "project",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "branch": {
+          "name": "branch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'open'"
+        },
+        "approved_revision": {
+          "name": "approved_revision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "approved_at": {
+          "name": "approved_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "moved_to_url": {
+          "name": "moved_to_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "imported_at": {
+          "name": "imported_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "snoozed_at": {
+          "name": "snoozed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "snoozed_until": {
+          "name": "snoozed_until",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "released_at": {
+          "name": "released_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "released_reason": {
+          "name": "released_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "reviews_owner_idx": {
+          "name": "reviews_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        },
+        "reviews_owner_state_updated_idx": {
+          "name": "reviews_owner_state_updated_idx",
+          "columns": [
+            "owner_id",
+            "state",
+            "updated_at"
+          ],
+          "isUnique": false
+        },
+        "reviews_owner_id_unique": {
+          "name": "reviews_owner_id_unique",
+          "columns": [
+            "owner_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "reviews_owner_origin_key_unique": {
+          "name": "reviews_owner_origin_key_unique",
+          "columns": [
+            "owner_id",
+            "origin_instance_id",
+            "review_key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "reviews_owner_id_owners_id_fk": {
+          "name": "reviews_owner_id_owners_id_fk",
+          "tableFrom": "reviews",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "reviews_origin_instance_id_instances_id_fk": {
+          "name": "reviews_origin_instance_id_instances_id_fk",
+          "tableFrom": "reviews",
+          "tableTo": "instances",
+          "columnsFrom": [
+            "origin_instance_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "reviews_owner_id_repo_id_repos_owner_id_id_fk": {
+          "name": "reviews_owner_id_repo_id_repos_owner_id_id_fk",
+          "tableFrom": "reviews",
+          "tableTo": "repos",
+          "columnsFrom": [
+            "owner_id",
+            "repo_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "reviews_owner_id_id_approved_revision_revisions_owner_id_review_id_id_fk": {
+          "name": "reviews_owner_id_id_approved_revision_revisions_owner_id_review_id_id_fk",
+          "tableFrom": "reviews",
+          "tableTo": "revisions",
+          "columnsFrom": [
+            "owner_id",
+            "id",
+            "approved_revision"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "review_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "reviews_released_reason_check": {
+          "name": "reviews_released_reason_check",
+          "value": "\"reviews\".\"released_reason\" in ('snoozed', 'retired')"
+        },
+        "reviews_state_check": {
+          "name": "reviews_state_check",
+          "value": "\"reviews\".\"state\" in ('open', 'approved', 'settled')"
+        }
+      }
+    },
+    "revisions": {
+      "name": "revisions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "review_id": {
+          "name": "review_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "base": {
+          "name": "base",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "head": {
+          "name": "head",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "main": {
+          "name": "main",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "writeup_empty": {
+          "name": "writeup_empty",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "0"
+        },
+        "content_key": {
+          "name": "content_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "revisions_owner_idx": {
+          "name": "revisions_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        },
+        "revisions_content_key_unique": {
+          "name": "revisions_content_key_unique",
+          "columns": [
+            "content_key"
+          ],
+          "isUnique": true
+        },
+        "revisions_owner_id_unique": {
+          "name": "revisions_owner_id_unique",
+          "columns": [
+            "owner_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "revisions_review_seq_unique": {
+          "name": "revisions_review_seq_unique",
+          "columns": [
+            "review_id",
+            "seq"
+          ],
+          "isUnique": true
+        },
+        "revisions_owner_review_id_unique": {
+          "name": "revisions_owner_review_id_unique",
+          "columns": [
+            "owner_id",
+            "review_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "revisions_owner_id_owners_id_fk": {
+          "name": "revisions_owner_id_owners_id_fk",
+          "tableFrom": "revisions",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "revisions_owner_id_review_id_reviews_owner_id_id_fk": {
+          "name": "revisions_owner_id_review_id_reviews_owner_id_id_fk",
+          "tableFrom": "revisions",
+          "tableTo": "reviews",
+          "columnsFrom": [
+            "owner_id",
+            "review_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "revisions_seq_positive": {
+          "name": "revisions_seq_positive",
+          "value": "\"revisions\".\"seq\" > 0"
+        }
+      }
+    },
+    "sends": {
+      "name": "sends",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "review_id": {
+          "name": "review_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision_id": {
+          "name": "revision_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mode": {
+          "name": "mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "instruction": {
+          "name": "instruction",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "delivery_id": {
+          "name": "delivery_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "set_aside_at": {
+          "name": "set_aside_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "sends_owner_idx": {
+          "name": "sends_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        },
+        "sends_owner_id_unique": {
+          "name": "sends_owner_id_unique",
+          "columns": [
+            "owner_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "sends_owner_review_id_unique": {
+          "name": "sends_owner_review_id_unique",
+          "columns": [
+            "owner_id",
+            "review_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "sends_owner_id_owners_id_fk": {
+          "name": "sends_owner_id_owners_id_fk",
+          "tableFrom": "sends",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "sends_owner_id_review_id_reviews_owner_id_id_fk": {
+          "name": "sends_owner_id_review_id_reviews_owner_id_id_fk",
+          "tableFrom": "sends",
+          "tableTo": "reviews",
+          "columnsFrom": [
+            "owner_id",
+            "review_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "sends_owner_id_review_id_revision_id_revisions_owner_id_review_id_id_fk": {
+          "name": "sends_owner_id_review_id_revision_id_revisions_owner_id_review_id_id_fk",
+          "tableFrom": "sends",
+          "tableTo": "revisions",
+          "columnsFrom": [
+            "owner_id",
+            "review_id",
+            "revision_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "review_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "sends_owner_id_review_id_delivery_id_deliveries_owner_id_review_id_id_fk": {
+          "name": "sends_owner_id_review_id_delivery_id_deliveries_owner_id_review_id_id_fk",
+          "tableFrom": "sends",
+          "tableTo": "deliveries",
+          "columnsFrom": [
+            "owner_id",
+            "review_id",
+            "delivery_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "review_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "sends_kind_check": {
+          "name": "sends_kind_check",
+          "value": "\"sends\".\"kind\" in ('go', 'approve')"
+        },
+        "sends_mode_check": {
+          "name": "sends_mode_check",
+          "value": "\"sends\".\"mode\" in ('fix-clear', 'explain', 'fix-all')"
+        }
+      }
+    },
+    "threads": {
+      "name": "threads",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "review_id": {
+          "name": "review_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "target": {
+          "name": "target",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'open'"
+        },
+        "created_revision_id": {
+          "name": "created_revision_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "threads_owner_idx": {
+          "name": "threads_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        },
+        "threads_owner_id_unique": {
+          "name": "threads_owner_id_unique",
+          "columns": [
+            "owner_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "threads_owner_review_id_unique": {
+          "name": "threads_owner_review_id_unique",
+          "columns": [
+            "owner_id",
+            "review_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "threads_owner_id_owners_id_fk": {
+          "name": "threads_owner_id_owners_id_fk",
+          "tableFrom": "threads",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "threads_owner_id_review_id_reviews_owner_id_id_fk": {
+          "name": "threads_owner_id_review_id_reviews_owner_id_id_fk",
+          "tableFrom": "threads",
+          "tableTo": "reviews",
+          "columnsFrom": [
+            "owner_id",
+            "review_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "threads_owner_id_review_id_created_revision_id_revisions_owner_id_review_id_id_fk": {
+          "name": "threads_owner_id_review_id_created_revision_id_revisions_owner_id_review_id_id_fk",
+          "tableFrom": "threads",
+          "tableTo": "revisions",
+          "columnsFrom": [
+            "owner_id",
+            "review_id",
+            "created_revision_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "review_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "threads_state_check": {
+          "name": "threads_state_check",
+          "value": "\"threads\".\"state\" in ('open', 'sent', 'answered', 'resolved')"
+        }
+      }
+    },
+    "tokens": {
+      "name": "tokens",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "instance_id": {
+          "name": "instance_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "secret_hash": {
+          "name": "secret_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_used_at": {
+          "name": "last_used_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "tokens_owner_idx": {
+          "name": "tokens_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        },
+        "tokens_owner_id_unique": {
+          "name": "tokens_owner_id_unique",
+          "columns": [
+            "owner_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "tokens_secret_hash_unique": {
+          "name": "tokens_secret_hash_unique",
+          "columns": [
+            "secret_hash"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "tokens_owner_id_owners_id_fk": {
+          "name": "tokens_owner_id_owners_id_fk",
+          "tableFrom": "tokens",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tokens_instance_id_instances_id_fk": {
+          "name": "tokens_instance_id_instances_id_fk",
+          "tableFrom": "tokens",
+          "tableTo": "instances",
+          "columnsFrom": [
+            "instance_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tokens_owner_id_device_id_devices_owner_id_id_fk": {
+          "name": "tokens_owner_id_device_id_devices_owner_id_id_fk",
+          "tableFrom": "tokens",
+          "tableTo": "devices",
+          "columnsFrom": [
+            "owner_id",
+            "device_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "tokens_kind_check": {
+          "name": "tokens_kind_check",
+          "value": "\"tokens\".\"kind\" in ('admin', 'agent', 'reviewer')"
+        },
+        "tokens_agent_instance_check": {
+          "name": "tokens_agent_instance_check",
+          "value": "\"tokens\".\"kind\" != 'agent' or \"tokens\".\"instance_id\" is not null"
+        }
+      }
+    },
+    "topics": {
+      "name": "topics",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision_id": {
+          "name": "revision_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "importance": {
+          "name": "importance",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "summary": {
+          "name": "summary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attention": {
+          "name": "attention",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "door": {
+          "name": "door",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "blast_scope": {
+          "name": "blast_scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "blast_note": {
+          "name": "blast_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "topics_owner_idx": {
+          "name": "topics_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        },
+        "topics_owner_id_unique": {
+          "name": "topics_owner_id_unique",
+          "columns": [
+            "owner_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "topics_owner_revision_slug_unique": {
+          "name": "topics_owner_revision_slug_unique",
+          "columns": [
+            "owner_id",
+            "revision_id",
+            "slug"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "topics_owner_id_owners_id_fk": {
+          "name": "topics_owner_id_owners_id_fk",
+          "tableFrom": "topics",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "topics_owner_id_revision_id_revisions_owner_id_id_fk": {
+          "name": "topics_owner_id_revision_id_revisions_owner_id_id_fk",
+          "tableFrom": "topics",
+          "tableTo": "revisions",
+          "columnsFrom": [
+            "owner_id",
+            "revision_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "topics_door_check": {
+          "name": "topics_door_check",
+          "value": "\"topics\".\"door\" in ('one-way', 'two-way')"
+        },
+        "topics_attention_check": {
+          "name": "topics_attention_check",
+          "value": "\"topics\".\"attention\" in ('critical', 'review', 'skim')"
+        },
+        "topics_importance_range": {
+          "name": "topics_importance_range",
+          "value": "\"topics\".\"importance\" between 0 and 100"
+        }
+      }
+    },
+    "viewed_files": {
+      "name": "viewed_files",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "review_id": {
+          "name": "review_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "path": {
+          "name": "path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision_seq": {
+          "name": "revision_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "old_blob": {
+          "name": "old_blob",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "new_blob": {
+          "name": "new_blob",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "viewed_files_owner_idx": {
+          "name": "viewed_files_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        },
+        "viewed_files_owner_old_blob_idx": {
+          "name": "viewed_files_owner_old_blob_idx",
+          "columns": [
+            "owner_id",
+            "old_blob"
+          ],
+          "isUnique": false
+        },
+        "viewed_files_owner_new_blob_idx": {
+          "name": "viewed_files_owner_new_blob_idx",
+          "columns": [
+            "owner_id",
+            "new_blob"
+          ],
+          "isUnique": false
+        },
+        "viewed_files_owner_id_unique": {
+          "name": "viewed_files_owner_id_unique",
+          "columns": [
+            "owner_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "viewed_files_owner_review_path_unique": {
+          "name": "viewed_files_owner_review_path_unique",
+          "columns": [
+            "owner_id",
+            "review_id",
+            "path"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "viewed_files_owner_id_owners_id_fk": {
+          "name": "viewed_files_owner_id_owners_id_fk",
+          "tableFrom": "viewed_files",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "viewed_files_owner_id_review_id_reviews_owner_id_id_fk": {
+          "name": "viewed_files_owner_id_review_id_reviews_owner_id_id_fk",
+          "tableFrom": "viewed_files",
+          "tableTo": "reviews",
+          "columnsFrom": [
+            "owner_id",
+            "review_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "viewed_files_owner_id_old_blob_blobs_owner_id_sha256_fk": {
+          "name": "viewed_files_owner_id_old_blob_blobs_owner_id_sha256_fk",
+          "tableFrom": "viewed_files",
+          "tableTo": "blobs",
+          "columnsFrom": [
+            "owner_id",
+            "old_blob"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "sha256"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "viewed_files_owner_id_new_blob_blobs_owner_id_sha256_fk": {
+          "name": "viewed_files_owner_id_new_blob_blobs_owner_id_sha256_fk",
+          "tableFrom": "viewed_files",
+          "tableTo": "blobs",
+          "columnsFrom": [
+            "owner_id",
+            "new_blob"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "sha256"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "viewed_files_revision_seq_positive": {
+          "name": "viewed_files_revision_seq_positive",
+          "value": "\"viewed_files\".\"revision_seq\" > 0"
+        }
+      }
+    },
+    "writeups": {
+      "name": "writeups",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision_id": {
+          "name": "revision_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_blob": {
+          "name": "source_blob",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "rendered_blob": {
+          "name": "rendered_blob",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "writeups_owner_idx": {
+          "name": "writeups_owner_idx",
+          "columns": [
+            "owner_id"
+          ],
+          "isUnique": false
+        },
+        "writeups_owner_source_blob_idx": {
+          "name": "writeups_owner_source_blob_idx",
+          "columns": [
+            "owner_id",
+            "source_blob"
+          ],
+          "isUnique": false
+        },
+        "writeups_owner_rendered_blob_idx": {
+          "name": "writeups_owner_rendered_blob_idx",
+          "columns": [
+            "owner_id",
+            "rendered_blob"
+          ],
+          "isUnique": false
+        },
+        "writeups_owner_id_unique": {
+          "name": "writeups_owner_id_unique",
+          "columns": [
+            "owner_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "writeups_revision_unique": {
+          "name": "writeups_revision_unique",
+          "columns": [
+            "revision_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "writeups_owner_id_owners_id_fk": {
+          "name": "writeups_owner_id_owners_id_fk",
+          "tableFrom": "writeups",
+          "tableTo": "owners",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "writeups_owner_id_revision_id_revisions_owner_id_id_fk": {
+          "name": "writeups_owner_id_revision_id_revisions_owner_id_id_fk",
+          "tableFrom": "writeups",
+          "tableTo": "revisions",
+          "columnsFrom": [
+            "owner_id",
+            "revision_id"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "writeups_owner_id_source_blob_blobs_owner_id_sha256_fk": {
+          "name": "writeups_owner_id_source_blob_blobs_owner_id_sha256_fk",
+          "tableFrom": "writeups",
+          "tableTo": "blobs",
+          "columnsFrom": [
+            "owner_id",
+            "source_blob"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "sha256"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "writeups_owner_id_rendered_blob_blobs_owner_id_sha256_fk": {
+          "name": "writeups_owner_id_rendered_blob_blobs_owner_id_sha256_fk",
+          "tableFrom": "writeups",
+          "tableTo": "blobs",
+          "columnsFrom": [
+            "owner_id",
+            "rendered_blob"
+          ],
+          "columnsTo": [
+            "owner_id",
+            "sha256"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

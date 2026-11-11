@@ -26,8 +26,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
   emend attach <link>            Attach this machine to a hub
   emend detach                   Detach this machine
   emend devices [--revoke <id>]  List or revoke devices
-  emend publish <path>... [--title T] [--key K | --new] [--review ID] [--main PATH] [--source] [--json]
-  emend publish --manifest <file> [--review <id>] [--key <name>]
+  emend publish <path>... [--title T] [--key K | --new] [--review ID] [--main PATH] [--source] [--json] [--project NAME]
+  emend publish --manifest <file> [--review <id>] [--key <name>] [--project NAME]
   emend wait <review> [--timeout <seconds>] [--save <folder>]
   emend feedback <review> [--save <folder>]
   emend reply <comment> --status <outcome> (--body <text> | --body-file <path | ->)

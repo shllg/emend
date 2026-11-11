@@ -99,7 +99,9 @@ export function Inbox({
   const projects = [...new Set(items.flatMap((review) => (review.project === null ? [] : [review.project])))].sort(
     (a, b) => a.localeCompare(b),
   );
-  const projectFilter = !compact && projects.length > 1 && projects.includes(project) ? project : "";
+  const showProjectPicker =
+    !compact && (projects.length > 1 || (projects.length === 1 && items.some((review) => review.project === null)));
+  const projectFilter = showProjectPicker && projects.includes(project) ? project : "";
   const needle = filter.toLocaleLowerCase();
   const filtered = items.filter(
     (review) =>
@@ -175,7 +177,7 @@ export function Inbox({
             ]}
           />
         )}
-        {!compact && projects.length > 1 && (
+        {showProjectPicker && (
           <Select
             aria-label="Project"
             dir="auto"

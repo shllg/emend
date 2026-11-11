@@ -32,6 +32,95 @@ vi.mock("./root.ts", async (original) => ({ ...(await original<typeof import("./
 
 const exec = promisify(execFile);
 
+const projectManifest = (base?: string): PublishManifest => ({
+  version: 1,
+  title: "Synthetic",
+  ...(base ? { base, head: base } : {}),
+  topics: [],
+  files: [{ path: "plan.md", role: "doc" }],
+  writeup: { overview: "", tldr: "", decisions: null, topics: {} },
+});
+
+test.each(["folder", "remote"])("a 230-character %s name is shortened for pubs and code reviews", async (kind) => {
+  const longName = "x".repeat(230);
+  const f = await fixture("sha1", "base\n", kind === "folder" ? longName : "repo");
+  try {
+    if (kind === "remote") await f.run("config", "remote.origin.url", `https://example.test/org/${longName}.git`);
+    await writeFile(join(f.root, "plan.md"), "# Synthetic plan");
+    const identity = kind === "remote" ? `https://example.test/org/${longName}` : await realpath(join(f.root, ".git"));
+    for (const base of [undefined, f.base]) {
+      const result = await resolvePublish(
+        projectManifest(base),
+        { key: "plan" },
+        f.state,
+        "instance",
+        f.root,
+        () => {},
+      );
+      expect(result.request.repo).toEqual({
+        key: createHash("sha256").update(identity).digest("hex"),
+        name: "x".repeat(200),
+      });
+    }
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("a pub falls back to the folder for an invalid remote while a code review still refuses it", async () => {
+  const f = await fixture();
+  try {
+    await f.run("config", "remote.origin.url", "https://example.invalid:99999/x");
+    await writeFile(join(f.root, "plan.md"), "# Synthetic plan");
+    const collect = (base?: string) =>
+      resolvePublish(projectManifest(base), { key: "plan" }, f.state, "instance", f.root, () => {});
+    expect((await collect()).request.repo).toEqual({
+      key: createHash("sha256")
+        .update(await realpath(join(f.root, ".git")))
+        .digest("hex"),
+      name: "repo",
+    });
+    await expect(collect(f.base)).rejects.toThrow("invalid origin URL");
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test.each(["separate", "bare"])(
+  "a %s git directory uses the right folder for its name and keeps its key",
+  async (kind) => {
+    const f = await fixture();
+    try {
+      const common = join(f.root, "..", kind === "bare" ? "orchard.git" : "metadata");
+      const root = kind === "bare" ? `${f.root}-linked` : f.root;
+      if (kind === "bare") {
+        await f.run("clone", "--bare", f.root, common);
+        await f.run("--git-dir", common, "config", "--unset", "remote.origin.url");
+        await f.run("--git-dir", common, "worktree", "add", "-b", "linked", root);
+      } else await f.run("init", "--separate-git-dir", common);
+      await writeFile(join(root, "plan.md"), "# Synthetic plan");
+      for (const base of [undefined, f.base]) {
+        const result = await resolvePublish(
+          projectManifest(base),
+          { key: "plan" },
+          f.state,
+          "instance",
+          root,
+          () => {},
+        );
+        expect(result.request.repo).toEqual({
+          key: createHash("sha256")
+            .update(await realpath(common))
+            .digest("hex"),
+          name: kind === "bare" ? "orchard" : "repo",
+        });
+      }
+    } finally {
+      await f.cleanup();
+    }
+  },
+);
+
 test.each(["remote", "local", "linked"])(
   "reviews and pubs use the %s repository's name and stable key",
   async (kind) => {
@@ -201,9 +290,9 @@ test("a later doc reserves bytes before 255 MiB of real collected diff sides", a
     await f.cleanup();
   }
 }, 15000);
-async function fixture(format = "sha1", content = "base\n") {
+async function fixture(format = "sha1", content = "base\n", name = "repo") {
   const dir = await mkdtemp(join(tmpdir(), "emend-worktree-listing-"));
-  const root = join(dir, "repo");
+  const root = join(dir, name);
   const run = (...args: string[]) =>
     exec("git", ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false", ...args], {
       cwd: root,

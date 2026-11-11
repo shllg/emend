@@ -55,6 +55,13 @@ export type PublishOptions = {
   docArguments?: ReadonlyMap<string, string>;
 };
 const sha256 = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
+export function shortenRepoName(name: string): string {
+  let end = LIMITS.titleChars;
+  const before = name.charCodeAt(end - 1);
+  const after = name.charCodeAt(end);
+  if (before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff) end--;
+  return name.slice(0, end);
+}
 export async function publishContext(cwd: string, stateDir: string) {
   const git = createGitSession();
   const worktree = await worktreeRoot(cwd);
@@ -105,13 +112,23 @@ export async function resolvePublish(
       else throw error;
     }
     if (!options.project) {
-      const identity = remote ? normalizeRemote(remote) : (gitDirs.at(-1) ?? root);
+      let identity = gitDirs.at(-1) ?? root;
+      if (remote) {
+        try {
+          identity = normalizeRemote(remote);
+        } catch (error) {
+          if (!code && error instanceof CliError && error.message === "invalid origin URL") remote = "";
+          else throw error;
+        }
+      }
       const name = remote
         ? basename(identity)
         : basename(identity) === ".git"
           ? basename(dirname(identity))
-          : basename(identity).replace(/\.git$/, "");
-      repo = { key: sha256(identity), name: name || basename(root) };
+          : basename(identity).endsWith(".git")
+            ? basename(identity).slice(0, -4)
+            : basename(root);
+      repo = { key: sha256(identity), name: shortenRepoName(name || basename(root)) };
     }
     if (code) repoUrl = remote ? (remoteToRepoUrl(remote) ?? undefined) : undefined;
   }

@@ -161,6 +161,8 @@ export async function importReview(principal: Principal, bundle: ImportBundle, d
           ...bundle.review,
           ownerId,
           repoId,
+          project:
+            bundle.review.project ?? (bundle.review.repo?.name === ".git" ? null : (bundle.review.repo?.name ?? null)),
           approvedRevision: null,
           approvedAt: null,
           movedToUrl: null,

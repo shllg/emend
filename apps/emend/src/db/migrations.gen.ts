@@ -212,5 +212,13 @@ export const MIGRATIONS: readonly { tag: string; when: number; hash: string; sta
     "statements": [
       "ALTER TABLE `reviews` ADD `approved_at` integer;"
     ]
+  },
+  {
+    "tag": "0014_chubby_pete_wisdom",
+    "when": 1794358346113,
+    "hash": "299f53b12dfa6fea52923255d4752664214a5ffaa06472982590ad7ee1858068",
+    "statements": [
+      "ALTER TABLE `reviews` ADD `project` text;"
+    ]
   }
 ];

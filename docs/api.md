@@ -212,8 +212,8 @@ kind: "review" | "publish" }`. `repo` is the repository key, and
 `approved` once `APPROVED_ACTIVE_HOURS` (12) hours have passed since approval or it does not fit
 Active's cap; an approved review is `active` until then if it has a place. An open review is
 `snoozed` while its snooze is in effect, `active` otherwise.
-`project` is the review's project name, the name of its repository (or the name given with
-`emend publish --project`), null when it has none.
+`project` is the name the review's newest publish sent with its `repo`; for a review not published
+since this field was added, it is its repository row's name unless that is `.git`; it is null when none.
 `activeUntil` is when an approved review in Active moves to Done; it is null otherwise. The server
 sends no event when an approval's window ends. A client estimates the server's clock from
 `serverTime` and the time elapsed since the response, refetches when `activeUntil` passes on that
@@ -653,7 +653,7 @@ Unknown keys, including owner ids, moved-to URLs, content keys, media types, `pl
 
 | Bundle field | Row fields |
 | --- | --- |
-| `review` | `id, originInstanceId, reviewKey: Sha256, repo: {key: Sha256, name} or null, branch, title, state, approvedRevision: UUID or null, createdAt, updatedAt` |
+| `review` | `id, originInstanceId, reviewKey: Sha256, repo: {key: Sha256, name} or null, project?: string or null, branch, title, state, approvedRevision: UUID or null, createdAt, updatedAt` |
 | `revisions` | `id, reviewId, seq, base, head, main, writeupEmpty, createdAt` |
 | `topics` | `id, revisionId` plus `TopicMeta` (optional door and blastRadius) |
 | `files` | `id, revisionId, path, oldPath, role, status, topicSlug, ord, oldBlob, newBlob, renderedBlob, flag, parentDocId, title?, view?: DocView`; nullable sides, status, topic, flag, parent |
@@ -664,6 +664,9 @@ Unknown keys, including owner ids, moved-to URLs, content keys, media types, `pl
 | `comments` | `id, reviewId, threadId, author, body, outcome, sendId, createdAt, updatedAt`; user outcome is null; agent outcome is required and sendId null |
 | `sends` | `id, reviewId, revisionId, kind, mode, instruction, deliveryId, setAsideAt, createdAt`; Go requires mode; Approve has null mode/instruction |
 | `deliveries` | `id, reviewId, leaseUntil, confirmedAt, createdAt` |
+
+`review.project` is optional and nullable, otherwise 1 through `titleChars` (200) characters.
+The hub keeps it when non-null; null or absent values fall back to `review.repo.name`, except `.git`, or null.
 
 All ids are unique across the bundle and all references stay within it. The hub computes each
 thread’s creation placement from its target, refusing an unplaceable original target with
@@ -725,9 +728,9 @@ and sign-out; loopback HTTP on the same server receives cookies without `Secure`
 title, base: commit | null, head: commit | "worktree" | null, main?, topics, writeup, links?, repoUrl?,
 files }`.
 The CLI sends `repo` for pubs too: the repository holding the working directory, or the
-`--project` name. A re-publish with a non-null `repo` moves the review to that repo; a null
-`repo` keeps the current one. A stored repo name `.git` is replaced by the incoming name on
-the next publish under that key.
+`--project` name. A publish with a non-null `repo` sets the review's project to `repo.name`;
+a null `repo` keeps its current project. The repository row is linked once when the review
+is created, and a publish never renames a repository row.
 `main` follows the manifest's type and doc-membership validation below; the CLI carries it unchanged.
 The keys are lowercase 64-character SHA-256 hex; `reviewId` is a UUID. Repo names obey
 `titleChars`, branches `pathChars`, and title, commits and writeup obey the manifest limits.

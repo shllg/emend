@@ -32,7 +32,7 @@ test("the approval migration preserves existing approval records without backfil
         VALUES (${revision}, ${owner}, ${review}, 1, 'synthetic', 5)`);
       await q.run(sql`UPDATE reviews SET approved_revision = ${revision} WHERE owner_id = ${owner} AND id = ${review}`);
     });
-    expect(await migrate(db)).toBe(1);
+    expect(await migrate(db)).toBe(MIGRATIONS.filter((m) => m.tag >= "0013").length);
     expect(await migrate(db)).toBe(0);
     expect(
       await db.read((q) =>

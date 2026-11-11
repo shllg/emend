@@ -51,79 +51,75 @@ function publish(
   return ingest(ownerId, instanceId, body, { db: f.db, blobs, baseUrl: "http://127.0.0.1:3636", executor });
 }
 
-test("publishing repairs only legacy .git names and a null repo keeps the project", async () => {
-  const repo = { key: "b".repeat(64), name: ".git" };
-  const first = await publish({ ...input(), repo });
-  const repository = () => f.db.read((q) => q.select().from(repos).where(eq(repos.ownerId, f.ownerId)).get());
-  const original = await repository();
-  expect(original?.name).toBe(".git");
-  await publish({ ...input(), repo: { ...repo, name: "Synthetic project" } });
-  expect(await repository()).toMatchObject({ id: original?.id, name: "Synthetic project" });
-  await publish({ ...input(), repo: { ...repo, name: "Other name" } });
-  expect((await repository())?.name).toBe("Synthetic project");
-  await publish(input());
-  expect(
-    await f.db.read((q) =>
-      q
-        .select()
-        .from(reviews)
-        .where(and(eq(reviews.ownerId, f.ownerId), eq(reviews.id, first.reviewId)))
-        .get(),
-    ),
-  ).toMatchObject({ repoId: original?.id });
-  expect((await repository())?.name).toBe("Synthetic project");
-});
+const reviewRow = (id: string) =>
+  f.db.read((q) =>
+    q
+      .select()
+      .from(reviews)
+      .where(and(eq(reviews.ownerId, f.ownerId), eq(reviews.id, id)))
+      .get(),
+  );
+const repoRows = () => f.db.read((q) => q.select().from(repos).where(eq(repos.ownerId, f.ownerId)));
 
-test.each([false, true])("moving a review removes its old repo only when unreferenced (shared=%s)", async (shared) => {
+test("a project is set on create and updated without renaming or changing the linked repo", async () => {
   const repo = { key: "b".repeat(64), name: "First project" };
   const first = await publish({ ...input(), repo });
-  const allRepos = () => f.db.read((q) => q.select().from(repos).where(eq(repos.ownerId, f.ownerId)));
-  const oldRepo = (await allRepos())[0];
-  if (shared) await publish({ ...input(), reviewKey: "c".repeat(64), repo });
-  const next = { key: "d".repeat(64), name: "Next project" };
-  await publish({ ...input(), reviewId: first.reviewId, repo: next });
-  const rows = await allRepos();
-  expect(rows.some((row) => row.id === oldRepo?.id)).toBe(shared);
-  const newRepo = rows.find((row) => row.key === next.key);
-  expect(newRepo).toMatchObject(next);
-  expect(
-    await f.db.read((q) =>
-      q
-        .select()
-        .from(reviews)
-        .where(and(eq(reviews.ownerId, f.ownerId), eq(reviews.id, first.reviewId)))
-        .get(),
-    ),
-  ).toMatchObject({ repoId: newRepo?.id });
+  const originalRepos = await repoRows();
+  const repoId = originalRepos[0]?.id;
+  expect(await reviewRow(first.reviewId)).toMatchObject({ project: repo.name, repoId });
+  await publish({ ...input(), repo: { key: "c".repeat(64), name: "Next project" } });
+  expect(await reviewRow(first.reviewId)).toMatchObject({ project: "Next project", repoId });
+  expect(await repoRows()).toEqual(originalRepos);
+  await publish(input());
+  expect(await reviewRow(first.reviewId)).toMatchObject({ project: "Next project", repoId });
 });
+
+test("an existing review without a repo can gain a project without linking or inserting a repo", async () => {
+  const first = await publish(input());
+  expect(await reviewRow(first.reviewId)).toMatchObject({ project: null, repoId: null });
+  await publish({ ...input(), repo: { key: "b".repeat(64), name: "Orchard" } });
+  expect(await reviewRow(first.reviewId)).toMatchObject({ project: "Orchard", repoId: null });
+  expect(await repoRows()).toEqual([]);
+});
+
+test.each([false, true])(
+  "a new review cannot change another review's project (other instance=%s)",
+  async (otherInstance) => {
+    const repo = { key: "b".repeat(64), name: ".git" };
+    const first = await publish({ ...input(), repo });
+    const originalRepos = await repoRows();
+    const instance = otherInstance ? randomUUID() : f.instanceId;
+    if (otherInstance) await f.db.query((q) => q.insert(instances).values({ id: instance, name: "Other machine" }));
+    const nextInput = { ...input(), reviewKey: "c".repeat(64), repo: { ...repo, name: "Other project" } };
+    const second = await publish(nextInput, instance);
+    expect(await reviewRow(first.reviewId)).toMatchObject({ project: ".git" });
+    expect(await reviewRow(second.reviewId)).toMatchObject({ project: "Other project", repoId: originalRepos[0]?.id });
+    expect(await repoRows()).toEqual(originalRepos);
+    await publish({ ...input(), repo: { ...repo, name: "Own project" } });
+    expect(await reviewRow(first.reviewId)).toMatchObject({ project: "Own project" });
+    expect(await reviewRow(second.reviewId)).toMatchObject({ project: "Other project" });
+    expect(await repoRows()).toEqual(originalRepos);
+  },
+);
 
 test("publishing never renames or links another owner's repo with the same key", async () => {
   const key = "b".repeat(64);
   await publish({ ...input(), repo: { key, name: ".git" } }, f.instanceId, f.otherOwnerId);
   const otherRepo = () => f.db.read((q) => q.select().from(repos).where(eq(repos.ownerId, f.otherOwnerId)).get());
   const foreign = await otherRepo();
-  const first = await publish(input());
-  await publish({ ...input(), repo: { key, name: "Own project" } });
-  const own = await f.db.read((q) => q.select().from(repos).where(eq(repos.ownerId, f.ownerId)).get());
+  const first = await publish({ ...input(), repo: { key, name: "Own project" } });
+  const own = (await repoRows())[0];
   expect(own).toMatchObject({ key, name: "Own project" });
   expect(own?.id).not.toBe(foreign?.id);
   expect(await otherRepo()).toEqual(foreign);
-  expect(
-    await f.db.read((q) =>
-      q
-        .select()
-        .from(reviews)
-        .where(and(eq(reviews.ownerId, f.ownerId), eq(reviews.id, first.reviewId)))
-        .get(),
-    ),
-  ).toMatchObject({ repoId: own?.id });
+  expect(await reviewRow(first.reviewId)).toMatchObject({ repoId: own?.id, project: "Own project" });
 });
 
-test("a failed render leaves repo creation and legacy-name repair untouched", async () => {
-  const repo = { key: "b".repeat(64), name: ".git" };
-  await publish({ ...input(), repo });
-  const repository = () => f.db.read((q) => q.select().from(repos).where(eq(repos.ownerId, f.ownerId)));
-  const before = await repository();
+test("a failed render leaves the project's value and repo rows unchanged", async () => {
+  const repo = { key: "b".repeat(64), name: "Original project" };
+  const first = await publish({ ...input(), repo });
+  const before = await reviewRow(first.reviewId);
+  const originalRepos = await repoRows();
   const fail: Executor = async () => {
     throw new Error("synthetic render failure");
   };
@@ -131,7 +127,8 @@ test("a failed render leaves repo creation and legacy-name repair untouched", as
     await expect(
       publish({ ...input(), repo: { key, name: "New project" } }, f.instanceId, f.ownerId, fail),
     ).rejects.toMatchObject({ code: "invalid_request", detail: "writeup_failed" });
-    expect(await repository()).toEqual(before);
+    expect(await reviewRow(first.reviewId)).toEqual(before);
+    expect(await repoRows()).toEqual(originalRepos);
   }
 });
 test.each([false, true])("first publish skips changes; revision 2 compares against it (empty=%s)", async (empty) => {

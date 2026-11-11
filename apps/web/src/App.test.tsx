@@ -2136,6 +2136,25 @@ test("a project selection is ignored when it disappears from the inbox", async (
   expect(screen.getByRole("link", { name: /Synthetic review/ })).toBeTruthy();
 });
 
+test("one named project plus a projectless review can be filtered by project", async () => {
+  withInbox([
+    { ...item, project: "Orchard" },
+    { ...secondItem, project: null },
+  ]);
+  mount();
+  const picker = await screen.findByRole("combobox", { name: "Project" });
+  expect(
+    within(picker)
+      .getAllByRole("option")
+      .map((option) => option.textContent),
+  ).toEqual(["All projects", "Orchard"]);
+  fireEvent.change(picker, { target: { value: "Orchard" } });
+  expect(screen.getByRole("link", { name: /Synthetic review/ })).toBeTruthy();
+  expect(screen.queryByRole("link", { name: /Another proposal/ })).toBeNull();
+  fireEvent.change(picker, { target: { value: "" } });
+  expect(screen.getByRole("link", { name: /Another proposal/ })).toBeTruthy();
+});
+
 test.each([null, "Orchard"])("one distinct project (%s) omits the picker", async (project) => {
   withInbox([
     { ...item, project },

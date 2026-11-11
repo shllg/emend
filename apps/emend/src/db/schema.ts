@@ -86,6 +86,7 @@ export const reviews = sqliteTable(
       .references(() => instances.id),
     reviewKey: text("review_key").notNull(),
     repoId: text("repo_id"),
+    project: text("project"),
     branch: text("branch"),
     title: text("title").notNull(),
     state: text("state", { enum: ["open", "approved", "settled"] })
