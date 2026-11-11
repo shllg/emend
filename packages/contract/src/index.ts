@@ -19,6 +19,7 @@ export * from "./placement.ts";
 export * from "./publish.ts";
 export * from "./review.ts";
 export * from "./send.ts";
+export * from "./settings.ts";
 export * from "./target.ts";
 export * from "./thread.ts";
 export * from "./views.ts";

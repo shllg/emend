@@ -1771,3 +1771,17 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
     expect(stdout[0]).toBe("emend: keeping the service options --port 4000\n");
   });
 });
+
+test.each(["linux", "darwin"])("%s service preserves the global config home", async (platform) => {
+  options.platform = platform;
+  const configHome = join(root, "synthetic config");
+  io.env.XDG_CONFIG_HOME = configHome;
+  expect(await invoke("install")).toBe(0);
+  const path = platform === "linux" ? join(configHome, "systemd/user/emend.service") : plistPath();
+  const document = await readFile(path, "utf8");
+  expect(document).toContain(
+    platform === "linux"
+      ? `Environment="XDG_CONFIG_HOME=${configHome}"`
+      : `<key>XDG_CONFIG_HOME</key>\n    <string>${configHome}</string>`,
+  );
+});

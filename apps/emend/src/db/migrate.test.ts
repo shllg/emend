@@ -79,6 +79,7 @@ test("migrations apply to an empty file and a second run applies nothing", async
       "reviews",
       "revisions",
       "sends",
+      "settings",
       "threads",
       "tokens",
       "topics",

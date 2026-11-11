@@ -124,7 +124,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   try {
     if (argv[0] === "serve") {
       const options = parseServeArgs(argv.slice(1));
-      await serveCommand(defaultStateDir(io.env), options, io);
+      await serveCommand(defaultStateDir(io.env), options, io, defaultConfigDir(io.env));
     } else {
       const { openCommand } = await import("./cli/commands/open.ts");
       await openCommand(defaultStateDir(io.env), defaultConfigDir(io.env), io);

@@ -16,7 +16,7 @@ vi.mock("node:child_process", async (original) => {
   const actual = await original<typeof import("node:child_process")>();
   return {
     ...actual,
-    // ensureServer has no env option. Keep fixture confinement after spies are restored too.
+    // Keep fixture confinement after spies are restored too.
     spawn(node: string, args: string[], options: childProcess.SpawnOptions) {
       const launch = launchEnvs.get(args[0] ?? "");
       if (node !== process.execPath || !launch) throw new Error("unregistered test child");

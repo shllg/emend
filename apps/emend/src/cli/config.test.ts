@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LIMITS } from "@emend/contract";
 import { expect, onTestFinished, test, vi } from "vitest";
+import * as reader from "../state/read-config.ts";
 import { readConfig, validateDocRoot } from "./config.ts";
 import { escapeReference } from "./escape.ts";
-import * as reader from "./publish/read.ts";
 
 vi.mock("node:fs/promises", async (original) => ({ ...(await original<typeof import("node:fs/promises")>()) }));
 vi.mock("node:os", async (original) => ({ ...(await original<typeof import("node:os")>()) }));
@@ -80,7 +80,9 @@ test.each([
 test.each(["EACCES", "EPERM", "EROFS"])("configuration names the global file on %s", async (code) => {
   const { dir, path } = await fixture();
   await writeFile(path, "{}");
-  vi.spyOn(reader, "readRegular").mockRejectedValueOnce(Object.assign(new Error("synthetic denial"), { code, path }));
+  vi.spyOn(reader, "readConfigJson").mockRejectedValueOnce(
+    Object.assign(new Error("synthetic denial"), { code, path }),
+  );
   await expect(readConfig(join(dir, "state"), dir)).rejects.toThrow(
     `invalid emend configuration in ${escapeReference(path)}`,
   );

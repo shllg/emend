@@ -295,7 +295,9 @@ test.each(
       });
       expect(code).toBe(0);
       expect(stderr).toEqual([]);
-      expect(ensureServer).toHaveBeenCalledWith(fixture.dir);
+      expect(ensureServer).toHaveBeenCalledWith(fixture.dir, {
+        env: expect.objectContaining({ XDG_CONFIG_HOME: fixture.configHome }),
+      });
       expect(pairings).toHaveBeenCalledTimes(openBrowser || isTTY ? 1 : 0);
       if (openBrowser) expect(openUrl).toHaveBeenCalledExactlyOnceWith(url);
       else expect(openUrl).not.toHaveBeenCalled();
@@ -440,7 +442,7 @@ test.each([false, undefined])(
       "emend is running at http://127.0.0.1:3636. Run emend in a terminal to get a sign-in link.\n",
     ]);
     expect(f.stderr).toEqual([]);
-    expect(ensureServer).toHaveBeenCalledWith(f.dir);
+    expect(ensureServer).toHaveBeenCalledWith(f.dir, { env: f.io.env });
     expect(readCredential).not.toHaveBeenCalled();
     expect(f.fetcher).toHaveBeenCalledOnce();
     expect(f.fetcher.mock.calls[0]?.[0]).toBe(`${localUrl}/api/v1/capabilities`);
@@ -472,7 +474,7 @@ test.each(
       "emend is running at http://127.0.0.1:3636. Run emend in a terminal to get a sign-in link.\n",
     ]);
     expect(f.stderr).toEqual([]);
-    expect(ensureServer).toHaveBeenCalledWith(f.dir);
+    expect(ensureServer).toHaveBeenCalledWith(f.dir, { env: { ...f.io.env, ...env } });
     expect(readCredential).not.toHaveBeenCalled();
     expect(f.fetcher).toHaveBeenCalledOnce();
     expect(f.fetcher.mock.calls[0]?.[0]).toBe(`${localUrl}/api/v1/capabilities`);

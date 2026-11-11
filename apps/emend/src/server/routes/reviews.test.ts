@@ -94,6 +94,7 @@ test("all three GETs parse their schemas and enforce reviewer scope and owner is
     if (path) await error(await get(path, "foreign"), 404, "unknown_review");
     else
       expect(await (await get(path, "foreign")).json()).toEqual({
+        approvedActiveHours: 12,
         items: [],
         serverTime: new Date(f.deps.now()).toISOString(),
       });
@@ -556,6 +557,7 @@ test("kind follows the newest revision's writeup: publish when empty, review oth
   await publishReview(f, { key: "e", writeup: empty });
   expect(await kinds()).toEqual(["review", "publish"]);
   expect(await (await get("", "foreign")).json()).toEqual({
+    approvedActiveHours: 12,
     items: [],
     serverTime: new Date(f.deps.now()).toISOString(),
   });

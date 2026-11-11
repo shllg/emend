@@ -50,7 +50,13 @@ beforeEach(async () => {
   });
   const bin = join(dir, "bin");
   await mkdir(bin);
-  env = { EMEND_HOME: dir, HOME: dir, PATH: bin, NODE_OPTIONS: "--this-must-not-be-inherited" };
+  env = {
+    EMEND_HOME: dir,
+    XDG_CONFIG_HOME: join(dir, "config"),
+    HOME: dir,
+    PATH: bin,
+    NODE_OPTIONS: "--this-must-not-be-inherited",
+  };
 });
 
 test.each(["owned", "unowned", "failed-off"])("serve recovers a route left by a crash (%s)", async (kind) => {
@@ -101,6 +107,9 @@ fi
   });
   try {
     expect(await result).toBe(0);
+    expect(startServer).toHaveBeenCalledWith(
+      expect.objectContaining({ configFile: join(env.XDG_CONFIG_HOME as string, "emend", "config.json") }),
+    );
     expect(stdout).toHaveBeenCalledExactlyOnceWith(`emend: serving https://${dnsName}\n`);
     expect(close).toHaveBeenCalledOnce();
     const calls = (await readFile(log, "utf8")).trim().split("\n");

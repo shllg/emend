@@ -26,9 +26,9 @@ test.each([-2, 0, 2])("inbox records both receipt clocks with the server %s hour
     const receivedAt = Date.now();
     const receivedMono = performance.now();
     const serverTime = new Date(receivedAt + hours * 3_600_000).toISOString();
-    response.resolve(Response.json({ items: [], serverTime }));
+    response.resolve(Response.json({ approvedActiveHours: 12, items: [], serverTime }));
     const data = await pending;
-    expect(data).toEqual({ items: [], serverTime, receivedAt, receivedMono });
+    expect(data).toEqual({ approvedActiveHours: 12, items: [], serverTime, receivedAt, receivedMono });
     expect(client.getQueryData(inboxQuery().queryKey)).toEqual(data);
     expect(serverNow(data)).toBe(Date.parse(serverTime));
   } finally {
@@ -48,6 +48,7 @@ test.each([
 ])("the server clock advances correctly after $scenario", ({ wallJump, elapsed, expected }) => {
   const serverTime = started + 2 * 3_600_000;
   const data: InboxData = {
+    approvedActiveHours: 12,
     items: [],
     serverTime: new Date(serverTime).toISOString(),
     receivedAt: Date.now(),

@@ -40,7 +40,7 @@ const item = {
   kind: "review",
 };
 
-test("approvals stay Active for a fixed 12 hours", () => {
+test("approvals default to 12 hours in Active", () => {
   expect(APPROVED_ACTIVE_HOURS).toBe(12);
 });
 
@@ -102,14 +102,19 @@ test("the inbox requires a server clock as an ISO datetime", () => {
   expect(InboxList.safeParse({ items: [] }).success).toBe(false);
   for (const serverTime of [null, "tomorrow", "2026-11-04", 0])
     expect(InboxList.safeParse({ items: [], serverTime }).success).toBe(false);
-  const list = { items: [], serverTime: "2026-11-04T10:00:00.000Z" };
+  const list = { items: [], approvedActiveHours: 12, serverTime: "2026-11-04T10:00:00.000Z" };
   expect(InboxList.parse(list)).toEqual(list);
 });
 
 test("the inbox cap applies per list", () => {
   const items = Array.from({ length: LIMITS.inboxItems * 3 }, () => item);
-  expect(InboxList.safeParse({ serverTime: "2026-11-04T10:00:00.000Z", items }).success).toBe(true);
-  expect(InboxList.safeParse({ serverTime: "2026-11-04T10:00:00.000Z", items: [...items, item] }).success).toBe(false);
+  expect(InboxList.safeParse({ approvedActiveHours: 12, serverTime: "2026-11-04T10:00:00.000Z", items }).success).toBe(
+    true,
+  );
+  expect(
+    InboxList.safeParse({ approvedActiveHours: 12, serverTime: "2026-11-04T10:00:00.000Z", items: [...items, item] })
+      .success,
+  ).toBe(false);
 });
 
 test("lifecycle events carry ids and a revision only", () => {

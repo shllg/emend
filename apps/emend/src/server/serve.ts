@@ -60,6 +60,7 @@ export function serverConfig(
 }
 export interface ServerOptions {
   stateDir: string;
+  configFile?: string;
   host?: string;
   port?: number;
   publicOrigin?: string;
@@ -89,7 +90,13 @@ export async function startServer(
           const address = server.address();
           if (!address || typeof address === "string") throw new Error("Invalid bound address.");
           const config = serverConfig(address.address, address.port, webRoot, opts.publicOrigin, key);
-          const app = createApp({ ...state, now: Date.now, config, onStopRequest: opts.onStopRequest });
+          const app = createApp({
+            ...state,
+            now: Date.now,
+            config,
+            configFile: opts.configFile,
+            onStopRequest: opts.onStopRequest,
+          });
           server.on("request", nodeRequestHandler(app, config));
           resolve({ url: localUrl(address.address, address.port), port: address.port });
         } catch (error) {

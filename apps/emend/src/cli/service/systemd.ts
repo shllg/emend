@@ -44,6 +44,9 @@ export function systemdWord(word: string, execStart: boolean): string {
 
 function unit(context: ServiceContext): string {
   const { node, entry, flags, stateDir } = context;
+  const configHome = context.io.env.XDG_CONFIG_HOME;
+  const configEnv = configHome && isAbsolute(configHome) ? configHome : undefined;
+  if (configEnv) validatePaths(configEnv);
   return `${prefix}[Unit]
 Description=emend review server
 
@@ -51,7 +54,7 @@ Description=emend review server
 Type=exec
 ExecStart=${systemdWord(node, false)} ${[entry, "serve", ...flags].map((word) => systemdWord(word, true)).join(" ")}
 Environment=${systemdWord(`EMEND_HOME=${stateDir}`, false)}
-Restart=on-failure
+${configEnv ? `Environment=${systemdWord(`XDG_CONFIG_HOME=${configEnv}`, false)}\n` : ""}Restart=on-failure
 
 [Install]
 WantedBy=default.target

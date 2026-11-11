@@ -33,7 +33,9 @@ beforeEach(() => {
   vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [] })),
+    vi.fn(async () =>
+      Response.json({ approvedActiveHours: 12, serverTime: new Date(Date.now()).toISOString(), items: [] }),
+    ),
   );
   fake.current.set({ state: "idle", reason: null, checkedAt: null });
   for (const mock of [fake.current.checkForUpdate, fake.current.installUpdate, fake.current.reloadNow])

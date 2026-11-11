@@ -56,6 +56,21 @@ const enumCheck = (name: string, column: SQLiteColumn, values: readonly string[]
 
 export const owners = sqliteTable("owners", { id: id() });
 
+export const settings = sqliteTable(
+  "settings",
+  {
+    ownerId: ownerId(),
+    key: text("key", { enum: ["approvedActiveHours"] }).notNull(),
+    value: text("value").notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.ownerId, t.key] }),
+    index("settings_owner_idx").on(t.ownerId),
+    enumCheck("settings_key_check", t.key, ["approvedActiveHours"]),
+  ],
+);
+
 export const instances = sqliteTable("instances", {
   id: id(),
   name: text("name").notNull(),

@@ -144,7 +144,7 @@ export async function discover(
 
 export async function ensureServer(
   stateDir: string,
-  opts: { node?: string; entry?: string; timeoutMs?: number } = {},
+  opts: { node?: string; entry?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
 ): Promise<{ url: string }> {
   ensureStateDir(stateDir);
   const timeoutMs = opts.timeoutMs ?? 5000;
@@ -158,7 +158,7 @@ export async function ensureServer(
       detached: true,
       cwd: stateDir,
       stdio: "ignore",
-      env: { ...process.env, EMEND_HOME: stateDir },
+      env: { ...(opts.env ?? process.env), EMEND_HOME: stateDir },
     });
     child.once("error", () => {
       spawnError = true;

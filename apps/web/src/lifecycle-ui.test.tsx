@@ -91,7 +91,11 @@ beforeEach(() => {
     }
     if (method === "POST") return new Response(null, { status: 204 });
     if (path === "/api/v1/reviews")
-      return Response.json({ items: inbox, serverTime: new Date(Date.now() + serverOffset).toISOString() });
+      return Response.json({
+        items: inbox,
+        approvedActiveHours: 12,
+        serverTime: new Date(Date.now() + serverOffset).toISOString(),
+      });
     if (path === `/api/v1/reviews/${id}`)
       return gone
         ? Response.json({ error: { code: "unknown_review", message: "Unknown review." } }, { status: 404 })
@@ -257,6 +261,7 @@ test.each([
     const invalidate = vi.spyOn(client, "invalidateQueries");
     await mountTimed();
     expect(client.getQueryData<InboxData>(["inbox"])).toMatchObject({
+      approvedActiveHours: 12,
       serverTime: new Date(Date.now() + serverOffset).toISOString(),
       receivedAt: Date.now(),
       receivedMono: performance.now(),
@@ -314,6 +319,7 @@ test("an accepted approval expires even when every following inbox refetch fails
   expect(approved).toBe(true);
   const cached = client.getQueryData<InboxData>(["inbox"]);
   expect(cached).toMatchObject({
+    approvedActiveHours: 12,
     serverTime: new Date(receivedAt + serverOffset).toISOString(),
     receivedAt,
     receivedMono,

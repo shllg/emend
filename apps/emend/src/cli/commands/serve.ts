@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { Io } from "../../main.ts";
 import { startServer } from "../../server/serve.ts";
 import { CliError, CliSignalExit, errorLine } from "../http.ts";
@@ -32,7 +33,12 @@ export function parseServeArgs(args: string[]) {
   if (tailscale && host !== "127.0.0.1") throw new UsageError("--tailscale requires --host 127.0.0.1.");
   return { host, port, ...(tailscale ? { tailscale: true } : {}) };
 }
-export async function serveCommand(stateDir: string, options: ReturnType<typeof parseServeArgs>, io: Io) {
+export async function serveCommand(
+  stateDir: string,
+  options: ReturnType<typeof parseServeArgs>,
+  io: Io,
+  configDir?: string,
+) {
   const startup = new AbortController();
   let self: Awaited<ReturnType<typeof tailscaleSelf>> = null;
   let server: Awaited<ReturnType<typeof startServer>> | undefined;
@@ -59,6 +65,7 @@ export async function serveCommand(stateDir: string, options: ReturnType<typeof 
     const publicOrigin = self ? `https://${self.dnsName}` : undefined;
     const starting = startServer({
       stateDir,
+      configFile: configDir ? join(configDir, "config.json") : undefined,
       host: options.host,
       port: options.port,
       publicOrigin,

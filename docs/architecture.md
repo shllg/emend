@@ -32,6 +32,11 @@ The file or its folder may be a symlink. An old `config.json` in the state folde
 it once and renamed `config.json.migrated`. Global values win; old doc roots are appended without
 duplicates. If the global file cannot be written, the CLI uses the merged values and retries later.
 
+Settings have defaults. The config file's `approvedActiveHours` sets how long approved reviews
+stay in Active. A value set in Settings is stored per owner in that server's database and wins.
+Clearing it falls back to the file, then the default of 12 hours. Each server, hub or attached
+machine, reads only its own file and database. Settings do not sync between servers.
+
 The default `emend` command starts a server if needed and prints a one-time sign-in link; it opens
 the browser only when the global `config.json` sets `"openBrowser": true`. `emend config`
 lists and changes this file's `docRoots` and `openBrowser`; each publish or bare `emend`

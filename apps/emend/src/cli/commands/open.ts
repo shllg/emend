@@ -61,7 +61,7 @@ export async function openCommand(stateDir: string, configDir: string, io: Io) {
   }
   let url: string;
   try {
-    ({ url } = await ensureServer(stateDir));
+    ({ url } = await ensureServer(stateDir, { env: io.env }));
   } catch {
     throw new CliError("Could not start the emend server.");
   }

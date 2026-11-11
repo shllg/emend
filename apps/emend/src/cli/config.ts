@@ -3,9 +3,10 @@ import { homedir, userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join, parse, resolve } from "node:path";
 import { LIMITS } from "@emend/contract";
 import { StateFolderWriteError, stateAccessError, writeSecretFile } from "../state/files.ts";
+import { readConfigJson } from "../state/read-config.ts";
 import { escapeReference, quoteShellArgument } from "./escape.ts";
 import { CliError, jsonLine } from "./http.ts";
-import { inside, readRegular } from "./publish/read.ts";
+import { inside } from "./publish/read.ts";
 
 interface Config {
   docRoots: string[];
@@ -138,8 +139,7 @@ async function readConfigFile(
   const invalid = () => new CliError(`invalid emend configuration in ${escapeReference(path)}`);
   let value: unknown;
   try {
-    const actual = followLink ? await realpath(path) : path;
-    value = JSON.parse((await readRegular(actual, LIMITS.publicJsonBytes)).toString());
+    value = await readConfigJson(path, followLink);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     const mapped = stateAccessError(stateDir, error);

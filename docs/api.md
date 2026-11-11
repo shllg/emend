@@ -62,9 +62,9 @@ The content path uses its capability key and never reads cookies. The server bin
 | --- | --- |
 | `admin` | `pairings:create`, `devices:manage`, `server:stop` |
 | `agent` | `publish`, `take`, `reply` |
-| `reviewer` | `read`, `comment`, `send`, `pairings:create`, `devices:manage` |
+| `reviewer` | `read`, `comment`, `send`, `pairings:create`, `devices:manage`, `settings:manage` |
 
-`Scope` is the enum of all nine scope strings; `SCOPES_BY_KIND` is typed against it.
+`Scope` is the enum of all ten scope strings; `SCOPES_BY_KIND` is typed against it.
 
 Only the reviewer session creates user comments, Sends and approvals. An agent reply cannot resolve
 a thread or count as a Send. Every query filters the authenticated principal's `owner_id`.
@@ -84,6 +84,8 @@ a machine token reaches only reviews from its own instance.
 | DELETE | `/api/v1/session` | Reviewer | End the current browser session. |
 | POST | `/api/v1/pairings` | Admin, reviewer | Create from `PairingRequest`; return `PairingCreated` (201). |
 | GET | `/api/v1/devices` | Admin, reviewer | Return `DeviceList` (200); live devices owned by the principal, newest first. |
+| GET | `/api/v1/settings` | Reviewer | Return `SettingsView` (200); requires `read`. |
+| PATCH | `/api/v1/settings` | Reviewer | Apply `SettingsUpdate` and return `SettingsView` (200); requires `settings:manage`. |
 | DELETE | `/api/v1/devices/:id` | Admin, reviewer | Revoke the device and every bound token atomically (204); missing, foreign or revoked is 404. |
 | POST | `/api/v1/machines` | Anyone with a pairing secret or code | Register `MachineRegistration`; return `MachineRegistered` (201); refuses device pairings. |
 | DELETE | `/api/v1/machines/self` | Agent | Revoke the current machine device and all its tokens (204); local agents get 404. |
@@ -199,6 +201,24 @@ batch as events. Errors drop their optimistic entry immediately and remain visib
 dismissed or their affected paths are successfully marked again. Revision queries retain
 their normal focus behavior; no unconditional focus refetch is required.
 
+### Settings
+
+`ApprovedActiveHours` is an integer from 0 to `MAX_APPROVED_ACTIVE_HOURS` (720).
+`SettingSource = "default" | "file" | "override"`.
+`HoursSetting = { value: ApprovedActiveHours, source: SettingSource, default: ApprovedActiveHours,
+file: ApprovedActiveHours | null, override: ApprovedActiveHours | null, fileError: boolean }`.
+`SettingsView = { approvedActiveHours: HoursSetting }`.
+`SettingsUpdate = { approvedActiveHours: ApprovedActiveHours | null }` is strict; extra keys are refused.
+
+The effective `value` uses the owner's database override, then the config file, then
+`APPROVED_ACTIVE_HOURS` (12). Zero moves an approved review out of Active at once.
+PATCH stores an override on this server; null clears it. Only a reviewer session can change it.
+Each server reads its own global config file on every settings or review read. It never writes
+or migrates that file. `file` is its usable value, or null when absent or invalid.
+`fileError` is true when the file cannot be read, is not a JSON object, or contains an unusable
+`approvedActiveHours` value. An invalid file does not prevent the default or override from working.
+A missing file or absent key is not an error. `docRoots` and `openBrowser` are not settings in this API.
+
 ### Review read views
 
 `ReviewState = "open" | "approved" | "settled"`. `settled` is the stored and wire value for a
@@ -209,7 +229,7 @@ updatedAt, movedTo: string | null, list: "active" | "snoozed" | "done", snoozed:
 snoozedUntil: string | null, activeUntil: string | null, releasedAt: string | null, pickedUpAt: string | null,
 kind: "review" | "publish" }`. `repo` is the repository key, and
 `movedTo` is the review's destination URL. `list` places the review: `done` for `settled`, and for
-`approved` once `APPROVED_ACTIVE_HOURS` (12) hours have passed since approval or it does not fit
+`approved` once the effective `approvedActiveHours` have passed since approval or it does not fit
 Active's cap; an approved review is `active` until then if it has a place. An open review is
 `snoozed` while its snooze is in effect, `active` otherwise.
 `project` is the name the review's newest publish sent with its `repo`; for any review not published
@@ -247,14 +267,15 @@ period) or an unexpired direct-wait row for the same owner and review. Direct wa
 30-second expiry every 10 seconds and delete their row when they end. They emit no live event;
 views reflect direct writes on their next load.
 
-`GET /api/v1/reviews` returns `InboxList = { items: InboxItem[], serverTime: string }`.
+`GET /api/v1/reviews` returns `InboxList = { items: InboxItem[], serverTime: string, approvedActiveHours: ApprovedActiveHours }`.
+`approvedActiveHours` is the effective window used for this response.
 `serverTime` is the server's clock when it built the list, as an ISO 8601 UTC string.
 The Active list holds open reviews
-whose snooze is not in effect and reviews approved in the last 12 hours. A review with a waiting
+whose snooze is not in effect and reviews approved within that window (12 hours by default). A review with a waiting
 agent comes first, then newest activity: an open review uses `updatedAt`, or the wake time of a
 timed snooze that has passed when that is later; an approved review sorts by `updatedAt`.
 Next is the Snoozed list (soonest wake first, a snooze until the next revision last), then the Done
-list (retired reviews and approvals at least 12 hours old, with no approval time, or without an Active place, newest
+list (retired reviews and approvals outside that window, with no approval time, or without an Active place, newest
 `updatedAt` first). Review id is the
 stable tie breaker in each. At most `inboxItems` (200) rows per list, so at most 600 in all.
 When more reviews qualify for Active than its cap, open reviews take the places first and approvals

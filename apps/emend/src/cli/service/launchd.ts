@@ -1,5 +1,5 @@
 import { mkdir, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { escapeReference } from "../escape.ts";
 import { CliError } from "../http.ts";
 import {
@@ -55,6 +55,9 @@ function xml(value: string): string {
 }
 function plist(context: ServiceContext): string {
   const { home, node, entry, flags, stateDir } = context;
+  const configHome = context.io.env.XDG_CONFIG_HOME;
+  const configEnv = configHome && isAbsolute(configHome) ? configHome : undefined;
+  if (configEnv) validatePaths(configEnv);
   const log = xml(join(home, "Library/Logs/emend.log"));
   return `${prefix}<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -69,7 +72,7 @@ ${[node, entry, "serve", ...flags].map((word) => `    <string>${xml(word)}</stri
   <dict>
     <key>EMEND_HOME</key>
     <string>${xml(stateDir)}</string>
-    <key>PATH</key>
+${configEnv ? `    <key>XDG_CONFIG_HOME</key>\n    <string>${xml(configEnv)}</string>\n` : ""}    <key>PATH</key>
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
   <key>RunAtLoad</key>

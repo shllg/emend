@@ -10,6 +10,10 @@ from a folder outside their repository. `emend config set openBrowser true` make
 browser instead of printing a one-time sign-in link. Run these yourself, never through an agent:
 they change what your agents may publish.
 
+Approved reviews stay in Active for 12 hours by default. Set `approvedActiveHours` in the global
+config file to whole hours from 0 to 720, or use Settings → Inbox to override it for this server;
+Reset falls back to the file, then the default, and 0 moves approvals out of Active at once.
+
 ## Publish a doc
 
 Publish any UTF-8 text file and get its review URL:

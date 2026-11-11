@@ -167,7 +167,11 @@ beforeEach(() => {
     vi.fn(async (path: string) => {
       if (path === "/api/v1/session") return new Response(null, { status: 204 });
       if (path === "/api/v1/reviews")
-        return Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [review] });
+        return Response.json({
+          approvedActiveHours: 12,
+          serverTime: new Date(Date.now()).toISOString(),
+          items: [review],
+        });
       if (path === `/api/v1/reviews/${id}`) return Response.json(review);
       const match = path.match(/\/revisions\/(\d+)$/);
       if (match && path.startsWith(`/api/v1/reviews/${id}`)) return Response.json(revisions[Number(match[1])]);

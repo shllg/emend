@@ -220,5 +220,14 @@ export const MIGRATIONS: readonly { tag: string; when: number; hash: string; sta
     "statements": [
       "ALTER TABLE `reviews` ADD `project` text;"
     ]
+  },
+  {
+    "tag": "0015_flaky_mephisto",
+    "when": 1794430578976,
+    "hash": "7fa33ae450b193d4e9e04643a6d87f25e379ff9d34eea6b16049c020d8b5a55a",
+    "statements": [
+      "CREATE TABLE `settings` (\n\t`owner_id` text NOT NULL,\n\t`key` text NOT NULL,\n\t`value` text NOT NULL,\n\t`updated_at` integer NOT NULL,\n\tPRIMARY KEY(`owner_id`, `key`),\n\tFOREIGN KEY (`owner_id`) REFERENCES `owners`(`id`) ON UPDATE no action ON DELETE no action,\n\tCONSTRAINT \"settings_key_check\" CHECK(\"settings\".\"key\" in ('approvedActiveHours'))\n);",
+      "CREATE INDEX `settings_owner_idx` ON `settings` (`owner_id`);"
+    ]
   }
 ];

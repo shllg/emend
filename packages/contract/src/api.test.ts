@@ -99,7 +99,18 @@ test.each([
 
 test("assigns only the specified scopes to each token kind", () => {
   expect([...Scope.options].sort()).toEqual(
-    ["pairings:create", "devices:manage", "server:stop", "publish", "take", "reply", "read", "comment", "send"].sort(),
+    [
+      "pairings:create",
+      "devices:manage",
+      "settings:manage",
+      "server:stop",
+      "publish",
+      "take",
+      "reply",
+      "read",
+      "comment",
+      "send",
+    ].sort(),
   );
   for (const scopes of Object.values(SCOPES_BY_KIND)) {
     for (const scope of scopes) expect(Scope.parse(scope)).toBe(scope);
@@ -109,7 +120,7 @@ test("assigns only the specified scopes to each token kind", () => {
   expect(SCOPES_BY_KIND).toEqual({
     admin: ["pairings:create", "devices:manage", "server:stop"],
     agent: ["publish", "take", "reply"],
-    reviewer: ["read", "comment", "send", "pairings:create", "devices:manage"],
+    reviewer: ["read", "comment", "send", "pairings:create", "devices:manage", "settings:manage"],
   });
 });
 

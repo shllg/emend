@@ -25,9 +25,13 @@ test("read requests keep credentials same-origin, parse errors, and send 401 to 
 test("a successful response still has to satisfy its schema", async () => {
   vi.stubGlobal(
     "fetch",
-    vi
-      .fn()
-      .mockResolvedValue(Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [{ id: "invalid" }] })),
+    vi.fn().mockResolvedValue(
+      Response.json({
+        approvedActiveHours: 12,
+        serverTime: new Date(Date.now()).toISOString(),
+        items: [{ id: "invalid" }],
+      }),
+    ),
   );
   await expect(get("/api/v1/reviews", InboxList)).rejects.toThrow();
 });

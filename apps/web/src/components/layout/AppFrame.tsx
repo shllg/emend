@@ -9,6 +9,7 @@ import {
   QrCode,
   RefreshCw,
   RotateCw,
+  Settings,
   Smartphone,
 } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef } from "react";
@@ -72,6 +73,12 @@ export function AppFrame({
     asChild: true,
     children: <Link to="/devices">Devices</Link>,
   };
+  const settings: MenuItem = {
+    label: "Settings",
+    icon: Settings,
+    asChild: true,
+    children: <Link to="/settings">Settings</Link>,
+  };
   const menuItems: MenuItem[] = isReview
     ? [
         ...updateItems,
@@ -100,11 +107,13 @@ export function AppFrame({
         { separator: true },
         { label: "Inbox", icon: Inbox, asChild: true, children: <Link to="/">Inbox</Link> },
         devices,
+        settings,
       ]
     : [
         ...updateItems,
         refreshItem,
         devices,
+        settings,
         {
           label: "Pair a device",
           icon: QrCode,
@@ -169,6 +178,9 @@ export function AppFrame({
             />
             <IconButton label="Devices" icon={Smartphone} asChild>
               <Link to="/devices" />
+            </IconButton>
+            <IconButton label="Settings" icon={Settings} asChild>
+              <Link to="/settings" />
             </IconButton>
           </div>
         )}

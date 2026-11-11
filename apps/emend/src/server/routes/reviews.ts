@@ -1,5 +1,4 @@
 import {
-  APPROVED_ACTIVE_HOURS,
   InboxList,
   LIMITS,
   PublishMeta,
@@ -53,6 +52,7 @@ import type { AppDeps } from "../app.ts";
 import type { AppEnv } from "../auth/principal.ts";
 import { ApiError } from "../http/errors.ts";
 import { noteView } from "../publish/notes.ts";
+import { readSettings } from "../settings.ts";
 import { commentHtml } from "./comment-html.ts";
 
 function publishMeta(rendered: unknown) {
@@ -71,7 +71,8 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, reviewId?: stri
     .as("latest");
   const now = deps.now();
   const serverTime = new Date(now).toISOString();
-  const approvedWindow = APPROVED_ACTIVE_HOURS * 3_600_000;
+  const approvedActiveHours = (await readSettings(ownerId, q, deps.configFile)).approvedActiveHours.value;
+  const approvedWindow = approvedActiveHours * 3_600_000;
   const cutoff = now - approvedWindow;
   const select = (where: SQL | undefined, order: SQL[], limit: number) =>
     q
@@ -93,6 +94,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, reviewId?: stri
   const asleep = and(isNotNull(reviews.snoozedAt), or(isNull(reviews.snoozedUntil), gt(reviews.snoozedUntil, now)));
   const isOpen = eq(reviews.state, "open");
   const recentlyApproved = and(
+    sql`${approvedActiveHours} > 0`,
     eq(reviews.state, "approved"),
     isNotNull(reviews.approvedAt),
     gt(reviews.approvedAt, cutoff),
@@ -141,7 +143,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, reviewId?: stri
           )),
         ]
       : await select(eq(reviews.id, reviewId), [asc(reviews.id)], 1);
-  if (!rows.length) return { items: [], serverTime };
+  if (!rows.length) return { items: [], serverTime, approvedActiveHours };
   const ids = rows.map((row) => row.review.id);
   const drafts = await q
     .select({ id: comments.reviewId, count: count() })
@@ -236,6 +238,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, reviewId?: stri
   const items = rows.map(({ review, origin, repo, repoName, newestRevision }) => {
     const snoozed = review.state === "open" && snoozeInEffect(review, now);
     const activeUntil =
+      approvedActiveHours > 0 &&
       review.state === "approved" &&
       review.approvedAt !== null &&
       (reviewId === undefined ? activeApprovedIds.has(review.id) : review.approvedAt > cutoff)
@@ -274,6 +277,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, reviewId?: stri
   // Inside Active, a review with a waiting agent comes first; the rows already run newest first.
   return {
     serverTime,
+    approvedActiveHours,
     items: [
       ...items.filter((item) => item.list === "active" && item.agentWaiting),
       ...items.filter((item) => item.list === "active" && !item.agentWaiting),

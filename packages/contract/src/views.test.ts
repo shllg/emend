@@ -36,12 +36,14 @@ test("review views validate their states, limits, rendered blocks and doc varian
   // The cap of 200 applies to each of the three lists.
   expect(
     contract.InboxList.safeParse({
+      approvedActiveHours: 12,
       serverTime: "2026-11-04T10:00:00.000Z",
       items: Array.from({ length: 600 }, () => item),
     }).success,
   ).toBe(true);
   expect(
     contract.InboxList.safeParse({
+      approvedActiveHours: 12,
       serverTime: "2026-11-04T10:00:00.000Z",
       items: Array.from({ length: 601 }, () => item),
     }).success,

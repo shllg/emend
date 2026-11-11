@@ -74,7 +74,11 @@ beforeEach(() => {
       }
       if (url === "/api/v1/reviews") {
         if (mode === "held") return new Promise<Response>((resolve) => held.push({ url, resolve }));
-        return Response.json({ items: [server], serverTime: new Date(Date.now() + serverOffset).toISOString() });
+        return Response.json({
+          items: [server],
+          approvedActiveHours: 12,
+          serverTime: new Date(Date.now() + serverOffset).toISOString(),
+        });
       }
       if (url === `/api/v1/reviews/${reviewId}`) {
         reviewGets += 1;
@@ -413,6 +417,7 @@ test.each(["Send", "Approve"] as const)("a fetch that started before the accepte
   await mount(<Inbox />);
   const received = client.getQueryData<InboxData>(["inbox"]);
   expect(received).toMatchObject({
+    approvedActiveHours: 12,
     serverTime: new Date(Date.now() + serverOffset).toISOString(),
     receivedAt: Date.now(),
     receivedMono: performance.now(),
@@ -434,7 +439,7 @@ test.each(["Send", "Approve"] as const)("a fetch that started before the accepte
     fetch.resolve(
       Response.json(
         fetch.url === "/api/v1/reviews"
-          ? { items: [before], serverTime: new Date(Date.now() + serverOffset).toISOString() }
+          ? { items: [before], approvedActiveHours: 12, serverTime: new Date(Date.now() + serverOffset).toISOString() }
           : before,
       ),
     );
@@ -467,7 +472,7 @@ test.each(["Send", "Approve"] as const)("a fetch that started before the accepte
     fetch.resolve(
       Response.json(
         fetch.url === "/api/v1/reviews"
-          ? { items: [after], serverTime: new Date(Date.now() + serverOffset).toISOString() }
+          ? { items: [after], approvedActiveHours: 12, serverTime: new Date(Date.now() + serverOffset).toISOString() }
           : after,
       ),
     );
@@ -494,4 +499,22 @@ test("a manual cache write does not clear the connection-lost wording; a real fe
   });
   await settle();
   expect(screen.queryByText(lostText)).toBeNull();
+});
+
+test.each([0, 2, 24, undefined])("accepted approval uses cached inbox hours %s", async (hours) => {
+  server = { ...base, unsentCount: 0 };
+  await mount(<Inbox />);
+  client.setQueryData<InboxData>(["inbox"], (data) =>
+    data ? { ...data, approvedActiveHours: hours as number } : data,
+  );
+  mode = "held";
+  approve("Approve revision 3");
+  await settle();
+  const expected = {
+    state: "approved",
+    list: hours === 0 ? "done" : "active",
+    activeUntil: hours === 0 ? null : new Date(Date.now() + (hours ?? APPROVED_ACTIVE_HOURS) * 3_600_000).toISOString(),
+  };
+  expect(client.getQueryData<InboxData>(["inbox"])?.items[0]).toMatchObject(expected);
+  expect(client.getQueryData<ReviewView>(["review", reviewId])).toMatchObject(expected);
 });
