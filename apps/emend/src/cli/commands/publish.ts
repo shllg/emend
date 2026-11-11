@@ -2,6 +2,7 @@ import { lstat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { type DocView, isRenderedHtmlDoc, LIMITS, PublishManifest, PublishResponse } from "@emend/contract";
 import type { Io } from "../../main.ts";
+import { readDocRoots } from "../config.ts";
 import { publishDirect } from "../direct/index.ts";
 import { escapeReference } from "../escape.ts";
 import { apiRequest, CliError, printJson, publishAnswerIncomplete } from "../http.ts";
@@ -152,7 +153,10 @@ export async function publishCommand(
 ): Promise<void> {
   const parsed = parsePublishArgs(args);
   const context = await publishContext(cwd, stateDir);
-  const shortcut = parsed.manifest ? undefined : await shortcutManifest(parsed, stateDir, configDir, cwd, context);
+  const configRoots = await readDocRoots(stateDir, configDir, cwd, io.stderr);
+  const shortcut = parsed.manifest
+    ? undefined
+    : await shortcutManifest(parsed, stateDir, configDir, cwd, context, configRoots);
   const manifest = shortcut?.manifest ?? (await readManifest(parsed.manifest ?? "", cwd, context));
   const options: PublishOptions = {
     manifest: parsed.manifest,
@@ -178,7 +182,7 @@ export async function publishCommand(
   };
   for (const argument of shortcut?.skippedArguments ?? [])
     warn(`emend: skipped ${escapeReference(argument)}: not a visible text doc\n`);
-  const collected = await resolvePublish(manifest, options, stateDir, configDir, null, cwd, warn, context);
+  const collected = await resolvePublish(manifest, options, stateDir, configDir, null, cwd, warn, context, configRoots);
   const published = new Set(collected.request.files.map((file) => file.path));
   for (const { path, reason } of shortcut?.skipped ?? [])
     if (!published.has(path)) warn(`emend: skipped ${escapeReference(path)}: ${reason}\n`);

@@ -282,3 +282,51 @@ test.each(["local", "hub"])("publish through a %s server prints no stopped-serve
   expect(JSON.parse(f.stdout[0] ?? "")).toMatchObject({ reviewId, revision: 1, url });
   expect(f.stderr).toEqual([`emend: published revision 1: ${url}\n`]);
 });
+
+test.each([false, true])("publish ignores committed repository config (shortcut=%s)", async (shortcut) => {
+  const f = await fixture();
+  const docs = await mkdtemp(join(tmpdir(), "emend-outside-docs-"));
+  onTestFinished(() => rm(docs, { recursive: true, force: true }));
+  const source = join(docs, "plan.md");
+  await writeFile(source, "# Synthetic plan");
+  const configHome = join(f.root, ".config");
+  const configDir = join(configHome, "emend");
+  const configFile = join(configDir, "config.json");
+  await mkdir(configDir, { recursive: true });
+  const content = JSON.stringify({ docRoots: [docs], openBrowser: true });
+  await writeFile(configFile, content);
+  const git = (args: string[]) =>
+    promisify(execFile)(
+      "git",
+      [
+        "-C",
+        f.root,
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "user.name=Synthetic",
+        "-c",
+        "user.email=synthetic@example.com",
+        ...args,
+      ],
+      {
+        env: { PATH: process.env.PATH, HOME: f.root, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
+      },
+    );
+  await git(["add", ".config/emend/config.json"]);
+  await git(["commit", "-m", "synthetic config"]);
+  await writeFile(join(f.dir, "config.json"), '{"approvedActiveHours":24}');
+  f.io.env.XDG_CONFIG_HOME = configHome;
+  await writeFile(f.path, JSON.stringify({ ...manifest(), files: [{ path: "plan.md", role: "doc", source }] }));
+  expect(await (shortcut ? run(["publish", source], f.io) : f.publish())).toBe(1);
+  expect(f.stdout).toEqual([]);
+  expect(f.stderr).toEqual([
+    `emend: ignoring ${configFile}: it sits inside the repository at ${f.root}\n`,
+    "emend: source is outside the allowed doc roots\n",
+  ]);
+  expect(await fs.readFile(configFile, "utf8")).toBe(content);
+  expect(await fs.readFile(join(f.dir, "config.json"), "utf8")).toBe('{"approvedActiveHours":24}');
+  await expect(fs.stat(join(f.dir, "config.json.migrated"))).rejects.toMatchObject({ code: "ENOENT" });
+});

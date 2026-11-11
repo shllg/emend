@@ -62,8 +62,12 @@ export async function shortcutManifest(
   configDir: string,
   cwd: string,
   context: Awaited<ReturnType<typeof publishContext>>,
+  configRoots?: readonly string[],
 ) {
-  const roots = [...(context.worktree ? [context.worktree] : []), ...(await readDocRoots(stateDir, configDir))];
+  const roots = [
+    ...(context.worktree ? [context.worktree] : []),
+    ...(configRoots ?? (await readDocRoots(stateDir, configDir, cwd))),
+  ];
   const checked = async (file: string) => {
     outsideGitSegments(file, context.root);
     try {

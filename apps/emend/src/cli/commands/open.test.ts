@@ -481,3 +481,22 @@ test.each(
     expect(new Headers(f.fetcher.mock.calls[0]?.[1]?.headers).has("Authorization")).toBe(false);
   },
 );
+
+test("bare emend ignores a repository's browser opt-in and warns once", async () => {
+  const f = await commandFixture();
+  const repo = join(f.dir, "repo");
+  await mkdir(join(repo, ".git"), { recursive: true });
+  await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/main\n");
+  const configHome = join(repo, ".config"),
+    configFile = join(configHome, "emend", "config.json");
+  await mkdir(join(configHome, "emend"), { recursive: true });
+  await writeFile(configFile, '{"openBrowser":true}');
+  vi.spyOn(process, "cwd").mockReturnValue(repo);
+  const openUrl = vi.fn(async () => true);
+  expect(await run([], { ...f.io, env: { ...f.io.env, XDG_CONFIG_HOME: configHome }, openUrl })).toBe(0);
+  expect(f.stderr).toEqual([`emend: ignoring ${configFile}: it sits inside the repository at ${repo}\n`]);
+  expect(openUrl).not.toHaveBeenCalled();
+  expect(f.stdout).toEqual([
+    "emend is running at http://127.0.0.1:3636. Run emend in a terminal to get a sign-in link.\n",
+  ]);
+});

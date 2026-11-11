@@ -4,6 +4,7 @@ import {
   type RetireRequest,
   type ReviewView,
   type RevisionView,
+  type SettingsView,
   type SnoozeRequest,
   type ViewedRequest,
 } from "@emend/contract";
@@ -122,7 +123,10 @@ type Accepted = { kind: "send" | "approve"; revision?: number };
 function applyAccepted(client: QueryClient, reviewId: string, { kind, revision }: Accepted) {
   const inbox = client.getQueryData<InboxData>(["inbox"]);
   const estimate = serverNow(inbox);
-  const approvedActiveHours = inbox?.approvedActiveHours ?? APPROVED_ACTIVE_HOURS;
+  const approvedActiveHours =
+    client.getQueryData<SettingsView>(["settings"])?.approvedActiveHours.value ??
+    inbox?.approvedActiveHours ??
+    APPROVED_ACTIVE_HOURS;
   const activeUntil =
     approvedActiveHours === 0 ? null : new Date(estimate + approvedActiveHours * 3_600_000).toISOString();
   const change = <T extends InboxItem>(item: T): T =>

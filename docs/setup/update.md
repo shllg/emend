@@ -11,6 +11,13 @@ A single machine skips step 1 and step 6 (the phone app), unless it also serves 
 the emend service was installed with. Run `emend service install` again after either one. A
 service that still points at the old Node.js fails to start.
 
+An old state-folder config is copied only when the global config is missing, then renamed
+`config.json.migrated`. If the global config already exists, emend keeps the old file under that
+name and warns without merging it. `EMEND_HOME` moves only state; use `XDG_CONFIG_HOME` for config.
+The service records an absolute `XDG_CONFIG_HOME` at install time. Reinstall it after changing that value.
+A global config inside a repository that holds the working directory is ignored by publish and
+bare `emend`; `emend config` refuses there. A dotfiles repository at the home folder is allowed.
+
 ## Set it up with an agent
 
 ```text

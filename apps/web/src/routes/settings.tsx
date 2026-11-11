@@ -19,7 +19,8 @@ function InboxSettings({ setting }: { setting: HoursSetting }) {
   const mutation = useMutation({
     mutationFn: (approvedActiveHours: number | null) =>
       patch("/api/v1/settings", { approvedActiveHours }, SettingsView),
-    onSuccess: (view) => {
+    onSuccess: async (view) => {
+      await client.cancelQueries({ queryKey: ["settings"] });
       client.setQueryData(["settings"], view);
       setDraft(undefined);
       setError(undefined);

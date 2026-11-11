@@ -10,6 +10,14 @@ from a folder outside their repository. `emend config set openBrowser true` make
 browser instead of printing a one-time sign-in link. Run these yourself, never through an agent:
 they change what your agents may publish.
 
+The old state-folder config is copied once, only if the global config is missing, then renamed
+`config.json.migrated`. An existing global config wins without merging the old file.
+`EMEND_HOME` moves only state; set `XDG_CONFIG_HOME` too for a separate config.
+Publish and bare `emend` ignore a global config inside a repository that holds the working
+directory and warn. `emend config` refuses there. A home-rooted dotfiles repository does not count.
+If `XDG_CONFIG_HOME` is absolute, `emend service install` records it at install time.
+Reinstall the service after changing it.
+
 Approved reviews stay in Active for 12 hours by default. Set `approvedActiveHours` in the global
 config file to whole hours from 0 to 720, or use Settings → Inbox to override it for this server;
 Reset falls back to the file, then the default, and 0 moves approvals out of Active at once.

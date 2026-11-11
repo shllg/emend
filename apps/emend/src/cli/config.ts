@@ -1,12 +1,14 @@
-import { lstat, readlink, realpath, rename } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { link, lstat, mkdir, open, readlink, realpath, rename, unlink } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join, parse, resolve } from "node:path";
 import { LIMITS } from "@emend/contract";
-import { StateFolderWriteError, stateAccessError, writeSecretFile } from "../state/files.ts";
+import { StateFolderWriteError, stateAccessError } from "../state/files.ts";
 import { readConfigJson } from "../state/read-config.ts";
 import { escapeReference, quoteShellArgument } from "./escape.ts";
 import { CliError, jsonLine } from "./http.ts";
 import { inside } from "./publish/read.ts";
+import { pathInRepository, repositoryRoots } from "./runtime-repository.ts";
 
 interface Config {
   docRoots: string[];
@@ -92,10 +94,12 @@ export async function validateDocRoot(
 export async function readDocRoots(
   stateDir: string,
   configDir: string,
+  cwd: string,
+  warn: (line: string) => void = () => {},
   home = homedir(),
   getAccountHome: () => string = accountHome,
 ): Promise<string[]> {
-  const { docRoots } = await readConfig(stateDir, configDir);
+  const { docRoots } = await readConfig(stateDir, configDir, { cwd, home, warn });
   const roots: string[] = [];
   for (const entry of docRoots) {
     const refuse = (problem: string) => {
@@ -125,12 +129,23 @@ export async function readDocRoots(
 
 type ConfigDocument = Partial<Config> & Record<string, unknown>;
 
-export async function readConfig(stateDir: string, configDir: string): Promise<Config> {
-  const { docRoots, openBrowser } = await readConfigDocument(stateDir, configDir);
+interface ConfigReadOptions {
+  cwd: string;
+  home?: string;
+  warn?: (line: string) => void;
+  repositoryPolicy?: "ignore" | "refuse";
+}
+
+export async function readConfig(
+  stateDir: string,
+  configDir: string,
+  options: ConfigReadOptions = { cwd: process.cwd() },
+): Promise<Config> {
+  const { docRoots, openBrowser } = await readConfigDocument(stateDir, configDir, options);
   return { docRoots, openBrowser };
 }
 
-/** Keep absent keys absent until migration has applied the global file's precedence. */
+/** Preserve unknown keys and omissions when copying a legacy file. */
 async function readConfigFile(
   path: string,
   stateDir: string,
@@ -157,52 +172,129 @@ async function readConfigFile(
   return value as ConfigDocument;
 }
 
-/** Atomic replacement follows dotfile links without replacing the links themselves. */
+async function checkedConfigPath(path: string, stateDir?: string): Promise<string> {
+  try {
+    return await realpathThroughAncestors(path);
+  } catch (error) {
+    if (stateDir !== undefined) {
+      const mapped = stateAccessError(stateDir, error);
+      if (mapped instanceof StateFolderWriteError) throw mapped;
+    }
+    throw new CliError(`cannot check emend configuration in ${escapeReference(path)}`);
+  }
+}
+
+async function configRepository(path: string, actual: string, options: ConfigReadOptions) {
+  try {
+    const roots = await repositoryRoots(options.cwd, options.home ?? homedir());
+    return roots.find((root) => pathInRepository(actual, [root]));
+  } catch {
+    throw new CliError(`cannot check emend configuration in ${escapeReference(path)}`);
+  }
+}
+
+function writeReason(error: unknown): string {
+  switch ((error as NodeJS.ErrnoException).code) {
+    case "EACCES":
+    case "EPERM":
+      return "permission denied";
+    case "EROFS":
+      return "read-only file system";
+    case "ENOSPC":
+      return "no space left on device";
+    case "ENOTDIR":
+      return "not a folder";
+    case "EISDIR":
+      return "not a regular file";
+    default:
+      return "file could not be written";
+  }
+}
+
+/** A temporary sibling keeps replacement atomic and exclusive migration cannot clobber a winner. */
+async function writeConfigFile(actual: string, data: string, exclusive: boolean): Promise<void> {
+  await mkdir(dirname(actual), { recursive: true, mode: 0o700 });
+  const temporary = join(dirname(actual), `.config-${randomUUID()}.tmp`);
+  const handle = await open(temporary, "wx", 0o600);
+  try {
+    await handle.writeFile(data);
+    await handle.sync();
+    await handle.close();
+    if (exclusive) await link(temporary, actual);
+    else await rename(temporary, actual);
+  } finally {
+    await handle.close();
+    await unlink(temporary).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error;
+    });
+  }
+}
+
+/** Atomic replacement follows dotfile links without changing existing folder permissions. */
 export async function writeConfigDocument(configDir: string, document: ConfigDocument): Promise<void> {
   const data = jsonLine(document);
   if (Buffer.byteLength(data) > LIMITS.publicJsonBytes)
     throw new CliError("emend configuration would exceed its size limit");
   const path = join(configDir, "config.json");
+  const actual = await checkedConfigPath(path);
   try {
-    const actual = await realpathThroughAncestors(path);
-    writeSecretFile(actual, data, dirname(actual));
-  } catch {
-    throw new CliError(`cannot write emend configuration in ${escapeReference(path)}`);
+    await writeConfigFile(actual, data, false);
+  } catch (error) {
+    throw new CliError(`cannot write emend configuration in ${escapeReference(path)}: ${writeReason(error)}`);
   }
 }
 
-/** Migrate only in CLI readers; retain unknown keys when either file is rewritten. */
+const withDefaults = (document: ConfigDocument): Config & Record<string, unknown> => ({
+  ...document,
+  docRoots: document.docRoots ?? [],
+  openBrowser: document.openBrowser ?? false,
+});
+
+/** Migrate once in CLI readers only. A global file is never merged with an old state file. */
 export async function readConfigDocument(
   stateDir: string,
   configDir: string,
+  options: ConfigReadOptions = { cwd: process.cwd() },
 ): Promise<Config & Record<string, unknown>> {
   const path = join(configDir, "config.json");
   const oldPath = join(stateDir, "config.json");
-  let document = (await readConfigFile(path, stateDir, true)) ?? {};
-  // A custom state folder can also be the global config folder, including through an alias.
-  const sameFile = (await realpathThroughAncestors(path)) === (await realpathThroughAncestors(oldPath));
-  const old = sameFile ? undefined : await readConfigFile(oldPath, stateDir, false);
-  if (old) {
-    const roots = [...(document.docRoots ?? [])];
-    const seen = new Set(roots);
-    for (const root of old.docRoots ?? []) {
-      if (!seen.has(root)) {
-        roots.push(root);
-        seen.add(root);
-      }
-    }
-    document = { ...old, ...document, docRoots: roots };
+  const actual = await checkedConfigPath(path);
+  const repository = await configRepository(path, actual, options);
+  if (repository && options.repositoryPolicy === "refuse")
+    throw new CliError(
+      `the emend config file ${escapeReference(path)} sits inside the repository at ${escapeReference(repository)}; run emend config outside it`,
+    );
+  const sameFile = actual === (await checkedConfigPath(oldPath, stateDir));
+  if (repository) {
+    options.warn?.(
+      `emend: ignoring ${escapeReference(path)}: it sits inside the repository at ${escapeReference(repository)}\n`,
+    );
+    return withDefaults(sameFile ? {} : ((await readConfigFile(oldPath, stateDir, false)) ?? {}));
+  }
+  let document = await readConfigFile(path, stateDir, true);
+  if (sameFile) return withDefaults(document ?? {});
+  let copied = false;
+  if (document === undefined) {
+    const old = await readConfigFile(oldPath, stateDir, false);
+    if (old === undefined) return withDefaults({});
     try {
-      await writeConfigDocument(configDir, document);
-    } catch {
-      // Read-only homes and sandboxes still use all configured values for this invocation.
-      return { ...document, docRoots: roots, openBrowser: document.openBrowser ?? false };
-    }
-    try {
-      await rename(oldPath, `${oldPath}.migrated`);
+      await writeConfigFile(actual, jsonLine(old), true);
+      document = old;
+      copied = true;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") return withDefaults(old);
+      document = await readConfigFile(path, stateDir, true);
+      if (document === undefined) return withDefaults(old);
     }
   }
-  return { ...document, docRoots: document.docRoots ?? [], openBrowser: document.openBrowser ?? false };
+  // A failed archive is harmless: future reads still use the global file without re-importing anything.
+  const archived = await rename(oldPath, `${oldPath}.migrated`).then(
+    () => true,
+    () => false,
+  );
+  if (archived && !copied)
+    options.warn?.(
+      `emend: ${escapeReference(oldPath)} was not copied because ${escapeReference(path)} already exists; it is kept as ${escapeReference(`${oldPath}.migrated`)}\n`,
+    );
+  return withDefaults(document);
 }

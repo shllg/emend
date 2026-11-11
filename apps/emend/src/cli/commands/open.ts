@@ -41,8 +41,8 @@ export async function openBrowser(url: string, env = process.env, timeoutMs = 5_
     }
   });
 }
-export async function openCommand(stateDir: string, configDir: string, io: Io) {
-  const config = await readConfig(stateDir, configDir);
+export async function openCommand(stateDir: string, configDir: string, io: Io, cwd: string) {
+  const config = await readConfig(stateDir, configDir, { cwd, warn: io.stderr });
   const openUrl = io.openUrl ?? ((url: string) => openBrowser(url, io.env));
   const attachment = await readAttachment(stateDir);
   if (attachment) {

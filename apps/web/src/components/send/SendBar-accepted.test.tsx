@@ -518,3 +518,21 @@ test.each([0, 2, 24, undefined])("accepted approval uses cached inbox hours %s",
   expect(client.getQueryData<InboxData>(["inbox"])?.items[0]).toMatchObject(expected);
   expect(client.getQueryData<ReviewView>(["review", reviewId])).toMatchObject(expected);
 });
+
+test.each([undefined, 24])("accepted approval uses zero settings hours before inbox hours %s", async (inboxHours) => {
+  server = { ...base, unsentCount: 0 };
+  await mount();
+  if (inboxHours !== undefined) client.setQueryData(["inbox"], { approvedActiveHours: inboxHours, items: [server] });
+  else expect(client.getQueryData(["inbox"])).toBeUndefined();
+  client.setQueryData(["settings"], {
+    approvedActiveHours: { value: 0, source: "override", default: 12, file: null, override: 0, fileError: false },
+  });
+  mode = "held";
+  approve("Approve revision 3");
+  await settle();
+  expect(client.getQueryData<ReviewView>(["review", reviewId])).toMatchObject({
+    state: "approved",
+    list: "done",
+    activeUntil: null,
+  });
+});

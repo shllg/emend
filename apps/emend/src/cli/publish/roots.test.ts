@@ -386,7 +386,7 @@ test.each(["ENOENT", "ENOTDIR"])("publish skips a %s entry and still publishes a
   if (code === "ENOTDIR") await writeFile(parent, "Synthetic non-directory");
   const missing = join(parent, "docs");
   await f.store([missing, f.docs]);
-  expect(await readDocRoots(f.state, f.configDir, f.home, () => f.account)).toEqual([f.docs]);
+  expect(await readDocRoots(f.state, f.configDir, f.root, undefined, f.home, () => f.account)).toEqual([f.docs]);
   const result = await f.publish();
   expect(result.code).toBe(0);
   expect(result.stdout).toHaveLength(1);
@@ -466,7 +466,7 @@ test("publish refuses a symlink loop as unreadable", async () => {
 });
 
 test.skipIf(process.getuid?.() === 0).each(["HOME", "account home"])(
-  "config add and publish name an unreadable %s without advising removal of a valid entry",
+  "config add and publish refuse an unreadable %s before source reads",
   async (kind) => {
     const f = await fixture();
     const parent = kind === "HOME" ? f.homeParent : f.accountParent;
@@ -480,7 +480,11 @@ test.skipIf(process.getuid?.() === 0).each(["HOME", "account home"])(
         stdout: [],
         stderr: [`emend: cannot check docRoots: ${folder} cannot be read\n`],
       };
-      expect(await f.command(["config", "add", "docRoots", f.docs])).toEqual(expected);
+      expect(await f.command(["config", "add", "docRoots", f.docs])).toEqual(
+        kind === "HOME"
+          ? { ...expected, stderr: [`emend: cannot check emend configuration in ${f.config}\n`] }
+          : expected,
+      );
       expect(await f.publish()).toEqual(expected);
       expect(git).not.toHaveBeenCalled();
       expect(f.reads.mock.calls.some(([path]) => path === f.manifest)).toBe(false);

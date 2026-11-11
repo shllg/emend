@@ -28,9 +28,15 @@ Node >=24.18.0; SQLite warning behavior has been verified on Node 24.18.0 and 26
 
 The global config is a plain JSON object in `$XDG_CONFIG_HOME/emend/config.json` when
 `XDG_CONFIG_HOME` is absolute, else `~/.config/emend/config.json`, on Linux and macOS.
-The file or its folder may be a symlink. An old `config.json` in the state folder is merged into
-it once and renamed `config.json.migrated`. Global values win; old doc roots are appended without
-duplicates. If the global file cannot be written, the CLI uses the merged values and retries later.
+The file or its folder may be a symlink. An old `config.json` in the state folder is copied only
+when the global file is missing. An exclusive create lets only one concurrent migration win.
+The old file is renamed `config.json.migrated`. When a global file already exists, the old file
+is kept under that name without merging, and the CLI prints a warning. A failed rename does not
+fail the command. If the global file cannot be created, the old values apply only for that run.
+
+Publish and bare `emend` ignore a global config file inside a repository that holds the working
+directory, including through links. They warn and use any old state config only in memory.
+`emend config` refuses there. A dotfiles repository rooted at the home folder does not count.
 
 Settings have defaults. The config file's `approvedActiveHours` sets how long approved reviews
 stay in Active. A value set in Settings is stored per owner in that server's database and wins.
@@ -48,6 +54,7 @@ Publish re-checks each stored doc root and refuses one that is not a real path o
 `emend serve` runs without opening a browser; `emend service install` installs a systemd
 user unit or a launchd agent. The server binds `127.0.0.1:3636` unless `--host` or `--tailscale`
 explicitly widens access. There is no telemetry.
+If `XDG_CONFIG_HOME` is absolute, the service install records it. Reinstall after changing it.
 
 Agent commands (`publish`, `wait`, `feedback`, `reply` and the MCP tools) work with or without a
 running server and never start one. They use a discovered server's API, or open the same local
@@ -66,7 +73,8 @@ A signal after a hand-off is claimed leaves it unconfirmed, and it is offered ag
 
 State is one SQLite database and a content-addressed blob store with SHA-256 names. `EMEND_HOME`
 overrides the platform data location: the XDG data directory on Linux, Application Support on
-macOS. Each instance has a stable id and a name, defaulting to the hostname.
+macOS. It moves only state; set `XDG_CONFIG_HOME` too for a separate config.
+Each instance has a stable id and a name, defaulting to the hostname.
 Both live in the state folder's `instance.json`, which emend creates once and never rewrites. If
 that file is deleted, the next server start or direct-mode command creates a new instance:
 reviews published before stay, but agents on this machine reach only the new instance's reviews.

@@ -45,7 +45,12 @@ function setup(setting: Partial<HoursSetting> = {}, path = "/settings", patchRes
       <App queryClient={client} history={createMemoryHistory({ initialEntries: [path] })} />
     </StrictMode>,
   );
-  return { client, invalidate, patches: () => fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH") };
+  return {
+    client,
+    invalidate,
+    fetcher,
+    patches: () => fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH"),
+  };
 }
 afterEach(() => {
   cleanup();
@@ -140,4 +145,28 @@ test("inbox header links to Settings", async () => {
   fireEvent.click(link);
   await screen.findByRole("heading", { name: "Settings", level: 1 });
   await field();
+});
+
+test("a delayed background GET cannot overwrite the saved settings view", async () => {
+  const f = setup();
+  const input = await field();
+  const delayed = Promise.withResolvers<Response>();
+  f.fetcher.mockImplementationOnce(async () => delayed.promise);
+  let refresh: Promise<void> | undefined;
+  act(() => {
+    refresh = f.client.invalidateQueries({ queryKey: ["settings"] });
+  });
+  await waitFor(() => expect(f.client.isFetching({ queryKey: ["settings"] })).toBe(1));
+  fireEvent.change(input, { target: { value: "0" } });
+  fireEvent.click(save());
+  await screen.findByText("Set here.");
+  await act(async () => {
+    delayed.resolve(Response.json({ approvedActiveHours: defaultSetting }));
+    await refresh;
+  });
+  expect(input.value).toBe("0");
+  expect(f.client.getQueryData<SettingsView>(["settings"])?.approvedActiveHours).toMatchObject({
+    value: 0,
+    source: "override",
+  });
 });

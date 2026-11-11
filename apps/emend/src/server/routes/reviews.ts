@@ -52,7 +52,7 @@ import type { AppDeps } from "../app.ts";
 import type { AppEnv } from "../auth/principal.ts";
 import { ApiError } from "../http/errors.ts";
 import { noteView } from "../publish/notes.ts";
-import { readSettings } from "../settings.ts";
+import { type FileSetting, readFileSetting, readSettings } from "../settings.ts";
 import { commentHtml } from "./comment-html.ts";
 
 function publishMeta(rendered: unknown) {
@@ -62,7 +62,7 @@ function publishMeta(rendered: unknown) {
 }
 
 /** Counts use one grouped query per kind, independent of the number of inbox rows. */
-async function inbox(ownerId: string, q: Queries, deps: AppDeps, reviewId?: string) {
+async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetting, reviewId?: string) {
   const latest = q
     .select({ reviewId: revisions.reviewId, seq: max(revisions.seq).as("seq") })
     .from(revisions)
@@ -71,7 +71,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, reviewId?: stri
     .as("latest");
   const now = deps.now();
   const serverTime = new Date(now).toISOString();
-  const approvedActiveHours = (await readSettings(ownerId, q, deps.configFile)).approvedActiveHours.value;
+  const approvedActiveHours = (await readSettings(ownerId, q, file)).approvedActiveHours.value;
   const approvedWindow = approvedActiveHours * 3_600_000;
   const cutoff = now - approvedWindow;
   const select = (where: SQL | undefined, order: SQL[], limit: number) =>
@@ -550,16 +550,18 @@ async function revisionView(ownerId: string, q: Queries, deps: AppDeps, reviewId
 export function reviewRoutes(app: Hono<AppEnv>, deps: AppDeps) {
   app.get("/api/v1/reviews", async (c) => {
     const ownerId = c.get("principal").ownerId;
-    const list = await deps.db.read((q) => inbox(ownerId, q, deps));
+    const file = await readFileSetting(deps.configFile);
+    const list = await deps.db.read((q) => inbox(ownerId, q, deps, file));
     return c.json(InboxList.parse(list));
   });
   app.get("/api/v1/reviews/:id", async (c) => {
     const ownerId = c.get("principal").ownerId;
     const reviewId = c.req.param("id");
+    const file = await readFileSetting(deps.configFile);
     const view = await deps.db.read(async (q) => {
       const {
         items: [item],
-      } = await inbox(ownerId, q, deps, reviewId);
+      } = await inbox(ownerId, q, deps, file, reviewId);
       if (!item) throw new ApiError("unknown_review");
       const rows = await q
         .select({ seq: revisions.seq, createdAt: revisions.createdAt })

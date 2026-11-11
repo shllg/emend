@@ -5,7 +5,12 @@ import type { Queries } from "../db/client.ts";
 import { settings } from "../db/schema.ts";
 import { readConfigJson } from "../state/read-config.ts";
 
-async function fileSetting(configFile?: string): Promise<{ file: number | null; fileError: boolean }> {
+export interface FileSetting {
+  file: number | null;
+  fileError: boolean;
+}
+
+export async function readFileSetting(configFile?: string): Promise<FileSetting> {
   if (!configFile) return { file: null, fileError: false };
   try {
     const document = await readConfigJson(configFile);
@@ -26,8 +31,11 @@ async function fileSetting(configFile?: string): Promise<{ file: number | null; 
   }
 }
 
-export async function readSettings(ownerId: string, q: Queries, configFile?: string): Promise<SettingsView> {
-  const { file, fileError } = await fileSetting(configFile);
+export async function readSettings(
+  ownerId: string,
+  q: Queries,
+  { file, fileError }: FileSetting,
+): Promise<SettingsView> {
   const row = await q
     .select()
     .from(settings)

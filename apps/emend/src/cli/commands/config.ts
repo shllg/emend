@@ -9,7 +9,13 @@ import { CliError } from "../http.ts";
 const usage =
   "Usage: emend config [list] | add docRoots <folder> | remove docRoots <folder> | set openBrowser true|false.";
 
-export async function configCommand(stateDir: string, configDir: string, args: string[], io: Io): Promise<void> {
+export async function configCommand(
+  stateDir: string,
+  configDir: string,
+  args: string[],
+  io: Io,
+  cwd: string,
+): Promise<void> {
   const [action = "list", key, value] = args;
   const list = action === "list" && args.length <= 1;
   const folder = (action === "add" || action === "remove") && key === "docRoots" && value !== "";
@@ -17,7 +23,7 @@ export async function configCommand(stateDir: string, configDir: string, args: s
   // Config's usage errors, like its other errors, exit 1.
   if (!list && (args.length !== 3 || (!folder && !setting))) throw new CliError(usage);
 
-  const config = await readConfigDocument(stateDir, configDir);
+  const config = await readConfigDocument(stateDir, configDir, { cwd, warn: io.stderr, repositoryPolicy: "refuse" });
   if (list) {
     const json = escapeJson(JSON.stringify({ docRoots: config.docRoots, openBrowser: config.openBrowser }));
     try {

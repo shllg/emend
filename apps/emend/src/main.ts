@@ -82,7 +82,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       };
       if (argv[0] === "config") {
         const { configCommand } = await import("./cli/commands/config.ts");
-        await configCommand(defaultStateDir(io.env), defaultConfigDir(io.env), argv.slice(1), io);
+        await configCommand(defaultStateDir(io.env), defaultConfigDir(io.env), argv.slice(1), io, process.cwd());
         return 0;
       }
       const command = await commands[argv[0] as keyof typeof commands]();
@@ -127,7 +127,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       await serveCommand(defaultStateDir(io.env), options, io, defaultConfigDir(io.env));
     } else {
       const { openCommand } = await import("./cli/commands/open.ts");
-      await openCommand(defaultStateDir(io.env), defaultConfigDir(io.env), io);
+      await openCommand(defaultStateDir(io.env), defaultConfigDir(io.env), io, process.cwd());
     }
     return 0;
   } catch (caught) {

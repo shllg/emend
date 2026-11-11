@@ -2,8 +2,10 @@ import { chmod, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { InboxList, LIMITS, ReviewView, SettingsView } from "@emend/contract";
 import { and, eq } from "drizzle-orm";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { Queries } from "../../db/client.ts";
 import { devices, reviews, settings } from "../../db/schema.ts";
+import * as configReader from "../../state/read-config.ts";
 import { createToken, SESSION_MS } from "../auth/tokens.ts";
 import { publishReview } from "../mailbox/lifecycle-support.ts";
 import { error, mailboxFixture } from "../mailbox/test-support.ts";
@@ -16,6 +18,7 @@ beforeEach(async () => {
   f.deps.configFile = file;
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   await f.cleanup();
 });
 const config = (value: unknown) => writeFile(file, JSON.stringify(value));
@@ -205,4 +208,35 @@ test("settings reject bearer reviewer credentials, bad origins and oversized bod
     "too_large",
   );
   expect(await view()).toMatchObject({ value: 12, source: "default" });
+});
+
+test("settings and review routes read config outside database callbacks", async () => {
+  await config({ approvedActiveHours: 24 });
+  let inside = 0;
+  const fileReads: number[] = [];
+  const read = f.db.read.bind(f.db),
+    transaction = f.db.transaction.bind(f.db);
+  const wrap =
+    <T>(callback: (q: Queries) => Promise<T>) =>
+    async (q: Queries) => {
+      inside++;
+      try {
+        return await callback(q);
+      } finally {
+        inside--;
+      }
+    };
+  vi.spyOn(f.db, "read").mockImplementation((callback) => read(wrap(callback)));
+  vi.spyOn(f.db, "transaction").mockImplementation((callback, options) => transaction(wrap(callback), options));
+  const readJson = configReader.readConfigJson;
+  vi.spyOn(configReader, "readConfigJson").mockImplementation(async (...args) => {
+    fileReads.push(inside);
+    return readJson(...args);
+  });
+  expect(await view()).toMatchObject({ value: 24, fileError: false });
+  expect(await update(2)).toMatchObject({ value: 2, file: 24 });
+  expect((await inbox()).approvedActiveHours).toBe(2);
+  const single = await f.request(`/reviews/${f.reviewId}`, "GET");
+  expect(single.status).toBe(200);
+  expect(fileReads).toEqual([0, 0, 0, 0]);
 });

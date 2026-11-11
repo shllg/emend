@@ -118,6 +118,7 @@ const multilineTemplates = new Map([
   ["db/client.ts", "The fixed transactionWorkerSource is parsed and checked separately."],
   ["cli/http.ts", "JSON output and diagnostics end with a newline."],
   ["cli/git.ts", "The object-format probe compares a newline-terminated result."],
+  ["cli/config.ts", "Config diagnostics end with a newline."],
   ["cli/publish/assets.ts", "Skipped-asset diagnostics end with a newline."],
   ["cli/publish/collect.ts", "Nested-repository diagnostics end with a newline."],
   ["cli/publish/sides.ts", "Synthetic submodule content ends with a newline."],
