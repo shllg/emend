@@ -22,6 +22,9 @@ const lines = {
 const cases: [Target, string, unknown][] = [
   [{ kind: "writeup-span", ...span }, "Writeup · Overview", TextSelect],
   [{ kind: "writeup-span", ...span, blockId: "tldr-12345678" }, "Writeup · TL;DR", TextSelect],
+  [{ kind: "writeup-span", ...span, blockId: "outOfScope-12345678" }, "Writeup · Out of scope", TextSelect],
+  [{ kind: "writeup-span", ...span, blockId: "whereToLook-12345678" }, "Writeup · Where to look", TextSelect],
+  [{ kind: "writeup-span", ...span, blockId: "context-12345678" }, "Writeup · Context", TextSelect],
   [{ kind: "writeup-span", ...span, blockId: "decisions-12345678" }, "Writeup · Decisions", TextSelect],
   [{ kind: "writeup-span", ...span, blockId: "glossary-12345678" }, "Writeup · Glossary", TextSelect],
   [{ kind: "writeup-span", ...span, blockId: "t-seed-water-why-12345678" }, "Writeup · Water seedlings", TextSelect],
@@ -40,6 +43,19 @@ const cases: [Target, string, unknown][] = [
 ];
 test.each(cases)("labels %j as %s", (target, label, icon) => {
   expect(targetLabel(target, topics)).toEqual({ label, icon });
+});
+
+test("fixed section prefixes cannot be mistaken for topic ids", () => {
+  const overlap = [{ slug: "context", title: "A context topic", importance: 1, summary: "" }];
+  expect(targetLabel({ kind: "writeup-span", ...span, blockId: "context-12345678-2" }, overlap).label).toBe(
+    "Writeup · Context",
+  );
+  expect(targetLabel({ kind: "writeup-span", ...span, blockId: "t-context-why-12345678" }, overlap).label).toBe(
+    "Writeup · A context topic",
+  );
+  expect(targetLabel({ kind: "writeup-span", ...span, blockId: "outOfScope-12345678-2" }, overlap).label).toBe(
+    "Writeup · Out of scope",
+  );
 });
 
 test.each(["t-seed-body-12345678", "t-seed-body-12345678-2", "t-seed-why-abcdef12", "t-seed-example-12345678"])(

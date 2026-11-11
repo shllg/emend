@@ -90,6 +90,9 @@
   .em-focus-prose .em-reading-group + .em-reading-group {
     margin-top: 52px;
   }
+  .em-focus-prose .em-reading-group + .em-writeup-quiet {
+    margin-top: 16px;
+  }
   .em-focus-prose .em-topic-section {
     padding-top: 30px;
   }

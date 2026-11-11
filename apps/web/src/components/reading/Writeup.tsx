@@ -75,7 +75,12 @@ export function Writeup({
           heading: section.key === "decisions" ? "Decisions & drift" : section.label,
           blocks: section.blocks,
           presentation:
-            section.key === "tldr" || section.key === "decisions" || section.key === "glossary"
+            section.key === "tldr" ||
+            section.key === "decisions" ||
+            section.key === "glossary" ||
+            section.key === "outOfScope" ||
+            section.key === "whereToLook" ||
+            section.key === "context"
               ? section.key
               : undefined,
         });
@@ -131,7 +136,9 @@ export function Writeup({
     if (ranked.length) {
       const written = new Set(groups.flatMap((group) => (group.id ? [group.id] : [])));
       const afterIntro =
-        groups.findLastIndex((group) => ["overview", "tldr", "decisions", "glossary"].includes(group.key)) + 1;
+        groups.findLastIndex((group) =>
+          ["overview", "tldr", "outOfScope", "whereToLook", "context", "decisions", "glossary"].includes(group.key),
+        ) + 1;
       groups.splice(afterIntro, 0, {
         key: "topics-map",
         heading: "Topics",

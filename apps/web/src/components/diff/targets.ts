@@ -25,9 +25,15 @@ export function targetLabel(target: Target, topics: TopicMeta[] = []) {
       const topic = topics.find((topic) => topic.slug === slug);
       const section =
         topic?.title ??
-        Object.entries({ overview: "Overview", tldr: "TL;DR", decisions: "Decisions", glossary: "Glossary" }).find(
-          ([key]) => target.blockId.startsWith(`${key}-`),
-        )?.[1];
+        Object.entries({
+          overview: "Overview",
+          tldr: "TL;DR",
+          outOfScope: "Out of scope",
+          whereToLook: "Where to look",
+          context: "Context",
+          decisions: "Decisions",
+          glossary: "Glossary",
+        }).find(([key]) => target.blockId.startsWith(`${key}-`))?.[1];
       return { label: section ? `Writeup · ${section}` : "Writeup", icon: TextSelect };
     }
     case "doc-span":

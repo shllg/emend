@@ -87,6 +87,82 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+test.each(["standard", "focus"] as const)(
+  "%s: new writeups show the opening hierarchy before topics",
+  async (reading) => {
+    layoutStore.update({ reading });
+    const writeup = RenderedWriteup.parse(
+      await renderWriteup(
+        {
+          tldr: "Failed requests now stop after three attempts.",
+          overview: "- **Goal:** Bound retries.\n- **Change:** Three attempts.",
+          outOfScope: "- The delay between attempts.",
+          whereToLook: "- **Biggest risk:** Losing the final attempt.\n- **Check first:** The retry loop.",
+          context: "- **Scope:** The request loop in `retry.ts`.",
+          decisions: "Keep the existing delay.",
+          glossary: "- **Budget:** The number of attempts.",
+          topics: { seed: { why: "Retries must end." } },
+        },
+        [topic],
+      ),
+    );
+    const { container } = mount(<Writeup {...props} topics={[topic]} writeup={writeup} />);
+    expect(
+      [...container.querySelectorAll("[data-reading-section]")].map((group) =>
+        group.getAttribute("data-reading-section"),
+      ),
+    ).toEqual([
+      "tldr",
+      "overview",
+      "outOfScope",
+      "whereToLook",
+      "context",
+      "decisions",
+      "glossary",
+      "topics-map",
+      "t-seed-why",
+    ]);
+    expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
+      "TL;DR",
+      "Overview",
+      "Out of scope",
+      "Where to look",
+      "Context",
+      "Decisions & drift",
+      "Topics",
+      "Topic 1: Plant a seed",
+    ]);
+    for (const [key, classes] of [
+      ["tldr", ["em-writeup-card"]],
+      ["outOfScope", ["em-writeup-quiet"]],
+      ["whereToLook", ["em-writeup-callout", "em-writeup-guide"]],
+      ["context", ["em-writeup-muted"]],
+      ["decisions", ["em-writeup-callout", "em-writeup-decisions"]],
+    ] as const) {
+      const group = container.querySelector(`[data-reading-section="${key}"]`);
+      expect(group).toBeTruthy();
+      for (const name of classes) expect(group?.classList.contains(name)).toBe(true);
+      expect(group?.querySelector("h2")?.className).toBe("em-writeup-kicker");
+      expect(group?.querySelector("details, [hidden], [aria-expanded]")).toBeNull();
+      expect(group?.querySelector("[data-block-id]")).toBeTruthy();
+    }
+    expect(screen.getByRole("heading", { name: "Overview" }).classList.contains("em-writeup-kicker")).toBe(false);
+  },
+);
+
+test("the topics map follows the new intro sections even without decisions or glossary", () => {
+  const sections: RenderedWriteup["sections"] = [
+    { key: "context", label: "Context", topic: null, blocks: [] },
+    section("seed", "why"),
+  ];
+  const { container } = mount(<Writeup {...props} topics={[topic]} writeup={{ sections }} />);
+  expect(
+    [...container.querySelectorAll("[data-reading-section]")].map((group) =>
+      group.getAttribute("data-reading-section"),
+    ),
+  ).toEqual(["context", "topics-map", "t-seed-why"]);
+});
+
 test.each([
   [true, true],
   [true, false],
@@ -105,6 +181,18 @@ test.each([
     { ...section("missing", "why"), label: "Unknown topic — Why" },
   ];
   const { container } = mount(<Writeup {...props} topics={[other, topic, second]} writeup={{ sections }} />);
+  const introKeys = [...(overview ? ["overview"] : []), ...(tldr ? ["tldr"] : []), "decisions", "glossary"];
+  expect(
+    [...container.querySelectorAll("[data-reading-section]")]
+      .slice(0, introKeys.length)
+      .map((group) => group.getAttribute("data-reading-section")),
+  ).toEqual(introKeys);
+  if (overview) expect(screen.getByRole("region", { name: "Overview" }).className).toBe("em-reading-group");
+  if (tldr) expect(screen.getByRole("region", { name: "TL;DR" }).className).toBe("em-reading-group em-writeup-card");
+  expect(screen.getByRole("region", { name: "Decisions & drift" }).className).toBe(
+    "em-reading-group em-writeup-callout em-writeup-decisions",
+  );
+  expect(container.querySelector("details.em-writeup-glossary")).toBeTruthy();
   expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
     ...(overview ? ["Overview"] : []),
     ...(tldr ? ["TL;DR"] : []),
@@ -299,6 +387,9 @@ test.each(["standard", "focus"] as const)(
       {
         overview: markdown,
         tldr: "",
+        outOfScope: markdown,
+        whereToLook: markdown,
+        context: markdown,
         decisions: null,
         glossary: markdown,
         topics: { seed: { why: markdown, body: markdown } },

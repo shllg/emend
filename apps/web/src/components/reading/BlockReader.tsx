@@ -37,7 +37,7 @@ export type ReaderGroup = {
   topic?: TopicMeta;
   rank?: number;
   commentCount?: number;
-  presentation?: "tldr" | "decisions" | "glossary";
+  presentation?: "tldr" | "decisions" | "glossary" | "outOfScope" | "whereToLook" | "context";
   action?: ReactNode;
   meta?: ReactNode;
   subsections?: { key: string; heading: string; kind: "why" | "example" | "body"; blocks: RenderedBlock[] }[];

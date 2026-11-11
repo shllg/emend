@@ -324,6 +324,24 @@
   .em-writeup-decisions {
     border-left-color: var(--ochre-400);
   }
+  .em-writeup-guide {
+    border-left-color: var(--border-2);
+  }
+  .em-writeup-quiet .em-prose {
+    font-size: 15px;
+    color: var(--fg-2);
+  }
+  .em-reading-group + .em-writeup-quiet {
+    margin-top: 12px;
+  }
+  .em-writeup-muted .em-prose {
+    font-size: 14px;
+    color: var(--fg-3);
+  }
+  .em-writeup-muted .em-prose :is(strong, code, h1, h2, h3, h4, h5, h6),
+  .em-writeup-muted .em-prose li::marker {
+    color: var(--fg-3);
+  }
   .em-writeup-why,
   .em-writeup-example,
   .em-writeup-details {

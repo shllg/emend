@@ -15,6 +15,15 @@ import { TopicRank } from "../status/TopicRank.tsx";
 import type { ReaderGroup } from "./BlockReader.tsx";
 import { TopicChips } from "./TopicChips.tsx";
 
+const presentationClasses = {
+  tldr: " em-writeup-card",
+  decisions: " em-writeup-callout em-writeup-decisions",
+  glossary: "",
+  outOfScope: " em-writeup-quiet",
+  whereToLook: " em-writeup-callout em-writeup-guide",
+  context: " em-writeup-muted",
+} satisfies Record<NonNullable<ReaderGroup["presentation"]>, string>;
+
 export const ReadingFoldContext = createContext<{
   reviewId: string;
   revision: number;
@@ -94,7 +103,7 @@ export function ReadingGroup({
         className={
           group.topic
             ? "em-topic-title"
-            : group.presentation === "tldr" || group.presentation === "decisions"
+            : group.presentation && group.presentation !== "glossary"
               ? "em-writeup-kicker"
               : "min-w-0 flex-1 wrap-anywhere text-fg-reading-strong [font:var(--type-h2)]"
         }
@@ -118,7 +127,7 @@ export function ReadingGroup({
       id={group.id}
       data-reading-section={group.key}
       aria-labelledby={group.labelledBy ?? headingId}
-      className={`em-reading-group${group.topic ? " em-topic-section" : ""}${group.presentation === "tldr" ? " em-writeup-card" : group.presentation === "decisions" ? " em-writeup-callout em-writeup-decisions" : ""}`}
+      className={`em-reading-group${group.topic ? " em-topic-section" : ""}${group.presentation ? presentationClasses[group.presentation] : ""}`}
     >
       {group.presentation === "glossary" ? (
         <details
