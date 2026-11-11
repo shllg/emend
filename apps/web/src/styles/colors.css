@@ -139,6 +139,8 @@
   --state-approved-bg: var(--green-50);
   --state-settled-fg: var(--fg-3);
   --state-settled-bg: var(--n-50);
+  --state-snoozed-fg: var(--info-fg);
+  --state-snoozed-bg: var(--info-bg);
   /* agent status */
   --agent-waiting: var(--blue-500);
   --agent-working: var(--ochre-500);

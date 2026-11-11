@@ -30,10 +30,9 @@ function resolveToken(name: string, tokens: Tokens, seen = new Set<string>()): s
   return alias ? resolveToken(alias, tokens, seen) : value;
 }
 
-function luminance(name: string, tokens: Tokens): number {
-  const value = resolveToken(name, tokens);
-  const match = /^oklch\(([\d.]+)\s+([\d.]+)\s+([\d.]+)\)$/.exec(value);
-  if (!match) throw new Error(`Expected an opaque OKLCH colour: ${value}`);
+function linearSrgb(value: string) {
+  const match = /^oklch\(([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\)$/.exec(value);
+  if (!match) throw new Error(`Expected an OKLCH colour: ${value}`);
   const lightness = Number(match[1]);
   const chroma = Number(match[2]);
   const hue = (Number(match[3]) * Math.PI) / 180;
@@ -47,7 +46,34 @@ function luminance(name: string, tokens: Tokens): number {
   const red = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
   const green = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
   const blue = -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s;
+  return { red, green, blue, alpha: Number(match[4] ?? 1) };
+}
+
+function luminance(name: string, tokens: Tokens): number {
+  const value = resolveToken(name, tokens);
+  const { red, green, blue, alpha } = linearSrgb(value);
+  if (alpha !== 1) throw new Error(`Expected an opaque OKLCH colour: ${value}`);
   return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
+
+// Composite clamped gamma sRGB channels over an opaque backdrop, then linearize for WCAG luminance.
+function compositedLuminance(name: string, backdrop: string, tokens: Tokens): number {
+  const { red, green, blue, alpha } = linearSrgb(resolveToken(name, tokens));
+  const background = linearSrgb(resolveToken(backdrop, tokens));
+  if (background.alpha !== 1) throw new Error(`Expected an opaque backdrop: ${backdrop}`);
+  const encode = (channel: number) => {
+    const clamped = Math.max(0, Math.min(1, channel));
+    return clamped <= 0.0031308 ? 12.92 * clamped : 1.055 * clamped ** (1 / 2.4) - 0.055;
+  };
+  const blend = (foreground: number, background: number) => {
+    const channel = alpha * encode(foreground) + (1 - alpha) * encode(background);
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  };
+  return (
+    0.2126 * blend(red, background.red) +
+    0.7152 * blend(green, background.green) +
+    0.0722 * blend(blue, background.blue)
+  );
 }
 
 function contrast(first: number, second: number): number {
@@ -73,6 +99,15 @@ test("both dark blocks declare the same reading colours", () => {
     "--fg-reading-strong": "var(--n-200)",
   });
   expect(readingTokens(explicitDark)).toEqual(readingTokens(systemDark));
+});
+
+test.each([
+  { name: "light", tokens: light },
+  { name: "system dark", tokens: systemDark },
+  { name: "explicit dark", tokens: explicitDark },
+])("$name snoozed pill text keeps at least 4.5:1 contrast over the header surface", ({ tokens }) => {
+  const background = compositedLuminance("--state-snoozed-bg", "--bg-surface", tokens);
+  expect(contrast(luminance("--state-snoozed-fg", tokens), background)).toBeGreaterThanOrEqual(4.5);
 });
 
 test.each([

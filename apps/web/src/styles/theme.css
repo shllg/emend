@@ -67,6 +67,8 @@
   --color-state-approved-bg: var(--state-approved-bg);
   --color-state-settled-fg: var(--state-settled-fg);
   --color-state-settled-bg: var(--state-settled-bg);
+  --color-state-snoozed-fg: var(--state-snoozed-fg);
+  --color-state-snoozed-bg: var(--state-snoozed-bg);
   --color-agent-waiting: var(--agent-waiting);
   --color-agent-working: var(--agent-working);
   --color-agent-none: var(--agent-none);

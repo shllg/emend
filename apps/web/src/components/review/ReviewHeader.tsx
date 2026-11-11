@@ -1,6 +1,5 @@
 import type { PublishLink, ReviewView, RevisionView } from "@emend/contract";
 import {
-  BellOff,
   CircleDot,
   ExternalLink,
   FileText,
@@ -11,10 +10,9 @@ import {
 } from "lucide-react";
 import { type Ref, useEffect, useState } from "react";
 import { plural } from "../../lib/count.ts";
-import { wakeHasPassed, wakeTime } from "../../lib/time.ts";
 import { AgentStatus, agentStatusOf } from "../status/AgentStatus.tsx";
 import { OriginBadge } from "../status/OriginBadge.tsx";
-import { StateBadge } from "../status/StateBadge.tsx";
+import { SnoozeBadge, StateBadge } from "../status/StateBadge.tsx";
 import { Banner } from "../ui/Banner.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -124,14 +122,7 @@ export function ReviewHeader({
             <span aria-hidden="true" className="text-line-strong">
               ·
             </span>
-            <span className="inline-flex items-center gap-1 whitespace-nowrap font-medium">
-              <Icon icon={BellOff} size={12} />
-              {!review.snoozedUntil
-                ? "Snoozed until it changes"
-                : wakeHasPassed(review.snoozedUntil, Date.now())
-                  ? "Waking up"
-                  : `Snoozed until ${wakeTime(review.snoozedUntil, Date.now())}`}
-            </span>
+            <SnoozeBadge until={review.snoozedUntil} now={Date.now()} />
           </>
         )}
         {agent && agent !== "approved" && (

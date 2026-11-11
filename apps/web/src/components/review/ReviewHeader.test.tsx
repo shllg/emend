@@ -2,7 +2,7 @@ import type { ReviewView, RevisionView } from "@emend/contract";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, expect, test, vi } from "vitest";
-import { relativeTime } from "../../lib/time.ts";
+import { relativeTime, wakeTime } from "../../lib/time.ts";
 import { ReviewHeader } from "./ReviewHeader.tsx";
 
 const review: ReviewView = {
@@ -197,6 +197,41 @@ test.each([
 test.each([false, true])("working tree commits are only shown off the phone (phone %s)", (phone) => {
   mount({ loaded: { ...revision, head: "worktree" }, phone });
   expect(screen.queryByText("abcdef1 → working tree") !== null).toBe(!phone);
+});
+
+test.each([false, true])("a timed snooze is a pill in the wrapping meta line (phone %s)", (phone) => {
+  const until = new Date(Date.now() + 2 * 3600_000).toISOString();
+  mount({ metadata: { ...review, snoozed: true, snoozedUntil: until }, phone });
+  const label = `Snoozed until ${wakeTime(until, Date.now())}`;
+  const pill = screen.getByText(label);
+  expect(pill.textContent).toBe(label);
+  for (const name of ["rounded-full", "bg-state-snoozed-bg", "text-state-snoozed-fg", "whitespace-nowrap", "shrink-0"])
+    expect(pill.classList.contains(name)).toBe(true);
+  expect(pill.querySelector("svg.lucide-bell-off")).not.toBeNull();
+  expect(pill.previousElementSibling?.textContent).toBe("·");
+  expect(pill.previousElementSibling?.getAttribute("aria-hidden")).toBe("true");
+  expect(pill.nextElementSibling?.nextElementSibling?.textContent).toBe("Agent waiting");
+  expect(pill.parentElement).toBe(screen.getByText("Workshop").parentElement);
+  expect(pill.parentElement?.classList.contains("flex-wrap")).toBe(true);
+});
+
+test.each([
+  { offset: null, label: "Snoozed until it changes" },
+  { offset: -60_000, label: "Waking up" },
+])("a snooze pill shows $label", ({ offset, label }) => {
+  const snoozedUntil = offset === null ? null : new Date(Date.now() + offset).toISOString();
+  mount({ metadata: { ...review, snoozed: true, snoozedUntil } });
+  const pill = screen.getByText(label);
+  expect(pill.textContent).toBe(label);
+  for (const name of ["rounded-full", "bg-state-snoozed-bg", "text-state-snoozed-fg", "whitespace-nowrap", "shrink-0"])
+    expect(pill.classList.contains(name)).toBe(true);
+  expect(pill.querySelector("svg.lucide-bell-off")).not.toBeNull();
+});
+
+test("an unsnoozed review has no snooze icon or text", () => {
+  const { container } = mount();
+  expect(container.querySelector(".lucide-bell-off")).toBeNull();
+  expect(screen.queryByText(/Snoozed|Waking up/)).toBeNull();
 });
 
 test("phone omits commit hashes", () => {
