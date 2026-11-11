@@ -5023,13 +5023,8 @@ test("round 22.3 CX2: malformed terms remain visible", () => {
 });
 
 test("round 22.3 OP3: byte-view and normalization budgets ignore term-list presence", () => {
-  const expanding = Buffer.concat([Buffer.from("\ufdfa".repeat(128), "utf16le").swap16(), Buffer.from("%41\0")]);
-  for (const terms of [empty, round23Terms]) {
-    const skipped = new ScanBudget(4096);
-    assert.deepEqual(checkBuffer(Buffer.alloc(1024), "fixture.bin", terms, true, true, 0, skipped), ["fixture.bin: binary file of unknown type"]);
-    assert.equal(skipped.remaining, 4096);
-    assert.throws(() => checkBuffer(expanding, "fixture.bin", terms, true, true, 0, new ScanBudget(32 * expanding.length)), /budget/);
-  }
+  for (const terms of [empty, round23Terms])
+    assert.throws(() => checkBuffer(Buffer.alloc(1024), "fixture.bin", terms, true, true, 0, new ScanBudget(4096)), /budget/);
   const bytes = Buffer.from("plain public fixture text line\n".repeat(Math.ceil(3600 * 1024 / 31))).subarray(0, 3600 * 1024);
   const half = Math.floor(bytes.length / 2);
   const text = `x = "${round19Prefix}\n${round23B64(bytes.subarray(0, half - 1))}\n${round23B64(bytes.subarray(half))}";`;
@@ -5712,4 +5707,50 @@ test("issue 35 check 2: WOFF2 long-range repetition keeps strict views", () => {
   const bytes = assetCompressedFont("woff2", [["glyf", glyf]]);
   assert.ok(bytes.length * 4 < glyf.length, "the font must carry long-range redundancy");
   assertBudgetedFontRefused(bytes, "fixture.woff2", new ScanBudget(32 * glyf.length - 1));
+});
+
+for (const encoding of ["UTF-16LE", "UTF-16BE"] as const)
+  test(`issue 35 final: large inline JPEG retains ${encoding} APP1 private terms`, () => {
+    const value = Buffer.from(assetTerm, "utf16le");
+    if (encoding === "UTF-16BE") value.swap16();
+    const app1 = Buffer.from([255, 225, 0, 0]);
+    app1.writeUInt16BE(value.length + 2, 2);
+    const filler = Buffer.concat([Buffer.from([255, 226, 255, 255]), Buffer.alloc(65533)]);
+    const jpeg = Buffer.concat([
+      Buffer.from([255, 216]), app1, value, ...Array<Buffer>(26).fill(filler), Buffer.from([255, 217]),
+    ]);
+    assert.ok(jpeg.length >= 1.6 * 1024 * 1024);
+    assert.ok(32 * jpeg.length > new ScanBudget().remaining);
+    const html = Buffer.from(`<html><body><img src="data:image/jpeg;base64,${jpeg.toString("base64")}"></body></html>`);
+    assertAssetRefused(html, "fixture.html");
+  });
+
+function assetCff(value: string): Buffer {
+  const name = Buffer.from("PublicFixtureFont"), filler = Buffer.alloc(80 * 1024), string = Buffer.from(value);
+  const strings = Buffer.alloc(15);
+  strings.writeUInt16BE(2); strings[2] = 4;
+  strings.writeUInt32BE(1, 3); strings.writeUInt32BE(filler.length + 1, 7);
+  strings.writeUInt32BE(filler.length + string.length + 1, 11);
+  return Buffer.concat([
+    Buffer.from([1, 0, 4, 4]), Buffer.from([0, 1, 1, 1, name.length + 1]), name,
+    Buffer.from([0, 1, 1, 1, 4, 248, 28, 2]), strings, filler, string, seededAssetBytes(2 * 1024 * 1024),
+  ]);
+}
+
+test("issue 35 final: large OTF retains CFF strings beyond 80 KiB", () => {
+  const bytes = assetSfnt([["CFF ", assetCff(assetTerm)], ["name", fontNameTable("Public Fixture Font", 3)]], Buffer.alloc(0), true);
+  assertAssetRefused(bytes, "fixture.otf");
+});
+
+for (const terms of [empty, assetTerms])
+  test(`issue 35 final: large OTF public CFF strings pass ${terms === empty ? "without" : "with"} terms`, () => {
+    const bytes = assetSfnt([["CFF ", assetCff("Public Fixture Font")], ["name", fontNameTable("Public Fixture Font", 3)]], Buffer.alloc(0), true);
+    assert.deepEqual(checkBuffer(bytes, "fixture.otf", terms, false, true), []);
+  });
+
+test("issue 35 final: invalid CFF header retains private terms at 100 KiB", () => {
+  const cff = assetCff("Public Fixture Font");
+  cff[0] = 2; cff.write(`\0${assetTerm}\0`, 100 * 1024);
+  const bytes = assetSfnt([["CFF ", cff], ["name", fontNameTable("Public Fixture Font", 3)]], Buffer.alloc(0), true);
+  assertBudgetedFontRefused(bytes, "fixture.otf", new ScanBudget(5 * bytes.length));
 });

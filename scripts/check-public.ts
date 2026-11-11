@@ -1312,8 +1312,27 @@ const FONT_BULK_TAGS = new Set([
   "CBDT", "CBLC", "EBDT", "EBLC", "sbix", "COLR", "cvt ", "fpgm", "prep", "HVAR", "VVAR",
 ]);
 
-function fontStrictPrefix(tag: string, length: number): number {
-  return !FONT_BULK_TAGS.has(tag) ? length : tag === "CFF " ? Math.min(length, 64 * 1024) : 0;
+function fontStrictPrefix(tag: string, table: Buffer): number {
+  if (!FONT_BULK_TAGS.has(tag)) return table.length;
+  if (tag !== "CFF ") return 0;
+  // The header and the Name, Top DICT and String INDEXes hold the font's names; charstrings follow.
+  try {
+    let at = table[2] ?? 0;
+    if (table[0] !== 1 || at < 4) throw new Error();
+    for (let index = 0; index < 3; index++) {
+      const count = table.readUInt16BE(at);
+      if (!count) { at += 2; continue; }
+      const offSize = table[at + 2] ?? 0;
+      if (offSize < 1 || offSize > 4) throw new Error();
+      const last = table.readUIntBE(at + 3 + count * offSize, offSize);
+      if (last < 1) throw new Error();
+      at += 3 + (count + 1) * offSize + last - 1;
+      if (at > table.length) throw new Error();
+    }
+    return Math.max(at, Math.min(table.length, 64 * 1024));
+  } catch {
+    return table.length;
+  }
 }
 
 class BudgetExceeded extends PublicCheckError {
@@ -1529,14 +1548,9 @@ function checkFont(buffer: Buffer, file: string, terms: PrivateTerms, depth: num
   return hits;
 }
 
-/** Whole views are optional when a caller permits skipping them within the budget. */
-function assetTermViews(buffer: Buffer, file: string, terms: PrivateTerms, budget: ScanBudget, fontData = false): string[] {
-  return buffer.length * RAW_VIEW_COST > budget.remaining ? [] : rawTermViews(buffer, file, terms, budget, fontData);
-}
-
-/** Only PNG/SFNT bulk is exempt; compressed fonts and malformed structures retain every byte. */
-function assetBulkRanges(buffer: Buffer, kind: string, budget: ScanBudget): ByteRange[] | undefined {
-  if (![".png", ".ttf", ".otf", ".woff", ".woff2"].includes(kind)) return undefined;
+/** Only PNG/SFNT bulk is exempt; every other kind and malformed structure retains every byte. */
+function assetBulkRanges(buffer: Buffer, kind: string, budget: ScanBudget): ByteRange[] {
+  if (![".png", ".ttf", ".otf"].includes(kind)) return [];
   const ranges: ByteRange[] = [];
   try {
     if (kind === ".png") {
@@ -1567,12 +1581,9 @@ function assetBulkRanges(buffer: Buffer, kind: string, budget: ScanBudget): Byte
       for (const { tag, offset, length } of tables.sort((a, b) => a.offset - b.offset)) {
         if (offset < previous) throw new Error();
         previous = offset + length;
-        const prefix = fontStrictPrefix(tag, length);
+        const prefix = fontStrictPrefix(tag, buffer.subarray(offset, offset + length));
         if (prefix < length) ranges.push([offset + prefix, offset + length]);
       }
-    } else {
-      // Compressed fonts have no bulk model, so every byte keeps strict views.
-      return [];
     }
     return ranges.sort((a, b) => a[0] - b[0]);
   } catch (error) {
@@ -2475,9 +2486,8 @@ export function checkBuffer(
     const fontData = binary && [".woff", ".woff2", ".ttf", ".otf"].includes(extension);
     const skipped = buffer.length * RAW_VIEW_COST > budget.remaining;
     const kind = buffer.subarray(0, PNG_MAGIC.length).equals(PNG_MAGIC) ? ".png" : binary ? extension : "";
-    const ranges = skipped ? assetBulkRanges(buffer, kind, budget) : undefined;
-    hits.push(...(ranges === undefined ? assetTermViews(buffer, file, terms, budget, fontData) :
-      rawTermViews(outsideBulk(buffer, ranges, budget), file, terms, budget, fontData)));
+    const ranges = skipped ? assetBulkRanges(buffer, kind, budget) : [];
+    hits.push(...rawTermViews(outsideBulk(buffer, ranges, budget), file, terms, budget, fontData));
     if (binary) {
       if (buffer.length > ASSET_BYTES) hits.push(safeLocation(file, terms) + ": asset exceeds size limit");
       hits.push(...binarySecrets(buffer, file, terms, budget));
