@@ -22,7 +22,8 @@ export function ReviewEventsProvider({ children, enabled = true }: { children: R
           event.revision > (previous.get(reviewId) ?? 0) ? new Map(previous).set(reviewId, event.revision) : previous,
         );
       const keys = event.type === "viewed" ? [] : [["inbox"], ["review", reviewId]];
-      if (["thread", "send", "claimed", "confirmed", "viewed"].includes(event.type)) keys.push(["revision", reviewId]);
+      if (["thread", "send", "claimed", "confirmed", "viewed", "retire"].includes(event.type))
+        keys.push(["revision", reviewId]);
       refreshQueries(client, keys);
     };
     const stop = subscribeReviewEvents(receive, () => {

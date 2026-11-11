@@ -101,6 +101,7 @@ export function useLifecycleMutation(reviewId: string) {
       }
       await change(`${path}/${input.action}`, "POST", "body" in input ? input.body : undefined);
       // The caller closes its dialog when the server answers; the refetch lands after.
+      if (input.action === "retire") void client.invalidateQueries({ queryKey: ["revision", reviewId] });
       void client.invalidateQueries({ queryKey: ["review", reviewId] });
       void client.invalidateQueries({ queryKey: ["inbox"] });
     },

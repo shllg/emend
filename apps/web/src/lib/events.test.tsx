@@ -49,19 +49,19 @@ function source() {
   return current;
 }
 
-test("all valid events refresh inbox and their review; comment and delivery changes refresh revisions", async () => {
+test("all valid events refresh inbox and their review; comment, delivery and retirement changes refresh revisions", async () => {
   const { invalidate, unmount } = await mount();
   expect(Events.opened).toHaveLength(1);
   expect(source().url).toBe("/api/v1/events");
   for (const reviewId of [id, other]) {
-    for (const type of ["publish", "waiting", "thread", "send", "claimed", "confirmed"]) {
+    for (const type of ["publish", "waiting", "thread", "send", "claimed", "confirmed", "retire"]) {
       invalidate.mockClear();
       act(() => source().emit(type, { reviewId, revision: 1, threadId: id, sendId: id, deliveryId: id }));
       await tick();
       expect(invalidate.mock.calls.map(([options]) => options?.queryKey)).toEqual([
         ["inbox"],
         ["review", reviewId],
-        ...(["thread", "send", "claimed", "confirmed"].includes(type) ? [["revision", reviewId]] : []),
+        ...(["thread", "send", "claimed", "confirmed", "retire"].includes(type) ? [["revision", reviewId]] : []),
       ]);
     }
   }

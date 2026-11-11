@@ -1,4 +1,4 @@
-import { APPROVED_ACTIVE_HOURS, type InboxItem, type ReviewView } from "@emend/contract";
+import { APPROVED_ACTIVE_HOURS, type InboxItem, type ReviewView, type ThreadView } from "@emend/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -532,6 +532,50 @@ test("an empty inbox keeps its empty state", async () => {
   mount();
   await screen.findByText("No reviews yet.");
   expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
+});
+
+test("retiring with discard refetches the revision and updates the Comments tab counts", async () => {
+  review = { ...item, unsentCount: 1, openThreads: 1 };
+  inbox = [review];
+  const threads: ThreadView[] = [false, true].map((sent, index) => ({
+    id: other(index),
+    createdOn: 1,
+    state: sent ? "resolved" : "open",
+    target: { kind: "review" },
+    placement: { status: "placed", location: { kind: "review" } },
+    comments: [{ id: other(index + 2), author: "user", body: "A comment", sent, sentOn: sent ? 1 : null }],
+  }));
+  let retired = false;
+  let revisionGets = 0;
+  const original = fetchMock.getMockImplementation();
+  fetchMock.mockImplementation(async (path, init) => {
+    if (path === `/api/v1/reviews/${id}/retire` && init?.method === "POST") {
+      retired = true;
+      review = { ...review, state: "settled", list: "done", unsentCount: 0, openThreads: 0 };
+      inbox = [review];
+      return new Response(null, { status: 204 });
+    }
+    if (path === `/api/v1/reviews/${id}/revisions/1`) {
+      revisionGets += 1;
+      return Response.json({ ...revision, threads: retired ? threads.filter((t) => t.state === "resolved") : threads });
+    }
+    if (!original) throw new Error("Missing synthetic fetch");
+    return original(path, init);
+  });
+  mount(`/r/${id}?tab=comments`);
+  const before = await screen.findByRole("tab", { name: "Comments 1 unsent, 1 not resolved, 2 threads in all" });
+  expect(within(before).getByText("1 / 1 / 2")).toBeTruthy();
+  expect(revisionGets).toBe(1);
+  fireEvent.keyDown(screen.getByRole("button", { name: "More review actions" }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Retire" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Discard 1 unsent comment and retire" }));
+  const after = await screen.findByRole("tab", { name: "Comments 0 unsent, 0 not resolved, 1 thread in all" });
+  expect(within(after).getByText("0 / 0 / 1")).toBeTruthy();
+  expect(revisionGets).toBe(2);
+  expect(fetchMock).toHaveBeenCalledWith(
+    `/api/v1/reviews/${id}/retire`,
+    expect.objectContaining({ method: "POST", body: JSON.stringify({ discardUnsent: true }) }),
+  );
 });
 
 test("a retired review reads Retired, disables Send and Approve and offers Reopen", async () => {
