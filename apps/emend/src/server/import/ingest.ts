@@ -136,8 +136,10 @@ export async function importReview(principal: Principal, bundle: ImportBundle, d
         const again = await preflight(ownerId, q, principal, bundle, deps.now());
         if (again) return skipOutcome(again);
         await checkIds(ownerId, q, bundle, signal);
+        const project =
+          bundle.review.project ?? (bundle.review.repo?.name === ".git" ? null : (bundle.review.repo?.name ?? null));
         let repoId: string | null = null;
-        if (bundle.review.repo) {
+        if (project !== null && bundle.review.repo) {
           await q
             .insert(t.repos)
             .values({ ownerId, ...bundle.review.repo })
@@ -161,8 +163,7 @@ export async function importReview(principal: Principal, bundle: ImportBundle, d
           ...bundle.review,
           ownerId,
           repoId,
-          project:
-            bundle.review.project ?? (bundle.review.repo?.name === ".git" ? null : (bundle.review.repo?.name ?? null)),
+          project,
           approvedRevision: null,
           approvedAt: null,
           movedToUrl: null,

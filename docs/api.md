@@ -212,9 +212,8 @@ kind: "review" | "publish" }`. `repo` is the repository key, and
 `approved` once `APPROVED_ACTIVE_HOURS` (12) hours have passed since approval or it does not fit
 Active's cap; an approved review is `active` until then if it has a place. An open review is
 `snoozed` while its snooze is in effect, `active` otherwise.
-`project` is the name the review's newest publish sent with its `repo`; for a review neither published
-since this field was added nor copied from another machine, it falls back to its repository row's name
-unless that is `.git`; it is null when none. Copied reviews show only their stored project.
+`project` is the name the review's newest publish sent with its `repo`; for any review not published
+since this field was added, it falls back to its repository row's name unless that is `.git`; it is null when none.
 `activeUntil` is when an approved review in Active moves to Done; it is null otherwise. The server
 sends no event when an approval's window ends. A client estimates the server's clock from
 `serverTime` and the time elapsed since the response, refetches when `activeUntil` passes on that
@@ -668,7 +667,7 @@ Unknown keys, including owner ids, moved-to URLs, content keys, media types, `pl
 
 `review.project` is optional and nullable, otherwise 1 through `titleChars` (200) characters.
 The hub keeps it when non-null; null or absent values fall back to `review.repo.name`, except `.git`, or null.
-This value is stored on the copied review; its project never falls back to a hub repository row's name.
+This value is stored on the copied review; a copy whose stored project is null links no repository row.
 
 All ids are unique across the bundle and all references stay within it. The hub computes each
 thread’s creation placement from its target, refusing an unplaceable original target with

@@ -123,10 +123,10 @@ export async function resolvePublish(
       }
       const name = remote
         ? basename(identity)
-        : basename(identity) === ".git"
-          ? basename(dirname(identity))
-          : gitDirs.length === 1
-            ? basename(root)
+        : gitDirs.length === 1
+          ? basename(root)
+          : basename(identity) === ".git"
+            ? basename(dirname(identity))
             : basename(identity).replace(/\.git$/, "");
       repo = { key: sha256(identity), name: shortenRepoName(name || basename(root)) };
     }

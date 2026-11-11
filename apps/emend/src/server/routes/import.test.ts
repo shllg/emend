@@ -44,7 +44,10 @@ test.each([
   { project: "Orchard", name: "Legacy", expected: "Orchard", existingRepo: true },
   { project: undefined, name: "Legacy", expected: "Legacy", existingRepo: true },
   { project: undefined, name: ".git", expected: null, existingRepo: true },
+  { project: undefined, name: ".git", expected: null, existingRepo: false },
   { project: ".git", name: "Legacy", expected: ".git", existingRepo: true },
+  { project: ".git", name: ".git", expected: ".git", existingRepo: false },
+  { project: "Orchard", name: null, expected: "Orchard", existingRepo: false },
   { project: null, name: "Orchard", expected: "Orchard", existingRepo: true },
   { project: null, name: "Orchard", expected: "Orchard", existingRepo: false },
   { project: null, name: ".git", expected: null, existingRepo: true },
@@ -74,17 +77,49 @@ test.each([
         .get(),
     );
     expect(review?.project).toBe(expected);
+    const expectedView = { project: expected, repo: expected === null ? null : (input.review.repo?.key ?? null) };
     const response = await f.request(`/reviews/${input.review.id}`, "GET");
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ project: expected });
+    expect(await response.json()).toMatchObject(expectedView);
     const inboxResponse = await f.request("/reviews", "GET");
     expect(inboxResponse.status).toBe(200);
     const inbox = InboxList.parse(await inboxResponse.json());
-    expect(inbox.items.find((item) => item.id === input.review.id)).toMatchObject({ project: expected });
+    expect(inbox.items.find((item) => item.id === input.review.id)).toMatchObject(expectedView);
     const repo = await f.db.read((q) => q.select().from(tables.repos).where(eq(tables.repos.ownerId, f.ownerId)).get());
-    expect(repo?.name).toBe(name === null ? undefined : existingRepo ? "Hub original" : name);
+    expect(repo?.name).toBe(
+      name === null ? undefined : existingRepo ? "Hub original" : expected === null ? undefined : name,
+    );
+    expect(review?.repoId).toBe(expected === null || name === null ? null : repo?.id);
   },
 );
+test("a review copied before projects were stored falls back to its repository name", async () => {
+  const repoId = randomUUID();
+  const reviewId = randomUUID();
+  const key = "b".repeat(64);
+  const importedAt = f.deps.now() - 1000;
+  await f.db.query(async (q) => {
+    await q.insert(tables.repos).values({ id: repoId, ownerId: f.ownerId, key, name: "Orchard" });
+    await q.insert(tables.reviews).values({
+      id: reviewId,
+      ownerId: f.ownerId,
+      originInstanceId: f.origin,
+      reviewKey: "c".repeat(64),
+      repoId,
+      project: null,
+      importedAt,
+      title: "Legacy copied review",
+    });
+    await q.insert(tables.revisions).values({ ownerId: f.ownerId, reviewId, seq: 1, contentKey: randomUUID() });
+  });
+  const expected = { project: "Orchard", repo: key };
+  const response = await f.request(`/reviews/${reviewId}`, "GET");
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ ...expected, importedAt: new Date(importedAt).toISOString() });
+  const inboxResponse = await f.request("/reviews", "GET");
+  expect(inboxResponse.status).toBe(200);
+  const inbox = InboxList.parse(await inboxResponse.json());
+  expect(inbox.items.find((item) => item.id === reviewId)).toMatchObject(expected);
+});
 test("copies ids and history atomically, releases unconfirmed Sends, rotates content keys and skips retries", async () => {
   const input = await bundle(f);
   const response = await f.importRequest("/import", input);

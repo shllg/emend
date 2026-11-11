@@ -15,7 +15,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { LIMITS, type PublishManifest } from "@emend/contract";
 import { expect, test, vi } from "vitest";
@@ -89,6 +89,7 @@ test("a pub falls back to the folder for an invalid remote while a code review s
 test.each([
   { kind: "separate", folder: "metadata" },
   { kind: "separate", folder: "metadata.git" },
+  { kind: "separate", folder: "metadata/.git" },
   { kind: "bare", folder: "orchard" },
   { kind: "bare", folder: "orchard.git" },
 ])(
@@ -102,7 +103,10 @@ test.each([
         await f.run("clone", "--bare", f.root, common);
         await f.run("--git-dir", common, "config", "--unset", "remote.origin.url");
         await f.run("--git-dir", common, "worktree", "add", "-b", "linked", root);
-      } else await f.run("init", "--separate-git-dir", common);
+      } else {
+        await mkdir(dirname(common), { recursive: true });
+        await f.run("init", "--separate-git-dir", common);
+      }
       await writeFile(join(root, "plan.md"), "# Synthetic plan");
       for (const base of [undefined, f.base]) {
         const result = await resolvePublish(
