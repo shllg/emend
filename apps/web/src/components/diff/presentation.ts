@@ -59,7 +59,7 @@ function diffTargetOffset(target: HTMLElement, pane: HTMLElement): number {
   return pane.scrollTop + measured.getBoundingClientRect().top - pane.getBoundingClientRect().top;
 }
 
-function diffTargetTop(target: HTMLElement, pane: HTMLElement, offset = diffTargetOffset(target, pane)): number {
+function diffStickyStack(target: HTMLElement, pane: HTMLElement): number {
   const toolbar = pane.querySelector("[data-diff-toolbar]");
   const section = target.closest("[data-topic]");
   // The phone topic header scrolls away with its section, so it takes no room in the stack.
@@ -68,9 +68,21 @@ function diffTargetTop(target: HTMLElement, pane: HTMLElement, offset = diffTarg
   // A header, its contents, and its section are destinations unobstructed by that header.
   const height = (header: Element | null | undefined) =>
     header && !target.contains(header) && !header.contains(target) ? header.getBoundingClientRect().height : 0;
-  const stack = (toolbar?.getBoundingClientRect().height ?? 0) + height(topic) + height(file);
-  const destination = offset - pane.clientTop - stack - 8;
+  return (toolbar?.getBoundingClientRect().height ?? 0) + height(topic) + height(file);
+}
+
+function diffTargetTop(target: HTMLElement, pane: HTMLElement, offset = diffTargetOffset(target, pane)): number {
+  const destination = offset - pane.clientTop - diffStickyStack(target, pane) - 8;
   return Math.max(0, Math.min(destination, Math.max(0, pane.scrollHeight - pane.clientHeight)));
+}
+
+export function diffFoldSpot(header: HTMLElement): number | undefined {
+  const pane = header.closest<HTMLElement>("[data-diff-scroll]");
+  if (!pane) return;
+  return Math.max(
+    header.getBoundingClientRect().top - pane.getBoundingClientRect().top,
+    pane.clientTop + diffStickyStack(header, pane),
+  );
 }
 
 export function scrollDiffTarget(target: HTMLElement) {
@@ -82,7 +94,7 @@ export const diffHoldQuietMs = 2000;
 export const diffHoldMaxMs = 10000;
 const diffHolds = new WeakMap<HTMLElement, () => void>();
 
-export function holdDiffTarget(target: HTMLElement): () => void {
+export function holdDiffTarget(target: HTMLElement, at?: number): () => void {
   const pane = target.closest<HTMLElement>("[data-diff-scroll]");
   if (!pane) return () => {};
   diffHolds.get(pane)?.();
@@ -104,7 +116,11 @@ export function holdDiffTarget(target: HTMLElement): () => void {
   const stopInput = onReaderInput(pane, cancel);
   window.addEventListener("keydown", onTab);
   diffHolds.set(pane, cancel);
-  scrollDiffTarget(target);
+  const destination = (offset = diffTargetOffset(target, pane)) =>
+    at === undefined
+      ? diffTargetTop(target, pane, offset)
+      : Math.max(0, Math.min(offset - at, Math.max(0, pane.scrollHeight - pane.clientHeight)));
+  pane.scrollTo({ top: destination(), behavior: "instant" });
   let lastScrollTop = pane.scrollTop;
   let lastOffset = diffTargetOffset(target, pane);
   const tick = () => {
@@ -120,7 +136,7 @@ export function holdDiffTarget(target: HTMLElement): () => void {
       cancel();
       return;
     }
-    const top = diffTargetTop(target, pane, offset);
+    const top = destination(offset);
     const moved = Math.abs(pane.scrollTop - top) >= 1;
     if (moved || shifted || height !== pane.scrollHeight || pane.querySelector("[data-diff-loading]")) lastMoved = now;
     height = pane.scrollHeight;

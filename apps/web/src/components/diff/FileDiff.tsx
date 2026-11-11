@@ -36,7 +36,14 @@ import { GutterComment } from "./GutterComment.tsx";
 import { LineComposer } from "./LineComposer.tsx";
 import { linesTarget } from "./linesTarget.ts";
 import { type DiffParser, parseOffThread } from "./parse-client.ts";
-import { type DiffCounts, type DiffStyle, diffCounts } from "./presentation.ts";
+import {
+  type DiffCounts,
+  type DiffStyle,
+  diffCounts,
+  diffFoldSpot,
+  diffHoldQuietMs,
+  holdDiffTarget,
+} from "./presentation.ts";
 import { diffShadowCSS } from "./shadow.ts";
 import type { FileLocation } from "./targets.ts";
 import { diffTheme } from "./theme.ts";
@@ -259,6 +266,7 @@ export function FileDiff({
 }: DiffContext & { file: FileView; topicCollapsed: boolean }) {
   const ref = useRef<HTMLElement>(null);
   const header = useRef<HTMLElement>(null);
+  const foldSpot = useRef<{ at: number; time: number }>(undefined);
   // Lines and threads below this sticky header scroll to the bottom of the stack, not under it.
   useStickyHeight(header, ref, "--em-file-height");
   const [near, setNear] = useState(false);
@@ -321,6 +329,13 @@ export function FileDiff({
   const mounted = near || !!selected || context.revealedFile === file.id;
   const lockfile = lockfiles.has(file.path.split("/").at(-1) ?? "");
   const collapsed = context.collapsedFiles.has(file.id);
+  // The folded body takes its height with it, and iOS has no scroll anchoring.
+  useLayoutEffect(() => {
+    const spot = foldSpot.current;
+    foldSpot.current = undefined;
+    if (collapsed && spot && performance.now() - spot.time < diffHoldQuietMs && header.current)
+      return holdDiffTarget(header.current, spot.at);
+  }, [collapsed]);
   const { onContentRendered } = context;
   const foreground =
     !collapsed &&
@@ -372,7 +387,17 @@ export function FileDiff({
         threads={fileThreads.length + lineThreads.length}
         onToggle={() => context.toggleFile(file.id)}
         onComment={() => context.onActive({ kind: "file", path: file.path })}
-        onViewed={context.onViewed}
+        onViewed={
+          context.onViewed
+            ? (paths, viewed) => {
+                if (viewed && !collapsed && header.current) {
+                  const at = diffFoldSpot(header.current);
+                  if (at !== undefined) foldSpot.current = { at, time: performance.now() };
+                }
+                context.onViewed?.(paths, viewed);
+              }
+            : undefined
+        }
       />
       <div className="em-diff-discussion">
         {context.notes !== false &&

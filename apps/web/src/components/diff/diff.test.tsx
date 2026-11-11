@@ -10,11 +10,13 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { NavigateDiff } from "../../lib/diff-navigation.ts";
 import { draftKey } from "../../lib/drafts.ts";
 import { layoutStore } from "../../lib/layout-store.ts";
+import { viewedState } from "../../lib/viewed-state.ts";
 import { Panes } from "../layout/Panes.tsx";
 import { DiffPane, type DiffPaneProps } from "./DiffPane.tsx";
 import type { DiffPostRender, ParsedDiff } from "./FileDiff.tsx";
 import { parsePair } from "./parse.worker.ts";
 import type { DiffParser } from "./parse-client.ts";
+import { diffHoldQuietMs } from "./presentation.ts";
 
 type Selection = { side?: "additions" | "deletions"; endSide?: "additions" | "deletions"; start: number; end: number };
 type Annotation = { side: string; lineNumber: number; metadata: ReactNode };
@@ -1740,5 +1742,184 @@ test.each(["toolbar", "navigator"])("a %s stuck file jump follows growth and can
   scroll.mockClear();
   targetTop += 1800;
   act(() => vi.advanceTimersToNextFrame());
+  expect(scroll).not.toHaveBeenCalled();
+});
+
+function foldLayout(bodyHeights: Record<string, number>) {
+  const pane = screen.getByTestId("diff-pane");
+  const paneTop = 50;
+  const paneHeight = 600;
+  const topicHeight = 100;
+  const toolbar = pane.querySelector<HTMLElement>("[data-diff-toolbar]");
+  const toolbarHeight = toolbar ? 41 : 0;
+  const layout = () => {
+    const rects = new Map<Element, DOMRect>();
+    const rect = (top: number, height: number) => new DOMRect(0, paneTop + top - pane.scrollTop, paneWidth, height);
+    rects.set(pane, new DOMRect(0, paneTop, paneWidth, paneHeight));
+    if (toolbar) rects.set(toolbar, new DOMRect(0, paneTop, paneWidth, toolbarHeight));
+    let top = toolbarHeight;
+    for (const topic of pane.querySelectorAll<HTMLElement>("[data-topic]")) {
+      const start = top;
+      const topicHeader = topic.querySelector<HTMLElement>("[data-topic-header]");
+      if (!topicHeader) throw new Error("Missing topic header");
+      const phone = topic.hasAttribute("data-phone");
+      top += topicHeight;
+      const details = topic.querySelector<HTMLElement>("[data-topic-details]");
+      if (details) {
+        const height = details.hidden ? 0 : 80;
+        rects.set(details, rect(top, height));
+        top += height;
+      }
+      for (const section of topic.querySelectorAll<HTMLElement>("[data-diff-file]")) {
+        const header = section.querySelector<HTMLElement>("[data-file-header]");
+        if (!header) throw new Error("Missing file header");
+        const path = section.getAttribute("aria-label")?.slice("File ".length) ?? "";
+        const height = 40 + (header.hasAttribute("data-collapsed") ? 0 : (bodyHeights[path] ?? 240));
+        top += 12;
+        const box = rect(top, height);
+        rects.set(section, box);
+        const line = paneTop + toolbarHeight + (phone ? 0 : topicHeight);
+        rects.set(header, new DOMRect(0, Math.min(Math.max(line, box.top), box.bottom - 40), paneWidth, 40));
+        top += height;
+      }
+      top += 12;
+      rects.set(topic, rect(start, top - start));
+      const headerTop = phone ? start : Math.min(Math.max(start, pane.scrollTop + toolbarHeight), top - topicHeight);
+      rects.set(topicHeader, rect(headerTop, topicHeight));
+    }
+    return { rects, height: top };
+  };
+  const bounds = HTMLElement.prototype.getBoundingClientRect;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    return layout().rects.get(this) ?? bounds.call(this);
+  });
+  Object.defineProperties(pane, {
+    clientHeight: { value: paneHeight },
+    scrollHeight: { get: () => layout().height },
+  });
+  const scroll = vi.spyOn(pane, "scrollTo").mockImplementation((options?: number | ScrollToOptions) => {
+    if (options && typeof options === "object")
+      pane.scrollTop = Math.max(0, Math.min(options.top ?? 0, Math.max(0, pane.scrollHeight - pane.clientHeight)));
+  });
+  const section = (path: string) => screen.getByRole("region", { name: `File ${path}` });
+  const header = (path: string) => {
+    const element = section(path).querySelector<HTMLElement>("[data-file-header]");
+    if (!element) throw new Error("Missing file header");
+    return element;
+  };
+  return {
+    pane,
+    scroll,
+    section,
+    header,
+    stickyLine: paneTop + toolbarHeight + (toolbar ? topicHeight : 0),
+    end: (path: string) => {
+      pane.scrollTo({ top: pane.scrollTop + section(path).getBoundingClientRect().bottom - paneTop - paneHeight });
+      scroll.mockClear();
+    },
+    grow: (path: string, delta: number) => {
+      bodyHeights[path] = (bodyHeights[path] ?? 240) + delta;
+    },
+  };
+}
+
+test.each([1280, 390].flatMap((width) => ["long file", "small files", "next topic"].map((next) => ({ width, next }))))(
+  "marking Viewed lands before the next $next ($width px)",
+  async ({ width, next }) => {
+    stubWidth(width);
+    fetchMock.mockImplementation(async (path: string) => new Response(path.endsWith("/old") ? "before\n" : "after\n"));
+    const following =
+      next === "small files"
+        ? Array.from({ length: 12 }, (_, index) => file(`small-${index + 1}.ts`, { order: index + 1 }))
+        : [file("long-b.ts", { order: 1, topic: next === "next topic" ? "second" : "first" })];
+    const view = revision([file("long-a.ts"), ...following]);
+    if (next === "next topic")
+      view.topics.push({ slug: "second", title: "Second", importance: 20, summary: "Second summary" });
+    await mount(view, {
+      onViewed: (paths, viewed) => viewedState(client).start(reviewId, { revision: view.seq, paths, viewed }),
+    });
+    if (width === 390) fireEvent.click(screen.getAllByRole("button", { name: "Details" })[0] as HTMLElement);
+    near("long-a.ts");
+    await screen.findByTestId("rendered-diff");
+    const { pane, header, section, stickyLine, end, grow } = foldLayout({ "long-a.ts": 3000, "long-b.ts": 4000 });
+    end("long-a.ts");
+    const marked = header("long-a.ts");
+    expect(marked.getBoundingClientRect().top).toBe(stickyLine);
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"] });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Mark long-a.ts as viewed" })));
+    const landing = () => {
+      expect(marked.hasAttribute("data-collapsed")).toBe(true);
+      expect(section("long-a.ts").querySelector(".em-diff-body")).toBeNull();
+      expect(marked.getBoundingClientRect().top).toBe(stickyLine);
+      expect(section("long-a.ts").getBoundingClientRect().top).toBe(stickyLine);
+      const bottom = marked.getBoundingClientRect().bottom;
+      if (next === "next topic") {
+        const firstTopic = screen.getByRole("region", { name: "Topic First" });
+        const secondTopic = screen.getByRole("region", { name: "Topic Second" });
+        const title = within(secondTopic).getByRole("heading", { name: "Second" }).closest("[data-topic-header]");
+        const details = within(secondTopic).getByText("Second summary").closest<HTMLElement>("[data-topic-details]");
+        expect(firstTopic.getBoundingClientRect().bottom).toBe(bottom + 12);
+        expect(title?.getBoundingClientRect().top).toBe(firstTopic.getBoundingClientRect().bottom);
+        expect(details?.hidden).toBe(false);
+        expect(details?.getBoundingClientRect().top).toBe(title?.getBoundingClientRect().bottom);
+        expect(details?.getBoundingClientRect().bottom).toBeLessThan(pane.getBoundingClientRect().bottom);
+      } else {
+        const firstPath = next === "small files" ? "small-1.ts" : "long-b.ts";
+        expect(section(firstPath).getBoundingClientRect().top).toBe(bottom + 12);
+        expect(header(firstPath).getBoundingClientRect().top).toBe(bottom + 12);
+      }
+    };
+    landing();
+    act(() => vi.advanceTimersToNextFrame());
+    landing();
+    const nextPath = next === "small files" ? "small-1.ts" : "long-b.ts";
+    near(nextPath);
+    await screen.findByTestId("rendered-diff");
+    expect(section(nextPath).hasAttribute("data-diff-loading")).toBe(true);
+    act(() => vi.advanceTimersByTime(diffHoldQuietMs + 500));
+    grow(nextPath, 600);
+    // Content loading below can also move the browser's scroll anchor.
+    pane.scrollTop += 120;
+    act(() => vi.advanceTimersToNextFrame());
+    landing();
+  },
+);
+
+test.each([1280, 390])("a wheel immediately after marking Viewed stops the hold (%s px)", async (width) => {
+  stubWidth(width);
+  const view = revision([file("long-a.ts"), file("long-b.ts", { order: 1 })]);
+  await mount(view, {
+    onViewed: (paths, viewed) => viewedState(client).start(reviewId, { revision: view.seq, paths, viewed }),
+  });
+  const { pane, scroll, end, grow } = foldLayout({ "long-a.ts": 3000, "long-b.ts": 4000 });
+  end("long-a.ts");
+  vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"] });
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Mark long-a.ts as viewed" })));
+  expect(scroll).toHaveBeenCalledTimes(1);
+  fireEvent.wheel(pane, { deltaY: 200 });
+  pane.scrollTop += 200;
+  const top = pane.scrollTop;
+  grow("long-b.ts", 600);
+  act(() => vi.advanceTimersByTime(500));
+  expect(pane.scrollTop).toBe(top);
+  expect(scroll).toHaveBeenCalledTimes(1);
+});
+
+test.each([1280, 390])("a later chevron fold discards an unused Viewed spot (%s px)", async (width) => {
+  stubWidth(width);
+  const onViewed = vi.fn();
+  await mount(revision([file("long-a.ts"), file("long-b.ts", { order: 1 })]), { onViewed });
+  const { pane, header, scroll, end } = foldLayout({ "long-a.ts": 3000, "long-b.ts": 4000 });
+  end("long-a.ts");
+  const top = pane.scrollTop;
+  vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"] });
+  fireEvent.click(screen.getByRole("button", { name: "Mark long-a.ts as viewed" }));
+  expect(onViewed).toHaveBeenCalledExactlyOnceWith(["long-a.ts"], true);
+  expect(header("long-a.ts").hasAttribute("data-collapsed")).toBe(false);
+  act(() => vi.advanceTimersByTime(diffHoldQuietMs));
+  fireEvent.click(within(header("long-a.ts")).getByRole("button", { name: "Collapse file" }));
+  expect(header("long-a.ts").hasAttribute("data-collapsed")).toBe(true);
+  act(() => vi.advanceTimersByTime(500));
+  expect(pane.scrollTop).toBe(top);
   expect(scroll).not.toHaveBeenCalled();
 });

@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { diffHoldMaxMs, diffHoldQuietMs, holdDiffTarget, scrollDiffTarget } from "./presentation.ts";
+import { diffFoldSpot, diffHoldMaxMs, diffHoldQuietMs, holdDiffTarget, scrollDiffTarget } from "./presentation.ts";
 
 afterEach(() => {
   cleanup();
@@ -123,10 +123,12 @@ function fileScene(phone: boolean) {
   const card = pane.querySelector<HTMLElement>("article") as HTMLElement;
   const file = pane.querySelector<HTMLElement>("[data-diff-file]") as HTMLElement;
   const header = pane.querySelector<HTMLElement>("[data-file-header]") as HTMLElement;
-  Object.defineProperties(pane, { clientHeight: { value: 500 }, scrollHeight: { value: 3000 } });
+  let fileTop = 1300;
+  let contentHeight = 3000;
+  Object.defineProperties(pane, { clientHeight: { value: 500 }, scrollHeight: { get: () => contentHeight } });
   vi.spyOn(pane, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 100, 500, 500));
   vi.spyOn(file, "getBoundingClientRect").mockImplementation(
-    () => new DOMRect(0, 100 + 1300 - pane.scrollTop, 500, 1700),
+    () => new DOMRect(0, 100 + fileTop - pane.scrollTop, 500, 1700),
   );
   vi.spyOn(header, "getBoundingClientRect").mockImplementation(
     () => new DOMRect(0, Math.max(phone ? 141 : 241, file.getBoundingClientRect().top), 500, 40),
@@ -137,8 +139,90 @@ function fileScene(phone: boolean) {
   const scroll = vi.spyOn(pane, "scrollTo").mockImplementation((options?: ScrollToOptions | number) => {
     if (options && typeof options === "object") pane.scrollTop = options.top ?? 0;
   });
-  return { pane, card, file, header, scroll };
+  return {
+    pane,
+    card,
+    file,
+    header,
+    scroll,
+    shift: (delta: number) => {
+      fileTop += delta;
+      contentHeight += delta;
+    },
+    grow: (delta: number) => {
+      contentHeight += delta;
+    },
+  };
 }
+
+test.each([false, true])("a fold spot keeps the header at or below the sticky line (phone=%s)", (phone) => {
+  const { pane, header } = fileScene(phone);
+  if (phone) pane.querySelector("[data-diff-toolbar]")?.remove();
+  Object.defineProperty(pane, "clientTop", { value: 2 });
+  const line = 2 + (phone ? 0 : 141);
+  const bounds = vi.mocked(header.getBoundingClientRect);
+  for (const { top, expected } of [
+    { top: line, expected: line },
+    { top: line - 20, expected: line },
+    { top: 320, expected: 320 },
+  ]) {
+    bounds.mockReturnValue(new DOMRect(0, 100 + top, 500, 40));
+    expect(diffFoldSpot(header)).toBe(expected);
+  }
+});
+
+test("a fold spot without a diff pane is undefined", () => {
+  expect(diffFoldSpot(document.createElement("header"))).toBeUndefined();
+});
+
+test.each([false, true].flatMap((phone) => [false, true].map((middle) => ({ phone, middle }))))(
+  "an explicit hold keeps the file section at its spot through growth (phone=$phone, middle=$middle)",
+  ({ phone, middle }) => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"] });
+    const { pane, file, header, scroll, shift } = fileScene(phone);
+    if (phone) pane.querySelector("[data-diff-toolbar]")?.remove();
+    pane.scrollTop = 2200;
+    const at = middle ? 320 : phone ? 0 : 141;
+    const cancel = holdDiffTarget(header, at);
+    expect(scroll).toHaveBeenCalledExactlyOnceWith({ top: 1300 - at, behavior: "instant" });
+    expect(file.getBoundingClientRect().top - pane.getBoundingClientRect().top).toBe(at);
+    shift(1800);
+    vi.advanceTimersToNextFrame();
+    expect(file.getBoundingClientRect().top - pane.getBoundingClientRect().top).toBe(at);
+    expect(scroll).toHaveBeenLastCalledWith({ top: 3100 - at, behavior: "instant" });
+    vi.advanceTimersByTime(500);
+    expect(scroll).toHaveBeenCalledTimes(2);
+    cancel();
+  },
+);
+
+test("an explicit hold clamps at the pane's end until more content loads", () => {
+  vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"] });
+  const { pane, file, header, scroll, grow } = fileScene(false);
+  grow(-1500);
+  const cancel = holdDiffTarget(header, 141);
+  expect(scroll).toHaveBeenCalledExactlyOnceWith({ top: 1000, behavior: "instant" });
+  expect(pane.scrollTop).toBe(pane.scrollHeight - pane.clientHeight);
+  vi.advanceTimersToNextFrame();
+  expect(scroll).toHaveBeenCalledTimes(1);
+  grow(1500);
+  vi.advanceTimersToNextFrame();
+  expect(file.getBoundingClientRect().top - pane.getBoundingClientRect().top).toBe(141);
+  cancel();
+});
+
+test.each([false, true])("an outside scroll stops an explicit hold (phone=%s)", (phone) => {
+  vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"] });
+  const { pane, header, scroll, shift } = fileScene(phone);
+  holdDiffTarget(header, 220);
+  pane.scrollTop += 200;
+  vi.advanceTimersToNextFrame();
+  expect(vi.getTimerCount()).toBe(0);
+  shift(500);
+  vi.advanceTimersToNextFrame();
+  expect(pane.scrollTop).toBe(1280);
+  expect(scroll).toHaveBeenCalledTimes(1);
+});
 
 test("a line or thread inside a file also clears that file's sticky header", () => {
   const { card, scroll } = fileScene(false);
