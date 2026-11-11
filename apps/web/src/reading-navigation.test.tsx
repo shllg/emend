@@ -591,7 +591,11 @@ test.each([
     await screen.findByRole("heading", { name: heading, level: 1 });
     expect(history.location.pathname).toBe(pathname);
     expect(history.location.search).toBe("");
-    expect(screen.queryByText("This review was deleted or never existed.")).toBeNull();
+    expect(
+      vi
+        .mocked(fetch)
+        .mock.calls.some(([path]) => typeof path === "string" && path.startsWith("/api/v1/reviews/undefined")),
+    ).toBe(false);
     expect(paths).not.toContain("/r/undefined");
 
     await act(async () => history.back());
@@ -611,10 +615,15 @@ test("a review sub-path keeps its address and empty search when leaving an open 
   await waitFor(() => expect(searchParams(history).get("doc")).toBe(gardenDoc.path));
   expect(history.location.pathname).toBe(`/r/${id}`);
 
+  const paths: string[] = [];
+  onTestFinished(history.subscribe(({ location }) => paths.push(location.pathname)));
   await act(async () => history.push(`/r/${id}/extra`));
   expect(history.location.pathname).toBe(`/r/${id}/extra`);
   expect(history.location.search).toBe("");
   await screen.findByRole("heading", { name: "Page not found" });
+  expect(history.location.pathname).toBe(`/r/${id}/extra`);
+  expect(history.location.search).toBe("");
+  expect(paths).not.toContain(`/r/${id}`);
 });
 
 test("the sidebar opens another review on its own doc and Back restores the first review's doc", async () => {

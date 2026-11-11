@@ -348,6 +348,7 @@ function LoadedReview({
             ? "Comments"
             : "Files",
     seq,
+    // No own address yet means leaving: unmount without writing history; the trail only needs a history index.
     location ?? liveLocation,
   );
   const readingFolds = useMemo(
