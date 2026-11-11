@@ -1195,7 +1195,8 @@ test.each([390, 800, 1280])("clicking a file path opens its full text and Copy p
   expect(pathBlock?.classList.contains("[overflow-wrap:anywhere]")).toBe(true);
   expect(pathBlock?.classList.contains("whitespace-pre-wrap")).toBe(true);
   expect(menu.classList.contains("max-w-[min(36rem,var(--radix-dropdown-menu-content-available-width))]")).toBe(true);
-  const copy = within(menu).getByRole("menuitem", { name: "Copy path" });
+  // The computed description separates the path's segment spans with spaces.
+  const copy = within(menu).getByRole("menuitem", { name: "Copy path", description: path.replaceAll("/", "/ ") });
   expect(copy.getAttribute("aria-describedby")?.split(/\s+/)).toEqual([pathBlock?.id]);
   expect(document.getElementById(copy.getAttribute("aria-describedby") ?? "")?.textContent).toBe(path);
 });
@@ -1249,6 +1250,24 @@ test("Copy path writes the exact path, announces success, stays open and resets 
   act(() => vi.advanceTimersByTime(1));
   expect(within(menu).getByRole("menuitem", { name: "Copy path" })).toBeTruthy();
   expect(status.textContent).toBe("");
+});
+
+test.each(["Enter", " "])("the focused Copy item copies with %s and keeps the menu open", async (key) => {
+  const path = "src/keyboard.ts";
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+  await mount(revision([file(path)]));
+  const button = screen.getByRole("button", { name: path });
+  act(() => button.focus());
+  fireEvent.keyDown(button, { key: "Enter" });
+  const menu = await screen.findByRole("menu");
+  const copy = within(menu).getByRole("menuitem", { name: "Copy path" });
+  await waitFor(() => expect(document.activeElement).toBe(copy));
+  fireEvent.keyDown(copy, { key });
+  expect(await within(menu).findByRole("menuitem", { name: "Copied" })).toBe(copy);
+  expect(writeText).toHaveBeenCalledExactlyOnceWith(path);
+  expect(screen.getByRole("status").textContent).toBe("Path copied");
+  expect(screen.getByRole("menu")).toBe(menu);
 });
 
 test.each(["resolve", "reject"])("an older copy's late %s leaves the latest success intact", async (settlement) => {
@@ -1346,6 +1365,29 @@ test.each(["resolve", "reject"])(
     expect(execCommand).not.toHaveBeenCalled();
   },
 );
+
+test.each(["reject", "resolve"])("unmounting the tree ignores a pending copy's late %s", async (settlement) => {
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  const pending = Promise.withResolvers<void>();
+  const writeText = vi.fn(() => pending.promise);
+  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+  const execCommand = vi.fn(() => false);
+  Object.defineProperty(document, "execCommand", { configurable: true, value: execCommand });
+  const { unmount } = await mount(detailed());
+  fireEvent.click(screen.getByRole("button", { name: "src/a.ts" }));
+  const menu = await screen.findByRole("menu");
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "Copy path" }));
+  expect(writeText).toHaveBeenCalledExactlyOnceWith("src/a.ts");
+  unmount();
+  expect(screen.queryByRole("menu")).toBeNull();
+  await act(async () => {
+    if (settlement === "reject") pending.reject(new Error("denied"));
+    else pending.resolve();
+  });
+  expect(execCommand).not.toHaveBeenCalled();
+  expect(window.getSelection()?.toString()).toBe("");
+  expect(error).not.toHaveBeenCalled();
+});
 
 test.each(["missing", "throws", "rejects"])(
   "a clipboard that %s selects only the path and reports copy failure",
@@ -1481,7 +1523,10 @@ test("a renamed file shows both paths in its menu but copies only the new path",
   const menu = await screen.findByRole("menu");
   expect([...menu.querySelectorAll("bdi")].map((node) => node.textContent)).toEqual(["src/a.ts", "src/b.ts"]);
   expect(within(menu).getByText("Renamed from").textContent).toBe("Renamed from src/b.ts");
-  const copy = within(menu).getByRole("menuitem", { name: "Copy path" });
+  const copy = within(menu).getByRole("menuitem", {
+    name: "Copy path",
+    description: "src/ a.ts Renamed from src/ b.ts",
+  });
   const descriptions = copy.getAttribute("aria-describedby")?.split(/\s+/) ?? [];
   expect(descriptions).toHaveLength(2);
   expect(descriptions.map((id) => document.getElementById(id)?.textContent)).toEqual([
