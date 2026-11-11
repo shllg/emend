@@ -18,7 +18,7 @@ function parseTokens(pattern: RegExp): Tokens {
 const light = parseTokens(/^:root\s*\{([^}]+)\}/m);
 const systemDark = parseTokens(/@media\s*\(prefers-color-scheme:\s*dark\)\s*\{\s*:root\s*\{([^}]+)\}/);
 const explicitDark = parseTokens(/\[data-theme="dark"\]\s*\{([^}]+)\}/);
-const readingNames = ["--bg-reading", "--bg-reading-card", "--fg-reading", "--fg-reading-strong"];
+const readingNames = ["--bg-reading", "--bg-reading-card", "--fg-reading", "--fg-reading-muted", "--fg-reading-strong"];
 const readingTokens = (tokens: Tokens) => Object.fromEntries(readingNames.map((name) => [name, tokens.get(name)]));
 
 function resolveToken(name: string, tokens: Tokens, seen = new Set<string>()): string {
@@ -59,6 +59,7 @@ test("light mode keeps the app colours", () => {
     "--bg-reading": "var(--bg-app)",
     "--bg-reading-card": "var(--bg-surface)",
     "--fg-reading": "var(--fg-3)",
+    "--fg-reading-muted": "oklch(0.55 0.004 260)",
     "--fg-reading-strong": "var(--fg-1)",
   });
 });
@@ -68,9 +69,21 @@ test("both dark blocks declare the same reading colours", () => {
     "--bg-reading": "var(--bg-surface)",
     "--bg-reading-card": "var(--bg-raised)",
     "--fg-reading": "oklch(0.79 0.004 260)",
+    "--fg-reading-muted": "var(--n-400)",
     "--fg-reading-strong": "var(--n-200)",
   });
   expect(readingTokens(explicitDark)).toEqual(readingTokens(systemDark));
+});
+
+test.each([
+  { name: "light", tokens: light },
+  { name: "system dark", tokens: systemDark },
+  { name: "explicit dark", tokens: explicitDark },
+])("$name muted text keeps at least 4.5:1 contrast and is dimmer than body text", ({ tokens }) => {
+  const page = luminance("--bg-reading", tokens);
+  const mutedContrast = contrast(luminance("--fg-reading-muted", tokens), page);
+  expect(mutedContrast).toBeGreaterThanOrEqual(4.5);
+  expect(mutedContrast).toBeLessThan(contrast(luminance("--fg-reading", tokens), page));
 });
 
 describe.each([
@@ -115,4 +128,24 @@ test("reading rules use the reading colour tokens", () => {
   );
   expect(/\.em-writeup-card\s*\{([^}]+)\}/.exec(reading)?.[1]).toMatch(/\bbackground:\s*var\(--bg-reading-card\)\s*;/);
   expect(/\.em-thread__comments\s*\{([^}]+)\}/.exec(threads)?.[1]).toMatch(/\bcolor:\s*var\(--fg-reading-strong\)\s*;/);
+  expect(
+    /\.em-writeup-muted \.em-prose :is\(strong, code, h1, h2, h3, h4, h5, h6\),\s*\.em-writeup-muted \.em-prose li::marker\s*\{([^}]+)\}/.exec(
+      reading,
+    )?.[1],
+  ).toMatch(/\bcolor:\s*var\(--fg-reading-muted\)\s*;/);
+});
+
+test.each([
+  { tone: "quiet", reduction: 1 },
+  { tone: "muted", reduction: 2 },
+])("$tone writeup prose follows the reader size and colour hierarchy", ({ tone, reduction }) => {
+  const reading = readFileSync(resolve(import.meta.dirname, "reading.css"), "utf8");
+  const rule = new RegExp(`\\.em-writeup-${tone} \\.em-prose\\s*\\{([^}]+)\\}`).exec(reading)?.[1];
+  expect(rule).toContain(`font-size: calc(var(--reader-prose-size, var(--type-prose-size)) - ${reduction}px);`);
+  expect(rule).not.toMatch(/\bfont-size:\s*[\d.]+px\s*;/);
+  if (tone === "quiet") {
+    expect(rule).not.toMatch(/\bcolor\s*:/);
+  } else {
+    expect(rule).toMatch(/\bcolor:\s*var\(--fg-reading-muted\)\s*;/);
+  }
 });

@@ -105,6 +105,7 @@
   --bg-reading: var(--bg-app);
   --bg-reading-card: var(--bg-surface);
   --fg-reading: var(--fg-3);
+  --fg-reading-muted: oklch(0.55 0.004 260);
   --fg-reading-strong: var(--fg-1);
   /* accent: the editor's pencil */
   --accent: var(--ochre-400);
@@ -214,6 +215,7 @@
     --bg-reading: var(--bg-surface);
     --bg-reading-card: var(--bg-raised);
     --fg-reading: oklch(0.79 0.004 260);
+    --fg-reading-muted: var(--n-400);
     --fg-reading-strong: var(--n-200);
     --focus-ring: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--ochre-400);
     --accent-text: var(--ochre-300);
@@ -320,6 +322,7 @@
   --bg-reading: var(--bg-surface);
   --bg-reading-card: var(--bg-raised);
   --fg-reading: oklch(0.79 0.004 260);
+  --fg-reading-muted: var(--n-400);
   --fg-reading-strong: var(--n-200);
   --focus-ring: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--ochre-400);
   --accent-text: var(--ochre-300);
