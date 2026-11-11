@@ -30,6 +30,7 @@ export function FilePathMenu({ path, oldPath }: { path: string; oldPath?: string
   const [open, setOpen] = useState(false);
   const pointerClick = useRef(false);
   const pathId = useId();
+  const oldPathId = useId();
   const text = useRef<HTMLDivElement>(null);
   const timer = useRef<number>(undefined);
   const attempt = useRef(0);
@@ -139,17 +140,22 @@ export function FilePathMenu({ path, oldPath }: { path: string; oldPath?: string
           <div
             id={pathId}
             ref={text}
+            aria-hidden="true"
             className="px-2.5 pt-2 pb-1 font-stretch-mono whitespace-pre-wrap text-fg-1 [font:var(--type-path)] [overflow-wrap:anywhere] select-text"
           >
             <Path path={path} />
           </div>
           {oldPath && (
-            <div className="px-2.5 pb-1 font-stretch-mono whitespace-pre-wrap text-fg-3 [font:var(--type-path)] [overflow-wrap:anywhere] select-text">
+            <div
+              id={oldPathId}
+              aria-hidden="true"
+              className="px-2.5 pb-1 font-stretch-mono whitespace-pre-wrap text-fg-3 [font:var(--type-path)] [overflow-wrap:anywhere] select-text"
+            >
               Renamed from <Path path={oldPath} />
             </div>
           )}
           <Primitive.Item
-            aria-describedby={pathId}
+            aria-describedby={oldPath ? `${pathId} ${oldPathId}` : pathId}
             onSelect={(event) => {
               event.preventDefault();
               copy();
@@ -163,7 +169,9 @@ export function FilePathMenu({ path, oldPath }: { path: string; oldPath?: string
             <span>{result === "copied" ? "Copied" : "Copy path"}</span>
           </Primitive.Item>
           {result === "failed" && (
-            <span className="block px-2.5 pb-1 text-fg-3 [font:var(--type-meta)]">Select and copy the path</span>
+            <span aria-hidden="true" className="block px-2.5 pb-1 text-fg-3 [font:var(--type-meta)]">
+              Select and copy the path
+            </span>
           )}
         </Primitive.Content>
       </Primitive.Portal>

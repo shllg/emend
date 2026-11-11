@@ -1191,11 +1191,12 @@ test.each([390, 800, 1280])("clicking a file path opens its full text and Copy p
   const menu = await screen.findByRole("menu");
   const pathBlock = menu.querySelector("bdi")?.parentElement;
   expect(pathBlock?.textContent).toBe(path);
+  expect(pathBlock?.getAttribute("aria-hidden")).toBe("true");
   expect(pathBlock?.classList.contains("[overflow-wrap:anywhere]")).toBe(true);
   expect(pathBlock?.classList.contains("whitespace-pre-wrap")).toBe(true);
   expect(menu.classList.contains("max-w-[min(36rem,var(--radix-dropdown-menu-content-available-width))]")).toBe(true);
   const copy = within(menu).getByRole("menuitem", { name: "Copy path" });
-  expect(copy.getAttribute("aria-describedby")).toBe(pathBlock?.id);
+  expect(copy.getAttribute("aria-describedby")?.split(/\s+/)).toEqual([pathBlock?.id]);
   expect(document.getElementById(copy.getAttribute("aria-describedby") ?? "")?.textContent).toBe(path);
 });
 
@@ -1369,6 +1370,7 @@ test.each(["missing", "throws", "rejects"])(
     expect(menu.querySelector('[role="status"]')).toBeNull();
     const visibleFailure = within(menu).getByText("Select and copy the path");
     expect(visibleFailure.hasAttribute("role")).toBe(false);
+    expect(visibleFailure.getAttribute("aria-hidden")).toBe("true");
     expect(visibleFailure.classList.contains("sr-only")).toBe(false);
     expect(window.getSelection()?.toString()).toBe("src/a.ts");
     expect(execCommand).toHaveBeenCalledExactlyOnceWith("copy");
@@ -1479,9 +1481,44 @@ test("a renamed file shows both paths in its menu but copies only the new path",
   const menu = await screen.findByRole("menu");
   expect([...menu.querySelectorAll("bdi")].map((node) => node.textContent)).toEqual(["src/a.ts", "src/b.ts"]);
   expect(within(menu).getByText("Renamed from").textContent).toBe("Renamed from src/b.ts");
-  fireEvent.click(within(menu).getByRole("menuitem", { name: "Copy path" }));
+  const copy = within(menu).getByRole("menuitem", { name: "Copy path" });
+  const descriptions = copy.getAttribute("aria-describedby")?.split(/\s+/) ?? [];
+  expect(descriptions).toHaveLength(2);
+  expect(descriptions.map((id) => document.getElementById(id)?.textContent)).toEqual([
+    "src/a.ts",
+    "Renamed from src/b.ts",
+  ]);
+  fireEvent.click(copy);
   await within(menu).findByRole("menuitem", { name: "Copied" });
   expect(writeText).toHaveBeenCalledExactlyOnceWith("src/a.ts");
+});
+
+test("menu text outside Copy is aria-hidden while the live region announces copy failure", async () => {
+  vi.stubGlobal("navigator", { ...navigator, clipboard: undefined });
+  Object.defineProperty(document, "execCommand", { configurable: true, value: vi.fn(() => false) });
+  await mount(detailed());
+  fireEvent.click(screen.getByRole("button", { name: "src/a.ts" }));
+  const menu = await screen.findByRole("menu");
+  const expectTextHidden = () => {
+    for (const element of menu.querySelectorAll("*")) {
+      if (!element.textContent?.trim() || element.closest('[role="menuitem"]')) continue;
+      expect(element.closest('[aria-hidden="true"]'), element.textContent).not.toBeNull();
+    }
+  };
+  expect(menu.querySelector("bdi")?.textContent).toBe("src/a.ts");
+  const rename = within(menu).getByText("Renamed from");
+  expect(rename.textContent).toBe("Renamed from src/b.ts");
+  expect(rename.getAttribute("aria-hidden")).toBe("true");
+  expectTextHidden();
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "Copy path" }));
+  expect(within(menu).getByText("Select and copy the path").getAttribute("aria-hidden")).toBe("true");
+  expectTextHidden();
+  expect(window.getSelection()?.toString()).toBe("src/a.ts");
+  const status = screen.getByRole("status");
+  expect(menu.contains(status)).toBe(false);
+  expect(status.closest('[aria-hidden="true"]')).toBeNull();
+  expect(status.getAttribute("aria-live")).toBe("polite");
+  expect(status.textContent).toBe("Select and copy the path");
 });
 
 test("a hostile path stays text in the header and the popover", async () => {
