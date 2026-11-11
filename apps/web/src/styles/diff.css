@@ -92,9 +92,24 @@
     font-stretch: var(--mono-stretch);
     overflow-wrap: anywhere;
   }
+  .em-file-path-button {
+    display: inline-block;
+    max-width: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+  }
   @media (max-width: 767px) {
-    /* One line: the path loses its start, the file name stays; <bdi> keeps the segments in order. */
-    .em-file h4.em-file-path {
+    /* Cut the button's text from its start, keeping the file name; <bdi> keeps segments in order. */
+    .em-file .em-file-path-button {
+      display: block;
+      width: 100%;
       direction: rtl;
       text-align: left;
       overflow: hidden;
