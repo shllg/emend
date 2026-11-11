@@ -201,6 +201,13 @@
     font: 400 12px / 1.4 var(--font-sans);
     color: var(--fg-3);
   }
+  .em-prose .emend-media > img[role="button"] {
+    cursor: zoom-in;
+  }
+  .em-prose .emend-media > img[role="button"]:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
   .em-prose p.emend-media-row {
     display: flex;
     flex-wrap: wrap;

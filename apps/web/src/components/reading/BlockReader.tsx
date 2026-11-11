@@ -5,6 +5,8 @@ import { mapBlockText } from "../../lib/block-ranges.ts";
 import { registerCommentRanges, supportsCommentHighlights } from "../../lib/comment-highlights.ts";
 import { claimDraft } from "../../lib/composer-owner.ts";
 import { draftKey } from "../../lib/drafts.ts";
+import { useLayout } from "../../lib/layout.ts";
+import { revealReadingTarget } from "../../lib/reading-reveal.ts";
 import { blockAnchor, selectionToAnchor } from "../../lib/selection.ts";
 import { Composer } from "../threads/Composer.tsx";
 import { ThreadCard } from "../threads/ThreadCard.tsx";
@@ -12,7 +14,9 @@ import { Button } from "../ui/Button.tsx";
 import { useAgentNoteRefs } from "./agent-note-refs.ts";
 import { Block } from "./Block.tsx";
 import { BlockThreads, type ThreadJump } from "./BlockThreads.tsx";
+import { Lightbox } from "./Lightbox.tsx";
 import { ReadingGroup } from "./ReadingGroup.tsx";
+import { type LightboxItem, useScreenshots } from "./screenshots.ts";
 
 const emptyFiles: RevisionView["files"] = [];
 
@@ -78,11 +82,23 @@ export function BlockReader({
   const [target, setTarget] = useState<Target | null>(null);
   const [composing, setComposing] = useState(false);
   const [error, setError] = useState("");
-  const openComposer = (next: Target) => {
+  const phone = useLayout() === "phone";
+  const screenshotOpener = useRef<HTMLElement | null>(null);
+  const { gallery, closeGallery } = useScreenshots(root, () => {
+    latched.current = null;
+    guardUntil.current = 0;
+    if (!composing) setTarget(null);
+    setError("");
+  });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A gallery's DOM snapshot belongs to one review revision.
+  useLayoutEffect(() => closeGallery(), [reviewId, revision, closeGallery]);
+  const openComposer = (next: Target, from?: HTMLElement) => {
+    screenshotOpener.current = from ?? null;
     opener.current =
-      document.activeElement instanceof HTMLElement && root.current?.contains(document.activeElement)
+      from ??
+      (document.activeElement instanceof HTMLElement && root.current?.contains(document.activeElement)
         ? document.activeElement
-        : null;
+        : null);
     claimDraft(draftKey(reviewId, next), "reading");
     setTarget(next);
     setComposing(true);
@@ -92,6 +108,8 @@ export function BlockReader({
     latched.current = null;
     setComposing(false);
     setTarget(null);
+    // On phones Sheet restores focus after its focus trap unmounts.
+    if (!phone && screenshotOpener.current?.isConnected) screenshotOpener.current.focus({ preventScroll: true });
   };
   useEffect(() => {
     if (!target) latched.current = null;
@@ -101,6 +119,22 @@ export function BlockReader({
     () => new Map(groups.flatMap((group) => groupBlocks(group).map((block) => [block.id, group.path] as const))),
     [groups],
   );
+  const screenshotBlocks = useMemo(
+    () =>
+      new Map(
+        groups.flatMap((group) => groupBlocks(group).map((block) => [block.id, { block, path: group.path }] as const)),
+      ),
+    [groups],
+  );
+  const screenshotTarget = (item: LightboxItem): Target | undefined => {
+    const entry = screenshotBlocks.get(item.blockId);
+    if (!entry || entry.block.kind === "heading") return;
+    const anchor = blockAnchor(entry.block);
+    if (!anchor.quote) return;
+    return entry.path === undefined
+      ? { kind: "writeup-span", ...anchor }
+      : { kind: "doc-span", path: entry.path, ...anchor };
+  };
   const blockThreads = useMemo(() => {
     const byBlock = new Map<string, RevisionView["threads"]>();
     for (const thread of threads) {
@@ -343,6 +377,20 @@ export function BlockReader({
             </Button>
           )}
         </div>
+      )}
+      {gallery && (
+        <Lightbox
+          gallery={gallery}
+          onClose={closeGallery}
+          canComment={(item) => !!screenshotTarget(item)}
+          onComment={(item) => {
+            const next = screenshotTarget(item);
+            if (next) {
+              if (item.element.isConnected) revealReadingTarget(item.element);
+              openComposer(next, item.element);
+            }
+          }}
+        />
       )}
     </div>
   );
