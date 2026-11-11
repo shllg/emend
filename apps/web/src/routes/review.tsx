@@ -775,7 +775,7 @@ function LoadedReview({
     <AppFrame isReview onCommentReview={revision ? commentOnReview : undefined}>
       <div className="contents" onClickCapture={followReadingLink} onAuxClickCapture={followReadingLink}>
         <Panes
-          inbox={<ReviewInbox currentReviewId={review.id} collapsed={collapsed} onCollapsedChange={setCollapsed} />}
+          inbox={<ReviewInbox collapsed={collapsed} onCollapsedChange={setCollapsed} />}
           tab={tab}
           hasDiff={hasDiff}
           readingLayout={docsVisible && openDoc?.kind === "html" ? "original" : undefined}

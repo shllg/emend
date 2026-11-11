@@ -2361,7 +2361,7 @@ async function openReviewInbox() {
   return within(screen.getByTestId("inbox-pane"));
 }
 
-test.each([1280, 900])("sidebar kind group filters and retains the open review at %s px", async (size) => {
+test.each([1280, 900])("sidebar kind group hides the open review under Pubs at %s px", async (size) => {
   width = size;
   const published = {
     ...secondItem,
@@ -2382,10 +2382,15 @@ test.each([1280, 900])("sidebar kind group filters and retains the open review a
   expect(sidebar.queryByRole("combobox", { name: "Machine" })).toBeNull();
   fireEvent.click(within(kind).getByRole("radio", { name: "Pubs" }));
   expect(sidebar.getByRole("link", { name: /Published notes/ })).toBeTruthy();
-  expect(sidebar.getByRole("link", { name: /Synthetic review/ }).getAttribute("aria-current")).toBe("page");
+  expect(sidebar.queryByRole("link", { name: /Synthetic review/ })).toBeNull();
   expect(sidebar.queryByRole("link", { name: /Another proposal/ })).toBeNull();
-  fireEvent.click(within(kind).getByRole("radio", { name: "All" }));
-  expect(sidebar.getByRole("link", { name: /Another proposal/ })).toBeTruthy();
+  // The tablet sheet hides the page from accessibility queries while open.
+  if (size < 1280) fireEvent.click(sidebar.getByRole("button", { name: "Close" }));
+  expect(screen.getByRole("heading", { name: item.title, level: 1 })).toBeTruthy();
+  const reopened = size < 1280 ? await openReviewInbox() : sidebar;
+  fireEvent.click(reopened.getByRole("radio", { name: "All" }));
+  expect(reopened.getByRole("link", { name: /Another proposal/ })).toBeTruthy();
+  expect(reopened.getByRole("link", { name: /Synthetic review/ }).getAttribute("aria-current")).toBe("page");
 });
 
 test.each([1280, 900])("kind choice is shared across sidebar and page remounts at %s px", async (size) => {
@@ -2415,7 +2420,7 @@ test.each([1280, 900])("kind choice is shared across sidebar and page remounts a
   expect(remounted.getByRole("link", { name: /Published notes/ })).toBeTruthy();
 });
 
-test.each([1280, 900])("sidebar Reviews keeps waiting publishes and the open publish at %s px", async (size) => {
+test.each([1280, 900])("sidebar Reviews keeps waiting publishes and hides the open publish at %s px", async (size) => {
   width = size;
   localStorage.setItem("emend:inbox-kind", "review");
   const waiting = { ...secondItem, kind: "publish" as const, title: "Waiting notes" };
@@ -2425,13 +2430,23 @@ test.each([1280, 900])("sidebar Reviews keeps waiting publishes and the open pub
     agentWaiting: false,
     title: "Quiet notes",
   };
-  withInbox([{ ...item, kind: "publish", agentWaiting: false }, waiting, quiet]);
+  const plain = {
+    ...secondItem,
+    id: "88888888-8888-4888-8888-888888888888",
+    kind: "review" as const,
+    agentWaiting: false,
+    title: "Plain proposal",
+  };
+  withInbox([{ ...item, kind: "publish", agentWaiting: false }, waiting, quiet, plain]);
   mount(`/r/${id}`);
   const sidebar = await openReviewInbox();
   expect(await sidebar.findByRole("radio", { name: "Reviews", checked: true })).toBeTruthy();
-  expect(sidebar.getByRole("link", { name: /Synthetic review/ })).toBeTruthy();
+  expect(sidebar.getByRole("link", { name: /Plain proposal/ })).toBeTruthy();
   expect(sidebar.getByRole("link", { name: /Waiting notes/ })).toBeTruthy();
   expect(sidebar.queryByRole("link", { name: /Quiet notes/ })).toBeNull();
+  expect(sidebar.queryByRole("link", { name: /Synthetic review/ })).toBeNull();
+  if (size < 1280) fireEvent.click(sidebar.getByRole("button", { name: "Close" }));
+  expect(screen.getByRole("heading", { name: item.title, level: 1 })).toBeTruthy();
 });
 
 test.each([

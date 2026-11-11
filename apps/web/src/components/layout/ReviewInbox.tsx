@@ -5,11 +5,9 @@ import { InboxRail } from "../inbox/InboxRail.tsx";
 import { Sheet } from "../ui/Sheet.tsx";
 
 export function ReviewInbox({
-  currentReviewId,
   collapsed,
   onCollapsedChange,
 }: {
-  currentReviewId: string;
   collapsed: boolean;
   onCollapsedChange: (collapsed: boolean) => void;
 }) {
@@ -25,7 +23,7 @@ export function ReviewInbox({
         data-testid="inbox-pane"
         className="flex min-h-0 w-(--inbox-w) shrink-0 flex-col bg-app"
       >
-        <Inbox compact currentReviewId={currentReviewId} onCollapse={() => onCollapsedChange(true)} />
+        <Inbox compact onCollapse={() => onCollapsedChange(true)} />
       </aside>
     );
   return (
@@ -33,7 +31,7 @@ export function ReviewInbox({
       <InboxRail onShow={() => (layout === "tablet" ? setOpen(true) : onCollapsedChange(false))} />
       {layout === "tablet" && (
         <Sheet side="left" title="Inbox" open={open} onOpenChange={setOpen}>
-          <Inbox compact hideHead currentReviewId={currentReviewId} onOpen={() => setOpen(false)} />
+          <Inbox compact hideHead onOpen={() => setOpen(false)} />
         </Sheet>
       )}
     </>

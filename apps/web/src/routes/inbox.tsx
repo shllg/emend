@@ -39,13 +39,11 @@ function readKind(): Kind {
 
 export function Inbox({
   compact = false,
-  currentReviewId,
   hideHead = false,
   onCollapse,
   onOpen,
 }: {
   compact?: boolean;
-  currentReviewId?: string;
   hideHead?: boolean;
   onCollapse?: () => void;
   onOpen?: () => void;
@@ -107,11 +105,8 @@ export function Inbox({
     (review) =>
       (!machineFilter || review.origin.id === machineFilter) &&
       (!projectFilter || review.project === projectFilter) &&
-      // Keep the open sidebar review, and never hide an agent-waiting item under Reviews.
-      (!kind ||
-        review.kind === kind ||
-        (kind === "review" && review.agentWaiting) ||
-        (compact && review.id === currentReviewId)) &&
+      // Never hide an agent-waiting item under Reviews.
+      (!kind || review.kind === kind || (kind === "review" && review.agentWaiting)) &&
       [review.title, review.branch, review.origin.name, review.project].some((value) =>
         value?.toLocaleLowerCase().includes(needle),
       ),
