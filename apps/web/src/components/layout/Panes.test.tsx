@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { defaultLayout, layoutKey, layoutStore } from "../../lib/layout-store.ts";
+import { OUTLINE_WIDTH } from "../reading/WriteupOutline.tsx";
 import { Panes } from "./Panes.tsx";
 
 let width: number;
@@ -33,18 +34,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function mount(hasDiff = true) {
-  return render(
+function mount(hasDiff = true, hasWriteup = false) {
+  const ui = (tab: string) => (
     <Panes
       inbox={<aside>Inbox</aside>}
       header={null}
       reading="Writeup"
       diff={<input aria-label="Diff editor" defaultValue="Draft" />}
       phoneTabs={null}
-      tab="writeup"
+      tab={tab}
       hasDiff={hasDiff}
-    />,
+      hasWriteup={hasWriteup}
+    />
   );
+  const view = render(ui("writeup"));
+  return { ...view, rerender: (tab: string) => view.rerender(ui(tab)) };
 }
 function inbox() {
   return screen.getByRole("separator", { name: "Resize inbox" });
@@ -106,6 +110,86 @@ test("reading limits reserve 440px for diff, preserve 360px at small widths and 
   expect(reading().getAttribute("aria-valuemax")).toBe("360");
   expect(layoutStore.getSnapshot().readingShare).toBe(defaultLayout.readingShare);
 });
+
+test("Contents adds the outline width to Split reading and removes it when switched off", () => {
+  mount(true, true);
+  const pane = screen.getByTestId("reading-pane");
+  expect(pane.style.flexBasis).toBe("504px");
+  act(() => layoutStore.update({ contents: true }));
+  expect(pane.style.flexBasis).toBe(`${504 + OUTLINE_WIDTH}px`);
+  act(() => layoutStore.update({ contents: false }));
+  expect(pane.style.flexBasis).toBe("504px");
+  expect(layoutStore.getSnapshot().readingShare).toBe(defaultLayout.readingShare);
+});
+
+test("Contents keeps the extra reading width when switching tabs", () => {
+  const view = mount(true, true);
+  act(() => layoutStore.update({ contents: true }));
+  const diff = screen.getByTestId("diff-pane");
+  for (const tab of ["files", "docs", "comments", "diff", "writeup"]) {
+    view.rerender(tab);
+    expect(screen.getByTestId("reading-pane").style.flexBasis).toBe(`${504 + OUTLINE_WIDTH}px`);
+    expect(screen.getByTestId("diff-pane")).toBe(diff);
+  }
+});
+
+test("Contents caps the extra reading width to reserve 440px for the diff", () => {
+  width = 1000;
+  mount(true, true);
+  const pane = screen.getByTestId("reading-pane");
+  expect(pane.style.flexBasis).toBe("420px");
+  act(() => layoutStore.update({ contents: true }));
+  expect(pane.style.flexBasis).toBe("552px");
+  expect(reading().getAttribute("aria-valuemax")).toBe("552");
+  expect(width - Number.parseFloat(pane.style.flexBasis) - 8).toBe(440);
+  act(() => layoutStore.update({ contents: false }));
+  expect(pane.style.flexBasis).toBe("420px");
+});
+
+test.each([
+  { name: "without a writeup", hasWriteup: false, hasDiff: true, pane: "split", phone: false, basis: "504px" },
+  { name: "without a diff", hasWriteup: true, hasDiff: false, pane: "split", phone: false, basis: "" },
+  { name: "in Tabs", hasWriteup: true, hasDiff: true, pane: "tabs", phone: false, basis: "" },
+  { name: "on phone", hasWriteup: true, hasDiff: true, pane: "split", phone: true, basis: "" },
+] as const)("Contents adds no reading width $name", ({ hasWriteup, hasDiff, pane, phone, basis }) => {
+  vi.stubGlobal("matchMedia", () => ({ matches: !phone, addEventListener() {}, removeEventListener() {} }));
+  layoutStore.update({ pane: { desktop: pane, tablet: pane } });
+  mount(hasDiff, hasWriteup);
+  const readingPane = screen.getByTestId("reading-pane");
+  expect(readingPane.style.flexBasis).toBe(basis);
+  act(() => layoutStore.update({ contents: true }));
+  expect(readingPane.style.flexBasis).toBe(basis);
+  act(() => layoutStore.update({ contents: false }));
+  expect(readingPane.style.flexBasis).toBe(basis);
+});
+
+test.each(["keyboard", "pointer"])("a %s resize with Contents stores the width without the outline", (input) => {
+  mount(true, true);
+  act(() => layoutStore.update({ contents: true }));
+  const handle = reading();
+  const pane = screen.getByTestId("reading-pane");
+  const start = 504 + OUTLINE_WIDTH;
+  const committed = start + 16;
+  if (input === "keyboard") {
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+  } else {
+    Object.assign(handle, { setPointerCapture() {}, hasPointerCapture: () => false });
+    fireEvent.pointerDown(handle, { pointerId: 1, pointerType: "mouse", button: 0, clientX: start });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: committed });
+    expect(pane.style.flexBasis).toBe(`${committed}px`);
+    expect(layoutStore.getSnapshot().readingShare).toBe(defaultLayout.readingShare);
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: committed });
+  }
+  expect(value(handle)).toBe(committed);
+  expect(pane.style.flexBasis).toBe(`${committed}px`);
+  expect(layoutStore.getSnapshot().readingShare).toBe((committed - OUTLINE_WIDTH) / width);
+  expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}").readingShare).toBe((committed - OUTLINE_WIDTH) / width);
+  act(() => layoutStore.update({ contents: false }));
+  expect(pane.style.flexBasis).toBe(`${committed - OUTLINE_WIDTH}px`);
+  act(() => layoutStore.update({ contents: true }));
+  expect(pane.style.flexBasis).toBe(`${committed}px`);
+});
+
 test.each(["touch", "pen", "mouse"])(
   "%s drag previews without writing, captures the pointer, commits once and keeps the diff mounted",
   (pointerType) => {

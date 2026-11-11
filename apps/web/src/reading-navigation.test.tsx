@@ -17,6 +17,7 @@ import type { ParsedDiff } from "./components/diff/FileDiff.tsx";
 import { parsePair } from "./components/diff/parse.worker.ts";
 import type { DiffParser } from "./components/diff/parse-client.ts";
 import * as diffPresentation from "./components/diff/presentation.ts";
+import { OUTLINE_WIDTH } from "./components/reading/WriteupOutline.tsx";
 import { blockLink } from "./components/threads/ThreadCard.tsx";
 import { claimDraft } from "./lib/composer-owner.ts";
 import { draftKey, editDraftKey, saveDraft } from "./lib/drafts.ts";
@@ -2572,6 +2573,14 @@ test("Tabs retains the selected doc while Diff is visible and gives each panel a
 
 test.each([1280, 900, 390])("reading switches toggle independently on their tabs at %s px", async (pixels) => {
   width = pixels;
+  if (pixels === 1280) {
+    const bounds = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("em-panes")) return new DOMRect(0, 0, 1600, 800);
+      if (this.querySelector(":scope > [data-reading-scroll]")) return new DOMRect(0, 0, 1200, 800);
+      return bounds.call(this);
+    });
+  }
   if (pixels === 390) {
     layoutStore.update({ contents: true, compact: true });
     currentRevision.threads = [placedWriteupThread()];
@@ -2595,7 +2604,13 @@ test.each([1280, 900, 390])("reading switches toggle independently on their tabs
   const contents = screen.getByRole("button", { name: "Contents", pressed: false });
   const compact = screen.getByRole("button", { name: "Compact comments", pressed: false });
   const saved = () => JSON.parse(localStorage.getItem(layoutKey) ?? "{}");
+  const reading = screen.getByTestId("reading-pane");
+  const contentsOffWidth = Number.parseFloat(reading.style.flexBasis);
   fireEvent.click(contents);
+  if (pixels === 1280) {
+    expect(contentsOffWidth).toBe(504);
+    expect(Number.parseFloat(reading.style.flexBasis)).toBe(contentsOffWidth + OUTLINE_WIDTH);
+  }
   expect(contents.getAttribute("aria-pressed")).toBe("true");
   expect(compact.getAttribute("aria-pressed")).toBe("false");
   expect(saved()).toMatchObject({ contents: true, compact: false });
@@ -2605,6 +2620,7 @@ test.each([1280, 900, 390])("reading switches toggle independently on their tabs
   expect(compact.getAttribute("aria-pressed")).toBe("true");
   expect(saved()).toMatchObject({ contents: true, compact: true });
   fireEvent.click(contents);
+  if (pixels === 1280) expect(Number.parseFloat(reading.style.flexBasis)).toBe(contentsOffWidth);
   expect(contents.getAttribute("aria-pressed")).toBe("false");
   expect(compact.getAttribute("aria-pressed")).toBe("true");
   expect(saved()).toMatchObject({ contents: false, compact: true });

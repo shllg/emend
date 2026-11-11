@@ -1,6 +1,7 @@
 import { type CSSProperties, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { useLayout } from "../../lib/layout.ts";
 import { defaultLayout, layoutStore, useLayoutPreferences } from "../../lib/layout-store.ts";
+import { OUTLINE_WIDTH } from "../reading/WriteupOutline.tsx";
 import { clampWidth, RESIZE_HANDLE_WIDTH, ResizeHandle } from "./ResizeHandle.tsx";
 
 export function Panes({
@@ -12,6 +13,7 @@ export function Panes({
   sendBar,
   tab,
   hasDiff,
+  hasWriteup = false,
   tabs,
   readingLayout,
 }: {
@@ -23,6 +25,7 @@ export function Panes({
   sendBar?: ReactNode;
   tab: string;
   hasDiff: boolean;
+  hasWriteup?: boolean;
   tabs?: ReactNode;
   readingLayout?: "original";
 }) {
@@ -59,7 +62,8 @@ export function Panes({
     preferences.readingShare === defaultLayout.readingShare
       ? clampWidth(areaWidth * defaultLayout.readingShare, 420, 760)
       : areaWidth * preferences.readingShare;
-  const readingWidth = clampWidth(readingPreview ?? preferredReading, 360, maxReading);
+  const extra = split && hasDiff && hasWriteup && preferences.contents ? OUTLINE_WIDTH : 0;
+  const readingWidth = clampWidth(readingPreview ?? preferredReading + extra, 360, maxReading);
   const maxInbox = clampWidth(layoutWidth - RESIZE_HANDLE_WIDTH * (showReadingHandle ? 2 : 1) - 360 - 440, 220, 520);
   const inboxWidth =
     layout === "desktop" ? clampWidth(inboxPreview ?? preferences.inboxWidth, 220, maxInbox) : defaultLayout.inboxWidth;
@@ -110,7 +114,7 @@ export function Panes({
               max={maxReading}
               onPreview={setReadingPreview}
               onCommit={(width) => {
-                if (areaWidth > 0) layoutStore.update({ readingShare: width / areaWidth });
+                if (areaWidth > 0) layoutStore.update({ readingShare: Math.max(0, width - extra) / areaWidth });
               }}
               onReset={() => layoutStore.update({ readingShare: defaultLayout.readingShare })}
             />

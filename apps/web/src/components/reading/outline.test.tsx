@@ -9,6 +9,7 @@ import { layoutStore } from "../../lib/layout-store.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
 import { DocView } from "./DocView.tsx";
 import { Writeup } from "./Writeup.tsx";
+import { OUTLINE_WIDTH } from "./WriteupOutline.tsx";
 
 const reviewId = "11111111-1111-4111-8111-111111111111";
 const block: RenderedBlock = {
@@ -210,6 +211,7 @@ test.each([false, true])("Markdown doc comments honor compact independently and 
 
 test("Contents keeps the standard measure and the outline hides below 640px", () => {
   const outline = readFileSync(resolve(import.meta.dirname, "../../styles/outline.css"), "utf8");
+  expect(outline).toContain(`grid-template-columns: ${OUTLINE_WIDTH}px minmax(0, 1fr);`);
   expect(outline).not.toMatch(/max-width|62ch/);
   expect(outline).toMatch(
     /\.em-outline-layout \.em-reading-group,\s*\.em-outline-layout \[id\]\s*\{\s*scroll-margin-top: calc\(var\(--reading-sticky-top\) \+ 14px\);/,

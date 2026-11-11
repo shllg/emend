@@ -779,6 +779,7 @@ function LoadedReview({
           inbox={<ReviewInbox collapsed={collapsed} onCollapsedChange={setCollapsed} />}
           tab={tab}
           hasDiff={hasDiff}
+          hasWriteup={hasWriteup}
           readingLayout={docsVisible && openDoc?.kind === "html" ? "original" : undefined}
           phoneTabs={<PhoneTabs {...tabProps} />}
           tabs={<ReviewTabs {...tabProps} docsCount={revision?.docs.length ?? 0} idBase={readingId} />}

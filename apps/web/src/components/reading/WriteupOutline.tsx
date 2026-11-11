@@ -5,6 +5,8 @@ import { revealReadingTarget } from "../../lib/reading-reveal.ts";
 import { TopicRank } from "../status/TopicRank.tsx";
 import type { ReaderGroup } from "./BlockReader.tsx";
 
+export const OUTLINE_WIDTH = 184;
+
 export function WriteupOutline({
   root,
   groups,
