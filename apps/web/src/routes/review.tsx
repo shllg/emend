@@ -264,12 +264,13 @@ function LoadedReview({
   const router = useRouter();
   const liveLocation = useLocation();
   const [, rawParams, foundRoute] = router.getMatchedRoutes(liveLocation.pathname);
-  const isOwnLocation = foundRoute?.id === "/r/$reviewId" && rawParams.reviewId === routeId;
-  const [lastOwnLocation, setLastOwnLocation] = useState(liveLocation);
+  const isOwnLocation =
+    foundRoute?.id === "/r/$reviewId" && rawParams.reviewId === routeId && rawParams["**"] === undefined;
+  const [lastOwnLocation, setLastOwnLocation] = useState(() => (isOwnLocation ? liveLocation : undefined));
   if (isOwnLocation && lastOwnLocation !== liveLocation) setLastOwnLocation(liveLocation);
   const location = isOwnLocation ? liveLocation : lastOwnLocation;
-  const search = useMemo(() => validateReviewSearch(location.search), [location.search]);
-  const hash = location.hash;
+  const search = useMemo(() => validateReviewSearch(location?.search ?? {}), [location?.search]);
+  const hash = location?.hash ?? "";
   const [initialRevision] = useState(review.newestRevision);
   const seq = search.rev ?? initialRevision;
   const query = useQuery(revisionQuery(review.id, seq));
@@ -347,7 +348,7 @@ function LoadedReview({
             ? "Comments"
             : "Files",
     seq,
-    location,
+    location ?? liveLocation,
   );
   const readingFolds = useMemo(
     () => ({ reviewId: review.id, revision: seq, choices: trail.entry.folds }),

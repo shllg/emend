@@ -177,8 +177,6 @@ beforeEach(() => {
       if (path === `/api/v1/reviews/${id}`) return Response.json(currentReview);
       if (path === `/api/v1/reviews/${id}/revisions/1`) return revisionReply ?? Response.json(currentRevision);
       if (path === `/api/v1/reviews/${id}/revisions/2`) return Response.json({ ...currentRevision, seq: 2 });
-      if (/^\/api\/v1\/reviews\/[^/]+$/.test(path))
-        return Response.json({ error: { code: "unknown_review", message: "Unknown review." } }, { status: 404 });
       throw new Error(`Unexpected synthetic request: ${path}`);
     }),
   );
@@ -604,6 +602,20 @@ test.each([
     expect(paths).not.toContain("/r/undefined");
   },
 );
+
+test("a review sub-path keeps its address and empty search when leaving an open doc", async () => {
+  docsFixture();
+  currentRevision.main = gardenDoc.path;
+  const { history } = mount("");
+  await screen.findByText("Water the seedlings");
+  await waitFor(() => expect(searchParams(history).get("doc")).toBe(gardenDoc.path));
+  expect(history.location.pathname).toBe(`/r/${id}`);
+
+  await act(async () => history.push(`/r/${id}/extra`));
+  expect(history.location.pathname).toBe(`/r/${id}/extra`);
+  expect(history.location.search).toBe("");
+  await screen.findByRole("heading", { name: "Page not found" });
+});
 
 test("the sidebar opens another review on its own doc and Back restores the first review's doc", async () => {
   width = 1280;
