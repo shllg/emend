@@ -6,6 +6,7 @@ import { TopicRank } from "../status/TopicRank.tsx";
 import type { ReaderGroup } from "./BlockReader.tsx";
 
 export const OUTLINE_WIDTH = 184;
+export const OUTLINE_MIN_WIDTH = 640;
 
 export function WriteupOutline({
   root,

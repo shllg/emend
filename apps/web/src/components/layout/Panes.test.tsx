@@ -133,18 +133,123 @@ test("Contents keeps the extra reading width when switching tabs", () => {
   }
 });
 
-test("Contents caps the extra reading width to reserve 440px for the diff", () => {
-  width = 1000;
+test("Contents adds no width in tablet Split when the outline cannot fit, including after a keyboard commit", () => {
+  layoutWidth = 1024;
+  width = 972;
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query === "(min-width: 768px)",
+    addEventListener() {},
+    removeEventListener() {},
+  }));
+  layoutStore.update({ pane: { desktop: "split", tablet: "split" } });
   mount(true, true);
   const pane = screen.getByTestId("reading-pane");
   expect(pane.style.flexBasis).toBe("420px");
+  expect(reading().getAttribute("aria-valuemin")).toBe("360");
+  expect(width - Number.parseFloat(pane.style.flexBasis) - 8).toBe(544);
   act(() => layoutStore.update({ contents: true }));
-  expect(pane.style.flexBasis).toBe("552px");
-  expect(reading().getAttribute("aria-valuemax")).toBe("552");
+  expect(pane.style.flexBasis).toBe("420px");
+  expect(reading().getAttribute("aria-valuemin")).toBe("360");
+  expect(reading().getAttribute("aria-valuemax")).toBe("524");
+  expect(width - Number.parseFloat(pane.style.flexBasis) - 8).toBe(544);
+  fireEvent.keyDown(reading(), { key: "ArrowRight" });
+  expect(pane.style.flexBasis).toBe("436px");
+  expect(layoutStore.getSnapshot().readingShare).toBe(436 / width);
+  expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}").readingShare).toBe(436 / width);
+  act(() => layoutStore.update({ contents: false }));
+  expect(pane.style.flexBasis).toBe("436px");
+});
+
+test.each([1112, 1128])("Contents caps reading at the diff reserve with a 664px minimum in a %ipx area", (area) => {
+  width = area;
+  layoutStore.update({ readingShare: 0.5 });
+  mount(true, true);
+  const pane = screen.getByTestId("reading-pane");
+  expect(pane.style.flexBasis).toBe(`${width / 2}px`);
+  act(() => layoutStore.update({ contents: true }));
+  const maxReading = width - 8 - 440;
+  expect(width / 2 + OUTLINE_WIDTH).toBeGreaterThan(maxReading);
+  expect(pane.style.flexBasis).toBe(`${maxReading}px`);
+  expect(value(reading())).toBeGreaterThanOrEqual(664);
+  expect(reading().getAttribute("aria-valuemin")).toBe("664");
+  expect(reading().getAttribute("aria-valuemax")).toBe(String(maxReading));
   expect(width - Number.parseFloat(pane.style.flexBasis) - 8).toBe(440);
   act(() => layoutStore.update({ contents: false }));
-  expect(pane.style.flexBasis).toBe("420px");
+  expect(pane.style.flexBasis).toBe(`${width / 2}px`);
+  expect(reading().getAttribute("aria-valuemin")).toBe("360");
 });
+
+test.each(["keyboard", "pointer"])(
+  "a %s resize with Contents clamps to 664px and round-trips without a jump",
+  (input) => {
+    mount(true, true);
+    act(() => layoutStore.update({ contents: true }));
+    const handle = reading();
+    const pane = screen.getByTestId("reading-pane");
+    expect(handle.getAttribute("aria-valuemin")).toBe("664");
+    if (input === "keyboard") {
+      fireEvent.keyDown(handle, { key: "Home" });
+    } else {
+      Object.assign(handle, { setPointerCapture() {}, hasPointerCapture: () => false });
+      fireEvent.pointerDown(handle, { pointerId: 1, pointerType: "mouse", button: 0, clientX: value(handle) });
+      fireEvent.pointerMove(handle, { pointerId: 1, clientX: 640 });
+      expect(pane.style.flexBasis).toBe("664px");
+      expect(layoutStore.getSnapshot().readingShare).toBe(defaultLayout.readingShare);
+      fireEvent.pointerUp(handle, { pointerId: 1, clientX: 640 });
+    }
+    expect(value(handle)).toBe(664);
+    expect(pane.style.flexBasis).toBe("664px");
+    expect(layoutStore.getSnapshot().readingShare).toBe((664 - OUTLINE_WIDTH) / width);
+    expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}").readingShare).toBe((664 - OUTLINE_WIDTH) / width);
+    for (const shiftKey of [false, true]) {
+      fireEvent.keyDown(handle, { key: "ArrowLeft", shiftKey });
+      expect(value(handle)).toBe(664);
+      expect(pane.style.flexBasis).toBe("664px");
+    }
+    act(() => layoutStore.update({ contents: false }));
+    expect(pane.style.flexBasis).toBe("480px");
+    expect(handle.getAttribute("aria-valuemin")).toBe("360");
+    act(() => layoutStore.update({ contents: true }));
+    expect(pane.style.flexBasis).toBe("664px");
+    expect(handle.getAttribute("aria-valuemin")).toBe("664");
+  },
+);
+
+test("an End commit with Contents stores the maximum without the outline and round-trips", () => {
+  mount(true, true);
+  act(() => layoutStore.update({ contents: true }));
+  const handle = reading();
+  const pane = screen.getByTestId("reading-pane");
+  const maxReading = width - 8 - 440;
+  fireEvent.keyDown(handle, { key: "End" });
+  expect(value(handle)).toBe(maxReading);
+  expect(pane.style.flexBasis).toBe(`${maxReading}px`);
+  expect(layoutStore.getSnapshot().readingShare).toBe((maxReading - OUTLINE_WIDTH) / width);
+  expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}").readingShare).toBe((maxReading - OUTLINE_WIDTH) / width);
+  fireEvent.keyDown(handle, { key: "ArrowRight", shiftKey: true });
+  expect(value(handle)).toBe(maxReading);
+  act(() => layoutStore.update({ contents: false }));
+  expect(pane.style.flexBasis).toBe(`${maxReading - OUTLINE_WIDTH}px`);
+  act(() => layoutStore.update({ contents: true }));
+  expect(pane.style.flexBasis).toBe(`${maxReading}px`);
+});
+
+test.each(["keyboard", "double-click"])(
+  "a %s reset with Contents restores the default share plus the outline",
+  (input) => {
+    mount(true, true);
+    act(() => layoutStore.update({ contents: true }));
+    const handle = reading();
+    fireEvent.keyDown(handle, { key: "Home" });
+    expect(layoutStore.getSnapshot().readingShare).not.toBe(defaultLayout.readingShare);
+    if (input === "keyboard") fireEvent.keyDown(handle, { key: "Enter" });
+    else fireEvent.doubleClick(handle);
+    expect(value(handle)).toBe(504 + OUTLINE_WIDTH);
+    expect(screen.getByTestId("reading-pane").style.flexBasis).toBe(`${504 + OUTLINE_WIDTH}px`);
+    expect(layoutStore.getSnapshot().readingShare).toBe(defaultLayout.readingShare);
+    expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}").readingShare).toBe(defaultLayout.readingShare);
+  },
+);
 
 test.each([
   { name: "without a writeup", hasWriteup: false, hasDiff: true, pane: "split", phone: false, basis: "504px" },

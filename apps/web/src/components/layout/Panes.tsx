@@ -1,7 +1,7 @@
 import { type CSSProperties, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { useLayout } from "../../lib/layout.ts";
 import { defaultLayout, layoutStore, useLayoutPreferences } from "../../lib/layout-store.ts";
-import { OUTLINE_WIDTH } from "../reading/WriteupOutline.tsx";
+import { OUTLINE_MIN_WIDTH, OUTLINE_WIDTH } from "../reading/WriteupOutline.tsx";
 import { clampWidth, RESIZE_HANDLE_WIDTH, ResizeHandle } from "./ResizeHandle.tsx";
 
 export function Panes({
@@ -62,8 +62,11 @@ export function Panes({
     preferences.readingShare === defaultLayout.readingShare
       ? clampWidth(areaWidth * defaultLayout.readingShare, 420, 760)
       : areaWidth * preferences.readingShare;
-  const extra = split && hasDiff && hasWriteup && preferences.contents ? OUTLINE_WIDTH : 0;
-  const readingWidth = clampWidth(readingPreview ?? preferredReading + extra, 360, maxReading);
+  const outlinePane = OUTLINE_MIN_WIDTH + 24; // Room for a classic vertical scrollbar.
+  const outline = split && hasDiff && hasWriteup && preferences.contents && maxReading >= outlinePane;
+  const extra = outline ? OUTLINE_WIDTH : 0;
+  const minReading = outline ? outlinePane : 360;
+  const readingWidth = clampWidth(readingPreview ?? preferredReading + extra, minReading, maxReading);
   const maxInbox = clampWidth(layoutWidth - RESIZE_HANDLE_WIDTH * (showReadingHandle ? 2 : 1) - 360 - 440, 220, 520);
   const inboxWidth =
     layout === "desktop" ? clampWidth(inboxPreview ?? preferences.inboxWidth, 220, maxInbox) : defaultLayout.inboxWidth;
@@ -110,7 +113,7 @@ export function Panes({
               key="reading-handle"
               label="Resize reading pane"
               value={readingWidth}
-              min={360}
+              min={minReading}
               max={maxReading}
               onPreview={setReadingPreview}
               onCommit={(width) => {
