@@ -1312,7 +1312,7 @@ const FONT_BULK_TAGS = new Set([
   "CBDT", "CBLC", "EBDT", "EBLC", "sbix", "COLR", "cvt ", "fpgm", "prep", "HVAR", "VVAR",
 ]);
 
-function fontStrictPrefix(tag: string, table: Buffer): number {
+function fontStrictPrefix(tag: string, table: Buffer, budget: ScanBudget): number {
   if (!FONT_BULK_TAGS.has(tag)) return table.length;
   if (tag !== "CFF ") return 0;
   // The header and the Name, Top DICT and String INDEXes hold the font's names; charstrings follow.
@@ -1324,13 +1324,19 @@ function fontStrictPrefix(tag: string, table: Buffer): number {
       if (!count) { at += 2; continue; }
       const offSize = table[at + 2] ?? 0;
       if (offSize < 1 || offSize > 4) throw new Error();
-      const last = table.readUIntBE(at + 3 + count * offSize, offSize);
-      if (last < 1) throw new Error();
+      budget.spend(count + 1);
+      let last = 1;
+      for (let i = 0; i <= count; i++) {
+        const offset = table.readUIntBE(at + 3 + i * offSize, offSize);
+        if ((!i && offset !== 1) || offset < last) throw new Error();
+        last = offset;
+      }
       at += 3 + (count + 1) * offSize + last - 1;
       if (at > table.length) throw new Error();
     }
     return Math.max(at, Math.min(table.length, 64 * 1024));
-  } catch {
+  } catch (error) {
+    if (error instanceof BudgetExceeded) throw error;
     return table.length;
   }
 }
@@ -1339,7 +1345,7 @@ class BudgetExceeded extends PublicCheckError {
   constructor() { super(1, "check:public: scan expansion budget exceeded"); }
 }
 
-/** One owner for every expansion and decoded view in a top-level scan. */
+/** One owner for structural traversal, expansions and decoded views in a top-level scan. */
 export class ScanBudget {
   remaining: number;
   /** Deterministic terminator-search work, shared by nested inline assets and visible to tests. */
@@ -1581,7 +1587,7 @@ function assetBulkRanges(buffer: Buffer, kind: string, budget: ScanBudget): Byte
       for (const { tag, offset, length } of tables.sort((a, b) => a.offset - b.offset)) {
         if (offset < previous) throw new Error();
         previous = offset + length;
-        const prefix = fontStrictPrefix(tag, buffer.subarray(offset, offset + length));
+        const prefix = fontStrictPrefix(tag, buffer.subarray(offset, offset + length), budget);
         if (prefix < length) ranges.push([offset + prefix, offset + length]);
       }
     }

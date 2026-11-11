@@ -5023,8 +5023,11 @@ test("round 22.3 CX2: malformed terms remain visible", () => {
 });
 
 test("round 22.3 OP3: byte-view and normalization budgets ignore term-list presence", () => {
-  for (const terms of [empty, round23Terms])
+  const expanding = Buffer.concat([Buffer.from("\ufdfa".repeat(128), "utf16le").swap16(), Buffer.from("%41\0")]);
+  for (const terms of [empty, round23Terms]) {
     assert.throws(() => checkBuffer(Buffer.alloc(1024), "fixture.bin", terms, true, true, 0, new ScanBudget(4096)), /budget/);
+    assert.throws(() => checkBuffer(expanding, "fixture.bin", terms, true, true, 0, new ScanBudget(32 * expanding.length)), /budget/);
+  }
   const bytes = Buffer.from("plain public fixture text line\n".repeat(Math.ceil(3600 * 1024 / 31))).subarray(0, 3600 * 1024);
   const half = Math.floor(bytes.length / 2);
   const text = `x = "${round19Prefix}\n${round23B64(bytes.subarray(0, half - 1))}\n${round23B64(bytes.subarray(half))}";`;
@@ -5725,15 +5728,15 @@ for (const encoding of ["UTF-16LE", "UTF-16BE"] as const)
     assertAssetRefused(html, "fixture.html");
   });
 
-function assetCff(value: string): Buffer {
+function assetCff(value: string, indexes: { name?: Buffer; strings?: Buffer } = {}): Buffer {
   const name = Buffer.from("PublicFixtureFont"), filler = Buffer.alloc(80 * 1024), string = Buffer.from(value);
   const strings = Buffer.alloc(15);
   strings.writeUInt16BE(2); strings[2] = 4;
   strings.writeUInt32BE(1, 3); strings.writeUInt32BE(filler.length + 1, 7);
   strings.writeUInt32BE(filler.length + string.length + 1, 11);
   return Buffer.concat([
-    Buffer.from([1, 0, 4, 4]), Buffer.from([0, 1, 1, 1, name.length + 1]), name,
-    Buffer.from([0, 1, 1, 1, 4, 248, 28, 2]), strings, filler, string, seededAssetBytes(2 * 1024 * 1024),
+    Buffer.from([1, 0, 4, 4]), indexes.name ?? Buffer.concat([Buffer.from([0, 1, 1, 1, name.length + 1]), name]),
+    Buffer.from([0, 1, 1, 1, 4, 248, 28, 2]), indexes.strings ?? Buffer.concat([strings, filler, string]), seededAssetBytes(2 * 1024 * 1024),
   ]);
 }
 
@@ -5754,3 +5757,18 @@ test("issue 35 final: invalid CFF header retains private terms at 100 KiB", () =
   const bytes = assetSfnt([["CFF ", cff], ["name", fontNameTable("Public Fixture Font", 3)]], Buffer.alloc(0), true);
   assertBudgetedFontRefused(bytes, "fixture.otf", new ScanBudget(5 * bytes.length));
 });
+
+for (const [label, index, offsets, termOffset] of [
+  ["decreasing String INDEX offsets", "strings", [1, 122880, 122880 + assetTerm.length, 2], 122880],
+  ["Name INDEX first offset other than 1", "name", [112640, 112640 + assetTerm.length, 2], 112640],
+] as const)
+  test(`issue 35 final-check: large OTF retains private terms with ${label}`, () => {
+    const dataStart = 3 + offsets.length * 4;
+    const malformed = Buffer.alloc(dataStart + termOffset - 1 + assetTerm.length);
+    malformed.writeUInt16BE(offsets.length - 1); malformed[2] = 4;
+    offsets.forEach((offset, i) => malformed.writeUInt32BE(offset, 3 + i * 4));
+    malformed.write(assetTerm, dataStart + termOffset - 1);
+    const cff = assetCff("Public Fixture Font", { [index]: malformed });
+    const bytes = assetSfnt([["CFF ", cff], ["name", fontNameTable("Public Fixture Font", 3)]], Buffer.alloc(0), true);
+    assertBudgetedFontRefused(bytes, "fixture.otf", new ScanBudget(5 * bytes.length));
+  });
