@@ -6,6 +6,7 @@ import {
   LIMITS,
   type PublishRequest,
   type PublishResponse,
+  writeupMarkdown,
 } from "@emend/contract";
 import { composeRenames, decodeText } from "@emend/core";
 import { and, desc, eq, isNull } from "drizzle-orm";
@@ -108,14 +109,7 @@ async function computePublish(
   input: PublishRequest,
   deps: Deps,
 ): Promise<PublishResponse> {
-  const writeup = input.writeup;
-  const writeupEmpty = [
-    writeup.overview,
-    writeup.tldr,
-    writeup.decisions,
-    writeup.glossary,
-    ...Object.values(writeup.topics).flatMap((topic) => [topic.why, topic.example, topic.body]),
-  ].every((section) => !section?.trim());
+  const writeupEmpty = writeupMarkdown(input.writeup).every((section) => !section?.trim());
   const worker = deps.executor ? undefined : workerExecutor();
   const run = deps.executor ?? worker;
   if (!run) throw new Error("Missing executor");

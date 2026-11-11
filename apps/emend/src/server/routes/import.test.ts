@@ -387,6 +387,36 @@ test("a round trip keeps links and repoUrl from the source blob and links issue 
   expect(html).toContain('href="https://github.com/owner/name/issues/5"');
 });
 
+test.each([undefined, "outOfScope", "whereToLook", "context"] as const)(
+  "import re-renders the source order and computes emptiness with optional %s",
+  async (field) => {
+    const input = await bundle(f);
+    for (const [index, row] of input.writeups.entries()) {
+      const source = {
+        overview: "",
+        tldr: "",
+        decisions: "",
+        glossary: "",
+        topics: {},
+        [field ?? "overview"]: index === 0 ? "<!-- source text -->" : " \n\t",
+      };
+      row.sourceBlob = await f.deps.blobs.put(f.ownerId, Buffer.from(JSON.stringify(source)), "application/json");
+      required(input.revisions[index]).writeupEmpty = index === 0;
+    }
+    expect((await f.importRequest("/import", input)).status).toBe(201);
+    for (const seq of [1, 2]) {
+      const response = await f.request(`/reviews/${input.review.id}/revisions/${seq}`, "GET");
+      expect(response.status).toBe(200);
+      const revision = RevisionView.parse(await response.json());
+      expect(revision.writeupEmpty).toBe(seq === 2);
+      expect(revision.writeup.sections.map((section) => section.key)).toEqual(
+        field ? ["tldr", "overview", field, "decisions", "glossary"] : ["overview", "tldr", "decisions", "glossary"],
+      );
+      expect(revision.writeup.sections.every((section) => section.blocks.length === 0)).toBe(true);
+    }
+  },
+);
+
 test("a source blob with a hostile link or repoUrl is refused", async () => {
   for (const extra of [{ links: [{ url: "javascript:alert(1)", label: "x" }] }, { repoUrl: "http://github.com/o/r" }]) {
     const input = await bundle(f);

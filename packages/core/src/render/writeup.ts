@@ -45,8 +45,17 @@ export async function renderWriteup(
       ),
     });
   };
-  await append("overview", "Overview", writeup.overview);
-  await append("tldr", "TL;DR", writeup.tldr);
+  if (writeup.outOfScope !== undefined || writeup.whereToLook !== undefined || writeup.context !== undefined) {
+    await append("tldr", "TL;DR", writeup.tldr);
+    await append("overview", "Overview", writeup.overview);
+    await append("outOfScope", "Out of scope", writeup.outOfScope);
+    await append("whereToLook", "Where to look", writeup.whereToLook);
+    await append("context", "Context", writeup.context);
+  } else {
+    // Keep old manifests unchanged, including imports that re-render their source.
+    await append("overview", "Overview", writeup.overview);
+    await append("tldr", "TL;DR", writeup.tldr);
+  }
   await append("decisions", "Decisions and drift", writeup.decisions ?? unwrittenDecisions);
   await append("glossary", "Glossary", writeup.glossary);
   // ECMAScript's stable sort preserves manifest order for equal importance.

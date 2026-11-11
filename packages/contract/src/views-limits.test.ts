@@ -90,11 +90,14 @@ test("topics accept the full publish limit, including Other changes", () => {
     expect(RevisionView.shape.topics.safeParse(topics).success).toBe(size === LIMITS.topicsPerReview);
   }
 });
-test("section count allows four fixed sections and three for every writeup topic", () => {
-  const sections = ["overview", "tldr", "decisions", "glossary"].map((key) => ({ ...section, key }));
+test("section count allows seven fixed sections and three for every writeup topic", () => {
+  const sections = ["overview", "tldr", "outOfScope", "whereToLook", "context", "decisions", "glossary"].map((key) => ({
+    ...section,
+    key,
+  }));
   for (let i = 0; i < LIMITS.topicsPerReview; i++)
     for (const suffix of ["why", "example", "body"]) sections.push({ ...section, key: `t-topic-${i}-${suffix}` });
-  expect(RenderedWriteup.shape.sections.safeParse(sections).success).toBe(true);
+  expect(RenderedWriteup.parse({ sections })).toEqual({ sections });
   expect(RenderedWriteup.shape.sections.safeParse([...sections, section]).success).toBe(false);
 });
 test("section keys and generated labels allow the longest valid topic slug and title", () => {

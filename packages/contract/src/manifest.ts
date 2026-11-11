@@ -13,25 +13,40 @@ const markdown = z
     "writeup section exceeds the UTF-8 byte limit",
   );
 
-export const WriteupInput = z
-  .object({
-    overview: markdown,
-    tldr: markdown,
-    decisions: markdown.nullable(),
-    glossary: markdown.optional(),
-    topics: z
-      .record(TopicSlug, z.object({ why: markdown, example: markdown.optional(), body: markdown.optional() }))
-      .refine((topics) => Object.keys(topics).length <= LIMITS.topicsPerReview, "too many writeup topics")
-      .transform((topics) => Object.assign(Object.create(null) as typeof topics, topics)),
-  })
-  .refine((writeup) => {
-    const sections = [writeup.overview, writeup.tldr, writeup.decisions, writeup.glossary];
-    for (const topic of Object.values(writeup.topics)) sections.push(topic.why, topic.example, topic.body);
-    return (
-      sections.reduce((bytes, section) => bytes + encoder.encode(section ?? "").byteLength, 0) <= LIMITS.writeupBytes
-    );
-  }, "writeup exceeds the total UTF-8 byte limit");
-export type WriteupInput = z.infer<typeof WriteupInput>;
+const writeupInput = z.object({
+  overview: markdown,
+  tldr: markdown,
+  outOfScope: markdown.optional(),
+  whereToLook: markdown.optional(),
+  context: markdown.optional(),
+  decisions: markdown.nullable(),
+  glossary: markdown.optional(),
+  topics: z
+    .record(TopicSlug, z.object({ why: markdown, example: markdown.optional(), body: markdown.optional() }))
+    .refine((topics) => Object.keys(topics).length <= LIMITS.topicsPerReview, "too many writeup topics")
+    .transform((topics) => Object.assign(Object.create(null) as typeof topics, topics)),
+});
+export type WriteupInput = z.infer<typeof writeupInput>;
+
+export const WriteupInput = writeupInput.refine((writeup) => {
+  return (
+    writeupMarkdown(writeup).reduce<number>((bytes, section) => bytes + encoder.encode(section ?? "").byteLength, 0) <=
+    LIMITS.writeupBytes
+  );
+}, "writeup exceeds the total UTF-8 byte limit");
+
+export function writeupMarkdown(writeup: WriteupInput): (string | null | undefined)[] {
+  return [
+    writeup.overview,
+    writeup.tldr,
+    writeup.outOfScope,
+    writeup.whereToLook,
+    writeup.context,
+    writeup.decisions,
+    writeup.glossary,
+    ...Object.values(writeup.topics).flatMap((topic) => [topic.why, topic.example, topic.body]),
+  ];
+}
 
 const commit = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/, "expected a full commit hash");
 const source = z

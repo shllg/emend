@@ -80,6 +80,63 @@ test("omits missing optional sections but preserves explicitly empty sections", 
   expect(rendered.sections.every((section) => section.blocks.length === 0)).toBe(true);
 });
 
+test("new writeups start with the summary, overview, scope, guide and context", async () => {
+  const rendered = await renderWriteup(
+    { ...writeup, outOfScope: "- Delays", whereToLook: "- Check the retry loop", context: "- No new dependency" },
+    topics,
+  );
+  const legacy = await renderWriteup(writeup, topics);
+  expect(rendered.sections.map(({ key, label }) => [key, label])).toEqual([
+    ["tldr", "TL;DR"],
+    ["overview", "Overview"],
+    ["outOfScope", "Out of scope"],
+    ["whereToLook", "Where to look"],
+    ["context", "Context"],
+    ...legacy.sections.slice(2).map(({ key, label }) => [key, label]),
+  ]);
+  expect(rendered.sections.slice(5)).toEqual(legacy.sections.slice(2));
+});
+
+test.each(["outOfScope", "whereToLook", "context"] as const)(
+  "a present %s selects the new order, including an empty string, and omits absent fields",
+  async (field) => {
+    for (const value of ["", "Synthetic text"]) {
+      const rendered = await renderWriteup({ overview: "", tldr: "", decisions: "", topics: {}, [field]: value }, []);
+      expect(rendered.sections.map((section) => section.key)).toEqual(["tldr", "overview", field, "decisions"]);
+      expect(rendered.sections[2]?.blocks).toHaveLength(value ? 1 : 0);
+    }
+  },
+);
+
+test.each(["outOfScope", "whereToLook", "context"] as const)("sanitizes hostile Markdown in %s", async (field) => {
+  const source = "graph TD; A-->B; click A callback";
+  const markdown = [
+    "<script>bad()</script>",
+    'Before <img src=x onerror="bad()"> after',
+    "[Unsafe link](javascript:bad())",
+    '<div onclick="bad()" style="position:fixed" id="raw" class="injected" data-foo="x">Raw HTML</div>',
+    '<svg onload="bad()"><circle /></svg>',
+    `\`\`\`mermaid\n${source}\n\`\`\``,
+  ].join("\n\n");
+  const rendered = await renderWriteup({ ...writeup, [field]: markdown }, []);
+  const blocks = rendered.sections.find((section) => section.key === field)?.blocks ?? [];
+  const html = blocks.map((block) => block.html).join("");
+  expect(html).toContain("Raw HTML");
+  expect(html).toContain("Unsafe link");
+  expect(html).toContain('id="user-content-raw"');
+  expect(html).toContain("user-content-injected");
+  expect(html).not.toMatch(
+    /<(script|style|iframe|object|embed|form|svg)|\s(on\w+|style|data-[\w-]+)=|javascript:|data:|vbscript:/i,
+  );
+  expect(blocks.filter((block) => block.kind === "diagram")).toEqual([
+    expect.objectContaining({ kind: "diagram", source, text: source, html: "" }),
+  ]);
+  for (const block of blocks) {
+    expect(block.section).toBe(field);
+    expect(BlockId.parse(block.id)).toMatch(new RegExp(`^${field}-`));
+  }
+});
+
 test("sanitizes raw glossary HTML through the same pipeline", async () => {
   const rendered = await renderWriteup(
     {

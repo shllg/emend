@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { PublishManifest, WriteupInput } from "./index.ts";
+import { PublishManifest, WriteupInput, writeupMarkdown } from "./index.ts";
 
 const topic = { slug: "routing", title: "Routing", importance: 20, summary: "Simplify route lookup." };
 const manifest = {
@@ -16,6 +16,46 @@ const manifest = {
 };
 
 describe("publish manifest", () => {
+  test("preserves old writeups and optional opening fields", () => {
+    expect(WriteupInput.parse(manifest.writeup)).toEqual(manifest.writeup);
+    for (const field of ["outOfScope", "whereToLook", "context"] as const) {
+      for (const value of ["", "  **Synthetic context.**\n"]) {
+        const writeup = { ...manifest.writeup, [field]: value };
+        expect(WriteupInput.parse(writeup)).toEqual(writeup);
+        expect(PublishManifest.parse({ ...manifest, writeup }).writeup).toEqual(writeup);
+      }
+      expect(WriteupInput.safeParse({ ...manifest.writeup, [field]: null }).success).toBe(false);
+    }
+  });
+
+  test("enumerates all Markdown fields, including optional topic content", () => {
+    expect(
+      writeupMarkdown({
+        overview: "Overview",
+        tldr: "Summary",
+        outOfScope: "Excluded",
+        whereToLook: "Guide",
+        context: "Context",
+        decisions: null,
+        topics: { routing: { why: "Why", example: "Example", body: "Details" }, fallback: { why: "Fallback" } },
+      }),
+    ).toEqual([
+      "Overview",
+      "Summary",
+      "Excluded",
+      "Guide",
+      "Context",
+      null,
+      undefined,
+      "Why",
+      "Example",
+      "Details",
+      "Fallback",
+      undefined,
+      undefined,
+    ]);
+  });
+
   test.each(["critical", "review", "skim"])("preserves optional attention %s without changing order", (attention) => {
     const topics = [
       { ...topic, importance: 30, attention },

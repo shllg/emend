@@ -1,5 +1,13 @@
 import { describe, expect, test } from "vitest";
-import { Target } from "./index.ts";
+import { BlockId, Target } from "./index.ts";
+
+test.each(["outOfScope", "whereToLook", "context"])("accepts block ids for %s", (section) => {
+  for (const suffix of ["", "-2", "-10"]) {
+    const id = `${section}-1234abcd${suffix}`;
+    expect(BlockId.parse(id)).toBe(id);
+  }
+  expect(BlockId.safeParse(`${section}-not-a-hash`).success).toBe(false);
+});
 
 const span = { blockId: "overview-1234abcd", quote: "route", prefix: "", suffix: "" };
 const lines = {

@@ -7,6 +7,7 @@ import {
   indexImportBundle,
   LIMITS,
   PublishRequest,
+  writeupMarkdown,
 } from "@emend/contract";
 import { decodeText } from "@emend/core";
 import { and, eq } from "drizzle-orm";
@@ -228,13 +229,7 @@ export async function prepareImport(ownerId: string, bundle: ImportBundle, deps:
       });
       empty.set(
         revision.id,
-        [
-          input.writeup.overview,
-          input.writeup.tldr,
-          input.writeup.decisions,
-          input.writeup.glossary,
-          ...Object.values(input.writeup.topics).flatMap((t) => [t.why, t.example, t.body]),
-        ].every((s) => !s?.trim()),
+        writeupMarkdown(input.writeup).every((s) => !s?.trim()),
       );
     }
     // Check even supplied derived references, which will never be served as trusted HTML.

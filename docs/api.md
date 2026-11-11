@@ -272,8 +272,8 @@ both fields are optional in the view, and revisions published before they existe
 Base/head are nullable full commit hashes; head also permits `worktree`.
 `main` is `"writeup" | FilePath | null`: the manifest's main page, or null when omitted.
 `writeupEmpty` is a boolean computed at publish from the source Markdown, before rendering:
-true only when overview, tldr, decisions, glossary, and every topic's why, example and body
-are missing or whitespace only. Both fields are stored on the revision; revisions predating
+true only when overview, tldr, outOfScope, whereToLook, context, decisions, glossary, and every
+topic's why, example and body are missing or whitespace only. Both fields are stored on the revision; revisions predating
 these fields read as `main: null`, `writeupEmpty: false` and keep opening on Writeup.
 Without an explicit visible `tab` in the URL, the app opens the main page when set; otherwise
 it opens Writeup if it has text, the first doc in manifest order, Diff if any file has role
@@ -496,8 +496,8 @@ to make a read fit a per-Send or per-revision limit. The limits below apply to t
 | `RevisionView.topics` | `topicsPerReview + 1` (201): up to 200 declared topics plus the reserved Other changes entry, as in publish |
 | `RevisionView.files`, `RevisionView.docs` | Each at most `filesPerRevision` (10000), the publish file limit |
 | `FileView.order` | Zero through `filesPerRevision - 1` (9999), the publisher's zero-based file-array index |
-| `RenderedWriteup.sections` | At most `4 + 3 * topicsPerReview` (604): four fixed sections and Why/Example/Details for each writeup topic |
-| `RenderedWriteup.sections[].key`, `RenderedBlock.section` | Renderer-generated keys: overview, tldr, decisions, glossary or `t-<TopicSlug>-why/example/body`; block sections also allow `doc-<hash8>`. TopicSlug permits 1–64 characters, so the longest topic section key is 74 characters |
+| `RenderedWriteup.sections` | At most `7 + 3 * topicsPerReview` (607): seven fixed sections and Why/Example/Details for each writeup topic |
+| `RenderedWriteup.sections[].key`, `RenderedBlock.section` | Renderer-generated keys: overview, tldr, outOfScope, whereToLook, context, decisions, glossary or `t-<TopicSlug>-why/example/body`; block sections also allow `doc-<hash8>`. TopicSlug permits 1–64 characters, so the longest topic section key is 74 characters |
 | `RenderedWriteup.sections[].label` | `titleChars + " — Example".length` (210), the longest renderer suffix appended to a topic title |
 | Section `blocks` and Markdown doc `blocks` | Each at most `blocksPerRevision` (100000); the same limit also applies to all writeup blocks combined and to writeup plus doc blocks combined |
 | `RenderedBlock.html`, `text`, `source` | Each bounded by `renderedBytesPerRevision` (268435456) UTF-8 bytes, the stored renderer output budget; source is optional |
@@ -858,12 +858,17 @@ text. There are at most `topicsPerReview` declared topics and writeup topic keys
 blast-radius scopes and notes obey `summaryChars`, `blastScopeChars` and `blastNoteChars`.
 Markdown strings are preserved exactly; the schema does not render or sanitize them.
 
-`WriteupInput = { overview, tldr, decisions: string | null, glossary?, topics }`. Sections are
-Markdown strings; `topics` maps slugs to `{ why, example?, body? }`, also Markdown. Decisions is
+`WriteupInput = { overview, tldr, outOfScope?, whereToLook?, context?, decisions: string | null, glossary?, topics }`.
+Sections are Markdown strings; `topics` maps slugs to `{ why, example?, body? }`, also Markdown. Decisions is
 required, with `null` representing no decisions section.
+The three new fields `outOfScope`, `whereToLook` and `context` are optional, additive fields under `/api/v1`.
+When any is present, even as an empty string, sections render as TL;DR, Overview, Out of scope,
+Where to look, Context, Decisions and drift, Glossary, then topics; absent optional fields emit no section.
+Without them, the existing order stays Overview, TL;DR, Decisions and drift, Glossary, then topics,
+including when an import re-renders stored source.
 Every Markdown string is limited to `writeupSectionBytes` UTF-8 bytes; the sum of all present
-`overview`, `tldr`, `decisions`, `glossary`, `why`, `example` and `body` strings is limited to
-`writeupBytes`. These limits measure UTF-8 bytes, not character count. Parsed `topics` has a null
+`overview`, `tldr`, `outOfScope`, `whereToLook`, `context`, `decisions`, `glossary`, `why`, `example`
+and `body` strings is limited to `writeupBytes`. These limits measure UTF-8 bytes, not character count. Parsed `topics` has a null
 prototype: an absent `topics["constructor"]` is `undefined`, while an explicitly declared
 `constructor` topic remains accessible and serializes normally.
 
@@ -1221,8 +1226,8 @@ that exceed the remaining budget are listed as oversized without uploading their
 - Blob hashes are lowercase 64-character hex SHA-256 digests, addressed per owner.
 - Block ids are `<section>-<hash8>`. `hash8` is the first eight lowercase hex characters of SHA-256
   over block text normalized to NFC, whitespace runs collapsed to one space, and trimmed. Repeats
-  within a section append `-2`, `-3`, and so on. Section keys are `overview`, `tldr`, `decisions`,
-  `glossary`, `t-<slug>-why`, `t-<slug>-example`, `t-<slug>-body`, and
+  within a section append `-2`, `-3`, and so on. Section keys are `overview`, `tldr`, `outOfScope`,
+  `whereToLook`, `context`, `decisions`, `glossary`, `t-<slug>-why`, `t-<slug>-example`, `t-<slug>-body`, and
   `doc-<hash8 of the doc path>`. The complete block id is bounded by `pathChars`.
 - Bearer tokens are `em_`, reviewer session secrets `ems_`, and pairing secrets `emp_`, followed
   by 32 random bytes encoded as unpadded base64url (43 encoded characters). Only SHA-256 hex

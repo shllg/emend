@@ -193,23 +193,31 @@ describe("topic ceilings", () => {
 });
 
 describe("UTF-8 writeup budgets", () => {
-  test.each(["overview", "tldr", "decisions", "glossary", "why", "example", "body"])(
-    "bounds %s by bytes, preserving text at the limit",
-    (field) => {
-      const text = "é".repeat(524288);
-      expect(new TextEncoder().encode(text).byteLength).toBe(1048576);
-      const input = (value: string) =>
-        ["why", "example", "body"].includes(field)
-          ? { ...emptyWriteup, topics: { routing: { why: "", [field]: value } } }
-          : { ...emptyWriteup, [field]: value };
-      const parsed = WriteupInput.parse(input(text));
-      expect(parsed).toEqual(input(text));
-      // A two-byte character repeated to the limit, plus one ASCII byte, is exactly one byte over.
-      const tooLarge = `${text}x`;
-      expect(new TextEncoder().encode(tooLarge).byteLength).toBe(1048577);
-      expect(WriteupInput.safeParse(input(tooLarge)).success).toBe(false);
-    },
-  );
+  test.each([
+    "overview",
+    "tldr",
+    "outOfScope",
+    "whereToLook",
+    "context",
+    "decisions",
+    "glossary",
+    "why",
+    "example",
+    "body",
+  ])("bounds %s by bytes, preserving text at the limit", (field) => {
+    const text = "é".repeat(524288);
+    expect(new TextEncoder().encode(text).byteLength).toBe(1048576);
+    const input = (value: string) =>
+      ["why", "example", "body"].includes(field)
+        ? { ...emptyWriteup, topics: { routing: { why: "", [field]: value } } }
+        : { ...emptyWriteup, [field]: value };
+    const parsed = WriteupInput.parse(input(text));
+    expect(parsed).toEqual(input(text));
+    // A two-byte character repeated to the limit, plus one ASCII byte, is exactly one byte over.
+    const tooLarge = `${text}x`;
+    expect(new TextEncoder().encode(tooLarge).byteLength).toBe(1048577);
+    expect(WriteupInput.safeParse(input(tooLarge)).success).toBe(false);
+  });
 
   test("accepts exactly the total byte budget across every section and refuses one extra byte", () => {
     const section = "é".repeat(131072);
@@ -225,6 +233,14 @@ describe("UTF-8 writeup budgets", () => {
     };
     expect(new TextEncoder().encode(section).byteLength * 8).toBe(2097152);
     expect(WriteupInput.parse(writeup)).toEqual(writeup);
+    for (const field of ["outOfScope", "whereToLook", "context"]) {
+      const result = WriteupInput.safeParse({ ...writeup, [field]: "x" });
+      expect(result.success).toBe(false);
+      if (!result.success)
+        expect(result.error.issues).toContainEqual(
+          expect.objectContaining({ message: "writeup exceeds the total UTF-8 byte limit" }),
+        );
+    }
     expect(
       WriteupInput.safeParse({ ...writeup, topics: { ...writeup.topics, fallback: { why: `${section}x` } } }).success,
     ).toBe(false);
