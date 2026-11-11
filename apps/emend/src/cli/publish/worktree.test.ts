@@ -86,13 +86,18 @@ test("a pub falls back to the folder for an invalid remote while a code review s
   }
 });
 
-test.each(["separate", "bare"])(
-  "a %s git directory uses the right folder for its name and keeps its key",
-  async (kind) => {
-    const f = await fixture();
+test.each([
+  { kind: "separate", folder: "metadata" },
+  { kind: "separate", folder: "metadata.git" },
+  { kind: "bare", folder: "orchard" },
+  { kind: "bare", folder: "orchard.git" },
+])(
+  "a $kind git directory named $folder uses the right folder for its name and keeps its key",
+  async ({ kind, folder }) => {
+    const f = await fixture("sha1", "base\n", kind === "separate" ? "orchard" : "repo");
     try {
-      const common = join(f.root, "..", kind === "bare" ? "orchard.git" : "metadata");
-      const root = kind === "bare" ? `${f.root}-linked` : f.root;
+      const common = join(f.root, "..", folder);
+      const root = kind === "bare" ? join(f.root, "..", "pr-42") : f.root;
       if (kind === "bare") {
         await f.run("clone", "--bare", f.root, common);
         await f.run("--git-dir", common, "config", "--unset", "remote.origin.url");
@@ -112,7 +117,7 @@ test.each(["separate", "bare"])(
           key: createHash("sha256")
             .update(await realpath(common))
             .digest("hex"),
-          name: kind === "bare" ? "orchard" : "repo",
+          name: "orchard",
         });
       }
     } finally {

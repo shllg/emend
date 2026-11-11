@@ -125,9 +125,9 @@ export async function resolvePublish(
         ? basename(identity)
         : basename(identity) === ".git"
           ? basename(dirname(identity))
-          : basename(identity).endsWith(".git")
-            ? basename(identity).slice(0, -4)
-            : basename(root);
+          : gitDirs.length === 1
+            ? basename(root)
+            : basename(identity).replace(/\.git$/, "");
       repo = { key: sha256(identity), name: shortenRepoName(name || basename(root)) };
     }
     if (code) repoUrl = remote ? (remoteToRepoUrl(remote) ?? undefined) : undefined;

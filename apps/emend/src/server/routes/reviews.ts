@@ -246,7 +246,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, reviewId?: stri
       title: review.title,
       origin,
       repo,
-      project: review.project ?? (repoName === ".git" ? null : repoName),
+      project: review.project ?? (review.importedAt === null && repoName !== ".git" ? repoName : null),
       branch: review.branch,
       state: review.state,
       newestRevision,

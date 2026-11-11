@@ -47,6 +47,7 @@ test.each([
   { project: ".git", name: "Legacy", expected: ".git", existingRepo: true },
   { project: null, name: "Orchard", expected: "Orchard", existingRepo: true },
   { project: null, name: "Orchard", expected: "Orchard", existingRepo: false },
+  { project: null, name: ".git", expected: null, existingRepo: true },
   { project: null, name: ".git", expected: null, existingRepo: false },
   { project: null, name: null, expected: null, existingRepo: false },
   { project: undefined, name: null, expected: null, existingRepo: false },
@@ -73,11 +74,13 @@ test.each([
         .get(),
     );
     expect(review?.project).toBe(expected);
-    if (expected !== null) {
-      const response = await f.request(`/reviews/${input.review.id}`, "GET");
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({ project: expected });
-    }
+    const response = await f.request(`/reviews/${input.review.id}`, "GET");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ project: expected });
+    const inboxResponse = await f.request("/reviews", "GET");
+    expect(inboxResponse.status).toBe(200);
+    const inbox = InboxList.parse(await inboxResponse.json());
+    expect(inbox.items.find((item) => item.id === input.review.id)).toMatchObject({ project: expected });
     const repo = await f.db.read((q) => q.select().from(tables.repos).where(eq(tables.repos.ownerId, f.ownerId)).get());
     expect(repo?.name).toBe(name === null ? undefined : existingRepo ? "Hub original" : name);
   },

@@ -115,22 +115,38 @@ test("publishing never renames or links another owner's repo with the same key",
   expect(await reviewRow(first.reviewId)).toMatchObject({ repoId: own?.id, project: "Own project" });
 });
 
-test("a failed render leaves the project's value and repo rows unchanged", async () => {
-  const repo = { key: "b".repeat(64), name: "Original project" };
-  const first = await publish({ ...input(), repo });
-  const before = await reviewRow(first.reviewId);
-  const originalRepos = await repoRows();
-  const fail: Executor = async () => {
-    throw new Error("synthetic render failure");
-  };
-  for (const key of [repo.key, "c".repeat(64)]) {
-    await expect(
-      publish({ ...input(), repo: { key, name: "New project" } }, f.instanceId, f.ownerId, fail),
-    ).rejects.toMatchObject({ code: "invalid_request", detail: "writeup_failed" });
-    expect(await reviewRow(first.reviewId)).toEqual(before);
-    expect(await repoRows()).toEqual(originalRepos);
-  }
-});
+test.each([false, true])(
+  "a failure after the project write rolls back reviews, repos and revisions (existing review=%s)",
+  async (existing) => {
+    const repo = { key: "b".repeat(64), name: "Original project" };
+    if (existing) await publish({ ...input(), repo });
+    const storedReviews = () => f.db.read((q) => q.select().from(reviews).where(eq(reviews.ownerId, f.ownerId)));
+    const storedRevisions = () => f.db.read((q) => q.select().from(revisions).where(eq(revisions.ownerId, f.ownerId)));
+    const before = await storedReviews();
+    const originalRepos = await repoRows();
+    const originalRevisions = await storedRevisions();
+    expect(before).toHaveLength(existing ? 1 : 0);
+    expect(originalRepos).toHaveLength(existing ? 1 : 0);
+    expect(originalRevisions).toHaveLength(existing ? 1 : 0);
+    await f.db.query((q) =>
+      q.exec(
+        "CREATE TRIGGER synthetic_publish_failure AFTER UPDATE ON reviews WHEN NEW.project = 'New project' BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END",
+      ),
+    );
+    try {
+      for (const key of [repo.key, "c".repeat(64)]) {
+        await expect(publish({ ...input(), repo: { key, name: "New project" } })).rejects.toMatchObject({
+          cause: { message: "synthetic failure" },
+        });
+        expect(await storedReviews()).toEqual(before);
+        expect(await repoRows()).toEqual(originalRepos);
+        expect(await storedRevisions()).toEqual(originalRevisions);
+      }
+    } finally {
+      await f.db.query((q) => q.exec("DROP TRIGGER synthetic_publish_failure"));
+    }
+  },
+);
 test.each([false, true])("first publish skips changes; revision 2 compares against it (empty=%s)", async (empty) => {
   const executor = vi.fn(executeWork);
   const firstDoc = await blobs.put(f.ownerId, Buffer.from("Original doc"), "text/markdown");
