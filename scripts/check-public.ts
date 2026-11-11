@@ -13,7 +13,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readlinkSync } from "node:fs";
 import { isIP } from "node:net";
 import path from "node:path";
-import { brotliDecompressSync, inflateSync } from "node:zlib";
+import { brotliDecompressSync, deflateSync, inflateSync } from "node:zlib";
 
 export interface PrivateTerms {
   terms: { value: string; line: number; source?: "file" | "env" }[];
@@ -1307,8 +1307,23 @@ const ASSET_BYTES = 25 * 1024 * 1024;
 const EXPANDED_BYTES = 50 * 1024 * 1024;
 // Raw views measure 15–23 budget bytes per input byte on real PNGs/fonts with and without terms, about 28 on contrived content.
 const RAW_VIEW_COST = 32;
-// Real font tables compress about 1.3–3x; above 8x, treat the expansion as a bomb and keep strict views.
-const FONT_EXPANSION_RATIO = 8;
+// Large real font tables measure 1.8–2.9x; above 4x, keep strict views of the expansion.
+const FONT_EXPANSION_RATIO = 4;
+const FONT_BULK_TAGS = new Set([
+  "glyf", "loca", "CFF ", "CFF2", "gvar", "hmtx", "vmtx", "hdmx", "kern", "kerx", "morx", "GPOS", "GSUB", "GDEF",
+  "CBDT", "CBLC", "EBDT", "EBLC", "sbix", "COLR", "cvt ", "fpgm", "prep", "HVAR", "VVAR",
+]);
+const WOFF2_TAGS = [
+  "cmap", "head", "hhea", "hmtx", "maxp", "name", "OS/2", "post", "cvt ", "fpgm", "glyf", "loca", "prep", "CFF ",
+  "VORG", "EBDT", "EBLC", "gasp", "hdmx", "kern", "LTSH", "PCLT", "VDMX", "vhea", "vmtx", "BASE", "GDEF", "GPOS",
+  "GSUB", "EBSC", "JSTF", "MATH", "CBDT", "CBLC", "COLR", "CPAL", "SVG ", "sbix", "acnt", "avar", "bdat", "bloc",
+  "bsln", "cvar", "fdsc", "feat", "fmtx", "fvar", "gvar", "hsty", "just", "lcar", "mort", "morx", "opbd", "prop",
+  "trak", "Zapf", "Silf", "Glat", "Gloc", "Feat", "Sill",
+];
+
+function fontStrictPrefix(tag: string, length: number): number {
+  return !FONT_BULK_TAGS.has(tag) ? length : tag === "CFF " ? Math.min(length, 64 * 1024) : 0;
+}
 
 class BudgetExceeded extends PublicCheckError {
   constructor() { super(1, "check:public: scan expansion budget exceeded"); }
@@ -1420,104 +1435,127 @@ function checkSfnt(buffer: Buffer, file: string, terms: PrivateTerms, depth: num
   return hits;
 }
 
-/** Font tables and optional metadata share one bounded expansion budget. */
+type ByteRange = [number, number];
+interface FontSpan { offset: number; length: number; compressed: number }
+interface FontTable extends FontSpan { tag: string }
+
+/** One charged directory walk for compressed ranges and decompressed table boundaries. */
+function fontLayout(buffer: Buffer, budget: ScanBudget): { woff2: boolean; tables: FontTable[]; stream?: FontSpan; metadata?: FontSpan } {
+  const woff2 = buffer.toString("ascii", 0, 4) === "wOF2", header = woff2 ? 48 : 44;
+  if (buffer.length < header || buffer.length > ASSET_BYTES || buffer.readUInt32BE(8) !== buffer.length) throw new Error();
+  const count = buffer.readUInt16BE(12), tables: FontTable[] = [], tags = new Set<string>();
+  if (!count || buffer.readUInt32BE(16) > EXPANDED_BYTES) throw new Error();
+  let dataEnd = header, stream: FontSpan | undefined;
+  if (!woff2) {
+    dataEnd = header + count * 20;
+    if (dataEnd > buffer.length) throw new Error();
+    for (let at = header; at < header + count * 20; at += 20) {
+      budget.spend(16);
+      const tag = buffer.toString("latin1", at, at + 4), offset = buffer.readUInt32BE(at + 4);
+      const compressed = buffer.readUInt32BE(at + 8), length = buffer.readUInt32BE(at + 12);
+      if (tags.has(tag) || !length || !compressed || compressed > length || offset < header + count * 20 || offset + compressed > buffer.length) throw new Error();
+      tags.add(tag); tables.push({ tag, offset, length, compressed });
+    }
+    for (const table of [...tables].sort((a, b) => a.offset - b.offset)) {
+      if (table.offset < dataEnd) throw new Error();
+      dataEnd = table.offset + table.compressed;
+    }
+  } else {
+    let at = header, expected = 0;
+    const uintBase128 = () => {
+      let value = 0;
+      for (let i = 0; i < 5; i++) {
+        if (at >= buffer.length) throw new Error();
+        const byte = buffer[at++] as number;
+        if ((!i && byte === 128) || value > 0x1ffffff) throw new Error();
+        value = value * 128 + (byte & 127);
+        if (!(byte & 128)) return value;
+      }
+      throw new Error();
+    };
+    for (let i = 0; i < count; i++) {
+      budget.spend(16);
+      if (at >= buffer.length) throw new Error();
+      const flags = buffer[at++] as number, index = flags & 63, version = flags >>> 6;
+      let tag = WOFF2_TAGS[index] ?? "";
+      if (index === 63) {
+        if (at + 4 > buffer.length) throw new Error();
+        tag = buffer.toString("latin1", at, at + 4); at += 4;
+      }
+      if (tags.has(tag)) throw new Error();
+      tags.add(tag);
+      const original = uintBase128(), transformed = tag === "glyf" || tag === "loca" ? version !== 3 : version !== 0;
+      const length = transformed ? uintBase128() : original;
+      if (tag === "name" && transformed) throw new Error();
+      tables.push({ tag, offset: expected, length, compressed: 0 }); expected += length;
+      if (expected > EXPANDED_BYTES || original > EXPANDED_BYTES) throw new Error();
+    }
+    const compressed = buffer.readUInt32BE(20);
+    if (!compressed || at + compressed > buffer.length) throw new Error();
+    stream = { offset: at, length: expected, compressed }; dataEnd = at + compressed;
+  }
+  const field = woff2 ? 28 : 24, offset = buffer.readUInt32BE(field);
+  const compressed = buffer.readUInt32BE(field + 4), length = buffer.readUInt32BE(field + 8);
+  const privateOffset = buffer.readUInt32BE(field + 12), privateLength = buffer.readUInt32BE(field + 16);
+  let metadata: FontSpan | undefined;
+  if (offset || compressed || length) {
+    if (offset < dataEnd || offset % 4 || !compressed || !length || offset + compressed > buffer.length) throw new Error();
+    metadata = { offset, length, compressed }; dataEnd = offset + compressed;
+  }
+  if ((privateOffset || privateLength) && (!privateOffset || !privateLength || privateOffset % 4 ||
+    privateOffset < dataEnd || privateOffset + privateLength > buffer.length)) throw new Error();
+  return { woff2, tables, stream, metadata };
+}
+
+/** Strict tables and metadata precede bulk views, sharing the same expansion budget. */
 function checkFont(buffer: Buffer, file: string, terms: PrivateTerms, depth: number, budget: ScanBudget): string[] {
   const hits: string[] = [];
   try {
-    const woff2 = buffer.toString("ascii", 0, 4) === "wOF2";
-    const header = woff2 ? 48 : 44;
-    if (buffer.length < header || buffer.length > ASSET_BYTES || buffer.readUInt32BE(8) !== buffer.length)
-      throw new Error();
-    const count = buffer.readUInt16BE(12);
-    if (!count || buffer.readUInt32BE(16) > EXPANDED_BYTES) throw new Error();
-    let dataEnd = header;
-    const scan = (data: Buffer, views = assetTermViews) => {
-      // Font names may also contain private text in any supported raw encoding.
-      hits.push(...views(data, file, terms, budget, true));
+    const { woff2, tables, stream, metadata } = fontLayout(buffer, budget);
+    const inflate = ({ offset, length, compressed }: FontSpan, brotli: boolean, stored = false) => {
+      if (length > budget.remaining) throw new BudgetExceeded();
+      const bytes = buffer.subarray(offset, offset + compressed);
+      const plain = stored && compressed === length;
+      const data = plain ? bytes : budget.inflate(bytes, brotli, Math.max(1, length));
+      if (plain) budget.spend(length);
+      if (data.length !== length) throw new Error();
+      return data;
+    };
+    const scan = (data: Buffer, view = data, strict = true) => {
+      hits.push(...(strict ? rawTermViews : assetTermViews)(view, file, terms, budget, true));
       hits.push(...binarySecrets(data, file, terms, budget));
     };
-    if (!woff2) {
-      if (header + count * 20 > buffer.length) throw new Error();
-      dataEnd = header + count * 20;
-      for (let i = 0; i < count; i++) {
-        const at = header + i * 20;
-        const offset = buffer.readUInt32BE(at + 4);
-        const compressed = buffer.readUInt32BE(at + 8);
-        const original = buffer.readUInt32BE(at + 12);
-        if (!original || compressed > original ||
-          offset < header + count * 20 || offset + compressed > buffer.length) throw new Error();
-        if (original > budget.remaining) throw new BudgetExceeded();
-        const bytes = buffer.subarray(offset, offset + compressed);
-        dataEnd = Math.max(dataEnd, offset + compressed);
-        const data = compressed === original ? bytes : budget.inflate(bytes, false, original);
-        if (compressed === original) budget.spend(original);
-        if (data.length !== original) throw new Error();
-        const name = buffer.toString("ascii", at, at + 4) === "name";
-        scan(data, name || original > compressed * FONT_EXPANSION_RATIO ? rawTermViews : assetTermViews);
-        if (name) hits.push(...checkFontNames(data, file, terms, depth, budget));
+    const data = stream ? inflate(stream, true) : undefined;
+    const canSkip = (table: FontTable) => fontStrictPrefix(table.tag, table.length) < table.length &&
+      (woff2 || table.length <= table.compressed * FONT_EXPANSION_RATIO);
+    const bulk: { data: Buffer; view: Buffer }[] = [];
+    for (const table of tables.sort((a, b) => Number(canSkip(a)) - Number(canSkip(b)))) {
+      const bytes = data ? data.subarray(table.offset, table.offset + table.length) : inflate(table, false, true);
+      if (!canSkip(table)) scan(bytes);
+      else {
+        const prefix = fontStrictPrefix(table.tag, table.length);
+        if (prefix) hits.push(...rawTermViews(bytes.subarray(0, prefix), file, terms, budget, true));
+        bulk.push({ data: bytes, view: bytes.subarray(prefix) });
       }
-    } else {
-      let at = header, expected = 0;
-      const names: { offset: number; length: number }[] = [];
-      const uintBase128 = () => {
-        let value = 0;
-        for (let i = 0; i < 5; i++) {
-          if (at >= buffer.length) throw new Error();
-          const byte = buffer[at++] as number;
-          if ((!i && byte === 128) || value > 0x1ffffff) throw new Error();
-          value = value * 128 + (byte & 127);
-          if (!(byte & 128)) return value;
-        }
-        throw new Error();
-      };
-      for (let i = 0; i < count; i++) {
-        if (at >= buffer.length) throw new Error();
-        const flags = buffer[at++] as number;
-        const index = flags & 63, version = flags >>> 6;
-        let tag = index === 5 ? "name" : index === 10 ? "glyf" : index === 11 ? "loca" : "";
-        if (index === 63) {
-          if (at + 4 > buffer.length) throw new Error();
-          tag = buffer.toString("ascii", at, at + 4);
-          at += 4;
-        }
-        const original = uintBase128();
-        const transformed = tag === "glyf" || tag === "loca" ? version !== 3 : version !== 0;
-        const length = transformed ? uintBase128() : original;
-        if (tag === "name") {
-          if (transformed) throw new Error();
-          names.push({ offset: expected, length });
-        }
-        expected += length;
-        if (expected > EXPANDED_BYTES || original > EXPANDED_BYTES) throw new Error();
-      }
-      const compressed = buffer.readUInt32BE(20);
-      if (expected > budget.remaining) throw new BudgetExceeded();
-      if (!compressed || at + compressed > buffer.length) throw new Error();
-      dataEnd = at + compressed;
-      const data = budget.inflate(buffer.subarray(at, at + compressed), true, Math.max(1, expected));
-      if (data.length !== expected) throw new Error();
-      scan(data, expected > compressed * FONT_EXPANSION_RATIO ? rawTermViews : assetTermViews);
-      for (const name of names) {
-        const table = data.subarray(name.offset, name.offset + name.length);
-        hits.push(...rawTermViews(table, file, terms, budget, true), ...checkFontNames(table, file, terms, depth, budget));
+      if (table.tag === "name") hits.push(...checkFontNames(bytes, file, terms, depth, budget));
+    }
+    if (metadata) {
+      const bytes = inflate(metadata, woff2);
+      scan(bytes);
+      hits.push(...checkText(bytes.toString("utf8"), file + " (metadata)", terms, { lines: true, lineExemptions: false, imageDepth: depth, budget }));
+    }
+    const skippable: typeof bulk = [];
+    for (const part of bulk) {
+      if (!woff2) skippable.push(part);
+      else if (part.view.length * RAW_VIEW_COST <= budget.remaining) scan(part.data, part.view);
+      else {
+        // Estimate each table independently: an incompressible neighbour cannot dilute a bomb.
+        budget.spend(part.data.length);
+        if (part.data.length > deflateSync(part.data, { level: 1 }).length * FONT_EXPANSION_RATIO) scan(part.data, part.view);
+        else skippable.push(part);
       }
     }
-    const field = woff2 ? 28 : 24;
-    const offset = buffer.readUInt32BE(field);
-    const compressed = buffer.readUInt32BE(field + 4);
-    const original = buffer.readUInt32BE(field + 8);
-    if (offset || compressed || original) {
-      const privateOffset = buffer.readUInt32BE(field + 12);
-      if (offset < dataEnd || offset % 4 !== 0 || !compressed || !original ||
-        offset + compressed > buffer.length ||
-        (privateOffset && offset + compressed > privateOffset)) throw new Error();
-      if (original > budget.remaining) throw new BudgetExceeded();
-      const bytes = buffer.subarray(offset, offset + compressed);
-      const data = budget.inflate(bytes, woff2, original);
-      if (data.length !== original) throw new Error();
-      scan(data, rawTermViews);
-      hits.push(...checkText(data.toString("utf8"), file + " (metadata)", terms, { lines: true, lineExemptions: false, imageDepth: depth, budget }));
-    }
+    for (const part of skippable) scan(part.data, part.view, false);
   } catch (error) {
     if (error instanceof BudgetExceeded) throw error;
     hits.push(safeLocation(file, terms) + ": invalid compressed font data");
@@ -1525,59 +1563,83 @@ function checkFont(buffer: Buffer, file: string, terms: PrivateTerms, depth: num
   return hits;
 }
 
-/** Raw views of a whole image or font run only while they fit the remaining budget;
- * a larger asset keeps its parsed metadata, font name tables and binary secret scan. */
+/** Whole views remain skippable for kinds without a bulk model. */
 function assetTermViews(buffer: Buffer, file: string, terms: PrivateTerms, budget: ScanBudget, fontData = false): string[] {
   return buffer.length * RAW_VIEW_COST > budget.remaining ? [] : rawTermViews(buffer, file, terms, budget, fontData);
 }
 
-/** When whole views skip, keep strict font names and batch the smallest non-pixel parts that fit. */
-function assetPartTermViews(buffer: Buffer, file: string, terms: PrivateTerms, budget: ScanBudget, fontData: boolean): string[] {
-  const parts: Buffer[] = [];
-  let name: Buffer | undefined;
-  if (fontData) {
-    if (buffer.length < 12) return [];
-    const end = 12 + buffer.readUInt16BE(4) * 16;
-    if (end > buffer.length) return [];
-    const tags = new Set<number>(), tables: { tag: number; offset: number; length: number }[] = [];
-    for (let at = 12; at < end; at += 16) {
-      const tag = buffer.readUInt32BE(at), offset = buffer.readUInt32BE(at + 8), length = buffer.readUInt32BE(at + 12);
-      if (tags.has(tag) || offset < end || offset + length > buffer.length) return [];
-      tags.add(tag); tables.push({ tag, offset, length });
+/** Only structurally identified bulk is exempt; malformed structures retain every byte. */
+function assetBulkRanges(buffer: Buffer, kind: string, budget: ScanBudget): ByteRange[] | undefined {
+  if (![".png", ".ttf", ".otf", ".woff", ".woff2"].includes(kind)) return undefined;
+  const ranges: ByteRange[] = [];
+  try {
+    if (kind === ".png") {
+      let ended = false;
+      for (let at = PNG_MAGIC.length; at < buffer.length; ) {
+        budget.spend(12);
+        if (buffer.length - at < 12) throw new Error();
+        const length = buffer.readUInt32BE(at);
+        if (length > buffer.length - at - 12) throw new Error();
+        const tag = buffer.toString("latin1", at + 4, at + 8);
+        if (!ended && (tag === "IDAT" || tag === "fdAT") && length) ranges.push([at + 8, at + 8 + length]);
+        if (tag === "IEND") ended = true;
+        at += length + 12;
+      }
+      if (!ended) throw new Error();
+    } else if (kind === ".ttf" || kind === ".otf") {
+      if (buffer.length < 12) throw new Error();
+      const end = 12 + buffer.readUInt16BE(4) * 16, tags = new Set<string>();
+      if (end > buffer.length) throw new Error();
+      const tables: { tag: string; offset: number; length: number }[] = [];
+      for (let at = 12; at < end; at += 16) {
+        budget.spend(16);
+        const tag = buffer.toString("latin1", at, at + 4), offset = buffer.readUInt32BE(at + 8), length = buffer.readUInt32BE(at + 12);
+        if (tags.has(tag) || offset < end || offset + length > buffer.length) throw new Error();
+        tags.add(tag); tables.push({ tag, offset, length });
+      }
+      let previous = end;
+      for (const { tag, offset, length } of tables.sort((a, b) => a.offset - b.offset)) {
+        if (offset < previous) throw new Error();
+        previous = offset + length;
+        const prefix = fontStrictPrefix(tag, length);
+        if (prefix < length) ranges.push([offset + prefix, offset + length]);
+      }
+    } else {
+      const { tables, stream, metadata } = fontLayout(buffer, budget);
+      if (stream) ranges.push([stream.offset, stream.offset + stream.compressed]);
+      else for (const table of tables) if (table.compressed) ranges.push([table.offset, table.offset + table.compressed]);
+      if (metadata) ranges.push([metadata.offset, metadata.offset + metadata.compressed]);
     }
-    tables.sort((a, b) => a.offset - b.offset);
-    let previous = end;
-    for (const table of tables) {
-      if (table.offset < previous) return [];
-      previous = table.offset + table.length;
-    }
-    for (const { tag, offset, length } of tables) {
-      const data = buffer.subarray(offset, offset + length);
-      if (tag === 0x6e616d65) name = data;
-      else if (length) parts.push(data);
-    }
-  } else {
-    for (let at = PNG_MAGIC.length; at < buffer.length; ) {
-      if (buffer.length - at < 12) return [];
-      const size = buffer.readUInt32BE(at);
-      if (size > buffer.length - at - 12) return [];
-      const kind = buffer.toString("ascii", at + 4, at + 8);
-      if (size && kind !== "IDAT" && kind !== "fdAT") parts.push(buffer.subarray(at + 8, at + 8 + size));
-      at += size + 12;
-    }
+    return ranges.sort((a, b) => a[0] - b[0]);
+  } catch (error) {
+    if (error instanceof BudgetExceeded) throw error;
+    return [];
   }
-  const hits = name ? rawTermViews(name, file, terms, budget, true) : [];
-  parts.sort((a, b) => a.length - b.length);
-  const selected: Buffer[] = [];
-  let total = 0;
-  for (const part of parts) {
-    const size = total + part.length + (selected.length ? 1 : 0);
-    if (size * RAW_VIEW_COST > budget.remaining) break;
-    if (selected.length) selected.push(Buffer.from([0]));
-    selected.push(part); total = size;
+}
+
+/** Copy the complement once, preserving headers, gaps and tails with one NUL between regions. */
+function outsideBulk(buffer: Buffer, ranges: ByteRange[], budget: ScanBudget): Buffer {
+  if (!ranges.length) return buffer;
+  const tail: ByteRange = [buffer.length, buffer.length];
+  let length = 0, previous = 0, count = 0;
+  for (let i = 0; i <= ranges.length; i++) {
+    const [start, end] = ranges[i] ?? tail;
+    if (start > previous) { length += start - previous + (count ? 1 : 0); count++; }
+    previous = end;
   }
-  if (selected.length) hits.push(...rawTermViews(Buffer.concat(selected, total), file, terms, budget, fontData));
-  return hits;
+  if (length * 5 > budget.remaining) throw new BudgetExceeded();
+  const bytes = Buffer.allocUnsafe(length);
+  let at = 0;
+  previous = 0;
+  for (let i = 0; i <= ranges.length; i++) {
+    const [start, end] = ranges[i] ?? tail;
+    if (start > previous) {
+      if (at) bytes[at++] = 0;
+      at += buffer.copy(bytes, at, previous, start);
+    }
+    previous = end;
+  }
+  return bytes;
 }
 
 /** Scan distinct byte-order/alignment views once; ASCII UTF-8 and Latin-1 share one view. */
@@ -2448,9 +2510,10 @@ export function checkBuffer(
     const extension = path.extname(file).toLowerCase();
     const fontData = binary && [".woff", ".woff2", ".ttf", ".otf"].includes(extension);
     const skipped = buffer.length * RAW_VIEW_COST > budget.remaining;
-    hits.push(...assetTermViews(buffer, file, terms, budget, fontData));
-    if (skipped && (buffer.subarray(0, PNG_MAGIC.length).equals(PNG_MAGIC) || (fontData && [".ttf", ".otf"].includes(extension))))
-      hits.push(...assetPartTermViews(buffer, file, terms, budget, fontData && [".ttf", ".otf"].includes(extension)));
+    const kind = buffer.subarray(0, PNG_MAGIC.length).equals(PNG_MAGIC) ? ".png" : binary ? extension : "";
+    const ranges = skipped ? assetBulkRanges(buffer, kind, budget) : undefined;
+    hits.push(...(ranges === undefined ? assetTermViews(buffer, file, terms, budget, fontData) :
+      rawTermViews(outsideBulk(buffer, ranges, budget), file, terms, budget, fontData)));
     if (binary) {
       if (buffer.length > ASSET_BYTES) hits.push(safeLocation(file, terms) + ": asset exceeds size limit");
       hits.push(...binarySecrets(buffer, file, terms, budget));
