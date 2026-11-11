@@ -1,4 +1,4 @@
-import { useLocation, useRouter } from "@tanstack/react-router";
+import { type ParsedLocation, useRouter } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import type { ReadingAnchor } from "./reading-position.ts";
 
@@ -11,9 +11,8 @@ export type ReadingEntry = {
 };
 
 /** Only entries observed inside this review can supply a Back label. Browser Back uses the same history. */
-export function useReadingTrail(title: string, revision: number) {
+export function useReadingTrail(title: string, revision: number, location: ParsedLocation) {
   const router = useRouter();
-  const location = useLocation();
   const index = location.state.__TSR_index;
   const trail = useRef(new Map<number, ReadingEntry>());
   let entry = trail.current.get(index);

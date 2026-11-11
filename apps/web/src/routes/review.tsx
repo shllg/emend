@@ -1,6 +1,6 @@
 import type { ReviewView, RevisionView } from "@emend/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import {
   type ComponentProps,
   type MouseEvent,
@@ -246,12 +246,14 @@ function resolveOpenDoc(
   );
 }
 function LoadedReview({
+  routeId,
   review,
   published,
   titleRef,
   collapsed,
   setCollapsed,
 }: {
+  routeId: string;
   review: ReviewView;
   published: number;
   titleRef: Ref<HTMLHeadingElement>;
@@ -259,7 +261,13 @@ function LoadedReview({
   setCollapsed: (collapsed: boolean) => void;
 }) {
   // Read search and hash from one location: route matches can lag during navigation.
-  const location = useLocation();
+  const router = useRouter();
+  const liveLocation = useLocation();
+  const [, rawParams, foundRoute] = router.getMatchedRoutes(liveLocation.pathname);
+  const isOwnLocation = foundRoute?.id === "/r/$reviewId" && rawParams.reviewId === routeId;
+  const [lastOwnLocation, setLastOwnLocation] = useState(liveLocation);
+  if (isOwnLocation && lastOwnLocation !== liveLocation) setLastOwnLocation(liveLocation);
+  const location = isOwnLocation ? liveLocation : lastOwnLocation;
   const search = useMemo(() => validateReviewSearch(location.search), [location.search]);
   const hash = location.hash;
   const [initialRevision] = useState(review.newestRevision);
@@ -339,6 +347,7 @@ function LoadedReview({
             ? "Comments"
             : "Files",
     seq,
+    location,
   );
   const readingFolds = useMemo(
     () => ({ reviewId: review.id, revision: seq, choices: trail.entry.folds }),
@@ -554,6 +563,9 @@ function LoadedReview({
   };
   // Data/DOM changes may fulfill an existing intent, but only navigation creates one.
   useEffect(() => {
+    // The router exposes the next page's address before this review unmounts.
+    // Replacing here would overwrite that page's history entry.
+    if (!isOwnLocation) return;
     const current = currentIntent;
     let created = false;
     if (requested && requested !== previous.current?.requested) {
@@ -999,6 +1011,7 @@ export function ReviewPage() {
     return (
       <LoadedReview
         key={reviewId}
+        routeId={reviewId}
         review={query.data}
         published={published}
         titleRef={titleRef}

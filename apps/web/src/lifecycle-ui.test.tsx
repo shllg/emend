@@ -2,7 +2,7 @@ import { APPROVED_ACTIVE_HOURS, type InboxItem, type ReviewView } from "@emend/c
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { App } from "./App.tsx";
 import { type InboxData, revisionQuery } from "./api/queries.ts";
 import { doneDimmed } from "./components/inbox/ReviewRow.tsx";
@@ -579,6 +579,55 @@ test("deleting from the review page asks, goes to the inbox and toasts the title
   await waitFor(() => expect(history.location.pathname).toBe("/"));
   await screen.findByText("No reviews yet.");
   expect(screen.queryByText("This review was deleted or never existed.")).toBeNull();
+});
+
+test("deleting from a review showing a doc reaches the inbox and Back keeps the real review address", async () => {
+  const doc = {
+    kind: "markdown",
+    path: "note.md",
+    blocks: [
+      {
+        id: "doc-12345678-12345678",
+        section: "doc-12345678",
+        kind: "paragraph",
+        text: "A synthetic note",
+        html: "<p>A synthetic note</p>",
+      },
+    ],
+  };
+  const original = fetchMock.getMockImplementation();
+  fetchMock.mockImplementation(async (path, init) => {
+    if (path === `/api/v1/reviews/${id}/revisions/1`)
+      return Response.json({ ...revision, main: doc.path, docs: [doc] });
+    if (!original) throw new Error("Missing synthetic fetch");
+    return original(path, init);
+  });
+  const { history } = mount(`/r/${id}`);
+  const paths = [history.location.pathname];
+  onTestFinished(history.subscribe(({ location }) => paths.push(location.pathname)));
+  await screen.findByText("A synthetic note");
+  await waitFor(() => expect(new URLSearchParams(history.location.search).get("doc")).toBe(doc.path));
+  expect(history.location.pathname).toBe(`/r/${id}`);
+  const search = history.location.search;
+
+  fireEvent.keyDown(screen.getByRole("button", { name: "More review actions" }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+  const dialog = await screen.findByRole("alertdialog", { name: "Delete “Synthetic review”?" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete review" }));
+  await screen.findByText("Deleted “Synthetic review”");
+  expect(history.location.pathname).toBe("/");
+  await screen.findByText("No reviews yet.");
+  expect(history.location.pathname).toBe("/");
+  expect(history.location.search).toBe("");
+  expect(screen.queryByText("This review was deleted or never existed.")).toBeNull();
+  expect(paths).not.toContain("/r/undefined");
+
+  await act(async () => history.back());
+  await screen.findByText("This review was deleted or never existed.");
+  expect(history.location.pathname).toBe(`/r/${id}`);
+  expect(history.location.search).toBe(search);
+  expect(new URLSearchParams(history.location.search).get("doc")).toBe(doc.path);
+  expect(paths).not.toContain("/r/undefined");
 });
 
 test("a delete event for the open review shows the deleted page with a link to the inbox", async () => {

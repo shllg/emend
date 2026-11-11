@@ -171,11 +171,14 @@ beforeEach(() => {
       if (path === `/api/v1/reviews/${id}/threads` && init?.method === "POST")
         return Response.json({ threadId: id, commentId: id }, { status: 201 });
       if (path === "/api/v1/session") return new Response(null, { status: 204 });
+      if (path === "/api/v1/devices") return Response.json({ items: [] });
       if (path === "/api/v1/reviews")
         return Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [review] });
       if (path === `/api/v1/reviews/${id}`) return Response.json(currentReview);
       if (path === `/api/v1/reviews/${id}/revisions/1`) return revisionReply ?? Response.json(currentRevision);
       if (path === `/api/v1/reviews/${id}/revisions/2`) return Response.json({ ...currentRevision, seq: 2 });
+      if (/^\/api\/v1\/reviews\/[^/]+$/.test(path))
+        return Response.json({ error: { code: "unknown_review", message: "Unknown review." } }, { status: 404 });
       throw new Error(`Unexpected synthetic request: ${path}`);
     }),
   );
@@ -566,6 +569,83 @@ function prepareFrame(path: string) {
   fireEvent.load(frame);
   return { frame, post };
 }
+
+test.each([
+  { pixels: 390, link: "Inbox", pathname: "/", heading: "Inbox" },
+  { pixels: 1280, link: "emend", pathname: "/", heading: "Inbox" },
+  { pixels: 1280, link: "Devices", pathname: "/devices", heading: "Devices" },
+])(
+  "$link header link leaves a doc review in one click at $pixels px and Back restores its doc",
+  async ({ pixels, link, pathname, heading }) => {
+    width = pixels;
+    docsFixture();
+    currentRevision.main = gardenDoc.path;
+    const { history } = mount("");
+    const paths = [history.location.pathname];
+    onTestFinished(history.subscribe(({ location }) => paths.push(location.pathname)));
+    await screen.findByText("Water the seedlings");
+    await waitFor(() => expect(searchParams(history).get("doc")).toBe(gardenDoc.path));
+    expect(history.location.pathname).toBe(`/r/${id}`);
+    const search = history.location.search;
+
+    await act(async () => fireEvent.click(screen.getByRole("link", { name: link })));
+    expect(history.location.pathname).toBe(pathname);
+    await screen.findByRole("heading", { name: heading, level: 1 });
+    expect(history.location.pathname).toBe(pathname);
+    expect(history.location.search).toBe("");
+    expect(screen.queryByText("This review was deleted or never existed.")).toBeNull();
+    expect(paths).not.toContain("/r/undefined");
+
+    await act(async () => history.back());
+    await screen.findByText("Water the seedlings");
+    expect(history.location.pathname).toBe(`/r/${id}`);
+    expect(history.location.search).toBe(search);
+    expect(searchParams(history).get("doc")).toBe(gardenDoc.path);
+    expect(paths).not.toContain("/r/undefined");
+  },
+);
+
+test("the sidebar opens another review on its own doc and Back restores the first review's doc", async () => {
+  width = 1280;
+  docsFixture();
+  currentRevision.main = gardenDoc.path;
+  currentRevision.docs = [gardenDoc];
+  const other = "22222222-2222-4222-8222-222222222222";
+  const otherReview = { ...review, id: other, title: "Another garden" };
+  const otherRevision = { ...currentRevision, main: plainDoc.path, docs: [plainDoc] };
+  const original = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation(async (path, init) => {
+    if (path === "/api/v1/reviews")
+      return Response.json({ serverTime: new Date(Date.now()).toISOString(), items: [review, otherReview] });
+    if (path === `/api/v1/reviews/${other}`) return Response.json(otherReview);
+    if (path === `/api/v1/reviews/${other}/revisions/1`) return Response.json(otherRevision);
+    if (!original) throw new Error("Missing synthetic fetch");
+    return original(path, init);
+  });
+  const { history } = mount("");
+  await screen.findByText("Water the seedlings");
+  await waitFor(() => expect(searchParams(history).get("doc")).toBe(gardenDoc.path));
+  expect(history.location.pathname).toBe(`/r/${id}`);
+  const search = history.location.search;
+  const sidebar = within(screen.getByRole("complementary", { name: "Inbox" }));
+  const next = await sidebar.findByRole("link", { name: /Another garden/ });
+
+  await act(async () => fireEvent.click(next));
+  await screen.findByRole("heading", { name: "Another garden", level: 1 });
+  await screen.findByRole("tab", { name: "Docs 1" });
+  expect(history.location.pathname).toBe(`/r/${other}`);
+  expect(searchParams(history).get("doc")).toBe(plainDoc.path);
+  await screen.findByText("Another doc");
+  expect(screen.queryByText("Document not found. Showing all docs.")).toBeNull();
+  expect(screen.queryByText("Water the seedlings")).toBeNull();
+
+  await act(async () => history.back());
+  await screen.findByText("Water the seedlings");
+  expect(history.location.pathname).toBe(`/r/${id}`);
+  expect(history.location.search).toBe(search);
+  expect(searchParams(history).get("doc")).toBe(gardenDoc.path);
+  expect(screen.queryByText("Document not found. Showing all docs.")).toBeNull();
+});
 
 test.each(["row", "rail"])(
   "inbox %s opens the declared main doc and selects a newly published revision",
