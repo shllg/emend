@@ -39,8 +39,11 @@
     { "path": "docs/adr/2026-07-01-retries.md", "role": "doc", "topic": "retry-budget" }
   ],
   "writeup": {
-    "overview": "- **Goal:** Failed requests must stop retrying.\n- **Change:** Each request gets three attempts.\n- **Scope:** The request loop and its design doc change.",
-    "tldr": "- **Biggest risk:** An early stop could discard the final attempt.\n- **Check first:** Read `src/retry.ts` in Retry budget.",
+    "tldr": "Requests that kept failing retried without end and held the request loop. Each request now stops after three attempts, as the retry PRD asks.",
+    "overview": "- **Goal:** Failed requests must stop retrying.\n- **Change:** Each request gets three attempts.",
+    "outOfScope": "- The wait between attempts.",
+    "whereToLook": "- **Biggest risk:** An early stop could discard the final attempt.\n- **Check first:** Read `src/retry.ts` in Retry budget.",
+    "context": "- The request loop and its PRD change.\n- No new dependency.\n- The retry budget follows `docs/adr/2026-07-01-retries.md`.",
     "decisions": null,
     "glossary": "- **Retry budget:** The total number of attempts allowed for one request.",
     "topics": {

@@ -385,6 +385,22 @@ test.each(["plugin/skills/emend-review/SKILL.md", "plugin/skills/emend-review/re
   },
 );
 
+test("review guidance lists the opening fields in display order", () => {
+  const text = read("plugin/skills/emend-review/SKILL.md");
+  const writing = text.split("## Write for the reviewer\n")[1]?.split("\n## ")[0] ?? "";
+  expect(writing).toContain("Write the opening fields below. The app shows them in this order, with these weights.");
+  expect([...writing.matchAll(/^- `([^`]+)`:/gm)].map((match) => match[1])).toEqual([
+    "tldr",
+    "overview",
+    "outOfScope",
+    "whereToLook",
+    "context",
+    "decisions",
+    "glossary",
+    "topics[slug]",
+  ]);
+});
+
 test("the complete example is the synthetic manifest fixture, with no stripped or invented fields", () => {
   const blocks = [...read("plugin/skills/emend-review/references/manifest.md").matchAll(/```json\n([\s\S]*?)\n```/g)];
   expect(blocks).toHaveLength(1);

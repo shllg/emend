@@ -22,6 +22,7 @@ git merge-base <target> HEAD
 If publish prints `git lookup failed`, resolve `base` again with `git merge-base` and check that the commit exists in this clone.
 
 Report the commit count the review covers, its scope and any missing context.
+List the commit count and the scope in the writeup's `context`.
 For a review containing only docs, omit both `base` and `head` and use `--key` for its first publish.
 The first publication of a code review on a detached HEAD also needs `--key`.
 `--key` is only for a first publish; later revisions use `--review <review-id>`.
@@ -140,7 +141,7 @@ Never invent a heading; confirm it in the file before citing it in words:
 Docs may come from the worktree or a folder listed in `docRoots`.
 For a sibling checkout or vault, follow the doc-root refusal rule under "Publish and offer the views".
 Never paste a doc's text into the writeup.
-If no related docs are found, write "No design doc is cited." in the Overview's scope.
+If no related docs are found, write "No design doc is cited." in the writeup's `context`.
 
 ## Write for the reviewer
 
@@ -149,9 +150,21 @@ Put the effect before the mechanism, explain unfamiliar terms, and cite paths yo
 Use the same rule for writeup text and feedback replies: answer first, one fact per sentence,
 and short sentences of 20 words or fewer.
 
-- `overview`: the goal, the visible change and its scope, in plain language.
-- `tldr`: two bullets, **Biggest risk** and **Check first**, naming the highest risk and the
-  topic and file to inspect first. Keep these current after fixes.
+Write the opening fields below. The app shows them in this order, with these weights.
+
+- `tldr`: two or three short sentences on what this change is and why it matters for the project.
+  Name the issue or plan task it serves when there is one.
+  The reviewer reads it first, often straight from other work.
+- `overview`: two bullets, **Goal** (the problem) and **Change** (what the reviewer sees now), in plain language.
+  They carry the most weight.
+- `outOfScope`: what the change leaves out on purpose, as a short list.
+  It shows quieter, right under the overview.
+- `whereToLook`: two bullets, **Biggest risk** and **Check first**.
+  Name the highest risk and the topic and file to inspect first.
+  It guides the review and does not summarize the change. Keep these current after fixes.
+- `context`: side information as a short list.
+  Include the commit count and scope, renamed files, dependencies, unchanged areas and cited docs.
+  It shows muted, below the guide.
 - `decisions`: write this only when the user's request is available in this conversation and
   you are not a sub-agent. Describe how the change runs, assumptions nobody asked for, and drift
   from the user's latest stated intent. Mark drift clearly and quote the short request it departs
