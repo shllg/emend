@@ -519,14 +519,22 @@ test.each([0, 2, 24, undefined])("accepted approval uses cached inbox hours %s",
   expect(client.getQueryData<ReviewView>(["review", reviewId])).toMatchObject(expected);
 });
 
+const hoursSetting = (value: number) => ({
+  value,
+  source: "override" as const,
+  default: 12,
+  file: null,
+  override: value,
+  fileError: false,
+});
+const at = (ms: number) => new Date(Date.now() + ms).toISOString();
+
 test.each([undefined, 24])("accepted approval uses zero settings hours before inbox hours %s", async (inboxHours) => {
   server = { ...base, unsentCount: 0 };
   await mount();
   if (inboxHours !== undefined) client.setQueryData(["inbox"], { approvedActiveHours: inboxHours, items: [server] });
   else expect(client.getQueryData(["inbox"])).toBeUndefined();
-  client.setQueryData(["settings"], {
-    approvedActiveHours: { value: 0, source: "override", default: 12, file: null, override: 0, fileError: false },
-  });
+  client.setQueryData(["settings"], { approvedActiveHours: hoursSetting(0), serverTime: at(0) });
   mode = "held";
   approve("Approve revision 3");
   await settle();
@@ -537,20 +545,18 @@ test.each([undefined, 24])("accepted approval uses zero settings hours before in
   });
 });
 
-test.each(["settings", "inbox"])("accepted approval uses the newer %s window", async (newer) => {
+test.each(["settings", "inbox"])("accepted approval uses the %s window the server answered last", async (newer) => {
   server = { ...base, unsentCount: 0 };
   await mount(<Inbox />);
   const now = Date.now();
-  client.setQueryData<InboxData>(["inbox"], (data) => data && { ...data, approvedActiveHours: 24 }, {
-    updatedAt: now - (newer === "inbox" ? 0 : 1_000),
-  });
-  client.setQueryData(
-    ["settings"],
-    {
-      approvedActiveHours: { value: 0, source: "override", default: 12, file: null, override: 0, fileError: false },
-    },
-    { updatedAt: now - (newer === "settings" ? 0 : 1_000) },
+  client.setQueryData<InboxData>(
+    ["inbox"],
+    (data) => data && { ...data, approvedActiveHours: 24, serverTime: at(newer === "inbox" ? 0 : -60_000) },
   );
+  client.setQueryData(["settings"], {
+    approvedActiveHours: hoursSetting(0),
+    serverTime: at(newer === "settings" ? 0 : -60_000),
+  });
   mode = "held";
   approve("Approve revision 3");
   await settle();
@@ -561,4 +567,29 @@ test.each(["settings", "inbox"])("accepted approval uses the newer %s window", a
   };
   expect(client.getQueryData<ReviewView>(["review", reviewId])).toMatchObject(expected);
   expect(client.getQueryData<InboxData>(["inbox"])?.items[0]).toMatchObject(expected);
+});
+
+test("consecutive approvals before a refetch keep the newer settings window", async () => {
+  server = { ...base, unsentCount: 0 };
+  await mount(<Inbox />);
+  client.setQueryData<InboxData>(
+    ["inbox"],
+    (data) => data && { ...data, approvedActiveHours: 24, serverTime: at(-60_000) },
+  );
+  client.setQueryData(["settings"], { approvedActiveHours: hoursSetting(0), serverTime: at(0) });
+  mode = "held";
+  for (const round of [1, 2]) {
+    approve("Approve revision 3");
+    await settle();
+    expect(client.getQueryData<ReviewView>(["review", reviewId]), `approval ${round}`).toMatchObject({
+      state: "approved",
+      list: "done",
+      activeUntil: null,
+    });
+    expect(client.getQueryData<InboxData>(["inbox"])?.items[0]).toMatchObject({ list: "done", activeUntil: null });
+    // Back to unapproved, as a second review would be, with no refetch in between.
+    client.setQueryData(["review", reviewId], server);
+    client.setQueryData<InboxData>(["inbox"], (data) => data && { ...data, items: [server] });
+    await settle();
+  }
 });

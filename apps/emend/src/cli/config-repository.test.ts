@@ -1,10 +1,13 @@
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import * as fs from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { expect, onTestFinished, test, vi } from "vitest";
 import { configCommand } from "./commands/config.ts";
 import { readConfig } from "./config.ts";
 import { escapeReference } from "./escape.ts";
+
+vi.mock("node:fs/promises", async (original) => ({ ...(await original<typeof import("node:fs/promises")>()) }));
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "emend-config-repo-"));
@@ -50,6 +53,75 @@ test.each(["file", "folder link", "file link", "missing"])(
     if (kind === "missing") await expect(stat(f.configDir)).rejects.toMatchObject({ code: "ENOENT" });
   },
 );
+
+test.each(["relative intermediate target", "parent after folder link"])(
+  "the config walk catches a repository hop through a %s with both endpoints outside",
+  async (kind) => {
+    const f = await fixture();
+    const outside = join(f.root, "outside");
+    await mkdir(outside);
+    const configured = join(outside, "config.json");
+    const target = join(f.home, "config.json");
+    await writeFile(target, '{"openBrowser":true}');
+    if (kind === "relative intermediate target") {
+      await symlink("hop", configured);
+      await symlink(relative(outside, join(f.repo, "config-link.json")), join(outside, "hop"));
+      await symlink("../config.json", join(f.repo, "config-link.json"));
+    } else {
+      await symlink("hop/../config.json", configured);
+      await symlink(f.repo, join(outside, "hop"));
+    }
+    expect(await realpath(configured)).toBe(await realpath(target));
+    expect(await readConfig(f.state, outside, f.options)).toEqual({ docRoots: [], openBrowser: false });
+    expect(f.warn).toHaveBeenCalledExactlyOnceWith(
+      `emend: ignoring ${configured}: it sits inside the repository at ${f.repo}\n`,
+    );
+    await expect(
+      configCommand(
+        f.state,
+        outside,
+        ["list"],
+        {
+          env: {},
+          stdout: vi.fn(),
+          stderr: vi.fn(),
+        },
+        f.repo,
+      ),
+    ).rejects.toThrow(
+      `the emend config file ${configured} sits inside the repository at ${f.repo}; run emend config outside it`,
+    );
+  },
+);
+
+test.each([40, 41])("the config path walk caps traversal at 40 hops (chain: %s)", async (count) => {
+  const f = await fixture();
+  const outside = join(f.root, "outside");
+  await mkdir(outside);
+  const configured = join(outside, "config.json");
+  const target = join(outside, "target.json");
+  await writeFile(target, '{"openBrowser":true}');
+  for (let i = 0; i < count; i++) {
+    await symlink(i === count - 1 ? "target.json" : `link-${i + 1}`, i === 0 ? configured : join(outside, `link-${i}`));
+  }
+  const actualFs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+  // Bypass the kernel's own link cap in the preliminary realpath; exercise the explicit walk's cap.
+  const resolve = vi.spyOn(fs, "realpath").mockImplementation(async (...args: unknown[]) => {
+    if (args[0] === configured) return target;
+    return Reflect.apply(actualFs.realpath, undefined, args);
+  });
+  const readlink = vi.spyOn(fs, "readlink");
+  try {
+    const result = readConfig(f.state, outside, f.options);
+    if (count === 40) await expect(result).resolves.toEqual({ docRoots: [], openBrowser: true });
+    else await expect(result).rejects.toThrow(`cannot check emend configuration in ${configured}`);
+    expect(readlink).toHaveBeenCalledTimes(40);
+    expect(f.warn).not.toHaveBeenCalled();
+  } finally {
+    readlink.mockRestore();
+    resolve.mockRestore();
+  }
+});
 
 test("an ignored config supplies no roots or browser opt-in without a legacy file", async () => {
   const f = await fixture();

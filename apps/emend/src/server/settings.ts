@@ -35,7 +35,7 @@ export async function readSettings(
   ownerId: string,
   q: Queries,
   { file, fileError }: FileSetting,
-): Promise<SettingsView> {
+): Promise<Omit<SettingsView, "serverTime">> {
   const row = await q
     .select()
     .from(settings)

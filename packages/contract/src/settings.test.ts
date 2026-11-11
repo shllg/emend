@@ -28,7 +28,10 @@ test("updates reject invalid hours, omissions and unknown keys", () => {
 test("settings expose the source and nullable file and override", () => {
   for (const source of SettingSource.options) {
     const setting = { value: 12, source, default: 12, file: null, override: null, fileError: false };
-    expect(SettingsView.parse({ approvedActiveHours: setting })).toEqual({ approvedActiveHours: setting });
+    const view = { approvedActiveHours: setting, serverTime: "2026-11-04T10:00:00.000Z" };
+    expect(SettingsView.parse(view)).toEqual(view);
+    expect(SettingsView.safeParse({ approvedActiveHours: setting }).success).toBe(false);
+    expect(SettingsView.safeParse({ ...view, serverTime: "yesterday" }).success).toBe(false);
     expect(HoursSetting.safeParse({ ...setting, source: "browser" }).success).toBe(false);
     expect(HoursSetting.safeParse({ ...setting, file: 25.5 }).success).toBe(false);
     expect(HoursSetting.safeParse({ ...setting, override: "12" }).success).toBe(false);

@@ -16,7 +16,10 @@ const defaultSetting: HoursSetting = {
   fileError: false,
 };
 function setup(setting: Partial<HoursSetting> = {}, path = "/settings", patchResponse?: Promise<Response>) {
-  let view: SettingsView = { approvedActiveHours: { ...defaultSetting, ...setting } };
+  let view: SettingsView = {
+    approvedActiveHours: { ...defaultSetting, ...setting },
+    serverTime: "2026-11-04T10:00:00.000Z",
+  };
   const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
     if (path === "/api/v1/settings") {
       if (init?.method === "PATCH") {
@@ -24,6 +27,7 @@ function setup(setting: Partial<HoursSetting> = {}, path = "/settings", patchRes
         const override = JSON.parse(String(init.body)).approvedActiveHours as number | null;
         const old = view.approvedActiveHours;
         view = {
+          serverTime: view.serverTime,
           approvedActiveHours: {
             ...old,
             override,
@@ -161,7 +165,7 @@ test("a delayed background GET cannot overwrite the saved settings view", async 
   fireEvent.click(save());
   await screen.findByText("Set here.");
   await act(async () => {
-    delayed.resolve(Response.json({ approvedActiveHours: defaultSetting }));
+    delayed.resolve(Response.json({ approvedActiveHours: defaultSetting, serverTime: "2026-11-04T10:00:00.000Z" }));
     await refresh;
   });
   expect(input.value).toBe("0");

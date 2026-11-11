@@ -90,6 +90,16 @@ test("default, file and owner override determine both inbox and single-review re
   expect(await view()).toMatchObject({ source: "default", fileError: false });
 });
 
+test("GET and PATCH answer with the server clock, which matches the inbox clock", async () => {
+  const get = SettingsView.parse(await (await f.request("/settings", "GET")).json());
+  expect(get.serverTime).toBe(new Date(f.deps.now()).toISOString());
+  f.advance(90_000);
+  const patch = SettingsView.parse(await (await f.request("/settings", "PATCH", { approvedActiveHours: 3 })).json());
+  expect(patch.serverTime).toBe(new Date(f.deps.now()).toISOString());
+  expect(Date.parse(patch.serverTime) - Date.parse(get.serverTime)).toBe(90_000);
+  expect((await inbox()).serverTime).toBe(patch.serverTime);
+});
+
 test.each([25.5, -1, 721, "12", null])("invalid file hours %j cannot break inbox reads", async (value) => {
   await config({ approvedActiveHours: value });
   expect(await view()).toMatchObject({ value: 12, source: "default", file: null, fileError: true });

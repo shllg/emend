@@ -10,7 +10,7 @@ export function settingsRoutes(app: Hono<AppEnv>, deps: AppDeps) {
     const { ownerId } = c.get("principal");
     const file = await readFileSetting(deps.configFile);
     const view = await deps.db.read((q) => readSettings(ownerId, q, file));
-    return c.json(SettingsView.parse(view));
+    return c.json(SettingsView.parse({ ...view, serverTime: new Date(deps.now()).toISOString() }));
   });
   app.patch("/api/v1/settings", async (c) => {
     const { ownerId } = c.get("principal");
@@ -18,6 +18,6 @@ export function settingsRoutes(app: Hono<AppEnv>, deps: AppDeps) {
     await deps.db.transaction((q) => updateApprovedActiveHours(ownerId, q, update.approvedActiveHours, deps.now()));
     const file = await readFileSetting(deps.configFile);
     const view = await deps.db.read((q) => readSettings(ownerId, q, file));
-    return c.json(SettingsView.parse(view));
+    return c.json(SettingsView.parse({ ...view, serverTime: new Date(deps.now()).toISOString() }));
   });
 }

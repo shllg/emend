@@ -121,16 +121,16 @@ type Accepted = { kind: "send" | "approve"; revision?: number };
 
 /** Shows an accepted Send or Approve in the cached review, inbox and revisions before the refetch lands. */
 function applyAccepted(client: QueryClient, reviewId: string, { kind, revision }: Accepted) {
-  const inboxState = client.getQueryState<InboxData>(["inbox"]);
-  const settingsState = client.getQueryState<SettingsView>(["settings"]);
-  const inbox = inboxState?.data;
+  const inbox = client.getQueryData<InboxData>(["inbox"]);
+  const settings = client.getQueryData<SettingsView>(["settings"]);
   const estimate = serverNow(inbox);
-  const settingsHours = settingsState?.data?.approvedActiveHours.value;
+  // The server's clock tells which answer is newer; cache write times do not, as optimistic writes bump them.
+  const settingsTime = settings ? Date.parse(settings.serverTime) : Number.NaN;
+  const inboxTime = inbox ? Date.parse(inbox.serverTime) : Number.NaN;
+  const settingsHours = settings?.approvedActiveHours.value;
   const inboxHours = inbox?.approvedActiveHours;
-  const approvedActiveHours =
-    ((settingsState?.dataUpdatedAt ?? 0) >= (inboxState?.dataUpdatedAt ?? 0)
-      ? (settingsHours ?? inboxHours)
-      : (inboxHours ?? settingsHours)) ?? APPROVED_ACTIVE_HOURS;
+  const useSettings = settingsHours !== undefined && (inboxHours === undefined || !(settingsTime < inboxTime));
+  const approvedActiveHours = (useSettings ? settingsHours : inboxHours) ?? APPROVED_ACTIVE_HOURS;
   const activeUntil =
     approvedActiveHours === 0 ? null : new Date(estimate + approvedActiveHours * 3_600_000).toISOString();
   const change = <T extends InboxItem>(item: T): T =>

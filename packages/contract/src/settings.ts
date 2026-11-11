@@ -17,7 +17,7 @@ export const HoursSetting = z.object({
 });
 export type HoursSetting = z.infer<typeof HoursSetting>;
 
-export const SettingsView = z.object({ approvedActiveHours: HoursSetting });
+export const SettingsView = z.object({ approvedActiveHours: HoursSetting, serverTime: z.iso.datetime() });
 export type SettingsView = z.infer<typeof SettingsView>;
 
 export const SettingsUpdate = z.strictObject({ approvedActiveHours: ApprovedActiveHours.nullable() });

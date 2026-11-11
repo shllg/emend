@@ -207,7 +207,8 @@ their normal focus behavior; no unconditional focus refetch is required.
 `SettingSource = "default" | "file" | "override"`.
 `HoursSetting = { value: ApprovedActiveHours, source: SettingSource, default: ApprovedActiveHours,
 file: ApprovedActiveHours | null, override: ApprovedActiveHours | null, fileError: boolean }`.
-`SettingsView = { approvedActiveHours: HoursSetting }`.
+`SettingsView = { approvedActiveHours: HoursSetting, serverTime: string }`. `serverTime` is the server's clock (ISO
+8601) when it answered; a client compares it with `InboxList.serverTime` to tell which window is newer.
 `SettingsUpdate = { approvedActiveHours: ApprovedActiveHours | null }` is strict; extra keys are refused.
 
 The effective `value` uses the owner's database override, then the config file, then
