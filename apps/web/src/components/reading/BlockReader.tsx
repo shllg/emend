@@ -59,12 +59,12 @@ export function BlockReader({
   resumedBlockId,
   activeThreadId,
   threadJump,
-  focus = false,
+  compact = false,
   files = emptyFiles,
   onNote,
 }: ReaderProps & {
   groups: ReaderGroup[];
-  focus?: boolean;
+  compact?: boolean;
   files?: RevisionView["files"];
   onNote?: (id: string) => void;
 }) {
@@ -275,7 +275,7 @@ export function BlockReader({
         }}
       >
         <BlockThreads
-          focus={focus}
+          compact={compact}
           reviewId={reviewId}
           threads={blockThreads.get(block.id) ?? []}
           composing={
@@ -314,11 +314,7 @@ export function BlockReader({
       </Block>
     ));
   return (
-    <div
-      ref={root}
-      tabIndex={-1}
-      className={focus ? "em-reading-column em-focus-prose" : "em-reading-column pt-4 pb-8 md:pt-7 md:pb-[72px]"}
-    >
+    <div ref={root} tabIndex={-1} className="em-reading-column pt-4 pb-8 md:pt-7 md:pb-[72px]">
       {groups.map((group, index) => (
         <ReadingGroup
           key={`${reviewId}:${revision}:${group.key}`}

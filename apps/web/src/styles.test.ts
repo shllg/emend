@@ -68,7 +68,7 @@ test("changed files keep the unviewed checkbox look", () => {
 test("the reading column grows with the pane up to 1000px on desktop and keeps its phone measure", () => {
   const css = readFileSync(join(webSource, "styles/reading.css"), "utf8");
   expect(/\.em-reading-column\s*\{([^}]+)\}/.exec(css)?.[1]).toMatch(/--reading-max:\s*68ch\s*;/);
-  expect(css).toMatch(/\.em-reading-column:not\(\.em-focus-prose\)\s*\{\s*--reading-max:\s*1000px;\s*\}/);
+  expect(css).toMatch(/\.em-reading-column\s*\{\s*--reading-max:\s*1000px;\s*\}/);
   expect(css).toMatch(/max-width:\s*calc\(var\(--reading-max\)\s*\+\s*112px\)/);
   expect(css).not.toMatch(/68ch\s*\+|-\s*68ch/);
   const prose = readFileSync(join(webSource, "styles/prose.css"), "utf8");

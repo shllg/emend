@@ -14,7 +14,8 @@ test("defaults include independent pane choices and D.4's 12px code size", () =>
     inboxWidth: 280,
     readingShare: 0.42,
     pane: { desktop: "split", tablet: "tabs" },
-    reading: "standard",
+    contents: false,
+    compact: false,
     diffStyle: "split",
     wrap: false,
     notes: true,
@@ -37,7 +38,8 @@ test("invalid fields fall back independently, including each device choice", () 
       inboxWidth: 521,
       readingShare: 0.6,
       pane: { desktop: "invalid", tablet: "split" },
-      reading: "focus",
+      contents: "true",
+      compact: true,
       diffStyle: "unified",
       wrap: "true",
       notes: "false",
@@ -50,12 +52,33 @@ test("invalid fields fall back independently, including each device choice", () 
     ...defaultLayout,
     readingShare: 0.6,
     pane: { desktop: "split", tablet: "split" },
-    reading: "focus",
+    contents: false,
+    compact: true,
     diffStyle: "unified",
     inboxCollapsed: true,
     codeSize: 14,
   });
 });
+test.each([
+  ['{"reading":"focus"}', true, true],
+  ['{"reading":"focus","contents":false}', false, true],
+  ['{"reading":"focus","compact":false}', true, false],
+  ['{"reading":"focus","contents":false,"compact":false}', false, false],
+  ['{"reading":"focus","contents":"true","compact":null}', false, false],
+  ['{"reading":"standard"}', false, false],
+  ['{"reading":"standard","contents":true}', true, false],
+] as const)("legacy preference %s migrates without overriding explicit switches", (raw, contents, compact) => {
+  localStorage.setItem(layoutKey, raw);
+  const store = createLayoutStore();
+  expect(store.getSnapshot()).toEqual({ ...defaultLayout, contents, compact });
+  expect(store.getSnapshot()).not.toHaveProperty("reading");
+  store.update({ wrap: true });
+  const saved = JSON.parse(localStorage.getItem(layoutKey) ?? "{}");
+  expect(saved).toMatchObject({ contents, compact, wrap: true });
+  expect(saved).not.toHaveProperty("reading");
+  expect(createLayoutStore().getSnapshot()).toEqual(saved);
+});
+
 test.each(["{", "null", "[]", '"text"'])("bad root %s uses defaults", (raw) => {
   localStorage.setItem(layoutKey, raw);
   expect(createLayoutStore().getSnapshot()).toEqual(defaultLayout);

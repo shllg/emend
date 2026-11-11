@@ -1,4 +1,29 @@
 @layer components {
+  .em-thread-pill {
+    display: inline-flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 8px 0 7px;
+    margin: 4px 0 2px;
+    border: 1px solid var(--border-1);
+    border-radius: var(--radius-full);
+    background: var(--bg-surface);
+    color: var(--fg-3);
+    font: 500 11.5px / 1 var(--font-sans);
+    cursor: pointer;
+  }
+  .em-thread-pill:hover {
+    color: var(--fg-1);
+    border-color: var(--border-strong);
+  }
+  .em-block-threads,
+  .em-block-threads__cards {
+    display: contents;
+  }
+  .em-block-threads[data-compact],
+  .em-block-threads[data-compact] > .em-block-threads__cards {
+    display: block;
+  }
   .em-agent-note__label {
     font: 600 12px / 1.4 var(--font-sans);
   }

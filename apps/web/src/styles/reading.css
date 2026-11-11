@@ -153,8 +153,8 @@
       /* Preserve the narrow pane's padding; match the gutter when the measure fits. */
       padding-right: clamp(var(--space-8), calc(100% - var(--reading-max) - 56px), 56px);
     }
-    /* The measure grows with the pane and stops at 1000px; focus mode keeps its own. */
-    .em-reading-column:not(.em-focus-prose) {
+    /* The measure grows with the pane and stops at 1000px, with or without Contents. */
+    .em-reading-column {
       --reading-max: 1000px;
     }
     /* Reading tabs: 40px controls and their bottom border. */

@@ -87,10 +87,15 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test.each(["standard", "focus"] as const)(
-  "%s: new writeups show the opening hierarchy before topics",
-  async (reading) => {
-    layoutStore.update({ reading });
+test.each([
+  { contents: false, compact: false },
+  { contents: true, compact: false },
+  { contents: false, compact: true },
+  { contents: true, compact: true },
+])(
+  "contents=$contents compact=$compact: new writeups show the opening hierarchy before topics",
+  async (preferences) => {
+    layoutStore.update(preferences);
     const writeup = RenderedWriteup.parse(
       await renderWriteup(
         {
@@ -371,10 +376,15 @@ test("an HTML doc keeps its sandbox note in the doc bar above the frame", () => 
   }
 });
 
-test.each(["standard", "focus"] as const)(
-  "%s: hostile metadata stays text and server-sanitized Markdown remains inert",
-  async (reading) => {
-    layoutStore.update({ reading });
+test.each([
+  { contents: false, compact: false },
+  { contents: true, compact: false },
+  { contents: false, compact: true },
+  { contents: true, compact: true },
+])(
+  "contents=$contents compact=$compact: hostile metadata stays text and server-sanitized Markdown remains inert",
+  async (preferences) => {
+    layoutStore.update(preferences);
     const hostile = "<script>evil()</script><img src=x onerror=evil()><svg onload=evil()></svg>";
     const markdown = `${hostile}\n\n[bad](javascript:evil())\n\nRaw <b>HTML</b>\n\n\`\`\`mermaid\ngraph TD; A-->B; click A evil "click"\n\`\`\``;
     const evilTopic = {

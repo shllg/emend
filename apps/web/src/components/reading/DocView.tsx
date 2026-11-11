@@ -16,6 +16,8 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { docFilename, docTitle } from "../../lib/doc-navigation.ts";
 import { docKey, docView, threadOnDoc } from "../../lib/doc-view.ts";
 import type { DocNavigation, HtmlPosition } from "../../lib/frame-messages.ts";
+import { useLayout } from "../../lib/layout.ts";
+import { useLayoutPreferences } from "../../lib/layout-store.ts";
 import { focusReadingTarget } from "../../lib/reading-focus.ts";
 import { readingPositionKey } from "../../lib/reading-position.ts";
 import type { ReadingEntry } from "../../lib/use-reading-trail.ts";
@@ -58,6 +60,8 @@ export function DocView({
   onHeading?: (id: string) => void;
   back?: { title: string; go: () => void };
 }) {
+  const phone = useLayout() === "phone";
+  const { compact } = useLayoutPreferences();
   const root = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -364,7 +368,7 @@ export function DocView({
         ) : openDoc.kind === "html" ? (
           content
         ) : (
-          <BlockReader key={docKey(openDoc)} {...props} groups={groups} />
+          <BlockReader key={docKey(openDoc)} {...props} groups={groups} compact={!phone && compact} />
         )}
         {hasContents && (
           <aside className="em-doc-contents-rail">

@@ -74,11 +74,18 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-function mount(readerGroups = groups, focus = false) {
+function mount(readerGroups = groups, compact = false) {
   const ui = (next: ReaderGroup[], id = reviewId, revision = 1) => (
     <QueryClientProvider client={client}>
       <ToastProvider>
-        <BlockReader reviewId={id} revision={revision} changedBlocks={[]} threads={[]} groups={next} focus={focus} />
+        <BlockReader
+          reviewId={id}
+          revision={revision}
+          changedBlocks={[]}
+          threads={[]}
+          groups={next}
+          compact={compact}
+        />
       </ToastProvider>
     </QueryClientProvider>
   );
@@ -194,9 +201,9 @@ test("ignores unwrapped images, nested images and author-prefixed wrappers", () 
 });
 
 test.each([false, true])(
-  "opens in the shared reader, including Focus mode (%s), with a plain caption and counter",
-  (focus) => {
-    const { container } = mount(groups, focus);
+  "opens in the shared reader, with compact comments (%s), with a plain caption and counter",
+  (compact) => {
+    const { container } = mount(groups, compact);
     open();
     expect(dialog().getAttribute("aria-modal")).toBe("true");
     expect(within(dialog()).getByRole("heading", { name: "Before" })).toBeTruthy();

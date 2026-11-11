@@ -4,7 +4,6 @@ import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { Window } from "happy-dom";
-import type { ComponentProps } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
 import { layoutStore } from "./lib/layout-store.ts";
@@ -15,23 +14,6 @@ import { restoreDelays } from "./lib/use-reading-position.ts";
 vi.mock("./components/diff/LazyDiffPane.tsx", () => ({
   LazyDiffPane: () => <p>Diff stub</p>,
 }));
-
-const presentation = vi.hoisted(() => ({ collapsedDocCards: false }));
-vi.mock("./components/reading/BlockReader.tsx", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./components/reading/BlockReader.tsx")>();
-  return {
-    ...actual,
-    // Exercise the existing collapsed-card mode without changing DocView's display defaults.
-    BlockReader: (props: ComponentProps<typeof actual.BlockReader>) => (
-      <actual.BlockReader
-        {...props}
-        focus={
-          props.focus || (presentation.collapsedDocCards && props.groups.some((group) => group.path !== undefined))
-        }
-      />
-    ),
-  };
-});
 
 let id = "11111111-1111-4111-8111-111111111111";
 const review: ReviewView = {
@@ -135,7 +117,6 @@ beforeEach(() => {
   id = crypto.randomUUID();
   review.id = id;
   writeupKey = readingPositionKey(id, "writeup", "", 1);
-  presentation.collapsedDocCards = false;
   const bounds = HTMLElement.prototype.getBoundingClientRect;
   Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
     configurable: true,
@@ -846,7 +827,7 @@ test.each(["Show in place", "click", "collapsed"])(
   "R4.2 Back keeps Markdown comment cards after %s without replaying the thread jump",
   async (action) => {
     width = 1280;
-    presentation.collapsedDocCards = true;
+    layoutStore.update({ compact: true });
     const target = docA[1];
     if (!target) throw new Error("missing target");
     const placed: ThreadView = {

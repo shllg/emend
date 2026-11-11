@@ -5,7 +5,7 @@ import { revealReadingTarget } from "../../lib/reading-reveal.ts";
 import { TopicRank } from "../status/TopicRank.tsx";
 import type { ReaderGroup } from "./BlockReader.tsx";
 
-export function FocusOutline({
+export function WriteupOutline({
   root,
   groups,
   threads,
@@ -134,16 +134,16 @@ export function FocusOutline({
 
   return (
     <>
-      <div ref={progress} className="em-focus-progress" style={{ transform: "scaleX(0)" }} aria-hidden="true" />
-      <nav className="em-focus-outline" aria-label="Writeup outline">
-        <div className="em-focus-outline__label">WRITEUP</div>
+      <div ref={progress} className="em-outline-progress" style={{ transform: "scaleX(0)" }} aria-hidden="true" />
+      <nav className="em-outline" aria-label="Writeup outline">
+        <div className="em-outline__label">WRITEUP</div>
         {sections.map((group) => {
           const count = counts.get(group.key) ?? 0;
           return (
             <button
               key={group.key}
               type="button"
-              className="em-focus-outline__item"
+              className="em-outline__item"
               aria-current={current === group.key ? "location" : undefined}
               onClick={() => {
                 const section = [...(root.current?.querySelectorAll<HTMLElement>("[data-reading-section]") ?? [])].find(
@@ -157,9 +157,9 @@ export function FocusOutline({
               }}
             >
               {group.rank !== undefined && <TopicRank rank={group.rank} />}
-              <span className="em-focus-outline__text">{group.topic?.title ?? group.heading}</span>
+              <span className="em-outline__text">{group.topic?.title ?? group.heading}</span>
               {count > 0 && (
-                <span className="em-focus-outline__count" title={`${count} ${plural(count, "comment")}`}>
+                <span className="em-outline__count" title={`${count} ${plural(count, "comment")}`}>
                   {count}
                   <span className="sr-only"> {plural(count, "comment")}</span>
                 </span>

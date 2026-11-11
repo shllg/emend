@@ -3288,7 +3288,8 @@ test.each([1280, 800, 390])("Files tab count excludes stale marks and row opens 
   const reading = within(screen.getByTestId("reading-pane"));
   expect(reading.getByText("1 of 2 viewed")).toBeTruthy();
   expect(reading.getByText("changed")).toBeTruthy();
-  if (size >= 768) expect(screen.queryByRole("radiogroup", { name: "Reading mode" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Contents" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
   scroll.mockClear();
   fireEvent.click(reading.getByRole("button", { name: "Open diff for new.txt, modified" }));
   await waitFor(() => expect(history.location.hash).toContain(`diff-file-${diffFile.id}`));

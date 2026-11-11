@@ -3,7 +3,7 @@ import { useLayout, usePaneMode } from "../../lib/layout.ts";
 import { layoutStore, useLayoutPreferences } from "../../lib/layout-store.ts";
 import type { ReviewSearch } from "../../router.tsx";
 import { formatThreadCounts, type ThreadCounts } from "../status/ThreadStateBadge.tsx";
-import { SegmentedControl } from "../ui/SegmentedControl.tsx";
+import { Button } from "../ui/Button.tsx";
 import { Tabs } from "../ui/Tabs.tsx";
 
 export interface ReviewTabsProps {
@@ -31,7 +31,7 @@ export function ReviewTabs({
 }: ReviewTabsProps & { docsCount: number; idBase: string }) {
   const navigate = useNavigate();
   const phone = useLayout() === "phone";
-  const { reading } = useLayoutPreferences();
+  const { contents, compact } = useLayoutPreferences();
   const showDiff = usePaneMode() === "tabs" && hasDiff;
   const active =
     (search.tab === "diff" && !showDiff) || (search.tab === "files" && !filesCount)
@@ -73,20 +73,29 @@ export function ReviewTabs({
           });
         }}
       />
-      {!phone && hasWriteup && value === "writeup" && (
-        <SegmentedControl
-          label="Reading mode"
-          size="sm"
-          className="mx-2 shrink-0"
-          options={[
-            { value: "standard", label: "Standard" },
-            { value: "focus", label: "Focus" },
-          ]}
-          value={reading}
-          onChange={(reading) => {
-            if (reading === "standard" || reading === "focus") layoutStore.update({ reading });
-          }}
-        />
+      {!phone && (value === "writeup" || value === "docs") && (
+        <div className="mx-2 flex shrink-0 gap-1">
+          {hasWriteup && value === "writeup" && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className={contents ? "bg-raised text-fg-1" : undefined}
+              aria-pressed={contents}
+              onClick={() => layoutStore.update({ contents: !contents })}
+            >
+              Contents
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            className={compact ? "bg-raised text-fg-1" : undefined}
+            aria-pressed={compact}
+            onClick={() => layoutStore.update({ compact: !compact })}
+          >
+            Compact comments
+          </Button>
+        </div>
       )}
     </div>
   );

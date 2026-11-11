@@ -167,7 +167,13 @@ export const SourceLines = memo(function SourceLines({
           row,
           <div key={`discussion-${number}`} className="em-source-discussion" data-source-end={number}>
             {placed && (
-              <BlockThreads focus={false} reviewId={reviewId} threads={placed} composing={composing} jump={threadJump}>
+              <BlockThreads
+                compact={false}
+                reviewId={reviewId}
+                threads={placed}
+                composing={composing}
+                jump={threadJump}
+              >
                 <ThreadComposerContext value={registerComposer}>
                   <ComposerVisibilityContext value={composerVisibility}>
                     {placed.map((thread) => (

@@ -9,7 +9,8 @@ export const layoutSchema = z.object({
   pane: z
     .object({ desktop: paneChoice.catch("split"), tablet: paneChoice.catch("tabs") })
     .catch({ desktop: "split", tablet: "tabs" }),
-  reading: z.enum(["standard", "focus"]).catch("standard"),
+  contents: z.boolean().catch(false),
+  compact: z.boolean().catch(false),
   diffStyle: z.enum(["split", "unified"]).catch("split"),
   wrap: z.boolean().catch(false),
   notes: z.boolean().catch(true),
@@ -31,7 +32,11 @@ export const defaultLayout = layoutSchema.parse({});
 
 function parse(raw: string | null): LayoutPreferences {
   try {
-    return layoutSchema.parse(JSON.parse(raw ?? "{}"));
+    let value = JSON.parse(raw ?? "{}");
+    if (value !== null && typeof value === "object" && !Array.isArray(value) && value.reading === "focus") {
+      value = { contents: true, compact: true, ...value };
+    }
+    return layoutSchema.parse(value);
   } catch {
     return layoutSchema.parse({});
   }

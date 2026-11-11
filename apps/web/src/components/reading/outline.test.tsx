@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { clearDraft, draftKey, editDraftKey, saveDraft } from "../../lib/drafts.ts";
 import { layoutStore } from "../../lib/layout-store.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
+import { DocView } from "./DocView.tsx";
 import { Writeup } from "./Writeup.tsx";
 
 const reviewId = "11111111-1111-4111-8111-111111111111";
@@ -62,7 +63,7 @@ beforeEach(() => {
   localStorage.clear();
   window.dispatchEvent(new StorageEvent("storage", { key: null, storageArea: localStorage }));
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
-  layoutStore.update({ reading: "focus" });
+  layoutStore.update({ contents: true, compact: true });
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   observers = [];
   frames = new Map();
@@ -138,6 +139,88 @@ function flushFrames() {
     for (const callback of callbacks) callback(0);
   });
 }
+
+test.each([
+  { contents: true, compact: false },
+  { contents: false, compact: true },
+  { contents: true, compact: true },
+  { contents: false, compact: false },
+])("writeup effects are independent with contents=$contents compact=$compact", ({ contents, compact }) => {
+  layoutStore.update({ contents, compact });
+  const view = mount();
+  expect(!!screen.queryByRole("navigation", { name: "Writeup outline" })).toBe(contents);
+  expect(!!view.container.querySelector(".em-outline-progress")).toBe(contents);
+  expect(view.container.querySelector(".em-reading-column")?.className).toBe(
+    "em-reading-column pt-4 pb-8 md:pt-7 md:pb-[72px]",
+  );
+  expect(!!document.getElementById(`thread-${thread.id}`)).toBe(!compact);
+  expect(!!screen.queryByRole("button", { name: "1 comment", expanded: false })).toBe(compact);
+  for (const wrapper of view.container.querySelectorAll(".em-block-threads")) {
+    expect(wrapper.hasAttribute("data-compact")).toBe(compact);
+  }
+  if (compact) {
+    fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
+    expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Hide", expanded: true })).toBeTruthy();
+  }
+});
+
+test.each([false, true])("Markdown doc comments honor compact independently and stay open on phone=%s", (phone) => {
+  vi.stubGlobal("matchMedia", () => ({ matches: !phone, addEventListener() {}, removeEventListener() {} }));
+  layoutStore.update({ contents: false, compact: true });
+  const doc = { kind: "markdown" as const, path: "garden.md", blocks: [block] };
+  const docThread: ThreadView = {
+    ...thread,
+    target: { kind: "doc-span", path: doc.path, blockId: block.id, quote: "seed", prefix: "Plant a ", suffix: "." },
+    placement: {
+      status: "placed",
+      location: { kind: "doc-span", path: doc.path, blockId: block.id, start: 8, end: 12 },
+    },
+  };
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <DocView
+          reviewId={reviewId}
+          revision={1}
+          docs={[doc]}
+          openDoc={doc}
+          search={{ tab: "docs", doc: doc.path }}
+          targeted={false}
+          onOpenDoc={() => {}}
+          changedBlocks={[]}
+          threads={[docThread]}
+        />
+      </ToastProvider>
+    </QueryClientProvider>,
+  );
+  expect(screen.queryByRole("navigation", { name: "Writeup outline" })).toBeNull();
+  expect(!!document.getElementById(`thread-${thread.id}`)).toBe(phone);
+  expect(!!view.container.querySelector(".em-thread-pill")).toBe(!phone);
+  if (!phone) {
+    fireEvent.click(screen.getByRole("button", { name: "1 comment", expanded: false }));
+    expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Hide", expanded: true }));
+    expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
+    act(() => layoutStore.update({ compact: false }));
+    expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
+    expect(view.container.querySelector(".em-thread-pill")).toBeNull();
+  }
+});
+
+test("Contents keeps the standard measure and the outline hides below 640px", () => {
+  const outline = readFileSync(resolve(import.meta.dirname, "../../styles/outline.css"), "utf8");
+  expect(outline).not.toMatch(/max-width|62ch/);
+  expect(outline).toMatch(
+    /\.em-outline-layout \.em-reading-group,\s*\.em-outline-layout \[id\]\s*\{\s*scroll-margin-top: calc\(var\(--reading-sticky-top\) \+ 14px\);/,
+  );
+  expect(outline).toMatch(
+    /@container reading \(width < 640px\)\s*\{\s*\.em-outline-layout\s*\{\s*grid-template-columns: minmax\(0, 1fr\);\s*\}\s*\.em-outline\s*\{\s*display: none;/,
+  );
+  const reading = readFileSync(resolve(import.meta.dirname, "../../styles/reading.css"), "utf8");
+  expect(reading).toMatch(/\.em-reading-column\s*\{\s*--reading-max:\s*1000px;\s*\}/);
+  expect(reading).not.toMatch(/\.em-reading-column:not\(/);
+});
 
 test("outline has one row per section, topic ranks and placed thread counts", () => {
   const topicThread: ThreadView = {
@@ -216,7 +299,7 @@ test("progress is aria-hidden, clamped, frame-coalesced and suspended with the p
     clientHeight: { configurable: true, value: 500 },
     scrollHeight: { configurable: true, value: 1500 },
   });
-  const progress = view.container.querySelector<HTMLElement>(".em-focus-progress");
+  const progress = view.container.querySelector<HTMLElement>(".em-outline-progress");
   expect(progress?.getAttribute("aria-hidden")).toBe("true");
   pane.scrollTop = 500;
   fireEvent.scroll(pane);
@@ -331,15 +414,15 @@ test("selection commenting uses the same anchor and keeps the selected block's t
   window.getSelection()?.removeAllRanges();
 });
 
-test("Standard restores the existing column and cards without replacing blocks or fold choices", () => {
+test("turning both switches off restores cards without replacing blocks or fold choices", () => {
   const view = mount();
   const content = document.getElementById(`block-${block.id}`);
   const title = screen.getByRole("heading", { name: "Topic 1: Plant a seed" });
   const fold = screen.getByRole("button", { name: "Topic 1: Plant a seed" });
   fireEvent.click(fold);
-  act(() => layoutStore.update({ reading: "standard" }));
+  act(() => layoutStore.update({ contents: false, compact: false }));
   expect(screen.queryByRole("navigation", { name: "Writeup outline" })).toBeNull();
-  expect(view.container.querySelector(".em-focus-progress")).toBeNull();
+  expect(view.container.querySelector(".em-outline-progress")).toBeNull();
   expect(view.container.querySelector(".em-reading-column")?.className).toBe(
     "em-reading-column pt-4 pb-8 md:pt-7 md:pb-[72px]",
   );
@@ -349,20 +432,20 @@ test("Standard restores the existing column and cards without replacing blocks o
   expect(fold.getAttribute("aria-expanded")).toBe("true");
 });
 
-test("phone stays Standard even when Focus is stored", () => {
+test("phone disables both effects even when both preferences are stored", () => {
   mount({ phone: true });
   expect(screen.queryByRole("navigation", { name: "Writeup outline" })).toBeNull();
   expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
-  expect(layoutStore.getSnapshot().reading).toBe("focus");
+  expect(layoutStore.getSnapshot()).toMatchObject({ contents: true, compact: true });
 });
 
-test("an open reply composer survives changing Standard to Focus and cannot be folded", async () => {
-  layoutStore.update({ reading: "standard" });
+test("an open reply composer survives enabling compact comments and cannot be folded", async () => {
+  layoutStore.update({ contents: false, compact: false });
   mount();
   fireEvent.click(screen.getByRole("button", { name: "Reply" }));
   const input = screen.getByRole("textbox");
   await act(async () => {});
-  act(() => layoutStore.update({ reading: "focus" }));
+  act(() => layoutStore.update({ contents: true, compact: true }));
   expect(screen.getByRole("textbox")).toBe(input);
   expect(screen.queryByRole("button", { name: "Hide" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -379,30 +462,41 @@ test("a pending thread navigation opens its pill when placement data arrives", (
   expect(screen.getByRole("button", { name: "Hide" })).toBeTruthy();
 });
 
-test("Standard and phone have no query container and thread wrappers are layout-neutral", () => {
+test("with both switches off and on phone there is no query container and thread wrappers are layout-neutral", () => {
   const style = document.createElement("style");
   // Happy DOM does not apply cascade layers; use the actual component declarations.
-  style.textContent = readFileSync(resolve(import.meta.dirname, "../../styles/focus.css"), "utf8")
-    .replace("@layer components {", "")
-    .replace(/}\s*$/, "");
+  style.textContent = ["outline.css", "threads.css"]
+    .map((file) =>
+      readFileSync(resolve(import.meta.dirname, `../../styles/${file}`), "utf8")
+        .replace("@layer components {", "")
+        .replace(/}\s*$/, ""),
+    )
+    .join("\n");
   document.head.append(style);
   try {
-    layoutStore.update({ reading: "standard" });
+    layoutStore.update({ contents: false, compact: false });
     const view = mount();
     const card = document.getElementById(`thread-${thread.id}`);
     expect(card).toBeTruthy();
     expect(screen.queryByRole("button", { name: /comment|Hide/ })).not.toBeTruthy();
-    expect(view.container.querySelector(".em-focus-container")).toBeNull();
+    expect(view.container.querySelector(".em-outline-container")).toBeNull();
     expect(getComputedStyle(screen.getByTestId("scroll")).getPropertyValue("container")).toBe("");
-    for (const wrapper of view.container.querySelectorAll(".em-focus-threads, .em-focus-threads__cards")) {
+    for (const wrapper of view.container.querySelectorAll(".em-block-threads, .em-block-threads__cards")) {
       expect(getComputedStyle(wrapper).display).toBe("contents");
     }
-    act(() => layoutStore.update({ reading: "focus" }));
-    expect(view.container.querySelector(".em-focus-container")).toBeTruthy();
+    act(() => layoutStore.update({ compact: true }));
+    expect(view.container.querySelector(".em-outline-container")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
+    for (const wrapper of view.container.querySelectorAll(".em-block-threads, .em-block-threads__cards")) {
+      expect(getComputedStyle(wrapper).display).toBe("block");
+    }
+    expect(getComputedStyle(screen.getByRole("button", { name: "Hide" })).display).toBe("inline-flex");
+    act(() => layoutStore.update({ contents: true }));
+    expect(view.container.querySelector(".em-outline-container")).toBeTruthy();
     expect(getComputedStyle(screen.getByTestId("scroll")).getPropertyValue("container")).toBe("");
     view.rerender({ phone: true });
-    expect(view.container.querySelector(".em-focus-container")).toBeNull();
-    for (const wrapper of view.container.querySelectorAll(".em-focus-threads, .em-focus-threads__cards")) {
+    expect(view.container.querySelector(".em-outline-container")).toBeNull();
+    for (const wrapper of view.container.querySelectorAll(".em-block-threads, .em-block-threads__cards")) {
       expect(getComputedStyle(wrapper).display).toBe("contents");
     }
     expect(screen.queryByRole("button", { name: "Hide" })).toBeNull();
@@ -411,7 +505,7 @@ test("Standard and phone have no query container and thread wrappers are layout-
   }
 });
 
-test("sticky offset follows the measured tab row, and is removed outside Focus", () => {
+test("sticky offset follows the measured tab row, and is removed with Contents off", () => {
   let resize: (() => void) | undefined;
   const observed: Element[] = [];
   vi.stubGlobal(
@@ -433,7 +527,7 @@ test("sticky offset follows the measured tab row, and is removed outside Focus",
   tabRow.className = "em-review-tabs";
   pane.prepend(tabRow);
   const bounds = vi.spyOn(tabRow, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 800, 57));
-  const root = view.container.querySelector<HTMLElement>(".em-focus");
+  const root = view.container.querySelector<HTMLElement>(".em-outline-layout");
   act(() => resize?.());
   expect(observed).toContain(tabRow);
   expect(root?.style.getPropertyValue("--reading-sticky-top")).toBe("57px");
@@ -443,7 +537,7 @@ test("sticky offset follows the measured tab row, and is removed outside Focus",
   tabRow.remove();
   act(() => resize?.());
   expect(root?.style.getPropertyValue("--reading-sticky-top")).toBe("0px");
-  act(() => layoutStore.update({ reading: "standard" }));
+  act(() => layoutStore.update({ contents: false, compact: false }));
   expect(root?.style.getPropertyValue("--reading-sticky-top")).toBe("");
 });
 
@@ -473,7 +567,7 @@ test("at the bottom, a short final section is current without rect reads on ever
   expect(outline.getByRole("button", { name: "Glossary" }).getAttribute("aria-current")).toBe("location");
 });
 
-test("a phone reply sheet reports its open composer and survives resizing into Focus", async () => {
+test("a phone reply sheet reports its open composer and survives resizing into compact comments", async () => {
   vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
   const view = mount({ phone: true });
   const card = document.getElementById(`thread-${thread.id}`);

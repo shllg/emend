@@ -10,14 +10,14 @@ export type ThreadJump = { threadId: string; token: object };
 
 /** Keep the existing cards and their highlight lifecycle; only their presentation folds. */
 export function BlockThreads({
-  focus,
+  compact,
   reviewId,
   threads,
   composing,
   jump,
   children,
 }: {
-  focus: boolean;
+  compact: boolean;
   reviewId: string;
   threads: RevisionView["threads"];
   composing: boolean;
@@ -69,7 +69,7 @@ export function BlockThreads({
   // Forced opening is sticky: saving, sending or closing an editor must not remove
   // the card (or its focused control) until the reviewer explicitly presses Hide.
   if (forced && !expanded) rememberOpen(true);
-  const open = !focus || expanded || forced;
+  const open = !compact || expanded || forced;
   const state = threads.every((thread) => thread.state === "resolved")
     ? " · resolved"
     : threads.some((thread) => thread.state === "answered")
@@ -77,16 +77,16 @@ export function BlockThreads({
       : "";
   return (
     <ThreadComposerContext value={registerComposer}>
-      <div className="em-focus-threads">
+      <div className="em-block-threads" data-compact={compact ? "" : undefined}>
         {open && (
-          <div id={id} className="em-focus-threads__cards">
+          <div id={id} className="em-block-threads__cards">
             {children}
           </div>
         )}
-        {focus && threads.length > 0 && !forced && (
+        {compact && threads.length > 0 && !forced && (
           <button
             type="button"
-            className="em-focus-pill"
+            className="em-thread-pill"
             aria-expanded={open}
             aria-controls={open ? id : undefined}
             onClick={(event) => {

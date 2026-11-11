@@ -5,9 +5,9 @@ import { useLayoutPreferences } from "../../lib/layout-store.ts";
 import { rankedTopics } from "../../lib/topics.ts";
 import type { ReviewSearch } from "../../router.tsx";
 import { BlockReader, type ReaderGroup, type ReaderProps } from "./BlockReader.tsx";
-import { FocusOutline } from "./FocusOutline.tsx";
 import { TopicsMap } from "./TopicsMap.tsx";
 import { useCurrentTopic } from "./useCurrentTopic.ts";
+import { WriteupOutline } from "./WriteupOutline.tsx";
 
 const emptyTopics: RevisionView["topics"] = [];
 const emptyFiles: RevisionView["files"] = [];
@@ -33,9 +33,10 @@ export function Writeup({
   onNote?: (id: string) => void;
 }) {
   const root = useRef<HTMLDivElement>(null);
-  const { reading } = useLayoutPreferences();
-  const focus = !phone && reading === "focus";
-  useCurrentTopic(root, onCurrentTopic, writeup.sections, visible && !focus);
+  const prefs = useLayoutPreferences();
+  const contents = !phone && prefs.contents;
+  const compact = !phone && prefs.compact;
+  useCurrentTopic(root, onCurrentTopic, writeup.sections, visible && !contents);
   useEffect(() => () => onCurrentTopic?.(undefined), [onCurrentTopic]);
   const groups = useMemo(() => {
     const ranked = rankedTopics(topics);
@@ -161,10 +162,10 @@ export function Writeup({
     return groups;
   }, [writeup.sections, topics, files, search.tab, search.rev, phone, props.reviewId, props.threads]);
   return (
-    <div className={focus ? "em-focus-container" : "contents"}>
-      <div ref={root} className={focus ? "em-focus" : "contents"}>
-        {focus && (
-          <FocusOutline
+    <div className={contents ? "em-outline-container" : "contents"}>
+      <div ref={root} className={contents ? "em-outline-layout" : "contents"}>
+        {contents && (
+          <WriteupOutline
             root={root}
             groups={groups}
             threads={props.threads}
@@ -172,7 +173,7 @@ export function Writeup({
             onCurrentTopic={onCurrentTopic}
           />
         )}
-        <BlockReader {...props} topics={topics} groups={groups} focus={focus} files={files} onNote={onNote} />
+        <BlockReader {...props} topics={topics} groups={groups} compact={compact} files={files} onNote={onNote} />
       </div>
     </div>
   );

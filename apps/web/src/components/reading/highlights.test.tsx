@@ -619,8 +619,8 @@ test("sanitized Markdown and glossary remain inert while marked, and Mermaid cli
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
 });
 
-test("Focus keeps quoted ranges while closed, tracks opened cards and unregisters them on Hide", () => {
-  layoutStore.update({ reading: "focus" });
+test("compact comments keep quoted ranges while closed, tracks opened cards and unregisters them on Hide", () => {
+  layoutStore.update({ compact: true });
   const sent = { ...thread, comments: thread.comments.map((comment) => ({ ...comment, sent: true, sentOn: 1 })) };
   const view = mount(<Writeup {...props} threads={[sent]} writeup={writeup()} />);
   expect(quotes()).toEqual(["seed"]);
