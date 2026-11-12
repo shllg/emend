@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { BinView, InboxList, LIMITS, type ReviewEvent } from "@emend/contract";
 import { and, eq, sql } from "drizzle-orm";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import * as t from "../../db/schema.ts";
 import { createToken, SESSION_MS } from "../auth/tokens.ts";
 import { publishReview } from "../mailbox/lifecycle-support.ts";
 import { error, mailboxFixture } from "../mailbox/test-support.ts";
+import * as pacing from "../pacing.ts";
 import { bundle, importFixture } from "./import-test-support.ts";
 
 let f: Awaited<ReturnType<typeof mailboxFixture>>;
@@ -13,6 +14,7 @@ beforeEach(async () => {
   f = await mailboxFixture();
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   await f.cleanup();
 });
 
@@ -20,6 +22,7 @@ const day = 86_400_000;
 const post = (id: string, action: string, who: "reviewer" | "foreign" | "agent" = "reviewer") =>
   f.request(`/reviews/${id}/${action}`, "POST", undefined, who);
 const bin = async () => BinView.parse(await (await f.request("/bin", "GET")).json());
+const cutoff = () => ({ upTo: new Date(f.deps.now()).toISOString() });
 const inboxIds = async () =>
   InboxList.parse(await (await f.request("/reviews", "GET")).json()).items.map((item) => item.id);
 const row = (id: string) =>
@@ -38,7 +41,7 @@ const bearer = (secret: string, path: string, method: string) =>
     headers: { Host: "127.0.0.1:3636", Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
   });
 
-test("the four bin routes are reviewer-only: agent, admin and bearer-sent reviewer tokens are refused", async () => {
+test("the five bin routes are reviewer-only: agent, admin and bearer-sent reviewer tokens are refused", async () => {
   const { reviewId } = await publishReview(f);
   const admin = (await createToken(f.db, f.ownerId, "admin")).secret;
   const deviceId = randomUUID();
@@ -54,6 +57,7 @@ test("the four bin routes are reviewer-only: agent, admin and bearer-sent review
     [`/reviews/${reviewId}/restore`, "POST"],
     ["/bin", "GET"],
     ["/bin", "DELETE"],
+    [`/bin/${reviewId}`, "DELETE"],
   ] as const;
   for (const [path, method] of calls) {
     await error(await f.request(path, method, undefined, "agent"), 403, "forbidden");
@@ -83,6 +87,7 @@ test("bin, list and restore a review without changing anything else", async () =
       },
     ],
     total: 1,
+    more: false,
   });
   expect(await inboxIds()).not.toContain(reviewId);
   expect({ ...(await row(reviewId)), binnedAt: null }).toEqual(before);
@@ -138,8 +143,8 @@ test("bin and restore are owner-scoped: a foreign or unknown review is 404 and n
   await error(await post(randomUUID(), "restore"), 404, "unknown_review");
   expect((await post(reviewId, "bin")).status).toBe(204);
   const foreign = BinView.parse(await (await f.request("/bin", "GET", undefined, "foreign")).json());
-  expect(foreign).toEqual({ items: [], total: 0 });
-  expect((await f.request("/bin", "DELETE", undefined, "foreign")).status).toBe(204);
+  expect(foreign).toEqual({ items: [], total: 0, more: false });
+  expect((await f.request("/bin", "DELETE", cutoff(), "foreign")).status).toBe(204);
   expect(await exists(reviewId)).toBe(true);
 });
 
@@ -151,30 +156,125 @@ test("a moved review cannot be binned", async () => {
   await error(await post(reviewId, "bin"), 409, "review_moved");
 });
 
-test("the bin lists newest first, ties by id, capped, with the full total", async () => {
-  const ids: string[] = [];
+test("the bin pages newest first, including timestamp ties across the page boundary", async () => {
   const stamp = 1_000_000;
-  for (let i = 0; i < LIMITS.binItems + 3; i++) {
+  const items = Array.from({ length: LIMITS.binItems + 3 }, (_, i) => {
     const id = randomUUID();
-    ids.push(id);
-    await f.db.query((q) =>
-      q.insert(t.reviews).values({
-        id,
-        ownerId: f.ownerId,
-        originInstanceId: f.instanceId,
-        reviewKey: id.replaceAll("-", "").padEnd(64, "0"),
-        title: `Review ${i}`,
-        // Three share the newest time, to exercise the id tie breaker.
-        binnedAt: i < 3 ? stamp + 10_000 : stamp + i,
-      }),
-    );
-  }
+    return {
+      id,
+      ownerId: f.ownerId,
+      originInstanceId: f.instanceId,
+      reviewKey: id.replaceAll("-", "").padEnd(64, "0"),
+      title: `Review ${i}`,
+      // Five share a time across the page boundary, followed by an older review.
+      binnedAt: i < LIMITS.binItems - 3 ? stamp + 1000 + i : i === LIMITS.binItems + 2 ? stamp - 1 : stamp,
+    };
+  });
+  await f.db.query((q) => q.insert(t.reviews).values(items));
+  const expected = items.sort((a, b) => b.binnedAt - a.binnedAt || a.id.localeCompare(b.id));
   const view = await bin();
   expect(view.total).toBe(LIMITS.binItems + 3);
   expect(view.items).toHaveLength(LIMITS.binItems);
-  expect(view.items.slice(0, 3).map((item) => item.id)).toEqual(ids.slice(0, 3).sort());
-  const times = view.items.map((item) => Date.parse(item.binnedAt));
-  expect(times).toEqual([...times].sort((x, y) => y - x));
+  expect(view.more).toBe(true);
+  const last = view.items.at(-1);
+  if (!last) throw new Error("Missing cursor");
+  const path = `/bin?${new URLSearchParams({ beforeAt: last.binnedAt, beforeId: last.id })}`;
+  const next = BinView.parse(await (await f.request(path, "GET")).json());
+  expect(next).toMatchObject({ total: LIMITS.binItems + 3, more: false });
+  expect(next.items).toHaveLength(3);
+  expect(next.items[0]?.binnedAt).toBe(last.binnedAt);
+  expect([...view.items, ...next.items].map((item) => item.id)).toEqual(expected.map((item) => item.id));
+  expect(BinView.parse(await (await f.request(path, "GET", undefined, "foreign")).json())).toEqual({
+    items: [],
+    total: 0,
+    more: false,
+  });
+});
+
+test.each([
+  "beforeAt=2026-11-04T10:00:00.000Z",
+  "beforeId=11111111-1111-4111-8111-111111111111",
+  "beforeAt=yesterday&beforeId=11111111-1111-4111-8111-111111111111",
+  "beforeAt=2026-11-04T10:00:00.000Z&beforeId=invalid",
+  "beforeAt=&beforeId=",
+])("invalid bin cursor %s is refused", async (query) => {
+  await error(await f.request(`/bin?${query}`, "GET"), 400, "invalid_request");
+});
+
+test("empty bin limits its JSON body before parsing", async () => {
+  await error(await f.request("/bin", "DELETE", { upTo: "x".repeat(LIMITS.requestJsonBytes) }), 413, "too_large");
+});
+
+test("delete for good refuses a restored, missing, foreign or moved review", async () => {
+  const { reviewId } = await publishReview(f);
+  expect((await post(reviewId, "bin")).status).toBe(204);
+  await error(await f.request(`/bin/${reviewId}`, "DELETE", undefined, "foreign"), 404, "unknown_review");
+  await error(await f.request(`/bin/${randomUUID()}`, "DELETE"), 404, "unknown_review");
+  expect((await post(reviewId, "restore")).status).toBe(204);
+  const before = await row(reviewId);
+  const seen: ReviewEvent[] = [];
+  f.deps.events?.subscribe(f.ownerId, null, (event) => seen.push(event));
+  await error(await f.request(`/bin/${reviewId}`, "DELETE"), 409, "invalid_state");
+  expect(await row(reviewId)).toEqual(before);
+  expect(seen).toEqual([]);
+  expect(await f.db.read((q) => q.select().from(t.reviewTombstones))).toEqual([]);
+  expect((await post(reviewId, "bin")).status).toBe(204);
+  await f.db.query((q) =>
+    q.update(t.reviews).set({ movedToUrl: "https://hub.example/r/x" }).where(eq(t.reviews.id, reviewId)),
+  );
+  await error(await f.request(`/bin/${reviewId}`, "DELETE"), 409, "review_moved");
+  const moved = await row(reviewId);
+  expect(await bin()).toEqual({ items: [], total: 0, more: false });
+  expect((await f.request("/bin", "DELETE", cutoff())).status).toBe(204);
+  expect(await row(reviewId)).toEqual(moved);
+});
+
+test.each([undefined, null, {}, { upTo: "yesterday" }, { upTo: "2026-11-04T10:00:00.000Z", extra: true }])(
+  "empty bin refuses an invalid body %j without deleting anything",
+  async (body) => {
+    const { reviewId } = await publishReview(f);
+    expect((await post(reviewId, "bin")).status).toBe(204);
+    await error(await f.request("/bin", "DELETE", body), 400, "invalid_request");
+    expect(await exists(reviewId)).toBe(true);
+  },
+);
+
+test("empty bin leaves reviews binned after the confirmed cutoff", async () => {
+  const first = await publishReview(f, { key: "1" });
+  const later = await publishReview(f, { key: "2" });
+  expect((await post(first.reviewId, "bin")).status).toBe(204);
+  const confirmed = cutoff();
+  f.advance(1);
+  expect((await post(later.reviewId, "bin")).status).toBe(204);
+  expect((await f.request("/bin", "DELETE", confirmed)).status).toBe(204);
+  expect(await exists(first.reviewId)).toBe(false);
+  expect((await bin()).items.map((item) => item.id)).toEqual([later.reviewId]);
+});
+
+test.each(["restore", "rebin"])("empty bin rechecks a review changed by %s after selection", async (action) => {
+  const a = await publishReview(f, { key: "1" });
+  const b = await publishReview(f, { key: "2" });
+  for (const id of [a.reviewId, b.reviewId]) expect((await post(id, "bin")).status).toBe(204);
+  const [first, second] = [a.reviewId, b.reviewId].sort();
+  if (!first || !second) throw new Error("Missing reviews");
+  const confirmed = cutoff();
+  const yieldToLoop = pacing.yieldToLoop;
+  let changed = false;
+  vi.spyOn(pacing, "yieldToLoop").mockImplementation(async (phase) => {
+    if (phase === "lifecycle-bin-empty" && !changed) {
+      changed = true;
+      expect((await post(second, "restore")).status).toBe(204);
+      if (action === "rebin") {
+        f.advance(1);
+        expect((await post(second, "bin")).status).toBe(204);
+      }
+    }
+    await yieldToLoop(phase);
+  });
+  expect((await f.request("/bin", "DELETE", confirmed)).status).toBe(204);
+  expect(changed).toBe(true);
+  expect(await exists(first)).toBe(false);
+  expect(await exists(second)).toBe(true);
 });
 
 test("a binned review acts as deleted for agents and reviewers", async () => {
@@ -270,10 +370,13 @@ test("a publish to a binned review by id or by key is refused and writes nothing
   expect((await f.request("/publish", "POST", body({}), "agent")).status).toBe(200);
 });
 
-test("deleting a binned review for good writes the tombstone", async () => {
+test.each(["reviews", "bin"])("deleting a binned review through /%s writes the tombstone", async (route) => {
   const { reviewId } = await publishReview(f);
   expect((await post(reviewId, "bin")).status).toBe(204);
-  expect((await f.request(`/reviews/${reviewId}`, "DELETE")).status).toBe(204);
+  const seen: ReviewEvent[] = [];
+  f.deps.events?.subscribe(f.ownerId, null, (event) => seen.push(event));
+  expect((await f.request(`/${route}/${reviewId}`, "DELETE")).status).toBe(204);
+  expect(seen).toEqual([{ type: "delete", reviewId, revision: 1 }]);
   await f.blobCleanup();
   expect(await exists(reviewId)).toBe(false);
   expect(
@@ -291,7 +394,7 @@ test("empty bin deletes only binned reviews and leaves a restored one", async ()
   expect((await post(restored.reviewId, "restore")).status).toBe(204);
   const seen: ReviewEvent[] = [];
   f.deps.events?.subscribe(f.ownerId, null, (event) => seen.push(event));
-  expect((await f.request("/bin", "DELETE")).status).toBe(204);
+  expect((await f.request("/bin", "DELETE", cutoff())).status).toBe(204);
   await f.blobCleanup();
   expect(await exists(kept.reviewId)).toBe(true);
   expect(await exists(restored.reviewId)).toBe(true);
@@ -302,7 +405,7 @@ test("empty bin deletes only binned reviews and leaves a restored one", async ()
   expect(tombstones.map(([id]) => id).sort()).toEqual([one.reviewId, two.reviewId].sort());
   expect((await bin()).total).toBe(0);
   // An empty bin is fine.
-  expect((await f.request("/bin", "DELETE")).status).toBe(204);
+  expect((await f.request("/bin", "DELETE", cutoff())).status).toBe(204);
 });
 
 test("an import with binnedAt lands in the hub's bin and a repeated attach does not restore it", async () => {

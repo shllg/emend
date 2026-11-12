@@ -2,10 +2,18 @@ import { randomUUID } from "node:crypto";
 import { cp, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { InboxList, PairingCreated, PublishResponse, WaitResult } from "@emend/contract";
+import {
+  Capabilities,
+  InboxList,
+  PairingCreated,
+  PublishResponse,
+  REVIEW_BIN_FEATURE,
+  WaitResult,
+} from "@emend/contract";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, onTestFinished, test, vi } from "vitest";
 import { openDb } from "../db/client.ts";
+import { listBin } from "../db/repo/lifecycle.ts";
 import { comments, deliveries, devices, docAssets, instances, owners, reviews, sends, threads } from "../db/schema.ts";
 import { run } from "../main.ts";
 import { createApp } from "../server/app.ts";
@@ -126,6 +134,72 @@ describe.each(["HTTP", "in-process"])("%s transport", (mode) => {
     expect(out.stdout.join("")).toMatch(
       /^http.*\/pair#emp_.*\nThis link works only on this machine\. To attach another machine, run emend serve --tailscale\.\n[0-9A-Z]{4}-[0-9A-Z]{4}\nValid for 10 minutes, once\.\nOn the other machine, run: emend attach /,
     );
+  });
+
+  test.each([
+    { feature: false, binned: true },
+    { feature: false, binned: false },
+    { feature: true, binned: true },
+  ])("attach preserves the bin (hub feature=$feature, local binned=$binned)", async ({ feature, binned }) => {
+    const f = await fixture();
+    const { result } = await f.publish();
+    const local = await f.reviewer();
+    if (binned) expect((await local.request(`/reviews/${result.reviewId}/bin`, {})).status).toBe(204);
+    const localRow = () =>
+      local.db.read((q) =>
+        q
+          .select()
+          .from(reviews)
+          .where(and(eq(reviews.ownerId, local.ownerId), eq(reviews.id, result.reviewId)))
+          .get(),
+      );
+    const before = await localRow();
+    const hubState = await initializeServerState(f.hubDir);
+    f.cleanup.push(() => hubState.db.close());
+    const hubDevices = () =>
+      hubState.db.read((q) => q.select().from(devices).where(eq(devices.ownerId, hubState.ownerId)));
+    const devicesBefore = await hubDevices();
+    const fetcher = globalThis.fetch;
+    const requests = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const response = await fetcher(input, init);
+      if (!feature && String(input) === `${f.hub.url}/api/v1/capabilities`) {
+        const capabilities = Capabilities.parse(await response.json());
+        return Response.json({
+          ...capabilities,
+          features: capabilities.features.filter((name) => name !== REVIEW_BIN_FEATURE),
+        });
+      }
+      return response;
+    });
+    const attached = await f.command(["attach", f.pairing.url]);
+    if (!feature && binned) {
+      expect(attached).toMatchObject({
+        code: 1,
+        stdout: [],
+        text: `emend: the server at ${f.hub.url} has no bin yet. Update emend there, or restore or delete the reviews in this machine's bin first.\n`,
+      });
+      expect(requests.mock.calls.map(([input]) => String(input))).toEqual([`${f.hub.url}/api/v1/capabilities`]);
+      expect(await localRow()).toEqual(before);
+      expect(await hubDevices()).toEqual(devicesBefore);
+      for (const name of ["hub.token", "attach.json", "attach.pending"])
+        await expect(stat(join(f.stateDir, name))).rejects.toMatchObject({ code: "ENOENT" });
+      return;
+    }
+    expect(attached.code, attached.text).toBe(0);
+    expect(attached.text).toContain("copied 1 reviews, skipped 0.");
+    const copied = await hubState.db.read((q) =>
+      q
+        .select()
+        .from(reviews)
+        .where(and(eq(reviews.ownerId, hubState.ownerId), eq(reviews.id, result.reviewId)))
+        .get(),
+    );
+    expect(copied?.binnedAt).toBe(before?.binnedAt);
+    expect((await listBin(hubState.ownerId, hubState.db)).items.map((item) => item.id)).toEqual(
+      binned ? [result.reviewId] : [],
+    );
+    expect((await localRow())?.movedToUrl).toBe(`${f.hub.url}/r/${result.reviewId}`);
+    expect(await listBin(local.ownerId, local.db)).toEqual({ items: [], total: 0, more: false });
   });
 
   test.each(["detach", "attach"])("%s recovers a crash after saving the hub token", async (command) => {

@@ -5,7 +5,7 @@ import {
   MAX_APPROVED_ACTIVE_HOURS,
   SettingsView,
 } from "@emend/contract";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { change, patch } from "../api/client.ts";
 import { mutationMessage } from "../api/mutations.ts";
@@ -111,17 +111,17 @@ function InboxSettings({ setting }: { setting: HoursSetting }) {
   );
 }
 
-type Confirm = { kind: "one"; item: BinItem } | { kind: "all" } | null;
+type Confirm = { kind: "one"; item: BinItem } | { kind: "all"; upTo: string; total: number } | null;
 
 function BinSettings() {
   const client = useQueryClient();
   const toast = useToast();
-  const bin = useQuery(binQuery());
+  const bin = useInfiniteQuery(binQuery());
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [pending, setPending] = useState(false);
   const busy = useRef(false);
-  const items = bin.data?.items ?? [];
-  const total = bin.data?.total ?? 0;
+  const items = bin.data?.pages.flatMap((page) => page.items) ?? [];
+  const total = bin.data?.pages[0]?.total ?? 0;
   /** Runs one request. A failure shows the server's message; every outcome refreshes the lists. */
   async function run(request: () => Promise<unknown>, success: string, reviewId?: string) {
     if (busy.current) return false;
@@ -156,11 +156,11 @@ function BinSettings() {
     const ok =
       confirm.kind === "one"
         ? await run(
-            () => change(`/api/v1/reviews/${encodeURIComponent(confirm.item.id)}`, "DELETE"),
+            () => change(`/api/v1/bin/${encodeURIComponent(confirm.item.id)}`, "DELETE"),
             `Deleted “${confirm.item.title}”`,
             confirm.item.id,
           )
-        : await run(() => change("/api/v1/bin", "DELETE"), "Emptied the bin");
+        : await run(() => change("/api/v1/bin", "DELETE", { upTo: confirm.upTo }), "Emptied the bin");
     if (ok) setConfirm(null);
   };
   const now = Date.now();
@@ -170,7 +170,14 @@ function BinSettings() {
         <h2 id="bin-settings" className="text-16 font-semibold">
           Bin
         </h2>
-        <Button variant="danger" disabled={total === 0 || pending} onClick={() => setConfirm({ kind: "all" })}>
+        <Button
+          variant="danger"
+          disabled={items.length === 0 || pending}
+          onClick={() => {
+            const newest = items[0];
+            if (newest) setConfirm({ kind: "all", upTo: newest.binnedAt, total });
+          }}
+        >
           Empty bin
         </Button>
       </div>
@@ -199,10 +206,15 @@ function BinSettings() {
           ))}
         </ul>
       )}
-      {bin.data && total > items.length && (
-        <p className="mt-2 text-14 text-fg-3">
-          Showing the newest {items.length} of {total}.
-        </p>
+      {bin.hasNextPage && (
+        <>
+          <p className="mt-2 text-14 text-fg-3">
+            Showing {items.length} of {total}.
+          </p>
+          <Button disabled={pending || bin.isFetching} onClick={() => void bin.fetchNextPage()}>
+            Show older
+          </Button>
+        </>
       )}
       <Dialog
         open={confirm !== null}
@@ -211,7 +223,7 @@ function BinSettings() {
         description={
           confirm?.kind === "one"
             ? "This removes the review, its revisions, comments and Sends. This cannot be undone."
-            : `This deletes the ${total} ${plural(total, "review")} in the bin for good, with their revisions, comments and Sends. This cannot be undone.`
+            : `This deletes the ${confirm?.total ?? total} ${plural(confirm?.total ?? total, "review")} in the bin for good, with their revisions, comments and Sends. This cannot be undone.`
         }
         actions={
           <>

@@ -117,8 +117,9 @@ a machine token reaches only reviews from its own instance.
 | DELETE | `/api/v1/reviews/:id` | Reviewer | Delete the review and its records for good (204), in the bin or not. |
 | POST | `/api/v1/reviews/:id/bin` | Reviewer | Move the review to the bin (204); see "Snooze, retire, delete and the bin". |
 | POST | `/api/v1/reviews/:id/restore` | Reviewer | Take the review out of the bin (204). |
-| GET | `/api/v1/bin` | Reviewer | List the binned reviews as `BinView` (200). |
-| DELETE | `/api/v1/bin` | Reviewer | Delete every binned review for good (204). |
+| GET | `/api/v1/bin` | Reviewer | Page through binned reviews as `BinView` (200), with optional `beforeAt` and `beforeId` together. |
+| DELETE | `/api/v1/bin` | Reviewer | Delete reviews binned at or before `EmptyBinRequest.upTo` for good (204). |
+| DELETE | `/api/v1/bin/:id` | Reviewer | Delete a review for good only while it is still in the bin (204). |
 | POST | `/api/v1/reviews/:id/take` | Agent | Claim a delivery with `{waitSeconds?: 0..25, maxBytes?: 65536..16777216, accepts?: ["closed"]}`. |
 | POST | `/api/v1/deliveries/:id/confirm` | Agent | Confirm receipt of a claimed delivery. |
 | POST | `/api/v1/comments/:id/reply` | Agent | Answer a comment with an outcome. |
@@ -981,7 +982,7 @@ original target separately.
 
 ### Snooze, retire, delete and the bin
 
-All nine routes (the five below, bin, restore and the two `/bin` routes) are reviewer-only (scope `send`): an agent or admin bearer, or a reviewer token
+All ten routes (the five below, bin, restore and the three `/bin` routes) are reviewer-only (scope `send`): an agent or admin bearer, or a reviewer token
 sent as a bearer, is refused before any lookup. A missing or foreign review is `404 unknown_review`.
 Each runs in one transaction and emits its event after the commit. A wrong state is `409 invalid_state`.
 Capabilities lists the features `review-lifecycle` and `review-bin`.
@@ -1018,15 +1019,26 @@ Capabilities lists the features `review-lifecycle` and `review-bin`.
 - `POST /reviews/:id/restore` clears `binnedAt` and nothing else, so the review returns to the list
   and place it had. A review that is not in the bin is `409 invalid_state`. Returns 204; emits
   `restore`.
-- `GET /bin` returns `BinView = { items: BinItem[], total }` with
+- `GET /bin` returns `BinView = { items: BinItem[], total: number, more: boolean }` with
   `BinItem = { id, title, machine, binnedAt }`. `machine` is the name of the review's origin
-  instance. Items run newest `binnedAt` first, review id as the stable tie breaker, at most
-  `binItems` (200) rows; `total` counts every binned review of the owner.
-- `DELETE /bin` deletes for good every review of the owner that is in the bin when the request
-  runs, each exactly like `DELETE /reviews/:id`: its own transaction, its tombstone, its
+  instance. Items run in `binnedAt` descending, `id` ascending order, at most `binItems` (200)
+  rows per page. Optional query parameters `beforeAt` (ISO datetime) and `beforeId` (UUID)
+  continue strictly after that item in this order. Give both or neither; one alone or an invalid
+  value is `400 invalid_request`. `more` is true when items remain after this page; `total` counts
+  every binned review of the owner, across all pages. Moved local copies are not listed or counted
+  in the local bin: the hub's copy is the live one in the hub's bin.
+- `DELETE /bin/:id` deletes the review exactly like `DELETE /reviews/:id`, but checks inside the
+  delete transaction that it is still in the bin. Otherwise it returns `409 invalid_state`.
+  A missing, foreign or other-owner review is `404 unknown_review`; a moved local copy is
+  `409 review_moved`.
+- `DELETE /bin` requires `EmptyBinRequest = { upTo: ISO datetime }` (strict); a missing or invalid
+  body is `400 invalid_request`. It deletes for good only reviews of the owner still in the bin
+  whose `binnedAt` is at or before `upTo`, excluding moved local copies. The web uses the newest
+  `binnedAt` it showed (the first item of the first page) when asking for confirmation. Each review
+  is deleted exactly like `DELETE /reviews/:id`: its own transaction, its tombstone, its
   repository cleanup and its `delete` event after the commit, and blob cleanup after the response.
-  Each transaction checks again that the review is still in the bin, so a review restored in the
-  meantime stays. The loop yields between reviews. Returns 204.
+  Each transaction checks again that the review is still in the bin at or before `upTo`, so a
+  review restored or binned later stays. The loop yields between reviews. Returns 204.
 - `DELETE /reviews/:id` keeps working on a binned review and deletes it for good.
 
 A binned review acts as deleted for agents and leaves every list. A take (`emend wait`,
@@ -1035,8 +1047,9 @@ every reviewer read or write of the review, its revisions, files, threads, comme
 marks, snooze, retire and reopen answer `409 review_in_bin`. Confirming or releasing a delivery that
 was claimed before the review was binned stays available. The inbox, its counts and the agent list
 leave binned reviews out. The content path is unchanged. A missing, foreign or other-origin review
-stays `404 unknown_review`. A publish that is refused with `review_in_bin` writes nothing. Bin
-ends a waiting take at once, like retire and delete.
+stays `404 unknown_review`. A publish that is refused with `review_in_bin` adds no review and no
+revision; blobs uploaded before it stay unreferenced, as after any failed publish. Bin ends a
+waiting take at once, like retire and delete.
 
 A take that finds no deliverable Send, on a review that is retired or snoozed, answers
 `closed` (below) when the request lists `"closed"` in `accepts`, and `409 review_closed`

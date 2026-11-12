@@ -101,6 +101,7 @@ export const ENDPOINTS = [
   { method: "POST", path: "/api/v1/reviews/:id/restore", scope: "send" },
   { method: "GET", path: "/api/v1/bin", scope: "send" },
   { method: "DELETE", path: "/api/v1/bin", scope: "send" },
+  { method: "DELETE", path: "/api/v1/bin/:id", scope: "send" },
   { method: "POST", path: "/api/v1/reviews/:id/take", scope: "take" },
   { method: "POST", path: "/api/v1/deliveries/:id/confirm", scope: "take" },
   { method: "POST", path: "/api/v1/comments/:id/reply", scope: "reply" },
@@ -134,7 +135,10 @@ export function createApp(deps: AppDeps) {
         ? endpointMatchers.find((entry) => entry.method === "GET" && entry.match.test(c.req.path))
         : undefined);
     const blobUpload = c.req.method === "PUT" && c.req.path.startsWith("/api/v1/blobs/");
-    const json = endpoint && ["POST", "PATCH", "PUT"].includes(c.req.method) && !blobUpload;
+    const json =
+      endpoint &&
+      !blobUpload &&
+      (["POST", "PATCH", "PUT"].includes(c.req.method) || (c.req.method === "DELETE" && c.req.path === "/api/v1/bin"));
     const limit = ["/api/v1/publish", "/api/v1/import"].includes(c.req.path)
       ? LIMITS.publishJsonBytes
       : ["/api/v1/session", "/api/v1/machines"].includes(c.req.path)

@@ -2,7 +2,9 @@ import { expect, test } from "vitest";
 import {
   APPROVED_ACTIVE_HOURS,
   BinItem,
+  BinQuery,
   BinView,
+  EmptyBinRequest,
   ERROR_STATUS,
   ImportResult,
   InboxItem,
@@ -141,12 +143,30 @@ test("the new refusals are 409 and an import can report a deleted review", () =>
 test("the bin view lists items with an ISO binnedAt and is capped", () => {
   const binned = { id, title: "Synthetic", machine: "Synthetic machine", binnedAt: "2026-11-04T10:00:00.000Z" };
   expect(BinItem.parse({ ...binned, extra: 1 })).toEqual(binned);
-  expect(BinView.parse({ items: [binned], total: 1 })).toEqual({ items: [binned], total: 1 });
+  expect(BinView.parse({ items: [binned], total: 1, more: false })).toEqual({ items: [binned], total: 1, more: false });
   expect(BinItem.safeParse({ ...binned, binnedAt: "yesterday" }).success).toBe(false);
-  expect(BinView.safeParse({ items: [], total: -1 }).success).toBe(false);
+  expect(BinView.safeParse({ items: [], total: -1, more: false }).success).toBe(false);
+  expect(BinView.safeParse({ items: [], total: 0 }).success).toBe(false);
   expect(
-    BinView.safeParse({ items: Array.from({ length: LIMITS.binItems + 1 }, () => binned), total: 201 }).success,
+    BinView.safeParse({ items: Array.from({ length: LIMITS.binItems + 1 }, () => binned), total: 201, more: false })
+      .success,
   ).toBe(false);
   expect(ERROR_STATUS.review_in_bin).toBe(409);
   expect(REVIEW_BIN_FEATURE).toBe("review-bin");
+});
+
+test("empty bin requires a strict ISO cutoff and bin cursors require both fields", () => {
+  const upTo = "2026-11-04T10:00:00.000Z";
+  expect(EmptyBinRequest.parse({ upTo })).toEqual({ upTo });
+  for (const value of [undefined, {}, { upTo: "yesterday" }, { upTo, extra: true }])
+    expect(EmptyBinRequest.safeParse(value).success).toBe(false);
+  expect(BinQuery.parse({})).toEqual({});
+  expect(BinQuery.parse({ beforeAt: upTo, beforeId: id })).toEqual({ beforeAt: upTo, beforeId: id });
+  for (const value of [
+    { beforeAt: upTo },
+    { beforeId: id },
+    { beforeAt: "yesterday", beforeId: id },
+    { beforeAt: upTo, beforeId: "invalid" },
+  ])
+    expect(BinQuery.safeParse(value).success).toBe(false);
 });

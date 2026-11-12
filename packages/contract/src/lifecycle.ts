@@ -20,6 +20,14 @@ export const REVIEW_LIFECYCLE_FEATURE = "review-lifecycle";
 /** Capabilities feature that announces the review bin: bin, restore, list and empty. */
 export const REVIEW_BIN_FEATURE = "review-bin";
 
+export const EmptyBinRequest = z.strictObject({ upTo: z.iso.datetime() });
+export type EmptyBinRequest = z.infer<typeof EmptyBinRequest>;
+
+export const BinQuery = z
+  .object({ beforeAt: z.iso.datetime().optional(), beforeId: z.uuid().optional() })
+  .refine((query) => (query.beforeAt === undefined) === (query.beforeId === undefined));
+export type BinQuery = z.infer<typeof BinQuery>;
+
 /** One binned review: enough to recognise it and restore or delete it. */
 export const BinItem = z.object({
   id: z.uuid(),
@@ -33,5 +41,6 @@ export type BinItem = z.infer<typeof BinItem>;
 export const BinView = z.object({
   items: z.array(BinItem).max(LIMITS.binItems),
   total: z.int().nonnegative(),
+  more: z.boolean(),
 });
 export type BinView = z.infer<typeof BinView>;

@@ -504,7 +504,7 @@ test.each([0, 5])("the per-list cap keeps overflow approvals in Done with %s ext
   expect(later.filter((item) => item.list === "done")).toHaveLength(6);
 });
 
-test("delete removes every row of the review and only the blobs no other review uses", async () => {
+test.each(["reviews", "bin"])("delete through /%s removes every row and only unreferenced blobs", async (route) => {
   const shared = "# Shared doc";
   const first = await publishReview(f, { key: "1", docs: { "shared.md": shared, "own.md": "# Only in the first" } });
   const second = await publishReview(f, { key: "2", docs: { "shared.md": shared } });
@@ -527,7 +527,8 @@ test("delete removes every row of the review and only the blobs no other review 
   const both = [...firstBlobs].filter((hash) => secondBlobs.has(hash));
   expect(onlyFirst.length).toBeGreaterThan(0);
   expect(both.length).toBeGreaterThan(0);
-  const response = await f.request(`/reviews/${first.reviewId}`, "DELETE");
+  if (route === "bin") expect((await post(first.reviewId, "bin")).status).toBe(204);
+  const response = await f.request(`/${route}/${first.reviewId}`, "DELETE");
   expect(response.status).toBe(204);
   await f.blobCleanup();
   const gone = await f.db.read(async (q) => {

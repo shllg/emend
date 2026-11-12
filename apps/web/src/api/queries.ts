@@ -1,5 +1,5 @@
-import { BinView, InboxList, ReviewView, RevisionView, SettingsView } from "@emend/contract";
-import { queryOptions } from "@tanstack/react-query";
+import { type BinQuery, BinView, InboxList, ReviewView, RevisionView, SettingsView } from "@emend/contract";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { viewedState } from "../lib/viewed-state.ts";
 import { get } from "./client.ts";
 
@@ -42,9 +42,20 @@ export const settingsQuery = () =>
     queryFn: ({ signal }) => get("/api/v1/settings", SettingsView, signal),
   });
 export const binQuery = () =>
-  queryOptions({
+  infiniteQueryOptions({
     queryKey: ["bin"],
-    queryFn: ({ signal }) => get("/api/v1/bin", BinView, signal),
+    initialPageParam: undefined as BinQuery | undefined,
+    queryFn: ({ signal, pageParam }) => {
+      const query =
+        pageParam?.beforeAt && pageParam.beforeId
+          ? `?${new URLSearchParams({ beforeAt: pageParam.beforeAt, beforeId: pageParam.beforeId })}`
+          : "";
+      return get(`/api/v1/bin${query}`, BinView, signal);
+    },
+    getNextPageParam: (page) => {
+      const last = page.items.at(-1);
+      return page.more && last ? { beforeAt: last.binnedAt, beforeId: last.id } : undefined;
+    },
   });
 export const revisionQuery = (id: string, seq: number) =>
   queryOptions({

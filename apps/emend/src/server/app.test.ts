@@ -172,7 +172,11 @@ test("every documented API endpoint enforces its scope even before its handler e
         path,
         endpoint.method,
         credential,
-        ["POST", "PATCH", "PUT"].includes(endpoint.method) ? {} : undefined,
+        path === "/api/v1/bin" && endpoint.method === "DELETE"
+          ? { upTo: new Date(now).toISOString() }
+          : ["POST", "PATCH", "PUT"].includes(endpoint.method)
+            ? {}
+            : undefined,
       );
       if (!(SCOPES_BY_KIND[kind] as readonly string[]).includes(endpoint.scope))
         await error(response, "forbidden", endpoint.method === "HEAD");
@@ -195,6 +199,7 @@ test("every documented API endpoint enforces its scope even before its handler e
       )
         await error(response, "invalid_request", endpoint.method === "HEAD");
       else if (
+        path === "/api/v1/bin/missing" ||
         /\/reviews\/missing(?:$|\/(?:events|take|unsnooze|retire|reopen|bin|restore|revisions\/missing)$)/.test(path)
       )
         await error(response, "unknown_review");
