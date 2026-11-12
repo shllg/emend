@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { PublishFile } from "@emend/contract";
 import { beforeEach, expect, test, vi } from "vitest";
 import { pacing } from "../pacing.ts";
-import { countDiffFiles, createDiffCountBudget } from "./counts.ts";
+import { countDiffFiles, createDiffCountBudget, DIFF_COUNT_NULL_TTL_MS } from "./counts.ts";
 import { WorkTimeout } from "./executor.ts";
 import { PublishAborted } from "./lifecycle.ts";
 import { type Executor, executeWork } from "./work.ts";
@@ -69,18 +69,20 @@ test("the cumulative budget stops new work and leaves remaining files null", asy
   expect(unread).not.toHaveBeenCalled();
 });
 
-test.each([new WorkTimeout(), new Error("Worker failed")])(
-  "a failed pair is cached as null and counting continues (%s)",
-  async (error) => {
-    const execute = vi.fn(executeWork).mockRejectedValueOnce(error);
-    const result = await countDiffFiles(
-      ownerId,
-      [file("failed"), file("alias"), file("next", { oldBlob: null })],
-      read,
-      execute,
-    );
-    expect([...result.values()]).toEqual([null, null, { additions: 2, deletions: 0 }]);
+test.each(["timeout", "failure", "wrong kind"])(
+  "a thrown %s is not memoized and a later call stores recovered counts",
+  async (outcome) => {
+    const execute = vi.fn(executeWork);
+    if (outcome === "wrong kind") execute.mockResolvedValueOnce({ kind: "line-count", count: 0 });
+    else execute.mockRejectedValueOnce(outcome === "timeout" ? new WorkTimeout() : new Error("Worker failed"));
+    const result = await countDiffFiles(ownerId, [file("failed"), file("next", { oldBlob: null })], read, execute);
+    expect([...result.values()]).toEqual([null, { additions: 2, deletions: 0 }]);
     expect(execute).toHaveBeenCalledTimes(2);
+    const recovered = await countDiffFiles(ownerId, [file("failed")], read, execute);
+    expect(recovered.get("failed")).toEqual({ additions: 2, deletions: 1 });
+    expect(execute).toHaveBeenCalledTimes(3);
+    expect(await countDiffFiles(ownerId, [file("failed")], read, execute)).toEqual(recovered);
+    expect(execute).toHaveBeenCalledTimes(3);
   },
 );
 
@@ -138,25 +140,70 @@ test("abort is never swallowed, including after the budget is spent", async () =
     ).rejects.toBe(error);
 });
 
-test.each(["success", "timeout", "failure"])(
-  "the same owner's %s result is reused without reads, work or budget",
+test("the same owner's successful result is reused without reads, work or budget and never expires", async () => {
+  const execute = vi.fn(executeWork);
+  const first = await countDiffFiles(ownerId, [file("one")], read, execute);
+  const unread = vi.fn(read);
+  const now = vi.fn(() => Number.MAX_SAFE_INTEGER);
+  const budget = createDiffCountBudget(0);
+  expect(await countDiffFiles(ownerId, [file("one")], unread, execute, undefined, budget, now)).toEqual(first);
+  expect(unread).not.toHaveBeenCalled();
+  expect(now).not.toHaveBeenCalled();
+  expect(execute).toHaveBeenCalledTimes(1);
+  expect(budget.spentMs).toBe(0);
+  await countDiffFiles(randomUUID(), [file("one")], read, execute);
+  expect(execute).toHaveBeenCalledTimes(2);
+});
+
+test("a returned null expires after fifteen minutes and is retried subject to the budget", async () => {
+  expect(DIFF_COUNT_NULL_TTL_MS).toBe(15 * 60 * 1000);
+  let time = 100;
+  const now = () => time;
+  const execute = vi.fn(executeWork).mockResolvedValueOnce({ kind: "diff-counts", counts: null });
+  const first = await countDiffFiles(ownerId, [file("one")], read, execute, undefined, createDiffCountBudget(), now);
+  expect(first.get("one")).toBeNull();
+  time += DIFF_COUNT_NULL_TTL_MS - 1;
+  const unread = vi.fn(read);
+  const emptyBudget = createDiffCountBudget(0);
+  expect(await countDiffFiles(ownerId, [file("one")], unread, execute, undefined, emptyBudget, now)).toEqual(first);
+  expect(unread).not.toHaveBeenCalled();
+  expect(execute).toHaveBeenCalledTimes(1);
+  expect(emptyBudget.spentMs).toBe(0);
+  time++;
+  expect(await countDiffFiles(ownerId, [file("one")], unread, execute, undefined, emptyBudget, now)).toEqual(first);
+  expect(unread).not.toHaveBeenCalled();
+  expect(execute).toHaveBeenCalledTimes(1);
+  const retried = await countDiffFiles(ownerId, [file("one")], read, execute, undefined, createDiffCountBudget(), now);
+  expect(retried.get("one")).toEqual({ additions: 2, deletions: 1 });
+  expect(execute).toHaveBeenCalledTimes(2);
+  time += DIFF_COUNT_NULL_TTL_MS * 2;
+  expect(await countDiffFiles(ownerId, [file("one")], read, execute, undefined, createDiffCountBudget(), now)).toEqual(
+    retried,
+  );
+  expect(execute).toHaveBeenCalledTimes(2);
+});
+
+test.each(["null", "timeout", "failure", "wrong kind"])(
+  "a late %s cannot overwrite concurrent successful counts",
   async (outcome) => {
-    const execute = vi.fn<Executor>(async (work) => {
-      if (outcome === "timeout") throw new WorkTimeout();
-      if (outcome === "failure") throw new Error("Worker failed");
-      return executeWork(work);
+    const pending = Promise.withResolvers<Awaited<ReturnType<Executor>>>();
+    const started = Promise.withResolvers<void>();
+    const late = countDiffFiles(ownerId, [file("one")], read, async () => {
+      started.resolve();
+      return pending.promise;
     });
-    const first = await countDiffFiles(ownerId, [file("one")], read, execute);
+    await started.promise;
+    const successful = await countDiffFiles(ownerId, [file("one")], read, executeWork);
+    if (outcome === "null") pending.resolve({ kind: "diff-counts", counts: null });
+    else if (outcome === "wrong kind") pending.resolve({ kind: "line-count", count: 0 });
+    else pending.reject(outcome === "timeout" ? new WorkTimeout() : new Error("Worker failed"));
+    expect((await late).get("one")).toBeNull();
+    expect(successful.get("one")).toEqual({ additions: 2, deletions: 1 });
+    const execute = vi.fn(executeWork);
     const unread = vi.fn(read);
-    const now = vi.fn(() => 0);
-    const budget = createDiffCountBudget(0);
-    expect(await countDiffFiles(ownerId, [file("one")], unread, execute, undefined, budget, now)).toEqual(first);
+    expect(await countDiffFiles(ownerId, [file("one")], unread, execute)).toEqual(successful);
+    expect(execute).not.toHaveBeenCalled();
     expect(unread).not.toHaveBeenCalled();
-    expect(now).not.toHaveBeenCalled();
-    expect(execute).toHaveBeenCalledTimes(1);
-    expect(budget.spentMs).toBe(0);
-    await countDiffFiles(randomUUID(), [file("one")], read, execute);
-    expect(execute).toHaveBeenCalledTimes(2);
   },
 );
 
@@ -198,11 +245,13 @@ test.each(["signal", "error"])("an abort via %s never poisons the memo", async (
   );
 });
 
-test("the bounded memo evicts its oldest result", async () => {
+test("each owner's cap evicts only that owner's oldest result", async () => {
+  const otherOwner = randomUUID();
   const execute = vi.fn<Executor>(async () => ({ kind: "diff-counts", counts: { additions: 1, deletions: 0 } }));
-  const files = Array.from({ length: 20001 }, (_, i) =>
+  const files = Array.from({ length: 20000 }, (_, i) =>
     file(`${i}`, { oldBlob: null, newBlob: i.toString(16).padStart(64, "0") }),
   );
+  await countDiffFiles(otherOwner, files.slice(0, 1), read, execute);
   await countDiffFiles(
     ownerId,
     files,
@@ -213,10 +262,15 @@ test("the bounded memo evicts its oldest result", async () => {
     () => 0,
   );
   expect(execute).toHaveBeenCalledTimes(20001);
-  await countDiffFiles(ownerId, files.slice(-1), read, execute);
-  expect(execute).toHaveBeenCalledTimes(20001);
   await countDiffFiles(ownerId, files.slice(0, 1), read, execute);
+  expect(execute).toHaveBeenCalledTimes(20001);
+  await countDiffFiles(ownerId, [file("overflow", { oldBlob: null, newBlob: "f".repeat(64) })], read, execute);
   expect(execute).toHaveBeenCalledTimes(20002);
+  await countDiffFiles(otherOwner, files.slice(0, 1), read, execute);
+  await countDiffFiles(ownerId, files.slice(-1), read, execute);
+  expect(execute).toHaveBeenCalledTimes(20002);
+  await countDiffFiles(ownerId, files.slice(0, 1), read, execute);
+  expect(execute).toHaveBeenCalledTimes(20003);
 });
 
 test("cached and skipped files still yield and observe cancellation", async () => {
