@@ -1,7 +1,7 @@
 import * as Primitive from "@radix-ui/react-dialog";
 import { ChevronLeft, ChevronRight, MessageSquarePlus, Minus, Plus, X } from "lucide-react";
 import { type RefObject, useCallback, useRef, useState } from "react";
-import { isAtFit, maxScale } from "../../lib/lightbox-view.ts";
+import { isAtFit, maxScale, type Size } from "../../lib/lightbox-view.ts";
 import { Button } from "../ui/Button.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { isToastInteraction } from "../ui/overlay.ts";
@@ -115,6 +115,10 @@ function LightboxImage({
   const zoomOutUnavailable = atFit || failed;
   const zoomInUnavailable = !model || failed || model.view.scale >= maxScale(model.bounds);
   const zoomPercent = model ? `${Math.round(model.view.scale * 100)}%` : null;
+  const onDiagramSize = useCallback(
+    (natural: Size | null) => (natural ? setImage(natural) : setFailed(true)),
+    [setImage, setFailed],
+  );
   const noun = item.kind === "image" ? "screenshot" : "diagram";
   // Keep unavailable controls focusable so reaching a limit or loading an image preserves arrow navigation.
   return (
@@ -211,10 +215,7 @@ function LightboxImage({
                 : undefined,
             }}
           >
-            <LightboxDiagram
-              source={item.source}
-              onSize={(natural) => (natural ? setImage(natural) : setFailed(true))}
-            />
+            <LightboxDiagram source={item.source} onSize={onDiagramSize} />
           </div>
         )}
         {count > 1 && (

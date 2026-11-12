@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { blockAnchor } from "../../lib/selection.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
 import { BlockReader, type ReaderGroup } from "./BlockReader.tsx";
+import { DIAGRAM_DRAW_TIMEOUT_MS } from "./MermaidBlock.tsx";
 
 const reviewId = "11111111-1111-4111-8111-111111111111";
 const media = (hash: string) => `/api/v1/media/${hash.repeat(64)}`;
@@ -1028,4 +1029,78 @@ test("all-screenshot gallery description stays unchanged", () => {
       "Screenshot 1 of 3. Left and Right arrows move between screenshots; when zoomed in, the arrow keys move the image. Escape closes.",
     ),
   ).toBeTruthy();
+});
+
+test("a diagram frame that never reports shows the failure after the draw timeout", () => {
+  vi.useFakeTimers();
+  try {
+    mount(mixedGroups);
+    fireEvent.click(button("Enlarge diagram"));
+    const { frame } = diagramFrame();
+    fireEvent.load(frame);
+    expect(within(dialog()).queryByRole("status")).toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(DIAGRAM_DRAW_TIMEOUT_MS);
+    });
+    expect(within(dialog()).getByRole("status").textContent).toBe("The diagram could not be drawn.");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a size that arrives before the draw timeout keeps the diagram visible", () => {
+  vi.useFakeTimers();
+  try {
+    mount(mixedGroups);
+    fireEvent.click(button("Enlarge diagram"));
+    const { subject } = loadDiagram();
+    act(() => {
+      vi.advanceTimersByTime(DIAGRAM_DRAW_TIMEOUT_MS * 2);
+    });
+    expect(within(dialog()).queryByRole("status")).toBeNull();
+    expect(subject.style.visibility).toBe("visible");
+    expect(subject.style.width).toBe("400px");
+    expect(subject.style.height).toBe("200px");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a size message from a stale lightbox frame is ignored", () => {
+  mount(mixedGroups);
+  fireEvent.click(button("Enlarge diagram"));
+  const first = diagramFrame().frame;
+  const stale = first.contentWindow;
+  fireEvent.click(button("Next"));
+  fireEvent.click(button("Previous"));
+  const { frame } = diagramFrame();
+  expect(frame).not.toBe(first);
+  const subject = diagramSubject();
+  fireEvent(
+    window,
+    new MessageEvent("message", {
+      source: stale,
+      data: { type: "size", height: 200, natural: { width: 400, height: 200 } },
+    }),
+  );
+  expect(subject.style.visibility).toBe("hidden");
+  expect(subject.style.width).toBe("100%");
+  expect(subject.style.height).toBe("100%");
+  expect(within(dialog()).queryByRole("status")).toBeNull();
+  frameSize(frame, { type: "size", height: 200, natural: { width: 400, height: 200 } });
+  expect(subject.style.visibility).toBe("visible");
+  expect(subject.style.width).toBe("400px");
+  expect(subject.style.height).toBe("200px");
+});
+
+test.each(["Close", "Escape"])("closing a diagram lightbox with %s returns focus to Enlarge", (how) => {
+  mount(mixedGroups);
+  const enlarge = button("Enlarge diagram");
+  act(() => enlarge.focus());
+  fireEvent.click(enlarge);
+  expect(document.activeElement).not.toBe(enlarge);
+  if (how === "Close") fireEvent.click(button("Close"));
+  else fireEvent.keyDown(dialog(), { key: "Escape" });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  return waitFor(() => expect(document.activeElement).toBe(enlarge));
 });

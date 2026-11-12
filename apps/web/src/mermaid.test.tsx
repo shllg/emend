@@ -427,6 +427,8 @@ test("inline Enlarge leaves the source disclosure and selection capture separate
   expect(mouseUp).not.toHaveBeenCalled();
   expect(keyUp).not.toHaveBeenCalled();
   const details = container.querySelector("details");
+  expect(details?.parentElement).toBe(enlarge.parentElement);
+  expect(details?.parentElement?.classList.contains("items-baseline")).toBe(true);
   expect(details?.open).toBe(false);
   fireEvent.click(getByText("Diagram source"));
   expect(details?.open).toBe(true);

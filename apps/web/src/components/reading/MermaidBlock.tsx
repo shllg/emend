@@ -31,16 +31,28 @@ export function parseFrameSize(data: unknown): { height: number; natural?: Size 
   return { height: data.height, natural: { width: natural.width, height: natural.height } };
 }
 
+export const DIAGRAM_DRAW_TIMEOUT_MS = 20_000;
+
 export function LightboxDiagram({ source, onSize }: { source: string; onSize: (natural: Size | null) => void }) {
   const loaded = useRef(false);
   const reported = useRef(false);
   const frame = useRef<HTMLIFrameElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => {
+    timer.current = setTimeout(() => {
+      if (reported.current) return;
+      reported.current = true;
+      onSize(null);
+    }, DIAGRAM_DRAW_TIMEOUT_MS);
+    return () => clearTimeout(timer.current);
+  }, [onSize]);
   useEffect(() => {
     const receive = (event: MessageEvent) => {
       if (!frame.current?.contentWindow || event.source !== frame.current.contentWindow || reported.current) return;
       const data = parseFrameSize(event.data);
       if (data?.natural === undefined) return;
       reported.current = true;
+      clearTimeout(timer.current);
       onSize(data.natural);
     };
     window.addEventListener("message", receive);
@@ -96,7 +108,7 @@ function DiagramFrame({ source }: { source: string }) {
           frame.current?.contentWindow?.postMessage({ type: "render", source }, "*");
         }}
       />
-      <div className="flex items-start gap-2">
+      <div className="flex items-baseline gap-2">
         <details className="min-w-0 flex-1">
           <summary className="cursor-pointer text-fg-3 [font:var(--type-meta)]">Diagram source</summary>
           <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-12 font-stretch-mono text-fg-2">
