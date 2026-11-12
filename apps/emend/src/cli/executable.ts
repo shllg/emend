@@ -38,20 +38,58 @@ export async function pathThroughRepository(
   return false;
 }
 
-/**
- * Keep only absolute PATH entries without "." or ".." parts. An empty part (trailing or doubled
- * slash) names the same folder as no part: the repository walk skips it and `join` drops it.
- */
+/** Absent names are harmless; existing names must pass the same hop walk as a helper. */
+async function executableInRepository(file: string, roots: readonly string[]): Promise<boolean | null> {
+  try {
+    await lstat(file);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    throw error;
+  }
+  return pathThroughRepository(file, roots, { allowMissingLeaf: true });
+}
+
+/** Keep absolute entries without dot components, preserving their original spelling. */
+function absoluteEntries(searchPath: string): string[] {
+  return searchPath.split(delimiter).filter((entry) => {
+    if (!isAbsolute(entry)) return false;
+    const tail = entry.slice(parse(entry).root.length);
+    return tail === "" || tail.split(sep).every((part) => part !== "." && part !== "..");
+  });
+}
+
+/** Filter names that children may resolve themselves, such as an env shebang's node. */
+export async function filterExecutablePath(
+  names: readonly string[],
+  searchPath: string,
+  roots: readonly string[],
+): Promise<string> {
+  const trusted: string[] = [];
+  for (const entry of absoluteEntries(searchPath)) {
+    try {
+      if (await pathThroughRepository(entry, roots)) continue;
+      let safe = true;
+      for (const name of names) {
+        if (await executableInRepository(join(entry, name), roots)) {
+          safe = false;
+          break;
+        }
+      }
+      if (safe) trusted.push(entry);
+    } catch {
+      // Uncheckable names must not remain on a child's PATH.
+    }
+  }
+  return trusted.join(delimiter);
+}
+
 export async function findExecutable(
   name: string,
   searchPath = process.env.PATH ?? "",
   options: { cwd?: string; home?: string } = {},
 ) {
-  const entries = searchPath.split(delimiter).filter((entry) => {
-    if (!isAbsolute(entry)) return false;
-    const tail = entry.slice(parse(entry).root.length);
-    return tail === "" || tail.split(sep).every((part) => part !== "." && part !== "..");
-  });
+  const entries = absoluteEntries(searchPath);
   let roots: string[];
   try {
     roots = await repositoryRoots(options.cwd ?? process.cwd(), options.home);
@@ -81,14 +119,12 @@ export async function findExecutable(
   for (const entry of safe) {
     const file = join(entry, name);
     try {
-      await lstat(file);
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === "ENOENT" || code === "ENOTDIR") trusted.push(entry);
-      continue;
-    }
-    try {
-      if (await pathThroughRepository(file, roots, { allowMissingLeaf: true })) {
+      const inRepository = await executableInRepository(file, roots);
+      if (inRepository === null) {
+        trusted.push(entry);
+        continue;
+      }
+      if (inRepository) {
         skipped = true;
         continue;
       }

@@ -4,18 +4,19 @@ import type { Io } from "../../main.ts";
 import { checkTokenFileMode } from "../../state/token-file.ts";
 import { escapeReference } from "../escape.ts";
 import { CliError, CliUsageError } from "../http.ts";
+import { type ServerRecord, serverRecord } from "../server-client.ts";
 import { servicePid } from "../service/pid.ts";
 import { requestServerStop } from "../service/takeover.ts";
 import { removeStaleTailscaleServe } from "../tailscale.ts";
 
 export async function stopCommand(stateDir: string, args: string[], io: Io) {
   if (args.length) throw new CliUsageError("Usage: emend stop.");
-  let serverPid: number | undefined;
+  let before: ServerRecord | undefined;
   const url = await requestServerStop(stateDir, {
     now: io.service?.now,
     sleep: io.service?.sleep,
     beforeProbe: async (record) => {
-      serverPid = record.pid;
+      before = record;
       const pid = await servicePid(io);
       if (pid === null) {
         let running = true;
@@ -42,6 +43,25 @@ export async function stopCommand(stateDir: string, args: string[], io: Io) {
       notStopped: `the emend server at ${reference} did not stop; try again.`,
     }),
   });
+  if (before) {
+    const now = io.service?.now ?? (() => performance.now());
+    const sleep = io.service?.sleep ?? delay;
+    const deadline = now() + 15000;
+    for (;;) {
+      try {
+        process.kill(before.pid, 0);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ESRCH") break;
+      }
+      // Discovery is removed after db.close(); zombies still answer kill(pid, 0).
+      // The per-process key also distinguishes a replacement that reused this pid.
+      const current = await serverRecord(stateDir);
+      if (!current || current.pid !== before.pid || current.key !== before.key) break;
+      if (now() >= deadline)
+        throw new CliError(`the emend server at ${escapeReference(before.url)} did not stop; try again.`);
+      await sleep(Math.min(100, Math.max(1, deadline - now())));
+    }
+  }
   if (url === undefined) {
     const route = await removeStaleTailscaleServe(stateDir, io.env, {
       now: io.service?.now,
@@ -55,18 +75,6 @@ export async function stopCommand(stateDir: string, args: string[], io: Io) {
           : "emend: no emend server is running.\n",
     );
   } else {
-    const now = io.service?.now ?? (() => performance.now());
-    const sleep = io.service?.sleep ?? delay;
-    const deadline = now() + 15000;
-    while (serverPid !== undefined) {
-      try {
-        process.kill(serverPid, 0);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ESRCH") break;
-      }
-      if (now() >= deadline) throw new CliError(`the emend server at ${escapeReference(url)} did not stop; try again.`);
-      await sleep(Math.min(100, Math.max(1, deadline - now())));
-    }
     io.stdout(`emend: stopped the emend server at ${escapeReference(url)}\n`);
   }
 }

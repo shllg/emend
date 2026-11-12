@@ -117,7 +117,7 @@ test("the CLI prints its version through a symlink without the caller's NODE_OPT
     await symlink(fileURLToPath(new URL("./cli.ts", import.meta.url)), entry);
     const stdout = execFileSync(process.execPath, [entry, "--version"], {
       encoding: "utf8",
-      env: { PATH: process.env.PATH, HOME: directory, EMEND_HOME: join(directory, "state"), LC_ALL: "C" },
+      env: { PATH: directory, HOME: directory, EMEND_HOME: join(directory, "state"), LC_ALL: "C" },
     });
     expect(stdout).toBe("emend 0.1.0\n");
     await expect(access(marker)).rejects.toMatchObject({ code: "ENOENT" });
@@ -126,4 +126,19 @@ test("the CLI prints its version through a symlink without the caller's NODE_OPT
     else process.env.NODE_OPTIONS = previous;
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test.each([129, 130, 131, 143])("the real entry exits immediately after interruption %s", async (code) => {
+  const f = await entryFixture();
+  const guard = join(f.directory, "interrupted.mjs");
+  await writeFile(
+    guard,
+    `import { registerHooks } from "node:module";
+registerHooks({ load(url, context, next) {
+  if (url.endsWith("/main.ts")) return { format: "module", shortCircuit: true,
+    source: "export async function run() { setTimeout(() => process.exit(99), 100); return ${code}; }" };
+  return next(url, context);
+} });`,
+  );
+  expect(await f.invoke(f.directory, ["update"], ["--import", guard])).toEqual({ code, stdout: "", stderr: "" });
 });

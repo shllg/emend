@@ -1,3 +1,4 @@
+import { NewerDatabaseError } from "../../db/migrate.ts";
 import { quoteShellArgument } from "../escape.ts";
 import { pathNames, proxyNames } from "./environment.ts";
 import { type Install, restoreArgs } from "./install.ts";
@@ -19,6 +20,7 @@ export function goBack(options: {
   uid?: number;
   env: Record<string, string>;
   launchctl?: string;
+  systemctl?: string;
 }): string {
   const { backupPath, database, env, hasService, oldEntry, oldVersion } = options;
   const pins = [
@@ -44,7 +46,7 @@ export function goBack(options: {
   const job = `gui/${options.uid}/dev.emend.server`;
   const stop = hasService
     ? options.platform === "linux"
-      ? `${pins} systemctl --user stop emend`
+      ? `${pins} ${quoteShellArgument(options.systemctl ?? "/bin/systemctl")} --user stop emend`
       : `( ${launchctl} bootout ${job}; n=0; while ${launchctl} print ${job} >/dev/null 2>&1 && [ "$n" -lt 50 ]; do n=$((n+1)); ${pins} /bin/sleep 0.2; done; ${launchctl} print ${job} >/dev/null 2>&1; [ "$?" -eq 113 ] )`
     : `${emend} stop`;
   const old = [options.helper, ...restoreArgs(options.install, oldVersion)]
@@ -52,20 +54,22 @@ export function goBack(options: {
     .join(" ");
   const restore = `${restorePins} ${old}`;
   const start = `${emend}${hasService ? " service install" : ""}`;
-  const packagePart = `emend: to go back to emend ${oldVersion}, stop every agent that uses emend, then paste these lines; they
-stop at the first failure:
+  const packagePart = `# emend: to go back to emend ${oldVersion}, stop every agent that uses emend, then paste these lines; they
+# stop at the first failure:
   cd ${quoteShellArgument(options.home)} &&
   ${hasService ? stop : restore} &&
   ${hasService ? restore : stop} &&
   ${start}
 `;
   if (backupPath === undefined) return packagePart;
-  return `${packagePart}emend: only if emend ${oldVersion} then says "The emend database is newer than this emend", put the
-database back to the backup from ${options.backupTime}. Everything since then is lost, including devices
-and tokens revoked since then: revoke them again afterwards. Paste these lines:
+  return `${packagePart}# emend: database recovery: stop every agent that uses emend.
+# This checks whether emend ${oldVersion} refuses the database before restoring the backup from ${options.backupTime}.
+# Everything since then is lost, including devices
+# and tokens revoked since then: revoke them again afterwards. Paste these lines:
   cd ${quoteShellArgument(options.home)} &&
+  ( out=$(${emend} ls 2>&1); case "$out" in *${quoteShellArgument(new NewerDatabaseError().message)}*) exit 0;; esac; echo ${quoteShellArgument(`emend: emend ${oldVersion} can read the database; it was not restored.`)} >&2; exit 1 ) &&
   ${stop} &&
-  ${pins} /bin/cp ${quoteShellArgument(backupPath)} ${quoteShellArgument(database)} && ${pins} /bin/rm -f ${quoteShellArgument(`${database}-wal`)} ${quoteShellArgument(`${database}-shm`)} &&
+  ${pins} /bin/cp ${quoteShellArgument(backupPath)} ${quoteShellArgument(`${database}.restore`)} && ${pins} /bin/rm -f ${quoteShellArgument(`${database}-wal`)} ${quoteShellArgument(`${database}-shm`)} && ${pins} /bin/mv -f ${quoteShellArgument(`${database}.restore`)} ${quoteShellArgument(database)} &&
   ${start}
 `;
 }

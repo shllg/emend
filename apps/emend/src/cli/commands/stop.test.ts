@@ -132,7 +132,11 @@ async function syntheticServer(mode = "stops") {
     }
     probes++;
     if (mode === "unanswered") throw new DOMException("synthetic timeout", "TimeoutError");
-    if (mode === "unverified" || (mode === "changed" && probes > 1)) return Response.json({});
+    if (mode === "unverified") {
+      await rm(join(state, "server.json"));
+      return Response.json({});
+    }
+    if (mode === "changed" && probes > 1) return Response.json({});
     const response = proof(String(input), init);
     if (!response) throw new Error("Unexpected request");
     return Response.json(
@@ -198,6 +202,7 @@ test("a dead recorded pid reports no server and leaves files unchanged", async (
   expect(await readdir(state)).toEqual(["server.json"]);
   expect(await readFile(join(state, "server.json"), "utf8")).toBe(record);
   expect(fetcher).not.toHaveBeenCalled();
+  expect(elapsed).toBe(0);
 });
 
 test("stop extra is a usage error without creating state", async () => {
@@ -483,4 +488,44 @@ test("stop fails after 15 seconds when the listener closes but the process never
   expect(elapsed).toBe(15000);
   expect(stdout).toEqual([]);
   expect(stderr).toEqual([`emend: the emend server at ${url} did not stop; try again.\n`]);
+});
+
+test.each([false, true])("an already absent listener waits for process exit (timeout: %s)", async (timeout) => {
+  const fetcher = await syntheticServer("never-exit");
+  fetcher.mockRejectedValue(new TypeError("refused", { cause: { code: "ECONNREFUSED" } }));
+  vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+    if (!timeout && elapsed >= 500 && pid === process.pid && signal === 0)
+      throw Object.assign(new Error("synthetic exit"), { code: "ESRCH" });
+    return killProcess(pid, signal);
+  });
+  expect(await run(["stop"], io)).toBe(timeout ? 1 : 0);
+  expect(elapsed).toBe(timeout ? 15000 : 500);
+  expect(stdout).toEqual(timeout ? [] : [noServer]);
+  expect(stderr).toEqual(timeout ? [`emend: the emend server at ${url} did not stop; try again.\n`] : []);
+  expect(fetcher.mock.calls.some(([input]) => String(input).endsWith("/server/stop"))).toBe(false);
+});
+
+test.each(["removed", "new-pid", "new-key"])("a live pid stops waiting when its record is %s", async (kind) => {
+  await syntheticServer("never-exit");
+  if (!io.service) throw new Error("missing service fixture");
+  io.service.sleep = async (ms) => {
+    elapsed += ms;
+    expect(stdout).toEqual([]);
+    if (elapsed === 500) {
+      const path = join(state, "server.json");
+      if (kind === "removed") await rm(path);
+      else {
+        const record = JSON.parse(await readFile(path, "utf8"));
+        if (kind === "new-pid") record.pid++;
+        else record.key = Buffer.alloc(32, 4).toString("base64url");
+        await writeFile(path, JSON.stringify(record));
+      }
+    }
+  };
+  // A zombie (or a replacement process) still answers kill(pid, 0).
+  vi.spyOn(process, "kill").mockReturnValue(true);
+  expect(await run(["stop"], io)).toBe(0);
+  expect(elapsed).toBe(500);
+  expect(stdout).toEqual([`emend: stopped the emend server at ${url}\n`]);
+  expect(stderr).toEqual([]);
 });

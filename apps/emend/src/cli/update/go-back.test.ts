@@ -1,6 +1,7 @@
-import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test } from "vitest";
+import { NewerDatabaseError } from "../../db/migrate.ts";
 import { quoteShellArgument } from "../escape.ts";
 import { goBack } from "./go-back.ts";
 import { runChild } from "./run.ts";
@@ -38,11 +39,14 @@ const defaults = {
   hasService: false,
   platform: "linux",
   uid: 1000,
+  systemctl: "/tools/systemctl",
   env: { PATH: "/tools", HOME: "/home/user" },
 };
 const pins = "/usr/bin/env -i PATH='/tools' HOME='/home/user'";
 function parts(block: string) {
-  return block.split("emend: only if").map((part) => part.split("\n").filter((line) => line.startsWith("  ")));
+  return block
+    .split("# emend: database recovery")
+    .map((part) => part.split("\n").filter((line) => line.startsWith("  ")));
 }
 
 test.each(["npm", "pnpm", "mise"] as const)(
@@ -62,7 +66,7 @@ test.each(["npm", "pnpm", "mise"] as const)(
         const launchctl = `${pins} '/bin/launchctl'`;
         const stop = hasService
           ? platform === "linux"
-            ? `${pins} systemctl --user stop emend`
+            ? `${pins} '/tools/systemctl' --user stop emend`
             : `( ${launchctl} bootout gui/1000/dev.emend.server; n=0; while ${launchctl} print gui/1000/dev.emend.server >/dev/null 2>&1 && [ "$n" -lt 50 ]; do n=$((n+1)); ${pins} /bin/sleep 0.2; done; ${launchctl} print gui/1000/dev.emend.server >/dev/null 2>&1; [ "$?" -eq 113 ] )`
           : `${emend} stop`;
         const args = {
@@ -80,11 +84,12 @@ test.each(["npm", "pnpm", "mise"] as const)(
         ]);
         expect(databasePart).toEqual([
           "  cd '/home/user' &&",
+          `  ( out=$(${emend} ls 2>&1); case "$out" in *${quoteShellArgument(new NewerDatabaseError().message)}*) exit 0;; esac; echo 'emend: emend 0.1.0 can read the database; it was not restored.' >&2; exit 1 ) &&`,
           `  ${stop} &&`,
-          `  ${pins} /bin/cp '/state/backup.db' '/state/emend.db' && ${pins} /bin/rm -f '/state/emend.db-wal' '/state/emend.db-shm' &&`,
+          `  ${pins} /bin/cp '/state/backup.db' '/state/emend.db.restore' && ${pins} /bin/rm -f '/state/emend.db-wal' '/state/emend.db-shm' && ${pins} /bin/mv -f '/state/emend.db.restore' '/state/emend.db' &&`,
           start,
         ]);
-        expect(block).toContain('only if emend 0.1.0 then says "The emend database is newer than this emend"');
+        expect(block).toContain("# emend: database recovery: stop every agent that uses emend.");
         expect(block).toContain(defaults.backupTime);
         expect(block).toContain("Everything since then is lost, including devices");
         expect(block).toContain("tokens revoked since then: revoke them again afterwards");
@@ -127,9 +132,9 @@ test.each([...directoryNames, "DBUS_SESSION_BUS_ADDRESS", "XDG_$(printf injected
   },
 );
 
-test.each([false, true])(
-  "pasted parts isolate every program and restore the database only on request (pins: %s)",
-  async (present) => {
+test.each([false, true].flatMap((present) => ["newer", "list", "error"].map((result) => ({ present, result }))))(
+  "pasting both complete parts isolates programs and checks the database ($present, $result)",
+  async ({ present, result: databaseResult }) => {
     const root = await mkdtemp(join(process.env.EMEND_HOME as string, "rollback-"));
     const safe = join(root, "safe");
     const hostile = join(root, "hostile");
@@ -151,7 +156,14 @@ delete env.HTTPS_PROXY;
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ argv, env, proxyMatches, database: fs.readFileSync(${JSON.stringify(database)}, "utf8") }) + "\\n");
 `;
     await writeFile(helper, `${script}fs.writeFileSync(${JSON.stringify(oldEntry)}, "restored");`);
-    await writeFile(node, `${script}if (!fs.existsSync(${JSON.stringify(oldEntry)})) process.exit(1);`);
+    await writeFile(
+      node,
+      `${script}if (!fs.existsSync(${JSON.stringify(oldEntry)})) process.exit(1);
+if (argv[1] === "ls") {
+  console.error(${JSON.stringify(databaseResult === "newer" ? new NewerDatabaseError().message : databaseResult === "list" ? "No reviews." : "Cannot open database.")});
+  process.exit(${databaseResult === "list" ? 0 : 1});
+}`,
+    );
     await writeFile(join(hostile, "node"), "#!/bin/sh\nexit 99\n", { mode: 0o755 });
     await Promise.all([helper, node].map((file) => chmod(file, 0o755)));
     await writeFile(database, "new database");
@@ -179,30 +191,28 @@ fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ argv, env, proxyMatch
       env: { ...pinned, HTTPS_PROXY: "https://never-print.example.test", USER: "identity" },
     });
     expect(block.includes("never-print.example")).toBe(false);
-    const commands = parts(block);
-    for (const index of [0, 1]) {
-      const result = await runChild("/bin/sh", ["-c", (commands[index] ?? []).join("\n")], {
-        cwd: root,
-        env: {
-          PATH: hostile,
-          HOME: hostile,
-          NODE_OPTIONS: "--require /hostile",
-          npm_config_registry: "https://hostile.invalid",
-          MISE_ENV: "hostile",
-          COREPACK_HOME: hostile,
-          HTTPS_PROXY: "https://proxy.example.test",
-          ...Object.fromEntries(directoryNames.map((name) => [name, hostile])),
-        },
-        timeoutMs: 3000,
-        output: "capture",
-      });
-      expect(result.code).toBe(0);
-      expect(await readFile(database, "utf8")).toBe(index === 0 ? "new database" : "old database");
-      if (index === 0) {
-        expect(await readFile(`${database}-wal`, "utf8")).toBe("wal");
-        expect(await readFile(`${database}-shm`, "utf8")).toBe("shm");
-      }
-    }
+    const beforeInode = (await stat(database)).ino;
+    const result = await runChild("/bin/sh", ["-c", block], {
+      cwd: root,
+      env: {
+        PATH: hostile,
+        HOME: hostile,
+        NODE_OPTIONS: "--require /hostile",
+        npm_config_registry: "https://hostile.invalid",
+        MISE_ENV: "hostile",
+        COREPACK_HOME: hostile,
+        HTTPS_PROXY: "https://proxy.example.test",
+        ...Object.fromEntries(directoryNames.map((name) => [name, hostile])),
+      },
+      timeoutMs: 3000,
+      output: "capture",
+    });
+    const restored = databaseResult === "newer";
+    expect(result.code).toBe(restored ? 0 : 1);
+    expect(result.stderr).toBe(restored ? "" : "emend: emend 0.1.0 can read the database; it was not restored.\n");
+    expect(result.stderr).not.toMatch(/not found|command not found/);
+    expect(await readFile(database, "utf8")).toBe(restored ? "old database" : "new database");
+    expect((await stat(database)).ino === beforeInode).toBe(!restored);
     const calls = (await readFile(log, "utf8"))
       .trim()
       .split("\n")
@@ -211,8 +221,8 @@ fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ argv, env, proxyMatch
       ["install", "--global", "--prefix", "/prefix", "--ignore-scripts", "@shllg/emend@0.1.0"],
       [oldEntry, "stop"],
       [oldEntry],
-      [oldEntry, "stop"],
-      [oldEntry],
+      [oldEntry, "ls"],
+      ...(restored ? [[oldEntry, "stop"], [oldEntry]] : []),
     ]);
     expect(calls[0].env).toEqual({ ...pinned, npm_config_ignore_scripts: "true" });
     expect(calls[0].proxyMatches).toBe(true);
@@ -225,10 +235,16 @@ fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ argv, env, proxyMatch
       "new database",
       "new database",
       "new database",
-      "old database",
+      ...(restored ? ["new database", "old database"] : []),
     ]);
-    await expect(readFile(`${database}-wal`)).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(readFile(`${database}-shm`)).rejects.toMatchObject({ code: "ENOENT" });
+    if (restored) {
+      await expect(readFile(`${database}-wal`)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(readFile(`${database}-shm`)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(readFile(`${database}.restore`)).rejects.toMatchObject({ code: "ENOENT" });
+    } else {
+      expect(await readFile(`${database}-wal`, "utf8")).toBe("wal");
+      expect(await readFile(`${database}-shm`, "utf8")).toBe("shm");
+    }
   },
 );
 

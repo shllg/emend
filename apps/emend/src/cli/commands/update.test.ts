@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -222,7 +222,7 @@ describe.each([
     const backup = join(fake.state, "backups", backups[0] as string);
     expect(err()).toContain("failed with exit 3.");
     expect(err()).toContain(`emend: to go back to emend ${VERSION}, stop every agent that uses emend`);
-    expect(err()).toContain(` /bin/cp '${backup}' '${join(fake.state, "emend.db")}' && /usr/bin/env -i `);
+    expect(err()).toContain(` /bin/cp '${backup}' '${join(fake.state, "emend.db.restore")}' && /usr/bin/env -i `);
     expect(err()).toContain(`  cd '${fake.home}' &&\n`);
     expect(err()).toContain(
       `  /usr/bin/env -i PATH='${fake.bin}' HOME='${fake.home}' EMEND_HOME='${fake.state}' '${process.execPath}' '${await realpath(fake.entry)}' stop &&\n`,
@@ -265,7 +265,7 @@ describe("the database backup", () => {
     expect(await update(), err()).toBe(0);
     expect(out()).toContain("emend: no database to back up yet.\n");
     expect(out()).toContain("to go back");
-    expect(out()).not.toContain("emend: only if");
+    expect(out()).not.toContain("emend: database recovery");
     expect(await readdir(fake.state)).not.toContain("backups");
   });
 
@@ -313,8 +313,9 @@ describe("the service", () => {
     expect(reinstall.entry).toBe(join(fake.oldPackage, "dist/emend.mjs"));
     expect(await realpath(reinstall.cwd)).toBe(fake.home);
     expect(out()).toContain("emend: the emend service runs emend 0.2.0\n");
+    expect(out().split(`${quoteShellArgument(join(fake.bin, "systemctl"))} --user stop emend`)).toHaveLength(3);
     expect(out()).toContain(
-      `  /usr/bin/env -i PATH='${fake.bin}' HOME='${fake.home}' XDG_CONFIG_HOME='${join(fake.home, ".config")}' systemctl --user stop emend &&\n`,
+      `  /usr/bin/env -i PATH='${fake.bin}' HOME='${fake.home}' XDG_CONFIG_HOME='${join(fake.home, ".config")}' '${join(fake.bin, "systemctl")}' --user stop emend &&\n`,
     );
     expect(out()).toContain(
       `  /usr/bin/env -i PATH='${fake.bin}' HOME='${fake.home}' XDG_CONFIG_HOME='${join(fake.home, ".config")}' EMEND_HOME='${fake.state}' '${process.execPath}' '${await realpath(fake.entry)}' service install\n`,
@@ -620,7 +621,7 @@ test("a planted service in a dropped XDG_CONFIG_HOME does not count as a service
   await fake.set({ updateFails: true });
   expect(await update(), err()).toBe(1);
   expect(err()).toContain(`${quoteShellArgument(await realpath(fake.entry))} stop &&`);
-  expect(err()).not.toContain("systemctl --user stop");
+  expect(err()).not.toContain("--user stop emend");
   expect((await fake.calls()).some((call) => call.tool === "service-install")).toBe(false);
 });
 
@@ -674,7 +675,9 @@ test.each(["npm", "pnpm", "mise"] as const)(
         expect(await update(), err()).toBe(1);
         const stopEntry = await realpath(fake.entry);
         expect(err()).toContain(
-          service ? "systemctl --user stop emend &&" : `${quoteShellArgument(stopEntry)} stop &&`,
+          service
+            ? `${quoteShellArgument(join(fake.bin, "systemctl"))} --user stop emend &&`
+            : `${quoteShellArgument(stopEntry)} stop &&`,
         );
         expect(err()).toContain(
           `${quoteShellArgument(await realpath(fake.entry))}${service ? " service install" : ""}\n`,
@@ -772,7 +775,7 @@ test.each(["npm", "pnpm", "mise"] as const)(
     expect(await update()).toBe(1);
     expect(err()).toContain(`emend: ${layout} installed emend 0.0.1, older than ${VERSION}.`);
     expect(err()).toContain("to go back");
-    expect(err()).not.toContain("emend: only if");
+    expect(err()).not.toContain("emend: database recovery");
     expect(await readFile(join(fake.root, "new-log"), "utf8")).toBe("");
   },
 );
@@ -789,7 +792,7 @@ test.each(["failure", "SIGHUP", "SIGQUIT"])(
     }
     expect(await pending).toBe(outcome === "failure" ? 1 : outcome === "SIGHUP" ? 129 : 131);
     expect(err()).toContain("to go back");
-    expect(err()).not.toContain("emend: only if");
+    expect(err()).not.toContain("emend: database recovery");
   },
 );
 
@@ -814,3 +817,74 @@ test.each([
   process.emit(signal);
   expect(await pending).toBe(code);
 });
+
+test.each(["node", "npm", "systemctl"])(
+  "update removes an entry with a repository %s link from child and printed PATH",
+  async (name) => {
+    await make("mise");
+    const repo = join(fake.root, "repo");
+    const planted = join(fake.root, "planted");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    await writeFile(join(repo, ".git/HEAD"), "ref: refs/heads/main\n");
+    await mkdir(planted);
+    await writeFile(join(repo, name), "#!/bin/sh\nexit 99\n", { mode: 0o755 });
+    await symlink(join(repo, name), join(planted, name));
+    fake.options.cwd = repo;
+    fake.io.env.PATH = [planted, fake.bin].join(delimiter);
+    expect(await update(), err()).toBe(0);
+    for (const call of await fake.calls()) expect(call.values).toMatchObject({ PATH: fake.bin });
+    expect(out()).toContain(`PATH='${fake.bin}'`);
+    expect(out()).not.toContain(planted);
+  },
+);
+
+test.each(["missing", "repository"])("a %s systemctl refuses before the backup", async (kind) => {
+  await make("npm");
+  await makeDatabase(join(fake.state, "emend.db"));
+  await installService(fake);
+  await rm(join(fake.bin, "systemctl"));
+  if (kind === "repository") {
+    const repo = join(fake.root, "repo");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    await writeFile(join(repo, ".git/HEAD"), "ref: refs/heads/main\n");
+    await writeFile(join(repo, "systemctl"), "#!/bin/sh\nexit 99\n", { mode: 0o755 });
+    await symlink(join(repo, "systemctl"), join(fake.bin, "systemctl"));
+    fake.options.cwd = repo;
+  }
+  expect(await update(), err()).toBe(1);
+  expect(err()).toBe("emend: could not use systemctl on PATH; nothing was changed.\n");
+  expect(await fake.calls()).toEqual([]);
+  expect(await readdir(fake.state)).not.toContain("backups");
+});
+
+test.each(["helper", "node", "old-entry", "systemctl"])(
+  "an equals sign in the %s path refuses before changing anything",
+  async (kind) => {
+    await make("npm");
+    await makeDatabase(join(fake.state, "emend.db"));
+    const folder = join(fake.root, "equal=sign");
+    await mkdir(folder);
+    if (kind === "helper" || kind === "systemctl") {
+      const name = kind === "helper" ? "npm" : "systemctl";
+      if (kind === "systemctl") await installService(fake);
+      await symlink(join(fake.bin, name), join(folder, name));
+      fake.io.env.PATH = [folder, fake.bin].join(delimiter);
+    } else if (kind === "node") {
+      fake.options.node = join(folder, "node");
+      await symlink(process.execPath, fake.options.node);
+    } else {
+      const prefix = join(fake.root, "prefix");
+      const moved = join(folder, "prefix");
+      await rename(prefix, moved);
+      fake.options.entry = fake.entry.replace(prefix, moved);
+      const launcher = join(moved, "bin/emend");
+      await rm(launcher);
+      await symlink(join(moved, "lib/node_modules/@shllg/emend/bin/emend"), launcher);
+    }
+    expect(await update(), err()).toBe(1);
+    expect(err()).toMatch(/nothing was changed/i);
+    expect(out()).toBe("");
+    expect(await fake.calls()).toEqual([]);
+    expect(await readdir(fake.state)).not.toContain("backups");
+  },
+);

@@ -62,4 +62,5 @@ if (refusal) {
 }
 // A pending stdout write can keep the event loop alive after an interrupted flush.
 // Serve has already finished its startup and process-group cleanup before returning.
-if (process.exitCode === 129 || process.exitCode === 130 || process.exitCode === 143) process.exit(process.exitCode);
+if (process.exitCode === 129 || process.exitCode === 130 || process.exitCode === 131 || process.exitCode === 143)
+  process.exit(process.exitCode);

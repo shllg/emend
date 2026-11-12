@@ -273,28 +273,37 @@ the old package and starts it; it leaves the database intact. It prints after a 
 and after any failure or interruption once the package manager started, even without a database.
 An unchanged successful update prints no recovery steps.
 
-Stop every agent that uses emend, then paste the first part as one shell list. Keep the quotes,
+Stop every agent that uses emend, then paste the recovery output into a POSIX shell such as bash
+or zsh. You may paste both parts, including their comment lines: the database part checks whether
+restoration is needed before changing anything. Keep the quotes,
 `/usr/bin/env -i` arguments and `&&` between commands: the list stops at the first failure.
 
 1. Change to the printed home folder.
-2. With a service, stop it first. Linux uses `systemctl --user stop emend` through the pinned
-   environment. macOS runs `/bin/launchctl bootout` in a subshell, then polls `print` up to 50
-   times, sleeping 0.2 seconds between attempts. Only a final exit status of 113 (not loaded)
+2. With a service, stop it first. Linux uses the checked absolute path to `systemctl` with
+   `--user stop emend` through the pinned environment. macOS runs `/bin/launchctl bootout` in a
+   subshell, then polls `print` up to 50 times, sleeping 0.2 seconds between attempts. Only a final exit status of 113 (not loaded)
    permits the next command; a still-loaded job, missing launchctl or any other error stops the list.
 3. Restore the old package through the printed absolute helper path. npm uses
    `install --global --prefix <prefix> --ignore-scripts @shllg/emend@<old>`; pnpm uses
    `add --global --ignore-scripts --ignore-pnpmfile @shllg/emend@<old>`; mise uses
    `use --global npm:@shllg/emend@<old>`.
    Without a service, restore first, then run the printed Node.js and restored old entry with
-   `stop`. It waits for the server process to exit, including its database cleanup.
+   `stop`. It waits until the server process exits or removes its discovery record after database
+   cleanup, even when the listener has already closed.
 4. Run the printed Node.js and old entry with `service install` when there is a service, or with
    no arguments to start the server and open the inbox otherwise.
 
-Only use the second part if the old emend then says `The emend database is newer than this emend`.
-It prints only when a backup exists, and names the backup time. **Everything since that backup is
-lost, including devices and tokens revoked since then: revoke them again afterwards.** The second
-list changes to the home folder, stops the service or waits for the old entry's `stop`, copies the
-backup with `/bin/cp`, removes the database's WAL and SHM files with `/bin/rm`, then starts the old
+The second part prints only when a backup exists, and names the backup time. Stop every agent
+that uses emend before running it. It first changes to the home folder and runs the restored old
+entry's `ls` with the pinned environment. It proceeds only if the output contains the newer-database
+error. A list, an answer from a running server, or any other error stops the list without restoring.
+**Everything since that backup is lost if it is restored, including devices and tokens revoked
+since then: revoke them again afterwards.**
+
+After that check, the second list stops the service, or runs the old entry's `stop` and waits for
+the server process and its database cleanup. It copies the backup to `emend.db.restore` with
+`/bin/cp`, removes the database's WAL and SHM files with `/bin/rm`, then moves the copy over the
+database with `/bin/mv`. Existing open handles retain the old inode. Finally it starts the old
 entry again. Without a backup, stay on the newer version if the old one refuses the database.
 
 Every program in both lists runs through `/usr/bin/env -i`, discarding the pasting shell's

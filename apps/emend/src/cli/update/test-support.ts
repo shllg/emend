@@ -207,6 +207,7 @@ export async function makeFake(parent: string, layout: Layout, oldVersion = "0.1
 }
 
 export async function installService(fake: Fake) {
+  await writeFile(join(fake.bin, "systemctl"), "#!/bin/sh\nexit 99\n", { mode: 0o755 });
   const unit = join(fake.home, ".config/systemd/user/emend.service");
   await mkdir(dirname(unit), { recursive: true });
   await writeFile(unit, "# written by emend\n");

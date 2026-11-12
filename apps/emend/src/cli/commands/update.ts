@@ -4,7 +4,7 @@ import { basename, isAbsolute, join, resolve } from "node:path";
 import type { Io } from "../../main.ts";
 import { VERSION } from "../../version.ts";
 import { escapeReference, quoteShellArgument } from "../escape.ts";
-import { findExecutable } from "../executable.ts";
+import { filterExecutablePath, findExecutable } from "../executable.ts";
 import { CliError, CliSignalExit, CliUsageError } from "../http.ts";
 import type { CliRuntime } from "../runtime.ts";
 import { cliRuntime } from "../runtime.ts";
@@ -125,6 +125,8 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
     try {
       const helper = await findExecutable(tool, io.env.PATH ?? "", { cwd, home });
       validatePaths(helper.file, runtime.node);
+      if ([helper.file, runtime.node].some((path) => path.includes("="))) throw new Error("ambiguous env command");
+      helper.path = await filterExecutablePath(["node", "npm", "systemctl"], helper.path, roots);
       const env = await childEnvironment(io.env, { path: helper.path, home, stateDir }, roots);
       return { helper, env };
     } catch (error) {
@@ -138,6 +140,8 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
   let oldEntry: string;
   try {
     oldEntry = await realpath(runtime.entry);
+    validatePaths(oldEntry);
+    if (oldEntry.includes("=")) throw new CliError("could not use the old entry path");
     install = await detectInstall(oldEntry, async (folder) => {
       prepared = await prepareHelper("pnpm");
       await pnpmPackages(prepared.helper.file, home, prepared.env, folder);
@@ -154,6 +158,16 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
   const servicePath = platform === "linux" ? unitPath(home, env.XDG_CONFIG_HOME) : plistPath(home);
   validatePaths(servicePath);
   const hasService = (await serviceFile(servicePath)) !== undefined;
+  let systemctl: string | undefined;
+  if (hasService && platform === "linux") {
+    try {
+      systemctl = (await findExecutable("systemctl", env.PATH, { cwd, home })).file;
+      validatePaths(systemctl);
+      if (systemctl.includes("=")) throw new Error("ambiguous env command");
+    } catch {
+      throw new CliError("could not use systemctl on PATH; nothing was changed.");
+    }
+  }
 
   const now = options.now ?? (() => new Date());
   const database = join(stateDir, "emend.db");
@@ -176,6 +190,7 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
       platform,
       uid,
       env,
+      systemctl,
     });
   const fail = (reason: string, code = 1): never => {
     try {

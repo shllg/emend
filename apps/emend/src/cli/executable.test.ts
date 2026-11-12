@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { access, lstat, mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { delimiter, join, relative, sep } from "node:path";
 import { afterEach, expect, onTestFinished, test, vi } from "vitest";
-import { findExecutable } from "./executable.ts";
+import { filterExecutablePath, findExecutable } from "./executable.ts";
 
 vi.mock("node:fs/promises", async (original) => {
   const actual = await original<typeof import("node:fs/promises")>();
@@ -455,4 +455,33 @@ test.each(["x/./bin", "x/../x/bin"])("a PATH entry with a %s part is rejected", 
     file: join(f.outside, "helper"),
     path: f.outside,
   });
+});
+
+test.each(["node", "npm", "systemctl"])("extra %s repository links drop the whole PATH entry", async (name) => {
+  const f = await fixture();
+  await symlink(join(f.bin, "git"), join(f.outside, name));
+  const next = await fallbackGit(f.root);
+  expect(await filterExecutablePath(["node", "npm", "systemctl"], [f.outside, next].join(delimiter), [f.cwd])).toBe(
+    next,
+  );
+});
+
+test("absent extra names preserve a safe PATH entry", async () => {
+  const f = await fixture();
+  expect(await filterExecutablePath(["node", "npm", "systemctl"], f.outside, [f.cwd])).toBe(f.outside);
+});
+
+test.each(["loop", "EACCES"])("an uncheckable extra name (%s) drops the PATH entry", async (kind) => {
+  const f = await fixture();
+  const file = join(f.outside, "node");
+  if (kind === "loop") await symlink("node", file);
+  else {
+    const read = vi.mocked(lstat).getMockImplementation();
+    if (!read) throw new Error("missing fixture lstat");
+    vi.mocked(lstat).mockImplementation(async (...args) => {
+      if (args[0] === file) throw Object.assign(new Error("synthetic failure"), { code: "EACCES" });
+      return read(...args);
+    });
+  }
+  expect(await filterExecutablePath(["node"], f.outside, [f.cwd])).toBe("");
 });
