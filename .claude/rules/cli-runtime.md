@@ -21,6 +21,14 @@ checks catch a copy inside the repo.
 - Only a repository whose root is the home folder itself (a dotfiles repository) does not count.
   When the home folder is relative or missing, every repository counts; when it cannot be
   resolved otherwise, emend refuses.
+- The config file (`config.json` in `$XDG_CONFIG_HOME/emend/` when that variable is absolute,
+  else `~/.config/emend/`) and the old one in the state folder get the same check
+  (`configRepository` in `cli/config.ts`). When the path, its real path or any symlink hop on the
+  way, walked one hop at a time (at most 40), lies inside such a repository, `publish` and `open`
+  ignore the file, never copying or renaming it, and `emend config` refuses. Keep the hop walk: a
+  link inside the repository could point the file at one the repository writes, whose `docRoots`
+  would let `publish` read a folder such as `~/.ssh`. The server reads only `approvedActiveHours`
+  from that file, a bounded integer, without this check.
 - Every helper program (git, systemctl, launchctl, tailscale, the browser opener) comes from
   `findExecutable` (`executable.ts`): absolute `PATH` entries without `.` or `..` parts, where no
   part of the entry's path or of the program's path, link targets included, lies inside such a
