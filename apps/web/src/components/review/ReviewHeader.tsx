@@ -78,7 +78,7 @@ export function ReviewHeader({
         phone ? "px-4 py-3" : "px-5 pt-3 pb-2.5",
       )}
     >
-      <div className="flex flex-wrap items-start gap-3">
+      <div className={phone ? "flex items-center gap-3" : "flex flex-wrap items-start gap-3"}>
         {phone ? (
           <CopyTextMenu
             text={review.title}
@@ -111,6 +111,7 @@ export function ReviewHeader({
             {review.title}
           </h1>
         )}
+        {phone && <RevisionPicker compact review={review} seq={seq} onChange={onRevisionChange} />}
         {!phone && (
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <Button variant="ghost" size="sm" icon={MessageSquarePlus} disabled={!revision} onClick={onCommentReview}>
@@ -160,27 +161,29 @@ export function ReviewHeader({
           </>
         )}
       </div>
-      <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 font-mono text-12 leading-[1.2] font-stretch-mono text-fg-3">
-        {review.branch && (
-          <span className={metaItem}>
-            <Icon icon={GitBranch} size={13} />
-            {review.branch}
-          </span>
-        )}
-        {!phone && commits && (
-          <span className={metaItem}>
-            <Icon icon={GitCommitHorizontal} size={13} />
-            {commits}
-          </span>
-        )}
-        {revision?.files.length === 0 && (
-          <span className={metaItem}>
-            <Icon icon={FileText} size={13} />
-            {revision.docs.length} {plural(revision.docs.length, "doc")} · no code changes
-          </span>
-        )}
-        <RevisionPicker review={review} seq={seq} onChange={onRevisionChange} />
-      </div>
+      {(!phone || review.branch || revision?.files.length === 0) && (
+        <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 font-mono text-12 leading-[1.2] font-stretch-mono text-fg-3">
+          {review.branch && (
+            <span className={metaItem}>
+              <Icon icon={GitBranch} size={13} />
+              {review.branch}
+            </span>
+          )}
+          {!phone && commits && (
+            <span className={metaItem}>
+              <Icon icon={GitCommitHorizontal} size={13} />
+              {commits}
+            </span>
+          )}
+          {revision?.files.length === 0 && (
+            <span className={metaItem}>
+              <Icon icon={FileText} size={13} />
+              {revision.docs.length} {plural(revision.docs.length, "doc")} · no code changes
+            </span>
+          )}
+          {!phone && <RevisionPicker review={review} seq={seq} onChange={onRevisionChange} />}
+        </div>
+      )}
       {links.length > 0 && (
         <ul
           aria-label="Links"

@@ -3,15 +3,19 @@ import { ChevronDown } from "lucide-react";
 import { relativeTime } from "../../lib/time.ts";
 import { Button } from "../ui/Button.tsx";
 import { Menu } from "../ui/Menu.tsx";
+import { cn } from "../ui/utils.ts";
 
 export function RevisionPicker({
   review,
   seq,
   onChange,
+  compact = false,
 }: {
   review: ReviewView;
   seq: number;
   onChange: (seq: number) => void;
+  /** Phone: the button shows only the numbers, and never shrinks or wraps. */
+  compact?: boolean;
 }) {
   const latest = review.newestRevision;
   const older = seq < latest;
@@ -21,12 +25,31 @@ export function RevisionPicker({
       label={older ? `Revision ${seq}, ${latest} is newer` : `Revision ${seq} of ${latest}`}
       align="left"
       trigger={
-        <Button size="sm" iconRight={ChevronDown} className="gap-1.5 pr-1.5 leading-none shadow-none">
-          Revision <span className="font-mono text-11 font-semibold font-stretch-mono">{seq}</span>
-          {older ? (
-            <span className="font-semibold text-warning-fg">· {latest} is newer</span>
+        <Button
+          size="sm"
+          iconRight={ChevronDown}
+          className={cn("gap-1.5 pr-1.5 leading-none shadow-none", compact && "shrink-0 whitespace-nowrap")}
+        >
+          {compact ? (
+            older ? (
+              <span className="font-semibold text-warning-fg">
+                {seq} of {latest}
+              </span>
+            ) : (
+              <>
+                <span className="font-mono text-11 font-semibold font-stretch-mono">{seq}</span>{" "}
+                <span className="text-fg-3">of {latest}</span>
+              </>
+            )
           ) : (
-            <span className="text-fg-3">of {latest}</span>
+            <>
+              Revision <span className="font-mono text-11 font-semibold font-stretch-mono">{seq}</span>
+              {older ? (
+                <span className="font-semibold text-warning-fg">· {latest} is newer</span>
+              ) : (
+                <span className="text-fg-3">of {latest}</span>
+              )}
+            </>
           )}
         </Button>
       }

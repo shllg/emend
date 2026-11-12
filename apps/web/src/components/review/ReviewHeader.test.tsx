@@ -600,3 +600,95 @@ test.each([1, 2])(
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
   },
 );
+
+const withFiles: RevisionView = {
+  ...revision,
+  files: [
+    {
+      id: review.id,
+      path: "file.txt",
+      oldPath: null,
+      role: "diff",
+      status: "modified",
+      topic: null,
+      order: 0,
+      mediaType: "text/plain",
+      flag: "binary",
+      hasOld: false,
+      hasNew: false,
+    },
+  ],
+};
+
+test("phone newest revision: the picker shows only the numbers at the end of the title row", () => {
+  mount({ phone: true });
+  const picker = screen.getByRole("button", { name: "Revision 2 of 2" });
+  expect(picker.textContent).toBe("2 of 2");
+  expect(picker.textContent).not.toContain("Revision");
+  const heading = screen.getByRole("heading", { level: 1 });
+  const row = heading.parentElement as HTMLElement;
+  expect(row.contains(picker)).toBe(true);
+  expect(heading.compareDocumentPosition(picker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(row.classList.contains("flex-wrap")).toBe(false);
+  expect(row.classList.contains("items-center")).toBe(true);
+  expect(row.classList.contains("gap-3")).toBe(true);
+  const metaRow = screen.getByText("topic/synthetic").parentElement as HTMLElement;
+  expect(metaRow.contains(picker)).toBe(false);
+});
+
+test("phone older revision: the numbers carry the warning colour", () => {
+  mount({ phone: true, seq: 1 });
+  const picker = screen.getByRole("button", { name: "Revision 1, 2 is newer" });
+  expect(picker.textContent).toBe("1 of 2");
+  const text = screen.getByText("1 of 2");
+  expect(text.classList.contains("text-warning-fg")).toBe(true);
+  expect(text.classList.contains("font-semibold")).toBe(true);
+});
+
+test("phone with a long title: the heading truncates and the picker never shrinks or wraps", () => {
+  mount({ phone: true, title: longTitle });
+  const heading = screen.getByRole("heading", { level: 1, name: titleName });
+  expect(heading.classList.contains("min-w-0")).toBe(true);
+  expect(heading.querySelector("span")?.classList.contains("truncate")).toBe(true);
+  const picker = screen.getByRole("button", { name: "Revision 2 of 2" });
+  expect(picker.classList.contains("shrink-0")).toBe(true);
+  expect(picker.classList.contains("whitespace-nowrap")).toBe(true);
+});
+
+test("phone without a branch and with files renders no meta row", () => {
+  const { container } = mount({ phone: true, metadata: { ...review, branch: null }, loaded: withFiles });
+  expect(container.querySelector(".font-mono.text-12")).toBeNull();
+  expect(container.querySelector(".lucide-git-branch")).toBeNull();
+  const header = container.firstElementChild as HTMLElement;
+  expect(header.children).toHaveLength(2);
+});
+
+test("phone with a branch keeps the meta row without the picker", () => {
+  mount({ phone: true, loaded: withFiles });
+  const metaRow = screen.getByText("topic/synthetic").parentElement as HTMLElement;
+  expect(metaRow.querySelector("button")).toBeNull();
+  expect(within(metaRow).queryByText(/of 2/)).toBeNull();
+});
+
+test.each([2, 1])("off the phone the picker stays in the meta row with its full text (seq %s)", (seq) => {
+  mount({ seq });
+  const picker = screen.getByRole("button", { name: seq === 1 ? "Revision 1, 2 is newer" : "Revision 2 of 2" });
+  expect(picker.textContent).toContain("Revision");
+  expect(picker.textContent).toContain(seq === 1 ? "· 2 is newer" : "of 2");
+  const metaRow = screen.getByText("topic/synthetic").parentElement as HTMLElement;
+  expect(metaRow.contains(picker)).toBe(true);
+  const titleRow = screen.getByRole("heading", { level: 1 }).parentElement as HTMLElement;
+  expect(titleRow.contains(picker)).toBe(false);
+  expect(titleRow.classList.contains("flex-wrap")).toBe(true);
+  expect(titleRow.classList.contains("items-start")).toBe(true);
+});
+
+test("the phone picker opens the same newest-first menu", async () => {
+  mount({ phone: true, seq: 1 });
+  fireEvent.keyDown(screen.getByRole("button", { name: "Revision 1, 2 is newer" }), { key: "ArrowDown" });
+  const menu = within(await screen.findByRole("menu"));
+  expect(menu.getAllByRole("menuitemradio")).toEqual([
+    menu.getByRole("menuitemradio", { name: /^Revision 2\b/ }),
+    menu.getByRole("menuitemradio", { name: /^Revision 1\b/ }),
+  ]);
+});
