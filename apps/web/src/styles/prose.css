@@ -199,6 +199,8 @@
     max-width: 100%;
     height: auto;
     max-height: 50svh;
+    /* If the size the server read differs from the decoded image, letterbox instead of distorting. */
+    object-fit: contain;
     /* A ring, not a border, so the image keeps one image pixel per CSS pixel. */
     box-shadow: 0 0 0 1px var(--border-1);
     border-radius: var(--radius-md);

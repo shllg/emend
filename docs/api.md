@@ -162,7 +162,8 @@ invalid or encoded-slash escape. A match becomes
 `<span class="emend-media"><img src="/api/v1/media/<sha256>" alt loading="lazy" decoding="async" width height><span class="emend-media-caption">…</span></span>`;
 the caption is the alt text, or the file name when the alt text is empty. `width` and `height` are
 the image's displayed pixel size, read by the server from the stored bytes at publish (JPEG EXIF
-orientation applied); they are absent when the server cannot read the size. On a writeup media image,
+orientation applied); they are absent when the server cannot read the size. The wrapper span also has
+the class `emend-media-sized` exactly when the server sent `width` and `height`. On a writeup media image,
 author-written width and height are always dropped. A paragraph holding only
 such images also has the class `emend-media-row`. Author classes keep the `user-content-`
 prefix, so they never match the generated classes. A block's id covers each image's alt text, path

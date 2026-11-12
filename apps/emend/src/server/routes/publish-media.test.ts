@@ -87,6 +87,7 @@ test("a published image's block carries the pixel size read from its bytes", asy
   const first = await publish(png("00"));
   const html = imageBlock(await view(first.reviewId, 1)).html;
   expect(html).toContain('width="1" height="1"');
+  expect(html).toContain('<span class="emend-media emend-media-sized">');
 });
 
 test("bytes that are not a readable image render without a size", async () => {
@@ -94,4 +95,5 @@ test("bytes that are not a readable image render without a size", async () => {
   const html = imageBlock(await view(first.reviewId, 1)).html;
   expect(html).toContain(`/api/v1/media/${first.newBlob}`);
   expect(html).not.toMatch(/width=|height=/);
+  expect(html).not.toContain("emend-media-sized");
 });

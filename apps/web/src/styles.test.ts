@@ -147,6 +147,7 @@ test("writeup images keep their own size, stay under half the screen and show a 
   expect(rule(".em-prose .emend-media")).toMatch(/max-width:\s*100%/);
   expect(rule(".em-prose .emend-media")).toMatch(/--emend-media-fit:\s*min\(\s*calc\(var\(--emend-media-w\) \* 1px\)/);
   expect(rule(".em-prose .emend-media img")).toMatch(/max-height:\s*50svh/);
+  expect(rule(".em-prose .emend-media img")).toMatch(/object-fit:\s*contain/);
   expect(rule(".em-prose .emend-media img")).toMatch(/box-shadow:\s*0 0 0 1px var\(--border-1\)/);
   expect(rule(".em-prose .emend-media img")).toMatch(/border-radius:\s*var\(--radius-md\)/);
   expect(rule(".em-prose .emend-media img")).toMatch(/background:\s*var\(--bg-sunken\)/);

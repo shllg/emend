@@ -171,8 +171,42 @@ describe("writeup media sizes", () => {
 
   test("emits the server's size after the other attributes", async () => {
     expect(await withSizes("![Before](media/a.png)")).toBe(
-      `<p class="emend-media-row"><span class="emend-media"><img src="/api/v1/media/${shaA}" alt="Before" loading="lazy" decoding="async" width="640" height="480"><span class="emend-media-caption">Before</span></span></p>`,
+      `<p class="emend-media-row"><span class="emend-media emend-media-sized"><img src="/api/v1/media/${shaA}" alt="Before" loading="lazy" decoding="async" width="640" height="480"><span class="emend-media-caption">Before</span></span></p>`,
     );
+  });
+
+  test("marks only wrappers of images with a valid server size", async () => {
+    const sized = await withSizes("![Before](media/a.png)");
+    expect(sized).toContain('class="emend-media emend-media-sized"');
+    const unread = await withSizes("![Other](media/b.png)");
+    expect(unread).toContain('class="emend-media"');
+    expect(unread).not.toContain("emend-media-sized");
+    const invalid = await renderMarkdownWithBudget(
+      "![Before](media/a.png)",
+      "overview",
+      { highlightedBytes: 0 },
+      undefined,
+      media,
+      undefined,
+      "",
+      undefined,
+      new Map([[shaA, { width: 0, height: 10 }]]),
+    ).then((blocks) => blocks.map((block) => block.html).join("\n"));
+    expect(invalid).toContain('class="emend-media"');
+    expect(invalid).not.toContain("emend-media-sized");
+  });
+
+  test("an author cannot forge the sized marker", async () => {
+    const out = await withSizes(
+      '<span class="emend-media emend-media-sized"><img src="media/a.png" width="9" height="9"></span>\n\n<img class="emend-media-sized" src="media/b.png" width="9" height="9">\n\n<span class="emend-media-sized">raw</span>',
+    );
+    expect(out).toContain("user-content-emend-media-sized");
+    expect(out.match(/class="emend-media-sized"/g)).toBeNull();
+    // The only unprefixed marker is on the wrapper the server made for the image it has a size for.
+    expect(out.match(/(?<![-\w])emend-media-sized/g)?.length ?? 0).toBe(
+      out.match(/class="emend-media emend-media-sized"/g)?.length ?? 0,
+    );
+    expect(out).not.toMatch(/<span class="emend-media-sized"/);
   });
 
   test("emits no size for an image the server could not read", async () => {

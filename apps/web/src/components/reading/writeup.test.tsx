@@ -679,6 +679,8 @@ test("each writeup image's wrapper gets its size as custom properties, and nothi
   const { container } = mount(<Writeup {...props} writeup={writeup} />);
   const wrappers = container.querySelectorAll<HTMLElement>("span.emend-media");
   expect(wrappers).toHaveLength(2);
+  expect(wrappers[0]?.classList.contains("emend-media-sized")).toBe(true);
+  expect(wrappers[1]?.classList.contains("emend-media-sized")).toBe(false);
   expect(wrappers[0]?.querySelector("img")?.getAttribute("width")).toBe("640");
   expect(wrappers[0]?.style.getPropertyValue("--emend-media-w")).toBe("640");
   expect(wrappers[0]?.style.getPropertyValue("--emend-media-h")).toBe("480");
@@ -688,7 +690,7 @@ test("each writeup image's wrapper gets its size as custom properties, and nothi
 
   const crafted = (attributes: string): RenderedBlock => ({
     ...block,
-    html: `<p><span class="emend-media"><img src="/api/v1/media/${hash}" alt="x" ${attributes}><span class="emend-media-caption">x</span></span></p>`,
+    html: `<p><span class="emend-media emend-media-sized"><img src="/api/v1/media/${hash}" alt="x" ${attributes}><span class="emend-media-caption">x</span></span></p>`,
   });
   for (const attributes of [
     'width="0" height="10"',
@@ -703,4 +705,12 @@ test("each writeup image's wrapper gets its size as custom properties, and nothi
     expect(wrapper?.style.getPropertyValue("--emend-media-h"), attributes).toBe("");
     cleanup();
   }
+  const legacy: RenderedBlock = {
+    ...block,
+    html: `<p><span class="emend-media"><img src="/api/v1/media/${hash}" alt="x" width="2000" height="100"><span class="emend-media-caption">x</span></span></p>`,
+  };
+  const view = mount(<BlockView block={legacy} />);
+  const wrapper = view.container.querySelector<HTMLElement>("span.emend-media");
+  expect(wrapper?.style.getPropertyValue("--emend-media-w")).toBe("");
+  expect(wrapper?.style.getPropertyValue("--emend-media-h")).toBe("");
 });

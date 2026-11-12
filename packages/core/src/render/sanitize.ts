@@ -186,13 +186,14 @@ export function mediaKey(src: unknown, media: ReadonlyMap<string, string>): stri
   return media.has(path) ? path : null;
 }
 
-function mediaSpan(image: HtmlElement, path: string, sha: string): HtmlElement {
+function mediaSpan(image: HtmlElement, path: string, sha: string, sized: boolean): HtmlElement {
   const alt = typeof image.properties.alt === "string" ? image.properties.alt : "";
   const caption = alt === "" ? (path.split("/").at(-1) ?? path) : alt;
   const span: HtmlElement = {
     type: "element",
     tagName: "span",
-    properties: { className: ["emend-media"] },
+    // The marker tells the client the width and height are the server's reading, not the author's.
+    properties: { className: sized ? ["emend-media", "emend-media-sized"] : ["emend-media"] },
     children: [
       image,
       {
@@ -228,11 +229,12 @@ function wrapMedia(
       delete child.properties.width;
       delete child.properties.height;
       const size = sizes?.get(sha);
-      if (size && validSide(size.width) && validSide(size.height)) {
+      const sized = size !== undefined && validSide(size.width) && validSide(size.height);
+      if (sized) {
         child.properties.width = size.width;
         child.properties.height = size.height;
       }
-      node.children[index] = mediaSpan(child, marked, sha);
+      node.children[index] = mediaSpan(child, marked, sha, sized);
     } else wrapMedia(child, media, sizes);
   }
   if (node.type === "element" && node.tagName === "p") {
