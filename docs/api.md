@@ -330,9 +330,10 @@ Content-Type is the stored media type, with `; charset=utf-8` for `text/*`, `app
 and `image/svg+xml`; the doc is `text/html; charset=utf-8`.
 
 The bridge also inserts one style element first in the doc's head, in the cascade layer
-`emend-fallback`: `pre { overflow-x: auto; }`. Declared first and layered, it loses to every rule of
-the doc's own CSS, so a code block the doc leaves unstyled scrolls inside its own box instead of
-widening the doc.
+`emend-fallback`: `pre { overflow-x: auto; }`. Declared first and layered, it loses to every
+document-level rule of the doc's own CSS, so a code block the doc leaves unstyled scrolls inside its
+own box instead of widening the doc. A `::slotted(pre)` rule in a shadow root does not override it:
+the cascade ranks the outer document's rules above a shadow tree's.
 
 Asset and error responses under `/content/` send:
 

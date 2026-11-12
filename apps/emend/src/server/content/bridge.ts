@@ -28,7 +28,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   const body = () => documentValue("body");
   const documentElement = () => documentValue("documentElement");
   const scroller = () => documentValue("scrollingElement") || documentElement();
-  // A weak layout fallback: first in the head and in the first cascade layer, so every rule of the doc's own CSS wins.
+  // A weak layout fallback: first in the head and in the first cascade layer, so every document-level rule of the doc's own CSS wins.
   try {
     const fallback = dom(window.Document.prototype, "createElement", document, "style");
     write(window.Element.prototype, "textContent", fallback, "@layer emend-fallback { pre { overflow-x: auto; } }");
