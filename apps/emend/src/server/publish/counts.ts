@@ -24,17 +24,24 @@ export async function countDiffFiles(
   now = () => performance.now(),
 ): Promise<Map<string, Counts>> {
   const counted = new Map<string, Counts>();
+  // Reuse every outcome within this call, including failures that must be retried by later calls.
+  const outcomes = new Map<string, Counts>();
   let visited = 0;
   for (const file of files) {
     if (++visited % 100 === 0) await yieldToLoop("publish-counts");
     checkPublishSignal(signal);
     if (file.role !== "diff" || file.flag) continue;
+    const key = `${file.oldBlob}:${file.newBlob}`;
+    const outcome = outcomes.get(key);
+    if (outcome !== undefined) {
+      counted.set(file.path, outcome);
+      continue;
+    }
     let cache = memo.get(ownerId);
     if (!cache) {
       cache = new Map<string, MemoEntry>();
       memo.set(ownerId, cache);
     }
-    const key = `${file.oldBlob}:${file.newBlob}`;
     let entry = cache.get(key);
     if (entry?.counts === null && now() >= entry.expiresAt) {
       cache.delete(key);
@@ -43,6 +50,7 @@ export async function countDiffFiles(
     let counts = entry?.counts;
     if (counts === undefined) {
       if (budget.spentMs >= budget.limitMs) {
+        outcomes.set(key, null);
         counted.set(file.path, null);
         continue;
       }
@@ -73,6 +81,7 @@ export async function countDiffFiles(
         cache.set(key, counts === null ? { counts, expiresAt: now() + DIFF_COUNT_NULL_TTL_MS } : { counts });
       }
     }
+    outcomes.set(key, counts);
     counted.set(file.path, counts);
   }
   checkPublishSignal(signal);

@@ -70,13 +70,18 @@ test("the cumulative budget stops new work and leaves remaining files null", asy
 });
 
 test.each(["timeout", "failure", "wrong kind"])(
-  "a thrown %s is not memoized and a later call stores recovered counts",
+  "a thrown %s is reused within the call and a later call stores recovered counts",
   async (outcome) => {
     const execute = vi.fn(executeWork);
     if (outcome === "wrong kind") execute.mockResolvedValueOnce({ kind: "line-count", count: 0 });
     else execute.mockRejectedValueOnce(outcome === "timeout" ? new WorkTimeout() : new Error("Worker failed"));
-    const result = await countDiffFiles(ownerId, [file("failed"), file("next", { oldBlob: null })], read, execute);
-    expect([...result.values()]).toEqual([null, { additions: 2, deletions: 0 }]);
+    const result = await countDiffFiles(
+      ownerId,
+      [file("failed"), file("alias"), file("next", { oldBlob: null })],
+      read,
+      execute,
+    );
+    expect([...result.values()]).toEqual([null, null, { additions: 2, deletions: 0 }]);
     expect(execute).toHaveBeenCalledTimes(2);
     const recovered = await countDiffFiles(ownerId, [file("failed")], read, execute);
     expect(recovered.get("failed")).toEqual({ additions: 2, deletions: 1 });
@@ -85,6 +90,30 @@ test.each(["timeout", "failure", "wrong kind"])(
     expect(execute).toHaveBeenCalledTimes(3);
   },
 );
+
+test("a duplicate failed pair spends budget once, leaving room for a distinct pair", async () => {
+  let time = 0;
+  const execute = vi.fn<Executor>(async (work) => {
+    time += 6;
+    if (work.kind === "diff-counts" && work.old !== null) throw new WorkTimeout();
+    return executeWork(work);
+  });
+  const budget = createDiffCountBudget(10);
+  const reads = vi.fn(read);
+  const result = await countDiffFiles(
+    ownerId,
+    [file("failed"), file("alias"), file("distinct", { oldBlob: null })],
+    reads,
+    execute,
+    undefined,
+    budget,
+    () => time,
+  );
+  expect([...result.values()]).toEqual([null, null, { additions: 2, deletions: 0 }]);
+  expect(execute).toHaveBeenCalledTimes(2);
+  expect(reads).toHaveBeenCalledTimes(3);
+  expect(budget.spentMs).toBe(12);
+});
 
 test("failed counting consumes the revision budget too", async () => {
   let time = 0;
@@ -164,16 +193,17 @@ test("a returned null expires after fifteen minutes and is retried subject to th
   expect(first.get("one")).toBeNull();
   time += DIFF_COUNT_NULL_TTL_MS - 1;
   const unread = vi.fn(read);
+  const budget = createDiffCountBudget();
+  expect(await countDiffFiles(ownerId, [file("one")], unread, execute, undefined, budget, now)).toEqual(first);
+  expect(unread).not.toHaveBeenCalled();
+  expect(execute).toHaveBeenCalledTimes(1);
+  expect(budget.spentMs).toBe(0);
+  time++;
   const emptyBudget = createDiffCountBudget(0);
   expect(await countDiffFiles(ownerId, [file("one")], unread, execute, undefined, emptyBudget, now)).toEqual(first);
   expect(unread).not.toHaveBeenCalled();
   expect(execute).toHaveBeenCalledTimes(1);
-  expect(emptyBudget.spentMs).toBe(0);
-  time++;
-  expect(await countDiffFiles(ownerId, [file("one")], unread, execute, undefined, emptyBudget, now)).toEqual(first);
-  expect(unread).not.toHaveBeenCalled();
-  expect(execute).toHaveBeenCalledTimes(1);
-  const retried = await countDiffFiles(ownerId, [file("one")], read, execute, undefined, createDiffCountBudget(), now);
+  const retried = await countDiffFiles(ownerId, [file("one")], read, execute, undefined, budget, now);
   expect(retried.get("one")).toEqual({ additions: 2, deletions: 1 });
   expect(execute).toHaveBeenCalledTimes(2);
   time += DIFF_COUNT_NULL_TTL_MS * 2;
@@ -188,7 +218,7 @@ test.each(["null", "timeout", "failure", "wrong kind"])(
   async (outcome) => {
     const pending = Promise.withResolvers<Awaited<ReturnType<Executor>>>();
     const started = Promise.withResolvers<void>();
-    const late = countDiffFiles(ownerId, [file("one")], read, async () => {
+    const late = countDiffFiles(ownerId, [file("one"), file("alias")], read, async () => {
       started.resolve();
       return pending.promise;
     });
@@ -197,7 +227,12 @@ test.each(["null", "timeout", "failure", "wrong kind"])(
     if (outcome === "null") pending.resolve({ kind: "diff-counts", counts: null });
     else if (outcome === "wrong kind") pending.resolve({ kind: "line-count", count: 0 });
     else pending.reject(outcome === "timeout" ? new WorkTimeout() : new Error("Worker failed"));
-    expect((await late).get("one")).toBeNull();
+    expect(await late).toEqual(
+      new Map([
+        ["one", null],
+        ["alias", null],
+      ]),
+    );
     expect(successful.get("one")).toEqual({ additions: 2, deletions: 1 });
     const execute = vi.fn(executeWork);
     const unread = vi.fn(read);
