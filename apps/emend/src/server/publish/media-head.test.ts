@@ -1,7 +1,8 @@
 import { expect, test, vi } from "vitest";
 import type { BlobRead } from "../../store/blob-read.ts";
+import { ApiError } from "../http/errors.ts";
 import { IMAGE_HEAD_BYTES } from "./image-size.ts";
-import { memoizedHeads, readBlobHead } from "./media-head.ts";
+import { memoizedHeads, ownerHead, readBlobHead } from "./media-head.ts";
 
 const CHUNK = 64 * 1024;
 
@@ -70,7 +71,8 @@ test("a failing stream rejects and still closes the read", async () => {
 
 test("memoized heads load once per hash and survive a detached earlier result", async () => {
   const load = vi.fn(async () => Uint8Array.from([1, 2, 3]).buffer);
-  const head = memoizedHeads(load);
+  const heads = memoizedHeads(load);
+  const head = heads.read;
   const first = await head("a");
   structuredClone(first, { transfer: [first] });
   expect(first.byteLength).toBe(0);
@@ -78,4 +80,31 @@ test("memoized heads load once per hash and survive a detached earlier result", 
   expect([...new Uint8Array(second)]).toEqual([1, 2, 3]);
   await head("b");
   expect(load).toHaveBeenCalledTimes(2);
+});
+
+test("memoized heads reload an entry that keep dropped and not one it kept", async () => {
+  const load = vi.fn(async () => Uint8Array.from([1]).buffer);
+  const heads = memoizedHeads(load);
+  await heads.read("a");
+  await heads.read("b");
+  heads.keep(["a"]);
+  await heads.read("a");
+  expect(load).toHaveBeenCalledTimes(2);
+  await heads.read("b");
+  expect(load).toHaveBeenCalledTimes(3);
+});
+
+test("ownerHead opens the owner's blob with the signal and returns its head", async () => {
+  const { read } = fakeRead(bytes(10));
+  const open = vi.fn(async () => read);
+  const signal = new AbortController().signal;
+  const head = await ownerHead({ open }, "owner", signal)("sha");
+  expect(open).toHaveBeenCalledWith("owner", "sha", signal);
+  expect(head.byteLength).toBe(10);
+});
+
+test("ownerHead rejects with blob_missing when the blob is absent", async () => {
+  const error = await ownerHead({ open: async () => null }, "owner")("sha").catch((e) => e);
+  expect(error).toBeInstanceOf(ApiError);
+  expect(error.code).toBe("blob_missing");
 });

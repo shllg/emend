@@ -1,4 +1,6 @@
 import type { BlobRead } from "../../store/blob-read.ts";
+import type { BlobStore } from "../../store/blobs.ts";
+import { ApiError } from "../http/errors.ts";
 import { IMAGE_HEAD_BYTES } from "./image-size.ts";
 
 /** Reads at most `limit` leading bytes of a blob without pulling the rest of its stream. */
@@ -31,16 +33,41 @@ export async function readBlobHead(
   }
 }
 
-/** Loads each hash once; every call returns its own copy because the render worker detaches what it gets. */
-export function memoizedHeads(load: (hash: string) => Promise<ArrayBuffer>): (hash: string) => Promise<ArrayBuffer> {
+/** Reads an owner's blob head; a missing blob is `blob_missing`. */
+export function ownerHead(
+  blobs: Pick<BlobStore, "open">,
+  ownerId: string,
+  signal?: AbortSignal,
+): (sha: string) => Promise<ArrayBuffer> {
+  return async (sha) => {
+    const head = await readBlobHead(() => blobs.open(ownerId, sha, signal));
+    if (!head) throw new ApiError("blob_missing");
+    return head;
+  };
+}
+
+/**
+ * Loads each hash once; every read returns its own copy because the render worker detaches what it gets.
+ * `keep` drops every cached head outside the given hashes.
+ */
+export function memoizedHeads(load: (hash: string) => Promise<ArrayBuffer>): {
+  read(hash: string): Promise<ArrayBuffer>;
+  keep(hashes: Iterable<string>): void;
+} {
   const heads = new Map<string, Promise<ArrayBuffer>>();
-  return async (hash) => {
-    let head = heads.get(hash);
-    if (!head) {
-      head = load(hash);
-      heads.set(hash, head);
-      head.catch(() => heads.delete(hash));
-    }
-    return (await head).slice(0);
+  return {
+    async read(hash) {
+      let head = heads.get(hash);
+      if (!head) {
+        head = load(hash);
+        heads.set(hash, head);
+        head.catch(() => heads.delete(hash));
+      }
+      return (await head).slice(0);
+    },
+    keep(hashes) {
+      const wanted = new Set(hashes);
+      for (const hash of heads.keys()) if (!wanted.has(hash)) heads.delete(hash);
+    },
   };
 }

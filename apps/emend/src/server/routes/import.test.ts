@@ -460,6 +460,46 @@ test("imports writeup media as parentless assets and the writeup renders the ima
   expect(Buffer.from(await image.arrayBuffer())).toEqual(png);
 });
 
+test("an image shown by two revisions is read once at import and sized in both writeups", async () => {
+  const input = await bundle(f);
+  const source = await f.deps.blobs.put(
+    f.ownerId,
+    Buffer.from(JSON.stringify({ overview: "![Before](media/a.png)", tldr: "", decisions: null, topics: {} })),
+    "application/json",
+  );
+  for (const w of input.writeups) w.sourceBlob = source;
+  const doc = required(input.files[0]);
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489", "hex");
+  const hash = await f.deps.blobs.put(f.ownerId, png, "image/png");
+  expect(input.revisions.length).toBeGreaterThanOrEqual(2);
+  const withMedia = {
+    ...input,
+    files: [
+      ...input.files,
+      ...input.revisions.map((r) => ({
+        ...doc,
+        id: randomUUID(),
+        revisionId: r.id,
+        path: "media/a.png",
+        role: "asset",
+        mediaType: "image/png",
+        newBlob: hash,
+        ord: 1,
+      })),
+    ],
+  };
+  const open = vi.spyOn(f.deps.blobs, "open");
+  expect((await f.importRequest("/import", withMedia)).status).toBe(201);
+  expect(open.mock.calls.filter(([, sha]) => sha === hash)).toHaveLength(1);
+  for (const seq of [1, 2]) {
+    const revision = RevisionView.parse(
+      await (await f.request(`/reviews/${input.review.id}/revisions/${seq}`, "GET")).json(),
+    );
+    const html = revision.writeup.sections.flatMap((s) => s.blocks.map((b) => b.html)).join("");
+    expect(html).toContain('width="1" height="1"');
+  }
+});
+
 test.each(["number", "ISO"])(
   "preserves approval records and permits retry after a busy response, ignoring a forged %s approval time",
   async (format) => {
