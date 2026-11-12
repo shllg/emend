@@ -1,10 +1,16 @@
+import { randomUUID } from "node:crypto";
 import type { PublishFile } from "@emend/contract";
-import { expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import { pacing } from "../pacing.ts";
-import { countDiffFiles } from "./counts.ts";
+import { countDiffFiles, createDiffCountBudget } from "./counts.ts";
 import { WorkTimeout } from "./executor.ts";
 import { PublishAborted } from "./lifecycle.ts";
 import { type Executor, executeWork } from "./work.ts";
+
+let ownerId: string;
+beforeEach(() => {
+  ownerId = randomUUID();
+});
 
 const file = (path: string, values: Partial<PublishFile> = {}): PublishFile => ({
   path,
@@ -20,6 +26,7 @@ const read = async (sha: string) => new TextEncoder().encode(sha.startsWith("a")
 test("only unflagged diffs are counted, with one job per ordered blob pair", async () => {
   const execute = vi.fn(executeWork);
   const result = await countDiffFiles(
+    ownerId,
     [
       file("first"),
       file("alias"),
@@ -52,11 +59,13 @@ test("the cumulative budget stops new work and leaves remaining files null", asy
     return { kind: "diff-counts", counts: { additions: 2, deletions: 1 } };
   });
   const files = Array.from({ length: 4 }, (_, i) => file(`${i}`, { newBlob: String(i).repeat(64) }));
-  const result = await countDiffFiles(files, read, execute, undefined, 10, () => time);
+  const result = await countDiffFiles(ownerId, files, read, execute, undefined, createDiffCountBudget(10), () => time);
   expect([...result.values()]).toEqual([{ additions: 2, deletions: 1 }, { additions: 2, deletions: 1 }, null, null]);
   expect(execute).toHaveBeenCalledTimes(2);
   const unread = vi.fn(read);
-  expect(await countDiffFiles([file("zero")], unread, execute, undefined, 0)).toEqual(new Map([["zero", null]]));
+  expect(await countDiffFiles(ownerId, [file("zero")], unread, execute, undefined, createDiffCountBudget(0))).toEqual(
+    new Map([["zero", null]]),
+  );
   expect(unread).not.toHaveBeenCalled();
 });
 
@@ -65,6 +74,7 @@ test.each([new WorkTimeout(), new Error("Worker failed")])(
   async (error) => {
     const execute = vi.fn(executeWork).mockRejectedValueOnce(error);
     const result = await countDiffFiles(
+      ownerId,
       [file("failed"), file("alias"), file("next", { oldBlob: null })],
       read,
       execute,
@@ -81,7 +91,15 @@ test("failed counting consumes the revision budget too", async () => {
     throw new WorkTimeout();
   });
   expect([
-    ...(await countDiffFiles([file("one"), file("two", { oldBlob: null })], read, execute, undefined, 10, () => time)),
+    ...(await countDiffFiles(
+      ownerId,
+      [file("one"), file("two", { oldBlob: null })],
+      read,
+      execute,
+      undefined,
+      createDiffCountBudget(10),
+      () => time,
+    )),
   ]).toEqual([
     ["one", null],
     ["two", null],
@@ -91,7 +109,7 @@ test("failed counting consumes the revision budget too", async () => {
 
 test("a jsdiff timeout remains null", async () => {
   const execute = vi.fn<Executor>(async () => ({ kind: "diff-counts", counts: null }));
-  expect(await countDiffFiles([file("one"), file("alias")], read, execute)).toEqual(
+  expect(await countDiffFiles(ownerId, [file("one"), file("alias")], read, execute)).toEqual(
     new Map([
       ["one", null],
       ["alias", null],
@@ -106,16 +124,99 @@ test("abort is never swallowed, including after the budget is spent", async () =
     controller.abort();
     throw new WorkTimeout();
   };
-  await expect(countDiffFiles([file("one")], read, execute, controller.signal)).rejects.toBeInstanceOf(PublishAborted);
-  await expect(countDiffFiles([file("one")], read, execute, controller.signal, 0)).rejects.toBeInstanceOf(
+  await expect(countDiffFiles(ownerId, [file("one")], read, execute, controller.signal)).rejects.toBeInstanceOf(
     PublishAborted,
   );
+  await expect(
+    countDiffFiles(ownerId, [file("one")], read, execute, controller.signal, createDiffCountBudget(0)),
+  ).rejects.toBeInstanceOf(PublishAborted);
   for (const error of [new PublishAborted(), new DOMException("Aborted", "AbortError")])
     await expect(
-      countDiffFiles([file("one")], read, async () => {
+      countDiffFiles(ownerId, [file("one")], read, async () => {
         throw error;
       }),
     ).rejects.toBe(error);
+});
+
+test.each(["success", "timeout", "failure"])(
+  "the same owner's %s result is reused without reads, work or budget",
+  async (outcome) => {
+    const execute = vi.fn<Executor>(async (work) => {
+      if (outcome === "timeout") throw new WorkTimeout();
+      if (outcome === "failure") throw new Error("Worker failed");
+      return executeWork(work);
+    });
+    const first = await countDiffFiles(ownerId, [file("one")], read, execute);
+    const unread = vi.fn(read);
+    const now = vi.fn(() => 0);
+    const budget = createDiffCountBudget(0);
+    expect(await countDiffFiles(ownerId, [file("one")], unread, execute, undefined, budget, now)).toEqual(first);
+    expect(unread).not.toHaveBeenCalled();
+    expect(now).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(budget.spentMs).toBe(0);
+    await countDiffFiles(randomUUID(), [file("one")], read, execute);
+    expect(execute).toHaveBeenCalledTimes(2);
+  },
+);
+
+test("a budget-skipped pair is counted on the next request", async () => {
+  const execute = vi.fn(executeWork);
+  expect(await countDiffFiles(ownerId, [file("one")], read, execute, undefined, createDiffCountBudget(0))).toEqual(
+    new Map([["one", null]]),
+  );
+  expect(execute).not.toHaveBeenCalled();
+  expect(await countDiffFiles(ownerId, [file("one")], read, execute)).toEqual(
+    new Map([["one", { additions: 2, deletions: 1 }]]),
+  );
+  expect(execute).toHaveBeenCalledTimes(1);
+});
+
+test.each(["signal", "error"])("an abort via %s never poisons the memo", async (via) => {
+  const controller = new AbortController();
+  await expect(
+    countDiffFiles(
+      ownerId,
+      [file("one")],
+      read,
+      async () => {
+        if (via === "signal") controller.abort();
+        throw via === "signal" ? new WorkTimeout() : new DOMException("Aborted", "AbortError");
+      },
+      controller.signal,
+    ),
+  ).rejects.toThrow();
+  const execute = vi.fn(executeWork);
+  expect(await countDiffFiles(ownerId, [file("one")], read, execute)).toEqual(
+    new Map([["one", { additions: 2, deletions: 1 }]]),
+  );
+  expect(execute).toHaveBeenCalledTimes(1);
+  // A memo hit must still respect an already aborted request.
+  controller.abort();
+  await expect(countDiffFiles(ownerId, [file("one")], read, execute, controller.signal)).rejects.toBeInstanceOf(
+    PublishAborted,
+  );
+});
+
+test("the bounded memo evicts its oldest result", async () => {
+  const execute = vi.fn<Executor>(async () => ({ kind: "diff-counts", counts: { additions: 1, deletions: 0 } }));
+  const files = Array.from({ length: 20001 }, (_, i) =>
+    file(`${i}`, { oldBlob: null, newBlob: i.toString(16).padStart(64, "0") }),
+  );
+  await countDiffFiles(
+    ownerId,
+    files,
+    async () => new ArrayBuffer(0),
+    execute,
+    undefined,
+    createDiffCountBudget(),
+    () => 0,
+  );
+  expect(execute).toHaveBeenCalledTimes(20001);
+  await countDiffFiles(ownerId, files.slice(-1), read, execute);
+  expect(execute).toHaveBeenCalledTimes(20001);
+  await countDiffFiles(ownerId, files.slice(0, 1), read, execute);
+  expect(execute).toHaveBeenCalledTimes(20002);
 });
 
 test("cached and skipped files still yield and observe cancellation", async () => {
@@ -125,11 +226,12 @@ test("cached and skipped files still yield and observe cancellation", async () =
   try {
     await expect(
       countDiffFiles(
+        ownerId,
         Array.from({ length: 200 }, (_, i) => file(`${i}`)),
         read,
         executeWork,
         controller.signal,
-        0,
+        createDiffCountBudget(0),
       ),
     ).rejects.toBeInstanceOf(PublishAborted);
     expect(probe).toHaveBeenCalledWith("publish-counts");

@@ -107,8 +107,8 @@ test("publish with closed stdout exits 1 with one diagnostic", async () => {
   expect(f.stdout).toEqual([]);
   expect(f.stderr).toEqual(["emend: Could not write to stdout.\n"]);
 });
-test("publish deadlines include the slot, one render pass and three placement attempts", () => {
-  expect(publishTimeoutMs([])).toBe(145000);
+test("publish deadlines include the slot, counting, one render pass and three placement attempts", () => {
+  expect(publishTimeoutMs([])).toBe(175000);
   expect(
     publishTimeoutMs([
       { role: "doc", path: "one.md" },
@@ -116,7 +116,7 @@ test("publish deadlines include the slot, one render pass and three placement at
       { role: "doc", path: "page.html" },
       { role: "diff", path: "source.md" },
     ]),
-  ).toBe(165000);
+  ).toBe(195000);
 });
 test("publish stdout is exactly one JSON line and unchanged docs upload nothing twice", async () => {
   const dir = await realpath(await mkdtemp(join(tmpdir(), "emend-command-")));

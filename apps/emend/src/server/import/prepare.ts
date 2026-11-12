@@ -16,7 +16,7 @@ import type { AppDeps } from "../app.ts";
 import { ApiError } from "../http/errors.ts";
 import { commentTargetReserve, envelopeBytes, jsonBytes } from "../mailbox/payload.ts";
 import { yieldToLoop } from "../pacing.ts";
-import { countDiffFiles } from "../publish/counts.ts";
+import { countDiffFiles, createDiffCountBudget } from "../publish/counts.ts";
 import { workerExecutor } from "../publish/executor.ts";
 import { IMAGE_HEAD_BYTES } from "../publish/image-size.ts";
 import { abortable } from "../publish/lifecycle.ts";
@@ -30,7 +30,13 @@ import { checkImportSignal } from "./lifecycle.ts";
 import { type ImportPlacement, importPlacements } from "./placements.ts";
 
 /** No database writes: even a late validation failure leaves no imported rows or blob metadata. */
-export async function prepareImport(ownerId: string, bundle: ImportBundle, deps: AppDeps, signal?: AbortSignal) {
+export async function prepareImport(
+  ownerId: string,
+  bundle: ImportBundle,
+  deps: AppDeps,
+  signal?: AbortSignal,
+  counting = { budget: createDiffCountBudget(), now: () => performance.now() },
+) {
   checkImportSignal(signal);
   const index = indexImportBundle(bundle);
   let rowCount = importRowCount(bundle);
@@ -212,7 +218,10 @@ export async function prepareImport(ownerId: string, bundle: ImportBundle, deps:
         }
       }
       await validateNoteRanges(input.files, read, execute);
-      counted.set(revision.id, await countDiffFiles(input.files, read, execute, signal));
+      counted.set(
+        revision.id,
+        await countDiffFiles(ownerId, input.files, read, execute, signal, counting.budget, counting.now),
+      );
       // Keep only this revision's and its predecessor's image heads.
       const media = input.files
         .filter((f) => f.role === "asset" && f.parent === undefined && f.newBlob)

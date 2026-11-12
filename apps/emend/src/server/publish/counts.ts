@@ -5,30 +5,35 @@ import type { Executor } from "./work.ts";
 
 export const DIFF_COUNT_BUDGET_MS = 20000;
 type Counts = { additions: number; deletions: number } | null;
+export type DiffCountBudget = { limitMs: number; spentMs: number };
+export const createDiffCountBudget = (limitMs = DIFF_COUNT_BUDGET_MS): DiffCountBudget => ({ limitMs, spentMs: 0 });
+
+const MEMO_ENTRIES = 20000;
+// Owners never share results. Retain only bounded counts, never blob contents.
+const memo = new Map<string, Counts>();
 
 export async function countDiffFiles(
+  ownerId: string,
   files: PublishFile[],
   read: (sha: string) => Promise<ArrayBuffer>,
   execute: Executor,
   signal?: AbortSignal,
-  budgetMs = DIFF_COUNT_BUDGET_MS,
+  budget = createDiffCountBudget(),
   now = () => performance.now(),
 ): Promise<Map<string, Counts>> {
   const counted = new Map<string, Counts>();
-  const cache = new Map<string, Counts>();
-  let spent = 0;
   let visited = 0;
   for (const file of files) {
     if (++visited % 100 === 0) await yieldToLoop("publish-counts");
     checkPublishSignal(signal);
     if (file.role !== "diff" || file.flag) continue;
-    if (spent >= budgetMs) {
-      counted.set(file.path, null);
-      continue;
-    }
-    const key = `${file.oldBlob}:${file.newBlob}`;
-    let counts = cache.get(key);
+    const key = `${ownerId}:${file.oldBlob}:${file.newBlob}`;
+    let counts = memo.get(key);
     if (counts === undefined) {
+      if (budget.spentMs >= budget.limitMs) {
+        counted.set(file.path, null);
+        continue;
+      }
       const start = now();
       const old = file.oldBlob === null ? null : await read(file.oldBlob);
       const next = file.newBlob === null ? null : await read(file.newBlob);
@@ -42,10 +47,14 @@ export async function countDiffFiles(
         if (error instanceof PublishAborted || (error instanceof Error && error.name === "AbortError")) throw error;
         counts = null;
       } finally {
-        spent += now() - start;
+        budget.spentMs += now() - start;
       }
       checkPublishSignal(signal);
-      cache.set(key, counts);
+      if (memo.size >= MEMO_ENTRIES) {
+        const oldest = memo.keys().next().value;
+        if (oldest !== undefined) memo.delete(oldest);
+      }
+      memo.set(key, counts);
     }
     counted.set(file.path, counts);
   }

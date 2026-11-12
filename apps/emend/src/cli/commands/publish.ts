@@ -2,6 +2,7 @@ import { lstat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { type DocView, isRenderedHtmlDoc, LIMITS, PublishManifest, PublishResponse } from "@emend/contract";
 import type { Io } from "../../main.ts";
+import { DIFF_COUNT_BUDGET_MS } from "../../server/publish/counts.ts";
 import { readDocRoots } from "../config.ts";
 import { publishDirect } from "../direct/index.ts";
 import { escapeReference } from "../escape.ts";
@@ -81,6 +82,9 @@ export function parsePublishArgs(args: string[]): PublishArgs {
 export const publishTimeoutMs = (files: { role: string; path: string; view?: DocView }[]) =>
   30000 +
   15000 +
+  // Counting can exceed its budget by the executor's final render timeout.
+  DIFF_COUNT_BUDGET_MS +
+  10000 +
   10000 * (1 + files.filter((file) => file.role === "doc" && !isRenderedHtmlDoc(file)).length) +
   3 * 30000;
 

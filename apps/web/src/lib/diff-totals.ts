@@ -2,14 +2,27 @@ import type { FileView, RevisionView } from "@emend/contract";
 import { diffGroups } from "./diff-groups.ts";
 
 type Counts = NonNullable<FileView["counts"]>;
+export type LineTotal = Counts & { uncounted: number };
 
-export function lineTotals(files: FileView[]): Counts | null {
-  return sumCounts(files.filter((file) => file.role === "diff").map((file) => file.counts));
+const uncountedFiles = (files: FileView[]) =>
+  files.filter((file) => file.role === "diff" && !file.flag && !file.counts).length;
+
+export function lineTotals(files: FileView[]): LineTotal | null {
+  const total = sumCounts(files.filter((file) => file.role === "diff").map((file) => file.counts));
+  return total && { ...total, uncounted: uncountedFiles(files) };
 }
 
 /** Sum the same groups the diff and Files tab show, including Other files. */
-export function reviewLineTotals(revision: RevisionView): Counts | null {
-  return sumCounts([...diffGroups(revision).values()].map(({ files }) => lineTotals(files)));
+export function reviewLineTotals(revision: RevisionView): LineTotal | null {
+  const groups = [...diffGroups(revision).values()].map(({ files }) => ({ files, total: lineTotals(files) }));
+  const total = sumCounts(groups.map(({ total }) => total));
+  // A wholly uncounted topic has no visible total but still makes the review partial.
+  return (
+    total && {
+      ...total,
+      uncounted: groups.reduce((sum, group) => sum + (group.total?.uncounted ?? uncountedFiles(group.files)), 0),
+    }
+  );
 }
 
 function sumCounts(counts: (Counts | null | undefined)[]): Counts | null {

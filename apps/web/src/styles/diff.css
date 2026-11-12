@@ -60,6 +60,12 @@
   .em-diff-topic[data-phone] .em-topic {
     position: static;
   }
+  .em-diff-topic[data-phone] .em-topic-meta {
+    flex-wrap: wrap;
+    white-space: normal;
+    overflow: visible;
+    row-gap: 4px;
+  }
   /* The file block is the sticky containing block, so the next file pushes its header away. */
   .em-diff-file {
     isolation: isolate;

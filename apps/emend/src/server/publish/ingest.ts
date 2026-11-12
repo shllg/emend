@@ -296,7 +296,7 @@ async function computePublish(
         }
       }
     if (!prepared) await validateNoteRanges(input.files, read, execute);
-    counted ??= await countDiffFiles(input.files, read, execute, deps.signal);
+    counted ??= await countDiffFiles(ownerId, input.files, read, execute, deps.signal);
     prepared ??= await renderRevision(
       input,
       execute,

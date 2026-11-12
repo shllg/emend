@@ -53,6 +53,19 @@ test("change bars define their base and continuation offsets in the components s
   expect(continuation).toMatch(/\btop:\s*calc\(-1\s*\*\s*var\(--reading-block-gap\)\)\s*;/);
 });
 
+test("phone topic metadata wraps without changing the clipped desktop row", () => {
+  const css = readFileSync(join(webSource, "styles/diff.css"), "utf8");
+  const desktop = /\.em-topic-meta\s*\{([^}]+)\}/.exec(css)?.[1];
+  expect(desktop).toMatch(/flex-wrap:\s*nowrap;/);
+  expect(desktop).toMatch(/white-space:\s*nowrap;/);
+  expect(desktop).toMatch(/overflow:\s*hidden;/);
+  const phone = /\.em-diff-topic\[data-phone\] \.em-topic-meta\s*\{([^}]+)\}/.exec(css)?.[1];
+  expect(phone).toMatch(/flex-wrap:\s*wrap;/);
+  expect(phone).toMatch(/white-space:\s*normal;/);
+  expect(phone).toMatch(/overflow:\s*visible;/);
+  expect(phone).toMatch(/row-gap:\s*4px;/);
+});
+
 test("changed files keep the unviewed checkbox look", () => {
   const css = readFileSync(join(webSource, "styles/files.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
   expect(css).not.toMatch(/\[data-stale[^\]]*\][^{}]*\.em-viewed-mark__box\b[^{}]*\{/);
