@@ -279,3 +279,50 @@ test.each([
     await b.window.happyDOM.close();
   }
 });
+
+const FALLBACK_CSS = "@layer emend-fallback { pre { overflow-x: auto; } }";
+
+test("the bridge inserts a layered layout fallback first in the head", async () => {
+  const b = bridge(
+    '<!doctype html><html><head><link rel="stylesheet" href="probe.css"><style>pre { color: red; }</style></head><body><p>Seed</p><pre>long line</pre></body></html>',
+  );
+  try {
+    const doc = b.window.document;
+    const first = doc.head.firstElementChild;
+    expect(first?.localName).toBe("style");
+    expect(first?.textContent).toBe(FALLBACK_CSS);
+    expect(doc.head.querySelectorAll("style")).toHaveLength(2);
+    expect(first?.nextElementSibling?.localName).toBe("link");
+    expect([...doc.querySelectorAll("*")].filter((el) => el.textContent === FALLBACK_CSS)).toHaveLength(1);
+    expect(doc.body.textContent).toBe("Seedlong line");
+    expect(doc.adoptedStyleSheets).toHaveLength(0);
+  } finally {
+    await b.window.happyDOM.close();
+  }
+});
+
+test("the layout fallback lands in the parser-created head of a bare fragment", async () => {
+  const b = bridge("<p>Seed</p><pre>x</pre>");
+  try {
+    const head = b.window.document.head;
+    expect(head.firstChild?.textContent).toBe(FALLBACK_CSS);
+    expect((head.firstChild as unknown as Element).localName).toBe("style");
+  } finally {
+    await b.window.happyDOM.close();
+  }
+});
+
+test("clobbering markup cannot stop the layout fallback or the ready message", async () => {
+  const b = bridge(
+    '<body><img name="head"><form name="createElement"></form><img name="firstChild"><form id="textContent"></form><p>Seed</p><pre>x</pre></body>',
+  );
+  try {
+    const head = b.window.document.documentElement.firstElementChild;
+    expect(head?.localName).toBe("head");
+    expect(head?.firstElementChild?.localName).toBe("style");
+    expect(head?.firstElementChild?.textContent).toBe(FALLBACK_CSS);
+    expect(b.post).toHaveBeenCalledWith({ type: "emend:ready" }, "*");
+  } finally {
+    await b.window.happyDOM.close();
+  }
+});

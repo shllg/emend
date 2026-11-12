@@ -28,6 +28,15 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   const body = () => documentValue("body");
   const documentElement = () => documentValue("documentElement");
   const scroller = () => documentValue("scrollingElement") || documentElement();
+  // A weak layout fallback: first in the head and in the first cascade layer, so every rule of the doc's own CSS wins.
+  try {
+    const fallback = dom(window.Document.prototype, "createElement", document, "style");
+    write(window.Element.prototype, "textContent", fallback, "@layer emend-fallback { pre { overflow-x: auto; } }");
+    const root = documentElement();
+    const first = root && elementValue("firstElementChild", root);
+    const parent = first && localName(first) === "head" ? first : root;
+    dom(window.Node.prototype, "insertBefore", parent, fallback, nodeValue("firstChild", parent));
+  } catch { /* The doc renders without the fallback. */ }
   const docs = new Set();
   let headings = [];
   // Kept in parity with htmlHeadings, nodeText and cleanDocTitle by the bridge fixture tests.

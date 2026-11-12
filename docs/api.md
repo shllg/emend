@@ -329,6 +329,11 @@ is sent. The doc receives an inline selection/highlight bridge; assets retain th
 Content-Type is the stored media type, with `; charset=utf-8` for `text/*`, `application/json`
 and `image/svg+xml`; the doc is `text/html; charset=utf-8`.
 
+The bridge also inserts one style element first in the doc's head, in the cascade layer
+`emend-fallback`: `pre { overflow-x: auto; }`. Declared first and layered, it loses to every rule of
+the doc's own CSS, so a code block the doc leaves unstyled scrolls inside its own box instead of
+widening the doc.
+
 Asset and error responses under `/content/` send:
 
 ```
