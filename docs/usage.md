@@ -16,7 +16,7 @@ The old state-folder config is copied once, only if the global config is missing
 For `docRoots` and `openBrowser`, publish and bare `emend` ignore a global config whose path or
 links lie inside a repository holding the working directory, and warn. `emend config` refuses
 there. An old state config inside such a repository is never read, copied or renamed.
-A home-rooted dotfiles repository does not count. The server reads only `approvedActiveHours`
+A home-rooted dotfiles repository does not count. The server reads only `approvedActiveHours` and `keys`
 from the file and does not apply this check. A config path set by a repository's environment
 is not detected when emend runs from a folder outside every repository.
 If `XDG_CONFIG_HOME` is absolute, `emend service install` records it at install time.
@@ -25,6 +25,12 @@ Reinstall the service after changing it.
 Approved reviews stay in Active for 12 hours by default. Set `approvedActiveHours` in the global
 config file to whole hours from 0 to 720, or use Settings → Inbox to override it for this server;
 Reset falls back to the file, then the default, and 0 moves approvals out of Active at once.
+
+Keyboard shortcuts work on desktop and tablet. Press `?` to list them. Settings → Keyboard shortcuts
+changes, turns off or resets a key. In the config file, use
+`"keys": { "inbox.next": "j", "file.toggleViewed": "shift+v", "review.snooze": null }`.
+`null` turns a shortcut off. A key is one letter, digit or punctuation character, optionally
+`shift+` with a letter. See [api.md](api.md) for the command ids.
 
 ## Publish a doc
 

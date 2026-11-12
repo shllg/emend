@@ -1,6 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useLayout, usePaneMode } from "../../lib/layout.ts";
 import { layoutStore, useLayoutPreferences } from "../../lib/layout-store.ts";
+import { useShortcut } from "../../lib/use-shortcut.tsx";
 import type { ReviewSearch } from "../../router.tsx";
 import { formatThreadCounts, type ThreadCounts } from "../status/ThreadStateBadge.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -45,6 +46,21 @@ export function ReviewTabs({
       : search.tab;
   const value = active ?? (hasWriteup ? "writeup" : hasDocs ? "docs" : "comments");
   const count = threadCounts && threadCounts.all > 0 ? formatThreadCounts(threadCounts) : undefined;
+  const changeTab = (tab: string) => {
+    if (tab !== "writeup" && tab !== "files" && tab !== "docs" && tab !== "comments" && tab !== "diff") return false;
+    void navigate({
+      to: "/r/$reviewId",
+      params: { reviewId: id },
+      search: { ...search, tab, thread: undefined },
+      hash: "",
+    });
+    return true;
+  };
+  useShortcut("tab.writeup", () => changeTab("writeup"), { enabled: hasWriteup });
+  useShortcut("tab.files", () => changeTab("files"), { enabled: filesCount > 0 });
+  useShortcut("tab.docs", () => changeTab("docs"), { enabled: hasDocs });
+  useShortcut("tab.comments", () => changeTab("comments"));
+  useShortcut("tab.diff", () => changeTab("diff"), { enabled: showDiff });
   return (
     <div className="em-review-tabs sticky top-0 z-(--z-sticky) flex shrink-0 items-center border-b border-line-1 bg-surface">
       <Tabs
@@ -65,15 +81,7 @@ export function ReviewTabs({
           },
           { id: "diff", label: "Diff", hidden: !showDiff },
         ].map((item) => ({ ...item, "aria-controls": `${idBase}-${item.id === "diff" ? "diff" : "reading"}-panel` }))}
-        onChange={(tab) => {
-          if (tab !== "writeup" && tab !== "files" && tab !== "docs" && tab !== "comments" && tab !== "diff") return;
-          void navigate({
-            to: "/r/$reviewId",
-            params: { reviewId: id },
-            search: { ...search, tab, thread: undefined },
-            hash: "",
-          });
-        }}
+        onChange={changeTab}
       />
       {!phone && (value === "writeup" || (value === "docs" && compactDoc)) && (
         <div className="mx-2 flex shrink-0 gap-1">

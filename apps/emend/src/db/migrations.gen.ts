@@ -246,5 +246,19 @@ export const MIGRATIONS: readonly { tag: string; when: number; hash: string; sta
       "ALTER TABLE `files` ADD `additions` integer;",
       "ALTER TABLE `files` ADD `deletions` integer;"
     ]
+  },
+  {
+    "tag": "0018_natural_lester",
+    "when": 1794523088678,
+    "hash": "b6715bfa445dd8fd4484714ecff23aeb2b0ba61dcb9fd360e2c63d33551510d1",
+    "statements": [
+      "PRAGMA foreign_keys=OFF;",
+      "CREATE TABLE `__new_settings` (\n\t`owner_id` text NOT NULL,\n\t`key` text NOT NULL,\n\t`value` text NOT NULL,\n\t`updated_at` integer NOT NULL,\n\tPRIMARY KEY(`owner_id`, `key`),\n\tFOREIGN KEY (`owner_id`) REFERENCES `owners`(`id`) ON UPDATE no action ON DELETE no action,\n\tCONSTRAINT \"settings_key_check\" CHECK(\"__new_settings\".\"key\" in ('approvedActiveHours', 'keys'))\n);",
+      "INSERT INTO `__new_settings`(\"owner_id\", \"key\", \"value\", \"updated_at\") SELECT \"owner_id\", \"key\", \"value\", \"updated_at\" FROM `settings`;",
+      "DROP TABLE `settings`;",
+      "ALTER TABLE `__new_settings` RENAME TO `settings`;",
+      "PRAGMA foreign_keys=ON;",
+      "CREATE INDEX `settings_owner_idx` ON `settings` (`owner_id`);"
+    ]
   }
 ];

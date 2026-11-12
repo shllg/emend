@@ -1,4 +1,11 @@
-import { APPROVED_ACTIVE_HOURS, type InboxItem, type ReviewView, type RevisionView } from "@emend/contract";
+import {
+  APPROVED_ACTIVE_HOURS,
+  type InboxItem,
+  KeysSetting,
+  type ReviewView,
+  type RevisionView,
+  SHORTCUT_DEFAULTS,
+} from "@emend/contract";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -519,6 +526,15 @@ test.each([0, 2, 24, undefined])("accepted approval uses cached inbox hours %s",
   expect(client.getQueryData<ReviewView>(["review", reviewId])).toMatchObject(expected);
 });
 
+const defaultKeys = KeysSetting.parse({
+  commands: Object.fromEntries(
+    Object.entries(SHORTCUT_DEFAULTS).map(([command, key]) => [
+      command,
+      { value: key, default: key, source: "default", fileError: false, clashWith: null },
+    ]),
+  ),
+  fileError: false,
+});
 const hoursSetting = (value: number) => ({
   value,
   source: "override" as const,
@@ -534,7 +550,7 @@ test.each([undefined, 24])("accepted approval uses zero settings hours before in
   await mount();
   if (inboxHours !== undefined) client.setQueryData(["inbox"], { approvedActiveHours: inboxHours, items: [server] });
   else expect(client.getQueryData(["inbox"])).toBeUndefined();
-  client.setQueryData(["settings"], { approvedActiveHours: hoursSetting(0), serverTime: at(0) });
+  client.setQueryData(["settings"], { approvedActiveHours: hoursSetting(0), keys: defaultKeys, serverTime: at(0) });
   mode = "held";
   approve("Approve revision 3");
   await settle();
@@ -555,6 +571,7 @@ test.each(["settings", "inbox"])("accepted approval uses the %s window the serve
   );
   client.setQueryData(["settings"], {
     approvedActiveHours: hoursSetting(0),
+    keys: defaultKeys,
     serverTime: at(newer === "settings" ? 0 : -60_000),
   });
   mode = "held";
@@ -576,7 +593,7 @@ test("consecutive approvals before a refetch keep the newer settings window", as
     ["inbox"],
     (data) => data && { ...data, approvedActiveHours: 24, serverTime: at(-60_000) },
   );
-  client.setQueryData(["settings"], { approvedActiveHours: hoursSetting(0), serverTime: at(0) });
+  client.setQueryData(["settings"], { approvedActiveHours: hoursSetting(0), keys: defaultKeys, serverTime: at(0) });
   mode = "held";
   for (const round of [1, 2]) {
     approve("Approve revision 3");

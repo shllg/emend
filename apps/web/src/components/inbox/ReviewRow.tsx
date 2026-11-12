@@ -133,6 +133,7 @@ export function ReviewRow({
         </div>
       ) : (
         <Link
+          data-inbox-row={review.id}
           to="/r/$reviewId"
           params={{ reviewId: review.id }}
           search={{ rev: review.newestRevision }}

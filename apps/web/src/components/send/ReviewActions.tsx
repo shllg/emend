@@ -5,6 +5,7 @@ import { ApiError } from "../../api/client.ts";
 import { type LifecycleAction, mutationMessage, useLifecycleMutation } from "../../api/mutations.ts";
 import { plural } from "../../lib/count.ts";
 import { type SnoozeChoice, snoozeChoices, wakeTime } from "../../lib/time.ts";
+import { useShortcut } from "../../lib/use-shortcut.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -66,6 +67,11 @@ export function ReviewActions({
   const close = () => {
     if (!busy.current) setPanel(null);
   };
+  useShortcut("review.snooze", () => {
+    if (state !== "open" || pending || busy.current || deleted.current) return false;
+    open("snooze");
+    return true;
+  });
   /** Returns whether the server accepted the action. A failure shows the server's message in a toast. */
   const run = async (input: LifecycleAction) => {
     if (busy.current || deleted.current) return false;

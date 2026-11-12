@@ -12,12 +12,13 @@ import {
   Settings,
   Smartphone,
 } from "lucide-react";
-import { type CSSProperties, type ReactNode, useRef } from "react";
+import { type ComponentProps, type CSSProperties, type ReactNode, useRef } from "react";
 import { useAppUpdate } from "../../lib/app-update.ts";
 import { useLayout } from "../../lib/layout.ts";
 import { layoutStore, useLayoutPreferences } from "../../lib/layout-store.ts";
 import { requestPairingFromLink } from "../../lib/pairing-intent.ts";
 import { useRefresh } from "../../lib/refresh.ts";
+import { ShortcutProvider } from "../../lib/use-shortcut.tsx";
 import { textSizeItems } from "../review/LayoutControls.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -27,7 +28,15 @@ import { useToast } from "../ui/Toast.tsx";
 import { cn } from "../ui/utils.ts";
 import { UpdateGateContext, useUpdateGate } from "./UpdateGate.tsx";
 
-export function AppFrame({
+export function AppFrame(props: ComponentProps<typeof AppFrameContent>) {
+  return (
+    <ShortcutProvider>
+      <AppFrameContent {...props} />
+    </ShortcutProvider>
+  );
+}
+
+function AppFrameContent({
   isReview = false,
   children,
   onCommentReview,

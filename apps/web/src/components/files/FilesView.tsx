@@ -1,7 +1,9 @@
 import { type FileView, OTHER_TOPIC, type RevisionView } from "@emend/contract";
+import { useRef } from "react";
 import { diffGroups } from "../../lib/diff-groups.ts";
 import { lineTotals } from "../../lib/diff-totals.ts";
 import { rankedTopics } from "../../lib/topics.ts";
+import { useShortcut } from "../../lib/use-shortcut.tsx";
 import { FileStatusMark } from "../diff/FileStatusMark.tsx";
 import { LineTotals } from "../diff/LineTotals.tsx";
 import type { DiffCounts } from "../diff/presentation.ts";
@@ -22,6 +24,19 @@ export function FilesView({
   onNavigate: (file: FileView) => void;
 }) {
   const groups = diffGroups(revision);
+  const root = useRef<HTMLDivElement>(null);
+  useShortcut(
+    "file.toggleViewed",
+    () => {
+      const focused = document.activeElement;
+      if (!focused || !root.current?.contains(focused)) return false;
+      const mark = focused.closest(".em-files-row")?.querySelector<HTMLButtonElement>(".em-viewed-mark");
+      if (!mark || mark.disabled) return false;
+      mark.click();
+      return true;
+    },
+    { priority: 10 },
+  );
   const ranks = new Map(
     rankedTopics([...groups.values()].map(({ topic }) => topic)).map(({ topic, rank }) => [topic.slug, rank]),
   );
@@ -34,7 +49,7 @@ export function FilesView({
     if (file) threads.set(file.id, (threads.get(file.id) ?? 0) + 1);
   }
   return (
-    <div className="em-files-view">
+    <div ref={root} className="em-files-view">
       {[...groups.values()].map(({ topic, files }) => {
         const done = files.filter((file) => file.viewed === "viewed").length;
         const all = files.length > 0 && done === files.length;

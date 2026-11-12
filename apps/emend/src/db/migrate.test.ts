@@ -14,7 +14,8 @@ vi.mock("./migrations.gen.ts", async (importOriginal) => {
 });
 
 // migrate() uses one transaction: foreign_keys is a no-op there, so table rebuilds fail with foreign-key children.
-test.each(MIGRATIONS.filter(({ tag }) => tag.slice(0, 4) > "0001"))(
+// 0001 (pairings) and 0018 (settings) rebuild tables without children; dedicated migration tests cover them.
+test.each(MIGRATIONS.filter(({ tag }) => tag.slice(0, 4) > "0001" && !tag.startsWith("0018_")))(
   "$tag avoids foreign_keys pragmas and table rebuilds",
   ({ statements }) => {
     const source = statements.join("\n");

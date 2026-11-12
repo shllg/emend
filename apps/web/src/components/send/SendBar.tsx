@@ -16,6 +16,7 @@ import {
   saveDraft,
   subscribeDrafts,
 } from "../../lib/drafts.ts";
+import { useShortcut } from "../../lib/use-shortcut.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
 import { inputClass, inputSizes } from "../ui/field.tsx";
@@ -86,6 +87,18 @@ export function SendBar({
     if (baseline) setHandoff(baseline);
   }, []);
   const desktopInstructions = useRef<HTMLTextAreaElement>(null);
+  useShortcut("review.instructions", () => {
+    const field = desktopInstructions.current;
+    if (!field || field.disabled) return false;
+    field.focus();
+    return true;
+  });
+  useShortcut("review.approve", () => {
+    const button = approveTrigger.current;
+    if (!button || button.disabled) return false;
+    button.click();
+    return true;
+  });
   useLayoutEffect(() => {
     const field = desktopInstructions.current;
     if (!field || phone) return;

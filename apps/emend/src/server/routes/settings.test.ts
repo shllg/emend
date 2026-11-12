@@ -1,6 +1,14 @@
 import { chmod, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { InboxList, LIMITS, ReviewView, SettingsView } from "@emend/contract";
+import {
+  InboxList,
+  LIMITS,
+  ReviewView,
+  type SettingsUpdate,
+  SettingsView,
+  SHORTCUT_DEFAULTS,
+  type ShortcutCommand,
+} from "@emend/contract";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Queries } from "../../db/client.ts";
@@ -9,6 +17,7 @@ import * as configReader from "../../state/read-config.ts";
 import { createToken, SESSION_MS } from "../auth/tokens.ts";
 import { publishReview } from "../mailbox/lifecycle-support.ts";
 import { error, mailboxFixture } from "../mailbox/test-support.ts";
+import * as settingsReader from "../settings.ts";
 
 let f: Awaited<ReturnType<typeof mailboxFixture>>;
 let file: string;
@@ -26,6 +35,16 @@ async function view() {
   const response = await f.request("/settings", "GET");
   expect(response.status).toBe(200);
   return SettingsView.parse(await response.json()).approvedActiveHours;
+}
+async function keyView() {
+  const response = await f.request("/settings", "GET");
+  expect(response.status).toBe(200);
+  return SettingsView.parse(await response.json()).keys;
+}
+async function updateKeys(keys: NonNullable<SettingsUpdate["keys"]>, who: "reviewer" | "foreign" = "reviewer") {
+  const response = await f.request("/settings", "PATCH", { keys }, who);
+  expect(response.status).toBe(200);
+  return SettingsView.parse(await response.json());
 }
 async function update(value: number | null, who: "reviewer" | "foreign" = "reviewer") {
   const response = await f.request("/settings", "PATCH", { approvedActiveHours: value }, who);
@@ -138,8 +157,254 @@ test("nonregular, dangling and unreadable files fall back; safe links are read w
   await update(null);
   expect(await readFile(regular, "utf8")).toBe('{"approvedActiveHours":24,"docRoots":"ignored"}');
 });
-test.each([721, -1, 1.5, "3", undefined])("invalid PATCH %j is rejected", async (value) => {
+test.each([721, -1, 1.5, "3"])("invalid PATCH %j is rejected", async (value) => {
   await error(await f.request("/settings", "PATCH", { approvedActiveHours: value }), 400, "invalid_request");
+});
+
+test("shortcut defaults include every command with absent file and override fields", async () => {
+  const keys = await keyView();
+  expect(keys.fileError).toBe(false);
+  expect(Object.keys(keys.commands)).toEqual(Object.keys(SHORTCUT_DEFAULTS));
+  for (const [command, key] of Object.entries(SHORTCUT_DEFAULTS))
+    expect(keys.commands[command as ShortcutCommand]).toEqual({
+      value: key,
+      source: "default",
+      default: key,
+      fileError: false,
+      clashWith: null,
+    });
+  await config({});
+  expect(await keyView()).toEqual(keys);
+  delete f.deps.configFile;
+  expect(await keyView()).toEqual(keys);
+});
+
+test("file shortcuts normalize keys, support off and report unusable entries separately", async () => {
+  await config({
+    approvedActiveHours: 24,
+    keys: {
+      "inbox.next": "x",
+      "inbox.previous": null,
+      "inbox.filter": "B",
+      "inbox.search": "sHiFt+C",
+      "inbox.back": "ctrl+k",
+    },
+  });
+  const keys = await keyView();
+  expect(keys.fileError).toBe(false);
+  expect(keys.commands["inbox.next"]).toMatchObject({ value: "x", file: "x", source: "file", fileError: false });
+  expect(keys.commands["inbox.previous"]).toMatchObject({ value: null, file: null, source: "file", fileError: false });
+  expect(keys.commands["inbox.filter"]).toMatchObject({ value: "shift+b", file: "shift+b", source: "file" });
+  expect(keys.commands["inbox.search"]).toMatchObject({ value: "shift+c", file: "shift+c", source: "file" });
+  expect(keys.commands["inbox.back"]).toEqual({
+    value: "u",
+    source: "default",
+    default: "u",
+    fileError: true,
+    clashWith: null,
+  });
+  expect(await view()).toMatchObject({ value: 24, fileError: false });
+});
+
+test("unknown file commands flag keys without discarding usable commands", async () => {
+  await config({ keys: { unknown: "j", constructor: null, "inbox.next": "x" } });
+  const keys = await keyView();
+  expect(keys.fileError).toBe(true);
+  expect(keys.commands["inbox.next"]).toMatchObject({ value: "x", fileError: false });
+  expect(Object.keys(keys.commands)).toEqual(Object.keys(SHORTCUT_DEFAULTS));
+  expect(await view()).toMatchObject({ value: 12, fileError: false });
+});
+
+test.each([null, [], "x", 12, true])("non-object file keys %j flag only keys", async (keys) => {
+  await config({ approvedActiveHours: 24, keys });
+  expect(await keyView()).toMatchObject({
+    fileError: true,
+    commands: { "inbox.next": { value: "j", fileError: false } },
+  });
+  expect(await view()).toMatchObject({ value: 24, fileError: false });
+});
+
+test.each(["{", "[]", "null", "12", '"text"', " ".repeat(LIMITS.publicJsonBytes + 1)])(
+  "unusable config document %# flags keys without command entries",
+  async (data) => {
+    await writeFile(file, data);
+    const keys = await keyView();
+    expect(keys.fileError).toBe(true);
+    expect(keys.commands["inbox.next"]).toEqual({
+      value: "j",
+      default: "j",
+      source: "default",
+      fileError: false,
+      clashWith: null,
+    });
+  },
+);
+
+test("dangling, nonregular and unreadable shortcut config files are errors; safe links work", async () => {
+  const target = join(f.dir, "keys.json");
+  await symlink(target, file);
+  expect((await keyView()).fileError).toBe(true);
+  await mkdir(target);
+  expect((await keyView()).fileError).toBe(true);
+  const regular = join(f.dir, "regular-keys.json");
+  await writeFile(regular, '{"keys":{"inbox.next":"x"}}');
+  f.deps.configFile = regular;
+  await chmod(regular, 0);
+  try {
+    expect((await keyView()).fileError).toBe(true);
+  } finally {
+    await chmod(regular, 0o600);
+  }
+  const link = join(f.dir, "linked-keys.json");
+  await symlink(regular, link);
+  f.deps.configFile = link;
+  expect(await keyView()).toMatchObject({
+    fileError: false,
+    commands: { "inbox.next": { value: "x", source: "file" } },
+  });
+  await updateKeys({ "inbox.next": { key: "y" } });
+  expect(await readFile(regular, "utf8")).toBe('{"keys":{"inbox.next":"x"}}');
+});
+
+test("PATCH merges shortcut set, off and reset and deletes an empty stored row", async () => {
+  await config({ keys: { "inbox.next": "x" } });
+  const stored = () =>
+    f.db.read((q) =>
+      q
+        .select()
+        .from(settings)
+        .where(and(eq(settings.ownerId, f.ownerId), eq(settings.key, "keys")))
+        .get(),
+    );
+  let keys = (await updateKeys({ "inbox.next": { key: "y" } })).keys;
+  expect(keys.commands["inbox.next"]).toMatchObject({ value: "y", source: "override", file: "x", override: "y" });
+  keys = (await updateKeys({ "inbox.previous": { key: null } })).keys;
+  expect(keys.commands["inbox.next"].override).toBe("y");
+  expect(keys.commands["inbox.previous"]).toMatchObject({ value: null, source: "override", override: null });
+  expect(JSON.parse((await stored())?.value ?? "null")).toEqual({ "inbox.next": "y", "inbox.previous": null });
+  keys = (await updateKeys({ "inbox.next": null })).keys;
+  expect(keys.commands["inbox.next"]).toEqual({
+    value: "x",
+    source: "file",
+    default: "j",
+    file: "x",
+    fileError: false,
+    clashWith: null,
+  });
+  expect(keys.commands["inbox.previous"].override).toBeNull();
+  await updateKeys({ "inbox.previous": null });
+  expect(await stored()).toBeUndefined();
+});
+
+test("partial and empty PATCH requests preserve settings that are omitted", async () => {
+  await update(48);
+  expect((await updateKeys({ "inbox.next": { key: "x" } })).approvedActiveHours).toMatchObject({
+    value: 48,
+    override: 48,
+  });
+  const response = await f.request("/settings", "PATCH", {});
+  expect(response.status).toBe(200);
+  expect(SettingsView.parse(await response.json())).toMatchObject({
+    approvedActiveHours: { value: 48, override: 48 },
+    keys: { commands: { "inbox.next": { override: "x" } } },
+  });
+  await update(null);
+  expect((await keyView()).commands["inbox.next"].override).toBe("x");
+  const both = await f.request("/settings", "PATCH", { approvedActiveHours: 2, keys: { "inbox.next": null } });
+  expect(both.status).toBe(200);
+  expect(SettingsView.parse(await both.json())).toMatchObject({
+    approvedActiveHours: { value: 2 },
+    keys: { commands: { "inbox.next": { value: "j", source: "default" } } },
+  });
+});
+
+test.each([
+  { unknown: { key: "j" } },
+  { "inbox.next": { key: "A" } },
+  { "inbox.next": { key: "SHIFT+a" } },
+  { "inbox.next": { key: "ctrl+k" } },
+  { "inbox.next": { key: "shift+1" } },
+  { "inbox.next": { key: "Escape" } },
+  { "inbox.next": { key: "j", extra: true } },
+  { "inbox.next": {} },
+  { "inbox.next": "j" },
+])("invalid shortcut PATCH %j is rejected without writing hours", async (keys) => {
+  await error(await f.request("/settings", "PATCH", { approvedActiveHours: 48, keys }), 400, "invalid_request");
+  expect(await view()).toMatchObject({ value: 12, source: "default" });
+});
+
+test("shortcut overrides and resets are isolated by owner", async () => {
+  await updateKeys({ "inbox.next": { key: "x" } }, "foreign");
+  expect((await keyView()).commands["inbox.next"].value).toBe("j");
+  await updateKeys({ "inbox.next": { key: "y" } });
+  await updateKeys({ "inbox.previous": { key: null } }, "foreign");
+  expect((await keyView()).commands["inbox.previous"].value).toBe("k");
+  await updateKeys({ "inbox.next": null });
+  expect((await updateKeys({}, "foreign")).keys.commands["inbox.next"].value).toBe("x");
+  await updateKeys({ "inbox.next": null, "inbox.previous": null }, "foreign");
+  expect((await keyView()).commands["inbox.next"].value).toBe("j");
+});
+
+test.each(["{", "null", "[]", "12", '"j"'])("corrupt stored keys %s are ignored", async (value) => {
+  await config({ keys: { "inbox.next": "x" } });
+  await f.db.query((q) => q.insert(settings).values({ ownerId: f.ownerId, key: "keys", value }));
+  expect((await keyView()).commands["inbox.next"]).toEqual({
+    value: "x",
+    source: "file",
+    default: "j",
+    file: "x",
+    fileError: false,
+    clashWith: null,
+  });
+  expect((await updateKeys({ "inbox.previous": { key: null } })).keys.commands["inbox.previous"].value).toBeNull();
+});
+
+test("invalid stored entries are ignored while normalized keys and off remain usable", async () => {
+  await f.db.query((q) =>
+    q.insert(settings).values({
+      ownerId: f.ownerId,
+      key: "keys",
+      value: JSON.stringify({
+        "inbox.next": "A",
+        "inbox.previous": "shift+B",
+        "inbox.filter": "x",
+        "inbox.search": null,
+        unknown: "j",
+      }),
+    }),
+  );
+  const keys = await keyView();
+  expect(keys.fileError).toBe(false);
+  expect(keys.commands["inbox.next"].value).toBe("j");
+  expect(keys.commands["inbox.next"]).not.toHaveProperty("override");
+  expect(keys.commands["inbox.previous"].value).toBe("k");
+  expect(keys.commands["inbox.filter"]).toMatchObject({ value: "x", override: "x", source: "override" });
+  expect(keys.commands["inbox.search"]).toMatchObject({ value: null, override: null, source: "override" });
+});
+
+test("settings expose shortcut clashes", async () => {
+  await config({ keys: { "inbox.next": "k" } });
+  const keys = await keyView();
+  expect(keys.commands["inbox.next"]).toMatchObject({ value: "k", source: "file", clashWith: null });
+  expect(keys.commands["inbox.previous"]).toMatchObject({ value: null, source: "default", clashWith: "inbox.next" });
+});
+
+test("a non-reviewer bearer cannot PATCH shortcut overrides", async () => {
+  await error(
+    await f.request("/settings", "PATCH", { keys: { "inbox.next": { key: "x" } } }, "agent"),
+    403,
+    "forbidden",
+  );
+  expect((await keyView()).commands["inbox.next"].value).toBe("j");
+});
+
+test("review reads do not load shortcut settings", async () => {
+  const readKeys = vi.spyOn(settingsReader, "readKeySettings");
+  await inbox();
+  expect((await f.request(`/reviews/${f.reviewId}`, "GET")).status).toBe(200);
+  expect(readKeys).not.toHaveBeenCalled();
+  await keyView();
+  expect(readKeys).toHaveBeenCalledOnce();
 });
 test("extra keys are refused and writes require a same-origin reviewer session", async () => {
   await error(await f.request("/settings", "PATCH", { approvedActiveHours: 3, extra: true }), 400, "invalid_request");

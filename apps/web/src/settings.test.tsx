@@ -1,4 +1,4 @@
-import type { BinView, HoursSetting, SettingsView } from "@emend/contract";
+import { type BinView, type HoursSetting, KeysSetting, type SettingsView, SHORTCUT_DEFAULTS } from "@emend/contract";
 import { type InfiniteData, QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -8,6 +8,15 @@ import { App } from "./App.tsx";
 
 const clients: QueryClient[] = [];
 const binVersion = "a".repeat(64);
+const defaultKeys = KeysSetting.parse({
+  commands: Object.fromEntries(
+    Object.entries(SHORTCUT_DEFAULTS).map(([command, key]) => [
+      command,
+      { value: key, default: key, source: "default", fileError: false, clashWith: null },
+    ]),
+  ),
+  fileError: false,
+});
 const defaultSetting: HoursSetting = {
   value: 12,
   source: "default",
@@ -26,6 +35,7 @@ function setup(
   let bin = binned;
   let view: SettingsView = {
     approvedActiveHours: { ...defaultSetting, ...setting },
+    keys: defaultKeys,
     serverTime: "2026-11-04T10:00:00.000Z",
   };
   const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
@@ -59,6 +69,7 @@ function setup(
         const old = view.approvedActiveHours;
         view = {
           serverTime: view.serverTime,
+          keys: view.keys,
           approvedActiveHours: {
             ...old,
             override,
@@ -96,6 +107,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+const inboxSettings = () => within(screen.getByRole("region", { name: "Inbox" }));
 const field = () => screen.findByRole<HTMLInputElement>("spinbutton", { name: "Keep approved reviews in Active for" });
 const save = () => screen.getByRole<HTMLButtonElement>("button", { name: "Save" });
 
@@ -112,8 +124,8 @@ test.each([
   expect(input.max).toBe("720");
   expect(input.step).toBe("1");
   expect(input.inputMode).toBe("numeric");
-  expect(screen.getByRole("heading", { name: "Inbox" })).toBeTruthy();
-  expect(screen.getByText(state.note)).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Inbox", level: 2 })).toBeTruthy();
+  expect(inboxSettings().getByText(state.note)).toBeTruthy();
   expect(save().disabled).toBe(true);
   expect(!!screen.queryByRole("button", { name: "Reset" })).toBe(state.source === "override");
   if (state.source === "override") expect(screen.getByText("The config file says 24 hours.")).toBeTruthy();
@@ -131,7 +143,7 @@ test.each([false, true])("Save sends a number and refreshes settings and review 
   fireEvent.change(input, { target: { value: "24" } });
   if (submit) fireEvent.submit(input.closest("form") as HTMLFormElement);
   else fireEvent.click(save());
-  await screen.findByText("Set here.");
+  await inboxSettings().findByText("Set here.");
   expect(f.patches()).toHaveLength(1);
   expect(JSON.parse(String(f.patches()[0]?.[1]?.body))).toEqual({ approvedActiveHours: 24 });
   expect(f.client.getQueryData<SettingsView>(["settings"])?.approvedActiveHours.value).toBe(24);
@@ -144,7 +156,7 @@ test.each(["Save", "Reset"])("%s can clear an override and fall back to the file
   const input = await field();
   if (button === "Save") fireEvent.change(input, { target: { value: "" } });
   fireEvent.click(screen.getByRole("button", { name: button }));
-  await screen.findByText("From the config file.");
+  await inboxSettings().findByText("From the config file.");
   expect(input.value).toBe("24");
   expect(JSON.parse(String(f.patches()[0]?.[1]?.body))).toEqual({ approvedActiveHours: null });
 });
@@ -156,7 +168,7 @@ test("the file value can be pinned as an override", async () => {
   fireEvent.change(input, { target: { value: "24" } });
   expect(save().disabled).toBe(false);
   fireEvent.click(save());
-  await screen.findByText("Set here.");
+  await inboxSettings().findByText("Set here.");
   expect(f.patches()).toHaveLength(1);
   expect(String(f.patches()[0]?.[1]?.body)).toBe('{"approvedActiveHours":24}');
 });
@@ -169,7 +181,7 @@ test("Reset without a file falls back to an empty default input", async () => {
   setup({ source: "override", value: 2, override: 2 });
   const input = await field();
   fireEvent.click(screen.getByRole("button", { name: "Reset" }));
-  await screen.findByText("Default.");
+  await inboxSettings().findByText("Default.");
   expect(input.value).toBe("");
 });
 test.each(["-1", "721", "1.5", "1e2"])("invalid input %s reports whole hours without sending", async (value) => {
@@ -214,9 +226,15 @@ test("a delayed background GET cannot overwrite the saved settings view", async 
   await waitFor(() => expect(f.client.isFetching({ queryKey: ["settings"] })).toBe(1));
   fireEvent.change(input, { target: { value: "0" } });
   fireEvent.click(save());
-  await screen.findByText("Set here.");
+  await inboxSettings().findByText("Set here.");
   await act(async () => {
-    delayed.resolve(Response.json({ approvedActiveHours: defaultSetting, serverTime: "2026-11-04T10:00:00.000Z" }));
+    delayed.resolve(
+      Response.json({
+        approvedActiveHours: defaultSetting,
+        keys: defaultKeys,
+        serverTime: "2026-11-04T10:00:00.000Z",
+      }),
+    );
     await refresh;
   });
   expect(input.value).toBe("0");

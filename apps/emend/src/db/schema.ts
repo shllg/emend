@@ -60,14 +60,14 @@ export const settings = sqliteTable(
   "settings",
   {
     ownerId: ownerId(),
-    key: text("key", { enum: ["approvedActiveHours"] }).notNull(),
+    key: text("key", { enum: ["approvedActiveHours", "keys"] }).notNull(),
     value: text("value").notNull(),
     updatedAt: updatedAt(),
   },
   (t) => [
     primaryKey({ columns: [t.ownerId, t.key] }),
     index("settings_owner_idx").on(t.ownerId),
-    enumCheck("settings_key_check", t.key, ["approvedActiveHours"]),
+    enumCheck("settings_key_check", t.key, ["approvedActiveHours", "keys"]),
   ],
 );
 

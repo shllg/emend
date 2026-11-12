@@ -27,8 +27,8 @@ checks catch a copy inside the repo.
   way, walked one hop at a time (at most 40), lies inside such a repository, `publish` and `open`
   ignore the file, never copying or renaming it, and `emend config` refuses. Keep the hop walk: a
   link inside the repository could point the file at one the repository writes, whose `docRoots`
-  would let `publish` read a folder such as `~/.ssh`. The server reads only `approvedActiveHours`
-  from that file, a bounded integer, without this check.
+  would let `publish` read a folder such as `~/.ssh`. The server reads only `approvedActiveHours` and
+  `keys` from that file, a bounded integer and a map of shortcut keys, without this check.
 - Every helper program (git, systemctl, launchctl, tailscale, the browser opener, and mise, npm
   and pnpm for `emend update`) comes from `findExecutable` (`executable.ts`): absolute `PATH`
   entries without `.` or `..` parts, where no part of the entry's path or of the program's path,
