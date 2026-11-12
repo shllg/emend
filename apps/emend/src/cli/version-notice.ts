@@ -12,17 +12,22 @@ function plainVersion(version: string): bigint[] | null {
   return match?.[0] === version ? match.slice(1).map(BigInt) : null;
 }
 
-function compareVersion(version: string): number | null {
-  if (version === VERSION) return 0;
-  const server = plainVersion(version);
-  const cli = plainVersion(VERSION);
-  if (!server || !cli) return null;
-  for (const [index, part] of server.entries()) {
-    const current = cli[index];
+/** -1 when `version` is older than `other`, 1 when newer, 0 when equal, null when either is not plain x.y.z. */
+export function compareVersions(version: string, other: string): number | null {
+  if (version === other) return 0;
+  const left = plainVersion(version);
+  const right = plainVersion(other);
+  if (!left || !right) return null;
+  for (const [index, part] of left.entries()) {
+    const current = right[index];
     if (current === undefined) return null;
     if (part !== current) return part < current ? -1 : 1;
   }
   return 0;
+}
+
+function compareVersion(version: string): number | null {
+  return compareVersions(version, VERSION);
 }
 
 export async function localVersionNotice(stateDir: string, io: Io, expectedUrl?: string): Promise<string | undefined> {

@@ -334,6 +334,8 @@ function assertAgentSql(
     for (let index = 0; index < tokens.length; index++) {
       const verb = tokens[index]?.toLowerCase();
       if (!verb || !["insert", "replace", "update", "delete"].includes(verb)) continue;
+      // A lone word names a command, not an SQL write statement.
+      if (tokens.length === 1) continue;
       let cursor = index + 1;
       if (tokens[cursor]?.toLowerCase() === "or") cursor += 2;
       // An interior prose word ("needs an update.") is not an UPDATE statement.
@@ -1192,7 +1194,13 @@ test.each([
   );
 });
 
+test("a lone update command is not an SQL write", async () => {
+  const folder = await fixture({ "entry.ts": 'export const command = "update";' });
+  await expect(assertAgentGraph(folder, [join(folder, "entry.ts")])).resolves.toBeInstanceOf(Set);
+});
+
 test.each([
+  "update reviews set state = 'approved'",
   `UPDATE reviews SET state = \${nextState}`,
   "UPDATE OR REPLACE reviews SET state = next_state",
   `INSERT INTO reviews (state) VALUES (\${nextState})`,

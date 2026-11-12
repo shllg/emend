@@ -11,8 +11,8 @@ A repo under review may try to run its own code through emend: under mise, its t
 point `emend`, `node` or `git` at code it controls, and agents run emend with full rights. These
 checks catch a copy inside the repo.
 
-- `publish`, `wait`, `feedback`, `reply`, `mcp`, `stop`, `service` and `skills` refuse an emend
-  whose Node.js or entry resolves inside a repository that holds the working directory
+- `publish`, `wait`, `feedback`, `reply`, `mcp`, `stop`, `service`, `update` and `skills` refuse
+  an emend whose Node.js or entry resolves inside a repository that holds the working directory
   (`apps/emend/src/cli.ts`, `runtime-repository.ts`). The refusal comes before `main.ts` loads.
 - A `.git` folder counts unless it has no `HEAD` (git never accepts one without), so an empty one
   such as a sandbox mount point does not, and one whose `HEAD` cannot be checked does. A `.git`
@@ -29,10 +29,10 @@ checks catch a copy inside the repo.
   link inside the repository could point the file at one the repository writes, whose `docRoots`
   would let `publish` read a folder such as `~/.ssh`. The server reads only `approvedActiveHours`
   from that file, a bounded integer, without this check.
-- Every helper program (git, systemctl, launchctl, tailscale, the browser opener) comes from
-  `findExecutable` (`executable.ts`): absolute `PATH` entries without `.` or `..` parts, where no
-  part of the entry's path or of the program's path, link targets included, lies inside such a
-  repository. The helper runs with only those entries on its `PATH`, minus any entry where a file
+- Every helper program (git, systemctl, launchctl, tailscale, the browser opener, and mise, npm
+  and pnpm for `emend update`) comes from `findExecutable` (`executable.ts`): absolute `PATH`
+  entries without `.` or `..` parts, where no part of the entry's path or of the program's path,
+  link targets included, lies inside such a repository. The helper runs with only those entries on its `PATH`, minus any entry where a file
   of that name exists but leads into such a repository or cannot be checked. On macOS, tailscale
   may instead come from the app's fixed path and then runs with the system `PATH`.
 - An error refuses, or skips the entry; nothing unchecked is trusted.
@@ -45,3 +45,11 @@ checks catch a copy inside the repo.
   mock of `executable.ts` refuses any lookup outside the test's own folders, so no test can reach a
   real `tailscale` or, on macOS, the Tailscale app. Tests of git run the system git with the
   fenced config above; tests of systemctl and launchctl use a fixture `PATH` and a mocked runner.
+- Tests use temporary `EMEND_HOME` folders and git repos built in the test, never real state.
+- `emend update` is the one command that runs a package manager. It refuses without a terminal on
+  stdin and stdout and as root. It runs mise, npm or pnpm found by `findExecutable`, with the home
+  folder as working directory, an allowlisted environment (no `NODE_OPTIONS`, no `npm_config_*`),
+  and `--ignore-scripts` where the tool takes it. It backs up `emend.db` first and prints how to
+  restore it. For a local build (a checkout, or a `mise link` from `pnpm install:local`) it prints
+  the commands and runs none. The new emend it starts (`--version`, `service install`) runs with
+  the same Node.js as the running one. Its tests run fake mise, npm and pnpm from a fixture `PATH`.

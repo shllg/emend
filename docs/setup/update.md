@@ -22,10 +22,43 @@ A dotfiles repository at the home folder is allowed. The server reads only `appr
 from the file and does not apply this check. A config path set by a repository's environment
 is not detected when emend runs from a folder outside every repository.
 
+## Update with one command
+
+`emend update` does steps 2 and 3 for you. Run it in your own terminal, on each machine:
+
+```sh
+emend update
+```
+
+It does five things:
+
+1. It finds how you installed emend: mise, npm or pnpm.
+2. It copies the database to `backups/` in the state folder and prints the path. Three backups
+   stay; older ones go.
+3. It updates emend from your home folder, never from inside a repository.
+4. It restarts the service on the new version, when you installed the service. The server migrates
+   the database as before.
+5. It prints the version this machine runs and, when the machine is attached, the version of its
+   hub and which one is behind.
+
+If something fails, it prints how to go back to the backup. The [Undo](#undo) section lists the
+same steps.
+
+A local build gets the commands and nothing else. If you built emend from a checkout (or linked it
+with `pnpm install:local`), `emend update` prints `git pull`, `pnpm install` and
+`pnpm install:local` for you to run, and changes nothing.
+
+`emend update` refuses to run without a terminal, so an agent cannot run it. Give the command to
+the agent's user instead.
+
+The other steps still apply. Update the hub first, link the skills again (step 4), update the
+plugin (step 5) and the phone app (step 6). It reports the hub only, not the machines attached to
+it: run it on each machine.
+
 ## Set it up with an agent
 
 ```text
-Rules: run the steps yourself and show me what each command printed; before you change an agent's
+Rules: never run emend update yourself; give it to me to run in my own terminal; run the steps yourself and show me what each command printed; before you change an agent's
 permission or sandbox settings (for example ~/.claude/settings.json or ~/.codex/rules/), show me the
 change and wait for my yes; never read secrets (tokens, .env files, credential stores) or emend's
 state folder; never open ~/.claude/settings.json whole; if a dotfiles tool manages a file or link
@@ -58,7 +91,7 @@ first, and the new version raises that minimum, the old machines stop. Do these 
 then repeat them on each attached machine ([attach.md](attach.md)).
 
 ```text
-Rules: never read secrets (tokens, .env files, credential stores) or emend's state folder.
+Rules: never run emend update yourself; give it to me to run in my own terminal; never read secrets (tokens, .env files, credential stores) or emend's state folder.
 Tell me which of these I run emend on: a hub, attached machines, a single machine. If I run a hub,
 remind me to update the hub first and the attached machines after it.
 ```
@@ -87,7 +120,7 @@ You should see `emend ` and the new version number. Use the command that matches
 installed it. If you installed with mise, `mise upgrade` keeps the old version in its own folder.
 
 ```text
-Rules: show me each change and wait for my yes; never read secrets (tokens, .env files, credential
+Rules: never run emend update yourself; give it to me to run in my own terminal; show me each change and wait for my yes; never read secrets (tokens, .env files, credential
 stores) or emend's state folder.
 Run emend --version and show me the result. Then update the package: if mise manages it, run mise
 upgrade npm:@shllg/emend; otherwise (npm or Homebrew's Node.js) run npm install -g
@@ -134,7 +167,7 @@ to stop, see
 [troubleshooting.md](troubleshooting.md#a-server-from-an-older-emend-cannot-be-asked-to-stop).
 
 ```text
-Rules: show me each change and wait for my yes; never read secrets (tokens, .env files, credential
+Rules: never run emend update yourself; give it to me to run in my own terminal; show me each change and wait for my yes; never read secrets (tokens, .env files, credential
 stores) or emend's state folder; outside your sandbox run only emend service install (no new flags),
 emend service status and emend stop, and no other command; never pass --host or any flag this page
 does not name; never retry a command through another program (for example script) to get a
@@ -159,7 +192,7 @@ emend skills install
 You should see `linked ...` for each skill, or `... already linked` when nothing changed.
 
 ```text
-Rules: show me each change and wait for my yes; never read secrets (tokens, .env files, credential
+Rules: never run emend update yourself; give it to me to run in my own terminal; show me each change and wait for my yes; never read secrets (tokens, .env files, credential
 stores) or emend's state folder; if a dotfiles tool manages a file or link you would change (a
 symlink into a dotfiles repository, stow, chezmoi, home-manager or similar), change its source and
 tell me how to apply it; outside your sandbox run only emend skills install, and no other command.
@@ -180,7 +213,7 @@ for the marketplace in `/plugin`, under Marketplaces, Claude Code does this for 
 run the commands. See [agents.md](agents.md#1-add-the-plugin-to-claude-code).
 
 ```text
-Rules: never read secrets (tokens, .env files, credential stores) or emend's state folder; never
+Rules: never run emend update yourself; give it to me to run in my own terminal; never read secrets (tokens, .env files, credential stores) or emend's state folder; never
 run claude plugin commands yourself.
 If I use the emend plugin in Claude Code, give me claude plugin marketplace update emend and claude
 plugin update emend@emend to run in my own terminal, since they change Claude Code's own plugin
@@ -201,7 +234,7 @@ secure shows `Updates need the installed app over a secure connection.`
 You do this step on the phone yourself.
 
 ```text
-Rules: never read secrets (tokens, .env files, credential stores) or emend's state folder.
+Rules: never run emend update yourself; give it to me to run in my own terminal; never read secrets (tokens, .env files, credential stores) or emend's state folder.
 Remind me to update the emend app on my phone after the hub is updated: open Devices, find the App
 section, tap Check for update, then Update now, then Reload. Do not try to do this for me.
 ```
@@ -237,8 +270,21 @@ npm install -g @shllg/emend@<version>
 ```
 
 An older emend refuses a database that a newer emend migrated, and says
-`The emend database is newer than this emend. Update emend, then try again.` In that case, stay on
-the newer version.
+`The emend database is newer than this emend. Update emend, then try again.` Without a backup, stay
+on the newer version.
+
+`emend update` copies the database to `backups/` in the state folder before it updates emend, and
+prints these steps if it fails. To go back by hand, with the service (Linux) or without it:
+
+```sh
+systemctl --user stop emend            # macOS: launchctl bootout gui/$(id -u)/dev.emend.server
+                                       # no service: emend stop
+npm install --global @shllg/emend@<old version>   # or the mise or pnpm line above
+cp <backup file> <state folder>/emend.db && rm -f <state folder>/emend.db-wal <state folder>/emend.db-shm
+emend service install                  # no service: emend
+```
+
+The state folder is `~/.local/share/emend` unless you set `EMEND_HOME`.
 
 ## When something goes wrong
 

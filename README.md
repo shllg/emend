@@ -73,12 +73,16 @@ one-prompt setup.
 ## Update
 
 ```sh
-npm install -g @shllg/emend@latest
+emend update
 claude plugin marketplace update emend
 claude plugin update emend@emend
 ```
 
-With mise, run `mise upgrade npm:@shllg/emend` instead of the `npm` line. If you installed the
+`emend update` backs up the database, updates emend with mise, npm or pnpm, and restarts the
+service. It runs only in your own terminal. A local build only gets the commands.
+
+To update by hand, run `npm install -g @shllg/emend@latest`, or with mise
+`mise upgrade npm:@shllg/emend`. If you installed the
 service, run `emend service install` again; it keeps its options. Without the service, run
 `emend stop`; the next `emend` starts the new version. If you ran `emend skills install`
 before, run it again. Then restart Claude Code. After `brew upgrade node` or `mise upgrade node`,

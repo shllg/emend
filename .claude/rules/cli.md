@@ -11,7 +11,8 @@ The CLI runs in repos under review: treat them as hostile.
 - Config comes only from the global config file (`$XDG_CONFIG_HOME/emend/`, else
   `~/.config/emend/`, also on macOS), the state directory and the environment, never from the
   reviewed repo, its git config or package.json.
-- Never run code from the reviewed repo: no scripts, hooks or package managers. Call git with an
+- Never run code from the reviewed repo: no scripts, hooks or package managers (`emend update`
+  aside: `cli-runtime.md`). Call git with an
   argv array, never through a shell, by an absolute path resolved from the absolute `PATH`
   entries only, and only in the plumbing forms of the `GitCall` union in
   `apps/emend/src/cli/git.ts`: `--version`, `rev-parse`, `diff-tree` (tree against tree),
@@ -77,4 +78,3 @@ The CLI runs in repos under review: treat them as hostile.
   `reply` and `mcp` then work on the state directory's database directly and never start a server.
   Only `emend` with no arguments and the service start one.
 - `emend wait` confirms a delivery only after its stdout has flushed.
-- Tests use temporary `EMEND_HOME` folders and git repos built in the test, never real state.

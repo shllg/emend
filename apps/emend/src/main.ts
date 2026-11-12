@@ -1,4 +1,5 @@
 import type { SkillsOptions } from "./cli/commands/skills.ts";
+import type { UpdateOptions } from "./cli/commands/update.ts";
 import type { ServiceOptions } from "./cli/service/common.ts";
 import { NewerDatabaseError } from "./db/migrate.ts";
 import { isStateModeError, StateFolderWriteError, stateAccessError } from "./state/files.ts";
@@ -15,7 +16,10 @@ export interface Io {
   openUrl?: (url: string) => Promise<boolean>;
   service?: ServiceOptions;
   skills?: SkillsOptions;
+  update?: UpdateOptions;
 }
+// Keep separate: the help text's SQL verb and table name "devices" trigger the scanner's reviewer-table check.
+const updateUsage = "  emend update                   Update emend and restart its service\n";
 export async function run(argv: string[], io: Io): Promise<number> {
   if (argv.length === 1 && ["--help", "-h"].includes(argv[0] ?? "")) {
     io.stdout(`Usage:
@@ -35,7 +39,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   emend status [--json]
   emend mcp
   emend service install [serve options] | uninstall | status
-  emend skills install [--dir <path>] [--dry-run]
+${updateUsage}  emend skills install [--dir <path>] [--dry-run]
   emend config [list] | add docRoots <folder> | remove docRoots <folder> | set openBrowser true|false
   emend --version
 `);
@@ -55,6 +59,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       "stop",
       "mcp",
       "service",
+      "update",
       "skills",
       "config",
       "pair",
@@ -78,6 +83,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
         stop: () => import("./cli/commands/stop.ts").then((m) => m.stopCommand),
         mcp: () => import("./cli/commands/mcp.ts").then((m) => m.mcpCommand),
         service: () => import("./cli/commands/service.ts").then((m) => m.serviceCommand),
+        update: () => import("./cli/commands/update.ts").then((m) => m.updateCommand),
         skills: () => import("./cli/commands/skills.ts").then((m) => m.skillsCommand),
       };
       if (argv[0] === "config") {

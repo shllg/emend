@@ -78,8 +78,8 @@ Each line prevents a real failure. "Before you touch" names the rule file with t
    first. The API is versioned under `/api/v1`. Additive fields are fine; breaking changes need
    `/api/v2`.
 7. **Never edit or delete a committed migration.** Add a new one.
-8. **The CLI runs no code from the repo under review.** No repo scripts, no package manager, git
-   only for allowlisted read-only lookups. Config never comes from that repo.
+8. **The CLI runs no code from the repo under review.** No repo scripts, no package manager but
+   `emend update`'s, git only for allowlisted read-only lookups. Config never comes from that repo.
 9. **Fixtures are synthetic, and client content never enters the repo.** Real reviews, state
    files and text from reviewed repos never become fixtures, tests or commit messages.
 10. **Never read secrets.** No tokens or `.env` values in output, code or commits. Check a

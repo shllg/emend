@@ -20,7 +20,7 @@ import { markServicePending, removeServiceOptions, saveServiceOptions, serviceIn
 const declaration = '<?xml version="1.0" encoding="UTF-8"?>';
 const prefix = `${declaration}\n<!-- written by emend -->\n`;
 
-function plistPath(home: string) {
+export function plistPath(home: string) {
   return join(home, "Library/LaunchAgents/dev.emend.server.plist");
 }
 

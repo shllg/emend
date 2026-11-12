@@ -19,7 +19,7 @@ import { markServicePending, removeServiceOptions, saveServiceOptions, serviceIn
 
 const prefix = "# written by emend\n";
 
-function unitPath(home: string, config: string | undefined) {
+export function unitPath(home: string, config: string | undefined) {
   return join(config && isAbsolute(config) ? config : join(home, ".config"), "systemd/user/emend.service");
 }
 

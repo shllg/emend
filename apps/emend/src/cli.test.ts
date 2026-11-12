@@ -51,6 +51,7 @@ test.each([
   ["mcp"],
   ["stop"],
   ["service", "install"],
+  ["update"],
   ["skills", "install"],
 ])("the real %s entry refuses a runtime inside the repository without touching state", async (...args) => {
   const f = await entryFixture();
