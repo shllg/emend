@@ -65,4 +65,7 @@ checks catch a copy inside the repo.
   a located downgrade refuses before executing it.
   Local builds only get instructions. A located new emend inside those repositories is refused,
   including every symlink hop; its `--version` and `service install` use the running Node.js.
+  After success it ends with notes; it compares the links in `~/.agents/skills` with the new
+  package's skills by real path only and reads nothing else there; each note line is inert prose
+  starting with `emend: `.
   Tests use fake package managers on a fixture PATH.

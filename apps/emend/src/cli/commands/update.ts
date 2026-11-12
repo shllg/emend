@@ -27,6 +27,7 @@ import {
   updateDoc,
   updatePackage,
 } from "../update/install.ts";
+import { checkSkillLinks, nextSteps } from "../update/next-steps.ts";
 import { checkNewEmend, type NewEmend } from "../update/package.ts";
 import { pnpmPackages } from "../update/pnpm.ts";
 import { runChild, succeeded } from "../update/run.ts";
@@ -75,6 +76,9 @@ function printLocalBuild(io: Io, install: Extract<Install, { kind: "local" }>) {
   ];
   if (install.root !== undefined) lines.push(`  cd ${quoteShellArgument(install.root)}`);
   lines.push("  git pull", "  pnpm install", "  pnpm install:local");
+  lines.push(
+    `emend: then link the agent skills again and update the Claude Code plugin and the phone app as ${updateDoc} says.`,
+  );
   io.stdout(`${lines.join("\n")}\n`);
 }
 
@@ -278,7 +282,7 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
       ),
     );
     io.stdout(`emend: this machine runs emend ${version}\n`);
-    await step(() => reportHub(io, stateDir, version, options, checkpoint));
+    const attached = await step(() => reportHub(io, stateDir, version, options, checkpoint));
     if (backupPath !== undefined) {
       if (version === VERSION && !restarted && (!runningBefore || runningBefore.version === version)) {
         await unlink(backupPath);
@@ -292,8 +296,10 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
         }
       }
     }
+    const notes = await step(async () => nextSteps(version, await checkSkillLinks(home, checked.folder), attached));
     checkpoint();
     if (version !== VERSION) io.stdout(rollback());
+    io.stdout(notes);
   } catch (error) {
     if (error instanceof CliSignalExit) throw error;
     checkpoint();
@@ -397,11 +403,11 @@ async function reportHub(io: Io, stateDir: string, version: string, options: Upd
   try {
     const attachment = await readAttachment(stateDir);
     checkpoint();
-    if (!attachment) return;
+    if (!attachment) return false;
     url = attachment.hubUrl;
   } catch (error) {
     if (error instanceof CliSignalExit) throw error;
-    return;
+    return false;
   }
   checkpoint();
   const shown = escapeReference(url);
@@ -427,4 +433,5 @@ async function reportHub(io: Io, stateDir: string, version: string, options: Upd
     checkpoint();
     io.stdout(`emend: could not reach the hub at ${shown} to check its version.\n`);
   }
+  return true;
 }

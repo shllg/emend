@@ -30,7 +30,7 @@ is not detected when emend runs from a folder outside every repository.
 emend update
 ```
 
-It does five things:
+It does six things:
 
 1. It finds how you installed emend: mise, npm or pnpm.
 2. It copies the database to `backups/` in the state folder and prints the path. Three backups
@@ -42,6 +42,8 @@ It does five things:
    the database as before.
 5. It prints the version this machine runs and, when the machine is attached, the version of its
    hub and which one is behind.
+6. It ends with notes for the other parts: whether the links in `~/.agents/skills` point at the
+   new version, the Claude Code plugin commands, and the phone app. It changes none of them.
 
 If something fails after the package manager starts, it prints how to restore the old version. The [Undo](#undo) section lists the
 same steps.
@@ -63,7 +65,7 @@ passes only a short list of environment variables. HOME must resolve to your acc
 Path settings and the newly installed emend must stay outside the repositories of your working
 directory, including paths reached through symbolic links.
 
-The other steps still apply. Update the hub first, link the skills again (step 4), update the
+The other steps still apply, and the notes name them. Update the hub first, link the skills again (step 4), update the
 plugin (step 5) and the phone app (step 6). It reports the hub only, not the machines attached to
 it: run it on each machine.
 

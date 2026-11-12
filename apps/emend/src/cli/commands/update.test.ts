@@ -6,6 +6,8 @@ import { run } from "../../main.ts";
 import { pollUntil } from "../../test/poll-until.ts";
 import { VERSION } from "../../version.ts";
 import { quoteShellArgument } from "../escape.ts";
+import { updateDoc } from "../update/install.ts";
+import { nextSteps } from "../update/next-steps.ts";
 import {
   attachHub,
   emendScript,
@@ -139,6 +141,7 @@ emend: to update it, review the new commits, then run in your emend checkout:
   git pull
   pnpm install
   pnpm install:local
+emend: then link the agent skills again and update the Claude Code plugin and the phone app as ${updateDoc} says.
 `);
     expect(await fake.calls()).toEqual([]);
     expect(await readdir(fake.state)).not.toContain("backups");
@@ -157,6 +160,7 @@ emend: to update it, review the new commits, then run in your emend checkout:
     expect(out()).toContain("this emend is a local build (linked into mise)");
     expect(out()).not.toContain("cd ");
     expect(out()).toContain("  pnpm install:local\n");
+    expect(out()).toMatch(/emend: then link the agent skills again[^\n]+\n$/);
     expect(await fake.calls()).toEqual([]);
     expect(await readdir(fake.state)).not.toContain("backups");
   });
@@ -237,6 +241,8 @@ describe.each([
     }[layout];
     expect(err()).toContain(`npm_config_ignore_scripts=true ${old} &&\n`);
     expect(out()).not.toContain("emend is now");
+    expect(out() + err()).not.toContain("emend: next,");
+    expect(out() + err()).not.toContain("emend: agent skills:");
   });
 
   test("a wrong version answer fails", async () => {
@@ -253,7 +259,30 @@ describe.each([
     });
     expect(await update(), err()).toBe(0);
     expect(out()).toContain(`emend: emend ${VERSION} is already installed; ${layout} installed nothing newer\n`);
+    expect(out().endsWith(nextSteps(VERSION, "unknown", false))).toBe(true);
   });
+});
+
+test.each([false, true])("a new version ends with notes after recovery with service=%s", async (service) => {
+  await make("mise");
+  if (service) await installService(fake);
+  const fresh = join(fake.root, "new-package");
+  await fake.set({ newPackage: fresh, located: join(fake.root, "located") });
+  await mkdir(join(fake.root, "located/lib/node_modules/@shllg"), { recursive: true });
+  await symlink(fresh, join(fake.root, "located/lib/node_modules/@shllg/emend"));
+  await mkdir(join(fresh, "dist/skills/emend-review"), { recursive: true });
+  await mkdir(join(fake.oldPackage, "dist/skills/emend-review"), { recursive: true });
+  const links = join(fake.home, ".agents/skills");
+  await mkdir(links, { recursive: true });
+  await symlink(await realpath(join(fake.oldPackage, "dist/skills/emend-review")), join(links, "emend-review"));
+  expect(await update(), err()).toBe(0);
+  const notes = nextSteps("0.2.0", "stale", false);
+  expect(out()).toContain("to go back");
+  expect(out().lastIndexOf("to go back")).toBeLessThan(out().indexOf(notes));
+  expect(out().endsWith(notes)).toBe(true);
+  expect((await fake.calls()).map((call) => call.tool)).toEqual(
+    service ? ["mise", "mise", "service-install"] : ["mise", "mise"],
+  );
 });
 
 describe("the database backup", () => {
@@ -342,6 +371,7 @@ describe("the service", () => {
     expect(await update(), err()).toBe(1);
     expect(err()).toContain("emend: the emend service does not run emend 0.2.0 yet; run emend service status.\n");
     expect(err()).toContain("to go back to emend");
+    expect(out() + err()).not.toContain("emend: next,");
   });
 
   test("a failing service install fails", async () => {
@@ -361,6 +391,7 @@ describe("the service", () => {
     expect(await update(), err()).toBe(0);
     expect(out()).toContain(`emend: the emend service already runs emend ${VERSION}\n`);
     expect((await fake.calls()).some((call) => call.tool === "service-install")).toBe(false);
+    expect(out().endsWith(nextSteps(VERSION, "unknown", false))).toBe(true);
   });
 
   test("without a service, an old running server gets a hint", async () => {
@@ -386,6 +417,7 @@ describe("the hub report", () => {
     fake.options.hubVersion = async () => hub;
     expect(await update(), err()).toBe(0);
     expect(out()).toContain(`emend: the hub at https://hub.example.test runs emend ${hub}. ${advice}\n`);
+    expect(out().endsWith(nextSteps("0.2.0", "unknown", true))).toBe(true);
   });
 
   test("an unreachable hub is not a failure", async () => {
@@ -394,12 +426,21 @@ describe("the hub report", () => {
     };
     expect(await update(), err()).toBe(0);
     expect(out()).toContain("emend: could not reach the hub at https://hub.example.test to check its version.\n");
+    expect(out().endsWith(nextSteps("0.2.0", "unknown", true))).toBe(true);
   });
 
   test("a machine without an attachment prints no hub line", async () => {
     await rm(join(fake.state, "attach.json"));
     expect(await update(), err()).toBe(0);
     expect(out()).not.toContain("the hub at");
+    expect(out().endsWith(nextSteps("0.2.0", "unknown", false))).toBe(true);
+  });
+
+  test("an unreadable attachment uses the unattached phone note", async () => {
+    await writeFile(join(fake.state, "attach.json"), "invalid JSON");
+    expect(await update(), err()).toBe(0);
+    expect(out()).not.toContain("the hub at");
+    expect(out().endsWith(nextSteps("0.2.0", "unknown", false))).toBe(true);
   });
 });
 
@@ -449,6 +490,7 @@ test.each(["npm", "pnpm", "mise"] as const)(
     expect(await update(), err()).toBe(0);
     expect(out()).toContain("local build");
     expect(out()).not.toContain("  cd ");
+    expect(out()).toMatch(/emend: then link the agent skills again[^\n]+\n$/);
     expect(await fake.calls()).toEqual([]);
   },
 );
@@ -751,6 +793,7 @@ test("SIGINT when stdout receives the final go-back list finishes successfully a
   expect(await update(), err()).toBe(0);
   expect((out() + err()).match(/to go back/g)).toHaveLength(1);
   expect(err()).toBe("");
+  expect(out().endsWith(nextSteps("0.2.0", "unknown", false))).toBe(true);
 });
 
 test("restarts a same-version service that stopped during the install", async () => {
