@@ -17,8 +17,10 @@ import { ApiError } from "../http/errors.ts";
 import { commentTargetReserve, envelopeBytes, jsonBytes } from "../mailbox/payload.ts";
 import { yieldToLoop } from "../pacing.ts";
 import { workerExecutor } from "../publish/executor.ts";
+import { IMAGE_HEAD_BYTES } from "../publish/image-size.ts";
 import { abortable } from "../publish/lifecycle.ts";
 import { fileMediaType } from "../publish/media.ts";
+import { memoizedHeads, readBlobHead } from "../publish/media-head.ts";
 import { validateNoteRanges } from "../publish/notes.ts";
 import { renderRevision } from "../publish/render.ts";
 import type { Executor, Work, WorkResult } from "../publish/work.ts";
@@ -82,6 +84,19 @@ export async function prepareImport(ownerId: string, bundle: ImportBundle, deps:
     if (!bytes) throw new ApiError("blob_missing");
     return Uint8Array.from(bytes).buffer;
   };
+  // Heads are keyed by SHA-256, so one memoized head stays valid across revisions although `current` is cleared.
+  const readHead = memoizedHeads(async (hash) => {
+    checkImportSignal(signal);
+    const size = staged.get(hash);
+    const own = current.get(hash);
+    if (own) return Uint8Array.from(own.subarray(0, IMAGE_HEAD_BYTES)).buffer;
+    const head =
+      size === undefined
+        ? await readBlobHead(() => deps.blobs.open(ownerId, hash, signal))
+        : (await deps.blobs.readStaged(hash, size))?.slice(0, IMAGE_HEAD_BYTES).buffer;
+    if (!head) throw new ApiError("blob_missing");
+    return head as ArrayBuffer;
+  });
   const put = async (bytes: Buffer) => {
     checkImportSignal(signal);
     const { sha256: hash, size } = deps.blobs.stage(bytes);
@@ -195,7 +210,7 @@ export async function prepareImport(ownerId: string, bundle: ImportBundle, deps:
         }
       }
       await validateNoteRanges(input.files, read, execute);
-      const result = await renderRevision(input, execute, read, put, signal, onRendered);
+      const result = await renderRevision(input, execute, read, readHead, put, signal, onRendered);
       if (!rows) throw new ApiError("invalid_request");
       if (previous) {
         const previousBlobs: Extract<Work, { kind: "changed" }>["previous"] = [];

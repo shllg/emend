@@ -58,13 +58,13 @@ test("many docs post one heading map per worker and a later publish replaces it"
     return hash;
   };
   try {
-    await renderRevision(input, execute, read, put);
+    await renderRevision(input, execute, read, async () => new ArrayBuffer(0), put);
     const posts = created.posts.slice(before);
     expect(posts.filter((post) => post.docs !== undefined)).toHaveLength(1);
     expect(
       posts.filter((post) => post.kind === "doc" || post.kind === "writeup").every((post) => post.docs === undefined),
     ).toBe(true);
-    const next = await renderRevision({ ...input, files: [] }, execute, read, put);
+    const next = await renderRevision({ ...input, files: [] }, execute, read, async () => new ArrayBuffer(0), put);
     expect(stored.get(next.renderedBlob)?.toString()).not.toContain("?tab=docs");
     expect(created.posts.slice(before).filter((post) => post.docs !== undefined)).toHaveLength(2);
   } finally {

@@ -19,6 +19,7 @@ export async function renderRevision(
   input: PublishRequest,
   execute: Executor,
   read: (hash: string) => Promise<ArrayBuffer>,
+  readHead: (hash: string) => Promise<ArrayBuffer>,
   put: (bytes: Buffer) => Promise<string>,
   signal?: AbortSignal,
   onRendered?: (bytes: number) => void,
@@ -85,7 +86,8 @@ export async function renderRevision(
   const mediaHeads: [string, ArrayBuffer][] = [];
   for (const sha of new Set(media.map(([, blob]) => blob))) {
     checkPublishSignal(signal);
-    mediaHeads.push([sha, (await read(sha)).slice(0, IMAGE_HEAD_BYTES)]);
+    const head = await readHead(sha);
+    mediaHeads.push([sha, head.byteLength > IMAGE_HEAD_BYTES ? head.slice(0, IMAGE_HEAD_BYTES) : head]);
     await yieldToLoop("publish-render");
   }
   let rendered: RenderedBytes;

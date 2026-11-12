@@ -32,6 +32,7 @@ import { insertChangedBlocks } from "./changed.ts";
 import { WorkTimeout, workerExecutor } from "./executor.ts";
 import { abortable, checkPublishSignal, PublishAborted, publishSlots } from "./lifecycle.ts";
 import { fileMediaType } from "./media.ts";
+import { readBlobHead } from "./media-head.ts";
 import { validateNoteRanges } from "./notes.ts";
 import { renderRevision } from "./render.ts";
 import { revisionTransition } from "./transitions.ts";
@@ -296,6 +297,11 @@ async function computePublish(
       input,
       execute,
       read,
+      async (sha) => {
+        const head = await readBlobHead(() => deps.blobs.open(ownerId, sha, deps.signal));
+        if (!head) throw new ApiError("blob_missing");
+        return head;
+      },
       (bytes) => deps.blobs.put(ownerId, bytes, "application/json"),
       deps.signal,
     );

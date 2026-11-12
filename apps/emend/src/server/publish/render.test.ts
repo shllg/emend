@@ -49,6 +49,7 @@ test("one shared Markdown render produces exactly each path's normal block ident
     input(["one/one.md", "two/two.md"]),
     execute,
     async (hash) => Uint8Array.from(stored.get(hash) ?? Buffer.from(source)).buffer,
+    async () => new ArrayBuffer(0),
     async (bytes) => {
       const key = String(stored.size);
       stored.set(key, bytes);
@@ -80,6 +81,7 @@ test.each(["failure", "timeout"])("identical bytes that %s cost one attempt acro
     body,
     execute,
     async (hash) => Uint8Array.from(stored.get(hash) ?? Buffer.from(hash === good.newBlob ? "# Good" : "# Bad")).buffer,
+    async () => new ArrayBuffer(0),
     async (bytes) => {
       const key = String(stored.size);
       stored.set(key, bytes);
@@ -102,6 +104,7 @@ test("shared doc links render once per folder and resection copies keep that fol
     input(paths),
     execute,
     async (hash) => Uint8Array.from(stored.get(hash) ?? Buffer.from("[go](target.md)")).buffer,
+    async () => new ArrayBuffer(0),
     async (bytes) => {
       const key = String(stored.size);
       stored.set(key, bytes);
@@ -127,6 +130,7 @@ test("a missing relative link in one folder cannot hide a declared link in anoth
     body,
     execute,
     async (hash) => Uint8Array.from(stored.get(hash) ?? Buffer.from("[go](target.md)")).buffer,
+    async () => new ArrayBuffer(0),
     async (bytes) => {
       const key = String(stored.size);
       stored.set(key, bytes);
@@ -159,6 +163,7 @@ test("the block cap counts repeated paths and stops every later Markdown doc", a
     body,
     execute,
     async () => serializeRendered(blocks).bytes,
+    async () => new ArrayBuffer(0),
     async () => "stored",
   );
   expect(result.count).toBe(99001); // 99,000 doc blocks plus the writeup block.
@@ -182,6 +187,7 @@ test("an over-cap writeup fails before any rendered blob is stored", async () =>
         ...serializeRendered({ sections: [{ key: "overview", label: "Overview", topic: null, blocks }] }),
       }),
       async () => new ArrayBuffer(0),
+      async () => new ArrayBuffer(0),
       put,
     ),
   ).rejects.toMatchObject({ code: "too_large", message: "The writeup has too many blocks." });
@@ -204,6 +210,7 @@ test("the writeup renders images that parentless assets declare, and only those"
   await renderRevision(
     body,
     executeWork,
+    async () => new ArrayBuffer(0),
     async () => new ArrayBuffer(0),
     async (bytes) => {
       stored.push(bytes);
@@ -229,6 +236,7 @@ test("a Markdown doc keeps no image source even when the writeup declares that m
     body,
     executeWork,
     async () => Uint8Array.from(docSource).buffer,
+    async () => new ArrayBuffer(0),
     async (bytes) => {
       stored.push(bytes);
       return String(stored.length - 1);
@@ -249,6 +257,7 @@ test("shared source resolves each doc's own fragments and directory separately",
     input(paths),
     executeWork,
     async (hash) => Uint8Array.from(stored.get(hash) ?? Buffer.from(source)).buffer,
+    async () => new ArrayBuffer(0),
     async (bytes) => {
       const key = String(stored.size);
       stored.set(key, bytes);
@@ -277,6 +286,7 @@ test.each(["failure", "budget"])("unrendered docs keep titles but no headings af
         return executeWork(work);
       },
       async (hash) => Uint8Array.from(stored.get(hash) ?? Buffer.from("# Title\n\n## Part")).buffer,
+      async () => new ArrayBuffer(0),
       async (bytes) => {
         const hash = String(stored.size);
         stored.set(hash, bytes);
@@ -306,6 +316,7 @@ test.each(["identical", "collision chain"])(
         return executeWork(work);
       },
       async (hash) => Uint8Array.from(stored.get(hash) ?? Buffer.from(source)).buffer,
+      async () => new ArrayBuffer(0),
       async (bytes) => {
         const key = String(stored.size);
         stored.set(key, bytes);
@@ -327,6 +338,7 @@ test("shared heading lists share their lookup map across paths", async () => {
     input(["a.md", "b.md"]),
     execute,
     async (hash) => Uint8Array.from(stored.get(hash) ?? Buffer.from("## Setup")).buffer,
+    async () => new ArrayBuffer(0),
     async (bytes) => {
       const key = String(stored.size);
       stored.set(key, bytes);
@@ -347,6 +359,7 @@ test("source aliases reuse one render per language and highlight mode", async ()
     input(paths),
     execute,
     async () => new TextEncoder().encode(source).buffer,
+    async () => new ArrayBuffer(0),
     async (bytes) => {
       const key = String(stored.size);
       stored.set(key, bytes);
@@ -397,6 +410,7 @@ test.each(["failure", "timeout"])(
         if (!source) throw new Error("missing source");
         return source;
       },
+      async () => new ArrayBuffer(0),
       async () => "stored",
     );
     const jobs = execute.mock.calls.flatMap(([work]) => (work.kind === "source" ? [work] : []));
@@ -410,3 +424,38 @@ test.each(["failure", "timeout"])(
     expect(result.sourceBlobs.size).toBe(3);
   },
 );
+
+test("media heads come from readHead once per distinct hash and never from read", async () => {
+  const sha = "c".repeat(64);
+  // Synthetic 3x2 PNG header.
+  const header = Buffer.from("89504e470d0a1a0a0000000d4948445200000003000000020806000000", "hex");
+  const read = vi.fn(async (hash: string): Promise<ArrayBuffer> => {
+    if (hash === sha) throw new Error("media blob must not be read whole");
+    return new ArrayBuffer(0);
+  });
+  const readHead = vi.fn(async () => Uint8Array.from(header).buffer);
+  const request: PublishRequest = {
+    ...input([]),
+    writeup: { overview: "![A](media/a.png) ![B](media/b.png)", tldr: "", decisions: null, topics: {} },
+    files: ["media/a.png", "media/b.png"].map((path) => ({
+      path,
+      role: "asset" as const,
+      oldPath: null,
+      oldBlob: null,
+      newBlob: sha,
+      flag: null,
+    })),
+  };
+  const stored = new Map<string, Buffer>();
+  const result = await renderRevision(request, executeWork, read, readHead, async (bytes) => {
+    const key = String(stored.size);
+    stored.set(key, bytes);
+    return key;
+  });
+  expect(readHead).toHaveBeenCalledTimes(1);
+  expect(readHead).toHaveBeenCalledWith(sha);
+  expect(read.mock.calls.some(([hash]) => hash === sha)).toBe(false);
+  const html = stored.get(result.renderedBlob)?.toString() ?? "";
+  expect(html).toContain('width=\\"3\\"');
+  expect(html).toContain('height=\\"2\\"');
+});

@@ -50,6 +50,7 @@ test("rendered bytes count each shared path and stop later docs even with differ
     input,
     execute,
     async () => serializeRendered([block]).bytes,
+    async () => new ArrayBuffer(0),
     async () => "stored",
   );
   expect([...result.docBlobs.keys()]).toEqual(["a.md"]);
@@ -69,6 +70,7 @@ test("a writeup alone above the byte cap has the fixed size error", async () => 
         }),
       }),
       async () => new ArrayBuffer(0),
+      async () => new ArrayBuffer(0),
       async () => "stored",
     ),
   ).rejects.toMatchObject({ code: "too_large", message: "The writeup has too many blocks." });
@@ -83,6 +85,7 @@ test("doc metadata is bounded before storing any rendered blobs", async () => {
         work.kind === "doc-metadata"
           ? { kind: "doc-metadata", title: "x".repeat(200), headings: [{ level: 2, text: "y".repeat(200) }] }
           : executeWork(work),
+      async () => new ArrayBuffer(0),
       async () => new ArrayBuffer(0),
       put,
     ),
@@ -102,6 +105,7 @@ test("lookup bytes have an independent budget even when metadata fits", async ()
               headings: [{ level: 2, text: "a".repeat(200), id: `user-content-${"b".repeat(187)}` }],
             }
           : executeWork(work),
+      async () => new ArrayBuffer(0),
       async () => new ArrayBuffer(0),
       put,
     ),
@@ -129,6 +133,7 @@ test.each(["distinct lists", "UTF-8 name"])(
         { ...input, files: files.filter((file) => file !== undefined) },
         execute,
         async () => new ArrayBuffer(0),
+        async () => new ArrayBuffer(0),
         put,
       ),
     ).rejects.toMatchObject({ code: "too_large" });
@@ -147,6 +152,7 @@ test("R1.8 exactly the lookup cap is accepted and a shared heading list is charg
   const result = await renderRevision(
     { ...input, files: input.files.slice(0, 2) },
     execute,
+    async () => new ArrayBuffer(0),
     async () => new ArrayBuffer(0),
     async () => "stored",
   );
@@ -169,6 +175,7 @@ test("source docs share the rendered-byte budget and skip metadata parsing", asy
   const result = await renderRevision(
     { ...input, files: input.files.map((f) => ({ ...f, view: "source" })) },
     execute,
+    async () => new ArrayBuffer(0),
     async () => new ArrayBuffer(0),
     async () => "stored",
   );
