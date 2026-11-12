@@ -158,7 +158,6 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
   const now = options.now ?? (() => new Date());
   const database = join(stateDir, "emend.db");
   let backupPath: string | undefined;
-  let fresh: NewEmend | undefined;
   const rollback = () =>
     goBack({
       home,
@@ -167,7 +166,6 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
       backupPath,
       oldVersion: VERSION,
       oldEntry,
-      newEntry: fresh?.entry,
       node: runtime.node,
       helper: helper.file,
       install,
@@ -216,9 +214,8 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
       );
     const located = await step(() => locate(method, install, helper, env, home, signals));
     const currentRoots = await step(() => repositoryRoots(cwd, home));
-    fresh = await checkNewEmend(located, currentRoots);
+    const checked = await checkNewEmend(located, currentRoots);
     checkpoint();
-    const checked = fresh;
     const version = checked.version;
     const asked = await step(() =>
       runChild(runtime.node, [checked.entry, "--version"], {
@@ -271,7 +268,6 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
     checkpoint();
     const block = rollback();
     if (block) io.stdout(block);
-    checkpoint();
   } catch (error) {
     if (error instanceof CliSignalExit) throw error;
     checkpoint();
@@ -345,9 +341,13 @@ async function restartService(
       );
     return false;
   }
-  if (version === VERSION && runningBefore?.version === version) {
-    io.stdout(`emend: the emend service already runs emend ${version}\n`);
-    return false;
+  if (version === VERSION) {
+    const running = await probe();
+    checkpoint();
+    if (running?.version === version) {
+      io.stdout(`emend: the emend service already runs emend ${version}\n`);
+      return false;
+    }
   }
   const installed = await runChild(runtime.node, [fresh.entry, "service", "install"], {
     cwd: home,

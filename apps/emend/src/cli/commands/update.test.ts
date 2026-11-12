@@ -227,15 +227,17 @@ describe.each([
     expect(err()).toContain(`  cp '${backup}' '${join(fake.state, "emend.db")}' && rm -f `);
     expect(err()).toContain(`  cd '${fake.home}' &&\n`);
     expect(err()).toContain(
-      `  EMEND_HOME='${fake.state}' '${process.execPath}' '${await realpath(fake.entry)}' stop &&\n`,
+      `  /usr/bin/env -u XDG_CONFIG_HOME EMEND_HOME='${fake.state}' '${process.execPath}' '${await realpath(fake.entry)}' stop &&\n`,
     );
-    expect(err()).toContain(`  EMEND_HOME='${fake.state}' '${process.execPath}' '${await realpath(fake.entry)}'\n`);
+    expect(err()).toContain(
+      `  /usr/bin/env -u XDG_CONFIG_HOME EMEND_HOME='${fake.state}' '${process.execPath}' '${await realpath(fake.entry)}'\n`,
+    );
     const old = {
       npm: `'${join(fake.bin, "npm")}' install --global --prefix '${join(fake.root, "prefix")}' --ignore-scripts @shllg/emend@${VERSION}`,
       pnpm: `'${join(fake.bin, "pnpm")}' add --global --ignore-scripts --ignore-pnpmfile @shllg/emend@${VERSION}`,
       mise: `'${join(fake.bin, "mise")}' use --global npm:@shllg/emend@${VERSION}`,
     }[layout];
-    expect(err()).toContain(`  npm_config_ignore_scripts=true ${old} &&\n`);
+    expect(err()).toContain(`npm_config_ignore_scripts=true ${old} &&\n`);
     expect(out()).not.toContain("emend is now");
   });
 
@@ -314,7 +316,7 @@ describe("the service", () => {
     expect(out()).toContain("emend: the emend service runs emend 0.2.0\n");
     expect(out()).toContain("  systemctl --user stop emend &&\n");
     expect(out()).toContain(
-      `  EMEND_HOME='${fake.state}' XDG_CONFIG_HOME='${join(fake.home, ".config")}' '${process.execPath}' '${await realpath(fake.entry)}' service install\n`,
+      `  /usr/bin/env EMEND_HOME='${fake.state}' XDG_CONFIG_HOME='${join(fake.home, ".config")}' '${process.execPath}' '${await realpath(fake.entry)}' service install\n`,
     );
   });
 
@@ -324,7 +326,9 @@ describe("the service", () => {
     await mkdir(join(fake.home, "Library/LaunchAgents"), { recursive: true });
     await writeFile(plist, "x");
     expect(await update(), err()).toBe(0);
-    expect(out()).toContain("  launchctl bootout gui/1000/dev.emend.server &&\n");
+    expect(out()).toContain(
+      "  { launchctl bootout gui/1000/dev.emend.server || ! launchctl print gui/1000/dev.emend.server >/dev/null 2>&1; } &&\n",
+    );
   });
 
   test("is not touched without a unit file", async () => {
@@ -459,7 +463,7 @@ test.each([{}, { listError: "global bin directory is not in PATH\u001b[31m\npriv
     expect(err()).toContain("could not tell how emend was installed");
     expect(await readdir(fake.state)).not.toContain("backups");
     expect((await fake.calls()).map((c) => c.argv)).toEqual([
-      ["list", "--global", "--json", "--depth", "0", "--ignore-pnpmfile"],
+      ["list", "--global", "--json", "--depth", "0", "--config.ignore-pnpmfile=true"],
     ]);
     if (patch.listError) {
       expect(err()).toContain("global bin directory is not in PATH");
@@ -560,13 +564,13 @@ test("rollback quotes every path even with shell metacharacters", async () => {
   const entry = await realpath(fake.entry);
   expect(err()).toContain(`  cd ${quoteShellArgument(fake.home)} &&\n`);
   expect(err()).toContain(
-    `  npm_config_ignore_scripts=true ${quoteShellArgument(join(fake.bin, "npm"))} install --global --prefix ${quoteShellArgument(join(fake.root, "prefix"))} --ignore-scripts @shllg/emend@${VERSION} &&\n`,
+    `npm_config_ignore_scripts=true ${quoteShellArgument(join(fake.bin, "npm"))} install --global --prefix ${quoteShellArgument(join(fake.root, "prefix"))} --ignore-scripts @shllg/emend@${VERSION} &&\n`,
   );
   expect(err()).toContain(
-    `  EMEND_HOME=${quoteShellArgument(fake.state)} ${quoteShellArgument(process.execPath)} ${quoteShellArgument(entry)} stop &&\n`,
+    `  /usr/bin/env -u XDG_CONFIG_HOME EMEND_HOME=${quoteShellArgument(fake.state)} ${quoteShellArgument(process.execPath)} ${quoteShellArgument(entry)} stop &&\n`,
   );
   expect(err()).toContain(
-    `  EMEND_HOME=${quoteShellArgument(fake.state)} ${quoteShellArgument(process.execPath)} ${quoteShellArgument(entry)}\n`,
+    `  /usr/bin/env -u XDG_CONFIG_HOME EMEND_HOME=${quoteShellArgument(fake.state)} ${quoteShellArgument(process.execPath)} ${quoteShellArgument(entry)}\n`,
   );
 });
 
@@ -584,9 +588,9 @@ test("every pnpm call disables pnpmfiles, including detection and locate", async
   await make("pnpm");
   expect(await update(), err()).toBe(0);
   expect((await fake.calls()).filter((call) => call.tool === "pnpm").map((call) => call.argv)).toEqual([
-    ["list", "--global", "--json", "--depth", "0", "--ignore-pnpmfile"],
+    ["list", "--global", "--json", "--depth", "0", "--config.ignore-pnpmfile=true"],
     ["add", "--global", "--ignore-scripts", "--ignore-pnpmfile", "@shllg/emend@latest"],
-    ["list", "--global", "--json", "--depth", "0", "--ignore-pnpmfile"],
+    ["list", "--global", "--json", "--depth", "0", "--config.ignore-pnpmfile=true"],
   ]);
 });
 
@@ -657,7 +661,7 @@ test("SIGINT during the hub probe keeps rollback and removes handlers", async ()
 });
 
 test.each(["npm", "pnpm", "mise"] as const)(
-  "%s rollback selects the checked new entry only once known",
+  "%s rollback restores before stopping the old entry even when the new version is broken",
   async (layout) => {
     for (const service of [false, true])
       for (const known of [false, true]) {
@@ -666,8 +670,7 @@ test.each(["npm", "pnpm", "mise"] as const)(
         if (service) await installService(fake);
         await fake.set(known ? { badVersion: true } : { updateFails: true });
         expect(await update(), err()).toBe(1);
-        const config = JSON.parse(await readFile(fake.config, "utf8"));
-        const stopEntry = known ? join(config.newPackage, "dist/emend.mjs") : await realpath(fake.entry);
+        const stopEntry = await realpath(fake.entry);
         expect(err()).toContain(
           service ? "systemctl --user stop emend &&" : `${quoteShellArgument(stopEntry)} stop &&`,
         );
@@ -725,5 +728,34 @@ test("rollback prints only checked child directory values, never raw or proxy se
     "XDG_STATE_HOME",
   ])
     expect(err()).toContain(`${name}=${quoteShellArgument(safe)}`);
-  expect(err()).not.toMatch(/MISE_CONFIG_DIR|MISE_CACHE_DIR|MISE_STATE_DIR|HTTPS_PROXY|proxy.example|XDG_RUNTIME_DIR/);
+  for (const name of ["MISE_CONFIG_DIR", "MISE_CACHE_DIR", "MISE_STATE_DIR"]) {
+    expect(err()).toContain(`-u ${name}`);
+    expect(err()).not.toContain(`${name}=`);
+  }
+  expect(err()).not.toMatch(/HTTPS_PROXY|proxy.example|XDG_RUNTIME_DIR/);
+});
+
+test("SIGINT when stdout receives the final go-back list finishes successfully and prints it once", async () => {
+  await make("npm");
+  await makeDatabase(join(fake.state, "emend.db"));
+  fake.io.stdout = (text) => {
+    fake.stdout.push(text);
+    if (text.includes("to go back")) process.emit("SIGINT");
+  };
+  expect(await update(), err()).toBe(0);
+  expect((out() + err()).match(/to go back/g)).toHaveLength(1);
+  expect(err()).toBe("");
+});
+
+test("restarts a same-version service that stopped during the install", async () => {
+  await make("npm");
+  await installService(fake);
+  await fake.set({ newVersion: VERSION, newScript: emendScript(VERSION, fake.root) });
+  const running = { url: "http://127.0.0.1:3636", version: VERSION };
+  const probe = vi.fn().mockResolvedValueOnce(running).mockResolvedValueOnce(null).mockResolvedValue(running);
+  fake.options.localVersion = probe;
+  expect(await update(), err()).toBe(0);
+  expect((await fake.calls()).some((call) => call.tool === "service-install")).toBe(true);
+  expect(probe).toHaveBeenCalledTimes(3);
+  expect(out()).not.toContain("the emend service already runs");
 });

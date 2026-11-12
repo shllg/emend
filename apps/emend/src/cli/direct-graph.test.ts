@@ -336,7 +336,13 @@ function assertAgentSql(
     if (!/\b(?:select|insert|replace|update|delete|with|from|join|create|alter|drop)\b/i.test(query)) continue;
     if (name === "db/client.ts" && /\bselect\b/i.test(query)) fail("reviewer SQL binding");
     // Static main help names the devices command; all SQL write checks still apply.
-    const help = name === "main.ts" && quote.startsWith("`") && query.startsWith("Usage:\n") && !query.includes("${");
+    const help =
+      name === "main.ts" &&
+      quote.startsWith("`") &&
+      query.startsWith("Usage:\n") &&
+      !query.includes("${") &&
+      source.includes(`io.stdout(${quote})`) &&
+      source.split(quote).length === 2;
     if (
       !help &&
       reviewerTables.some(
@@ -1843,11 +1849,15 @@ test.each(["cli.ts", "main.ts"])("allows only the command name in %s", async (na
   await expect(assertAgentGraph(bad, [join(bad, name)])).rejects.toThrow("forbidden");
 });
 test("allows the main Usage template including the inline update command", async () => {
-  const folder = await fixture({ "main.ts": "export const help = `Usage:\n  emend update\n  emend devices`;" });
+  const folder = await fixture({
+    "main.ts": "export const help = (io) => io.stdout(`Usage:\n  emend update\n  emend devices`);",
+  });
   await expect(assertAgentGraph(folder, [join(folder, "main.ts")])).resolves.toBeInstanceOf(Set);
 });
 
 test.each([
+  "export const act = (q) => q.run(`Usage:\nSELECT * FROM devices`.slice(7));",
+  "export const act = (io, q) => { io.stdout(`Usage:\nSELECT * FROM devices`); q.run(`Usage:\nSELECT * FROM devices`.slice(7)); };",
   "export const act = (q) => q.run(`Usage:\nUPDATE reviews SET state = 'approved'`.slice(7));",
   "export const act = (q) => q.run(`Usage:\nDELETE FROM tokens`.slice(7));",
   `const x = "UPDATE reviews SET state = 'approved'"; export const act = (q) => q.run(\`Usage:\n\${x}\`);`,

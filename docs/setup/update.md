@@ -272,25 +272,29 @@ on the newer version.
 
 `emend update` prints a go-back block with the exact home, helper, Node.js, old entry, database and
 backup paths for that run. Stop every agent that uses emend, then paste the printed lines as one
-shell list. Keep the quotes, environment assignments and `&&` between commands: the list stops at
-the first failure. The assignments pin the checked package-manager directories, state folder and
-config folder so shell directory hooks cannot redirect the restore after `cd`. Every restore sets
-`npm_config_ignore_scripts=true`, including mise's npm backend.
+shell list. Keep the quotes, `/usr/bin/env` arguments and `&&` between commands: the list stops at
+the first failure. Each program with pinned variables runs through `/usr/bin/env`, with `-u NAME`
+first for every directory variable the update left out, then `NAME='value'` for checked values.
+This prevents shell directory hooks from redirecting the restore after `cd`. The restore covers
+`MISE_DATA_DIR`, `MISE_CONFIG_DIR`, `MISE_CACHE_DIR`, `MISE_STATE_DIR`, `PNPM_HOME`, `XDG_DATA_HOME`,
+`XDG_CONFIG_HOME`, `XDG_CACHE_HOME` and `XDG_STATE_HOME`, and sets `npm_config_ignore_scripts=true`,
+including for mise's npm backend. The emend commands pin `EMEND_HOME` and either pin
+`XDG_CONFIG_HOME` or unset it with `/usr/bin/env -u XDG_CONFIG_HOME EMEND_HOME='…' …`.
 
 1. Change to the printed home folder.
-2. Stop the service: `systemctl --user stop emend` on Linux, or
-   `launchctl bootout gui/<uid>/dev.emend.server` on macOS. Without a service, run the printed Node.js
-   and checked new entry paths followed by `stop`; if the update failed before locating the new
-   emend, the block uses the old entry instead.
-3. Run the printed environment assignments and absolute package-manager path to restore the old
+2. With a service, stop it first: `systemctl --user stop emend` on Linux, or
+   `{ launchctl bootout gui/<uid>/dev.emend.server || ! launchctl print gui/<uid>/dev.emend.server >/dev/null 2>&1; }`
+   on macOS. The macOS command also succeeds when the job is not loaded.
+3. Run the printed `/usr/bin/env` arguments and absolute package-manager path to restore the old
    version. npm uses
    `install --global --prefix <prefix> --ignore-scripts @shllg/emend@<old>`; pnpm uses
    `add --global --ignore-scripts --ignore-pnpmfile @shllg/emend@<old>`; mise uses
    `use --global npm:@shllg/emend@<old>`.
+   Without a service, restore first, then run the printed Node.js and restored old entry paths
+   followed by `stop`, with their printed `/usr/bin/env` arguments.
 4. Run the printed `cp <backup> <database> && rm -f <database>-wal <database>-shm` line.
-5. Run the printed `EMEND_HOME` (and `XDG_CONFIG_HOME` when present) assignments, Node.js and old
-   entry paths with `service install` when there is a service,
-   or with no arguments to start the server and open the inbox otherwise.
+5. Run the printed `/usr/bin/env` arguments, Node.js and old entry paths with `service install`
+   when there is a service, or with no arguments to start the server and open the inbox otherwise.
 
 The state folder defaults to `$XDG_DATA_HOME/emend` on Linux when `XDG_DATA_HOME` is absolute,
 otherwise `~/.local/share/emend`; on macOS it is `~/Library/Application Support/emend`.

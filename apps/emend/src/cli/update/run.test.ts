@@ -86,3 +86,78 @@ test("records the first signal between children and starts no subsequent child",
     signals.dispose();
   }
 });
+
+function killGroup(pid: number) {
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+}
+
+async function processTree(output: "inherit" | "capture", signals?: UpdateSignals, exits = false) {
+  const dir = await mkdtemp(join(process.env.EMEND_HOME as string, "descendants-"));
+  const pidFile = join(dir, "grandchild");
+  const groupFile = join(dir, "group");
+  const grandchild = `const fs = require("node:fs");
+    process.on("SIGINT", () => {}); process.on("SIGTERM", () => {});
+    fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+    setTimeout(() => {}, 60000);`;
+  const pending = runChild(
+    process.execPath,
+    [
+      "-e",
+      `
+    const fs = require("node:fs");
+    fs.writeFileSync(${JSON.stringify(groupFile)}, String(process.pid));
+    require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(grandchild)}], { stdio: "inherit", env: {} });
+    ${exits ? "process.exit(0);" : "setInterval(() => {}, 1000);"}
+  `,
+    ],
+    { cwd: dir, env: {}, timeoutMs: 10000, output, signals },
+  );
+  await pollUntil(async () => expect(Number(await readFile(pidFile, "utf8"))).toBeGreaterThan(0));
+  return { pending, pid: Number(await readFile(pidFile, "utf8")), group: Number(await readFile(groupFile, "utf8")) };
+}
+
+test.each(["inherit", "capture"] as const)(
+  "interrupting %s kills descendants that ignore both signals",
+  async (output) => {
+    for (const signal of ["SIGINT", "SIGTERM"] as const) {
+      const signals = new UpdateSignals();
+      const tree = await processTree(output, signals);
+      try {
+        const start = performance.now();
+        process.emit(signal);
+        expect((await tree.pending).interrupted).toBe(signal);
+        await pollUntil(() =>
+          expect(() => process.kill(tree.pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" })),
+        );
+        expect(performance.now() - start).toBeLessThan(7000);
+      } finally {
+        killGroup(tree.group);
+        // Also cleans up the old implementation, whose child has no separate group.
+        try {
+          process.kill(tree.pid, "SIGKILL");
+        } catch {}
+        signals.dispose();
+      }
+    }
+  },
+  15000,
+);
+
+test("capture settles after exit even when a descendant holds stdout open", async () => {
+  const start = performance.now();
+  const tree = await processTree("capture", undefined, true);
+  try {
+    const result = await tree.pending;
+    expect(result).toMatchObject({ code: 0, signal: null, timedOut: false, error: false });
+    expect(performance.now() - start).toBeLessThan(4000);
+  } finally {
+    killGroup(tree.group);
+    try {
+      process.kill(tree.pid, "SIGKILL");
+    } catch {}
+  }
+}, 15000);

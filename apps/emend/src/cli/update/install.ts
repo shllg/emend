@@ -113,7 +113,7 @@ export function updateArgs(install: Install): string[] {
 
 /** The command that prints where the new package lives. */
 export function locateArgs(install: Install): string[] {
-  if (install.kind === "pnpm") return ["list", "--global", "--json", "--depth", "0", "--ignore-pnpmfile"];
+  if (install.kind === "pnpm") return ["list", "--global", "--json", "--depth", "0", "--config.ignore-pnpmfile=true"];
   return ["where", `npm:${updatePackage}`];
 }
 

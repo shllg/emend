@@ -36,11 +36,13 @@ export function runChild(
     let onSignal: (() => void) | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
+    let closeTimer: ReturnType<typeof setTimeout> | undefined;
     const done = (code: number | null, signal: NodeJS.Signals | null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       clearTimeout(killTimer);
+      clearTimeout(closeTimer);
       if (onSignal) options.signals?.signal.removeEventListener("abort", onSignal);
       resolve({ code, signal, interrupted, timedOut, error, stdout, stderr });
     };
@@ -54,14 +56,27 @@ export function runChild(
         cwd: options.cwd,
         env: options.env,
         shell: false,
+        detached: true,
         stdio: inherit ? "inherit" : ["ignore", "pipe", "pipe"],
       });
+      let terminating = false;
+      let exited = false;
+      const signalGroup = (signal: NodeJS.Signals) => {
+        if (child.pid === undefined) return;
+        try {
+          process.kill(-child.pid, signal);
+        } catch (cause) {
+          if ((cause as NodeJS.ErrnoException).code !== "ESRCH") error = true;
+        }
+      };
       const terminate = (signal: "SIGINT" | "SIGTERM") => {
-        child.kill(signal);
-        killTimer ??= setTimeout(() => {
-          if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-        }, 5000);
-        killTimer.unref();
+        terminating = true;
+        signalGroup(signal);
+        if (exited) signalGroup("SIGKILL");
+        else {
+          killTimer ??= setTimeout(() => signalGroup("SIGKILL"), 5000);
+          killTimer.unref();
+        }
       };
       onSignal = () => {
         interrupted = options.signals?.interrupted ?? null;
@@ -75,7 +90,7 @@ export function runChild(
       const capture = (current: string, chunk: string) => {
         if (Buffer.byteLength(current) + Buffer.byteLength(chunk) > captureLimit) {
           error = true;
-          child.kill("SIGTERM");
+          terminate("SIGTERM");
           return current;
         }
         return current + chunk;
@@ -91,6 +106,17 @@ export function runChild(
       child.once("error", () => {
         error = true;
         done(null, null);
+      });
+      child.once("exit", (code, signal) => {
+        exited = true;
+        clearTimeout(timer);
+        // The leader can exit while descendants keep running and hold its pipes open.
+        if (terminating) signalGroup("SIGKILL");
+        closeTimer = setTimeout(() => {
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          done(code, signal);
+        }, 1000);
       });
       child.once("close", done);
     } catch {

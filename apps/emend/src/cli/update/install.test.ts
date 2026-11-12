@@ -134,7 +134,14 @@ describe("commands", () => {
     expect(restoreArgs({ kind: "mise" }, "0.1.0")).toEqual(["use", "--global", "npm:@shllg/emend@0.1.0"]);
   });
   test("locate queries pnpm's global dependencies and mise's installed folder", () => {
-    expect(locateArgs({ kind: "pnpm" })).toEqual(["list", "--global", "--json", "--depth", "0", "--ignore-pnpmfile"]);
+    expect(locateArgs({ kind: "pnpm" })).toEqual([
+      "list",
+      "--global",
+      "--json",
+      "--depth",
+      "0",
+      "--config.ignore-pnpmfile=true",
+    ]);
     expect(locateArgs({ kind: "mise" })).toEqual(["where", "npm:@shllg/emend"]);
   });
 });

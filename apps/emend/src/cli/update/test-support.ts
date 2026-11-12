@@ -28,12 +28,12 @@ export interface Fake {
 
 /** An emend whose `--version` answers `version`; `service install` records itself and sets the server version. */
 export function emendScript(version: string, root: string): string {
-  return `import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+  return `import { appendFileSync, readFileSync, writeFileSync, writeSync } from "node:fs";
 const config = JSON.parse(readFileSync(${JSON.stringify(join(root, "fake.json"))}, "utf8"));
 const argv = process.argv.slice(2);
 if (argv[0] === "--version") {
   appendFileSync(config.newLog, "version\\n");
-  process.stdout.write(config.badVersion ? "emend nonsense\\n" : "emend ${version}\\n");
+  writeSync(1, config.badVersion ? "emend nonsense\\n" : "emend ${version}\\n");
 }
 else if (argv[0] === "service" && argv[1] === "install") {
   appendFileSync(config.newLog, "service\\n");
@@ -52,6 +52,15 @@ const config = JSON.parse(fs.readFileSync(${JSON.stringify(join(root, "fake.json
 const argv = process.argv.slice(2);
 fs.appendFileSync(config.log, JSON.stringify({ tool: ${JSON.stringify(tool)}, argv, cwd: process.cwd(), env: Object.keys(process.env), values: { PATH: process.env.PATH, HOME: process.env.HOME, EMEND_HOME: process.env.EMEND_HOME, npm_config_ignore_scripts: process.env.npm_config_ignore_scripts } }) + "\\n");
 const verb = argv[0];
+if (${JSON.stringify(tool)} === "pnpm" && (verb === "list" || verb === "add")) {
+  const allowed = verb === "list" ? ["--global", "--json", "--depth"] : ["--global", "--ignore-scripts", "--ignore-pnpmfile"];
+  for (const arg of argv.slice(1)) {
+    if (arg.startsWith("-") && !allowed.includes(arg) && !/^--config\\.[^=]+=.*$/.test(arg)) {
+      fs.writeSync(2, "[ERROR] Unknown option: '" + arg.replace(/^-+/, "").split("=")[0] + "'\\n");
+      process.exit(1);
+    }
+  }
+}
 if (verb === "install" || verb === "add" || verb === "upgrade") {
   if (config.sleep) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, config.sleep);
   if (config.updateFails) process.exit(3);
@@ -60,12 +69,12 @@ if (verb === "install" || verb === "add" || verb === "upgrade") {
   fs.writeFileSync(path.join(config.newPackage, "package.json"), JSON.stringify({ name: "@shllg/emend", version: config.newVersion }));
   fs.writeFileSync(path.join(config.newPackage, "dist/emend.mjs"), config.newScript);
 } else if (verb === "list") {
-  if (config.listWarning) process.stderr.write(config.listWarning);
-  if (config.listError) { process.stderr.write(config.listError); process.exit(2); }
+  if (config.listWarning) fs.writeSync(2, config.listWarning);
+  if (config.listError) { fs.writeSync(2, config.listError); process.exit(2); }
   const folder = fs.existsSync(config.updated) ? config.newPackage : config.oldPackage;
-  process.stdout.write(config.listOutput ?? JSON.stringify([{ dependencies: config.unlisted ? {} : { "@shllg/emend": { version: "0.1.0", path: folder } } }]));
+  fs.writeSync(1, config.listOutput ?? JSON.stringify([{ dependencies: config.unlisted ? {} : { "@shllg/emend": { version: "0.1.0", path: folder } } }]));
 }
-else if (verb === "where") process.stdout.write(config.located + "\\n");
+else if (verb === "where") fs.writeSync(1, config.located + "\\n");
 `;
 }
 
