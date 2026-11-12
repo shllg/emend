@@ -16,6 +16,7 @@ function InboxSettings({ setting }: { setting: HoursSetting }) {
   const input = useRef<HTMLInputElement>(null);
   const initial = setting.source === "default" ? "" : String(setting.value);
   const value = draft ?? initial;
+  const changed = draft !== undefined && (value === "" ? null : Number(value)) !== setting.override;
   const mutation = useMutation({
     mutationFn: (approvedActiveHours: number | null) =>
       patch("/api/v1/settings", { approvedActiveHours }, SettingsView),
@@ -35,7 +36,7 @@ function InboxSettings({ setting }: { setting: HoursSetting }) {
       setError("Enter whole hours from 0 to 720.");
       return;
     }
-    if (value !== initial) mutation.mutate(value === "" ? null : Number(value));
+    if (changed) mutation.mutate(value === "" ? null : Number(value));
   }
   return (
     <section aria-labelledby="inbox-settings" className="mt-6">
@@ -69,7 +70,7 @@ function InboxSettings({ setting }: { setting: HoursSetting }) {
             }}
           />
           <span className="pb-2 text-14 text-fg-3">{value === "1" ? "hour" : "hours"}</span>
-          <Button type="submit" variant="primary" disabled={value === initial || mutation.isPending}>
+          <Button type="submit" variant="primary" disabled={!changed || mutation.isPending}>
             Save
           </Button>
           {setting.source === "override" && (

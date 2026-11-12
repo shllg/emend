@@ -114,6 +114,23 @@ test.each(["Save", "Reset"])("%s can clear an override and fall back to the file
   expect(input.value).toBe("24");
   expect(JSON.parse(String(f.patches()[0]?.[1]?.body))).toEqual({ approvedActiveHours: null });
 });
+test("the file value can be pinned as an override", async () => {
+  const f = setup({ source: "file", value: 24, file: 24 });
+  const input = await field();
+  expect(save().disabled).toBe(true);
+  fireEvent.change(input, { target: { value: "" } });
+  fireEvent.change(input, { target: { value: "24" } });
+  expect(save().disabled).toBe(false);
+  fireEvent.click(save());
+  await screen.findByText("Set here.");
+  expect(f.patches()).toHaveLength(1);
+  expect(String(f.patches()[0]?.[1]?.body)).toBe('{"approvedActiveHours":24}');
+});
+test("clearing a file value leaves Save disabled", async () => {
+  setup({ source: "file", value: 24, file: 24 });
+  fireEvent.change(await field(), { target: { value: "" } });
+  expect(save().disabled).toBe(true);
+});
 test("Reset without a file falls back to an empty default input", async () => {
   setup({ source: "override", value: 2, override: 2 });
   const input = await field();
