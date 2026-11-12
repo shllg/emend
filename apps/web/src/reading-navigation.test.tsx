@@ -935,7 +935,8 @@ test.each([1280, 768, 390])("doc list and open doc navigate, focus and reset scr
   await screen.findByRole("heading", { name: "seed.html" });
   expect(container.querySelectorAll("iframe")).toHaveLength(1);
   expect(container.querySelector("[data-block-id]")).toBeNull();
-  expect(screen.getByText("Sandboxed, scripts off")).toBeTruthy();
+  if (pixels === 390) expect(screen.queryByText("Sandboxed, scripts off")).toBeNull();
+  else expect(screen.getByText("Sandboxed, scripts off")).toBeTruthy();
   act(() => history.back());
   const htmlRow = await screen.findByRole("link", { name: names[2] });
   await waitFor(() => expect(document.activeElement).toBe(htmlRow));
@@ -3408,7 +3409,12 @@ test.each([390, 1280])("C3 HTML fills the pane with app-owned controls and drawe
   expect(frame.style.height).not.toBe("70vh");
   expect(screen.getByTestId("reading-pane").getAttribute("data-reading-layout")).toBe("original");
   expect(screen.getByTestId("reading-pane").classList.contains("overflow-y-auto")).toBe(false);
-  expect(screen.getByText("Sandboxed, scripts off").closest(".em-doc-bar")).toBeTruthy();
+  if (pixels === 1280) {
+    expect(screen.getByText("Sandboxed, scripts off").closest(".em-doc-bar")).toBeTruthy();
+  } else {
+    expect(screen.queryByText("Sandboxed, scripts off")).toBeNull();
+    expect(document.querySelector(".em-doc-bar p")).toBeNull();
+  }
   for (const name of ["Docs", "Contents", "Comments (0)"]) {
     const button = screen.getByRole("button", { name });
     fireEvent.click(button);
@@ -3418,6 +3424,28 @@ test.each([390, 1280])("C3 HTML fills the pane with app-owned controls and drawe
     await waitFor(() => expect(document.activeElement).toBe(button));
   }
 });
+
+test.each([390, 768, 1280])(
+  "an HTML doc drops its sandbox note on a phone and keeps it on tablet and desktop at %s px",
+  async (pixels) => {
+    width = pixels;
+    htmlReadingFixture();
+    mount("?tab=docs&doc=seed.html&rev=1&view=reading");
+    await screen.findByRole("heading", { name: "Seed guide" });
+    const { frame } = prepareFrame("seed.html");
+    const bar = document.querySelector(".em-doc-bar");
+    if (!bar) throw new Error("Missing doc bar");
+    if (pixels === 390) {
+      expect(screen.queryByText("Sandboxed, scripts off")).toBeNull();
+      expect(bar.querySelector("p")).toBeNull();
+    } else {
+      const note = screen.getByText("Sandboxed, scripts off");
+      expect(bar.contains(note)).toBe(true);
+      expect(note.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+  },
+);
 
 test("C3 HTML Contents gates goto on ready, replaces history and marks position without changing the URL", async () => {
   width = 1280;

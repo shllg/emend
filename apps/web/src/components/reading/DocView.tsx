@@ -355,7 +355,7 @@ export function DocView({
             </Button>
           )}
         </div>
-        {openDoc.kind === "html" && (
+        {openDoc.kind === "html" && !phone && (
           <p className="flex items-center gap-1.5 text-fg-3 [font:var(--type-meta)]">
             <Icon icon={ShieldCheck} size={13} />
             Sandboxed, scripts off

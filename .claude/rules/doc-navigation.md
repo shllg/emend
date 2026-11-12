@@ -45,4 +45,5 @@ to it. Any change here needs `emend-security-reviewer`.
   offset in memory, never quote text, heading text or a content URL. Remembered focus names
   only the app's own block, thread or writeup topic ids or a declared heading, and stays in memory
   only.
-- The doc bar and its sandbox label stay outside the frame and visible.
+- The doc bar stays outside the frame and visible. Its sandbox label sits there too, on tablet and
+  desktop; the phone layout drops the label to give the doc its row.
