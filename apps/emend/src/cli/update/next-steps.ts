@@ -37,6 +37,10 @@ export async function checkSkillLinks(home: string, folder: string): Promise<Ski
   }
 }
 
+export function localBuildNote(): string {
+  return `emend: then link the agent skills again and update the Claude Code plugin and the phone app as ${updateDoc} says.`;
+}
+
 export function nextSteps(version: string, skills: SkillLinks, attached: boolean): string {
   const shown = escapeReference(version);
   const skillNotes = {

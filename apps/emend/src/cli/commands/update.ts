@@ -27,7 +27,7 @@ import {
   updateDoc,
   updatePackage,
 } from "../update/install.ts";
-import { checkSkillLinks, nextSteps } from "../update/next-steps.ts";
+import { checkSkillLinks, localBuildNote, nextSteps } from "../update/next-steps.ts";
 import { checkNewEmend, type NewEmend } from "../update/package.ts";
 import { pnpmPackages } from "../update/pnpm.ts";
 import { runChild, succeeded } from "../update/run.ts";
@@ -76,9 +76,7 @@ function printLocalBuild(io: Io, install: Extract<Install, { kind: "local" }>) {
   ];
   if (install.root !== undefined) lines.push(`  cd ${quoteShellArgument(install.root)}`);
   lines.push("  git pull", "  pnpm install", "  pnpm install:local");
-  lines.push(
-    `emend: then link the agent skills again and update the Claude Code plugin and the phone app as ${updateDoc} says.`,
-  );
+  lines.push(localBuildNote());
   io.stdout(`${lines.join("\n")}\n`);
 }
 

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node
 import { join } from "node:path";
 import { beforeEach, describe, expect, test } from "vitest";
 import { updateDoc } from "./install.ts";
-import { checkSkillLinks, nextSteps } from "./next-steps.ts";
+import { checkSkillLinks, localBuildNote, nextSteps } from "./next-steps.ts";
 
 let root: string;
 let home: string;
@@ -122,9 +122,9 @@ describe.each(["current", "stale", "none", "unknown"] as const)("%s notes", (sta
         "",
       ].join("\n"),
     );
-    for (const line of notes.trimEnd().split("\n")) {
+    for (const line of `${notes}${localBuildNote()}\n`.trimEnd().split("\n")) {
       expect(line.startsWith("emend: ")).toBe(true);
-      expect(line).not.toMatch(/[;&|<>()$`\\"']/);
+      expect(line).not.toMatch(/[!;&|<>()$`\\"']/);
     }
   });
 
@@ -143,7 +143,7 @@ describe.each(["current", "stale", "none", "unknown"] as const)("%s notes", (sta
       });
       child.on("error", reject);
       child.on("close", resolve);
-      child.stdin.end(nextSteps(version, status, attached));
+      child.stdin.end(`${nextSteps(version, status, attached)}${localBuildNote()}\n`);
     });
     expect(code).toBe(127);
     expect(await readFile(log, "utf8")).toBe("");
