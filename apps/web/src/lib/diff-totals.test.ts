@@ -41,6 +41,36 @@ test("a missing text file makes the total partial, while flagged files do not", 
   });
 });
 
+test("parsed counts fill missing server counts", () => {
+  const missing = file();
+  expect(lineTotals([missing], new Map([[missing.id, { additions: 7, deletions: 3 }]]))).toEqual({
+    additions: 7,
+    deletions: 3,
+    uncounted: 0,
+  });
+});
+
+test("server counts take precedence over parsed counts", () => {
+  const counted = file({ counts: { additions: 2, deletions: 1 } });
+  expect(lineTotals([counted], new Map([[counted.id, { additions: 7, deletions: 3 }]]))).toEqual({
+    additions: 2,
+    deletions: 1,
+    uncounted: 0,
+  });
+});
+
+test.each(["binary", "oversized"] as const)("%s files never add server or parsed counts", (flag) => {
+  const flagged = file({ flag });
+  const parsed = new Map([[flagged.id, { additions: 7, deletions: 3 }]]);
+  expect(lineTotals([flagged], parsed)).toBeNull();
+  expect(lineTotals([{ ...flagged, counts: { additions: 2, deletions: 1 } }], parsed)).toBeNull();
+  expect(lineTotals([file({ counts: { additions: 1, deletions: 0 } }), flagged], parsed)).toEqual({
+    additions: 1,
+    deletions: 0,
+    uncounted: 0,
+  });
+});
+
 test("no counted diff is null, while a counted unchanged file is zero", () => {
   for (const files of [[], [file()], [file({ role: "doc" })], [file({ flag: "binary" })]])
     expect(lineTotals(files)).toBeNull();
@@ -83,6 +113,10 @@ test("the review is the sum of its topic totals, including unassigned files", ()
     { additions: 5, deletions: 6, uncounted: 1 },
   ]);
   expect(reviewLineTotals(revision)).toEqual({ additions: 7, deletions: 9, uncounted: 3 });
+  const parsed = new Map(
+    revision.files.filter((file) => !file.counts).map((file) => [file.id, { additions: 1, deletions: 2 }]),
+  );
+  expect(reviewLineTotals(revision, parsed)).toEqual({ additions: 10, deletions: 15, uncounted: 0 });
   expect(reviewLineTotals({ ...revision, files: [] })).toBeNull();
   expect(reviewLineTotals({ ...revision, files: [file()] })).toBeNull();
 });

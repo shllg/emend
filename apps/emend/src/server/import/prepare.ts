@@ -153,6 +153,7 @@ export async function prepareImport(
     const checkedSources = new Set<string>();
     let previousSourceHash: string | undefined;
     let previousMedia: string[] = [];
+    const revisionsToCount: { id: string; files: PublishRequest["files"] }[] = [];
     for (const revision of bundle.revisions) {
       checkImportSignal(signal);
       current.clear();
@@ -218,10 +219,7 @@ export async function prepareImport(
         }
       }
       await validateNoteRanges(input.files, read, execute);
-      counted.set(
-        revision.id,
-        await countDiffFiles(ownerId, input.files, read, execute, signal, counting.budget, counting.now),
-      );
+      revisionsToCount.push({ id: revision.id, files: input.files });
       // Keep only this revision's and its predecessor's image heads.
       const media = input.files
         .filter((f) => f.role === "asset" && f.parent === undefined && f.newBlob)
@@ -265,6 +263,12 @@ export async function prepareImport(
         writeupMarkdown(input.writeup).every((s) => !s?.trim()),
       );
     }
+    // Spend the shared counting budget on the revision the reviewer opens first.
+    for (const revision of revisionsToCount.reverse())
+      counted.set(
+        revision.id,
+        await countDiffFiles(ownerId, revision.files, read, execute, signal, counting.budget, counting.now),
+      );
     // Check even supplied derived references, which will never be served as trusted HTML.
     for (const hash of hashes) {
       checkImportSignal(signal);

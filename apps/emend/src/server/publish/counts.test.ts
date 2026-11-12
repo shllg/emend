@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import type { PublishFile } from "@emend/contract";
 import { beforeEach, expect, test, vi } from "vitest";
 import { pacing } from "../pacing.ts";
-import { countDiffFiles, createDiffCountBudget, DIFF_COUNT_NULL_TTL_MS } from "./counts.ts";
+import {
+  countDiffFiles,
+  createDiffCountBudget,
+  DIFF_COUNT_FIRST_NULL_TTL_MS,
+  DIFF_COUNT_NULL_TTL_MS,
+} from "./counts.ts";
 import { WorkTimeout } from "./executor.ts";
 import { PublishAborted } from "./lifecycle.ts";
 import { type Executor, executeWork } from "./work.ts";
@@ -53,6 +58,7 @@ test("only unflagged diffs are counted, with one job per ordered blob pair", asy
 });
 
 test("the cumulative budget stops new work and leaves remaining files null", async () => {
+  expect(createDiffCountBudget()).toEqual({ limitMs: 10000, spentMs: 0 });
   let time = 0;
   const execute = vi.fn<Executor>(async () => {
     time += 6;
@@ -184,14 +190,14 @@ test("the same owner's successful result is reused without reads, work or budget
   expect(execute).toHaveBeenCalledTimes(2);
 });
 
-test("a returned null expires after fifteen minutes and is retried subject to the budget", async () => {
-  expect(DIFF_COUNT_NULL_TTL_MS).toBe(15 * 60 * 1000);
+test("a first returned null expires after sixty seconds and is retried subject to the budget", async () => {
+  expect(DIFF_COUNT_FIRST_NULL_TTL_MS).toBe(60_000);
   let time = 100;
   const now = () => time;
   const execute = vi.fn(executeWork).mockResolvedValueOnce({ kind: "diff-counts", counts: null });
   const first = await countDiffFiles(ownerId, [file("one")], read, execute, undefined, createDiffCountBudget(), now);
   expect(first.get("one")).toBeNull();
-  time += DIFF_COUNT_NULL_TTL_MS - 1;
+  time += DIFF_COUNT_FIRST_NULL_TTL_MS - 1;
   const unread = vi.fn(read);
   const budget = createDiffCountBudget();
   expect(await countDiffFiles(ownerId, [file("one")], unread, execute, undefined, budget, now)).toEqual(first);
@@ -212,6 +218,54 @@ test("a returned null expires after fifteen minutes and is retried subject to th
   );
   expect(execute).toHaveBeenCalledTimes(2);
 });
+
+test("a second returned null survives fifteen minutes before retrying", async () => {
+  expect(DIFF_COUNT_NULL_TTL_MS).toBe(15 * 60 * 1000);
+  let time = 0;
+  const execute = vi
+    .fn(executeWork)
+    .mockResolvedValueOnce({ kind: "diff-counts", counts: null })
+    .mockResolvedValueOnce({ kind: "diff-counts", counts: null });
+  const count = (limit = 10000) =>
+    countDiffFiles(ownerId, [file("one")], read, execute, undefined, createDiffCountBudget(limit), () => time);
+  expect((await count()).get("one")).toBeNull();
+  time += DIFF_COUNT_FIRST_NULL_TTL_MS;
+  expect((await count(0)).get("one")).toBeNull();
+  expect(execute).toHaveBeenCalledTimes(1);
+  expect((await count()).get("one")).toBeNull();
+  expect(execute).toHaveBeenCalledTimes(2);
+  time += DIFF_COUNT_NULL_TTL_MS - 1;
+  expect((await count()).get("one")).toBeNull();
+  expect(execute).toHaveBeenCalledTimes(2);
+  time++;
+  expect((await count()).get("one")).toEqual({ additions: 2, deletions: 1 });
+  expect(execute).toHaveBeenCalledTimes(3);
+});
+
+test.each(["timeout", "failure", "wrong kind"])(
+  "a retry's %s leaves null strike history untouched",
+  async (outcome) => {
+    let time = 0;
+    const execute = vi.fn(executeWork).mockResolvedValueOnce({ kind: "diff-counts", counts: null });
+    if (outcome === "wrong kind") execute.mockResolvedValueOnce({ kind: "line-count", count: 0 });
+    else execute.mockRejectedValueOnce(outcome === "timeout" ? new WorkTimeout() : new Error("Worker failed"));
+    execute.mockResolvedValueOnce({ kind: "diff-counts", counts: null });
+    const count = () =>
+      countDiffFiles(ownerId, [file("one")], read, execute, undefined, createDiffCountBudget(), () => time);
+    expect((await count()).get("one")).toBeNull();
+    time += DIFF_COUNT_FIRST_NULL_TTL_MS;
+    expect((await count()).get("one")).toBeNull();
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect((await count()).get("one")).toBeNull();
+    expect(execute).toHaveBeenCalledTimes(3);
+    time += DIFF_COUNT_NULL_TTL_MS - 1;
+    expect((await count()).get("one")).toBeNull();
+    expect(execute).toHaveBeenCalledTimes(3);
+    time++;
+    expect((await count()).get("one")).toEqual({ additions: 2, deletions: 1 });
+    expect(execute).toHaveBeenCalledTimes(4);
+  },
+);
 
 test.each(["null", "timeout", "failure", "wrong kind"])(
   "a late %s cannot overwrite concurrent successful counts",

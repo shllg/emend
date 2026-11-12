@@ -81,7 +81,7 @@ export function TopicSection({
       <span>
         {files.length} {plural(files.length, "file")}
       </span>
-      <LineTotals counts={lineTotals(files)} />
+      <LineTotals counts={lineTotals(files, context.counts)} />
       <ThreadCount count={threadCount} />
     </div>
   );

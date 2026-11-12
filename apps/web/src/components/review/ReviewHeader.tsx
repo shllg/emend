@@ -12,6 +12,7 @@ import { type Ref, useEffect, useState } from "react";
 import { plural } from "../../lib/count.ts";
 import { reviewLineTotals } from "../../lib/diff-totals.ts";
 import { LineTotals } from "../diff/LineTotals.tsx";
+import type { DiffCounts } from "../diff/presentation.ts";
 import { AgentStatus, agentStatusOf } from "../status/AgentStatus.tsx";
 import { OriginBadge } from "../status/OriginBadge.tsx";
 import { SnoozeBadge, StateBadge } from "../status/StateBadge.tsx";
@@ -43,6 +44,7 @@ function safeLinks(links: PublishLink[] | undefined) {
 export function ReviewHeader({
   review,
   revision,
+  counts,
   seq,
   ready,
   phone,
@@ -52,6 +54,7 @@ export function ReviewHeader({
 }: {
   review: ReviewView;
   revision?: RevisionView;
+  counts: ReadonlyMap<string, DiffCounts>;
   seq: number;
   ready: number;
   phone: boolean;
@@ -72,7 +75,7 @@ export function ReviewHeader({
       .filter(Boolean)
       .join(" → ");
   const links = safeLinks(revision?.links);
-  const total = revision ? reviewLineTotals(revision) : null;
+  const total = revision ? reviewLineTotals(revision, counts) : null;
   const metaItem = "inline-flex min-w-0 items-center gap-[5px] wrap-anywhere";
   return (
     <div

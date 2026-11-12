@@ -6,7 +6,7 @@ import { executeWork } from "../publish/work.ts";
 import { importFixture, replayBundle } from "../routes/import-test-support.ts";
 import { prepareImport } from "./prepare.ts";
 
-test("import shares one counting budget and reuses blob pairs across revisions", async () => {
+test.each([6, 10])("import counts newest first and reuses pairs with a shared %s ms budget", async (limit) => {
   const f = await importFixture();
   onTestFinished(() => f.cleanup());
   const input = await replayBundle(f, 5, 0);
@@ -15,7 +15,7 @@ test("import shares one counting budget and reuses blob pairs across revisions",
   const hashes = await Promise.all(
     ["first\n", "second\n", "third\n"].map((text) => f.deps.blobs.put(f.ownerId, Buffer.from(text), "text/plain")),
   );
-  const pairs = [hashes[0], hashes[0], hashes[1], hashes[2], hashes[0]];
+  const pairs = [hashes[1], hashes[0], hashes[1], hashes[2], hashes[0]];
   input.files = input.revisions.map((revision, i) => ({
     ...template,
     id: randomUUID(),
@@ -35,19 +35,19 @@ test("import shares one counting budget and reuses blob pairs across revisions",
     }
     return executeWork(work);
   };
-  const budget = createDiffCountBudget(10);
+  const budget = createDiffCountBudget(limit);
   const prepared = await prepareImport(f.ownerId, ImportBundle.parse(input), f.deps, undefined, {
     budget,
     now: () => time,
   });
   try {
-    expect(counted).toHaveBeenCalledTimes(2);
-    expect(budget.spentMs).toBe(12);
+    expect(counted).toHaveBeenCalledTimes(limit === 6 ? 1 : 2);
+    expect(budget.spentMs).toBe(limit === 6 ? 6 : 12);
     expect(input.revisions.map((revision) => prepared.counted.get(revision.id)?.get("source.txt"))).toEqual([
-      { additions: 1, deletions: 0 },
-      { additions: 1, deletions: 0 },
+      null,
       { additions: 1, deletions: 0 },
       null,
+      limit === 6 ? null : { additions: 1, deletions: 0 },
       { additions: 1, deletions: 0 },
     ]);
   } finally {

@@ -114,8 +114,9 @@ test("Files groups match diff order, render counts, old-side threads, stale mark
   expect(group.getByText("01")).toBeTruthy();
   expect(group.getByText("0/1")).toBeTruthy();
   expect(group.getByText("R")).toBeTruthy();
-  expect(group.getByText("+2")).toBeTruthy();
-  expect(group.getByText("−1")).toBeTruthy();
+  const row = group.getByRole("button", { name: `Open diff for ${hostile}, renamed, 2 added, 1 removed, 1 thread` });
+  expect(within(row).getByText("+2")).toBeTruthy();
+  expect(within(row).getByText("−1")).toBeTruthy();
   expect(group.getByText("1 thread")).toBeTruthy();
   const path = group.getByTitle(hostile);
   expect(path.querySelector("bdi")?.textContent).toBe(hostile);
@@ -139,7 +140,6 @@ test("Files groups match diff order, render counts, old-side threads, stale mark
   expect(screen.getByText("1 of 3 viewed")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Open diff for misc.ts, modified" })).toBeTruthy();
   expect(screen.getByRole("progressbar").getAttribute("value")).toBe("1");
-  const row = group.getByRole("button", { name: `Open diff for ${hostile}, renamed, 2 added, 1 removed, 1 thread` });
   fireEvent.click(row);
   expect(onNavigate).toHaveBeenCalledWith(first);
   expect(row.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -157,5 +157,7 @@ test("Files groups match diff order, render counts, old-side threads, stale mark
       onNavigate={onNavigate}
     />,
   );
-  expect(within(screen.getByRole("region", { name: "Last" })).getByText("+4")).toBeTruthy();
+  expect(
+    within(screen.getByRole("button", { name: "Open diff for tail.ts, modified, 4 added, 0 removed" })).getByText("+4"),
+  ).toBeTruthy();
 });

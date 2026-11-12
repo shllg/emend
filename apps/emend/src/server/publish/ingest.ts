@@ -296,7 +296,6 @@ async function computePublish(
         }
       }
     if (!prepared) await validateNoteRanges(input.files, read, execute);
-    counted ??= await countDiffFiles(ownerId, input.files, read, execute, deps.signal);
     prepared ??= await renderRevision(
       input,
       execute,
@@ -305,6 +304,7 @@ async function computePublish(
       (bytes) => deps.blobs.put(ownerId, bytes, "application/json"),
       deps.signal,
     );
+    counted ??= await countDiffFiles(ownerId, input.files, read, execute, deps.signal);
     const { ids, renderedBlob, sourceBlob, docBlobs, unrendered, metadata, sourceBlobs, sourceMetadata } = prepared;
     const sideTexts = new Map<string, ArrayBuffer>();
     const sideText = async (sha: string) => {

@@ -3,14 +3,15 @@ import { yieldToLoop } from "../pacing.ts";
 import { checkPublishSignal, PublishAborted } from "./lifecycle.ts";
 import type { Executor } from "./work.ts";
 
-export const DIFF_COUNT_BUDGET_MS = 20000;
+export const DIFF_COUNT_BUDGET_MS = 10000;
+export const DIFF_COUNT_FIRST_NULL_TTL_MS = 60_000;
 export const DIFF_COUNT_NULL_TTL_MS = 15 * 60 * 1000;
 type Counts = { additions: number; deletions: number } | null;
 export type DiffCountBudget = { limitMs: number; spentMs: number };
 export const createDiffCountBudget = (limitMs = DIFF_COUNT_BUDGET_MS): DiffCountBudget => ({ limitMs, spentMs: 0 });
 
 const MEMO_ENTRIES = 20000;
-type MemoEntry = { counts: NonNullable<Counts> } | { counts: null; expiresAt: number };
+type MemoEntry = { counts: NonNullable<Counts> } | { counts: null; expiresAt: number; strikes: number };
 // Each owner retains bounded counts independently, never blob contents.
 const memo = new Map<string, Map<string, MemoEntry>>();
 
@@ -42,12 +43,9 @@ export async function countDiffFiles(
       cache = new Map<string, MemoEntry>();
       memo.set(ownerId, cache);
     }
-    let entry = cache.get(key);
-    if (entry?.counts === null && now() >= entry.expiresAt) {
-      cache.delete(key);
-      entry = undefined;
-    }
-    let counts = entry?.counts;
+    const entry = cache.get(key);
+    // Expired nulls miss the cache but retain their strike history for the retry.
+    let counts = entry?.counts === null && now() >= entry.expiresAt ? undefined : entry?.counts;
     if (counts === undefined) {
       if (budget.spentMs >= budget.limitMs) {
         outcomes.set(key, null);
@@ -73,12 +71,17 @@ export async function countDiffFiles(
       }
       checkPublishSignal(signal);
       // A late timeout must not downgrade another call's successful result.
-      if (returned && (counts !== null || !cache.get(key)?.counts)) {
+      const previous = cache.get(key);
+      if (returned && (counts !== null || !previous?.counts)) {
         if (!cache.has(key) && cache.size >= MEMO_ENTRIES) {
           const oldest = cache.keys().next().value;
           if (oldest !== undefined) cache.delete(oldest);
         }
-        cache.set(key, counts === null ? { counts, expiresAt: now() + DIFF_COUNT_NULL_TTL_MS } : { counts });
+        if (counts === null) {
+          const strikes = (previous?.counts === null ? previous.strikes : 0) + 1;
+          const ttl = strikes === 1 ? DIFF_COUNT_FIRST_NULL_TTL_MS : DIFF_COUNT_NULL_TTL_MS;
+          cache.set(key, { counts, strikes, expiresAt: now() + ttl });
+        } else cache.set(key, { counts });
       }
     }
     outcomes.set(key, counts);

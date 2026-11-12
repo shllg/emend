@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { createRef } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { relativeTime, wakeTime } from "../../lib/time.ts";
+import type { DiffCounts } from "../diff/presentation.ts";
 import { ReviewHeader } from "./ReviewHeader.tsx";
 
 const review: ReviewView = {
@@ -86,6 +87,33 @@ test.each([false, true])("review totals show immediately from all topic groups (
   expect(screen.getByText("1,207 lines added, 4 lines removed")).toBeTruthy();
 });
 
+test("review totals become complete when the missing file's parsed counts arrive", () => {
+  const missing = { ...countedFile, id: crypto.randomUUID(), path: "missing.ts", counts: undefined };
+  const header = (counts: ReadonlyMap<string, DiffCounts>) => (
+    <ReviewHeader
+      review={review}
+      revision={{ ...revision, files: [countedFile, missing] }}
+      counts={counts}
+      seq={2}
+      ready={2}
+      phone={false}
+      titleRef={null}
+      onRevisionChange={vi.fn()}
+    />
+  );
+  const { rerender } = render(header(new Map()));
+  expect(screen.getByText("≥")).toBeTruthy();
+  expect(screen.getByTitle("Partial: 1 file not counted")).toBeTruthy();
+  expect(screen.getByText("+1,200")).toBeTruthy();
+  expect(screen.getByText("−3")).toBeTruthy();
+  rerender(header(new Map([[missing.id, { additions: 7, deletions: 2 }]])));
+  expect(screen.queryByText("≥")).toBeNull();
+  expect(screen.queryByTitle(/Partial:/)).toBeNull();
+  expect(screen.getByText("+1,207")).toBeTruthy();
+  expect(screen.getByText("−5")).toBeTruthy();
+  expect(screen.getByText("1,207 lines added, 5 lines removed")).toBeTruthy();
+});
+
 test.each(["pub", "no files", "legacy"])("%s has no review total", (kind) => {
   const { counts: _counts, ...uncounted } = countedFile;
   const { container } = mount({
@@ -124,6 +152,7 @@ function mount({
     <ReviewHeader
       review={{ ...metadata, title }}
       revision={loaded}
+      counts={new Map()}
       seq={seq}
       ready={metadata.newestRevision}
       phone={phone}

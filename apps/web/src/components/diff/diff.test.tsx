@@ -643,12 +643,13 @@ test("toolbar counts exclude Other, pluralize, and jump menu reveals a collapsed
 });
 
 test("single topic/file counts and parsed additions in the jump menu", async () => {
-  await mount(revision([file("src/added.ts", { hasOld: false, status: "added" })]));
+  const value = file("src/added.ts", { hasOld: false, status: "added" });
+  await mount(revision([value]));
   const jump = screen.getByRole("button", { name: "1 topic · 1 file" });
   expect(within(screen.getByRole("region", { name: "Topic First" })).getByText("1 file")).toBeTruthy();
   expect(screen.queryByText("+3")).toBeNull();
   near("src/added.ts");
-  await screen.findByText("+3");
+  await within(document.getElementById(`diff-file-${value.id}`) as HTMLElement).findByText("+3");
   fireEvent.keyDown(jump, { key: "ArrowDown" });
   expect(await screen.findByRole("menuitem", { name: "added.ts +3" })).toBeTruthy();
 });
@@ -1030,7 +1031,7 @@ test("a viewed file parses counts while collapsed without rendering its body, an
   mounted.unmount();
   client.removeQueries({ queryKey: ["file-diff", value.id] });
   await mount(revision([value]));
-  expect(screen.getByText("+2")).toBeTruthy();
+  expect(within(document.getElementById(`diff-file-${value.id}`) as HTMLElement).getByText("+2")).toBeTruthy();
   expect(parser).toHaveBeenCalledOnce();
 });
 
@@ -1655,9 +1656,9 @@ test("the details sit outside the sticky header, and Details controls that one e
   expect(header.contains(screen.getByText("One-way door"))).toBe(true);
 });
 
-test("the compact meta row stays one line and is cut from its end", () => {
+test("the compact meta row wraps whole items in a narrow pane", () => {
   expect(diffStylesheet).toMatch(
-    /\.em-topic-meta\s*\{[^}]*flex-wrap:\s*nowrap;[^}]*overflow:\s*hidden;[^}]*white-space:\s*nowrap;/,
+    /\.em-topic-meta\s*\{[^}]*flex-wrap:\s*wrap;[^}]*row-gap:\s*2px;[^}]*overflow:\s*hidden;[^}]*white-space:\s*nowrap;/,
   );
 });
 

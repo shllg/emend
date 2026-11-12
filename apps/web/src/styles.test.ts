@@ -53,10 +53,11 @@ test("change bars define their base and continuation offsets in the components s
   expect(continuation).toMatch(/\btop:\s*calc\(-1\s*\*\s*var\(--reading-block-gap\)\)\s*;/);
 });
 
-test("phone topic metadata wraps without changing the clipped desktop row", () => {
+test("topic metadata wraps whole desktop items and keeps the phone spacing", () => {
   const css = readFileSync(join(webSource, "styles/diff.css"), "utf8");
   const desktop = /\.em-topic-meta\s*\{([^}]+)\}/.exec(css)?.[1];
-  expect(desktop).toMatch(/flex-wrap:\s*nowrap;/);
+  expect(desktop).toMatch(/flex-wrap:\s*wrap;/);
+  expect(desktop).toMatch(/row-gap:\s*2px;/);
   expect(desktop).toMatch(/white-space:\s*nowrap;/);
   expect(desktop).toMatch(/overflow:\s*hidden;/);
   const phone = /\.em-diff-topic\[data-phone\] \.em-topic-meta\s*\{([^}]+)\}/.exec(css)?.[1];

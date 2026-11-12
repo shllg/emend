@@ -421,6 +421,21 @@ test("render failure rolls back a writeup, doc failure degrades, placement timeo
   ).toHaveLength(1);
 });
 
+test("render failure spends no diff counting work", async () => {
+  const hash = await blobs.put(f.ownerId, Buffer.from("changed\n"), "text/plain");
+  const body: PublishRequest = {
+    ...input(),
+    files: [{ path: "source.txt", role: "diff", oldPath: null, oldBlob: null, newBlob: hash, flag: null }],
+  };
+  const executor = vi.fn<Executor>(async (work) => {
+    if (work.kind === "writeup") throw new Error("synthetic render failure");
+    return executeWork(work);
+  });
+  await expect(publish(body, f.instanceId, f.ownerId, executor)).rejects.toMatchObject({ code: "invalid_request" });
+  expect(executor.mock.calls.some(([work]) => work.kind === "writeup")).toBe(true);
+  expect(executor.mock.calls.filter(([work]) => work.kind === "diff-counts")).toHaveLength(0);
+});
+
 test("a thread created during computation retries with cached rendering, counts and transferred IDs", async () => {
   const worker = workerExecutor();
   try {

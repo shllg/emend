@@ -834,6 +834,7 @@ function LoadedReview({
                 <ReviewHeader
                   review={review}
                   revision={revision}
+                  counts={diffCounts}
                   seq={seq}
                   ready={ready}
                   phone={layout === "phone"}

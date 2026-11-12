@@ -45,7 +45,7 @@ export function FilesView({
             <div className="em-files-group__head">
               {rank ? <TopicRank rank={rank} /> : <span aria-hidden="true">··</span>}
               <h3 className="em-files-group__title">{title}</h3>
-              <LineTotals counts={lineTotals(files)} />
+              <LineTotals counts={lineTotals(files, counts)} />
               <span className="em-files-group__count">
                 {done}/{files.length}
               </span>
