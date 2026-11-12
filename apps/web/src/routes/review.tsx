@@ -13,7 +13,7 @@ import {
   useState,
 } from "react";
 import { placeSpan } from "../../../../packages/core/src/place/span.ts";
-import { ApiError } from "../api/client.ts";
+import { ApiError, change } from "../api/client.ts";
 import { mutationMessage, useViewedErrors, useViewedMutation, useViewedRevision } from "../api/mutations.ts";
 import { reviewQuery, revisionQuery } from "../api/queries.ts";
 import { LazyDiffPane } from "../components/diff/LazyDiffPane.tsx";
@@ -35,6 +35,7 @@ import { threadCounts } from "../components/status/ThreadStateBadge.tsx";
 import { Composer } from "../components/threads/Composer.tsx";
 import { ThreadList } from "../components/threads/ThreadList.tsx";
 import { Button } from "../components/ui/Button.tsx";
+import { useToast } from "../components/ui/Toast.tsx";
 import { claimDraft } from "../lib/composer-owner.ts";
 import { useDiffCounts } from "../lib/diff-counts.ts";
 import type { NavigateDiff } from "../lib/diff-navigation.ts";
@@ -993,6 +994,44 @@ function LoadedReview({
     </AppFrame>
   );
 }
+/** A review in the bin keeps its address: say so, and offer Restore, the bin and the inbox. */
+function BinNotice({ reviewId }: { reviewId: string }) {
+  const client = useQueryClient();
+  const toast = useToast();
+  const [pending, setPending] = useState(false);
+  const busy = useRef(false);
+  const restore = async () => {
+    if (busy.current) return;
+    busy.current = true;
+    setPending(true);
+    try {
+      await change(`/api/v1/reviews/${encodeURIComponent(reviewId)}/restore`, "POST");
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ["review", reviewId] }),
+        client.invalidateQueries({ queryKey: ["revision", reviewId] }),
+        client.invalidateQueries({ queryKey: ["inbox"] }),
+        client.invalidateQueries({ queryKey: ["bin"] }),
+      ]);
+    } catch (error) {
+      toast.show({ tone: "danger", title: mutationMessage(error as Error) });
+    } finally {
+      busy.current = false;
+      setPending(false);
+    }
+  };
+  return (
+    <AppFrame isReview>
+      <main className="flex flex-col items-start gap-3 p-5">
+        <p role="status">This review is in the bin.</p>
+        <Button variant="primary" loading={pending} onClick={() => void restore()}>
+          Restore
+        </Button>
+        <Link to="/settings">Open the bin</Link>
+        <Link to="/">Back to the inbox</Link>
+      </main>
+    </AppFrame>
+  );
+}
 export function ReviewPage() {
   const { reviewId } = useParams({ from: "/r/$reviewId" });
   const query = useQuery(reviewQuery(reviewId));
@@ -1022,6 +1061,9 @@ export function ReviewPage() {
         </main>
       </AppFrame>
     );
+  // Same reason: a refetch that answers 409 keeps the old data.
+  if (query.error instanceof ApiError && query.error.status === 409 && query.error.code === "review_in_bin")
+    return <BinNotice reviewId={reviewId} />;
   if (query.data)
     return (
       <LoadedReview

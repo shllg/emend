@@ -1,4 +1,4 @@
-import { InboxList, ReviewView, RevisionView, SettingsView } from "@emend/contract";
+import { BinView, InboxList, ReviewView, RevisionView, SettingsView } from "@emend/contract";
 import { queryOptions } from "@tanstack/react-query";
 import { viewedState } from "../lib/viewed-state.ts";
 import { get } from "./client.ts";
@@ -40,6 +40,11 @@ export const settingsQuery = () =>
   queryOptions({
     queryKey: ["settings"],
     queryFn: ({ signal }) => get("/api/v1/settings", SettingsView, signal),
+  });
+export const binQuery = () =>
+  queryOptions({
+    queryKey: ["bin"],
+    queryFn: ({ signal }) => get("/api/v1/bin", BinView, signal),
   });
 export const revisionQuery = (id: string, seq: number) =>
   queryOptions({

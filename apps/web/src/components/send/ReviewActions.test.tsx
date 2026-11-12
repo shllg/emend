@@ -352,33 +352,33 @@ test("the trigger keeps focus while an action runs and does not open the menu", 
   await waitFor(() => expect(trigger.getAttribute("aria-disabled")).not.toBe("true"));
 });
 
-test("after the server deleted the review a further press is a no-op", async () => {
+test("after the server moved the review to the bin a further press is a no-op", async () => {
   mount();
   await choose("Delete");
-  fireEvent.click(await screen.findByRole("button", { name: "Delete review" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Move to bin" }));
   await waitFor(() => expect(lifecycle.onDeleted).toHaveBeenCalledOnce());
   // The dialog is closed at once, and the menu cannot open another one.
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   await choose("Delete");
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(screen.queryByRole("alertdialog")).toBeNull();
-  expect(sent().filter(([method]) => method === "DELETE")).toHaveLength(1);
+  expect(sent().filter(([method, path]) => method === "POST" && String(path).endsWith("/bin"))).toHaveLength(1);
   expect(lifecycle.onDeleted).toHaveBeenCalledOnce();
 });
 
-test("delete asks first, names the title as text, then calls onDeleted and toasts", async () => {
+test("delete asks first, names the title as text, then moves it to the bin, calls onDeleted and toasts", async () => {
   mount();
   await choose("Delete");
   const dialog = await screen.findByRole("alertdialog", { name: "Delete “Synthetic <b>review</b>”?" });
   expect(dialog.querySelector("b")).toBeNull();
-  expect(dialog.textContent).toContain("removes the review, its revisions, comments and Sends for good");
-  expect(dialog.textContent).toContain("agent waiting on it stops");
-  expect(dialog.textContent).toContain("cannot be undone");
+  expect(dialog.textContent).toContain(
+    "It moves to the bin in Settings, where you can restore it or delete it for good. It leaves the inbox, and an agent waiting on it stops.",
+  );
   expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Cancel" }));
   expect(fetchMock).not.toHaveBeenCalled();
-  fireEvent.click(within(dialog).getByRole("button", { name: "Delete review" }));
-  await screen.findByText("Deleted “Synthetic <b>review</b>”");
-  expect(sent()).toEqual([["DELETE", base, undefined]]);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Move to bin" }));
+  await screen.findByText("Moved “Synthetic <b>review</b>” to the bin");
+  expect(sent()).toEqual([["POST", `${base}/bin`, undefined]]);
   expect(lifecycle.onDeleted).toHaveBeenCalledOnce();
 });
 
@@ -396,7 +396,7 @@ test("a pending delete shows progress and cannot be pressed twice", async () => 
   fetchMock.mockImplementation(() => new Promise<Response>((resolve) => (finish = resolve)));
   mount();
   await choose("Delete");
-  const button = await screen.findByRole("button", { name: "Delete review" });
+  const button = await screen.findByRole("button", { name: "Move to bin" });
   fireEvent.click(button);
   await waitFor(() => expect(button.getAttribute("aria-busy")).toBe("true"));
   fireEvent.click(button);

@@ -16,7 +16,7 @@ export interface ReviewLifecycle {
   state: ReviewState;
   snoozed: boolean;
   snoozedUntil: string | null;
-  /** Called after the server deleted the review, before the toast. */
+  /** Called after the server moved the review to the bin, before the toast. */
   onDeleted: () => void;
 }
 
@@ -72,8 +72,8 @@ export function ReviewActions({
     busy.current = true;
     try {
       await mutation.mutateAsync(input);
-      if (input.action === "delete") {
-        // Done for good: close at once, and every later press is a no-op.
+      if (input.action === "bin") {
+        // Done: close at once, and every later press is a no-op.
         deleted.current = true;
         if (mounted.current) setPanel(null);
       }
@@ -137,9 +137,9 @@ export function ReviewActions({
     toast.show({ tone: "success", title: "Review retired" });
   };
   const remove = async () => {
-    if (!(await run({ action: "delete" }))) return;
+    if (!(await run({ action: "bin" }))) return;
     onDeleted();
-    toast.show({ tone: "success", title: `Deleted “${title}”` });
+    toast.show({ tone: "success", title: `Moved “${title}” to the bin` });
   };
   const items: MenuItem[] = [];
   if (state === "open") {
@@ -244,12 +244,12 @@ export function ReviewActions({
         returnFocus={trigger}
         onOpenChange={(next) => !next && close()}
         title={`Delete “${title}”?`}
-        description="This removes the review, its revisions, comments and Sends for good. An agent waiting on it stops. This cannot be undone."
+        description="It moves to the bin in Settings, where you can restore it or delete it for good. It leaves the inbox, and an agent waiting on it stops."
         actions={
           <>
             {cancel}
             <Button variant="danger" loading={pending} onClick={() => void remove()}>
-              Delete review
+              Move to bin
             </Button>
           </>
         }

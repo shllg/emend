@@ -58,6 +58,7 @@ function matchesWidth(query: string) {
 let inbox: InboxItem[];
 let review: InboxItem;
 let gone: boolean;
+let binned: boolean;
 let serverOffset: number;
 let fetchMock: ReturnType<typeof vi.fn<(path: string, init?: RequestInit) => Promise<Response>>>;
 let client: QueryClient;
@@ -81,12 +82,23 @@ beforeEach(() => {
   review = item;
   inbox = [item];
   gone = false;
+  binned = false;
   serverOffset = 0;
   fetchMock = vi.fn(async (path: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
     if (method === "DELETE") {
       gone = true;
       inbox = [];
+      return new Response(null, { status: 204 });
+    }
+    if (method === "POST" && path === `/api/v1/reviews/${id}/bin`) {
+      binned = true;
+      inbox = [];
+      return new Response(null, { status: 204 });
+    }
+    if (method === "POST" && path === `/api/v1/reviews/${id}/restore`) {
+      binned = false;
+      inbox = [item];
       return new Response(null, { status: 204 });
     }
     if (method === "POST") return new Response(null, { status: 204 });
@@ -96,6 +108,8 @@ beforeEach(() => {
         approvedActiveHours: 12,
         serverTime: new Date(Date.now() + serverOffset).toISOString(),
       });
+    if (path === `/api/v1/reviews/${id}` && binned)
+      return Response.json({ error: { code: "review_in_bin", message: "The review is in the bin." } }, { status: 409 });
     if (path === `/api/v1/reviews/${id}`)
       return gone
         ? Response.json({ error: { code: "unknown_review", message: "Unknown review." } }, { status: 404 })
@@ -725,11 +739,20 @@ test("deleting from the review page asks, goes to the inbox and toasts the title
   fireEvent.keyDown(screen.getByRole("button", { name: "More review actions" }), { key: "ArrowDown" });
   fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
   const dialog = await screen.findByRole("alertdialog", { name: "Delete “Synthetic review”?" });
-  expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
-  fireEvent.click(within(dialog).getByRole("button", { name: "Delete review" }));
-  await screen.findByText("Deleted “Synthetic review”");
+  expect(
+    within(dialog).getByText(
+      "It moves to the bin in Settings, where you can restore it or delete it for good. It leaves the inbox, and an agent waiting on it stops.",
+    ),
+  ).toBeTruthy();
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE" || init?.method === "POST")).toBe(false);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Move to bin" }));
+  await screen.findByText("Moved “Synthetic review” to the bin");
   await waitFor(() => expect(history.location.pathname).toBe("/"));
   await screen.findByText("No reviews yet.");
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+  expect(
+    fetchMock.mock.calls.filter(([path, init]) => path === `/api/v1/reviews/${id}/bin` && init?.method === "POST"),
+  ).toHaveLength(1);
   expect(screen.queryByText("This review was deleted or never existed.")).toBeNull();
 });
 
@@ -765,8 +788,8 @@ test("deleting from a review showing a doc reaches the inbox and Back keeps the 
   fireEvent.keyDown(screen.getByRole("button", { name: "More review actions" }), { key: "ArrowDown" });
   fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
   const dialog = await screen.findByRole("alertdialog", { name: "Delete “Synthetic review”?" });
-  fireEvent.click(within(dialog).getByRole("button", { name: "Delete review" }));
-  await screen.findByText("Deleted “Synthetic review”");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Move to bin" }));
+  await screen.findByText("Moved “Synthetic review” to the bin");
   expect(history.location.pathname).toBe("/");
   await screen.findByText("No reviews yet.");
   expect(history.location.pathname).toBe("/");
@@ -775,7 +798,7 @@ test("deleting from a review showing a doc reaches the inbox and Back keeps the 
   expect(paths).not.toContain("/r/undefined");
 
   await act(async () => history.back());
-  await screen.findByText("This review was deleted or never existed.");
+  await screen.findByText("This review is in the bin.");
   expect(history.location.pathname).toBe(`/r/${id}`);
   expect(history.location.search).toBe(search);
   expect(new URLSearchParams(history.location.search).get("doc")).toBe(doc.path);
@@ -793,6 +816,36 @@ test("a delete event for the open review shows the deleted page with a link to t
   expect(screen.queryByText("Could not load this review.")).toBeNull();
   fireEvent.click(screen.getByRole("link", { name: "Back to the inbox" }));
   await waitFor(() => expect(history.location.pathname).toBe("/"));
+});
+
+test("a review in the bin shows a notice, and Restore loads the review again", async () => {
+  binned = true;
+  const { history } = mount(`/r/${id}`);
+  await screen.findByText("This review is in the bin.");
+  expect(screen.queryByText("This review was deleted or never existed.")).toBeNull();
+  expect(screen.getByRole("link", { name: "Open the bin" }).getAttribute("href")).toBe("/settings");
+  expect(screen.getByRole("link", { name: "Back to the inbox" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+  await screen.findByRole("heading", { name: "Synthetic review", level: 1 });
+  expect(
+    fetchMock.mock.calls.filter(([path, init]) => path === `/api/v1/reviews/${id}/restore` && init?.method === "POST"),
+  ).toHaveLength(1);
+  expect(history.location.pathname).toBe(`/r/${id}`);
+});
+
+test("a bin event turns the open review into the bin notice, and a restore event brings it back", async () => {
+  mount(`/r/${id}`);
+  await screen.findByRole("heading", { name: "Synthetic review", level: 1 });
+  binned = true;
+  act(() => {
+    Events.opened[0]?.emit("bin", { reviewId: id, revision: 1 });
+  });
+  await screen.findByText("This review is in the bin.");
+  binned = false;
+  act(() => {
+    Events.opened[0]?.emit("restore", { reviewId: id, revision: 1 });
+  });
+  await screen.findByRole("heading", { name: "Synthetic review", level: 1 });
 });
 
 test.each(["snooze", "unsnooze", "retire", "reopen"] as const)(

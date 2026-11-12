@@ -1,11 +1,22 @@
-import { ApprovedActiveHours, type HoursSetting, MAX_APPROVED_ACTIVE_HOURS, SettingsView } from "@emend/contract";
+import {
+  ApprovedActiveHours,
+  type BinItem,
+  type HoursSetting,
+  MAX_APPROVED_ACTIVE_HOURS,
+  SettingsView,
+} from "@emend/contract";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { patch } from "../api/client.ts";
-import { settingsQuery } from "../api/queries.ts";
+import { change, patch } from "../api/client.ts";
+import { mutationMessage } from "../api/mutations.ts";
+import { binQuery, settingsQuery } from "../api/queries.ts";
 import { AppFrame } from "../components/layout/AppFrame.tsx";
 import { Button } from "../components/ui/Button.tsx";
+import { Dialog } from "../components/ui/Dialog.tsx";
 import { TextField } from "../components/ui/TextField.tsx";
+import { useToast } from "../components/ui/Toast.tsx";
+import { plural } from "../lib/count.ts";
+import { relativeTime } from "../lib/time.ts";
 
 const hours = (value: number) => `${value} ${value === 1 ? "hour" : "hours"}`;
 
@@ -100,6 +111,123 @@ function InboxSettings({ setting }: { setting: HoursSetting }) {
   );
 }
 
+type Confirm = { kind: "one"; item: BinItem } | { kind: "all" } | null;
+
+function BinSettings() {
+  const client = useQueryClient();
+  const toast = useToast();
+  const bin = useQuery(binQuery());
+  const [confirm, setConfirm] = useState<Confirm>(null);
+  const [pending, setPending] = useState(false);
+  const busy = useRef(false);
+  const items = bin.data?.items ?? [];
+  const total = bin.data?.total ?? 0;
+  /** Runs one request. A failure shows the server's message; every outcome refreshes the lists. */
+  async function run(request: () => Promise<unknown>, success: string, reviewId?: string) {
+    if (busy.current) return false;
+    busy.current = true;
+    setPending(true);
+    try {
+      await request();
+      toast.show({ tone: "success", title: success });
+      return true;
+    } catch (error) {
+      toast.show({ tone: "danger", title: mutationMessage(error as Error) });
+      return false;
+    } finally {
+      busy.current = false;
+      setPending(false);
+      void client.invalidateQueries({ queryKey: ["bin"] });
+      void client.invalidateQueries({ queryKey: ["inbox"] });
+      if (reviewId) {
+        void client.invalidateQueries({ queryKey: ["review", reviewId] });
+        void client.invalidateQueries({ queryKey: ["revision", reviewId] });
+      } else void client.invalidateQueries({ queryKey: ["review"] });
+    }
+  }
+  const restore = (item: BinItem) =>
+    run(
+      () => change(`/api/v1/reviews/${encodeURIComponent(item.id)}/restore`, "POST"),
+      `Restored “${item.title}”`,
+      item.id,
+    );
+  const confirmed = async () => {
+    if (!confirm) return;
+    const ok =
+      confirm.kind === "one"
+        ? await run(
+            () => change(`/api/v1/reviews/${encodeURIComponent(confirm.item.id)}`, "DELETE"),
+            `Deleted “${confirm.item.title}”`,
+            confirm.item.id,
+          )
+        : await run(() => change("/api/v1/bin", "DELETE"), "Emptied the bin");
+    if (ok) setConfirm(null);
+  };
+  const now = Date.now();
+  return (
+    <section aria-labelledby="bin-settings" className="mt-10">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 id="bin-settings" className="text-16 font-semibold">
+          Bin
+        </h2>
+        <Button variant="danger" disabled={total === 0 || pending} onClick={() => setConfirm({ kind: "all" })}>
+          Empty bin
+        </Button>
+      </div>
+      {bin.isPending && <p role="status">Loading the bin…</p>}
+      {bin.isError && <p role="alert">Could not load the bin. Try again.</p>}
+      {bin.data && items.length === 0 && <p className="text-14 text-fg-3">The bin is empty.</p>}
+      {items.length > 0 && (
+        <ul className="m-0 flex list-none flex-col gap-2 p-0">
+          {items.map((item) => (
+            <li key={item.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-line-1 px-3 py-2">
+              <div className="min-w-0 flex-1">
+                <p className="m-0 truncate text-14 font-medium" dir="auto">
+                  {item.title}
+                </p>
+                <p className="m-0 truncate text-13 text-fg-3" dir="auto">
+                  {item.machine} · Deleted {relativeTime(item.binnedAt, now)}
+                </p>
+              </div>
+              <Button disabled={pending} onClick={() => void restore(item)}>
+                Restore
+              </Button>
+              <Button variant="danger" disabled={pending} onClick={() => setConfirm({ kind: "one", item })}>
+                Delete for good
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {bin.data && total > items.length && (
+        <p className="mt-2 text-14 text-fg-3">
+          Showing the newest {items.length} of {total}.
+        </p>
+      )}
+      <Dialog
+        open={confirm !== null}
+        onOpenChange={(next) => !next && !busy.current && setConfirm(null)}
+        title={confirm?.kind === "one" ? `Delete “${confirm.item.title}” for good?` : "Empty the bin?"}
+        description={
+          confirm?.kind === "one"
+            ? "This removes the review, its revisions, comments and Sends. This cannot be undone."
+            : `This deletes the ${total} ${plural(total, "review")} in the bin for good, with their revisions, comments and Sends. This cannot be undone.`
+        }
+        actions={
+          <>
+            <Button data-autofocus disabled={pending} onClick={() => setConfirm(null)}>
+              Cancel
+            </Button>
+            <Button variant="danger" loading={pending} onClick={() => void confirmed()}>
+              {confirm?.kind === "one" ? "Delete for good" : "Empty bin"}
+            </Button>
+          </>
+        }
+      />
+    </section>
+  );
+}
+
 export function SettingsPage() {
   const settings = useQuery(settingsQuery());
   return (
@@ -110,6 +238,7 @@ export function SettingsPage() {
           {settings.isPending && <p role="status">Loading settings…</p>}
           {settings.isError && <p role="alert">Could not load settings. Try again.</p>}
           {settings.data && <InboxSettings setting={settings.data.approvedActiveHours} />}
+          <BinSettings />
         </div>
       </main>
     </AppFrame>

@@ -86,18 +86,19 @@ export type LifecycleAction =
   | { action: "unsnooze" }
   | { action: "retire"; body: RetireRequest }
   | { action: "reopen" }
-  | { action: "delete" };
+  | { action: "bin" };
 
-/** Snooze, unsnooze, retire, reopen and delete. The server's own message reaches the caller as an ApiError. */
+/** Snooze, unsnooze, retire, reopen and move to the bin. The server's own message reaches the caller as an ApiError. */
 export function useLifecycleMutation(reviewId: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: async (input: LifecycleAction) => {
       const path = `/api/v1/reviews/${encodeURIComponent(reviewId)}`;
-      if (input.action === "delete") {
-        await change(path, "DELETE");
-        // No wait: the page navigates away first, and a refetch of this review would answer 404.
+      if (input.action === "bin") {
+        await change(`${path}/bin`, "POST");
+        // No review refetch: the page navigates away first, and it would answer 409 review_in_bin.
         void client.invalidateQueries({ queryKey: ["inbox"] });
+        void client.invalidateQueries({ queryKey: ["bin"] });
         return;
       }
       await change(`${path}/${input.action}`, "POST", "body" in input ? input.body : undefined);
