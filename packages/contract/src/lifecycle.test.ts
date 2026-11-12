@@ -142,12 +142,12 @@ test("the new refusals are 409 and an import can report a deleted review", () =>
 
 test("the bin view lists items with an ISO binnedAt and is capped", () => {
   const binned = { id, title: "Synthetic", machine: "Synthetic machine", binnedAt: "2026-11-04T10:00:00.000Z" };
-  const asOf = "2026-11-04T11:00:00.000Z";
+  const version = "0123456789abcdef".repeat(4);
   expect(BinItem.parse({ ...binned, extra: 1 })).toEqual(binned);
-  const view = { items: [binned], total: 1, more: false, asOf };
+  const view = { items: [binned], total: 1, more: false, version };
   expect(BinView.parse(view)).toEqual(view);
   expect(BinItem.safeParse({ ...binned, binnedAt: "yesterday" }).success).toBe(false);
-  for (const invalid of [{ total: -1 }, { more: undefined }, { asOf: undefined }, { asOf: "yesterday" }])
+  for (const invalid of [{ total: -1 }, { more: undefined }, { version: undefined }, { version: "invalid" }])
     expect(BinView.safeParse({ ...view, ...invalid }).success).toBe(false);
   expect(
     BinView.safeParse({ ...view, items: Array.from({ length: LIMITS.binItems + 1 }, () => binned), total: 201 })
@@ -157,25 +157,43 @@ test("the bin view lists items with an ISO binnedAt and is capped", () => {
   expect(REVIEW_BIN_FEATURE).toBe("review-bin");
 });
 
-test("empty bin requires a strict ISO cutoff and count, and bin cursors require both fields", () => {
-  const upTo = "2026-11-04T10:00:00.000Z";
-  for (const total of [0, 1, 201]) expect(EmptyBinRequest.parse({ upTo, total })).toEqual({ upTo, total });
+test("empty bin requires a strict lowercase SHA-256 version", () => {
+  const version = "0123456789abcdef".repeat(4);
+  expect(EmptyBinRequest.parse({ version })).toEqual({ version });
   for (const value of [
     undefined,
+    null,
     {},
-    { upTo },
-    { upTo: "yesterday", total: 1 },
-    { upTo, total: 1, extra: true },
-    ...[-1, 1.5, "1", null].map((total) => ({ upTo, total })),
+    { version, extra: true },
+    { version, total: 1 },
+    { version, upTo: "2026-11-04T10:00:00.000Z" },
+    { upTo: "2026-11-04T10:00:00.000Z", total: 1 },
   ])
     expect(EmptyBinRequest.safeParse(value).success).toBe(false);
+  for (const invalid of [
+    undefined,
+    null,
+    1,
+    "",
+    "a".repeat(63),
+    "a".repeat(65),
+    "g".repeat(64),
+    version.toUpperCase(),
+  ]) {
+    expect(EmptyBinRequest.safeParse({ version: invalid }).success).toBe(false);
+    expect(BinView.safeParse({ version: invalid, items: [], total: 0, more: false }).success).toBe(false);
+  }
+});
+
+test("bin cursors require both fields", () => {
+  const beforeAt = "2026-11-04T10:00:00.000Z";
   expect(BinQuery.parse({})).toEqual({});
-  expect(BinQuery.parse({ beforeAt: upTo, beforeId: id })).toEqual({ beforeAt: upTo, beforeId: id });
+  expect(BinQuery.parse({ beforeAt, beforeId: id })).toEqual({ beforeAt, beforeId: id });
   for (const value of [
-    { beforeAt: upTo },
+    { beforeAt },
     { beforeId: id },
     { beforeAt: "yesterday", beforeId: id },
-    { beforeAt: upTo, beforeId: "invalid" },
+    { beforeAt, beforeId: "invalid" },
   ])
     expect(BinQuery.safeParse(value).success).toBe(false);
 });

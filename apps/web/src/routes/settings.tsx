@@ -111,7 +111,7 @@ function InboxSettings({ setting }: { setting: HoursSetting }) {
   );
 }
 
-type Confirm = { kind: "one"; item: BinItem } | { kind: "all"; upTo: string; total: number } | null;
+type Confirm = { kind: "one"; item: BinItem } | { kind: "all"; version: string; total: number } | null;
 
 function BinSettings() {
   const client = useQueryClient();
@@ -162,10 +162,7 @@ function BinSettings() {
             `Deleted “${confirm.item.title}”`,
             confirm.item.id,
           )
-        : await run(
-            () => change("/api/v1/bin", "DELETE", { upTo: confirm.upTo, total: confirm.total }),
-            "Emptied the bin",
-          );
+        : await run(() => change("/api/v1/bin", "DELETE", { version: confirm.version }), "Emptied the bin");
     if (ok) setConfirm(null);
   };
   const now = Date.now();
@@ -180,7 +177,7 @@ function BinSettings() {
           disabled={total === 0 || pending}
           onClick={() => {
             const first = bin.data?.pages[0];
-            if (first) setConfirm({ kind: "all", upTo: first.asOf, total: first.total });
+            if (first) setConfirm({ kind: "all", version: first.version, total: first.total });
           }}
         >
           Empty bin

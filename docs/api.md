@@ -118,7 +118,7 @@ a machine token reaches only reviews from its own instance.
 | POST | `/api/v1/reviews/:id/bin` | Reviewer | Move the review to the bin (204); see "Snooze, retire, delete and the bin". |
 | POST | `/api/v1/reviews/:id/restore` | Reviewer | Take the review out of the bin (204). |
 | GET | `/api/v1/bin` | Reviewer | Page through binned reviews as `BinView` (200), with optional `beforeAt` and `beforeId` together. |
-| DELETE | `/api/v1/bin` | Reviewer | Delete binned reviews that arrived before `EmptyBinRequest.upTo`, if their count matches `total` (204). |
+| DELETE | `/api/v1/bin` | Reviewer | Delete the confirmed bin if its version matches `EmptyBinRequest.version` (204). |
 | DELETE | `/api/v1/bin/:id` | Reviewer | Delete a review for good only while it is still in the bin (204). |
 | POST | `/api/v1/reviews/:id/take` | Agent | Claim a delivery with `{waitSeconds?: 0..25, maxBytes?: 65536..16777216, accepts?: ["closed"]}`. |
 | POST | `/api/v1/deliveries/:id/confirm` | Agent | Confirm receipt of a claimed delivery. |
@@ -1024,33 +1024,34 @@ Capabilities lists the features `review-lifecycle` and `review-bin`.
 - `POST /reviews/:id/restore` clears `binnedAt` and nothing else, so the review returns to the list
   and place it had. A review that is not in the bin is `409 invalid_state`. Returns 204; emits
   `restore`.
-- `GET /bin` returns `BinView = { items: BinItem[], total: number, more: boolean, asOf: ISO datetime }` with
+- `GET /bin` returns `BinView = { items: BinItem[], total: number, more: boolean, version: string }` with
   `BinItem = { id, title, machine, binnedAt }`. `machine` is the name of the review's origin
   instance. Items run in `binnedAt` descending, `id` ascending order, at most `binItems` (200)
   rows per page. Optional query parameters `beforeAt` (ISO datetime) and `beforeId` (UUID)
   continue strictly after that item in this order. Give both or neither; one alone or an invalid
   value is `400 invalid_request`. `more` is true when items remain after this page; `total` counts
   every binned review of the owner, across all pages. Moved local copies are not listed or counted
-  in the local bin: the hub's copy is the live one in the hub's bin. `asOf` is the server clock
-  when this page was read.
+  in the local bin: the hub's copy is the live one in the hub's bin. `version` is the SHA-256,
+  encoded as 64 lowercase hex characters, of the sorted ids of every binned, unmoved review of
+  the owner, joined by `\n`. It describes the whole bin in the same read as `total`; every page of
+  an unchanged bin carries the same version. Any bin, restore, import, move mark or delete that
+  changes this membership changes the version, regardless of timestamps or clock adjustments.
 - `DELETE /bin/:id` deletes the review exactly like `DELETE /reviews/:id`, but checks inside the
   delete transaction that it is still in the bin. Otherwise it returns `409 invalid_state`.
   A missing, foreign or other-owner review is `404 unknown_review`; a moved local copy is
   `409 review_moved`.
-- `DELETE /bin` requires `EmptyBinRequest = { upTo: ISO datetime, total: integer >= 0 }` (strict);
-  a missing or invalid body is `400 invalid_request`. It selects only reviews of the owner still
-  in the bin, excluding moved local copies, whose arrival on this server is strictly before
-  `upTo`. Arrival is the later of `binnedAt` and `importedAt`; null `importedAt` means never
-  imported, so arrival is `binnedAt`. A review binned or imported in the same millisecond as
-  `upTo` stays. The web sends `upTo` = `asOf` and `total` from its first loaded page, both frozen
-  when the confirmation dialog opens. Before deleting anything, the server counts the selection.
-  If that count differs from `total`, it returns `409 invalid_state` and deletes nothing: the
-  bin changed since confirmation, for example through a restore, import or clock step. The web
-  closes the dialog, refreshes the bin and shows the server's message. Each selected review
+- `DELETE /bin` requires `EmptyBinRequest = { version: string }` (strict), with 64 lowercase hex
+  characters; a missing or invalid body is `400 invalid_request`. The web sends the `version`
+  from its first loaded page, frozen with the displayed `total` when the confirmation dialog
+  opens. Before deleting anything, the server reads the owner's current binned, unmoved ids and
+  their version in one read. If the version differs, it returns `409 invalid_state` with
+  `bin_changed` detail and deletes nothing. The web closes the dialog, refreshes the bin and shows
+  the server's message. Empty bin selects exactly the confirmed set or deletes nothing; each selected review
   is deleted exactly like `DELETE /reviews/:id`: its own transaction, its tombstone, its
   repository cleanup and its `delete` event after the commit, and blob cleanup after the response.
-  Each transaction checks the same arrival rule again, so a review restored, binned or imported
-  at or after `upTo` stays. The loop yields between reviews. Returns 204.
+  Each transaction checks again that the review is still in the bin, so a review restored
+  meanwhile stays. A review binned or imported after the version read is outside the selected
+  ids and stays. The loop yields between reviews. Returns 204.
 - `DELETE /reviews/:id` keeps working on a binned review and deletes it for good.
 
 A binned review acts as deleted for agents and leaves every list. A take (`emend wait`,

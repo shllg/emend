@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Capabilities, ERROR_STATUS, ErrorBody, LIMITS, PairingCreated, SCOPES_BY_KIND } from "@emend/contract";
@@ -173,7 +173,7 @@ test("every documented API endpoint enforces its scope even before its handler e
         endpoint.method,
         credential,
         path === "/api/v1/bin" && endpoint.method === "DELETE"
-          ? { upTo: new Date(now).toISOString(), total: 0 }
+          ? { version: createHash("sha256").update("").digest("hex") }
           : ["POST", "PATCH", "PUT"].includes(endpoint.method)
             ? {}
             : undefined,

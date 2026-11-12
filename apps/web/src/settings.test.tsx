@@ -7,7 +7,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
 
 const clients: QueryClient[] = [];
-const binAsOf = "2026-11-04T10:00:00.000Z";
+const binVersion = "a".repeat(64);
 const defaultSetting: HoursSetting = {
   value: 12,
   source: "default",
@@ -20,7 +20,7 @@ function setup(
   setting: Partial<HoursSetting> = {},
   path = "/settings",
   patchResponse?: Promise<Response>,
-  binned: BinView = { items: [], total: 0, more: false, asOf: binAsOf },
+  binned: BinView = { items: [], total: 0, more: false, version: binVersion },
   pageSize = 200,
 ) {
   let bin = binned;
@@ -31,7 +31,7 @@ function setup(
   const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
     if (path === "/api/v1/bin" || path.startsWith("/api/v1/bin?")) {
       if (init?.method === "DELETE") {
-        bin = { items: [], total: 0, more: false, asOf: binAsOf };
+        bin = { items: [], total: 0, more: false, version: binVersion };
         return new Response(null, { status: 204 });
       }
       const query = new URL(path, "http://localhost").searchParams;
@@ -43,7 +43,6 @@ function setup(
       );
       return Response.json({
         ...bin,
-        asOf: beforeId ? new Date(Date.parse(bin.asOf) + 1000).toISOString() : bin.asOf,
         items: items.slice(0, pageSize),
         more: bin.more || pageSize < items.length,
       });
@@ -244,14 +243,14 @@ test("the bin lists title, machine and deleted time, and Empty bin is disabled w
   expect(screen.getByRole<HTMLButtonElement>("button", { name: "Empty bin" }).disabled).toBe(true);
 });
 test("the bin shows each item and says when it is cut short", async () => {
-  setup({}, "/settings", undefined, { items: [binItem], total: 3, more: true, asOf: binAsOf });
+  setup({}, "/settings", undefined, { items: [binItem], total: 3, more: true, version: binVersion });
   await screen.findByText("Binned review");
   expect(screen.getByText(/Workshop · Deleted /)).toBeTruthy();
   expect(screen.getByText("Showing 1 of 3.")).toBeTruthy();
   expect(screen.getByRole<HTMLButtonElement>("button", { name: "Empty bin" }).disabled).toBe(false);
 });
 test("Restore needs no confirm, calls restore and toasts", async () => {
-  const f = setup({}, "/settings", undefined, { items: [binItem], total: 1, more: false, asOf: binAsOf });
+  const f = setup({}, "/settings", undefined, { items: [binItem], total: 1, more: false, version: binVersion });
   fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
   await screen.findByText("Restored “Binned review”");
   expect(calls(f, "POST", `/api/v1/reviews/${binId}/restore`)).toHaveLength(1);
@@ -260,7 +259,7 @@ test("Restore needs no confirm, calls restore and toasts", async () => {
   expect(f.invalidate).toHaveBeenCalledWith({ queryKey: ["bin"] });
 });
 test("Delete for good asks first, and Cancel calls nothing", async () => {
-  const f = setup({}, "/settings", undefined, { items: [binItem], total: 1, more: false, asOf: binAsOf });
+  const f = setup({}, "/settings", undefined, { items: [binItem], total: 1, more: false, version: binVersion });
   fireEvent.click(await screen.findByRole("button", { name: "Delete for good" }));
   const dialog = await screen.findByRole("alertdialog", { name: "Delete “Binned review” for good?" });
   expect(
@@ -271,7 +270,7 @@ test("Delete for good asks first, and Cancel calls nothing", async () => {
   expect(f.fetcher.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
 });
 test("Delete for good calls DELETE on the bin item and toasts", async () => {
-  const f = setup({}, "/settings", undefined, { items: [binItem], total: 1, more: false, asOf: binAsOf });
+  const f = setup({}, "/settings", undefined, { items: [binItem], total: 1, more: false, version: binVersion });
   fireEvent.click(await screen.findByRole("button", { name: "Delete for good" }));
   const dialog = await screen.findByRole("alertdialog");
   fireEvent.click(within(dialog).getByRole("button", { name: "Delete for good" }));
@@ -280,7 +279,7 @@ test("Delete for good calls DELETE on the bin item and toasts", async () => {
   await screen.findByText("The bin is empty.");
 });
 test("Empty bin asks with the count, and Cancel calls nothing", async () => {
-  const f = setup({}, "/settings", undefined, { items: [binItem], total: 1, more: false, asOf: binAsOf });
+  const f = setup({}, "/settings", undefined, { items: [binItem], total: 1, more: false, version: binVersion });
   await screen.findByText("Binned review");
   fireEvent.click(screen.getByRole("button", { name: "Empty bin" }));
   const dialog = await screen.findByRole("alertdialog", { name: "Empty the bin?" });
@@ -294,14 +293,14 @@ test("Empty bin asks with the count, and Cancel calls nothing", async () => {
   expect(calls(f, "DELETE", "/api/v1/bin")).toHaveLength(0);
 });
 test("Empty bin calls DELETE on the bin and toasts", async () => {
-  const f = setup({}, "/settings", undefined, { items: [binItem], total: 1, more: false, asOf: binAsOf });
+  const f = setup({}, "/settings", undefined, { items: [binItem], total: 1, more: false, version: binVersion });
   await screen.findByText("Binned review");
   fireEvent.click(screen.getByRole("button", { name: "Empty bin" }));
   const dialog = await screen.findByRole("alertdialog");
   fireEvent.click(within(dialog).getByRole("button", { name: "Empty bin" }));
   await screen.findByText("Emptied the bin");
   expect(calls(f, "DELETE", "/api/v1/bin")).toHaveLength(1);
-  expect(JSON.parse(String(calls(f, "DELETE", "/api/v1/bin")[0]?.[1]?.body))).toEqual({ upTo: binAsOf, total: 1 });
+  expect(JSON.parse(String(calls(f, "DELETE", "/api/v1/bin")[0]?.[1]?.body))).toEqual({ version: binVersion });
 });
 
 test.each(["Restore", "Delete for good"])("Show older appends a page and %s works on it", async (action) => {
@@ -311,7 +310,13 @@ test.each(["Restore", "Delete for good"])("Show older appends a page and %s work
     title: "Older review",
     binnedAt: "2026-11-03T09:00:00.000Z",
   };
-  const f = setup({}, "/settings", undefined, { items: [binItem, older], total: 2, more: false, asOf: binAsOf }, 1);
+  const f = setup(
+    {},
+    "/settings",
+    undefined,
+    { items: [binItem, older], total: 2, more: false, version: binVersion },
+    1,
+  );
   await screen.findByText("Showing 1 of 2.");
   expect(screen.queryByText(older.title)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Show older" }));
@@ -341,26 +346,32 @@ test.each(["Restore", "Delete for good"])("Show older appends a page and %s work
   expect(screen.getByText(binItem.title)).toBeTruthy();
 });
 
-test("Show older works after the cursor row was deleted and Empty bin uses the first page's timestamp and count", async () => {
+test("Show older works after the cursor row was deleted and Empty bin uses the first page's version and count", async () => {
   const older = { ...binItem, id: "44444444-4444-4444-8444-444444444444", title: "Older review" };
-  const f = setup({}, "/settings", undefined, { items: [binItem, older], total: 2, more: false, asOf: binAsOf }, 1);
+  const f = setup(
+    {},
+    "/settings",
+    undefined,
+    { items: [binItem, older], total: 2, more: false, version: binVersion },
+    1,
+  );
   await screen.findByText("Showing 1 of 2.");
-  f.setBin({ items: [older], total: 1, more: false, asOf: binAsOf });
+  f.setBin({ items: [older], total: 1, more: false, version: "b".repeat(64) });
   fireEvent.click(screen.getByRole("button", { name: "Show older" }));
   await screen.findByText(older.title);
   const pages = f.client.getQueryData<InfiniteData<BinView>>(["bin"])?.pages;
-  expect(pages?.[1]?.asOf).not.toBe(pages?.[0]?.asOf);
+  expect(pages?.[1]?.version).not.toBe(pages?.[0]?.version);
   expect(pages?.[1]?.total).toBe(1);
   fireEvent.click(screen.getByRole("button", { name: "Empty bin" }));
   const dialog = await screen.findByRole("alertdialog");
   expect(within(dialog).getByText(/This deletes the 2 reviews in the bin/)).toBeTruthy();
   fireEvent.click(within(dialog).getByRole("button", { name: "Empty bin" }));
   await screen.findByText("Emptied the bin");
-  expect(JSON.parse(String(calls(f, "DELETE", "/api/v1/bin")[0]?.[1]?.body))).toEqual({ upTo: binAsOf, total: 2 });
+  expect(JSON.parse(String(calls(f, "DELETE", "/api/v1/bin")[0]?.[1]?.body))).toEqual({ version: binVersion });
 });
 
 test("Empty bin stays enabled when the listing has a count but no items", async () => {
-  const f = setup({}, "/settings", undefined, { items: [], total: 1, more: false, asOf: binAsOf });
+  const f = setup({}, "/settings", undefined, { items: [], total: 1, more: false, version: binVersion });
   await screen.findByText("The bin is empty.");
   const button = screen.getByRole<HTMLButtonElement>("button", { name: "Empty bin" });
   expect(button.disabled).toBe(false);
@@ -368,15 +379,15 @@ test("Empty bin stays enabled when the listing has a count but no items", async 
   const dialog = await screen.findByRole("alertdialog");
   fireEvent.click(within(dialog).getByRole("button", { name: "Empty bin" }));
   await screen.findByText("Emptied the bin");
-  expect(JSON.parse(String(calls(f, "DELETE", "/api/v1/bin")[0]?.[1]?.body))).toEqual({ upTo: binAsOf, total: 1 });
+  expect(JSON.parse(String(calls(f, "DELETE", "/api/v1/bin")[0]?.[1]?.body))).toEqual({ version: binVersion });
 });
 
-test("Empty bin closes its dialog, refreshes the bin and toasts the server's message on a count conflict", async () => {
-  const f = setup({}, "/settings", undefined, { items: [binItem], total: 1, more: false, asOf: binAsOf });
+test("Empty bin closes its dialog, refreshes the bin and toasts the server's message on a version conflict", async () => {
+  const f = setup({}, "/settings", undefined, { items: [binItem], total: 1, more: false, version: binVersion });
   await screen.findByText(binItem.title);
   fireEvent.click(screen.getByRole("button", { name: "Empty bin" }));
   const dialog = await screen.findByRole("alertdialog");
-  f.setBin({ items: [], total: 0, more: false, asOf: binAsOf });
+  f.setBin({ items: [], total: 0, more: false, version: "b".repeat(64) });
   f.fetcher.mockImplementationOnce(async () =>
     Response.json(
       { error: { code: "invalid_state", message: "The bin changed. Check it and try again." } },
@@ -390,11 +401,11 @@ test("Empty bin closes its dialog, refreshes the bin and toasts the server's mes
   expect(screen.queryByText(binItem.title)).toBeNull();
   expect(f.invalidate).toHaveBeenCalledWith({ queryKey: ["bin"] });
   expect(calls(f, "DELETE", "/api/v1/bin")).toHaveLength(1);
-  expect(JSON.parse(String(calls(f, "DELETE", "/api/v1/bin")[0]?.[1]?.body))).toEqual({ upTo: binAsOf, total: 1 });
+  expect(JSON.parse(String(calls(f, "DELETE", "/api/v1/bin")[0]?.[1]?.body))).toEqual({ version: binVersion });
 });
 
-test("Empty bin preserves the shown cutoff and count while its confirmation is open", async () => {
-  const f = setup({}, "/settings", undefined, { items: [binItem], total: 1, more: false, asOf: binAsOf });
+test("Empty bin preserves the shown version and count while its confirmation is open", async () => {
+  const f = setup({}, "/settings", undefined, { items: [binItem], total: 1, more: false, version: binVersion });
   await screen.findByText(binItem.title);
   fireEvent.click(screen.getByRole("button", { name: "Empty bin" }));
   const dialog = await screen.findByRole("alertdialog");
@@ -413,7 +424,7 @@ test("Empty bin preserves the shown cutoff and count while its confirmation is o
           ],
           total: 2,
           more: false,
-          asOf: "2026-11-05T10:00:00.000Z",
+          version: "b".repeat(64),
         },
       ],
       pageParams: [undefined],
@@ -423,5 +434,5 @@ test("Empty bin preserves the shown cutoff and count while its confirmation is o
   expect(within(dialog).getByText(/This deletes the 1 review in the bin/)).toBeTruthy();
   fireEvent.click(within(dialog).getByRole("button", { name: "Empty bin" }));
   await screen.findByText("Emptied the bin");
-  expect(JSON.parse(String(calls(f, "DELETE", "/api/v1/bin")[0]?.[1]?.body))).toEqual({ upTo: binAsOf, total: 1 });
+  expect(JSON.parse(String(calls(f, "DELETE", "/api/v1/bin")[0]?.[1]?.body))).toEqual({ version: binVersion });
 });
