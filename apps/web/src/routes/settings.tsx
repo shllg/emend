@@ -11,6 +11,7 @@ import { ApiError, change, patch } from "../api/client.ts";
 import { mutationMessage } from "../api/mutations.ts";
 import { binQuery, settingsQuery } from "../api/queries.ts";
 import { AppFrame } from "../components/layout/AppFrame.tsx";
+import { ShortcutSettings } from "../components/ShortcutSettings.tsx";
 import { Button } from "../components/ui/Button.tsx";
 import { Dialog } from "../components/ui/Dialog.tsx";
 import { TextField } from "../components/ui/TextField.tsx";
@@ -29,6 +30,7 @@ function InboxSettings({ setting }: { setting: HoursSetting }) {
   const value = draft ?? initial;
   const changed = draft !== undefined && (value === "" ? null : Number(value)) !== setting.override;
   const mutation = useMutation({
+    scope: { id: "settings" },
     mutationFn: (approvedActiveHours: number | null) =>
       patch("/api/v1/settings", { approvedActiveHours }, SettingsView),
     onSuccess: async (view) => {
@@ -252,6 +254,7 @@ export function SettingsPage() {
           {settings.isPending && <p role="status">Loading settings…</p>}
           {settings.isError && <p role="alert">Could not load settings. Try again.</p>}
           {settings.data && <InboxSettings setting={settings.data.approvedActiveHours} />}
+          {settings.data && <ShortcutSettings keys={settings.data.keys} />}
           <BinSettings />
         </div>
       </main>

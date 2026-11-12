@@ -1,7 +1,15 @@
 import { createHash, createHmac } from "node:crypto";
 import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { Capabilities, ERROR_STATUS, ErrorBody, LIMITS, PairingCreated, SCOPES_BY_KIND } from "@emend/contract";
+import {
+  Capabilities,
+  ERROR_STATUS,
+  ErrorBody,
+  LIMITS,
+  PairingCreated,
+  SCOPES_BY_KIND,
+  SettingsView,
+} from "@emend/contract";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { devices, pairings, tokens } from "../db/schema.ts";
@@ -182,7 +190,10 @@ test("every documented API endpoint enforces its scope even before its handler e
         await error(response, "forbidden", endpoint.method === "HEAD");
       else if (path === "/api/v1/settings") {
         if (endpoint.method === "GET") expect(response.status).toBe(200);
-        else await error(response, "invalid_request");
+        else if (endpoint.method === "PATCH") {
+          expect(response.status).toBe(200);
+          expect(SettingsView.safeParse(await response.json()).success).toBe(true);
+        } else await error(response, "invalid_request");
       } else if (path === "/api/v1/pairings") expect(response.status).toBe(201);
       else if (["/api/v1/reviews", "/api/v1/devices", "/api/v1/agent/reviews"].includes(path))
         expect(response.status).toBe(200);

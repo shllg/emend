@@ -19,6 +19,7 @@ export { normalizeText } from "./render/normalize.ts";
 export type { MediaSize } from "./render/sanitize.ts";
 export * from "./render/source.ts";
 export { type RenderedWriteup, renderWriteup } from "./render/writeup.ts";
+export { resolveShortcuts } from "./shortcuts.ts";
 
 export * from "./text.ts";
 export { type ChangedPath, UnchangedFilesError, withOtherChanges } from "./topics.ts";

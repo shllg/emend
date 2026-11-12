@@ -18,7 +18,7 @@ The service records an absolute `XDG_CONFIG_HOME` at install time. Reinstall it 
 For `docRoots` and `openBrowser`, publish and bare `emend` ignore a global config whose path or
 links lie inside a repository holding the working directory. `emend config` refuses there.
 An old state config inside such a repository is never read, copied or renamed.
-A dotfiles repository at the home folder is allowed. The server reads only `approvedActiveHours`
+A dotfiles repository at the home folder is allowed. The server reads only `approvedActiveHours` and `keys`
 from the file and does not apply this check. A config path set by a repository's environment
 is not detected when emend runs from a folder outside every repository.
 

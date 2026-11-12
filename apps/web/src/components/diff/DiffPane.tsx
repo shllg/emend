@@ -7,8 +7,10 @@ import { DiffNavigation, type NavigateDiff } from "../../lib/diff-navigation.ts"
 import { draftKey, type SavedDraft } from "../../lib/drafts.ts";
 import { useLayout } from "../../lib/layout.ts";
 import { layoutStore, useLayoutPreferences } from "../../lib/layout-store.ts";
+import { onReaderInput } from "../../lib/reader-input.ts";
 import { useTopicFolds } from "../../lib/topic-folds.ts";
 import { rankedTopics } from "../../lib/topics.ts";
+import { useShortcut } from "../../lib/use-shortcut.tsx";
 import { useViewedCollapse } from "../../lib/viewed-collapse.ts";
 import type { ReviewSearch } from "../../router.tsx";
 import { Composer } from "../threads/Composer.tsx";
@@ -95,6 +97,67 @@ export function DiffPane({
     setActive(target);
   };
   const groups = diffGroups(revision);
+  const orderedFiles = [...groups.values()].flatMap((group) => group.files);
+  const lastReachedFile = useRef<string | null>(null);
+  useEffect(() => {
+    const scroll = root.current?.closest<HTMLElement>("[data-diff-scroll]");
+    if (!scroll) return;
+    return onReaderInput(scroll, () => {
+      lastReachedFile.current = null;
+    });
+  }, []);
+  const currentFile = () => {
+    const pane = root.current;
+    const scroll = pane?.closest<HTMLElement>("[data-diff-scroll]");
+    if (!pane || !scroll || pane.closest("[hidden]")) return undefined;
+    const { top, bottom } = scroll.getBoundingClientRect();
+    type CurrentFile = { index: number; header: HTMLElement; top: number; headerTop: number; visible: boolean };
+    let atTop: CurrentFile | undefined;
+    let firstVisible: CurrentFile | undefined;
+    for (const [i, file] of orderedFiles.entries()) {
+      const element = document.getElementById(`diff-file-${file.id}`);
+      if (!element || !pane.contains(element) || element.closest("[hidden]")) continue;
+      // Sticky headers move with the viewport. Measure their original file position below the
+      // pinned toolbar/topic stack, just as the toolbar's jump does.
+      const sticky = getComputedStyle(element).position === "sticky";
+      const topic = element.closest("[data-topic]")?.querySelector("[data-topic-header]");
+      const stack = sticky
+        ? (pane.querySelector("[data-diff-toolbar]")?.getBoundingClientRect().height ?? 0) +
+          (topic?.getBoundingClientRect().height ?? 0)
+        : 0;
+      const section = (element.closest("[data-diff-file]") ?? element).getBoundingClientRect();
+      const position = (sticky ? section.top : element.getBoundingClientRect().top) - stack;
+      const visible = section.top < bottom && section.bottom > top;
+      const filePosition = { index: i, header: element, top, headerTop: position, visible };
+      // A short file cannot always scroll to the top. Keep the keyboard destination while visible.
+      if (visible && file.id === lastReachedFile.current) return filePosition;
+      if (position <= top + 8) atTop = filePosition;
+      if (visible) firstVisible ??= filePosition;
+    }
+    lastReachedFile.current = null;
+    return atTop ?? firstVisible ?? { index: -1, header: undefined, top, headerTop: top, visible: false };
+  };
+  const moveFile = (delta: 1 | -1) => {
+    const current = currentFile();
+    if (!current) return false;
+    const inside = current.headerTop < current.top;
+    const file = orderedFiles[current.index + (delta === -1 && inside ? 0 : delta)];
+    if (!file) return false;
+    lastReachedFile.current = file.id;
+    setJump(file);
+    return true;
+  };
+  useShortcut("file.next", () => moveFile(1));
+  useShortcut("file.previous", () => moveFile(-1));
+  useShortcut("file.toggleViewed", () => {
+    if (document.activeElement?.closest(".em-files-row")) return false;
+    const current = currentFile();
+    if (!current?.visible) return false;
+    const mark = current.header?.querySelector<HTMLButtonElement>(".em-viewed-mark");
+    if (!mark || mark.disabled) return false;
+    mark.click();
+    return true;
+  });
   const resolved = new Map<FileLocation, FileView | undefined>();
   const fileForTarget = (target: FileLocation) => {
     if (!resolved.has(target)) resolved.set(target, resolveFile(revision.files, target));
@@ -164,6 +227,7 @@ export function DiffPane({
     if (!anchor || !root.current?.contains(anchor) || anchor.closest("[hidden], [data-slot-pending]")) return false;
     cancelHold.current?.();
     cancelHold.current = holdDiffTarget(anchor);
+    lastReachedFile.current = file?.id ?? null;
     return true;
   };
   useLayoutEffect(() => {

@@ -220,9 +220,16 @@ their normal focus behavior; no unconditional focus refetch is required.
 `SettingSource = "default" | "file" | "override"`.
 `HoursSetting = { value: ApprovedActiveHours, source: SettingSource, default: ApprovedActiveHours,
 file: ApprovedActiveHours | null, override: ApprovedActiveHours | null, fileError: boolean }`.
-`SettingsView = { approvedActiveHours: HoursSetting, serverTime: string }`. `serverTime` is the server's clock (ISO
+`KeyBinding = ShortcutKey | null`; null turns a shortcut off.
+`KeySetting = { value: KeyBinding, source: SettingSource, default: ShortcutKey, file?: KeyBinding,
+override?: KeyBinding, fileError: boolean, clashWith: ShortcutCommand | null }`.
+`KeysSetting = { commands: Record<ShortcutCommand, KeySetting>, fileError: boolean }`; every command is present.
+`SettingsView = { approvedActiveHours: HoursSetting, keys: KeysSetting, serverTime: string }`. `serverTime` is the server's clock (ISO
 8601) when it answered; a client compares it with `InboxList.serverTime` to tell which window is newer.
-`SettingsUpdate = { approvedActiveHours: ApprovedActiveHours | null }` is strict; extra keys are refused.
+`SettingsUpdate = { approvedActiveHours?: ApprovedActiveHours | null,
+keys?: Partial<Record<ShortcutCommand, { key: KeyBinding } | null>> }` is strict, including each
+`{ key }` object; extra keys, unknown commands and non-normalized keys are refused (400).
+An empty update is accepted. Omitted settings stay unchanged. Updates to both settings share one transaction.
 
 The effective `value` uses the owner's database override, then the config file, then
 `APPROVED_ACTIVE_HOURS` (12). Zero moves an approved review out of Active at once.
@@ -232,6 +239,58 @@ or migrates that file. `file` is its usable value, or null when absent or invali
 `fileError` is true when the file cannot be read, is not a JSON object, or contains an unusable
 `approvedActiveHours` value. An invalid file does not prevent the default or override from working.
 A missing file or absent key is not an error. `docRoots` and `openBrowser` are not settings in this API.
+
+`ShortcutKey` is a normalized string: one lowercase ASCII letter, `shift+` followed by one
+lowercase ASCII letter, one ASCII digit, or one printable ASCII punctuation character
+(0x21–0x7E excluding letters and digits). Spaces, named keys (including Escape, Tab, Enter,
+arrows, PageUp/PageDown, Home, End and F-keys), ctrl/alt/meta modifiers and `shift+` before a
+non-letter are refused. The config file alone also accepts uppercase letters (`A` becomes
+`shift+a`) and case-insensitive shift-letter combinations (`SHIFT+A` becomes `shift+a`).
+
+The global config file format is `"keys": { "<command>": "<key>" | null }`. It is read once
+alongside `approvedActiveHours`. An absent `file` or `override` in a `KeySetting` means that
+source sets nothing usable; a present null explicitly turns the command off. An unusable file
+entry is ignored and sets that command's `fileError`. `keys.fileError` is true if the file
+cannot be read, is not a JSON object, its `keys` is present but not a plain object, or it names
+an unknown command. Unknown entries are ignored; other usable entries still apply. A missing
+file or absent `keys` is not an error.
+
+PATCH `keys` merges commands into one stored object per owner: `{ key: "j" }` stores an override,
+`{ key: null }` stores off, and null removes the override. Unmentioned commands stay unchanged;
+removing the last override deletes the stored row. Corrupt stored objects and invalid or unknown
+entries are ignored. Only a reviewer session can PATCH keys. The `readSettings` path on review
+reads is unchanged: it reads only the approved-hours setting, without querying shortcut overrides.
+
+`ShortcutCommand` and `SHORTCUT_DEFAULTS` use this order:
+
+| Command | Default key |
+| --- | --- |
+| `inbox.next` | `j` |
+| `inbox.previous` | `k` |
+| `inbox.filter` | `f` |
+| `inbox.search` | `/` |
+| `inbox.back` | `u` |
+| `tab.writeup` | `1` |
+| `tab.files` | `2` |
+| `tab.docs` | `3` |
+| `tab.comments` | `4` |
+| `tab.diff` | `5` |
+| `file.next` | `n` |
+| `file.previous` | `p` |
+| `file.toggleViewed` | `v` |
+| `review.instructions` | `s` |
+| `review.approve` | `shift+a` |
+| `review.snooze` | `z` |
+| `shortcuts.show` | `?` |
+
+Each command tries its override (level 2), file entry (level 1), then default (level 0), skipping
+absent candidates. Off never clashes. For each group holding the same non-null key, the highest
+level wins over lower levels: each lower command advances and records `clashWith` as the first
+command at the highest level in the order above. If multiple commands tie at the highest level,
+all of them advance too, each recording the first other command at that level. Repeat until
+keys are unique. A command losing its default ends off with source `default`. Otherwise `value`
+and `source` name its final candidate. `clashWith` records the last clash, or null if there was
+none; `default`, `file`, `override` and `fileError` describe the inputs even after a clash.
 
 ### Review read views
 

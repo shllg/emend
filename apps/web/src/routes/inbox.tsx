@@ -1,7 +1,8 @@
 import type { InboxItem } from "@emend/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import { ChevronDown, ChevronRight, PanelLeftClose, Search } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { inboxQuery, serverNow } from "../api/queries.ts";
 import { needsAttention, ReviewRow } from "../components/inbox/ReviewRow.tsx";
 import { AppFrame } from "../components/layout/AppFrame.tsx";
@@ -13,51 +14,44 @@ import { Select } from "../components/ui/Select.tsx";
 import { TextField } from "../components/ui/TextField.tsx";
 import { plural } from "../lib/count.ts";
 import { useInboxArrivals } from "../lib/inbox-arrivals.tsx";
+import {
+  adjacentInboxItem,
+  type InboxKind,
+  inboxKindKey,
+  inboxSections,
+  inboxSequence,
+  readInboxKind,
+} from "../lib/inbox-list.ts";
+import { useShortcut } from "../lib/use-shortcut.tsx";
 import { useWakeTimer } from "../lib/wake-timer.ts";
-
-const lists = [
-  { list: "active", title: "Active" },
-  { list: "snoozed", title: "Snoozed" },
-  { list: "done", title: "Done" },
-] as const;
-
-function effectiveList(review: InboxItem, now: number) {
-  return review.activeUntil !== null && new Date(review.activeUntil).getTime() <= now ? "done" : review.list;
-}
-
-type Kind = "" | "review" | "publish";
-// A per-browser convenience: the inbox unmounts whenever a review opens.
-const kindKey = "emend:inbox-kind";
-function readKind(): Kind {
-  try {
-    const stored = localStorage.getItem(kindKey);
-    return stored === "review" || stored === "publish" ? stored : "";
-  } catch {
-    return "";
-  }
-}
 
 export function Inbox({
   compact = false,
   hideHead = false,
   onCollapse,
   onOpen,
+  searchRef,
 }: {
   compact?: boolean;
   hideHead?: boolean;
   onCollapse?: () => void;
   onOpen?: () => void;
+  searchRef?: React.Ref<HTMLInputElement>;
 }) {
   const query = useQuery(inboxQuery());
+  const root = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
+  const { reviewId } = useParams({ strict: false });
   const [filter, setFilter] = useState("");
   const [machine, setMachine] = useState("");
   const [project, setProject] = useState("");
-  const [kind, setKindState] = useState<Kind>(readKind);
-  const setKind = (next: Kind) => {
+  const [kind, setKindState] = useState<InboxKind>(readInboxKind);
+  const setKind = (next: InboxKind) => {
     setKindState(next);
     try {
-      if (next) localStorage.setItem(kindKey, next);
-      else localStorage.removeItem(kindKey);
+      if (next) localStorage.setItem(inboxKindKey, next);
+      else localStorage.removeItem(inboxKindKey);
     } catch {}
   };
   const [now, setNow] = useState(Date.now);
@@ -101,21 +95,58 @@ export function Inbox({
     !compact && (projects.length > 1 || (projects.length === 1 && items.some((review) => review.project === null)));
   const projectFilter = showProjectPicker && projects.includes(project) ? project : "";
   const needle = filter.toLocaleLowerCase();
-  const filtered = items.filter(
-    (review) =>
-      (!machineFilter || review.origin.id === machineFilter) &&
-      (!projectFilter || review.project === projectFilter) &&
-      // Never hide an agent-waiting item under Reviews.
-      (!kind || review.kind === kind || (kind === "review" && review.agentWaiting)) &&
-      [review.title, review.branch, review.origin.name, review.project].some((value) =>
-        value?.toLocaleLowerCase().includes(needle),
-      ),
+  const sections = inboxSections(items, estimate, {
+    kind,
+    filter,
+    machine: machineFilter,
+    project: projectFilter,
+    open,
+  });
+  const filteredCount = sections.reduce((count, section) => count + section.rows.length, 0);
+  const move = (delta: 1 | -1) => {
+    const sequence = inboxSequence(sections);
+    const links = [...(root.current?.querySelectorAll<HTMLAnchorElement>("a[data-inbox-row]") ?? [])];
+    const focusedId = links.find((link) => link === document.activeElement)?.dataset.inboxRow;
+    const item = adjacentInboxItem(sequence, reviewId ?? focusedId, delta);
+    if (!item) return false;
+    if (reviewId) {
+      void navigate({ to: "/r/$reviewId", params: { reviewId: item.id }, search: { rev: item.newestRevision } });
+      onOpen?.();
+    } else {
+      const link = links.find((link) => link.dataset.inboxRow === item.id);
+      if (!link) return false;
+      link.focus();
+      link.scrollIntoView({ block: "nearest" });
+    }
+    return true;
+  };
+  useShortcut("inbox.next", () => move(1), { priority: 10 });
+  useShortcut("inbox.previous", () => move(-1), { priority: 10 });
+  useShortcut(
+    "inbox.filter",
+    () => {
+      setKind(kind === "" ? "review" : kind === "review" ? "publish" : "");
+      return true;
+    },
+    { enabled: items.length > 0, priority: 10 },
+  );
+  useShortcut(
+    "inbox.search",
+    () => {
+      if (!input.current) return false;
+      input.current.focus();
+      return true;
+    },
+    { priority: 10 },
   );
   const highlighted = useInboxArrivals(items);
   const Heading = compact ? "h3" : "h2";
   const attention = items.filter(needsAttention).length;
   return (
-    <div className={compact ? "flex min-h-0 flex-1 flex-col" : "mx-auto w-full max-w-[760px] px-5 pt-8 pb-20"}>
+    <div
+      ref={root}
+      className={compact ? "flex min-h-0 flex-1 flex-col" : "mx-auto w-full max-w-[760px] px-5 pt-8 pb-20"}
+    >
       {!hideHead &&
         (compact ? (
           <div className="flex items-center justify-between pt-2.5 pr-2 pb-1.5 pl-4">
@@ -135,6 +166,11 @@ export function Inbox({
         ))}
       <div className={compact ? "flex flex-col gap-2 px-2.5 pb-2" : "mb-3 flex flex-wrap items-center gap-2.5"}>
         <TextField
+          ref={(node) => {
+            input.current = node;
+            if (typeof searchRef === "function") return searchRef(node);
+            if (searchRef) searchRef.current = node;
+          }}
           aria-label="Filter reviews"
           placeholder="Filter by title, branch, machine, project"
           icon={Search}
@@ -197,7 +233,7 @@ export function Inbox({
           </div>
         )}
         {query.data && items.length === 0 && <p className="p-4 text-fg-3">No reviews yet.</p>}
-        {items.length > 0 && filtered.length === 0 && (
+        {items.length > 0 && filteredCount === 0 && (
           <div className="p-4">
             <p className="text-fg-3">No reviews match this filter.</p>
             <Button
@@ -215,19 +251,10 @@ export function Inbox({
         )}
         {query.data &&
           items.length > 0 &&
-          filtered.length > 0 &&
-          lists.map(({ list, title }) => {
-            const rows = filtered.filter((review) => effectiveList(review, estimate) === list);
-            if (list === "done")
-              rows.sort(
-                (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-              );
-            const nothingActive =
-              list === "active" && !items.some((review) => effectiveList(review, estimate) === "active");
+          filteredCount > 0 &&
+          sections.map(({ list, title, rows, nothingActive, expanded }) => {
             if (rows.length === 0 && !nothingActive) return null;
             const collapsible = list !== "active";
-            // A filter that matches only collapsed Snoozed or Done rows would otherwise show nothing.
-            const expanded = !collapsible || open[list] || needle !== "";
             const heading = (
               <>
                 {title}
