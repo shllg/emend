@@ -237,5 +237,14 @@ export const MIGRATIONS: readonly { tag: string; when: number; hash: string; sta
     "statements": [
       "ALTER TABLE `reviews` ADD `binned_at` integer;"
     ]
+  },
+  {
+    "tag": "0017_solid_captain_universe",
+    "when": 1794514472860,
+    "hash": "34971ff62cf37d0c7bbed01603f090501349b2abaa01a89289875058c5ba2569",
+    "statements": [
+      "ALTER TABLE `files` ADD `additions` integer;",
+      "ALTER TABLE `files` ADD `deletions` integer;"
+    ]
   }
 ];

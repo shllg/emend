@@ -21,7 +21,7 @@ test("adding diff counts preserves old file rows with null counts", async () => 
       await q.exec(
         "CREATE TABLE __emend_migrations (hash text primary key, tag text not null, applied_at integer not null)",
       );
-      for (const migration of MIGRATIONS.filter((m) => m.tag < "0016")) {
+      for (const migration of MIGRATIONS.filter((m) => m.tag < "0017")) {
         for (const statement of migration.statements) await q.exec(statement);
         await q.run(sql`INSERT INTO __emend_migrations VALUES (${migration.hash}, ${migration.tag}, 0)`);
       }
@@ -37,7 +37,7 @@ test("adding diff counts preserves old file rows with null counts", async () => 
         sql`INSERT INTO files (id, owner_id, revision_id, path, role, status, ord, media_type) VALUES (${file}, ${owner}, ${revision}, 'synthetic.txt', 'diff', 'modified', 0, 'text/plain')`,
       );
     });
-    expect(await migrate(db)).toBe(MIGRATIONS.filter((m) => m.tag >= "0016").length);
+    expect(await migrate(db)).toBe(MIGRATIONS.filter((m) => m.tag >= "0017").length);
     expect(await migrate(db)).toBe(0);
     expect(
       await db.read((q) =>
