@@ -31,6 +31,7 @@ vi.mock("../executable.ts", async (original) => {
   };
 });
 
+const killProcess = process.kill;
 const url = "http://127.0.0.1:3636";
 const noServer = "emend: no emend server is running.\n";
 let root: string;
@@ -110,6 +111,18 @@ async function syntheticServer(mode = "stops") {
   writeSecretFile(join(state, "admin.token"), `em_${"a".repeat(43)}`);
   const proof = provenTestServer(state);
   let stopped = false;
+  const kill = killProcess;
+  vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+    if (
+      pid === process.pid &&
+      signal === 0 &&
+      stopped &&
+      mode !== "never-exit" &&
+      (mode !== "delayed-exit" || elapsed >= 500)
+    )
+      throw Object.assign(new Error("synthetic exited server"), { code: "ESRCH" });
+    return kill(pid, signal);
+  });
   let probes = 0;
   const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     if (stopped) throw new TypeError("refused", { cause: { code: "ECONNREFUSED" } });
@@ -156,7 +169,7 @@ test("stop refuses a loose state folder with a stale route and no recorded serve
   writeSecretFile(path, contents);
   await chmod(state, 0o770);
   vi.spyOn(markers, "loopbackState").mockResolvedValue("refused");
-  const kill = process.kill;
+  const kill = killProcess;
   vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
     if (pid !== marker.pid) return kill(pid, signal);
     throw Object.assign(new Error("synthetic dead process"), { code: "ESRCH" });
@@ -255,7 +268,7 @@ test("a loose admin token still refuses when unknown service ownership finds a d
     gone = true;
     return { code: 1, stdout: "", stderr: "synthetic failure" };
   });
-  const kill = process.kill;
+  const kill = killProcess;
   vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
     if (gone && pid === process.pid && signal === 0)
       throw Object.assign(new Error("synthetic dead process"), { code: "ESRCH" });
@@ -333,7 +346,7 @@ for (const platform of ["linux", "darwin"]) {
   test.each(["ESRCH", "EPERM"])(`${platform} unknown ownership checks recorded pid liveness (%s)`, async (code) => {
     const fetcher = await syntheticServer();
     await installService(platform);
-    const kill = process.kill;
+    const kill = killProcess;
     vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
       if (pid !== process.pid || signal !== 0) return kill(pid, signal);
       throw Object.assign(new Error("synthetic liveness"), { code });
@@ -382,14 +395,28 @@ test("other platforms skip service ownership", async () => {
 });
 
 test("stops a real bare server through its handler", async () => {
+  // This server closes in this process; its asynchronous cleanup needs the real clock.
+  if (io.service) {
+    io.service.now = undefined;
+    io.service.sleep = undefined;
+  }
   let server: Awaited<ReturnType<typeof startServer>> | undefined;
   let closing: Promise<void> | undefined;
+  let closed = false;
+  const kill = killProcess;
+  vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+    if (closed && pid === process.pid && signal === 0)
+      throw Object.assign(new Error("in-process server closed"), { code: "ESRCH" });
+    return kill(pid, signal);
+  });
   try {
     server = await startServer({
       stateDir: state,
       port: 0,
       onStopRequest: () => {
-        closing = server?.close();
+        closing = server?.close().then(() => {
+          closed = true;
+        });
       },
     });
     expect(await run(["stop"], io)).toBe(0);
@@ -428,7 +455,7 @@ test("stop keeps the marker and warns the route may still exist when Tailscale i
   await mkdir(state, { recursive: true, mode: 0o700 });
   writeSecretFile(join(state, "tailscale-serve.json"), JSON.stringify(marker));
   vi.spyOn(markers, "loopbackState").mockResolvedValue("refused");
-  const kill = process.kill;
+  const kill = killProcess;
   vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
     if (pid !== marker.pid) return kill(pid, signal);
     throw Object.assign(new Error("synthetic dead process"), { code: "ESRCH" });
@@ -439,4 +466,21 @@ test("stop keeps the marker and warns the route may still exist when Tailscale i
     "emend: no emend server is running; tailscale was not found on PATH, so the Tailscale Serve route at https://hub.example.ts.net may still exist.\n",
   ]);
   expect(JSON.parse(await readFile(join(state, "tailscale-serve.json"), "utf8"))).toEqual(marker);
+});
+
+test("stop waits for the process to exit after its listener closes", async () => {
+  const fetcher = await syntheticServer("delayed-exit");
+  expect(await run(["stop"], io)).toBe(0);
+  expect(elapsed).toBe(500);
+  expect(fetcher.mock.calls.some(([input]) => String(input).endsWith("/server/stop"))).toBe(true);
+  expect(stdout).toEqual([`emend: stopped the emend server at ${url}\n`]);
+  expect(stderr).toEqual([]);
+});
+
+test("stop fails after 15 seconds when the listener closes but the process never exits", async () => {
+  await syntheticServer("never-exit");
+  expect(await run(["stop"], io)).toBe(1);
+  expect(elapsed).toBe(15000);
+  expect(stdout).toEqual([]);
+  expect(stderr).toEqual([`emend: the emend server at ${url} did not stop; try again.\n`]);
 });

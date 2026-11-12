@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
-import type { UpdateSignals } from "./signals.ts";
+import type { UpdateSignal, UpdateSignals } from "./signals.ts";
 
 export interface ChildResult {
   code: number | null;
   signal: NodeJS.Signals | null;
-  interrupted: "SIGINT" | "SIGTERM" | null;
+  interrupted: UpdateSignal | null;
   timedOut: boolean;
   error: boolean;
   stdout: string;
@@ -69,7 +69,7 @@ export function runChild(
           if ((cause as NodeJS.ErrnoException).code !== "ESRCH") error = true;
         }
       };
-      const terminate = (signal: "SIGINT" | "SIGTERM") => {
+      const terminate = (signal: UpdateSignal) => {
         terminating = true;
         signalGroup(signal);
         if (exited) signalGroup("SIGKILL");

@@ -77,3 +77,13 @@ test.each(pathNames)(
     expect(await childEnvironment({ [name]: safe }, fixed, [repo])).toHaveProperty(name, safe);
   },
 );
+
+test.each(["TZ", "LANG", "LANGUAGE", "LC_TIME", "LC_ALL"])(
+  "drops file-valued %s but keeps plain locale settings",
+  async (name) => {
+    const fixed = { path: "/trusted", home: "/home/user", stateDir: "/state" };
+    for (const value of ["/repository/locale", "../locale", ":/repository/zone", "Europe/Berlin"])
+      expect(await childEnvironment({ [name]: value }, fixed, [])).not.toHaveProperty(name);
+    expect(await childEnvironment({ [name]: "C.UTF-8" }, fixed, [])).toHaveProperty(name, "C.UTF-8");
+  },
+);

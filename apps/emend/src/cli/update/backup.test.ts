@@ -1,8 +1,39 @@
 import { chmod, mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { backupDatabase, backupStamp, pruneBackups } from "./backup.ts";
+
+const events = vi.hoisted(() => [] as string[]);
+vi.mock("node:fs/promises", async (original) => {
+  const fs = await original<typeof import("node:fs/promises")>();
+  return {
+    ...fs,
+    async open(...args: Parameters<typeof fs.open>) {
+      const file = await fs.open(...args);
+      const sync = file.sync.bind(file);
+      file.sync = async () => {
+        events.push("file sync");
+        await sync();
+      };
+      return file;
+    },
+    async rename(...args: Parameters<typeof fs.rename>) {
+      await fs.rename(...args);
+      events.push("rename");
+    },
+  };
+});
+vi.mock("../../state/files.ts", async (original) => {
+  const files = await original<typeof import("../../state/files.ts")>();
+  return {
+    ...files,
+    syncDirectory(path: string) {
+      events.push(path);
+      files.syncDirectory(path);
+    },
+  };
+});
 
 async function state() {
   const dir = await mkdtemp(join(process.env.EMEND_HOME as string, "backup-"));
@@ -65,3 +96,18 @@ test("pruning keeps the three newest by timestamp and ignores other names", asyn
     "other.db",
   ]);
 });
+
+test.each([false, true])(
+  "backup syncs the file, renames, then syncs directories (existing folder: %s)",
+  async (existing) => {
+    const dir = await state();
+    const folder = join(dir, "backups");
+    if (existing) await mkdir(folder);
+    const db = new DatabaseSync(join(dir, "emend.db"));
+    db.exec("CREATE TABLE sample(value TEXT)");
+    db.close();
+    events.length = 0;
+    await backupDatabase(dir, "0.1.0", new Date());
+    expect(events).toEqual(["file sync", "rename", folder, ...(existing ? [] : [dir])]);
+  },
+);

@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import type { Io } from "../../main.ts";
 import { checkTokenFileMode } from "../../state/token-file.ts";
 import { escapeReference } from "../escape.ts";
@@ -9,10 +10,12 @@ import { removeStaleTailscaleServe } from "../tailscale.ts";
 
 export async function stopCommand(stateDir: string, args: string[], io: Io) {
   if (args.length) throw new CliUsageError("Usage: emend stop.");
+  let serverPid: number | undefined;
   const url = await requestServerStop(stateDir, {
     now: io.service?.now,
     sleep: io.service?.sleep,
     beforeProbe: async (record) => {
+      serverPid = record.pid;
       const pid = await servicePid(io);
       if (pid === null) {
         let running = true;
@@ -51,5 +54,19 @@ export async function stopCommand(stateDir: string, args: string[], io: Io) {
           ? `emend: no emend server is running; tailscale was not found on PATH, so the Tailscale Serve route at https://${escapeReference(route.dnsName)} may still exist.\n`
           : "emend: no emend server is running.\n",
     );
-  } else io.stdout(`emend: stopped the emend server at ${escapeReference(url)}\n`);
+  } else {
+    const now = io.service?.now ?? (() => performance.now());
+    const sleep = io.service?.sleep ?? delay;
+    const deadline = now() + 15000;
+    while (serverPid !== undefined) {
+      try {
+        process.kill(serverPid, 0);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ESRCH") break;
+      }
+      if (now() >= deadline) throw new CliError(`the emend server at ${escapeReference(url)} did not stop; try again.`);
+      await sleep(Math.min(100, Math.max(1, deadline - now())));
+    }
+    io.stdout(`emend: stopped the emend server at ${escapeReference(url)}\n`);
+  }
 }

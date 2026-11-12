@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { open, readdir, rename, stat, unlink } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
-import { ensurePrivateDir } from "../../state/files.ts";
+import { ensurePrivateDir, syncDirectory } from "../../state/files.ts";
 import { CliError } from "../http.ts";
 
 export const keptBackups = 3;
@@ -31,6 +31,13 @@ export async function backupDatabase(stateDir: string, version: string, now: Dat
   const partial = `${target}.partial`;
   let created = false;
   try {
+    const folderExisted = await stat(folder).then(
+      () => true,
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return false;
+        throw error;
+      },
+    );
     ensurePrivateDir(folder, stateDir);
     const file = await open(partial, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
     created = true;
@@ -48,6 +55,8 @@ export async function backupDatabase(stateDir: string, version: string, now: Dat
       await written.close();
     }
     await rename(partial, target);
+    syncDirectory(folder);
+    if (!folderExisted) syncDirectory(stateDir);
     return target;
   } catch {
     if (created) await unlink(partial).catch(() => {});

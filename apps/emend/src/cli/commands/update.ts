@@ -30,7 +30,7 @@ import {
 import { checkNewEmend, type NewEmend } from "../update/package.ts";
 import { pnpmPackages } from "../update/pnpm.ts";
 import { runChild, succeeded } from "../update/run.ts";
-import { UpdateSignals } from "../update/signals.ts";
+import { signalExitCodes, UpdateSignals } from "../update/signals.ts";
 import { compareVersions } from "../version-notice.ts";
 
 export interface UpdateOptions extends Partial<CliRuntime> {
@@ -158,12 +158,15 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
   const now = options.now ?? (() => new Date());
   const database = join(stateDir, "emend.db");
   let backupPath: string | undefined;
+  let backupTime: string | undefined;
+  let installerStarted = false;
   const rollback = () =>
     goBack({
       home,
       stateDir,
       database,
       backupPath,
+      backupTime,
       oldVersion: VERSION,
       oldEntry,
       node: runtime.node,
@@ -175,13 +178,17 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
       env,
     });
   const fail = (reason: string, code = 1): never => {
-    io.stderr(`emend: ${reason}\n${rollback()}`);
+    try {
+      io.stderr(`emend: ${reason}\n${installerStarted ? rollback() : ""}`);
+    } catch {
+      // A hung-up terminal must not replace the interruption's exit code.
+    }
     throw new CliSignalExit(code);
   };
 
   const signals = new UpdateSignals();
   const checkpoint = () => {
-    if (signals.interrupted) fail("emend update was interrupted.", signals.interrupted === "SIGINT" ? 130 : 143);
+    if (signals.interrupted) fail("emend update was interrupted.", signalExitCodes[signals.interrupted]);
   };
   const step = async <T>(action: () => Promise<T>): Promise<T> => {
     checkpoint();
@@ -192,22 +199,25 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
   try {
     if (await step(() => databaseExists(database))) {
       // Store the completed backup before checking a signal received while it was copying.
-      backupPath = await backupDatabase(stateDir, VERSION, now());
+      const at = now();
+      backupTime = at.toISOString();
+      backupPath = await backupDatabase(stateDir, VERSION, at);
       checkpoint();
       io.stdout(`emend: backed up the database to ${escapeReference(backupPath)}\n`);
     } else io.stdout("emend: no database to back up yet.\n");
     const runningBefore = await step(options.localVersion ?? (() => localServer(stateDir)));
     const command = [basename(helper.file), ...updateArgs(install)].join(" ");
     io.stdout(`emend: running ${escapeReference(command)} in ${escapeReference(home)}\n`);
-    const updated = await step(() =>
-      runChild(helper.file, updateArgs(install), {
+    const updated = await step(() => {
+      installerStarted = true;
+      return runChild(helper.file, updateArgs(install), {
         cwd: home,
         env,
         timeoutMs: 15 * minute,
         output: "inherit",
         signals,
-      }),
-    );
+      });
+    });
     if (!succeeded(updated))
       return fail(
         `${escapeReference(command)} ${updated.timedOut ? "timed out" : updated.code === null ? "did not finish" : `failed with exit ${updated.code}`}.`,
@@ -217,6 +227,8 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
     const checked = await checkNewEmend(located, currentRoots);
     checkpoint();
     const version = checked.version;
+    if (compareVersions(version, VERSION) === -1)
+      return fail(`${tool} installed emend ${version}, older than ${VERSION}.`);
     const asked = await step(() =>
       runChild(runtime.node, [checked.entry, "--version"], {
         cwd: home,
@@ -230,7 +242,7 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
       return fail("the new emend does not answer with its version.");
     io.stdout(
       version === VERSION
-        ? `emend: emend ${version} is already the newest release\n`
+        ? `emend: emend ${version} is already installed; ${tool} installed nothing newer\n`
         : `emend: emend is now ${version}\n`,
     );
     const restarted = await step(() =>
@@ -266,8 +278,7 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
       }
     }
     checkpoint();
-    const block = rollback();
-    if (block) io.stdout(block);
+    if (version !== VERSION) io.stdout(rollback());
   } catch (error) {
     if (error instanceof CliSignalExit) throw error;
     checkpoint();

@@ -1,24 +1,28 @@
+export type UpdateSignal = "SIGINT" | "SIGTERM" | "SIGHUP" | "SIGQUIT";
+export const signalExitCodes: Record<UpdateSignal, number> = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129, SIGQUIT: 131 };
+
 /** Keep interruption state through the backup, children, probes and final report. */
 export class UpdateSignals {
-  interrupted: "SIGINT" | "SIGTERM" | null = null;
+  interrupted: UpdateSignal | null = null;
   private readonly controller = new AbortController();
   readonly signal: AbortSignal = this.controller.signal;
-  private readonly onInterrupt = () => this.receive("SIGINT");
-  private readonly onTerminate = () => this.receive("SIGTERM");
+  private readonly handlers = new Map<UpdateSignal, () => void>();
 
   constructor() {
-    process.on("SIGINT", this.onInterrupt);
-    process.on("SIGTERM", this.onTerminate);
+    for (const signal of Object.keys(signalExitCodes) as UpdateSignal[]) {
+      const handler = () => this.receive(signal);
+      this.handlers.set(signal, handler);
+      process.on(signal, handler);
+    }
   }
 
-  private receive(signal: "SIGINT" | "SIGTERM") {
+  private receive(signal: UpdateSignal) {
     if (this.interrupted !== null) return;
     this.interrupted = signal;
     this.controller.abort();
   }
 
   dispose() {
-    process.off("SIGINT", this.onInterrupt);
-    process.off("SIGTERM", this.onTerminate);
+    for (const [signal, handler] of this.handlers) process.off(signal, handler);
   }
 }

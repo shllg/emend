@@ -8,11 +8,11 @@ import { UpdateSignals } from "./signals.ts";
 test.each(["inherit", "capture"] as const)(
   "forwards parent signals to a %s child and removes handlers",
   async (output) => {
-    for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"] as const) {
       const dir = await mkdtemp(join(process.env.EMEND_HOME as string, "signals-"));
       const ready = join(dir, "ready");
       const received = join(dir, "received");
-      const before = [process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")];
+      const before = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"].map((name) => process.listenerCount(name));
       const signals = new UpdateSignals();
       try {
         const pending = runChild(
@@ -32,7 +32,7 @@ test.each(["inherit", "capture"] as const)(
       } finally {
         signals.dispose();
       }
-      expect([process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")]).toEqual(before);
+      expect(["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"].map((name) => process.listenerCount(name))).toEqual(before);
     }
   },
 );
@@ -100,7 +100,7 @@ async function processTree(output: "inherit" | "capture", signals?: UpdateSignal
   const pidFile = join(dir, "grandchild");
   const groupFile = join(dir, "group");
   const grandchild = `const fs = require("node:fs");
-    process.on("SIGINT", () => {}); process.on("SIGTERM", () => {});
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"]) process.on(signal, () => {});
     fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
     setTimeout(() => {}, 60000);`;
   const pending = runChild(
@@ -121,9 +121,9 @@ async function processTree(output: "inherit" | "capture", signals?: UpdateSignal
 }
 
 test.each(["inherit", "capture"] as const)(
-  "interrupting %s kills descendants that ignore both signals",
+  "interrupting %s kills descendants that ignore all four signals",
   async (output) => {
-    for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"] as const) {
       const signals = new UpdateSignals();
       const tree = await processTree(output, signals);
       try {

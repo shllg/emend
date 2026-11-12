@@ -52,9 +52,14 @@ checks catch a copy inside the repo.
   variables pass only when checked outside the working directory's repositories, hop by hop.
   Every child gets `npm_config_ignore_scripts=true`; npm and pnpm get `--ignore-scripts`, and
   pnpm list gets `--config.ignore-pnpmfile=true`, pnpm add `--ignore-pnpmfile`. Children run in
-  their own process group; termination signals the group and sweeps descendants with SIGKILL.
-  It backs up the database and prints a pinned go-back shell list that stops at the first failure
-  and uses `/usr/bin/env -u` to unset directory variables the update left out.
+  their own process group; SIGINT, SIGTERM, SIGHUP and SIGQUIT forward to the group, followed by
+  SIGKILL on termination. Backups sync the file before rename and the directories afterward.
+  Go-back lists stop at the first failure: restore the old package and start it first; restore
+  the database only if the old version refuses it, warning of lost changes and revived revocations.
+  Every program uses `/usr/bin/env -i` with checked PATH, HOME, path and session-bus pins; restore
+  proxies pass by shell reference, never printed values. Linux stops via systemctl on the pinned
+  PATH; macOS polls launchctl and proceeds only on status 113. Bare stop waits for process exit.
+  File-valued locale settings are dropped; a located downgrade refuses before executing it.
   Local builds only get instructions. A located new emend inside those repositories is refused,
   including every symlink hop; its `--version` and `service install` use the running Node.js.
   Tests use fake package managers on a fixture PATH.

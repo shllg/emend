@@ -43,8 +43,12 @@ It does five things:
 5. It prints the version this machine runs and, when the machine is attached, the version of its
    hub and which one is behind.
 
-If something fails, it prints how to go back to the backup. The [Undo](#undo) section lists the
+If something fails after the package manager starts, it prints how to restore the old version. The [Undo](#undo) section lists the
 same steps.
+
+If the package manager installs the same version, emend says
+`emend <v> is already installed; <tool> installed nothing newer`. This does not claim the registry
+has no newer release: the tool may defer one under its own release policy.
 
 A local build gets the commands and nothing else. If you built emend from a checkout (or linked it
 with `pnpm install:local`), `emend update` prints `git pull`, `pnpm install` and
@@ -264,37 +268,42 @@ This page is the update procedure. Run it again for the next release.
 
 ## Undo
 
-emend has no rollback command. Use the go-back block printed by `emend update`.
+emend has no rollback command. Use the two parts printed by `emend update`. The first restores
+the old package and starts it; it leaves the database intact. It prints after a version change
+and after any failure or interruption once the package manager started, even without a database.
+An unchanged successful update prints no recovery steps.
 
-An older emend refuses a database that a newer emend migrated, and says
-`The emend database is newer than this emend. Update emend, then try again.` Without a backup, stay
-on the newer version.
-
-`emend update` prints a go-back block with the exact home, helper, Node.js, old entry, database and
-backup paths for that run. Stop every agent that uses emend, then paste the printed lines as one
-shell list. Keep the quotes, `/usr/bin/env` arguments and `&&` between commands: the list stops at
-the first failure. Each program with pinned variables runs through `/usr/bin/env`, with `-u NAME`
-first for every directory variable the update left out, then `NAME='value'` for checked values.
-This prevents shell directory hooks from redirecting the restore after `cd`. The restore covers
-`MISE_DATA_DIR`, `MISE_CONFIG_DIR`, `MISE_CACHE_DIR`, `MISE_STATE_DIR`, `PNPM_HOME`, `XDG_DATA_HOME`,
-`XDG_CONFIG_HOME`, `XDG_CACHE_HOME` and `XDG_STATE_HOME`, and sets `npm_config_ignore_scripts=true`,
-including for mise's npm backend. The emend commands pin `EMEND_HOME` and either pin
-`XDG_CONFIG_HOME` or unset it with `/usr/bin/env -u XDG_CONFIG_HOME EMEND_HOME='…' …`.
+Stop every agent that uses emend, then paste the first part as one shell list. Keep the quotes,
+`/usr/bin/env -i` arguments and `&&` between commands: the list stops at the first failure.
 
 1. Change to the printed home folder.
-2. With a service, stop it first: `systemctl --user stop emend` on Linux, or
-   `{ launchctl bootout gui/<uid>/dev.emend.server || ! launchctl print gui/<uid>/dev.emend.server >/dev/null 2>&1; }`
-   on macOS. The macOS command also succeeds when the job is not loaded.
-3. Run the printed `/usr/bin/env` arguments and absolute package-manager path to restore the old
-   version. npm uses
+2. With a service, stop it first. Linux uses `systemctl --user stop emend` through the pinned
+   environment. macOS runs `/bin/launchctl bootout` in a subshell, then polls `print` up to 50
+   times, sleeping 0.2 seconds between attempts. Only a final exit status of 113 (not loaded)
+   permits the next command; a still-loaded job, missing launchctl or any other error stops the list.
+3. Restore the old package through the printed absolute helper path. npm uses
    `install --global --prefix <prefix> --ignore-scripts @shllg/emend@<old>`; pnpm uses
    `add --global --ignore-scripts --ignore-pnpmfile @shllg/emend@<old>`; mise uses
    `use --global npm:@shllg/emend@<old>`.
-   Without a service, restore first, then run the printed Node.js and restored old entry paths
-   followed by `stop`, with their printed `/usr/bin/env` arguments.
-4. Run the printed `cp <backup> <database> && rm -f <database>-wal <database>-shm` line.
-5. Run the printed `/usr/bin/env` arguments, Node.js and old entry paths with `service install`
-   when there is a service, or with no arguments to start the server and open the inbox otherwise.
+   Without a service, restore first, then run the printed Node.js and restored old entry with
+   `stop`. It waits for the server process to exit, including its database cleanup.
+4. Run the printed Node.js and old entry with `service install` when there is a service, or with
+   no arguments to start the server and open the inbox otherwise.
+
+Only use the second part if the old emend then says `The emend database is newer than this emend`.
+It prints only when a backup exists, and names the backup time. **Everything since that backup is
+lost, including devices and tokens revoked since then: revoke them again afterwards.** The second
+list changes to the home folder, stops the service or waits for the old entry's `stop`, copies the
+backup with `/bin/cp`, removes the database's WAL and SHM files with `/bin/rm`, then starts the old
+entry again. Without a backup, stay on the newer version if the old one refuses the database.
+
+Every program in both lists runs through `/usr/bin/env -i`, discarding the pasting shell's
+settings. It pins the checked `PATH`, `HOME`, mise directories, tool homes, certificate paths,
+`TMPDIR`, all retained `XDG_*` names (including `XDG_RUNTIME_DIR`) and `DBUS_SESSION_BUS_ADDRESS`
+from the update's child environment. It omits identity, shell, locale and terminal settings.
+The restore adds `npm_config_ignore_scripts=true`, including for mise's npm backend, and refers
+to each retained proxy variable as `NAME="${NAME-}"`: proxy values are never printed, and come
+from the shell where you paste the list. The emend commands also pin `EMEND_HOME`.
 
 The state folder defaults to `$XDG_DATA_HOME/emend` on Linux when `XDG_DATA_HOME` is absolute,
 otherwise `~/.local/share/emend`; on macOS it is `~/Library/Application Support/emend`.

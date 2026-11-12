@@ -1,6 +1,11 @@
 import { isAbsolute } from "node:path";
 import { pathThroughRepository } from "../executable.ts";
 
+export const proxyNames = ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY"].flatMap((name) => [
+  name,
+  name.toLowerCase(),
+]);
+
 const names = new Set([
   "USER",
   "LOGNAME",
@@ -11,10 +16,10 @@ const names = new Set([
   "NO_COLOR",
   "TZ",
   "DBUS_SESSION_BUS_ADDRESS",
-  ...["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY"].flatMap((name) => [name, name.toLowerCase()]),
+  ...proxyNames,
 ]);
 
-const pathNames = new Set([
+export const pathNames = new Set([
   "SHELL",
   "MISE_DATA_DIR",
   "MISE_CONFIG_DIR",
@@ -44,6 +49,7 @@ export async function childEnvironment(
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(parent)) {
     if (value === undefined) continue;
+    if ((["TZ", "LANG", "LANGUAGE"].includes(name) || name.startsWith("LC_")) && value.includes("/")) continue;
     if (pathNames.has(name) || name.startsWith("XDG_")) {
       try {
         if (isAbsolute(value) && !(await pathThroughRepository(value, roots))) env[name] = value;

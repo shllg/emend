@@ -44,10 +44,10 @@ const update = (...args: string[]) => run(["update", ...args], fake.io);
 let listeners: number[];
 beforeEach(() => {
   fixtureRoot = "";
-  listeners = [process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")];
+  listeners = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"].map((name) => process.listenerCount(name));
 });
 afterEach(() => {
-  expect([process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")]).toEqual(listeners);
+  expect(["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"].map((name) => process.listenerCount(name))).toEqual(listeners);
 });
 
 describe("refusals change nothing", () => {
@@ -221,16 +221,14 @@ describe.each([
     expect(backups).toEqual(["emend-0.1.0-20261112T102030123Z.db"]);
     const backup = join(fake.state, "backups", backups[0] as string);
     expect(err()).toContain("failed with exit 3.");
-    expect(err()).toContain(
-      `emend: to go back to emend ${VERSION} with the database from before this update, stop every agent that`,
-    );
-    expect(err()).toContain(`  cp '${backup}' '${join(fake.state, "emend.db")}' && rm -f `);
+    expect(err()).toContain(`emend: to go back to emend ${VERSION}, stop every agent that uses emend`);
+    expect(err()).toContain(` /bin/cp '${backup}' '${join(fake.state, "emend.db")}' && /usr/bin/env -i `);
     expect(err()).toContain(`  cd '${fake.home}' &&\n`);
     expect(err()).toContain(
-      `  /usr/bin/env -u XDG_CONFIG_HOME EMEND_HOME='${fake.state}' '${process.execPath}' '${await realpath(fake.entry)}' stop &&\n`,
+      `  /usr/bin/env -i PATH='${fake.bin}' HOME='${fake.home}' EMEND_HOME='${fake.state}' '${process.execPath}' '${await realpath(fake.entry)}' stop &&\n`,
     );
     expect(err()).toContain(
-      `  /usr/bin/env -u XDG_CONFIG_HOME EMEND_HOME='${fake.state}' '${process.execPath}' '${await realpath(fake.entry)}'\n`,
+      `  /usr/bin/env -i PATH='${fake.bin}' HOME='${fake.home}' EMEND_HOME='${fake.state}' '${process.execPath}' '${await realpath(fake.entry)}'\n`,
     );
     const old = {
       npm: `'${join(fake.bin, "npm")}' install --global --prefix '${join(fake.root, "prefix")}' --ignore-scripts @shllg/emend@${VERSION}`,
@@ -248,13 +246,13 @@ describe.each([
     expect(err()).toContain("to go back to emend");
   });
 
-  test("reports an emend that is already the newest", async () => {
+  test("reports that the helper installed nothing newer", async () => {
     await fake.set({
       newVersion: VERSION,
       newScript: emendScript(VERSION, fake.root),
     });
     expect(await update(), err()).toBe(0);
-    expect(out()).toContain(`emend: emend ${VERSION} is already the newest release\n`);
+    expect(out()).toContain(`emend: emend ${VERSION} is already installed; ${layout} installed nothing newer\n`);
   });
 });
 
@@ -266,7 +264,8 @@ describe("the database backup", () => {
   test("without a database it says so and continues", async () => {
     expect(await update(), err()).toBe(0);
     expect(out()).toContain("emend: no database to back up yet.\n");
-    expect(out()).not.toContain("to go back");
+    expect(out()).toContain("to go back");
+    expect(out()).not.toContain("emend: only if");
     expect(await readdir(fake.state)).not.toContain("backups");
   });
 
@@ -314,9 +313,11 @@ describe("the service", () => {
     expect(reinstall.entry).toBe(join(fake.oldPackage, "dist/emend.mjs"));
     expect(await realpath(reinstall.cwd)).toBe(fake.home);
     expect(out()).toContain("emend: the emend service runs emend 0.2.0\n");
-    expect(out()).toContain("  systemctl --user stop emend &&\n");
     expect(out()).toContain(
-      `  /usr/bin/env EMEND_HOME='${fake.state}' XDG_CONFIG_HOME='${join(fake.home, ".config")}' '${process.execPath}' '${await realpath(fake.entry)}' service install\n`,
+      `  /usr/bin/env -i PATH='${fake.bin}' HOME='${fake.home}' XDG_CONFIG_HOME='${join(fake.home, ".config")}' systemctl --user stop emend &&\n`,
+    );
+    expect(out()).toContain(
+      `  /usr/bin/env -i PATH='${fake.bin}' HOME='${fake.home}' XDG_CONFIG_HOME='${join(fake.home, ".config")}' EMEND_HOME='${fake.state}' '${process.execPath}' '${await realpath(fake.entry)}' service install\n`,
     );
   });
 
@@ -326,9 +327,7 @@ describe("the service", () => {
     await mkdir(join(fake.home, "Library/LaunchAgents"), { recursive: true });
     await writeFile(plist, "x");
     expect(await update(), err()).toBe(0);
-    expect(out()).toContain(
-      "  { launchctl bootout gui/1000/dev.emend.server || ! launchctl print gui/1000/dev.emend.server >/dev/null 2>&1; } &&\n",
-    );
+    expect(out()).toContain("'/bin/launchctl' bootout gui/1000/dev.emend.server; n=0; while /usr/bin/env -i ");
   });
 
   test("is not touched without a unit file", async () => {
@@ -510,6 +509,8 @@ test.each(["changed", "noop", "failed"])("backup retention after %s with a backw
 test.each([
   ["SIGINT", 130],
   ["SIGTERM", 143],
+  ["SIGHUP", 129],
+  ["SIGQUIT", 131],
 ] as const)(
   "%s during a terminal child keeps the backup, prints rollback and removes handlers",
   async (signal, code) => {
@@ -567,10 +568,10 @@ test("rollback quotes every path even with shell metacharacters", async () => {
     `npm_config_ignore_scripts=true ${quoteShellArgument(join(fake.bin, "npm"))} install --global --prefix ${quoteShellArgument(join(fake.root, "prefix"))} --ignore-scripts @shllg/emend@${VERSION} &&\n`,
   );
   expect(err()).toContain(
-    `  /usr/bin/env -u XDG_CONFIG_HOME EMEND_HOME=${quoteShellArgument(fake.state)} ${quoteShellArgument(process.execPath)} ${quoteShellArgument(entry)} stop &&\n`,
+    `  /usr/bin/env -i PATH=${quoteShellArgument(fake.bin)} HOME=${quoteShellArgument(fake.home)} EMEND_HOME=${quoteShellArgument(fake.state)} ${quoteShellArgument(process.execPath)} ${quoteShellArgument(entry)} stop &&\n`,
   );
   expect(err()).toContain(
-    `  /usr/bin/env -u XDG_CONFIG_HOME EMEND_HOME=${quoteShellArgument(fake.state)} ${quoteShellArgument(process.execPath)} ${quoteShellArgument(entry)}\n`,
+    `  /usr/bin/env -i PATH=${quoteShellArgument(fake.bin)} HOME=${quoteShellArgument(fake.home)} EMEND_HOME=${quoteShellArgument(fake.state)} ${quoteShellArgument(process.execPath)} ${quoteShellArgument(entry)}\n`,
   );
 });
 
@@ -602,6 +603,7 @@ test("a same-version update without a service keeps the backup for an older runn
   expect(await update(), err()).toBe(0);
   expect(await readdir(join(fake.state, "backups"))).toHaveLength(1);
   expect(out()).not.toContain("nothing changed");
+  expect(out()).not.toContain("to go back");
 });
 
 test("a planted service in a dropped XDG_CONFIG_HOME does not count as a service", async () => {
@@ -633,7 +635,7 @@ test("SIGTERM during a capture child forwards the signal, prints rollback and re
     writeFileSync(${JSON.stringify(ready)}, "ready");
     setInterval(() => {}, 1000);`,
   });
-  const before = [process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")];
+  const before = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"].map((name) => process.listenerCount(name));
   const pending = update();
   await pollUntil(async () => expect(await readFile(ready, "utf8")).toBe("ready"));
   process.emit("SIGTERM");
@@ -641,7 +643,7 @@ test("SIGTERM during a capture child forwards the signal, prints rollback and re
   expect(await readFile(received, "utf8")).toBe("SIGTERM");
   expect(err()).toContain("emend update was interrupted.");
   expect(err()).toContain("to go back");
-  expect([process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")]).toEqual(before);
+  expect(["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"].map((name) => process.listenerCount(name))).toEqual(before);
 });
 
 test("SIGINT during the hub probe keeps rollback and removes handlers", async () => {
@@ -652,12 +654,12 @@ test("SIGINT during the hub probe keeps rollback and removes handlers", async ()
     process.emit("SIGINT");
     return "0.2.0";
   };
-  const before = [process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")];
+  const before = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"].map((name) => process.listenerCount(name));
   expect(await update(), err()).toBe(130);
   expect(err()).toContain("emend update was interrupted.");
   expect(err()).toContain("to go back");
   expect(await readdir(join(fake.state, "backups"))).toHaveLength(1);
-  expect([process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")]).toEqual(before);
+  expect(["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"].map((name) => process.listenerCount(name))).toEqual(before);
 });
 
 test.each(["npm", "pnpm", "mise"] as const)(
@@ -681,7 +683,7 @@ test.each(["npm", "pnpm", "mise"] as const)(
   },
 );
 
-test("SIGINT between backup and the package manager keeps rollback and starts no child", async () => {
+test("SIGINT before the package manager keeps the backup and starts no child", async () => {
   await make("npm");
   await makeDatabase(join(fake.state, "emend.db"));
   fake.options.localVersion = async () => {
@@ -691,7 +693,7 @@ test("SIGINT between backup and the package manager keeps rollback and starts no
   expect(await update(), err()).toBe(130);
   expect(await fake.calls()).toEqual([]);
   expect(err()).toContain("emend update was interrupted.");
-  expect(err().match(/to go back/g)).toHaveLength(1);
+  expect(err()).not.toContain("to go back");
   expect(await readdir(join(fake.state, "backups"))).toHaveLength(1);
 });
 
@@ -729,10 +731,11 @@ test("rollback prints only checked child directory values, never raw or proxy se
   ])
     expect(err()).toContain(`${name}=${quoteShellArgument(safe)}`);
   for (const name of ["MISE_CONFIG_DIR", "MISE_CACHE_DIR", "MISE_STATE_DIR"]) {
-    expect(err()).toContain(`-u ${name}`);
     expect(err()).not.toContain(`${name}=`);
   }
-  expect(err()).not.toMatch(/HTTPS_PROXY|proxy.example|XDG_RUNTIME_DIR/);
+  expect(err()).toContain(`HTTPS_PROXY="\${HTTPS_PROXY-}"`);
+  expect(err().includes("proxy.example")).toBe(false);
+  expect(err()).toContain(`XDG_RUNTIME_DIR=${quoteShellArgument(safe)}`);
 });
 
 test("SIGINT when stdout receives the final go-back list finishes successfully and prints it once", async () => {
@@ -758,4 +761,56 @@ test("restarts a same-version service that stopped during the install", async ()
   expect((await fake.calls()).some((call) => call.tool === "service-install")).toBe(true);
   expect(probe).toHaveBeenCalledTimes(3);
   expect(out()).not.toContain("the emend service already runs");
+});
+
+test.each(["npm", "pnpm", "mise"] as const)(
+  "%s refuses a downgrade before running the located entry",
+  async (layout) => {
+    await make(layout);
+    await fake.set({ newVersion: "0.0.1", newScript: emendScript("0.0.1", fake.root) });
+    await installService(fake);
+    expect(await update()).toBe(1);
+    expect(err()).toContain(`emend: ${layout} installed emend 0.0.1, older than ${VERSION}.`);
+    expect(err()).toContain("to go back");
+    expect(err()).not.toContain("emend: only if");
+    expect(await readFile(join(fake.root, "new-log"), "utf8")).toBe("");
+  },
+);
+
+test.each(["failure", "SIGHUP", "SIGQUIT"])(
+  "%s after the installer starts prints package recovery without a database",
+  async (outcome) => {
+    await make("npm");
+    await fake.set(outcome === "failure" ? { updateFails: true } : { sleep: 300 });
+    const pending = update();
+    if (outcome !== "failure") {
+      await pollUntil(async () => expect(await fake.calls()).toHaveLength(1));
+      process.emit(outcome);
+    }
+    expect(await pending).toBe(outcome === "failure" ? 1 : outcome === "SIGHUP" ? 129 : 131);
+    expect(err()).toContain("to go back");
+    expect(err()).not.toContain("emend: only if");
+  },
+);
+
+test("a successful unchanged install without a database prints no recovery", async () => {
+  await make("npm");
+  await fake.set({ newVersion: VERSION, newScript: emendScript(VERSION, fake.root) });
+  expect(await update()).toBe(0);
+  expect(out()).not.toContain("to go back");
+});
+
+test.each([
+  ["SIGHUP", 129],
+  ["SIGQUIT", 131],
+] as const)("a failed terminal write preserves the %s exit", async (signal, code) => {
+  await make("npm");
+  await fake.set({ sleep: 300 });
+  const pending = update();
+  await pollUntil(async () => expect(await fake.calls()).toHaveLength(1));
+  fake.io.stderr = () => {
+    throw new Error("terminal hung up");
+  };
+  process.emit(signal);
+  expect(await pending).toBe(code);
 });
