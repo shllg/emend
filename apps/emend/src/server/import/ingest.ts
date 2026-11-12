@@ -212,6 +212,7 @@ export async function importReview(principal: Principal, bundle: ImportBundle, d
                     ?.[docViewOf(r) === "source" ? "sourceMetadata" : "metadata"].get(r.path)?.headings ?? null)
                 : null,
             mediaType: fileMediaType(r),
+            ...(r.role === "diff" ? prepared.counted.get(r.revisionId)?.get(r.path) : {}),
             renderedBlob:
               r.role === "doc"
                 ? (prepared.rendered

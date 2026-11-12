@@ -29,6 +29,7 @@ import type { BlobStore } from "../../store/blobs.ts";
 import { ApiError } from "../http/errors.ts";
 import { yieldToLoop } from "../pacing.ts";
 import { insertChangedBlocks } from "./changed.ts";
+import { countDiffFiles } from "./counts.ts";
 import { WorkTimeout, workerExecutor } from "./executor.ts";
 import { abortable, checkPublishSignal, PublishAborted, publishSlots } from "./lifecycle.ts";
 import { fileMediaType } from "./media.ts";
@@ -121,6 +122,7 @@ async function computePublish(
   };
   deps.signal?.addEventListener("abort", stop, { once: true });
   let prepared: Awaited<ReturnType<typeof renderRevision>> | undefined;
+  let counted: Awaited<ReturnType<typeof countDiffFiles>> | undefined;
   const attempt = async () => {
     checkPublishSignal(deps.signal);
     // Snapshot only metadata while holding the queue; no rendering or filesystem reads.
@@ -294,6 +296,7 @@ async function computePublish(
         }
       }
     if (!prepared) await validateNoteRanges(input.files, read, execute);
+    counted ??= await countDiffFiles(input.files, read, execute, deps.signal);
     prepared ??= await renderRevision(
       input,
       execute,
@@ -528,6 +531,7 @@ async function computePublish(
             oldBlob: file.oldBlob,
             newBlob: file.newBlob,
             flag: file.flag,
+            ...(file.role === "diff" ? counted?.get(file.path) : {}),
             parentDocId: file.parent ? ids.get(`doc:${file.parent}`) : null,
             title:
               file.role === "doc"

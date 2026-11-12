@@ -75,25 +75,27 @@ export function workerExecutor(timeouts = { render: 10000, place: 30000 }): Work
       current.ref();
       try {
         const buffers =
-          work.kind === "doc" || work.kind === "source"
-            ? [work.source]
-            : work.kind === "doc-metadata" ||
-                work.kind === "resection" ||
-                work.kind === "placement-doc" ||
-                work.kind === "writeup-source" ||
-                work.kind === "line-count"
-              ? [work.bytes]
-              : work.kind === "changed"
-                ? [...work.previous.map((blob) => blob.bytes), ...work.next]
-                : work.kind === "writeup"
-                  ? (work.mediaHeads ?? []).map(([, head]) => head)
-                  : work.kind === "place"
-                    ? [
-                        ...work.texts.values(),
-                        ...[...(work.parsedDocs?.values() ?? [])].map((doc) => doc.bytes),
-                        ...(work.parsedWriteup ? [work.parsedWriteup.bytes] : []),
-                      ]
-                    : [];
+          work.kind === "diff-counts"
+            ? [work.old, work.next].filter((buffer): buffer is ArrayBuffer => buffer !== null)
+            : work.kind === "doc" || work.kind === "source"
+              ? [work.source]
+              : work.kind === "doc-metadata" ||
+                  work.kind === "resection" ||
+                  work.kind === "placement-doc" ||
+                  work.kind === "writeup-source" ||
+                  work.kind === "line-count"
+                ? [work.bytes]
+                : work.kind === "changed"
+                  ? [...work.previous.map((blob) => blob.bytes), ...work.next]
+                  : work.kind === "writeup"
+                    ? (work.mediaHeads ?? []).map(([, head]) => head)
+                    : work.kind === "place"
+                      ? [
+                          ...work.texts.values(),
+                          ...[...(work.parsedDocs?.values() ?? [])].map((doc) => doc.bytes),
+                          ...(work.parsedWriteup ? [work.parsedWriteup.bytes] : []),
+                        ]
+                      : [];
         if (work.kind === "doc" || work.kind === "writeup") {
           const { docs, ...job } = work;
           // Each revision owns one immutable map. Transport it once per worker, including

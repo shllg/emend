@@ -1,4 +1,4 @@
-import type { ReviewView, RevisionView } from "@emend/contract";
+import type { FileView, ReviewView, RevisionView } from "@emend/contract";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, expect, test, vi } from "vitest";
@@ -47,6 +47,56 @@ const revision: RevisionView = {
   changedBlocks: [],
 };
 const execCommandDescriptor = Object.getOwnPropertyDescriptor(document, "execCommand");
+const countedFile: FileView = {
+  id: "33333333-3333-4333-8333-333333333333",
+  path: "synthetic.ts",
+  oldPath: null,
+  role: "diff",
+  status: "modified",
+  topic: "first",
+  order: 0,
+  mediaType: "text/plain",
+  flag: null,
+  hasOld: true,
+  hasNew: true,
+  counts: { additions: 1200, deletions: 3 },
+};
+
+test.each([false, true])("review totals show immediately from all topic groups (phone: %s)", (phone) => {
+  mount({
+    phone,
+    metadata: { ...review, branch: null },
+    loaded: {
+      ...revision,
+      topics: [{ slug: "first", title: "First", importance: 10, summary: "" }],
+      files: [
+        countedFile,
+        {
+          ...countedFile,
+          id: crypto.randomUUID(),
+          path: "other.ts",
+          topic: null,
+          counts: { additions: 7, deletions: 1 },
+        },
+      ],
+    },
+  });
+  expect(screen.getByText("+1,207")).toBeTruthy();
+  expect(screen.getByText("−4")).toBeTruthy();
+  expect(screen.getByText("1,207 lines added, 4 lines removed")).toBeTruthy();
+});
+
+test.each(["pub", "no files", "legacy"])("%s has no review total", (kind) => {
+  const { counts: _counts, ...uncounted } = countedFile;
+  const { container } = mount({
+    metadata: { ...review, kind: kind === "pub" ? "publish" : "review" },
+    loaded: {
+      ...revision,
+      files: kind === "pub" ? [{ ...uncounted, role: "doc" }] : kind === "no files" ? [] : [uncounted],
+    },
+  });
+  expect(container.querySelector(".text-diff-add-fg, .text-diff-del-fg")).toBeNull();
+});
 afterEach(() => {
   cleanup();
   window.getSelection()?.removeAllRanges();

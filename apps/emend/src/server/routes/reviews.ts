@@ -521,6 +521,9 @@ async function revisionView(ownerId: string, q: Queries, deps: AppDeps, reviewId
         flag: file.flag,
         hasOld: file.oldBlob !== null,
         hasNew: file.newBlob !== null,
+        ...(file.role === "diff" && file.additions !== null && file.deletions !== null
+          ? { counts: { additions: file.additions, deletions: file.deletions } }
+          : {}),
         ...(notesByFile.has(file.id) ? { notes: notesByFile.get(file.id) } : {}),
         ...(mark
           ? {

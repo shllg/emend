@@ -12,8 +12,10 @@ import {
   type Block,
   blockHash,
   composeRenames,
+  DIFF_COUNT_TIMEOUT_MS,
   type DocLinks,
   decodeText,
+  diffLineCounts,
   docText,
   type FileSides,
   htmlHeadings,
@@ -41,6 +43,7 @@ export type PlacementDoc = PlaceContext["docs"] extends Map<string, infer T> ? T
 /** Import caches opaque worker output; parsed content never crosses by structured clone. */
 export type EncodedPlacementDoc = { bytes: ArrayBuffer; textBytes: number; encodedBytes: number };
 export type Work =
+  | { kind: "diff-counts"; old: ArrayBuffer | null; next: ArrayBuffer | null }
   | { kind: "source"; path: string; source: ArrayBuffer; highlight?: boolean }
   | { kind: "doc-metadata"; format: "html" | "markdown"; bytes: ArrayBuffer }
   | { kind: "line-count"; bytes: ArrayBuffer }
@@ -81,6 +84,7 @@ export type Work =
     };
 export type DocMetadata = { title?: string; headings: DocHeading[] };
 export type WorkResult =
+  | { kind: "diff-counts"; counts: { additions: number; deletions: number } | null }
   | ({ kind: "doc-metadata" } & DocMetadata)
   | { kind: "line-count"; count: number }
   | { kind: "writeup-source"; source: WriteupInput; links?: PublishLinks; repoUrl?: string }
@@ -112,6 +116,13 @@ export function serializeRendered(value: RenderedWriteup | Block[], pathDependen
 }
 export type Executor = (work: Work) => Promise<WorkResult>;
 export const executeWork: Executor = async (work) => {
+  if (work.kind === "diff-counts")
+    return {
+      kind: "diff-counts",
+      counts: diffLineCounts(work.old === null ? "" : decode(work.old), work.next === null ? "" : decode(work.next), {
+        timeout: DIFF_COUNT_TIMEOUT_MS,
+      }),
+    };
   if (work.kind === "source") {
     const content = await renderSource(decodeText(new Uint8Array(work.source)), work.path, work.highlight);
     return {

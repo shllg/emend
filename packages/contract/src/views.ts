@@ -139,6 +139,12 @@ export const FileView = z
     flag: FileFlag.nullable(),
     hasOld: z.boolean(),
     hasNew: z.boolean(),
+    counts: z
+      .object({
+        additions: z.int().min(0).max(LIMITS.diffSideBytes),
+        deletions: z.int().min(0).max(LIMITS.diffSideBytes),
+      })
+      .optional(),
     viewed: z.enum(["viewed", "stale"]).optional(),
     viewedOn: z.int().positive().optional(),
     notes: z.array(AgentNoteView).max(LIMITS.agentNotesPerFile).optional(),

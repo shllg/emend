@@ -1,4 +1,5 @@
 export { htmlAssetReferences } from "./assets.ts";
+export { DIFF_COUNT_TIMEOUT_MS, diffLineCounts } from "./diff-counts.ts";
 export { htmlHeadings, markdownHeadings } from "./doc-headings.ts";
 export { cleanDocTitle, inferDocTitle, markdownTitle } from "./doc-title.ts";
 export { headingLookups } from "./heading-lookups.ts";

@@ -28,6 +28,45 @@ vi.mock("node:worker_threads", async (original) => {
   };
 });
 
+test("diff counting decodes like Response.text and transfers both sides, deduplicating shared buffers", async () => {
+  const execute = workerExecutor();
+  try {
+    const old = new TextEncoder().encode("\uFEFFkeep\nold\n").buffer;
+    const next = new TextEncoder().encode("keep\nnew\nextra\n").buffer;
+    expect(await execute({ kind: "diff-counts", old, next })).toEqual({
+      kind: "diff-counts",
+      counts: { additions: 2, deletions: 1 },
+    });
+    expect(old.byteLength).toBe(0);
+    expect(next.byteLength).toBe(0);
+    const shared = new TextEncoder().encode("same\n").buffer;
+    expect(await execute({ kind: "diff-counts", old: shared, next: shared })).toEqual({
+      kind: "diff-counts",
+      counts: { additions: 0, deletions: 0 },
+    });
+    expect(shared.byteLength).toBe(0);
+    const invalid = new Uint8Array([0xff, 10]).buffer;
+    expect(
+      await execute({ kind: "diff-counts", old: invalid, next: new TextEncoder().encode("\uFFFD\n").buffer }),
+    ).toEqual({ kind: "diff-counts", counts: { additions: 0, deletions: 0 } });
+    for (const side of ["old", "next"] as const) {
+      expect(
+        await execute({
+          kind: "diff-counts",
+          old: null,
+          next: null,
+          [side]: new TextEncoder().encode("one\ntwo\n").buffer,
+        }),
+      ).toEqual({
+        kind: "diff-counts",
+        counts: side === "next" ? { additions: 2, deletions: 0 } : { additions: 0, deletions: 2 },
+      });
+    }
+  } finally {
+    await execute.close();
+  }
+});
+
 test("many docs post one heading map per worker and a later publish replaces it", async () => {
   const execute = workerExecutor();
   const before = created.posts.length;

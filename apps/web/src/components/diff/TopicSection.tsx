@@ -2,6 +2,7 @@ import type { FileView, TopicMeta as Topic } from "@emend/contract";
 import { ChevronDown, ChevronRight, FileText, Info, MessageSquarePlus } from "lucide-react";
 import { useId, useLayoutEffect, useRef } from "react";
 import { plural } from "../../lib/count.ts";
+import { lineTotals } from "../../lib/diff-totals.ts";
 import { useLayout, useTopicDetails } from "../../lib/layout.ts";
 import { useStickyHeight } from "../../lib/sticky-stack.ts";
 import { BlastRadius, TopicMeta } from "../reading/TopicMeta.tsx";
@@ -11,6 +12,7 @@ import { ThreadCard } from "../threads/ThreadCard.tsx";
 import { Button } from "../ui/Button.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { type DiffContext, FileDiff } from "./FileDiff.tsx";
+import { LineTotals } from "./LineTotals.tsx";
 import { ThreadCount } from "./ThreadCount.tsx";
 
 export function TopicSection({
@@ -79,6 +81,7 @@ export function TopicSection({
       <span>
         {files.length} {plural(files.length, "file")}
       </span>
+      <LineTotals counts={lineTotals(files)} />
       <ThreadCount count={threadCount} />
     </div>
   );

@@ -35,7 +35,15 @@ test.each([false, true])("settings migration preserves existing data (previous=%
     const before = await snapshot();
     expect(await migrate(db)).toBe(previous ? MIGRATIONS.filter((m) => m.tag >= "0015").length : MIGRATIONS.length);
     expect(await migrate(db)).toBe(0);
-    if (previous) expect(await snapshot()).toEqual(before);
+    if (previous)
+      expect(
+        (await snapshot()).map(([name, ddl]) => [
+          name,
+          name === "files" && typeof ddl === "string"
+            ? ddl.replace(", `additions` integer, `deletions` integer", "")
+            : ddl,
+        ]),
+      ).toEqual(before);
     else await db.query((q) => q.run(sql`INSERT INTO owners VALUES (${owner}), (${other})`));
     await db.query(async (q) => {
       await q.run(

@@ -56,7 +56,11 @@ test.each([false, true])(
         expect(
           after.map(([name, ddl]) => [
             name,
-            name === "files" && typeof ddl === "string" ? ddl.replace(", `title` text, `headings` text", "") : ddl,
+            name === "files" && typeof ddl === "string"
+              ? ddl
+                  .replace(", `title` text, `headings` text", "")
+                  .replace(", `additions` integer, `deletions` integer", "")
+              : ddl,
           ]),
         ).toEqual(before);
       }

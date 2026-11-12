@@ -1,7 +1,9 @@
 import { type FileView, OTHER_TOPIC, type RevisionView } from "@emend/contract";
 import { diffGroups } from "../../lib/diff-groups.ts";
+import { lineTotals } from "../../lib/diff-totals.ts";
 import { rankedTopics } from "../../lib/topics.ts";
 import { FileStatusMark } from "../diff/FileStatusMark.tsx";
+import { LineTotals } from "../diff/LineTotals.tsx";
 import type { DiffCounts } from "../diff/presentation.ts";
 import { ThreadCount } from "../diff/ThreadCount.tsx";
 import { resolveFile } from "../diff/targets.ts";
@@ -43,6 +45,7 @@ export function FilesView({
             <div className="em-files-group__head">
               {rank ? <TopicRank rank={rank} /> : <span aria-hidden="true">··</span>}
               <h3 className="em-files-group__title">{title}</h3>
+              <LineTotals counts={lineTotals(files)} />
               <span className="em-files-group__count">
                 {done}/{files.length}
               </span>

@@ -243,6 +243,8 @@ export const files = sqliteTable(
     oldBlob: text("old_blob"),
     newBlob: text("new_blob"),
     renderedBlob: text("rendered_blob"),
+    additions: integer("additions"),
+    deletions: integer("deletions"),
     title: text("title"),
     headings: text("headings", { mode: "json" }).$type<DocHeading[]>(),
     flag: text("flag", { enum: enumValues(FileFlag.options) }),

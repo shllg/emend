@@ -16,6 +16,7 @@ import type { AppDeps } from "../app.ts";
 import { ApiError } from "../http/errors.ts";
 import { commentTargetReserve, envelopeBytes, jsonBytes } from "../mailbox/payload.ts";
 import { yieldToLoop } from "../pacing.ts";
+import { countDiffFiles } from "../publish/counts.ts";
 import { workerExecutor } from "../publish/executor.ts";
 import { IMAGE_HEAD_BYTES } from "../publish/image-size.ts";
 import { abortable } from "../publish/lifecycle.ts";
@@ -122,6 +123,7 @@ export async function prepareImport(ownerId: string, bundle: ImportBundle, deps:
     >
   >();
   const empty = new Map<string, boolean>();
+  const counted = new Map<string, Awaited<ReturnType<typeof countDiffFiles>>>();
   try {
     const targetReserves = new Map<string, number>();
     let checkedComments = 0;
@@ -210,6 +212,7 @@ export async function prepareImport(ownerId: string, bundle: ImportBundle, deps:
         }
       }
       await validateNoteRanges(input.files, read, execute);
+      counted.set(revision.id, await countDiffFiles(input.files, read, execute, signal));
       // Keep only this revision's and its predecessor's image heads.
       const media = input.files
         .filter((f) => f.role === "asset" && f.parent === undefined && f.newBlob)
@@ -259,7 +262,7 @@ export async function prepareImport(ownerId: string, bundle: ImportBundle, deps:
       if (!(await deps.blobs.hasContent(ownerId, hash, sizes.get(hash) ?? 0))) throw new ApiError("blob_missing");
     }
     checkImportSignal(signal);
-    return { staged, holds, rendered, empty, placements, changedBlocks };
+    return { staged, holds, rendered, empty, counted, placements, changedBlocks };
   } finally {
     signal?.removeEventListener("abort", stop);
     await worker?.close();
