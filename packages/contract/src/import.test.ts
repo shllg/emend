@@ -94,6 +94,14 @@ test("bundle project is optional, nullable and bounded without adding import row
     expect(ImportBundle.safeParse({ ...input, review: { ...input.review, project } }).success).toBe(false);
 });
 
+test("bundle binnedAt is optional and nullable; older bundles parse as not binned", () => {
+  const input = ImportBundle.parse(bundle());
+  expect(input.review).not.toHaveProperty("binnedAt");
+  for (const binnedAt of [null, "2026-11-04T10:00:00.000Z"])
+    expect(ImportBundle.parse({ ...input, review: { ...input.review, binnedAt } }).review.binnedAt).toBe(binnedAt);
+  expect(ImportBundle.safeParse({ ...input, review: { ...input.review, binnedAt: "soon" } }).success).toBe(false);
+});
+
 test("import strips heading declarations while preserving a doc title", () => {
   const input = bundle();
   const file = {

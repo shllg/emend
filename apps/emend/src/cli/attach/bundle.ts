@@ -143,7 +143,12 @@ export async function snapshot(
     .where(and(eq(deliveries.ownerId, ownerId), eq(deliveries.reviewId, reviewId)))
     .orderBy(sql`${deliveries}.rowid`);
   const prepared = prepareBundle({
-    review: { ...dates(review), repo: repo ?? null, project: review.project },
+    review: {
+      ...dates(review),
+      repo: repo ?? null,
+      project: review.project,
+      binnedAt: review.binnedAt === null ? null : iso(review.binnedAt),
+    },
     revisions: revisionRows.map((r) => ({ ...r, createdAt: iso(r.createdAt) })),
     topics: topicRows.map((t) => ({
       ...t,

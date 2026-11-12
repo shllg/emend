@@ -1,5 +1,5 @@
-import { MAX_SNOOZE_DAYS, type RetireRequest, type SnoozeRequest } from "@emend/contract";
-import { and, count, eq, inArray, isNull, notExists, notInArray, sql } from "drizzle-orm";
+import { BinView, LIMITS, MAX_SNOOZE_DAYS, type RetireRequest, type SnoozeRequest } from "@emend/contract";
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, notExists, notInArray, sql } from "drizzle-orm";
 import { ApiError } from "../../server/http/errors.ts";
 import type { Db, Queries } from "../client.ts";
 import {
@@ -10,6 +10,7 @@ import {
   deliveries,
   docAssets,
   files,
+  instances,
   placements,
   repos,
   reviews,
@@ -118,10 +119,73 @@ export function reopenReview(ownerId: string, db: Db, reviewId: string, now: num
   });
 }
 
-/** Delete one review and everything under it in one transaction; return the blobs it may have freed. */
-export function deleteReview(ownerId: string, db: Db, reviewId: string, now: number) {
+/** Move a review to the bin. Only binned_at changes: nothing else of the review is touched. */
+export function binReview(ownerId: string, db: Db, reviewId: string, now: number) {
   return db.transaction(async (q) => {
-    const review = await requireReview(ownerId, q, reviewId);
+    // requireReview answers review_in_bin for a review that is already binned.
+    await requireReview(ownerId, q, reviewId);
+    await touch(ownerId, q, reviewId, { binnedAt: now });
+    return (await newestRevision(ownerId, q, reviewId)).seq;
+  });
+}
+
+/** Take a review out of the bin. Only binned_at changes, so it returns to the list and place it had. */
+export function restoreReview(ownerId: string, db: Db, reviewId: string) {
+  return db.transaction(async (q) => {
+    const review = await requireReview(ownerId, q, reviewId, undefined, true, false, true);
+    if (review.binnedAt === null) throw new ApiError("invalid_state");
+    await touch(ownerId, q, reviewId, { binnedAt: null });
+    return (await newestRevision(ownerId, q, reviewId)).seq;
+  });
+}
+
+/** The owner's binned reviews, newest binned first (ties by id), capped; total counts them all. */
+export function listBin(ownerId: string, db: Db): Promise<BinView> {
+  return db.read(async (q) => {
+    const binned = and(eq(reviews.ownerId, ownerId), isNotNull(reviews.binnedAt));
+    const rows = await q
+      .select({ id: reviews.id, title: reviews.title, machine: instances.name, binnedAt: reviews.binnedAt })
+      .from(reviews)
+      .innerJoin(instances, eq(instances.id, reviews.originInstanceId))
+      .where(binned)
+      .orderBy(desc(reviews.binnedAt), asc(reviews.id))
+      .limit(LIMITS.binItems)
+      .all();
+    const total = (await q.select({ n: count() }).from(reviews).where(binned).get())?.n ?? 0;
+    return BinView.parse({
+      items: rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        machine: row.machine,
+        binnedAt: new Date(row.binnedAt as number).toISOString(),
+      })),
+      total,
+    });
+  });
+}
+
+/** The ids of every review of the owner that is in the bin now. */
+export function binnedIds(ownerId: string, db: Db) {
+  return db.read(async (q) =>
+    (
+      await q
+        .select({ id: reviews.id })
+        .from(reviews)
+        .where(and(eq(reviews.ownerId, ownerId), isNotNull(reviews.binnedAt)))
+        .orderBy(asc(reviews.id))
+    ).map((row) => row.id),
+  );
+}
+
+/**
+ * Delete one review and everything under it in one transaction; return the blobs it may have freed.
+ * A binned review can be deleted. With `onlyBinned`, a review that is not (or no longer) in the bin
+ * stays, and the call answers null.
+ */
+export function deleteReview(ownerId: string, db: Db, reviewId: string, now: number, onlyBinned = false) {
+  return db.transaction(async (q) => {
+    const review = await requireReview(ownerId, q, reviewId, undefined, true, false, true);
+    if (onlyBinned && review.binnedAt === null) return null;
     const revision = (await newestRevision(ownerId, q, reviewId)).seq;
     const revisionIds = q
       .select({ id: revisions.id })

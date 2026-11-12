@@ -25,10 +25,11 @@ test.each([false, true])("settings migration preserves existing data (previous=%
         }
         await q.run(sql`INSERT INTO owners VALUES (${owner}), (${other})`);
       });
+    // Later migrations may alter the reviews table (the bin adds a column), so it stays out of the comparison.
     const snapshot = () =>
       db.read((q) =>
         q.values(
-          sql`SELECT name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE 'settings%' ORDER BY name`,
+          sql`SELECT name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE 'settings%' AND name <> 'reviews' ORDER BY name`,
         ),
       );
     const before = await snapshot();

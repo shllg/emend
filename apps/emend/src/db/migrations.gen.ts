@@ -229,5 +229,13 @@ export const MIGRATIONS: readonly { tag: string; when: number; hash: string; sta
       "CREATE TABLE `settings` (\n\t`owner_id` text NOT NULL,\n\t`key` text NOT NULL,\n\t`value` text NOT NULL,\n\t`updated_at` integer NOT NULL,\n\tPRIMARY KEY(`owner_id`, `key`),\n\tFOREIGN KEY (`owner_id`) REFERENCES `owners`(`id`) ON UPDATE no action ON DELETE no action,\n\tCONSTRAINT \"settings_key_check\" CHECK(\"settings\".\"key\" in ('approvedActiveHours'))\n);",
       "CREATE INDEX `settings_owner_idx` ON `settings` (`owner_id`);"
     ]
+  },
+  {
+    "tag": "0016_confused_king_bedlam",
+    "when": 1794496820114,
+    "hash": "50e49139efcd59d588a9b0a4c97d0f37fda2d08b2b5c35ca0e959a4ffb0241b6",
+    "statements": [
+      "ALTER TABLE `reviews` ADD `binned_at` integer;"
+    ]
   }
 ];

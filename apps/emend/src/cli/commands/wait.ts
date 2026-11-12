@@ -2,7 +2,7 @@ import { MAX_TAKE_WAIT_SECONDS, WaitResult } from "@emend/contract";
 import type { Io } from "../../main.ts";
 import { confirmDirect, takeDirect } from "../direct/index.ts";
 import { apiRequest, CliError, CliSignalExit, CliUsageError, jsonLine, printJson } from "../http.ts";
-import { deletedError, movedError } from "../moved.ts";
+import { binnedError, deletedError, movedError } from "../moved.ts";
 import { pause } from "../pause.ts";
 import {
   type CheckedFolder,
@@ -70,9 +70,9 @@ export async function takeFeedback(
       waitedSeconds: timeoutSeconds === 0 ? 0 : Math.floor((performance.now() - start) / 1000),
     };
   } catch (error) {
-    return deletedError(stateDir, error, reviewId, target.via === "hub" ? target.url : undefined).catch((next) =>
-      movedError(stateDir, next, { reviewId }),
-    );
+    return deletedError(stateDir, error, reviewId, target.via === "hub" ? target.url : undefined)
+      .catch((next) => movedError(stateDir, next, { reviewId }))
+      .catch((next) => binnedError(stateDir, next, { reviewId }));
   }
 }
 

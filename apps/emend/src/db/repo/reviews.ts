@@ -1,4 +1,4 @@
-import { and, desc, eq, max } from "drizzle-orm";
+import { and, desc, eq, isNull, max } from "drizzle-orm";
 import type { Db } from "../client.ts";
 import { repos, reviews, revisions } from "../schema.ts";
 
@@ -94,7 +94,12 @@ export function getReview(ownerId: string, db: Db, reviewId: string) {
 
 export function listReviews(ownerId: string, db: Db) {
   return db.query((q) =>
-    q.select().from(reviews).where(eq(reviews.ownerId, ownerId)).orderBy(desc(reviews.updatedAt), reviews.id).all(),
+    q
+      .select()
+      .from(reviews)
+      .where(and(eq(reviews.ownerId, ownerId), isNull(reviews.binnedAt)))
+      .orderBy(desc(reviews.updatedAt), reviews.id)
+      .all(),
   );
 }
 

@@ -6,7 +6,7 @@ import { readDocRoots } from "../config.ts";
 import { publishDirect } from "../direct/index.ts";
 import { escapeReference } from "../escape.ts";
 import { apiRequest, CliError, printJson, publishAnswerIncomplete } from "../http.ts";
-import { movedError, refuseUncopiedReview } from "../moved.ts";
+import { binnedError, movedError, refuseUncopiedReview } from "../moved.ts";
 import { manifestError } from "../publish/manifest-error.ts";
 import { GitFolderRead, inside, NotRegularFile, OversizedFile, readRegular } from "../publish/read.ts";
 import { type PublishOptions, publishContext, resolvePublish } from "../publish/resolve.ts";
@@ -227,7 +227,7 @@ export async function publishCommand(
       error,
       { reviewId: options.review, keyFor: (id) => collected.forInstance(id).reviewKey },
       true,
-    );
+    ).catch((next) => binnedError(stateDir, next, { reviewId: options.review, publish: true }));
   }
   const result = PublishResponse.safeParse(response);
   if (!result.success) throw new CliError(publishAnswerIncomplete);

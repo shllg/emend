@@ -1,5 +1,5 @@
 import { AgentReviewList, LIMITS } from "@emend/contract";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import type { Principal } from "../../server/auth/principal.ts";
 import type { Db } from "../client.ts";
 import { reviews } from "../schema.ts";
@@ -15,7 +15,9 @@ export async function listAgentReviews(db: Db, principal: Principal, baseUrl: st
     q
       .select({ id: reviews.id, title: reviews.title, state: reviews.state, updatedAt: reviews.updatedAt })
       .from(reviews)
-      .where(and(eq(reviews.ownerId, principal.ownerId), eq(reviews.originInstanceId, instanceId)))
+      .where(
+        and(eq(reviews.ownerId, principal.ownerId), eq(reviews.originInstanceId, instanceId), isNull(reviews.binnedAt)),
+      )
       .orderBy(desc(reviews.updatedAt), asc(reviews.id))
       .limit(LIMITS.agentReviews)
       .all(),

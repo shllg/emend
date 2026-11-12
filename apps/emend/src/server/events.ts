@@ -98,8 +98,8 @@ export class ReviewEvents {
     let finish = () => {};
     const promise = new Promise<void>((resolve) => {
       const unsubscribe = this.subscribe(ownerId, reviewId, (event) => {
-        // A Send, or the reviewer ending the wait: snooze, retire and delete.
-        if (["send", "snooze", "retire", "delete"].includes(event.type)) finish();
+        // A Send, or the reviewer ending the wait: snooze, retire, bin and delete.
+        if (["send", "snooze", "retire", "delete", "bin"].includes(event.type)) finish();
       });
       const timer = setTimeout(() => finish(), seconds * 1000);
       finish = () => {

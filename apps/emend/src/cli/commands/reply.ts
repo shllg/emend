@@ -5,7 +5,7 @@ import { ReplyCreated, ReplyRequest } from "@emend/contract";
 import type { Io } from "../../main.ts";
 import { replyDirect } from "../direct/index.ts";
 import { apiRequest, CliError, CliUsageError, printJson } from "../http.ts";
-import { movedError } from "../moved.ts";
+import { binnedError, movedError } from "../moved.ts";
 import { assertSaveFolder, checkSaveFolder } from "../save-feedback.ts";
 import { resolveTarget, type Target } from "../target.ts";
 
@@ -98,7 +98,7 @@ export async function sendReply(
     if (!result.success) throw new CliError("The emend server returned an invalid response.");
     return result.data;
   } catch (error) {
-    return movedError(stateDir, error, { commentId });
+    return movedError(stateDir, error, { commentId }).catch((next) => binnedError(stateDir, next, { commentId }));
   }
 }
 

@@ -110,11 +110,15 @@ a machine token reaches only reviews from its own instance.
 | POST | `/api/v1/threads/:id/resolve` | Reviewer | Resolve a thread. |
 | POST | `/api/v1/threads/:id/reopen` | Reviewer | Reopen a thread. |
 | POST | `/api/v1/reviews/:id/sends` | Reviewer | Send feedback or approve the revision on screen. |
-| POST | `/api/v1/reviews/:id/snooze` | Reviewer | Move an open review to Snoozed (204); see "Snooze, retire and delete". |
+| POST | `/api/v1/reviews/:id/snooze` | Reviewer | Move an open review to Snoozed (204); see "Snooze, retire, delete and the bin". |
 | POST | `/api/v1/reviews/:id/unsnooze` | Reviewer | End a snooze (204). |
 | POST | `/api/v1/reviews/:id/retire` | Reviewer | Mark an open review done without an approval (204). |
 | POST | `/api/v1/reviews/:id/reopen` | Reviewer | Reopen a retired review (204). |
-| DELETE | `/api/v1/reviews/:id` | Reviewer | Delete the review and its records (204). |
+| DELETE | `/api/v1/reviews/:id` | Reviewer | Delete the review and its records for good (204), in the bin or not. |
+| POST | `/api/v1/reviews/:id/bin` | Reviewer | Move the review to the bin (204); see "Snooze, retire, delete and the bin". |
+| POST | `/api/v1/reviews/:id/restore` | Reviewer | Take the review out of the bin (204). |
+| GET | `/api/v1/bin` | Reviewer | List the binned reviews as `BinView` (200). |
+| DELETE | `/api/v1/bin` | Reviewer | Delete every binned review for good (204). |
 | POST | `/api/v1/reviews/:id/take` | Agent | Claim a delivery with `{waitSeconds?: 0..25, maxBytes?: 65536..16777216, accepts?: ["closed"]}`. |
 | POST | `/api/v1/deliveries/:id/confirm` | Agent | Confirm receipt of a claimed delivery. |
 | POST | `/api/v1/comments/:id/reply` | Agent | Answer a comment with an outcome. |
@@ -273,7 +277,7 @@ period) or an unexpired direct-wait row for the same owner and review. Direct wa
 views reflect direct writes on their next load.
 
 `GET /api/v1/reviews` returns `InboxList = { items: InboxItem[], serverTime: string, approvedActiveHours: ApprovedActiveHours }`.
-`approvedActiveHours` is the effective window used for this response.
+`approvedActiveHours` is the effective window used for this response. Reviews in the bin are in none of the lists.
 `serverTime` is the server's clock when it built the list, as an ISO 8601 UTC string.
 The Active list holds open reviews
 whose snooze is not in effect and reviews approved within that window (12 hours by default). A review with a waiting
@@ -506,7 +510,7 @@ invalid sequences of an owned review return `404 not_found`. Agent tokens receiv
 scope and lists only the principal owner's reviews whose origin is the token's own instance, so a
 machine token never sees another instance's or another owner's reviews. Items run newest
 `updatedAt` first, review id as the stable tie breaker, at most `agentReviews` (100) rows, with no
-pagination. The list has no inbox filter: snoozed, approved and retired reviews appear with their
+pagination. Binned reviews are left out. The list has no other inbox filter: snoozed, approved and retired reviews appear with their
 stored `state` (`open`, `approved` or `settled`). `updatedAt` is an ISO 8601 UTC string. `url` is
 the review's address on this server. The list carries no comment bodies,
 writeup text, doc content, tokens or other ids. A reviewer session receives `403 forbidden`.
@@ -728,7 +732,10 @@ with the review. Failed imports may leave unreferenced immutable bytes, as publi
 `ImportResult = { skipped, deleted? }`. A review the owner deleted on the hub is answered
 `{ skipped: true, deleted: true }` (200): the hub keeps a tombstone by review id, so a repeated
 `emend attach` never brings it back. A retired review is exported with its `settled` state; the
-snooze is not part of the bundle.
+snooze is not part of the bundle. `review.binnedAt` is optional and nullable (an ISO timestamp,
+clamped to at most the hub clock like the other timestamps); a review exported from the bin lands
+in the hub's bin, and a bundle without it is not binned. A review the hub already holds, in its
+bin or not, is skipped like any existing review and never restored by a repeated attach.
 
 The hub records its copy time in nullable `ReviewView.importedAt`; ordinary local reviews use
 null (older responses lacking this additive field parse as null). Imported `movedTo` is ignored.
@@ -793,7 +800,7 @@ Content-Length is checked first; credentials and scope are checked before readin
 Blob lookups never expose another owner's content.
 
 Publish resolves an explicit id only for the authenticated owner and origin instance, otherwise
-404 `unknown_review`. A moved review returns 409 `review_moved`. Without an id the server
+404 `unknown_review`. A moved review returns 409 `review_moved`, and a review in the bin 409 `review_in_bin`. Without an id the server
 atomically finds or creates by owner, token instance and review key. Missing referenced blobs
 return 400 `blob_missing`. Each successful publish adds a revision, reopens the review, and
 reports placement counts for that revision. Media types and role size limits are server enforced.
@@ -972,12 +979,12 @@ doc spans retain `path` and `blockId`; HTML spans retain `path`. Line locations 
 use the same fields as their targets. Placement describes the newest revision; a thread keeps its
 original target separately.
 
-### Snooze, retire and delete
+### Snooze, retire, delete and the bin
 
-All five routes are reviewer-only (scope `send`): an agent or admin bearer, or a reviewer token
+All nine routes (the five below, bin, restore and the two `/bin` routes) are reviewer-only (scope `send`): an agent or admin bearer, or a reviewer token
 sent as a bearer, is refused before any lookup. A missing or foreign review is `404 unknown_review`.
 Each runs in one transaction and emits its event after the commit. A wrong state is `409 invalid_state`.
-Capabilities lists the feature `review-lifecycle`.
+Capabilities lists the features `review-lifecycle` and `review-bin`.
 
 - `POST /reviews/:id/snooze`, body `SnoozeRequest = { until: datetime } | { untilRevision: true }`
   (strict, exactly one). `until` must lie in the future and at most `MAX_SNOOZE_DAYS` (366) days
@@ -1003,11 +1010,39 @@ Capabilities lists the feature `review-lifecycle`.
   failure there is logged and never changes the response. A later take on the id is `404 unknown_review`. A publish with
   the same key creates a new review with a new id and URL.
 
+- `POST /reviews/:id/bin` moves a review to the bin. It sets `binnedAt` to now and changes nothing
+  else: state, snooze, approval, `updatedAt`, revisions, threads, comments, Sends, deliveries and
+  viewed marks stay. A moved review is `409 review_moved`; a review already in the bin is
+  `409 review_in_bin`. Returns 204; emits `bin` (its `revision` is the newest). Nothing leaves the
+  bin on its own: no timer or purge removes a binned review.
+- `POST /reviews/:id/restore` clears `binnedAt` and nothing else, so the review returns to the list
+  and place it had. A review that is not in the bin is `409 invalid_state`. Returns 204; emits
+  `restore`.
+- `GET /bin` returns `BinView = { items: BinItem[], total }` with
+  `BinItem = { id, title, machine, binnedAt }`. `machine` is the name of the review's origin
+  instance. Items run newest `binnedAt` first, review id as the stable tie breaker, at most
+  `binItems` (200) rows; `total` counts every binned review of the owner.
+- `DELETE /bin` deletes for good every review of the owner that is in the bin when the request
+  runs, each exactly like `DELETE /reviews/:id`: its own transaction, its tombstone, its
+  repository cleanup and its `delete` event after the commit, and blob cleanup after the response.
+  Each transaction checks again that the review is still in the bin, so a review restored in the
+  meantime stays. The loop yields between reviews. Returns 204.
+- `DELETE /reviews/:id` keeps working on a binned review and deletes it for good.
+
+A binned review acts as deleted for agents and leaves every list. A take (`emend wait`,
+`emend feedback`, the MCP tools), a waiter, an agent reply, a publish to it by id or by key, and
+every reviewer read or write of the review, its revisions, files, threads, comments, Sends, viewed
+marks, snooze, retire and reopen answer `409 review_in_bin`. Confirming or releasing a delivery that
+was claimed before the review was binned stays available. The inbox, its counts and the agent list
+leave binned reviews out. The content path is unchanged. A missing, foreign or other-origin review
+stays `404 unknown_review`. A publish that is refused with `review_in_bin` writes nothing. Bin
+ends a waiting take at once, like retire and delete.
+
 A take that finds no deliverable Send, on a review that is retired or snoozed, answers
 `closed` (below) when the request lists `"closed"` in `accepts`, and `409 review_closed`
 otherwise, so a client that does not know `closed` stops instead of waiting. A pending Send is
 delivered first. `closed` is a status answer, not a hand-off: it repeats on every later take while
-the review stays retired or snoozed. Retire, snooze and delete end a waiting take at once; `unsnooze`
+the review stays retired or snoozed. Retire, snooze, bin and delete end a waiting take at once; `unsnooze`
 and `reopen` never end one.
 
 ### Sends, replies and waiting
@@ -1054,7 +1089,7 @@ endpoints use `text/event-stream`, `Cache-Control: no-store` and a keepalive eve
 data and is not a `ReviewEvent`. (A comment line would fire no browser event, and an event with
 an empty data buffer is never dispatched.) A client may treat about 40 seconds without any frame
 (`ping` or review event) as a dead stream and reconnect. `ReviewEventName` is
-`publish | send | thread | waiting | claimed | confirmed | viewed | snooze | unsnooze | retire | reopen | delete`. `ReviewEvent` has a `type`
+`publish | send | thread | waiting | claimed | confirmed | viewed | snooze | unsnooze | retire | reopen | delete | bin | restore`. `ReviewEvent` has a `type`
 discriminator and the same fields as its SSE payload. The SSE `event` line supplies
 `type`; the JSON `data` is:
 
@@ -1067,7 +1102,7 @@ discriminator and the same fields as its SSE payload. The SSE `event` line suppl
 | `claimed` | `{ reviewId, revision }` |
 | `confirmed` | `{ reviewId, revision, deliveryId }` |
 | `viewed` | `{ reviewId }` |
-| `snooze`, `unsnooze`, `retire`, `reopen`, `delete` | `{ reviewId, revision }` |
+| `snooze`, `unsnooze`, `retire`, `reopen`, `delete`, `bin`, `restore` | `{ reviewId, revision }` |
 
 Events contain ids and, except for `viewed`, a positive revision sequence only, never paths, text bodies or
 instructions. `claimed` follows a successful take; `confirmed` follows a successful
@@ -1178,7 +1213,11 @@ a newer approval remains intact.
 A merged Go and Approve delivers Go with `approvalSetAside: true`. The CLI prints one JSON object
 for Go, Approve, Closed or Pending and exits 0; errors print one line to stderr, nothing to stdout,
 and exit 1. A take on a deleted or unknown review prints `review <id> was deleted or never existed`
-(`review <id> was deleted on the hub` for a local copy that moved to the hub).
+(`review <id> was deleted on the hub` for a local copy that moved to the hub). A take or a reply on
+a binned review prints `review <id> is in the bin`. `emend publish --review <id>` on one prints
+`review <id> is in the bin. Restore it in Settings, or publish without --review and with a new
+--key for a new review.`, and a publish by key prints `the review this publish would update is in
+the bin. Restore it in Settings, or pass a new --key for a new review.`
 Synthetic examples live in `packages/contract/fixtures/wait-*.json`.
 
 ## Limits
@@ -1191,6 +1230,7 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | --- | ---: |
 | `inboxItems` | 200 reviews returned in the inbox |
 | `agentReviews` | 100 reviews returned in the agent list |
+| `binItems` | 200 reviews returned in the bin list |
 | `importRevisions` | 1000 revisions per import |
 | `importThreads` | 1000 threads per import |
 | `importComments` | 10000 comments per import |
@@ -1306,6 +1346,7 @@ escaped line on stderr.
 | `unsent_comments` | 409 | An Approve is attempted while unsent comments remain. |
 | `instance_attached` | 409 | The instance already has a live machine device; the pairing remains usable. |
 | `review_moved` | 409 | A mutation targets a local review moved to a hub. |
+| `review_in_bin` | 409 | The review is in the bin and the operation is not restore, delete for good or the settling of a delivery claimed before. |
 | `review_closed` | 409 | A take finds the review retired or snoozed and the client did not list `closed` in `accepts`. |
 | `invalid_state` | 409 | A lifecycle action does not fit the review's state, or a Send targets a retired review. |
 | `publish_conflict` | 409 | The revision or thread set changed during publish computation on three attempts; retry publishing. |

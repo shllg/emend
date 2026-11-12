@@ -4,6 +4,7 @@ import { LIMITS } from "@emend/contract";
 import { and, eq } from "drizzle-orm";
 import { openDb } from "../db/client.ts";
 import { comments, owners, reviews } from "../db/schema.ts";
+import { escapeReference } from "./escape.ts";
 import { CliApiError, CliError } from "./http.ts";
 import { readRegular } from "./publish/read.ts";
 
@@ -112,6 +113,61 @@ export async function deletedError(
     }
   }
   throw new CliError(`review ${reviewId} was deleted ${onHub ? "on the hub" : "or never existed"}`);
+}
+
+/**
+ * Turn a review_in_bin answer into the line the skills stop on. A publish names the way out: restore
+ * the review, or publish as a new one. A reply knows only its comment, so it looks the review up in
+ * the local state and falls back to naming the comment. Any other error is rethrown unchanged.
+ */
+export async function binnedError(
+  stateDir: string,
+  error: unknown,
+  reference: { reviewId?: string; commentId?: string; publish?: boolean },
+): Promise<never> {
+  if (!(error instanceof CliApiError) || error.code !== "review_in_bin") throw error;
+  if (reference.publish) {
+    if (reference.reviewId === undefined)
+      throw new CliError(
+        "the review this publish would update is in the bin. Restore it in Settings, or pass a new --key for a new review.",
+      );
+    throw new CliError(
+      `review ${escapeReference(reference.reviewId)} is in the bin. Restore it in Settings, or publish without --review and with a new --key for a new review.`,
+    );
+  }
+  let reviewId = reference.reviewId;
+  if (reviewId === undefined && reference.commentId !== undefined) {
+    const commentId = reference.commentId;
+    const path = join(stateDir, "emend.db");
+    if (
+      await lstat(path).then(
+        (s) => s.isFile(),
+        () => false,
+      )
+    ) {
+      const db = openDb(path);
+      try {
+        reviewId = await db.read(async (q) => {
+          // Local bootstrap has exactly one owner; never use an id from command input as an owner.
+          const owner = await q.select({ id: owners.id }).from(owners).get();
+          if (!owner) return undefined;
+          return (
+            await q
+              .select({ reviewId: comments.reviewId })
+              .from(comments)
+              .where(and(eq(comments.ownerId, owner.id), eq(comments.id, commentId)))
+              .get()
+          )?.reviewId;
+        });
+      } catch {
+        reviewId = undefined;
+      } finally {
+        await db.close();
+      }
+    }
+    if (reviewId === undefined) throw new CliError(`the review of comment ${escapeReference(commentId)} is in the bin`);
+  }
+  throw new CliError(`review ${escapeReference(reviewId ?? "")} is in the bin`);
 }
 
 /** Refuse an attached publish before any request can create a competing hub review. */

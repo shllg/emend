@@ -1,10 +1,21 @@
 import { RetireRequest, SnoozeRequest } from "@emend/contract";
 import type { Hono } from "hono";
 import { removeUnreferencedBlob } from "../../db/repo/blob-removal.ts";
-import { deleteReview, reopenReview, retireReview, snoozeReview, unsnoozeReview } from "../../db/repo/lifecycle.ts";
+import {
+  binnedIds,
+  binReview,
+  deleteReview,
+  listBin,
+  reopenReview,
+  restoreReview,
+  retireReview,
+  snoozeReview,
+  unsnoozeReview,
+} from "../../db/repo/lifecycle.ts";
 import type { AppDeps } from "../app.ts";
 import type { AppEnv } from "../auth/principal.ts";
 import { parseBody } from "../http/body.ts";
+import { ApiError } from "../http/errors.ts";
 import { yieldToLoop } from "../pacing.ts";
 
 export const CLEANUP_BATCH = 16;
@@ -65,11 +76,49 @@ export function lifecycleRoutes(app: Hono<AppEnv>, deps: AppDeps) {
   app.delete("/api/v1/reviews/:id", async (c) => {
     const ownerId = owner(c);
     const reviewId = c.req.param("id");
-    const { revision, candidates } = await deleteReview(ownerId, deps.db, reviewId, deps.now());
+    const deleted = await deleteReview(ownerId, deps.db, reviewId, deps.now());
+    if (!deleted) throw new ApiError("unknown_review");
+    const { revision, candidates } = deleted;
     deps.events?.emit(ownerId, { type: "delete", reviewId, revision });
     // The rows are committed, so the delete is done. Freeing blobs follows the response and never
     // fails it: a blob that stays is only disk, and an error is logged without its content.
     const cleanup = cleanBlobs(deps, ownerId, candidates);
+    deps.onBlobCleanup?.(cleanup);
+    return c.body(null, 204);
+  });
+  app.post("/api/v1/reviews/:id/bin", async (c) => {
+    const ownerId = owner(c);
+    const reviewId = c.req.param("id");
+    const revision = await binReview(ownerId, deps.db, reviewId, deps.now());
+    deps.events?.emit(ownerId, { type: "bin", reviewId, revision });
+    return c.body(null, 204);
+  });
+  app.post("/api/v1/reviews/:id/restore", async (c) => {
+    const ownerId = owner(c);
+    const reviewId = c.req.param("id");
+    const revision = await restoreReview(ownerId, deps.db, reviewId);
+    deps.events?.emit(ownerId, { type: "restore", reviewId, revision });
+    return c.body(null, 204);
+  });
+  app.get("/api/v1/bin", async (c) => c.json(await listBin(owner(c), deps.db)));
+  app.delete("/api/v1/bin", async (c) => {
+    const ownerId = owner(c);
+    const candidates: string[] = [];
+    // Each review goes in its own transaction, and only while it is still in the bin. A review
+    // restored or deleted meanwhile is left alone. The loop yields so a large bin does not block.
+    for (const reviewId of await binnedIds(ownerId, deps.db)) {
+      try {
+        const deleted = await deleteReview(ownerId, deps.db, reviewId, deps.now(), true);
+        if (deleted) {
+          deps.events?.emit(ownerId, { type: "delete", reviewId, revision: deleted.revision });
+          candidates.push(...deleted.candidates);
+        }
+      } catch (error) {
+        if (!(error instanceof ApiError) || !["unknown_review", "review_moved"].includes(error.code)) throw error;
+      }
+      await yieldToLoop("lifecycle-bin-empty");
+    }
+    const cleanup = cleanBlobs(deps, ownerId, [...new Set(candidates)]);
     deps.onBlobCleanup?.(cleanup);
     return c.body(null, 204);
   });

@@ -1,6 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { Hono } from "hono";
-import { files } from "../../db/schema.ts";
+import { files, reviews, revisions } from "../../db/schema.ts";
 import type { AppDeps } from "../app.ts";
 import type { AppEnv } from "../auth/principal.ts";
 import { ApiError } from "../http/errors.ts";
@@ -11,8 +11,10 @@ export function fileRoutes(app: Hono<AppEnv>, deps: AppDeps) {
       const ownerId = c.get("principal").ownerId;
       const bytes = await deps.db.read(async (q) => {
         const file = await q
-          .select({ hash: side === "old" ? files.oldBlob : files.newBlob })
+          .select({ hash: side === "old" ? files.oldBlob : files.newBlob, binnedAt: reviews.binnedAt })
           .from(files)
+          .innerJoin(revisions, and(eq(revisions.ownerId, ownerId), eq(revisions.id, files.revisionId)))
+          .innerJoin(reviews, and(eq(reviews.ownerId, ownerId), eq(reviews.id, revisions.reviewId)))
           .where(
             and(
               eq(files.ownerId, ownerId),
@@ -22,6 +24,7 @@ export function fileRoutes(app: Hono<AppEnv>, deps: AppDeps) {
             ),
           )
           .get();
+        if (file && file.binnedAt !== null) throw new ApiError("review_in_bin");
         if (!file?.hash) throw new ApiError("not_found");
         const bytes = await deps.blobs.get(ownerId, file.hash, q);
         if (!bytes) throw new ApiError("not_found");

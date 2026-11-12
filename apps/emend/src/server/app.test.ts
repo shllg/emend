@@ -182,6 +182,7 @@ test("every documented API endpoint enforces its scope even before its handler e
       } else if (path === "/api/v1/pairings") expect(response.status).toBe(201);
       else if (["/api/v1/reviews", "/api/v1/devices", "/api/v1/agent/reviews"].includes(path))
         expect(response.status).toBe(200);
+      else if (path === "/api/v1/bin") expect(response.status).toBe(endpoint.method === "GET" ? 200 : 204);
       else if (path === "/api/v1/events") {
         expect(response.status).toBe(200);
         await response.body?.cancel();
@@ -193,7 +194,9 @@ test("every documented API endpoint enforces its scope even before its handler e
         (endpoint.method === "PATCH" && path.startsWith("/api/v1/comments/"))
       )
         await error(response, "invalid_request", endpoint.method === "HEAD");
-      else if (/\/reviews\/missing(?:$|\/(?:events|take|unsnooze|retire|reopen|revisions\/missing)$)/.test(path))
+      else if (
+        /\/reviews\/missing(?:$|\/(?:events|take|unsnooze|retire|reopen|bin|restore|revisions\/missing)$)/.test(path)
+      )
         await error(response, "unknown_review");
       else await error(response, "not_found", endpoint.method === "HEAD");
     }

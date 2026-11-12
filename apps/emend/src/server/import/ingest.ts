@@ -167,6 +167,7 @@ export async function importReview(principal: Principal, bundle: ImportBundle, d
           approvedRevision: null,
           approvedAt: null,
           movedToUrl: null,
+          binnedAt: nullableAt(bundle.review.binnedAt ?? null),
           importedAt: deps.now(),
           createdAt: at(bundle.review.createdAt),
           updatedAt: at(bundle.review.updatedAt),

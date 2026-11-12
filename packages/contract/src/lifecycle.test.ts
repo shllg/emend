@@ -1,11 +1,14 @@
 import { expect, test } from "vitest";
 import {
   APPROVED_ACTIVE_HOURS,
+  BinItem,
+  BinView,
   ERROR_STATUS,
   ImportResult,
   InboxItem,
   InboxList,
   LIMITS,
+  REVIEW_BIN_FEATURE,
   RetireRequest,
   ReviewEvent,
   ReviewEventName,
@@ -118,7 +121,7 @@ test("the inbox cap applies per list", () => {
 });
 
 test("lifecycle events carry ids and a revision only", () => {
-  for (const type of ["snooze", "unsnooze", "retire", "reopen", "delete"] as const) {
+  for (const type of ["snooze", "unsnooze", "retire", "reopen", "delete", "bin", "restore"] as const) {
     expect(ReviewEventName.options).toContain(type);
     expect(ReviewEvent.parse({ type, reviewId: id, revision: 3, body: "dropped" })).toEqual({
       type,
@@ -133,4 +136,17 @@ test("the new refusals are 409 and an import can report a deleted review", () =>
   expect(ERROR_STATUS.invalid_state).toBe(409);
   expect(ImportResult.parse({ skipped: true, deleted: true })).toEqual({ skipped: true, deleted: true });
   expect(ImportResult.parse({ skipped: false })).toEqual({ skipped: false });
+});
+
+test("the bin view lists items with an ISO binnedAt and is capped", () => {
+  const binned = { id, title: "Synthetic", machine: "Synthetic machine", binnedAt: "2026-11-04T10:00:00.000Z" };
+  expect(BinItem.parse({ ...binned, extra: 1 })).toEqual(binned);
+  expect(BinView.parse({ items: [binned], total: 1 })).toEqual({ items: [binned], total: 1 });
+  expect(BinItem.safeParse({ ...binned, binnedAt: "yesterday" }).success).toBe(false);
+  expect(BinView.safeParse({ items: [], total: -1 }).success).toBe(false);
+  expect(
+    BinView.safeParse({ items: Array.from({ length: LIMITS.binItems + 1 }, () => binned), total: 201 }).success,
+  ).toBe(false);
+  expect(ERROR_STATUS.review_in_bin).toBe(409);
+  expect(REVIEW_BIN_FEATURE).toBe("review-bin");
 });

@@ -27,6 +27,7 @@ const ImportRows = z.object({
     title: PublishRequest.shape.title,
     state: z.enum(["open", "approved", "settled"]),
     approvedRevision: id.nullable(),
+    binnedAt: time.nullable().optional(),
     ...dates,
   }),
   revisions: z

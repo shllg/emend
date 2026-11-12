@@ -87,7 +87,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
       .innerJoin(latest, eq(latest.reviewId, reviews.id))
       .innerJoin(instances, eq(instances.id, reviews.originInstanceId))
       .leftJoin(repos, and(eq(repos.ownerId, ownerId), eq(repos.id, reviews.repoId)))
-      .where(and(eq(reviews.ownerId, ownerId), where))
+      .where(and(eq(reviews.ownerId, ownerId), isNull(reviews.binnedAt), where))
       .orderBy(...order)
       .limit(limit)
       .all();
@@ -547,6 +547,16 @@ async function revisionView(ownerId: string, q: Queries, deps: AppDeps, reviewId
   });
 }
 
+/** A binned review acts as deleted for reads: the inbox leaves it out, a direct read says why. */
+async function refuseBinned(ownerId: string, q: Queries, reviewId: string) {
+  const review = await q
+    .select({ binnedAt: reviews.binnedAt })
+    .from(reviews)
+    .where(and(eq(reviews.ownerId, ownerId), eq(reviews.id, reviewId)))
+    .get();
+  if (review && review.binnedAt !== null) throw new ApiError("review_in_bin");
+}
+
 export function reviewRoutes(app: Hono<AppEnv>, deps: AppDeps) {
   app.get("/api/v1/reviews", async (c) => {
     const ownerId = c.get("principal").ownerId;
@@ -559,6 +569,7 @@ export function reviewRoutes(app: Hono<AppEnv>, deps: AppDeps) {
     const reviewId = c.req.param("id");
     const file = await readFileSetting(deps.configFile);
     const view = await deps.db.read(async (q) => {
+      await refuseBinned(ownerId, q, reviewId);
       const {
         items: [item],
       } = await inbox(ownerId, q, deps, file, reviewId);
@@ -581,11 +592,12 @@ export function reviewRoutes(app: Hono<AppEnv>, deps: AppDeps) {
     const reviewId = c.req.param("id");
     const view = await deps.db.read(async (q) => {
       const review = await q
-        .select({ id: reviews.id })
+        .select({ id: reviews.id, binnedAt: reviews.binnedAt })
         .from(reviews)
         .where(and(eq(reviews.ownerId, ownerId), eq(reviews.id, reviewId)))
         .get();
       if (!review) throw new ApiError("unknown_review");
+      if (review.binnedAt !== null) throw new ApiError("review_in_bin");
       const seq = Number(c.req.param("seq"));
       if (!/^[1-9]\d*$/.test(c.req.param("seq")) || !Number.isSafeInteger(seq)) throw new ApiError("not_found");
       return revisionView(ownerId, q, deps, reviewId, seq);

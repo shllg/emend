@@ -49,6 +49,7 @@ async function findReview(ownerId: string, instanceId: string, input: PublishReq
     .get();
   if (existing) {
     if (existing.movedToUrl) throw new ApiError("review_moved");
+    if (existing.binnedAt !== null) throw new ApiError("review_in_bin");
     return existing;
   }
   if (input.reviewId) throw new ApiError("unknown_review");

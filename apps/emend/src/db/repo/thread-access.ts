@@ -11,6 +11,8 @@ export async function requireReview(
   principal?: Principal,
   mutation = true,
   nested = false,
+  /** Only restore, delete for good and the settling of an already-claimed delivery reach a binned review. */
+  allowBinned = false,
 ) {
   const review = await q
     .select()
@@ -25,6 +27,7 @@ export async function requireReview(
     .get();
   if (!review) throw new ApiError(nested ? "not_found" : "unknown_review");
   if (mutation && review.movedToUrl) throw new ApiError("review_moved");
+  if (review.binnedAt !== null && !allowBinned) throw new ApiError("review_in_bin");
   return review;
 }
 export async function newestRevision(ownerId: string, q: Queries, reviewId: string) {

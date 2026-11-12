@@ -20,6 +20,7 @@ test("maps every error code to its specified HTTP status", () => {
     comment_frozen: 409,
     unsent_comments: 409,
     review_moved: 409,
+    review_in_bin: 409,
     review_closed: 409,
     invalid_state: 409,
     instance_attached: 409,

@@ -65,3 +65,32 @@ test("export rows keep doc titles but omit recomputable headings", async () => {
   expect(exported.bundle.files[0]).not.toHaveProperty("headings");
   expect(JSON.parse(exported.json).files[0]).not.toHaveProperty("headings");
 });
+
+test.each([
+  [false, null],
+  [true, "2026-11-04T10:00:00.000Z"],
+])("export carries binnedAt of a binned review (binned: %s)", async (binned, expected) => {
+  const fixture = await directFixture();
+  const { result } = await fixture.publish();
+  const server = await fixture.reviewer();
+  if (binned)
+    await server.db.query((q) =>
+      q
+        .update(reviews)
+        .set({ binnedAt: Date.parse("2026-11-04T10:00:00.000Z") })
+        .where(and(eq(reviews.ownerId, server.ownerId), eq(reviews.id, result.reviewId))),
+    );
+  const exported = await server.db.transaction((q) =>
+    snapshot(
+      q,
+      server.ownerId,
+      server.instance.id,
+      result.reviewId,
+      `https://hub.example/r/${result.reviewId}`,
+      Date.now(),
+    ),
+  );
+  if (exported.kind !== "bundle") throw new Error("missing bundle");
+  expect(exported.bundle.review.binnedAt).toBe(expected);
+  expect(JSON.parse(exported.json).review.binnedAt).toBe(expected);
+});

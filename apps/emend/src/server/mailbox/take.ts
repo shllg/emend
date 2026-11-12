@@ -381,7 +381,7 @@ export function confirmDelivery(db: Db, principal: Principal, deliveryId: string
       .where(and(eq(deliveries.ownerId, ownerId), eq(deliveries.id, deliveryId)))
       .get();
     if (!delivery) return false;
-    const review = await requireReview(ownerId, q, delivery.reviewId, principal, false, true);
+    const review = await requireReview(ownerId, q, delivery.reviewId, principal, false, true, true);
     const confirmed = await q
       .update(deliveries)
       .set({ confirmedAt: now })
@@ -421,7 +421,7 @@ export function releaseUnreturnedDelivery(db: Db, principal: Principal, delivery
     const owned = and(eq(deliveries.ownerId, ownerId), eq(deliveries.id, deliveryId), isNull(deliveries.confirmedAt));
     const delivery = await q.select().from(deliveries).where(owned).get();
     if (!delivery) return;
-    await requireReview(ownerId, q, delivery.reviewId, principal, false, true);
+    await requireReview(ownerId, q, delivery.reviewId, principal, false, true, true);
     await q
       .update(sends)
       .set({ deliveryId: null, setAsideAt: null })

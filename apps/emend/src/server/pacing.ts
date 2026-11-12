@@ -12,7 +12,8 @@ export type PacingPhase =
   | "import-placement-copy"
   | "import-prepare-comments"
   | "import-prepare-changed"
-  | "lifecycle-blob-cleanup";
+  | "lifecycle-blob-cleanup"
+  | "lifecycle-bin-empty";
 
 /** Test seam for counting work between main-thread yields; production leaves the probe unset. */
 export const pacing: { probe?: (phase: PacingPhase) => void } = { probe: undefined };
