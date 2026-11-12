@@ -30,6 +30,7 @@ test("an attach snapshot leaves out a send-less closed delivery, so the bundle s
       result.reviewId,
       `https://hub.example/r/${result.reviewId}`,
       Date.now(),
+      false,
     ),
   );
   if (snap.kind !== "bundle") throw new Error(`expected a bundle, got ${snap.kind}`);

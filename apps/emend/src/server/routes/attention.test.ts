@@ -40,7 +40,7 @@ test("published attention survives views and export/import; absence and importan
     expect((await view(source)).topics).toEqual(topics);
     expect((await view(source)).topics[3]).not.toHaveProperty("attention");
     const exported = await source.db.transaction((q) =>
-      snapshot(q, source.ownerId, source.instanceId, reviewId, "http://127.0.0.1:3637", source.deps.now()),
+      snapshot(q, source.ownerId, source.instanceId, reviewId, "http://127.0.0.1:3637", source.deps.now(), false),
     );
     expect(exported.kind).toBe("bundle");
     if (exported.kind !== "bundle") throw new Error("Expected an export bundle");

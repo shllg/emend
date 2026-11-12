@@ -199,8 +199,68 @@ describe.each(["HTTP", "in-process"])("%s transport", (mode) => {
       binned ? [result.reviewId] : [],
     );
     expect((await localRow())?.movedToUrl).toBe(`${f.hub.url}/r/${result.reviewId}`);
-    expect(await listBin(local.ownerId, local.db)).toEqual({ items: [], total: 0, more: false });
+    expect(await listBin(local.ownerId, local.db)).toMatchObject({ items: [], total: 0, more: false });
   });
+
+  test.each(["during registration", "another origin"])(
+    "attach to a hub without a bin leaves a review binned %s local",
+    async (when) => {
+      const f = await fixture();
+      const { result } = await f.publish();
+      const local = await f.reviewer();
+      if (when === "another origin") {
+        const originId = randomUUID();
+        await local.db.transaction(async (q) => {
+          await q.insert(instances).values({ id: originId, name: "Another machine" });
+          await q
+            .update(reviews)
+            .set({ originInstanceId: originId })
+            .where(and(eq(reviews.ownerId, local.ownerId), eq(reviews.id, result.reviewId)));
+        });
+        expect((await local.request(`/reviews/${result.reviewId}/bin`, {})).status).toBe(204);
+      }
+      const fetcher = globalThis.fetch;
+      const requests = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        const response = await fetcher(input, init);
+        if (String(input) === `${f.hub.url}/api/v1/capabilities`) {
+          const capabilities = Capabilities.parse(await response.json());
+          return Response.json({
+            ...capabilities,
+            features: capabilities.features.filter((name) => name !== REVIEW_BIN_FEATURE),
+          });
+        }
+        if (when === "during registration" && String(input) === `${f.hub.url}/api/v1/machines`)
+          expect((await local.request(`/reviews/${result.reviewId}/bin`, {})).status).toBe(204);
+        return response;
+      });
+      const attached = await f.command(["attach", f.pairing.url]);
+      expect(attached.code, attached.text).toBe(0);
+      expect(attached.text).toContain(`copied 0 reviews, skipped ${when === "during registration" ? 1 : 0}.`);
+      expect(requests.mock.calls.some(([input]) => String(input) === `${f.hub.url}/api/v1/machines`)).toBe(true);
+      expect(requests.mock.calls.some(([input]) => String(input) === `${f.hub.url}/api/v1/import`)).toBe(false);
+      expect(
+        await local.db.read((q) =>
+          q
+            .select()
+            .from(reviews)
+            .where(and(eq(reviews.ownerId, local.ownerId), eq(reviews.id, result.reviewId)))
+            .get(),
+        ),
+      ).toMatchObject({ movedToUrl: null, binnedAt: expect.any(Number) });
+      expect((await listBin(local.ownerId, local.db)).items.map((item) => item.id)).toEqual([result.reviewId]);
+      const hubState = await initializeServerState(f.hubDir);
+      f.cleanup.push(() => hubState.db.close());
+      expect(
+        await hubState.db.read((q) =>
+          q
+            .select()
+            .from(reviews)
+            .where(and(eq(reviews.ownerId, hubState.ownerId), eq(reviews.id, result.reviewId)))
+            .get(),
+        ),
+      ).toBeUndefined();
+    },
+  );
 
   test.each(["detach", "attach"])("%s recovers a crash after saving the hub token", async (command) => {
     const f = await fixture();

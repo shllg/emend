@@ -84,7 +84,7 @@ test("notes survive publish, revision view, export and import as immutable plain
     ),
   ).rejects.toThrow();
   const exported = await f.db.transaction((q) =>
-    snapshot(q, f.ownerId, f.instanceId, published.reviewId, "https://example.test", f.deps.now()),
+    snapshot(q, f.ownerId, f.instanceId, published.reviewId, "https://example.test", f.deps.now(), false),
   );
   if (exported.kind !== "bundle") throw new Error("Missing export");
   expect(exported.bundle.agentNotes?.find((n) => n.id === id)).toMatchObject(note);
@@ -260,7 +260,7 @@ test.each(["view", "export"])(
     if (kind === "view") await view(f, published.reviewId);
     else
       await f.db.transaction((q) =>
-        snapshot(q, f.ownerId, f.instanceId, published.reviewId, "https://example.test", f.deps.now()),
+        snapshot(q, f.ownerId, f.instanceId, published.reviewId, "https://example.test", f.deps.now(), false),
       );
     expect(plan.join("\n")).toContain("agent_notes_owner_file_ord_unique (owner_id=? AND file_id=?)");
     expect(plan.join("\n")).toContain("files_owner_revision_id_unique (owner_id=? AND revision_id=?)");

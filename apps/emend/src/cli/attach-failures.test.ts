@@ -604,7 +604,9 @@ test("a failing clear transaction keeps the mark recoverable by the next attach"
       : normal(url, init),
   );
   const out = f.output();
-  expect(await copyReviews(f.stateDir, state, { via: "hub", url: origin, token }, out.io)).toMatchObject({ failed: 1 });
+  expect(await copyReviews(f.stateDir, state, { via: "hub", url: origin, token }, out.io, false)).toMatchObject({
+    failed: 1,
+  });
   expect(out.stderr.join("")).toContain("could not clear the local mark. Run emend attach again.");
   await expect(takeDirect(f.stateDir, review.result.reviewId, 0)).rejects.toMatchObject({ code: "review_moved" });
   f.handler.mockImplementation(normal);
@@ -725,7 +727,7 @@ test.each(["missing", "PUT", "next import", "next connection", "signal"])(
       return normal(url, init);
     });
     const out = f.output();
-    const result = copyReviews(f.stateDir, state, { via: "hub", url: origin, token }, out.io);
+    const result = copyReviews(f.stateDir, state, { via: "hub", url: origin, token }, out.io, false);
     if (failure === "signal") await expect(result).rejects.toMatchObject({ exitCode: 130 });
     else expect(await result).toMatchObject({ failed: 1 });
     if (failure === "next import") {

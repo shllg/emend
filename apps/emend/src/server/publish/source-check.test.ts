@@ -56,7 +56,7 @@ test.each(["publish", "import"])("%s validates shared source bytes once across a
     const first = await publish(executeWork);
     await publish(executeWork);
     const exported = await f.db.query((q) =>
-      snapshot(q, f.ownerId, f.instanceId, first.reviewId, "https://hub.example", 1800000000000),
+      snapshot(q, f.ownerId, f.instanceId, first.reviewId, "https://hub.example", 1800000000000, false),
     );
     if (exported.kind !== "bundle") throw new Error("missing bundle");
     get.mockClear();

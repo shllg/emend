@@ -39,11 +39,12 @@ export async function copyReviews(
   state: Awaited<ReturnType<typeof initializeServerState>>,
   target: HttpTarget,
   io: Io,
+  hubHasBin: boolean,
   signal?: AbortSignal,
 ) {
   return signal
-    ? copy(stateDir, state, target, io, signal)
-    : withAttachSignals((signal) => copy(stateDir, state, target, io, signal));
+    ? copy(stateDir, state, target, io, hubHasBin, signal)
+    : withAttachSignals((signal) => copy(stateDir, state, target, io, hubHasBin, signal));
 }
 
 async function copy(
@@ -51,6 +52,7 @@ async function copy(
   state: Awaited<ReturnType<typeof initializeServerState>>,
   target: HttpTarget,
   io: Io,
+  hubHasBin: boolean,
   signal: AbortSignal,
 ) {
   const { db, ownerId, instance, blobs } = state;
@@ -72,9 +74,12 @@ async function copy(
     let unknownSeen = false;
     let snapshotted = false;
     try {
-      const result = await db.transaction((q) => snapshot(q, ownerId, instance.id, id, movedToUrl, Date.now()), {
-        offThread: true,
-      });
+      const result = await db.transaction(
+        (q) => snapshot(q, ownerId, instance.id, id, movedToUrl, Date.now(), hubHasBin),
+        {
+          offThread: true,
+        },
+      );
       if (result.kind === "skipped") {
         skipped++;
         continue;

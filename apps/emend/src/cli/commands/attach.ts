@@ -62,12 +62,20 @@ async function attach(stateDir: string, link: ReturnType<typeof pairingLink>, io
     throw new CliError(`the server at ${link.origin} cannot accept machines.`);
   const state = await initializeServerState(stateDir, { tokens: false });
   try {
-    if (!capabilities.features.includes(REVIEW_BIN_FEATURE)) {
+    const hubHasBin = capabilities.features.includes(REVIEW_BIN_FEATURE);
+    if (!hubHasBin) {
       const binned = await state.db.read((q) =>
         q
           .select({ id: reviews.id })
           .from(reviews)
-          .where(and(eq(reviews.ownerId, state.ownerId), isNotNull(reviews.binnedAt), isNull(reviews.movedToUrl)))
+          .where(
+            and(
+              eq(reviews.ownerId, state.ownerId),
+              eq(reviews.originInstanceId, state.instance.id),
+              isNotNull(reviews.binnedAt),
+              isNull(reviews.movedToUrl),
+            ),
+          )
           .limit(1)
           .get(),
       );
@@ -78,7 +86,7 @@ async function attach(stateDir: string, link: ReturnType<typeof pairingLink>, io
     }
     signal.throwIfAborted();
     if (!pair) pair = await register(stateDir, link, state.instance, io, signal);
-    const result = await copyReviews(stateDir, state, attachedTarget(pair), io, signal);
+    const result = await copyReviews(stateDir, state, attachedTarget(pair), io, hubHasBin, signal);
     io.stderr(
       `emend: attached to ${safeMessage(pair.attachment.hubName)}; copied ${result.copied} reviews, skipped ${result.skipped}.\n`,
     );

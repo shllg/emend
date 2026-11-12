@@ -173,7 +173,7 @@ test("every documented API endpoint enforces its scope even before its handler e
         endpoint.method,
         credential,
         path === "/api/v1/bin" && endpoint.method === "DELETE"
-          ? { upTo: new Date(now).toISOString() }
+          ? { upTo: new Date(now).toISOString(), total: 0 }
           : ["POST", "PATCH", "PUT"].includes(endpoint.method)
             ? {}
             : undefined,

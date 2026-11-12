@@ -29,6 +29,7 @@ const MESSAGES: Record<ErrorCode, string> = {
   rate_limited: "Code entry is temporarily locked.",
 };
 const DETAILS = {
+  bin_changed: { code: "invalid_state", message: "The bin changed. Check it and try again." },
   import_aborted: { code: "invalid_request", message: "The import was cancelled." },
   import_busy: { code: "rate_limited", message: "The server is busy importing; try again." },
   waiting_takes: { code: "rate_limited", message: "Too many waiting takes." },

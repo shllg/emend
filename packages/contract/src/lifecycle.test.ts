@@ -142,23 +142,32 @@ test("the new refusals are 409 and an import can report a deleted review", () =>
 
 test("the bin view lists items with an ISO binnedAt and is capped", () => {
   const binned = { id, title: "Synthetic", machine: "Synthetic machine", binnedAt: "2026-11-04T10:00:00.000Z" };
+  const asOf = "2026-11-04T11:00:00.000Z";
   expect(BinItem.parse({ ...binned, extra: 1 })).toEqual(binned);
-  expect(BinView.parse({ items: [binned], total: 1, more: false })).toEqual({ items: [binned], total: 1, more: false });
+  const view = { items: [binned], total: 1, more: false, asOf };
+  expect(BinView.parse(view)).toEqual(view);
   expect(BinItem.safeParse({ ...binned, binnedAt: "yesterday" }).success).toBe(false);
-  expect(BinView.safeParse({ items: [], total: -1, more: false }).success).toBe(false);
-  expect(BinView.safeParse({ items: [], total: 0 }).success).toBe(false);
+  for (const invalid of [{ total: -1 }, { more: undefined }, { asOf: undefined }, { asOf: "yesterday" }])
+    expect(BinView.safeParse({ ...view, ...invalid }).success).toBe(false);
   expect(
-    BinView.safeParse({ items: Array.from({ length: LIMITS.binItems + 1 }, () => binned), total: 201, more: false })
+    BinView.safeParse({ ...view, items: Array.from({ length: LIMITS.binItems + 1 }, () => binned), total: 201 })
       .success,
   ).toBe(false);
   expect(ERROR_STATUS.review_in_bin).toBe(409);
   expect(REVIEW_BIN_FEATURE).toBe("review-bin");
 });
 
-test("empty bin requires a strict ISO cutoff and bin cursors require both fields", () => {
+test("empty bin requires a strict ISO cutoff and count, and bin cursors require both fields", () => {
   const upTo = "2026-11-04T10:00:00.000Z";
-  expect(EmptyBinRequest.parse({ upTo })).toEqual({ upTo });
-  for (const value of [undefined, {}, { upTo: "yesterday" }, { upTo, extra: true }])
+  for (const total of [0, 1, 201]) expect(EmptyBinRequest.parse({ upTo, total })).toEqual({ upTo, total });
+  for (const value of [
+    undefined,
+    {},
+    { upTo },
+    { upTo: "yesterday", total: 1 },
+    { upTo, total: 1, extra: true },
+    ...[-1, 1.5, "1", null].map((total) => ({ upTo, total })),
+  ])
     expect(EmptyBinRequest.safeParse(value).success).toBe(false);
   expect(BinQuery.parse({})).toEqual({});
   expect(BinQuery.parse({ beforeAt: upTo, beforeId: id })).toEqual({ beforeAt: upTo, beforeId: id });

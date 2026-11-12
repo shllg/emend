@@ -186,7 +186,7 @@ it("export/import round-trips both doc views and a source-lines thread across re
     ).status,
   ).toBe(200);
   const exported = await f.db.query((q) =>
-    snapshot(q, f.ownerId, f.instanceId, first.reviewId, "https://hub.example", Date.now()),
+    snapshot(q, f.ownerId, f.instanceId, first.reviewId, "https://hub.example", Date.now(), false),
   );
   if (exported.kind !== "bundle") throw new Error("missing export");
   expect(exported.bundle.files.map((row) => row.view)).toEqual([undefined, "source", undefined, "source"]);

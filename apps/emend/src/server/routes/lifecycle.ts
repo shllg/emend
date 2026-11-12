@@ -108,15 +108,18 @@ export function lifecycleRoutes(app: Hono<AppEnv>, deps: AppDeps) {
   app.get("/api/v1/bin", async (c) => {
     const query = BinQuery.safeParse(c.req.query());
     if (!query.success) throw new ApiError("invalid_request");
-    return c.json(await listBin(owner(c), deps.db, query.data));
+    return c.json(await listBin(owner(c), deps.db, query.data, deps.now()));
   });
   app.delete("/api/v1/bin", async (c) => {
     const ownerId = owner(c);
-    const upTo = Date.parse(parseBody(c, EmptyBinRequest).upTo);
+    const request = parseBody(c, EmptyBinRequest);
+    const upTo = Date.parse(request.upTo);
+    const ids = await binnedIds(ownerId, deps.db, upTo);
+    if (ids.length !== request.total) throw new ApiError("invalid_state", "bin_changed");
     const candidates: string[] = [];
     // Each review goes in its own transaction, and only while it is still in the bin. A review
     // restored or deleted meanwhile is left alone. The loop yields so a large bin does not block.
-    for (const reviewId of await binnedIds(ownerId, deps.db, upTo)) {
+    for (const reviewId of ids) {
       try {
         const deleted = await deleteReview(ownerId, deps.db, reviewId, deps.now(), true, upTo);
         if (deleted) {

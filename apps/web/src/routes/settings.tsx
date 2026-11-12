@@ -7,7 +7,7 @@ import {
 } from "@emend/contract";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { change, patch } from "../api/client.ts";
+import { ApiError, change, patch } from "../api/client.ts";
 import { mutationMessage } from "../api/mutations.ts";
 import { binQuery, settingsQuery } from "../api/queries.ts";
 import { AppFrame } from "../components/layout/AppFrame.tsx";
@@ -133,6 +133,8 @@ function BinSettings() {
       return true;
     } catch (error) {
       toast.show({ tone: "danger", title: mutationMessage(error as Error) });
+      if (!reviewId && error instanceof ApiError && error.status === 409 && error.code === "invalid_state")
+        setConfirm(null);
       return false;
     } finally {
       busy.current = false;
@@ -160,7 +162,10 @@ function BinSettings() {
             `Deleted “${confirm.item.title}”`,
             confirm.item.id,
           )
-        : await run(() => change("/api/v1/bin", "DELETE", { upTo: confirm.upTo }), "Emptied the bin");
+        : await run(
+            () => change("/api/v1/bin", "DELETE", { upTo: confirm.upTo, total: confirm.total }),
+            "Emptied the bin",
+          );
     if (ok) setConfirm(null);
   };
   const now = Date.now();
@@ -172,10 +177,10 @@ function BinSettings() {
         </h2>
         <Button
           variant="danger"
-          disabled={items.length === 0 || pending}
+          disabled={total === 0 || pending}
           onClick={() => {
-            const newest = items[0];
-            if (newest) setConfirm({ kind: "all", upTo: newest.binnedAt, total });
+            const first = bin.data?.pages[0];
+            if (first) setConfirm({ kind: "all", upTo: first.asOf, total: first.total });
           }}
         >
           Empty bin

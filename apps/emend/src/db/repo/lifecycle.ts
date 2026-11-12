@@ -17,7 +17,6 @@ import {
   isNotNull,
   isNull,
   lt,
-  lte,
   notExists,
   notInArray,
   or,
@@ -163,7 +162,7 @@ export function restoreReview(ownerId: string, db: Db, reviewId: string) {
 }
 
 /** One page of the owner's live binned reviews, newest first (ties by id); total counts them all. */
-export function listBin(ownerId: string, db: Db, cursor: BinQuery = {}): Promise<BinView> {
+export function listBin(ownerId: string, db: Db, cursor: BinQuery = {}, now = Date.now()): Promise<BinView> {
   return db.read(async (q) => {
     const binned = and(eq(reviews.ownerId, ownerId), isNotNull(reviews.binnedAt), isNull(reviews.movedToUrl));
     const after =
@@ -183,6 +182,7 @@ export function listBin(ownerId: string, db: Db, cursor: BinQuery = {}): Promise
       .all();
     const total = (await q.select({ n: count() }).from(reviews).where(binned).get())?.n ?? 0;
     return BinView.parse({
+      asOf: new Date(now).toISOString(),
       items: rows.slice(0, LIMITS.binItems).map((row) => ({
         id: row.id,
         title: row.title,
@@ -195,14 +195,21 @@ export function listBin(ownerId: string, db: Db, cursor: BinQuery = {}): Promise
   });
 }
 
-/** The ids of the owner's live reviews binned no later than the confirmed cutoff. */
+/** The ids of the owner's live binned reviews that arrived strictly before the confirmed cutoff. */
 export function binnedIds(ownerId: string, db: Db, upTo: number) {
   return db.read(async (q) =>
     (
       await q
         .select({ id: reviews.id })
         .from(reviews)
-        .where(and(eq(reviews.ownerId, ownerId), lte(reviews.binnedAt, upTo), isNull(reviews.movedToUrl)))
+        .where(
+          and(
+            eq(reviews.ownerId, ownerId),
+            lt(reviews.binnedAt, upTo),
+            or(isNull(reviews.importedAt), lt(reviews.importedAt, upTo)),
+            isNull(reviews.movedToUrl),
+          ),
+        )
         .orderBy(asc(reviews.id))
     ).map((row) => row.id),
   );
@@ -211,7 +218,7 @@ export function binnedIds(ownerId: string, db: Db, upTo: number) {
 /**
  * Delete one review and everything under it in one transaction; return the blobs it may have freed.
  * A binned review can be deleted. With `onlyBinned`, a review that is not (or no longer) in the bin
- * stays, and the call answers null. An optional cutoff also leaves a review binned later alone.
+ * stays, and the call answers null. An optional cutoff leaves arrivals at or after that time alone.
  */
 export function deleteReview(
   ownerId: string,
@@ -223,7 +230,12 @@ export function deleteReview(
 ) {
   return db.transaction(async (q) => {
     const review = await requireReview(ownerId, q, reviewId, undefined, true, false, true);
-    if (onlyBinned && (review.binnedAt === null || (upTo !== undefined && review.binnedAt > upTo))) return null;
+    if (
+      onlyBinned &&
+      (review.binnedAt === null ||
+        (upTo !== undefined && Math.max(review.binnedAt, review.importedAt ?? review.binnedAt) >= upTo))
+    )
+      return null;
     const revision = (await newestRevision(ownerId, q, reviewId)).seq;
     const revisionIds = q
       .select({ id: revisions.id })
