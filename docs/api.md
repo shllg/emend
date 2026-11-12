@@ -153,6 +153,10 @@ stored media type of `image/png`, `image/jpeg`, `image/gif`, `image/webp` or `im
 row, a diff side, an SVG, an HTML doc's own asset or any other asset, a foreign owner's row, a
 missing stored blob, or one whose size or bytes do not match its hash returns `404 not_found`
 before any byte is sent.
+An image used only by reviews in the bin also returns `404 not_found`. Media is addressed by
+hash and may be shared, so it never answers `review_in_bin`; another readable review using the
+same image keeps it available, and Restore makes it available again. A moved local copy remains
+readable even if it was binned before the move.
 Otherwise it returns `200` with the stored bytes, `Content-Length`, `Content-Type` set to the
 row's stored media type, `X-Content-Type-Options: nosniff`, `Cross-Origin-Resource-Policy: same-origin`,
 `Cache-Control: no-store`, `Content-Disposition: inline` and
@@ -1033,7 +1037,7 @@ Capabilities lists the features `review-lifecycle` and `review-bin`.
   every binned review of the owner, across all pages. Moved local copies are not listed or counted
   in the local bin: the hub's copy is the live one in the hub's bin. `version` is the SHA-256,
   encoded as 64 lowercase hex characters, of the sorted ids of every binned, unmoved review of
-  the owner, joined by `\n`. It describes the whole bin in the same read as `total`; every page of
+  the owner, joined by `\n`. Items, `total`, `more` and `version` come from one SQL snapshot; every page of
   an unchanged bin carries the same version. Any bin, restore, import, move mark or delete that
   changes this membership changes the version, regardless of timestamps or clock adjustments.
 - `DELETE /bin/:id` deletes the review exactly like `DELETE /reviews/:id`, but checks inside the
@@ -1051,13 +1055,18 @@ Capabilities lists the features `review-lifecycle` and `review-bin`.
   repository cleanup and its `delete` event after the commit, and blob cleanup after the response.
   Each transaction checks again that the review is still in the bin, so a review restored
   meanwhile stays. A review binned or imported after the version read is outside the selected
-  ids and stays. The loop yields between reviews. Returns 204.
+  ids and stays. The loop yields between reviews. Returns 204. If a later delete fails, earlier
+  deletes stay committed and their blob cleanup still runs; the request returns the delete error.
 - `DELETE /reviews/:id` keeps working on a binned review and deletes it for good.
 
 A binned review acts as deleted for agents and leaves every list. A take (`emend wait`,
 `emend feedback`, the MCP tools), a waiter, an agent reply, a publish to it by id or by key, and
 every reviewer read or write of the review, its revisions, files, threads, comments, Sends, viewed
-marks, snooze, retire and reopen answer `409 review_in_bin`. Confirming or releasing a delivery that
+marks, snooze, retire and reopen answer `409 review_in_bin`. `/media/:sha256` is the exception:
+an image used only by binned reviews answers `404 not_found`, as described under Writeup media.
+A moved local copy takes precedence over the bin: reads by id return the normal view with
+`movedTo`, and its revisions, files and media remain readable. Mutations still answer
+`409 review_moved`, including bin and restore. Confirming or releasing a delivery that
 was claimed before the review was binned stays available. The inbox, its counts and the agent list
 leave binned reviews out. The content path is unchanged. A missing, foreign or other-origin review
 stays `404 unknown_review`. A publish that is refused with `review_in_bin` adds no review and no

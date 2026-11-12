@@ -1,8 +1,20 @@
 import { createHash, randomUUID } from "node:crypto";
-import { BinView, InboxList, LIMITS, type ReviewEvent } from "@emend/contract";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import {
+  AgentReviewList,
+  BinView,
+  InboxList,
+  LIMITS,
+  type ReviewEvent,
+  ReviewView,
+  RevisionView,
+} from "@emend/contract";
 import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import * as lifecycle from "../../db/repo/lifecycle.ts";
+import { requireReview } from "../../db/repo/thread-access.ts";
 import * as t from "../../db/schema.ts";
 import { createToken, SESSION_MS } from "../auth/tokens.ts";
 import { publishReview } from "../mailbox/lifecycle-support.ts";
@@ -38,6 +50,31 @@ const row = (id: string) =>
       .get(),
   );
 const exists = async (id: string) => (await row(id)) !== undefined;
+
+// A synthetic PNG header, served without decoding by the media route.
+const png = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489", "hex");
+async function seedWriteupImage(reviewId: string) {
+  const hash = await f.deps.blobs.put(f.ownerId, png, "image/png");
+  await f.db.query(async (q) => {
+    const revision = await q
+      .select({ id: t.revisions.id })
+      .from(t.revisions)
+      .where(and(eq(t.revisions.ownerId, f.ownerId), eq(t.revisions.reviewId, reviewId)))
+      .get();
+    if (!revision) throw new Error("Missing revision");
+    await q.insert(t.files).values({
+      id: randomUUID(),
+      ownerId: f.ownerId,
+      revisionId: revision.id,
+      path: "image.png",
+      role: "asset",
+      ord: 1,
+      mediaType: "image/png",
+      newBlob: hash,
+    });
+  });
+  return hash;
+}
 
 const bearer = (secret: string, path: string, method: string) =>
   f.app.request(`http://127.0.0.1:3636/api/v1${path}`, {
@@ -159,6 +196,92 @@ test("a moved review cannot be binned", async () => {
     q.update(t.reviews).set({ movedToUrl: "https://hub.example/r/x" }).where(eq(t.reviews.id, reviewId)),
   );
   await error(await post(reviewId, "bin"), 409, "review_moved");
+});
+
+test("a moved and binned review reads as moved but stays out of every list", async () => {
+  const { reviewId } = await publishReview(f, { diff: true });
+  const hash = await seedWriteupImage(reviewId);
+  const movedTo = "https://hub.example/r/moved";
+  expect((await post(reviewId, "bin")).status).toBe(204);
+  await f.db.query((q) =>
+    q
+      .update(t.reviews)
+      .set({ movedToUrl: movedTo })
+      .where(and(eq(t.reviews.ownerId, f.ownerId), eq(t.reviews.id, reviewId))),
+  );
+  const response = await f.request(`/reviews/${reviewId}`, "GET");
+  expect(response.status).toBe(200);
+  expect(ReviewView.parse(await response.json())).toMatchObject({ id: reviewId, movedTo });
+  expect(await f.db.read((q) => requireReview(f.ownerId, q, reviewId, undefined, false))).toMatchObject({
+    movedToUrl: movedTo,
+  });
+  const revisionResponse = await f.request(`/reviews/${reviewId}/revisions/1`, "GET");
+  expect(revisionResponse.status).toBe(200);
+  const revision = RevisionView.parse(await revisionResponse.json());
+  const file = revision.files.find((file) => file.path === "src/a.ts");
+  if (!file) throw new Error("Missing diff");
+  for (const [side, content] of [
+    ["old", "const a = 1;\n"],
+    ["new", "const a = 2;\n"],
+  ]) {
+    const response = await f.request(`/files/${file.id}/${side}`, "GET");
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(content);
+  }
+  const image = await f.request(`/media/${hash}`, "GET");
+  expect(image.status).toBe(200);
+  expect(Buffer.from(await image.arrayBuffer())).toEqual(png);
+  for (const action of ["restore", "bin"]) await error(await post(reviewId, action), 409, "review_moved");
+  expect(await inboxIds()).not.toContain(reviewId);
+  const agent = AgentReviewList.parse(await (await f.request("/agent/reviews", "GET", undefined, "agent")).json());
+  expect(agent.items.map((item) => item.id)).not.toContain(reviewId);
+  expect(await bin()).toMatchObject({ items: [], total: 0, more: false });
+  await error(await f.request(`/reviews/${reviewId}`, "GET", undefined, "foreign"), 404, "unknown_review");
+  await error(await f.request(`/files/${file.id}/new`, "GET", undefined, "foreign"), 404, "not_found");
+  await error(await f.request(`/media/${hash}`, "GET", undefined, "foreign"), 404, "not_found");
+});
+
+test("bin rows and version share one statement even when another connection swaps membership", async () => {
+  const a = await publishReview(f, { key: "1" });
+  const b = await publishReview(f, { key: "2" });
+  expect((await post(a.reviewId, "bin")).status).toBe(204);
+  const writer = new DatabaseSync(f.file);
+  const swap = writer.prepare(
+    "UPDATE reviews SET binned_at = CASE id WHEN ? THEN NULL ELSE ? END WHERE owner_id = ? AND id IN (?, ?)",
+  );
+  const prepare = DatabaseSync.prototype.prepare;
+  const statements = vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementationOnce(function (
+    this: DatabaseSync,
+    sql,
+  ) {
+    const statement = prepare.call(this, sql);
+    const all = statement.all.bind(statement);
+    vi.spyOn(statement, "all").mockImplementationOnce((...params) => {
+      const rows = all(...params);
+      // Commit after the page SELECT finishes, before listBin can issue another SELECT.
+      swap.run(a.reviewId, f.deps.now(), f.ownerId, a.reviewId, b.reviewId);
+      return rows;
+    });
+    return statement;
+  });
+  let shown: BinView;
+  try {
+    shown = await lifecycle.listBin(f.ownerId, f.db);
+    expect(shown).toMatchObject({
+      items: [{ id: a.reviewId }],
+      total: 1,
+      more: false,
+      version: createHash("sha256").update(a.reviewId).digest("hex"),
+    });
+    expect(statements).toHaveBeenCalledTimes(1);
+  } finally {
+    statements.mockRestore();
+    writer.close();
+  }
+  expect((await bin()).items.map((item) => item.id)).toEqual([b.reviewId]);
+  await error(await f.request("/bin", "DELETE", { version: shown.version }), 409, "invalid_state");
+  expect(await exists(a.reviewId)).toBe(true);
+  expect(await exists(b.reviewId)).toBe(true);
 });
 
 test.each([false, true])("the bin pages timestamp ties even with its cursor deleted (%s)", async (deleteCursor) => {
@@ -446,6 +569,26 @@ test("a binned review acts as deleted for agents and reviewers", async () => {
   expect(list.items.map((item) => (item as { id: string }).id)).not.toContain(reviewId);
 });
 
+test("writeup media is hidden only while every review using it is binned", async () => {
+  const hash = await seedWriteupImage(f.reviewId);
+  const served = async () => {
+    const response = await f.request(`/media/${hash}`, "GET");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("image/png");
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(png);
+  };
+  await served();
+  expect((await post(f.reviewId, "bin")).status).toBe(204);
+  await error(await f.request(`/media/${hash}`, "GET"), 404, "not_found");
+  const shared = await publishReview(f);
+  expect(await seedWriteupImage(shared.reviewId)).toBe(hash);
+  await served();
+  expect((await post(shared.reviewId, "bin")).status).toBe(204);
+  await error(await f.request(`/media/${hash}`, "GET"), 404, "not_found");
+  expect((await post(f.reviewId, "restore")).status).toBe(204);
+  await served();
+});
+
 test("a waiting take ends at once when the review is binned", async () => {
   const { reviewId } = await publishReview(f);
   const controller = new AbortController();
@@ -537,6 +680,34 @@ test("empty bin deletes only binned reviews and leaves a restored one", async ()
   expect((await bin()).total).toBe(0);
   // An empty bin is fine.
   expect((await f.request("/bin", "DELETE", await confirmation())).status).toBe(204);
+});
+
+test("empty bin cleans committed deletes when a later delete throws a non-ApiError", async () => {
+  const contents = ["# First unique document", "# Second unique document"];
+  const published = [];
+  for (const [index, content] of contents.entries()) {
+    const { reviewId } = await publishReview(f, { key: String(index + 1), docs: { "unique.md": content } });
+    expect((await post(reviewId, "bin")).status).toBe(204);
+    published.push({ reviewId, hash: createHash("sha256").update(content).digest("hex"), content });
+  }
+  published.sort((a, b) => a.reviewId.localeCompare(b.reviewId));
+  const [deleted, kept] = published;
+  if (!deleted || !kept) throw new Error("Missing reviews");
+  const path = (hash: string) => join(f.dir, "state", "blobs", hash.slice(0, 2), hash);
+  expect(await readFile(path(deleted.hash), "utf8")).toBe(deleted.content);
+  const cleanup = vi.spyOn(f.deps, "onBlobCleanup");
+  const deleteReview = lifecycle.deleteReview;
+  vi.spyOn(lifecycle, "deleteReview")
+    .mockImplementationOnce(deleteReview)
+    .mockRejectedValueOnce(Object.assign(new Error("Synthetic writer contention"), { code: "SQLITE_BUSY" }));
+  await error(await f.request("/bin", "DELETE", await confirmation()), 500, "internal");
+  await f.blobCleanup();
+  expect(cleanup).toHaveBeenCalledTimes(1);
+  expect(await exists(deleted.reviewId)).toBe(false);
+  expect(await exists(kept.reviewId)).toBe(true);
+  expect(await f.deps.blobs.has(f.ownerId, deleted.hash)).toBe(false);
+  await expect(readFile(path(deleted.hash))).rejects.toMatchObject({ code: "ENOENT" });
+  expect(await readFile(path(kept.hash), "utf8")).toBe(kept.content);
 });
 
 test("an import with binnedAt lands in the hub's bin and a repeated attach does not restore it", async () => {

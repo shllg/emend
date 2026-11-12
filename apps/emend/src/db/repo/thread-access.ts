@@ -27,7 +27,7 @@ export async function requireReview(
     .get();
   if (!review) throw new ApiError(nested ? "not_found" : "unknown_review");
   if (mutation && review.movedToUrl) throw new ApiError("review_moved");
-  if (review.binnedAt !== null && !allowBinned) throw new ApiError("review_in_bin");
+  if (review.binnedAt !== null && review.movedToUrl === null && !allowBinned) throw new ApiError("review_in_bin");
   return review;
 }
 export async function newestRevision(ownerId: string, q: Queries, reviewId: string) {

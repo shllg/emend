@@ -2,8 +2,8 @@ import { BinQuery, EmptyBinRequest, RetireRequest, SnoozeRequest } from "@emend/
 import type { Hono } from "hono";
 import { removeUnreferencedBlob } from "../../db/repo/blob-removal.ts";
 import {
-  binnedIds,
   binReview,
+  binSnapshot,
   deleteReview,
   listBin,
   reopenReview,
@@ -113,25 +113,28 @@ export function lifecycleRoutes(app: Hono<AppEnv>, deps: AppDeps) {
   app.delete("/api/v1/bin", async (c) => {
     const ownerId = owner(c);
     const request = parseBody(c, EmptyBinRequest);
-    const { ids, version } = await deps.db.read((q) => binnedIds(ownerId, q));
+    const { ids, version } = await deps.db.read((q) => binSnapshot(ownerId, q));
     if (version !== request.version) throw new ApiError("invalid_state", "bin_changed");
     const candidates: string[] = [];
     // Each review goes in its own transaction, and only while it is still in the bin. A review
     // restored or deleted meanwhile is left alone. The loop yields so a large bin does not block.
-    for (const reviewId of ids) {
-      try {
-        const deleted = await deleteReview(ownerId, deps.db, reviewId, deps.now(), true);
-        if (deleted) {
-          deps.events?.emit(ownerId, { type: "delete", reviewId, revision: deleted.revision });
-          candidates.push(...deleted.candidates);
+    try {
+      for (const reviewId of ids) {
+        try {
+          const deleted = await deleteReview(ownerId, deps.db, reviewId, deps.now(), true);
+          if (deleted) {
+            candidates.push(...deleted.candidates);
+            deps.events?.emit(ownerId, { type: "delete", reviewId, revision: deleted.revision });
+          }
+        } catch (error) {
+          if (!(error instanceof ApiError) || !["unknown_review", "review_moved"].includes(error.code)) throw error;
         }
-      } catch (error) {
-        if (!(error instanceof ApiError) || !["unknown_review", "review_moved"].includes(error.code)) throw error;
+        await yieldToLoop("lifecycle-bin-empty");
       }
-      await yieldToLoop("lifecycle-bin-empty");
+    } finally {
+      const cleanup = cleanBlobs(deps, ownerId, [...new Set(candidates)]);
+      deps.onBlobCleanup?.(cleanup);
     }
-    const cleanup = cleanBlobs(deps, ownerId, [...new Set(candidates)]);
-    deps.onBlobCleanup?.(cleanup);
     return c.body(null, 204);
   });
 }

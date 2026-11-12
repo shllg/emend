@@ -11,7 +11,11 @@ export function fileRoutes(app: Hono<AppEnv>, deps: AppDeps) {
       const ownerId = c.get("principal").ownerId;
       const bytes = await deps.db.read(async (q) => {
         const file = await q
-          .select({ hash: side === "old" ? files.oldBlob : files.newBlob, binnedAt: reviews.binnedAt })
+          .select({
+            hash: side === "old" ? files.oldBlob : files.newBlob,
+            binnedAt: reviews.binnedAt,
+            movedToUrl: reviews.movedToUrl,
+          })
           .from(files)
           .innerJoin(revisions, and(eq(revisions.ownerId, ownerId), eq(revisions.id, files.revisionId)))
           .innerJoin(reviews, and(eq(reviews.ownerId, ownerId), eq(reviews.id, revisions.reviewId)))
@@ -24,7 +28,7 @@ export function fileRoutes(app: Hono<AppEnv>, deps: AppDeps) {
             ),
           )
           .get();
-        if (file && file.binnedAt !== null) throw new ApiError("review_in_bin");
+        if (file && file.binnedAt !== null && file.movedToUrl === null) throw new ApiError("review_in_bin");
         if (!file?.hash) throw new ApiError("not_found");
         const bytes = await deps.blobs.get(ownerId, file.hash, q);
         if (!bytes) throw new ApiError("not_found");

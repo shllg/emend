@@ -7,22 +7,7 @@ import {
   type RetireRequest,
   type SnoozeRequest,
 } from "@emend/contract";
-import {
-  and,
-  asc,
-  count,
-  desc,
-  eq,
-  gt,
-  inArray,
-  isNotNull,
-  isNull,
-  lt,
-  notExists,
-  notInArray,
-  or,
-  sql,
-} from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, notExists, notInArray, sql } from "drizzle-orm";
 import { ApiError } from "../../server/http/errors.ts";
 import type { Db, Queries } from "../client.ts";
 import {
@@ -165,47 +150,40 @@ export function restoreReview(ownerId: string, db: Db, reviewId: string) {
 /** One page of the owner's live binned reviews, newest first (ties by id); total counts them all. */
 export function listBin(ownerId: string, db: Db, cursor: BinQuery = {}): Promise<BinView> {
   return db.read(async (q) => {
-    const binned = and(eq(reviews.ownerId, ownerId), isNotNull(reviews.binnedAt), isNull(reviews.movedToUrl));
-    const after =
-      cursor.beforeAt && cursor.beforeId
-        ? or(
-            lt(reviews.binnedAt, Date.parse(cursor.beforeAt)),
-            and(eq(reviews.binnedAt, Date.parse(cursor.beforeAt)), gt(reviews.id, cursor.beforeId)),
-          )
-        : undefined;
-    const rows = await q
-      .select({ id: reviews.id, title: reviews.title, machine: instances.name, binnedAt: reviews.binnedAt })
-      .from(reviews)
-      .innerJoin(instances, eq(instances.id, reviews.originInstanceId))
-      .where(and(binned, after))
-      .orderBy(desc(reviews.binnedAt), asc(reviews.id))
-      .limit(LIMITS.binItems + 1)
-      .all();
-    const { ids, version } = await binnedIds(ownerId, q);
+    const { rows, version } = await binSnapshot(ownerId, q);
+    let page = rows;
+    if (cursor.beforeAt && cursor.beforeId) {
+      const beforeAt = Date.parse(cursor.beforeAt);
+      const beforeId = cursor.beforeId;
+      page = rows.filter(
+        (row) => (row.binnedAt as number) < beforeAt || (row.binnedAt === beforeAt && row.id > beforeId),
+      );
+    }
     return BinView.parse({
       version,
-      items: rows.slice(0, LIMITS.binItems).map((row) => ({
+      items: page.slice(0, LIMITS.binItems).map((row) => ({
         id: row.id,
         title: row.title,
         machine: row.machine,
         binnedAt: new Date(row.binnedAt as number).toISOString(),
       })),
-      total: ids.length,
-      more: rows.length > LIMITS.binItems,
+      total: rows.length,
+      more: page.length > LIMITS.binItems,
     });
   });
 }
 
-/** The whole owner's live bin and its version, derived from the same selection. */
-export async function binnedIds(ownerId: string, q: Queries) {
-  const ids = (
-    await q
-      .select({ id: reviews.id })
-      .from(reviews)
-      .where(and(eq(reviews.ownerId, ownerId), isNotNull(reviews.binnedAt), isNull(reviews.movedToUrl)))
-      .orderBy(asc(reviews.id))
-  ).map((row) => row.id);
-  return { ids, version: createHash("sha256").update(ids.join("\n")).digest("hex") };
+/** One statement gives listing and deletion the same bin snapshot, even with external writers. */
+export async function binSnapshot(ownerId: string, q: Queries) {
+  const rows = await q
+    .select({ id: reviews.id, title: reviews.title, machine: instances.name, binnedAt: reviews.binnedAt })
+    .from(reviews)
+    .innerJoin(instances, eq(instances.id, reviews.originInstanceId))
+    .where(and(eq(reviews.ownerId, ownerId), isNotNull(reviews.binnedAt), isNull(reviews.movedToUrl)))
+    .orderBy(desc(reviews.binnedAt), asc(reviews.id))
+    .all();
+  const ids = rows.map((row) => row.id).sort();
+  return { rows, ids, version: createHash("sha256").update(ids.join("\n")).digest("hex") };
 }
 
 /**
