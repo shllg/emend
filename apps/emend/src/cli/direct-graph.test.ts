@@ -131,8 +131,8 @@ const nonSqlQuotes = new Map<string, { reason: string; accepts: (quote: string, 
   [
     "main.ts",
     {
-      reason: "update names a CLI command; the Usage template lists commands.",
-      accepts: (quote, content) => content === "update" || (quote.startsWith("`") && content.startsWith("Usage:\n")),
+      reason: "update names a CLI command.",
+      accepts: (_quote, content) => content === "update",
     },
   ],
 ]);
@@ -335,7 +335,10 @@ function assertAgentSql(
     if (nonSqlQuotes.get(name)?.accepts(quote, query)) continue;
     if (!/\b(?:select|insert|replace|update|delete|with|from|join|create|alter|drop)\b/i.test(query)) continue;
     if (name === "db/client.ts" && /\bselect\b/i.test(query)) fail("reviewer SQL binding");
+    // Static main help names the devices command; all SQL write checks still apply.
+    const help = name === "main.ts" && quote.startsWith("`") && query.startsWith("Usage:\n") && !query.includes("${");
     if (
+      !help &&
       reviewerTables.some(
         (table) => !mayBindTable(name, table) && new RegExp(`\\b${bindings(source, table)}\\b`, "i").test(query),
       )
@@ -1842,4 +1845,14 @@ test.each(["cli.ts", "main.ts"])("allows only the command name in %s", async (na
 test("allows the main Usage template including the inline update command", async () => {
   const folder = await fixture({ "main.ts": "export const help = `Usage:\n  emend update\n  emend devices`;" });
   await expect(assertAgentGraph(folder, [join(folder, "main.ts")])).resolves.toBeInstanceOf(Set);
+});
+
+test.each([
+  "export const act = (q) => q.run(`Usage:\nUPDATE reviews SET state = 'approved'`.slice(7));",
+  "export const act = (q) => q.run(`Usage:\nDELETE FROM tokens`.slice(7));",
+  `const x = "UPDATE reviews SET state = 'approved'"; export const act = (q) => q.run(\`Usage:\n\${x}\`);`,
+  `export const act = (q, x) => q.run(\`Usage:\n\${x} SELECT * FROM devices\`);`,
+])("main Usage templates still reject SQL: %s", async (source) => {
+  const folder = await fixture({ "main.ts": source });
+  await expect(assertAgentGraph(folder, [join(folder, "main.ts")])).rejects.toThrow("forbidden");
 });

@@ -4,7 +4,6 @@ import { pathThroughRepository } from "../executable.ts";
 const names = new Set([
   "USER",
   "LOGNAME",
-  "SHELL",
   "LANG",
   "LANGUAGE",
   "TERM",
@@ -16,6 +15,7 @@ const names = new Set([
 ]);
 
 const pathNames = new Set([
+  "SHELL",
   "MISE_DATA_DIR",
   "MISE_CONFIG_DIR",
   "MISE_CACHE_DIR",
@@ -31,7 +31,7 @@ const pathNames = new Set([
 
 /**
  * Pass identity, locale, terminal, proxy and session-bus settings. MISE's four directory settings,
- * XDG_*, tool homes, certificate paths and TMPDIR pass only when absolute and checked outside
+ * XDG_*, SHELL, tool homes, certificate paths and TMPDIR pass only when absolute and checked outside
  * the original cwd's repositories, including every link hop. Drop everything else: a repository
  * may have set Node or package-manager options that execute its code. Force npm lifecycle scripts
  * off even when mise launches npm itself.

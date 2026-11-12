@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import type { UpdateSignals } from "./signals.ts";
 
 export interface ChildResult {
   code: number | null;
@@ -12,11 +13,17 @@ export interface ChildResult {
 
 const captureLimit = 64 * 1024;
 
-/** Start one program with an argv array and no shell. Keep terminal signals for the rollback report. */
+/** Start one program with an argv array and no shell. Forward update signals for the rollback report. */
 export function runChild(
   file: string,
   args: string[],
-  options: { cwd: string; env: Record<string, string>; timeoutMs: number; output: "inherit" | "capture" },
+  options: {
+    cwd: string;
+    env: Record<string, string>;
+    timeoutMs: number;
+    output: "inherit" | "capture";
+    signals?: UpdateSignals;
+  },
 ): Promise<ChildResult> {
   return new Promise((resolve) => {
     let stdout = "";
@@ -26,12 +33,7 @@ export function runChild(
     let settled = false;
     let interrupted: ChildResult["interrupted"] = null;
     const inherit = options.output === "inherit";
-    const onInterrupt = () => {
-      interrupted ??= "SIGINT";
-    };
-    const onTerminate = () => {
-      interrupted ??= "SIGTERM";
-    };
+    let onSignal: (() => void) | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     const done = (code: number | null, signal: NodeJS.Signals | null) => {
@@ -39,15 +41,13 @@ export function runChild(
       settled = true;
       clearTimeout(timer);
       clearTimeout(killTimer);
-      if (inherit) {
-        process.off("SIGINT", onInterrupt);
-        process.off("SIGTERM", onTerminate);
-      }
+      if (onSignal) options.signals?.signal.removeEventListener("abort", onSignal);
       resolve({ code, signal, interrupted, timedOut, error, stdout, stderr });
     };
-    if (inherit) {
-      process.on("SIGINT", onInterrupt);
-      process.on("SIGTERM", onTerminate);
+    if (options.signals?.interrupted) {
+      interrupted = options.signals.interrupted;
+      done(null, null);
+      return;
     }
     try {
       const child = spawn(file, args, {
@@ -56,11 +56,21 @@ export function runChild(
         shell: false,
         stdio: inherit ? "inherit" : ["ignore", "pipe", "pipe"],
       });
+      const terminate = (signal: "SIGINT" | "SIGTERM") => {
+        child.kill(signal);
+        killTimer ??= setTimeout(() => {
+          if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        }, 5000);
+        killTimer.unref();
+      };
+      onSignal = () => {
+        interrupted = options.signals?.interrupted ?? null;
+        if (interrupted) terminate(interrupted);
+      };
+      options.signals?.signal.addEventListener("abort", onSignal, { once: true });
       timer = setTimeout(() => {
         timedOut = true;
-        child.kill("SIGTERM");
-        killTimer = setTimeout(() => child.kill("SIGKILL"), 5000);
-        killTimer.unref();
+        terminate("SIGTERM");
       }, options.timeoutMs);
       const capture = (current: string, chunk: string) => {
         if (Buffer.byteLength(current) + Buffer.byteLength(chunk) > captureLimit) {

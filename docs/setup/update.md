@@ -35,7 +35,8 @@ It does five things:
 1. It finds how you installed emend: mise, npm or pnpm.
 2. It copies the database to `backups/` in the state folder and prints the path. Three backups
    stay after a successful change, always including this run's backup. A failed update keeps all
-   backups. If the version and service stay unchanged, it removes only the backup it just made.
+   backups. If the version and service stay unchanged and no older server is running, it removes
+   only the backup it just made.
 3. It updates emend from your home folder, never from inside a repository.
 4. It restarts the service on the new version, when you installed the service. The server migrates
    the database as before.
@@ -270,19 +271,25 @@ An older emend refuses a database that a newer emend migrated, and says
 on the newer version.
 
 `emend update` prints a go-back block with the exact home, helper, Node.js, old entry, database and
-backup paths for that run. Use those printed paths, including their quotes. Stop every agent that
-uses emend, then run the printed commands one at a time and stop if one fails:
+backup paths for that run. Stop every agent that uses emend, then paste the printed lines as one
+shell list. Keep the quotes, environment assignments and `&&` between commands: the list stops at
+the first failure. The assignments pin the checked package-manager directories, state folder and
+config folder so shell directory hooks cannot redirect the restore after `cd`. Every restore sets
+`npm_config_ignore_scripts=true`, including mise's npm backend.
 
 1. Change to the printed home folder.
 2. Stop the service: `systemctl --user stop emend` on Linux, or
    `launchctl bootout gui/<uid>/dev.emend.server` on macOS. Without a service, run the printed Node.js
-   and old entry paths followed by `stop`.
-3. Run the printed absolute package-manager path to restore the old version. npm uses
+   and checked new entry paths followed by `stop`; if the update failed before locating the new
+   emend, the block uses the old entry instead.
+3. Run the printed environment assignments and absolute package-manager path to restore the old
+   version. npm uses
    `install --global --prefix <prefix> --ignore-scripts @shllg/emend@<old>`; pnpm uses
    `add --global --ignore-scripts --ignore-pnpmfile @shllg/emend@<old>`; mise uses
    `use --global npm:@shllg/emend@<old>`.
 4. Run the printed `cp <backup> <database> && rm -f <database>-wal <database>-shm` line.
-5. Run the printed Node.js and old entry paths with `service install` when there is a service,
+5. Run the printed `EMEND_HOME` (and `XDG_CONFIG_HOME` when present) assignments, Node.js and old
+   entry paths with `service install` when there is a service,
    or with no arguments to start the server and open the inbox otherwise.
 
 The state folder defaults to `$XDG_DATA_HOME/emend` on Linux when `XDG_DATA_HOME` is absolute,

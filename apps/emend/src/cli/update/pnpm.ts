@@ -5,6 +5,7 @@ import { validatePaths } from "../service/common.ts";
 import { locateArgs, updatePackage } from "./install.ts";
 import { isPnpmProjects } from "./manifest.ts";
 import { runChild, succeeded } from "./run.ts";
+import type { UpdateSignals } from "./signals.ts";
 
 /** Query ownership and the updated location through the same bounded, validated global list. */
 export async function pnpmPackages(
@@ -12,12 +13,14 @@ export async function pnpmPackages(
   home: string,
   env: Record<string, string>,
   expectedFolder?: string,
+  signals?: UpdateSignals,
 ): Promise<string[]> {
   const result = await runChild(file, locateArgs({ kind: "pnpm" }), {
     cwd: home,
     env,
     timeoutMs: 30_000,
     output: "capture",
+    signals,
   });
   const detail = result.stderr.split(/\r?\n/, 1)[0];
   const invalid = () =>

@@ -45,6 +45,7 @@ test("compareVersions compares plain versions and gives up on anything else", ()
 });
 
 const pathNames = [
+  "SHELL",
   "MISE_DATA_DIR",
   "MISE_CONFIG_DIR",
   "MISE_CACHE_DIR",

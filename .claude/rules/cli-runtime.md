@@ -51,7 +51,8 @@ checks catch a copy inside the repo.
   from home. Its allowlisted environment drops Node options and incoming npm options; path-valued
   variables pass only when checked outside the working directory's repositories, hop by hop.
   Every child gets `npm_config_ignore_scripts=true`; npm and pnpm get `--ignore-scripts`, and
-  pnpm also gets `--ignore-pnpmfile`. It backs up the database and prints how to restore it.
+  every pnpm call gets `--ignore-pnpmfile`. It backs up the database and prints a pinned go-back
+  shell list that stops at the first failure.
   Local builds only get instructions. A located new emend inside those repositories is refused,
   including every symlink hop; its `--version` and `service install` use the running Node.js.
   Tests use fake package managers on a fixture PATH.

@@ -16,13 +16,13 @@ import { unitPath } from "../service/systemd.ts";
 import { hubCapabilities, readAttachment } from "../target.ts";
 import { backupDatabase, databaseExists, pruneBackups } from "../update/backup.ts";
 import { childEnvironment } from "../update/environment.ts";
+import { goBack } from "../update/go-back.ts";
 import {
   detectInstall,
   type Install,
   locateArgs,
   type Method,
   methodTool,
-  restoreArgs,
   updateArgs,
   updateDoc,
   updatePackage,
@@ -30,6 +30,7 @@ import {
 import { checkNewEmend, type NewEmend } from "../update/package.ts";
 import { pnpmPackages } from "../update/pnpm.ts";
 import { runChild, succeeded } from "../update/run.ts";
+import { UpdateSignals } from "../update/signals.ts";
 import { compareVersions } from "../version-notice.ts";
 
 export interface UpdateOptions extends Partial<CliRuntime> {
@@ -150,68 +151,84 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
   const method: Method = install.kind;
   const tool = methodTool[method];
   const { helper, env } = prepared ?? (await prepareHelper(tool));
-  const servicePath = platform === "linux" ? unitPath(home, io.env.XDG_CONFIG_HOME) : plistPath(home);
+  const servicePath = platform === "linux" ? unitPath(home, env.XDG_CONFIG_HOME) : plistPath(home);
   validatePaths(servicePath);
   const hasService = (await serviceFile(servicePath)) !== undefined;
 
   const now = options.now ?? (() => new Date());
   const database = join(stateDir, "emend.db");
   let backupPath: string | undefined;
-  if (await databaseExists(database)) {
-    backupPath = await backupDatabase(stateDir, VERSION, now());
-    io.stdout(`emend: backed up the database to ${escapeReference(backupPath)}\n`);
-  } else io.stdout("emend: no database to back up yet.\n");
-
-  const goBack = (): string => {
-    if (backupPath === undefined) return "";
-    const stop = hasService
-      ? platform === "linux"
-        ? "systemctl --user stop emend"
-        : `launchctl bootout gui/${uid}/dev.emend.server`
-      : `${quoteShellArgument(runtime.node)} ${quoteShellArgument(oldEntry)} stop`;
-    const old = [helper.file, ...restoreArgs(install, VERSION)]
-      .map((word, index, words) => (index === 0 || words[index - 1] === "--prefix" ? quoteShellArgument(word) : word))
-      .join(" ");
-    const restore = `cp ${quoteShellArgument(backupPath)} ${quoteShellArgument(database)} && rm -f ${quoteShellArgument(`${database}-wal`)} ${quoteShellArgument(`${database}-shm`)}`;
-    return `emend: to go back to emend ${VERSION} with the database from before this update, stop every agent that
-uses emend, then run these one at a time and stop if one fails:
-  cd ${quoteShellArgument(home)}
-  ${stop}
-  ${old}
-  ${restore}
-  ${quoteShellArgument(runtime.node)} ${quoteShellArgument(oldEntry)}${hasService ? " service install" : ""}
-`;
-  };
+  let fresh: NewEmend | undefined;
+  const rollback = () =>
+    goBack({
+      home,
+      stateDir,
+      database,
+      backupPath,
+      oldVersion: VERSION,
+      oldEntry,
+      newEntry: fresh?.entry,
+      node: runtime.node,
+      helper: helper.file,
+      install,
+      hasService,
+      platform,
+      uid,
+      env,
+    });
   const fail = (reason: string, code = 1): never => {
-    io.stderr(`emend: ${reason}\n${goBack()}`);
+    io.stderr(`emend: ${reason}\n${rollback()}`);
     throw new CliSignalExit(code);
   };
 
+  const signals = new UpdateSignals();
+  const checkpoint = () => {
+    if (signals.interrupted) fail("emend update was interrupted.", signals.interrupted === "SIGINT" ? 130 : 143);
+  };
+  const step = async <T>(action: () => Promise<T>): Promise<T> => {
+    checkpoint();
+    const result = await action();
+    checkpoint();
+    return result;
+  };
   try {
+    if (await step(() => databaseExists(database))) {
+      // Store the completed backup before checking a signal received while it was copying.
+      backupPath = await backupDatabase(stateDir, VERSION, now());
+      checkpoint();
+      io.stdout(`emend: backed up the database to ${escapeReference(backupPath)}\n`);
+    } else io.stdout("emend: no database to back up yet.\n");
+    const runningBefore = await step(options.localVersion ?? (() => localServer(stateDir)));
     const command = [basename(helper.file), ...updateArgs(install)].join(" ");
     io.stdout(`emend: running ${escapeReference(command)} in ${escapeReference(home)}\n`);
-    const updated = await runChild(helper.file, updateArgs(install), {
-      cwd: home,
-      env,
-      timeoutMs: 15 * minute,
-      output: "inherit",
-    });
-    if (updated.interrupted) return fail("emend update was interrupted.", updated.interrupted === "SIGINT" ? 130 : 143);
+    const updated = await step(() =>
+      runChild(helper.file, updateArgs(install), {
+        cwd: home,
+        env,
+        timeoutMs: 15 * minute,
+        output: "inherit",
+        signals,
+      }),
+    );
     if (!succeeded(updated))
       return fail(
         `${escapeReference(command)} ${updated.timedOut ? "timed out" : updated.code === null ? "did not finish" : `failed with exit ${updated.code}`}.`,
       );
-    const located = await locate(method, install, helper, env, home);
-    const fresh = await checkNewEmend(located, await repositoryRoots(cwd, home)).catch((error: unknown) => {
-      throw error instanceof CliError ? error : new CliError("the package manager did not install a usable emend.");
-    });
-    const version = fresh.version;
-    const asked = await runChild(runtime.node, [fresh.entry, "--version"], {
-      cwd: home,
-      env,
-      timeoutMs: 30_000,
-      output: "capture",
-    });
+    const located = await step(() => locate(method, install, helper, env, home, signals));
+    const currentRoots = await step(() => repositoryRoots(cwd, home));
+    fresh = await checkNewEmend(located, currentRoots);
+    checkpoint();
+    const checked = fresh;
+    const version = checked.version;
+    const asked = await step(() =>
+      runChild(runtime.node, [checked.entry, "--version"], {
+        cwd: home,
+        env,
+        timeoutMs: 30_000,
+        output: "capture",
+        signals,
+      }),
+    );
     if (!succeeded(asked) || asked.stdout !== `emend ${version}\n`)
       return fail("the new emend does not answer with its version.");
     io.stdout(
@@ -219,11 +236,27 @@ uses emend, then run these one at a time and stop if one fails:
         ? `emend: emend ${version} is already the newest release\n`
         : `emend: emend is now ${version}\n`,
     );
-    const restarted = await restartService(hasService, version, fresh, runtime, env, home, io, stateDir, options, fail);
+    const restarted = await step(() =>
+      restartService(
+        hasService,
+        version,
+        checked,
+        runtime,
+        env,
+        home,
+        io,
+        stateDir,
+        options,
+        fail,
+        runningBefore,
+        signals,
+        checkpoint,
+      ),
+    );
     io.stdout(`emend: this machine runs emend ${version}\n`);
-    await reportHub(io, stateDir, version, options);
+    await step(() => reportHub(io, stateDir, version, options, checkpoint));
     if (backupPath !== undefined) {
-      if (version === VERSION && !restarted) {
+      if (version === VERSION && !restarted && (!runningBefore || runningBefore.version === version)) {
         await unlink(backupPath);
         backupPath = undefined;
         io.stdout("emend: nothing changed; removed the backup.\n");
@@ -235,11 +268,16 @@ uses emend, then run these one at a time and stop if one fails:
         }
       }
     }
-    const block = goBack();
+    checkpoint();
+    const block = rollback();
     if (block) io.stdout(block);
+    checkpoint();
   } catch (error) {
     if (error instanceof CliSignalExit) throw error;
+    checkpoint();
     return fail(error instanceof CliError ? escapeReference(error.message) : "the update failed.");
+  } finally {
+    signals.dispose();
   }
 }
 
@@ -249,18 +287,21 @@ async function locate(
   helper: { file: string },
   env: Record<string, string>,
   home: string,
+  signals: UpdateSignals,
 ): Promise<string> {
   if (install.kind === "npm") return join(install.prefix, "lib", "node_modules", updatePackage);
   if (method === "pnpm") {
-    const folders = await pnpmPackages(helper.file, home, env);
-    if (folders.length !== 1) throw new CliError("pnpm did not say where it installed emend.");
-    return folders[0] as string;
+    const folders = await pnpmPackages(helper.file, home, env, undefined, signals);
+    if (folders.length !== 1 || folders[0] === undefined)
+      throw new CliError("pnpm did not say where it installed emend.");
+    return folders[0];
   }
   const result = await runChild(helper.file, locateArgs(install), {
     cwd: home,
     env,
     timeoutMs: 30_000,
     output: "capture",
+    signals,
   });
   const line = await firstLine(result.stdout);
   if (!succeeded(result) || !line) throw new CliError(`${methodTool[method]} did not say where it installed emend.`);
@@ -291,17 +332,20 @@ async function restartService(
   stateDir: string,
   options: UpdateOptions,
   fail: (reason: string, code?: number) => never,
+  runningBefore: { url: string; version: string } | null,
+  signals: UpdateSignals,
+  checkpoint: () => void,
 ) {
   const probe = options.localVersion ?? (() => localServer(stateDir));
   if (!hasService) {
-    const running = await probe();
+    const running = runningBefore;
     if (running && running.version !== version)
       io.stdout(
         `emend: the emend server at ${escapeReference(running.url)} still runs emend ${escapeReference(running.version)}. Run emend stop, then emend, to start emend ${version}.\n`,
       );
     return false;
   }
-  if (version === VERSION && (await probe())?.version === version) {
+  if (version === VERSION && runningBefore?.version === version) {
     io.stdout(`emend: the emend service already runs emend ${version}\n`);
     return false;
   }
@@ -310,26 +354,30 @@ async function restartService(
     env,
     timeoutMs: 3 * minute,
     output: "inherit",
+    signals,
   });
-  if (installed.interrupted)
-    return fail("emend update was interrupted.", installed.interrupted === "SIGINT" ? 130 : 143);
+  checkpoint();
   const mismatch = `the emend service does not run emend ${version} yet; run emend service status.`;
   if (!succeeded(installed)) return fail(mismatch);
   const running = await probe();
+  checkpoint();
   if (running?.version !== version) return fail(mismatch);
   io.stdout(`emend: the emend service runs emend ${version}\n`);
   return true;
 }
 
-async function reportHub(io: Io, stateDir: string, version: string, options: UpdateOptions) {
+async function reportHub(io: Io, stateDir: string, version: string, options: UpdateOptions, checkpoint: () => void) {
   let url: string;
   try {
     const attachment = await readAttachment(stateDir);
+    checkpoint();
     if (!attachment) return;
     url = attachment.hubUrl;
-  } catch {
+  } catch (error) {
+    if (error instanceof CliSignalExit) throw error;
     return;
   }
+  checkpoint();
   const shown = escapeReference(url);
   try {
     const signal = AbortSignal.timeout(3000);
@@ -337,6 +385,7 @@ async function reportHub(io: Io, stateDir: string, version: string, options: Upd
       url,
       signal,
     );
+    checkpoint();
     const comparison = compareVersions(hub, version);
     const advice =
       comparison === null
@@ -347,7 +396,9 @@ async function reportHub(io: Io, stateDir: string, version: string, options: Upd
             ? "This machine is behind the hub."
             : "Both run the same version.";
     io.stdout(`emend: the hub at ${shown} runs emend ${escapeReference(hub)}. ${advice}\n`);
-  } catch {
+  } catch (error) {
+    if (error instanceof CliSignalExit) throw error;
+    checkpoint();
     io.stdout(`emend: could not reach the hub at ${shown} to check its version.\n`);
   }
 }

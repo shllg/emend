@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { run } from "../../main.ts";
 import { pollUntil } from "../../test/poll-until.ts";
 import { VERSION } from "../../version.ts";
@@ -41,8 +41,13 @@ const out = () => fake.stdout.join("");
 const err = () => fake.stderr.join("");
 const update = (...args: string[]) => run(["update", ...args], fake.io);
 
+let listeners: number[];
 beforeEach(() => {
   fixtureRoot = "";
+  listeners = [process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")];
+});
+afterEach(() => {
+  expect([process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")]).toEqual(listeners);
 });
 
 describe("refusals change nothing", () => {
@@ -220,15 +225,17 @@ describe.each([
       `emend: to go back to emend ${VERSION} with the database from before this update, stop every agent that`,
     );
     expect(err()).toContain(`  cp '${backup}' '${join(fake.state, "emend.db")}' && rm -f `);
-    expect(err()).toContain(`  cd '${fake.home}'\n`);
-    expect(err()).toContain(`  '${process.execPath}' '${await realpath(fake.entry)}' stop\n`);
-    expect(err()).toContain(`  '${process.execPath}' '${await realpath(fake.entry)}'\n`);
+    expect(err()).toContain(`  cd '${fake.home}' &&\n`);
+    expect(err()).toContain(
+      `  EMEND_HOME='${fake.state}' '${process.execPath}' '${await realpath(fake.entry)}' stop &&\n`,
+    );
+    expect(err()).toContain(`  EMEND_HOME='${fake.state}' '${process.execPath}' '${await realpath(fake.entry)}'\n`);
     const old = {
       npm: `'${join(fake.bin, "npm")}' install --global --prefix '${join(fake.root, "prefix")}' --ignore-scripts @shllg/emend@${VERSION}`,
       pnpm: `'${join(fake.bin, "pnpm")}' add --global --ignore-scripts --ignore-pnpmfile @shllg/emend@${VERSION}`,
       mise: `'${join(fake.bin, "mise")}' use --global npm:@shllg/emend@${VERSION}`,
     }[layout];
-    expect(err()).toContain(`  ${old}\n`);
+    expect(err()).toContain(`  npm_config_ignore_scripts=true ${old} &&\n`);
     expect(out()).not.toContain("emend is now");
   });
 
@@ -305,8 +312,10 @@ describe("the service", () => {
     expect(reinstall.entry).toBe(join(fake.oldPackage, "dist/emend.mjs"));
     expect(await realpath(reinstall.cwd)).toBe(fake.home);
     expect(out()).toContain("emend: the emend service runs emend 0.2.0\n");
-    expect(out()).toContain("  systemctl --user stop emend\n");
-    expect(out()).toContain(`  '${process.execPath}' '${await realpath(fake.entry)}' service install\n`);
+    expect(out()).toContain("  systemctl --user stop emend &&\n");
+    expect(out()).toContain(
+      `  EMEND_HOME='${fake.state}' XDG_CONFIG_HOME='${join(fake.home, ".config")}' '${process.execPath}' '${await realpath(fake.entry)}' service install\n`,
+    );
   });
 
   test("a macOS go-back block boots the agent out", async () => {
@@ -315,7 +324,7 @@ describe("the service", () => {
     await mkdir(join(fake.home, "Library/LaunchAgents"), { recursive: true });
     await writeFile(plist, "x");
     expect(await update(), err()).toBe(0);
-    expect(out()).toContain("  launchctl bootout gui/1000/dev.emend.server\n");
+    expect(out()).toContain("  launchctl bootout gui/1000/dev.emend.server &&\n");
   });
 
   test("is not touched without a unit file", async () => {
@@ -449,7 +458,9 @@ test.each([{}, { listError: "global bin directory is not in PATH\u001b[31m\npriv
     expect(await update(), err()).toBe(1);
     expect(err()).toContain("could not tell how emend was installed");
     expect(await readdir(fake.state)).not.toContain("backups");
-    expect((await fake.calls()).map((c) => c.argv)).toEqual([["list", "--global", "--json", "--depth", "0"]]);
+    expect((await fake.calls()).map((c) => c.argv)).toEqual([
+      ["list", "--global", "--json", "--depth", "0", "--ignore-pnpmfile"],
+    ]);
     if (patch.listError) {
       expect(err()).toContain("global bin directory is not in PATH");
       expect(err()).not.toContain("\u001b");
@@ -547,12 +558,16 @@ test("rollback quotes every path even with shell metacharacters", async () => {
   await fake.set({ updateFails: true });
   expect(await update(), err()).toBe(1);
   const entry = await realpath(fake.entry);
-  expect(err()).toContain(`  cd ${quoteShellArgument(fake.home)}\n`);
+  expect(err()).toContain(`  cd ${quoteShellArgument(fake.home)} &&\n`);
   expect(err()).toContain(
-    `  ${quoteShellArgument(join(fake.bin, "npm"))} install --global --prefix ${quoteShellArgument(join(fake.root, "prefix"))} --ignore-scripts @shllg/emend@${VERSION}\n`,
+    `  npm_config_ignore_scripts=true ${quoteShellArgument(join(fake.bin, "npm"))} install --global --prefix ${quoteShellArgument(join(fake.root, "prefix"))} --ignore-scripts @shllg/emend@${VERSION} &&\n`,
   );
-  expect(err()).toContain(`  ${quoteShellArgument(process.execPath)} ${quoteShellArgument(entry)} stop\n`);
-  expect(err()).toContain(`  ${quoteShellArgument(process.execPath)} ${quoteShellArgument(entry)}\n`);
+  expect(err()).toContain(
+    `  EMEND_HOME=${quoteShellArgument(fake.state)} ${quoteShellArgument(process.execPath)} ${quoteShellArgument(entry)} stop &&\n`,
+  );
+  expect(err()).toContain(
+    `  EMEND_HOME=${quoteShellArgument(fake.state)} ${quoteShellArgument(process.execPath)} ${quoteShellArgument(entry)}\n`,
+  );
 });
 
 test("pnpm names the first escaped warning when its successful list does not confirm ownership", async () => {
@@ -563,4 +578,152 @@ test("pnpm names the first escaped warning when its successful list does not con
   expect(err()).toContain("global bin directory is not in PATH\\u{1b}[31m");
   expect(err()).not.toContain("second line");
   expect(await readdir(fake.state)).not.toContain("backups");
+});
+
+test("every pnpm call disables pnpmfiles, including detection and locate", async () => {
+  await make("pnpm");
+  expect(await update(), err()).toBe(0);
+  expect((await fake.calls()).filter((call) => call.tool === "pnpm").map((call) => call.argv)).toEqual([
+    ["list", "--global", "--json", "--depth", "0", "--ignore-pnpmfile"],
+    ["add", "--global", "--ignore-scripts", "--ignore-pnpmfile", "@shllg/emend@latest"],
+    ["list", "--global", "--json", "--depth", "0", "--ignore-pnpmfile"],
+  ]);
+});
+
+test("a same-version update without a service keeps the backup for an older running server", async () => {
+  await make("npm");
+  await makeDatabase(join(fake.state, "emend.db"));
+  await fake.set({ newVersion: VERSION, newScript: emendScript(VERSION, fake.root) });
+  await writeFile(join(fake.root, "server-version"), "0.0.1");
+  expect(await update(), err()).toBe(0);
+  expect(await readdir(join(fake.state, "backups"))).toHaveLength(1);
+  expect(out()).not.toContain("nothing changed");
+});
+
+test("a planted service in a dropped XDG_CONFIG_HOME does not count as a service", async () => {
+  await make("npm");
+  const repo = join(fake.root, "repo");
+  await mkdir(join(repo, ".git"), { recursive: true });
+  await writeFile(join(repo, ".git/HEAD"), "ref: refs/heads/main\n");
+  const config = join(repo, "config");
+  await mkdir(join(config, "systemd/user"), { recursive: true });
+  await writeFile(join(config, "systemd/user/emend.service"), "# planted");
+  fake.options.cwd = repo;
+  fake.io.env.XDG_CONFIG_HOME = config;
+  await makeDatabase(join(fake.state, "emend.db"));
+  await fake.set({ updateFails: true });
+  expect(await update(), err()).toBe(1);
+  expect(err()).toContain(`${quoteShellArgument(await realpath(fake.entry))} stop &&`);
+  expect(err()).not.toContain("systemctl --user stop");
+  expect((await fake.calls()).some((call) => call.tool === "service-install")).toBe(false);
+});
+
+test("SIGTERM during a capture child forwards the signal, prints rollback and removes handlers", async () => {
+  await make("npm");
+  await makeDatabase(join(fake.state, "emend.db"));
+  const ready = join(fake.root, "capture-ready");
+  const received = join(fake.root, "capture-signal");
+  await fake.set({
+    newScript: `import { writeFileSync } from "node:fs";
+    process.on("SIGTERM", () => { writeFileSync(${JSON.stringify(received)}, "SIGTERM"); process.exit(0); });
+    writeFileSync(${JSON.stringify(ready)}, "ready");
+    setInterval(() => {}, 1000);`,
+  });
+  const before = [process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")];
+  const pending = update();
+  await pollUntil(async () => expect(await readFile(ready, "utf8")).toBe("ready"));
+  process.emit("SIGTERM");
+  expect(await pending).toBe(143);
+  expect(await readFile(received, "utf8")).toBe("SIGTERM");
+  expect(err()).toContain("emend update was interrupted.");
+  expect(err()).toContain("to go back");
+  expect([process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")]).toEqual(before);
+});
+
+test("SIGINT during the hub probe keeps rollback and removes handlers", async () => {
+  await make("npm");
+  await makeDatabase(join(fake.state, "emend.db"));
+  await attachHub(fake.state);
+  fake.options.hubVersion = async () => {
+    process.emit("SIGINT");
+    return "0.2.0";
+  };
+  const before = [process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")];
+  expect(await update(), err()).toBe(130);
+  expect(err()).toContain("emend update was interrupted.");
+  expect(err()).toContain("to go back");
+  expect(await readdir(join(fake.state, "backups"))).toHaveLength(1);
+  expect([process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")]).toEqual(before);
+});
+
+test.each(["npm", "pnpm", "mise"] as const)(
+  "%s rollback selects the checked new entry only once known",
+  async (layout) => {
+    for (const service of [false, true])
+      for (const known of [false, true]) {
+        await make(layout);
+        await makeDatabase(join(fake.state, "emend.db"));
+        if (service) await installService(fake);
+        await fake.set(known ? { badVersion: true } : { updateFails: true });
+        expect(await update(), err()).toBe(1);
+        const config = JSON.parse(await readFile(fake.config, "utf8"));
+        const stopEntry = known ? join(config.newPackage, "dist/emend.mjs") : await realpath(fake.entry);
+        expect(err()).toContain(
+          service ? "systemctl --user stop emend &&" : `${quoteShellArgument(stopEntry)} stop &&`,
+        );
+        expect(err()).toContain(
+          `${quoteShellArgument(await realpath(fake.entry))}${service ? " service install" : ""}\n`,
+        );
+      }
+  },
+);
+
+test("SIGINT between backup and the package manager keeps rollback and starts no child", async () => {
+  await make("npm");
+  await makeDatabase(join(fake.state, "emend.db"));
+  fake.options.localVersion = async () => {
+    process.emit("SIGINT");
+    return null;
+  };
+  expect(await update(), err()).toBe(130);
+  expect(await fake.calls()).toEqual([]);
+  expect(err()).toContain("emend update was interrupted.");
+  expect(err().match(/to go back/g)).toHaveLength(1);
+  expect(await readdir(join(fake.state, "backups"))).toHaveLength(1);
+});
+
+test("rollback prints only checked child directory values, never raw or proxy settings", async () => {
+  await make("npm");
+  await makeDatabase(join(fake.state, "emend.db"));
+  const safe = join(fake.root, "quote's $directory");
+  const repo = join(fake.root, "repo");
+  await mkdir(safe);
+  await mkdir(join(repo, ".git"), { recursive: true });
+  await writeFile(join(repo, ".git/HEAD"), "ref: refs/heads/main\n");
+  fake.options.cwd = repo;
+  Object.assign(fake.io.env, {
+    MISE_DATA_DIR: safe,
+    MISE_CONFIG_DIR: repo,
+    MISE_CACHE_DIR: "relative",
+    MISE_STATE_DIR: join(fake.root, "missing"),
+    PNPM_HOME: safe,
+    XDG_DATA_HOME: safe,
+    XDG_CONFIG_HOME: safe,
+    XDG_CACHE_HOME: safe,
+    XDG_STATE_HOME: safe,
+    HTTPS_PROXY: "https://proxy.example.test",
+    XDG_RUNTIME_DIR: safe,
+  });
+  await fake.set({ updateFails: true });
+  expect(await update(), err()).toBe(1);
+  for (const name of [
+    "MISE_DATA_DIR",
+    "PNPM_HOME",
+    "XDG_DATA_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_STATE_HOME",
+  ])
+    expect(err()).toContain(`${name}=${quoteShellArgument(safe)}`);
+  expect(err()).not.toMatch(/MISE_CONFIG_DIR|MISE_CACHE_DIR|MISE_STATE_DIR|HTTPS_PROXY|proxy.example|XDG_RUNTIME_DIR/);
 });
