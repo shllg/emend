@@ -3444,6 +3444,7 @@ test.each([390, 768, 1280])(
       expect(note.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(bar.contains(frame)).toBe(false);
   },
 );
 
