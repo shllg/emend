@@ -154,6 +154,12 @@ function isAbsoluteUrl(value: unknown, allowMail: boolean): value is string {
   }
 }
 
+/** A writeup image's displayed pixel size. */
+export type MediaSize = { width: number; height: number };
+
+const validSide = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 65535;
+
 export const MEDIA_URL_PREFIX = "/api/v1/media/";
 
 /** Resolve a writeup image reference to a declared media path, or null. */
@@ -204,7 +210,11 @@ function mediaSpan(image: HtmlElement, path: string, sha: string): HtmlElement {
 const isMediaSpan = (node: HtmlNode) => node.type === "element" && renderData(node).emendMedia !== undefined;
 
 /** Wrap the images marked by the resolver and flag paragraphs that hold nothing else. */
-function wrapMedia(node: HtmlNode, media: ReadonlyMap<string, string>) {
+function wrapMedia(
+  node: HtmlNode,
+  media: ReadonlyMap<string, string>,
+  sizes: ReadonlyMap<string, MediaSize> | undefined,
+) {
   if (!("children" in node)) return;
   for (const [index, child] of node.children.entries()) {
     if (child.type !== "element") continue;
@@ -214,8 +224,16 @@ function wrapMedia(node: HtmlNode, media: ReadonlyMap<string, string>) {
       child.properties.src = `${MEDIA_URL_PREFIX}${sha}`;
       child.properties.loading = "lazy";
       child.properties.decoding = "async";
+      // Author-written sizes are never trusted; only the server's reading of the stored bytes is.
+      delete child.properties.width;
+      delete child.properties.height;
+      const size = sizes?.get(sha);
+      if (size && validSide(size.width) && validSide(size.height)) {
+        child.properties.width = size.width;
+        child.properties.height = size.height;
+      }
       node.children[index] = mediaSpan(child, marked, sha);
-    } else wrapMedia(child, media);
+    } else wrapMedia(child, media, sizes);
   }
   if (node.type === "element" && node.tagName === "p") {
     const spans = node.children.filter(isMediaSpan);
@@ -231,6 +249,7 @@ function wrapMedia(node: HtmlNode, media: ReadonlyMap<string, string>) {
 export function hardenLinks() {
   return (tree: HtmlRoot, file: { data: Record<string, unknown> }) => {
     const media = file.data.media as ReadonlyMap<string, string> | undefined;
+    const sizes = file.data.mediaSizes as ReadonlyMap<string, MediaSize> | undefined;
     const docs = file.data.docs as DocLinks | undefined;
     const base = typeof file.data.docBase === "string" ? file.data.docBase : "";
     visitElements(tree, (element) => {
@@ -289,6 +308,6 @@ export function hardenLinks() {
       } else if (!isAbsoluteUrl(src, false)) delete element.properties.src;
     });
     // Generated classes are set after the namespaced author classes, on nodes made here.
-    if (media && media.size > 0) wrapMedia(tree, media);
+    if (media && media.size > 0) wrapMedia(tree, media, sizes);
   };
 }

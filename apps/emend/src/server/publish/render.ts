@@ -11,6 +11,7 @@ import {
 import { ApiError } from "../http/errors.ts";
 import { yieldToLoop } from "../pacing.ts";
 import { WorkTimeout } from "./executor.ts";
+import { IMAGE_HEAD_BYTES } from "./image-size.ts";
 import { checkPublishSignal } from "./lifecycle.ts";
 import type { DocMetadata, Executor, RenderedBytes } from "./work.ts";
 
@@ -77,11 +78,18 @@ export async function renderRevision(
     docs.set(path, names);
     await yieldToLoop("publish-render");
   }
+  const media: [string, string][] = [];
+  for (const file of input.files)
+    if (file.role === "asset" && file.parent === undefined && file.newBlob) media.push([file.path, file.newBlob]);
+  // Only the first bytes of each distinct blob cross to the worker, which reads the image sizes.
+  const mediaHeads: [string, ArrayBuffer][] = [];
+  for (const sha of new Set(media.map(([, blob]) => blob))) {
+    checkPublishSignal(signal);
+    mediaHeads.push([sha, (await read(sha)).slice(0, IMAGE_HEAD_BYTES)]);
+    await yieldToLoop("publish-render");
+  }
   let rendered: RenderedBytes;
   try {
-    const media: [string, string][] = [];
-    for (const file of input.files)
-      if (file.role === "asset" && file.parent === undefined && file.newBlob) media.push([file.path, file.newBlob]);
     const result = await execute({
       kind: "writeup",
       source: input.writeup,
@@ -89,6 +97,7 @@ export async function renderRevision(
       links: input.links,
       repoUrl: input.repoUrl,
       media,
+      mediaHeads,
       docs,
     });
     if (result.kind !== "writeup") throw new Error("wrong result");

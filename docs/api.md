@@ -159,8 +159,11 @@ image source, relative or absolute, is dropped, in writeups, Markdown docs and c
 path never contains a colon. The renderer drops any query or fragment, strips a leading `./`, percent-decodes, and refuses a
 result with a `..` segment, a leading `/`, a scheme, a backslash, a control character or an
 invalid or encoded-slash escape. A match becomes
-`<span class="emend-media"><img src="/api/v1/media/<sha256>" alt loading="lazy" decoding="async"><span class="emend-media-caption">…</span></span>`;
-the caption is the alt text, or the file name when the alt text is empty. A paragraph holding only
+`<span class="emend-media"><img src="/api/v1/media/<sha256>" alt loading="lazy" decoding="async" width height><span class="emend-media-caption">…</span></span>`;
+the caption is the alt text, or the file name when the alt text is empty. `width` and `height` are
+the image's displayed pixel size, read by the server from the stored bytes at publish (JPEG EXIF
+orientation applied); they are absent when the server cannot read the size. Author-written width
+and height on an image are always dropped. A paragraph holding only
 such images also has the class `emend-media-row`. Author classes keep the `user-content-`
 prefix, so they never match the generated classes. A block's id covers each image's alt text, path
 and SHA-256, so a re-shot image at the same path shows as changed. Markdown docs render no

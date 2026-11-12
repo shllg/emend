@@ -19,6 +19,7 @@ import { limitReferences } from "./reference-limit.ts";
 import {
   FOOTNOTE_NODE,
   hardenLinks,
+  type MediaSize,
   markFootnotes,
   namespaceClasses,
   restoreFootnotes,
@@ -94,6 +95,7 @@ export async function renderMarkdownWithBudget(
   docs?: DocLinks,
   docBase = "",
   effects?: { docBaseUsed?: boolean; docPathUsed?: boolean },
+  mediaSizes?: ReadonlyMap<string, MediaSize>,
 ): Promise<Block[]> {
   // Check even an empty document: every emitted id must satisfy the contract.
   BlockId.parse(`${section}-00000000`);
@@ -108,6 +110,7 @@ export async function renderMarkdownWithBudget(
     largeTables: tables,
     repoUrl,
     media,
+    mediaSizes,
     docs,
     docBase,
     docBaseUsed: false,

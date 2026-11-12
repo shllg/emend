@@ -182,22 +182,36 @@
   .em-prose a:hover {
     color: var(--fg-link-hover);
   }
-  /* Writeup images: the server wraps each one with a caption; a paragraph of only images is a row. */
+  /* Writeup images: the server wraps each one with a caption and sends its pixel size, which the app
+     copies into --emend-media-w and --emend-media-h. An image is never drawn above its own size
+     or taller than half the visible screen, and its box is known before it loads. */
   .em-prose .emend-media {
-    display: inline-flex;
-    flex-direction: column;
-    gap: 6px;
-    max-width: 100%;
+    --emend-media-fit: min(calc(var(--emend-media-w) * 1px), calc(50svh * var(--emend-media-w) / var(--emend-media-h)));
+    display: inline-block;
     vertical-align: top;
+    width: var(--emend-media-fit);
+    min-width: min(10rem, 100%);
+    max-width: 100%;
   }
   .em-prose .emend-media img {
+    display: block;
+    width: var(--emend-media-fit);
     max-width: 100%;
     height: auto;
-    border: 1px solid var(--border-1);
+    max-height: 50svh;
+    /* A ring, not a border, so the image keeps one image pixel per CSS pixel. */
+    box-shadow: 0 0 0 1px var(--border-1);
     border-radius: var(--radius-md);
-    background: var(--bg-surface);
+    /* The quiet placeholder until the image arrives. */
+    background: var(--bg-sunken);
   }
   .em-prose .emend-media-caption {
+    display: block;
+    /* Wraps at the image's width and never widens the box. */
+    width: 0;
+    min-width: 100%;
+    margin-top: 6px;
+    overflow-wrap: anywhere;
     font: 400 12px / 1.4 var(--font-sans);
     color: var(--fg-3);
   }
@@ -214,9 +228,10 @@
     align-items: flex-start;
     gap: 0.75rem;
   }
+  /* Side by side down to 18rem each, then wrap; never wider than the image or its caption minimum. */
   .em-prose p.emend-media-row > .emend-media {
-    flex: 1 1 18rem;
-    min-width: 0;
+    flex: 1 1 min(var(--emend-media-fit), 18rem);
+    max-width: min(100%, max(var(--emend-media-fit), 10rem));
   }
   .em-prose > :first-child {
     margin-top: 0;

@@ -82,3 +82,16 @@ test("a span comment on the caption survives a re-shot image with the same capti
   expect(two.threads[0]?.placement).toMatchObject({ status: "placed" });
   expect(JSON.stringify(two.threads[0]?.placement)).toContain(after.id);
 });
+
+test("a published image's block carries the pixel size read from its bytes", async () => {
+  const first = await publish(png("00"));
+  const html = imageBlock(await view(first.reviewId, 1)).html;
+  expect(html).toContain('width="1" height="1"');
+});
+
+test("bytes that are not a readable image render without a size", async () => {
+  const first = await publish(Buffer.from("not an image"));
+  const html = imageBlock(await view(first.reviewId, 1)).html;
+  expect(html).toContain(`/api/v1/media/${first.newBlob}`);
+  expect(html).not.toMatch(/width=|height=/);
+});

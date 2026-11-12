@@ -139,16 +139,21 @@ test("the five variable fonts and their OFL licences ship with matching font-fac
   expect(sources.sort()).toEqual(fontFiles.map((file) => join(webFonts, file)).sort());
 });
 
-test("writeup images sit in a wrapping row that stacks on narrow screens, using theme tokens only", () => {
+test("writeup images keep their own size, stay under half the screen and show a ring, using theme tokens only", () => {
   const css = readFileSync(join(webSource, "styles/prose.css"), "utf8");
   const rule = (selector: string) =>
     new RegExp(`${selector.replace(/[.>]/g, "\\$&")}\\s*\\{([^}]+)\\}`).exec(css)?.[1] ?? "";
-  expect(rule(".em-prose .emend-media")).toMatch(/display:\s*inline-flex/);
+  expect(rule(".em-prose .emend-media")).toMatch(/display:\s*inline-block/);
   expect(rule(".em-prose .emend-media")).toMatch(/max-width:\s*100%/);
-  expect(rule(".em-prose .emend-media img")).toMatch(/border:\s*1px solid var\(--border-1\)/);
+  expect(rule(".em-prose .emend-media")).toMatch(/--emend-media-fit:\s*min\(\s*calc\(var\(--emend-media-w\) \* 1px\)/);
+  expect(rule(".em-prose .emend-media img")).toMatch(/max-height:\s*50svh/);
+  expect(rule(".em-prose .emend-media img")).toMatch(/box-shadow:\s*0 0 0 1px var\(--border-1\)/);
   expect(rule(".em-prose .emend-media img")).toMatch(/border-radius:\s*var\(--radius-md\)/);
+  expect(rule(".em-prose .emend-media img")).toMatch(/background:\s*var\(--bg-sunken\)/);
   expect(rule(".em-prose p.emend-media-row")).toMatch(/flex-wrap:\s*wrap/);
-  expect(rule(".em-prose p.emend-media-row > .emend-media")).toMatch(/flex:\s*1 1 18rem/);
+  expect(rule(".em-prose p.emend-media-row > .emend-media")).toMatch(
+    /flex:\s*1 1 min\(var\(--emend-media-fit\), 18rem\)/,
+  );
   const media = css.slice(css.indexOf(".em-prose .emend-media {"), css.indexOf(".em-prose > :first-child"));
   expect(media).not.toMatch(/#[0-9a-f]{3,8}\b|rgb\(|oklch\(/i);
 });

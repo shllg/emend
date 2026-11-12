@@ -7,6 +7,7 @@ import { renderWriteup } from "../../../../../packages/core/src/render/writeup.t
 import { layoutStore } from "../../lib/layout-store.ts";
 import { blockAnchor } from "../../lib/selection.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
+import { BlockView } from "./BlockView.tsx";
 import { DocView } from "./DocView.tsx";
 import { Writeup } from "./Writeup.tsx";
 
@@ -653,4 +654,53 @@ test("a writeup image renders inline with its caption and takes a block comment"
   const target = JSON.parse(fetchMock.mock.calls[0]?.[1].body).target;
   expect(target.kind).toBe("writeup-span");
   expect(target.quote ?? target.text ?? JSON.stringify(target)).toContain("Before");
+});
+
+test("each writeup image's wrapper gets its size as custom properties, and nothing invalid does", async () => {
+  const hash = "a".repeat(64);
+  const writeup = RenderedWriteup.parse(
+    await renderWriteup(
+      {
+        overview: "![Sized](media/sized.png)\n\n![Unsized](media/unsized.png)",
+        tldr: "",
+        decisions: null,
+        topics: {},
+      },
+      [],
+      {
+        media: new Map([
+          ["media/sized.png", hash],
+          ["media/unsized.png", "b".repeat(64)],
+        ]),
+        mediaSizes: new Map([[hash, { width: 640, height: 480 }]]),
+      },
+    ),
+  );
+  const { container } = mount(<Writeup {...props} writeup={writeup} />);
+  const wrappers = container.querySelectorAll<HTMLElement>("span.emend-media");
+  expect(wrappers).toHaveLength(2);
+  expect(wrappers[0]?.querySelector("img")?.getAttribute("width")).toBe("640");
+  expect(wrappers[0]?.style.getPropertyValue("--emend-media-w")).toBe("640");
+  expect(wrappers[0]?.style.getPropertyValue("--emend-media-h")).toBe("480");
+  expect(wrappers[1]?.style.getPropertyValue("--emend-media-w")).toBe("");
+  expect(wrappers[1]?.style.getPropertyValue("--emend-media-h")).toBe("");
+  cleanup();
+
+  const crafted = (attributes: string): RenderedBlock => ({
+    ...block,
+    html: `<p><span class="emend-media"><img src="/api/v1/media/${hash}" alt="x" ${attributes}><span class="emend-media-caption">x</span></span></p>`,
+  });
+  for (const attributes of [
+    'width="0" height="10"',
+    'width="99999999" height="10"',
+    'width="1e3" height="10"',
+    'width="70000" height="10"',
+    'width="10"',
+  ]) {
+    const view = mount(<BlockView block={crafted(attributes)} />);
+    const wrapper = view.container.querySelector<HTMLElement>("span.emend-media");
+    expect(wrapper?.style.getPropertyValue("--emend-media-w"), attributes).toBe("");
+    expect(wrapper?.style.getPropertyValue("--emend-media-h"), attributes).toBe("");
+    cleanup();
+  }
 });

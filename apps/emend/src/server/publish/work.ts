@@ -30,6 +30,7 @@ import {
   renderWriteup,
   resectionBlocks,
 } from "@emend/core";
+import { type ImageSize, imageSize } from "./image-size.ts";
 
 /** One comment's rendered HTML is at most this many characters; a larger one is null. */
 export const COMMENT_HTML_CHARS = 262144;
@@ -52,6 +53,8 @@ export type Work =
       links?: PublishLinks;
       repoUrl?: string;
       media: [string, string][];
+      /** Each distinct media blob's SHA-256 and its first bytes, for reading image sizes in the worker. */
+      mediaHeads?: [string, ArrayBuffer][];
       docs?: DocLinks;
     }
   | { kind: "doc"; path: string; source: ArrayBuffer; repoUrl?: string; docs?: DocLinks }
@@ -161,10 +164,16 @@ export const executeWork: Executor = async (work) => {
   }
   if (work.kind === "writeup") {
     const effects: { docBaseUsed?: boolean } = {};
+    const mediaSizes = new Map<string, ImageSize>();
+    for (const [sha, head] of work.mediaHeads ?? []) {
+      const size = imageSize(new Uint8Array(head));
+      if (size) mediaSizes.set(sha, size);
+    }
     const rendered = await renderWriteup(work.source, work.topics, {
       links: work.links,
       repoUrl: work.repoUrl,
       media: new Map(work.media),
+      mediaSizes,
       docs: work.docs,
       effects,
     });

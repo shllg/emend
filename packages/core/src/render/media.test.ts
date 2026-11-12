@@ -153,3 +153,93 @@ describe("renderWriteup media", () => {
     expect(JSON.stringify(rendered)).not.toContain("<img");
   });
 });
+
+describe("writeup media sizes", () => {
+  const sizes = new Map([[shaA, { width: 640, height: 480 }]]);
+  const withSizes = (md: string, map: ReadonlyMap<string, { width: number; height: number }> = sizes) =>
+    renderMarkdownWithBudget(
+      md,
+      "overview",
+      { highlightedBytes: 0 },
+      undefined,
+      media,
+      undefined,
+      "",
+      undefined,
+      map,
+    ).then((blocks) => blocks.map((block) => block.html).join("\n"));
+
+  test("emits the server's size after the other attributes", async () => {
+    expect(await withSizes("![Before](media/a.png)")).toBe(
+      `<p class="emend-media-row"><span class="emend-media"><img src="/api/v1/media/${shaA}" alt="Before" loading="lazy" decoding="async" width="640" height="480"><span class="emend-media-caption">Before</span></span></p>`,
+    );
+  });
+
+  test("emits no size for an image the server could not read", async () => {
+    const out = await withSizes("![Other](media/b.png)");
+    expect(out).toContain("<img");
+    expect(out).not.toMatch(/width|height/);
+    expect(await html("![Before](media/a.png)")).not.toMatch(/width|height/);
+  });
+
+  test("drops author width and height, with and without server sizes", async () => {
+    for (const md of [
+      '<img src="media/a.png" width="9999" height="1">',
+      '![x](media/a.png "t")\n\n<img src="media/a.png" height="7">',
+    ]) {
+      const plain = await html(md);
+      expect(plain).not.toMatch(/width|height/);
+      const sized = await withSizes(md);
+      expect(sized.match(/width="640" height="480"/g)?.length).toBeGreaterThan(0);
+      expect(sized).not.toMatch(/9999|height="1"|height="7"/);
+    }
+  });
+
+  test.each([0, -1, 1.5, Number.NaN, 70000])("does not emit an invalid server size %s", async (side) => {
+    const out = await withSizes("![x](media/a.png)", new Map([[shaA, { width: side, height: 10 }]]));
+    expect(out).toContain("<img");
+    expect(out).not.toMatch(/width|height/);
+  });
+
+  test("a non-media image keeps no source and gets no server size", async () => {
+    const out = await withSizes(
+      '<img src="media/c.png" alt="x" width="5">\n\n<img src="https://example.com/x.png" alt="y">',
+    );
+    expect(out).not.toMatch(/src=|height="480"|width="640"/);
+  });
+
+  test("hostile input stays inert while the declared image keeps its size", async () => {
+    const hostile = [
+      "<script>alert(1)</script>",
+      '<img src="x" onerror="alert(1)">',
+      "[bad](javascript:alert(1))",
+      '<svg onload="x"><circle/></svg>',
+      '<div style="x:y" onclick="z()">raw</div>',
+    ].join("\n\n");
+    const rendered = await renderWriteup(
+      {
+        overview: `${hostile}\n\n![Shot](media/a.png)`,
+        tldr: "t",
+        decisions: null,
+        glossary: `${hostile}\n\n![Glossary](media/a.png)`,
+        topics: {
+          ui: {
+            why: '```mermaid\nflowchart TD\n  A --> B\n  click A href "javascript:alert(1)"\n```\n\n![Why](media/a.png)',
+          },
+        },
+      } as WriteupInput,
+      [{ slug: "ui", title: "UI", importance: 1, summary: "UI." }],
+      { media, mediaSizes: sizes },
+    );
+    for (const section of rendered.sections) {
+      const out = section.blocks.map((b) => b.html).join("");
+      expect(out).not.toMatch(/<script|<svg|\son\w+=|javascript:\s*alert/i);
+      for (const style of out.matchAll(/ style="([^"]*)"/g))
+        expect(style[1]).toMatch(/^(--shiki-[a-z]+:#?[\w(),. %-]+;?)+$/i);
+    }
+    const sized = rendered.sections.filter((s) => s.blocks.some((b) => b.html.includes("emend-media")));
+    expect(sized.map((s) => s.key)).toEqual(expect.arrayContaining(["overview", "glossary"]));
+    for (const section of sized)
+      expect(section.blocks.map((b) => b.html).join("")).toContain('width="640" height="480"');
+  });
+});

@@ -2,6 +2,7 @@ import type { PublishLinks, TopicMeta, WriteupInput } from "@emend/contract";
 import type { DocLinks } from "../links.ts";
 import type { Block } from "./blocks.ts";
 import { renderMarkdownWithBudget } from "./markdown.ts";
+import type { MediaSize } from "./sanitize.ts";
 
 export type RenderedWriteup = {
   sections: { key: string; label: string; topic: string | null; blocks: Block[] }[];
@@ -23,6 +24,8 @@ export async function renderWriteup(
     media?: ReadonlyMap<string, string>;
     docs?: DocLinks;
     effects?: { docBaseUsed?: boolean };
+    /** Displayed pixel size per media SHA-256, read by the server from the stored bytes. */
+    mediaSizes?: ReadonlyMap<string, MediaSize>;
   } = {},
 ): Promise<RenderedWriteup> {
   const sections: RenderedWriteup["sections"] = [];
@@ -42,6 +45,7 @@ export async function renderWriteup(
         meta.docs,
         "",
         meta.effects,
+        meta.mediaSizes,
       ),
     });
   };
