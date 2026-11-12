@@ -107,7 +107,7 @@ For a new or saved `approve`, report the approved revision, append its `delivery
 - `reason: "retired"`: stop the loop and tell the user the reviewer retired review <review-id>.
 - `reason: "snoozed"`: stop the loop and tell the user: "The reviewer moved review <review-id> down until <time>. When they send feedback, resume with `/emend:emend-feedback <review-id>`." When `until` is `null`, say "until its next revision" in place of the time.
 
-If an error line reads `review <review-id> was deleted or never existed` or `review <review-id> was deleted on the hub`, stop the loop and report that line.
+If an error line reads `review <review-id> is in the bin` (or a publish line says `is in the bin`), `review <review-id> was deleted or never existed` or `review <review-id> was deleted on the hub`, stop the loop. Tell the user that the reviewer moved review <review-id> to the bin, where they can restore it under Settings in emend, or that it was deleted, and quote the line. Offer to publish the current state as a new review. Publish only after the user agrees: run the same publish command without `--review` and with `--key <new-key>`, where `<new-key>` is a name this work has not used before, then continue with the new review id the publish prints.
 
 Use the verified `handled.txt`, or create it if absent, replacing `<deliveryId>` with that result's field:
 

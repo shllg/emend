@@ -123,13 +123,13 @@ export async function deletedError(
 export async function binnedError(
   stateDir: string,
   error: unknown,
-  reference: { reviewId?: string; commentId?: string; publish?: boolean },
+  reference: { reviewId?: string; commentId?: string; publish?: boolean; shortcut?: boolean },
 ): Promise<never> {
   if (!(error instanceof CliApiError) || error.code !== "review_in_bin") throw error;
   if (reference.publish) {
     if (reference.reviewId === undefined)
       throw new CliError(
-        "the review this publish would update is in the bin. Restore it in Settings, or pass a new --key for a new review.",
+        `the review this publish would update is in the bin. Restore it in Settings, or pass ${reference.shortcut ? "--new" : "a new --key"} for a new review.`,
       );
     throw new CliError(
       `review ${escapeReference(reference.reviewId)} is in the bin. Restore it in Settings, or publish without --review and with a new --key for a new review.`,

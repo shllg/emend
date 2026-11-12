@@ -42,6 +42,8 @@ If you wrote it elsewhere, copy it into a doc root as step 1 says.
    `--main <path>` picks the document that opens first.
 5. If publishing fails, keep the file, tell the user where it is and carry on with the main task.
    Publishing never blocks the work.
+   If publish says the review is in the bin, tell the user they can restore it under Settings in emend.
+   Offer to publish a new review with `--new`, and do so only after they agree.
 
 ## Publish
 

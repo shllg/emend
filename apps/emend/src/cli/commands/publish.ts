@@ -227,7 +227,13 @@ export async function publishCommand(
       error,
       { reviewId: options.review, keyFor: (id) => collected.forInstance(id).reviewKey },
       true,
-    ).catch((next) => binnedError(stateDir, next, { reviewId: options.review, publish: true }));
+    ).catch((next) =>
+      binnedError(stateDir, next, {
+        reviewId: options.review,
+        publish: true,
+        shortcut: options.manifest === undefined,
+      }),
+    );
   }
   const result = PublishResponse.safeParse(response);
   if (!result.success) throw new CliError(publishAnswerIncomplete);

@@ -25,6 +25,8 @@ const byId = (id: string) =>
   `emend: review ${id} is in the bin. Restore it in Settings, or publish without --review and with a new --key for a new review.\n`;
 const byKey =
   "emend: the review this publish would update is in the bin. Restore it in Settings, or pass a new --key for a new review.\n";
+const byKeyShortcut =
+  "emend: the review this publish would update is in the bin. Restore it in Settings, or pass --new for a new review.\n";
 
 async function binned() {
   const f = await directFixture();
@@ -94,5 +96,11 @@ test("binnedError rewrites only review_in_bin and falls back to the comment when
   );
   await expect(binnedError(f.stateDir, bin, { reviewId: randomUUID() })).rejects.toBeInstanceOf(CliError);
   const other = new CliApiError("review_moved");
+  await expect(binnedError(f.stateDir, bin, { publish: true, shortcut: true })).rejects.toThrow(
+    byKeyShortcut.slice("emend: ".length).trimEnd(),
+  );
+  await expect(binnedError(f.stateDir, bin, { publish: true })).rejects.toThrow(
+    byKey.slice("emend: ".length).trimEnd(),
+  );
   await expect(binnedError(f.stateDir, other, { reviewId: randomUUID() })).rejects.toBe(other);
 });
