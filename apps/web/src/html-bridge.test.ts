@@ -311,18 +311,3 @@ test("the layout fallback lands in the parser-created head of a bare fragment", 
     await b.window.happyDOM.close();
   }
 });
-
-test("clobbering markup cannot stop the layout fallback or the ready message", async () => {
-  const b = bridge(
-    '<body><img name="head"><form name="createElement"></form><img name="firstChild"><form id="textContent"></form><p>Seed</p><pre>x</pre></body>',
-  );
-  try {
-    const head = b.window.document.documentElement.firstElementChild;
-    expect(head?.localName).toBe("head");
-    expect(head?.firstElementChild?.localName).toBe("style");
-    expect(head?.firstElementChild?.textContent).toBe(FALLBACK_CSS);
-    expect(b.post).toHaveBeenCalledWith({ type: "emend:ready" }, "*");
-  } finally {
-    await b.window.happyDOM.close();
-  }
-});

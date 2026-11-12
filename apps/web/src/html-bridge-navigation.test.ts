@@ -423,6 +423,87 @@ test.each([true, false])(
   },
 );
 
+const FALLBACK_CSS = "@layer emend-fallback { pre { overflow-x: auto; } }";
+
+test("the layout fallback ignores shadowed document properties", async () => {
+  const touched = vi.fn();
+  let restore = () => {};
+  const b = bridge("<body><p>Seed</p><pre>x</pre></body>", "docs/a.html", false, (window) => {
+    const doc = window.document;
+    const root = doc.documentElement;
+    const head = required(doc.head);
+    // Emulate the native getter: happy-dom reads the shadowable documentElement instead.
+    vi.spyOn(window.Document.prototype, "body", "get").mockReturnValue(doc.body);
+    const poison = doc.createElement("input");
+    const shadows: [object, string][] = [
+      ...["createElement", "documentElement", "head"].map((name) => [doc, name] as [object, string]),
+      ...[root, head].flatMap((node) =>
+        ["firstElementChild", "firstChild", "insertBefore", "localName"].map(
+          (name) => [node, name] as [object, string],
+        ),
+      ),
+    ];
+    for (const [node, name] of shadows)
+      Object.defineProperty(node, name, {
+        configurable: true,
+        get: () => {
+          touched(name);
+          return poison;
+        },
+        set: () => touched(name),
+      });
+    restore = () => {
+      for (const [node, name] of shadows) Reflect.deleteProperty(node, name);
+    };
+    return restore;
+  });
+  try {
+    restore();
+    const head = required(b.window.document.documentElement.firstElementChild);
+    expect(head.localName).toBe("head");
+    const style = required(head.firstElementChild);
+    expect(style.localName).toBe("style");
+    expect(style.textContent).toBe(FALLBACK_CSS);
+    expect(
+      [...b.window.document.querySelectorAll("*")].filter(
+        (el) => el.localName === "style" && el.textContent === FALLBACK_CSS,
+      ),
+    ).toHaveLength(1);
+    expect(touched).not.toHaveBeenCalled();
+    expect(b.post).toHaveBeenCalledWith({ type: "emend:ready" }, "*");
+  } finally {
+    await b.close();
+  }
+});
+
+test("a failing layout fallback leaves the bridge working", async () => {
+  let text: Node | undefined;
+  const b = bridge("<body><p>Seed</p><pre>x</pre></body>", "docs/a.html", false, (window) => {
+    text = required(required(window.document.querySelector("p")).firstChild);
+    const spy = vi.spyOn(window.Node.prototype, "insertBefore").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    return () => spy.mockRestore();
+  });
+  try {
+    // The bridge has run; let the document accept inserts again.
+    vi.mocked(b.window.Node.prototype.insertBefore).mockRestore();
+    expect(
+      [...b.window.document.querySelectorAll("*")].filter(
+        (el) => el.localName === "style" && el.textContent === FALLBACK_CSS,
+      ),
+    ).toHaveLength(0);
+    expect(b.post).toHaveBeenCalledWith({ type: "emend:ready" }, "*");
+    const range = b.window.document.createRange();
+    range.selectNodeContents(required(text));
+    b.window.getSelection()?.addRange(range);
+    b.window.document.dispatchEvent(new b.window.Event("mouseup"));
+    expect(b.post.mock.calls.findLast(([data]) => data.type === "emend:anchor")?.[0].quote).toBe("Seed");
+  } finally {
+    await b.close();
+  }
+});
+
 test.each(["#", "a.html", "a.html#"])("R1.2 same-document top link %s has no history", async (href) => {
   const b = bridge(`<body><a href="${href}">Top</a></body>`);
   try {
