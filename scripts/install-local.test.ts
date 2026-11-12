@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { type TestContext, test } from "node:test";
+import { hooks } from "../.pnpmfile.mjs";
 import { installLocal, type Runner, runCommand } from "./install-local.ts";
 import { cleanPackageDocs, preparePackageDocs, requirePnpmPacking } from "./package-docs.ts";
 
@@ -168,7 +169,13 @@ function fixture(t: TestContext, options: FixtureOptions = {}) {
       installedVersion = JSON.parse(readFileSync(join(command.cwd, "apps/emend/package.json"), "utf8")).version;
       builtSource = readFileSync(join(command.cwd, "apps/emend/src/version.ts"), "utf8");
     }
-    if (label === "pnpm pack") writeFileSync(join(args[2], `shllg-emend-${installedVersion}.tgz`), "synthetic tarball");
+    if (label === "pnpm pack") {
+      const manifest = JSON.parse(readFileSync(join(command.cwd, "package.json"), "utf8"));
+      const archive = calls.find((call) => call.args[0] === "archive");
+      assert.equal(manifest.emendLocalBuild, archive?.args.at(-1), "packed local builds carry the archived commit");
+      assert.equal(typeof manifest.emendLocalBuild, "string");
+      writeFileSync(join(args[2], `shllg-emend-${installedVersion}.tgz`), "synthetic tarball");
+    }
     if (label === "npm install") {
       folder = args[2] === "--prefix" ? args[3] : prefix;
       assert.equal(readFileSync(args[args.length - 1], "utf8"), "synthetic tarball");
@@ -682,4 +689,11 @@ test("local install resolves HEAD once and keeps the archive, tag and printed SH
   assert.equal(f.installedVersion, "1.3.0", "the newer HEAD's v9.0.0 tag must not be used");
   assert(f.stdout.includes(`install:local: installed emend 1.3.0 (${f.commit}).`));
   f.clean();
+});
+
+
+test("packing preserves the local-build marker while stripping workspace dependencies", () => {
+  const packed = hooks.beforePacking({ name: "@shllg/emend", emendLocalBuild: "abc123", devDependencies: { "@emend/core": "workspace:*" } });
+  assert.equal(packed.emendLocalBuild, "abc123");
+  assert.equal(packed.devDependencies, undefined);
 });

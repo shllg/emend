@@ -1,5 +1,8 @@
-import { lstat } from "node:fs/promises";
-import { dirname, join, sep } from "node:path";
+import { lstat, realpath } from "node:fs/promises";
+import { dirname, isAbsolute, join, sep } from "node:path";
+
+import { readRegular } from "../publish/read.ts";
+import { isInstalledManifest } from "./manifest.ts";
 
 export const updatePackage = "@shllg/emend";
 export const updateDoc = "https://github.com/shllg/emend/blob/release/docs/setup/update.md";
@@ -8,7 +11,7 @@ export type Install =
   | { kind: "mise" }
   | { kind: "pnpm" }
   | { kind: "npm"; prefix: string }
-  | { kind: "local"; where: "mise-link" | "checkout"; root?: string }
+  | { kind: "local"; where: "mise-link" | "checkout" | "marked"; root?: string }
   | { kind: "unknown" };
 
 const packageTail = ["node_modules", "@shllg", "emend", "dist", "emend.mjs"];
@@ -18,10 +21,6 @@ function endsWith(segments: string[], tail: string[]): boolean {
     segments.length >= tail.length &&
     tail.every((part, index) => segments[segments.length - tail.length + index] === part)
   );
-}
-
-function packageCopies(segments: string[]): number {
-  return segments.filter((part, index) => part === "@shllg" && segments[index + 1] === "emend").length;
 }
 
 /** Walk up from the entry's folder and return the first folder that holds a `.git` entry. */
@@ -40,45 +39,58 @@ export async function checkoutRoot(realEntry: string): Promise<string | undefine
   }
 }
 
-/**
- * Tell how emend was installed from the real path of its entry file. Compares whole path
- * segments, never substrings, so a look-alike folder or file name matches nothing.
- */
+/** Confirm package identity and ownership; pnpm evidence comes from its global list. */
 export async function detectInstall(
-  realEntry: string,
-  findCheckout: (realEntry: string) => Promise<string | undefined> = checkoutRoot,
+  entry: string,
+  confirmPnpm: (folder: string) => Promise<boolean> = async () => false,
 ): Promise<Install> {
-  if (!realEntry.startsWith(sep)) return { kind: "unknown" };
-  const segments = realEntry.split(sep).filter(Boolean);
-  const copies = packageCopies(segments);
-  const modules = segments.filter((part) => part === "node_modules").length;
-  const installs = segments.findIndex(
-    (part, index) =>
-      part === "installs" &&
-      segments[index + 1] === "npm-shllg-emend" &&
-      Boolean(segments[index + 2]) &&
-      !["lib", "node_modules"].includes(segments[index + 2] as string),
-  );
-  if (installs !== -1 && copies === 1) {
-    const rest = segments.slice(installs + 3);
-    if (
-      (endsWith(rest, ["lib", ...packageTail]) && rest.length === packageTail.length + 1) ||
-      (endsWith(rest, packageTail) && rest.length === packageTail.length)
-    )
-      return { kind: "mise" };
-  }
-  if (segments.includes("linked-installs")) return { kind: "local", where: "mise-link" };
-  if (modules === 0) {
-    const root = await findCheckout(realEntry);
-    if (root !== undefined) return { kind: "local", where: "checkout", root };
+  let realEntry: string;
+  let folder: string;
+  let manifest: unknown;
+  try {
+    if (!isAbsolute(entry)) return { kind: "unknown" };
+    realEntry = await realpath(entry);
+    if (!endsWith(realEntry.split(sep), ["dist", "emend.mjs"])) return { kind: "unknown" };
+    folder = await realpath(dirname(dirname(realEntry)));
+    manifest = JSON.parse((await readRegular(join(folder, "package.json"), 64 * 1024)).toString("utf8"));
+    if (!isInstalledManifest(manifest)) return { kind: "unknown" };
+  } catch {
     return { kind: "unknown" };
   }
-  if (copies !== 1 || !endsWith(segments, packageTail)) return { kind: "unknown" };
-  if (segments.includes(".pnpm") || segments.includes("pnpm")) return { kind: "pnpm" };
-  const lead = segments.slice(0, segments.length - packageTail.length);
-  const foreign = ["installs", "linked-installs", "npm-shllg-emend", ".pnpm", "pnpm"];
-  if (lead[lead.length - 1] === "lib" && modules === 1 && !lead.some((part) => foreign.includes(part))) {
-    return { kind: "npm", prefix: sep + lead.slice(0, -1).join(sep) };
+  if (manifest.emendLocalBuild !== undefined) return { kind: "local", where: "marked" };
+  const segments = realEntry.split(sep).filter(Boolean);
+  const modules = segments.filter((part) => part === "node_modules").length;
+  if (segments.includes("linked-installs")) return { kind: "local", where: "mise-link" };
+  const installs = segments.findIndex(
+    (part, index) => part === "installs" && segments[index + 1] === "npm-shllg-emend",
+  );
+  if (installs !== -1) {
+    const version = segments[installs + 2];
+    const rest = segments.slice(installs + 3);
+    if (
+      version &&
+      !["lib", "node_modules"].includes(version) &&
+      ((rest.length === packageTail.length && endsWith(rest, packageTail)) ||
+        (rest.length === packageTail.length + 1 && endsWith(rest, ["lib", ...packageTail])))
+    )
+      return { kind: "mise" };
+    return { kind: "unknown" };
+  }
+  if (modules === 0) {
+    const root = await checkoutRoot(realEntry);
+    return root === undefined ? { kind: "unknown" } : { kind: "local", where: "checkout", root };
+  }
+  if (!endsWith(segments, packageTail)) return { kind: "unknown" };
+  if (segments.includes("pnpm") || segments.includes(".pnpm"))
+    return { kind: (await confirmPnpm(folder)) ? "pnpm" : "unknown" };
+  const lead = segments.slice(0, -packageTail.length);
+  if (lead.at(-1) === "lib" && modules === 1 && !lead.includes("npm-shllg-emend")) {
+    const prefix = sep + lead.slice(0, -1).join(sep);
+    try {
+      if ((await realpath(join(prefix, "bin/emend"))) === join(folder, "bin/emend")) return { kind: "npm", prefix };
+    } catch {
+      /* Missing or foreign launchers do not establish ownership. */
+    }
   }
   return { kind: "unknown" };
 }
@@ -94,19 +106,22 @@ export function npmPrefix(install: Install): string {
 export function updateArgs(install: Install): string[] {
   if (install.kind === "npm")
     return ["install", "--global", "--prefix", install.prefix, "--ignore-scripts", `${updatePackage}@latest`];
-  if (install.kind === "pnpm") return ["add", "--global", "--ignore-scripts", `${updatePackage}@latest`];
+  if (install.kind === "pnpm")
+    return ["add", "--global", "--ignore-scripts", "--ignore-pnpmfile", `${updatePackage}@latest`];
   return ["upgrade", "--bump", `npm:${updatePackage}`];
 }
 
 /** The command that prints where the new package lives. */
 export function locateArgs(install: Install): string[] {
-  if (install.kind === "pnpm") return ["root", "--global"];
+  if (install.kind === "pnpm") return ["list", "--global", "--json", "--depth", "0"];
   return ["where", `npm:${updatePackage}`];
 }
 
 /** The command that installs the old version again. */
 export function restoreArgs(install: Install, version: string): string[] {
-  if (install.kind === "npm") return ["install", "--global", "--prefix", install.prefix, `${updatePackage}@${version}`];
-  if (install.kind === "pnpm") return ["add", "--global", `${updatePackage}@${version}`];
+  if (install.kind === "npm")
+    return ["install", "--global", "--prefix", install.prefix, "--ignore-scripts", `${updatePackage}@${version}`];
+  if (install.kind === "pnpm")
+    return ["add", "--global", "--ignore-scripts", "--ignore-pnpmfile", `${updatePackage}@${version}`];
   return ["use", "--global", `npm:${updatePackage}@${version}`];
 }

@@ -1,4 +1,5 @@
 import { isAbsolute } from "node:path";
+import { pathThroughRepository } from "../executable.ts";
 
 const names = new Set([
   "USER",
@@ -10,35 +11,46 @@ const names = new Set([
   "COLORTERM",
   "NO_COLOR",
   "TZ",
-  "TMPDIR",
   "DBUS_SESSION_BUS_ADDRESS",
-  "PNPM_HOME",
-  "VOLTA_HOME",
-  "NVM_DIR",
-  "SSL_CERT_FILE",
-  "SSL_CERT_DIR",
-  "NODE_EXTRA_CA_CERTS",
+  ...["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY"].flatMap((name) => [name, name.toLowerCase()]),
+]);
+
+const pathNames = new Set([
   "MISE_DATA_DIR",
   "MISE_CONFIG_DIR",
   "MISE_CACHE_DIR",
   "MISE_STATE_DIR",
-  ...["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY"].flatMap((name) => [name, name.toLowerCase()]),
+  "PNPM_HOME",
+  "VOLTA_HOME",
+  "NVM_DIR",
+  "NODE_EXTRA_CA_CERTS",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "TMPDIR",
 ]);
 
 /**
- * The environment of every program `emend update` starts. It is an allowlist: the repository the
- * user stands in may have set NODE_OPTIONS, NODE_PATH, npm_config_* or MISE_* variables that
- * make a package manager or Node.js run its code, so none of them pass.
+ * Pass identity, locale, terminal, proxy and session-bus settings. MISE's four directory settings,
+ * XDG_*, tool homes, certificate paths and TMPDIR pass only when absolute and checked outside
+ * the original cwd's repositories, including every link hop. Drop everything else: a repository
+ * may have set Node or package-manager options that execute its code. Force npm lifecycle scripts
+ * off even when mise launches npm itself.
  */
-export function childEnvironment(
+export async function childEnvironment(
   parent: Record<string, string | undefined>,
   fixed: { path: string; home: string; stateDir: string },
-): Record<string, string> {
+  roots: readonly string[],
+): Promise<Record<string, string>> {
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(parent)) {
     if (value === undefined) continue;
-    if (names.has(name) || name.startsWith("LC_")) env[name] = value;
-    else if (name.startsWith("XDG_") && isAbsolute(value)) env[name] = value;
+    if (pathNames.has(name) || name.startsWith("XDG_")) {
+      try {
+        if (isAbsolute(value) && !(await pathThroughRepository(value, roots))) env[name] = value;
+      } catch {
+        // Uncheckable paths never reach a child.
+      }
+    } else if (names.has(name) || name.startsWith("LC_")) env[name] = value;
   }
-  return { ...env, PATH: fixed.path, HOME: fixed.home, EMEND_HOME: fixed.stateDir };
+  return { ...env, PATH: fixed.path, HOME: fixed.home, EMEND_HOME: fixed.stateDir, npm_config_ignore_scripts: "true" };
 }

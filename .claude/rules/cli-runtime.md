@@ -46,10 +46,12 @@ checks catch a copy inside the repo.
   real `tailscale` or, on macOS, the Tailscale app. Tests of git run the system git with the
   fenced config above; tests of systemctl and launchctl use a fixture `PATH` and a mocked runner.
 - Tests use temporary `EMEND_HOME` folders and git repos built in the test, never real state.
-- `emend update` is the one command that runs a package manager. It refuses without a terminal on
-  stdin and stdout and as root. It runs mise, npm or pnpm found by `findExecutable`, with the home
-  folder as working directory, an allowlisted environment (no `NODE_OPTIONS`, no `npm_config_*`),
-  and `--ignore-scripts` where the tool takes it. It backs up `emend.db` first and prints how to
-  restore it. For a local build (a checkout, or a `mise link` from `pnpm install:local`) it prints
-  the commands and runs none. The new emend it starts (`--version`, `service install`) runs with
-  the same Node.js as the running one. Its tests run fake mise, npm and pnpm from a fixture `PATH`.
+- `emend update` alone runs a package manager: it requires a terminal, a non-root user and HOME
+  resolving to the account's home. It finds mise, npm or pnpm through `findExecutable` and runs
+  from home. Its allowlisted environment drops Node options and incoming npm options; path-valued
+  variables pass only when checked outside the working directory's repositories, hop by hop.
+  Every child gets `npm_config_ignore_scripts=true`; npm and pnpm get `--ignore-scripts`, and
+  pnpm also gets `--ignore-pnpmfile`. It backs up the database and prints how to restore it.
+  Local builds only get instructions. A located new emend inside those repositories is refused,
+  including every symlink hop; its `--version` and `service install` use the running Node.js.
+  Tests use fake package managers on a fixture PATH.

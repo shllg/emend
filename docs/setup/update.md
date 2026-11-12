@@ -34,7 +34,8 @@ It does five things:
 
 1. It finds how you installed emend: mise, npm or pnpm.
 2. It copies the database to `backups/` in the state folder and prints the path. Three backups
-   stay; older ones go.
+   stay after a successful change, always including this run's backup. A failed update keeps all
+   backups. If the version and service stay unchanged, it removes only the backup it just made.
 3. It updates emend from your home folder, never from inside a repository.
 4. It restarts the service on the new version, when you installed the service. The server migrates
    the database as before.
@@ -46,10 +47,16 @@ same steps.
 
 A local build gets the commands and nothing else. If you built emend from a checkout (or linked it
 with `pnpm install:local`), `emend update` prints `git pull`, `pnpm install` and
-`pnpm install:local` for you to run, and changes nothing.
+`pnpm install:local` for you to run, and changes nothing. Older local builds without the build
+marker may still be mistaken for release installs.
 
-`emend update` refuses to run without a terminal, so an agent cannot run it. Give the command to
-the agent's user instead.
+`emend update` requires a terminal to prevent accidental agent runs; this does not stop a determined
+agent. Agents must not run it: give the command to the user for their own terminal.
+
+Registry and proxy settings must live in `~/.npmrc`, pnpm's or mise's own config: `emend update`
+passes only a short list of environment variables. HOME must resolve to your account's home folder.
+Path settings and the newly installed emend must stay outside the repositories of your working
+directory, including paths reached through symbolic links.
 
 The other steps still apply. Update the hub first, link the skills again (step 4), update the
 plugin (step 5) and the phone app (step 6). It reports the hub only, not the machines attached to
@@ -256,35 +263,31 @@ This page is the update procedure. Run it again for the next release.
 
 ## Undo
 
-emend has no rollback command. To go back to an older version, install it by number, then repeat
-steps 3 to 5. With mise:
-
-```sh
-mise use -g npm:@shllg/emend@<version>
-```
-
-With npm:
-
-```sh
-npm install -g @shllg/emend@<version>
-```
+emend has no rollback command. Use the go-back block printed by `emend update`.
 
 An older emend refuses a database that a newer emend migrated, and says
 `The emend database is newer than this emend. Update emend, then try again.` Without a backup, stay
 on the newer version.
 
-`emend update` copies the database to `backups/` in the state folder before it updates emend, and
-prints these steps if it fails. To go back by hand, with the service (Linux) or without it:
+`emend update` prints a go-back block with the exact home, helper, Node.js, old entry, database and
+backup paths for that run. Use those printed paths, including their quotes. Stop every agent that
+uses emend, then run the printed commands one at a time and stop if one fails:
 
-```sh
-systemctl --user stop emend            # macOS: launchctl bootout gui/$(id -u)/dev.emend.server
-                                       # no service: emend stop
-npm install --global @shllg/emend@<old version>   # or the mise or pnpm line above
-cp <backup file> <state folder>/emend.db && rm -f <state folder>/emend.db-wal <state folder>/emend.db-shm
-emend service install                  # no service: emend
-```
+1. Change to the printed home folder.
+2. Stop the service: `systemctl --user stop emend` on Linux, or
+   `launchctl bootout gui/<uid>/dev.emend.server` on macOS. Without a service, run the printed Node.js
+   and old entry paths followed by `stop`.
+3. Run the printed absolute package-manager path to restore the old version. npm uses
+   `install --global --prefix <prefix> --ignore-scripts @shllg/emend@<old>`; pnpm uses
+   `add --global --ignore-scripts --ignore-pnpmfile @shllg/emend@<old>`; mise uses
+   `use --global npm:@shllg/emend@<old>`.
+4. Run the printed `cp <backup> <database> && rm -f <database>-wal <database>-shm` line.
+5. Run the printed Node.js and old entry paths with `service install` when there is a service,
+   or with no arguments to start the server and open the inbox otherwise.
 
-The state folder is `~/.local/share/emend` unless you set `EMEND_HOME`.
+The state folder defaults to `$XDG_DATA_HOME/emend` on Linux when `XDG_DATA_HOME` is absolute,
+otherwise `~/.local/share/emend`; on macOS it is `~/Library/Application Support/emend`.
+`EMEND_HOME` overrides these defaults. The printed restore paths already account for it.
 
 ## When something goes wrong
 

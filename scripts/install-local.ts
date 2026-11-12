@@ -9,6 +9,7 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
@@ -134,6 +135,10 @@ export async function installLocal(args: string[], options: InstallOptions = {})
       }
       if (compareVersions(version, committed) > 0) stampVersion(source, version);
     }
+    step = "stamp local build";
+    const manifestPath = join(source, "apps/emend/package.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    writeFileSync(manifestPath, `${JSON.stringify({ ...manifest, emendLocalBuild: commit }, null, 2)}\n`);
     await command("pnpm install", "pnpm", ["install", "--frozen-lockfile"], source);
     await command("pnpm build", "pnpm", ["build"], source);
     const pkg = join(source, "apps/emend");

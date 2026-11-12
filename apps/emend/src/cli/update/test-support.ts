@@ -31,9 +31,13 @@ export function emendScript(version: string, root: string): string {
   return `import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 const config = JSON.parse(readFileSync(${JSON.stringify(join(root, "fake.json"))}, "utf8"));
 const argv = process.argv.slice(2);
-if (argv[0] === "--version") process.stdout.write(config.badVersion ? "emend nonsense\\n" : "emend ${version}\\n");
+if (argv[0] === "--version") {
+  appendFileSync(config.newLog, "version\\n");
+  process.stdout.write(config.badVersion ? "emend nonsense\\n" : "emend ${version}\\n");
+}
 else if (argv[0] === "service" && argv[1] === "install") {
-  appendFileSync(config.log, JSON.stringify({ tool: "service-install", entry: import.meta.filename, argv, cwd: process.cwd(), env: Object.keys(process.env), emendHome: process.env.EMEND_HOME }) + "\\n");
+  appendFileSync(config.newLog, "service\\n");
+  appendFileSync(config.log, JSON.stringify({ tool: "service-install", entry: process.argv[1], node: process.execPath, argv, cwd: process.cwd(), env: Object.keys(process.env), emendHome: process.env.EMEND_HOME }) + "\\n");
   if (config.serviceFails) process.exit(1);
   writeFileSync(config.serverFile, config.serverVersion ?? "${version}");
 }
@@ -46,14 +50,21 @@ const fs = require("node:fs");
 const path = require("node:path");
 const config = JSON.parse(fs.readFileSync(${JSON.stringify(join(root, "fake.json"))}, "utf8"));
 const argv = process.argv.slice(2);
-fs.appendFileSync(config.log, JSON.stringify({ tool: ${JSON.stringify(tool)}, argv, cwd: process.cwd(), env: Object.keys(process.env), values: { PATH: process.env.PATH, HOME: process.env.HOME, EMEND_HOME: process.env.EMEND_HOME } }) + "\\n");
+fs.appendFileSync(config.log, JSON.stringify({ tool: ${JSON.stringify(tool)}, argv, cwd: process.cwd(), env: Object.keys(process.env), values: { PATH: process.env.PATH, HOME: process.env.HOME, EMEND_HOME: process.env.EMEND_HOME, npm_config_ignore_scripts: process.env.npm_config_ignore_scripts } }) + "\\n");
 const verb = argv[0];
 if (verb === "install" || verb === "add" || verb === "upgrade") {
+  if (config.sleep) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, config.sleep);
   if (config.updateFails) process.exit(3);
+  fs.writeFileSync(config.updated, "yes");
   fs.mkdirSync(path.join(config.newPackage, "dist"), { recursive: true });
   fs.writeFileSync(path.join(config.newPackage, "package.json"), JSON.stringify({ name: "@shllg/emend", version: config.newVersion }));
   fs.writeFileSync(path.join(config.newPackage, "dist/emend.mjs"), config.newScript);
-} else if (verb === "root") process.stdout.write(config.located + "\\n");
+} else if (verb === "list") {
+  if (config.listWarning) process.stderr.write(config.listWarning);
+  if (config.listError) { process.stderr.write(config.listError); process.exit(2); }
+  const folder = fs.existsSync(config.updated) ? config.newPackage : config.oldPackage;
+  process.stdout.write(config.listOutput ?? JSON.stringify([{ dependencies: config.unlisted ? {} : { "@shllg/emend": { version: "0.1.0", path: folder } } }]));
+}
 else if (verb === "where") process.stdout.write(config.located + "\\n");
 `;
 }
@@ -75,6 +86,7 @@ export async function makeFake(parent: string, layout: Layout, oldVersion = "0.1
   await Promise.all([home, bin].map((path) => mkdir(path, { recursive: true })));
   await mkdir(state, { mode: 0o700 });
   await writeFile(log, "");
+  await writeFile(join(root, "new-log"), "");
   let oldPackage: string;
   let newPackage: string;
   let located: string;
@@ -94,6 +106,12 @@ export async function makeFake(parent: string, layout: Layout, oldVersion = "0.1
   await mkdir(join(oldPackage, "dist"), { recursive: true });
   await writeFile(join(oldPackage, "package.json"), JSON.stringify({ name: "@shllg/emend", version: oldVersion }));
   await writeFile(join(oldPackage, "dist/emend.mjs"), emendScript(oldVersion, root));
+  if (layout === "npm") {
+    await mkdir(join(oldPackage, "bin"));
+    await writeFile(join(oldPackage, "bin/emend"), "synthetic launcher");
+    await mkdir(join(root, "prefix/bin"));
+    await symlink(join(oldPackage, "bin/emend"), join(root, "prefix/bin/emend"));
+  }
   let entry = join(oldPackage, "dist/emend.mjs");
   if (layout === "pnpm") {
     const link = join(root, "pnpm/global/5/node_modules/@shllg/emend");
@@ -122,6 +140,8 @@ export async function makeFake(parent: string, layout: Layout, oldVersion = "0.1
       uid: 1000,
       platform: "linux",
       home,
+      accountHome: home,
+      node: process.execPath,
       cwd: home,
       entry,
       now: () => new Date("2026-11-12T10:20:30.123Z"),
@@ -145,6 +165,9 @@ export async function makeFake(parent: string, layout: Layout, oldVersion = "0.1
     config,
     JSON.stringify({
       log,
+      newLog: join(root, "new-log"),
+      updated: join(root, "updated"),
+      oldPackage,
       serverFile: join(root, "server-version"),
       newPackage,
       newVersion: "0.2.0",

@@ -18,8 +18,6 @@ export interface Io {
   skills?: SkillsOptions;
   update?: UpdateOptions;
 }
-// Keep separate: the help text's SQL verb and table name "devices" trigger the scanner's reviewer-table check.
-const updateUsage = "  emend update                   Update emend and restart its service\n";
 export async function run(argv: string[], io: Io): Promise<number> {
   if (argv.length === 1 && ["--help", "-h"].includes(argv[0] ?? "")) {
     io.stdout(`Usage:
@@ -39,7 +37,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
   emend status [--json]
   emend mcp
   emend service install [serve options] | uninstall | status
-${updateUsage}  emend skills install [--dir <path>] [--dry-run]
+  emend update                   Update emend and restart its service
+  emend skills install [--dir <path>] [--dry-run]
   emend config [list] | add docRoots <folder> | remove docRoots <folder> | set openBrowser true|false
   emend --version
 `);

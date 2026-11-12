@@ -4,7 +4,7 @@ import { delimiter, isAbsolute, join, parse, sep } from "node:path";
 import { CliError } from "./http.ts";
 import { pathInRepository, repositoryRoots } from "./runtime-repository.ts";
 
-async function pathThroughRepository(
+export async function pathThroughRepository(
   absolutePath: string,
   roots: readonly string[],
   { allowMissingLeaf = false } = {},

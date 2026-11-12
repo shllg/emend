@@ -126,6 +126,16 @@ const multilineTemplates = new Map([
   ["cli/commands/feedback.ts", "The reply hint on stderr ends with a newline."],
   ["cli/commands/mcp.ts", "MCP JSON output ends with a newline."],
 ]);
+const nonSqlQuotes = new Map<string, { reason: string; accepts: (quote: string, content: string) => boolean }>([
+  ["cli.ts", { reason: "update names a CLI command.", accepts: (_quote, content) => content === "update" }],
+  [
+    "main.ts",
+    {
+      reason: "update names a CLI command; the Usage template lists commands.",
+      accepts: (quote, content) => content === "update" || (quote.startsWith("`") && content.startsWith("Usage:\n")),
+    },
+  ],
+]);
 const workerSpawners = new Set(["db/client.ts", "server/publish/executor.ts"]);
 // Receivers use parentPort (and the inline worker's workerData), never construct workers.
 const workerReceivers = new Set(["server/publish/worker.ts", "db/client.ts inline worker"]);
@@ -322,6 +332,7 @@ function assertAgentSql(
   };
   for (const quote of quotes) {
     const query = literal(quote) ?? quote.slice(1, -1);
+    if (nonSqlQuotes.get(name)?.accepts(quote, query)) continue;
     if (!/\b(?:select|insert|replace|update|delete|with|from|join|create|alter|drop)\b/i.test(query)) continue;
     if (name === "db/client.ts" && /\bselect\b/i.test(query)) fail("reviewer SQL binding");
     if (
@@ -334,8 +345,7 @@ function assertAgentSql(
     for (let index = 0; index < tokens.length; index++) {
       const verb = tokens[index]?.toLowerCase();
       if (!verb || !["insert", "replace", "update", "delete"].includes(verb)) continue;
-      // A lone word names a command, not an SQL write statement.
-      if (tokens.length === 1) continue;
+      if (tokens.length === 1) fail("unresolved SQL write target");
       let cursor = index + 1;
       if (tokens[cursor]?.toLowerCase() === "or") cursor += 2;
       // An interior prose word ("needs an update.") is not an UPDATE statement.
@@ -1194,9 +1204,9 @@ test.each([
   );
 });
 
-test("a lone update command is not an SQL write", async () => {
+test("a lone update outside the CLI entry modules is refused", async () => {
   const folder = await fixture({ "entry.ts": 'export const command = "update";' });
-  await expect(assertAgentGraph(folder, [join(folder, "entry.ts")])).resolves.toBeInstanceOf(Set);
+  await expect(assertAgentGraph(folder, [join(folder, "entry.ts")])).rejects.toThrow("forbidden");
 });
 
 test.each([
@@ -1811,4 +1821,25 @@ test.each(["import", "require"])("round 5: db/client may pass on a %s schema nam
     "db/schema.ts": "export const comments = {};",
   });
   await expect(assertAgentGraph(folder, [join(folder, "db/client.ts")])).resolves.toBeInstanceOf(Set);
+});
+
+test.each([
+  'export const v = "update";',
+  'export const v = "delete";',
+  'export const act = (q) => q.run("update" + " tokens set kind = \'reviewer\'");',
+  `const v = "update"; export const act = (q) => q.run(\`\${v} reviews set state = 'approved'\`);`,
+])("rejects split and lone SQL verbs: %s", async (source) => {
+  const folder = await fixture({ "entry.ts": source });
+  await expect(assertAgentGraph(folder, [join(folder, "entry.ts")])).rejects.toThrow("forbidden");
+});
+
+test.each(["cli.ts", "main.ts"])("allows only the command name in %s", async (name) => {
+  const folder = await fixture({ [name]: 'export const command = "update";' });
+  await expect(assertAgentGraph(folder, [join(folder, name)])).resolves.toBeInstanceOf(Set);
+  const bad = await fixture({ [name]: 'export const command = "delete";' });
+  await expect(assertAgentGraph(bad, [join(bad, name)])).rejects.toThrow("forbidden");
+});
+test("allows the main Usage template including the inline update command", async () => {
+  const folder = await fixture({ "main.ts": "export const help = `Usage:\n  emend update\n  emend devices`;" });
+  await expect(assertAgentGraph(folder, [join(folder, "main.ts")])).resolves.toBeInstanceOf(Set);
 });

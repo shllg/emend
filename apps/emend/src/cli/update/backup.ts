@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { open, readdir, rename, stat, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
 import { ensurePrivateDir } from "../../state/files.ts";
 import { CliError } from "../http.ts";
@@ -55,12 +55,13 @@ export async function backupDatabase(stateDir: string, version: string, now: Dat
   }
 }
 
-/** Remove all but the newest backups. Files with other names stay. */
-export async function pruneBackups(stateDir: string, keep = keptBackups): Promise<void> {
+/** Keep this run's backup even when the clock went backward, then the newest older backups. */
+export async function pruneBackups(stateDir: string, current?: string, keep = keptBackups): Promise<void> {
   const folder = join(stateDir, "backups");
   const found = (await readdir(folder))
     .map((name) => ({ name, stamp: backupName.exec(name)?.[1] }))
     .filter((entry): entry is { name: string; stamp: string } => entry.stamp !== undefined)
     .sort((a, b) => (a.stamp === b.stamp ? b.name.localeCompare(a.name) : b.stamp.localeCompare(a.stamp)));
-  for (const entry of found.slice(keep)) await unlink(join(folder, entry.name));
+  const older = found.filter((entry) => entry.name !== (current === undefined ? undefined : basename(current)));
+  for (const entry of older.slice(current === undefined ? keep : keep - 1)) await unlink(join(folder, entry.name));
 }

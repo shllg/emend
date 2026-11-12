@@ -1,8 +1,8 @@
 import { chmod, mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { expect, test } from "vitest";
 import { backupDatabase, backupStamp, pruneBackups } from "./backup.ts";
-import { makeDatabase } from "./test-support.ts";
 
 async function state() {
   const dir = await mkdtemp(join(process.env.EMEND_HOME as string, "backup-"));
@@ -23,11 +23,24 @@ test("a failed backup leaves no partial file and says nothing was changed", asyn
   expect(await readdir(join(dir, "backups"))).toEqual([]);
 });
 
-test("a backup of a database in WAL mode works", async () => {
+test("a backup includes committed WAL rows while the writer stays open", async () => {
   const dir = await state();
-  await makeDatabase(join(dir, "emend.db"));
-  const path = await backupDatabase(dir, "0.1.0", new Date("2026-11-12T10:20:30.123Z"));
-  expect(path).toBe(join(dir, "backups", "emend-0.1.0-20261112T102030123Z.db"));
+  const writer = new DatabaseSync(join(dir, "emend.db"));
+  try {
+    writer.exec(
+      "PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE sample(value TEXT); INSERT INTO sample VALUES ('only in WAL');",
+    );
+    expect(await readdir(dir)).toContain("emend.db-wal");
+    const path = await backupDatabase(dir, "0.1.0", new Date("2026-11-12T10:20:30.123Z"));
+    const copy = new DatabaseSync(path, { readOnly: true });
+    try {
+      expect(copy.prepare("SELECT value FROM sample").all()).toEqual([{ value: "only in WAL" }]);
+    } finally {
+      copy.close();
+    }
+  } finally {
+    writer.close();
+  }
 });
 
 test("pruning keeps the three newest by timestamp and ignores other names", async () => {
