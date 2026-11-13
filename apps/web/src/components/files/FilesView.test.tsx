@@ -1,9 +1,13 @@
 import type { FileView, RevisionView } from "@emend/contract";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { createLayoutStore, layoutStore } from "../../lib/layout-store.ts";
 import { FilesView } from "./FilesView.tsx";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  layoutStore.update({ fileOrder: "topics" });
+});
 const file = (path: string, order: number, topic: string | null = null): FileView => ({
   id: crypto.randomUUID(),
   path,
@@ -160,4 +164,93 @@ test("Files groups match diff order, render counts, old-side threads, stale mark
   expect(
     within(screen.getByRole("button", { name: "Open diff for tail.ts, modified, 4 added, 0 removed" })).getByText("+4"),
   ).toBeTruthy();
+  const rowStates = () =>
+    Object.fromEntries(
+      [...container.querySelectorAll(".em-files-row")].map((row) => {
+        const main = row.querySelector(".em-files-row__main");
+        const mark = row.querySelector(".em-viewed-mark");
+        return [
+          row.querySelector(".em-files-row__path")?.getAttribute("title"),
+          {
+            label: main?.getAttribute("aria-label"),
+            text: main?.textContent,
+            viewed: row.getAttribute("data-viewed"),
+            markLabel: mark?.getAttribute("aria-label"),
+            pressed: mark?.getAttribute("aria-pressed"),
+            stale: mark?.hasAttribute("data-stale"),
+          },
+        ];
+      }),
+    );
+  const topicRows = rowStates();
+  const order = screen.getByRole("radiogroup", { name: "File order" });
+  expect(within(order).getByRole("radio", { name: "Topics" }).getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(within(order).getByRole("radio", { name: "A to Z" }));
+  expect(screen.getAllByRole("region").map((group) => group.getAttribute("aria-label"))).toEqual(["Files A to Z"]);
+  expect(container.querySelector(".em-files-group__head")).toBeNull();
+  expect(screen.queryAllByRole("button", { name: /\btopic (First|Last|Other files)\b/ })).toHaveLength(0);
+  expect([...container.querySelectorAll(".em-files-row__path")].map((path) => path.getAttribute("title"))).toEqual([
+    hostile,
+    "misc.ts",
+    "tail.ts",
+  ]);
+  expect(rowStates()).toEqual(topicRows);
+  expect(container.querySelector("img, script")).toBeNull();
+  expect(screen.getByText("1 of 3 viewed")).toBeTruthy();
+  expect(screen.getByRole("progressbar").getAttribute("value")).toBe("1");
+  expect(layoutStore.getSnapshot().fileOrder).toBe("path");
+  const pathRow = screen.getByRole("button", {
+    name: `Open diff for ${hostile}, renamed, 2 added, 1 removed, 1 thread`,
+  });
+  fireEvent.click(pathRow);
+  expect(onNavigate).toHaveBeenLastCalledWith(first);
+  expect(onNavigate).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole("button", { name: "Unmark tail.ts as viewed" }));
+  expect(onViewed).toHaveBeenLastCalledWith([last.path], false);
+  fireEvent.click(within(order).getByRole("radio", { name: "Topics" }));
+  expect(screen.getAllByRole("region").map((group) => group.getAttribute("aria-label"))).toEqual([
+    "First",
+    "Last",
+    "Other files",
+  ]);
+  expect(screen.getAllByRole("button", { name: /\btopic (First|Last|Other files)\b/ })).toHaveLength(3);
+  expect(rowStates()).toEqual(topicRows);
+});
+
+test("the saved file order applies to a fresh render of a different revision", () => {
+  const revision: RevisionView = {
+    seq: 1,
+    base: null,
+    head: null,
+    main: null,
+    writeupEmpty: true,
+    topics: [],
+    files: [file("z.ts", 0), file("a.ts", 1)],
+    docs: [],
+    threads: [],
+    writeup: { sections: [] },
+    changedBlocks: [],
+  };
+  const { unmount } = render(
+    <FilesView revision={revision} counts={new Map()} onViewed={vi.fn()} onNavigate={vi.fn()} />,
+  );
+  fireEvent.click(screen.getByRole("radio", { name: "A to Z" }));
+  expect(layoutStore.getSnapshot().fileOrder).toBe("path");
+  expect(createLayoutStore().getSnapshot().fileOrder).toBe("path");
+  unmount();
+  render(
+    <FilesView
+      revision={{ ...revision, seq: 2, files: [file("src/y.ts", 0), file("src/b.ts", 1)] }}
+      counts={new Map()}
+      onViewed={vi.fn()}
+      onNavigate={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole("radio", { name: "A to Z" }).getAttribute("aria-checked")).toBe("true");
+  const rows = screen.getAllByRole("button", { name: /^Open diff for / });
+  expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual([
+    "Open diff for src/b.ts, modified",
+    "Open diff for src/y.ts, modified",
+  ]);
+  expect(screen.queryByRole("region", { name: "Other files" })).toBeNull();
 });

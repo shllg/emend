@@ -1,5 +1,5 @@
 import { type RefObject, useLayoutEffect, useState } from "react";
-import { layoutStore, useLayoutPreferences } from "../../lib/layout-store.ts";
+import { type FileOrder, layoutStore, useLayoutPreferences } from "../../lib/layout-store.ts";
 import { onReaderInput } from "../../lib/reader-input.ts";
 import type { ParsedDiff } from "./FileDiff.tsx";
 
@@ -24,6 +24,11 @@ export function useDiffStyle() {
 export function useDiffWrap() {
   const { wrap } = useLayoutPreferences();
   return [wrap, (next: boolean) => layoutStore.update({ wrap: next })] as const;
+}
+
+export function useFileOrder() {
+  const { fileOrder } = useLayoutPreferences();
+  return [fileOrder, (next: FileOrder) => layoutStore.update({ fileOrder: next })] as const;
 }
 
 export function useNarrowDiffPane(root: RefObject<HTMLElement | null>) {

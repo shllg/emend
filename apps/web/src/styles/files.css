@@ -2,6 +2,13 @@
   .em-files-view {
     padding: 6px 8px 24px;
   }
+  .em-files-order {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    min-height: 32px;
+    padding: 4px 0 8px 8px;
+  }
   .em-files-group {
     margin-bottom: 8px;
   }

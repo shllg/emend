@@ -18,6 +18,7 @@ test("defaults include independent pane choices and D.4's 12px code size", () =>
     compact: false,
     hideResolved: false,
     diffStyle: "split",
+    fileOrder: "topics",
     wrap: false,
     notes: true,
     details: { phone: false, tablet: true, desktop: true },
@@ -43,6 +44,7 @@ test("invalid fields fall back independently, including each device choice", () 
       compact: true,
       hideResolved: "true",
       diffStyle: "unified",
+      fileOrder: "invalid",
       wrap: "true",
       notes: "false",
       inboxCollapsed: true,
@@ -60,6 +62,23 @@ test("invalid fields fall back independently, including each device choice", () 
     inboxCollapsed: true,
     codeSize: 14,
   });
+});
+test("file order persists across stores and follows other tabs' updates", () => {
+  const store = createLayoutStore();
+  store.update({ fileOrder: "path" });
+  expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}").fileOrder).toBe("path");
+  expect(createLayoutStore().getSnapshot().fileOrder).toBe("path");
+  const changed = vi.fn();
+  const unsubscribe = store.subscribe(changed);
+  try {
+    const newValue = JSON.stringify({ ...store.getSnapshot(), fileOrder: "topics" });
+    localStorage.setItem(layoutKey, newValue);
+    window.dispatchEvent(new StorageEvent("storage", { key: layoutKey, newValue, storageArea: localStorage }));
+    expect(changed).toHaveBeenCalledOnce();
+    expect(store.getSnapshot().fileOrder).toBe("topics");
+  } finally {
+    unsubscribe();
+  }
 });
 test.each([
   ['{"reading":"focus"}', true],
