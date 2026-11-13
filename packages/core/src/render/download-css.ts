@@ -21,9 +21,14 @@ export type CssToken = {
   start: number;
   end: number;
   value: string;
+  unterminated: boolean;
 };
 export const asciiLower = (value: string) => value.replace(/[A-Z]/g, (char) => char.toLowerCase());
 export const isImageSet = (name: string) => name === "image-set" || name === "-webkit-image-set";
+export const isImageFunction = (name: string) =>
+  isImageSet(name) || ["image", "cross-fade", "-webkit-cross-fade"].includes(name);
+export const isIndirectReference = (name: string) => ["var", "env", "attr"].includes(name);
+export type CssContext = "stylesheet" | "attribute";
 export function utf8Length(value: string, start = 0, end = value.length): number {
   let bytes = 0;
   for (let i = start; i < end; i++) {
@@ -159,6 +164,7 @@ export function* cssTokenize(source: string): Generator<CssToken> {
     const start = pos;
     let kind: CssToken["kind"] = "delim";
     let value = "";
+    let unterminated = false;
     const c = at(pos);
     if (space(c)) {
       kind = "space";
@@ -169,18 +175,22 @@ export function* cssTokenize(source: string): Generator<CssToken> {
       kind = "comment";
       pos += 2;
       while (pos < source.length && !(at(pos) === "*" && at(pos + 1) === "/")) pos++;
+      unterminated = pos === source.length;
       pos = Math.min(pos + 2, source.length);
     } else if (c === '"' || c === "'") {
       kind = "string";
+      unterminated = true;
       pos++;
       const parts = new CssTextBuffer();
       while (pos < source.length) {
         if (at(pos) === c) {
+          unterminated = false;
           pos++;
           break;
         }
         if (newline(at(pos))) {
           kind = "bad-string";
+          unterminated = false;
           break;
         }
         if (at(pos) === "\\") {
@@ -305,6 +315,121 @@ export function* cssTokenize(source: string): Generator<CssToken> {
       if (":;,()[]{}".includes(c)) kind = "punct";
       else if (c === "\0") value = "\ufffd";
     }
-    yield { kind, start, end: pos, value };
+    yield { kind, start, end: pos, value, unterminated };
   }
+}
+
+export function cssOpener(token: CssToken): number {
+  if (token.kind === "function") return 1;
+  if (token.kind !== "punct") return 0;
+  return token.value === "(" ? 1 : token.value === "[" ? 2 : token.value === "{" ? 3 : 0;
+}
+export function cssCloser(token: CssToken): number {
+  if (token.kind !== "punct") return 0;
+  return token.value === ")" ? 1 : token.value === "]" ? 2 : token.value === "}" ? 3 : 0;
+}
+export function closeCss(stack: CssStack, token: CssToken): number {
+  const closer = cssCloser(token);
+  return closer && ((stack.top() ?? 0) & 3) === closer ? (stack.pop() ?? 0) : 0;
+}
+export const cssTrivia = (token: CssToken) => token.kind === "space" || token.kind === "comment";
+
+/** Preserve complete escapes in every token so HTML escaping cannot create new CSS tokens. */
+export function escapeCssToken(raw: string, string = false, atEof = false): string {
+  const output = new CssTextBuffer();
+  let start = 0;
+  let index = 0;
+  while (index < raw.length) {
+    const char = raw.charAt(index);
+    if (
+      (char === "<" && (string || /^[a-z/!?]/i.test(raw.charAt(index + 1)))) ||
+      (char === "\\" && raw.charAt(index + 1) === "<")
+    ) {
+      output.push(raw.slice(start, index));
+      output.push("\\3c ");
+      index += char === "\\" ? 2 : 1;
+      start = index;
+    } else if (char === "\\") {
+      if (atEof && index + 1 === raw.length) {
+        output.push(raw.slice(start, index));
+        // EOF consumes a lone escape in a string, or decodes it as U+FFFD in a name.
+        if (!string) output.push("\\fffd ");
+        start = raw.length;
+        break;
+      }
+      index++;
+      if (hex(raw.charAt(index))) {
+        const end = index + 6;
+        while (index < end && hex(raw.charAt(index))) index++;
+        if (space(raw.charAt(index))) {
+          if (raw.charAt(index++) === "\r" && raw.charAt(index) === "\n") index++;
+        }
+      } else if (raw.charAt(index) === "\r" && raw.charAt(index + 1) === "\n") index += 2;
+      else if (index < raw.length) index += (raw.codePointAt(index) ?? 0) > 0xffff ? 2 : 1;
+    } else index++;
+  }
+  output.push(raw.slice(start));
+  return output.finish();
+}
+
+const offlineCssReference = (value: string) => /^data:/i.test(value) || /^#[^\s]*$/.test(value);
+/** Validate the final token stream. The caller reserves its work budget before this scan. */
+export async function checkDownloadCss(
+  css: string,
+  progress: (bytes: number) => Promise<void> | undefined = () => undefined,
+  context: CssContext = "stylesheet",
+): Promise<string | null> {
+  const contexts = new CssStack();
+  let namespace = false;
+  let images = 0;
+  let urlFunction = false;
+  let urlString = false;
+  for (const token of cssTokenize(css)) {
+    const pending = progress(utf8Length(css, token.start, token.end));
+    if (pending) await pending;
+    if (token.unterminated) return null;
+    if (namespace) {
+      if (!contexts.length && token.kind === "punct" && ";{}".includes(token.value)) {
+        namespace = false;
+      } else {
+        const opener = cssOpener(token);
+        if (opener) contexts.push(opener);
+        else closeCss(contexts, token);
+        continue;
+      }
+      // The terminator belongs to the surrounding CSS, including an unmatched closing brace.
+    }
+    if (urlFunction) {
+      if (cssTrivia(token)) continue;
+      if (token.kind === "punct" && token.value === ")") {
+        if (!urlString) return null;
+        urlFunction = false;
+      } else if (token.kind === "string" && !urlString && offlineCssReference(token.value)) urlString = true;
+      else return null;
+      continue;
+    }
+    const name = token.kind === "at" || token.kind === "function" ? asciiLower(token.value) : "";
+    if (token.kind === "at") {
+      if (name === "import") return null;
+      if (name === "namespace" && context === "stylesheet" && !contexts.length) {
+        namespace = true;
+        continue;
+      }
+    }
+    if (token.kind === "bad-url" || (token.kind === "url" && !offlineCssReference(token.value))) return null;
+    if (token.kind === "function" && images && isIndirectReference(name)) return null;
+    if (token.kind === "function" && (name === "url" || name === "src")) {
+      urlFunction = true;
+      urlString = false;
+      continue;
+    }
+    if (token.kind === "string" && (contexts.top() ?? 0) & 4 && !offlineCssReference(token.value)) return null;
+    const opener = cssOpener(token);
+    if (opener) {
+      const reference = token.kind === "function" && isImageFunction(name);
+      if (reference) images++;
+      contexts.push(opener | (reference ? 4 : 0));
+    } else if (closeCss(contexts, token) & 4) images--;
+  }
+  return urlFunction && !urlString ? null : css;
 }

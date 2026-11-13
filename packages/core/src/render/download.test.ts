@@ -10,6 +10,7 @@ import {
   DOWNLOAD_FILE_CSP,
   type ResolveResult,
 } from "./download.ts";
+import { checkDownloadCss, cssTokenize } from "./download-css.ts";
 
 const sha = "a".repeat(64);
 const details = { project: "Sample", branch: "feature", seq: 2, publishedAt: "2026-01-02T23:00:00Z", links: [] };
@@ -514,7 +515,7 @@ test("preserves import media layer and supports conditions and removes charsets"
       "docs/supports.css": css("p{display:none}"),
     },
   ).result;
-  expect(html).toContain("@media print { p{display:none} }");
+  expect(html).toContain("@media print { /**//**/p{display:none} }");
   expect(html).toContain("@layer { p{display:none} }");
   expect(html).toContain(
     "@layer report { @supports (display:grid) { @media screen and (min-width: 10px) { p{display:none} } } }",
@@ -528,7 +529,7 @@ test("drops malformed import preludes and their blocks before rewriting the foll
     { "docs/a.css": css("p{color:green}") },
   );
   const html = await result;
-  expect(html).toContain('<style>body{background:url("data:,")};</style>');
+  expect(html).toContain('<style>/**//**/body{background:/**/url("data:,")/**/};</style>');
   expect(html).not.toContain("https://evil.example");
   expect(html).not.toContain("@import");
   expect(html).not.toContain("p{color:green}");
@@ -547,7 +548,7 @@ test.each([
     { "docs/a.css": css("p{color:green}") },
   );
   const html = await result;
-  expect(html).toContain('<style>body{background:url("data:,")}</style>');
+  expect(html).toContain('<style>/**//**/body{background:/**/url("data:,")/**/}</style>');
   expect(html).not.toContain("https://evil.example");
   expect(html).not.toContain("@import");
   expect(html).not.toContain("p{color:green}");
@@ -576,7 +577,7 @@ test.each(["image-set", "-webkit-image-set"])("rewrites every quoted string and 
     { "docs/a.png": png, "docs/b.png": png },
   ).result;
   expect(html).toContain(
-    `${fn}("data:image/png;base64,AQID" 1x type("image/png"), url("data:image/png;base64,AQID") 2x, "data:," 3x)`,
+    `${fn}(/**/"data:image/png;base64,AQID"/**/ 1x type("image/png"), /**/url("data:image/png;base64,AQID")/**/ 2x, /**/"data:,"/**/ 3x)`,
   );
 });
 
@@ -623,7 +624,7 @@ test("resolves quoted image-set candidates after CSS comments", async () => {
   const html = await htmlDoc('<style>p{background:image-set(/* preview */ "a.png" 1x)}</style>', {
     "docs/a.png": png,
   }).result;
-  expect(html).toContain('image-set(/* preview */ "data:image/png;base64,AQID" 1x)');
+  expect(html).toContain('image-set(/* preview */ /**/"data:image/png;base64,AQID"/**/ 1x)');
 });
 
 test("bounds a repeated import tree to 64 stylesheet occurrences with a size note", async () => {
@@ -656,7 +657,7 @@ test("inlines repeated stylesheet links and imports with their own media and lay
   expect(styles.map((el) => hastText(el))).toEqual([
     "p{color:green}",
     "p{color:green}",
-    "@layer ui { p{color:green} }",
+    "/**/@layer ui { p{color:green} }/**/",
   ]);
   expect(resolveAsset).toHaveBeenCalledExactlyOnceWith("docs/shared.css");
   expect(html).not.toContain("Some content was left out");
@@ -740,7 +741,7 @@ test("replaces 2000 nested image-set openers and 100 KB of filler with none with
   );
   const html = await result;
   expect(Date.now() - start).toBeLessThan(10_000);
-  expect(html).toContain("<style>i{background:none}p{color:green}</style>");
+  expect(html).toContain("<style>i{background:/**/none/**/}p{color:green}</style>");
   expect(resolveAsset).not.toHaveBeenCalled();
 }, 15_000);
 
@@ -751,7 +752,7 @@ test("rewrites 5000 image-set rules within 10 seconds and resolves each candidat
   );
   const html = await result;
   expect(Date.now() - start).toBeLessThan(10_000);
-  expect(html).toContain(`<style>${'i{background:image-set("data:," 1x)}'.repeat(5000)}</style>`);
+  expect(html).toContain(`<style>${'i{background:image-set(/**/"data:,"/**/ 1x)}'.repeat(5000)}</style>`);
   expect(resolveAsset).toHaveBeenCalledExactlyOnceWith("docs/missing.png");
 }, 15_000);
 
@@ -765,7 +766,7 @@ test("preserves image-set asset fragments and author data URLs while charging ev
     docPath: "doc.html",
     resolveAsset,
   });
-  expect(html).toContain(`image-set("${uri}#part" 1x, url("${uri}#part") 2x, "${uri}" 3x)`);
+  expect(html).toContain(`image-set(/**/"${uri}#part"/**/ 1x, /**/url("${uri}#part")/**/ 2x, /**/"${uri}"/**/ 3x)`);
   expect(resolveAsset).toHaveBeenCalledExactlyOnceWith("a.png");
   const largeUri = `data:image/png;base64,${"A".repeat(1024)}`;
   const limited = await buildHtmlDocDownload({
@@ -776,7 +777,7 @@ test("preserves image-set asset fragments and author data URLs while charging ev
     resolveAsset,
   });
   expect(limited.match(/data:image\/png/g)).toHaveLength(2);
-  expect(limited).toContain('image-set("data:," 1x)');
+  expect(limited).toContain('image-set(/**/"data:,"/**/ 1x)');
   expect(limited).toContain("Some content was left out");
 });
 
@@ -845,7 +846,7 @@ test.each(["element", "attribute"])(
     const { result, resolveAsset } = htmlDoc(input);
     const html = await result;
     expect(Date.now() - start).toBeLessThan(15_000);
-    expect(html).toContain("background:none");
+    expect(html).toContain("background:/**/none/**/");
     expect(html).not.toContain("nested.png");
     expect(html.match(/data:,/g)).toHaveLength(10_000);
     expect(resolveAsset).toHaveBeenCalledExactlyOnceWith("docs/missing.png");
@@ -853,11 +854,11 @@ test.each(["element", "attribute"])(
   20_000,
 );
 
-test.each(['"', "'"])("keeps unterminated %s strings with a final escape in one token", async (quote) => {
+test.each(['"', "'"])("closes unterminated %s strings after dropping a lone final escape", async (quote) => {
   const source = `${quote}a${`\\${quote}`.repeat(40_000)}\\`;
   const { result, resolveAsset } = htmlDoc(`<style>${source}</style>`);
   const html = await result;
-  expect(html).toContain(`<style>${source}</style>`);
+  expect(html).toContain(`<style>${source.slice(0, -1)}${quote}</style>`);
   expect(resolveAsset).not.toHaveBeenCalled();
 });
 
@@ -993,7 +994,7 @@ test.each(["writeup", "markdown", "html"])(
   },
 );
 
-test("pauses in both CSS passes for each MiB across style elements and attributes", async () => {
+test("pauses in both source passes and the output check for each MiB across styles and attributes", async () => {
   const source = `/*${"é".repeat((1024 * 1024 - 4) / 2)}*/`;
   const pause = vi.fn(async () => {});
   const html = await buildHtmlDocDownload({
@@ -1004,7 +1005,7 @@ test("pauses in both CSS passes for each MiB across style elements and attribute
     pause,
   });
   expect(html).toContain(source);
-  expect(pause).toHaveBeenCalledTimes(4);
+  expect(pause).toHaveBeenCalledTimes(6);
   pause.mockClear();
   await buildHtmlDocDownload({
     html: '<style>p{color:green}</style><div style="color:red"></div>',
@@ -1082,7 +1083,7 @@ test("preserves image-set type strings while resolving candidate strings", async
   const html = await htmlDoc('<style>p{background:image-set("a.png" 1x type("image/png"))}</style>', {
     "docs/a.png": png,
   }).result;
-  expect(html).toContain('image-set("data:image/png;base64,AQID" 1x type("image/png"))');
+  expect(html).toContain('image-set(/**/"data:image/png;base64,AQID"/**/ 1x type("image/png"))');
 });
 
 test("does not mistake comments and strings for nested image-set functions", async () => {
@@ -1097,7 +1098,7 @@ test("does not mistake comments and strings for nested image-set functions", asy
 test("ends bad strings at unescaped newlines so later resource references are rewritten", async () => {
   const html = await htmlDoc('<style>.bad{content:"oops\n}.ok{background:url(a.png)}</style>', { "docs/a.png": png })
     .result;
-  expect(html).toContain('.ok{background:url("data:image/png;base64,AQID")}');
+  expect(html).toContain('.ok{background:/**/url("data:image/png;base64,AQID")/**/}');
 });
 
 test.each([
@@ -1115,20 +1116,21 @@ test.each([
   expect(html).toContain("Some content was left out");
 });
 
+const hostileCssCorpus = [
+  '<meta http-equiv="refresh">',
+  "</style>",
+  "<!-- -->",
+  "<?x>",
+  "</p>",
+  "/*<meta><script></style>*/",
+  'p{content:"<meta></style>"}',
+  'p{content:"<meta>\n}p{color:red}',
+  'p{background:url("data:image/png,<meta>")}',
+  '@import "a.css" supports(font-family:"<meta>");',
+];
+
 test("serializes hostile CSS tokens safely before the style escape backstop", async () => {
-  const corpus = [
-    '<meta http-equiv="refresh">',
-    "</style>",
-    "<!-- -->",
-    "<?x>",
-    "</p>",
-    "/*<meta><script></style>*/",
-    'p{content:"<meta></style>"}',
-    'p{content:"<meta>\n}p{color:red}',
-    'p{background:url("data:image/png,<meta>")}',
-    '@import "a.css" supports(font-family:"<meta>");',
-  ];
-  for (const source of corpus) {
+  for (const source of hostileCssCorpus) {
     const input = `<svg><style>${source.replaceAll("&", "&amp;").replaceAll("<", "&lt;")}</style></svg>`;
     const html = await htmlDoc(input, { "docs/a.css": css("p{color:green}") }).result;
     const attributeHtml = await htmlDoc(
@@ -1152,7 +1154,7 @@ test.each(['url(bad"x)', 'url("a.png" extra)', 'src("a.png" extra)'])(
   "fails closed for malformed CSS resource %s",
   async (source) => {
     const html = await htmlDoc(`<style>p{background:${source}}</style>`).result;
-    expect(html).toContain('background:url("data:,")');
+    expect(html).toContain('background:/**/url("data:,")/**/');
   },
 );
 
@@ -1328,7 +1330,7 @@ test.each([
   { placement: "style", character: "(", mib: 8 },
   { placement: "style", character: "<", mib: 8 },
 ])(
-  "streams $mib MiB of $character in a $placement and pauses in both CSS passes",
+  "streams $mib MiB of $character in a $placement and pauses in all three CSS passes",
   async ({ placement, character, mib }) => {
     const source = character.repeat(mib * 1024 * 1024);
     const pause = vi.fn(async () => {});
@@ -1341,7 +1343,7 @@ test.each([
     });
     expect(html).toContain("<p>Kept page text</p>");
     expect(html).toContain(`<style>${source}</style>`);
-    expect(pause).toHaveBeenCalledTimes(mib * 2);
+    expect(pause).toHaveBeenCalledTimes(mib * 3);
   },
   60_000,
 );
@@ -1351,7 +1353,7 @@ test("drops imports whose preludes exceed 64 tokens without losing following CSS
     "docs/a.css": css("p{color:red}"),
   });
   const html = await result;
-  expect(html).toContain("<style>p{color:green}</style>");
+  expect(html).toContain("<style>/**//**/p{color:green}</style>");
   expect(html).toContain("Some content was left out");
   expect(resolveAsset).not.toHaveBeenCalled();
 });
@@ -1361,7 +1363,7 @@ test("drops imports whose preludes exceed four KiB even with few tokens", async 
     "docs/a.css": css("p{color:red}"),
   });
   const html = await result;
-  expect(html).toContain("<style>p{color:green}</style>");
+  expect(html).toContain("<style>/**//**/p{color:green}</style>");
   expect(html).toContain("Some content was left out");
   expect(resolveAsset).not.toHaveBeenCalled();
 });
@@ -1371,7 +1373,7 @@ test("drops invalid import rules with their entire block and keeps the following
     "docs/a.css": css("p{color:blue}"),
   });
   const html = await result;
-  expect(html).toContain("<style> p{color:green}</style>");
+  expect(html).toContain("<style>/**//**/ p{color:green}</style>");
   expect(html).not.toContain("color:red");
   expect(html).not.toContain("color:blue");
   expect(resolveAsset).not.toHaveBeenCalled();
@@ -1390,3 +1392,416 @@ test("uses image tag names without inferring namespaces for resource hrefs", asy
   expect(nodes.filter((el) => el.tagName === "mi").map((el) => el.properties.href)).toEqual([undefined, "#local"]);
   expect(resolveAsset).toHaveBeenCalledExactlyOnceWith("docs/a.png");
 });
+
+const cssSplices = [
+  String.raw`p{background:\75r@import "missing.css"{}l(https://probe.invalid/a.png)}`,
+  String.raw`p{background:\75r@charset "x";l(https://probe.invalid/b.png)}`,
+  'a{color:red}/@import "m.css"{}*"*/ p{background:url(https://probe.invalid/c.png)} /*"',
+];
+
+const securitySheets = {
+  "docs/str.css": css('x{y:z} "unterminated'),
+  "docs/com.css": css("x{y:z} /* unterminated"),
+  "docs/bs.css": css("x{y:z} \\"),
+  "docs/ok.css": css("x{y:z}"),
+};
+const securityCssProbes = [
+  {
+    name: "escaped less-than in a function name",
+    source: String.raw`li{list-style:\<url(https://probe.invalid/a.png)}`,
+  },
+  { name: "a nested namespace", source: "li{ i{ @namespace } list-style:url(https://probe.invalid/b.png); }" },
+  {
+    name: "a namespace ending at a closing brace",
+    source: "@namespace } background:url(https://probe.invalid/s.png);",
+  },
+  {
+    name: "an import between identifier fragments",
+    source: 'li.t{list-style:u@import "missing.css";rl(https://probe.invalid/g-import.png)}',
+  },
+  {
+    name: "a charset between identifier fragments",
+    source: 'li.t{list-style:u@charset "x";rl(https://probe.invalid/g-charset.png)}',
+  },
+  {
+    name: "an imported unterminated string",
+    source: '@import "str.css";"{} li.t{list-style:url(https://probe.invalid/d-string.png)} x{a:"',
+  },
+  {
+    name: "an imported unterminated comment",
+    source: '@import "com.css";"*/ li.t{list-style:url(https://probe.invalid/d-comment.png)} x{a:"',
+  },
+  {
+    name: "an imported final backslash",
+    source: '@import "bs.css";"; li.t{list-style:url(https://probe.invalid/d-backslash.png)} x{a:"',
+  },
+  {
+    name: "a bad string in import conditions",
+    source: '@import "ok.css" "x\n;"; li.t{list-style:url(https://probe.invalid/d-badstring.png)} x{a:"',
+  },
+  {
+    name: "an image-set variable",
+    source: ':root{--c:"https://probe.invalid/c.png"} p{background-image:image-set(var(--c) 1x)}',
+  },
+];
+
+/** Inspect the tokens of the written CSS independently of the production backstop. */
+function expectOfflineCss(source: string, attribute = false) {
+  const tokens = [...cssTokenize(source)];
+  const contexts: string[] = [];
+  const imageFunctions = ["image-set", "-webkit-image-set", "image", "cross-fade", "-webkit-cross-fade"];
+  const safe = (value: string) => expect(value).toMatch(/^(?:data:|#[^\s]*$)/i);
+  for (const token of tokens) expect(token.unterminated).toBe(false);
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (!token) break;
+    const name = token.value.toLowerCase();
+    if (token.kind === "at" && name === "namespace" && !attribute && !contexts.length) {
+      let depth = 0;
+      for (index++; index < tokens.length; index++) {
+        const part = tokens[index];
+        if (!part) break;
+        if (!depth && part.kind === "punct" && ";{}".includes(part.value)) {
+          if (part.value === "{") contexts.push("{");
+          break;
+        }
+        if (part.kind === "function" || (part.kind === "punct" && "([{".includes(part.value))) depth++;
+        else if (part.kind === "punct" && ")]}".includes(part.value)) depth = Math.max(0, depth - 1);
+      }
+      continue;
+    }
+    expect(token.kind).not.toBe("bad-url");
+    if (token.kind === "at") expect(name).not.toBe("import");
+    if (token.kind === "url") safe(token.value);
+    if (token.kind === "function") {
+      if (contexts.some((name) => imageFunctions.includes(name))) expect(["var", "env", "attr"]).not.toContain(name);
+      if (name === "url" || name === "src") {
+        const argumentsFound = [];
+        for (index++; index < tokens.length; index++) {
+          const argument = tokens[index];
+          if (!argument || (argument.kind === "punct" && argument.value === ")")) break;
+          if (argument.kind !== "space" && argument.kind !== "comment") argumentsFound.push(argument);
+        }
+        expect(argumentsFound).toHaveLength(1);
+        expect(argumentsFound[0]?.kind).toBe("string");
+        safe(argumentsFound[0]?.value ?? "");
+      } else contexts.push(name);
+    } else if (token.kind === "punct") {
+      if ("([{".includes(token.value)) contexts.push(token.value);
+      else if (")]}".includes(token.value)) contexts.pop();
+    } else if (token.kind === "string" && imageFunctions.includes(contexts.at(-1) ?? "")) safe(token.value);
+  }
+}
+
+test("keeps rewritten stylesheets and style attributes free of active remote references across the hostile corpus", async () => {
+  const corpus = [
+    ...hostileCssCorpus,
+    ...cssSplices,
+    ...securityCssProbes.map(({ source }) => source),
+    String.raw`p{a:u\72l(https://probe.invalid/a);b:image-s\65t("https://probe.invalid/b" 1x)}`,
+    'p{a:src("https://probe.invalid/a");b:image("https://probe.invalid/b");c:cross-fade("https://probe.invalid/c",red)}',
+    'p{background:image-set(/*image-set(*/ "a.png" 1x type("image/png"))}',
+    '.bad{content:"oops\n}.ok{background:url(https://probe.invalid/a)}',
+    '@import "a.css" supports(font-family:"a/*b");',
+    "@namespace svg url(http://www.w3.org/2000/svg);svg|rect{fill:red}",
+  ];
+  for (const source of corpus) {
+    const escaped = source.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
+    const { result } = htmlDoc(
+      `<svg><style>${escaped}</style></svg><p style="${escaped}">Text</p><link rel="stylesheet" href="hostile.css">`,
+      {
+        "docs/hostile.css": css(source),
+        "docs/a.css": css('p{background:url("https://probe.invalid/imported")}'),
+        "docs/a.png": png,
+        ...securitySheets,
+      },
+    );
+    const html = await result;
+    for (const node of parsed(html)) {
+      if (node.tagName === "style") expectOfflineCss(hastText(node));
+      if (typeof node.properties.style === "string") expectOfflineCss(node.properties.style, true);
+    }
+  }
+});
+
+test.each([
+  "p{background:url(https://probe.invalid/a.png)}",
+  'p{background:url("https://probe.invalid/a.png")}',
+  'p{background:src("https://probe.invalid/a.png")}',
+  'p{background:url("data:image/png,x" extra)}',
+  'p{background:url("data:image/png,x" "data:image/png,y")}',
+  'p{background:url(bad"url)}',
+  '@import "data:text/css,p{}";',
+  'p{background:image-set("https://probe.invalid/a.png" 1x)}',
+  'p{background:-webkit-image-set("https://probe.invalid/a.png" 1x)}',
+  'p{background:image("https://probe.invalid/a.png")}',
+  'p{background:cross-fade("https://probe.invalid/a.png",red)}',
+  'p{background:-webkit-cross-fade("https://probe.invalid/a.png",red)}',
+  "p{background:image-set(var(--c) 1x)}",
+  "p{background:IMAGE-SET(type(v\\61r(--c)) 1x)}",
+  "p{background:image(env(--c))}",
+  "p{background:cross-fade(attr(data-image))}",
+  'p{background:src("data:image/png,x" var(--c))}',
+  'p{content:"unterminated',
+  'p{content:"unterminated\\',
+  "/* unterminated",
+  "li{ i{ @namespace } list-style:url(https://probe.invalid/b.png); }",
+  "@namespace } background:url(https://probe.invalid/s.png);",
+])("rejects synthetic unsafe CSS output in the backstop: %s", async (source) => {
+  expect(await checkDownloadCss(source)).toBeNull();
+});
+
+test("exempts namespace preludes while checking the CSS after them", async () => {
+  const namespace = '@namespace svg url("http://www.w3.org/2000/svg");';
+  const source = `${namespace}p{background:src(/**/"data:image/png,x"/**/);filter:url(#local)}`;
+  expect(await checkDownloadCss(source)).toBe(source);
+  expect(await checkDownloadCss(`${namespace}p{background:url(https://probe.invalid/a.png)}`)).toBeNull();
+});
+
+test.each([
+  String.raw`p::before{content:"\<"}`,
+  String.raw`[data-x="\<"]{color:red}`,
+  'p{content:"\\<\n}.ok{color:green}',
+  String.raw`p{content:"\\< \3c  \00003C \< <"}`,
+])("preserves decoded string values while escaping less-than in %s", async (source) => {
+  const before = [...cssTokenize(source)].filter((token) => token.kind === "string" || token.kind === "bad-string");
+  const html = await htmlDoc(`<style>${source}</style>`).result;
+  const stylesheet = parsed(html).find((node) => node.tagName === "style");
+  expect(stylesheet).toBeDefined();
+  const written = stylesheet ? hastText(stylesheet) : "";
+  const after = [...cssTokenize(written)].filter((token) => token.kind === "string" || token.kind === "bad-string");
+  expect(after.map(({ kind, value }) => ({ kind, value }))).toEqual(before.map(({ kind, value }) => ({ kind, value })));
+  expect(written).toContain("\\3c ");
+  if (source.includes(".ok")) expect(written).toContain("\n}.ok{color:green}");
+});
+
+test("charges separators around replacements and drops and separates them from less-than", async () => {
+  const source = '<url(#x)@import "missing.css";';
+  const { result } = htmlDoc(`<style>${source}</style>`);
+  const html = await result;
+  const written = hastText(parsed(html).find((node) => node.tagName === "style") as Element);
+  expect(written).toBe('< /**/url("#x")/**//**//**/');
+  const limited = await buildHtmlDocDownload({
+    html: `<style>${source}</style>`,
+    title: "Budget",
+    docPath: "doc.html",
+    inlineBudget: new TextEncoder().encode(written).byteLength - 1,
+    resolveAsset: async () => null,
+  });
+  expect(parsed(limited).some((node) => node.tagName === "style")).toBe(false);
+  expect(limited).toContain("Some content was left out");
+});
+
+test.each(cssSplices)(
+  "separates removed CSS constructs without creating reference or comment tokens: %s",
+  async (source) => {
+    const { result, resolveAsset } = htmlDoc(`<style>${source}</style>`);
+    const html = await result;
+    const stylesheet = parsed(html).find((node) => node.tagName === "style");
+    expect(stylesheet).toBeDefined();
+    const written = stylesheet ? hastText(stylesheet) : "";
+    expectOfflineCss(written);
+    expect(written).toContain("/**//**/");
+    if (source.startsWith("a{")) {
+      expect(written).toContain("a{color:red}");
+      const strings = (value: string) =>
+        [...cssTokenize(value)].filter((token) => token.kind === "string").map((token) => token.value);
+      expect(strings(written)).toEqual(strings(source).slice(1));
+    } else {
+      expect(written).toContain(String.raw`\75r/**//**/l(`);
+      expect(
+        [...cssTokenize(written)].some(
+          (token) => token.kind === "url" || (token.kind === "function" && token.value === "url"),
+        ),
+      ).toBe(false);
+    }
+    expect(resolveAsset).not.toHaveBeenCalled();
+  },
+);
+
+test.each(securityCssProbes)("preserves safe surrounding rules while neutralizing $name", async ({ source, name }) => {
+  const before = "a{color:red}";
+  const after = "p{color:green}";
+  const html = await htmlDoc(`<style>${before}${source}${after}</style>`, securitySheets).result;
+  const stylesheet = parsed(html).find((node) => node.tagName === "style");
+  expect(stylesheet).toBeDefined();
+  const written = stylesheet ? hastText(stylesheet) : "";
+  expectOfflineCss(written);
+  expect(written.startsWith(before)).toBe(true);
+  expect(written.endsWith(after)).toBe(true);
+  // Neither surrounding rule may have become part of a string or comment.
+  const tokens = [...cssTokenize(written)];
+  expect(tokens.find((token) => token.start === 0)?.value).toBe("a");
+  expect(tokens.find((token) => token.start === written.length - after.length)?.value).toBe("p");
+  if (name.startsWith("an imported")) expect(written).toContain("x{y:z}");
+  if (name === "a bad string in import conditions") expect(written).not.toContain("x{y:z}");
+  if (name === "escaped less-than in a function name") {
+    expect(tokens.filter((token) => token.kind === "function").map((token) => token.value)).toEqual(["<url"]);
+    expect(tokens.some((token) => token.kind === "url" || token.kind === "bad-url")).toBe(false);
+  }
+  if (name === "an image-set variable") {
+    expect(written).toContain(':root{--c:"https://probe.invalid/c.png"}');
+    expect(written).toContain("background-image:/**/none/**/");
+  }
+});
+
+test("preserves decoded escaped less-than in names, functions, at-keywords, hashes and dimensions", async () => {
+  const source = String.raw`li.\<name#\<hash{--\<ident:1\<unit;value:\<function(1);content:"\<"}@\<rule x;`;
+  const html = await htmlDoc(`<style>${source}</style>`).result;
+  const sheet = parsed(html).find((node) => node.tagName === "style");
+  expect(sheet).toBeDefined();
+  const written = sheet ? hastText(sheet) : "";
+  const decoded = (value: string) => [...cssTokenize(value)].map(({ kind, value }) => ({ kind, value }));
+  expect(decoded(written)).toEqual(decoded(source));
+  expect(written).toContain("\\3c ");
+  expect(written.replace(/<(?=[a-z/!?])/gi, "\\3c ")).toBe(written);
+  expectOfflineCss(written);
+});
+
+test("rewrites namespace references in attributes and blocks but preserves top-level stylesheet namespaces", async () => {
+  const namespace = "@namespace svg url(http://www.w3.org/2000/svg);";
+  const input = `<style>${namespace} svg|rect{fill:red}@media screen{${namespace}p{color:green}}</style><p style="${namespace}color:red">Text</p>`;
+  const html = await htmlDoc(input).result;
+  const nodes = parsed(html);
+  const sheet = nodes.find((node) => node.tagName === "style");
+  const written = sheet ? hastText(sheet) : "";
+  expect(written.startsWith(namespace)).toBe(true);
+  expect(written.match(/http:\/\/www.w3.org\/2000\/svg/g)).toHaveLength(1);
+  expect(written).toContain('svg|rect{fill:red}@media screen{@namespace svg /**/url("data:,")/**/;p{color:green}}');
+  const attribute = nodes.find((node) => node.tagName === "p")?.properties.style;
+  expect(attribute).toBe('@namespace svg /**/url("data:,")/**/;color:red');
+  expectOfflineCss(written);
+  if (typeof attribute === "string") expectOfflineCss(attribute, true);
+});
+
+test("limits the namespace backstop exemption to a stylesheet prelude at depth zero", async () => {
+  const namespace = "@namespace svg url(http://www.w3.org/2000/svg);";
+  expect(await checkDownloadCss(namespace)).toBe(namespace);
+  expect(await checkDownloadCss(namespace, undefined, "attribute")).toBeNull();
+  expect(await checkDownloadCss(`p{${namespace}}`)).toBeNull();
+  expect(
+    await checkDownloadCss(
+      "@namespace svg url(http://www.w3.org/2000/svg){p{background:url(https://probe.invalid/x)}}",
+    ),
+  ).toBeNull();
+});
+
+test.each(['"unterminated', "/* unterminated", '"bad\nstring', 'url(bad"url)'])(
+  "drops an import whose prelude contains %s without reading its sheet",
+  async (condition) => {
+    const { result, resolveAsset } = htmlDoc(
+      `<style>a{color:red}@import "ok.css" ${condition}</style>`,
+      securitySheets,
+    );
+    const html = await result;
+    const written = hastText(parsed(html).find((node) => node.tagName === "style") as Element);
+    expect(written).toBe("a{color:red}/**//**/");
+    expectOfflineCss(written);
+    expect(resolveAsset).not.toHaveBeenCalled();
+  },
+);
+
+test.each(["image-set", "-webkit-image-set", "image", "cross-fade", "-webkit-cross-fade"])(
+  "replaces %s containing indirect references at any depth without resolving them",
+  async (name) => {
+    for (const indirect of ["var(--c)", "env(--c)", "attr(data-image)", String.raw`v\61r(--c)`]) {
+      const source = `p{a:${name}(${indirect});b:${name}(type(${indirect}));c:${name}(type(image(${indirect})));d:src(${indirect});color:green}`;
+      const { result, resolveAsset } = htmlDoc(`<style>${source}</style>`);
+      const html = await result;
+      const written = hastText(parsed(html).find((node) => node.tagName === "style") as Element);
+      expect(written).toBe('p{a:/**/none/**/;b:/**/none/**/;c:/**/none/**/;d:/**/url("data:,")/**/;color:green}');
+      expectOfflineCss(written);
+      expect(resolveAsset).not.toHaveBeenCalled();
+    }
+  },
+);
+
+test("detects indirect references in image functions that end at EOF", async () => {
+  const html = await htmlDoc("<style>p{color:green;background:image(type(var(--c)</style>").result;
+  const written = hastText(parsed(html).find((node) => node.tagName === "style") as Element);
+  expect(written).toBe("p{color:green;background:/**/none/**/");
+  expectOfflineCss(written);
+});
+
+test("does not mistake strings or comments for indirect image references", async () => {
+  const html = await htmlDoc('<style>p{background:image-set(/*var(*/ "var(--c).png" 1x type("env(--c)"))}</style>', {
+    "docs/var(--c).png": png,
+  }).result;
+  const written = hastText(parsed(html).find((node) => node.tagName === "style") as Element);
+  expect(written).not.toContain("none");
+  expect(written).toContain('type("env(--c)")');
+  expect(written).toContain("data:image/png;base64,AQID");
+  expectOfflineCss(written);
+});
+
+test("charges the final CSS validation scan to the never-refunded work budget", async () => {
+  const mib = 1024 * 1024;
+  const source = `/*${"x".repeat(mib - 4)}*/`;
+  const pause = vi.fn(async () => {});
+  const html = await buildHtmlDocDownload({
+    html: '<link rel="stylesheet" href="a.css">'.repeat(33),
+    docPath: "doc.html",
+    title: "Work budget",
+    resolveAsset: async () => css(source),
+    pause,
+  });
+  expect(html.match(/<style>/g)).toHaveLength(32);
+  expect(html).toContain("Some content was left out");
+  expect(pause).toHaveBeenCalledTimes(96);
+}, 15_000);
+
+test.each(["element", "attribute"])(
+  "rewrites references after a namespace closing brace in a style %s",
+  async (kind) => {
+    for (const prelude of ["", "fn([;{}]) "]) {
+      const source = `@namespace ${prelude}} background:url(https://probe.invalid/s.png);p{color:green}`;
+      const input = kind === "element" ? `<style>${source}</style>` : `<p style='${source}'>Text</p>`;
+      const nodes = parsed(await htmlDoc(input).result);
+      const written =
+        kind === "element"
+          ? hastText(nodes.find((node) => node.tagName === "style") as Element)
+          : String(nodes.find((node) => node.tagName === "p")?.properties.style);
+      expect(written).toBe(`@namespace ${prelude}} background:/**/url("data:,")/**/;p{color:green}`);
+      expectOfflineCss(written, kind === "attribute");
+      expect(await checkDownloadCss(source, undefined, kind === "attribute" ? "attribute" : "stylesheet")).toBeNull();
+    }
+  },
+);
+
+test.each(["element", "attribute", "linked sheet"])(
+  "checks an entire import chain once in the final %s text",
+  async (kind) => {
+    const mib = 1024 * 1024;
+    const rule = "p{color:green}";
+    const leaf = `/*${"x".repeat(mib - 4 - rule.length)}*/${rule}`;
+    const sheets: Record<string, ResolveResult> = {
+      "docs/a.css": css('@import "b.css";'),
+      "docs/b.css": css('@import "leaf.css";'),
+      "docs/leaf.css": css(leaf),
+    };
+    const pause = vi.fn(async () => {});
+    const input =
+      kind === "element"
+        ? '<style>@import "a.css";</style>'
+        : kind === "attribute"
+          ? "<p style='@import \"a.css\";'>Text</p>"
+          : '<link rel="stylesheet" href="a.css">';
+    const html = await buildHtmlDocDownload({
+      html: input,
+      docPath: "docs/index.html",
+      title: "Import chain",
+      resolveAsset: async (path) => sheets[path] ?? null,
+      pause,
+    });
+    const nodes = parsed(html);
+    const written =
+      kind === "attribute"
+        ? String(nodes.find((node) => node.tagName === "p")?.properties.style)
+        : hastText(nodes.find((node) => node.tagName === "style") as Element);
+    expect(written).toContain(leaf);
+    expectOfflineCss(written, kind === "attribute");
+    // Two source passes over the leaf, then one check of the fully joined output.
+    expect(pause).toHaveBeenCalledTimes(3);
+    expect(html).not.toContain("Some content was left out");
+  },
+);

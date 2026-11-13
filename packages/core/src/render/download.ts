@@ -15,11 +15,20 @@ import { parseDocHtml } from "../place/html.ts";
 import type { HtmlElement as Element, HtmlRoot as Root } from "./blocks.ts";
 import {
   asciiLower,
+  type CssContext,
   CssStack,
   CssTextBuffer,
   type CssToken,
+  checkDownloadCss,
+  closeCss,
+  cssCloser,
+  cssOpener,
   cssTokenize,
+  cssTrivia,
+  escapeCssToken,
+  isImageFunction,
   isImageSet,
+  isIndirectReference,
   utf8Length,
 } from "./download-css.ts";
 import { MEDIA_URL_PREFIX } from "./sanitize.ts";
@@ -500,47 +509,56 @@ const CSS_REFERENCE_CONTEXT = 4;
 const CSS_IMAGE_SET_CONTEXT = 8;
 const IMPORT_PRELUDE_TOKENS = 64;
 const IMPORT_PRELUDE_BYTES = 4096;
-function cssOpener(token: CssToken): number {
-  if (token.kind === "function") return 1;
-  if (token.kind !== "punct") return 0;
-  return token.value === "(" ? 1 : token.value === "[" ? 2 : token.value === "{" ? 3 : 0;
-}
-function cssCloser(token: CssToken): number {
-  if (token.kind !== "punct") return 0;
-  return token.value === ")" ? 1 : token.value === "]" ? 2 : token.value === "}" ? 3 : 0;
-}
-function closeCss(stack: CssStack, token: CssToken): number {
-  const closer = cssCloser(token);
-  return closer && ((stack.top() ?? 0) & 3) === closer ? (stack.pop() ?? 0) : 0;
-}
-const cssTrivia = (token: CssToken) => token.kind === "space" || token.kind === "comment";
-
-// Pass one retains only nested image-set offsets, not tokens or bracket objects.
+// Retain only unsafe function offsets, not tokens or bracket objects.
 async function nestedImageSets(css: string, state: AssetState): Promise<Set<number>> {
   const nested = new Set<number>();
   const stack = new CssStack();
   const images = new CssStack(true);
+  const references = new CssStack(true);
+  const indirectStarts = new CssStack(true);
+  let indirectCount = 0;
   for (const token of cssTokenize(css)) {
     const pending = state.tokenizedCss(utf8Length(css, token.start, token.end));
     if (pending) await pending;
+    const name = token.kind === "function" ? asciiLower(token.value) : "";
+    if (isIndirectReference(name)) indirectCount++;
     const opener = cssOpener(token);
     if (opener) {
-      const image = token.kind === "function" && isImageSet(asciiLower(token.value));
+      const image = isImageSet(name);
+      const reference = isImageFunction(name);
       if (image) {
         const parent = images.top();
         if (parent !== undefined) nested.add(parent);
         images.push(token.start);
       }
-      stack.push(opener | (image ? CSS_IMAGE_SET_CONTEXT : 0));
-    } else if (closeCss(stack, token) & CSS_IMAGE_SET_CONTEXT) images.pop();
+      if (reference) {
+        references.push(token.start);
+        indirectStarts.push(indirectCount);
+      }
+      stack.push(opener | (image ? CSS_IMAGE_SET_CONTEXT : 0) | (reference ? CSS_REFERENCE_CONTEXT : 0));
+    } else {
+      const closed = closeCss(stack, token);
+      if (closed & CSS_IMAGE_SET_CONTEXT) images.pop();
+      if (closed & CSS_REFERENCE_CONTEXT) {
+        const offset = references.pop();
+        if (indirectStarts.pop() !== indirectCount && offset !== undefined) nested.add(offset);
+      }
+    }
+  }
+  // CSS closes open functions at EOF as well.
+  while (references.length) {
+    const offset = references.pop();
+    if (indirectStarts.pop() !== indirectCount && offset !== undefined) nested.add(offset);
   }
   return nested;
 }
 function cssWritten(token: CssToken, css: string): string {
   const raw = css.slice(token.start, token.end);
-  if (["string", "bad-string", "comment"].includes(token.kind)) return raw.replaceAll("<", "\\3c ");
+  if (token.kind === "comment") return raw.replaceAll("<", "\\3c ") + (token.unterminated ? "*/" : "");
   if (token.kind === "cdo") return " ";
-  return escapeCssText(raw);
+  const string = token.kind === "string" || token.kind === "bad-string";
+  const written = escapeCssToken(raw, string, token.end === css.length);
+  return written + (token.kind === "string" && token.unterminated ? raw.charAt(0) : "");
 }
 const dangerousAfterLessThan = (value: string) => /^[a-z/!?]/i.test(value);
 
@@ -549,6 +567,7 @@ function cssImport(tokens: CssToken[], css: string): { reference: string; open: 
   const ends = new Uint8Array(tokens.length);
   const stack = new CssStack();
   for (const [index, token] of tokens.entries()) {
+    if (token.unterminated || token.kind === "bad-string" || token.kind === "bad-url") return null;
     ends[index] = index;
     if (cssOpener(token)) {
       ends[index] = tokens.length;
@@ -636,8 +655,9 @@ async function rewriteCss(
   basePath: string,
   state: AssetState,
   chain: string[] = [],
+  context: CssContext = "stylesheet",
 ): Promise<string | null> {
-  // Both scans yield, but input work is charged just once per occurrence.
+  // Imported sheets share the work budget; only their final joined text is validated.
   if (state.beginCss(css) === null) return null;
   const nested = await nestedImageSets(css, state);
   const checkpoint = state.used;
@@ -658,6 +678,9 @@ async function rewriteCss(
     output.push(value);
     return true;
   };
+  // A replacement must not combine its neighbours into a new CSS token.
+  const replace = (value: string, charged = 0) => append(`/**/${value}/**/`, charged);
+  const boundary = () => append("/**/");
   const appendSource = (token: CssToken) => {
     if (last === "<" && dangerousAfterLessThan(css.charAt(token.start)) && !append(" ")) return false;
     if (!state.take(utf8Length(css, token.start, token.end))) return false;
@@ -671,7 +694,8 @@ async function rewriteCss(
     // These tokens cannot contain an HTML opener internally. Avoid allocating a piece per delimiter.
     if (["punct", "delim", "space", "number", "percentage", "cdc"].includes(token.kind)) return appendSource(token);
     const value = cssWritten(token, css);
-    return value === css.slice(token.start, token.end) ? appendSource(token) : append(value);
+    if (value === css.slice(token.start, token.end)) return appendSource(token);
+    return token.kind === "cdo" ? replace(value) : append(value);
   };
   const drop = () => {
     state.used = checkpoint;
@@ -681,9 +705,9 @@ async function rewriteCss(
     const before = state.used;
     const uri = value === null ? null : await resourceUrl(value, basePath, state, true);
     const quotedUri = cssQuote(uri ?? "data:,");
-    if (append(quoted ? quotedUri : `url(${quotedUri})`, state.used - before)) return true;
+    if (replace(quoted ? quotedUri : `url(${quotedUri})`, state.used - before)) return true;
     state.used = before;
-    return append(quoted ? '"data:,"' : 'url("data:,")');
+    return replace(quoted ? '"data:,"' : 'url("data:,")');
   };
   const tokens = cssTokenize(css);
   let pending: Promise<void> | undefined;
@@ -742,37 +766,39 @@ async function rewriteCss(
     return oversized ? null : prelude;
   };
   const contexts = new CssStack();
+  let namespace = false;
   for (let token = next(); token; token = next()) {
     if (pending) await pending;
+    if (namespace) {
+      if (!contexts.length && token.kind === "punct" && ";{}".includes(token.value)) {
+        namespace = false;
+      } else {
+        if (!appendToken(token)) return drop();
+        const opener = cssOpener(token);
+        if (opener) contexts.push(opener);
+        else closeCss(contexts, token);
+        continue;
+      }
+      // Leave the terminator to the normal token handling below.
+    }
     const name = token.kind === "at" || token.kind === "function" ? asciiLower(token.value) : "";
     if (token.kind === "at" && name === "charset") {
+      if (!boundary()) return drop();
       for (let part = next(); part; part = next()) {
         if (pending) await pending;
         if (part.kind === "punct" && part.value === ";") break;
       }
+      if (!boundary()) return drop();
       continue;
     }
-    if (token.kind === "at" && name === "namespace") {
+    if (token.kind === "at" && name === "namespace" && context === "stylesheet" && !contexts.length) {
       // Namespace URLs are identifiers, never fetched. Preserve the prelude without buffering it.
       if (!appendToken(token)) return drop();
-      const stack = new CssStack();
-      for (let part = next(); part; part = next()) {
-        if (pending) await pending;
-        if (!appendToken(part)) return drop();
-        if (!stack.length && part.kind === "punct") {
-          if (part.value === ";") break;
-          if (part.value === "{") {
-            contexts.push(3);
-            break;
-          }
-        }
-        const opener = cssOpener(part);
-        if (opener) stack.push(opener);
-        else closeCss(stack, part);
-      }
+      namespace = true;
       continue;
     }
     if (token.kind === "at" && name === "import") {
+      if (!boundary()) return drop();
       const prelude = await consumeImport();
       const rule = prelude ? cssImport(prelude, css) : null;
       const path = rule ? assetPath(rule.reference, basePath) : null;
@@ -788,6 +814,7 @@ async function rewriteCss(
           }
         }
       }
+      if (!boundary()) return drop();
       continue;
     }
     if (token.kind === "url" || token.kind === "bad-url") {
@@ -796,7 +823,7 @@ async function rewriteCss(
       const reference = await consumeBlock(1, true);
       if (!(await appendReference(reference))) return drop();
     } else if (token.kind === "function" && nested.has(token.start)) {
-      if (!append("none")) return drop();
+      if (!replace("none")) return drop();
       await consumeBlock(1);
     } else {
       if (token.kind === "string" && (contexts.top() ?? 0) & CSS_REFERENCE_CONTEXT) {
@@ -804,15 +831,40 @@ async function rewriteCss(
       } else if (!appendToken(token)) return drop();
       const opener = cssOpener(token);
       if (opener) {
-        const reference =
-          token.kind === "function" &&
-          (isImageSet(name) || ["image", "cross-fade", "-webkit-cross-fade"].includes(name));
+        const reference = token.kind === "function" && isImageFunction(name);
         contexts.push(opener | (reference ? CSS_REFERENCE_CONTEXT : 0));
       } else closeCss(contexts, token);
     }
   }
   flushSource();
   return output.finish();
+}
+
+/** Check once, after imports and HTML escaping, on exactly the text the file will contain. */
+async function finalCss(
+  css: string,
+  basePath: string,
+  state: AssetState,
+  chain: string[] = [],
+  context: CssContext = "stylesheet",
+): Promise<string | null> {
+  const checkpoint = state.used;
+  const rewritten = await rewriteCss(css, basePath, state, chain, context);
+  if (rewritten === null) return null;
+  const written = escapeCssText(rewritten);
+  if (
+    (written !== rewritten && !state.take(utf8Length(written) - utf8Length(rewritten))) ||
+    state.beginCss(written) === null
+  ) {
+    state.used = checkpoint;
+    return null;
+  }
+  const checked = await checkDownloadCss(written, (bytes) => state.tokenizedCss(bytes), context);
+  if (checked === null) {
+    state.tooLarge = true;
+    state.used = checkpoint;
+  }
+  return checked;
 }
 
 // HTML srcset candidates: only whitespace ends a URL; trailing commas end a candidate.
@@ -924,13 +976,13 @@ export async function buildHtmlDocDownload(input: {
             : null;
         const asset = path ? await state.stylesheet(path) : null;
         if (path && asset) {
-          const css = await rewriteCss(new TextDecoder().decode(asset.bytes), path, state, [path]);
+          const css = await finalCss(new TextDecoder().decode(asset.bytes), path, state, [path]);
           if (css !== null) children.push(style(css, node.properties.media ? { media: node.properties.media } : {}));
         }
         continue;
       }
       if (typeof node.properties.style === "string") {
-        const css = await rewriteCss(node.properties.style, input.docPath, state);
+        const css = await finalCss(node.properties.style, input.docPath, state, [], "attribute");
         if (css === null) delete node.properties.style;
         else node.properties.style = css;
       }
@@ -969,7 +1021,7 @@ export async function buildHtmlDocDownload(input: {
           else if (!fragment(value)) delete node.properties[key];
         }
       if (tag === "style") {
-        const css = await rewriteCss(hastText(node), input.docPath, state);
+        const css = await finalCss(hastText(node), input.docPath, state);
         if (css !== null) children.push(style(css, node.properties));
         continue;
       }

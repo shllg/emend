@@ -221,8 +221,9 @@ text counts its final UTF-8 bytes each time it is emitted. The server also reads
 128 MiB of distinct stored assets. It checks stored sizes before reading them.
 At most 64 stylesheet occurrences are inlined, across imports and stylesheet links. Repeated
 paths count each time and keep their own conditions. Imports stop at depth 4 and never repeat
-a path in the same chain. Each file has a 64 MiB CSS work budget. CSS input bytes count on every
-pass, including imports. Dropped output does not refund spent work. When that budget is spent,
+a path in the same chain. Each file has a 64 MiB CSS work budget. Each rewrite charges its input
+bytes. The final output check charges the written bytes too, with imports joined in.
+Dropped output does not refund spent work. When that budget is spent,
 remaining styles, style attributes and stylesheets are left out.
 HTML parsing stops at nesting depth 512 or 200,000 elements. An over-limit Markdown or writeup
 block is left out. An over-limit HTML doc becomes a page with the title, reading styles and
@@ -240,11 +241,20 @@ Writeup and Markdown images allow only PNG, JPEG, GIF, WebP and AVIF.
 Author data URLs for images, audio, video and VTT captions may stay in resource attributes.
 CSS may retain data URLs and local fragments. Asset references keep their fragments.
 CSS is read with a CSS Syntax Level 3 tokenizer. Escaped names count as their decoded spelling.
+Written CSS is tokenized again and checked once, after imports and HTML escaping.
+CSS that still holds a resource reference other
+than a data URL or a fragment is left out with the note. The file's CSP blocks any network load
+in any case.
 An `@import` prelude is limited to 64 tokens and 4 KiB of source. Longer imports are left out.
 An invalid `@import … {…}` rule is dropped together with its block.
 Inlined imports keep their layer, supports and media conditions. Alternate and disabled
-stylesheets are left out. `@charset` is removed. `@namespace` is kept; its URL is not fetched.
-A nested `image-set()` becomes `none`.
+stylesheets are left out. `@charset` is removed. A top-level stylesheet `@namespace` prelude
+is kept; its URL is not fetched. It ends at `;`, `{` or `}` outside nested brackets and functions.
+Inside blocks and style attributes, its references are rewritten.
+Unfinished strings and comments are closed before joining sheets. Imports with unfinished
+or invalid strings or URLs in their prelude are left out.
+A nested `image-set()` becomes `none`. Image functions containing `var()`, `env()` or `attr()`
+at any depth also become `none`.
 
 ### Viewed files
 
