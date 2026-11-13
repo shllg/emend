@@ -3,7 +3,7 @@ import { buildDocDownload, buildHtmlDocDownload, buildWriteupDownload, type Reso
 import { and, eq, sql } from "drizzle-orm";
 import type { Hono } from "hono";
 import type { Queries } from "../../db/client.ts";
-import { docAssets, files, repos, reviews, revisions, topics, writeups } from "../../db/schema.ts";
+import { blobs, docAssets, files, repos, reviews, revisions, topics, writeups } from "../../db/schema.ts";
 import type { AppDeps } from "../app.ts";
 import type { AppEnv } from "../auth/principal.ts";
 import { ApiError } from "../http/errors.ts";
@@ -11,7 +11,20 @@ import { DOWNLOAD_CSP } from "../http/headers.ts";
 import { publishMeta, topicView } from "./reviews.ts";
 
 const imageTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
-const activeDownloads = new Set<string>();
+// One builder per owner; waiting requests have not opened a database read yet.
+const downloadQueues = new Map<string, (() => void)[]>();
+async function acquireDownload(ownerId: string): Promise<() => void> {
+  const queue = downloadQueues.get(ownerId);
+  if (queue) {
+    if (queue.length >= 2) throw new ApiError("rate_limited", "download_busy");
+    await new Promise<void>((resolve) => queue.push(resolve));
+  } else downloadQueues.set(ownerId, []);
+  return () => {
+    const next = downloadQueues.get(ownerId)?.shift();
+    if (next) next();
+    else downloadQueues.delete(ownerId);
+  };
+}
 const pause = () => new Promise<void>((resolve) => setImmediate(resolve));
 function downloadFilename(title: string, seq: number) {
   const slug =
@@ -87,17 +100,23 @@ async function revisionDownload(
   };
   let total = 0;
   // Cache bytes by blob, separately from the builders' path cache: aliases spend the budget once.
-  const blobs = new Map<string, Uint8Array | null | "too-large">();
+  const blobCache = new Map<string, Uint8Array | null | "too-large">();
   const resolveFile = async (file: typeof files.$inferSelect | undefined): Promise<ResolveResult> => {
     if (!file?.newBlob) return null;
-    let bytes = blobs.get(file.newBlob);
+    let bytes = blobCache.get(file.newBlob);
     if (bytes === undefined) {
-      bytes = await deps.blobs.get(ownerId, file.newBlob, q);
-      if (bytes) {
-        if (total + bytes.byteLength > budget) bytes = "too-large";
-        else total += bytes.byteLength;
+      const stored = await q
+        .select({ size: blobs.size })
+        .from(blobs)
+        .where(and(eq(blobs.ownerId, ownerId), eq(blobs.sha256, file.newBlob)))
+        .get();
+      if (!stored) bytes = null;
+      else if (stored.size > budget - total) bytes = "too-large";
+      else {
+        bytes = await deps.blobs.get(ownerId, file.newBlob, q);
+        if (bytes) total += stored.size;
       }
-      blobs.set(file.newBlob, bytes);
+      blobCache.set(file.newBlob, bytes);
     }
     return bytes === null || bytes === "too-large" ? bytes : { bytes, mediaType: file.mediaType };
   };
@@ -109,7 +128,10 @@ async function revisionDownload(
   );
   const resolveMedia = (sha: string) => resolveFile(media.get(sha));
   const docs = fileRows.filter((file) => file.role === "doc");
-  const doc = revision.writeupEmpty ? (docs.find((file) => file.path === revision.main) ?? docs[0]) : undefined;
+  const doc =
+    revision.writeupEmpty && revision.base === null
+      ? (docs.find((file) => file.path === revision.main) ?? docs[0])
+      : undefined;
   let html: string;
   if (doc?.mediaType === "text/html") {
     const bytes = doc.newBlob ? await deps.blobs.get(ownerId, doc.newBlob, q) : null;
@@ -185,10 +207,7 @@ export function downloadRoutes(app: Hono<AppEnv>, deps: AppDeps, budget: number 
   app.get("/api/v1/reviews/:id/revisions/:seq/download", async (c) => {
     const ownerId = c.get("principal").ownerId;
     const headOnly = c.req.method === "HEAD";
-    if (!headOnly) {
-      if (activeDownloads.has(ownerId)) throw new ApiError("rate_limited", "download_busy");
-      activeDownloads.add(ownerId);
-    }
+    const release = headOnly ? undefined : await acquireDownload(ownerId);
     try {
       const result = await deps.db.read((q) =>
         revisionDownload(ownerId, q, deps, c.req.param("id"), c.req.param("seq"), budget, headOnly),
@@ -201,7 +220,7 @@ export function downloadRoutes(app: Hono<AppEnv>, deps: AppDeps, budget: number 
       c.header("Cross-Origin-Resource-Policy", "same-origin");
       return result.html === null ? c.body(null) : c.body(result.html);
     } finally {
-      if (!headOnly) activeDownloads.delete(ownerId);
+      release?.();
     }
   });
 }

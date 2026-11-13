@@ -186,20 +186,25 @@ local images.
 A bearer token gets `403`, like other reviewer routes. Missing credentials get `401`.
 It follows the revision route's `404` and `review_in_bin` rules.
 `HEAD` checks the same access and revision rules and returns the download headers without
-building a file or reading blobs. Only one download builds at a time per owner in this server
-process. A second concurrent download gets `429 rate_limited`. Retry when the first finishes.
+building a file or reading blobs. It never waits for a download slot.
+One download builds at a time per owner in this server process. Up to two more requests wait
+in order. A further request gets `429 rate_limited` with the `download_busy` message:
+"A download is already building. Try again when it finishes."
+The slot is released after success or failure.
 
 A code review's file holds the review title and that revision's writeup: sections, topics, text,
-code blocks and images with captions. It holds no docs, comments or diff. When `writeupEmpty`
-is true and the revision has docs, it holds one doc instead: `main` when it names a doc, else
-the first doc in file order. Markdown uses its stored rendered blocks. Source uses its stored
-highlighted tokens. Code reviews and Markdown and source pubs get the emend header with the
-review title, project, branch and publish links. An HTML pub keeps the agent's HTML as is, with
-no emend header. Its listed assets are built in and its scripts are left out.
+code blocks and images with captions. It holds no docs, comments or diff. A revision is a pub
+when `writeupEmpty` is true and `base` is null. When a pub has docs, the download holds one doc:
+`main` when it names a doc, else the first doc in file order. Markdown uses its stored rendered
+blocks. Source uses its stored highlighted tokens. Code reviews and Markdown and source pubs
+get the emend header with the review title, project, branch and publish links. An HTML pub keeps
+the agent's HTML layout, with no emend header. Its listed assets are built in after filtering.
 Mermaid diagrams show as labelled source text. Links to other docs become plain text.
 Absolute HTTP, HTTPS and mailto links keep working on `a` and `area` elements.
-SVG `use` keeps only a same-document fragment. Other elements' hrefs follow the resource rules.
-SMIL `set`, `animate`, `animateMotion` and `animateTransform` elements targeting an href are removed.
+Only SVG `image` and `feImage` hrefs follow the resource rules. Other elements, including SVG
+`use` and MathML elements, keep only same-document fragments in hrefs. These rules also apply
+to `xlink:href`. SMIL `set`, `animate`, `animateMotion` and `animateTransform` elements targeting
+an href are removed.
 
 The response is `200` with `Content-Type: text/html; charset=utf-8`,
 `Content-Disposition: attachment; filename="<name>"`, `X-Content-Type-Options: nosniff`,
@@ -207,27 +212,38 @@ The response is `200` with `Content-Type: text/html; charset=utf-8`,
 The filename is the lowercase title, with runs outside `[a-z0-9]` replaced by `-`, trimmed,
 cut to 60 characters and trimmed again. An empty name becomes `emend`. It ends in `-r<seq>.html`.
 `Content-Security-Policy: sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; media-src data:; base-uri 'none'; form-action 'none'`
-replaces the app CSP for this route. The file also has a CSP meta with the same policy without
-`sandbox`. It opens offline with no scripts or network requests.
+replaces the app CSP for this route. Every file starts with a UTF-8 byte order mark.
+The file also has a CSP meta with the same policy without `sandbox`.
+It opens offline with no scripts or network requests.
 
-At most 128 MiB of built-in content is emitted. Every copy of a data URL counts its full length,
-and every inlined CSS text counts its length each time it is emitted. The server also reads at
-most 128 MiB of distinct stored assets. When content would pass either budget, it is left out.
+At most 128 MiB of built-in content is emitted. Every copy of a data URL and every inlined CSS
+text counts its final UTF-8 bytes each time it is emitted. The server also reads at most
+128 MiB of distinct stored assets. It checks stored sizes before reading them.
 At most 64 stylesheet occurrences are inlined, across imports and stylesheet links. Repeated
-paths count each time and keep their own conditions. Further stylesheets are left out with the
-same size note. Imports stop at depth 4 and never repeat a path in the same chain.
-Each file has a 64 MiB CSS work budget. CSS input bytes count on every pass, including imports.
-Dropped output does not refund spent work.
-When this budget is reached, remaining styles, style attributes and stylesheets are left out
-with the same size note. The server yields to other requests while it builds.
-One visible note says:
-"Some images or files were left out because the download would pass 128 MiB."
+paths count each time and keep their own conditions. Imports stop at depth 4 and never repeat
+a path in the same chain. Each file has a 64 MiB CSS work budget. CSS input bytes count on every
+pass, including imports. Dropped output does not refund spent work. When that budget is spent,
+remaining styles, style attributes and stylesheets are left out.
+HTML parsing stops at nesting depth 512 or 200,000 elements. An over-limit Markdown or writeup
+block is left out. An over-limit HTML doc becomes a page with the title, reading styles and
+only the note in its body. When any size or processing limit omits content, one visible note says:
+"Some content was left out of this download because it passed a size or processing limit."
+The server yields between steps while building, including CSS, element walks, references and
+base64 chunks. The final HTML serialization runs in one step.
+
 The file holds no server address, emend link, sign-in link, token or machine name.
 HTML docs lose scripts, event handlers, frames, embeds, `<base>`, `<noscript>`, `<meta http-equiv>`
-and resource references that are not listed assets. Forms are unwrapped, keeping their content.
+and unlisted resource references. Forms are unwrapped, keeping their content.
+Listed image, audio, video and font assets and `text/vtt` captions may be built in.
+CSS assets are used only as stylesheets. Other asset media types are left out.
+Writeup and Markdown images allow only PNG, JPEG, GIF, WebP and AVIF.
 Author data URLs for images, audio, video and VTT captions may stay in resource attributes.
 CSS may retain data URLs and local fragments. Asset references keep their fragments.
-Inlined CSS imports keep their layer, supports and media conditions.
+CSS is read with a CSS Syntax Level 3 tokenizer. Escaped names count as their decoded spelling.
+An `@import` prelude is limited to 64 tokens and 4 KiB of source. Longer imports are left out.
+An invalid `@import … {…}` rule is dropped together with its block.
+Inlined imports keep their layer, supports and media conditions. Alternate and disabled
+stylesheets are left out. `@charset` is removed. `@namespace` is kept; its URL is not fetched.
 A nested `image-set()` becomes `none`.
 
 ### Viewed files

@@ -116,9 +116,8 @@ test("checks reviewer access ownership revision and bin state for HEAD downloads
   expect(reads).not.toHaveBeenCalled();
 });
 
-test("limits concurrent downloads per owner and releases the slot when a build finishes", async () => {
+test("queues two downloads per owner and refuses a fourth while HEAD never waits", async () => {
   const { reviewId } = await mediaReview();
-  const other = await publish({ reviewKey: "c".repeat(64) });
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   const read = f.deps.blobs.get.bind(f.deps.blobs);
@@ -128,16 +127,14 @@ test("limits concurrent downloads per owner and releases the slot when a build f
     return read(...args);
   });
   const first = Promise.resolve(get(reviewId));
+  const pending = [first];
   try {
-    await Promise.race([
-      entered.promise,
-      first.then(() => {
-        throw new Error("Download finished before reaching the blob read");
-      }),
-    ]);
-    const second = await get(other.reviewId);
-    expect(second.status).toBe(429);
-    expect(await second.json()).toEqual({
+    await entered.promise;
+    pending.push(Promise.resolve(get(reviewId)), Promise.resolve(get(reviewId)));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const fourth = await get(reviewId);
+    expect(fourth.status).toBe(429);
+    expect(await fourth.json()).toEqual({
       error: { code: "rate_limited", message: "A download is already building. Try again when it finishes." },
     });
     const head = await f.request(`/reviews/${reviewId}/revisions/1/download`, "HEAD");
@@ -147,16 +144,40 @@ test("limits concurrent downloads per owner and releases the slot when a build f
     await error(await get(reviewId, 1, "foreign"), 404, "unknown_review");
   } finally {
     release.resolve();
-    await first;
+    await Promise.all(pending);
   }
-  expect((await first).status).toBe(200);
-  expect((await get(other.reviewId)).status).toBe(200);
+  expect((await Promise.all(pending)).map((response) => response.status)).toEqual([200, 200, 200]);
+  expect((await get(reviewId)).status).toBe(200);
 });
 
-test("releases the owner download slot after a failed build", async () => {
+test.each([false, true])("hands the slot to a waiting download after the first build fails: %s", async (fail) => {
   const { reviewId } = await publish();
-  vi.spyOn(f.deps.blobs, "get").mockResolvedValueOnce(null);
-  await error(await get(reviewId), 404, "not_found");
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const read = f.deps.blobs.get.bind(f.deps.blobs);
+  vi.spyOn(f.deps.blobs, "get").mockImplementationOnce(async (...args) => {
+    entered.resolve();
+    await release.promise;
+    return fail ? null : read(...args);
+  });
+  const first = Promise.resolve(get(reviewId));
+  let second: Promise<Response> | undefined;
+  let secondFinished = false;
+  try {
+    await entered.promise;
+    second = Promise.resolve(get(reviewId)).then((response) => {
+      secondFinished = true;
+      return response;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(secondFinished).toBe(false);
+  } finally {
+    release.resolve();
+    await first;
+    await second;
+  }
+  expect((await first).status).toBe(fail ? 404 : 200);
+  expect((await second)?.status).toBe(200);
   expect((await get(reviewId)).status).toBe(200);
 });
 
@@ -348,7 +369,7 @@ test("leaves an over-budget image out and shows one note", async () => {
   expect(response.status).toBe(200);
   const html = await response.text();
   expect(html).not.toContain("data:image/png");
-  expect(html.match(/Some images or files were left out/g)).toHaveLength(1);
+  expect(html.match(/Some content was left out/g)).toHaveLength(1);
   expect(html).toContain("Small image");
 });
 
@@ -369,7 +390,7 @@ test("counts each emitted image copy while reading shared blobs only once", asyn
   const inlineBudget = `data:image/png;base64,${png.toString("base64")}`.length;
   const html = await (await budgetApp(inlineBudget).request(reviewDownloadPath(reviewId, 1))).text();
   expect(html.match(/data:image\/png/g)).toHaveLength(1);
-  expect(html).toContain("Some images or files were left out");
+  expect(html).toContain("Some content was left out");
   expect(reads.mock.calls.filter((call) => call[1] === hash)).toHaveLength(1);
 });
 
@@ -611,4 +632,34 @@ test("downloads a review with the maximum declared topics plus the reserved Othe
   expect(response.status).toBe(200);
   const html = await response.text();
   expect(html).toContain(`Topic ${LIMITS.topicsPerReview - 1}`);
+});
+
+test.each([null, "a".repeat(40)])(
+  "downloads an empty writeup's attached doc only without a diff base: %s",
+  async (base) => {
+    const hash = await f.deps.blobs.put(f.ownerId, Buffer.from("Attached publication"), "text/markdown");
+    const { reviewId } = await publish({
+      base,
+      head: base === null ? null : "b".repeat(40),
+      writeup: blank,
+      files: [{ path: "doc.md", role: "doc", oldPath: null, oldBlob: null, newBlob: hash, flag: null }],
+    });
+    const response = await get(reviewId);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    if (base === null) expect(html).toContain("Attached publication");
+    else {
+      expect(html).not.toContain("Attached publication");
+      expect(html).toContain("<h1>Export example</h1>");
+    }
+  },
+);
+
+test("refuses an asset from its stored size before reading its blob", async () => {
+  const { reviewId, hash } = await mediaReview();
+  const reads = vi.spyOn(f.deps.blobs, "get");
+  const response = await budgetApp(png.byteLength - 1).request(reviewDownloadPath(reviewId, 1));
+  expect(response.status).toBe(200);
+  expect(await response.text()).toContain("Some content was left out");
+  expect(reads.mock.calls.some(([, sha]) => sha === hash)).toBe(false);
 });
