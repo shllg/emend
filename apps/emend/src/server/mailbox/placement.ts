@@ -11,7 +11,7 @@ export type PlacementDeps = { blobs: BlobStore; executor?: Executor; signal?: Ab
 type Snapshot = {
   revision: typeof revisions.$inferSelect;
   files: (typeof files.$inferSelect)[];
-  topics: { slug: string; title: string; summary: string }[];
+  topics: { slug: string; title?: string; summary?: string }[];
   writeup: typeof writeups.$inferSelect | undefined;
 };
 type Carried = NonNullable<typeof placements.$inferSelect.carried>;
@@ -111,6 +111,15 @@ export async function computePlacements(
       if (writeup) await read(writeup);
       let placed: Awaited<ReturnType<Executor>>;
       try {
+        const topicText =
+          target.kind === "topic" && target.part
+            ? new Map(
+                snapshot.topics.map((t) => {
+                  if (t.title === undefined || t.summary === undefined) throw new Error("Missing topic placement text");
+                  return [t.slug, { title: t.title, summary: t.summary }];
+                }),
+              )
+            : undefined;
         placed = await abortable(deps.signal, () =>
           run({
             kind: "place",
@@ -119,7 +128,8 @@ export async function computePlacements(
             sources,
             texts,
             files: fileMap,
-            topics: new Map(snapshot.topics.map((t) => [t.slug, { title: t.title, summary: t.summary }])),
+            topics: new Set(snapshot.topics.map((t) => t.slug)),
+            ...(topicText ? { topicText } : {}),
             threads: [{ id: threadId, target, last, renames: [transition], carried }],
           }),
         );

@@ -42,7 +42,7 @@ test.each(cases)("synthetic corpus: $name", async (entry) => {
     docs: new Map(),
     files: new Map(),
     renamedFrom: new Map(),
-    topics: new Map(),
+    topics: new Set(),
     last: null,
   };
   Target.parse(entry.target);

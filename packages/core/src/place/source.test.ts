@@ -17,7 +17,7 @@ function context(text: string): PlaceContext {
     docs: new Map(),
     sources: new Map([["new.ts", { text, hash: "new" }]]),
     files: new Map(),
-    topics: new Map(),
+    topics: new Set(),
     renamedFrom: new Map([["old.ts", "new.ts"]]),
     last: {
       location: { kind: "source-lines", path: "old.ts", start: 2, end: 2 },

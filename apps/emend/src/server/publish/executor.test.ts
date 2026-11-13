@@ -225,7 +225,7 @@ test("real worker reuses jobs with bounded memory and is replaced after failure 
       kind: "place",
       writeup: null,
       docs: new Map(),
-      topics: new Map(),
+      topics: new Set(),
       texts: new Map([[hash, new TextEncoder().encode("needle\n").buffer]]),
       files: new Map([["file.ts", { newHash: hash }]]),
       threads: [
@@ -307,7 +307,7 @@ test("fix5: real worker transfers parsed doc bytes in both directions and preser
         files: new Map(),
         texts: new Map(),
         writeup: null,
-        topics: new Map(),
+        topics: new Set(),
         threads: [
           {
             id: "synthetic",
@@ -362,7 +362,7 @@ test("fix5: real worker transfers parsed writeup bytes and reuses them for place
           docs: new Map(),
           texts: new Map(),
           files: new Map(),
-          topics: new Map(),
+          topics: new Set(),
           threads: [
             {
               id: "synthetic",

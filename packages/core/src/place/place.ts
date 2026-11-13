@@ -16,7 +16,8 @@ export type PlaceContext = {
   sources?: Map<string, { text: string; hash?: string }>;
   files: Map<string, FileSides>;
   renamedFrom: Map<string, string | null>;
-  topics: ReadonlyMap<string, { title: string; summary: string }>;
+  topics: ReadonlySet<string>;
+  topicText?: ReadonlyMap<string, { title: string; summary: string }>;
   last: { location: PlacementLocation; sides?: FileSides } | null;
 };
 
@@ -26,9 +27,10 @@ export function placeThread(target: Target, ctx: PlaceContext): Placement {
     case "review":
       return { status: "placed", location: { kind: "review" } };
     case "topic": {
-      const topic = ctx.topics.get(target.slug);
-      if (!topic) return { status: "unplaced", reason: "topic-gone" };
+      if (!ctx.topics.has(target.slug)) return { status: "unplaced", reason: "topic-gone" };
       if (target.part === undefined) return { status: "placed", location: { kind: "topic", slug: target.slug } };
+      const topic = ctx.topicText?.get(target.slug);
+      if (!topic) throw new Error("Missing topic placement text");
       const result = placeTextSpan(
         (["title", "summary"] as const).map((part) => ({ id: part, text: topic[part] })),
         {
@@ -37,6 +39,7 @@ export function placeThread(target: Target, ctx: PlaceContext): Placement {
           prefix: target.prefix ?? "",
           suffix: target.suffix ?? "",
         },
+        { contextOnly: true },
       );
       return result.status === "unplaced"
         ? result

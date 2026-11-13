@@ -28,6 +28,7 @@ function buildIndex(bundle: ImportBundle) {
         sourcePaths: new Map<string, Row<"files">>(),
         docPaths: new Map<string, Row<"files">>(),
         anyPaths: new Map<string, Row<"files">>(),
+        topicSlugs: new Set<string>(),
         topicText: new Map<string, { title: string; summary: string }>(),
       },
     ]),
@@ -35,6 +36,7 @@ function buildIndex(bundle: ImportBundle) {
   for (const row of bundle.topics) {
     const r = revisions.get(row.revisionId);
     r?.topics.push(row);
+    r?.topicSlugs.add(row.slug);
     r?.topicText.set(row.slug, { title: row.title, summary: row.summary });
   }
   for (const row of bundle.files) {

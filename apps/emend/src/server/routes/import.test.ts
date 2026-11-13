@@ -74,6 +74,74 @@ test("import places topic quotes using revision title and summary text", async (
     });
   }
 });
+test("import refuses a topic quote placed in the wrong original part without writes", async () => {
+  const input = ImportBundle.parse(await bundle(f));
+  required(input.threads[0]).target = {
+    kind: "topic",
+    slug: "synthetic",
+    part: "title",
+    quote: "summary",
+    prefix: "Synthetic ",
+    suffix: "",
+  };
+  const before = await snapshot(f);
+  await error(await f.importRequest("/import", input), 400, "invalid_request");
+  expect(await snapshot(f)).toEqual(before);
+});
+test.each([1, 2])("import charges topic text once per revision for each of %i quote threads", async (count) => {
+  const input = ImportBundle.parse(await bundle(f));
+  const thread = required(input.threads[0]);
+  thread.target = {
+    kind: "topic",
+    slug: "synthetic",
+    part: "title",
+    quote: "topic",
+    prefix: "Synthetic ",
+    suffix: "",
+  };
+  input.threads = Array.from({ length: count }, (_, i) => ({ ...thread, id: i ? randomUUID() : thread.id }));
+  for (const topic of input.topics) topic.summary = "界".repeat(200);
+  let metadataBytes = 0;
+  const place = importPlacements();
+  const read = vi.fn(async () => new ArrayBuffer(0));
+  for (const revision of indexImportBundle(ImportBundle.parse(input)).revisions.values())
+    await place(revision, { renderedBlob: "unused", docBlobs: new Map() }, read, async (work) => {
+      chargePlacementMetadata(work, (bytes) => {
+        metadataBytes += bytes;
+      });
+      return executeWork(work);
+    });
+  expect(read).not.toHaveBeenCalled();
+  const textBytes = input.topics.reduce(
+    (total, topic) => total + Buffer.byteLength(topic.title) + Buffer.byteLength(topic.summary),
+    0,
+  );
+  const original = LIMITS.importPlacementBytes;
+  const before = await snapshot(f);
+  const transaction = vi.spyOn(f.db, "transaction");
+  try {
+    Object.assign(LIMITS, { importPlacementBytes: metadataBytes + count * textBytes - 1 });
+    await error(await f.importRequest("/import", input), 413, "too_large");
+    expect(transaction).not.toHaveBeenCalled();
+    expect(await snapshot(f)).toEqual(before);
+    Object.assign(LIMITS, { importPlacementBytes: metadataBytes + count * textBytes });
+    expect((await f.importRequest("/import", input)).status).toBe(201);
+  } finally {
+    Object.assign(LIMITS, { importPlacementBytes: original });
+  }
+});
+test("import placement without topic quotes carries only topic slugs", async () => {
+  const input = await bundle(f);
+  const jobs = vi.fn(required(f.deps.publishExecutor));
+  f.deps.publishExecutor = jobs;
+  expect((await f.importRequest("/import", input)).status).toBe(201);
+  const work = jobs.mock.calls.map(([work]) => work).filter((work) => work.kind === "place");
+  expect(work).toHaveLength(2);
+  for (const job of work) {
+    expect(job.topics).toEqual(new Set(["synthetic"]));
+    expect(job).not.toHaveProperty("topicText");
+  }
+});
 test.each([
   { project: "Orchard", name: "Legacy", expected: "Orchard", existingRepo: true },
   { project: undefined, name: "Legacy", expected: "Legacy", existingRepo: true },

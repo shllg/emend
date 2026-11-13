@@ -896,12 +896,14 @@ extracted text. Parsed content is reused by format and blob hash, retaining at m
 by the current and previous revision. Each lines thread charges the UTF-8 bytes of its next
 side on every revision, and its previous side only when the two hashes differ, matching the
 equal-hash placement shortcut. Each unique side buffer read/transferred per revision is also
-charged. The worker encodes parsed docs/writeups as bytes and reports their encoded and text
-sizes; the hub keeps those bytes and sends transferred copies for placement. Each shared parsed
-payload's encoded size is charged once per job that sends it, including cache hits.
+charged. Each topic-quote thread charges its topic's title and summary UTF-8 bytes once per
+revision, when the topic exists. The worker encodes parsed docs/writeups as bytes and reports
+their encoded and text sizes; the hub keeps those bytes and sends transferred copies for placement.
+Each shared parsed payload's encoded size is charged once per job that sends it, including cache hits.
 Other worker metadata is counted incrementally as each string's UTF-8 length, plus fixed
 overhead per object (16 bytes), entry (8 bytes) and scalar (8 bytes), including field names,
-targets, anchors, carried paths, rename maps, file paths/hashes, topic slugs and document paths.
+targets, anchors, carried paths, rename maps, file paths/hashes, topic slugs, document paths and,
+when a topic quote is placed, topic titles and summaries.
 Shared objects are counted once per job, as structured clone sends them; accounting never
 builds the job's JSON or parses its content on the main thread. Raw buffers are counted
 separately. Each addition checks the remaining budget first; excess stops with `413 too_large`
@@ -1207,10 +1209,10 @@ doc spans retain `path` and `blockId`; HTML spans retain `path`. Line locations 
 Topic locations carry `slug`, plus `part`, `start`, `end` for a quote, with span offsets within the
 normalized title or summary text. File and review locations use the same fields as their targets.
 Placement describes the newest revision; a thread keeps its original target separately.
-A topic quote follows the writeup-span rules within that topic's title and summary: the quote alone
-when it occurs once in the part it was last placed on, otherwise quote with prefix and suffix when
-they occur exactly once across the topic's title and summary. Otherwise it is unplaced as `ambiguous`
-or `block-gone`; a gone topic is `topic-gone`.
+A topic quote matches with its prefix and suffix, never the quote alone: first in the part it was
+last placed on (or the target's part), when the context match occurs exactly once there; otherwise
+when it occurs exactly once across the topic's title and summary. Otherwise it is unplaced as
+`ambiguous` or `block-gone`; a gone topic is `topic-gone`.
 
 ### Snooze, retire, delete and the bin
 

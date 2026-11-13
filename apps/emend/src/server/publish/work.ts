@@ -73,7 +73,8 @@ export type Work =
       parsedWriteup?: EncodedPlacementDoc;
       texts: Map<string, ArrayBuffer>;
       files: Map<string, SharedSides>;
-      topics: PlaceContext["topics"];
+      topics: Set<string>;
+      topicText?: ReadonlyMap<string, { title: string; summary: string }>;
       threads: {
         id: string;
         target: Target;
@@ -307,6 +308,7 @@ export const executeWork: Executor = async (work) => {
           sources,
           files,
           topics: work.topics,
+          topicText: work.topicText,
           last:
             thread.last && carriedLocation
               ? {

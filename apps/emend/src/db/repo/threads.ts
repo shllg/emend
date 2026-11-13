@@ -38,10 +38,16 @@ export async function createThread(
               .select()
               .from(files)
               .where(and(eq(files.ownerId, ownerId), eq(files.revisionId, revision.id))),
-            topics: await q
-              .select({ slug: topics.slug, title: topics.title, summary: topics.summary })
-              .from(topics)
-              .where(and(eq(topics.ownerId, ownerId), eq(topics.revisionId, revision.id))),
+            topics:
+              request.target.kind === "topic" && request.target.part
+                ? await q
+                    .select({ slug: topics.slug, title: topics.title, summary: topics.summary })
+                    .from(topics)
+                    .where(and(eq(topics.ownerId, ownerId), eq(topics.revisionId, revision.id)))
+                : await q
+                    .select({ slug: topics.slug })
+                    .from(topics)
+                    .where(and(eq(topics.ownerId, ownerId), eq(topics.revisionId, revision.id))),
             writeup: await q
               .select()
               .from(writeups)

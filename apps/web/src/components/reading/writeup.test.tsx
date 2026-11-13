@@ -153,31 +153,43 @@ test("Comment on topic saves a slug-only target even when the topic is folded", 
   await waitFor(() => expect(container.querySelector("textarea")).toBeNull());
 });
 
-test("a touch title selection survives collapse between pointerdown and click on the prompt", async () => {
-  vi.useFakeTimers();
-  const { container } = topicReader();
-  const { node, selection } = selectTopic(container, "title");
-  document.dispatchEvent(new Event("selectionchange"));
-  expect(screen.queryByRole("button", { name: "Comment on selection" })).toBeNull();
-  act(() => void vi.advanceTimersByTime(250));
-  const prompt = screen.getByRole("button", { name: "Comment on selection" });
-  expect(fireEvent.pointerDown(prompt, { pointerType: "touch" })).toBe(false);
-  selection.collapse(node, 0);
-  document.dispatchEvent(new Event("selectionchange"));
-  act(() => void vi.advanceTimersByTime(250));
-  expect(prompt.isConnected).toBe(true);
-  fireEvent.pointerUp(prompt, { pointerType: "touch" });
-  fireEvent.click(prompt);
-  vi.useRealTimers();
-  expect(await saveTopicComment()).toEqual({
-    kind: "topic",
-    slug: topic.slug,
-    part: "title",
-    quote: "seed",
-    prefix: "Plant a ",
-    suffix: "",
-  });
-});
+test.each(["title", "summary"] as const)(
+  "phone touch selection on the topic %s survives collapse and saves through the composer sheet",
+  async (part) => {
+    vi.stubGlobal("innerWidth", 390);
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: 390 >= Number(query.match(/\d+/)?.[0] ?? Infinity),
+      addEventListener() {},
+      removeEventListener() {},
+    }));
+    vi.useFakeTimers();
+    const { container } = topicReader();
+    const { node, selection } = selectTopic(container, part);
+    document.dispatchEvent(new Event("selectionchange"));
+    expect(screen.queryByRole("button", { name: "Comment on selection" })).toBeNull();
+    act(() => void vi.advanceTimersByTime(250));
+    const prompt = screen.getByRole("button", { name: "Comment on selection" });
+    expect(fireEvent.pointerDown(prompt, { pointerType: "touch" })).toBe(false);
+    selection.collapse(node, 0);
+    document.dispatchEvent(new Event("selectionchange"));
+    act(() => void vi.advanceTimersByTime(250));
+    expect(prompt.isConnected).toBe(true);
+    fireEvent.pointerUp(prompt, { pointerType: "touch" });
+    fireEvent.click(prompt);
+    vi.useRealTimers();
+    const sheet = screen.getByRole("dialog", { name: "New comment" });
+    const form = within(sheet).getByLabelText("Comment").closest("form");
+    expect(form?.classList.contains("em-composer--sheet")).toBe(true);
+    expect(await saveTopicComment()).toEqual({
+      kind: "topic",
+      slug: topic.slug,
+      part,
+      ...(part === "title"
+        ? { quote: "seed", prefix: "Plant a ", suffix: "" }
+        : { quote: "synthetic", prefix: "A ", suffix: " garden" }),
+    });
+  },
+);
 
 test.each(["paragraph", "summary"])("selection from a topic title to a %s reports cross-block", (end) => {
   const { container } = topicReader();

@@ -23,7 +23,7 @@ type State = { thread: Thread; last: PlacementLocation | null; anchor?: File; ca
 
 function originalLocation(target: Thread["target"], placement: Placement) {
   if (placement.status !== "placed" || target.kind !== placement.location.kind) return false;
-  for (const key of ["path", "blockId", "side", "slug", "start", "end"] as const)
+  for (const key of ["path", "blockId", "side", "slug", "part", "start", "end"] as const)
     if (key in target && Reflect.get(target, key) !== Reflect.get(placement.location, key)) return false;
   return true;
 }
@@ -167,6 +167,10 @@ export function importPlacements() {
         writeup ??= await loadParsed(rendered.renderedBlob, "writeup");
         charge(writeup.textBytes);
       }
+      if (target.kind === "topic" && target.part) {
+        const topic = revision.topicText.get(target.slug);
+        if (topic) charge(Buffer.byteLength(topic.title) + Buffer.byteLength(topic.summary));
+      }
       workThreads.push({ id, target, last, renames: steps, carried: state.carried });
     }
     const work: Work = {
@@ -178,7 +182,10 @@ export function importPlacements() {
       parsedDocs,
       texts,
       files,
-      topics: revision.topicText,
+      topics: revision.topicSlugs,
+      ...(workThreads.some(({ target }) => target.kind === "topic" && target.part)
+        ? { topicText: revision.topicText }
+        : {}),
       threads: workThreads,
     };
     chargePlacementMetadata(work, charge);

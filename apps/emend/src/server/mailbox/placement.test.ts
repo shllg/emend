@@ -195,7 +195,7 @@ test("invalid original targets are rejected even if the quote exists elsewhere",
     );
   expect(await f.db.read((q) => q.select().from(placements).where(eq(placements.ownerId, f.ownerId)))).toHaveLength(0);
 });
-test("file, topic and span targets place on their own revision", async () => {
+test("file, topic and span targets place on their own revision without topic text", async () => {
   await file(f.revisionId, "a.ts", "needle\n");
   await f.db.query((q) =>
     q.insert(topics).values({
@@ -219,6 +219,13 @@ test("file, topic and span targets place on their own revision", async () => {
       .insert(writeups)
       .values({ ownerId: f.ownerId, revisionId: f.revisionId, sourceBlob: rendered, renderedBlob: rendered }),
   );
+  f.deps.publishExecutor = async (work) => {
+    if (work.kind === "place") {
+      expect(work.topics).toEqual(new Set(["topic"]));
+      expect(work).not.toHaveProperty("topicText");
+    }
+    return executeWork(work);
+  };
   for (const target of [
     { kind: "file", path: "a.ts" },
     { kind: "topic", slug: "topic" },

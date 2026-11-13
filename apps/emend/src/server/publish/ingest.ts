@@ -416,6 +416,7 @@ async function computePublish(
     let placedRows: Extract<Awaited<ReturnType<Executor>>, { kind: "place" }>["placements"] = [];
     if (workThreads.length) {
       const needsWriteup = workThreads.some(({ target }) => target.kind === "writeup-span");
+      const needsTopicText = workThreads.some(({ target }) => target.kind === "topic" && target.part);
       if (needsWriteup) await sideText(renderedBlob);
       try {
         const result = await execute({
@@ -425,7 +426,10 @@ async function computePublish(
           sources,
           texts: sideTexts,
           files: currentSides,
-          topics: new Map(input.topics.map((t) => [t.slug, { title: t.title, summary: t.summary }])),
+          topics: new Set(input.topics.map((t) => t.slug)),
+          ...(needsTopicText
+            ? { topicText: new Map(input.topics.map((t) => [t.slug, { title: t.title, summary: t.summary }])) }
+            : {}),
           threads: workThreads,
         });
         if (result.kind !== "place") throw new Error("wrong result");

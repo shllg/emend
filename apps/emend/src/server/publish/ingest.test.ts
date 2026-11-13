@@ -696,6 +696,7 @@ test("placement reads only targeted sides and deduplicates their shared hashes",
   const unused = await blobs.put(f.ownerId, Buffer.from("unused\n"), "text/plain");
   const body: PublishRequest = {
     ...input(),
+    topics: [{ slug: "garden", title: "Plant a seed", summary: "Fresh soil", importance: 10 }],
     files: ["a.ts", "b.ts", "unused.ts"].map((path) => ({
       path,
       role: "diff",
@@ -731,6 +732,10 @@ test("placement reads only targeted sides and deduplicates their shared hashes",
   const result = await publish(body, f.instanceId, f.ownerId, async (work) => {
     // Counting needs both sides; measure placement reads after that preparation finishes.
     if (work.kind === "writeup") get.mockClear();
+    if (work.kind === "place") {
+      expect(work.topics).toEqual(new Set(["garden"]));
+      expect(work).not.toHaveProperty("topicText");
+    }
     return executeWork(work);
   });
   expect(result).toMatchObject({ placed: 2, unplaced: 0 });

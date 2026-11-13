@@ -8,9 +8,14 @@ function bytes(value: unknown) {
   });
   return total;
 }
-test("topic metadata charges title and summary text carried by Maps", () => {
-  const empty = bytes(new Map([["garden", { title: "", summary: "" }]]));
-  const text = bytes(new Map([["garden", { title: "界".repeat(200), summary: "界".repeat(2000) }]]));
+test("topic metadata charges slugs and optional title and summary text", () => {
+  const topics = new Set(["garden"]);
+  const empty = bytes({ topics, topicText: new Map([["garden", { title: "", summary: "" }]]) });
+  const text = bytes({
+    topics,
+    topicText: new Map([["garden", { title: "界".repeat(200), summary: "界".repeat(2000) }]]),
+  });
+  expect(empty).toBeGreaterThan(bytes({ topics }));
   expect(text - empty).toBe(3 * 2200);
 });
 test("fix5: metadata counts shared structures once per job without serializing", () => {
