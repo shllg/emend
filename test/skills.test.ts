@@ -366,6 +366,15 @@ test("review, feedback and publish link to the shared writing reference", () => 
     expect(target).toBe(join(repo, writingReference));
     expect(existsSync(target), path).toBe(true);
   }
+  expect(read("plugin/skills/emend-review/SKILL.md").replace(/\s+/g, " ")).toContain(
+    "Read [the writing reference](references/writing.md) before you write the writeup.",
+  );
+  expect(read("plugin/skills/emend-feedback/SKILL.md").replace(/\s+/g, " ")).toContain(
+    "Write replies and writeup text as [the writing reference](../emend-review/references/writing.md) says.",
+  );
+  expect(read(publishSkill).replace(/\s+/g, " ")).toContain(
+    "Before you write it, read [the writing reference](../emend-review/references/writing.md) and follow it.",
+  );
   expect(hasSkillCommands(read(writingReference))).toBe(false);
 });
 
@@ -386,17 +395,37 @@ test("moved writing rules appear once, in the shared writing reference", () => {
     'alt text "Before" and "After"',
     "Remote image URLs do not show",
     "Use no CDN scripts, styles or fonts",
+    "Keep each section useful to someone who has not opened the code",
+    "Put the effect before the mechanism",
+    "Answer first, then give the reason and relevant validation",
+    "Name the issue or plan task it serves",
+    "The reader reads it first, often straight from other work",
+    "explains what the area does, the problem and the fix",
+    "shows a concrete before/after case",
+    "Prefer existing project meanings and omit general programming terms",
+    "The alt text becomes the caption",
+    "Only listed paths render",
+    "Images do not render in Markdown docs",
+    "Markdown shows no local images yet",
+    "Keep the page self-contained",
+    "loads nothing from other hosts",
+    "Keep images and styles beside the file, using relative paths",
   ]) {
-    const paths = docs.flatMap(({ path, text }) => [...text.matchAll(new RegExp(phrase, "gi"))].map(() => path));
+    const pattern = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    const paths = docs.flatMap(({ path, text }) => [...text.matchAll(pattern)].map(() => path));
     expect(paths, phrase).toEqual([join(repo, writingReference)]);
   }
 });
 
 test("the writing reference defines HTML pages and both TL;DR locations", () => {
   const text = read(writingReference);
-  const html = text.split("## HTML pages\n")[1]?.split("\n## ")[0] ?? "";
-  for (const value of ["1024px", "18px", "1.65", "self-contained"]) {
-    expect(html).toContain(value);
+  const html = (text.split("## HTML pages\n")[1]?.split("\n## ")[0] ?? "").replace(/\s+/g, " ");
+  for (const rule of [
+    "Give the main column a max width of 1024px.",
+    "Use body text around 18px with a line height around 1.65.",
+    "Keep the page self-contained.",
+  ]) {
+    expect(html).toContain(rule);
   }
   const tldr = text.split("## TL;DR\n")[1]?.split("\n## ")[0] ?? "";
   expect(tldr).toContain("A review writeup holds it in `tldr`.");

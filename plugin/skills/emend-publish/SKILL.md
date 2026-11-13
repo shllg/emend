@@ -23,9 +23,9 @@ If you wrote it elsewhere, copy it into a doc root as step 1 says.
 
 1. Write the document into the repository when it belongs there.
    Otherwise write it into a folder the user allowed as a doc root.
-   Prefer one Markdown file or one self-contained HTML file.
+   Prefer one Markdown file or one HTML file.
    Before you write it, read [the writing reference](../emend-review/references/writing.md) and
-   follow it: the document opens with a TL;DR, and an HTML page follows its page rules.
+   follow it. It covers sentences, the TL;DR, the glossary, images and HTML pages.
    emend renders Markdown on its server: GFM tables, code colours, and ```` ```mermaid ```` fences become diagrams.
    Keep it out of hidden folders: folder publishing skips dotfiles and hidden folders.
    Tell the user the path of the file you wrote.
