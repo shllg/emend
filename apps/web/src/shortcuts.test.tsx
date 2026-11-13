@@ -175,6 +175,7 @@ afterEach(() => {
   client.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  layoutStore.update({ fileOrder: "topics" });
 });
 function mount(path = `/r/${ids[0]}`) {
   const history = createMemoryHistory({ initialEntries: [path] });
@@ -417,6 +418,63 @@ test("n/p use file order and the toolbar jump; v uses the current file; hidden d
   act(() => layoutStore.update({ pane: { ...defaultLayout.pane, desktop: "tabs" } }));
   expect(pane.hidden).toBe(true);
   for (const key of ["n", "p", "v"]) expect(press(key).defaultPrevented).toBe(false);
+});
+test("n/p walk A to Z after switching from a different topic order", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
+  revision.topics = [
+    { slug: "first", title: "First", importance: 10, summary: "" },
+    { slug: "second", title: "Second", importance: 20, summary: "" },
+  ];
+  revision.files = ["c.txt", "a.txt", "b.txt"].map((path, order) => ({
+    ...(initialRevision.files[0] as RevisionView["files"][number]),
+    id: ids[order] ?? ids[0],
+    path,
+    order,
+    topic: order === 0 ? "first" : "second",
+  }));
+  mount();
+  await ready();
+  const pane = screen.getByTestId("diff-pane");
+  await within(pane).findByRole("button", { name: "Mark c.txt as viewed" });
+  const headers = () => [...pane.querySelectorAll<HTMLElement>("[data-file-header]")];
+  expect(headers().map((header) => header.id)).toEqual(ids.map((id) => `diff-file-${id}`));
+  fireEvent.keyDown(screen.getByRole("button", { name: "2 topics · 3 files" }), { key: "ArrowDown" });
+  const menu = await screen.findByRole("menu");
+  fireEvent.click(within(menu).getByRole("menuitemradio", { name: "A to Z" }));
+  fireEvent.keyDown(menu, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  expect(layoutStore.getSnapshot().fileOrder).toBe("path");
+  const ordered = headers();
+  expect(ordered.map((header) => header.id)).toEqual([ids[1], ids[2], ids[0]].map((id) => `diff-file-${id}`));
+  const blocks = ordered.map((header) => {
+    header.style.position = "sticky";
+    return header.closest("[data-diff-file]");
+  });
+  vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function (this: HTMLElement) {
+    if (this === pane || this.classList.contains("em-diff-pane")) return new DOMRect(0, 100, 900, 600);
+    const index = blocks.indexOf(this);
+    if (index !== -1) return new DOMRect(0, 148 + index * 180, 800, 180);
+    if (this.hasAttribute("data-diff-toolbar")) return new DOMRect(0, 100, 800, 40);
+    if (this.hasAttribute("data-file-header")) return new DOMRect(0, 140, 800, 32);
+    return new DOMRect();
+  });
+  Object.defineProperties(pane, {
+    scrollHeight: { value: 1200, configurable: true },
+    clientHeight: { value: 600, configurable: true },
+  });
+  const scroll = vi.spyOn(pane, "scrollTo").mockImplementation(() => {});
+  expect(press("p").defaultPrevented).toBe(false);
+  for (const [key, top] of [
+    ["n", 180],
+    ["n", 360],
+    ["p", 180],
+    ["p", 0],
+  ] as const) {
+    scroll.mockClear();
+    expect(press(key).defaultPrevented).toBe(true);
+    expect(scroll).toHaveBeenLastCalledWith({ top, behavior: "instant" });
+  }
+  expect(press("p").defaultPrevented).toBe(false);
 });
 test("short files that cannot scroll keep the last keyboard destination for n and v", async () => {
   layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });

@@ -19,15 +19,16 @@ export function diffGroups(revision: Pick<RevisionView, "topics" | "files">) {
 }
 
 export function pathOrder(files: FileView[]): FileView[] {
-  return files.toSorted((a, b) => {
-    const left = a.path.split("/");
-    const right = b.path.split("/");
-    for (let index = 0; index < Math.min(left.length, right.length); index++) {
-      const compared = pathCollator.compare(left[index] ?? "", right[index] ?? "");
-      if (compared) return compared;
-    }
-    return left.length - right.length || (a.path < b.path ? -1 : a.path > b.path ? 1 : a.order - b.order);
-  });
+  return files
+    .map((file) => ({ file, segments: file.path.split("/") }))
+    .sort(({ file: a, segments: left }, { file: b, segments: right }) => {
+      for (let index = 0; index < Math.min(left.length, right.length); index++) {
+        const compared = pathCollator.compare(left[index] ?? "", right[index] ?? "");
+        if (compared) return compared;
+      }
+      return left.length - right.length || (a.path < b.path ? -1 : a.path > b.path ? 1 : a.order - b.order);
+    })
+    .map(({ file }) => file);
 }
 
 export function diffFiles(revision: Pick<RevisionView, "topics" | "files">, order: FileOrder): FileView[] {

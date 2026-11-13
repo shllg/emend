@@ -4,11 +4,12 @@ import type { FileView, RevisionView, Target, ThreadView } from "@emend/contract
 import type { GetHoveredLineResult } from "@pierre/diffs";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { claimDraft } from "../../lib/composer-owner.ts";
 import type { NavigateDiff } from "../../lib/diff-navigation.ts";
-import { draftKey } from "../../lib/drafts.ts";
+import { draftKey, isAnyDraftSaving, saveDraft } from "../../lib/drafts.ts";
 import { layoutStore } from "../../lib/layout-store.ts";
 import { viewedState } from "../../lib/viewed-state.ts";
 import { Panes } from "../layout/Panes.tsx";
@@ -16,7 +17,7 @@ import { DiffPane, type DiffPaneProps } from "./DiffPane.tsx";
 import type { DiffPostRender, ParsedDiff } from "./FileDiff.tsx";
 import { parsePair } from "./parse.worker.ts";
 import type { DiffParser } from "./parse-client.ts";
-import { diffHoldQuietMs } from "./presentation.ts";
+import { diffHoldQuietMs, useFileOrder } from "./presentation.ts";
 
 type Selection = { side?: "additions" | "deletions"; endSide?: "additions" | "deletions"; start: number; end: number };
 type Annotation = { side: string; lineNumber: number; metadata: ReactNode };
@@ -860,6 +861,80 @@ test.each(["save", "cancel"])("a topic composer moves to A to Z once and closes 
   expect(screen.queryByRole("region", { name: "Topic comments" })).toBeNull();
 });
 
+test.each([false, true])("a resumed A to Z topic draft focuses its composer (has files: %s)", async (hasFiles) => {
+  layoutStore.update({ fileOrder: "path" });
+  const target = { kind: "topic", slug: "first" } as const;
+  const key = draftKey(reviewId, target);
+  saveDraft(key, "Resumed topic draft");
+  claimDraft(key, "diff");
+  const first = file("a.ts", { flag: "binary", viewed: "viewed", viewedOn: 2 });
+  let navigate: NavigateDiff | null = null;
+  await mount(revision(hasFiles ? [file("z.ts", { flag: "binary" }), first] : []), {
+    resume: { key, target },
+    onNavigator: (value) => {
+      navigate = value;
+    },
+  });
+  const comments = screen.getByRole("region", { name: "Topic comments" });
+  const input = within(comments).getByRole("textbox", { name: "Comment" });
+  expect((input as HTMLTextAreaElement).value).toBe("Resumed topic draft");
+  await waitFor(() => expect(document.activeElement).toBe(input));
+  const editor = input.closest<HTMLElement>(".em-composer");
+  if (!editor) throw new Error("Missing topic composer");
+  act(() => expect(navigate?.({ target, element: editor })).toBe(true));
+  if (hasFiles) {
+    const section = screen.getByRole("region", { name: `File ${first.path}` });
+    expect(within(section).getByRole("button", { name: "Expand file" })).toBeTruthy();
+    expect(within(section).queryByRole("button", { name: "Collapse file" })).toBeNull();
+    expect(parser).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  }
+  expect(document.activeElement).toBe(input);
+});
+
+test.each(["file", "topic"])("file order stays locked until a %s comment save closes its composer", async (kind) => {
+  const save = Promise.withResolvers<Response>();
+  const fallback = fetchMock.getMockImplementation() as
+    | ((path: string, init?: RequestInit) => Promise<Response>)
+    | undefined;
+  fetchMock.mockImplementation((path: string, init?: RequestInit) =>
+    path.endsWith("/threads") ? save.promise : fallback?.(path, init),
+  );
+  const { result } = renderHook(() => useFileOrder());
+  const setOrder = result.current[1];
+  try {
+    await mount(revision([file("source.ts", { flag: "binary" })]));
+    fireEvent.click(screen.getByRole("button", { name: `Comment on ${kind}` }));
+    const input = screen.getByRole("textbox", { name: "Comment" });
+    fireEvent.change(input, { target: { value: "Pending comment" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
+    await waitFor(() => expect(isAnyDraftSaving()).toBe(true));
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v1/reviews/${reviewId}/threads`,
+      expect.objectContaining({ method: "POST" }),
+    );
+    fireEvent.keyDown(screen.getByRole("button", { name: "1 topic · 1 file" }), { key: "ArrowDown" });
+    const menu = await screen.findByRole("menu");
+    const order = within(menu).getByLabelText("File order");
+    for (const option of within(order).getAllByRole("menuitemradio"))
+      expect(option.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(within(order).getByRole("menuitemradio", { name: "A to Z" }));
+    act(() => setOrder("path"));
+    expect(layoutStore.getSnapshot().fileOrder).toBe("topics");
+    expect(input.isConnected).toBe(true);
+    await act(async () => save.resolve(Response.json({}, { status: 201 })));
+    await waitFor(() => expect(input.isConnected).toBe(false));
+    expect(document.querySelector(".em-composer")).toBeNull();
+    for (const option of within(order).getAllByRole("menuitemradio"))
+      expect(option.getAttribute("aria-disabled")).not.toBe("true");
+    fireEvent.click(within(order).getByRole("menuitemradio", { name: "A to Z" }));
+    expect(layoutStore.getSnapshot().fileOrder).toBe("path");
+  } finally {
+    await act(async () => save.resolve(Response.json({}, { status: 201 })));
+    await waitFor(() => expect(isAnyDraftSaving()).toBe(false));
+  }
+});
+
 test("an A to Z topic draft without a section uses only the fallback composer", async () => {
   layoutStore.update({ fileOrder: "path" });
   const target = { kind: "topic", slug: "missing" } as const;
@@ -867,7 +942,7 @@ test("an A to Z topic draft without a section uses only the fallback composer", 
     resume: { key: draftKey(reviewId, target), target },
   });
   expect(screen.getAllByRole("textbox", { name: "Comment" })).toHaveLength(1);
-  expect(within(screen.getByRole("region", { name: "Topic comments" })).queryByRole("textbox")).toBeNull();
+  expect(screen.queryByRole("region", { name: "Topic comments" })).toBeNull();
 });
 
 test("the phone renders saved A to Z order without topic sections or a toolbar", async () => {

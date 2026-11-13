@@ -1,4 +1,5 @@
-import { type RefObject, useLayoutEffect, useState } from "react";
+import { type RefObject, useLayoutEffect, useState, useSyncExternalStore } from "react";
+import { isAnyDraftSaving, subscribeDrafts } from "../../lib/drafts.ts";
 import { type FileOrder, layoutStore, useLayoutPreferences } from "../../lib/layout-store.ts";
 import { onReaderInput } from "../../lib/reader-input.ts";
 import type { ParsedDiff } from "./FileDiff.tsx";
@@ -28,7 +29,14 @@ export function useDiffWrap() {
 
 export function useFileOrder() {
   const { fileOrder } = useLayoutPreferences();
-  return [fileOrder, (next: FileOrder) => layoutStore.update({ fileOrder: next })] as const;
+  const saving = useSyncExternalStore(subscribeDrafts, isAnyDraftSaving, () => false);
+  return [
+    fileOrder,
+    (next: FileOrder) => {
+      if (!isAnyDraftSaving()) layoutStore.update({ fileOrder: next });
+    },
+    saving,
+  ] as const;
 }
 
 export function useNarrowDiffPane(root: RefObject<HTMLElement | null>) {

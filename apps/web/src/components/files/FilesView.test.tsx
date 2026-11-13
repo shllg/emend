@@ -1,6 +1,7 @@
 import type { FileView, RevisionView } from "@emend/contract";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { beginDraftSave, draftKey, finishDraftSave, trackReviewDraftSave } from "../../lib/drafts.ts";
 import { createLayoutStore, layoutStore } from "../../lib/layout-store.ts";
 import { FilesView } from "./FilesView.tsx";
 
@@ -20,6 +21,59 @@ const file = (path: string, order: number, topic: string | null = null): FileVie
   flag: null,
   hasOld: true,
   hasNew: true,
+});
+
+test("file order stays locked through a draft save and its review refresh", () => {
+  const revision: RevisionView = {
+    seq: 1,
+    base: null,
+    head: null,
+    main: null,
+    writeupEmpty: true,
+    topics: [],
+    files: [file("z.ts", 0), file("a.ts", 1)],
+    docs: [],
+    threads: [],
+    writeup: { sections: [] },
+    changedBlocks: [],
+  };
+  const reviewId = "11111111-1111-4111-8111-111111111111";
+  const key = draftKey(reviewId, { kind: "file", path: "z.ts" });
+  let finishReviewSave: (() => void) | undefined;
+  render(<FilesView revision={revision} counts={new Map()} onViewed={vi.fn()} onNavigate={vi.fn()} />);
+  const expectLocked = () => {
+    for (const label of ["Topics", "A to Z"]) {
+      const option = screen.getByRole("radio", { name: label });
+      expect(option.hasAttribute("disabled")).toBe(true);
+      expect(option.closest("[title]")?.getAttribute("title")).toBe("Wait until the comment is saved");
+    }
+    fireEvent.click(screen.getByRole("radio", { name: "A to Z" }));
+    expect(layoutStore.getSnapshot().fileOrder).toBe("topics");
+    expect(screen.getByRole("radio", { name: "Topics" }).getAttribute("aria-checked")).toBe("true");
+  };
+  try {
+    act(() => expect(beginDraftSave(key)).toBe(true));
+    expectLocked();
+    act(() => {
+      finishReviewSave = trackReviewDraftSave(reviewId);
+      finishDraftSave(key);
+    });
+    expectLocked();
+    act(() => {
+      finishReviewSave?.();
+      finishReviewSave = undefined;
+    });
+    for (const option of screen.getAllByRole("radio")) expect(option.hasAttribute("disabled")).toBe(false);
+    expect(screen.queryByTitle("Wait until the comment is saved")).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: "A to Z" }));
+    expect(layoutStore.getSnapshot().fileOrder).toBe("path");
+    expect(screen.getByRole("region", { name: "Files A to Z" })).toBeTruthy();
+  } finally {
+    act(() => {
+      finishDraftSave(key);
+      finishReviewSave?.();
+    });
+  }
 });
 
 test("topic totals are ready before any file has been parsed", () => {

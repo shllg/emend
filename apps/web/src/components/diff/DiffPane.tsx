@@ -1,5 +1,5 @@
 import { type FileView, OTHER_TOPIC, type RevisionView, type Target } from "@emend/contract";
-import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { claimDraft } from "../../lib/composer-owner.ts";
 import { useDiffCounts } from "../../lib/diff-counts.ts";
 import { diffFiles, diffGroups } from "../../lib/diff-groups.ts";
@@ -60,7 +60,7 @@ export function DiffPane({
   const layout = useLayout();
   const [style, setStyle] = useDiffStyle();
   const [wrap, setWrap] = useDiffWrap();
-  const [order, setOrder] = useFileOrder();
+  const [order, setOrder, saving] = useFileOrder();
   const { notes } = useLayoutPreferences();
   const [collapsedTopics, setCollapsedTopics] = useTopicFolds(reviewId, revision.seq);
   const [collapsedFiles, setCollapsedFiles] = useViewedCollapse(reviewId, revision);
@@ -106,7 +106,10 @@ export function DiffPane({
     setActive(target);
   };
   const groups = diffGroups(revision);
-  const orderedFiles = diffFiles(revision, order);
+  const orderedFiles = useMemo(
+    () => diffFiles({ files: revision.files, topics: revision.topics }, order),
+    [revision.files, revision.topics, order],
+  );
   const lastReachedFile = useRef<string | null>(null);
   useEffect(() => {
     const scroll = root.current?.closest<HTMLElement>("[data-diff-scroll]");
@@ -237,7 +240,13 @@ export function DiffPane({
           : elementId?.startsWith("diff-topic-")
             ? elementId.slice(11)
             : undefined;
-    if (order === "path" && topic && !thread && (location?.kind === "topic" || elementId?.startsWith("diff-topic-"))) {
+    if (
+      order === "path" &&
+      topic &&
+      !thread &&
+      !(element && root.current?.contains(element)) &&
+      (location?.kind === "topic" || elementId?.startsWith("diff-topic-"))
+    ) {
       file = orderedFiles.find((file) => topicForFile(file) === topic);
       if (!file) return false;
       elementId = `diff-file-${file.id}`;
@@ -313,9 +322,11 @@ export function DiffPane({
         {layout !== "phone" && (
           <DiffToolbar
             groups={[...groups.values()]}
+            files={orderedFiles}
             ranks={ranks}
             counts={counts}
             order={order}
+            orderLocked={saving}
             onOrder={setOrder}
             style={diffStyle}
             splitDisabled={narrow !== false}
@@ -337,7 +348,7 @@ export function DiffPane({
             ))}
           </section>
         )}
-        {order === "path" && (topicThreads.length > 0 || active?.kind === "topic") && (
+        {order === "path" && (topicThreads.length > 0 || (active?.kind === "topic" && hasSection(active))) && (
           <section aria-label="Topic comments" data-diff-section className="mb-5 space-y-3 px-3">
             <h3 className="font-semibold">Topic comments</h3>
             {active?.kind === "topic" && hasSection(active) && (

@@ -1,5 +1,5 @@
 import { type FileView, OTHER_TOPIC, type RevisionView } from "@emend/contract";
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import { diffGroups, pathOrder } from "../../lib/diff-groups.ts";
 import { lineTotals } from "../../lib/diff-totals.ts";
 import { rankedTopics } from "../../lib/topics.ts";
@@ -24,8 +24,12 @@ export function FilesView({
   onViewed: (paths: string[], viewed: boolean) => void;
   onNavigate: (file: FileView) => void;
 }) {
-  const [order, setOrder] = useFileOrder();
+  const [order, setOrder, saving] = useFileOrder();
   const groups = diffGroups(revision);
+  const orderedFiles = useMemo(
+    () => pathOrder(revision.files.filter((file) => file.role === "diff")),
+    [revision.files],
+  );
   const root = useRef<HTMLDivElement>(null);
   useShortcut(
     "file.toggleViewed",
@@ -59,14 +63,24 @@ export function FilesView({
           value={order}
           onChange={(value) => setOrder(value === "path" ? "path" : "topics")}
           options={[
-            { value: "topics", label: "Topics" },
-            { value: "path", label: "A to Z" },
+            {
+              value: "topics",
+              label: "Topics",
+              disabled: saving,
+              title: saving ? "Wait until the comment is saved" : undefined,
+            },
+            {
+              value: "path",
+              label: "A to Z",
+              disabled: saving,
+              title: saving ? "Wait until the comment is saved" : undefined,
+            },
           ]}
         />
       </div>
       {order === "path" ? (
         <section className="em-files-group" aria-label="Files A to Z">
-          {pathOrder(files).map((file) => (
+          {orderedFiles.map((file) => (
             <FileRow
               key={file.id}
               file={file}

@@ -1,5 +1,5 @@
 import type { FileView, RevisionView } from "@emend/contract";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { diffFiles, diffGroups, pathOrder } from "./diff-groups.ts";
 
 const file = (path: string, values: Partial<FileView> = {}): FileView => ({
@@ -46,6 +46,19 @@ test("collation ties use the full path's code points, then the file order", () =
   const last = file("f2.ts", { order: 0 });
   expect(pathOrder([last, second, first])).toEqual([first, second, last]);
   expect(pathOrder([first, last, second])).toEqual([first, second, last]);
+});
+
+test("path order splits each path at most once", () => {
+  const files = Array.from({ length: 50 }, (_, index) => file(`src/deep/nested/f${50 - index}.ts`));
+  const split = vi.spyOn(String.prototype, "split");
+  let calls: number;
+  try {
+    pathOrder(files);
+    calls = split.mock.calls.length;
+  } finally {
+    split.mockRestore();
+  }
+  expect(calls).toBeLessThanOrEqual(files.length);
 });
 
 test("diff files preserve ranked groups in Topics and exclude other roles in A to Z", () => {
