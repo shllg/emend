@@ -23,6 +23,14 @@ export {
   type DownloadWork,
   type ResolveResult,
 } from "./render/download.ts";
+export {
+  type DownloadComment,
+  type DownloadFile,
+  type DownloadThread,
+  type DownloadThreadInput,
+  type FileThreads,
+  routeDownloadThreads,
+} from "./render/download-threads.ts";
 export { blockHash } from "./render/hash.ts";
 export { HIGHLIGHT_FENCE_BYTES, HIGHLIGHT_LINE_CHARS, HIGHLIGHT_RENDER_BYTES } from "./render/highlight.ts";
 export { renderCommentHtml, renderDoc, renderMarkdown, renderMetadataBlocks } from "./render/markdown.ts";

@@ -978,6 +978,71 @@ test("desktop Download offers unticked docs, updates its link and resets each ti
   expect(reopened.getByRole("link", { name: "Download" }).getAttribute("href")).toBe(reviewDownloadPath(id, 1));
 });
 
+const downloadThread = (sent: boolean): RevisionView["threads"][number] => ({
+  id: "55555555-5555-4555-8555-555555555555",
+  target: { kind: "review" },
+  state: sent ? "sent" : "open",
+  createdOn: 1,
+  placement: { status: "placed", location: { kind: "review" } },
+  comments: [
+    {
+      id: "66666666-6666-4666-8666-666666666666",
+      author: "user",
+      body: "Synthetic remark",
+      sent,
+      sentOn: sent ? 1 : null,
+    },
+  ],
+});
+
+test("Download hides the comments box without sent comments", async () => {
+  withDownloadDocs(2, { threads: [downloadThread(false)] });
+  mount(`/r/${id}`);
+  fireEvent.click(await screen.findByRole("button", { name: "Download" }));
+  const dialog = within(await screen.findByRole("alertdialog", { name: "Download" }));
+  expect(dialog.queryByRole("checkbox", { name: /Comments and replies/ })).toBeNull();
+});
+
+test("sent comments open the Download dialog without docs, unticked, and the box resets on reopen", async () => {
+  withDownloadDocs(0, { threads: [downloadThread(true)] });
+  mount(`/r/${id}`);
+  const trigger = await screen.findByRole("button", { name: "Download" });
+  fireEvent.click(trigger);
+  const dialogNode = await screen.findByRole("alertdialog", { name: "Download" });
+  const dialog = within(dialogNode);
+  const description = document.getElementById(dialogNode.getAttribute("aria-describedby") ?? "");
+  expect(description?.textContent).toBe("The writeup is always in.");
+  const box = dialog.getByRole("checkbox", { name: /Comments and replies/ }) as HTMLInputElement;
+  expect(box.checked).toBe(false);
+  expect(
+    dialog.getByText("Sent comments and the agent's replies, next to their text. Unsent comments stay out."),
+  ).toBeTruthy();
+  expect(dialog.getByRole("link", { name: "Download" }).getAttribute("href")).toBe(reviewDownloadPath(id, 1));
+  fireEvent.click(box);
+  expect(dialog.getByRole("link", { name: "Download" }).getAttribute("href")).toBe(
+    reviewDownloadPath(id, 1, [], { comments: true }),
+  );
+  expect(dialog.getByRole("link", { name: "Download" }).getAttribute("href")).toContain("?comments=1");
+  fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  fireEvent.click(trigger);
+  const reopened = within(await screen.findByRole("alertdialog", { name: "Download" }));
+  expect((reopened.getByRole("checkbox", { name: /Comments and replies/ }) as HTMLInputElement).checked).toBe(false);
+  expect(reopened.getByRole("link", { name: "Download" }).getAttribute("href")).toBe(reviewDownloadPath(id, 1));
+});
+
+test("Download combines ticked docs with comments in one link", async () => {
+  const value = withDownloadDocs(2, { threads: [downloadThread(true)] });
+  mount(`/r/${id}`);
+  fireEvent.click(await screen.findByRole("button", { name: "Download" }));
+  const dialog = within(await screen.findByRole("alertdialog", { name: "Download" }));
+  fireEvent.click(dialog.getByRole("checkbox", { name: /Plan title/ }));
+  fireEvent.click(dialog.getByRole("checkbox", { name: /Comments and replies/ }));
+  expect(dialog.getByRole("link", { name: "Download" }).getAttribute("href")).toBe(
+    reviewDownloadPath(id, 1, [value.files[0]?.id ?? ""], { comments: true }),
+  );
+});
+
 test.each([null, "doc-1.md"])("Download excludes a pub's base doc with main %s", async (main) => {
   withDownloadDocs(2, { writeupEmpty: true, main });
   mount(`/r/${id}`);

@@ -31,6 +31,7 @@ import {
   isIndirectReference,
   utf8Length,
 } from "./download-css.ts";
+import { type DownloadComment, type DownloadThread, type FileThreads, threadOrder } from "./download-threads.ts";
 import { MEDIA_URL_PREFIX } from "./sanitize.ts";
 
 type ElementContent = Element["children"][number];
@@ -64,6 +65,7 @@ type PageInput = {
   inlineBudget?: number;
   pause?: () => Promise<void>;
   work?: DownloadWork;
+  threads?: FileThreads;
 };
 
 const STYLESHEET_LIMIT = 64;
@@ -78,6 +80,11 @@ const READING_STYLES = `
 :root{color-scheme:light dark;--bg:oklch(.985 .001 260);--sunken:oklch(.968 .002 260);--fg:oklch(.49 .004 260);--strong:oklch(.18 .004 260);--muted:oklch(.55 .004 260);--border:oklch(.895 .003 260);--link:oklch(.42 .09 60)}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:400 16px/1.7 ui-sans-serif,system-ui,sans-serif}.em-download{max-width:68ch;margin:auto;padding:32px 20px;overflow-wrap:break-word}h1,h2,h3,h5,h6,strong,code{color:var(--strong)}h1{font-size:24px;line-height:1.2;letter-spacing:-.015em;margin:0 0 16px}h2{font-size:19px;line-height:1.3;letter-spacing:-.01em;margin:36px 0 12px}h3{font-size:16px;line-height:1.35;margin:24px 0 6px}h4{font:600 11px/1.3 ui-monospace,"SF Mono",Menlo,monospace;text-transform:uppercase;letter-spacing:.04em}h1,h2,h3{font-weight:600}p,ul,ol{margin:0 0 12px}ul,ol{padding-left:22px}li{margin:6px 0}a{color:var(--link)}a :is(strong,code){color:inherit}.em-doc-link{color:inherit}code{font:400 .84em/1 ui-monospace,"SF Mono",Menlo,monospace;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--sunken)}pre{margin:0 0 14px;padding:12px 14px;border:1px solid var(--border);border-radius:6px;background:var(--sunken);overflow:auto;font:400 12px/1.6 ui-monospace,"SF Mono",Menlo,monospace}pre code{padding:0;border:0;background:none;font:inherit}.shiki{background-color:var(--shiki-light-bg,var(--sunken))}.shiki,.shiki span{color:var(--shiki-light,inherit)}blockquote{margin:0 0 12px;padding-left:14px;border-left:2px solid var(--border)}table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;margin:0 0 14px;font-size:14px}th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)}th{font-weight:500}hr{border:0;border-top:1px solid var(--border);margin:24px 0}img{max-width:100%;height:auto}.emend-media{display:inline-block;max-width:100%;vertical-align:top}.emend-media img{display:block;border-radius:6px}.emend-media-caption{display:block;margin-top:6px;overflow-wrap:anywhere}.em-meta,.emend-media-caption,figcaption,footer,.em-topic-blast,.em-link-host{font:400 12px/1.4 ui-sans-serif,system-ui,sans-serif;color:var(--muted)}.em-links{list-style:none;padding:0}.em-link-host{margin-left:6px}.em-diagram{margin:16px 0}.em-diagram figcaption{margin-bottom:6px}.em-download-note{padding:12px 14px;border:1px solid var(--border);border-radius:6px;background:var(--sunken)}footer{border-top:1px solid var(--border);margin-top:36px;padding-top:16px}
 @media(prefers-color-scheme:dark){:root{--bg:oklch(.18 .004 260);--sunken:oklch(.125 .004 260);--fg:oklch(.79 .004 260);--strong:oklch(.895 .003 260);--muted:oklch(.7 .004 260);--border:oklch(.25 .004 260);--link:oklch(.85 .14 81)}.shiki{background-color:var(--shiki-dark-bg,var(--sunken))}.shiki,.shiki span{color:var(--shiki-dark,inherit)}}
+`;
+// Literal fallbacks: an HTML doc does not define the reading tokens.
+const THREAD_STYLES = `
+.em-threads{margin:24px 0}.em-thread{margin:12px 0;padding:10px 14px;border:1px solid var(--border,#d4d4d8);border-left:3px solid var(--link,#7c5a1e);border-radius:6px;background:var(--sunken,#f7f7f8);color:var(--fg,#3f3f46);font:400 14px/1.55 ui-sans-serif,system-ui,sans-serif;text-align:left}.em-thread[data-state=resolved]{border-left-color:var(--muted,#71717a)}.em-thread-head,.em-thread-note,.em-comment-head{margin:0 0 6px;font-size:12px;line-height:1.4;color:var(--muted,#71717a)}.em-thread-where,.em-comment-head strong{color:var(--strong,#18181b)}.em-thread-quote{margin:0 0 8px;padding-left:10px;border-left:2px solid var(--border,#d4d4d8)}.em-thread-quote p{margin:0}.em-thread-lines{margin:0 0 8px;padding:8px 10px;overflow:auto;font:400 12px/1.5 ui-monospace,"SF Mono",Menlo,monospace}.em-comments{list-style:none;margin:0;padding:0}.em-comment{margin:8px 0 0;padding-top:8px;border-top:1px solid var(--border,#d4d4d8)}.em-comment:first-child{margin-top:0;padding-top:0;border-top:0}.em-comment-text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.em-comment-body{overflow-wrap:anywhere}.em-comment-body>*{margin-top:0}.em-comment-body>:last-child{margin-bottom:0}
+@media(prefers-color-scheme:dark){.em-thread{border-color:var(--border,#3f3f46);background:var(--sunken,#1c1c1f);color:var(--fg,#d4d4d8)}.em-thread-head,.em-thread-note,.em-comment-head{color:var(--muted,#a1a1aa)}.em-thread-where,.em-comment-head strong{color:var(--strong,#f4f4f5)}.em-thread-quote,.em-comment{border-color:var(--border,#3f3f46)}}
 `;
 const rel = ["noopener", "noreferrer", "nofollow"];
 const imageTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
@@ -219,7 +226,7 @@ function resolverState(
   return state;
 }
 type AssetState = ReturnType<typeof resolverState>;
-function frame(input: PageInput, content: ElementContent[], tooLarge: boolean): string {
+function frame(input: PageInput, content: ElementContent[], tooLarge: boolean, threadStyles = false): string {
   const { title, details } = input;
   const links = (details.links ?? []).flatMap((link) => {
     try {
@@ -256,6 +263,7 @@ function frame(input: PageInput, content: ElementContent[], tooLarge: boolean): 
             element("meta", [], { name: "color-scheme", content: "light dark" }),
             element("title", [text(title)]),
             style(READING_STYLES),
+            ...(threadStyles ? [style(THREAD_STYLES)] : []),
           ]),
           element("body", [
             element(
@@ -341,7 +349,126 @@ async function transformBlocks(parent: Root | Element, state: AssetState): Promi
   }
   parent.children = children;
 }
-async function blocksContent(blocks: RenderedBlock[], state: AssetState): Promise<ElementContent[]> {
+/** Threads of one file and the ones a page has already shown. */
+type ThreadContext = { threads: FileThreads; emitted: Set<DownloadThread>; state: AssetState };
+const stateLabels = { open: "Open", sent: "Sent", answered: "Answered", resolved: "Resolved" } as const;
+const outcomeLabels = { fixed: "Fixed", explained: "Explained", held: "Held", declined: "Declined" } as const;
+function commentTime(ms: number): ElementContent {
+  const iso = new Date(ms).toISOString();
+  return element("time", [text(`${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`)], { dateTime: iso });
+}
+async function commentBody(comment: DownloadComment, state: AssetState): Promise<Element> {
+  const plain = () => element("p", [text(comment.body)], { className: ["em-comment-text"] });
+  if (comment.html === null || !parseDocHtml(comment.html, HTML_ELEMENT_LIMIT)) return plain();
+  // The same filtering as writeup blocks: no scripts, handlers, frames, styles or remote loads.
+  const tree = fromHtml(comment.html, { fragment: true });
+  await transformBlocks(tree, state);
+  return element(
+    "div",
+    tree.children.filter((node): node is ElementContent => node.type !== "doctype"),
+    { className: ["em-comment-body"] },
+  );
+}
+async function threadCard(thread: DownloadThread, state: AssetState, showWhere: boolean): Promise<Element> {
+  const items: ElementContent[] = [];
+  for (const comment of thread.comments) {
+    items.push(
+      element(
+        "li",
+        [
+          element(
+            "p",
+            [
+              element("strong", [text(comment.author === "agent" ? "Agent" : "Reviewer")]),
+              ...(comment.outcome ? [text(` · ${outcomeLabels[comment.outcome]}`)] : []),
+              text(" · "),
+              commentTime(comment.createdAt),
+            ],
+            { className: ["em-comment-head"] },
+          ),
+          await commentBody(comment, state),
+        ],
+        { className: ["em-comment"], dataAuthor: comment.author },
+      ),
+    );
+  }
+  return element(
+    "aside",
+    [
+      element(
+        "p",
+        [
+          ...(showWhere
+            ? [element("span", [text(thread.where)], { className: ["em-thread-where"] }), text(" · ")]
+            : []),
+          element("span", [text(stateLabels[thread.state])], { className: ["em-thread-state"] }),
+        ],
+        { className: ["em-thread-head"] },
+      ),
+      ...(thread.note ? [element("p", [text(thread.note)], { className: ["em-thread-note"] })] : []),
+      ...(thread.quote !== undefined
+        ? [element("blockquote", [element("p", [text(thread.quote)])], { className: ["em-thread-quote"] })]
+        : thread.lines
+          ? [element("pre", [element("code", [text(thread.lines.join("\n"))])], { className: ["em-thread-lines"] })]
+          : []),
+      element("ol", items, { className: ["em-comments"] }),
+    ],
+    { className: ["em-thread"], dataState: thread.state },
+  );
+}
+/** Cards for threads this page has not shown yet; marks them shown. */
+async function threadCards(list: DownloadThread[] | undefined, ctx: ThreadContext, showWhere = false) {
+  const cards: ElementContent[] = [];
+  for (const thread of list ?? []) {
+    if (ctx.emitted.has(thread)) continue;
+    ctx.emitted.add(thread);
+    cards.push(await threadCard(thread, ctx.state, showWhere));
+  }
+  return cards;
+}
+async function threadSection(
+  heading: string,
+  list: DownloadThread[],
+  ctx: ThreadContext,
+  showWhere = false,
+): Promise<ElementContent[]> {
+  const cards = await threadCards(list, ctx, showWhere);
+  return cards.length
+    ? [element("section", [element("h2", [text(heading)]), ...cards], { className: ["em-threads"] })]
+    : [];
+}
+/** Whole-review threads first, the page content, then every thread that found no place on the page. */
+async function withThreads(
+  threads: FileThreads | undefined,
+  state: AssetState,
+  build: (ctx?: ThreadContext) => Promise<ElementContent[]>,
+): Promise<ElementContent[]> {
+  const parts = await threadParts(threads, state, build);
+  return [...parts.top, ...parts.content, ...parts.tail];
+}
+async function threadParts(
+  threads: FileThreads | undefined,
+  state: AssetState,
+  build: (ctx?: ThreadContext) => Promise<ElementContent[]>,
+): Promise<{ top: ElementContent[]; content: ElementContent[]; tail: ElementContent[] }> {
+  if (!threads) return { top: [], content: await build(), tail: [] };
+  const ctx: ThreadContext = { threads, emitted: new Set(), state };
+  const top = await threadSection("Comments on the whole review", threads.top, ctx);
+  const content = await build(ctx);
+  const doc = await threadSection("Comments on this doc", threads.doc, ctx);
+  const other = [
+    ...threads.end,
+    ...[...threads.blocks.values(), ...threads.topics.values(), ...threads.lines.values()].flat(),
+  ]
+    .filter((thread) => !ctx.emitted.has(thread))
+    .sort((a, b) => threadOrder(a) - threadOrder(b));
+  return { top, content, tail: [...doc, ...(await threadSection("Other comments", other, ctx, true))] };
+}
+async function blocksContent(
+  blocks: RenderedBlock[],
+  state: AssetState,
+  ctx?: ThreadContext,
+): Promise<ElementContent[]> {
   const children: ElementContent[] = [];
   for (const block of blocks) {
     if (block.kind === "diagram") {
@@ -364,6 +491,7 @@ async function blocksContent(blocks: RenderedBlock[], state: AssetState): Promis
       await transformBlocks(tree, state);
       children.push(...tree.children.filter((node): node is ElementContent => node.type !== "doctype"));
     }
+    if (ctx) children.push(...(await threadCards(ctx.threads.blocks.get(block.id), ctx)));
   }
   return children;
 }
@@ -376,75 +504,75 @@ export async function buildWriteupDownload(
   const bySlug = new Map(ranked.map((topic) => [topic.slug, topic]));
   const groups: { key: string; node: Element }[] = [];
   const written = new Map<string, Element>();
-  for (const section of input.writeup.sections) {
-    const topic = section.topic ? bySlug.get(section.topic) : undefined;
-    const content = await blocksContent(section.blocks, state);
-    if (!topic) {
-      groups.push({
-        key: section.key,
-        node: element("section", [
-          element("h2", [text(section.key === "decisions" ? "Decisions & drift" : section.label)]),
-          ...content,
-        ]),
-      });
-      continue;
-    }
-    let group = written.get(topic.slug);
-    if (!group) {
-      group = element("section", [element("h2", [text(topic.title)]), element("p", [text(topic.summary)])], {
-        id: `topic-${topic.slug}`,
-      });
-      if (topic.blastRadius)
-        group.children.push(
-          element(
-            "p",
-            [
-              text("Blast radius: "),
-              element("strong", [text(topic.blastRadius.scope)]),
-              text(` — ${topic.blastRadius.note}`),
-            ],
-            { className: ["em-topic-blast"] },
-          ),
-        );
-      written.set(topic.slug, group);
-      groups.push({ key: section.key, node: group });
-    }
-    const suffix = section.key.slice(section.key.lastIndexOf("-") + 1);
-    group.children.push(
-      element("h3", [text(suffix === "why" ? "Why" : suffix === "example" ? "Example" : "Details")]),
-      ...content,
-    );
-  }
-  if (ranked.length) {
-    const intro = ["overview", "tldr", "outOfScope", "whereToLook", "context", "decisions", "glossary"];
-    const index = groups.findLastIndex((group) => intro.includes(group.key)) + 1;
-    groups.splice(index, 0, {
-      key: "topics",
-      node: element("section", [
-        element("h2", [text("Topics")]),
-        element(
-          "ol",
-          ranked.map((topic, index) =>
+  const content = await withThreads(input.threads, state, async (ctx) => {
+    for (const section of input.writeup.sections) {
+      const topic = section.topic ? bySlug.get(section.topic) : undefined;
+      const content = await blocksContent(section.blocks, state, ctx);
+      if (!topic) {
+        groups.push({
+          key: section.key,
+          node: element("section", [
+            element("h2", [text(section.key === "decisions" ? "Decisions & drift" : section.label)]),
+            ...content,
+          ]),
+        });
+        continue;
+      }
+      let group = written.get(topic.slug);
+      if (!group) {
+        group = element("section", [element("h2", [text(topic.title)]), element("p", [text(topic.summary)])], {
+          id: `topic-${topic.slug}`,
+        });
+        if (topic.blastRadius)
+          group.children.push(
             element(
-              "li",
+              "p",
               [
-                written.has(topic.slug)
-                  ? element("a", [text(topic.title)], { href: `#topic-${topic.slug}` })
-                  : element("span", [text(topic.title)]),
-                element("p", [text(topic.summary)]),
+                text("Blast radius: "),
+                element("strong", [text(topic.blastRadius.scope)]),
+                text(` — ${topic.blastRadius.note}`),
               ],
-              { value: String(index + 1) },
+              { className: ["em-topic-blast"] },
+            ),
+          );
+        if (ctx) group.children.push(...(await threadCards(ctx.threads.topics.get(topic.slug), ctx)));
+        written.set(topic.slug, group);
+        groups.push({ key: section.key, node: group });
+      }
+      const suffix = section.key.slice(section.key.lastIndexOf("-") + 1);
+      group.children.push(
+        element("h3", [text(suffix === "why" ? "Why" : suffix === "example" ? "Example" : "Details")]),
+        ...content,
+      );
+    }
+    if (ranked.length) {
+      const intro = ["overview", "tldr", "outOfScope", "whereToLook", "context", "decisions", "glossary"];
+      const index = groups.findLastIndex((group) => intro.includes(group.key)) + 1;
+      groups.splice(index, 0, {
+        key: "topics",
+        node: element("section", [
+          element("h2", [text("Topics")]),
+          element(
+            "ol",
+            ranked.map((topic, index) =>
+              element(
+                "li",
+                [
+                  written.has(topic.slug)
+                    ? element("a", [text(topic.title)], { href: `#topic-${topic.slug}` })
+                    : element("span", [text(topic.title)]),
+                  element("p", [text(topic.summary)]),
+                ],
+                { value: String(index + 1) },
+              ),
             ),
           ),
-        ),
-      ]),
-    });
-  }
-  return frame(
-    input,
-    groups.map((group) => group.node),
-    state.tooLarge,
-  );
+        ]),
+      });
+    }
+    return groups.map((group) => group.node);
+  });
+  return frame(input, content, state.tooLarge, input.threads !== undefined);
 }
 export async function buildDocDownload(
   input: PageInput & {
@@ -454,13 +582,18 @@ export async function buildDocDownload(
   },
 ): Promise<string> {
   const state = resolverState(input.resolveMedia, input.inlineBudget, input.pause, input.work);
-  let content: ElementContent[];
-  if (input.content.kind === "markdown") content = await blocksContent(input.content.blocks, state);
-  else if (input.content.unrendered) content = [element("p", [text("This file could not be shown.")])];
-  else {
-    const lines: ElementContent[] = [];
-    input.content.lines.forEach((line, index) => {
-      if (index) lines.push(text("\n"));
+  const source = input.content;
+  const content = await withThreads(input.threads, state, async (ctx) => {
+    if (source.kind === "markdown") return blocksContent(source.blocks, state, ctx);
+    if (source.unrendered) return [element("p", [text("This file could not be shown.")])];
+    const pre = (lines: ElementContent[]) =>
+      element("pre", [element("code", lines)], { className: ["shiki", "em-source"] });
+    const result: ElementContent[] = [];
+    let lines: ElementContent[] = [];
+    let count = 0;
+    for (const [index, line] of source.lines.entries()) {
+      if (count) lines.push(text("\n"));
+      count++;
       lines.push(
         element(
           "span",
@@ -474,10 +607,18 @@ export async function buildDocDownload(
           { className: ["line"] },
         ),
       );
-    });
-    content = [element("pre", [element("code", lines)], { className: ["shiki", "em-source"] })];
-  }
-  return frame(input, content, state.tooLarge);
+      const cards = ctx ? await threadCards(ctx.threads.lines.get(index + 1), ctx) : [];
+      if (cards.length) {
+        result.push(pre(lines), ...cards);
+        lines = [];
+        count = 0;
+      }
+    }
+    // Without threads this is the one pre of before, also for a file with no lines.
+    if (lines.length || !result.length) result.push(pre(lines));
+    return result;
+  });
+  return frame(input, content, state.tooLarge, input.threads !== undefined);
 }
 
 /** Resolve once, with browser path semantics, but never let a reference pick an origin. */
@@ -970,6 +1111,7 @@ export async function buildHtmlDocDownload(input: {
   inlineBudget?: number;
   pause?: () => Promise<void>;
   work?: DownloadWork;
+  threads?: FileThreads;
 }): Promise<string> {
   if (!parseDocHtml(input.html, HTML_ELEMENT_LIMIT)) return buildOmittedDownload(input);
   const tree = fromHtml(input.html);
@@ -1093,6 +1235,12 @@ export async function buildHtmlDocDownload(input: {
   if (!body) {
     body = element("body");
     html.children.push(body);
+  }
+  if (input.threads) {
+    const parts = await threadParts(input.threads, state, async () => []);
+    head.children.push(style(THREAD_STYLES));
+    body.children.unshift(...parts.top);
+    body.children.push(...parts.tail);
   }
   if (state.tooLarge) body.children.unshift(note());
   if (!tree.children.some((node) => node.type === "doctype")) tree.children.unshift({ type: "doctype" });

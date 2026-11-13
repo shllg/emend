@@ -1,7 +1,7 @@
 import { LIMITS, type RevisionView } from "@emend/contract";
 import { expect, test } from "vitest";
 import apiDocs from "../../../../docs/api.md?raw";
-import { downloadBaseLabel, downloadDocChoices } from "./download.ts";
+import { downloadBaseLabel, downloadDocChoices, downloadHasComments } from "./download.ts";
 
 const revision: RevisionView = {
   seq: 1,
@@ -107,6 +107,34 @@ test.each([null, "plan.md"])("a pub excludes exactly its first doc view in file 
     expect(downloadBaseLabel(pub)).toEqual({ title: sourceFirst ? "Plan source" : "The plan", path: "plan.md" });
     expect(downloadDocChoices(pub).map((doc) => doc.id)).toEqual([pub.files[1]?.id]);
   }
+});
+
+const withComments = (...comments: { author: "user" | "agent"; sent: boolean }[]): RevisionView => ({
+  ...revision,
+  threads: [
+    {
+      id: "33333333-3333-4333-8333-333333333333",
+      target: { kind: "review" },
+      state: "open",
+      createdOn: 1,
+      placement: { status: "placed", location: { kind: "review" } },
+      comments: comments.map((comment, index) => ({
+        id: `44444444-4444-4444-8444-${String(index).padStart(12, "0")}`,
+        body: "Synthetic",
+        sentOn: null,
+        ...comment,
+      })),
+    },
+  ],
+});
+
+test("comments are offered only for a sent reviewer comment or an agent reply", () => {
+  expect(downloadHasComments(revision)).toBe(false);
+  expect(downloadHasComments(withComments({ author: "user", sent: false }))).toBe(false);
+  expect(downloadHasComments(withComments({ author: "user", sent: true }))).toBe(true);
+  expect(downloadHasComments(withComments({ author: "user", sent: false }, { author: "agent", sent: false }))).toBe(
+    true,
+  );
 });
 
 test("the API limits table documents both shared download budgets", () => {

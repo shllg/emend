@@ -1,22 +1,47 @@
-import { DownloadDocIds, LIMITS, RenderedBlock, RenderedWriteup, SourceContent, TopicMeta } from "@emend/contract";
+import {
+  DownloadComments,
+  DownloadDocIds,
+  LIMITS,
+  RenderedBlock,
+  RenderedWriteup,
+  SourceContent,
+  TopicMeta,
+} from "@emend/contract";
 import {
   buildDocDownload,
   buildHtmlDocDownload,
   buildOmittedDownload,
   buildWriteupDownload,
   createDownloadWork,
+  type DownloadFile,
+  type DownloadThreadInput,
+  type FileThreads,
   type ResolveResult,
+  routeDownloadThreads,
 } from "@emend/core";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import type { Hono } from "hono";
 import type { Queries } from "../../db/client.ts";
-import { blobs, docAssets, files, repos, reviews, revisions, topics, writeups } from "../../db/schema.ts";
+import {
+  blobs,
+  comments,
+  docAssets,
+  files,
+  placements,
+  repos,
+  reviews,
+  revisions,
+  threads,
+  topics,
+  writeups,
+} from "../../db/schema.ts";
 import type { AppDeps } from "../app.ts";
 import type { AppEnv } from "../auth/principal.ts";
 import { downloadDocNames } from "../http/download-names.ts";
 import { ApiError } from "../http/errors.ts";
 import { DOWNLOAD_CSP } from "../http/headers.ts";
 import { ZipWriter } from "../http/zip.ts";
+import { commentHtml } from "./comment-html.ts";
 import { publishMeta, topicView } from "./reviews.ts";
 
 const imageTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
@@ -54,6 +79,7 @@ async function revisionDownload(
   budget: number,
   headOnly: boolean,
   docIds: string[],
+  withComments: boolean,
 ) {
   const row = await q
     .select({ review: reviews, repoName: repos.name })
@@ -156,11 +182,109 @@ async function revisionDownload(
       ? (docs.find((file) => file.path === revision.main) ?? docs[0])
       : undefined;
   const work = createDownloadWork();
+  const fileKind = (file: typeof files.$inferSelect): "markdown" | "source" | "html" =>
+    file.mediaType === "text/html" ? "html" : file.mediaType === "text/plain" ? "source" : "markdown";
+  const loadThreads = async () => {
+    const threadRows = await q
+      .select({ thread: threads, createdOn: revisions.seq, placement: placements })
+      .from(threads)
+      .innerJoin(
+        revisions,
+        and(
+          eq(revisions.ownerId, ownerId),
+          eq(revisions.reviewId, reviewId),
+          eq(revisions.id, threads.createdRevisionId),
+        ),
+      )
+      .leftJoin(
+        placements,
+        and(
+          eq(placements.ownerId, ownerId),
+          eq(placements.reviewId, reviewId),
+          eq(placements.threadId, threads.id),
+          eq(placements.revisionId, revision.id),
+        ),
+      )
+      .where(and(eq(threads.ownerId, ownerId), eq(threads.reviewId, reviewId)))
+      .orderBy(sql`${threads}.rowid`)
+      .all();
+    // Unsent reviewer comments never leave the database.
+    const commentRows = await q
+      .select({
+        threadId: comments.threadId,
+        author: comments.author,
+        body: comments.body,
+        outcome: comments.outcome,
+        sendId: comments.sendId,
+        createdAt: comments.createdAt,
+      })
+      .from(comments)
+      .where(
+        and(
+          eq(comments.ownerId, ownerId),
+          eq(comments.reviewId, reviewId),
+          or(eq(comments.author, "agent"), isNotNull(comments.sendId)),
+        ),
+      )
+      .orderBy(sql`${comments}.rowid`)
+      .all();
+    // A missing or unreadable writeup only means comment links have no repository to resolve against.
+    const meta = await readWriteup()
+      .then(publishMeta)
+      .catch((error: unknown) => {
+        if (error instanceof ApiError) return publishMeta(undefined);
+        throw error;
+      });
+    const htmls = await commentHtml(
+      deps,
+      ownerId,
+      commentRows.map((row) => row.body),
+      "repoUrl" in meta && meta.repoUrl ? meta.repoUrl : undefined,
+    );
+    const byThread = new Map<string, DownloadThreadInput["comments"]>();
+    commentRows.forEach((row, index) => {
+      const list = byThread.get(row.threadId) ?? [];
+      list.push({
+        author: row.author,
+        sent: row.sendId !== null,
+        body: row.body,
+        html: htmls[index] ?? null,
+        createdAt: row.createdAt,
+        ...(row.outcome === null ? {} : { outcome: row.outcome }),
+      });
+      byThread.set(row.threadId, list);
+    });
+    const topicRows = await q
+      .select()
+      .from(topics)
+      .where(and(eq(topics.ownerId, ownerId), eq(topics.revisionId, revision.id)))
+      .orderBy(topics.importance, sql`${topics}.rowid`)
+      .all();
+    const base: DownloadFile = doc ? { kind: fileKind(doc), path: doc.path } : { kind: "writeup" };
+    return routeDownloadThreads({
+      threads: threadRows.map(({ thread, createdOn, placement }) => ({
+        target: thread.target,
+        state: thread.state,
+        createdOn,
+        comments: byThread.get(thread.id) ?? [],
+        placement:
+          placement?.status === "placed" && placement.location
+            ? { status: "placed" as const, location: placement.location }
+            : { status: "unplaced" as const, reason: placement?.reason ?? "not-placed" },
+      })),
+      seq,
+      topics: parse(TopicMeta.array().max(LIMITS.topicsPerReview + 1), topicRows.map(topicView)),
+      base,
+      docs: selectedDocs.map((file) => ({ kind: fileKind(file), path: file.path })),
+    });
+  };
+  const routed = withComments ? await loadThreads() : undefined;
   const buildHtmlDoc = async (
     doc: typeof files.$inferSelect,
     title: string,
     inlineBudget: number,
     body?: Uint8Array,
+    threadsForDoc?: FileThreads,
   ) => {
     const bytes = body ?? (doc.newBlob ? await deps.blobs.get(ownerId, doc.newBlob, q) : null);
     if (!bytes) throw new ApiError("not_found");
@@ -189,11 +313,12 @@ async function revisionDownload(
       inlineBudget,
       pause,
       work,
+      threads: threadsForDoc,
     });
   };
   const buildBase = async () => {
     if (doc?.mediaType === "text/html") {
-      return buildHtmlDoc(doc, review.title, budget);
+      return buildHtmlDoc(doc, review.title, budget, undefined, routed?.base);
     } else if (doc) {
       const content = await readJson(doc.renderedBlob);
       const meta = await readWriteup()
@@ -209,6 +334,7 @@ async function revisionDownload(
         inlineBudget: budget,
         pause,
         work,
+        threads: routed?.base,
         content:
           doc.mediaType === "text/plain"
             ? { kind: "source", lines: parse(SourceContent, content).lines }
@@ -232,6 +358,7 @@ async function revisionDownload(
         inlineBudget: budget,
         pause,
         work,
+        threads: routed?.base,
       });
     }
   };
@@ -243,7 +370,7 @@ async function revisionDownload(
     bytesSoFar += data.byteLength;
     await writer.add(name, data);
   };
-  const buildSelected = async (selected: typeof files.$inferSelect): Promise<string> => {
+  const buildSelected = async (selected: typeof files.$inferSelect, index: number): Promise<string> => {
     const inlineBudget = Math.max(0, budget - bytesSoFar);
     const title = selected.title ?? selected.path;
     if (inlineBudget === 0) return buildOmittedDownload({ title });
@@ -252,7 +379,7 @@ async function revisionDownload(
     if (bytes === "too-large") return buildOmittedDownload({ title });
     if (selected.mediaType === "text/html") {
       if (!bytes) throw new ApiError("not_found");
-      return buildHtmlDoc(selected, title, inlineBudget, bytes);
+      return buildHtmlDoc(selected, title, inlineBudget, bytes, routed?.docs[index]);
     }
     let stored: unknown;
     if (bytes) {
@@ -271,6 +398,7 @@ async function revisionDownload(
       inlineBudget,
       pause,
       work,
+      threads: routed?.docs[index],
       content: source
         ? source.success
           ? { kind: "source", lines: source.data.lines }
@@ -284,7 +412,7 @@ async function revisionDownload(
     await pause();
     const name = names[index];
     if (name === undefined) throw new Error("Missing download entry name");
-    await addHtml(name, await buildSelected(selected));
+    await addHtml(name, await buildSelected(selected, index));
   }
   return { body: writer.finish(), filename: responseFilename };
 }
@@ -297,10 +425,23 @@ export function downloadRoutes(app: Hono<AppEnv>, deps: AppDeps, budget: number 
     const parsed = DownloadDocIds.safeParse(c.req.queries("doc") ?? []);
     if (!parsed.success) throw new ApiError("invalid_request");
     const docIds = parsed.data;
+    const commentsParsed = DownloadComments.safeParse(c.req.queries("comments") ?? []);
+    if (!commentsParsed.success) throw new ApiError("invalid_request");
+    const withComments = commentsParsed.data.length === 1;
     const release = headOnly ? undefined : await acquireDownload(ownerId);
     try {
       const result = await deps.db.read((q) =>
-        revisionDownload(ownerId, q, deps, c.req.param("id"), c.req.param("seq"), budget, headOnly, docIds),
+        revisionDownload(
+          ownerId,
+          q,
+          deps,
+          c.req.param("id"),
+          c.req.param("seq"),
+          budget,
+          headOnly,
+          docIds,
+          withComments,
+        ),
       );
       c.header("Content-Type", docIds.length ? "application/zip" : "text/html; charset=utf-8");
       c.header("Content-Disposition", `attachment; filename="${result.filename}"`);

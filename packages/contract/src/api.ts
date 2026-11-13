@@ -3,10 +3,19 @@ import { LIMITS } from "./limits.ts";
 import { FilePath } from "./review.ts";
 
 export const API_PREFIX = "/api/v1";
-export function reviewDownloadPath(reviewId: string, seq: number, docIds: readonly string[] = []): string {
+export function reviewDownloadPath(
+  reviewId: string,
+  seq: number,
+  docIds: readonly string[] = [],
+  options: { comments?: boolean } = {},
+): string {
   const path = `${API_PREFIX}/reviews/${encodeURIComponent(reviewId)}/revisions/${seq}/download`;
-  return docIds.length ? `${path}?${docIds.map((id) => `doc=${encodeURIComponent(id)}`).join("&")}` : path;
+  const query = [...docIds.map((id) => `doc=${encodeURIComponent(id)}`), ...(options.comments ? ["comments=1"] : [])];
+  return query.length ? `${path}?${query.join("&")}` : path;
 }
+
+/** The `comments` query values: absent, or exactly one `1`. */
+export const DownloadComments = z.array(z.literal("1")).max(1);
 
 export const DownloadDocIds = z
   .array(z.uuid())

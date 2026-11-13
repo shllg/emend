@@ -37,3 +37,10 @@ export function downloadBaseLabel(revision: RevisionView): { title?: string; pat
   const doc = baseDoc(revision);
   return doc ? { title: doc.title, path: doc.path } : null;
 }
+
+/** True when a download could show comments: any sent reviewer comment or any agent reply. */
+export function downloadHasComments(revision: RevisionView): boolean {
+  return revision.threads.some((thread) =>
+    thread.comments.some((comment) => comment.author === "agent" || comment.sent),
+  );
+}

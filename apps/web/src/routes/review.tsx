@@ -42,7 +42,7 @@ import { useDiffCounts } from "../lib/diff-counts.ts";
 import type { NavigateDiff } from "../lib/diff-navigation.ts";
 import { appElementId, docHeading, docTitle } from "../lib/doc-navigation.ts";
 import { docKey, docView, findDoc } from "../lib/doc-view.ts";
-import { downloadDocChoices } from "../lib/download.ts";
+import { downloadDocChoices, downloadHasComments } from "../lib/download.ts";
 import { draftKey, hasDraft, type SavedDraft, saveDraft, subscribeDrafts } from "../lib/drafts.ts";
 import { usePublishedRevision } from "../lib/events.tsx";
 import { useInboxCollapsed, useLayout, usePaneMode } from "../lib/layout.ts";
@@ -308,7 +308,10 @@ function LoadedReview({
   const revision = useViewedRevision(review.id, query.data);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const downloadReturnFocus = useRef<HTMLButtonElement>(null);
-  const onDownload = revision && downloadDocChoices(revision).length > 0 ? () => setDownloadOpen(true) : undefined;
+  const onDownload =
+    revision && (downloadDocChoices(revision).length > 0 || downloadHasComments(revision))
+      ? () => setDownloadOpen(true)
+      : undefined;
   const diffFiles = revision?.files.filter((file) => file.role === "diff") ?? [];
   const [resumed, setResumed] = useState<(SavedDraft & { tab: NonNullable<ReviewSearch["tab"]> }) | null>(null);
   const resumedPlacement = resumed && revision ? draftPlacement(resumed, revision) : undefined;

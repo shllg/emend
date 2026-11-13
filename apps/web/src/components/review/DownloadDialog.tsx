@@ -1,6 +1,6 @@
 import { LIMITS, type RevisionView, reviewDownloadPath } from "@emend/contract";
 import { type RefObject, useEffect, useState } from "react";
-import { downloadBaseLabel, downloadDocChoices } from "../../lib/download.ts";
+import { downloadBaseLabel, downloadDocChoices, downloadHasComments } from "../../lib/download.ts";
 import { Button } from "../ui/Button.tsx";
 import { Checkbox } from "../ui/Checkbox.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
@@ -19,9 +19,15 @@ export function DownloadDialog({
   returnFocus?: RefObject<HTMLElement | null>;
 }) {
   const [tickedIds, setTickedIds] = useState<string[]>([]);
+  const [comments, setComments] = useState(false);
   const base = downloadBaseLabel(revision);
+  const choices = downloadDocChoices(revision);
+  const hasComments = downloadHasComments(revision);
   useEffect(() => {
-    if (open) setTickedIds([]);
+    if (open) {
+      setTickedIds([]);
+      setComments(false);
+    }
   }, [open]);
   return (
     <Dialog
@@ -39,7 +45,9 @@ export function DownloadDialog({
           ) : (
             "The writeup"
           )}
-          {" is always in. Tick docs to add them; with any doc ticked, the download is a ZIP file."}
+          {choices.length > 0
+            ? " is always in. Tick docs to add them; with any doc ticked, the download is a ZIP file."
+            : " is always in."}
         </>
       }
       open={open}
@@ -52,7 +60,7 @@ export function DownloadDialog({
           </Button>
           <Button asChild variant="primary">
             <a
-              href={reviewDownloadPath(reviewId, revision.seq, tickedIds)}
+              href={reviewDownloadPath(reviewId, revision.seq, tickedIds, { comments })}
               download
               onClick={() => onOpenChange(false)}
             >
@@ -63,7 +71,15 @@ export function DownloadDialog({
       }
     >
       <div className="flex min-w-0 flex-col gap-3 wrap-anywhere">
-        {downloadDocChoices(revision).map((doc) => (
+        {hasComments && (
+          <Checkbox
+            label="Comments and replies"
+            description="Sent comments and the agent's replies, next to their text. Unsent comments stay out."
+            checked={comments}
+            onChange={(event) => setComments(event.currentTarget.checked)}
+          />
+        )}
+        {choices.map((doc) => (
           <Checkbox
             key={doc.id}
             label={<bdi>{doc.label}</bdi>}

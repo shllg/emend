@@ -200,8 +200,13 @@ ZIP headers when docs are selected, without reading blobs or building the archiv
 Rendered and source views of one path have distinct file ids. A source doc's file row has
 `view: "source"`; a rendered doc's row has no `view`.
 
+An optional `comments=1` query parameter adds comments and replies (see below). Any other
+value or a repeat gets `400 invalid_request`, before waiting for a slot, also on `HEAD`. `HEAD`
+headers do not change. `comments=1` without docs keeps the single HTML response.
+
 A code review's file holds the review title and that revision's writeup: sections, topics, text,
-code blocks and images with captions. The base file holds no docs, comments or diff. A revision
+code blocks and images with captions. The base file holds no docs and no diff, and no comments
+unless `comments=1` is set. A revision
 is a pub when `writeupEmpty` is true and `base` is null. A pub's base file holds one doc:
 the first doc row in file order whose path equals `main`, else the first doc row. The order
 includes both rendered and source views of a path. Markdown uses its stored rendered
@@ -234,6 +239,31 @@ Markdown and source docs get their title or path and the base file's project, br
 and publication time; publish links stay in the base file. Missing or invalid Markdown rendering
 shows empty content. Missing or invalid source rendering says "This file could not be shown."
 A missing HTML doc blob gets `404 not_found`.
+
+With `comments=1`, each file shows the threads of this review at their place, with their replies.
+Only sent reviewer comments and all agent replies are included. A thread with no comment left
+is left out. Unsent comments never reach the file. Each thread shows its state (Open, Sent,
+Answered or Resolved), the quoted text or the diff lines it was made on, and its comments,
+labelled "Reviewer" or "Agent", with an agent's outcome and the time in UTC. Comment bodies
+are shown as emend renders them in the app and pass the same filtering as the rest of the file:
+scripts, styles, frames, event handlers and remote images are removed, and a body that cannot
+be rendered shows as plain text. No thread id, comment id or address is in the file.
+Where a thread goes, by its placement on this revision:
+
+- Whole-review threads: a list at the top of the base file.
+- Topic threads: in the topic's section of a code review's writeup.
+- Writeup threads: right after their block in the writeup.
+- Markdown doc threads: right after their block, in the file of that doc when it is selected
+  (or is the pub's base doc).
+- Source doc threads: after their last line, in the file of that doc when it is selected (or
+  is the pub's base doc).
+- HTML doc threads: in a list at the end of that doc's file.
+- Everything else, including diff threads, threads that have no place on this revision (with the
+  reason and the revision they were made on), and threads whose file or block is not in the
+  download: an "Other comments" list at the end of the base file, with the path and lines.
+
+A selected doc replaced by the left-out page shows none of its threads. With `comments=1`, the
+files grow by the comments, within the same size limits. The diff itself is never in the download.
 
 Doc entry names use the doc path split on `/`. Each segment replaces runs outside `[A-Za-z0-9._-]`
 with `-`, strips leading dots, trims trailing dots and hyphens, cuts to 80 characters and trims

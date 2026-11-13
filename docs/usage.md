@@ -142,5 +142,7 @@ its writeup; a published doc's file holds that doc. You can tick docs to add the
 ticked, the download is a ZIP holding the writeup file (or the pub's base doc) and one HTML file
 per selected doc. Rendered and source views of the same path are separate choices; source choices
 say “source” beside the path. Links between files stay plain text. Diagrams show as their source
-text. File names are made safe for Windows too. Size and CSS processing limits are shared across
-the download. A doc that does not fit is replaced by a page with its title and a left-out note.
+text. Tick Comments and replies to add the sent comments and the agent's replies next to their
+text; unsent comments stay out. File names are made safe for Windows too. Size and CSS processing
+limits are shared across the download. A doc that does not fit is replaced by a page with its
+title and a left-out note.
