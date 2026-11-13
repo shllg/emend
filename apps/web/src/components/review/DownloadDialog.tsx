@@ -1,6 +1,6 @@
 import { LIMITS, type RevisionView, reviewDownloadPath } from "@emend/contract";
 import { type RefObject, useEffect, useState } from "react";
-import { downloadBaseLabel, downloadDocChoices, downloadHasComments } from "../../lib/download.ts";
+import { downloadBaseIsHtml, downloadBaseLabel, downloadDocChoices, downloadHasComments } from "../../lib/download.ts";
 import { Button } from "../ui/Button.tsx";
 import { Checkbox } from "../ui/Checkbox.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
@@ -74,7 +74,12 @@ export function DownloadDialog({
         {hasComments && (
           <Checkbox
             label="Comments and replies"
-            description="Sent comments and the agent's replies, next to their text. Unsent comments stay out."
+            description={
+              "Sent comments and the agent's replies, next to their text. Unsent comments stay out." +
+              (downloadBaseIsHtml(revision)
+                ? " The comments come as a separate file, so the download is a ZIP file."
+                : "")
+            }
             checked={comments}
             onChange={(event) => setComments(event.currentTarget.checked)}
           />

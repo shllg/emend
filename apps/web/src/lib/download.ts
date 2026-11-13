@@ -44,3 +44,7 @@ export function downloadHasComments(revision: RevisionView): boolean {
     thread.comments.some((comment) => comment.author === "agent" || comment.sent),
   );
 }
+
+export function downloadBaseIsHtml(revision: RevisionView): boolean {
+  return baseDoc(revision)?.kind === "html";
+}

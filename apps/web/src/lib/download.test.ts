@@ -1,7 +1,7 @@
 import { LIMITS, type RevisionView } from "@emend/contract";
 import { expect, test } from "vitest";
 import apiDocs from "../../../../docs/api.md?raw";
-import { downloadBaseLabel, downloadDocChoices, downloadHasComments } from "./download.ts";
+import { downloadBaseIsHtml, downloadBaseLabel, downloadDocChoices, downloadHasComments } from "./download.ts";
 
 const revision: RevisionView = {
   seq: 1,
@@ -143,4 +143,22 @@ test("the API limits table documents both shared download budgets", () => {
   expect(row).toContain("emitted built-in content per download");
   expect(row).toContain("the same read budget for stored assets and selected doc bodies");
   expect(row).toContain("both shared by all files of a ZIP");
+});
+
+test("HTML base detection follows the pub main and first-doc rules, including source views", () => {
+  expect(downloadBaseIsHtml(revision)).toBe(false);
+  const pub = { ...revision, writeupEmpty: true };
+  expect(downloadBaseIsHtml(pub)).toBe(false);
+  expect(downloadBaseIsHtml({ ...pub, main: "a.html" })).toBe(true);
+  const [markdown, html] = revision.docs;
+  if (!markdown || !html) throw new Error("Missing fixture docs");
+  const htmlFirst = { ...pub, docs: [html, markdown] };
+  expect(downloadBaseIsHtml(htmlFirst)).toBe(true);
+  expect(downloadBaseIsHtml({ ...htmlFirst, main: "missing.html" })).toBe(true);
+  expect(downloadBaseIsHtml({ ...htmlFirst, main: "z.md" })).toBe(false);
+  expect(downloadBaseIsHtml({ ...htmlFirst, base: "a".repeat(40) })).toBe(false);
+  expect(downloadBaseIsHtml({ ...pub, docs: [] })).toBe(false);
+  const source: RevisionView["docs"][number] = { kind: "source", path: "a.html", language: "html", lines: [] };
+  expect(downloadBaseIsHtml({ ...pub, main: "a.html", docs: [source, html] })).toBe(false);
+  expect(downloadBaseIsHtml({ ...pub, main: "a.html", docs: [html, source] })).toBe(true);
 });

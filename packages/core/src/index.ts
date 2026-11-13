@@ -13,6 +13,7 @@ export { makeSpan, placeSpan } from "./place/span.ts";
 export { type Block, blockText, resectionBlocks } from "./render/blocks.ts";
 export { changedBlockIds } from "./render/changed.ts";
 export {
+  buildCommentsDownload,
   buildDocDownload,
   buildHtmlDocDownload,
   buildOmittedDownload,

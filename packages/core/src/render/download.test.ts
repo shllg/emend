@@ -1,9 +1,12 @@
-import type { RenderedBlock, RenderedWriteup, TopicMeta } from "@emend/contract";
+/// <reference types="node" />
+import { createHash } from "node:crypto";
+import type { RenderedBlock, RenderedWriteup, Target, TopicMeta } from "@emend/contract";
 import { fromHtml } from "hast-util-from-html";
 import { toString as hastText } from "hast-util-to-string";
 import { expect, test, vi } from "vitest";
 import type { HtmlElement as Element, HtmlRoot as Root } from "./blocks.ts";
 import {
+  buildCommentsDownload,
   buildDocDownload,
   buildHtmlDocDownload,
   buildOmittedDownload,
@@ -13,7 +16,7 @@ import {
   type ResolveResult,
 } from "./download.ts";
 import { checkDownloadCss, cssTokenize } from "./download-css.ts";
-import type { DownloadThread, FileThreads } from "./download-threads.ts";
+import { type DownloadThread, type FileThreads, routeDownloadThreads } from "./download-threads.ts";
 
 const sha = "a".repeat(64);
 const details = { project: "Sample", branch: "feature", seq: 2, publishedAt: "2026-01-02T23:00:00Z", links: [] };
@@ -2029,7 +2032,7 @@ test("the stylesheet occurrence limit remains per file when CSS work is shared",
 
 test("omitted downloads are exactly the safe page returned for an over-limit HTML doc", async () => {
   const title = "Doc <script>";
-  const html = buildOmittedDownload({ title });
+  const html = await buildOmittedDownload({ title });
   const resolveAsset = vi.fn(async () => null);
   expect(
     await buildHtmlDocDownload({
@@ -2057,7 +2060,6 @@ const emptyThreads = (over: Partial<FileThreads> = {}): FileThreads => ({
   blocks: new Map(),
   topics: new Map(),
   lines: new Map(),
-  doc: [],
   end: [],
   ...over,
 });
@@ -2075,21 +2077,98 @@ const indexOfText = (html: string, needle: string) => {
 };
 const sourceLines = [[{ text: "one" }], [{ text: "two" }], [{ text: "three" }]];
 
-test("builders without threads write the same bytes as before and no thread markup", async () => {
-  const none = { threads: undefined };
-  const base = { title: "T", details, resolveMedia: async () => null };
-  const writeupArgs = { ...base, writeup: writeup([block("<p>Body</p>")]), topics: [] };
-  const writeupBytes = await buildWriteupDownload(writeupArgs);
-  expect(await buildWriteupDownload({ ...writeupArgs, ...none })).toBe(writeupBytes);
-  const docArgs = { ...base, content: { kind: "source" as const, lines: sourceLines } };
-  const docBytes = await buildDocDownload(docArgs);
-  expect(await buildDocDownload({ ...docArgs, ...none })).toBe(docBytes);
-  const htmlArgs = { html: "<body><p>Doc</p></body>", docPath: "d.html", title: "T", resolveAsset: async () => null };
-  const htmlBytes = await buildHtmlDocDownload(htmlArgs);
-  expect(await buildHtmlDocDownload({ ...htmlArgs, ...none })).toBe(htmlBytes);
-  for (const bytes of [writeupBytes, docBytes, htmlBytes]) {
-    expect(bytes).not.toContain("em-thread");
-    expect(bytes).not.toContain("Other comments");
+type CompatibilityBuilders = Pick<
+  typeof import("./download.ts"),
+  "buildWriteupDownload" | "buildDocDownload" | "buildHtmlDocDownload"
+> & {
+  buildOmittedDownload: (input: { title: string }) => string | Promise<string>;
+};
+async function commentsOffOutputs(builders: CompatibilityBuilders) {
+  const base = {
+    title: "Compatibility <example>",
+    details: { ...details, links: [{ label: "More", url: "https://example.com/plan" }] },
+    resolveMedia: async () => png,
+  };
+  const topic: TopicMeta = {
+    slug: "auth",
+    title: "Auth",
+    importance: 10,
+    summary: "Sign-in",
+    blastRadius: { scope: "module", note: "One module" },
+  };
+  const diagram: RenderedBlock = {
+    id: "overview-dddddddd",
+    section: "overview",
+    kind: "diagram",
+    html: "",
+    text: "graph TD; A-->B",
+    source: "graph TD; A-->B",
+  };
+  const htmlInput = {
+    title: base.title,
+    html: '<link rel="stylesheet" href="site.css"><p>HTML body</p><img src="shot.png">',
+    docPath: "doc.html",
+    resolveAsset: async (path: string) => (path === "site.css" ? css("p{color:green}") : png),
+  };
+  return {
+    writeup: await builders.buildWriteupDownload({
+      ...base,
+      topics: [topic],
+      writeup: {
+        sections: [
+          { key: "overview", label: "Overview", topic: null, blocks: [block("<p>Overview</p>"), diagram, imageBlock] },
+          {
+            key: "t-auth-why",
+            label: "Why",
+            topic: "auth",
+            blocks: [{ ...block("<p>Topic body</p>"), id: "t-auth-why-12345678", section: "t-auth-why" }],
+          },
+        ],
+      },
+    }),
+    markdown: await builders.buildDocDownload({
+      ...base,
+      content: { kind: "markdown", blocks: [block("<p>Markdown <strong>body</strong></p>"), imageBlock] },
+    }),
+    source: await builders.buildDocDownload({
+      ...base,
+      content: {
+        kind: "source",
+        lines: [[{ text: "const a = ", light: "#112233", dark: "#ddeeff" }, { text: '"<tag>"' }], [{ text: "next" }]],
+      },
+    }),
+    emptySource: await builders.buildDocDownload({ ...base, content: { kind: "source", lines: [] } }),
+    unrenderedSource: await builders.buildDocDownload({
+      ...base,
+      content: { kind: "source", lines: [], unrendered: true },
+    }),
+    html: await builders.buildHtmlDocDownload(htmlInput),
+    overLimitHtml: await builders.buildHtmlDocDownload({ ...htmlInput, html: "<div>".repeat(600) }),
+    omitted: await builders.buildOmittedDownload({ title: base.title }),
+  };
+}
+
+// Hashes come from the builder before comments existed; change only with an intended markup change.
+const commentsOffHashes = {
+  writeup: "7ef645b00c7986fd9c2cf1892e682d0fd4828609b9d2aa2d03373debef3e1c36",
+  markdown: "8999a91827a926e16583a2ce3d19a563b8f710fbf43c6c64e9b993ceaccba705",
+  source: "3eb892ff22a6cde3105a940cca2c0ad8b8f88ac804a1f515e66b23029855bbf6",
+  emptySource: "7c9b648a61a96a406da701dcc70b7637cc3ff9a2ff32f269fe0ec43d9d0f77ff",
+  unrenderedSource: "ac1fd35ef0394b7c543bde51ef13fad63da31a980f188a2a36b1fceec466725e",
+  html: "ebd1d21e1b7d438fa77910ed4a617b0850bbc687dc44b06aab36d42194f329e7",
+  overLimitHtml: "9123b3e00b6e45188b0858cfea33b2216c843dc60f3ea45714e10aac0586b6b6",
+  omitted: "9123b3e00b6e45188b0858cfea33b2216c843dc60f3ea45714e10aac0586b6b6",
+};
+test("comments-off output matches the pre-comments builder hashes", async () => {
+  const outputs = await commentsOffOutputs({
+    buildWriteupDownload,
+    buildDocDownload,
+    buildHtmlDocDownload,
+    buildOmittedDownload,
+  });
+  for (const [name, html] of Object.entries(outputs)) {
+    expect(createHash("sha256").update(html).digest("hex"), name).toBe(commentsOffHashes[name as keyof typeof outputs]);
+    expect(html).not.toContain("em-thread");
   }
 });
 
@@ -2204,35 +2283,35 @@ test("a source page splits its code after a commented line and ends without an e
   expect(threadMarkers(past)).toBe(1);
 });
 
-test("an HTML doc takes whole-review threads first, its own threads and Other comments last", async () => {
-  const html = await buildHtmlDocDownload({
-    html: "<html><head><title>Doc</title></head><body><p>Doc body</p></body></html>",
-    docPath: "doc.html",
-    title: "T",
-    resolveAsset: async () => null,
+test("a separate comments page has the review header, sections and no publish links", async () => {
+  const html = await buildCommentsDownload({
+    title: "Example",
+    details: { ...details, links: [{ label: "Publish link", url: "https://example.com" }] },
+    resolveMedia: async () => null,
     threads: emptyThreads({
       top: [sampleThread("whole")],
-      doc: [sampleThread("in doc", { quote: "Doc body" })],
-      end: [sampleThread("other", { where: "x.ts" })],
+      end: [sampleThread("html remark", { where: "doc.html", quote: "Doc body" })],
     }),
   });
   expectHead(html);
-  const body = parsed(html).find((el) => el.tagName === "body");
-  expect(body?.children[0]).toMatchObject({ tagName: "section", properties: { className: ["em-threads"] } });
-  const last = body?.children.at(-1);
-  expect(last).toMatchObject({ tagName: "section" });
-  expect(hastText(last as Element)).toContain("Other comments");
-  expect(indexOfText(html, "Comments on this doc")).toBeGreaterThan(indexOfText(html, "Doc body</p>"));
-  expect(indexOfText(html, "Comments on this doc")).toBeLessThan(indexOfText(html, "Other comments"));
+  expect(html).toContain("<h1>Example — comments</h1>");
+  expect(html).toContain("Sample · feature · Revision 2 · 2026-01-02");
+  expect(html).not.toContain("Publish link");
+  expect(parsed(html).filter((el) => el.tagName === "style")).toHaveLength(2);
+  expect(threadMarkers(html)).toBe(2);
+  expect(indexOfText(html, "Comments on the whole review")).toBeLessThan(indexOfText(html, "whole</p>"));
+  expect(indexOfText(html, "Other comments")).toBeLessThan(indexOfText(html, "html remark"));
+  expect(html).toContain('<span class="em-thread-where">doc.html</span>');
   expect(html).toContain('<blockquote class="em-thread-quote"><p>Doc body</p></blockquote>');
-  // Literal fallbacks for every var() in the thread styles.
-  const styles = hastText(
-    parsed(html)
-      .filter((el) => el.tagName === "style")
-      .at(-1) as Element,
-  );
-  expect(styles).toContain("em-thread");
-  expect(styles.match(/var\(--[a-z-]+\)/g)).toBeNull();
+  expect(html).not.toContain("No sent comments.");
+  const empty = await buildCommentsDownload({
+    title: "Example",
+    details,
+    resolveMedia: async () => null,
+    threads: emptyThreads(),
+  });
+  expect(empty).toContain("<p>No sent comments.</p>");
+  expect(threadMarkers(empty)).toBe(0);
 });
 
 test("a thread card shows the labels, outcome, state and time and nothing else", async () => {
@@ -2308,4 +2387,132 @@ test("hostile comment HTML and text never run or load anything", async () => {
   expect(html).not.toContain("onerror");
   expect(html).toContain("&#x3C;script>alert(1)&#x3C;/script>");
   expect(html).toContain("<p>ok</p>");
+});
+
+test.each(["", " \n<hr>", "<script>alert(1)</script>"])(
+  "empty filtered comment HTML falls back to escaped body: %s",
+  async (rendered) => {
+    const html = await buildCommentsDownload({
+      title: "Example",
+      details,
+      resolveMedia: async () => null,
+      threads: emptyThreads({
+        top: [
+          sampleThread("ignored", {
+            comments: [{ author: "user", sent: true, body: "<script>alert(1)</script>", html: rendered, createdAt: 0 }],
+          }),
+        ],
+      }),
+    });
+    expect(html).toContain('<p class="em-comment-text">&#x3C;script>alert(1)&#x3C;/script></p>');
+    expect(html).not.toContain("<script");
+  },
+);
+
+test("a comment consisting only of an image keeps the image", async () => {
+  const html = await buildCommentsDownload({
+    title: "Example",
+    details,
+    resolveMedia: async () => png,
+    threads: emptyThreads({
+      top: [
+        sampleThread("image source", {
+          comments: [
+            {
+              author: "user",
+              sent: true,
+              body: "image source",
+              html: `<img src="/api/v1/media/${sha}">`,
+              createdAt: 0,
+            },
+          ],
+        }),
+      ],
+    }),
+  });
+  expect(html).toContain("data:image/png;base64,AQID");
+  expect(html).not.toContain("image source");
+});
+
+test("a comment that exceeds the emitted budget leaves a note and the document intact", async () => {
+  const html = await buildDocDownload({
+    title: "Example",
+    details,
+    resolveMedia: async () => null,
+    inlineBudget: 40,
+    content: { kind: "markdown", blocks: [block("<p>Kept text</p>")] },
+    threads: emptyThreads({ top: [sampleThread("long remark".repeat(100))], end: [sampleThread("fits")] }),
+  });
+  expect(html).toContain("Some content was left out");
+  expect(html).toContain("<p>Kept text</p>");
+  expect(html).not.toContain("long remark");
+  expect(html).toContain("fits");
+  expect(threadMarkers(html)).toBe(1);
+});
+
+test.each([null, "<p>é</p>", ""])(
+  "thread budgets charge UTF-8 labels, notes, quotes, lines and comment output: %s",
+  async (rendered) => {
+    const thread = sampleThread("é", {
+      where: "路径",
+      note: "note",
+      quote: "quote",
+      lines: ["a", "b"],
+      comments: [{ author: "user", sent: true, body: "é", html: rendered, createdAt: 0 }],
+    });
+    const bytes = Buffer.byteLength(`路径notequotea\nb${rendered || "é"}`);
+    for (const inlineBudget of [bytes, bytes - 1]) {
+      const html = await buildCommentsDownload({
+        title: "Example",
+        details,
+        resolveMedia: async () => null,
+        inlineBudget,
+        threads: emptyThreads({ end: [thread] }),
+      });
+      expect(threadMarkers(html)).toBe(inlineBudget === bytes ? 1 : 0);
+      expect(html.includes("Some content was left out")).toBe(inlineBudget !== bytes);
+    }
+  },
+);
+
+test("an omitted doc keeps all its threads in input order, with labels and a budget", async () => {
+  const targets: Target[] = [
+    { kind: "source-lines", path: "doc.ts", start: 1, end: 1, lines: ["line"], before: [], after: [] },
+    { kind: "writeup-span", blockId: "overview-12345678", quote: "quote", prefix: "", suffix: "" },
+    { kind: "topic", slug: "auth" },
+    { kind: "file", path: "other.ts" },
+    { kind: "review" },
+  ];
+  // Merge the routed buckets to exercise every type while retaining their input order.
+  const routed = routeDownloadThreads({
+    seq: 1,
+    topics: [],
+    base: { kind: "writeup" },
+    docs: [{ kind: "source", path: "doc.ts" }],
+    threads: targets.map((target, i) => ({
+      target,
+      state: "sent",
+      createdOn: 1,
+      placement: { status: "placed", location: { ...target, start: 1, end: 1 } },
+      comments: sampleThread(`remark-${i}`).comments,
+    })),
+  });
+  const threads = { ...routed.base, lines: routed.docs[0]?.lines ?? new Map() };
+  for (const inlineBudget of [1000, 0]) {
+    const html = await buildOmittedDownload({ title: "Doc", threads, inlineBudget });
+    expectHead(html);
+    expect(parsed(html).filter((el) => el.tagName === "style")).toHaveLength(2);
+    expect(html).toContain("Some content was left out");
+    expect(threadMarkers(html)).toBe(inlineBudget ? 5 : 0);
+    if (!inlineBudget) continue;
+    const section = indexOfText(html, "Comments on this doc");
+    expect(indexOfText(html, "remark-4")).toBeLessThan(section);
+    let previous = section;
+    for (const i of [0, 1, 2, 3]) {
+      const next = indexOfText(html, `remark-${i}`);
+      expect(next).toBeGreaterThan(previous);
+      previous = next;
+    }
+    expect(html.match(/class="em-thread-where"/g)).toHaveLength(4);
+  }
 });

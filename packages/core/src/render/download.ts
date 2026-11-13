@@ -81,7 +81,6 @@ const READING_STYLES = `
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:400 16px/1.7 ui-sans-serif,system-ui,sans-serif}.em-download{max-width:68ch;margin:auto;padding:32px 20px;overflow-wrap:break-word}h1,h2,h3,h5,h6,strong,code{color:var(--strong)}h1{font-size:24px;line-height:1.2;letter-spacing:-.015em;margin:0 0 16px}h2{font-size:19px;line-height:1.3;letter-spacing:-.01em;margin:36px 0 12px}h3{font-size:16px;line-height:1.35;margin:24px 0 6px}h4{font:600 11px/1.3 ui-monospace,"SF Mono",Menlo,monospace;text-transform:uppercase;letter-spacing:.04em}h1,h2,h3{font-weight:600}p,ul,ol{margin:0 0 12px}ul,ol{padding-left:22px}li{margin:6px 0}a{color:var(--link)}a :is(strong,code){color:inherit}.em-doc-link{color:inherit}code{font:400 .84em/1 ui-monospace,"SF Mono",Menlo,monospace;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--sunken)}pre{margin:0 0 14px;padding:12px 14px;border:1px solid var(--border);border-radius:6px;background:var(--sunken);overflow:auto;font:400 12px/1.6 ui-monospace,"SF Mono",Menlo,monospace}pre code{padding:0;border:0;background:none;font:inherit}.shiki{background-color:var(--shiki-light-bg,var(--sunken))}.shiki,.shiki span{color:var(--shiki-light,inherit)}blockquote{margin:0 0 12px;padding-left:14px;border-left:2px solid var(--border)}table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;margin:0 0 14px;font-size:14px}th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)}th{font-weight:500}hr{border:0;border-top:1px solid var(--border);margin:24px 0}img{max-width:100%;height:auto}.emend-media{display:inline-block;max-width:100%;vertical-align:top}.emend-media img{display:block;border-radius:6px}.emend-media-caption{display:block;margin-top:6px;overflow-wrap:anywhere}.em-meta,.emend-media-caption,figcaption,footer,.em-topic-blast,.em-link-host{font:400 12px/1.4 ui-sans-serif,system-ui,sans-serif;color:var(--muted)}.em-links{list-style:none;padding:0}.em-link-host{margin-left:6px}.em-diagram{margin:16px 0}.em-diagram figcaption{margin-bottom:6px}.em-download-note{padding:12px 14px;border:1px solid var(--border);border-radius:6px;background:var(--sunken)}footer{border-top:1px solid var(--border);margin-top:36px;padding-top:16px}
 @media(prefers-color-scheme:dark){:root{--bg:oklch(.18 .004 260);--sunken:oklch(.125 .004 260);--fg:oklch(.79 .004 260);--strong:oklch(.895 .003 260);--muted:oklch(.7 .004 260);--border:oklch(.25 .004 260);--link:oklch(.85 .14 81)}.shiki{background-color:var(--shiki-dark-bg,var(--sunken))}.shiki,.shiki span{color:var(--shiki-dark,inherit)}}
 `;
-// Literal fallbacks: an HTML doc does not define the reading tokens.
 const THREAD_STYLES = `
 .em-threads{margin:24px 0}.em-thread{margin:12px 0;padding:10px 14px;border:1px solid var(--border,#d4d4d8);border-left:3px solid var(--link,#7c5a1e);border-radius:6px;background:var(--sunken,#f7f7f8);color:var(--fg,#3f3f46);font:400 14px/1.55 ui-sans-serif,system-ui,sans-serif;text-align:left}.em-thread[data-state=resolved]{border-left-color:var(--muted,#71717a)}.em-thread-head,.em-thread-note,.em-comment-head{margin:0 0 6px;font-size:12px;line-height:1.4;color:var(--muted,#71717a)}.em-thread-where,.em-comment-head strong{color:var(--strong,#18181b)}.em-thread-quote{margin:0 0 8px;padding-left:10px;border-left:2px solid var(--border,#d4d4d8)}.em-thread-quote p{margin:0}.em-thread-lines{margin:0 0 8px;padding:8px 10px;overflow:auto;font:400 12px/1.5 ui-monospace,"SF Mono",Menlo,monospace}.em-comments{list-style:none;margin:0;padding:0}.em-comment{margin:8px 0 0;padding-top:8px;border-top:1px solid var(--border,#d4d4d8)}.em-comment:first-child{margin-top:0;padding-top:0;border-top:0}.em-comment-text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.em-comment-body{overflow-wrap:anywhere}.em-comment-body>*{margin-top:0}.em-comment-body>:last-child{margin-bottom:0}
 @media(prefers-color-scheme:dark){.em-thread{border-color:var(--border,#3f3f46);background:var(--sunken,#1c1c1f);color:var(--fg,#d4d4d8)}.em-thread-head,.em-thread-note,.em-comment-head{color:var(--muted,#a1a1aa)}.em-thread-where,.em-comment-head strong{color:var(--strong,#f4f4f5)}.em-thread-quote,.em-comment{border-color:var(--border,#3f3f46)}}
@@ -357,21 +356,46 @@ function commentTime(ms: number): ElementContent {
   const iso = new Date(ms).toISOString();
   return element("time", [text(`${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`)], { dateTime: iso });
 }
-async function commentBody(comment: DownloadComment, state: AssetState): Promise<Element> {
-  const plain = () => element("p", [text(comment.body)], { className: ["em-comment-text"] });
+function hasCommentContent(node: Root | Element): boolean {
+  return node.children.some((child) =>
+    child.type === "text"
+      ? child.value.trim().length > 0
+      : child.type === "element" && (child.tagName === "img" || hasCommentContent(child)),
+  );
+}
+async function commentBody(comment: DownloadComment, state: AssetState): Promise<{ node: Element; bytes: number }> {
+  const plain = () => ({
+    node: element("p", [text(comment.body)], { className: ["em-comment-text"] }),
+    bytes: utf8Length(comment.body),
+  });
   if (comment.html === null || !parseDocHtml(comment.html, HTML_ELEMENT_LIMIT)) return plain();
   // The same filtering as writeup blocks: no scripts, handlers, frames, styles or remote loads.
   const tree = fromHtml(comment.html, { fragment: true });
   await transformBlocks(tree, state);
-  return element(
-    "div",
-    tree.children.filter((node): node is ElementContent => node.type !== "doctype"),
-    { className: ["em-comment-body"] },
-  );
+  if (!hasCommentContent(tree)) return plain();
+  return {
+    bytes: utf8Length(serialize(tree).slice(1)),
+    node: element(
+      "div",
+      tree.children.filter((node): node is ElementContent => node.type !== "doctype"),
+      { className: ["em-comment-body"] },
+    ),
+  };
 }
-async function threadCard(thread: DownloadThread, state: AssetState, showWhere: boolean): Promise<Element> {
-  const items: ElementContent[] = [];
+async function threadCard(thread: DownloadThread, state: AssetState, showWhere: boolean): Promise<Element | null> {
+  const bodies: Element[] = [];
+  let bytes = [thread.where, thread.note ?? "", thread.quote ?? "", thread.lines?.join("\n") ?? ""].reduce(
+    (sum, value) => sum + utf8Length(value),
+    0,
+  );
   for (const comment of thread.comments) {
+    const body = await commentBody(comment, state);
+    bytes += body.bytes;
+    bodies.push(body.node);
+  }
+  if (!state.take(bytes)) return null;
+  const items: ElementContent[] = [];
+  for (const [index, comment] of thread.comments.entries()) {
     items.push(
       element(
         "li",
@@ -386,7 +410,7 @@ async function threadCard(thread: DownloadThread, state: AssetState, showWhere: 
             ],
             { className: ["em-comment-head"] },
           ),
-          await commentBody(comment, state),
+          ...(bodies[index] ? [bodies[index]] : []),
         ],
         { className: ["em-comment"], dataAuthor: comment.author },
       ),
@@ -422,7 +446,8 @@ async function threadCards(list: DownloadThread[] | undefined, ctx: ThreadContex
   for (const thread of list ?? []) {
     if (ctx.emitted.has(thread)) continue;
     ctx.emitted.add(thread);
-    cards.push(await threadCard(thread, ctx.state, showWhere));
+    const card = await threadCard(thread, ctx.state, showWhere);
+    if (card) cards.push(card);
   }
   return cards;
 }
@@ -455,14 +480,26 @@ async function threadParts(
   const ctx: ThreadContext = { threads, emitted: new Set(), state };
   const top = await threadSection("Comments on the whole review", threads.top, ctx);
   const content = await build(ctx);
-  const doc = await threadSection("Comments on this doc", threads.doc, ctx);
-  const other = [
+  const other = fileThreads(threads).filter((thread) => !ctx.emitted.has(thread));
+  return { top, content, tail: await threadSection("Other comments", other, ctx, true) };
+}
+function fileThreads(threads: FileThreads): DownloadThread[] {
+  return [
     ...threads.end,
     ...[...threads.blocks.values(), ...threads.topics.values(), ...threads.lines.values()].flat(),
-  ]
-    .filter((thread) => !ctx.emitted.has(thread))
-    .sort((a, b) => threadOrder(a) - threadOrder(b));
-  return { top, content, tail: [...doc, ...(await threadSection("Other comments", other, ctx, true))] };
+  ].sort((a, b) => threadOrder(a) - threadOrder(b));
+}
+export async function buildCommentsDownload(input: PageInput & { threads: FileThreads }): Promise<string> {
+  const state = resolverState(input.resolveMedia, input.inlineBudget, input.pause, input.work);
+  const content = await withThreads(input.threads, state, async () => []);
+  if (!input.threads.top.length && !fileThreads(input.threads).length)
+    content.push(element("p", [text("No sent comments.")]));
+  return frame(
+    { ...input, title: `${input.title} — comments`, details: { ...input.details, links: undefined } },
+    content,
+    state.tooLarge,
+    true,
+  );
 }
 async function blocksContent(
   blocks: RenderedBlock[],
@@ -1087,7 +1124,20 @@ const cssResourceAttributes = new Set([
   "by",
   "marker",
 ]);
-export function buildOmittedDownload(input: { title: string }): string {
+export async function buildOmittedDownload(input: {
+  title: string;
+  threads?: FileThreads;
+  inlineBudget?: number;
+  pause?: () => Promise<void>;
+  work?: DownloadWork;
+}): Promise<string> {
+  const content: ElementContent[] = [note()];
+  if (input.threads) {
+    const state = resolverState(async () => null, input.inlineBudget, input.pause, input.work);
+    const ctx: ThreadContext = { threads: input.threads, emitted: new Set(), state };
+    content.push(...(await threadSection("Comments on the whole review", input.threads.top, ctx)));
+    content.push(...(await threadSection("Comments on this doc", fileThreads(input.threads), ctx, true)));
+  }
   return serialize({
     type: "root",
     children: [
@@ -1095,8 +1145,13 @@ export function buildOmittedDownload(input: { title: string }): string {
       element(
         "html",
         [
-          element("head", [...headMetas(), element("title", [text(input.title)]), style(READING_STYLES)]),
-          element("body", [note()]),
+          element("head", [
+            ...headMetas(),
+            element("title", [text(input.title)]),
+            style(READING_STYLES),
+            ...(input.threads ? [style(THREAD_STYLES)] : []),
+          ]),
+          element("body", content),
         ],
         { lang: "en" },
       ),
@@ -1111,9 +1166,8 @@ export async function buildHtmlDocDownload(input: {
   inlineBudget?: number;
   pause?: () => Promise<void>;
   work?: DownloadWork;
-  threads?: FileThreads;
 }): Promise<string> {
-  if (!parseDocHtml(input.html, HTML_ELEMENT_LIMIT)) return buildOmittedDownload(input);
+  if (!parseDocHtml(input.html, HTML_ELEMENT_LIMIT)) return buildOmittedDownload({ title: input.title });
   const tree = fromHtml(input.html);
   const state = resolverState(input.resolveAsset, input.inlineBudget, input.pause, input.work);
   const resource = (value: string) => resourceUrl(value, input.docPath, state);
@@ -1235,12 +1289,6 @@ export async function buildHtmlDocDownload(input: {
   if (!body) {
     body = element("body");
     html.children.push(body);
-  }
-  if (input.threads) {
-    const parts = await threadParts(input.threads, state, async () => []);
-    head.children.push(style(THREAD_STYLES));
-    body.children.unshift(...parts.top);
-    body.children.push(...parts.tail);
   }
   if (state.tooLarge) body.children.unshift(note());
   if (!tree.children.some((node) => node.type === "doctype")) tree.children.unshift({ type: "doctype" });

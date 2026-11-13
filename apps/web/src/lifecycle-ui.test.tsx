@@ -1154,3 +1154,24 @@ test("Download can select rendered and source views of the same doc path indepen
     ),
   );
 });
+
+test("an HTML pub explains that comments turn the download into a ZIP", async () => {
+  withDownloadDocs(0, {
+    writeupEmpty: true,
+    main: "doc.html",
+    docs: [{ kind: "html", path: "doc.html", contentUrl: "/content/synthetic/doc.html" }],
+    threads: [downloadThread(true)],
+  });
+  mount(`/r/${id}`);
+  fireEvent.click(await screen.findByRole("button", { name: "Download" }));
+  const dialog = within(await screen.findByRole("alertdialog", { name: "Download" }));
+  expect(
+    dialog.getByText(
+      "Sent comments and the agent's replies, next to their text. Unsent comments stay out. The comments come as a separate file, so the download is a ZIP file.",
+    ),
+  ).toBeTruthy();
+  fireEvent.click(dialog.getByRole("checkbox", { name: /Comments and replies/ }));
+  expect(dialog.getByRole("link", { name: "Download" }).getAttribute("href")).toBe(
+    reviewDownloadPath(id, 1, [], { comments: true }),
+  );
+});

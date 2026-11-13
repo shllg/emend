@@ -8,6 +8,7 @@ import {
   TopicMeta,
 } from "@emend/contract";
 import {
+  buildCommentsDownload,
   buildDocDownload,
   buildHtmlDocDownload,
   buildOmittedDownload,
@@ -15,11 +16,10 @@ import {
   createDownloadWork,
   type DownloadFile,
   type DownloadThreadInput,
-  type FileThreads,
   type ResolveResult,
   routeDownloadThreads,
 } from "@emend/core";
-import { and, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
 import type { Hono } from "hono";
 import type { Queries } from "../../db/client.ts";
 import {
@@ -109,8 +109,23 @@ async function revisionDownload(
         .all()
     : [];
   if (selectedDocs.length !== docIds.length) throw new ApiError("not_found");
-  const responseFilename = docIds.length ? filename.replace(/\.html$/, ".zip") : filename;
-  if (headOnly) return { body: null, filename: responseFilename };
+  const baseDoc = <T extends { path: string }>(docs: T[]) =>
+    revision.writeupEmpty && revision.base === null
+      ? (docs.find((file) => file.path === revision.main) ?? docs[0])
+      : undefined;
+  if (headOnly) {
+    const docs =
+      withComments && revision.writeupEmpty && revision.base === null
+        ? await q
+            .select({ path: files.path, mediaType: files.mediaType })
+            .from(files)
+            .where(and(ownedFiles, eq(files.role, "doc")))
+            .orderBy(files.ord, files.id)
+            .all()
+        : [];
+    const zip = docIds.length > 0 || baseDoc(docs)?.mediaType === "text/html";
+    return { body: null, filename: zip ? filename.replace(/\.html$/, ".zip") : filename, zip };
+  }
   const fileRows = await q.select().from(files).where(ownedFiles).orderBy(files.ord, files.id).all();
   const readJson = async (hash: string | null): Promise<unknown> => {
     const bytes = hash ? await deps.blobs.get(ownerId, hash, q) : null;
@@ -177,10 +192,8 @@ async function revisionDownload(
   );
   const resolveMedia = (sha: string) => resolveFile(media.get(sha));
   const docs = fileRows.filter((file) => file.role === "doc");
-  const doc =
-    revision.writeupEmpty && revision.base === null
-      ? (docs.find((file) => file.path === revision.main) ?? docs[0])
-      : undefined;
+  const doc = baseDoc(docs);
+  const zip = docIds.length > 0 || (withComments && doc?.mediaType === "text/html");
   const work = createDownloadWork();
   const fileKind = (file: typeof files.$inferSelect): "markdown" | "source" | "html" =>
     file.mediaType === "text/html" ? "html" : file.mediaType === "text/plain" ? "source" : "markdown";
@@ -205,7 +218,7 @@ async function revisionDownload(
           eq(placements.revisionId, revision.id),
         ),
       )
-      .where(and(eq(threads.ownerId, ownerId), eq(threads.reviewId, reviewId)))
+      .where(and(eq(threads.ownerId, ownerId), eq(threads.reviewId, reviewId), lte(revisions.seq, seq)))
       .orderBy(sql`${threads}.rowid`)
       .all();
     // Unsent reviewer comments never leave the database.
@@ -284,7 +297,6 @@ async function revisionDownload(
     title: string,
     inlineBudget: number,
     body?: Uint8Array,
-    threadsForDoc?: FileThreads,
   ) => {
     const bytes = body ?? (doc.newBlob ? await deps.blobs.get(ownerId, doc.newBlob, q) : null);
     if (!bytes) throw new ApiError("not_found");
@@ -313,12 +325,11 @@ async function revisionDownload(
       inlineBudget,
       pause,
       work,
-      threads: threadsForDoc,
     });
   };
   const buildBase = async () => {
     if (doc?.mediaType === "text/html") {
-      return buildHtmlDoc(doc, review.title, budget, undefined, routed?.base);
+      return buildHtmlDoc(doc, review.title, budget);
     } else if (doc) {
       const content = await readJson(doc.renderedBlob);
       const meta = await readWriteup()
@@ -362,7 +373,7 @@ async function revisionDownload(
       });
     }
   };
-  if (!selectedDocs.length) return { body: await buildBase(), filename };
+  if (!zip) return { body: await buildBase(), filename, zip };
   const writer = new ZipWriter(new Date(revision.createdAt));
   let bytesSoFar = 0;
   const addHtml = async (name: string, html: string) => {
@@ -373,13 +384,14 @@ async function revisionDownload(
   const buildSelected = async (selected: typeof files.$inferSelect, index: number): Promise<string> => {
     const inlineBudget = Math.max(0, budget - bytesSoFar);
     const title = selected.title ?? selected.path;
-    if (inlineBudget === 0) return buildOmittedDownload({ title });
+    const omitted = () => buildOmittedDownload({ title, threads: routed?.docs[index], inlineBudget, pause, work });
+    if (inlineBudget === 0) return omitted();
     // Do not cache doc bodies: each is released after its ZIP entry is compressed.
     const bytes = await readLimited(selected.mediaType === "text/html" ? selected.newBlob : selected.renderedBlob);
-    if (bytes === "too-large") return buildOmittedDownload({ title });
+    if (bytes === "too-large") return omitted();
     if (selected.mediaType === "text/html") {
       if (!bytes) throw new ApiError("not_found");
-      return buildHtmlDoc(selected, title, inlineBudget, bytes, routed?.docs[index]);
+      return buildHtmlDoc(selected, title, inlineBudget, bytes);
     }
     let stored: unknown;
     if (bytes) {
@@ -407,6 +419,20 @@ async function revisionDownload(
     });
   };
   await addHtml(filename, await buildBase());
+  if (routed?.comments) {
+    await addHtml(
+      "comments.html",
+      await buildCommentsDownload({
+        title: review.title,
+        details: { ...details, links: undefined },
+        resolveMedia,
+        threads: routed.comments,
+        inlineBudget: Math.max(0, budget - bytesSoFar),
+        pause,
+        work,
+      }),
+    );
+  }
   const names = downloadDocNames(selectedDocs.map((file) => file.path));
   for (const [index, selected] of selectedDocs.entries()) {
     await pause();
@@ -414,7 +440,7 @@ async function revisionDownload(
     if (name === undefined) throw new Error("Missing download entry name");
     await addHtml(name, await buildSelected(selected, index));
   }
-  return { body: writer.finish(), filename: responseFilename };
+  return { body: writer.finish(), filename: filename.replace(/\.html$/, ".zip"), zip };
 }
 
 /** The budget parameter is internal; requests cannot change the export ceiling. */
@@ -443,7 +469,7 @@ export function downloadRoutes(app: Hono<AppEnv>, deps: AppDeps, budget: number 
           withComments,
         ),
       );
-      c.header("Content-Type", docIds.length ? "application/zip" : "text/html; charset=utf-8");
+      c.header("Content-Type", result.zip ? "application/zip" : "text/html; charset=utf-8");
       c.header("Content-Disposition", `attachment; filename="${result.filename}"`);
       c.header("Content-Security-Policy", DOWNLOAD_CSP);
       c.header("X-Content-Type-Options", "nosniff");

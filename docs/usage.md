@@ -146,3 +146,5 @@ text. Tick Comments and replies to add the sent comments and the agent's replies
 text; unsent comments stay out. File names are made safe for Windows too. Size and CSS processing
 limits are shared across the download. A doc that does not fit is replaced by a page with its
 title and a left-out note.
+
+An HTML doc's comments come in a separate list or file, never inside the doc.

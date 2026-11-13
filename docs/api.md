@@ -201,8 +201,9 @@ Rendered and source views of one path have distinct file ids. A source doc's fil
 `view: "source"`; a rendered doc's row has no `view`.
 
 An optional `comments=1` query parameter adds comments and replies (see below). Any other
-value or a repeat gets `400 invalid_request`, before waiting for a slot, also on `HEAD`. `HEAD`
-headers do not change. `comments=1` without docs keeps the single HTML response.
+value or a repeat gets `400 invalid_request`, before waiting for a slot, also on `HEAD`.
+An HTML pub with `comments=1` downloads as a ZIP, even with no docs selected. `HEAD` returns
+the same headers, using only the revision and doc metadata to identify the base doc.
 
 A code review's file holds the review title and that revision's writeup: sections, topics, text,
 code blocks and images with captions. The base file holds no docs and no diff, and no comments
@@ -230,40 +231,51 @@ replaces the app CSP for this route. Every file starts with a UTF-8 byte order m
 The file also has a CSP meta with the same policy without `sandbox`.
 It opens offline with no scripts or network requests.
 
-With no `doc` parameter, the single HTML response is unchanged. With any docs selected, the
+With no `doc` parameter, the response is a single HTML file unless it is an HTML pub with
+`comments=1`. With any docs selected, or with comments on an HTML pub, the
 response is `application/zip`, with attachment filename `<slug>-r<seq>.zip` and the same CSP,
 nosniff, no-store and same-origin headers. The ZIP starts with the base file at the root under
-its single-download name, then the selected docs under `docs/`, in revision file order (`ord`,
-then `id`). Each doc is an offline HTML file using the same rendering and filtering rules.
+its single-download name. For an HTML pub with `comments=1`, `comments.html` follows at the
+root. Selected docs follow under `docs/`, in revision file order (`ord`, then `id`). Each doc
+is an offline HTML file using the same rendering and filtering rules.
 Markdown and source docs get their title or path and the base file's project, branch, revision
 and publication time; publish links stay in the base file. Missing or invalid Markdown rendering
 shows empty content. Missing or invalid source rendering says "This file could not be shown."
 A missing HTML doc blob gets `404 not_found`.
 
 With `comments=1`, each file shows the threads of this review at their place, with their replies.
-Only sent reviewer comments and all agent replies are included. A thread with no comment left
-is left out. Unsent comments never reach the file. Each thread shows its state (Open, Sent,
+Only threads made on this revision or an earlier one are included. Later replies on those
+threads stay. Only sent reviewer comments and all agent replies are included. A thread with no
+comment left is left out. Unsent comments never reach the file. Each thread shows its state (Open, Sent,
 Answered or Resolved), the quoted text or the diff lines it was made on, and its comments,
 labelled "Reviewer" or "Agent", with an agent's outcome and the time in UTC. Comment bodies
 are shown as emend renders them in the app and pass the same filtering as the rest of the file:
 scripts, styles, frames, event handlers and remote images are removed, and a body that cannot
-be rendered shows as plain text. No thread id, comment id or address is in the file.
+be rendered shows as plain text. A body with no text or image after filtering also shows as
+escaped plain text. No thread id, comment id or address is in the file.
+A thread shows once, in the first file that holds its doc (the base file first). HTML docs never
+hold comments. Their threads go to the "Other comments" list, with the path and quote.
+For an HTML pub, `comments.html` holds whole-review threads and "Other comments". It has
+the review title followed by " — comments", the same meta line and no publish links.
+With no sent comments it says "No sent comments."
 Where a thread goes, by its placement on this revision:
 
-- Whole-review threads: a list at the top of the base file.
+- Whole-review threads: a list at the top of the base file, or in `comments.html` for an HTML pub.
 - Topic threads: in the topic's section of a code review's writeup.
 - Writeup threads: right after their block in the writeup.
 - Markdown doc threads: right after their block, in the file of that doc when it is selected
   (or is the pub's base doc).
 - Source doc threads: after their last line, in the file of that doc when it is selected (or
   is the pub's base doc).
-- HTML doc threads: in a list at the end of that doc's file.
 - Everything else, including diff threads, threads that have no place on this revision (with the
   reason and the revision they were made on), and threads whose file or block is not in the
-  download: an "Other comments" list at the end of the base file, with the path and lines.
+  download: an "Other comments" list at the end of the base file, or in `comments.html` for an
+  HTML pub, with the path and lines.
 
-A selected doc replaced by the left-out page shows none of its threads. With `comments=1`, the
-files grow by the comments, within the same size limits. The diff itself is never in the download.
+A selected Markdown or source doc replaced by the left-out page keeps its threads after the
+note, in a "Comments on this doc" list with where labels. Thread text counts against the same
+128 MiB emitted budget as built-in content. A thread that does not fit is left out with the note.
+The diff itself is never in the download.
 
 Doc entry names use the doc path split on `/`. Each segment replaces runs outside `[A-Za-z0-9._-]`
 with `-`, strips leading dots, trims trailing dots and hyphens, cuts to 80 characters and trims

@@ -24,7 +24,7 @@ export type DownloadThread = {
   comments: DownloadComment[];
 };
 export type FileThreads = {
-  /** Whole-review threads (base file only). */
+  /** Whole-review threads (home file only). */
   top: DownloadThread[];
   /** Block id to the threads shown right after that block. */
   blocks: Map<string, DownloadThread[]>;
@@ -32,8 +32,6 @@ export type FileThreads = {
   topics: Map<string, DownloadThread[]>;
   /** Source line number (1-based) to the threads shown after that line. */
   lines: Map<number, DownloadThread[]>;
-  /** An HTML doc's own threads, shown at the end of its body. */
-  doc: DownloadThread[];
   /** Threads with no place in this file's content. */
   end: DownloadThread[];
 };
@@ -54,7 +52,6 @@ const emptyThreads = (): FileThreads => ({
   blocks: new Map(),
   topics: new Map(),
   lines: new Map(),
-  doc: [],
   end: [],
 });
 function push<K>(map: Map<K, DownloadThread[]>, key: K, thread: DownloadThread) {
@@ -104,15 +101,17 @@ export function routeDownloadThreads(input: {
   topics: TopicMeta[];
   base: DownloadFile;
   docs: DownloadFile[];
-}): { base: FileThreads; docs: FileThreads[] } {
+}): { base: FileThreads; docs: FileThreads[]; comments?: FileThreads } {
   const base = emptyThreads();
   const docs = input.docs.map(emptyThreads);
+  const comments = input.base.kind === "html" ? emptyThreads() : undefined;
+  const home = comments ?? base;
   const files: { file: DownloadFile; threads: FileThreads }[] = [
     { file: input.base, threads: base },
     ...input.docs.map((file, index) => ({ file, threads: docs[index] ?? emptyThreads() })),
   ];
   const titles = new Map(input.topics.map((topic) => [topic.slug, topic.title]));
-  const find = (kind: "markdown" | "source" | "html", path: string) =>
+  const find = (kind: "markdown" | "source", path: string) =>
     files.find(({ file }) => file.kind === kind && file.path === path)?.threads;
 
   let count = 0;
@@ -130,7 +129,7 @@ export function routeDownloadThreads(input: {
       thread.where = whereLabel(target, titles);
       const reason = reasons[item.placement.reason];
       thread.note = item.createdOn === input.seq ? reason : `${reason} Made on revision ${item.createdOn}.`;
-      base.end.push(thread);
+      home.end.push(thread);
       continue;
     }
     const location = item.placement.location;
@@ -138,37 +137,34 @@ export function routeDownloadThreads(input: {
     const writeupBase = input.base.kind === "writeup";
     switch (location.kind) {
       case "review":
-        base.top.push(thread);
+        home.top.push(thread);
         break;
       case "topic":
         if (writeupBase) push(base.topics, location.slug, thread);
-        else base.end.push(thread);
+        else home.end.push(thread);
         break;
       case "writeup-span":
         if (writeupBase) push(base.blocks, location.blockId, thread);
-        else base.end.push(thread);
+        else home.end.push(thread);
         break;
       case "doc-span": {
         const target = find("markdown", location.path);
         if (target) push(target.blocks, location.blockId, thread);
-        else base.end.push(thread);
+        else home.end.push(thread);
         break;
       }
-      case "html-span": {
-        const target = find("html", location.path);
-        if (target) target.doc.push(thread);
-        else base.end.push(thread);
+      case "html-span":
+        home.end.push(thread);
         break;
-      }
       case "source-lines": {
         const target = find("source", location.path);
         if (target) push(target.lines, location.end, thread);
-        else base.end.push(thread);
+        else home.end.push(thread);
         break;
       }
       default:
-        base.end.push(thread);
+        home.end.push(thread);
     }
   }
-  return { base, docs };
+  return { base, docs, ...(comments ? { comments } : {}) };
 }
