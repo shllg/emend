@@ -131,12 +131,12 @@ export function CommandPalette() {
                 if (event.key !== "Enter") armed.current = null;
                 if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                   event.preventDefault();
-                  const index = active ? selectable.indexOf(active) : -1;
-                  const next =
-                    selectable[(index + (event.key === "ArrowDown" ? 1 : -1) + selectable.length) % selectable.length];
+                  const direction = event.key === "ArrowDown" ? 1 : -1;
+                  const index = active ? selectable.indexOf(active) : direction === 1 ? -1 : 0;
+                  const next = selectable[(index + direction + selectable.length) % selectable.length];
                   if (next) setSelected(next);
                 } else if (event.key === "Enter") {
-                  if (event.ctrlKey || event.metaKey || event.altKey) {
+                  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
                     armed.current = null;
                     return;
                   }
@@ -149,7 +149,7 @@ export function CommandPalette() {
                 if (event.key !== "Enter") return;
                 const command = armed.current;
                 armed.current = null;
-                if (event.ctrlKey || event.metaKey || event.altKey) return;
+                if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
                 event.preventDefault();
                 if (command && command === active) choose(command);
               }}

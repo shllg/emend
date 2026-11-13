@@ -378,8 +378,8 @@ test("held Enter keeps the palette open and runs the command once on release", a
   expect(writes()).toHaveLength(0);
 });
 
-test.each(["ctrlKey", "metaKey", "altKey"])(
-  "Enter with %s neither runs a command nor prevents the key",
+test.each(["ctrlKey", "metaKey", "altKey", "shiftKey"])(
+  "Enter with %s disarms without running a command or preventing the key",
   async (modifier) => {
     mount();
     await ready();
@@ -387,6 +387,13 @@ test.each(["ctrlKey", "metaKey", "altKey"])(
     search(input, "Approve");
     expect(selected()).toBe(option("Approve"));
     expect(press("Enter", { [modifier]: true }, input).defaultPrevented).toBe(false);
+    keyDown("Enter", {}, input);
+    expect(keyDown("Enter", { [modifier]: true }, input).defaultPrevented).toBe(false);
+    fireEvent.keyUp(input, { key: "Enter" });
+    expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
+    keyDown("Enter", {}, input);
+    expect(fireEvent.keyUp(input, { key: "Enter", [modifier]: true })).toBe(true);
+    fireEvent.keyUp(input, { key: "Enter" });
     expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
     expect(document.activeElement).toBe(input);
     expect(screen.queryByRole("alertdialog")).toBeNull();
@@ -572,6 +579,31 @@ test.each([false, true])(
     act(() => client.setQueryData(reviewQuery(ids[0]).queryKey, (old) => old && { ...old, unsentCount: 0 }));
     await waitFor(() => expect(option("Approve").getAttribute("aria-disabled")).toBe("false"));
     expect(selected()).toBe(option("Approve"));
+  },
+);
+
+test.each([
+  ["ArrowUp", -1],
+  ["ArrowDown", 0],
+] as const)(
+  "%s selects the available boundary row after the selected command becomes unavailable",
+  async (key, index) => {
+    mount();
+    await ready();
+    const input = await openPalette();
+    fireEvent.pointerMove(option("Approve"));
+    expect(selected()).toBe(option("Approve"));
+    act(() => client.setQueryData(reviewQuery(ids[0]).queryKey, (old) => old && { ...old, unsentCount: 1 }));
+    await waitFor(() => expect(option("Approve").getAttribute("aria-disabled")).toBe("true"));
+    expect(selected()).toBeNull();
+    expect(input.hasAttribute("aria-activedescendant")).toBe(false);
+    const available = screen.getAllByRole("option").filter((row) => row.getAttribute("aria-disabled") !== "true");
+    expect(available.length).toBeGreaterThan(1);
+    expect(press(key, {}, input).defaultPrevented).toBe(true);
+    expect(selected()).toBe(available.at(index));
+    expect(input.getAttribute("aria-activedescendant")).toBe(selected()?.id);
+    expect(document.activeElement).toBe(input);
+    expect(writes()).toHaveLength(0);
   },
 );
 
