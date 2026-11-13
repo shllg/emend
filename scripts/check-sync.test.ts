@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { checkSync as runCheckSync, globToRegExp, isValidSyncTrailer } from "./check-sync.ts";
+import {
+  checkSync as runCheckSync,
+  globToRegExp,
+  isValidSyncTrailer,
+  lastParagraphSyncValues,
+} from "./check-sync.ts";
 
 const home = mkdtempSync(path.join(tmpdir(), "sync-home-"));
 const childEnv = {
@@ -287,6 +292,24 @@ test("a pending trailer passes", () => {
   const dir = makeRepo();
   commit(dir, { "sync/a.json": "{}\n" }, "chore(sync): add a\n\nSync: pending hunk-review-skill B9");
   assert.deepEqual(checkSync({ cwd: dir, base: "main" }).errors, []);
+});
+
+test("a Sync line that shares the last paragraph with a Closes line passes", () => {
+  const dir = makeRepo();
+  commit(dir, { "sync/a.json": "{}\n" }, "chore(sync): add a\n\nBody.\n\nCloses #80\nSync: none — fixture only");
+  assert.deepEqual(checkSync({ cwd: dir, base: "main" }).errors, []);
+});
+
+test("a Sync line outside the last paragraph fails", () => {
+  const dir = makeRepo();
+  commit(dir, { "sync/a.json": "{}\n" }, "chore(sync): add a\n\nSync: none — fixture only\n\nCloses #80");
+  assert.equal(checkSync({ cwd: dir, base: "main" }).errors.length, 1);
+});
+
+test("lastParagraphSyncValues reads only the last paragraph", () => {
+  assert.deepEqual(lastParagraphSyncValues("feat: x\n\nCloses #80\nSync: none — reason\n"), [" none — reason"]);
+  assert.deepEqual(lastParagraphSyncValues("feat: x\n\nSync: none — reason\n\nCloses #80\n"), []);
+  assert.deepEqual(lastParagraphSyncValues("feat: x\n\nA line that mentions Sync: none — inline\n"), []);
 });
 
 test("an invalid trailer fails", () => {

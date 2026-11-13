@@ -51,6 +51,23 @@ export function isValidSyncTrailer(value: string): boolean {
   );
 }
 
+/**
+ * The `Sync:` values in a commit message's last paragraph. git reads a paragraph as trailers only
+ * when every line has the `Key: value` form, so a `Closes #12` line above `Sync:` hides it from
+ * `%(trailers)`. This fallback still finds it there, and nowhere else in the message.
+ */
+export function lastParagraphSyncValues(message: string): string[] {
+  const paragraphs = message
+    .trim()
+    .split(/\n[ \t]*\n/)
+    .filter((paragraph) => paragraph.trim() !== "");
+  const last = paragraphs.at(-1) ?? "";
+  return last
+    .split("\n")
+    .map((line) => /^Sync:(.*)$/.exec(line.trim())?.[1])
+    .filter((value): value is string => value !== undefined);
+}
+
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf8",
@@ -171,6 +188,8 @@ export function checkSync(opts: { cwd: string; base?: string }): SyncResult {
       .map((line) => line.trim())
       .filter((line) => line !== "");
     if (trailers.some(isValidSyncTrailer)) continue;
+    const message = git(cwd, ["log", "-1", "--format=%B", sha]);
+    if (lastParagraphSyncValues(message).some(isValidSyncTrailer)) continue;
     const subject = git(cwd, ["log", "-1", "--format=%s", sha]).trim();
     const listed = shared.slice(0, 5).join(", ");
     const more = shared.length > 5 ? ` and ${shared.length - 5} more` : "";
