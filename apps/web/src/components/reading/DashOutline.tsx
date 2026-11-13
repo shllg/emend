@@ -10,6 +10,15 @@ export interface DashOutlineItem {
   count?: number;
 }
 
+function revealCurrent(element: HTMLElement | null) {
+  const item = element?.querySelector<HTMLElement>('button[aria-current="location"]');
+  if (!element || !item) return;
+  const top = item.offsetTop;
+  const bottom = top + item.offsetHeight;
+  if (top < element.scrollTop) element.scrollTop = top;
+  else if (bottom > element.scrollTop + element.clientHeight) element.scrollTop = bottom - element.clientHeight;
+}
+
 export function DashOutline({
   label,
   items,
@@ -29,28 +38,30 @@ export function DashOutline({
     if (!element || !pane) return;
     const measure = () => {
       const room = pane.getBoundingClientRect().bottom - element.getBoundingClientRect().top - 12;
-      setMaxHeight(Math.max(96, Math.floor(room)));
+      setMaxHeight(Math.max(0, Math.floor(room)));
+    };
+    const onPointerEnter = () => {
+      measure();
+      revealCurrent(element);
+    };
+    const onFocusIn = (event: FocusEvent) => {
+      if (event.relatedTarget instanceof Node && element.contains(event.relatedTarget)) return;
+      measure();
+      revealCurrent(element);
     };
     measure();
     const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : undefined;
     observer?.observe(pane);
-    element.addEventListener("pointerenter", measure);
-    element.addEventListener("focusin", measure);
+    element.addEventListener("pointerenter", onPointerEnter);
+    element.addEventListener("focusin", onFocusIn);
     return () => {
       observer?.disconnect();
-      element.removeEventListener("pointerenter", measure);
-      element.removeEventListener("focusin", measure);
+      element.removeEventListener("pointerenter", onPointerEnter);
+      element.removeEventListener("focusin", onFocusIn);
     };
   }, []);
   useLayoutEffect(() => {
-    if (current === undefined) return;
-    const element = nav.current;
-    const item = element?.querySelector<HTMLElement>('button[aria-current="location"]');
-    if (!element || !item) return;
-    const top = item.offsetTop;
-    const bottom = top + item.offsetHeight;
-    if (top < element.scrollTop) element.scrollTop = top;
-    else if (bottom > element.scrollTop + element.clientHeight) element.scrollTop = bottom - element.clientHeight;
+    if (current !== undefined) revealCurrent(nav.current);
   }, [current]);
   return (
     <nav ref={nav} className="em-dash-outline" aria-label={label} style={{ maxHeight }}>

@@ -321,7 +321,10 @@ test("dash outline measures its pane on mount, resize, hover and focus, and clea
   expect(nav.style.maxHeight).toBe("288px");
   navTop = 480;
   fireEvent.focusIn(within(nav).getByRole("button", { name: "Seed" }));
-  expect(nav.style.maxHeight).toBe("96px");
+  expect(nav.style.maxHeight).toBe("8px");
+  navTop = 500;
+  fireEvent.pointerEnter(nav);
+  expect(nav.style.maxHeight).toBe("0");
   view.unmount();
   expect(disconnect).toHaveBeenCalledOnce();
   bounds.mockClear();
@@ -370,6 +373,48 @@ test("the current dash scrolls only its outline when it leaves the visible range
   view.rerender(ui("sprout"));
   expect(nav.scrollTop).toBe(30);
   view.rerender(ui("seed"));
+  expect(nav.scrollTop).toBe(0);
+  expect(pane.scrollTop).toBe(240);
+  expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+});
+
+test.each([30, 44])("expanding dash rows to %spx reveals the current item without fighting focus", (height) => {
+  const items = [
+    { id: "seed", label: "Seed" },
+    { id: "sprout", label: "Sprout" },
+    { id: "flower", label: "Flower" },
+  ];
+  const ui = (current: string) => (
+    <section data-reading-scroll data-testid="pane">
+      <button type="button">Outside</button>
+      <DashOutline label="Outline" items={items} current={current} onPick={() => {}} />
+    </section>
+  );
+  const view = render(ui("seed"));
+  const nav = screen.getByRole("navigation", { name: "Outline" });
+  const pane = screen.getByTestId("pane");
+  const outside = screen.getByRole("button", { name: "Outside" });
+  const seed = within(nav).getByRole("button", { name: "Seed" });
+  const sprout = within(nav).getByRole("button", { name: "Sprout" });
+  let rowHeight = 12;
+  vi.spyOn(nav, "clientHeight", "get").mockReturnValue(60);
+  for (const [index, button] of within(nav).getAllByRole("button").entries()) {
+    vi.spyOn(button, "offsetTop", "get").mockImplementation(() => index * rowHeight);
+    vi.spyOn(button, "offsetHeight", "get").mockImplementation(() => rowHeight);
+  }
+  pane.scrollTop = 240;
+  view.rerender(ui("flower"));
+  expect(nav.scrollTop).toBe(0);
+  rowHeight = height;
+  fireEvent.pointerEnter(nav);
+  expect(nav.scrollTop).toBe(3 * height - 60);
+  for (const relatedTarget of [outside, null]) {
+    nav.scrollTop = 0;
+    fireEvent.focusIn(seed, { relatedTarget });
+    expect(nav.scrollTop).toBe(3 * height - 60);
+  }
+  nav.scrollTop = 0;
+  fireEvent.focusIn(sprout, { relatedTarget: seed });
   expect(nav.scrollTop).toBe(0);
   expect(pane.scrollTop).toBe(240);
   expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
