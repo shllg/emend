@@ -378,7 +378,85 @@ test("the current dash scrolls only its outline when it leaves the visible range
   expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
 });
 
-test.each([30, 44])("expanding dash rows to %spx reveals the current item without fighting focus", (height) => {
+test("shrinking the pane reveals the current dash after the smaller height is applied", () => {
+  let paneHeight = 712;
+  vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function (this: HTMLElement) {
+    return this.hasAttribute("data-reading-scroll") ? new DOMRect(0, 0, 800, paneHeight) : new DOMRect(0, 100, 28, 600);
+  });
+  let resize = () => {};
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(callback: () => void) {
+        resize = callback;
+      }
+      observe() {}
+      disconnect() {}
+    },
+  );
+  const items = Array.from({ length: 50 }, (_, index) => ({ id: `heading-${index}`, label: `Heading ${index + 1}` }));
+  const ui = (current: string) => (
+    <section data-reading-scroll data-testid="pane">
+      <DashOutline label="Outline" items={items} current={current} onPick={() => {}} />
+    </section>
+  );
+  const view = render(ui("heading-0"));
+  const nav = screen.getByRole("navigation", { name: "Outline" });
+  const pane = screen.getByTestId("pane");
+  vi.spyOn(nav, "clientHeight", "get").mockImplementation(() => Number.parseFloat(nav.style.maxHeight));
+  for (const [index, button] of within(nav).getAllByRole("button").entries()) {
+    vi.spyOn(button, "offsetTop", "get").mockReturnValue(index * 12);
+    vi.spyOn(button, "offsetHeight", "get").mockReturnValue(12);
+  }
+  pane.scrollTop = 240;
+  view.rerender(ui("heading-39"));
+  expect(nav.style.maxHeight).toBe("600px");
+  expect(nav.scrollTop).toBe(0);
+  paneHeight = 412;
+  act(() => resize());
+  expect(nav.style.maxHeight).toBe("300px");
+  expect(nav.scrollTop).toBe(180);
+  const current = within(nav).getByRole("button", { name: "Heading 40" });
+  expect(current.offsetTop).toBeGreaterThanOrEqual(nav.scrollTop);
+  expect(current.offsetTop + current.offsetHeight).toBeLessThanOrEqual(nav.scrollTop + nav.clientHeight);
+  expect(pane.scrollTop).toBe(240);
+  expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+});
+
+test("tabbing into a long outline keeps the focused first entry visible instead of the current entry", () => {
+  const items = Array.from({ length: 50 }, (_, index) => ({ id: `heading-${index}`, label: `Heading ${index + 1}` }));
+  const ui = (current: string) => (
+    <section data-reading-scroll data-testid="pane">
+      <button type="button">Outside</button>
+      <DashOutline label="Outline" items={items} current={current} onPick={() => {}} />
+    </section>
+  );
+  const view = render(ui("heading-0"));
+  const nav = screen.getByRole("navigation", { name: "Outline" });
+  const pane = screen.getByTestId("pane");
+  const first = within(nav).getByRole("button", { name: "Heading 1" });
+  vi.spyOn(nav, "clientHeight", "get").mockReturnValue(120);
+  for (const [index, button] of within(nav).getAllByRole("button").entries()) {
+    vi.spyOn(button, "offsetTop", "get").mockReturnValue(index * 30);
+    vi.spyOn(button, "offsetHeight", "get").mockReturnValue(30);
+  }
+  pane.scrollTop = 240;
+  view.rerender(ui("heading-39"));
+  expect(nav.scrollTop).toBe(1080);
+  act(() => screen.getByRole("button", { name: "Outside" }).focus());
+  nav.scrollTop = 0;
+  act(() => first.focus());
+  expect(document.activeElement).toBe(first);
+  expect(nav.scrollTop).toBe(0);
+  view.rerender(ui("heading-49"));
+  expect(nav.scrollTop).toBe(0);
+  fireEvent.pointerEnter(nav);
+  expect(nav.scrollTop).toBe(0);
+  expect(pane.scrollTop).toBe(240);
+  expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+});
+
+test.each([30, 44])("expanding dash rows to %spx reveals the current or focused item", (height) => {
   const items = [
     { id: "seed", label: "Seed" },
     { id: "sprout", label: "Sprout" },
@@ -409,12 +487,17 @@ test.each([30, 44])("expanding dash rows to %spx reveals the current item withou
   fireEvent.pointerEnter(nav);
   expect(nav.scrollTop).toBe(3 * height - 60);
   for (const relatedTarget of [outside, null]) {
+    act(() => {
+      if (relatedTarget) relatedTarget.focus();
+      else seed.blur();
+    });
     nav.scrollTop = 0;
-    fireEvent.focusIn(seed, { relatedTarget });
-    expect(nav.scrollTop).toBe(3 * height - 60);
+    act(() => seed.focus());
+    expect(document.activeElement).toBe(seed);
+    expect(nav.scrollTop).toBe(0);
   }
   nav.scrollTop = 0;
-  fireEvent.focusIn(sprout, { relatedTarget: seed });
+  act(() => sprout.focus());
   expect(nav.scrollTop).toBe(0);
   expect(pane.scrollTop).toBe(240);
   expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();

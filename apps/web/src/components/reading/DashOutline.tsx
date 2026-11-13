@@ -10,13 +10,18 @@ export interface DashOutlineItem {
   count?: number;
 }
 
-function revealCurrent(element: HTMLElement | null) {
-  const item = element?.querySelector<HTMLElement>('button[aria-current="location"]');
-  if (!element || !item) return;
+function reveal(nav: HTMLElement | null) {
+  if (!nav) return;
+  const active = document.activeElement;
+  const item =
+    active instanceof HTMLButtonElement && nav.contains(active)
+      ? active
+      : nav.querySelector<HTMLElement>('button[aria-current="location"]');
+  if (!item) return;
   const top = item.offsetTop;
   const bottom = top + item.offsetHeight;
-  if (top < element.scrollTop) element.scrollTop = top;
-  else if (bottom > element.scrollTop + element.clientHeight) element.scrollTop = bottom - element.clientHeight;
+  if (top < nav.scrollTop) nav.scrollTop = top;
+  else if (bottom > nav.scrollTop + nav.clientHeight) nav.scrollTop = bottom - nav.clientHeight;
 }
 
 export function DashOutline({
@@ -42,12 +47,12 @@ export function DashOutline({
     };
     const onPointerEnter = () => {
       measure();
-      revealCurrent(element);
+      reveal(element);
     };
     const onFocusIn = (event: FocusEvent) => {
       if (event.relatedTarget instanceof Node && element.contains(event.relatedTarget)) return;
       measure();
-      revealCurrent(element);
+      reveal(element);
     };
     measure();
     const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : undefined;
@@ -61,8 +66,11 @@ export function DashOutline({
     };
   }, []);
   useLayoutEffect(() => {
-    if (current !== undefined) revealCurrent(nav.current);
+    if (current !== undefined) reveal(nav.current);
   }, [current]);
+  useLayoutEffect(() => {
+    if (maxHeight !== undefined) reveal(nav.current);
+  }, [maxHeight]);
   return (
     <nav ref={nav} className="em-dash-outline" aria-label={label} style={{ maxHeight }}>
       <ul>
