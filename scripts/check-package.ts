@@ -63,6 +63,7 @@ try {
     "dist/web/licenses/hanken-grotesk-OFL.txt",
     "dist/web/licenses/martian-mono-OFL.txt",
     "dist/skills/emend-review/SKILL.md",
+    "dist/skills/emend-review/references/writing.md",
     "dist/skills/emend-feedback/SKILL.md",
     "dist/skills/emend-publish/SKILL.md",
   ]) {

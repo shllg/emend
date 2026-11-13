@@ -32,6 +32,7 @@ const skillFiles = [
   "plugin/skills/emend-review/references/manifest.md",
 ];
 const publishSkill = "plugin/skills/emend-publish/SKILL.md";
+const writingReference = "plugin/skills/emend-review/references/writing.md";
 const docSkills = [...skillFiles, publishSkill];
 const gitTest = test.skipIf(!existsSync(join(repo, ".git")));
 const exec = promisify(execFile);
@@ -354,6 +355,81 @@ test("emend-publish stays small, publishes without waiting and names its trigger
 
 test.each(docSkills)("%s has no command markers", (path) => {
   expect(hasSkillCommands(read(path)), path).toBe(false);
+});
+
+test("review, feedback and publish link to the shared writing reference", () => {
+  for (const name of names) {
+    const path = `plugin/skills/${name}/SKILL.md`;
+    const reference = name === "emend-review" ? "references/writing.md" : "../emend-review/references/writing.md";
+    expect(read(path)).toContain(`[the writing reference](${reference})`);
+    const target = resolve(repo, dirname(path), reference);
+    expect(target).toBe(join(repo, writingReference));
+    expect(existsSync(target), path).toBe(true);
+  }
+  expect(read("plugin/skills/emend-review/SKILL.md").replace(/\s+/g, " ")).toContain(
+    "Read [the writing reference](references/writing.md) before you write the writeup.",
+  );
+  expect(read("plugin/skills/emend-feedback/SKILL.md").replace(/\s+/g, " ")).toContain(
+    "Write replies and writeup text as [the writing reference](../emend-review/references/writing.md) says.",
+  );
+  expect(read(publishSkill).replace(/\s+/g, " ")).toContain(
+    "Before you write it, read [the writing reference](../emend-review/references/writing.md) and follow it.",
+  );
+  expect(hasSkillCommands(read(writingReference))).toBe(false);
+});
+
+test("moved writing rules appear once, in the shared writing reference", () => {
+  const skills = join(repo, "plugin", "skills");
+  const docs = readdirSync(skills, { recursive: true, encoding: "utf8" })
+    .filter((path) => path.endsWith(".md") && statSync(join(skills, path)).isFile())
+    .map((path) => ({
+      path: join(skills, path),
+      text: readFileSync(join(skills, path), "utf8").replace(/\s+/g, " "),
+    }));
+  for (const phrase of [
+    "20 words or fewer",
+    "one fact per sentence",
+    "two or three short sentences",
+    "Keep examples grounded in the actual change",
+    "one term per item",
+    'alt text "Before" and "After"',
+    "Remote image URLs do not show",
+    "Use no CDN scripts, styles or fonts",
+    "Keep each section useful to someone who has not opened the code",
+    "Put the effect before the mechanism",
+    "Answer first, then give the reason and relevant validation",
+    "Name the issue or plan task it serves",
+    "The reader reads it first, often straight from other work",
+    "explains what the area does, the problem and the fix",
+    "shows a concrete before/after case",
+    "Prefer existing project meanings and omit general programming terms",
+    "The alt text becomes the caption",
+    "Only listed paths render",
+    "Images do not render in Markdown docs",
+    "Markdown shows no local images yet",
+    "Keep the page self-contained",
+    "loads nothing from other hosts",
+    "Keep images and styles beside the file, using relative paths",
+  ]) {
+    const pattern = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    const paths = docs.flatMap(({ path, text }) => [...text.matchAll(pattern)].map(() => path));
+    expect(paths, phrase).toEqual([join(repo, writingReference)]);
+  }
+});
+
+test("the writing reference defines HTML pages and both TL;DR locations", () => {
+  const text = read(writingReference);
+  const html = (text.split("## HTML pages\n")[1]?.split("\n## ")[0] ?? "").replace(/\s+/g, " ");
+  for (const rule of [
+    "Give the main column a max width of 1024px.",
+    "Use body text around 18px with a line height around 1.65.",
+    "Keep the page self-contained.",
+  ]) {
+    expect(html).toContain(rule);
+  }
+  const tldr = text.split("## TL;DR\n")[1]?.split("\n## ")[0] ?? "";
+  expect(tldr).toContain("A review writeup holds it in `tldr`.");
+  expect(tldr).toContain('A document opens with it, under a "TL;DR" heading right after the title.');
 });
 
 test.each(names)("%s has only safe frontmatter and registered commands", async (name) => {

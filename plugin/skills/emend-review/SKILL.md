@@ -145,16 +145,14 @@ If no related docs are found, write "No design doc is cited." in the writeup's `
 
 ## Write for the reviewer
 
-Author Markdown in `writeup`. Keep each section useful to someone who has not opened the code.
-Put the effect before the mechanism, explain unfamiliar terms, and cite paths you inspected.
-Use the same rule for writeup text and feedback replies: answer first, one fact per sentence,
-and short sentences of 20 words or fewer.
+Read [the writing reference](references/writing.md) before you write the writeup. It holds the
+writing rules: sentences, the TL;DR, Why and Example, the glossary and screenshots.
+
+Author Markdown in `writeup`.
 
 Write the opening fields below. The app shows them in this order, with these weights.
 
-- `tldr`: two or three short sentences on what this change is and why it matters for the project.
-  Name the issue or plan task it serves when there is one.
-  The reviewer reads it first, often straight from other work.
+- `tldr`: the TL;DR, as the writing reference says.
 - `overview`: two bullets, **Goal** (the problem) and **Change** (what the reviewer sees now), in plain language.
   They carry the most weight.
 - `outOfScope`: what the change leaves out on purpose, as a short list.
@@ -172,24 +170,9 @@ Write the opening fields below. The app shows them in this order, with these wei
   from. Include any independent review findings and whether they were fixed, disputed or remain
   open; say when no independent review ran. With no first-hand intent, set this field to `null`:
   the decisions section is **not written**. Never reconstruct intent from commits or the diff.
-- `glossary`: brief definitions of the domain terms this writeup uses. Prefer existing project
-  meanings and omit general programming terms. Write the glossary as a list, one term per item.
-- `topics[slug]`: `why` explains what the area does, the problem and the fix; `example` shows a
-  concrete before/after case; `body` gives the decisions, trade-offs and checks. Keep examples
-  grounded in the actual change. A request to explain something in the writeup belongs here.
-
-## Show screenshots in the writeup
-
-A writeup can show images, such as before and after screenshots of a UI change.
-
-- Save each screenshot in the worktree, in a folder git ignores, or in a `docRoots` folder.
-- List it under `media` in the manifest with a `path` and a `source`.
-- Reference it from any writeup section with `![Alt](path)`. The alt text becomes the caption.
-- Put a before and an after image in one paragraph, with alt text "Before" and "After", to show them side by side.
-- Use PNG, JPEG, GIF, WebP or AVIF only. Each file is at most 25 MiB. A review holds at most 50.
-- Only listed paths render. Any other image reference in the writeup is dropped.
-- Remote image URLs do not show. List the file under `media` instead.
-- Images do not render in Markdown docs.
+- `glossary`: the glossary, as the writing reference says.
+- `topics[slug]`: `why` and `example` as the writing reference says; `body` gives the decisions,
+  trade-offs and checks. A request to explain something in the writeup belongs here.
 
 ## Pin a few agent notes
 
