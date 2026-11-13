@@ -2,6 +2,7 @@ import { z } from "@emend/contract/browser";
 import { useSyncExternalStore } from "react";
 
 export const layoutKey = "emend.layout.v1";
+export const tabsDefaultKey = "emend.layout.tabs-default";
 const paneChoice = z.enum(["split", "tabs"]);
 export const layoutSchema = z.object({
   inboxWidth: z.number().min(220).max(520).catch(280),
@@ -38,18 +39,9 @@ function parse(raw: string | null): LayoutPreferences {
     if (value !== null && typeof value === "object" && !Array.isArray(value) && value.reading === "focus") {
       value = { compact: true, ...value };
     }
-    if (needsPaneMigration(raw)) value.pane = { ...value.pane, desktop: "tabs" };
     return layoutSchema.parse(value);
   } catch {
     return layoutSchema.parse({});
-  }
-}
-function needsPaneMigration(raw: string | null): boolean {
-  try {
-    const value = JSON.parse(raw ?? "null");
-    return value !== null && typeof value === "object" && !Array.isArray(value) && !("readingWidth" in value);
-  } catch {
-    return false;
   }
 }
 function read(key: string): string | null | undefined {
@@ -62,6 +54,7 @@ function read(key: string): string | null | undefined {
 
 export function createLayoutStore() {
   let saved = read(layoutKey);
+  const tabsDefault = read(tabsDefaultKey);
   let snapshot =
     saved == null
       ? layoutSchema.parse({
@@ -83,8 +76,19 @@ export function createLayoutStore() {
       // Preferences still work in memory when storage is denied or full.
     }
   };
-  // Older snapshots persisted Split by default; save the move once, outside getSnapshot.
-  if (saved === null || (saved !== undefined && needsPaneMigration(saved))) persist();
+  // A separate marker keeps older tabs that strip unknown layout fields from repeating the move.
+  if (saved != null && tabsDefault === null) {
+    snapshot = { ...snapshot, pane: { ...snapshot.pane, desktop: "tabs" } };
+    persist();
+  }
+  if (saved === null) persist();
+  if (tabsDefault === null) {
+    try {
+      localStorage.setItem(tabsDefaultKey, "1");
+    } catch {
+      // Preferences still work in memory when storage is denied or full.
+    }
+  }
   const getSnapshot = () => {
     const raw = read(layoutKey);
     if (raw !== undefined && raw !== saved) {

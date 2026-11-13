@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { clearDraft, draftKey, editDraftKey, saveDraft } from "../../lib/drafts.ts";
 import { layoutStore } from "../../lib/layout-store.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
+import { DashOutline } from "./DashOutline.tsx";
 import { DocView } from "./DocView.tsx";
 import { Writeup } from "./Writeup.tsx";
 
@@ -269,6 +270,109 @@ test("dash outline expands only on hover or visible keyboard focus and overlays 
   expect(outline).toMatch(
     /\.em-outline-layout \.em-reading-group,\s*\.em-outline-layout \[id\]\s*\{\s*scroll-margin-top: calc\(var\(--reading-sticky-top\) \+ 14px\);/,
   );
+});
+
+test("dash items contain hidden labels and keep at least 24px touch targets when collapsed", () => {
+  const outline = readFileSync(resolve(import.meta.dirname, "../../styles/outline.css"), "utf8");
+  expect(outline).toMatch(/\.em-dash-outline__item\s*\{[^}]*position:\s*relative;/);
+  const touchHeight = outline.match(
+    /@media\s*\(pointer:\s*coarse\)\s*\{\s*\.em-dash-outline__item\s*\{[^}]*min-height:\s*(\d+)px;/,
+  );
+  expect(touchHeight).not.toBeNull();
+  expect(Number(touchHeight?.[1])).toBeGreaterThanOrEqual(24);
+});
+
+test("dash outline measures its pane on mount, resize, hover and focus, and cleans up", () => {
+  let paneHeight = 500.8;
+  let navTop = 150.2;
+  const bounds = vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return this.hasAttribute("data-reading-scroll")
+      ? new DOMRect(0, 100, 800, paneHeight)
+      : new DOMRect(0, navTop, 28, 200);
+  });
+  let resize = () => {};
+  const observe = vi.fn();
+  const disconnect = vi.fn();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(callback: () => void) {
+        resize = callback;
+      }
+      observe = observe;
+      disconnect = disconnect;
+    },
+  );
+  const view = render(
+    <section data-reading-scroll data-testid="pane">
+      <DashOutline label="Outline" items={[{ id: "seed", label: "Seed" }]} onPick={() => {}} />
+    </section>,
+  );
+  const nav = screen.getByRole("navigation", { name: "Outline" });
+  expect(observe).toHaveBeenCalledExactlyOnceWith(screen.getByTestId("pane"));
+  expect(nav.style.maxHeight).toBe("438px");
+  paneHeight = 400;
+  act(() => resize());
+  expect(nav.style.maxHeight).toBe("337px");
+  navTop = 200;
+  fireEvent.pointerEnter(nav);
+  expect(nav.style.maxHeight).toBe("288px");
+  navTop = 480;
+  fireEvent.focusIn(within(nav).getByRole("button", { name: "Seed" }));
+  expect(nav.style.maxHeight).toBe("96px");
+  view.unmount();
+  expect(disconnect).toHaveBeenCalledOnce();
+  bounds.mockClear();
+  fireEvent.pointerEnter(nav);
+  fireEvent.focusIn(nav);
+  expect(bounds).not.toHaveBeenCalled();
+});
+
+test("dash outline measures without ResizeObserver and leaves the CSS fallback when there is no pane", () => {
+  vi.stubGlobal("ResizeObserver", undefined);
+  vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function (this: HTMLElement) {
+    return this.hasAttribute("data-reading-scroll") ? new DOMRect(0, 0, 800, 400) : new DOMRect(0, 100, 28, 200);
+  });
+  const outline = <DashOutline label="Outline" items={[{ id: "seed", label: "Seed" }]} onPick={() => {}} />;
+  const view = render(<section data-reading-scroll>{outline}</section>);
+  expect(screen.getByRole("navigation", { name: "Outline" }).style.maxHeight).toBe("288px");
+  view.unmount();
+  render(outline);
+  expect(screen.getByRole("navigation", { name: "Outline" }).style.maxHeight).toBe("");
+});
+
+test("the current dash scrolls only its outline when it leaves the visible range", () => {
+  const items = [
+    { id: "seed", label: "Seed" },
+    { id: "sprout", label: "Sprout" },
+    { id: "flower", label: "Flower" },
+  ];
+  const ui = (current: string) => (
+    <section data-reading-scroll data-testid="pane">
+      <DashOutline label="Outline" items={items} current={current} onPick={() => {}} />
+    </section>
+  );
+  const view = render(ui("seed"));
+  const nav = screen.getByRole("navigation", { name: "Outline" });
+  const pane = screen.getByTestId("pane");
+  const buttons = within(nav).getAllByRole("button");
+  vi.spyOn(nav, "clientHeight", "get").mockReturnValue(60);
+  for (const [index, button] of buttons.entries()) {
+    vi.spyOn(button, "offsetTop", "get").mockReturnValue(index * 30);
+    vi.spyOn(button, "offsetHeight", "get").mockReturnValue(30);
+  }
+  pane.scrollTop = 240;
+  view.rerender(ui("flower"));
+  expect(nav.scrollTop).toBe(30);
+  expect(buttons[2]?.getAttribute("aria-current")).toBe("location");
+  view.rerender(ui("sprout"));
+  expect(nav.scrollTop).toBe(30);
+  view.rerender(ui("seed"));
+  expect(nav.scrollTop).toBe(0);
+  expect(pane.scrollTop).toBe(240);
+  expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
 });
 
 test("outline has one row per section, topic ranks and placed thread counts", () => {

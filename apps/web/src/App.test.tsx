@@ -3358,6 +3358,69 @@ test.each([1280, 900])("Width menu changes the reading measure at %s px", async 
   }
 });
 
+test.each(["writeup", "Markdown doc", "Markdown pub"])(
+  "reading width reaches the %s content at 1280px",
+  async (surface) => {
+    width = 1280;
+    const block: RenderedBlock = {
+      id: "overview-12345678",
+      section: "overview",
+      kind: "paragraph",
+      text: "A synthetic reading-width paragraph.",
+      html: "<p>A synthetic reading-width paragraph.</p>",
+    };
+    openingRevision(
+      surface === "writeup"
+        ? {
+            writeupEmpty: false,
+            writeup: { sections: [{ key: "overview", label: "Overview", topic: null, blocks: [block] }] },
+          }
+        : {
+            main: surface === "Markdown pub" ? "plan.md" : null,
+            writeup: { sections: [] },
+            docs: [{ path: "plan.md", kind: "markdown", blocks: [block] }],
+          },
+    );
+    const { container } = mount(`/r/${id}${surface === "Markdown doc" ? "?tab=docs&doc=plan.md" : ""}`);
+    const content = await screen.findByText(block.text);
+    const column = content.closest(".em-reading-column");
+    const root = container.querySelector<HTMLElement>(".em-app");
+    expect(column).not.toBeNull();
+    expect(root).not.toBeNull();
+    expect(column?.closest(".em-app")).toBe(root);
+    expect(root?.style.getPropertyValue("--reader-measure")).toBe("1024px");
+    for (const [label, measure] of [
+      ["Wide 1248px", "1248px"],
+      ["Narrow 68ch", "68ch"],
+    ]) {
+      fireEvent.keyDown(screen.getByRole("button", { name: "Reading width" }), { key: "ArrowDown" });
+      const menu = within(await screen.findByRole("menu", { name: "Reading width" }));
+      fireEvent.click(menu.getByRole("menuitemradio", { name: label }));
+      expect(container.querySelector(".em-app")).toBe(root);
+      expect(screen.getByText(block.text).closest(".em-reading-column")?.closest(".em-app")).toBe(root);
+      expect(root?.style.getPropertyValue("--reader-measure")).toBe(measure);
+      await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    }
+  },
+);
+
+test("an HTML doc has no reading column at 1280px", async () => {
+  width = 1280;
+  openingRevision({
+    main: "plan.html",
+    writeup: { sections: [] },
+    docs: [{ path: "plan.html", kind: "html", contentUrl: "/content/key/plan.html" }],
+  });
+  const { container } = mount(`/r/${id}`);
+  await screen.findByRole("heading", { name: "plan.html" });
+  const frame = container.querySelector('iframe[title="plan.html"]');
+  expect(frame).not.toBeNull();
+  const root = container.querySelector<HTMLElement>(".em-app");
+  expect(root?.contains(frame)).toBe(true);
+  expect(root?.style.getPropertyValue("--reader-measure")).toBe("1024px");
+  expect(container.querySelector(".em-reading-column")).toBeNull();
+});
+
 test("phone menus omit reading width", async () => {
   width = 390;
   mount(`/r/${id}`);

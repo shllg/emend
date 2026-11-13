@@ -17,6 +17,7 @@
     scrollbar-width: none;
   }
   .em-dash-outline__item {
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: flex-end;
@@ -102,6 +103,9 @@
     padding-inline-start: 20px;
   }
   @media (pointer: coarse) {
+    .em-dash-outline__item {
+      min-height: 24px;
+    }
     .em-dash-outline:is(:hover, :has(:focus-visible)) .em-dash-outline__item {
       min-height: 44px;
     }

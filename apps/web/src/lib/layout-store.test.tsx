@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { useSyncExternalStore } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { createLayoutStore, defaultLayout, layoutKey } from "./layout-store.ts";
+import { createLayoutStore, defaultLayout, layoutKey, tabsDefaultKey } from "./layout-store.ts";
 
 beforeEach(() => localStorage.clear());
 afterEach(() => {
@@ -77,42 +77,98 @@ test.each([
   expect(createLayoutStore().getSnapshot()).toEqual(saved);
 });
 
-test("the old desktop default moves to Tabs once, preserving tablet and other choices", () => {
-  localStorage.setItem(layoutKey, JSON.stringify({ pane: { desktop: "split", tablet: "split" }, proseSize: 18 }));
+test.each([undefined, "wide"] as const)(
+  "without a marker, desktop moves to Tabs once with readingWidth=%s and keeps other choices",
+  (readingWidth) => {
+    localStorage.setItem(
+      layoutKey,
+      JSON.stringify({ pane: { desktop: "split", tablet: "split" }, proseSize: 18, readingWidth }),
+    );
+    const write = vi.spyOn(localStorage, "setItem");
+    const store = createLayoutStore();
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(write).toHaveBeenCalledWith(tabsDefaultKey, "1");
+    expect(localStorage.getItem(tabsDefaultKey)).toBe("1");
+    expect(store.getSnapshot()).toEqual({
+      ...defaultLayout,
+      pane: { desktop: "tabs", tablet: "split" },
+      readingWidth: readingWidth ?? "comfortable",
+      proseSize: 18,
+    });
+    expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}")).toEqual(store.getSnapshot());
+    write.mockClear();
+    store.getSnapshot();
+    createLayoutStore();
+    expect(write).not.toHaveBeenCalled();
+    store.update({ pane: { desktop: "split", tablet: "split" } });
+    expect(createLayoutStore().getSnapshot().pane.desktop).toBe("split");
+  },
+);
+
+test("the marker preserves a chosen desktop Split even without a stored reading width", () => {
+  localStorage.setItem(tabsDefaultKey, "1");
+  localStorage.setItem(layoutKey, JSON.stringify({ pane: { desktop: "split", tablet: "tabs" } }));
   const write = vi.spyOn(localStorage, "setItem");
+  expect(createLayoutStore().getSnapshot()).toMatchObject({ pane: { desktop: "split" }, readingWidth: "comfortable" });
+  expect(write).not.toHaveBeenCalled();
+});
+
+test("a fresh browser records the Tabs default and a later Split choice survives store creation", () => {
   const store = createLayoutStore();
-  expect(write).toHaveBeenCalledTimes(1);
-  expect(store.getSnapshot()).toMatchObject({
-    pane: { desktop: "tabs", tablet: "split" },
-    readingWidth: "comfortable",
-    proseSize: 18,
-  });
+  expect(store.getSnapshot().pane).toEqual({ desktop: "tabs", tablet: "tabs" });
+  expect(localStorage.getItem(tabsDefaultKey)).toBe("1");
   expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}")).toEqual(store.getSnapshot());
-  write.mockClear();
-  store.getSnapshot();
-  createLayoutStore();
-  expect(write).not.toHaveBeenCalled();
-  store.update({ pane: { desktop: "split", tablet: "split" } });
+  store.update({ pane: { desktop: "split", tablet: "tabs" } });
   expect(createLayoutStore().getSnapshot().pane.desktop).toBe("split");
 });
 
-test("a stored reading width preserves a chosen desktop Split", () => {
-  localStorage.setItem(layoutKey, JSON.stringify({ pane: { desktop: "split", tablet: "tabs" }, readingWidth: "wide" }));
-  const write = vi.spyOn(localStorage, "setItem");
-  expect(createLayoutStore().getSnapshot()).toMatchObject({ pane: { desktop: "split" }, readingWidth: "wide" });
-  expect(write).not.toHaveBeenCalled();
-});
-
-test("choosing Split in a new store survives the next store creation", () => {
-  createLayoutStore().update({ pane: { desktop: "split", tablet: "tabs" } });
-  expect(createLayoutStore().getSnapshot().pane.desktop).toBe("split");
-});
-
-test("snapshot reads migrate old values in memory without writing", () => {
-  const store = createLayoutStore();
+test.each(["snapshot", "storage event"])("an older client's write preserves Split through a %s", (refresh) => {
   localStorage.setItem(layoutKey, JSON.stringify({ pane: { desktop: "split", tablet: "split" } }));
+  const store = createLayoutStore();
+  expect(store.getSnapshot().pane.desktop).toBe("tabs");
+  store.update({ pane: { desktop: "split", tablet: "split" } });
+  const changed = vi.fn();
+  const unsubscribe = store.subscribe(changed);
+  const newValue = JSON.stringify({ pane: { desktop: "split", tablet: "split" }, proseSize: 18 });
+  localStorage.setItem(layoutKey, newValue);
   const write = vi.spyOn(localStorage, "setItem");
-  expect(store.getSnapshot().pane).toEqual({ desktop: "tabs", tablet: "split" });
+  try {
+    if (refresh === "storage event") {
+      window.dispatchEvent(new StorageEvent("storage", { key: layoutKey, newValue, storageArea: localStorage }));
+      expect(changed).toHaveBeenCalledOnce();
+    }
+    expect(store.getSnapshot()).toMatchObject({ pane: { desktop: "split", tablet: "split" }, proseSize: 18 });
+    expect(createLayoutStore().getSnapshot().pane.desktop).toBe("split");
+    expect(write).not.toHaveBeenCalled();
+  } finally {
+    unsubscribe();
+  }
+});
+
+test("denied storage reads neither throw nor record the pane move", () => {
+  const write = vi.fn();
+  vi.stubGlobal("localStorage", {
+    getItem() {
+      throw Error("Denied");
+    },
+    setItem: write,
+  });
+  expect(createLayoutStore().getSnapshot()).toEqual(defaultLayout);
+  expect(write).not.toHaveBeenCalled();
+});
+
+test("an unreadable marker leaves a saved Split alone", () => {
+  localStorage.setItem(layoutKey, JSON.stringify({ pane: { desktop: "split", tablet: "split" } }));
+  const storage = localStorage;
+  const write = vi.fn(storage.setItem.bind(storage));
+  vi.stubGlobal("localStorage", {
+    getItem(key: string) {
+      if (key === tabsDefaultKey) throw Error("Denied");
+      return storage.getItem(key);
+    },
+    setItem: write,
+  });
+  expect(createLayoutStore().getSnapshot().pane).toEqual({ desktop: "split", tablet: "split" });
   expect(write).not.toHaveBeenCalled();
 });
 
@@ -188,7 +244,8 @@ test("migration writes during store creation, never during snapshot reads", () =
   localStorage.setItem("emend.diff.wrap", "true");
   const write = vi.spyOn(localStorage, "setItem");
   const store = createLayoutStore();
-  expect(write).toHaveBeenCalledTimes(1);
+  expect(write).toHaveBeenCalledTimes(2);
+  expect(write).toHaveBeenCalledWith(tabsDefaultKey, "1");
   write.mockClear();
   const initial = store.getSnapshot();
   expect(initial.wrap).toBe(true);
