@@ -316,7 +316,7 @@ test("mark requires one JSON document equal to an unversioned original plus the 
   );
   assert(
     stamp.includes(
-      'if ! jq -n -e --rawfile raw "$RUNNER_TEMP/manifests/${path##*/}" --argjson original "$original" --arg version "$VERSION" \'($original | has("version") | not) and (($raw | fromjson) == ($original + {version: $version}))\'; then',
+      'if ! jq -n -e --rawfile raw "$RUNNER_TEMP/manifests/${path##*/}" --argjson original "$original" --arg version "$VERSION" \'($raw | startswith("{")) and ($original | has("version") | not) and (($raw | fromjson) == ($original + {version: $version}))\'; then',
     ),
   );
   assert.match(stamp, /echo "stamped manifest does not match \$path at \$SHA with version \$VERSION" >&2\s+exit 1/);

@@ -329,7 +329,7 @@ jobs:
               echo "could not read $path at $SHA" >&2
               exit 1
             fi
-            if ! jq -n -e --rawfile raw "$RUNNER_TEMP/manifests/${path##*/}" --argjson original "$original" --arg version "$VERSION" '($original | has("version") | not) and (($raw | fromjson) == ($original + {version: $version}))'; then
+            if ! jq -n -e --rawfile raw "$RUNNER_TEMP/manifests/${path##*/}" --argjson original "$original" --arg version "$VERSION" '($raw | startswith("{")) and ($original | has("version") | not) and (($raw | fromjson) == ($original + {version: $version}))'; then
               echo "stamped manifest does not match $path at $SHA with version $VERSION" >&2
               exit 1
             fi

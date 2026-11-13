@@ -239,7 +239,9 @@ gh api repos/shllg/emend/compare/v<x.y.z>...<stamp-sha> --jq '.files[] | .filena
 The parents must list the tagged commit first. The owner confirms that the comparison lists only
 `plugin/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`, and that each patch adds
 only a `"version": "<x.y.z>",` line. Then use a token with the `workflow` scope and drop the extra
-scope after the update:
+scope after the update. Skip both `gh auth refresh` lines if the token already has the `workflow`
+scope. Run these commands from a terminal where no agent session uses the same `gh` login, because
+that scope lets any `gh` call change workflow files while it is granted.
 
 ```sh
 gh auth refresh -s workflow
