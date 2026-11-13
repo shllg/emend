@@ -147,17 +147,25 @@ export function DiffPane({
     setJump(file);
     return true;
   };
-  useShortcut("file.next", () => moveFile(1));
-  useShortcut("file.previous", () => moveFile(-1));
-  useShortcut("file.toggleViewed", () => {
-    if (document.activeElement?.closest(".em-files-row")) return false;
-    const current = currentFile();
-    if (!current?.visible) return false;
-    const mark = current.header?.querySelector<HTMLButtonElement>(".em-viewed-mark");
-    if (!mark || mark.disabled) return false;
-    mark.click();
-    return true;
-  });
+  const paneVisible = () => {
+    const pane = root.current;
+    return !!pane && !pane.closest("[hidden]");
+  };
+  useShortcut("file.next", () => moveFile(1), { when: paneVisible });
+  useShortcut("file.previous", () => moveFile(-1), { when: paneVisible });
+  useShortcut(
+    "file.toggleViewed",
+    () => {
+      if (document.activeElement?.closest(".em-files-row")) return false;
+      const current = currentFile();
+      if (!current?.visible) return false;
+      const mark = current.header?.querySelector<HTMLButtonElement>(".em-viewed-mark");
+      if (!mark || mark.disabled) return false;
+      mark.click();
+      return true;
+    },
+    { when: paneVisible },
+  );
   const resolved = new Map<FileLocation, FileView | undefined>();
   const fileForTarget = (target: FileLocation) => {
     if (!resolved.has(target)) resolved.set(target, resolveFile(revision.files, target));

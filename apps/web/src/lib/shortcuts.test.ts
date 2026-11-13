@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "vitest";
-import { captureShortcut, ignoreShortcut, keyLabel, matchesShortcut } from "./shortcuts.ts";
+import { captureShortcut, hasOpenOverlay, ignoreShortcut, keyLabel, matchesShortcut } from "./shortcuts.ts";
 
 const key = (value: string, options: KeyboardEventInit = {}) =>
   new KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true, ...options });
@@ -122,11 +122,25 @@ test("ignores defaultPrevented", () => {
 test.each(["dialog", "alertdialog", "menu"])("ignores open %s, but not closed or hidden content", (role) => {
   const content = document.body.appendChild(document.createElement("div"));
   content.setAttribute("role", role);
+  expect(hasOpenOverlay()).toBe(true);
   expect(ignoreShortcut(key("j"))).toBe(true);
   content.setAttribute("data-state", "closed");
+  expect(hasOpenOverlay()).toBe(false);
   expect(ignoreShortcut(key("j"))).toBe(false);
   content.setAttribute("data-state", "open");
   content.hidden = true;
+  expect(hasOpenOverlay()).toBe(false);
+  expect(ignoreShortcut(key("j"))).toBe(false);
+  content.hidden = false;
+  const parent = document.body.appendChild(document.createElement("div"));
+  parent.hidden = true;
+  parent.appendChild(content);
+  expect(hasOpenOverlay()).toBe(false);
+  expect(ignoreShortcut(key("j"))).toBe(false);
+  parent.hidden = false;
+  expect(hasOpenOverlay()).toBe(true);
+  content.remove();
+  expect(hasOpenOverlay()).toBe(false);
   expect(ignoreShortcut(key("j"))).toBe(false);
 });
 

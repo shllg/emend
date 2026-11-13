@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { StrictMode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
+import { reviewQuery } from "./api/queries.ts";
 import { defaultLayout, layoutStore } from "./lib/layout-store.ts";
 import { keyLabel, shortcutGroups, shortcutLabels } from "./lib/shortcuts.ts";
 
@@ -138,9 +139,14 @@ function mount(path = `/r/${ids[0]}`) {
   );
   return history;
 }
-const press = (key: string, options: KeyboardEventInit = {}, target: HTMLElement = document.body) => {
+const keyDown = (key: string, options: KeyboardEventInit = {}, target: HTMLElement = document.body) => {
   const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...options });
   fireEvent(target, event);
+  return event;
+};
+const press = (key: string, options: KeyboardEventInit = {}, target: HTMLElement = document.body) => {
+  const event = keyDown(key, options, target);
+  fireEvent.keyUp(target, { key, ...options });
   return event;
 };
 const ready = () => screen.findByRole("button", { name: "Approve revision 1" });
@@ -230,6 +236,15 @@ test("finds letters with gaps, resets selection on search and shows when no comm
   const status = within(screen.getByRole("dialog", { name: "Command palette" })).getByRole("status");
   expect(status.textContent).toBe("");
   expect(status.closest('[role="listbox"]')).toBeNull();
+  search(input, "tab");
+  expect(selected()).toBe(option("Docs tab"));
+  press("ArrowDown", {}, input);
+  expect(selected()).toBe(option("Files tab"));
+  search(input, "ta");
+  expect(option("Files tab").getAttribute("aria-disabled")).toBe("false");
+  const firstAvailable = screen.getAllByRole("option").find((row) => row.getAttribute("aria-disabled") === "false");
+  expect(selected()).toBe(firstAvailable);
+  expect(selected()).toBe(option("Docs tab"));
   search(input, "nxtfl");
   expect(screen.getAllByRole("option")).toEqual([option("Next file")]);
   expect(selected()).toBe(option("Next file"));
@@ -340,6 +355,105 @@ test.each(["Enter", "click"])("runs Files tab with %s after closing the palette"
   expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
 });
 
+test("held Enter keeps the palette open and runs the command once on release", async () => {
+  mount();
+  const opener = await ready();
+  act(() => opener.focus());
+  const instructions = screen.getByRole("textbox", { name: "Instructions" });
+  const focus = vi.spyOn(instructions, "focus");
+  const input = await openPalette();
+  search(input, "Write the Send instructions");
+  expect(keyDown("Enter", {}, input).defaultPrevented).toBe(true);
+  fireEvent.pointerMove(option("Write the Send instructions"));
+  for (let repeat = 0; repeat < 3; repeat++)
+    expect(keyDown("Enter", { repeat: true }, input).defaultPrevented).toBe(true);
+  expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
+  expect(document.activeElement).toBe(input);
+  expect(focus).not.toHaveBeenCalled();
+  expect(writes()).toHaveLength(0);
+  fireEvent.keyUp(input, { key: "Enter" });
+  await waitFor(() => expect(focus).toHaveBeenCalledTimes(1));
+  expect(document.activeElement).toBe(instructions);
+  expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
+  expect(writes()).toHaveLength(0);
+});
+
+test.each(["ctrlKey", "metaKey", "altKey"])(
+  "Enter with %s neither runs a command nor prevents the key",
+  async (modifier) => {
+    mount();
+    await ready();
+    const input = await openPalette();
+    search(input, "Approve");
+    expect(selected()).toBe(option("Approve"));
+    expect(press("Enter", { [modifier]: true }, input).defaultPrevented).toBe(false);
+    expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
+    expect(document.activeElement).toBe(input);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(writes()).toHaveLength(0);
+  },
+);
+
+test("repeat Enter without an initial keydown never arms a command", async () => {
+  mount();
+  await ready();
+  const input = await openPalette();
+  search(input, "Approve");
+  expect(keyDown("Enter", { repeat: true }, input).defaultPrevented).toBe(true);
+  fireEvent.keyUp(input, { key: "Enter" });
+  expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(writes()).toHaveLength(0);
+});
+
+test.each(["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "typing", "pointer move", "close"])(
+  "%s disarms a held Enter",
+  async (action) => {
+    const history = mount();
+    const opener = await ready();
+    act(() => opener.focus());
+    let input = await openPalette();
+    search(input, "tab");
+    const location = history.location.href;
+    keyDown("Enter", {}, input);
+    if (action === "typing") search(input, "ta");
+    else if (action === "pointer move") {
+      fireEvent.pointerMove(option("Files tab"));
+      fireEvent.pointerMove(option("Docs tab"));
+    } else if (action === "close") {
+      press("Escape", {}, input);
+      await waitFor(() => expect(document.activeElement).toBe(opener));
+      input = await openPalette();
+      search(input, "tab");
+    } else {
+      press(action, {}, input);
+      if (action === "ArrowDown") press("ArrowUp", {}, input);
+      if (action === "ArrowUp") press("ArrowDown", {}, input);
+    }
+    fireEvent.keyUp(input, { key: "Enter" });
+    expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
+    expect(history.location.href).toBe(location);
+    expect(writes()).toHaveLength(0);
+  },
+);
+
+test.each([{ isComposing: true }, { keyCode: 229 }])(
+  "composing Escape (%j) keeps the palette open",
+  async (options) => {
+    mount();
+    await ready();
+    const input = await openPalette();
+    search(input, "tab");
+    const active = selected();
+    expect(press("Escape", options, input).defaultPrevented).toBe(true);
+    expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
+    expect(document.activeElement).toBe(input);
+    expect(selected()).toBe(active);
+    expect(input.getAttribute("aria-activedescendant")).toBe(active?.id);
+    expect(writes()).toHaveLength(0);
+  },
+);
+
 test("runs Files tab with Enter even when its shortcut key is off", async () => {
   settings.keys.commands["tab.files"].value = null;
   mount();
@@ -374,9 +488,11 @@ test.each([
   const opener = await ready();
   act(() => opener.focus());
   const input = await openPalette();
+  const palette = screen.getByRole("dialog", { name: "Command palette" });
   search(input, label);
   press("Enter", {}, input);
   const dialog = await screen.findByRole("alertdialog", { name: title });
+  expect(palette.isConnected).toBe(false);
   expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
   expect(dialog.contains(document.activeElement)).toBe(true);
   expect(writes()).toHaveLength(0);
@@ -385,6 +501,79 @@ test.each([
   await waitFor(() => expect(document.body.style.pointerEvents).not.toBe("none"));
   expect(writes()).toHaveLength(0);
 });
+
+test.each(["Show keyboard shortcuts", "Snooze", "Approve"])(
+  "does not run %s when another dialog opens while Enter is held",
+  async (label) => {
+    mount();
+    const opener = await ready();
+    act(() => opener.focus());
+    const input = await openPalette();
+    search(input, label);
+    expect(selected()).toBe(option(label));
+    keyDown("Enter", {}, input);
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("data-state", "open");
+    document.body.appendChild(dialog);
+    try {
+      fireEvent.keyUp(input, { key: "Enter" });
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull());
+      await waitFor(() => expect(document.activeElement).toBe(opener));
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(dialog.isConnected).toBe(true);
+      expect(writes()).toHaveLength(0);
+    } finally {
+      dialog.remove();
+    }
+  },
+);
+
+test("diff commands are unavailable on the Writeup tab and available on the Diff tab in Tabs layout", async () => {
+  mount();
+  const opener = await ready();
+  await within(screen.getByTestId("diff-pane")).findByRole("button", { name: "Mark a.txt as viewed" });
+  act(() => layoutStore.update({ pane: { ...defaultLayout.pane, desktop: "tabs" } }));
+  act(() => opener.focus());
+  expect(screen.getByRole("tab", { name: /Writeup/ }).getAttribute("aria-selected")).toBe("true");
+  expect(screen.getByTestId("diff-pane").hidden).toBe(true);
+  const input = await openPalette();
+  const labels = ["Next file", "Previous file", "Mark the current file viewed"];
+  for (const label of labels) expect(option(label).getAttribute("aria-disabled")).toBe("true");
+  press("Escape", {}, input);
+  await waitFor(() => expect(document.activeElement).toBe(opener));
+  press("5");
+  await waitFor(() => expect(screen.getByRole("tab", { name: /Diff/ }).getAttribute("aria-selected")).toBe("true"));
+  await within(screen.getByTestId("diff-pane")).findByRole("button", { name: "Mark a.txt as viewed" });
+  expect(screen.getByTestId("diff-pane").hidden).toBe(false);
+  await openPalette();
+  for (const label of labels) expect(option(label).getAttribute("aria-disabled")).toBe("false");
+});
+
+test.each([false, true])(
+  "unsent comments disable the selected Approve without selecting another row (armed: %s)",
+  async (armed) => {
+    mount();
+    await ready();
+    const input = await openPalette();
+    fireEvent.pointerMove(option("Approve"));
+    expect(selected()).toBe(option("Approve"));
+    if (armed) keyDown("Enter", {}, input);
+    act(() => client.setQueryData(reviewQuery(ids[0]).queryKey, (old) => old && { ...old, unsentCount: 1 }));
+    await waitFor(() => expect(option("Approve").getAttribute("aria-disabled")).toBe("true"));
+    expect(option("Show keyboard shortcuts").getAttribute("aria-disabled")).toBe("false");
+    expect(selected()).toBeNull();
+    expect(input.hasAttribute("aria-activedescendant")).toBe(false);
+    if (armed) fireEvent.keyUp(input, { key: "Enter" });
+    else press("Enter", {}, input);
+    expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(writes()).toHaveLength(0);
+    act(() => client.setQueryData(reviewQuery(ids[0]).queryKey, (old) => old && { ...old, unsentCount: 0 }));
+    await waitFor(() => expect(option("Approve").getAttribute("aria-disabled")).toBe("false"));
+    expect(selected()).toBe(option("Approve"));
+  },
+);
 
 test("lists Approve and Snooze as unavailable on a retired review and keeps the palette open on Enter", async () => {
   inbox[0] = { ...(inbox[0] as InboxItem), state: "settled" };

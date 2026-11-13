@@ -82,6 +82,10 @@ export function ignoreShortcut(event: KeyboardEvent) {
     )
       return true;
   }
+  return hasOpenOverlay();
+}
+
+export function hasOpenOverlay() {
   // Radix unmounts closed content; during exit animations it carries data-state="closed".
   return [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [role="menu"]')].some(
     (content) => content.getAttribute("data-state") !== "closed" && !content.closest("[hidden]"),

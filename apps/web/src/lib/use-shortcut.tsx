@@ -1,7 +1,16 @@
 import { type KeyBinding, type SettingsView, SHORTCUT_DEFAULTS, type ShortcutCommand } from "@emend/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
-import { createContext, type ReactNode, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { settingsQuery } from "../api/queries.ts";
 import { Button } from "../components/ui/Button.tsx";
 import { Dialog } from "../components/ui/Dialog.tsx";
@@ -17,19 +26,50 @@ import {
 } from "./shortcuts.ts";
 
 type Handler = () => boolean;
-type Registration = { command: ShortcutCommand; priority: number; handle: Handler };
-const Shortcuts = createContext<Set<Registration> | null>(null);
+type Registration = { command: ShortcutCommand; priority: number; handle: Handler; when: () => boolean };
+
+function createRegistry() {
+  const entries = new Set<Registration>();
+  const listeners = new Set<() => void>();
+  let version = 0;
+  const notify = () => {
+    version++;
+    for (const listener of listeners) listener();
+  };
+  return {
+    entries,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    getSnapshot: () => version,
+    register: (entry: Registration) => {
+      entries.add(entry);
+      notify();
+      return () => {
+        entries.delete(entry);
+        notify();
+      };
+    },
+  };
+}
+
+const emptyRegistry = createRegistry();
+const Shortcuts = createContext<ReturnType<typeof createRegistry> | null>(null);
 
 function orderedHandlers(registry: Set<Registration>) {
   return [...registry].reverse().sort((a, b) => b.priority - a.priority);
 }
 
 export function useShortcutRunner() {
-  const registry = useContext(Shortcuts);
+  const registry = useContext(Shortcuts) ?? emptyRegistry;
+  useSyncExternalStore(registry.subscribe, registry.getSnapshot);
   return {
-    commands: () => new Set(registry ? [...registry].map((entry) => entry.command) : []),
+    available: () => new Set([...registry.entries].filter((entry) => entry.when()).map((entry) => entry.command)),
     run: (command: ShortcutCommand) =>
-      registry ? orderedHandlers(registry).some((entry) => entry.command === command && entry.handle()) : false,
+      orderedHandlers(registry.entries).some((entry) => entry.command === command && entry.when() && entry.handle()),
   };
 }
 
@@ -43,19 +83,24 @@ export function useShortcutKeys(): Record<ShortcutCommand, KeyBinding> {
   ) as Record<ShortcutCommand, KeyBinding>;
 }
 
-export function useShortcut(command: ShortcutCommand, handler: Handler, { enabled = true, priority = 0 } = {}) {
+export function useShortcut(
+  command: ShortcutCommand,
+  handler: Handler,
+  { enabled = true, priority = 0, when }: { enabled?: boolean; priority?: number; when?: () => boolean } = {},
+) {
   const registry = useContext(Shortcuts);
-  const latest = useRef(handler);
+  const latest = useRef({ handler, when });
   useLayoutEffect(() => {
-    latest.current = handler;
+    latest.current = { handler, when };
   });
   useEffect(() => {
     if (!registry || !enabled) return;
-    const entry = { command, priority, handle: () => latest.current() };
-    registry.add(entry);
-    return () => {
-      registry.delete(entry);
-    };
+    return registry.register({
+      command,
+      priority,
+      handle: () => latest.current.handler(),
+      when: () => latest.current.when?.() ?? true,
+    });
   }, [registry, command, enabled, priority]);
 }
 
@@ -112,7 +157,7 @@ function GlobalShortcuts({ keys }: { keys: Record<ShortcutCommand, KeyBinding> }
 
 /** The app's only global shortcut listener. Components only register local actions. */
 export function ShortcutProvider({ children }: { children: ReactNode }) {
-  const [registry] = useState(() => new Set<Registration>());
+  const [registry] = useState(createRegistry);
   const client = useQueryClient();
   const layout = useLayout();
   const keys = useShortcutKeys();
@@ -125,10 +170,10 @@ export function ShortcutProvider({ children }: { children: ReactNode }) {
       if (current.current === "phone" || ignoreShortcut(event)) return;
       // Cache writes take effect even before React Query's batched render notification.
       const settings = client.getQueryData<SettingsView>(["settings"]);
-      const handlers = orderedHandlers(registry);
+      const handlers = orderedHandlers(registry.entries);
       for (const entry of handlers) {
         const key = settings ? settings.keys.commands[entry.command].value : SHORTCUT_DEFAULTS[entry.command];
-        if (matchesShortcut(event, key) && entry.handle()) {
+        if (matchesShortcut(event, key) && entry.when() && entry.handle()) {
           event.preventDefault();
           break;
         }

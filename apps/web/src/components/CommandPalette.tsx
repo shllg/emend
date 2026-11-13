@@ -2,7 +2,7 @@ import type { ShortcutCommand } from "@emend/contract";
 import * as Primitive from "@radix-ui/react-dialog";
 import { useEffect, useId, useRef, useState } from "react";
 import { fuzzyMatch } from "../lib/fuzzy-match.ts";
-import { keyLabel, shortcutGroups, shortcutLabels } from "../lib/shortcuts.ts";
+import { hasOpenOverlay, keyLabel, shortcutGroups, shortcutLabels } from "../lib/shortcuts.ts";
 import { useShortcut, useShortcutKeys, useShortcutRunner } from "../lib/use-shortcut.tsx";
 import { Kbd } from "./ui/Kbd.tsx";
 import { isToastInteraction, overlayClass } from "./ui/overlay.ts";
@@ -27,28 +27,38 @@ function matchingGroups(query: string) {
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [available, setAvailable] = useState<Set<ShortcutCommand>>(() => new Set());
   const [selected, setSelected] = useState<ShortcutCommand | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const listbox = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const pending = useRef<ShortcutCommand | null>(null);
+  const armed = useRef<ShortcutCommand | null>(null);
   const id = useId();
   const listId = `${id}-commands`;
   const rowId = (command: ShortcutCommand) => `${id}-${command}`;
   const keys = useShortcutKeys();
   const runner = useShortcutRunner();
+  const available = runner.available();
   const groups = matchingGroups(query);
   const selectable: ShortcutCommand[] = groups
     .flatMap((group) => group.rows.map((row) => row.command))
     .filter((command) => available.has(command));
-  const active = selected !== null && selectable.includes(selected) ? selected : selectable[0];
+  const active = selected !== null && selectable.includes(selected) ? selected : null;
   const activeId = active ? rowId(active) : undefined;
 
+  function firstAvailable(value: string) {
+    const commands = runner.available();
+    return (
+      matchingGroups(value)
+        .flatMap((group) => group.rows.map((row) => row.command))
+        .find((command) => commands.has(command)) ?? null
+    );
+  }
+
   useShortcut("palette.open", () => {
-    setAvailable(runner.commands());
+    armed.current = null;
     setQuery("");
-    setSelected(null);
+    setSelected(firstAvailable(""));
     setOpen(true);
     return true;
   });
@@ -58,18 +68,26 @@ export function CommandPalette() {
       listbox.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest" });
   }, [open, activeId]);
 
+  function changeOpen(value: boolean) {
+    armed.current = null;
+    setOpen(value);
+  }
+
   function choose(command: ShortcutCommand) {
-    if (!available.has(command)) return;
+    if (!runner.available().has(command)) return;
     pending.current = command;
-    setOpen(false);
+    changeOpen(false);
   }
 
   return (
-    <Primitive.Root open={open} onOpenChange={setOpen}>
+    <Primitive.Root open={open} onOpenChange={changeOpen}>
       <Primitive.Portal>
         <Primitive.Overlay className={overlayClass} />
         <Primitive.Content
           aria-describedby={undefined}
+          onEscapeKeyDown={(event) => {
+            if (event.isComposing || event.keyCode === 229) event.preventDefault();
+          }}
           onInteractOutside={(event) => {
             if (isToastInteraction(event)) event.preventDefault();
           }}
@@ -84,7 +102,7 @@ export function CommandPalette() {
             // Focus-dependent handlers need the opener back; dialogs must start after this modal layer unmounts.
             const command = pending.current;
             pending.current = null;
-            if (command) runner.run(command);
+            if (command && !hasOpenOverlay()) runner.run(command);
           }}
           className="fixed top-[12vh] left-1/2 z-[calc(var(--z-sheet)+1)] flex max-h-[70dvh] w-[min(560px,92%)] -translate-x-1/2 animate-[em-fade_var(--dur-2)_var(--ease-out)] flex-col overflow-hidden rounded-xl border border-line-1 bg-surface shadow-3"
         >
@@ -104,11 +122,13 @@ export function CommandPalette() {
               spellCheck={false}
               value={query}
               onChange={(event) => {
+                armed.current = null;
                 setQuery(event.target.value);
-                setSelected(null);
+                setSelected(firstAvailable(event.target.value));
               }}
               onKeyDown={(event) => {
                 if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+                if (event.key !== "Enter") armed.current = null;
                 if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                   event.preventDefault();
                   const index = active ? selectable.indexOf(active) : -1;
@@ -116,9 +136,22 @@ export function CommandPalette() {
                     selectable[(index + (event.key === "ArrowDown" ? 1 : -1) + selectable.length) % selectable.length];
                   if (next) setSelected(next);
                 } else if (event.key === "Enter") {
+                  if (event.ctrlKey || event.metaKey || event.altKey) {
+                    armed.current = null;
+                    return;
+                  }
                   event.preventDefault();
-                  if (active) choose(active);
+                  if (!event.repeat) armed.current = active;
                 }
+              }}
+              onKeyUp={(event) => {
+                if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+                if (event.key !== "Enter") return;
+                const command = armed.current;
+                armed.current = null;
+                if (event.ctrlKey || event.metaKey || event.altKey) return;
+                event.preventDefault();
+                if (command && command === active) choose(command);
               }}
               className="min-w-0 flex-1 border-0 bg-transparent font-sans text-14 text-fg-1 outline-none placeholder:text-fg-3"
             />
@@ -150,7 +183,10 @@ export function CommandPalette() {
                     aria-selected={command === active}
                     aria-disabled={!available.has(command)}
                     onPointerMove={() => {
-                      if (available.has(command)) setSelected(command);
+                      if (available.has(command) && command !== selected) {
+                        armed.current = null;
+                        setSelected(command);
+                      }
                     }}
                     onPointerDown={(event) => event.preventDefault()}
                     onClick={() => choose(command)}
