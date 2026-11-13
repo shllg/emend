@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { AgentReviewList } from "@emend/contract";
 import { eq } from "drizzle-orm";
 import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
-import { reviews } from "../../db/schema.ts";
+import { reviews, revisions } from "../../db/schema.ts";
 import { run } from "../../main.ts";
 import * as executors from "../../server/publish/executor.ts";
 import { writeSecretFile } from "../../state/files.ts";
@@ -29,7 +29,10 @@ const reviewId = randomUUID();
 const item = {
   id: reviewId,
   title: "Synthetic review",
+  branch: null,
   state: "open",
+  newest: null,
+  approved: null,
   updatedAt: "2026-01-01T00:10:00.000Z",
   url: `http://127.0.0.1:3636/r/${reviewId}`,
 };
@@ -139,7 +142,7 @@ test.each([401, 500])("ls against a local server answering %s exits 1 with one s
 test("ls rejects arguments and an invalid server answer", async () => {
   const f = await commandFixture();
   expect(await run(["ls", "--bogus"], f.io)).toBe(2);
-  expect(f.stderr.join("")).toContain("Usage: emend ls [--json]");
+  expect(f.stderr.join("")).toContain("Usage: emend ls [--json] [--head <sha>]");
   f.setResponse(async () => Response.json({ items: [{ id: "x" }] }));
   expect(await run(["ls"], f.io)).toBe(1);
   expect(f.stderr.join("")).toContain("invalid response");
@@ -167,6 +170,71 @@ test("ls without a server reads the state folder directly, newest first", async 
   const lines = human.stdout.join("").split("\n");
   expect(lines[0]).toContain(`${first.result.reviewId}\topen\t`);
   expect(lines[1]).toContain(`${second.result.reviewId}\topen\t`);
+});
+
+const sha = "ab".repeat(20);
+test("ls --json --head sends the head as a query, in either order", async () => {
+  for (const args of [
+    ["ls", "--json", "--head", sha],
+    ["ls", "--head", sha, "--json"],
+  ]) {
+    const f = await commandFixture();
+    f.setResponse(async (url) => {
+      expect(String(url)).toBe(`http://127.0.0.1:3636/api/v1/agent/reviews?head=${sha}`);
+      return Response.json({
+        items: [{ ...item, branch: "feature", newest: { revision: 2, head: sha }, approved: null }],
+      });
+    });
+    expect(await run(args, f.io)).toBe(0);
+    expect(AgentReviewList.parse(JSON.parse(f.stdout.join(""))).items[0]).toMatchObject({
+      newest: { revision: 2, head: sha },
+      approved: null,
+    });
+  }
+});
+
+test.each([
+  ["--head"],
+  ["--head", "abc"],
+  ["--head", "worktree"],
+  ["--head", sha.toUpperCase()],
+  ["--head", sha, "--head", sha],
+  ["--json", "--json"],
+  ["--bogus"],
+])("ls %s is a usage error", async (...args) => {
+  const f = await commandFixture();
+  f.setResponse(async () => Response.json({ items: [] }));
+  expect(await run(["ls", ...args], f.io)).toBe(2);
+  expect(f.stderr.join("")).toContain("Usage: emend ls [--json] [--head <sha>]");
+  expect(f.stdout).toEqual([]);
+});
+
+test("ls --head without a server filters the state folder directly", async () => {
+  const f = await directFixture();
+  const first = await f.publish("first");
+  const second = await f.publish("second");
+  const state = await f.reviewer();
+  await state.db.query((q) =>
+    q.update(revisions).set({ head: sha }).where(eq(revisions.reviewId, first.result.reviewId)),
+  );
+  await state.db.query((q) =>
+    q
+      .update(revisions)
+      .set({ head: "cd".repeat(20) })
+      .where(eq(revisions.reviewId, second.result.reviewId)),
+  );
+  const out = f.output();
+  expect(await run(["ls", "--json", "--head", sha], out.io)).toBe(0);
+  const list = AgentReviewList.parse(JSON.parse(out.stdout.join("")));
+  expect(list.items).toHaveLength(1);
+  expect(list.items[0]).toMatchObject({
+    id: first.result.reviewId,
+    newest: { revision: 1, head: sha },
+    approved: null,
+  });
+  const human = f.output();
+  expect(await run(["ls", "--head", sha], human.io)).toBe(0);
+  expect(human.stdout.join("").split("\n").filter(Boolean)).toHaveLength(1);
 });
 
 test("status without a server reports local, not answering, and no address", async () => {

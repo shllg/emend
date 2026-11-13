@@ -10,6 +10,11 @@ import { ApprovedActiveHours } from "./settings.ts";
 import { BlockId, Target } from "./target.ts";
 import { CommentBody, Outcome, ThreadState } from "./thread.ts";
 
+/** A full commit object id: 40 (SHA-1) or 64 (SHA-256) lowercase hex characters. */
+const commit = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
+/** What a revision was published against: a commit, `worktree` (uncommitted state) or nothing. */
+const revisionHead = z.union([commit, z.literal("worktree")]).nullable();
+
 export const PublishResponse = z.object({
   reviewId: z.uuid(),
   revision: z.int().positive(),
@@ -56,17 +61,30 @@ export const InboxList = z.object({
   serverTime: z.iso.datetime(),
 });
 export type InboxList = z.infer<typeof InboxList>;
-/** One row of the agent's own list: no comments, writeup, docs or other owners' ids. */
+/** A revision's number and the head it was published against. */
+export const AgentReviewRevision = z.object({ revision: z.int().positive(), head: revisionHead });
+export type AgentReviewRevision = z.infer<typeof AgentReviewRevision>;
+/**
+ * One row of the agent's own list: no comments, writeup, docs or other owners' ids.
+ * `newest` is the review's newest revision, or null for a review without any revision.
+ * `approved` is null while no revision is approved, else the approved revision.
+ */
 export const AgentReviewItem = z.object({
   id: z.uuid(),
   title: PublishRequest.shape.title,
+  branch: PublishRequest.shape.branch,
   state: ReviewState,
+  newest: AgentReviewRevision.nullable(),
+  approved: AgentReviewRevision.nullable(),
   updatedAt: z.iso.datetime(),
   url: z.url({ protocol: /^https?$/ }).max(LIMITS.pathChars),
 });
 export type AgentReviewItem = z.infer<typeof AgentReviewItem>;
 export const AgentReviewList = z.object({ items: z.array(AgentReviewItem).max(LIMITS.agentReviews) });
 export type AgentReviewList = z.infer<typeof AgentReviewList>;
+/** Query of `GET /api/v1/agent/reviews`: a full commit object id, no prefix and no `worktree`. */
+export const AgentReviewQuery = z.object({ head: commit.optional() });
+export type AgentReviewQuery = z.infer<typeof AgentReviewQuery>;
 export const ReviewView = InboxItem.extend({
   importedAt: z.iso.datetime().nullable().default(null),
   revisions: z.array(z.object({ seq: z.int().positive(), createdAt: z.iso.datetime() })),
@@ -184,12 +202,11 @@ const contentUrl = z.string().refine((url) => {
     return false;
   }
 }, "expected a percent-encoded content path");
-const commit = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 export const RevisionView = z
   .object({
     seq: z.int().positive(),
     base: commit.nullable(),
-    head: z.union([commit, z.literal("worktree")]).nullable(),
+    head: revisionHead,
     main: z.union([z.literal("writeup"), FilePath]).nullable(),
     writeupEmpty: z.boolean(),
     topics: z.array(TopicMeta).max(LIMITS.topicsPerReview + 1),

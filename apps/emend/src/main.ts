@@ -33,7 +33,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   emend wait <review> [--timeout <seconds>] [--save <folder>]
   emend feedback <review> [--save <folder>]
   emend reply <comment> --status <outcome> (--body <text> | --body-file <path | ->)
-  emend ls [--json]
+  emend ls [--json] [--head <sha>]
   emend status [--json]
   emend mcp
   emend service install [serve options] | uninstall | status

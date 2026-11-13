@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import {
+  type AgentReviewQuery,
   LIMITS,
   MAX_TAKE_WAIT_SECONDS,
   PublishRequest,
@@ -109,9 +110,9 @@ export function replyDirect(stateDir: string, commentId: string, input: ReplyReq
   });
 }
 
-export function listDirect(stateDir: string) {
+export function listDirect(stateDir: string, query: AgentReviewQuery = {}) {
   return withState(stateDir, async (state, principal) =>
-    listAgentReviews(state.db, principal, await savedBaseUrl(stateDir)),
+    listAgentReviews(state.db, principal, await savedBaseUrl(stateDir), query),
   );
 }
 
