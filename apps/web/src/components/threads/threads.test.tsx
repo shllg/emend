@@ -1,6 +1,13 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { LIMITS, type Target, type ThreadView, type UnplacedReason } from "@emend/contract";
+import {
+  LIMITS,
+  OTHER_TOPIC,
+  type RevisionView,
+  type Target,
+  type ThreadView,
+  type UnplacedReason,
+} from "@emend/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -9,6 +16,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { claimDraft } from "../../lib/composer-owner.ts";
 import { plural } from "../../lib/count.ts";
 import { draftKey, editDraftKey, hasDraft, loadDraft, saveDraft } from "../../lib/drafts.ts";
+import { createLayoutStore, layoutKey } from "../../lib/layout-store.ts";
 import { cancelThreadActionFocus, useThreadActionFocus } from "../../lib/thread-action-focus.ts";
 import { OutcomeBadge } from "../status/OutcomeBadge.tsx";
 import { shownThreadState, ThreadStateBadge } from "../status/ThreadStateBadge.tsx";
@@ -384,6 +392,8 @@ test("resolved cards expose only Reopen and the Comments copy starts collapsed",
     />,
   );
   expect(screen.queryByText("A synthetic comment")).toBeNull();
+  expect(screen.getByText("Seed").closest(".em-thread-quote")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Reopen" })).toBeNull();
   expect(screen.getByRole("button", { name: "Expand thread" }).getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(screen.getByRole("button", { name: "Expand thread" }));
   expect(screen.getByText("A synthetic comment")).toBeTruthy();
@@ -415,7 +425,7 @@ test.each(reasons)("unplaced %s explains its reason and links only across revisi
   expect(screen.getByText(sentence)).toBeTruthy();
   expect(screen.queryByRole("link")).toBeNull();
 });
-test("Comments groups follow shown state, place unplaced first over state, hide empties and count drafts", () => {
+test("Comments groups follow place order, retain state badges, hide empties and keep drafts first", () => {
   const threads: ThreadView[] = (["resolved", "open", "answered", "sent"] as const).map((state, index) => ({
     ...base,
     id: `thread-${index}`,
@@ -423,28 +433,307 @@ test("Comments groups follow shown state, place unplaced first over state, hide 
   }));
   threads.push({ ...base, id: "unsent", comments: base.comments.map((comment) => ({ ...comment, sent: false })) });
   threads.push({ ...base, id: "unplaced", state: "resolved", placement: { status: "unplaced", reason: "block-gone" } });
+  threads.push({ ...base, id: "review", placement: { status: "placed", location: { kind: "review" } } });
+  threads.push({
+    ...base,
+    id: "topic",
+    placement: { status: "placed", location: { kind: "topic", slug: "garden", part: "title", start: 0, end: 4 } },
+  });
+  threads.push({
+    ...base,
+    id: "doc",
+    placement: {
+      status: "placed",
+      location: { kind: "doc-span", path: "garden.md", blockId: "doc-11111111-11111111", start: 0, end: 4 },
+    },
+  });
+  threads.push({ ...base, id: "file", placement: { status: "placed", location: { kind: "file", path: "garden.ts" } } });
+  const writeup: RevisionView["writeup"] = {
+    sections: [
+      { key: "overview", topic: null, label: "Overview", blocks: [] },
+      { key: "t-garden-body", topic: "garden", label: "Garden", blocks: [] },
+    ],
+  };
   saveDraft(draftKey(id, { kind: "review" }), "Review draft");
   const view = mount(
-    <ThreadList reviewId={id} revision={2} threads={threads} changedBlocks={[]} onResume={() => {}} />,
+    <ThreadList
+      reviewId={id}
+      revision={2}
+      threads={threads}
+      changedBlocks={[]}
+      writeup={writeup}
+      topics={[{ slug: "garden", title: "Garden", importance: 1, summary: "" }]}
+      search={{ rev: 2, tab: "comments" }}
+      onResume={() => {}}
+    />,
   );
   expect(screen.getAllByRole("heading", { level: 2 }).map((node) => node.textContent)).toEqual([
     "Unsaved comments1",
-    "Unsent1",
-    "Sent1",
-    "Answered1",
-    "Open1",
+    "Whole review1",
+    "Writeup · Overview5",
+    "Topic 01 · Garden1",
+    "garden.md1",
+    "garden.ts1",
     "Unplaced1",
-    "Resolved1",
   ]);
+  const overview = within(screen.getByRole("region", { name: "Writeup · Overview" }));
+  for (const state of ["Resolved", "Open", "Answered", "Sent", "Unsent"])
+    expect(overview.getByText(state)).toBeTruthy();
+  expect(
+    within(screen.getByRole("region", { name: "Topic 01 · Garden" }))
+      .getByRole("link", { name: "Show in place" })
+      .getAttribute("href"),
+  ).toBe(`/r/${id}?rev=2&tab=writeup#thread-topic`);
   view.unmount();
   localStorage.clear();
   window.dispatchEvent(new StorageEvent("storage", { key: null }));
   mount(<ThreadList reviewId={id} revision={2} threads={[]} changedBlocks={[]} onResume={() => {}} />);
   expect(screen.queryByRole("heading")).toBeNull();
+  expect(screen.queryByRole("checkbox", { name: "Hide resolved" })).toBeNull();
   expect(screen.getByText("No comments yet.")).toBeTruthy();
   expect(screen.queryByText("Select text to comment.")).toBeNull();
   expect(screen.getByText("Select text in the writeup or a doc, or click a line in the diff.")).toBeTruthy();
 });
+test("Hide resolved persists and keeps unsent and directly linked resolved threads visible", () => {
+  const threads: ThreadView[] = [
+    { ...base, id: "hidden", state: "resolved" },
+    { ...base, id: "hidden-unplaced", state: "resolved", placement: { status: "unplaced", reason: "block-gone" } },
+    { ...base, id: "linked", state: "resolved" },
+    {
+      ...base,
+      id: "unsent",
+      state: "resolved",
+      comments: base.comments.map((comment) => ({ ...comment, sent: false, sentOn: null })),
+    },
+    { ...base, id: "open" },
+  ];
+  const list = (
+    <ThreadList
+      reviewId={id}
+      revision={2}
+      threads={threads}
+      changedBlocks={[]}
+      search={{ thread: "linked" }}
+      onResume={() => {}}
+    />
+  );
+  const view = mount(list);
+  expect(screen.getAllByRole("article")).toHaveLength(5);
+  expect(screen.queryByText(/hidden$/)).toBeNull();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Hide resolved" }));
+  expect(screen.getAllByRole("article").map((card) => card.id)).toEqual([
+    "thread-linked",
+    "thread-unsent",
+    "thread-open",
+  ]);
+  expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Writeup · Overview3");
+  expect(screen.queryByRole("region", { name: "Unplaced" })).toBeNull();
+  expect(screen.getByText("2 hidden")).toBeTruthy();
+  expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}").hideResolved).toBe(true);
+  expect(createLayoutStore().getSnapshot().hideResolved).toBe(true);
+  view.unmount();
+  mount(list);
+  expect(screen.getByRole<HTMLInputElement>("checkbox", { name: "Hide resolved" }).checked).toBe(true);
+  expect(screen.getAllByRole("article")).toHaveLength(3);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Hide resolved" }));
+  expect(screen.getAllByRole("article")).toHaveLength(5);
+  expect(screen.queryByText("2 hidden")).toBeNull();
+});
+test("hiding every thread keeps the toolbar and distinguishes resolved threads from an empty review", () => {
+  mount(
+    <ThreadList
+      reviewId={id}
+      revision={2}
+      threads={[{ ...base, state: "resolved" }]}
+      changedBlocks={[]}
+      onResume={() => {}}
+    />,
+  );
+  fireEvent.click(screen.getByRole("checkbox", { name: "Hide resolved" }));
+  expect(screen.getByText("Every thread is resolved.")).toBeTruthy();
+  expect(screen.getByText("1 hidden")).toBeTruthy();
+  expect(screen.queryByText("No comments yet.")).toBeNull();
+  expect(screen.queryByRole("heading")).toBeNull();
+  expect(screen.queryByRole("article")).toBeNull();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Hide resolved" }));
+  expect(screen.queryByText("Every thread is resolved.")).toBeNull();
+  expect(screen.getByRole("article")).toBeTruthy();
+});
+
+test.each(["lines", "source-lines"] as const)(
+  "%s code quotes show three lines only on the Comments surface, including collapsed cards",
+  (kind) => {
+    const target: Target = {
+      kind,
+      side: "new",
+      path: "garden.ts",
+      start: 1,
+      end: 5,
+      lines: ["one", "  two", "three", "four", "five"],
+      before: [],
+      after: [],
+    };
+    const thread = { ...base, target };
+    const { container } = mount(
+      <>
+        <ThreadCard reviewId={id} revision={2} thread={thread} changedBlocks={[]} surface="comments" />
+        <ThreadCard reviewId={id} revision={2} thread={thread} changedBlocks={[]} surface="reading" />
+        <ThreadCard reviewId={id} revision={2} thread={thread} changedBlocks={[]} surface="diff" />
+        <ThreadCard
+          reviewId={id}
+          revision={2}
+          thread={{ ...thread, id: "resolved-code", state: "resolved" }}
+          changedBlocks={[]}
+          surface="comments"
+        />
+      </>,
+    );
+    const quotes = container.querySelectorAll("pre.em-thread-quote--code");
+    expect(quotes).toHaveLength(2);
+    for (const quote of quotes) expect(quote.textContent).toBe("one\n  two\nthree\n… 2 more lines");
+    const collapsed = container.querySelector("[data-collapsed]");
+    expect(collapsed?.querySelector(".em-thread-quote")).toBeTruthy();
+    expect(collapsed?.querySelector(".em-thread__comments, .em-card__foot")).toBeNull();
+    expect(container.querySelectorAll("[data-thread-card]:not([data-collapsed]) .em-thread-quote")).toHaveLength(1);
+  },
+);
+test.each(
+  [
+    ["<script>evil()</script>", '<img src=x onerror="evil()">', '<a href="javascript:evil()">link</a>'],
+    ["<b>raw HTML</b>", '<svg onload="evil()"></svg>', 'graph TD; A-->B; click A "javascript:evil()"'],
+  ].flatMap((lines) => (["lines", "source-lines"] as const).map((kind) => ({ kind, lines }))),
+)("hostile $kind quotes render only React text: $lines", ({ kind, lines }) => {
+  const target: Target = { kind, side: "new", path: "garden.ts", start: 1, end: 3, lines, before: [], after: [] };
+  const { container } = mount(
+    <ThreadCard reviewId={id} revision={2} thread={{ ...base, target }} changedBlocks={[]} surface="comments" />,
+  );
+  expect(container.querySelector("pre")?.textContent).toBe(lines.join("\n"));
+  const quote = container.querySelector("pre");
+  expect(quote?.querySelector("*")).toBeNull();
+  expect(container.querySelector('script, img, [onerror], [onload], [href^="javascript:"]')).toBeNull();
+});
+
+test.each([false, true])(
+  "topic jumps use written cards and preserve the existing links for unwritten topics (phone=%s)",
+  (phone) => {
+    const written = new Set(["garden"]);
+    const search = { rev: 2, tab: "comments" as const };
+    for (const part of ["title", "summary", undefined] as const) {
+      for (const slug of ["garden", "soil", OTHER_TOPIC.slug, "missing"]) {
+        const thread: ThreadView = {
+          ...base,
+          placement: {
+            status: "placed",
+            location: { kind: "topic", slug, ...(part ? { part, start: 0, end: 4 } : {}) },
+          },
+        };
+        const href = threadPlaceLink(id, thread, search, phone, written);
+        if (slug === "garden") expect(href).toBe(`/r/${id}?rev=2&tab=writeup#thread-${id}`);
+        else expect(href).toBe(`/r/${id}?rev=2&tab=${phone ? "diff" : "comments"}#diff-thread-${id}`);
+        expect(threadPlaceLink(id, thread, search, phone)).toBe(
+          `/r/${id}?rev=2&tab=${phone ? "diff" : "comments"}#diff-thread-${id}`,
+        );
+      }
+    }
+  },
+);
+test.each([false, true].flatMap((phone) => (["title", undefined] as const).map((part) => ({ phone, part }))))(
+  "only ranked written topics link to writeup cards (phone=$phone, part=$part)",
+  ({ phone, part }) => {
+    const slugs = [OTHER_TOPIC.slug, "missing", "garden"];
+    const threads: ThreadView[] = slugs.map((slug) => ({
+      ...base,
+      id: slug,
+      target: { kind: "topic", slug, ...(part ? { part, quote: "Seed", prefix: "", suffix: "" } : {}) },
+      placement: { status: "placed", location: { kind: "topic", slug, ...(part ? { part, start: 0, end: 4 } : {}) } },
+    }));
+    const { container } = mount(
+      <ThreadList
+        reviewId={id}
+        revision={2}
+        threads={threads}
+        changedBlocks={[]}
+        topics={[
+          { ...OTHER_TOPIC, importance: 3, summary: "" },
+          { slug: "garden", title: "Garden", importance: 1, summary: "" },
+        ]}
+        writeup={{ sections: slugs.map((slug) => ({ key: `t-${slug}-body`, label: slug, topic: slug, blocks: [] })) }}
+        search={{ rev: 2, tab: "comments" }}
+        phone={phone}
+        onResume={() => {}}
+      />,
+    );
+    for (const slug of slugs) {
+      const card = container.querySelector(`[id="thread-${slug}"]`);
+      expect(card).toBeTruthy();
+      const href = within(card as HTMLElement)
+        .getByRole("link", { name: "Show in place" })
+        .getAttribute("href");
+      expect(href).toBe(
+        slug === "garden"
+          ? `/r/${id}?rev=2&tab=writeup#thread-${slug}`
+          : `/r/${id}?rev=2&tab=${phone ? "diff" : "comments"}#diff-thread-${slug}`,
+      );
+    }
+  },
+);
+
+test("Comments group headings and collapsed span quotes render hostile input verbatim as text", () => {
+  const docPath = "<img src=x onerror=alert(1)>.md";
+  const filePath = "<script>alert(1)</script>.ts";
+  const title = 'javascript:alert(1) <a href="javascript:alert(1)">link</a>';
+  const quote = "<script>alert(1)</script><img src=x onerror=alert(1)><iframe onload=alert(1)></iframe>";
+  const threads: ThreadView[] = [
+    {
+      ...base,
+      id: "doc",
+      target: {
+        kind: "doc-span",
+        path: docPath,
+        blockId: "doc-11111111-11111111",
+        quote: "Seed",
+        prefix: "",
+        suffix: "",
+      },
+      placement: {
+        status: "placed",
+        location: { kind: "doc-span", path: docPath, blockId: "doc-11111111-11111111", start: 0, end: 4 },
+      },
+    },
+    {
+      ...base,
+      id: "file",
+      target: { kind: "file", path: filePath },
+      placement: { status: "placed", location: { kind: "file", path: filePath } },
+    },
+    {
+      ...base,
+      id: "topic",
+      target: { kind: "topic", slug: "garden" },
+      placement: { status: "placed", location: { kind: "topic", slug: "garden" } },
+    },
+    { ...base, id: "collapsed", state: "resolved", target: { ...target, quote } },
+  ];
+  const { container } = mount(
+    <ThreadList
+      reviewId={id}
+      revision={2}
+      threads={threads}
+      changedBlocks={[]}
+      topics={[{ slug: "garden", title, importance: 1, summary: "" }]}
+      onResume={() => {}}
+    />,
+  );
+  for (const label of [docPath, filePath, `Topic 01 · ${title}`]) {
+    const group = within(screen.getByRole("region", { name: label }));
+    expect(group.getByRole("heading", { level: 2 }).textContent).toBe(`${label}1`);
+  }
+  const collapsed = container.querySelector("#thread-collapsed[data-collapsed]");
+  expect(collapsed?.querySelector(".em-thread-quote")?.textContent).toBe(quote);
+  expect(collapsed?.querySelector(".em-thread__comments, .em-card__foot")).toBeNull();
+  expect(container.querySelector('script, img, iframe, [onerror], [onload], a[href^="javascript:"]')).toBeNull();
+});
+
 test.each([{ metaKey: true }, { ctrlKey: true }])(
   "composer saves with %j Enter, ignoring IME and ordinary Enter",
   async (modifier) => {

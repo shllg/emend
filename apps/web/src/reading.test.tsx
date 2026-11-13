@@ -635,7 +635,7 @@ test("thread groups are ordered, unplaced quotes link to their original revision
   await screen.findByRole("heading", { name: "Unplaced 1" });
 
   expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
-    "Answered1",
+    "Writeup · Overview1",
     "Unplaced1",
   ]);
   const changed = screen.getByRole("link", { name: "Changed in revision 3" });
@@ -656,7 +656,7 @@ test("Send counts review-wide unsent comments, defaults mode, limits instruction
   fireEvent.change(screen.getByLabelText("Instructions"), { target: { value: "x".repeat(4000) } });
   expect((screen.getByLabelText("Instructions") as HTMLTextAreaElement).maxLength).toBe(4000);
   expect((screen.getByLabelText("Instructions") as HTMLTextAreaElement).value).toHaveLength(4000);
-  fireEvent.click(screen.getByRole("button", { name: "Send 7" }));
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
   await waitFor(() =>
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/v1/reviews/${id}/sends`,

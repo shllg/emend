@@ -69,7 +69,7 @@ function expectSend(body: object) {
   });
 }
 
-test.each([0, 1, 2])("desktop count %s, Send eligibility and visible approval reason", (unsentCount) => {
+test.each([0, 1, 2, 3])("desktop count %s, Send eligibility and visible approval reason", (unsentCount) => {
   mount({ unsentCount });
   const bar = within(screen.getByRole("region", { name: "Send and approve" }));
   expect(
@@ -77,7 +77,12 @@ test.each([0, 1, 2])("desktop count %s, Send eligibility and visible approval re
       unsentCount ? `${unsentCount} unsent ${unsentCount === 1 ? "comment" : "comments"}` : "No unsent comments",
     ),
   ).toBeTruthy();
-  expect(button(/^Send(?: \d+)?$/).disabled).toBe(unsentCount === 0);
+  expect(button("Send").disabled).toBe(unsentCount === 0);
+  if (unsentCount) {
+    const count = bar.getByText(`${unsentCount} to send`);
+    expect(count.nextElementSibling).toBe(button("Send"));
+    expect(description(button("Send"))).toContain(`${unsentCount} to send`);
+  } else expect(bar.queryByText(/\d+ to send/)).toBeNull();
   expect(button("Approve revision 3").disabled).toBe(unsentCount > 0);
   if (unsentCount) {
     expect(bar.getByText(String(unsentCount)).getAttribute("aria-hidden")).toBe("true");
@@ -122,7 +127,7 @@ test("blank instructions do not enable Send and Ctrl+Enter posts the selected mo
 
 test.each([1, 2])("desktop sends %s comments with the exact existing body and a success toast", async (unsentCount) => {
   mount({ unsentCount });
-  fireEvent.click(button(`Send ${unsentCount}`));
+  fireEvent.click(button("Send"));
   await closeSent();
   expectSend({ revision: 3, kind: "go", mode: "fix-clear", instruction: "" });
 });
@@ -175,7 +180,7 @@ test.each([false, true])("pending Send disables repeat requests and both actions
   const pending = Promise.withResolvers<Response>();
   fetchMock.mockReturnValue(pending.promise);
   mount({ phone, unsentCount: 1 });
-  const opener = button(phone ? "Send" : "Send 1");
+  const opener = button("Send");
   const approve = button(phone ? "Approve" : "Approve revision 3");
   fireEvent.click(opener);
   if (phone) fireEvent.click(button("Send 1 comment on revision 3"));
@@ -223,7 +228,7 @@ test.each([0, 1, 2])(
   async (unsentCount) => {
     mount({ phone: true, unsentCount });
     const bar = within(screen.getByRole("region", { name: "Send and approve" }));
-    expect(bar.getByText(unsentCount ? "unsent" : "Nothing to send")).toBeTruthy();
+    expect(bar.getByText(unsentCount ? "to send" : "Nothing to send")).toBeTruthy();
     expect(bar.getByText("Revision 3")).toBeTruthy();
     expect(screen.queryByRole("textbox")).toBeNull();
     if (unsentCount) {
@@ -286,10 +291,12 @@ test("phone soft limit keeps excess text and disables Send with a visible linked
   expect(fetchMock).not.toHaveBeenCalled();
   // An over-limit phone draft must remain blocked after a resize to desktop.
   rerender(<SendBar reviewId={reviewId} revision={3} newestRevision={3} unsentCount={1} />);
-  expect(button("Send 1").disabled).toBe(true);
-  expect(description(button("Send 1"))).toBe(`Shorten the instructions to ${LIMITS.instructionChars} characters.`);
+  expect(button("Send").disabled).toBe(true);
+  expect(description(button("Send"))).toBe(
+    `Shorten the instructions to ${LIMITS.instructionChars} characters. 1 to send`,
+  );
   fireEvent.change(input(), { target: { value: "x".repeat(LIMITS.instructionChars) } });
-  expect(button("Send 1").disabled).toBe(false);
+  expect(button("Send").disabled).toBe(false);
 });
 
 test("Safari's IME confirmation Enter with keyCode 229 does not Send", async () => {
@@ -335,7 +342,7 @@ test.each([
       ? () => fireEvent.keyDown(input(), { key: "Enter", ctrlKey: true })
       : action === "Approve"
         ? () => approve(/^Approve/)
-        : () => fireEvent.click(button(phone ? "Send 1 comment on revision 3" : "Send 1"));
+        : () => fireEvent.click(button(phone ? "Send 1 comment on revision 3" : "Send"));
   if (action === "Approve") {
     // The dialog's Approve is the one pressed twice.
     fireEvent.click(button(/^Approve/));
@@ -450,7 +457,7 @@ test("desktop reasons share the revision status line and never add an idle row",
     "Revision 1 · Send or delete before approving · Shorten the instructions to 4000 characters. · Revision 2 is newer. Switch to it to send or approve.",
   );
   expect(new Set([approval.id, tooLong.id, older.id]).size).toBe(3);
-  expect(description(button("Send 1"))).toBe(`${tooLong.textContent} ${older.textContent}`);
+  expect(description(button("Send"))).toBe(`${tooLong.textContent} ${older.textContent} 1 to send`);
   expect(description(button("Approve revision 1"))).toBe(`${approval.textContent} ${older.textContent}`);
   expect(bar.children).toHaveLength(1);
 });
@@ -477,7 +484,7 @@ test.each([
   mount({ phone, unsentCount: 1 });
   if (phone) fireEvent.click(button("Send"));
   fireEvent.change(input(), { target: { value: "Retain this instruction" } });
-  fireEvent.click(button(phone ? "Send 1 comment on revision 3" : "Send 1"));
+  fireEvent.click(button(phone ? "Send 1 comment on revision 3" : "Send"));
   await screen.findByRole("alert");
   expect(screen.getAllByRole("alert", { hidden: true })).toHaveLength(1);
   if (change === "instruction") fireEvent.change(input(), { target: { value: "Edited instruction" } });
@@ -718,7 +725,7 @@ test.each([
         ),
       },
     );
-    if (action === "Send") fireEvent.click(button("Send 1"));
+    if (action === "Send") fireEvent.click(button("Send"));
     else approve("Approve revision 3");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
     expectSend(

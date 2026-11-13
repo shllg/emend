@@ -129,6 +129,7 @@ export function SendBar({
   const formId = useId();
   const blocked = useId();
   const sendReasonId = useId();
+  const sendCountId = useId();
   const revisionStatus = useId();
   const olderReasonId = useId();
   const retired = lifecycle?.state === "settled";
@@ -317,7 +318,7 @@ export function SendBar({
         {unsentCount > 0 && " "}
         {phone
           ? unsentCount > 0
-            ? "unsent"
+            ? "to send"
             : "Nothing to send"
           : unsentCount > 0
             ? `${unsentCount} unsent ${plural(unsentCount, "comment")}`
@@ -480,15 +481,20 @@ export function SendBar({
           <div className="flex shrink-0 items-center gap-2">
             {actions}
             {approveButton}
+            {unsentCount > 0 && (
+              <span id={sendCountId} className="tabular-nums text-fg-3 [font:var(--type-meta)]">
+                {unsentCount} to send
+              </span>
+            )}
             <Button
               type="submit"
               variant="primary"
               icon={Send}
               disabled={disabled || !!sendReason}
               loading={sending}
-              aria-describedby={describedBy}
+              aria-describedby={[describedBy, unsentCount > 0 && sendCountId].filter(Boolean).join(" ") || undefined}
             >
-              {unsentCount > 0 ? `Send ${unsentCount}` : "Send"}
+              Send
             </Button>
           </div>
         </form>

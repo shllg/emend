@@ -74,7 +74,7 @@ async function settle(ms = 0) {
 }
 async function send(phone = false) {
   if (phone) fireEvent.click(screen.getByRole("button", { name: "Send" }));
-  fireEvent.click(screen.getByRole("button", { name: phone ? /^Send 1 comment/ : "Send 1" }));
+  fireEvent.click(screen.getByRole("button", { name: phone ? /^Send 1 comment/ : "Send" }));
   await settle();
 }
 const refetches = (key: string) =>
@@ -343,7 +343,7 @@ test("a refetch that lands before the Send response opens the window already pic
   const pending = Promise.withResolvers<Response>();
   fetchMock.mockReturnValueOnce(pending.promise);
   const { update } = mount({ agent: waiting });
-  fireEvent.click(screen.getByRole("button", { name: "Send 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
   await settle();
   // The baseline was read at click time: this snapshot differs from it.
   update({ agent: { ...waiting, pickedUpAt: pickedAt } });
@@ -521,7 +521,7 @@ test("a Send answered by the server opens the window and frees the button while 
   mount({ agent: idle });
   await send();
   expect(screen.getByRole("alertdialog", { name: "Sent" })).toBeTruthy();
-  const sendButton = screen.getByRole("button", { name: "Send 1", hidden: true });
+  const sendButton = screen.getByRole("button", { name: "Send", hidden: true });
   expect(sendButton.getAttribute("aria-busy")).not.toBe("true");
   expect((sendButton as HTMLButtonElement).disabled).toBe(false);
 });

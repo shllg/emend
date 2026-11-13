@@ -188,6 +188,17 @@
     color: inherit;
     border-bottom: 1.5px solid var(--mark-line);
   }
+  .em-thread-quote--code {
+    font-family: var(--font-mono);
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .em-thread[data-collapsed] .em-thread-quote {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+    overflow: hidden;
+  }
   .em-thread__comments {
     color: var(--fg-reading-strong);
     display: flex;

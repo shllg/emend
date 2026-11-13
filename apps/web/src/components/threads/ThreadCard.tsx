@@ -15,6 +15,7 @@ import {
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { mutationMessage, useReviewMutation } from "../../api/mutations.ts";
 import { claimDraft, useDraftClaim, useEditComposer, useReplyComposer } from "../../lib/composer-owner.ts";
+import { plural } from "../../lib/count.ts";
 import {
   clearDraft,
   draftKey,
@@ -62,14 +63,21 @@ function answeredBefore(thread: ThreadView, revision: number) {
   return answeredOn > 0 && answeredOn < revision;
 }
 
-export function threadPlaceLink(reviewId: string, thread: ThreadView, search: ReviewSearch, phone: boolean) {
+export function threadPlaceLink(
+  reviewId: string,
+  thread: ThreadView,
+  search: ReviewSearch,
+  phone: boolean,
+  writtenTopics?: ReadonlySet<string>,
+) {
   if (thread.placement.status !== "placed") return undefined;
   const location = thread.placement.location;
   if (location.kind === "review") return undefined;
   const params = new URLSearchParams();
   if (search.rev !== undefined) params.set("rev", String(search.rev));
   let hash = `thread-${thread.id}`;
-  if (location.kind === "writeup-span") params.set("tab", "writeup");
+  if (location.kind === "writeup-span" || (location.kind === "topic" && writtenTopics?.has(location.slug)))
+    params.set("tab", "writeup");
   else if (location.kind === "doc-span" || location.kind === "html-span" || location.kind === "source-lines") {
     params.set("tab", "docs");
     params.set("doc", location.path);
@@ -124,6 +132,18 @@ export function ThreadCard({
   const { label, icon } = targetLabel(thread.target, topics);
   const resolved = thread.state === "resolved";
   const collapsed = collapse && resolved;
+  const quote =
+    "quote" in thread.target ? (
+      <p className="em-thread-quote">
+        <mark>{thread.target.quote}</mark>
+      </p>
+    ) : surface === "comments" && (thread.target.kind === "lines" || thread.target.kind === "source-lines") ? (
+      <pre className="em-thread-quote em-thread-quote--code">
+        {thread.target.lines.slice(0, 3).join("\n")}
+        {thread.target.lines.length > 3 &&
+          `\n… ${thread.target.lines.length - 3} more ${plural(thread.target.lines.length - 3, "line")}`}
+      </pre>
+    ) : null;
   useThreadComposer(replyOpen && !collapsed);
   const canReply = !resolved && thread.comments.some((comment) => comment.author === "agent" || comment.sent);
   return (
@@ -172,6 +192,7 @@ export function ThreadCard({
           />
         )}
       </header>
+      {collapsed && quote && <div className="em-card__body">{quote}</div>}
       {!collapsed && (
         <>
           {thread.placement.status === "unplaced" && (
@@ -196,11 +217,7 @@ export function ThreadCard({
             </div>
           )}
           <div className="em-card__body">
-            {"quote" in thread.target && (
-              <p className="em-thread-quote">
-                <mark>{thread.target.quote}</mark>
-              </p>
-            )}
+            {quote}
             <ol className="em-thread__comments">
               {thread.comments.map((comment) => (
                 <Comment

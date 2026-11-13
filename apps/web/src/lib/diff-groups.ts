@@ -1,7 +1,7 @@
 import { type FileView, OTHER_TOPIC, type RevisionView, type TopicMeta } from "@emend/contract";
 
 /** Shared order for the diff and its Files table of contents. */
-export function diffGroups(revision: RevisionView) {
+export function diffGroups(revision: Pick<RevisionView, "topics" | "files">) {
   const groups = new Map<string, { topic: TopicMeta; files: FileView[] }>();
   for (const topic of revision.topics.toSorted((a, b) => a.importance - b.importance))
     groups.set(topic.slug, { topic, files: [] });

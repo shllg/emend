@@ -78,6 +78,7 @@ function Reading({
   composingPath,
   resumedBlockId,
   activeThreadId,
+  addressedThreadId,
   threadJump,
   search,
   phone,
@@ -104,6 +105,7 @@ function Reading({
   composingPath?: string;
   resumedBlockId?: string;
   activeThreadId?: string;
+  addressedThreadId?: string;
   threadJump?: ThreadJump;
   search: ReviewSearch;
   phone: boolean;
@@ -146,7 +148,19 @@ function Reading({
     activeThreadId,
     threadJump,
   };
-  if (tab === "comments") return <ThreadList {...props} search={search} phone={phone} onResume={onResume} />;
+  if (tab === "comments")
+    return (
+      <ThreadList
+        {...props}
+        writeup={revision.writeup}
+        docs={revision.docs}
+        files={revision.files}
+        search={search}
+        addressedThreadId={addressedThreadId}
+        phone={phone}
+        onResume={onResume}
+      />
+    );
   if (tab === "docs")
     return (
       <DocView
@@ -280,6 +294,14 @@ function LoadedReview({
   const location = isOwnLocation ? liveLocation : lastOwnLocation;
   const search = useMemo(() => validateReviewSearch(location?.search ?? {}), [location?.search]);
   const hash = location?.hash ?? "";
+  const addressedThreadId = useMemo(() => {
+    try {
+      const decoded = decodeURIComponent(hash);
+      return decoded.startsWith("thread-") ? decoded.slice(7) || undefined : undefined;
+    } catch {
+      return undefined;
+    }
+  }, [hash]);
   const [initialRevision] = useState(review.newestRevision);
   const seq = search.rev ?? initialRevision;
   const query = useQuery(revisionQuery(review.id, seq));
@@ -935,6 +957,7 @@ function LoadedReview({
                         openDoc={openDoc}
                         targeted={!!hash || !!search.thread || (trail.returning && !!trail.entry.focus)}
                         activeThreadId={currentIntent.threadId}
+                        addressedThreadId={addressedThreadId}
                         threadJump={threadJump?.navigation === currentIntent.navigation ? threadJump : undefined}
                         onOpenDoc={(doc) =>
                           navigateReading(

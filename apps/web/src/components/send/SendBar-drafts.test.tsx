@@ -320,9 +320,9 @@ test("saving a typed draft re-enables Send", async () => {
     </>,
   );
   fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "New comment" } });
-  expect(button("Send 1").disabled).toBe(true);
+  expect(button("Send").disabled).toBe(true);
   fireEvent.click(button("Save comment"));
-  await waitFor(() => expect(button("Send 1").disabled).toBe(false));
+  await waitFor(() => expect(button("Send").disabled).toBe(false));
 });
 
 test("all pending saves must finish refreshing before either action unlocks", async () => {
@@ -382,8 +382,8 @@ test.each(["success", "failure"])(
     fireEvent.click(button("Save changes"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("PATCH");
-    expect(button("Send 1").disabled).toBe(true);
-    fireEvent.click(button("Send 1"));
+    expect(button("Send").disabled).toBe(true);
+    fireEvent.click(button("Send"));
     await act(async () => {
       if (outcome === "success") patch.resolve(new Response(null, { status: 204 }));
       else patch.reject(new Error("Synthetic failure"));
@@ -392,14 +392,14 @@ test.each(["success", "failure"])(
       await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(3));
       expect(listDrafts(id)).toHaveLength(0);
       expect(screen.queryByText("1 unsaved comment: save or discard it first.")).toBeNull();
-      expect(button("Send 1").disabled).toBe(true);
-      fireEvent.click(button("Send 1"));
+      expect(button("Send").disabled).toBe(true);
+      fireEvent.click(button("Send"));
       await act(async () => refresh.resolve());
-      await waitFor(() => expect(button("Send 1").disabled).toBe(false));
+      await waitFor(() => expect(button("Send").disabled).toBe(false));
     } else {
       await screen.findByRole("alert");
       expect(loadDraft(editDraftKey(id, id))).toBe("Edited text");
-      expect(button("Send 1").disabled).toBe(true);
+      expect(button("Send").disabled).toBe(true);
       expect(invalidate).not.toHaveBeenCalled();
     }
     expect(fetchMock).toHaveBeenCalledOnce();
