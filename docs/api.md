@@ -185,12 +185,17 @@ local images.
 `GET /api/v1/reviews/:id/revisions/:seq/download` requires a reviewer session with `read` scope.
 A bearer token gets `403`, like other reviewer routes. Missing credentials get `401`.
 It follows the revision route's `404` and `review_in_bin` rules.
+`HEAD` checks the same access and revision rules and returns the download headers without
+building a file or reading blobs. Only one download builds at a time per owner in this server
+process. A second concurrent download gets `429 rate_limited`. Retry when the first finishes.
 
 A code review's file holds the review title and that revision's writeup: sections, topics, text,
 code blocks and images with captions. It holds no docs, comments or diff. When `writeupEmpty`
 is true and the revision has docs, it holds one doc instead: `main` when it names a doc, else
 the first doc in file order. Markdown uses its stored rendered blocks. Source uses its stored
-highlighted tokens. HTML keeps its listed assets built in, with script assets left out.
+highlighted tokens. Code reviews and Markdown and source pubs get the emend header with the
+review title, project, branch and publish links. An HTML pub keeps the agent's HTML as is, with
+no emend header. Its listed assets are built in and its scripts are left out.
 Mermaid diagrams show as labelled source text. Links to other docs become plain text.
 Absolute HTTP, HTTPS and mailto links keep working.
 
@@ -203,12 +208,19 @@ cut to 60 characters and trimmed again. An empty name becomes `emend`. It ends i
 replaces the app CSP for this route. The file also has a CSP meta with the same policy without
 `sandbox`. It opens offline with no scripts or network requests.
 
-At most 128 MiB of stored asset bytes are built in, counting each distinct blob once.
-When an asset would pass this budget, it is left out. One visible note says:
+At most 128 MiB of built-in content is emitted. Every copy of a data URL counts its full length,
+and every inlined CSS text counts its length each time it is emitted. The server also reads at
+most 128 MiB of distinct stored assets. When content would pass either budget, it is left out.
+Each CSS path is inlined at most once per file, across imports and stylesheet links. At most
+64 stylesheets are inlined. Further stylesheets are left out with the same size note.
+One visible note says:
 "Some images or files were left out because the download would pass 128 MiB."
 The file holds no server address, emend link, sign-in link, token or machine name.
-HTML docs lose scripts, event handlers, frames, embeds, `<base>`, `<meta http-equiv>` and resource
-references that are not listed assets. CSS may retain data URLs and local fragments.
+HTML docs lose scripts, event handlers, frames, embeds, `<base>`, `<noscript>`, `<meta http-equiv>`
+and resource references that are not listed assets. Forms are unwrapped, keeping their content.
+Author data URLs for images, audio, video and VTT captions may stay in resource attributes.
+CSS may retain data URLs and local fragments. Asset references keep their fragments.
+Inlined CSS imports keep their layer, supports and media conditions.
 
 ### Viewed files
 

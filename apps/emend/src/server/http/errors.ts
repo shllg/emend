@@ -35,6 +35,7 @@ const DETAILS = {
   waiting_takes: { code: "rate_limited", message: "Too many waiting takes." },
   event_streams: { code: "rate_limited", message: "Too many open event streams." },
   publish_busy: { code: "rate_limited", message: "The server is busy publishing; try again." },
+  download_busy: { code: "rate_limited", message: "A download is already building. Try again when it finishes." },
   publish_aborted: { code: "invalid_request", message: "The publish was cancelled." },
   writeup_blocks: { code: "too_large", message: "The writeup has too many blocks." },
   writeup_failed: { code: "invalid_request", message: "The writeup could not be rendered." },

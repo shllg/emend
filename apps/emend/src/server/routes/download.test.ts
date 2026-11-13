@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { type PublishRequest, PublishResponse, reviewDownloadPath } from "@emend/contract";
+import { LIMITS, type PublishRequest, PublishResponse, RevisionView, reviewDownloadPath } from "@emend/contract";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -81,6 +81,83 @@ test("downloads an attachment with all offline response headers for a reviewer",
   }))
     expect(response.headers.get(name)).toBe(value);
   expect(await response.text()).toContain("First revision text");
+});
+
+test("returns HEAD download headers without building or reading blobs", async () => {
+  const { reviewId } = await mediaReview();
+  const download = await get(reviewId);
+  expect(download.status).toBe(200);
+  const reads = vi.spyOn(f.deps.blobs, "get");
+  const response = await f.request(`/reviews/${reviewId}/revisions/1/download`, "HEAD");
+  expect(response.status).toBe(200);
+  for (const name of [
+    "Content-Type",
+    "Content-Disposition",
+    "Content-Security-Policy",
+    "X-Content-Type-Options",
+    "Cache-Control",
+    "Cross-Origin-Resource-Policy",
+  ])
+    expect(response.headers.get(name)).toBe(download.headers.get(name));
+  expect(await response.text()).toBe("");
+  expect(reads).not.toHaveBeenCalled();
+});
+
+test("checks reviewer access ownership revision and bin state for HEAD downloads", async () => {
+  const { reviewId } = await publish();
+  const path = `/reviews/${reviewId}/revisions/1/download`;
+  const reads = vi.spyOn(f.deps.blobs, "get");
+  expect((await f.request(path, "HEAD", undefined, "agent")).status).toBe(403);
+  expect((await f.request(path, "HEAD", undefined, "foreign")).status).toBe(404);
+  for (const seq of [0, 2, "abc"])
+    expect((await f.request(`/reviews/${reviewId}/revisions/${seq}/download`, "HEAD")).status).toBe(404);
+  expect((await f.request(`/reviews/${reviewId}/bin`, "POST")).status).toBe(204);
+  expect((await f.request(path, "HEAD")).status).toBe(409);
+  expect(reads).not.toHaveBeenCalled();
+});
+
+test("limits concurrent downloads per owner and releases the slot when a build finishes", async () => {
+  const { reviewId } = await mediaReview();
+  const other = await publish({ reviewKey: "c".repeat(64) });
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const read = f.deps.blobs.get.bind(f.deps.blobs);
+  const reads = vi.spyOn(f.deps.blobs, "get").mockImplementationOnce(async (...args) => {
+    entered.resolve();
+    await release.promise;
+    return read(...args);
+  });
+  const first = Promise.resolve(get(reviewId));
+  try {
+    await Promise.race([
+      entered.promise,
+      first.then(() => {
+        throw new Error("Download finished before reaching the blob read");
+      }),
+    ]);
+    const second = await get(other.reviewId);
+    expect(second.status).toBe(429);
+    expect(await second.json()).toEqual({
+      error: { code: "rate_limited", message: "A download is already building. Try again when it finishes." },
+    });
+    const head = await f.request(`/reviews/${reviewId}/revisions/1/download`, "HEAD");
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe("");
+    expect(reads).toHaveBeenCalledTimes(1);
+    await error(await get(reviewId, 1, "foreign"), 404, "unknown_review");
+  } finally {
+    release.resolve();
+    await first;
+  }
+  expect((await first).status).toBe(200);
+  expect((await get(other.reviewId)).status).toBe(200);
+});
+
+test("releases the owner download slot after a failed build", async () => {
+  const { reviewId } = await publish();
+  vi.spyOn(f.deps.blobs, "get").mockResolvedValueOnce(null);
+  await error(await get(reviewId), 404, "not_found");
+  expect((await get(reviewId)).status).toBe(200);
 });
 
 test("refuses agent bearers unauthenticated requests and foreign reviews", async () => {
@@ -238,7 +315,7 @@ test("leaves an over-budget image out and shows one note", async () => {
   expect(html).toContain("Small image");
 });
 
-test("counts repeated references and blob aliases only once", async () => {
+test("counts each emitted image copy while reading shared blobs only once", async () => {
   const hash = await f.deps.blobs.put(f.ownerId, png, "image/png");
   const { reviewId } = await publish({
     writeup: { ...blank, overview: "![One](one.png) ![Two](two.png)" },
@@ -251,9 +328,12 @@ test("counts repeated references and blob aliases only once", async () => {
       flag: null,
     })),
   });
-  const html = await (await budgetApp(png.length).request(reviewDownloadPath(reviewId, 1))).text();
-  expect(html.match(/data:image\/png/g)).toHaveLength(2);
-  expect(html).not.toContain("Some images or files were left out");
+  const reads = vi.spyOn(f.deps.blobs, "get");
+  const inlineBudget = `data:image/png;base64,${png.toString("base64")}`.length;
+  const html = await (await budgetApp(inlineBudget).request(reviewDownloadPath(reviewId, 1))).text();
+  expect(html.match(/data:image\/png/g)).toHaveLength(1);
+  expect(html).toContain("Some images or files were left out");
+  expect(reads.mock.calls.filter((call) => call[1] === hash)).toHaveLength(1);
 });
 
 test("does not use another revision's media or a parented doc asset", async () => {
@@ -349,4 +429,111 @@ test.each([
   const { reviewId } = await publish({ title });
   const response = await get(reviewId);
   expect(response.headers.get("Content-Disposition")).toBe(`attachment; filename="${slug}-r1.html"`);
+});
+
+test.each(
+  ["html", "md"].flatMap((kind) => ["missing", "malformed", "invalid sections"].map((stored) => ({ kind, stored }))),
+)("downloads a $kind pub with a $stored stored writeup", async ({ kind, stored }) => {
+  const hash = await f.deps.blobs.put(
+    f.ownerId,
+    Buffer.from(kind === "html" ? "<p>Publication content</p>" : "Publication content"),
+    kind === "html" ? "text/html" : "text/markdown",
+  );
+  const { reviewId } = await publish({
+    writeup: blank,
+    files: [
+      {
+        path: `doc.${kind}`,
+        role: "doc",
+        ...(kind === "html" ? { assets: [] } : {}),
+        oldPath: null,
+        oldBlob: null,
+        newBlob: hash,
+        flag: null,
+      },
+    ],
+  });
+  const revision = await f.db.read((q) =>
+    q
+      .select()
+      .from(revisions)
+      .where(and(eq(revisions.ownerId, f.ownerId), eq(revisions.reviewId, reviewId)))
+      .get(),
+  );
+  if (!revision) throw new Error("Missing revision");
+  const owned = and(eq(writeups.ownerId, f.ownerId), eq(writeups.revisionId, revision.id));
+  if (stored === "missing") await f.db.query((q) => q.delete(writeups).where(owned));
+  else {
+    const blob = await f.deps.blobs.put(
+      f.ownerId,
+      Buffer.from(stored === "malformed" ? "not JSON" : '{"sections":false}'),
+      "application/json",
+    );
+    await f.db.query((q) => q.update(writeups).set({ renderedBlob: blob }).where(owned));
+  }
+  const response = await get(reviewId);
+  expect(response.status).toBe(200);
+  expect(await response.text()).toContain("Publication content");
+});
+
+test("adds an emend header to Markdown and source pubs while preserving an HTML pub's own header", async () => {
+  for (const [index, path] of ["doc.html", "doc.md", "doc.txt"].entries()) {
+    const hash = await f.deps.blobs.put(
+      f.ownerId,
+      Buffer.from(
+        path.endsWith("html") ? "<header>Author header</header><p>Publication content</p>" : "Publication content",
+      ),
+      "text/plain",
+    );
+    const { reviewId } = await publish({
+      reviewKey: String(index + 1).repeat(64),
+      title: "Publication title",
+      writeup: blank,
+      links: [{ url: "https://example.com", label: "Publication link" }],
+      files: [
+        {
+          path,
+          role: "doc",
+          ...(path.endsWith("html") ? { assets: [] } : {}),
+          oldPath: null,
+          oldBlob: null,
+          newBlob: hash,
+          flag: null,
+        },
+      ],
+    });
+    const html = await (await get(reviewId)).text();
+    if (path.endsWith("html")) {
+      expect(html).toContain("<header>Author header</header>");
+      expect(html).not.toContain('class="em-meta"');
+      expect(html).not.toContain("Publication link");
+      expect(html).not.toContain("<h1>Publication title</h1>");
+    } else {
+      expect(html).toContain("<h1>Publication title</h1>");
+      expect(html).toContain('class="em-meta"');
+      expect(html).toContain("Publication link");
+    }
+  }
+});
+
+test("downloads a review with the maximum declared topics plus the reserved Other topic", async () => {
+  const topics = Array.from({ length: LIMITS.topicsPerReview }, (_, index) => ({
+    slug: `topic-${index}`,
+    title: `Topic ${index}`,
+    importance: index % 100,
+    summary: "Synthetic topic",
+  }));
+  const hash = await f.deps.blobs.put(f.ownerId, Buffer.from("synthetic diff"), "text/plain");
+  const { reviewId } = await publish({
+    topics: [...topics, { slug: "other", title: "Other changes", importance: 100, summary: "Unassigned files" }],
+    files: [
+      { path: "unassigned.txt", topic: "other", role: "diff", oldPath: null, oldBlob: null, newBlob: hash, flag: null },
+    ],
+  });
+  const view = RevisionView.parse(await (await f.request(`/reviews/${reviewId}/revisions/1`, "GET")).json());
+  expect(view.topics).toHaveLength(LIMITS.topicsPerReview + 1);
+  const response = await get(reviewId);
+  expect(response.status).toBe(200);
+  const html = await response.text();
+  expect(html).toContain(`Topic ${LIMITS.topicsPerReview - 1}`);
 });

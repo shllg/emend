@@ -11,6 +11,7 @@ import { DOWNLOAD_CSP } from "../http/headers.ts";
 import { publishMeta, topicView } from "./reviews.ts";
 
 const imageTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
+const activeDownloads = new Set<string>();
 function downloadFilename(title: string, seq: number) {
   const slug =
     title
@@ -28,6 +29,7 @@ async function revisionDownload(
   reviewId: string,
   rawSeq: string,
   budget: number,
+  headOnly: boolean,
 ) {
   const row = await q
     .select({ review: reviews, repoName: repos.name })
@@ -46,14 +48,10 @@ async function revisionDownload(
     .where(and(eq(revisions.ownerId, ownerId), eq(revisions.reviewId, reviewId), eq(revisions.seq, seq)))
     .get();
   if (!revision) throw new ApiError("not_found");
+  const filename = downloadFilename(review.title, seq);
+  if (headOnly) return { html: null, filename };
   const ownedFiles = and(eq(files.ownerId, ownerId), eq(files.revisionId, revision.id));
   const fileRows = await q.select().from(files).where(ownedFiles).orderBy(files.ord, files.id).all();
-  const writeup = await q
-    .select({ hash: writeups.renderedBlob })
-    .from(writeups)
-    .where(and(eq(writeups.ownerId, ownerId), eq(writeups.revisionId, revision.id)))
-    .get();
-  if (!writeup) throw new ApiError("not_found");
   const readJson = async (hash: string | null): Promise<unknown> => {
     const bytes = hash ? await deps.blobs.get(ownerId, hash, q) : null;
     if (!bytes) throw new ApiError("not_found");
@@ -71,14 +69,20 @@ async function revisionDownload(
     if (!result.success) throw new ApiError("not_found");
     return result.data;
   };
-  const stored = await readJson(writeup.hash);
-  const rendered = parse(RenderedWriteup, stored);
+  const readWriteup = async () => {
+    const writeup = await q
+      .select({ hash: writeups.renderedBlob })
+      .from(writeups)
+      .where(and(eq(writeups.ownerId, ownerId), eq(writeups.revisionId, revision.id)))
+      .get();
+    if (!writeup) throw new ApiError("not_found");
+    return readJson(writeup.hash);
+  };
   const details = {
     project: review.project ?? (repoName !== ".git" ? repoName : null),
     branch: review.branch,
     seq,
     publishedAt: new Date(revision.createdAt).toISOString(),
-    links: publishMeta(stored).links,
   };
   let total = 0;
   // Cache bytes by blob, separately from the builders' path cache: aliases spend the budget once.
@@ -131,19 +135,29 @@ async function revisionDownload(
       docPath: doc.path,
       title: review.title,
       resolveAsset: (path) => resolveFile(assets.get(path)),
+      inlineBudget: budget,
     });
   } else if (doc) {
     const content = await readJson(doc.renderedBlob);
+    const meta = await readWriteup()
+      .then(publishMeta)
+      .catch((error: unknown) => {
+        if (error instanceof ApiError && error.code === "not_found") return publishMeta(undefined);
+        throw error;
+      });
     html = await buildDocDownload({
       title: review.title,
-      details,
+      details: { ...details, links: meta.links },
       resolveMedia,
+      inlineBudget: budget,
       content:
         doc.mediaType === "text/plain"
           ? { kind: "source", lines: parse(SourceContent, content).lines }
           : { kind: "markdown", blocks: parse(RenderedBlock.array().max(LIMITS.blocksPerRevision), content) },
     });
   } else {
+    const stored = await readWriteup();
+    const rendered = parse(RenderedWriteup, stored);
     const topicRows = await q
       .select()
       .from(topics)
@@ -152,28 +166,38 @@ async function revisionDownload(
       .all();
     html = await buildWriteupDownload({
       title: review.title,
-      details,
+      details: { ...details, links: publishMeta(stored).links },
       writeup: rendered,
-      topics: parse(TopicMeta.array().max(LIMITS.topicsPerReview), topicRows.map(topicView)),
+      topics: parse(TopicMeta.array().max(LIMITS.topicsPerReview + 1), topicRows.map(topicView)),
       resolveMedia,
+      inlineBudget: budget,
     });
   }
-  return { html, filename: downloadFilename(review.title, seq) };
+  return { html, filename };
 }
 
 /** The budget parameter is internal; requests cannot change the export ceiling. */
 export function downloadRoutes(app: Hono<AppEnv>, deps: AppDeps, budget: number = LIMITS.downloadInlineBytes) {
   app.get("/api/v1/reviews/:id/revisions/:seq/download", async (c) => {
     const ownerId = c.get("principal").ownerId;
-    const result = await deps.db.read((q) =>
-      revisionDownload(ownerId, q, deps, c.req.param("id"), c.req.param("seq"), budget),
-    );
-    c.header("Content-Type", "text/html; charset=utf-8");
-    c.header("Content-Disposition", `attachment; filename="${result.filename}"`);
-    c.header("Content-Security-Policy", DOWNLOAD_CSP);
-    c.header("X-Content-Type-Options", "nosniff");
-    c.header("Cache-Control", "no-store");
-    c.header("Cross-Origin-Resource-Policy", "same-origin");
-    return c.body(result.html);
+    const headOnly = c.req.method === "HEAD";
+    if (!headOnly) {
+      if (activeDownloads.has(ownerId)) throw new ApiError("rate_limited", "download_busy");
+      activeDownloads.add(ownerId);
+    }
+    try {
+      const result = await deps.db.read((q) =>
+        revisionDownload(ownerId, q, deps, c.req.param("id"), c.req.param("seq"), budget, headOnly),
+      );
+      c.header("Content-Type", "text/html; charset=utf-8");
+      c.header("Content-Disposition", `attachment; filename="${result.filename}"`);
+      c.header("Content-Security-Policy", DOWNLOAD_CSP);
+      c.header("X-Content-Type-Options", "nosniff");
+      c.header("Cache-Control", "no-store");
+      c.header("Cross-Origin-Resource-Policy", "same-origin");
+      return result.html === null ? c.body(null) : c.body(result.html);
+    } finally {
+      if (!headOnly) activeDownloads.delete(ownerId);
+    }
   });
 }
