@@ -1,7 +1,8 @@
 # Releasing emend
 
 This page is for maintainers. GitHub Actions releases `@shllg/emend` and moves the Claude Code
-marketplace branch. Nothing is committed back to the repository.
+marketplace branch. Nothing is committed back to main. The `release` branch gets one stamp commit
+per release.
 
 ## Versioning
 
@@ -32,8 +33,10 @@ whether `origin/release` contains its commit. If either is incomplete, it attemp
 tag, using the highest plain tag below it merged into HEAD as the previous release. Notes cover
 only the counted commits between that previous tag and the resumed tag. An unpublished tag can
 resume only from a run at its own commit, to preserve npm provenance. A published tag can resume
-marking from a later HEAD. The planner refuses if `release` is ahead of or diverged from the
-planned commit, or already holds an unpublished tag's commit.
+marking from a later HEAD. The planner refuses if the release source commit is ahead of or diverged
+from the planned commit, or `release` already holds an unpublished tag's commit. The source is the
+release head's first parent when its plugin manifest carries a version. Otherwise it is the head
+itself.
 
 Once the newest tag is published and contained by `release`, no counted commits means nothing to
 release. An existing target tag or npm version refuses a new version. Release notes group counted
@@ -77,12 +80,15 @@ an in-progress release.
    `pnpm bench` prints non-gating JSON lines with no timing assertions; CI does not run it.
    `SYNC_BASE` is the previous release tag, so the sync check covers all commits being released.
 3. **build** installs from the frozen lockfile on Node 26, stamps the version into the build
-   checkout, builds and packs with pnpm. The root pnpmfile strips private development dependencies;
-   the prepack hook refuses npm packing. `check:package --tarball` checks that exact tarball. The
-   job uploads it with its SHA-512 integrity and file name.
-4. **tag** checks the live `release` branch is an ancestor of or equal to the planned SHA, including
-   on reruns that reuse old plan outputs. It then creates the lightweight `v<version>` tag. An
-   existing lightweight or annotated tag at that same commit is accepted; a different target fails.
+   checkout, and writes stamped copies of the plugin and marketplace manifests outside that
+   checkout. It builds and packs with pnpm. The root pnpmfile strips private development
+   dependencies; the prepack hook refuses npm packing. `check:package --tarball` checks that exact
+   tarball. The job uploads it with its SHA-512 integrity and file name, and uploads the stamped
+   manifests as `release-manifests`.
+4. **tag** checks the live release source is an ancestor of or equal to the planned SHA, including
+   on reruns that reuse old plan outputs. It reads the plugin manifest at the release head to
+   identify a stamp and resolve its first parent. It then creates the lightweight `v<version>` tag.
+   An existing lightweight or annotated tag at that same commit is accepted; a different target fails.
 5. **publish** runs in the `npm` environment on a GitHub-hosted runner, with only `id-token: write`.
    It checks out no repository code and runs no pnpm. It downloads the tarball, checks its integrity
    and requires npm CLI >= 11.5.1. It publishes with
@@ -94,14 +100,18 @@ an in-progress release.
    must always match this run's build integrity. It then polls npm every 20 seconds, for up to
    15 minutes, until the version is visible.
 6. **mark** first creates a GitHub Release with the saved notes and verified tag, unless that
-   release already exists. It then moves `release` to the SHA without force, creating the branch
-   if missing. A non-fast-forward fails, leaving the release notes available. Plugin users
-   therefore update only after npm is ready.
+   release already exists. It checks the stamped manifests against the tagged commit. Each must
+   equal its original with only the release version added. It creates a stamp commit through the
+   Git Data API, using the tagged tree with those two files replaced. Its first parent is the
+   tagged commit. Its second parent is the previous release head when that head is a stamp commit.
+   It then moves `release` to the stamp without force, creating the branch if missing. An already
+   stamped version succeeds without moving anything. A non-fast-forward fails, leaving the release
+   notes available. Plugin users therefore update only after npm is ready.
 
 ## Version in the repository
 
 The committed version in `apps/emend/package.json` and `apps/emend/src/version.ts` stays as a floor.
-CI stamps the real release version into its build; it never commits the stamp or updates
+CI stamps the real release version into its build; it never commits those build files or updates
 `CHANGELOG.md`. From 0.1.1 onward, release notes live in GitHub Releases.
 
 `pnpm install:local` resolves HEAD once to a full SHA, exports that commit into a temporary folder,
@@ -111,10 +121,13 @@ even if HEAD moves during the install. With no reachable plain tag, it keeps the
 It never stamps the source checkout. Fetch tags before installing if the checkout is missing
 recent releases.
 
-`plugin/.claude-plugin/plugin.json` has no `version` field on purpose: Claude Code then uses the git
-commit SHA as the plugin version, so every move of `release` is an update. A fixed version would
-stop plugin updates. `check:package` enforces the absence of that field and checks the installed
-CLI version; `version.test.ts` checks that the two CLI version literals agree.
+On main, `plugin/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` carry no version.
+`check:package` enforces this, and the skills test also checks the plugin manifest. A local checkout
+therefore still tracks commits. On `release`, each stamp puts the release version directly after
+the top-level name in both manifests. Claude Code shows that version. Every release is an update
+because every release bumps it. The marketplace plugin entry carries no version: `plugin.json`
+wins, and Claude Code warns when both are set. `check:package` also checks the installed CLI
+version; `version.test.ts` checks that the two CLI version literals agree.
 
 ## One-time owner setup
 
@@ -122,9 +135,10 @@ CLI version; `version.test.ts` checks that the two CLI version literals agree.
    **main** branch, without required reviewers or an approval gate. The release workflow's publish
    job names this environment.
 2. Create two rulesets: one for branch **release** and one for tags `v*`. Both block force pushes
-   and deletions. Enable **Require signed commits** on the `release` ruleset: the workflow only
-   moves it to main's commits, which are signed. Allow the workflow to create tags and advance
-   `release` normally; whoever can move that branch controls what marketplace users receive.
+   and deletions. Enable **Require signed commits** on the `release` ruleset. The branch takes
+   main's signed commits and stamp commits that GitHub signs for the workflow token. The workflow
+   sends no custom author or committer. Allow the workflow to create tags and advance `release`
+   normally; whoever can move that branch controls what marketplace users receive.
 3. On npmjs.com, add a GitHub Actions trusted publisher for user/organization **shllg**, repository
    **emend**, workflow **release.yml**, environment **npm**. Its first publish must complete within
    **2 days** of creating the trusted publisher. If that deadline passes, delete and recreate the
@@ -147,7 +161,7 @@ CLI version; `version.test.ts` checks that the two CLI version literals agree.
 
 Expect the first real release to stop at the tag or mark step: its range adds
 `.github/workflows/release.yml`, and GitHub may refuse that ref update with the workflow token.
-Use the owner fallback in Recovery below: push the tag or `release` by hand, then re-run the
+Use the owner fallback in Recovery below: create the tag or update `release` by hand, then re-run the
 failed jobs.
 
 After the first CI publish succeeds, set the package's publishing access on npmjs.com to
@@ -196,27 +210,36 @@ wait and re-run the failed jobs. If the planner or tag job refuses a stale relea
 update is not a fast-forward, investigate the branch history; do not force it. If `release` already
 holds a tag's commit but npm lacks its version, investigate that inconsistent state before retrying.
 
-GitHub can refuse a `GITHUB_TOKEN` ref update whose range adds a workflow file. If it refuses the
-workflow's token when creating the tag or moving `release`, the owner makes the failed update
-with the planned SHA and version, then uses **Re-run failed jobs** on that same run.
-
-If tag creation was refused:
+GitHub can refuse a `GITHUB_TOKEN` ref update whose range adds a workflow file. If it refuses tag
+creation, the owner creates the tag with the planned SHA and version, then uses **Re-run failed
+jobs** on that same run:
 
 ```sh
 git push origin '<sha>:refs/tags/v<x.y.z>'
 ```
 
-If moving the marketplace branch was refused:
+### A stamp step fails halfway
+
+Nothing moves until the final PATCH updates `release` (or POST creates a missing branch). A stamp
+commit created but not reachable from a ref is harmless. Re-running the failed jobs makes a fresh
+one. Never force `release`.
+
+If GitHub refuses the workflow token's update of `release`, the owner moves it to the stamp commit
+printed in the failed step. Use a token with the `workflow` scope:
 
 ```sh
-git push origin 'v<x.y.z>^{commit}:refs/heads/release'
+gh auth refresh -s workflow
+gh api --method PATCH repos/shllg/emend/git/refs/heads/release -f sha=<stamp-sha> -F force=false
 ```
+
+Then re-run the failed jobs. They find `release` already stamped and finish without another move.
 
 ## What users see
 
 - **npm users** get the new version through `mise upgrade` or `npm install -g @shllg/emend`.
 - **Claude Code users** get the new skills when `release` moves and they update the plugin, or
-  when they have plugin auto-update on.
+  when they have plugin auto-update on. After `claude plugin marketplace update emend` and
+  `claude plugin update emend@emend`, `claude plugin list` shows the release version.
 
 ## Verify a release
 
@@ -227,8 +250,18 @@ npm install -g --registry=https://registry.npmjs.org/ --prefix "$prefix" @shllg/
 "$prefix/bin/emend" --version
 ```
 
-The versions must match the released one. Check that the `release` branch points at the tagged
-commit with `git ls-remote origin refs/heads/release`.
+The versions must match the released one. Fetch the branch and tags, then check both manifests:
+
+```sh
+git fetch origin
+git show origin/release:plugin/.claude-plugin/plugin.json
+git show origin/release:.claude-plugin/marketplace.json
+git rev-parse origin/release^1
+git rev-parse 'v<version>^{commit}'
+```
+
+Both top-level manifest versions must match the release. The last two commands must print the
+same SHA: the stamp's first parent is the tagged commit.
 
 Check npm signatures and provenance from a temporary folder, using the released version:
 

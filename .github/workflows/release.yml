@@ -1,5 +1,6 @@
 # Releases shipped changes from main nightly or on demand. Builds without write credentials;
-# only the publish job can request npm's trusted-publishing identity. No release commits.
+# only the publish job can request npm's trusted-publishing identity. Main gets no release commits;
+# the release branch gets one stamp commit per release.
 name: Release
 
 on:
@@ -119,6 +120,9 @@ jobs:
       - run: node scripts/release.ts stamp "$VERSION"
         env:
           VERSION: ${{ needs.plan.outputs.version }}
+      - run: node scripts/release.ts manifests "$VERSION" "$RUNNER_TEMP/manifests"
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
       - run: pnpm build
       - run: pnpm pack --pack-destination "$RUNNER_TEMP/pack"
         working-directory: apps/emend
@@ -143,6 +147,13 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-manifests
+          path: ${{ runner.temp }}/manifests
+          if-no-files-found: error
+          overwrite: true
+
   tag:
     needs: [plan, build]
     if: ${{ !inputs.dry_run && vars.RELEASE_ENABLED == 'true' }}
@@ -162,7 +173,23 @@ jobs:
             echo "could not resolve the release branch" >&2
             exit 1
           fi
-          if ! comparison=$(gh api "repos/$GH_REPO/compare/$release_sha...$SHA" --jq .status); then
+          if ! plugin=$(gh api -H "Accept: application/vnd.github.raw+json" "repos/$GH_REPO/contents/plugin/.claude-plugin/plugin.json?ref=$release_sha"); then
+            echo "could not read plugin/.claude-plugin/plugin.json at $release_sha" >&2
+            exit 1
+          fi
+          if ! release_version=$(jq -r '.version // empty' <<< "$plugin"); then
+            echo "invalid plugin/.claude-plugin/plugin.json at $release_sha" >&2
+            exit 1
+          fi
+          source_sha="$release_sha"
+          if [ -n "$release_version" ]; then
+            if ! source_sha=$(gh api "repos/$GH_REPO/git/commits/$release_sha" --jq '.parents[0].sha'); then
+              echo "could not resolve the release source at $release_sha" >&2
+              exit 1
+            fi
+            [ -n "$source_sha" ] && [ "$source_sha" != null ] || { echo "release stamp has no first parent" >&2; exit 1; }
+          fi
+          if ! comparison=$(gh api "repos/$GH_REPO/compare/$source_sha...$SHA" --jq .status); then
             echo "could not compare release with $SHA" >&2
             exit 1
           fi
@@ -280,17 +307,92 @@ jobs:
             exit 1
           fi
 
-      - name: Move the marketplace branch without force
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-manifests
+          path: ${{ runner.temp }}/manifests
+
+      - name: Stamp and move the marketplace branch without force
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           SHA: ${{ needs.plan.outputs.sha }}
+          VERSION: ${{ needs.plan.outputs.version }}
         run: |
-          if gh api "repos/$GH_REPO/git/ref/heads/release" > /dev/null 2> "$RUNNER_TEMP/branch-error"; then
-            gh api --method PATCH "repos/$GH_REPO/git/refs/heads/release" -f "sha=$SHA" -F force=false
+          for path in plugin/.claude-plugin/plugin.json .claude-plugin/marketplace.json; do
+            if ! original=$(gh api -H "Accept: application/vnd.github.raw+json" "repos/$GH_REPO/contents/$path?ref=$SHA"); then
+              echo "could not read $path at $SHA" >&2
+              exit 1
+            fi
+            if ! jq -e --arg version "$VERSION" --argjson original "$original" '. == ($original + {version: $version})' "$RUNNER_TEMP/manifests/${path##*/}"; then
+              echo "stamped manifest does not match $path at $SHA with version $VERSION" >&2
+              exit 1
+            fi
+          done
+
+          parents=$(jq -n --arg sha "$SHA" '[$sha]')
+          if release_sha=$(gh api "repos/$GH_REPO/git/ref/heads/release" --jq .object.sha 2> "$RUNNER_TEMP/branch-error"); then
+            if ! plugin=$(gh api -H "Accept: application/vnd.github.raw+json" "repos/$GH_REPO/contents/plugin/.claude-plugin/plugin.json?ref=$release_sha"); then
+              echo "could not read plugin/.claude-plugin/plugin.json at $release_sha" >&2
+              exit 1
+            fi
+            if ! release_version=$(jq -r '.version // empty' <<< "$plugin"); then
+              echo "invalid plugin/.claude-plugin/plugin.json at $release_sha" >&2
+              exit 1
+            fi
+            source_sha="$release_sha"
+            if [ -n "$release_version" ]; then
+              if ! source_sha=$(gh api "repos/$GH_REPO/git/commits/$release_sha" --jq '.parents[0].sha'); then
+                echo "could not resolve the release source at $release_sha" >&2
+                exit 1
+              fi
+              [ -n "$source_sha" ] && [ "$source_sha" != null ] || { echo "release stamp has no first parent" >&2; exit 1; }
+              parents=$(jq -n --arg sha "$SHA" --arg released "$release_sha" '[$sha, $released]')
+            fi
+            if [ "$source_sha" = "$SHA" ] && [ "$release_version" = "$VERSION" ]; then
+              echo "release already carries $VERSION"
+              exit 0
+            fi
+            if ! comparison=$(gh api "repos/$GH_REPO/compare/$source_sha...$SHA" --jq .status); then
+              echo "could not compare release with $SHA" >&2
+              exit 1
+            fi
+            if [ "$comparison" != ahead ] && [ "$comparison" != identical ]; then
+              echo "release is ahead of or diverged from $SHA; refusing a stale run" >&2
+              exit 1
+            fi
           elif grep -q 'HTTP 404' "$RUNNER_TEMP/branch-error"; then
-            gh api --method POST "repos/$GH_REPO/git/refs" -f ref=refs/heads/release -f "sha=$SHA"
+            release_sha=""
           else
             cat "$RUNNER_TEMP/branch-error" >&2
             exit 1
+          fi
+
+          if ! base_tree=$(gh api "repos/$GH_REPO/git/commits/$SHA" --jq .tree.sha); then
+            echo "could not resolve the tree at $SHA" >&2
+            exit 1
+          fi
+          if ! tree=$(jq -n --arg base_tree "$base_tree" \
+            --rawfile plugin "$RUNNER_TEMP/manifests/plugin.json" \
+            --rawfile marketplace "$RUNNER_TEMP/manifests/marketplace.json" \
+            '{base_tree: $base_tree, tree: [
+              {path: "plugin/.claude-plugin/plugin.json", mode: "100644", type: "blob", content: $plugin},
+              {path: ".claude-plugin/marketplace.json", mode: "100644", type: "blob", content: $marketplace}
+            ]}' | gh api --method POST "repos/$GH_REPO/git/trees" --input - --jq .sha); then
+            echo "could not create the stamped tree" >&2
+            exit 1
+          fi
+          if ! stamp=$(jq -n --arg message "chore: stamp emend $VERSION into the plugin manifests" \
+            --arg tree "$tree" --argjson parents "$parents" \
+            '{message: $message, tree: $tree, parents: $parents}' \
+            | gh api --method POST "repos/$GH_REPO/git/commits" --input - --jq .sha); then
+            echo "could not create the stamp commit" >&2
+            exit 1
+          fi
+          echo "Stamp commit: $stamp"
+          if [ -n "$release_sha" ]; then
+            gh api --method PATCH "repos/$GH_REPO/git/refs/heads/release" -f "sha=$stamp" -F force=false
+          else
+            gh api --method POST "repos/$GH_REPO/git/refs" -f ref=refs/heads/release -f "sha=$stamp"
           fi

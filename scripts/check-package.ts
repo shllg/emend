@@ -110,8 +110,16 @@ try {
   check = "read version";
   const version = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8")).version;
   const plugin = JSON.parse(readFileSync(join(root, "plugin/.claude-plugin/plugin.json"), "utf8"));
-  check = "plugin.json has no version field: a fixed version stops plugin updates";
+  check = "plugin.json on main carries no version; the release workflow stamps it on the release branch";
   assert(!Object.hasOwn(plugin, "version"));
+  const marketplace = JSON.parse(readFileSync(join(root, ".claude-plugin/marketplace.json"), "utf8"));
+  check = "marketplace.json on main carries no version; the release workflow stamps it on the release branch";
+  assert(!Object.hasOwn(marketplace, "version"));
+  assert(!Object.hasOwn(marketplace.metadata ?? {}, "version"));
+  for (const entry of marketplace.plugins) {
+    check = "marketplace plugin entries carry no version; plugin.json supplies it on the release branch";
+    assert(!Object.hasOwn(entry, "version"));
+  }
   const userconfig = join(work, "userconfig");
   const globalconfig = join(work, "globalconfig");
   writeFileSync(userconfig, "");

@@ -1,9 +1,10 @@
-// Plans releases from shipped commits and stamps only the temporary build's version files.
+// Plans releases from shipped commits, stamps the temporary build and writes release manifests.
 // GitHub Actions owns verification, tagging, publishing and the release branch.
 import { execFileSync, spawnSync } from "node:child_process";
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 export class ReleaseError extends Error {}
 class UsageError extends Error {}
@@ -11,6 +12,8 @@ class UsageError extends Error {}
 export const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?![\s\S])/;
 const VERSION_VALUE = /("version"\s*:\s*")([^"]*)(")/;
 const VERSION_SOURCE = "apps/emend/src/version.ts";
+const PLUGIN_MANIFEST = "plugin/.claude-plugin/plugin.json";
+const MARKETPLACE_MANIFEST = ".claude-plugin/marketplace.json";
 
 // Directories include everything below them; the other entries name exact root-relative files.
 export const SHIPPED_PATHS = [
@@ -91,6 +94,38 @@ export function bumpedVersionText(root: string, file: string, version: string): 
     throw new ReleaseError(`release: could not set the top-level version in ${file}`);
   }
   return bumped;
+}
+
+export function versionedManifestText(root: string, file: string, version: string): string {
+  const text = readFileSync(join(root, file), "utf8");
+  let original: unknown;
+  try {
+    original = JSON.parse(text);
+  } catch {
+    throw new ReleaseError(`release: ${file} is not valid JSON`);
+  }
+  const failure = `release: could not set the top-level version in ${file}`;
+  if (!original || typeof original !== "object" || Array.isArray(original)) throw new ReleaseError(failure);
+  if (Object.hasOwn(original, "version")) throw new ReleaseError(`release: ${file} must carry no version`);
+  const stamped = text.replace(
+    /(\r?\n[ \t]*|[ \t]*)"name"\s*:\s*"(?:[^"\\]|\\.)*"/,
+    (name, whitespace) => `${name},${whitespace}"version": ${JSON.stringify(version)}`,
+  );
+  try {
+    if (isDeepStrictEqual(JSON.parse(stamped), { ...original, version })) return stamped;
+  } catch {
+    // A match inside a string must never produce a damaged manifest.
+  }
+  throw new ReleaseError(failure);
+}
+
+export function stampPluginManifests(root: string, version: string, outDir: string): void {
+  if (!VERSION_PATTERN.test(version)) throw new ReleaseError("release: version must be plain x.y.z");
+  const plugin = versionedManifestText(root, PLUGIN_MANIFEST, version);
+  const marketplace = versionedManifestText(root, MARKETPLACE_MANIFEST, version);
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(join(outDir, "plugin.json"), plugin);
+  writeFileSync(join(outDir, "marketplace.json"), marketplace);
 }
 
 const VERSION_LINE = /^(export const VERSION = ")([^"\r\n]*)(";)(?=\r?$)/gm;
@@ -226,6 +261,26 @@ function releaseCommit(root: string, ref: string): string {
   }
 }
 
+export function releaseSource(root: string, released: string): string {
+  if (!git(root, ["ls-tree", "--name-only", released, "--", PLUGIN_MANIFEST]).trim()) return released;
+  const text = git(root, ["show", `${released}:${PLUGIN_MANIFEST}`]);
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(text);
+  } catch {
+    throw new ReleaseError(`release: ${PLUGIN_MANIFEST} at ${released} is not valid JSON`);
+  }
+  if (manifest && typeof manifest === "object" && !Array.isArray(manifest) && Object.hasOwn(manifest, "version")) {
+    // Stamp commits keep the tagged source first and the previous stamp second for fast-forward moves.
+    try {
+      return git(root, ["rev-parse", "--verify", `${released}^1^{commit}`]).trim();
+    } catch {
+      throw new ReleaseError(`release: stamp commit ${released} has no first parent`);
+    }
+  }
+  return released;
+}
+
 function isAncestor(root: string, ancestor: string, descendant: string): boolean {
   const result = spawnSync("git", ["-C", root, "merge-base", "--is-ancestor", ancestor, descendant], {
     encoding: "utf8",
@@ -244,9 +299,10 @@ export async function plan(options: PlanOptions) {
   const taggedSha = git(root, ["rev-parse", "--verify", `refs/tags/${newest}^{commit}`]).trim();
   const releaseRef = options.releaseRef ?? "refs/remotes/origin/release";
   const released = releaseCommit(root, releaseRef);
+  const source = releaseSource(root, released);
   const contained = isAncestor(root, taggedSha, released);
   const requireCurrentRelease = (sha: string) => {
-    if (!isAncestor(root, released, sha)) {
+    if (!isAncestor(root, source, sha)) {
       throw new ReleaseError(`release: ${releaseRef} is ahead of or diverged from ${sha}; refusing a stale release`);
     }
   };
@@ -322,12 +378,19 @@ export async function plan(options: PlanOptions) {
   return { release: true as const, resume: false, version, previous, sha, section };
 }
 
-type Command = { command: "plan"; bump: Bump; notes?: string } | { command: "stamp"; version: string };
-const USAGE = "Usage: node scripts/release.ts plan [--bump auto|patch|minor] [--notes <file>] | stamp <x.y.z>";
+type Command =
+  | { command: "plan"; bump: Bump; notes?: string }
+  | { command: "stamp"; version: string }
+  | { command: "manifests"; version: string; outDir: string };
+const USAGE =
+  "Usage: node scripts/release.ts plan [--bump auto|patch|minor] [--notes <file>] | stamp <x.y.z> | manifests <x.y.z> <dir>";
 
 export function parseArgs(args: string[]): Command {
   if (args[0] === "stamp" && args.length === 2 && !args[1].startsWith("-")) {
     return { command: "stamp", version: args[1] };
+  }
+  if (args[0] === "manifests" && args.length === 3 && !args[1].startsWith("-") && !args[2].startsWith("-")) {
+    return { command: "manifests", version: args[1], outDir: args[2] };
   }
   if (args[0] !== "plan") throw new UsageError(USAGE);
   let bump: Bump = "auto";
@@ -350,6 +413,7 @@ if (import.meta.main) {
   try {
     const args = parseArgs(process.argv.slice(2));
     if (args.command === "stamp") stampVersion(root, args.version);
+    else if (args.command === "manifests") stampPluginManifests(root, args.version, args.outDir);
     else await plan({ root, ...args, output: process.env.GITHUB_OUTPUT, stdout: console.log });
   } catch (error) {
     const message = error instanceof Error ? error.message.split(/\r?\n/)[0] : String(error);
