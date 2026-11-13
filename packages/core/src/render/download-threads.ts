@@ -24,6 +24,8 @@ export type DownloadThread = {
   comments: DownloadComment[];
 };
 export type FileThreads = {
+  /** Time this review was copied from another machine, in epoch milliseconds. */
+  copiedAt?: number;
   /** Whole-review threads (home file only). */
   top: DownloadThread[];
   /** Block id to the threads shown right after that block. */
@@ -101,10 +103,13 @@ export function routeDownloadThreads(input: {
   topics: TopicMeta[];
   base: DownloadFile;
   docs: DownloadFile[];
+  importedAt?: number | null;
 }): { base: FileThreads; docs: FileThreads[]; comments?: FileThreads } {
   const base = emptyThreads();
   const docs = input.docs.map(emptyThreads);
   const comments = input.base.kind === "html" ? emptyThreads() : undefined;
+  if (input.importedAt != null)
+    for (const file of [base, ...docs, ...(comments ? [comments] : [])]) file.copiedAt = input.importedAt;
   const home = comments ?? base;
   const files: { file: DownloadFile; threads: FileThreads }[] = [
     { file: input.base, threads: base },

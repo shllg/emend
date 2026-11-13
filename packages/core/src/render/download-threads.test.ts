@@ -154,6 +154,19 @@ test("an HTML pub uses a separate home and HTML files never receive threads", ()
   expect(route([], { kind: "html", path: "p.html" }).comments).toEqual(route([]).base);
 });
 
+test.each([undefined, null, 0, Date.UTC(2026, 10, 13, 10, 5)])(
+  "carries the copy time to the base, docs and comments files: %s",
+  (importedAt) => {
+    for (const base of [writeup, { kind: "html", path: "p.html" }] as DownloadFile[]) {
+      const routed = routeDownloadThreads({ threads: [review, docSpan], seq: 2, topics, base, docs, importedAt });
+      for (const file of [routed.base, ...routed.docs, ...(routed.comments ? [routed.comments] : [])]) {
+        if (importedAt == null) expect(file).not.toHaveProperty("copiedAt");
+        else expect(file.copiedAt).toBe(importedAt);
+      }
+    }
+  },
+);
+
 test.each([
   [docSpan, { kind: "markdown", path: "a.md" }],
   [sourceLines, { kind: "source", path: "s.ts" }],

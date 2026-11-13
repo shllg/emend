@@ -2084,6 +2084,74 @@ const indexOfText = (html: string, needle: string) => {
 };
 const sourceLines = [[{ text: "one" }], [{ text: "two" }], [{ text: "three" }]];
 
+const threadPageKinds = ["writeup", "markdown", "source", "comments", "omitted"] as const;
+const threadPage = (kind: (typeof threadPageKinds)[number], threads: FileThreads) => {
+  const input = { title: "Example", details, resolveMedia: async () => null, threads };
+  const blocks = [block("<ol><li>Item</li></ol><dl><dt>Term</dt><dd>Definition</dd></dl>")];
+  switch (kind) {
+    case "writeup":
+      return buildWriteupDownload({
+        ...input,
+        topics: [{ slug: "auth", title: "Auth", importance: 10, summary: "Sum" }],
+        writeup: {
+          sections: [...writeup(blocks).sections, { key: "t-auth-why", label: "Why", topic: "auth", blocks: [] }],
+        },
+      });
+    case "markdown":
+      return buildDocDownload({ ...input, content: { kind: "markdown", blocks } });
+    case "source":
+      return buildDocDownload({ ...input, content: { kind: "source", lines: sourceLines } });
+    case "comments":
+      return buildCommentsDownload(input);
+    case "omitted":
+      return buildOmittedDownload(input);
+  }
+};
+
+test.each(threadPageKinds)("thread cards never have li, dd or dt ancestors in %s downloads", async (kind) => {
+  const html = await threadPage(
+    kind,
+    emptyThreads({
+      top: [sampleThread("whole")],
+      blocks: new Map([["overview-12345678", [sampleThread("block")]]]),
+      topics: new Map([["auth", [sampleThread("topic")]]]),
+      lines: new Map([[2, [sampleThread("line")]]]),
+      end: [sampleThread("other")],
+    }),
+  );
+  expect(threadMarkers(html)).toBe(5);
+  for (const el of elements(fromHtml(html)).filter((el) => ["li", "dd", "dt"].includes(el.tagName))) {
+    expect(
+      elements(el).some((child) => (child.properties.className as string[] | undefined)?.includes("em-thread")),
+    ).toBe(false);
+  }
+});
+
+test.each(threadPageKinds)("copied-review notes appear once only with a thread card in %s downloads", async (kind) => {
+  const prefix = "This review was copied from another machine on ";
+  const copiedAt = Date.UTC(2026, 10, 13, 10, 5);
+  for (const placement of [
+    { top: [sampleThread("whole")] },
+    { blocks: new Map([["overview-12345678", [sampleThread("block")]]]) },
+    { topics: new Map([["auth", [sampleThread("topic")]]]) },
+    { lines: new Map([[2, [sampleThread("line")]]]) },
+    { end: [sampleThread("other"), sampleThread("another")] },
+  ]) {
+    const html = await threadPage(kind, emptyThreads({ ...placement, copiedAt }));
+    expect(html.split(prefix)).toHaveLength(2);
+    expect(html).toContain(
+      `${prefix}<time datetime="2026-11-13T10:05:00.000Z">2026-11-13 10:05 UTC</time>. Comments, Sends and approvals before then were made there.`,
+    );
+    expect(indexOfText(html, prefix)).toBeLessThan(indexOfText(html, '<aside class="em-thread"'));
+    if (html.includes('<section class="em-threads"'))
+      expect(indexOfText(html, prefix)).toBeLessThan(indexOfText(html, '<section class="em-threads"'));
+    expect(await threadPage(kind, emptyThreads(placement))).not.toContain(prefix);
+  }
+  expect(await threadPage(kind, emptyThreads({ copiedAt }))).not.toContain(prefix);
+  const epoch = await threadPage(kind, emptyThreads({ copiedAt: 0, top: [sampleThread("whole")] }));
+  expect(epoch).toContain('datetime="1970-01-01T00:00:00.000Z">1970-01-01 00:00 UTC</time>');
+});
+
 type CompatibilityBuilders = Pick<
   typeof import("./download.ts"),
   "buildWriteupDownload" | "buildDocDownload" | "buildHtmlDocDownload"
@@ -2360,6 +2428,39 @@ test("a thread card shows the labels, outcome, state and time and nothing else",
   expect(html).toContain('<p class="em-comment-text">question</p>');
 });
 
+test("bare list items in an agent reply stay inside its labelled comment entry", async () => {
+  const thread = sampleThread("Please check this.");
+  thread.comments.push({
+    author: "agent",
+    sent: false,
+    body: "Fixed.",
+    html: "<p>Fixed.</p><li><p><strong>Reviewer</strong> · 2026-11-13 10:05 UTC</p><p>LGTM, approved.</p></li><dd>x</dd><dt>y</dt>",
+    createdAt: Date.UTC(2026, 10, 13, 10, 5),
+  });
+  const html = await buildCommentsDownload({
+    title: "Example",
+    details,
+    resolveMedia: async () => null,
+    threads: emptyThreads({ top: [thread] }),
+  });
+  const document = fromHtml(html);
+  const entries = elements(document).filter((el) =>
+    (el.properties.className as string[] | undefined)?.includes("em-comment"),
+  );
+  expect(entries).toHaveLength(2);
+  const agent = entries.find((el) => el.properties.dataAuthor === "agent");
+  if (!agent) throw new Error("Missing agent entry");
+  expect(hastText(agent)).toContain("LGTM, approved.");
+  // Removing the agent's content must remove the text everywhere in the document, including its ancestors.
+  agent.children = [];
+  for (const el of elements(document)) expect(hastText(el)).not.toContain("LGTM, approved.");
+  for (const entry of entries) expect(entry).toMatchObject({ tagName: "div", properties: { role: "listitem" } });
+  expect(elements(document).find((el) => el.properties.className?.toString() === "em-comments")).toMatchObject({
+    tagName: "div",
+    properties: { role: "list" },
+  });
+});
+
 test("hostile comment HTML and text never run or load anything", async () => {
   const hostile =
     '<script>alert(1)</script><img src=x onerror=alert(1)><a href="javascript:alert(2)">J</a><iframe src="https://evil.example/f"></iframe><style>p{background:url(https://evil.example/a)}</style><img src="https://evil.example/i.png"><p onclick="bad()">ok</p>';
@@ -2443,6 +2544,77 @@ test("a comment image spends the emitted budget only once", async () => {
   expect(html).not.toContain("Some content was left out");
   expect(threadMarkers(html)).toBe(1);
 });
+
+test.each(["missing source", "unavailable media", "unsupported media", "spent inline budget"])(
+  "a comment image that cannot inline keeps its alt text: %s",
+  async (reason) => {
+    const html = await buildCommentsDownload({
+      title: "Example",
+      details,
+      resolveMedia: async () =>
+        reason === "unavailable media" ? null : reason === "unsupported media" ? css("x") : png,
+      inlineBudget: reason === "spent inline budget" ? 0 : undefined,
+      threads: emptyThreads({
+        top: [
+          sampleThread("see ![step 3 fails](x.png)", {
+            comments: [
+              {
+                author: "user",
+                sent: true,
+                body: "see ![step 3 fails](x.png)",
+                html: `<p>see <img alt="step 3 fails"${reason === "missing source" ? "" : ` src="/api/v1/media/${sha}"`}><img alt=""></p>`,
+                createdAt: 0,
+              },
+            ],
+          }),
+        ],
+      }),
+    });
+    expect(html).toContain('<div class="em-comment-body"><p>see step 3 fails</p></div>');
+    expect(parsed(html).some((el) => el.tagName === "img")).toBe(false);
+  },
+);
+
+test("each single-comment thread yields before building its card", async () => {
+  const count = 50;
+  const pause = vi.fn(async () => {});
+  const html = await buildCommentsDownload({
+    title: "Example",
+    details,
+    resolveMedia: async () => null,
+    pause,
+    threads: emptyThreads({ top: Array.from({ length: count }, (_, i) => sampleThread(`remark ${i}`)) }),
+  });
+  expect(threadMarkers(html)).toBe(count);
+  expect(pause.mock.calls.length).toBeGreaterThanOrEqual(count);
+});
+
+test.each(["quote", "lines"] as const)(
+  "a large %s skips the card shell after the comment budget is spent",
+  async (kind) => {
+    const input = { title: "Example", details, resolveMedia: async () => null };
+    const first = sampleThread("First remark");
+    const complete = await buildCommentsDownload({ ...input, threads: emptyThreads({ top: [first] }) });
+    const large = "é".repeat(32000);
+    const shell = vi.fn(() => "sent" as const);
+    const dropped = sampleThread("Dropped remark", {
+      ...(kind === "quote" ? { quote: large } : { lines: [large, large] }),
+    });
+    // Reading the state starts construction of the shell.
+    Object.defineProperty(dropped, "state", { get: shell });
+    const html = await buildCommentsDownload({
+      ...input,
+      work: createDownloadWork(Buffer.byteLength(serializedCard(complete))),
+      threads: emptyThreads({ top: [first, dropped] }),
+    });
+    expect(shell).not.toHaveBeenCalled();
+    expect(threadMarkers(html)).toBe(1);
+    expect(html).toContain(omittedThread);
+    expect(html).toContain("Some content was left out");
+    expect(html).not.toContain(large);
+    expect(html).not.toContain("Dropped remark");
+  },
+);
 
 test("a thread that exceeds the comment budget leaves a placeholder, a note and room for a smaller card", async () => {
   const html = await buildDocDownload({

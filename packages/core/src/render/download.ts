@@ -83,7 +83,7 @@ const READING_STYLES = `
 @media(prefers-color-scheme:dark){:root{--bg:oklch(.18 .004 260);--sunken:oklch(.125 .004 260);--fg:oklch(.79 .004 260);--strong:oklch(.895 .003 260);--muted:oklch(.7 .004 260);--border:oklch(.25 .004 260);--link:oklch(.85 .14 81)}.shiki{background-color:var(--shiki-dark-bg,var(--sunken))}.shiki,.shiki span{color:var(--shiki-dark,inherit)}}
 `;
 const THREAD_STYLES = `
-.em-threads{margin:24px 0}.em-thread{margin:12px 0;padding:10px 14px;border:1px solid var(--border,#d4d4d8);border-left:3px solid var(--link,#7c5a1e);border-radius:6px;background:var(--sunken,#f7f7f8);color:var(--fg,#3f3f46);font:400 14px/1.55 ui-sans-serif,system-ui,sans-serif;text-align:left}.em-thread[data-state=resolved]{border-left-color:var(--muted,#71717a)}.em-thread-head,.em-thread-note,.em-thread-omitted,.em-comment-head{margin:0 0 6px;font-size:12px;line-height:1.4;color:var(--muted,#71717a)}.em-thread-where,.em-comment-head strong{color:var(--strong,#18181b)}.em-thread-quote{margin:0 0 8px;padding-left:10px;border-left:2px solid var(--border,#d4d4d8)}.em-thread-quote p{margin:0}.em-thread-lines{margin:0 0 8px;padding:8px 10px;overflow:auto;font:400 12px/1.5 ui-monospace,"SF Mono",Menlo,monospace}.em-comments{list-style:none;margin:0;padding:0}.em-comment{margin:8px 0 0;padding-top:8px;border-top:1px solid var(--border,#d4d4d8)}.em-comment:first-child{margin-top:0;padding-top:0;border-top:0}.em-comment-text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.em-comment-body{overflow-wrap:anywhere}.em-comment-body>*{margin-top:0}.em-comment-body>:last-child{margin-bottom:0}
+.em-threads{margin:24px 0}.em-thread{margin:12px 0;padding:10px 14px;border:1px solid var(--border,#d4d4d8);border-left:3px solid var(--link,#7c5a1e);border-radius:6px;background:var(--sunken,#f7f7f8);color:var(--fg,#3f3f46);font:400 14px/1.55 ui-sans-serif,system-ui,sans-serif;text-align:left}.em-thread[data-state=resolved]{border-left-color:var(--muted,#71717a)}.em-thread-head,.em-thread-note,.em-thread-omitted,.em-comment-head{margin:0 0 6px;font-size:12px;line-height:1.4;color:var(--muted,#71717a)}.em-thread-where,.em-comment-head strong{color:var(--strong,#18181b)}.em-thread-quote{margin:0 0 8px;padding-left:10px;border-left:2px solid var(--border,#d4d4d8)}.em-thread-quote p{margin:0}.em-thread-lines{margin:0 0 8px;padding:8px 10px;overflow:auto;font:400 12px/1.5 ui-monospace,"SF Mono",Menlo,monospace}.em-comments{margin:0;padding:0}.em-comment{margin:8px 0 0;padding-top:8px;border-top:1px solid var(--border,#d4d4d8)}.em-comment:first-child{margin-top:0;padding-top:0;border-top:0}.em-comment-text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.em-comment-body{overflow-wrap:anywhere}.em-comment-body>*{margin-top:0}.em-comment-body>:last-child{margin-bottom:0}
 @media(prefers-color-scheme:dark){.em-thread{border-color:var(--border,#3f3f46);background:var(--sunken,#1c1c1f);color:var(--fg,#d4d4d8)}.em-thread-head,.em-thread-note,.em-thread-omitted,.em-comment-head{color:var(--muted,#a1a1aa)}.em-thread-where,.em-comment-head strong{color:var(--strong,#f4f4f5)}.em-thread-quote,.em-comment{border-color:var(--border,#3f3f46)}}
 `;
 const rel = ["noopener", "noreferrer", "nofollow"];
@@ -321,7 +321,11 @@ function stripAttributes(el: Element, removed: Set<string>) {
   for (const key of Object.keys(el.properties))
     if (/^on/i.test(key) || removed.has(key.toLowerCase())) delete el.properties[key];
 }
-async function transformBlocks(parent: Root | Element, state: AssetState): Promise<void> {
+async function transformBlocks(
+  parent: Root | Element,
+  state: AssetState,
+  options: { imageAlt?: boolean } = {},
+): Promise<void> {
   const children: ElementContent[] = [];
   for (const node of parent.children) {
     if (node.type === "text") {
@@ -341,9 +345,12 @@ async function transformBlocks(parent: Root | Element, state: AssetState): Promi
       const src = String(node.properties.src ?? "");
       const hash = src.startsWith(MEDIA_URL_PREFIX) ? src.slice(MEDIA_URL_PREFIX.length) : "";
       const asset = /^[0-9a-f]{64}$/.test(hash) ? await state.get(hash) : null;
-      if (!asset || !imageTypes.has(asset.mediaType)) continue;
-      const uri = await state.data(asset);
-      if (uri === null) continue;
+      const uri = asset && imageTypes.has(asset.mediaType) ? await state.data(asset) : null;
+      if (uri === null) {
+        const alt = node.properties.alt;
+        if (options.imageAlt && typeof alt === "string" && alt.length) children.push(text(alt));
+        continue;
+      }
       node.properties.src = uri;
     }
     if (node.tagName === "a") {
@@ -356,18 +363,32 @@ async function transformBlocks(parent: Root | Element, state: AssetState): Promi
         node.properties = { className: ["em-doc-link"] };
       }
     }
-    await transformBlocks(node, state);
+    await transformBlocks(node, state, options);
     children.push(node);
   }
   parent.children = children;
 }
 /** Threads of one file and the ones a page has already shown. */
-type ThreadContext = { threads: FileThreads; emitted: Set<DownloadThread>; state: AssetState };
+type ThreadContext = { threads: FileThreads; emitted: Set<DownloadThread>; state: AssetState; hasCards?: boolean };
 const stateLabels = { open: "Open", sent: "Sent", answered: "Answered", resolved: "Resolved" } as const;
 const outcomeLabels = { fixed: "Fixed", explained: "Explained", held: "Held", declined: "Declined" } as const;
 function commentTime(ms: number): ElementContent {
   const iso = new Date(ms).toISOString();
   return element("time", [text(`${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`)], { dateTime: iso });
+}
+function copiedReviewNote(ctx: ThreadContext): ElementContent[] {
+  if (!ctx.hasCards || ctx.threads.copiedAt === undefined) return [];
+  return [
+    element(
+      "p",
+      [
+        text("This review was copied from another machine on "),
+        commentTime(ctx.threads.copiedAt),
+        text(". Comments, Sends and approvals before then were made there."),
+      ],
+      { className: ["em-thread-note"] },
+    ),
+  ];
 }
 function hasCommentContent(node: Root | Element): boolean {
   return node.children.some((child) =>
@@ -381,7 +402,7 @@ async function commentBody(comment: DownloadComment, state: AssetState): Promise
   if (comment.html === null || !parseDocHtml(comment.html, HTML_ELEMENT_LIMIT)) return plain();
   // The same filtering as writeup blocks: no scripts, handlers, frames, styles or remote loads.
   const tree = fromHtml(comment.html, { fragment: true });
-  await transformBlocks(tree, state);
+  await transformBlocks(tree, state, { imageAlt: true });
   if (!hasCommentContent(tree)) return plain();
   return element(
     "div",
@@ -389,9 +410,20 @@ async function commentBody(comment: DownloadComment, state: AssetState): Promise
     { className: ["em-comment-body"] },
   );
 }
+const omittedThread = () =>
+  element("p", [text("A comment thread was left out here because it passed the size limit for comments.")], {
+    className: ["em-thread-omitted"],
+  });
 async function threadCard(thread: DownloadThread, state: AssetState, showWhere: boolean): Promise<Element> {
+  await state.pause?.();
+  const excerpt = thread.quote ?? thread.lines?.join("\n") ?? "";
+  const bound = utf8Length(excerpt);
+  if (bound > state.commentLeft()) {
+    state.takeComment(bound);
+    return omittedThread();
+  }
   const items: ElementContent[] = [];
-  const list = element("ol", [], { className: ["em-comments"] });
+  const list = element("div", [], { className: ["em-comments"], role: "list" });
   const card = element(
     "aside",
     [
@@ -407,9 +439,9 @@ async function threadCard(thread: DownloadThread, state: AssetState, showWhere: 
       ),
       ...(thread.note ? [element("p", [text(thread.note)], { className: ["em-thread-note"] })] : []),
       ...(thread.quote !== undefined
-        ? [element("blockquote", [element("p", [text(thread.quote)])], { className: ["em-thread-quote"] })]
+        ? [element("blockquote", [element("p", [text(excerpt)])], { className: ["em-thread-quote"] })]
         : thread.lines
-          ? [element("pre", [element("code", [text(thread.lines.join("\n"))])], { className: ["em-thread-lines"] })]
+          ? [element("pre", [element("code", [text(excerpt)])], { className: ["em-thread-lines"] })]
           : []),
       list,
     ],
@@ -420,7 +452,7 @@ async function threadCard(thread: DownloadThread, state: AssetState, showWhere: 
     for (const comment of thread.comments) {
       if (items.length) await state.pause?.();
       const item = element(
-        "li",
+        "div",
         [
           element(
             "p",
@@ -434,7 +466,7 @@ async function threadCard(thread: DownloadThread, state: AssetState, showWhere: 
           ),
           await commentBody(comment, state),
         ],
-        { className: ["em-comment"], dataAuthor: comment.author },
+        { className: ["em-comment"], role: "listitem", dataAuthor: comment.author },
       );
       bytes += utf8Length(serialize({ type: "root", children: [item] }).slice(1));
       if (bytes > state.commentLeft()) break;
@@ -445,9 +477,7 @@ async function threadCard(thread: DownloadThread, state: AssetState, showWhere: 
     list.children = items;
     return card;
   }
-  return element("p", [text("A comment thread was left out here because it passed the size limit for comments.")], {
-    className: ["em-thread-omitted"],
-  });
+  return omittedThread();
 }
 /** Cards for threads this page has not shown yet; marks them shown. */
 async function threadCards(list: DownloadThread[] | undefined, ctx: ThreadContext, showWhere = false) {
@@ -455,7 +485,9 @@ async function threadCards(list: DownloadThread[] | undefined, ctx: ThreadContex
   for (const thread of list ?? []) {
     if (ctx.emitted.has(thread)) continue;
     ctx.emitted.add(thread);
-    cards.push(await threadCard(thread, ctx.state, showWhere));
+    const card = await threadCard(thread, ctx.state, showWhere);
+    if (card.tagName === "aside") ctx.hasCards = true;
+    cards.push(card);
   }
   return cards;
 }
@@ -489,7 +521,9 @@ async function threadParts(
   const top = await threadSection("Comments on the whole review", threads.top, ctx);
   const content = await build(ctx);
   const other = fileThreads(threads).filter((thread) => !ctx.emitted.has(thread));
-  return { top, content, tail: await threadSection("Other comments", other, ctx, true) };
+  const tail = await threadSection("Other comments", other, ctx, true);
+  top.unshift(...copiedReviewNote(ctx));
+  return { top, content, tail };
 }
 function fileThreads(threads: FileThreads): DownloadThread[] {
   return [
@@ -1151,6 +1185,7 @@ export async function buildOmittedDownload(input: {
     const ctx: ThreadContext = { threads: input.threads, emitted: new Set(), state };
     content.push(...(await threadSection("Comments on the whole review", input.threads.top, ctx)));
     content.push(...(await threadSection("Comments on this doc", fileThreads(input.threads), ctx, true)));
+    content.splice(1, 0, ...copiedReviewNote(ctx));
   }
   return serialize({
     type: "root",

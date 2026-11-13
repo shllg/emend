@@ -97,7 +97,7 @@ a machine token reaches only reviews from its own instance.
 | GET | `/api/v1/agent/reviews` | Agent | List the token's own instance's reviews, newest first, as `AgentReviewList`; `?head=<sha>` keeps those whose approved or newest revision has that head. |
 | GET | `/api/v1/reviews/:id` | Reviewer | Read a review. |
 | GET | `/api/v1/reviews/:id/revisions/:seq` | Reviewer | Read one revision. |
-| GET | `/api/v1/reviews/:id/revisions/:seq/download` | Reviewer | Download one offline HTML file, or a ZIP with docs selected by repeated `doc` query parameters. |
+| GET | `/api/v1/reviews/:id/revisions/:seq/download` | Reviewer | Download one offline HTML file, or a ZIP with docs selected by repeated `doc` parameters. Optional `comments=1` adds sent comments and replies; an HTML pub with comments downloads as a ZIP. |
 | PUT | `/api/v1/reviews/:id/viewed` | Reviewer | Mark or unmark diff files as viewed; return 204. |
 | GET | `/api/v1/files/:fileId/old` | Reviewer | Read the old file side. |
 | GET | `/api/v1/files/:fileId/new` | Reviewer | Read the new file side. |
@@ -250,9 +250,13 @@ comment left is left out. Unsent comments never reach the file. Each thread show
 Answered or Resolved), the quoted text or the diff lines it was made on, and its comments,
 labelled "Reviewer" or "Agent", with an agent's outcome and the time in UTC. Comment bodies
 are shown as emend renders them in the app and pass the same filtering as the rest of the file:
-scripts, styles, frames, event handlers and remote images are removed, and a body that cannot
-be rendered shows as plain text. A body with no text or image after filtering also shows as
-escaped plain text. No thread id, comment id or address is in the file.
+scripts, styles, frames, event handlers and remote images are removed. An image in a comment
+that cannot be shown leaves its alt text. A body that cannot be rendered shows as plain text.
+A body with no text or image after filtering also shows as escaped plain text.
+No thread id, comment id or address is in the file.
+For a copied review, each file that shows a thread card has a note before its threads:
+"This review was copied from another machine on YYYY-MM-DD HH:MM UTC. Comments, Sends and
+approvals before then were made there." No machine name, host or id is included.
 A thread shows once, in the first file that holds its doc (the base file first). HTML docs never
 hold comments. Their threads go to the "Other comments" list, with the path and quote.
 For an HTML pub, `comments.html` holds whole-review threads and "Other comments". It has
@@ -268,8 +272,10 @@ Where a thread goes, by its placement on this revision:
   (or is the pub's base doc).
 - Source doc threads: after their last line, in the file of that doc when it is selected (or
   is the pub's base doc).
+- Threads placed on a doc in the download whose block or line cannot be found in that file:
+  an "Other comments" list at the end of that doc's own file.
 - Everything else, including diff threads, threads that have no place on this revision (with the
-  reason and the revision they were made on), and threads whose file or block is not in the
+  reason and the revision they were made on), and threads whose file is not in the
   download: an "Other comments" list at the end of the base file, or in `comments.html` for an
   HTML pub, with the path and lines.
 

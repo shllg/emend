@@ -10,6 +10,8 @@ import type { AppEnv } from "../auth/principal.ts";
 import { DOWNLOAD_CSP } from "../http/headers.ts";
 import { publishReview } from "../mailbox/lifecycle-support.ts";
 import { error, mailboxFixture } from "../mailbox/test-support.ts";
+import { executeWork } from "../publish/work.ts";
+import { clearCommentHtmlCache } from "./comment-html.ts";
 import { downloadRoutes } from "./download.ts";
 
 let f: Awaited<ReturnType<typeof mailboxFixture>>;
@@ -1317,6 +1319,34 @@ test("comments on shows each thread at its place with replies, labels and state"
   expect(base).not.toContain("Ticked doc remark");
 });
 
+test.each([null, Date.UTC(2026, 10, 13, 10, 5)])(
+  "downloads show the review's copy time only when imported: %s",
+  async (importedAt) => {
+    const { reviewId, ids } = await commentedReview();
+    if (importedAt !== null)
+      await f.db.query((q) =>
+        q
+          .update(reviews)
+          .set({ importedAt })
+          .where(and(eq(reviews.ownerId, f.ownerId), eq(reviews.id, reviewId))),
+      );
+    const entries = await zipEntries(await f.request(commentsPath(reviewId, [ids.plan]), "GET"));
+    expect(entries).toHaveLength(2);
+    for (const { html } of entries) {
+      const prefix = "This review was copied from another machine on ";
+      if (importedAt === null) expect(html).not.toContain(prefix);
+      else {
+        expect(html.split(prefix)).toHaveLength(2);
+        expect(html).toContain(
+          `${prefix}<time datetime="2026-11-13T10:05:00.000Z">2026-11-13 10:05 UTC</time>. Comments, Sends and approvals before then were made there.`,
+        );
+        expect(at(html, prefix)).toBeLessThan(at(html, '<aside class="em-thread"'));
+      }
+    }
+    expect(await (await get(reviewId)).text()).not.toContain("This review was copied");
+  },
+);
+
 test("comments=1 without docs keeps the single HTML response and headers", async () => {
   const { reviewId } = await commentedReview();
   const response = await f.request(commentsPath(reviewId), "GET");
@@ -1676,16 +1706,26 @@ test("older revisions exclude later threads while keeping later replies on their
   const first = await postThread(reviewId, { kind: "review" }, "Revision one remark");
   await sendComments(reviewId);
   await publish({ reviewId, writeup: { ...blank, overview: "Revision two" } });
-  await postThread(reviewId, { kind: "review" }, "Revision two remark", 2);
+  const later = await postThread(reviewId, { kind: "review" }, "Revision two remark", 2);
   await sendComments(reviewId, 2);
+  await reply(later.commentId, "Reply on revision two");
   await reply(first.commentId, "Later reply on revision one");
+  clearCommentHtmlCache();
+  const rendered: string[] = [];
+  f.deps.publishExecutor = async (work) => {
+    if (work.kind === "comment-md") rendered.push(...work.bodies);
+    return executeWork(work);
+  };
   const one = await (await f.request(commentsPath(reviewId), "GET")).text();
+  expect(rendered).toEqual(["Revision one remark", "Later reply on revision one"]);
   const two = await (await f.request(`/reviews/${reviewId}/revisions/2/download?comments=1`, "GET")).text();
   expect(one).toContain("Revision one remark");
   expect(one).toContain("Later reply on revision one");
   expect(one).not.toContain("Revision two remark");
+  expect(one).not.toContain("Reply on revision two");
   expect(two).toContain("Revision one remark");
   expect(two).toContain("Revision two remark");
+  expect(two).toContain("Reply on revision two");
 });
 
 test("a sent script-only comment survives as escaped text", async () => {

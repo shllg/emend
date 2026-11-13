@@ -238,10 +238,23 @@ async function revisionDownload(
         createdAt: comments.createdAt,
       })
       .from(comments)
+      .innerJoin(
+        threads,
+        and(eq(threads.ownerId, ownerId), eq(threads.reviewId, reviewId), eq(threads.id, comments.threadId)),
+      )
+      .innerJoin(
+        revisions,
+        and(
+          eq(revisions.ownerId, ownerId),
+          eq(revisions.reviewId, reviewId),
+          eq(revisions.id, threads.createdRevisionId),
+        ),
+      )
       .where(
         and(
           eq(comments.ownerId, ownerId),
           eq(comments.reviewId, reviewId),
+          lte(revisions.seq, seq),
           or(eq(comments.author, "agent"), isNotNull(comments.sendId)),
         ),
       )
@@ -281,6 +294,7 @@ async function revisionDownload(
       .all();
     const base: DownloadFile = doc ? { kind: fileKind(doc), path: doc.path } : { kind: "writeup" };
     return routeDownloadThreads({
+      importedAt: review.importedAt,
       threads: threadRows.map(({ thread, createdOn, placement }) => ({
         target: thread.target,
         state: thread.state,
