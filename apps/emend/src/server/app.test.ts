@@ -438,6 +438,17 @@ test.each([
     expect(initialCookie).toContain("emend_session=");
     expect(initialCookie.includes("Secure")).toBe(publicOrigin);
     const cookie = initialCookie.split(";")[0] ?? "";
+    const secret = cookie.split("=")[1] ?? "";
+    const readSession = () =>
+      fixture.db.query((q) =>
+        q
+          .select()
+          .from(tokens)
+          .where(and(eq(tokens.ownerId, fixture.ownerId), eq(tokens.secretHash, hashSecret(secret))))
+          .get(),
+      );
+    const originalExpiry = (await readSession())?.expiresAt;
+    expect(originalExpiry).toBe(now + 30 * day);
     now += day;
     const response = await request(
       method === "POST" ? "/pairings" : "/reviews",
@@ -446,12 +457,20 @@ test.each([
       method === "POST" ? {} : undefined,
     );
     expect(response.status).toBe(method === "POST" ? 201 : 200);
-    if (renewal === "none") expect(response.headers.has("set-cookie")).toBe(false);
-    else {
+    if (renewal === "none") {
+      expect(response.headers.has("set-cookie")).toBe(false);
+      expect((await readSession())?.expiresAt).toBe(originalExpiry);
+      const write = await request("/pairings", "POST", { Host: host, Cookie: cookie, Origin: origin }, {});
+      expect(write.status).toBe(201);
+      const renewedCookie = write.headers.get("set-cookie") ?? "";
+      expect(renewedCookie).toContain("Max-Age=2592000");
+      expect(renewedCookie).not.toContain("Secure");
+    } else {
       const renewedCookie = response.headers.get("set-cookie") ?? "";
       expect(renewedCookie).toContain("Max-Age=2592000");
       expect(renewedCookie.includes("Secure")).toBe(renewal === "secure");
     }
+    expect((await readSession())?.expiresAt).toBe(now + 30 * day);
   },
 );
 

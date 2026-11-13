@@ -153,16 +153,15 @@ export function createApp(deps: AppDeps) {
       let principal = authorization !== undefined ? await verifyBearer(deps.db, authorization, deps.now()) : null;
       if (authorization === undefined) {
         const secret = sessionCookie(c);
-        const session = await verifySession(deps.db, secret, deps.now());
+        const secure = secureSessionRequest(c, deps.config.secureCookieHost);
+        const readOnly = c.req.method === "GET" || c.req.method === "HEAD";
+        // Reads skip Origin checks: a rewritten Host must not downgrade the cookie,
+        // and the database must not renew without writing the cookie.
+        const mayRenew = deps.config.secureCookieHost === undefined || secure || !readOnly;
+        const session = await verifySession(deps.db, secret, deps.now(), mayRenew);
         if (session) {
           principal = session.principal;
-          if (session.renew && secret) {
-            const secure = secureSessionRequest(c, deps.config.secureCookieHost);
-            const readOnly = c.req.method === "GET" || c.req.method === "HEAD";
-            // Reads skip Origin checks, so a rewritten Host must not downgrade the cookie.
-            if (deps.config.secureCookieHost === undefined || secure || !readOnly)
-              writeSessionCookie(c, secret, secure);
-          }
+          if (session.renew && secret) writeSessionCookie(c, secret, secure);
         }
       }
       if (!principal) throw new ApiError("unauthorized");
