@@ -160,13 +160,11 @@ Each entry is `{ "path": "media/before.png", "source": ".shots/before.png" }`.
 
 - `path` is the published name and `source` the local file. Without `source`, publish reads `path`.
 - Save the file in the worktree, in a folder git ignores, or in a `docRoots` folder.
-- Reference it from any writeup section with `![Alt](path)`. The alt text becomes the caption.
-- Put a before and an after image in one paragraph, with alt text "Before" and "After", to show them side by side.
 - Use PNG, JPEG, GIF, WebP or AVIF only. The source must end in the same extension as `path`.
 - Each file is at most 25 MiB. A review holds at most 50.
 - `path` has no segment that starts with `.`, has no `:` and is unique.
-- Remote image URLs do not show. List the file under `media` instead.
-- Only listed paths render. Images do not render in Markdown docs.
+
+How to show them in the writeup is in [the writing reference](writing.md).
 
 Use these constraints when writing the manifest:
 

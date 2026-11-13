@@ -166,13 +166,12 @@ Replies render as Markdown: lists, `code`, fenced code and links work. Write Mar
 When you name an issue or pull request, write its full URL, or `#123` when the review has a
 repository address, so the reviewer can open it.
 
-For replies and writeup text, answer first, then give the reason and relevant validation.
-Use one fact per sentence and short sentences of 20 words or fewer. Give a short summary in the
-conversation too, grouped by outcome. If a request says "explain it in the writeup", revise the
-owning topic's `why`, `example` or `body`, not only the reply. In `explain` mode, propose that
-text in the reply without editing files. Keep the TL;DR, Where to look, glossary, decisions and
-drift current when edits are allowed; preserve `decisions: null` when the original intent is
-unavailable.
+Write replies and writeup text as [the writing reference](../emend-review/references/writing.md)
+says. Give a short summary in the conversation too, grouped by outcome. If a request says "explain
+it in the writeup", revise the owning topic's `why`, `example` or `body`, not only the reply. In
+`explain` mode, propose that text in the reply without editing files. Keep the TL;DR, Where to look,
+glossary, decisions and drift current when edits are allowed; preserve `decisions: null` when the
+original intent is unavailable.
 
 After a Go, an instruction stating what the change should do becomes the latest stated intent.
 Use it to reassess how the change runs, decisions and drift in the writeup.

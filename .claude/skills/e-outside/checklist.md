@@ -46,7 +46,7 @@ each. End with: merge, ask for changes, or close.
 
 Return the emend review manifest as one JSON object and nothing else. Its shape is in
 `plugin/skills/emend-review/references/manifest.md`; write for the reviewer as
-`plugin/skills/emend-review/SKILL.md` says.
+`plugin/skills/emend-review/SKILL.md` and its `references/writing.md` say.
 
 - `base` and `head` exactly as given. `links`: exactly the PR and the issue (`kind` `pr` and
   `issue`). No `repoUrl`, `media` or `docs`; every file entry has `role` `diff` and no `source`,
