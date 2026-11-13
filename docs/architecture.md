@@ -59,7 +59,8 @@ opener.
 Publish re-checks each stored doc root and refuses one that is not a real path or that `emend config add` would refuse.
 `emend serve` runs without opening a browser; `emend service install` installs a systemd
 user unit or a launchd agent. The server binds `127.0.0.1:3636` unless `--host` or `--tailscale`
-explicitly widens access. There is no telemetry.
+explicitly widens access. `emend serve --public-url <url>` names the HTTPS origin behind the
+user's own proxy and widens no bind. There is no telemetry.
 If `XDG_CONFIG_HOME` is absolute, the service install records it. Reinstall after changing it.
 
 Agent commands (`publish`, `wait`, `feedback`, `reply` and the MCP tools) work with or without a
@@ -90,7 +91,8 @@ Tests always use temporary state directories.
 ## Attached machines and the phone
 
 An always-on machine can serve as the hub. `emend serve --tailscale` exposes its server through
-Tailscale Serve HTTPS. Pairing provides a one-time link, QR code and code for browser sessions.
+Tailscale Serve HTTPS. `emend serve --public-url <url>` uses the user's own HTTPS proxy instead
+and widens no bind. Pairing provides a one-time link, QR code and code for browser sessions.
 A phone opens the same web app and can install it with Add to Home Screen. Its session has
 reviewer privileges only.
 

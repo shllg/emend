@@ -3,8 +3,41 @@ import { and, eq } from "drizzle-orm";
 import { expect, test } from "vitest";
 import { devices, tokens } from "../../db/schema.ts";
 import { testDb } from "../../db/test-support.ts";
-import { revokeSession } from "./sessions.ts";
+import { revokeSession, verifySession } from "./sessions.ts";
 import { createToken, principalFromToken, SESSION_MS } from "./tokens.ts";
+
+test("verifySession can verify without renewing and leave a due renewal for a later request", async () => {
+  const f = await testDb();
+  try {
+    const now = Date.now();
+    const deviceId = randomUUID();
+    await f.db.query((q) =>
+      q.insert(devices).values({ id: deviceId, ownerId: f.ownerId, kind: "browser", name: "Synthetic" }),
+    );
+    const token = await createToken(f.db, f.ownerId, "reviewer", { deviceId, now, expiresAt: now + SESSION_MS });
+    const read = () =>
+      f.db.read((q) =>
+        q
+          .select()
+          .from(tokens)
+          .where(and(eq(tokens.ownerId, f.ownerId), eq(tokens.id, token.id)))
+          .get(),
+      );
+    const later = now + 86_400_000;
+    expect(await verifySession(f.db, token.secret, later, false)).toMatchObject({
+      principal: { tokenId: token.id, ownerId: f.ownerId },
+      renew: false,
+    });
+    expect((await read())?.expiresAt).toBe(now + SESSION_MS);
+    expect(await verifySession(f.db, token.secret, later)).toMatchObject({
+      principal: { tokenId: token.id, ownerId: f.ownerId },
+      renew: true,
+    });
+    expect((await read())?.expiresAt).toBe(later + SESSION_MS);
+  } finally {
+    await f.cleanup();
+  }
+});
 
 test.each(["admin", "agent"] as const)(
   "revokeSession leaves a %s principal untouched and returns no ids",

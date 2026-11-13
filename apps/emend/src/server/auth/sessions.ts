@@ -22,12 +22,12 @@ export function writeSessionCookie(c: Context, secret: string, secure: boolean, 
 export function sessionCookie(c: Context): string | undefined {
   return getCookie(c, SESSION_COOKIE);
 }
-export async function verifySession(db: Db, secret: string | undefined, now: number) {
+export async function verifySession(db: Db, secret: string | undefined, now: number, allowRenewal = true) {
   if (!secret || !SESSION_SHAPE.test(secret)) return null;
   return db.query(async (q) => {
     const row = await liveToken(q, secret, now);
     if (row?.kind !== "reviewer" || !row.deviceId || row.expiresAt === null) return null;
-    const due = now - (row.expiresAt - SESSION_MS) >= 86_400_000;
+    const due = allowRenewal && now - (row.expiresAt - SESSION_MS) >= 86_400_000;
     let renew = false;
     if (due) {
       const updated = await q

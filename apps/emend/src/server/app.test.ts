@@ -18,6 +18,7 @@ import { BlobStore } from "../store/blobs.ts";
 import { createApp, ENDPOINTS } from "./app.ts";
 import { createToken, hashSecret, verifyBearer } from "./auth/tokens.ts";
 import { APP_CSP } from "./http/headers.ts";
+import { serverConfig } from "./serve.ts";
 
 let fixture: Awaited<ReturnType<typeof testDb>>;
 let app: ReturnType<typeof createApp>;
@@ -155,6 +156,68 @@ test("client and origin guards precede credentials and parsing", async () => {
   );
   await error(await request("/session", "POST", { Cookie: "emend_session=invalid" }, {}), "bad_origin");
   expect((await request("/pairings", "POST", bearer(admin), {})).status).toBe(201);
+});
+
+test.each(["emend.example.com", "EMEND.EXAMPLE.COM", "emend.example.com:8443"])(
+  "pairing requires matching Origin and Host and sets Secure only for the public host %s",
+  async (publicHost) => {
+    const publicOrigin = `https://${publicHost.toLowerCase()}`;
+    app = createApp({
+      db: fixture.db,
+      blobs: new BlobStore(fixture.db, join(fixture.dir, "state")),
+      instance: { id: fixture.instanceId, name: "Synthetic" },
+      now: () => now,
+      config: serverConfig("127.0.0.1", 3636, webRoot, publicOrigin),
+    });
+    const pairing = await issue();
+    const body = { secret: new URL(pairing.url).hash.slice(1) };
+    for (const headers of [
+      { Host: host, Origin: publicOrigin },
+      { Host: publicHost, Origin: origin },
+    ]) {
+      const refused = await request("/session", "POST", headers, body);
+      await error(refused, "bad_origin");
+      expect(refused.headers.has("set-cookie")).toBe(false);
+    }
+    const session = await request("/session", "POST", { Host: publicHost, Origin: publicOrigin }, body);
+    expect(session.status).toBe(204);
+    expect(session.headers.get("set-cookie")).toContain("Secure");
+    const cookie = session.headers.get("set-cookie")?.split(";")[0] ?? "";
+    await error(await request("/pairings", "POST", { Cookie: cookie, Origin: publicOrigin }, {}), "bad_origin");
+    const localPairing = await issue();
+    const localSession = await request(
+      "/session",
+      "POST",
+      { Host: host, Origin: origin },
+      { secret: new URL(localPairing.url).hash.slice(1) },
+    );
+    expect(localSession.status).toBe(204);
+    expect(localSession.headers.get("set-cookie")).toContain("emend_session=");
+    expect(localSession.headers.get("set-cookie")).not.toContain("Secure");
+  },
+);
+
+test.each(["null", "https://[invalid", "not an origin"])(
+  "malformed Origin %s is refused before pairing",
+  async (value) => {
+    await error(await request("/session", "POST", { Origin: value }, {}), "bad_origin");
+  },
+);
+
+test.each(["GET", "HEAD"])("%s still skips the Origin guard", async (method) => {
+  expect((await request("/capabilities", method, { Origin: "null", Cookie: "emend_session=invalid" })).status).toBe(
+    200,
+  );
+});
+
+test("content requests ignore session cookies when checking for a missing Origin", async () => {
+  await error(
+    await app.request(`${origin}/content/synthetic/file.html`, {
+      method: "POST",
+      headers: { Host: host, Cookie: "emend_session=invalid" },
+    }),
+    "not_found",
+  );
 });
 
 test("every documented API endpoint enforces its scope even before its handler exists", async () => {
@@ -343,6 +406,73 @@ test("code failures use a sliding window, malformed inputs do not count, links w
   const fresh = await issue();
   expect((await request("/session", "POST", {}, { code: fresh.code })).status).toBe(204);
 });
+
+test.each([
+  { publicOrigin: true, method: "GET", requestHost: host, renewal: "none" },
+  { publicOrigin: true, method: "HEAD", requestHost: host, renewal: "none" },
+  { publicOrigin: true, method: "GET", requestHost: "emend.example.com", renewal: "secure" },
+  { publicOrigin: true, method: "HEAD", requestHost: "emend.example.com", renewal: "secure" },
+  { publicOrigin: true, method: "POST", requestHost: host, renewal: "plain" },
+  { publicOrigin: false, method: "GET", requestHost: host, renewal: "plain" },
+  { publicOrigin: false, method: "HEAD", requestHost: host, renewal: "plain" },
+])(
+  "$method on $requestHost has $renewal cookie renewal (public origin: $publicOrigin)",
+  async ({ publicOrigin, method, requestHost, renewal }) => {
+    const publicUrl = publicOrigin ? "https://emend.example.com" : undefined;
+    app = createApp({
+      db: fixture.db,
+      blobs: new BlobStore(fixture.db, join(fixture.dir, "state")),
+      instance: { id: fixture.instanceId, name: "Synthetic" },
+      now: () => now,
+      config: serverConfig("127.0.0.1", 3636, webRoot, publicUrl),
+    });
+    const pairing = await issue();
+    const session = await request(
+      "/session",
+      "POST",
+      { Host: publicOrigin ? "emend.example.com" : host, Origin: publicUrl ?? origin },
+      { secret: new URL(pairing.url).hash.slice(1) },
+    );
+    expect(session.status).toBe(204);
+    const initialCookie = session.headers.get("set-cookie") ?? "";
+    expect(initialCookie).toContain("emend_session=");
+    expect(initialCookie.includes("Secure")).toBe(publicOrigin);
+    const cookie = initialCookie.split(";")[0] ?? "";
+    const secret = cookie.split("=")[1] ?? "";
+    const readSession = () =>
+      fixture.db.query((q) =>
+        q
+          .select()
+          .from(tokens)
+          .where(and(eq(tokens.ownerId, fixture.ownerId), eq(tokens.secretHash, hashSecret(secret))))
+          .get(),
+      );
+    const originalExpiry = (await readSession())?.expiresAt;
+    expect(originalExpiry).toBe(now + 30 * day);
+    now += day;
+    const response = await request(
+      method === "POST" ? "/pairings" : "/reviews",
+      method,
+      { Host: requestHost, Cookie: cookie, ...(method === "POST" ? { Origin: origin } : {}) },
+      method === "POST" ? {} : undefined,
+    );
+    expect(response.status).toBe(method === "POST" ? 201 : 200);
+    if (renewal === "none") {
+      expect(response.headers.has("set-cookie")).toBe(false);
+      expect((await readSession())?.expiresAt).toBe(originalExpiry);
+      const write = await request("/pairings", "POST", { Host: host, Cookie: cookie, Origin: origin }, {});
+      expect(write.status).toBe(201);
+      const renewedCookie = write.headers.get("set-cookie") ?? "";
+      expect(renewedCookie).toContain("Max-Age=2592000");
+      expect(renewedCookie).not.toContain("Secure");
+    } else {
+      const renewedCookie = response.headers.get("set-cookie") ?? "";
+      expect(renewedCookie).toContain("Max-Age=2592000");
+      expect(renewedCookie.includes("Secure")).toBe(renewal === "secure");
+    }
+    expect((await readSession())?.expiresAt).toBe(now + 30 * day);
+  },
+);
 
 test("sessions renew only daily, session-created pairings name the token, logout revokes both rows", async () => {
   const cookie = await login();

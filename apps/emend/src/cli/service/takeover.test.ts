@@ -326,7 +326,7 @@ describe("server takeover by request", () => {
     });
   });
 
-  test("waitForServer follows the manager's current pid and waits for Tailscale readiness", async () => {
+  test("waitForServer follows the manager's current pid and waits for public origin readiness", async () => {
     await withSyntheticServer("verified", async (stateDir, url) => {
       const calls = spyOnFetchWithoutSignal();
       const { pid } = JSON.parse(await readFile(join(stateDir, "server.json"), "utf8"));
@@ -339,7 +339,7 @@ describe("server takeover by request", () => {
           JSON.stringify({ baseUrl: elapsed < 400 ? url : "https://review.example.test" }),
         );
       });
-      expect(await waitForServer(stateDir, { mainPid, tailscale: true, now: () => elapsed, sleep })).toEqual({
+      expect(await waitForServer(stateDir, { mainPid, publicOrigin: true, now: () => elapsed, sleep })).toEqual({
         url,
         pid,
       });
@@ -391,7 +391,7 @@ describe("server takeover by request", () => {
   });
 
   test.each(["symlink", "oversized", "http", "credentials"])(
-    "tailscale refuses an unsafe %s public origin record",
+    "readiness refuses an unsafe %s public origin record",
     async (kind) => {
       await withSyntheticServer("verified", async (stateDir) => {
         const calls = spyOnFetchWithoutSignal();
@@ -413,7 +413,7 @@ describe("server takeover by request", () => {
         let elapsed = 0;
         expect(
           await waitForServer(stateDir, {
-            tailscale: true,
+            publicOrigin: true,
             timeoutMs: 100,
             now: () => elapsed,
             sleep: async (ms) => {

@@ -15,7 +15,7 @@ interface ServerWaitOptions {
 }
 export interface ServerReadyOptions extends ServerWaitOptions {
   mainPid?: () => Promise<number>;
-  tailscale?: boolean;
+  publicOrigin?: boolean;
 }
 
 interface ServerStopOptions extends ServerWaitOptions {
@@ -134,7 +134,11 @@ export async function waitForServer(
     const record = await serverRecord(stateDir);
     if (record && (mainPid === undefined || record.pid === mainPid) && now() < deadline) {
       const result = await probeServer(record, Math.min(200, deadline - now()));
-      if (result.kind === "verified" && result.capabilities && (!opts.tailscale || (await publicOriginReady(stateDir))))
+      if (
+        result.kind === "verified" &&
+        result.capabilities &&
+        (!opts.publicOrigin || (await publicOriginReady(stateDir)))
+      )
         return { url: record.url, pid: record.pid };
     }
     await sleep(Math.min(200, Math.max(0, deadline - now())));

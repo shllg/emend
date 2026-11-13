@@ -29,6 +29,7 @@ here **before** writing the route. This includes `PublishRequest` (plan task 1.6
   proof reveals nothing about the key. Neither header carries a bearer or the server key.
 - Browsers use `emend_session`, with `HttpOnly`, `SameSite=Strict`, `Path=/`,
   `Max-Age=2592000` (30 days), and `Secure` on HTTPS. Sessions renew at most once daily.
+  With a configured public HTTPS origin, a GET or HEAD renews the cookie only on that origin's Host.
 - JSON bodies use `Content-Type: application/json`. Routes reject bodies over their JSON byte
   limit with `413 too_large` before parsing, then validate with the contract schemas:
   `POST /api/v1/publish` and `POST /api/v1/import` permit at most `publishJsonBytes` (8388608 bytes); `POST /session` and
@@ -36,9 +37,12 @@ here **before** writing the route. This includes `PublishRequest` (plan task 1.6
   `requestJsonBytes` (1048576 bytes).
 - Every request checks `Host` against `127.0.0.1:<port>`, `localhost:<port>`, `[::1]:<port>`, and
   the listener's actual concrete address, and the tailnet name only when configured with
-  `--tailscale` (with `--tailscale-port <n>`, the name and that port, `<name>:<n>`). Other hosts receive `403 bad_host`. Every non-GET/HEAD request with an Origin
-  must name an allowed app origin. A non-GET/HEAD request carrying a session cookie must carry
-  that Origin; a missing or disallowed origin receives `403 bad_origin`.
+  `--tailscale` (with `--tailscale-port <n>`, the name and that port, `<name>:<n>`), or the
+  `--public-url` origin's host (with its port when not 443). Other hosts receive `403 bad_host`.
+  Every non-GET/HEAD request with an Origin must name an allowed app origin. That Origin's host
+  must equal the request's Host, including its port, compared in lowercase. An invalid Origin or
+  a mismatch receives `403 bad_origin`. Outside `/content/`, a non-GET/HEAD request carrying a
+  session cookie must carry that Origin; a missing or disallowed origin receives `403 bad_origin`.
 
 Guards run in this order: Host, client version, Origin, declared Content-Length limit,
 credential and scope, bounded body streaming, then handler and schema parsing. An unauthorized
@@ -56,7 +60,8 @@ request-construction failures receive `400 invalid_request` with the same respon
 
 All API requests require credentials except capabilities, session creation and machine registration.
 The content path uses its capability key and never reads cookies. The server binds
-`127.0.0.1:3636` by default; only `--host` or `--tailscale` widens it. There is no telemetry.
+`127.0.0.1:3636` by default; only `--host` or `--tailscale` widens it. `--public-url` widens no
+bind. There is no telemetry.
 
 | Token kind | Scopes |
 | --- | --- |
@@ -892,7 +897,8 @@ The CLI warns `emend: could not render <path>` for each; the publish still succe
 The URL is `<baseUrl>/r/<reviewId>` (HTTP or HTTPS);
 it is bounded by `pathChars` (4096 characters). At each start the local server saves its listening URL in `server-url.json` in the state
 directory, mode 0600. With Tailscale, it replaces that value with the public origin only after
-Serve setup succeeds; a failed startup keeps the loopback URL. A successful start leaves its
+Serve setup succeeds; a failed startup keeps the loopback URL. With `--public-url`, it saves that
+origin after the listener starts, without contacting the address. A successful start leaves its
 confirmed base URL there on close. Direct publish uses that saved HTTP(S) origin;
 a missing or invalid JSON record, credentials, path, query or fragment falls back to
 `http://127.0.0.1:3636`. An attached machine publishes to the hub using its machine credential.
@@ -1057,9 +1063,10 @@ revocation timestamps are preserved. An agent token has no
 `devices:manage` scope and receives 403 for both device endpoints.
 
 With `emend serve --tailscale`, pairing URLs use the configured Tailscale HTTPS origin (with
-`--tailscale-port <n>`, that origin includes `:<n>`); the
-secret remains exclusively in the fragment. Only that configured tailnet Host is added to
-the allowlist. Session cookies use `Secure` when that Host is requested, including renewal
+`--tailscale-port <n>`, that origin includes `:<n>`). With `emend serve --public-url <url>`, they
+use the given HTTPS origin instead, including its port when not 443. The secret remains
+exclusively in the fragment. Only the configured origin's Host is added to the allowlist.
+Session cookies use `Secure` when that Host is requested, including renewal
 and sign-out; loopback HTTP on the same server receives cookies without `Secure`.
 
 ### Manifest and topics

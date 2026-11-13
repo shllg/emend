@@ -1,6 +1,7 @@
 import * as childProcesses from "node:child_process";
 import { EventEmitter } from "node:events";
 import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, join, sep } from "node:path";
 import { PassThrough } from "node:stream";
@@ -10,7 +11,7 @@ import { startServer } from "../../server/serve.ts";
 import { writeSecretFile } from "../../state/files.ts";
 import * as executables from "../executable.ts";
 import { stopLocalServer } from "../service/takeover.ts";
-import { parseServeArgs } from "./serve.ts";
+import { parseServeArgs, UsageError } from "./serve.ts";
 
 vi.mock("../../server/serve.ts", () => ({ startServer: vi.fn() }));
 vi.mock("node:child_process", async (original) => ({
@@ -323,6 +324,144 @@ test.each(["SIGINT", "SIGTERM"] as const)("serve prints once and closes cleanly 
   expect(stderr).toEqual([]);
 });
 
+test.each([
+  ["https://emend.example.com", "https://emend.example.com"],
+  ["https://emend.example.com/", "https://emend.example.com"],
+  ["https://Emend.Example.COM", "https://emend.example.com"],
+  ["https://emend.example.com:443", "https://emend.example.com"],
+  ["https://emend.example.com:8443", "https://emend.example.com:8443"],
+  ["https://192.0.2.10", "https://192.0.2.10"],
+  ["https://[2001:db8::1]:8443", "https://[2001:db8::1]:8443"],
+])("public-url normalizes %s without widening the bind", (value, publicUrl) => {
+  expect(parseServeArgs(["--public-url", value])).toEqual({ host: "127.0.0.1", port: 3636, publicUrl });
+  expect(parseServeArgs(["--public-url", value, "--host", "192.0.2.1", "--port", "4000"])).toEqual({
+    host: "192.0.2.1",
+    port: 4000,
+    publicUrl,
+  });
+});
+
+test.each([
+  "http://emend.example.com",
+  "https://emend.example.com/emend",
+  "https://emend.example.com?query=1",
+  "https://emend.example.com#fragment",
+  "https://u:p@emend.example.com",
+  "https://emend.example.com ",
+  "https://emend.\texample.com",
+  "https://emend.\nexample.com",
+  "https://emend.example.com\n",
+  "https://emend.example.com\r",
+  "https://emend.example.com\u0000",
+  "https://",
+  "https://emend.example.com:70000",
+  `https://${"a".repeat(290)}.com`,
+  "https://emend.example.com//",
+  "https://emend_example.com",
+  "https://emend..example.com",
+  "https://emend.example.com:",
+  "https://emend.example.com\\",
+  "https://[invalid]",
+  "https://[2001:::1]",
+])("public-url refuses %j before URL parsing can hide unsafe characters", (value) => {
+  expect(() => parseServeArgs(["--public-url", value])).toThrow(
+    new UsageError("--public-url must be an https origin such as https://emend.example.com, with no path."),
+  );
+});
+
+test("public-url is unique, needs a value, and cannot combine with tailscale", () => {
+  const flag = ["--public-url", "https://emend.example.com"];
+  for (const args of [
+    [...flag, "--tailscale"],
+    ["--tailscale", "--tailscale-port", "13636", ...flag],
+  ])
+    expect(() => parseServeArgs(args)).toThrow(new UsageError("--public-url cannot be combined with --tailscale."));
+  for (const args of [["--public-url"], [...flag, ...flag]])
+    expect(() => parseServeArgs(args)).toThrow(new UsageError("Invalid serve options."));
+});
+
+test("public-url advertises the origin and accepts its Host without contacting it or Tailscale", async () => {
+  const stateDir = env.EMEND_HOME as string;
+  const actual = await vi.importActual<typeof import("../../server/serve.ts")>("../../server/serve.ts");
+  const tailscale = await import("../tailscale.ts");
+  const self = vi.spyOn(tailscale, "tailscaleSelf").mockResolvedValue(null);
+  const setup = vi.spyOn(tailscale, "ensureTailscaleServe");
+  const remove = vi.spyOn(tailscale, "removeTailscaleServe");
+  const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Unexpected outgoing request."));
+  let server: Awaited<ReturnType<typeof startServer>> | undefined;
+  let stop: (() => void) | undefined;
+  vi.mocked(startServer).mockImplementation(async (options) => {
+    expect(options).toMatchObject({ host: "127.0.0.1", port: 0, publicOrigin: "https://emend.example.com" });
+    stop = options.onStopRequest;
+    server = await actual.startServer(options);
+    return server;
+  });
+  const printed = Promise.withResolvers<void>();
+  const stdout = vi.fn(() => printed.resolve());
+  const stderr = vi.fn();
+  const result = run(["serve", "--port", "0", "--public-url", "https://emend.example.com"], { env, stdout, stderr });
+  onTestFinished(async () => {
+    stop?.();
+    await result;
+    await server?.close();
+  });
+  await Promise.race([
+    printed.promise,
+    result.then(() => {
+      throw new Error(`Server exited before serving: ${stderr.mock.calls.flat().join("")}`);
+    }),
+  ]);
+  expect(stdout).toHaveBeenCalledExactlyOnceWith("emend: serving https://emend.example.com\n");
+  expect(JSON.parse(await readFile(join(stateDir, "server-url.json"), "utf8"))).toEqual({
+    baseUrl: "https://emend.example.com",
+  });
+  for (const [host, status] of [
+    ["emend.example.com", 200],
+    ["other.example.com", 403],
+  ] as const) {
+    const response = await new Promise<{ status: number | undefined; body: string }>((resolve, reject) => {
+      const request = httpRequest(
+        { hostname: "127.0.0.1", port: server?.port, path: "/api/v1/capabilities", headers: { Host: host } },
+        (response) => {
+          let body = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk) => {
+            body += chunk;
+          });
+          response.on("end", () => resolve({ status: response.statusCode, body }));
+        },
+      );
+      request.on("error", reject);
+      request.end();
+    });
+    expect(response.status).toBe(status);
+    if (status === 403) expect(JSON.parse(response.body).error.code).toBe("bad_host");
+  }
+  stop?.();
+  expect(await result).toBe(0);
+  for (const helper of [self, setup, remove, fetch]) expect(helper).not.toHaveBeenCalled();
+  expect(stderr).not.toHaveBeenCalled();
+});
+
+test("public-url becomes ready before printing and closes on a stop request", async () => {
+  const ready = vi.fn();
+  const close = vi.fn(async () => {});
+  let stop: (() => void) | undefined;
+  vi.mocked(startServer).mockImplementation(async (options) => {
+    expect(options).toMatchObject({ host: "127.0.0.1", port: 3636, publicOrigin: "https://emend.example.com" });
+    stop = options.onStopRequest;
+    return { url: "http://127.0.0.1:3636", port: 3636, setPublicOriginReady: ready, close };
+  });
+  const stdout = vi.fn(() => stop?.());
+  const stderr = vi.fn();
+  expect(await run(["serve", "--public-url", "https://Emend.Example.COM:443/"], { env, stdout, stderr })).toBe(0);
+  expect(ready).toHaveBeenCalledExactlyOnceWith(true);
+  expect(ready).toHaveBeenCalledBefore(stdout);
+  expect(stdout).toHaveBeenCalledExactlyOnceWith("emend: serving https://emend.example.com\n");
+  expect(close).toHaveBeenCalledOnce();
+  expect(stderr).not.toHaveBeenCalled();
+});
+
 test("tailscale flag is boolean, unique, and binds only loopback", () => {
   expect(parseServeArgs(["--tailscale"])).toEqual({ host: "127.0.0.1", port: 3636, tailscale: true });
   expect(parseServeArgs(["--tailscale", "--port", "4000", "--host", "127.0.0.1"])).toEqual({
@@ -468,36 +607,39 @@ test("a setup attempt that throws still removes its route during shutdown", asyn
   expect(stderr).toHaveBeenCalledExactlyOnceWith("emend: synthetic setup failure\n");
 });
 
-test("a stop after startServer resolves skips Tailscale setup and closes normally", async () => {
-  const tailscale = await import("../tailscale.ts");
-  vi.spyOn(tailscale, "tailscaleSelf").mockResolvedValue({ dnsName: "hub.example.ts.net" });
-  const setup = vi
-    .spyOn(tailscale, "ensureTailscaleServe")
-    .mockResolvedValue({ created: true, otherHttpsPorts: false });
-  const remove = vi.spyOn(tailscale, "removeTailscaleServe").mockResolvedValue(undefined);
-  const close = vi.fn(async () => {});
-  const advertise = vi.fn();
-  vi.mocked(startServer).mockImplementation(() => {
-    const started = Promise.resolve({
-      url: "http://127.0.0.1:41999",
-      port: 41999,
-      setPublicOriginReady: advertise,
-      close,
+test.each([{ flags: ["--tailscale"] }, { flags: ["--public-url", "https://emend.example.com"] }])(
+  "a stop after startServer resolves skips public setup and closes normally ($flags)",
+  async ({ flags }) => {
+    const tailscale = await import("../tailscale.ts");
+    vi.spyOn(tailscale, "tailscaleSelf").mockResolvedValue({ dnsName: "hub.example.ts.net" });
+    const setup = vi
+      .spyOn(tailscale, "ensureTailscaleServe")
+      .mockResolvedValue({ created: true, otherHttpsPorts: false });
+    const remove = vi.spyOn(tailscale, "removeTailscaleServe").mockResolvedValue(undefined);
+    const close = vi.fn(async () => {});
+    const advertise = vi.fn();
+    vi.mocked(startServer).mockImplementation(() => {
+      const started = Promise.resolve({
+        url: "http://127.0.0.1:41999",
+        port: 41999,
+        setPublicOriginReady: advertise,
+        close,
+      });
+      // Deliver the stop between the resolved start promise and serve's continuation.
+      void started.then(() => queueMicrotask(() => process.emit("SIGTERM")));
+      return started;
     });
-    // Deliver the stop between the resolved start promise and serve's continuation.
-    void started.then(() => queueMicrotask(() => process.emit("SIGTERM")));
-    return started;
-  });
-  const stdout = vi.fn();
-  const stderr = vi.fn();
-  expect(await run(["serve", "--tailscale"], { env, stdout, stderr })).toBe(0);
-  expect(setup).not.toHaveBeenCalled();
-  expect(remove).not.toHaveBeenCalled();
-  expect(advertise).not.toHaveBeenCalled();
-  expect(close).toHaveBeenCalledTimes(1);
-  expect(stdout).not.toHaveBeenCalled();
-  expect(stderr).not.toHaveBeenCalled();
-});
+    const stdout = vi.fn();
+    const stderr = vi.fn();
+    expect(await run(["serve", ...flags], { env, stdout, stderr })).toBe(0);
+    expect(setup).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    expect(advertise).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(stdout).not.toHaveBeenCalled();
+    expect(stderr).not.toHaveBeenCalled();
+  },
+);
 
 test.each([
   ["SIGINT", 130, false],

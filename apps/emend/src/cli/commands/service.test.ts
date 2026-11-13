@@ -1297,6 +1297,51 @@ test("launchd status uses the first service-level state, never nested states", a
   expect(stdout).toEqual([`emend: service installed but not running (${plistPath()})\n`]);
 });
 
+test.each(["linux", "darwin"])("%s service install saves the public URL and waits for its origin", async (platform) => {
+  options.platform = platform;
+  const flags = ["--public-url", "https://emend.example.com"];
+  expect(await invoke("install", ...flags)).toBe(0);
+  const path = platform === "linux" ? unitPath() : plistPath();
+  const content = await readFile(path, "utf8");
+  expect(content).toContain(
+    platform === "linux"
+      ? "serve --public-url https://emend.example.com"
+      : "<string>--public-url</string>\n    <string>https://emend.example.com</string>",
+  );
+  expect(waitForServer).toHaveBeenCalledWith(expect.objectContaining({ publicOrigin: true }));
+  expect(JSON.parse(await readFile(optionsPath(), "utf8"))).toEqual(flags);
+  resetOutput();
+  expect(await invoke("install")).toBe(0);
+  expect(await readFile(path, "utf8")).toBe(content);
+  expect(waitForServer).toHaveBeenCalledWith(expect.objectContaining({ publicOrigin: true }));
+});
+
+test.each(["linux", "darwin"])("%s service install without options needs no public origin", async (platform) => {
+  options.platform = platform;
+  expect(await invoke("install")).toBe(0);
+  expect(waitForServer).toHaveBeenCalledWith(expect.objectContaining({ publicOrigin: false }));
+});
+
+test.each(["linux", "darwin"])(
+  "%s service install refuses unsafe public URLs before any side effect",
+  async (platform) => {
+    options.platform = platform;
+    for (const value of [
+      "https://emend.example.com\n",
+      "https://emend.\texample.com",
+      "https://emend.example.com/emend",
+    ]) {
+      expect(await invoke("install", "--public-url", value)).toBe(2);
+      expect(stderr.at(-1)).toBe(
+        "emend: --public-url must be an https origin such as https://emend.example.com, with no path.\n",
+      );
+    }
+    expect(calls()).toEqual([]);
+    await expect(lstat(platform === "linux" ? unitPath() : plistPath())).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(optionsPath())).rejects.toMatchObject({ code: "ENOENT" });
+  },
+);
+
 test.each(["linux", "darwin"])("%s service install preserves tailscale serve flags", async (platform) => {
   options.platform = platform;
   expect(await invoke("install", "--tailscale", "--port", "4000")).toBe(0);

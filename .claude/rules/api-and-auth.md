@@ -12,7 +12,8 @@ The values below are binding. Limits and ids are in `docs/api.md` once it exists
 - Session cookie: `emend_session`, `HttpOnly`, `SameSite=Strict`, `Secure` on HTTPS, `Path=/`,
   `Max-Age=2592000` (30 days), renewed at most daily.
 - Host allowlist: `127.0.0.1:<port>`, `localhost:<port>`, `[::1]:<port>`, plus the tailnet name
-  only when `--tailscale` configured it. Anything else is `403 bad_host`.
+  only when `--tailscale` configured it, or the host of an https `--public-url` origin. Anything
+  else is `403 bad_host`. `--public-url` widens no bind.
 - Pairing: the secret travels only in the URL fragment (`/pair#<secret>`), never in a query or a
   log. A pairing is one-time and expires after 10 minutes. Its code is `XXXX-XXXX` in Crockford
   base32; five wrong codes lock code entry for 10 minutes (`429 rate_limited`).
@@ -28,7 +29,10 @@ The values below are binding. Limits and ids are in `docs/api.md` once it exists
   CLI and MCP use `Authorization: Bearer <token>`. A reviewer credential is accepted only from the
   cookie, never as a bearer.
 - Host header allowlist on every request; an Origin check on every non-GET request that carries
-  the cookie. A missing Origin with the cookie is refused.
+  the cookie. A missing Origin with the cookie is refused. An Origin must be an app origin whose
+  host equals the request's Host. With a public origin configured, a GET or HEAD renews the
+  session only on that origin's Host. Together they keep a proxy that rewrites Host from getting a
+  cookie without `Secure`.
 - Take `owner_id` from the principal, never from the request. Every query filters it. A missing or
   foreign row is `404`, never `403`.
 - Origin comes from the token. A review's origin instance is the instance its agent token is
