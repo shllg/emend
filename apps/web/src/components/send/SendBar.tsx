@@ -87,18 +87,6 @@ export function SendBar({
     if (baseline) setHandoff(baseline);
   }, []);
   const desktopInstructions = useRef<HTMLTextAreaElement>(null);
-  useShortcut("review.instructions", () => {
-    const field = desktopInstructions.current;
-    if (!field || field.disabled) return false;
-    field.focus();
-    return true;
-  });
-  useShortcut("review.approve", () => {
-    const button = approveTrigger.current;
-    if (!button || button.disabled) return false;
-    button.click();
-    return true;
-  });
   useLayoutEffect(() => {
     const field = desktopInstructions.current;
     if (!field || phone) return;
@@ -153,6 +141,28 @@ export function SendBar({
       ? `Revision ${newestRevision} is newer. Switch to it to send or approve.`
       : undefined;
   const disabled = sending || commentSaving || unsavedCount > 0 || revision === undefined || !!olderReason || retired;
+  const approveDisabled = disabled || unsentCount > 0 || approved;
+  const instructionsDisabled = sending;
+  useShortcut(
+    "review.instructions",
+    () => {
+      const field = desktopInstructions.current;
+      if (!field || field.disabled) return false;
+      field.focus();
+      return true;
+    },
+    { enabled: !instructionsDisabled },
+  );
+  useShortcut(
+    "review.approve",
+    () => {
+      const button = approveTrigger.current;
+      if (!button || button.disabled) return false;
+      button.click();
+      return true;
+    },
+    { enabled: !approveDisabled },
+  );
   const approveBlocked = unsentCount > 0 && !approved && !retired;
   // When approving stops being possible (a newer revision, comments, another tab, a retirement) the
   // dialog's Approve would do nothing: close it and let the bar show its usual reason.
@@ -264,7 +274,7 @@ export function SendBar({
       variant="approve"
       size={phone ? "lg" : "md"}
       icon={Check}
-      disabled={disabled || unsentCount > 0 || approved}
+      disabled={approveDisabled}
       aria-describedby={
         [
           approveBlocked && blocked,
@@ -448,7 +458,7 @@ export function SendBar({
                   instruction && "h-auto [field-sizing:content]",
                 )}
                 maxLength={LIMITS.instructionChars}
-                disabled={sending}
+                disabled={instructionsDisabled}
                 value={instruction}
                 onChange={(event) => changeInstruction(event.target.value)}
                 onKeyDown={(event) => {

@@ -386,18 +386,33 @@ test.each([
   expect(writes()).toHaveLength(0);
 });
 
-test("says when Snooze declines on a retired review without opening a dialog or making a write", async () => {
+test("lists Approve and Snooze as unavailable on a retired review and keeps the palette open on Enter", async () => {
   inbox[0] = { ...(inbox[0] as InboxItem), state: "settled" };
   mount();
   await ready();
   const input = await openPalette();
+  expect(option("Approve").getAttribute("aria-disabled")).toBe("true");
+  expect(option("Snooze").getAttribute("aria-disabled")).toBe("true");
   search(input, "Snooze");
-  expect(selected()).toBe(option("Snooze"));
-  expect(option("Snooze").getAttribute("aria-disabled")).toBe("false");
+  expect(selected()).toBeNull();
+  expect(input.hasAttribute("aria-activedescendant")).toBe(false);
   press("Enter", {}, input);
-  const message = await screen.findByText("Snooze can't run right now.");
-  expect(message.closest('[role="status"]')).toBeTruthy();
-  expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
+  expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(writes()).toHaveLength(0);
+});
+
+test("lists Approve as unavailable when the review has unsent comments", async () => {
+  inbox[0] = { ...(inbox[0] as InboxItem), unsentCount: 1 };
+  mount();
+  await ready();
+  const input = await openPalette();
+  expect(option("Approve").getAttribute("aria-disabled")).toBe("true");
+  search(input, "Approve");
+  expect(selected()).toBeNull();
+  expect(input.hasAttribute("aria-activedescendant")).toBe(false);
+  press("Enter", {}, input);
+  expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
   expect(screen.queryByRole("alertdialog")).toBeNull();
   expect(writes()).toHaveLength(0);
 });

@@ -6,7 +6,6 @@ import { keyLabel, shortcutGroups, shortcutLabels } from "../lib/shortcuts.ts";
 import { useShortcut, useShortcutKeys, useShortcutRunner } from "../lib/use-shortcut.tsx";
 import { Kbd } from "./ui/Kbd.tsx";
 import { isToastInteraction, overlayClass } from "./ui/overlay.ts";
-import { useToast } from "./ui/Toast.tsx";
 import { cn } from "./ui/utils.ts";
 
 function matchingGroups(query: string) {
@@ -39,7 +38,6 @@ export function CommandPalette() {
   const rowId = (command: ShortcutCommand) => `${id}-${command}`;
   const keys = useShortcutKeys();
   const runner = useShortcutRunner();
-  const toast = useToast();
   const groups = matchingGroups(query);
   const selectable: ShortcutCommand[] = groups
     .flatMap((group) => group.rows.map((row) => row.command))
@@ -86,8 +84,7 @@ export function CommandPalette() {
             // Focus-dependent handlers need the opener back; dialogs must start after this modal layer unmounts.
             const command = pending.current;
             pending.current = null;
-            if (command && !runner.run(command))
-              toast.show({ title: `${shortcutLabels[command]} can't run right now.` });
+            if (command) runner.run(command);
           }}
           className="fixed top-[12vh] left-1/2 z-[calc(var(--z-sheet)+1)] flex max-h-[70dvh] w-[min(560px,92%)] -translate-x-1/2 animate-[em-fade_var(--dur-2)_var(--ease-out)] flex-col overflow-hidden rounded-xl border border-line-1 bg-surface shadow-3"
         >
