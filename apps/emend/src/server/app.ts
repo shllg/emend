@@ -23,6 +23,7 @@ import { capabilitiesRoutes } from "./routes/capabilities.ts";
 import { commentRoutes } from "./routes/comments.ts";
 import { deliveryRoutes } from "./routes/deliveries.ts";
 import { deviceRoutes } from "./routes/devices.ts";
+import { downloadRoutes } from "./routes/download.ts";
 import { eventRoutes } from "./routes/events.ts";
 import { fileRoutes } from "./routes/files.ts";
 import { importRoutes } from "./routes/import.ts";
@@ -79,6 +80,7 @@ export const ENDPOINTS = [
   { method: "GET", path: "/api/v1/reviews", scope: "read" },
   { method: "GET", path: "/api/v1/reviews/:id", scope: "read" },
   { method: "GET", path: "/api/v1/reviews/:id/revisions/:seq", scope: "read" },
+  { method: "GET", path: "/api/v1/reviews/:id/revisions/:seq/download", scope: "read" },
   { method: "PUT", path: "/api/v1/reviews/:id/viewed", scope: "comment" },
   { method: "GET", path: "/api/v1/files/:fileId/old", scope: "read" },
   { method: "GET", path: "/api/v1/files/:fileId/new", scope: "read" },
@@ -179,6 +181,7 @@ export function createApp(deps: AppDeps) {
   publishRoutes(app, deps);
   agentReviewRoutes(app, deps);
   reviewRoutes(app, deps);
+  downloadRoutes(app, deps);
   lifecycleRoutes(app, deps);
   viewedRoutes(app, deps);
   fileRoutes(app, deps);

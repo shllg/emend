@@ -10,13 +10,18 @@ export const HTML_NESTING_LIMIT = 512;
 class HtmlNestingLimitError extends Error {}
 
 /** Shared by placement and doc metadata. A failed or over-nested parse has no usable tree. */
-export function parseDocHtml(html: string): DefaultTreeAdapterTypes.Document | null {
+export function parseDocHtml(html: string, elementLimit = Infinity): DefaultTreeAdapterTypes.Document | null {
   try {
     let openElements = 0;
+    let elements = 0;
     return parse(html, {
       scriptingEnabled: true,
       treeAdapter: {
         ...defaultTreeAdapter,
+        createElement(tagName, namespaceURI, attrs) {
+          if (++elements > elementLimit) throw new HtmlNestingLimitError();
+          return defaultTreeAdapter.createElement(tagName, namespaceURI, attrs);
+        },
         onItemPush() {
           if (++openElements > HTML_NESTING_LIMIT) throw new HtmlNestingLimitError();
         },

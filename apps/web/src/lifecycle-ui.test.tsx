@@ -875,3 +875,40 @@ test("on the phone the actions menu shares the bar with Approve and Send", async
   expect(bar.getByRole("button", { name: "Approve" })).toBeTruthy();
   expect(bar.getByRole("button", { name: "Send" })).toBeTruthy();
 });
+
+test("the desktop Download link follows the revision on screen", async () => {
+  review = { ...item, newestRevision: 2 };
+  const original = fetchMock.getMockImplementation();
+  fetchMock.mockImplementation(async (path, init) => {
+    if (path === `/api/v1/reviews/${id}`)
+      return Response.json({ ...review, revisions: [1, 2].map((seq) => ({ seq, createdAt: item.updatedAt })) });
+    if (path.includes("/revisions/")) return Response.json({ ...revision, seq: Number(path.split("/").at(-1)) });
+    if (!original) throw new Error("Missing fetch fixture");
+    return original(path, init);
+  });
+  mount(`/r/${id}`);
+  const link = await screen.findByRole("link", { name: "Download" });
+  expect(link.getAttribute("href")).toBe(`/api/v1/reviews/${id}/revisions/2/download`);
+  expect(link.hasAttribute("download")).toBe(true);
+  expect(link.getAttribute("title")).toBe("Download this revision as one HTML file");
+  expect(link.querySelector("svg")).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("button", { name: "Revision 2 of 2" }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: /Revision 1/ }));
+  await waitFor(() =>
+    expect(screen.getByRole("link", { name: "Download" }).getAttribute("href")).toBe(
+      `/api/v1/reviews/${id}/revisions/1/download`,
+    ),
+  );
+});
+
+test("the phone review menu downloads the revision on screen", async () => {
+  width = 390;
+  mount(`/r/${id}`);
+  await screen.findByRole("heading", { name: "Synthetic review", level: 1 });
+  expect(screen.queryByRole("link", { name: "Download" })).toBeNull();
+  fireEvent.keyDown(screen.getByRole("button", { name: "More" }), { key: "ArrowDown" });
+  const link = await screen.findByRole("menuitem", { name: "Download" });
+  expect(link.tagName).toBe("A");
+  expect(link.getAttribute("href")).toBe(`/api/v1/reviews/${id}/revisions/1/download`);
+  expect(link.hasAttribute("download")).toBe(true);
+});

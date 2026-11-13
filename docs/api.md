@@ -97,6 +97,7 @@ a machine token reaches only reviews from its own instance.
 | GET | `/api/v1/agent/reviews` | Agent | List the token's own instance's reviews, newest first, as `AgentReviewList`; `?head=<sha>` keeps those whose approved or newest revision has that head. |
 | GET | `/api/v1/reviews/:id` | Reviewer | Read a review. |
 | GET | `/api/v1/reviews/:id/revisions/:seq` | Reviewer | Read one revision. |
+| GET | `/api/v1/reviews/:id/revisions/:seq/download` | Reviewer | Download one revision as one self-contained HTML file. |
 | PUT | `/api/v1/reviews/:id/viewed` | Reviewer | Mark or unmark diff files as viewed; return 204. |
 | GET | `/api/v1/files/:fileId/old` | Reviewer | Read the old file side. |
 | GET | `/api/v1/files/:fileId/new` | Reviewer | Read the new file side. |
@@ -178,6 +179,84 @@ such images also has the class `emend-media-row`. Author classes keep the `user-
 prefix, so they never match the generated classes. A block's id covers each image's alt text, path
 and SHA-256, so a re-shot image at the same path shows as changed. Markdown docs render no
 local images.
+
+### Downloads
+
+`GET /api/v1/reviews/:id/revisions/:seq/download` requires a reviewer session with `read` scope.
+A bearer token gets `403`, like other reviewer routes. Missing credentials get `401`.
+It follows the revision route's `404` and `review_in_bin` rules.
+`HEAD` checks the same access and revision rules and returns the download headers without
+building a file or reading blobs. It never waits for a download slot.
+One download builds at a time per owner in this server process. Up to two more requests wait
+in order. A further request gets `429 rate_limited` with the `download_busy` message:
+"A download is already building. Try again when it finishes."
+The slot is released after success or failure.
+
+A code review's file holds the review title and that revision's writeup: sections, topics, text,
+code blocks and images with captions. It holds no docs, comments or diff. A revision is a pub
+when `writeupEmpty` is true and `base` is null. When a pub has docs, the download holds one doc:
+`main` when it names a doc, else the first doc in file order. Markdown uses its stored rendered
+blocks. Source uses its stored highlighted tokens. Code reviews and Markdown and source pubs
+get the emend header with the review title, project, branch and publish links. An HTML pub keeps
+the agent's HTML layout, with no emend header. Its listed assets are built in after filtering.
+Mermaid diagrams show as labelled source text. Links to other docs become plain text.
+Absolute HTTP, HTTPS and mailto links keep working on `a` and `area` elements.
+Only SVG `image` and `feImage` hrefs follow the resource rules. Other elements, including SVG
+`use` and MathML elements, keep only same-document fragments in hrefs. These rules also apply
+to `xlink:href`. SMIL `set`, `animate`, `animateMotion` and `animateTransform` elements targeting
+an href are removed.
+
+The response is `200` with `Content-Type: text/html; charset=utf-8`,
+`Content-Disposition: attachment; filename="<name>"`, `X-Content-Type-Options: nosniff`,
+`Cache-Control: no-store` and `Cross-Origin-Resource-Policy: same-origin`.
+The filename is the lowercase title, with runs outside `[a-z0-9]` replaced by `-`, trimmed,
+cut to 60 characters and trimmed again. An empty name becomes `emend`. It ends in `-r<seq>.html`.
+`Content-Security-Policy: sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; media-src data:; base-uri 'none'; form-action 'none'`
+replaces the app CSP for this route. Every file starts with a UTF-8 byte order mark.
+The file also has a CSP meta with the same policy without `sandbox`.
+It opens offline with no scripts or network requests.
+
+At most 128 MiB of built-in content is emitted. Every copy of a data URL and every inlined CSS
+text counts its final UTF-8 bytes each time it is emitted. The server also reads at most
+128 MiB of distinct stored assets. It checks stored sizes before reading them.
+At most 64 stylesheet occurrences are inlined, across imports and stylesheet links. Repeated
+paths count each time and keep their own conditions. Imports stop at depth 4 and never repeat
+a path in the same chain. Each file has a 64 MiB CSS work budget. Each rewrite charges its input
+bytes. The final output check charges the written bytes too, with imports joined in.
+Dropped output does not refund spent work. When that budget is spent,
+remaining styles, style attributes and stylesheets are left out.
+HTML parsing stops at nesting depth 512 or 200,000 elements. An over-limit Markdown or writeup
+block is left out. An over-limit HTML doc becomes a page with the title, reading styles and
+only the note in its body. When any size or processing limit omits content, one visible note says:
+"Some content was left out of this download because it passed a size or processing limit."
+The server yields between steps while building, including CSS, element walks, references and
+base64 chunks. The final HTML serialization runs in one step.
+
+The file holds no server address, emend link, sign-in link, token or machine name.
+HTML docs lose scripts, event handlers, frames, embeds, `<base>`, `<noscript>`, `<meta http-equiv>`
+and unlisted resource references. Forms are unwrapped, keeping their content.
+Listed image, audio, video and font assets and `text/vtt` captions may be built in.
+CSS assets are used only as stylesheets. Other asset media types are left out.
+Writeup and Markdown images allow only PNG, JPEG, GIF, WebP and AVIF.
+Author data URLs for images, audio, video and VTT captions may stay in resource attributes.
+CSS may retain data URLs and local fragments. Asset references keep their fragments.
+SVG presentation and animation attributes that reference anything but a fragment are removed.
+CSS is read with a CSS Syntax Level 3 tokenizer. Escaped names count as their decoded spelling.
+Written CSS never holds an `&` that could start a character reference.
+Written CSS is tokenized again and checked once, after imports and HTML escaping.
+CSS that still holds a resource reference other
+than a data URL or a fragment is left out with the note. The file's CSP blocks any network load
+in any case.
+An `@import` prelude is limited to 64 tokens and 4 KiB of source. Longer imports are left out.
+An invalid `@import … {…}` rule is dropped together with its block.
+Inlined imports keep their layer, supports and media conditions. Alternate and disabled
+stylesheets are left out. `@charset` is removed. A top-level stylesheet `@namespace` prelude
+is kept; its URL is not fetched. It ends at `;`, `{` or `}` outside nested brackets and functions.
+Inside blocks and style attributes, its references are rewritten.
+Unfinished strings and comments are closed before joining sheets. Imports with unfinished
+or invalid strings or URLs in their prelude are left out.
+A nested `image-set()` becomes `none`. Image functions containing `var()`, `env()` or `attr()`
+at any depth also become `none`.
 
 ### Viewed files
 
@@ -1387,6 +1466,7 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `diffSideBytes` | 1048576 bytes shown per side |
 | `markdownDocBytes` | 1048576 bytes |
 | `htmlDocBytes` | 8388608 bytes |
+| `downloadInlineBytes` | 134217728 bytes (128 MiB) of distinct stored assets built into one download |
 | `assetBytes` | 26214400 bytes per asset |
 | `htmlDocWithAssetsBytes` | 52428800 bytes combined |
 | `revisionBytes` | 268435456 bytes for writeup source JSON and unique referenced blobs; checked before reading content |

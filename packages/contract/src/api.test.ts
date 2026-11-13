@@ -9,6 +9,7 @@ import {
   MIN_CLIENT_VERSION,
   OTHER_TOPIC,
   PublishResponse,
+  reviewDownloadPath,
   SCOPES_BY_KIND,
   Scope,
   ServerStopping,
@@ -48,6 +49,7 @@ test("exports the v1 API, limits, file vocabulary and reserved fallback", () => 
     sourceLinesPerRevision: 200000,
     sourceBytesPerRevision: 16777216,
     htmlDocBytes: 8388608,
+    downloadInlineBytes: 134217728,
     assetBytes: 26214400,
     htmlDocWithAssetsBytes: 52428800,
     revisionBytes: 268435456,
@@ -163,4 +165,8 @@ test("validates publish response ids, revision, URL and placement counts", () =>
   ]) {
     expect(PublishResponse.safeParse({ ...response, ...change }).success).toBe(false);
   }
+});
+
+test("builds a revision download path with an encoded review id", () => {
+  expect(reviewDownloadPath("review/id ?", 3)).toBe("/api/v1/reviews/review%2Fid%20%3F/revisions/3/download");
 });

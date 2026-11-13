@@ -1,7 +1,8 @@
-import type { PublishLink, ReviewView, RevisionView } from "@emend/contract";
+import { type PublishLink, type ReviewView, type RevisionView, reviewDownloadPath } from "@emend/contract";
 import {
   CircleDot,
   ExternalLink,
+  FileDown,
   FileText,
   GitBranch,
   GitCommitHorizontal,
@@ -120,6 +121,11 @@ export function ReviewHeader({
         {phone && <RevisionPicker compact review={review} seq={seq} onChange={onRevisionChange} />}
         {!phone && (
           <div className="ml-auto flex flex-wrap items-center gap-2">
+            <Button asChild variant="ghost" size="sm" icon={FileDown} title="Download this revision as one HTML file">
+              <a href={reviewDownloadPath(review.id, seq)} download>
+                Download
+              </a>
+            </Button>
             <Button variant="ghost" size="sm" icon={MessageSquarePlus} disabled={!revision} onClick={onCommentReview}>
               Comment on review
             </Button>

@@ -12,6 +12,14 @@ export { composeRenames } from "./place/renames.ts";
 export { makeSpan, placeSpan } from "./place/span.ts";
 export { type Block, blockText, resectionBlocks } from "./render/blocks.ts";
 export { changedBlockIds } from "./render/changed.ts";
+export {
+  buildDocDownload,
+  buildHtmlDocDownload,
+  buildWriteupDownload,
+  DOWNLOAD_FILE_CSP,
+  type DownloadAsset,
+  type ResolveResult,
+} from "./render/download.ts";
 export { blockHash } from "./render/hash.ts";
 export { HIGHLIGHT_FENCE_BYTES, HIGHLIGHT_LINE_CHARS, HIGHLIGHT_RENDER_BYTES } from "./render/highlight.ts";
 export { renderCommentHtml, renderDoc, renderMarkdown, renderMetadataBlocks } from "./render/markdown.ts";

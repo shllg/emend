@@ -132,3 +132,7 @@ Comments stay unsent until you press Send. The Comments tab lists them, and the 
 pick how the agent should act on them.
 
 ![The Comments tab with three unsent comments and the Send button](images/send-desktop.png)
+
+Download (on a phone: in the menu) saves the revision on screen as one HTML file that opens offline
+in any browser, so you can send it to someone who cannot reach emend. A code review's file holds
+its writeup; a published doc's file holds that doc. Diagrams show as their source text.

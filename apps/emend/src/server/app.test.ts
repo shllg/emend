@@ -211,7 +211,9 @@ test("every documented API endpoint enforces its scope even before its handler e
         await error(response, "invalid_request", endpoint.method === "HEAD");
       else if (
         path === "/api/v1/bin/missing" ||
-        /\/reviews\/missing(?:$|\/(?:events|take|unsnooze|retire|reopen|bin|restore|revisions\/missing)$)/.test(path)
+        /\/reviews\/missing(?:$|\/(?:events|take|unsnooze|retire|reopen|bin|restore|revisions\/missing(?:\/download)?)$)/.test(
+          path,
+        )
       )
         await error(response, "unknown_review");
       else await error(response, "not_found", endpoint.method === "HEAD");
