@@ -405,10 +405,18 @@ Run `emend stop` again in a terminal where `command -v tailscale` finds it. If y
 Tailscale on this machine for good, delete the file `tailscale-serve.json` in emend's state folder
 (where that folder lives: [local.md](local.md#undo), step 5).
 
-## The hub behind your proxy answers bad_host
+## The hub behind your proxy answers bad_host or bad_origin
 
-The proxy rewrites the `Host` header or drops its port. Pass it through unchanged. In nginx,
-use `proxy_set_header Host $http_host;`, not `$host`, which drops the port.
+The proxy may rewrite the `Host` header or drop its port. A host emend does not know gets
+`403 bad_host`. A host emend allows, such as `127.0.0.1:3636`, still differs from the browser's
+public Origin. That makes pairing and every browser change fail with `403 bad_origin`.
+
+For that pairing failure, the page says: "Could not pair. Check your connection and try again."
+This is the page's fixed message for a 403 response; it does not show `bad_origin` itself.
+
+Pass `Host` through unchanged, including its port. In nginx, use
+`proxy_set_header Host $http_host;`, not `$host`, which drops the port. The default `$proxy_host`
+sends the upstream host instead. With Apache, use `ProxyPreserveHost On` for the emend site.
 
 Check that the address given to `--public-url` is the one the phone opens, including its port
 when not 443. Then reload the proxy after fixing its configuration. If the address was wrong,

@@ -29,7 +29,9 @@ The values below are binding. Limits and ids are in `docs/api.md` once it exists
   CLI and MCP use `Authorization: Bearer <token>`. A reviewer credential is accepted only from the
   cookie, never as a bearer.
 - Host header allowlist on every request; an Origin check on every non-GET request that carries
-  the cookie. A missing Origin with the cookie is refused.
+  the cookie. A missing Origin with the cookie is refused. An Origin must be an app origin whose
+  host equals the request's Host, so a proxy that rewrites Host cannot get a cookie without
+  `Secure`.
 - Take `owner_id` from the principal, never from the request. Every query filters it. A missing or
   foreign row is `404`, never `403`.
 - Origin comes from the token. A review's origin instance is the instance its agent token is

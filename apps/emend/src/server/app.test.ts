@@ -18,6 +18,7 @@ import { BlobStore } from "../store/blobs.ts";
 import { createApp, ENDPOINTS } from "./app.ts";
 import { createToken, hashSecret, verifyBearer } from "./auth/tokens.ts";
 import { APP_CSP } from "./http/headers.ts";
+import { serverConfig } from "./serve.ts";
 
 let fixture: Awaited<ReturnType<typeof testDb>>;
 let app: ReturnType<typeof createApp>;
@@ -155,6 +156,68 @@ test("client and origin guards precede credentials and parsing", async () => {
   );
   await error(await request("/session", "POST", { Cookie: "emend_session=invalid" }, {}), "bad_origin");
   expect((await request("/pairings", "POST", bearer(admin), {})).status).toBe(201);
+});
+
+test.each(["emend.example.com", "EMEND.EXAMPLE.COM", "emend.example.com:8443"])(
+  "pairing requires matching Origin and Host and sets Secure only for the public host %s",
+  async (publicHost) => {
+    const publicOrigin = `https://${publicHost.toLowerCase()}`;
+    app = createApp({
+      db: fixture.db,
+      blobs: new BlobStore(fixture.db, join(fixture.dir, "state")),
+      instance: { id: fixture.instanceId, name: "Synthetic" },
+      now: () => now,
+      config: serverConfig("127.0.0.1", 3636, webRoot, publicOrigin),
+    });
+    const pairing = await issue();
+    const body = { secret: new URL(pairing.url).hash.slice(1) };
+    for (const headers of [
+      { Host: host, Origin: publicOrigin },
+      { Host: publicHost, Origin: origin },
+    ]) {
+      const refused = await request("/session", "POST", headers, body);
+      await error(refused, "bad_origin");
+      expect(refused.headers.has("set-cookie")).toBe(false);
+    }
+    const session = await request("/session", "POST", { Host: publicHost, Origin: publicOrigin }, body);
+    expect(session.status).toBe(204);
+    expect(session.headers.get("set-cookie")).toContain("Secure");
+    const cookie = session.headers.get("set-cookie")?.split(";")[0] ?? "";
+    await error(await request("/pairings", "POST", { Cookie: cookie, Origin: publicOrigin }, {}), "bad_origin");
+    const localPairing = await issue();
+    const localSession = await request(
+      "/session",
+      "POST",
+      { Host: host, Origin: origin },
+      { secret: new URL(localPairing.url).hash.slice(1) },
+    );
+    expect(localSession.status).toBe(204);
+    expect(localSession.headers.get("set-cookie")).toContain("emend_session=");
+    expect(localSession.headers.get("set-cookie")).not.toContain("Secure");
+  },
+);
+
+test.each(["null", "https://[invalid", "not an origin"])(
+  "malformed Origin %s is refused before pairing",
+  async (value) => {
+    await error(await request("/session", "POST", { Origin: value }, {}), "bad_origin");
+  },
+);
+
+test.each(["GET", "HEAD"])("%s still skips the Origin guard", async (method) => {
+  expect((await request("/capabilities", method, { Origin: "null", Cookie: "emend_session=invalid" })).status).toBe(
+    200,
+  );
+});
+
+test("content requests ignore session cookies when checking for a missing Origin", async () => {
+  await error(
+    await app.request(`${origin}/content/synthetic/file.html`, {
+      method: "POST",
+      headers: { Host: host, Cookie: "emend_session=invalid" },
+    }),
+    "not_found",
+  );
 });
 
 test("every documented API endpoint enforces its scope even before its handler exists", async () => {

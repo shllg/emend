@@ -38,8 +38,10 @@ here **before** writing the route. This includes `PublishRequest` (plan task 1.6
   the listener's actual concrete address, and the tailnet name only when configured with
   `--tailscale` (with `--tailscale-port <n>`, the name and that port, `<name>:<n>`), or the
   `--public-url` origin's host (with its port when not 443). Other hosts receive `403 bad_host`.
-  Every non-GET/HEAD request with an Origin must name an allowed app origin. A non-GET/HEAD request carrying a session cookie must carry
-  that Origin; a missing or disallowed origin receives `403 bad_origin`.
+  Every non-GET/HEAD request with an Origin must name an allowed app origin. That Origin's host
+  must equal the request's Host, including its port, compared in lowercase. An invalid Origin or
+  a mismatch receives `403 bad_origin`. Outside `/content/`, a non-GET/HEAD request carrying a
+  session cookie must carry that Origin; a missing or disallowed origin receives `403 bad_origin`.
 
 Guards run in this order: Host, client version, Origin, declared Content-Length limit,
 credential and scope, bounded body streaming, then handler and schema parsing. An unauthorized

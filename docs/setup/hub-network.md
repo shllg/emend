@@ -40,11 +40,12 @@ command works inside your sandbox.
 - An always-on machine on Linux or macOS with emend installed. See [local.md](local.md).
 - A name your devices resolve to the hub, through your DNS, your router or a hosts entry.
 - An HTTPS reverse proxy on the hub: Caddy, nginx, Traefik or another. Its certificate must be
-  trusted by every device that reviews or attaches. A publicly trusted certificate works
-  everywhere. For example, Let's Encrypt through the DNS challenge needs no open port. If you use
-  your own CA, trust it on the phone and on each attached machine. Node.js ignores the system
-  store by default: set `NODE_EXTRA_CA_CERTS` to your CA certificate's path in the environment
-  emend runs in.
+  trusted by every device that reviews or attaches. Prefer a publicly trusted certificate.
+  For example, Let's Encrypt through the DNS challenge needs no open port. If you use your own
+  CA, trust it on the phone and on each attached machine. Without name constraints, a device that
+  trusts your CA trusts every certificate its key signs, for any site. Whoever reads that key
+  can impersonate any site to that device. The key may be on the hub, in the proxy's data folder
+  or in a backup. If you make a CA, prefer one limited to your own names through name constraints.
 - A network only you and your devices reach, such as your home network or your VPN. Do not expose
   the hub to the open internet. Anyone who reaches `/pair` can lock code entry for ten minutes by
   guessing wrong codes.
@@ -52,14 +53,21 @@ command works inside your sandbox.
   sign-in cookie.
 - A phone with a browser. On an iPhone, use Safari.
 
+For an own-CA certificate, Node.js ignores the system store by default. On attached machines,
+set `NODE_EXTRA_CA_CERTS` to your CA certificate's path only where emend runs. It applies to
+every Node.js program started with it. The hub itself does not need it: emend never contacts its
+own address, and its CLI talks to `127.0.0.1`.
+
 ## 1. Point your proxy at emend
 
 Configure your proxy to:
 
-- Forward `https://emend.example.com` to `http://127.0.0.1:3636`.
+- Forward `https://emend.example.com` to `http://127.0.0.1:3636`, never `localhost`. `localhost`
+  can resolve to `::1`, where emend does not listen and another local user could.
 - Pass the `Host` header through unchanged, port included. emend answers hosts outside its
-  allowlist with `403 bad_host`. It marks the sign-in cookie `Secure` only for the configured
-  HTTPS host.
+  allowlist with `403 bad_host`. Rewriting it to an allowed host such as `127.0.0.1:3636` makes
+  pairing and every browser change fail with `403 bad_origin`: the browser's Origin names the
+  public host. emend marks the sign-in cookie `Secure` only for that configured HTTPS host.
 - Not buffer responses. The browser's live updates are a server-sent event stream.
 - Not cap request bodies. emend enforces its own limits; attached machines upload whole reviews.
 
@@ -73,8 +81,10 @@ emend.example.com {
 
 Caddy passes `Host` through, streams event responses and sets no body limit by default. This
 block uses Caddy's automatic HTTPS. Configure certificate issuance for your network; for a DNS
-challenge, Caddy needs the DNS provider's module and configuration. Adding `tls internal` uses
-Caddy's own CA instead. Every device must then trust that CA.
+challenge, Caddy needs the DNS provider's module and configuration. Prefer a publicly trusted
+certificate. Adding `tls internal` uses Caddy's own CA instead. Every device must then trust that
+CA. Anyone who reads its key can impersonate sites to those devices. If you make a CA, prefer
+one limited to your own names through name constraints.
 
 For nginx, set these in the emend site's proxy configuration:
 
@@ -92,14 +102,17 @@ through Homebrew. Changing a system proxy usually needs `sudo`. Run those comman
 
 ```text
 Rules: never read secrets (tokens, .env files, credential stores, private keys) or emend's state
-folder; before you change the proxy's configuration, show me the change and wait for my yes;
-give me any command that needs sudo to run myself; if a dotfiles tool manages a file or link you
-would change, change its source and tell me how to apply it; run no process listing yourself;
-stay inside your sandbox and give me commands that need to run outside it.
-Find which HTTPS proxy runs on this machine. Ask me for emend's address and how its certificate
-is trusted. Show me the site change that forwards it to http://127.0.0.1:3636, preserves Host
-including its port, streams responses and sets no request body limit. Wait for my yes before
-changing it. Give me any sudo commands to apply the change myself.
+folder; never read the proxy's certificate keys or its data folder; never search for or read whole
+proxy configs; read only the emend site block, or ask me to paste it; if a file shows a credential
+(a token in a tls or dns block, an API key), stop reading, never repeat it, and tell me; before you
+change the proxy's configuration, show me the change and wait for my yes; give me any command that
+needs sudo to run myself; if a dotfiles tool manages a file or link you would change, change its
+source and tell me how to apply it; run no process listing yourself; stay inside your sandbox and
+give me commands that need to run outside it.
+Ask me which proxy I run and where its emend site lives. Ask me for emend's address and how its
+certificate is trusted. Show me the site change that forwards it to http://127.0.0.1:3636, never
+localhost, preserves Host including its port, streams responses and sets no request body limit.
+Wait for my yes before changing it. Give me any sudo commands to apply the change myself.
 ```
 
 ## 2. Install the service with your address
@@ -138,9 +151,15 @@ On Linux, the unit is `~/.config/systemd/user/emend.service` and the log is
 `journalctl --user -u emend`. On macOS, the agent is
 `~/Library/LaunchAgents/dev.emend.server.plist` and the log is `~/Library/Logs/emend.log`.
 
-**Why this matters.** While emend is down, whatever listens on `127.0.0.1:3636` receives the
-requests your proxy forwards, including the reviewer cookie. On a shared machine, any local user
-could bind that port. Run the hub on a machine you alone use.
+**Why this matters.** While emend is down, whatever binds `127.0.0.1:3636` serves its own pages on
+`https://emend.example.com`. On a shared machine, any local user could bind that port. A script
+it leaves in the phone's browser, such as a service worker, can keep running after emend is back.
+It can read reviews and send comments, Sends and approvals with the reviewer's cookie. Clearing
+the site's data in the browser removes it. This window exists during every service restart or
+install, during `emend update`, and after a crash until the restart. After uninstall, it lasts
+until you remove the proxy's emend site. emend cannot remove your proxy's route. Point the proxy
+at `127.0.0.1:3636`, never `localhost`: it can resolve to `::1`, where emend does not listen and
+another local user could. Run the hub on a machine you alone use.
 
 ```text
 Rules: show me each change and wait for my yes; never read secrets (tokens, .env files, credential
@@ -160,6 +179,10 @@ https://github.com/shllg/emend/blob/release/docs/setup/troubleshooting.md.
 
 `--host <address of the hub>` makes emend listen on that address, over plain HTTP. Every
 device on that network can reach emend directly, unencrypted. Use it only on a network you trust.
+Every request on the proxy-to-hub hop is plain text. That includes the reviewer's sign-in cookie
+and pairing secrets. Anyone who can watch that network can read them. Use a firewall rule that
+lets only the proxy's address reach the port, or an encrypted link such as WireGuard between the
+two machines.
 Run this yourself; agents must not pass `--host`:
 
 ```sh
@@ -219,9 +242,15 @@ because it has its own storage; on another phone install the app from the browse
 To make the agents on your other machines publish to the hub, follow [attach.md](attach.md). The
 agent side of each machine is on [agents.md](agents.md).
 
-If the proxy uses a certificate from your own CA, each attached machine must trust it too. Set
-`NODE_EXTRA_CA_CERTS` to your CA certificate's path in the environment that runs emend, including
-the agents that call it. Node.js reads that variable when it starts.
+Prefer a publicly trusted certificate. If you use your own CA, each attached machine must trust
+it too. Without name constraints, that trust covers every certificate its key signs, for any
+site. Whoever reads the key on the hub, in the proxy's data folder or in a backup can impersonate
+sites to those devices. If you make a CA, prefer one limited to your own names.
+
+Set `NODE_EXTRA_CA_CERTS` to your CA certificate's path only where emend runs on attached
+machines. Node.js reads it when it starts. It applies to every Node.js program started with it,
+so do not set it for unrelated programs. The hub itself does not need it: emend never contacts its
+own address, and its CLI talks to `127.0.0.1`.
 
 ```text
 Rules: never read secrets (tokens, .env files, credential stores) or emend's state folder; never run
@@ -229,8 +258,13 @@ emend pair, attach, detach, config or devices yourself, give me the command inst
 Help me attach another machine to this hub: follow
 https://github.com/shllg/emend/blob/release/docs/setup/attach.md. Tell me to run emend pair
 --machine on the hub myself, and the emend attach command it prints on the other machine myself.
-If I use my own CA, explain how to set NODE_EXTRA_CA_CERTS to its certificate on that machine
-before emend or its agents start. Then follow
+Recommend a publicly trusted certificate first. If I use my own CA, explain that a device trusts
+every certificate its key signs, for any site, unless the CA has name constraints. Whoever reads
+the key on the hub, in the proxy's data folder or in a backup can impersonate sites to that
+device. Recommend name constraints that limit the CA to my own names. Explain how to set
+NODE_EXTRA_CA_CERTS to its certificate only where emend runs on the attached machine. It applies
+to every Node.js program started with it. The hub does not need it: emend never contacts its own
+address, and its CLI talks to 127.0.0.1. Then follow
 https://github.com/shllg/emend/blob/release/docs/setup/agents.md for its agents.
 ```
 
@@ -250,8 +284,14 @@ Update the hub first, then its machines. See [update.md](update.md).
 ## Undo
 
 1. Stop the hub: `emend service uninstall`. This stops the server and deletes its saved options.
-2. Remove the proxy's emend site and reload the proxy. Until you do, a program on port 3636
-   receives requests meant for emend. Run commands that need `sudo` yourself.
+2. Remove the proxy's emend site and reload the proxy. emend cannot remove that route. Until you
+   do, whatever binds `127.0.0.1:3636` serves its own pages on `https://emend.example.com`. A script
+   it leaves in the phone's browser, such as a service worker, can remain after emend is back.
+   It can read reviews and send comments, Sends and approvals with the reviewer's cookie. Clear
+   the site's data in the browser to remove it. This window also exists during every service
+   restart or install, during `emend update`, and after a crash until the restart. Keep the proxy
+   pointed at `127.0.0.1:3636`, never `localhost`, which may resolve to `::1` where another user
+   could listen. Run commands that need `sudo` yourself.
 3. To run a loopback-only server again, run `emend service install` with no options after the
    uninstall. It uses `127.0.0.1:3636`, without a public address. Skip this to run no service at
    all.
@@ -263,8 +303,8 @@ Update the hub first, then its machines. See [update.md](update.md).
 
 ## When something goes wrong
 
-- [The hub behind your proxy answers
-  bad_host](troubleshooting.md#the-hub-behind-your-proxy-answers-bad_host)
+- [The hub behind your proxy answers bad_host or
+  bad_origin](troubleshooting.md#the-hub-behind-your-proxy-answers-bad_host-or-bad_origin)
 - [The service does not start](troubleshooting.md#the-service-does-not-start)
 - [The hub is unreachable](troubleshooting.md#the-hub-is-unreachable)
 - [The pairing code expired or is locked](troubleshooting.md#the-pairing-code-expired-or-is-locked)
