@@ -407,6 +407,54 @@ test("code failures use a sliding window, malformed inputs do not count, links w
   expect((await request("/session", "POST", {}, { code: fresh.code })).status).toBe(204);
 });
 
+test.each([
+  { publicOrigin: true, method: "GET", requestHost: host, renewal: "none" },
+  { publicOrigin: true, method: "HEAD", requestHost: host, renewal: "none" },
+  { publicOrigin: true, method: "GET", requestHost: "emend.example.com", renewal: "secure" },
+  { publicOrigin: true, method: "HEAD", requestHost: "emend.example.com", renewal: "secure" },
+  { publicOrigin: true, method: "POST", requestHost: host, renewal: "plain" },
+  { publicOrigin: false, method: "GET", requestHost: host, renewal: "plain" },
+  { publicOrigin: false, method: "HEAD", requestHost: host, renewal: "plain" },
+])(
+  "$method on $requestHost has $renewal cookie renewal (public origin: $publicOrigin)",
+  async ({ publicOrigin, method, requestHost, renewal }) => {
+    const publicUrl = publicOrigin ? "https://emend.example.com" : undefined;
+    app = createApp({
+      db: fixture.db,
+      blobs: new BlobStore(fixture.db, join(fixture.dir, "state")),
+      instance: { id: fixture.instanceId, name: "Synthetic" },
+      now: () => now,
+      config: serverConfig("127.0.0.1", 3636, webRoot, publicUrl),
+    });
+    const pairing = await issue();
+    const session = await request(
+      "/session",
+      "POST",
+      { Host: publicOrigin ? "emend.example.com" : host, Origin: publicUrl ?? origin },
+      { secret: new URL(pairing.url).hash.slice(1) },
+    );
+    expect(session.status).toBe(204);
+    const initialCookie = session.headers.get("set-cookie") ?? "";
+    expect(initialCookie).toContain("emend_session=");
+    expect(initialCookie.includes("Secure")).toBe(publicOrigin);
+    const cookie = initialCookie.split(";")[0] ?? "";
+    now += day;
+    const response = await request(
+      method === "POST" ? "/pairings" : "/reviews",
+      method,
+      { Host: requestHost, Cookie: cookie, ...(method === "POST" ? { Origin: origin } : {}) },
+      method === "POST" ? {} : undefined,
+    );
+    expect(response.status).toBe(method === "POST" ? 201 : 200);
+    if (renewal === "none") expect(response.headers.has("set-cookie")).toBe(false);
+    else {
+      const renewedCookie = response.headers.get("set-cookie") ?? "";
+      expect(renewedCookie).toContain("Max-Age=2592000");
+      expect(renewedCookie.includes("Secure")).toBe(renewal === "secure");
+    }
+  },
+);
+
 test("sessions renew only daily, session-created pairings name the token, logout revokes both rows", async () => {
   const cookie = await login();
   const secret = cookie.split("=")[1] ?? "";

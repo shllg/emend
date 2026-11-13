@@ -29,6 +29,7 @@ here **before** writing the route. This includes `PublishRequest` (plan task 1.6
   proof reveals nothing about the key. Neither header carries a bearer or the server key.
 - Browsers use `emend_session`, with `HttpOnly`, `SameSite=Strict`, `Path=/`,
   `Max-Age=2592000` (30 days), and `Secure` on HTTPS. Sessions renew at most once daily.
+  With a configured public HTTPS origin, a GET or HEAD renews the cookie only on that origin's Host.
 - JSON bodies use `Content-Type: application/json`. Routes reject bodies over their JSON byte
   limit with `413 too_large` before parsing, then validate with the contract schemas:
   `POST /api/v1/publish` and `POST /api/v1/import` permit at most `publishJsonBytes` (8388608 bytes); `POST /session` and

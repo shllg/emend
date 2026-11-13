@@ -152,13 +152,21 @@ On Linux, the unit is `~/.config/systemd/user/emend.service` and the log is
 `~/Library/LaunchAgents/dev.emend.server.plist` and the log is `~/Library/Logs/emend.log`.
 
 **Why this matters.** While emend is down, whatever binds `127.0.0.1:3636` serves its own pages on
-`https://emend.example.com`. On a shared machine, any local user could bind that port. A script
-it leaves in the phone's browser, such as a service worker, can keep running after emend is back.
-It can read reviews and send comments, Sends and approvals with the reviewer's cookie. Clearing
-the site's data in the browser removes it. This window exists during every service restart or
-install, during `emend update`, and after a crash until the restart. After uninstall, it lasts
-until you remove the proxy's emend site. emend cannot remove your proxy's route. Point the proxy
-at `127.0.0.1:3636`, never `localhost`: it can resolve to `::1`, where emend does not listen and
+`https://emend.example.com`. On a shared machine, any local user could bind that port. That process
+also receives the requests your proxy forwards, including the reviewer cookie. It can use that
+session from the hub's loopback until you revoke it. A script it leaves in the phone's browser,
+such as a service worker, can keep running after emend is back. It can read reviews and send
+comments, Sends and approvals with the reviewer's cookie.
+
+Clear the site's data in the phone's browser to remove that script. Clearing site data does not
+revoke the stolen session. Revoke the device with `emend devices --revoke <id>` and pair again.
+
+This window exists during every service restart or install, during `emend update`, and after a
+crash until the restart. It also exists while the proxy runs without emend: on Linux after you
+log out unless linger is on, and on macOS before you log in. The macOS LaunchAgent runs only in
+your session, while a system proxy starts at boot. After uninstall, the window lasts until you
+remove the proxy's emend site. emend cannot remove your proxy's route. Point the proxy at
+`127.0.0.1:3636`, never `localhost`: it can resolve to `::1`, where emend does not listen and
 another local user could. Run the hub on a machine you alone use.
 
 ```text
@@ -180,9 +188,11 @@ https://github.com/shllg/emend/blob/release/docs/setup/troubleshooting.md.
 `--host <address of the hub>` makes emend listen on that address, over plain HTTP. Every
 device on that network can reach emend directly, unencrypted. Use it only on a network you trust.
 Every request on the proxy-to-hub hop is plain text. That includes the reviewer's sign-in cookie
-and pairing secrets. Anyone who can watch that network can read them. Use a firewall rule that
-lets only the proxy's address reach the port, or an encrypted link such as WireGuard between the
-two machines.
+and pairing secrets. Anyone who can watch that network can read them. Only an encrypted link
+between the two machines, such as WireGuard, keeps the cookie and pairing secrets off the network.
+A firewall rule that lets only the proxy's address reach the port additionally keeps other
+devices from connecting directly. It does not stop anyone watching the network from reading the
+hop.
 Run this yourself; agents must not pass `--host`:
 
 ```sh
@@ -285,13 +295,7 @@ Update the hub first, then its machines. See [update.md](update.md).
 
 1. Stop the hub: `emend service uninstall`. This stops the server and deletes its saved options.
 2. Remove the proxy's emend site and reload the proxy. emend cannot remove that route. Until you
-   do, whatever binds `127.0.0.1:3636` serves its own pages on `https://emend.example.com`. A script
-   it leaves in the phone's browser, such as a service worker, can remain after emend is back.
-   It can read reviews and send comments, Sends and approvals with the reviewer's cookie. Clear
-   the site's data in the browser to remove it. This window also exists during every service
-   restart or install, during `emend update`, and after a crash until the restart. Keep the proxy
-   pointed at `127.0.0.1:3636`, never `localhost`, which may resolve to `::1` where another user
-   could listen. Run commands that need `sudo` yourself.
+   do, the risk in step 2's "Why this matters" applies. Run commands that need `sudo` yourself.
 3. To run a loopback-only server again, run `emend service install` with no options after the
    uninstall. It uses `127.0.0.1:3636`, without a public address. Skip this to run no service at
    all.

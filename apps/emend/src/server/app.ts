@@ -156,8 +156,13 @@ export function createApp(deps: AppDeps) {
         const session = await verifySession(deps.db, secret, deps.now());
         if (session) {
           principal = session.principal;
-          if (session.renew && secret)
-            writeSessionCookie(c, secret, secureSessionRequest(c, deps.config.secureCookieHost));
+          if (session.renew && secret) {
+            const secure = secureSessionRequest(c, deps.config.secureCookieHost);
+            const readOnly = c.req.method === "GET" || c.req.method === "HEAD";
+            // Reads skip Origin checks, so a rewritten Host must not downgrade the cookie.
+            if (deps.config.secureCookieHost === undefined || secure || !readOnly)
+              writeSessionCookie(c, secret, secure);
+          }
         }
       }
       if (!principal) throw new ApiError("unauthorized");

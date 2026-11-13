@@ -130,7 +130,8 @@ test("Tailscale host is opt-in, links are HTTPS fragments, and cookies follow ea
     f.advance(86_400_000);
     const renew = await request(app, host, "/devices", "GET", undefined, cookie.split(";")[0]);
     expect(renew.status).toBe(200);
-    expect(renew.headers.get("set-cookie")?.includes("Secure")).toBe(host === tailnet);
+    if (host === tailnet) expect(renew.headers.get("set-cookie")).toContain("Secure");
+    else expect(renew.headers.has("set-cookie")).toBe(false);
     const logout = await request(app, host, "/session", "DELETE", undefined, cookie.split(";")[0]);
     expect(logout.status).toBe(204);
     expect(logout.headers.get("set-cookie")?.includes("Secure")).toBe(host === tailnet);
