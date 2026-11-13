@@ -31,7 +31,18 @@ export type DownloadDetails = {
   publishedAt: string;
   links: PublishLinks | undefined;
 };
-type PageInput = { title: string; details: DownloadDetails; resolveMedia: DownloadResolver; inlineBudget?: number };
+type PageInput = {
+  title: string;
+  details: DownloadDetails;
+  resolveMedia: DownloadResolver;
+  inlineBudget?: number;
+  pause?: () => Promise<void>;
+};
+
+const STYLESHEET_LIMIT = 64;
+const CSS_WORK_BYTES = 64 * 1024 * 1024;
+const CSS_PAUSE_BYTES = 1024 * 1024;
+const REFERENCE_PAUSE_COUNT = 1000;
 
 // Literal reading tokens keep the exported page independent of the app and its fonts.
 const READING_STYLES = `
@@ -75,9 +86,16 @@ function dataUri(asset: DownloadAsset): string {
     chunks.push(String.fromCharCode(...asset.bytes.subarray(i, i + 0x8000)));
   return `data:${asset.mediaType};base64,${btoa(chunks.join(""))}`;
 }
-function resolverState(resolve: DownloadResolver, inlineBudget: number = LIMITS.downloadInlineBytes) {
+function resolverState(
+  resolve: DownloadResolver,
+  inlineBudget: number = LIMITS.downloadInlineBytes,
+  pause?: () => Promise<void>,
+) {
   const cache = new Map<string, Promise<DownloadAsset | null>>();
   let stylesheets = 0;
+  let cssWork = 0;
+  let cssSincePause = 0;
+  let referencesSincePause = 0;
   const state = {
     tooLarge: false,
     used: 0,
@@ -88,6 +106,40 @@ function resolverState(resolve: DownloadResolver, inlineBudget: number = LIMITS.
       }
       state.used += length;
       return true;
+    },
+    reference(): Promise<void> | undefined {
+      referencesSincePause++;
+      if (referencesSincePause < REFERENCE_PAUSE_COUNT) return;
+      referencesSincePause = 0;
+      return pause?.();
+    },
+    cssAvailable(): boolean {
+      if (cssWork < CSS_WORK_BYTES) return true;
+      state.tooLarge = true;
+      return false;
+    },
+    beginCss(css: string): number | null {
+      if (!state.cssAvailable()) return null;
+      const bytes = new TextEncoder().encode(css).byteLength;
+      if (bytes > CSS_WORK_BYTES - cssWork) {
+        cssWork = CSS_WORK_BYTES;
+        state.tooLarge = true;
+        return null;
+      }
+      // Charge the whole occurrence before rewriting; dropping output never refunds this work.
+      cssWork += bytes;
+      return bytes;
+    },
+    tokenizedCss(bytes: number): Promise<void> | undefined {
+      if (!pause) return;
+      cssSincePause += bytes;
+      if (cssSincePause < CSS_PAUSE_BYTES) return;
+      return (async () => {
+        while (cssSincePause >= CSS_PAUSE_BYTES) {
+          cssSincePause -= CSS_PAUSE_BYTES;
+          await pause();
+        }
+      })();
     },
     data(asset: DownloadAsset, suffix = ""): string | null {
       const length = `data:${asset.mediaType};base64,`.length + 4 * Math.ceil(asset.bytes.length / 3) + suffix.length;
@@ -108,7 +160,10 @@ function resolverState(resolve: DownloadResolver, inlineBudget: number = LIMITS.
       return result;
     },
     async stylesheet(path: string): Promise<DownloadAsset | null> {
-      if (stylesheets >= 64) {
+      const pending = state.reference();
+      if (pending) await pending;
+      if (!state.cssAvailable()) return null;
+      if (stylesheets >= STYLESHEET_LIMIT) {
         state.tooLarge = true;
         return null;
       }
@@ -216,6 +271,8 @@ async function transformBlocks(parent: Root | Element, state: AssetState): Promi
     if (typeof node.properties.style === "string" && /url\s*\(|expression\s*\(/i.test(node.properties.style))
       delete node.properties.style;
     if (node.tagName === "img") {
+      const pending = state.reference();
+      if (pending) await pending;
       const src = String(node.properties.src ?? "");
       const hash = src.startsWith(MEDIA_URL_PREFIX) ? src.slice(MEDIA_URL_PREFIX.length) : "";
       const asset = /^[0-9a-f]{64}$/.test(hash) ? await state.get(hash) : null;
@@ -264,7 +321,7 @@ async function blocksContent(blocks: RenderedBlock[], state: AssetState): Promis
 export async function buildWriteupDownload(
   input: PageInput & { writeup: RenderedWriteup; topics: TopicMeta[] },
 ): Promise<string> {
-  const state = resolverState(input.resolveMedia, input.inlineBudget);
+  const state = resolverState(input.resolveMedia, input.inlineBudget, input.pause);
   // Revisions arrive in review order. The reserved Other topic never receives a rank.
   const ranked = input.topics.filter((topic) => topic.slug !== OTHER_TOPIC.slug);
   const bySlug = new Map(ranked.map((topic) => [topic.slug, topic]));
@@ -345,7 +402,7 @@ export async function buildDocDownload(
     content: { kind: "markdown"; blocks: RenderedBlock[] } | { kind: "source"; lines: SourceContent["lines"] };
   },
 ): Promise<string> {
-  const state = resolverState(input.resolveMedia, input.inlineBudget);
+  const state = resolverState(input.resolveMedia, input.inlineBudget, input.pause);
   let content: ElementContent[];
   if (input.content.kind === "markdown") content = await blocksContent(input.content.blocks, state);
   else {
@@ -397,6 +454,8 @@ const cssQuote = (value: string) =>
     .replace(/\r\n|[\r\n\f]/g, "\\a ")}"`;
 
 async function resourceUrl(value: string, basePath: string, state: AssetState, css = false): Promise<string | null> {
+  const pending = state.reference();
+  if (pending) await pending;
   if (fragment(value)) return value;
   if ((css ? /^data:/i : mediaData).test(value)) return state.take(value.length) ? value : null;
   const path = assetPath(value, basePath);
@@ -461,6 +520,15 @@ async function rewriteCss(
   state: AssetState,
   chain: string[] = [],
 ): Promise<string | null> {
+  const inputBytes = state.beginCss(css);
+  if (inputBytes === null) return null;
+  let tokenized = 0;
+  const advance = (end: number) => {
+    const bytes =
+      inputBytes === css.length ? end - tokenized : new TextEncoder().encode(css.slice(tokenized, end)).byteLength;
+    tokenized = end;
+    return state.tokenizedCss(bytes);
+  };
   const checkpoint = state.used;
   const parts: string[] = [];
   const append = (value: string, charged = 0) => {
@@ -508,6 +576,8 @@ async function rewriteCss(
   for (;;) {
     const match = tokens.exec(css);
     if (!match) break;
+    let pending = advance(tokens.lastIndex);
+    if (pending) await pending;
     if (!append(css.slice(offset, match.index))) return drop();
     const token = match[0];
     let end = tokens.lastIndex;
@@ -517,6 +587,8 @@ async function rewriteCss(
       const rule = css.slice(tokens.lastIndex, end);
       const opensBlock = css[end] === "{";
       if (css[end] === ";") end++;
+      pending = advance(end);
+      if (pending) await pending;
       // A block cannot belong to an import; leave it for the normal URL rewrite.
       if (isImport && !opensBlock) {
         const ref = importReference.exec(rule);
@@ -542,6 +614,8 @@ async function rewriteCss(
       }
     } else if (/^(?:-webkit-)?image-set\s*\(/i.test(token)) {
       end = cssEnd(css, end, ")");
+      pending = advance(css[end] === ")" ? end + 1 : end);
+      if (pending) await pending;
       const argument = css.slice(tokens.lastIndex, end);
       if (/(?:-webkit-)?image-set\s*\(/i.test(argument)) {
         if (!append("none")) return drop();
@@ -554,11 +628,15 @@ async function rewriteCss(
       end = cssEnd(css, end, ")");
       const value = cssValue(css.slice(tokens.lastIndex, end));
       if (css[end] === ")") end++;
+      pending = advance(end);
+      if (pending) await pending;
       if (!(await appendReference(value, false, css.slice(match.index, end)))) return drop();
     } else if (!append(token)) return drop();
     offset = end;
     tokens.lastIndex = end;
   }
+  const pending = advance(css.length);
+  if (pending) await pending;
   if (!append(css.slice(offset))) return drop();
   return parts.join("");
 }
@@ -611,9 +689,10 @@ export async function buildHtmlDocDownload(input: {
   title: string;
   resolveAsset: DownloadResolver;
   inlineBudget?: number;
+  pause?: () => Promise<void>;
 }): Promise<string> {
   const tree = fromHtml(input.html);
-  const state = resolverState(input.resolveAsset, input.inlineBudget);
+  const state = resolverState(input.resolveAsset, input.inlineBudget, input.pause);
   const resource = (value: string) => resourceUrl(value, input.docPath, state);
   async function walk(parent: Root | Element): Promise<void> {
     const children: RootContent[] = [];

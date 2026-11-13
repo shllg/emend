@@ -12,6 +12,7 @@ import { publishMeta, topicView } from "./reviews.ts";
 
 const imageTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
 const activeDownloads = new Set<string>();
+const pause = () => new Promise<void>((resolve) => setImmediate(resolve));
 function downloadFilename(title: string, seq: number) {
   const slug =
     title
@@ -136,6 +137,7 @@ async function revisionDownload(
       title: review.title,
       resolveAsset: (path) => resolveFile(assets.get(path)),
       inlineBudget: budget,
+      pause,
     });
   } else if (doc) {
     const content = await readJson(doc.renderedBlob);
@@ -150,6 +152,7 @@ async function revisionDownload(
       details: { ...details, links: meta.links },
       resolveMedia,
       inlineBudget: budget,
+      pause,
       content:
         doc.mediaType === "text/plain"
           ? { kind: "source", lines: parse(SourceContent, content).lines }
@@ -171,6 +174,7 @@ async function revisionDownload(
       topics: parse(TopicMeta.array().max(LIMITS.topicsPerReview + 1), topicRows.map(topicView)),
       resolveMedia,
       inlineBudget: budget,
+      pause,
     });
   }
   return { html, filename };

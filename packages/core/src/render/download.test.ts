@@ -930,3 +930,94 @@ test.each(["asset", "author data URL"])(
     }
   },
 );
+
+test.each(["imports", "links"])(
+  "bounds discarded 4 MiB CSS repeated through 64 %s to the work budget within 15 seconds",
+  async (kind) => {
+    const mib = 1024 * 1024;
+    const suffix = ".large{color:green}";
+    const stylesheet = `/*${"x".repeat(4 * mib - suffix.length - 4)}*/${suffix}`;
+    const imports = '@import "large.css";'.repeat(64);
+    const input =
+      kind === "imports" ? `<style>${imports}</style>` : '<link rel="stylesheet" href="large.css">'.repeat(64);
+    const pause = vi.fn(async () => {});
+    const asset = css(stylesheet);
+    const resolveAsset = vi.fn(async () => asset);
+    const start = Date.now();
+    const html = await buildHtmlDocDownload({
+      html: `${input}<style>.late{color:red}</style><p style="color:red">Kept text</p>`,
+      docPath: "doc.html",
+      title: "Work budget",
+      resolveAsset,
+      inlineBudget: 4 * mib - 1,
+      pause,
+    });
+    expect(Date.now() - start).toBeLessThan(15_000);
+    expect(html).not.toContain(".large");
+    expect(html).not.toContain(".late");
+    expect(html).not.toContain('style="color:red"');
+    expect(html).toContain("Kept text");
+    expect(html.match(/Some images or files were left out/g)).toHaveLength(1);
+    expect(html.length).toBeLessThan(2000);
+    expect(resolveAsset).toHaveBeenCalledExactlyOnceWith("large.css");
+    expect(pause).toHaveBeenCalledTimes(kind === "imports" ? 60 : 64);
+  },
+  20_000,
+);
+
+test.each(["writeup", "markdown", "html"])(
+  "pauses every 1000 repeated references in a %s download and never for a tiny one",
+  async (kind) => {
+    for (const count of [1, 2000]) {
+      const pause = vi.fn(async () => {});
+      const resolve = vi.fn(async () => png);
+      const blocks = [block(`<img src="/api/v1/media/${sha}">`.repeat(count))];
+      const input = { title: "References", details, resolveMedia: resolve, pause };
+      const html =
+        kind === "writeup"
+          ? await buildWriteupDownload({ ...input, writeup: writeup(blocks), topics: [] })
+          : kind === "markdown"
+            ? await buildDocDownload({ ...input, content: { kind: "markdown", blocks } })
+            : await buildHtmlDocDownload({
+                html: '<img src="a.png">'.repeat(count),
+                title: "References",
+                docPath: "doc.html",
+                resolveAsset: resolve,
+                pause,
+              });
+      expect(html.match(/data:image\/png/g)).toHaveLength(count);
+      expect(pause).toHaveBeenCalledTimes(Math.floor(count / 1000));
+      expect(resolve).toHaveBeenCalledTimes(1);
+    }
+  },
+);
+
+test("pauses for each MiB of UTF-8 CSS across style elements and attributes", async () => {
+  const source = `/*${"é".repeat((1024 * 1024 - 4) / 2)}*/`;
+  const pause = vi.fn(async () => {});
+  const html = await buildHtmlDocDownload({
+    html: `<style>${source}</style><div style="${source}"></div>`,
+    title: "CSS progress",
+    docPath: "doc.html",
+    resolveAsset: async () => null,
+    pause,
+  });
+  expect(html).toContain(source);
+  expect(pause).toHaveBeenCalledTimes(2);
+  pause.mockClear();
+  await buildHtmlDocDownload({
+    html: '<style>p{color:green}</style><div style="color:red"></div>',
+    title: "Small CSS",
+    docPath: "doc.html",
+    resolveAsset: async () => null,
+    pause,
+  });
+  await buildDocDownload({
+    title: "Small source",
+    details,
+    resolveMedia: async () => null,
+    content: { kind: "source", lines: [[{ text: "source text" }]] },
+    pause,
+  });
+  expect(pause).not.toHaveBeenCalled();
+});

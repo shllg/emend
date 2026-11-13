@@ -160,6 +160,43 @@ test("releases the owner download slot after a failed build", async () => {
   expect((await get(reviewId)).status).toBe(200);
 });
 
+test("yields to queued event-loop callbacks before a large download completes", async () => {
+  const content = Buffer.from(`<style>/*${"x".repeat(2 * 1024 * 1024)}*/</style><p>Large publication</p>`);
+  const hash = await f.deps.blobs.put(f.ownerId, content, "text/html");
+  const { reviewId } = await publish({
+    writeup: blank,
+    files: [{ path: "doc.html", role: "doc", assets: [], oldPath: null, oldBlob: null, newBlob: hash, flag: null }],
+  });
+  const events: string[] = [];
+  let duringBuild: Promise<void> | undefined;
+  // Keep blob I/O out of the scheduling assertion: the builder must yield on its own.
+  vi.spyOn(f.deps.blobs, "get").mockImplementation(async () => {
+    duringBuild = new Promise<void>((resolve) => {
+      setImmediate(() => {
+        events.push("during build");
+        resolve();
+      });
+    });
+    return content;
+  });
+  const beforeRequest = new Promise<void>((resolve) => {
+    setImmediate(() => {
+      events.push("before request");
+      resolve();
+    });
+  });
+  try {
+    const response = await get(reviewId);
+    events.push("response");
+    expect(response.status).toBe(200);
+    expect(events).toEqual(["before request", "during build", "response"]);
+    expect(await response.text()).toContain("Large publication");
+  } finally {
+    await beforeRequest;
+    await duringBuild;
+  }
+});
+
 test("refuses agent bearers unauthenticated requests and foreign reviews", async () => {
   const { reviewId } = await publish();
   await error(await get(reviewId, 1, "agent"), 403, "forbidden");

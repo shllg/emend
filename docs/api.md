@@ -198,7 +198,8 @@ review title, project, branch and publish links. An HTML pub keeps the agent's H
 no emend header. Its listed assets are built in and its scripts are left out.
 Mermaid diagrams show as labelled source text. Links to other docs become plain text.
 Absolute HTTP, HTTPS and mailto links keep working on `a` and `area` elements.
-Other elements' hrefs follow the resource rules.
+SVG `use` keeps only a same-document fragment. Other elements' hrefs follow the resource rules.
+SMIL `set`, `animate`, `animateMotion` and `animateTransform` elements targeting an href are removed.
 
 The response is `200` with `Content-Type: text/html; charset=utf-8`,
 `Content-Disposition: attachment; filename="<name>"`, `X-Content-Type-Options: nosniff`,
@@ -215,6 +216,10 @@ most 128 MiB of distinct stored assets. When content would pass either budget, i
 At most 64 stylesheet occurrences are inlined, across imports and stylesheet links. Repeated
 paths count each time and keep their own conditions. Further stylesheets are left out with the
 same size note. Imports stop at depth 4 and never repeat a path in the same chain.
+Each file has a 64 MiB CSS work budget. CSS input bytes count on every pass, including imports.
+Dropped output does not refund spent work.
+When this budget is reached, remaining styles, style attributes and stylesheets are left out
+with the same size note. The server yields to other requests while it builds.
 One visible note says:
 "Some images or files were left out because the download would pass 128 MiB."
 The file holds no server address, emend link, sign-in link, token or machine name.
@@ -223,6 +228,7 @@ and resource references that are not listed assets. Forms are unwrapped, keeping
 Author data URLs for images, audio, video and VTT captions may stay in resource attributes.
 CSS may retain data URLs and local fragments. Asset references keep their fragments.
 Inlined CSS imports keep their layer, supports and media conditions.
+A nested `image-set()` becomes `none`.
 
 ### Viewed files
 
