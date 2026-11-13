@@ -1,5 +1,6 @@
-import type { RevisionView } from "@emend/contract";
+import { LIMITS, type RevisionView } from "@emend/contract";
 import { expect, test } from "vitest";
+import apiDocs from "../../../../docs/api.md?raw";
 import { downloadBaseLabel, downloadDocChoices } from "./download.ts";
 
 const revision: RevisionView = {
@@ -35,28 +36,28 @@ const revision: RevisionView = {
 
 test("choices follow doc order, map file ids, preserve titles and omit docs without a doc row", () => {
   expect(downloadDocChoices(revision)).toEqual([
-    { id: revision.files[1]?.id, path: "z.md", label: "The plan", title: "The plan", description: "z.md" },
-    { id: revision.files[0]?.id, path: "a.html", label: "a.html", title: undefined },
+    { id: revision.files[1]?.id, path: "z.md", label: "The plan", title: "The plan", source: false },
+    { id: revision.files[0]?.id, path: "a.html", label: "a.html", title: undefined, source: false },
   ]);
-  expect(downloadBaseLabel(revision)).toBe("The writeup");
+  expect(downloadBaseLabel(revision)).toBeNull();
 });
 
 test.each([
-  ["a.html", "a.html", "z.md"],
-  [null, "The plan", "a.html"],
-  ["absent.md", "The plan", "a.html"],
+  ["a.html", { path: "a.html" }, "z.md"],
+  [null, { title: "The plan", path: "z.md" }, "a.html"],
+  ["absent.md", { title: "The plan", path: "z.md" }, "a.html"],
 ] as const)("pub main %s determines the base label and excluded doc", (main, label, choice) => {
   const pub = { ...revision, writeupEmpty: true, main };
-  expect(downloadBaseLabel(pub)).toBe(label);
+  expect(downloadBaseLabel(pub)).toEqual(label);
   expect(downloadDocChoices(pub).map((doc) => doc.path)).toEqual([choice]);
 });
 
 test("an empty writeup with a diff base remains the base file, and a docless pub falls back to it", () => {
   const code = { ...revision, writeupEmpty: true, base: "a".repeat(40) };
-  expect(downloadBaseLabel(code)).toBe("The writeup");
+  expect(downloadBaseLabel(code)).toBeNull();
   expect(downloadDocChoices(code)).toEqual(downloadDocChoices(revision));
   const pub = { ...revision, writeupEmpty: true, docs: [] };
-  expect(downloadBaseLabel(pub)).toBe("The writeup");
+  expect(downloadBaseLabel(pub)).toBeNull();
   expect(downloadDocChoices(pub)).toEqual([]);
 });
 
@@ -85,7 +86,10 @@ const dualView: RevisionView = {
 test("rendered and source choices at one path map to distinct doc file ids", () => {
   const choices = downloadDocChoices(dualView);
   expect(choices.map((doc) => doc.id)).toEqual(dualView.files.map((file) => file.id));
-  expect(choices.map((doc) => doc.description)).toEqual(["plan.md", "plan.md · source"]);
+  expect(choices.map((doc) => ({ path: doc.path, source: doc.source }))).toEqual([
+    { path: "plan.md", source: false },
+    { path: "plan.md", source: true },
+  ]);
   expect(downloadDocChoices({ ...dualView, files: dualView.files.slice(0, 1) }).map((doc) => doc.id)).toEqual([
     dualView.files[0]?.id,
   ]);
@@ -100,7 +104,15 @@ test.each([null, "plan.md"])("a pub excludes exactly its first doc view in file 
       docs: sourceFirst ? [...dualView.docs].reverse() : dualView.docs,
       files: sourceFirst ? [...dualView.files].reverse() : dualView.files,
     };
-    expect(downloadBaseLabel(pub)).toBe(sourceFirst ? "Plan source" : "The plan");
+    expect(downloadBaseLabel(pub)).toEqual({ title: sourceFirst ? "Plan source" : "The plan", path: "plan.md" });
     expect(downloadDocChoices(pub).map((doc) => doc.id)).toEqual([pub.files[1]?.id]);
   }
+});
+
+test("the API limits table documents both shared download budgets", () => {
+  const row = apiDocs.split("\n").find((line) => line.startsWith("| `downloadInlineBytes` |"));
+  expect(row).toContain(`${LIMITS.downloadInlineBytes} bytes (128 MiB)`);
+  expect(row).toContain("emitted built-in content per download");
+  expect(row).toContain("the same read budget for stored assets and selected doc bodies");
+  expect(row).toContain("both shared by all files of a ZIP");
 });

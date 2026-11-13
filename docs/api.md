@@ -1502,7 +1502,7 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `diffSideBytes` | 1048576 bytes shown per side |
 | `markdownDocBytes` | 1048576 bytes |
 | `htmlDocBytes` | 8388608 bytes |
-| `downloadInlineBytes` | 134217728 bytes (128 MiB) of distinct stored assets built into one download |
+| `downloadInlineBytes` | 134217728 bytes (128 MiB) of emitted built-in content per download, and the same read budget for stored assets and selected doc bodies; both shared by all files of a ZIP |
 | `downloadDocs` | 50 docs added to one download |
 | `assetBytes` | 26214400 bytes per asset |
 | `htmlDocWithAssetsBytes` | 52428800 bytes combined |

@@ -5,12 +5,13 @@ import { cn } from "./utils.ts";
 
 export interface CheckboxProps extends Omit<ComponentProps<"input">, "type"> {
   label: ReactNode;
-  description?: string;
+  description?: ReactNode;
 }
 
 export function Checkbox({ label, description, className, id, ...props }: CheckboxProps) {
   const generated = useId();
   const fieldId = id ?? generated;
+  const hasDescription = description != null && typeof description !== "boolean" && description !== "";
   return (
     <label
       htmlFor={fieldId}
@@ -25,7 +26,7 @@ export function Checkbox({ label, description, className, id, ...props }: Checkb
         type="checkbox"
         className="peer sr-only"
         aria-describedby={
-          [props["aria-describedby"], description && `${fieldId}-description`].filter(Boolean).join(" ") || undefined
+          [props["aria-describedby"], hasDescription && `${fieldId}-description`].filter(Boolean).join(" ") || undefined
         }
       />
       <span
@@ -36,7 +37,7 @@ export function Checkbox({ label, description, className, id, ...props }: Checkb
       </span>
       <span>
         {label}
-        {description && (
+        {hasDescription && (
           <span
             id={`${fieldId}-description`}
             className="mt-px block font-sans text-12 font-normal leading-(--lh-snug) text-fg-3"

@@ -982,14 +982,17 @@ test.each([null, "doc-1.md"])("Download excludes a pub's base doc with main %s",
   withDownloadDocs(2, { writeupEmpty: true, main });
   mount(`/r/${id}`);
   fireEvent.click(await screen.findByRole("button", { name: "Download" }));
-  const dialog = within(await screen.findByRole("alertdialog", { name: "Download" }));
+  const dialogNode = await screen.findByRole("alertdialog", { name: "Download" });
+  const dialog = within(dialogNode);
   expect(dialog.getAllByRole("checkbox")).toHaveLength(1);
   expect(dialog.getByRole("checkbox", { name: main ? /Plan title/ : "doc-1.md" })).toBeTruthy();
-  expect(
-    dialog.getByText(
-      `${main ?? "Plan title"} is always in. Tick docs to add them; with any doc ticked, the download is a ZIP file.`,
-    ),
-  ).toBeTruthy();
+  const description = document.getElementById(dialogNode.getAttribute("aria-describedby") ?? "");
+  expect(description?.textContent).toBe(
+    `${main ?? "Plan title (doc-0.md)"} is always in. Tick docs to add them; with any doc ticked, the download is a ZIP file.`,
+  );
+  expect(Array.from(description?.querySelectorAll("bdi") ?? [], (node) => node.textContent)).toEqual(
+    main ? ["doc-1.md"] : ["Plan title", "doc-0.md"],
+  );
 });
 
 test("a pub with only its base doc keeps the direct Download link", async () => {
@@ -1065,6 +1068,13 @@ test("Download can select rendered and source views of the same doc path indepen
   const dialog = within(await screen.findByRole("alertdialog", { name: "Download" }));
   const rendered = dialog.getByRole("checkbox", { description: "plan.md" }) as HTMLInputElement;
   const source = dialog.getByRole("checkbox", { description: "plan.md · source" }) as HTMLInputElement;
+  for (const checkbox of [rendered, source]) {
+    const description = document.getElementById(checkbox.getAttribute("aria-describedby") ?? "");
+    expect(description?.querySelectorAll("bdi")).toHaveLength(1);
+    const path = description?.querySelector("bdi");
+    expect(path?.textContent).toBe("plan.md");
+    expect(path?.nextSibling?.textContent ?? "").toBe(checkbox === source ? " · source" : "");
+  }
   expect(source.checked).toBe(false);
   fireEvent.click(rendered);
   expect(rendered.checked).toBe(true);

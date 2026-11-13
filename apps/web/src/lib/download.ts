@@ -9,7 +9,7 @@ function baseDoc(revision: RevisionView) {
 
 export function downloadDocChoices(
   revision: RevisionView,
-): { id: string; path: string; label: string; title?: string; description?: string }[] {
+): { id: string; path: string; label: string; title?: string; source: boolean }[] {
   const base = baseDoc(revision);
   const key = (path: string, source: boolean) => `${source ? "source" : "rendered"}:${path}`;
   const files = new Map(
@@ -27,13 +27,13 @@ export function downloadDocChoices(
             path: doc.path,
             label: doc.title ?? doc.path,
             title: doc.title,
-            description: doc.kind === "source" ? `${doc.path} · source` : doc.title ? doc.path : undefined,
+            source: doc.kind === "source",
           },
         ];
   });
 }
 
-export function downloadBaseLabel(revision: RevisionView): string {
+export function downloadBaseLabel(revision: RevisionView): { title?: string; path: string } | null {
   const doc = baseDoc(revision);
-  return doc ? (doc.title ?? doc.path) : "The writeup";
+  return doc ? { title: doc.title, path: doc.path } : null;
 }

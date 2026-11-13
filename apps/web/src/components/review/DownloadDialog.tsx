@@ -19,13 +19,29 @@ export function DownloadDialog({
   returnFocus?: RefObject<HTMLElement | null>;
 }) {
   const [tickedIds, setTickedIds] = useState<string[]>([]);
+  const base = downloadBaseLabel(revision);
   useEffect(() => {
     if (open) setTickedIds([]);
   }, [open]);
   return (
     <Dialog
       title="Download"
-      description={`${downloadBaseLabel(revision)} is always in. Tick docs to add them; with any doc ticked, the download is a ZIP file.`}
+      description={
+        <>
+          {base ? (
+            base.title ? (
+              <>
+                <bdi>{base.title}</bdi> (<bdi>{base.path}</bdi>)
+              </>
+            ) : (
+              <bdi>{base.path}</bdi>
+            )
+          ) : (
+            "The writeup"
+          )}
+          {" is always in. Tick docs to add them; with any doc ticked, the download is a ZIP file."}
+        </>
+      }
       open={open}
       onOpenChange={onOpenChange}
       returnFocus={returnFocus}
@@ -51,7 +67,14 @@ export function DownloadDialog({
           <Checkbox
             key={doc.id}
             label={<bdi>{doc.label}</bdi>}
-            description={doc.description}
+            description={
+              doc.title || doc.source ? (
+                <>
+                  <bdi>{doc.path}</bdi>
+                  {doc.source && " · source"}
+                </>
+              ) : undefined
+            }
             checked={tickedIds.includes(doc.id)}
             disabled={tickedIds.length >= LIMITS.downloadDocs && !tickedIds.includes(doc.id)}
             onChange={(event) => {
