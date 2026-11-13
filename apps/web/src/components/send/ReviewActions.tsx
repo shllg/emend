@@ -67,11 +67,15 @@ export function ReviewActions({
   const close = () => {
     if (!busy.current) setPanel(null);
   };
-  useShortcut("review.snooze", () => {
-    if (state !== "open" || pending || busy.current || deleted.current) return false;
-    open("snooze");
-    return true;
-  });
+  useShortcut(
+    "review.snooze",
+    () => {
+      if (state !== "open" || pending || busy.current || deleted.current) return false;
+      open("snooze");
+      return true;
+    },
+    { enabled: state === "open" && !pending },
+  );
   /** Returns whether the server accepted the action. A failure shows the server's message in a toast. */
   const run = async (input: LifecycleAction) => {
     if (busy.current || deleted.current) return false;

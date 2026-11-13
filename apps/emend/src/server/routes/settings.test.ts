@@ -179,6 +179,35 @@ test("shortcut defaults include every command with absent file and override fiel
   expect(await keyView()).toEqual(keys);
 });
 
+test("palette mod keys persist in overrides and normalize only in the config file", async () => {
+  await config({ keys: { "palette.open": "Mod+Shift+K" } });
+  expect((await keyView()).commands["palette.open"]).toMatchObject({
+    value: "mod+shift+k",
+    file: "mod+shift+k",
+    source: "file",
+    fileError: false,
+  });
+  expect((await updateKeys({ "palette.open": { key: "mod+k" } })).keys.commands["palette.open"]).toMatchObject({
+    value: "mod+k",
+    override: "mod+k",
+    source: "override",
+  });
+  expect((await keyView()).commands["palette.open"].value).toBe("mod+k");
+  await error(
+    await f.request("/settings", "PATCH", { keys: { "palette.open": { key: "Mod+K" } } }),
+    400,
+    "invalid_request",
+  );
+  await config({ keys: { "palette.open": "ctrl+k" } });
+  expect((await keyView()).commands["palette.open"]).toMatchObject({ value: "mod+k", fileError: true });
+  await updateKeys({ "palette.open": null });
+  expect((await keyView()).commands["palette.open"]).toMatchObject({
+    value: "mod+shift+p",
+    source: "default",
+    fileError: true,
+  });
+});
+
 test("file shortcuts normalize keys, support off and report unusable entries separately", async () => {
   await config({
     approvedActiveHours: 24,

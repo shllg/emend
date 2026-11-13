@@ -127,6 +127,8 @@ test("config keys normalize uppercase letters and any case of shift plus a lette
 
 test("shortcut views contain every command and distinguish missing bindings from off", () => {
   expect(ShortcutCommand.options).toEqual(Object.keys(SHORTCUT_DEFAULTS));
+  expect(ShortcutCommand.options.at(-1)).toBe("palette.open");
+  expect(SHORTCUT_DEFAULTS["palette.open"]).toBe("mod+shift+p");
   const keys = defaultKeys();
   expect(KeysSetting.parse(keys)).toEqual(keys);
   const { "inbox.next": next, ...rest } = keys.commands;
@@ -136,6 +138,53 @@ test("shortcut views contain every command and distinguish missing bindings from
   expect(
     KeysSetting.parse({ ...keys, commands: { ...keys.commands, "inbox.next": off } }).commands["inbox.next"],
   ).toEqual(off);
+});
+
+test("mod keys accept only normalized letters with an optional spelled-out Shift", () => {
+  for (const key of ["mod+a", "mod+z", "mod+shift+a", "mod+shift+z"]) expect(ShortcutKey.parse(key)).toBe(key);
+  for (const key of [
+    "ctrl+k",
+    "cmd+k",
+    "meta+k",
+    "alt+k",
+    "mod+1",
+    "mod+?",
+    "mod+shift+1",
+    "mod+shift+?",
+    "shift+mod+p",
+    "mod+alt+p",
+    "Mod+P",
+    "mod+P",
+    "MOD+SHIFT+P",
+    "mod+",
+    "mod+shift+",
+    "mod+k\n",
+    "mod+shift+k\n",
+  ])
+    expect(ShortcutKey.safeParse(key).success, key).toBe(false);
+});
+
+test("config normalizes mod forms without inferring Shift from uppercase letters", () => {
+  expect(normalizeShortcutKey("MOD+SHIFT+P")).toBe("mod+shift+p");
+  expect(normalizeShortcutKey("Mod+K")).toBe("mod+k");
+  for (const key of [
+    "ctrl+shift+p",
+    "cmd+k",
+    "meta+k",
+    "alt+k",
+    "shift+mod+p",
+    "mod+alt+p",
+    "Mod+1",
+    "Mod+?",
+    "mod+",
+    "mod+shift+",
+    "Mod+K\n",
+  ])
+    expect(normalizeShortcutKey(key), key).toBeUndefined();
+  expect(SettingsUpdate.parse({ keys: { "palette.open": { key: "mod+k" } } }).keys?.["palette.open"]).toEqual({
+    key: "mod+k",
+  });
+  expect(SettingsUpdate.safeParse({ keys: { "palette.open": { key: "Mod+K" } } }).success).toBe(false);
 });
 
 test("partial settings updates accept set, off, reset and empty updates", () => {

@@ -320,11 +320,15 @@ or migrates that file. `file` is its usable value, or null when absent or invali
 A missing file or absent key is not an error. `docRoots` and `openBrowser` are not settings in this API.
 
 `ShortcutKey` is a normalized string: one lowercase ASCII letter, `shift+` followed by one
-lowercase ASCII letter, one ASCII digit, or one printable ASCII punctuation character
-(0x21–0x7E excluding letters and digits). Spaces, named keys (including Escape, Tab, Enter,
-arrows, PageUp/PageDown, Home, End and F-keys), ctrl/alt/meta modifiers and `shift+` before a
+lowercase ASCII letter, `mod+` or `mod+shift+` followed by one lowercase ASCII letter,
+one ASCII digit, or one printable ASCII punctuation character (0x21–0x7E excluding letters
+and digits). `mod` means Ctrl, or ⌘ on a Mac; a client accepts either one, but not both together.
+Spaces, named keys (including Escape, Tab, Enter, arrows, PageUp/PageDown, Home, End and F-keys),
+spelled-out `ctrl+`, `cmd+`, `meta+` and `alt+` modifiers, and `shift+` or `mod+` before a
 non-letter are refused. The config file alone also accepts uppercase letters (`A` becomes
-`shift+a`) and case-insensitive shift-letter combinations (`SHIFT+A` becomes `shift+a`).
+`shift+a`), case-insensitive shift-letter combinations (`SHIFT+A` becomes `shift+a`) and
+case-insensitive mod forms (`Mod+K` becomes `mod+k`, `MOD+SHIFT+P` becomes `mod+shift+p`).
+Shift must be spelled out in mod forms.
 
 The global config file format is `"keys": { "<command>": "<key>" | null }`. It is read once
 alongside `approvedActiveHours`. An absent `file` or `override` in a `KeySetting` means that
@@ -361,6 +365,7 @@ reads is unchanged: it reads only the approved-hours setting, without querying s
 | `review.approve` | `shift+a` |
 | `review.snooze` | `z` |
 | `shortcuts.show` | `?` |
+| `palette.open` | `mod+shift+p` |
 
 Each command tries its override (level 2), file entry (level 1), then default (level 0), skipping
 absent candidates. Off never clashes. For each group holding the same non-null key, the highest
