@@ -1,6 +1,6 @@
 import { crc32, deflateRaw, inflateRawSync } from "node:zlib";
 import { expect, test, vi } from "vitest";
-import { zipFiles } from "./zip.ts";
+import { ZipWriter, zipFiles } from "./zip.ts";
 
 vi.mock("node:zlib", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:zlib")>();
@@ -65,7 +65,9 @@ test("ZIP local and central records round-trip deflated, stored and empty files 
     { name: "docs/raw.html", data: Uint8Array.of(1, 2, 3, 4) },
     { name: "docs/empty.html", data: new Uint8Array() },
   ];
-  const entries = readZip(await zipFiles(input, modified));
+  const writer = new ZipWriter(modified);
+  for (const { name, data } of input) await writer.add(name, data);
+  const entries = readZip(writer.finish());
   expect(entries.map(({ name, data }) => ({ name, data }))).toEqual(
     input.map(({ name, data }) => ({ name, data: Buffer.from(data) })),
   );
@@ -126,4 +128,29 @@ test.each([2 ** 32 - 31, 2 ** 32 - 100])(
 
 test("refuses invalid dates", async () => {
   await expect(zipFiles([], new Date(Number.NaN))).rejects.toThrow("Invalid ZIP date");
+});
+
+test("incremental additions own stored and deflated bytes after add returns", async () => {
+  const writer = new ZipWriter(modified);
+  const raw = Uint8Array.of(1, 2, 3);
+  const compressible = Buffer.from("repeat ".repeat(100));
+  await writer.add("raw", raw);
+  raw.fill(0);
+  await writer.add("compressed", compressible);
+  compressible.fill(0);
+  const entries = readZip(writer.finish());
+  expect(entries[0]?.data).toEqual(Buffer.from([1, 2, 3]));
+  expect(entries[1]?.data.toString()).toBe("repeat ".repeat(100));
+  await expect(writer.add("late", raw)).rejects.toThrow("not ready");
+  expect(() => writer.finish()).toThrow("not ready");
+});
+
+test("the writer refuses concurrent additions and finishing before compression settles", async () => {
+  const writer = new ZipWriter(modified);
+  const adding = writer.add("first", Uint8Array.of(1));
+  await expect(writer.add("second", Uint8Array.of(2))).rejects.toThrow("not ready");
+  expect(() => writer.finish()).toThrow("not ready");
+  await adding;
+  await writer.add("second", Uint8Array.of(2));
+  expect(readZip(writer.finish()).map((entry) => entry.name)).toEqual(["first", "second"]);
 });

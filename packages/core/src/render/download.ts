@@ -50,12 +50,20 @@ export type DownloadDetails = {
   publishedAt: string;
   links: PublishLinks | undefined;
 };
+const cssWork = Symbol("download CSS work");
+/** Opaque work allowance shared by all files in one download. */
+export type DownloadWork = { [cssWork]: number };
+export function createDownloadWork(): DownloadWork {
+  return { [cssWork]: 0 };
+}
+
 type PageInput = {
   title: string;
   details: DownloadDetails;
   resolveMedia: DownloadResolver;
   inlineBudget?: number;
   pause?: () => Promise<void>;
+  work?: DownloadWork;
 };
 
 const STYLESHEET_LIMIT = 64;
@@ -117,10 +125,10 @@ function resolverState(
   resolve: DownloadResolver,
   inlineBudget: number = LIMITS.downloadInlineBytes,
   pause?: () => Promise<void>,
+  work: DownloadWork = createDownloadWork(),
 ) {
   const cache = new Map<string, Promise<DownloadAsset | null>>();
   let stylesheets = 0;
-  let cssWork = 0;
   let cssSincePause = 0;
   let referencesSincePause = 0;
   let elementsSincePause = 0;
@@ -147,20 +155,20 @@ function resolverState(
       return pause?.();
     },
     cssAvailable(): boolean {
-      if (cssWork < CSS_WORK_BYTES) return true;
+      if (work[cssWork] < CSS_WORK_BYTES) return true;
       state.tooLarge = true;
       return false;
     },
     beginCss(css: string): number | null {
       if (!state.cssAvailable()) return null;
       const bytes = utf8Length(css);
-      if (bytes > CSS_WORK_BYTES - cssWork) {
-        cssWork = CSS_WORK_BYTES;
+      if (bytes > CSS_WORK_BYTES - work[cssWork]) {
+        work[cssWork] = CSS_WORK_BYTES;
         state.tooLarge = true;
         return null;
       }
       // Charge the whole occurrence before rewriting; dropping output never refunds this work.
-      cssWork += bytes;
+      work[cssWork] += bytes;
       return bytes;
     },
     tokenizedCss(bytes: number): Promise<void> | undefined {
@@ -362,7 +370,7 @@ async function blocksContent(blocks: RenderedBlock[], state: AssetState): Promis
 export async function buildWriteupDownload(
   input: PageInput & { writeup: RenderedWriteup; topics: TopicMeta[] },
 ): Promise<string> {
-  const state = resolverState(input.resolveMedia, input.inlineBudget, input.pause);
+  const state = resolverState(input.resolveMedia, input.inlineBudget, input.pause, input.work);
   // Revisions arrive in review order. The reserved Other topic never receives a rank.
   const ranked = input.topics.filter((topic) => topic.slug !== OTHER_TOPIC.slug);
   const bySlug = new Map(ranked.map((topic) => [topic.slug, topic]));
@@ -445,7 +453,7 @@ export async function buildDocDownload(
       | { kind: "source"; lines: SourceContent["lines"]; unrendered?: true };
   },
 ): Promise<string> {
-  const state = resolverState(input.resolveMedia, input.inlineBudget, input.pause);
+  const state = resolverState(input.resolveMedia, input.inlineBudget, input.pause, input.work);
   let content: ElementContent[];
   if (input.content.kind === "markdown") content = await blocksContent(input.content.blocks, state);
   else if (input.content.unrendered) content = [element("p", [text("This file could not be shown.")])];
@@ -938,6 +946,22 @@ const cssResourceAttributes = new Set([
   "by",
   "marker",
 ]);
+export function buildOmittedDownload(input: { title: string }): string {
+  return serialize({
+    type: "root",
+    children: [
+      { type: "doctype" },
+      element(
+        "html",
+        [
+          element("head", [...headMetas(), element("title", [text(input.title)]), style(READING_STYLES)]),
+          element("body", [note()]),
+        ],
+        { lang: "en" },
+      ),
+    ],
+  });
+}
 export async function buildHtmlDocDownload(input: {
   html: string;
   docPath: string;
@@ -945,24 +969,11 @@ export async function buildHtmlDocDownload(input: {
   resolveAsset: DownloadResolver;
   inlineBudget?: number;
   pause?: () => Promise<void>;
+  work?: DownloadWork;
 }): Promise<string> {
-  if (!parseDocHtml(input.html, HTML_ELEMENT_LIMIT))
-    return serialize({
-      type: "root",
-      children: [
-        { type: "doctype" },
-        element(
-          "html",
-          [
-            element("head", [...headMetas(), element("title", [text(input.title)]), style(READING_STYLES)]),
-            element("body", [note()]),
-          ],
-          { lang: "en" },
-        ),
-      ],
-    });
+  if (!parseDocHtml(input.html, HTML_ELEMENT_LIMIT)) return buildOmittedDownload(input);
   const tree = fromHtml(input.html);
-  const state = resolverState(input.resolveAsset, input.inlineBudget, input.pause);
+  const state = resolverState(input.resolveAsset, input.inlineBudget, input.pause, input.work);
   const resource = (value: string) => resourceUrl(value, input.docPath, state);
   async function walk(parent: Root | Element): Promise<void> {
     const children: RootContent[] = [];

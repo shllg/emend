@@ -51,7 +51,7 @@ export function DownloadDialog({
           <Checkbox
             key={doc.id}
             label={<bdi>{doc.label}</bdi>}
-            description={doc.title ? doc.path : undefined}
+            description={doc.description}
             checked={tickedIds.includes(doc.id)}
             disabled={tickedIds.length >= LIMITS.downloadDocs && !tickedIds.includes(doc.id)}
             onChange={(event) => {

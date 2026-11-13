@@ -40,3 +40,29 @@ test("resolves file versus folder conflicts in either order", () => {
   ]);
   expect(downloadDocNames(["a.html/b.md", "A.html"])).toEqual(["docs/a.html/b.md.html", "docs/A-2.html"]);
 });
+
+test.each([
+  "CON",
+  "prn",
+  "AuX",
+  "nul",
+  ...Array.from({ length: 10 }, (_, n) => `cOm${n}`),
+  ...Array.from({ length: 10 }, (_, n) => `LpT${n}`),
+])("escapes reserved Windows stem %s in folder and file segments", (stem) => {
+  expect(downloadDocNames([`${stem}/${stem}.md`, `${stem}.folder/${stem}.HTML`, stem])).toEqual([
+    `docs/${stem}_/${stem}_.md.html`,
+    `docs/${stem}_.folder/${stem}_.HTML`,
+    `docs/${stem}_.html`,
+  ]);
+});
+
+test("reserved Windows stems are escaped after cleaning and before disambiguation", () => {
+  expect(downloadDocNames([".aux.-", "aux_", "CON.md", "con_.md", "com10/lpt10.md", "auxiliary/con-man.md"])).toEqual([
+    "docs/aux_.html",
+    "docs/aux_-2.html",
+    "docs/CON_.md.html",
+    "docs/con_.md-2.html",
+    "docs/com10/lpt10.md.html",
+    "docs/auxiliary/con-man.md.html",
+  ]);
+});

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { crc32, inflateRawSync } from "node:zlib";
 import { LIMITS, type PublishRequest, PublishResponse, RevisionView, reviewDownloadPath } from "@emend/contract";
-import { buildWriteupDownload, DOWNLOAD_FILE_CSP } from "@emend/core";
+import { buildOmittedDownload, buildWriteupDownload, DOWNLOAD_FILE_CSP } from "@emend/core";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -1035,3 +1035,135 @@ test("selected-doc downloads still reject bearer tokens and missing credentials"
     "unauthorized",
   );
 });
+
+async function bodyBudgetReview(kind: "html" | "markdown" | "source", bodySize = 16000) {
+  const path = kind === "html" ? "budget.html" : kind === "source" ? "budget.txt" : "budget.md";
+  const text =
+    kind === "html" ? `<p>Budget body</p><!--${"x".repeat(bodySize)}-->` : `Budget body ${"x".repeat(bodySize)}`;
+  const hash = await f.deps.blobs.put(f.ownerId, Buffer.from(text), "text/plain");
+  const { reviewId } = await publish({
+    files: [
+      {
+        path,
+        role: "doc",
+        title: "Budget doc",
+        oldPath: null,
+        oldBlob: null,
+        newBlob: hash,
+        flag: null,
+        ...(kind === "html" ? { assets: [] } : {}),
+      },
+    ],
+  });
+  const view = await revisionView(reviewId);
+  const id = view.files[0]?.id;
+  if (!id) throw new Error("Missing budget doc");
+  const row = await f.db.read((q) =>
+    q
+      .select()
+      .from(files)
+      .where(and(eq(files.ownerId, f.ownerId), eq(files.id, id)))
+      .get(),
+  );
+  const bodyHash = kind === "html" ? row?.newBlob : row?.renderedBlob;
+  if (!bodyHash) throw new Error("Missing doc body");
+  const base = Buffer.from(await (await get(reviewId)).arrayBuffer());
+  return { reviewId, id, bodyHash, base };
+}
+
+test.each(["html", "markdown", "source"] as const)(
+  "checks a selected %s doc's stored size before reading its body",
+  async (kind) => {
+    const { reviewId, id, bodyHash, base } = await bodyBudgetReview(kind);
+    const budget = base.byteLength + 32;
+    const reads = vi.spyOn(f.deps.blobs, "get");
+    const entries = await zipEntries(await budgetApp(budget).request(reviewDownloadPath(reviewId, 1, [id])));
+    expect(entries).toHaveLength(2);
+    expect(entries[0]?.data).toEqual(base);
+    expect(entries[1]?.html).toBe(buildOmittedDownload({ title: "Budget doc" }));
+    expect(reads.mock.calls.some(([, hash]) => hash === bodyHash)).toBe(false);
+  },
+);
+
+test.each(["html", "markdown", "source"] as const)(
+  "does not read a selected %s doc after the emitted budget is spent",
+  async (kind) => {
+    const { reviewId, id, bodyHash, base } = await bodyBudgetReview(kind, 16);
+    const reads = vi.spyOn(f.deps.blobs, "get");
+    const entries = await zipEntries(await budgetApp(base.byteLength).request(reviewDownloadPath(reviewId, 1, [id])));
+    expect(entries[0]?.data).toEqual(base);
+    expect(entries[1]?.html).toBe(buildOmittedDownload({ title: "Budget doc" }));
+    expect(reads.mock.calls.some(([, hash]) => hash === bodyHash)).toBe(false);
+  },
+);
+
+test("selected doc bodies and assets spend the same read budget even when emitted space remains", async () => {
+  const { reviewId, ids } = await docsReview();
+  const complete = await zipEntries(await selectedDownload(reviewId, ids));
+  const budget = complete.reduce((sum, file) => sum + file.data.byteLength, 0) + 1024;
+  const rows = await f.db.read((q) =>
+    q
+      .select()
+      .from(files)
+      .where(and(eq(files.ownerId, f.ownerId), eq(files.id, ids[0])))
+      .all(),
+  );
+  const markdown = rows[0];
+  const html = await f.db.read((q) =>
+    q
+      .select()
+      .from(files)
+      .where(and(eq(files.ownerId, f.ownerId), eq(files.id, ids[1])))
+      .get(),
+  );
+  if (!markdown?.renderedBlob || !html?.newBlob) throw new Error("Missing doc bodies");
+  const markdownBytes = await f.deps.blobs.get(f.ownerId, markdown.renderedBlob);
+  const htmlBytes = await f.deps.blobs.get(f.ownerId, html.newBlob);
+  if (!markdownBytes || !htmlBytes) throw new Error("Missing stored bodies");
+  // Base image + first doc leave one byte less than the second body needs.
+  const paddedSize = budget - png.byteLength - htmlBytes.byteLength + 1;
+  const padded = Buffer.concat([markdownBytes, Buffer.alloc(paddedSize - markdownBytes.byteLength, " ")]);
+  const paddedHash = await f.deps.blobs.put(f.ownerId, padded, "application/json");
+  await f.db.query((q) =>
+    q
+      .update(files)
+      .set({ renderedBlob: paddedHash })
+      .where(and(eq(files.ownerId, f.ownerId), eq(files.id, ids[0]))),
+  );
+  const reads = vi.spyOn(f.deps.blobs, "get");
+  const entries = await zipEntries(await budgetApp(budget).request(reviewDownloadPath(reviewId, 1, ids)));
+  expect(entries[1]?.data).toEqual(complete[1]?.data);
+  expect(entries[2]?.html).toBe(buildOmittedDownload({ title: html.title ?? html.path }));
+  expect(reads.mock.calls.filter(([, hash]) => hash === paddedHash)).toHaveLength(1);
+  expect(reads.mock.calls.some(([, hash]) => hash === html.newBlob)).toBe(false);
+});
+
+test.each([false, true])(
+  "pub doc order and base selection include both views of a path, source first: %s",
+  async (sourceFirst) => {
+    const hash = await f.deps.blobs.put(f.ownerId, Buffer.from("# Dual view\n\nOne document"), "text/markdown");
+    const input: PublishRequest["files"] = [false, true].map((source) => ({
+      path: "plan.md",
+      role: "doc",
+      oldPath: null,
+      oldBlob: null,
+      newBlob: hash,
+      flag: null,
+      ...(source ? { view: "source" } : {}),
+    }));
+    if (sourceFirst) input.reverse();
+    const { reviewId } = await publish({ writeup: blank, main: "plan.md", files: input });
+    const view = await revisionView(reviewId);
+    expect(view.docs.map((doc) => doc.kind)).toEqual(sourceFirst ? ["source", "markdown"] : ["markdown", "source"]);
+    expect(view.files.map((file) => file.view === "source")).toEqual([sourceFirst, !sourceFirst]);
+    const entries = await zipEntries(
+      await selectedDownload(
+        reviewId,
+        view.files.map((file) => file.id),
+      ),
+    );
+    expect(entries[0]?.data).toEqual(Buffer.from(await (await get(reviewId)).arrayBuffer()));
+    expect(entries[0]?.html.includes('class="shiki em-source"')).toBe(sourceFirst);
+    expect(entries).toHaveLength(3);
+  },
+);

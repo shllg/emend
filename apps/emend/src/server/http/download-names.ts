@@ -10,7 +10,8 @@ export function downloadDocNames(paths: readonly string[]): string[] {
           .replace(/^\.+/, "")
           .replace(/[.-]+$/, "")
           .slice(0, 80)
-          .replace(/[.-]+$/, "") || "_",
+          .replace(/[.-]+$/, "")
+          .replace(/^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(?=\.|$)/i, "$1_") || "_",
     );
     const last = parts.length - 1;
     if (!/\.html$/i.test(parts[last] ?? "")) parts[last] += ".html";

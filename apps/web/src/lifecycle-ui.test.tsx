@@ -1047,3 +1047,35 @@ test("the phone menu opens the doc picker and downloads through its accessible l
   await waitFor(() => expect(document.activeElement).toBe(trigger));
   expect(document.body.style.pointerEvents).not.toBe("none");
 });
+
+test("Download can select rendered and source views of the same doc path independently", async () => {
+  const value = withDownloadDocs();
+  value.docs = [
+    { kind: "markdown", path: "plan.md", title: "Plan", blocks: [] },
+    { kind: "source", path: "plan.md", title: "Plan", language: "md", lines: [] },
+  ];
+  value.files = value.files.map((file, index) => ({
+    ...file,
+    path: "plan.md",
+    mediaType: index === 0 ? "text/markdown" : "text/plain",
+    ...(index === 1 ? { view: "source" as const } : {}),
+  }));
+  mount(`/r/${id}`);
+  fireEvent.click(await screen.findByRole("button", { name: "Download" }));
+  const dialog = within(await screen.findByRole("alertdialog", { name: "Download" }));
+  const rendered = dialog.getByRole("checkbox", { description: "plan.md" }) as HTMLInputElement;
+  const source = dialog.getByRole("checkbox", { description: "plan.md · source" }) as HTMLInputElement;
+  expect(source.checked).toBe(false);
+  fireEvent.click(rendered);
+  expect(rendered.checked).toBe(true);
+  expect(source.checked).toBe(false);
+  fireEvent.click(source);
+  expect(source.checked).toBe(true);
+  expect(dialog.getByRole("link", { name: "Download" }).getAttribute("href")).toBe(
+    reviewDownloadPath(
+      id,
+      1,
+      value.files.map((file) => file.id),
+    ),
+  );
+});

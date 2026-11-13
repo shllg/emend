@@ -197,11 +197,14 @@ revision's `RevisionView.files` rows with role `doc`. Invalid UUIDs, duplicates 
 50 ids get `400 invalid_request`, before waiting for a slot. A missing id, another owner's id,
 another revision's id or a non-doc id gets `404 not_found`. `HEAD` checks the ids too and returns
 ZIP headers when docs are selected, without reading blobs or building the archive.
+Rendered and source views of one path have distinct file ids. A source doc's file row has
+`view: "source"`; a rendered doc's row has no `view`.
 
 A code review's file holds the review title and that revision's writeup: sections, topics, text,
 code blocks and images with captions. The base file holds no docs, comments or diff. A revision
 is a pub when `writeupEmpty` is true and `base` is null. A pub's base file holds one doc:
-`main` when it names a doc, else the first doc in file order. Markdown uses its stored rendered
+the first doc row in file order whose path equals `main`, else the first doc row. The order
+includes both rendered and source views of a path. Markdown uses its stored rendered
 blocks. Source uses its stored highlighted tokens. Code reviews and Markdown and source pubs
 get the emend header with the review title, project, branch and publish links. An HTML pub keeps
 the agent's HTML layout, with no emend header. Its listed assets are built in after filtering.
@@ -234,7 +237,9 @@ A missing HTML doc blob gets `404 not_found`.
 
 Doc entry names use the doc path split on `/`. Each segment replaces runs outside `[A-Za-z0-9._-]`
 with `-`, strips leading dots, trims trailing dots and hyphens, cuts to 80 characters and trims
-again. An empty segment becomes `_`. The last segment gains `.html` unless it already ends in
+again. An empty segment becomes `_`. If the stem before its first dot is `CON`, `PRN`, `AUX`,
+`NUL`, `COM0`–`COM9` or `LPT0`–`LPT9`, ignoring case, it gains `_`, for folders and files alike.
+The last segment gains `.html` unless it already ends in
 `.html`, ignoring case. Name and folder conflicts are compared without case; suffixes `-2`,
 `-3`, and so on before `.html` disambiguate them. Ordinary folders may be shared. If a folder
 would replace an earlier file, suffix that folder segment too. Names are ASCII, relative, and
@@ -242,12 +247,17 @@ contain no backslash, empty, `.` or `..` segment. Links between the files stay p
 
 At most 128 MiB of built-in content is emitted. Every copy of a data URL and every inlined CSS
 text counts its final UTF-8 bytes each time it is emitted. The server also reads at most
-128 MiB of distinct stored assets. It checks stored sizes before reading them.
+128 MiB of stored assets and selected doc bodies: HTML blobs and Markdown/source rendered blobs.
+It checks their stored sizes before reading them. Assets are cached and charged once; selected
+doc bodies are charged on each read and released after building their file.
 Both budgets are shared by all files in a ZIP. Each later builder's emitted budget is reduced
-by the full UTF-8 size of every file already built. Repeated assets share the read cache.
-At most 64 stylesheet occurrences are inlined, across imports and stylesheet links. Repeated
+by the full UTF-8 size of every file already built. A selected doc that does not fit the remaining
+read budget, or comes after the emitted budget is spent, is left unread. Its file is a page with
+the title, reading styles and only the left-out note in its body. The base file's read paths stay
+unchanged. Each ZIP entry is compressed before building the next file.
+At most 64 stylesheet occurrences are inlined per file, across imports and stylesheet links. Repeated
 paths count each time and keep their own conditions. Imports stop at depth 4 and never repeat
-a path in the same chain. Each file has a 64 MiB CSS work budget. Each rewrite charges its input
+a path in the same chain. All files of a download share one 64 MiB CSS work budget. Each rewrite charges its input
 bytes. The final output check charges the written bytes too, with imports joined in.
 Dropped output does not refund spent work. When that budget is spent,
 remaining styles, style attributes and stylesheets are left out.
