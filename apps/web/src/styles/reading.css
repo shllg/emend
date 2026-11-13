@@ -60,9 +60,6 @@
   .em-doc-body {
     min-width: 0;
   }
-  .em-doc-contents-rail {
-    display: none;
-  }
   .em-reading-popover {
     position: absolute;
     inset-inline-end: 12px;
@@ -120,24 +117,6 @@
     background: var(--accent-tint);
     color: var(--accent-text);
   }
-  @container doc (min-width: 960px) {
-    .em-doc-body:has(.em-doc-contents-rail) {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 220px;
-    }
-    .em-doc-contents-control {
-      display: none;
-    }
-    .em-doc-contents-rail {
-      display: block;
-      position: sticky;
-      top: calc(var(--doc-bar-height) + 48px);
-      align-self: start;
-      max-height: calc(100dvh - var(--doc-bar-height) - 68px);
-      overflow: auto;
-      padding: 12px;
-    }
-  }
   @media (max-width: 767px) {
     .em-doc-control-label {
       display: none;
@@ -153,9 +132,9 @@
       /* Preserve the narrow pane's padding; match the gutter when the measure fits. */
       padding-right: clamp(var(--space-8), calc(100% - var(--reading-max) - 56px), 56px);
     }
-    /* The measure grows with the pane and stops at 1000px, with or without Contents. */
+    /* The measure grows with the pane and stops at the chosen reading width. */
     .em-reading-column {
-      --reading-max: 1000px;
+      --reading-max: var(--reader-measure, 1024px);
     }
     /* Reading tabs: 40px controls and their bottom border. */
     .em-doc-bar {
@@ -424,12 +403,6 @@
     flex: 1;
     min-height: 0;
     overflow: hidden;
-  }
-  .em-doc-view[data-layout="original"] .em-doc-contents-rail {
-    flex: 0 0 220px;
-    position: static;
-    align-self: stretch;
-    max-height: none;
   }
   .em-html-doc,
   .em-html-frame {

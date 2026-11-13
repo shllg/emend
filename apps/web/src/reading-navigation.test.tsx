@@ -17,7 +17,6 @@ import type { ParsedDiff } from "./components/diff/FileDiff.tsx";
 import { parsePair } from "./components/diff/parse.worker.ts";
 import type { DiffParser } from "./components/diff/parse-client.ts";
 import * as diffPresentation from "./components/diff/presentation.ts";
-import { OUTLINE_WIDTH } from "./components/reading/WriteupOutline.tsx";
 import { blockLink } from "./components/threads/ThreadCard.tsx";
 import { claimDraft } from "./lib/composer-owner.ts";
 import { draftKey, editDraftKey, saveDraft } from "./lib/drafts.ts";
@@ -204,6 +203,22 @@ function mount(search = "?tab=writeup&rev=1") {
   return { ...render(<App queryClient={client} history={history} />), history };
 }
 
+test("a new desktop browser opens a review on Writeup in Tabs", async () => {
+  expect(width).toBe(1280);
+  expect(localStorage.getItem(layoutKey)).toBeNull();
+  mount("");
+  await screen.findByRole("heading", { name: "Topic 1: Plant a seed" });
+  expect(screen.getByRole("tab", { name: "Writeup" }).getAttribute("aria-selected")).toBe("true");
+  expect(
+    within(screen.getByRole("radiogroup", { name: "Panes" }))
+      .getByRole("radio", { name: "Tabs" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
+  expect(screen.getByTestId("reading-pane").hidden).toBe(false);
+  expect(screen.getByTestId("diff-pane").hidden).toBe(true);
+  expect(screen.queryByRole("separator", { name: "Resize reading pane" })).toBeNull();
+});
+
 test("writeup doc links keep the older revision when their href has no rev", async () => {
   currentReview.newestRevision = 2;
   currentReview.revisions.push({ seq: 2, createdAt: "2026-01-02T00:00:00.000Z" });
@@ -224,17 +239,17 @@ test("writeup doc links keep the older revision when their href has no rev", asy
 });
 
 test.each([
-  { pixels: 1280, contents: false, compact: false, pane: "split", key: "click", path: "seed.txt" },
-  { pixels: 1280, contents: false, compact: false, pane: "split", key: "click", path: "pnpm-lock.yaml" },
-  { pixels: 1280, contents: false, compact: false, pane: "tabs", key: "Enter", path: "large.txt" },
-  { pixels: 1280, contents: true, compact: true, pane: "tabs", key: "Enter", path: "seed.txt" },
-  { pixels: 768, contents: false, compact: false, pane: "tabs", key: " ", path: "seed.txt" },
-  { pixels: 390, contents: false, compact: false, pane: "tabs", key: "click", path: "seed.txt" },
+  { pixels: 1280, compact: false, pane: "split", key: "click", path: "seed.txt" },
+  { pixels: 1280, compact: false, pane: "split", key: "click", path: "pnpm-lock.yaml" },
+  { pixels: 1280, compact: false, pane: "tabs", key: "Enter", path: "large.txt" },
+  { pixels: 1280, compact: true, pane: "tabs", key: "Enter", path: "seed.txt" },
+  { pixels: 768, compact: false, pane: "tabs", key: " ", path: "seed.txt" },
+  { pixels: 390, compact: false, pane: "tabs", key: "click", path: "seed.txt" },
 ] as const)(
-  "note refs navigate and mark a hidden, viewed file at $pixels px with contents=$contents compact=$compact in $pane via $key",
-  async ({ pixels, contents, compact, pane, key, path }) => {
+  "note refs navigate and mark a hidden, viewed file at $pixels px with compact=$compact in $pane via $key",
+  async ({ pixels, compact, pane, key, path }) => {
     width = pixels;
-    layoutStore.update({ contents, compact, pane: { desktop: pane, tablet: pane }, notes: false });
+    layoutStore.update({ compact, pane: { desktop: pane, tablet: pane }, notes: false });
     const note = {
       id: crypto.randomUUID(),
       side: "new" as const,
@@ -359,6 +374,7 @@ test.each([1280, 768, 390])("Files in diff waits for lazy rendering and scrolls 
 test.each([1280, 768])(
   "reading tabs have counts, keyboard navigation and a labelled panel at %s px",
   async (pixels) => {
+    layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
     width = pixels;
     const { history } = mount(`?tab=writeup&thread=${id}#topic-seed`);
     const tabs = within(await screen.findByRole("tablist", { name: "Reading tabs" }));
@@ -393,6 +409,7 @@ test.each([1280, 768])(
 );
 
 test("a diff search still labels the panel with the first visible reading tab", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   mount("?tab=diff");
   await screen.findByRole("heading", { name: "Topic 1: Plant a seed" });
   expect(screen.getByRole("tab", { name: "Writeup" }).getAttribute("aria-selected")).toBe("true");
@@ -408,6 +425,7 @@ test.each(
 )(
   "$destination navigation discards a $threadKind thread at $pixels px",
   async ({ pixels, threadKind, destination }) => {
+    layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
     width = pixels;
     const threadId = "22222222-2222-4222-8222-222222222222";
     const htmlThread: ThreadView = {
@@ -1655,6 +1673,7 @@ test.each([1280, 390])("Show in place routes to and scrolls a writeup thread at 
   expect(screen.queryByRole("textbox", { name: "Reply" })).toBeNull();
 });
 test.each([1280, 390])("Show in place reaches a line thread, using the phone Diff tab at %s px", async (pixels) => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   width = pixels;
   const target = {
     kind: "lines" as const,
@@ -1748,6 +1767,7 @@ test("fix1 blank Comment on review cancellation leaves no draft or editor after 
   expect(screen.queryByRole("textbox", { name: "Comment" })).toBeNull();
 });
 test("fix1 an unplaced diff revision link preserves Instructions and creates a router intent", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   currentRevision.threads = [
     {
       ...placedWriteupThread(),
@@ -1804,6 +1824,7 @@ test("fix1 closing a phone selection sheet restores focus in the reading pane", 
 });
 
 test.each(["Cancel", "Save comment"])("fix1 Resume then %s closes replies in both real panes", async (action) => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   const target = { kind: "file" as const, path: "seed.txt" };
   currentRevision.threads = [{ ...placedWriteupThread(), target, placement: { status: "placed", location: target } }];
   const request = vi.mocked(fetch).getMockImplementation();
@@ -1851,6 +1872,7 @@ test("fix1 a removed phone selection prompt returns focus to the reading pane", 
 });
 
 test("R8 Files in diff expands a collapsed topic before scrolling, including a repeated link intent", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   const scroll = vi.spyOn(diffPresentation, "holdDiffTarget");
   mount();
   await act(async () => loaded.resolve());
@@ -1873,6 +1895,7 @@ test("R8 Files in diff expands a collapsed topic before scrolling, including a r
 test.each(["file", "lines"] as const)(
   "R8 a Show in place %s thread link expands both containers and scrolls after expansion",
   async (kind) => {
+    layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
     const target =
       kind === "file"
         ? { kind, path: "seed.txt" }
@@ -1907,6 +1930,7 @@ test.each(["file", "lines"] as const)(
 );
 
 test("R8 a file header URL expands its topic and file through the same route intent", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   const scroll = vi.spyOn(diffPresentation, "holdDiffTarget");
   const { history } = mount();
   await act(async () => loaded.resolve());
@@ -1922,6 +1946,7 @@ test("R8 a file header URL expands its topic and file through the same route int
 });
 
 test.each(["file", "lines"] as const)("R8 Resume of a %s draft expands a collapsed topic and file", async (kind) => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   const target =
     kind === "file"
       ? { kind, path: "seed.txt" }
@@ -1943,6 +1968,7 @@ test.each(["file", "lines"] as const)("R8 Resume of a %s draft expands a collaps
 test.each([1280, 768, 390])(
   "R8 Writeup links follow pane visibility at %s px and use reading navigation",
   async (pixels) => {
+    layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
     width = pixels;
     const { history } = mount(pixels < 1280 ? "?tab=diff&rev=1" : "?tab=writeup&rev=1");
     await act(async () => loaded.resolve());
@@ -1963,6 +1989,7 @@ test.each([1280, 768, 390])(
 );
 
 test("R8 one writeup observer follows the top topic without scrolling the diff", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   currentRevision.topics.push({ slug: "water", title: "Water the garden", summary: "", importance: 2 });
   currentRevision.writeup.sections.push({ key: "t-water-body", topic: "water", label: "Water the garden", blocks: [] });
   const observers: {
@@ -1994,10 +2021,10 @@ test("R8 one writeup observer follows the top topic without scrolling the diff",
   const current = observers.filter((observer) => observer.options?.root === reading && !observer.disconnected);
   expect(current).toHaveLength(1);
   const observer = current[0];
-  expect(observer?.elements.map((section) => section.id)).toEqual(["topic-seed", "topic-water"]);
+  expect(observer?.elements.map((heading) => heading.closest("section")?.id)).toEqual(["topic-seed", "topic-water"]);
   vi.spyOn(reading, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 100, 500, 500));
-  const seed = document.getElementById("topic-seed") as HTMLElement;
-  const water = document.getElementById("topic-water") as HTMLElement;
+  const seed = document.querySelector("#topic-seed h2") as HTMLElement;
+  const water = document.querySelector("#topic-water h2") as HTMLElement;
   vi.spyOn(seed, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 80, 500, 500));
   const waterBounds = vi.spyOn(water, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 580, 500, 600));
   const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
@@ -2021,6 +2048,7 @@ test("R8 one writeup observer follows the top topic without scrolling the diff",
 test.each(["Show in place", "hash", "claim", "edit claim", "phone edit claim", "retry"])(
   "R8 fix1 %s waits for a lazy line-100 thread's final annotation slot",
   async (navigation) => {
+    layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
     const phoneEdit = navigation === "phone edit claim";
     if (phoneEdit) width = 390;
     const old = Array.from({ length: 120 }, (_, index) => `line ${index + 1}`).join("\n");
@@ -2128,6 +2156,7 @@ test.each(["Show in place", "hash", "claim", "edit claim", "phone edit claim", "
 );
 
 test("R8 fix1 Resume reveals an already-mounted file composer before consuming its focus request", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   mount();
   await act(async () => loaded.resolve());
   const diff = within(await screen.findByTestId("diff-pane"));
@@ -2207,6 +2236,7 @@ test.each(["binary", "oversized", "lockfile", "large", "identical", "missing-lin
 test.each(["Comment on review", "Comment on file", "input", "textarea"])(
   "R8 fix2 a deferred Reply yields to newer focus in %s without losing its draft or open state",
   async (destination) => {
+    layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
     const target = {
       kind: "lines" as const,
       path: "seed.txt",
@@ -2328,6 +2358,7 @@ test("R8 fix2 a rendered diff with no annotation slot completes its intent at th
 test.each([false, true])(
   "R8 fix3 returning to a canceled Reply renews focus through its inline move (newer composer=%s)",
   async (newerComposer) => {
+    layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
     const target = {
       kind: "lines" as const,
       path: "seed.txt",
@@ -2584,83 +2615,49 @@ test("Tabs retains the selected doc while Diff is visible and gives each panel a
   expect(reading.scrollTop).toBe(90);
 });
 
-test.each([1280, 900, 390])("reading switches toggle independently on their tabs at %s px", async (pixels) => {
+test.each([1280, 900, 390])("compact comments toggle on the relevant tabs at %s px", async (pixels) => {
   width = pixels;
-  if (pixels === 1280) {
-    const bounds = HTMLElement.prototype.getBoundingClientRect;
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-      if (this.classList.contains("em-panes")) return new DOMRect(0, 0, 1600, 800);
-      if (this.querySelector(":scope > [data-reading-scroll]")) return new DOMRect(0, 0, 1200, 800);
-      return bounds.call(this);
-    });
-  }
   if (pixels === 390) {
-    layoutStore.update({ contents: true, compact: true });
+    layoutStore.update({ compact: true });
     currentRevision.threads = [placedWriteupThread()];
   }
   mount();
   await screen.findByRole("heading", { name: "Topic 1: Plant a seed" });
   const tabBar = document.querySelector(".em-review-tabs");
   expect(tabBar?.textContent ?? "").not.toContain("Focus");
+  expect(screen.queryByRole("button", { name: "Contents" })).toBeNull();
   if (pixels === 390) {
-    expect(screen.queryByRole("button", { name: "Contents" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
     expect(screen.queryByRole("navigation", { name: "Writeup outline" })).toBeNull();
     expect(document.getElementById(`thread-${id}`)).toBeTruthy();
     expect(document.querySelector(".em-thread-pill")).toBeNull();
     fireEvent.click(screen.getByRole("link", { name: "Docs" }));
     await screen.findByRole("heading", { name: "Docs" });
-    expect(screen.queryByRole("button", { name: "Contents" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
     return;
   }
-  const contents = screen.getByRole("button", { name: "Contents", pressed: false });
   const compact = screen.getByRole("button", { name: "Compact comments", pressed: false });
   const saved = () => JSON.parse(localStorage.getItem(layoutKey) ?? "{}");
-  const reading = screen.getByTestId("reading-pane");
-  const contentsOffWidth = Number.parseFloat(reading.style.flexBasis);
-  fireEvent.click(contents);
-  if (pixels === 1280) {
-    expect(contentsOffWidth).toBe(504);
-    expect(Number.parseFloat(reading.style.flexBasis)).toBe(contentsOffWidth + OUTLINE_WIDTH);
-  }
-  expect(contents.getAttribute("aria-pressed")).toBe("true");
-  expect(compact.getAttribute("aria-pressed")).toBe("false");
-  expect(saved()).toMatchObject({ contents: true, compact: false });
-  expect(screen.getByRole("navigation", { name: "Writeup outline" })).toBeTruthy();
   fireEvent.click(compact);
-  expect(contents.getAttribute("aria-pressed")).toBe("true");
   expect(compact.getAttribute("aria-pressed")).toBe("true");
-  expect(saved()).toMatchObject({ contents: true, compact: true });
-  fireEvent.click(contents);
-  if (pixels === 1280) expect(Number.parseFloat(reading.style.flexBasis)).toBe(contentsOffWidth);
-  expect(contents.getAttribute("aria-pressed")).toBe("false");
-  expect(compact.getAttribute("aria-pressed")).toBe("true");
-  expect(saved()).toMatchObject({ contents: false, compact: true });
-  expect(screen.queryByRole("navigation", { name: "Writeup outline" })).toBeNull();
+  expect(saved()).toMatchObject({ compact: true });
   fireEvent.click(screen.getByRole("tab", { name: "Docs 2" }));
   await screen.findByRole("heading", { name: "Docs" });
-  expect(screen.queryByRole("button", { name: "Contents" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
   expect(tabBar?.children).toHaveLength(1);
   fireEvent.click(screen.getByRole("link", { name: "seed.md seed.md" }));
   await screen.findByRole("heading", { name: "seed.md" });
-  expect(screen.queryByRole("button", { name: "Contents" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Compact comments", pressed: true }));
-  expect(saved()).toMatchObject({ contents: false, compact: false });
+  expect(saved()).toMatchObject({ compact: false });
   expect(screen.getByRole("button", { name: "Compact comments", pressed: false })).toBeTruthy();
   fireEvent.click(screen.getByRole("tab", { name: /^Comments/ }));
   await screen.findByText("No comments yet.");
-  expect(screen.queryByRole("button", { name: "Contents" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
-  if (pixels === 1280) act(() => layoutStore.update({ pane: { desktop: "tabs", tablet: "tabs" } }));
   fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
   await waitFor(() => expect(screen.getByTestId("reading-pane").hidden).toBe(true));
-  expect(screen.queryByRole("button", { name: "Contents" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
   fireEvent.click(screen.getByRole("tab", { name: "Writeup" }));
-  await screen.findByRole("button", { name: "Contents", pressed: false });
-  expect(screen.getByRole("button", { name: "Compact comments", pressed: false })).toBeTruthy();
+  await screen.findByRole("button", { name: "Compact comments", pressed: false });
 });
 
 test.each<RevisionView["docs"][number]>([
@@ -2668,7 +2665,7 @@ test.each<RevisionView["docs"][number]>([
   htmlDoc,
 ])("reading switches stay hidden for $kind docs", async (doc) => {
   currentRevision.docs.push(doc);
-  layoutStore.update({ contents: true, compact: true });
+  layoutStore.update({ compact: true });
   mount(`?tab=docs&doc=${doc.path}&rev=1`);
   await screen.findByRole("heading", { name: doc.path.split("/").at(-1) });
   expect(screen.queryByRole("button", { name: "Contents" })).toBeNull();
@@ -2680,34 +2677,26 @@ test.each<RevisionView["docs"][number]>([
   expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
   expect(document.querySelector(".em-review-tabs")?.children).toHaveLength(1);
   fireEvent.click(screen.getByRole("tab", { name: "Writeup" }));
-  await screen.findByRole("button", { name: "Contents", pressed: true });
-  expect(screen.getByRole("button", { name: "Compact comments", pressed: true })).toBeTruthy();
+  await screen.findByRole("button", { name: "Compact comments", pressed: true });
 });
 
-test.each([
-  { contents: true, compact: false },
-  { contents: false, compact: true },
-  { contents: true, compact: true },
-])("reading switches survive remount with contents=$contents compact=$compact", async ({ contents, compact }) => {
+test.each([false, true])("compact comments survive remount with compact=%s", async (compact) => {
   const view = mount();
-  await screen.findByRole("button", { name: "Contents", pressed: false });
-  if (contents) fireEvent.click(screen.getByRole("button", { name: "Contents" }));
-  if (compact) fireEvent.click(screen.getByRole("button", { name: "Compact comments" }));
+  await screen.findByRole("button", { name: "Compact comments", pressed: false });
+  fireEvent.click(screen.getByRole("button", { name: "Compact comments" }));
+  if (!compact) fireEvent.click(screen.getByRole("button", { name: "Compact comments" }));
   view.unmount();
   mount();
-  await screen.findByRole("button", { name: "Contents", pressed: contents });
-  expect(screen.getByRole("button", { name: "Compact comments", pressed: compact })).toBeTruthy();
-  expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}")).toMatchObject({ contents, compact });
+  await screen.findByRole("button", { name: "Compact comments", pressed: compact });
+  expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}")).toMatchObject({ compact });
 });
 
-test("legacy reading preference starts with both switches pressed", async () => {
+test("legacy reading preference starts with compact comments pressed", async () => {
   localStorage.setItem(layoutKey, '{"reading":"focus"}');
   currentRevision.threads = [placedWriteupThread()];
   mount();
-  await screen.findByRole("button", { name: "Contents", pressed: true });
-  expect(screen.getByRole("button", { name: "Compact comments", pressed: true })).toBeTruthy();
-  expect(screen.getByRole("navigation", { name: "Writeup outline" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "1 comment", expanded: false })).toBeTruthy();
+  await screen.findByRole("button", { name: "Compact comments", pressed: true });
+  expect(await screen.findByRole("button", { name: "1 comment", expanded: false })).toBeTruthy();
 });
 
 test.each(["hash", "Show in place", "initial hash"])(
@@ -2745,9 +2734,9 @@ test.each(["hash", "Show in place", "initial hash"])(
   },
 );
 
-test("Contents disconnects its observer while Tabs hides the mounted reading pane and resumes it", async () => {
+test("the outline disconnects its observer while Tabs hides the mounted reading pane and resumes it", async () => {
   width = 900;
-  layoutStore.update({ contents: true });
+  currentRevision.writeup.sections.unshift({ key: "overview", label: "Overview", topic: null, blocks: [] });
   const observers: {
     root?: Element | Document | null;
     disconnect: ReturnType<typeof vi.fn<() => void>>;
@@ -2939,9 +2928,11 @@ test("doc links push, Contents replaces, Back follows the real entry", async () 
   expect(history.length).toBe(initial + 1);
   const doc = document.querySelector('[data-reading-section="seed.md"]');
   await waitFor(() => expect(scroll.mock.instances).toContain(doc?.querySelector("h2")));
-  fireEvent.click(screen.getByRole("button", { name: "Contents" }));
+
   fireEvent.click(
-    within(await screen.findByRole("dialog", { name: "Contents" })).getByRole("button", { name: "Section 1" }),
+    within(await screen.findByRole("navigation", { name: "Document contents" })).getByRole("button", {
+      name: "Section 1",
+    }),
   );
   await waitFor(() => expect(history.location.hash).toBe("#h-diff-pretend"));
   expect(history.length).toBe(initial + 1);
@@ -3095,7 +3086,8 @@ test("switcher keeps manifest order, disambiguates paths, marks the open doc and
 test("scrolling updates Contents without adding history or moving focus", async () => {
   navigationDocs();
   const { history } = mount("?tab=docs&doc=seed.md&rev=1");
-  const trigger = await screen.findByRole("button", { name: "Contents" });
+  const outline = await screen.findByRole("navigation", { name: "Document contents" });
+  const trigger = within(outline).getByRole("button", { name: "Section 0" });
   const pane = screen.getByTestId("reading-pane");
   const doc = document.querySelector('[data-reading-section="seed.md"]');
   if (!doc) throw new Error("missing doc");
@@ -3110,7 +3102,7 @@ test("scrolling updates Contents without adding history or moving focus", async 
   pane.scrollTop = 150;
   fireEvent.scroll(pane);
   await waitFor(() =>
-    expect(document.querySelector('.em-doc-contents [aria-current="location"]')?.textContent).toBe("Section 1"),
+    expect(document.querySelector('.em-dash-outline [aria-current="location"]')?.textContent).toBe("Section 1"),
   );
   expect(document.activeElement).toBe(trigger);
   expect(history.location.href).toBe(before);
@@ -3213,9 +3205,11 @@ test("R1.6 Back restores a collapsed topic while the writeup stays mounted", asy
 test("R1.7 Back focuses the remounted heading when navigation preserves focus", async () => {
   navigationDocs();
   const { history } = mount("?tab=docs&doc=seed.md&rev=1");
-  fireEvent.click(await screen.findByRole("button", { name: "Contents" }));
+
   fireEvent.click(
-    within(await screen.findByRole("dialog", { name: "Contents" })).getByRole("button", { name: "Section 2" }),
+    within(await screen.findByRole("navigation", { name: "Document contents" })).getByRole("button", {
+      name: "Section 2",
+    }),
   );
   const first = await screen.findByRole("heading", { name: "Section 2" });
   await waitFor(() => expect(document.activeElement).toBe(first));
@@ -3231,9 +3225,11 @@ test("R1.7 Back focuses the remounted heading when navigation preserves focus", 
 test("R3.5 a doc switcher control clears the earlier heading focus before Back", async () => {
   navigationDocs();
   const { history } = mount("?tab=docs&doc=seed.md&rev=1");
-  fireEvent.click(await screen.findByRole("button", { name: "Contents" }));
+
   fireEvent.click(
-    within(await screen.findByRole("dialog", { name: "Contents" })).getByRole("button", { name: "Section 2" }),
+    within(await screen.findByRole("navigation", { name: "Document contents" })).getByRole("button", {
+      name: "Section 2",
+    }),
   );
   const first = await screen.findByRole("heading", { name: "Section 2" });
   await waitFor(() => expect(document.activeElement).toBe(first));
@@ -3362,9 +3358,10 @@ test.each(["link", "Contents", "restore"])("R2.7 %s ignores a placed comment's d
   const heading = await screen.findByRole("heading", { name: "Section 2" });
   const reply = screen.getByRole("heading", { name: "Reply heading" });
   if (mode === "Contents") {
-    fireEvent.click(screen.getByRole("button", { name: "Contents" }));
     fireEvent.click(
-      within(await screen.findByRole("dialog", { name: "Contents" })).getByRole("button", { name: "Section 2" }),
+      within(await screen.findByRole("navigation", { name: "Document contents" })).getByRole("button", {
+        name: "Section 2",
+      }),
     );
   }
   if (mode === "restore") await waitFor(() => expect(screen.getByTestId("reading-pane").scrollTop).toBe(300));
@@ -3418,7 +3415,7 @@ test.each([390, 1280])("C3 HTML fills the pane with app-owned controls and drawe
     expect(screen.queryByText("Sandboxed, scripts off")).toBeNull();
     expect(document.querySelector(".em-doc-bar p")).toBeNull();
   }
-  for (const name of ["Docs", "Contents", "Comments (0)"]) {
+  for (const name of ["Docs", ...(pixels === 390 ? ["Contents"] : []), "Comments (0)"]) {
     const button = screen.getByRole("button", { name });
     fireEvent.click(button);
     const dialog = await screen.findByRole("dialog", { name: name.startsWith("Comments") ? "Comments" : name });
@@ -3458,9 +3455,11 @@ test("C3 HTML Contents gates goto on ready, replaces history and marks position 
   await screen.findByRole("heading", { name: "Seed guide" });
   const { frame, post } = prepareFrame("seed.html");
   const length = history.length;
-  fireEvent.click(screen.getByRole("button", { name: "Contents" }));
+
   fireEvent.click(
-    within(await screen.findByRole("dialog", { name: "Contents" })).getByRole("button", { name: "Second" }),
+    within(await screen.findByRole("navigation", { name: "Document contents" })).getByRole("button", {
+      name: "Second",
+    }),
   );
   await waitFor(() => expect(history.location.hash).toBe("#h-1"));
   expect(history.length).toBe(length);
@@ -3470,9 +3469,9 @@ test("C3 HTML Contents gates goto on ready, replaces history and marks position 
   const href = history.location.href;
   frameMessage(frame, { type: "emend:position", heading: 2, fraction: 0.25 });
   expect(history.location.href).toBe(href);
-  fireEvent.click(screen.getByRole("button", { name: "Contents" }));
+
   expect(
-    within(await screen.findByRole("dialog", { name: "Contents" }))
+    within(await screen.findByRole("navigation", { name: "Document contents" }))
       .getByRole("button", { name: "Third" })
       .getAttribute("aria-current"),
   ).toBe("location");
@@ -3674,13 +3673,12 @@ test("C3 R1.3 returning to the introduction clears position and Contents, includ
     expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 1, label: "Second", fraction: 0.4 }, "*"),
   );
   frameMessage(frame, { type: "emend:position", heading: 1, fraction: 0.4 });
-  fireEvent.click(screen.getByRole("button", { name: "Contents" }));
-  const contents = await screen.findByRole("dialog", { name: "Contents" });
+
+  const contents = await screen.findByRole("navigation", { name: "Document contents" });
   expect(within(contents).getByRole("button", { name: "Second" }).getAttribute("aria-current")).toBe("location");
   frameMessage(frame, { type: "emend:position", heading: null, fraction: 0 });
   expect(readingPosition.loadReadingPosition(key)).toBeUndefined();
   expect(contents.querySelector('[aria-current="location"]')).toBeNull();
-  fireEvent.click(within(contents).getByRole("button", { name: "Close" }));
   await act(async () => app.history.push(`/r/${id}?tab=docs&doc=water.md&rev=1`));
   await screen.findByRole("heading", { name: "water.md" });
   await act(async () => app.history.back());
@@ -3709,9 +3707,10 @@ test.each(["Contents", "restore"])("C3 R1.4 %s posts nothing after an unexpected
   post.mockClear();
   frameMessage(frame, { type: "emend:ready" });
   if (kind === "Contents") {
-    fireEvent.click(screen.getByRole("button", { name: "Contents" }));
     fireEvent.click(
-      within(await screen.findByRole("dialog", { name: "Contents" })).getByRole("button", { name: "Second" }),
+      within(await screen.findByRole("navigation", { name: "Document contents" })).getByRole("button", {
+        name: "Second",
+      }),
     );
     await waitFor(() => expect(history.location.hash).toBe("#h-1"));
   } else {
@@ -3749,9 +3748,10 @@ test.each(["Contents", "restore"])(
     expect(screen.queryByRole("button", { name: "Comment on selection" })).toBeNull();
     expect(searchParams(history).get("doc")).toBe("seed.html");
     if (kind === "Contents") {
-      fireEvent.click(screen.getByRole("button", { name: "Contents" }));
       fireEvent.click(
-        within(await screen.findByRole("dialog", { name: "Contents" })).getByRole("button", { name: "Third" }),
+        within(await screen.findByRole("navigation", { name: "Document contents" })).getByRole("button", {
+          name: "Third",
+        }),
       );
       await waitFor(() => expect(history.location.hash).toBe("#h-2"));
     } else {
@@ -3813,14 +3813,16 @@ test("R4 an actual inset bridge report keeps the picked Contents marker and save
     runInNewContext(script, { window: content, document: content.document });
     content.document.dispatchEvent(new content.Event("DOMContentLoaded"));
     await act(async () => content.happyDOM.waitUntilComplete());
-    fireEvent.click(screen.getByRole("button", { name: "Contents" }));
+
     fireEvent.click(
-      within(await screen.findByRole("dialog", { name: "Contents" })).getByRole("button", { name: "First" }),
+      within(await screen.findByRole("navigation", { name: "Document contents" })).getByRole("button", {
+        name: "First",
+      }),
     );
     await waitFor(() => expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 0, label: "First" }, "*"));
     await act(async () => content.happyDOM.waitUntilComplete());
-    fireEvent.click(screen.getByRole("button", { name: "Contents" }));
-    const contents = await screen.findByRole("dialog", { name: "Contents" });
+
+    const contents = await screen.findByRole("navigation", { name: "Document contents" });
     expect(within(contents).getByRole("button", { name: "First" }).getAttribute("aria-current")).toBe("location");
     const key = readingPosition.readingPositionKey(id, "docs", "seed.html", 1, "original");
     expect(readingPosition.loadReadingPosition(key)).toEqual({ id: "h-0", fraction: 0 });

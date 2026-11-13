@@ -96,13 +96,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function topicReader(threads: ThreadView[] = [], value = topic) {
+function topicReader(threads: ThreadView[] = [], value = topic, overview = false) {
   return mount(
     <Writeup
       {...props}
       threads={threads}
       topics={[value]}
-      writeup={{ sections: [{ ...section(value.slug, "why"), blocks: [block] }] }}
+      writeup={{
+        sections: [
+          ...(overview ? [plain("overview", "Overview")] : []),
+          { ...section(value.slug, "why"), blocks: [block] },
+        ],
+      }}
     />,
   );
 }
@@ -221,7 +226,7 @@ test("blast radius text has no comment anchor", () => {
 });
 
 test("whole-topic and quoted threads stay below the topic metadata when folded and both count", () => {
-  layoutStore.update({ contents: true, compact: false });
+  layoutStore.update({ compact: false });
   const whole: ThreadView = {
     id: reviewId,
     createdOn: 1,
@@ -237,7 +242,7 @@ test("whole-topic and quoted threads stay below the topic metadata when folded a
     placement: { status: "placed", location: { kind: "topic", slug: topic.slug, part: "title", start: 8, end: 12 } },
     comments: whole.comments.map((comment) => ({ ...comment, body: "Quoted topic feedback" })),
   };
-  topicReader([whole, quoted], { ...topic, attention: "skim" });
+  topicReader([whole, quoted], { ...topic, attention: "skim" }, true);
   const group = screen.getByRole("region", { name: "Topic 1: Plant a seed" });
   const cards = group.querySelectorAll("[data-thread-card]");
   expect(cards).toHaveLength(2);
@@ -262,13 +267,8 @@ test("a hostile topic title and summary remain literal React text", () => {
   expect(container.querySelector("img, script, [onerror]")).toBeNull();
 });
 
-test.each([
-  { contents: false, compact: false },
-  { contents: true, compact: false },
-  { contents: false, compact: true },
-  { contents: true, compact: true },
-])(
-  "contents=$contents compact=$compact: new writeups show the opening hierarchy before topics",
+test.each([{ compact: false }, { compact: true }])(
+  "compact=$compact: new writeups show the opening hierarchy before topics",
   async (preferences) => {
     layoutStore.update(preferences);
     const writeup = RenderedWriteup.parse(
@@ -551,13 +551,8 @@ test("an HTML doc keeps its sandbox note in the doc bar above the frame", () => 
   }
 });
 
-test.each([
-  { contents: false, compact: false },
-  { contents: true, compact: false },
-  { contents: false, compact: true },
-  { contents: true, compact: true },
-])(
-  "contents=$contents compact=$compact: hostile metadata stays text and server-sanitized Markdown remains inert",
+test.each([{ compact: false }, { compact: true }])(
+  "compact=$compact: hostile metadata stays text and server-sanitized Markdown remains inert",
   async (preferences) => {
     layoutStore.update(preferences);
     const hostile = "<script>evil()</script><img src=x onerror=evil()><svg onload=evil()></svg>";

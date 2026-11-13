@@ -104,7 +104,7 @@
   /* reading views: the writeup, Markdown docs and comment bodies; light mode keeps the app colours */
   --bg-reading: var(--bg-app);
   --bg-reading-card: var(--bg-surface);
-  --fg-reading: var(--fg-3);
+  --fg-reading: var(--fg-1);
   --fg-reading-muted: oklch(0.55 0.004 260);
   --fg-reading-strong: var(--fg-1);
   /* accent: the editor's pencil */

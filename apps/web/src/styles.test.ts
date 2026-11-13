@@ -79,10 +79,10 @@ test("changed files keep the unviewed checkbox look", () => {
   expect(media?.[1]?.replace(labelRule, "")).not.toMatch(hiddenLabel);
 });
 
-test("the reading column grows with the pane up to 1000px on desktop and keeps its phone measure", () => {
+test("the reading column grows with the pane up to the chosen reading width on desktop and keeps its phone measure", () => {
   const css = readFileSync(join(webSource, "styles/reading.css"), "utf8");
   expect(/\.em-reading-column\s*\{([^}]+)\}/.exec(css)?.[1]).toMatch(/--reading-max:\s*68ch\s*;/);
-  expect(css).toMatch(/\.em-reading-column\s*\{\s*--reading-max:\s*1000px;\s*\}/);
+  expect(css).toMatch(/@media \(min-width: 768px\)[\s\S]*--reading-max: var\(--reader-measure, 1024px\);/);
   expect(css).toMatch(/max-width:\s*calc\(var\(--reading-max\)\s*\+\s*112px\)/);
   expect(css).not.toMatch(/68ch\s*\+|-\s*68ch/);
   const prose = readFileSync(join(webSource, "styles/prose.css"), "utf8");

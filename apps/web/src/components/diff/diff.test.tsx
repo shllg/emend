@@ -975,6 +975,7 @@ test.each([390, 1280])("R8 fix1 a revision without a writeup has no Writeup link
 });
 
 test("dragging reading across the 760px diff threshold switches presentation without remounting", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "split" } });
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     if (this.classList.contains("em-diff-pane")) {

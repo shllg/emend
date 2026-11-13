@@ -16,12 +16,12 @@ import {
 import { type ComponentProps, type CSSProperties, type ReactNode, type RefObject, useRef } from "react";
 import { useAppUpdate } from "../../lib/app-update.ts";
 import { useLayout } from "../../lib/layout.ts";
-import { layoutStore, useLayoutPreferences } from "../../lib/layout-store.ts";
+import { layoutStore, readingMeasure, useLayoutPreferences } from "../../lib/layout-store.ts";
 import { requestPairingFromLink } from "../../lib/pairing-intent.ts";
 import { useRefresh } from "../../lib/refresh.ts";
 import { ShortcutProvider } from "../../lib/use-shortcut.tsx";
 import { CommandPalette } from "../CommandPalette.tsx";
-import { textSizeItems } from "../review/LayoutControls.tsx";
+import { readingWidthItems, textSizeItems } from "../review/LayoutControls.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -124,6 +124,7 @@ function AppFrameContent({
             : []),
         { separator: true },
         ...textSizeItems(preferences),
+        ...(layout !== "phone" ? readingWidthItems(preferences) : []),
         { heading: "Long lines" },
         {
           radioGroup: {
@@ -166,6 +167,7 @@ function AppFrameContent({
       style={
         {
           "--reader-prose-size": `${preferences.proseSize}px`,
+          "--reader-measure": readingMeasure[preferences.readingWidth],
           "--reader-code-size": `${preferences.codeSize}px`,
         } as CSSProperties
       }

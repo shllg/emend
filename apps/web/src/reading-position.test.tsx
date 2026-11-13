@@ -429,6 +429,7 @@ test.each([390, 1280])(
 );
 
 test("a fulfilled jump no longer blocks a later restore without a navigation", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   width = 1280;
   const { history } = mount(`?tab=diff&rev=1#block-${c.id}`);
   vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});

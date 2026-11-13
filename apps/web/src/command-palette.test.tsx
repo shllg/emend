@@ -235,6 +235,7 @@ test("lists every other command in its group with live keys and no hint for an o
 });
 
 test("finds letters with gaps, resets selection on search and shows when no command matches", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   mount();
   await ready();
   await within(screen.getByTestId("diff-pane")).findByRole("button", { name: "Mark a.txt as viewed" });
@@ -543,6 +544,7 @@ test.each(["Show keyboard shortcuts", "Snooze", "Approve"])(
 );
 
 test("diff commands are unavailable on the Writeup tab and available on the Diff tab in Tabs layout", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   mount();
   const opener = await ready();
   await within(screen.getByTestId("diff-pane")).findByRole("button", { name: "Mark a.txt as viewed" });

@@ -1,85 +1,150 @@
 @layer components {
-  .em-outline-container {
-    container: reading / inline-size;
+  .em-dash-rail {
+    position: sticky;
+    align-self: start;
+    width: 28px;
+    height: 0;
+    z-index: 2;
   }
-  .em-outline-layout {
-    --reading-sticky-top: 0px;
-    display: grid;
-    grid-template-columns: 184px minmax(0, 1fr);
-    align-items: start;
+  .em-dash-outline {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 28px;
+    max-height: calc(100dvh - 160px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+  .em-dash-outline__item {
     position: relative;
-  }
-  .em-outline-progress {
-    position: sticky;
-    top: var(--reading-sticky-top);
-    grid-column: 1 / -1;
-    height: 2px;
-    margin-bottom: -2px;
-    background: var(--accent);
-    transform-origin: left;
-    z-index: 3;
-  }
-  .em-outline {
-    position: sticky;
-    top: calc(var(--reading-sticky-top) + 2px);
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    padding: 22px 6px 24px 14px;
-  }
-  .em-outline__label {
-    margin: 0 8px 8px;
-    font: var(--type-label);
-    font-stretch: var(--mono-stretch);
-    letter-spacing: var(--tracking-label);
-    color: var(--fg-3);
-  }
-  .em-outline__item {
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: flex-end;
     width: 100%;
-    min-height: 30px;
-    padding: 4px 8px;
+    min-height: 12px;
+    padding: 0;
     border-radius: var(--radius-sm);
-    text-align: left;
-    color: var(--fg-3);
-    font: var(--type-ui);
-    font-weight: 450;
     cursor: pointer;
   }
-  .em-outline__item:hover {
-    color: var(--fg-1);
-    background: var(--bg-hover);
+  .em-dash-outline__item > :not(.em-dash-outline__dash) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
-  .em-outline__item[aria-current="location"] {
-    color: var(--fg-1);
-    background: var(--bg-selected);
-    font-weight: 600;
+  .em-dash-outline__dash {
+    flex: none;
+    width: 12px;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--border-strong);
   }
-  .em-outline__text {
+  .em-dash-outline [data-level="3"] .em-dash-outline__dash {
+    width: 8px;
+  }
+  .em-dash-outline [aria-current="location"] .em-dash-outline__dash {
+    width: 18px;
+    background: var(--topic-solid);
+  }
+  .em-dash-outline:is(:hover, :has(:focus-visible)) {
+    width: min(320px, calc(100vw - 32px));
+    background: var(--bg-surface);
+    border: 1px solid var(--border-1);
+    border-radius: 8px;
+    box-shadow: var(--shadow-3);
+    padding: 6px;
+    scrollbar-width: thin;
+  }
+  .em-dash-outline:is(:hover, :has(:focus-visible)) .em-dash-outline__item {
+    min-height: 30px;
+    padding: 4px 8px;
+    gap: 8px;
+    text-align: start;
+    color: var(--fg-3);
+    font: var(--type-ui);
+  }
+  .em-dash-outline:is(:hover, :has(:focus-visible)) .em-dash-outline__item > :not(.em-dash-outline__dash) {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+  }
+  .em-dash-outline:is(:hover, :has(:focus-visible)) .em-dash-outline__item > .em-dash-outline__text {
     flex: 1;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .em-outline__count {
+  .em-dash-outline:is(:hover, :has(:focus-visible)) .em-dash-outline__count {
+    flex: none;
     font: var(--type-label);
     font-stretch: var(--mono-stretch);
     color: var(--fg-3);
-    flex: none;
+  }
+  .em-dash-outline:is(:hover, :has(:focus-visible)) .em-dash-outline__item:hover {
+    background: var(--bg-hover);
+    color: var(--fg-1);
+  }
+  .em-dash-outline:is(:hover, :has(:focus-visible)) .em-dash-outline__item[aria-current="location"] {
+    color: var(--fg-1);
+    background: var(--bg-selected);
+    font-weight: 600;
+  }
+  .em-dash-outline:is(:hover, :has(:focus-visible)) [data-level="3"] .em-dash-outline__item {
+    padding-inline-start: 20px;
+  }
+  @media (pointer: coarse) {
+    .em-dash-outline__item {
+      min-height: 24px;
+    }
+    .em-dash-outline:is(:hover, :has(:focus-visible)) .em-dash-outline__item {
+      min-height: 44px;
+    }
+  }
+  .em-outline-layout {
+    --reading-sticky-top: 0px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 28px;
+    align-items: start;
+    position: relative;
+  }
+  .em-outline-layout > .em-dash-rail {
+    grid-column: 2;
+    grid-row: 1;
+    top: calc(var(--reading-sticky-top) + 16px);
+  }
+  .em-outline-layout > .em-reading-column {
+    grid-column: 1;
+    grid-row: 1;
   }
   .em-outline-layout .em-reading-group,
   .em-outline-layout [id] {
     scroll-margin-top: calc(var(--reading-sticky-top) + 14px);
   }
-  @container reading (width < 640px) {
-    .em-outline-layout {
-      grid-template-columns: minmax(0, 1fr);
-    }
-    .em-outline {
-      display: none;
-    }
+  .em-doc-body:has(> .em-dash-rail) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 28px;
+  }
+  .em-doc-body > .em-dash-rail {
+    top: calc(var(--doc-bar-height) + 48px);
+  }
+  .em-doc-view[data-layout="original"] > .em-doc-body > .em-dash-rail {
+    flex: 0 0 28px;
+    position: relative;
+    align-self: stretch;
+    height: auto;
+    top: 0;
+  }
+  .em-doc-view[data-layout="original"] .em-dash-outline {
+    top: 12px;
   }
 }

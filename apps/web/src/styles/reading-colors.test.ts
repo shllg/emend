@@ -84,7 +84,7 @@ test("light mode keeps the app colours", () => {
   expect(readingTokens(light)).toEqual({
     "--bg-reading": "var(--bg-app)",
     "--bg-reading-card": "var(--bg-surface)",
-    "--fg-reading": "var(--fg-3)",
+    "--fg-reading": "var(--fg-1)",
     "--fg-reading-muted": "oklch(0.55 0.004 260)",
     "--fg-reading-strong": "var(--fg-1)",
   });

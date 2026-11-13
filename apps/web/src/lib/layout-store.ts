@@ -2,14 +2,15 @@ import { z } from "@emend/contract/browser";
 import { useSyncExternalStore } from "react";
 
 export const layoutKey = "emend.layout.v1";
+export const tabsDefaultKey = "emend.layout.tabs-default";
 const paneChoice = z.enum(["split", "tabs"]);
 export const layoutSchema = z.object({
   inboxWidth: z.number().min(220).max(520).catch(280),
   readingShare: z.number().min(0).max(1).catch(0.42),
   pane: z
-    .object({ desktop: paneChoice.catch("split"), tablet: paneChoice.catch("tabs") })
-    .catch({ desktop: "split", tablet: "tabs" }),
-  contents: z.boolean().catch(false),
+    .object({ desktop: paneChoice.catch("tabs"), tablet: paneChoice.catch("tabs") })
+    .catch({ desktop: "tabs", tablet: "tabs" }),
+  readingWidth: z.enum(["comfortable", "wide", "narrow"]).catch("comfortable"),
   compact: z.boolean().catch(false),
   diffStyle: z.enum(["split", "unified"]).catch("split"),
   wrap: z.boolean().catch(false),
@@ -24,6 +25,8 @@ export const layoutSchema = z.object({
   codeSize: z.union([z.literal(11), z.literal(12), z.literal(13), z.literal(14)]).catch(12),
 });
 export type LayoutPreferences = z.infer<typeof layoutSchema>;
+export type ReadingWidth = LayoutPreferences["readingWidth"];
+export const readingMeasure = { comfortable: "1024px", wide: "1248px", narrow: "68ch" } as const;
 type LayoutPatch = Partial<Omit<LayoutPreferences, "proseSize" | "codeSize">> & {
   proseSize?: number;
   codeSize?: number;
@@ -34,7 +37,7 @@ function parse(raw: string | null): LayoutPreferences {
   try {
     let value = JSON.parse(raw ?? "{}");
     if (value !== null && typeof value === "object" && !Array.isArray(value) && value.reading === "focus") {
-      value = { contents: true, compact: true, ...value };
+      value = { compact: true, ...value };
     }
     return layoutSchema.parse(value);
   } catch {
@@ -51,6 +54,7 @@ function read(key: string): string | null | undefined {
 
 export function createLayoutStore() {
   let saved = read(layoutKey);
+  const tabsDefault = read(tabsDefaultKey);
   let snapshot =
     saved == null
       ? layoutSchema.parse({
@@ -72,8 +76,19 @@ export function createLayoutStore() {
       // Preferences still work in memory when storage is denied or full.
     }
   };
-  // Migrate before React reads a snapshot; getSnapshot must never write during render.
+  // A separate marker keeps older tabs that strip unknown layout fields from repeating the move.
+  if (saved != null && tabsDefault === null) {
+    snapshot = { ...snapshot, pane: { ...snapshot.pane, desktop: "tabs" } };
+    persist();
+  }
   if (saved === null) persist();
+  if (tabsDefault === null) {
+    try {
+      localStorage.setItem(tabsDefaultKey, "1");
+    } catch {
+      // Preferences still work in memory when storage is denied or full.
+    }
+  }
   const getSnapshot = () => {
     const raw = read(layoutKey);
     if (raw !== undefined && raw !== saved) {

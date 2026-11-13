@@ -34,9 +34,7 @@ export function Writeup({
 }) {
   const root = useRef<HTMLDivElement>(null);
   const prefs = useLayoutPreferences();
-  const contents = !phone && prefs.contents;
   const compact = !phone && prefs.compact;
-  useCurrentTopic(root, onCurrentTopic, writeup.sections, visible && !contents);
   useEffect(() => () => onCurrentTopic?.(undefined), [onCurrentTopic]);
   const groups = useMemo(() => {
     const ranked = rankedTopics(topics);
@@ -170,20 +168,20 @@ export function Writeup({
     }
     return groups;
   }, [writeup.sections, topics, files, search.tab, search.rev, phone, props.reviewId, props.threads]);
+  const outline = !phone && groups.filter((group) => group.key !== "topics-map").length >= 2;
+  useCurrentTopic(root, onCurrentTopic, writeup.sections, visible && !outline);
   return (
-    <div className={contents ? "em-outline-container" : "contents"}>
-      <div ref={root} className={contents ? "em-outline-layout" : "contents"}>
-        {contents && (
-          <WriteupOutline
-            root={root}
-            groups={groups}
-            threads={props.threads}
-            visible={visible}
-            onCurrentTopic={onCurrentTopic}
-          />
-        )}
-        <BlockReader {...props} topics={topics} groups={groups} compact={compact} files={files} onNote={onNote} />
-      </div>
+    <div ref={root} className={outline ? "em-outline-layout" : "contents"}>
+      {outline && (
+        <WriteupOutline
+          root={root}
+          groups={groups}
+          threads={props.threads}
+          visible={visible}
+          onCurrentTopic={onCurrentTopic}
+        />
+      )}
+      <BlockReader {...props} topics={topics} groups={groups} compact={compact} files={files} onNote={onNote} />
     </div>
   );
 }

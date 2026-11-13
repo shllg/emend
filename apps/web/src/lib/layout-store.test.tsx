@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { useSyncExternalStore } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { createLayoutStore, defaultLayout, layoutKey } from "./layout-store.ts";
+import { createLayoutStore, defaultLayout, layoutKey, tabsDefaultKey } from "./layout-store.ts";
 
 beforeEach(() => localStorage.clear());
 afterEach(() => {
@@ -13,8 +13,8 @@ test("defaults include independent pane choices and D.4's 12px code size", () =>
   expect(createLayoutStore().getSnapshot()).toEqual({
     inboxWidth: 280,
     readingShare: 0.42,
-    pane: { desktop: "split", tablet: "tabs" },
-    contents: false,
+    pane: { desktop: "tabs", tablet: "tabs" },
+    readingWidth: "comfortable",
     compact: false,
     diffStyle: "split",
     wrap: false,
@@ -38,7 +38,7 @@ test("invalid fields fall back independently, including each device choice", () 
       inboxWidth: 521,
       readingShare: 0.6,
       pane: { desktop: "invalid", tablet: "split" },
-      contents: "true",
+      readingWidth: "invalid",
       compact: true,
       diffStyle: "unified",
       wrap: "true",
@@ -51,8 +51,8 @@ test("invalid fields fall back independently, including each device choice", () 
   expect(createLayoutStore().getSnapshot()).toEqual({
     ...defaultLayout,
     readingShare: 0.6,
-    pane: { desktop: "split", tablet: "split" },
-    contents: false,
+    pane: { desktop: "tabs", tablet: "split" },
+    readingWidth: "comfortable",
     compact: true,
     diffStyle: "unified",
     inboxCollapsed: true,
@@ -60,23 +60,122 @@ test("invalid fields fall back independently, including each device choice", () 
   });
 });
 test.each([
-  ['{"reading":"focus"}', true, true],
-  ['{"reading":"focus","contents":false}', false, true],
-  ['{"reading":"focus","compact":false}', true, false],
-  ['{"reading":"focus","contents":false,"compact":false}', false, false],
-  ['{"reading":"focus","contents":"true","compact":null}', false, false],
-  ['{"reading":"standard"}', false, false],
-  ['{"reading":"standard","contents":true}', true, false],
-] as const)("legacy preference %s migrates without overriding explicit switches", (raw, contents, compact) => {
+  ['{"reading":"focus"}', true],
+  ['{"reading":"focus","compact":false}', false],
+  ['{"reading":"focus","compact":null}', false],
+  ['{"reading":"standard"}', false],
+  ['{"reading":"standard","compact":true}', true],
+] as const)("legacy preference %s migrates without overriding explicit compact", (raw, compact) => {
   localStorage.setItem(layoutKey, raw);
   const store = createLayoutStore();
-  expect(store.getSnapshot()).toEqual({ ...defaultLayout, contents, compact });
+  expect(store.getSnapshot()).toEqual({ ...defaultLayout, compact });
   expect(store.getSnapshot()).not.toHaveProperty("reading");
   store.update({ wrap: true });
   const saved = JSON.parse(localStorage.getItem(layoutKey) ?? "{}");
-  expect(saved).toMatchObject({ contents, compact, wrap: true });
+  expect(saved).toMatchObject({ compact, wrap: true });
   expect(saved).not.toHaveProperty("reading");
   expect(createLayoutStore().getSnapshot()).toEqual(saved);
+});
+
+test.each([undefined, "wide"] as const)(
+  "without a marker, desktop moves to Tabs once with readingWidth=%s and keeps other choices",
+  (readingWidth) => {
+    localStorage.setItem(
+      layoutKey,
+      JSON.stringify({ pane: { desktop: "split", tablet: "split" }, proseSize: 18, readingWidth }),
+    );
+    const write = vi.spyOn(localStorage, "setItem");
+    const store = createLayoutStore();
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(write).toHaveBeenCalledWith(tabsDefaultKey, "1");
+    expect(localStorage.getItem(tabsDefaultKey)).toBe("1");
+    expect(store.getSnapshot()).toEqual({
+      ...defaultLayout,
+      pane: { desktop: "tabs", tablet: "split" },
+      readingWidth: readingWidth ?? "comfortable",
+      proseSize: 18,
+    });
+    expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}")).toEqual(store.getSnapshot());
+    write.mockClear();
+    store.getSnapshot();
+    createLayoutStore();
+    expect(write).not.toHaveBeenCalled();
+    store.update({ pane: { desktop: "split", tablet: "split" } });
+    expect(createLayoutStore().getSnapshot().pane.desktop).toBe("split");
+  },
+);
+
+test("the marker preserves a chosen desktop Split even without a stored reading width", () => {
+  localStorage.setItem(tabsDefaultKey, "1");
+  localStorage.setItem(layoutKey, JSON.stringify({ pane: { desktop: "split", tablet: "tabs" } }));
+  const write = vi.spyOn(localStorage, "setItem");
+  expect(createLayoutStore().getSnapshot()).toMatchObject({ pane: { desktop: "split" }, readingWidth: "comfortable" });
+  expect(write).not.toHaveBeenCalled();
+});
+
+test("a fresh browser records the Tabs default and a later Split choice survives store creation", () => {
+  const store = createLayoutStore();
+  expect(store.getSnapshot().pane).toEqual({ desktop: "tabs", tablet: "tabs" });
+  expect(localStorage.getItem(tabsDefaultKey)).toBe("1");
+  expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}")).toEqual(store.getSnapshot());
+  store.update({ pane: { desktop: "split", tablet: "tabs" } });
+  expect(createLayoutStore().getSnapshot().pane.desktop).toBe("split");
+});
+
+test.each(["snapshot", "storage event"])("an older client's write preserves Split through a %s", (refresh) => {
+  localStorage.setItem(layoutKey, JSON.stringify({ pane: { desktop: "split", tablet: "split" } }));
+  const store = createLayoutStore();
+  expect(store.getSnapshot().pane.desktop).toBe("tabs");
+  store.update({ pane: { desktop: "split", tablet: "split" } });
+  const changed = vi.fn();
+  const unsubscribe = store.subscribe(changed);
+  const newValue = JSON.stringify({ pane: { desktop: "split", tablet: "split" }, proseSize: 18 });
+  localStorage.setItem(layoutKey, newValue);
+  const write = vi.spyOn(localStorage, "setItem");
+  try {
+    if (refresh === "storage event") {
+      window.dispatchEvent(new StorageEvent("storage", { key: layoutKey, newValue, storageArea: localStorage }));
+      expect(changed).toHaveBeenCalledOnce();
+    }
+    expect(store.getSnapshot()).toMatchObject({ pane: { desktop: "split", tablet: "split" }, proseSize: 18 });
+    expect(createLayoutStore().getSnapshot().pane.desktop).toBe("split");
+    expect(write).not.toHaveBeenCalled();
+  } finally {
+    unsubscribe();
+  }
+});
+
+test("denied storage reads neither throw nor record the pane move", () => {
+  const write = vi.fn();
+  vi.stubGlobal("localStorage", {
+    getItem() {
+      throw Error("Denied");
+    },
+    setItem: write,
+  });
+  expect(createLayoutStore().getSnapshot()).toEqual(defaultLayout);
+  expect(write).not.toHaveBeenCalled();
+});
+
+test("an unreadable marker leaves a saved Split alone", () => {
+  localStorage.setItem(layoutKey, JSON.stringify({ pane: { desktop: "split", tablet: "split" } }));
+  const storage = localStorage;
+  const write = vi.fn(storage.setItem.bind(storage));
+  vi.stubGlobal("localStorage", {
+    getItem(key: string) {
+      if (key === tabsDefaultKey) throw Error("Denied");
+      return storage.getItem(key);
+    },
+    setItem: write,
+  });
+  expect(createLayoutStore().getSnapshot().pane).toEqual({ desktop: "split", tablet: "split" });
+  expect(write).not.toHaveBeenCalled();
+});
+
+test("obsolete Contents is stripped from preferences", () => {
+  localStorage.setItem(layoutKey, '{"contents":true}');
+  expect(createLayoutStore().getSnapshot()).not.toHaveProperty("contents");
+  expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}")).not.toHaveProperty("contents");
 });
 
 test.each(["{", "null", "[]", '"text"'])("bad root %s uses defaults", (raw) => {
@@ -145,7 +244,8 @@ test("migration writes during store creation, never during snapshot reads", () =
   localStorage.setItem("emend.diff.wrap", "true");
   const write = vi.spyOn(localStorage, "setItem");
   const store = createLayoutStore();
-  expect(write).toHaveBeenCalledTimes(1);
+  expect(write).toHaveBeenCalledTimes(2);
+  expect(write).toHaveBeenCalledWith(tabsDefaultKey, "1");
   write.mockClear();
   const initial = store.getSnapshot();
   expect(initial.wrap).toBe(true);
