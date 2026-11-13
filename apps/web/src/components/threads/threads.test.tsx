@@ -614,12 +614,12 @@ test.each(
 });
 
 test.each([false, true])(
-  "topic passage jumps use written headings and preserve the existing diff links (phone=%s)",
+  "topic jumps use written cards and preserve the existing links for unwritten topics (phone=%s)",
   (phone) => {
     const written = new Set(["garden"]);
     const search = { rev: 2, tab: "comments" as const };
     for (const part of ["title", "summary", undefined] as const) {
-      for (const slug of ["garden", "soil"]) {
+      for (const slug of ["garden", "soil", OTHER_TOPIC.slug, "missing"]) {
         const thread: ThreadView = {
           ...base,
           placement: {
@@ -628,7 +628,7 @@ test.each([false, true])(
           },
         };
         const href = threadPlaceLink(id, thread, search, phone, written);
-        if (part && slug === "garden") expect(href).toBe(`/r/${id}?rev=2&tab=writeup#thread-${id}`);
+        if (slug === "garden") expect(href).toBe(`/r/${id}?rev=2&tab=writeup#thread-${id}`);
         else expect(href).toBe(`/r/${id}?rev=2&tab=${phone ? "diff" : "comments"}#diff-thread-${id}`);
         expect(threadPlaceLink(id, thread, search, phone)).toBe(
           `/r/${id}?rev=2&tab=${phone ? "diff" : "comments"}#diff-thread-${id}`,
@@ -637,43 +637,46 @@ test.each([false, true])(
     }
   },
 );
-test.each([false, true])("only ranked written topics link to writeup cards (phone=%s)", (phone) => {
-  const slugs = [OTHER_TOPIC.slug, "missing", "garden"];
-  const threads: ThreadView[] = slugs.map((slug) => ({
-    ...base,
-    id: slug,
-    target: { kind: "topic", slug, part: "title", quote: "Seed", prefix: "", suffix: "" },
-    placement: { status: "placed", location: { kind: "topic", slug, part: "title", start: 0, end: 4 } },
-  }));
-  const { container } = mount(
-    <ThreadList
-      reviewId={id}
-      revision={2}
-      threads={threads}
-      changedBlocks={[]}
-      topics={[
-        { ...OTHER_TOPIC, importance: 3, summary: "" },
-        { slug: "garden", title: "Garden", importance: 1, summary: "" },
-      ]}
-      writeup={{ sections: slugs.map((slug) => ({ key: `t-${slug}-body`, label: slug, topic: slug, blocks: [] })) }}
-      search={{ rev: 2, tab: "comments" }}
-      phone={phone}
-      onResume={() => {}}
-    />,
-  );
-  for (const slug of slugs) {
-    const card = container.querySelector(`[id="thread-${slug}"]`);
-    expect(card).toBeTruthy();
-    const href = within(card as HTMLElement)
-      .getByRole("link", { name: "Show in place" })
-      .getAttribute("href");
-    expect(href).toBe(
-      slug === "garden"
-        ? `/r/${id}?rev=2&tab=writeup#thread-${slug}`
-        : `/r/${id}?rev=2&tab=${phone ? "diff" : "comments"}#diff-thread-${slug}`,
+test.each([false, true].flatMap((phone) => (["title", undefined] as const).map((part) => ({ phone, part }))))(
+  "only ranked written topics link to writeup cards (phone=$phone, part=$part)",
+  ({ phone, part }) => {
+    const slugs = [OTHER_TOPIC.slug, "missing", "garden"];
+    const threads: ThreadView[] = slugs.map((slug) => ({
+      ...base,
+      id: slug,
+      target: { kind: "topic", slug, ...(part ? { part, quote: "Seed", prefix: "", suffix: "" } : {}) },
+      placement: { status: "placed", location: { kind: "topic", slug, ...(part ? { part, start: 0, end: 4 } : {}) } },
+    }));
+    const { container } = mount(
+      <ThreadList
+        reviewId={id}
+        revision={2}
+        threads={threads}
+        changedBlocks={[]}
+        topics={[
+          { ...OTHER_TOPIC, importance: 3, summary: "" },
+          { slug: "garden", title: "Garden", importance: 1, summary: "" },
+        ]}
+        writeup={{ sections: slugs.map((slug) => ({ key: `t-${slug}-body`, label: slug, topic: slug, blocks: [] })) }}
+        search={{ rev: 2, tab: "comments" }}
+        phone={phone}
+        onResume={() => {}}
+      />,
     );
-  }
-});
+    for (const slug of slugs) {
+      const card = container.querySelector(`[id="thread-${slug}"]`);
+      expect(card).toBeTruthy();
+      const href = within(card as HTMLElement)
+        .getByRole("link", { name: "Show in place" })
+        .getAttribute("href");
+      expect(href).toBe(
+        slug === "garden"
+          ? `/r/${id}?rev=2&tab=writeup#thread-${slug}`
+          : `/r/${id}?rev=2&tab=${phone ? "diff" : "comments"}#diff-thread-${slug}`,
+      );
+    }
+  },
+);
 
 test("Comments group headings and collapsed span quotes render hostile input verbatim as text", () => {
   const docPath = "<img src=x onerror=alert(1)>.md";

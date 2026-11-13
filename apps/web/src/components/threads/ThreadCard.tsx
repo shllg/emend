@@ -76,10 +76,7 @@ export function threadPlaceLink(
   const params = new URLSearchParams();
   if (search.rev !== undefined) params.set("rev", String(search.rev));
   let hash = `thread-${thread.id}`;
-  if (
-    location.kind === "writeup-span" ||
-    (location.kind === "topic" && location.part && writtenTopics?.has(location.slug))
-  )
+  if (location.kind === "writeup-span" || (location.kind === "topic" && writtenTopics?.has(location.slug)))
     params.set("tab", "writeup");
   else if (location.kind === "doc-span" || location.kind === "html-span" || location.kind === "source-lines") {
     params.set("tab", "docs");

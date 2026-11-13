@@ -1747,6 +1747,29 @@ test.each([1280, 390].flatMap((pixels) => (["title", "summary"] as const).map((p
     await waitFor(() => expect(scroll.mock.instances).toContain(document.getElementById(`thread-${id}`)));
   },
 );
+test.each([1280, 390])(
+  "Show in place reaches a written whole-topic thread without diff files at %s px",
+  async (pixels) => {
+    width = pixels;
+    const target: Target = { kind: "topic", slug: "seed" };
+    currentRevision.files = [];
+    currentRevision.threads = [
+      {
+        ...placedWriteupThread(),
+        target,
+        placement: { status: "placed", location: { kind: "topic", slug: "seed" } },
+      },
+    ];
+    const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+    const { history } = mount("?tab=comments&rev=1");
+    fireEvent.click(await screen.findByRole("link", { name: "Show in place" }));
+    await screen.findByRole("heading", { name: "Topic 1: Plant a seed" });
+    expect(searchParams(history).get("tab")).toBe("writeup");
+    expect(searchParams(history).get("rev")).toBe("1");
+    expect(history.location.hash).toBe(`#thread-${id}`);
+    await waitFor(() => expect(scroll.mock.instances).toContain(document.getElementById(`thread-${id}`)));
+  },
+);
 test.each([1280, 390])("Show in place reaches a line thread, using the phone Diff tab at %s px", async (pixels) => {
   layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   width = pixels;
