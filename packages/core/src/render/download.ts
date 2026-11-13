@@ -49,7 +49,7 @@ const element = (tagName: string, children: ElementContent[] = [], properties: P
   children,
 });
 // Style text is raw HTML to the serializer, even in SVG and MathML.
-const escapeCssText = (css: string) => css.replaceAll("<", "\\3c ");
+const escapeCssText = (css: string) => css.replace(/<(?=[a-z/!?])/gi, "\\3c ");
 const style = (css: string, properties: Properties = {}) => element("style", [text(escapeCssText(css))], properties);
 const serialize = (tree: Root) =>
   String(unified().use(rehypeStringify, { allowDangerousCharacters: false }).stringify(tree));
@@ -77,7 +77,7 @@ function dataUri(asset: DownloadAsset): string {
 }
 function resolverState(resolve: DownloadResolver, inlineBudget: number = LIMITS.downloadInlineBytes) {
   const cache = new Map<string, Promise<DownloadAsset | null>>();
-  const stylesheets = new Set<string>();
+  let stylesheets = 0;
   const state = {
     tooLarge: false,
     used: 0,
@@ -108,15 +108,14 @@ function resolverState(resolve: DownloadResolver, inlineBudget: number = LIMITS.
       return result;
     },
     async stylesheet(path: string): Promise<DownloadAsset | null> {
-      if (stylesheets.has(path)) return null;
-      if (stylesheets.size >= 64) {
+      if (stylesheets >= 64) {
         state.tooLarge = true;
         return null;
       }
       const asset = await state.get(path);
       if (asset?.mediaType !== "text/css") return null;
-      // Reserve before following imports; branching imports must not multiply the same CSS.
-      stylesheets.add(path);
+      // Reserve each occurrence before following its imports, including repeated paths.
+      stylesheets++;
       return asset;
     },
   };
@@ -425,13 +424,13 @@ function cssEnd(css: string, start: number, delimiters: string): number {
       i = end < 0 ? css.length : end + 1;
     } else if (depth === 0 && delimiters.includes(char)) return i;
     else if (char === "(") depth++;
-    else if (char === ")") depth--;
+    else if (char === ")" && depth > 0) depth--;
   }
   return css.length;
 }
 function importWrappers(conditions: string): string[] {
   const wrappers: string[] = [];
-  conditions = conditions.trim();
+  conditions = conditions.replace(/\/\*[\s\S]*?(?:\*\/|$)/g, " ").trim();
   if (/^layer\b/i.test(conditions)) {
     conditions = conditions.slice(5).trimStart();
     if (conditions.startsWith("(")) {
@@ -451,19 +450,21 @@ function importWrappers(conditions: string): string[] {
 }
 const importReference =
   /^\s*(?:url\(\s*("[^"\\]*(?:\\.[^"\\]*)*"|'[^'\\]*(?:\\.[^'\\]*)*'|[^)]*)\s*\)|("[^"\\]*(?:\\.[^"\\]*)*"|'[^'\\]*(?:\\.[^'\\]*)*'))/i;
+// Unterminated strings, including a final escape, consume the rest instead of retrying at later quotes.
 const cssTokens =
-  /\/\*[\s\S]*?(?:\*\/|$)|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|@import\b|@charset\b|(?:-webkit-)?image-set\s*\(|url\s*\(/gi;
+  /\/\*[\s\S]*?(?:\*\/|$)|"(?:\\[\s\S]|[^"\\])*(?:"|\\?$)|'(?:\\[\s\S]|[^'\\])*(?:'|\\?$)|@import\b|@charset\b|(?:-webkit-)?image-set\s*\(|url\s*\(/gi;
+const imageSetTokens =
+  /\/\*[\s\S]*?(?:\*\/|$)|"(?:\\[\s\S]|[^"\\])*(?:"|\\?$)|'(?:\\[\s\S]|[^'\\])*(?:'|\\?$)|url\s*\(/gi;
 async function rewriteCss(
   css: string,
   basePath: string,
   state: AssetState,
   chain: string[] = [],
-  imageCandidate = false,
 ): Promise<string | null> {
   const checkpoint = state.used;
   const parts: string[] = [];
-  const append = (value: string) => {
-    if (!state.take(escapeCssText(value).length)) return false;
+  const append = (value: string, charged = 0) => {
+    if (!state.take(escapeCssText(value).length - charged)) return false;
     parts.push(value);
     return true;
   };
@@ -475,9 +476,31 @@ async function rewriteCss(
     const before = state.used;
     const uri = await resourceUrl(value, basePath, state, true);
     const result = uri === value ? original : quoted ? cssQuote(uri ?? "data:,") : `url(${cssQuote(uri ?? "data:,")})`;
-    if (append(result)) return true;
+    // The resolver charged the URI before allocating it; charge only the rest of the CSS here.
+    if (append(result, state.used - before)) return true;
     state.used = before;
     return append(quoted ? '"data:,"' : 'url("data:,")');
+  };
+  const appendImageSet = async (argument: string) => {
+    const references = new RegExp(imageSetTokens);
+    let offset = 0;
+    for (;;) {
+      const match = references.exec(argument);
+      if (!match) break;
+      if (!append(argument.slice(offset, match.index))) return false;
+      let end = references.lastIndex;
+      if (/^url\s*\(/i.test(match[0])) {
+        end = cssEnd(argument, end, ")");
+        const value = cssValue(argument.slice(references.lastIndex, end));
+        if (argument[end] === ")") end++;
+        if (!(await appendReference(value, false, argument.slice(match.index, end)))) return false;
+      } else if (/^['"]/.test(match[0])) {
+        if (!(await appendReference(cssValue(match[0]), true, match[0]))) return false;
+      } else if (!append(match[0])) return false;
+      offset = end;
+      references.lastIndex = end;
+    }
+    return append(argument.slice(offset));
   };
   // Each call owns its cursor; imports recurse with the imported file as their base.
   const tokens = new RegExp(cssTokens);
@@ -519,35 +542,19 @@ async function rewriteCss(
       }
     } else if (/^(?:-webkit-)?image-set\s*\(/i.test(token)) {
       end = cssEnd(css, end, ")");
-      if (!append(token)) return drop();
-      let start = tokens.lastIndex;
-      while (start < end) {
-        const comma = cssEnd(css, start, ",");
-        const stop = Math.min(comma, end);
-        const candidate = await rewriteCss(css.slice(start, stop), basePath, state, chain, true);
-        if (candidate === null) return drop();
-        parts.push(candidate);
-        if (stop < end && !append(",")) return drop();
-        start = stop + 1;
+      const argument = css.slice(tokens.lastIndex, end);
+      if (/(?:-webkit-)?image-set\s*\(/i.test(argument)) {
+        if (!append("none")) return drop();
+      } else {
+        if (!append(token) || !(await appendImageSet(argument))) return drop();
+        if (css[end] === ")" && !append(")")) return drop();
       }
-      if (css[end] === ")") {
-        if (!append(")")) return drop();
-        end++;
-      }
+      if (css[end] === ")") end++;
     } else if (/^url\s*\(/i.test(token)) {
       end = cssEnd(css, end, ")");
       const value = cssValue(css.slice(tokens.lastIndex, end));
       if (css[end] === ")") end++;
       if (!(await appendReference(value, false, css.slice(match.index, end)))) return drop();
-    } else if (
-      imageCandidate &&
-      /^['"]/.test(token) &&
-      !css
-        .slice(0, match.index)
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .trim()
-    ) {
-      if (!(await appendReference(cssValue(token), true, token))) return drop();
     } else if (!append(token)) return drop();
     offset = end;
     tokens.lastIndex = end;
@@ -563,12 +570,13 @@ function srcsetCandidates(value: string): { ref: string; descriptors: string[] }
   while (offset < value.length) {
     while (/[\s,]/.test(value[offset] ?? "")) offset++;
     const start = offset;
-    const data = /^data:/i.test(value.slice(start));
+    const data = /^data:/i.test(value.slice(start, start + 5));
     while (offset < value.length && !/\s/.test(value[offset] ?? "") && (data || value[offset] !== ",")) offset++;
-    const raw = value.slice(start, offset);
-    const ref = raw.replace(/,+$/, "");
+    let urlEnd = offset;
+    while (urlEnd > start && value[urlEnd - 1] === ",") urlEnd--;
+    const ref = value.slice(start, urlEnd);
     if (!ref) break;
-    if (raw.endsWith(",") || value[offset] === ",") {
+    if (urlEnd < offset || value[offset] === ",") {
       candidates.push({ ref, descriptors: [] });
       if (value[offset] === ",") offset++;
       continue;
@@ -582,21 +590,6 @@ function srcsetCandidates(value: string): { ref: string; descriptors: string[] }
   return candidates;
 }
 
-type Namespace = "html" | "svg" | "math";
-function namespaceOf(parent: Root | Element, tag: string, namespace: Namespace): Namespace {
-  if (parent.type === "element") {
-    const name = parent.tagName.toLowerCase();
-    if (namespace === "svg" && ["foreignobject", "desc", "title"].includes(name)) namespace = "html";
-    if (
-      namespace === "math" &&
-      ((["mi", "mo", "mn", "ms", "mtext"].includes(name) && !["mglyph", "malignmark"].includes(tag)) ||
-        (name === "annotation-xml" &&
-          /^(?:text\/html|application\/xhtml\+xml)$/i.test(String(parent.properties.encoding))))
-    )
-      namespace = "html";
-  }
-  return namespace === "html" && (tag === "math" || tag === "svg") ? tag : namespace;
-}
 const htmlRemoved = new Set([
   "script",
   "iframe",
@@ -611,6 +604,7 @@ const htmlRemoved = new Set([
   "noscript",
 ]);
 const htmlAttributes = new Set(["ping", "srcdoc", "formaction", "action", "integrity", "nonce", "download", "target"]);
+const animationTags = new Set(["set", "animate", "animatemotion", "animatetransform"]);
 export async function buildHtmlDocDownload(input: {
   html: string;
   docPath: string;
@@ -621,7 +615,7 @@ export async function buildHtmlDocDownload(input: {
   const tree = fromHtml(input.html);
   const state = resolverState(input.resolveAsset, input.inlineBudget);
   const resource = (value: string) => resourceUrl(value, input.docPath, state);
-  async function walk(parent: Root | Element, parentNamespace: Namespace = "html"): Promise<void> {
+  async function walk(parent: Root | Element): Promise<void> {
     const children: RootContent[] = [];
     for (const node of parent.children) {
       if (node.type !== "element") {
@@ -629,12 +623,17 @@ export async function buildHtmlDocDownload(input: {
         continue;
       }
       const tag = node.tagName.toLowerCase();
-      const namespace = namespaceOf(parent, tag, parentNamespace);
-      const isLink = tag === "a" || tag === "area" || namespace === "math";
+      const isLink = tag === "a" || tag === "area";
       if (htmlRemoved.has(tag) || (tag === "meta" && ("httpEquiv" in node.properties || "charSet" in node.properties)))
         continue;
+      if (animationTags.has(tag)) {
+        const attribute = String(node.properties.attributeName ?? "")
+          .trim()
+          .toLowerCase();
+        if (attribute === "href" || attribute.endsWith(":href")) continue;
+      }
       if (tag === "form") {
-        await walk(node, namespace);
+        await walk(node);
         children.push(...node.children);
         continue;
       }
@@ -666,6 +665,10 @@ export async function buildHtmlDocDownload(input: {
       ];
       for (const key of resources) {
         if (!(key in node.properties)) continue;
+        if (tag === "use" && (key === "href" || key === "xLinkHref")) {
+          if (!fragment(String(node.properties[key]))) delete node.properties[key];
+          continue;
+        }
         const value = await resource(String(node.properties[key]));
         if (value === null) delete node.properties[key];
         else node.properties[key] = value;
@@ -684,14 +687,14 @@ export async function buildHtmlDocDownload(input: {
         for (const key of ["href", "xLinkHref"]) {
           const value = String(node.properties[key] ?? "");
           if (absoluteLink(value)) node.properties.rel = rel;
-          else if (namespace === "math" || !fragment(value)) delete node.properties[key];
+          else if (!fragment(value)) delete node.properties[key];
         }
       if (tag === "style") {
         const css = await rewriteCss(hastText(node), input.docPath, state);
         if (css !== null) children.push(style(css, node.properties));
         continue;
       }
-      await walk(node, namespace);
+      await walk(node);
       children.push(node);
     }
     // A doctype belongs only to the root; fromHtml enforces this when parsing.

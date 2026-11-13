@@ -432,20 +432,24 @@ test.each([
 });
 
 test.each(
-  ["html", "md"].flatMap((kind) => ["missing", "malformed", "invalid sections"].map((stored) => ({ kind, stored }))),
-)("downloads a $kind pub with a $stored stored writeup", async ({ kind, stored }) => {
+  ["html", "md", "txt"].flatMap((kind) =>
+    ["missing", "malformed", "invalid sections"].map((stored) => ({ kind, stored })),
+  ),
+)("downloads a $kind pub without publish links when its stored writeup is $stored", async ({ kind, stored }) => {
   const hash = await f.deps.blobs.put(
     f.ownerId,
     Buffer.from(kind === "html" ? "<p>Publication content</p>" : "Publication content"),
-    kind === "html" ? "text/html" : "text/markdown",
+    kind === "html" ? "text/html" : kind === "txt" ? "text/plain" : "text/markdown",
   );
   const { reviewId } = await publish({
     writeup: blank,
+    links: [{ url: "https://example.com/publication", label: "Publication link" }],
     files: [
       {
         path: `doc.${kind}`,
         role: "doc",
         ...(kind === "html" ? { assets: [] } : {}),
+        ...(kind === "txt" ? { view: "source" as const } : {}),
         oldPath: null,
         oldBlob: null,
         newBlob: hash,
@@ -453,6 +457,7 @@ test.each(
       },
     ],
   });
+  if (kind !== "html") expect(await (await get(reviewId)).text()).toContain("Publication link");
   const revision = await f.db.read((q) =>
     q
       .select()
@@ -473,7 +478,40 @@ test.each(
   }
   const response = await get(reviewId);
   expect(response.status).toBe(200);
-  expect(await response.text()).toContain("Publication content");
+  const html = await response.text();
+  expect(html).toContain("Publication content");
+  expect(html).not.toContain("Publication link");
+  expect(html).not.toContain("https://example.com/publication");
+  expect(html).not.toContain('class="em-links"');
+});
+
+test("downloads an HTML pub without reading an unavailable stored writeup blob", async () => {
+  const hash = await f.deps.blobs.put(f.ownerId, Buffer.from("<p>HTML publication content</p>"), "text/html");
+  const { reviewId } = await publish({
+    writeup: blank,
+    links: [{ url: "https://example.com/publication", label: "Publication link" }],
+    files: [{ path: "doc.html", role: "doc", assets: [], oldPath: null, oldBlob: null, newBlob: hash, flag: null }],
+  });
+  const writeup = await f.db.read((q) =>
+    q
+      .select({ hash: writeups.renderedBlob })
+      .from(writeups)
+      .innerJoin(revisions, and(eq(revisions.ownerId, f.ownerId), eq(revisions.id, writeups.revisionId)))
+      .where(and(eq(writeups.ownerId, f.ownerId), eq(revisions.reviewId, reviewId)))
+      .get(),
+  );
+  if (!writeup) throw new Error("Missing writeup row");
+  const read = f.deps.blobs.get.bind(f.deps.blobs);
+  const reads = vi.spyOn(f.deps.blobs, "get").mockImplementation(async (ownerId, sha, q) => {
+    if (sha === writeup.hash) return null;
+    return read(ownerId, sha, q);
+  });
+  const response = await get(reviewId);
+  expect(response.status).toBe(200);
+  const html = await response.text();
+  expect(html).toContain("HTML publication content");
+  expect(html).not.toContain("Publication link");
+  expect(reads.mock.calls.map(([, sha]) => sha)).toEqual([hash]);
 });
 
 test("adds an emend header to Markdown and source pubs while preserving an HTML pub's own header", async () => {

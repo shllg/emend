@@ -197,7 +197,8 @@ highlighted tokens. Code reviews and Markdown and source pubs get the emend head
 review title, project, branch and publish links. An HTML pub keeps the agent's HTML as is, with
 no emend header. Its listed assets are built in and its scripts are left out.
 Mermaid diagrams show as labelled source text. Links to other docs become plain text.
-Absolute HTTP, HTTPS and mailto links keep working.
+Absolute HTTP, HTTPS and mailto links keep working on `a` and `area` elements.
+Other elements' hrefs follow the resource rules.
 
 The response is `200` with `Content-Type: text/html; charset=utf-8`,
 `Content-Disposition: attachment; filename="<name>"`, `X-Content-Type-Options: nosniff`,
@@ -211,8 +212,9 @@ replaces the app CSP for this route. The file also has a CSP meta with the same 
 At most 128 MiB of built-in content is emitted. Every copy of a data URL counts its full length,
 and every inlined CSS text counts its length each time it is emitted. The server also reads at
 most 128 MiB of distinct stored assets. When content would pass either budget, it is left out.
-Each CSS path is inlined at most once per file, across imports and stylesheet links. At most
-64 stylesheets are inlined. Further stylesheets are left out with the same size note.
+At most 64 stylesheet occurrences are inlined, across imports and stylesheet links. Repeated
+paths count each time and keep their own conditions. Further stylesheets are left out with the
+same size note. Imports stop at depth 4 and never repeat a path in the same chain.
 One visible note says:
 "Some images or files were left out because the download would pass 128 MiB."
 The file holds no server address, emend link, sign-in link, token or machine name.

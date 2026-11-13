@@ -475,7 +475,7 @@ test.each([
   }
 });
 
-test("applies link rules to areas and MathML and resource rules to all other hrefs", async () => {
+test("applies link rules only to anchors and areas and resource rules to all other hrefs", async () => {
   const html = await htmlDoc(
     '<html manifest="offline.appcache"><body background="https://evil.example/x.png"><map><area href="other.html"><area href="https://example.com"></map><svg><a xlink:href="javascript:alert(1)">X</a><pattern href="https://example.com/p.svg"/><linearGradient xlink:href="https://example.com/g.svg"/><textPath href="https://example.com/t.svg"/><pattern href="icon.svg#x"/></svg><math><mi href="https://example.com">x</mi><mi href="other.html">y</mi><mi href="#local">z</mi></math></body></html>',
     { "docs/icon.svg": { mediaType: "image/svg+xml", bytes: new Uint8Array([1]) } },
@@ -488,9 +488,9 @@ test("applies link rules to areas and MathML and resource rules to all other hre
     "https://example.com",
   ]);
   expect(nodes.filter((el) => el.tagName === "mi").map((el) => el.properties.href)).toEqual([
-    "https://example.com",
     undefined,
     undefined,
+    "#local",
   ]);
   for (const el of nodes.filter((el) => el.properties.href === "https://example.com"))
     expect(el.properties.rel).toEqual(["noopener", "noreferrer", "nofollow"]);
@@ -571,18 +571,15 @@ test("applies resource rules to src on MathML and unknown elements in every name
   expect(resolveAsset).toHaveBeenCalledExactlyOnceWith("docs/glyph.png");
 });
 
-test.each(["image-set", "-webkit-image-set"])(
-  "rewrites quoted %s candidates without rewriting type strings",
-  async (fn) => {
-    const html = await htmlDoc(
-      `<style>p{background:${fn}("a.png" 1x type("image/png"), url(b.png) 2x, 'https://example.com/c.png' 3x)}</style>`,
-      { "docs/a.png": png, "docs/b.png": png },
-    ).result;
-    expect(html).toContain(
-      `${fn}("data:image/png;base64,AQID" 1x type("image/png"), url("data:image/png;base64,AQID") 2x, "data:," 3x)`,
-    );
-  },
-);
+test.each(["image-set", "-webkit-image-set"])("rewrites every quoted string and URL in %s arguments", async (fn) => {
+  const html = await htmlDoc(
+    `<style>p{background:${fn}("a.png" 1x type("image/png"), url(b.png) 2x, 'https://example.com/c.png' 3x)}</style>`,
+    { "docs/a.png": png, "docs/b.png": png },
+  ).result;
+  expect(html).toContain(
+    `${fn}("data:image/png;base64,AQID" 1x type("data:,"), url("data:image/png;base64,AQID") 2x, "data:," 3x)`,
+  );
+});
 
 test("keeps author media data URLs across resource attributes and srcset candidates", async () => {
   const uri = "data:image/png;base64,AQID";
@@ -614,7 +611,7 @@ test("counts retained author data URLs against the inline budget", async () => {
 test("preserves the original fragments on built-in HTML and CSS asset references", async () => {
   const asset = { mediaType: "image/svg+xml", bytes: new Uint8Array([1]) };
   const { result, resolveAsset } = htmlDoc(
-    '<svg><use href="icons.svg#check"/></svg><style>p{filter:url(icons.svg?theme=dark#bl%75r)}</style>',
+    '<svg><image href="icons.svg#check"/></svg><style>p{filter:url(icons.svg?theme=dark#bl%75r)}</style>',
     { "docs/icons.svg": asset },
   );
   const html = await result;
@@ -630,7 +627,7 @@ test("resolves quoted image-set candidates after CSS comments", async () => {
   expect(html).toContain('image-set(/* preview */ "data:image/png;base64,AQID" 1x)');
 });
 
-test("inlines each CSS file once across a repeated import tree and stylesheet links", async () => {
+test("bounds a repeated import tree to 64 stylesheet occurrences with a size note", async () => {
   const assets: Record<string, ResolveResult> = {};
   for (let level = 0; level < 4; level++) {
     const imports = level < 3 ? `@import "level-${level + 1}.css";`.repeat(24) : "";
@@ -641,22 +638,28 @@ test("inlines each CSS file once across a repeated import tree and stylesheet li
     assets,
   );
   const html = await result;
-  for (let level = 0; level < 4; level++) expect(html.split(`.level-${level}{`).length - 1).toBe(1);
+  expect(html.match(/\.level-\d\{/g)).toHaveLength(64);
   expect(parsed(html).filter((el) => el.tagName === "style")).toHaveLength(1);
   expect(resolveAsset).toHaveBeenCalledTimes(4);
   expect(html).not.toContain("@import");
-  expect(html).not.toContain("Some images or files were left out");
-  expect(html.length).toBeLessThan(1500);
+  expect(html.match(/Some images or files were left out/g)).toHaveLength(1);
+  expect(html.length).toBeLessThan(4000);
 });
 
-test("drops later imports of a stylesheet already inlined by a link", async () => {
+test("inlines repeated stylesheet links and imports with their own media and layer conditions", async () => {
   const { result, resolveAsset } = htmlDoc(
-    '<link rel="stylesheet" href="site.css"><link rel="stylesheet" href="site.css"><style>@import "site.css";</style>',
-    { "docs/site.css": css("p{color:green}") },
+    '<link rel="stylesheet" href="shared.css" media="print"><link rel="stylesheet" href="shared.css" media="screen"><style>@import "shared.css" layer(ui);</style>',
+    { "docs/shared.css": css("p{color:green}") },
   );
   const html = await result;
-  expect(html.split("p{color:green}").length - 1).toBe(1);
-  expect(resolveAsset).toHaveBeenCalledExactlyOnceWith("docs/site.css");
+  const styles = parsed(html).filter((el) => el.tagName === "style");
+  expect(styles.map((el) => el.properties.media)).toEqual(["print", "screen", undefined]);
+  expect(styles.map((el) => hastText(el))).toEqual([
+    "p{color:green}",
+    "p{color:green}",
+    "@layer ui { p{color:green} }",
+  ]);
+  expect(resolveAsset).toHaveBeenCalledExactlyOnceWith("docs/shared.css");
   expect(html).not.toContain("Some images or files were left out");
 });
 
@@ -730,3 +733,200 @@ test("turns protocol-relative writeup links into plain text", async () => {
   expect(span && hastText(span)).toBe("External text");
   expect(html).not.toContain("//attacker.example");
 });
+
+test("replaces 2000 nested image-set openers and 100 KB of filler with none within 10 seconds", async () => {
+  const start = Date.now();
+  const { result, resolveAsset } = htmlDoc(
+    `<style>i{background:${"image-set(".repeat(2000)}${"x".repeat(100_000)}${")".repeat(2000)}}p{color:green}</style>`,
+  );
+  const html = await result;
+  expect(Date.now() - start).toBeLessThan(10_000);
+  expect(html).toContain("<style>i{background:none}p{color:green}</style>");
+  expect(resolveAsset).not.toHaveBeenCalled();
+}, 15_000);
+
+test("rewrites 5000 image-set rules within 10 seconds and resolves each candidate path once", async () => {
+  const start = Date.now();
+  const { result, resolveAsset } = htmlDoc(
+    `<style>${'i{background:image-set("missing.png" 1x)}'.repeat(5000)}</style>`,
+  );
+  const html = await result;
+  expect(Date.now() - start).toBeLessThan(10_000);
+  expect(html).toContain(`<style>${'i{background:image-set("data:," 1x)}'.repeat(5000)}</style>`);
+  expect(resolveAsset).toHaveBeenCalledExactlyOnceWith("docs/missing.png");
+}, 15_000);
+
+test("preserves image-set asset fragments and author data URLs while charging every copy", async () => {
+  const uri = "data:image/png;base64,AQID";
+  const resolveAsset = vi.fn(async () => png);
+  const source = `i{background:image-set("a.png#part" 1x, url(a.png#part) 2x, "${uri}" 3x)}`;
+  const html = await buildHtmlDocDownload({
+    html: `<style>${source}</style>`,
+    title: "Budget",
+    docPath: "doc.html",
+    resolveAsset,
+  });
+  expect(html).toContain(`image-set("${uri}#part" 1x, url("${uri}#part") 2x, "${uri}" 3x)`);
+  expect(resolveAsset).toHaveBeenCalledExactlyOnceWith("a.png");
+  const largeUri = `data:image/png;base64,${"A".repeat(1024)}`;
+  const limited = await buildHtmlDocDownload({
+    html: `<style>${`i{background:image-set("${largeUri}" 1x)}`.repeat(5)}</style>`,
+    title: "Budget",
+    docPath: "doc.html",
+    inlineBudget: 2400,
+    resolveAsset,
+  });
+  expect(limited.match(/data:image\/png/g)).toHaveLength(2);
+  expect(limited).toContain('image-set("data:," 1x)');
+  expect(limited).toContain("Some images or files were left out");
+});
+
+test("keeps CSS less-than and less-than-or-equal range comparisons intact", async () => {
+  const source = "@media (width < 600px){p{color:green}}@media (width <= 600px){p{color:red}}";
+  const html = await htmlDoc(`<style>${source}</style>`).result;
+  expect(html).toContain(`<style>${source}</style>`);
+});
+
+test("escapes HTML token openers in CSS without creating elements on reparse", async () => {
+  const payload = '<meta http-equiv="refresh" content="0;url=https://evil.example/"></style><!-- --><?x></p>';
+  const html = await htmlDoc('<link rel="stylesheet" href="site.css">', { "docs/site.css": css(payload) }).result;
+  for (const opener of ["meta", "/style", "!--", "?x", "/p"]) expect(html).toContain(`\\3c ${opener}`);
+  const nodes = parsed(html);
+  expect(nodes.some((el) => ["p", "script", "img"].includes(el.tagName))).toBe(false);
+  expect(nodes.filter((el) => el.tagName === "meta" && el.properties.httpEquiv)).toMatchObject([
+    { properties: { httpEquiv: ["Content-Security-Policy"], content: DOWNLOAD_FILE_CSP } },
+  ]);
+  const styles = nodes.filter((el) => el.tagName === "style");
+  expect(styles).toHaveLength(1);
+  expect(styles[0]?.children.every((node) => node.type === "text")).toBe(true);
+});
+
+test("inlines listed SVG images inside MathML annotation-xml and removes remote hrefs", async () => {
+  const { result, resolveAsset } = htmlDoc(
+    '<math><annotation-xml><svg><image href="chart.png"/><image href="https://evil.example/x.png"/></svg></annotation-xml><mi href="https://example.com/">x</mi></math>',
+    { "docs/chart.png": png },
+  );
+  const nodes = parsed(await result);
+  expect(nodes.filter((el) => el.tagName === "image").map((el) => el.properties.href)).toEqual([
+    "data:image/png;base64,AQID",
+    undefined,
+  ]);
+  expect(nodes.find((el) => el.tagName === "mi")?.properties).not.toHaveProperty("href");
+  expect(resolveAsset).toHaveBeenCalledExactlyOnceWith("docs/chart.png");
+});
+
+test("ignores comments between import conditions when building wrappers", async () => {
+  const html = await htmlDoc('<style>@import "a.css" layer(ui) /* note */ supports(display:grid);</style>', {
+    "docs/a.css": css("p{color:green}"),
+  }).result;
+  expect(html).toContain("@layer ui { @supports (display:grid) { p{color:green} } }");
+  expect(html).not.toContain("@media");
+});
+
+test("keeps rules after an import with an unmatched closing parenthesis", async () => {
+  const html = await htmlDoc('<style>@import "missing.css"); p{color:green}</style>').result;
+  expect(html).toContain("p{color:green}");
+  expect(html).not.toContain("@import");
+});
+
+test.each(["element", "attribute"])(
+  "rewrites 8 MiB of adversarial CSS in a style %s within 15 seconds",
+  async (placement) => {
+    const nested = `i{background:${"image-set(".repeat(3000)}"nested.png"${")".repeat(3000)}}`;
+    const rules = 'i{background:image-set("missing.png" 1x)}'.repeat(5000);
+    const strings = `i{background:image-set(${'"missing.png" '.repeat(5000)}1x)}`;
+    const unterminated = `"a${'\\"'.repeat(40_000)}`;
+    const prefix = nested + rules + strings;
+    const filler = "x".repeat(8 * 1024 * 1024 - prefix.length - unterminated.length - 4);
+    const source = `${prefix}/*${filler}*/${unterminated}`;
+    const input = placement === "element" ? `<style>${source}</style>` : `<div style='${source}'></div>`;
+    const start = Date.now();
+    const { result, resolveAsset } = htmlDoc(input);
+    const html = await result;
+    expect(Date.now() - start).toBeLessThan(15_000);
+    expect(html).toContain("background:none");
+    expect(html).not.toContain("nested.png");
+    expect(html.match(/data:,/g)).toHaveLength(10_000);
+    expect(resolveAsset).toHaveBeenCalledExactlyOnceWith("docs/missing.png");
+  },
+  20_000,
+);
+
+test.each(['"', "'"])("keeps unterminated %s strings with a final escape in one token", async (quote) => {
+  const source = `${quote}a${`\\${quote}`.repeat(40_000)}\\`;
+  const { result, resolveAsset } = htmlDoc(`<style>${source}</style>`);
+  const html = await result;
+  expect(html).toContain(`<style>${source}</style>`);
+  expect(resolveAsset).not.toHaveBeenCalled();
+});
+
+test("keeps commas inside data srcset payloads and trims only trailing separators", async () => {
+  const uri = `data:image/png,${",".repeat(40_000)}tail`;
+  const { result, resolveAsset } = htmlDoc(`<img srcset="${uri}, a.png 2x">`, { "docs/a.png": png });
+  const img = parsed(await result).find((el) => el.tagName === "img");
+  expect(img?.properties.srcSet).toBe(`${uri}, data:image/png;base64,AQID 2x`);
+  expect(resolveAsset).toHaveBeenCalledExactlyOnceWith("docs/a.png");
+});
+
+test("removes SMIL elements that would give an SVG anchor a link target", async () => {
+  const html = await htmlDoc(
+    '<svg><a><set attributeName="href" to="//attacker.example/share"/><animate attributeName="xlink:href" values="other-doc.html"/><text y="20">click</text></a></svg>',
+  ).result;
+  const nodes = parsed(html);
+  expect(nodes.some((el) => ["set", "animate"].includes(el.tagName))).toBe(false);
+  const anchor = nodes.find((el) => el.tagName === "a");
+  expect(anchor?.properties).not.toHaveProperty("href");
+  expect(anchor?.properties).not.toHaveProperty("xLinkHref");
+  expect(anchor && hastText(anchor)).toBe("click");
+});
+
+test.each(["set", "animate", "animateMotion", "animateTransform"])(
+  "removes %s href changes after normalizing attributeName and preserves unrelated animation",
+  async (tag) => {
+    const html = await htmlDoc(
+      `<svg><${tag} attributeName=" XLINK:HREF " to="https://example.com"/><${tag} attributeName="x" to="20"/></svg>`,
+    ).result;
+    const animations = parsed(html).filter((el) => el.tagName.toLowerCase() === tag.toLowerCase());
+    expect(animations).toHaveLength(1);
+    expect(animations[0]?.properties.attributeName).toBe("x");
+  },
+);
+
+test.each(["href", "xlink:href"])("keeps only same-document fragments on SVG use %s", async (attribute) => {
+  const { result, resolveAsset } = htmlDoc(
+    `<svg><use ${attribute}="s.svg#icon"/><use ${attribute}="data:image/svg+xml,%3Csvg%3E%3C/svg%3E#x"/><use ${attribute}="#local"/></svg>`,
+    { "docs/s.svg": { mediaType: "image/svg+xml", bytes: new TextEncoder().encode("<svg/>") } },
+  );
+  const property = attribute === "href" ? "href" : "xLinkHref";
+  expect(
+    parsed(await result)
+      .filter((el) => el.tagName === "use")
+      .map((el) => el.properties[property]),
+  ).toEqual([undefined, undefined, "#local"]);
+  expect(resolveAsset).not.toHaveBeenCalled();
+});
+
+test.each(["asset", "author data URL"])(
+  "charges each CSS %s once so seven copies fit just as in images",
+  async (kind) => {
+    const uri = `data:image/png;base64,${"A".repeat(133_336)}`;
+    const reference = kind === "asset" ? "a.png" : uri;
+    for (const input of [
+      `<style>${`i{background:url("${reference}")}`.repeat(10)}</style>`,
+      `<img src="${reference}">`.repeat(10),
+    ]) {
+      const resolveAsset = vi.fn(async () => ({ mediaType: "image/png", bytes: new Uint8Array(100_000) }));
+      const html = await buildHtmlDocDownload({
+        html: input,
+        title: "Budget",
+        docPath: "doc.html",
+        inlineBudget: 1_000_000,
+        resolveAsset,
+      });
+      expect(html.match(/data:image\/png/g)).toHaveLength(7);
+      expect(html).toContain("Some images or files were left out");
+      expect(html.length).toBeLessThan(1_001_000);
+      expect(resolveAsset).toHaveBeenCalledTimes(kind === "asset" ? 1 : 0);
+    }
+  },
+);
