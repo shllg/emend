@@ -37,6 +37,7 @@ test("review views validate their states, limits, rendered blocks and doc varian
   expect(
     contract.InboxList.safeParse({
       approvedActiveHours: 12,
+      approvedActiveLimit: 5,
       serverTime: "2026-11-04T10:00:00.000Z",
       items: Array.from({ length: 600 }, () => item),
     }).success,
@@ -44,6 +45,7 @@ test("review views validate their states, limits, rendered blocks and doc varian
   expect(
     contract.InboxList.safeParse({
       approvedActiveHours: 12,
+      approvedActiveLimit: 5,
       serverTime: "2026-11-04T10:00:00.000Z",
       items: Array.from({ length: 601 }, () => item),
     }).success,

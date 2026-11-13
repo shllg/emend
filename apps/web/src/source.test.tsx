@@ -108,6 +108,7 @@ beforeEach(() => {
       if (url === "/api/v1/reviews")
         return Response.json({
           approvedActiveHours: 12,
+          approvedActiveLimit: 5,
           serverTime: new Date(Date.now()).toISOString(),
           items: [review],
         });

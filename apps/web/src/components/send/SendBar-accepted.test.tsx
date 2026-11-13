@@ -84,6 +84,7 @@ beforeEach(() => {
         return Response.json({
           items: [server],
           approvedActiveHours: 12,
+          approvedActiveLimit: 5,
           serverTime: new Date(Date.now() + serverOffset).toISOString(),
         });
       }
@@ -425,6 +426,7 @@ test.each(["Send", "Approve"] as const)("a fetch that started before the accepte
   const received = client.getQueryData<InboxData>(["inbox"]);
   expect(received).toMatchObject({
     approvedActiveHours: 12,
+    approvedActiveLimit: 5,
     serverTime: new Date(Date.now() + serverOffset).toISOString(),
     receivedAt: Date.now(),
     receivedMono: performance.now(),
@@ -446,7 +448,12 @@ test.each(["Send", "Approve"] as const)("a fetch that started before the accepte
     fetch.resolve(
       Response.json(
         fetch.url === "/api/v1/reviews"
-          ? { items: [before], approvedActiveHours: 12, serverTime: new Date(Date.now() + serverOffset).toISOString() }
+          ? {
+              items: [before],
+              approvedActiveHours: 12,
+              approvedActiveLimit: 5,
+              serverTime: new Date(Date.now() + serverOffset).toISOString(),
+            }
           : before,
       ),
     );
@@ -479,7 +486,12 @@ test.each(["Send", "Approve"] as const)("a fetch that started before the accepte
     fetch.resolve(
       Response.json(
         fetch.url === "/api/v1/reviews"
-          ? { items: [after], approvedActiveHours: 12, serverTime: new Date(Date.now() + serverOffset).toISOString() }
+          ? {
+              items: [after],
+              approvedActiveHours: 12,
+              approvedActiveLimit: 5,
+              serverTime: new Date(Date.now() + serverOffset).toISOString(),
+            }
           : after,
       ),
     );
@@ -550,7 +562,12 @@ test.each([undefined, 24])("accepted approval uses zero settings hours before in
   await mount();
   if (inboxHours !== undefined) client.setQueryData(["inbox"], { approvedActiveHours: inboxHours, items: [server] });
   else expect(client.getQueryData(["inbox"])).toBeUndefined();
-  client.setQueryData(["settings"], { approvedActiveHours: hoursSetting(0), keys: defaultKeys, serverTime: at(0) });
+  client.setQueryData(["settings"], {
+    approvedActiveHours: hoursSetting(0),
+    approvedActiveLimit: { ...hoursSetting(5), default: 5 },
+    keys: defaultKeys,
+    serverTime: at(0),
+  });
   mode = "held";
   approve("Approve revision 3");
   await settle();
@@ -571,6 +588,7 @@ test.each(["settings", "inbox"])("accepted approval uses the %s window the serve
   );
   client.setQueryData(["settings"], {
     approvedActiveHours: hoursSetting(0),
+    approvedActiveLimit: { ...hoursSetting(5), default: 5 },
     keys: defaultKeys,
     serverTime: at(newer === "settings" ? 0 : -60_000),
   });
@@ -593,7 +611,12 @@ test("consecutive approvals before a refetch keep the newer settings window", as
     ["inbox"],
     (data) => data && { ...data, approvedActiveHours: 24, serverTime: at(-60_000) },
   );
-  client.setQueryData(["settings"], { approvedActiveHours: hoursSetting(0), keys: defaultKeys, serverTime: at(0) });
+  client.setQueryData(["settings"], {
+    approvedActiveHours: hoursSetting(0),
+    approvedActiveLimit: { ...hoursSetting(5), default: 5 },
+    keys: defaultKeys,
+    serverTime: at(0),
+  });
   mode = "held";
   for (const round of [1, 2]) {
     approve("Approve revision 3");
@@ -609,4 +632,105 @@ test("consecutive approvals before a refetch keep the newer settings window", as
     client.setQueryData<InboxData>(["inbox"], (data) => data && { ...data, items: [server] });
     await settle();
   }
+});
+
+test.each([0, 5, undefined])("accepted approval uses cached inbox cap %s", async (limit) => {
+  server = { ...base, unsentCount: 0 };
+  await mount(<Inbox />);
+  client.setQueryData<InboxData>(["inbox"], (data) => data && { ...data, approvedActiveLimit: limit as number });
+  mode = "held";
+  approve("Approve revision 3");
+  await settle();
+  const expected = {
+    state: "approved",
+    list: limit === 0 ? "done" : "active",
+    activeUntil: limit === 0 ? null : new Date(Date.now() + APPROVED_ACTIVE_HOURS * 3_600_000).toISOString(),
+  };
+  expect(client.getQueryData<InboxData>(["inbox"])?.items[0]).toMatchObject(expected);
+  expect(client.getQueryData<ReviewView>(["review", reviewId])).toMatchObject(expected);
+});
+
+test.each([
+  { newer: "settings", settingsLimit: 0, inboxLimit: 5, done: true },
+  { newer: "settings", settingsLimit: 5, inboxLimit: 0, done: false },
+  { newer: "inbox", settingsLimit: 0, inboxLimit: 5, done: false },
+  { newer: "inbox", settingsLimit: 5, inboxLimit: 0, done: true },
+])(
+  "accepted approval uses the $newer cap (settings=$settingsLimit, inbox=$inboxLimit)",
+  async ({ newer, settingsLimit, inboxLimit, done }) => {
+    server = { ...base, unsentCount: 0 };
+    await mount(<Inbox />);
+    client.setQueryData<InboxData>(
+      ["inbox"],
+      (data) => data && { ...data, approvedActiveLimit: inboxLimit, serverTime: at(newer === "inbox" ? 0 : -60_000) },
+    );
+    client.setQueryData(["settings"], {
+      approvedActiveHours: hoursSetting(12),
+      approvedActiveLimit: { ...hoursSetting(settingsLimit), default: 5 },
+      keys: defaultKeys,
+      serverTime: at(newer === "settings" ? 0 : -60_000),
+    });
+    mode = "held";
+    approve("Approve revision 3");
+    await settle();
+    const expected = {
+      state: "approved",
+      list: done ? "done" : "active",
+      activeUntil: done
+        ? null
+        : new Date(Date.now() + (newer === "settings" ? -60_000 : 0) + APPROVED_ACTIVE_HOURS * 3_600_000).toISOString(),
+    };
+    expect(client.getQueryData<InboxData>(["inbox"])?.items[0]).toMatchObject(expected);
+    expect(client.getQueryData<ReviewView>(["review", reviewId])).toMatchObject(expected);
+  },
+);
+
+test("accepted approval uses a zero settings cap before the inbox is loaded", async () => {
+  server = { ...base, unsentCount: 0 };
+  await mount();
+  expect(client.getQueryData(["inbox"])).toBeUndefined();
+  client.setQueryData(["settings"], {
+    approvedActiveHours: hoursSetting(12),
+    approvedActiveLimit: { ...hoursSetting(0), default: 5 },
+    keys: defaultKeys,
+    serverTime: at(0),
+  });
+  mode = "held";
+  approve("Approve revision 3");
+  await settle();
+  expect(client.getQueryData<ReviewView>(["review", reviewId])).toMatchObject({
+    state: "approved",
+    list: "done",
+    activeUntil: null,
+  });
+});
+
+test("a zero settings cap moves an accepted approval to Done while the inbox refetch stalls", async () => {
+  server = { ...base, unsentCount: 0 };
+  serverOffset = 2 * 3_600_000;
+  await mount(<Inbox />);
+  const done = {
+    ...base,
+    id: "22222222-2222-4222-8222-222222222222",
+    state: "settled" as const,
+    list: "done" as const,
+    updatedAt: at(-60_000),
+  };
+  client.setQueryData<InboxData>(["inbox"], (data) => data && { ...data, items: [server, done] });
+  client.setQueryData(["settings"], {
+    approvedActiveHours: hoursSetting(12),
+    approvedActiveLimit: { ...hoursSetting(0), default: 5 },
+    keys: defaultKeys,
+    serverTime: at(serverOffset),
+  });
+  mode = "held";
+  approve("Approve revision 3");
+  await settle();
+  const expected = { state: "approved", list: "done", activeUntil: null };
+  const cached = client.getQueryData<InboxData>(["inbox"]);
+  expect(cached?.items.map((item) => item.id)).toEqual([reviewId, done.id]);
+  expect(cached?.items[0]).toMatchObject(expected);
+  expect(client.getQueryData<ReviewView>(["review", reviewId])).toMatchObject(expected);
+  expect(held.some(({ url }) => url === "/api/v1/reviews")).toBe(true);
+  expect(client.getQueryState(["inbox"])?.fetchStatus).toBe("fetching");
 });

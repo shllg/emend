@@ -1,5 +1,6 @@
 import {
   APPROVED_ACTIVE_HOURS,
+  APPROVED_ACTIVE_LIMIT,
   type InboxItem,
   type RetireRequest,
   type ReviewView,
@@ -132,8 +133,14 @@ function applyAccepted(client: QueryClient, reviewId: string, { kind, revision }
   const inboxHours = inbox?.approvedActiveHours;
   const useSettings = settingsHours !== undefined && (inboxHours === undefined || !(settingsTime < inboxTime));
   const approvedActiveHours = (useSettings ? settingsHours : inboxHours) ?? APPROVED_ACTIVE_HOURS;
+  const settingsLimit = settings?.approvedActiveLimit?.value;
+  const inboxLimit = inbox?.approvedActiveLimit;
+  const useSettingsLimit = settingsLimit !== undefined && (inboxLimit === undefined || !(settingsTime < inboxTime));
+  const approvedActiveLimit = (useSettingsLimit ? settingsLimit : inboxLimit) ?? APPROVED_ACTIVE_LIMIT;
   const activeUntil =
-    approvedActiveHours === 0 ? null : new Date(estimate + approvedActiveHours * 3_600_000).toISOString();
+    approvedActiveHours === 0 || approvedActiveLimit === 0
+      ? null
+      : new Date(estimate + approvedActiveHours * 3_600_000).toISOString();
   const change = <T extends InboxItem>(item: T): T =>
     kind === "approve"
       ? {

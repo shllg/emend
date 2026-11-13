@@ -1,8 +1,11 @@
 import {
   ApprovedActiveHours,
+  ApprovedActiveLimit,
   type BinItem,
   type HoursSetting,
+  type LimitSetting,
   MAX_APPROVED_ACTIVE_HOURS,
+  MAX_APPROVED_ACTIVE_LIMIT,
   SettingsView,
 } from "@emend/contract";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -19,9 +22,34 @@ import { useToast } from "../components/ui/Toast.tsx";
 import { plural } from "../lib/count.ts";
 import { relativeTime } from "../lib/time.ts";
 
-const hours = (value: number) => `${value} ${value === 1 ? "hour" : "hours"}`;
+const numericSettings = {
+  approvedActiveHours: {
+    schema: ApprovedActiveHours,
+    max: MAX_APPROVED_ACTIVE_HOURS,
+    label: "Keep approved reviews in Active for",
+    unit: "hour",
+    validation: "Enter whole hours from 0 to 720.",
+    noteId: "approved-hours-note",
+  },
+  approvedActiveLimit: {
+    schema: ApprovedActiveLimit,
+    max: MAX_APPROVED_ACTIVE_LIMIT,
+    label: "Show at most this many approved reviews in Active",
+    unit: "review",
+    validation: `Enter a whole number from 0 to ${MAX_APPROVED_ACTIVE_LIMIT}.`,
+    noteId: "approved-limit-note",
+  },
+};
 
-function InboxSettings({ setting }: { setting: HoursSetting }) {
+function NumericSettingField({
+  name,
+  setting,
+}: {
+  name: keyof typeof numericSettings;
+  setting: HoursSetting | LimitSetting;
+}) {
+  const options = numericSettings[name];
+  const format = (value: number) => `${value} ${plural(value, options.unit)}`;
   const client = useQueryClient();
   const [draft, setDraft] = useState<string>();
   const [error, setError] = useState<string>();
@@ -31,8 +59,7 @@ function InboxSettings({ setting }: { setting: HoursSetting }) {
   const changed = draft !== undefined && (value === "" ? null : Number(value)) !== setting.override;
   const mutation = useMutation({
     scope: { id: "settings" },
-    mutationFn: (approvedActiveHours: number | null) =>
-      patch("/api/v1/settings", { approvedActiveHours }, SettingsView),
+    mutationFn: (value: number | null) => patch("/api/v1/settings", { [name]: value }, SettingsView),
     onSuccess: async (view) => {
       await client.cancelQueries({ queryKey: ["settings"] });
       client.setQueryData(["settings"], view);
@@ -44,71 +71,80 @@ function InboxSettings({ setting }: { setting: HoursSetting }) {
   });
   function save() {
     if (mutation.isPending) return;
-    const parsed = ApprovedActiveHours.safeParse(Number(value));
+    const parsed = options.schema.safeParse(Number(value));
     if (input.current?.validity.badInput || (value !== "" && (!/^\d+$/.test(value) || !parsed.success))) {
-      setError("Enter whole hours from 0 to 720.");
+      setError(options.validation);
       return;
     }
     if (changed) mutation.mutate(value === "" ? null : Number(value));
   }
   return (
+    <form
+      noValidate
+      onSubmit={(event) => {
+        event.preventDefault();
+        save();
+      }}
+    >
+      <div className="flex flex-wrap items-end gap-3">
+        <TextField
+          ref={input}
+          label={options.label}
+          type="number"
+          min={0}
+          max={options.max}
+          step={1}
+          inputMode="numeric"
+          placeholder={format(setting.default)}
+          value={value}
+          disabled={mutation.isPending}
+          error={error}
+          aria-describedby={options.noteId}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            setError(event.target.validity.badInput ? options.validation : undefined);
+          }}
+        />
+        <span className="pb-2 text-14 text-fg-3">{value === "1" ? options.unit : `${options.unit}s`}</span>
+        <Button type="submit" variant="primary" disabled={!changed || mutation.isPending}>
+          Save
+        </Button>
+        {setting.source === "override" && (
+          <Button type="button" disabled={mutation.isPending} onClick={() => mutation.mutate(null)}>
+            Reset
+          </Button>
+        )}
+      </div>
+      <div id={options.noteId} className="mt-2 text-14 text-fg-3">
+        <p>
+          {setting.source === "default"
+            ? "Default."
+            : setting.source === "file"
+              ? "From the config file."
+              : "Set here."}
+        </p>
+        {setting.source === "override" && setting.file !== null && <p>The config file says {format(setting.file)}.</p>}
+        {setting.fileError && <p>The config file's value can't be used, so it is ignored.</p>}
+      </div>
+      {mutation.isError && (
+        <p role="alert" className="mt-2 text-14 text-fg-3">
+          Could not save settings. Try again.
+        </p>
+      )}
+    </form>
+  );
+}
+
+function InboxSettings({ settings }: { settings: SettingsView }) {
+  return (
     <section aria-labelledby="inbox-settings" className="mt-6">
       <h2 id="inbox-settings" className="mb-4 text-16 font-semibold">
         Inbox
       </h2>
-      <form
-        noValidate
-        onSubmit={(event) => {
-          event.preventDefault();
-          save();
-        }}
-      >
-        <div className="flex flex-wrap items-end gap-3">
-          <TextField
-            ref={input}
-            label="Keep approved reviews in Active for"
-            type="number"
-            min={0}
-            max={MAX_APPROVED_ACTIVE_HOURS}
-            step={1}
-            inputMode="numeric"
-            placeholder={hours(setting.default)}
-            value={value}
-            disabled={mutation.isPending}
-            error={error}
-            aria-describedby="approved-hours-note"
-            onChange={(event) => {
-              setDraft(event.target.value);
-              setError(event.target.validity.badInput ? "Enter whole hours from 0 to 720." : undefined);
-            }}
-          />
-          <span className="pb-2 text-14 text-fg-3">{value === "1" ? "hour" : "hours"}</span>
-          <Button type="submit" variant="primary" disabled={!changed || mutation.isPending}>
-            Save
-          </Button>
-          {setting.source === "override" && (
-            <Button type="button" disabled={mutation.isPending} onClick={() => mutation.mutate(null)}>
-              Reset
-            </Button>
-          )}
-        </div>
-        <div id="approved-hours-note" className="mt-2 text-14 text-fg-3">
-          <p>
-            {setting.source === "default"
-              ? "Default."
-              : setting.source === "file"
-                ? "From the config file."
-                : "Set here."}
-          </p>
-          {setting.source === "override" && setting.file !== null && <p>The config file says {hours(setting.file)}.</p>}
-          {setting.fileError && <p>The config file's value can't be used, so it is ignored.</p>}
-        </div>
-        {mutation.isError && (
-          <p role="alert" className="mt-2 text-14 text-fg-3">
-            Could not save settings. Try again.
-          </p>
-        )}
-      </form>
+      <div className="flex flex-col gap-6">
+        <NumericSettingField name="approvedActiveHours" setting={settings.approvedActiveHours} />
+        <NumericSettingField name="approvedActiveLimit" setting={settings.approvedActiveLimit} />
+      </div>
     </section>
   );
 }
@@ -253,7 +289,7 @@ export function SettingsPage() {
           <h1 className="text-24 font-semibold leading-(--lh-tight) tracking-(--tracking-tight)">Settings</h1>
           {settings.isPending && <p role="status">Loading settings…</p>}
           {settings.isError && <p role="alert">Could not load settings. Try again.</p>}
-          {settings.data && <InboxSettings setting={settings.data.approvedActiveHours} />}
+          {settings.data && <InboxSettings settings={settings.data} />}
           {settings.data && <ShortcutSettings keys={settings.data.keys} />}
           <BinSettings />
         </div>

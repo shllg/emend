@@ -113,6 +113,7 @@ beforeEach(() => {
       return Response.json({
         items: inbox,
         approvedActiveHours: 12,
+        approvedActiveLimit: 5,
         serverTime: new Date(Date.now() + serverOffset).toISOString(),
       });
     if (path === `/api/v1/reviews/${id}` && binned)
@@ -184,6 +185,79 @@ function inboxItems(): InboxItem[] {
     { ...item, id: other(6), title: "Done retired", list: "done", state: "settled" },
   ];
 }
+
+function expectDivider(title: string, count: number, level: number) {
+  const section = screen.getByRole("region", { name: title });
+  const heading = within(section).getByRole("heading", { level });
+  expect(heading.textContent).toBe(`${title}${count}`);
+  const countLabel = within(heading).getByText(String(count));
+  for (const name of ["font-normal", "tabular-nums", "text-fg-2"])
+    expect(countLabel.classList.contains(name)).toBe(true);
+  const line = heading.querySelector('span[aria-hidden="true"].h-px');
+  expect(line).not.toBeNull();
+  expect(line?.classList.contains("flex-1")).toBe(true);
+  expect(line?.classList.contains("bg-line-2")).toBe(true);
+  expect(line?.closest("button")).toBeNull();
+}
+
+test.each([false, true])(
+  "section dividers preserve server order and toggles in the compact=%s inbox",
+  async (compact) => {
+    vi.useFakeTimers({ toFake: ["Date", "performance"] });
+    vi.setSystemTime(new Date("2026-11-04T12:00:00.000Z"));
+    const now = Date.now();
+    inbox = [
+      { ...item, id: other(1), title: "Agent waiting", agentWaiting: true },
+      { ...item, id: other(2), title: "Unsent comments", unsentCount: 1 },
+      item,
+      { ...item, id: other(3), title: "Answered", pendingSend: true },
+      { ...recentApproval(), id: other(4) },
+      { ...item, id: other(5), title: "Snoozed review", list: "snoozed" as const, snoozed: true },
+      { ...item, id: other(6), title: "Retired review", list: "done" as const, state: "settled" as const },
+    ].map((entry, index) => ({ ...entry, updatedAt: new Date(now - (10 - index) * 1000).toISOString() }));
+    mount(compact ? `/r/${id}` : "/");
+    await screen.findByRole("region", { name: "Active" });
+    const level = compact ? 3 : 2;
+    expectDivider("Active", 5, level);
+    expectDivider("Snoozed", 1, level);
+    expectDivider("Done", 1, level);
+    const active = within(screen.getByRole("region", { name: "Active" }));
+    expect(active.getAllByRole("link").map((link) => link.getAttribute("data-inbox-row"))).toEqual(
+      inbox.slice(0, 5).map((entry) => entry.id),
+    );
+    expectDimmed(active.getByRole("link", { name: /Recently approved/ }));
+    for (const [title, rowTitle] of [
+      ["Snoozed", "Snoozed review"],
+      ["Done", "Retired review"],
+    ] as const) {
+      const section = within(screen.getByRole("region", { name: title }));
+      const toggle = section.getByRole("button", { name: `${title} 1` });
+      expect(toggle.getAttribute("aria-expanded")).toBe("false");
+      expect(section.queryByRole("link")).toBeNull();
+      fireEvent.click(toggle);
+      expect(toggle.getAttribute("aria-expanded")).toBe("true");
+      expect(section.getByRole("link", { name: new RegExp(rowTitle) })).toBeTruthy();
+      fireEvent.click(toggle);
+      expect(toggle.getAttribute("aria-expanded")).toBe("false");
+      expect(section.queryByRole("link")).toBeNull();
+    }
+    if (compact) {
+      fireEvent.click(screen.getByRole("button", { name: "Collapse inbox" }));
+      const rail = within(screen.getByRole("complementary", { name: "Inbox" }));
+      expect(rail.getAllByRole("link").map((link) => link.getAttribute("aria-label"))).toEqual(
+        inbox.map((entry) => `${entry.agentWaiting || entry.unsentCount > 0 ? "Needs you: " : ""}${entry.title}`),
+      );
+      expectDimmed(rail.getByRole("link", { name: "Recently approved" }));
+    } else {
+      fireEvent.change(screen.getByRole("textbox", { name: "Filter reviews" }), { target: { value: "review" } });
+      for (const title of ["Snoozed", "Done"]) {
+        expectDivider(title, 1, level);
+        expect(within(screen.getByRole("region", { name: title })).queryByRole("button")).toBeNull();
+        expect(within(screen.getByRole("region", { name: title })).getByRole("link")).toBeTruthy();
+      }
+    }
+  },
+);
 
 test("the inbox shows Active, Snoozed and Done in order with counts, wake times and collapsed Snoozed and Done", async () => {
   vi.useFakeTimers({ toFake: ["Date", "performance"] });
@@ -344,6 +418,7 @@ test.each([
     await mountTimed();
     expect(client.getQueryData<InboxData>(["inbox"])).toMatchObject({
       approvedActiveHours: 12,
+      approvedActiveLimit: 5,
       serverTime: new Date(Date.now() + serverOffset).toISOString(),
       receivedAt: Date.now(),
       receivedMono: performance.now(),
@@ -402,6 +477,7 @@ test("an accepted approval expires even when every following inbox refetch fails
   const cached = client.getQueryData<InboxData>(["inbox"]);
   expect(cached).toMatchObject({
     approvedActiveHours: 12,
+    approvedActiveLimit: 5,
     serverTime: new Date(receivedAt + serverOffset).toISOString(),
     receivedAt,
     receivedMono,

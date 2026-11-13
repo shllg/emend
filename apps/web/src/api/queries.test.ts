@@ -26,9 +26,16 @@ test.each([-2, 0, 2])("inbox records both receipt clocks with the server %s hour
     const receivedAt = Date.now();
     const receivedMono = performance.now();
     const serverTime = new Date(receivedAt + hours * 3_600_000).toISOString();
-    response.resolve(Response.json({ approvedActiveHours: 12, items: [], serverTime }));
+    response.resolve(Response.json({ approvedActiveHours: 12, approvedActiveLimit: 5, items: [], serverTime }));
     const data = await pending;
-    expect(data).toEqual({ approvedActiveHours: 12, items: [], serverTime, receivedAt, receivedMono });
+    expect(data).toEqual({
+      approvedActiveHours: 12,
+      approvedActiveLimit: 5,
+      items: [],
+      serverTime,
+      receivedAt,
+      receivedMono,
+    });
     expect(client.getQueryData(inboxQuery().queryKey)).toEqual(data);
     expect(serverNow(data)).toBe(Date.parse(serverTime));
   } finally {
@@ -49,6 +56,7 @@ test.each([
   const serverTime = started + 2 * 3_600_000;
   const data: InboxData = {
     approvedActiveHours: 12,
+    approvedActiveLimit: 5,
     items: [],
     serverTime: new Date(serverTime).toISOString(),
     receivedAt: Date.now(),

@@ -95,6 +95,7 @@ test("all three GETs parse their schemas and enforce reviewer scope and owner is
     else
       expect(await (await get(path, "foreign")).json()).toEqual({
         approvedActiveHours: 12,
+        approvedActiveLimit: 5,
         items: [],
         serverTime: new Date(f.deps.now()).toISOString(),
       });
@@ -146,7 +147,8 @@ test("inbox sorts newest first and caps the result at 200", async () => {
   selects = 0;
   const response = await get();
   expect(response.status).toBe(200);
-  expect(selects).toBe(singleReviewSelects);
+  // A full Active list skips the one approval-selection query; aggregates stay independent of row count.
+  expect(selects).toBe(singleReviewSelects - 1);
   const list = contract.InboxList.parse(await response.json());
   expect(list.items).toHaveLength(contract.LIMITS.inboxItems);
   expect(list.items[0]?.title).toBe("Review 201");
@@ -558,6 +560,7 @@ test("kind follows the newest revision's writeup: publish when empty, review oth
   expect(await kinds()).toEqual(["review", "publish"]);
   expect(await (await get("", "foreign")).json()).toEqual({
     approvedActiveHours: 12,
+    approvedActiveLimit: 5,
     items: [],
     serverTime: new Date(f.deps.now()).toISOString(),
   });

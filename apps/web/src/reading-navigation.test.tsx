@@ -178,6 +178,7 @@ beforeEach(() => {
       if (path === "/api/v1/reviews")
         return Response.json({
           approvedActiveHours: 12,
+          approvedActiveLimit: 5,
           serverTime: new Date(Date.now()).toISOString(),
           items: [review],
         });
@@ -744,6 +745,7 @@ test("the sidebar opens another review on its own doc and Back restores the firs
     if (path === "/api/v1/reviews")
       return Response.json({
         approvedActiveHours: 12,
+        approvedActiveLimit: 5,
         serverTime: new Date(Date.now()).toISOString(),
         items: [review, otherReview],
       });
@@ -803,6 +805,7 @@ test.each(["row", "rail"])(
       client.setQueryData(["review", id], currentReview);
       client.setQueryData<InboxData>(["inbox"], {
         approvedActiveHours: 12,
+        approvedActiveLimit: 5,
         serverTime: new Date(Date.now()).toISOString(),
         receivedAt: Date.now(),
         receivedMono: performance.now(),

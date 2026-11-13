@@ -1,8 +1,13 @@
 import { z } from "zod";
+import { LIMITS } from "./limits.ts";
 
 export const MAX_APPROVED_ACTIVE_HOURS = 720;
 export const ApprovedActiveHours = z.int().min(0).max(MAX_APPROVED_ACTIVE_HOURS);
 export type ApprovedActiveHours = z.infer<typeof ApprovedActiveHours>;
+
+export const MAX_APPROVED_ACTIVE_LIMIT = LIMITS.inboxItems;
+export const ApprovedActiveLimit = z.int().min(0).max(MAX_APPROVED_ACTIVE_LIMIT);
+export type ApprovedActiveLimit = z.infer<typeof ApprovedActiveLimit>;
 
 export const SettingSource = z.enum(["default", "file", "override"]);
 export type SettingSource = z.infer<typeof SettingSource>;
@@ -98,8 +103,19 @@ export const HoursSetting = z.object({
 });
 export type HoursSetting = z.infer<typeof HoursSetting>;
 
+export const LimitSetting = z.object({
+  value: ApprovedActiveLimit,
+  source: SettingSource,
+  default: ApprovedActiveLimit,
+  file: ApprovedActiveLimit.nullable(),
+  override: ApprovedActiveLimit.nullable(),
+  fileError: z.boolean(),
+});
+export type LimitSetting = z.infer<typeof LimitSetting>;
+
 export const SettingsView = z.object({
   approvedActiveHours: HoursSetting,
+  approvedActiveLimit: LimitSetting,
   keys: KeysSetting,
   serverTime: z.iso.datetime(),
 });
@@ -107,6 +123,7 @@ export type SettingsView = z.infer<typeof SettingsView>;
 
 export const SettingsUpdate = z.strictObject({
   approvedActiveHours: ApprovedActiveHours.nullable().optional(),
+  approvedActiveLimit: ApprovedActiveLimit.nullable().optional(),
   keys: z.partialRecord(ShortcutCommand, z.strictObject({ key: KeyBinding }).nullable()).optional(),
 });
 export type SettingsUpdate = z.infer<typeof SettingsUpdate>;

@@ -3,7 +3,7 @@ import type { Hono } from "hono";
 import type { AppDeps } from "../app.ts";
 import type { AppEnv } from "../auth/principal.ts";
 import { parseBody } from "../http/body.ts";
-import { readFileSetting, readKeySettings, readSettings, updateApprovedActiveHours, updateKeys } from "../settings.ts";
+import { readFileSetting, readKeySettings, readSettings, updateKeys, updateNumericSetting } from "../settings.ts";
 
 export function settingsRoutes(app: Hono<AppEnv>, deps: AppDeps) {
   app.get("/api/v1/settings", async (c) => {
@@ -21,7 +21,9 @@ export function settingsRoutes(app: Hono<AppEnv>, deps: AppDeps) {
     await deps.db.transaction(async (q) => {
       const now = deps.now();
       if (update.approvedActiveHours !== undefined)
-        await updateApprovedActiveHours(ownerId, q, update.approvedActiveHours, now);
+        await updateNumericSetting(ownerId, q, "approvedActiveHours", update.approvedActiveHours, now);
+      if (update.approvedActiveLimit !== undefined)
+        await updateNumericSetting(ownerId, q, "approvedActiveLimit", update.approvedActiveLimit, now);
       if (update.keys !== undefined) await updateKeys(ownerId, q, update.keys, now);
     });
     const file = await readFileSetting(deps.configFile);

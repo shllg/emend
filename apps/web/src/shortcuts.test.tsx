@@ -72,6 +72,7 @@ const initialRevision: RevisionView = {
 };
 const defaultSettings = (): SettingsView => ({
   approvedActiveHours: { value: 12, source: "default", default: 12, file: null, override: null, fileError: false },
+  approvedActiveLimit: { value: 5, source: "default", default: 5, file: null, override: null, fileError: false },
   keys: KeysSetting.parse({
     commands: Object.fromEntries(
       Object.entries(SHORTCUT_DEFAULTS).map(([command, key]) => [
@@ -142,7 +143,12 @@ beforeEach(() => {
     }
     if (path === "/api/v1/bin") return Response.json({ items: [], more: false, total: 0, version: "a".repeat(64) });
     if (path === "/api/v1/reviews")
-      return Response.json({ items: inbox, approvedActiveHours: 12, serverTime: new Date().toISOString() });
+      return Response.json({
+        items: inbox,
+        approvedActiveHours: 12,
+        approvedActiveLimit: 5,
+        serverTime: new Date().toISOString(),
+      });
     if (path.endsWith("/viewed")) {
       const body = JSON.parse(String(init?.body));
       revision = {
@@ -874,7 +880,7 @@ test("inbox settings wait for a shortcut save before writing the shared settings
   await waitFor(() => expect(writes("PATCH")).toHaveLength(1));
   const input = screen.getByRole<HTMLInputElement>("spinbutton", { name: "Keep approved reviews in Active for" });
   fireEvent.change(input, { target: { value: "24" } });
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  fireEvent.click(within(input.closest("form") as HTMLFormElement).getByRole("button", { name: "Save" }));
   await waitFor(() => expect(input.disabled).toBe(true));
   expect(writes("PATCH")).toHaveLength(1);
   settings.keys.commands["shortcuts.show"] = {

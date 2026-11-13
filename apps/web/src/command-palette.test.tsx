@@ -64,6 +64,7 @@ const initialRevision: RevisionView = {
 };
 const defaultSettings = (): SettingsView => ({
   approvedActiveHours: { value: 12, source: "default", default: 12, file: null, override: null, fileError: false },
+  approvedActiveLimit: { value: 5, source: "default", default: 5, file: null, override: null, fileError: false },
   keys: KeysSetting.parse({
     commands: Object.fromEntries(
       Object.entries(SHORTCUT_DEFAULTS).map(([command, key]) => [
@@ -102,7 +103,12 @@ beforeEach(() => {
     if (path === "/api/v1/settings") return Response.json(settings);
     if (path === "/api/v1/bin") return Response.json({ items: [], more: false, total: 0, version: "a".repeat(64) });
     if (path === "/api/v1/reviews")
-      return Response.json({ items: inbox, approvedActiveHours: 12, serverTime: new Date().toISOString() });
+      return Response.json({
+        items: inbox,
+        approvedActiveHours: 12,
+        approvedActiveLimit: 5,
+        serverTime: new Date().toISOString(),
+      });
     if (path.endsWith("/viewed")) {
       const body = JSON.parse(String(init?.body));
       revision = {

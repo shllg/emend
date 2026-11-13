@@ -145,7 +145,12 @@ beforeEach(() => {
   fetchMock = vi.fn(async (path: string) => {
     if (path === "/api/v1/session") return new Response(null, { status: 204 });
     if (path === "/api/v1/reviews")
-      return Response.json({ approvedActiveHours: 12, serverTime: new Date(Date.now()).toISOString(), items: [item] });
+      return Response.json({
+        approvedActiveHours: 12,
+        approvedActiveLimit: 5,
+        serverTime: new Date(Date.now()).toISOString(),
+        items: [item],
+      });
     if (path === `/api/v1/reviews/${id}`)
       return Response.json({
         ...item,
@@ -390,7 +395,12 @@ test.each(["127.0.0.1", "localhost", "[::1]"])(
         expect(JSON.parse(String(init?.body))).toEqual({ secret });
         return new Response(null, { status: 204 });
       }
-      return Response.json({ approvedActiveHours: 12, serverTime: new Date(Date.now()).toISOString(), items: [] });
+      return Response.json({
+        approvedActiveHours: 12,
+        approvedActiveLimit: 5,
+        serverTime: new Date(Date.now()).toISOString(),
+        items: [],
+      });
     });
     const { history } = mount("/pair");
     await screen.findByRole("heading", { name: "Inbox" });
@@ -443,6 +453,7 @@ test("moved inbox rows show the destination host without a navigable link", asyn
   fetchMock.mockResolvedValue(
     Response.json({
       approvedActiveHours: 12,
+      approvedActiveLimit: 5,
       serverTime: new Date(Date.now()).toISOString(),
       items: [{ ...item, movedTo: "https://hub.example/r/new" }],
     }),
@@ -667,7 +678,12 @@ test("hides Docs without docs, defaults bad search values, and keeps diff visibl
   fetchMock.mockImplementation(async (path: string) => {
     if (path.endsWith("/revisions/1")) return Response.json({ ...revision, docs: [] });
     if (path === "/api/v1/reviews")
-      return Response.json({ approvedActiveHours: 12, serverTime: new Date(Date.now()).toISOString(), items: [item] });
+      return Response.json({
+        approvedActiveHours: 12,
+        approvedActiveLimit: 5,
+        serverTime: new Date(Date.now()).toISOString(),
+        items: [item],
+      });
     return Response.json({ ...item, revisions: [{ seq: 1, createdAt: item.updatedAt }] });
   });
   const { history } = mount(`/r/${id}?rev=-1&tab=diff&thread=bad`);
@@ -747,7 +763,12 @@ test("the first stream open recovers a publication after the initial inbox snaps
   fetchMock.mockImplementation((path, init) =>
     path === "/api/v1/reviews"
       ? Promise.resolve(
-          Response.json({ approvedActiveHours: 12, serverTime: new Date(Date.now()).toISOString(), items }),
+          Response.json({
+            approvedActiveHours: 12,
+            approvedActiveLimit: 5,
+            serverTime: new Date(Date.now()).toISOString(),
+            items,
+          }),
         )
       : (fallback?.(path, init) as Promise<Response>),
   );
@@ -764,6 +785,7 @@ test("the first inbox response establishes the baseline even when a stale cache 
   const arrival = { ...item, id: "22222222-2222-4222-8222-222222222222", title: "Already present at first response" };
   client.setQueryData<InboxData>(["inbox"], {
     approvedActiveHours: 12,
+    approvedActiveLimit: 5,
     serverTime: new Date(Date.now()).toISOString(),
     receivedAt: Date.now(),
     receivedMono: performance.now(),
@@ -781,6 +803,7 @@ test("the first inbox response establishes the baseline even when a stale cache 
     response.resolve(
       Response.json({
         approvedActiveHours: 12,
+        approvedActiveLimit: 5,
         serverTime: new Date(Date.now()).toISOString(),
         items: [item, arrival],
       }),
@@ -797,7 +820,12 @@ test("a review published while away highlights once on return, including after a
   fetchMock.mockImplementation((path, init) =>
     path === "/api/v1/reviews"
       ? Promise.resolve(
-          Response.json({ approvedActiveHours: 12, serverTime: new Date(Date.now()).toISOString(), items }),
+          Response.json({
+            approvedActiveHours: 12,
+            approvedActiveLimit: 5,
+            serverTime: new Date(Date.now()).toISOString(),
+            items,
+          }),
         )
       : (fallback?.(path, init) as Promise<Response>),
   );
@@ -833,6 +861,7 @@ test("an arrival hidden by a filter consumes its highlight before the filter is 
     await act(async () => {
       client.setQueryData<InboxData>(["inbox"], {
         approvedActiveHours: 12,
+        approvedActiveLimit: 5,
         serverTime: new Date(Date.now()).toISOString(),
         receivedAt: Date.now(),
         receivedMono: performance.now(),
@@ -860,7 +889,12 @@ test.each([false, true])(
       fetchMock.mockImplementation((path, init) =>
         path === "/api/v1/reviews"
           ? Promise.resolve(
-              Response.json({ approvedActiveHours: 12, serverTime: new Date(Date.now()).toISOString(), items: [] }),
+              Response.json({
+                approvedActiveHours: 12,
+                approvedActiveLimit: 5,
+                serverTime: new Date(Date.now()).toISOString(),
+                items: [],
+              }),
             )
           : (fallback?.(path, init) as Promise<Response>),
       );
@@ -877,6 +911,7 @@ test.each([false, true])(
         await act(async () => {
           client.setQueryData<InboxData>(["inbox"], {
             approvedActiveHours: 12,
+            approvedActiveLimit: 5,
             serverTime: new Date(Date.now()).toISOString(),
             receivedAt: Date.now(),
             receivedMono: performance.now(),
@@ -952,6 +987,7 @@ test("review route saves a selected doc span, refreshes its thread, sends it, th
     if (path === "/api/v1/reviews")
       return Response.json({
         approvedActiveHours: 12,
+        approvedActiveLimit: 5,
         serverTime: new Date(Date.now()).toISOString(),
         items: [current],
       });
@@ -1095,7 +1131,12 @@ test("saved reply clears before delayed metadata while revision refresh regroups
       return Response.json({ commentId: id }, { status: 201 });
     }
     if (path === "/api/v1/reviews")
-      return Response.json({ approvedActiveHours: 12, serverTime: new Date(Date.now()).toISOString(), items: [item] });
+      return Response.json({
+        approvedActiveHours: 12,
+        approvedActiveLimit: 5,
+        serverTime: new Date(Date.now()).toISOString(),
+        items: [item],
+      });
     if (path.includes("/revisions/"))
       return Response.json({
         ...revision,
@@ -2039,7 +2080,12 @@ function withInbox(items: InboxItem[]) {
   const fallback = fetchMock.getMockImplementation();
   fetchMock.mockImplementation(async (path, init) =>
     path === "/api/v1/reviews"
-      ? Response.json({ approvedActiveHours: 12, serverTime: new Date(Date.now()).toISOString(), items })
+      ? Response.json({
+          approvedActiveHours: 12,
+          approvedActiveLimit: 5,
+          serverTime: new Date(Date.now()).toISOString(),
+          items,
+        })
       : (fallback?.(path, init) as Promise<Response>),
   );
 }
@@ -2146,6 +2192,7 @@ test("a project selection is ignored when it disappears from the inbox", async (
   act(() =>
     client.setQueryData<InboxData>(["inbox"], {
       approvedActiveHours: 12,
+      approvedActiveLimit: 5,
       serverTime: new Date().toISOString(),
       receivedAt: Date.now(),
       receivedMono: performance.now(),
@@ -2886,6 +2933,7 @@ test("a row with an invalid cached timestamp has no time text", async () => {
   client.setQueryDefaults(["inbox"], { staleTime: Infinity });
   client.setQueryData<InboxData>(["inbox"], {
     approvedActiveHours: 12,
+    approvedActiveLimit: 5,
     serverTime: new Date(Date.now()).toISOString(),
     receivedAt: Date.now(),
     receivedMono: performance.now(),

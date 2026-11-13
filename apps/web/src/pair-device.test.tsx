@@ -45,7 +45,12 @@ function serve(create: () => Response | Promise<Response> = () => Response.json(
   const fetcher = vi.fn(async (path: string) => {
     if (path === "/api/v1/pairings") return create();
     if (path !== "/api/v1/devices")
-      return Response.json({ approvedActiveHours: 12, serverTime: new Date(Date.now()).toISOString(), items: [] });
+      return Response.json({
+        approvedActiveHours: 12,
+        approvedActiveLimit: 5,
+        serverTime: new Date(Date.now()).toISOString(),
+        items: [],
+      });
     return Response.json({
       items: [
         {
