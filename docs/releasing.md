@@ -128,7 +128,7 @@ On main, `plugin/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.jso
 therefore still tracks commits. On `release`, each stamp puts the release version directly after
 the top-level name in both manifests. Claude Code shows that version. Every release is an update
 because every release bumps it. The marketplace plugin entry carries no version: `plugin.json`
-wins, and Claude Code warns when both are set (see the
+wins, and `claude plugin validate` warns when both are set (see the
 [marketplace reference](https://code.claude.com/docs/en/plugins/marketplace-reference)).
 `check:package` also checks the installed CLI
 version; `version.test.ts` checks that the two CLI version literals agree.
@@ -233,12 +233,13 @@ printed in the failed step. Before updating the branch, check that commit:
 
 ```sh
 gh api repos/shllg/emend/git/commits/<stamp-sha> --jq '.parents[].sha'
-gh api repos/shllg/emend/compare/v<x.y.z>...<stamp-sha> --jq '.files[].filename'
+gh api repos/shllg/emend/compare/v<x.y.z>...<stamp-sha> --jq '.files[] | .filename, .patch'
 ```
 
-The parents must list the tagged commit first. The comparison must list only
-`plugin/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`. Then use a token with
-the `workflow` scope and drop the extra scope after the update:
+The parents must list the tagged commit first. The owner confirms that the comparison lists only
+`plugin/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`, and that each patch adds
+only a `"version": "<x.y.z>",` line. Then use a token with the `workflow` scope and drop the extra
+scope after the update:
 
 ```sh
 gh auth refresh -s workflow

@@ -181,7 +181,7 @@ jobs:
             echo "could not read plugin/.claude-plugin/plugin.json at $release_sha" >&2
             exit 1
           fi
-          if ! release_version=$(jq -r 'if has("version") then (.version | select(type == "string" and test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\z"))) // error("invalid version") else "" end' <<< "$plugin"); then
+          if ! release_version=$(jq -n -r --arg raw "$plugin" '$raw | fromjson | if type != "object" then error("not an object") elif has("version") then (.version | select(type == "string" and test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\z"))) // error("invalid version") else "" end'); then
             echo "invalid plugin/.claude-plugin/plugin.json at $release_sha" >&2
             exit 1
           fi
@@ -341,7 +341,7 @@ jobs:
               echo "could not read plugin/.claude-plugin/plugin.json at $release_sha" >&2
               exit 1
             fi
-            if ! release_version=$(jq -r 'if has("version") then (.version | select(type == "string" and test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\z"))) // error("invalid version") else "" end' <<< "$plugin"); then
+            if ! release_version=$(jq -n -r --arg raw "$plugin" '$raw | fromjson | if type != "object" then error("not an object") elif has("version") then (.version | select(type == "string" and test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\z"))) // error("invalid version") else "" end'); then
               echo "invalid plugin/.claude-plugin/plugin.json at $release_sha" >&2
               exit 1
             fi

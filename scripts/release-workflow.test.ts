@@ -280,9 +280,10 @@ test("tag and mark resolve a stamp's first parent and refuse manifest or source 
       /if ! plugin=\$\(gh api -H "Accept: application\/vnd.github.raw\+json" "repos\/\$GH_REPO\/contents\/plugin\/\.claude-plugin\/plugin.json\?ref=\$release_sha"\); then\s+echo "could not read plugin\/\.claude-plugin\/plugin.json at \$release_sha" >&2\s+exit 1/,
     );
     assert(!body.includes(".version // empty"));
+    assert(!body.includes('<<< "$plugin"'));
     assert(
       body.includes(
-        String.raw`if ! release_version=$(jq -r 'if has("version") then (.version | select(type == "string" and test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\z"))) // error("invalid version") else "" end' <<< "$plugin"); then`,
+        String.raw`if ! release_version=$(jq -n -r --arg raw "$plugin" '$raw | fromjson | if type != "object" then error("not an object") elif has("version") then (.version | select(type == "string" and test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\z"))) // error("invalid version") else "" end'); then`,
       ),
     );
     assert.match(body, /echo "invalid plugin\/\.claude-plugin\/plugin.json at \$release_sha" >&2\s+exit 1/);

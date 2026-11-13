@@ -278,7 +278,10 @@ export function releaseSource(root: string, released: string): string {
   } catch {
     throw new ReleaseError(`release: ${PLUGIN_MANIFEST} at ${released} is not valid JSON`);
   }
-  if (manifest && typeof manifest === "object" && !Array.isArray(manifest) && Object.hasOwn(manifest, "version")) {
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+    throw new ReleaseError(`release: ${PLUGIN_MANIFEST} at ${released} is not a JSON object`);
+  }
+  if (Object.hasOwn(manifest, "version")) {
     const version = (manifest as { version: unknown }).version;
     if (typeof version !== "string" || !VERSION_PATTERN.test(version)) {
       throw new ReleaseError(`release: ${PLUGIN_MANIFEST} at ${released} must carry a plain x.y.z version`);

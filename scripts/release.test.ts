@@ -642,6 +642,35 @@ for (const version of [null, false, "", "1.2", "01.2.3", "1.2.3-beta", "1.2.3\n"
   });
 }
 
+test("planning refuses a release head whose plugin manifest is an array", async (t) => {
+  const root = fixture(t);
+  write(root, PLUGIN_MANIFEST, '[{"name":"emend","version":"0.1.0"}]');
+  commit(root, "chore: invalid release manifest");
+  const released = git(root, "rev-parse", "HEAD").trim();
+  git(root, "update-ref", "refs/remotes/origin/release", released);
+  commit(root, "fix: later work");
+  await assert.rejects(
+    run(root),
+    (error) =>
+      error instanceof ReleaseError &&
+      error.message === `release: ${PLUGIN_MANIFEST} at ${released} is not a JSON object`,
+  );
+});
+
+test("planning refuses a release head whose plugin manifest contains two JSON documents", async (t) => {
+  const root = fixture(t);
+  write(root, PLUGIN_MANIFEST, '{"name":"emend","version":"0.1.0"}\n{"name":"emend","version":"0.2.0"}\n');
+  commit(root, "chore: invalid release manifest");
+  const released = git(root, "rev-parse", "HEAD").trim();
+  git(root, "update-ref", "refs/remotes/origin/release", released);
+  commit(root, "fix: later work");
+  await assert.rejects(
+    run(root),
+    (error) =>
+      error instanceof ReleaseError && error.message === `release: ${PLUGIN_MANIFEST} at ${released} is not valid JSON`,
+  );
+});
+
 test("invalid JSON at the release head refuses planning", async (t) => {
   const root = fixture(t);
   write(root, PLUGIN_MANIFEST, "{invalid JSON");
