@@ -142,6 +142,7 @@ function resolverState(
   const state = {
     tooLarge: false,
     used: 0,
+    pause,
     take(length: number): boolean {
       if (length > inlineBudget - state.used) {
         state.tooLarge = true;
@@ -149,6 +150,9 @@ function resolverState(
       }
       state.used += length;
       return true;
+    },
+    commentLeft(): number {
+      return work[commentWork];
     },
     takeComment(length: number): boolean {
       if (length > work[commentWork]) {
@@ -387,27 +391,7 @@ async function commentBody(comment: DownloadComment, state: AssetState): Promise
 }
 async function threadCard(thread: DownloadThread, state: AssetState, showWhere: boolean): Promise<Element> {
   const items: ElementContent[] = [];
-  for (const comment of thread.comments) {
-    items.push(
-      element(
-        "li",
-        [
-          element(
-            "p",
-            [
-              element("strong", [text(comment.author === "agent" ? "Agent" : "Reviewer")]),
-              ...(comment.outcome ? [text(` · ${outcomeLabels[comment.outcome]}`)] : []),
-              text(" · "),
-              commentTime(comment.createdAt),
-            ],
-            { className: ["em-comment-head"] },
-          ),
-          await commentBody(comment, state),
-        ],
-        { className: ["em-comment"], dataAuthor: comment.author },
-      ),
-    );
-  }
+  const list = element("ol", [], { className: ["em-comments"] });
   const card = element(
     "aside",
     [
@@ -427,12 +411,40 @@ async function threadCard(thread: DownloadThread, state: AssetState, showWhere: 
         : thread.lines
           ? [element("pre", [element("code", [text(thread.lines.join("\n"))])], { className: ["em-thread-lines"] })]
           : []),
-      element("ol", items, { className: ["em-comments"] }),
+      list,
     ],
     { className: ["em-thread"], dataState: thread.state },
   );
-  const bytes = utf8Length(serialize({ type: "root", children: [card] }).slice(1));
-  if (state.takeComment(bytes)) return card;
+  let bytes = utf8Length(serialize({ type: "root", children: [card] }).slice(1));
+  if (bytes <= state.commentLeft()) {
+    for (const comment of thread.comments) {
+      if (items.length) await state.pause?.();
+      const item = element(
+        "li",
+        [
+          element(
+            "p",
+            [
+              element("strong", [text(comment.author === "agent" ? "Agent" : "Reviewer")]),
+              ...(comment.outcome ? [text(` · ${outcomeLabels[comment.outcome]}`)] : []),
+              text(" · "),
+              commentTime(comment.createdAt),
+            ],
+            { className: ["em-comment-head"] },
+          ),
+          await commentBody(comment, state),
+        ],
+        { className: ["em-comment"], dataAuthor: comment.author },
+      );
+      bytes += utf8Length(serialize({ type: "root", children: [item] }).slice(1));
+      if (bytes > state.commentLeft()) break;
+      items.push(item);
+    }
+  }
+  if (state.takeComment(bytes)) {
+    list.children = items;
+    return card;
+  }
   return element("p", [text("A comment thread was left out here because it passed the size limit for comments.")], {
     className: ["em-thread-omitted"],
   });

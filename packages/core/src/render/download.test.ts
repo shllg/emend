@@ -2518,6 +2518,39 @@ test("one-character agent replies count their full card markup", async () => {
   expect(html).not.toContain("Reviewer remark");
 });
 
+test("stops building an oversized thread early without charging for the dropped card", async () => {
+  const thread = sampleThread("Reviewer remark");
+  thread.comments.push(
+    ...Array.from({ length: 100 }, () => ({
+      author: "agent" as const,
+      sent: false,
+      body: "<".repeat(1000),
+      html: null,
+      createdAt: 0,
+    })),
+  );
+  const input = { title: "Example", details, resolveMedia: async () => null };
+  const fitting = await buildCommentsDownload({
+    ...input,
+    threads: emptyThreads({ top: [{ ...thread, comments: thread.comments.slice(0, 3) }] }),
+  });
+  const pause = vi.fn(async () => {});
+  const html = await buildCommentsDownload({
+    ...input,
+    pause,
+    work: createDownloadWork(Buffer.byteLength(serializedCard(fitting))),
+    threads: emptyThreads({ top: [thread, sampleThread("Later small remark")] }),
+  });
+  expect(html).toContain(omittedThread);
+  expect(html).toContain("Some content was left out");
+  expect(html).not.toContain("Reviewer remark");
+  expect(html).not.toContain("&#x3C;");
+  expect(html).toContain("Later small remark");
+  expect(threadMarkers(html)).toBe(1);
+  expect(pause).toHaveBeenCalled();
+  expect(pause.mock.calls.length).toBeLessThan(10);
+});
+
 test.each([null, "<p>é</p>", ""])(
   "thread budgets charge exact UTF-8 markup including labels, notes, quotes and comment output: %s",
   async (rendered) => {
