@@ -34,7 +34,7 @@ export function ReviewTabs({
 }: ReviewTabsProps & { docsCount: number; idBase: string }) {
   const navigate = useNavigate();
   const phone = useLayout() === "phone";
-  const { contents, compact } = useLayoutPreferences();
+  const { compact } = useLayoutPreferences();
   const showDiff = usePaneMode() === "tabs" && hasDiff;
   const active =
     (search.tab === "diff" && !showDiff) || (search.tab === "files" && !filesCount)
@@ -85,17 +85,6 @@ export function ReviewTabs({
       />
       {!phone && (value === "writeup" || (value === "docs" && compactDoc)) && (
         <div className="mx-2 flex shrink-0 gap-1">
-          {hasWriteup && value === "writeup" && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className={contents ? "bg-raised text-fg-1" : undefined}
-              aria-pressed={contents}
-              onClick={() => layoutStore.update({ contents: !contents })}
-            >
-              Contents
-            </Button>
-          )}
           <Button
             size="sm"
             variant="ghost"

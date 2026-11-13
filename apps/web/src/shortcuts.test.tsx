@@ -325,6 +325,7 @@ test("u returns to the inbox and declines on the inbox", async () => {
   expect(press("u").defaultPrevented).toBe(false);
 });
 test("tabs follow their visibility and 5 only works in Tabs mode", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   const history = mount();
   await ready();
   expect(press("5").defaultPrevented).toBe(false);
@@ -359,6 +360,7 @@ test("v in a Files row toggles only that row, ahead of the diff handler", async 
   expect(writes("PUT")[0]?.[0]).toBe(`/api/v1/reviews/${ids[0]}/viewed`);
 });
 test("n/p use file order and the toolbar jump; v uses the current file; hidden diff declines", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   mount();
   await ready();
   const pane = screen.getByTestId("diff-pane");
@@ -417,6 +419,7 @@ test("n/p use file order and the toolbar jump; v uses the current file; hidden d
   for (const key of ["n", "p", "v"]) expect(press(key).defaultPrevented).toBe(false);
 });
 test("short files that cannot scroll keep the last keyboard destination for n and v", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   mount();
   await ready();
   const pane = screen.getByTestId("diff-pane");
@@ -454,6 +457,7 @@ test("short files that cannot scroll keep the last keyboard destination for n an
   expect(JSON.parse(String(writes("PUT")[0]?.[1]?.body))).toEqual({ revision: 1, paths: ["b.txt"], viewed: true });
 });
 test("opening a short file from Files replaces the keyboard destination for v", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   const history = mount();
   await ready();
   const pane = screen.getByTestId("diff-pane");
@@ -497,6 +501,7 @@ test("opening a short file from Files replaces the keyboard destination for v", 
 test.each(["wheel", "touchstart", "touchmove", "pointerdown", "PageUp"])(
   "%s forgets the keyboard destination when the reader returns to A with B still visible",
   async (input) => {
+    layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
     mount();
     await ready();
     const pane = screen.getByTestId("diff-pane");
@@ -537,6 +542,7 @@ test.each(["wheel", "touchstart", "touchmove", "pointerdown", "PageUp"])(
   },
 );
 test("reader input past B selects C at the top and n goes to D, even with B still partly visible", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   revision.files = ["a.txt", "b.txt", "c.txt", "d.txt"].map((path, order) => ({
     ...(initialRevision.files[0] as RevisionView["files"][number]),
     id: ids[order] ?? "44444444-4444-4444-8444-444444444444",
@@ -577,6 +583,7 @@ test("reader input past B selects C at the top and n goes to D, even with B stil
   expect(scroll).toHaveBeenLastCalledWith({ top: 592, behavior: "instant" });
 });
 test("p returns to the current file's header from inside its body after manual scrolling", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   mount();
   await ready();
   const pane = screen.getByTestId("diff-pane");

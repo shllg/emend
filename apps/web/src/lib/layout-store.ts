@@ -7,9 +7,9 @@ export const layoutSchema = z.object({
   inboxWidth: z.number().min(220).max(520).catch(280),
   readingShare: z.number().min(0).max(1).catch(0.42),
   pane: z
-    .object({ desktop: paneChoice.catch("split"), tablet: paneChoice.catch("tabs") })
-    .catch({ desktop: "split", tablet: "tabs" }),
-  contents: z.boolean().catch(false),
+    .object({ desktop: paneChoice.catch("tabs"), tablet: paneChoice.catch("tabs") })
+    .catch({ desktop: "tabs", tablet: "tabs" }),
+  readingWidth: z.enum(["comfortable", "wide", "narrow"]).catch("comfortable"),
   compact: z.boolean().catch(false),
   diffStyle: z.enum(["split", "unified"]).catch("split"),
   wrap: z.boolean().catch(false),
@@ -24,6 +24,8 @@ export const layoutSchema = z.object({
   codeSize: z.union([z.literal(11), z.literal(12), z.literal(13), z.literal(14)]).catch(12),
 });
 export type LayoutPreferences = z.infer<typeof layoutSchema>;
+export type ReadingWidth = LayoutPreferences["readingWidth"];
+export const readingMeasure = { comfortable: "1024px", wide: "1248px", narrow: "68ch" } as const;
 type LayoutPatch = Partial<Omit<LayoutPreferences, "proseSize" | "codeSize">> & {
   proseSize?: number;
   codeSize?: number;
@@ -34,11 +36,20 @@ function parse(raw: string | null): LayoutPreferences {
   try {
     let value = JSON.parse(raw ?? "{}");
     if (value !== null && typeof value === "object" && !Array.isArray(value) && value.reading === "focus") {
-      value = { contents: true, compact: true, ...value };
+      value = { compact: true, ...value };
     }
+    if (needsPaneMigration(raw)) value.pane = { ...value.pane, desktop: "tabs" };
     return layoutSchema.parse(value);
   } catch {
     return layoutSchema.parse({});
+  }
+}
+function needsPaneMigration(raw: string | null): boolean {
+  try {
+    const value = JSON.parse(raw ?? "null");
+    return value !== null && typeof value === "object" && !Array.isArray(value) && !("readingWidth" in value);
+  } catch {
+    return false;
   }
 }
 function read(key: string): string | null | undefined {
@@ -72,8 +83,8 @@ export function createLayoutStore() {
       // Preferences still work in memory when storage is denied or full.
     }
   };
-  // Migrate before React reads a snapshot; getSnapshot must never write during render.
-  if (saved === null) persist();
+  // Older snapshots persisted Split by default; save the move once, outside getSnapshot.
+  if (saved === null || (saved !== undefined && needsPaneMigration(saved))) persist();
   const getSnapshot = () => {
     const raw = read(layoutKey);
     if (raw !== undefined && raw !== saved) {

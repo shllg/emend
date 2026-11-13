@@ -1,12 +1,9 @@
 import type { RevisionView } from "@emend/contract";
-import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
-import { plural } from "../../lib/count.ts";
+import { type RefObject, useEffect, useMemo, useState } from "react";
 import { revealReadingTarget } from "../../lib/reading-reveal.ts";
-import { TopicRank } from "../status/TopicRank.tsx";
 import type { ReaderGroup } from "./BlockReader.tsx";
 
-export const OUTLINE_WIDTH = 184;
-export const OUTLINE_MIN_WIDTH = 640;
+import { DashOutline } from "./DashOutline.tsx";
 
 export function WriteupOutline({
   root,
@@ -21,7 +18,6 @@ export function WriteupOutline({
   visible: boolean;
   onCurrentTopic?: (slug: string | undefined) => void;
 }) {
-  const progress = useRef<HTMLDivElement>(null);
   const sections = useMemo(() => groups.filter((group) => group.key !== "topics-map"), [groups]);
   const [current, setCurrent] = useState(sections[0]?.key);
   const counts = useMemo(() => {
@@ -53,7 +49,6 @@ export function WriteupOutline({
     const scroll = content?.closest<HTMLElement>("[data-reading-scroll]");
     if (!visible || !content || !scroll) return;
     let stopped = false;
-    let frame: number | undefined;
     let observer: IntersectionObserver | undefined;
     let tabRow: HTMLElement | null = null;
     let tabHeight = 0;
@@ -81,21 +76,15 @@ export function WriteupOutline({
       setCurrent(section?.group.key);
       onCurrentTopic?.(section?.group.topic?.slug);
     };
-    const updateProgress = () => {
-      frame = undefined;
-      if (!active() || !progress.current) return;
+    const updateBottom = () => {
+      if (!active()) return;
       const max = scroll.scrollHeight - scroll.clientHeight;
       const scrollTop = scroll.scrollTop;
-      const ratio = max > 0 ? Math.min(1, Math.max(0, scrollTop / max)) : 1;
-      progress.current.style.transform = `scaleX(${ratio})`;
       const bottom = max > 0 && scrollTop >= max - 1;
       if (bottom !== atBottom) {
         atBottom = bottom;
         report();
       }
-    };
-    const scheduleProgress = () => {
-      if (active() && frame === undefined) frame = requestAnimationFrame(updateProgress);
     };
     const observe = () => {
       if (!active()) return;
@@ -118,59 +107,45 @@ export function WriteupOutline({
       });
       for (const { heading } of headers) observer.observe(heading);
       report();
-      scheduleProgress();
+      updateBottom();
     };
     const resize = new ResizeObserver(observe);
     observe();
     resize.observe(scroll);
     resize.observe(content);
-    scroll.addEventListener("scroll", scheduleProgress, { passive: true });
+    scroll.addEventListener("scroll", updateBottom, { passive: true });
     return () => {
       stopped = true;
       observer?.disconnect();
       resize.disconnect();
-      scroll.removeEventListener("scroll", scheduleProgress);
-      if (frame !== undefined) cancelAnimationFrame(frame);
+      scroll.removeEventListener("scroll", updateBottom);
       content.style.removeProperty("--reading-sticky-top");
     };
   }, [root, sections, visible, onCurrentTopic]);
 
   return (
-    <>
-      <div ref={progress} className="em-outline-progress" style={{ transform: "scaleX(0)" }} aria-hidden="true" />
-      <nav className="em-outline" aria-label="Writeup outline">
-        <div className="em-outline__label">WRITEUP</div>
-        {sections.map((group) => {
-          const count = counts.get(group.key) ?? 0;
-          return (
-            <button
-              key={group.key}
-              type="button"
-              className="em-outline__item"
-              aria-current={current === group.key ? "location" : undefined}
-              onClick={() => {
-                const section = [...(root.current?.querySelectorAll<HTMLElement>("[data-reading-section]") ?? [])].find(
-                  (node) => node.dataset.readingSection === group.key,
-                );
-                if (!section) return;
-                setCurrent(group.key);
-                onCurrentTopic?.(group.topic?.slug);
-                revealReadingTarget(section);
-                section.scrollIntoView({ block: "start" });
-              }}
-            >
-              {group.rank !== undefined && <TopicRank rank={group.rank} />}
-              <span className="em-outline__text">{group.topic?.title ?? group.heading}</span>
-              {count > 0 && (
-                <span className="em-outline__count" title={`${count} ${plural(count, "comment")}`}>
-                  {count}
-                  <span className="sr-only"> {plural(count, "comment")}</span>
-                </span>
-              )}
-            </button>
+    <div className="em-dash-rail">
+      <DashOutline
+        label="Writeup outline"
+        items={sections.map((group) => ({
+          id: group.key,
+          label: group.topic?.title ?? group.heading,
+          rank: group.rank,
+          count: counts.get(group.key) ?? 0,
+        }))}
+        current={current}
+        onPick={(id) => {
+          const group = sections.find((group) => group.key === id);
+          const section = [...(root.current?.querySelectorAll<HTMLElement>("[data-reading-section]") ?? [])].find(
+            (node) => node.dataset.readingSection === id,
           );
-        })}
-      </nav>
-    </>
+          if (!section) return;
+          setCurrent(id);
+          onCurrentTopic?.(group?.topic?.slug);
+          revealReadingTarget(section);
+          section.scrollIntoView({ block: "start" });
+        }}
+      />
+    </div>
   );
 }

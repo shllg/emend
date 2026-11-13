@@ -2,14 +2,13 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { RenderedBlock, RenderedWriteup, ThreadView, TopicMeta } from "@emend/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { clearDraft, draftKey, editDraftKey, saveDraft } from "../../lib/drafts.ts";
 import { layoutStore } from "../../lib/layout-store.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
 import { DocView } from "./DocView.tsx";
 import { Writeup } from "./Writeup.tsx";
-import { OUTLINE_MIN_WIDTH, OUTLINE_WIDTH } from "./WriteupOutline.tsx";
 
 const reviewId = "11111111-1111-4111-8111-111111111111";
 const block: RenderedBlock = {
@@ -64,7 +63,7 @@ beforeEach(() => {
   localStorage.clear();
   window.dispatchEvent(new StorageEvent("storage", { key: null, storageArea: localStorage }));
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
-  layoutStore.update({ contents: true, compact: true });
+  layoutStore.update({ compact: true });
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   observers = [];
   frames = new Map();
@@ -141,16 +140,10 @@ function flushFrames() {
   });
 }
 
-test.each([
-  { contents: true, compact: false },
-  { contents: false, compact: true },
-  { contents: true, compact: true },
-  { contents: false, compact: false },
-])("writeup effects are independent with contents=$contents compact=$compact", ({ contents, compact }) => {
-  layoutStore.update({ contents, compact });
+test.each([false, true])("writeup outline stays visible with compact=%s", (compact) => {
+  layoutStore.update({ compact });
   const view = mount();
-  expect(!!screen.queryByRole("navigation", { name: "Writeup outline" })).toBe(contents);
-  expect(!!view.container.querySelector(".em-outline-progress")).toBe(contents);
+  expect(screen.getByRole("navigation", { name: "Writeup outline" })).toBeTruthy();
   expect(view.container.querySelector(".em-reading-column")?.className).toBe(
     "em-reading-column pt-4 pb-8 md:pt-7 md:pb-[72px]",
   );
@@ -168,7 +161,7 @@ test.each([
 
 test.each([false, true])("Markdown doc comments honor compact independently and stay open on phone=%s", (phone) => {
   vi.stubGlobal("matchMedia", () => ({ matches: !phone, addEventListener() {}, removeEventListener() {} }));
-  layoutStore.update({ contents: false, compact: true });
+  layoutStore.update({ compact: true });
   const doc = { kind: "markdown" as const, path: "garden.md", blocks: [block] };
   const docThread: ThreadView = {
     ...thread,
@@ -209,20 +202,73 @@ test.each([false, true])("Markdown doc comments honor compact independently and 
   }
 });
 
-test("Contents keeps the standard measure and the outline hides below 640px", () => {
+test("a writeup with only one outline section has no rail", () => {
+  mount({ writeup: { sections: writeup.sections.slice(0, 1) }, topics: [] });
+  expect(screen.queryByRole("navigation", { name: "Writeup outline" })).toBeNull();
+  expect(document.querySelector(".em-outline-layout")).toBeNull();
+});
+
+test.each([false, true])(
+  "Markdown headings use the dash outline off phone and the Contents menu on phone=%s",
+  async (phone) => {
+    vi.stubGlobal("matchMedia", () => ({ matches: !phone, addEventListener() {}, removeEventListener() {} }));
+    const headings = [
+      { id: "intro", text: "Introduction", level: 2 as const },
+      { id: "detail", text: '<img src=x onerror="alert(1)">', level: 3 as const },
+      { id: "end", text: "Conclusion", level: 2 as const },
+    ] as const;
+    const doc = { kind: "markdown" as const, path: "garden.md", blocks: [], headings: [...headings] };
+    const onHeading = vi.fn();
+    const view = render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <DocView
+            reviewId={reviewId}
+            revision={1}
+            docs={[doc]}
+            openDoc={doc}
+            search={{ tab: "docs", doc: doc.path }}
+            targeted={false}
+            onOpenDoc={() => {}}
+            onHeading={onHeading}
+            threads={[]}
+            changedBlocks={[]}
+          />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    expect(view.container.querySelector(".em-doc-contents-rail")).toBeNull();
+    if (phone) {
+      expect(view.container.querySelector(".em-dash-rail")).toBeNull();
+      expect(screen.queryByRole("navigation", { name: "Document contents" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Contents" }));
+      await screen.findByRole("dialog", { name: "Contents" });
+    } else {
+      expect(screen.queryByRole("button", { name: "Contents" })).toBeNull();
+      expect(view.container.querySelector(".em-doc-body > .em-dash-rail")).toBeTruthy();
+    }
+    const nav = screen.getByRole("navigation", { name: "Document contents" });
+    expect(within(nav).getAllByRole("button")).toHaveLength(3);
+    const title = within(nav).getByText(headings[1].text);
+    expect(title.getAttribute("dir")).toBe("auto");
+    expect(nav.querySelector("img")).toBeNull();
+    fireEvent.click(within(nav).getByRole("button", { name: headings[1].text }));
+    flushFrames();
+    await waitFor(() => expect(onHeading).toHaveBeenCalledExactlyOnceWith("detail"));
+  },
+);
+
+test("dash outline expands only on hover or visible keyboard focus and overlays from the right", () => {
   const outline = readFileSync(resolve(import.meta.dirname, "../../styles/outline.css"), "utf8");
-  expect(outline).toContain(`grid-template-columns: ${OUTLINE_WIDTH}px minmax(0, 1fr);`);
-  expect(outline).toContain(`@container reading (width < ${OUTLINE_MIN_WIDTH}px)`);
-  expect(outline).not.toMatch(/max-width|62ch/);
+  expect(outline).toContain("grid-template-columns: minmax(0, 1fr) 28px;");
+  expect(outline).toContain(".em-dash-outline:is(:hover, :has(:focus-visible))");
+  expect(outline).not.toMatch(/:focus-within|@container reading|transition:|display: none/);
+  expect(outline).toContain("clip: rect(0, 0, 0, 0);");
+  expect(outline).toContain("@media (pointer: coarse)");
+  expect(outline).toContain("min-height: 44px;");
   expect(outline).toMatch(
     /\.em-outline-layout \.em-reading-group,\s*\.em-outline-layout \[id\]\s*\{\s*scroll-margin-top: calc\(var\(--reading-sticky-top\) \+ 14px\);/,
   );
-  expect(outline).toMatch(
-    /@container reading \(width < 640px\)\s*\{\s*\.em-outline-layout\s*\{\s*grid-template-columns: minmax\(0, 1fr\);\s*\}\s*\.em-outline\s*\{\s*display: none;/,
-  );
-  const reading = readFileSync(resolve(import.meta.dirname, "../../styles/reading.css"), "utf8");
-  expect(reading).toMatch(/\.em-reading-column\s*\{\s*--reading-max:\s*1000px;\s*\}/);
-  expect(reading).not.toMatch(/\.em-reading-column:not\(/);
 });
 
 test("outline has one row per section, topic ranks and placed thread counts", () => {
@@ -232,7 +278,7 @@ test("outline has one row per section, topic ranks and placed thread counts", ()
     target: { kind: "topic", slug: "seed" },
     placement: { status: "placed", location: { kind: "topic", slug: "seed" } },
   };
-  mount({
+  const view = mount({
     threads: [
       thread,
       { ...thread, id: "resolved", state: "resolved" },
@@ -250,6 +296,12 @@ test("outline has one row per section, topic ranks and placed thread counts", ()
   ]);
   expect(outline.getByRole("button", { name: "Overview 2 comments" }).getAttribute("aria-current")).toBe("location");
   expect(screen.getAllByRole("heading", { name: "Topic 1: Plant a seed" })).toHaveLength(1);
+  const nav = screen.getByRole("navigation", { name: "Writeup outline" });
+  expect(nav.querySelectorAll(".em-dash-outline__dash")).toHaveLength(5);
+  expect([...nav.querySelectorAll(".em-dash-outline__text")].every((node) => node.getAttribute("dir") === "auto")).toBe(
+    true,
+  );
+  expect(view.container.querySelector(".em-outline-layout")?.firstElementChild?.contains(nav)).toBe(true);
 });
 
 test("outline reveals folded topics and the glossary before scrolling their existing sections", () => {
@@ -263,6 +315,7 @@ test("outline reveals folded topics and the glossary before scrolling their exis
   fireEvent.click(outline.getByRole("button", { name: "Plant a seed" }));
   expect(outline.getByRole("button", { name: "Plant a seed" }).getAttribute("aria-current")).toBe("location");
   expect(hiddenAtScroll).toBe(false);
+  expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({ block: "start" });
   expect(fold.getAttribute("aria-expanded")).toBe("true");
   expect(vi.mocked(HTMLElement.prototype.scrollIntoView).mock.instances).toContain(
     document.getElementById("topic-seed"),
@@ -274,7 +327,7 @@ test("outline reveals folded topics and the glossary before scrolling their exis
   expect(outline.getByRole("button", { name: "Glossary" }).getAttribute("aria-current")).toBe("location");
 });
 
-test("one header observer follows the current section and scroll only queues progress", () => {
+test("one header observer follows the current section without measuring every scroll", () => {
   const onCurrentTopic = vi.fn();
   mount({ onCurrentTopic });
   const observer = observers.at(-1);
@@ -293,46 +346,19 @@ test("one header observer follows the current section and scroll only queues pro
   expect(bounds).not.toHaveBeenCalled();
 });
 
-test("progress is aria-hidden, clamped, frame-coalesced and suspended with the pane", () => {
+test("section tracking suspends with the hidden pane and resumes when shown", () => {
   const onCurrentTopic = vi.fn();
-  const props = { onCurrentTopic };
-  const view = mount(props);
-  const pane = screen.getByTestId("scroll");
-  Object.defineProperties(pane, {
-    clientHeight: { configurable: true, value: 500 },
-    scrollHeight: { configurable: true, value: 1500 },
-  });
-  const progress = view.container.querySelector<HTMLElement>(".em-outline-progress");
-  expect(progress?.getAttribute("aria-hidden")).toBe("true");
-  pane.scrollTop = 500;
-  fireEvent.scroll(pane);
-  fireEvent.scroll(pane);
-  expect(frames.size).toBe(1);
-  flushFrames();
-  expect(progress?.style.transform).toBe("scaleX(0.5)");
-  pane.scrollTop = 2000;
-  fireEvent.scroll(pane);
-  flushFrames();
-  expect(progress?.style.transform).toBe("scaleX(1)");
-  pane.scrollTop = -10;
-  fireEvent.scroll(pane);
-  flushFrames();
-  expect(progress?.style.transform).toBe("scaleX(0)");
-  fireEvent.scroll(pane);
+  const view = mount({ onCurrentTopic });
   const observer = observers.at(-1);
-  view.rerender(props, false);
-  expect(frames.size).toBe(0);
+  view.rerender({ onCurrentTopic }, false);
   expect(observer?.disconnect).toHaveBeenCalled();
   onCurrentTopic.mockClear();
   act(() => observer?.callback());
-  fireEvent.scroll(pane);
-  expect(frames.size).toBe(0);
+  fireEvent.scroll(screen.getByTestId("scroll"));
   expect(onCurrentTopic).not.toHaveBeenCalled();
-  pane.scrollTop = 750;
-  view.rerender(props, true);
+  view.rerender({ onCurrentTopic }, true);
   expect(observers.at(-1)).not.toBe(observer);
-  flushFrames();
-  expect(progress?.style.transform).toBe("scaleX(0.75)");
+  expect(onCurrentTopic).toHaveBeenCalled();
 });
 
 test("a pane mounted hidden starts observing only when shown", () => {
@@ -417,15 +443,14 @@ test("selection commenting uses the same anchor and keeps the selected block's t
   window.getSelection()?.removeAllRanges();
 });
 
-test("turning both switches off restores cards without replacing blocks or fold choices", () => {
+test("turning compact comments off restores cards without replacing blocks or fold choices", () => {
   const view = mount();
   const content = document.getElementById(`block-${block.id}`);
   const title = screen.getByRole("heading", { name: "Topic 1: Plant a seed" });
   const fold = screen.getByRole("button", { name: "Topic 1: Plant a seed" });
   fireEvent.click(fold);
-  act(() => layoutStore.update({ contents: false, compact: false }));
-  expect(screen.queryByRole("navigation", { name: "Writeup outline" })).toBeNull();
-  expect(view.container.querySelector(".em-outline-progress")).toBeNull();
+  act(() => layoutStore.update({ compact: false }));
+  expect(screen.getByRole("navigation", { name: "Writeup outline" })).toBeTruthy();
   expect(view.container.querySelector(".em-reading-column")?.className).toBe(
     "em-reading-column pt-4 pb-8 md:pt-7 md:pb-[72px]",
   );
@@ -435,20 +460,20 @@ test("turning both switches off restores cards without replacing blocks or fold 
   expect(fold.getAttribute("aria-expanded")).toBe("true");
 });
 
-test("phone disables both effects even when both preferences are stored", () => {
+test("phone disables the outline and stored compact comments", () => {
   mount({ phone: true });
   expect(screen.queryByRole("navigation", { name: "Writeup outline" })).toBeNull();
   expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
-  expect(layoutStore.getSnapshot()).toMatchObject({ contents: true, compact: true });
+  expect(layoutStore.getSnapshot()).toMatchObject({ compact: true });
 });
 
 test("an open reply composer survives enabling compact comments and cannot be folded", async () => {
-  layoutStore.update({ contents: false, compact: false });
+  layoutStore.update({ compact: false });
   mount();
   fireEvent.click(screen.getByRole("button", { name: "Reply" }));
   const input = screen.getByRole("textbox");
   await act(async () => {});
-  act(() => layoutStore.update({ contents: true, compact: true }));
+  act(() => layoutStore.update({ compact: true }));
   expect(screen.getByRole("textbox")).toBe(input);
   expect(screen.queryByRole("button", { name: "Hide" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -465,7 +490,7 @@ test("a pending thread navigation opens its pill when placement data arrives", (
   expect(screen.getByRole("button", { name: "Hide" })).toBeTruthy();
 });
 
-test("with both switches off and on phone there is no query container and thread wrappers are layout-neutral", () => {
+test("thread wrappers stay layout-neutral outside compact comments, including on phone", () => {
   const style = document.createElement("style");
   // Happy DOM does not apply cascade layers; use the actual component declarations.
   style.textContent = ["outline.css", "threads.css"]
@@ -477,11 +502,11 @@ test("with both switches off and on phone there is no query container and thread
     .join("\n");
   document.head.append(style);
   try {
-    layoutStore.update({ contents: false, compact: false });
+    layoutStore.update({ compact: false });
     const view = mount();
     const card = document.getElementById(`thread-${thread.id}`);
     expect(card).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /comment|Hide/ })).not.toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^(?:\d+ comments?|Hide)$/ })).not.toBeTruthy();
     expect(view.container.querySelector(".em-outline-container")).toBeNull();
     expect(getComputedStyle(screen.getByTestId("scroll")).getPropertyValue("container")).toBe("");
     for (const wrapper of view.container.querySelectorAll(".em-block-threads, .em-block-threads__cards")) {
@@ -494,8 +519,6 @@ test("with both switches off and on phone there is no query container and thread
       expect(getComputedStyle(wrapper).display).toBe("block");
     }
     expect(getComputedStyle(screen.getByRole("button", { name: "Hide" })).display).toBe("inline-flex");
-    act(() => layoutStore.update({ contents: true }));
-    expect(view.container.querySelector(".em-outline-container")).toBeTruthy();
     expect(getComputedStyle(screen.getByTestId("scroll")).getPropertyValue("container")).toBe("");
     view.rerender({ phone: true });
     expect(view.container.querySelector(".em-outline-container")).toBeNull();
@@ -508,7 +531,7 @@ test("with both switches off and on phone there is no query container and thread
   }
 });
 
-test("sticky offset follows the measured tab row, and is removed with Contents off", () => {
+test("sticky offset follows the measured tab row, and is removed on phone", () => {
   let resize: (() => void) | undefined;
   const observed: Element[] = [];
   vi.stubGlobal(
@@ -540,7 +563,7 @@ test("sticky offset follows the measured tab row, and is removed with Contents o
   tabRow.remove();
   act(() => resize?.());
   expect(root?.style.getPropertyValue("--reading-sticky-top")).toBe("0px");
-  act(() => layoutStore.update({ contents: false, compact: false }));
+  view.rerender({ phone: true });
   expect(root?.style.getPropertyValue("--reading-sticky-top")).toBe("");
 });
 
@@ -669,7 +692,7 @@ test("only a new matching jump token reopens a hidden pill", () => {
   expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
 });
 
-test("a writeup that fits the pane keeps its first section current after the progress frame", () => {
+test("a writeup that fits the pane keeps its first section current on scroll", () => {
   vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(600);
   positions.set("overview", 26);
   positions.set("tldr", 140);
@@ -680,7 +703,7 @@ test("a writeup that fits the pane keeps its first section current after the pro
   const outline = within(screen.getByRole("navigation", { name: "Writeup outline" }));
   const overview = outline.getByRole("button", { name: "Overview 1 comment" });
   expect(overview.getAttribute("aria-current")).toBe("location");
-  flushFrames();
+  fireEvent.scroll(screen.getByTestId("scroll"));
   expect(overview.getAttribute("aria-current")).toBe("location");
   expect(outline.getByRole("button", { name: "Plant a seed" }).hasAttribute("aria-current")).toBe(false);
 });

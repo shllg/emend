@@ -466,6 +466,7 @@ test.each([767, 768, 1279, 1280, 390])(
   "review retains tablet panes and mounts only the active phone pane at %s px",
   async (size) => {
     width = size;
+    layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
     mount(`/r/${id}`);
     await screen.findByText("Overview");
     expect(screen.getAllByTestId(/-pane$/)).toHaveLength(size >= 1280 ? 3 : size >= 768 ? 2 : 1);
@@ -675,6 +676,7 @@ test("phone inbox menu offers Devices and Pair a device", async () => {
 });
 
 test("hides Docs without docs, defaults bad search values, and keeps diff visible on desktop", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   fetchMock.mockImplementation(async (path: string) => {
     if (path.endsWith("/revisions/1")) return Response.json({ ...revision, docs: [] });
     if (path === "/api/v1/reviews")
@@ -1784,6 +1786,7 @@ function withDiff(threads: ThreadView[] = [diffThread], file: Partial<FileView> 
   );
 }
 test("Resume claims the Comments reply from the diff, focuses it and keeps thread ids unique", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   withDiff([
     { ...diffThread, comments: diffThread.comments.map((comment) => ({ ...comment, sent: true, sentOn: 1 })) },
   ]);
@@ -1844,6 +1847,7 @@ test("Resume of a lines draft opens the phone Diff tab and focuses its file comp
   expect(screen.queryByRole("region", { name: "Resumed comment" })).toBeNull();
 });
 test("a delayed diff reply save cannot clear newer text after Comments claims the key", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   withDiff([
     { ...diffThread, comments: diffThread.comments.map((comment) => ({ ...comment, sent: true, sentOn: 1 })) },
   ]);
@@ -1894,6 +1898,7 @@ test("a delayed diff reply save cannot clear newer text after Comments claims th
   await waitFor(() => expect(reading.queryByRole("textbox", { name: "Reply" })).toBeNull());
 });
 test("a pending edit resumes in Comments and a completed PATCH preserves newer edit text", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   withDiff();
   const fallback = fetchMock.getMockImplementation();
   let finish = () => {};
@@ -2049,6 +2054,7 @@ test.each(["writeup", "docs"] as const)(
 );
 
 test("an unplaced reading draft resumed beside Diff stays visible when resized to a phone", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   openingRevision({ files: [{ ...diffFile, topic: null }], writeup: { sections: [] } });
   localStorage.setItem(draftKey(id, draftTarget), "Unplaced writeup draft");
   const { history } = mount(`/r/${id}?tab=diff`);
@@ -3222,9 +3228,7 @@ test("pane defaults and choices are independent across desktop, tablet and phone
   const { history } = mount(`/r/${id}`);
   await screen.findByText("Overview");
   const paneControls = () => within(screen.getByRole("radiogroup", { name: "Panes" }));
-  expect(paneControls().getByRole("radio", { name: "Split" }).getAttribute("aria-checked")).toBe("true");
-  expect(screen.queryByRole("tab", { name: "Diff" })).toBeNull();
-  fireEvent.click(paneControls().getByRole("radio", { name: "Tabs" }));
+  expect(paneControls().getByRole("radio", { name: "Tabs" }).getAttribute("aria-checked")).toBe("true");
   expect(screen.getByTestId("diff-pane").hidden).toBe(true);
   expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
     "Writeup",
@@ -3334,8 +3338,40 @@ test.each([1280, 900, 390])("text menu changes validated app variables at %s px"
   await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 });
 
+test.each([1280, 900])("Width menu changes the reading measure at %s px", async (size) => {
+  width = size;
+  const { container } = mount(`/r/${id}`);
+  await screen.findByText("Overview");
+  const root = container.querySelector<HTMLElement>(".em-app");
+  expect(root?.style.getPropertyValue("--reader-measure")).toBe("1024px");
+  for (const [value, label, measure] of [
+    ["wide", "Wide 1248px", "1248px"],
+    ["narrow", "Narrow 68ch", "68ch"],
+    ["comfortable", "Comfortable 1024px", "1024px"],
+  ]) {
+    fireEvent.keyDown(screen.getByRole("button", { name: "Reading width" }), { key: "ArrowDown" });
+    const menu = within(await screen.findByRole("menu", { name: "Reading width" }));
+    fireEvent.click(menu.getByRole("menuitemradio", { name: label }));
+    expect(layoutStore.getSnapshot().readingWidth).toBe(value);
+    expect(root?.style.getPropertyValue("--reader-measure")).toBe(measure);
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  }
+});
+
+test("phone menus omit reading width", async () => {
+  width = 390;
+  mount(`/r/${id}`);
+  await screen.findByText("Overview");
+  expect(screen.queryByRole("button", { name: "Reading width" })).toBeNull();
+  fireEvent.keyDown(screen.getByRole("button", { name: "More" }), { key: "ArrowDown" });
+  const menu = within(await screen.findByRole("menu", { name: "More" }));
+  expect(menu.queryByRole("group", { name: "Reading width" })).toBeNull();
+  expect(menu.queryByRole("menuitemradio", { name: "Comfortable 1024px" })).toBeNull();
+});
+
 test.each([1280, 800, 390])("Files tab count excludes stale marks and row opens the diff at %s px", async (size) => {
   width = size;
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   openingRevision({
     files: [
       { ...diffFile, viewed: "stale", viewedOn: 1 },
@@ -3392,6 +3428,7 @@ test.each([1280, 800, 390])(
 );
 
 test.each([false, true])("viewed mutation collapses optimistically and handles failure=%s", async (fail) => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   const fallback = fetchMock.getMockImplementation();
   const response = Promise.withResolvers<Response>();
   let viewed = false;
@@ -3455,6 +3492,7 @@ test.each([false, true])("viewed mutation collapses optimistically and handles f
 });
 
 test.each(["diff file header", "Files tab"])("stale viewed mark in the %s can be checked once", async (place) => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   const fallback = fetchMock.getMockImplementation();
   let viewed = false;
   fetchMock.mockImplementation(async (path, init) => {
@@ -3542,6 +3580,7 @@ test("topic viewed box sends every file in one request and marks them all", asyn
 });
 
 test("viewed events update boxes without changing folds; focus alone does not refetch revisions", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   let state: "viewed" | "stale" = "viewed";
   const fallback = fetchMock.getMockImplementation();
   fetchMock.mockImplementation(async (path, init) =>

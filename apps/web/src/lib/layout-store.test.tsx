@@ -13,8 +13,8 @@ test("defaults include independent pane choices and D.4's 12px code size", () =>
   expect(createLayoutStore().getSnapshot()).toEqual({
     inboxWidth: 280,
     readingShare: 0.42,
-    pane: { desktop: "split", tablet: "tabs" },
-    contents: false,
+    pane: { desktop: "tabs", tablet: "tabs" },
+    readingWidth: "comfortable",
     compact: false,
     diffStyle: "split",
     wrap: false,
@@ -38,7 +38,7 @@ test("invalid fields fall back independently, including each device choice", () 
       inboxWidth: 521,
       readingShare: 0.6,
       pane: { desktop: "invalid", tablet: "split" },
-      contents: "true",
+      readingWidth: "invalid",
       compact: true,
       diffStyle: "unified",
       wrap: "true",
@@ -51,8 +51,8 @@ test("invalid fields fall back independently, including each device choice", () 
   expect(createLayoutStore().getSnapshot()).toEqual({
     ...defaultLayout,
     readingShare: 0.6,
-    pane: { desktop: "split", tablet: "split" },
-    contents: false,
+    pane: { desktop: "tabs", tablet: "split" },
+    readingWidth: "comfortable",
     compact: true,
     diffStyle: "unified",
     inboxCollapsed: true,
@@ -60,23 +60,66 @@ test("invalid fields fall back independently, including each device choice", () 
   });
 });
 test.each([
-  ['{"reading":"focus"}', true, true],
-  ['{"reading":"focus","contents":false}', false, true],
-  ['{"reading":"focus","compact":false}', true, false],
-  ['{"reading":"focus","contents":false,"compact":false}', false, false],
-  ['{"reading":"focus","contents":"true","compact":null}', false, false],
-  ['{"reading":"standard"}', false, false],
-  ['{"reading":"standard","contents":true}', true, false],
-] as const)("legacy preference %s migrates without overriding explicit switches", (raw, contents, compact) => {
+  ['{"reading":"focus"}', true],
+  ['{"reading":"focus","compact":false}', false],
+  ['{"reading":"focus","compact":null}', false],
+  ['{"reading":"standard"}', false],
+  ['{"reading":"standard","compact":true}', true],
+] as const)("legacy preference %s migrates without overriding explicit compact", (raw, compact) => {
   localStorage.setItem(layoutKey, raw);
   const store = createLayoutStore();
-  expect(store.getSnapshot()).toEqual({ ...defaultLayout, contents, compact });
+  expect(store.getSnapshot()).toEqual({ ...defaultLayout, compact });
   expect(store.getSnapshot()).not.toHaveProperty("reading");
   store.update({ wrap: true });
   const saved = JSON.parse(localStorage.getItem(layoutKey) ?? "{}");
-  expect(saved).toMatchObject({ contents, compact, wrap: true });
+  expect(saved).toMatchObject({ compact, wrap: true });
   expect(saved).not.toHaveProperty("reading");
   expect(createLayoutStore().getSnapshot()).toEqual(saved);
+});
+
+test("the old desktop default moves to Tabs once, preserving tablet and other choices", () => {
+  localStorage.setItem(layoutKey, JSON.stringify({ pane: { desktop: "split", tablet: "split" }, proseSize: 18 }));
+  const write = vi.spyOn(localStorage, "setItem");
+  const store = createLayoutStore();
+  expect(write).toHaveBeenCalledTimes(1);
+  expect(store.getSnapshot()).toMatchObject({
+    pane: { desktop: "tabs", tablet: "split" },
+    readingWidth: "comfortable",
+    proseSize: 18,
+  });
+  expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}")).toEqual(store.getSnapshot());
+  write.mockClear();
+  store.getSnapshot();
+  createLayoutStore();
+  expect(write).not.toHaveBeenCalled();
+  store.update({ pane: { desktop: "split", tablet: "split" } });
+  expect(createLayoutStore().getSnapshot().pane.desktop).toBe("split");
+});
+
+test("a stored reading width preserves a chosen desktop Split", () => {
+  localStorage.setItem(layoutKey, JSON.stringify({ pane: { desktop: "split", tablet: "tabs" }, readingWidth: "wide" }));
+  const write = vi.spyOn(localStorage, "setItem");
+  expect(createLayoutStore().getSnapshot()).toMatchObject({ pane: { desktop: "split" }, readingWidth: "wide" });
+  expect(write).not.toHaveBeenCalled();
+});
+
+test("choosing Split in a new store survives the next store creation", () => {
+  createLayoutStore().update({ pane: { desktop: "split", tablet: "tabs" } });
+  expect(createLayoutStore().getSnapshot().pane.desktop).toBe("split");
+});
+
+test("snapshot reads migrate old values in memory without writing", () => {
+  const store = createLayoutStore();
+  localStorage.setItem(layoutKey, JSON.stringify({ pane: { desktop: "split", tablet: "split" } }));
+  const write = vi.spyOn(localStorage, "setItem");
+  expect(store.getSnapshot().pane).toEqual({ desktop: "tabs", tablet: "split" });
+  expect(write).not.toHaveBeenCalled();
+});
+
+test("obsolete Contents is stripped from preferences", () => {
+  localStorage.setItem(layoutKey, '{"contents":true}');
+  expect(createLayoutStore().getSnapshot()).not.toHaveProperty("contents");
+  expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}")).not.toHaveProperty("contents");
 });
 
 test.each(["{", "null", "[]", '"text"'])("bad root %s uses defaults", (raw) => {

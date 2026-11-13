@@ -25,6 +25,7 @@ import type { ReviewSearch } from "../../router.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { BlockReader, type ReaderGroup, type ReaderProps } from "./BlockReader.tsx";
+import { DashOutline } from "./DashOutline.tsx";
 import { DocContents, useCurrentHeading } from "./DocContents.tsx";
 import { HtmlDocFrame, type HtmlNavigation } from "./HtmlDocFrame.tsx";
 import { ReadingMenu } from "./ReadingMenu.tsx";
@@ -97,7 +98,7 @@ export function DocView({
         ? []
         : openDoc?.kind === "html"
           ? (openDoc.headings ?? []).map((heading, index) => ({ ...heading, id: String(index) }))
-          : (openDoc?.headings?.filter((heading) => heading.id) ?? []),
+          : (openDoc?.headings?.flatMap((heading) => (heading.id ? [{ ...heading, id: heading.id }] : [])) ?? []),
     [openDoc],
   );
   const frameReading = useMemo(
@@ -321,18 +322,12 @@ export function DocView({
               <span className="em-doc-control-label">Comments ({commentCount})</span>
             </Button>
           )}
-          {hasContents && (
-            <span className="em-doc-contents-control">
-              <ReadingMenu label="Contents" icon={List}>
-                {(pick) => (
-                  <DocContents
-                    headings={headings}
-                    current={currentHeading}
-                    onPick={(id) => pick(() => onHeading(id))}
-                  />
-                )}
-              </ReadingMenu>
-            </span>
+          {hasContents && phone && (
+            <ReadingMenu label="Contents" icon={List}>
+              {(pick) => (
+                <DocContents headings={headings} current={currentHeading} onPick={(id) => pick(() => onHeading(id))} />
+              )}
+            </ReadingMenu>
           )}
           {docs.length > 1 && (
             <Button asChild variant="ghost" className="em-doc-control">
@@ -370,9 +365,14 @@ export function DocView({
         ) : (
           <BlockReader key={docKey(openDoc)} {...props} groups={groups} compact={!phone && compact} />
         )}
-        {hasContents && (
-          <aside className="em-doc-contents-rail">
-            <DocContents headings={headings} current={currentHeading} onPick={onHeading} />
+        {hasContents && !phone && (
+          <aside className="em-dash-rail">
+            <DashOutline
+              label="Document contents"
+              items={headings.map((heading) => ({ id: heading.id, label: heading.text, level: heading.level }))}
+              current={currentHeading}
+              onPick={onHeading}
+            />
           </aside>
         )}
       </div>
