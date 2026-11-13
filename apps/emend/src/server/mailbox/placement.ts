@@ -109,17 +109,17 @@ export async function computePlacements(
       }
       const writeup = target.kind === "writeup-span" ? (snapshot.writeup?.renderedBlob ?? null) : null;
       if (writeup) await read(writeup);
+      const topicText =
+        target.kind === "topic" && target.part
+          ? new Map(
+              snapshot.topics.map((t) => {
+                if (t.title === undefined || t.summary === undefined) throw new Error("Missing topic placement text");
+                return [t.slug, { title: t.title, summary: t.summary }];
+              }),
+            )
+          : undefined;
       let placed: Awaited<ReturnType<Executor>>;
       try {
-        const topicText =
-          target.kind === "topic" && target.part
-            ? new Map(
-                snapshot.topics.map((t) => {
-                  if (t.title === undefined || t.summary === undefined) throw new Error("Missing topic placement text");
-                  return [t.slug, { title: t.title, summary: t.summary }];
-                }),
-              )
-            : undefined;
         placed = await abortable(deps.signal, () =>
           run({
             kind: "place",

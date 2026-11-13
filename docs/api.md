@@ -1209,10 +1209,11 @@ doc spans retain `path` and `blockId`; HTML spans retain `path`. Line locations 
 Topic locations carry `slug`, plus `part`, `start`, `end` for a quote, with span offsets within the
 normalized title or summary text. File and review locations use the same fields as their targets.
 Placement describes the newest revision; a thread keeps its original target separately.
-A topic quote matches with its prefix and suffix, never the quote alone: first in the part it was
-last placed on (or the target's part), when the context match occurs exactly once there; otherwise
-when it occurs exactly once across the topic's title and summary. Otherwise it is unplaced as
-`ambiguous` or `block-gone`; a gone topic is `topic-gone`.
+A topic quote matches with its recorded prefix and suffix (empty for a whole title or summary),
+never by the quote alone within a reworded part: first in the part it was last placed on (or the
+target's part), when that match occurs exactly once there; otherwise when it occurs exactly once
+across the topic's title and summary. Otherwise it is unplaced as `ambiguous` or `block-gone`;
+a gone topic is `topic-gone`.
 
 ### Snooze, retire, delete and the bin
 
