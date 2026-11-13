@@ -1,11 +1,14 @@
-import type { PublishLinks, TopicMeta, WriteupInput } from "@emend/contract";
+import { type GlossaryTerm, LIMITS, type PublishLinks, type TopicMeta, type WriteupInput } from "@emend/contract";
 import type { DocLinks } from "../links.ts";
 import type { Block } from "./blocks.ts";
 import { renderMarkdownWithBudget } from "./markdown.ts";
+import { normalizeText } from "./normalize.ts";
 import type { MediaSize } from "./sanitize.ts";
+import { normalizeTerm, termMatcher } from "./terms.ts";
 
 export type RenderedWriteup = {
   sections: { key: string; label: string; topic: string | null; blocks: Block[] }[];
+  terms?: GlossaryTerm[];
   /** Publish-level links and the repo base, kept beside the sections in the stored blob. */
   links?: PublishLinks;
   repoUrl?: string;
@@ -30,6 +33,9 @@ export async function renderWriteup(
 ): Promise<RenderedWriteup> {
   const sections: RenderedWriteup["sections"] = [];
   const highlightBudget = { highlightedBytes: 0 };
+  const entries = Array.isArray(writeup.glossary) ? writeup.glossary : undefined;
+  const terms: GlossaryTerm[] = [];
+  const matcher = entries ? termMatcher(entries) : undefined;
   const append = async (key: string, label: string, markdown: string | undefined, topic: string | null = null) => {
     if (markdown === undefined) return;
     sections.push({
@@ -46,6 +52,7 @@ export async function renderWriteup(
         "",
         meta.effects,
         meta.mediaSizes,
+        key === "glossary" ? undefined : matcher,
       ),
     });
   };
@@ -61,7 +68,52 @@ export async function renderWriteup(
     await append("tldr", "TL;DR", writeup.tldr);
   }
   await append("decisions", "Decisions and drift", writeup.decisions ?? unwrittenDecisions);
-  await append("glossary", "Glossary", writeup.glossary);
+  if (entries) {
+    const glossaryBlocks: Block[] = [];
+    const occurrences = new Map<string, number>();
+    for (const entry of entries) {
+      const escaped = normalizeTerm(entry.term).replace(/[!-/:-@[-`{-~]/g, "\\$&");
+      const definition = entry.definition.replace(/\r\n?/g, "\n").replace(/\n/g, "\n  ");
+      const rendered = await renderMarkdownWithBudget(
+        `- **${escaped}:** ${definition}`,
+        "glossary",
+        highlightBudget,
+        meta.repoUrl,
+        meta.media,
+        meta.docs,
+        "",
+        meta.effects,
+        meta.mediaSizes,
+      );
+      for (const block of rendered) {
+        const base = block.id.slice(0, "glossary-".length + 8);
+        const count = (occurrences.get(base) ?? 0) + 1;
+        occurrences.set(base, count);
+        block.id = count === 1 ? base : `${base}-${count}`;
+        glossaryBlocks.push(block);
+      }
+      const first = rendered[0];
+      if (!first) throw new Error("glossary entry rendered no block");
+      const term = normalizeTerm(entry.term);
+      let text = normalizeText(
+        rendered
+          .filter((block) => block.kind !== "diagram")
+          .map((block) => block.text)
+          .join(" "),
+      );
+      const prefix = normalizeText(`${term}:`);
+      if (text.startsWith(prefix)) text = text.slice(prefix.length).trim();
+      if (text.length > LIMITS.glossaryDefinitionChars) {
+        let cut = LIMITS.glossaryDefinitionChars - 1;
+        if ((text.codePointAt(cut - 1) ?? 0) > 0xffff) cut--;
+        text = `${text.slice(0, cut)}…`;
+      }
+      terms.push({ term, definition: text, blockId: first.id });
+    }
+    sections.push({ key: "glossary", label: "Glossary", topic: null, blocks: glossaryBlocks });
+  } else {
+    await append("glossary", "Glossary", typeof writeup.glossary === "string" ? writeup.glossary : undefined);
+  }
   // ECMAScript's stable sort preserves manifest order for equal importance.
   for (const topic of topics.toSorted((a, b) => a.importance - b.importance)) {
     if (!Object.hasOwn(writeup.topics, topic.slug)) continue;
@@ -73,6 +125,7 @@ export async function renderWriteup(
   }
   return {
     sections,
+    ...(terms.length ? { terms } : {}),
     ...(meta.links?.length ? { links: meta.links } : {}),
     ...(meta.repoUrl ? { repoUrl: meta.repoUrl } : {}),
   };

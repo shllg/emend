@@ -31,10 +31,12 @@ A document that explains a change or a proposal gives the same why and a grounde
 
 Give brief definitions of the domain terms the text uses.
 Prefer existing project meanings and omit general programming terms.
-Write the glossary as a list, one term per item.
-
-- A review writeup holds it in `glossary`.
-- A document that uses such terms holds it under a "Glossary" heading.
+Keep it to at most 12 terms and one short sentence per definition.
+A review writeup holds it in `glossary` as a list of entries with `term`, `definition` and optional `aliases`.
+emend marks each term's first use in every section.
+It shows the definition when the reader points at it.
+Add an alias for another form the text uses, such as an abbreviation.
+A document keeps its glossary as a list under a "Glossary" heading, one term per item.
 
 ## Screenshots
 

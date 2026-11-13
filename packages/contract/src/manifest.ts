@@ -13,6 +13,57 @@ const markdown = z
     "writeup section exceeds the UTF-8 byte limit",
   );
 
+const normalizeGlossaryForm = (text: string) => text.normalize("NFC").replace(/\s+/gu, " ").trim();
+const glossaryForm = z
+  .string()
+  .min(1)
+  .max(LIMITS.glossaryTermChars)
+  .refine(
+    (text) => normalizeGlossaryForm(text).length <= LIMITS.glossaryTermChars,
+    "glossary term exceeds the character limit after normalization",
+  )
+  .refine((text) => /\S/.test(text), "glossary term must not be blank")
+  .refine((text) => text.isWellFormed(), "glossary term must be well-formed UTF-16")
+  .refine(
+    (text) =>
+      !Array.from(text).some((char) => {
+        const code = char.charCodeAt(0);
+        return code < 32 || (code >= 127 && code <= 159) || code === 0x2028 || code === 0x2029;
+      }),
+    "glossary term must not contain control or line-break characters",
+  );
+
+export const GlossaryEntry = z.object({
+  term: glossaryForm,
+  definition: z
+    .string()
+    .min(1)
+    .max(LIMITS.glossaryDefinitionChars)
+    .refine((text) => /\S/.test(text), "glossary definition must not be blank"),
+  aliases: z.array(glossaryForm).max(LIMITS.glossaryAliases).optional(),
+});
+export type GlossaryEntry = z.infer<typeof GlossaryEntry>;
+
+export const Glossary = z
+  .array(GlossaryEntry)
+  .max(LIMITS.glossaryTerms)
+  .superRefine((entries, ctx) => {
+    const seen = new Set<string>();
+    for (const [index, entry] of entries.entries()) {
+      for (const [formIndex, form] of [entry.term, ...(entry.aliases ?? [])].entries()) {
+        const key = normalizeGlossaryForm(form).toLowerCase();
+        if (seen.has(key))
+          ctx.addIssue({
+            code: "custom",
+            path: formIndex === 0 ? [index, "term"] : [index, "aliases", formIndex - 1],
+            message: "duplicate glossary term",
+          });
+        seen.add(key);
+      }
+    }
+  });
+export type Glossary = z.infer<typeof Glossary>;
+
 const writeupInput = z.object({
   overview: markdown,
   tldr: markdown,
@@ -20,7 +71,7 @@ const writeupInput = z.object({
   whereToLook: markdown.optional(),
   context: markdown.optional(),
   decisions: markdown.nullable(),
-  glossary: markdown.optional(),
+  glossary: z.union([markdown, Glossary]).optional(),
   topics: z
     .record(TopicSlug, z.object({ why: markdown, example: markdown.optional(), body: markdown.optional() }))
     .refine((topics) => Object.keys(topics).length <= LIMITS.topicsPerReview, "too many writeup topics")
@@ -43,7 +94,9 @@ export function writeupMarkdown(writeup: WriteupInput): (string | null | undefin
     writeup.whereToLook,
     writeup.context,
     writeup.decisions,
-    writeup.glossary,
+    ...(Array.isArray(writeup.glossary)
+      ? writeup.glossary.flatMap((entry) => [entry.term, entry.definition, ...(entry.aliases ?? [])])
+      : [writeup.glossary]),
     ...Object.values(writeup.topics).flatMap((topic) => [topic.why, topic.example, topic.body]),
   ];
 }

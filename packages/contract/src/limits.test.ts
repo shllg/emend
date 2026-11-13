@@ -370,3 +370,30 @@ describe("response text budgets", () => {
     expect(BlockId.safeParse(blockPrefix + "2".repeat(length - blockPrefix.length)).success).toBe(accepted);
   });
 });
+
+test("glossary lists enforce each ceiling at the edge and one past it", () => {
+  const entry = { term: "Budget", definition: "Attempts." };
+  for (const [extra, accepted] of [
+    [0, true],
+    [1, false],
+  ] as const) {
+    const cases = [
+      Array.from({ length: 50 + extra }, (_, i) => ({ ...entry, term: `Term ${i}` })),
+      [{ ...entry, term: "x".repeat(100 + extra) }],
+      [{ ...entry, aliases: ["x".repeat(100 + extra)] }],
+      [{ ...entry, aliases: Array.from({ length: 8 + extra }, (_, i) => `Alias ${i}`) }],
+      [{ ...entry, definition: "x".repeat(2000 + extra) }],
+    ];
+    for (const glossary of cases) expect(WriteupInput.safeParse({ ...emptyWriteup, glossary }).success).toBe(accepted);
+  }
+  expect(
+    WriteupInput.safeParse({ ...emptyWriteup, glossary: [{ term: "x", definition: "y", aliases: [] }] }).success,
+  ).toBe(true);
+});
+
+test("the writeup byte budget counts every glossary term, definition and alias", () => {
+  const glossary = [{ term: "é", definition: "é", aliases: ["à"] }];
+  const writeup = { ...emptyWriteup, overview: "x".repeat(1048576), tldr: "x".repeat(1048576 - 6), glossary };
+  expect(WriteupInput.safeParse(writeup).success).toBe(true);
+  expect(WriteupInput.safeParse({ ...writeup, tldr: `${writeup.tldr}x` }).success).toBe(false);
+});

@@ -1,10 +1,11 @@
 import type { RenderedWriteup, RevisionView } from "@emend/contract";
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { plural } from "../../lib/count.ts";
 import { useLayoutPreferences } from "../../lib/layout-store.ts";
 import { rankedTopics } from "../../lib/topics.ts";
 import type { ReviewSearch } from "../../router.tsx";
 import { BlockReader, type ReaderGroup, type ReaderProps } from "./BlockReader.tsx";
+import { GlossaryTerms } from "./GlossaryTerms.tsx";
 import { TopicsMap } from "./TopicsMap.tsx";
 import { useCurrentTopic } from "./useCurrentTopic.ts";
 import { WriteupOutline } from "./WriteupOutline.tsx";
@@ -36,6 +37,15 @@ export function Writeup({
   const prefs = useLayoutPreferences();
   const compact = !phone && prefs.compact;
   useEffect(() => () => onCurrentTopic?.(undefined), [onCurrentTopic]);
+  const link = useCallback(
+    (hash: string, diff = false) => {
+      const next = { tab: diff && phone ? "diff" : search.tab, rev: search.rev };
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(next)) if (value !== undefined) params.set(key, String(value));
+      return `/r/${encodeURIComponent(props.reviewId)}${params.size ? `?${params}` : ""}#${hash}`;
+    },
+    [phone, search.tab, search.rev, props.reviewId],
+  );
   const groups = useMemo(() => {
     const ranked = rankedTopics(topics);
     const bySlug = new Map(ranked.map((entry) => [entry.topic.slug, entry]));
@@ -44,12 +54,6 @@ export function Writeup({
       if (file.role === "diff" && file.topic) counts.set(file.topic, (counts.get(file.topic) ?? 0) + 1);
     }
     const fileCount = (slug: string) => counts.get(slug) ?? 0;
-    const link = (hash: string, diff = false) => {
-      const next = { tab: diff && phone ? "diff" : search.tab, rev: search.rev };
-      const params = new URLSearchParams();
-      for (const [key, value] of Object.entries(next)) if (value !== undefined) params.set(key, String(value));
-      return `/r/${encodeURIComponent(props.reviewId)}${params.size ? `?${params}` : ""}#${hash}`;
-    };
     const blockTopics = new Map(
       writeup.sections.flatMap((section) => section.blocks.map((block) => [block.id, section.topic] as const)),
     );
@@ -167,21 +171,24 @@ export function Writeup({
       });
     }
     return groups;
-  }, [writeup.sections, topics, files, search.tab, search.rev, phone, props.reviewId, props.threads]);
+  }, [writeup.sections, topics, files, link, props.threads]);
   const outline = !phone && groups.filter((group) => group.key !== "topics-map").length >= 2;
   useCurrentTopic(root, onCurrentTopic, writeup.sections, visible && !outline);
   return (
-    <div ref={root} className={outline ? "em-outline-layout" : "contents"}>
-      {outline && (
-        <WriteupOutline
-          root={root}
-          groups={groups}
-          threads={props.threads}
-          visible={visible}
-          onCurrentTopic={onCurrentTopic}
-        />
-      )}
-      <BlockReader {...props} topics={topics} groups={groups} compact={compact} files={files} onNote={onNote} />
-    </div>
+    <>
+      <div ref={root} className={outline ? "em-outline-layout" : "contents"}>
+        {outline && (
+          <WriteupOutline
+            root={root}
+            groups={groups}
+            threads={props.threads}
+            visible={visible}
+            onCurrentTopic={onCurrentTopic}
+          />
+        )}
+        <BlockReader {...props} topics={topics} groups={groups} compact={compact} files={files} onNote={onNote} />
+      </div>
+      <GlossaryTerms root={root} terms={writeup.terms} href={(blockId) => link(`block-${blockId}`)} />
+    </>
   );
 }

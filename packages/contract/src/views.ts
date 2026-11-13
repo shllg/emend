@@ -118,8 +118,15 @@ export const RenderedBlock = z.object({
   source: renderedText.optional(),
 });
 export type RenderedBlock = z.infer<typeof RenderedBlock>;
+export const GlossaryTerm = z.object({
+  term: z.string().min(1).max(LIMITS.glossaryTermChars),
+  definition: z.string().max(LIMITS.glossaryDefinitionChars),
+  blockId: BlockId,
+});
+export type GlossaryTerm = z.infer<typeof GlossaryTerm>;
 export const RenderedWriteup = z
   .object({
+    terms: z.array(GlossaryTerm).max(LIMITS.glossaryTerms).optional(),
     sections: z
       .array(
         z.object({

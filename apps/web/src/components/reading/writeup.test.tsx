@@ -736,7 +736,7 @@ test.each(["critical", "review", "skim", undefined] as const)(
   },
 );
 
-test("a changed glossary starts open", () => {
+test("a changed glossary stays folded and opens on navigation", () => {
   mount(
     <Writeup
       {...props}
@@ -745,6 +745,12 @@ test("a changed glossary starts open", () => {
     />,
   );
   const glossary = screen.getByText("Glossary · 1 term").closest("details");
+  expect(glossary?.open).toBe(false);
+  const target = document.getElementById(`block-${block.id}`);
+  expect(target).toBeTruthy();
+  act(() => {
+    target?.dispatchEvent(new Event("emend:reveal-reading", { bubbles: true }));
+  });
   expect(glossary?.open).toBe(true);
   expect(glossary && within(glossary).getByRole("button", { name: "Comment on block" })).toBeTruthy();
 });

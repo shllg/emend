@@ -26,6 +26,7 @@ import {
   sanitizeSchema,
 } from "./sanitize.ts";
 import { limitTables, prepareTables } from "./tables.ts";
+import { markTerms, type TermMatcher } from "./terms.ts";
 
 function isolateDiagrams() {
   return (tree: HtmlRoot) => {
@@ -71,6 +72,7 @@ async function createProcessor() {
   const highlighter = await sharedHighlighter();
   return sanitizedPipeline()
     .use(isolateDiagrams)
+    .use(markTerms)
     .use(limitHighlighting, highlighter.getLoadedLanguages())
     .use(rehypeShiki, highlighter, {
       themes: { light: "github-light", dark: "github-dark" },
@@ -96,6 +98,7 @@ export async function renderMarkdownWithBudget(
   docBase = "",
   effects?: { docBaseUsed?: boolean; docPathUsed?: boolean },
   mediaSizes?: ReadonlyMap<string, MediaSize>,
+  terms?: TermMatcher,
 ): Promise<Block[]> {
   // Check even an empty document: every emitted id must satisfy the contract.
   BlockId.parse(`${section}-00000000`);
@@ -111,6 +114,7 @@ export async function renderMarkdownWithBudget(
     repoUrl,
     media,
     mediaSizes,
+    terms,
     docs,
     docBase,
     docBaseUsed: false,

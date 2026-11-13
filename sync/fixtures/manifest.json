@@ -45,7 +45,7 @@
     "whereToLook": "- **Biggest risk:** An early stop could discard the final attempt.\n- **Check first:** Read `src/retry.ts` in Retry budget.",
     "context": "- The request loop and its PRD change.\n- No new dependency.\n- The retry budget follows `docs/adr/2026-07-01-retries.md`.",
     "decisions": null,
-    "glossary": "- **Retry budget:** The total number of attempts allowed for one request.",
+    "glossary": [{ "term": "Retry budget", "definition": "The total number of attempts allowed for one request." }],
     "topics": {
       "retry-budget": {
         "why": "**What it is:** The request loop retries temporary failures.\n\n**Problem:** Repeated failures kept the loop running.\n\n**Fix:** The loop stops after three attempts.",

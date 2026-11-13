@@ -2,7 +2,14 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
-import type { RenderedBlock, ReviewView, RevisionView, Target, ThreadView } from "@emend/contract";
+import {
+  type RenderedBlock,
+  RenderedWriteup,
+  type ReviewView,
+  type RevisionView,
+  type Target,
+  type ThreadView,
+} from "@emend/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -10,6 +17,7 @@ import type { Window } from "happy-dom";
 import { type Element as BridgeElement, Window as BridgeWindow } from "happy-dom";
 import { type ComponentProps, Profiler, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, onTestFinished, test, vi } from "vitest";
+import { renderWriteup } from "../../../packages/core/src/render/writeup.ts";
 import { App } from "./App.tsx";
 import type { InboxData } from "./api/queries.ts";
 import type { DiffPaneProps } from "./components/diff/DiffPane.tsx";
@@ -2613,6 +2621,37 @@ test.each(["hash", "browser search"])("%s opens the glossary before navigating t
   }
   expect(glossary?.open).toBe(true);
   expect(glossary && within(glossary).getByRole("button", { name: "Comment on block" })).toBeTruthy();
+});
+
+test("the term card's Glossary link opens and scrolls to its entry through the review route", async () => {
+  currentRevision.writeup = RenderedWriteup.parse(
+    await renderWriteup(
+      {
+        overview: "Budget limits retries.",
+        tldr: "",
+        decisions: "",
+        topics: {},
+        glossary: [{ term: "Budget", definition: "The attempts allowed." }],
+      },
+      [],
+    ),
+  );
+  const term = currentRevision.writeup.terms?.[0];
+  if (!term) throw new Error("Missing glossary term");
+  let openAtScroll = false;
+  vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (this: HTMLElement) {
+    if (this.id === `block-${term.blockId}`) openAtScroll = this.closest("details")?.open === true;
+  });
+  const { history } = mount();
+  const glossary = (await screen.findByText("Glossary · 1 term")).closest("details");
+  expect(glossary?.open).toBe(false);
+  fireEvent.click(await screen.findByRole("button", { name: "Budget" }));
+  const card = screen.getByRole("dialog", { name: "Budget" });
+  fireEvent.click(within(card).getByRole("link", { name: "Glossary" }));
+  await waitFor(() => expect(openAtScroll).toBe(true));
+  expect(glossary?.open).toBe(true);
+  expect(history.location.hash).toBe(`#block-${term.blockId}`);
+  expect(screen.queryByRole("dialog", { name: "Budget" })).toBeNull();
 });
 
 test.each(["skim", "review"] as const)(
