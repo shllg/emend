@@ -31,6 +31,7 @@ import {
   isIndirectReference,
   utf8Length,
 } from "./download-css.ts";
+import { type DownloadComment, type DownloadThread, type FileThreads, threadOrder } from "./download-threads.ts";
 import { MEDIA_URL_PREFIX } from "./sanitize.ts";
 
 type ElementContent = Element["children"][number];
@@ -51,10 +52,11 @@ export type DownloadDetails = {
   links: PublishLinks | undefined;
 };
 const cssWork = Symbol("download CSS work");
+const commentWork = Symbol("download comment bytes");
 /** Opaque work allowance shared by all files in one download. */
-export type DownloadWork = { [cssWork]: number };
-export function createDownloadWork(): DownloadWork {
-  return { [cssWork]: 0 };
+export type DownloadWork = { [cssWork]: number; [commentWork]: number };
+export function createDownloadWork(commentBytes: number = LIMITS.downloadCommentBytes): DownloadWork {
+  return { [cssWork]: 0, [commentWork]: commentBytes };
 }
 
 type PageInput = {
@@ -64,6 +66,7 @@ type PageInput = {
   inlineBudget?: number;
   pause?: () => Promise<void>;
   work?: DownloadWork;
+  threads?: FileThreads;
 };
 
 const STYLESHEET_LIMIT = 64;
@@ -78,6 +81,10 @@ const READING_STYLES = `
 :root{color-scheme:light dark;--bg:oklch(.985 .001 260);--sunken:oklch(.968 .002 260);--fg:oklch(.49 .004 260);--strong:oklch(.18 .004 260);--muted:oklch(.55 .004 260);--border:oklch(.895 .003 260);--link:oklch(.42 .09 60)}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:400 16px/1.7 ui-sans-serif,system-ui,sans-serif}.em-download{max-width:68ch;margin:auto;padding:32px 20px;overflow-wrap:break-word}h1,h2,h3,h5,h6,strong,code{color:var(--strong)}h1{font-size:24px;line-height:1.2;letter-spacing:-.015em;margin:0 0 16px}h2{font-size:19px;line-height:1.3;letter-spacing:-.01em;margin:36px 0 12px}h3{font-size:16px;line-height:1.35;margin:24px 0 6px}h4{font:600 11px/1.3 ui-monospace,"SF Mono",Menlo,monospace;text-transform:uppercase;letter-spacing:.04em}h1,h2,h3{font-weight:600}p,ul,ol{margin:0 0 12px}ul,ol{padding-left:22px}li{margin:6px 0}a{color:var(--link)}a :is(strong,code){color:inherit}.em-doc-link{color:inherit}code{font:400 .84em/1 ui-monospace,"SF Mono",Menlo,monospace;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--sunken)}pre{margin:0 0 14px;padding:12px 14px;border:1px solid var(--border);border-radius:6px;background:var(--sunken);overflow:auto;font:400 12px/1.6 ui-monospace,"SF Mono",Menlo,monospace}pre code{padding:0;border:0;background:none;font:inherit}.shiki{background-color:var(--shiki-light-bg,var(--sunken))}.shiki,.shiki span{color:var(--shiki-light,inherit)}blockquote{margin:0 0 12px;padding-left:14px;border-left:2px solid var(--border)}table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;margin:0 0 14px;font-size:14px}th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)}th{font-weight:500}hr{border:0;border-top:1px solid var(--border);margin:24px 0}img{max-width:100%;height:auto}.emend-media{display:inline-block;max-width:100%;vertical-align:top}.emend-media img{display:block;border-radius:6px}.emend-media-caption{display:block;margin-top:6px;overflow-wrap:anywhere}.em-meta,.emend-media-caption,figcaption,footer,.em-topic-blast,.em-link-host{font:400 12px/1.4 ui-sans-serif,system-ui,sans-serif;color:var(--muted)}.em-links{list-style:none;padding:0}.em-link-host{margin-left:6px}.em-diagram{margin:16px 0}.em-diagram figcaption{margin-bottom:6px}.em-download-note{padding:12px 14px;border:1px solid var(--border);border-radius:6px;background:var(--sunken)}footer{border-top:1px solid var(--border);margin-top:36px;padding-top:16px}
 @media(prefers-color-scheme:dark){:root{--bg:oklch(.18 .004 260);--sunken:oklch(.125 .004 260);--fg:oklch(.79 .004 260);--strong:oklch(.895 .003 260);--muted:oklch(.7 .004 260);--border:oklch(.25 .004 260);--link:oklch(.85 .14 81)}.shiki{background-color:var(--shiki-dark-bg,var(--sunken))}.shiki,.shiki span{color:var(--shiki-dark,inherit)}}
+`;
+const THREAD_STYLES = `
+.em-threads{margin:24px 0}.em-thread{margin:12px 0;padding:10px 14px;border:1px solid var(--border,#d4d4d8);border-left:3px solid var(--link,#7c5a1e);border-radius:6px;background:var(--sunken,#f7f7f8);color:var(--fg,#3f3f46);font:400 14px/1.55 ui-sans-serif,system-ui,sans-serif;text-align:left}.em-thread[data-state=resolved]{border-left-color:var(--muted,#71717a)}.em-thread-head,.em-thread-note,.em-thread-omitted,.em-comment-head{margin:0 0 6px;font-size:12px;line-height:1.4;color:var(--muted,#71717a)}.em-thread-where,.em-comment-head strong{color:var(--strong,#18181b)}.em-thread-quote{margin:0 0 8px;padding-left:10px;border-left:2px solid var(--border,#d4d4d8)}.em-thread-quote p{margin:0}.em-thread-lines{margin:0 0 8px;padding:8px 10px;overflow:auto;font:400 12px/1.5 ui-monospace,"SF Mono",Menlo,monospace}.em-comments{margin:0;padding:0}.em-comment{margin:8px 0 0;padding-top:8px;border-top:1px solid var(--border,#d4d4d8)}.em-comment:first-child{margin-top:0;padding-top:0;border-top:0}.em-comment-text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.em-comment-body{overflow-wrap:anywhere}.em-comment-body>*{margin-top:0}.em-comment-body>:last-child{margin-bottom:0}
+@media(prefers-color-scheme:dark){.em-thread{border-color:var(--border,#3f3f46);background:var(--sunken,#1c1c1f);color:var(--fg,#d4d4d8)}.em-thread-head,.em-thread-note,.em-thread-omitted,.em-comment-head{color:var(--muted,#a1a1aa)}.em-thread-where,.em-comment-head strong{color:var(--strong,#f4f4f5)}.em-thread-quote,.em-comment{border-color:var(--border,#3f3f46)}}
 `;
 const rel = ["noopener", "noreferrer", "nofollow"];
 const imageTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
@@ -135,12 +142,24 @@ function resolverState(
   const state = {
     tooLarge: false,
     used: 0,
+    pause,
     take(length: number): boolean {
       if (length > inlineBudget - state.used) {
         state.tooLarge = true;
         return false;
       }
       state.used += length;
+      return true;
+    },
+    commentLeft(): number {
+      return work[commentWork];
+    },
+    takeComment(length: number): boolean {
+      if (length > work[commentWork]) {
+        state.tooLarge = true;
+        return false;
+      }
+      work[commentWork] -= length;
       return true;
     },
     reference(): Promise<void> | undefined {
@@ -219,7 +238,7 @@ function resolverState(
   return state;
 }
 type AssetState = ReturnType<typeof resolverState>;
-function frame(input: PageInput, content: ElementContent[], tooLarge: boolean): string {
+function frame(input: PageInput, content: ElementContent[], tooLarge: boolean, threadStyles = false): string {
   const { title, details } = input;
   const links = (details.links ?? []).flatMap((link) => {
     try {
@@ -256,6 +275,7 @@ function frame(input: PageInput, content: ElementContent[], tooLarge: boolean): 
             element("meta", [], { name: "color-scheme", content: "light dark" }),
             element("title", [text(title)]),
             style(READING_STYLES),
+            ...(threadStyles ? [style(THREAD_STYLES)] : []),
           ]),
           element("body", [
             element(
@@ -301,7 +321,11 @@ function stripAttributes(el: Element, removed: Set<string>) {
   for (const key of Object.keys(el.properties))
     if (/^on/i.test(key) || removed.has(key.toLowerCase())) delete el.properties[key];
 }
-async function transformBlocks(parent: Root | Element, state: AssetState): Promise<void> {
+async function transformBlocks(
+  parent: Root | Element,
+  state: AssetState,
+  options: { imageAlt?: boolean } = {},
+): Promise<void> {
   const children: ElementContent[] = [];
   for (const node of parent.children) {
     if (node.type === "text") {
@@ -321,9 +345,12 @@ async function transformBlocks(parent: Root | Element, state: AssetState): Promi
       const src = String(node.properties.src ?? "");
       const hash = src.startsWith(MEDIA_URL_PREFIX) ? src.slice(MEDIA_URL_PREFIX.length) : "";
       const asset = /^[0-9a-f]{64}$/.test(hash) ? await state.get(hash) : null;
-      if (!asset || !imageTypes.has(asset.mediaType)) continue;
-      const uri = await state.data(asset);
-      if (uri === null) continue;
+      const uri = asset && imageTypes.has(asset.mediaType) ? await state.data(asset) : null;
+      if (uri === null) {
+        const alt = node.properties.alt;
+        if (options.imageAlt && typeof alt === "string" && alt.length) children.push(text(alt));
+        continue;
+      }
       node.properties.src = uri;
     }
     if (node.tagName === "a") {
@@ -336,12 +363,197 @@ async function transformBlocks(parent: Root | Element, state: AssetState): Promi
         node.properties = { className: ["em-doc-link"] };
       }
     }
-    await transformBlocks(node, state);
+    await transformBlocks(node, state, options);
     children.push(node);
   }
   parent.children = children;
 }
-async function blocksContent(blocks: RenderedBlock[], state: AssetState): Promise<ElementContent[]> {
+/** Threads of one file and the ones a page has already shown. */
+type ThreadContext = { threads: FileThreads; emitted: Set<DownloadThread>; state: AssetState; hasCards?: boolean };
+const stateLabels = { open: "Open", sent: "Sent", answered: "Answered", resolved: "Resolved" } as const;
+const outcomeLabels = { fixed: "Fixed", explained: "Explained", held: "Held", declined: "Declined" } as const;
+function commentTime(ms: number): ElementContent {
+  const iso = new Date(ms).toISOString();
+  return element("time", [text(`${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`)], { dateTime: iso });
+}
+function copiedReviewNote(ctx: ThreadContext): ElementContent[] {
+  if (!ctx.hasCards || ctx.threads.copiedAt === undefined) return [];
+  return [
+    element(
+      "p",
+      [
+        text("This review was copied from another machine on "),
+        commentTime(ctx.threads.copiedAt),
+        text(". Comments, Sends and approvals before then were made there."),
+      ],
+      { className: ["em-thread-note"] },
+    ),
+  ];
+}
+function hasCommentContent(node: Root | Element): boolean {
+  return node.children.some((child) =>
+    child.type === "text"
+      ? child.value.trim().length > 0
+      : child.type === "element" && (child.tagName === "img" || hasCommentContent(child)),
+  );
+}
+async function commentBody(comment: DownloadComment, state: AssetState): Promise<Element> {
+  const plain = () => element("p", [text(comment.body)], { className: ["em-comment-text"] });
+  if (comment.html === null || !parseDocHtml(comment.html, HTML_ELEMENT_LIMIT)) return plain();
+  // The same filtering as writeup blocks: no scripts, handlers, frames, styles or remote loads.
+  const tree = fromHtml(comment.html, { fragment: true });
+  await transformBlocks(tree, state, { imageAlt: true });
+  if (!hasCommentContent(tree)) return plain();
+  return element(
+    "div",
+    tree.children.filter((node): node is ElementContent => node.type !== "doctype"),
+    { className: ["em-comment-body"] },
+  );
+}
+const omittedThread = () =>
+  element("p", [text("A comment thread was left out here because it passed the size limit for comments.")], {
+    className: ["em-thread-omitted"],
+  });
+async function threadCard(thread: DownloadThread, state: AssetState, showWhere: boolean): Promise<Element> {
+  await state.pause?.();
+  const excerpt = thread.quote ?? thread.lines?.join("\n") ?? "";
+  const bound = utf8Length(excerpt);
+  if (bound > state.commentLeft()) {
+    state.takeComment(bound);
+    return omittedThread();
+  }
+  const items: ElementContent[] = [];
+  const list = element("div", [], { className: ["em-comments"], role: "list" });
+  const card = element(
+    "aside",
+    [
+      element(
+        "p",
+        [
+          ...(showWhere
+            ? [element("span", [text(thread.where)], { className: ["em-thread-where"] }), text(" · ")]
+            : []),
+          element("span", [text(stateLabels[thread.state])], { className: ["em-thread-state"] }),
+        ],
+        { className: ["em-thread-head"] },
+      ),
+      ...(thread.note ? [element("p", [text(thread.note)], { className: ["em-thread-note"] })] : []),
+      ...(thread.quote !== undefined
+        ? [element("blockquote", [element("p", [text(excerpt)])], { className: ["em-thread-quote"] })]
+        : thread.lines
+          ? [element("pre", [element("code", [text(excerpt)])], { className: ["em-thread-lines"] })]
+          : []),
+      list,
+    ],
+    { className: ["em-thread"], dataState: thread.state },
+  );
+  let bytes = utf8Length(serialize({ type: "root", children: [card] }).slice(1));
+  if (bytes <= state.commentLeft()) {
+    for (const comment of thread.comments) {
+      if (items.length) await state.pause?.();
+      const item = element(
+        "div",
+        [
+          element(
+            "p",
+            [
+              element("strong", [text(comment.author === "agent" ? "Agent" : "Reviewer")]),
+              ...(comment.outcome ? [text(` · ${outcomeLabels[comment.outcome]}`)] : []),
+              text(" · "),
+              commentTime(comment.createdAt),
+            ],
+            { className: ["em-comment-head"] },
+          ),
+          await commentBody(comment, state),
+        ],
+        { className: ["em-comment"], role: "listitem", dataAuthor: comment.author },
+      );
+      bytes += utf8Length(serialize({ type: "root", children: [item] }).slice(1));
+      if (bytes > state.commentLeft()) break;
+      items.push(item);
+    }
+  }
+  if (state.takeComment(bytes)) {
+    list.children = items;
+    return card;
+  }
+  return omittedThread();
+}
+/** Cards for threads this page has not shown yet; marks them shown. */
+async function threadCards(list: DownloadThread[] | undefined, ctx: ThreadContext, showWhere = false) {
+  const cards: ElementContent[] = [];
+  for (const thread of list ?? []) {
+    if (ctx.emitted.has(thread)) continue;
+    ctx.emitted.add(thread);
+    const card = await threadCard(thread, ctx.state, showWhere);
+    if (card.tagName === "aside") ctx.hasCards = true;
+    cards.push(card);
+  }
+  return cards;
+}
+async function threadSection(
+  heading: string,
+  list: DownloadThread[],
+  ctx: ThreadContext,
+  showWhere = false,
+): Promise<ElementContent[]> {
+  const cards = await threadCards(list, ctx, showWhere);
+  return cards.length
+    ? [element("section", [element("h2", [text(heading)]), ...cards], { className: ["em-threads"] })]
+    : [];
+}
+/** Whole-review threads first, the page content, then every thread that found no place on the page. */
+async function withThreads(
+  threads: FileThreads | undefined,
+  state: AssetState,
+  build: (ctx?: ThreadContext) => Promise<ElementContent[]>,
+): Promise<ElementContent[]> {
+  const parts = await threadParts(threads, state, build);
+  return [...parts.top, ...parts.content, ...parts.tail];
+}
+async function threadParts(
+  threads: FileThreads | undefined,
+  state: AssetState,
+  build: (ctx?: ThreadContext) => Promise<ElementContent[]>,
+): Promise<{ top: ElementContent[]; content: ElementContent[]; tail: ElementContent[] }> {
+  if (!threads) return { top: [], content: await build(), tail: [] };
+  const ctx: ThreadContext = { threads, emitted: new Set(), state };
+  const top = await threadSection("Comments on the whole review", threads.top, ctx);
+  const content = await build(ctx);
+  const other = fileThreads(threads).filter((thread) => !ctx.emitted.has(thread));
+  const tail = await threadSection("Other comments", other, ctx, true);
+  top.unshift(...copiedReviewNote(ctx));
+  return { top, content, tail };
+}
+function fileThreads(threads: FileThreads): DownloadThread[] {
+  return [
+    ...threads.end,
+    ...[...threads.blocks.values(), ...threads.topics.values(), ...threads.lines.values()].flat(),
+  ].sort((a, b) => threadOrder(a) - threadOrder(b));
+}
+export async function buildCommentsDownload(
+  input: PageInput & { threads: FileThreads; elsewhere?: boolean },
+): Promise<string> {
+  const state = resolverState(input.resolveMedia, input.inlineBudget, input.pause, input.work);
+  const content = await withThreads(input.threads, state, async () => []);
+  if (!content.length)
+    content.push(
+      element("p", [
+        text(input.elsewhere ? "The comments are in the doc files of this download." : "No sent comments."),
+      ]),
+    );
+  return frame(
+    { ...input, title: `${input.title} — comments`, details: { ...input.details, links: undefined } },
+    content,
+    state.tooLarge,
+    true,
+  );
+}
+async function blocksContent(
+  blocks: RenderedBlock[],
+  state: AssetState,
+  ctx?: ThreadContext,
+): Promise<ElementContent[]> {
   const children: ElementContent[] = [];
   for (const block of blocks) {
     if (block.kind === "diagram") {
@@ -364,6 +576,7 @@ async function blocksContent(blocks: RenderedBlock[], state: AssetState): Promis
       await transformBlocks(tree, state);
       children.push(...tree.children.filter((node): node is ElementContent => node.type !== "doctype"));
     }
+    if (ctx) children.push(...(await threadCards(ctx.threads.blocks.get(block.id), ctx)));
   }
   return children;
 }
@@ -376,75 +589,75 @@ export async function buildWriteupDownload(
   const bySlug = new Map(ranked.map((topic) => [topic.slug, topic]));
   const groups: { key: string; node: Element }[] = [];
   const written = new Map<string, Element>();
-  for (const section of input.writeup.sections) {
-    const topic = section.topic ? bySlug.get(section.topic) : undefined;
-    const content = await blocksContent(section.blocks, state);
-    if (!topic) {
-      groups.push({
-        key: section.key,
-        node: element("section", [
-          element("h2", [text(section.key === "decisions" ? "Decisions & drift" : section.label)]),
-          ...content,
-        ]),
-      });
-      continue;
-    }
-    let group = written.get(topic.slug);
-    if (!group) {
-      group = element("section", [element("h2", [text(topic.title)]), element("p", [text(topic.summary)])], {
-        id: `topic-${topic.slug}`,
-      });
-      if (topic.blastRadius)
-        group.children.push(
-          element(
-            "p",
-            [
-              text("Blast radius: "),
-              element("strong", [text(topic.blastRadius.scope)]),
-              text(` — ${topic.blastRadius.note}`),
-            ],
-            { className: ["em-topic-blast"] },
-          ),
-        );
-      written.set(topic.slug, group);
-      groups.push({ key: section.key, node: group });
-    }
-    const suffix = section.key.slice(section.key.lastIndexOf("-") + 1);
-    group.children.push(
-      element("h3", [text(suffix === "why" ? "Why" : suffix === "example" ? "Example" : "Details")]),
-      ...content,
-    );
-  }
-  if (ranked.length) {
-    const intro = ["overview", "tldr", "outOfScope", "whereToLook", "context", "decisions", "glossary"];
-    const index = groups.findLastIndex((group) => intro.includes(group.key)) + 1;
-    groups.splice(index, 0, {
-      key: "topics",
-      node: element("section", [
-        element("h2", [text("Topics")]),
-        element(
-          "ol",
-          ranked.map((topic, index) =>
+  const content = await withThreads(input.threads, state, async (ctx) => {
+    for (const section of input.writeup.sections) {
+      const topic = section.topic ? bySlug.get(section.topic) : undefined;
+      const content = await blocksContent(section.blocks, state, ctx);
+      if (!topic) {
+        groups.push({
+          key: section.key,
+          node: element("section", [
+            element("h2", [text(section.key === "decisions" ? "Decisions & drift" : section.label)]),
+            ...content,
+          ]),
+        });
+        continue;
+      }
+      let group = written.get(topic.slug);
+      if (!group) {
+        group = element("section", [element("h2", [text(topic.title)]), element("p", [text(topic.summary)])], {
+          id: `topic-${topic.slug}`,
+        });
+        if (topic.blastRadius)
+          group.children.push(
             element(
-              "li",
+              "p",
               [
-                written.has(topic.slug)
-                  ? element("a", [text(topic.title)], { href: `#topic-${topic.slug}` })
-                  : element("span", [text(topic.title)]),
-                element("p", [text(topic.summary)]),
+                text("Blast radius: "),
+                element("strong", [text(topic.blastRadius.scope)]),
+                text(` — ${topic.blastRadius.note}`),
               ],
-              { value: String(index + 1) },
+              { className: ["em-topic-blast"] },
+            ),
+          );
+        if (ctx) group.children.push(...(await threadCards(ctx.threads.topics.get(topic.slug), ctx)));
+        written.set(topic.slug, group);
+        groups.push({ key: section.key, node: group });
+      }
+      const suffix = section.key.slice(section.key.lastIndexOf("-") + 1);
+      group.children.push(
+        element("h3", [text(suffix === "why" ? "Why" : suffix === "example" ? "Example" : "Details")]),
+        ...content,
+      );
+    }
+    if (ranked.length) {
+      const intro = ["overview", "tldr", "outOfScope", "whereToLook", "context", "decisions", "glossary"];
+      const index = groups.findLastIndex((group) => intro.includes(group.key)) + 1;
+      groups.splice(index, 0, {
+        key: "topics",
+        node: element("section", [
+          element("h2", [text("Topics")]),
+          element(
+            "ol",
+            ranked.map((topic, index) =>
+              element(
+                "li",
+                [
+                  written.has(topic.slug)
+                    ? element("a", [text(topic.title)], { href: `#topic-${topic.slug}` })
+                    : element("span", [text(topic.title)]),
+                  element("p", [text(topic.summary)]),
+                ],
+                { value: String(index + 1) },
+              ),
             ),
           ),
-        ),
-      ]),
-    });
-  }
-  return frame(
-    input,
-    groups.map((group) => group.node),
-    state.tooLarge,
-  );
+        ]),
+      });
+    }
+    return groups.map((group) => group.node);
+  });
+  return frame(input, content, state.tooLarge, input.threads !== undefined);
 }
 export async function buildDocDownload(
   input: PageInput & {
@@ -454,13 +667,18 @@ export async function buildDocDownload(
   },
 ): Promise<string> {
   const state = resolverState(input.resolveMedia, input.inlineBudget, input.pause, input.work);
-  let content: ElementContent[];
-  if (input.content.kind === "markdown") content = await blocksContent(input.content.blocks, state);
-  else if (input.content.unrendered) content = [element("p", [text("This file could not be shown.")])];
-  else {
-    const lines: ElementContent[] = [];
-    input.content.lines.forEach((line, index) => {
-      if (index) lines.push(text("\n"));
+  const source = input.content;
+  const content = await withThreads(input.threads, state, async (ctx) => {
+    if (source.kind === "markdown") return blocksContent(source.blocks, state, ctx);
+    if (source.unrendered) return [element("p", [text("This file could not be shown.")])];
+    const pre = (lines: ElementContent[]) =>
+      element("pre", [element("code", lines)], { className: ["shiki", "em-source"] });
+    const result: ElementContent[] = [];
+    let lines: ElementContent[] = [];
+    let count = 0;
+    for (const [index, line] of source.lines.entries()) {
+      if (count) lines.push(text("\n"));
+      count++;
       lines.push(
         element(
           "span",
@@ -474,10 +692,18 @@ export async function buildDocDownload(
           { className: ["line"] },
         ),
       );
-    });
-    content = [element("pre", [element("code", lines)], { className: ["shiki", "em-source"] })];
-  }
-  return frame(input, content, state.tooLarge);
+      const cards = ctx ? await threadCards(ctx.threads.lines.get(index + 1), ctx) : [];
+      if (cards.length) {
+        result.push(pre(lines), ...cards);
+        lines = [];
+        count = 0;
+      }
+    }
+    // Without threads this is the one pre of before, also for a file with no lines.
+    if (lines.length || !result.length) result.push(pre(lines));
+    return result;
+  });
+  return frame(input, content, state.tooLarge, input.threads !== undefined);
 }
 
 /** Resolve once, with browser path semantics, but never let a reference pick an origin. */
@@ -946,7 +1172,21 @@ const cssResourceAttributes = new Set([
   "by",
   "marker",
 ]);
-export function buildOmittedDownload(input: { title: string }): string {
+export async function buildOmittedDownload(input: {
+  title: string;
+  threads?: FileThreads;
+  inlineBudget?: number;
+  pause?: () => Promise<void>;
+  work?: DownloadWork;
+}): Promise<string> {
+  const content: ElementContent[] = [note()];
+  if (input.threads) {
+    const state = resolverState(async () => null, input.inlineBudget, input.pause, input.work);
+    const ctx: ThreadContext = { threads: input.threads, emitted: new Set(), state };
+    content.push(...(await threadSection("Comments on the whole review", input.threads.top, ctx)));
+    content.push(...(await threadSection("Comments on this doc", fileThreads(input.threads), ctx, true)));
+    content.splice(1, 0, ...copiedReviewNote(ctx));
+  }
   return serialize({
     type: "root",
     children: [
@@ -954,8 +1194,13 @@ export function buildOmittedDownload(input: { title: string }): string {
       element(
         "html",
         [
-          element("head", [...headMetas(), element("title", [text(input.title)]), style(READING_STYLES)]),
-          element("body", [note()]),
+          element("head", [
+            ...headMetas(),
+            element("title", [text(input.title)]),
+            style(READING_STYLES),
+            ...(input.threads ? [style(THREAD_STYLES)] : []),
+          ]),
+          element("body", content),
         ],
         { lang: "en" },
       ),
@@ -971,7 +1216,7 @@ export async function buildHtmlDocDownload(input: {
   pause?: () => Promise<void>;
   work?: DownloadWork;
 }): Promise<string> {
-  if (!parseDocHtml(input.html, HTML_ELEMENT_LIMIT)) return buildOmittedDownload(input);
+  if (!parseDocHtml(input.html, HTML_ELEMENT_LIMIT)) return buildOmittedDownload({ title: input.title });
   const tree = fromHtml(input.html);
   const state = resolverState(input.resolveAsset, input.inlineBudget, input.pause, input.work);
   const resource = (value: string) => resourceUrl(value, input.docPath, state);

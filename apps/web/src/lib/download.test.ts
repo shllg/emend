@@ -1,7 +1,7 @@
 import { LIMITS, type RevisionView } from "@emend/contract";
 import { expect, test } from "vitest";
 import apiDocs from "../../../../docs/api.md?raw";
-import { downloadBaseLabel, downloadDocChoices } from "./download.ts";
+import { downloadBaseIsHtml, downloadBaseLabel, downloadDocChoices, downloadHasComments } from "./download.ts";
 
 const revision: RevisionView = {
   seq: 1,
@@ -109,10 +109,56 @@ test.each([null, "plan.md"])("a pub excludes exactly its first doc view in file 
   }
 });
 
+const withComments = (...comments: { author: "user" | "agent"; sent: boolean }[]): RevisionView => ({
+  ...revision,
+  threads: [
+    {
+      id: "33333333-3333-4333-8333-333333333333",
+      target: { kind: "review" },
+      state: "open",
+      createdOn: 1,
+      placement: { status: "placed", location: { kind: "review" } },
+      comments: comments.map((comment, index) => ({
+        id: `44444444-4444-4444-8444-${String(index).padStart(12, "0")}`,
+        body: "Synthetic",
+        sentOn: null,
+        ...comment,
+      })),
+    },
+  ],
+});
+
+test("comments are offered only for a sent reviewer comment or an agent reply", () => {
+  expect(downloadHasComments(revision)).toBe(false);
+  expect(downloadHasComments(withComments({ author: "user", sent: false }))).toBe(false);
+  expect(downloadHasComments(withComments({ author: "user", sent: true }))).toBe(true);
+  expect(downloadHasComments(withComments({ author: "user", sent: false }, { author: "agent", sent: false }))).toBe(
+    true,
+  );
+});
+
 test("the API limits table documents both shared download budgets", () => {
   const row = apiDocs.split("\n").find((line) => line.startsWith("| `downloadInlineBytes` |"));
   expect(row).toContain(`${LIMITS.downloadInlineBytes} bytes (128 MiB)`);
   expect(row).toContain("emitted built-in content per download");
   expect(row).toContain("the same read budget for stored assets and selected doc bodies");
   expect(row).toContain("both shared by all files of a ZIP");
+});
+
+test("HTML base detection follows the pub main and first-doc rules, including source views", () => {
+  expect(downloadBaseIsHtml(revision)).toBe(false);
+  const pub = { ...revision, writeupEmpty: true };
+  expect(downloadBaseIsHtml(pub)).toBe(false);
+  expect(downloadBaseIsHtml({ ...pub, main: "a.html" })).toBe(true);
+  const [markdown, html] = revision.docs;
+  if (!markdown || !html) throw new Error("Missing fixture docs");
+  const htmlFirst = { ...pub, docs: [html, markdown] };
+  expect(downloadBaseIsHtml(htmlFirst)).toBe(true);
+  expect(downloadBaseIsHtml({ ...htmlFirst, main: "missing.html" })).toBe(true);
+  expect(downloadBaseIsHtml({ ...htmlFirst, main: "z.md" })).toBe(false);
+  expect(downloadBaseIsHtml({ ...htmlFirst, base: "a".repeat(40) })).toBe(false);
+  expect(downloadBaseIsHtml({ ...pub, docs: [] })).toBe(false);
+  const source: RevisionView["docs"][number] = { kind: "source", path: "a.html", language: "html", lines: [] };
+  expect(downloadBaseIsHtml({ ...pub, main: "a.html", docs: [source, html] })).toBe(false);
+  expect(downloadBaseIsHtml({ ...pub, main: "a.html", docs: [html, source] })).toBe(true);
 });

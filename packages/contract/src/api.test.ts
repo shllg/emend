@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import {
   API_PREFIX,
   Capabilities,
+  DownloadComments,
   DownloadDocIds,
   FileFlag,
   FileRole,
@@ -51,6 +52,7 @@ test("exports the v1 API, limits, file vocabulary and reserved fallback", () => 
     sourceBytesPerRevision: 16777216,
     htmlDocBytes: 8388608,
     downloadInlineBytes: 134217728,
+    downloadCommentBytes: 33554432,
     downloadDocs: 50,
     assetBytes: 26214400,
     htmlDocWithAssetsBytes: 52428800,
@@ -177,6 +179,21 @@ test("download paths preserve doc order and encode every query value", () => {
   const path = reviewDownloadPath("review", 2);
   expect(reviewDownloadPath("review", 2, [])).toBe(path);
   expect(reviewDownloadPath("review", 2, ["b? /&", "a#="])).toBe(`${path}?doc=b%3F%20%2F%26&doc=a%23%3D`);
+});
+
+test("download paths add comments=1 after the docs", () => {
+  const path = reviewDownloadPath("review", 2);
+  expect(reviewDownloadPath("review", 2, [], { comments: true })).toBe(`${path}?comments=1`);
+  expect(reviewDownloadPath("review", 2, ["a"], { comments: true })).toBe(`${path}?doc=a&comments=1`);
+  expect(reviewDownloadPath("review", 2, [], { comments: false })).toBe(path);
+});
+
+test("download comments accept nothing or one 1", () => {
+  expect(DownloadComments.parse([])).toEqual([]);
+  expect(DownloadComments.parse(["1"])).toEqual(["1"]);
+  for (const value of [["0"], ["true"], ["1", "1"], [""]]) {
+    expect(DownloadComments.safeParse(value).success).toBe(false);
+  }
 });
 
 test("download ids are distinct UUIDs with at most 50 entries", () => {
