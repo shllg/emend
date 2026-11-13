@@ -1,6 +1,7 @@
 # Attach more of your machines to your hub
 
-This setup suits you if you run your own emend hub ([hub-tailscale.md](hub-tailscale.md)) and
+This setup suits you if you run your own emend hub ([hub-tailscale.md](hub-tailscale.md) or
+[hub-network.md](hub-network.md)) and
 work with agents on other machines, such as a laptop or a build box. You get one inbox for all of
 them: the agents on an attached machine publish to your hub, and the feedback you send from any
 device reaches them.
@@ -30,7 +31,7 @@ inside your sandbox.
 ## What you need
 
 - A working hub with its address, for example `https://<hub>.<tailnet>.ts.net`. See
-  [hub-tailscale.md](hub-tailscale.md).
+  [hub-tailscale.md](hub-tailscale.md) or [hub-network.md](hub-network.md).
 - emend installed on this machine. A hub refuses a machine whose emend is older than the hub's
   minimum client version. See [local.md](local.md) and [update.md](update.md).
 - This machine reaches the hub. For a Tailscale hub, Tailscale runs here and is signed in to the
@@ -53,8 +54,8 @@ You should see a link such as `https://<hub>.<tailnet>.ts.net/pair#emp_...`, a c
 `On the other machine, run: emend attach <link>`.
 
 If the hub prints `This link works only on this machine. To attach another machine, run emend
-serve --tailscale.`, the hub does not serve your tailnet yet. Finish
-[hub-tailscale.md](hub-tailscale.md) first.
+serve --tailscale.`, the hub does not know its public address yet. Finish
+[hub-tailscale.md](hub-tailscale.md) or [hub-network.md](hub-network.md) first.
 
 You run this yourself: the link is a one-time secret.
 

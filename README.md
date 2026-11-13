@@ -68,7 +68,7 @@ one-prompt setup.
 | [Develop emend from a checkout](https://github.com/shllg/emend/blob/release/docs/setup/development.md) | You change emend itself or run it from a clone. |
 | [Update](https://github.com/shllg/emend/blob/release/docs/setup/update.md) | A new version is out. |
 | [Troubleshooting](https://github.com/shllg/emend/blob/release/docs/setup/troubleshooting.md) | A setup or update step fails. |
-| A hub on your own network (a LAN address or your own HTTPS proxy) | Not supported yet; planned. Today Tailscale is the supported way to reach a hub from other devices. |
+| [Your own hub behind your own address](https://github.com/shllg/emend/blob/release/docs/setup/hub-network.md) | You have your own name and HTTPS proxy and want to review from other devices. |
 
 ## Update
 

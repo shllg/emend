@@ -146,7 +146,7 @@ export async function launchdService(action: ServiceAction, context: ServiceCont
   await clearServicePending(stateDir);
   let mainPid = 0;
   const found = await context.waitForServer({
-    tailscale: flags.includes("--tailscale"),
+    publicOrigin: flags.includes("--tailscale") || flags.includes("--public-url"),
     mainPid: async () => {
       mainPid = await launchdMainPid(launchctl, target);
       return mainPid;

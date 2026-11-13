@@ -12,7 +12,8 @@ The values below are binding. Limits and ids are in `docs/api.md` once it exists
 - Session cookie: `emend_session`, `HttpOnly`, `SameSite=Strict`, `Secure` on HTTPS, `Path=/`,
   `Max-Age=2592000` (30 days), renewed at most daily.
 - Host allowlist: `127.0.0.1:<port>`, `localhost:<port>`, `[::1]:<port>`, plus the tailnet name
-  only when `--tailscale` configured it. Anything else is `403 bad_host`.
+  only when `--tailscale` configured it, or the host of an https `--public-url` origin. Anything
+  else is `403 bad_host`. `--public-url` widens no bind.
 - Pairing: the secret travels only in the URL fragment (`/pair#<secret>`), never in a query or a
   log. A pairing is one-time and expires after 10 minutes. Its code is `XXXX-XXXX` in Crockford
   base32; five wrong codes lock code entry for 10 minutes (`429 rate_limited`).

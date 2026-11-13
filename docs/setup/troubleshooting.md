@@ -405,6 +405,16 @@ Run `emend stop` again in a terminal where `command -v tailscale` finds it. If y
 Tailscale on this machine for good, delete the file `tailscale-serve.json` in emend's state folder
 (where that folder lives: [local.md](local.md#undo), step 5).
 
+## The hub behind your proxy answers bad_host
+
+The proxy rewrites the `Host` header or drops its port. Pass it through unchanged. In nginx,
+use `proxy_set_header Host $http_host;`, not `$host`, which drops the port.
+
+Check that the address given to `--public-url` is the one the phone opens, including its port
+when not 443. Then reload the proxy after fixing its configuration. If the address was wrong,
+run `emend service install --public-url https://emend.example.com` with the right address.
+See [hub-network.md](hub-network.md#1-point-your-proxy-at-emend).
+
 ## The hub is unreachable
 
 A command on an attached machine prints one of:
