@@ -1,7 +1,7 @@
 import { LIMITS, normalizeGlossaryForm, WriteupInput } from "@emend/contract";
 import { expect, test } from "vitest";
 import { renderCommentHtml, renderDoc, renderMarkdownWithBudget, renderMetadataBlocks } from "./markdown.ts";
-import { termMatcher } from "./terms.ts";
+import { TERM_MATCH_WORK_BUDGET, termMatcher } from "./terms.ts";
 import { renderWriteup } from "./writeup.ts";
 
 async function html(
@@ -209,7 +209,7 @@ test("acronym fallback spends the shared work budget on repeated wrong-case hits
   );
 });
 
-test("a typical twelve-term glossary still marks the last section of a long writeup", async () => {
+test("a typical twelve-term glossary fits the maximum writeup budget and marks its last section", async () => {
   const glossary = [
     "budget",
     "retry",
@@ -224,7 +224,9 @@ test("a typical twelve-term glossary still marks the last section of a long writ
     "entry",
     "limit",
   ].map((term) => ({ term, definition: "A synthetic definition." }));
-  const prose = "x ".repeat((LIMITS.writeupBytes - 4096) / 4);
+  // The default scan budget covers a glossary of weight up to about 190 at the writeup byte limit.
+  expect(termMatcher(glossary).weight * LIMITS.writeupBytes).toBeLessThanOrEqual(TERM_MATCH_WORK_BUDGET);
+  const prose = "This section explains the proposed change. ".repeat(40);
   const rendered = await renderWriteup(
     WriteupInput.parse({
       overview: prose,
