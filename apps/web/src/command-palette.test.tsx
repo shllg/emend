@@ -167,6 +167,7 @@ test.each([1280, 900])(
     const opener = await ready();
     act(() => opener.focus());
     const input = await openPalette();
+    const focus = vi.spyOn(opener, "focus");
     expect(document.activeElement).toBe(input);
     expect(input.placeholder).toBe("Type a command…");
     expect(input.getAttribute("aria-expanded")).toBe("true");
@@ -176,6 +177,7 @@ test.each([1280, 900])(
     press("Escape", {}, input);
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(opener));
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
     press("P", { metaKey: true, shiftKey: true }, opener);
     const reopened = await screen.findByRole<HTMLInputElement>("combobox", { name: "Command" });
     expect(reopened.value).toBe("");
@@ -193,6 +195,8 @@ test("lists every other command in its group with live keys and no hint for an o
   expect(screen.queryByRole("option", { name: /Open the command palette/ })).toBeNull();
   for (const group of shortcutGroups) {
     const section = screen.getByRole("group", { name: group.label });
+    expect(section.tagName).toBe("DIV");
+    expect(within(section).getByRole("presentation").textContent).toBe(group.label);
     for (const command of group.commands.filter((command) => command !== "palette.open")) {
       const row = within(section).getByRole("option", { name: new RegExp(`^${shortcutLabels[command]}`) });
       const key = settings.keys.commands[command].value;
@@ -223,17 +227,23 @@ test("finds letters with gaps, resets selection on search and shows when no comm
   await ready();
   await within(screen.getByTestId("diff-pane")).findByRole("button", { name: "Mark a.txt as viewed" });
   const input = await openPalette();
+  const status = within(screen.getByRole("dialog", { name: "Command palette" })).getByRole("status");
+  expect(status.textContent).toBe("");
+  expect(status.closest('[role="listbox"]')).toBeNull();
   search(input, "nxtfl");
   expect(screen.getAllByRole("option")).toEqual([option("Next file")]);
   expect(selected()).toBe(option("Next file"));
   expect(input.getAttribute("aria-activedescendant")).toBe(selected()?.id);
   search(input, "xyz");
   expect(screen.queryAllByRole("option")).toHaveLength(0);
-  expect(screen.getByText("No command matches.").closest('[role="listbox"]')).toBeNull();
+  expect(screen.getByText("No command matches.")).toBe(status);
   expect(input.hasAttribute("aria-activedescendant")).toBe(false);
   expect(press("ArrowDown", {}, input).defaultPrevented).toBe(true);
   press("Enter", {}, input);
   expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
+  search(input, "file");
+  expect(within(screen.getByRole("dialog", { name: "Command palette" })).getByRole("status")).toBe(status);
+  expect(status.textContent).toBe("");
 });
 
 test("sorts matches within groups and groups by their best score, keeping ties stable", async () => {
@@ -298,6 +308,27 @@ test("lists review commands as unavailable on the inbox and never selects or run
   expect(writes()).toHaveLength(0);
 });
 
+test.each([
+  ["Enter", { isComposing: true }],
+  ["ArrowDown", { isComposing: true }],
+  ["Enter", { keyCode: 229 }],
+] as const)("leaves IME %s with %j alone without running a command or moving selection", async (key, options) => {
+  const history = mount();
+  await ready();
+  const input = await openPalette();
+  search(input, "tab");
+  const active = selected();
+  expect(active).toBe(option("Docs tab"));
+  const location = history.location.href;
+  expect(press(key, options, input).defaultPrevented).toBe(false);
+  expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
+  expect(selected()).toBe(active);
+  expect(input.getAttribute("aria-activedescendant")).toBe(active?.id);
+  expect(history.location.href).toBe(location);
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(writes()).toHaveLength(0);
+});
+
 test.each(["Enter", "click"])("runs Files tab with %s after closing the palette", async (method) => {
   mount();
   await ready();
@@ -307,6 +338,20 @@ test.each(["Enter", "click"])("runs Files tab with %s after closing the palette"
   else fireEvent.click(option("Files tab"));
   await waitFor(() => expect(screen.getByRole("tab", { name: /Files/ }).getAttribute("aria-selected")).toBe("true"));
   expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
+});
+
+test("runs Files tab with Enter even when its shortcut key is off", async () => {
+  settings.keys.commands["tab.files"].value = null;
+  mount();
+  await ready();
+  const input = await openPalette();
+  search(input, "Files tab");
+  expect(selected()).toBe(option("Files tab"));
+  expect(option("Files tab").querySelector("kbd")).toBeNull();
+  press("Enter", {}, input);
+  await waitFor(() => expect(screen.getByRole("tab", { name: /Files/ }).getAttribute("aria-selected")).toBe("true"));
+  expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
+  expect(writes()).toHaveLength(0);
 });
 
 test("restores focus before running the command that focuses the Instructions field", async () => {
@@ -323,6 +368,7 @@ test("restores focus before running the command that focuses the Instructions fi
 test.each([
   ["Show keyboard shortcuts", "Keyboard shortcuts"],
   ["Snooze", "Snooze this review"],
+  ["Approve", "Approve revision 1?"],
 ] as const)("opens %s only after removing the palette's modal layer", async (label, title) => {
   mount();
   const opener = await ready();
@@ -333,9 +379,27 @@ test.each([
   const dialog = await screen.findByRole("alertdialog", { name: title });
   expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
   expect(dialog.contains(document.activeElement)).toBe(true);
+  expect(writes()).toHaveLength(0);
   press("Escape", {}, document.activeElement as HTMLElement);
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   await waitFor(() => expect(document.body.style.pointerEvents).not.toBe("none"));
+  expect(writes()).toHaveLength(0);
+});
+
+test("says when Snooze declines on a retired review without opening a dialog or making a write", async () => {
+  inbox[0] = { ...(inbox[0] as InboxItem), state: "settled" };
+  mount();
+  await ready();
+  const input = await openPalette();
+  search(input, "Snooze");
+  expect(selected()).toBe(option("Snooze"));
+  expect(option("Snooze").getAttribute("aria-disabled")).toBe("false");
+  press("Enter", {}, input);
+  const message = await screen.findByText("Snooze can't run right now.");
+  expect(message.closest('[role="status"]')).toBeTruthy();
+  expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(writes()).toHaveLength(0);
 });
 
 test("returns focus to a Files row before marking that file viewed", async () => {
@@ -345,9 +409,11 @@ test("returns focus to a Files row before marking that file viewed", async () =>
   const file = await screen.findByRole("button", { name: /^Open diff for b.txt/ });
   act(() => file.focus());
   const input = await openPalette();
+  const focus = vi.spyOn(file, "focus");
   search(input, "Mark the current file viewed");
   press("Enter", {}, input);
   await waitFor(() => expect(writes("PUT")).toHaveLength(1));
+  expect(focus).toHaveBeenCalledWith({ preventScroll: true });
   expect(JSON.parse(String(writes("PUT")[0]?.[1]?.body)).paths).toEqual(["b.txt"]);
 });
 

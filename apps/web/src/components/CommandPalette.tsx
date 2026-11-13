@@ -6,6 +6,7 @@ import { keyLabel, shortcutGroups, shortcutLabels } from "../lib/shortcuts.ts";
 import { useShortcut, useShortcutKeys, useShortcutRunner } from "../lib/use-shortcut.tsx";
 import { Kbd } from "./ui/Kbd.tsx";
 import { isToastInteraction, overlayClass } from "./ui/overlay.ts";
+import { useToast } from "./ui/Toast.tsx";
 import { cn } from "./ui/utils.ts";
 
 function matchingGroups(query: string) {
@@ -30,6 +31,7 @@ export function CommandPalette() {
   const [available, setAvailable] = useState<Set<ShortcutCommand>>(() => new Set());
   const [selected, setSelected] = useState<ShortcutCommand | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const listbox = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const pending = useRef<ShortcutCommand | null>(null);
   const id = useId();
@@ -37,6 +39,7 @@ export function CommandPalette() {
   const rowId = (command: ShortcutCommand) => `${id}-${command}`;
   const keys = useShortcutKeys();
   const runner = useShortcutRunner();
+  const toast = useToast();
   const groups = matchingGroups(query);
   const selectable: ShortcutCommand[] = groups
     .flatMap((group) => group.rows.map((row) => row.command))
@@ -53,7 +56,8 @@ export function CommandPalette() {
   });
 
   useEffect(() => {
-    if (open && activeId) document.getElementById(activeId)?.scrollIntoView?.({ block: "nearest" });
+    if (open && activeId)
+      listbox.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest" });
   }, [open, activeId]);
 
   function choose(command: ShortcutCommand) {
@@ -78,11 +82,12 @@ export function CommandPalette() {
           }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            if (opener.current?.isConnected) opener.current.focus();
+            if (opener.current?.isConnected) opener.current.focus({ preventScroll: true });
             // Focus-dependent handlers need the opener back; dialogs must start after this modal layer unmounts.
             const command = pending.current;
             pending.current = null;
-            if (command) runner.run(command);
+            if (command && !runner.run(command))
+              toast.show({ title: `${shortcutLabels[command]} can't run right now.` });
           }}
           className="fixed top-[12vh] left-1/2 z-[calc(var(--z-sheet)+1)] flex max-h-[70dvh] w-[min(560px,92%)] -translate-x-1/2 animate-[em-fade_var(--dur-2)_var(--ease-out)] flex-col overflow-hidden rounded-xl border border-line-1 bg-surface shadow-3"
         >
@@ -106,6 +111,7 @@ export function CommandPalette() {
                 setSelected(null);
               }}
               onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                 if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                   event.preventDefault();
                   const index = active ? selectable.indexOf(active) : -1;
@@ -121,15 +127,18 @@ export function CommandPalette() {
             />
             <Kbd aria-hidden="true">Esc</Kbd>
           </div>
-          <div id={listId} role="listbox" aria-label="Commands" className="min-h-0 overflow-y-auto p-1">
+          <div ref={listbox} id={listId} role="listbox" aria-label="Commands" className="min-h-0 overflow-y-auto p-1">
             {groups.map((group) => (
-              <fieldset
+              // biome-ignore lint/a11y/useSemanticElements: Grouped listboxes use ARIA groups for options, not form fieldsets.
+              <div
                 key={group.label}
+                role="group"
                 aria-labelledby={`${id}-${group.label.replaceAll(" ", "-")}`}
                 className="min-w-0 border-0"
               >
                 <div
                   id={`${id}-${group.label.replaceAll(" ", "-")}`}
+                  role="presentation"
                   className="px-2.5 pt-2 pb-1 font-mono text-11 font-medium leading-(--lh-snug) font-stretch-mono tracking-(--tracking-label) text-fg-3 uppercase"
                 >
                   {group.label}
@@ -158,10 +167,12 @@ export function CommandPalette() {
                     {keys[command] !== null && <Kbd className="ml-auto shrink-0">{keyLabel(keys[command])}</Kbd>}
                   </button>
                 ))}
-              </fieldset>
+              </div>
             ))}
           </div>
-          {groups.length === 0 && <p className="px-4 py-3 text-14 text-fg-2">No command matches.</p>}
+          <p role="status" className="px-4 py-3 text-14 text-fg-2 empty:p-0">
+            {groups.length === 0 ? "No command matches." : ""}
+          </p>
         </Primitive.Content>
       </Primitive.Portal>
     </Primitive.Root>
