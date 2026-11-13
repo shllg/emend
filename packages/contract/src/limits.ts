@@ -26,6 +26,7 @@ export const LIMITS = {
   markdownDocBytes: 1048576,
   htmlDocBytes: 8388608,
   downloadInlineBytes: 134217728,
+  downloadCommentBytes: 33554432,
   downloadDocs: 50,
   assetBytes: 26214400,
   htmlDocWithAssetsBytes: 52428800,

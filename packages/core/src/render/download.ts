@@ -52,10 +52,11 @@ export type DownloadDetails = {
   links: PublishLinks | undefined;
 };
 const cssWork = Symbol("download CSS work");
+const commentWork = Symbol("download comment bytes");
 /** Opaque work allowance shared by all files in one download. */
-export type DownloadWork = { [cssWork]: number };
-export function createDownloadWork(): DownloadWork {
-  return { [cssWork]: 0 };
+export type DownloadWork = { [cssWork]: number; [commentWork]: number };
+export function createDownloadWork(commentBytes: number = LIMITS.downloadCommentBytes): DownloadWork {
+  return { [cssWork]: 0, [commentWork]: commentBytes };
 }
 
 type PageInput = {
@@ -82,8 +83,8 @@ const READING_STYLES = `
 @media(prefers-color-scheme:dark){:root{--bg:oklch(.18 .004 260);--sunken:oklch(.125 .004 260);--fg:oklch(.79 .004 260);--strong:oklch(.895 .003 260);--muted:oklch(.7 .004 260);--border:oklch(.25 .004 260);--link:oklch(.85 .14 81)}.shiki{background-color:var(--shiki-dark-bg,var(--sunken))}.shiki,.shiki span{color:var(--shiki-dark,inherit)}}
 `;
 const THREAD_STYLES = `
-.em-threads{margin:24px 0}.em-thread{margin:12px 0;padding:10px 14px;border:1px solid var(--border,#d4d4d8);border-left:3px solid var(--link,#7c5a1e);border-radius:6px;background:var(--sunken,#f7f7f8);color:var(--fg,#3f3f46);font:400 14px/1.55 ui-sans-serif,system-ui,sans-serif;text-align:left}.em-thread[data-state=resolved]{border-left-color:var(--muted,#71717a)}.em-thread-head,.em-thread-note,.em-comment-head{margin:0 0 6px;font-size:12px;line-height:1.4;color:var(--muted,#71717a)}.em-thread-where,.em-comment-head strong{color:var(--strong,#18181b)}.em-thread-quote{margin:0 0 8px;padding-left:10px;border-left:2px solid var(--border,#d4d4d8)}.em-thread-quote p{margin:0}.em-thread-lines{margin:0 0 8px;padding:8px 10px;overflow:auto;font:400 12px/1.5 ui-monospace,"SF Mono",Menlo,monospace}.em-comments{list-style:none;margin:0;padding:0}.em-comment{margin:8px 0 0;padding-top:8px;border-top:1px solid var(--border,#d4d4d8)}.em-comment:first-child{margin-top:0;padding-top:0;border-top:0}.em-comment-text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.em-comment-body{overflow-wrap:anywhere}.em-comment-body>*{margin-top:0}.em-comment-body>:last-child{margin-bottom:0}
-@media(prefers-color-scheme:dark){.em-thread{border-color:var(--border,#3f3f46);background:var(--sunken,#1c1c1f);color:var(--fg,#d4d4d8)}.em-thread-head,.em-thread-note,.em-comment-head{color:var(--muted,#a1a1aa)}.em-thread-where,.em-comment-head strong{color:var(--strong,#f4f4f5)}.em-thread-quote,.em-comment{border-color:var(--border,#3f3f46)}}
+.em-threads{margin:24px 0}.em-thread{margin:12px 0;padding:10px 14px;border:1px solid var(--border,#d4d4d8);border-left:3px solid var(--link,#7c5a1e);border-radius:6px;background:var(--sunken,#f7f7f8);color:var(--fg,#3f3f46);font:400 14px/1.55 ui-sans-serif,system-ui,sans-serif;text-align:left}.em-thread[data-state=resolved]{border-left-color:var(--muted,#71717a)}.em-thread-head,.em-thread-note,.em-thread-omitted,.em-comment-head{margin:0 0 6px;font-size:12px;line-height:1.4;color:var(--muted,#71717a)}.em-thread-where,.em-comment-head strong{color:var(--strong,#18181b)}.em-thread-quote{margin:0 0 8px;padding-left:10px;border-left:2px solid var(--border,#d4d4d8)}.em-thread-quote p{margin:0}.em-thread-lines{margin:0 0 8px;padding:8px 10px;overflow:auto;font:400 12px/1.5 ui-monospace,"SF Mono",Menlo,monospace}.em-comments{list-style:none;margin:0;padding:0}.em-comment{margin:8px 0 0;padding-top:8px;border-top:1px solid var(--border,#d4d4d8)}.em-comment:first-child{margin-top:0;padding-top:0;border-top:0}.em-comment-text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.em-comment-body{overflow-wrap:anywhere}.em-comment-body>*{margin-top:0}.em-comment-body>:last-child{margin-bottom:0}
+@media(prefers-color-scheme:dark){.em-thread{border-color:var(--border,#3f3f46);background:var(--sunken,#1c1c1f);color:var(--fg,#d4d4d8)}.em-thread-head,.em-thread-note,.em-thread-omitted,.em-comment-head{color:var(--muted,#a1a1aa)}.em-thread-where,.em-comment-head strong{color:var(--strong,#f4f4f5)}.em-thread-quote,.em-comment{border-color:var(--border,#3f3f46)}}
 `;
 const rel = ["noopener", "noreferrer", "nofollow"];
 const imageTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
@@ -147,6 +148,14 @@ function resolverState(
         return false;
       }
       state.used += length;
+      return true;
+    },
+    takeComment(length: number): boolean {
+      if (length > work[commentWork]) {
+        state.tooLarge = true;
+        return false;
+      }
+      work[commentWork] -= length;
       return true;
     },
     reference(): Promise<void> | undefined {
@@ -363,39 +372,22 @@ function hasCommentContent(node: Root | Element): boolean {
       : child.type === "element" && (child.tagName === "img" || hasCommentContent(child)),
   );
 }
-async function commentBody(comment: DownloadComment, state: AssetState): Promise<{ node: Element; bytes: number }> {
-  const plain = () => ({
-    node: element("p", [text(comment.body)], { className: ["em-comment-text"] }),
-    bytes: utf8Length(comment.body),
-  });
+async function commentBody(comment: DownloadComment, state: AssetState): Promise<Element> {
+  const plain = () => element("p", [text(comment.body)], { className: ["em-comment-text"] });
   if (comment.html === null || !parseDocHtml(comment.html, HTML_ELEMENT_LIMIT)) return plain();
   // The same filtering as writeup blocks: no scripts, handlers, frames, styles or remote loads.
   const tree = fromHtml(comment.html, { fragment: true });
   await transformBlocks(tree, state);
   if (!hasCommentContent(tree)) return plain();
-  return {
-    bytes: utf8Length(serialize(tree).slice(1)),
-    node: element(
-      "div",
-      tree.children.filter((node): node is ElementContent => node.type !== "doctype"),
-      { className: ["em-comment-body"] },
-    ),
-  };
-}
-async function threadCard(thread: DownloadThread, state: AssetState, showWhere: boolean): Promise<Element | null> {
-  const bodies: Element[] = [];
-  let bytes = [thread.where, thread.note ?? "", thread.quote ?? "", thread.lines?.join("\n") ?? ""].reduce(
-    (sum, value) => sum + utf8Length(value),
-    0,
+  return element(
+    "div",
+    tree.children.filter((node): node is ElementContent => node.type !== "doctype"),
+    { className: ["em-comment-body"] },
   );
-  for (const comment of thread.comments) {
-    const body = await commentBody(comment, state);
-    bytes += body.bytes;
-    bodies.push(body.node);
-  }
-  if (!state.take(bytes)) return null;
+}
+async function threadCard(thread: DownloadThread, state: AssetState, showWhere: boolean): Promise<Element> {
   const items: ElementContent[] = [];
-  for (const [index, comment] of thread.comments.entries()) {
+  for (const comment of thread.comments) {
     items.push(
       element(
         "li",
@@ -410,13 +402,13 @@ async function threadCard(thread: DownloadThread, state: AssetState, showWhere: 
             ],
             { className: ["em-comment-head"] },
           ),
-          ...(bodies[index] ? [bodies[index]] : []),
+          await commentBody(comment, state),
         ],
         { className: ["em-comment"], dataAuthor: comment.author },
       ),
     );
   }
-  return element(
+  const card = element(
     "aside",
     [
       element(
@@ -439,6 +431,11 @@ async function threadCard(thread: DownloadThread, state: AssetState, showWhere: 
     ],
     { className: ["em-thread"], dataState: thread.state },
   );
+  const bytes = utf8Length(serialize({ type: "root", children: [card] }).slice(1));
+  if (state.takeComment(bytes)) return card;
+  return element("p", [text("A comment thread was left out here because it passed the size limit for comments.")], {
+    className: ["em-thread-omitted"],
+  });
 }
 /** Cards for threads this page has not shown yet; marks them shown. */
 async function threadCards(list: DownloadThread[] | undefined, ctx: ThreadContext, showWhere = false) {
@@ -446,8 +443,7 @@ async function threadCards(list: DownloadThread[] | undefined, ctx: ThreadContex
   for (const thread of list ?? []) {
     if (ctx.emitted.has(thread)) continue;
     ctx.emitted.add(thread);
-    const card = await threadCard(thread, ctx.state, showWhere);
-    if (card) cards.push(card);
+    cards.push(await threadCard(thread, ctx.state, showWhere));
   }
   return cards;
 }
@@ -489,11 +485,17 @@ function fileThreads(threads: FileThreads): DownloadThread[] {
     ...[...threads.blocks.values(), ...threads.topics.values(), ...threads.lines.values()].flat(),
   ].sort((a, b) => threadOrder(a) - threadOrder(b));
 }
-export async function buildCommentsDownload(input: PageInput & { threads: FileThreads }): Promise<string> {
+export async function buildCommentsDownload(
+  input: PageInput & { threads: FileThreads; elsewhere?: boolean },
+): Promise<string> {
   const state = resolverState(input.resolveMedia, input.inlineBudget, input.pause, input.work);
   const content = await withThreads(input.threads, state, async () => []);
-  if (!input.threads.top.length && !fileThreads(input.threads).length)
-    content.push(element("p", [text("No sent comments.")]));
+  if (!content.length)
+    content.push(
+      element("p", [
+        text(input.elsewhere ? "The comments are in the doc files of this download." : "No sent comments."),
+      ]),
+    );
   return frame(
     { ...input, title: `${input.title} — comments`, details: { ...input.details, links: undefined } },
     content,

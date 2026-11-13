@@ -16,6 +16,7 @@ import {
   createDownloadWork,
   type DownloadFile,
   type DownloadThreadInput,
+  type FileThreads,
   type ResolveResult,
   routeDownloadThreads,
 } from "@emend/core";
@@ -60,6 +61,10 @@ async function acquireDownload(ownerId: string): Promise<() => void> {
   };
 }
 const pause = () => new Promise<void>((resolve) => setImmediate(resolve));
+const hasThreads = (threads: FileThreads): boolean =>
+  threads.top.length > 0 ||
+  threads.end.length > 0 ||
+  [...threads.blocks.values(), ...threads.topics.values(), ...threads.lines.values()].some((list) => list.length > 0);
 function downloadFilename(title: string, seq: number) {
   const slug =
     title
@@ -77,6 +82,7 @@ async function revisionDownload(
   reviewId: string,
   rawSeq: string,
   budget: number,
+  commentBudget: number,
   headOnly: boolean,
   docIds: string[],
   withComments: boolean,
@@ -194,7 +200,7 @@ async function revisionDownload(
   const docs = fileRows.filter((file) => file.role === "doc");
   const doc = baseDoc(docs);
   const zip = docIds.length > 0 || (withComments && doc?.mediaType === "text/html");
-  const work = createDownloadWork();
+  const work = createDownloadWork(commentBudget);
   const fileKind = (file: typeof files.$inferSelect): "markdown" | "source" | "html" =>
     file.mediaType === "text/html" ? "html" : file.mediaType === "text/plain" ? "source" : "markdown";
   const loadThreads = async () => {
@@ -384,7 +390,9 @@ async function revisionDownload(
   const buildSelected = async (selected: typeof files.$inferSelect, index: number): Promise<string> => {
     const inlineBudget = Math.max(0, budget - bytesSoFar);
     const title = selected.title ?? selected.path;
-    const omitted = () => buildOmittedDownload({ title, threads: routed?.docs[index], inlineBudget, pause, work });
+    const routedThreads = routed?.docs[index];
+    const threads = routedThreads && hasThreads(routedThreads) ? routedThreads : undefined;
+    const omitted = () => buildOmittedDownload({ title, threads, inlineBudget, pause, work });
     if (inlineBudget === 0) return omitted();
     // Do not cache doc bodies: each is released after its ZIP entry is compressed.
     const bytes = await readLimited(selected.mediaType === "text/html" ? selected.newBlob : selected.renderedBlob);
@@ -410,7 +418,7 @@ async function revisionDownload(
       inlineBudget,
       pause,
       work,
-      threads: routed?.docs[index],
+      threads,
       content: source
         ? source.success
           ? { kind: "source", lines: source.data.lines }
@@ -427,6 +435,7 @@ async function revisionDownload(
         details: { ...details, links: undefined },
         resolveMedia,
         threads: routed.comments,
+        elsewhere: routed.docs.some(hasThreads),
         inlineBudget: Math.max(0, budget - bytesSoFar),
         pause,
         work,
@@ -443,8 +452,13 @@ async function revisionDownload(
   return { body: writer.finish(), filename: filename.replace(/\.html$/, ".zip"), zip };
 }
 
-/** The budget parameter is internal; requests cannot change the export ceiling. */
-export function downloadRoutes(app: Hono<AppEnv>, deps: AppDeps, budget: number = LIMITS.downloadInlineBytes) {
+/** The budget parameters are internal; requests cannot change the export ceilings. */
+export function downloadRoutes(
+  app: Hono<AppEnv>,
+  deps: AppDeps,
+  budget: number = LIMITS.downloadInlineBytes,
+  commentBudget: number = LIMITS.downloadCommentBytes,
+) {
   app.get("/api/v1/reviews/:id/revisions/:seq/download", async (c) => {
     const ownerId = c.get("principal").ownerId;
     const headOnly = c.req.method === "HEAD";
@@ -464,6 +478,7 @@ export function downloadRoutes(app: Hono<AppEnv>, deps: AppDeps, budget: number 
           c.req.param("id"),
           c.req.param("seq"),
           budget,
+          commentBudget,
           headOnly,
           docIds,
           withComments,

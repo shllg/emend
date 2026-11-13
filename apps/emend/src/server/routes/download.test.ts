@@ -53,7 +53,7 @@ async function mediaReview() {
   });
   return { ...published, hash };
 }
-function budgetApp(budget: number) {
+function budgetApp(budget: number, commentBudget?: number) {
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
     c.set("principal", {
@@ -65,7 +65,7 @@ function budgetApp(budget: number) {
     });
     await next();
   });
-  downloadRoutes(app, f.deps, budget);
+  downloadRoutes(app, f.deps, budget, commentBudget);
   return app;
 }
 
@@ -1171,6 +1171,8 @@ test.each([false, true])(
 // Comments and replies.
 const commentsPath = (reviewId: string, ids: readonly string[] = [], comments = true) =>
   reviewDownloadPath(reviewId, 1, ids, { comments }).slice("/api/v1".length);
+const omittedThread =
+  '<p class="em-thread-omitted">A comment thread was left out here because it passed the size limit for comments.</p>';
 async function postThread(reviewId: string, target: unknown, body: string, revision = 1) {
   const response = await f.request(`/reviews/${reviewId}/threads`, "POST", { revision, target, body });
   expect(response.status).toBe(201);
@@ -1325,6 +1327,34 @@ test("comments=1 without docs keeps the single HTML response and headers", async
   expect(await head.text()).toBe("");
 });
 
+test("writeup media can fill the emitted budget without spending the whole-review comment allowance", async () => {
+  const { reviewId } = await mediaReview();
+  const remark = "Reviewer remark in full.";
+  await postThread(reviewId, { kind: "review" }, remark);
+  await sendComments(reviewId);
+  const budget = 2 * Buffer.byteLength(`data:image/png;base64,${png.toString("base64")}`);
+  for (const commentBudget of [undefined, 1]) {
+    const response = await budgetApp(budget, commentBudget).request(
+      reviewDownloadPath(reviewId, 1, [], { comments: true }),
+    );
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html.match(/data:image\/png;base64,/g)).toHaveLength(2);
+    if (commentBudget === undefined) {
+      expect(html).toContain(`<p>${remark}</p>`);
+      expect(html.match(/class="em-thread"/g)).toHaveLength(1);
+      expect(at(html, remark)).toBeLessThan(at(html, "data:image/png"));
+      expect(html).not.toContain(omittedThread);
+      expect(html).not.toContain("Some content was left out");
+    } else {
+      expect(html).not.toContain(remark);
+      expect(html).not.toContain('class="em-thread"');
+      expect(html).toContain(omittedThread);
+      expect(html).toContain("Some content was left out");
+    }
+  }
+});
+
 test("unsent comments stay out of the file", async () => {
   const { reviewId, threadsMade } = await commentedReview({ send: false });
   const first = await (await f.request(commentsPath(reviewId), "GET")).text();
@@ -1436,15 +1466,60 @@ test.each(["markdown", "source"] as const)(
   "a %s pub places its base doc thread after the block or line",
   async (kind) => {
     const { reviewId } = await commentDocReview(kind, true);
+    if (kind === "markdown") {
+      await postThread(reviewId, { kind: "review" }, "Whole publication remark");
+      await sendComments(reviewId);
+    }
     const response = await f.request(commentsPath(reviewId), "GET");
     expect(response.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
     const html = await response.text();
     expect(at(html, "Doc remark")).toBeGreaterThan(at(html, "Doc paragraph"));
     expect(at(html, "Doc remark")).toBeLessThan(at(html, "Next paragraph"));
-    expect(html.match(/class="em-thread"/g)).toHaveLength(1);
+    expect(html.match(/class="em-thread"/g)).toHaveLength(kind === "markdown" ? 2 : 1);
     expect(html).not.toContain("Other comments");
+    if (kind === "markdown") {
+      expect(at(html, "Whole publication remark")).toBeLessThan(at(html, "<p>Doc paragraph</p>"));
+      expect(html).toContain('<p>Doc paragraph</p><aside class="em-thread"');
+      expect(html).toContain("</aside><p>Next paragraph</p>");
+    } else {
+      expect(html.match(/<pre class="shiki em-source">/g)).toHaveLength(2);
+      expect(html).toContain('Doc paragraph</span></span></code></pre><aside class="em-thread"');
+      expect(html).toContain('</aside><pre class="shiki em-source"><code>');
+    }
   },
 );
+
+test("selecting a Markdown pub's base doc again keeps its thread only in the base entry", async () => {
+  const { reviewId, id } = await commentDocReview("markdown", true);
+  const entries = await zipEntries(await f.request(commentsPath(reviewId, [id]), "GET"));
+  expect(entries.map((entry) => entry.name)).toEqual(["export-example-r1.html", "docs/plan.md.html"]);
+  expect(entries[0]?.html.match(/class="em-thread"/g)).toHaveLength(1);
+  expect(entries[0]?.html).toContain("Doc remark");
+  expect(entries[1]?.html).toContain("Doc paragraph");
+  expect(entries[1]?.html).not.toContain("Doc remark");
+  expect(entries[1]?.html).not.toContain("em-thread");
+});
+
+test("the comment allowance is shared by the base file and selected doc entries", async () => {
+  const { reviewId, id } = await commentDocReview("markdown", false);
+  await postThread(reviewId, { kind: "review" }, "Whole review remark");
+  await sendComments(reviewId);
+  const complete = await zipEntries(await f.request(commentsPath(reviewId, [id]), "GET"));
+  const card = complete[0]?.html.match(/<aside class="em-thread"[\s\S]*?<\/aside>/)?.[0];
+  if (!card) throw new Error("Missing whole-review card");
+  expect(complete[1]?.html).toContain("Doc remark");
+  const entries = await zipEntries(
+    await budgetApp(LIMITS.downloadInlineBytes, Buffer.byteLength(card)).request(
+      reviewDownloadPath(reviewId, 1, [id], { comments: true }),
+    ),
+  );
+  expect(entries[0]?.html).toContain(card);
+  expect(entries[0]?.html).not.toContain("Some content was left out");
+  expect(entries[1]?.html).not.toContain("Doc remark");
+  expect(entries[1]?.html).toContain("Doc paragraph");
+  expect(entries[1]?.html).toContain(omittedThread);
+  expect(entries[1]?.html).toContain("Some content was left out");
+});
 
 test("a selected source doc holds its line thread in its ZIP entry", async () => {
   const { reviewId, id } = await commentDocReview("source", false);
@@ -1532,6 +1607,32 @@ test("an HTML pub without sent threads still has a comments page before the sele
     "docs/guide/plan.md.html",
   ]);
   expect(entries[1]?.html).toContain("<p>No sent comments.</p>");
+  expect(entries[1]?.html).not.toContain("The comments are in the doc files of this download.");
+});
+
+test("an HTML pub's comments page points to selected docs when they hold all sent threads", async () => {
+  const { reviewId, view, ids } = await docsReview({ writeup: blank, main: "guide/visual.html" });
+  const doc = view.docs.find((candidate) => candidate.path === "guide/plan.md");
+  const block = doc && "blocks" in doc ? doc.blocks[0] : undefined;
+  if (!block) throw new Error("Missing Markdown block");
+  await postThread(
+    reviewId,
+    { kind: "doc-span", path: "guide/plan.md", blockId: block.id, quote: block.text, prefix: "", suffix: "" },
+    "Selected doc remark",
+  );
+  await sendComments(reviewId);
+  const entries = await zipEntries(await f.request(commentsPath(reviewId, [ids[0]]), "GET"));
+  expect(entries.map((entry) => entry.name)).toEqual([
+    "export-example-r1.html",
+    "comments.html",
+    "docs/guide/plan.md.html",
+  ]);
+  expect(entries[1]?.html).toContain("<p>The comments are in the doc files of this download.</p>");
+  expect(entries[1]?.html).not.toContain("No sent comments.");
+  expect(entries[1]?.html).not.toContain('class="em-thread"');
+  expect(entries[1]?.html).not.toContain(omittedThread);
+  expect(entries[2]?.html).toContain("Selected doc remark");
+  expect(entries[2]?.html.match(/class="em-thread"/g)).toHaveLength(1);
 });
 
 test("a selected Markdown doc replaced by the left-out page retains its threads within budget", async () => {
@@ -1561,7 +1662,13 @@ test("a selected Markdown doc replaced by the left-out page retains its threads 
     await budgetApp(baseBytes).request(reviewDownloadPath(reviewId, 1, [id], { comments: true })),
   );
   expect(exhausted[1]?.html).toContain("Some content was left out");
-  expect(exhausted[1]?.html).not.toContain("Kept doc remark");
+  expect(exhausted[1]?.html).toContain("Kept doc remark");
+  const commentsExhausted = await zipEntries(
+    await budgetApp(baseBytes, 1).request(reviewDownloadPath(reviewId, 1, [id], { comments: true })),
+  );
+  expect(commentsExhausted[1]?.html).toContain("Some content was left out");
+  expect(commentsExhausted[1]?.html).toContain(omittedThread);
+  expect(commentsExhausted[1]?.html).not.toContain("Kept doc remark");
 });
 
 test("older revisions exclude later threads while keeping later replies on their own threads", async () => {

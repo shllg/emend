@@ -257,7 +257,8 @@ A thread shows once, in the first file that holds its doc (the base file first).
 hold comments. Their threads go to the "Other comments" list, with the path and quote.
 For an HTML pub, `comments.html` holds whole-review threads and "Other comments". It has
 the review title followed by " — comments", the same meta line and no publish links.
-With no sent comments it says "No sent comments."
+With no sent comments it says "No sent comments." When all comments are in selected doc files,
+it says "The comments are in the doc files of this download."
 Where a thread goes, by its placement on this revision:
 
 - Whole-review threads: a list at the top of the base file, or in `comments.html` for an HTML pub.
@@ -273,8 +274,10 @@ Where a thread goes, by its placement on this revision:
   HTML pub, with the path and lines.
 
 A selected Markdown or source doc replaced by the left-out page keeps its threads after the
-note, in a "Comments on this doc" list with where labels. Thread text counts against the same
-128 MiB emitted budget as built-in content. A thread that does not fit is left out with the note.
+note, in a "Comments on this doc" list with where labels. Each thread card counts its final UTF-8
+bytes against a separate 32 MiB comment budget shared by all files of a download. Built-in images
+inside comments also count against the 128 MiB budget. A card that does not fit is replaced by a
+line saying a comment thread was left out, and the size note shows.
 The diff itself is never in the download.
 
 Doc entry names use the doc path split on `/`. Each segment replaces runs outside `[A-Za-z0-9._-]`
@@ -1550,6 +1553,7 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `markdownDocBytes` | 1048576 bytes |
 | `htmlDocBytes` | 8388608 bytes |
 | `downloadInlineBytes` | 134217728 bytes (128 MiB) of emitted built-in content per download, and the same read budget for stored assets and selected doc bodies; both shared by all files of a ZIP |
+| `downloadCommentBytes` | 32 MiB of thread cards per download, shared by all files of a ZIP, separate from the built-in content budget |
 | `downloadDocs` | 50 docs added to one download |
 | `assetBytes` | 26214400 bytes per asset |
 | `htmlDocWithAssetsBytes` | 52428800 bytes combined |
