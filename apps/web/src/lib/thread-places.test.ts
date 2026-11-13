@@ -258,7 +258,7 @@ test.each([false, true])("a doc's source view preserves paragraph order (source 
   const second = "doc-11111111-11111111";
   const docs: RevisionView["docs"] = [
     { kind: "markdown", path, blocks: [block(first), block(second)] },
-    { kind: "source", path, language: "markdown", lines: [] },
+    { kind: "source", path, language: "md", lines: [] },
   ];
   const groups = places([thread("second", docSpan(path, second)), thread("first", docSpan(path, first, 1))], {
     docs: sourceFirst ? docs.toReversed() : docs,
