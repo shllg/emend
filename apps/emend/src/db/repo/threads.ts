@@ -39,7 +39,7 @@ export async function createThread(
               .from(files)
               .where(and(eq(files.ownerId, ownerId), eq(files.revisionId, revision.id))),
             topics: await q
-              .select({ slug: topics.slug })
+              .select({ slug: topics.slug, title: topics.title, summary: topics.summary })
               .from(topics)
               .where(and(eq(topics.ownerId, ownerId), eq(topics.revisionId, revision.id))),
             writeup: await q

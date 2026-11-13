@@ -43,8 +43,10 @@ function placementReserve(target: Target) {
   let location: unknown;
   switch (target.kind) {
     case "review":
-    case "topic":
       location = target;
+      break;
+    case "topic":
+      location = target.part ? { kind: "topic", slug: target.slug, part: "summary", ...range } : target;
       break;
     case "file":
       location = { kind: target.kind, path };

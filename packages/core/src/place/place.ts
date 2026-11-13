@@ -2,7 +2,7 @@ import type { Placement, PlacementLocation, Target } from "@emend/contract";
 import type { Block } from "../render/blocks.ts";
 import { placeHtmlSpan } from "./html.ts";
 import { type FileSides, placeLines } from "./lines.ts";
-import { placeSpan } from "./span.ts";
+import { placeSpan, placeTextSpan } from "./span.ts";
 
 /**
  * renamedFrom covers the entire interval from last's revision (or the target's original
@@ -16,7 +16,7 @@ export type PlaceContext = {
   sources?: Map<string, { text: string; hash?: string }>;
   files: Map<string, FileSides>;
   renamedFrom: Map<string, string | null>;
-  topics: Set<string>;
+  topics: ReadonlyMap<string, { title: string; summary: string }>;
   last: { location: PlacementLocation; sides?: FileSides } | null;
 };
 
@@ -25,10 +25,26 @@ export function placeThread(target: Target, ctx: PlaceContext): Placement {
   switch (target.kind) {
     case "review":
       return { status: "placed", location: { kind: "review" } };
-    case "topic":
-      return ctx.topics.has(target.slug)
-        ? { status: "placed", location: { kind: "topic", slug: target.slug } }
-        : { status: "unplaced", reason: "topic-gone" };
+    case "topic": {
+      const topic = ctx.topics.get(target.slug);
+      if (!topic) return { status: "unplaced", reason: "topic-gone" };
+      if (target.part === undefined) return { status: "placed", location: { kind: "topic", slug: target.slug } };
+      const result = placeTextSpan(
+        (["title", "summary"] as const).map((part) => ({ id: part, text: topic[part] })),
+        {
+          blockId: last?.kind === "topic" && last.part ? last.part : target.part,
+          quote: target.quote ?? "",
+          prefix: target.prefix ?? "",
+          suffix: target.suffix ?? "",
+        },
+      );
+      return result.status === "unplaced"
+        ? result
+        : {
+            status: "placed",
+            location: { kind: "topic", slug: target.slug, part: result.block.id, ...result.range },
+          };
+    }
     case "writeup-span":
       return placeSpan(ctx.writeup, {
         ...target,

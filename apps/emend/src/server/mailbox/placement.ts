@@ -11,7 +11,7 @@ export type PlacementDeps = { blobs: BlobStore; executor?: Executor; signal?: Ab
 type Snapshot = {
   revision: typeof revisions.$inferSelect;
   files: (typeof files.$inferSelect)[];
-  topics: { slug: string }[];
+  topics: { slug: string; title: string; summary: string }[];
   writeup: typeof writeups.$inferSelect | undefined;
 };
 type Carried = NonNullable<typeof placements.$inferSelect.carried>;
@@ -20,7 +20,7 @@ function originalLocation(target: Target, placement: Placement) {
   if (placement.status !== "placed") return false;
   const location = placement.location;
   if (target.kind !== location.kind) return false;
-  for (const key of ["path", "blockId", "side", "slug", "start", "end"] as const)
+  for (const key of ["path", "blockId", "side", "slug", "part", "start", "end"] as const)
     if (key in target && (!(key in location) || Reflect.get(target, key) !== Reflect.get(location, key))) return false;
   return true;
 }
@@ -119,7 +119,7 @@ export async function computePlacements(
             sources,
             texts,
             files: fileMap,
-            topics: new Set(snapshot.topics.map((t) => t.slug)),
+            topics: new Map(snapshot.topics.map((t) => [t.slug, { title: t.title, summary: t.summary }])),
             threads: [{ id: threadId, target, last, renames: [transition], carried }],
           }),
         );

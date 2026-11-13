@@ -97,6 +97,59 @@ test("an unsent writeup thread marks exactly its quote, and unmount deletes both
   expect(highlights.size).toBe(0);
 });
 
+test("topic highlights follow placed parts and slugs, exclude resolved threads and keep titles literal", () => {
+  const topic = {
+    slug: "garden",
+    title: "Plant a seed",
+    summary: "Fresh soil",
+    importance: 10,
+    attention: "skim" as const,
+  };
+  const placed = (id: string, part: "title" | "summary", start: number, end: number): ThreadView => ({
+    ...thread,
+    id,
+    target: { kind: "topic", slug: topic.slug, part: "title", quote: "seed", prefix: "Plant a ", suffix: "" },
+    placement: { status: "placed", location: { kind: "topic", slug: topic.slug, part, start, end } },
+  });
+  const title = placed(reviewId, "title", 8, 12);
+  const summary = placed(secondId, "summary", 6, 10);
+  const ignored: ThreadView[] = [
+    { ...placed("resolved", "summary", 0, 5), state: "resolved" },
+    {
+      ...thread,
+      id: "whole",
+      target: { kind: "topic", slug: topic.slug },
+      placement: { status: "placed", location: { kind: "topic", slug: topic.slug } },
+    },
+    {
+      ...title,
+      id: "foreign",
+      placement: { status: "placed", location: { kind: "topic", slug: "other", part: "title", start: 0, end: 5 } },
+    },
+  ];
+  const content: RenderedWriteup = {
+    sections: [{ key: "t-garden-why", label: "Garden", topic: topic.slug, blocks: [] }],
+  };
+  const view = mount(<Writeup {...props} topics={[topic]} writeup={content} threads={[title, summary, ...ignored]} />);
+  expect(quotes()).toEqual(["seed", "soil"]);
+  expect(ranges().map((range) => range.startContainer.parentElement?.dataset.topicPart)).toEqual(["title", "summary"]);
+  const element = required(view.container.querySelector('[data-topic-part="title"]'));
+  expect(element.querySelector(".sr-only")).toBeNull();
+  view.rerender(
+    <Writeup
+      {...props}
+      topics={[topic]}
+      writeup={content}
+      threads={[{ ...title, state: "resolved" }, summary]}
+      activeThreadId={secondId}
+    />,
+  );
+  expect(quotes()).toEqual([]);
+  expect(quotes(true)).toEqual(["soil"]);
+  view.unmount();
+  expect(highlights.size).toBe(0);
+});
+
 test("composer hover and focus never add a draft key to the writeup active set", () => {
   const key = draftKey(reviewId, thread.target);
   const view = mount(<Composer reviewId={reviewId} revision={1} target={thread.target} />);

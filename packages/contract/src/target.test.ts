@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { BlockId, Target } from "./index.ts";
+import { BlockId, Target, TopicPart, TopicTarget } from "./index.ts";
 
 test.each(["outOfScope", "whereToLook", "context"])("accepts block ids for %s", (section) => {
   for (const suffix of ["", "-2", "-10"]) {
@@ -10,6 +10,20 @@ test.each(["outOfScope", "whereToLook", "context"])("accepts block ids for %s", 
 });
 
 const span = { blockId: "overview-1234abcd", quote: "route", prefix: "", suffix: "" };
+test("topic quote fields must be all present or all absent", () => {
+  expect(TopicPart.options).toEqual(["title", "summary"]);
+  const fields = Object.entries({ part: "summary", quote: "seed", prefix: "", suffix: "" });
+  for (let mask = 0; mask < 16; mask++) {
+    const target = { kind: "topic", slug: "garden", ...Object.fromEntries(fields.filter((_, i) => mask & (1 << i))) };
+    for (const schema of [TopicTarget, Target]) {
+      expect(schema.safeParse(target).success, `field mask ${mask}`).toBe(mask === 0 || mask === 15);
+    }
+  }
+  expect(
+    TopicTarget.safeParse({ kind: "topic", slug: "garden", part: "blast", quote: "seed", prefix: "", suffix: "" })
+      .success,
+  ).toBe(false);
+});
 const lines = {
   kind: "lines",
   path: "src/router.ts",
@@ -29,13 +43,14 @@ describe("targets", () => {
     lines,
     { kind: "file", path: "src/router.ts" },
     { kind: "topic", slug: "other" },
+    { kind: "topic", slug: "garden", part: "title", quote: "seed", prefix: "", suffix: "" },
     { kind: "review" },
   ])("accepts a %s target and strips unknown keys", (target) => {
     expect(Target.parse({ ...target, extra: true })).toEqual(target);
   });
 
-  test.each(["writeup-span", "doc-span", "html-span"])("enforces quote and context limits for %s", (kind) => {
-    const target = { kind, path: "docs/plan.md", ...span };
+  test.each(["writeup-span", "doc-span", "html-span", "topic"])("enforces quote and context limits for %s", (kind) => {
+    const target = { kind, path: "docs/plan.md", slug: "garden", part: "summary", ...span };
     for (const change of [
       { quote: "" },
       { quote: "x".repeat(2001) },

@@ -40,6 +40,40 @@ beforeEach(async () => {
   f = await importFixture();
   onTestFinished(() => f.cleanup());
 });
+test("import places topic quotes using revision title and summary text", async () => {
+  const input = ImportBundle.parse(await bundle(f));
+  const target = {
+    kind: "topic",
+    slug: "synthetic",
+    part: "title",
+    quote: "topic",
+    prefix: "Synthetic ",
+    suffix: "",
+  } as const;
+  required(input.threads[0]).target = target;
+  required(input.topics[1]).title = "New title";
+  required(input.topics[1]).summary = "Synthetic topic";
+  expect((await f.importRequest("/import", input)).status).toBe(201);
+  for (const [index, part] of ["title", "summary"].entries()) {
+    const row = await f.db.read((q) =>
+      q
+        .select()
+        .from(tables.placements)
+        .where(
+          and(
+            eq(tables.placements.ownerId, f.ownerId),
+            eq(tables.placements.threadId, required(input.threads[0]).id),
+            eq(tables.placements.revisionId, required(input.revisions[index]).id),
+          ),
+        )
+        .get(),
+    );
+    expect(row).toMatchObject({
+      status: "placed",
+      location: { kind: "topic", slug: "synthetic", part, start: 10, end: 15 },
+    });
+  }
+});
 test.each([
   { project: "Orchard", name: "Legacy", expected: "Orchard", existingRepo: true },
   { project: undefined, name: "Legacy", expected: "Legacy", existingRepo: true },

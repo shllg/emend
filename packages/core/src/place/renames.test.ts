@@ -16,7 +16,7 @@ function context(): PlaceContext {
   return {
     writeup: [],
     docs: new Map(),
-    topics: new Set(),
+    topics: new Map(),
     files: new Map(),
     renamedFrom: new Map(),
     last: { location: { kind: "lines", path: target.path, side: "new", start: 1, end: 1 }, sides: { newText: "seed" } },

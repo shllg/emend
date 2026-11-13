@@ -425,7 +425,7 @@ async function computePublish(
           sources,
           texts: sideTexts,
           files: currentSides,
-          topics: new Set(input.topics.map((t) => t.slug)),
+          topics: new Map(input.topics.map((t) => [t.slug, { title: t.title, summary: t.summary }])),
           threads: workThreads,
         });
         if (result.kind !== "place") throw new Error("wrong result");

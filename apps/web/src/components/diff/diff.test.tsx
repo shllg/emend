@@ -842,6 +842,23 @@ function placedThread(target: Extract<Target, { kind: "topic" | "file" | "lines"
   };
 }
 
+test("TopicSection shows a quoted topic thread and counts it while collapsed", async () => {
+  const quoted: ThreadView = {
+    ...placedThread(
+      { kind: "topic", slug: "first", part: "summary", quote: "Synthetic", prefix: "", suffix: " summary" },
+      "Quoted topic discussion",
+    ),
+    placement: { status: "placed", location: { kind: "topic", slug: "first", part: "summary", start: 0, end: 9 } },
+  };
+  await mount(revision([file()], { threads: [quoted] }));
+  const topic = screen.getByRole("region", { name: "Topic First" });
+  expect(topic.querySelector("[data-topic-header]")?.textContent).toContain("1 thread");
+  fireEvent.click(within(topic).getByRole("button", { name: "Collapse topic" }));
+  const discussion = topic.querySelector(".em-diff-discussion");
+  expect(discussion?.querySelector(".em-thread-quote")?.textContent).toBe("Synthetic");
+  expect(within(topic).getByText("Quoted topic discussion").closest("[hidden]")).toBeNull();
+});
+
 test("topic and file counts include placed threads only; collapse keeps topic discussion and restores file state", async () => {
   const topicThread = placedThread({ kind: "topic", slug: "first" }, "Topic discussion");
   const fileThread = placedThread({ kind: "file", path: "source.ts" }, "File discussion");

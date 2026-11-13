@@ -3,6 +3,7 @@ import type { Target } from "@emend/contract";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { files, placements, revisions, topics, writeups } from "../../db/schema.ts";
+import { ingest } from "../publish/ingest.ts";
 import { executeWork } from "../publish/work.ts";
 import { error, mailboxFixture } from "./test-support.ts";
 
@@ -22,6 +23,98 @@ const line = (start = 1): Target => ({
   lines: ["needle"],
   before: [],
   after: [],
+});
+
+test("topic quotes store ranges, reject the wrong original part and survive publication and hand-off", async () => {
+  const topic = { slug: "garden", title: "Plant a seed.", summary: "Fresh soil.", importance: 10 };
+  await f.db.query((q) => q.insert(topics).values({ ownerId: f.ownerId, revisionId: f.revisionId, ...topic }));
+  // Exercise structured clone through the production placement worker.
+  f.deps.publishExecutor = undefined;
+  const target = {
+    kind: "topic",
+    slug: topic.slug,
+    part: "title",
+    quote: "seed",
+    prefix: "Plant a ",
+    suffix: ".",
+  } as const;
+  const created = await f.thread("Explain the seed", target);
+  const placement = (revisionId: string) =>
+    f.db.read((q) =>
+      q
+        .select()
+        .from(placements)
+        .where(
+          and(
+            eq(placements.ownerId, f.ownerId),
+            eq(placements.threadId, created.threadId),
+            eq(placements.revisionId, revisionId),
+          ),
+        )
+        .get(),
+    );
+  expect(await placement(f.revisionId)).toMatchObject({
+    status: "placed",
+    location: { kind: "topic", slug: topic.slug, part: "title", start: 8, end: 12 },
+  });
+  for (const invalid of [
+    { ...target, part: "summary" },
+    { ...target, quote: "missing" },
+  ]) {
+    await error(
+      await f.request(`/reviews/${f.reviewId}/threads`, "POST", { revision: 1, target: invalid, body: "No" }),
+      400,
+      "invalid_target",
+    );
+  }
+  await error(
+    await f.request(`/reviews/${f.reviewId}/threads`, "POST", { revision: 1, target, body: "No" }, "agent"),
+    403,
+    "forbidden",
+  );
+  const publish = (title: string, summary: string) =>
+    ingest(
+      f.ownerId,
+      f.instanceId,
+      {
+        reviewKey: "a".repeat(64),
+        repo: null,
+        branch: null,
+        title: "Synthetic review",
+        base: null,
+        head: null,
+        topics: [{ ...topic, title, summary }],
+        files: [],
+        writeup: { overview: "Garden", tldr: "", decisions: null, topics: {} },
+      },
+      { db: f.db, blobs: f.deps.blobs, baseUrl: "http://127.0.0.1:3636" },
+    );
+  const moved = await publish("Plant flowers", "Plant a seed.");
+  expect(moved).toMatchObject({ revision: 2, placed: 1, unplaced: 0 });
+  await f.send({ revision: 2, kind: "go" });
+  expect(await f.take()).toMatchObject({
+    kind: "go",
+    comments: [
+      {
+        target,
+        placement: {
+          status: "placed",
+          location: { kind: "topic", slug: topic.slug, part: "summary", start: 8, end: 12 },
+        },
+      },
+    ],
+  });
+  const removed = await publish("Plant flowers", "Fresh soil.");
+  expect(removed).toMatchObject({ revision: 3, placed: 0, unplaced: 1 });
+  const newest = await f.db.read((q) =>
+    q
+      .select()
+      .from(revisions)
+      .where(and(eq(revisions.ownerId, f.ownerId), eq(revisions.reviewId, f.reviewId), eq(revisions.seq, 3)))
+      .get(),
+  );
+  if (!newest) throw new Error("Missing revision");
+  expect(await placement(newest.id)).toMatchObject({ status: "unplaced", reason: "block-gone", location: null });
 });
 async function file(revisionId: string, path: string, text: string, oldPath: string | null = null) {
   const blob = await f.deps.blobs.put(f.ownerId, Buffer.from(text), "text/plain");

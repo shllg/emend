@@ -73,7 +73,7 @@ export type Work =
       parsedWriteup?: EncodedPlacementDoc;
       texts: Map<string, ArrayBuffer>;
       files: Map<string, SharedSides>;
-      topics: Set<string>;
+      topics: PlaceContext["topics"];
       threads: {
         id: string;
         target: Target;

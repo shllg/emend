@@ -1176,7 +1176,7 @@ open `links` the same way, after checking again that each URL is https, and show
 | `lines` | `path`, `side: "old" | "new"`, `start`, `end`, `lines`, `before`, `after` |
 | `source-lines` | `path`, `start`, `end`, `lines`, `before`, `after` |
 | `file` | `path` |
-| `topic` | `slug` |
+| `topic` | `slug`; for a quote on the title or summary also `part: "title" \| "summary"`, `quote`, `prefix`, `suffix` (all four or none) |
 | `review` | No additional fields. |
 
 Every span quote is non-empty; prefix and suffix may be empty. Line numbers are positive integers,
@@ -1203,9 +1203,14 @@ Locations use the target's `kind`. Span locations contain `start` and `end`
 instead of quote/context; offsets are zero-based UTF-16 indices with an exclusive end greater than
 start, within the normalized block text or HTML document text. Writeup spans retain `blockId`;
 doc spans retain `path` and `blockId`; HTML spans retain `path`. Line locations contain `path`,
-`side`, `start`, `end`, using the same 1-based inclusive convention. Source-line locations omit `side`. File, topic and review locations
-use the same fields as their targets. Placement describes the newest revision; a thread keeps its
-original target separately.
+`side`, `start`, `end`, using the same 1-based inclusive convention. Source-line locations omit `side`.
+Topic locations carry `slug`, plus `part`, `start`, `end` for a quote, with span offsets within the
+normalized title or summary text. File and review locations use the same fields as their targets.
+Placement describes the newest revision; a thread keeps its original target separately.
+A topic quote follows the writeup-span rules within that topic's title and summary: the quote alone
+when it occurs once in the part it was last placed on, otherwise quote with prefix and suffix when
+they occur exactly once across the topic's title and summary. Otherwise it is unplaced as `ambiguous`
+or `block-gone`; a gone topic is `topic-gone`.
 
 ### Snooze, retire, delete and the bin
 

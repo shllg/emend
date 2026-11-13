@@ -58,7 +58,24 @@ export type SourceLinesTarget = z.infer<typeof SourceLinesTarget>;
 export const FileTarget = z.object({ kind: z.literal("file"), path: FilePath });
 export type FileTarget = z.infer<typeof FileTarget>;
 
-export const TopicTarget = z.object({ kind: z.literal("topic"), slug: TopicSlug });
+export const TopicPart = z.enum(["title", "summary"]);
+export type TopicPart = z.infer<typeof TopicPart>;
+
+export const TopicTarget = z
+  .object({
+    kind: z.literal("topic"),
+    slug: TopicSlug,
+    part: TopicPart.optional(),
+    quote: span.quote.optional(),
+    prefix: span.prefix.optional(),
+    suffix: span.suffix.optional(),
+  })
+  .superRefine((target, ctx) => {
+    const fields = [target.part, target.quote, target.prefix, target.suffix];
+    if (fields.some((value) => value !== undefined) && fields.some((value) => value === undefined)) {
+      ctx.addIssue({ code: "custom", message: "part, quote, prefix and suffix must all be present or absent" });
+    }
+  });
 export type TopicTarget = z.infer<typeof TopicTarget>;
 
 export const ReviewTarget = z.object({ kind: z.literal("review") });

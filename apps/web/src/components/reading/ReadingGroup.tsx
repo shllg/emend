@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, MessageSquarePlus } from "lucide-react";
 import {
   createContext,
   type ReactNode,
@@ -12,6 +12,7 @@ import {
 import { plural } from "../../lib/count.ts";
 import { ChangedMarker } from "../status/ChangedMarker.tsx";
 import { TopicRank } from "../status/TopicRank.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
 import type { ReaderGroup } from "./BlockReader.tsx";
 import { TopicChips } from "./TopicChips.tsx";
 
@@ -34,11 +35,15 @@ export function ReadingGroup({
   group,
   headingId,
   changedIn,
+  onCommentTopic,
+  discussion,
   children,
 }: {
   group: ReaderGroup;
   headingId: string;
   changedIn?: number;
+  onCommentTopic?: (slug: string, from: HTMLElement) => void;
+  discussion?: ReactNode;
   children: ReactNode;
 }) {
   const root = useRef<HTMLElement>(null);
@@ -117,6 +122,16 @@ export function ReadingGroup({
       )}
       {group.topic && !open && changedIn !== undefined && <ChangedMarker revision={changedIn} />}
       {group.action}
+      {group.topic && (
+        <IconButton
+          label="Comment on topic"
+          icon={MessageSquarePlus}
+          size="sm"
+          onClick={(event) => {
+            if (group.topic) onCommentTopic?.(group.topic.slug, event.currentTarget);
+          }}
+        />
+      )}
     </div>
   );
   const items = group.blocks.filter((block) => block.kind === "item").length;
@@ -146,6 +161,7 @@ export function ReadingGroup({
         <>
           {heading}
           {group.meta}
+          {discussion}
           {group.topic ? (
             <div ref={body} id={bodyId} hidden={!open}>
               {children}

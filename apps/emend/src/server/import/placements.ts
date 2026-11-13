@@ -178,7 +178,7 @@ export function importPlacements() {
       parsedDocs,
       texts,
       files,
-      topics: revision.topicSlugs,
+      topics: revision.topicText,
       threads: workThreads,
     };
     chargePlacementMetadata(work, charge);

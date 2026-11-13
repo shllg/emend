@@ -38,14 +38,12 @@ export function spanCandidates(text: string, target: Quote, withContext = true):
   }));
 }
 
-export function placeSpan(blocks: Block[], target: WriteupSpanTarget | DocSpanTarget): Placement {
-  const placed = (block: Block, range: Range): Placement => ({
-    status: "placed",
-    location:
-      target.kind === "doc-span"
-        ? { kind: target.kind, path: target.path, blockId: block.id, ...range }
-        : { kind: target.kind, blockId: block.id, ...range },
-  });
+/** Shared search for block spans and topic parts, with identical normalization and fallback rules. */
+export function placeTextSpan<B extends Pick<Block, "id" | "text"> & { kind?: Block["kind"] }>(
+  blocks: readonly B[],
+  target: Span,
+): { status: "placed"; block: B; range: Range } | Extract<Placement, { status: "unplaced" }> {
+  const placed = (block: B, range: Range) => ({ status: "placed" as const, block, range });
   const same = blocks.find((block) => block.id === target.blockId);
   if (same) {
     const text = normalizeText(same.text);
@@ -55,7 +53,7 @@ export function placeSpan(blocks: Block[], target: WriteupSpanTarget | DocSpanTa
     if (candidates.length === 1 && candidates[0]) return placed(same, candidates[0]);
   }
 
-  let result: Placement | undefined;
+  let result: ReturnType<typeof placed> | undefined;
   for (const block of blocks) {
     for (const range of spanCandidates(normalizeText(block.text), target)) {
       if (result) return { status: "unplaced", reason: "ambiguous" };
@@ -63,4 +61,17 @@ export function placeSpan(blocks: Block[], target: WriteupSpanTarget | DocSpanTa
     }
   }
   return result ?? { status: "unplaced", reason: "block-gone" };
+}
+
+export function placeSpan(blocks: Block[], target: WriteupSpanTarget | DocSpanTarget): Placement {
+  const result = placeTextSpan(blocks, target);
+  if (result.status === "unplaced") return result;
+  const { block, range } = result;
+  return {
+    status: "placed",
+    location:
+      target.kind === "doc-span"
+        ? { kind: target.kind, path: target.path, blockId: block.id, ...range }
+        : { kind: target.kind, blockId: block.id, ...range },
+  };
 }

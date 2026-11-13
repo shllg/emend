@@ -1,7 +1,14 @@
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
-import { type FileView, OTHER_TOPIC, type RenderedBlock, RenderedWriteup, type TopicMeta } from "@emend/contract";
+import {
+  type FileView,
+  OTHER_TOPIC,
+  type RenderedBlock,
+  RenderedWriteup,
+  type ThreadView,
+  type TopicMeta,
+} from "@emend/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { renderWriteup } from "../../../../../packages/core/src/render/writeup.ts";
 import { layoutStore } from "../../lib/layout-store.ts";
@@ -82,10 +89,165 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   client.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+function topicReader(threads: ThreadView[] = [], value = topic) {
+  return mount(
+    <Writeup
+      {...props}
+      threads={threads}
+      topics={[value]}
+      writeup={{ sections: [{ ...section(value.slug, "why"), blocks: [block] }] }}
+    />,
+  );
+}
+function selectTopic(container: HTMLElement, part: "title" | "summary") {
+  const element = container.querySelector<HTMLElement>(`[data-topic-part="${part}"]`);
+  const node = element?.firstChild;
+  if (!node || !element) throw new Error("Missing topic text");
+  const quote = part === "title" ? "seed" : "synthetic";
+  const from = (node.textContent ?? "").indexOf(quote);
+  const range = document.createRange();
+  range.setStart(node, from);
+  range.setEnd(node, from + quote.length);
+  const selection = window.getSelection();
+  if (!selection) throw new Error("Missing selection");
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return { element, node, selection };
+}
+async function saveTopicComment() {
+  fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "Explain this topic" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  return JSON.parse(fetchMock.mock.calls[0]?.[1].body).target;
+}
+
+test.each(["title", "summary"] as const)("mouse selection on the topic %s saves the quote and topic", async (part) => {
+  const { container } = topicReader();
+  const { element } = selectTopic(container, part);
+  expect(element.hasAttribute("data-block-id")).toBe(false);
+  fireEvent.mouseUp(element);
+  fireEvent.click(screen.getByRole("button", { name: "Comment on selection" }));
+  expect(await saveTopicComment()).toEqual({
+    kind: "topic",
+    slug: topic.slug,
+    part,
+    ...(part === "title"
+      ? { quote: "seed", prefix: "Plant a ", suffix: "" }
+      : { quote: "synthetic", prefix: "A ", suffix: " garden" }),
+  });
+});
+
+test("Comment on topic saves a slug-only target even when the topic is folded", async () => {
+  const { container } = topicReader([], { ...topic, attention: "skim" });
+  const button = screen.getByRole("button", { name: "Comment on topic" });
+  fireEvent.click(button);
+  expect(screen.getByLabelText("Comment").closest("[hidden]")).toBeNull();
+  expect(await saveTopicComment()).toEqual({ kind: "topic", slug: topic.slug });
+  await waitFor(() => expect(container.querySelector("textarea")).toBeNull());
+});
+
+test("a touch title selection survives collapse between pointerdown and click on the prompt", async () => {
+  vi.useFakeTimers();
+  const { container } = topicReader();
+  const { node, selection } = selectTopic(container, "title");
+  document.dispatchEvent(new Event("selectionchange"));
+  expect(screen.queryByRole("button", { name: "Comment on selection" })).toBeNull();
+  act(() => void vi.advanceTimersByTime(250));
+  const prompt = screen.getByRole("button", { name: "Comment on selection" });
+  expect(fireEvent.pointerDown(prompt, { pointerType: "touch" })).toBe(false);
+  selection.collapse(node, 0);
+  document.dispatchEvent(new Event("selectionchange"));
+  act(() => void vi.advanceTimersByTime(250));
+  expect(prompt.isConnected).toBe(true);
+  fireEvent.pointerUp(prompt, { pointerType: "touch" });
+  fireEvent.click(prompt);
+  vi.useRealTimers();
+  expect(await saveTopicComment()).toEqual({
+    kind: "topic",
+    slug: topic.slug,
+    part: "title",
+    quote: "seed",
+    prefix: "Plant a ",
+    suffix: "",
+  });
+});
+
+test.each(["paragraph", "summary"])("selection from a topic title to a %s reports cross-block", (end) => {
+  const { container } = topicReader();
+  const { element, node, selection } = selectTopic(container, "title");
+  const last = container.querySelector(
+    end === "summary" ? '[data-topic-part="summary"]' : "[data-block-id] p",
+  )?.firstChild;
+  if (!last) throw new Error("Missing selection end");
+  const range = document.createRange();
+  range.setStart(node, 0);
+  range.setEnd(last, 3);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  fireEvent.mouseUp(element);
+  expect(screen.getByText("Select text within one paragraph").getAttribute("role")).toBe("status");
+  expect(screen.queryByRole("button", { name: "Comment on selection" })).toBeNull();
+});
+
+test("blast radius text has no comment anchor", () => {
+  const { container } = topicReader();
+  const blast = container.querySelector(".em-topic-blast");
+  if (!blast) throw new Error("Missing blast radius");
+  expect(blast.querySelector("[data-topic-part], [data-block-id]")).toBeNull();
+  const range = document.createRange();
+  range.selectNodeContents(blast);
+  window.getSelection()?.addRange(range);
+  fireEvent.mouseUp(blast);
+  expect(screen.queryByRole("button", { name: "Comment on selection" })).toBeNull();
+});
+
+test("whole-topic and quoted threads stay below the topic metadata when folded and both count", () => {
+  layoutStore.update({ contents: true, compact: false });
+  const whole: ThreadView = {
+    id: reviewId,
+    createdOn: 1,
+    state: "open",
+    target: { kind: "topic", slug: topic.slug },
+    placement: { status: "placed", location: { kind: "topic", slug: topic.slug } },
+    comments: [{ id: reviewId, author: "user", body: "Whole topic feedback", sent: false, sentOn: null }],
+  };
+  const quoted: ThreadView = {
+    ...whole,
+    id: "22222222-2222-4222-8222-222222222222",
+    target: { kind: "topic", slug: topic.slug, part: "title", quote: "seed", prefix: "Plant a ", suffix: "" },
+    placement: { status: "placed", location: { kind: "topic", slug: topic.slug, part: "title", start: 8, end: 12 } },
+    comments: whole.comments.map((comment) => ({ ...comment, body: "Quoted topic feedback" })),
+  };
+  topicReader([whole, quoted], { ...topic, attention: "skim" });
+  const group = screen.getByRole("region", { name: "Topic 1: Plant a seed" });
+  const cards = group.querySelectorAll("[data-thread-card]");
+  expect(cards).toHaveLength(2);
+  for (const card of cards) {
+    expect(card.closest("[hidden]")).toBeNull();
+    expect(
+      (group.querySelector(".em-topic-summary")?.compareDocumentPosition(card) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  }
+  expect(within(group).getByText("2 comments")).toBeTruthy();
+  expect(group.querySelector(".em-thread-quote")?.textContent).toBe("seed");
+  expect(within(group).getByText("Whole topic feedback")).toBeTruthy();
+  expect(within(group).getByText("Quoted topic feedback")).toBeTruthy();
+  expect(screen.getByRole("navigation", { name: "Writeup outline" }).textContent).toContain("2 comments");
+});
+
+test("a hostile topic title and summary remain literal React text", () => {
+  const title = "<img src=x onerror=alert(1)>";
+  const { container } = topicReader([], { ...topic, title, summary: "<script>alert(1)</script>" });
+  expect(container.querySelector('[data-topic-part="title"]')?.textContent).toBe(title);
+  expect(container.querySelector('[data-topic-part="summary"]')?.textContent).toBe("<script>alert(1)</script>");
+  expect(container.querySelector("img, script, [onerror]")).toBeNull();
 });
 
 test.each([
