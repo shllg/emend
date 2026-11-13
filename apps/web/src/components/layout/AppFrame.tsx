@@ -13,7 +13,7 @@ import {
   Settings,
   Smartphone,
 } from "lucide-react";
-import { type ComponentProps, type CSSProperties, type ReactNode, useRef } from "react";
+import { type ComponentProps, type CSSProperties, type ReactNode, type RefObject, useRef } from "react";
 import { useAppUpdate } from "../../lib/app-update.ts";
 import { useLayout } from "../../lib/layout.ts";
 import { layoutStore, useLayoutPreferences } from "../../lib/layout-store.ts";
@@ -42,11 +42,15 @@ function AppFrameContent({
   children,
   onCommentReview,
   downloadHref,
+  onDownload,
+  menuTriggerRef,
 }: {
   isReview?: boolean;
   children: ReactNode;
   onCommentReview?: () => void;
   downloadHref?: string;
+  onDownload?: () => void;
+  menuTriggerRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const layout = useLayout();
   const preferences = useLayoutPreferences();
@@ -54,8 +58,9 @@ function AppFrameContent({
   const toast = useToast();
   const { refresh, busy } = useRefresh();
   const update = useAppUpdate();
-  // The phone menu's trigger: the update dialog it can open returns focus there.
-  const moreRef = useRef<HTMLButtonElement>(null);
+  // Menu-opened dialogs return focus to this trigger.
+  const localMoreRef = useRef<HTMLButtonElement>(null);
+  const moreRef = menuTriggerRef ?? localMoreRef;
   const gate = useUpdateGate(moreRef);
   const updateItems: MenuItem[] =
     update.state === "available"
@@ -99,20 +104,22 @@ function AppFrameContent({
         ...(onCommentReview
           ? [{ label: "Comment on review", icon: MessageSquarePlus, onSelect: onCommentReview }]
           : []),
-        ...(downloadHref
-          ? [
-              {
-                label: "Download",
-                icon: FileDown,
-                asChild: true,
-                children: (
-                  <a href={downloadHref} download>
-                    Download
-                  </a>
-                ),
-              },
-            ]
-          : []),
+        ...(onDownload
+          ? [{ label: "Download", icon: FileDown, opensDialog: true, onSelect: onDownload }]
+          : downloadHref
+            ? [
+                {
+                  label: "Download",
+                  icon: FileDown,
+                  asChild: true,
+                  children: (
+                    <a href={downloadHref} download>
+                      Download
+                    </a>
+                  ),
+                },
+              ]
+            : []),
         { separator: true },
         ...textSizeItems(preferences),
         { heading: "Long lines" },

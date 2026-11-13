@@ -1978,3 +1978,16 @@ test("yields while checking a large presentation attribute", async () => {
   expect(parsed(html).find((node) => node.tagName === "path")?.properties.fill).toBe(value);
   expect(pause).toHaveBeenCalledTimes(1);
 });
+
+test("an unrendered source doc shows the reading view's fallback instead of a code block", async () => {
+  const html = await buildDocDownload({
+    title: "Unavailable source",
+    details,
+    resolveMedia: async () => null,
+    content: { kind: "source", lines: [[{ text: "hidden source" }]], unrendered: true },
+  });
+  expectHead(html);
+  expect(html).toContain("<p>This file could not be shown.</p>");
+  expect(html).not.toContain("<pre");
+  expect(html).not.toContain("hidden source");
+});

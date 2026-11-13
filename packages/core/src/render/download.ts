@@ -440,12 +440,15 @@ export async function buildWriteupDownload(
 }
 export async function buildDocDownload(
   input: PageInput & {
-    content: { kind: "markdown"; blocks: RenderedBlock[] } | { kind: "source"; lines: SourceContent["lines"] };
+    content:
+      | { kind: "markdown"; blocks: RenderedBlock[] }
+      | { kind: "source"; lines: SourceContent["lines"]; unrendered?: true };
   },
 ): Promise<string> {
   const state = resolverState(input.resolveMedia, input.inlineBudget, input.pause);
   let content: ElementContent[];
   if (input.content.kind === "markdown") content = await blocksContent(input.content.blocks, state);
+  else if (input.content.unrendered) content = [element("p", [text("This file could not be shown.")])];
   else {
     const lines: ElementContent[] = [];
     input.content.lines.forEach((line, index) => {

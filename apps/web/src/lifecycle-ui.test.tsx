@@ -1,4 +1,11 @@
-import { APPROVED_ACTIVE_HOURS, type InboxItem, type ReviewView, type ThreadView } from "@emend/contract";
+import {
+  APPROVED_ACTIVE_HOURS,
+  type InboxItem,
+  type ReviewView,
+  type RevisionView,
+  reviewDownloadPath,
+  type ThreadView,
+} from "@emend/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -35,7 +42,7 @@ const item: InboxItem = {
   pickedUpAt: null,
   kind: "review",
 };
-const revision = {
+const revision: RevisionView = {
   seq: 1,
   base: null,
   head: null,
@@ -911,4 +918,132 @@ test("the phone review menu downloads the revision on screen", async () => {
   expect(link.tagName).toBe("A");
   expect(link.getAttribute("href")).toBe(`/api/v1/reviews/${id}/revisions/1/download`);
   expect(link.hasAttribute("download")).toBe(true);
+});
+
+function withDownloadDocs(count = 2, changes: Partial<RevisionView> = {}) {
+  const docs = Array.from({ length: count }, (_, index) => ({
+    path: `doc-${index}.md`,
+    kind: "markdown" as const,
+    blocks: [],
+    ...(index === 0 ? { title: "Plan title" } : {}),
+  }));
+  const files: RevisionView["files"] = docs.map((doc, index) => ({
+    id: `33333333-3333-4333-8333-${String(index).padStart(12, "0")}`,
+    path: doc.path,
+    oldPath: null,
+    role: "doc",
+    status: null,
+    topic: null,
+    order: index,
+    mediaType: "text/markdown",
+    flag: null,
+    hasOld: false,
+    hasNew: true,
+  }));
+  const value: RevisionView = { ...revision, docs, files, ...changes };
+  const original = fetchMock.getMockImplementation();
+  fetchMock.mockImplementation(async (path, init) => {
+    if (path.includes("/revisions/")) return Response.json(value);
+    if (!original) throw new Error("Missing fetch fixture");
+    return original(path, init);
+  });
+  return value;
+}
+
+test("desktop Download offers unticked docs, updates its link and resets each time it opens", async () => {
+  const value = withDownloadDocs();
+  mount(`/r/${id}`);
+  const trigger = await screen.findByRole("button", { name: "Download" });
+  trigger.focus();
+  fireEvent.click(trigger);
+  const dialog = within(await screen.findByRole("alertdialog", { name: "Download" }));
+  expect(
+    dialog.getByText(
+      "The writeup is always in. Tick docs to add them; with any doc ticked, the download is a ZIP file.",
+    ),
+  ).toBeTruthy();
+  for (const checkbox of dialog.getAllByRole("checkbox")) expect((checkbox as HTMLInputElement).checked).toBe(false);
+  expect(document.activeElement).toBe(dialog.getByRole("button", { name: "Cancel" }));
+  expect(dialog.getByRole("link", { name: "Download" }).getAttribute("href")).toBe(reviewDownloadPath(id, 1));
+  fireEvent.click(dialog.getByRole("checkbox", { name: /Plan title/ }));
+  const link = dialog.getByRole("link", { name: "Download" });
+  expect(link.getAttribute("href")).toBe(reviewDownloadPath(id, 1, [value.files[0]?.id ?? ""]));
+  expect(link.hasAttribute("download")).toBe(true);
+  fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
+  fireEvent.click(trigger);
+  const reopened = within(await screen.findByRole("alertdialog", { name: "Download" }));
+  expect((reopened.getByRole("checkbox", { name: /Plan title/ }) as HTMLInputElement).checked).toBe(false);
+  expect(reopened.getByRole("link", { name: "Download" }).getAttribute("href")).toBe(reviewDownloadPath(id, 1));
+});
+
+test.each([null, "doc-1.md"])("Download excludes a pub's base doc with main %s", async (main) => {
+  withDownloadDocs(2, { writeupEmpty: true, main });
+  mount(`/r/${id}`);
+  fireEvent.click(await screen.findByRole("button", { name: "Download" }));
+  const dialog = within(await screen.findByRole("alertdialog", { name: "Download" }));
+  expect(dialog.getAllByRole("checkbox")).toHaveLength(1);
+  expect(dialog.getByRole("checkbox", { name: main ? /Plan title/ : "doc-1.md" })).toBeTruthy();
+  expect(
+    dialog.getByText(
+      `${main ?? "Plan title"} is always in. Tick docs to add them; with any doc ticked, the download is a ZIP file.`,
+    ),
+  ).toBeTruthy();
+});
+
+test("a pub with only its base doc keeps the direct Download link", async () => {
+  withDownloadDocs(1, { writeupEmpty: true });
+  mount(`/r/${id}`);
+  const link = await screen.findByRole("link", { name: "Download" });
+  expect(link.getAttribute("href")).toBe(reviewDownloadPath(id, 1));
+  expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+});
+
+test("Download disables unticked docs at 50 and enables them when a choice is cleared", async () => {
+  withDownloadDocs(51);
+  mount(`/r/${id}`);
+  fireEvent.click(await screen.findByRole("button", { name: "Download" }));
+  const dialog = within(await screen.findByRole("alertdialog", { name: "Download" }));
+  const checkboxes = dialog.getAllByRole("checkbox") as HTMLInputElement[];
+  for (const checkbox of checkboxes.slice(0, 50)) fireEvent.click(checkbox);
+  const first = checkboxes[0];
+  const last = checkboxes[50];
+  if (!first || !last) throw new Error("Missing choices");
+  expect(last.disabled).toBe(true);
+  expect(first.disabled).toBe(false);
+  const href = dialog.getByRole("link", { name: "Download" }).getAttribute("href");
+  expect(new URL(href ?? "", "http://localhost").searchParams.getAll("doc")).toHaveLength(50);
+  fireEvent.click(first);
+  expect(last.disabled).toBe(false);
+  fireEvent.click(last);
+  expect(first.disabled).toBe(true);
+});
+
+test("the phone menu opens the doc picker and downloads through its accessible link", async () => {
+  width = 390;
+  const value = withDownloadDocs();
+  mount(`/r/${id}`);
+  await screen.findByRole("heading", { name: "Synthetic review", level: 1 });
+  // Wait for the revision, not just the review header.
+  await screen.findByRole("link", { name: "Docs" });
+  const trigger = screen.getByRole("button", { name: "More" });
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: "ArrowDown" });
+  const item = await screen.findByRole("menuitem", { name: "Download" });
+  expect(item.tagName).not.toBe("A");
+  fireEvent.click(item);
+  const dialog = within(await screen.findByRole("alertdialog", { name: "Download" }));
+  expect(screen.queryByRole("menu")).toBeNull();
+  expect(dialog.getByRole("link", { name: "Download" }).getAttribute("href")).toBe(reviewDownloadPath(id, 1));
+  fireEvent.click(dialog.getByRole("checkbox", { name: "doc-1.md" }));
+  const link = dialog.getByRole("link", { name: "Download" });
+  expect(link.getAttribute("href")).toBe(reviewDownloadPath(id, 1, [value.files[1]?.id ?? ""]));
+  expect(link.hasAttribute("download")).toBe(true);
+  // Keep happy-dom from navigating; exercise the link's own close handler.
+  link.addEventListener("click", (event) => event.preventDefault());
+  fireEvent.click(link);
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
+  expect(document.body.style.pointerEvents).not.toBe("none");
 });

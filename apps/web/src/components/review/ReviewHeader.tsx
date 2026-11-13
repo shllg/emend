@@ -52,6 +52,7 @@ export function ReviewHeader({
   titleRef,
   onRevisionChange,
   onCommentReview,
+  onDownload,
 }: {
   review: ReviewView;
   revision?: RevisionView;
@@ -62,6 +63,7 @@ export function ReviewHeader({
   titleRef: Ref<HTMLHeadingElement>;
   onRevisionChange: (seq: number) => void;
   onCommentReview?: () => void;
+  onDownload?: () => void;
 }) {
   const agent = agentStatusOf(review);
   // The same minute clock the inbox rows use, so "Picked up 5m" stays current.
@@ -121,11 +123,23 @@ export function ReviewHeader({
         {phone && <RevisionPicker compact review={review} seq={seq} onChange={onRevisionChange} />}
         {!phone && (
           <div className="ml-auto flex flex-wrap items-center gap-2">
-            <Button asChild variant="ghost" size="sm" icon={FileDown} title="Download this revision as one HTML file">
-              <a href={reviewDownloadPath(review.id, seq)} download>
+            {onDownload ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={FileDown}
+                title="Download this revision, with docs if you pick them"
+                onClick={onDownload}
+              >
                 Download
-              </a>
-            </Button>
+              </Button>
+            ) : (
+              <Button asChild variant="ghost" size="sm" icon={FileDown} title="Download this revision as one HTML file">
+                <a href={reviewDownloadPath(review.id, seq)} download>
+                  Download
+                </a>
+              </Button>
+            )}
             <Button variant="ghost" size="sm" icon={MessageSquarePlus} disabled={!revision} onClick={onCommentReview}>
               Comment on review
             </Button>
