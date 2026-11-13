@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import {
   classifyCommit,
@@ -22,8 +22,11 @@ import {
   localDate,
   plan,
   ReleaseError,
+  releaseSource,
   SHIPPED_PATHS,
+  stampPluginManifests,
   stampVersion,
+  versionedManifestText,
 } from "./release.ts";
 
 const CLI_JSON = '{\r\n    "name": "@shllg/emend",\r\n    "version" : "0.1.0",\r\n    "other": "0.1.0"\r\n}\r\n';
@@ -341,6 +344,138 @@ test("stamp refuses a nested first version instead of modifying the wrong key", 
   assert.equal(readFileSync(join(root, "apps/emend/package.json"), "utf8"), manifest);
 });
 
+const PLUGIN_MANIFEST = "plugin/.claude-plugin/plugin.json";
+const MARKETPLACE_MANIFEST = ".claude-plugin/marketplace.json";
+
+test("repository manifests gain exactly one version line after the top-level name", () => {
+  for (const [file, url] of [
+    [PLUGIN_MANIFEST, new URL("../plugin/.claude-plugin/plugin.json", import.meta.url)],
+    [MARKETPLACE_MANIFEST, new URL("../.claude-plugin/marketplace.json", import.meta.url)],
+  ] as const) {
+    const original = readFileSync(url, "utf8");
+    const expected = original.replace('  "name": "emend",\n', '  "name": "emend",\n  "version": "0.3.0",\n');
+    assert.notEqual(expected, original);
+    assert.equal(versionedManifestText(original, file, "0.3.0"), expected);
+  }
+});
+
+for (const [style, original, expected] of [
+  [
+    "CRLF and tabs",
+    '{\r\n\t"name" : "emend",\r\n\t"owner": {"name":"x"}\r\n}\r\n',
+    '{\r\n\t"name" : "emend",\r\n\t"version": "0.3.0",\r\n\t"owner": {"name":"x"}\r\n}\r\n',
+  ],
+  ["compact JSON", '{"name":"emend"}\n', '{"name":"emend","version": "0.3.0"}\n'],
+  [
+    "escaped name strings",
+    '{"name":"e\\\"mend","other":true}',
+    '{"name":"e\\\"mend","version": "0.3.0","other":true}',
+  ],
+]) {
+  test(`manifest stamping preserves ${style}`, () => {
+    assert.equal(versionedManifestText(original, PLUGIN_MANIFEST, "0.3.0"), expected);
+  });
+}
+
+for (const version of ['"0.1.0"', "null", "false"]) {
+  test(`manifest stamping refuses an existing top-level version of ${version}`, () => {
+    const original = `{"name":"emend","version":${version}}`;
+    assert.throws(() => versionedManifestText(original, PLUGIN_MANIFEST, "0.3.0"), {
+      message: `release: ${PLUGIN_MANIFEST} must carry no version`,
+    });
+  });
+}
+
+test("manifest stamping refuses a nested first name instead of changing the wrong object", () => {
+  const original = '{"owner":{"name":"x"},"name":"emend"}';
+  assert.throws(
+    () => versionedManifestText(original, PLUGIN_MANIFEST, "0.3.0"),
+    (error) =>
+      error instanceof ReleaseError &&
+      error.message === `release: could not set the top-level version in ${PLUGIN_MANIFEST}`,
+  );
+});
+
+test("manifest stamping reads the given commit and leaves a different HEAD and dirty checkout unchanged", (t) => {
+  const root = fixture(t);
+  write(root, MARKETPLACE_MANIFEST, '{"name":"emend","plugins":[{"name":"emend","source":"./plugin"}]}\n');
+  commit(root, "chore: add marketplace");
+  const source = git(root, "rev-parse", "HEAD").trim();
+  const originals = [PLUGIN_MANIFEST, MARKETPLACE_MANIFEST].map((file) => readFileSync(join(root, file), "utf8"));
+  for (const file of [PLUGIN_MANIFEST, MARKETPLACE_MANIFEST]) write(root, file, '{"name":"later"}\n');
+  commit(root, "chore: later manifests");
+  for (const file of [PLUGIN_MANIFEST, MARKETPLACE_MANIFEST]) write(root, file, '{"name":"dirty"}\n');
+  const head = git(root, "rev-parse", "HEAD").trim();
+  const out = join(root, "output/manifests");
+  stampPluginManifests(root, source, "0.3.0", out);
+  for (const [i, file] of [PLUGIN_MANIFEST, MARKETPLACE_MANIFEST].entries()) {
+    assert.equal(readFileSync(join(root, file), "utf8"), '{"name":"dirty"}\n');
+    assert.deepEqual(JSON.parse(readFileSync(join(out, basename(file)), "utf8")), {
+      ...JSON.parse(originals[i]),
+      version: "0.3.0",
+    });
+  }
+  assert.equal(git(root, "rev-parse", "HEAD").trim(), head);
+});
+
+for (const invalid of [PLUGIN_MANIFEST, MARKETPLACE_MANIFEST]) {
+  test(`invalid ${invalid} prevents either manifest output from being written`, (t) => {
+    const root = fixture(t);
+    write(root, MARKETPLACE_MANIFEST, '{"name":"emend"}\n');
+    write(root, invalid, "{invalid JSON");
+    commit(root, "chore: invalid manifest");
+    const out = join(root, "output");
+    assert.throws(() => stampPluginManifests(root, "HEAD", "0.3.0", out), ReleaseError);
+    assert(!existsSync(join(out, "plugin.json")));
+    assert(!existsSync(join(out, "marketplace.json")));
+    assert(!existsSync(out));
+  });
+}
+
+for (const missing of [PLUGIN_MANIFEST, MARKETPLACE_MANIFEST]) {
+  test(`a commit missing ${missing} refuses stamping without writing either output`, (t) => {
+    const root = fixture(t);
+    write(root, MARKETPLACE_MANIFEST, '{"name":"emend"}\n');
+    rmSync(join(root, missing));
+    commit(root, "chore: missing manifest");
+    const source = git(root, "rev-parse", "HEAD").trim();
+    write(root, missing, '{"name":"only-in-checkout"}\n');
+    const out = join(root, "output");
+    assert.throws(
+      () => stampPluginManifests(root, source, "0.3.0", out),
+      (error) => error instanceof ReleaseError && error.message === `release: could not read ${missing} at ${source}`,
+    );
+    assert(!existsSync(out));
+  });
+}
+
+test("manifest stamping refuses non-plain versions before writing", (t) => {
+  const root = fixture(t);
+  const out = join(root, "output");
+  for (const version of ["v0.3.0", "0.3.0-beta", "0.3.0+build", "00.3.0", "0.3.0\n"]) {
+    assert.throws(() => stampPluginManifests(root, "HEAD", version, out), {
+      message: "release: version must be plain x.y.z",
+    });
+  }
+  assert(!existsSync(out));
+  assert.equal(git(root, "status", "--porcelain"), "");
+});
+
+test("the manifests command takes version, commit and directory and stamps that commit", (t) => {
+  const root = fixture(t);
+  write(root, MARKETPLACE_MANIFEST, '{"name":"emend"}\n');
+  commit(root, "chore: add marketplace");
+  const source = git(root, "rev-parse", "HEAD").trim();
+  for (const file of [PLUGIN_MANIFEST, MARKETPLACE_MANIFEST]) write(root, file, '{"name":"later"}\n');
+  commit(root, "chore: later manifests");
+  const out = join(root, "output");
+  const result = cli(root, ["manifests", "0.3.0", source, out]);
+  assert.equal(result.status, 0, result.stderr);
+  for (const file of ["plugin.json", "marketplace.json"]) {
+    assert.equal(readFileSync(join(out, file), "utf8"), '{"name":"emend","version": "0.3.0"}\n');
+  }
+});
+
 test("usage errors exit 2", (t) => {
   const root = fixture(t);
   for (const args of [
@@ -358,6 +493,24 @@ test("usage errors exit 2", (t) => {
     assert.equal(result.status, 2, args.join(" "));
     assert.match(result.stderr, /^Usage: node scripts\/release.ts /);
   }
+});
+
+test("the manifests command exits 2 for missing or extra operands and operands starting with a dash", (t) => {
+  const root = fixture(t);
+  for (const args of [
+    [],
+    ["0.3.0"],
+    ["0.3.0", "HEAD"],
+    ["0.3.0", "HEAD", "output", "extra"],
+    ["--version", "HEAD", "output"],
+    ["0.3.0", "--commit", "output"],
+    ["0.3.0", "HEAD", "--output"],
+  ]) {
+    const result = cli(root, ["manifests", ...args]);
+    assert.equal(result.status, 2, args.join(" "));
+    assert.match(result.stderr, /manifests <x\.y\.z> <commit> <dir>\n$/);
+  }
+  assert.equal(git(root, "status", "--porcelain"), "");
 });
 
 test("helpers preserve date, classification and numeric ordering", () => {
@@ -383,6 +536,160 @@ function pendingRelease(t: TestContext) {
   git(root, "tag", "v0.2.0-rc.1");
   return { root, sha };
 }
+
+function stampRelease(root: string, source: string, version: string, previous?: string): string {
+  const original = readFileSync(join(root, PLUGIN_MANIFEST), "utf8");
+  try {
+    git(root, "read-tree", source);
+    const manifest = JSON.parse(git(root, "show", `${source}:${PLUGIN_MANIFEST}`));
+    write(root, PLUGIN_MANIFEST, JSON.stringify({ ...manifest, version }));
+    git(root, "add", PLUGIN_MANIFEST);
+    const tree = git(root, "write-tree").trim();
+    const stamp = git(
+      root,
+      "commit-tree",
+      tree,
+      "-p",
+      source,
+      ...(previous ? ["-p", previous] : []),
+      "-m",
+      `chore: stamp ${version}`,
+    ).trim();
+    git(root, "update-ref", "refs/remotes/origin/release", stamp);
+    return stamp;
+  } finally {
+    git(root, "read-tree", "HEAD");
+    write(root, PLUGIN_MANIFEST, original);
+  }
+}
+
+test("a stamp of the newest tag permits planning a new release", async (t) => {
+  const root = fixture(t);
+  const first = git(root, "rev-parse", "HEAD").trim();
+  const previous = stampRelease(root, first, "0.1.0");
+  assert.equal(git(root, "show", "-s", "--format=%P", previous).trim(), first);
+  commit(root, "fix: next release");
+  git(root, "tag", "v0.1.1");
+  const tagged = git(root, "rev-parse", "HEAD").trim();
+  const stamp = stampRelease(root, tagged, "0.1.1", previous);
+  assert.equal(git(root, "show", "-s", "--format=%P", stamp).trim(), `${tagged} ${previous}`);
+  assert.equal(releaseSource(root, stamp), tagged);
+  commit(root, "feat: next feature");
+  const result = await run(root);
+  assert.equal(result.resume, false);
+  assert.equal(result.version, "0.2.0");
+  assert.equal(result.sha, git(root, "rev-parse", "HEAD").trim());
+  assert.equal(git(root, "status", "--porcelain"), "");
+});
+
+test("a published newest tag resumes when release is the previous tag's stamp", async (t) => {
+  const { root, sha } = pendingRelease(t);
+  stampRelease(root, git(root, "rev-parse", "v0.1.0").trim(), "0.1.0");
+  commit(root, "feat: later work must wait");
+  const result = await plan({ root, isPublished: async () => true });
+  assert.equal(result.resume, true);
+  assert.equal(result.version, "0.1.1");
+  assert.equal(result.sha, sha);
+  assert(!result.section?.includes("later work"));
+});
+
+for (const mode of ["new", "resume"] as const) {
+  test(`${mode} planning refuses a stamp whose source is ahead of HEAD`, async (t) => {
+    const root = mode === "resume" ? pendingRelease(t).root : fixture(t);
+    if (mode === "new") commit(root, "fix: candidate");
+    const sha = git(root, "rev-parse", "HEAD").trim();
+    git(root, "checkout", "-q", "-b", "later-release");
+    commit(root, "fix: already released");
+    stampRelease(root, git(root, "rev-parse", "HEAD").trim(), "0.2.0");
+    git(root, "checkout", "-q", "main");
+    await assert.rejects(
+      plan({ root, isPublished: async () => mode === "new" }),
+      (error) =>
+        error instanceof ReleaseError &&
+        error.message === `release: refs/remotes/origin/release is ahead of or diverged from ${sha}; refusing a stale release`,
+    );
+  });
+}
+
+test("planning refuses a release head without a plugin manifest", async (t) => {
+  const root = fixture(t);
+  git(root, "rm", PLUGIN_MANIFEST);
+  commit(root, "fix: legacy release");
+  const released = git(root, "rev-parse", "HEAD").trim();
+  git(root, "update-ref", "refs/remotes/origin/release", released);
+  commit(root, "fix: later work");
+  await assert.rejects(
+    run(root),
+    (error) =>
+      error instanceof ReleaseError && error.message === `release: ${PLUGIN_MANIFEST} is missing at ${released}`,
+  );
+});
+
+for (const version of [null, false, "", "1.2", "01.2.3", "1.2.3-beta", "1.2.3\n"]) {
+  test(`planning refuses a release head whose version is ${JSON.stringify(version)}`, async (t) => {
+    const root = fixture(t);
+    write(root, PLUGIN_MANIFEST, JSON.stringify({ name: "emend", version }));
+    commit(root, "chore: invalid release version");
+    const released = git(root, "rev-parse", "HEAD").trim();
+    git(root, "update-ref", "refs/remotes/origin/release", released);
+    commit(root, "fix: later work");
+    await assert.rejects(
+      run(root),
+      (error) =>
+        error instanceof ReleaseError &&
+        error.message === `release: ${PLUGIN_MANIFEST} at ${released} must carry a plain x.y.z version`,
+    );
+  });
+}
+
+test("planning refuses a release head whose plugin manifest is an array", async (t) => {
+  const root = fixture(t);
+  write(root, PLUGIN_MANIFEST, '[{"name":"emend","version":"0.1.0"}]');
+  commit(root, "chore: invalid release manifest");
+  const released = git(root, "rev-parse", "HEAD").trim();
+  git(root, "update-ref", "refs/remotes/origin/release", released);
+  commit(root, "fix: later work");
+  await assert.rejects(
+    run(root),
+    (error) =>
+      error instanceof ReleaseError &&
+      error.message === `release: ${PLUGIN_MANIFEST} at ${released} is not a JSON object`,
+  );
+});
+
+test("planning refuses a release head whose plugin manifest contains two JSON documents", async (t) => {
+  const root = fixture(t);
+  write(root, PLUGIN_MANIFEST, '{"name":"emend","version":"0.1.0"}\n{"name":"emend","version":"0.2.0"}\n');
+  commit(root, "chore: invalid release manifest");
+  const released = git(root, "rev-parse", "HEAD").trim();
+  git(root, "update-ref", "refs/remotes/origin/release", released);
+  commit(root, "fix: later work");
+  await assert.rejects(
+    run(root),
+    (error) =>
+      error instanceof ReleaseError && error.message === `release: ${PLUGIN_MANIFEST} at ${released} is not valid JSON`,
+  );
+});
+
+test("invalid JSON at the release head refuses planning", async (t) => {
+  const root = fixture(t);
+  write(root, PLUGIN_MANIFEST, "{invalid JSON");
+  commit(root, "fix: invalid release manifest");
+  git(root, "update-ref", "refs/remotes/origin/release", "HEAD");
+  await assert.rejects(run(root), (error) => error instanceof ReleaseError && /not valid JSON/.test(error.message));
+});
+
+test("a versioned release commit without a parent is refused", (t) => {
+  const root = fixture(t);
+  write(root, PLUGIN_MANIFEST, '{"name":"emend","version":"0.1.0"}');
+  git(root, "add", PLUGIN_MANIFEST);
+  const tree = git(root, "write-tree").trim();
+  const orphan = git(root, "commit-tree", tree, "-m", "chore: orphan stamp").trim();
+  assert.throws(
+    () => releaseSource(root, orphan),
+    (error) => error instanceof ReleaseError && /no first parent/.test(error.message),
+  );
+});
 
 test("a published tag contained by release plans new shipped commits normally", async (t) => {
   const { root, sha } = pendingRelease(t);
