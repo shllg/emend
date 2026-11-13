@@ -55,10 +55,24 @@ import { noteView } from "../publish/notes.ts";
 import { type FileSetting, readFileSetting, readSettings } from "../settings.ts";
 import { commentHtml } from "./comment-html.ts";
 
-function publishMeta(rendered: unknown) {
+export function publishMeta(rendered: unknown) {
   const meta = PublishMeta.safeParse(rendered);
   // Invalid stored values are dropped, never shown.
   return meta.success ? { links: meta.data.links ?? [], repoUrl: meta.data.repoUrl ?? null } : {};
+}
+
+export function topicView(topic: typeof topics.$inferSelect) {
+  return {
+    slug: topic.slug,
+    title: topic.title,
+    importance: topic.importance,
+    summary: topic.summary,
+    ...(topic.attention === null ? {} : { attention: topic.attention }),
+    ...(topic.door === null ? {} : { door: topic.door }),
+    ...(topic.blastScope === null || topic.blastNote === null
+      ? {}
+      : { blastRadius: { scope: topic.blastScope, note: topic.blastNote } }),
+  };
 }
 
 /** Counts use one grouped query per kind, independent of the number of inbox rows. */
@@ -495,17 +509,7 @@ async function revisionView(ownerId: string, q: Queries, deps: AppDeps, reviewId
     head: revision.head,
     main: revision.main,
     writeupEmpty: revision.writeupEmpty,
-    topics: topicRows.map((topic) => ({
-      slug: topic.slug,
-      title: topic.title,
-      importance: topic.importance,
-      summary: topic.summary,
-      ...(topic.attention === null ? {} : { attention: topic.attention }),
-      ...(topic.door === null ? {} : { door: topic.door }),
-      ...(topic.blastScope === null || topic.blastNote === null
-        ? {}
-        : { blastRadius: { scope: topic.blastScope, note: topic.blastNote } }),
-    })),
+    topics: topicRows.map(topicView),
     files: fileRows.map((file) => {
       const mark = file.role === "diff" ? marksByPath.get(file.path) : undefined;
       return {

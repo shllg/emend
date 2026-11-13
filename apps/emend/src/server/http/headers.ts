@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import type { Context } from "hono";
 import { BRIDGE_SOURCE } from "../content/bridge.ts";
 
+export const DOWNLOAD_CSP =
+  "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; media-src data:; base-uri 'none'; form-action 'none'";
 export const APP_CSP =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 export const isApiPath = (path: string) => path === "/api/v1" || path.startsWith("/api/v1/");

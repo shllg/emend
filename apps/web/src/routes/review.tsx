@@ -1,4 +1,4 @@
-import type { ReviewView, RevisionView } from "@emend/contract";
+import { type ReviewView, type RevisionView, reviewDownloadPath } from "@emend/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import {
@@ -775,7 +775,11 @@ function LoadedReview({
   };
   const ready = Math.max(published, review.newestRevision);
   return (
-    <AppFrame isReview onCommentReview={revision ? commentOnReview : undefined}>
+    <AppFrame
+      isReview
+      onCommentReview={revision ? commentOnReview : undefined}
+      downloadHref={reviewDownloadPath(review.id, seq)}
+    >
       <div className="contents" onClickCapture={followReadingLink} onAuxClickCapture={followReadingLink}>
         <Panes
           inbox={<ReviewInbox collapsed={collapsed} onCollapsedChange={setCollapsed} />}

@@ -97,6 +97,7 @@ a machine token reaches only reviews from its own instance.
 | GET | `/api/v1/agent/reviews` | Agent | List the token's own instance's reviews, newest first, as `AgentReviewList`; `?head=<sha>` keeps those whose approved or newest revision has that head. |
 | GET | `/api/v1/reviews/:id` | Reviewer | Read a review. |
 | GET | `/api/v1/reviews/:id/revisions/:seq` | Reviewer | Read one revision. |
+| GET | `/api/v1/reviews/:id/revisions/:seq/download` | Reviewer | Download one revision as one self-contained HTML file. |
 | PUT | `/api/v1/reviews/:id/viewed` | Reviewer | Mark or unmark diff files as viewed; return 204. |
 | GET | `/api/v1/files/:fileId/old` | Reviewer | Read the old file side. |
 | GET | `/api/v1/files/:fileId/new` | Reviewer | Read the new file side. |
@@ -178,6 +179,36 @@ such images also has the class `emend-media-row`. Author classes keep the `user-
 prefix, so they never match the generated classes. A block's id covers each image's alt text, path
 and SHA-256, so a re-shot image at the same path shows as changed. Markdown docs render no
 local images.
+
+### Downloads
+
+`GET /api/v1/reviews/:id/revisions/:seq/download` requires a reviewer session with `read` scope.
+A bearer token gets `403`, like other reviewer routes. Missing credentials get `401`.
+It follows the revision route's `404` and `review_in_bin` rules.
+
+A code review's file holds the review title and that revision's writeup: sections, topics, text,
+code blocks and images with captions. It holds no docs, comments or diff. When `writeupEmpty`
+is true and the revision has docs, it holds one doc instead: `main` when it names a doc, else
+the first doc in file order. Markdown uses its stored rendered blocks. Source uses its stored
+highlighted tokens. HTML keeps its listed assets built in, with script assets left out.
+Mermaid diagrams show as labelled source text. Links to other docs become plain text.
+Absolute HTTP, HTTPS and mailto links keep working.
+
+The response is `200` with `Content-Type: text/html; charset=utf-8`,
+`Content-Disposition: attachment; filename="<name>"`, `X-Content-Type-Options: nosniff`,
+`Cache-Control: no-store` and `Cross-Origin-Resource-Policy: same-origin`.
+The filename is the lowercase title, with runs outside `[a-z0-9]` replaced by `-`, trimmed,
+cut to 60 characters and trimmed again. An empty name becomes `emend`. It ends in `-r<seq>.html`.
+`Content-Security-Policy: sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; media-src data:; base-uri 'none'; form-action 'none'`
+replaces the app CSP for this route. The file also has a CSP meta with the same policy without
+`sandbox`. It opens offline with no scripts or network requests.
+
+At most 128 MiB of stored asset bytes are built in, counting each distinct blob once.
+When an asset would pass this budget, it is left out. One visible note says:
+"Some images or files were left out because the download would pass 128 MiB."
+The file holds no server address, emend link, sign-in link, token or machine name.
+HTML docs lose scripts, event handlers, frames, embeds, `<base>`, `<meta http-equiv>` and resource
+references that are not listed assets. CSS may retain data URLs and local fragments.
 
 ### Viewed files
 
@@ -1387,6 +1418,7 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `diffSideBytes` | 1048576 bytes shown per side |
 | `markdownDocBytes` | 1048576 bytes |
 | `htmlDocBytes` | 8388608 bytes |
+| `downloadInlineBytes` | 134217728 bytes (128 MiB) of distinct stored assets built into one download |
 | `assetBytes` | 26214400 bytes per asset |
 | `htmlDocWithAssetsBytes` | 52428800 bytes combined |
 | `revisionBytes` | 268435456 bytes for writeup source JSON and unique referenced blobs; checked before reading content |

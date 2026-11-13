@@ -3,6 +3,7 @@ import {
   ChevronLeft,
   Download,
   Ellipsis,
+  FileDown,
   Inbox,
   Link as LinkIcon,
   MessageSquarePlus,
@@ -40,10 +41,12 @@ function AppFrameContent({
   isReview = false,
   children,
   onCommentReview,
+  downloadHref,
 }: {
   isReview?: boolean;
   children: ReactNode;
   onCommentReview?: () => void;
+  downloadHref?: string;
 }) {
   const layout = useLayout();
   const preferences = useLayoutPreferences();
@@ -95,6 +98,20 @@ function AppFrameContent({
         { label: "Copy link", icon: LinkIcon, onSelect: () => void copyLink() },
         ...(onCommentReview
           ? [{ label: "Comment on review", icon: MessageSquarePlus, onSelect: onCommentReview }]
+          : []),
+        ...(downloadHref
+          ? [
+              {
+                label: "Download",
+                icon: FileDown,
+                asChild: true,
+                children: (
+                  <a href={downloadHref} download>
+                    Download
+                  </a>
+                ),
+              },
+            ]
           : []),
         { separator: true },
         ...textSizeItems(preferences),

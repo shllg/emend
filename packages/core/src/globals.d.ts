@@ -22,8 +22,16 @@ declare global {
     toString(): string;
   }
 
+  function btoa(input: string): string;
+
   class URL {
-    constructor(input: string);
+    constructor(input: string, base?: string);
     readonly protocol: string;
+    readonly username: string;
+    readonly password: string;
+    readonly href: string;
+    readonly host: string;
+    readonly origin: string;
+    readonly pathname: string;
   }
 }

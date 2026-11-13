@@ -3,6 +3,10 @@ import { LIMITS } from "./limits.ts";
 import { FilePath } from "./review.ts";
 
 export const API_PREFIX = "/api/v1";
+export function reviewDownloadPath(reviewId: string, seq: number): string {
+  return `${API_PREFIX}/reviews/${encodeURIComponent(reviewId)}/revisions/${seq}/download`;
+}
+
 export const MIN_CLIENT_VERSION = "0.1.0";
 
 export const SERVER_CHALLENGE_HEADER = "X-Emend-Challenge";
