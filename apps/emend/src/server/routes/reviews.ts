@@ -78,14 +78,16 @@ export function topicView(topic: typeof topics.$inferSelect) {
 /** Counts use one grouped query per kind, independent of the number of inbox rows. */
 async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetting, reviewId?: string) {
   const latest = q
-    .select({ reviewId: revisions.reviewId, seq: max(revisions.seq).as("seq") })
+    .select({ reviewId: revisions.reviewId, seq: max(revisions.seq).as("newest_seq") })
     .from(revisions)
     .where(eq(revisions.ownerId, ownerId))
     .groupBy(revisions.reviewId)
     .as("latest");
   const now = deps.now();
   const serverTime = new Date(now).toISOString();
-  const approvedActiveHours = (await readSettings(ownerId, q, file)).approvedActiveHours.value;
+  const settings = await readSettings(ownerId, q, file);
+  const approvedActiveHours = settings.approvedActiveHours.value;
+  const approvedActiveLimit = settings.approvedActiveLimit.value;
   const approvedWindow = approvedActiveHours * 3_600_000;
   const cutoff = now - approvedWindow;
   const select = (where: SQL | undefined, order: SQL[], limit: number) =>
@@ -123,26 +125,17 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
   );
   const activity = (review: typeof reviews.$inferSelect) =>
     review.state === "open" ? Math.max(review.updatedAt, review.snoozedUntil ?? 0) : review.updatedAt;
-  // Open reviews take Active's capped places first; display order still follows activity.
   const active =
     reviewId === undefined
-      ? // Only open reviews count a passed timed snooze as an update at its wake time.
-        (
-          await select(
-            or(and(isOpen, not(asleep as SQL)), recentlyApproved),
-            [
-              asc(eq(reviews.state, "approved")),
-              sql`case when ${isOpen} then max(${reviews.updatedAt}, coalesce(${reviews.snoozedUntil}, 0)) else ${reviews.updatedAt} end desc`,
-              asc(reviews.id),
-            ],
-            LIMITS.inboxItems,
-          )
-        ).sort(
-          (a, b) =>
-            activity(b.review) - activity(a.review) ||
-            (a.review.id < b.review.id ? -1 : a.review.id > b.review.id ? 1 : 0),
+      ? await select(
+          and(isOpen, not(asleep as SQL)),
+          [sql`max(${reviews.updatedAt}, coalesce(${reviews.snoozedUntil}, 0)) desc`, asc(reviews.id)],
+          LIMITS.inboxItems,
         )
       : [];
+  const places = Math.min(approvedActiveLimit, LIMITS.inboxItems - active.length);
+  if (reviewId === undefined && approvedActiveHours > 0 && places > 0)
+    active.push(...(await select(recentlyApproved, [desc(reviews.approvedAt), asc(reviews.id)], places)));
   const activeApprovedIds = new Set(
     active.filter(({ review }) => review.state === "approved").map(({ review }) => review.id),
   );
@@ -165,7 +158,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
           )),
         ]
       : await select(eq(reviews.id, reviewId), [asc(reviews.id)], 1);
-  if (!rows.length) return { items: [], serverTime, approvedActiveHours };
+  if (!rows.length) return { items: [], serverTime, approvedActiveHours, approvedActiveLimit };
   const ids = rows.map((row) => row.review.id);
   const drafts = await q
     .select({ id: comments.reviewId, count: count() })
@@ -207,6 +200,25 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
     )
     .groupBy(sends.reviewId)
     .all();
+  const answered =
+    reviewId === undefined
+      ? await q
+          .select({ id: sends.reviewId })
+          .from(sends)
+          .innerJoin(
+            revisions,
+            and(
+              eq(revisions.ownerId, ownerId),
+              eq(revisions.reviewId, sends.reviewId),
+              eq(revisions.id, sends.revisionId),
+            ),
+          )
+          .innerJoin(latest, and(eq(latest.reviewId, sends.reviewId), eq(latest.seq, revisions.seq)))
+          .where(and(eq(sends.ownerId, ownerId), inArray(sends.reviewId, ids), isNull(sends.setAsideAt)))
+          .groupBy(sends.reviewId)
+          .all()
+      : [];
+  const answeredIds = new Set(answered.map((row) => row.id));
   // Latest confirmed delivery that carried a live Send made on the review's newest revision.
   const confirmed = await q
     .select({ id: sends.reviewId, seq: revisions.seq, at: max(deliveries.confirmedAt) })
@@ -296,15 +308,31 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
       pickedUpAt: pickedUp.has(review.id) ? new Date(pickedUp.get(review.id) as number).toISOString() : null,
     };
   });
-  // Inside Active, a review with a waiting agent comes first; the rows already run newest first.
+  const group = (item: (typeof items)[number]) => {
+    if (item.state === "approved") return 4;
+    if (item.agentWaiting) return 0;
+    if (item.unsentCount > 0) return 1;
+    return answeredIds.has(item.id) ? 3 : 2;
+  };
+  const activities = new Map(rows.map(({ review }) => [review.id, activity(review)]));
   return {
     serverTime,
     approvedActiveHours,
-    items: [
-      ...items.filter((item) => item.list === "active" && item.agentWaiting),
-      ...items.filter((item) => item.list === "active" && !item.agentWaiting),
-      ...items.filter((item) => item.list !== "active"),
-    ],
+    approvedActiveLimit,
+    items:
+      reviewId === undefined
+        ? [
+            ...items
+              .filter((item) => item.list === "active")
+              .sort(
+                (a, b) =>
+                  group(a) - group(b) ||
+                  (activities.get(b.id) ?? 0) - (activities.get(a.id) ?? 0) ||
+                  (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+              ),
+            ...items.filter((item) => item.list !== "active"),
+          ]
+        : items,
   };
 }
 

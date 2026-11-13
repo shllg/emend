@@ -258,11 +258,11 @@ export function Inbox({
             const heading = (
               <>
                 {title}
-                <span className="ml-1.5 font-normal tabular-nums text-fg-3">{rows.length}</span>
+                <span className="ml-1.5 font-normal tabular-nums text-fg-2">{rows.length}</span>
               </>
             );
             const headingClass =
-              "m-0 px-2.5 pt-3 pb-1 font-mono text-11 font-medium leading-(--lh-snug) font-stretch-mono tracking-(--tracking-label) text-fg-3 uppercase";
+              "m-0 flex items-center gap-2 px-2.5 pt-3 pb-1 font-mono text-12 font-semibold leading-(--lh-snug) font-stretch-mono tracking-(--tracking-label) text-fg-2 uppercase";
             return (
               <section key={list} aria-label={title}>
                 <Heading className={headingClass}>
@@ -277,8 +277,9 @@ export function Inbox({
                       {heading}
                     </button>
                   ) : (
-                    heading
+                    <span>{heading}</span>
                   )}
+                  <span aria-hidden="true" className="h-px flex-1 bg-line-2" />
                 </Heading>
                 {nothingActive && <p className="px-2.5 py-2 text-13 text-fg-3">No active reviews.</p>}
                 {expanded && rows.length > 0 && (

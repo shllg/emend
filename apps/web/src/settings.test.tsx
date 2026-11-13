@@ -1,4 +1,11 @@
-import { type BinView, type HoursSetting, KeysSetting, type SettingsView, SHORTCUT_DEFAULTS } from "@emend/contract";
+import {
+  type BinView,
+  type HoursSetting,
+  KeysSetting,
+  type LimitSetting,
+  type SettingsView,
+  SHORTCUT_DEFAULTS,
+} from "@emend/contract";
 import { type InfiniteData, QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -25,16 +32,19 @@ const defaultSetting: HoursSetting = {
   override: null,
   fileError: false,
 };
+const defaultLimit: LimitSetting = { ...defaultSetting, value: 5, default: 5 };
 function setup(
   setting: Partial<HoursSetting> = {},
   path = "/settings",
   patchResponse?: Promise<Response>,
   binned: BinView = { items: [], total: 0, more: false, version: binVersion },
   pageSize = 200,
+  limit: Partial<LimitSetting> = {},
 ) {
   let bin = binned;
   let view: SettingsView = {
     approvedActiveHours: { ...defaultSetting, ...setting },
+    approvedActiveLimit: { ...defaultLimit, ...limit },
     keys: defaultKeys,
     serverTime: "2026-11-04T10:00:00.000Z",
   };
@@ -65,22 +75,33 @@ function setup(
     if (path === "/api/v1/settings") {
       if (init?.method === "PATCH") {
         if (patchResponse) return patchResponse;
-        const override = JSON.parse(String(init.body)).approvedActiveHours as number | null;
-        const old = view.approvedActiveHours;
-        view = {
-          serverTime: view.serverTime,
-          keys: view.keys,
-          approvedActiveHours: {
-            ...old,
-            override,
-            value: override ?? old.file ?? old.default,
-            source: override !== null ? "override" : old.file !== null ? "file" : "default",
-          },
+        const update = JSON.parse(String(init.body)) as {
+          approvedActiveHours?: number | null;
+          approvedActiveLimit?: number | null;
         };
+        for (const key of ["approvedActiveHours", "approvedActiveLimit"] as const) {
+          const override = update[key];
+          if (override === undefined) continue;
+          const old = view[key];
+          view = {
+            ...view,
+            [key]: {
+              ...old,
+              override,
+              value: override ?? old.file ?? old.default,
+              source: override !== null ? "override" : old.file !== null ? "file" : "default",
+            },
+          };
+        }
       }
       return Response.json(view);
     }
-    return Response.json({ items: [], approvedActiveHours: 12, serverTime: "2026-11-04T10:00:00.000Z" });
+    return Response.json({
+      items: [],
+      approvedActiveHours: 12,
+      approvedActiveLimit: 5,
+      serverTime: "2026-11-04T10:00:00.000Z",
+    });
   });
   vi.stubGlobal("fetch", fetcher);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -107,9 +128,12 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-const inboxSettings = () => within(screen.getByRole("region", { name: "Inbox" }));
+const hoursForm = () =>
+  within(
+    screen.getByRole("spinbutton", { name: "Keep approved reviews in Active for" }).closest("form") as HTMLFormElement,
+  );
 const field = () => screen.findByRole<HTMLInputElement>("spinbutton", { name: "Keep approved reviews in Active for" });
-const save = () => screen.getByRole<HTMLButtonElement>("button", { name: "Save" });
+const save = () => hoursForm().getByRole<HTMLButtonElement>("button", { name: "Save" });
 
 test.each([
   { source: "default", value: 12, input: "", note: "Default." },
@@ -125,7 +149,7 @@ test.each([
   expect(input.step).toBe("1");
   expect(input.inputMode).toBe("numeric");
   expect(screen.getByRole("heading", { name: "Inbox", level: 2 })).toBeTruthy();
-  expect(inboxSettings().getByText(state.note)).toBeTruthy();
+  expect(hoursForm().getByText(state.note)).toBeTruthy();
   expect(save().disabled).toBe(true);
   expect(!!screen.queryByRole("button", { name: "Reset" })).toBe(state.source === "override");
   if (state.source === "override") expect(screen.getByText("The config file says 24 hours.")).toBeTruthy();
@@ -143,7 +167,7 @@ test.each([false, true])("Save sends a number and refreshes settings and review 
   fireEvent.change(input, { target: { value: "24" } });
   if (submit) fireEvent.submit(input.closest("form") as HTMLFormElement);
   else fireEvent.click(save());
-  await inboxSettings().findByText("Set here.");
+  await hoursForm().findByText("Set here.");
   expect(f.patches()).toHaveLength(1);
   expect(JSON.parse(String(f.patches()[0]?.[1]?.body))).toEqual({ approvedActiveHours: 24 });
   expect(f.client.getQueryData<SettingsView>(["settings"])?.approvedActiveHours.value).toBe(24);
@@ -155,8 +179,8 @@ test.each(["Save", "Reset"])("%s can clear an override and fall back to the file
   const f = setup({ source: "override", value: 2, override: 2, file: 24 });
   const input = await field();
   if (button === "Save") fireEvent.change(input, { target: { value: "" } });
-  fireEvent.click(screen.getByRole("button", { name: button }));
-  await inboxSettings().findByText("From the config file.");
+  fireEvent.click(hoursForm().getByRole("button", { name: button }));
+  await hoursForm().findByText("From the config file.");
   expect(input.value).toBe("24");
   expect(JSON.parse(String(f.patches()[0]?.[1]?.body))).toEqual({ approvedActiveHours: null });
 });
@@ -168,7 +192,7 @@ test("the file value can be pinned as an override", async () => {
   fireEvent.change(input, { target: { value: "24" } });
   expect(save().disabled).toBe(false);
   fireEvent.click(save());
-  await inboxSettings().findByText("Set here.");
+  await hoursForm().findByText("Set here.");
   expect(f.patches()).toHaveLength(1);
   expect(String(f.patches()[0]?.[1]?.body)).toBe('{"approvedActiveHours":24}');
 });
@@ -181,7 +205,7 @@ test("Reset without a file falls back to an empty default input", async () => {
   setup({ source: "override", value: 2, override: 2 });
   const input = await field();
   fireEvent.click(screen.getByRole("button", { name: "Reset" }));
-  await inboxSettings().findByText("Default.");
+  await hoursForm().findByText("Default.");
   expect(input.value).toBe("");
 });
 test.each(["-1", "721", "1.5", "1e2"])("invalid input %s reports whole hours without sending", async (value) => {
@@ -226,11 +250,12 @@ test("a delayed background GET cannot overwrite the saved settings view", async 
   await waitFor(() => expect(f.client.isFetching({ queryKey: ["settings"] })).toBe(1));
   fireEvent.change(input, { target: { value: "0" } });
   fireEvent.click(save());
-  await inboxSettings().findByText("Set here.");
+  await hoursForm().findByText("Set here.");
   await act(async () => {
     delayed.resolve(
       Response.json({
         approvedActiveHours: defaultSetting,
+        approvedActiveLimit: defaultLimit,
         keys: defaultKeys,
         serverTime: "2026-11-04T10:00:00.000Z",
       }),
@@ -242,6 +267,79 @@ test("a delayed background GET cannot overwrite the saved settings view", async 
     value: 0,
     source: "override",
   });
+});
+
+const capLabel = "Show at most this many approved reviews in Active";
+const capField = () => screen.findByRole<HTMLInputElement>("spinbutton", { name: capLabel });
+const capForm = () => within(screen.getByRole("spinbutton", { name: capLabel }).closest("form") as HTMLFormElement);
+const setupCap = (limit: Partial<LimitSetting> = {}) => setup({}, "/settings", undefined, undefined, undefined, limit);
+
+test.each([
+  { source: "default", value: 5, input: "", note: "Default." },
+  { source: "file", value: 10, input: "10", note: "From the config file.", file: 10 },
+  { source: "override", value: 2, input: "2", note: "Set here.", override: 2, file: 10 },
+] as const)("the approval cap renders its $source state", async (state) => {
+  setupCap(state);
+  const input = await capField();
+  expect(input.value).toBe(state.input);
+  expect(input.placeholder).toBe("5 reviews");
+  expect(input.min).toBe("0");
+  expect(input.max).toBe("200");
+  expect(input.step).toBe("1");
+  expect(input.inputMode).toBe("numeric");
+  expect(capForm().getByText(state.note)).toBeTruthy();
+  expect(capForm().getByRole<HTMLButtonElement>("button", { name: "Save" }).disabled).toBe(true);
+  expect(!!capForm().queryByRole("button", { name: "Reset" })).toBe(state.source === "override");
+  if (state.source === "override") expect(capForm().getByText("The config file says 10 reviews.")).toBeTruthy();
+});
+
+test("the cap shows its own file error and singular review", async () => {
+  setupCap({ source: "override", value: 1, override: 1, file: 1, fileError: true });
+  await capField();
+  expect(capForm().getByText("The config file says 1 review.")).toBeTruthy();
+  expect(capForm().getByText("review")).toBeTruthy();
+  expect(capForm().getByText("The config file's value can't be used, so it is ignored.")).toBeTruthy();
+  expect(hoursForm().queryByText("The config file's value can't be used, so it is ignored.")).toBeNull();
+});
+
+test.each([0, 10, 200])("saving cap %s patches only the cap and refreshes review caches", async (value) => {
+  const f = setupCap();
+  fireEvent.change(await capField(), { target: { value: String(value) } });
+  fireEvent.click(capForm().getByRole("button", { name: "Save" }));
+  await capForm().findByText("Set here.");
+  expect(f.patches()).toHaveLength(1);
+  expect(JSON.parse(String(f.patches()[0]?.[1]?.body))).toEqual({ approvedActiveLimit: value });
+  expect(f.client.getQueryData<SettingsView>(["settings"])?.approvedActiveLimit.value).toBe(value);
+  expect(f.client.getQueryData<SettingsView>(["settings"])?.approvedActiveHours.value).toBe(12);
+  expect(f.invalidate).toHaveBeenCalledWith({ queryKey: ["inbox"] });
+  expect(f.invalidate).toHaveBeenCalledWith({ queryKey: ["review"] });
+});
+
+test.each(["Save", "Reset"])("%s clears the cap override and falls back to the file", async (button) => {
+  const f = setupCap({ source: "override", value: 2, override: 2, file: 10 });
+  const input = await capField();
+  if (button === "Save") fireEvent.change(input, { target: { value: "" } });
+  fireEvent.click(capForm().getByRole("button", { name: button }));
+  await capForm().findByText("From the config file.");
+  expect(input.value).toBe("10");
+  expect(JSON.parse(String(f.patches()[0]?.[1]?.body))).toEqual({ approvedActiveLimit: null });
+});
+
+test("Reset without a file returns the cap to an empty default field", async () => {
+  setupCap({ source: "override", value: 2, override: 2 });
+  const input = await capField();
+  fireEvent.click(capForm().getByRole("button", { name: "Reset" }));
+  await capForm().findByText("Default.");
+  expect(input.value).toBe("");
+  expect(input.placeholder).toBe("5 reviews");
+});
+
+test.each(["-1", "201", "1.5", "1e2"])("invalid cap input %s is rejected without sending", async (value) => {
+  const f = setupCap();
+  fireEvent.change(await capField(), { target: { value } });
+  fireEvent.click(capForm().getByRole("button", { name: "Save" }));
+  expect(await capForm().findByText("Enter a whole number from 0 to 200.")).toBeTruthy();
+  expect(f.patches()).toHaveLength(0);
 });
 
 const binId = "33333333-3333-4333-8333-333333333333";

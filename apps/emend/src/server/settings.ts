@@ -1,7 +1,10 @@
 import { lstat } from "node:fs/promises";
 import {
   APPROVED_ACTIVE_HOURS,
+  APPROVED_ACTIVE_LIMIT,
   ApprovedActiveHours,
+  ApprovedActiveLimit,
+  type HoursSetting,
   KeyBinding,
   type KeysSetting,
   normalizeShortcutKey,
@@ -10,7 +13,7 @@ import {
   ShortcutCommand,
 } from "@emend/contract";
 import { resolveShortcuts } from "@emend/core";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { Queries } from "../db/client.ts";
 import { settings } from "../db/schema.ts";
 import { readConfigJson } from "../state/read-config.ts";
@@ -18,6 +21,7 @@ import { readConfigJson } from "../state/read-config.ts";
 export interface FileSetting {
   file: number | null;
   fileError: boolean;
+  limit: { file: number | null; fileError: boolean };
   keys: {
     file: Partial<Record<ShortcutCommand, KeyBinding>>;
     fileErrors: Set<ShortcutCommand>;
@@ -35,6 +39,7 @@ export async function readFileSetting(configFile?: string): Promise<FileSetting>
   const result: FileSetting = {
     file: null,
     fileError: false,
+    limit: { file: null, fileError: false },
     keys: { file: {}, fileErrors: new Set(), fileError: false },
   };
   if (!configFile) return result;
@@ -45,6 +50,11 @@ export async function readFileSetting(configFile?: string): Promise<FileSetting>
       const parsed = ApprovedActiveHours.safeParse(document.approvedActiveHours);
       result.file = parsed.success ? parsed.data : null;
       result.fileError = !parsed.success;
+    }
+    if (Object.hasOwn(document, "approvedActiveLimit")) {
+      const parsed = ApprovedActiveLimit.safeParse(document.approvedActiveLimit);
+      result.limit.file = parsed.success ? parsed.data : null;
+      result.limit.fileError = !parsed.success;
     }
     if (Object.hasOwn(document, "keys")) {
       if (!isPlainObject(document.keys)) result.keys.fileError = true;
@@ -71,6 +81,7 @@ export async function readFileSetting(configFile?: string): Promise<FileSetting>
       if (missing) return result;
     }
     result.fileError = true;
+    result.limit.fileError = true;
     result.keys.fileError = true;
     return result;
   }
@@ -79,30 +90,40 @@ export async function readFileSetting(configFile?: string): Promise<FileSetting>
 export async function readSettings(
   ownerId: string,
   q: Queries,
-  { file, fileError }: FileSetting,
-): Promise<Pick<SettingsView, "approvedActiveHours">> {
-  const row = await q
+  file: FileSetting,
+): Promise<Pick<SettingsView, "approvedActiveHours" | "approvedActiveLimit">> {
+  const rows = await q
     .select()
     .from(settings)
-    .where(and(eq(settings.ownerId, ownerId), eq(settings.key, "approvedActiveHours")))
-    .get();
-  let override: number | null = null;
-  if (row) {
-    try {
-      override = ApprovedActiveHours.safeParse(JSON.parse(row.value)).data ?? null;
-    } catch {
-      // Corrupt or obsolete stored values do not override a usable file or default.
+    .where(and(eq(settings.ownerId, ownerId), inArray(settings.key, ["approvedActiveHours", "approvedActiveLimit"])))
+    .all();
+  function resolve(
+    key: "approvedActiveHours" | "approvedActiveLimit",
+    schema: typeof ApprovedActiveHours,
+    fallback: number,
+    { file, fileError }: { file: number | null; fileError: boolean },
+  ): HoursSetting {
+    const row = rows.find((row) => row.key === key);
+    let override: number | null = null;
+    if (row) {
+      try {
+        override = schema.safeParse(JSON.parse(row.value)).data ?? null;
+      } catch {
+        // Corrupt or obsolete stored values do not override a usable file or default.
+      }
     }
-  }
-  return {
-    approvedActiveHours: {
-      value: override ?? file ?? APPROVED_ACTIVE_HOURS,
+    return {
+      value: override ?? file ?? fallback,
       source: override !== null ? "override" : file !== null ? "file" : "default",
-      default: APPROVED_ACTIVE_HOURS,
+      default: fallback,
       file,
       override,
       fileError,
-    },
+    };
+  }
+  return {
+    approvedActiveHours: resolve("approvedActiveHours", ApprovedActiveHours, APPROVED_ACTIVE_HOURS, file),
+    approvedActiveLimit: resolve("approvedActiveLimit", ApprovedActiveLimit, APPROVED_ACTIVE_LIMIT, file.limit),
   };
 }
 
@@ -164,13 +185,19 @@ export async function updateKeys(
   }
 }
 
-export async function updateApprovedActiveHours(ownerId: string, q: Queries, value: number | null, now: number) {
+export async function updateNumericSetting(
+  ownerId: string,
+  q: Queries,
+  key: "approvedActiveHours" | "approvedActiveLimit",
+  value: number | null,
+  now: number,
+) {
   if (value === null) {
-    await q.delete(settings).where(and(eq(settings.ownerId, ownerId), eq(settings.key, "approvedActiveHours")));
+    await q.delete(settings).where(and(eq(settings.ownerId, ownerId), eq(settings.key, key)));
   } else {
     await q
       .insert(settings)
-      .values({ ownerId, key: "approvedActiveHours", value: JSON.stringify(value), updatedAt: now })
+      .values({ ownerId, key, value: JSON.stringify(value), updatedAt: now })
       .onConflictDoUpdate({
         target: [settings.ownerId, settings.key],
         set: { value: JSON.stringify(value), updatedAt: now },

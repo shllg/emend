@@ -28,6 +28,7 @@ test("a successful response still has to satisfy its schema", async () => {
     vi.fn().mockResolvedValue(
       Response.json({
         approvedActiveHours: 12,
+        approvedActiveLimit: 5,
         serverTime: new Date(Date.now()).toISOString(),
         items: [{ id: "invalid" }],
       }),

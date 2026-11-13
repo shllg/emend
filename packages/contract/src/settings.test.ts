@@ -1,11 +1,14 @@
 import { expect, test } from "vitest";
 import {
   ApprovedActiveHours,
+  ApprovedActiveLimit,
   HoursSetting,
   InboxList,
   KeyBinding,
   KeysSetting,
+  LimitSetting,
   MAX_APPROVED_ACTIVE_HOURS,
+  MAX_APPROVED_ACTIVE_LIMIT,
   normalizeShortcutKey,
   SCOPES_BY_KIND,
   SettingSource,
@@ -34,7 +37,12 @@ test("updates reject invalid hours and unknown keys", () => {
 test("settings expose the source and nullable file and override", () => {
   for (const source of SettingSource.options) {
     const setting = { value: 12, source, default: 12, file: null, override: null, fileError: false };
-    const view = { approvedActiveHours: setting, keys: defaultKeys(), serverTime: "2026-11-04T10:00:00.000Z" };
+    const view = {
+      approvedActiveHours: setting,
+      approvedActiveLimit: { ...setting, value: 5, default: 5 },
+      keys: defaultKeys(),
+      serverTime: "2026-11-04T10:00:00.000Z",
+    };
     expect(SettingsView.parse(view)).toEqual(view);
     expect(SettingsView.safeParse({ approvedActiveHours: setting }).success).toBe(false);
     expect(SettingsView.safeParse({ ...view, serverTime: "yesterday" }).success).toBe(false);
@@ -214,8 +222,31 @@ test("only reviewers manage settings", () => {
     expect(scopes.some((scope) => scope === "settings:manage")).toBe(kind === "reviewer");
 });
 test("inbox lists require the window used for their items", () => {
-  const list = { items: [], serverTime: "2026-11-04T10:00:00.000Z" };
+  const list = { items: [], approvedActiveLimit: 5, serverTime: "2026-11-04T10:00:00.000Z" };
   expect(InboxList.safeParse(list).success).toBe(false);
   for (const approvedActiveHours of [0, 720])
     expect(InboxList.parse({ ...list, approvedActiveHours }).approvedActiveHours).toBe(approvedActiveHours);
+});
+
+test("approved review limits include both bounds and reject invalid values", () => {
+  expect(MAX_APPROVED_ACTIVE_LIMIT).toBe(200);
+  for (const value of [0, 1, 5, 200]) {
+    expect(ApprovedActiveLimit.parse(value)).toBe(value);
+    expect(SettingsUpdate.parse({ approvedActiveLimit: value })).toEqual({ approvedActiveLimit: value });
+  }
+  expect(SettingsUpdate.parse({ approvedActiveLimit: null })).toEqual({ approvedActiveLimit: null });
+  for (const value of [-1, 1.5, 201, "5", true, NaN, Infinity]) {
+    expect(ApprovedActiveLimit.safeParse(value).success).toBe(false);
+    expect(SettingsUpdate.safeParse({ approvedActiveLimit: value }).success).toBe(false);
+  }
+  const setting = { value: 5, source: "default", default: 5, file: null, override: null, fileError: false };
+  expect(LimitSetting.parse(setting)).toEqual(setting);
+  for (const field of ["value", "default", "file", "override"]) {
+    expect(LimitSetting.safeParse({ ...setting, [field]: 201 }).success).toBe(false);
+  }
+  const list = { items: [], approvedActiveHours: 12, approvedActiveLimit: 5, serverTime: "2026-11-04T10:00:00.000Z" };
+  expect(InboxList.parse(list)).toEqual(list);
+  for (const value of [undefined, -1, 1.5, 201, "5"]) {
+    expect(InboxList.safeParse({ ...list, approvedActiveLimit: value }).success).toBe(false);
+  }
 });

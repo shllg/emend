@@ -260,5 +260,19 @@ export const MIGRATIONS: readonly { tag: string; when: number; hash: string; sta
       "PRAGMA foreign_keys=ON;",
       "CREATE INDEX `settings_owner_idx` ON `settings` (`owner_id`);"
     ]
+  },
+  {
+    "tag": "0019_daffy_kulan_gath",
+    "when": 1794565026377,
+    "hash": "6998946a3e9df622825707a26ade34180b58756989f2bb3e84cd0ff77a41968c",
+    "statements": [
+      "PRAGMA foreign_keys=OFF;",
+      "CREATE TABLE `__new_settings` (\n\t`owner_id` text NOT NULL,\n\t`key` text NOT NULL,\n\t`value` text NOT NULL,\n\t`updated_at` integer NOT NULL,\n\tPRIMARY KEY(`owner_id`, `key`),\n\tFOREIGN KEY (`owner_id`) REFERENCES `owners`(`id`) ON UPDATE no action ON DELETE no action,\n\tCONSTRAINT \"settings_key_check\" CHECK(\"__new_settings\".\"key\" in ('approvedActiveHours', 'approvedActiveLimit', 'keys'))\n);",
+      "INSERT INTO `__new_settings`(\"owner_id\", \"key\", \"value\", \"updated_at\") SELECT \"owner_id\", \"key\", \"value\", \"updated_at\" FROM `settings`;",
+      "DROP TABLE `settings`;",
+      "ALTER TABLE `__new_settings` RENAME TO `settings`;",
+      "PRAGMA foreign_keys=ON;",
+      "CREATE INDEX `settings_owner_idx` ON `settings` (`owner_id`);"
+    ]
   }
 ];

@@ -15,6 +15,8 @@ export type RetireRequest = z.infer<typeof RetireRequest>;
 export const MAX_SNOOZE_DAYS = 366;
 /** Default hours an approved review stays in Active after approval. */
 export const APPROVED_ACTIVE_HOURS = 12;
+/** Default number of approved reviews Active keeps, newest approvals first. */
+export const APPROVED_ACTIVE_LIMIT = 5;
 /** Capabilities feature that announces snooze, retire, reopen and delete. */
 export const REVIEW_LIFECYCLE_FEATURE = "review-lifecycle";
 /** Capabilities feature that announces the review bin: bin, restore, list and empty. */

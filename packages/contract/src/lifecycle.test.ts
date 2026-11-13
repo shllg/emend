@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import {
   APPROVED_ACTIVE_HOURS,
+  APPROVED_ACTIVE_LIMIT,
   BinItem,
   BinQuery,
   BinView,
@@ -45,8 +46,9 @@ const item = {
   kind: "review",
 };
 
-test("approvals default to 12 hours in Active", () => {
+test("approvals default to 12 hours and 5 rows in Active", () => {
   expect(APPROVED_ACTIVE_HOURS).toBe(12);
+  expect(APPROVED_ACTIVE_LIMIT).toBe(5);
 });
 
 test("snooze takes exactly one strict end condition", () => {
@@ -107,19 +109,15 @@ test("the inbox requires a server clock as an ISO datetime", () => {
   expect(InboxList.safeParse({ items: [] }).success).toBe(false);
   for (const serverTime of [null, "tomorrow", "2026-11-04", 0])
     expect(InboxList.safeParse({ items: [], serverTime }).success).toBe(false);
-  const list = { items: [], approvedActiveHours: 12, serverTime: "2026-11-04T10:00:00.000Z" };
+  const list = { items: [], approvedActiveHours: 12, approvedActiveLimit: 5, serverTime: "2026-11-04T10:00:00.000Z" };
   expect(InboxList.parse(list)).toEqual(list);
 });
 
 test("the inbox cap applies per list", () => {
   const items = Array.from({ length: LIMITS.inboxItems * 3 }, () => item);
-  expect(InboxList.safeParse({ approvedActiveHours: 12, serverTime: "2026-11-04T10:00:00.000Z", items }).success).toBe(
-    true,
-  );
-  expect(
-    InboxList.safeParse({ approvedActiveHours: 12, serverTime: "2026-11-04T10:00:00.000Z", items: [...items, item] })
-      .success,
-  ).toBe(false);
+  const list = { approvedActiveHours: 12, approvedActiveLimit: 5, serverTime: "2026-11-04T10:00:00.000Z", items };
+  expect(InboxList.safeParse(list).success).toBe(true);
+  expect(InboxList.safeParse({ ...list, items: [...items, item] }).success).toBe(false);
 });
 
 test("lifecycle events carry ids and a revision only", () => {

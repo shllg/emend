@@ -36,6 +36,16 @@ async function view() {
   expect(response.status).toBe(200);
   return SettingsView.parse(await response.json()).approvedActiveHours;
 }
+async function limitView() {
+  const response = await f.request("/settings", "GET");
+  expect(response.status).toBe(200);
+  return SettingsView.parse(await response.json()).approvedActiveLimit;
+}
+async function updateLimit(value: number | null, who: "reviewer" | "foreign" = "reviewer") {
+  const response = await f.request("/settings", "PATCH", { approvedActiveLimit: value }, who);
+  expect(response.status).toBe(200);
+  return SettingsView.parse(await response.json()).approvedActiveLimit;
+}
 async function keyView() {
   const response = await f.request("/settings", "GET");
   expect(response.status).toBe(200);
@@ -131,6 +141,8 @@ test.each(["{", "[]", "null", "12", '"text"', " ".repeat(LIMITS.publicJsonBytes 
   async (data) => {
     await writeFile(file, data);
     expect(await view()).toMatchObject({ value: 12, fileError: true });
+    expect(await limitView()).toMatchObject({ value: 5, fileError: true });
+    expect((await keyView()).fileError).toBe(true);
     expect((await inbox()).approvedActiveHours).toBe(12);
   },
 );
@@ -138,14 +150,17 @@ test("nonregular, dangling and unreadable files fall back; safe links are read w
   const target = join(f.dir, "target.json");
   await symlink(target, file);
   expect(await view()).toMatchObject({ fileError: true });
+  expect(await limitView()).toMatchObject({ fileError: true });
   await mkdir(target);
   expect(await view()).toMatchObject({ fileError: true });
+  expect(await limitView()).toMatchObject({ fileError: true });
   const regular = join(f.dir, "regular.json");
   await writeFile(regular, '{"approvedActiveHours":24,"docRoots":"ignored"}');
   f.deps.configFile = regular;
   await chmod(regular, 0);
   try {
     expect(await view()).toMatchObject({ fileError: true });
+    expect(await limitView()).toMatchObject({ fileError: true });
   } finally {
     await chmod(regular, 0o600);
   }
@@ -543,4 +558,110 @@ test("settings and review routes read config outside database callbacks", async 
   const single = await f.request(`/reviews/${f.reviewId}`, "GET");
   expect(single.status).toBe(200);
   expect(fileReads).toEqual([0, 0, 0, 0]);
+});
+
+test("the approval cap uses the default, file and owner override, and reset falls back", async () => {
+  expect(await limitView()).toEqual({
+    value: 5,
+    source: "default",
+    default: 5,
+    file: null,
+    override: null,
+    fileError: false,
+  });
+  expect((await inbox()).approvedActiveLimit).toBe(5);
+  await config({ approvedActiveLimit: 10 });
+  expect(await limitView()).toMatchObject({ value: 10, source: "file", file: 10, fileError: false });
+  expect((await inbox()).approvedActiveLimit).toBe(10);
+  expect(await updateLimit(2)).toMatchObject({ value: 2, source: "override", file: 10, override: 2 });
+  expect((await inbox()).approvedActiveLimit).toBe(2);
+  expect(await updateLimit(0)).toMatchObject({ value: 0, source: "override" });
+  expect((await inbox()).approvedActiveLimit).toBe(0);
+  expect(await updateLimit(null)).toMatchObject({ value: 10, source: "file", override: null });
+  expect((await inbox()).approvedActiveLimit).toBe(10);
+  await config({});
+  expect(await limitView()).toMatchObject({ value: 5, source: "default", fileError: false });
+  delete f.deps.configFile;
+  expect(await limitView()).toMatchObject({ value: 5, source: "default", fileError: false });
+});
+
+test.each([-1, 1.5, 201, "5", null])("invalid file cap %j flags only the cap", async (approvedActiveLimit) => {
+  await config({ approvedActiveHours: 24, approvedActiveLimit, keys: { "inbox.next": "x" } });
+  expect(await limitView()).toMatchObject({ value: 5, source: "default", file: null, fileError: true });
+  expect(await view()).toMatchObject({ value: 24, source: "file", fileError: false });
+  expect(await keyView()).toMatchObject({
+    fileError: false,
+    commands: { "inbox.next": { value: "x", fileError: false } },
+  });
+  expect((await inbox()).approvedActiveLimit).toBe(5);
+  expect(await updateLimit(3)).toMatchObject({ value: 3, source: "override", fileError: true });
+});
+
+test("invalid file hours do not affect a usable cap", async () => {
+  await config({ approvedActiveHours: -1, approvedActiveLimit: 10 });
+  expect(await view()).toMatchObject({ value: 12, fileError: true });
+  expect(await limitView()).toMatchObject({ value: 10, fileError: false });
+});
+
+test.each([-1, 1.5, 201, "5"])("invalid cap PATCH %j leaves hours and cap unchanged", async (approvedActiveLimit) => {
+  await error(
+    await f.request("/settings", "PATCH", { approvedActiveHours: 24, approvedActiveLimit }),
+    400,
+    "invalid_request",
+  );
+  expect(await view()).toMatchObject({ value: 12, source: "default" });
+  expect(await limitView()).toMatchObject({ value: 5, source: "default" });
+});
+
+test("cap updates reject extra keys and require a reviewer", async () => {
+  await error(await f.request("/settings", "PATCH", { approvedActiveLimit: 3, extra: true }), 400, "invalid_request");
+  await error(await f.request("/settings", "PATCH", { approvedActiveLimit: 3 }, "agent"), 403, "forbidden");
+  expect(await limitView()).toMatchObject({ value: 5, source: "default" });
+});
+
+test("numeric settings can be updated together or independently without losing the other override", async () => {
+  const response = await f.request("/settings", "PATCH", {
+    approvedActiveHours: 24,
+    approvedActiveLimit: 10,
+    keys: { "inbox.next": { key: "x" } },
+  });
+  expect(response.status).toBe(200);
+  expect(SettingsView.parse(await response.json())).toMatchObject({
+    approvedActiveHours: { value: 24, override: 24 },
+    approvedActiveLimit: { value: 10, override: 10 },
+    keys: { commands: { "inbox.next": { value: "x" } } },
+  });
+  await updateLimit(0);
+  expect(await view()).toMatchObject({ value: 24, override: 24 });
+  await update(2);
+  expect(await limitView()).toMatchObject({ value: 0, override: 0 });
+  await updateLimit(null);
+  expect(await view()).toMatchObject({ value: 2, override: 2 });
+  expect((await keyView()).commands["inbox.next"].value).toBe("x");
+  await update(null);
+  expect(await limitView()).toMatchObject({ value: 5, source: "default" });
+});
+
+test("cap overrides and resets are isolated by owner", async () => {
+  await config({ approvedActiveLimit: 10 });
+  await updateLimit(2);
+  await updateLimit(20, "foreign");
+  expect(await limitView()).toMatchObject({ value: 2, override: 2 });
+  await updateLimit(null, "foreign");
+  expect(await limitView()).toMatchObject({ value: 2, override: 2 });
+  await updateLimit(null);
+  expect(await limitView()).toMatchObject({ value: 10, source: "file" });
+});
+
+test.each(['"5"', "201", "-1", "1.5", "{"])("unusable stored cap %s is ignored", async (value) => {
+  await config({ approvedActiveHours: 24, approvedActiveLimit: 10 });
+  await f.db.query((q) => q.insert(settings).values({ ownerId: f.ownerId, key: "approvedActiveLimit", value }));
+  expect(await limitView()).toMatchObject({ value: 10, source: "file", override: null });
+  expect(await view()).toMatchObject({ value: 24, fileError: false });
+});
+
+test("an empty inbox still reports the effective approval cap", async () => {
+  await updateLimit(10);
+  expect((await f.request(`/reviews/${f.reviewId}`, "DELETE")).status).toBe(204);
+  expect(await inbox()).toMatchObject({ items: [], approvedActiveLimit: 10 });
 });

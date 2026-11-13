@@ -332,27 +332,34 @@ their normal focus behavior; no unconditional focus refetch is required.
 ### Settings
 
 `ApprovedActiveHours` is an integer from 0 to `MAX_APPROVED_ACTIVE_HOURS` (720).
+`ApprovedActiveLimit` is an integer from 0 to `MAX_APPROVED_ACTIVE_LIMIT` (200, the Active list's cap).
 `SettingSource = "default" | "file" | "override"`.
 `HoursSetting = { value: ApprovedActiveHours, source: SettingSource, default: ApprovedActiveHours,
 file: ApprovedActiveHours | null, override: ApprovedActiveHours | null, fileError: boolean }`.
+`LimitSetting` has the same shape as `HoursSetting`, with `ApprovedActiveLimit` values.
 `KeyBinding = ShortcutKey | null`; null turns a shortcut off.
 `KeySetting = { value: KeyBinding, source: SettingSource, default: ShortcutKey, file?: KeyBinding,
 override?: KeyBinding, fileError: boolean, clashWith: ShortcutCommand | null }`.
 `KeysSetting = { commands: Record<ShortcutCommand, KeySetting>, fileError: boolean }`; every command is present.
-`SettingsView = { approvedActiveHours: HoursSetting, keys: KeysSetting, serverTime: string }`. `serverTime` is the server's clock (ISO
-8601) when it answered; a client compares it with `InboxList.serverTime` to tell which window is newer.
-`SettingsUpdate = { approvedActiveHours?: ApprovedActiveHours | null,
+`SettingsView = { approvedActiveHours: HoursSetting, approvedActiveLimit: LimitSetting,
+keys: KeysSetting, serverTime: string }`. `serverTime` is the server's clock (ISO 8601) when it
+answered; a client compares it with `InboxList.serverTime` to tell which window and cap are newer.
+`SettingsUpdate = { approvedActiveHours?: ApprovedActiveHours | null, approvedActiveLimit?: ApprovedActiveLimit | null,
 keys?: Partial<Record<ShortcutCommand, { key: KeyBinding } | null>> }` is strict, including each
 `{ key }` object; extra keys, unknown commands and non-normalized keys are refused (400).
-An empty update is accepted. Omitted settings stay unchanged. Updates to both settings share one transaction.
+An empty update is accepted. Omitted settings stay unchanged. Updates to all settings share one transaction.
 
 The effective `value` uses the owner's database override, then the config file, then
-`APPROVED_ACTIVE_HOURS` (12). Zero moves an approved review out of Active at once.
+`APPROVED_ACTIVE_HOURS` (12) for the window and `APPROVED_ACTIVE_LIMIT` (5) for the cap.
+The file keys are `approvedActiveHours` and `approvedActiveLimit`. Zero hours moves an approved
+review out of Active at once; a cap of 0 shows no approved review in Active.
 PATCH stores an override on this server; null clears it. Only a reviewer session can change it.
 Each server reads its own global config file on every settings or review read. It never writes
 or migrates that file. `file` is its usable value, or null when absent or invalid.
 `fileError` is true when the file cannot be read, is not a JSON object, or contains an unusable
-`approvedActiveHours` value. An invalid file does not prevent the default or override from working.
+`approvedActiveHours` or `approvedActiveLimit` value. Each numeric setting has its own `fileError`;
+an unreadable or non-object file sets every `fileError`. An invalid file does not prevent the
+default or override from working.
 A missing file or absent key is not an error. `docRoots` and `openBrowser` are not settings in this API.
 
 `ShortcutKey` is a normalized string: one lowercase ASCII letter, `shift+` followed by one
@@ -367,7 +374,8 @@ case-insensitive mod forms (`Mod+K` becomes `mod+k`, `MOD+SHIFT+P` becomes `mod+
 Shift must be spelled out in mod forms.
 
 The global config file format is `"keys": { "<command>": "<key>" | null }`. It is read once
-alongside `approvedActiveHours`. An absent `file` or `override` in a `KeySetting` means that
+alongside `approvedActiveHours` and `approvedActiveLimit`. An absent `file` or `override` in a
+`KeySetting` means that
 source sets nothing usable; a present null explicitly turns the command off. An unusable file
 entry is ignored and sets that command's `fileError`. `keys.fileError` is true if the file
 cannot be read, is not a JSON object, its `keys` is present but not a plain object, or it names
@@ -377,8 +385,8 @@ file or absent `keys` is not an error.
 PATCH `keys` merges commands into one stored object per owner: `{ key: "j" }` stores an override,
 `{ key: null }` stores off, and null removes the override. Unmentioned commands stay unchanged;
 removing the last override deletes the stored row. Corrupt stored objects and invalid or unknown
-entries are ignored. Only a reviewer session can PATCH keys. The `readSettings` path on review
-reads is unchanged: it reads only the approved-hours setting, without querying shortcut overrides.
+entries are ignored. Only a reviewer session can PATCH keys. The `readSettings` path
+reads the approval window and the approval cap on review reads, still without querying shortcut overrides.
 
 `ShortcutCommand` and `SHORTCUT_DEFAULTS` use this order:
 
@@ -423,7 +431,8 @@ snoozedUntil: string | null, activeUntil: string | null, releasedAt: string | nu
 kind: "review" | "publish" }`. `repo` is the repository key, and
 `movedTo` is the review's destination URL. `list` places the review: `done` for `settled`, and for
 `approved` once the effective `approvedActiveHours` have passed since approval or it does not fit
-Active's cap; an approved review is `active` until then if it has a place. An open review is
+Active's approval cap or total cap; an approved review is `active` until then if it has a place.
+An open review is
 `snoozed` while its snooze is in effect, `active` otherwise.
 `project` is the name the review's newest publish sent with its `repo`; for any review not published
 since this field was added, it falls back to its repository row's name unless that is `.git`; it is null when none.
@@ -460,21 +469,31 @@ period) or an unexpired direct-wait row for the same owner and review. Direct wa
 30-second expiry every 10 seconds and delete their row when they end. They emit no live event;
 views reflect direct writes on their next load.
 
-`GET /api/v1/reviews` returns `InboxList = { items: InboxItem[], serverTime: string, approvedActiveHours: ApprovedActiveHours }`.
-`approvedActiveHours` is the effective window used for this response. Reviews in the bin are in none of the lists.
+`GET /api/v1/reviews` returns `InboxList = { items: InboxItem[], serverTime: string,
+approvedActiveHours: ApprovedActiveHours, approvedActiveLimit: ApprovedActiveLimit }`.
+`approvedActiveHours` and `approvedActiveLimit` are the effective window and approval cap used
+for this response. Reviews in the bin are in none of the lists.
 `serverTime` is the server's clock when it built the list, as an ISO 8601 UTC string.
-The Active list holds open reviews
-whose snooze is not in effect and reviews approved within that window (12 hours by default). A review with a waiting
-agent comes first, then newest activity: an open review uses `updatedAt`, or the wake time of a
-timed snooze that has passed when that is later; an approved review sorts by `updatedAt`.
-Next is the Snoozed list (soonest wake first, a snooze until the next revision last), then the Done
-list (retired reviews and approvals outside that window, with no approval time, or without an Active place, newest
-`updatedAt` first). Review id is the
-stable tie breaker in each. At most `inboxItems` (200) rows per list, so at most 600 in all.
-When more reviews qualify for Active than its cap, open reviews take the places first and approvals
-that do not fit are listed in Done with `activeUntil: null`.
+The Active list holds open reviews whose snooze is not in effect, selected by newest activity,
+then id ascending, up to `inboxItems` (200). Open reviews take the places first. Approved reviews
+qualify only inside the approval window (12 hours by default), up to `approvedActiveLimit`
+(5 by default) or the number of remaining Active places, whichever is smaller. These places go
+to the newest approvals by approval time, then id ascending, regardless of later activity.
+Every other approved review is in Done with `activeUntil: null`. Because every approval has the
+same window length, a window ending cannot bring an older approval back into Active.
+
+Active is ordered by group, first match wins: open with an agent waiting; open with unsent
+comments; open without a live Send on its newest revision (To review); open with such a Send
+(Answered); approved. A live Send is not set aside, whether its delivery is pending or confirmed.
+The group is not a wire field. Within each group, newest activity comes first: an open review uses
+`updatedAt`, or the wake time of a timed snooze that has passed when that is later; an approved
+review uses `updatedAt`. Id ascending breaks ties. Approved reviews always follow every open review.
+Next is Snoozed (soonest wake first, a snooze until the next revision last), then Done (retired
+reviews and approvals without an Active place, newest `updatedAt` first). Id ascending breaks
+ties in each. Each list holds at most 200 rows, so at most 600 in all.
 `GET /api/v1/reviews/:id` returns `ReviewView = InboxItem & { revisions: { seq, createdAt }[], importedAt: string | null }`,
-with revisions ascending by sequence. It places an approved review by the 12-hour rule alone.
+with revisions ascending by sequence. It places an approved review by the effective approval
+window alone, without Active's caps.
 Both are reviewer-only, as is the revision endpoint below.
 
 `GET /api/v1/reviews/:id/revisions/:seq` returns `RevisionView = { seq, base, head, main, writeupEmpty,

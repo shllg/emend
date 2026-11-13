@@ -6,7 +6,7 @@ import { PublishLinks, RepoUrl } from "./links.ts";
 import { Placement } from "./placement.ts";
 import { PublishRequest, Sha256 } from "./publish.ts";
 import { FileFlag, FilePath, FileRole, FileStatus, TopicMeta, TopicSlug } from "./review.ts";
-import { ApprovedActiveHours } from "./settings.ts";
+import { ApprovedActiveHours, ApprovedActiveLimit } from "./settings.ts";
 import { BlockId, Target } from "./target.ts";
 import { CommentBody, Outcome, ThreadState } from "./thread.ts";
 
@@ -57,6 +57,7 @@ export const InboxItem = z.object({
 export type InboxItem = z.infer<typeof InboxItem>;
 export const InboxList = z.object({
   approvedActiveHours: ApprovedActiveHours,
+  approvedActiveLimit: ApprovedActiveLimit,
   items: z.array(InboxItem).max(LIMITS.inboxItems * ReviewList.options.length),
   serverTime: z.iso.datetime(),
 });

@@ -34,7 +34,12 @@ beforeEach(() => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async () =>
-      Response.json({ approvedActiveHours: 12, serverTime: new Date(Date.now()).toISOString(), items: [] }),
+      Response.json({
+        approvedActiveHours: 12,
+        approvedActiveLimit: 5,
+        serverTime: new Date(Date.now()).toISOString(),
+        items: [],
+      }),
     ),
   );
   fake.current.set({ state: "idle", reason: null, checkedAt: null });

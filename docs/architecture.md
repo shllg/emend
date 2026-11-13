@@ -37,13 +37,15 @@ For `docRoots` and `openBrowser`, publish and bare `emend` ignore a config file 
 links lie inside a repository holding the working directory. They warn; `emend config` refuses
 that global file. An old state config inside such a repository is never read, copied or renamed.
 An old config outside it can still supply values in memory. A dotfiles repository rooted at the
-home folder does not count. The server reads only `approvedActiveHours` and `keys` from the file
+home folder does not count. The server reads only `approvedActiveHours`, `approvedActiveLimit` and `keys` from the file
 and does not apply this check. Known limit: a config path set by a repository's environment is not detected
 when emend runs from a folder outside every repository.
 
 Settings have defaults. The config file's `approvedActiveHours` sets how long approved reviews
 stay in Active. A value set in Settings is stored per owner in that server's database and wins.
-Clearing it falls back to the file, then the default of 12 hours. The file's `keys` sets keyboard
+Clearing it falls back to the file, then the default of 12 hours. `approvedActiveLimit` caps the
+number of approved reviews in Active the same way, keeping the newest approvals (5 by default).
+The file's `keys` sets keyboard
 shortcuts the same way: a stored key wins, then the file, then the default. Each server, hub or attached
 machine, reads only its own file and database. Settings do not sync between servers.
 

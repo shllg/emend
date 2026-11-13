@@ -37,7 +37,12 @@ test("Pair this device explains code entry, requires eight characters, and submi
   const fetcher = vi.fn(async (path: string, _init?: RequestInit) =>
     path === "/api/v1/session"
       ? pending.promise
-      : Response.json({ approvedActiveHours: 12, serverTime: new Date(Date.now()).toISOString(), items: [] }),
+      : Response.json({
+          approvedActiveHours: 12,
+          approvedActiveLimit: 5,
+          serverTime: new Date(Date.now()).toISOString(),
+          items: [],
+        }),
   );
   vi.stubGlobal("fetch", fetcher);
   const { history, client } = mount();
