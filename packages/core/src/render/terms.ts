@@ -11,7 +11,7 @@ const boundary = "[\\p{L}\\p{M}\\p{N}_]";
 const startsWord = new RegExp(`^${boundary}`, "u");
 const endsWord = new RegExp(`${boundary}$`, "u");
 const skipped = new Set(["a", "code", "pre", "kbd", "samp", "h1", "h2", "h3", "h4", "h5", "h6"]);
-const phrasing = new Set([
+export const phrasing = new Set([
   "a",
   "abbr",
   "b",
@@ -28,16 +28,56 @@ const phrasing = new Set([
   "kbd",
   "mark",
   "q",
+  "rp",
+  "rt",
+  "ruby",
   "s",
   "samp",
   "small",
   "span",
+  "strike",
   "strong",
   "sub",
   "sup",
   "time",
+  "tt",
   "u",
   "var",
+]);
+// Keep both classifications explicit so additions to the sanitize schema need a decision.
+export const runBreaks = new Set([
+  "blockquote",
+  "br",
+  "dd",
+  "details",
+  "div",
+  "dl",
+  "dt",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "hr",
+  "img",
+  "input",
+  "li",
+  "ol",
+  "p",
+  "picture",
+  "pre",
+  "section",
+  "source",
+  "summary",
+  "table",
+  "tbody",
+  "td",
+  "tfoot",
+  "th",
+  "thead",
+  "tr",
+  "ul",
 ]);
 let segmenter: Intl.Segmenter | undefined;
 
@@ -155,32 +195,28 @@ export function markTerms() {
         }
         // The same matcher carries the remaining work across every writeup section.
         if (!charge(matcher, view.length * matcher.weight)) return;
+        const edges = neighbours.get(node);
+        const rangeAt = (index: number, length: number) => {
+          const start = offsets?.get(index);
+          const finish = offsets?.get(index + length);
+          if (
+            start === undefined ||
+            finish === undefined ||
+            (start === 0 && edges?.before) ||
+            (finish === node.value.length && edges?.after)
+          )
+            return;
+          return { start, finish };
+        };
         const advance = (index: number) => index + ((view.codePointAt(index) ?? 0) > 0xffff ? 2 : 1);
         const replacements: HtmlElement["children"] = [];
         let end = 0;
         matcher.pattern.lastIndex = 0;
         for (let match = matcher.pattern.exec(view); match; match = matcher.pattern.exec(view)) {
+          if (!charge(matcher, matcher.forms.length)) return;
           let form = matcher.forms[match.findIndex((value, index) => index > 0 && value !== undefined) - 1];
           let length = match[0].length;
           if (!form) continue;
-          if (form.acronym) {
-            // An insensitive alternation can find a wrong-case acronym. Try the forms at
-            // that same position again so a shorter, valid form still gets its turn.
-            if (!charge(matcher, matcher.weight)) return;
-            const candidate = matcher.forms.find((candidate) => {
-              candidate.at.lastIndex = match.index;
-              const exact = candidate.at.exec(view);
-              if (!exact) return false;
-              length = exact[0].length;
-              return true;
-            });
-            if (!candidate) {
-              matcher.pattern.lastIndex = advance(match.index);
-              continue;
-            }
-            form = candidate;
-            matcher.pattern.lastIndex = match.index + length;
-          }
           // Unchanged NFC nodes need segmentation only once a candidate exists.
           if (!offsets) {
             segmenter ??= new Intl.Segmenter(undefined, { granularity: "grapheme" });
@@ -188,19 +224,30 @@ export function markTerms() {
             for (const { index } of segmenter.segment(node.value)) offsets.set(index, index);
             offsets.set(view.length, node.value.length);
           }
-          const start = offsets.get(match.index);
-          const finish = offsets.get(match.index + length);
-          const edges = neighbours.get(node);
-          if (
-            start === undefined ||
-            finish === undefined ||
-            (start === 0 && edges?.before) ||
-            (finish === node.value.length && edges?.after)
-          ) {
+          let range = rangeAt(match.index, length);
+          if (form.acronym || !range) {
+            // Recheck case and boundaries together so a refused form cannot hide a shorter one.
+            if (!charge(matcher, matcher.weight)) return;
+            range = undefined;
+            for (const candidate of matcher.forms) {
+              candidate.at.lastIndex = match.index;
+              const exact = candidate.at.exec(view);
+              if (!exact) continue;
+              const accepted = rangeAt(match.index, exact[0].length);
+              if (!accepted) continue;
+              form = candidate;
+              length = exact[0].length;
+              range = accepted;
+              break;
+            }
+          }
+          if (!range) {
             matcher.pattern.lastIndex = advance(match.index);
             continue;
           }
+          matcher.pattern.lastIndex = match.index + length;
           if (seen.has(form.entry)) continue;
+          const { start, finish } = range;
           if (start > end) replacements.push({ type: "text", value: node.value.slice(end, start) });
           replacements.push({
             type: "element",

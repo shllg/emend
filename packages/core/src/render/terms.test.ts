@@ -1,7 +1,8 @@
 import { LIMITS, normalizeGlossaryForm, WriteupInput } from "@emend/contract";
 import { expect, test } from "vitest";
 import { renderCommentHtml, renderDoc, renderMarkdownWithBudget, renderMetadataBlocks } from "./markdown.ts";
-import { TERM_MATCH_WORK_BUDGET, termMatcher } from "./terms.ts";
+import { sanitizeSchema } from "./sanitize.ts";
+import { phrasing, runBreaks, TERM_MATCH_WORK_BUDGET, termMatcher } from "./terms.ts";
 import { renderWriteup } from "./writeup.ts";
 
 async function html(
@@ -44,6 +45,19 @@ test.each([
   ["**API**s API", "API", `<p><strong>API</strong>s ${mark("API")}</p>`],
 ])("rejects word fragments across inline formatting: %s", async (source, term, expected) => {
   expect(await html(source, [{ term }])).toBe(expected);
+});
+
+test.each(["tt", "strike"])("keeps <%s> inside an inline run", async (tag) => {
+  expect(await html(`<${tag}>budget</${tag}>ing budget`, [{ term: "budget" }])).toBe(
+    `<p><${tag}>budget</${tag}>ing ${mark("budget")}</p>`,
+  );
+});
+
+test("classifies every sanitized tag as phrasing or a run break, never both", () => {
+  expect(sanitizeSchema.tagNames?.length).toBeGreaterThan(0);
+  for (const tag of sanitizeSchema.tagNames ?? []) {
+    expect(Number(phrasing.has(tag)) + Number(runBreaks.has(tag)), tag).toBe(1);
+  }
 });
 
 test.each([
@@ -152,6 +166,33 @@ test("a rejected acronym still lets a later word inside its span match", async (
   expect(await html("pr budget", entries)).toBe(`<p>pr ${mark("budget", 1)}</p>`);
 });
 
+test("retries a shorter form at the same position after an inline-edge refusal", async () => {
+  const entries = [{ term: "retry" }, { term: "retry budget" }];
+  expect(await html("retry budget**ing**", entries)).toBe(`<p>${mark("retry")} budget<strong>ing</strong></p>`);
+});
+
+test.each(["", "Cafe\u0301 "])("retries a shorter form after a grapheme-boundary refusal: %j", async (prefix) => {
+  const entries = [{ term: "retry" }, { term: "retry budget" }];
+  expect(await html(`${prefix}retry budget\u200d then`, entries)).toBe(
+    `<p>${prefix}${mark("retry")} budget\u200d then</p>`,
+  );
+});
+
+test("an already-marked longer form keeps its position ahead of a shorter form", async () => {
+  const entries = [{ term: "retry" }, { term: "retry budget" }];
+  expect(await html("retry budget retry budget", entries)).toBe(`<p>${mark("retry budget", 1)} retry budget</p>`);
+});
+
+test("inline-edge fallback charges the weight once for all forms tried at that position", async () => {
+  const entries = [{ term: "retry" }, { term: "retry budget" }];
+  const source = "retry budget**ing**";
+  // The node scan costs 12 * 17, the match lookup 2, and the fallback 17: 223 units.
+  expect(await html(source, entries, termMatcher(entries, 222))).toBe(await html(source, []));
+  expect(await html(source, entries, termMatcher(entries, 223))).toBe(
+    `<p>${mark("retry")} budget<strong>ing</strong></p>`,
+  );
+});
+
 test("the longest form wins and matches never cross text nodes", async () => {
   const rendered = await html("retry budget budget retry budget", [{ term: "budget" }, { term: "retry budget" }]);
   expect(rendered).toContain(`${mark("retry budget", 1)} ${mark("budget")} retry budget`);
@@ -198,15 +239,27 @@ test("a shared work budget stops at the first oversized node and preserves later
 test("acronym fallback spends the shared work budget on repeated wrong-case hits", async () => {
   const entries = [{ term: "budget" }, { term: "PR" }];
   const source = "budget\n\npr pr PR";
-  // Scans cost (6 + 1 + 8) * 8 units; only one fallback fits in the remaining 8.
-  const matcher = termMatcher(entries, 128);
+  // Scans cost 120 units and three match lookups cost 6; only one 8-unit fallback fits.
+  const matcher = termMatcher(entries, 134);
   const rendered = await html(source, entries, matcher);
   expect(rendered).toBe(`<p>${mark("budget")}</p><p>pr pr PR</p>`);
   expect(rendered.replace(mark("budget"), "budget")).toBe(await html(source, []));
   expect(await html("PR", entries, matcher, "tldr")).toBe("<p>PR</p>");
-  expect(await html(source, entries, termMatcher(entries, 144))).toBe(
+  expect(await html(source, entries, termMatcher(entries, 152))).toBe(
     `<p>${mark("budget")}</p><p>pr pr ${mark("PR", 1)}</p>`,
   );
+});
+
+test("repeated matches of an already-marked entry spend the budget without changing text", async () => {
+  const entries = [{ term: "☀" }, { term: "☁" }];
+  const repeated = "☀".repeat(20);
+  const source = `☀\n\n${repeated}\n\n☁`;
+  const matcher = termMatcher(entries, 60);
+  const rendered = await html(source, entries, matcher);
+  expect(rendered).toBe(`<p>${mark("☀")}</p><p>${repeated}</p><p>☁</p>`);
+  expect(rendered.replace(mark("☀"), "☀")).toBe(await html(source, []));
+  expect(matcher.remaining).toBe(0);
+  expect(await html("☁", entries, matcher, "tldr")).toBe("<p>☁</p>");
 });
 
 test("a typical twelve-term glossary fits the maximum writeup budget and marks its last section", async () => {
