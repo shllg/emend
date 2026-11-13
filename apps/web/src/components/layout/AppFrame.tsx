@@ -19,6 +19,7 @@ import { layoutStore, useLayoutPreferences } from "../../lib/layout-store.ts";
 import { requestPairingFromLink } from "../../lib/pairing-intent.ts";
 import { useRefresh } from "../../lib/refresh.ts";
 import { ShortcutProvider } from "../../lib/use-shortcut.tsx";
+import { CommandPalette } from "../CommandPalette.tsx";
 import { textSizeItems } from "../review/LayoutControls.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -32,6 +33,7 @@ export function AppFrame(props: ComponentProps<typeof AppFrameContent>) {
   return (
     <ShortcutProvider>
       <AppFrameContent {...props} />
+      <CommandPalette />
     </ShortcutProvider>
   );
 }

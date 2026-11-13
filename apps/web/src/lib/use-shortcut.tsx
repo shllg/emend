@@ -16,9 +16,32 @@ import {
   shortcutLabels,
 } from "./shortcuts.ts";
 
-type Handler = (event: KeyboardEvent) => boolean;
+type Handler = () => boolean;
 type Registration = { command: ShortcutCommand; priority: number; handle: Handler };
 const Shortcuts = createContext<Set<Registration> | null>(null);
+
+function orderedHandlers(registry: Set<Registration>) {
+  return [...registry].reverse().sort((a, b) => b.priority - a.priority);
+}
+
+export function useShortcutRunner() {
+  const registry = useContext(Shortcuts);
+  return {
+    commands: () => new Set(registry ? [...registry].map((entry) => entry.command) : []),
+    run: (command: ShortcutCommand) =>
+      registry ? orderedHandlers(registry).some((entry) => entry.command === command && entry.handle()) : false,
+  };
+}
+
+export function useShortcutKeys(): Record<ShortcutCommand, KeyBinding> {
+  const settings = useQuery(settingsQuery());
+  return Object.fromEntries(
+    shortcutCommands.map((command) => [
+      command,
+      settings.data ? settings.data.keys.commands[command].value : SHORTCUT_DEFAULTS[command],
+    ]),
+  ) as Record<ShortcutCommand, KeyBinding>;
+}
 
 export function useShortcut(command: ShortcutCommand, handler: Handler, { enabled = true, priority = 0 } = {}) {
   const registry = useContext(Shortcuts);
@@ -28,7 +51,7 @@ export function useShortcut(command: ShortcutCommand, handler: Handler, { enable
   });
   useEffect(() => {
     if (!registry || !enabled) return;
-    const entry = { command, priority, handle: (event: KeyboardEvent) => latest.current(event) };
+    const entry = { command, priority, handle: () => latest.current() };
     registry.add(entry);
     return () => {
       registry.delete(entry);
@@ -92,13 +115,7 @@ export function ShortcutProvider({ children }: { children: ReactNode }) {
   const [registry] = useState(() => new Set<Registration>());
   const client = useQueryClient();
   const layout = useLayout();
-  const settings = useQuery(settingsQuery());
-  const keys = Object.fromEntries(
-    shortcutCommands.map((command) => [
-      command,
-      settings.data ? settings.data.keys.commands[command].value : SHORTCUT_DEFAULTS[command],
-    ]),
-  ) as Record<ShortcutCommand, KeyBinding>;
+  const keys = useShortcutKeys();
   const current = useRef(layout);
   useLayoutEffect(() => {
     current.current = layout;
@@ -108,10 +125,10 @@ export function ShortcutProvider({ children }: { children: ReactNode }) {
       if (current.current === "phone" || ignoreShortcut(event)) return;
       // Cache writes take effect even before React Query's batched render notification.
       const settings = client.getQueryData<SettingsView>(["settings"]);
-      const handlers = [...registry].reverse().sort((a, b) => b.priority - a.priority);
+      const handlers = orderedHandlers(registry);
       for (const entry of handlers) {
         const key = settings ? settings.keys.commands[entry.command].value : SHORTCUT_DEFAULTS[entry.command];
-        if (matchesShortcut(event, key) && entry.handle(event)) {
+        if (matchesShortcut(event, key) && entry.handle()) {
           event.preventDefault();
           break;
         }

@@ -27,10 +27,13 @@ config file to whole hours from 0 to 720, or use Settings → Inbox to override 
 Reset falls back to the file, then the default, and 0 moves approvals out of Active at once.
 
 Keyboard shortcuts work on desktop and tablet. Press `?` to list them. Settings → Keyboard shortcuts
-changes, turns off or resets a key. In the config file, use
+changes, turns off or resets a key. Ctrl+Shift+P (⌘⇧P on a Mac) opens the command palette; type a
+few letters of a command, move with the arrow keys and press Enter. Firefox keeps that key for a
+private window, so pick another one in Settings there. In the config file, use
 `"keys": { "inbox.next": "j", "file.toggleViewed": "shift+v", "review.snooze": null }`.
-`null` turns a shortcut off. A key is one letter, digit or punctuation character, optionally
-`shift+` with a letter. See [api.md](api.md) for the command ids.
+`null` turns a shortcut off. A key is one letter, digit or punctuation character, or `shift+`,
+`mod+` or `mod+shift+` followed by a letter. `mod` means Ctrl, or ⌘ on a Mac.
+See [api.md](api.md) for the command ids.
 
 ## Publish a doc
 

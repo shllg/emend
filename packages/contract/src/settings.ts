@@ -25,6 +25,7 @@ export const SHORTCUT_DEFAULTS = {
   "review.approve": "shift+a",
   "review.snooze": "z",
   "shortcuts.show": "?",
+  "palette.open": "mod+shift+p",
 } as const;
 
 export const ShortcutCommand = z.enum([
@@ -45,6 +46,7 @@ export const ShortcutCommand = z.enum([
   "review.approve",
   "review.snooze",
   "shortcuts.show",
+  "palette.open",
 ]);
 export type ShortcutCommand = z.infer<typeof ShortcutCommand>;
 
@@ -53,7 +55,8 @@ export const ShortcutKey = z
   .refine(
     (key) =>
       (key.length === 1 && key >= "!" && key <= "~" && !/[A-Z]/.test(key)) ||
-      (key.length === 7 && /^shift\+[a-z]$/.test(key)),
+      (key.length === 7 && /^shift\+[a-z]$/.test(key)) ||
+      ((key.length === 5 || key.length === 11) && /^mod\+(shift\+)?[a-z]$/.test(key)),
     "Invalid shortcut key",
   );
 export type ShortcutKey = z.infer<typeof ShortcutKey>;
@@ -64,6 +67,7 @@ export function normalizeShortcutKey(input: unknown): ShortcutKey | undefined {
   if (typeof input !== "string") return undefined;
   if (input.length === 1 && /^[A-Z]$/.test(input)) return `shift+${input.toLowerCase()}`;
   if (input.length === 7 && /^shift\+[a-z]$/i.test(input)) return input.toLowerCase();
+  if ((input.length === 5 || input.length === 11) && /^mod\+(shift\+)?[a-z]$/i.test(input)) return input.toLowerCase();
   return undefined;
 }
 

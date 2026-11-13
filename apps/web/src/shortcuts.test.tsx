@@ -737,7 +737,12 @@ test("phone layout never handles shortcuts", async () => {
   const history = mount();
   await screen.findByRole("button", { name: "Approve" });
   for (const key of Object.values(SHORTCUT_DEFAULTS))
-    expect(press(key === "shift+a" ? "A" : key, { shiftKey: key === "shift+a" }).defaultPrevented).toBe(false);
+    expect(
+      press(key === "mod+shift+p" ? "P" : key === "shift+a" ? "A" : key, {
+        shiftKey: key === "shift+a" || key === "mod+shift+p",
+        ctrlKey: key === "mod+shift+p",
+      }).defaultPrevented,
+    ).toBe(false);
   expect(history.location.pathname).toBe(`/r/${ids[0]}`);
   expect(screen.queryByRole("alertdialog")).toBeNull();
   expect(writes()).toHaveLength(0);
@@ -781,7 +786,8 @@ test("capture refuses modifiers, named keys and clashes, staying ready for anoth
   await openSettings();
   const button = change("inbox.next");
   for (const [key, options, message] of [
-    ["k", { ctrlKey: true }, "Ctrl, ⌘ and Alt combinations stay with the browser."],
+    ["k", { altKey: true }, "Alt combinations stay with the browser."],
+    ["1", { ctrlKey: true }, "Use Ctrl or ⌘ with one letter."],
     ["Enter", {}, "Use a letter, a digit or a punctuation key."],
     ["k", {}, "Already used by Previous review or pub."],
   ] as const) {
@@ -885,4 +891,19 @@ test("inbox settings wait for a shortcut save before writing the shared settings
   expect(JSON.parse(String(writes("PATCH")[1]?.[1]?.body))).toEqual({ approvedActiveHours: 24 });
   expect(client.getQueryData<SettingsView>(["settings"])?.approvedActiveHours.value).toBe(24);
   expect(press("?").defaultPrevented).toBe(false);
+});
+
+test("capture waits silently for Shift and saves Ctrl+Shift+K as a mod key", async () => {
+  await openSettings();
+  const button = change("palette.open");
+  press("Shift", { shiftKey: true }, button);
+  expect(row("palette.open").queryByRole("alert")).toBeNull();
+  expect(button.textContent).toBe("Press a key…");
+  expect(writes()).toHaveLength(0);
+  press("K", { ctrlKey: true, shiftKey: true }, button);
+  await row("palette.open").findByText("Set here.");
+  expect(JSON.parse(String(writes("PATCH")[0]?.[1]?.body))).toEqual({
+    keys: { "palette.open": { key: "mod+shift+k" } },
+  });
+  expect(client.getQueryData<SettingsView>(["settings"])?.keys.commands["palette.open"].value).toBe("mod+shift+k");
 });
