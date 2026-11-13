@@ -10,7 +10,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { claimDraft } from "../../lib/composer-owner.ts";
 import type { NavigateDiff } from "../../lib/diff-navigation.ts";
 import { draftKey, isAnyDraftSaving, saveDraft } from "../../lib/drafts.ts";
-import { layoutStore } from "../../lib/layout-store.ts";
+import { layoutKey, layoutStore } from "../../lib/layout-store.ts";
 import { viewedState } from "../../lib/viewed-state.ts";
 import { Panes } from "../layout/Panes.tsx";
 import { DiffPane, type DiffPaneProps } from "./DiffPane.tsx";
@@ -929,6 +929,44 @@ test.each(["file", "topic"])("file order stays locked until a %s comment save cl
       expect(option.getAttribute("aria-disabled")).not.toBe("true");
     fireEvent.click(within(order).getByRole("menuitemradio", { name: "A to Z" }));
     expect(layoutStore.getSnapshot().fileOrder).toBe("path");
+  } finally {
+    await act(async () => save.resolve(Response.json({}, { status: 201 })));
+    await waitFor(() => expect(isAnyDraftSaving()).toBe(false));
+  }
+});
+
+test.each(["file", "topic"])("another tab's order waits until a %s comment save closes its composer", async (kind) => {
+  const save = Promise.withResolvers<Response>();
+  const fallback = fetchMock.getMockImplementation() as
+    | ((path: string, init?: RequestInit) => Promise<Response>)
+    | undefined;
+  fetchMock.mockImplementation((path: string, init?: RequestInit) =>
+    path.endsWith("/threads") ? save.promise : fallback?.(path, init),
+  );
+  try {
+    await mount(revision([file("source.ts", { flag: "binary" })]));
+    fireEvent.click(screen.getByRole("button", { name: `Comment on ${kind}` }));
+    const input = screen.getByRole("textbox", { name: "Comment" });
+    fireEvent.change(input, { target: { value: "Pending comment" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
+    await waitFor(() => expect(isAnyDraftSaving()).toBe(true));
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v1/reviews/${reviewId}/threads`,
+      expect.objectContaining({ method: "POST" }),
+    );
+    act(() => {
+      const newValue = JSON.stringify({ ...layoutStore.getSnapshot(), fileOrder: "path" });
+      localStorage.setItem(layoutKey, newValue);
+      window.dispatchEvent(new StorageEvent("storage", { key: layoutKey, newValue, storageArea: localStorage }));
+    });
+    expect(layoutStore.getSnapshot().fileOrder).toBe("path");
+    expect(screen.getByRole("region", { name: "Topic First" })).toBeTruthy();
+    expect(input.isConnected).toBe(true);
+    await act(async () => save.resolve(Response.json({}, { status: 201 })));
+    await waitFor(() => expect(input.isConnected).toBe(false));
+    expect(document.querySelector(".em-composer")).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("region", { name: /^Topic / })).toBeNull());
+    expect(document.querySelector("[data-topic]")).toBeNull();
   } finally {
     await act(async () => save.resolve(Response.json({}, { status: 201 })));
     await waitFor(() => expect(isAnyDraftSaving()).toBe(false));

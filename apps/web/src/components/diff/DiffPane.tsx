@@ -1,4 +1,5 @@
 import { type FileView, OTHER_TOPIC, type RevisionView, type Target } from "@emend/contract";
+import { useIsMutating } from "@tanstack/react-query";
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { claimDraft } from "../../lib/composer-owner.ts";
 import { useDiffCounts } from "../../lib/diff-counts.ts";
@@ -61,6 +62,11 @@ export function DiffPane({
   const [style, setStyle] = useDiffStyle();
   const [wrap, setWrap] = useDiffWrap();
   const [order, setOrder, saving] = useFileOrder();
+  const mutating = useIsMutating() > 0;
+  const [shownOrder, setShownOrder] = useState(order);
+  // Per-call mutate callbacks run synchronously in the success/error dispatch; useIsMutating hears
+  // through TanStack's scheduler later, so apply a held order only after the save's callbacks ran.
+  if (!mutating && shownOrder !== order) setShownOrder(order);
   const { notes } = useLayoutPreferences();
   const [collapsedTopics, setCollapsedTopics] = useTopicFolds(reviewId, revision.seq);
   const [collapsedFiles, setCollapsedFiles] = useViewedCollapse(reviewId, revision);
@@ -95,7 +101,7 @@ export function DiffPane({
   useEffect(() => {
     // The route's scroll retry relies on diff sections rendering in the same commit as this pane.
     onRendered?.();
-  }, [onRendered, collapsedTopics, collapsedFiles, revealedFile, notes, order]);
+  }, [onRendered, collapsedTopics, collapsedFiles, revealedFile, notes, shownOrder]);
   const [active, setActive] = useState<Target | null>(null);
   const onActive = (target: Target | null) => {
     if (target) {
@@ -107,8 +113,8 @@ export function DiffPane({
   };
   const groups = diffGroups(revision);
   const orderedFiles = useMemo(
-    () => diffFiles({ files: revision.files, topics: revision.topics }, order),
-    [revision.files, revision.topics, order],
+    () => diffFiles({ files: revision.files, topics: revision.topics }, shownOrder),
+    [revision.files, revision.topics, shownOrder],
   );
   const lastReachedFile = useRef<string | null>(null);
   useEffect(() => {
@@ -187,10 +193,10 @@ export function DiffPane({
     [...groups.values()].find((group) => group.files.some((item) => item.id === file.id))?.topic.slug;
   const expand = (topic?: string, file?: string) => {
     const changed =
-      (order === "topics" && !!topic && collapsedTopics.has(topic)) ||
+      (shownOrder === "topics" && !!topic && collapsedTopics.has(topic)) ||
       (!!file && (collapsedFiles.has(file) || revealedFile !== file));
     if (file && revealedFile !== file) setRevealedFile(file);
-    if (order === "topics" && topic && collapsedTopics.has(topic))
+    if (shownOrder === "topics" && topic && collapsedTopics.has(topic))
       setCollapsedTopics((previous) => {
         const next = new Set(previous);
         next.delete(topic);
@@ -241,7 +247,7 @@ export function DiffPane({
             ? elementId.slice(11)
             : undefined;
     if (
-      order === "path" &&
+      shownOrder === "path" &&
       topic &&
       !thread &&
       !(element && root.current?.contains(element)) &&
@@ -305,7 +311,7 @@ export function DiffPane({
       isDiffTarget(thread.target) && (thread.placement.status === "unplaced" || !hasSection(thread.placement.location)),
   );
   const topicThreads =
-    order === "path"
+    shownOrder === "path"
       ? [...groups.keys()].flatMap((slug) =>
           revision.threads.filter(
             (thread) =>
@@ -325,7 +331,7 @@ export function DiffPane({
             files={orderedFiles}
             ranks={ranks}
             counts={counts}
-            order={order}
+            order={shownOrder}
             orderLocked={saving}
             onOrder={setOrder}
             style={diffStyle}
@@ -348,7 +354,7 @@ export function DiffPane({
             ))}
           </section>
         )}
-        {order === "path" && (topicThreads.length > 0 || (active?.kind === "topic" && hasSection(active))) && (
+        {shownOrder === "path" && (topicThreads.length > 0 || (active?.kind === "topic" && hasSection(active))) && (
           <section aria-label="Topic comments" data-diff-section className="mb-5 space-y-3 px-3">
             <h3 className="font-semibold">Topic comments</h3>
             {active?.kind === "topic" && hasSection(active) && (
@@ -384,7 +390,7 @@ export function DiffPane({
           <p className="mb-4 text-sm text-neutral-500">No changed files.</p>
         )}
         {(layout === "phone" || narrow !== undefined) &&
-          (order === "path" ? (
+          (shownOrder === "path" ? (
             <div className="px-3 pb-3">
               {orderedFiles.map((file) => (
                 <FileDiff key={file.id} file={file} topicCollapsed={false} {...context} />
