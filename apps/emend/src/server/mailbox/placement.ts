@@ -1,4 +1,5 @@
 import type { Placement, Target } from "@emend/contract";
+import type { PlaceContext } from "@emend/core";
 import type { files, placements, revisions, writeups } from "../../db/schema.ts";
 import type { BlobStore } from "../../store/blobs.ts";
 import { ApiError } from "../http/errors.ts";
@@ -45,6 +46,7 @@ export async function computePlacements(
   };
   let last: WorkLast = null;
   let anchor: typeof files.$inferSelect | undefined;
+  let topicAnchor: PlaceContext["topicAnchor"];
   const result: Pick<typeof placements.$inferInsert, "revisionId" | "status" | "location" | "reason" | "carried">[] =
     [];
   try {
@@ -118,6 +120,10 @@ export async function computePlacements(
               }),
             )
           : undefined;
+      if (index === 0 && target.kind === "topic" && target.part) {
+        const topic = topicText?.get(target.slug);
+        if (topic) topicAnchor = { part: target.part, text: topic[target.part] };
+      }
       let placed: Awaited<ReturnType<Executor>>;
       try {
         placed = await abortable(deps.signal, () =>
@@ -130,7 +136,7 @@ export async function computePlacements(
             files: fileMap,
             topics: new Set(snapshot.topics.map((t) => t.slug)),
             ...(topicText ? { topicText } : {}),
-            threads: [{ id: threadId, target, last, renames: [transition], carried }],
+            threads: [{ id: threadId, target, last, topicAnchor, renames: [transition], carried }],
           }),
         );
       } catch (error) {
@@ -150,6 +156,11 @@ export async function computePlacements(
       if (placement.status === "placed") {
         last = { location: placement.location };
         anchor = current;
+        if (placement.location.kind === "topic" && placement.location.part) {
+          const { slug, part } = placement.location;
+          const topic = topicText?.get(slug);
+          if (topic) topicAnchor = { part, text: topic[part] };
+        }
       }
       carried = next;
     }

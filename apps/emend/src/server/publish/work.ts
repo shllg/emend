@@ -79,6 +79,7 @@ export type Work =
         id: string;
         target: Target;
         last: WorkLast;
+        topicAnchor?: PlaceContext["topicAnchor"];
         renames: Map<string, string | null>[];
         carried?: { path: string | null; side?: "old" | "new" };
       }[];
@@ -309,6 +310,7 @@ export const executeWork: Executor = async (work) => {
           files,
           topics: work.topics,
           topicText: work.topicText,
+          topicAnchor: thread.topicAnchor,
           last:
             thread.last && carriedLocation
               ? {

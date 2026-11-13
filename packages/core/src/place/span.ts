@@ -38,19 +38,18 @@ export function spanCandidates(text: string, target: Quote, withContext = true):
   }));
 }
 
-/** Shared search for block spans and topic parts; stable part IDs require context on every match. */
+/** Shared writeup-span search; callers use a matching block ID only for unchanged text. */
 export function placeTextSpan<B extends Pick<Block, "id" | "text"> & { kind?: Block["kind"] }>(
   blocks: readonly B[],
   target: Span,
-  options: { contextOnly?: boolean } = {},
 ): { status: "placed"; block: B; range: Range } | Extract<Placement, { status: "unplaced" }> {
   const placed = (block: B, range: Range) => ({ status: "placed" as const, block, range });
   const same = blocks.find((block) => block.id === target.blockId);
   if (same) {
     const text = normalizeText(same.text);
     if (same.kind === "diagram") return placed(same, { start: 0, end: text.length });
-    const occurrences = spanCandidates(text, target, options.contextOnly === true);
-    const candidates = options.contextOnly || occurrences.length === 1 ? occurrences : spanCandidates(text, target);
+    const occurrences = spanCandidates(text, target, false);
+    const candidates = occurrences.length === 1 ? occurrences : spanCandidates(text, target);
     if (candidates.length === 1 && candidates[0]) return placed(same, candidates[0]);
   }
 

@@ -12,6 +12,7 @@ import * as payload from "../mailbox/payload.ts";
 import { error } from "../mailbox/test-support.ts";
 import { WorkTimeout, workerExecutor } from "../publish/executor.ts";
 import { publishSlots } from "../publish/lifecycle.ts";
+import { topicQuote, topicQuoteHistory } from "../publish/topic-test-support.ts";
 import { executeWork, serializeRendered } from "../publish/work.ts";
 import {
   bundle,
@@ -87,6 +88,50 @@ test("import refuses a topic quote placed in the wrong original part without wri
   const before = await snapshot(f);
   await error(await f.importRequest("/import", input), 400, "invalid_request");
   expect(await snapshot(f)).toEqual(before);
+});
+test("import replays the same topic quote history as creation and publishing", async () => {
+  const input = ImportBundle.parse(await bundle(f));
+  required(input.threads[0]).target = topicQuote;
+  const revision = required(input.revisions[1]);
+  const writeup = required(input.writeups[1]);
+  for (let index = input.revisions.length; index < topicQuoteHistory.length; index++) {
+    const id = randomUUID();
+    input.revisions.push({ ...revision, id, seq: index + 1 });
+    input.writeups.push({ ...writeup, id: randomUUID(), revisionId: id });
+  }
+  const topic = required(input.topics[0]);
+  input.topics = topicQuoteHistory.map(({ title, summary }, index) => ({
+    ...topic,
+    id: randomUUID(),
+    revisionId: required(input.revisions[index]).id,
+    title,
+    summary,
+  }));
+  expect((await f.importRequest("/import", input)).status).toBe(201);
+  const rows = await f.db.read((q) =>
+    q
+      .select({
+        status: tables.placements.status,
+        location: tables.placements.location,
+        reason: tables.placements.reason,
+      })
+      .from(tables.placements)
+      .innerJoin(
+        tables.revisions,
+        and(eq(tables.revisions.ownerId, f.ownerId), eq(tables.revisions.id, tables.placements.revisionId)),
+      )
+      .where(
+        and(eq(tables.placements.ownerId, f.ownerId), eq(tables.placements.threadId, required(input.threads[0]).id)),
+      )
+      .orderBy(tables.revisions.seq),
+  );
+  expect(rows).toEqual(
+    topicQuoteHistory.map(({ placement }) => ({
+      status: placement.status,
+      location: placement.status === "placed" ? placement.location : null,
+      reason: placement.status === "unplaced" ? placement.reason : null,
+    })),
+  );
 });
 test.each([1, 2])("import charges topic text once per revision for each of %i quote threads", async (count) => {
   const input = ImportBundle.parse(await bundle(f));

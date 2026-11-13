@@ -6,6 +6,7 @@ import {
   type Placement,
   type PlacementLocation,
 } from "@emend/contract";
+import type { PlaceContext } from "@emend/core";
 import type { placements } from "../../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
 import { yieldToLoop } from "../pacing.ts";
@@ -19,7 +20,13 @@ type Thread = ImportBundle["threads"][number];
 type File = ImportBundle["files"][number];
 type Carried = NonNullable<typeof placements.$inferSelect.carried>;
 export type ImportPlacement = Omit<typeof placements.$inferInsert, "ownerId">;
-type State = { thread: Thread; last: PlacementLocation | null; anchor?: File; carried: Carried };
+type State = {
+  thread: Thread;
+  last: PlacementLocation | null;
+  anchor?: File;
+  topicAnchor?: PlaceContext["topicAnchor"];
+  carried: Carried;
+};
 
 function originalLocation(target: Thread["target"], placement: Placement) {
   if (placement.status !== "placed" || target.kind !== placement.location.kind) return false;
@@ -170,8 +177,9 @@ export function importPlacements() {
       if (target.kind === "topic" && target.part) {
         const topic = revision.topicText.get(target.slug);
         if (topic) charge(Buffer.byteLength(topic.title) + Buffer.byteLength(topic.summary));
+        if (created.has(id) && topic) state.topicAnchor = { part: target.part, text: topic[target.part] };
       }
-      workThreads.push({ id, target, last, renames: steps, carried: state.carried });
+      workThreads.push({ id, target, last, topicAnchor: state.topicAnchor, renames: steps, carried: state.carried });
     }
     const work: Work = {
       kind: "place",
@@ -236,6 +244,11 @@ export function importPlacements() {
       });
       if (placement.status === "placed") {
         state.last = placement.location;
+        if (placement.location.kind === "topic" && placement.location.part) {
+          const { slug, part } = placement.location;
+          const topic = revision.topicText.get(slug);
+          if (topic) state.topicAnchor = { part, text: topic[part] };
+        }
         state.anchor =
           carried.path === null
             ? undefined

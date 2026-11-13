@@ -1,5 +1,6 @@
-import type { Placement, PlacementLocation, Target } from "@emend/contract";
+import type { Placement, PlacementLocation, Target, TopicPart } from "@emend/contract";
 import type { Block } from "../render/blocks.ts";
+import { normalizeText } from "../render/normalize.ts";
 import { placeHtmlSpan } from "./html.ts";
 import { type FileSides, placeLines } from "./lines.ts";
 import { placeSpan, placeTextSpan } from "./span.ts";
@@ -18,6 +19,8 @@ export type PlaceContext = {
   renamedFrom: Map<string, string | null>;
   topics: ReadonlySet<string>;
   topicText?: ReadonlyMap<string, { title: string; summary: string }>;
+  /** Text at the last placed revision, or the creation revision before the first placement. */
+  topicAnchor?: { part: TopicPart; text: string };
   last: { location: PlacementLocation; sides?: FileSides } | null;
 };
 
@@ -31,15 +34,17 @@ export function placeThread(target: Target, ctx: PlaceContext): Placement {
       if (target.part === undefined) return { status: "placed", location: { kind: "topic", slug: target.slug } };
       const topic = ctx.topicText?.get(target.slug);
       if (!topic) throw new Error("Missing topic placement text");
+      const { topicAnchor } = ctx;
+      const unchanged =
+        topicAnchor !== undefined && normalizeText(topicAnchor.text) === normalizeText(topic[topicAnchor.part]);
       const result = placeTextSpan(
         (["title", "summary"] as const).map((part) => ({ id: part, text: topic[part] })),
         {
-          blockId: last?.kind === "topic" && last.part ? last.part : target.part,
+          blockId: unchanged ? topicAnchor.part : "",
           quote: target.quote ?? "",
           prefix: target.prefix ?? "",
           suffix: target.suffix ?? "",
         },
-        { contextOnly: true },
       );
       return result.status === "unplaced"
         ? result

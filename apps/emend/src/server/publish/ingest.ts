@@ -8,7 +8,7 @@ import {
   type PublishResponse,
   writeupMarkdown,
 } from "@emend/contract";
-import { composeRenames, decodeText } from "@emend/core";
+import { composeRenames, decodeText, type PlaceContext } from "@emend/core";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import type { Db, Queries } from "../../db/client.ts";
 import { DuplicateReviewKeyError } from "../../db/repo/reviews.ts";
@@ -219,7 +219,19 @@ async function computePublish(
                 )
                 .get()
             : undefined;
-        threadSnapshots.push({ thread, latest, from, carried, anchor });
+        let topicAnchor: PlaceContext["topicAnchor"];
+        if (thread.target.kind === "topic" && thread.target.part) {
+          const topic = await q
+            .select({ title: topics.title, summary: topics.summary })
+            .from(topics)
+            .where(
+              and(eq(topics.ownerId, ownerId), eq(topics.revisionId, from.id), eq(topics.slug, thread.target.slug)),
+            )
+            .get();
+          const part = location.kind === "topic" ? (location.part ?? thread.target.part) : thread.target.part;
+          if (topic) topicAnchor = { part, text: topic[part] };
+        }
+        threadSnapshots.push({ thread, latest, from, carried, anchor, topicAnchor });
       }
       const previousFiles = new Map<string, FileRow[]>();
       for (const revisionId of needed)
@@ -374,7 +386,7 @@ async function computePublish(
       input.base,
     );
     const carriedRows = new Map<string, NonNullable<typeof placements.$inferSelect.carried>>();
-    for (const { thread, latest, from, carried, anchor } of threadSnapshots) {
+    for (const { thread, latest, from, carried, anchor, topicAnchor } of threadSnapshots) {
       let last: WorkLast = latest?.placement.location ? { location: latest.placement.location } : null;
       if (thread.target.kind === "source-lines") {
         const location = last?.location.kind === "source-lines" ? last.location : thread.target;
@@ -411,7 +423,7 @@ async function computePublish(
             ...(await sides(file, next.side ?? thread.target.side)),
           });
       }
-      workThreads.push({ id: thread.id, target: thread.target, last, renames: steps, carried: start });
+      workThreads.push({ id: thread.id, target: thread.target, last, topicAnchor, renames: steps, carried: start });
     }
     let placedRows: Extract<Awaited<ReturnType<Executor>>, { kind: "place" }>["placements"] = [];
     if (workThreads.length) {

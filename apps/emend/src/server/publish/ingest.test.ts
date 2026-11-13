@@ -20,6 +20,7 @@ import { testDb } from "../../db/test-support.ts";
 import { BlobStore } from "../../store/blobs.ts";
 import { WorkTimeout, workerExecutor } from "./executor.ts";
 import { ingest } from "./ingest.ts";
+import { topicQuote, topicQuoteHistory } from "./topic-test-support.ts";
 import { type Executor, executeWork } from "./work.ts";
 
 let f: Awaited<ReturnType<typeof testDb>>;
@@ -216,6 +217,65 @@ test("same key appends a revision, reopens and counts placed and unplaced thread
     approvedRevision: null,
   });
 });
+test.each([false, true])(
+  "topic quotes publish from their last placed text (creation placement: %s)",
+  async (hasPlacement) => {
+    const first = topicQuoteHistory[0];
+    if (!first) throw new Error("Missing snapshot");
+    const body = (title: string, summary: string): PublishRequest => ({
+      ...input(),
+      topics: [{ slug: topicQuote.slug, title, summary, importance: 10 }],
+    });
+    const review = await publish(body(first.title, first.summary));
+    const revision = await f.db.read((q) => q.select().from(revisions).where(eq(revisions.ownerId, f.ownerId)).get());
+    if (!revision) throw new Error("Missing revision");
+    const threadId = randomUUID();
+    await f.db.query(async (q) => {
+      await q.insert(threads).values({
+        id: threadId,
+        ownerId: f.ownerId,
+        reviewId: review.reviewId,
+        createdRevisionId: revision.id,
+        target: topicQuote,
+      });
+      if (hasPlacement && first.placement.status === "placed")
+        await q.insert(placements).values({
+          ownerId: f.ownerId,
+          reviewId: review.reviewId,
+          threadId,
+          revisionId: revision.id,
+          status: "placed",
+          location: first.placement.location,
+        });
+    });
+    for (const { title, summary, placement } of topicQuoteHistory.slice(1)) {
+      const result = await publish(body(title, summary));
+      expect(result).toMatchObject({
+        placed: Number(placement.status === "placed"),
+        unplaced: Number(placement.status === "unplaced"),
+      });
+      const row = await f.db.read((q) =>
+        q
+          .select({ status: placements.status, location: placements.location, reason: placements.reason })
+          .from(placements)
+          .innerJoin(revisions, and(eq(revisions.ownerId, f.ownerId), eq(revisions.id, placements.revisionId)))
+          .where(
+            and(
+              eq(placements.ownerId, f.ownerId),
+              eq(placements.threadId, threadId),
+              eq(revisions.seq, result.revision),
+            ),
+          )
+          .get(),
+      );
+      expect(row).toEqual({
+        status: placement.status,
+        location: placement.status === "placed" ? placement.location : null,
+        reason: placement.status === "unplaced" ? placement.reason : null,
+      });
+    }
+  },
+);
 test("missing, foreign and other-instance review ids are identical; moved reviews refuse", async () => {
   const first = await publish(input());
   const another = randomUUID();
