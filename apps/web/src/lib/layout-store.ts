@@ -12,6 +12,7 @@ export const layoutSchema = z.object({
     .catch({ desktop: "tabs", tablet: "tabs" }),
   readingWidth: z.enum(["comfortable", "wide", "narrow"]).catch("comfortable"),
   compact: z.boolean().catch(false),
+  hideResolved: z.boolean().catch(false),
   diffStyle: z.enum(["split", "unified"]).catch("split"),
   wrap: z.boolean().catch(false),
   notes: z.boolean().catch(true),

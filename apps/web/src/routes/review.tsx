@@ -146,7 +146,18 @@ function Reading({
     activeThreadId,
     threadJump,
   };
-  if (tab === "comments") return <ThreadList {...props} search={search} phone={phone} onResume={onResume} />;
+  if (tab === "comments")
+    return (
+      <ThreadList
+        {...props}
+        writeup={revision.writeup}
+        docs={revision.docs}
+        files={revision.files}
+        search={search}
+        phone={phone}
+        onResume={onResume}
+      />
+    );
   if (tab === "docs")
     return (
       <DocView

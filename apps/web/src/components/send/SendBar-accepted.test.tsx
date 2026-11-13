@@ -213,7 +213,7 @@ test("an accepted Send aborts a pending first revision fetch and loads post-Send
   expect(signals).toHaveLength(1);
   expect(signals[0]?.aborted).toBe(false);
   server = { ...base, unsentCount: 0, pendingSend: true };
-  fireEvent.click(button("Send 1"));
+  fireEvent.click(button("Send"));
   await settle();
   expect(posts).toBe(1);
   expect(signals[0]?.aborted).toBe(true);
@@ -268,7 +268,7 @@ test.each(["Send", "Approve", "refused Send"])(
     await mount();
     mode = "hang";
     if (action === "Approve") approve("Approve revision 3");
-    else fireEvent.click(button("Send 1"));
+    else fireEvent.click(button("Send"));
     await settle();
     expect(posts).toBe(1);
     for (const seq of [1, 2, 3]) {
@@ -324,7 +324,7 @@ test("after a successful approval focus moves to the bar's status, not to the pa
 test("a second Send after closing the window, while the refetch hangs, sends nothing", async () => {
   await mount();
   mode = "hang";
-  fireEvent.click(button("Send 1"));
+  fireEvent.click(button("Send"));
   await settle();
   fireEvent.click(button("Close"));
   await settle();
@@ -350,18 +350,18 @@ test("a refused Send heals the stale bar and revision counts from the server", a
   expect(revisionGets).toBe(1);
   server = { ...base, unsentCount: 0 };
   postAnswer = () => Response.json({ error: { code: "empty_send", message: "Nothing to send." } }, { status: 400 });
-  fireEvent.click(button("Send 1"));
+  fireEvent.click(button("Send"));
   await settle();
   expect(screen.getByRole("alert").textContent).toBe("Nothing to send.");
   expect(button("Send").disabled).toBe(true);
-  expect(screen.queryByRole("button", { name: "Send 1" })).toBeNull();
+  expect(screen.queryByText("1 to send")).toBeNull();
   expect(revisionGets).toBe(2);
   expect(screen.getByText("0 / 1 / 1")).toBeTruthy();
 });
 
 test("a slow but successful inbox does not say the server cannot be reached", async () => {
   await mount(<SlowInbox />);
-  fireEvent.click(button("Send 1"));
+  fireEvent.click(button("Send"));
   await settle();
   await settle(HANDOFF_REFETCH_MS * 2);
   expect(screen.getByText(normalText)).toBeTruthy();
@@ -371,7 +371,7 @@ test("a slow but successful inbox does not say the server cannot be reached", as
 test("an HTTP error such as a 404 does not say the server cannot be reached", async () => {
   await mount();
   mode = "notfound";
-  fireEvent.click(button("Send 1"));
+  fireEvent.click(button("Send"));
   await settle();
   await settle(HANDOFF_REFETCH_MS * 2);
   expect(screen.getByText(normalText)).toBeTruthy();
@@ -381,7 +381,7 @@ test("an HTTP error such as a 404 does not say the server cannot be reached", as
 test("a stalled review fetch says it, and a later success clears it", async () => {
   await mount();
   mode = "hang";
-  fireEvent.click(button("Send 1"));
+  fireEvent.click(button("Send"));
   await settle();
   await settle(HANDOFF_REFETCH_MS);
   expect(screen.getByText(lostText)).toBeTruthy();
@@ -397,7 +397,7 @@ test("a stalled review fetch says it, and a later success clears it", async () =
 test("a network error says the server cannot be reached", async () => {
   await mount();
   mode = "network";
-  fireEvent.click(button("Send 1"));
+  fireEvent.click(button("Send"));
   await settle();
   expect(screen.getByText(lostText)).toBeTruthy();
 });
@@ -406,7 +406,7 @@ test("the window's refetch joins the Send's own refetch instead of cancelling it
   await mount();
   mode = "hang";
   const before = reviewGets;
-  fireEvent.click(button("Send 1"));
+  fireEvent.click(button("Send"));
   await settle();
   // The Send's background refetch started one fetch; the window's ask did not start another.
   expect(reviewGets).toBe(before + 1);
@@ -440,7 +440,7 @@ test.each(["Send", "Approve"] as const)("a fetch that started before the accepte
   const stale = [...held];
   expect(stale.map((fetch) => fetch.url).sort()).toEqual(["/api/v1/reviews", `/api/v1/reviews/${reviewId}`]);
   const activeUntil = new Date(Date.now() + serverOffset + APPROVED_ACTIVE_HOURS * 3_600_000).toISOString();
-  if (kind === "Send") fireEvent.click(button("Send 1"));
+  if (kind === "Send") fireEvent.click(button("Send"));
   else approve("Approve revision 3");
   await settle();
   // Both stale fetches now answer with the data from before the write.
@@ -502,7 +502,7 @@ test.each(["Send", "Approve"] as const)("a fetch that started before the accepte
 test("a manual cache write does not clear the connection-lost wording; a real fetch does", async () => {
   await mount();
   mode = "hang";
-  fireEvent.click(button("Send 1"));
+  fireEvent.click(button("Send"));
   await settle();
   await settle(HANDOFF_REFETCH_MS);
   expect(screen.getByText(lostText)).toBeTruthy();

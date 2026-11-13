@@ -1026,7 +1026,7 @@ test("review route saves a selected doc span, refreshes its thread, sends it, th
   });
   await screen.findByText("1 unsent comment");
   expect((screen.getByRole("button", { name: /^Approve/ }) as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.click(screen.getByRole("button", { name: /^Send(?: \d+)?$/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
   await screen.findByText(/No agent has picked this up yet/);
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
   await waitFor(() => expect(screen.queryByText(/No agent has picked this up yet/)).toBeNull());
@@ -2781,9 +2781,11 @@ test.each([1280, 390])("Comments tab counts threads and updates before the Send 
     fireEvent.pointerLeave(bubble, { pointerType: "mouse" });
   }
   const reading = within(screen.getByRole("region", { name: "Reading" }));
-  expect(within(reading.getByRole("region", { name: "Unsent" })).getAllByRole("article")).toHaveLength(2);
+  const place = reading.getByRole("region", { name: diffTarget.path });
+  expect(place.querySelectorAll('[data-thread-card][data-state="unsent"]')).toHaveLength(2);
+  expect(within(place).getAllByRole("article")).toHaveLength(9);
   expect(reading.getAllByRole("article")).toHaveLength(9);
-  fireEvent.click(screen.getByRole("button", { name: size === 390 ? "Send" : "Send 2" }));
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
   if (size === 390) fireEvent.click(screen.getByRole("button", { name: "Send 2 comments on revision 1" }));
   const dialog = await screen.findByRole(size === 390 ? "dialog" : "alertdialog", { name: "Sent" });
   fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
@@ -2793,7 +2795,7 @@ test.each([1280, 390])("Comments tab counts threads and updates before the Send 
   expect(neutral.className).toContain("bg-active");
   expect(neutral.className).toContain("text-fg-2");
   expect(neutral.className).not.toContain("bg-accent");
-  expect(reading.queryByRole("region", { name: "Unsent" })).toBeNull();
+  expect(place.querySelectorAll('[data-thread-card][data-state="unsent"]')).toHaveLength(0);
   expect(reading.getAllByRole("article")).toHaveLength(9);
   expect(releaseRevision).toBeTypeOf("function");
   expect(client.getQueryState(["revision", id, 1])?.fetchStatus).toBe("fetching");
@@ -3167,12 +3169,12 @@ test("a published revision blocks stale actions even before review metadata catc
   mount(`/r/${id}`);
   await screen.findByText("Overview");
   fireEvent.change(screen.getByLabelText("Instructions"), { target: { value: "Keep this instruction" } });
-  expect((screen.getByRole("button", { name: "Send 2" }) as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(false);
   // newest stays 1 in the metadata fixture; the event is the newest known revision.
   act(() => Events.opened[0]?.emit("publish", { reviewId: id, revision: 2 }));
   const reason = "Revision 2 is newer. Switch to it to send or approve.";
   await screen.findByText(reason);
-  for (const name of ["Send 2", "Approve revision 1"]) {
+  for (const name of ["Send", "Approve revision 1"]) {
     const button = screen.getByRole("button", { name }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     const descriptions = button
@@ -3182,9 +3184,7 @@ test("a published revision blocks stale actions even before review metadata catc
     expect(descriptions).toContain(reason);
   }
   fireEvent.click(screen.getByRole("button", { name: "Show" }));
-  await waitFor(() =>
-    expect((screen.getByRole("button", { name: "Send 2" }) as HTMLButtonElement).disabled).toBe(false),
-  );
+  await waitFor(() => expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(false));
   expect((screen.getByLabelText("Instructions") as HTMLTextAreaElement).value).toBe("Keep this instruction");
 });
 

@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
-import type { RenderedBlock, ReviewView, RevisionView, ThreadView } from "@emend/contract";
+import type { RenderedBlock, ReviewView, RevisionView, Target, ThreadView } from "@emend/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -891,7 +891,7 @@ test("instructions survive navigation to another review and back, then clear aft
   await act(async () => history.back());
   await screen.findByRole("heading", { name: "Synthetic garden" });
   expect(input().value).toBe("Retain the garden instructions");
-  fireEvent.click(screen.getByRole("button", { name: "Send 2" }));
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
   fireEvent.click(await screen.findByRole("button", { name: "Close" }));
   await waitFor(() => expect(input().value).toBe(""));
   await act(async () => history.push(`/r/${other}`));
@@ -1465,8 +1465,8 @@ test.each(
   const thread = placedWriteupThread();
   const editing = kind === "edit";
   if (editing) thread.comments = thread.comments.map((comment) => ({ ...comment, sent: false, sentOn: null }));
-  const beforeGroup = editing ? "Unsent" : "Sent";
-  const afterGroup = editing ? "Unplaced" : "Unsent";
+  const beforeGroup = "Topic 01 · Plant a seed";
+  const afterGroup = editing ? "Unplaced" : beforeGroup;
   const action = editing ? "Edit" : "Reply";
   currentRevision.threads = [thread];
   const original = vi.mocked(fetch).getMockImplementation();
@@ -1529,8 +1529,9 @@ test.each(
   await act(async () => refresh.resolve(Response.json(currentRevision)));
   const after = within(await screen.findByRole("region", { name: afterGroup }));
   const currentButton = after.getByRole("button", { name: action });
-  expect(currentButton.closest("[data-thread-card]")).not.toBe(oldCard);
-  expect(oldCard?.isConnected).toBe(false);
+  const remounted = editing || next === "navigate";
+  expect(currentButton.closest("[data-thread-card]") === oldCard).toBe(!remounted);
+  expect(oldCard?.isConnected).toBe(!remounted);
   if (next === "regroup" || next === "immediate")
     await waitFor(() => expect(document.activeElement).toBe(currentButton));
   else if (next === "focus elsewhere") expect(document.activeElement).toBe(more);
@@ -1600,6 +1601,7 @@ test.each([
         {
           ...thread,
           state: "answered",
+          placement: { status: "unplaced", reason: "block-gone" },
           comments: [
             ...(currentRevision.threads[0]?.comments ?? []).map((comment) => ({ ...comment, sent: true, sentOn: 1 })),
             {
@@ -1616,8 +1618,8 @@ test.each([
     });
     if (next === "timeout") await vi.advanceTimersByTimeAsync(20);
   });
-  if (next === "timeout") expect(screen.getByRole("region", { name: "Answered" })).toBeTruthy();
-  else await screen.findByRole("region", { name: "Answered" });
+  if (next === "timeout") expect(screen.getByRole("region", { name: "Unplaced" })).toBeTruthy();
+  else await screen.findByRole("region", { name: "Unplaced" });
   expect(returned.isConnected).toBe(false);
   expect(document.activeElement).toBe(document.body);
 });
@@ -1656,7 +1658,8 @@ test("whole review threads appear in Comments without a Show in place link", asy
     },
   ];
   mount("?tab=comments");
-  expect(await screen.findByText("Whole review")).toBeTruthy();
+  const group = await screen.findByRole("region", { name: "Whole review" });
+  expect(within(group).getByRole("heading", { name: "Whole review 1" })).toBeTruthy();
   expect(screen.getByText("A synthetic question")).toBeTruthy();
   expect(screen.queryByRole("link", { name: "Show in place" })).toBeNull();
 });
@@ -1672,6 +1675,38 @@ test.each([1280, 390])("Show in place routes to and scrolls a writeup thread at 
   await waitFor(() => expect(scroll.mock.instances).toContain(document.getElementById(`thread-${id}`)));
   expect(screen.queryByRole("textbox", { name: "Reply" })).toBeNull();
 });
+test.each([1280, 390].flatMap((pixels) => (["title", "summary"] as const).map((part) => ({ pixels, part }))))(
+  "Show in place reaches a written topic's $part passage at $pixels px",
+  async ({ pixels, part }) => {
+    width = pixels;
+    const target: Target = {
+      kind: "topic",
+      slug: "seed",
+      part,
+      quote: part === "title" ? "Plant" : "A synthetic",
+      prefix: "",
+      suffix: "",
+    };
+    currentRevision.threads = [
+      {
+        ...placedWriteupThread(),
+        target,
+        placement: {
+          status: "placed",
+          location: { kind: "topic", slug: "seed", part, start: 0, end: target.quote?.length },
+        },
+      },
+    ];
+    const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+    const { history } = mount("?tab=comments&rev=1");
+    fireEvent.click(await screen.findByRole("link", { name: "Show in place" }));
+    await screen.findByRole("heading", { name: "Topic 1: Plant a seed" });
+    expect(searchParams(history).get("tab")).toBe("writeup");
+    expect(searchParams(history).get("rev")).toBe("1");
+    expect(history.location.hash).toBe(`#thread-${id}`);
+    await waitFor(() => expect(scroll.mock.instances).toContain(document.getElementById(`thread-${id}`)));
+  },
+);
 test.each([1280, 390])("Show in place reaches a line thread, using the phone Diff tab at %s px", async (pixels) => {
   layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   width = pixels;

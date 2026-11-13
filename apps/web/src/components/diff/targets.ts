@@ -18,6 +18,15 @@ export function resolveFile(files: FileView[], target: FileLocation) {
   });
   return matches.length === 1 ? matches[0] : undefined;
 }
+export const WRITEUP_SECTION_NAMES = {
+  overview: "Overview",
+  tldr: "TL;DR",
+  outOfScope: "Out of scope",
+  whereToLook: "Where to look",
+  context: "Context",
+  decisions: "Decisions",
+  glossary: "Glossary",
+};
 export function targetLabel(target: Target, topics: TopicMeta[] = []) {
   switch (target.kind) {
     case "writeup-span": {
@@ -25,15 +34,7 @@ export function targetLabel(target: Target, topics: TopicMeta[] = []) {
       const topic = topics.find((topic) => topic.slug === slug);
       const section =
         topic?.title ??
-        Object.entries({
-          overview: "Overview",
-          tldr: "TL;DR",
-          outOfScope: "Out of scope",
-          whereToLook: "Where to look",
-          context: "Context",
-          decisions: "Decisions",
-          glossary: "Glossary",
-        }).find(([key]) => target.blockId.startsWith(`${key}-`))?.[1];
+        Object.entries(WRITEUP_SECTION_NAMES).find(([key]) => target.blockId.startsWith(`${key}-`))?.[1];
       return { label: section ? `Writeup · ${section}` : "Writeup", icon: TextSelect };
     }
     case "doc-span":
