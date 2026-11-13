@@ -36,7 +36,8 @@ resume only from a run at its own commit, to preserve npm provenance. A publishe
 marking from a later HEAD. The planner refuses if the release source commit is ahead of or diverged
 from the planned commit, or `release` already holds an unpublished tag's commit. The source is the
 release head's first parent when its plugin manifest carries a version. Otherwise it is the head
-itself.
+itself. A release head without `plugin/.claude-plugin/plugin.json`, or with a version that is not
+a plain `x.y.z` string, refuses planning.
 
 Once the newest tag is published and contained by `release`, no counted commits means nothing to
 release. An existing target tag or npm version refuses a new version. Release notes group counted
@@ -73,18 +74,17 @@ an in-progress release.
 1. **plan** reads full history, tags and `origin/release`. It checks npm and the release branch
    before choosing a new version or resuming the newest tag's peeled commit. It records the
    previous tag, full SHA and whether this is a resume, uploads the notes and writes the Actions
-   summary.
+   summary. When it plans a release, it also writes stamped plugin and marketplace manifests from
+   the planned commit and uploads them as `release-manifests`.
 2. **verify** checks that SHA through the shared verify workflow: `verify:static`, `verify:test`,
    `verify:build` and `verify:harness` run in parallel on Node 24 and 26, with
    4 Vitest shards per Node version. These are the same checks as the local `pnpm verify` gate.
    `pnpm bench` prints non-gating JSON lines with no timing assertions; CI does not run it.
    `SYNC_BASE` is the previous release tag, so the sync check covers all commits being released.
 3. **build** installs from the frozen lockfile on Node 26, stamps the version into the build
-   checkout, and writes stamped copies of the plugin and marketplace manifests outside that
-   checkout. It builds and packs with pnpm. The root pnpmfile strips private development
-   dependencies; the prepack hook refuses npm packing. `check:package --tarball` checks that exact
-   tarball. The job uploads it with its SHA-512 integrity and file name, and uploads the stamped
-   manifests as `release-manifests`.
+   checkout, builds and packs with pnpm. The root pnpmfile strips private development dependencies;
+   the prepack hook refuses npm packing. `check:package --tarball` checks that exact tarball. The
+   job uploads it with its SHA-512 integrity and file name.
 4. **tag** checks the live release source is an ancestor of or equal to the planned SHA, including
    on reruns that reuse old plan outputs. It reads the plugin manifest at the release head to
    identify a stamp and resolve its first parent. It then creates the lightweight `v<version>` tag.
@@ -101,12 +101,14 @@ an in-progress release.
    15 minutes, until the version is visible.
 6. **mark** first creates a GitHub Release with the saved notes and verified tag, unless that
    release already exists. It checks the stamped manifests against the tagged commit. Each must
-   equal its original with only the release version added. It creates a stamp commit through the
-   Git Data API, using the tagged tree with those two files replaced. Its first parent is the
-   tagged commit. Its second parent is the previous release head when that head is a stamp commit.
-   It then moves `release` to the stamp without force, creating the branch if missing. An already
-   stamped version succeeds without moving anything. A non-fast-forward fails, leaving the release
-   notes available. Plugin users therefore update only after npm is ready.
+   be one JSON document equal to its original with only the release version added, and the original
+   must carry no version. It refuses a version that is not higher than the one `release` carries,
+   unless `release` already carries this version for this commit, which succeeds without moving
+   anything. It creates a stamp commit through the Git Data API, using the tagged tree with those
+   two files replaced. Its first parent is the tagged commit. Its second parent is the previous
+   release head when that head is a stamp commit. It then moves `release` to the stamp without
+   force, creating the branch if missing. A non-fast-forward fails, leaving the release notes
+   available. Plugin users therefore update only after npm is ready.
 
 ## Version in the repository
 
@@ -126,7 +128,9 @@ On main, `plugin/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.jso
 therefore still tracks commits. On `release`, each stamp puts the release version directly after
 the top-level name in both manifests. Claude Code shows that version. Every release is an update
 because every release bumps it. The marketplace plugin entry carries no version: `plugin.json`
-wins, and Claude Code warns when both are set. `check:package` also checks the installed CLI
+wins, and Claude Code warns when both are set (see the
+[marketplace reference](https://code.claude.com/docs/en/plugins/marketplace-reference)).
+`check:package` also checks the installed CLI
 version; `version.test.ts` checks that the two CLI version literals agree.
 
 ## One-time owner setup
@@ -225,11 +229,21 @@ commit created but not reachable from a ref is harmless. Re-running the failed j
 one. Never force `release`.
 
 If GitHub refuses the workflow token's update of `release`, the owner moves it to the stamp commit
-printed in the failed step. Use a token with the `workflow` scope:
+printed in the failed step. Before updating the branch, check that commit:
+
+```sh
+gh api repos/shllg/emend/git/commits/<stamp-sha> --jq '.parents[].sha'
+gh api repos/shllg/emend/compare/v<x.y.z>...<stamp-sha> --jq '.files[].filename'
+```
+
+The parents must list the tagged commit first. The comparison must list only
+`plugin/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`. Then use a token with
+the `workflow` scope and drop the extra scope after the update:
 
 ```sh
 gh auth refresh -s workflow
 gh api --method PATCH repos/shllg/emend/git/refs/heads/release -f sha=<stamp-sha> -F force=false
+gh auth refresh --remove-scopes workflow
 ```
 
 Then re-run the failed jobs. They find `release` already stamped and finish without another move.

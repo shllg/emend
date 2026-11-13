@@ -96,8 +96,7 @@ export function bumpedVersionText(root: string, file: string, version: string): 
   return bumped;
 }
 
-export function versionedManifestText(root: string, file: string, version: string): string {
-  const text = readFileSync(join(root, file), "utf8");
+export function versionedManifestText(text: string, file: string, version: string): string {
   let original: unknown;
   try {
     original = JSON.parse(text);
@@ -119,10 +118,17 @@ export function versionedManifestText(root: string, file: string, version: strin
   throw new ReleaseError(failure);
 }
 
-export function stampPluginManifests(root: string, version: string, outDir: string): void {
+export function stampPluginManifests(root: string, commit: string, version: string, outDir: string): void {
   if (!VERSION_PATTERN.test(version)) throw new ReleaseError("release: version must be plain x.y.z");
-  const plugin = versionedManifestText(root, PLUGIN_MANIFEST, version);
-  const marketplace = versionedManifestText(root, MARKETPLACE_MANIFEST, version);
+  const [plugin, marketplace] = [PLUGIN_MANIFEST, MARKETPLACE_MANIFEST].map((file) => {
+    let text: string;
+    try {
+      text = git(root, ["show", `${commit}:${file}`]);
+    } catch {
+      throw new ReleaseError(`release: could not read ${file} at ${commit}`);
+    }
+    return versionedManifestText(text, file, version);
+  });
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, "plugin.json"), plugin);
   writeFileSync(join(outDir, "marketplace.json"), marketplace);
@@ -262,7 +268,9 @@ function releaseCommit(root: string, ref: string): string {
 }
 
 export function releaseSource(root: string, released: string): string {
-  if (!git(root, ["ls-tree", "--name-only", released, "--", PLUGIN_MANIFEST]).trim()) return released;
+  if (!git(root, ["ls-tree", "--name-only", released, "--", PLUGIN_MANIFEST]).trim()) {
+    throw new ReleaseError(`release: ${PLUGIN_MANIFEST} is missing at ${released}`);
+  }
   const text = git(root, ["show", `${released}:${PLUGIN_MANIFEST}`]);
   let manifest: unknown;
   try {
@@ -271,6 +279,10 @@ export function releaseSource(root: string, released: string): string {
     throw new ReleaseError(`release: ${PLUGIN_MANIFEST} at ${released} is not valid JSON`);
   }
   if (manifest && typeof manifest === "object" && !Array.isArray(manifest) && Object.hasOwn(manifest, "version")) {
+    const version = (manifest as { version: unknown }).version;
+    if (typeof version !== "string" || !VERSION_PATTERN.test(version)) {
+      throw new ReleaseError(`release: ${PLUGIN_MANIFEST} at ${released} must carry a plain x.y.z version`);
+    }
     // Stamp commits keep the tagged source first and the previous stamp second for fast-forward moves.
     try {
       return git(root, ["rev-parse", "--verify", `${released}^1^{commit}`]).trim();
@@ -381,16 +393,16 @@ export async function plan(options: PlanOptions) {
 type Command =
   | { command: "plan"; bump: Bump; notes?: string }
   | { command: "stamp"; version: string }
-  | { command: "manifests"; version: string; outDir: string };
+  | { command: "manifests"; version: string; commit: string; outDir: string };
 const USAGE =
-  "Usage: node scripts/release.ts plan [--bump auto|patch|minor] [--notes <file>] | stamp <x.y.z> | manifests <x.y.z> <dir>";
+  "Usage: node scripts/release.ts plan [--bump auto|patch|minor] [--notes <file>] | stamp <x.y.z> | manifests <x.y.z> <commit> <dir>";
 
 export function parseArgs(args: string[]): Command {
   if (args[0] === "stamp" && args.length === 2 && !args[1].startsWith("-")) {
     return { command: "stamp", version: args[1] };
   }
-  if (args[0] === "manifests" && args.length === 3 && !args[1].startsWith("-") && !args[2].startsWith("-")) {
-    return { command: "manifests", version: args[1], outDir: args[2] };
+  if (args[0] === "manifests" && args.length === 4 && args.slice(1).every((arg) => !arg.startsWith("-"))) {
+    return { command: "manifests", version: args[1], commit: args[2], outDir: args[3] };
   }
   if (args[0] !== "plan") throw new UsageError(USAGE);
   let bump: Bump = "auto";
@@ -413,7 +425,7 @@ if (import.meta.main) {
   try {
     const args = parseArgs(process.argv.slice(2));
     if (args.command === "stamp") stampVersion(root, args.version);
-    else if (args.command === "manifests") stampPluginManifests(root, args.version, args.outDir);
+    else if (args.command === "manifests") stampPluginManifests(root, args.commit, args.version, args.outDir);
     else await plan({ root, ...args, output: process.env.GITHUB_OUTPUT, stdout: console.log });
   } catch (error) {
     const message = error instanceof Error ? error.message.split(/\r?\n/)[0] : String(error);

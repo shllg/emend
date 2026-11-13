@@ -78,8 +78,8 @@ test("tarball, notes and manifests artifacts keep matching upload and download n
     }
   }
   assert.deepEqual(uploads.sort(), [
-    ["build", "release-manifests"],
     ["build", "release-tarball"],
+    ["plan", "release-manifests"],
     ["plan", "release-notes"],
   ]);
   assert.deepEqual(downloads.sort(), [
@@ -211,19 +211,31 @@ test("all artifact uploads overwrite previous attempts in the same run", () => {
   }
 });
 
-test("build writes the manifests with the package version immediately after stamping the build", () => {
-  const build = steps(jobs.get("build") ?? "");
-  const stamp = build.findIndex((step) => step.startsWith('run: node scripts/release.ts stamp "$VERSION"'));
-  assert(stamp >= 0);
-  assert.match(build[stamp + 1], /^run: node scripts\/release.ts manifests "\$VERSION" "\$RUNNER_TEMP\/manifests"\n/);
-  for (const step of [build[stamp], build[stamp + 1]]) {
-    assert.match(step, /^          VERSION: \$\{\{ needs.plan.outputs.version \}\}$/m);
+test("plan stamps the planned commit and uploads manifests only when it plans a release", () => {
+  const plan = steps(jobs.get("plan") ?? "");
+  const planning = plan.findIndex((step) => step.startsWith("id: plan\n"));
+  const stamp = plan.findIndex((step) => step.startsWith('run: node scripts/release.ts manifests "$VERSION" "$SHA"'));
+  const upload = plan.findIndex((step) => step.includes("name: release-manifests"));
+  assert(planning >= 0 && stamp > planning && upload > stamp);
+  assert.match(plan[stamp], /^run: node scripts\/release.ts manifests "\$VERSION" "\$SHA" "\$RUNNER_TEMP\/manifests"\n/);
+  assert.match(plan[stamp], /^          VERSION: \$\{\{ steps.plan.outputs.version \}\}$/m);
+  assert.match(plan[stamp], /^          SHA: \$\{\{ steps.plan.outputs.sha \}\}$/m);
+  assert.match(plan[upload], /^uses: actions\/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 /);
+  for (const step of [plan[stamp], plan[upload]]) {
+    assert.match(step, /^        if: steps.plan.outputs.release == 'true'$/m);
   }
-  for (const job of ["build", "mark"]) {
+  assert(!(jobs.get("plan") ?? "").includes("pnpm"));
+  for (const job of ["plan", "mark"]) {
     const artifact = steps(jobs.get(job) ?? "").find((step) => step.includes("name: release-manifests"));
     assert(artifact);
     assert.match(artifact, /^          path: \$\{\{ runner.temp \}\}\/manifests$/m);
   }
+});
+
+test("build stamps only the package version and uploads no release manifests", () => {
+  const build = jobs.get("build") ?? "";
+  assert.match(build, /run: node scripts\/release.ts stamp "\$VERSION"/);
+  assert(!build.includes("manifests"));
 });
 
 test("tag compares the live release source before accepting or creating a tag and peels annotated tags", () => {
@@ -267,7 +279,13 @@ test("tag and mark resolve a stamp's first parent and refuse manifest or source 
       body,
       /if ! plugin=\$\(gh api -H "Accept: application\/vnd.github.raw\+json" "repos\/\$GH_REPO\/contents\/plugin\/\.claude-plugin\/plugin.json\?ref=\$release_sha"\); then\s+echo "could not read plugin\/\.claude-plugin\/plugin.json at \$release_sha" >&2\s+exit 1/,
     );
-    assert.match(body, /release_version=\$\(jq -r '\.version \/\/ empty' <<< "\$plugin"\)/);
+    assert(!body.includes(".version // empty"));
+    assert(
+      body.includes(
+        String.raw`if ! release_version=$(jq -r 'if has("version") then (.version | select(type == "string" and test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\z"))) // error("invalid version") else "" end' <<< "$plugin"); then`,
+      ),
+    );
+    assert.match(body, /echo "invalid plugin\/\.claude-plugin\/plugin.json at \$release_sha" >&2\s+exit 1/);
     assert.match(body, /source_sha="\$release_sha"\s+if \[ -n "\$release_version" \]; then/);
     assert.match(
       body,
@@ -277,10 +295,10 @@ test("tag and mark resolve a stamp's first parent and refuse manifest or source 
   }
 });
 
-test("mark verifies manifests after creating release notes and before creating the stamp commit", () => {
+test("mark requires one JSON document equal to an unversioned original plus the version before creating a stamp", () => {
   const mark = jobs.get("mark") ?? "";
   const create = mark.indexOf("gh release create");
-  const validation = mark.indexOf("jq -e --arg version");
+  const validation = mark.indexOf("jq -n -e --rawfile raw");
   const tree = mark.indexOf('gh api --method POST "repos/$GH_REPO/git/trees"');
   const commit = mark.indexOf('gh api --method POST "repos/$GH_REPO/git/commits"');
   const move = mark.indexOf('gh api --method PATCH "repos/$GH_REPO/git/refs/heads/release"');
@@ -297,10 +315,30 @@ test("mark verifies manifests after creating release notes and before creating t
   );
   assert(
     stamp.includes(
-      'if ! jq -e --arg version "$VERSION" --argjson original "$original" \'. == ($original + {version: $version})\' "$RUNNER_TEMP/manifests/${path##*/}"; then',
+      'if ! jq -n -e --rawfile raw "$RUNNER_TEMP/manifests/${path##*/}" --argjson original "$original" --arg version "$VERSION" \'($original | has("version") | not) and (($raw | fromjson) == ($original + {version: $version}))\'; then',
     ),
   );
   assert.match(stamp, /echo "stamped manifest does not match \$path at \$SHA with version \$VERSION" >&2\s+exit 1/);
+});
+
+test("mark refuses versions that are not higher after the idempotent exit and before creating a commit", () => {
+  const mark = jobs.get("mark") ?? "";
+  const skip = mark.indexOf("exit 0");
+  const guard = mark.indexOf("sort -V");
+  const commit = mark.indexOf('gh api --method POST "repos/$GH_REPO/git/commits"');
+  assert(skip >= 0 && guard > skip && commit > guard);
+  assert(
+    mark.includes(
+      String.raw`if [ -n "$release_version" ]; then
+              if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
+                [ "$VERSION" = "$release_version" ] ||
+                [ "$(printf '%s\n' "$release_version" "$VERSION" | sort -V | tail -n 1)" != "$VERSION" ]; then
+                echo "release already carries $release_version; refusing $VERSION" >&2
+                exit 1
+              fi
+            fi`,
+    ),
+  );
 });
 
 test("mark uses the tagged tree and only the two stamped blobs without custom commit identity or signature", () => {

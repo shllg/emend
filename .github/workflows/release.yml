@@ -55,6 +55,20 @@ jobs:
           BUMP: ${{ inputs.bump || 'auto' }}
         run: node scripts/release.ts plan --bump "$BUMP" --notes "$RUNNER_TEMP/notes.md"
 
+      - run: node scripts/release.ts manifests "$VERSION" "$SHA" "$RUNNER_TEMP/manifests"
+        if: steps.plan.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+          SHA: ${{ steps.plan.outputs.sha }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.plan.outputs.release == 'true'
+        with:
+          name: release-manifests
+          path: ${{ runner.temp }}/manifests
+          if-no-files-found: error
+          overwrite: true
+
       - name: Release summary
         env:
           RELEASE: ${{ steps.plan.outputs.release }}
@@ -120,9 +134,6 @@ jobs:
       - run: node scripts/release.ts stamp "$VERSION"
         env:
           VERSION: ${{ needs.plan.outputs.version }}
-      - run: node scripts/release.ts manifests "$VERSION" "$RUNNER_TEMP/manifests"
-        env:
-          VERSION: ${{ needs.plan.outputs.version }}
       - run: pnpm build
       - run: pnpm pack --pack-destination "$RUNNER_TEMP/pack"
         working-directory: apps/emend
@@ -144,13 +155,6 @@ jobs:
         with:
           name: release-tarball
           path: ${{ runner.temp }}/pack/*.tgz
-          if-no-files-found: error
-          overwrite: true
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-manifests
-          path: ${{ runner.temp }}/manifests
           if-no-files-found: error
           overwrite: true
 
@@ -177,7 +181,7 @@ jobs:
             echo "could not read plugin/.claude-plugin/plugin.json at $release_sha" >&2
             exit 1
           fi
-          if ! release_version=$(jq -r '.version // empty' <<< "$plugin"); then
+          if ! release_version=$(jq -r 'if has("version") then (.version | select(type == "string" and test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\z"))) // error("invalid version") else "" end' <<< "$plugin"); then
             echo "invalid plugin/.claude-plugin/plugin.json at $release_sha" >&2
             exit 1
           fi
@@ -325,7 +329,7 @@ jobs:
               echo "could not read $path at $SHA" >&2
               exit 1
             fi
-            if ! jq -e --arg version "$VERSION" --argjson original "$original" '. == ($original + {version: $version})' "$RUNNER_TEMP/manifests/${path##*/}"; then
+            if ! jq -n -e --rawfile raw "$RUNNER_TEMP/manifests/${path##*/}" --argjson original "$original" --arg version "$VERSION" '($original | has("version") | not) and (($raw | fromjson) == ($original + {version: $version}))'; then
               echo "stamped manifest does not match $path at $SHA with version $VERSION" >&2
               exit 1
             fi
@@ -337,7 +341,7 @@ jobs:
               echo "could not read plugin/.claude-plugin/plugin.json at $release_sha" >&2
               exit 1
             fi
-            if ! release_version=$(jq -r '.version // empty' <<< "$plugin"); then
+            if ! release_version=$(jq -r 'if has("version") then (.version | select(type == "string" and test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\z"))) // error("invalid version") else "" end' <<< "$plugin"); then
               echo "invalid plugin/.claude-plugin/plugin.json at $release_sha" >&2
               exit 1
             fi
@@ -353,6 +357,14 @@ jobs:
             if [ "$source_sha" = "$SHA" ] && [ "$release_version" = "$VERSION" ]; then
               echo "release already carries $VERSION"
               exit 0
+            fi
+            if [ -n "$release_version" ]; then
+              if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
+                [ "$VERSION" = "$release_version" ] ||
+                [ "$(printf '%s\n' "$release_version" "$VERSION" | sort -V | tail -n 1)" != "$VERSION" ]; then
+                echo "release already carries $release_version; refusing $VERSION" >&2
+                exit 1
+              fi
             fi
             if ! comparison=$(gh api "repos/$GH_REPO/compare/$source_sha...$SHA" --jq .status); then
               echo "could not compare release with $SHA" >&2
