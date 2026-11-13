@@ -159,13 +159,29 @@ export function BlockReader({
     }
     return byBlock;
   }, [threads, targets]);
+  const topicThreads = useMemo(() => {
+    const byTopic = new Map<string, RevisionView["threads"]>();
+    for (const thread of threads) {
+      if (thread.placement.status !== "placed" || thread.placement.location.kind !== "topic") continue;
+      const slug = thread.placement.location.slug;
+      const placed = byTopic.get(slug) ?? [];
+      placed.push(thread);
+      byTopic.set(slug, placed);
+    }
+    return byTopic;
+  }, [threads]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: A revision/review change retires ranges even if the cached blocks and threads are shared.
   useLayoutEffect(() => {
     if (!root.current || !supportsCommentHighlights()) return;
     const blocks: Map<string, Range>[] = [];
-    for (const block of root.current.querySelectorAll<HTMLElement>("[data-block-id]")) {
+    for (const block of root.current.querySelectorAll<HTMLElement>(
+      "[data-block-id], [data-topic-slug][data-topic-part]",
+    )) {
       try {
-        const placed = blockThreads.get(block.dataset.blockId ?? "");
+        const part = block.dataset.topicPart;
+        const placed = part
+          ? topicThreads.get(block.dataset.topicSlug ?? "")
+          : blockThreads.get(block.dataset.blockId ?? "");
         if (!placed) continue;
         const map = mapBlockText(block);
         if (!map) continue;
@@ -173,7 +189,13 @@ export function BlockReader({
         for (const thread of placed) {
           if (thread.state === "resolved" || thread.placement.status !== "placed") continue;
           const location = thread.placement.location;
-          if (location.kind !== "writeup-span" && location.kind !== "doc-span") continue;
+          if (
+            part
+              ? location.kind !== "topic" || location.part !== part
+              : location.kind !== "writeup-span" && location.kind !== "doc-span"
+          )
+            continue;
+          if (!("start" in location) || location.start === undefined || location.end === undefined) continue;
           const range = map(location.start, location.end);
           if (range) ranges.set(thread.id, range);
         }
@@ -188,7 +210,7 @@ export function BlockReader({
       registration?.unregister();
       highlights.current = undefined;
     };
-  }, [blockThreads, revision, reviewId]);
+  }, [blockThreads, topicThreads, revision, reviewId]);
   // Apply the current intent to new registrations too, without remapping text.
   useLayoutEffect(() => highlights.current?.setActiveThread(activeThreadId));
   useEffect(() => {
@@ -227,8 +249,11 @@ export function BlockReader({
         );
         return;
       }
-      const path = targets.get(anchor.blockId);
-      setTarget(path === undefined ? { kind: "writeup-span", ...anchor } : { kind: "doc-span", path, ...anchor });
+      if ("slug" in anchor) setTarget({ kind: "topic", ...anchor });
+      else {
+        const path = targets.get(anchor.blockId);
+        setTarget(path === undefined ? { kind: "writeup-span", ...anchor } : { kind: "doc-span", path, ...anchor });
+      }
       setError("");
     };
     const element = root.current;
@@ -262,6 +287,34 @@ export function BlockReader({
       element?.removeEventListener("keyup", capture);
     };
   }, [composing, targets]);
+  const renderThreads = (placed: RevisionView["threads"]) =>
+    placed.map((thread) => (
+      <div key={thread.id} className="mt-2.5 mb-1.5">
+        <ThreadCard
+          reviewId={reviewId}
+          revision={revision}
+          thread={thread}
+          changedBlocks={changedBlocks}
+          topics={topics}
+        />
+      </div>
+    ));
+  const composer = composing && target && (
+    <Composer
+      reviewId={reviewId}
+      revision={revision}
+      target={target}
+      topics={topics}
+      onSaved={close}
+      onCancel={close}
+      returnFocus={() =>
+        opener.current?.isConnected
+          ? opener.current
+          : (root.current?.closest<HTMLElement>("[data-reading-scroll]") ?? root.current)
+      }
+      wrap={(editor) => <div className="mt-3">{editor}</div>}
+    />
+  );
   const renderBlocks = (blocks: RenderedBlock[], path?: string, decisions = false) =>
     blocks.map((block, index) => (
       <Block
@@ -290,34 +343,9 @@ export function BlockReader({
           }
           jump={threadJump}
         >
-          {blockThreads.get(block.id)?.map((thread) => (
-            <div key={thread.id} className="mt-2.5 mb-1.5">
-              <ThreadCard
-                reviewId={reviewId}
-                revision={revision}
-                thread={thread}
-                changedBlocks={changedBlocks}
-                topics={topics}
-              />
-            </div>
-          ))}
+          {renderThreads(blockThreads.get(block.id) ?? [])}
         </BlockThreads>
-        {composing && target && "blockId" in target && target.blockId === block.id && (
-          <Composer
-            reviewId={reviewId}
-            revision={revision}
-            target={target}
-            topics={topics}
-            onSaved={close}
-            onCancel={close}
-            returnFocus={() =>
-              opener.current?.isConnected
-                ? opener.current
-                : (root.current?.closest<HTMLElement>("[data-reading-scroll]") ?? root.current)
-            }
-            wrap={(editor) => <div className="mt-3">{editor}</div>}
-          />
-        )}
+        {target && "blockId" in target && target.blockId === block.id && composer}
       </Block>
     ));
   return (
@@ -329,6 +357,23 @@ export function BlockReader({
           headingId={`${headingBase}-${index}`}
           changedIn={
             groupBlocks(group).reduce((latest, block) => Math.max(latest, changes.get(block.id) ?? 0), 0) || undefined
+          }
+          onCommentTopic={(slug, from) => openComposer({ kind: "topic", slug }, from)}
+          discussion={
+            group.topic && (
+              <>
+                {target?.kind === "topic" && target.slug === group.topic.slug && composer}
+                <BlockThreads
+                  compact={compact}
+                  reviewId={reviewId}
+                  threads={topicThreads.get(group.topic.slug) ?? []}
+                  composing={composing && target?.kind === "topic" && target.slug === group.topic.slug}
+                  jump={threadJump}
+                >
+                  {renderThreads(topicThreads.get(group.topic.slug) ?? [])}
+                </BlockThreads>
+              </>
+            )
           }
         >
           {group.content}

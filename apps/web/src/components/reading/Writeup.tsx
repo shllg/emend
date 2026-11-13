@@ -100,7 +100,9 @@ export function Writeup({
             <>
               <span>
                 <span className="sr-only">Topic {rank}: </span>
-                {topic.title}
+                <span data-topic-slug={topic.slug} data-topic-part="title" data-block-text={topic.title}>
+                  {topic.title}
+                </span>
               </span>
             </>
           ),
@@ -118,7 +120,14 @@ export function Writeup({
           ),
           meta: (
             <>
-              <p className="em-topic-summary">{topic.summary}</p>
+              <p
+                className="em-topic-summary"
+                data-topic-slug={topic.slug}
+                data-topic-part="summary"
+                data-block-text={topic.summary}
+              >
+                {topic.summary}
+              </p>
               {topic.blastRadius && (
                 <p className="em-topic-blast">
                   Blast radius: <strong>{topic.blastRadius.scope}</strong> — {topic.blastRadius.note}

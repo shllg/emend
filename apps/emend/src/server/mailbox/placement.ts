@@ -1,4 +1,5 @@
 import type { Placement, Target } from "@emend/contract";
+import type { PlaceContext } from "@emend/core";
 import type { files, placements, revisions, writeups } from "../../db/schema.ts";
 import type { BlobStore } from "../../store/blobs.ts";
 import { ApiError } from "../http/errors.ts";
@@ -11,7 +12,7 @@ export type PlacementDeps = { blobs: BlobStore; executor?: Executor; signal?: Ab
 type Snapshot = {
   revision: typeof revisions.$inferSelect;
   files: (typeof files.$inferSelect)[];
-  topics: { slug: string }[];
+  topics: { slug: string; title?: string; summary?: string }[];
   writeup: typeof writeups.$inferSelect | undefined;
 };
 type Carried = NonNullable<typeof placements.$inferSelect.carried>;
@@ -20,7 +21,7 @@ function originalLocation(target: Target, placement: Placement) {
   if (placement.status !== "placed") return false;
   const location = placement.location;
   if (target.kind !== location.kind) return false;
-  for (const key of ["path", "blockId", "side", "slug", "start", "end"] as const)
+  for (const key of ["path", "blockId", "side", "slug", "part", "start", "end"] as const)
     if (key in target && (!(key in location) || Reflect.get(target, key) !== Reflect.get(location, key))) return false;
   return true;
 }
@@ -45,6 +46,7 @@ export async function computePlacements(
   };
   let last: WorkLast = null;
   let anchor: typeof files.$inferSelect | undefined;
+  let topicAnchor: PlaceContext["topicAnchor"];
   const result: Pick<typeof placements.$inferInsert, "revisionId" | "status" | "location" | "reason" | "carried">[] =
     [];
   try {
@@ -109,6 +111,19 @@ export async function computePlacements(
       }
       const writeup = target.kind === "writeup-span" ? (snapshot.writeup?.renderedBlob ?? null) : null;
       if (writeup) await read(writeup);
+      const topicText =
+        target.kind === "topic" && target.part
+          ? new Map(
+              snapshot.topics.map((t) => {
+                if (t.title === undefined || t.summary === undefined) throw new Error("Missing topic placement text");
+                return [t.slug, { title: t.title, summary: t.summary }];
+              }),
+            )
+          : undefined;
+      if (index === 0 && target.kind === "topic" && target.part) {
+        const topic = topicText?.get(target.slug);
+        if (topic) topicAnchor = { part: target.part, text: topic[target.part] };
+      }
       let placed: Awaited<ReturnType<Executor>>;
       try {
         placed = await abortable(deps.signal, () =>
@@ -120,7 +135,8 @@ export async function computePlacements(
             texts,
             files: fileMap,
             topics: new Set(snapshot.topics.map((t) => t.slug)),
-            threads: [{ id: threadId, target, last, renames: [transition], carried }],
+            ...(topicText ? { topicText } : {}),
+            threads: [{ id: threadId, target, last, topicAnchor, renames: [transition], carried }],
           }),
         );
       } catch (error) {
@@ -140,6 +156,11 @@ export async function computePlacements(
       if (placement.status === "placed") {
         last = { location: placement.location };
         anchor = current;
+        if (placement.location.kind === "topic" && placement.location.part) {
+          const { slug, part } = placement.location;
+          const topic = topicText?.get(slug);
+          if (topic) topicAnchor = { part, text: topic[part] };
+        }
       }
       carried = next;
     }

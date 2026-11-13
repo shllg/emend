@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { FilePath } from "./review.ts";
-import { BlockId, FileTarget, ReviewTarget, TopicTarget } from "./target.ts";
+import { FilePath, TopicSlug } from "./review.ts";
+import { BlockId, FileTarget, ReviewTarget, TopicPart } from "./target.ts";
 
 export const UnplacedReason = z.enum([
   "block-gone",
@@ -33,7 +33,23 @@ export const PlacementLocation = z.discriminatedUnion("kind", [
     .object({ kind: z.literal("source-lines"), path: FilePath, start: z.int().positive(), end: z.int().positive() })
     .refine((range) => range.end >= range.start, { path: ["end"], message: "line end must be at least start" }),
   FileTarget,
-  TopicTarget,
+  z
+    .object({
+      kind: z.literal("topic"),
+      slug: TopicSlug,
+      part: TopicPart.optional(),
+      start: z.int().nonnegative().optional(),
+      end: z.int().positive().optional(),
+    })
+    .superRefine((location, ctx) => {
+      const fields = [location.part, location.start, location.end];
+      if (fields.some((value) => value !== undefined) && fields.some((value) => value === undefined)) {
+        ctx.addIssue({ code: "custom", message: "part, start and end must all be present or absent" });
+      }
+      if (location.start !== undefined && location.end !== undefined && location.end <= location.start) {
+        ctx.addIssue({ code: "custom", path: ["end"], message: "span end must be after start" });
+      }
+    }),
   ReviewTarget,
 ]);
 export type PlacementLocation = z.infer<typeof PlacementLocation>;

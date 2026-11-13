@@ -947,12 +947,14 @@ extracted text. Parsed content is reused by format and blob hash, retaining at m
 by the current and previous revision. Each lines thread charges the UTF-8 bytes of its next
 side on every revision, and its previous side only when the two hashes differ, matching the
 equal-hash placement shortcut. Each unique side buffer read/transferred per revision is also
-charged. The worker encodes parsed docs/writeups as bytes and reports their encoded and text
-sizes; the hub keeps those bytes and sends transferred copies for placement. Each shared parsed
-payload's encoded size is charged once per job that sends it, including cache hits.
+charged. Each topic-quote thread charges its topic's title and summary UTF-8 bytes once per
+revision, when the topic exists. The worker encodes parsed docs/writeups as bytes and reports
+their encoded and text sizes; the hub keeps those bytes and sends transferred copies for placement.
+Each shared parsed payload's encoded size is charged once per job that sends it, including cache hits.
 Other worker metadata is counted incrementally as each string's UTF-8 length, plus fixed
 overhead per object (16 bytes), entry (8 bytes) and scalar (8 bytes), including field names,
-targets, anchors, carried paths, rename maps, file paths/hashes, topic slugs and document paths.
+targets, anchors, carried paths, rename maps, file paths/hashes, topic slugs, document paths and,
+when a topic quote is placed, topic titles and summaries.
 Shared objects are counted once per job, as structured clone sends them; accounting never
 builds the job's JSON or parses its content on the main thread. Raw buffers are counted
 separately. Each addition checks the remaining budget first; excess stops with `413 too_large`
@@ -1227,7 +1229,7 @@ open `links` the same way, after checking again that each URL is https, and show
 | `lines` | `path`, `side: "old" | "new"`, `start`, `end`, `lines`, `before`, `after` |
 | `source-lines` | `path`, `start`, `end`, `lines`, `before`, `after` |
 | `file` | `path` |
-| `topic` | `slug` |
+| `topic` | `slug`; for a quote on the title or summary also `part: "title" \| "summary"`, `quote`, `prefix`, `suffix` (all four or none) |
 | `review` | No additional fields. |
 
 Every span quote is non-empty; prefix and suffix may be empty. Line numbers are positive integers,
@@ -1254,9 +1256,17 @@ Locations use the target's `kind`. Span locations contain `start` and `end`
 instead of quote/context; offsets are zero-based UTF-16 indices with an exclusive end greater than
 start, within the normalized block text or HTML document text. Writeup spans retain `blockId`;
 doc spans retain `path` and `blockId`; HTML spans retain `path`. Line locations contain `path`,
-`side`, `start`, `end`, using the same 1-based inclusive convention. Source-line locations omit `side`. File, topic and review locations
-use the same fields as their targets. Placement describes the newest revision; a thread keeps its
-original target separately.
+`side`, `start`, `end`, using the same 1-based inclusive convention. Source-line locations omit `side`.
+Topic locations carry `slug`, plus `part`, `start`, `end` for a quote, with span offsets within the
+normalized title or summary text. File and review locations use the same fields as their targets.
+Placement describes the newest revision; a thread keeps its original target separately.
+A topic quote follows the writeup-span rules, with the topic's title and summary as its blocks.
+The part it was last placed on is the same block only while its normalized text is unchanged.
+There the quote alone places it when it occurs once, otherwise the quote with its prefix and
+suffix when they occur once in that part. Otherwise the quote with its prefix and suffix must
+occur exactly once across the title and summary. A whole-title or whole-summary quote has an
+empty prefix and suffix. Otherwise it is unplaced as `ambiguous` or `block-gone`; a gone topic
+is `topic-gone`.
 
 ### Snooze, retire, delete and the bin
 

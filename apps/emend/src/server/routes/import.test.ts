@@ -12,6 +12,7 @@ import * as payload from "../mailbox/payload.ts";
 import { error } from "../mailbox/test-support.ts";
 import { WorkTimeout, workerExecutor } from "../publish/executor.ts";
 import { publishSlots } from "../publish/lifecycle.ts";
+import { topicQuote, topicQuoteHistory } from "../publish/topic-test-support.ts";
 import { executeWork, serializeRendered } from "../publish/work.ts";
 import {
   bundle,
@@ -39,6 +40,152 @@ beforeEach(async () => {
   });
   f = await importFixture();
   onTestFinished(() => f.cleanup());
+});
+test("import places topic quotes using revision title and summary text", async () => {
+  const input = ImportBundle.parse(await bundle(f));
+  const target = {
+    kind: "topic",
+    slug: "synthetic",
+    part: "title",
+    quote: "topic",
+    prefix: "Synthetic ",
+    suffix: "",
+  } as const;
+  required(input.threads[0]).target = target;
+  required(input.topics[1]).title = "New title";
+  required(input.topics[1]).summary = "Synthetic topic";
+  expect((await f.importRequest("/import", input)).status).toBe(201);
+  for (const [index, part] of ["title", "summary"].entries()) {
+    const row = await f.db.read((q) =>
+      q
+        .select()
+        .from(tables.placements)
+        .where(
+          and(
+            eq(tables.placements.ownerId, f.ownerId),
+            eq(tables.placements.threadId, required(input.threads[0]).id),
+            eq(tables.placements.revisionId, required(input.revisions[index]).id),
+          ),
+        )
+        .get(),
+    );
+    expect(row).toMatchObject({
+      status: "placed",
+      location: { kind: "topic", slug: "synthetic", part, start: 10, end: 15 },
+    });
+  }
+});
+test("import refuses a topic quote placed in the wrong original part without writes", async () => {
+  const input = ImportBundle.parse(await bundle(f));
+  required(input.threads[0]).target = {
+    kind: "topic",
+    slug: "synthetic",
+    part: "title",
+    quote: "summary",
+    prefix: "Synthetic ",
+    suffix: "",
+  };
+  const before = await snapshot(f);
+  await error(await f.importRequest("/import", input), 400, "invalid_request");
+  expect(await snapshot(f)).toEqual(before);
+});
+test("import replays the same topic quote history as creation and publishing", async () => {
+  const input = ImportBundle.parse(await bundle(f));
+  required(input.threads[0]).target = topicQuote;
+  const revision = required(input.revisions[1]);
+  const writeup = required(input.writeups[1]);
+  for (let index = input.revisions.length; index < topicQuoteHistory.length; index++) {
+    const id = randomUUID();
+    input.revisions.push({ ...revision, id, seq: index + 1 });
+    input.writeups.push({ ...writeup, id: randomUUID(), revisionId: id });
+  }
+  const topic = required(input.topics[0]);
+  input.topics = topicQuoteHistory.map(({ title, summary }, index) => ({
+    ...topic,
+    id: randomUUID(),
+    revisionId: required(input.revisions[index]).id,
+    title,
+    summary,
+  }));
+  expect((await f.importRequest("/import", input)).status).toBe(201);
+  const rows = await f.db.read((q) =>
+    q
+      .select({
+        status: tables.placements.status,
+        location: tables.placements.location,
+        reason: tables.placements.reason,
+      })
+      .from(tables.placements)
+      .innerJoin(
+        tables.revisions,
+        and(eq(tables.revisions.ownerId, f.ownerId), eq(tables.revisions.id, tables.placements.revisionId)),
+      )
+      .where(
+        and(eq(tables.placements.ownerId, f.ownerId), eq(tables.placements.threadId, required(input.threads[0]).id)),
+      )
+      .orderBy(tables.revisions.seq),
+  );
+  expect(rows).toEqual(
+    topicQuoteHistory.map(({ placement }) => ({
+      status: placement.status,
+      location: placement.status === "placed" ? placement.location : null,
+      reason: placement.status === "unplaced" ? placement.reason : null,
+    })),
+  );
+});
+test.each([1, 2])("import charges topic text once per revision for each of %i quote threads", async (count) => {
+  const input = ImportBundle.parse(await bundle(f));
+  const thread = required(input.threads[0]);
+  thread.target = {
+    kind: "topic",
+    slug: "synthetic",
+    part: "title",
+    quote: "topic",
+    prefix: "Synthetic ",
+    suffix: "",
+  };
+  input.threads = Array.from({ length: count }, (_, i) => ({ ...thread, id: i ? randomUUID() : thread.id }));
+  for (const topic of input.topics) topic.summary = "界".repeat(200);
+  let metadataBytes = 0;
+  const place = importPlacements();
+  const read = vi.fn(async () => new ArrayBuffer(0));
+  for (const revision of indexImportBundle(ImportBundle.parse(input)).revisions.values())
+    await place(revision, { renderedBlob: "unused", docBlobs: new Map() }, read, async (work) => {
+      chargePlacementMetadata(work, (bytes) => {
+        metadataBytes += bytes;
+      });
+      return executeWork(work);
+    });
+  expect(read).not.toHaveBeenCalled();
+  const textBytes = input.topics.reduce(
+    (total, topic) => total + Buffer.byteLength(topic.title) + Buffer.byteLength(topic.summary),
+    0,
+  );
+  const original = LIMITS.importPlacementBytes;
+  const before = await snapshot(f);
+  const transaction = vi.spyOn(f.db, "transaction");
+  try {
+    Object.assign(LIMITS, { importPlacementBytes: metadataBytes + count * textBytes - 1 });
+    await error(await f.importRequest("/import", input), 413, "too_large");
+    expect(transaction).not.toHaveBeenCalled();
+    expect(await snapshot(f)).toEqual(before);
+    Object.assign(LIMITS, { importPlacementBytes: metadataBytes + count * textBytes });
+    expect((await f.importRequest("/import", input)).status).toBe(201);
+  } finally {
+    Object.assign(LIMITS, { importPlacementBytes: original });
+  }
+});
+test("import placement without topic quotes carries only topic slugs", async () => {
+  const input = await bundle(f);
+  const jobs = vi.fn(required(f.deps.publishExecutor));
+  f.deps.publishExecutor = jobs;
+  expect((await f.importRequest("/import", input)).status).toBe(201);
+  const work = jobs.mock.calls.map(([work]) => work).filter((work) => work.kind === "place");
+  expect(work).toHaveLength(2);
+  for (const job of work) {
+    expect(job.topics).toEqual(new Set(["synthetic"]));
+    expect(job).not.toHaveProperty("topicText");
+  }
 });
 test.each([
   { project: "Orchard", name: "Legacy", expected: "Orchard", existingRepo: true },

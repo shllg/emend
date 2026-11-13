@@ -74,10 +74,12 @@ export type Work =
       texts: Map<string, ArrayBuffer>;
       files: Map<string, SharedSides>;
       topics: Set<string>;
+      topicText?: ReadonlyMap<string, { title: string; summary: string }>;
       threads: {
         id: string;
         target: Target;
         last: WorkLast;
+        topicAnchor?: PlaceContext["topicAnchor"];
         renames: Map<string, string | null>[];
         carried?: { path: string | null; side?: "old" | "new" };
       }[];
@@ -307,6 +309,8 @@ export const executeWork: Executor = async (work) => {
           sources,
           files,
           topics: work.topics,
+          topicText: work.topicText,
+          topicAnchor: thread.topicAnchor,
           last:
             thread.last && carriedLocation
               ? {

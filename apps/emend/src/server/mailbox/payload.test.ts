@@ -6,6 +6,7 @@ import { mailboxFixture } from "./test-support.ts";
 test.each<Target>([
   { kind: "review" },
   { kind: "topic", slug: "synthetic" },
+  { kind: "topic", slug: "synthetic", part: "title", quote: "s", prefix: "", suffix: "" },
   { kind: "file", path: "文.md" },
   { kind: "lines", path: "a.ts", side: "new", start: 1, end: 1, lines: ["\\".repeat(65536)], before: [], after: [] },
   { kind: "source-lines", path: "a.ts", start: 1, end: 1, lines: ["\\".repeat(65536)], before: [], after: [] },
@@ -19,6 +20,31 @@ test.each<Target>([
     );
     expect(payload.commentReserve(target, body) - payload.commentReserve(target, "")).toBe(payload.jsonBytes(body) - 2);
   }
+});
+
+test("a topic quote reserves the longer part name and largest offsets after a move", () => {
+  const target: Target = { kind: "topic", slug: "synthetic", part: "title", quote: "s", prefix: "", suffix: "" };
+  const id = "00000000-0000-4000-8000-000000000000";
+  const body = "A comment";
+  const comment = {
+    id,
+    threadId: id,
+    target,
+    body,
+    history: [],
+    historyTrimmed: true,
+    placement: {
+      status: "placed",
+      location: {
+        kind: "topic",
+        slug: target.slug,
+        part: "summary",
+        start: Number.MAX_SAFE_INTEGER - 1,
+        end: Number.MAX_SAFE_INTEGER,
+      },
+    },
+  };
+  expect(payload.commentReserve(target, body)).toBeGreaterThanOrEqual(payload.jsonBytes(comment) + 1);
 });
 
 test("breaker: Send reserves each thread target once and resets for the next Send", async () => {

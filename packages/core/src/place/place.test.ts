@@ -8,6 +8,181 @@ function context(): PlaceContext {
   return { writeup: [], docs: new Map(), files: new Map(), renamedFrom: new Map(), topics: new Set(), last: null };
 }
 
+const topicQuote = {
+  kind: "topic",
+  slug: "garden",
+  part: "title",
+  quote: "seed",
+  prefix: "Plant a ",
+  suffix: ".",
+} as const;
+test.each([
+  { part: "title", title: "Plant a seed.", summary: "Details", start: 8 },
+  { part: "summary", title: "Details", summary: "Plant a seed.", start: 8 },
+  { part: "title", title: "  Plant\n a  seed.  ", summary: "Details", start: 8 },
+] as const)("places a quote on $part at normalized offset $start", ({ part, title, summary, start }) => {
+  const ctx = { ...context(), topics: new Set(["garden"]), topicText: new Map([["garden", { title, summary }]]) };
+  expect(placeThread({ ...topicQuote, part }, ctx)).toEqual({
+    status: "placed",
+    location: { kind: "topic", slug: "garden", part, start, end: start + 4 },
+  });
+});
+
+test("a topic quote follows its context into the summary when the title keeps only the quoted word", () => {
+  const ctx = context();
+  ctx.topicAnchor = { part: "title", text: "Remove the cache entirely." };
+  ctx.topics = new Set(["garden"]);
+  ctx.topicText = new Map([["garden", { title: "Increase cache capacity.", summary: "Remove the cache entirely." }]]);
+  expect(placeThread({ ...topicQuote, quote: "cache", prefix: "Remove the ", suffix: " entirely." }, ctx)).toEqual({
+    status: "placed",
+    location: { kind: "topic", slug: "garden", part: "summary", start: 11, end: 16 },
+  });
+});
+
+test("a topic quote is block-gone when only its surrounding words changed", () => {
+  const ctx = context();
+  ctx.topicAnchor = { part: "title", text: "Plant a seed." };
+  ctx.topics = new Set(["garden"]);
+  ctx.topicText = new Map([["garden", { title: "Now plant this seed!", summary: "Details" }]]);
+  expect(placeThread(topicQuote, ctx)).toEqual({ status: "unplaced", reason: "block-gone" });
+});
+
+test("one context match in the unchanged last part wins over other quote and context matches", () => {
+  const ctx = context();
+  ctx.topicAnchor = { part: "title", text: "red seed blue seed" };
+  ctx.topics = new Set(["garden"]);
+  ctx.topicText = new Map([["garden", { title: "red seed blue seed", summary: "red seed" }]]);
+  expect(placeThread({ ...topicQuote, prefix: "red ", suffix: "" }, ctx)).toEqual({
+    status: "placed",
+    location: { kind: "topic", slug: "garden", part: "title", start: 4, end: 8 },
+  });
+});
+
+test("a changed title with context in both parts is ambiguous", () => {
+  const ctx = context();
+  ctx.topics = new Set(["garden"]);
+  ctx.topicAnchor = { part: "title", text: "remove the cache entirely." };
+  ctx.topicText = new Map([
+    [
+      "garden",
+      { title: "Do not remove the cache entirely.", summary: "Previous proposal: remove the cache entirely." },
+    ],
+  ]);
+  expect(placeThread({ ...topicQuote, quote: "cache", prefix: "remove the ", suffix: " entirely." }, ctx)).toEqual({
+    status: "unplaced",
+    reason: "ambiguous",
+  });
+});
+
+test.each(["Plant a seed.", "  Plant\n a  seed.  "])(
+  "an unchanged normalized title keeps its quote when the summary also has its context: %s",
+  (title) => {
+    const ctx = context();
+    ctx.topics = new Set(["garden"]);
+    ctx.topicAnchor = { part: "title", text: "Plant a seed." };
+    ctx.topicText = new Map([["garden", { title, summary: "Plant a seed." }]]);
+    expect(placeThread(topicQuote, ctx)).toEqual({
+      status: "placed",
+      location: { kind: "topic", slug: "garden", part: "title", start: 8, end: 12 },
+    });
+  },
+);
+
+test("an unchanged title places by its unique quote alone even without matching context", () => {
+  const ctx = context();
+  ctx.topics = new Set(["garden"]);
+  ctx.topicAnchor = { part: "title", text: "Now plant this seed!" };
+  ctx.topicText = new Map([["garden", { title: "Now plant this seed!", summary: "Plant a seed." }]]);
+  expect(placeThread(topicQuote, ctx)).toEqual({
+    status: "placed",
+    location: { kind: "topic", slug: "garden", part: "title", start: 15, end: 19 },
+  });
+});
+
+test("a changed title places through a globally unique context match", () => {
+  const ctx = context();
+  ctx.topics = new Set(["garden"]);
+  ctx.topicAnchor = { part: "title", text: "Plant a seed." };
+  ctx.topicText = new Map([["garden", { title: "Now Plant a seed.", summary: "The seed grows." }]]);
+  expect(placeThread(topicQuote, ctx)).toEqual({
+    status: "placed",
+    location: { kind: "topic", slug: "garden", part: "title", start: 12, end: 16 },
+  });
+});
+
+test("a whole-title quote in a changed title places when the bare quote is globally unique", () => {
+  const ctx = context();
+  ctx.topics = new Set(["garden"]);
+  ctx.topicAnchor = { part: "title", text: "Plant a seed." };
+  ctx.topicText = new Map([["garden", { title: "Now Plant a seed.", summary: "Details" }]]);
+  expect(placeThread({ ...topicQuote, quote: "Plant a seed.", prefix: "", suffix: "" }, ctx)).toEqual({
+    status: "placed",
+    location: { kind: "topic", slug: "garden", part: "title", start: 4, end: 17 },
+  });
+});
+
+test.each([false, true])("without an anchor neither the target nor last part gets priority (last: %s)", (last) => {
+  const ctx = context();
+  ctx.topics = new Set(["garden"]);
+  ctx.last = last ? { location: { kind: "topic", slug: "garden", part: "title", start: 8, end: 12 } } : null;
+  ctx.topicText = new Map([["garden", { title: "Plant a seed.", summary: "Plant a seed." }]]);
+  expect(placeThread(topicQuote, ctx)).toEqual({ status: "unplaced", reason: "ambiguous" });
+  ctx.topicText = new Map([["garden", { title: "Now plant this seed!", summary: "Details" }]]);
+  expect(placeThread(topicQuote, ctx)).toEqual({ status: "unplaced", reason: "block-gone" });
+});
+
+test("a present topic quote requires its text to be loaded", () => {
+  const ctx = context();
+  ctx.topics = new Set(["garden"]);
+  expect(() => placeThread(topicQuote, ctx)).toThrow("Missing topic placement text");
+  ctx.topicText = new Map();
+  expect(() => placeThread(topicQuote, ctx)).toThrow("Missing topic placement text");
+});
+
+test("topic quotes cannot silently land on other text, topics or writeup blocks", async () => {
+  const ctx = context();
+  ctx.topics = new Set(["garden", "other"]);
+  ctx.topicText = new Map([
+    ["garden", { title: "Plant a flower.", summary: "Different seed." }],
+    ["other", { title: "Plant a seed.", summary: "" }],
+  ]);
+  ctx.writeup = await renderMarkdown("Plant a seed.", "overview");
+  expect(placeThread(topicQuote, ctx)).toEqual({ status: "unplaced", reason: "block-gone" });
+  expect(placeThread({ ...topicQuote, slug: "gone" }, ctx)).toEqual({ status: "unplaced", reason: "topic-gone" });
+  ctx.topicText = new Map([["garden", { title: "Plant a seed. Plant a seed.", summary: "" }]]);
+  expect(placeThread(topicQuote, ctx)).toEqual({ status: "unplaced", reason: "ambiguous" });
+});
+
+test("topic quotes use the last placed part only while its text is unchanged", () => {
+  const ctx = context();
+  ctx.topicAnchor = { part: "title", text: "Plant a seed." };
+  ctx.topics = new Set(["garden"]);
+  ctx.topicText = new Map([["garden", { title: "New title", summary: "Plant a seed." }]]);
+  const moved = placeThread(topicQuote, ctx);
+  expect(moved).toEqual({
+    status: "placed",
+    location: { kind: "topic", slug: "garden", part: "summary", start: 8, end: 12 },
+  });
+  if (moved.status !== "placed") throw new Error("Expected placement");
+  ctx.last = { location: moved.location };
+  ctx.topicAnchor = { part: "summary", text: "Plant a seed." };
+  ctx.topicText = new Map([["garden", { title: "Plant a seed.", summary: "Plant a seed." }]]);
+  expect(placeThread(topicQuote, ctx)).toEqual({
+    status: "placed",
+    location: { kind: "topic", slug: "garden", part: "summary", start: 8, end: 12 },
+  });
+  ctx.topicText = new Map([["garden", { title: "Plant a seed.", summary: "Now Plant a seed." }]]);
+  expect(placeThread(topicQuote, ctx)).toEqual({ status: "unplaced", reason: "ambiguous" });
+  ctx.topicText = new Map([["garden", { title: "Plant a seed.", summary: "The seed grows." }]]);
+  expect(placeThread(topicQuote, ctx)).toEqual({
+    status: "placed",
+    location: { kind: "topic", slug: "garden", part: "title", start: 8, end: 12 },
+  });
+  ctx.last = null;
+  ctx.topicText = new Map([["garden", { title: "Gone", summary: "Plant a seed. Plant a seed." }]]);
+  expect(placeThread(topicQuote, ctx)).toEqual({ status: "unplaced", reason: "ambiguous" });
+});
+
 test("an unreadable HTML document leaves its spans unplaced", () => {
   const ctx = context();
   ctx.docs.set("docs/seed.html", { kind: "html", text: null });
@@ -18,7 +193,7 @@ test("an unreadable HTML document leaves its spans unplaced", () => {
 
 test("review is always placed and topic slugs must still exist", () => {
   const ctx = context();
-  ctx.topics.add("new-garden");
+  ctx.topics = new Set(["new-garden"]);
   expect(placeThread({ kind: "review" }, ctx)).toEqual({ status: "placed", location: { kind: "review" } });
   expect(placeThread({ kind: "topic", slug: "new-garden" }, ctx)).toEqual({
     status: "placed",
