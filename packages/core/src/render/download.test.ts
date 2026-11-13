@@ -2577,7 +2577,11 @@ test.each(["missing source", "unavailable media", "unsupported media", "spent in
 
 test("each single-comment thread yields before building its card", async () => {
   const count = 50;
-  const pause = vi.fn(async () => {});
+  let resumed = 0;
+  const pause = vi.fn(async () => {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    resumed++;
+  });
   const html = await buildCommentsDownload({
     title: "Example",
     details,
@@ -2585,6 +2589,7 @@ test("each single-comment thread yields before building its card", async () => {
     pause,
     threads: emptyThreads({ top: Array.from({ length: count }, (_, i) => sampleThread(`remark ${i}`)) }),
   });
+  expect(resumed).toBe(pause.mock.calls.length);
   expect(threadMarkers(html)).toBe(count);
   expect(pause.mock.calls.length).toBeGreaterThanOrEqual(count);
 });
