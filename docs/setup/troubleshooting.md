@@ -414,7 +414,11 @@ public Origin. That makes pairing and every browser change fail with `403 bad_or
 For that pairing failure, the page says: "Could not pair. Check your connection and try again."
 This is the page's fixed message for a 403 response; it does not show `bad_origin` itself.
 
-Pass `Host` through unchanged, including its port. In nginx, use
+Fix `bad_origin` by passing `Host` through unchanged, including its port, never by changing Origin.
+Never set, strip or rewrite `Origin` in the proxy. emend's Origin check is its only defence against
+requests from sibling names under the same domain. A fixed Origin turns that check off.
+
+In nginx, use
 `proxy_set_header Host $http_host;`, not `$host`, which drops the port. The default `$proxy_host`
 sends the upstream host instead. With Apache, use `ProxyPreserveHost On` for the emend site.
 

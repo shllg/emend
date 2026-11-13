@@ -16,9 +16,11 @@ it ([attach.md](attach.md)) so their agents publish there.
 ```text
 Rules: run the steps yourself and show me what each command printed; before you change an agent's
 permission or sandbox settings (for example ~/.claude/settings.json or ~/.codex/rules/), show me the
-change and wait for my yes; before you change the proxy's configuration, show me the change and
-wait for my yes; give me any command that needs sudo to run myself; never read secrets (tokens,
-.env files, credential stores) or emend's state folder; never open ~/.claude/settings.json whole;
+change and wait for my yes; never open the proxy's configuration files, certificate keys or data
+folder yourself: work from the emend site block I paste with credentials removed, show me the new
+block and give me the commands to apply it; give me any command that needs sudo to run myself;
+never read secrets (tokens, .env files, credential stores) or emend's state folder; never open
+~/.claude/settings.json whole;
 if a dotfiles tool manages a file or link you would change (a symlink into a dotfiles repository,
 stow, chezmoi, home-manager or similar), change its source and tell me how to apply it; never run
 emend pair, attach, detach, config or devices yourself, give me the command instead; never pass
@@ -62,14 +64,20 @@ own address, and its CLI talks to `127.0.0.1`.
 
 Configure your proxy to:
 
+- Serve emend only on HTTPS. Redirect plain HTTP on port 80 to HTTPS; never forward it to emend.
+  A phone that opens the HTTP address could send a pairing secret or code across the network in
+  plain text before emend refuses the request.
 - Forward `https://emend.example.com` to `http://127.0.0.1:3636`, never `localhost`. `localhost`
   can resolve to `::1`, where emend does not listen and another local user could.
 - Pass the `Host` header through unchanged, port included. emend answers hosts outside its
   allowlist with `403 bad_host`. Rewriting it to an allowed host such as `127.0.0.1:3636` makes
   pairing and every browser change fail with `403 bad_origin`: the browser's Origin names the
   public host. emend marks the sign-in cookie `Secure` only for that configured HTTPS host.
+- Never set, strip or rewrite `Origin`. emend's Origin check is its only defence against requests
+  from sibling names under the same domain. A fixed Origin turns that check off.
 - Not buffer responses. The browser's live updates are a server-sent event stream.
-- Not cap request bodies. emend enforces its own limits; attached machines upload whole reviews.
+- Allow request bodies of at least 25 MiB. That is emend's largest request body, a blob upload.
+  emend enforces its own limits; attached machines upload whole reviews.
 
 For Caddy, the Caddyfile site block is:
 
@@ -91,28 +99,34 @@ For nginx, set these in the emend site's proxy configuration:
 ```nginx
 proxy_set_header Host $http_host;
 proxy_buffering off;
-client_max_body_size 0;
+client_max_body_size 32m;
 ```
 
 Use `$http_host`, not `$host`: `$host` drops the port. You also need the site's HTTPS listener,
-certificate and `proxy_pass http://127.0.0.1:3636;`.
+certificate and `proxy_pass http://127.0.0.1:3636;`. The emend server block listens on 443 only.
+Port 80 belongs in a separate block that redirects to HTTPS.
+
+Keep a finite body limit. By default, nginx stores a request body before forwarding it. With no
+limit, any client can fill the hub's disk. The 32 MiB cap allows emend's largest request body.
 
 On Linux, Caddy and nginx come from your distribution's packages. On macOS, both are available
 through Homebrew. Changing a system proxy usually needs `sudo`. Run those commands yourself.
 
 ```text
 Rules: never read secrets (tokens, .env files, credential stores, private keys) or emend's state
-folder; never read the proxy's certificate keys or its data folder; never search for or read whole
-proxy configs; read only the emend site block, or ask me to paste it; if a file shows a credential
-(a token in a tls or dns block, an API key), stop reading, never repeat it, and tell me; before you
-change the proxy's configuration, show me the change and wait for my yes; give me any command that
-needs sudo to run myself; if a dotfiles tool manages a file or link you would change, change its
-source and tell me how to apply it; run no process listing yourself; stay inside your sandbox and
-give me commands that need to run outside it.
+folder; never read the proxy's certificate keys or its data folder; never open the proxy's
+configuration files yourself; work only from the emend site block I paste with credentials
+removed; show me the new block and give me the commands to apply it myself; give me any command
+that needs sudo to run myself; if a dotfiles tool manages the file or link, give me the change to
+its source and tell me how to apply it; run no process listing yourself; stay inside your sandbox
+and give me commands that need to run outside it.
 Ask me which proxy I run and where its emend site lives. Ask me for emend's address and how its
-certificate is trusted. Show me the site change that forwards it to http://127.0.0.1:3636, never
-localhost, preserves Host including its port, streams responses and sets no request body limit.
-Wait for my yes before changing it. Give me any sudo commands to apply the change myself.
+certificate is trusted. Ask me to paste the emend site block with any credential removed, including
+a token in a tls or dns block or an API key. Work from that paste. Show me a new block that serves
+emend only on HTTPS and redirects port 80 to HTTPS. It must forward to http://127.0.0.1:3636, never
+localhost, preserve Host including its port, leave Origin unchanged, stream responses and allow
+request bodies of at least 25 MiB. For nginx, use client_max_body_size 32m. Give me the commands to
+apply the change myself.
 ```
 
 ## 2. Install the service with your address
@@ -156,15 +170,17 @@ On Linux, the unit is `~/.config/systemd/user/emend.service` and the log is
 also receives the requests your proxy forwards, including the reviewer cookie. It can use that
 session from the hub's loopback until you revoke it. A script it leaves in the phone's browser,
 such as a service worker, can keep running after emend is back. It can read reviews and send
-comments, Sends and approvals with the reviewer's cookie.
+comments, Sends and approvals with the reviewer's cookie. A stolen reviewer cookie can also pair
+new devices and machines.
 
 Clear the site's data in the phone's browser to remove that script. Clearing site data does not
-revoke the stolen session. Revoke the device with `emend devices --revoke <id>` and pair again.
+revoke the stolen session. Run `emend devices`. Revoke every device you do not recognize and every
+device that used the address during the window, with `emend devices --revoke <id>`. Then pair again.
 
 This window exists during every service restart or install, during `emend update`, and after a
-crash until the restart. It also exists while the proxy runs without emend: on Linux after you
-log out unless linger is on, and on macOS before you log in. The macOS LaunchAgent runs only in
-your session, while a system proxy starts at boot. After uninstall, the window lasts until you
+crash until the restart. It also exists while the proxy runs whenever you are logged out of the
+hub: on Linux unless linger is on, and on macOS always. The LaunchAgent runs only in your session,
+while a system proxy starts at boot. After uninstall, the window lasts until you
 remove the proxy's emend site. emend cannot remove your proxy's route. Point the proxy at
 `127.0.0.1:3636`, never `localhost`: it can resolve to `::1`, where emend does not listen and
 another local user could. Run the hub on a machine you alone use.
@@ -294,16 +310,18 @@ Update the hub first, then its machines. See [update.md](update.md).
 ## Undo
 
 1. Stop the hub: `emend service uninstall`. This stops the server and deletes its saved options.
-2. Remove the proxy's emend site and reload the proxy. emend cannot remove that route. Until you
+2. If you ran `emend serve --public-url …` in a terminal instead of the service, stop it with
+   Ctrl-C in that terminal, or run `emend stop`.
+3. Remove the proxy's emend site and reload the proxy. emend cannot remove that route. Until you
    do, the risk in step 2's "Why this matters" applies. Run commands that need `sudo` yourself.
-3. To run a loopback-only server again, run `emend service install` with no options after the
+4. To run a loopback-only server again, run `emend service install` with no options after the
    uninstall. It uses `127.0.0.1:3636`, without a public address. Skip this to run no service at
    all.
-4. Revoke a lost phone at once with `emend devices --revoke <id>` on the hub. Revoke your devices
+5. Revoke a lost phone at once with `emend devices --revoke <id>` on the hub. Revoke your devices
    if the hub stays up: `emend devices`, then `emend devices --revoke <id>` for each. Remove the
    emend app from your phone's home screen.
-5. Detach each attached machine with `emend detach` ([attach.md](attach.md#undo)).
-6. The proxy and the name otherwise stay as they were.
+6. Detach each attached machine with `emend detach` ([attach.md](attach.md#undo)).
+7. The proxy and the name otherwise stay as they were.
 
 ## When something goes wrong
 
