@@ -452,3 +452,88 @@ test("legacy unbound admin tokens are adopted before repair and a failed rotatio
     await fixture.cleanup();
   }
 });
+
+test("config with a public origin that has a port allows exactly that host and uses it everywhere", () => {
+  const config = serverConfig("127.0.0.1", 1234, "/synthetic/web", "https://reviewer.example:13636");
+  expect(config.allowedHosts).toEqual(["127.0.0.1:1234", "localhost:1234", "[::1]:1234", "reviewer.example:13636"]);
+  expect(config.appOrigins).toContain("https://reviewer.example:13636");
+  expect(config.appOrigins).not.toContain("https://reviewer.example");
+  expect(config.baseUrl).toBe("https://reviewer.example:13636");
+  expect(config.secureCookieHost).toBe("reviewer.example:13636");
+  // The default HTTPS port is written without the port, as the browser sends it.
+  expect(serverConfig("127.0.0.1", 1234, "/synthetic/web", "https://reviewer.example:443").allowedHosts).toContain(
+    "reviewer.example",
+  );
+});
+
+test("a public origin with a port guards the host, pairs and sets Secure cookies only for that host", async () => {
+  const fixture = await testDb();
+  const stateDir = join(fixture.dir, "port-server");
+  let server: Awaited<ReturnType<typeof startServer>> | undefined;
+  try {
+    server = await startServer({ stateDir, port: 0, publicOrigin: "https://reviewer.example:13636" });
+    const target = new URL(server.url);
+    const send = (host: string, method: string, path: string, headers: Record<string, string> = {}, body?: string) =>
+      new Promise<{ status: number | undefined; headers: Record<string, unknown>; body: string }>((resolve, reject) => {
+        const request = httpRequest(
+          { hostname: target.hostname, port: target.port, path, method, headers: { Host: host, ...headers } },
+          (response) => {
+            let text = "";
+            response.setEncoding("utf8");
+            response.on("data", (chunk) => {
+              text += chunk;
+            });
+            response.on("end", () => resolve({ status: response.statusCode, headers: response.headers, body: text }));
+          },
+        );
+        request.on("error", reject);
+        request.end(body);
+      });
+    for (const host of ["reviewer.example", "reviewer.example:443", "reviewer.example:13637"]) {
+      const refused = await send(host, "GET", "/api/v1/capabilities");
+      expect(refused.status).toBe(403);
+      expect(JSON.parse(refused.body).error.code).toBe("bad_host");
+    }
+    // Before the public origin is ready the saved address stays the loopback one.
+    expect(JSON.parse(await readFile(join(stateDir, "server-url.json"), "utf8"))).toEqual({ baseUrl: server.url });
+    server.setPublicOriginReady(true);
+    expect(JSON.parse(await readFile(join(stateDir, "server-url.json"), "utf8"))).toEqual({
+      baseUrl: "https://reviewer.example:13636",
+    });
+    const secret = (await readFile(join(stateDir, "admin.token"), "utf8")).trim();
+    const json = { "Content-Type": "application/json" };
+    const created = await send(
+      "reviewer.example:13636",
+      "POST",
+      "/api/v1/pairings",
+      { ...json, Authorization: `Bearer ${secret}` },
+      JSON.stringify({ purpose: "device" }),
+    );
+    expect(created.status).toBe(201);
+    const pairing = JSON.parse(created.body) as { url: string };
+    expect(new URL(pairing.url).origin).toBe("https://reviewer.example:13636");
+    const body = JSON.stringify({ secret: new URL(pairing.url).hash.slice(1) });
+    const session = await send("reviewer.example:13636", "POST", "/api/v1/session", json, body);
+    expect(session.status).toBe(204);
+    expect(String(session.headers["set-cookie"])).toContain("Secure");
+    const sameOrigin = await send(
+      "reviewer.example:13636",
+      "POST",
+      "/api/v1/pairings",
+      { ...json, Authorization: `Bearer ${secret}`, Origin: "https://reviewer.example:13636" },
+      JSON.stringify({ purpose: "device" }),
+    );
+    expect(sameOrigin.status).toBe(201);
+    const bareOrigin = await send(
+      "reviewer.example:13636",
+      "POST",
+      "/api/v1/pairings",
+      { ...json, Authorization: `Bearer ${secret}`, Origin: "https://reviewer.example" },
+      JSON.stringify({ purpose: "device" }),
+    );
+    expect(bareOrigin.status).toBe(403);
+  } finally {
+    await server?.close();
+    await fixture.cleanup();
+  }
+});

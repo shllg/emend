@@ -36,7 +36,7 @@ here **before** writing the route. This includes `PublishRequest` (plan task 1.6
   `requestJsonBytes` (1048576 bytes).
 - Every request checks `Host` against `127.0.0.1:<port>`, `localhost:<port>`, `[::1]:<port>`, and
   the listener's actual concrete address, and the tailnet name only when configured with
-  `--tailscale`. Other hosts receive `403 bad_host`. Every non-GET/HEAD request with an Origin
+  `--tailscale` (with `--tailscale-port <n>`, the name and that port, `<name>:<n>`). Other hosts receive `403 bad_host`. Every non-GET/HEAD request with an Origin
   must name an allowed app origin. A non-GET/HEAD request carrying a session cookie must carry
   that Origin; a missing or disallowed origin receives `403 bad_origin`.
 
@@ -864,7 +864,8 @@ The device and its still-live bound tokens are revoked in one transaction; earli
 revocation timestamps are preserved. An agent token has no
 `devices:manage` scope and receives 403 for both device endpoints.
 
-With `emend serve --tailscale`, pairing URLs use the configured Tailscale HTTPS origin; the
+With `emend serve --tailscale`, pairing URLs use the configured Tailscale HTTPS origin (with
+`--tailscale-port <n>`, that origin includes `:<n>`); the
 secret remains exclusively in the fragment. Only that configured tailnet Host is added to
 the allowlist. Session cookies use `Secure` when that Host is requested, including renewal
 and sign-out; loopback HTTP on the same server receives cookies without `Secure`.

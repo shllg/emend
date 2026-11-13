@@ -22,7 +22,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   if (argv.length === 1 && ["--help", "-h"].includes(argv[0] ?? "")) {
     io.stdout(`Usage:
   emend                         Open the review inbox
-  emend serve [--tailscale]      Run the local server
+  emend serve [--tailscale [--tailscale-port <n>]]  Run the local server
   emend stop                     Stop the server emend started
   emend pair [--machine]        Pair a device or machine
   emend attach <link>            Attach this machine to a hub

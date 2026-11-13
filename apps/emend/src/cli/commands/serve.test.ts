@@ -586,3 +586,85 @@ test.each([
     await result;
   }
 });
+
+test("tailscale-port needs tailscale, is digits only and within 1..65535", async () => {
+  expect(parseServeArgs(["--tailscale", "--tailscale-port", "13636"])).toEqual({
+    host: "127.0.0.1",
+    port: 3636,
+    tailscale: true,
+    tailscalePort: 13636,
+  });
+  expect(parseServeArgs(["--tailscale-port", "65535", "--tailscale"])).toMatchObject({ tailscalePort: 65535 });
+  expect(parseServeArgs(["--tailscale", "--tailscale-port", "443"])).toMatchObject({ tailscalePort: 443 });
+  // Existing inputs keep their exact shape.
+  expect(parseServeArgs(["--tailscale"])).toEqual({ host: "127.0.0.1", port: 3636, tailscale: true });
+  for (const value of ["0", "65536", "-1", "1.5", "0443", "1e3", "+443", "abc", "443 ", "123456"])
+    expect(() => parseServeArgs(["--tailscale", "--tailscale-port", value])).toThrow(/--tailscale-port must be/);
+  for (const args of [
+    ["--tailscale", "--tailscale-port"],
+    ["--tailscale", "--tailscale-port", "1", "--tailscale-port", "2"],
+  ])
+    expect(() => parseServeArgs(args)).toThrow();
+  expect(() => parseServeArgs(["--tailscale-port", "13636"])).toThrow("--tailscale-port requires --tailscale.");
+  expect(() => parseServeArgs(["--tailscale-port", "13636", "--port", "4000"])).toThrow(
+    "--tailscale-port requires --tailscale.",
+  );
+  const stderr: string[] = [];
+  expect(
+    await run(["serve", "--tailscale-port", "13636"], { env, stdout: () => {}, stderr: (s) => stderr.push(s) }),
+  ).toBe(2);
+  expect(stderr[0]).toContain("--tailscale-port requires --tailscale.");
+});
+
+test.each([
+  { args: ["--tailscale-port", "13636"], origin: "https://hub.example.ts.net:13636", https: 13636 },
+  { args: ["--tailscale-port", "443"], origin: "https://hub.example.ts.net", https: 443 },
+  { args: [], origin: "https://hub.example.ts.net", https: 443 },
+])("serve with tailscale $args uses $origin and HTTPS port $https", async ({ args, origin, https }) => {
+  const tailscale = await import("../tailscale.ts");
+  vi.spyOn(tailscale, "tailscaleSelf").mockResolvedValue({ dnsName: "hub.example.ts.net" });
+  const ensure = vi
+    .spyOn(tailscale, "ensureTailscaleServe")
+    .mockResolvedValue({ created: true, otherHttpsPorts: false });
+  const remove = vi.spyOn(tailscale, "removeTailscaleServe").mockResolvedValue(undefined);
+  const ready = vi.fn();
+  vi.mocked(startServer).mockImplementation(async (options) => {
+    // The listener never follows the Tailscale port.
+    expect(options).toMatchObject({ host: "127.0.0.1", port: 0, publicOrigin: origin });
+    return { url: "http://127.0.0.1:4000", port: 4000, setPublicOriginReady: ready, close: async () => {} };
+  });
+  const stdout: string[] = [];
+  const printed = Promise.withResolvers<void>();
+  const result = run(["serve", "--port", "0", "--tailscale", ...args], {
+    env,
+    stdout: (s) => {
+      stdout.push(s);
+      printed.resolve();
+    },
+    stderr: () => {},
+  });
+  onTestFinished(async () => {
+    process.emit("SIGTERM");
+    await result;
+  });
+  await printed.promise;
+  expect(stdout).toEqual([`emend: serving ${origin}\n`]);
+  expect(ensure).toHaveBeenCalledOnce();
+  const options = ensure.mock.calls[0]?.[4];
+  if (https === 443) expect(options).toEqual({ fixedPort: false, stateDir: env.EMEND_HOME });
+  else expect(options).toEqual({ fixedPort: false, stateDir: env.EMEND_HOME, httpsPort: https });
+  expect(ready).toHaveBeenCalledWith(true);
+  process.emit("SIGTERM");
+  expect(await result).toBe(0);
+  if (https === 443) expect(remove).toHaveBeenCalledExactlyOnceWith(4000, env, "hub.example.ts.net", env.EMEND_HOME);
+  else
+    expect(remove).toHaveBeenCalledExactlyOnceWith(
+      4000,
+      env,
+      "hub.example.ts.net",
+      env.EMEND_HOME,
+      process.pid,
+      undefined,
+      https,
+    );
+});

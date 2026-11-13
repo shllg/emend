@@ -42,7 +42,7 @@ test.each(["pair", "devices"])("%s without a running server prints one line and 
   expect(f.stdout).toEqual([]);
   expect(f.fetcher).not.toHaveBeenCalled();
 });
-test.each(["http://127.0.0.1:3636", "https://hub.example.ts.net"])(
+test.each(["http://127.0.0.1:3636", "https://hub.example.ts.net", "https://hub.example.ts.net:13636"])(
   "pair prints link, optional hint, code, QR and validity for %s",
   async (origin) => {
     const f = await fixture();

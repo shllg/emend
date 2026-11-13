@@ -10,7 +10,15 @@ export interface TailscaleRoute {
   target: string;
   dnsName: string;
   pid: number;
+  /** HTTPS port of the route; absent means 443, the only shape older emend versions wrote. */
+  httpsPort?: number;
 }
+export const defaultTailscaleHttpsPort = 443;
+export const routeHttpsPort = (route: Pick<TailscaleRoute, "httpsPort">) =>
+  route.httpsPort ?? defaultTailscaleHttpsPort;
+/** The public origin of a route: Tailscale Serve omits the port only for 443. */
+export const tailscaleOrigin = (dnsName: string, httpsPort = defaultTailscaleHttpsPort) =>
+  httpsPort === defaultTailscaleHttpsPort ? `https://${dnsName}` : `https://${dnsName}:${httpsPort}`;
 type Marker = { kind: "missing" | "invalid" } | { kind: "valid"; route: TailscaleRoute };
 const markerPath = (stateDir: string) => join(stateDir, "tailscale-serve.json");
 
@@ -35,7 +43,7 @@ export async function readTailscaleMarker(stateDir: string): Promise<Marker> {
       !value ||
       typeof value !== "object" ||
       Array.isArray(value) ||
-      Object.keys(value).length !== 3 ||
+      !(Object.keys(value).length === 3 || (Object.keys(value).length === 4 && "httpsPort" in value)) ||
       !("target" in value) ||
       typeof value.target !== "string" ||
       !("dnsName" in value) ||
@@ -46,10 +54,29 @@ export async function readTailscaleMarker(stateDir: string): Promise<Marker> {
       value.pid <= 0
     )
       return { kind: "invalid" };
+    // A route on 443 is written without the field; the field exists only for another port.
+    const httpsPort = "httpsPort" in value ? value.httpsPort : undefined;
+    if (
+      "httpsPort" in value &&
+      (typeof httpsPort !== "number" ||
+        !Number.isSafeInteger(httpsPort) ||
+        httpsPort < 1 ||
+        httpsPort > 65535 ||
+        httpsPort === defaultTailscaleHttpsPort)
+    )
+      return { kind: "invalid" };
     const target = /^http:\/\/127\.0\.0\.1:([1-9]\d{0,4})$/.exec(value.target);
     const dnsName = tailscaleDnsName(value.dnsName);
     if (!target || target[0] !== value.target || Number(target[1]) > 65535 || !dnsName) return { kind: "invalid" };
-    return { kind: "valid", route: { target: value.target, dnsName, pid: value.pid } };
+    return {
+      kind: "valid",
+      route: {
+        target: value.target,
+        dnsName,
+        pid: value.pid,
+        ...(typeof httpsPort === "number" ? { httpsPort } : {}),
+      },
+    };
   } catch (error) {
     const mapped = stateAccessError(stateDir, error);
     if (mapped instanceof StateFolderWriteError) {
@@ -69,7 +96,12 @@ export function writeTailscaleMarker(stateDir: string, route: TailscaleRoute): v
   try {
     // Serve creates the state folder; marker persistence must not create it.
     statSync(stateDir);
-    writeSecretFile(markerPath(stateDir), JSON.stringify(route));
+    const { target, dnsName, pid } = route;
+    const httpsPort = routeHttpsPort(route);
+    writeSecretFile(
+      markerPath(stateDir),
+      JSON.stringify({ target, dnsName, pid, ...(httpsPort === defaultTailscaleHttpsPort ? {} : { httpsPort }) }),
+    );
   } catch (error) {
     throw stateAccessError(stateDir, error);
   }
@@ -81,7 +113,8 @@ export async function removeTailscaleMarker(stateDir: string, route: TailscaleRo
     marker.kind !== "valid" ||
     marker.route.target !== route.target ||
     marker.route.dnsName !== route.dnsName ||
-    marker.route.pid !== route.pid
+    marker.route.pid !== route.pid ||
+    routeHttpsPort(marker.route) !== routeHttpsPort(route)
   )
     return;
   try {

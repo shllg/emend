@@ -334,6 +334,8 @@ Could not configure Tailscale Serve. Run `sudo tailscale set --operator=$USER` o
 port 443 of Tailscale Serve already has a setup emend did not make or cannot read; inspect it with `tailscale serve status`.
 ```
 
+With `--tailscale-port <n>`, the lines name that port instead of 443.
+
 Why: Tailscale does not let your user set up Serve, or port 443 already has a route that emend did
 not make. emend never replaces a route it did not make.
 
@@ -348,7 +350,8 @@ Fix:
   uses it and never removes it. Remove it with `sudo tailscale serve --https=443 off` when the
   machine stops being your hub.
 - For the third line, run `tailscale serve status` and decide whether that route is yours. If you
-  keep it, emend cannot serve the hub on port 443 of this machine.
+  keep it, emend cannot serve the hub on port 443 of this machine. Choose another port with
+  `--tailscale-port`: see [hub-tailscale.md](hub-tailscale.md#choose-another-port).
 
 Three more lines come from emend itself:
 
@@ -365,7 +368,12 @@ Three more lines come from emend itself:
 
 One more line is a warning, not an error: `emend: warning: Tailscale Serve also serves other HTTPS
 ports on <hub>.<tailnet>.ts.net; pages there receive emend's sign-in cookie.` Remove the other
-HTTPS routes, or accept that pages there see the cookie.
+HTTPS routes, or accept that pages there see the cookie. The warning covers only Tailscale Serve
+HTTPS routes; any HTTPS service on the same Tailscale name receives the cookie.
+
+An emend version older than `--tailscale-port` never removes a route on a chosen port. After you
+go back to an older version, check `tailscale serve status` and remove that route yourself with
+`tailscale serve --https=<n> off`.
 
 ## emend stop cannot remove a Tailscale route
 

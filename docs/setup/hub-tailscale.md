@@ -75,7 +75,7 @@ emend service install --tailscale
 emend service status
 ```
 
-With `--tailscale`, emend serves the hub on your tailnet through Tailscale Serve on port 443. The
+With `--tailscale`, emend serves the hub on your tailnet through Tailscale Serve on HTTPS port 443, or on the port you choose (below). The
 server itself keeps listening on `127.0.0.1:3636`; Tailscale Serve forwards the HTTPS requests to
 it. Only devices on your tailnet reach the address. You should see `emend: service installed`,
 then `emend: service running (<path>)`. The service log then holds
@@ -87,11 +87,47 @@ the server is too old to be asked.
 
 The service remembers `--tailscale`. `emend service install` without options keeps it.
 
+### Choose another port
+
+Port 443 of your Tailscale name may already serve something else. Then pick another HTTPS port
+for emend:
+
+```sh
+emend service install --tailscale --tailscale-port 13636
+```
+
+`emend serve --tailscale --tailscale-port <n>` takes the same option. The port is a number from 1
+to 65535 and needs `--tailscale`. The hub then
+answers at `https://<hub>.<tailnet>.ts.net:13636`. Pairing links, the QR code and the service log
+use that address. A phone must open it with the port.
+
+The server still listens only on `127.0.0.1:3636`; the port only picks where Tailscale Serve
+listens. Whatever is on port 443, or on other ports, stays untouched. A route on the chosen port
+that emend did not make blocks the setup, as on 443: emend reports it and leaves it alone.
+
+The service remembers the port like `--tailscale`, and `emend service install` without options
+keeps it. To move back to 443, run `emend service install --tailscale`. When you change the port,
+emend removes the route it made on the old port before it sets up the new one. A route you made
+with `sudo` is never removed.
+
+The sign-in cookie does not depend on the port: every page on the same Tailscale name, on any
+HTTPS port, receives it. emend warns when Serve also serves other HTTPS ports on that name. That
+warning covers only Tailscale Serve HTTPS routes. It does not see a Serve TCP passthrough to a
+local TLS server, or a process bound directly to the Tailscale address. Any HTTPS service on the
+same Tailscale name, on any port, receives emend's sign-in cookie. When port 443 of the name
+belongs to something you do not fully trust, put emend on a separate Tailscale name.
+
+An emend version older than this option does not recognise the route record of a chosen port, so
+it never removes that route. After you go back to an older version, check `tailscale serve status`
+and remove the route on the chosen port yourself with `tailscale serve --https=<n> off`.
+
 If Tailscale refuses to let your user set up Serve, run this once as root, then install again:
 
 ```sh
 sudo tailscale serve --bg --https=443 http://127.0.0.1:3636
 ```
+
+With a chosen port, use that port in place of 443 here and in the commands below.
 
 emend uses that route and never removes a route it did not create. The route stays until you run
 `sudo tailscale serve --https=443 off`. Remove it when the machine stops being your hub.

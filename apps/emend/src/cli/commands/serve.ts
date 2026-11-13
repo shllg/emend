@@ -9,12 +9,14 @@ import {
   tailscaleUnavailable,
   waitForTailscaleEscalations,
 } from "../tailscale.ts";
+import { tailscaleOrigin } from "../tailscale-marker.ts";
 
 export class UsageError extends Error {}
 export function parseServeArgs(args: string[]) {
   let host = "127.0.0.1";
   let port = 3636;
   let tailscale = false;
+  let tailscalePort: number | undefined;
   const seen = new Set<string>();
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
@@ -28,10 +30,20 @@ export function parseServeArgs(args: string[]) {
     if (!value) throw new UsageError("Invalid serve options.");
     if (flag === "--host" && /^[a-zA-Z0-9:][a-zA-Z0-9.:-]*$/.test(value)) host = value;
     else if (flag === "--port" && /^\d{1,5}$/.test(value) && Number(value) <= 65535) port = Number(value);
-    else throw new UsageError("Invalid serve options.");
+    else if (flag === "--tailscale-port") {
+      if (!/^[1-9]\d{0,4}$/.test(value) || Number(value) > 65535)
+        throw new UsageError("--tailscale-port must be a whole number from 1 to 65535.");
+      tailscalePort = Number(value);
+    } else throw new UsageError("Invalid serve options.");
   }
+  if (tailscalePort !== undefined && !tailscale) throw new UsageError("--tailscale-port requires --tailscale.");
   if (tailscale && host !== "127.0.0.1") throw new UsageError("--tailscale requires --host 127.0.0.1.");
-  return { host, port, ...(tailscale ? { tailscale: true } : {}) };
+  return {
+    host,
+    port,
+    ...(tailscale ? { tailscale: true } : {}),
+    ...(tailscalePort !== undefined ? { tailscalePort } : {}),
+  };
 }
 export async function serveCommand(
   stateDir: string,
@@ -40,6 +52,7 @@ export async function serveCommand(
   configDir?: string,
 ) {
   const startup = new AbortController();
+  const httpsPort = options.tailscalePort ?? 443;
   let self: Awaited<ReturnType<typeof tailscaleSelf>> = null;
   let server: Awaited<ReturnType<typeof startServer>> | undefined;
   let setup = false;
@@ -62,7 +75,7 @@ export async function serveCommand(
     self = options.tailscale ? await tailscaleSelf(io.env, startup.signal) : null;
     startup.signal.throwIfAborted();
     if (options.tailscale && !self) throw new CliError(tailscaleUnavailable);
-    const publicOrigin = self ? `https://${self.dnsName}` : undefined;
+    const publicOrigin = self ? tailscaleOrigin(self.dnsName, httpsPort) : undefined;
     const starting = startServer({
       stateDir,
       configFile: configDir ? join(configDir, "config.json") : undefined,
@@ -93,7 +106,7 @@ export async function serveCommand(
           // A failed --bg call can still have applied the handler.
           setup = owned;
         },
-        { fixedPort: options.port !== 0, stateDir },
+        { fixedPort: options.port !== 0, stateDir, ...(httpsPort === 443 ? {} : { httpsPort }) },
       );
       setup = result.created || result.owned === true;
       if (stopped) return;
@@ -120,7 +133,19 @@ export async function serveCommand(
         let removalError: string | undefined;
         // Remove an owned proxy before releasing its loopback port to another process.
         try {
-          if (self && setup) await removeTailscaleServe(server.port, io.env, self.dnsName, stateDir);
+          if (self && setup) {
+            if (httpsPort === 443) await removeTailscaleServe(server.port, io.env, self.dnsName, stateDir);
+            else
+              await removeTailscaleServe(
+                server.port,
+                io.env,
+                self.dnsName,
+                stateDir,
+                process.pid,
+                undefined,
+                httpsPort,
+              );
+          }
         } catch (error) {
           removalError = errorLine(error);
         } finally {

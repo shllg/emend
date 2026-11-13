@@ -330,7 +330,8 @@ elif [ "$2" = status ]; then
 elif [ "$2" = --bg ]; then
   /bin/cp ${quote(path)} ${quote(join(f.dir, "marker-at-setup.json"))} 2>/dev/null || :
   if [ -f ${quote(join(f.dir, "deny-setup"))} ]; then printf 'Access denied: operator required' >&2; exit 1; fi
-  printf '{"TCP":{"443":{"HTTPS":true}},"Web":{"${currentDnsName}:443":{"Handlers":{"/":{"Proxy":"%s"}}}}}' "$4" > ${quote(configPath)}
+  https="\${3#--https=}"
+  printf '{"TCP":{"%s":{"HTTPS":true}},"Web":{"${currentDnsName}:%s":{"Handlers":{"/":{"Proxy":"%s"}}}}}' "$https" "$https" "$4" > ${quote(configPath)}
   if [ -f ${quote(join(f.dir, "fail-setup"))} ]; then exit 1; fi
 elif [ "$3" = off ]; then
   if [ -f ${quote(join(f.dir, "fail-off"))} ]; then exit 1; fi
@@ -344,8 +345,16 @@ fi
     stateDir,
     path,
     configPath,
-    setup: () => ensureTailscaleServe(3636, f.env, currentDnsName, undefined, { ...f.options, stateDir }),
-    stop: (port = 3636) => removeTailscaleServe(port, f.env, currentDnsName, stateDir),
+    setup: (httpsPort?: number) =>
+      ensureTailscaleServe(3636, f.env, currentDnsName, undefined, {
+        ...f.options,
+        stateDir,
+        ...(httpsPort ? { httpsPort } : {}),
+      }),
+    stop: (port = 3636, httpsPort?: number) =>
+      httpsPort
+        ? removeTailscaleServe(port, f.env, currentDnsName, stateDir, process.pid, undefined, httpsPort)
+        : removeTailscaleServe(port, f.env, currentDnsName, stateDir),
     args: async () => (await f.calls()).map((call) => call.args),
   };
 }
@@ -1292,4 +1301,213 @@ test.each([
   expect(await result).toBe(state);
   expect(socket.destroy).toHaveBeenCalledTimes(1);
   expect(vi.getTimerCount()).toBe(0);
+});
+
+const chosen = 13636;
+const routeOn = (httpsPort: number, port = 3636) => ({
+  TCP: { [String(httpsPort)]: { HTTPS: true } },
+  Web: { [`${dnsName}:${httpsPort}`]: { Handlers: { "/": { Proxy: `http://127.0.0.1:${port}` } } } },
+});
+const ownershipOn = (httpsPort: number, port = 3636, pid = process.pid) => ({ ...ownership(port, pid), httpsPort });
+
+test("a chosen HTTPS port is used for setup, the marker and the permission hint", async () => {
+  const f = await ownedFake({}, null);
+  expect(await f.setup(chosen)).toMatchObject({ created: true, owned: true });
+  expect(await f.args()).toEqual([
+    ["serve", "status", "--json"],
+    ["serve", "--bg", `--https=${chosen}`, ownership().target],
+  ]);
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownershipOn(chosen));
+  await f.stop(3636, chosen);
+  expect((await f.args()).at(-1)).toEqual(["serve", `--https=${chosen}`, "off"]);
+  await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+
+  const denied = await fake(running, {}, true);
+  await expect(
+    ensureTailscaleServe(3636, denied.env, undefined, undefined, { ...denied.options, httpsPort: chosen }),
+  ).rejects.toMatchObject({
+    message: `Could not configure Tailscale Serve. Run \`sudo tailscale serve --bg --https=${chosen} http://127.0.0.1:3636\` once as root, then try again. emend uses that route and never removes it.`,
+  });
+  const ephemeral = await fake(running, {}, true);
+  await expect(
+    ensureTailscaleServe(41999, ephemeral.env, undefined, undefined, {
+      ...ephemeral.options,
+      httpsPort: chosen,
+      fixedPort: false,
+    }),
+  ).rejects.toMatchObject({ message: expect.stringContaining(`--bg --https=${chosen} http://127.0.0.1:<port>`) });
+});
+
+test.each([0, 65536, 1.5, Number.NaN])(
+  "an invalid HTTPS port %s is refused before Serve is read",
+  async (httpsPort) => {
+    const f = await fake(running);
+    await expect(ensureTailscaleServe(3636, f.env, undefined, undefined, { ...f.options, httpsPort })).rejects.toThrow(
+      "Invalid Tailscale Serve HTTPS port.",
+    );
+    await expect(lstat(join(f.dir, "calls.jsonl"))).rejects.toMatchObject({ code: "ENOENT" });
+  },
+);
+
+test("a foreign or unreadable setup on the chosen port is occupied and left alone", async () => {
+  const foreign = routeOn(chosen, 9999);
+  for (const config of [
+    foreign,
+    { TCP: { [String(chosen)]: { TCPForward: "localhost:9999" } } },
+    { AllowFunnel: { [`${dnsName}:${chosen}`]: true } },
+  ]) {
+    const f = await fake(running, config);
+    await expect(
+      ensureTailscaleServe(3636, f.env, dnsName, undefined, { ...f.options, httpsPort: chosen }),
+    ).rejects.toThrow(
+      `port ${chosen} of Tailscale Serve already has a setup emend did not make or cannot read; inspect it with \`tailscale serve status\`.`,
+    );
+    expect(await f.calls()).toHaveLength(1);
+  }
+});
+
+test("a setup on 443 is not considered when another port is chosen, and a 443 funnel does not block it", async () => {
+  const config = { ...route(9999), AllowFunnel: { [`${dnsName}:443`]: true } };
+  const f = await fake(running, config);
+  expect(await ensureTailscaleServe(3636, f.env, dnsName, undefined, { ...f.options, httpsPort: chosen })).toEqual({
+    created: true,
+    otherHttpsPorts: true,
+  });
+  expect((await f.calls()).map((call) => call.args)).toEqual([
+    ["serve", "status", "--json"],
+    ["serve", "--bg", `--https=${chosen}`, "http://127.0.0.1:3636"],
+  ]);
+  // The chosen port is the one that is not "other".
+  const mine = await fake(running, routeOn(chosen));
+  expect(
+    await ensureTailscaleServe(3636, mine.env, dnsName, undefined, { ...mine.options, httpsPort: chosen }),
+  ).toEqual({
+    created: false,
+    otherHttpsPorts: false,
+  });
+});
+
+test("a same-target route made by root on the chosen port is used and not owned", async () => {
+  const f = await ownedFake(routeOn(chosen), null);
+  expect(await f.setup(chosen)).toMatchObject({ created: false, owned: false });
+  expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+  await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("a crash marker on the chosen port adopts the same route", async () => {
+  const f = await ownedFake(routeOn(chosen), ownershipOn(chosen, 3636, markerPid()));
+  expect(await f.setup(chosen)).toMatchObject({ created: false, owned: true });
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownershipOn(chosen));
+  expect(await f.args()).toEqual([["serve", "status", "--json"]]);
+});
+
+test("a port change removes emend's old route and only that one", async () => {
+  const f = await ownedFake(route(), ownership(3636, markerPid("running")));
+  expect(await f.setup(chosen)).toMatchObject({ created: true, owned: true });
+  expect(await f.args()).toEqual([
+    ["serve", "status", "--json"],
+    ["serve", "status", "--json"],
+    ["serve", "--https=443", "off"],
+    ["serve", "status", "--json"],
+    ["serve", "--bg", `--https=${chosen}`, ownership().target],
+  ]);
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownershipOn(chosen));
+
+  const back = await ownedFake(routeOn(chosen), ownershipOn(chosen, 3636, markerPid("running")));
+  expect(await back.setup()).toMatchObject({ created: true, owned: true });
+  expect((await back.args()).filter((args) => args.includes("off"))).toEqual([["serve", `--https=${chosen}`, "off"]]);
+  expect(JSON.parse(await readFile(back.path, "utf8"))).toEqual(ownership());
+});
+
+test("a port change leaves a route on the old port that is no longer emend's", async () => {
+  const f = await ownedFake(route(9999), ownership(3636, markerPid("running")));
+  expect(await f.setup(chosen)).toMatchObject({ created: true, owned: true });
+  expect((await f.args()).filter((args) => args.includes("off"))).toEqual([]);
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownershipOn(chosen));
+});
+
+test("a port change is refused while another process owns a different loopback port", async () => {
+  const f = await ownedFake(routeOn(chosen, 4000), ownershipOn(chosen, 4000, markerPid("running")));
+  await expect(f.setup()).rejects.toThrow(
+    `another emend server (process 2000000000) serves port ${chosen} of Tailscale Serve; stop that server, then try again.`,
+  );
+  expect((await f.args()).filter((args) => args.includes("off"))).toEqual([]);
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownershipOn(chosen, 4000, 2_000_000_000));
+});
+
+test("stop removes only the route on the marker's port and names its origin", async () => {
+  const both = { TCP: { ...route().TCP, ...routeOn(chosen).TCP }, Web: { ...route().Web, ...routeOn(chosen).Web } };
+  const f = await ownedFake(both, ownershipOn(chosen, 3636, markerPid()));
+  expect(await stopState(f.env)).toEqual({
+    code: 0,
+    stdout: [
+      `emend: no emend server is running; removed the Tailscale Serve route a stopped emend server left at https://${dnsName}:${chosen}\n`,
+    ],
+    stderr: [],
+  });
+  expect(await f.args()).toEqual([
+    ["serve", "status", "--json"],
+    ["serve", `--https=${chosen}`, "off"],
+  ]);
+  await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+  // The 443 route stays: nothing here touched it.
+  expect(JSON.parse(await readFile(f.configPath, "utf8"))).toEqual({});
+});
+
+test("stop names the chosen port when a stale-route removal fails", async () => {
+  const marker = ownershipOn(chosen, 3636, markerPid());
+  const f = await ownedFake(routeOn(chosen), marker);
+  await writeFile(join(f.dir, "fail-off"), "");
+  expect(await stopState(f.env)).toEqual({
+    code: 1,
+    stdout: [],
+    stderr: [
+      `emend: no emend server is running, but removing the Tailscale Serve route it left at https://${dnsName}:${chosen} failed: Could not configure Tailscale Serve.\n`,
+    ],
+  });
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(marker);
+});
+
+test("stop leaves a chosen-port marker's route alone when only 443 holds the target", async () => {
+  const f = await ownedFake(route(), ownershipOn(chosen, 3636, markerPid()));
+  const result = await removeStaleTailscaleServe(f.stateDir, f.env);
+  expect(result).toEqual({ removed: false });
+  expect((await f.args()).filter((args) => args.includes("off"))).toEqual([]);
+  await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("the marker accepts the three-key and the four-key shape and nothing else", async () => {
+  const valid = [ownership(), ownershipOn(chosen), ownershipOn(1), ownershipOn(65535)];
+  for (const marker of valid) {
+    const f = await ownedFake({}, marker);
+    const read = await readTailscaleMarker(f.stateDir);
+    expect(read).toMatchObject({ kind: "valid", route: marker });
+  }
+  const invalid = [
+    ownershipOn(443),
+    ownershipOn(0),
+    ownershipOn(65536),
+    ownershipOn(1.5),
+    { ...ownership(), httpsPort: "13636" },
+    { ...ownership(), httpsPort: null },
+    { ...ownership(), other: chosen },
+    { ...ownershipOn(chosen), extra: true },
+  ];
+  for (const marker of invalid) {
+    const f = await ownedFake({}, marker);
+    expect(await readTailscaleMarker(f.stateDir)).toEqual({ kind: "invalid" });
+  }
+});
+
+test("the marker removal and the writer compare and write the port", async () => {
+  const f = await ownedFake({}, ownershipOn(chosen));
+  await markers.removeTailscaleMarker(f.stateDir, ownership());
+  expect(await readTailscaleMarker(f.stateDir)).toMatchObject({ kind: "valid" });
+  await markers.removeTailscaleMarker(f.stateDir, ownershipOn(443));
+  expect(await readTailscaleMarker(f.stateDir)).toMatchObject({ kind: "valid" });
+  markers.writeTailscaleMarker(f.stateDir, { ...ownership(), httpsPort: 443 });
+  expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual(ownership());
+  markers.writeTailscaleMarker(f.stateDir, ownershipOn(chosen));
+  await markers.removeTailscaleMarker(f.stateDir, ownershipOn(chosen));
+  await expect(lstat(f.path)).rejects.toMatchObject({ code: "ENOENT" });
 });

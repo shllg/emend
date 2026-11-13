@@ -10,13 +10,15 @@ import {
   loopbackState,
   readTailscaleMarker,
   removeTailscaleMarker,
+  routeHttpsPort,
   type TailscaleRoute,
   tailscaleDnsName,
+  tailscaleOrigin,
   writeTailscaleMarker,
 } from "./tailscale-marker.ts";
 
-const occupied =
-  "port 443 of Tailscale Serve already has a setup emend did not make or cannot read; inspect it with `tailscale serve status`.";
+const occupied = (httpsPort: number) =>
+  `port ${httpsPort} of Tailscale Serve already has a setup emend did not make or cannot read; inspect it with \`tailscale serve status\`.`;
 const unreadable = "could not read the output of tailscale status.";
 export const tailscaleUnavailable = "Tailscale is not running or not logged in.";
 class TailscaleSetupDenied extends CliError {}
@@ -33,6 +35,8 @@ interface RunOptions {
   fixedPort?: boolean;
 }
 interface ServeOptions extends RunOptions {
+  /** HTTPS port of Tailscale Serve to use; 443 when absent. */
+  httpsPort?: number;
   stateDir?: string;
   lock?: TailscaleLockOptions;
 }
@@ -76,9 +80,10 @@ async function execute(
   return new Promise((resolve, reject) => {
     const serve = args[0] === "serve";
     const failure = (stderr = "") => {
+      const https = args.find((arg) => /^--https=\d+$/.test(arg)) ?? "--https=443";
       const setupHint = fixedPort
-        ? ` Run \`sudo tailscale serve --bg --https=443 ${args[3]}\` once as root, then try again. emend uses that route and never removes it.`
-        : " Use a fixed --port, run `sudo tailscale serve --bg --https=443 http://127.0.0.1:<port>` once as root with that port, then try again.";
+        ? ` Run \`sudo tailscale serve --bg ${https} ${args[3]}\` once as root, then try again. emend uses that route and never removes it.`
+        : ` Use a fixed --port, run \`sudo tailscale serve --bg ${https} http://127.0.0.1:<port>\` once as root with that port, then try again.`;
       const denied = serve && /permission|access denied|not permitted|sudo tailscale|operator/i.test(stderr);
       const hint = denied
         ? args[1] === "--bg"
@@ -221,7 +226,12 @@ export async function tailscaleSelf(
   return dnsName ? { dnsName } : null;
 }
 /** Unknown shapes are occupied: never repair or replace someone else's Serve config. */
-function handlerState(config: unknown, target: string, dnsName?: string): "empty" | "same" | "occupied" {
+function handlerState(
+  config: unknown,
+  target: string,
+  dnsName?: string,
+  httpsPort = 443,
+): "empty" | "same" | "occupied" {
   if (
     !record(config) ||
     Object.keys(config).some((key) => !["TCP", "Web", "Services", "AllowFunnel", "Foreground"].includes(key))
@@ -234,7 +244,7 @@ function handlerState(config: unknown, target: string, dnsName?: string): "empty
     if (!record(config.AllowFunnel)) return "occupied";
     for (const [host, allowed] of Object.entries(config.AllowFunnel)) {
       if (!/^[a-z0-9.-]+:[1-9]\d{0,4}$/.test(host) || typeof allowed !== "boolean") return "occupied";
-      if (allowed && (dnsName ? host === `${dnsName}:443` : host.endsWith(":443"))) return "occupied";
+      if (allowed && (dnsName ? host === `${dnsName}:${httpsPort}` : host.endsWith(`:${httpsPort}`))) return "occupied";
     }
   }
   if (config.TCP !== undefined && !record(config.TCP)) return "occupied";
@@ -249,8 +259,8 @@ function handlerState(config: unknown, target: string, dnsName?: string): "empty
     Object.entries(web).some(([host, handler]) => !/^[a-z0-9.-]+:[1-9]\d{0,4}$/.test(host) || !record(handler))
   )
     return "occupied";
-  const endpoints = Object.entries(web).filter(([host]) => host.endsWith(":443"));
-  const listener = tcp["443"];
+  const endpoints = Object.entries(web).filter(([host]) => host.endsWith(`:${httpsPort}`));
+  const listener = tcp[String(httpsPort)];
   if (listener === undefined && endpoints.length === 0) return "empty";
   if (
     !record(listener) ||
@@ -259,7 +269,7 @@ function handlerState(config: unknown, target: string, dnsName?: string): "empty
     endpoints.length !== 1
   )
     return "occupied";
-  if (dnsName && endpoints[0]?.[0] !== `${dnsName}:443`) return "occupied";
+  if (dnsName && endpoints[0]?.[0] !== `${dnsName}:${httpsPort}`) return "occupied";
   const endpoint = endpoints[0]?.[1];
   if (!record(endpoint) || Object.keys(endpoint).some((key) => key !== "Handlers") || !record(endpoint.Handlers))
     return "occupied";
@@ -280,12 +290,12 @@ async function serveConfig(env: NodeJS.ProcessEnv, options?: RunOptions): Promis
     throw new CliError(unreadable);
   }
 }
-function otherHttpsPorts(config: unknown, dnsName?: string): boolean {
+function otherHttpsPorts(config: unknown, dnsName?: string, httpsPort = 443): boolean {
   if (!dnsName || !record(config) || !record(config.TCP)) return false;
   const web = record(config.Web) ? config.Web : {};
   return Object.entries(config.TCP).some(
     ([port, listener]) =>
-      port !== "443" &&
+      port !== String(httpsPort) &&
       record(listener) &&
       (listener.TerminateTLS === dnsName || (listener.HTTPS === true && Object.hasOwn(web, `${dnsName}:${port}`))),
   );
@@ -298,7 +308,8 @@ async function ownerRunning(route: TailscaleRoute): Promise<boolean> {
   return (await loopbackState(markerPort(route))) !== "refused";
 }
 const sameMarker = (a: TailscaleRoute, b: TailscaleRoute) =>
-  a.target === b.target && a.dnsName === b.dnsName && a.pid === b.pid;
+  a.target === b.target && a.dnsName === b.dnsName && a.pid === b.pid && routeHttpsPort(a) === routeHttpsPort(b);
+const httpsRoute = (httpsPort: number) => (httpsPort === 443 ? {} : { httpsPort });
 export async function ensureTailscaleServe(
   port: number,
   env = process.env,
@@ -307,6 +318,9 @@ export async function ensureTailscaleServe(
   options?: ServeOptions,
 ): Promise<{ created: boolean; owned?: boolean; otherHttpsPorts: boolean }> {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new CliError("Invalid Tailscale Serve port.");
+  const httpsPort = options?.httpsPort ?? 443;
+  if (!Number.isInteger(httpsPort) || httpsPort < 1 || httpsPort > 65535)
+    throw new CliError("Invalid Tailscale Serve HTTPS port.");
   const stateDir = options?.stateDir;
   const release = stateDir ? await lockTailscaleServe(stateDir, options?.lock) : undefined;
   try {
@@ -323,41 +337,44 @@ async function ensureLocked(
   options: ServeOptions | undefined,
 ): Promise<{ created: boolean; owned?: boolean; otherHttpsPorts: boolean }> {
   const stateDir = options?.stateDir;
+  const httpsPort = options?.httpsPort ?? 443;
   const marker = stateDir ? await readTailscaleMarker(stateDir) : { kind: "missing" as const };
   let config = await serveConfig(env, options);
   const target = `http://127.0.0.1:${port}`;
   let adopted = false;
   if (stateDir && marker.kind === "valid") {
     const previous = marker.route;
-    if (handlerState(config, previous.target, previous.dnsName) === "same") {
-      const sameTarget = previous.target === target && previous.dnsName === dnsName;
+    const previousHttps = routeHttpsPort(previous);
+    if (handlerState(config, previous.target, previous.dnsName, previousHttps) === "same") {
+      const sameTarget = previous.target === target && previous.dnsName === dnsName && previousHttps === httpsPort;
       if (sameTarget) {
         writeTailscaleMarker(stateDir, { ...previous, pid: process.pid });
         adopted = true;
       } else {
         const previousPort = markerPort(previous);
-        // This server already owns its listening port, even after a DNS rename.
+        // This server already owns its listening port, even after a DNS rename or a move to another HTTPS port.
         if (previousPort !== port && (await ownerRunning(previous)))
           throw new CliError(
-            `another emend server (process ${previous.pid}) serves port 443 of Tailscale Serve; stop that server, then try again.`,
+            `another emend server (process ${previous.pid}) serves port ${previousHttps} of Tailscale Serve; stop that server, then try again.`,
           );
         // Removal re-reads Serve before touching the old route.
-        await removeLocked(previousPort, env, previous.dnsName, stateDir, previous.pid);
+        await removeLocked(previousPort, env, previous.dnsName, stateDir, previous.pid, previousHttps);
         config = await serveConfig(env, options);
       }
     } else await removeTailscaleMarker(stateDir, previous);
   }
-  const state = handlerState(config, target, dnsName);
-  if (state === "occupied") throw new CliError(occupied);
+  const state = handlerState(config, target, dnsName, httpsPort);
+  if (state === "occupied") throw new CliError(occupied(httpsPort));
   if (state === "empty") {
-    if (stateDir && dnsName) writeTailscaleMarker(stateDir, { target, dnsName, pid: process.pid });
+    const route = { target, dnsName: dnsName ?? "", pid: process.pid, ...httpsRoute(httpsPort) };
+    if (stateDir && dnsName) writeTailscaleMarker(stateDir, route);
     onOwnershipChange?.(true);
     try {
-      await execute(["serve", "--bg", "--https=443", target], env, undefined, options);
+      await execute(["serve", "--bg", `--https=${httpsPort}`, target], env, undefined, options);
     } catch (error) {
       if (error instanceof TailscaleSetupDenied) {
         onOwnershipChange?.(false);
-        if (stateDir && dnsName) await removeTailscaleMarker(stateDir, { target, dnsName, pid: process.pid });
+        if (stateDir && dnsName) await removeTailscaleMarker(stateDir, route);
       }
       throw error;
     }
@@ -365,7 +382,7 @@ async function ensureLocked(
   return {
     created: state === "empty",
     ...(stateDir ? { owned: state === "empty" || adopted } : {}),
-    otherHttpsPorts: otherHttpsPorts(config, dnsName),
+    otherHttpsPorts: otherHttpsPorts(config, dnsName, httpsPort),
   };
 }
 async function removeLocked(
@@ -374,12 +391,18 @@ async function removeLocked(
   dnsName: string | undefined,
   stateDir: string | undefined,
   ownerPid: number,
+  httpsPort = 443,
 ): Promise<void> {
   const config = await serveConfig(env);
-  if (handlerState(config, `http://127.0.0.1:${port}`, dnsName) === "same")
-    await execute(["serve", "--https=443", "off"], env);
+  if (handlerState(config, `http://127.0.0.1:${port}`, dnsName, httpsPort) === "same")
+    await execute(["serve", `--https=${httpsPort}`, "off"], env);
   if (stateDir && dnsName)
-    await removeTailscaleMarker(stateDir, { target: `http://127.0.0.1:${port}`, dnsName, pid: ownerPid });
+    await removeTailscaleMarker(stateDir, {
+      target: `http://127.0.0.1:${port}`,
+      dnsName,
+      pid: ownerPid,
+      ...httpsRoute(httpsPort),
+    });
 }
 export async function removeTailscaleServe(
   port: number,
@@ -388,10 +411,11 @@ export async function removeTailscaleServe(
   stateDir?: string,
   ownerPid = process.pid,
   lock?: TailscaleLockOptions,
+  httpsPort = 443,
 ): Promise<void> {
   const release = stateDir ? await lockTailscaleServe(stateDir, lock) : undefined;
   try {
-    await removeLocked(port, env, dnsName, stateDir, ownerPid);
+    await removeLocked(port, env, dnsName, stateDir, ownerPid, httpsPort);
   } finally {
     release?.();
   }
@@ -402,7 +426,9 @@ export async function removeStaleTailscaleServe(
   env = process.env,
   lock?: TailscaleLockOptions,
 ): Promise<
-  { removed: false } | { removed: true; dnsName: string } | { removed: false; notInstalled: true; dnsName: string }
+  | { removed: false }
+  | { removed: true; dnsName: string; httpsPort?: number }
+  | { removed: false; notInstalled: true; dnsName: string; httpsPort?: number }
 > {
   const dir = resolve(stateDir);
   try {
@@ -423,20 +449,26 @@ export async function removeStaleTailscaleServe(
       if (held.kind !== "valid" || !sameMarker(held.route, route) || (await ownerRunning(held.route)))
         return { removed: false };
       const config = await serveConfig(env);
-      if (handlerState(config, route.target, route.dnsName) !== "same") {
+      if (handlerState(config, route.target, route.dnsName, routeHttpsPort(route)) !== "same") {
         await removeTailscaleMarker(stateDir, route);
         return { removed: false };
       }
       const current = await readTailscaleMarker(stateDir);
       if (current.kind !== "valid" || !sameMarker(current.route, route)) return { removed: false };
-      await execute(["serve", "--https=443", "off"], env);
+      await execute(["serve", `--https=${routeHttpsPort(route)}`, "off"], env);
       await removeTailscaleMarker(stateDir, route);
-      return { removed: true, dnsName: route.dnsName };
+      return { removed: true, dnsName: route.dnsName, ...httpsRoute(routeHttpsPort(route)) };
     } catch (error) {
-      if (error instanceof TailscaleNotInstalled) return { removed: false, notInstalled: true, dnsName: route.dnsName };
+      if (error instanceof TailscaleNotInstalled)
+        return {
+          removed: false,
+          notInstalled: true,
+          dnsName: route.dnsName,
+          ...httpsRoute(routeHttpsPort(route)),
+        };
       const reason = error instanceof Error ? error.message : "unknown error";
       throw new CliError(
-        `no emend server is running, but removing the Tailscale Serve route it left at https://${escapeReference(route.dnsName)} failed: ${escapeReference(reason)}`,
+        `no emend server is running, but removing the Tailscale Serve route it left at ${escapeReference(tailscaleOrigin(route.dnsName, routeHttpsPort(route)))} failed: ${escapeReference(reason)}`,
       );
     }
   } finally {

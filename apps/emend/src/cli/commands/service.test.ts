@@ -508,6 +508,36 @@ describe.each(["linux", "darwin"])("%s service lifecycle", (platform) => {
     }
   });
 
+  test("tailscale readiness with a chosen port waits for the public origin that has the port", async () => {
+    const server = await startServer({
+      stateDir: state,
+      port: 0,
+      publicOrigin: "https://review.example.ts.net:13636",
+    });
+    recorded.mockImplementation(async (_file, args) => {
+      if (args.includes("show")) return { ...ok, stdout: `${process.pid}\n` };
+      if (args[0] === "print") return { ...ok, stdout: `target = {\n pid = ${process.pid}\n}\n` };
+      return ok;
+    });
+    sleep.mockImplementation(async (ms) => {
+      elapsed += ms;
+      expect(stdout).toEqual([]);
+      if (elapsed >= 400) server.setPublicOriginReady(true);
+    });
+    waitForServer.mockImplementation((ready) =>
+      waitForManagedServer(state, { ...ready, timeoutMs: 1000, now: () => elapsed, sleep }),
+    );
+    try {
+      expect(await invoke("install", "--tailscale", "--tailscale-port", "13636")).toBe(0);
+      expect(elapsed).toBe(400);
+      expect(JSON.parse(await readFile(join(state, "server-url.json"), "utf8"))).toEqual({
+        baseUrl: "https://review.example.ts.net:13636",
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
   test("stops the service and detached server before starting and confirming the replacement", async () => {
     expect(await invoke("install")).toBe(0);
     resetOutput();
@@ -1272,6 +1302,33 @@ test.each(["linux", "darwin"])("%s service install preserves tailscale serve fla
   expect(await invoke("install", "--tailscale", "--port", "4000")).toBe(0);
   const content = await readFile(platform === "linux" ? unitPath() : plistPath(), "utf8");
   expect(content).toContain(platform === "linux" ? "serve --tailscale --port 4000" : "<string>--tailscale</string>");
+});
+
+test.each(["linux", "darwin"])("%s service install saves and keeps the tailscale port", async (platform) => {
+  options.platform = platform;
+  const flags = ["--tailscale", "--tailscale-port", "13636"];
+  expect(await invoke("install", ...flags)).toBe(0);
+  const content = await readFile(platform === "linux" ? unitPath() : plistPath(), "utf8");
+  expect(content).toContain(
+    platform === "linux"
+      ? "serve --tailscale --tailscale-port 13636"
+      : "<string>--tailscale-port</string>\n    <string>13636</string>",
+  );
+  expect(JSON.parse(await readFile(optionsPath(), "utf8"))).toEqual(flags);
+  resetOutput();
+  expect(await invoke("install")).toBe(0);
+  expect(stdout).toEqual([`emend: keeping the service options ${flags.join(" ")}\n`, "emend: service installed\n"]);
+  expect(await readFile(platform === "linux" ? unitPath() : plistPath(), "utf8")).toBe(content);
+  expect(JSON.parse(await readFile(optionsPath(), "utf8"))).toEqual(flags);
+  resetOutput();
+  expect(await invoke("install", "--tailscale")).toBe(0);
+  expect(await readFile(platform === "linux" ? unitPath() : plistPath(), "utf8")).not.toContain("13636");
+});
+
+test("service install refuses a tailscale port without tailscale before any side effect", async () => {
+  expect(await invoke("install", "--tailscale-port", "13636")).toBe(2);
+  expect(stderr[0]).toContain("--tailscale-port requires --tailscale.");
+  await expect(lstat(unitPath())).rejects.toMatchObject({ code: "ENOENT" });
 });
 
 test("launchd installs a fixed trusted PATH including both Homebrew locations", async () => {

@@ -473,6 +473,29 @@ test("stop keeps the marker and warns the route may still exist when Tailscale i
   expect(JSON.parse(await readFile(join(state, "tailscale-serve.json"), "utf8"))).toEqual(marker);
 });
 
+test("stop names the chosen port when Tailscale is not on PATH", async () => {
+  const marker = {
+    target: "http://127.0.0.1:3636",
+    dnsName: "hub.example.ts.net",
+    pid: 2_000_000_000,
+    httpsPort: 13636,
+  };
+  await mkdir(state, { recursive: true, mode: 0o700 });
+  writeSecretFile(join(state, "tailscale-serve.json"), JSON.stringify(marker));
+  vi.spyOn(markers, "loopbackState").mockResolvedValue("refused");
+  const kill = process.kill;
+  vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+    if (pid !== marker.pid) return kill(pid, signal);
+    throw Object.assign(new Error("synthetic dead process"), { code: "ESRCH" });
+  });
+  expect(await run(["stop"], io)).toBe(0);
+  expect(stderr).toEqual([]);
+  expect(stdout).toEqual([
+    "emend: no emend server is running; tailscale was not found on PATH, so the Tailscale Serve route at https://hub.example.ts.net:13636 may still exist.\n",
+  ]);
+  expect(JSON.parse(await readFile(join(state, "tailscale-serve.json"), "utf8"))).toEqual(marker);
+});
+
 test("stop waits for the process to exit after its listener closes", async () => {
   const fetcher = await syntheticServer("delayed-exit");
   expect(await run(["stop"], io)).toBe(0);
