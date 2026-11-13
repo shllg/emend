@@ -240,7 +240,9 @@ CSS assets are used only as stylesheets. Other asset media types are left out.
 Writeup and Markdown images allow only PNG, JPEG, GIF, WebP and AVIF.
 Author data URLs for images, audio, video and VTT captions may stay in resource attributes.
 CSS may retain data URLs and local fragments. Asset references keep their fragments.
+SVG presentation and animation attributes that reference anything but a fragment are removed.
 CSS is read with a CSS Syntax Level 3 tokenizer. Escaped names count as their decoded spelling.
+Written CSS never holds an `&` that could start a character reference.
 Written CSS is tokenized again and checked once, after imports and HTML escaping.
 CSS that still holds a resource reference other
 than a data URL or a fragment is left out with the note. The file's CSP blocks any network load

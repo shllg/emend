@@ -1805,3 +1805,176 @@ test.each(["element", "attribute", "linked sheet"])(
     expect(html).not.toContain("Some content was left out");
   },
 );
+
+test.each(["&#114;", "&#114", "&#x72;", "&#x72", "&not;", "&not"])(
+  "prevents a second character-reference decode of %s in SVG style text",
+  async (reference) => {
+    const source = `p{background:u${reference}l(https://probe.invalid/a.png)}.kept{color:green}`;
+    const html = await htmlDoc(`<svg><style>${source.replaceAll("&", "&amp;")}</style></svg>`).result;
+    const written = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
+    expect(written).not.toMatch(/&[a-z0-9#]/i);
+    expect(written).toContain("&/**/");
+    // fromHtml performs the same foreign-content character-reference decode as a browser.
+    const reparsed = hastText(parsed(html).find((node) => node.tagName === "style") as Element);
+    expect(reparsed).toBe(written);
+    expectOfflineCss(reparsed);
+    expect(reparsed).toContain(".kept{color:green}");
+    expect([...cssTokenize(reparsed)].some((token) => token.kind === "url")).toBe(false);
+  },
+);
+
+test("keeps nesting selectors unchanged when separating their ampersands from character references", async () => {
+  const source = "a{&.b{color:red} &:hover{color:blue}}";
+  const html = await htmlDoc(`<style>${source}</style>`).result;
+  const written = hastText(parsed(html).find((node) => node.tagName === "style") as Element);
+  expect(written).toBe("a{&/**/.b{color:red} &/**/:hover{color:blue}}");
+  const tokens = (value: string) =>
+    [...cssTokenize(value)].filter((token) => token.kind !== "comment").map(({ kind, value }) => ({ kind, value }));
+  expect(tokens(written)).toEqual(tokens(source));
+});
+
+test.each([
+  'p{content:"a&b"}',
+  String.raw`p{content:"a\&b"}`,
+  String.raw`p{content:"a\\&b"}`,
+  'p{content:"a&b\n}.kept{color:green}',
+  String.raw`.a\&b#x\&y{--a\&b:1a\&b;x:f\&g(1)}@a\&b x;`,
+  "@namespace svg url(https://example.com/a&b);",
+])("preserves decoded ampersands while escaping character references in %s", async (source) => {
+  for (const svg of [false, true]) {
+    const html = await htmlDoc(
+      svg ? `<svg><style>${source.replaceAll("&", "&amp;")}</style></svg>` : `<style>${source}</style>`,
+    ).result;
+    const written = hastText(parsed(html).find((node) => node.tagName === "style") as Element);
+    const tokens = (value: string) => [...cssTokenize(value)].map(({ kind, value }) => ({ kind, value }));
+    expect(tokens(written)).toEqual(tokens(source));
+    expect(written).toContain("\\26 ");
+    expect(written).not.toMatch(/&[a-z0-9#]/i);
+  }
+});
+
+test("escapes ampersands in comments and rewritten references without changing their decoded URLs", async () => {
+  const source = '/*&not &#114*/p{background:url("data:image/png,a&b");filter:url(#a&b)}';
+  const html = await htmlDoc(`<svg><style>${source.replaceAll("&", "&amp;")}</style></svg>`).result;
+  const written = hastText(parsed(html).find((node) => node.tagName === "style") as Element);
+  expect(written).toContain("/*\\26 not \\26 #114*/");
+  expect(written).not.toMatch(/&[a-z0-9#]/i);
+  expect([...cssTokenize(written)].filter((token) => token.kind === "string").map((token) => token.value)).toEqual([
+    "data:image/png,a&b",
+    "#a&b",
+  ]);
+  expectOfflineCss(written);
+});
+
+test.each([
+  "a{&not{color:red}}",
+  'p{content:"a&b"}',
+  "/*&#114*/",
+  "a{&1{color:red}}",
+  "@namespace svg url(https://example.com/a&b);",
+])("refuses character-reference openers in final CSS: %s", async (source) => {
+  expect(await checkDownloadCss(source)).toBeNull();
+});
+
+test.each(["a{&b{color:red}}", 'p{content:"a&b"}'])(
+  "charges the final bytes of ampersand escaping in %s",
+  async (source) => {
+    const original = await htmlDoc(`<style>${source}</style>`).result;
+    const written = hastText(parsed(original).find((node) => node.tagName === "style") as Element);
+    const length = new TextEncoder().encode(written).byteLength;
+    expect(length).toBeGreaterThan(new TextEncoder().encode(source).byteLength);
+    for (const budget of [length, length - 1]) {
+      const html = await buildHtmlDocDownload({
+        html: `<style>${source}</style>`,
+        title: "Budget",
+        docPath: "doc.html",
+        resolveAsset: async () => null,
+        inlineBudget: budget,
+      });
+      expect(parsed(html).some((node) => node.tagName === "style")).toBe(budget === length);
+      expect(html.includes("Some content was left out")).toBe(budget !== length);
+    }
+  },
+);
+
+const presentationAttributes = [
+  ["fill", "fill"],
+  ["stroke", "stroke"],
+  ["filter", "filter"],
+  ["clip-path", "clipPath"],
+  ["mask", "mask"],
+  ["marker-start", "markerStart"],
+  ["marker-mid", "markerMid"],
+  ["marker-end", "markerEnd"],
+  ["cursor", "cursor"],
+  ["values", "values"],
+  ["from", "from"],
+  ["to", "to"],
+  ["by", "by"],
+  ["marker", "marker"],
+];
+
+test.each(presentationAttributes)("removes unlisted CSS references from %s attributes", async (attribute, property) => {
+  for (const value of ["url(https://probe.invalid/a.png)", String.raw`u\72l(https://probe.invalid/a.png)`]) {
+    const { result, resolveAsset } = htmlDoc(
+      `<svg><path ${attribute}="${value}"></path></svg><div ${attribute}="${value}">Text</div>`,
+    );
+    const nodes = parsed(await result).filter((node) => node.tagName === "path" || node.tagName === "div");
+    expect(nodes).toHaveLength(2);
+    for (const node of nodes) {
+      expect(node.properties).not.toHaveProperty(property);
+      expect(Object.values(node.properties).join(" ")).not.toContain("probe.invalid");
+    }
+    expect(resolveAsset).not.toHaveBeenCalled();
+  }
+});
+
+test.each(presentationAttributes)(
+  "keeps local fragments and plain values in %s attributes",
+  async (attribute, property) => {
+    for (const value of ["url(#grad)", "none", "red"]) {
+      const html = await htmlDoc(`<svg><path ${attribute}="${value}"></path></svg>`).result;
+      expect(parsed(html).find((node) => node.tagName === "path")?.properties[property]).toBe(value);
+    }
+  },
+);
+
+test("removes remote paint references from SMIL values while preserving the animation element", async () => {
+  const html = await htmlDoc(
+    '<svg><animate attributeName="fill" values="red;url(https://probe.invalid/x.png)"></animate></svg>',
+  ).result;
+  const animation = parsed(html).find((node) => node.tagName === "animate");
+  expect(animation?.properties.attributeName).toBe("fill");
+  expect(animation?.properties).not.toHaveProperty("values");
+});
+
+test("separates nesting ampersands in import conditions before writing their wrappers", async () => {
+  const html = await htmlDoc('<style>@import "a.css" supports(selector(&.b));</style>', {
+    "docs/a.css": css("p{color:green}"),
+  }).result;
+  const written = hastText(parsed(html).find((node) => node.tagName === "style") as Element);
+  expect(written).toContain("@supports (selector(&/**/.b)) { p{color:green} }");
+  expect(await checkDownloadCss(written)).toBe(written);
+});
+
+test("permits data references in styles but keeps only fragments in presentation attributes", async () => {
+  const value = "url(data:image/png;base64,AQID)";
+  const html = await htmlDoc(`<svg><path fill="${value}" style="fill:${value}"></path></svg>`).result;
+  const path = parsed(html).find((node) => node.tagName === "path");
+  expect(path?.properties).not.toHaveProperty("fill");
+  expect(path?.properties.style).toContain("data:image/png;base64,AQID");
+});
+
+test("yields while checking a large presentation attribute", async () => {
+  const value = `/*${"x".repeat(1024 * 1024)}*/red`;
+  const pause = vi.fn(async () => {});
+  const html = await buildHtmlDocDownload({
+    html: `<svg><path fill="${value}"></path></svg>`,
+    title: "Paint",
+    docPath: "doc.html",
+    resolveAsset: async () => null,
+    pause,
+  });
+  expect(parsed(html).find((node) => node.tagName === "path")?.properties.fill).toBe(value);
+  expect(pause).toHaveBeenCalledTimes(1);
+});

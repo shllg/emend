@@ -335,18 +335,21 @@ export function closeCss(stack: CssStack, token: CssToken): number {
 export const cssTrivia = (token: CssToken) => token.kind === "space" || token.kind === "comment";
 
 /** Preserve complete escapes in every token so HTML escaping cannot create new CSS tokens. */
-export function escapeCssToken(raw: string, string = false, atEof = false): string {
+export function escapeCssToken(raw: string, kind: CssToken["kind"], atEof = false): string {
+  const string = kind === "string" || kind === "bad-string";
   const output = new CssTextBuffer();
   let start = 0;
   let index = 0;
   while (index < raw.length) {
     const char = raw.charAt(index);
+    const escaped = char === "\\" && (raw.charAt(index + 1) === "<" || raw.charAt(index + 1) === "&");
     if (
       (char === "<" && (string || /^[a-z/!?]/i.test(raw.charAt(index + 1)))) ||
-      (char === "\\" && raw.charAt(index + 1) === "<")
+      (char === "&" && (string || kind === "url")) ||
+      escaped
     ) {
       output.push(raw.slice(start, index));
-      output.push("\\3c ");
+      output.push((escaped ? raw.charAt(index + 1) : char) === "<" ? "\\3c " : "\\26 ");
       index += char === "\\" ? 2 : 1;
       start = index;
     } else if (char === "\\") {
@@ -372,13 +375,17 @@ export function escapeCssToken(raw: string, string = false, atEof = false): stri
   return output.finish();
 }
 
-const offlineCssReference = (value: string) => /^data:/i.test(value) || /^#[^\s]*$/.test(value);
+const offlineCssReference = (value: string, references: "data-or-fragment" | "fragment") =>
+  (references === "data-or-fragment" && /^data:/i.test(value)) || /^#[^\s]*$/.test(value);
 /** Validate the final token stream. The caller reserves its work budget before this scan. */
 export async function checkDownloadCss(
   css: string,
   progress: (bytes: number) => Promise<void> | undefined = () => undefined,
   context: CssContext = "stylesheet",
+  references: "data-or-fragment" | "fragment" = "data-or-fragment",
 ): Promise<string | null> {
+  // Foreign-content style text decodes character references even though the serializer writes it raw.
+  if (/&[a-z0-9#]/i.test(css)) return null;
   const contexts = new CssStack();
   let namespace = false;
   let images = 0;
@@ -404,7 +411,8 @@ export async function checkDownloadCss(
       if (token.kind === "punct" && token.value === ")") {
         if (!urlString) return null;
         urlFunction = false;
-      } else if (token.kind === "string" && !urlString && offlineCssReference(token.value)) urlString = true;
+      } else if (token.kind === "string" && !urlString && offlineCssReference(token.value, references))
+        urlString = true;
       else return null;
       continue;
     }
@@ -416,14 +424,16 @@ export async function checkDownloadCss(
         continue;
       }
     }
-    if (token.kind === "bad-url" || (token.kind === "url" && !offlineCssReference(token.value))) return null;
+    if (token.kind === "bad-url" || (token.kind === "url" && !offlineCssReference(token.value, references)))
+      return null;
     if (token.kind === "function" && images && isIndirectReference(name)) return null;
     if (token.kind === "function" && (name === "url" || name === "src")) {
       urlFunction = true;
       urlString = false;
       continue;
     }
-    if (token.kind === "string" && (contexts.top() ?? 0) & 4 && !offlineCssReference(token.value)) return null;
+    if (token.kind === "string" && (contexts.top() ?? 0) & 4 && !offlineCssReference(token.value, references))
+      return null;
     const opener = cssOpener(token);
     if (opener) {
       const reference = token.kind === "function" && isImageFunction(name);

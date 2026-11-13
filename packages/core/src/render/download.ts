@@ -493,6 +493,7 @@ const cssQuote = (value: string) =>
     .replaceAll("\\", "\\\\")
     .replaceAll('"', '\\"')
     .replaceAll("<", "\\3c ")
+    .replaceAll("&", "\\26 ")
     .replace(/\r\n|[\r\n\f]/g, "\\a ")}"`;
 
 async function resourceUrl(value: string, basePath: string, state: AssetState, css = false): Promise<string | null> {
@@ -554,10 +555,11 @@ async function nestedImageSets(css: string, state: AssetState): Promise<Set<numb
 }
 function cssWritten(token: CssToken, css: string): string {
   const raw = css.slice(token.start, token.end);
-  if (token.kind === "comment") return raw.replaceAll("<", "\\3c ") + (token.unterminated ? "*/" : "");
+  if (token.kind === "comment")
+    return raw.replaceAll("<", "\\3c ").replaceAll("&", "\\26 ") + (token.unterminated ? "*/" : "");
   if (token.kind === "cdo") return " ";
-  const string = token.kind === "string" || token.kind === "bad-string";
-  const written = escapeCssToken(raw, string, token.end === css.length);
+  if (token.kind === "delim" && token.value === "&") return "&/**/";
+  const written = escapeCssToken(raw, token.kind, token.end === css.length);
   return written + (token.kind === "string" && token.unterminated ? raw.charAt(0) : "");
 }
 const dangerousAfterLessThan = (value: string) => /^[a-z/!?]/i.test(value);
@@ -691,6 +693,7 @@ async function rewriteCss(
     return true;
   };
   const appendToken = (token: CssToken) => {
+    if (token.kind === "delim" && token.value === "&") return append(cssWritten(token, css));
     // These tokens cannot contain an HTML opener internally. Avoid allocating a piece per delimiter.
     if (["punct", "delim", "space", "number", "percentage", "cdc"].includes(token.kind)) return appendSource(token);
     const value = cssWritten(token, css);
@@ -915,6 +918,23 @@ const htmlRemoved = new Set([
 ]);
 const htmlAttributes = new Set(["ping", "srcdoc", "formaction", "action", "integrity", "nonce", "download", "target"]);
 const animationTags = new Set(["set", "animate", "animatemotion", "animatetransform"]);
+// SVG HAST uses camelCase; HTML elements retain hyphenated or lowercase attribute names.
+const cssResourceAttributes = new Set([
+  "fill",
+  "stroke",
+  "filter",
+  "clippath",
+  "mask",
+  "markerstart",
+  "markermid",
+  "markerend",
+  "cursor",
+  "values",
+  "from",
+  "to",
+  "by",
+  "marker",
+]);
 export async function buildHtmlDocDownload(input: {
   html: string;
   docPath: string;
@@ -987,6 +1007,15 @@ export async function buildHtmlDocDownload(input: {
         else node.properties.style = css;
       }
       if (tag === "html") delete node.properties.manifest;
+      for (const [key, raw] of Object.entries(node.properties)) {
+        if (!cssResourceAttributes.has(key.toLowerCase().replaceAll("-", ""))) continue;
+        const value = String(raw);
+        if (
+          state.beginCss(value) === null ||
+          (await checkDownloadCss(value, (bytes) => state.tokenizedCss(bytes), "attribute", "fragment")) === null
+        )
+          delete node.properties[key];
+      }
       const resources = [
         "data",
         "background",
