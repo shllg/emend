@@ -1,6 +1,13 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { LIMITS, type RevisionView, type Target, type ThreadView, type UnplacedReason } from "@emend/contract";
+import {
+  LIMITS,
+  OTHER_TOPIC,
+  type RevisionView,
+  type Target,
+  type ThreadView,
+  type UnplacedReason,
+} from "@emend/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -630,6 +637,100 @@ test.each([false, true])(
     }
   },
 );
+test.each([false, true])("only ranked written topics link to writeup cards (phone=%s)", (phone) => {
+  const slugs = [OTHER_TOPIC.slug, "missing", "garden"];
+  const threads: ThreadView[] = slugs.map((slug) => ({
+    ...base,
+    id: slug,
+    target: { kind: "topic", slug, part: "title", quote: "Seed", prefix: "", suffix: "" },
+    placement: { status: "placed", location: { kind: "topic", slug, part: "title", start: 0, end: 4 } },
+  }));
+  const { container } = mount(
+    <ThreadList
+      reviewId={id}
+      revision={2}
+      threads={threads}
+      changedBlocks={[]}
+      topics={[
+        { ...OTHER_TOPIC, importance: 3, summary: "" },
+        { slug: "garden", title: "Garden", importance: 1, summary: "" },
+      ]}
+      writeup={{ sections: slugs.map((slug) => ({ key: `t-${slug}-body`, label: slug, topic: slug, blocks: [] })) }}
+      search={{ rev: 2, tab: "comments" }}
+      phone={phone}
+      onResume={() => {}}
+    />,
+  );
+  for (const slug of slugs) {
+    const card = container.querySelector(`[id="thread-${slug}"]`);
+    expect(card).toBeTruthy();
+    const href = within(card as HTMLElement)
+      .getByRole("link", { name: "Show in place" })
+      .getAttribute("href");
+    expect(href).toBe(
+      slug === "garden"
+        ? `/r/${id}?rev=2&tab=writeup#thread-${slug}`
+        : `/r/${id}?rev=2&tab=${phone ? "diff" : "comments"}#diff-thread-${slug}`,
+    );
+  }
+});
+
+test("Comments group headings and collapsed span quotes render hostile input verbatim as text", () => {
+  const docPath = "<img src=x onerror=alert(1)>.md";
+  const filePath = "<script>alert(1)</script>.ts";
+  const title = 'javascript:alert(1) <a href="javascript:alert(1)">link</a>';
+  const quote = "<script>alert(1)</script><img src=x onerror=alert(1)><iframe onload=alert(1)></iframe>";
+  const threads: ThreadView[] = [
+    {
+      ...base,
+      id: "doc",
+      target: {
+        kind: "doc-span",
+        path: docPath,
+        blockId: "doc-11111111-11111111",
+        quote: "Seed",
+        prefix: "",
+        suffix: "",
+      },
+      placement: {
+        status: "placed",
+        location: { kind: "doc-span", path: docPath, blockId: "doc-11111111-11111111", start: 0, end: 4 },
+      },
+    },
+    {
+      ...base,
+      id: "file",
+      target: { kind: "file", path: filePath },
+      placement: { status: "placed", location: { kind: "file", path: filePath } },
+    },
+    {
+      ...base,
+      id: "topic",
+      target: { kind: "topic", slug: "garden" },
+      placement: { status: "placed", location: { kind: "topic", slug: "garden" } },
+    },
+    { ...base, id: "collapsed", state: "resolved", target: { ...target, quote } },
+  ];
+  const { container } = mount(
+    <ThreadList
+      reviewId={id}
+      revision={2}
+      threads={threads}
+      changedBlocks={[]}
+      topics={[{ slug: "garden", title, importance: 1, summary: "" }]}
+      onResume={() => {}}
+    />,
+  );
+  for (const label of [docPath, filePath, `Topic 01 · ${title}`]) {
+    const group = within(screen.getByRole("region", { name: label }));
+    expect(group.getByRole("heading", { level: 2 }).textContent).toBe(`${label}1`);
+  }
+  const collapsed = container.querySelector("#thread-collapsed[data-collapsed]");
+  expect(collapsed?.querySelector(".em-thread-quote")?.textContent).toBe(quote);
+  expect(collapsed?.querySelector(".em-thread__comments, .em-card__foot")).toBeNull();
+  expect(container.querySelector('script, img, iframe, [onerror], [onload], a[href^="javascript:"]')).toBeNull();
+});
+
 test.each([{ metaKey: true }, { ctrlKey: true }])(
   "composer saves with %j Enter, ignoring IME and ordinary Enter",
   async (modifier) => {

@@ -1466,7 +1466,7 @@ test.each(
   const editing = kind === "edit";
   if (editing) thread.comments = thread.comments.map((comment) => ({ ...comment, sent: false, sentOn: null }));
   const beforeGroup = "Topic 01 · Plant a seed";
-  const afterGroup = editing ? "Unplaced" : beforeGroup;
+  const afterGroup = "Unplaced";
   const action = editing ? "Edit" : "Reply";
   currentRevision.threads = [thread];
   const original = vi.mocked(fetch).getMockImplementation();
@@ -1495,6 +1495,7 @@ test.each(
         }
       : {
           ...thread,
+          placement: { status: "unplaced", reason: "not-placed" },
           comments: [
             ...thread.comments,
             {
@@ -1529,99 +1530,138 @@ test.each(
   await act(async () => refresh.resolve(Response.json(currentRevision)));
   const after = within(await screen.findByRole("region", { name: afterGroup }));
   const currentButton = after.getByRole("button", { name: action });
-  const remounted = editing || next === "navigate";
-  expect(currentButton.closest("[data-thread-card]") === oldCard).toBe(!remounted);
-  expect(oldCard?.isConnected).toBe(!remounted);
+  expect(currentButton.closest("[data-thread-card]")).not.toBe(oldCard);
+  expect(oldCard?.isConnected).toBe(false);
   if (next === "regroup" || next === "immediate")
     await waitFor(() => expect(document.activeElement).toBe(currentButton));
   else if (next === "focus elsewhere") expect(document.activeElement).toBe(more);
   else expect(document.activeElement).not.toBe(currentButton);
 });
-test.each([
-  ...["Cancel", "Save"].flatMap((close) => ["pointer", "keyboard", "timeout"].map((next) => ({ close, next }))),
-  ...["Cancel", "Escape", "Close"].map((close) => ({ close, next: "refresh" })),
-])("fix3 phone Reply $close cannot reclaim focus on a later refresh after $next", async ({ close, next }) => {
-  width = 390;
-  const thread = placedWriteupThread();
-  currentRevision.threads = [thread];
-  const original = vi.mocked(fetch).getMockImplementation();
-  vi.mocked(fetch).mockImplementation(async (path, init) => {
-    if (path === `/api/v1/threads/${id}/comments` && init?.method === "POST")
-      return Response.json({ commentId: "22222222-2222-4222-8222-222222222222" }, { status: 201 });
-    return original?.(path, init) as Promise<Response>;
-  });
-  mount("?tab=comments&rev=1");
-  fireEvent.click(await screen.findByRole("button", { name: "Reply" }));
-  const input = await screen.findByRole("textbox", { name: "Reply" });
-  await waitFor(() => expect(document.activeElement).toBe(input));
-  if (close === "Save") {
-    fireEvent.change(input, { target: { value: "Check the seedlings" } });
-    currentRevision.threads = [
-      {
-        ...thread,
-        comments: [
-          ...thread.comments,
-          {
-            id: "22222222-2222-4222-8222-222222222222",
-            author: "user",
-            body: "Check the seedlings",
-            sent: false,
-            sentOn: null,
-          },
-        ],
-      },
-    ];
-  }
-  if (next === "timeout") vi.useFakeTimers();
-  if (close === "Escape") fireEvent.keyDown(input, { key: "Escape" });
-  else fireEvent.click(screen.getByRole("button", { name: close === "Save" ? "Save comment" : close }));
-  if (next === "timeout") await act(async () => vi.advanceTimersByTimeAsync(20));
-  else await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Reply" })));
-  expect(screen.queryByRole("dialog")).toBeNull();
-  const returned = screen.getByRole("button", { name: "Reply" });
-  expect(document.activeElement).toBe(returned);
-  const content = screen.getByText("A synthetic question");
-  if (next === "pointer") {
-    fireEvent.pointerDown(content);
-    // happy-dom does not perform the browser's blur on non-focusable content.
-    act(() => returned.blur());
-    fireEvent.click(content);
-  } else if (next === "keyboard") {
-    fireEvent.keyDown(document.body, { key: "Escape" });
-    act(() => returned.blur());
-  } else if (next === "timeout") {
-    await act(async () => vi.advanceTimersByTimeAsync(1000));
-    act(() => returned.blur());
-  }
-  if (next !== "refresh") expect(document.activeElement).toBe(document.body);
-  await act(async () => {
-    client.setQueryData(["revision", id, 1], {
-      ...currentRevision,
-      threads: [
+test.each(
+  [
+    ...["Cancel", "Save"].flatMap((close) => ["pointer", "keyboard", "timeout"].map((next) => ({ close, next }))),
+    ...["Cancel", "Escape", "Close"].map((close) => ({ close, next: "refresh" })),
+  ].flatMap((variant) => [true, false].map((regroup) => ({ ...variant, regroup }))),
+)(
+  "fix3 phone Reply $close cannot reclaim focus on a later refresh after $next (regroup=$regroup)",
+  async ({ close, next, regroup }) => {
+    width = 390;
+    const thread = placedWriteupThread();
+    currentRevision.threads = [thread];
+    const original = vi.mocked(fetch).getMockImplementation();
+    vi.mocked(fetch).mockImplementation(async (path, init) => {
+      if (path === `/api/v1/threads/${id}/comments` && init?.method === "POST")
+        return Response.json({ commentId: "22222222-2222-4222-8222-222222222222" }, { status: 201 });
+      return original?.(path, init) as Promise<Response>;
+    });
+    mount("?tab=comments&rev=1");
+    fireEvent.click(await screen.findByRole("button", { name: "Reply" }));
+    const input = await screen.findByRole("textbox", { name: "Reply" });
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    if (close === "Save") {
+      fireEvent.change(input, { target: { value: "Check the seedlings" } });
+      currentRevision.threads = [
         {
           ...thread,
-          state: "answered",
-          placement: { status: "unplaced", reason: "block-gone" },
           comments: [
-            ...(currentRevision.threads[0]?.comments ?? []).map((comment) => ({ ...comment, sent: true, sentOn: 1 })),
+            ...thread.comments,
             {
-              id: "33333333-3333-4333-8333-333333333333",
-              author: "agent",
-              body: "The seedlings are checked",
+              id: "22222222-2222-4222-8222-222222222222",
+              author: "user",
+              body: "Check the seedlings",
               sent: false,
               sentOn: null,
-              outcome: "explained",
             },
           ],
         },
-      ],
+      ];
+    }
+    if (next === "timeout") vi.useFakeTimers();
+    if (close === "Escape") fireEvent.keyDown(input, { key: "Escape" });
+    else fireEvent.click(screen.getByRole("button", { name: close === "Save" ? "Save comment" : close }));
+    if (next === "timeout") await act(async () => vi.advanceTimersByTimeAsync(20));
+    else await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Reply" })));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const returned = screen.getByRole("button", { name: "Reply" });
+    expect(document.activeElement).toBe(returned);
+    const content = screen.getByText("A synthetic question");
+    if (next === "pointer") {
+      fireEvent.pointerDown(content);
+      // happy-dom does not perform the browser's blur on non-focusable content.
+      act(() => returned.blur());
+      fireEvent.click(content);
+    } else if (next === "keyboard") {
+      fireEvent.keyDown(document.body, { key: "Escape" });
+      act(() => returned.blur());
+    } else if (next === "timeout") {
+      await act(async () => vi.advanceTimersByTimeAsync(1000));
+      act(() => returned.blur());
+    } else if (!regroup) {
+      // Without a remount, blur explicitly so the refresh must leave focus alone.
+      act(() => returned.blur());
+    }
+    if (next !== "refresh" || !regroup) expect(document.activeElement).toBe(document.body);
+    await act(async () => {
+      client.setQueryData(["revision", id, 1], {
+        ...currentRevision,
+        threads: [
+          {
+            ...thread,
+            state: "answered",
+            placement: regroup ? { status: "unplaced", reason: "block-gone" } : thread.placement,
+            comments: [
+              ...(currentRevision.threads[0]?.comments ?? []).map((comment) => ({ ...comment, sent: true, sentOn: 1 })),
+              {
+                id: "33333333-3333-4333-8333-333333333333",
+                author: "agent",
+                body: "The seedlings are checked",
+                sent: false,
+                sentOn: null,
+                outcome: "explained",
+              },
+            ],
+          },
+        ],
+      });
+      if (next === "timeout") await vi.advanceTimersByTimeAsync(20);
     });
-    if (next === "timeout") await vi.advanceTimersByTimeAsync(20);
-  });
-  if (next === "timeout") expect(screen.getByRole("region", { name: "Unplaced" })).toBeTruthy();
-  else await screen.findByRole("region", { name: "Unplaced" });
-  expect(returned.isConnected).toBe(false);
-  expect(document.activeElement).toBe(document.body);
+    const groupName = regroup ? "Unplaced" : "Topic 01 · Plant a seed";
+    const group =
+      next === "timeout"
+        ? screen.getByRole("region", { name: groupName })
+        : await screen.findByRole("region", { name: groupName });
+    expect(within(group).getByText("Answered").classList.contains("em-card__pill")).toBe(true);
+    expect(returned.isConnected).toBe(!regroup);
+    expect(document.activeElement).toBe(document.body);
+  },
+);
+test.each([
+  { hash: `thread-${id}`, visible: true },
+  { hash: `thread-%31${id.slice(1)}`, visible: true },
+  { hash: `%74hread-${id}`, visible: true },
+  { hash: `diff-thread-${id}`, visible: false },
+  { hash: `prefix-thread-${id}`, visible: false },
+  { hash: `thread-${id}-extra`, visible: false },
+  { hash: `thread-%2531${id.slice(1)}`, visible: false },
+  { hash: `thread-${id}%`, visible: false },
+  { hash: `thread-${id}%0A`, visible: false },
+  { hash: "thread-", visible: false },
+])("Hide resolved honors only an exact, once-decoded thread hash: $hash", async ({ hash, visible }) => {
+  const otherId = "22222222-2222-4222-8222-222222222222";
+  currentRevision.files = [];
+  currentRevision.threads = [
+    { ...placedWriteupThread(), state: "resolved" },
+    { ...placedWriteupThread(), id: otherId, state: "resolved" },
+  ];
+  localStorage.setItem(layoutKey, JSON.stringify({ hideResolved: true }));
+  const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+  mount(`?tab=comments#${hash}`);
+  expect((await screen.findByRole<HTMLInputElement>("checkbox", { name: "Hide resolved" })).checked).toBe(true);
+  expect(screen.queryAllByRole("article").map((card) => card.id)).toEqual(visible ? [`thread-${id}`] : []);
+  expect(document.getElementById(`thread-${otherId}`)).toBeNull();
+  if (hash === `thread-${id}`) {
+    await waitFor(() => expect(scroll.mock.instances).toContain(document.getElementById(`thread-${id}`)));
+  }
 });
 test.each([1280, 768, 390])("Comment on review opens and saves Whole review at %s px", async (pixels) => {
   width = pixels;

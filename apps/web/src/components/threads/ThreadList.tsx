@@ -3,6 +3,7 @@ import { useSyncExternalStore } from "react";
 import { listDrafts, type SavedDraft, subscribeDrafts } from "../../lib/drafts.ts";
 import { layoutStore, useLayoutPreferences } from "../../lib/layout-store.ts";
 import { threadPlaces } from "../../lib/thread-places.ts";
+import { rankedTopics } from "../../lib/topics.ts";
 import type { ReviewSearch } from "../../router.tsx";
 import { shownThreadState } from "../status/ThreadStateBadge.tsx";
 import { Checkbox } from "../ui/Checkbox.tsx";
@@ -19,6 +20,7 @@ export function ThreadList({
   docs = [],
   files = [],
   search = {},
+  addressedThreadId,
   phone = false,
   onResume,
 }: {
@@ -31,17 +33,26 @@ export function ThreadList({
   docs?: RevisionView["docs"];
   files?: RevisionView["files"];
   search?: ReviewSearch;
+  addressedThreadId?: string;
   phone?: boolean;
   onResume: (draft: SavedDraft) => void;
 }) {
   const hasDrafts = useSyncExternalStore(subscribeDrafts, () => listDrafts(reviewId).length > 0);
   const { hideResolved } = useLayoutPreferences();
   const shown = threads.filter(
-    (thread) => !hideResolved || shownThreadState(thread) !== "resolved" || search.thread === thread.id,
+    (thread) =>
+      !hideResolved ||
+      shownThreadState(thread) !== "resolved" ||
+      search.thread === thread.id ||
+      addressedThreadId === thread.id,
   );
   const hiddenCount = threads.length - shown.length;
   const groups = threadPlaces({ threads: shown, topics, writeup, docs, files });
-  const writtenTopics = new Set(writeup.sections.flatMap((section) => (section.topic !== null ? [section.topic] : [])));
+  const writtenTopics = new Set(
+    rankedTopics(topics)
+      .filter(({ topic }) => writeup.sections.some((section) => section.topic === topic.slug))
+      .map(({ topic }) => topic.slug),
+  );
   const props = { reviewId, revision, changedBlocks, topics, surface: "comments" as const };
   return (
     <div className="space-y-6 px-4 pt-4 pb-8 md:mx-auto md:max-w-[calc(1000px+88px)] md:pt-7 md:pr-8 md:pb-[72px] md:pl-14">

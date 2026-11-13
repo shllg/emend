@@ -252,6 +252,20 @@ test("docs order rendered blocks and offsets before source lines, and HTML spans
   ]);
 });
 
+test.each([false, true])("a doc's source view preserves paragraph order (source first=%s)", (sourceFirst) => {
+  const path = "notes.md";
+  const first = "doc-11111111-ffffffff";
+  const second = "doc-11111111-11111111";
+  const docs: RevisionView["docs"] = [
+    { kind: "markdown", path, blocks: [block(first), block(second)] },
+    { kind: "source", path, language: "markdown", lines: [] },
+  ];
+  const groups = places([thread("second", docSpan(path, second)), thread("first", docSpan(path, first, 1))], {
+    docs: sourceFirst ? docs.toReversed() : docs,
+  });
+  expect(groups[0]?.threads.map((thread) => thread.id)).toEqual(["first", "second"]);
+});
+
 test("files precede line ranges ordered by start then end; old-side lines use the renamed file", () => {
   const groups = places(
     [

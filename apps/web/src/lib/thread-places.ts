@@ -18,7 +18,9 @@ export function threadPlaces({ threads, topics, writeup, docs, files }: Input): 
     for (const block of section.blocks) blocks.set(block.id, { key: sectionKey(section), index: blocks.size });
   }
   const docBlocks = new Map(
-    docs.map((doc) => [doc.path, new Map(doc.kind === "markdown" ? doc.blocks.map((block, i) => [block.id, i]) : [])]),
+    docs
+      .filter((doc) => doc.kind === "markdown")
+      .map((doc) => [doc.path, new Map(doc.blocks.map((block, i) => [block.id, i]))]),
   );
   const placeKey = (location: PlacementLocation): string => {
     switch (location.kind) {
