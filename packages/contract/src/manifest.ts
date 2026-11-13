@@ -13,7 +13,7 @@ const markdown = z
     "writeup section exceeds the UTF-8 byte limit",
   );
 
-const normalizeGlossaryForm = (text: string) => text.normalize("NFC").replace(/\s+/gu, " ").trim();
+export const normalizeGlossaryForm = (text: string) => text.normalize("NFC").replace(/\s+/gu, " ").trim();
 const glossaryForm = z
   .string()
   .min(1)

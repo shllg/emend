@@ -2654,6 +2654,43 @@ test("the term card's Glossary link opens and scrolls to its entry through the r
   expect(screen.queryByRole("dialog", { name: "Budget" })).toBeNull();
 });
 
+test("keyboard glossary follow opens and scrolls to the entry while keeping focus on its term", async () => {
+  currentRevision.writeup = RenderedWriteup.parse(
+    await renderWriteup(
+      {
+        overview: "Budget limits retries.",
+        tldr: "",
+        decisions: "",
+        topics: {},
+        glossary: [{ term: "Budget", definition: "The attempts allowed." }],
+      },
+      [],
+    ),
+  );
+  const term = currentRevision.writeup.terms?.[0];
+  if (!term) throw new Error("Missing glossary term");
+  let openAtScroll = false;
+  const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (this: HTMLElement) {
+    if (this.id === `block-${term.blockId}`) openAtScroll = this.closest("details")?.open === true;
+  });
+  const { history } = mount();
+  const glossary = (await screen.findByText("Glossary · 1 term")).closest("details");
+  expect(glossary?.open).toBe(false);
+  const mark = await screen.findByRole("button", { name: "Budget" });
+  act(() => mark.focus());
+  fireEvent.keyDown(mark, { key: "Enter" });
+  const card = screen.getByRole("dialog", { name: "Budget" });
+  const link = within(card).getByRole("link", { name: "Glossary" });
+  expect(document.activeElement).toBe(link);
+  fireEvent.click(link);
+  await waitFor(() => expect(openAtScroll).toBe(true));
+  expect(glossary?.open).toBe(true);
+  expect(history.location.hash).toBe(`#block-${term.blockId}`);
+  expect(document.activeElement).toBe(mark);
+  expect(scroll.mock.instances).not.toContain(mark);
+  expect(screen.queryByRole("dialog", { name: "Budget" })).toBeNull();
+});
+
 test.each(["skim", "review"] as const)(
   "%s fold choice survives tabs and resets on revision change",
   async (attention) => {

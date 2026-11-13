@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { GlossaryEntry, PublishManifest, WriteupInput, writeupMarkdown } from "./index.ts";
+import { GlossaryEntry, normalizeGlossaryForm, PublishManifest, WriteupInput, writeupMarkdown } from "./index.ts";
 
 const topic = { slug: "routing", title: "Routing", importance: 20, summary: "Simplify route lookup." };
 const manifest = {
@@ -174,6 +174,14 @@ describe("publish manifest", () => {
 });
 
 describe("glossary lists", () => {
+  test.each([
+    ["  Cafe\u0301 \u00a0 budget  ", "Café budget"],
+    [" \u0344 ", "\u0308\u0301"],
+    ["  API  ", "API"],
+  ])("exports canonical glossary form normalization: %j", (source, expected) => {
+    expect(normalizeGlossaryForm(source)).toBe(expected);
+  });
+
   test.each(["term", "alias"])("bounds the %s after NFC normalization expands its characters", (field) => {
     for (const [count, accepted] of [
       [33, true],

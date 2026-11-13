@@ -1,11 +1,18 @@
+import { LIMITS, normalizeGlossaryForm, WriteupInput } from "@emend/contract";
 import { expect, test } from "vitest";
 import { renderCommentHtml, renderDoc, renderMarkdownWithBudget, renderMetadataBlocks } from "./markdown.ts";
 import { termMatcher } from "./terms.ts";
+import { renderWriteup } from "./writeup.ts";
 
-async function html(source: string, entries: { term: string; aliases?: string[] }[]) {
+async function html(
+  source: string,
+  entries: { term: string; aliases?: string[] }[],
+  matcher = termMatcher(entries),
+  section = "overview",
+) {
   const blocks = await renderMarkdownWithBudget(
     source,
-    "overview",
+    section,
     { highlightedBytes: 0 },
     "https://github.com/example/project",
     new Map([["shot.png", "a".repeat(64)]]),
@@ -13,7 +20,7 @@ async function html(source: string, entries: { term: string; aliases?: string[] 
     "",
     undefined,
     undefined,
-    termMatcher(entries),
+    matcher,
   );
   return blocks.map((block) => block.html).join("");
 }
@@ -28,6 +35,48 @@ test.each([
   expect(rendered).toContain(mark(match));
   expect(rendered.match(/data-emend-term=/g)).toHaveLength(1);
 });
+
+test.each([
+  ["**budget**ing budget", "budget", `<p><strong>budget</strong>ing ${mark("budget")}</p>`],
+  ["re*try* retry", "retry", `<p>re<em>try</em> ${mark("retry")}</p>`],
+  ["re*try* try", "try", `<p>re<em>try</em> ${mark("try")}</p>`],
+  ["**re**try try", "try", `<p><strong>re</strong>try ${mark("try")}</p>`],
+  ["**API**s API", "API", `<p><strong>API</strong>s ${mark("API")}</p>`],
+])("rejects word fragments across inline formatting: %s", async (source, term, expected) => {
+  expect(await html(source, [{ term }])).toBe(expected);
+});
+
+test.each([
+  ["**budget** is set", `<p><strong>${mark("budget")}</strong> is set</p>`],
+  ["the *budget*.", `<p>the <em>${mark("budget")}</em>.</p>`],
+])("accepts whole words inside inline formatting: %s", async (source, expected) => {
+  expect(await html(source, [{ term: "budget" }])).toBe(expected);
+});
+
+test.each([
+  ["`x`budget budget", `<p><code>x</code>budget ${mark("budget")}</p>`],
+  ["`.`budget", `<p><code>.</code>${mark("budget")}</p>`],
+  ["budget`x` budget", `<p>budget<code>x</code> ${mark("budget")}</p>`],
+  ["budget`.`", `<p>${mark("budget")}<code>.</code></p>`],
+])("counts inline code as a word-boundary neighbour: %s", async (source, expected) => {
+  expect(await html(source, [{ term: "budget" }])).toBe(expected);
+});
+
+test.each(["[x](https://example.com)budget budget", "budget[x](https://example.com) budget"])(
+  "counts skipped links as word-boundary neighbours: %s",
+  async (source) => {
+    const rendered = await html(source, [{ term: "budget" }]);
+    expect(rendered).toContain(` ${mark("budget")}</p>`);
+    expect(rendered.match(/data-emend-term=/g)).toHaveLength(1);
+  },
+);
+
+test.each(["x\n\nbudget", "budget\n\nx", "- x\n- budget", "- budget\n- x"])(
+  "ends inline runs at block boundaries: %s",
+  async (source) => {
+    expect(await html(source, [{ term: "budget" }])).toContain(mark("budget"));
+  },
+);
 
 test("matches aliases, normalized forms, whitespace runs and literal regex syntax", async () => {
   expect(await html("Allowance budget", [{ term: "budget", aliases: ["allowance"] }])).toContain(mark("Allowance"));
@@ -59,6 +108,14 @@ test("normalization keeps one regex alternative per term or alias", () => {
   expect(matcher.pattern.exec("Café résumé")).toHaveLength(4);
 });
 
+test("matcher weight uses the contract's normalized terms and aliases", () => {
+  const term = "  Cafe\u0301   budget ";
+  const forms = [term, "\u0344"];
+  const matcher = termMatcher([{ term, aliases: forms.slice(1) }]);
+  expect(matcher.weight).toBe(forms.reduce((weight, form) => weight + normalizeGlossaryForm(form).length, 0));
+  expect(matcher.pattern.exec(normalizeGlossaryForm(term))?.[0]).toBe("Café budget");
+});
+
 test("normalized offsets preserve text before, between and after multiple marks", async () => {
   const prose = "Préface\u0301: Cafe\u0301 and re\u0301sume\u0301. Après.";
   expect(await html(prose, [{ term: "Café" }, { term: "résumé" }])).toBe(
@@ -69,6 +126,18 @@ test("normalized offsets preserve text before, between and after multiple marks"
 test("rejects matches inside a normalized grapheme and resumes at the next code point", async () => {
   const prose = "Cafe\u0301 👩‍👧 then 👧.";
   expect(await html(prose, [{ term: "👩" }, { term: "👧" }])).toBe(`<p>Cafe\u0301 👩‍👧 then ${mark("👧", 1)}.</p>`);
+});
+
+test.each(["", "Cafe\u0301 "])("protects joined emoji independently of unrelated normalization: %j", async (prefix) => {
+  expect(await html(`${prefix}👩‍👧 then 👧.`, [{ term: "👧" }])).toBe(`<p>${prefix}👩‍👧 then ${mark("👧")}.</p>`);
+});
+
+test.each(["\u200d", "\u200c"])("rejects a term followed by a grapheme joiner: %j", async (joiner) => {
+  for (const prefix of ["", "Cafe\u0301 "]) {
+    expect(await html(`${prefix}budget${joiner} then budget.`, [{ term: "budget" }])).toBe(
+      `<p>${prefix}budget${joiner} then ${mark("budget")}.</p>`,
+    );
+  }
 });
 
 test("acronym fallback resumes after the shorter match instead of the rejected longer form", async () => {
@@ -113,4 +182,59 @@ test("docs, comments and metadata never gain marks", async () => {
   expect(JSON.stringify(await renderDoc("Budget", "guide.md"))).not.toContain("emend-term");
   expect(await renderCommentHtml("Budget")).not.toContain("emend-term");
   expect(JSON.stringify(await renderMetadataBlocks("Budget"))).not.toContain("emend-term");
+});
+
+test("a shared work budget stops at the first oversized node and preserves later sections byte for byte", async () => {
+  const entries = [{ term: "budget" }, { term: "a" }];
+  const matcher = termMatcher(entries, 70);
+  const source = "Budget\n\nCafe\u0301 a\n\na";
+  const rendered = await html(source, entries, matcher);
+  expect(rendered).toBe(`<p>${mark("Budget")}</p><p>Cafe\u0301 a</p><p>a</p>`);
+  expect(rendered.replace(mark("Budget"), "Budget")).toBe(await html(source, []));
+  expect(await html("a", entries, matcher, "tldr")).toBe(await html("a", []));
+  expect(await html("Budget a", entries, matcher, "decisions")).toBe(await html("Budget a", []));
+});
+
+test("acronym fallback spends the shared work budget on repeated wrong-case hits", async () => {
+  const entries = [{ term: "budget" }, { term: "PR" }];
+  const source = "budget\n\npr pr PR";
+  // Scans cost (6 + 1 + 8) * 8 units; only one fallback fits in the remaining 8.
+  const matcher = termMatcher(entries, 128);
+  const rendered = await html(source, entries, matcher);
+  expect(rendered).toBe(`<p>${mark("budget")}</p><p>pr pr PR</p>`);
+  expect(rendered.replace(mark("budget"), "budget")).toBe(await html(source, []));
+  expect(await html("PR", entries, matcher, "tldr")).toBe("<p>PR</p>");
+  expect(await html(source, entries, termMatcher(entries, 144))).toBe(
+    `<p>${mark("budget")}</p><p>pr pr ${mark("PR", 1)}</p>`,
+  );
+});
+
+test("a typical twelve-term glossary still marks the last section of a long writeup", async () => {
+  const glossary = [
+    "budget",
+    "retry",
+    "queue",
+    "cache",
+    "worker",
+    "lease",
+    "route",
+    "token",
+    "scope",
+    "batch",
+    "entry",
+    "limit",
+  ].map((term) => ({ term, definition: "A synthetic definition." }));
+  const prose = "x ".repeat((LIMITS.writeupBytes - 4096) / 4);
+  const rendered = await renderWriteup(
+    WriteupInput.parse({
+      overview: prose,
+      tldr: prose,
+      decisions: "",
+      topics: { final: { why: "budget" } },
+      glossary,
+    }),
+    [{ slug: "final", title: "Final", importance: 10, summary: "Last section." }],
+  );
+  expect(rendered.sections.at(-1)?.key).toBe("t-final-why");
+  expect(rendered.sections.at(-1)?.blocks[0]?.html).toBe(`<p>${mark("budget")}</p>`);
 });

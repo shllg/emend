@@ -1,6 +1,7 @@
 import type { GlossaryTerm } from "@emend/contract";
 import { type RefObject, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { focusReadingTarget } from "../../lib/reading-focus.ts";
 
 type ActiveTerm = { element: HTMLElement; index: number };
 
@@ -91,7 +92,7 @@ function TermCards({ root, terms, href }: GlossaryTermsProps & { terms: Glossary
       focusLink.current = false;
       if (restore && open?.element.isConnected) {
         restoringFocus = true;
-        open.element.focus();
+        focusReadingTarget(open.element);
         restoringFocus = false;
       }
       setOpen(null);
@@ -111,11 +112,11 @@ function TermCards({ root, terms, href }: GlossaryTermsProps & { terms: Glossary
     const leave = (event: PointerEvent) => {
       if (event.pointerType !== "mouse" && event.pointerType !== "pen") return;
       if (!termAt(event.target, element, terms) && !panel?.contains(event.target as Node)) return;
+      clearOpen();
       if (inside(event.relatedTarget)) {
         clearClose();
         return;
       }
-      clearOpen();
       if (inside(event.target) && !focused()) {
         clearClose();
         closing.current = setTimeout(() => {
@@ -169,7 +170,7 @@ function TermCards({ root, terms, href }: GlossaryTermsProps & { terms: Glossary
     const outside = (event: PointerEvent) => {
       if (!inside(event.target)) close();
     };
-    const follow = () => close();
+    const follow = () => close(!!panel?.contains(document.activeElement));
     const position = () => {
       if (!open || !panel) return;
       const anchor = open.element.getBoundingClientRect();

@@ -1,10 +1,17 @@
-import { type GlossaryTerm, LIMITS, type PublishLinks, type TopicMeta, type WriteupInput } from "@emend/contract";
+import {
+  type GlossaryTerm,
+  LIMITS,
+  normalizeGlossaryForm,
+  type PublishLinks,
+  type TopicMeta,
+  type WriteupInput,
+} from "@emend/contract";
 import type { DocLinks } from "../links.ts";
 import type { Block } from "./blocks.ts";
 import { renderMarkdownWithBudget } from "./markdown.ts";
 import { normalizeText } from "./normalize.ts";
 import type { MediaSize } from "./sanitize.ts";
-import { normalizeTerm, termMatcher } from "./terms.ts";
+import { termMatcher } from "./terms.ts";
 
 export type RenderedWriteup = {
   sections: { key: string; label: string; topic: string | null; blocks: Block[] }[];
@@ -72,7 +79,7 @@ export async function renderWriteup(
     const glossaryBlocks: Block[] = [];
     const occurrences = new Map<string, number>();
     for (const entry of entries) {
-      const escaped = normalizeTerm(entry.term).replace(/[!-/:-@[-`{-~]/g, "\\$&");
+      const escaped = normalizeGlossaryForm(entry.term).replace(/[!-/:-@[-`{-~]/g, "\\$&");
       const definition = entry.definition.replace(/\r\n?/g, "\n").replace(/\n/g, "\n  ");
       const rendered = await renderMarkdownWithBudget(
         `- **${escaped}:** ${definition}`,
@@ -94,7 +101,7 @@ export async function renderWriteup(
       }
       const first = rendered[0];
       if (!first) throw new Error("glossary entry rendered no block");
-      const term = normalizeTerm(entry.term);
+      const term = normalizeGlossaryForm(entry.term);
       let text = normalizeText(
         rendered
           .filter((block) => block.kind !== "diagram")

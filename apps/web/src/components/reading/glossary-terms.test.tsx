@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { useRef } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { renderWriteup } from "../../../../../packages/core/src/render/writeup.ts";
+import { isReadingFocusMove } from "../../lib/reading-focus.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
 import { GlossaryTerms } from "./GlossaryTerms.tsx";
 import { Writeup } from "./Writeup.tsx";
@@ -182,6 +183,28 @@ test("crossing another term for 100 ms keeps the open card's original 300 ms clo
   expect(screen.queryByRole("dialog")).toBeNull();
 });
 
+test("crossing another term into the open card cancels that term's pending opening", async () => {
+  const { first, marks, writeup } = await mount();
+  const retry = marks[1];
+  if (!retry) throw new Error("Missing retry term");
+  over(first);
+  advance(500);
+  const card = screen.getByRole("dialog", { name: "Budget" });
+  out(first, retry);
+  over(retry, first);
+  advance(100);
+  out(retry, card);
+  over(card, retry);
+  for (const elapsed of [400, 500, 1000]) {
+    advance(elapsed);
+    expect(screen.getByRole("dialog", { name: "Budget" })).toBe(card);
+    expect(screen.queryByRole("dialog", { name: "Retry" })).toBeNull();
+    expect(within(card).getByRole("link", { name: "Glossary" }).getAttribute("href")).toBe(
+      `/r/${reviewId}?tab=writeup&rev=2#block-${writeup.terms?.[0]?.blockId}`,
+    );
+  }
+});
+
 test("leaving the open card for another term closes at 300 ms and opens the next at 500 ms", async () => {
   const { first, marks } = await mount();
   render(<button type="button">Elsewhere</button>);
@@ -319,6 +342,45 @@ test.each(["Enter", " "])(
     expect(screen.queryByRole("dialog")).toBeNull();
   },
 );
+
+test("keyboard glossary follow restores term focus without scrolling, reader input or reopening", async () => {
+  const { first } = await mount();
+  act(() => first.focus());
+  fireEvent.keyDown(first, { key: "Enter" });
+  const link = within(screen.getByRole("dialog", { name: "Budget" })).getByRole("link", { name: "Glossary" });
+  expect(document.activeElement).toBe(link);
+  const scroll = vi.spyOn(first, "scrollIntoView").mockImplementation(() => {});
+  const focus = vi.spyOn(first, "focus");
+  const readingFocus = vi.fn(() => isReadingFocusMove(first));
+  first.addEventListener("focusin", readingFocus);
+  try {
+    fireEvent.click(link);
+    expect(document.activeElement).toBe(first);
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect(readingFocus).toHaveReturnedWith(true);
+    expect(scroll).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    advance(500);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    advance(500);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(first);
+  } finally {
+    first.removeEventListener("focusin", readingFocus);
+  }
+});
+
+test("mouse glossary follow preserves focus outside the card", async () => {
+  const { first } = await mount();
+  render(<button type="button">Elsewhere</button>);
+  const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
+  act(() => elsewhere.focus());
+  over(first);
+  advance(500);
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Budget" })).getByRole("link", { name: "Glossary" }));
+  expect(document.activeElement).toBe(elsewhere);
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
 
 test("Esc closes the hovered card and reaches document when focus is elsewhere", async () => {
   const { first } = await mount();
