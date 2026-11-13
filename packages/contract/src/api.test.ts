@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import {
   API_PREFIX,
   Capabilities,
+  DownloadDocIds,
   FileFlag,
   FileRole,
   FileStatus,
@@ -50,6 +51,7 @@ test("exports the v1 API, limits, file vocabulary and reserved fallback", () => 
     sourceBytesPerRevision: 16777216,
     htmlDocBytes: 8388608,
     downloadInlineBytes: 134217728,
+    downloadDocs: 50,
     assetBytes: 26214400,
     htmlDocWithAssetsBytes: 52428800,
     revisionBytes: 268435456,
@@ -169,4 +171,19 @@ test("validates publish response ids, revision, URL and placement counts", () =>
 
 test("builds a revision download path with an encoded review id", () => {
   expect(reviewDownloadPath("review/id ?", 3)).toBe("/api/v1/reviews/review%2Fid%20%3F/revisions/3/download");
+});
+
+test("download paths preserve doc order and encode every query value", () => {
+  const path = reviewDownloadPath("review", 2);
+  expect(reviewDownloadPath("review", 2, [])).toBe(path);
+  expect(reviewDownloadPath("review", 2, ["b? /&", "a#="])).toBe(`${path}?doc=b%3F%20%2F%26&doc=a%23%3D`);
+});
+
+test("download ids are distinct UUIDs with at most 50 entries", () => {
+  const ids = Array.from({ length: 51 }, (_, n) => `11111111-1111-4111-8111-${String(n).padStart(12, "0")}`);
+  expect(DownloadDocIds.parse([])).toEqual([]);
+  expect(DownloadDocIds.parse(ids.slice(0, 50))).toEqual(ids.slice(0, 50));
+  for (const value of [ids, [ids[0], ids[0]], ["invalid"], "", [null]]) {
+    expect(DownloadDocIds.safeParse(value).success).toBe(false);
+  }
 });

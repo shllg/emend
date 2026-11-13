@@ -97,7 +97,7 @@ a machine token reaches only reviews from its own instance.
 | GET | `/api/v1/agent/reviews` | Agent | List the token's own instance's reviews, newest first, as `AgentReviewList`; `?head=<sha>` keeps those whose approved or newest revision has that head. |
 | GET | `/api/v1/reviews/:id` | Reviewer | Read a review. |
 | GET | `/api/v1/reviews/:id/revisions/:seq` | Reviewer | Read one revision. |
-| GET | `/api/v1/reviews/:id/revisions/:seq/download` | Reviewer | Download one revision as one self-contained HTML file. |
+| GET | `/api/v1/reviews/:id/revisions/:seq/download` | Reviewer | Download one offline HTML file, or a ZIP with docs selected by repeated `doc` query parameters. |
 | PUT | `/api/v1/reviews/:id/viewed` | Reviewer | Mark or unmark diff files as viewed; return 204. |
 | GET | `/api/v1/files/:fileId/old` | Reviewer | Read the old file side. |
 | GET | `/api/v1/files/:fileId/new` | Reviewer | Read the new file side. |
@@ -192,10 +192,19 @@ in order. A further request gets `429 rate_limited` with the `download_busy` mes
 "A download is already building. Try again when it finishes."
 The slot is released after success or failure.
 
+Optional repeated `doc` query parameters select up to 50 distinct UUID file ids from this
+revision's `RevisionView.files` rows with role `doc`. Invalid UUIDs, duplicates or more than
+50 ids get `400 invalid_request`, before waiting for a slot. A missing id, another owner's id,
+another revision's id or a non-doc id gets `404 not_found`. `HEAD` checks the ids too and returns
+ZIP headers when docs are selected, without reading blobs or building the archive.
+Rendered and source views of one path have distinct file ids. A source doc's file row has
+`view: "source"`; a rendered doc's row has no `view`.
+
 A code review's file holds the review title and that revision's writeup: sections, topics, text,
-code blocks and images with captions. It holds no docs, comments or diff. A revision is a pub
-when `writeupEmpty` is true and `base` is null. When a pub has docs, the download holds one doc:
-`main` when it names a doc, else the first doc in file order. Markdown uses its stored rendered
+code blocks and images with captions. The base file holds no docs, comments or diff. A revision
+is a pub when `writeupEmpty` is true and `base` is null. A pub's base file holds one doc:
+the first doc row in file order whose path equals `main`, else the first doc row. The order
+includes both rendered and source views of a path. Markdown uses its stored rendered
 blocks. Source uses its stored highlighted tokens. Code reviews and Markdown and source pubs
 get the emend header with the review title, project, branch and publish links. An HTML pub keeps
 the agent's HTML layout, with no emend header. Its listed assets are built in after filtering.
@@ -216,12 +225,39 @@ replaces the app CSP for this route. Every file starts with a UTF-8 byte order m
 The file also has a CSP meta with the same policy without `sandbox`.
 It opens offline with no scripts or network requests.
 
+With no `doc` parameter, the single HTML response is unchanged. With any docs selected, the
+response is `application/zip`, with attachment filename `<slug>-r<seq>.zip` and the same CSP,
+nosniff, no-store and same-origin headers. The ZIP starts with the base file at the root under
+its single-download name, then the selected docs under `docs/`, in revision file order (`ord`,
+then `id`). Each doc is an offline HTML file using the same rendering and filtering rules.
+Markdown and source docs get their title or path and the base file's project, branch, revision
+and publication time; publish links stay in the base file. Missing or invalid Markdown rendering
+shows empty content. Missing or invalid source rendering says "This file could not be shown."
+A missing HTML doc blob gets `404 not_found`.
+
+Doc entry names use the doc path split on `/`. Each segment replaces runs outside `[A-Za-z0-9._-]`
+with `-`, strips leading dots, trims trailing dots and hyphens, cuts to 80 characters and trims
+again. An empty segment becomes `_`. If the stem before its first dot is `CON`, `PRN`, `AUX`,
+`NUL`, `COM0`–`COM9` or `LPT0`–`LPT9`, ignoring case, it gains `_`, for folders and files alike.
+The last segment gains `.html` unless it already ends in
+`.html`, ignoring case. Name and folder conflicts are compared without case; suffixes `-2`,
+`-3`, and so on before `.html` disambiguate them. Ordinary folders may be shared. If a folder
+would replace an earlier file, suffix that folder segment too. Names are ASCII, relative, and
+contain no backslash, empty, `.` or `..` segment. Links between the files stay plain text.
+
 At most 128 MiB of built-in content is emitted. Every copy of a data URL and every inlined CSS
 text counts its final UTF-8 bytes each time it is emitted. The server also reads at most
-128 MiB of distinct stored assets. It checks stored sizes before reading them.
-At most 64 stylesheet occurrences are inlined, across imports and stylesheet links. Repeated
+128 MiB of stored assets and selected doc bodies: HTML blobs and Markdown/source rendered blobs.
+It checks their stored sizes before reading them. Assets are cached and charged once; selected
+doc bodies are charged on each read and released after building their file.
+Both budgets are shared by all files in a ZIP. Each later builder's emitted budget is reduced
+by the full UTF-8 size of every file already built. A selected doc that does not fit the remaining
+read budget, or comes after the emitted budget is spent, is left unread. Its file is a page with
+the title, reading styles and only the left-out note in its body. The base file's read paths stay
+unchanged. Each ZIP entry is compressed before building the next file.
+At most 64 stylesheet occurrences are inlined per file, across imports and stylesheet links. Repeated
 paths count each time and keep their own conditions. Imports stop at depth 4 and never repeat
-a path in the same chain. Each file has a 64 MiB CSS work budget. Each rewrite charges its input
+a path in the same chain. All files of a download share one 64 MiB CSS work budget. Each rewrite charges its input
 bytes. The final output check charges the written bytes too, with imports joined in.
 Dropped output does not refund spent work. When that budget is spent,
 remaining styles, style attributes and stylesheets are left out.
@@ -1471,7 +1507,8 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `diffSideBytes` | 1048576 bytes shown per side |
 | `markdownDocBytes` | 1048576 bytes |
 | `htmlDocBytes` | 8388608 bytes |
-| `downloadInlineBytes` | 134217728 bytes (128 MiB) of distinct stored assets built into one download |
+| `downloadInlineBytes` | 134217728 bytes (128 MiB) of emitted built-in content per download, and the same read budget for stored assets and selected doc bodies; both shared by all files of a ZIP |
+| `downloadDocs` | 50 docs added to one download |
 | `assetBytes` | 26214400 bytes per asset |
 | `htmlDocWithAssetsBytes` | 52428800 bytes combined |
 | `revisionBytes` | 268435456 bytes for writeup source JSON and unique referenced blobs; checked before reading content |

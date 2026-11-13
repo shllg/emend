@@ -1090,3 +1090,36 @@ test("text menu row navigation keeps focus after deferred Radix handlers and sta
   expect(document.activeElement).toBe(option(18));
   expect(option(13).getAttribute("aria-checked")).toBe("true");
 });
+
+test("Checkbox keeps React-node descriptions associated with existing help text", () => {
+  mount(
+    <>
+      <span id="doc-help">Choose a document.</span>
+      <Checkbox
+        label="Include document"
+        aria-describedby="doc-help"
+        description={
+          <>
+            <bdi>guide/plan.md</bdi>
+            {" · source"}
+          </>
+        }
+      />
+    </>,
+  );
+  const checkbox = screen.getByRole("checkbox", {
+    name: /Include document/,
+    description: "Choose a document. guide/plan.md · source",
+  });
+  const ids = checkbox.getAttribute("aria-describedby")?.split(" ") ?? [];
+  expect(ids).toHaveLength(2);
+  expect(ids[0]).toBe("doc-help");
+  const description = document.getElementById(ids[1] ?? "");
+  expect(description?.querySelector("bdi")?.textContent).toBe("guide/plan.md");
+});
+
+test("Checkbox renders a zero description as a React node with its description id", () => {
+  mount(<Checkbox label="Include document" description={0} />);
+  const checkbox = screen.getByRole("checkbox", { name: /Include document/, description: "0" });
+  expect(document.getElementById(checkbox.getAttribute("aria-describedby") ?? "")?.textContent).toBe("0");
+});

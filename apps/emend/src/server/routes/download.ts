@@ -1,13 +1,22 @@
-import { LIMITS, RenderedBlock, RenderedWriteup, SourceContent, TopicMeta } from "@emend/contract";
-import { buildDocDownload, buildHtmlDocDownload, buildWriteupDownload, type ResolveResult } from "@emend/core";
-import { and, eq, sql } from "drizzle-orm";
+import { DownloadDocIds, LIMITS, RenderedBlock, RenderedWriteup, SourceContent, TopicMeta } from "@emend/contract";
+import {
+  buildDocDownload,
+  buildHtmlDocDownload,
+  buildOmittedDownload,
+  buildWriteupDownload,
+  createDownloadWork,
+  type ResolveResult,
+} from "@emend/core";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Hono } from "hono";
 import type { Queries } from "../../db/client.ts";
 import { blobs, docAssets, files, repos, reviews, revisions, topics, writeups } from "../../db/schema.ts";
 import type { AppDeps } from "../app.ts";
 import type { AppEnv } from "../auth/principal.ts";
+import { downloadDocNames } from "../http/download-names.ts";
 import { ApiError } from "../http/errors.ts";
 import { DOWNLOAD_CSP } from "../http/headers.ts";
+import { ZipWriter } from "../http/zip.ts";
 import { publishMeta, topicView } from "./reviews.ts";
 
 const imageTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
@@ -44,6 +53,7 @@ async function revisionDownload(
   rawSeq: string,
   budget: number,
   headOnly: boolean,
+  docIds: string[],
 ) {
   const row = await q
     .select({ review: reviews, repoName: repos.name })
@@ -63,8 +73,18 @@ async function revisionDownload(
     .get();
   if (!revision) throw new ApiError("not_found");
   const filename = downloadFilename(review.title, seq);
-  if (headOnly) return { html: null, filename };
   const ownedFiles = and(eq(files.ownerId, ownerId), eq(files.revisionId, revision.id));
+  const selectedDocs = docIds.length
+    ? await q
+        .select()
+        .from(files)
+        .where(and(ownedFiles, eq(files.role, "doc"), inArray(files.id, docIds)))
+        .orderBy(files.ord, files.id)
+        .all()
+    : [];
+  if (selectedDocs.length !== docIds.length) throw new ApiError("not_found");
+  const responseFilename = docIds.length ? filename.replace(/\.html$/, ".zip") : filename;
+  if (headOnly) return { body: null, filename: responseFilename };
   const fileRows = await q.select().from(files).where(ownedFiles).orderBy(files.ord, files.id).all();
   const readJson = async (hash: string | null): Promise<unknown> => {
     const bytes = hash ? await deps.blobs.get(ownerId, hash, q) : null;
@@ -101,21 +121,24 @@ async function revisionDownload(
   let total = 0;
   // Cache bytes by blob, separately from the builders' path cache: aliases spend the budget once.
   const blobCache = new Map<string, Uint8Array | null | "too-large">();
+  const readLimited = async (hash: string | null): Promise<Uint8Array | null | "too-large"> => {
+    if (!hash) return null;
+    const stored = await q
+      .select({ size: blobs.size })
+      .from(blobs)
+      .where(and(eq(blobs.ownerId, ownerId), eq(blobs.sha256, hash)))
+      .get();
+    if (!stored) return null;
+    if (stored.size > budget - total) return "too-large";
+    const bytes = await deps.blobs.get(ownerId, hash, q);
+    if (bytes) total += stored.size;
+    return bytes;
+  };
   const resolveFile = async (file: typeof files.$inferSelect | undefined): Promise<ResolveResult> => {
     if (!file?.newBlob) return null;
     let bytes = blobCache.get(file.newBlob);
     if (bytes === undefined) {
-      const stored = await q
-        .select({ size: blobs.size })
-        .from(blobs)
-        .where(and(eq(blobs.ownerId, ownerId), eq(blobs.sha256, file.newBlob)))
-        .get();
-      if (!stored) bytes = null;
-      else if (stored.size > budget - total) bytes = "too-large";
-      else {
-        bytes = await deps.blobs.get(ownerId, file.newBlob, q);
-        if (bytes) total += stored.size;
-      }
+      bytes = await readLimited(file.newBlob);
       blobCache.set(file.newBlob, bytes);
     }
     return bytes === null || bytes === "too-large" ? bytes : { bytes, mediaType: file.mediaType };
@@ -132,9 +155,14 @@ async function revisionDownload(
     revision.writeupEmpty && revision.base === null
       ? (docs.find((file) => file.path === revision.main) ?? docs[0])
       : undefined;
-  let html: string;
-  if (doc?.mediaType === "text/html") {
-    const bytes = doc.newBlob ? await deps.blobs.get(ownerId, doc.newBlob, q) : null;
+  const work = createDownloadWork();
+  const buildHtmlDoc = async (
+    doc: typeof files.$inferSelect,
+    title: string,
+    inlineBudget: number,
+    body?: Uint8Array,
+  ) => {
+    const bytes = body ?? (doc.newBlob ? await deps.blobs.get(ownerId, doc.newBlob, q) : null);
     if (!bytes) throw new ApiError("not_found");
     const rows = await q
       .select({ file: files })
@@ -153,53 +181,112 @@ async function revisionDownload(
     const assets = new Map(
       rows.filter(({ file }) => file.mediaType !== "text/javascript").map(({ file }) => [file.path, file]),
     );
-    html = await buildHtmlDocDownload({
+    return buildHtmlDocDownload({
       html: new TextDecoder().decode(bytes),
       docPath: doc.path,
-      title: review.title,
+      title,
       resolveAsset: (path) => resolveFile(assets.get(path)),
-      inlineBudget: budget,
+      inlineBudget,
       pause,
+      work,
     });
-  } else if (doc) {
-    const content = await readJson(doc.renderedBlob);
-    const meta = await readWriteup()
-      .then(publishMeta)
-      .catch((error: unknown) => {
-        if (error instanceof ApiError && error.code === "not_found") return publishMeta(undefined);
-        throw error;
+  };
+  const buildBase = async () => {
+    if (doc?.mediaType === "text/html") {
+      return buildHtmlDoc(doc, review.title, budget);
+    } else if (doc) {
+      const content = await readJson(doc.renderedBlob);
+      const meta = await readWriteup()
+        .then(publishMeta)
+        .catch((error: unknown) => {
+          if (error instanceof ApiError && error.code === "not_found") return publishMeta(undefined);
+          throw error;
+        });
+      return buildDocDownload({
+        title: review.title,
+        details: { ...details, links: meta.links },
+        resolveMedia,
+        inlineBudget: budget,
+        pause,
+        work,
+        content:
+          doc.mediaType === "text/plain"
+            ? { kind: "source", lines: parse(SourceContent, content).lines }
+            : { kind: "markdown", blocks: parse(RenderedBlock.array().max(LIMITS.blocksPerRevision), content) },
       });
-    html = await buildDocDownload({
-      title: review.title,
-      details: { ...details, links: meta.links },
+    } else {
+      const stored = await readWriteup();
+      const rendered = parse(RenderedWriteup, stored);
+      const topicRows = await q
+        .select()
+        .from(topics)
+        .where(and(eq(topics.ownerId, ownerId), eq(topics.revisionId, revision.id)))
+        .orderBy(topics.importance, sql`${topics}.rowid`)
+        .all();
+      return buildWriteupDownload({
+        title: review.title,
+        details: { ...details, links: publishMeta(stored).links },
+        writeup: rendered,
+        topics: parse(TopicMeta.array().max(LIMITS.topicsPerReview + 1), topicRows.map(topicView)),
+        resolveMedia,
+        inlineBudget: budget,
+        pause,
+        work,
+      });
+    }
+  };
+  if (!selectedDocs.length) return { body: await buildBase(), filename };
+  const writer = new ZipWriter(new Date(revision.createdAt));
+  let bytesSoFar = 0;
+  const addHtml = async (name: string, html: string) => {
+    const data = Buffer.from(html, "utf8");
+    bytesSoFar += data.byteLength;
+    await writer.add(name, data);
+  };
+  const buildSelected = async (selected: typeof files.$inferSelect): Promise<string> => {
+    const inlineBudget = Math.max(0, budget - bytesSoFar);
+    const title = selected.title ?? selected.path;
+    if (inlineBudget === 0) return buildOmittedDownload({ title });
+    // Do not cache doc bodies: each is released after its ZIP entry is compressed.
+    const bytes = await readLimited(selected.mediaType === "text/html" ? selected.newBlob : selected.renderedBlob);
+    if (bytes === "too-large") return buildOmittedDownload({ title });
+    if (selected.mediaType === "text/html") {
+      if (!bytes) throw new ApiError("not_found");
+      return buildHtmlDoc(selected, title, inlineBudget, bytes);
+    }
+    let stored: unknown;
+    if (bytes) {
+      try {
+        stored = JSON.parse(new TextDecoder().decode(bytes));
+      } catch {
+        /* Missing or invalid rendering follows the reading view's fallback. */
+      }
+    }
+    const source = selected.mediaType === "text/plain" ? SourceContent.safeParse(stored) : undefined;
+    const markdown = source ? undefined : RenderedBlock.array().max(LIMITS.blocksPerRevision).safeParse(stored);
+    return buildDocDownload({
+      title,
+      details: { ...details, links: undefined },
       resolveMedia,
-      inlineBudget: budget,
+      inlineBudget,
       pause,
-      content:
-        doc.mediaType === "text/plain"
-          ? { kind: "source", lines: parse(SourceContent, content).lines }
-          : { kind: "markdown", blocks: parse(RenderedBlock.array().max(LIMITS.blocksPerRevision), content) },
+      work,
+      content: source
+        ? source.success
+          ? { kind: "source", lines: source.data.lines }
+          : { kind: "source", lines: [], unrendered: true }
+        : { kind: "markdown", blocks: markdown?.success ? markdown.data : [] },
     });
-  } else {
-    const stored = await readWriteup();
-    const rendered = parse(RenderedWriteup, stored);
-    const topicRows = await q
-      .select()
-      .from(topics)
-      .where(and(eq(topics.ownerId, ownerId), eq(topics.revisionId, revision.id)))
-      .orderBy(topics.importance, sql`${topics}.rowid`)
-      .all();
-    html = await buildWriteupDownload({
-      title: review.title,
-      details: { ...details, links: publishMeta(stored).links },
-      writeup: rendered,
-      topics: parse(TopicMeta.array().max(LIMITS.topicsPerReview + 1), topicRows.map(topicView)),
-      resolveMedia,
-      inlineBudget: budget,
-      pause,
-    });
+  };
+  await addHtml(filename, await buildBase());
+  const names = downloadDocNames(selectedDocs.map((file) => file.path));
+  for (const [index, selected] of selectedDocs.entries()) {
+    await pause();
+    const name = names[index];
+    if (name === undefined) throw new Error("Missing download entry name");
+    await addHtml(name, await buildSelected(selected));
   }
-  return { html, filename };
+  return { body: writer.finish(), filename: responseFilename };
 }
 
 /** The budget parameter is internal; requests cannot change the export ceiling. */
@@ -207,18 +294,21 @@ export function downloadRoutes(app: Hono<AppEnv>, deps: AppDeps, budget: number 
   app.get("/api/v1/reviews/:id/revisions/:seq/download", async (c) => {
     const ownerId = c.get("principal").ownerId;
     const headOnly = c.req.method === "HEAD";
+    const parsed = DownloadDocIds.safeParse(c.req.queries("doc") ?? []);
+    if (!parsed.success) throw new ApiError("invalid_request");
+    const docIds = parsed.data;
     const release = headOnly ? undefined : await acquireDownload(ownerId);
     try {
       const result = await deps.db.read((q) =>
-        revisionDownload(ownerId, q, deps, c.req.param("id"), c.req.param("seq"), budget, headOnly),
+        revisionDownload(ownerId, q, deps, c.req.param("id"), c.req.param("seq"), budget, headOnly, docIds),
       );
-      c.header("Content-Type", "text/html; charset=utf-8");
+      c.header("Content-Type", docIds.length ? "application/zip" : "text/html; charset=utf-8");
       c.header("Content-Disposition", `attachment; filename="${result.filename}"`);
       c.header("Content-Security-Policy", DOWNLOAD_CSP);
       c.header("X-Content-Type-Options", "nosniff");
       c.header("Cache-Control", "no-store");
       c.header("Cross-Origin-Resource-Policy", "same-origin");
-      return result.html === null ? c.body(null) : c.body(result.html);
+      return result.body === null ? c.body(null) : c.body(result.body);
     } finally {
       release?.();
     }

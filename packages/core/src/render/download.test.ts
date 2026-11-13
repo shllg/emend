@@ -6,7 +6,9 @@ import type { HtmlElement as Element, HtmlRoot as Root } from "./blocks.ts";
 import {
   buildDocDownload,
   buildHtmlDocDownload,
+  buildOmittedDownload,
   buildWriteupDownload,
+  createDownloadWork,
   DOWNLOAD_FILE_CSP,
   type ResolveResult,
 } from "./download.ts";
@@ -1738,16 +1740,33 @@ test("charges the final CSS validation scan to the never-refunded work budget", 
   const mib = 1024 * 1024;
   const source = `/*${"x".repeat(mib - 4)}*/`;
   const pause = vi.fn(async () => {});
+  const work = createDownloadWork();
   const html = await buildHtmlDocDownload({
     html: '<link rel="stylesheet" href="a.css">'.repeat(33),
     docPath: "doc.html",
     title: "Work budget",
     resolveAsset: async () => css(source),
     pause,
+    work,
   });
   expect(html.match(/<style>/g)).toHaveLength(32);
   expect(html).toContain("Some content was left out");
   expect(pause).toHaveBeenCalledTimes(96);
+  const next = {
+    html: '<style>.late{color:green}</style><p style="color:red">Next doc</p>',
+    title: "Next doc",
+    docPath: "next.html",
+    resolveAsset: async () => null,
+  };
+  const shared = await buildHtmlDocDownload({ ...next, work });
+  expect(shared).not.toContain(".late");
+  expect(shared).not.toContain('style="color:red"');
+  expect(shared).toContain("Next doc");
+  expect(shared.match(/Some content was left out/g)).toHaveLength(1);
+  const independent = await buildHtmlDocDownload(next);
+  expect(independent).toContain(".late{color:green}");
+  expect(independent).toContain('style="color:red"');
+  expect(independent).not.toContain("Some content was left out");
 }, 15_000);
 
 test.each(["element", "attribute"])(
@@ -1977,4 +1996,56 @@ test("yields while checking a large presentation attribute", async () => {
   });
   expect(parsed(html).find((node) => node.tagName === "path")?.properties.fill).toBe(value);
   expect(pause).toHaveBeenCalledTimes(1);
+});
+
+test("an unrendered source doc shows the reading view's fallback instead of a code block", async () => {
+  const html = await buildDocDownload({
+    title: "Unavailable source",
+    details,
+    resolveMedia: async () => null,
+    content: { kind: "source", lines: [[{ text: "hidden source" }]], unrendered: true },
+  });
+  expectHead(html);
+  expect(html).toContain("<p>This file could not be shown.</p>");
+  expect(html).not.toContain("<pre");
+  expect(html).not.toContain("hidden source");
+});
+
+test("the stylesheet occurrence limit remains per file when CSS work is shared", async () => {
+  const work = createDownloadWork();
+  for (let index = 0; index < 2; index++) {
+    const html = await buildHtmlDocDownload({
+      html: '<link rel="stylesheet" href="a.css">'.repeat(65),
+      docPath: "doc.html",
+      title: "Stylesheets",
+      resolveAsset: async () => css("p{color:green}"),
+      work,
+    });
+    expect(html.match(/<style>/g)).toHaveLength(64);
+    expect(html.match(/Some content was left out/g)).toHaveLength(1);
+  }
+});
+
+test("omitted downloads are exactly the safe page returned for an over-limit HTML doc", async () => {
+  const title = "Doc <script>";
+  const html = buildOmittedDownload({ title });
+  const resolveAsset = vi.fn(async () => null);
+  expect(
+    await buildHtmlDocDownload({
+      title,
+      docPath: "doc.html",
+      html: "<div>".repeat(600),
+      resolveAsset,
+    }),
+  ).toBe(html);
+  expect(resolveAsset).not.toHaveBeenCalled();
+  expectHead(html);
+  expect(html).not.toContain("<script>");
+  const nodes = parsed(html);
+  expect(hastText(nodes.find((node) => node.tagName === "title") as Element)).toBe(title);
+  expect(nodes.find((node) => node.tagName === "body")?.children).toMatchObject([
+    { tagName: "p", properties: { className: ["em-download-note"] } },
+  ]);
+  expect(nodes.find((node) => node.tagName === "body")?.children).toHaveLength(1);
+  expect(nodes.some((node) => node.tagName === "style")).toBe(true);
 });

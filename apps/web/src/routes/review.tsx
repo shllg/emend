@@ -29,6 +29,7 @@ import { DocView } from "../components/reading/DocView.tsx";
 import type { HtmlNavigation } from "../components/reading/HtmlDocFrame.tsx";
 import { ReadingFoldContext } from "../components/reading/ReadingGroup.tsx";
 import { Writeup } from "../components/reading/Writeup.tsx";
+import { DownloadDialog } from "../components/review/DownloadDialog.tsx";
 import { ReviewHeader } from "../components/review/ReviewHeader.tsx";
 import { SendBar } from "../components/send/SendBar.tsx";
 import { threadCounts } from "../components/status/ThreadStateBadge.tsx";
@@ -41,6 +42,7 @@ import { useDiffCounts } from "../lib/diff-counts.ts";
 import type { NavigateDiff } from "../lib/diff-navigation.ts";
 import { appElementId, docHeading, docTitle } from "../lib/doc-navigation.ts";
 import { docKey, docView, findDoc } from "../lib/doc-view.ts";
+import { downloadDocChoices } from "../lib/download.ts";
 import { draftKey, hasDraft, type SavedDraft, saveDraft, subscribeDrafts } from "../lib/drafts.ts";
 import { usePublishedRevision } from "../lib/events.tsx";
 import { useInboxCollapsed, useLayout, usePaneMode } from "../lib/layout.ts";
@@ -304,6 +306,9 @@ function LoadedReview({
   }, []);
   const [currentTopic, setCurrentTopic] = useState<string>();
   const revision = useViewedRevision(review.id, query.data);
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const downloadReturnFocus = useRef<HTMLButtonElement>(null);
+  const onDownload = revision && downloadDocChoices(revision).length > 0 ? () => setDownloadOpen(true) : undefined;
   const diffFiles = revision?.files.filter((file) => file.role === "diff") ?? [];
   const [resumed, setResumed] = useState<(SavedDraft & { tab: NonNullable<ReviewSearch["tab"]> }) | null>(null);
   const resumedPlacement = resumed && revision ? draftPlacement(resumed, revision) : undefined;
@@ -779,7 +784,19 @@ function LoadedReview({
       isReview
       onCommentReview={revision ? commentOnReview : undefined}
       downloadHref={reviewDownloadPath(review.id, seq)}
+      onDownload={onDownload}
+      menuTriggerRef={downloadReturnFocus}
     >
+      {revision && (
+        <DownloadDialog
+          key={`${review.id}:${seq}`}
+          reviewId={review.id}
+          revision={revision}
+          open={downloadOpen}
+          onOpenChange={setDownloadOpen}
+          returnFocus={downloadReturnFocus}
+        />
+      )}
       <div className="contents" onClickCapture={followReadingLink} onAuxClickCapture={followReadingLink}>
         <Panes
           inbox={<ReviewInbox collapsed={collapsed} onCollapsedChange={setCollapsed} />}
@@ -845,6 +862,7 @@ function LoadedReview({
                   titleRef={titleRef}
                   onRevisionChange={setRevision}
                   onCommentReview={commentOnReview}
+                  onDownload={onDownload}
                 />
               )}
             </>

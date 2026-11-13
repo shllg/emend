@@ -138,4 +138,9 @@ pick how the agent should act on them.
 
 Download (on a phone: in the menu) saves the revision on screen as one HTML file that opens offline
 in any browser, so you can send it to someone who cannot reach emend. A code review's file holds
-its writeup; a published doc's file holds that doc. Diagrams show as their source text.
+its writeup; a published doc's file holds that doc. You can tick docs to add them. With any doc
+ticked, the download is a ZIP holding the writeup file (or the pub's base doc) and one HTML file
+per selected doc. Rendered and source views of the same path are separate choices; source choices
+say “source” beside the path. Links between files stay plain text. Diagrams show as their source
+text. File names are made safe for Windows too. Size and CSS processing limits are shared across
+the download. A doc that does not fit is replaced by a page with its title and a left-out note.

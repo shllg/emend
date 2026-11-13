@@ -3,9 +3,15 @@ import { LIMITS } from "./limits.ts";
 import { FilePath } from "./review.ts";
 
 export const API_PREFIX = "/api/v1";
-export function reviewDownloadPath(reviewId: string, seq: number): string {
-  return `${API_PREFIX}/reviews/${encodeURIComponent(reviewId)}/revisions/${seq}/download`;
+export function reviewDownloadPath(reviewId: string, seq: number, docIds: readonly string[] = []): string {
+  const path = `${API_PREFIX}/reviews/${encodeURIComponent(reviewId)}/revisions/${seq}/download`;
+  return docIds.length ? `${path}?${docIds.map((id) => `doc=${encodeURIComponent(id)}`).join("&")}` : path;
 }
+
+export const DownloadDocIds = z
+  .array(z.uuid())
+  .max(LIMITS.downloadDocs)
+  .refine((ids) => new Set(ids).size === ids.length, "Duplicate doc ids");
 
 export const MIN_CLIENT_VERSION = "0.1.0";
 

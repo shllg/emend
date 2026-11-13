@@ -15,9 +15,12 @@ export { changedBlockIds } from "./render/changed.ts";
 export {
   buildDocDownload,
   buildHtmlDocDownload,
+  buildOmittedDownload,
   buildWriteupDownload,
+  createDownloadWork,
   DOWNLOAD_FILE_CSP,
   type DownloadAsset,
+  type DownloadWork,
   type ResolveResult,
 } from "./render/download.ts";
 export { blockHash } from "./render/hash.ts";
