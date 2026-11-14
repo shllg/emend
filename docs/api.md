@@ -284,8 +284,10 @@ Where a thread goes, by its placement on this revision:
 - Threads placed on a doc in the download whose block or line cannot be found in that file:
   an "Other comments" list at the end of that doc's own file.
 - With `diff=1`, diff threads matched to a unique file: whole-file threads after its header;
-  line threads after their end line on the old or new side. Threads outside the shown hunks,
-  or on a file whose body is not shown, follow that file's body with their path and lines.
+  line threads after their end line on the old or new side. With `comments=1`, the diff also
+  shows each placed line comment's lines with up to three lines around them, like the app,
+  so the card follows its end line. Threads whose lines cannot be shown, or on a file whose
+  body is not shown, follow that file's body with their path and lines.
 - Everything else, including diff threads without `diff=1` or without a unique file match,
   threads that have no place on this revision (with the
   reason and the revision they were made on), and threads whose file is not in the
@@ -306,6 +308,8 @@ no topic or an unknown topic go under "Other changes", always last. Each file sh
 `+A −D` counts from the shown hunks, or stored counts when both exist and the body is not shown.
 Hunks are unified plain text with old and new line numbers and four context lines, like the app.
 Code, including HTML and scripts, is escaped text. The same offline CSP and no-script rules apply.
+Within diff lines, carriage returns (except one trailing CR), U+2028, U+2029 and bidi controls
+(U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069) show as `[U+XXXX]`.
 Binary files say "Binary file. Its changes are not shown." Oversized files say "This file is too
 large to show." Lock files say "Lock file. Its changes are left out." Missing blobs say "This file
 could not be shown." Identical text says "No changes to the text."

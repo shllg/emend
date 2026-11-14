@@ -29,8 +29,10 @@ export {
   DOWNLOAD_DIFF_BYTES,
   DOWNLOAD_DIFF_CONTEXT,
   DOWNLOAD_DIFF_LINES,
+  DOWNLOAD_DIFF_REVEAL_CONTEXT,
   type DownloadDiffFile,
   type DownloadDiffHunk,
+  type DownloadDiffReveal,
   downloadDiffGroups,
   downloadDiffHunks,
 } from "./render/download-diff.ts";

@@ -1,5 +1,5 @@
 import type { Outcome, Placement, Target, ThreadState, TopicMeta, UnplacedReason } from "@emend/contract";
-import type { DownloadDiffFile } from "./download-diff.ts";
+import type { DownloadDiffFile, DownloadDiffReveal } from "./download-diff.ts";
 
 export type DownloadComment = {
   author: "user" | "agent";
@@ -41,6 +41,7 @@ export type FileThreads = {
   end: DownloadThread[];
 };
 export type DiffThreads = {
+  ranges: DownloadDiffReveal[];
   whole: DownloadThread[];
   old: Map<number, DownloadThread[]>;
   new: Map<number, DownloadThread[]>;
@@ -197,11 +198,14 @@ export function routeDownloadThreads(input: {
         }
         let target = base.diff.get(index);
         if (!target) {
-          target = { whole: [], old: new Map(), new: new Map() };
+          target = { ranges: [], whole: [], old: new Map(), new: new Map() };
           base.diff.set(index, target);
         }
         if (location.kind === "file") target.whole.push(thread);
-        else push(target[location.side], location.end, thread);
+        else {
+          target.ranges.push({ side: location.side, start: location.start, end: location.end });
+          push(target[location.side], location.end, thread);
+        }
         break;
       }
       default:

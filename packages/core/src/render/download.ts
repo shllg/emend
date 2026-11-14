@@ -37,6 +37,7 @@ import {
   DOWNLOAD_DIFF_LINES,
   type DownloadDiffFile,
   type DownloadDiffHunk,
+  type DownloadDiffReveal,
   downloadDiffGroups,
 } from "./download-diff.ts";
 import { type DownloadComment, type DownloadThread, type FileThreads, threadOrder } from "./download-threads.ts";
@@ -608,6 +609,7 @@ type DownloadDiff = {
   hunks: (
     index: number,
     maxLines: number,
+    reveal: DownloadDiffReveal[],
   ) => Promise<DownloadDiffHunk[] | "missing" | "too-large" | "failed" | "too-long">;
   bytes?: number;
 };
@@ -650,6 +652,7 @@ async function diffContent(
       await state.pause?.();
       const file = diff.files[index];
       if (!file) continue;
+      const threads = ctx?.threads.diff.get(index);
       let message: string | undefined;
       let hunks: DownloadDiffHunk[] = [];
       let shown = false;
@@ -658,7 +661,7 @@ async function diffContent(
       else if (isLockfile(file.path)) message = "Lock file. Its changes are left out.";
       else if (lineCount >= DOWNLOAD_DIFF_LINES || bytesLeft <= 0) message = leftOut();
       else {
-        const result = await diff.hunks(index, DOWNLOAD_DIFF_LINES - lineCount);
+        const result = await diff.hunks(index, DOWNLOAD_DIFF_LINES - lineCount, threads?.ranges ?? []);
         if (result === "missing") message = "This file could not be shown.";
         else if (result === "too-large" || result === "failed") message = leftOut();
         else if (result === "too-long") {
@@ -678,7 +681,6 @@ async function diffContent(
         }
       }
       const counts = hunks.map(hunkCounts);
-      const threads = ctx?.threads.diff.get(index);
       // Stage the same pre splits without spending comment bytes or marking cards emitted.
       const body: { pre: Element; threads?: DownloadThread[] }[] = [];
       const placed = new Set(threads?.whole);
@@ -704,7 +706,12 @@ async function diffContent(
           const pending = state.element();
           if (pending) await pending;
           if (lines.length) lines.push(text("\n"));
-          const line = raw.replace(/\r$/, "");
+          const line = raw
+            .replace(/\r$/, "")
+            .replace(
+              /[\r\u2028\u2029\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,
+              (character) => `[U+${character.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}]`,
+            );
           const oldLine = line.startsWith("-") || line.startsWith(" ") ? old++ : undefined;
           const newLine = line.startsWith("+") || line.startsWith(" ") ? next++ : undefined;
           const marker = line.startsWith("\\");
@@ -754,9 +761,13 @@ async function diffContent(
       const additions = shown ? counts.reduce((total, count) => total + count.additions, 0) : file.additions;
       const deletions = shown ? counts.reduce((total, count) => total + count.deletions, 0) : file.deletions;
       const path = file.oldPath !== null && file.oldPath !== file.path ? `${file.oldPath} → ${file.path}` : file.path;
-      const header = [path, ...(file.status ? [diffStatus[file.status]] : [])];
+      const header: string[] = file.status ? [diffStatus[file.status]] : [];
       if (additions !== null && deletions !== null) header.push(`+${additions} −${deletions}`);
-      content.push(element("p", [text(header.join(" · "))], { className: ["em-diff-file"] }));
+      content.push(
+        element("p", [element("bdi", [text(path)]), text(header.length ? ` · ${header.join(" · ")}` : "")], {
+          className: ["em-diff-file"],
+        }),
+      );
       if (ctx) content.push(...(await threadCards(threads?.whole, ctx)));
       if (message) content.push(element("p", [text(message)]));
       for (const part of body) {

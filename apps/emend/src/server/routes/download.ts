@@ -17,6 +17,7 @@ import {
   createDownloadWork,
   type DownloadDiffFile,
   type DownloadDiffHunk,
+  type DownloadDiffReveal,
   type DownloadFile,
   type DownloadThreadInput,
   type FileThreads,
@@ -229,6 +230,7 @@ async function revisionDownload(
   const diffHunks = async (
     index: number,
     maxLines: number,
+    reveal: DownloadDiffReveal[],
   ): Promise<DownloadDiffHunk[] | "missing" | "too-large" | "failed" | "too-long"> => {
     if (diffSpentMs >= DOWNLOAD_DIFF_BUDGET_MS) return "failed";
     const started = performance.now();
@@ -252,6 +254,7 @@ async function revisionDownload(
         run({
           kind: "diff-hunks",
           maxLines,
+          reveal,
           old: old ? Uint8Array.from(old).buffer : null,
           next: next ? Uint8Array.from(next).buffer : null,
         }),

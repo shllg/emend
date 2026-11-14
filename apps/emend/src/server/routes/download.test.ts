@@ -164,6 +164,62 @@ test("comments with the diff place a line card between its line and the next one
   expect(at(without, "Diff line remark")).toBeGreaterThan(at(without, "Other comments"));
 });
 
+test.each(["new", "old"] as const)("diff reveals a sent comment on unchanged %s-side line 20", async (side) => {
+  const old = Array.from({ length: 100 }, (_, index) => `line ${index + 1}\n`).join("");
+  const next = old.replace("line 80\n", "changed eighty\n");
+  const oldBlob = await f.deps.blobs.put(f.ownerId, Buffer.from(old), "text/plain");
+  const newBlob = await f.deps.blobs.put(f.ownerId, Buffer.from(next), "text/plain");
+  const { reviewId } = await publish({
+    base: "a".repeat(40),
+    head: "b".repeat(40),
+    files: [{ path: "src/context.ts", role: "diff", oldPath: null, oldBlob, newBlob, flag: null }],
+  });
+  const path = `/reviews/${reviewId}/revisions/1/download?diff=1`;
+  const without = await (await f.request(path, "GET")).text();
+  const noDiff = await (await get(reviewId)).text();
+  await postThread(
+    reviewId,
+    {
+      kind: "lines",
+      path: "src/context.ts",
+      side,
+      start: 20,
+      end: 20,
+      lines: ["line 20"],
+      before: ["line 19"],
+      after: ["line 21"],
+    },
+    "Unchanged line remark",
+  );
+  await sendComments(reviewId);
+  const run = vi.fn(executeWork);
+  f.deps.publishExecutor = run;
+  const response = await f.request(`${path}&comments=1`, "GET");
+  expect(response.status).toBe(200);
+  const html = await response.text();
+  expect(run.mock.calls.map(([work]) => work).filter((work) => work.kind === "diff-hunks")).toMatchObject([
+    { reveal: [{ side, start: 20, end: 20 }], maxLines: DOWNLOAD_DIFF_LINES },
+  ]);
+  expect(html).toContain("@@ -17,7 +17,7 @@");
+  for (let number = 17; number <= 23; number++)
+    expect(html).toContain(`<span class="em-diff-numbers">${number} ${number} </span> line ${number}</span>`);
+  const endLine = '<span class="em-diff-numbers">20 20 </span> line 20</span>';
+  const nextLine = '<span class="em-diff-numbers">21 21 </span> line 21</span>';
+  expect(at(html, endLine)).toBeLessThan(at(html, "Unchanged line remark"));
+  expect(at(html, "Unchanged line remark")).toBeLessThan(at(html, nextLine));
+  expect(at(html, nextLine)).toBeLessThan(at(html, "@@ -76,9 +76,9 @@"));
+  expect(html.match(/Unchanged line remark/g)).toHaveLength(1);
+  expect(html).not.toContain('class="em-thread-where"');
+  expect(html).not.toContain("Other comments");
+  run.mockClear();
+  expect(await (await f.request(path, "GET")).text()).toBe(without);
+  expect(run.mock.calls.map(([work]) => work)).toMatchObject([{ kind: "diff-hunks", reveal: [] }]);
+  expect(without).not.toContain("@@ -17,7 +17,7 @@");
+  run.mockClear();
+  expect(await (await get(reviewId)).text()).toBe(noDiff);
+  expect(run).not.toHaveBeenCalled();
+});
+
 test("each diff-hunks work item carries the remaining maxLines allowance", async () => {
   const { reviewId } = await topicDiffReview();
   const run = vi.fn(executeWork);
@@ -171,8 +227,8 @@ test("each diff-hunks work item carries the remaining maxLines allowance", async
   const response = await f.request(`/reviews/${reviewId}/revisions/1/download?diff=1`, "GET");
   expect(response.status).toBe(200);
   expect(run.mock.calls.map(([work]) => work)).toMatchObject([
-    { kind: "diff-hunks", maxLines: DOWNLOAD_DIFF_LINES },
-    { kind: "diff-hunks", maxLines: DOWNLOAD_DIFF_LINES - 4 },
+    { kind: "diff-hunks", maxLines: DOWNLOAD_DIFF_LINES, reveal: [] },
+    { kind: "diff-hunks", maxLines: DOWNLOAD_DIFF_LINES - 4, reveal: [] },
   ]);
 });
 
@@ -183,6 +239,7 @@ test("diff-hunks work returns too-long when its maxLines allowance is exceeded",
       old: null,
       next: new TextEncoder().encode("one\ntwo\nthree\n").buffer,
       maxLines: 2,
+      reveal: [],
     }),
   ).toEqual({ kind: "diff-hunks", hunks: "too-long" });
 });

@@ -15,6 +15,7 @@ import {
   DIFF_COUNT_TIMEOUT_MS,
   type DocLinks,
   type DownloadDiffHunk,
+  type DownloadDiffReveal,
   decodeText,
   diffLineCounts,
   docText,
@@ -46,7 +47,13 @@ export type PlacementDoc = PlaceContext["docs"] extends Map<string, infer T> ? T
 export type EncodedPlacementDoc = { bytes: ArrayBuffer; textBytes: number; encodedBytes: number };
 export type Work =
   | { kind: "diff-counts"; old: ArrayBuffer | null; next: ArrayBuffer | null }
-  | { kind: "diff-hunks"; old: ArrayBuffer | null; next: ArrayBuffer | null; maxLines: number }
+  | {
+      kind: "diff-hunks";
+      old: ArrayBuffer | null;
+      next: ArrayBuffer | null;
+      maxLines: number;
+      reveal: DownloadDiffReveal[];
+    }
   | { kind: "source"; path: string; source: ArrayBuffer; highlight?: boolean }
   | { kind: "doc-metadata"; format: "html" | "markdown"; bytes: ArrayBuffer }
   | { kind: "line-count"; bytes: ArrayBuffer }
@@ -130,6 +137,7 @@ export const executeWork: Executor = async (work) => {
         work.next === null ? "" : decode(work.next),
         DIFF_COUNT_TIMEOUT_MS,
         work.maxLines,
+        work.reveal,
       ),
     };
   if (work.kind === "diff-counts")

@@ -180,6 +180,10 @@ test("routes diff threads by unique file, side and end line only when the writeu
   expect(base.diff.get(0)?.whole.map((thread) => thread.where)).toEqual(["f.ts"]);
   expect(base.diff.get(0)?.old.get(3)?.[0]?.where).toBe("d.ts · line 3 (old)");
   expect(base.diff.get(0)?.new.get(4)?.[0]?.where).toBe("f.ts · lines 2–4");
+  expect(base.diff.get(0)?.ranges).toEqual([
+    { side: "old", start: 3, end: 3 },
+    { side: "new", start: 2, end: 4 },
+  ]);
   expect(routeDownloadThreads(input).base.end).toHaveLength(3);
   expect(routeDownloadThreads({ ...input, diff: undefined }).base).toEqual(routeDownloadThreads(input).base);
   expect(routeDownloadThreads({ ...input, diff: [diffFile(), diffFile()] }).base.end).toHaveLength(3);
@@ -198,6 +202,20 @@ test("routes diff threads by unique file, side and end line only when the writeu
     diff: [diffFile({ path: "d.ts", oldPath: null, status: "modified" })],
   });
   expect(unrenamed.base.diff.get(0)?.old.get(3)).toHaveLength(1);
+});
+
+test("diff reveal ranges use placed coordinates and omit unsent or unplaced threads", () => {
+  const moved = thread(diffLines.target, { kind: "lines", path: "f.ts", side: "new", start: 20, end: 22 });
+  const { base } = routeDownloadThreads({
+    threads: [moved, { ...moved, comments: [comment("draft", { sent: false })] }, thread(diffLines.target, null), file],
+    seq: 2,
+    topics,
+    base: writeup,
+    docs: [],
+    diff: [diffFile()],
+  });
+  expect(base.diff.get(0)?.ranges).toEqual([{ side: "new", start: 20, end: 22 }]);
+  expect(base.diff.get(0)?.new.get(22)).toHaveLength(1);
 });
 
 test.each([undefined, null, 0, Date.UTC(2026, 10, 13, 10, 5)])(
