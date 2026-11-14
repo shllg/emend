@@ -978,3 +978,123 @@ test("capture waits silently for Shift and saves Ctrl+Shift+K as a mod key", asy
   });
   expect(client.getQueryData<SettingsView>(["settings"])?.keys.commands["palette.open"].value).toBe("mod+shift+k");
 });
+
+test("period and comma step through visible reader comments and leave reply typing alone", async () => {
+  const block = {
+    id: "overview-12345678",
+    section: "overview",
+    kind: "paragraph" as const,
+    text: "Plant a seed.",
+    html: "<p>Plant a seed.</p>",
+  };
+  revision.writeup.sections[0]?.blocks.push(block);
+  revision.threads = ids.slice(0, 2).map((id, index) => ({
+    id,
+    createdOn: 1,
+    state: "open",
+    target: { kind: "writeup-span", blockId: block.id, quote: "seed", prefix: "", suffix: "" },
+    placement: {
+      status: "placed",
+      location: { kind: "writeup-span", blockId: block.id, start: index * 8, end: index * 8 + 4 },
+    },
+    comments: [{ id, author: "user", body: "Synthetic comment", sent: true, sentOn: 1 }],
+  }));
+  vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([
+    new DOMRect(0, 100, 600, 20),
+  ] as unknown as DOMRectList);
+  vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+  mount();
+  await ready();
+  press(",");
+  const last = await screen.findByRole("dialog", { name: "Comment thread" });
+  expect(within(last).getByText("2 of 2")).toBeTruthy();
+  fireEvent.click(within(last).getByRole("button", { name: "Close" }));
+  press(".");
+  const dialog = await screen.findByRole("dialog", { name: "Comment thread" });
+  expect(within(dialog).getByText("1 of 2")).toBeTruthy();
+  press(".", {}, dialog);
+  expect(within(dialog).getByText("2 of 2")).toBeTruthy();
+  press(",", {}, dialog);
+  expect(within(dialog).getByText("1 of 2")).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Reply" }));
+  const input = within(dialog).getByRole("textbox", { name: "Reply" });
+  expect(press(".", {}, input).defaultPrevented).toBe(false);
+  expect(press(",", {}, input).defaultPrevented).toBe(false);
+  expect(within(dialog).getByText("1 of 2")).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+  fireEvent.click(screen.getByRole("button", { name: "Comment on block" }));
+  expect(screen.getByRole("textbox", { name: "Comment" })).toBeTruthy();
+  press(".");
+  const whileComposing = screen.getByRole("dialog", { name: "Comment thread" });
+  expect(within(whileComposing).getByText("1 of 2")).toBeTruthy();
+  press(".", {}, whileComposing);
+  expect(within(whileComposing).getByText("2 of 2")).toBeTruthy();
+  press(",", {}, whileComposing);
+  expect(within(whileComposing).getByText("1 of 2")).toBeTruthy();
+  fireEvent.click(within(whileComposing).getByRole("button", { name: "Close" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
+  await waitFor(() => expect(screen.getByTestId("reading-pane").hidden).toBe(true));
+  expect(press(".").defaultPrevented).toBe(false);
+  expect(screen.queryByRole("dialog", { name: "Comment thread" })).toBeNull();
+});
+
+test.each([false, true])(
+  "with no thread open, stepping starts beside the visible area including folded=%s",
+  async (folded) => {
+    const blocks = ids.map((id, index) => ({
+      id: `overview-${id.slice(0, 8)}`,
+      section: "overview",
+      kind: "paragraph" as const,
+      text: `Synthetic passage ${index}`,
+      html: `<p>Synthetic passage ${index}</p>`,
+    }));
+    revision.writeup.sections[0]?.blocks.push(...blocks);
+    revision.threads = blocks
+      .map((block, index) => ({
+        id: ids[index] ?? ids[0],
+        createdOn: 1,
+        state: "open",
+        target: { kind: "writeup-span", blockId: block.id, quote: block.text, prefix: "", suffix: "" },
+        placement: {
+          status: "placed",
+          location: { kind: "writeup-span", blockId: block.id, start: 0, end: block.text.length },
+        },
+        comments: [],
+      }))
+      .reverse() as RevisionView["threads"];
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("em-review-tabs") || this.closest("[hidden]")) return new DOMRect();
+      if (this.dataset.readingSection?.startsWith("t-garden")) return new DOMRect(0, 120, 600, 20);
+      const index = blocks.findIndex((block) => this.dataset.blockId === block.id);
+      return index >= 0
+        ? new DOMRect(0, 20 + index * 100, 600, 20)
+        : this.hasAttribute("data-reading-scroll")
+          ? new DOMRect(0, 100, 600, 500)
+          : new DOMRect(0, 0, 600, 600);
+    });
+    vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(function (this: HTMLElement) {
+      return [this.getBoundingClientRect()] as unknown as DOMRectList;
+    });
+    vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+    if (folded) {
+      revision.topics = [
+        { slug: "garden", title: "Garden", summary: "Synthetic plants", importance: 1, attention: "skim" },
+      ];
+      revision.writeup.sections = blocks.map((block, index) => ({
+        key: index === 1 ? "t-garden-body" : index === 0 ? "overview" : "decisions",
+        label: `Section ${index}`,
+        topic: index === 1 ? "garden" : null,
+        blocks: [block],
+      }));
+    }
+    mount();
+    await ready();
+    press(".");
+    let dialog = await screen.findByRole("dialog", { name: "Comment thread" });
+    expect(within(dialog).getByText("2 of 3")).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    press(",");
+    dialog = await screen.findByRole("dialog", { name: "Comment thread" });
+    expect(within(dialog).getByText("1 of 3")).toBeTruthy();
+  },
+);

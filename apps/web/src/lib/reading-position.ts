@@ -91,7 +91,9 @@ const readingTop = (scroller: HTMLElement) =>
 export function findAnchor(scroller: HTMLElement, selector: string): ReadingAnchor | null {
   if (scroller.scrollTop <= 0) return null;
   const top = readingTop(scroller);
-  const list = Array.from(scroller.querySelectorAll<HTMLElement>(selector));
+  const list = Array.from(scroller.querySelectorAll<HTMLElement>(selector)).filter(
+    (element) => !element.closest("[data-reading-thread-popover]"),
+  );
   const at = (index: number) => list[index] as HTMLElement;
   let found: { index: number; rect: DOMRect } | undefined;
   let lo = 0;
@@ -162,7 +164,7 @@ export function applyAnchor(
     : appElementId(anchor.id)
       ? document.getElementById(anchor.id)
       : undefined;
-  if (!element || !scroller.contains(element)) return undefined;
+  if (!element || !scroller.contains(element) || element.closest("[data-reading-thread-popover]")) return undefined;
   const rect = element.getBoundingClientRect();
   const top = readingTop(scroller);
   let line = rect.top + anchor.fraction * rect.height;
@@ -171,7 +173,11 @@ export function applyAnchor(
     line = top + anchor.gap * fTop - scroller.scrollTop;
   } else if (anchor.gap !== undefined) {
     line = rect.bottom;
-    const list = selector ? Array.from(scroller.querySelectorAll<HTMLElement>(selector)) : [];
+    const list = selector
+      ? Array.from(scroller.querySelectorAll<HTMLElement>(selector)).filter(
+          (element) => !element.closest("[data-reading-thread-popover]"),
+        )
+      : [];
     const index = list.indexOf(element);
     if (index !== -1) {
       let hasNext = false;

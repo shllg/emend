@@ -21,6 +21,7 @@
     text-decoration: underline;
   }
   .em-reading-column {
+    position: relative;
     --reading-inset: 0px;
     --reading-comment-offset: 40px;
     --reading-max: 68ch;
@@ -388,6 +389,7 @@
     .em-reading-column {
       --reading-comment-offset: 32px;
       padding-left: 40px;
+      padding-right: 40px;
     }
   }
   [data-reading-layout="original"]:not([hidden]) {

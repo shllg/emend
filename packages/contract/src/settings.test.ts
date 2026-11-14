@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import {
   ApprovedActiveHours,
@@ -248,5 +249,19 @@ test("approved review limits include both bounds and reject invalid values", () 
   expect(InboxList.parse(list)).toEqual(list);
   for (const value of [undefined, -1, 1.5, 201, "5"]) {
     expect(InboxList.safeParse({ ...list, approvedActiveLimit: value }).success).toBe(false);
+  }
+});
+
+test("comment stepping defaults, enum order and documented commands agree", () => {
+  const commands = Object.keys(SHORTCUT_DEFAULTS);
+  expect(commands.slice(commands.indexOf("file.toggleViewed") + 1, commands.indexOf("file.toggleViewed") + 3)).toEqual([
+    "thread.next",
+    "thread.previous",
+  ]);
+  expect(ShortcutCommand.options).toEqual(commands);
+  expect(SHORTCUT_DEFAULTS).toMatchObject({ "thread.next": ".", "thread.previous": "," });
+  const api = readFileSync(new URL("../../../docs/api.md", import.meta.url), "utf8");
+  for (const [command, key] of Object.entries(SHORTCUT_DEFAULTS)) {
+    expect(api).toContain(`| \`${command}\` | \`${key}\` |`);
   }
 });

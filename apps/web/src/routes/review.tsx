@@ -667,6 +667,7 @@ function LoadedReview({
       complete();
       return;
     }
+    if (!revision) return;
     const opensThread =
       intent.jumpThread && !intent.reply && intent.threadId && intent.elementId === `thread-${intent.threadId}`;
     if (opensThread && intent.threadId) {
@@ -679,7 +680,6 @@ function LoadedReview({
       setThreadJump(undefined);
       return;
     }
-    if (!revision) return;
     if (docsVisible && !missingDoc && (search.doc !== openDoc?.path || search.view !== docView(openDoc, search.view))) {
       const next: ReviewSearch = { ...search, doc: openDoc?.path, view: docView(openDoc, search.view) };
       intent.navigation = readingIntent(next, hash, seq).navigation;
@@ -784,8 +784,11 @@ function LoadedReview({
     }
     const element = appElementId(intent.elementId) ? document.getElementById(intent.elementId) : null;
     if (!element) return;
-    revealReadingTarget(element);
-    element.scrollIntoView?.({ block: intent.block });
+    // The reader reveals the passage and owns the thread surface's scroll position.
+    if (!element.closest("[data-reading-thread-popover], [data-reading-thread-sheet]")) {
+      revealReadingTarget(element);
+      element.scrollIntoView?.({ block: intent.block });
+    }
     complete(intent.jumpThread);
     if (element.hasAttribute("data-thread-card") && element.closest(".em-source")) {
       element.tabIndex = -1;
@@ -798,7 +801,6 @@ function LoadedReview({
     hasDocs,
     hasDiff,
     hasWriteup,
-    compactDoc: openDoc?.kind === "markdown",
     threadCounts: revision ? threadCounts(revision.threads) : undefined,
     filesCount: diffFiles.length,
     viewedCount: diffFiles.filter((file) => file.viewed === "viewed").length,

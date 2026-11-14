@@ -700,3 +700,12 @@ test("uses a changed palette key and stops handling its default key", async () =
   expect(press("k", { ctrlKey: true }).defaultPrevented).toBe(true);
   await screen.findByRole("dialog", { name: "Command palette" });
 });
+
+test("comment stepping commands appear in the Review page group", async () => {
+  mount();
+  await ready();
+  await openPalette();
+  const group = within(screen.getByRole("group", { name: "Review page" }));
+  expect(group.getByRole("option", { name: /^Next comment/ }).querySelector("kbd")?.textContent).toBe(".");
+  expect(group.getByRole("option", { name: /^Previous comment/ }).querySelector("kbd")?.textContent).toBe(",");
+});

@@ -43,6 +43,7 @@ import { Composer } from "./Composer.tsx";
 
 export type ThreadProps = {
   surface?: "reading" | "comments" | "diff";
+  replyInFooter?: boolean;
   reviewId: string;
   revision: number;
   thread: ThreadView;
@@ -99,6 +100,10 @@ const reasons: Record<UnplacedReason, string> = {
   "lines-gone": "The lines this comment was on are gone.",
   "not-placed": "This comment has no place in this revision.",
 };
+export function canReplyToThread(thread: ThreadView) {
+  return thread.state !== "resolved" && thread.comments.some((comment) => comment.author === "agent" || comment.sent);
+}
+
 export function ThreadCard({
   reviewId,
   revision,
@@ -107,6 +112,7 @@ export function ThreadCard({
   topics,
   showInPlace,
   surface = "reading",
+  replyInFooter = false,
 }: ThreadProps) {
   const location = thread.placement.status === "placed" ? thread.placement.location : null;
   const highlightCard = useCommentCard(thread.id, surface === "diff" ? location : null);
@@ -116,7 +122,8 @@ export function ThreadCard({
   const key = draftKey(reviewId, thread.target, thread.id);
   const keys = [key, ...thread.comments.map((comment) => editDraftKey(reviewId, comment.id))];
   const claim = useDraftClaim(keys, surface);
-  const { open: replyOpen, close: closeReply } = useReplyComposer(key);
+  const { open: requestedReply, close: closeReply } = useReplyComposer(key, !replyInFooter);
+  const replyOpen = requestedReply && !replyInFooter;
   const replyButton = useThreadActionFocus(reviewId, thread.id, surface, "reply", replyOpen);
   const [collapse, setCollapsed] = useState(
     () => surface === "comments" && thread.state === "resolved" && !keys.some((key) => loadDraft(key).trim()),
@@ -134,7 +141,7 @@ export function ThreadCard({
   const collapsed = collapse && resolved;
   const quote =
     "quote" in thread.target ? (
-      <p className="em-thread-quote">
+      <p className={`em-thread-quote${replyInFooter ? " line-clamp-2" : ""}`}>
         <mark>{thread.target.quote}</mark>
       </p>
     ) : surface === "comments" && (thread.target.kind === "lines" || thread.target.kind === "source-lines") ? (
@@ -145,7 +152,7 @@ export function ThreadCard({
       </pre>
     ) : null;
   useThreadComposer(replyOpen && !collapsed);
-  const canReply = !resolved && thread.comments.some((comment) => comment.author === "agent" || comment.sent);
+  const canReply = canReplyToThread(thread);
   return (
     <article
       ref={highlightCard}
@@ -223,6 +230,7 @@ export function ThreadCard({
                 <Comment
                   key={comment.id}
                   comment={comment}
+                  inlineComposer={replyInFooter}
                   reviewId={reviewId}
                   revision={revision}
                   thread={thread}
@@ -237,7 +245,7 @@ export function ThreadCard({
             <footer className="em-card__foot" data-reply-open={replyOpen ? "" : undefined}>
               {(canReply || resolved) && (
                 <div className={replyOpen ? "em-card__foot" : "contents"}>
-                  {canReply && !replyOpen && (
+                  {canReply && !replyOpen && !replyInFooter && (
                     <Button
                       ref={replyButton.ref}
                       variant="ghost"
@@ -289,6 +297,7 @@ export function ThreadCard({
 
 function Comment({
   comment,
+  inlineComposer,
   reviewId,
   revision,
   thread,
@@ -296,6 +305,7 @@ function Comment({
   surface = "reading",
 }: {
   comment: ThreadView["comments"][number];
+  inlineComposer: boolean;
 } & Pick<ThreadProps, "reviewId" | "revision" | "thread" | "topics" | "surface">) {
   const key = editDraftKey(reviewId, comment.id);
   const draftExists = useSyncExternalStore(subscribeDrafts, () => hasDraft(key));
@@ -381,6 +391,7 @@ function Comment({
         {editable && editing ? (
           <Composer
             embedded
+            inline={inlineComposer}
             surface={surface}
             reviewId={reviewId}
             revision={revision}

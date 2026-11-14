@@ -51,6 +51,12 @@ function Reader({
       <article id="thread-synthetic">
         <a href="#thread-synthetic">Thread link</a>
       </article>
+      <div data-reading-thread-popover>
+        <article id="thread-popover">
+          <a href="https://example.com">Popover link</a>
+          <textarea aria-label="Popover reply" />
+        </article>
+      </div>
       <button type="button">Outside control</button>
     </div>
   );
@@ -92,6 +98,16 @@ test("R2.9 reopening a pane after a diff navigation still restores its position"
 });
 
 const entryWith = (): ReadingEntry => ({ title: "Doc", revision: 1, folds: new Map(), positions: new Map() });
+
+test.each(["Popover link", "Popover reply"])("focus on %s is never remembered as reading focus", (name) => {
+  const entry = entryWith();
+  render(<Reader entry={entry} />);
+  act(() => screen.getByRole("link", { name: "Block link" }).focus());
+  expect(entry.focus?.id).toBe("block-doc-focus");
+  const control = name === "Popover link" ? screen.getByRole("link", { name }) : screen.getByRole("textbox", { name });
+  act(() => control.focus());
+  expect(entry.focus).toBeUndefined();
+});
 
 test("R3.1 a pending link never seeds its entry with a stored starting position", () => {
   saveReadingPosition("focus-test", { id: "block-doc-focus", fraction: 0.5 });

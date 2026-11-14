@@ -11,7 +11,6 @@ export const layoutSchema = z.object({
     .object({ desktop: paneChoice.catch("tabs"), tablet: paneChoice.catch("tabs") })
     .catch({ desktop: "tabs", tablet: "tabs" }),
   readingWidth: z.enum(["comfortable", "wide", "narrow"]).catch("comfortable"),
-  compact: z.boolean().catch(false),
   hideResolved: z.boolean().catch(false),
   diffStyle: z.enum(["split", "unified"]).catch("split"),
   fileOrder: z.enum(["topics", "path"]).catch("topics"),
@@ -38,10 +37,7 @@ export const defaultLayout = layoutSchema.parse({});
 
 function parse(raw: string | null): LayoutPreferences {
   try {
-    let value = JSON.parse(raw ?? "{}");
-    if (value !== null && typeof value === "object" && !Array.isArray(value) && value.reading === "focus") {
-      value = { compact: true, ...value };
-    }
+    const value = JSON.parse(raw ?? "{}");
     return layoutSchema.parse(value);
   } catch {
     return layoutSchema.parse({});

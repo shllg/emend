@@ -337,7 +337,9 @@ test("source thread links and Comments jumps open source and focus its card", as
   fireEvent.click(await screen.findByRole("link", { name: "Show in place" }));
   await screen.findByRole("button", { name: "Comment on line 6" });
   await waitFor(() => expect(document.activeElement?.id).toBe(`thread-${id}`));
-  expect(scroll.mock.contexts.some((element) => (element as HTMLElement).id === `thread-${id}`)).toBe(true);
+  const cardScroll = scroll.mock.contexts.findIndex((element) => (element as HTMLElement).id === `thread-${id}`);
+  expect(cardScroll).toBeGreaterThanOrEqual(0);
+  expect(scroll.mock.calls[cardScroll]).toEqual([{ block: "center" }]);
   expect(history.location.search).toContain("view=source");
 });
 test("a direct thread intent selects source and an unplaced thread stays in Comments", async () => {

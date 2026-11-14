@@ -1,7 +1,6 @@
 import type { RenderedWriteup, RevisionView } from "@emend/contract";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { plural } from "../../lib/count.ts";
-import { useLayoutPreferences } from "../../lib/layout-store.ts";
 import { rankedTopics } from "../../lib/topics.ts";
 import type { ReviewSearch } from "../../router.tsx";
 import { BlockReader, type ReaderGroup, type ReaderProps } from "./BlockReader.tsx";
@@ -35,8 +34,6 @@ export function Writeup({
   onNote?: (id: string) => void;
 }) {
   const root = useRef<HTMLDivElement>(null);
-  const prefs = useLayoutPreferences();
-  const compact = !phone && prefs.compact;
   useEffect(() => () => onCurrentTopic?.(undefined), [onCurrentTopic]);
   const link = useCallback(
     (hash: string, diff = false) => {
@@ -199,7 +196,7 @@ export function Writeup({
             onCurrentTopic={onCurrentTopic}
           />
         )}
-        <BlockReader {...props} topics={topics} groups={groups} compact={compact} files={files} onNote={onNote} />
+        <BlockReader {...props} topics={topics} groups={groups} files={files} onNote={onNote} />
       </div>
       <GlossaryTerms root={root} terms={writeup.terms} href={(blockId) => link(`block-${blockId}`)} />
     </>

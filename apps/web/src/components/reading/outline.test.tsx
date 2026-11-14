@@ -5,7 +5,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { clearDraft, draftKey, editDraftKey, saveDraft } from "../../lib/drafts.ts";
-import { layoutStore } from "../../lib/layout-store.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
 import { DashOutline } from "./DashOutline.tsx";
 import { DocView } from "./DocView.tsx";
@@ -64,7 +63,6 @@ beforeEach(() => {
   localStorage.clear();
   window.dispatchEvent(new StorageEvent("storage", { key: null, storageArea: localStorage }));
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
-  layoutStore.update({ compact: true });
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   observers = [];
   frames = new Map();
@@ -100,6 +98,9 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     const section = this.closest<HTMLElement>("[data-reading-section]")?.dataset.readingSection;
     return new DOMRect(0, section ? (positions.get(section) ?? 0) : 0, 800, 20);
+  });
+  vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(function (this: HTMLElement) {
+    return [this.getBoundingClientRect()] as unknown as DOMRectList;
   });
   vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
@@ -141,28 +142,20 @@ function flushFrames() {
   });
 }
 
-test.each([false, true])("writeup outline stays visible with compact=%s", (compact) => {
-  layoutStore.update({ compact });
+test("opening a comment keeps the writeup outline and passage mounted", () => {
   const view = mount();
+  const column = view.container.querySelector(".em-reading-column");
   expect(screen.getByRole("navigation", { name: "Writeup outline" })).toBeTruthy();
-  expect(view.container.querySelector(".em-reading-column")?.className).toBe(
-    "em-reading-column pt-4 pb-8 md:pt-7 md:pb-[72px]",
-  );
-  expect(!!document.getElementById(`thread-${thread.id}`)).toBe(!compact);
-  expect(!!screen.queryByRole("button", { name: "1 comment", expanded: false })).toBe(compact);
-  for (const wrapper of view.container.querySelectorAll(".em-block-threads")) {
-    expect(wrapper.hasAttribute("data-compact")).toBe(compact);
-  }
-  if (compact) {
-    fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
-    expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Hide", expanded: true })).toBeTruthy();
-  }
+  expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
+  expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
+  expect(view.container.querySelector(".em-reading-column")).toBe(column);
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
 });
 
-test.each([false, true])("Markdown doc comments honor compact independently and stay open on phone=%s", (phone) => {
+test.each([false, true])("Markdown doc comments open beside the text with phone=%s", (phone) => {
   vi.stubGlobal("matchMedia", () => ({ matches: !phone, addEventListener() {}, removeEventListener() {} }));
-  layoutStore.update({ compact: true });
   const doc = { kind: "markdown" as const, path: "garden.md", blocks: [block] };
   const docThread: ThreadView = {
     ...thread,
@@ -190,17 +183,14 @@ test.each([false, true])("Markdown doc comments honor compact independently and 
     </QueryClientProvider>,
   );
   expect(screen.queryByRole("navigation", { name: "Writeup outline" })).toBeNull();
-  expect(!!document.getElementById(`thread-${thread.id}`)).toBe(phone);
-  expect(!!view.container.querySelector(".em-thread-pill")).toBe(!phone);
-  if (!phone) {
-    fireEvent.click(screen.getByRole("button", { name: "1 comment", expanded: false }));
-    expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Hide", expanded: true }));
-    expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
-    act(() => layoutStore.update({ compact: false }));
-    expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
-    expect(view.container.querySelector(".em-thread-pill")).toBeNull();
-  }
+  expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
+  expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
+  expect(
+    view.container.querySelector("[data-block-id]")?.contains(document.getElementById(`thread-${thread.id}`)),
+  ).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
 });
 
 test("a writeup with only one outline section has no rail", () => {
@@ -601,33 +591,30 @@ test("a pane mounted hidden starts observing only when shown", () => {
   expect(observers).toHaveLength(1);
 });
 
-test.each([
-  ["open", "1 comment"],
-  ["answered", "1 comment · answered"],
-  ["resolved", "1 comment · resolved"],
-] as const)("%s threads fold and reopen without changing the block DOM or anchors", (state, label) => {
-  const view = mount({ threads: [{ ...thread, state }] });
-  const content = document.getElementById(`block-${block.id}`);
-  const pill = screen.getByRole("button", { name: label, expanded: false });
-  expect(view.container.querySelector("[data-thread-card]")).toBeNull();
-  fireEvent.click(pill);
-  expect(document.getElementById(`thread-${thread.id}`)?.classList.contains("em-card")).toBe(true);
-  fireEvent.click(screen.getByRole("button", { name: "Hide", expanded: true }));
-  expect(view.container.querySelector("[data-thread-card]")).toBeNull();
-  expect(document.getElementById(`block-${block.id}`)).toBe(content);
-  expect(screen.getByRole("button", { name: label })).toBe(document.activeElement);
-});
+test.each(["open", "answered"] as const)(
+  "a %s thread opens from a chip and closes without changing the block",
+  (state) => {
+    mount({ threads: [{ ...thread, state }] });
+    const content = document.getElementById(`block-${block.id}`);
+    fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
+    expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
+    expect(document.getElementById(`block-${block.id}`)).toBe(content);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "1 comment" }));
+  },
+);
 
-test("multiple threads share a pill, with answered taking precedence unless all are resolved", () => {
+test("multiple unresolved threads share a chip without counting resolved threads", () => {
   const view = mount({
     threads: [thread, { ...thread, id: "second", state: "answered" }, { ...thread, id: "third", state: "resolved" }],
   });
-  expect(screen.getByRole("button", { name: "3 comments · answered" })).toBeTruthy();
-  view.rerender({ threads: [thread, { ...thread, id: "second", state: "resolved" }] });
   expect(screen.getByRole("button", { name: "2 comments" })).toBeTruthy();
+  view.rerender({ threads: [thread, { ...thread, id: "second", state: "resolved" }] });
+  expect(screen.getByRole("button", { name: "1 comment" })).toBeTruthy();
 });
 
-test("unsent comments, including replies, and resumed composers keep all block threads open", () => {
+test("unsent replies stay behind their chip and a resumed new composer closes the popover", () => {
   const unsent = {
     ...thread,
     comments: [
@@ -636,29 +623,30 @@ test("unsent comments, including replies, and resumed composers keep all block t
     ],
   };
   const view = mount({ threads: [unsent] });
-  expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Hide" })).toBeNull();
+  expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
+  expect(screen.getByText("An unsent reply")).toBeTruthy();
   view.rerender({ resumedBlockId: block.id });
-  expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Hide" })).toBeNull();
+  expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
 });
 
-test("closing the gutter composer keeps its cards mounted until Hide", () => {
+test("the gutter composer closes a popover and keeps its block mounted", () => {
   mount();
-  const overview = screen.getByRole("region", { name: "Overview" });
-  fireEvent.click(within(overview).getByRole("button", { name: "Comment on block" }));
-  const card = document.getElementById(`thread-${thread.id}`);
-  expect(card).toBeTruthy();
+  const content = document.getElementById(`block-${block.id}`);
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
+  fireEvent.click(
+    within(screen.getByRole("region", { name: "Overview" })).getByRole("button", { name: "Comment on block" }),
+  );
+  expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
   expect(screen.getByRole("textbox")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Hide" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-  expect(document.getElementById(`thread-${thread.id}`)).toBe(card);
-  fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+  expect(document.getElementById(`block-${block.id}`)).toBe(content);
   expect(screen.getByRole("button", { name: "1 comment" })).toBeTruthy();
 });
 
-test("selection commenting uses the same anchor and keeps the selected block's threads open", () => {
+test("selection commenting uses the same anchor and closes the thread popover", () => {
   mount();
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
   const content = document.getElementById(`block-${block.id}`);
   const text = content?.querySelector("p")?.firstChild;
   if (!content || !text) throw new Error("Missing block text");
@@ -670,18 +658,17 @@ test("selection commenting uses the same anchor and keeps the selected block's t
   fireEvent.mouseUp(content);
   fireEvent.click(screen.getByRole("button", { name: "Comment on selection" }));
   expect(screen.getByRole("textbox")).toBeTruthy();
-  expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Hide" })).toBeNull();
+  expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
   window.getSelection()?.removeAllRanges();
 });
 
-test("turning compact comments off restores cards without replacing blocks or fold choices", () => {
+test("opening a comment preserves blocks and topic fold choices", () => {
   const view = mount();
   const content = document.getElementById(`block-${block.id}`);
   const title = screen.getByRole("heading", { name: "Topic 1: Plant a seed" });
   const fold = screen.getByRole("button", { name: "Topic 1: Plant a seed" });
   fireEvent.click(fold);
-  act(() => layoutStore.update({ compact: false }));
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
   expect(screen.getByRole("navigation", { name: "Writeup outline" })).toBeTruthy();
   expect(view.container.querySelector(".em-reading-column")?.className).toBe(
     "em-reading-column pt-4 pb-8 md:pt-7 md:pb-[72px]",
@@ -692,85 +679,51 @@ test("turning compact comments off restores cards without replacing blocks or fo
   expect(fold.getAttribute("aria-expanded")).toBe("true");
 });
 
-test("phone disables the outline and stored compact comments", () => {
+test("phone disables the outline and comments start behind chips", () => {
   mount({ phone: true });
   expect(screen.queryByRole("navigation", { name: "Writeup outline" })).toBeNull();
-  expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
-  expect(layoutStore.getSnapshot()).toMatchObject({ compact: true });
+  expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
+  expect(screen.getByRole("button", { name: "1 comment" })).toBeTruthy();
 });
 
-test("an open reply composer survives enabling compact comments and cannot be folded", async () => {
-  layoutStore.update({ compact: false });
+test("a reply draft survives closing and reopening the popover", async () => {
   mount();
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
   fireEvent.click(screen.getByRole("button", { name: "Reply" }));
-  const input = screen.getByRole("textbox");
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "Synthetic reply" } });
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   await act(async () => {});
-  act(() => layoutStore.update({ compact: true }));
-  expect(screen.getByRole("textbox")).toBe(input);
-  expect(screen.queryByRole("button", { name: "Hide" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-  await act(async () => {});
-  expect(screen.getByRole("button", { name: "Hide" })).toBeTruthy();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
+  expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Synthetic reply");
 });
 
-test("a pending thread navigation opens its pill when placement data arrives", () => {
+test("a pending thread navigation opens its popover when placement data arrives", () => {
   const threadJump = { threadId: thread.id, token: {} };
   const view = mount({ threads: [], threadJump });
   expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
   view.rerender({ threads: [thread], threadJump });
   expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Hide" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
 });
 
-test("thread wrappers stay layout-neutral outside compact comments, including on phone", () => {
-  const style = document.createElement("style");
-  // Happy DOM does not apply cascade layers; use the actual component declarations.
-  style.textContent = ["outline.css", "threads.css"]
-    .map((file) =>
-      readFileSync(resolve(import.meta.dirname, `../../styles/${file}`), "utf8")
-        .replace("@layer components {", "")
-        .replace(/}\s*$/, ""),
-    )
-    .join("\n");
-  document.head.append(style);
-  try {
-    layoutStore.update({ compact: false });
-    const view = mount();
-    const card = document.getElementById(`thread-${thread.id}`);
-    expect(card).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^(?:\d+ comments?|Hide)$/ })).not.toBeTruthy();
-    expect(view.container.querySelector(".em-outline-container")).toBeNull();
-    expect(getComputedStyle(screen.getByTestId("scroll")).getPropertyValue("container")).toBe("");
-    for (const wrapper of view.container.querySelectorAll(".em-block-threads, .em-block-threads__cards")) {
-      expect(getComputedStyle(wrapper).display).toBe("contents");
-    }
-    act(() => layoutStore.update({ compact: true }));
-    expect(view.container.querySelector(".em-outline-container")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
-    for (const wrapper of view.container.querySelectorAll(".em-block-threads, .em-block-threads__cards")) {
-      expect(getComputedStyle(wrapper).display).toBe("block");
-    }
-    expect(getComputedStyle(screen.getByRole("button", { name: "Hide" })).display).toBe("inline-flex");
-    expect(getComputedStyle(screen.getByTestId("scroll")).getPropertyValue("container")).toBe("");
-    view.rerender({ phone: true });
-    expect(view.container.querySelector(".em-outline-container")).toBeNull();
-    for (const wrapper of view.container.querySelectorAll(".em-block-threads, .em-block-threads__cards")) {
-      expect(getComputedStyle(wrapper).display).toBe("contents");
-    }
-    expect(screen.queryByRole("button", { name: "Hide" })).toBeNull();
-  } finally {
-    style.remove();
-  }
+test("source thread wrappers remain layout-neutral and reader popovers are absolute", () => {
+  const css = readFileSync(resolve(import.meta.dirname, "../../styles/threads.css"), "utf8");
+  expect(css).toMatch(/\.em-block-threads,\s*\.em-block-threads__cards\s*\{\s*display: contents;/);
+  expect(css).toMatch(/\.em-reading-thread-popover\s*\{\s*position: absolute;/);
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
+  expect(document.getElementById(`thread-${thread.id}`)?.closest("[data-reading-thread-popover]")).toBeTruthy();
 });
 
 test("sticky offset follows the measured tab row, and is removed on phone", () => {
-  let resize: (() => void) | undefined;
+  const resizes: (() => void)[] = [];
   const observed: Element[] = [];
   vi.stubGlobal(
     "ResizeObserver",
     class {
       constructor(callback: () => void) {
-        resize = callback;
+        resizes.push(callback);
       }
       observe(node: Element) {
         observed.push(node);
@@ -786,14 +739,26 @@ test("sticky offset follows the measured tab row, and is removed on phone", () =
   pane.prepend(tabRow);
   const bounds = vi.spyOn(tabRow, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 800, 57));
   const root = view.container.querySelector<HTMLElement>(".em-outline-layout");
-  act(() => resize?.());
+  act(() =>
+    resizes.forEach((resize) => {
+      resize();
+    }),
+  );
   expect(observed).toContain(tabRow);
   expect(root?.style.getPropertyValue("--reading-sticky-top")).toBe("57px");
   bounds.mockReturnValue(new DOMRect(0, 0, 800, 73));
-  act(() => resize?.());
+  act(() =>
+    resizes.forEach((resize) => {
+      resize();
+    }),
+  );
   expect(root?.style.getPropertyValue("--reading-sticky-top")).toBe("73px");
   tabRow.remove();
-  act(() => resize?.());
+  act(() =>
+    resizes.forEach((resize) => {
+      resize();
+    }),
+  );
   expect(root?.style.getPropertyValue("--reading-sticky-top")).toBe("0px");
   view.rerender({ phone: true });
   expect(root?.style.getPropertyValue("--reading-sticky-top")).toBe("");
@@ -825,27 +790,21 @@ test("at the bottom, a short final section is current without rect reads on ever
   expect(outline.getByRole("button", { name: "Glossary" }).getAttribute("aria-current")).toBe("location");
 });
 
-test("a phone reply sheet reports its open composer and survives resizing into compact comments", async () => {
+test("a phone reply draft survives resizing into a desktop popover", async () => {
   vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
   const view = mount({ phone: true });
-  const card = document.getElementById(`thread-${thread.id}`);
-  fireEvent.click(screen.getByRole("button", { name: "Reply" }));
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
   const input = screen.getByRole("textbox", { name: "Reply" });
   expect(view.container.contains(input)).toBe(false);
-  expect(input.closest('[role="dialog"]')).toBeTruthy();
-  // No saved draft: the context alone must keep this empty editor's card mounted.
+  fireEvent.change(input, { target: { value: "Synthetic reply" } });
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
   view.rerender({ phone: false });
-  expect(document.getElementById(`thread-${thread.id}`)).toBe(card);
-  expect(screen.getByRole("textbox", { name: "Reply" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Hide" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   await act(async () => {});
-  expect(screen.getByRole("button", { name: "Hide" })).toBeTruthy();
-  expect(document.getElementById(`thread-${thread.id}`)).toBe(card);
+  expect((screen.getByRole("textbox", { name: "Reply" }) as HTMLTextAreaElement).value).toBe("Synthetic reply");
+  expect(screen.getAllByRole("dialog")).toHaveLength(1);
 });
 
-test.each(["reply", "edit"])("a saved %s draft opens its block on mount", (kind) => {
+test.each(["reply", "edit"])("a saved %s draft restores its editor only after opening the chip", (kind) => {
   const key = kind === "reply" ? draftKey(reviewId, thread.target, thread.id) : editDraftKey(reviewId, reviewId);
   saveDraft(key, "Saved synthetic draft");
   mount({
@@ -858,10 +817,12 @@ test.each(["reply", "edit"])("a saved %s draft opens its block on mount", (kind)
         : thread,
     ],
   });
-  expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Hide" })).toBeNull();
-  if (kind === "reply")
-    expect((screen.getByRole("textbox", { name: "Reply" }) as HTMLTextAreaElement).value).toBe("Saved synthetic draft");
+  expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
+  expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
+  expect(
+    screen.getByRole<HTMLTextAreaElement>("textbox", { name: kind === "reply" ? "Reply" : "Edit comment" }).value,
+  ).toBe("Saved synthetic draft");
 });
 
 test.each(["Edited synthetic text", ""])("an unsent comment's saved edit resumes with text %j", (text) => {
@@ -869,15 +830,19 @@ test.each(["Edited synthetic text", ""])("an unsent comment's saved edit resumes
   mount({
     threads: [{ ...thread, comments: thread.comments.map((comment) => ({ ...comment, sent: false, sentOn: null })) }],
   });
+  expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
   expect((screen.getByRole("textbox", { name: "Edit comment" }) as HTMLTextAreaElement).value).toBe(text);
-  expect(screen.queryByRole("button", { name: "Hide" })).toBeNull();
 });
 
-test("draft subscriptions open a closed block and clearing the draft leaves its card and focus in place", () => {
+test("saving a draft keeps its thread closed and clearing it after opening preserves the card and focus", () => {
   mount();
   expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
   const key = draftKey(reviewId, thread.target, thread.id);
   act(() => saveDraft(key, "Synthetic saved reply"));
+  expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
+  expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
   const card = document.getElementById(`thread-${thread.id}`);
   expect(card).toBeTruthy();
   const resolve = screen.getByRole("button", { name: "Resolve" });
@@ -886,7 +851,7 @@ test("draft subscriptions open a closed block and clearing the draft leaves its 
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(document.getElementById(`thread-${thread.id}`)).toBe(card);
   expect(document.activeElement).toBe(resolve);
-  expect(screen.getByRole("button", { name: "Hide" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
 });
 
 test("sending the last unsent comment keeps the card and focused control mounted", () => {
@@ -898,6 +863,7 @@ test("sending the last unsent comment keeps the card and focused control mounted
     ],
   };
   const view = mount({ threads: [unsent] });
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
   const card = document.getElementById(`thread-${thread.id}`);
   const resolve = screen.getByRole("button", { name: "Resolve" });
   act(() => resolve.focus());
@@ -906,14 +872,14 @@ test("sending the last unsent comment keeps the card and focused control mounted
   });
   expect(document.getElementById(`thread-${thread.id}`)).toBe(card);
   expect(document.activeElement).toBe(resolve);
-  fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
 });
 
-test("only a new matching jump token reopens a hidden pill", () => {
+test("only a new matching jump token reopens a closed popover", () => {
   const threadJump = { threadId: thread.id, token: {} };
   const view = mount({ threadJump });
-  fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   view.rerender({ threadJump, search: { tab: "diff" } });
   expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
   view.rerender({ threadJump: { threadId: "other-thread", token: {} } });
@@ -940,7 +906,7 @@ test("a writeup that fits the pane keeps its first section current on scroll", (
   expect(outline.getByRole("button", { name: "Plant a seed" }).hasAttribute("aria-current")).toBe(false);
 });
 
-test.each(["", " \n\t"])("a blank saved reply %j does not pin its block open and Hide works", (text) => {
+test.each(["", " \n\t"])("a blank saved reply %j does not pin its block open and Close works", (text) => {
   const key = draftKey(reviewId, thread.target, thread.id);
   saveDraft(key, text);
   mount();
@@ -948,7 +914,7 @@ test.each(["", " \n\t"])("a blank saved reply %j does not pin its block open and
   fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
   expect(screen.queryByRole("textbox", { name: "Reply" })).toBeNull();
   expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
   act(() => saveDraft(key, " \t"));
   expect(screen.getByRole("button", { name: "1 comment" })).toBeTruthy();
@@ -973,6 +939,6 @@ test.each(["sent", "agent"])("a stale edit draft for a %s comment does not pin i
   expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
   expect(screen.queryByRole("textbox", { name: "Edit comment" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
 });

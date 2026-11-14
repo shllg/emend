@@ -1,22 +1,21 @@
 import type { RenderedBlock, RevisionView, Target, TopicMeta } from "@emend/contract";
 import { TextSelect } from "lucide-react";
 import { type ReactNode, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { mapBlockText } from "../../lib/block-ranges.ts";
-import { registerCommentRanges, supportsCommentHighlights } from "../../lib/comment-highlights.ts";
 import { claimDraft } from "../../lib/composer-owner.ts";
 import { draftKey } from "../../lib/drafts.ts";
 import { useLayout } from "../../lib/layout.ts";
 import { revealReadingTarget } from "../../lib/reading-reveal.ts";
 import { blockAnchor, selectionToAnchor } from "../../lib/selection.ts";
 import { Composer } from "../threads/Composer.tsx";
-import { ThreadCard } from "../threads/ThreadCard.tsx";
 import { Button } from "../ui/Button.tsx";
 import { useAgentNoteRefs } from "./agent-note-refs.ts";
 import { Block } from "./Block.tsx";
-import { BlockThreads, type ThreadJump } from "./BlockThreads.tsx";
+import type { ThreadJump } from "./BlockThreads.tsx";
 import { Lightbox } from "./Lightbox.tsx";
 import { ReadingGroup } from "./ReadingGroup.tsx";
+import { ReadingThreads } from "./ReadingThreads.tsx";
 import { type LightboxItem, useScreenshots } from "./screenshots.ts";
+import { useReaderThreads } from "./use-reader-threads.ts";
 
 const emptyFiles: RevisionView["files"] = [];
 
@@ -59,12 +58,10 @@ export function BlockReader({
   resumedBlockId,
   activeThreadId,
   threadJump,
-  compact = false,
   files = emptyFiles,
   onNote,
 }: ReaderProps & {
   groups: ReaderGroup[];
-  compact?: boolean;
   files?: RevisionView["files"];
   onNote?: (id: string) => void;
 }) {
@@ -72,7 +69,6 @@ export function BlockReader({
   const root = useRef<HTMLDivElement>(null);
   useAgentNoteRefs(root, groups, files, onNote);
   const selectionPrompt = useRef<HTMLDivElement>(null);
-  const highlights = useRef<ReturnType<typeof registerCommentRanges>>(undefined);
   const opener = useRef<HTMLElement | null>(null);
   // A press on the prompt: the target latched at pointerdown, and until when selection changes are ignored
   // (Infinity while the pointer is down, then 600 ms past its release).
@@ -107,6 +103,7 @@ export function BlockReader({
   // biome-ignore lint/correctness/useExhaustiveDependencies: A gallery's DOM snapshot belongs to one review revision.
   useLayoutEffect(() => closeGallery(), [reviewId, revision, closeGallery]);
   const openComposer = (next: Target, from?: HTMLElement) => {
+    readingThreads.close();
     screenshotOpener.current = from ?? null;
     opener.current =
       from ??
@@ -170,49 +167,16 @@ export function BlockReader({
     }
     return byTopic;
   }, [threads]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: A revision/review change retires ranges even if the cached blocks and threads are shared.
-  useLayoutEffect(() => {
-    if (!root.current || !supportsCommentHighlights()) return;
-    const blocks: Map<string, Range>[] = [];
-    for (const block of root.current.querySelectorAll<HTMLElement>(
-      "[data-block-id], [data-topic-slug][data-topic-part]",
-    )) {
-      try {
-        const part = block.dataset.topicPart;
-        const placed = part
-          ? topicThreads.get(block.dataset.topicSlug ?? "")
-          : blockThreads.get(block.dataset.blockId ?? "");
-        if (!placed) continue;
-        const map = mapBlockText(block);
-        if (!map) continue;
-        const ranges = new Map<string, Range>();
-        for (const thread of placed) {
-          if (thread.state === "resolved" || thread.placement.status !== "placed") continue;
-          const location = thread.placement.location;
-          if (
-            part
-              ? location.kind !== "topic" || location.part !== part
-              : location.kind !== "writeup-span" && location.kind !== "doc-span"
-          )
-            continue;
-          if (!("start" in location) || location.start === undefined || location.end === undefined) continue;
-          const range = map(location.start, location.end);
-          if (range) ranges.set(thread.id, range);
-        }
-        blocks.push(ranges);
-      } catch {
-        // A failed block contributes no ranges; the rest of the reader still works.
-      }
-    }
-    const registration = registerCommentRanges(blocks);
-    highlights.current = registration;
-    return () => {
-      registration?.unregister();
-      highlights.current = undefined;
-    };
-  }, [blockThreads, topicThreads, revision, reviewId]);
-  // Apply the current intent to new registrations too, without remapping text.
-  useLayoutEffect(() => highlights.current?.setActiveThread(activeThreadId));
+  const readingThreads = useReaderThreads({
+    root,
+    blockThreads,
+    topicThreads,
+    reviewId,
+    revision,
+    activeThreadId,
+    threadJump,
+    composing: composing || !!resumedBlockId,
+  });
   useEffect(() => {
     const capture = (event?: Event) => {
       if (!root.current || composing) return;
@@ -287,18 +251,6 @@ export function BlockReader({
       element?.removeEventListener("keyup", capture);
     };
   }, [composing, targets]);
-  const renderThreads = (placed: RevisionView["threads"]) =>
-    placed.map((thread) => (
-      <div key={thread.id} className="mt-2.5 mb-1.5">
-        <ThreadCard
-          reviewId={reviewId}
-          revision={revision}
-          thread={thread}
-          changedBlocks={changedBlocks}
-          topics={topics}
-        />
-      </div>
-    ));
   const composer = composing && target && (
     <Composer
       reviewId={reviewId}
@@ -334,17 +286,6 @@ export function BlockReader({
           );
         }}
       >
-        <BlockThreads
-          compact={compact}
-          reviewId={reviewId}
-          threads={blockThreads.get(block.id) ?? []}
-          composing={
-            resumedBlockId === block.id || (composing && !!target && "blockId" in target && target.blockId === block.id)
-          }
-          jump={threadJump}
-        >
-          {renderThreads(blockThreads.get(block.id) ?? [])}
-        </BlockThreads>
         {target && "blockId" in target && target.blockId === block.id && composer}
       </Block>
     ));
@@ -359,22 +300,7 @@ export function BlockReader({
             groupBlocks(group).reduce((latest, block) => Math.max(latest, changes.get(block.id) ?? 0), 0) || undefined
           }
           onCommentTopic={(slug, from) => openComposer({ kind: "topic", slug }, from)}
-          discussion={
-            group.topic && (
-              <>
-                {target?.kind === "topic" && target.slug === group.topic.slug && composer}
-                <BlockThreads
-                  compact={compact}
-                  reviewId={reviewId}
-                  threads={topicThreads.get(group.topic.slug) ?? []}
-                  composing={composing && target?.kind === "topic" && target.slug === group.topic.slug}
-                  jump={threadJump}
-                >
-                  {renderThreads(topicThreads.get(group.topic.slug) ?? [])}
-                </BlockThreads>
-              </>
-            )
-          }
+          discussion={group.topic && target?.kind === "topic" && target.slug === group.topic.slug && composer}
         >
           {group.content}
           {renderBlocks(group.blocks, group.path, group.presentation === "decisions")}
@@ -391,6 +317,14 @@ export function BlockReader({
           ))}
         </ReadingGroup>
       ))}
+      <ReadingThreads
+        state={readingThreads}
+        root={root}
+        reviewId={reviewId}
+        revision={revision}
+        changedBlocks={changedBlocks}
+        topics={topics}
+      />
       {!composing && (error || target) && (
         <div
           ref={selectionPrompt}

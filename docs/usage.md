@@ -133,7 +133,8 @@ the same groups as a desktop.
 </p>
 
 A plan or other doc that comes with a review opens next to its diff, with its diagrams drawn and
-your comments beside the text.
+your comments beside the text. A tinted passage, or the count in the margin, opens its thread
+beside the text. Press `,` and `.` to step through the comments.
 
 ![A plan doc with a state diagram and a comment thread](images/doc-desktop.png)
 

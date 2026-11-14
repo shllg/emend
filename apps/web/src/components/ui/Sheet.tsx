@@ -19,6 +19,8 @@ export interface SheetProps {
   onInteractOutside?: ComponentProps<typeof Dialog.Content>["onInteractOutside"];
   initialFocus?: RefObject<HTMLElement | null>;
   returnFocus?: () => HTMLElement | null;
+  /** A supplied container mounts content in the same commit as its navigation intent. */
+  portalContainer?: HTMLElement;
   /** Called once the sheet has closed and unmounted, after focus went back. */
   onClosed?: () => void;
 }
@@ -43,6 +45,7 @@ export function Sheet({
   onInteractOutside,
   initialFocus,
   returnFocus,
+  portalContainer,
   onClosed,
 }: SheetProps) {
   const content = useRef<HTMLDivElement>(null);
@@ -56,10 +59,15 @@ export function Sheet({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       {trigger && <Dialog.Trigger asChild>{trigger}</Dialog.Trigger>}
-      <Dialog.Portal>
+      <Dialog.Portal container={portalContainer}>
         <Dialog.Overlay className={overlayClass} />
         <Dialog.Content
           ref={attach}
+          onEscapeKeyDown={(event) => {
+            // A dismissible inline editor handles Escape before its containing sheet closes.
+            if (event.target instanceof Element && event.target.closest("[data-inline-composer-dismiss]"))
+              event.preventDefault();
+          }}
           onInteractOutside={(event) => {
             if (isToastInteraction(event)) event.preventDefault();
             else onInteractOutside?.(event);
@@ -94,7 +102,9 @@ export function Sheet({
               <IconButton label="Close" icon={X} size={side === "bottom" ? "lg" : "md"} tooltip={false} />
             </Dialog.Close>
           </header>
-          <div className="relative min-h-0 flex-1 space-y-4 overflow-auto p-4">
+          {/* The body yields all its height before the footer shrinks, so the footer scrolls only
+              when the header and footer alone do not fit. */}
+          <div className="relative min-h-0 flex-[1_1000000_0%] space-y-4 overflow-auto p-4">
             {description && (
               <Dialog.Description className="m-0 font-sans text-14 font-normal leading-(--lh-body) text-fg-2">
                 {description}
@@ -103,7 +113,9 @@ export function Sheet({
             {children}
           </div>
           {footer && (
-            <footer className="flex shrink-0 justify-end gap-2 border-t border-line-1 px-4 py-3">{footer}</footer>
+            <footer className="flex min-h-0 justify-end gap-2 overflow-y-auto border-t border-line-1 px-4 py-3">
+              {footer}
+            </footer>
           )}
         </Dialog.Content>
       </Dialog.Portal>

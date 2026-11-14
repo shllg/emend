@@ -1,6 +1,6 @@
 import { LIMITS, type Target, type TopicMeta } from "@emend/contract";
 import { Lock } from "lucide-react";
-import { type ReactNode, type RefObject, useId, useLayoutEffect, useRef, useSyncExternalStore } from "react";
+import { type ReactNode, type RefObject, useEffect, useId, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { mutationMessage, useReviewMutation } from "../../api/mutations.ts";
 import { useComposerOwner } from "../../lib/composer-owner.ts";
 import {
@@ -21,6 +21,11 @@ import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Sheet } from "../ui/Sheet.tsx";
 
+function canRestoreInlineFocus(form: HTMLFormElement | null | undefined) {
+  const active = document.activeElement;
+  return !active || active === document.body || !!form?.contains(active);
+}
+
 export function Composer({
   reviewId,
   revision,
@@ -37,6 +42,7 @@ export function Composer({
   wrap,
   placeholder = true,
   embedded = false,
+  inline = false,
 }: {
   reviewId: string;
   revision: number;
@@ -49,6 +55,8 @@ export function Composer({
   wrap?: (editor: ReactNode) => ReactNode;
   placeholder?: boolean;
   embedded?: boolean;
+  /** Render inside an existing sheet without opening or focusing another one. */
+  inline?: boolean;
   onSaved?: () => void;
   onCancel?: () => void;
   onDismiss?: () => void;
@@ -58,6 +66,23 @@ export function Composer({
   const owner = useComposerOwner(key, surface, target, threadId, commentId);
   const phone = useLayout() === "phone";
   const saved = useRef(false);
+  const restored = useRef(false);
+  const latestReturnFocus = useRef(returnFocus);
+  latestReturnFocus.current = returnFocus;
+  useEffect(() => {
+    restored.current = false;
+    if (!phone || !inline || !owner.owns) return;
+    const input = owner.input.current;
+    const form = input?.form;
+    return () => {
+      const wasSaved = saved.current || (isDraftSaving(key) && !hasDraft(key));
+      const restore = latestReturnFocus.current;
+      // Passive cleanup runs after the replacement Edit button's ref attaches. An extra microtask
+      // lets the sheet's focus trap move lost focus first, obscuring whether this editor owned it.
+      if (input && !input.isConnected && !restored.current && canRestoreInlineFocus(form))
+        restore?.(wasSaved)?.focus({ preventScroll: true });
+    };
+  }, [key, phone, inline, owner.owns, owner.input]);
   useLayoutEffect(() => {
     saved.current = false;
     if (!phone) return;
@@ -91,15 +116,26 @@ export function Composer({
       target={target}
       topics={topics}
       phone={phone}
+      inline={inline}
       embedded={embedded}
       threadId={threadId}
       commentId={commentId}
-      onSaved={onSaved}
+      onSaved={() => {
+        onSaved?.();
+        const input = owner.input.current;
+        if (phone && inline && input?.isConnected && canRestoreInlineFocus(input.form)) {
+          const target = returnFocus?.(true);
+          if (target?.isConnected) {
+            restored.current = true;
+            target.focus({ preventScroll: true });
+          }
+        }
+      }}
       onCancel={cancel}
       onDismiss={onDismiss ?? cancel}
     />
   );
-  if (phone)
+  if (phone && !inline)
     return (
       <Sheet
         side="bottom"
@@ -118,6 +154,7 @@ export function Composer({
 }
 function DraftComposer({
   phone,
+  inline,
   embedded,
   inputRef,
   onFocus,
@@ -133,6 +170,7 @@ function DraftComposer({
   onDismiss,
 }: {
   phone: boolean;
+  inline: boolean;
   embedded: boolean;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   onFocus: () => void;
@@ -153,16 +191,17 @@ function DraftComposer({
   const { label, icon } = targetLabel(target, topics);
   const saveLabel = commentId ? "Save changes" : "Save comment";
   const shortcut = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "⌘↵" : "Ctrl ↵";
-  const bare = embedded && !phone;
+  const bare = embedded && (!phone || inline);
   const highlightCard = useCommentCard(null, !bare && !phone ? target : null);
   return (
     <form
       ref={highlightCard}
-      className={`em-composer ${phone ? "em-composer--sheet" : bare ? "em-composer--inline" : "em-card"}`}
+      className={`em-composer ${bare ? "em-composer--inline" : phone ? "em-composer--sheet" : "em-card"}`}
       data-state="draft"
       data-reply={bare && !commentId ? "" : undefined}
+      data-inline-composer-dismiss={inline && onDismiss ? "" : undefined}
       onKeyDown={(event) => {
-        if (event.key === "Escape" && onDismiss && !phone) {
+        if (event.key === "Escape" && onDismiss && (!phone || inline)) {
           event.preventDefault();
           event.stopPropagation();
           if (!mutation.isPending && !isDraftSaving(storageKey)) onDismiss();

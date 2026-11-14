@@ -1,10 +1,8 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useLayout, usePaneMode } from "../../lib/layout.ts";
-import { layoutStore, useLayoutPreferences } from "../../lib/layout-store.ts";
+import { usePaneMode } from "../../lib/layout.ts";
 import { useShortcut } from "../../lib/use-shortcut.tsx";
 import type { ReviewSearch } from "../../router.tsx";
 import { formatThreadCounts, type ThreadCounts } from "../status/ThreadStateBadge.tsx";
-import { Button } from "../ui/Button.tsx";
 import { Tabs } from "../ui/Tabs.tsx";
 
 export interface ReviewTabsProps {
@@ -13,7 +11,6 @@ export interface ReviewTabsProps {
   hasDocs: boolean;
   hasWriteup: boolean;
   hasDiff: boolean;
-  compactDoc?: boolean;
   threadCounts?: ThreadCounts;
   filesCount?: number;
   viewedCount?: number;
@@ -25,7 +22,6 @@ export function ReviewTabs({
   hasDocs,
   hasWriteup,
   hasDiff,
-  compactDoc = false,
   threadCounts,
   filesCount = 0,
   viewedCount = 0,
@@ -33,8 +29,6 @@ export function ReviewTabs({
   idBase,
 }: ReviewTabsProps & { docsCount: number; idBase: string }) {
   const navigate = useNavigate();
-  const phone = useLayout() === "phone";
-  const { compact } = useLayoutPreferences();
   const showDiff = usePaneMode() === "tabs" && hasDiff;
   const active =
     (search.tab === "diff" && !showDiff) || (search.tab === "files" && !filesCount)
@@ -83,19 +77,6 @@ export function ReviewTabs({
         ].map((item) => ({ ...item, "aria-controls": `${idBase}-${item.id === "diff" ? "diff" : "reading"}-panel` }))}
         onChange={changeTab}
       />
-      {!phone && (value === "writeup" || (value === "docs" && compactDoc)) && (
-        <div className="mx-2 flex shrink-0 gap-1">
-          <Button
-            size="sm"
-            variant="ghost"
-            className={compact ? "bg-raised text-fg-1" : undefined}
-            aria-pressed={compact}
-            onClick={() => layoutStore.update({ compact: !compact })}
-          >
-            Compact comments
-          </Button>
-        </div>
-      )}
     </div>
   );
 }

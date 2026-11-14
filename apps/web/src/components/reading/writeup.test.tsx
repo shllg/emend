@@ -11,7 +11,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { renderWriteup } from "../../../../../packages/core/src/render/writeup.ts";
-import { layoutStore } from "../../lib/layout-store.ts";
 import { blockAnchor } from "../../lib/selection.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
 import { BlockView } from "./BlockView.tsx";
@@ -82,6 +81,9 @@ function mount(ui: React.ReactNode) {
 }
 beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([
+    new DOMRect(0, 100, 200, 20),
+  ] as unknown as DOMRectList);
   localStorage.clear();
   window.dispatchEvent(new StorageEvent("storage", { key: null, storageArea: localStorage }));
   window.getSelection()?.removeAllRanges();
@@ -225,8 +227,7 @@ test("blast radius text has no comment anchor", () => {
   expect(screen.queryByRole("button", { name: "Comment on selection" })).toBeNull();
 });
 
-test("whole-topic and quoted threads stay below the topic metadata when folded and both count", () => {
-  layoutStore.update({ compact: false });
+test("whole-topic and quoted threads share the title chip when folded and both count", () => {
   const whole: ThreadView = {
     id: reviewId,
     createdOn: 1,
@@ -244,18 +245,13 @@ test("whole-topic and quoted threads stay below the topic metadata when folded a
   };
   topicReader([whole, quoted], { ...topic, attention: "skim" }, true);
   const group = screen.getByRole("region", { name: "Topic 1: Plant a seed" });
-  const cards = group.querySelectorAll("[data-thread-card]");
-  expect(cards).toHaveLength(2);
-  for (const card of cards) {
-    expect(card.closest("[hidden]")).toBeNull();
-    expect(
-      (group.querySelector(".em-topic-summary")?.compareDocumentPosition(card) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-  }
+  expect(group.querySelectorAll("[data-thread-card]")).toHaveLength(0);
   expect(within(group).getByText("2 comments")).toBeTruthy();
-  expect(group.querySelector(".em-thread-quote")?.textContent).toBe("seed");
-  expect(within(group).getByText("Whole topic feedback")).toBeTruthy();
-  expect(within(group).getByText("Quoted topic feedback")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "2 comments" }));
+  expect(screen.getByText("Whole topic feedback")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByText("Quoted topic feedback")).toBeTruthy();
+  expect(screen.getByRole("dialog").querySelector(".em-thread-quote")?.textContent).toBe("seed");
   expect(screen.getByRole("navigation", { name: "Writeup outline" }).textContent).toContain("2 comments");
 });
 
@@ -267,81 +263,77 @@ test("a hostile topic title and summary remain literal React text", () => {
   expect(container.querySelector("img, script, [onerror]")).toBeNull();
 });
 
-test.each([{ compact: false }, { compact: true }])(
-  "compact=$compact: new writeups show the opening hierarchy before topics",
-  async (preferences) => {
-    layoutStore.update(preferences);
-    const writeup = RenderedWriteup.parse(
-      await renderWriteup(
-        {
-          tldr: "Failed requests now stop after three attempts.",
-          review: { level: "topics", topics: ["seed"], reason: "Check the retry boundary." },
-          checked: "Unit tests cover three attempts.",
-          notChecked: "Browser behavior.",
-          overview: "- **Goal:** Bound retries.\n- **Change:** Three attempts.",
-          outOfScope: "- The delay between attempts.",
-          whereToLook: "- **Biggest risk:** Losing the final attempt.\n- **Check first:** The retry loop.",
-          context: "- **Scope:** The request loop in `retry.ts`.",
-          decisions: "Keep the existing delay.",
-          glossary: "- **Budget:** The number of attempts.",
-          topics: { seed: { why: "Retries must end." } },
-        },
-        [topic],
-      ),
-    );
-    const { container } = mount(<Writeup {...props} topics={[topic]} writeup={writeup} />);
-    expect(
-      [...container.querySelectorAll("[data-reading-section]")].map((group) =>
-        group.getAttribute("data-reading-section"),
-      ),
-    ).toEqual([
-      "tldr",
-      "review",
-      "checked",
-      "notChecked",
-      "overview",
-      "outOfScope",
-      "whereToLook",
-      "context",
-      "decisions",
-      "glossary",
-      "topics-map",
-      "t-seed-why",
-    ]);
-    expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
-      "TL;DR",
-      "Review",
-      "Checked",
-      "Not checked",
-      "Overview",
-      "Out of scope",
-      "Where to look",
-      "Context",
-      "Decisions & drift",
-      "Topics",
-      "Topic 1: Plant a seed",
-    ]);
-    for (const [key, classes] of [
-      ["tldr", ["em-writeup-card"]],
-      ["outOfScope", ["em-writeup-quiet"]],
-      ["whereToLook", ["em-writeup-callout", "em-writeup-guide"]],
-      ["context", ["em-writeup-muted"]],
-      ["decisions", ["em-writeup-callout", "em-writeup-decisions"]],
-    ] as const) {
-      const group = container.querySelector(`[data-reading-section="${key}"]`);
-      expect(group).toBeTruthy();
-      for (const name of classes) expect(group?.classList.contains(name)).toBe(true);
-      expect(group?.querySelector("h2")?.className).toBe("em-writeup-kicker");
-      expect(group?.querySelector("details, [hidden], [aria-expanded]")).toBeNull();
-      expect(group?.querySelector("[data-block-id]")).toBeTruthy();
-    }
-    expect(screen.getByRole("heading", { name: "Overview" }).classList.contains("em-writeup-kicker")).toBe(false);
-    for (const label of ["Review", "Checked", "Not checked"]) {
-      expect(screen.getByRole("region", { name: label }).className).toBe("em-reading-group");
-      expect(screen.getByRole("heading", { name: label }).classList.contains("em-writeup-kicker")).toBe(false);
-    }
-  },
-);
+test("new writeups show the opening hierarchy before topics", async () => {
+  const writeup = RenderedWriteup.parse(
+    await renderWriteup(
+      {
+        tldr: "Failed requests now stop after three attempts.",
+        review: { level: "topics", topics: ["seed"], reason: "Check the retry boundary." },
+        checked: "Unit tests cover three attempts.",
+        notChecked: "Browser behavior.",
+        overview: "- **Goal:** Bound retries.\n- **Change:** Three attempts.",
+        outOfScope: "- The delay between attempts.",
+        whereToLook: "- **Biggest risk:** Losing the final attempt.\n- **Check first:** The retry loop.",
+        context: "- **Scope:** The request loop in `retry.ts`.",
+        decisions: "Keep the existing delay.",
+        glossary: "- **Budget:** The number of attempts.",
+        topics: { seed: { why: "Retries must end." } },
+      },
+      [topic],
+    ),
+  );
+  const { container } = mount(<Writeup {...props} topics={[topic]} writeup={writeup} />);
+  expect(
+    [...container.querySelectorAll("[data-reading-section]")].map((group) =>
+      group.getAttribute("data-reading-section"),
+    ),
+  ).toEqual([
+    "tldr",
+    "review",
+    "checked",
+    "notChecked",
+    "overview",
+    "outOfScope",
+    "whereToLook",
+    "context",
+    "decisions",
+    "glossary",
+    "topics-map",
+    "t-seed-why",
+  ]);
+  expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
+    "TL;DR",
+    "Review",
+    "Checked",
+    "Not checked",
+    "Overview",
+    "Out of scope",
+    "Where to look",
+    "Context",
+    "Decisions & drift",
+    "Topics",
+    "Topic 1: Plant a seed",
+  ]);
+  for (const [key, classes] of [
+    ["tldr", ["em-writeup-card"]],
+    ["outOfScope", ["em-writeup-quiet"]],
+    ["whereToLook", ["em-writeup-callout", "em-writeup-guide"]],
+    ["context", ["em-writeup-muted"]],
+    ["decisions", ["em-writeup-callout", "em-writeup-decisions"]],
+  ] as const) {
+    const group = container.querySelector(`[data-reading-section="${key}"]`);
+    expect(group).toBeTruthy();
+    for (const name of classes) expect(group?.classList.contains(name)).toBe(true);
+    expect(group?.querySelector("h2")?.className).toBe("em-writeup-kicker");
+    expect(group?.querySelector("details, [hidden], [aria-expanded]")).toBeNull();
+    expect(group?.querySelector("[data-block-id]")).toBeTruthy();
+  }
+  expect(screen.getByRole("heading", { name: "Overview" }).classList.contains("em-writeup-kicker")).toBe(false);
+  for (const label of ["Review", "Checked", "Not checked"]) {
+    expect(screen.getByRole("region", { name: label }).className).toBe("em-reading-group");
+    expect(screen.getByRole("heading", { name: label }).classList.contains("em-writeup-kicker")).toBe(false);
+  }
+});
 
 test.each(["review", "checked", "notChecked", "context"] as const)(
   "the topics map follows %s even without decisions or glossary",
@@ -567,54 +559,50 @@ test("an HTML doc keeps its sandbox note in the doc bar above the frame", () => 
   }
 });
 
-test.each([{ compact: false }, { compact: true }])(
-  "compact=$compact: hostile metadata stays text and server-sanitized Markdown remains inert",
-  async (preferences) => {
-    layoutStore.update(preferences);
-    const hostile = "<script>evil()</script><img src=x onerror=evil()><svg onload=evil()></svg>";
-    const markdown = `${hostile}\n\n[bad](javascript:evil())\n\nRaw <b>HTML</b>\n\n\`\`\`mermaid\ngraph TD; A-->B; click A evil "click"\n\`\`\``;
-    const evilTopic = {
-      ...topic,
-      title: hostile,
-      summary: hostile,
-      blastRadius: { scope: "<img/onerror=evil()>", note: hostile },
-    };
-    const writeup = await renderWriteup(
-      {
-        overview: markdown,
-        tldr: "",
-        outOfScope: markdown,
-        whereToLook: markdown,
-        context: markdown,
-        decisions: null,
-        glossary: markdown,
-        topics: { seed: { why: markdown, body: markdown } },
-      },
-      [evilTopic],
-    );
-    const { container } = mount(
-      <>
-        <Writeup {...props} topics={[evilTopic]} writeup={RenderedWriteup.parse(writeup)} />
-        <DocView
-          {...props}
-          docs={[{ path: hostile, kind: "markdown", blocks: [] }]}
-          openDoc={{ path: hostile, kind: "markdown", blocks: [] }}
-          search={{ tab: "docs" }}
-          targeted={false}
-          onOpenDoc={() => {}}
-        />
-      </>,
-    );
-    expect(screen.getAllByText(hostile).length).toBeGreaterThanOrEqual(3);
-    expect(container.querySelector("script, svg[onload], [onerror], [onclick]")).toBeNull();
-    expect(container.querySelector('a[href^="javascript:"]')).toBeNull();
-    expect(container.querySelectorAll(".em-prose").length).toBeGreaterThan(0);
-    for (const frame of container.querySelectorAll("iframe")) {
-      expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
-      expect(frame.getAttribute("src")).toBe("/mermaid-frame.html");
-    }
-  },
-);
+test("hostile metadata stays text and server-sanitized Markdown remains inert", async () => {
+  const hostile = "<script>evil()</script><img src=x onerror=evil()><svg onload=evil()></svg>";
+  const markdown = `${hostile}\n\n[bad](javascript:evil())\n\nRaw <b>HTML</b>\n\n\`\`\`mermaid\ngraph TD; A-->B; click A evil "click"\n\`\`\``;
+  const evilTopic = {
+    ...topic,
+    title: hostile,
+    summary: hostile,
+    blastRadius: { scope: "<img/onerror=evil()>", note: hostile },
+  };
+  const writeup = await renderWriteup(
+    {
+      overview: markdown,
+      tldr: "",
+      outOfScope: markdown,
+      whereToLook: markdown,
+      context: markdown,
+      decisions: null,
+      glossary: markdown,
+      topics: { seed: { why: markdown, body: markdown } },
+    },
+    [evilTopic],
+  );
+  const { container } = mount(
+    <>
+      <Writeup {...props} topics={[evilTopic]} writeup={RenderedWriteup.parse(writeup)} />
+      <DocView
+        {...props}
+        docs={[{ path: hostile, kind: "markdown", blocks: [] }]}
+        openDoc={{ path: hostile, kind: "markdown", blocks: [] }}
+        search={{ tab: "docs" }}
+        targeted={false}
+        onOpenDoc={() => {}}
+      />
+    </>,
+  );
+  expect(screen.getAllByText(hostile).length).toBeGreaterThanOrEqual(3);
+  expect(container.querySelector("script, svg[onload], [onerror], [onclick]")).toBeNull();
+  expect(container.querySelector('a[href^="javascript:"]')).toBeNull();
+  expect(container.querySelectorAll(".em-prose").length).toBeGreaterThan(0);
+  for (const frame of container.querySelectorAll("iframe")) {
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(frame.getAttribute("src")).toBe("/mermaid-frame.html");
+  }
+});
 
 test.each([
   ["critical", "High risk"],
