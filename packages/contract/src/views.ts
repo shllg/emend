@@ -104,7 +104,18 @@ const renderedText = z
   );
 const renderedBytes = (value: unknown) => encoder.encode(JSON.stringify(value)).byteLength;
 const sectionKey = z.union([
-  z.enum(["overview", "tldr", "outOfScope", "whereToLook", "context", "decisions", "glossary"]),
+  z.enum([
+    "overview",
+    "tldr",
+    "review",
+    "checked",
+    "notChecked",
+    "outOfScope",
+    "whereToLook",
+    "context",
+    "decisions",
+    "glossary",
+  ]),
   z.templateLiteral(["t-", TopicSlug, "-", z.enum(["why", "example", "body"])]),
 ]);
 
@@ -136,7 +147,7 @@ export const RenderedWriteup = z
           blocks: z.array(RenderedBlock).max(LIMITS.blocksPerRevision),
         }),
       )
-      .max(7 + 3 * LIMITS.topicsPerReview),
+      .max(10 + 3 * LIMITS.topicsPerReview),
   })
   .refine(
     (writeup) =>

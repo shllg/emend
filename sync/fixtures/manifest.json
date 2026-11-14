@@ -14,7 +14,6 @@
       "importance": 10,
       "attention": "review",
       "summary": "Requests stop retrying after three attempts.",
-      "door": "two-way",
       "blastRadius": { "scope": "user", "note": "A failed request could stop before a later attempt succeeds." }
     }
   ],
@@ -40,6 +39,9 @@
   ],
   "writeup": {
     "tldr": "Requests that kept failing retried without end and held the request loop. Each request now stops after three attempts, as the retry PRD asks.",
+    "review": { "level": "topics", "topics": ["retry-budget"], "reason": "Every request passes the new retry loop." },
+    "checked": "- Unit tests for one, two and three failed attempts pass.\n- The full test suite passes.",
+    "notChecked": "- A real network that drops requests.",
     "overview": "- **Goal:** Failed requests must stop retrying.\n- **Change:** Each request gets three attempts.",
     "outOfScope": "- The wait between attempts.",
     "whereToLook": "- **Biggest risk:** An early stop could discard the final attempt.\n- **Check first:** Read `src/retry.ts` in Retry budget.",

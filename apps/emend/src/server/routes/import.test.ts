@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ImportBundle, InboxList, importRowCount, indexImportBundle, LIMITS, RevisionView } from "@emend/contract";
+import {
+  ImportBundle,
+  InboxList,
+  importRowCount,
+  indexImportBundle,
+  LIMITS,
+  RevisionView,
+  type WriteupInput,
+} from "@emend/contract";
 import * as core from "@emend/core";
 import { and, eq, sql } from "drizzle-orm";
 import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
@@ -563,6 +571,62 @@ test.each([undefined, "outOfScope", "whereToLook", "context"] as const)(
     }
   },
 );
+
+test.each(["review and checks", "checked only"])("a round trip keeps %s and recomputes emptiness", async (fields) => {
+  const input = await bundle(f);
+  const withVerdict = fields === "review and checks";
+  const source: WriteupInput = {
+    overview: "",
+    tldr: "",
+    decisions: "",
+    glossary: "",
+    topics: {},
+    checked: "Synthetic unit checks passed.",
+    ...(withVerdict
+      ? {
+          review: { level: "topics" as const, topics: ["synthetic"], reason: "Inspect the changed lookup." },
+          notChecked: "Browser behavior.",
+        }
+      : {}),
+  };
+  const hash = await f.deps.blobs.put(f.ownerId, Buffer.from(JSON.stringify(source)), "application/json");
+  for (const row of input.writeups) row.sourceBlob = hash;
+  for (const revision of input.revisions) revision.writeupEmpty = true;
+  expect((await f.importRequest("/import", input)).status).toBe(201);
+  for (const row of input.revisions) {
+    const saved = required(
+      await f.db.read((q) =>
+        q
+          .select()
+          .from(tables.writeups)
+          .where(and(eq(tables.writeups.ownerId, f.ownerId), eq(tables.writeups.revisionId, row.id)))
+          .get(),
+      ),
+    );
+    const bytes = required((await f.deps.blobs.get(f.ownerId, saved.sourceBlob)) ?? undefined);
+    expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual(source);
+    const response = await f.request(`/reviews/${input.review.id}/revisions/${row.seq}`, "GET");
+    expect(response.status).toBe(200);
+    const revision = RevisionView.parse(await response.json());
+    expect(revision.writeupEmpty).toBe(false);
+    expect(revision.writeup.sections.map(({ key, label }) => [key, label])).toEqual([
+      ["tldr", "TL;DR"],
+      ...(withVerdict ? [["review", "Review"]] : []),
+      ["checked", "Checked"],
+      ...(withVerdict ? [["notChecked", "Not checked"]] : []),
+      ["overview", "Overview"],
+      ["decisions", "Decisions and drift"],
+      ["glossary", "Glossary"],
+    ]);
+    const text = (key: string) =>
+      revision.writeup.sections.find((section) => section.key === key)?.blocks.map((block) => block.text);
+    expect(text("checked")).toEqual([source.checked]);
+    if (withVerdict) {
+      expect(text("review")).toEqual([`Read topic “Synthetic topic”. ${source.review?.reason}`]);
+      expect(text("notChecked")).toEqual([source.notChecked]);
+    }
+  }
+});
 
 test("a source blob with a hostile link or repoUrl is refused", async () => {
   for (const extra of [{ links: [{ url: "javascript:alert(1)", label: "x" }] }, { repoUrl: "http://github.com/o/r" }]) {

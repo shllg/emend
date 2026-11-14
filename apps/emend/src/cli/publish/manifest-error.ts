@@ -11,9 +11,12 @@ function expectedForm(issue: ManifestIssue): string {
   const field = issue.path.at(-1);
   if (issue.path.length === 1 && field === "base") return "a full commit hash";
   if (issue.path.length === 1 && field === "head") return "a full commit hash or worktree";
+  const review = issue.path[0] === "writeup" && issue.path[1] === "review";
+  if (review && field === "level") return "skim, topics or everything";
   const topic = issue.path[0] === "topics" && typeof issue.path[1] === "number";
   if (
     (topic && field === "slug") ||
+    (review && issue.path[2] === "topics" && typeof field === "number") ||
     (issue.path[0] === "files" && field === "topic") ||
     (issue.code === "invalid_key" && issue.path[0] === "writeup" && issue.path[1] === "topics")
   )

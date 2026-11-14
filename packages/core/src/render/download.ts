@@ -631,7 +631,18 @@ export async function buildWriteupDownload(
       );
     }
     if (ranked.length) {
-      const intro = ["overview", "tldr", "outOfScope", "whereToLook", "context", "decisions", "glossary"];
+      const intro = [
+        "overview",
+        "tldr",
+        "review",
+        "checked",
+        "notChecked",
+        "outOfScope",
+        "whereToLook",
+        "context",
+        "decisions",
+        "glossary",
+      ];
       const index = groups.findLastIndex((group) => intro.includes(group.key)) + 1;
       groups.splice(index, 0, {
         key: "topics",

@@ -1,15 +1,11 @@
 import type { TopicMeta as Topic } from "@emend/contract";
-import { AttentionChip } from "./TopicChips.tsx";
+import { AttentionChip, undoSentence } from "./TopicChips.tsx";
 
 export function TopicMeta({ topic, note = false, blast = true }: { topic: Topic; note?: boolean; blast?: boolean }) {
   return (
     <>
       <AttentionChip attention={topic.attention} />
-      {topic.door && (
-        <span className={topic.door === "one-way" ? "font-medium text-warning-fg" : undefined}>
-          {topic.door === "one-way" ? "One-way door" : "Two-way door"}
-        </span>
-      )}
+      {topic.door && <span>{undoSentence(topic.door)}</span>}
       {blast && <BlastRadius topic={topic} note={note} />}
     </>
   );

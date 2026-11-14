@@ -22,6 +22,9 @@ const lines = {
 const cases: [Target, string, unknown][] = [
   [{ kind: "writeup-span", ...span }, "Writeup · Overview", TextSelect],
   [{ kind: "writeup-span", ...span, blockId: "tldr-12345678" }, "Writeup · TL;DR", TextSelect],
+  [{ kind: "writeup-span", ...span, blockId: "review-0123abcd" }, "Writeup · Review", TextSelect],
+  [{ kind: "writeup-span", ...span, blockId: "checked-0123abcd" }, "Writeup · Checked", TextSelect],
+  [{ kind: "writeup-span", ...span, blockId: "notChecked-0123abcd" }, "Writeup · Not checked", TextSelect],
   [{ kind: "writeup-span", ...span, blockId: "outOfScope-12345678" }, "Writeup · Out of scope", TextSelect],
   [{ kind: "writeup-span", ...span, blockId: "whereToLook-12345678" }, "Writeup · Where to look", TextSelect],
   [{ kind: "writeup-span", ...span, blockId: "context-12345678" }, "Writeup · Context", TextSelect],

@@ -6,6 +6,7 @@ import { rankedTopics } from "../../lib/topics.ts";
 import type { ReviewSearch } from "../../router.tsx";
 import { BlockReader, type ReaderGroup, type ReaderProps } from "./BlockReader.tsx";
 import { GlossaryTerms } from "./GlossaryTerms.tsx";
+import { undoSentence } from "./TopicChips.tsx";
 import { TopicsMap } from "./TopicsMap.tsx";
 import { useCurrentTopic } from "./useCurrentTopic.ts";
 import { WriteupOutline } from "./WriteupOutline.tsx";
@@ -130,6 +131,7 @@ export function Writeup({
               >
                 {topic.summary}
               </p>
+              {topic.door && <p className="em-topic-undo">{undoSentence(topic.door)}</p>}
               {topic.blastRadius && (
                 <p className="em-topic-blast">
                   Blast radius: <strong>{topic.blastRadius.scope}</strong> — {topic.blastRadius.note}
@@ -149,7 +151,18 @@ export function Writeup({
       const written = new Set(groups.flatMap((group) => (group.id ? [group.id] : [])));
       const afterIntro =
         groups.findLastIndex((group) =>
-          ["overview", "tldr", "outOfScope", "whereToLook", "context", "decisions", "glossary"].includes(group.key),
+          [
+            "overview",
+            "tldr",
+            "review",
+            "checked",
+            "notChecked",
+            "outOfScope",
+            "whereToLook",
+            "context",
+            "decisions",
+            "glossary",
+          ].includes(group.key),
         ) + 1;
       groups.splice(afterIntro, 0, {
         key: "topics-map",

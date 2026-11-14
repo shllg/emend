@@ -302,13 +302,17 @@ test("topics sort ascending stably, Other last, files by order, empty headers an
     "unknown.ts",
     "null.ts",
   ]);
-  for (const text of ["One-way door", "Two-way door", "<img src=x onerror=alert(1)>"])
+  for (const text of ["Undo: a revert is not enough", "Undo: a revert", "<img src=x onerror=alert(1)>"])
     expect(screen.getByText(text)).toBeTruthy();
+  for (const text of ["Undo: a revert is not enough", "Undo: a revert"])
+    expect(screen.getByText(text).classList.contains("text-warning-fg")).toBe(false);
+  expect(document.querySelector("[data-door]")).toBeNull();
+  expect(document.body.textContent).not.toMatch(/One-way|Two-way/);
   expect(screen.getByText("local").parentElement?.textContent).toBe("Blast radius local · A synthetic note");
   for (const [title, attention] of [
-    ["Low", "SKIM"],
-    ["First", "CRITICAL"],
-    ["Tie", "REVIEW"],
+    ["Low", "Low risk"],
+    ["First", "High risk"],
+    ["Tie", "Medium risk"],
   ]) {
     const header = screen.getByRole("heading", { name: title }).closest("header");
     expect(header?.querySelectorAll("[data-attention]")).toHaveLength(1);
@@ -1585,8 +1589,8 @@ test.each([
   expect(detailsButton().getAttribute("aria-pressed")).toBe(String(full));
   expect(screen.getByText("Synthetic summary").closest("[hidden]") === null).toBe(full);
   expect(screen.getByText(/A synthetic note/).closest("[hidden]") === null).toBe(full);
-  // The second line stays in both modes: attention, door, file count.
-  expect(screen.getByText("One-way door")).toBeTruthy();
+  // The second line stays in both modes: risk, undo, file count.
+  expect(screen.getByText("Undo: a revert is not enough")).toBeTruthy();
   expect(screen.getByText("1 file")).toBeTruthy();
 });
 
@@ -2101,7 +2105,7 @@ test("the details sit outside the sticky header, and Details controls that one e
   // The sticky part keeps only the title, buttons and the meta row.
   expect(header.textContent).not.toContain("Synthetic summary");
   expect(header.textContent).not.toContain("Blast radius");
-  expect(header.contains(screen.getByText("One-way door"))).toBe(true);
+  expect(header.contains(screen.getByText("Undo: a revert is not enough"))).toBe(true);
 });
 
 test("the compact meta row wraps whole items in a narrow pane", () => {

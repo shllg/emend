@@ -12,6 +12,62 @@ const markdown = z
     (text) => encoder.encode(text).byteLength <= LIMITS.writeupSectionBytes,
     "writeup section exceeds the UTF-8 byte limit",
   );
+const nonBlankMarkdown = markdown.refine((text) => /\S/.test(text), "must not be blank");
+
+export const ReviewVerdict = z
+  .object({
+    level: z.enum(["skim", "topics", "everything"]),
+    topics: z.array(TopicSlug).min(1).max(LIMITS.topicsPerReview).optional(),
+    reason: nonBlankMarkdown,
+  })
+  .superRefine((review, ctx) => {
+    if (review.level === "topics" && review.topics === undefined) {
+      ctx.addIssue({ code: "custom", path: ["topics"], message: "the topics level names one or more topics" });
+    }
+    if (review.level !== "topics" && review.topics !== undefined) {
+      ctx.addIssue({ code: "custom", path: ["topics"], message: "only the topics level names topics" });
+    }
+    const seen = new Set<string>();
+    for (const [index, slug] of (review.topics ?? []).entries()) {
+      if (seen.has(slug)) {
+        ctx.addIssue({ code: "custom", path: ["topics", index], message: "duplicate topic slug" });
+      }
+      seen.add(slug);
+    }
+  });
+export type ReviewVerdict = z.infer<typeof ReviewVerdict>;
+
+export function reviewVerdictIssues(
+  review: ReviewVerdict | undefined,
+  topics: readonly { slug: string; attention?: "critical" | "review" | "skim" }[],
+): { path: (string | number)[]; message: string }[] {
+  if (review === undefined) return [];
+  const issues: { path: (string | number)[]; message: string }[] = [];
+  if (review.level !== "everything" && topics.some((topic) => topic.attention === "critical")) {
+    issues.push({ path: ["writeup", "review", "level"], message: "a critical topic needs level everything" });
+  }
+  if (review.level === "skim") {
+    if (topics.some((topic) => topic.slug === OTHER_TOPIC.slug && topic.attention !== "skim")) {
+      issues.push({
+        path: ["writeup", "review", "level"],
+        message: "level skim needs every changed file in a declared topic",
+      });
+    }
+    if (topics.some((topic) => topic.slug !== OTHER_TOPIC.slug && topic.attention !== "skim")) {
+      issues.push({ path: ["writeup", "review", "level"], message: "level skim needs every topic at attention skim" });
+    }
+  }
+  if (review.level === "topics") {
+    const named = new Set(review.topics);
+    if (topics.some((topic) => topic.attention === "review" && !named.has(topic.slug))) {
+      issues.push({
+        path: ["writeup", "review", "topics"],
+        message: "level topics must name every topic at attention review",
+      });
+    }
+  }
+  return issues;
+}
 
 export const normalizeGlossaryForm = (text: string) => text.normalize("NFC").replace(/\s+/gu, " ").trim();
 const glossaryForm = z
@@ -67,6 +123,9 @@ export type Glossary = z.infer<typeof Glossary>;
 const writeupInput = z.object({
   overview: markdown,
   tldr: markdown,
+  review: ReviewVerdict.optional(),
+  checked: nonBlankMarkdown.optional(),
+  notChecked: nonBlankMarkdown.optional(),
   outOfScope: markdown.optional(),
   whereToLook: markdown.optional(),
   context: markdown.optional(),
@@ -90,6 +149,9 @@ export function writeupMarkdown(writeup: WriteupInput): (string | null | undefin
   return [
     writeup.overview,
     writeup.tldr,
+    writeup.review?.reason,
+    writeup.checked,
+    writeup.notChecked,
     writeup.outOfScope,
     writeup.whereToLook,
     writeup.context,
@@ -185,6 +247,18 @@ export const PublishManifest = z
         ctx.addIssue({ code: "custom", path: ["topics", index, "slug"], message: "duplicate topic slug" });
       }
       topics.add(topic.slug);
+    }
+    for (const [index, slug] of (manifest.writeup.review?.topics ?? []).entries()) {
+      if (!topics.has(slug)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["writeup", "review", "topics", index],
+          message: "review topic is not declared",
+        });
+      }
+    }
+    for (const { path, message } of reviewVerdictIssues(manifest.writeup.review, manifest.topics)) {
+      ctx.addIssue({ code: "custom", path, message });
     }
     const paths = new Set<string>();
     for (const [index, file] of manifest.files.entries()) {

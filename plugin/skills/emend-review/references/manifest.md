@@ -170,18 +170,23 @@ Use these constraints when writing the manifest:
 
 - Topic slugs use lowercase letters, digits and `-`, at most 64 characters. Start with a letter or digit.
 - `scope` is one word, at most 32 characters.
-- Set `attention` on every topic: `critical`, `review`, or `skim`.
-- `critical`: a security boundary, an irreversible effect, data loss, or a decision only the reviewer can make.
-- `review`: behaviour worth reading line by line.
-- `skim`: mechanical changes, renames, tests that only follow the code, or wording.
-- A `skim` topic starts folded. Never give a topic with real risk `skim`.
+- Set `attention` on every topic, as the writing reference rates risk: `skim` (Low), `review`
+  (Medium) or `critical` (High).
+- A `skim` topic starts folded.
 - Tests that only follow the code, when there are any, go into one topic after every other topic
   you declare: slug `tests` (`routine-tests` if `tests` is taken), title "Tests that follow the
   code", attention `skim`, importance 99, which no other topic uses. A test file stays in its
   feature topic only when it holds an edge case, a tricky setup, a changed expectation, or a
   removed or weakened assertion, with a note on those lines that says why.
 - Attention never changes order. `importance` alone sorts.
-- `door` is `one-way` or `two-way`.
+- Leave out `door`. A topic that a revert does not undo ends its `why` with an **Undo:** line.
+- `writeup.review` is `{ "level", "topics"?, "reason" }`. `level` is `skim`, `topics` or
+  `everything`. `topics` lists declared topic slugs, only with level `topics`. `reason` is one
+  short sentence.
+- Publish refuses a verdict that contradicts the topics. A `critical` topic needs `everything`.
+  `skim` needs every topic at attention `skim` and every changed file in a declared topic.
+  `topics` must name every topic at attention `review`.
+- `writeup.checked` and `writeup.notChecked` are Markdown and never blank.
 - `title` is at most 200 characters; `summary` is at most 2000.
 - `links` is optional: at most 8 entries of `url`, `label` and `kind`. `url` is an `https:` URL
   without a user name or password, at most 2048 characters. `label` has 1 to 60 characters.
@@ -232,7 +237,6 @@ Fix those fields and publish again.
       "importance": 10,
       "attention": "review",
       "summary": "Requests stop retrying after three attempts.",
-      "door": "two-way",
       "blastRadius": { "scope": "user", "note": "A failed request could stop before a later attempt succeeds." }
     }
   ],
@@ -258,6 +262,9 @@ Fix those fields and publish again.
   ],
   "writeup": {
     "tldr": "Requests that kept failing retried without end and held the request loop. Each request now stops after three attempts, as the retry PRD asks.",
+    "review": { "level": "topics", "topics": ["retry-budget"], "reason": "Every request passes the new retry loop." },
+    "checked": "- Unit tests for one, two and three failed attempts pass.\n- The full test suite passes.",
+    "notChecked": "- A real network that drops requests.",
     "overview": "- **Goal:** Failed requests must stop retrying.\n- **Change:** Each request gets three attempts.",
     "outOfScope": "- The wait between attempts.",
     "whereToLook": "- **Biggest risk:** An early stop could discard the final attempt.\n- **Check first:** Read `src/retry.ts` in Retry budget.",

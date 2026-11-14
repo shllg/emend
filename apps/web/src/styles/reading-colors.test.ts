@@ -178,6 +178,36 @@ test("reading rules use the reading colour tokens", () => {
   ).toMatch(/\bcolor:\s*var\(--fg-reading\)\s*;/);
 });
 
+test("topic risk words stay unfilled and reserve danger colour for critical attention", () => {
+  const reading = readFileSync(resolve(import.meta.dirname, "reading.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = [...reading.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter((match) => match[1]?.includes(".em-topic-chip"));
+  expect(rules.length).toBeGreaterThan(0);
+  for (const rule of rules) {
+    const selector = rule[1]?.trim() ?? "";
+    const body = rule[2] ?? "";
+    for (const declaration of body.matchAll(/([\w-]+)\s*:\s*([^;]+)(?:;|$)/g)) {
+      const property = declaration[1]?.toLowerCase();
+      expect(["background", "background-color", "border-color"], selector).not.toContain(property);
+      if (property === "border") {
+        expect(
+          declaration[2]
+            ?.replace(/\s*!important\s*$/i, "")
+            .trim()
+            .toLowerCase(),
+          selector,
+        ).toBe("none");
+      }
+    }
+    expect(body, selector).not.toMatch(/--(?:warning-fg|warning-bg|danger-bg|accent-tint)\b/);
+  }
+  expect(rules.filter((rule) => rule[2]?.includes("--danger-fg")).map((rule) => rule[1]?.trim())).toEqual([
+    '.em-topic-chip[data-attention="critical"]',
+  ]);
+  const skim = rules.find((rule) => rule[1]?.trim() === '.em-topic-chip[data-attention="skim"]');
+  expect(skim?.[2]).toMatch(/\bcolor:\s*var\(--fg-3\)\s*;/);
+  expect(reading).not.toMatch(/\[\s*data-door\b/);
+});
+
 test.each([
   { tone: "quiet", reduction: 1, labelColor: "--fg-reading" },
   { tone: "muted", reduction: 2, labelColor: "--fg-reading-muted" },
