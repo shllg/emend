@@ -3,6 +3,7 @@ import {
   LIMITS,
   normalizeGlossaryForm,
   type PublishLinks,
+  type ReviewVerdict,
   type TopicMeta,
   type WriteupInput,
 } from "@emend/contract";
@@ -23,6 +24,23 @@ export type RenderedWriteup = {
 
 const unwrittenDecisions =
   "Decisions and drift: not written. Only the session where the change was asked for can tell what drifted from it.";
+
+const escapeMarkdown = (text: string) => text.replace(/[!-/:-@[-`{-~]/g, "\\$&");
+
+function reviewMarkdown(review: ReviewVerdict, topics: TopicMeta[]): string {
+  let verdict = review.level === "skim" ? "Skim, then merge." : "Read everything.";
+  if (review.level === "topics") {
+    const names = (review.topics ?? []).map((slug) => {
+      const title = (topics.find((topic) => topic.slug === slug)?.title ?? slug).replace(/\s+/g, " ").trim();
+      return `“${escapeMarkdown(title)}”`;
+    });
+    verdict =
+      names.length === 1
+        ? `Read topic ${names[0]}.`
+        : `Read topics ${names.slice(0, -1).join(", ")} and ${names.at(-1)}.`;
+  }
+  return `**${verdict}** ${review.reason}`;
+}
 
 /** `meta.media` maps declared media paths to their SHA-256; only those paths resolve as images. */
 export async function renderWriteup(
@@ -63,8 +81,18 @@ export async function renderWriteup(
       ),
     });
   };
-  if (writeup.outOfScope !== undefined || writeup.whereToLook !== undefined || writeup.context !== undefined) {
+  if (
+    writeup.review !== undefined ||
+    writeup.checked !== undefined ||
+    writeup.notChecked !== undefined ||
+    writeup.outOfScope !== undefined ||
+    writeup.whereToLook !== undefined ||
+    writeup.context !== undefined
+  ) {
     await append("tldr", "TL;DR", writeup.tldr);
+    await append("review", "Review", writeup.review ? reviewMarkdown(writeup.review, topics) : undefined);
+    await append("checked", "Checked", writeup.checked);
+    await append("notChecked", "Not checked", writeup.notChecked);
     await append("overview", "Overview", writeup.overview);
     await append("outOfScope", "Out of scope", writeup.outOfScope);
     await append("whereToLook", "Where to look", writeup.whereToLook);
@@ -79,7 +107,7 @@ export async function renderWriteup(
     const glossaryBlocks: Block[] = [];
     const occurrences = new Map<string, number>();
     for (const entry of entries) {
-      const escaped = normalizeGlossaryForm(entry.term).replace(/[!-/:-@[-`{-~]/g, "\\$&");
+      const escaped = escapeMarkdown(normalizeGlossaryForm(entry.term));
       const definition = entry.definition.replace(/\r\n?/g, "\n").replace(/\n/g, "\n  ");
       const rendered = await renderMarkdownWithBudget(
         `- **${escaped}:** ${definition}`,

@@ -275,6 +275,9 @@ test.each([{ compact: false }, { compact: true }])(
       await renderWriteup(
         {
           tldr: "Failed requests now stop after three attempts.",
+          review: { level: "topics", topics: ["seed"], reason: "Check the retry boundary." },
+          checked: "Unit tests cover three attempts.",
+          notChecked: "Browser behavior.",
           overview: "- **Goal:** Bound retries.\n- **Change:** Three attempts.",
           outOfScope: "- The delay between attempts.",
           whereToLook: "- **Biggest risk:** Losing the final attempt.\n- **Check first:** The retry loop.",
@@ -293,6 +296,9 @@ test.each([{ compact: false }, { compact: true }])(
       ),
     ).toEqual([
       "tldr",
+      "review",
+      "checked",
+      "notChecked",
       "overview",
       "outOfScope",
       "whereToLook",
@@ -304,6 +310,9 @@ test.each([{ compact: false }, { compact: true }])(
     ]);
     expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
       "TL;DR",
+      "Review",
+      "Checked",
+      "Not checked",
       "Overview",
       "Out of scope",
       "Where to look",
@@ -327,21 +336,28 @@ test.each([{ compact: false }, { compact: true }])(
       expect(group?.querySelector("[data-block-id]")).toBeTruthy();
     }
     expect(screen.getByRole("heading", { name: "Overview" }).classList.contains("em-writeup-kicker")).toBe(false);
+    for (const label of ["Review", "Checked", "Not checked"]) {
+      expect(screen.getByRole("region", { name: label }).className).toBe("em-reading-group");
+      expect(screen.getByRole("heading", { name: label }).classList.contains("em-writeup-kicker")).toBe(false);
+    }
   },
 );
 
-test("the topics map follows the new intro sections even without decisions or glossary", () => {
-  const sections: RenderedWriteup["sections"] = [
-    { key: "context", label: "Context", topic: null, blocks: [] },
-    section("seed", "why"),
-  ];
-  const { container } = mount(<Writeup {...props} topics={[topic]} writeup={{ sections }} />);
-  expect(
-    [...container.querySelectorAll("[data-reading-section]")].map((group) =>
-      group.getAttribute("data-reading-section"),
-    ),
-  ).toEqual(["context", "topics-map", "t-seed-why"]);
-});
+test.each(["review", "checked", "notChecked", "context"] as const)(
+  "the topics map follows %s even without decisions or glossary",
+  (key) => {
+    const sections: RenderedWriteup["sections"] = [
+      { key, label: "Intro", topic: null, blocks: [] },
+      section("seed", "why"),
+    ];
+    const { container } = mount(<Writeup {...props} topics={[topic]} writeup={{ sections }} />);
+    expect(
+      [...container.querySelectorAll("[data-reading-section]")].map((group) =>
+        group.getAttribute("data-reading-section"),
+      ),
+    ).toEqual([key, "topics-map", "t-seed-why"]);
+  },
+);
 
 test.each([
   [true, true],
@@ -416,8 +432,8 @@ test.each([false, true])("topics map ranks, metadata and link destinations (phon
   const map = within(screen.getByRole("region", { name: "Topics" }));
   const rows = map.getAllByRole("listitem");
   expect(rows.map((row) => row.querySelector("[aria-hidden]")?.textContent)).toEqual(["01", "02", "03"]);
-  expect(map.getByText("One-way door").className).toContain("text-warning-fg");
-  expect(map.getByText("Two-way door")).toBeTruthy();
+  expect(map.getByText("Undo: a revert is not enough").className).not.toContain("text-warning-fg");
+  expect(map.getByText("Undo: a revert").className).not.toContain("text-warning-fg");
   expect(map.getByText("garden")).toBeTruthy();
   expect(map.getByText("1 file")).toBeTruthy();
   expect(map.getByText("2 files")).toBeTruthy();
@@ -452,7 +468,7 @@ test("topics without metadata or diff files omit their meta line and jump link",
   );
   const group = screen.getByRole("region", { name: `Topic 1: ${bare.title}` });
   expect(within(group).queryByRole("link")).toBeNull();
-  expect(within(group).queryByText(/door|Blast radius/)).toBeNull();
+  expect(within(group).queryByText(/Undo:|Blast radius/)).toBeNull();
 });
 
 test.each(["writeup", "doc"])(
@@ -600,48 +616,70 @@ test.each([{ compact: false }, { compact: true }])(
   },
 );
 
-test.each(["critical", "review", "skim", undefined] as const)(
-  "topic chips and folding for attention %s",
-  (attention) => {
-    const value = { ...topic, attention };
-    const why = { ...section("seed", "why"), blocks: [block] };
-    const { container } = mount(<Writeup {...props} topics={[value]} files={[file]} writeup={{ sections: [why] }} />);
-    const group = screen.getByRole("region", { name: "Topic 1: Plant a seed" });
-    const chip = group.querySelector("[data-attention]");
-    expect(chip?.textContent).toBe(attention?.toUpperCase());
-    const map = screen.getByRole("region", { name: "Topics" });
-    expect(map.querySelector("[data-attention]")?.textContent).toBe(attention?.toUpperCase());
-    expect(within(group).getByText(topic.summary)).toBeTruthy();
-    expect(within(group).getByText("garden").tagName).toBe("STRONG");
-    expect(within(group).getByText(/Blast radius:.*The seed bed/)).toBeTruthy();
-    expect(within(group).getByRole("link", { name: `Files in diff: ${topic.title}` }).textContent).toBe(
-      "1 file · Files in diff →",
-    );
-    const fold = within(group).getByRole("button", {
-      name: `Topic 1: ${topic.title}`,
-    });
-    const title = within(group).getByRole("heading", { level: 2 });
-    expect(fold.getAttribute("aria-labelledby")).toBe(title.id);
-    expect(title.textContent).toBe(`Topic 1: ${topic.title}`);
-    const header = title.parentElement;
-    if (!header) throw new Error("Missing topic header");
-    expect(within(header).getByText("01").closest("h2")).toBeNull();
-    expect(within(header).queryByText(/Changed in rev/)).toBeNull();
-    const body = document.getElementById(fold.getAttribute("aria-controls") ?? "");
-    expect(fold.getAttribute("aria-expanded")).toBe(String(attention !== "skim"));
-    expect(body?.hasAttribute("hidden")).toBe(attention === "skim");
-    fireEvent.click(fold);
-    expect(within(group).getByRole("button", { name: `Topic 1: ${topic.title}` })).toBe(fold);
-    expect(fold.getAttribute("aria-expanded")).toBe(String(attention === "skim"));
-    expect(body?.hasAttribute("hidden")).toBe(attention !== "skim");
-    expect(container.querySelectorAll(`[data-block-id="${block.id}"]`)).toHaveLength(1);
-  },
-);
-
-test.each(["one-way", "two-way", undefined] as const)("topic door chip %s", (door) => {
-  mount(<Writeup {...props} topics={[{ ...topic, door }]} writeup={{ sections: [section("seed", "why")] }} />);
+test.each([
+  ["critical", "High risk"],
+  ["review", "Medium risk"],
+  ["skim", "Low risk"],
+  [undefined, undefined],
+] as const)("topic chips and folding for attention %s", (attention, expected) => {
+  const value = { ...topic, attention };
+  const why = { ...section("seed", "why"), blocks: [block] };
+  const { container } = mount(<Writeup {...props} topics={[value]} files={[file]} writeup={{ sections: [why] }} />);
   const group = screen.getByRole("region", { name: "Topic 1: Plant a seed" });
-  expect(group.querySelector("[data-door]")?.textContent).toBe(door?.toUpperCase());
+  const chip = group.querySelector("[data-attention]");
+  expect(chip?.textContent).toBe(expected);
+  if (attention) expect(chip?.querySelector(".sr-only")?.textContent).toBe(" risk");
+  const map = screen.getByRole("region", { name: "Topics" });
+  expect(map.querySelector("[data-attention]")?.textContent).toBe(expected);
+  expect(container.querySelector("[data-door]")).toBeNull();
+  expect(within(group).getByText(topic.summary)).toBeTruthy();
+  expect(within(group).getByText("garden").tagName).toBe("STRONG");
+  expect(within(group).getByText(/Blast radius:.*The seed bed/)).toBeTruthy();
+  expect(within(group).getByRole("link", { name: `Files in diff: ${topic.title}` }).textContent).toBe(
+    "1 file · Files in diff →",
+  );
+  const fold = within(group).getByRole("button", {
+    name: `Topic 1: ${topic.title}`,
+  });
+  const title = within(group).getByRole("heading", { level: 2 });
+  expect(fold.getAttribute("aria-labelledby")).toBe(title.id);
+  expect(title.textContent).toBe(`Topic 1: ${topic.title}`);
+  const header = title.parentElement;
+  if (!header) throw new Error("Missing topic header");
+  expect(within(header).getByText("01").closest("h2")).toBeNull();
+  expect(within(header).queryByText(/Changed in rev/)).toBeNull();
+  const body = document.getElementById(fold.getAttribute("aria-controls") ?? "");
+  expect(fold.getAttribute("aria-expanded")).toBe(String(attention !== "skim"));
+  expect(body?.hasAttribute("hidden")).toBe(attention === "skim");
+  fireEvent.click(fold);
+  expect(within(group).getByRole("button", { name: `Topic 1: ${topic.title}` })).toBe(fold);
+  expect(fold.getAttribute("aria-expanded")).toBe(String(attention === "skim"));
+  expect(body?.hasAttribute("hidden")).toBe(attention !== "skim");
+  expect(container.querySelectorAll(`[data-block-id="${block.id}"]`)).toHaveLength(1);
+});
+
+test.each([
+  ["one-way", "Undo: a revert is not enough"],
+  ["two-way", "Undo: a revert"],
+  [undefined, undefined],
+] as const)("topic undo sentence for %s", (door, expected) => {
+  const { container } = mount(
+    <Writeup {...props} topics={[{ ...topic, door }]} writeup={{ sections: [section("seed", "why")] }} />,
+  );
+  const group = screen.getByRole("region", { name: "Topic 1: Plant a seed" });
+  const undo = group.querySelector(".em-topic-undo");
+  expect(undo?.textContent).toBe(expected);
+  if (expected) {
+    expect(undo?.classList.contains("text-warning-fg")).toBe(false);
+    expect(undo?.previousElementSibling?.className).toBe("em-topic-summary");
+    expect(undo?.nextElementSibling?.className).toBe("em-topic-blast");
+    const map = within(screen.getByRole("region", { name: "Topics" }));
+    expect(map.getByText(expected).classList.contains("text-warning-fg")).toBe(false);
+  } else {
+    expect(container.textContent).not.toContain("Undo:");
+  }
+  expect(container.querySelector("[data-door], .text-warning-fg")).toBeNull();
+  expect(container.textContent).not.toMatch(/One-way|Two-way/);
 });
 
 test("front matter cards, callouts and hidden Details keep the original comment anchors", async () => {

@@ -1,4 +1,4 @@
-import { BlockId } from "@emend/contract";
+import { BlockId, type ReviewVerdict, type WriteupInput } from "@emend/contract";
 import { fromHtml } from "hast-util-from-html";
 import { expect, test, vi } from "vitest";
 import { blockText, visitElements } from "./blocks.ts";
@@ -83,21 +83,125 @@ test("omits missing optional sections but preserves explicitly empty sections", 
   expect(rendered.sections.every((section) => section.blocks.length === 0)).toBe(true);
 });
 
-test("new writeups start with the summary, overview, scope, guide and context", async () => {
+test("old manifests keep their overview-first output", async () => {
   const rendered = await renderWriteup(
-    { ...writeup, outOfScope: "- Delays", whereToLook: "- Check the retry loop", context: "- No new dependency" },
+    { overview: "Existing **overview**.", tldr: "Existing summary.", decisions: "", topics: {} },
+    [],
+  );
+  expect(rendered.sections.map(({ key, blocks }) => ({ key, html: blocks.map((block) => block.html) }))).toEqual([
+    { key: "overview", html: ["<p>Existing <strong>overview</strong>.</p>"] },
+    { key: "tldr", html: ["<p>Existing summary.</p>"] },
+    { key: "decisions", html: [] },
+  ]);
+});
+
+test("new writeups start with the summary, verdict, checks, overview, scope, guide and context", async () => {
+  const rendered = await renderWriteup(
+    {
+      ...writeup,
+      review: { level: "skim", reason: "The change is small." },
+      checked: "Unit tests.",
+      notChecked: "Browser behavior.",
+      outOfScope: "- Delays",
+      whereToLook: "- Check the retry loop",
+      context: "- No new dependency",
+    },
     topics,
   );
   const legacy = await renderWriteup(writeup, topics);
   expect(rendered.sections.map(({ key, label }) => [key, label])).toEqual([
     ["tldr", "TL;DR"],
+    ["review", "Review"],
+    ["checked", "Checked"],
+    ["notChecked", "Not checked"],
     ["overview", "Overview"],
     ["outOfScope", "Out of scope"],
     ["whereToLook", "Where to look"],
     ["context", "Context"],
     ...legacy.sections.slice(2).map(({ key, label }) => [key, label]),
   ]);
-  expect(rendered.sections.slice(5)).toEqual(legacy.sections.slice(2));
+  expect(rendered.sections[0]).toEqual(legacy.sections[1]);
+  expect(rendered.sections[4]).toEqual(legacy.sections[0]);
+  expect(rendered.sections.slice(8)).toEqual(legacy.sections.slice(2));
+});
+
+test.each(["review", "checked", "notChecked"] as const)("%s alone selects the new section order", async (field) => {
+  const change =
+    field === "review"
+      ? { review: { level: "skim" as const, reason: "Synthetic reason." } }
+      : { [field]: "Synthetic check." };
+  const rendered = await renderWriteup({ overview: "", tldr: "", decisions: "", topics: {}, ...change }, []);
+  expect(rendered.sections.map((section) => section.key)).toEqual(["tldr", field, "overview", "decisions"]);
+});
+
+const verdictCases: [ReviewVerdict, string][] = [
+  [{ level: "skim", reason: "Small change." }, "Skim, then merge."],
+  [{ level: "everything", reason: "Broad change." }, "Read everything."],
+  [{ level: "topics", topics: ["search"], reason: "Search changed." }, "Read topic “Shelf search”."],
+  [
+    { level: "topics", topics: ["labels", "search"], reason: "Names and search changed." },
+    "Read topics “Clear labels” and “Shelf search”.",
+  ],
+  [
+    { level: "topics", topics: ["labels", "search", "sorting"], reason: "The library changed." },
+    "Read topics “Clear labels”, “Shelf search” and “Stable sorting”.",
+  ],
+  [{ level: "topics", topics: ["missing-topic"], reason: "Fallback." }, "Read topic “missing-topic”."],
+];
+test.each(verdictCases)("renders the verdict %j as one paragraph", async (review, verdict) => {
+  const rendered = await renderWriteup({ ...writeup, review }, topics);
+  const section = rendered.sections.find((section) => section.key === "review");
+  expect(section).toMatchObject({ label: "Review", topic: null });
+  expect(section?.blocks).toEqual([
+    expect.objectContaining({
+      kind: "paragraph",
+      text: `${verdict} ${review.reason}`,
+      html: `<p><strong>${verdict}</strong> ${review.reason}</p>`,
+    }),
+  ]);
+});
+
+test("verdict reasons keep their Markdown after the generated verdict", async () => {
+  const rendered = await renderWriteup(
+    { ...writeup, review: { level: "skim", reason: "The **small** change has a [guide](https://example.com)." } },
+    [],
+  );
+  const html = rendered.sections.find((section) => section.key === "review")?.blocks[0]?.html;
+  expect(html).toContain("<strong>Skim, then merge.</strong> The <strong>small</strong> change");
+  expect(html).toContain('href="https://example.com"');
+  expect(html).toContain('rel="noopener noreferrer nofollow"');
+});
+
+test.each([
+  "[x](javascript:alert(1))",
+  "[guide](https://example.com)",
+  "*stars* _underscores_ `code` **strong**",
+  "<img src=x onerror=alert(1)>",
+  "  Shelf\n\t search  ",
+])("verdict topic title stays literal on one line: %j", async (title) => {
+  const rendered = await renderWriteup(
+    { ...writeup, review: { level: "topics", topics: ["search"], reason: "Check this topic." } },
+    [{ slug: "search", title, importance: 10, summary: "Synthetic topic." }],
+  );
+  const blocks = rendered.sections.find((section) => section.key === "review")?.blocks ?? [];
+  const verdict = `Read topic “${title.replace(/\s+/g, " ").trim()}”.`;
+  expect(blocks).toHaveLength(1);
+  expect(blocks[0]?.text).toBe(`${verdict} Check this topic.`);
+  const html = blocks[0]?.html ?? "";
+  expect(html).not.toContain("\n");
+  const autolink = title === "[guide](https://example.com)";
+  if (autolink) expect(html).not.toMatch(/javascript:/i);
+  const tags: string[] = [];
+  visitElements(fromHtml(html, { fragment: true }), (element) => {
+    tags.push(element.tagName);
+    if (autolink && element.tagName === "a") {
+      expect(element.properties.href).toMatch(/^https:\/\/example\.com/);
+      expect(element.properties.rel).toEqual(["noopener", "noreferrer", "nofollow"]);
+    } else {
+      expect(element.properties).toEqual({});
+    }
+  });
+  expect(tags).toEqual(autolink ? ["p", "strong", "a"] : ["p", "strong"]);
 });
 
 test.each(["outOfScope", "whereToLook", "context"] as const)(
@@ -111,34 +215,39 @@ test.each(["outOfScope", "whereToLook", "context"] as const)(
   },
 );
 
-test.each(["outOfScope", "whereToLook", "context"] as const)("sanitizes hostile Markdown in %s", async (field) => {
-  const source = "graph TD; A-->B; click A callback";
-  const markdown = [
-    "<script>bad()</script>",
-    'Before <img src=x onerror="bad()"> after',
-    "[Unsafe link](javascript:bad())",
-    '<div onclick="bad()" style="position:fixed" id="raw" class="injected" data-foo="x">Raw HTML</div>',
-    '<svg onload="bad()"><circle /></svg>',
-    `\`\`\`mermaid\n${source}\n\`\`\``,
-  ].join("\n\n");
-  const rendered = await renderWriteup({ ...writeup, [field]: markdown }, []);
-  const blocks = rendered.sections.find((section) => section.key === field)?.blocks ?? [];
-  const html = blocks.map((block) => block.html).join("");
-  expect(html).toContain("Raw HTML");
-  expect(html).toContain("Unsafe link");
-  expect(html).toContain('id="user-content-raw"');
-  expect(html).toContain("user-content-injected");
-  expect(html).not.toMatch(
-    /<(script|style|iframe|object|embed|form|svg)|\s(on\w+|style|data-[\w-]+)=|javascript:|data:|vbscript:/i,
-  );
-  expect(blocks.filter((block) => block.kind === "diagram")).toEqual([
-    expect.objectContaining({ kind: "diagram", source, text: source, html: "" }),
-  ]);
-  for (const block of blocks) {
-    expect(block.section).toBe(field);
-    expect(BlockId.parse(block.id)).toMatch(new RegExp(`^${field}-`));
-  }
-});
+test.each(["review", "checked", "notChecked", "outOfScope", "whereToLook", "context"] as const)(
+  "sanitizes hostile Markdown in %s",
+  async (field) => {
+    const source = "graph TD; A-->B; click A callback";
+    const markdown = [
+      "<script>bad()</script>",
+      "Before <img src=x onerror=alert(1)> after",
+      "[Unsafe link](javascript:bad())",
+      '<div onclick="bad()" style="position:fixed" id="raw" class="injected" data-foo="x">Raw HTML</div>',
+      '<svg onload="bad()"><circle /></svg>',
+      `\`\`\`mermaid\n${source}\n\`\`\``,
+    ].join("\n\n");
+    const change =
+      field === "review" ? { review: { level: "everything" as const, reason: markdown } } : { [field]: markdown };
+    const rendered = await renderWriteup({ ...writeup, ...change }, []);
+    const blocks = rendered.sections.find((section) => section.key === field)?.blocks ?? [];
+    const html = blocks.map((block) => block.html).join("");
+    expect(html).toContain("Raw HTML");
+    expect(html).toContain("Unsafe link");
+    expect(html).toContain('id="user-content-raw"');
+    expect(html).toContain("user-content-injected");
+    expect(html).not.toMatch(
+      /<(script|style|iframe|object|embed|form|svg)|\s(on\w+|style|data-[\w-]+)=|javascript:|data:|vbscript:/i,
+    );
+    expect(blocks.filter((block) => block.kind === "diagram")).toEqual([
+      expect.objectContaining({ kind: "diagram", source, text: source, html: "" }),
+    ]);
+    for (const block of blocks) {
+      expect(block.section).toBe(field);
+      expect(BlockId.parse(block.id)).toMatch(new RegExp(`^${field}-`));
+    }
+  },
+);
 
 test("sanitizes raw glossary HTML through the same pipeline", async () => {
   const rendered = await renderWriteup(
@@ -187,9 +296,12 @@ test("list glossaries emit item blocks and plain text terms, without marking glo
 });
 
 test("list glossary marks reset in every section without changing block text or ids", async () => {
-  const source = {
+  const source: WriteupInput = {
     overview: "Budget budget.",
     tldr: "Budget budget.",
+    review: { level: "skim", reason: "Budget budget." },
+    checked: "Budget budget.",
+    notChecked: "Budget budget.",
     decisions: "Budget budget.",
     outOfScope: "Budget budget.",
     whereToLook: "Budget budget.",
@@ -199,7 +311,7 @@ test("list glossary marks reset in every section without changing block text or 
   const plain = await renderWriteup(source, topics);
   const marked = await renderWriteup({ ...source, glossary: [{ term: "Budget", definition: "Attempts." }] }, topics);
   const sections = marked.sections.filter((section) => section.key !== "glossary");
-  expect(sections).toHaveLength(9);
+  expect(sections).toHaveLength(12);
   for (const [index, section] of sections.entries()) {
     expect(section.blocks.map(({ id, text }) => ({ id, text }))).toEqual(
       plain.sections[index]?.blocks.map(({ id, text }) => ({ id, text })),

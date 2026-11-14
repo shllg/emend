@@ -6,7 +6,7 @@ export const BlockId = z
   .string()
   .max(LIMITS.pathChars)
   .regex(
-    /^(?:overview|tldr|outOfScope|whereToLook|context|decisions|glossary|t-[a-z0-9][a-z0-9-]{0,63}-(?:why|example|body)|doc-[0-9a-f]{8})-[0-9a-f]{8}(?:-(?:[2-9]|[1-9][0-9]+))?$/,
+    /^(?:overview|tldr|review|checked|notChecked|outOfScope|whereToLook|context|decisions|glossary|t-[a-z0-9][a-z0-9-]{0,63}-(?:why|example|body)|doc-[0-9a-f]{8})-[0-9a-f]{8}(?:-(?:[2-9]|[1-9][0-9]+))?$/,
   );
 export type BlockId = z.infer<typeof BlockId>;
 

@@ -161,6 +161,33 @@ test("renders the ranked Topics list and written Why Example and Details section
   expect(html).not.toContain("Other changes");
 });
 
+test.each([
+  ["review", "Review"],
+  ["checked", "Checked"],
+  ["notChecked", "Not checked"],
+] as const)("the Topics list follows the %s intro section", async (key, label) => {
+  const html = await buildWriteupDownload({
+    title: "Synthetic review",
+    details,
+    topics: [{ slug: "search", title: "Shelf search", summary: "Find books.", importance: 10 }],
+    resolveMedia: async () => null,
+    writeup: {
+      sections: [
+        { key: "tldr", label: "TL;DR", topic: null, blocks: [] },
+        { key, label, topic: null, blocks: [] },
+        { key: "t-search-why", label: "Shelf search — Why", topic: "search", blocks: [] },
+      ],
+    },
+  });
+  const nodes = parsed(html);
+  expect(nodes.filter((el) => el.tagName === "h2").map((node) => hastText(node))).toEqual([
+    "TL;DR",
+    label,
+    "Topics",
+    "Shelf search",
+  ]);
+});
+
 test("drops active hostile block HTML and unsafe style URLs", async () => {
   const html = await render([
     block(

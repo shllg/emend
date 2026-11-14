@@ -252,29 +252,20 @@
     display: inline-flex;
     flex: none;
     align-items: center;
-    border: 1px solid var(--border-2);
-    border-radius: 999px;
-    padding: 2px 7px;
-    font: 600 10.5px / 1.4 var(--font-mono);
-    font-stretch: var(--mono-stretch);
-    letter-spacing: 0.05em;
+    font: 600 12.5px / 1.4 var(--font-sans);
+    letter-spacing: normal;
     white-space: nowrap;
-    color: var(--fg-3);
+    color: var(--fg-2);
   }
   .em-topic-chip[data-attention="critical"] {
     color: var(--danger-fg);
-    background: var(--danger-bg);
-    border-color: transparent;
   }
   .em-topic-chip[data-attention="review"] {
-    color: var(--accent-text);
-    background: var(--accent-tint);
-    border-color: transparent;
+    color: var(--fg-2);
   }
-  .em-topic-chip[data-door="one-way"] {
-    color: var(--warning-fg);
-    background: var(--warning-bg);
-    border-color: transparent;
+  .em-topic-chip[data-attention="skim"] {
+    color: var(--fg-3);
+    font-weight: 400;
   }
   .em-topic-files,
   .em-topic-comments {
@@ -294,7 +285,8 @@
     color: var(--fg-2);
     overflow-wrap: anywhere;
   }
-  .em-topic-blast {
+  .em-topic-blast,
+  .em-topic-undo {
     font-size: 14px;
     color: var(--fg-3);
     overflow-wrap: anywhere;

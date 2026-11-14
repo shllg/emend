@@ -60,6 +60,20 @@ test.each([
   [{ topics: [{ ...topic, door: "received-door" }] }, "topics.0.door (one-way or two-way)"],
   [{ topics: [{ ...topic, attention: "received-attention" }] }, "topics.0.attention (critical, review or skim)"],
   [
+    { writeup: { ...manifest().writeup, review: { level: "received-level", reason: "Synthetic reason." } } },
+    "writeup.review.level (skim, topics or everything)",
+  ],
+  [
+    {
+      writeup: {
+        ...manifest().writeup,
+        review: { level: "topics", topics: ["Received"], reason: "Synthetic reason." },
+      },
+    },
+    "writeup.review.topics.0 (topic slug: lowercase letters, digits and -, at most 64); " +
+      "writeup.review.topics.0 (review topic is not declared)",
+  ],
+  [
     { topics: [{ ...topic, blastRadius: { scope: "received scope", note: "Synthetic" } }] },
     "topics.0.blastRadius.scope (one word, at most 32 characters)",
   ],

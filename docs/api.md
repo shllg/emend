@@ -565,8 +565,9 @@ names the entry's first glossary block. Old revisions, empty lists and Markdown 
 Base/head are nullable full commit hashes; head also permits `worktree`.
 `main` is `"writeup" | FilePath | null`: the manifest's main page, or null when omitted.
 `writeupEmpty` is a boolean computed at publish from the source Markdown, before rendering:
-true only when overview, tldr, outOfScope, whereToLook, context, decisions, glossary, and every
-topic's why, example and body are missing or whitespace only. Both fields are stored on the revision; revisions predating
+true only when overview, tldr, the review verdict's reason, checked, notChecked, outOfScope,
+whereToLook, context, decisions, glossary, and every topic's why, example and body are missing or
+whitespace only. Both fields are stored on the revision; revisions predating
 these fields read as `main: null`, `writeupEmpty: false` and keep opening on Writeup.
 Without an explicit visible `tab` in the URL, the app opens the main page when set; otherwise
 it opens Writeup if it has text, the first doc in manifest order, Diff if any file has role
@@ -833,9 +834,9 @@ to make a read fit a per-Send or per-revision limit. The limits below apply to t
 | `RevisionView.topics` | `topicsPerReview + 1` (201): up to 200 declared topics plus the reserved Other changes entry, as in publish |
 | `RevisionView.files`, `RevisionView.docs` | Each at most `filesPerRevision` (10000), the publish file limit |
 | `FileView.order` | Zero through `filesPerRevision - 1` (9999), the publisher's zero-based file-array index |
-| `RenderedWriteup.sections` | At most `7 + 3 * topicsPerReview` (607): seven fixed sections and Why/Example/Details for each writeup topic |
+| `RenderedWriteup.sections` | At most `10 + 3 * topicsPerReview` (610): ten fixed sections and Why/Example/Details for each writeup topic |
 | `RenderedWriteup.terms` | Optional array of at most `glossaryTerms` (50) entries: `term` 1–`glossaryTermChars` (100) characters, plain-text `definition` 0–`glossaryDefinitionChars` (2000) characters, and a validated `blockId: BlockId` |
-| `RenderedWriteup.sections[].key`, `RenderedBlock.section` | Renderer-generated keys: overview, tldr, outOfScope, whereToLook, context, decisions, glossary or `t-<TopicSlug>-why/example/body`; block sections also allow `doc-<hash8>`. TopicSlug permits 1–64 characters, so the longest topic section key is 74 characters |
+| `RenderedWriteup.sections[].key`, `RenderedBlock.section` | Renderer-generated keys: overview, tldr, review, checked, notChecked, outOfScope, whereToLook, context, decisions, glossary or `t-<TopicSlug>-why/example/body`; block sections also allow `doc-<hash8>`. TopicSlug permits 1–64 characters, so the longest topic section key is 74 characters |
 | `RenderedWriteup.sections[].label` | `titleChars + " — Example".length` (210), the longest renderer suffix appended to a topic title |
 | Section `blocks` and Markdown doc `blocks` | Each at most `blocksPerRevision` (100000); the same limit also applies to all writeup blocks combined and to writeup plus doc blocks combined |
 | `RenderedBlock.html`, `text`, `source` | Each bounded by `renderedBytesPerRevision` (268435456) UTF-8 bytes, the stored renderer output budget; source is optional |
@@ -1090,7 +1091,7 @@ There are at most `topicsPerReview` declared topics plus the optional generated 
 topic (importance 100, last); at most `filesPerRevision` files. Base and head are null together.
 `PublishFile = { path, oldPath: FilePath | null, role, status?, topic?, title?, view?: DocView, oldBlob: sha256 | null,
 newBlob: sha256 | null, flag: FileFlag | null, parent?: FilePath, assets?: FilePath[], notes?: AgentNote[] }`. Paths and topic slugs are
-unique within their namespaces (diffs; rendered docs and assets; source docs); file and writeup topics must be declared.
+unique within their namespaces (diffs; rendered docs and assets; source docs); file, writeup and review-verdict topics must be declared.
 `assets` is required for rendered HTML docs (including an empty array) and must be absent on all other files.
 Assets name a declared HTML doc in `parent`, stay inside its folder and have no hidden or dot
 segments. Allowed extensions are js, mjs, css, png, jpg, jpeg, gif, svg, webp, avif, ico, bmp,
@@ -1193,13 +1194,18 @@ trailing dots/spaces, and rejects HFS-ignorable code points U+206A–U+206F.
 
 `TopicMeta = { slug, title, importance, summary, attention?, door?, blastRadius? }`. A slug matches
 `^[a-z0-9][a-z0-9-]{0,63}$`. Importance is a number from 0 through 100; lower sorts first.
-Attention is optional: `critical` marks a security boundary, an irreversible effect, data loss,
-or a decision only the reviewer can make; `review` marks behaviour worth reading line by line;
-`skim` marks mechanical changes, renames, tests that only follow the code, or wording.
+Attention is optional and holds the topic's risk. The app shows `critical` as High (data loss,
+a security hole, money, or an outage), `review` as Medium (a common path can break, and users
+notice) and `skim` as Low (a rare path that tests cover, or a mechanical change). The words carry
+no colored fill; High is the only red one.
 Skim topics start folded in the writeup. Attention never changes order: `importance` alone sorts.
 When absent, attention stays absent in views and export/import, and the topic starts open.
-Door is `one-way` or `two-way`. Blast radius is `{ scope, note }`: scope is one non-whitespace word,
-and note must contain non-whitespace text. The fallback is `{ slug: "other", title: "Other changes" }`;
+Door is `one-way` or `two-way`. The app shows it only as an Undo sentence: `two-way` as "Undo: a
+revert", `one-way` as "Undo: a revert is not enough". The emend-review skill no longer sets it; a
+topic names a repair or a step that cannot be undone in an **Undo:** line of its `why`.
+Blast radius is `{ scope, note }`: scope is one non-whitespace word, and note must contain
+non-whitespace text. The skill uses scope as a plain sensitivity tag (`auth`, `data`, `money`,
+`privacy`, `network`) or names who is affected. The fallback is `{ slug: "other", title: "Other changes" }`;
 declaring that slug in a manifest fails with `topic slug other is reserved`. It remains a valid
 target for automatically grouped changes.
 
@@ -1209,19 +1215,28 @@ text. There are at most `topicsPerReview` declared topics and writeup topic keys
 blast-radius scopes and notes obey `summaryChars`, `blastScopeChars` and `blastNoteChars`.
 Markdown strings are preserved exactly; the schema does not render or sanitize them.
 
-`WriteupInput = { overview, tldr, outOfScope?, whereToLook?, context?, decisions: string | null, glossary?, topics }`.
-Sections are Markdown strings, except `glossary?: string | GlossaryEntry[]`;
+`WriteupInput = { overview, tldr, review?, checked?, notChecked?, outOfScope?, whereToLook?, context?, decisions: string | null, glossary?, topics }`.
+Sections are Markdown strings, except `glossary?: string | GlossaryEntry[]` and `review?: ReviewVerdict`;
 `topics` maps slugs to `{ why, example?, body? }`, also Markdown. Decisions is
 required, with `null` representing no decisions section.
-The three new fields `outOfScope`, `whereToLook` and `context` are optional, additive fields under `/api/v1`.
-When any is present, even as an empty string, sections render as TL;DR, Overview, Out of scope,
-Where to look, Context, Decisions and drift, Glossary, then topics; absent optional fields emit no section.
+The fields `outOfScope`, `whereToLook`, `context`, `review`, `checked` and `notChecked` are optional, additive fields under `/api/v1`.
+`ReviewVerdict = { level: "skim" | "topics" | "everything", topics?: TopicSlug[], reason }` is the
+agent's advice on how deep to read. `topics` is required for level `topics` and refused for the
+other levels; it holds 1–`topicsPerReview` unique declared topic slugs. `reason` is Markdown with
+non-whitespace text. The renderer composes the Review section as one paragraph: a bold
+"Skim, then merge.", "Read everything." or "Read topic(s) “<title>” …" (each title escaped as
+literal text), then `reason`. `checked` (what the agent ran or verified) and `notChecked` (what it
+did not) are Markdown with non-whitespace text.
+When any of the six is present, even as an empty string, sections render as TL;DR, Review, Checked,
+Not checked, Overview, Out of scope, Where to look, Context, Decisions and drift, Glossary, then
+topics; absent optional fields emit no section.
 Without them, the existing order stays Overview, TL;DR, Decisions and drift, Glossary, then topics,
 including when an import re-renders stored source.
 Every Markdown string is limited to `writeupSectionBytes` UTF-8 bytes; the sum of all present
 `overview`, `tldr`, `outOfScope`, `whereToLook`, `context`, `decisions`, `glossary`, `why`, `example`
 and `body` strings, including every list glossary term, definition and alias, is limited to
-`writeupBytes`. These limits measure UTF-8 bytes, not character count. Parsed `topics` has a null
+`writeupBytes`. The verdict's `reason`, `checked` and `notChecked` count toward both limits too.
+These limits measure UTF-8 bytes, not character count. Parsed `topics` has a null
 prototype: an absent `topics["constructor"]` is `undefined`, while an explicitly declared
 `constructor` topic remains accessible and serializes normally.
 
@@ -1674,8 +1689,9 @@ that exceed the remaining budget are listed as oversized without uploading their
 - Blob hashes are lowercase 64-character hex SHA-256 digests, addressed per owner.
 - Block ids are `<section>-<hash8>`. `hash8` is the first eight lowercase hex characters of SHA-256
   over block text normalized to NFC, whitespace runs collapsed to one space, and trimmed. Repeats
-  within a section append `-2`, `-3`, and so on. Section keys are `overview`, `tldr`, `outOfScope`,
-  `whereToLook`, `context`, `decisions`, `glossary`, `t-<slug>-why`, `t-<slug>-example`, `t-<slug>-body`, and
+  within a section append `-2`, `-3`, and so on. Section keys are `overview`, `tldr`, `review`,
+  `checked`, `notChecked`, `outOfScope`, `whereToLook`, `context`, `decisions`, `glossary`,
+  `t-<slug>-why`, `t-<slug>-example`, `t-<slug>-body`, and
   `doc-<hash8 of the doc path>`. The complete block id is bounded by `pathChars`.
 - Bearer tokens are `em_`, reviewer session secrets `ems_`, and pairing secrets `emp_`, followed
   by 32 random bytes encoded as unpadded base64url (43 encoded characters). Only SHA-256 hex

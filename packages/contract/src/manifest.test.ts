@@ -1,5 +1,13 @@
 import { describe, expect, test } from "vitest";
-import { GlossaryEntry, normalizeGlossaryForm, PublishManifest, WriteupInput, writeupMarkdown } from "./index.ts";
+import {
+  GlossaryEntry,
+  LIMITS,
+  normalizeGlossaryForm,
+  PublishManifest,
+  ReviewVerdict,
+  WriteupInput,
+  writeupMarkdown,
+} from "./index.ts";
 
 const topic = { slug: "routing", title: "Routing", importance: 20, summary: "Simplify route lookup." };
 const manifest = {
@@ -18,6 +26,7 @@ const manifest = {
 describe("publish manifest", () => {
   test("preserves old writeups and optional opening fields", () => {
     expect(WriteupInput.parse(manifest.writeup)).toEqual(manifest.writeup);
+    expect(PublishManifest.parse(manifest)).toEqual(manifest);
     for (const field of ["outOfScope", "whereToLook", "context"] as const) {
       for (const value of ["", "  **Synthetic context.**\n"]) {
         const writeup = { ...manifest.writeup, [field]: value };
@@ -33,6 +42,9 @@ describe("publish manifest", () => {
       writeupMarkdown({
         overview: "Overview",
         tldr: "Summary",
+        review: { level: "skim", reason: "A small change" },
+        checked: "Unit tests",
+        notChecked: "Browser behavior",
         outOfScope: "Excluded",
         whereToLook: "Guide",
         context: "Context",
@@ -42,6 +54,9 @@ describe("publish manifest", () => {
     ).toEqual([
       "Overview",
       "Summary",
+      "A small change",
+      "Unit tests",
+      "Browser behavior",
       "Excluded",
       "Guide",
       "Context",
@@ -170,6 +185,86 @@ describe("publish manifest", () => {
         glossary: "Router: selects a handler.",
       }).success,
     ).toBe(true);
+  });
+});
+
+describe("review verdicts", () => {
+  test.each(["skim", "topics", "everything"] as const)("accepts the %s level with check details", (level) => {
+    const review: ReviewVerdict = {
+      level,
+      ...(level === "topics" ? { topics: [topic.slug] } : {}),
+      reason: "  **Routing** deserves a look.\n",
+    };
+    const writeup = { ...manifest.writeup, review, checked: "Unit tests.", notChecked: "Browser behavior." };
+    expect(ReviewVerdict.parse(review)).toEqual(review);
+    expect(PublishManifest.parse({ ...manifest, writeup }).writeup).toEqual(writeup);
+  });
+
+  test.each([
+    [{ level: "topics" }, ["topics"], "the topics level names one or more topics"],
+    [{ level: "skim", topics: [topic.slug] }, ["topics"], "only the topics level names topics"],
+    [{ level: "everything", topics: [topic.slug] }, ["topics"], "only the topics level names topics"],
+    [{ level: "topics", topics: [topic.slug, topic.slug] }, ["topics", 1], "duplicate topic slug"],
+    [{ level: "topics", topics: ["missing"] }, ["topics", 0], "review topic is not declared"],
+  ] as const)("refuses invalid review topics: %j", (review, path, message) => {
+    const result = PublishManifest.safeParse({
+      ...manifest,
+      writeup: { ...manifest.writeup, review: { ...review, reason: "Synthetic reason." } },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toContainEqual(
+        expect.objectContaining({ code: "custom", path: ["writeup", "review", ...path], message }),
+      );
+    }
+  });
+
+  test.each(["checked", "notChecked", "reason"] as const)("refuses blank %s", (field) => {
+    for (const value of ["", " \n\t "]) {
+      const change = field === "reason" ? { review: { level: "skim", reason: value } } : { [field]: value };
+      const result = PublishManifest.safeParse({ ...manifest, writeup: { ...manifest.writeup, ...change } });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues).toContainEqual(
+          expect.objectContaining({
+            path: ["writeup", ...(field === "reason" ? ["review", "reason"] : [field])],
+            message: "must not be blank",
+          }),
+        );
+      }
+    }
+  });
+
+  test.each([
+    { level: "unknown" },
+    { level: "topics", topics: [] },
+    { level: "topics", topics: ["Invalid slug"] },
+    { level: "topics", topics: Array.from({ length: LIMITS.topicsPerReview + 1 }, (_, index) => `topic-${index}`) },
+  ])("refuses an invalid review: %j", (review) => {
+    expect(
+      PublishManifest.safeParse({
+        ...manifest,
+        writeup: { ...manifest.writeup, review: { ...review, reason: "Synthetic reason." } },
+      }).success,
+    ).toBe(false);
+  });
+
+  test.each(["checked", "notChecked", "reason"] as const)("counts %s toward both Markdown byte limits", (field) => {
+    const change = (text: string) =>
+      field === "reason" ? { review: { level: "skim", reason: text } } : { [field]: text };
+    expect(
+      WriteupInput.safeParse({ ...manifest.writeup, ...change("é".repeat(LIMITS.writeupSectionBytes / 2 + 1)) })
+        .success,
+    ).toBe(false);
+    const full = "x".repeat(LIMITS.writeupSectionBytes);
+    const writeup = {
+      overview: full,
+      tldr: "x".repeat(LIMITS.writeupBytes - LIMITS.writeupSectionBytes),
+      decisions: "",
+      topics: {},
+    };
+    expect(WriteupInput.safeParse(writeup).success).toBe(true);
+    expect(WriteupInput.safeParse({ ...writeup, ...change("x") }).success).toBe(false);
   });
 });
 
