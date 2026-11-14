@@ -89,13 +89,14 @@ function closeReply(key: string) {
   notify();
 }
 /** Cards share visibility; ownership still selects the one editable copy. */
-export function useReplyComposer(key: string) {
+export function useReplyComposer(key: string, enabled = true) {
   const id = useId();
   const visibility = useContext(ComposerVisibilityContext);
   useSyncExternalStore(subscribe, snapshot, snapshot);
   const value = entries.get(key);
   const open = value?.replyOpen ?? visibility?.get(key) ?? hasDraftText(key);
   useLayoutEffect(() => {
+    if (!enabled) return;
     const value = entry(key);
     value.release = undefined;
     value.cards.add(id);
@@ -125,7 +126,7 @@ export function useReplyComposer(key: string) {
       }
       notify();
     };
-  }, [key, id, visibility]);
+  }, [key, id, visibility, enabled]);
   return { open, close: () => closeReply(key) };
 }
 export function isEditComposerOpen(key: string) {

@@ -9,7 +9,6 @@ import { renderWriteup } from "../../../../../packages/core/src/render/writeup.t
 import * as blockRanges from "../../lib/block-ranges.ts";
 import { registerCommentRanges, trackCommentCard } from "../../lib/comment-highlights.ts";
 import { draftKey } from "../../lib/drafts.ts";
-import { layoutStore } from "../../lib/layout-store.ts";
 import { Composer } from "../threads/Composer.tsx";
 import { ThreadCard } from "../threads/ThreadCard.tsx";
 import { ToastProvider } from "../ui/Toast.tsx";
@@ -54,6 +53,10 @@ class MockHighlight extends Set<Range> {
 beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   localStorage.clear();
+  vi.spyOn(Range.prototype, "getClientRects").mockReturnValue([new DOMRect(0, 100, 200, 20)] as unknown as DOMRectList);
+  vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([
+    new DOMRect(0, 100, 200, 20),
+  ] as unknown as DOMRectList);
   highlights = new Map();
   vi.stubGlobal("CSS", { highlights });
   vi.stubGlobal("Highlight", MockHighlight);
@@ -272,7 +275,12 @@ test("writeup and Markdown readers divide active and ordinary ranges without ove
 });
 
 test("hover and focus each keep a card active until both have left, including focus within it", () => {
-  const view = mount(<Writeup {...props} writeup={writeup()} />);
+  const view = mount(
+    <>
+      <Writeup {...props} writeup={writeup()} />
+      <ThreadCard {...props} thread={thread} surface="comments" />
+    </>,
+  );
   const card = required(view.container.querySelector<HTMLElement>("[data-thread-card]"));
   const edit = within(card).getByRole("button", { name: "Edit" });
   const remove = within(card).getByRole("button", { name: "Delete" });
@@ -298,7 +306,12 @@ test("hover and focus each keep a card active until both have left, including fo
 });
 
 test("a card copy on another surface activates all reader copies and cleans up on removal", () => {
-  const reader = mount(<Writeup {...props} writeup={writeup()} />);
+  const reader = mount(
+    <>
+      <Writeup {...props} writeup={writeup()} />
+      <ThreadCard {...props} thread={thread} surface="comments" />
+    </>,
+  );
   const second = mount(<ThreadCard {...props} thread={thread} surface="comments" />);
   const firstCard = required(reader.container.querySelector<HTMLElement>("[data-thread-card]"));
   const secondCard = required(second.container.querySelector<HTMLElement>("[data-thread-card]"));
@@ -312,7 +325,12 @@ test("a card copy on another surface activates all reader copies and cleans up o
 });
 
 test("URL intent and card activity combine, and clearing either preserves the other", () => {
-  const view = mount(<Writeup {...props} writeup={writeup()} activeThreadId={thread.id} />);
+  const view = mount(
+    <>
+      <Writeup {...props} writeup={writeup()} activeThreadId={thread.id} />
+      <ThreadCard {...props} thread={thread} surface="comments" />
+    </>,
+  );
   expect(quotes(true)).toEqual(["seed"]);
   expect(quotes()).toEqual([]);
   const card = required(view.container.querySelector<HTMLElement>("[data-thread-card]"));
@@ -320,7 +338,12 @@ test("URL intent and card activity combine, and clearing either preserves the ot
   fireEvent.pointerLeave(card);
   expect(quotes(true)).toEqual(["seed"]);
   fireEvent.pointerEnter(card);
-  view.rerender(<Writeup {...props} writeup={writeup()} />);
+  view.rerender(
+    <>
+      <Writeup {...props} writeup={writeup()} />
+      <ThreadCard {...props} thread={thread} surface="comments" />
+    </>,
+  );
   expect(quotes(true)).toEqual(["seed"]);
   fireEvent.pointerLeave(card);
   expect(quotes()).toEqual(["seed"]);
@@ -362,7 +385,12 @@ test.each(["CSS", "highlights", "Highlight", "Intl.Segmenter"])("missing %s mean
   else if (missing === "Intl.Segmenter")
     vi.stubGlobal("Intl", Object.assign(Object.create(Intl), { Segmenter: undefined }));
   else vi.stubGlobal("Highlight", undefined);
-  const view = mount(<Writeup {...props} writeup={writeup()} activeThreadId={thread.id} />);
+  const view = mount(
+    <>
+      <Writeup {...props} writeup={writeup()} activeThreadId={thread.id} />
+      <ThreadCard {...props} thread={thread} surface="comments" />
+    </>,
+  );
   const card = required(view.container.querySelector<HTMLElement>("[data-thread-card]"));
   fireEvent.pointerEnter(card);
   act(() => within(card).getByRole("button", { name: "Edit" }).focus());
@@ -378,6 +406,7 @@ test("removing a focused comment control deactivates on refresh and stays inacti
     <>
       <button type="button">Outside</button>
       <Writeup {...props} threads={[{ ...thread, comments }]} writeup={content} />
+      <ThreadCard {...props} thread={{ ...thread, comments }} surface="comments" />
     </>
   );
   const view = mount(ui([parent, reply]));
@@ -512,7 +541,12 @@ test("mounting and removing inactive cards performs no highlight writes", () => 
 });
 
 test("card events rebuild only on an active thread transition", () => {
-  const view = mount(<Writeup {...props} writeup={writeup()} />);
+  const view = mount(
+    <>
+      <Writeup {...props} writeup={writeup()} />
+      <ThreadCard {...props} thread={thread} surface="comments" />
+    </>,
+  );
   const card = required(view.container.querySelector<HTMLElement>("[data-thread-card]"));
   const set = vi.spyOn(highlights, "set");
   fireEvent.pointerEnter(card);
@@ -529,14 +563,24 @@ test("card events rebuild only on an active thread transition", () => {
 
 test("an active URL or another card copy makes redundant card activity free of registry writes", () => {
   const content = writeup();
-  const view = mount(<Writeup {...props} writeup={content} activeThreadId={thread.id} />);
+  const view = mount(
+    <>
+      <Writeup {...props} writeup={content} activeThreadId={thread.id} />
+      <ThreadCard {...props} thread={thread} surface="comments" />
+    </>,
+  );
   const card = required(view.container.querySelector<HTMLElement>("[data-thread-card]"));
   const set = vi.spyOn(highlights, "set");
   fireEvent.pointerEnter(card);
   fireEvent.pointerLeave(card);
   expect(set).not.toHaveBeenCalled();
   fireEvent.pointerEnter(card);
-  view.rerender(<Writeup {...props} writeup={content} />);
+  view.rerender(
+    <>
+      <Writeup {...props} writeup={content} />
+      <ThreadCard {...props} thread={thread} surface="comments" />
+    </>,
+  );
   const copy = mount(<ThreadCard {...props} thread={thread} surface="comments" />);
   set.mockClear();
   fireEvent.pointerEnter(required(copy.container.querySelector<HTMLElement>("[data-thread-card]")));
@@ -672,8 +716,7 @@ test("sanitized Markdown and glossary remain inert while marked, and Mermaid cli
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
 });
 
-test("compact comments keep quoted ranges while closed, tracks opened cards and unregisters them on Hide", () => {
-  layoutStore.update({ compact: true });
+test("chips keep quoted ranges while closed and opened cards unregister on Close", () => {
   const sent = { ...thread, comments: thread.comments.map((comment) => ({ ...comment, sent: true, sentOn: 1 })) };
   const view = mount(<Writeup {...props} threads={[sent]} writeup={writeup()} />);
   expect(quotes()).toEqual(["seed"]);
@@ -688,7 +731,7 @@ test("compact comments keep quoted ranges while closed, tracks opened cards and 
   act(() => reply.focus());
   expect(card.hasAttribute("data-focus-within")).toBe(true);
   expect(quotes(true)).toEqual(["seed"]);
-  fireEvent.click(view.getByRole("button", { name: "Hide" }));
+  fireEvent.click(view.getByRole("button", { name: "Close" }));
   expect(card.isConnected).toBe(false);
   expect(card.hasAttribute("data-focus-within")).toBe(false);
   expect(quotes(true)).toEqual([]);

@@ -949,6 +949,9 @@ test.each([false, true])(
 );
 
 test("review route saves a selected doc span, refreshes its thread, sends it, then enables approval", async () => {
+  vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([
+    new DOMRect(0, 100, 200, 20),
+  ] as unknown as DOMRectList);
   const block = {
     id: "doc-12345678-12345678",
     section: "doc-12345678",
@@ -1015,7 +1018,10 @@ test("review route saves a selected doc span, refreshes its thread, sends it, th
   fireEvent.click(screen.getByRole("button", { name: "Comment on selection" }));
   fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "Explain the seed" } });
   fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
-  await screen.findByText("Explain the seed");
+  await waitFor(() => expect(screen.queryByRole("textbox", { name: "Comment" })).toBeNull());
+  fireEvent.click(await screen.findByRole("button", { name: "1 comment" }));
+  expect(within(screen.getByRole("dialog", { name: "Comment thread" })).getByText("Explain the seed")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   expect(posts[0]).toEqual({
     path: `/api/v1/reviews/${id}/threads`,
     body: {
@@ -1030,7 +1036,8 @@ test("review route saves a selected doc span, refreshes its thread, sends it, th
   await screen.findByText(/No agent has picked this up yet/);
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
   await waitFor(() => expect(screen.queryByText(/No agent has picked this up yet/)).toBeNull());
-  expect(screen.getByText("Sent")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
+  expect(within(screen.getByRole("dialog", { name: "Comment thread" })).getByText("Sent")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
   expect((screen.getByRole("button", { name: /^Approve/ }) as HTMLButtonElement).disabled).toBe(false);
   expect(

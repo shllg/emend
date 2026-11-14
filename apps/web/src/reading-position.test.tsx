@@ -136,6 +136,9 @@ beforeEach(() => {
   for (const [index, block] of docB.entries()) offsets.set(block.id, index * 100);
   revisions = { 1: revisionWith(1, [a, b, c]), 2: revisionWith(2, [a, b, c]) };
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(function (this: HTMLElement) {
+    return [this.getBoundingClientRect()] as unknown as DOMRectList;
+  });
   localStorage.clear();
   window.dispatchEvent(new StorageEvent("storage", { key: null, storageArea: localStorage }));
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -830,10 +833,9 @@ test.each(
 );
 
 test.each(["Show in place", "click", "collapsed"])(
-  "R4.2 Back keeps Markdown comment cards after %s without replaying the thread jump",
+  "R4.2 Back keeps the reading position after %s without reopening a transient popover",
   async (action) => {
     width = 1280;
-    layoutStore.update({ compact: true });
     const target = docA[1];
     if (!target) throw new Error("missing target");
     const placed: ThreadView = {
@@ -851,9 +853,9 @@ test.each(["Show in place", "click", "collapsed"])(
     const { history } = mount(action === "click" ? "?tab=docs&doc=a.md&rev=1" : "?tab=comments&rev=1");
     if (action === "click") fireEvent.click(await screen.findByRole("button", { name: "1 comment", expanded: false }));
     else fireEvent.click(await screen.findByRole("link", { name: "Show in place" }));
-    await screen.findByRole("button", { name: "Hide", expanded: true });
+    await screen.findByRole("button", { name: "Close" });
     expect(document.getElementById(`thread-${thread.id}`)).toBeTruthy();
-    if (action === "collapsed") fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+    if (action === "collapsed") fireEvent.click(screen.getByRole("button", { name: "Close" }));
     readerScroll(175);
     await go(history, "?tab=docs&doc=b.md&rev=1");
     await screen.findByText("Doc b2b2b2b2 2222");
@@ -861,10 +863,8 @@ test.each(["Show in place", "click", "collapsed"])(
     await act(async () => history.back());
     await screen.findByRole("heading", { name: "a.md" });
     await waitFor(() => expect(pane().scrollTop).toBe(175));
-    expect(
-      screen.getByRole("button", { name: action === "collapsed" ? "1 comment" : "Hide" }).getAttribute("aria-expanded"),
-    ).toBe(String(action !== "collapsed"));
-    expect(!!document.getElementById(`thread-${thread.id}`)).toBe(action !== "collapsed");
+    expect(screen.getByRole("button", { name: "1 comment" }).getAttribute("aria-expanded")).toBe("false");
+    expect(document.getElementById(`thread-${thread.id}`)).toBeNull();
     expect(jump).not.toHaveBeenCalled();
     expect(localStorage.getItem(readingKey)).not.toContain(`thread-${thread.id}`);
   },
@@ -880,6 +880,7 @@ test("R4.1 a reply composer's focus still captures the position for Back", async
     focus.call(this, options);
   });
   const { history } = mount();
+  fireEvent.click(await screen.findByRole("button", { name: "1 comment" }));
   fireEvent.click(await screen.findByRole("button", { name: "Reply" }));
   const composer = await screen.findByRole("textbox", { name: "Reply" });
   await waitFor(() => expect(document.activeElement).toBe(composer));

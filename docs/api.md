@@ -461,6 +461,8 @@ reads the approval window and the approval cap on review reads, still without qu
 | `file.next` | `n` |
 | `file.previous` | `p` |
 | `file.toggleViewed` | `v` |
+| `thread.next` | `.` |
+| `thread.previous` | `,` |
 | `review.instructions` | `s` |
 | `review.approve` | `shift+a` |
 | `review.snooze` | `z` |

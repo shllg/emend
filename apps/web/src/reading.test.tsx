@@ -549,6 +549,9 @@ test.each([
   ["markdown", "edit"],
 ])("%s retains its draft-based %s restoration after dismissal and remount", async (surface, kind) => {
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
+  vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([
+    new DOMRect(0, 100, 200, 20),
+  ] as unknown as DOMRectList);
   const doc = { path: "plan.md", kind: "markdown" as const, blocks: [block] };
   const placed: ThreadView = {
     ...thread,
@@ -584,6 +587,7 @@ test.each([
       />
     );
   const first = mount(reader);
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
   fireEvent.click(screen.getByRole("button", { name: kind === "reply" ? "Reply" : "Edit" }));
   const label = kind === "reply" ? "Reply" : "Edit comment";
   const editor = screen.getByRole("textbox", { name: label });
@@ -591,8 +595,11 @@ test.each([
   if (kind === "reply") fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   else fireEvent.keyDown(editor, { key: "Escape" });
   expect(screen.queryByRole("textbox", { name: label })).toBeNull();
+  expect(screen.getByRole("dialog", { name: "Comment thread" })).toBeTruthy();
   await act(async () => first.unmount());
   mount(reader);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
   expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: label }).value).toBe("Retained surface draft");
 });
 test("thread groups are ordered, unplaced quotes link to their original revision, and answered changes link to the block", async () => {

@@ -15,7 +15,6 @@ test("defaults include independent pane choices and D.4's 12px code size", () =>
     readingShare: 0.42,
     pane: { desktop: "tabs", tablet: "tabs" },
     readingWidth: "comfortable",
-    compact: false,
     hideResolved: false,
     diffStyle: "split",
     fileOrder: "topics",
@@ -41,7 +40,6 @@ test("invalid fields fall back independently, including each device choice", () 
       readingShare: 0.6,
       pane: { desktop: "invalid", tablet: "split" },
       readingWidth: "invalid",
-      compact: true,
       hideResolved: "true",
       diffStyle: "unified",
       fileOrder: "invalid",
@@ -57,7 +55,6 @@ test("invalid fields fall back independently, including each device choice", () 
     readingShare: 0.6,
     pane: { desktop: "tabs", tablet: "split" },
     readingWidth: "comfortable",
-    compact: true,
     diffStyle: "unified",
     inboxCollapsed: true,
     codeSize: 14,
@@ -81,20 +78,21 @@ test("file order persists across stores and follows other tabs' updates", () => 
   }
 });
 test.each([
-  ['{"reading":"focus"}', true],
-  ['{"reading":"focus","compact":false}', false],
-  ['{"reading":"focus","compact":null}', false],
-  ['{"reading":"standard"}', false],
-  ['{"reading":"standard","compact":true}', true],
-] as const)("legacy preference %s migrates without overriding explicit compact", (raw, compact) => {
+  '{"reading":"focus"}',
+  '{"reading":"focus","compact":false}',
+  '{"reading":"focus","compact":null}',
+  '{"reading":"standard"}',
+  '{"reading":"standard","compact":true}',
+] as const)("obsolete reading and compact preferences are stripped from %s", (raw) => {
   localStorage.setItem(layoutKey, raw);
   const store = createLayoutStore();
-  expect(store.getSnapshot()).toEqual({ ...defaultLayout, compact });
+  expect(store.getSnapshot()).toEqual(defaultLayout);
   expect(store.getSnapshot()).not.toHaveProperty("reading");
   store.update({ wrap: true });
   const saved = JSON.parse(localStorage.getItem(layoutKey) ?? "{}");
-  expect(saved).toMatchObject({ compact, wrap: true });
+  expect(saved).toMatchObject({ wrap: true });
   expect(saved).not.toHaveProperty("reading");
+  expect(saved).not.toHaveProperty("compact");
   expect(createLayoutStore().getSnapshot()).toEqual(saved);
 });
 

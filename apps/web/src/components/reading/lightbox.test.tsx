@@ -75,18 +75,11 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-function mount(readerGroups = groups, compact = false) {
+function mount(readerGroups = groups) {
   const ui = (next: ReaderGroup[], id = reviewId, revision = 1) => (
     <QueryClientProvider client={client}>
       <ToastProvider>
-        <BlockReader
-          reviewId={id}
-          revision={revision}
-          changedBlocks={[]}
-          threads={[]}
-          groups={next}
-          compact={compact}
-        />
+        <BlockReader reviewId={id} revision={revision} changedBlocks={[]} threads={[]} groups={next} />
       </ToastProvider>
     </QueryClientProvider>
   );
@@ -201,18 +194,15 @@ test("ignores unwrapped images, nested images and author-prefixed wrappers", () 
   expect(container.querySelectorAll("img[role]")).toHaveLength(0);
 });
 
-test.each([false, true])(
-  "opens in the shared reader, with compact comments (%s), with a plain caption and counter",
-  (compact) => {
-    const { container } = mount(groups, compact);
-    open();
-    expect(dialog().getAttribute("aria-modal")).toBe("true");
-    expect(within(dialog()).getByRole("heading", { name: "Before" })).toBeTruthy();
-    expect(within(dialog()).getByText("1 of 3")).toBeTruthy();
-    expect(container.contains(dialog())).toBe(false);
-    expect(document.activeElement).toBe(button("Close"));
-  },
-);
+test("opens in the shared reader with a plain caption and counter", () => {
+  const { container } = mount(groups);
+  open();
+  expect(dialog().getAttribute("aria-modal")).toBe("true");
+  expect(within(dialog()).getByRole("heading", { name: "Before" })).toBeTruthy();
+  expect(within(dialog()).getByText("1 of 3")).toBeTruthy();
+  expect(container.contains(dialog())).toBe(false);
+  expect(document.activeElement).toBe(button("Close"));
+});
 
 test.each(["Enter", " "])("%s opens a focused screenshot and prevents the default action", (key) => {
   mount();

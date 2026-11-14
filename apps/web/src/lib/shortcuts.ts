@@ -15,6 +15,8 @@ export const shortcutLabels: Record<ShortcutCommand, string> = {
   "file.next": "Next file",
   "file.previous": "Previous file",
   "file.toggleViewed": "Mark the current file viewed or not viewed",
+  "thread.next": "Next comment",
+  "thread.previous": "Previous comment",
   "review.instructions": "Write the Send instructions",
   "review.approve": "Approve",
   "review.snooze": "Snooze",
@@ -25,7 +27,7 @@ export const shortcutGroups = [
   { label: "Inbox", commands: shortcutCommands.filter((command) => command.startsWith("inbox.")) },
   {
     label: "Review page",
-    commands: shortcutCommands.filter((command) => /^(tab|file|review)\./.test(command)),
+    commands: shortcutCommands.filter((command) => /^(tab|file|thread|review)\./.test(command)),
   },
   { label: "Everywhere", commands: ["shortcuts.show", "palette.open"] as ShortcutCommand[] },
 ];
@@ -88,6 +90,9 @@ export function ignoreShortcut(event: KeyboardEvent) {
 export function hasOpenOverlay() {
   // Radix unmounts closed content; during exit animations it carries data-state="closed".
   return [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [role="menu"]')].some(
-    (content) => content.getAttribute("data-state") !== "closed" && !content.closest("[hidden]"),
+    (content) =>
+      content.getAttribute("data-state") !== "closed" &&
+      !content.closest("[hidden]") &&
+      !content.hasAttribute("data-reading-thread-popover"),
   );
 }

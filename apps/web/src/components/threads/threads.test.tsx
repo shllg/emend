@@ -1193,3 +1193,77 @@ test("fix3 Cancel returns focus without scheduling a handoff", async () => {
   await act(async () => view.rerender(<FocusReturnProbe generation={1} />));
   expect(document.activeElement).toBe(document.body);
 });
+
+function InlineEditor({ returnFocus }: { returnFocus: (saved: boolean) => HTMLElement | null }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <>
+      <button type="button">Edit opener</button>
+      {open && (
+        <Composer
+          inline
+          reviewId={id}
+          revision={2}
+          target={target}
+          commentId={id}
+          returnFocus={returnFocus}
+          onCancel={() => setOpen(false)}
+          onDismiss={() => setOpen(false)}
+          onSaved={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+test.each(["Cancel", "Escape", "Save changes"])(
+  "an inline phone composer returns focus with the saved flag after %s",
+  async (action) => {
+    width = 390;
+    const returnFocus = vi.fn(() => screen.getByRole<HTMLButtonElement>("button", { name: "Edit opener" }));
+    mount(<InlineEditor returnFocus={returnFocus} />);
+    const input = screen.getByRole("textbox", { name: "Edit comment" });
+    expect(returnFocus).not.toHaveBeenCalled();
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "Synthetic edited draft" } });
+    if (action === "Escape") fireEvent.keyDown(input, { key: "Escape" });
+    else fireEvent.click(screen.getByRole("button", { name: action }));
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+    await waitFor(() => expect(returnFocus).toHaveBeenCalledWith(action === "Save changes"));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Edit opener" }));
+  },
+);
+
+test.each(["field", "button"])(
+  "an inline phone edit unmount after Save preserves focus moved to another %s",
+  async (kind) => {
+    width = 390;
+    let finish = () => {};
+    const response = new Promise<Response>((resolve) => {
+      finish = () => resolve(new Response(null, { status: 200 }));
+    });
+    fetchMock.mockImplementation(() => response);
+    const returnFocus = vi.fn(() => screen.getByRole<HTMLButtonElement>("button", { name: "Edit opener" }));
+    mount(
+      <>
+        <input aria-label="Another field" />
+        <button type="button">Another action</button>
+        <InlineEditor returnFocus={returnFocus} />
+      </>,
+    );
+    const input = screen.getByRole("textbox", { name: "Edit comment" });
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "Synthetic edited draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    const other =
+      kind === "field"
+        ? screen.getByRole("textbox", { name: "Another field" })
+        : screen.getByRole("button", { name: "Another action" });
+    act(() => other.focus());
+    await act(async () => finish());
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Edit comment" })).toBeNull());
+    expect(document.activeElement).toBe(other);
+    expect(returnFocus).not.toHaveBeenCalled();
+  },
+);

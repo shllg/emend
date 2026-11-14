@@ -217,7 +217,9 @@ export function useReadingPosition({
       onScroll();
       if (!entry) return;
       const active = document.activeElement;
-      const appRoot = active.closest<HTMLElement>('[id^="block-"], [id^="thread-"], [id^="topic-"]');
+      const appRoot = active.closest("[data-reading-thread-popover]")
+        ? null
+        : active.closest<HTMLElement>('[id^="block-"], [id^="thread-"], [id^="topic-"]');
       const heading =
         latestDoc.current && docHeading(scroller, latestDoc.current, active.id) === active ? active : undefined;
       const root = heading ?? (appRoot && appElementId(appRoot.id) && scroller.contains(appRoot) ? appRoot : undefined);

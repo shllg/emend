@@ -168,6 +168,10 @@ beforeEach(() => {
   loading.ready = loaded.promise;
   loading.parser = undefined;
   loading.rendering = "normal";
+  vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(function (this: HTMLElement) {
+    const rect = this.getBoundingClientRect();
+    return [rect.width || rect.height ? rect : new DOMRect(0, 100, 200, 20)] as unknown as DOMRectList;
+  });
   localStorage.clear();
   window.dispatchEvent(new StorageEvent("storage", { key: null, storageArea: localStorage }));
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -247,17 +251,17 @@ test("writeup doc links keep the older revision when their href has no rev", asy
 });
 
 test.each([
-  { pixels: 1280, compact: false, pane: "split", key: "click", path: "seed.txt" },
-  { pixels: 1280, compact: false, pane: "split", key: "click", path: "pnpm-lock.yaml" },
-  { pixels: 1280, compact: false, pane: "tabs", key: "Enter", path: "large.txt" },
-  { pixels: 1280, compact: true, pane: "tabs", key: "Enter", path: "seed.txt" },
-  { pixels: 768, compact: false, pane: "tabs", key: " ", path: "seed.txt" },
-  { pixels: 390, compact: false, pane: "tabs", key: "click", path: "seed.txt" },
+  { pixels: 1280, pane: "split", key: "click", path: "seed.txt" },
+  { pixels: 1280, pane: "split", key: "click", path: "pnpm-lock.yaml" },
+  { pixels: 1280, pane: "tabs", key: "Enter", path: "large.txt" },
+  { pixels: 1280, pane: "tabs", key: "Enter", path: "seed.txt" },
+  { pixels: 768, pane: "tabs", key: " ", path: "seed.txt" },
+  { pixels: 390, pane: "tabs", key: "click", path: "seed.txt" },
 ] as const)(
-  "note refs navigate and mark a hidden, viewed file at $pixels px with compact=$compact in $pane via $key",
-  async ({ pixels, compact, pane, key, path }) => {
+  "note refs navigate and mark a hidden, viewed file at $pixels px in $pane via $key",
+  async ({ pixels, pane, key, path }) => {
     width = pixels;
-    layoutStore.update({ compact, pane: { desktop: pane, tablet: pane }, notes: false });
+    layoutStore.update({ pane: { desktop: pane, tablet: pane }, notes: false });
     const note = {
       id: crypto.randomUUID(),
       side: "new" as const,
@@ -1423,6 +1427,7 @@ describe("comment highlight navigation", () => {
       await waitFor(() => expect(quotes(true)).toEqual(["Keep growing"]));
       expect(quotes()).toEqual([]);
 
+      fireEvent.click(await screen.findByRole("button", { name: "Close" }));
       await act(async () => view.history.push(url()));
       await waitFor(() => expect(quotes()).toEqual(["Keep growing"]));
       expect(quotes(true)).toEqual([]);
@@ -1717,11 +1722,11 @@ test.each([1280, 390])("Show in place routes to and scrolls a writeup thread at 
   const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
   const { history } = mount("?tab=comments&rev=1");
   fireEvent.click(await screen.findByRole("link", { name: "Show in place" }));
-  await screen.findByRole("heading", { name: "Topic 1: Plant a seed" });
+  await screen.findByRole("heading", { name: "Topic 1: Plant a seed", hidden: pixels === 390 });
   expect(searchParams(history).get("tab")).toBe("writeup");
   expect(history.location.hash).toBe(`#thread-${id}`);
   await waitFor(() => expect(scroll.mock.instances).toContain(document.getElementById(`thread-${id}`)));
-  expect(screen.queryByRole("textbox", { name: "Reply" })).toBeNull();
+  expect(!!screen.queryByRole("textbox", { name: "Reply" })).toBe(pixels === 390);
 });
 test.each([1280, 390].flatMap((pixels) => (["title", "summary"] as const).map((part) => ({ pixels, part }))))(
   "Show in place reaches a written topic's $part passage at $pixels px",
@@ -1748,7 +1753,7 @@ test.each([1280, 390].flatMap((pixels) => (["title", "summary"] as const).map((p
     const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
     const { history } = mount("?tab=comments&rev=1");
     fireEvent.click(await screen.findByRole("link", { name: "Show in place" }));
-    await screen.findByRole("heading", { name: "Topic 1: Plant a seed" });
+    await screen.findByRole("heading", { name: "Topic 1: Plant a seed", hidden: pixels === 390 });
     expect(searchParams(history).get("tab")).toBe("writeup");
     expect(searchParams(history).get("rev")).toBe("1");
     expect(history.location.hash).toBe(`#thread-${id}`);
@@ -1771,7 +1776,7 @@ test.each([1280, 390])(
     const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
     const { history } = mount("?tab=comments&rev=1");
     fireEvent.click(await screen.findByRole("link", { name: "Show in place" }));
-    await screen.findByRole("heading", { name: "Topic 1: Plant a seed" });
+    await screen.findByRole("heading", { name: "Topic 1: Plant a seed", hidden: pixels === 390 });
     expect(searchParams(history).get("tab")).toBe("writeup");
     expect(searchParams(history).get("rev")).toBe("1");
     expect(history.location.hash).toBe(`#thread-${id}`);
@@ -1803,16 +1808,17 @@ test.each([1280, 390])("Show in place reaches a line thread, using the phone Dif
     expect(scroll.mock.calls.map(([node]) => node)).toContain(document.getElementById(`diff-thread-${id}`)),
   );
 });
-test("desktop block composer is inline after the block's threads, with one quote", async () => {
+test("desktop block composer stays inline after its block, with one quote", async () => {
   currentRevision.threads = [placedWriteupThread()];
   const { container } = mount();
   fireEvent.click(await screen.findByRole("button", { name: "Comment on block" }));
   const input = screen.getByRole("textbox", { name: "Comment" });
   expect(document.activeElement).toBe(input);
   const block = container.querySelector("[data-commenting]");
-  const thread = document.getElementById(`thread-${id}`);
+  const passage = block?.querySelector("[data-block-id]");
   expect(block?.contains(input)).toBe(true);
-  expect((thread?.compareDocumentPosition(input) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(document.getElementById(`thread-${id}`)).toBeNull();
+  expect((passage?.compareDocumentPosition(input) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(input.closest("form")?.querySelectorAll("mark")).toHaveLength(1);
   expect(input.closest("form")?.querySelector("blockquote")).toBeNull();
 });
@@ -2789,49 +2795,22 @@ test("Tabs retains the selected doc while Diff is visible and gives each panel a
   expect(reading.scrollTop).toBe(90);
 });
 
-test.each([1280, 900, 390])("compact comments toggle on the relevant tabs at %s px", async (pixels) => {
+test.each([1280, 900, 390])("reader tabs have no compact comments switch at %s px", async (pixels) => {
   width = pixels;
-  if (pixels === 390) {
-    layoutStore.update({ compact: true });
-    currentRevision.threads = [placedWriteupThread()];
-  }
+  currentRevision.threads = [placedWriteupThread()];
   mount();
   await screen.findByRole("heading", { name: "Topic 1: Plant a seed" });
-  const tabBar = document.querySelector(".em-review-tabs");
-  expect(tabBar?.textContent ?? "").not.toContain("Focus");
-  expect(screen.queryByRole("button", { name: "Contents" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
+  expect(document.getElementById(`thread-${id}`)).toBeNull();
   if (pixels === 390) {
-    expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
     expect(screen.queryByRole("navigation", { name: "Writeup outline" })).toBeNull();
-    expect(document.getElementById(`thread-${id}`)).toBeTruthy();
-    expect(document.querySelector(".em-thread-pill")).toBeNull();
     fireEvent.click(screen.getByRole("link", { name: "Docs" }));
-    await screen.findByRole("heading", { name: "Docs" });
-    expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
-    return;
-  }
-  const compact = screen.getByRole("button", { name: "Compact comments", pressed: false });
-  const saved = () => JSON.parse(localStorage.getItem(layoutKey) ?? "{}");
-  fireEvent.click(compact);
-  expect(compact.getAttribute("aria-pressed")).toBe("true");
-  expect(saved()).toMatchObject({ compact: true });
-  fireEvent.click(screen.getByRole("tab", { name: "Docs 2" }));
+  } else fireEvent.click(screen.getByRole("tab", { name: "Docs 2" }));
   await screen.findByRole("heading", { name: "Docs" });
   expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
-  expect(tabBar?.children).toHaveLength(1);
   fireEvent.click(screen.getByRole("link", { name: "seed.md seed.md" }));
   await screen.findByRole("heading", { name: "seed.md" });
-  fireEvent.click(screen.getByRole("button", { name: "Compact comments", pressed: true }));
-  expect(saved()).toMatchObject({ compact: false });
-  expect(screen.getByRole("button", { name: "Compact comments", pressed: false })).toBeTruthy();
-  fireEvent.click(screen.getByRole("tab", { name: /^Comments/ }));
-  await screen.findByText("No comments yet.");
   expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
-  fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
-  await waitFor(() => expect(screen.getByTestId("reading-pane").hidden).toBe(true));
-  expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
-  fireEvent.click(screen.getByRole("tab", { name: "Writeup" }));
-  await screen.findByRole("button", { name: "Compact comments", pressed: false });
 });
 
 test.each<RevisionView["docs"][number]>([
@@ -2839,7 +2818,6 @@ test.each<RevisionView["docs"][number]>([
   htmlDoc,
 ])("reading switches stay hidden for $kind docs", async (doc) => {
   currentRevision.docs.push(doc);
-  layoutStore.update({ compact: true });
   mount(`?tab=docs&doc=${doc.path}&rev=1`);
   await screen.findByRole("heading", { name: doc.path.split("/").at(-1) });
   expect(screen.queryByRole("button", { name: "Contents" })).toBeNull();
@@ -2851,32 +2829,22 @@ test.each<RevisionView["docs"][number]>([
   expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
   expect(document.querySelector(".em-review-tabs")?.children).toHaveLength(1);
   fireEvent.click(screen.getByRole("tab", { name: "Writeup" }));
-  await screen.findByRole("button", { name: "Compact comments", pressed: true });
+  await screen.findByRole("heading", { name: "Topic 1: Plant a seed" });
+  expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
 });
 
-test.each([false, true])("compact comments survive remount with compact=%s", async (compact) => {
-  const view = mount();
-  await screen.findByRole("button", { name: "Compact comments", pressed: false });
-  fireEvent.click(screen.getByRole("button", { name: "Compact comments" }));
-  if (!compact) fireEvent.click(screen.getByRole("button", { name: "Compact comments" }));
-  view.unmount();
-  mount();
-  await screen.findByRole("button", { name: "Compact comments", pressed: compact });
-  expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}")).toMatchObject({ compact });
-});
-
-test("legacy reading preference starts with compact comments pressed", async () => {
-  localStorage.setItem(layoutKey, '{"reading":"focus"}');
+test("obsolete reading preferences do not affect comment marks", async () => {
+  localStorage.setItem(layoutKey, '{"reading":"focus","compact":true}');
   currentRevision.threads = [placedWriteupThread()];
   mount();
-  await screen.findByRole("button", { name: "Compact comments", pressed: true });
-  expect(await screen.findByRole("button", { name: "1 comment", expanded: false })).toBeTruthy();
+  await screen.findByRole("button", { name: "1 comment", expanded: false });
+  expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
+  expect(document.getElementById(`thread-${id}`)).toBeNull();
 });
 
 test.each(["hash", "Show in place", "initial hash"])(
-  "compact %s opens a pill and its folded topic before scrolling the marked card",
+  "%s opens a popover and its folded topic before scrolling the marked card",
   async (navigation) => {
-    layoutStore.update({ compact: true });
     currentRevision.topics = currentRevision.topics.map((topic) => ({ ...topic, attention: "skim" }));
     currentRevision.threads = [placedWriteupThread()];
     const scrolled: { id: string; hidden: boolean; jumped: boolean }[] = [];
@@ -2897,12 +2865,12 @@ test.each(["hash", "Show in place", "initial hash"])(
     }
     await waitFor(() => expect(scrolled).toContainEqual({ id: `thread-${id}`, hidden: false, jumped: true }));
     expect(screen.getByRole("button", { name: "Topic 1: Plant a seed", expanded: true })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Hide" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(document.getElementById(`thread-${id}`)).toBeNull();
     scrolled.length = 0;
     await act(async () => history.push(`/r/${id}?tab=writeup&rev=1`));
-    // Returning to the same thread is a fresh navigation and reopens the pill.
+    // Returning to the same thread is a fresh navigation and reopens the popover.
     await act(async () => history.push(`/r/${id}?tab=writeup&rev=1#thread-${id}`));
     await waitFor(() => expect(scrolled).toContainEqual({ id: `thread-${id}`, hidden: false, jumped: true }));
   },
@@ -2947,8 +2915,7 @@ test("the outline disconnects its observer while Tabs hides the mounted reading 
   expect(observers.filter((entry) => entry.root === pane).length).toBeGreaterThan(1);
 });
 
-test("compact comments repeat an explicit Show in place intent with the same URL after Hide", async () => {
-  layoutStore.update({ compact: true });
+test("thread popovers repeat an explicit Show in place intent with the same URL after Close", async () => {
   currentRevision.threads = [placedWriteupThread()];
   const block = currentRevision.writeup.sections[0]?.blocks[0];
   if (!block) throw new Error("Missing synthetic block");
@@ -2959,13 +2926,13 @@ test("compact comments repeat an explicit Show in place intent with the same URL
   const { history } = mount();
   const link = await screen.findByRole("link", { name: "Show in place" });
   fireEvent.click(link);
-  await screen.findByRole("button", { name: "Hide" });
+  await screen.findByRole("button", { name: "Close" });
   const url = history.location.href;
-  fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   expect(document.getElementById(`thread-${id}`)).toBeNull();
   scroll.mockClear();
   fireEvent.click(link);
-  await screen.findByRole("button", { name: "Hide" });
+  await screen.findByRole("button", { name: "Close" });
   const card = document.getElementById(`thread-${id}`);
   expect(card?.hasAttribute("data-jump")).toBe(true);
   expect(history.location.href).toBe(url);
@@ -2973,7 +2940,6 @@ test("compact comments repeat an explicit Show in place intent with the same URL
 });
 
 test("an external _blank link is left to the browser while a same-review link still follows in place", async () => {
-  layoutStore.update({ compact: true });
   currentRevision.threads = [placedWriteupThread()];
   const block = currentRevision.writeup.sections[0]?.blocks[0];
   if (!block) throw new Error("Missing synthetic block");
@@ -3005,18 +2971,17 @@ test("an external _blank link is left to the browser while a same-review link st
   expect(prevented).toBe(false);
   expect(history.location.href).toBe(before);
   fireEvent.click(screen.getByRole("link", { name: "In" }));
-  await screen.findByRole("button", { name: "Hide" });
+  await screen.findByRole("button", { name: "Close" });
 });
 
 test.each(["tab", "doc", "revision", "no thread", "other thread"])(
-  "compact comments keep a hidden pill closed after an unrelated %s navigation",
+  "thread popovers stay closed after an unrelated %s navigation",
   async (navigation) => {
     width = 900;
-    layoutStore.update({ compact: true });
     currentRevision.threads = [placedWriteupThread()];
     currentReview.revisions.push({ seq: 2, createdAt: "2026-01-02T00:00:00.000Z" });
     const { history } = mount(`?tab=writeup&rev=1#thread-${id}`);
-    fireEvent.click(await screen.findByRole("button", { name: "Hide" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Close" }));
     const next =
       navigation === "tab"
         ? `?tab=diff&rev=1#thread-${id}`
@@ -3028,7 +2993,8 @@ test.each(["tab", "doc", "revision", "no thread", "other thread"])(
               ? "?tab=writeup&rev=1#thread-22222222-2222-4222-8222-222222222222"
               : "?tab=writeup&rev=1";
     await act(async () => history.push(`/r/${id}${next}`));
-    await waitFor(() => expect(document.querySelector(".em-thread-pill")?.textContent).toBe("1 comment"));
+    if (navigation !== "tab")
+      await waitFor(() => expect(document.querySelector(".em-thread-chip")?.textContent).toBe("1"));
     expect(document.getElementById(`thread-${id}`)).toBeNull();
     if (navigation === "tab") {
       await waitFor(() => expect(screen.getByTestId("reading-pane").hidden).toBe(true));
@@ -3038,16 +3004,15 @@ test.each(["tab", "doc", "revision", "no thread", "other thread"])(
   },
 );
 
-test("a fulfilled compact comment jump does not reopen a hidden pill when the block remounts in the same navigation", async () => {
-  layoutStore.update({ compact: true });
+test("a fulfilled comment jump does not reopen a closed popover when the block remounts in the same navigation", async () => {
   currentRevision.threads = [placedWriteupThread()];
   const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
   const { history } = mount("?tab=comments&rev=1");
   fireEvent.click(await screen.findByRole("link", { name: "Show in place" }));
-  await screen.findByRole("button", { name: "Hide" });
+  await screen.findByRole("button", { name: "Close" });
   const card = document.getElementById(`thread-${id}`);
   await waitFor(() => expect(scroll.mock.instances).toContain(card));
-  fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   expect(card?.isConnected).toBe(false);
   const url = history.location.href;
   const originalBlock = document.getElementById("block-t-seed-body-12345678");
@@ -3530,6 +3495,7 @@ test.each(["link", "Contents", "restore"])("R2.7 %s ignores a placed comment's d
   const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
   const { history } = mount(`?tab=docs&doc=seed.md&rev=1${mode === "link" ? `#h-${setup}` : ""}`);
   const heading = await screen.findByRole("heading", { name: "Section 2" });
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
   const reply = screen.getByRole("heading", { name: "Reply heading" });
   if (mode === "Contents") {
     fireEvent.click(

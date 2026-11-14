@@ -1,4 +1,4 @@
-type Reader = { blocks: Map<string, Range>[]; activeThreadId?: string };
+type Reader = { blocks: Map<string, Range>[]; activeThreadId?: string; openThreadId?: string };
 type Card = { threadId: string | null; hovered: boolean; active: boolean; onActivity?: (active: boolean) => void };
 const readers = new Set<Reader>();
 const cards = new Map<HTMLElement, Card>();
@@ -35,7 +35,10 @@ function reconcileCards() {
 
 function activeThreadIds() {
   const ids = new Set(activeCardThreads);
-  for (const reader of readers) if (reader.activeThreadId) ids.add(reader.activeThreadId);
+  for (const reader of readers) {
+    if (reader.activeThreadId) ids.add(reader.activeThreadId);
+    if (reader.openThreadId) ids.add(reader.openThreadId);
+  }
   return ids;
 }
 
@@ -88,9 +91,10 @@ export function registerCommentRanges(blocks: Map<string, Range>[]) {
   readers.add(reader);
   rebuild();
   return {
-    setActiveThread(activeThreadId?: string) {
-      if (reader.activeThreadId === activeThreadId) return;
+    setActiveThread(activeThreadId?: string, openThreadId?: string) {
+      if (reader.activeThreadId === activeThreadId && reader.openThreadId === openThreadId) return;
       reader.activeThreadId = activeThreadId;
+      reader.openThreadId = openThreadId;
       rebuild();
     },
     unregister() {

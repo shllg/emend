@@ -354,3 +354,26 @@ test("a gap search still reads O(log n) rects", () => {
   );
   expect(reads).toBeLessThan(20);
 });
+
+test.each(["finding", "applying"])("%s anchors ignores every element inside a reading popover", (operation) => {
+  const scroller = scene({ "thread-popover": 100 }, 125);
+  const card = document.getElementById("thread-popover") as HTMLElement;
+  const popover = document.createElement("div");
+  popover.dataset.readingThreadPopover = "";
+  scroller.append(popover);
+  popover.append(card);
+  if (operation === "finding") expect(findAnchor(scroller, '[id^="thread-"]')).toBeNull();
+  else expect(applyAnchor(scroller, { id: card.id, fraction: 0.5 })).toBeUndefined();
+  expect(scroller.scrollTop).toBe(125);
+});
+
+test("gap restoration skips a popover between two passage anchors", () => {
+  const scroller = scene({ "block-before": 0, "thread-popover": 150, "block-after": 300 }, 0);
+  const card = document.getElementById("thread-popover") as HTMLElement;
+  const popover = document.createElement("div");
+  popover.dataset.readingThreadPopover = "";
+  card.before(popover);
+  popover.append(card);
+  expect(applyAnchor(scroller, { id: "block-before", fraction: 1, gap: 0.5 }, undefined, "[id]")).toBe(200);
+  expect(findAnchor(scroller, "[id]")).toEqual({ id: "block-before", fraction: 1, gap: 0.5 });
+});

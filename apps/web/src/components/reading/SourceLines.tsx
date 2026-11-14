@@ -76,7 +76,6 @@ export const SourceLines = memo(function SourceLines({
   revision,
   changedBlocks,
   topics,
-  threadJump,
 }: Omit<ReaderProps, "threads"> & {
   lines: SourceToken[][];
   start: number;
@@ -167,13 +166,7 @@ export const SourceLines = memo(function SourceLines({
           row,
           <div key={`discussion-${number}`} className="em-source-discussion" data-source-end={number}>
             {placed && (
-              <BlockThreads
-                compact={false}
-                reviewId={reviewId}
-                threads={placed}
-                composing={composing}
-                jump={threadJump}
-              >
+              <BlockThreads>
                 <ThreadComposerContext value={registerComposer}>
                   <ComposerVisibilityContext value={composerVisibility}>
                     {placed.map((thread) => (
