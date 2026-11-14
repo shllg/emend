@@ -1030,7 +1030,8 @@ test.each(["block", "heading", "doc", "html-doc", "doc-thread", "html-thread"])(
     const { history } = mount(`?tab=docs#${elementId}`);
     await screen.findByRole("heading", { name: path.split("/").at(-1) });
     await waitFor(() => expect(searchParams(history).get("doc")).toBe(path));
-    const scrollTarget = kind === "html-thread" ? `html-doc-${path}` : elementId;
+    const scrollTarget =
+      kind === "html-thread" ? `html-doc-${path}` : kind === "doc-thread" ? `block-${docBlock.id}` : elementId;
     await waitFor(() => expect(scroll.mock.instances).toContain(document.getElementById(scrollTarget)));
     expect(history.length).toBe(1);
     expect(document.activeElement).not.toBe(screen.getByRole("heading", { name: path.split("/").at(-1) }));
@@ -1716,7 +1717,7 @@ test("whole review threads appear in Comments without a Show in place link", asy
   expect(screen.getByText("A synthetic question")).toBeTruthy();
   expect(screen.queryByRole("link", { name: "Show in place" })).toBeNull();
 });
-test.each([1280, 390])("Show in place routes to and scrolls a writeup thread at %s px", async (pixels) => {
+test.each([1280, 390])("Show in place opens a writeup thread and reveals its passage at %s px", async (pixels) => {
   width = pixels;
   currentRevision.threads = [placedWriteupThread()];
   const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
@@ -1725,7 +1726,9 @@ test.each([1280, 390])("Show in place routes to and scrolls a writeup thread at 
   await screen.findByRole("heading", { name: "Topic 1: Plant a seed", hidden: pixels === 390 });
   expect(searchParams(history).get("tab")).toBe("writeup");
   expect(history.location.hash).toBe(`#thread-${id}`);
-  await waitFor(() => expect(scroll.mock.instances).toContain(document.getElementById(`thread-${id}`)));
+  const dialog = await screen.findByRole("dialog", { name: "Comment thread" });
+  expect(scroll.mock.instances).toContain(document.getElementById("block-t-seed-body-12345678"));
+  expect(scroll.mock.instances).not.toContain(within(dialog).getByRole("article"));
   expect(!!screen.queryByRole("textbox", { name: "Reply" })).toBe(pixels === 390);
 });
 test.each([1280, 390].flatMap((pixels) => (["title", "summary"] as const).map((part) => ({ pixels, part }))))(
@@ -1757,7 +1760,11 @@ test.each([1280, 390].flatMap((pixels) => (["title", "summary"] as const).map((p
     expect(searchParams(history).get("tab")).toBe("writeup");
     expect(searchParams(history).get("rev")).toBe("1");
     expect(history.location.hash).toBe(`#thread-${id}`);
-    await waitFor(() => expect(scroll.mock.instances).toContain(document.getElementById(`thread-${id}`)));
+    const dialog = await screen.findByRole("dialog", { name: "Comment thread" });
+    expect(scroll.mock.instances).toContain(
+      document.querySelector(`[data-topic-slug="seed"][data-topic-part="${part}"]`),
+    );
+    expect(scroll.mock.instances).not.toContain(within(dialog).getByRole("article"));
   },
 );
 test.each([1280, 390])(
@@ -1780,7 +1787,11 @@ test.each([1280, 390])(
     expect(searchParams(history).get("tab")).toBe("writeup");
     expect(searchParams(history).get("rev")).toBe("1");
     expect(history.location.hash).toBe(`#thread-${id}`);
-    await waitFor(() => expect(scroll.mock.instances).toContain(document.getElementById(`thread-${id}`)));
+    const dialog = await screen.findByRole("dialog", { name: "Comment thread" });
+    expect(scroll.mock.instances).toContain(
+      document.querySelector('[data-topic-slug="seed"][data-topic-part="title"]'),
+    );
+    expect(scroll.mock.instances).not.toContain(within(dialog).getByRole("article"));
   },
 );
 test.each([1280, 390])("Show in place reaches a line thread, using the phone Diff tab at %s px", async (pixels) => {
@@ -2551,9 +2562,10 @@ test.each(["hash", "map", "thread hash", "thread go to", "browser search"])(
         : navigation === "thread hash"
           ? `thread-${id}`
           : "block-t-seed-body-12345678";
+    const scrolledId = navigation === "map" ? "topic-seed" : "block-t-seed-body-12345678";
     let visibleAtScroll = false;
     const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (this: HTMLElement) {
-      if (this.id === targetId) visibleAtScroll = !this.closest("[hidden]");
+      if (this.id === scrolledId) visibleAtScroll = !this.closest("[hidden]");
     });
     const { history } = mount(navigation === "thread go to" ? "?tab=comments&rev=1" : "?tab=writeup&rev=1");
     const navigate = async () => {
@@ -2843,13 +2855,13 @@ test("obsolete reading preferences do not affect comment marks", async () => {
 });
 
 test.each(["hash", "Show in place", "initial hash"])(
-  "%s opens a popover and its folded topic before scrolling the marked card",
+  "%s opens a popover and reveals its folded passage without scrolling the card",
   async (navigation) => {
     currentRevision.topics = currentRevision.topics.map((topic) => ({ ...topic, attention: "skim" }));
     currentRevision.threads = [placedWriteupThread()];
-    const scrolled: { id: string; hidden: boolean; jumped: boolean }[] = [];
+    const scrolled: { id: string; hidden: boolean }[] = [];
     vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (this: HTMLElement) {
-      scrolled.push({ id: this.id, hidden: !!this.closest("[hidden]"), jumped: this.hasAttribute("data-jump") });
+      scrolled.push({ id: this.id, hidden: !!this.closest("[hidden]") });
     });
     const { history } = mount(
       navigation === "Show in place"
@@ -2863,7 +2875,10 @@ test.each(["hash", "Show in place", "initial hash"])(
       expect(document.getElementById(`thread-${id}`)).toBeNull();
       await act(async () => history.push(`/r/${id}?tab=writeup&rev=1#thread-${id}`));
     }
-    await waitFor(() => expect(scrolled).toContainEqual({ id: `thread-${id}`, hidden: false, jumped: true }));
+    await screen.findByRole("dialog", { name: "Comment thread" });
+    expect(scrolled).toContainEqual({ id: "block-t-seed-body-12345678", hidden: false });
+    expect(scrolled.some((element) => element.id === `thread-${id}`)).toBe(false);
+    expect(document.getElementById(`thread-${id}`)?.hasAttribute("data-jump")).toBe(true);
     expect(screen.getByRole("button", { name: "Topic 1: Plant a seed", expanded: true })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
@@ -2872,7 +2887,60 @@ test.each(["hash", "Show in place", "initial hash"])(
     await act(async () => history.push(`/r/${id}?tab=writeup&rev=1`));
     // Returning to the same thread is a fresh navigation and reopens the popover.
     await act(async () => history.push(`/r/${id}?tab=writeup&rev=1#thread-${id}`));
-    await waitFor(() => expect(scrolled).toContainEqual({ id: `thread-${id}`, hidden: false, jumped: true }));
+    await screen.findByRole("dialog", { name: "Comment thread" });
+    expect(scrolled).toContainEqual({ id: "block-t-seed-body-12345678", hidden: false });
+    expect(scrolled.some((element) => element.id === `thread-${id}`)).toBe(false);
+    expect(document.getElementById(`thread-${id}`)?.hasAttribute("data-jump")).toBe(true);
+  },
+);
+
+test.each([1280, 390].flatMap((pixels) => ["writeup", "docs"].map((tab) => ({ pixels, tab }))))(
+  "a $tab thread hash opens at the top without scrolling its card at $pixels px",
+  async ({ pixels, tab }) => {
+    width = pixels;
+    const thread = placedWriteupThread();
+    if (tab === "docs") {
+      thread.target = {
+        kind: "doc-span",
+        path: "seed.md",
+        blockId: "t-seed-body-12345678",
+        quote: "Keep growing",
+        prefix: "",
+        suffix: "",
+      };
+      thread.placement = {
+        status: "placed",
+        location: { kind: "doc-span", path: "seed.md", blockId: "t-seed-body-12345678", start: 0, end: 12 },
+      };
+      currentRevision.docs = [
+        {
+          kind: "markdown",
+          path: "seed.md",
+          blocks: currentRevision.writeup.sections.flatMap((section) => section.blocks),
+        },
+      ];
+    }
+    currentRevision.threads = [thread];
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(900);
+    const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (this: HTMLElement) {
+      const surface = this.closest<HTMLElement>("[data-reading-thread-popover], [data-reading-thread-sheet]");
+      // Model the card-centering scroll that would hide the start of a tall thread.
+      if (surface) {
+        const scroller = surface.hasAttribute("data-reading-thread-sheet") ? surface.parentElement : surface;
+        if (scroller) scroller.scrollTop = 220;
+      }
+    });
+    const { history } = mount(`?tab=${tab}${tab === "docs" ? "&doc=seed.md" : ""}&rev=1#thread-${id}`);
+    const dialog = await screen.findByRole("dialog", { name: "Comment thread" });
+    const card = within(dialog).getByRole("article");
+    const sheet = dialog.querySelector<HTMLElement>("[data-reading-thread-sheet]");
+    const scroller = pixels === 390 ? sheet?.parentElement : dialog;
+    expect(card.id).toBe(`thread-${id}`);
+    expect(pixels === 390 ? sheet : dialog.hasAttribute("data-reading-thread-popover")).toBeTruthy();
+    expect(history.location.hash).toBe(`#thread-${id}`);
+    expect(scroll.mock.instances).toContain(document.getElementById("block-t-seed-body-12345678"));
+    expect(scroll.mock.instances).not.toContain(card);
+    expect(scroller?.scrollTop).toBe(0);
   },
 );
 
@@ -2936,7 +3004,8 @@ test("thread popovers repeat an explicit Show in place intent with the same URL 
   const card = document.getElementById(`thread-${id}`);
   expect(card?.hasAttribute("data-jump")).toBe(true);
   expect(history.location.href).toBe(url);
-  await waitFor(() => expect(scroll.mock.instances).toContain(card));
+  expect(scroll.mock.instances).toContain(document.getElementById("block-t-seed-body-12345678"));
+  expect(scroll.mock.instances).not.toContain(card);
 });
 
 test("an external _blank link is left to the browser while a same-review link still follows in place", async () => {
@@ -3011,7 +3080,8 @@ test("a fulfilled comment jump does not reopen a closed popover when the block r
   fireEvent.click(await screen.findByRole("link", { name: "Show in place" }));
   await screen.findByRole("button", { name: "Close" });
   const card = document.getElementById(`thread-${id}`);
-  await waitFor(() => expect(scroll.mock.instances).toContain(card));
+  expect(scroll.mock.instances).toContain(document.getElementById("block-t-seed-body-12345678"));
+  expect(scroll.mock.instances).not.toContain(card);
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
   expect(card?.isConnected).toBe(false);
   const url = history.location.href;

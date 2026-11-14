@@ -184,6 +184,38 @@ test("a tinted point opens the shortest overlapping passage and ignores outside,
   fireEvent.click(text, { clientX: 60, clientY: 110 });
   expect(within(dialog()).getByRole("article").id).toBe(`thread-${thread.id}`);
 });
+test.each([false, true])("continuation clicks cannot step through a newly opened thread with phone=%s", (isPhone) => {
+  phone = isPhone;
+  const view = mount([
+    thread,
+    {
+      ...second,
+      placement: { status: "placed", location: { kind: "writeup-span", blockId: block.id, start: 13, end: 18 } },
+    },
+  ]);
+  fireEvent.click(view.container.querySelector("strong") as HTMLElement, { clientX: 60, clientY: 110, detail: 1 });
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${thread.id}`);
+  const next = within(dialog()).getByRole("button", { name: "Next" });
+  expect(fireEvent.click(next, { detail: 2 })).toBe(false);
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${thread.id}`);
+  fireEvent.click(next, { detail: 1 });
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${second.id}`);
+  const previous = within(dialog()).getByRole("button", { name: "Previous" });
+  expect(fireEvent.click(previous, { detail: 2 })).toBe(false);
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${second.id}`);
+  // Keyboard activation dispatches a click with detail 0.
+  fireEvent.click(previous, { detail: 0 });
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${thread.id}`);
+});
+test.each([0, 1])("continuation clicks cannot open Reply but activation with detail=%s can", (detail) => {
+  const view = mount();
+  fireEvent.click(view.container.querySelector("strong") as HTMLElement, { clientX: 60, clientY: 110, detail: 1 });
+  const reply = within(dialog()).getByRole("button", { name: "Reply" });
+  expect(fireEvent.click(reply, { detail: 2 })).toBe(false);
+  expect(within(dialog()).queryByRole("textbox", { name: "Reply" })).toBeNull();
+  fireEvent.click(reply, { detail });
+  expect(within(dialog()).getByRole("textbox", { name: "Reply" })).toBeTruthy();
+});
 test("stepping follows range order with disabled ends and one dialog", () => {
   mount([thread, second]);
   fireEvent.click(chip(2));
@@ -268,6 +300,38 @@ test("a phone sheet shows a clamped quote and an unfocused inline reply field wi
   expect(screen.getByRole("textbox", { name: "Reply" })).toBe(input);
 });
 
+test("the phone reply footer can shrink and scroll in a short viewport", () => {
+  phone = true;
+  mount();
+  fireEvent.click(chip());
+  const footer = within(dialog()).getByRole("textbox", { name: "Reply" }).closest("footer");
+  expect(footer?.classList.contains("min-h-0")).toBe(true);
+  expect(footer?.classList.contains("overflow-y-auto")).toBe(true);
+  expect(footer?.classList.contains("shrink-0")).toBe(false);
+  const body = footer?.previousElementSibling;
+  expect(body?.classList.contains("flex-[1_1000000_0%]")).toBe(true);
+  expect(body?.classList.contains("flex-1")).toBe(false);
+});
+
+test.each([0, 1])("the phone reply footer ignores continuation clicks but saves with detail=%s", async (detail) => {
+  phone = true;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(null, { status: 201 })),
+  );
+  const view = mount();
+  fireEvent.click(view.container.querySelector("strong") as HTMLElement, { clientX: 60, clientY: 110, detail: 1 });
+  const input = within(dialog()).getByRole<HTMLTextAreaElement>("textbox", { name: "Reply" });
+  fireEvent.change(input, { target: { value: "Synthetic reply" } });
+  const save = within(dialog()).getByRole("button", { name: "Save comment" });
+  expect(fireEvent.click(save, { detail: 2 })).toBe(false);
+  expect(fetch).not.toHaveBeenCalled();
+  expect(input.value).toBe("Synthetic reply");
+  fireEvent.click(save, { detail });
+  await waitFor(() => expect(input.value).toBe(""));
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
 test("a popover fits above a passage near the visible bottom", () => {
   vi.mocked(Range.prototype.getClientRects).mockReturnValue([rect(670)] as unknown as DOMRectList);
   vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(300);
@@ -275,6 +339,54 @@ test("a popover fits above a passage near the visible bottom", () => {
   fireEvent.click(chip());
   expect(dialog().style.top).toBe("362px");
   expect(dialog().style.maxHeight).toBe("448px");
+});
+
+test("resizing only the reading scroller repositions and constrains the open popover", () => {
+  const observers: { callback: () => void; elements: Set<Element> }[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      entry: (typeof observers)[number];
+      constructor(callback: () => void) {
+        this.entry = { callback, elements: new Set() };
+        observers.push(this.entry);
+      }
+      observe(element: Element) {
+        this.entry.elements.add(element);
+      }
+      disconnect() {
+        this.entry.elements.clear();
+      }
+    },
+  );
+  vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(600);
+  const view = mount();
+  fireEvent.click(chip());
+  expect(dialog().style.top).toBe("128px");
+  expect(dialog().style.maxHeight).toBe("448px");
+  const scroller = view.container.querySelector<HTMLElement>("[data-reading-scroll]") as HTMLElement;
+  const observer = observers.find((entry) => entry.elements.has(scroller) && entry.elements.has(dialog()));
+  expect(observer).toBeTruthy();
+  scroller.getBoundingClientRect = () => new DOMRect(0, 0, 600, 300);
+  act(() => observer?.callback());
+  expect(dialog().style.top).toBe("8px");
+  expect(dialog().style.maxHeight).toBe("284px");
+  fireEvent.click(within(dialog()).getByRole("button", { name: "Close" }));
+  expect(observer?.elements.size).toBe(0);
+});
+
+test("window resize repositions a popover without a reading scroller", () => {
+  vi.stubGlobal("innerHeight", 700);
+  vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(600);
+  const view = mount();
+  view.container.querySelector("[data-reading-scroll]")?.removeAttribute("data-reading-scroll");
+  fireEvent.click(chip());
+  expect(dialog().style.top).toBe("128px");
+  expect(dialog().style.maxHeight).toBe("448px");
+  vi.stubGlobal("innerHeight", 300);
+  fireEvent(window, new Event("resize"));
+  expect(dialog().style.top).toBe("8px");
+  expect(dialog().style.maxHeight).toBe("284px");
 });
 
 test("clicking a different chip switches the dialog and Escape dismisses the reply before the popover", () => {

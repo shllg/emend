@@ -1,4 +1,4 @@
-import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type MouseEvent, type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useDraftClaim } from "../../lib/composer-owner.ts";
 import { draftKey, editDraftKey } from "../../lib/drafts.ts";
 import { useLayout } from "../../lib/layout.ts";
@@ -12,6 +12,13 @@ import { passageRect, type ReaderThread, visibleReadingArea } from "./reader-thr
 import type { useReaderThreads } from "./use-reader-threads.ts";
 
 type State = ReturnType<typeof useReaderThreads>;
+function ignoreContinuationClick(event: MouseEvent) {
+  if (event.detail > 1) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+}
+
 export function ReadingThreads({
   state,
   root,
@@ -57,7 +64,13 @@ export function ReadingThreads({
     const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure);
     observer?.observe(panel);
     observer?.observe(column);
-    return () => observer?.disconnect();
+    const { scroller } = visibleReadingArea(column);
+    if (scroller) observer?.observe(scroller);
+    else window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
   }, [openEntry, phone, popover, root, chips]);
   const stepper = (
     <nav ref={navigation} className="flex items-center gap-2" aria-label="Comment navigation">
@@ -140,7 +153,7 @@ export function ReadingThreads({
             }}
             footer={
               canReplyToThread(openEntry.thread) && (
-                <div className="w-full">
+                <div className="w-full" onClickCapture={ignoreContinuationClick}>
                   <Composer
                     inline
                     embedded
@@ -155,8 +168,10 @@ export function ReadingThreads({
               )
             }
           >
-            {stepper}
-            {card}
+            <div data-reading-thread-sheet className="space-y-4" onClickCapture={ignoreContinuationClick}>
+              {stepper}
+              {card}
+            </div>
           </Sheet>
         ) : (
           <div
@@ -168,6 +183,7 @@ export function ReadingThreads({
             aria-label="Comment thread"
             tabIndex={-1}
             style={position}
+            onClickCapture={ignoreContinuationClick}
             onKeyDown={(event) => {
               if (
                 event.key === "Escape" &&

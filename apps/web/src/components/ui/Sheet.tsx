@@ -102,7 +102,9 @@ export function Sheet({
               <IconButton label="Close" icon={X} size={side === "bottom" ? "lg" : "md"} tooltip={false} />
             </Dialog.Close>
           </header>
-          <div className="relative min-h-0 flex-1 space-y-4 overflow-auto p-4">
+          {/* The body yields all its height before the footer shrinks, so the footer scrolls only
+              when the header and footer alone do not fit. */}
+          <div className="relative min-h-0 flex-[1_1000000_0%] space-y-4 overflow-auto p-4">
             {description && (
               <Dialog.Description className="m-0 font-sans text-14 font-normal leading-(--lh-body) text-fg-2">
                 {description}
@@ -111,7 +113,9 @@ export function Sheet({
             {children}
           </div>
           {footer && (
-            <footer className="flex shrink-0 justify-end gap-2 border-t border-line-1 px-4 py-3">{footer}</footer>
+            <footer className="flex min-h-0 justify-end gap-2 overflow-y-auto border-t border-line-1 px-4 py-3">
+              {footer}
+            </footer>
           )}
         </Dialog.Content>
       </Dialog.Portal>

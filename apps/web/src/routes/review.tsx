@@ -784,8 +784,11 @@ function LoadedReview({
     }
     const element = appElementId(intent.elementId) ? document.getElementById(intent.elementId) : null;
     if (!element) return;
-    revealReadingTarget(element);
-    element.scrollIntoView?.({ block: intent.block });
+    // The reader reveals the passage and owns the thread surface's scroll position.
+    if (!element.closest("[data-reading-thread-popover], [data-reading-thread-sheet]")) {
+      revealReadingTarget(element);
+      element.scrollIntoView?.({ block: intent.block });
+    }
     complete(intent.jumpThread);
     if (element.hasAttribute("data-thread-card") && element.closest(".em-source")) {
       element.tabIndex = -1;
