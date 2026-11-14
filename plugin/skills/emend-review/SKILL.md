@@ -38,13 +38,17 @@ Lower importance sorts first. Lead with
 security boundaries, irreversible effects, removals and uncertain behavior. Mechanical changes
 belong later, regardless of file size or alphabetic order.
 
-Set `attention` on every topic. It never changes order.
+Rate each topic's risk, sensitivity and undo with the rubric in
+[the writing reference](references/writing.md), "Review verdict and risk". It holds the plain
+risk words, the budget of one High topic, and the migration rule.
 
-- `critical`: a security boundary, an irreversible effect, data loss, or a decision only the reviewer can make.
-- `review`: behaviour worth reading line by line.
-- `skim`: mechanical changes, renames, tests that only follow the code, or wording.
+- `attention` is the risk: `skim` is Low, `review` is Medium and `critical` is High. It never
+  changes order. A `skim` topic starts folded.
+- `blastRadius` is optional: `scope` is the one-word sensitivity tag, `note` says how a break
+  would show.
+- A topic that a revert does not undo ends its `why` with an **Undo:** line. Leave out `door`.
 
-A `skim` topic starts folded. Never give a topic with real risk `skim`.
+`importance` alone determines order.
 
 Keep tests that only follow the code out of the feature topics. When there are any, put them in
 one topic of their own after every other topic you declare: slug `tests` (`routine-tests` if
@@ -52,13 +56,6 @@ one topic of their own after every other topic you declare: slug `tests` (`routi
 other topic 99. Keep a test file in its feature topic only when it holds something the reviewer
 should look at: an edge case, a tricky setup, a changed expectation, or a removed or weakened
 assertion. Then add a note on those lines that says why.
-
-Make two separate calls for each topic:
-
-- `door`: `one-way` when reverting the code cannot undo an effect, such as deleting stored data
-  or sending a message; otherwise `two-way`. A flag does not undo writes already made.
-- `blastRadius`: a one-word `scope` naming who is affected, and a short `note` explaining how.
-  These describe the risk; `importance` alone determines order.
 
 ## Collect the docs the change rests on
 
@@ -153,6 +150,11 @@ Author Markdown in `writeup`.
 Write the opening fields below. The app shows them in this order, with these weights.
 
 - `tldr`: the TL;DR, as the writing reference says.
+- `review`: your verdict, as the writing reference says under "Review verdict and risk".
+  `level` is `skim`, `topics` or `everything`. Only `topics` takes `topics`, the slugs to read.
+  `reason` is one short sentence. It shows right under the TL;DR.
+- `checked`: what you actually ran or verified, as a short list. Never empty.
+- `notChecked`: what you did not run or verify, as a short list. Never empty.
 - `overview`: two bullets, **Goal** (the problem) and **Change** (what the reviewer sees now), in plain language.
   They carry the most weight.
 - `outOfScope`: what the change leaves out on purpose, as a short list.
