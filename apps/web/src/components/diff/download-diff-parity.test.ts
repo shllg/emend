@@ -1,6 +1,6 @@
 import { parseDiffFromFile } from "@pierre/diffs";
 import { expect, test } from "vitest";
-import { downloadDiffHunks } from "../../../../../packages/core/src/render/download-diff.ts";
+import { DOWNLOAD_DIFF_LINES, downloadDiffHunks } from "../../../../../packages/core/src/render/download-diff.ts";
 
 const many = Array.from({ length: 50 }, (_, index) => `line ${index + 1}\n`).join("");
 test.each([
@@ -20,10 +20,11 @@ test.each([
     old === null ? null : { name: "synthetic.txt", contents: old },
     next === null ? null : { name: "synthetic.txt", contents: next },
   );
-  const hunks = downloadDiffHunks(old ?? "", next ?? "", 1000);
-  expect(hunks).not.toBeNull();
+  const hunks = downloadDiffHunks(old ?? "", next ?? "", 1000, DOWNLOAD_DIFF_LINES);
+  expect(Array.isArray(hunks)).toBe(true);
+  if (!Array.isArray(hunks)) throw new Error("Expected download hunks");
   expect(
-    hunks?.map((hunk) => ({
+    hunks.map((hunk) => ({
       oldStart: hunk.oldStart,
       newStart: hunk.newStart,
       oldLines: hunk.lines.filter((line) => line.startsWith(" ") || line.startsWith("-")).length,

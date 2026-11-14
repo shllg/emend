@@ -3,6 +3,7 @@ import { structuredPatch } from "diff";
 
 export const DOWNLOAD_DIFF_CONTEXT = 4;
 export const DOWNLOAD_DIFF_LINES = 100_000;
+export const DOWNLOAD_DIFF_BYTES = 32 * 1024 * 1024;
 export type DownloadDiffFile = {
   path: string;
   oldPath: string | null;
@@ -27,17 +28,28 @@ export function downloadDiffGroups(topics: TopicMeta[], files: DownloadDiffFile[
   return [...groups.values(), other].filter((group) => group.files.length > 0);
 }
 
-export function downloadDiffHunks(old: string, next: string, timeoutMs: number): DownloadDiffHunk[] | null {
+export function downloadDiffHunks(
+  old: string,
+  next: string,
+  timeoutMs: number,
+  maxLines: number,
+): DownloadDiffHunk[] | null | "too-long" {
   const patch = structuredPatch("", "", old, next, undefined, undefined, {
     context: DOWNLOAD_DIFF_CONTEXT,
     timeout: timeoutMs,
   });
-  // Match jsdiff's unified headers for a side with no lines.
-  return (
-    patch?.hunks.map((hunk) => ({
+  if (!patch) return null;
+  const hunks: DownloadDiffHunk[] = [];
+  let lines = 0;
+  for (const hunk of patch.hunks) {
+    lines += hunk.lines.length;
+    if (lines > maxLines) return "too-long";
+    // Match jsdiff's unified headers for a side with no lines.
+    hunks.push({
       oldStart: hunk.oldStart - (hunk.oldLines === 0 ? 1 : 0),
       newStart: hunk.newStart - (hunk.newLines === 0 ? 1 : 0),
       lines: hunk.lines,
-    })) ?? null
-  );
+    });
+  }
+  return hunks;
 }

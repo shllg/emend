@@ -33,6 +33,7 @@ import {
   utf8Length,
 } from "./download-css.ts";
 import {
+  DOWNLOAD_DIFF_BYTES,
   DOWNLOAD_DIFF_LINES,
   type DownloadDiffFile,
   type DownloadDiffHunk,
@@ -604,7 +605,11 @@ async function blocksContent(
 }
 type DownloadDiff = {
   files: DownloadDiffFile[];
-  hunks: (index: number) => Promise<DownloadDiffHunk[] | "missing" | "too-large" | "failed">;
+  hunks: (
+    index: number,
+    maxLines: number,
+  ) => Promise<DownloadDiffHunk[] | "missing" | "too-large" | "failed" | "too-long">;
+  bytes?: number;
 };
 const diffStatus = {
   added: "Added",
@@ -634,6 +639,7 @@ async function diffContent(
 ): Promise<Element> {
   const content: ElementContent[] = [element("h2", [text("Code diff")])];
   let lineCount = 0;
+  let bytesLeft = diff.bytes ?? DOWNLOAD_DIFF_BYTES;
   const leftOut = () => {
     state.tooLarge = true;
     return "Left out because it passed a size or processing limit.";
@@ -650,12 +656,15 @@ async function diffContent(
       if (file.flag === "binary") message = "Binary file. Its changes are not shown.";
       else if (file.flag === "oversized") message = "This file is too large to show.";
       else if (isLockfile(file.path)) message = "Lock file. Its changes are left out.";
-      else if (lineCount >= DOWNLOAD_DIFF_LINES) message = leftOut();
+      else if (lineCount >= DOWNLOAD_DIFF_LINES || bytesLeft <= 0) message = leftOut();
       else {
-        const result = await diff.hunks(index);
+        const result = await diff.hunks(index, DOWNLOAD_DIFF_LINES - lineCount);
         if (result === "missing") message = "This file could not be shown.";
         else if (result === "too-large" || result === "failed") message = leftOut();
-        else {
+        else if (result === "too-long") {
+          lineCount = DOWNLOAD_DIFF_LINES;
+          message = leftOut();
+        } else {
           const count = result.reduce((total, hunk) => total + hunk.lines.length, 0);
           if (count > DOWNLOAD_DIFF_LINES - lineCount) {
             lineCount = DOWNLOAD_DIFF_LINES;
@@ -669,15 +678,10 @@ async function diffContent(
         }
       }
       const counts = hunks.map(hunkCounts);
-      const additions = shown ? counts.reduce((total, count) => total + count.additions, 0) : file.additions;
-      const deletions = shown ? counts.reduce((total, count) => total + count.deletions, 0) : file.deletions;
-      const path = file.status === "renamed" && file.oldPath ? `${file.oldPath} → ${file.path}` : file.path;
-      const header = [path, ...(file.status ? [diffStatus[file.status]] : [])];
-      if (additions !== null && deletions !== null) header.push(`+${additions} −${deletions}`);
-      content.push(element("p", [text(header.join(" · "))], { className: ["em-diff-file"] }));
       const threads = ctx?.threads.diff.get(index);
-      if (ctx) content.push(...(await threadCards(threads?.whole, ctx)));
-      if (message) content.push(element("p", [text(message)]));
+      // Stage the same pre splits without spending comment bytes or marking cards emitted.
+      const body: { pre: Element; threads?: DownloadThread[] }[] = [];
+      const placed = new Set(threads?.whole);
       let widest = 1;
       for (const [index, hunk] of hunks.entries()) {
         const count = counts[index];
@@ -724,14 +728,40 @@ async function diffContent(
           const atLine = [
             ...(oldLine === undefined ? [] : (threads?.old.get(oldLine) ?? [])),
             ...(newLine === undefined ? [] : (threads?.new.get(newLine) ?? [])),
-          ].sort((a, b) => threadOrder(a) - threadOrder(b));
-          const cards = ctx ? await threadCards(atLine, ctx) : [];
-          if (cards.length) {
-            content.push(pre(lines), ...cards);
+          ]
+            .sort((a, b) => threadOrder(a) - threadOrder(b))
+            .filter((thread) => {
+              if (ctx?.emitted.has(thread) || placed.has(thread)) return false;
+              placed.add(thread);
+              return true;
+            });
+          if (atLine.length) {
+            body.push({ pre: pre(lines), threads: atLine });
             lines = [];
           }
         }
-        if (lines.length) content.push(pre(lines));
+        if (lines.length) body.push({ pre: pre(lines) });
+      }
+      if (body.length) {
+        const bytes = utf8Length(serialize({ type: "root", children: body.map((part) => part.pre) }).slice(1));
+        if (bytes > bytesLeft) {
+          bytesLeft = 0;
+          shown = false;
+          message = leftOut();
+          body.length = 0;
+        } else bytesLeft -= bytes;
+      }
+      const additions = shown ? counts.reduce((total, count) => total + count.additions, 0) : file.additions;
+      const deletions = shown ? counts.reduce((total, count) => total + count.deletions, 0) : file.deletions;
+      const path = file.oldPath !== null && file.oldPath !== file.path ? `${file.oldPath} → ${file.path}` : file.path;
+      const header = [path, ...(file.status ? [diffStatus[file.status]] : [])];
+      if (additions !== null && deletions !== null) header.push(`+${additions} −${deletions}`);
+      content.push(element("p", [text(header.join(" · "))], { className: ["em-diff-file"] }));
+      if (ctx) content.push(...(await threadCards(threads?.whole, ctx)));
+      if (message) content.push(element("p", [text(message)]));
+      for (const part of body) {
+        content.push(part.pre);
+        if (ctx) content.push(...(await threadCards(part.threads, ctx)));
       }
       if (ctx && threads) {
         const remaining = [...threads.old.values(), ...threads.new.values()]

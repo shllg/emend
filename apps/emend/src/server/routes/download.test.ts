@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { crc32, inflateRawSync } from "node:zlib";
 import { LIMITS, type PublishRequest, PublishResponse, RevisionView, reviewDownloadPath } from "@emend/contract";
-import { buildOmittedDownload, buildWriteupDownload, DOWNLOAD_FILE_CSP } from "@emend/core";
+import { buildOmittedDownload, buildWriteupDownload, DOWNLOAD_DIFF_LINES, DOWNLOAD_FILE_CSP } from "@emend/core";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -162,6 +164,44 @@ test("comments with the diff place a line card between its line and the next one
   expect(at(without, "Diff line remark")).toBeGreaterThan(at(without, "Other comments"));
 });
 
+test("each diff-hunks work item carries the remaining maxLines allowance", async () => {
+  const { reviewId } = await topicDiffReview();
+  const run = vi.fn(executeWork);
+  f.deps.publishExecutor = run;
+  const response = await f.request(`/reviews/${reviewId}/revisions/1/download?diff=1`, "GET");
+  expect(response.status).toBe(200);
+  expect(run.mock.calls.map(([work]) => work)).toMatchObject([
+    { kind: "diff-hunks", maxLines: DOWNLOAD_DIFF_LINES },
+    { kind: "diff-hunks", maxLines: DOWNLOAD_DIFF_LINES - 4 },
+  ]);
+});
+
+test("diff-hunks work returns too-long when its maxLines allowance is exceeded", async () => {
+  expect(
+    await executeWork({
+      kind: "diff-hunks",
+      old: null,
+      next: new TextEncoder().encode("one\ntwo\nthree\n").buffer,
+      maxLines: 2,
+    }),
+  ).toEqual({ kind: "diff-hunks", hunks: "too-long" });
+});
+
+test("a too-long worker result leaves out later diff files without reading or computing them", async () => {
+  const { reviewId, oldBlob, newBlob } = await topicDiffReview();
+  const read = vi.spyOn(f.deps.blobs, "get");
+  const run = vi.fn(async (work: Parameters<typeof executeWork>[0]) =>
+    work.kind === "diff-hunks" ? { kind: "diff-hunks" as const, hunks: "too-long" as const } : executeWork(work),
+  );
+  f.deps.publishExecutor = run;
+  const html = await (await f.request(`/reviews/${reviewId}/revisions/1/download?diff=1`, "GET")).text();
+  expect(html.match(/Left out because it passed a size or processing limit\./g)).toHaveLength(2);
+  expect(html).toContain("Some content was left out of this download");
+  expect(html).not.toContain('class="em-diff"');
+  expect(read.mock.calls.filter(([, hash]) => hash === oldBlob || hash === newBlob)).toHaveLength(2);
+  expect(run).toHaveBeenCalledTimes(1);
+});
+
 test("a pub ignores diff=1 and keeps its exact bytes", async () => {
   const hash = await f.deps.blobs.put(f.ownerId, Buffer.from("Published doc text"), "text/markdown");
   const { reviewId } = await publish({
@@ -187,6 +227,38 @@ test("diff reads share the budget and do not cache repeated sides", async () => 
   expect(html).toContain("Some content was left out of this download");
   expect(read.mock.calls.filter(([, hash]) => hash === oldBlob || hash === newBlob)).toHaveLength(2);
 });
+
+test.each(["hash", "size"])(
+  "diff reads that fail %s verification spend stored-size budget and bound repeated reads",
+  async (mismatch) => {
+    const bytes = Buffer.from("Synthetic shared diff blob\n");
+    const hash = await f.deps.blobs.put(f.ownerId, bytes, "text/plain");
+    const { reviewId } = await publish({
+      base: "a".repeat(40),
+      head: "b".repeat(40),
+      files: Array.from({ length: 5 }, (_, index) => ({
+        path: `src/file-${index}.ts`,
+        role: "diff" as const,
+        oldPath: null,
+        oldBlob: hash,
+        newBlob: null,
+        flag: null,
+      })),
+    });
+    await writeFile(
+      join(f.dir, "state", "blobs", hash.slice(0, 2), hash),
+      Buffer.alloc(mismatch === "size" ? 3 : bytes.length),
+    );
+    const read = vi.spyOn(f.deps.blobs, "get");
+    const response = await budgetApp(bytes.length * 2).request(reviewDownloadPath(reviewId, 1, [], { diff: true }));
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html.match(/This file could not be shown\./g)).toHaveLength(2);
+    expect(html.match(/Left out because it passed a size or processing limit\./g)).toHaveLength(3);
+    expect(html).toContain("Some content was left out of this download");
+    expect(read.mock.calls.filter(([, blob]) => blob === hash)).toHaveLength(2);
+  },
+);
 
 test.each(["throws", "aborts"])("a diff executor that %s leaves a note", async (kind) => {
   const { reviewId } = await topicDiffReview();

@@ -145,6 +145,27 @@ test("the API limits table documents both shared download budgets", () => {
   expect(row).toContain("both shared by all files of a ZIP");
 });
 
+test("download docs describe diff output bytes, early line limits, charged failed reads and non-interruptible reads", () => {
+  const docs = apiDocs.replace(/\s+/g, " ");
+  expect(docs).toContain(
+    "The worker stops mapping hunks as soon as their total line count passes the remaining allowance.",
+  );
+  expect(docs).toContain(
+    "32 MiB output budget: the exact final UTF-8 bytes of the hunk `pre` elements, excluding thread cards.",
+  );
+  expect(docs).toContain("separate from the 128 MiB built-in content budget and the 32 MiB comment budget.");
+  expect(docs).toContain(
+    "A file that does not fit either the line or diff output budget and all later text files are omitted",
+  );
+  expect(docs).toContain(
+    "charged on each read attempt by stored size, including a read that fails verification, without caching.",
+  );
+  expect(docs).toContain(
+    "20-second budget is checked before each read and before each computation; reads are not interrupted, and a running computation is cut off at the remaining budget.",
+  );
+  expect(docs).not.toContain("budget across all files' reads and computation");
+});
+
 test("HTML base detection follows the pub main and first-doc rules, including source views", () => {
   expect(downloadBaseIsHtml(revision)).toBe(false);
   const pub = { ...revision, writeupEmpty: true };

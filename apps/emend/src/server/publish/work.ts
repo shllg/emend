@@ -46,7 +46,7 @@ export type PlacementDoc = PlaceContext["docs"] extends Map<string, infer T> ? T
 export type EncodedPlacementDoc = { bytes: ArrayBuffer; textBytes: number; encodedBytes: number };
 export type Work =
   | { kind: "diff-counts"; old: ArrayBuffer | null; next: ArrayBuffer | null }
-  | { kind: "diff-hunks"; old: ArrayBuffer | null; next: ArrayBuffer | null }
+  | { kind: "diff-hunks"; old: ArrayBuffer | null; next: ArrayBuffer | null; maxLines: number }
   | { kind: "source"; path: string; source: ArrayBuffer; highlight?: boolean }
   | { kind: "doc-metadata"; format: "html" | "markdown"; bytes: ArrayBuffer }
   | { kind: "line-count"; bytes: ArrayBuffer }
@@ -90,7 +90,7 @@ export type Work =
 export type DocMetadata = { title?: string; headings: DocHeading[] };
 export type WorkResult =
   | { kind: "diff-counts"; counts: { additions: number; deletions: number } | null }
-  | { kind: "diff-hunks"; hunks: DownloadDiffHunk[] | null }
+  | { kind: "diff-hunks"; hunks: DownloadDiffHunk[] | null | "too-long" }
   | ({ kind: "doc-metadata" } & DocMetadata)
   | { kind: "line-count"; count: number }
   | { kind: "writeup-source"; source: WriteupInput; links?: PublishLinks; repoUrl?: string }
@@ -129,6 +129,7 @@ export const executeWork: Executor = async (work) => {
         work.old === null ? "" : decode(work.old),
         work.next === null ? "" : decode(work.next),
         DIFF_COUNT_TIMEOUT_MS,
+        work.maxLines,
       ),
     };
   if (work.kind === "diff-counts")

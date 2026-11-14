@@ -187,9 +187,8 @@ async function revisionDownload(
       .get();
     if (!stored) return null;
     if (stored.size > budget - total) return "too-large";
-    const bytes = await deps.blobs.get(ownerId, hash, q);
-    if (bytes) total += stored.size;
-    return bytes;
+    total += stored.size;
+    return deps.blobs.get(ownerId, hash, q);
   };
   const resolveFile = async (file: typeof files.$inferSelect | undefined): Promise<ResolveResult> => {
     if (!file?.newBlob) return null;
@@ -227,7 +226,10 @@ async function revisionDownload(
       : undefined;
   let diffWorker: WorkerExecutor | undefined;
   let diffSpentMs = 0;
-  const diffHunks = async (index: number): Promise<DownloadDiffHunk[] | "missing" | "too-large" | "failed"> => {
+  const diffHunks = async (
+    index: number,
+    maxLines: number,
+  ): Promise<DownloadDiffHunk[] | "missing" | "too-large" | "failed" | "too-long"> => {
     if (diffSpentMs >= DOWNLOAD_DIFF_BUDGET_MS) return "failed";
     const started = performance.now();
     const remaining = () => DOWNLOAD_DIFF_BUDGET_MS - diffSpentMs - (performance.now() - started);
@@ -249,6 +251,7 @@ async function revisionDownload(
       const result = await Promise.race([
         run({
           kind: "diff-hunks",
+          maxLines,
           old: old ? Uint8Array.from(old).buffer : null,
           next: next ? Uint8Array.from(next).buffer : null,
         }),

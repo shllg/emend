@@ -310,12 +310,19 @@ Binary files say "Binary file. Its changes are not shown." Oversized files say "
 large to show." Lock files say "Lock file. Its changes are left out." Missing blobs say "This file
 could not be shown." Identical text says "No changes to the text."
 
-At most 100,000 diff hunk lines are shown per download, including no-newline markers. A file
-that would pass the cap and all later text files are omitted rather than partly shown. Diff blob
-reads share the 128 MiB read budget below and are charged on each read without caching. Computing
-hunks runs in a worker, with a 20-second budget across all files' reads and computation and a
-per-job timeout. A file that passes a line, read or processing limit, or whose worker fails, says
-"Left out because it passed a size or processing limit." The top left-out note also shows.
+At most 100,000 diff hunk lines are shown per download, including no-newline markers. The worker
+stops mapping hunks as soon as their total line count passes the remaining allowance. Diff markup
+has a separate 32 MiB output budget: the exact final UTF-8 bytes of the hunk `pre` elements,
+excluding thread cards. This budget is shared by all diff files and is separate from the 128 MiB
+built-in content budget and the 32 MiB comment budget. A file that does not fit either the line
+or diff output budget and all later text files are omitted rather than partly shown.
+
+Diff blob reads share the 128 MiB read budget below and are charged on each read attempt by
+stored size, including a read that fails verification, without caching. Computing hunks runs in
+a worker with a per-job timeout. A shared 20-second budget is checked before each read and before
+each computation; reads are not interrupted, and a running computation is cut off at the remaining
+budget. A file that passes a line, diff output, read or processing limit, or whose worker fails,
+says "Left out because it passed a size or processing limit." The top left-out note also shows.
 
 Doc entry names use the doc path split on `/`. Each segment replaces runs outside `[A-Za-z0-9._-]`
 with `-`, strips leading dots, trims trailing dots and hyphens, cuts to 80 characters and trims
@@ -331,8 +338,9 @@ At most 128 MiB of built-in content is emitted. Every copy of a data URL and eve
 text counts its final UTF-8 bytes each time it is emitted. The server also reads at most
 128 MiB of stored assets, selected doc bodies (HTML blobs and Markdown/source rendered blobs),
 and diff blobs when selected.
-It checks their stored sizes before reading them. Assets are cached and charged once; selected
-doc bodies are charged on each read and released after building their file.
+It checks their stored sizes before reading them and charges each read attempt by stored size,
+including a read that fails verification. Assets are cached and charged once; selected doc bodies
+are charged on each read and released after building their file.
 Both budgets are shared by all files in a ZIP. Each later builder's emitted budget is reduced
 by the full UTF-8 size of every file already built. A selected doc that does not fit the remaining
 read budget, or comes after the emitted budget is spent, is left unread. Its file is a page with

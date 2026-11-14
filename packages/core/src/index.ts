@@ -26,6 +26,7 @@ export {
   type ResolveResult,
 } from "./render/download.ts";
 export {
+  DOWNLOAD_DIFF_BYTES,
   DOWNLOAD_DIFF_CONTEXT,
   DOWNLOAD_DIFF_LINES,
   type DownloadDiffFile,
