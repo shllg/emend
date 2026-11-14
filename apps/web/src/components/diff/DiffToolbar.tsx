@@ -47,6 +47,7 @@ export function DiffToolbar({
       : `${files.length} ${plural(files.length, "file")}`;
   const fileItem = (file: FileView): MenuItem => ({
     label: order === "path" ? file.path : (file.path.split("/").at(-1) ?? file.path),
+    truncateStart: order === "path",
     title: file.path,
     icon: FileCode,
     hint: !file.flag && counts.has(file.id) ? `+${counts.get(file.id)?.additions}` : undefined,

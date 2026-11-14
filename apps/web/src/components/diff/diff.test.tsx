@@ -686,7 +686,8 @@ test("A to Z flattens files and keeps topic folds when switching back", async ()
 });
 
 test("the jump menu switches order without closing and lists full paths in A to Z", async () => {
-  const last = file("apps/web-x/a.ts", { flag: "binary" });
+  const last = file(`apps/web-x/${"synthetic-long-directory/".repeat(6)}a.ts`, { flag: "binary" });
+  expect(last.path.length).toBeGreaterThanOrEqual(120);
   const second = file("apps/web/y.ts", { order: 1 });
   const first = file("apps/web/x.ts", { flag: "binary", topic: null });
   await mount(revision([last, second, first]));
@@ -694,6 +695,11 @@ test("the jump menu switches order without closing and lists full paths in A to 
   await within(document.getElementById(`diff-file-${second.id}`) as HTMLElement).findByText("+0");
   fireEvent.keyDown(screen.getByRole("button", { name: "1 topic · 3 files" }), { key: "ArrowDown" });
   const menu = await screen.findByRole("menu");
+  expect(menu.classList.contains("max-w-[min(36rem,var(--radix-dropdown-menu-content-available-width))]")).toBe(true);
+  const topicLabel = within(menu).getByText("a.ts");
+  expect(topicLabel.classList.contains("truncate")).toBe(true);
+  expect(topicLabel.classList.contains("[direction:rtl]")).toBe(false);
+  expect(topicLabel.querySelector("bdi")).toBeNull();
   const order = within(menu).getByLabelText("File order");
   const heading = within(menu).getByText("01 First");
   expect(order.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -707,7 +713,14 @@ test("the jump menu switches order without closing and lists full paths in A to 
   const items = within(menu).getAllByRole("menuitem");
   expect(items.map((item) => item.title)).toEqual([first.path, second.path, last.path]);
   expect(items.map((item) => item.textContent)).toEqual([first.path, `${second.path}+0`, last.path]);
-  for (const item of items) expect(item.querySelector("svg")).not.toBeNull();
+  for (const item of items) {
+    expect(item.querySelector("svg")).not.toBeNull();
+    const label = item.querySelector("bdi");
+    expect(label?.textContent).toBe(item.title);
+    expect(label?.classList.contains("[unicode-bidi:plaintext]")).toBe(true);
+    expect(label?.parentElement?.classList.contains("truncate")).toBe(true);
+    expect(label?.parentElement?.classList.contains("[direction:rtl]")).toBe(true);
+  }
   fireEvent.keyDown(menu, { key: "Escape" });
   await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
   expect(screen.getByRole("button", { name: "3 files" })).toBeTruthy();
