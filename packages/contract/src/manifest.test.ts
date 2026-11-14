@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { PublishManifest, WriteupInput, writeupMarkdown } from "./index.ts";
+import { GlossaryEntry, normalizeGlossaryForm, PublishManifest, WriteupInput, writeupMarkdown } from "./index.ts";
 
 const topic = { slug: "routing", title: "Routing", importance: 20, summary: "Simplify route lookup." };
 const manifest = {
@@ -170,5 +170,100 @@ describe("publish manifest", () => {
         glossary: "Router: selects a handler.",
       }).success,
     ).toBe(true);
+  });
+});
+
+describe("glossary lists", () => {
+  test.each([
+    ["  Cafe\u0301 \u00a0 budget  ", "Café budget"],
+    [" \u0344 ", "\u0308\u0301"],
+    ["  API  ", "API"],
+  ])("exports canonical glossary form normalization: %j", (source, expected) => {
+    expect(normalizeGlossaryForm(source)).toBe(expected);
+  });
+
+  test.each(["term", "alias"])("bounds the %s after NFC normalization expands its characters", (field) => {
+    for (const [count, accepted] of [
+      [33, true],
+      [34, false],
+    ] as const) {
+      const form = "\ufb2c".repeat(count);
+      const entry = {
+        term: field === "term" ? form : "Budget",
+        definition: "Attempts allowed.",
+        ...(field === "alias" ? { aliases: [form] } : {}),
+      };
+      const result = GlossaryEntry.safeParse(entry);
+      expect(form).toHaveLength(count);
+      expect(form.normalize("NFC")).toHaveLength(count * 3);
+      expect(result.success).toBe(accepted);
+      expect(WriteupInput.safeParse({ ...manifest.writeup, glossary: [entry] }).success).toBe(accepted);
+      if (!result.success)
+        expect(result.error.issues).toContainEqual(
+          expect.objectContaining({
+            path: field === "term" ? ["term"] : ["aliases", 0],
+            message: "glossary term exceeds the character limit after normalization",
+          }),
+        );
+    }
+  });
+
+  test("accepts lists and legacy Markdown and enumerates each list string", () => {
+    const glossary = [{ term: "Budget", definition: "Attempts allowed.", aliases: ["Allowance"] }];
+    for (const value of [glossary, [], "- **Budget:** Attempts allowed."])
+      expect(WriteupInput.parse({ ...manifest.writeup, glossary: value }).glossary).toEqual(value);
+    expect(writeupMarkdown({ ...manifest.writeup, glossary })).toContain("Budget");
+    expect(writeupMarkdown({ ...manifest.writeup, glossary })).toContain("Attempts allowed.");
+    expect(writeupMarkdown({ ...manifest.writeup, glossary })).toContain("Allowance");
+  });
+
+  test.each([
+    { term: "" },
+    { term: "  " },
+    { term: "two\nlines" },
+    { term: "two\u2028lines" },
+    { term: "two\u2029lines" },
+    { term: "\ud800" },
+    { aliases: ["\udc00"] },
+    { aliases: ["bad\u0001alias"] },
+    { aliases: ["bad\u007falias"] },
+    { aliases: ["bad\u009falias"] },
+    { aliases: [" "] },
+    { definition: "" },
+    { definition: " \n " },
+  ])("refuses invalid entry %j", (patch) => {
+    expect(
+      WriteupInput.safeParse({ ...manifest.writeup, glossary: [{ term: "Budget", definition: "Attempts.", ...patch }] })
+        .success,
+    ).toBe(false);
+  });
+
+  test.each([
+    [
+      { term: "Budget", definition: "One." },
+      { term: "budget", definition: "Two." },
+    ],
+    [
+      { term: "Budget", definition: "One.", aliases: ["Allowance"] },
+      { term: "ALLOWANCE", definition: "Two." },
+    ],
+    [
+      { term: "Café budget", definition: "One." },
+      { term: "Other", definition: "Two.", aliases: ["  CAFE\u0301   BUDGET "] },
+    ],
+    [{ term: "Budget", definition: "One.", aliases: ["BUDGET"] }],
+  ])("refuses duplicate forms with an entry path: %j", (...glossary) => {
+    const result = WriteupInput.safeParse({ ...manifest.writeup, glossary });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((issue) => issue.message === "duplicate glossary term");
+      expect(issue?.path).toEqual(
+        glossary.length === 1
+          ? ["glossary", 0, "aliases", 0]
+          : glossary[1] && "aliases" in glossary[1]
+            ? ["glossary", 1, "aliases", 0]
+            : ["glossary", 1, "term"],
+      );
+    }
   });
 });

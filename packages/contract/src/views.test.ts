@@ -120,3 +120,19 @@ test("comment sentOn is a required nullable positive revision sequence", () => {
     expect(schema.safeParse({ ...comment, sentOn }).success).toBe(false);
   }
 });
+
+test("rendered glossary terms are optional, bounded and reference validated blocks", () => {
+  const term = { term: "Budget", definition: "Attempts.", blockId: "glossary-12345678" };
+  expect(contract.RenderedWriteup.parse({ sections: [], terms: [term] }).terms).toEqual([term]);
+  expect(contract.RenderedWriteup.parse({ sections: [] })).not.toHaveProperty("terms");
+  for (const patch of [{ blockId: "bad" }, { term: "" }, { term: "x".repeat(101) }, { definition: "x".repeat(2001) }])
+    expect(contract.RenderedWriteup.safeParse({ sections: [], terms: [{ ...term, ...patch }] }).success).toBe(false);
+  expect(contract.GlossaryTerm.parse({ ...term, term: "x".repeat(100), definition: "x".repeat(2000) })).toBeDefined();
+  expect(contract.GlossaryTerm.parse({ ...term, definition: "" })).toBeDefined();
+  expect(
+    contract.RenderedWriteup.safeParse({ sections: [], terms: Array.from({ length: 50 }, () => term) }).success,
+  ).toBe(true);
+  expect(
+    contract.RenderedWriteup.safeParse({ sections: [], terms: Array.from({ length: 51 }, () => term) }).success,
+  ).toBe(false);
+});

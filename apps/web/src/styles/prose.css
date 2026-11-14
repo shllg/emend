@@ -220,6 +220,17 @@
   .em-prose .emend-media > img[role="button"] {
     cursor: zoom-in;
   }
+  .em-prose .emend-term {
+    text-decoration-line: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 3px;
+    cursor: help;
+  }
+  .em-prose .emend-term:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: 2px;
+  }
   .em-prose .emend-media > img[role="button"]:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);

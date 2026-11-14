@@ -558,6 +558,10 @@ repoUrl: string | null, docs, threads: ThreadView[],
 changedBlocks: { blockId: BlockId, revision: number }[] }`.
 `links` and `repoUrl` are the revision's publish-level links (see "Links and repoUrl" below);
 both fields are optional in the view, and revisions published before they existed omit them.
+`RenderedWriteup.terms?: GlossaryTerm[]` holds at most 50 entries `{ term, definition, blockId }`
+for a list glossary. `term` is normalized plain text (1–100 characters), `definition` is plain
+text from sanitized glossary blocks (0–2000 characters, ending in `…` when cut), and `blockId`
+names the entry's first glossary block. Old revisions, empty lists and Markdown glossaries omit it.
 Base/head are nullable full commit hashes; head also permits `worktree`.
 `main` is `"writeup" | FilePath | null`: the manifest's main page, or null when omitted.
 `writeupEmpty` is a boolean computed at publish from the source Markdown, before rendering:
@@ -830,6 +834,7 @@ to make a read fit a per-Send or per-revision limit. The limits below apply to t
 | `RevisionView.files`, `RevisionView.docs` | Each at most `filesPerRevision` (10000), the publish file limit |
 | `FileView.order` | Zero through `filesPerRevision - 1` (9999), the publisher's zero-based file-array index |
 | `RenderedWriteup.sections` | At most `7 + 3 * topicsPerReview` (607): seven fixed sections and Why/Example/Details for each writeup topic |
+| `RenderedWriteup.terms` | Optional array of at most `glossaryTerms` (50) entries: `term` 1–`glossaryTermChars` (100) characters, plain-text `definition` 0–`glossaryDefinitionChars` (2000) characters, and a validated `blockId: BlockId` |
 | `RenderedWriteup.sections[].key`, `RenderedBlock.section` | Renderer-generated keys: overview, tldr, outOfScope, whereToLook, context, decisions, glossary or `t-<TopicSlug>-why/example/body`; block sections also allow `doc-<hash8>`. TopicSlug permits 1–64 characters, so the longest topic section key is 74 characters |
 | `RenderedWriteup.sections[].label` | `titleChars + " — Example".length` (210), the longest renderer suffix appended to a topic title |
 | Section `blocks` and Markdown doc `blocks` | Each at most `blocksPerRevision` (100000); the same limit also applies to all writeup blocks combined and to writeup plus doc blocks combined |
@@ -1205,7 +1210,8 @@ blast-radius scopes and notes obey `summaryChars`, `blastScopeChars` and `blastN
 Markdown strings are preserved exactly; the schema does not render or sanitize them.
 
 `WriteupInput = { overview, tldr, outOfScope?, whereToLook?, context?, decisions: string | null, glossary?, topics }`.
-Sections are Markdown strings; `topics` maps slugs to `{ why, example?, body? }`, also Markdown. Decisions is
+Sections are Markdown strings, except `glossary?: string | GlossaryEntry[]`;
+`topics` maps slugs to `{ why, example?, body? }`, also Markdown. Decisions is
 required, with `null` representing no decisions section.
 The three new fields `outOfScope`, `whereToLook` and `context` are optional, additive fields under `/api/v1`.
 When any is present, even as an empty string, sections render as TL;DR, Overview, Out of scope,
@@ -1214,9 +1220,32 @@ Without them, the existing order stays Overview, TL;DR, Decisions and drift, Glo
 including when an import re-renders stored source.
 Every Markdown string is limited to `writeupSectionBytes` UTF-8 bytes; the sum of all present
 `overview`, `tldr`, `outOfScope`, `whereToLook`, `context`, `decisions`, `glossary`, `why`, `example`
-and `body` strings is limited to `writeupBytes`. These limits measure UTF-8 bytes, not character count. Parsed `topics` has a null
+and `body` strings, including every list glossary term, definition and alias, is limited to
+`writeupBytes`. These limits measure UTF-8 bytes, not character count. Parsed `topics` has a null
 prototype: an absent `topics["constructor"]` is `undefined`, while an explicitly declared
 `constructor` topic remains accessible and serializes normally.
+
+A list glossary holds at most `glossaryTerms` (50) entries. `GlossaryEntry` is
+`{ term: string, definition: string, aliases?: string[] }`. Terms and aliases are nonblank,
+well-formed UTF-16 strings of 1–`glossaryTermChars` (100) characters, with no code points below 32,
+127–159, U+2028 or U+2029. The character limit also applies after NFC normalization, collapsing
+whitespace runs to one space and trimming; an overlong normalized form produces
+`glossary term exceeds the character limit after normalization`.
+Each entry has at most `glossaryAliases` (8) aliases. A definition is
+nonblank Markdown of 1–`glossaryDefinitionChars` (2000) characters. All terms and aliases must
+be distinct after NFC normalization, collapsing whitespace runs to one space, trimming and
+`toLowerCase()`; duplicates produce `duplicate glossary term` at the entry's term or alias index.
+
+Only the review writeup marks terms: the first use of each entry in each section, including
+separate topic Why, Example and Details sections. Matches stay within a text node, skip headings,
+links (including issue links), code, pre, kbd, samp, images and their captions, diagrams and existing
+marks, and require whole-word boundaries (no adjacent Unicode letter, mark, digit or underscore).
+Forms match without regard to case, except forms with no lowercase and at least two uppercase
+letters, which require exact case. A trailing `s` or `es` also matches; aliases supply other forms.
+Spaces match whitespace runs; the longest form wins at the same position. Marks have a dotted
+underline and show a definition card on hover, focus or tap, with a link to the glossary entry.
+The glossary starts folded even when changed; navigation to an entry opens it. Old Markdown
+glossaries render as before and get no marks. Markdown docs and published docs get no marks.
 
 #### Links and repoUrl
 
@@ -1610,6 +1639,10 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `pathSegmentChars` | 255 characters per published path segment |
 | `topicsPerReview` | 200 declared topics or writeup topic keys |
 | `summaryChars` | 2000 characters per topic summary |
+| `glossaryTerms` | 50 entries per glossary list |
+| `glossaryTermChars` | 100 characters per term or alias |
+| `glossaryAliases` | 8 aliases per glossary entry |
+| `glossaryDefinitionChars` | 2000 characters per glossary definition |
 | `blastScopeChars` | 32 characters per blast-radius scope |
 | `blastNoteChars` | 2000 characters per blast-radius note |
 | `writeupSectionBytes` | 1048576 UTF-8 bytes per Markdown string |
