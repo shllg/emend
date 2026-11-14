@@ -128,7 +128,7 @@ export function ReviewHeader({
                 variant="ghost"
                 size="sm"
                 icon={FileDown}
-                title="Download this revision, with docs or comments if you pick them"
+                title="Download this revision, with docs, comments or the diff if you pick them"
                 onClick={onDownload}
               >
                 Download

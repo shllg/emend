@@ -19,6 +19,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { isLockfile } from "../../../../../packages/core/src/lockfiles.ts";
 import { splitLines } from "../../../../../packages/core/src/place/linemap.ts";
 import { getText } from "../../api/client.ts";
 import { plural } from "../../lib/count.ts";
@@ -220,24 +221,6 @@ export function DiffView({
     </div>
   );
 }
-const lockfiles = new Set([
-  "pnpm-lock.yaml",
-  "package-lock.json",
-  "npm-shrinkwrap.json",
-  "yarn.lock",
-  "bun.lock",
-  "Cargo.lock",
-  "Gemfile.lock",
-  "poetry.lock",
-  "uv.lock",
-  "Pipfile.lock",
-  "composer.lock",
-  "go.sum",
-  "flake.lock",
-  "pubspec.lock",
-  "mix.lock",
-  "Podfile.lock",
-]);
 export type DiffContext = {
   reviewId: string;
   revision: number;
@@ -327,7 +310,7 @@ export function FileDiff({
   const active = context.active;
   const selected = active?.kind === "lines" && context.fileForTarget(active)?.id === file.id ? active : null;
   const mounted = near || !!selected || context.revealedFile === file.id;
-  const lockfile = lockfiles.has(file.path.split("/").at(-1) ?? "");
+  const lockfile = isLockfile(file.path);
   const collapsed = context.collapsedFiles.has(file.id);
   // The folded body takes its height with it, and iOS has no scroll anchoring.
   useLayoutEffect(() => {

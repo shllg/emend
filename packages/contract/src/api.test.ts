@@ -3,6 +3,7 @@ import {
   API_PREFIX,
   Capabilities,
   DownloadComments,
+  DownloadDiff,
   DownloadDocIds,
   FileFlag,
   FileRole,
@@ -198,6 +199,23 @@ test("download comments accept nothing or one 1", () => {
   for (const value of [["0"], ["true"], ["1", "1"], [""]]) {
     expect(DownloadComments.safeParse(value).success).toBe(false);
   }
+});
+
+test("download diff accepts nothing or one 1", () => {
+  expect(DownloadDiff.parse([])).toEqual([]);
+  expect(DownloadDiff.parse(["1"])).toEqual(["1"]);
+  for (const value of [["2"], ["1", "1"]]) expect(DownloadDiff.safeParse(value).success).toBe(false);
+});
+
+test("download paths add diff=1 after docs and comments", () => {
+  const path = reviewDownloadPath("review", 2);
+  expect(reviewDownloadPath("review", 2, [], { diff: true })).toBe(`${path}?diff=1`);
+  expect(reviewDownloadPath("review", 2, ["a"], { diff: true })).toBe(`${path}?doc=a&diff=1`);
+  expect(reviewDownloadPath("review", 2, ["a"], { comments: true, diff: true })).toBe(
+    `${path}?doc=a&comments=1&diff=1`,
+  );
+  expect(reviewDownloadPath("review", 2, [], { comments: true, diff: true })).toBe(`${path}?comments=1&diff=1`);
+  expect(reviewDownloadPath("review", 2, [], { diff: false })).toBe(path);
 });
 
 test("download ids are distinct UUIDs with at most 50 entries", () => {

@@ -12,7 +12,7 @@ import { publishReview } from "../mailbox/lifecycle-support.ts";
 import { error, mailboxFixture } from "../mailbox/test-support.ts";
 import { executeWork } from "../publish/work.ts";
 import { clearCommentHtmlCache } from "./comment-html.ts";
-import { downloadRoutes } from "./download.ts";
+import { DOWNLOAD_DIFF_BUDGET_MS, downloadRoutes } from "./download.ts";
 
 let f: Awaited<ReturnType<typeof mailboxFixture>>;
 beforeEach(async () => {
@@ -70,6 +70,175 @@ function budgetApp(budget: number, commentBudget?: number) {
   downloadRoutes(app, f.deps, budget, commentBudget);
   return app;
 }
+
+async function topicDiffReview() {
+  const oldBlob = await f.deps.blobs.put(f.ownerId, Buffer.from("keep\nbefore\nend\n"), "text/plain");
+  const newBlob = await f.deps.blobs.put(f.ownerId, Buffer.from("keep\nafter\nend\n"), "text/plain");
+  const published = await publish({
+    base: "a".repeat(40),
+    head: "b".repeat(40),
+    topics: [
+      { slug: "later", title: "Later topic", importance: 20, summary: "Later changes" },
+      { slug: "first", title: "First topic", importance: 10, summary: "First changes" },
+    ],
+    files: ["later", "first"].map((topic) => ({
+      path: `src/${topic}.ts`,
+      role: "diff",
+      topic,
+      oldPath: null,
+      oldBlob,
+      newBlob,
+      flag: null,
+    })),
+  });
+  return { ...published, oldBlob, newBlob };
+}
+
+test("validates diff before building for GET and HEAD", async () => {
+  const { reviewId } = await publish();
+  const read = vi.spyOn(f.deps.blobs, "get");
+  for (const query of ["diff=2", "diff=1&diff=1", "diff="])
+    for (const method of ["GET", "HEAD"]) {
+      const response = await f.request(`/reviews/${reviewId}/revisions/1/download?${query}`, method);
+      expect(response.status).toBe(400);
+      if (method === "GET") expect(await response.json()).toMatchObject({ error: { code: "invalid_request" } });
+    }
+  expect(read).not.toHaveBeenCalled();
+});
+
+test("diff changes no HEAD headers or filename and reads no blobs", async () => {
+  const { reviewId } = await topicDiffReview();
+  const before = await f.request(`/reviews/${reviewId}/revisions/1/download`, "HEAD");
+  const read = vi.spyOn(f.deps.blobs, "get");
+  const response = await f.request(`/reviews/${reviewId}/revisions/1/download?diff=1`, "HEAD");
+  expect(response.status).toBe(200);
+  for (const name of [
+    "Content-Type",
+    "Content-Disposition",
+    "Content-Security-Policy",
+    "X-Content-Type-Options",
+    "Cache-Control",
+    "Cross-Origin-Resource-Policy",
+  ])
+    expect(response.headers.get(name)).toBe(before.headers.get(name));
+  expect(await response.text()).toBe("");
+  expect(read).not.toHaveBeenCalled();
+});
+
+test("diff downloads show files in topic order while the off choice keeps identical bytes", async () => {
+  const { reviewId } = await topicDiffReview();
+  const before = Buffer.from(await (await get(reviewId)).arrayBuffer());
+  const run = vi.fn(executeWork);
+  f.deps.publishExecutor = run;
+  const response = await f.request(`/reviews/${reviewId}/revisions/1/download?diff=1`, "GET");
+  expect(response.status).toBe(200);
+  expect(response.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
+  expect(response.headers.get("Content-Disposition")).toBe('attachment; filename="export-example-r1.html"');
+  const html = await response.text();
+  expect(at(html, "First revision text")).toBeLessThan(at(html, "<h2>Code diff</h2>"));
+  expect(at(html, "<h3>First topic</h3>")).toBeLessThan(at(html, "src/first.ts"));
+  expect(at(html, "src/first.ts")).toBeLessThan(at(html, "<h3>Later topic</h3>"));
+  expect(at(html, "<h3>Later topic</h3>")).toBeLessThan(at(html, "src/later.ts"));
+  expect(html).toContain("-before");
+  expect(html).toContain("+after");
+  expect(html).toContain("@@ -1,3 +1,3 @@");
+  expect(run.mock.calls.map(([work]) => work.kind)).toEqual(["diff-hunks", "diff-hunks"]);
+  run.mockClear();
+  const off = reviewDownloadPath(reviewId, 1, [], { diff: false }).slice("/api/v1".length);
+  expect(Buffer.from(await (await f.request(off, "GET")).arrayBuffer())).toEqual(before);
+  expect(before.toString("utf8")).not.toContain("Code diff");
+  expect(before.toString("utf8")).not.toContain("em-diff");
+  expect(run).not.toHaveBeenCalled();
+});
+
+test("comments with the diff place a line card between its line and the next one", async () => {
+  const { reviewId } = await commentedReview();
+  const html = await (await f.request(`${commentsPath(reviewId)}&diff=1`, "GET")).text();
+  expect(at(html, "+two")).toBeLessThan(at(html, "Diff line remark"));
+  expect(at(html, "Diff line remark")).toBeLessThan(at(html, "+three"));
+  expect(at(html, "Diff line remark")).toBeLessThan(at(html, "Other comments"));
+  expect(html.match(/Diff line remark/g)).toHaveLength(1);
+  const without = await (await f.request(commentsPath(reviewId), "GET")).text();
+  expect(at(without, "Diff line remark")).toBeGreaterThan(at(without, "Other comments"));
+});
+
+test("a pub ignores diff=1 and keeps its exact bytes", async () => {
+  const hash = await f.deps.blobs.put(f.ownerId, Buffer.from("Published doc text"), "text/markdown");
+  const { reviewId } = await publish({
+    writeup: blank,
+    files: [{ path: "plan.md", role: "doc", oldPath: null, oldBlob: null, newBlob: hash, flag: null }],
+  });
+  const before = Buffer.from(await (await get(reviewId)).arrayBuffer());
+  const run = vi.fn(executeWork);
+  f.deps.publishExecutor = run;
+  const response = await f.request(`/reviews/${reviewId}/revisions/1/download?diff=1`, "GET");
+  expect(Buffer.from(await response.arrayBuffer())).toEqual(before);
+  expect(run).not.toHaveBeenCalled();
+});
+
+test("diff reads share the budget and do not cache repeated sides", async () => {
+  const { reviewId, oldBlob, newBlob } = await topicDiffReview();
+  const read = vi.spyOn(f.deps.blobs, "get");
+  const bytes = Buffer.byteLength("keep\nbefore\nend\n") + Buffer.byteLength("keep\nafter\nend\n");
+  const response = await budgetApp(bytes).request(reviewDownloadPath(reviewId, 1, [], { diff: true }));
+  const html = await response.text();
+  expect(html).toContain("+after");
+  expect(html).toContain("Left out because it passed a size or processing limit.");
+  expect(html).toContain("Some content was left out of this download");
+  expect(read.mock.calls.filter(([, hash]) => hash === oldBlob || hash === newBlob)).toHaveLength(2);
+});
+
+test.each(["throws", "aborts"])("a diff executor that %s leaves a note", async (kind) => {
+  const { reviewId } = await topicDiffReview();
+  f.deps.publishExecutor = async (work) => {
+    if (work.kind !== "diff-hunks") return executeWork(work);
+    if (kind === "throws") throw new Error("Synthetic worker failure");
+    return { kind: "diff-hunks", hunks: null };
+  };
+  const html = await (await f.request(`/reviews/${reviewId}/revisions/1/download?diff=1`, "GET")).text();
+  expect(html).toContain("Left out because it passed a size or processing limit.");
+  expect(html).toContain("Some content was left out of this download");
+  expect(html).not.toContain("+after");
+});
+
+test("a non-answering diff executor times out and releases the download slot", async () => {
+  const { reviewId } = await publishReview(f, { diff: true });
+  const entered = Promise.withResolvers<void>();
+  f.deps.publishExecutor = async (work) => {
+    if (work.kind !== "diff-hunks") return executeWork(work);
+    entered.resolve();
+    return new Promise<never>(() => {});
+  };
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const pending = Promise.resolve(f.request(`/reviews/${reviewId}/revisions/1/download?diff=1`, "GET"));
+    await entered.promise;
+    await vi.advanceTimersByTimeAsync(10_501);
+    const html = await (await pending).text();
+    expect(html).toContain("Left out because it passed a size or processing limit.");
+    expect(html).toContain("Some content was left out of this download");
+  } finally {
+    vi.useRealTimers();
+  }
+  expect((await get(reviewId)).status).toBe(200);
+});
+
+test("a spent diff time budget skips later files before reading their blobs", async () => {
+  const { reviewId, oldBlob, newBlob } = await topicDiffReview();
+  let now = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => now);
+  const read = vi.spyOn(f.deps.blobs, "get");
+  const run = vi.fn(async (work: Parameters<typeof executeWork>[0]) => {
+    const result = await executeWork(work);
+    if (work.kind === "diff-hunks") now += DOWNLOAD_DIFF_BUDGET_MS + 1;
+    return result;
+  });
+  f.deps.publishExecutor = run;
+  const html = await (await f.request(`/reviews/${reviewId}/revisions/1/download?diff=1`, "GET")).text();
+  expect(html).toContain("Left out because it passed a size or processing limit.");
+  expect(read.mock.calls.filter(([, hash]) => hash === oldBlob || hash === newBlob)).toHaveLength(2);
+  expect(run).toHaveBeenCalledTimes(1);
+});
 
 test("downloads an attachment with all offline response headers for a reviewer", async () => {
   const { reviewId } = await publish();

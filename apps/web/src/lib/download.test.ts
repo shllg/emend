@@ -141,7 +141,7 @@ test("the API limits table documents both shared download budgets", () => {
   const row = apiDocs.split("\n").find((line) => line.startsWith("| `downloadInlineBytes` |"));
   expect(row).toContain(`${LIMITS.downloadInlineBytes} bytes (128 MiB)`);
   expect(row).toContain("emitted built-in content per download");
-  expect(row).toContain("the same read budget for stored assets and selected doc bodies");
+  expect(row).toContain("the same read budget for stored assets, selected doc bodies and selected diff blobs");
   expect(row).toContain("both shared by all files of a ZIP");
 });
 

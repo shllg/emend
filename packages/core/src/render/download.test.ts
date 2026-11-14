@@ -16,6 +16,12 @@ import {
   type ResolveResult,
 } from "./download.ts";
 import { checkDownloadCss, cssTokenize } from "./download-css.ts";
+import {
+  DOWNLOAD_DIFF_LINES,
+  type DownloadDiffFile,
+  type DownloadDiffHunk,
+  downloadDiffHunks,
+} from "./download-diff.ts";
 import { type DownloadThread, type FileThreads, routeDownloadThreads } from "./download-threads.ts";
 
 const sha = "a".repeat(64);
@@ -2081,12 +2087,170 @@ test("omitted downloads are exactly the safe page returned for an over-limit HTM
   expect(nodes.some((node) => node.tagName === "style")).toBe(true);
 });
 
+const diffFile = (over: Partial<DownloadDiffFile> = {}): DownloadDiffFile => ({
+  path: "src/Example.ts",
+  oldPath: null,
+  status: "modified",
+  flag: null,
+  topic: null,
+  order: 0,
+  hasOld: true,
+  hasNew: true,
+  additions: 90,
+  deletions: 80,
+  ...over,
+});
+const diffInput = {
+  title: "Diff download",
+  details,
+  topics: [],
+  writeup: writeup([block("<p>Writeup body</p>")]),
+  resolveMedia: async () => null,
+};
+const diffNodes = (html: string, className: string) =>
+  parsed(html).filter((node) => (node.properties.className as string[] | undefined)?.includes(className));
+
+test("an undefined diff preserves the exact writeup bytes and adds no diff styles or markup", async () => {
+  const before = await buildWriteupDownload(diffInput);
+  expect(await buildWriteupDownload({ ...diffInput, diff: undefined })).toBe(before);
+  expect(before).not.toContain("Code diff");
+  expect(before).not.toContain("em-diff");
+});
+
+test("downloads diff topics and files in review order with case-sensitive paths, statuses and shown counts", async () => {
+  const html = await buildWriteupDownload({
+    ...diffInput,
+    topics: [
+      { slug: "later", title: "Later topic", summary: "", importance: 20 },
+      { slug: "first", title: "First topic", summary: "", importance: 10 },
+    ],
+    diff: {
+      files: [
+        diffFile({ path: "Last.ts", topic: "later", order: 0 }),
+        diffFile({ path: "Second.ts", topic: "first", order: 3, status: "added" }),
+        diffFile({ path: "Renamed.ts", oldPath: "Before.ts", topic: "first", order: 1, status: "renamed" }),
+        diffFile({ path: "Other.ts", topic: "unknown", status: "mode-changed" }),
+      ],
+      hunks: async () => [{ oldStart: 9, newStart: 9, lines: [" keep\r", "-old\r", "+new\r", " end\r"] }],
+    },
+  });
+  expect(
+    parsed(html)
+      .filter((node) => node.tagName === "h3")
+      .map(hastText),
+  ).toEqual(["First topic", "Later topic", "Other changes"]);
+  expect(diffNodes(html, "em-diff-file").map(hastText)).toEqual([
+    "Before.ts → Renamed.ts · Renamed · +1 −1",
+    "Second.ts · Added · +1 −1",
+    "Last.ts · Modified · +1 −1",
+    "Other.ts · Mode changed · +1 −1",
+  ]);
+  expect(hastText(diffNodes(html, "em-diff")[0] as Element)).toBe(
+    "@@ -9,3 +9,3 @@\n 9  9  keep\n10    -old\n   10 +new\n11 11  end",
+  );
+  expect(html.indexOf("Writeup body")).toBeLessThan(html.indexOf("<h2>Code diff</h2>"));
+  expect(diffNodes(html, "em-diff-file").every((node) => node.tagName !== "h4")).toBe(true);
+  expectHead(html);
+});
+
+test("hostile diff code, paths and titles stay escaped text under the unchanged CSP", async () => {
+  const hostile = [
+    "<script>alert(1)</script>",
+    "<img src=x onerror=alert(1)>",
+    "</code></pre><script>x()</script>",
+    '<a href="javascript:alert(1)">link</a>',
+    '<svg onload="alert(1)"></svg>',
+    'graph TD; A-->B; click A "javascript:alert(1)"',
+  ];
+  const html = await buildWriteupDownload({
+    ...diffInput,
+    topics: [{ slug: "hostile", title: "<script>topic</script>", importance: 1, summary: "" }],
+    diff: {
+      files: [diffFile({ path: "<img onerror=x>.html", topic: "hostile" })],
+      hunks: async () => [{ oldStart: 0, newStart: 1, lines: hostile.map((line) => `+${line}`) }],
+    },
+  });
+  for (const line of hostile) expect(hastText(diffNodes(html, "em-diff")[0] as Element)).toContain(`+${line}`);
+  expect(parsed(html).filter((node) => ["script", "img", "a", "svg"].includes(node.tagName))).toEqual([]);
+  expect(html).toContain("&#x3C;script>alert(1)&#x3C;/script>");
+  expectHead(html);
+});
+
+test.each([
+  ["binary", "Binary file. Its changes are not shown.", false],
+  ["oversized", "This file is too large to show.", false],
+  ["lock", "Lock file. Its changes are left out.", false],
+  ["missing", "This file could not be shown.", false],
+  ["too-large", "Left out because it passed a size or processing limit.", true],
+  ["failed", "Left out because it passed a size or processing limit.", true],
+] as const)("shows the %s note with stored counts", async (kind, message, limited) => {
+  const hunks = vi.fn(async () => (kind === "too-large" || kind === "failed" ? kind : ("missing" as const)));
+  const html = await buildWriteupDownload({
+    ...diffInput,
+    diff: {
+      files: [
+        diffFile({
+          path: kind === "lock" ? "nested/pnpm-lock.yaml" : "Example.ts",
+          flag: kind === "binary" || kind === "oversized" ? kind : null,
+        }),
+      ],
+      hunks,
+    },
+  });
+  expect(html).toContain(message);
+  expect(diffNodes(html, "em-download-note")).toHaveLength(limited ? 1 : 0);
+  expect(diffNodes(html, "em-diff")).toHaveLength(0);
+  expect(hastText(diffNodes(html, "em-diff-file")[0] as Element)).toContain("+90 −80");
+  expect(hunks).toHaveBeenCalledTimes(["binary", "oversized", "lock"].includes(kind) ? 0 : 1);
+});
+
+test("identical text shows zero counts, and hidden files with incomplete stored counts show none", async () => {
+  const html = await buildWriteupDownload({
+    ...diffInput,
+    diff: {
+      files: [diffFile(), diffFile({ path: "Gone.ts", status: "deleted", flag: "binary", additions: null })],
+      hunks: async () => [],
+    },
+  });
+  expect(html).toContain("No changes to the text.");
+  expect(diffNodes(html, "em-diff-file").map(hastText)).toEqual([
+    "src/Example.ts · Modified · +0 −0",
+    "Gone.ts · Deleted",
+  ]);
+});
+
+test("counts no-newline markers toward the cap and leaves out whole files after it is crossed", async () => {
+  const hunks = vi.fn(
+    async (index: number): Promise<DownloadDiffHunk[]> => [
+      {
+        oldStart: 0,
+        newStart: 1,
+        lines:
+          index === 0 ? ["+first", "\\ No newline at end of file"] : Array(DOWNLOAD_DIFF_LINES - 1).fill("+hidden"),
+      },
+    ],
+  );
+  const html = await buildWriteupDownload({
+    ...diffInput,
+    diff: { files: [diffFile(), diffFile({ path: "Over.ts" }), diffFile({ path: "Later.ts" })], hunks },
+  });
+  expect(diffNodes(html, "em-diff")).toHaveLength(1);
+  expect(hastText(diffNodes(html, "em-diff")[0] as Element)).toBe(
+    "@@ -0,0 +1,1 @@\n  1 +first\n\\ No newline at end of file",
+  );
+  expect(html).not.toContain("+hidden");
+  expect(html.match(/Left out because it passed a size or processing limit\./g)).toHaveLength(2);
+  expect(diffNodes(html, "em-download-note")).toHaveLength(1);
+  expect(hunks.mock.calls).toEqual([[0], [1]]);
+});
+
 // Threads in downloads.
 const emptyThreads = (over: Partial<FileThreads> = {}): FileThreads => ({
   top: [],
   blocks: new Map(),
   topics: new Map(),
   lines: new Map(),
+  diff: new Map(),
   end: [],
   ...over,
 });
@@ -2096,6 +2260,57 @@ const sampleThread = (body: string, over: Partial<DownloadThread> = {}): Downloa
   comments: [{ author: "user", sent: true, body, html: null, createdAt: Date.UTC(2026, 0, 2, 3, 4) }],
   ...over,
 });
+
+test("diff cards follow whole files, old and new end lines, then lines outside the hunks", async () => {
+  const threads = emptyThreads({
+    diff: new Map([
+      [
+        0,
+        {
+          whole: [sampleThread("Whole file remark")],
+          old: new Map([[2, [sampleThread("Old line remark")]]]),
+          new: new Map([
+            [2, [sampleThread("New line remark")]],
+            [90, [sampleThread("Outside remark", { where: "src/Example.ts · line 90" })]],
+          ]),
+        },
+      ],
+    ]),
+  });
+  const diff = {
+    files: [diffFile()],
+    hunks: async () => downloadDiffHunks("keep\nold\nend\n", "keep\nnew\nend\n", 1000) ?? [],
+  };
+  const html = await buildWriteupDownload({ ...diffInput, diff, threads });
+  const nodes = parsed(html).filter(
+    (node) => node.tagName === "aside" || (node.properties.className as string[] | undefined)?.includes("em-diff"),
+  );
+  expect(nodes.map((node) => node.tagName)).toEqual(["aside", "pre", "aside", "pre", "aside", "pre", "aside"]);
+  expect(nodes.map(hastText)).toEqual([
+    expect.stringContaining("Whole file remark"),
+    "@@ -1,3 +1,3 @@\n1 1  keep\n2   -old",
+    expect.stringContaining("Old line remark"),
+    "  2 +new",
+    expect.stringContaining("New line remark"),
+    "3 3  end",
+    expect.stringContaining("Outside remark"),
+  ]);
+  expect(html.indexOf('class="em-diff-file"')).toBeLessThan(html.indexOf("Whole file remark"));
+  expect(html).toContain('<span class="em-thread-where">src/Example.ts · line 90</span>');
+  expect(html).not.toContain("Other comments");
+  const hidden = await buildWriteupDownload({
+    ...diffInput,
+    threads,
+    diff: { ...diff, files: [diffFile({ flag: "binary" })] },
+  });
+  expect(hidden.indexOf("Binary file.")).toBeLessThan(hidden.indexOf("Old line remark"));
+  expect(hidden).not.toContain("Other comments");
+  const without = await buildWriteupDownload({ ...diffInput, threads });
+  expect(without).toContain("Other comments");
+  for (const remark of ["Whole file remark", "Old line remark", "New line remark", "Outside remark"])
+    expect(without).toContain(remark);
+});
+
 const threadMarkers = (html: string) => (html.match(/class="em-thread"/g) ?? []).length;
 const omittedThread =
   '<p class="em-thread-omitted">A comment thread was left out here because it passed the size limit for comments.</p>';

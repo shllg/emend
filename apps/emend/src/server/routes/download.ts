@@ -1,5 +1,6 @@
 import {
   DownloadComments,
+  DownloadDiff,
   DownloadDocIds,
   LIMITS,
   RenderedBlock,
@@ -14,6 +15,8 @@ import {
   buildOmittedDownload,
   buildWriteupDownload,
   createDownloadWork,
+  type DownloadDiffFile,
+  type DownloadDiffHunk,
   type DownloadFile,
   type DownloadThreadInput,
   type FileThreads,
@@ -42,10 +45,13 @@ import { downloadDocNames } from "../http/download-names.ts";
 import { ApiError } from "../http/errors.ts";
 import { DOWNLOAD_CSP } from "../http/headers.ts";
 import { ZipWriter } from "../http/zip.ts";
+import { type WorkerExecutor, workerExecutor } from "../publish/executor.ts";
 import { commentHtml } from "./comment-html.ts";
 import { publishMeta, topicView } from "./reviews.ts";
 
 const imageTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
+export const DOWNLOAD_DIFF_BUDGET_MS = 20_000;
+const DOWNLOAD_DIFF_RENDER_MS = 10_000;
 // One builder per owner; waiting requests have not opened a database read yet.
 const downloadQueues = new Map<string, (() => void)[]>();
 async function acquireDownload(ownerId: string): Promise<() => void> {
@@ -64,7 +70,10 @@ const pause = () => new Promise<void>((resolve) => setImmediate(resolve));
 const hasThreads = (threads: FileThreads): boolean =>
   threads.top.length > 0 ||
   threads.end.length > 0 ||
-  [...threads.blocks.values(), ...threads.topics.values(), ...threads.lines.values()].some((list) => list.length > 0);
+  [...threads.blocks.values(), ...threads.topics.values(), ...threads.lines.values()].some((list) => list.length > 0) ||
+  [...threads.diff.values()].some(
+    (file) => file.whole.length > 0 || [...file.old.values(), ...file.new.values()].some((list) => list.length > 0),
+  );
 function downloadFilename(title: string, seq: number) {
   const slug =
     title
@@ -86,6 +95,7 @@ async function revisionDownload(
   headOnly: boolean,
   docIds: string[],
   withComments: boolean,
+  withDiff: boolean,
 ) {
   const row = await q
     .select({ review: reviews, repoName: repos.name })
@@ -199,6 +209,64 @@ async function revisionDownload(
   const resolveMedia = (sha: string) => resolveFile(media.get(sha));
   const docs = fileRows.filter((file) => file.role === "doc");
   const doc = baseDoc(docs);
+  const diffRows = fileRows.filter((file) => file.role === "diff");
+  const diffFiles: DownloadDiffFile[] | undefined =
+    withDiff && !(revision.writeupEmpty && revision.base === null)
+      ? diffRows.map((file) => ({
+          path: file.path,
+          oldPath: file.oldPath,
+          status: file.status,
+          flag: file.flag,
+          topic: file.topicSlug,
+          order: file.ord,
+          hasOld: file.oldBlob !== null,
+          hasNew: file.newBlob !== null,
+          additions: file.additions,
+          deletions: file.deletions,
+        }))
+      : undefined;
+  let diffWorker: WorkerExecutor | undefined;
+  let diffSpentMs = 0;
+  const diffHunks = async (index: number): Promise<DownloadDiffHunk[] | "missing" | "too-large" | "failed"> => {
+    if (diffSpentMs >= DOWNLOAD_DIFF_BUDGET_MS) return "failed";
+    const started = performance.now();
+    const remaining = () => DOWNLOAD_DIFF_BUDGET_MS - diffSpentMs - (performance.now() - started);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const file = diffRows[index];
+      if (!file) return "missing";
+      const old = await readLimited(file.oldBlob);
+      if (old === "too-large") return "too-large";
+      if (file.oldBlob !== null && old === null) return "missing";
+      if (remaining() <= 0) return "failed";
+      const next = await readLimited(file.newBlob);
+      if (next === "too-large") return "too-large";
+      if (file.newBlob !== null && next === null) return "missing";
+      if (remaining() <= 0) return "failed";
+      if (!deps.publishExecutor && !diffWorker) diffWorker = workerExecutor();
+      const run = deps.publishExecutor ?? diffWorker;
+      if (!run) return "failed";
+      const result = await Promise.race([
+        run({
+          kind: "diff-hunks",
+          old: old ? Uint8Array.from(old).buffer : null,
+          next: next ? Uint8Array.from(next).buffer : null,
+        }),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Download diff timed out")),
+            Math.min(DOWNLOAD_DIFF_RENDER_MS + 500, remaining()),
+          );
+        }),
+      ]);
+      return result.kind === "diff-hunks" && result.hunks !== null ? result.hunks : "failed";
+    } catch {
+      return "failed";
+    } finally {
+      clearTimeout(timer);
+      diffSpentMs += performance.now() - started;
+    }
+  };
   const zip = docIds.length > 0 || (withComments && doc?.mediaType === "text/html");
   const work = createDownloadWork(commentBudget);
   const fileKind = (file: typeof files.$inferSelect): "markdown" | "source" | "html" =>
@@ -309,6 +377,7 @@ async function revisionDownload(
       topics: parse(TopicMeta.array().max(LIMITS.topicsPerReview + 1), topicRows.map(topicView)),
       base,
       docs: selectedDocs.map((file) => ({ kind: fileKind(file), path: file.path })),
+      diff: diffFiles,
     });
   };
   const routed = withComments ? await loadThreads() : undefined;
@@ -380,17 +449,22 @@ async function revisionDownload(
         .where(and(eq(topics.ownerId, ownerId), eq(topics.revisionId, revision.id)))
         .orderBy(topics.importance, sql`${topics}.rowid`)
         .all();
-      return buildWriteupDownload({
-        title: review.title,
-        details: { ...details, links: publishMeta(stored).links },
-        writeup: rendered,
-        topics: parse(TopicMeta.array().max(LIMITS.topicsPerReview + 1), topicRows.map(topicView)),
-        resolveMedia,
-        inlineBudget: budget,
-        pause,
-        work,
-        threads: routed?.base,
-      });
+      try {
+        return await buildWriteupDownload({
+          title: review.title,
+          details: { ...details, links: publishMeta(stored).links },
+          writeup: rendered,
+          topics: parse(TopicMeta.array().max(LIMITS.topicsPerReview + 1), topicRows.map(topicView)),
+          resolveMedia,
+          inlineBudget: budget,
+          pause,
+          work,
+          threads: routed?.base,
+          diff: diffFiles ? { files: diffFiles, hunks: diffHunks } : undefined,
+        });
+      } finally {
+        await diffWorker?.close();
+      }
     }
   };
   if (!zip) return { body: await buildBase(), filename, zip };
@@ -482,6 +556,9 @@ export function downloadRoutes(
     const commentsParsed = DownloadComments.safeParse(c.req.queries("comments") ?? []);
     if (!commentsParsed.success) throw new ApiError("invalid_request");
     const withComments = commentsParsed.data.length === 1;
+    const diffParsed = DownloadDiff.safeParse(c.req.queries("diff") ?? []);
+    if (!diffParsed.success) throw new ApiError("invalid_request");
+    const withDiff = diffParsed.data.length === 1;
     const release = headOnly ? undefined : await acquireDownload(ownerId);
     try {
       const result = await deps.db.read((q) =>
@@ -496,6 +573,7 @@ export function downloadRoutes(
           headOnly,
           docIds,
           withComments,
+          withDiff,
         ),
       );
       c.header("Content-Type", result.zip ? "application/zip" : "text/html; charset=utf-8");

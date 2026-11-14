@@ -75,7 +75,7 @@ export function workerExecutor(timeouts = { render: 10000, place: 30000 }): Work
       current.ref();
       try {
         const buffers =
-          work.kind === "diff-counts"
+          work.kind === "diff-counts" || work.kind === "diff-hunks"
             ? [work.old, work.next].filter((buffer): buffer is ArrayBuffer => buffer !== null)
             : work.kind === "doc" || work.kind === "source"
               ? [work.source]

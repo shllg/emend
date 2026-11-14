@@ -1,4 +1,5 @@
 import type { Outcome, Placement, Target, ThreadState, TopicMeta, UnplacedReason } from "@emend/contract";
+import type { DownloadDiffFile } from "./download-diff.ts";
 
 export type DownloadComment = {
   author: "user" | "agent";
@@ -34,8 +35,15 @@ export type FileThreads = {
   topics: Map<string, DownloadThread[]>;
   /** Source line number (1-based) to the threads shown after that line. */
   lines: Map<number, DownloadThread[]>;
+  /** Diff file index to whole-file threads and end lines on each side. */
+  diff: Map<number, DiffThreads>;
   /** Threads with no place in this file's content. */
   end: DownloadThread[];
+};
+export type DiffThreads = {
+  whole: DownloadThread[];
+  old: Map<number, DownloadThread[]>;
+  new: Map<number, DownloadThread[]>;
 };
 export type DownloadFile = { kind: "writeup" } | { kind: "markdown" | "source" | "html"; path: string };
 
@@ -54,6 +62,7 @@ const emptyThreads = (): FileThreads => ({
   blocks: new Map(),
   topics: new Map(),
   lines: new Map(),
+  diff: new Map(),
   end: [],
 });
 function push<K>(map: Map<K, DownloadThread[]>, key: K, thread: DownloadThread) {
@@ -103,6 +112,7 @@ export function routeDownloadThreads(input: {
   topics: TopicMeta[];
   base: DownloadFile;
   docs: DownloadFile[];
+  diff?: DownloadDiffFile[];
   importedAt?: number | null;
 }): { base: FileThreads; docs: FileThreads[]; comments?: FileThreads } {
   const base = emptyThreads();
@@ -165,6 +175,33 @@ export function routeDownloadThreads(input: {
         const target = find("source", location.path);
         if (target) push(target.lines, location.end, thread);
         else home.end.push(thread);
+        break;
+      }
+      case "lines":
+      case "file": {
+        const matches = writeupBase
+          ? (input.diff ?? []).flatMap((file, index) => {
+              const matches =
+                location.kind === "file"
+                  ? location.path === file.path
+                  : location.side === "old"
+                    ? file.hasOld && file.status !== "added" && location.path === (file.oldPath ?? file.path)
+                    : file.hasNew && location.path === file.path;
+              return matches ? [index] : [];
+            })
+          : [];
+        const index = matches.length === 1 ? matches[0] : undefined;
+        if (index === undefined) {
+          home.end.push(thread);
+          break;
+        }
+        let target = base.diff.get(index);
+        if (!target) {
+          target = { whole: [], old: new Map(), new: new Map() };
+          base.diff.set(index, target);
+        }
+        if (location.kind === "file") target.whole.push(thread);
+        else push(target[location.side], location.end, thread);
         break;
       }
       default:
