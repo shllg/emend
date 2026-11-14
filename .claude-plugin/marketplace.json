@@ -1,5 +1,6 @@
 {
   "name": "emend",
+  "version": "0.10.0",
   "owner": { "name": "shllg" },
   "description": "Local-first review for work done by coding agents: plans, docs and code.",
   "plugins": [

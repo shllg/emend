@@ -1,5 +1,6 @@
 {
   "name": "emend",
+  "version": "0.10.0",
   "description": "Local-first review for work done by coding agents: plans, docs and code.",
   "author": { "name": "shllg" },
   "repository": "https://github.com/shllg/emend",
