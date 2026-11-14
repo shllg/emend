@@ -1,6 +1,7 @@
 import { type FileView, OTHER_TOPIC, type RevisionView, type Target } from "@emend/contract";
 import { useIsMutating } from "@tanstack/react-query";
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { runningCommentSaves } from "../../api/mutations.ts";
 import { claimDraft } from "../../lib/composer-owner.ts";
 import { useDiffCounts } from "../../lib/diff-counts.ts";
 import { diffFiles, diffGroups } from "../../lib/diff-groups.ts";
@@ -62,10 +63,10 @@ export function DiffPane({
   const [style, setStyle] = useDiffStyle();
   const [wrap, setWrap] = useDiffWrap();
   const [order, setOrder, saving] = useFileOrder();
-  const mutating = useIsMutating() > 0;
+  const mutating = useIsMutating(runningCommentSaves) > 0;
   const [shownOrder, setShownOrder] = useState(order);
   // Per-call mutate callbacks run synchronously in the success/error dispatch; useIsMutating hears
-  // through TanStack's scheduler later, so apply a held order only after the save's callbacks ran.
+  // through TanStack's scheduler later, so apply a held order only after the comment save's callbacks ran.
   if (!mutating && shownOrder !== order) setShownOrder(order);
   const { notes } = useLayoutPreferences();
   const [collapsedTopics, setCollapsedTopics] = useTopicFolds(reviewId, revision.seq);

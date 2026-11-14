@@ -2,11 +2,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { FileView, RevisionView, Target, ThreadView } from "@emend/contract";
 import type { GetHoveredLineResult } from "@pierre/diffs";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { useViewedMutation } from "../../api/mutations.ts";
 import { claimDraft } from "../../lib/composer-owner.ts";
 import type { NavigateDiff } from "../../lib/diff-navigation.ts";
 import { draftKey, isAnyDraftSaving, saveDraft } from "../../lib/drafts.ts";
@@ -970,6 +971,78 @@ test.each(["file", "topic"])("another tab's order waits until a %s comment save 
   } finally {
     await act(async () => save.resolve(Response.json({}, { status: 201 })));
     await waitFor(() => expect(isAnyDraftSaving()).toBe(false));
+  }
+});
+
+test("an unrelated pending mutation does not hold the diff's order", async () => {
+  const request = Promise.withResolvers<Response>();
+  const fallback = fetchMock.getMockImplementation() as
+    | ((path: string, init?: RequestInit) => Promise<Response>)
+    | undefined;
+  fetchMock.mockImplementation((path: string, init?: RequestInit) =>
+    path.endsWith("/viewed") ? request.promise : fallback?.(path, init),
+  );
+  const { result } = renderHook(() => useViewedMutation(reviewId), {
+    wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+  });
+  const view = revision([file("source.ts", { flag: "binary" })]);
+  try {
+    await mount(view, {
+      onViewed: (paths, viewed) => result.current.mutate({ revision: view.seq, paths, viewed }),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Mark source.ts as viewed" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/v1/reviews/${reviewId}/viewed`,
+        expect.objectContaining({ method: "PUT" }),
+      ),
+    );
+    expect(client.isMutating()).toBe(1);
+    expect(screen.getByRole("region", { name: "Topic First" })).toBeTruthy();
+    act(() => layoutStore.update({ fileOrder: "path" }));
+    expect(screen.queryByRole("region", { name: /^Topic / })).toBeNull();
+    expect(document.querySelector("[data-topic]")).toBeNull();
+    expect(screen.getByRole("region", { name: "File source.ts" })).toBeTruthy();
+    expect(client.isMutating()).toBe(1);
+  } finally {
+    await act(async () => request.resolve(Response.json({})));
+    await waitFor(() => expect(client.isMutating()).toBe(0));
+  }
+});
+
+test("a paused comment save does not hold the diff's order", async () => {
+  const save = Promise.withResolvers<Response>();
+  const fallback = fetchMock.getMockImplementation() as
+    | ((path: string, init?: RequestInit) => Promise<Response>)
+    | undefined;
+  fetchMock.mockImplementation((path: string, init?: RequestInit) =>
+    path.endsWith("/threads") ? save.promise : fallback?.(path, init),
+  );
+  try {
+    await mount(revision([file("source.ts", { flag: "binary" })]));
+    act(() => onlineManager.setOnline(false));
+    fireEvent.click(screen.getByRole("button", { name: "Comment on file" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Paused comment" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
+    await waitFor(() => expect(client.getMutationCache().find({ status: "pending" })?.state.isPaused).toBe(true));
+    expect(isAnyDraftSaving()).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      `/api/v1/reviews/${reviewId}/threads`,
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(screen.getByRole("region", { name: "Topic First" })).toBeTruthy();
+    act(() => layoutStore.update({ fileOrder: "path" }));
+    expect(screen.queryByRole("region", { name: /^Topic / })).toBeNull();
+    expect(document.querySelector("[data-topic]")).toBeNull();
+    expect(screen.getByRole("region", { name: "File source.ts" })).toBeTruthy();
+    expect(client.getMutationCache().find({ status: "pending" })?.state.isPaused).toBe(true);
+  } finally {
+    await act(async () => {
+      onlineManager.setOnline(true);
+      save.resolve(Response.json({}, { status: 201 }));
+    });
+    await waitFor(() => expect(client.isMutating()).toBe(0));
+    expect(isAnyDraftSaving()).toBe(false);
   }
 });
 
