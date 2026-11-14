@@ -189,15 +189,67 @@ describe("publish manifest", () => {
 });
 
 describe("review verdicts", () => {
-  test.each(["skim", "topics", "everything"] as const)("accepts the %s level with check details", (level) => {
+  test.each([
+    ["skim", "skim"],
+    ["topics", "review"],
+    ["everything", "critical"],
+  ] as const)("accepts the %s level with consistent %s topics and check details", (level, attention) => {
+    const topics = [
+      { ...topic, attention },
+      { ...topic, slug: "lookup", attention },
+      { ...topic, slug: "labels", attention: "skim" },
+    ];
     const review: ReviewVerdict = {
       level,
-      ...(level === "topics" ? { topics: [topic.slug] } : {}),
+      ...(level === "topics" ? { topics: [topic.slug, "lookup"] } : {}),
       reason: "  **Routing** deserves a look.\n",
     };
     const writeup = { ...manifest.writeup, review, checked: "Unit tests.", notChecked: "Browser behavior." };
     expect(ReviewVerdict.parse(review)).toEqual(review);
-    expect(PublishManifest.parse({ ...manifest, writeup }).writeup).toEqual(writeup);
+    expect(PublishManifest.parse({ ...manifest, topics, writeup }).writeup).toEqual(writeup);
+  });
+
+  test("preserves a manifest without a verdict even when topics are critical", () => {
+    const input = { ...manifest, topics: [{ ...topic, attention: "critical" }] };
+    expect(PublishManifest.parse(input)).toEqual(input);
+  });
+
+  const criticalIssue = {
+    code: "custom",
+    path: ["writeup", "review", "level"],
+    message: "a critical topic needs level everything",
+  };
+  const skimIssue = {
+    code: "custom",
+    path: ["writeup", "review", "level"],
+    message: "level skim needs every topic at attention skim",
+  };
+  const topicsIssue = {
+    code: "custom",
+    path: ["writeup", "review", "topics"],
+    message: "level topics must name every topic at attention review",
+  };
+  test.each([
+    ["skim", "critical", [criticalIssue, skimIssue]],
+    ["topics", "critical", [criticalIssue]],
+    ["skim", "review", [skimIssue]],
+    ["skim", undefined, [skimIssue]],
+    ["topics", "review", [topicsIssue]],
+  ] as const)("refuses level %s with conflicting %s topics once per rule", (level, attention, issues) => {
+    const result = PublishManifest.safeParse({
+      ...manifest,
+      topics: [
+        { ...topic, attention: level === "topics" ? "review" : "skim" },
+        { ...topic, slug: "lookup", attention },
+        { ...topic, slug: "labels", attention },
+      ],
+      writeup: {
+        ...manifest.writeup,
+        review: { level, ...(level === "topics" ? { topics: [topic.slug] } : {}), reason: "Synthetic reason." },
+      },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues).toEqual(issues.map((issue) => expect.objectContaining(issue)));
   });
 
   test.each([

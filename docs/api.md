@@ -1223,9 +1223,15 @@ The fields `outOfScope`, `whereToLook`, `context`, `review`, `checked` and `notC
 `ReviewVerdict = { level: "skim" | "topics" | "everything", topics?: TopicSlug[], reason }` is the
 agent's advice on how deep to read. `topics` is required for level `topics` and refused for the
 other levels; it holds 1–`topicsPerReview` unique declared topic slugs. `reason` is Markdown with
-non-whitespace text. The renderer composes the Review section: a bold "Skim, then merge.",
-"Read everything." or "Read topic(s) “<title>” …" (each title escaped as literal text), followed
-on the same line by `reason`. A `reason` with blank lines adds paragraphs. `checked` (what the
+non-whitespace text. A verdict must agree with the topics' attention, or the manifest and the
+publish request are refused: any `critical` topic needs level `everything` (`a critical topic needs
+level everything`); level `skim` needs every declared topic at attention `skim` (`level skim needs
+every topic at attention skim`); level `topics` must name every topic at attention `review` (`level
+topics must name every topic at attention review`). The generated `other` topic is ignored.
+The renderer composes the Review section: a bold "Skim, then merge.", "Read everything." or
+"Read topic(s) “<title>” …", followed on the same line by `reason`. Each title is escaped, so its
+Markdown and HTML stay literal; a bare URL, `www.` address or email in a title still becomes a
+hardened link, as in other writeup text. A `reason` with blank lines adds paragraphs. `checked` (what the
 agent ran or verified) and `notChecked` (what it did not) are Markdown with non-whitespace text.
 When any of the six is present (`outOfScope`, `whereToLook` and `context` count even as an empty
 string), sections render as TL;DR, Review, Checked,

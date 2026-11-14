@@ -3,7 +3,7 @@ import { AgentNotes, validateAgentNotes } from "./agent-note.ts";
 import { DocTitle, DocView, docViewOf, isRenderedHtmlDoc, validateDocView } from "./doc.ts";
 import { LIMITS } from "./limits.ts";
 import { PublishLinks, RepoUrl } from "./links.ts";
-import { MEDIA_EXTENSIONS, PublishManifest, WriteupInput } from "./manifest.ts";
+import { MEDIA_EXTENSIONS, PublishManifest, reviewVerdictIssues, WriteupInput } from "./manifest.ts";
 import { FileFlag, FilePath, FileRole, FileStatus, OTHER_TOPIC, TopicMeta, TopicSlug } from "./review.ts";
 
 export const ASSET_EXTENSIONS = new Set(
@@ -139,5 +139,7 @@ export const PublishRequest = z
       if (!topics.has(slug)) issue("writeup topic is not declared");
     for (const slug of request.writeup.review?.topics ?? [])
       if (!topics.has(slug)) issue("review topic is not declared");
+    for (const { path, message } of reviewVerdictIssues(request.writeup.review, request.topics))
+      ctx.addIssue({ code: "custom", path, message });
   });
 export type PublishRequest = z.infer<typeof PublishRequest>;
