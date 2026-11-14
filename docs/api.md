@@ -1223,11 +1223,12 @@ The fields `outOfScope`, `whereToLook`, `context`, `review`, `checked` and `notC
 `ReviewVerdict = { level: "skim" | "topics" | "everything", topics?: TopicSlug[], reason }` is the
 agent's advice on how deep to read. `topics` is required for level `topics` and refused for the
 other levels; it holds 1–`topicsPerReview` unique declared topic slugs. `reason` is Markdown with
-non-whitespace text. The renderer composes the Review section as one paragraph: a bold
-"Skim, then merge.", "Read everything." or "Read topic(s) “<title>” …" (each title escaped as
-literal text), then `reason`. `checked` (what the agent ran or verified) and `notChecked` (what it
-did not) are Markdown with non-whitespace text.
-When any of the six is present, even as an empty string, sections render as TL;DR, Review, Checked,
+non-whitespace text. The renderer composes the Review section: a bold "Skim, then merge.",
+"Read everything." or "Read topic(s) “<title>” …" (each title escaped as literal text), followed
+on the same line by `reason`. A `reason` with blank lines adds paragraphs. `checked` (what the
+agent ran or verified) and `notChecked` (what it did not) are Markdown with non-whitespace text.
+When any of the six is present (`outOfScope`, `whereToLook` and `context` count even as an empty
+string), sections render as TL;DR, Review, Checked,
 Not checked, Overview, Out of scope, Where to look, Context, Decisions and drift, Glossary, then
 topics; absent optional fields emit no section.
 Without them, the existing order stays Overview, TL;DR, Decisions and drift, Glossary, then topics,

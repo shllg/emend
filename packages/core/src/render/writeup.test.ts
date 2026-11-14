@@ -177,7 +177,13 @@ test.each([
   "[guide](https://example.com)",
   "*stars* _underscores_ `code` **strong**",
   "<img src=x onerror=alert(1)>",
+  "<script>alert(1)</script>",
+  "&lt;script&gt; &#x3C;b&#x3E;",
   "  Shelf\n\t search  ",
+  "  Shelf\u2028search\u2029results  ",
+  "a\\b",
+  "www.example.com",
+  "someone@example.com",
 ])("verdict topic title stays literal on one line: %j", async (title) => {
   const rendered = await renderWriteup(
     { ...writeup, review: { level: "topics", topics: ["search"], reason: "Check this topic." } },
@@ -189,13 +195,20 @@ test.each([
   expect(blocks[0]?.text).toBe(`${verdict} Check this topic.`);
   const html = blocks[0]?.html ?? "";
   expect(html).not.toContain("\n");
-  const autolink = title === "[guide](https://example.com)";
+  const autolink =
+    title === "[guide](https://example.com)"
+      ? /^https:\/\/example\.com/
+      : title === "www.example.com"
+        ? /^https?:\/\/www\.example\.com/
+        : title === "someone@example.com"
+          ? /^mailto:someone@example\.com/
+          : undefined;
   if (autolink) expect(html).not.toMatch(/javascript:/i);
   const tags: string[] = [];
   visitElements(fromHtml(html, { fragment: true }), (element) => {
     tags.push(element.tagName);
     if (autolink && element.tagName === "a") {
-      expect(element.properties.href).toMatch(/^https:\/\/example\.com/);
+      expect(element.properties.href).toMatch(autolink);
       expect(element.properties.rel).toEqual(["noopener", "noreferrer", "nofollow"]);
     } else {
       expect(element.properties).toEqual({});

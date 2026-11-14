@@ -40,6 +40,31 @@ test("publish accepts resolved docs and assets and rejects undeclared references
     expect(PublishRequest.safeParse({ ...request, files }).success).toBe(false);
   }
 });
+test("publish accepts a verdict naming a declared topic", () => {
+  const input = {
+    ...request,
+    topics: [{ slug: "routing", title: "Routing", importance: 20, summary: "Simplify route lookup." }],
+    writeup: {
+      ...request.writeup,
+      review: { level: "topics", topics: ["routing"], reason: "Route lookup changed." },
+    },
+  };
+  expect(PublishRequest.parse(input)).toEqual(input);
+});
+test("publish refuses an undeclared verdict topic", () => {
+  const result = PublishRequest.safeParse({
+    ...request,
+    writeup: {
+      ...request.writeup,
+      review: { level: "topics", topics: ["missing"], reason: "Inspect the changed lookup." },
+    },
+  });
+  expect(result.success).toBe(false);
+  if (!result.success)
+    expect(result.error.issues).toContainEqual(
+      expect.objectContaining({ code: "custom", path: [], message: "review topic is not declared" }),
+    );
+});
 test("publish bounds identifiers, arrays, and every string", () => {
   for (const patch of [
     { reviewKey: "a" },

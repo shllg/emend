@@ -137,5 +137,7 @@ export const PublishRequest = z
     if (mediaCount > LIMITS.mediaPerRevision) issue("too many media files");
     for (const slug of Object.keys(request.writeup.topics))
       if (!topics.has(slug)) issue("writeup topic is not declared");
+    for (const slug of request.writeup.review?.topics ?? [])
+      if (!topics.has(slug)) issue("review topic is not declared");
   });
 export type PublishRequest = z.infer<typeof PublishRequest>;
