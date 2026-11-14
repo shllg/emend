@@ -76,6 +76,11 @@ const skimVerdictIssue = {
   path: ["writeup", "review", "level"],
   message: "level skim needs every topic at attention skim",
 };
+const unassignedVerdictIssue = {
+  code: "custom",
+  path: ["writeup", "review", "level"],
+  message: "level skim needs every changed file in a declared topic",
+};
 const topicsVerdictIssue = {
   code: "custom",
   path: ["writeup", "review", "topics"],
@@ -129,22 +134,38 @@ test.each([
   expect(PublishRequest.parse(input)).toEqual(input);
 });
 
-test.each([undefined, "skim", "review", "critical"] as const)(
-  "publish ignores Other changes with attention %s when checking a skim verdict",
-  (attention) => {
-    const input = {
-      ...request,
-      topics: [
-        { slug: "routing", title: "Routing", importance: 20, summary: "Simplify route lookup.", attention: "skim" },
-        { ...OTHER_TOPIC, importance: 100, summary: "Generated changes.", ...(attention ? { attention } : {}) },
-      ],
-      writeup: { ...request.writeup, review: { level: "skim", reason: "Every declared topic is low risk." } },
-    };
+test.each([
+  ["skim", undefined, [unassignedVerdictIssue]],
+  ["skim", "skim", []],
+  ["skim", "review", [unassignedVerdictIssue]],
+  ["skim", "critical", [criticalVerdictIssue, unassignedVerdictIssue]],
+  ["topics", "critical", [criticalVerdictIssue]],
+  ["topics", undefined, []],
+  ["topics", "skim", []],
+  ["everything", undefined, []],
+  ["everything", "critical", []],
+] as const)("publish checks level %s against Other changes with attention %s", (level, attention, issues) => {
+  const input = {
+    ...request,
+    topics: [
+      { slug: "routing", title: "Routing", importance: 20, summary: "Simplify route lookup.", attention: "skim" },
+      { ...OTHER_TOPIC, importance: 100, summary: "Generated changes.", ...(attention ? { attention } : {}) },
+    ],
+    writeup: {
+      ...request.writeup,
+      review: { level, ...(level === "topics" ? { topics: ["routing"] } : {}), reason: "Inspect the changes." },
+    },
+  };
+  if (issues.length === 0) {
     expect(PublishRequest.parse(input)).toEqual(input);
-  },
-);
+  } else {
+    const result = PublishRequest.safeParse(input);
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues).toEqual(issues.map((issue) => expect.objectContaining(issue)));
+  }
+});
 
-test("a topics verdict does not need to name Other changes at attention review", () => {
+test("a topics verdict must name Other changes at attention review", () => {
   const input = {
     ...request,
     topics: [
@@ -153,6 +174,10 @@ test("a topics verdict does not need to name Other changes at attention review",
     ],
     writeup: { ...request.writeup, review: { level: "topics", topics: ["routing"], reason: "Check route lookup." } },
   };
+  const result = PublishRequest.safeParse(input);
+  expect(result.success).toBe(false);
+  if (!result.success) expect(result.error.issues).toEqual([expect.objectContaining(topicsVerdictIssue)]);
+  input.writeup.review.topics.push(OTHER_TOPIC.slug);
   expect(PublishRequest.parse(input)).toEqual(input);
 });
 

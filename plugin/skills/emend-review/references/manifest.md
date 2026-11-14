@@ -184,7 +184,8 @@ Use these constraints when writing the manifest:
   `everything`. `topics` lists declared topic slugs, only with level `topics`. `reason` is one
   short sentence.
 - Publish refuses a verdict that contradicts the topics. A `critical` topic needs `everything`.
-  `skim` needs every topic at attention `skim`. `topics` must name every topic at attention `review`.
+  `skim` needs every topic at attention `skim` and every changed file in a declared topic.
+  `topics` must name every topic at attention `review`.
 - `writeup.checked` and `writeup.notChecked` are Markdown and never blank.
 - `title` is at most 200 characters; `summary` is at most 2000.
 - `links` is optional: at most 8 entries of `url`, `label` and `kind`. `url` is an `https:` URL

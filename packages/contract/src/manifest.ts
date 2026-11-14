@@ -42,17 +42,24 @@ export function reviewVerdictIssues(
   topics: readonly { slug: string; attention?: "critical" | "review" | "skim" }[],
 ): { path: (string | number)[]; message: string }[] {
   if (review === undefined) return [];
-  const declared = topics.filter((topic) => topic.slug !== OTHER_TOPIC.slug);
   const issues: { path: (string | number)[]; message: string }[] = [];
-  if (review.level !== "everything" && declared.some((topic) => topic.attention === "critical")) {
+  if (review.level !== "everything" && topics.some((topic) => topic.attention === "critical")) {
     issues.push({ path: ["writeup", "review", "level"], message: "a critical topic needs level everything" });
   }
-  if (review.level === "skim" && declared.some((topic) => topic.attention !== "skim")) {
-    issues.push({ path: ["writeup", "review", "level"], message: "level skim needs every topic at attention skim" });
+  if (review.level === "skim") {
+    if (topics.some((topic) => topic.slug === OTHER_TOPIC.slug && topic.attention !== "skim")) {
+      issues.push({
+        path: ["writeup", "review", "level"],
+        message: "level skim needs every changed file in a declared topic",
+      });
+    }
+    if (topics.some((topic) => topic.slug !== OTHER_TOPIC.slug && topic.attention !== "skim")) {
+      issues.push({ path: ["writeup", "review", "level"], message: "level skim needs every topic at attention skim" });
+    }
   }
   if (review.level === "topics") {
     const named = new Set(review.topics);
-    if (declared.some((topic) => topic.attention === "review" && !named.has(topic.slug))) {
+    if (topics.some((topic) => topic.attention === "review" && !named.has(topic.slug))) {
       issues.push({
         path: ["writeup", "review", "topics"],
         message: "level topics must name every topic at attention review",

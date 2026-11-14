@@ -3,8 +3,10 @@ import {
   GlossaryEntry,
   LIMITS,
   normalizeGlossaryForm,
+  OTHER_TOPIC,
   PublishManifest,
   ReviewVerdict,
+  reviewVerdictIssues,
   WriteupInput,
   writeupMarkdown,
 } from "./index.ts";
@@ -212,6 +214,35 @@ describe("review verdicts", () => {
   test("preserves a manifest without a verdict even when topics are critical", () => {
     const input = { ...manifest, topics: [{ ...topic, attention: "critical" }] };
     expect(PublishManifest.parse(input)).toEqual(input);
+  });
+
+  test("the verdict helper refuses skim when Other changes has no attention", () => {
+    expect(reviewVerdictIssues({ level: "skim", reason: "Synthetic reason." }, [{ slug: OTHER_TOPIC.slug }])).toEqual([
+      {
+        path: ["writeup", "review", "level"],
+        message: "level skim needs every changed file in a declared topic",
+      },
+    ]);
+  });
+
+  test("the verdict helper reports both skim conflicts only once", () => {
+    expect(
+      reviewVerdictIssues({ level: "skim", reason: "Synthetic reason." }, [
+        { slug: OTHER_TOPIC.slug },
+        { slug: OTHER_TOPIC.slug, attention: "review" },
+        { slug: "routing", attention: "review" },
+        { slug: "lookup" },
+      ]),
+    ).toEqual([
+      {
+        path: ["writeup", "review", "level"],
+        message: "level skim needs every changed file in a declared topic",
+      },
+      {
+        path: ["writeup", "review", "level"],
+        message: "level skim needs every topic at attention skim",
+      },
+    ]);
   });
 
   const criticalIssue = {

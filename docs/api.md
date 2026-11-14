@@ -1227,7 +1227,9 @@ non-whitespace text. A verdict must agree with the topics' attention, or the man
 publish request are refused: any `critical` topic needs level `everything` (`a critical topic needs
 level everything`); level `skim` needs every declared topic at attention `skim` (`level skim needs
 every topic at attention skim`); level `topics` must name every topic at attention `review` (`level
-topics must name every topic at attention review`). The generated `other` topic is ignored.
+topics must name every topic at attention review`). The generated `other` topic counts too: a
+request that holds it, because some changed files have no declared topic, cannot take level `skim`
+(`level skim needs every changed file in a declared topic`).
 The renderer composes the Review section: a bold "Skim, then merge.", "Read everything." or
 "Read topic(s) “<title>” …", followed on the same line by `reason`. Each title is escaped, so its
 Markdown and HTML stay literal; a bare URL, `www.` address or email in a title still becomes a
