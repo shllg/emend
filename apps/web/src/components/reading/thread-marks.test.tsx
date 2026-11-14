@@ -201,11 +201,53 @@ test.each([false, true])("continuation clicks cannot step through a newly opened
   fireEvent.click(next, { detail: 1 });
   expect(within(dialog()).getByRole("article").id).toBe(`thread-${second.id}`);
   const previous = within(dialog()).getByRole("button", { name: "Previous" });
-  expect(fireEvent.click(previous, { detail: 2 })).toBe(false);
-  expect(within(dialog()).getByRole("article").id).toBe(`thread-${second.id}`);
-  // Keyboard activation dispatches a click with detail 0.
-  fireEvent.click(previous, { detail: 0 });
+  fireEvent.click(previous, { detail: 2 });
   expect(within(dialog()).getByRole("article").id).toBe(`thread-${thread.id}`);
+  // Keyboard activation dispatches a click with detail 0.
+  fireEvent.click(next, { detail: 0 });
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${second.id}`);
+});
+test.each([false, true])("a double-click started on Next steps twice with phone=%s", (isPhone) => {
+  phone = isPhone;
+  const thirdId = "44444444-4444-4444-8444-444444444444";
+  const view = mount([
+    thread,
+    {
+      ...second,
+      placement: { status: "placed", location: { kind: "writeup-span", blockId: block.id, start: 12, end: 18 } },
+    },
+    {
+      ...second,
+      id: thirdId,
+      placement: { status: "placed", location: { kind: "writeup-span", blockId: block.id, start: 13, end: 18 } },
+    },
+  ]);
+  fireEvent.click(view.container.querySelector("strong") as HTMLElement, { clientX: 60, clientY: 110, detail: 1 });
+  const next = within(dialog()).getByRole("button", { name: "Next" });
+  expect(fireEvent.click(next, { detail: 2 })).toBe(false);
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${thread.id}`);
+  fireEvent.click(next, { detail: 1 });
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${second.id}`);
+  fireEvent.click(next, { detail: 2 });
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${thirdId}`);
+});
+test("clicking a different tinted passage resets a sequence that started inside the open popover", () => {
+  vi.mocked(Range.prototype.getClientRects).mockImplementation(function (this: Range) {
+    return [rect(this.toString() === "seed" ? 160 : 100)] as unknown as DOMRectList;
+  });
+  const view = mount([thread, second]);
+  const passage = view.container.querySelector("strong") as HTMLElement;
+  fireEvent.click(passage, { clientX: 60, clientY: 170, detail: 1 });
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${thread.id}`);
+  fireEvent.click(within(dialog()).getByRole("button", { name: "Previous" }), { detail: 1 });
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${second.id}`);
+  fireEvent.click(passage, { clientX: 60, clientY: 170, detail: 1 });
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${thread.id}`);
+  const previous = within(dialog()).getByRole("button", { name: "Previous" });
+  expect(fireEvent.click(previous, { detail: 2 })).toBe(false);
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${thread.id}`);
+  fireEvent.click(previous, { detail: 1 });
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${second.id}`);
 });
 test.each([0, 1])("continuation clicks cannot open Reply but activation with detail=%s can", (detail) => {
   const view = mount();
@@ -234,6 +276,24 @@ test("a jump opens even a resolved thread and removing its data closes the dialo
   expect(within(dialog()).getByRole("button", { name: "Reopen" })).toBeTruthy();
   view.update([]);
   expect(screen.queryByRole("dialog")).toBeNull();
+});
+test("a new jump token reveals an already open thread immediately without replaying after a data refresh", () => {
+  const threads = [thread];
+  const view = mount(threads, undefined, thread.id);
+  const passage = view.container.querySelector("[data-block-id]");
+  const scroll = vi.mocked(HTMLElement.prototype.scrollIntoView);
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${thread.id}`);
+  expect(scroll.mock.instances).toContain(passage);
+  expect(scroll).toHaveBeenCalledWith({ block: "nearest" });
+  scroll.mockClear();
+  // Keep the thread data stable so only the new jump token can trigger the reveal.
+  view.update(threads, thread.id);
+  expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: "nearest" });
+  expect(scroll.mock.instances[0]).toBe(passage);
+  scroll.mockClear();
+  view.update([...threads]);
+  expect(scroll).not.toHaveBeenCalled();
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${thread.id}`);
 });
 test("outside presses close a thread and starting a block comment closes it", () => {
   mount();

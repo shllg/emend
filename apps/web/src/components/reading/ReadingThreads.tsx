@@ -12,13 +12,6 @@ import { passageRect, type ReaderThread, visibleReadingArea } from "./reader-thr
 import type { useReaderThreads } from "./use-reader-threads.ts";
 
 type State = ReturnType<typeof useReaderThreads>;
-function ignoreContinuationClick(event: MouseEvent) {
-  if (event.detail > 1) {
-    event.preventDefault();
-    event.stopPropagation();
-  }
-}
-
 export function ReadingThreads({
   state,
   root,
@@ -31,7 +24,27 @@ export function ReadingThreads({
   const { openEntry, popover, chips, chipsRef, index, total, step, close } = state;
   const [position, setPosition] = useState({ top: 0, maxHeight: 400 });
   const navigation = useRef<HTMLElement>(null);
+  const sequenceInside = useRef(false);
   const openId = openEntry?.thread.id;
+  const isOpen = !!openEntry;
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    sequenceInside.current = false;
+    const trackSequence = (event: globalThis.MouseEvent) => {
+      if (event.detail > 1) return;
+      const surface = phone ? navigation.current?.closest('[role="dialog"]') : popover.current;
+      sequenceInside.current = event.target instanceof Node && !!surface?.contains(event.target);
+    };
+    // Document capture records the sequence origin before the surface's React capture handler runs.
+    document.addEventListener("click", trackSequence, true);
+    return () => document.removeEventListener("click", trackSequence, true);
+  }, [isOpen, phone, popover]);
+  const ignoreContinuationClick = (event: MouseEvent) => {
+    if (event.detail > 1 && !sequenceInside.current) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
   useLayoutEffect(() => {
     if (!openId || phone) return;
     if (popover.current) popover.current.scrollTop = 0;

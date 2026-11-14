@@ -44,7 +44,7 @@ export function useReaderThreads({
   const pendingReveal = useRef<string | undefined>(undefined);
   const wasComposing = useRef(composing);
   const openEntry = entries.find((entry) => entry.thread.id === openId);
-  // The route scrolls in the commit after delivering the intent. Mount the card in that commit.
+  // The route completes the intent in the commit after delivering it. Mount the card in that commit.
   if (threadJump && threadJump.token !== handled && entries.some((entry) => entry.thread.id === threadJump.threadId)) {
     setHandled(threadJump.token);
     setOpenId(threadJump.threadId);
@@ -68,7 +68,7 @@ export function useReaderThreads({
   useLayoutEffect(() => registration.current?.setActiveThread(activeThreadId, openId));
   useLayoutEffect(() => {
     if (!root.current) return;
-    if (openEntry && pendingReveal.current === openEntry.thread.id) {
+    if (handled && openEntry && pendingReveal.current === openEntry.thread.id) {
       revealThread(openEntry, root.current);
       pendingReveal.current = undefined;
     }
@@ -83,7 +83,7 @@ export function useReaderThreads({
       observer?.disconnect();
       folds.disconnect();
     };
-  }, [root, entries, measure, openEntry]);
+  }, [root, entries, measure, openEntry, handled]);
   useEffect(() => {
     if (composing && !wasComposing.current) setOpenId(undefined);
     wasComposing.current = composing;
