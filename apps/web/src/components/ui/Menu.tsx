@@ -21,6 +21,8 @@ export type MenuItem =
     }
   | {
       label: string;
+      /** A long label loses its start instead of its end, so a path keeps its file name. */
+      truncateStart?: boolean;
       title?: string;
       icon?: IconComponent;
       hint?: string;
@@ -70,7 +72,7 @@ export function Menu({ label, trigger, align = "right", size = "md", items, defa
           sideOffset={4}
           collisionPadding={8}
           className={cn(
-            "relative z-[calc(var(--z-sheet)+2)] max-h-(--radix-dropdown-menu-content-available-height) min-w-52 animate-[em-fade_var(--dur-1)_var(--ease-out)] overflow-y-auto rounded-lg border border-line-1 bg-raised p-1 shadow-3",
+            "relative z-[calc(var(--z-sheet)+2)] max-h-(--radix-dropdown-menu-content-available-height) min-w-52 max-w-[min(36rem,var(--radix-dropdown-menu-content-available-width))] animate-[em-fade_var(--dur-1)_var(--ease-out)] overflow-y-auto rounded-lg border border-line-1 bg-raised p-1 shadow-3",
             items.some((item) => "radioGroup" in item) && "min-w-60",
           )}
         >
@@ -178,13 +180,21 @@ export function Menu({ label, trigger, align = "right", size = "md", items, defa
                 )}
               >
                 {item.icon && <Icon icon={item.icon} />}
-                <Slottable>{item.asChild ? item.children : <span>{item.label}</span>}</Slottable>
+                <Slottable>
+                  {item.asChild ? (
+                    item.children
+                  ) : (
+                    <span className={cn("min-w-0 truncate", item.truncateStart && "text-left [direction:rtl]")}>
+                      {item.truncateStart ? <bdi className="[unicode-bidi:plaintext]">{item.label}</bdi> : item.label}
+                    </span>
+                  )}
+                </Slottable>
                 {item.hint && (
-                  <span className="ml-auto font-sans text-12 font-normal leading-(--lh-snug) text-fg-3">
+                  <span className="ml-auto shrink-0 font-sans text-12 font-normal leading-(--lh-snug) text-fg-3">
                     {item.hint}
                   </span>
                 )}
-                {item.kbd && <Kbd className="ml-auto">{item.kbd}</Kbd>}
+                {item.kbd && <Kbd className="ml-auto shrink-0">{item.kbd}</Kbd>}
               </Primitive.Item>
             );
           })}

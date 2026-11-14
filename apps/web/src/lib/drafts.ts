@@ -154,6 +154,9 @@ export function unsavedWork(): UnsavedWork {
 export function isDraftSaving(key: string) {
   return saving.has(key);
 }
+export function isAnyDraftSaving() {
+  return saving.size > 0 || reviewSaves.size > 0;
+}
 export function isReviewDraftSaving(reviewId: string) {
   return (reviewSaves.get(reviewId) ?? 0) > 0;
 }

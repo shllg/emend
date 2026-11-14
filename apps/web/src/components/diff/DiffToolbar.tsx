@@ -1,6 +1,7 @@
 import { type FileView, OTHER_TOPIC, type TopicMeta } from "@emend/contract";
 import { ChevronDown, Columns2, FileCode, List } from "lucide-react";
 import { plural } from "../../lib/count.ts";
+import type { FileOrder } from "../../lib/layout-store.ts";
 import { Button } from "../ui/Button.tsx";
 import { Menu, type MenuItem } from "../ui/Menu.tsx";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
@@ -8,8 +9,12 @@ import type { DiffCounts, DiffStyle } from "./presentation.ts";
 
 export function DiffToolbar({
   groups,
+  files,
   ranks,
   counts,
+  order,
+  orderLocked,
+  onOrder,
   style,
   splitDisabled,
   onStyle,
@@ -20,8 +25,12 @@ export function DiffToolbar({
   onJump,
 }: {
   groups: { topic: TopicMeta; files: FileView[] }[];
+  files: FileView[];
   ranks: Map<string, number>;
   counts: Map<string, DiffCounts>;
+  order: FileOrder;
+  orderLocked: boolean;
+  onOrder: (order: FileOrder) => void;
   style: DiffStyle;
   splitDisabled: boolean;
   onStyle: (style: DiffStyle) => void;
@@ -32,23 +41,43 @@ export function DiffToolbar({
   onJump: (file: FileView) => void;
 }) {
   const topics = groups.filter(({ topic }) => topic.slug !== OTHER_TOPIC.slug).length;
-  const files = groups.reduce((count, group) => count + group.files.length, 0);
-  const label = `${topics} ${plural(topics, "topic")} · ${files} ${plural(files, "file")}`;
-  const items: MenuItem[] = groups.flatMap(({ topic, files }) => [
+  const label =
+    order === "topics"
+      ? `${topics} ${plural(topics, "topic")} · ${files.length} ${plural(files.length, "file")}`
+      : `${files.length} ${plural(files.length, "file")}`;
+  const fileItem = (file: FileView): MenuItem => ({
+    label: order === "path" ? file.path : (file.path.split("/").at(-1) ?? file.path),
+    truncateStart: order === "path",
+    title: file.path,
+    icon: FileCode,
+    hint: !file.flag && counts.has(file.id) ? `+${counts.get(file.id)?.additions}` : undefined,
+    onSelect: () => onJump(file),
+  });
+  const items: MenuItem[] = [
     {
-      heading:
-        topic.slug === OTHER_TOPIC.slug
-          ? OTHER_TOPIC.title
-          : `${String(ranks.get(topic.slug)).padStart(2, "0")} ${topic.title}`,
+      radioGroup: {
+        segmented: true,
+        label: "File order",
+        value: order,
+        onValueChange: (value) => onOrder(value === "path" ? "path" : "topics"),
+        items: [
+          { value: "topics", label: "Topics", disabled: orderLocked },
+          { value: "path", label: "A to Z", disabled: orderLocked },
+        ],
+      },
     },
-    ...files.map((file) => ({
-      label: file.path.split("/").at(-1) ?? file.path,
-      title: file.path,
-      icon: FileCode,
-      hint: !file.flag && counts.has(file.id) ? `+${counts.get(file.id)?.additions}` : undefined,
-      onSelect: () => onJump(file),
-    })),
-  ]);
+    ...(order === "path"
+      ? files.map(fileItem)
+      : groups.flatMap(({ topic, files }) => [
+          {
+            heading:
+              topic.slug === OTHER_TOPIC.slug
+                ? OTHER_TOPIC.title
+                : `${String(ranks.get(topic.slug)).padStart(2, "0")} ${topic.title}`,
+          },
+          ...files.map(fileItem),
+        ])),
+  ];
   return (
     <div data-diff-toolbar className="em-diff-toolbar">
       <Menu

@@ -2,21 +2,23 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { FileView, RevisionView, Target, ThreadView } from "@emend/contract";
 import type { GetHoveredLineResult } from "@pierre/diffs";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { useViewedMutation } from "../../api/mutations.ts";
+import { claimDraft } from "../../lib/composer-owner.ts";
 import type { NavigateDiff } from "../../lib/diff-navigation.ts";
-import { draftKey } from "../../lib/drafts.ts";
-import { layoutStore } from "../../lib/layout-store.ts";
+import { draftKey, isAnyDraftSaving, saveDraft } from "../../lib/drafts.ts";
+import { layoutKey, layoutStore } from "../../lib/layout-store.ts";
 import { viewedState } from "../../lib/viewed-state.ts";
 import { Panes } from "../layout/Panes.tsx";
 import { DiffPane, type DiffPaneProps } from "./DiffPane.tsx";
 import type { DiffPostRender, ParsedDiff } from "./FileDiff.tsx";
 import { parsePair } from "./parse.worker.ts";
 import type { DiffParser } from "./parse-client.ts";
-import { diffHoldQuietMs } from "./presentation.ts";
+import { diffHoldQuietMs, useFileOrder } from "./presentation.ts";
 
 type Selection = { side?: "additions" | "deletions"; endSide?: "additions" | "deletions"; start: number; end: number };
 type Annotation = { side: string; lineNumber: number; metadata: ReactNode };
@@ -234,6 +236,7 @@ afterEach(() => {
   window.getSelection()?.removeAllRanges();
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  layoutStore.update({ fileOrder: "topics" });
 });
 test.each([true, false])("topic totals precede parsing and survive folding (counted: %s)", async (counted) => {
   await mount(
@@ -652,6 +655,433 @@ test("single topic/file counts and parsed additions in the jump menu", async () 
   await within(document.getElementById(`diff-file-${value.id}`) as HTMLElement).findByText("+3");
   fireEvent.keyDown(jump, { key: "ArrowDown" });
   expect(await screen.findByRole("menuitem", { name: "added.ts +3" })).toBeTruthy();
+});
+
+test("A to Z flattens files and keeps topic folds when switching back", async () => {
+  const last = file("src/z.ts", { flag: "binary" });
+  const first = file("src/a/b.ts", { flag: "binary", order: 1 });
+  const other = file("src/m.ts", { flag: "binary", topic: null });
+  await mount(revision([last, first, other, file("doc.md", { role: "doc" })]));
+  const ids = () => [...document.querySelectorAll('[id^="diff-file-"]')].map((element) => element.id);
+  expect(ids()).toEqual([last, first, other].map((file) => `diff-file-${file.id}`));
+  const topic = screen.getByRole("region", { name: "Topic First" });
+  fireEvent.click(within(topic).getByRole("button", { name: "Collapse topic" }));
+  expect(screen.queryByRole("region", { name: `File ${first.path}` })).toBeNull();
+  act(() => layoutStore.update({ fileOrder: "path" }));
+  expect(screen.queryByRole("region", { name: /^Topic / })).toBeNull();
+  expect(document.querySelector("[data-topic]")).toBeNull();
+  expect(ids()).toEqual([first, other, last].map((file) => `diff-file-${file.id}`));
+  for (const source of [first, other, last]) {
+    const section = screen.getByRole("region", { name: `File ${source.path}` });
+    expect(section.closest("[hidden]")).toBeNull();
+    expect(within(section).getByText("Not shown: binary file")).toBeTruthy();
+  }
+  act(() => layoutStore.update({ fileOrder: "topics" }));
+  expect(screen.getByRole("region", { name: "Topic Other changes" })).toBeTruthy();
+  const restored = screen.getByRole("region", { name: "Topic First" });
+  expect(within(restored).getByRole("button", { name: "Expand topic" }).getAttribute("aria-expanded")).toBe("false");
+  expect(screen.queryByRole("region", { name: `File ${first.path}` })).toBeNull();
+  fireEvent.click(within(restored).getByRole("button", { name: "Expand topic" }));
+  expect(ids()).toEqual([last, first, other].map((file) => `diff-file-${file.id}`));
+});
+
+test("the jump menu switches order without closing and lists full paths in A to Z", async () => {
+  const last = file(`apps/web-x/${"synthetic-long-directory/".repeat(6)}a.ts`, { flag: "binary" });
+  expect(last.path.length).toBeGreaterThanOrEqual(120);
+  const second = file("apps/web/y.ts", { order: 1 });
+  const first = file("apps/web/x.ts", { flag: "binary", topic: null });
+  await mount(revision([last, second, first]));
+  near(second.path);
+  await within(document.getElementById(`diff-file-${second.id}`) as HTMLElement).findByText("+0");
+  fireEvent.keyDown(screen.getByRole("button", { name: "1 topic · 3 files" }), { key: "ArrowDown" });
+  const menu = await screen.findByRole("menu");
+  expect(menu.classList.contains("max-w-[min(36rem,var(--radix-dropdown-menu-content-available-width))]")).toBe(true);
+  const topicLabel = within(menu).getByText("a.ts");
+  expect(topicLabel.classList.contains("truncate")).toBe(true);
+  expect(topicLabel.classList.contains("[direction:rtl]")).toBe(false);
+  expect(topicLabel.querySelector("bdi")).toBeNull();
+  const order = within(menu).getByLabelText("File order");
+  const heading = within(menu).getByText("01 First");
+  expect(order.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(within(order).getByRole("menuitemradio", { name: "Topics" }).getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(within(order).getByRole("menuitemradio", { name: "A to Z" }));
+  expect(screen.getByRole("menu")).toBe(menu);
+  expect(within(order).getByRole("menuitemradio", { name: "A to Z" }).getAttribute("aria-checked")).toBe("true");
+  expect(layoutStore.getSnapshot().fileOrder).toBe("path");
+  expect(within(menu).queryByText("01 First")).toBeNull();
+  expect(within(menu).queryByText("Other changes")).toBeNull();
+  const items = within(menu).getAllByRole("menuitem");
+  expect(items.map((item) => item.title)).toEqual([first.path, second.path, last.path]);
+  expect(items.map((item) => item.textContent)).toEqual([first.path, `${second.path}+0`, last.path]);
+  for (const item of items) {
+    expect(item.querySelector("svg")).not.toBeNull();
+    const label = item.querySelector("bdi");
+    expect(label?.textContent).toBe(item.title);
+    expect(label?.classList.contains("[unicode-bidi:plaintext]")).toBe(true);
+    expect(label?.parentElement?.classList.contains("truncate")).toBe(true);
+    expect(label?.parentElement?.classList.contains("[direction:rtl]")).toBe(true);
+  }
+  fireEvent.keyDown(menu, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  expect(screen.getByRole("button", { name: "3 files" })).toBeTruthy();
+});
+
+test.each(["topics", "path"] as const)("file and line-thread jumps reveal files in %s order", async (order) => {
+  layoutStore.update({ fileOrder: order });
+  const source = file("src/source.ts", { viewed: "viewed", viewedOn: 2 });
+  const thread = placedThread(
+    { kind: "lines", path: source.path, side: "new", start: 1, end: 1, lines: ["one"], before: [], after: [] },
+    "Line discussion",
+  );
+  let navigate: NavigateDiff | null = null;
+  await mount(revision([file("z.ts", { flag: "binary" }), source], { threads: [thread] }), {
+    onNavigator: (value) => {
+      navigate = value;
+    },
+  });
+  const pane = screen.getByTestId("diff-pane");
+  const section = screen.getByRole("region", { name: `File ${source.path}` });
+  const header = document.getElementById(`diff-file-${source.id}`);
+  if (!header) throw new Error("Missing file header");
+  Object.defineProperties(pane, { scrollHeight: { value: 3000 }, clientHeight: { value: 600 } });
+  vi.spyOn(pane, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 900, 600));
+  vi.spyOn(section, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 900, 900, 1000));
+  vi.spyOn(header, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 900, 900, 40));
+  const scroll = vi.spyOn(pane, "scrollTo").mockImplementation(() => {});
+  expect(within(section).getByRole("button", { name: "Expand file" })).toBeTruthy();
+  act(() => expect(navigate?.({ elementId: header.id })).toBe(false));
+  act(() => expect(navigate?.({ elementId: header.id })).toBe(true));
+  expect(scroll).toHaveBeenLastCalledWith({ top: 892, behavior: "instant" });
+  expect(within(section).getByRole("button", { name: "Collapse file" })).toBeTruthy();
+  await screen.findByTestId("rendered-diff");
+  const card = document.getElementById(`diff-thread-${thread.id}`);
+  if (!card) throw new Error("Missing line thread");
+  vi.spyOn(card, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 1100, 900, 100));
+  expect(section.contains(card)).toBe(true);
+  await waitFor(() => expect(card.closest("[data-slot-pending]")).toBeNull());
+  fireEvent.click(within(section).getByRole("button", { name: "Collapse file" }));
+  act(() => expect(navigate?.({ elementId: card.id })).toBe(false));
+  await screen.findByTestId("rendered-diff");
+  act(() => expect(navigate?.({ elementId: card.id })).toBe(true));
+  expect(scroll).toHaveBeenLastCalledWith({ top: 1052, behavior: "instant" });
+  expect(within(section).getByRole("button", { name: "Collapse file" })).toBeTruthy();
+});
+
+test.each(["elementId", "target"] as const)("topic %s jumps to its first A to Z file and keeps folds", async (via) => {
+  const last = file("z.ts", { flag: "binary" });
+  const first = file("a.ts", { flag: "binary", order: 1, viewed: "viewed", viewedOn: 2 });
+  let navigate: NavigateDiff | null = null;
+  await mount(
+    revision([last, first, file("0.ts", { flag: "binary", topic: null })], {
+      topics: [
+        { slug: "first", title: "First", importance: 10, summary: "" },
+        { slug: "empty", title: "Empty", importance: 20, summary: "" },
+      ],
+    }),
+    {
+      onNavigator: (value) => {
+        navigate = value;
+      },
+    },
+  );
+  const topic = screen.getByRole("region", { name: "Topic First" });
+  fireEvent.click(within(topic).getByRole("button", { name: "Collapse topic" }));
+  act(() => layoutStore.update({ fileOrder: "path" }));
+  const pane = screen.getByTestId("diff-pane");
+  const section = screen.getByRole("region", { name: `File ${first.path}` });
+  Object.defineProperties(pane, { scrollHeight: { value: 3000 }, clientHeight: { value: 600 } });
+  vi.spyOn(pane, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 900, 600));
+  vi.spyOn(section, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 900, 900, 1000));
+  const scroll = vi.spyOn(pane, "scrollTo").mockImplementation(() => {});
+  const destination =
+    via === "elementId" ? { elementId: "diff-topic-first" } : { target: { kind: "topic" as const, slug: "first" } };
+  act(() => expect(navigate?.(destination)).toBe(false));
+  act(() => expect(navigate?.(destination)).toBe(true));
+  expect(scroll).toHaveBeenLastCalledWith({ top: 892, behavior: "instant" });
+  expect(within(section).getByRole("button", { name: "Collapse file" })).toBeTruthy();
+  act(() => expect(navigate?.({ elementId: "diff-topic-empty" })).toBe(false));
+  act(() => expect(navigate?.({ target: { kind: "topic", slug: "missing" } })).toBe(false));
+  act(() => layoutStore.update({ fileOrder: "topics" }));
+  const restored = screen.getByRole("region", { name: "Topic First" });
+  expect(within(restored).getByRole("button", { name: "Expand topic" })).toBeTruthy();
+});
+
+test("A to Z keeps placed topic threads in topic order between unplaced comments and files", async () => {
+  layoutStore.update({ fileOrder: "path" });
+  const first = placedThread({ kind: "topic", slug: "first" }, "First discussion");
+  const second = placedThread({ kind: "topic", slug: "second" }, "Second discussion");
+  const missing = placedThread({ kind: "topic", slug: "missing" }, "Missing topic");
+  let navigate: NavigateDiff | null = null;
+  await mount(
+    revision([file("source.ts", { flag: "binary" })], {
+      topics: [
+        { slug: "second", title: "Second", importance: 20, summary: "" },
+        { slug: "first", title: "First", importance: 10, summary: "" },
+      ],
+      threads: [second, missing, first],
+    }),
+    {
+      onNavigator: (value) => {
+        navigate = value;
+      },
+    },
+  );
+  const comments = screen.getByRole("region", { name: "Topic comments" });
+  expect(within(comments).getByRole("heading", { name: "Topic comments" })).toBeTruthy();
+  expect([...comments.querySelectorAll("[data-thread-card]")].map((card) => card.id)).toEqual([
+    `diff-thread-${first.id}`,
+    `diff-thread-${second.id}`,
+  ]);
+  expect(within(comments).getByText("First discussion")).toBeTruthy();
+  expect(within(comments).getByText("Second discussion")).toBeTruthy();
+  expect(within(comments).queryByText("Missing topic")).toBeNull();
+  const unplaced = screen.getByRole("region", { name: "Unplaced comments" });
+  expect(within(unplaced).getByText("Missing topic")).toBeTruthy();
+  expect(unplaced.compareDocumentPosition(comments) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const files = screen.getByRole("region", { name: "File source.ts" });
+  expect(comments.compareDocumentPosition(files) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const pane = screen.getByTestId("diff-pane");
+  const card = document.getElementById(`diff-thread-${second.id}`);
+  if (!card) throw new Error("Missing topic thread");
+  Object.defineProperties(pane, { scrollHeight: { value: 3000 }, clientHeight: { value: 600 } });
+  vi.spyOn(pane, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 900, 600));
+  vi.spyOn(card, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 700, 900, 100));
+  const scroll = vi.spyOn(pane, "scrollTo").mockImplementation(() => {});
+  act(() => expect(navigate?.({ elementId: card.id })).toBe(true));
+  expect(scroll).toHaveBeenLastCalledWith({ top: 692, behavior: "instant" });
+  expect(document.querySelector("[data-topic]")).toBeNull();
+});
+
+test.each(["save", "cancel"])("a topic composer moves to A to Z once and closes on %s", async (action) => {
+  await mount(revision([file("source.ts", { flag: "binary" })]));
+  fireEvent.click(screen.getByRole("button", { name: "Comment on topic" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Topic draft" } });
+  act(() => layoutStore.update({ fileOrder: "path" }));
+  const comments = screen.getByRole("region", { name: "Topic comments" });
+  expect(screen.getAllByRole("textbox", { name: "Comment" })).toHaveLength(1);
+  expect((within(comments).getByRole("textbox", { name: "Comment" }) as HTMLTextAreaElement).value).toBe("Topic draft");
+  fireEvent.click(within(comments).getByRole("button", { name: action === "save" ? "Save comment" : "Cancel" }));
+  if (action === "save") {
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/v1/reviews/${reviewId}/threads`,
+        expect.objectContaining({
+          body: JSON.stringify({ revision: 2, target: { kind: "topic", slug: "first" }, body: "Topic draft" }),
+        }),
+      ),
+    );
+  }
+  await waitFor(() => expect(screen.queryByRole("textbox", { name: "Comment" })).toBeNull());
+  expect(screen.queryByRole("region", { name: "Topic comments" })).toBeNull();
+});
+
+test.each([false, true])("a resumed A to Z topic draft focuses its composer (has files: %s)", async (hasFiles) => {
+  layoutStore.update({ fileOrder: "path" });
+  const target = { kind: "topic", slug: "first" } as const;
+  const key = draftKey(reviewId, target);
+  saveDraft(key, "Resumed topic draft");
+  claimDraft(key, "diff");
+  const first = file("a.ts", { flag: "binary", viewed: "viewed", viewedOn: 2 });
+  let navigate: NavigateDiff | null = null;
+  await mount(revision(hasFiles ? [file("z.ts", { flag: "binary" }), first] : []), {
+    resume: { key, target },
+    onNavigator: (value) => {
+      navigate = value;
+    },
+  });
+  const comments = screen.getByRole("region", { name: "Topic comments" });
+  const input = within(comments).getByRole("textbox", { name: "Comment" });
+  expect((input as HTMLTextAreaElement).value).toBe("Resumed topic draft");
+  await waitFor(() => expect(document.activeElement).toBe(input));
+  const editor = input.closest<HTMLElement>(".em-composer");
+  if (!editor) throw new Error("Missing topic composer");
+  act(() => expect(navigate?.({ target, element: editor })).toBe(true));
+  if (hasFiles) {
+    const section = screen.getByRole("region", { name: `File ${first.path}` });
+    expect(within(section).getByRole("button", { name: "Expand file" })).toBeTruthy();
+    expect(within(section).queryByRole("button", { name: "Collapse file" })).toBeNull();
+    expect(parser).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  }
+  expect(document.activeElement).toBe(input);
+});
+
+test.each(["file", "topic"])("file order stays locked until a %s comment save closes its composer", async (kind) => {
+  const save = Promise.withResolvers<Response>();
+  const fallback = fetchMock.getMockImplementation() as
+    | ((path: string, init?: RequestInit) => Promise<Response>)
+    | undefined;
+  fetchMock.mockImplementation((path: string, init?: RequestInit) =>
+    path.endsWith("/threads") ? save.promise : fallback?.(path, init),
+  );
+  const { result } = renderHook(() => useFileOrder());
+  const setOrder = result.current[1];
+  try {
+    await mount(revision([file("source.ts", { flag: "binary" })]));
+    fireEvent.click(screen.getByRole("button", { name: `Comment on ${kind}` }));
+    const input = screen.getByRole("textbox", { name: "Comment" });
+    fireEvent.change(input, { target: { value: "Pending comment" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
+    await waitFor(() => expect(isAnyDraftSaving()).toBe(true));
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v1/reviews/${reviewId}/threads`,
+      expect.objectContaining({ method: "POST" }),
+    );
+    fireEvent.keyDown(screen.getByRole("button", { name: "1 topic · 1 file" }), { key: "ArrowDown" });
+    const menu = await screen.findByRole("menu");
+    const order = within(menu).getByLabelText("File order");
+    for (const option of within(order).getAllByRole("menuitemradio"))
+      expect(option.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(within(order).getByRole("menuitemradio", { name: "A to Z" }));
+    act(() => setOrder("path"));
+    expect(layoutStore.getSnapshot().fileOrder).toBe("topics");
+    expect(input.isConnected).toBe(true);
+    await act(async () => save.resolve(Response.json({}, { status: 201 })));
+    await waitFor(() => expect(input.isConnected).toBe(false));
+    expect(document.querySelector(".em-composer")).toBeNull();
+    for (const option of within(order).getAllByRole("menuitemradio"))
+      expect(option.getAttribute("aria-disabled")).not.toBe("true");
+    fireEvent.click(within(order).getByRole("menuitemradio", { name: "A to Z" }));
+    expect(layoutStore.getSnapshot().fileOrder).toBe("path");
+  } finally {
+    await act(async () => save.resolve(Response.json({}, { status: 201 })));
+    await waitFor(() => expect(isAnyDraftSaving()).toBe(false));
+  }
+});
+
+test.each(["file", "topic"])("another tab's order waits until a %s comment save closes its composer", async (kind) => {
+  const save = Promise.withResolvers<Response>();
+  const fallback = fetchMock.getMockImplementation() as
+    | ((path: string, init?: RequestInit) => Promise<Response>)
+    | undefined;
+  fetchMock.mockImplementation((path: string, init?: RequestInit) =>
+    path.endsWith("/threads") ? save.promise : fallback?.(path, init),
+  );
+  try {
+    await mount(revision([file("source.ts", { flag: "binary" })]));
+    fireEvent.click(screen.getByRole("button", { name: `Comment on ${kind}` }));
+    const input = screen.getByRole("textbox", { name: "Comment" });
+    fireEvent.change(input, { target: { value: "Pending comment" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
+    await waitFor(() => expect(isAnyDraftSaving()).toBe(true));
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v1/reviews/${reviewId}/threads`,
+      expect.objectContaining({ method: "POST" }),
+    );
+    act(() => {
+      const newValue = JSON.stringify({ ...layoutStore.getSnapshot(), fileOrder: "path" });
+      localStorage.setItem(layoutKey, newValue);
+      window.dispatchEvent(new StorageEvent("storage", { key: layoutKey, newValue, storageArea: localStorage }));
+    });
+    expect(layoutStore.getSnapshot().fileOrder).toBe("path");
+    expect(screen.getByRole("region", { name: "Topic First" })).toBeTruthy();
+    expect(input.isConnected).toBe(true);
+    await act(async () => save.resolve(Response.json({}, { status: 201 })));
+    await waitFor(() => expect(input.isConnected).toBe(false));
+    expect(document.querySelector(".em-composer")).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("region", { name: /^Topic / })).toBeNull());
+    expect(document.querySelector("[data-topic]")).toBeNull();
+  } finally {
+    await act(async () => save.resolve(Response.json({}, { status: 201 })));
+    await waitFor(() => expect(isAnyDraftSaving()).toBe(false));
+  }
+});
+
+test("an unrelated pending mutation does not hold the diff's order", async () => {
+  const request = Promise.withResolvers<Response>();
+  const fallback = fetchMock.getMockImplementation() as
+    | ((path: string, init?: RequestInit) => Promise<Response>)
+    | undefined;
+  fetchMock.mockImplementation((path: string, init?: RequestInit) =>
+    path.endsWith("/viewed") ? request.promise : fallback?.(path, init),
+  );
+  const { result } = renderHook(() => useViewedMutation(reviewId), {
+    wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+  });
+  const view = revision([file("source.ts", { flag: "binary" })]);
+  try {
+    await mount(view, {
+      onViewed: (paths, viewed) => result.current.mutate({ revision: view.seq, paths, viewed }),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Mark source.ts as viewed" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/v1/reviews/${reviewId}/viewed`,
+        expect.objectContaining({ method: "PUT" }),
+      ),
+    );
+    expect(client.isMutating()).toBe(1);
+    expect(screen.getByRole("region", { name: "Topic First" })).toBeTruthy();
+    act(() => layoutStore.update({ fileOrder: "path" }));
+    expect(screen.queryByRole("region", { name: /^Topic / })).toBeNull();
+    expect(document.querySelector("[data-topic]")).toBeNull();
+    expect(screen.getByRole("region", { name: "File source.ts" })).toBeTruthy();
+    expect(client.isMutating()).toBe(1);
+  } finally {
+    await act(async () => request.resolve(Response.json({})));
+    await waitFor(() => expect(client.isMutating()).toBe(0));
+  }
+});
+
+test("a paused comment save does not hold the diff's order", async () => {
+  const save = Promise.withResolvers<Response>();
+  const fallback = fetchMock.getMockImplementation() as
+    | ((path: string, init?: RequestInit) => Promise<Response>)
+    | undefined;
+  fetchMock.mockImplementation((path: string, init?: RequestInit) =>
+    path.endsWith("/threads") ? save.promise : fallback?.(path, init),
+  );
+  try {
+    await mount(revision([file("source.ts", { flag: "binary" })]));
+    act(() => onlineManager.setOnline(false));
+    fireEvent.click(screen.getByRole("button", { name: "Comment on file" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Paused comment" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
+    await waitFor(() => expect(client.getMutationCache().find({ status: "pending" })?.state.isPaused).toBe(true));
+    expect(isAnyDraftSaving()).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      `/api/v1/reviews/${reviewId}/threads`,
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(screen.getByRole("region", { name: "Topic First" })).toBeTruthy();
+    act(() => layoutStore.update({ fileOrder: "path" }));
+    expect(screen.queryByRole("region", { name: /^Topic / })).toBeNull();
+    expect(document.querySelector("[data-topic]")).toBeNull();
+    expect(screen.getByRole("region", { name: "File source.ts" })).toBeTruthy();
+    expect(client.getMutationCache().find({ status: "pending" })?.state.isPaused).toBe(true);
+  } finally {
+    await act(async () => {
+      onlineManager.setOnline(true);
+      save.resolve(Response.json({}, { status: 201 }));
+    });
+    await waitFor(() => expect(client.isMutating()).toBe(0));
+    expect(isAnyDraftSaving()).toBe(false);
+  }
+});
+
+test("an A to Z topic draft without a section uses only the fallback composer", async () => {
+  layoutStore.update({ fileOrder: "path" });
+  const target = { kind: "topic", slug: "missing" } as const;
+  await mount(revision([file("source.ts", { flag: "binary" })]), {
+    resume: { key: draftKey(reviewId, target), target },
+  });
+  expect(screen.getAllByRole("textbox", { name: "Comment" })).toHaveLength(1);
+  expect(screen.queryByRole("region", { name: "Topic comments" })).toBeNull();
+});
+
+test("the phone renders saved A to Z order without topic sections or a toolbar", async () => {
+  stubWidth(320);
+  layoutStore.update({ fileOrder: "path" });
+  const last = file("z.ts", { flag: "binary" });
+  const first = file("a.ts", { flag: "binary", topic: null });
+  await mount(revision([last, first]));
+  expect([...document.querySelectorAll('[id^="diff-file-"]')].map((element) => element.id)).toEqual([
+    `diff-file-${first.id}`,
+    `diff-file-${last.id}`,
+  ]);
+  expect(screen.queryByRole("region", { name: /^Topic / })).toBeNull();
+  expect(document.querySelector("[data-topic], [data-phone], [data-diff-toolbar]")).toBeNull();
+  expect(screen.getAllByRole("region", { name: /^File / })).toHaveLength(2);
 });
 
 test("Split and Unified change renderer options and survive remount; phone keeps its unified layout", async () => {

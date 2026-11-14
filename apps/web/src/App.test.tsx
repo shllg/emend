@@ -3432,47 +3432,59 @@ test("phone menus omit reading width", async () => {
   expect(menu.queryByRole("menuitemradio", { name: "Comfortable 1024px" })).toBeNull();
 });
 
-test.each([1280, 800, 390])("Files tab count excludes stale marks and row opens the diff at %s px", async (size) => {
-  width = size;
-  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
-  openingRevision({
-    files: [
-      { ...diffFile, viewed: "stale", viewedOn: 1 },
-      {
-        ...diffFile,
-        id: "44444444-4444-4444-8444-444444444444",
-        path: "viewed.txt",
-        order: 1,
-        viewed: "viewed",
-        viewedOn: 1,
-      },
-    ],
-    writeupEmpty: false,
-    topics: [{ slug: "topic", title: "Topic", summary: "", importance: 1 }],
-  });
-  const scroll = vi.spyOn(HTMLElement.prototype, "scrollTo");
-  const { history } = mount(`/r/${id}?tab=files`);
-  const filesTab = await screen.findByRole(size < 768 ? "link" : "tab", { name: "Files 1/2" });
-  expect(filesTab.getAttribute(size < 768 ? "aria-current" : "aria-selected")).toBe(size < 768 ? "page" : "true");
-  const reading = within(screen.getByTestId("reading-pane"));
-  expect(reading.getByText("1 of 2 viewed")).toBeTruthy();
-  expect(reading.getByText("changed")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Contents" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
-  scroll.mockClear();
-  fireEvent.click(reading.getByRole("button", { name: "Open diff for new.txt, modified" }));
-  await waitFor(() => expect(history.location.hash).toContain(`diff-file-${diffFile.id}`));
-  if (size < 1280) await waitFor(() => expect(history.location.search).toContain("tab=diff"));
-  else expect(history.location.search).toContain("tab=files");
-  await waitFor(() =>
-    expect(
-      scroll.mock.instances.some(
-        (element) => element instanceof HTMLElement && element.hasAttribute("data-diff-scroll"),
-      ),
-    ).toBe(true),
-  );
-  expect(screen.getByTestId("diff-pane").hidden).toBe(false);
-});
+test.each([1280, 800, 390].flatMap((size) => (["topics", "path"] as const).map((fileOrder) => ({ size, fileOrder }))))(
+  "Files tab count excludes stale marks and row opens the diff at $size px in $fileOrder order",
+  async ({ size, fileOrder }) => {
+    onTestFinished(() => layoutStore.update({ fileOrder: "topics" }));
+    width = size;
+    layoutStore.update({ pane: { desktop: "split", tablet: "tabs" }, fileOrder });
+    const viewed = {
+      ...diffFile,
+      id: "44444444-4444-4444-8444-444444444444",
+      path: "viewed.txt",
+      order: 1,
+      viewed: "viewed" as const,
+      viewedOn: 1,
+    };
+    openingRevision({
+      files: [{ ...diffFile, viewed: "stale", viewedOn: 1 }, viewed],
+      writeupEmpty: false,
+      topics: [{ slug: "topic", title: "Topic", summary: "", importance: 1 }],
+    });
+    const scroll = vi.spyOn(HTMLElement.prototype, "scrollTo");
+    const { history } = mount(`/r/${id}?tab=files`);
+    const filesTab = await screen.findByRole(size < 768 ? "link" : "tab", { name: "Files 1/2" });
+    expect(filesTab.getAttribute(size < 768 ? "aria-current" : "aria-selected")).toBe(size < 768 ? "page" : "true");
+    const reading = within(screen.getByTestId("reading-pane"));
+    expect(reading.getByText("1 of 2 viewed")).toBeTruthy();
+    expect(reading.getByText("changed")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Contents" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
+    for (const file of fileOrder === "path" ? [diffFile, viewed] : [diffFile]) {
+      if (file === viewed && size < 1280) {
+        fireEvent.click(screen.getByRole(size < 768 ? "link" : "tab", { name: "Files 1/2" }));
+        await waitFor(() => expect(history.location.search).toContain("tab=files"));
+      }
+      const row = await screen.findByRole("button", { name: `Open diff for ${file.path}, modified` });
+      scroll.mockClear();
+      fireEvent.click(row);
+      await waitFor(() => expect(history.location.hash).toBe(`#diff-file-${file.id}`));
+      if (size < 1280) await waitFor(() => expect(history.location.search).toContain("tab=diff"));
+      else expect(history.location.search).toContain("tab=files");
+      await waitFor(() =>
+        expect(
+          scroll.mock.instances.some(
+            (element) => element instanceof HTMLElement && element.hasAttribute("data-diff-scroll"),
+          ),
+        ).toBe(true),
+      );
+      expect(screen.getByTestId("diff-pane").hidden).toBe(false);
+      const section = screen.getByRole("region", { name: `File ${file.path}` });
+      expect(section.querySelector(`[id="diff-file-${file.id}"]`)).not.toBeNull();
+      expect(within(section).getByRole("button", { name: "Collapse file" })).toBeTruthy();
+    }
+  },
+);
 
 test.each([1280, 800, 390])(
   "Files tab is absent and tab=files falls back without diff files at %s px",

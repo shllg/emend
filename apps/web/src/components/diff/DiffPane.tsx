@@ -1,8 +1,10 @@
 import { type FileView, OTHER_TOPIC, type RevisionView, type Target } from "@emend/contract";
-import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
+import { useIsMutating } from "@tanstack/react-query";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { runningCommentSaves } from "../../api/mutations.ts";
 import { claimDraft } from "../../lib/composer-owner.ts";
 import { useDiffCounts } from "../../lib/diff-counts.ts";
-import { diffGroups } from "../../lib/diff-groups.ts";
+import { diffFiles, diffGroups } from "../../lib/diff-groups.ts";
 import { DiffNavigation, type NavigateDiff } from "../../lib/diff-navigation.ts";
 import { draftKey, type SavedDraft } from "../../lib/drafts.ts";
 import { useLayout } from "../../lib/layout.ts";
@@ -16,8 +18,16 @@ import type { ReviewSearch } from "../../router.tsx";
 import { Composer } from "../threads/Composer.tsx";
 import { ThreadCard } from "../threads/ThreadCard.tsx";
 import { DiffToolbar } from "./DiffToolbar.tsx";
+import { FileDiff } from "./FileDiff.tsx";
 import type { DiffParser } from "./parse-client.ts";
-import { type DiffCounts, holdDiffTarget, useDiffStyle, useDiffWrap, useNarrowDiffPane } from "./presentation.ts";
+import {
+  type DiffCounts,
+  holdDiffTarget,
+  useDiffStyle,
+  useDiffWrap,
+  useFileOrder,
+  useNarrowDiffPane,
+} from "./presentation.ts";
 import { TopicSection } from "./TopicSection.tsx";
 import { type FileLocation, isDiffTarget, resolveFile } from "./targets.ts";
 
@@ -52,6 +62,12 @@ export function DiffPane({
   const layout = useLayout();
   const [style, setStyle] = useDiffStyle();
   const [wrap, setWrap] = useDiffWrap();
+  const [order, setOrder, saving] = useFileOrder();
+  const mutating = useIsMutating(runningCommentSaves) > 0;
+  const [shownOrder, setShownOrder] = useState(order);
+  // Per-call mutate callbacks run synchronously in the success/error dispatch; useIsMutating hears
+  // through TanStack's scheduler later, so apply a held order only after the comment save's callbacks ran.
+  if (!mutating && shownOrder !== order) setShownOrder(order);
   const { notes } = useLayoutPreferences();
   const [collapsedTopics, setCollapsedTopics] = useTopicFolds(reviewId, revision.seq);
   const [collapsedFiles, setCollapsedFiles] = useViewedCollapse(reviewId, revision);
@@ -84,9 +100,9 @@ export function DiffPane({
   };
   // biome-ignore lint/correctness/useExhaustiveDependencies: Expansion commits must wake the route's pending scroll retry.
   useEffect(() => {
-    // The route's scroll retry relies on topic sections rendering in the same commit as this pane.
+    // The route's scroll retry relies on diff sections rendering in the same commit as this pane.
     onRendered?.();
-  }, [onRendered, collapsedTopics, collapsedFiles, revealedFile, notes]);
+  }, [onRendered, collapsedTopics, collapsedFiles, revealedFile, notes, shownOrder]);
   const [active, setActive] = useState<Target | null>(null);
   const onActive = (target: Target | null) => {
     if (target) {
@@ -97,7 +113,10 @@ export function DiffPane({
     setActive(target);
   };
   const groups = diffGroups(revision);
-  const orderedFiles = [...groups.values()].flatMap((group) => group.files);
+  const orderedFiles = useMemo(
+    () => diffFiles({ files: revision.files, topics: revision.topics }, shownOrder),
+    [revision.files, revision.topics, shownOrder],
+  );
   const lastReachedFile = useRef<string | null>(null);
   useEffect(() => {
     const scroll = root.current?.closest<HTMLElement>("[data-diff-scroll]");
@@ -175,9 +194,10 @@ export function DiffPane({
     [...groups.values()].find((group) => group.files.some((item) => item.id === file.id))?.topic.slug;
   const expand = (topic?: string, file?: string) => {
     const changed =
-      (!!topic && collapsedTopics.has(topic)) || (!!file && (collapsedFiles.has(file) || revealedFile !== file));
+      (shownOrder === "topics" && !!topic && collapsedTopics.has(topic)) ||
+      (!!file && (collapsedFiles.has(file) || revealedFile !== file));
     if (file && revealedFile !== file) setRevealedFile(file);
-    if (topic && collapsedTopics.has(topic))
+    if (shownOrder === "topics" && topic && collapsedTopics.has(topic))
       setCollapsedTopics((previous) => {
         const next = new Set(previous);
         next.delete(topic);
@@ -216,7 +236,7 @@ export function DiffPane({
         (commentId && thread.comments.some((comment) => comment.id === commentId)),
     );
     const location = thread ? (thread.placement.status === "placed" ? thread.placement.location : undefined) : target;
-    const file =
+    let file =
       noteFile ??
       (location ? fileForTarget(location) : revision.files.find((file) => `diff-file-${file.id}` === elementId));
     const topic =
@@ -227,6 +247,17 @@ export function DiffPane({
           : elementId?.startsWith("diff-topic-")
             ? elementId.slice(11)
             : undefined;
+    if (
+      shownOrder === "path" &&
+      topic &&
+      !thread &&
+      !(element && root.current?.contains(element)) &&
+      (location?.kind === "topic" || elementId?.startsWith("diff-topic-"))
+    ) {
+      file = orderedFiles.find((file) => topicForFile(file) === topic);
+      if (!file) return false;
+      elementId = `diff-file-${file.id}`;
+    }
     if (expand(topic, file?.id)) return false;
     const id =
       elementId ??
@@ -280,6 +311,17 @@ export function DiffPane({
     (thread) =>
       isDiffTarget(thread.target) && (thread.placement.status === "unplaced" || !hasSection(thread.placement.location)),
   );
+  const topicThreads =
+    shownOrder === "path"
+      ? [...groups.keys()].flatMap((slug) =>
+          revision.threads.filter(
+            (thread) =>
+              thread.placement.status === "placed" &&
+              thread.placement.location.kind === "topic" &&
+              thread.placement.location.slug === slug,
+          ),
+        )
+      : [];
   return (
     <DiffNavigation value={navigateDiff}>
       <div ref={root} className="em-diff-pane" data-toolbar={layout !== "phone" || undefined}>
@@ -287,8 +329,12 @@ export function DiffPane({
         {layout !== "phone" && (
           <DiffToolbar
             groups={[...groups.values()]}
+            files={orderedFiles}
             ranks={ranks}
             counts={counts}
+            order={shownOrder}
+            orderLocked={saving}
+            onOrder={setOrder}
             style={diffStyle}
             splitDisabled={narrow !== false}
             onStyle={setStyle}
@@ -305,6 +351,25 @@ export function DiffPane({
           <section aria-label="Unplaced comments" className="mb-5 space-y-3">
             <h3 className="font-semibold">Unplaced comments</h3>
             {unplaced.map((thread) => (
+              <ThreadCard key={thread.id} surface="diff" {...context} thread={thread} />
+            ))}
+          </section>
+        )}
+        {shownOrder === "path" && (topicThreads.length > 0 || (active?.kind === "topic" && hasSection(active))) && (
+          <section aria-label="Topic comments" data-diff-section className="mb-5 space-y-3 px-3">
+            <h3 className="font-semibold">Topic comments</h3>
+            {active?.kind === "topic" && hasSection(active) && (
+              <Composer
+                surface="diff"
+                reviewId={reviewId}
+                revision={revision.seq}
+                target={active}
+                topics={revision.topics}
+                onSaved={() => onActive(null)}
+                onCancel={() => onActive(null)}
+              />
+            )}
+            {topicThreads.map((thread) => (
               <ThreadCard key={thread.id} surface="diff" {...context} thread={thread} />
             ))}
           </section>
@@ -326,24 +391,32 @@ export function DiffPane({
           <p className="mb-4 text-sm text-neutral-500">No changed files.</p>
         )}
         {(layout === "phone" || narrow !== undefined) &&
-          [...groups.values()].map(({ topic, files }) => (
-            <TopicSection
-              key={topic.slug}
-              {...context}
-              topic={topic}
-              files={files}
-              rank={ranks.get(topic.slug)}
-              current={layout !== "phone" && writeupVisible && currentTopic === topic.slug}
-              writeupLink={
-                (!revision.writeupEmpty || revision.main === "writeup") &&
-                topic.slug !== OTHER_TOPIC.slug &&
-                (layout === "phone" || !writeupVisible)
-                  ? `/r/${encodeURIComponent(reviewId)}?tab=writeup${search.rev === undefined ? "" : `&rev=${search.rev}`}#topic-${topic.slug}`
-                  : undefined
-              }
-              collapsed={collapsedTopics.has(topic.slug)}
-              onToggle={() => setCollapsedTopics((previous) => toggle(previous, topic.slug))}
-            />
+          (shownOrder === "path" ? (
+            <div className="px-3 pb-3">
+              {orderedFiles.map((file) => (
+                <FileDiff key={file.id} file={file} topicCollapsed={false} {...context} />
+              ))}
+            </div>
+          ) : (
+            [...groups.values()].map(({ topic, files }) => (
+              <TopicSection
+                key={topic.slug}
+                {...context}
+                topic={topic}
+                files={files}
+                rank={ranks.get(topic.slug)}
+                current={layout !== "phone" && writeupVisible && currentTopic === topic.slug}
+                writeupLink={
+                  (!revision.writeupEmpty || revision.main === "writeup") &&
+                  topic.slug !== OTHER_TOPIC.slug &&
+                  (layout === "phone" || !writeupVisible)
+                    ? `/r/${encodeURIComponent(reviewId)}?tab=writeup${search.rev === undefined ? "" : `&rev=${search.rev}`}#topic-${topic.slug}`
+                    : undefined
+                }
+                collapsed={collapsedTopics.has(topic.slug)}
+                onToggle={() => setCollapsedTopics((previous) => toggle(previous, topic.slug))}
+              />
+            ))
           ))}
       </div>
     </DiffNavigation>

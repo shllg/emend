@@ -1,4 +1,7 @@
 import { type FileView, OTHER_TOPIC, type RevisionView, type TopicMeta } from "@emend/contract";
+import type { FileOrder } from "./layout-store.ts";
+
+const pathCollator = new Intl.Collator("en", { numeric: true });
 
 /** Shared order for the diff and its Files table of contents. */
 export function diffGroups(revision: Pick<RevisionView, "topics" | "files">) {
@@ -13,4 +16,23 @@ export function diffGroups(revision: Pick<RevisionView, "topics" | "files">) {
   if (other.files.length || revision.topics.some((topic) => topic.slug === OTHER_TOPIC.slug))
     groups.set(OTHER_TOPIC.slug, other);
   return groups;
+}
+
+export function pathOrder(files: FileView[]): FileView[] {
+  return files
+    .map((file) => ({ file, segments: file.path.split("/") }))
+    .sort(({ file: a, segments: left }, { file: b, segments: right }) => {
+      for (let index = 0; index < Math.min(left.length, right.length); index++) {
+        const compared = pathCollator.compare(left[index] ?? "", right[index] ?? "");
+        if (compared) return compared;
+      }
+      return left.length - right.length || (a.path < b.path ? -1 : a.path > b.path ? 1 : a.order - b.order);
+    })
+    .map(({ file }) => file);
+}
+
+export function diffFiles(revision: Pick<RevisionView, "topics" | "files">, order: FileOrder): FileView[] {
+  return order === "path"
+    ? pathOrder(revision.files.filter((file) => file.role === "diff"))
+    : [...diffGroups(revision).values()].flatMap((group) => group.files);
 }

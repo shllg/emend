@@ -14,6 +14,7 @@ export const layoutSchema = z.object({
   compact: z.boolean().catch(false),
   hideResolved: z.boolean().catch(false),
   diffStyle: z.enum(["split", "unified"]).catch("split"),
+  fileOrder: z.enum(["topics", "path"]).catch("topics"),
   wrap: z.boolean().catch(false),
   notes: z.boolean().catch(true),
   // Diff topic headers: true shows the summary and blast radius. One choice per device class.
@@ -26,6 +27,7 @@ export const layoutSchema = z.object({
   codeSize: z.union([z.literal(11), z.literal(12), z.literal(13), z.literal(14)]).catch(12),
 });
 export type LayoutPreferences = z.infer<typeof layoutSchema>;
+export type FileOrder = LayoutPreferences["fileOrder"];
 export type ReadingWidth = LayoutPreferences["readingWidth"];
 export const readingMeasure = { comfortable: "1024px", wide: "1248px", narrow: "68ch" } as const;
 type LayoutPatch = Partial<Omit<LayoutPreferences, "proseSize" | "codeSize">> & {

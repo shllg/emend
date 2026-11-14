@@ -9,7 +9,7 @@ import {
   type SnoozeRequest,
   type ViewedRequest,
 } from "@emend/contract";
-import { type QueryClient, useMutation, useQueryClient } from "@tanstack/react-query";
+import { type MutationFilters, type QueryClient, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useSyncExternalStore } from "react";
 import {
   beginDraftSave,
@@ -182,6 +182,22 @@ function applyAccepted(client: QueryClient, reviewId: string, { kind, revision }
     );
   }
 }
+
+function hasDraft(variables: unknown) {
+  return (
+    typeof variables === "object" &&
+    variables !== null &&
+    "draft" in variables &&
+    typeof variables.draft === "object" &&
+    variables.draft !== null
+  );
+}
+
+// Paused saves are excluded so offline waits never stall the order; their remount loss
+// belongs to the Composer, not here.
+export const runningCommentSaves: MutationFilters = {
+  predicate: (mutation) => !mutation.state.isPaused && hasDraft(mutation.state.variables),
+};
 
 export function useReviewMutation(reviewId: string, key?: string) {
   const client = useQueryClient();
