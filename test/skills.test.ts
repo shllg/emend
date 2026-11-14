@@ -467,6 +467,9 @@ test("review guidance lists the opening fields in display order", () => {
   expect(writing).toContain("Write the opening fields below. The app shows them in this order, with these weights.");
   expect([...writing.matchAll(/^- `([^`]+)`:/gm)].map((match) => match[1])).toEqual([
     "tldr",
+    "review",
+    "checked",
+    "notChecked",
     "overview",
     "outOfScope",
     "whereToLook",

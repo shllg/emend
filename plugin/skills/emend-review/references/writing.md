@@ -90,7 +90,8 @@ A data migration always states, in its topic:
 
 ### Worked examples
 
-These cases are synthetic. Each shows the topics, the verdict and its evidence.
+These cases are synthetic. Three cases per level: the first shows the topics, the verdict and
+its evidence; the other two are short.
 
 **Low: skim, then merge.** A change renames `fetchUser` to `loadUser` in eight files.
 
@@ -99,6 +100,11 @@ These cases are synthetic. Each shows the topics, the verdict and its evidence.
 - `checked`: the full test suite and the type check pass.
 - `notChecked`: no manual run of the app.
 
+Two more Low cases:
+
+- A typo fix in three error messages. The undo is a revert.
+- A cache key gains a version prefix, so old entries expire. The undo: revert, then clear the cache.
+
 **Medium: read topics.** A change caps request retries at three and rewords a settings label.
 
 - Topic "Retry budget": Medium, because every request passes the loop. The undo is a revert.
@@ -106,6 +112,12 @@ These cases are synthetic. Each shows the topics, the verdict and its evidence.
 - `review`: `{ "level": "topics", "topics": ["retry-budget"], "reason": "Every request passes the new retry loop." }`
 - `checked`: unit tests for one, two and three failed attempts.
 - `notChecked`: a real network that drops requests.
+
+Two more Medium cases, each read as its own topic:
+
+- The inbox shows 50 rows per page instead of 20. Every user sees it. The undo is a revert.
+- A search field is renamed, and every search reads it. The undo: revert, then rerun the index
+  build.
 
 **High: read everything.** A data migration moves invoice amounts from decimals to whole cents.
 
@@ -117,6 +129,11 @@ These cases are synthetic. Each shows the topics, the verdict and its evidence.
 - `review`: `{ "level": "everything", "reason": "A data migration rewrites every stored invoice amount." }`
 - `checked`: the dry run on the copy and the full test suite.
 - `notChecked`: the migration's run time on the live table under load.
+
+Two more High cases, each read everything:
+
+- Login skips the second factor on a remembered device. A mistake is a security hole.
+- The billing job moves from the end to the start of the month. A mistake charges customers twice.
 
 ## Glossary
 
