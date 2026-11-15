@@ -46,7 +46,7 @@ risk words, the budget of one High topic, and the migration rule.
   changes order. A `skim` topic starts folded.
 - `blastRadius` is optional: `scope` is the one-word sensitivity tag, `note` says how a break
   would show.
-- A topic that a revert does not undo ends its `why` with an **Undo:** line. Leave out `door`.
+- A topic that a revert does not undo ends its `why` with an **Undo:** paragraph. Leave out `door`.
 
 `importance` alone determines order.
 
@@ -145,18 +145,23 @@ If no related docs are found, write "No design doc is cited." in the writeup's `
 Read [the writing reference](references/writing.md) before you write the writeup. It holds the
 writing rules: sentences, the TL;DR, Why and Example, the glossary and screenshots.
 
-Author Markdown in `writeup`.
+Author Markdown in `writeup`, except the plain-text `area`.
 
-Write the opening fields below. The app shows them in this order, with these weights.
+Write the opening fields below. The app groups them for the reviewer.
 
 - `tldr`: the TL;DR, as the writing reference says.
+- `whyItMatters`: what the change gives the product, or what it prepares for, in one or two sentences.
+  It shows inside the TL;DR card.
+- `area`: one to three words naming the part of the project, such as `cli › serve`.
+  Use plain text, at most 60 characters. The breadcrumb shows it after the project.
+  Leave it out and the app shows the deepest folder the changed files share.
 - `review`: your verdict, as the writing reference says under "Review verdict and risk".
   `level` is `skim`, `topics` or `everything`. Only `topics` takes `topics`, the slugs to read.
-  `reason` is one short sentence. It shows right under the TL;DR.
+  `reason` is one short sentence. It shows in Facts, right under the TL;DR card.
 - `checked`: what you actually ran or verified, as a short list. Never empty.
 - `notChecked`: what you did not run or verify, as a short list. Never empty.
 - `overview`: two bullets, **Goal** (the problem) and **Change** (what the reviewer sees now), in plain language.
-  They carry the most weight.
+  They show side by side.
 - `outOfScope`: what the change leaves out on purpose, as a short list.
   It shows quieter, right under the overview.
 - `whereToLook`: two bullets, **Biggest risk** and **Check first**.
@@ -175,6 +180,9 @@ Write the opening fields below. The app shows them in this order, with these wei
 - `glossary`: the glossary, as the writing reference says.
 - `topics[slug]`: `why` and `example` as the writing reference says; `body` gives the decisions,
   trade-offs and checks. A request to explain something in the writeup belongs here.
+
+The app adds Risk, Undo, Read and Since to Facts from the topics, diff and earlier revisions.
+Write nothing for them.
 
 ## Pin a few agent notes
 

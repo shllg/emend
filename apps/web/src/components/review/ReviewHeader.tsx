@@ -12,6 +12,8 @@ import {
 import { type Ref, useEffect, useState } from "react";
 import { plural } from "../../lib/count.ts";
 import { reviewLineTotals } from "../../lib/diff-totals.ts";
+import { sharedDiffFolder } from "../../lib/writeup-area.ts";
+import { usesOpeningCard } from "../../lib/writeup-facts.ts";
 import { LineTotals } from "../diff/LineTotals.tsx";
 import type { DiffCounts } from "../diff/presentation.ts";
 import { AgentStatus, agentStatusOf } from "../status/AgentStatus.tsx";
@@ -40,6 +42,23 @@ function safeLinks(links: PublishLink[] | undefined) {
       return [];
     }
   });
+}
+
+function LinkChip({ link }: { link: ReturnType<typeof safeLinks>[number] }) {
+  return (
+    <a
+      href={link.href}
+      title={link.href}
+      target="_blank"
+      rel="noopener noreferrer nofollow"
+      className="inline-flex max-w-full items-center gap-1 rounded-sm border border-line-1 px-1.5 py-[3px] text-fg-2 no-underline hover:bg-hover hover:text-fg-1"
+    >
+      <Icon icon={linkIcon[link.kind ?? "other"]} size={12} />
+      <span className="min-w-0 shrink-[0.2] truncate">{link.label}</span>
+      {/* An agent writes the label, so the real host stays visible; the host gives way first. */}
+      <span className="min-w-0 shrink-[3] truncate text-11 text-fg-3">{link.host}</span>
+    </a>
+  );
 }
 
 export function ReviewHeader({
@@ -77,7 +96,12 @@ export function ReviewHeader({
     [revision.base?.slice(0, 7), revision.head === "worktree" ? "working tree" : revision.head?.slice(0, 7)]
       .filter(Boolean)
       .join(" → ");
-  const links = safeLinks(revision?.links);
+  const safe = safeLinks(revision?.links);
+  const openingCard = revision !== undefined && usesOpeningCard(revision.writeup);
+  const links = openingCard ? safe.filter((link) => link.kind !== "pr" && link.kind !== "issue") : safe;
+  const related = openingCard ? safe.filter((link) => link.kind === "pr" || link.kind === "issue") : [];
+  const area = openingCard ? (revision.writeup.area ?? sharedDiffFolder(revision.files)) : undefined;
+  const breadcrumb = [review.project, area].filter((item): item is string => item != null);
   const total = revision ? reviewLineTotals(revision, counts) : null;
   const metaItem = "inline-flex min-w-0 items-center gap-[5px] wrap-anywhere";
   return (
@@ -87,6 +111,28 @@ export function ReviewHeader({
         phone ? "px-4 py-3" : "px-5 pt-3 pb-2.5",
       )}
     >
+      {openingCard && (breadcrumb.length > 0 || related.length > 0) && (
+        <nav aria-label="Breadcrumb" className="text-fg-3 [font:var(--type-meta)]">
+          <ol className="m-0 flex min-w-0 list-none flex-wrap items-center gap-1.5 p-0">
+            {breadcrumb.map((item, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: project and area have fixed positions and can share text.
+              <li key={index} className="flex min-w-0 items-center gap-1.5">
+                {index > 0 && <span aria-hidden="true">›</span>}
+                <span dir="auto" className="min-w-0 overflow-hidden wrap-anywhere">
+                  {item}
+                </span>
+              </li>
+            ))}
+            {related.map((link, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: two links may share a URL; the list never reorders.
+              <li key={`${index}:${link.url}`} className="flex min-w-0 max-w-full items-center gap-1.5">
+                {(breadcrumb.length > 0 || index > 0) && <span aria-hidden="true">›</span>}
+                <LinkChip link={link} />
+              </li>
+            ))}
+          </ol>
+        </nav>
+      )}
       <div className={phone ? "flex items-center gap-3" : "flex flex-wrap items-start gap-3"}>
         {phone ? (
           <CopyTextMenu
@@ -152,7 +198,7 @@ export function ReviewHeader({
           <OriginBadge origin={review.origin} dot className="size-[7px] opacity-85" />
           {review.origin.name}
         </span>
-        {review.project !== null && (
+        {!openingCard && review.project !== null && (
           <>
             <span aria-hidden="true" className="text-line-strong">
               ·
@@ -219,18 +265,7 @@ export function ReviewHeader({
           {links.map((link, index) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: two links may share a URL; the list never reorders.
             <li key={`${index}:${link.url}`} className="min-w-0 max-w-full">
-              <a
-                href={link.href}
-                title={link.href}
-                target="_blank"
-                rel="noopener noreferrer nofollow"
-                className="inline-flex max-w-full items-center gap-1 rounded-sm border border-line-1 px-1.5 py-[3px] text-fg-2 no-underline hover:bg-hover hover:text-fg-1"
-              >
-                <Icon icon={linkIcon[link.kind ?? "other"]} size={12} />
-                <span className="min-w-0 shrink-[0.2] truncate">{link.label}</span>
-                {/* An agent writes the label, so the real host stays visible; the host gives way first. */}
-                <span className="min-w-0 shrink-[3] truncate text-11 text-fg-3">{link.host}</span>
-              </a>
+              <LinkChip link={link} />
             </li>
           ))}
         </ul>

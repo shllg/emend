@@ -21,6 +21,7 @@ export function resolveFile(files: FileView[], target: FileLocation) {
 export const WRITEUP_SECTION_NAMES = {
   overview: "Overview",
   tldr: "TL;DR",
+  whyItMatters: "Why it matters",
   review: "Review",
   checked: "Checked",
   notChecked: "Not checked",

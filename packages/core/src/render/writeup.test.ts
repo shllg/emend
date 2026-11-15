@@ -228,7 +228,7 @@ test.each(["outOfScope", "whereToLook", "context"] as const)(
   },
 );
 
-test.each(["review", "checked", "notChecked", "outOfScope", "whereToLook", "context"] as const)(
+test.each(["whyItMatters", "review", "checked", "notChecked", "outOfScope", "whereToLook", "context"] as const)(
   "sanitizes hostile Markdown in %s",
   async (field) => {
     const source = "graph TD; A-->B; click A callback";
@@ -544,4 +544,36 @@ test("definition truncation keeps astral characters well-formed at the cut", asy
   expect(definition.isWellFormed()).toBe(true);
   expect(definition.length).toBeLessThanOrEqual(2000);
   expect(definition).toBe(`${"x".repeat(1998)}…`);
+});
+
+test("whyItMatters follows the TL;DR without changing the other sections or block ids", async () => {
+  const input: WriteupInput = {
+    ...writeup,
+    review: { level: "skim", reason: "Small change." },
+    checked: "Unit tests.",
+    notChecked: "Browser.",
+    outOfScope: "Delays.",
+    whereToLook: "Search.",
+    context: "Library.",
+  };
+  const before = await renderWriteup(input, topics);
+  const rendered = await renderWriteup(
+    { ...input, whyItMatters: "The library stays responsive.", area: "  library  ›  search  " },
+    topics,
+  );
+  expect(rendered.area).toBe("library › search");
+  expect(rendered.sections[1]).toMatchObject({
+    key: "whyItMatters",
+    label: "Why it matters",
+    topic: null,
+    blocks: [expect.objectContaining({ text: "The library stays responsive." })],
+  });
+  expect(rendered.sections.filter((section) => section.key !== "whyItMatters")).toEqual(before.sections);
+});
+
+test("area alone selects the non-legacy branch even with no Markdown", async () => {
+  const rendered = await renderWriteup({ overview: "", tldr: "", decisions: "", topics: {}, area: "Library" }, []);
+  expect(rendered.area).toBe("Library");
+  expect(rendered.sections.map((section) => section.key)).toEqual(["tldr", "overview", "decisions"]);
+  expect(rendered.sections.every((section) => section.blocks.length === 0)).toBe(true);
 });

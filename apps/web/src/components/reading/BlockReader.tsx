@@ -40,13 +40,23 @@ export type ReaderGroup = {
   topic?: TopicMeta;
   rank?: number;
   commentCount?: number;
-  presentation?: "tldr" | "decisions" | "glossary" | "outOfScope" | "whereToLook" | "context";
+  presentation?: "tldr" | "decisions" | "glossary" | "outOfScope" | "whereToLook" | "context" | "facts" | "pair";
   action?: ReactNode;
   meta?: ReactNode;
-  subsections?: { key: string; heading: string; kind: "why" | "example" | "body"; blocks: RenderedBlock[] }[];
+  facts?: { key: string; label: string; blocks?: RenderedBlock[]; content?: ReactNode }[];
+  subsections?: {
+    key: string;
+    heading: string;
+    kind: "why" | "example" | "body" | "matters";
+    blocks: RenderedBlock[];
+  }[];
 };
-function groupBlocks(group: ReaderGroup) {
-  return [...group.blocks, ...(group.subsections?.flatMap((section) => section.blocks) ?? [])];
+export function groupBlocks(group: ReaderGroup) {
+  return [
+    ...group.blocks,
+    ...(group.subsections?.flatMap((section) => section.blocks) ?? []),
+    ...(group.facts?.flatMap((fact) => fact.blocks ?? []) ?? []),
+  ];
 }
 export function BlockReader({
   reviewId,
@@ -304,11 +314,28 @@ export function BlockReader({
         >
           {group.content}
           {renderBlocks(group.blocks, group.path, group.presentation === "decisions")}
+          {group.facts && (
+            <dl className="em-writeup-facts">
+              {group.facts.map((fact) => (
+                <div key={fact.key} className="em-writeup-fact" data-fact={fact.key}>
+                  <dt>{fact.label}</dt>
+                  <dd>
+                    {fact.content}
+                    {renderBlocks(fact.blocks ?? [], group.path)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
           {group.subsections?.map((section) => (
             <div
               key={section.key}
               className={
-                section.kind === "body" ? "em-writeup-details" : `em-writeup-callout em-writeup-${section.kind}`
+                section.kind === "body"
+                  ? "em-writeup-details"
+                  : section.kind === "matters"
+                    ? "em-writeup-matters"
+                    : `em-writeup-callout em-writeup-${section.kind}`
               }
             >
               <h3 className={section.kind === "body" ? "sr-only" : "em-writeup-kicker"}>{section.heading}</h3>

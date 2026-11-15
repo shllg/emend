@@ -2180,3 +2180,27 @@ test.each([new Uint8Array([255]), new Uint8Array([97, 0])])("import refuses non-
   expect(response.status).toBe(400);
   expect(await response.json()).toEqual({ error: { code: "invalid_request", message: "The request is invalid." } });
 });
+
+test("import preserves area and whyItMatters when it re-renders stored writeup source", async () => {
+  const input = ImportBundle.parse(await bundle(f));
+  const source: WriteupInput = {
+    overview: "Synthetic writeup",
+    tldr: "Retries stop.",
+    whyItMatters: "Other requests can run.",
+    area: "requests › retries",
+    decisions: "",
+    topics: {},
+  };
+  const blob = await f.deps.blobs.put(f.ownerId, Buffer.from(JSON.stringify(source)), "application/json");
+  for (const writeup of input.writeups) writeup.sourceBlob = blob;
+  expect((await f.importRequest("/import", input)).status).toBe(201);
+  for (const seq of [1, 2]) {
+    const response = await f.request(`/reviews/${input.review.id}/revisions/${seq}`, "GET");
+    expect(response.status).toBe(200);
+    const view = RevisionView.parse(await response.json());
+    expect(view.writeup.area).toBe(source.area);
+    expect(view.writeup.sections.find((section) => section.key === "whyItMatters")?.blocks[0]?.text).toBe(
+      source.whyItMatters,
+    );
+  }
+});

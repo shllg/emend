@@ -179,7 +179,12 @@ Use these constraints when writing the manifest:
   feature topic only when it holds an edge case, a tricky setup, a changed expectation, or a
   removed or weakened assertion, with a note on those lines that says why.
 - Attention never changes order. `importance` alone sorts.
-- Leave out `door`. A topic that a revert does not undo ends its `why` with an **Undo:** line.
+- Leave out `door`. A topic that a revert does not undo ends its `why` with an **Undo:** paragraph.
+- `writeup.whyItMatters` is nonblank Markdown, in one or two sentences.
+  Say what the change gives the product or prepares for. It shows inside the TL;DR card.
+- `writeup.area` names the part of the project in one to three words, at most 60 characters.
+  Use plain text, never Markdown, control characters or line breaks.
+  Leave it out to use the deepest folder the changed files share.
 - `writeup.review` is `{ "level", "topics"?, "reason" }`. `level` is `skim`, `topics` or
   `everything`. `topics` lists declared topic slugs, only with level `topics`. `reason` is one
   short sentence.
@@ -262,6 +267,8 @@ Fix those fields and publish again.
   ],
   "writeup": {
     "tldr": "Requests that kept failing retried without end and held the request loop. Each request now stops after three attempts, as the retry PRD asks.",
+    "whyItMatters": "A failed service can no longer hold the request loop forever. Other requests can keep moving.",
+    "area": "requests › retries",
     "review": { "level": "topics", "topics": ["retry-budget"], "reason": "Every request passes the new retry loop." },
     "checked": "- Unit tests for one, two and three failed attempts pass.\n- The full test suite passes.",
     "notChecked": "- A real network that drops requests.",

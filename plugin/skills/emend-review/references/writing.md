@@ -18,7 +18,15 @@ Name the issue or plan task it serves when there is one.
 The reader reads it first, often straight from other work.
 
 - A review writeup holds it in `tldr`.
+  State what changes for the user, with the before state when it helps.
+  `whyItMatters` says what the change gives the product or prepares for, in one or two sentences.
 - A document opens with it, under a "TL;DR" heading right after the title.
+
+## No filler
+
+Leave out a fact, a field or a line that has nothing real to say.
+Never write "None", "N/A" or a sentence that only repeats its label.
+Checked and Not checked are the exception. They are never empty.
 
 ## Why and Example
 
@@ -61,7 +69,7 @@ Every topic has one of three undos:
 - Cannot be undone, with the step named: "Cannot be undone: drops column `x`."
 
 Without a named step, the undo is a revert.
-When a revert is not enough, end the topic's `why` with a line that starts with **Undo:**.
+When a revert is not enough, end the topic's `why` with a paragraph of its own that starts with **Undo:**.
 A feature flag does not undo writes already made.
 
 ### The verdict

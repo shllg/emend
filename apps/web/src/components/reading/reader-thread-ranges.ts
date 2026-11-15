@@ -102,8 +102,12 @@ export function threadChips(entries: ReaderThread[], root: HTMLElement): ThreadC
     if (entry.thread.state === "resolved") continue;
     const rect = passageRect(entry);
     if (!rect) continue;
+    const pair = entry.element.closest(".em-writeup-pair");
     const chip = chips.find(
-      (chip) => chip.entries[0]?.element === entry.element && Math.abs(chip.top - (rect.top - top)) < 3,
+      (chip) =>
+        (chip.entries[0]?.element === entry.element ||
+          (pair !== null && chip.entries[0]?.element.closest(".em-writeup-pair") === pair)) &&
+        Math.abs(chip.top - (rect.top - top)) < 3,
     );
     if (chip) chip.entries.push(entry);
     else chips.push({ top: rect.top - top, entries: [entry] });

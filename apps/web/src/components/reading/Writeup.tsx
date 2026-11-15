@@ -2,6 +2,7 @@ import type { RenderedWriteup, RevisionView } from "@emend/contract";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { plural } from "../../lib/count.ts";
 import { rankedTopics } from "../../lib/topics.ts";
+import { readFact, riskFact, sinceFact, undoFact, usesOpeningCard } from "../../lib/writeup-facts.ts";
 import type { ReviewSearch } from "../../router.tsx";
 import { BlockReader, type ReaderGroup, type ReaderProps } from "./BlockReader.tsx";
 import { GlossaryTerms } from "./GlossaryTerms.tsx";
@@ -12,11 +13,14 @@ import { WriteupOutline } from "./WriteupOutline.tsx";
 
 const emptyTopics: RevisionView["topics"] = [];
 const emptyFiles: RevisionView["files"] = [];
+const emptyDocs: RevisionView["docs"] = [];
 
 export function Writeup({
   writeup,
   topics = emptyTopics,
   files = emptyFiles,
+  docs = emptyDocs,
+  changedSince,
   search = {},
   phone = false,
   visible = true,
@@ -27,6 +31,8 @@ export function Writeup({
   writeup: RenderedWriteup;
   topics?: RevisionView["topics"];
   files?: RevisionView["files"];
+  docs?: RevisionView["docs"];
+  changedSince?: number;
   search?: ReviewSearch;
   phone?: boolean;
   visible?: boolean;
@@ -43,6 +49,13 @@ export function Writeup({
       return `/r/${encodeURIComponent(props.reviewId)}${params.size ? `?${params}` : ""}#${hash}`;
     },
     [phone, search.tab, search.rev, props.reviewId],
+  );
+  const read = useMemo(
+    () =>
+      usesOpeningCard({ sections: writeup.sections, area: writeup.area })
+        ? readFact({ sections: writeup.sections }, docs, files)
+        : undefined,
+    [writeup.sections, writeup.area, docs, files],
   );
   const groups = useMemo(() => {
     const ranked = rankedTopics(topics);
@@ -68,7 +81,68 @@ export function Writeup({
       if (slug) commentCounts.set(slug, (commentCounts.get(slug) ?? 0) + 1);
     }
     const groups: ReaderGroup[] = [];
+    const newLayout = usesOpeningCard({ sections: writeup.sections, area: writeup.area });
+    if (newLayout) {
+      const tldr = writeup.sections.find((section) => section.key === "tldr");
+      const matters = writeup.sections.find((section) => section.key === "whyItMatters");
+      groups.push({
+        key: "tldr",
+        heading: "TL;DR",
+        presentation: "tldr",
+        blocks: tldr?.blocks ?? [],
+        subsections: matters
+          ? [{ key: "whyItMatters", heading: "Why it matters", kind: "matters", blocks: matters.blocks }]
+          : [],
+      });
+      const facts: NonNullable<ReaderGroup["facts"]> = [];
+      for (const [key, label] of [
+        ["review", "Review"],
+        ["checked", "Checked"],
+        ["notChecked", "Not checked"],
+      ] as const) {
+        const blocks = writeup.sections.find((section) => section.key === key)?.blocks;
+        if (blocks?.some((block) => block.text.trim())) facts.push({ key, label, blocks });
+      }
+      const computed = [
+        ["risk", "Risk", riskFact(topics)],
+        ["undo", "Undo", undoFact({ sections: writeup.sections }, topics)],
+        ["read", "Read", read],
+        [
+          "since",
+          "Since",
+          sinceFact({
+            writeup: { sections: writeup.sections },
+            topics,
+            docs,
+            files,
+            revision: props.revision,
+            changedSince,
+            changedBlocks: props.changedBlocks,
+          }),
+        ],
+      ] as const;
+      for (const [key, label, content] of computed) {
+        if (content !== undefined)
+          facts.push({
+            key,
+            label,
+            content:
+              typeof content === "string"
+                ? content
+                : content.map((part, index) =>
+                    part.agent ? (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: fact parts are text, rebuilt together in order.
+                      <bdi key={index}>{part.text}</bdi>
+                    ) : (
+                      part.text
+                    ),
+                  ),
+          });
+      }
+      if (facts.length) groups.push({ key: "facts", heading: "Facts", presentation: "facts", blocks: [], facts });
+    }
     for (const section of writeup.sections) {
+      if (newLayout && ["tldr", "whyItMatters", "review", "checked", "notChecked"].includes(section.key)) continue;
       const entry = section.topic ? bySlug.get(section.topic) : undefined;
       if (!entry) {
         groups.push({
@@ -76,14 +150,19 @@ export function Writeup({
           heading: section.key === "decisions" ? "Decisions & drift" : section.label,
           blocks: section.blocks,
           presentation:
-            section.key === "tldr" ||
-            section.key === "decisions" ||
-            section.key === "glossary" ||
-            section.key === "outOfScope" ||
-            section.key === "whereToLook" ||
-            section.key === "context"
-              ? section.key
-              : undefined,
+            newLayout &&
+            section.key === "overview" &&
+            section.blocks.length === 2 &&
+            section.blocks.every((block) => block.kind === "item")
+              ? "pair"
+              : section.key === "tldr" ||
+                  section.key === "decisions" ||
+                  section.key === "glossary" ||
+                  section.key === "outOfScope" ||
+                  section.key === "whereToLook" ||
+                  section.key === "context"
+                ? section.key
+                : undefined,
         });
         continue;
       }
@@ -151,6 +230,7 @@ export function Writeup({
           [
             "overview",
             "tldr",
+            "facts",
             "review",
             "checked",
             "notChecked",
@@ -181,7 +261,19 @@ export function Writeup({
       });
     }
     return groups;
-  }, [writeup.sections, topics, files, link, props.threads]);
+  }, [
+    writeup.sections,
+    writeup.area,
+    topics,
+    files,
+    docs,
+    read,
+    changedSince,
+    link,
+    props.threads,
+    props.revision,
+    props.changedBlocks,
+  ]);
   const outline = !phone && groups.filter((group) => group.key !== "topics-map").length >= 2;
   useCurrentTopic(root, onCurrentTopic, writeup.sections, visible && !outline);
   return (

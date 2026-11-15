@@ -43,6 +43,7 @@ test("exports the v1 API, limits, file vocabulary and reserved fallback", () => 
     prefixSuffixChars: 32,
     diffContextLines: 3,
     titleChars: 200,
+    areaChars: 60,
     headingsPerDoc: 1024,
     headingTextChars: 200,
     headingIdChars: 256,

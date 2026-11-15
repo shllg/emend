@@ -464,9 +464,11 @@ test.each(["plugin/skills/emend-review/SKILL.md", "plugin/skills/emend-review/re
 test("review guidance lists the opening fields in display order", () => {
   const text = read("plugin/skills/emend-review/SKILL.md");
   const writing = text.split("## Write for the reviewer\n")[1]?.split("\n## ")[0] ?? "";
-  expect(writing).toContain("Write the opening fields below. The app shows them in this order, with these weights.");
+  expect(writing).toContain("Write the opening fields below. The app groups them for the reviewer.");
   expect([...writing.matchAll(/^- `([^`]+)`:/gm)].map((match) => match[1])).toEqual([
     "tldr",
+    "whyItMatters",
+    "area",
     "review",
     "checked",
     "notChecked",
