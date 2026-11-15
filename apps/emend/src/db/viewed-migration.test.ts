@@ -35,7 +35,7 @@ test.each([false, true])(
         });
       const before = await db.read((q) =>
         q.values(
-          sql`SELECT name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE 'review_tombstones%' AND name NOT IN ('reviews', 'reviews_owner_state_updated_idx', 'blobs_sha256_idx') AND name NOT LIKE '%_blob_idx' ORDER BY name`,
+          sql`SELECT name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE 'review_tombstones%' AND name NOT IN ('reviews', 'reviews_owner_state_updated_idx', 'blobs_sha256_idx') AND name NOT LIKE '%_blob_idx' AND name != 'doc_assets_owner_asset_idx' ORDER BY name`,
         ),
       );
       if (previous) expect(before.some(([name]) => name === "files")).toBe(true);
@@ -50,7 +50,7 @@ test.each([false, true])(
         ).toEqual([["Synthetic"]]);
         const after = await db.read((q) =>
           q.values(
-            sql`SELECT name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE 'settings%' AND name NOT LIKE 'agent_notes%' AND name NOT LIKE 'viewed_files%' AND name != 'files_owner_revision_path_idx' AND name NOT LIKE 'review_tombstones%' AND name NOT IN ('reviews', 'reviews_owner_state_updated_idx', 'blobs_sha256_idx') AND name NOT LIKE '%_blob_idx' ORDER BY name`,
+            sql`SELECT name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE 'settings%' AND name NOT LIKE 'agent_notes%' AND name NOT LIKE 'viewed_files%' AND name != 'files_owner_revision_path_idx' AND name NOT LIKE 'review_tombstones%' AND name NOT IN ('reviews', 'reviews_owner_state_updated_idx', 'blobs_sha256_idx') AND name NOT LIKE '%_blob_idx' AND name != 'doc_assets_owner_asset_idx' ORDER BY name`,
           ),
         );
         expect(

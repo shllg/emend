@@ -8,6 +8,7 @@ import {
 } from "@emend/core";
 import { expect, test, vi } from "vitest";
 import { WorkTimeout } from "./executor.ts";
+import { PublishAborted } from "./lifecycle.ts";
 import { renderRevision } from "./render.ts";
 import { executeWork, serializeRendered } from "./work.ts";
 
@@ -458,4 +459,211 @@ test("media heads come from readHead once per distinct hash and never from read"
   const html = stored.get(result.renderedBlob)?.toString() ?? "";
   expect(html).toContain('width=\\"3\\"');
   expect(html).toContain('height=\\"2\\"');
+});
+
+test("shared Markdown sources keep their own image maps and share bounded heads with the writeup", async () => {
+  const request = input(["one/a.md", "one/b.md", "two/a.md", "plain.md"]);
+  const shaA = "c".repeat(64),
+    shaB = "d".repeat(64);
+  request.writeup.overview = "![Writeup](one/shot.png)";
+  for (const doc of request.files) if (doc.path !== "plain.md") doc.assets = [`${doc.path.split("/")[0]}/shot.png`];
+  request.files.push(
+    { path: "one/shot.png", role: "asset", oldPath: null, oldBlob: null, newBlob: shaA, flag: null },
+    {
+      path: "two/shot.png",
+      role: "asset",
+      parent: "two/a.md",
+      oldPath: null,
+      oldBlob: null,
+      newBlob: shaB,
+      flag: null,
+    },
+  );
+  const stored = new Map<string, Buffer>();
+  const png = Buffer.from("89504e470d0a1a0a0000000d4948445200000280000001e008060000001f15c489", "hex");
+  const head = vi.fn(async () => Uint8Array.from(png).buffer);
+  const execute = vi.fn(async (work: Parameters<typeof executeWork>[0]) => {
+    if (work.kind === "image-sizes" || work.kind === "writeup") {
+      // Match real worker transfer semantics: the sender's copies become detached.
+      const transfers = (work.kind === "image-sizes" ? work.heads : (work.mediaHeads ?? [])).map(([, head]) => head);
+      return executeWork(structuredClone(work, { transfer: transfers }));
+    }
+    return executeWork(work);
+  });
+  const result = await renderRevision(
+    request,
+    execute,
+    async (sha) => Uint8Array.from(stored.get(sha) ?? Buffer.from("![Shot](shot.png)")).buffer,
+    head,
+    async (bytes) => {
+      const key = String(stored.size);
+      stored.set(key, bytes);
+      return key;
+    },
+  );
+  expect(head.mock.calls).toEqual([[shaA], [shaB]]);
+  expect(execute.mock.calls.filter(([work]) => work.kind === "doc")).toHaveLength(3);
+  for (const [path, sha] of [
+    ["one/a.md", shaA],
+    ["one/b.md", shaA],
+    ["two/a.md", shaB],
+  ]) {
+    const html = stored.get(result.docBlobs.get(path ?? "") ?? "")?.toString();
+    expect(html).toContain(`/api/v1/media/${sha}`);
+    expect(html).toContain('width=\\"640\\" height=\\"480\\"');
+  }
+  expect(stored.get(result.docBlobs.get("plain.md") ?? "")?.toString()).not.toContain("/api/v1/media/");
+});
+
+test("metadata and rendered image headings agree, including cached sources and cross-doc links", async () => {
+  const request = input(["with.md", "without.md", "link.md"]);
+  const first = request.files[0];
+  const link = request.files[2];
+  if (!first || !link) throw new Error("missing doc");
+  first.assets = ["shot.png"];
+  link.newBlob = "e".repeat(64);
+  request.files.push({
+    path: "shot.png",
+    role: "asset",
+    parent: "with.md",
+    oldPath: null,
+    oldBlob: null,
+    newBlob: "c".repeat(64),
+    flag: null,
+  });
+  const stored = new Map<string, Buffer>();
+  const result = await renderRevision(
+    request,
+    executeWork,
+    async (sha) =>
+      Uint8Array.from(
+        stored.get(sha) ??
+          Buffer.from(sha === link.newBlob ? "[Status](with.md#status-before)" : "## Status ![Before](shot.png)"),
+      ).buffer,
+    async () => new ArrayBuffer(0),
+    async (bytes) => {
+      const key = String(stored.size);
+      stored.set(key, bytes);
+      return key;
+    },
+  );
+  const html = (path: string) =>
+    (JSON.parse(stored.get(result.docBlobs.get(path) ?? "")?.toString() ?? "[]") as Block[])
+      .map((b) => b.html)
+      .join("");
+  const id = result.metadata.get("with.md")?.headings[0]?.id;
+  expect(id).toBeTruthy();
+  expect(html("with.md")).toContain(`id="${id}"`);
+  expect(html("link.md")).toContain(`doc=with.md#h-${id}`);
+  const plainId = result.metadata.get("without.md")?.headings[0]?.id;
+  expect(plainId).not.toBe(id);
+  expect(html("without.md")).toContain(`id="${plainId}"`);
+});
+
+test("doc image heads are released in batches of at most 16 MiB and docs receive only sizes", async () => {
+  const request = input(["one.md", "two.md"]);
+  const paths = Array.from({ length: 66 }, (_, i) => `shot-${i}.png`);
+  for (const doc of request.files) doc.assets = paths;
+  request.files.push(
+    ...paths.map((path, i) => ({
+      path,
+      role: "asset" as const,
+      parent: "one.md",
+      oldPath: null,
+      oldBlob: null,
+      newBlob: i.toString(16).padStart(64, "0"),
+      flag: null,
+    })),
+  );
+  const png = Buffer.from("89504e470d0a1a0a0000000d4948445200000003000000020806000000", "hex");
+  let liveBytes = 0;
+  const batches: number[] = [];
+  const readHead = vi.fn(async (_sha: string) => {
+    liveBytes += 256 * 1024;
+    expect(liveBytes).toBeLessThanOrEqual(16 * 1024 * 1024);
+    const head = new Uint8Array(256 * 1024);
+    head.set(png);
+    return head.buffer;
+  });
+  const execute = vi.fn(async (work: Parameters<typeof executeWork>[0]) => {
+    if (work.kind === "doc") {
+      expect(work).not.toHaveProperty("mediaHeads");
+      expect(work.mediaSizes).toHaveLength(66);
+    }
+    if (work.kind !== "image-sizes") return executeWork(work);
+    const bytes = work.heads.reduce((sum, [, head]) => sum + head.byteLength, 0);
+    const result = await executeWork(structuredClone(work, { transfer: work.heads.map(([, head]) => head) }));
+    batches.push(bytes);
+    liveBytes -= bytes;
+    return result;
+  });
+  const stored = new Map<string, Buffer>();
+  const result = await renderRevision(
+    request,
+    execute,
+    async (sha) => Uint8Array.from(stored.get(sha) ?? Buffer.from("![Shot](shot-0.png)")).buffer,
+    readHead,
+    async (bytes) => {
+      const key = String(stored.size);
+      stored.set(key, bytes);
+      return key;
+    },
+  );
+  expect(batches).toEqual([16 * 1024 * 1024, 2 * 256 * 1024]);
+  expect(readHead).toHaveBeenCalledTimes(66);
+  expect(new Set(readHead.mock.calls.map(([sha]) => sha)).size).toBe(66);
+  for (const path of ["one.md", "two.md"]) {
+    const html = stored.get(result.docBlobs.get(path) ?? "")?.toString();
+    expect(html).toContain("emend-media-sized");
+    expect(html).toContain('width=\\"3\\" height=\\"2\\"');
+  }
+});
+
+test.each([false, true])("doc image head failures honor cancellation (aborted: %s)", async (aborted) => {
+  const request = input(["plan.md", "other.md"]);
+  request.writeup.overview = "Synthetic overview";
+  const sha = "c".repeat(64);
+  for (const doc of request.files) doc.assets = ["shot.png"];
+  request.files.push({
+    path: "shot.png",
+    role: "asset",
+    parent: "plan.md",
+    oldPath: null,
+    oldBlob: null,
+    newBlob: sha,
+    flag: null,
+  });
+  const controller = new AbortController();
+  const stored = new Map<string, Buffer>();
+  const head = vi.fn(async () => {
+    if (aborted) controller.abort();
+    throw new Error("synthetic head read failure");
+  });
+  const rendered = renderRevision(
+    request,
+    executeWork,
+    async (hash) => Uint8Array.from(stored.get(hash) ?? Buffer.from("![Shot](shot.png)")).buffer,
+    head,
+    async (bytes) => {
+      const key = String(stored.size);
+      stored.set(key, bytes);
+      return key;
+    },
+    controller.signal,
+  );
+  if (aborted) {
+    await expect(rendered).rejects.toBeInstanceOf(PublishAborted);
+    expect(stored.size).toBe(0);
+    return;
+  }
+  const result = await rendered;
+  expect(head).toHaveBeenCalledExactlyOnceWith(sha);
+  expect(result.unrendered).toEqual([]);
+  expect(stored.get(result.renderedBlob)?.toString()).toContain("Synthetic overview");
+  for (const path of ["plan.md", "other.md"]) {
+    const blocks = JSON.parse(stored.get(result.docBlobs.get(path) ?? "")?.toString() ?? "[]") as Block[];
+    const html = blocks.map((block) => block.html).join("");
+    expect(html).toContain(`/api/v1/media/${sha}`);
+    expect(html).not.toMatch(/width=|height=|emend-media-sized/);
+  }
 });

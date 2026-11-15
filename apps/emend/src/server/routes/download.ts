@@ -46,11 +46,11 @@ import { downloadDocNames } from "../http/download-names.ts";
 import { ApiError } from "../http/errors.ts";
 import { DOWNLOAD_CSP } from "../http/headers.ts";
 import { ZipWriter } from "../http/zip.ts";
+import { mediaAsset } from "../media.ts";
 import { type WorkerExecutor, workerExecutor } from "../publish/executor.ts";
 import { commentHtml } from "./comment-html.ts";
 import { publishMeta, topicView } from "./reviews.ts";
 
-const imageTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
 export const DOWNLOAD_DIFF_BUDGET_MS = 20_000;
 const DOWNLOAD_DIFF_RENDER_MS = 10_000;
 // One builder per owner; waiting requests have not opened a database read yet.
@@ -200,12 +200,13 @@ async function revisionDownload(
     }
     return bytes === null || bytes === "too-large" ? bytes : { bytes, mediaType: file.mediaType };
   };
-  const media = new Map(
-    fileRows
-      .filter((file) => file.role === "asset" && file.parentDocId === null && imageTypes.has(file.mediaType))
-      .sort((a, b) => a.mediaType.localeCompare(b.mediaType))
-      .map((file) => [file.newBlob, file]),
-  );
+  const mediaRows = await q
+    .select()
+    .from(files)
+    .where(and(ownedFiles, mediaAsset(q, ownerId)))
+    .orderBy(files.mediaType)
+    .all();
+  const media = new Map(mediaRows.map((file) => [file.newBlob, file]));
   const resolveMedia = (sha: string) => resolveFile(media.get(sha));
   const docs = fileRows.filter((file) => file.role === "doc");
   const doc = baseDoc(docs);

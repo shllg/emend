@@ -220,7 +220,7 @@ export async function prepareImport(
       }
       await validateNoteRanges(input.files, read, execute);
       revisionsToCount.push({ id: revision.id, files: input.files });
-      // Keep only this revision's and its predecessor's image heads.
+      // Keep only this revision's and its predecessor's writeup heads; doc heads are not retained.
       const media = input.files
         .filter((f) => f.role === "asset" && f.parent === undefined && f.newBlob)
         .map((f) => f.newBlob as string);

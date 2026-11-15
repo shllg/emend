@@ -47,26 +47,27 @@ export function ownerHead(
 }
 
 /**
- * Loads each hash once; every read returns its own copy because the render worker detaches what it gets.
- * `keep` drops every cached head outside the given hashes.
+ * Memoizes retained hashes; every read returns its own copy because the render worker detaches what it gets.
+ * `keep` limits retained heads to the given hashes, including subsequent reads.
  */
 export function memoizedHeads(load: (hash: string) => Promise<ArrayBuffer>): {
   read(hash: string): Promise<ArrayBuffer>;
   keep(hashes: Iterable<string>): void;
 } {
   const heads = new Map<string, Promise<ArrayBuffer>>();
+  let wanted: Set<string> | undefined;
   return {
     async read(hash) {
       let head = heads.get(hash);
       if (!head) {
         head = load(hash);
-        heads.set(hash, head);
+        if (!wanted || wanted.has(hash)) heads.set(hash, head);
         head.catch(() => heads.delete(hash));
       }
       return (await head).slice(0);
     },
     keep(hashes) {
-      const wanted = new Set(hashes);
+      wanted = new Set(hashes);
       for (const hash of heads.keys()) if (!wanted.has(hash)) heads.delete(hash);
     },
   };

@@ -63,7 +63,7 @@ without NUL and at most 1 MiB; explicitly named binary files are refused. A fold
 that look like secrets (Markdown and HTML files publish whatever their name), folders named exactly
 `secret`, `secrets`, `credential` or `credentials` in any case below the folder argument, binary
 files, files that are too large or unreadable, and files shown as source that hold a private key
-(walked Markdown and HTML that render are not scanned). Below a folder argument, an HTML asset
+(walked Markdown and HTML that render are not scanned). Below a folder argument, a doc asset
 inside such a folder or holding a private key is not uploaded either. A file or folder named
 explicitly is published as named, so never name a credential file or a secrets folder explicitly.
 Name a public file the walk skipped, such as `passwords.ts`, to publish it. Skip warnings stop
@@ -72,9 +72,17 @@ CSS and JavaScript files in a folder also appear as source docs, even when an HT
 uses them as assets.
 
 You can name several files or a folder. A folder bundles its visible text files with the
-assets those HTML docs reference; dotfiles, `.git/` and `node_modules/` are skipped. Symlinks
-leaving the folder are refused. A folder of HTML docs keeps its links and images; Markdown docs
-in a folder do not link to each other or show local images yet.
+images and assets its documents reference; dotfiles, `.git/` and `node_modules/` are skipped. Symlinks
+leaving the folder are refused. Markdown docs show local PNG, JPEG, GIF, WebP and AVIF images
+referenced relative to the doc, such as `![Alt](shots/before.png)`. Remote image URLs do not show.
+Markdown image paths use the renderer's local-path rules: `./shots/before.png` is allowed;
+encoded separators such as `shots%2Fbefore.png` and secret-looking names such as `api-key.png`
+are skipped with a warning. Images are found in a worker under the render timeout. If discovery
+fails or times out, publish warns once with an escaped doc reference and the fixed reason
+`published without images: image discovery failed or timed out`; the doc still publishes, with
+no images. If the image-reference byte cap is reached, publish warns once for that doc:
+`some images left out: too many image references`. The images found before the cap still publish.
+These rules also apply to `--manifest`.
 
 The default key uses the instance and the sorted, distinct real input paths, so reordering the
 arguments keeps the URL. Adding files inside a named folder also keeps it; changing the set of

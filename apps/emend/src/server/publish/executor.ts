@@ -83,12 +83,13 @@ export function workerExecutor(timeouts = { render: 10000, place: 30000 }): Work
                   work.kind === "resection" ||
                   work.kind === "placement-doc" ||
                   work.kind === "writeup-source" ||
-                  work.kind === "line-count"
+                  work.kind === "line-count" ||
+                  work.kind === "doc-images"
                 ? [work.bytes]
                 : work.kind === "changed"
                   ? [...work.previous.map((blob) => blob.bytes), ...work.next]
-                  : work.kind === "writeup"
-                    ? (work.mediaHeads ?? []).map(([, head]) => head)
+                  : work.kind === "writeup" || work.kind === "image-sizes"
+                    ? (work.kind === "writeup" ? (work.mediaHeads ?? []) : work.heads).map(([, head]) => head)
                     : work.kind === "place"
                       ? [
                           ...work.texts.values(),

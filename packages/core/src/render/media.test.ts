@@ -277,3 +277,48 @@ describe("writeup media sizes", () => {
       expect(section.blocks.map((b) => b.html).join("")).toContain('width="640" height="480"');
   });
 });
+
+describe("Markdown doc images", () => {
+  const docMedia = new Map([["shots/a.png", shaA]]);
+  const doc = async (source: string) => {
+    const { renderDoc } = await import("./markdown.ts");
+    return renderDoc(
+      source,
+      "docs/plan.md",
+      undefined,
+      undefined,
+      undefined,
+      docMedia,
+      new Map([[shaA, { width: 640, height: 480 }]]),
+    );
+  };
+  test("uses doc-relative image paths, captions, rows and server sizes", async () => {
+    const blocks = await doc('![Before](shots/a.png)\n\n<img src="shots/a.png" alt="After" onerror="bad()" width="9">');
+    expect(blocks[0]?.html).toBe(
+      `<p class="emend-media-row"><span class="emend-media emend-media-sized"><img src="/api/v1/media/${shaA}" alt="Before" loading="lazy" decoding="async" width="640" height="480"><span class="emend-media-caption">Before</span></span></p>`,
+    );
+    expect(blocks[1]?.html).toContain('width="640" height="480"');
+    expect(blocks[1]?.html).not.toMatch(/onerror|bad\(\)|width="9"/);
+  });
+  test.each([
+    "https://example.com/a.png",
+    "//example.com/a.png",
+    "../x.png",
+    "/abs.png",
+    "shots%2Fa.png",
+    "javascript:alert(1)",
+    "data:image/png;base64,AAAA",
+  ])("drops unsafe or remote source %s", async (src) => {
+    const blocks = await doc(`<img src="${src}" alt="x">`);
+    expect(blocks.map((block) => block.html).join("")).not.toContain("src=");
+  });
+  test("keeps hostile HTML and Mermaid handling unchanged beside doc images", async () => {
+    const blocks = await doc(
+      '<script>bad()</script>\n\n<svg onload="bad()"><circle/></svg>\n\n<div onclick="bad()" style="color:red">Raw HTML</div>\n\n[bad](javascript:alert)\n\n![Before](shots/a.png)\n\n```mermaid\ngraph TD; A-->B; click A callback\n```',
+    );
+    const out = blocks.map((block) => block.html).join("");
+    expect(out).not.toMatch(/<script|<svg|onload|onclick|style=|javascript:/);
+    expect(out).toContain("Raw HTML");
+    expect(blocks.at(-1)).toMatchObject({ kind: "diagram", html: "", source: "graph TD; A-->B; click A callback" });
+  });
+});

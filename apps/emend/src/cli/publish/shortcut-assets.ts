@@ -1,8 +1,14 @@
 import { lstat, realpath, stat } from "node:fs/promises";
-import { dirname, posix, relative, sep } from "node:path";
+import { basename, dirname, posix, relative, sep } from "node:path";
 import { LIMITS, type PublishFile } from "@emend/contract";
 import { CliError } from "../http.ts";
-import { assetCandidates, assetWarning } from "./assets.ts";
+import {
+  type AssetFormat,
+  assetCandidates,
+  assetWarning,
+  docAssetSizeError,
+  type WalkedSecretPaths,
+} from "./assets.ts";
 import {
   checkPublishedFolders,
   GitFolderRead,
@@ -16,7 +22,7 @@ import {
   sourcePath,
 } from "./read.ts";
 import { RetainedSources } from "./retained.ts";
-import { holdsPrivateKey } from "./shortcut-walk.ts";
+import { holdsPrivateKey, isSecretPath } from "./shortcut-walk.ts";
 import type { BlobSource } from "./upload.ts";
 
 interface AssetSource {
@@ -26,9 +32,11 @@ interface AssetSource {
   docs: Set<DocAssets>;
   size?: number;
   skipped?: string;
+  secretName?: boolean;
   hash?: string;
 }
 interface DocAssets {
+  format: AssetFormat;
   doc: PublishFile;
   bytes: number;
   remaining: number;
@@ -46,6 +54,7 @@ export class ShortcutAssets {
   private folderRoots: readonly string[];
   private namedFiles: ReadonlySet<string>;
   private retainedSources: RetainedSources;
+  private walkedSecretPaths: WalkedSecretPaths;
 
   constructor(
     gitDirs: string[],
@@ -54,6 +63,7 @@ export class ShortcutAssets {
     folderRoots: readonly string[] = [],
     namedFiles: ReadonlySet<string> = new Set(),
     retainedSources = new RetainedSources(),
+    walkedSecretPaths: WalkedSecretPaths = new Map(),
   ) {
     this.gitDirs = gitDirs;
     this.warn = warn;
@@ -61,10 +71,19 @@ export class ShortcutAssets {
     this.folderRoots = folderRoots;
     this.namedFiles = namedFiles;
     this.retainedSources = retainedSources;
+    this.walkedSecretPaths = walkedSecretPaths;
   }
 
-  add(doc: PublishFile, realSource: string, bytes: Buffer, folders: readonly PublishedFolder[]) {
+  add(
+    doc: PublishFile,
+    realSource: string,
+    bytes: Buffer,
+    folders: readonly PublishedFolder[],
+    format: AssetFormat = "html",
+    imageReferences: readonly string[] = [],
+  ) {
     const entry: DocAssets = {
+      format,
       doc,
       bytes: bytes.length,
       remaining: LIMITS.htmlDocWithAssetsBytes - bytes.length,
@@ -73,7 +92,15 @@ export class ShortcutAssets {
     this.docs.push(entry);
     const seen = new Set<string>();
     this.referenceBytes += 2; // Brackets for the assets array.
-    for (const candidate of assetCandidates(realSource, bytes.toString(), this.warn, true)) {
+    for (const candidate of assetCandidates(
+      realSource,
+      bytes.toString(),
+      this.warn,
+      true,
+      format,
+      imageReferences,
+      this.walkedSecretPaths,
+    )) {
       // The shortcut reports these skips once, using their walked paths.
       if (this.excludedAssets.has(candidate.file)) continue;
       const path = posix.join(posix.dirname(doc.path), candidate.ref);
@@ -140,6 +167,8 @@ export class ShortcutAssets {
       const issue = this.pathIssue(asset, actual);
       if (issue)
         return issue === "source is outside the allowed doc roots" ? "target leaves the visible doc folder" : issue;
+      asset.secretName = isSecretPath(basename(actual));
+      if (asset.secretName && [...asset.docs].every((doc) => doc.format === "markdown")) return "may hold a secret";
       if (retained) {
         asset.size = retained.length;
         return;
@@ -160,7 +189,7 @@ export class ShortcutAssets {
 
   private checkSize(entry: DocAssets) {
     const size = entry.refs.reduce((sum, { source }) => sum + (source.size ?? 0), entry.bytes);
-    if (size > LIMITS.htmlDocWithAssetsBytes) throw new CliError("HTML doc and assets exceed their size limit");
+    if (size > LIMITS.htmlDocWithAssetsBytes) throw new CliError(docAssetSizeError(entry.format));
   }
 
   async resolve(fileCount: number, add: (bytes: Buffer, read: BlobSource["read"]) => string) {
@@ -171,7 +200,13 @@ export class ShortcutAssets {
     }
     const preReadPaths = new Set<string>();
     for (const entry of this.docs) {
-      const refs = entry.refs.filter(({ source }) => !source.skipped);
+      const refs = entry.refs.filter(({ source }) => {
+        if (entry.format === "markdown" && source.secretName) {
+          source.docs.delete(entry);
+          return false;
+        }
+        return !source.skipped;
+      });
       for (const { path } of refs) preReadPaths.add(path);
       if (fileCount + preReadPaths.size > LIMITS.filesPerRevision) throw new CliError("too many files in the review");
       this.checkSize({ ...entry, refs });
@@ -190,6 +225,8 @@ export class ShortcutAssets {
             throw new CliError(
               issue === "target is in node_modules" ? "asset target changed into node_modules" : issue,
             );
+          if ([...asset.docs].some((doc) => doc.format === "markdown") && isSecretPath(basename(actual)))
+            throw new CliError("asset target changed to a secret-looking name");
           scanPrivateKey = this.inScope(asset, actual);
           retainedPath = actual;
         };
@@ -212,7 +249,13 @@ export class ShortcutAssets {
         );
       };
       let limit: number = LIMITS.assetBytes;
-      for (const doc of asset.docs) limit = Math.min(limit, doc.remaining);
+      let limitingDoc: DocAssets | undefined;
+      for (const doc of asset.docs) {
+        if (doc.remaining < limit) {
+          limit = doc.remaining;
+          limitingDoc = doc;
+        }
+      }
       // A spent doc budget can leave limit <= 0; read(0) intentionally rejects content with the combined-size message.
       let bytes: Buffer;
       try {
@@ -223,13 +266,13 @@ export class ShortcutAssets {
         }
       } catch (error) {
         if (error instanceof OversizedFile && limit < LIMITS.assetBytes)
-          throw new CliError("HTML doc and assets exceed their size limit");
+          throw new CliError(docAssetSizeError(limitingDoc?.format ?? "html"));
         throw error;
       }
       firstRead = false;
       for (const doc of asset.docs) {
         doc.remaining -= bytes.length;
-        if (doc.remaining < 0) throw new CliError("HTML doc and assets exceed their size limit");
+        if (doc.remaining < 0) throw new CliError(docAssetSizeError(doc.format));
       }
       asset.size = bytes.length;
       if (scanPrivateKey) {
@@ -242,8 +285,10 @@ export class ShortcutAssets {
     const paths = new Set<string>();
     for (const entry of this.docs) {
       entry.refs = entry.refs.filter(({ source, raw }) => {
-        if (!source.skipped) return true;
-        this.warn(assetWarning(raw, source.skipped));
+        const reason =
+          source.skipped ?? (entry.format === "markdown" && source.secretName ? "may hold a secret" : undefined);
+        if (!reason) return true;
+        this.warn(assetWarning(raw, reason));
         return false;
       });
       entry.doc.assets = entry.refs.map(({ path }) => path);

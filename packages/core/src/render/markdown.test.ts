@@ -259,3 +259,48 @@ test("concurrent renders keep duplicate counters and diagram metadata local", as
   expect(first[2]?.kind).toBe("diagram");
   expect(second[2]?.kind).toBe("code");
 });
+
+test("image references come from the same sanitized tree as rendering", async () => {
+  const { markdownImageReferences } = await import("./markdown.ts");
+  expect(
+    markdownImageReferences(
+      [
+        "![inline](shots/a.png)",
+        "![reference][shot]\n\n[shot]: shots/b.png",
+        '<img src="shots/c.png" onerror="bad()">',
+        "[![linked](shots/d.png)](https://example.com)",
+        "| Shot |\n| --- |\n| ![table](shots/e.png) |",
+        "Foot[^1].\n\n[^1]: ![note](shots/f.png)",
+        '<script src="script.png"></script>',
+        '<svg><image href="svg.png"/></svg>',
+        '<iframe src="frame.png"></iframe>',
+        '<template><img src="hidden.png"></template>',
+        "![bad](javascript:alert) ![data](data:image/png;base64,AAAA)",
+      ].join("\n\n"),
+    ),
+  ).toEqual({
+    references: ["shots/a.png", "shots/b.png", "shots/c.png", "shots/d.png", "shots/e.png", "shots/f.png"],
+    capped: false,
+  });
+});
+
+test("image discovery returns distinct UTF-8 references in first-seen order", async () => {
+  const { markdownImageReferences } = await import("./markdown.ts");
+  const markdown =
+    "![One][a] ![Again][a] <img src='二.png'> ![Too large][b] ![Later](c.png)\n\n[a]: a.png\n[b]: long-name.png";
+  expect(markdownImageReferences(markdown)).toEqual({
+    references: ["a.png", "二.png", "long-name.png", "c.png"],
+    capped: false,
+  });
+  expect(markdownImageReferences(`${"![a][r] ".repeat(1000)}\n\n[r]: shot.png`)).toEqual({
+    references: ["shot.png"],
+    capped: false,
+  });
+});
+
+test("image discovery stops before expanded references exceed the Markdown byte limit", async () => {
+  const { markdownImageReferences } = await import("./markdown.ts");
+  // UTF-8 URL encoding expands this sub-limit source past the one-MiB result budget.
+  const markdown = `![First](first.png) ![Large](${"é".repeat(180000)}.png) ![Later](later.png)`;
+  expect(markdownImageReferences(markdown)).toEqual({ references: ["first.png"], capped: true });
+});

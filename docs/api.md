@@ -106,7 +106,7 @@ a machine token reaches only reviews from its own instance.
 | PUT | `/api/v1/reviews/:id/viewed` | Reviewer | Mark or unmark diff files as viewed; return 204. |
 | GET | `/api/v1/files/:fileId/old` | Reviewer | Read the old file side. |
 | GET | `/api/v1/files/:fileId/new` | Reviewer | Read the new file side. |
-| GET | `/api/v1/media/:sha256` | Reviewer | Read a writeup image by content hash. |
+| GET | `/api/v1/media/:sha256` | Reviewer | Read a writeup or Markdown doc image by content hash. |
 | GET | `/api/v1/events` | Reviewer | Subscribe to owner-wide review events using SSE. |
 | GET | `/api/v1/reviews/:id/events` | Reviewer | Subscribe to review events using SSE. |
 | POST | `/api/v1/reviews/:id/threads` | Reviewer | Create a thread and user comment. |
@@ -150,15 +150,17 @@ returns `404 not_found`. `HEAD` applies the same authorization and headers, with
 no response body. File and blob lookups filter the authenticated owner's id;
 the number of queries is bounded independently of revision size.
 
-### Writeup media
+### Writeup and Markdown doc media
 
-`GET /api/v1/media/:sha256` serves one image that a writeup embeds. A parameter that is not 64
+`GET /api/v1/media/:sha256` serves one writeup or Markdown doc image. A parameter that is not 64
 lowercase hex characters returns `404 not_found`. The server looks up one file of the
-authenticated owner with `role` `asset` and no parent doc, `newBlob` equal to the hash and a
+authenticated owner with `role` `asset`, `newBlob` equal to the hash and a
 stored media type of `image/png`, `image/jpeg`, `image/gif`, `image/webp` or `image/avif`. No such
-row, a diff side, an SVG, an HTML doc's own asset or any other asset, a foreign owner's row, a
+row, a diff side, an SVG, an asset listed only by HTML docs, a foreign owner's row, a
 missing stored blob, or one whose size or bytes do not match its hash returns `404 not_found`
 before any byte is sent.
+The asset must have no parent doc, or a `doc_assets` row must link it to a `text/markdown` doc
+of the same owner and revision. Every joined row is filtered by owner.
 An image used only by reviews in the bin also returns `404 not_found`. Media is addressed by
 hash and may be shared, so it never answers `review_in_bin`; another readable review using the
 same image keeps it available, and Restore makes it available again. A moved local copy remains
@@ -178,12 +180,12 @@ invalid or encoded-slash escape. A match becomes
 the caption is the alt text, or the file name when the alt text is empty. `width` and `height` are
 the image's displayed pixel size, read by the server from the stored bytes at publish (JPEG EXIF
 orientation applied); they are absent when the server cannot read the size. The wrapper span also has
-the class `emend-media-sized` exactly when the server sent `width` and `height`. On a writeup media image,
+the class `emend-media-sized` exactly when the server sent `width` and `height`. On a declared media image,
 author-written width and height are always dropped. A paragraph holding only
 such images also has the class `emend-media-row`. Author classes keep the `user-content-`
 prefix, so they never match the generated classes. A block's id covers each image's alt text, path
-and SHA-256, so a re-shot image at the same path shows as changed. Markdown docs render no
-local images.
+and SHA-256, so a re-shot image at the same path shows as changed. Markdown docs render their listed
+image assets with the same markup, resolved relative to the doc's folder. Remote images stay dropped.
 
 ### Downloads
 
@@ -220,8 +222,9 @@ and no comments unless `comments=1` is set. A revision
 is a pub when `writeupEmpty` is true and `base` is null. A pub's base file holds one doc:
 the first doc row in file order whose path equals `main`, else the first doc row. The order
 includes both rendered and source views of a path. Markdown uses its stored rendered
-blocks. Source uses its stored highlighted tokens. Code reviews and Markdown and source pubs
-get the emend header with the review title, project, branch and publish links. An HTML pub keeps
+blocks and builds in its listed images like writeup images. Source uses its stored highlighted
+tokens. Code reviews and Markdown and source pubs get the emend header with the review title,
+project, branch and publish links. An HTML pub keeps
 the agent's HTML layout, with no emend header. Its listed assets are built in after filtering.
 Mermaid diagrams show as labelled source text. Links to other docs become plain text.
 Absolute HTTP, HTTPS and mailto links keep working on `a` and `area` elements.
@@ -933,10 +936,10 @@ the individual secret links remain usable.
 
 `PublishResponse = { reviewId, revision, url, placed, unplaced, unrendered: FilePath[] }`.
 An omitted `unrendered` field defaults to `[]`.
-HTML doc entries include `assets: FilePath[]`. Each listed path must be an asset in the request
-inside that doc's folder. The HTML source plus its own listed assets must fit
-`htmlDocWithAssetsBytes`; shared assets count for every doc listing them. Asset rows retain
-their first parent, and their blob bytes count once toward the revision byte budget. Every HTML
+HTML doc entries include `assets: FilePath[]`; rendered Markdown docs may include image assets.
+Each listed path must be an asset in the request inside that doc's folder. The doc source plus its
+own listed assets must fit `htmlDocWithAssetsBytes`; shared assets count for every doc listing them. Asset rows retain
+their first parent, and their blob bytes count once toward the revision byte budget. Every rendered
 doc's full asset list is stored, so a shared asset loads under each doc that lists it. Existing
 revisions migrate their parent associations and retain parent-only asset access.
 `unrendered` lists Markdown docs whose rendering failed, timed out or exceeded rendered-output budgets
@@ -1137,14 +1140,19 @@ topic (importance 100, last); at most `filesPerRevision` files. Base and head ar
 `PublishFile = { path, oldPath: FilePath | null, role, status?, topic?, title?, view?: DocView, oldBlob: sha256 | null,
 newBlob: sha256 | null, flag: FileFlag | null, parent?: FilePath, assets?: FilePath[], notes?: AgentNote[] }`. Paths and topic slugs are
 unique within their namespaces (diffs; rendered docs and assets; source docs); file, writeup and review-verdict topics must be declared.
-`assets` is required for rendered HTML docs (including an empty array) and must be absent on all other files.
-Assets name a declared HTML doc in `parent`, stay inside its folder and have no hidden or dot
-segments. Allowed extensions are js, mjs, css, png, jpg, jpeg, gif, svg, webp, avif, ico, bmp,
+`assets` is required for rendered HTML docs (including an empty array), optional for rendered Markdown
+docs, and absent on other files, including source-view docs. Lists contain no duplicates, and each
+path names a request asset inside the doc's folder. Markdown lists allow only png, jpg, jpeg, gif,
+webp and avif (case insensitive), with no hidden segments.
+Assets name a declared rendered HTML or Markdown doc in `parent`, stay inside its folder and have
+no hidden or dot segments. A Markdown parent's assets allow only those image extensions. HTML asset
+extensions are js, mjs, css, png, jpg, jpeg, gif, svg, webp, avif, ico, bmp,
 woff, woff2, ttf, otf, mp4, webm, ogg, mp3, wav and m4a (case insensitive). Shared assets are
 published once, with the first doc as parent. Diff rows always have media type `text/plain`.
 An asset with no `parent` is writeup media. Its extension is png, jpg, jpeg, gif, webp or avif
 (case insensitive), no segment starts with `.`, and it has no `topic`, `assets` or `notes`. No
-HTML doc lists it in `assets`. A request holds at most `mediaPerRevision` (50) of them. Media have
+HTML doc lists it in `assets`; Markdown docs may list the same row without duplicating it.
+A request holds at most `mediaPerRevision` (50) of them. Media have
 no `FileRole` of their own; they use `role: "asset"` and never appear in file lists, counts or
 viewed progress. Only assets have parents. Docs and assets have a new blob, no old side and no flag; flagged
 diffs have no blobs. Source filenames never leave the CLI.
@@ -1199,7 +1207,8 @@ exactly like a doc source (the worktree or a `docRoots` folder, regular files on
 out, none in the git folder), and reads at most `assetBytes` (25 MiB) from each. The real source's
 extension must equal the path's extension, ignoring case. Each image is published as a
 parentless `asset` file and counts toward `filesPerRevision` and `revisionBytes`. A media path
-that equals an HTML doc's asset path is refused. The writeup embeds an image with
+that equals an HTML doc's asset path is refused; a rendered Markdown doc may list that same
+media row as an image asset. The writeup embeds an image with
 `![Alt](path)`.
 
 Only a `diff` entry accepts `notes`; docs and assets reject the field, even an empty array.
@@ -1231,6 +1240,17 @@ repository whose root is the filesystem root, the home folder or a folder that h
 folder that holds emend's state folder or sits inside it. A symlink leading outside these roots is
 refused. The role's size limit applies.
 Plan task 1.6 implements and tests these checks. Assets are collected during publish.
+Markdown image discovery runs in a worker under the render timeout (10 seconds), for both
+path and `--manifest` publishing. Distinct references keep their first-seen order and total at
+most `markdownDocBytes` UTF-8 bytes; discovery stops when the next reference would exceed it.
+At that cap, the CLI warns once for the doc: `some images left out: too many image references`.
+If discovery fails or times out, the CLI warns once with an escaped argument or review path
+and the fixed reason `published without images: image discovery failed or timed out`.
+The doc still publishes, with no images.
+Markdown image references must pass the renderer's local-path normalization and every CLI
+asset path check. A leading `./` is allowed; encoded separators such as `%2F` are skipped.
+Image filenames that look secret-like are skipped as "may hold a secret", including
+secret-looking names such as `api-key.png`. HTML discovery is unchanged.
 
 The general `FileRole` vocabulary is `diff`, `doc`, `asset`; `FileStatus` is `added`, `modified`,
 `deleted`, `renamed`, `mode-changed`; `FileFlag` is `binary` or `oversized`.
@@ -1700,12 +1720,12 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `downloadInlineBytes` | 134217728 bytes (128 MiB) of emitted built-in content per download, and the same read budget for stored assets, selected doc bodies and selected diff blobs; both shared by all files of a ZIP |
 | `downloadCommentBytes` | 32 MiB of thread cards per download, shared by all files of a ZIP, separate from the built-in content budget |
 | `downloadDocs` | 50 docs added to one download |
-| `assetBytes` | 26214400 bytes per asset |
-| `htmlDocWithAssetsBytes` | 52428800 bytes combined |
+| `assetBytes` | 26214400 bytes per asset, including Markdown doc images |
+| `htmlDocWithAssetsBytes` | 52428800 bytes per HTML or Markdown doc plus its listed assets |
 | `revisionBytes` | 268435456 bytes for writeup source JSON and unique referenced blobs; checked before reading content |
 | `blocksPerRevision` | 100000 rendered blocks across every path, including the writeup |
 | `renderedBytesPerRevision` | 268435456 rendered JSON bytes across every path, including the writeup |
-| `filesPerRevision` | 10000 files |
+| `filesPerRevision` | 10000 files, including HTML assets and Markdown doc images; parented doc images do not count toward `mediaPerRevision` |
 | `mediaPerRevision` | 50 writeup images (counted in `filesPerRevision`; each at most `assetBytes`) |
 | `agentNotesPerFile` | 8 notes |
 | `agentNotesPerRevision` | 64 notes |

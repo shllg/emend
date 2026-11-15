@@ -1,4 +1,4 @@
-import { BlockId } from "@emend/contract";
+import { BlockId, LIMITS } from "@emend/contract";
 import rehypeShiki from "@shikijs/rehype/core";
 import { toString as hastText } from "hast-util-to-string";
 import rehypeRaw from "rehype-raw";
@@ -50,8 +50,8 @@ function isolateDiagrams() {
 
 const keepLines = () => undefined;
 
-/** Everything up to and including link hardening: the part writeups, docs and comments share. */
-function sanitizedPipeline(lineBreaks = false) {
+/** The shared parsing and sanitizing steps, before image sources and links are hardened. */
+function sanitizedTreePipeline(lineBreaks = false) {
   return unified()
     .use(remarkParse)
     .use(remarkGfm)
@@ -63,9 +63,47 @@ function sanitizedPipeline(lineBreaks = false) {
     .use(rehypeRaw, { passThrough: [FOOTNOTE_NODE] })
     .use(restoreFootnotes)
     .use(namespaceClasses)
-    .use(rehypeSanitize, sanitizeSchema)
-    .use(linkIssueRefs)
-    .use(hardenLinks);
+    .use(rehypeSanitize, sanitizeSchema);
+}
+
+function sanitizedPipeline(lineBreaks = false) {
+  return sanitizedTreePipeline(lineBreaks).use(linkIssueRefs).use(hardenLinks);
+}
+
+const imageReferenceProcessor = sanitizedTreePipeline();
+/** Image sources the renderer sees after sanitize, before resolving declared local media. */
+export function markdownImageReferences(markdown: string): { references: string[]; capped: boolean } {
+  const { source, tables } = prepareTables(markdown);
+  const tree = imageReferenceProcessor.runSync(imageReferenceProcessor.parse(source), {
+    value: source,
+    data: { largeTables: tables },
+  });
+  const refs: string[] = [];
+  const seen = new Set<string>();
+  const encoder = new TextEncoder();
+  let bytes = 0;
+  // Iterative traversal preserves source order and stops once the result budget is spent.
+  const pending: (typeof tree | (typeof tree.children)[number])[] = [tree];
+  while (pending.length) {
+    const node = pending.pop();
+    if (!node) break;
+    if (node.type === "element" && node.tagName === "img" && typeof node.properties.src === "string") {
+      const ref = node.properties.src;
+      if (!seen.has(ref)) {
+        const size = encoder.encode(ref).byteLength;
+        if (bytes + size > LIMITS.markdownDocBytes) return { references: refs, capped: true };
+        bytes += size;
+        seen.add(ref);
+        refs.push(ref);
+      }
+    }
+    if ("children" in node)
+      for (let i = node.children.length - 1; i >= 0; i--) {
+        const child = node.children[i];
+        if (child) pending.push(child);
+      }
+  }
+  return { references: refs, capped: false };
 }
 
 async function createProcessor() {
@@ -154,26 +192,29 @@ export async function renderDoc(
   repoUrl?: string,
   docs?: DocLinks,
   effects?: { docBaseUsed?: boolean; docPathUsed?: boolean },
+  media?: ReadonlyMap<string, string>,
+  mediaSizes?: ReadonlyMap<string, MediaSize>,
 ): Promise<Block[]> {
   return renderMarkdownWithBudget(
     markdown,
     `doc-${await blockHash(path)}`,
     { highlightedBytes: 0 },
     repoUrl,
-    undefined,
+    media,
     docs,
     path,
     effects,
+    mediaSizes,
   );
 }
 
 const metadataProcessor = sanitizedPipeline().use(isolateDiagrams).use(rehypeStringify);
 /** The same sanitized blocks, without syntax highlighting, for publish metadata and CLI titles. */
-export async function renderMetadataBlocks(markdown: string): Promise<Block[]> {
+export async function renderMetadataBlocks(markdown: string, media?: ReadonlyMap<string, string>): Promise<Block[]> {
   const { source, tables } = prepareTables(markdown);
   const tree = await metadataProcessor.run(metadataProcessor.parse(source), {
     value: source,
-    data: { largeTables: tables },
+    data: { largeTables: tables, media },
   });
   return blocksFromTree(tree, "metadata", (node) =>
     metadataProcessor.stringify(node.type === "root" ? node : { type: "root", children: [node] }),

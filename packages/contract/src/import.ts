@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { AgentNoteView, validateAgentNotes } from "./agent-note.ts";
-import { DocTitle, DocView, isRenderedHtmlDoc, validateDocView } from "./doc.ts";
+import { DocTitle, DocView, isRenderedHtmlDoc, isRenderedMarkdownDoc, validateDocView } from "./doc.ts";
 import { indexImportBundle } from "./import-index.ts";
 import { LIMITS } from "./limits.ts";
-import { PublishRequest, Sha256 } from "./publish.ts";
+import { MEDIA_EXTENSIONS, PublishRequest, Sha256 } from "./publish.ts";
 import { FileFlag, FilePath, FileRole, FileStatus, TopicMeta, TopicSlug } from "./review.ts";
 import { GoMode, SendRequest } from "./send.ts";
 import { Target } from "./target.ts";
@@ -181,8 +181,9 @@ export const ImportBundle = BundleRows.superRefine((bundle, ctx) => {
       doc?.revisionId !== a.revisionId ||
       asset?.revisionId !== a.revisionId ||
       doc?.role !== "doc" ||
-      !isRenderedHtmlDoc(doc) ||
-      asset?.role !== "asset"
+      (!isRenderedHtmlDoc(doc) && !isRenderedMarkdownDoc(doc)) ||
+      asset?.role !== "asset" ||
+      (isRenderedMarkdownDoc(doc) && !MEDIA_EXTENSIONS.has(asset.path.split(".").at(-1)?.toLowerCase() ?? ""))
     )
       issue("invalid doc asset association");
   }
@@ -190,7 +191,11 @@ export const ImportBundle = BundleRows.superRefine((bundle, ctx) => {
     const parent = f.parentDocId === null ? undefined : files.get(f.parentDocId);
     if (
       f.parentDocId !== null &&
-      (f.role !== "asset" || parent?.role !== "doc" || parent.revisionId !== f.revisionId || !isRenderedHtmlDoc(parent))
+      (f.role !== "asset" ||
+        parent?.role !== "doc" ||
+        parent.revisionId !== f.revisionId ||
+        (!isRenderedHtmlDoc(parent) && !isRenderedMarkdownDoc(parent)) ||
+        (isRenderedMarkdownDoc(parent) && !MEDIA_EXTENSIONS.has(f.path.split(".").at(-1)?.toLowerCase() ?? "")))
     )
       issue("invalid parent doc");
   }
@@ -243,9 +248,10 @@ export function importPublishInput(
       topic: f.topicSlug ?? undefined,
       notes: index.notesByFile.get(f.id)?.toSorted((a, b) => a.ord - b.ord),
       parent: f.parentDocId === null ? undefined : index.files.get(f.parentDocId)?.path,
-      assets: isRenderedHtmlDoc(f)
-        ? (index.assetsByDoc.get(f.id) ?? []).map((a) => index.files.get(a.assetId)?.path)
-        : undefined,
+      assets:
+        isRenderedHtmlDoc(f) || (isRenderedMarkdownDoc(f) && index.assetsByDoc.has(f.id))
+          ? (index.assetsByDoc.get(f.id) ?? []).map((a) => index.files.get(a.assetId)?.path)
+          : undefined,
     })),
   };
 }

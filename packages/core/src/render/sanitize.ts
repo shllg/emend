@@ -162,8 +162,8 @@ const validSide = (value: unknown): value is number =>
 
 export const MEDIA_URL_PREFIX = "/api/v1/media/";
 
-/** Resolve a writeup image reference to a declared media path, or null. */
-export function mediaKey(src: unknown, media: ReadonlyMap<string, string>): string | null {
+/** Normalize a local image reference, rejecting ambiguous or unsafe paths. */
+export function localMediaPath(src: unknown): string | null {
   if (typeof src !== "string" || /^https?:\/\//i.test(src)) return null;
   let path = src.split(/[?#]/)[0] ?? "";
   while (path.startsWith("./")) path = path.slice(2);
@@ -183,7 +183,13 @@ export function mediaKey(src: unknown, media: ReadonlyMap<string, string>): stri
     path.split("/").includes("..")
   )
     return null;
-  return media.has(path) ? path : null;
+  return path;
+}
+
+/** Resolve an image reference to a declared media path, or null. */
+export function mediaKey(src: unknown, media: ReadonlyMap<string, string>): string | null {
+  const path = localMediaPath(src);
+  return path !== null && media.has(path) ? path : null;
 }
 
 function mediaSpan(image: HtmlElement, path: string, sha: string, sized: boolean): HtmlElement {

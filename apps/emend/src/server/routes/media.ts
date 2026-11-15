@@ -1,13 +1,12 @@
-import { and, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, or } from "drizzle-orm";
 import type { Hono } from "hono";
 import { files, reviews, revisions } from "../../db/schema.ts";
 import type { AppDeps } from "../app.ts";
 import type { AppEnv } from "../auth/principal.ts";
 import { ApiError } from "../http/errors.ts";
+import { mediaAsset } from "../media.ts";
 
-const MEDIA_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"];
-
-/** Serves writeup images by content hash, to the owner only, with a locked-down response. */
+/** Serves writeup and Markdown doc images by content hash with a locked-down response. */
 export function mediaRoutes(app: Hono<AppEnv>, deps: AppDeps) {
   app.get("/api/v1/media/:sha256", async (c) => {
     const ownerId = c.get("principal").ownerId;
@@ -24,11 +23,8 @@ export function mediaRoutes(app: Hono<AppEnv>, deps: AppDeps) {
             eq(files.ownerId, ownerId),
             // Moved copies remain readable; otherwise binned reviews keep bytes only for restore.
             or(isNull(reviews.binnedAt), isNotNull(reviews.movedToUrl)),
-            eq(files.role, "asset"),
             eq(files.newBlob, hash),
-            // Only writeup media: an HTML doc's own assets load from its content path.
-            isNull(files.parentDocId),
-            inArray(files.mediaType, MEDIA_TYPES),
+            mediaAsset(q, ownerId),
           ),
         )
         // The same bytes can sit under two image types; pick one type deterministically.

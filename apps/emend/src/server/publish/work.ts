@@ -24,6 +24,7 @@ import {
   htmlHeadings,
   inferDocTitle,
   markdownHeadings,
+  markdownImageReferences,
   markdownTitle,
   type PlaceContext,
   placeThread,
@@ -55,7 +56,9 @@ export type Work =
       reveal: DownloadDiffReveal[];
     }
   | { kind: "source"; path: string; source: ArrayBuffer; highlight?: boolean }
-  | { kind: "doc-metadata"; format: "html" | "markdown"; bytes: ArrayBuffer }
+  | { kind: "doc-images"; bytes: ArrayBuffer }
+  | { kind: "image-sizes"; heads: [string, ArrayBuffer][] }
+  | { kind: "doc-metadata"; format: "html" | "markdown"; bytes: ArrayBuffer; media?: [string, string][] }
   | { kind: "line-count"; bytes: ArrayBuffer }
   | { kind: "writeup-source"; bytes: ArrayBuffer }
   | { kind: "placement-doc"; format: "html" | "markdown" | "writeup"; bytes: ArrayBuffer }
@@ -70,7 +73,15 @@ export type Work =
       mediaHeads?: [string, ArrayBuffer][];
       docs?: DocLinks;
     }
-  | { kind: "doc"; path: string; source: ArrayBuffer; repoUrl?: string; docs?: DocLinks }
+  | {
+      kind: "doc";
+      path: string;
+      source: ArrayBuffer;
+      repoUrl?: string;
+      docs?: DocLinks;
+      media?: [string, string][];
+      mediaSizes?: [string, ImageSize][];
+    }
   | { kind: "resection"; path: string; bytes: ArrayBuffer }
   | { kind: "comment-md"; bodies: string[]; repoUrl?: string }
   | { kind: "changed"; previous: { format: "writeup" | "doc"; bytes: ArrayBuffer }[]; next: ArrayBuffer[] }
@@ -98,6 +109,8 @@ export type DocMetadata = { title?: string; headings: DocHeading[] };
 export type WorkResult =
   | { kind: "diff-counts"; counts: { additions: number; deletions: number } | null }
   | { kind: "diff-hunks"; hunks: DownloadDiffHunk[] | null | "too-long" }
+  | { kind: "doc-images"; references: string[]; capped: boolean }
+  | { kind: "image-sizes"; sizes: [string, ImageSize][] }
   | ({ kind: "doc-metadata" } & DocMetadata)
   | { kind: "line-count"; count: number }
   | { kind: "writeup-source"; source: WriteupInput; links?: PublishLinks; repoUrl?: string }
@@ -128,6 +141,14 @@ export function serializeRendered(value: RenderedWriteup | Block[], pathDependen
   };
 }
 export type Executor = (work: Work) => Promise<WorkResult>;
+function readImageSizes(heads: [string, ArrayBuffer][] = []) {
+  const sizes = new Map<string, ImageSize>();
+  for (const [sha, head] of heads) {
+    const size = imageSize(new Uint8Array(head));
+    if (size) sizes.set(sha, size);
+  }
+  return sizes;
+}
 export const executeWork: Executor = async (work) => {
   if (work.kind === "diff-hunks")
     return {
@@ -156,6 +177,8 @@ export const executeWork: Executor = async (work) => {
       count: 0,
     };
   }
+  if (work.kind === "doc-images") return { kind: "doc-images", ...markdownImageReferences(decode(work.bytes)) };
+  if (work.kind === "image-sizes") return { kind: "image-sizes", sizes: [...readImageSizes(work.heads)] };
   if (work.kind === "doc-metadata") {
     if (work.format === "html")
       return {
@@ -163,7 +186,7 @@ export const executeWork: Executor = async (work) => {
         title: await inferDocTitle("html", new Uint8Array(work.bytes)),
         headings: htmlHeadings(decode(work.bytes)),
       };
-    const blocks = await renderMetadataBlocks(decode(work.bytes));
+    const blocks = await renderMetadataBlocks(decode(work.bytes), new Map(work.media));
     return { kind: "doc-metadata", title: markdownTitle(blocks), headings: markdownHeadings(blocks) };
   }
   if (work.kind === "line-count") {
@@ -199,11 +222,7 @@ export const executeWork: Executor = async (work) => {
   }
   if (work.kind === "writeup") {
     const effects: { docBaseUsed?: boolean } = {};
-    const mediaSizes = new Map<string, ImageSize>();
-    for (const [sha, head] of work.mediaHeads ?? []) {
-      const size = imageSize(new Uint8Array(head));
-      if (size) mediaSizes.set(sha, size);
-    }
+    const mediaSizes = readImageSizes(work.mediaHeads);
     const rendered = await renderWriteup(work.source, work.topics, {
       links: work.links,
       repoUrl: work.repoUrl,
@@ -219,7 +238,15 @@ export const executeWork: Executor = async (work) => {
   }
   if (work.kind === "doc") {
     const effects: { docBaseUsed?: boolean; docPathUsed?: boolean } = {};
-    const blocks = await renderDoc(decode(work.source), work.path, work.repoUrl, work.docs, effects);
+    const blocks = await renderDoc(
+      decode(work.source),
+      work.path,
+      work.repoUrl,
+      work.docs,
+      effects,
+      new Map(work.media),
+      new Map(work.mediaSizes),
+    );
     return {
       kind: "doc",
       ...serializeRendered(blocks, effects.docBaseUsed),

@@ -1,0 +1,1 @@
+CREATE INDEX `doc_assets_owner_asset_idx` ON `doc_assets` (`owner_id`,`asset_id`);

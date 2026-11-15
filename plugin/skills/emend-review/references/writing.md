@@ -166,9 +166,9 @@ In a review writeup:
   side by side.
 - Only listed paths render. Any other image reference in the writeup is dropped.
 - Remote image URLs do not show. List the file under `media` instead.
-- Images do not render in Markdown docs.
 
-In a published document, Markdown shows no local images yet; use HTML for images.
+In a Markdown document, put the image beside it and reference it with a relative path,
+`![Alt](shots/before.png)`. PNG, JPEG, GIF, WebP and AVIF show; remote image URLs do not.
 
 ## HTML pages
 

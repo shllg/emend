@@ -13,11 +13,13 @@ import {
   PublishRequest,
 } from "@emend/contract";
 import { decodeText, UnchangedFilesError, withOtherChanges } from "@emend/core";
+import { workerExecutor } from "../../server/publish/executor.ts";
+import type { Executor } from "../../server/publish/work.ts";
 import { DocRootError, readDocRoots, rootRules, validateDocRoot } from "../config.ts";
 import { escapeReference } from "../escape.ts";
 import { createGitSession, GitFailed } from "../git.ts";
 import { CliError } from "../http.ts";
-import { collectAssets } from "./assets.ts";
+import { collectAssets, docAssetSizeError, docImageWarning, type WalkedSecretPaths } from "./assets.ts";
 import { collectChanges } from "./collect.ts";
 import { docsKey, normalizeRemote, projectKey, reviewKey } from "./key.ts";
 import {
@@ -33,7 +35,7 @@ import { remoteToRepoUrl } from "./repo-url.ts";
 import type { RetainedSources } from "./retained.ts";
 import { gitFolders, worktreeRoot } from "./root.ts";
 import { ShortcutAssets } from "./shortcut-assets.ts";
-import { readSkipReason } from "./shortcut-walk.ts";
+import { isSecretPath, readSkipReason } from "./shortcut-walk.ts";
 import { readSide } from "./sides.ts";
 
 import { type BlobSource, readBlob } from "./upload.ts";
@@ -44,10 +46,12 @@ export type PublishOptions = {
   project?: string;
   key?: string | ((instanceId: string) => string);
   skipNodeModules?: boolean;
-  titleFromMain?: (bytes: Uint8Array) => string | Promise<string>;
+  titleFromMain?: (bytes: Uint8Array, execute: Executor) => string | Promise<string>;
   docFolders?: ReadonlyMap<string, readonly PublishedFolder[]>;
   /** Absolute paths rejected by the walked-doc private-key content check. */
   excludedAssets?: ReadonlySet<string>;
+  /** Absolute paths whose secret-name warning is already supplied by the folder walk. */
+  walkedSecretPaths?: WalkedSecretPaths;
   retainedSources?: RetainedSources;
   /** Real paths of shortcut folder arguments and explicitly named files. */
   folderRoots?: readonly string[];
@@ -85,6 +89,40 @@ export async function publishContext(cwd: string, stateDir: string) {
   return { git, worktree, root, gitDirs };
 }
 export async function resolvePublish(
+  manifest: PublishManifest,
+  options: PublishOptions,
+  stateDir: string,
+  configDir: string,
+  instanceId: string | null,
+  cwd: string,
+  warn: (line: string) => void,
+  context?: Awaited<ReturnType<typeof publishContext>>,
+  configRoots?: readonly string[],
+) {
+  let worker: ReturnType<typeof workerExecutor> | undefined;
+  const execute: Executor = (work) => {
+    worker ??= workerExecutor();
+    return worker(work);
+  };
+  try {
+    return await resolveWithWorker(
+      execute,
+      manifest,
+      options,
+      stateDir,
+      configDir,
+      instanceId,
+      cwd,
+      warn,
+      context,
+      configRoots,
+    );
+  } finally {
+    await worker?.close();
+  }
+}
+async function resolveWithWorker(
+  execute: Executor,
   manifest: PublishManifest,
   options: PublishOptions,
   stateDir: string,
@@ -160,7 +198,7 @@ export async function resolvePublish(
       totalBytes += bytes.length;
       const size = bytes.length;
       if (options.docFolders) {
-        // Shortcut deduplication retains every source's checks, including shared HTML assets.
+        // Shortcut deduplication retains every source's checks, including shared doc assets.
         const checks: BlobSource["read"][] = [];
         rechecks.set(hash, checks);
         blobs.set(hash, {
@@ -189,6 +227,7 @@ export async function resolvePublish(
   let title = manifest.title;
   let assetCount = 0;
   const assetPaths = new Set<string>();
+  const mediaPaths = new Set(manifest.media?.map((item) => item.path));
   const shortcutAssets = options.docFolders
     ? new ShortcutAssets(
         gitDirs,
@@ -197,6 +236,7 @@ export async function resolvePublish(
         options.folderRoots,
         options.namedFiles,
         options.retainedSources,
+        options.walkedSecretPaths,
       )
     : undefined;
   const roots = [
@@ -305,7 +345,7 @@ export async function resolvePublish(
       if (file.source !== undefined) checkExtension(file.source);
       checkExtension(source);
     }
-    if (file.path === manifest.main && options.titleFromMain) title = await options.titleFromMain(bytes);
+    if (file.path === manifest.main && options.titleFromMain) title = await options.titleFromMain(bytes, execute);
     const resolvedDoc: PublishFile = {
       path: file.path,
       oldPath: null,
@@ -319,11 +359,25 @@ export async function resolvePublish(
       ...(html ? { assets: [] } : {}),
     };
     files.push(resolvedDoc);
-    if (!html) continue;
+    if (sourceView) continue;
+    const format = html ? "html" : "markdown";
+    let imageReferences: string[] = [];
+    // Only image syntax can produce img elements; a pre-check miss only leaves an image out.
+    if (!html && /!\[|<im(?:g|age)/i.test(bytes.toString())) {
+      const label = escapeReference(options.docArguments?.get(file.path) ?? file.path);
+      try {
+        const result = await execute({ kind: "doc-images", bytes: Uint8Array.from(bytes).buffer });
+        if (result.kind !== "doc-images") throw new Error("wrong result");
+        imageReferences = result.references;
+        if (result.capped) warn(docImageWarning(label, "some images left out: too many image references"));
+      } catch {
+        warn(docImageWarning(label, "published without images: image discovery failed or timed out"));
+      }
+    }
     if (shortcutAssets) {
       // source is the checked real path, so aliases use the target folder for assets.
-      // readResolvedDoc/readDoc enforce the HTML doc Git and published-folder rules here.
-      shortcutAssets.add(resolvedDoc, source, bytes, publishedFolders);
+      // readResolvedDoc/readDoc enforce the doc Git and published-folder rules here.
+      shortcutAssets.add(resolvedDoc, source, bytes, publishedFolders, format, imageReferences);
       continue;
     }
     const assets = await collectAssets(
@@ -333,18 +387,22 @@ export async function resolvePublish(
       gitDirs,
       options.skipNodeModules,
       publishedFolders,
+      format,
+      imageReferences,
     );
     resolvedDoc.assets = assets.map((asset) => posix.join(posix.dirname(file.path), asset.ref));
     let size = bytes.length;
     for (const asset of assets) {
+      if (!html && mediaPaths.has(posix.join(posix.dirname(file.path), asset.ref))) continue;
       const info = await stat(asset.file);
       if (info.size > LIMITS.assetBytes) throw new CliError("asset exceeds its size limit");
       size += info.size;
-      if (size > LIMITS.htmlDocWithAssetsBytes) throw new CliError("HTML doc and assets exceed their size limit");
+      if (size > LIMITS.htmlDocWithAssetsBytes) throw new CliError(docAssetSizeError(format));
     }
     let actualSize = bytes.length;
     const readAsset = async (file: string, limit: number) => {
       const actual = await sourcePath(file, [dirname(source)], gitDirs, publishedFolders);
+      if (!html && isSecretPath(basename(actual))) throw new CliError("asset target changed to a secret-looking name");
       if (options.skipNodeModules && actual.split(sep).includes("node_modules"))
         throw new CliError("asset target changed into node_modules");
       return readRegular(
@@ -353,12 +411,16 @@ export async function resolvePublish(
         [dirname(source)],
         undefined,
         gitDirs,
-        (_info, opened) => checkPublishedFolders(opened, publishedFolders),
+        (_info, opened) => {
+          checkPublishedFolders(opened, publishedFolders);
+          if (!html && isSecretPath(basename(opened)))
+            throw new CliError("asset target changed to a secret-looking name");
+        },
       );
     };
     for (const asset of assets) {
       const path = posix.join(posix.dirname(file.path), asset.ref);
-      if (assetPaths.has(path)) continue;
+      if ((!html && mediaPaths.has(path)) || assetPaths.has(path)) continue;
       assetPaths.add(path);
       if (grouped.files.length + ++assetCount > LIMITS.filesPerRevision)
         throw new CliError("too many files in the review");
@@ -380,9 +442,12 @@ export async function resolvePublish(
     }
   }
   if (shortcutAssets) {
-    // HTML docs already passed their checked reads; this phase checks their shared assets.
+    // Rendered docs already passed their checked reads; this phase checks their shared assets.
     const assets = await shortcutAssets.resolve(files.length, addRequired);
-    files = files.flatMap((file) => [file, ...(isRenderedHtmlDoc(file) ? (assets.get(file.path) ?? []) : [])]);
+    files = files.flatMap((file) => [
+      file,
+      ...(file.role === "doc" && docViewOf(file) === "rendered" ? (assets.get(file.path) ?? []) : []),
+    ]);
   }
   for (const item of manifest.media ?? []) {
     const label = escapeReference(item.source ?? item.path);
@@ -427,6 +492,17 @@ export async function resolvePublish(
       newBlob: addRequired(bytes, readMedia),
       flag: null,
     });
+  }
+  // Shared assets and writeup-media overlaps count at their final stored size for every doc.
+  const resolvedAssets = new Map(files.filter((file) => file.role === "asset").map((file) => [file.path, file]));
+  for (const doc of files) {
+    if (!doc.assets) continue;
+    const size = doc.assets.reduce(
+      (sum, path) => sum + (blobs.get(resolvedAssets.get(path)?.newBlob ?? "")?.size ?? 0),
+      blobs.get(doc.newBlob ?? "")?.size ?? 0,
+    );
+    if (size > LIMITS.htmlDocWithAssetsBytes)
+      throw new CliError(docAssetSizeError(isRenderedHtmlDoc(doc) ? "html" : "markdown"));
   }
   const keyFor = (id: string) => {
     const name = typeof options.key === "function" ? options.key(id) : options.key;
