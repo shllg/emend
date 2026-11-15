@@ -4,6 +4,7 @@ export { htmlHeadings, markdownHeadings } from "./doc-headings.ts";
 export { cleanDocTitle, inferDocTitle, markdownTitle } from "./doc-title.ts";
 export { headingLookups } from "./heading-lookups.ts";
 export { type DocLinks, resolveDocLink } from "./links.ts";
+export { isLockfile } from "./lockfiles.ts";
 export { docText, placeHtmlSpan } from "./place/html.ts";
 export { lineMap } from "./place/linemap.ts";
 export { type FileSides, placeLines } from "./place/lines.ts";
@@ -24,6 +25,17 @@ export {
   type DownloadWork,
   type ResolveResult,
 } from "./render/download.ts";
+export {
+  DOWNLOAD_DIFF_BYTES,
+  DOWNLOAD_DIFF_CONTEXT,
+  DOWNLOAD_DIFF_LINES,
+  DOWNLOAD_DIFF_REVEAL_CONTEXT,
+  type DownloadDiffFile,
+  type DownloadDiffHunk,
+  type DownloadDiffReveal,
+  downloadDiffGroups,
+  downloadDiffHunks,
+} from "./render/download-diff.ts";
 export {
   type DownloadComment,
   type DownloadFile,

@@ -48,3 +48,7 @@ export function downloadHasComments(revision: RevisionView): boolean {
 export function downloadBaseIsHtml(revision: RevisionView): boolean {
   return baseDoc(revision)?.kind === "html";
 }
+
+export function downloadHasDiff(revision: RevisionView): boolean {
+  return !(revision.writeupEmpty && revision.base === null) && revision.files.some((file) => file.role === "diff");
+}

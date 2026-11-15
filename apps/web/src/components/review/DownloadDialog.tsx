@@ -1,6 +1,12 @@
 import { LIMITS, type RevisionView, reviewDownloadPath } from "@emend/contract";
 import { type RefObject, useEffect, useState } from "react";
-import { downloadBaseIsHtml, downloadBaseLabel, downloadDocChoices, downloadHasComments } from "../../lib/download.ts";
+import {
+  downloadBaseIsHtml,
+  downloadBaseLabel,
+  downloadDocChoices,
+  downloadHasComments,
+  downloadHasDiff,
+} from "../../lib/download.ts";
 import { Button } from "../ui/Button.tsx";
 import { Checkbox } from "../ui/Checkbox.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
@@ -20,13 +26,16 @@ export function DownloadDialog({
 }) {
   const [tickedIds, setTickedIds] = useState<string[]>([]);
   const [comments, setComments] = useState(false);
+  const [diff, setDiff] = useState(false);
   const base = downloadBaseLabel(revision);
   const choices = downloadDocChoices(revision);
   const hasComments = downloadHasComments(revision);
+  const hasDiff = downloadHasDiff(revision);
   useEffect(() => {
     if (open) {
       setTickedIds([]);
       setComments(false);
+      setDiff(false);
     }
   }, [open]);
   return (
@@ -60,7 +69,7 @@ export function DownloadDialog({
           </Button>
           <Button asChild variant="primary">
             <a
-              href={reviewDownloadPath(reviewId, revision.seq, tickedIds, { comments })}
+              href={reviewDownloadPath(reviewId, revision.seq, tickedIds, { comments, diff })}
               download
               onClick={() => onOpenChange(false)}
             >
@@ -82,6 +91,14 @@ export function DownloadDialog({
             }
             checked={comments}
             onChange={(event) => setComments(event.currentTarget.checked)}
+          />
+        )}
+        {hasDiff && (
+          <Checkbox
+            label="Code diff"
+            description="Each topic's changed files with their added and removed lines, after the writeup, as plain text."
+            checked={diff}
+            onChange={(event) => setDiff(event.currentTarget.checked)}
           />
         )}
         {choices.map((doc) => (

@@ -7,15 +7,22 @@ export function reviewDownloadPath(
   reviewId: string,
   seq: number,
   docIds: readonly string[] = [],
-  options: { comments?: boolean } = {},
+  options: { comments?: boolean; diff?: boolean } = {},
 ): string {
   const path = `${API_PREFIX}/reviews/${encodeURIComponent(reviewId)}/revisions/${seq}/download`;
-  const query = [...docIds.map((id) => `doc=${encodeURIComponent(id)}`), ...(options.comments ? ["comments=1"] : [])];
+  const query = [
+    ...docIds.map((id) => `doc=${encodeURIComponent(id)}`),
+    ...(options.comments ? ["comments=1"] : []),
+    ...(options.diff ? ["diff=1"] : []),
+  ];
   return query.length ? `${path}?${query.join("&")}` : path;
 }
 
 /** The `comments` query values: absent, or exactly one `1`. */
 export const DownloadComments = z.array(z.literal("1")).max(1);
+
+/** The `diff` query values: absent, or exactly one `1`. */
+export const DownloadDiff = z.array(z.literal("1")).max(1);
 
 export const DownloadDocIds = z
   .array(z.uuid())

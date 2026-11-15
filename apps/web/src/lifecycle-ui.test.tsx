@@ -1071,12 +1071,104 @@ const downloadThread = (sent: boolean): RevisionView["threads"][number] => ({
   ],
 });
 
+const downloadDiffFile: RevisionView["files"][number] = {
+  id: "44444444-4444-4444-8444-444444444444",
+  path: "src/Example.ts",
+  oldPath: null,
+  role: "diff",
+  status: "added",
+  topic: null,
+  order: 0,
+  mediaType: "application/octet-stream",
+  flag: "binary",
+  hasOld: false,
+  hasNew: true,
+};
+
+test("a code review offers an unticked diff, combines choices and resets it on reopen", async () => {
+  withDownloadDocs(0, { files: [downloadDiffFile], threads: [downloadThread(true)] });
+  mount(`/r/${id}`);
+  const trigger = await screen.findByRole("button", { name: "Download" });
+  expect(trigger.getAttribute("title")).toBe(
+    "Download this revision, with docs, comments or the diff if you pick them",
+  );
+  fireEvent.click(trigger);
+  const dialog = within(await screen.findByRole("alertdialog", { name: "Download" }));
+  const diff = dialog.getByRole("checkbox", { name: /^Code diff/ }) as HTMLInputElement;
+  expect(diff.checked).toBe(false);
+  expect(dialog.getAllByRole("checkbox")).toEqual([
+    dialog.getByRole("checkbox", { name: /^Comments and replies/ }),
+    diff,
+  ]);
+  expect(
+    dialog.getByText(
+      "Each topic's changed files with their added and removed lines, after the writeup, as plain text.",
+    ),
+  ).toBeTruthy();
+  const link = dialog.getByRole("link", { name: "Download" });
+  expect(link.getAttribute("href")).toBe(reviewDownloadPath(id, 1));
+  fireEvent.click(diff);
+  expect(link.getAttribute("href")).toBe(reviewDownloadPath(id, 1, [], { diff: true }));
+  fireEvent.click(dialog.getByRole("checkbox", { name: /^Comments and replies/ }));
+  expect(link.getAttribute("href")).toBe(reviewDownloadPath(id, 1, [], { comments: true, diff: true }));
+  expect(link.getAttribute("href")).toContain("?comments=1&diff=1");
+  fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  fireEvent.click(trigger);
+  const reopened = within(await screen.findByRole("alertdialog", { name: "Download" }));
+  expect((reopened.getByRole("checkbox", { name: /^Code diff/ }) as HTMLInputElement).checked).toBe(false);
+  expect(reopened.getByRole("link", { name: "Download" }).getAttribute("href")).toBe(reviewDownloadPath(id, 1));
+});
+
+test("a code review with only diff files opens the Download dialog", async () => {
+  withDownloadDocs(0, { files: [downloadDiffFile] });
+  mount(`/r/${id}`);
+  fireEvent.click(await screen.findByRole("button", { name: "Download" }));
+  const dialog = within(await screen.findByRole("alertdialog", { name: "Download" }));
+  expect(dialog.getAllByRole("checkbox")).toEqual([dialog.getByRole("checkbox", { name: /^Code diff/ })]);
+});
+
+test("a pub never offers the diff choice", async () => {
+  const value = withDownloadDocs(2, { writeupEmpty: true });
+  value.files.push(downloadDiffFile);
+  mount(`/r/${id}`);
+  fireEvent.click(await screen.findByRole("button", { name: "Download" }));
+  const dialog = within(await screen.findByRole("alertdialog", { name: "Download" }));
+  expect(dialog.queryByRole("checkbox", { name: /^Code diff/ })).toBeNull();
+  expect(dialog.getByRole("link", { name: "Download" }).getAttribute("href")).toBe(reviewDownloadPath(id, 1));
+});
+
+test("the phone menu offers the diff choice with the same download link", async () => {
+  width = 390;
+  const value = withDownloadDocs(1);
+  value.files.push(downloadDiffFile);
+  mount(`/r/${id}`);
+  await screen.findByRole("link", { name: "Docs" });
+  const trigger = screen.getByRole("button", { name: "More" });
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Download" }));
+  const dialog = within(await screen.findByRole("alertdialog", { name: "Download" }));
+  const diff = dialog.getByRole("checkbox", { name: /^Code diff/ }) as HTMLInputElement;
+  expect(diff.checked).toBe(false);
+  fireEvent.click(diff);
+  fireEvent.click(dialog.getByRole("checkbox", { name: /Plan title/ }));
+  const link = dialog.getByRole("link", { name: "Download" });
+  expect(link.getAttribute("href")).toBe(reviewDownloadPath(id, 1, [value.files[0]?.id ?? ""], { diff: true }));
+  expect(link.hasAttribute("download")).toBe(true);
+  link.addEventListener("click", (event) => event.preventDefault());
+  fireEvent.click(link);
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
+});
+
 test("Download hides the comments box without sent comments", async () => {
   withDownloadDocs(2, { threads: [downloadThread(false)] });
   mount(`/r/${id}`);
   fireEvent.click(await screen.findByRole("button", { name: "Download" }));
   const dialog = within(await screen.findByRole("alertdialog", { name: "Download" }));
   expect(dialog.queryByRole("checkbox", { name: /Comments and replies/ })).toBeNull();
+  expect(dialog.queryByRole("checkbox", { name: /^Code diff/ })).toBeNull();
 });
 
 test("sent comments open the Download dialog without docs, unticked, and the box resets on reopen", async () => {

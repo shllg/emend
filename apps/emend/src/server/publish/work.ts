@@ -14,9 +14,12 @@ import {
   composeRenames,
   DIFF_COUNT_TIMEOUT_MS,
   type DocLinks,
+  type DownloadDiffHunk,
+  type DownloadDiffReveal,
   decodeText,
   diffLineCounts,
   docText,
+  downloadDiffHunks,
   type FileSides,
   htmlHeadings,
   inferDocTitle,
@@ -44,6 +47,13 @@ export type PlacementDoc = PlaceContext["docs"] extends Map<string, infer T> ? T
 export type EncodedPlacementDoc = { bytes: ArrayBuffer; textBytes: number; encodedBytes: number };
 export type Work =
   | { kind: "diff-counts"; old: ArrayBuffer | null; next: ArrayBuffer | null }
+  | {
+      kind: "diff-hunks";
+      old: ArrayBuffer | null;
+      next: ArrayBuffer | null;
+      maxLines: number;
+      reveal: DownloadDiffReveal[];
+    }
   | { kind: "source"; path: string; source: ArrayBuffer; highlight?: boolean }
   | { kind: "doc-metadata"; format: "html" | "markdown"; bytes: ArrayBuffer }
   | { kind: "line-count"; bytes: ArrayBuffer }
@@ -87,6 +97,7 @@ export type Work =
 export type DocMetadata = { title?: string; headings: DocHeading[] };
 export type WorkResult =
   | { kind: "diff-counts"; counts: { additions: number; deletions: number } | null }
+  | { kind: "diff-hunks"; hunks: DownloadDiffHunk[] | null | "too-long" }
   | ({ kind: "doc-metadata" } & DocMetadata)
   | { kind: "line-count"; count: number }
   | { kind: "writeup-source"; source: WriteupInput; links?: PublishLinks; repoUrl?: string }
@@ -118,6 +129,17 @@ export function serializeRendered(value: RenderedWriteup | Block[], pathDependen
 }
 export type Executor = (work: Work) => Promise<WorkResult>;
 export const executeWork: Executor = async (work) => {
+  if (work.kind === "diff-hunks")
+    return {
+      kind: "diff-hunks",
+      hunks: downloadDiffHunks(
+        work.old === null ? "" : decode(work.old),
+        work.next === null ? "" : decode(work.next),
+        DIFF_COUNT_TIMEOUT_MS,
+        work.maxLines,
+        work.reveal,
+      ),
+    };
   if (work.kind === "diff-counts")
     return {
       kind: "diff-counts",

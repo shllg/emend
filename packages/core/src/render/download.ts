@@ -11,6 +11,7 @@ import { fromHtml } from "hast-util-from-html";
 import { toString as hastText } from "hast-util-to-string";
 import rehypeStringify from "rehype-stringify";
 import { unified } from "unified";
+import { isLockfile } from "../lockfiles.ts";
 import { parseDocHtml } from "../place/html.ts";
 import type { HtmlElement as Element, HtmlRoot as Root } from "./blocks.ts";
 import {
@@ -31,6 +32,14 @@ import {
   isIndirectReference,
   utf8Length,
 } from "./download-css.ts";
+import {
+  DOWNLOAD_DIFF_BYTES,
+  DOWNLOAD_DIFF_LINES,
+  type DownloadDiffFile,
+  type DownloadDiffHunk,
+  type DownloadDiffReveal,
+  downloadDiffGroups,
+} from "./download-diff.ts";
 import { type DownloadComment, type DownloadThread, type FileThreads, threadOrder } from "./download-threads.ts";
 import { MEDIA_URL_PREFIX } from "./sanitize.ts";
 
@@ -85,6 +94,10 @@ const READING_STYLES = `
 const THREAD_STYLES = `
 .em-threads{margin:24px 0}.em-thread{margin:12px 0;padding:10px 14px;border:1px solid var(--border,#d4d4d8);border-left:3px solid var(--link,#7c5a1e);border-radius:6px;background:var(--sunken,#f7f7f8);color:var(--fg,#3f3f46);font:400 14px/1.55 ui-sans-serif,system-ui,sans-serif;text-align:left}.em-thread[data-state=resolved]{border-left-color:var(--muted,#71717a)}.em-thread-head,.em-thread-note,.em-thread-omitted,.em-comment-head{margin:0 0 6px;font-size:12px;line-height:1.4;color:var(--muted,#71717a)}.em-thread-where,.em-comment-head strong{color:var(--strong,#18181b)}.em-thread-quote{margin:0 0 8px;padding-left:10px;border-left:2px solid var(--border,#d4d4d8)}.em-thread-quote p{margin:0}.em-thread-lines{margin:0 0 8px;padding:8px 10px;overflow:auto;font:400 12px/1.5 ui-monospace,"SF Mono",Menlo,monospace}.em-comments{margin:0;padding:0}.em-comment{margin:8px 0 0;padding-top:8px;border-top:1px solid var(--border,#d4d4d8)}.em-comment:first-child{margin-top:0;padding-top:0;border-top:0}.em-comment-text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.em-comment-body{overflow-wrap:anywhere}.em-comment-body>*{margin-top:0}.em-comment-body>:last-child{margin-bottom:0}
 @media(prefers-color-scheme:dark){.em-thread{border-color:var(--border,#3f3f46);background:var(--sunken,#1c1c1f);color:var(--fg,#d4d4d8)}.em-thread-head,.em-thread-note,.em-thread-omitted,.em-comment-head{color:var(--muted,#a1a1aa)}.em-thread-where,.em-comment-head strong{color:var(--strong,#f4f4f5)}.em-thread-quote,.em-comment{border-color:var(--border,#3f3f46)}}
+`;
+const DIFF_STYLES = `
+.em-diff-file{margin:20px 0 8px;font:600 12px/1.5 ui-monospace,"SF Mono",Menlo,monospace;color:var(--strong);text-transform:none;overflow-wrap:anywhere}.em-diff{overflow:auto;font-size:12px}.em-diff-line{display:inline-block;min-width:100%}.em-diff-add{background:oklch(.94 .04 145)}.em-diff-delete{background:oklch(.94 .04 25)}.em-diff-numbers,.em-diff-hunk,.em-diff-marker{color:var(--muted)}.em-diff-numbers{user-select:none}
+@media(prefers-color-scheme:dark){.em-diff-add{background:oklch(.27 .04 145)}.em-diff-delete{background:oklch(.27 .04 25)}}
 `;
 const rel = ["noopener", "noreferrer", "nofollow"];
 const imageTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
@@ -238,7 +251,13 @@ function resolverState(
   return state;
 }
 type AssetState = ReturnType<typeof resolverState>;
-function frame(input: PageInput, content: ElementContent[], tooLarge: boolean, threadStyles = false): string {
+function frame(
+  input: PageInput,
+  content: ElementContent[],
+  tooLarge: boolean,
+  threadStyles = false,
+  diffStyles = false,
+): string {
   const { title, details } = input;
   const links = (details.links ?? []).flatMap((link) => {
     try {
@@ -276,6 +295,7 @@ function frame(input: PageInput, content: ElementContent[], tooLarge: boolean, t
             element("title", [text(title)]),
             style(READING_STYLES),
             ...(threadStyles ? [style(THREAD_STYLES)] : []),
+            ...(diffStyles ? [style(DIFF_STYLES)] : []),
           ]),
           element("body", [
             element(
@@ -529,6 +549,10 @@ function fileThreads(threads: FileThreads): DownloadThread[] {
   return [
     ...threads.end,
     ...[...threads.blocks.values(), ...threads.topics.values(), ...threads.lines.values()].flat(),
+    ...[...threads.diff.values()].flatMap((file) => [
+      ...file.whole,
+      ...[...file.old.values(), ...file.new.values()].flat(),
+    ]),
   ].sort((a, b) => threadOrder(a) - threadOrder(b));
 }
 export async function buildCommentsDownload(
@@ -580,8 +604,188 @@ async function blocksContent(
   }
   return children;
 }
+type DownloadDiff = {
+  files: DownloadDiffFile[];
+  hunks: (
+    index: number,
+    maxLines: number,
+    reveal: DownloadDiffReveal[],
+  ) => Promise<DownloadDiffHunk[] | "missing" | "too-large" | "failed" | "too-long">;
+  bytes?: number;
+};
+const diffStatus = {
+  added: "Added",
+  modified: "Modified",
+  deleted: "Deleted",
+  renamed: "Renamed",
+  "mode-changed": "Mode changed",
+};
+function hunkCounts(hunk: DownloadDiffHunk) {
+  let old = 0;
+  let next = 0;
+  let additions = 0;
+  let deletions = 0;
+  for (const line of hunk.lines) {
+    if (line.startsWith(" ") || line.startsWith("-")) old++;
+    if (line.startsWith(" ") || line.startsWith("+")) next++;
+    if (line.startsWith("+")) additions++;
+    if (line.startsWith("-")) deletions++;
+  }
+  return { old, next, additions, deletions };
+}
+async function diffContent(
+  diff: DownloadDiff,
+  topics: TopicMeta[],
+  state: AssetState,
+  ctx?: ThreadContext,
+): Promise<Element> {
+  const content: ElementContent[] = [element("h2", [text("Code diff")])];
+  let lineCount = 0;
+  let bytesLeft = diff.bytes ?? DOWNLOAD_DIFF_BYTES;
+  const leftOut = () => {
+    state.tooLarge = true;
+    return "Left out because it passed a size or processing limit.";
+  };
+  for (const group of downloadDiffGroups(topics, diff.files)) {
+    content.push(element("h3", [text(group.title)]));
+    for (const index of group.files) {
+      await state.pause?.();
+      const file = diff.files[index];
+      if (!file) continue;
+      const threads = ctx?.threads.diff.get(index);
+      let message: string | undefined;
+      let hunks: DownloadDiffHunk[] = [];
+      let shown = false;
+      if (file.flag === "binary") message = "Binary file. Its changes are not shown.";
+      else if (file.flag === "oversized") message = "This file is too large to show.";
+      else if (isLockfile(file.path)) message = "Lock file. Its changes are left out.";
+      else if (lineCount >= DOWNLOAD_DIFF_LINES || bytesLeft <= 0) message = leftOut();
+      else {
+        const result = await diff.hunks(index, DOWNLOAD_DIFF_LINES - lineCount, threads?.ranges ?? []);
+        if (result === "missing") message = "This file could not be shown.";
+        else if (result === "too-large" || result === "failed") message = leftOut();
+        else if (result === "too-long") {
+          lineCount = DOWNLOAD_DIFF_LINES;
+          message = leftOut();
+        } else {
+          const count = result.reduce((total, hunk) => total + hunk.lines.length, 0);
+          if (count > DOWNLOAD_DIFF_LINES - lineCount) {
+            lineCount = DOWNLOAD_DIFF_LINES;
+            message = leftOut();
+          } else {
+            lineCount += count;
+            hunks = result;
+            shown = true;
+            if (!hunks.length) message = "No changes to the text.";
+          }
+        }
+      }
+      const counts = hunks.map(hunkCounts);
+      // Stage the same pre splits without spending comment bytes or marking cards emitted.
+      const body: { pre: Element; threads?: DownloadThread[] }[] = [];
+      const placed = new Set(threads?.whole);
+      let widest = 1;
+      for (const [index, hunk] of hunks.entries()) {
+        const count = counts[index];
+        if (count) widest = Math.max(widest, hunk.oldStart + count.old - 1, hunk.newStart + count.next - 1);
+      }
+      const width = String(widest).length;
+      const number = (value: number | undefined) => (value === undefined ? "" : String(value)).padStart(width);
+      const pre = (lines: ElementContent[]) => element("pre", [element("code", lines)], { className: ["em-diff"] });
+      for (const [index, hunk] of hunks.entries()) {
+        const count = counts[index];
+        if (!count) continue;
+        let lines: ElementContent[] = [
+          element("span", [text(`@@ -${hunk.oldStart},${count.old} +${hunk.newStart},${count.next} @@`)], {
+            className: ["em-diff-hunk"],
+          }),
+        ];
+        let old = hunk.oldStart;
+        let next = hunk.newStart;
+        for (const raw of hunk.lines) {
+          const pending = state.element();
+          if (pending) await pending;
+          if (lines.length) lines.push(text("\n"));
+          const line = raw
+            .replace(/\r$/, "")
+            .replace(
+              /[\r\u2028\u2029\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,
+              (character) => `[U+${character.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}]`,
+            );
+          const oldLine = line.startsWith("-") || line.startsWith(" ") ? old++ : undefined;
+          const newLine = line.startsWith("+") || line.startsWith(" ") ? next++ : undefined;
+          const marker = line.startsWith("\\");
+          const kind = marker ? "marker" : line.startsWith("+") ? "add" : line.startsWith("-") ? "delete" : "context";
+          lines.push(
+            element(
+              "span",
+              [
+                ...(marker
+                  ? []
+                  : [
+                      element("span", [text(`${number(oldLine)} ${number(newLine)} `)], {
+                        className: ["em-diff-numbers"],
+                      }),
+                    ]),
+                text(line),
+              ],
+              { className: ["em-diff-line", `em-diff-${kind}`] },
+            ),
+          );
+          const atLine = [
+            ...(oldLine === undefined ? [] : (threads?.old.get(oldLine) ?? [])),
+            ...(newLine === undefined ? [] : (threads?.new.get(newLine) ?? [])),
+          ]
+            .sort((a, b) => threadOrder(a) - threadOrder(b))
+            .filter((thread) => {
+              if (ctx?.emitted.has(thread) || placed.has(thread)) return false;
+              placed.add(thread);
+              return true;
+            });
+          if (atLine.length) {
+            body.push({ pre: pre(lines), threads: atLine });
+            lines = [];
+          }
+        }
+        if (lines.length) body.push({ pre: pre(lines) });
+      }
+      if (body.length) {
+        const bytes = utf8Length(serialize({ type: "root", children: body.map((part) => part.pre) }).slice(1));
+        if (bytes > bytesLeft) {
+          bytesLeft = 0;
+          shown = false;
+          message = leftOut();
+          body.length = 0;
+        } else bytesLeft -= bytes;
+      }
+      const additions = shown ? counts.reduce((total, count) => total + count.additions, 0) : file.additions;
+      const deletions = shown ? counts.reduce((total, count) => total + count.deletions, 0) : file.deletions;
+      const path = file.oldPath !== null && file.oldPath !== file.path ? `${file.oldPath} → ${file.path}` : file.path;
+      const header: string[] = file.status ? [diffStatus[file.status]] : [];
+      if (additions !== null && deletions !== null) header.push(`+${additions} −${deletions}`);
+      content.push(
+        element("p", [element("bdi", [text(path)]), text(header.length ? ` · ${header.join(" · ")}` : "")], {
+          className: ["em-diff-file"],
+        }),
+      );
+      if (ctx) content.push(...(await threadCards(threads?.whole, ctx)));
+      if (message) content.push(element("p", [text(message)]));
+      for (const part of body) {
+        content.push(part.pre);
+        if (ctx) content.push(...(await threadCards(part.threads, ctx)));
+      }
+      if (ctx && threads) {
+        const remaining = [...threads.old.values(), ...threads.new.values()]
+          .flat()
+          .sort((a, b) => threadOrder(a) - threadOrder(b));
+        content.push(...(await threadCards(remaining, ctx, true)));
+      }
+    }
+  }
+  return element("section", content);
+}
 export async function buildWriteupDownload(
-  input: PageInput & { writeup: RenderedWriteup; topics: TopicMeta[] },
+  input: PageInput & { writeup: RenderedWriteup; topics: TopicMeta[]; diff?: DownloadDiff },
 ): Promise<string> {
   const state = resolverState(input.resolveMedia, input.inlineBudget, input.pause, input.work);
   // Revisions arrive in review order. The reserved Other topic never receives a rank.
@@ -666,9 +870,11 @@ export async function buildWriteupDownload(
         ]),
       });
     }
-    return groups.map((group) => group.node);
+    const result = groups.map((group) => group.node);
+    if (input.diff) result.push(await diffContent(input.diff, input.topics, state, ctx));
+    return result;
   });
-  return frame(input, content, state.tooLarge, input.threads !== undefined);
+  return frame(input, content, state.tooLarge, input.threads !== undefined, input.diff !== undefined);
 }
 export async function buildDocDownload(
   input: PageInput & {

@@ -102,7 +102,7 @@ a machine token reaches only reviews from its own instance.
 | GET | `/api/v1/agent/reviews` | Agent | List the token's own instance's reviews, newest first, as `AgentReviewList`; `?head=<sha>` keeps those whose approved or newest revision has that head. |
 | GET | `/api/v1/reviews/:id` | Reviewer | Read a review. |
 | GET | `/api/v1/reviews/:id/revisions/:seq` | Reviewer | Read one revision. |
-| GET | `/api/v1/reviews/:id/revisions/:seq/download` | Reviewer | Download one offline HTML file, or a ZIP with docs selected by repeated `doc` parameters. Optional `comments=1` adds sent comments and replies; an HTML pub with comments downloads as a ZIP. |
+| GET | `/api/v1/reviews/:id/revisions/:seq/download` | Reviewer | Download one offline HTML file, or a ZIP with docs selected by repeated `doc` parameters. Optional `comments=1` adds sent comments and replies; an HTML pub with comments downloads as a ZIP. Optional `diff=1` adds the code diff after the writeup. |
 | PUT | `/api/v1/reviews/:id/viewed` | Reviewer | Mark or unmark diff files as viewed; return 204. |
 | GET | `/api/v1/files/:fileId/old` | Reviewer | Read the old file side. |
 | GET | `/api/v1/files/:fileId/new` | Reviewer | Read the new file side. |
@@ -210,9 +210,13 @@ value or a repeat gets `400 invalid_request`, before waiting for a slot, also on
 An HTML pub with `comments=1` downloads as a ZIP, even with no docs selected. `HEAD` returns
 the same headers, using only the revision and doc metadata to identify the base doc.
 
+An optional `diff=1` query parameter adds the code diff after the writeup in the base file.
+Any other value or a repeat gets `400 invalid_request` before waiting for a slot, also on `HEAD`.
+It changes no headers, filename or ZIP decision. The choice is off by default.
+
 A code review's file holds the review title and that revision's writeup: sections, topics, text,
-code blocks and images with captions. The base file holds no docs and no diff, and no comments
-unless `comments=1` is set. A revision
+code blocks and images with captions. The base file holds no docs, no diff unless `diff=1` is set,
+and no comments unless `comments=1` is set. A revision
 is a pub when `writeupEmpty` is true and `base` is null. A pub's base file holds one doc:
 the first doc row in file order whose path equals `main`, else the first doc row. The order
 includes both rendered and source views of a path. Markdown uses its stored rendered
@@ -279,7 +283,13 @@ Where a thread goes, by its placement on this revision:
   is the pub's base doc).
 - Threads placed on a doc in the download whose block or line cannot be found in that file:
   an "Other comments" list at the end of that doc's own file.
-- Everything else, including diff threads, threads that have no place on this revision (with the
+- With `diff=1`, diff threads matched to a unique file: whole-file threads after its header;
+  line threads after their end line on the old or new side. With `comments=1`, the diff also
+  shows each placed line comment's lines with up to three lines around them, like the app,
+  so the card follows its end line. Threads whose lines cannot be shown, or on a file whose
+  body is not shown, follow that file's body with their path and lines.
+- Everything else, including diff threads without `diff=1` or without a unique file match,
+  threads that have no place on this revision (with the
   reason and the revision they were made on), and threads whose file is not in the
   download: an "Other comments" list at the end of the base file, or in `comments.html` for an
   HTML pub, with the path and lines.
@@ -289,7 +299,34 @@ note, in a "Comments on this doc" list with where labels. Each thread card count
 bytes against a separate 32 MiB comment budget shared by all files of a download. Built-in images
 inside comments also count against the 128 MiB budget. A card that does not fit is replaced by a
 line saying a comment thread was left out, and the size note shows.
-The diff itself is never in the download.
+Without `diff=1` the diff is never in the download. A pub ignores `diff=1`.
+
+The code diff groups files by topic in ascending importance order, stable for equal importance.
+Files within a topic follow file order (`ord`, then `id`). Empty topics are omitted. Files with
+no topic or an unknown topic go under "Other changes", always last. Each file shows its path
+(old → new for a rename), its status (Added, Modified, Deleted, Renamed or Mode changed) and
+`+A −D` counts from the shown hunks, or stored counts when both exist and the body is not shown.
+Hunks are unified plain text with old and new line numbers and four context lines, like the app.
+Code, including HTML and scripts, is escaped text. The same offline CSP and no-script rules apply.
+Within diff lines, carriage returns (except one trailing CR), U+2028, U+2029 and bidi controls
+(U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069) show as `[U+XXXX]`.
+Binary files say "Binary file. Its changes are not shown." Oversized files say "This file is too
+large to show." Lock files say "Lock file. Its changes are left out." Missing blobs say "This file
+could not be shown." Identical text says "No changes to the text."
+
+At most 100,000 diff hunk lines are shown per download, including no-newline markers. The worker
+stops mapping hunks as soon as their total line count passes the remaining allowance. Diff markup
+has a separate 32 MiB output budget: the exact final UTF-8 bytes of the hunk `pre` elements,
+excluding thread cards. This budget is shared by all diff files and is separate from the 128 MiB
+built-in content budget and the 32 MiB comment budget. A file that does not fit either the line
+or diff output budget and all later text files are omitted rather than partly shown.
+
+Diff blob reads share the 128 MiB read budget below and are charged on each read attempt by
+stored size, including a read that fails verification, without caching. Computing hunks runs in
+a worker with a per-job timeout. A shared 20-second budget is checked before each read and before
+each computation; reads are not interrupted, and a running computation is cut off at the remaining
+budget. A file that passes a line, diff output, read or processing limit, or whose worker fails,
+says "Left out because it passed a size or processing limit." The top left-out note also shows.
 
 Doc entry names use the doc path split on `/`. Each segment replaces runs outside `[A-Za-z0-9._-]`
 with `-`, strips leading dots, trims trailing dots and hyphens, cuts to 80 characters and trims
@@ -303,14 +340,16 @@ contain no backslash, empty, `.` or `..` segment. Links between the files stay p
 
 At most 128 MiB of built-in content is emitted. Every copy of a data URL and every inlined CSS
 text counts its final UTF-8 bytes each time it is emitted. The server also reads at most
-128 MiB of stored assets and selected doc bodies: HTML blobs and Markdown/source rendered blobs.
-It checks their stored sizes before reading them. Assets are cached and charged once; selected
-doc bodies are charged on each read and released after building their file.
+128 MiB of stored assets, selected doc bodies (HTML blobs and Markdown/source rendered blobs),
+and diff blobs when selected.
+It checks their stored sizes before reading them and charges each read attempt by stored size,
+including a read that fails verification. Assets are cached and charged once; selected doc bodies
+are charged on each read and released after building their file.
 Both budgets are shared by all files in a ZIP. Each later builder's emitted budget is reduced
 by the full UTF-8 size of every file already built. A selected doc that does not fit the remaining
 read budget, or comes after the emitted budget is spent, is left unread. Its file is a page with
-the title, reading styles and only the left-out note in its body. The base file's read paths stay
-unchanged. Each ZIP entry is compressed before building the next file.
+the title, reading styles and only the left-out note in its body. Without the diff, the base file's
+read paths stay unchanged. Each ZIP entry is compressed before building the next file.
 At most 64 stylesheet occurrences are inlined per file, across imports and stylesheet links. Repeated
 paths count each time and keep their own conditions. Imports stop at depth 4 and never repeat
 a path in the same chain. All files of a download share one 64 MiB CSS work budget. Each rewrite charges its input
@@ -1649,7 +1688,7 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `diffSideBytes` | 1048576 bytes shown per side |
 | `markdownDocBytes` | 1048576 bytes |
 | `htmlDocBytes` | 8388608 bytes |
-| `downloadInlineBytes` | 134217728 bytes (128 MiB) of emitted built-in content per download, and the same read budget for stored assets and selected doc bodies; both shared by all files of a ZIP |
+| `downloadInlineBytes` | 134217728 bytes (128 MiB) of emitted built-in content per download, and the same read budget for stored assets, selected doc bodies and selected diff blobs; both shared by all files of a ZIP |
 | `downloadCommentBytes` | 32 MiB of thread cards per download, shared by all files of a ZIP, separate from the built-in content budget |
 | `downloadDocs` | 50 docs added to one download |
 | `assetBytes` | 26214400 bytes per asset |

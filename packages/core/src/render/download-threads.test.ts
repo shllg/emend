@@ -1,5 +1,6 @@
 import type { Placement, PlacementLocation, Target, TopicMeta } from "@emend/contract";
 import { expect, test } from "vitest";
+import type { DownloadDiffFile } from "./download-diff.ts";
 import {
   type DownloadComment,
   type DownloadFile,
@@ -152,6 +153,69 @@ test("an HTML pub uses a separate home and HTML files never receive threads", ()
   ]);
   expect(route([])).not.toHaveProperty("comments");
   expect(route([], { kind: "html", path: "p.html" }).comments).toEqual(route([]).base);
+});
+
+const diffFile = (over: Partial<DownloadDiffFile> = {}): DownloadDiffFile => ({
+  path: "f.ts",
+  oldPath: "d.ts",
+  status: "renamed",
+  flag: null,
+  topic: null,
+  order: 0,
+  hasOld: true,
+  hasNew: true,
+  additions: 1,
+  deletions: 1,
+  ...over,
+});
+
+test("routes diff threads by unique file, side and end line only when the writeup includes the diff", () => {
+  const newLines = thread(
+    { kind: "lines", side: "new", path: "f.ts", start: 2, end: 4, lines: ["a", "b", "c"], before: [], after: [] },
+    { kind: "lines", side: "new", path: "f.ts", start: 2, end: 4 },
+  );
+  const input = { threads: [diffLines, file, newLines], seq: 2, topics, base: writeup, docs: [] };
+  const { base } = routeDownloadThreads({ ...input, diff: [diffFile()] });
+  expect(base.end).toEqual([]);
+  expect(base.diff.get(0)?.whole.map((thread) => thread.where)).toEqual(["f.ts"]);
+  expect(base.diff.get(0)?.old.get(3)?.[0]?.where).toBe("d.ts · line 3 (old)");
+  expect(base.diff.get(0)?.new.get(4)?.[0]?.where).toBe("f.ts · lines 2–4");
+  expect(base.diff.get(0)?.ranges).toEqual([
+    { side: "old", start: 3, end: 3 },
+    { side: "new", start: 2, end: 4 },
+  ]);
+  expect(routeDownloadThreads(input).base.end).toHaveLength(3);
+  expect(routeDownloadThreads({ ...input, diff: undefined }).base).toEqual(routeDownloadThreads(input).base);
+  expect(routeDownloadThreads({ ...input, diff: [diffFile(), diffFile()] }).base.end).toHaveLength(3);
+  const pub = routeDownloadThreads({ ...input, base: { kind: "markdown", path: "p.md" }, diff: [diffFile()] });
+  expect(pub.base.end).toHaveLength(3);
+  expect(pub.base.diff.size).toBe(0);
+  for (const changed of [{ hasOld: false }, { status: "added" as const }, { oldPath: "elsewhere.ts" }]) {
+    const routed = routeDownloadThreads({ ...input, diff: [diffFile(changed)] });
+    expect(routed.base.end.map((thread) => thread.where)).toEqual(["d.ts · line 3 (old)"]);
+  }
+  const noNew = routeDownloadThreads({ ...input, diff: [diffFile({ hasNew: false })] });
+  expect(noNew.base.end.map((thread) => thread.where)).toEqual(["f.ts · lines 2–4"]);
+  const unrenamed = routeDownloadThreads({
+    ...input,
+    threads: [diffLines],
+    diff: [diffFile({ path: "d.ts", oldPath: null, status: "modified" })],
+  });
+  expect(unrenamed.base.diff.get(0)?.old.get(3)).toHaveLength(1);
+});
+
+test("diff reveal ranges use placed coordinates and omit unsent or unplaced threads", () => {
+  const moved = thread(diffLines.target, { kind: "lines", path: "f.ts", side: "new", start: 20, end: 22 });
+  const { base } = routeDownloadThreads({
+    threads: [moved, { ...moved, comments: [comment("draft", { sent: false })] }, thread(diffLines.target, null), file],
+    seq: 2,
+    topics,
+    base: writeup,
+    docs: [],
+    diff: [diffFile()],
+  });
+  expect(base.diff.get(0)?.ranges).toEqual([{ side: "new", start: 20, end: 22 }]);
+  expect(base.diff.get(0)?.new.get(22)).toHaveLength(1);
 });
 
 test.each([undefined, null, 0, Date.UTC(2026, 10, 13, 10, 5)])(
