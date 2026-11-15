@@ -70,7 +70,15 @@ export type Work =
       mediaHeads?: [string, ArrayBuffer][];
       docs?: DocLinks;
     }
-  | { kind: "doc"; path: string; source: ArrayBuffer; repoUrl?: string; docs?: DocLinks }
+  | {
+      kind: "doc";
+      path: string;
+      source: ArrayBuffer;
+      repoUrl?: string;
+      docs?: DocLinks;
+      media?: [string, string][];
+      mediaHeads?: [string, ArrayBuffer][];
+    }
   | { kind: "resection"; path: string; bytes: ArrayBuffer }
   | { kind: "comment-md"; bodies: string[]; repoUrl?: string }
   | { kind: "changed"; previous: { format: "writeup" | "doc"; bytes: ArrayBuffer }[]; next: ArrayBuffer[] }
@@ -128,6 +136,14 @@ export function serializeRendered(value: RenderedWriteup | Block[], pathDependen
   };
 }
 export type Executor = (work: Work) => Promise<WorkResult>;
+function readImageSizes(heads: [string, ArrayBuffer][] = []) {
+  const sizes = new Map<string, ImageSize>();
+  for (const [sha, head] of heads) {
+    const size = imageSize(new Uint8Array(head));
+    if (size) sizes.set(sha, size);
+  }
+  return sizes;
+}
 export const executeWork: Executor = async (work) => {
   if (work.kind === "diff-hunks")
     return {
@@ -199,11 +215,7 @@ export const executeWork: Executor = async (work) => {
   }
   if (work.kind === "writeup") {
     const effects: { docBaseUsed?: boolean } = {};
-    const mediaSizes = new Map<string, ImageSize>();
-    for (const [sha, head] of work.mediaHeads ?? []) {
-      const size = imageSize(new Uint8Array(head));
-      if (size) mediaSizes.set(sha, size);
-    }
+    const mediaSizes = readImageSizes(work.mediaHeads);
     const rendered = await renderWriteup(work.source, work.topics, {
       links: work.links,
       repoUrl: work.repoUrl,
@@ -219,7 +231,15 @@ export const executeWork: Executor = async (work) => {
   }
   if (work.kind === "doc") {
     const effects: { docBaseUsed?: boolean; docPathUsed?: boolean } = {};
-    const blocks = await renderDoc(decode(work.source), work.path, work.repoUrl, work.docs, effects);
+    const blocks = await renderDoc(
+      decode(work.source),
+      work.path,
+      work.repoUrl,
+      work.docs,
+      effects,
+      new Map(work.media),
+      readImageSizes(work.mediaHeads),
+    );
     return {
       kind: "doc",
       ...serializeRendered(blocks, effects.docBaseUsed),

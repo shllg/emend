@@ -63,7 +63,7 @@ without NUL and at most 1 MiB; explicitly named binary files are refused. A fold
 that look like secrets (Markdown and HTML files publish whatever their name), folders named exactly
 `secret`, `secrets`, `credential` or `credentials` in any case below the folder argument, binary
 files, files that are too large or unreadable, and files shown as source that hold a private key
-(walked Markdown and HTML that render are not scanned). Below a folder argument, an HTML asset
+(walked Markdown and HTML that render are not scanned). Below a folder argument, a doc asset
 inside such a folder or holding a private key is not uploaded either. A file or folder named
 explicitly is published as named, so never name a credential file or a secrets folder explicitly.
 Name a public file the walk skipped, such as `passwords.ts`, to publish it. Skip warnings stop
@@ -72,9 +72,9 @@ CSS and JavaScript files in a folder also appear as source docs, even when an HT
 uses them as assets.
 
 You can name several files or a folder. A folder bundles its visible text files with the
-assets those HTML docs reference; dotfiles, `.git/` and `node_modules/` are skipped. Symlinks
-leaving the folder are refused. A folder of HTML docs keeps its links and images; Markdown docs
-in a folder do not link to each other or show local images yet.
+images and assets its documents reference; dotfiles, `.git/` and `node_modules/` are skipped. Symlinks
+leaving the folder are refused. Markdown docs show local PNG, JPEG, GIF, WebP and AVIF images
+referenced relative to the doc, such as `![Alt](shots/before.png)`. Remote image URLs do not show.
 
 The default key uses the instance and the sorted, distinct real input paths, so reordering the
 arguments keeps the URL. Adding files inside a named folder also keeps it; changing the set of

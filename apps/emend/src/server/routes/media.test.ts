@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { type FileHandle, open, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { files } from "../../db/schema.ts";
+import { docAssets, files, reviews } from "../../db/schema.ts";
 import { error, mailboxFixture } from "../mailbox/test-support.ts";
 
 let f: Awaited<ReturnType<typeof mailboxFixture>>;
@@ -302,4 +303,53 @@ test("an unauthenticated request is refused like other API routes", async () => 
   expect(response.status).toBe(401);
   expect(response.headers.get("Content-Type")).not.toMatch(/^image\//);
   expect(await response.json()).toMatchObject({ error: { code: "unauthorized" } });
+});
+
+test.each(["text/markdown", "text/html", "text/plain"])(
+  "only an association to a Markdown doc exposes parented images (%s)",
+  async (mediaType) => {
+    const hash = await f.deps.blobs.put(f.ownerId, png, "image/png");
+    const parent = randomUUID(),
+      doc = randomUUID(),
+      asset = randomUUID();
+    await seed({ id: parent, path: "first.html", role: "doc", mediaType: "text/html" });
+    await seed({ id: doc, path: "plan.md", role: "doc", mediaType });
+    await seed({ id: asset, path: "shot.png", parentDocId: parent, newBlob: hash });
+    await f.db.query((q) =>
+      q.insert(docAssets).values({ ownerId: f.ownerId, revisionId: f.revisionId, docId: doc, assetId: asset }),
+    );
+    const response = await f.request(`/media/${hash}`, "GET");
+    if (mediaType !== "text/markdown") {
+      await error(response, 404, "not_found");
+      return;
+    }
+    expect(response.status).toBe(200);
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(png);
+    expect(Object.fromEntries(headerNames.map((name) => [name, response.headers.get(name)]))).toEqual(expected);
+    await error(await f.request(`/media/${hash}`, "GET", undefined, "foreign"), 404, "not_found");
+    await f.db.query((q) =>
+      q
+        .update(reviews)
+        .set({ binnedAt: f.deps.now() })
+        .where(and(eq(reviews.ownerId, f.ownerId), eq(reviews.id, f.reviewId))),
+    );
+    await error(await f.request(`/media/${hash}`, "GET"), 404, "not_found");
+    await f.db.query((q) =>
+      q
+        .update(reviews)
+        .set({ binnedAt: null })
+        .where(and(eq(reviews.ownerId, f.ownerId), eq(reviews.id, f.reviewId))),
+    );
+    const restored = await f.request(`/media/${hash}`, "GET");
+    expect(restored.status).toBe(200);
+    expect(Buffer.from(await restored.arrayBuffer())).toEqual(png);
+  },
+);
+
+test("a Markdown parent alone does not expose an unlisted image", async () => {
+  const hash = await f.deps.blobs.put(f.ownerId, png, "image/png");
+  const doc = randomUUID();
+  await seed({ id: doc, path: "plan.md", role: "doc", mediaType: "text/markdown" });
+  await seed({ path: "shot.png", parentDocId: doc, newBlob: hash });
+  await error(await f.request(`/media/${hash}`, "GET"), 404, "not_found");
 });

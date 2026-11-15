@@ -915,3 +915,36 @@ test("a pending Resume or open intent cancels another key's kept handoff", () =>
   const second = mount(<Composer reviewId={id} revision={2} target={other} />);
   expect(document.activeElement).toBe(within(second.container).getByLabelText("Comment"));
 });
+
+test("a Markdown image in the docs tab opens the lightbox on click", async () => {
+  const src = `/api/v1/media/${"a".repeat(64)}`;
+  const doc = {
+    path: "plan.md",
+    kind: "markdown" as const,
+    blocks: [
+      {
+        ...block,
+        id: "doc-12345678-12345678",
+        section: "doc-12345678",
+        text: "Before",
+        html: `<p class="emend-media-row"><span class="emend-media"><img src="${src}" alt="Before"><span class="emend-media-caption">Before</span></span></p>`,
+      },
+    ],
+  };
+  mount(
+    <DocView
+      reviewId={id}
+      revision={1}
+      docs={[doc]}
+      openDoc={doc}
+      search={{ tab: "docs", doc: doc.path }}
+      targeted={false}
+      onOpenDoc={() => {}}
+      changedBlocks={[]}
+      threads={[]}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open screenshot: Before" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).getByAltText("Before").getAttribute("src")).toBe(src);
+});

@@ -17,7 +17,7 @@ import { DocRootError, readDocRoots, rootRules, validateDocRoot } from "../confi
 import { escapeReference } from "../escape.ts";
 import { createGitSession, GitFailed } from "../git.ts";
 import { CliError } from "../http.ts";
-import { collectAssets } from "./assets.ts";
+import { collectAssets, docAssetSizeError } from "./assets.ts";
 import { collectChanges } from "./collect.ts";
 import { docsKey, normalizeRemote, projectKey, reviewKey } from "./key.ts";
 import {
@@ -160,7 +160,7 @@ export async function resolvePublish(
       totalBytes += bytes.length;
       const size = bytes.length;
       if (options.docFolders) {
-        // Shortcut deduplication retains every source's checks, including shared HTML assets.
+        // Shortcut deduplication retains every source's checks, including shared doc assets.
         const checks: BlobSource["read"][] = [];
         rechecks.set(hash, checks);
         blobs.set(hash, {
@@ -189,6 +189,7 @@ export async function resolvePublish(
   let title = manifest.title;
   let assetCount = 0;
   const assetPaths = new Set<string>();
+  const mediaPaths = new Set(manifest.media?.map((item) => item.path));
   const shortcutAssets = options.docFolders
     ? new ShortcutAssets(
         gitDirs,
@@ -319,11 +320,12 @@ export async function resolvePublish(
       ...(html ? { assets: [] } : {}),
     };
     files.push(resolvedDoc);
-    if (!html) continue;
+    if (sourceView) continue;
+    const format = html ? "html" : "markdown";
     if (shortcutAssets) {
       // source is the checked real path, so aliases use the target folder for assets.
-      // readResolvedDoc/readDoc enforce the HTML doc Git and published-folder rules here.
-      shortcutAssets.add(resolvedDoc, source, bytes, publishedFolders);
+      // readResolvedDoc/readDoc enforce the doc Git and published-folder rules here.
+      shortcutAssets.add(resolvedDoc, source, bytes, publishedFolders, format);
       continue;
     }
     const assets = await collectAssets(
@@ -333,14 +335,16 @@ export async function resolvePublish(
       gitDirs,
       options.skipNodeModules,
       publishedFolders,
+      format,
     );
     resolvedDoc.assets = assets.map((asset) => posix.join(posix.dirname(file.path), asset.ref));
     let size = bytes.length;
     for (const asset of assets) {
+      if (!html && mediaPaths.has(posix.join(posix.dirname(file.path), asset.ref))) continue;
       const info = await stat(asset.file);
       if (info.size > LIMITS.assetBytes) throw new CliError("asset exceeds its size limit");
       size += info.size;
-      if (size > LIMITS.htmlDocWithAssetsBytes) throw new CliError("HTML doc and assets exceed their size limit");
+      if (size > LIMITS.htmlDocWithAssetsBytes) throw new CliError(docAssetSizeError(format));
     }
     let actualSize = bytes.length;
     const readAsset = async (file: string, limit: number) => {
@@ -358,7 +362,7 @@ export async function resolvePublish(
     };
     for (const asset of assets) {
       const path = posix.join(posix.dirname(file.path), asset.ref);
-      if (assetPaths.has(path)) continue;
+      if ((!html && mediaPaths.has(path)) || assetPaths.has(path)) continue;
       assetPaths.add(path);
       if (grouped.files.length + ++assetCount > LIMITS.filesPerRevision)
         throw new CliError("too many files in the review");
@@ -380,9 +384,12 @@ export async function resolvePublish(
     }
   }
   if (shortcutAssets) {
-    // HTML docs already passed their checked reads; this phase checks their shared assets.
+    // Rendered docs already passed their checked reads; this phase checks their shared assets.
     const assets = await shortcutAssets.resolve(files.length, addRequired);
-    files = files.flatMap((file) => [file, ...(isRenderedHtmlDoc(file) ? (assets.get(file.path) ?? []) : [])]);
+    files = files.flatMap((file) => [
+      file,
+      ...(file.role === "doc" && docViewOf(file) === "rendered" ? (assets.get(file.path) ?? []) : []),
+    ]);
   }
   for (const item of manifest.media ?? []) {
     const label = escapeReference(item.source ?? item.path);
@@ -427,6 +434,17 @@ export async function resolvePublish(
       newBlob: addRequired(bytes, readMedia),
       flag: null,
     });
+  }
+  // Shared assets and writeup-media overlaps count at their final stored size for every doc.
+  const resolvedAssets = new Map(files.filter((file) => file.role === "asset").map((file) => [file.path, file]));
+  for (const doc of files) {
+    if (!doc.assets) continue;
+    const size = doc.assets.reduce(
+      (sum, path) => sum + (blobs.get(resolvedAssets.get(path)?.newBlob ?? "")?.size ?? 0),
+      blobs.get(doc.newBlob ?? "")?.size ?? 0,
+    );
+    if (size > LIMITS.htmlDocWithAssetsBytes)
+      throw new CliError(docAssetSizeError(isRenderedHtmlDoc(doc) ? "html" : "markdown"));
   }
   const keyFor = (id: string) => {
     const name = typeof options.key === "function" ? options.key(id) : options.key;

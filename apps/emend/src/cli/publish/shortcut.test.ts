@@ -1917,3 +1917,96 @@ test("an entirely skipped walk reports escaped paths and reasons in its one capp
   expect(line).not.toContain("z-secret-17");
   expect(line.split("\n")).toHaveLength(2);
 });
+
+test.each(["bundle", "bundle/plan.md"])(
+  "publishes Markdown images from %s and hides their binary skip warnings",
+  async (path) => {
+    const f = await fixture();
+    await f.file("bundle/plan.md", "# Plan\n\n![Before](shots/a.png)\n\n![Remote](https://example.com/remote.png)");
+    await f.file("bundle/shots/a.png", "synthetic image");
+    const capture = await f.capture();
+    const result = await f.publish(path);
+    expect(result.code, result.stderr.join("")).toBe(0);
+    const request = capture.requests[0];
+    expect(request?.files).toMatchObject([
+      { path: "plan.md", role: "doc", assets: ["shots/a.png"] },
+      { path: "shots/a.png", role: "asset", parent: "plan.md" },
+    ]);
+    expect(result.stderr.join("")).not.toContain("binary file");
+    expect(result.stderr.join("")).toContain("not a local visible path");
+  },
+);
+
+test("Markdown image discovery retains fixed skip reasons and folder boundaries", async () => {
+  const f = await fixture();
+  await f.file("outside.png", "outside");
+  await f.file(
+    "bundle/plan.md",
+    ["../outside.png", "escape.png", ".hidden/a.png", "node_modules/a.png", "vector.svg", "https://example.com/a.png"]
+      .map((src) => `![Shot](${src})`)
+      .join("\n\n"),
+  );
+  await symlink(join(f.source, "outside.png"), join(f.source, "bundle/escape.png"));
+  await f.file("bundle/.hidden/a.png", "hidden");
+  await f.file("bundle/node_modules/a.png", "dependency");
+  await f.file("bundle/vector.svg", "<svg/>");
+  const capture = await f.capture();
+  const result = await f.publish("bundle/plan.md");
+  expect(result.code, result.stderr.join("")).toBe(0);
+  expect(capture.requests[0]?.files).toHaveLength(1);
+  const warnings = result.stderr.join("");
+  for (const [path, reason] of [
+    ["../outside.png", "not a local visible path"],
+    ["escape.png", "target leaves the visible doc folder"],
+    [".hidden/a.png", "not a local visible path"],
+    ["node_modules/a.png", "target is in node_modules"],
+    ["vector.svg", "not a supported image"],
+    ["https://example.com/a.png", "not a local visible path"],
+  ])
+    expect(warnings).toContain(`${path}: ${reason}`);
+});
+
+test("a Markdown pub resolves, ingests, renders and serves its local screenshot", async () => {
+  const f = await fixture(true);
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489", "hex");
+  await f.file("plan.md", "# Plan\n\n![Before](shots/a.png)\n\nRemote: ![Remote](https://example.com/remote.png)");
+  await f.file("shots/a.png", png);
+  const result = await f.publish("plan.md", "--json");
+  expect(result.code, result.stderr.join("")).toBe(0);
+  const pub = PublishResponse.parse(JSON.parse(result.stdout.join("")));
+  const reviewer = await f.reviewer();
+  const { RevisionView } = await import("@emend/contract");
+  const revision = RevisionView.parse(await (await reviewer.request(`/reviews/${pub.reviewId}/revisions/1`)).json());
+  const doc = revision.docs.find((doc) => doc.kind === "markdown");
+  if (doc?.kind !== "markdown") throw new Error("Missing Markdown doc");
+  const hash = createHash("sha256").update(png).digest("hex");
+  const html = doc.blocks.map((block) => block.html).join("");
+  expect(html).toContain(`<span class="emend-media emend-media-sized"><img src="/api/v1/media/${hash}"`);
+  expect(html).toContain('width="1" height="1"');
+  expect(html).toContain('<img alt="Remote">');
+  expect(html).not.toContain("https://example.com");
+  const media = await reviewer.request(`/media/${hash}`);
+  expect(media.status).toBe(200);
+  expect(Buffer.from(await media.arrayBuffer())).toEqual(png);
+  const download = await reviewer.request(`/reviews/${pub.reviewId}/revisions/1/download`);
+  expect(download.status).toBe(200);
+  expect(await download.text()).toContain(`data:image/png;base64,${png.toString("base64")}`);
+});
+
+test("walked Markdown images keep the private-key scan and source view collects none", async () => {
+  const f = await fixture();
+  await f.file("bundle/plan.md", "# Plan\n\n![Key](shots/a.png) ![Secret](secrets/b.png)");
+  await f.file("bundle/shots/a.png", syntheticPrivateKey());
+  await f.file("bundle/secrets/b.png", "synthetic image");
+  const capture = await f.capture();
+  const result = await f.publish("bundle");
+  expect(result.code, result.stderr.join("")).toBe(0);
+  expect(capture.requests[0]?.files).toMatchObject([{ path: "plan.md", role: "doc", assets: [] }]);
+  expect(capture.requests[0]?.files).toHaveLength(1);
+  expect(result.stderr.join("")).toContain("may hold a secret");
+  const source = await f.publish("bundle/plan.md", "--source");
+  expect(source.code, source.stderr.join("")).toBe(0);
+  expect(capture.requests[1]?.files).toHaveLength(1);
+  expect(capture.requests[1]?.files[0]?.view).toBe("source");
+  expect(capture.requests[1]?.files[0]?.assets).toBeUndefined();
+});

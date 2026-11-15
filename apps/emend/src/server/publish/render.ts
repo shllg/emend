@@ -82,14 +82,25 @@ export async function renderRevision(
   const media: [string, string][] = [];
   for (const file of input.files)
     if (file.role === "asset" && file.parent === undefined && file.newBlob) media.push([file.path, file.newBlob]);
-  // Only the first bytes of each distinct blob cross to the worker, which reads the image sizes.
-  const mediaHeads: [string, ArrayBuffer][] = [];
-  for (const sha of new Set(media.map(([, blob]) => blob))) {
-    checkPublishSignal(signal);
-    const head = await readHead(sha);
-    mediaHeads.push([sha, head.byteLength > IMAGE_HEAD_BYTES ? head.slice(0, IMAGE_HEAD_BYTES) : head]);
-    await yieldToLoop("publish-render");
-  }
+  // Cache bounded heads across writeup and docs; each worker transfer gets its own copy.
+  const heads = new Map<string, ArrayBuffer>();
+  const imageHeads = async (images: [string, string][]): Promise<[string, ArrayBuffer][]> => {
+    const result: [string, ArrayBuffer][] = [];
+    for (const sha of new Set(images.map(([, blob]) => blob))) {
+      checkPublishSignal(signal);
+      let head = heads.get(sha);
+      if (!head) {
+        const bytes = await readHead(sha);
+        head = bytes.byteLength > IMAGE_HEAD_BYTES ? bytes.slice(0, IMAGE_HEAD_BYTES) : bytes;
+        heads.set(sha, head);
+        await yieldToLoop("publish-render");
+      }
+      result.push([sha, head.slice(0)]);
+    }
+    return result;
+  };
+  const assets = new Map(input.files.filter((file) => file.role === "asset").map((file) => [file.path, file.newBlob]));
+  const mediaHeads = await imageHeads(media);
   let rendered: RenderedBytes;
   try {
     const result = await execute({
@@ -230,8 +241,15 @@ export async function renderRevision(
       continue;
     }
     let result: RenderedBytes;
-    const folderKey = `${file.newBlob}:${file.path.slice(0, file.path.lastIndexOf("/") + 1)}`;
-    const source = cache.get(file.newBlob);
+    const folder = file.path.slice(0, file.path.lastIndexOf("/") + 1);
+    const docMedia: [string, string][] = [];
+    for (const path of file.assets ?? []) {
+      const sha = assets.get(path);
+      if (sha) docMedia.push([path.slice(folder.length), sha]);
+    }
+    const cacheKey = JSON.stringify([file.newBlob, docMedia]);
+    const folderKey = JSON.stringify([cacheKey, folder]);
+    const source = cache.get(cacheKey);
     const shared = source === undefined ? folderCache.get(folderKey) : source;
     if (shared === null) {
       markUnrendered(file.path);
@@ -240,15 +258,23 @@ export async function renderRevision(
     try {
       const rendered = await execute(
         shared === undefined
-          ? { kind: "doc", path: file.path, source: await read(file.newBlob), repoUrl: input.repoUrl, docs }
+          ? {
+              kind: "doc",
+              path: file.path,
+              source: await read(file.newBlob),
+              repoUrl: input.repoUrl,
+              docs,
+              media: docMedia,
+              mediaHeads: await imageHeads(docMedia),
+            }
           : { kind: "resection", path: file.path, bytes: await read(shared) },
       );
       if (rendered.kind !== "doc") throw new Error("wrong result");
       result = rendered;
     } catch {
       checkPublishSignal(signal);
-      // A source that fails once is intentionally unrendered in every folder, even if resection failed.
-      cache.set(file.newBlob, null);
+      // A source with this image map that fails once stays unrendered in every folder.
+      cache.set(cacheKey, null);
       markUnrendered(file.path);
       continue;
     }
@@ -266,7 +292,7 @@ export async function renderRevision(
     const blob = await put(json);
     docBlobs.set(file.path, blob);
     if (shared === undefined) {
-      if (!result.pathDependent) cache.set(file.newBlob, blob);
+      if (!result.pathDependent) cache.set(cacheKey, blob);
       else if (!result.selfDependent) folderCache.set(folderKey, blob);
     }
     ids.push(result.ids);

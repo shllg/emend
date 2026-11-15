@@ -2,7 +2,7 @@ import { lstat, realpath, stat } from "node:fs/promises";
 import { dirname, posix, relative, sep } from "node:path";
 import { LIMITS, type PublishFile } from "@emend/contract";
 import { CliError } from "../http.ts";
-import { assetCandidates, assetWarning } from "./assets.ts";
+import { type AssetFormat, assetCandidates, assetWarning, docAssetSizeError } from "./assets.ts";
 import {
   checkPublishedFolders,
   GitFolderRead,
@@ -29,6 +29,7 @@ interface AssetSource {
   hash?: string;
 }
 interface DocAssets {
+  format: AssetFormat;
   doc: PublishFile;
   bytes: number;
   remaining: number;
@@ -63,8 +64,15 @@ export class ShortcutAssets {
     this.retainedSources = retainedSources;
   }
 
-  add(doc: PublishFile, realSource: string, bytes: Buffer, folders: readonly PublishedFolder[]) {
+  add(
+    doc: PublishFile,
+    realSource: string,
+    bytes: Buffer,
+    folders: readonly PublishedFolder[],
+    format: AssetFormat = "html",
+  ) {
     const entry: DocAssets = {
+      format,
       doc,
       bytes: bytes.length,
       remaining: LIMITS.htmlDocWithAssetsBytes - bytes.length,
@@ -73,7 +81,7 @@ export class ShortcutAssets {
     this.docs.push(entry);
     const seen = new Set<string>();
     this.referenceBytes += 2; // Brackets for the assets array.
-    for (const candidate of assetCandidates(realSource, bytes.toString(), this.warn, true)) {
+    for (const candidate of assetCandidates(realSource, bytes.toString(), this.warn, true, format)) {
       // The shortcut reports these skips once, using their walked paths.
       if (this.excludedAssets.has(candidate.file)) continue;
       const path = posix.join(posix.dirname(doc.path), candidate.ref);
@@ -160,7 +168,7 @@ export class ShortcutAssets {
 
   private checkSize(entry: DocAssets) {
     const size = entry.refs.reduce((sum, { source }) => sum + (source.size ?? 0), entry.bytes);
-    if (size > LIMITS.htmlDocWithAssetsBytes) throw new CliError("HTML doc and assets exceed their size limit");
+    if (size > LIMITS.htmlDocWithAssetsBytes) throw new CliError(docAssetSizeError(entry.format));
   }
 
   async resolve(fileCount: number, add: (bytes: Buffer, read: BlobSource["read"]) => string) {
@@ -212,7 +220,13 @@ export class ShortcutAssets {
         );
       };
       let limit: number = LIMITS.assetBytes;
-      for (const doc of asset.docs) limit = Math.min(limit, doc.remaining);
+      let limitingDoc: DocAssets | undefined;
+      for (const doc of asset.docs) {
+        if (doc.remaining < limit) {
+          limit = doc.remaining;
+          limitingDoc = doc;
+        }
+      }
       // A spent doc budget can leave limit <= 0; read(0) intentionally rejects content with the combined-size message.
       let bytes: Buffer;
       try {
@@ -223,13 +237,13 @@ export class ShortcutAssets {
         }
       } catch (error) {
         if (error instanceof OversizedFile && limit < LIMITS.assetBytes)
-          throw new CliError("HTML doc and assets exceed their size limit");
+          throw new CliError(docAssetSizeError(limitingDoc?.format ?? "html"));
         throw error;
       }
       firstRead = false;
       for (const doc of asset.docs) {
         doc.remaining -= bytes.length;
-        if (doc.remaining < 0) throw new CliError("HTML doc and assets exceed their size limit");
+        if (doc.remaining < 0) throw new CliError(docAssetSizeError(doc.format));
       }
       asset.size = bytes.length;
       if (scanPrivateKey) {

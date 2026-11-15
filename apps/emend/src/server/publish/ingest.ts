@@ -3,6 +3,7 @@ import {
   type DocView,
   docViewOf,
   isRenderedHtmlDoc,
+  isRenderedMarkdownDoc,
   LIMITS,
   type PublishRequest,
   type PublishResponse,
@@ -285,7 +286,7 @@ async function computePublish(
     }
     const assets = new Map(input.files.filter((file) => file.role === "asset").map((file) => [file.path, file]));
     for (const file of input.files)
-      if (isRenderedHtmlDoc(file)) {
+      if (isRenderedHtmlDoc(file) || isRenderedMarkdownDoc(file)) {
         let size = sizes.get(file.newBlob ?? "") ?? 0;
         for (const path of file.assets ?? []) {
           const asset = assets.get(path);
@@ -578,7 +579,7 @@ async function computePublish(
         }
         let associations: (typeof docAssets.$inferInsert)[] = [];
         for (const file of input.files) {
-          if (!isRenderedHtmlDoc(file)) continue;
+          if (!isRenderedHtmlDoc(file) && !isRenderedMarkdownDoc(file)) continue;
           const docId = ids.get(fileKey(file));
           if (!docId) throw new Error("Missing doc id");
           for (const path of file.assets ?? []) {

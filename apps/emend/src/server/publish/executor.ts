@@ -78,7 +78,7 @@ export function workerExecutor(timeouts = { render: 10000, place: 30000 }): Work
           work.kind === "diff-counts" || work.kind === "diff-hunks"
             ? [work.old, work.next].filter((buffer): buffer is ArrayBuffer => buffer !== null)
             : work.kind === "doc" || work.kind === "source"
-              ? [work.source]
+              ? [work.source, ...(work.kind === "doc" ? (work.mediaHeads ?? []).map(([, head]) => head) : [])]
               : work.kind === "doc-metadata" ||
                   work.kind === "resection" ||
                   work.kind === "placement-doc" ||

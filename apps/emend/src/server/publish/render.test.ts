@@ -459,3 +459,57 @@ test("media heads come from readHead once per distinct hash and never from read"
   expect(html).toContain('width=\\"3\\"');
   expect(html).toContain('height=\\"2\\"');
 });
+
+test("shared Markdown sources keep their own image maps and share bounded heads with the writeup", async () => {
+  const request = input(["one/a.md", "one/b.md", "two/a.md", "plain.md"]);
+  const shaA = "c".repeat(64),
+    shaB = "d".repeat(64);
+  request.writeup.overview = "![Writeup](one/shot.png)";
+  for (const doc of request.files) if (doc.path !== "plain.md") doc.assets = [`${doc.path.split("/")[0]}/shot.png`];
+  request.files.push(
+    { path: "one/shot.png", role: "asset", oldPath: null, oldBlob: null, newBlob: shaA, flag: null },
+    {
+      path: "two/shot.png",
+      role: "asset",
+      parent: "two/a.md",
+      oldPath: null,
+      oldBlob: null,
+      newBlob: shaB,
+      flag: null,
+    },
+  );
+  const stored = new Map<string, Buffer>();
+  const png = Buffer.from("89504e470d0a1a0a0000000d4948445200000280000001e008060000001f15c489", "hex");
+  const head = vi.fn(async () => Uint8Array.from(png).buffer);
+  const execute = vi.fn(async (work: Parameters<typeof executeWork>[0]) => {
+    if (work.kind === "doc" || work.kind === "writeup") {
+      // Match real worker transfer semantics: the sender's copies become detached.
+      const transfers = (work.mediaHeads ?? []).map(([, head]) => head);
+      return executeWork(structuredClone(work, { transfer: transfers }));
+    }
+    return executeWork(work);
+  });
+  const result = await renderRevision(
+    request,
+    execute,
+    async (sha) => Uint8Array.from(stored.get(sha) ?? Buffer.from("![Shot](shot.png)")).buffer,
+    head,
+    async (bytes) => {
+      const key = String(stored.size);
+      stored.set(key, bytes);
+      return key;
+    },
+  );
+  expect(head.mock.calls).toEqual([[shaA], [shaB]]);
+  expect(execute.mock.calls.filter(([work]) => work.kind === "doc")).toHaveLength(3);
+  for (const [path, sha] of [
+    ["one/a.md", shaA],
+    ["one/b.md", shaA],
+    ["two/a.md", shaB],
+  ]) {
+    const html = stored.get(result.docBlobs.get(path ?? "") ?? "")?.toString();
+    expect(html).toContain(`/api/v1/media/${sha}`);
+    expect(html).toContain('width=\\"640\\" height=\\"480\\"');
+  }
+  expect(stored.get(result.docBlobs.get("plain.md") ?? "")?.toString()).not.toContain("/api/v1/media/");
+});

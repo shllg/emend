@@ -82,12 +82,12 @@ test("doc sources resolve only inside the worktree or configured real doc roots"
     await rm(dir, { recursive: true, force: true });
   }
 });
-test("HTML and each asset and their cumulative bytes have pre-read limits", async () => {
+test.each(["html", "md"])("%s and each asset and their cumulative bytes have pre-read limits", async (extension) => {
   const dir = await mkdtemp(join(tmpdir(), "emend-limits-"));
   const root = join(dir, "repo");
   try {
     await mkdir(join(root, ".git"), { recursive: true });
-    const input = { ...manifest(), files: [{ path: "plan.html", role: "doc" as const }] };
+    const input = { ...manifest(), files: [{ path: `plan.${extension}`, role: "doc" as const }] };
     const collect = () =>
       resolvePublish(
         input,
@@ -98,7 +98,7 @@ test("HTML and each asset and their cumulative bytes have pre-read limits", asyn
         root,
         () => {},
       );
-    await writeFile(join(root, "plan.html"), '<img src="a.png">');
+    await writeFile(join(root, `plan.${extension}`), '<img src="a.png">');
     await writeFile(join(root, "a.png"), "");
     await truncate(join(root, "a.png"), LIMITS.assetBytes);
     const single = await collect();
@@ -108,15 +108,20 @@ test("HTML and each asset and their cumulative bytes have pre-read limits", asyn
     await expect(collect()).rejects.toThrow("asset exceeds");
     await truncate(join(root, "a.png"), LIMITS.assetBytes);
     const html = '<img src="a.png"><img src="b.png">';
-    await writeFile(join(root, "plan.html"), html);
+    await writeFile(join(root, `plan.${extension}`), html);
     await writeFile(join(root, "b.png"), "");
     const remaining = LIMITS.htmlDocWithAssetsBytes - Buffer.byteLength(html) - LIMITS.assetBytes;
     await truncate(join(root, "b.png"), remaining);
     const combined = await collect();
     expect([...combined.blobs.values()].reduce((sum, blob) => sum + blob.size, 0)).toBe(LIMITS.htmlDocWithAssetsBytes);
     await truncate(join(root, "b.png"), remaining + 1);
-    await expect(collect()).rejects.toThrow("HTML doc and assets exceed");
-    await truncate(join(root, "plan.html"), LIMITS.htmlDocBytes + 1);
+    await expect(collect()).rejects.toThrow(
+      extension === "html" ? "HTML doc and assets exceed" : "Markdown doc and images exceed",
+    );
+    await truncate(
+      join(root, `plan.${extension}`),
+      (extension === "html" ? LIMITS.htmlDocBytes : LIMITS.markdownDocBytes) + 1,
+    );
     await expect(collect()).rejects.toThrow("size limit");
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -374,6 +379,37 @@ test("links and a valid manifest repoUrl reach the request; no remote derives no
     expect((await resolve({ repoUrl: null })).request.repoUrl).toBeUndefined();
     const parsed = PublishManifest.parse({ ...manifest(), repoUrl: "http://github.com/o/r" });
     expect((await resolve(parsed)).request.repoUrl).toBeUndefined();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("manifest media shared by Markdown docs publishes one parentless asset row", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "emend-markdown-media-"));
+  const root = join(dir, "repo");
+  try {
+    await mkdir(join(root, ".git"), { recursive: true });
+    await mkdir(join(root, "shots"));
+    await writeFile(join(root, "plan.md"), "![Before](shots/a.png)");
+    await writeFile(join(root, "shots/a.png"), "synthetic image");
+    const result = await resolvePublish(
+      {
+        ...manifest(),
+        media: [{ path: "shots/a.png" }],
+        writeup: { ...manifest().writeup, overview: "![Before](shots/a.png)" },
+      },
+      { manifest: "synthetic", key: "plan" },
+      join(dir, "state"),
+      join(dir, "config"),
+      "instance",
+      root,
+      () => {},
+    );
+    expect(result.request.files).toHaveLength(2);
+    expect(result.request.files[0]?.assets).toEqual(["shots/a.png"]);
+    expect(result.request.files[1]).toMatchObject({ path: "shots/a.png", role: "asset" });
+    expect(result.request.files[1]?.parent).toBeUndefined();
+    expect(result.blobs.size).toBe(2);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

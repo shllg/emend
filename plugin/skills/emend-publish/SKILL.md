@@ -36,7 +36,7 @@ If you wrote it elsewhere, copy it into a doc root as step 1 says.
    The review keeps its URL and gets a new revision.
    Use `--key <name>` when a regenerated document lands at a new path each run.
    Use `--new` to start a separate review.
-   A folder bundles its documents and the assets its HTML documents reference.
+   A folder bundles its documents and the images and assets they reference.
    `--main <path>` picks the document that opens first.
 5. If publishing fails, keep the file, tell the user where it is and carry on with the main task.
    Publishing never blocks the work.
@@ -53,7 +53,7 @@ Use a short, plain title; titles starting with `--` are refused.
 It shows these as source with line comments. Add `--source` to show Markdown or HTML as source.
 A folder walk skips secret-looking filenames (not Markdown or HTML), binary, oversized or unreadable
 files, text shown as source holding a private key, and folders named `secret(s)` or `credential(s)` in any case below the folder argument.
-Below a folder argument, HTML assets in those folders or holding a private key are skipped too; other assets are not checked.
+Below a folder argument, doc images and assets in those folders or holding a private key are skipped too; other assets are not checked.
 Explicit file or folder arguments publish as named; never name a credential file or secrets folder.
 Warnings stop after 20, then count further skips.
 Each folder argument gets a published-file count.

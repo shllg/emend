@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AgentNotes, validateAgentNotes } from "./agent-note.ts";
-import { DocTitle, DocView, docViewOf, isRenderedHtmlDoc, validateDocView } from "./doc.ts";
+import { DocTitle, DocView, docViewOf, isRenderedHtmlDoc, isRenderedMarkdownDoc, validateDocView } from "./doc.ts";
 import { LIMITS } from "./limits.ts";
 import { PublishLinks, RepoUrl } from "./links.ts";
 import { MEDIA_EXTENSIONS, PublishManifest, reviewVerdictIssues, WriteupInput } from "./manifest.ts";
@@ -89,18 +89,26 @@ export const PublishRequest = z
         .map((file) => [file.path, file]),
     );
     if (keys.size !== request.files.length) issue("duplicate file path in namespace");
-    const listed = new Set(request.files.flatMap((file) => file.assets ?? []));
+    const htmlAssets = new Set(request.files.filter(isRenderedHtmlDoc).flatMap((file) => file.assets ?? []));
     let mediaCount = 0;
     for (const file of request.files) {
       if (file.topic && !topics.has(file.topic)) issue("file topic is not declared");
-      if (isRenderedHtmlDoc(file)) {
-        if (!file.assets) issue("HTML docs must list their assets");
+      const markdown = isRenderedMarkdownDoc(file);
+      if (isRenderedHtmlDoc(file) || markdown) {
+        if (!markdown && !file.assets) issue("HTML docs must list their assets");
         const folder = file.path.slice(0, file.path.lastIndexOf("/") + 1);
-        if (new Set(file.assets).size !== file.assets?.length) issue("duplicate HTML asset reference");
-        for (const path of file.assets ?? [])
+        if (file.assets && new Set(file.assets).size !== file.assets.length) issue("duplicate doc asset reference");
+        for (const path of file.assets ?? []) {
           if (paths.get(path)?.role !== "asset" || !path.startsWith(folder))
-            issue("HTML assets must be request assets inside the doc folder");
-      } else if (file.assets !== undefined) issue("only HTML docs list assets");
+            issue("doc assets must be request assets inside the doc folder");
+          if (
+            markdown &&
+            (!MEDIA_EXTENSIONS.has(path.split(".").at(-1)?.toLowerCase() ?? "") ||
+              path.split("/").some((part) => part.startsWith(".")))
+          )
+            issue("Markdown assets must be visible image files");
+        }
+      } else if (file.assets !== undefined) issue("only rendered docs list assets");
       if (file.role === "asset" && file.parent === undefined) {
         // A parentless asset is writeup media.
         if (request.files.some((doc) => doc.role === "doc" && doc.path === file.path))
@@ -114,13 +122,15 @@ export const PublishRequest = z
         if (file.path.includes(":")) issue("media path must not contain a colon");
         if (file.topic !== undefined || file.assets !== undefined || file.notes !== undefined)
           issue("media has no topic, assets or notes");
-        if (listed.has(file.path)) issue("media is already a doc asset");
+        if (htmlAssets.has(file.path)) issue("media is already a doc asset");
       } else if (file.role === "asset") {
         const parent = file.parent ? paths.get(file.parent) : undefined;
-        if (!parent || !isRenderedHtmlDoc(parent)) issue("asset parent must be an HTML doc");
+        if (!parent || (!isRenderedHtmlDoc(parent) && !isRenderedMarkdownDoc(parent)))
+          issue("asset parent must be a rendered HTML or Markdown doc");
         const folder = parent?.path.slice(0, parent.path.lastIndexOf("/") + 1);
+        const extensions = parent && isRenderedMarkdownDoc(parent) ? MEDIA_EXTENSIONS : ASSET_EXTENSIONS;
         if (
-          !ASSET_EXTENSIONS.has(file.path.split(".").at(-1)?.toLowerCase() ?? "") ||
+          !extensions.has(file.path.split(".").at(-1)?.toLowerCase() ?? "") ||
           folder === undefined ||
           !file.path.startsWith(folder) ||
           file.path.split("/").some((part) => part.startsWith("."))

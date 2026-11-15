@@ -37,6 +37,9 @@ export function docViewOf(file: { path: string; view?: DocView }): DocView {
 export function isRenderedHtmlDoc(file: { role: string; path: string; view?: DocView }): boolean {
   return file.role === "doc" && docViewOf(file) === "rendered" && /\.html?$/i.test(file.path);
 }
+export function isRenderedMarkdownDoc(file: { role: string; path: string; view?: DocView }): boolean {
+  return file.role === "doc" && docViewOf(file) === "rendered" && /\.(md|markdown)$/i.test(file.path);
+}
 export function validateDocView(file: { role: string; path: string; view?: DocView }, ctx: z.RefinementCtx) {
   if (file.view !== undefined && file.role !== "doc")
     ctx.addIssue({ code: "custom", path: ["view"], message: "only doc files have a view" });

@@ -225,3 +225,49 @@ test("import row counts are pure and count creation through latest", () => {
   thread.createdRevisionId = next;
   expect(importRowCount(input)).toBe(8);
 });
+
+test("imports Markdown image associations and parents while preserving old docs without assets", async () => {
+  const { importPublishInput, PublishRequest } = await import("./index.ts");
+  const input = ImportBundle.parse(bundle());
+  const revisionId = input.revisions[0]?.id ?? "";
+  const doc = {
+    id: randomUUID(),
+    revisionId,
+    path: "docs/plan.md",
+    oldPath: null,
+    role: "doc" as const,
+    status: null,
+    topicSlug: null,
+    ord: 0,
+    oldBlob: null,
+    newBlob: "a".repeat(64),
+    renderedBlob: null,
+    flag: null,
+    parentDocId: null,
+  };
+  const asset = { ...doc, id: randomUUID(), path: "docs/a.png", role: "asset" as const, ord: 1, parentDocId: doc.id };
+  const association = { revisionId, docId: doc.id, assetId: asset.id };
+  const writeup = { overview: "", tldr: "", decisions: null, topics: {} };
+  for (const parentDocId of [doc.id, null]) {
+    const parsed = ImportBundle.parse({ ...input, files: [doc, { ...asset, parentDocId }], docAssets: [association] });
+    const request = PublishRequest.parse(importPublishInput(parsed, revisionId, writeup));
+    expect(request.files[0]?.assets).toEqual([asset.path]);
+    expect(request.files[1]?.parent).toBe(parentDocId ? doc.path : undefined);
+  }
+  const old = ImportBundle.parse({ ...input, files: [doc] });
+  expect(PublishRequest.parse(importPublishInput(old, revisionId, writeup)).files[0]?.assets).toBeUndefined();
+  for (const patch of [
+    { files: [{ ...doc, view: "source" }, asset] },
+    { files: [doc, { ...asset, path: "docs/a.svg" }] },
+    { files: [doc, { ...asset, path: "docs/a.mp4" }] },
+    { files: [doc, { ...asset, role: "diff" }] },
+    { files: [doc, { ...asset, parentDocId: randomUUID() }] },
+    { docAssets: [{ ...association, revisionId: randomUUID() }] },
+    { docAssets: [association, association] },
+  ])
+    expect(ImportBundle.safeParse({ ...input, files: [doc, asset], docAssets: [association], ...patch }).success).toBe(
+      false,
+    );
+  // The parent validator also rejects a non-image without an association.
+  expect(ImportBundle.safeParse({ ...input, files: [doc, { ...asset, path: "docs/a.svg" }] }).success).toBe(false);
+});

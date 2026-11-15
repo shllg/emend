@@ -238,3 +238,86 @@ test("HTML asset lists require existing assets in the doc folder", () => {
     ).toBe(false);
   }
 });
+
+test("rendered Markdown docs list image assets, including shared writeup media", () => {
+  const markdown = { ...doc, path: "docs/plan.md", assets: ["docs/a.PNG"] };
+  const image = { ...doc, path: "docs/a.PNG", role: "asset", assets: undefined, parent: markdown.path };
+  for (const parent of [markdown.path, undefined]) {
+    expect(PublishRequest.safeParse({ ...request, files: [markdown, { ...image, parent }] }).success).toBe(true);
+  }
+  for (const assets of [undefined, []])
+    expect(PublishRequest.safeParse({ ...request, files: [{ ...markdown, assets }] }).success).toBe(true);
+  const html = { ...doc, path: "docs/plan.html", assets: [image.path] };
+  expect(
+    PublishRequest.safeParse({ ...request, files: [html, markdown, { ...image, parent: html.path }] }).success,
+  ).toBe(true);
+  expect(
+    PublishRequest.safeParse({ ...request, files: [html, markdown, { ...image, parent: undefined }] }).success,
+  ).toBe(false);
+});
+
+test("Markdown asset lists reject duplicates, non-images, hidden paths and missing or out-of-folder rows", () => {
+  const markdown = { ...doc, path: "docs/plan.md", assets: ["docs/a.png"] };
+  const image = { ...doc, path: "docs/a.png", role: "asset", assets: undefined, parent: markdown.path };
+  for (const files of [
+    [{ ...markdown, assets: [image.path, image.path] }, image],
+    [{ ...markdown, assets: ["docs/missing.png"] }, image],
+    [{ ...markdown, assets: [markdown.path] }, image],
+    [{ ...markdown, view: "source" }, image],
+    [markdown, { ...image, parent: "missing.md" }],
+    [markdown, { ...image, parent: image.path }],
+  ])
+    expect(PublishRequest.safeParse({ ...request, files }).success).toBe(false);
+  for (const path of [
+    "elsewhere/a.png",
+    "docs-extra/a.png",
+    "docs/.hidden/a.png",
+    "docs/.a.png",
+    "docs/a.svg",
+    "docs/a.ico",
+    "docs/a.bmp",
+    "docs/a.mp4",
+    "docs/a.css",
+  ]) {
+    const files = [
+      { ...markdown, assets: [path] },
+      { ...image, path },
+    ];
+    expect(PublishRequest.safeParse({ ...request, files }).success, path).toBe(false);
+    // Even when unlisted, a Markdown parent's assets must be visible images.
+    expect(
+      PublishRequest.safeParse({
+        ...request,
+        files: [
+          { ...markdown, assets: [] },
+          { ...image, path },
+        ],
+      }).success,
+      path,
+    ).toBe(false);
+  }
+  // An HTML parent does not allow a non-image into a Markdown doc's list.
+  const html = { ...doc, path: "docs/plan.html" };
+  expect(
+    PublishRequest.safeParse({
+      ...request,
+      files: [html, { ...markdown, assets: ["docs/a.svg"] }, { ...image, path: "docs/a.svg", parent: html.path }],
+    }).success,
+  ).toBe(false);
+});
+
+test("Markdown doc images count as files, without spending the writeup media count", () => {
+  const images = Array.from({ length: LIMITS.mediaPerRevision + 1 }, (_, i) => ({
+    ...doc,
+    path: `shots/${i}.png`,
+    role: "asset",
+    assets: undefined,
+    parent: "plan.md",
+  }));
+  expect(
+    PublishRequest.safeParse({
+      ...request,
+      files: [{ ...doc, path: "plan.md", assets: images.map((file) => file.path) }, ...images],
+    }).success,
+  ).toBe(true);
+});

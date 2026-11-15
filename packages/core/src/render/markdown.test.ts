@@ -259,3 +259,24 @@ test("concurrent renders keep duplicate counters and diagram metadata local", as
   expect(first[2]?.kind).toBe("diagram");
   expect(second[2]?.kind).toBe("code");
 });
+
+test("image references come from the same sanitized tree as rendering", async () => {
+  const { markdownImageReferences } = await import("./markdown.ts");
+  expect(
+    markdownImageReferences(
+      [
+        "![inline](shots/a.png)",
+        "![reference][shot]\n\n[shot]: shots/b.png",
+        '<img src="shots/c.png" onerror="bad()">',
+        "[![linked](shots/d.png)](https://example.com)",
+        "| Shot |\n| --- |\n| ![table](shots/e.png) |",
+        "Foot[^1].\n\n[^1]: ![note](shots/f.png)",
+        '<script src="script.png"></script>',
+        '<svg><image href="svg.png"/></svg>',
+        '<iframe src="frame.png"></iframe>',
+        '<template><img src="hidden.png"></template>',
+        "![bad](javascript:alert) ![data](data:image/png;base64,AAAA)",
+      ].join("\n\n"),
+    ),
+  ).toEqual(["shots/a.png", "shots/b.png", "shots/c.png", "shots/d.png", "shots/e.png", "shots/f.png"]);
+});
