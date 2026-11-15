@@ -50,7 +50,13 @@ export function Writeup({
     },
     [phone, search.tab, search.rev, props.reviewId],
   );
-  const read = useMemo(() => readFact({ sections: writeup.sections }, docs, files), [writeup.sections, docs, files]);
+  const read = useMemo(
+    () =>
+      usesOpeningCard({ sections: writeup.sections, area: writeup.area })
+        ? readFact({ sections: writeup.sections }, docs, files)
+        : undefined,
+    [writeup.sections, writeup.area, docs, files],
+  );
   const groups = useMemo(() => {
     const ranked = rankedTopics(topics);
     const bySlug = new Map(ranked.map((entry) => [entry.topic.slug, entry]));

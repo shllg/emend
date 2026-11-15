@@ -788,8 +788,12 @@ test.each([false, true])("the breadcrumb shows project and explicit area above t
       .getAllByRole("listitem")
       .map((item) => item.textContent),
   ).toEqual(["Garden", "›requests › retries"]);
-  for (const label of ["Garden", "requests › retries"])
-    expect(within(nav).getByText(label).getAttribute("dir")).toBe("auto");
+  for (const label of ["Garden", "requests › retries"]) {
+    const text = within(nav).getByText(label);
+    expect(text.getAttribute("dir")).toBe("auto");
+    expect(text.classList.contains("overflow-hidden")).toBe(true);
+    expect(text.classList.contains("wrap-anywhere")).toBe(true);
+  }
   expect(within(nav).getByText("›").getAttribute("aria-hidden")).toBe("true");
   expect(
     nav.compareDocumentPosition(screen.getByRole("heading", { level: 1 })) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -862,15 +866,19 @@ test("PR and issue chips move to Breadcrumb while other links stay in Links", ()
   expect(screen.queryByText("Unsafe")).toBeNull();
 });
 
-test.each(["<img src=x onerror=alert(1)>", "x".repeat(1000)])("area is literal wrapping text: %j", (area) => {
-  mount({ loaded: { ...revision, writeup: { sections: [], area } } });
-  const nav = screen.getByRole("navigation", { name: "Breadcrumb" });
-  expect(nav.textContent).toBe(area);
-  expect(nav.querySelectorAll("img, script")).toHaveLength(0);
-  expect(within(nav).getByText(area).classList.contains("wrap-anywhere")).toBe(true);
-});
+test.each(["<img src=x onerror=alert(1)>", "x".repeat(1000), `a${"\u0301".repeat(59)}`])(
+  "area is clipped literal wrapping text: %j",
+  (area) => {
+    mount({ loaded: { ...revision, writeup: { sections: [], area } } });
+    const nav = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(nav.textContent).toBe(area);
+    expect(nav.querySelectorAll("img, script")).toHaveLength(0);
+    expect(within(nav).getByText(area).classList.contains("wrap-anywhere")).toBe(true);
+    expect(within(nav).getByText(area).classList.contains("overflow-hidden")).toBe(true);
+  },
+);
 
-test.each(["Orchard", "<img src=x onerror=alert(1)>"])(
+test.each(["Orchard", "<img src=x onerror=alert(1)>", `a${"\u0301".repeat(59)}`])(
   "opening-card header project %s is isolated in the breadcrumb instead of the meta line",
   (project) => {
     mount({
@@ -884,6 +892,7 @@ test.each(["Orchard", "<img src=x onerror=alert(1)>"])(
     const label = within(breadcrumb).getByText(project);
     expect(label.getAttribute("dir")).toBe("auto");
     expect(label.classList.contains("wrap-anywhere")).toBe(true);
+    expect(label.classList.contains("overflow-hidden")).toBe(true);
     expect(within(breadcrumb).getAllByRole("listitem")).toHaveLength(1);
     expect(screen.getByText("Workshop").parentElement?.contains(label)).toBe(false);
     expect(document.querySelector("img")).toBeNull();

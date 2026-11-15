@@ -10,7 +10,7 @@ export function usesOpeningCard(writeup: RenderedWriteup): boolean {
 export type FactPart = { text: string; agent?: true };
 
 function agentPart(text: string): FactPart {
-  return { text: text.replace(/\p{Bidi_Control}/gu, ""), agent: true };
+  return { text: text.replace(/[\p{Cc}\u2028\u2029]/gu, " ").replace(/\p{Bidi_Control}/gu, ""), agent: true };
 }
 
 export function riskFact(topics: TopicMeta[]): FactPart[] | undefined {
@@ -98,7 +98,10 @@ export function readFact(
     (sum, file) => sum + (file.role === "diff" && file.counts ? file.counts.additions + file.counts.deletions : 0),
     0,
   );
-  const skipped = docs.some((doc) => doc.kind === "html") ? "; HTML docs not counted" : "";
+  const uncounted = files.filter((file) => file.role === "diff" && !file.counts).length;
+  const skipped =
+    (docs.some((doc) => doc.kind === "html") ? "; HTML docs not counted" : "") +
+    (uncounted ? `; ${uncounted} diff ${plural(uncounted, "file")} not counted` : "");
   if (!wordCount && !lines) return skipped ? `Not estimated${skipped}` : undefined;
   // Eight changed lines a minute is the common ceiling of about 500 lines an hour for careful review.
   const rawMinutes = wordCount / 200 + lines / 8;
@@ -148,9 +151,14 @@ export function sinceFact({
   for (const doc of docs) {
     if (doc.kind === "markdown" && doc.blocks.some((block) => changed.has(block.id))) names.push([agentPart(doc.path)]);
   }
-  const stale = files.filter((file) => file.viewed === "stale").length;
-  if (!names.length && !stale) return;
+  const stale = files.filter(
+    (file) => file.viewed === "stale" && file.viewedOn !== undefined && file.viewedOn >= changedSince,
+  ).length;
   const parts: FactPart[] = [{ text: `Since revision ${changedSince}: ` }];
+  if (!names.length && !stale) {
+    parts.push({ text: "no new text in the writeup or Markdown docs. Removed text is not tracked." });
+    return parts;
+  }
   if (names.length) {
     parts.push({ text: "new or changed text in " });
     for (const [index, name] of names.entries()) {

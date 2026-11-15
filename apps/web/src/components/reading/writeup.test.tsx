@@ -1022,6 +1022,43 @@ test("an HTML-only revision explains why Read has no estimate", () => {
   expect(container.querySelector('[data-fact="read"] dd')?.textContent).toBe("Not estimated; HTML docs not counted");
 });
 
+test("legacy writeups never compute Read, including after content and layout changes", () => {
+  const read = vi.spyOn(writeupFacts, "readFact");
+  const legacy: RenderedWriteup = { sections: [{ ...plain("overview", "Overview"), blocks: [block] }] };
+  const reader = (writeup: RenderedWriteup, files: FileView[] = []) => (
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <Writeup {...props} writeup={writeup} files={files} />
+      </ToastProvider>
+    </QueryClientProvider>
+  );
+  const { container, rerender } = render(reader(legacy));
+  rerender(reader({ sections: [...legacy.sections, plain("tldr", "TL;DR")] }, [file]));
+  expect(read).not.toHaveBeenCalled();
+  expect(container.querySelector('[data-fact="read"]')).toBeNull();
+
+  const files: FileView[] = [];
+  rerender(reader(legacy, files));
+  expect(read).not.toHaveBeenCalled();
+  rerender(reader({ ...legacy, area: "Garden" }, files));
+  expect(read).toHaveBeenCalledOnce();
+  expect(container.querySelector('[data-fact="read"]')).not.toBeNull();
+  rerender(reader(legacy, files));
+  expect(read).toHaveBeenCalledOnce();
+  expect(container.querySelector('[data-fact="read"]')).toBeNull();
+
+  rerender(
+    reader(
+      {
+        sections: [...legacy.sections, { key: "whyItMatters", label: "Why it matters", topic: null, blocks: [] }],
+      },
+      files,
+    ),
+  );
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(container.querySelector('[data-fact="read"]')).not.toBeNull();
+});
+
 test("Read reuses source word counts on parent and comment updates, and refreshes when content changes", () => {
   const read = vi.spyOn(writeupFacts, "readFact");
   const writeup: RenderedWriteup = { area: "Garden", sections: [] };
@@ -1202,7 +1239,7 @@ test("PDI and RLO in agent text are removed while emend's fact text stays outsid
   }
 });
 
-test("a revision that only removed a paragraph has no Since fact", async () => {
+test("a revision that only removed a paragraph keeps Since and explains that removals are not tracked", async () => {
   const input = { area: "Garden", overview: "", decisions: "", topics: {} };
   const before = RenderedWriteup.parse(await renderWriteup({ ...input, tldr: "Keep the soil.\n\nWater daily." }, []));
   const after = RenderedWriteup.parse(await renderWriteup({ ...input, tldr: "Keep the soil." }, []));
@@ -1217,7 +1254,9 @@ test("a revision that only removed a paragraph has no Since fact", async () => {
     <Writeup {...props} revision={3} changedSince={2} changedBlocks={changedBlocks} writeup={after} />,
   );
   expect(container.querySelector('[data-fact="read"]')).not.toBeNull();
-  expect(container.querySelector('[data-fact="since"]')).toBeNull();
+  expect(container.querySelector('[data-fact="since"] dd')?.textContent).toBe(
+    "Since revision 2: no new text in the writeup or Markdown docs. Removed text is not tracked.",
+  );
 });
 
 test("comments on both paired overview blocks share a usable gutter chip when their first lines align", () => {

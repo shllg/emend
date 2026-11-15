@@ -118,7 +118,7 @@ export function ReviewHeader({
               // biome-ignore lint/suspicious/noArrayIndexKey: project and area have fixed positions and can share text.
               <li key={index} className="flex min-w-0 items-center gap-1.5">
                 {index > 0 && <span aria-hidden="true">›</span>}
-                <span dir="auto" className="min-w-0 wrap-anywhere">
+                <span dir="auto" className="min-w-0 overflow-hidden wrap-anywhere">
                   {item}
                 </span>
               </li>

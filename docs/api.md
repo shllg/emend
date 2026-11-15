@@ -1267,7 +1267,8 @@ required, with `null` representing no decisions section.
 `whyItMatters` is nonblank Markdown: what the change gives the product or prepares for.
 `area` is plain text, never Markdown. `WriteupArea` accepts 1–`areaChars` (60) characters,
 with non-whitespace text, well-formed UTF-16, no control or format characters (`Cc` or `Cf`),
-and no U+2028 or U+2029. Both fields are optional and additive under `/api/v1`.
+no U+2028 or U+2029, and no filler characters U+115F, U+1160, U+3164, U+FFA0 or U+2800.
+Both fields are optional and additive under `/api/v1`.
 The fields `outOfScope`, `whereToLook`, `context`, `review`, `checked` and `notChecked` are optional, additive fields under `/api/v1`.
 `ReviewVerdict = { level: "skim" | "topics" | "everything", topics?: TopicSlug[], reason }` is the
 agent's advice on how deep to read. `topics` is required for level `topics` and refused for the

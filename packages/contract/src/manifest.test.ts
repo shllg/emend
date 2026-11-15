@@ -448,13 +448,16 @@ describe("glossary lists", () => {
 });
 
 describe("writeup opening", () => {
-  test.each(["cli › serve", "x".repeat(60), "  requests   › retries  ", "<img src=x onerror=alert(1)>"])(
-    "accepts a plain-text area: %j",
-    (area) => {
-      expect(WriteupArea.parse(area)).toBe(area);
-      expect(WriteupInput.parse({ ...manifest.writeup, area }).area).toBe(area);
-    },
-  );
+  test.each([
+    "cli › serve",
+    "リクエスト › 再試行",
+    "x".repeat(60),
+    "  requests   › retries  ",
+    "<img src=x onerror=alert(1)>",
+  ])("accepts a plain-text area: %j", (area) => {
+    expect(WriteupArea.parse(area)).toBe(area);
+    expect(WriteupInput.parse({ ...manifest.writeup, area }).area).toBe(area);
+  });
   test.each([
     "",
     "   ",
@@ -468,6 +471,14 @@ describe("writeup opening", () => {
   ])("rejects an invalid area: %j", (area) => {
     expect(WriteupArea.safeParse(area).success).toBe(false);
     expect(WriteupInput.safeParse({ ...manifest.writeup, area }).success).toBe(false);
+  });
+  test.each(["\u115f", "\u1160", "\u3164", "\uffa0", "\u2800"])("rejects area filler %j", (filler) => {
+    for (const area of [filler, `cli${filler}serve`]) {
+      const result = WriteupArea.safeParse(area);
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.message).toBe("area must be plain visible text");
+      expect(WriteupInput.safeParse({ ...manifest.writeup, area }).success).toBe(false);
+    }
   });
   test("whyItMatters is nonblank Markdown and spends both writeup byte budgets", () => {
     for (const whyItMatters of ["", " \n\t ", "é".repeat(LIMITS.writeupSectionBytes / 2 + 1)]) {

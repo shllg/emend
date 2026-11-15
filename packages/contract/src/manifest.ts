@@ -126,7 +126,10 @@ export const WriteupArea = z
   .max(LIMITS.areaChars)
   .refine((text) => /\S/.test(text), "area must not be blank")
   .refine((text) => text.isWellFormed(), "area must be well-formed UTF-16")
-  .refine((text) => !/[\p{Cc}\p{Cf}\u2028\u2029]/u.test(text), "area must be plain visible text");
+  .refine(
+    (text) => !/[\p{Cc}\p{Cf}\u2028\u2029\u115f\u1160\u3164\uffa0\u2800]/u.test(text),
+    "area must be plain visible text",
+  );
 export type WriteupArea = z.infer<typeof WriteupArea>;
 
 const writeupInput = z.object({
