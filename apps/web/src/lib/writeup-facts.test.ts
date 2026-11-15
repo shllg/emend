@@ -249,7 +249,11 @@ test("Read notes skipped HTML docs once, including under a minute and diff-only 
   expect(readFact(empty, docs, [{ ...file, counts: { additions: 8, deletions: 0 } }])).toBe(
     "About 1 min: diff 1 min (8 lines); HTML docs not counted",
   );
-  expect(readFact(empty, docs, [])).toBeUndefined();
+  expect(readFact(empty, docs, [])).toBe("Not estimated; HTML docs not counted");
+});
+
+test("Read omits an empty revision without HTML docs", () => {
+  expect(readFact({ ...empty, area: "Garden" }, [], [])).toBeUndefined();
 });
 
 const since = {
@@ -361,22 +365,34 @@ test("Since names docs with identical titles by their isolated paths", () => {
   ]);
 });
 
-test("facts mark only agent titles and undo text for isolation", () => {
-  const title = "Retry \u202ebudget";
+test.each([
+  ["PDI followed by RLO", "\u2069\u202e"],
+  ["all bidi controls", "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"],
+])("agent fact parts strip %s while preserving isolated text", (_label, controls) => {
+  const title = `Docs${controls}`;
   const topics = [{ ...topic("retry", "critical"), title }];
-  expect(riskFact(topics)).toEqual([{ text: "High: " }, { text: title, agent: true }]);
-  expect(undoFact({ sections: [section("t-retry-why", "Undo: Restore state.", "retry")] }, topics)).toEqual([
+  expect(riskFact(topics)).toEqual([{ text: "High: " }, { text: "Docs", agent: true }]);
+  expect(undoFact({ sections: [section("t-retry-why", `Undo: Restore state${controls}`, "retry")] }, topics)).toEqual([
     { text: "Restore state", agent: true },
     { text: " (" },
-    { text: title, agent: true },
+    { text: "Docs", agent: true },
     { text: ")" },
   ]);
-  expect(sinceFact({ ...since, topics, changedBlocks: [{ blockId: "t-retry-why-12345678", revision: 3 }] })).toEqual([
+  expect(
+    sinceFact({
+      ...since,
+      topics,
+      docs: [{ kind: "markdown", path: `docs/${controls}design.md`, blocks: [block("doc-12345678", "Design")] }],
+      changedBlocks: ["t-retry-why-12345678", "doc-12345678-12345678"].map((blockId) => ({ blockId, revision: 3 })),
+    }),
+  ).toEqual([
     { text: "Since revision 2: " },
     { text: "new or changed text in " },
     { text: "topic “" },
-    { text: title, agent: true },
+    { text: "Docs", agent: true },
     { text: "”" },
+    { text: " and " },
+    { text: "docs/design.md", agent: true },
     { text: "." },
   ]);
 });

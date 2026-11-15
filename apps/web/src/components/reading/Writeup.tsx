@@ -50,6 +50,7 @@ export function Writeup({
     },
     [phone, search.tab, search.rev, props.reviewId],
   );
+  const read = useMemo(() => readFact({ sections: writeup.sections }, docs, files), [writeup.sections, docs, files]);
   const groups = useMemo(() => {
     const ranked = rankedTopics(topics);
     const bySlug = new Map(ranked.map((entry) => [entry.topic.slug, entry]));
@@ -99,7 +100,7 @@ export function Writeup({
       const computed = [
         ["risk", "Risk", riskFact(topics)],
         ["undo", "Undo", undoFact({ sections: writeup.sections }, topics)],
-        ["read", "Read", readFact({ sections: writeup.sections }, docs, files)],
+        ["read", "Read", read],
         [
           "since",
           "Since",
@@ -260,6 +261,7 @@ export function Writeup({
     topics,
     files,
     docs,
+    read,
     changedSince,
     link,
     props.threads,

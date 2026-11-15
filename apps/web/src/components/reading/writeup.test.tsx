@@ -4,6 +4,7 @@ import {
   OTHER_TOPIC,
   type RenderedBlock,
   RenderedWriteup,
+  type RevisionView,
   type ThreadView,
   type TopicMeta,
 } from "@emend/contract";
@@ -12,6 +13,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { renderWriteup } from "../../../../../packages/core/src/render/writeup.ts";
 import { blockAnchor } from "../../lib/selection.ts";
+import * as writeupFacts from "../../lib/writeup-facts.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
 import { BlockView } from "./BlockView.tsx";
 import { DocView } from "./DocView.tsx";
@@ -1009,6 +1011,65 @@ test("an area-only empty writeup still has a TL;DR card and omits empty Facts", 
   expect(container.querySelector('[data-reading-section="facts"]')).toBeNull();
 });
 
+test("an HTML-only revision explains why Read has no estimate", () => {
+  const { container } = mount(
+    <Writeup
+      {...props}
+      writeup={{ area: "Garden", sections: [] }}
+      docs={[{ kind: "html", path: "preview.html", contentUrl: "/content/preview" }]}
+    />,
+  );
+  expect(container.querySelector('[data-fact="read"] dd')?.textContent).toBe("Not estimated; HTML docs not counted");
+});
+
+test("Read reuses source word counts on parent and comment updates, and refreshes when content changes", () => {
+  const read = vi.spyOn(writeupFacts, "readFact");
+  const writeup: RenderedWriteup = { area: "Garden", sections: [] };
+  const source: Extract<RevisionView["docs"][number], { kind: "source" }> = {
+    kind: "source",
+    path: "source.ts",
+    language: "ts",
+    lines: [[{ text: "word ".repeat(200) }]],
+  };
+  const docs = [source];
+  const files: FileView[] = [];
+  const reader = (updates: Partial<React.ComponentProps<typeof Writeup>> = {}) => (
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <Writeup {...props} writeup={{ ...writeup }} docs={docs} files={files} {...updates} />
+      </ToastProvider>
+    </QueryClientProvider>
+  );
+  const { container, rerender } = render(reader());
+  expect(read).toHaveBeenCalledOnce();
+  expect(container.querySelector('[data-fact="read"] dd')?.textContent).toBe("About 1 min: writeup and docs 1 min");
+  rerender(reader());
+  rerender(reader({ threads: [] }));
+  rerender(reader({ changedBlocks: [{ blockId: block.id, revision: 2 }] }));
+  expect(read).toHaveBeenCalledOnce();
+
+  const moreDocs = [{ ...source, lines: [...source.lines, ...source.lines] }];
+  rerender(reader({ docs: moreDocs }));
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(container.querySelector('[data-fact="read"] dd')?.textContent).toBe("About 2 min: writeup and docs 2 min");
+
+  const moreWriteup = {
+    ...writeup,
+    sections: [{ ...plain("overview", "Overview"), blocks: [{ ...block, text: "word ".repeat(200) }] }],
+  };
+  rerender(reader({ docs: moreDocs, writeup: moreWriteup }));
+  expect(read).toHaveBeenCalledTimes(3);
+  expect(container.querySelector('[data-fact="read"] dd')?.textContent).toBe("About 3 min: writeup and docs 3 min");
+
+  rerender(
+    reader({ docs: moreDocs, writeup: moreWriteup, files: [{ ...file, counts: { additions: 8, deletions: 0 } }] }),
+  );
+  expect(read).toHaveBeenCalledTimes(4);
+  expect(container.querySelector('[data-fact="read"] dd')?.textContent).toBe(
+    "About 4 min: writeup and docs 3 min, diff 1 min (8 lines)",
+  );
+});
+
 test("a fact block keeps its writeup-span target, change marker and Facts outline thread count", async () => {
   const checked: RenderedBlock = {
     ...block,
@@ -1096,9 +1157,9 @@ test("computed facts isolate literal titles, undo text and doc paths even when h
   ]);
 });
 
-test("bidi topic titles and undo text cannot consume emend's own fact punctuation", () => {
-  const title = "Seed \u202egarden";
-  const undo = "Restore \u202estate";
+test("PDI and RLO in agent text are removed while emend's fact text stays outside each bdi in order", () => {
+  const title = "Docs\u2069\u202e";
+  const undo = "Restore state\u2069\u202e";
   const why = { ...block, id: "t-seed-why-12345678", section: "t-seed-why" as const, text: `Undo: ${undo}` };
   const { container } = mount(
     <Writeup
@@ -1109,16 +1170,28 @@ test("bidi topic titles and undo text cannot consume emend's own fact punctuatio
       topics={[
         { ...topic, title, attention: "critical" },
         { ...second, attention: "critical" },
+        ...["Third", "Fourth", "Fifth"].map((title) => ({
+          ...second,
+          slug: title.toLowerCase(),
+          title,
+          attention: "critical" as const,
+        })),
       ]}
       writeup={{ area: "Garden", sections: [{ ...section("seed", "why"), blocks: [why] }] }}
     />,
   );
-  for (const [key, expected, following] of [
-    ["risk", [title, second.title], [", ", undefined]],
-    ["undo", [undo, title], [" (", ")"]],
-    ["since", [title], ["”"]],
+  for (const [key, expected, following, text] of [
+    [
+      "risk",
+      ["Docs", second.title, "Third"],
+      [", ", ", ", " and 2 more"],
+      `High: Docs, ${second.title}, Third and 2 more`,
+    ],
+    ["undo", ["Restore state", "Docs"], [" (", ")"], "Restore state (Docs)"],
+    ["since", ["Docs"], ["”"], "Since revision 2: new or changed text in topic “Docs”."],
   ] as const) {
     const fact = container.querySelector(`[data-fact="${key}"] dd`);
+    expect(fact?.textContent).toBe(text);
     const parts = [...(fact?.querySelectorAll("bdi") ?? [])];
     expect(parts.map((part) => part.textContent)).toEqual(expected);
     for (const [index, part] of parts.entries()) {

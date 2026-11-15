@@ -9,6 +9,10 @@ export function usesOpeningCard(writeup: RenderedWriteup): boolean {
 
 export type FactPart = { text: string; agent?: true };
 
+function agentPart(text: string): FactPart {
+  return { text: text.replace(/\p{Bidi_Control}/gu, ""), agent: true };
+}
+
 export function riskFact(topics: TopicMeta[]): FactPart[] | undefined {
   for (const [attention, label] of [
     ["critical", "High"],
@@ -20,7 +24,7 @@ export function riskFact(topics: TopicMeta[]): FactPart[] | undefined {
     const parts: FactPart[] = [{ text: `${label}: ` }];
     for (const [index, topic] of matching.slice(0, 3).entries()) {
       if (index) parts.push({ text: ", " });
-      parts.push({ text: topic.title, agent: true });
+      parts.push(agentPart(topic.title));
     }
     if (matching.length > 3) parts.push({ text: ` and ${matching.length - 3} more` });
     return parts;
@@ -58,8 +62,8 @@ export function undoFact(writeup: RenderedWriteup, topics: TopicMeta[]): FactPar
     const level = undo ? (/cannot be undone/i.test(undo) ? 2 : 1) : topic.door === "one-way" ? 1 : 0;
     if (level > hardest.level) {
       const text = (undo || "A revert is not enough").replace(/\.$/u, "");
-      const parts: FactPart[] = [undo ? { text: capUndo(text), agent: true } : { text }];
-      if (text !== "A revert") parts.push({ text: " (" }, { text: topic.title, agent: true }, { text: ")" });
+      const parts: FactPart[] = [undo ? agentPart(capUndo(text)) : { text }];
+      if (text !== "A revert") parts.push({ text: " (" }, agentPart(topic.title), { text: ")" });
       hardest = { level, parts };
     }
   }
@@ -94,8 +98,8 @@ export function readFact(
     (sum, file) => sum + (file.role === "diff" && file.counts ? file.counts.additions + file.counts.deletions : 0),
     0,
   );
-  if (!wordCount && !lines) return;
   const skipped = docs.some((doc) => doc.kind === "html") ? "; HTML docs not counted" : "";
+  if (!wordCount && !lines) return skipped ? `Not estimated${skipped}` : undefined;
   // Eight changed lines a minute is the common ceiling of about 500 lines an hour for careful review.
   const rawMinutes = wordCount / 200 + lines / 8;
   if (rawMinutes < 1) return `Under 1 min${skipped}`;
@@ -134,11 +138,7 @@ export function sinceFact({
     if (!section.blocks.some((block) => changed.has(block.id))) continue;
     if (section.topic) {
       if (!seenTopics.has(section.topic))
-        names.push([
-          { text: "topic “" },
-          { text: titles.get(section.topic) ?? section.topic, agent: true },
-          { text: "”" },
-        ]);
+        names.push([{ text: "topic “" }, agentPart(titles.get(section.topic) ?? section.topic), { text: "”" }]);
       seenTopics.add(section.topic);
     } else {
       const name = WRITEUP_SECTION_NAMES[section.key as keyof typeof WRITEUP_SECTION_NAMES];
@@ -146,8 +146,7 @@ export function sinceFact({
     }
   }
   for (const doc of docs) {
-    if (doc.kind === "markdown" && doc.blocks.some((block) => changed.has(block.id)))
-      names.push([{ text: doc.path, agent: true }]);
+    if (doc.kind === "markdown" && doc.blocks.some((block) => changed.has(block.id))) names.push([agentPart(doc.path)]);
   }
   const stale = files.filter((file) => file.viewed === "stale").length;
   if (!names.length && !stale) return;
