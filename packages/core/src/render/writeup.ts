@@ -17,6 +17,7 @@ import { termMatcher } from "./terms.ts";
 export type RenderedWriteup = {
   sections: { key: string; label: string; topic: string | null; blocks: Block[] }[];
   terms?: GlossaryTerm[];
+  area?: string;
   /** Publish-level links and the repo base, kept beside the sections in the stored blob. */
   links?: PublishLinks;
   repoUrl?: string;
@@ -82,6 +83,8 @@ export async function renderWriteup(
     });
   };
   if (
+    writeup.whyItMatters !== undefined ||
+    writeup.area !== undefined ||
     writeup.review !== undefined ||
     writeup.checked !== undefined ||
     writeup.notChecked !== undefined ||
@@ -90,6 +93,7 @@ export async function renderWriteup(
     writeup.context !== undefined
   ) {
     await append("tldr", "TL;DR", writeup.tldr);
+    await append("whyItMatters", "Why it matters", writeup.whyItMatters);
     await append("review", "Review", writeup.review ? reviewMarkdown(writeup.review, topics) : undefined);
     await append("checked", "Checked", writeup.checked);
     await append("notChecked", "Not checked", writeup.notChecked);
@@ -160,6 +164,7 @@ export async function renderWriteup(
   }
   return {
     sections,
+    ...(writeup.area !== undefined ? { area: writeup.area.replace(/\s+/gu, " ").trim() } : {}),
     ...(terms.length ? { terms } : {}),
     ...(meta.links?.length ? { links: meta.links } : {}),
     ...(meta.repoUrl ? { repoUrl: meta.repoUrl } : {}),

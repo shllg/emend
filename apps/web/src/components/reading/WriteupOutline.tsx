@@ -1,7 +1,7 @@
 import type { RevisionView } from "@emend/contract";
 import { type RefObject, useEffect, useMemo, useState } from "react";
 import { revealReadingTarget } from "../../lib/reading-reveal.ts";
-import type { ReaderGroup } from "./BlockReader.tsx";
+import { groupBlocks, type ReaderGroup } from "./BlockReader.tsx";
 
 import { DashOutline } from "./DashOutline.tsx";
 
@@ -22,11 +22,7 @@ export function WriteupOutline({
   const [current, setCurrent] = useState(sections[0]?.key);
   const counts = useMemo(() => {
     const blocks = new Map(
-      sections.flatMap((group) =>
-        [...group.blocks, ...(group.subsections?.flatMap((section) => section.blocks) ?? [])].map(
-          (block) => [block.id, group.key] as const,
-        ),
-      ),
+      sections.flatMap((group) => groupBlocks(group).map((block) => [block.id, group.key] as const)),
     );
     const topics = new Map(sections.flatMap((group) => (group.topic ? [[group.topic.slug, group.key]] : [])));
     const counts = new Map<string, number>();

@@ -915,3 +915,219 @@ test("each writeup image's wrapper gets its size as custom properties, and nothi
   expect(wrapper?.style.getPropertyValue("--emend-media-w")).toBe("");
   expect(wrapper?.style.getPropertyValue("--emend-media-h")).toBe("");
 });
+
+test("the new opening keeps Why it matters inside the first card and lists commentable and computed facts", async () => {
+  const topics = [{ ...topic, attention: "review" as const }];
+  const writeup = RenderedWriteup.parse(
+    await renderWriteup(
+      {
+        tldr: "The seed bed stays healthy.",
+        whyItMatters: "More plants survive.",
+        area: "Garden",
+        review: { level: "topics", topics: [topic.slug], reason: "Check the seed bed." },
+        checked: "- Unit tests.",
+        notChecked: "- Dry weather.",
+        overview: "- **Goal:** Healthy plants.\n- **Change:** More water.",
+        outOfScope: "Harvesting.",
+        whereToLook: "Water the seeds.",
+        context: "A small garden.",
+        decisions: "Keep the soil.",
+        glossary: "- **Seed:** A new plant.",
+        topics: { seed: { why: "The soil dries.", example: "A seed grows.", body: "Water daily." } },
+      },
+      topics,
+    ),
+  );
+  const tldr = writeup.sections.find((section) => section.key === "tldr")?.blocks[0];
+  if (!tldr) throw new Error("Missing TL;DR");
+  const { container } = mount(
+    <Writeup
+      {...props}
+      revision={3}
+      changedSince={2}
+      changedBlocks={[{ blockId: tldr.id, revision: 3 }]}
+      topics={topics}
+      writeup={writeup}
+      files={[{ ...file, counts: { additions: 32, deletions: 32 } }]}
+    />,
+  );
+  expect(
+    [...container.querySelectorAll("[data-reading-section]")].map((group) =>
+      group.getAttribute("data-reading-section"),
+    ),
+  ).toEqual([
+    "tldr",
+    "facts",
+    "overview",
+    "outOfScope",
+    "whereToLook",
+    "context",
+    "decisions",
+    "glossary",
+    "topics-map",
+    "t-seed-why",
+  ]);
+  const card = container.querySelector('[data-reading-section="tldr"]');
+  expect(card?.classList.contains("em-writeup-card")).toBe(true);
+  expect(card && within(card as HTMLElement).getByRole("heading", { level: 3, name: "Why it matters" })).toBeTruthy();
+  expect(card?.querySelector(".em-writeup-matters")?.textContent).toContain("More plants survive.");
+  expect([...container.querySelectorAll(".em-writeup-facts dt")].map((label) => label.textContent)).toEqual([
+    "Review",
+    "Checked",
+    "Not checked",
+    "Risk",
+    "Undo",
+    "Read",
+    "Since",
+  ]);
+  expect(screen.getByRole("heading", { level: 2, name: "Facts" }).className).toBe("sr-only");
+  expect(container.querySelector('[data-reading-section="overview"]')?.classList.contains("em-writeup-pair")).toBe(
+    true,
+  );
+  expect(screen.getByRole("heading", { level: 2, name: "Overview" }).className).not.toContain("em-writeup-kicker");
+});
+
+test.each([
+  [["item", "item"], true],
+  [["item"], false],
+  [["item", "item", "item"], false],
+  [["paragraph", "item"], false],
+] as const)("the new overview pairs only two item blocks: %j", (kinds, paired) => {
+  const blocks = kinds.map((kind, index) => ({ ...block, kind, id: `overview-1234567${index}` }));
+  const { container } = mount(
+    <Writeup {...props} writeup={{ area: "Garden", sections: [{ ...plain("overview", "Overview"), blocks }] }} />,
+  );
+  expect(container.querySelector('[data-reading-section="overview"]')?.classList.contains("em-writeup-pair")).toBe(
+    paired,
+  );
+  expect(container.querySelector("[data-reading-section]")?.getAttribute("data-reading-section")).toBe("tldr");
+});
+
+test("an area-only empty writeup still has a TL;DR card and omits empty Facts", () => {
+  const { container } = mount(<Writeup {...props} writeup={{ area: "Garden", sections: [] }} />);
+  expect(screen.getByRole("heading", { name: "TL;DR", level: 2 })).toBeTruthy();
+  expect(container.querySelector('[data-reading-section="facts"]')).toBeNull();
+});
+
+test("a fact block keeps its writeup-span target, change marker and Facts outline thread count", async () => {
+  const checked: RenderedBlock = {
+    ...block,
+    id: "checked-12345678",
+    section: "checked",
+    text: "Unit tests pass.",
+    html: "<p>Unit tests pass.</p>",
+  };
+  const target = { kind: "writeup-span" as const, ...blockAnchor(checked) };
+  const thread: ThreadView = {
+    id: reviewId,
+    createdOn: 1,
+    state: "open",
+    target,
+    placement: {
+      status: "placed",
+      location: { kind: "writeup-span", blockId: checked.id, start: 0, end: checked.text.length },
+    },
+    comments: [{ id: reviewId, author: "user", body: "Which tests?", sent: false, sentOn: null }],
+  };
+  const { container } = mount(
+    <Writeup
+      {...props}
+      threads={[thread]}
+      changedBlocks={[{ blockId: checked.id, revision: 2 }]}
+      writeup={{ area: "Garden", sections: [{ key: "checked", label: "Checked", topic: null, blocks: [checked] }] }}
+    />,
+  );
+  const facts = container.querySelector<HTMLElement>('[data-reading-section="facts"]');
+  if (!facts) throw new Error("Missing Facts");
+  expect(facts.querySelector(".em-reading-block__change")).not.toBeNull();
+  const outline = screen.getByRole("navigation", { name: "Writeup outline" });
+  expect(within(outline).getByRole("button", { name: /Facts/ }).textContent).toContain("1 comment");
+  fireEvent.click(within(facts).getByRole("button", { name: "Comment on block" }));
+  fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "Add browser coverage" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+  expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body).target).toEqual(target);
+});
+
+test("computed fact strings remain literal text even when titles, undo text and doc titles are hostile", () => {
+  const hostile = "<img src=x onerror=alert(1)>";
+  const why: RenderedBlock = {
+    ...block,
+    id: "t-seed-why-12345678",
+    section: "t-seed-why",
+    text: `Undo: ${hostile}`,
+    html: "<p>Undo details.</p>",
+  };
+  const { container } = mount(
+    <Writeup
+      {...props}
+      revision={3}
+      changedSince={2}
+      changedBlocks={[
+        { blockId: why.id, revision: 3 },
+        { blockId: "doc-12345678-12345678", revision: 3 },
+      ]}
+      topics={[{ ...topic, title: hostile, attention: "critical" }]}
+      docs={[
+        {
+          path: "docs/design.md",
+          title: hostile,
+          kind: "markdown",
+          blocks: [{ ...block, id: "doc-12345678-12345678", section: "doc-12345678" }],
+        },
+      ]}
+      writeup={{ area: "Garden", sections: [{ ...section("seed", "why"), blocks: [why] }] }}
+    />,
+  );
+  const facts = container.querySelector(".em-writeup-facts");
+  expect(facts?.querySelectorAll("img, script")).toHaveLength(0);
+  expect(facts?.querySelector('[data-fact="risk"] dd')?.textContent).toBe(`High: ${hostile}`);
+  expect(facts?.querySelector('[data-fact="undo"] dd')?.textContent).toBe(`${hostile} (${hostile})`);
+  expect(facts?.querySelector('[data-fact="since"] dd')?.textContent).toBe(
+    `Since revision 2: topic “${hostile}” and ${hostile} changed.`,
+  );
+});
+
+test("comments on both paired overview blocks share a usable gutter chip when their first lines align", () => {
+  const blocks: RenderedBlock[] = [
+    { ...block, kind: "item", id: "overview-11111111", text: "Goal: Plants.", html: "<ul><li>Goal: Plants.</li></ul>" },
+    {
+      ...block,
+      kind: "item",
+      id: "overview-22222222",
+      text: "Change: Water.",
+      html: "<ul><li>Change: Water.</li></ul>",
+    },
+  ];
+  const threads: ThreadView[] = blocks.map((block, index) => ({
+    id: `11111111-1111-4111-8111-11111111111${index}`,
+    createdOn: 1,
+    state: "open",
+    target: { kind: "writeup-span", ...blockAnchor(block) },
+    placement: {
+      status: "placed",
+      location: { kind: "writeup-span", blockId: block.id, start: 0, end: block.text.length },
+    },
+    comments: [
+      {
+        id: reviewId,
+        author: "user",
+        body: index === 0 ? "Explain the goal" : "Explain the change",
+        sent: false,
+        sentOn: null,
+      },
+    ],
+  }));
+  const { container } = mount(
+    <Writeup
+      {...props}
+      threads={threads}
+      writeup={{ area: "Garden", sections: [{ ...plain("overview", "Overview"), blocks }] }}
+    />,
+  );
+  expect(container.querySelectorAll("[data-thread-chip]")).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "2 comments" }));
+  expect(screen.getByText("Explain the goal")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByText("Explain the change")).toBeTruthy();
+});

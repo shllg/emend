@@ -18,6 +18,8 @@ import { TopicChips } from "./TopicChips.tsx";
 
 const presentationClasses = {
   tldr: " em-writeup-card",
+  facts: " em-writeup-facts-group",
+  pair: " em-writeup-pair",
   decisions: " em-writeup-callout em-writeup-decisions",
   glossary: "",
   outOfScope: " em-writeup-quiet",
@@ -86,7 +88,11 @@ export function ReadingGroup({
     };
   }, [group.presentation, rememberOpen]);
   const heading = group.heading != null && (
-    <div className={group.topic ? "em-topic-header" : "mb-3 flex items-center gap-2.5"}>
+    <div
+      className={
+        group.topic ? "em-topic-header" : group.presentation === "facts" ? undefined : "mb-3 flex items-center gap-2.5"
+      }
+    >
       {group.topic && (
         <>
           <button
@@ -106,11 +112,13 @@ export function ReadingGroup({
       <h2
         id={headingId}
         className={
-          group.topic
-            ? "em-topic-title"
-            : group.presentation && group.presentation !== "glossary"
-              ? "em-writeup-kicker"
-              : "min-w-0 flex-1 wrap-anywhere text-fg-reading-strong [font:var(--type-h2)]"
+          group.presentation === "facts"
+            ? "sr-only"
+            : group.topic
+              ? "em-topic-title"
+              : group.presentation && group.presentation !== "glossary" && group.presentation !== "pair"
+                ? "em-writeup-kicker"
+                : "min-w-0 flex-1 wrap-anywhere text-fg-reading-strong [font:var(--type-h2)]"
         }
       >
         {group.heading}

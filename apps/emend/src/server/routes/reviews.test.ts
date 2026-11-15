@@ -759,3 +759,34 @@ test("a set-aside Send does not count even on a confirmed delivery", async () =>
   await f.db.query((q) => q.update(sends).set({ setAsideAt: f.deps.now() }).where(eq(sends.id, sent.sendId)));
   expect(await pickedUp()).toBeNull();
 });
+
+test("revision views expose the Send baseline and round-trip the new writeup fields", async () => {
+  const input = {
+    overview: "Goal.",
+    tldr: "Retries stop.",
+    whyItMatters: "Other requests can run.",
+    area: "  requests  › retries  ",
+    decisions: "",
+    topics: {},
+  };
+  const { reviewId } = await publishReview(f, { key: "5", writeup: input });
+  const view = async (seq: number) =>
+    contract.RevisionView.parse(await (await get(`/${reviewId}/revisions/${seq}`)).json());
+  const first = await view(1);
+  expect(first.changedSince).toBe(1);
+  expect(first.writeup.area).toBe("requests › retries");
+  expect(first.writeup.sections.find((section) => section.key === "whyItMatters")?.blocks[0]?.text).toBe(
+    input.whyItMatters,
+  );
+  await publishReview(f, { key: "5", writeup: { ...input, tldr: "Retries stop after three attempts." } });
+  expect((await view(2)).changedSince).toBe(1);
+  expect((await f.request(`/reviews/${reviewId}/sends`, "POST", { kind: "approve", revision: 2 })).status).toBe(201);
+  await publishReview(f, { key: "5", writeup: { ...input, whyItMatters: "The request loop stays responsive." } });
+  const third = await view(3);
+  expect(third.changedSince).toBe(2);
+  expect(third.changedBlocks).toContainEqual({
+    blockId: third.writeup.sections.find((section) => section.key === "whyItMatters")?.blocks[0]?.id,
+    revision: 3,
+  });
+  expect((await view(1)).changedSince).toBe(2);
+});

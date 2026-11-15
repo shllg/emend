@@ -587,6 +587,7 @@ async function revisionView(ownerId: string, q: Queries, deps: AppDeps, reviewId
           : { status: "unplaced", reason: placement?.reason ?? "not-placed" },
     })),
     changedBlocks: changed,
+    changedSince: Math.max(lastSend?.seq ?? 0, 1),
   });
 }
 

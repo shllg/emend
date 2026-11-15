@@ -185,6 +185,8 @@ function Reading({
     <Writeup
       {...props}
       writeup={revision.writeup}
+      docs={revision.docs}
+      changedSince={revision.changedSince}
       files={revision.files}
       search={search}
       phone={phone}

@@ -838,6 +838,7 @@ export async function buildWriteupDownload(
       const intro = [
         "overview",
         "tldr",
+        "whyItMatters",
         "review",
         "checked",
         "notChecked",

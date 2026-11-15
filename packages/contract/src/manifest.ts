@@ -120,9 +120,20 @@ export const Glossary = z
   });
 export type Glossary = z.infer<typeof Glossary>;
 
+export const WriteupArea = z
+  .string()
+  .min(1)
+  .max(LIMITS.areaChars)
+  .refine((text) => /\S/.test(text), "area must not be blank")
+  .refine((text) => text.isWellFormed(), "area must be well-formed UTF-16")
+  .refine((text) => !/[\p{Cc}\p{Cf}\u2028\u2029]/u.test(text), "area must be plain visible text");
+export type WriteupArea = z.infer<typeof WriteupArea>;
+
 const writeupInput = z.object({
   overview: markdown,
   tldr: markdown,
+  whyItMatters: nonBlankMarkdown.optional(),
+  area: WriteupArea.optional(),
   review: ReviewVerdict.optional(),
   checked: nonBlankMarkdown.optional(),
   notChecked: nonBlankMarkdown.optional(),
@@ -149,6 +160,7 @@ export function writeupMarkdown(writeup: WriteupInput): (string | null | undefin
   return [
     writeup.overview,
     writeup.tldr,
+    ...(writeup.whyItMatters !== undefined ? [writeup.whyItMatters] : []),
     writeup.review?.reason,
     writeup.checked,
     writeup.notChecked,

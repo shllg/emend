@@ -1,0 +1,225 @@
+import { type FileView, type RenderedBlock, RenderedWriteup, type RevisionView, type TopicMeta } from "@emend/contract";
+import { expect, test } from "vitest";
+import { renderWriteup } from "../../../../packages/core/src/render/writeup.ts";
+import { readFact, riskFact, sinceFact, undoFact } from "./writeup-facts.ts";
+
+const topic = (slug: string, attention?: TopicMeta["attention"]): TopicMeta => ({
+  slug,
+  title: slug,
+  summary: "",
+  importance: 10,
+  attention,
+});
+const block = (section: RenderedBlock["section"], text: string): RenderedBlock => ({
+  id: `${section}-12345678`,
+  section,
+  text,
+  html: "",
+  kind: "paragraph",
+});
+const section = (
+  key: RenderedWriteup["sections"][number]["key"],
+  text: string,
+  topic: string | null = null,
+): RenderedWriteup["sections"][number] => ({
+  key,
+  label: key,
+  topic,
+  blocks: [block(key, text)],
+});
+const file: FileView = {
+  id: "11111111-1111-4111-8111-111111111111",
+  path: "src/retry.ts",
+  oldPath: null,
+  role: "diff",
+  status: "modified",
+  topic: null,
+  order: 0,
+  mediaType: "text/plain",
+  flag: null,
+  hasOld: true,
+  hasNew: true,
+};
+const empty: RenderedWriteup = { sections: [] };
+
+test("Risk uses the highest attention, preserves rank order and caps names at three", () => {
+  expect(riskFact([])).toBeUndefined();
+  expect(riskFact([topic("unknown")])).toBeUndefined();
+  expect(riskFact([topic("first", "skim")])).toBe("Low: first");
+  expect(riskFact([topic("low", "skim"), topic("medium", "review")])).toBe("Medium: medium");
+  const topics = [
+    topic("medium", "review"),
+    ...["third", "first", "second", "fourth", "fifth"].map((slug) => topic(slug, "critical")),
+  ];
+  expect(riskFact(topics)).toBe("High: third, first, second and 2 more");
+  expect(riskFact([topic("<img src=x onerror=alert(1)>", "critical")])).toBe("High: <img src=x onerror=alert(1)>");
+});
+
+test("Undo chooses the hardest ranked topic, with stable ties and one-way fallback", () => {
+  const topics = [topic("first"), { ...topic("second"), door: "one-way" as const }, topic("last")];
+  expect(undoFact(empty, [])).toBeUndefined();
+  expect(undoFact(empty, [topic("other")])).toBeUndefined();
+  expect(undoFact(empty, [topics[0] as TopicMeta])).toBe("A revert");
+  expect(undoFact(empty, topics)).toBe("A revert is not enough (second)");
+  const writeup = {
+    sections: [
+      section("t-first-why", "  Undo: Restore the saved state.  ", "first"),
+      section("t-last-why", "Undo: This cannot be undone.", "last"),
+    ],
+  };
+  expect(undoFact(writeup, topics)).toBe("This cannot be undone (last)");
+  expect(undoFact({ sections: writeup.sections.slice(0, 1) }, topics)).toBe("Restore the saved state (first)");
+});
+
+test("Undo reads the last matching block in Why, ignoring other sections and nonmatching blocks", () => {
+  const why = section("t-first-why", "The change.", "first");
+  why.blocks.push(
+    block(why.key, "Undo: Cannot be undone"),
+    block(why.key, "Undo: <img src=x onerror=alert(1)>"),
+    block(why.key, "Check the migration."),
+  );
+  expect(
+    undoFact({ sections: [section("t-first-body", "Undo: Cannot be undone", "first"), why] }, [topic("first")]),
+  ).toBe("<img src=x onerror=alert(1)> (first)");
+  why.blocks = [block(why.key, "Undo:   ")];
+  expect(undoFact({ sections: [why] }, [topic("first")])).toBe("A revert");
+  why.blocks = [block(why.key, "Undo: A revert")];
+  expect(undoFact({ sections: [why] }, [topic("first")])).toBe("A revert");
+});
+
+test.each(["\n", "\n\n"])("Undo survives rendering after the Markdown separator %j", async (separator) => {
+  const writeup = RenderedWriteup.parse(
+    await renderWriteup(
+      {
+        overview: "",
+        tldr: "",
+        decisions: "",
+        topics: { first: { why: `Retries must end.${separator}**Undo:** Revert, then rerun.` } },
+      },
+      [topic("first")],
+    ),
+  );
+  const blocks = writeup.sections.find((section) => section.key === "t-first-why")?.blocks;
+  expect(blocks).toHaveLength(separator === "\n" ? 1 : 2);
+  expect(undoFact(writeup, [topic("first")])).toBe("Revert, then rerun (first)");
+});
+
+test.each(["The undo procedure is documented.", "We mention Undo: rerun the migration."])(
+  "Undo ignores a mid-sentence mention: %s",
+  (text) => {
+    expect(undoFact({ sections: [section("t-first-why", text, "first")] }, [topic("first")])).toBe("A revert");
+  },
+);
+
+test.each([
+  ["Cannot be undone: drops column x.", "Cannot be undone: drops column x"],
+  ["Cannot be undone: drops column x", "Cannot be undone: drops column x"],
+  ["Cannot be undone: drops column x..", "Cannot be undone: drops column x."],
+])("Undo trims exactly one trailing period: %s", (undo, expected) => {
+  const writeup = { sections: [section("t-cents-why", `Undo: ${undo}`, "cents")] };
+  expect(undoFact(writeup, [{ ...topic("cents"), title: "Cents migration" }])).toBe(`${expected} (Cents migration)`);
+});
+
+test("Read counts every writeup and Markdown doc block and only counted diff files", () => {
+  const writeup = { sections: [section("tldr", "word ".repeat(400))] };
+  const docs: RevisionView["docs"] = [
+    { kind: "markdown", path: "design.md", blocks: [block("doc-12345678", "word\n\t".repeat(400))] },
+    { kind: "html", path: "preview.html", contentUrl: "/content/preview" },
+    { kind: "source", path: "source.ts", language: "text", lines: [] },
+  ];
+  const files: FileView[] = [
+    { ...file, counts: { additions: 40, deletions: 24 } },
+    { ...file, role: "doc", counts: { additions: 500, deletions: 500 } },
+    file,
+  ];
+  expect(readFact(writeup, docs, files)).toBe("About 12 min: writeup and docs 4 min, diff 8 min (64 lines)");
+  expect(readFact(writeup, [], [])).toBe("About 2 min: writeup and docs 2 min");
+  expect(readFact(empty, [], [files[0] as FileView])).toBe("About 8 min: diff 8 min (64 lines)");
+});
+
+test("Read omits empty content, handles under a minute and rounds hours to five minutes", () => {
+  expect(readFact(empty, [], [file])).toBeUndefined();
+  expect(readFact({ sections: [section("tldr", " \n ")] }, [], [])).toBeUndefined();
+  expect(readFact({ sections: [section("tldr", "One word")] }, [], [])).toBe("Under 1 min");
+  expect(readFact(empty, [], [{ ...file, counts: { additions: 7, deletions: 0 } }])).toBe("Under 1 min");
+  expect(readFact(empty, [], [{ ...file, counts: { additions: 8, deletions: 0 } }])).toBe(
+    "About 1 min: diff 1 min (8 lines)",
+  );
+  expect(readFact(empty, [], [{ ...file, counts: { additions: 480, deletions: 0 } }])).toBe(
+    "About 1 h: diff 1 h (480 lines)",
+  );
+  expect(readFact(empty, [], [{ ...file, counts: { additions: 664, deletions: 0 } }])).toBe(
+    "About 1 h 25 min: diff 1 h 25 min (664 lines)",
+  );
+});
+
+const since = {
+  writeup: {
+    sections: [
+      section("tldr", "Summary"),
+      section("whyItMatters", "Responsive"),
+      section("t-retry-why", "Why", "retry"),
+      section("t-retry-body", "Body", "retry"),
+    ],
+  },
+  topics: [{ ...topic("retry"), title: "Retry budget" }],
+  docs: [{ kind: "markdown" as const, path: "docs/design.md", blocks: [block("doc-12345678", "Design")] }],
+  files: [] as FileView[],
+  revision: 3,
+  changedSince: 2,
+  changedBlocks: [] as RevisionView["changedBlocks"],
+};
+
+test("Since respects the baseline and names changed sections, each topic once, docs and stale files", () => {
+  for (const change of [{ revision: 1 }, { revision: 2 }, { changedSince: undefined }, { changedSince: 4 }]) {
+    expect(sinceFact({ ...since, ...change })).toBeUndefined();
+  }
+  expect(sinceFact(since)).toBe("Since revision 2, nothing in the writeup, the docs or the files you viewed changed.");
+  const changedBlocks = ["doc-12345678", "t-retry-body", "t-retry-why", "tldr"].map((section) => ({
+    blockId: `${section}-12345678`,
+    revision: 3,
+  }));
+  expect(sinceFact({ ...since, changedBlocks })).toBe(
+    "Since revision 2: TL;DR, topic “Retry budget” and docs/design.md changed.",
+  );
+  changedBlocks.push({ blockId: "whyItMatters-12345678", revision: 3 });
+  expect(
+    sinceFact({
+      ...since,
+      changedBlocks,
+      files: [
+        { ...file, viewed: "stale" },
+        { ...file, viewed: "viewed" },
+      ],
+    }),
+  ).toBe(
+    "Since revision 2: TL;DR, Why it matters, topic “Retry budget”, docs/design.md and 1 file you viewed changed.",
+  );
+  expect(
+    sinceFact({
+      ...since,
+      changedBlocks: [changedBlocks[0] as RevisionView["changedBlocks"][number]],
+      docs: [
+        {
+          ...(since.docs[0] as Extract<RevisionView["docs"][number], { kind: "markdown" }>),
+          title: "<img src=x onerror=alert(1)>",
+        },
+      ],
+    }),
+  ).toBe("Since revision 2: <img src=x onerror=alert(1)> changed.");
+});
+
+test("Since uses bare section labels, including Checked", () => {
+  const sections = [
+    section("tldr", "Summary"),
+    section("checked", "Unit tests"),
+    section("t-retry-why", "Why", "retry"),
+  ];
+  expect(
+    sinceFact({
+      ...since,
+      writeup: { sections },
+      changedBlocks: sections.flatMap((section) => section.blocks.map((block) => ({ blockId: block.id, revision: 3 }))),
+    }),
+  ).toBe("Since revision 2: TL;DR, Checked and topic “Retry budget” changed.");
+});

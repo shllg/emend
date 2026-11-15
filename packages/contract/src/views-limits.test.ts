@@ -90,10 +90,11 @@ test("topics accept the full publish limit, including Other changes", () => {
     expect(RevisionView.shape.topics.safeParse(topics).success).toBe(size === LIMITS.topicsPerReview);
   }
 });
-test("section count allows ten fixed sections and three for every writeup topic", () => {
+test("section count allows eleven fixed sections and three for every writeup topic", () => {
   const sections = [
     "overview",
     "tldr",
+    "whyItMatters",
     "review",
     "checked",
     "notChecked",
@@ -111,12 +112,15 @@ test("section count allows ten fixed sections and three for every writeup topic"
   expect(RenderedWriteup.parse({ sections })).toEqual({ sections });
   expect(RenderedWriteup.shape.sections.safeParse([...sections, section]).success).toBe(false);
 });
-test.each(["review", "checked", "notChecked"] as const)("accepts rendered %s sections and blocks", (key) => {
-  const rendered = {
-    sections: [{ ...section, key, blocks: [{ ...block, id: `${key}-0123abcd`, section: key }] }],
-  };
-  expect(RenderedWriteup.parse(rendered)).toEqual(rendered);
-});
+test.each(["whyItMatters", "review", "checked", "notChecked"] as const)(
+  "accepts rendered %s sections and blocks",
+  (key) => {
+    const rendered = {
+      sections: [{ ...section, key, blocks: [{ ...block, id: `${key}-0123abcd`, section: key }] }],
+    };
+    expect(RenderedWriteup.parse(rendered)).toEqual(rendered);
+  },
+);
 test("section keys and generated labels allow the longest valid topic slug and title", () => {
   const key = `t-${"a".repeat(64)}-example`;
   const tooLong = `t-${"a".repeat(65)}-example`;

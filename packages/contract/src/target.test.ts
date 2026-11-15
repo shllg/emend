@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { BlockId, Target, TopicPart, TopicTarget } from "./index.ts";
 
-test.each(["review", "checked", "notChecked", "outOfScope", "whereToLook", "context"])(
+test.each(["whyItMatters", "review", "checked", "notChecked", "outOfScope", "whereToLook", "context"])(
   "accepts block ids for %s",
   (section) => {
     for (const suffix of ["", "-2", "-10"]) {

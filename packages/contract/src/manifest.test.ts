@@ -7,6 +7,7 @@ import {
   PublishManifest,
   ReviewVerdict,
   reviewVerdictIssues,
+  WriteupArea,
   WriteupInput,
   writeupMarkdown,
 } from "./index.ts";
@@ -443,5 +444,51 @@ describe("glossary lists", () => {
             : ["glossary", 1, "term"],
       );
     }
+  });
+});
+
+describe("writeup opening", () => {
+  test.each(["cli › serve", "x".repeat(60), "  requests   › retries  ", "<img src=x onerror=alert(1)>"])(
+    "accepts a plain-text area: %j",
+    (area) => {
+      expect(WriteupArea.parse(area)).toBe(area);
+      expect(WriteupInput.parse({ ...manifest.writeup, area }).area).toBe(area);
+    },
+  );
+  test.each([
+    "",
+    "   ",
+    "x".repeat(61),
+    "bad\u0001area",
+    "bad\u200earea",
+    "two\u2028lines",
+    "two\u2029lines",
+    "two\nlines",
+    "\ud800",
+  ])("rejects an invalid area: %j", (area) => {
+    expect(WriteupArea.safeParse(area).success).toBe(false);
+    expect(WriteupInput.safeParse({ ...manifest.writeup, area }).success).toBe(false);
+  });
+  test("whyItMatters is nonblank Markdown and spends both writeup byte budgets", () => {
+    for (const whyItMatters of ["", " \n\t ", "é".repeat(LIMITS.writeupSectionBytes / 2 + 1)]) {
+      expect(WriteupInput.safeParse({ ...manifest.writeup, whyItMatters }).success).toBe(false);
+    }
+    const full = {
+      overview: "x".repeat(LIMITS.writeupSectionBytes),
+      tldr: "x".repeat(LIMITS.writeupSectionBytes),
+      decisions: "",
+      topics: {},
+    };
+    expect(WriteupInput.safeParse({ ...full, area: "Requests" }).success).toBe(true);
+    expect(WriteupInput.safeParse({ ...full, whyItMatters: "x" }).success).toBe(false);
+    const input = { ...manifest.writeup, whyItMatters: "**Resilience.**", area: "Requests" };
+    expect(WriteupInput.parse(input)).toEqual(input);
+    expect(writeupMarkdown(input).slice(0, 3)).toEqual([input.overview, input.tldr, input.whyItMatters]);
+    expect(writeupMarkdown(input)).not.toContain(input.area);
+    expect(
+      writeupMarkdown({ overview: "", tldr: "", decisions: "", topics: {}, area: "Requests" }).some((text) =>
+        text?.trim(),
+      ),
+    ).toBe(false);
   });
 });

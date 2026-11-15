@@ -136,3 +136,13 @@ test("rendered glossary terms are optional, bounded and reference validated bloc
     contract.RenderedWriteup.safeParse({ sections: [], terms: Array.from({ length: 51 }, () => term) }).success,
   ).toBe(false);
 });
+
+test("rendered writeups omit invalid stored areas instead of refusing the revision", () => {
+  expect(contract.RenderedWriteup.parse({ sections: [], area: "Requests" }).area).toBe("Requests");
+  for (const area of ["", " ", "x".repeat(61), "bad\u200earea", "bad\narea", "\ud800", 42, null]) {
+    expect(contract.RenderedWriteup.parse({ sections: [], area }).area).toBeUndefined();
+  }
+  const schema = contract.RevisionView.shape.changedSince;
+  for (const changedSince of [undefined, 1, 3]) expect(schema.parse(changedSince)).toBe(changedSince);
+  for (const changedSince of [null, 0, -1, 1.5]) expect(schema.safeParse(changedSince).success).toBe(false);
+});

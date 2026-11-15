@@ -596,9 +596,11 @@ Both are reviewer-only, as is the revision endpoint below.
 `GET /api/v1/reviews/:id/revisions/:seq` returns `RevisionView = { seq, base, head, main, writeupEmpty,
 topics: TopicMeta[], files: FileView[], writeup: RenderedWriteup, links: PublishLink[],
 repoUrl: string | null, docs, threads: ThreadView[],
-changedBlocks: { blockId: BlockId, revision: number }[] }`.
+changedBlocks: { blockId: BlockId, revision: number }[], changedSince?: number }`.
 `links` and `repoUrl` are the revision's publish-level links (see "Links and repoUrl" below);
 both fields are optional in the view, and revisions published before they existed omit them.
+`RenderedWriteup.area?: WriteupArea` is the plain-text area, with whitespace collapsed and trimmed.
+An invalid stored area is omitted.
 `RenderedWriteup.terms?: GlossaryTerm[]` holds at most 50 entries `{ term, definition, blockId }`
 for a list glossary. `term` is normalized plain text (1–100 characters), `definition` is plain
 text from sanitized glossary blocks (0–2000 characters, ending in `…` when cut), and `blockId`
@@ -606,10 +608,10 @@ names the entry's first glossary block. Old revisions, empty lists and Markdown 
 Base/head are nullable full commit hashes; head also permits `worktree`.
 `main` is `"writeup" | FilePath | null`: the manifest's main page, or null when omitted.
 `writeupEmpty` is a boolean computed at publish from the source Markdown, before rendering:
-true only when overview, tldr, the review verdict's reason, checked, notChecked, outOfScope,
+true only when overview, tldr, whyItMatters, the review verdict's reason, checked, notChecked, outOfScope,
 whereToLook, context, decisions, glossary, and every topic's why, example and body are missing or
-whitespace only. Both fields are stored on the revision; revisions predating
-these fields read as `main: null`, `writeupEmpty: false` and keep opening on Writeup.
+whitespace only. The plain-text area does not make a writeup non-empty. Both fields are stored
+on the revision; revisions predating these fields read as `main: null`, `writeupEmpty: false` and keep opening on Writeup.
 Without an explicit visible `tab` in the URL, the app opens the main page when set; otherwise
 it opens Writeup if it has text, the first doc in manifest order, Diff if any file has role
 `diff`, or Writeup when there is nothing. A main doc opens Docs scrolled to that document.
@@ -807,6 +809,8 @@ regardless of clock changes. `sent` means the comment has a Send; agent replies 
 `sentOn` is the positive revision sequence named by that comment's Send, derived from the stored
 Send/revision relationship, never from timestamps. It is `null` for unsent comments and agent
 replies, and stays the same when reading another revision.
+`changedSince` is an optional positive revision sequence: the newest Send's revision, or 1
+without a Send. It is the exclusive lower bound used by `changedBlocks`.
 `changedBlocks` contains each block once, paired with the newest positive revision sequence in
 which it changed after the reviewer's most recent Send's revision and through the requested revision.
 For example, a block changed in revisions 2 and 3 after a Send on revision 1 appears once with
@@ -875,9 +879,9 @@ to make a read fit a per-Send or per-revision limit. The limits below apply to t
 | `RevisionView.topics` | `topicsPerReview + 1` (201): up to 200 declared topics plus the reserved Other changes entry, as in publish |
 | `RevisionView.files`, `RevisionView.docs` | Each at most `filesPerRevision` (10000), the publish file limit |
 | `FileView.order` | Zero through `filesPerRevision - 1` (9999), the publisher's zero-based file-array index |
-| `RenderedWriteup.sections` | At most `10 + 3 * topicsPerReview` (610): ten fixed sections and Why/Example/Details for each writeup topic |
+| `RenderedWriteup.sections` | At most `11 + 3 * topicsPerReview` (611): eleven fixed sections and Why/Example/Details for each writeup topic |
 | `RenderedWriteup.terms` | Optional array of at most `glossaryTerms` (50) entries: `term` 1–`glossaryTermChars` (100) characters, plain-text `definition` 0–`glossaryDefinitionChars` (2000) characters, and a validated `blockId: BlockId` |
-| `RenderedWriteup.sections[].key`, `RenderedBlock.section` | Renderer-generated keys: overview, tldr, review, checked, notChecked, outOfScope, whereToLook, context, decisions, glossary or `t-<TopicSlug>-why/example/body`; block sections also allow `doc-<hash8>`. TopicSlug permits 1–64 characters, so the longest topic section key is 74 characters |
+| `RenderedWriteup.sections[].key`, `RenderedBlock.section` | Renderer-generated keys: overview, tldr, whyItMatters, review, checked, notChecked, outOfScope, whereToLook, context, decisions, glossary or `t-<TopicSlug>-why/example/body`; block sections also allow `doc-<hash8>`. TopicSlug permits 1–64 characters, so the longest topic section key is 74 characters |
 | `RenderedWriteup.sections[].label` | `titleChars + " — Example".length` (210), the longest renderer suffix appended to a topic title |
 | Section `blocks` and Markdown doc `blocks` | Each at most `blocksPerRevision` (100000); the same limit also applies to all writeup blocks combined and to writeup plus doc blocks combined |
 | `RenderedBlock.html`, `text`, `source` | Each bounded by `renderedBytesPerRevision` (268435456) UTF-8 bytes, the stored renderer output budget; source is optional |
@@ -1256,10 +1260,14 @@ text. There are at most `topicsPerReview` declared topics and writeup topic keys
 blast-radius scopes and notes obey `summaryChars`, `blastScopeChars` and `blastNoteChars`.
 Markdown strings are preserved exactly; the schema does not render or sanitize them.
 
-`WriteupInput = { overview, tldr, review?, checked?, notChecked?, outOfScope?, whereToLook?, context?, decisions: string | null, glossary?, topics }`.
-Sections are Markdown strings, except `glossary?: string | GlossaryEntry[]` and `review?: ReviewVerdict`;
+`WriteupInput = { overview, tldr, whyItMatters?, area?, review?, checked?, notChecked?, outOfScope?, whereToLook?, context?, decisions: string | null, glossary?, topics }`.
+Sections are Markdown strings, except `area?: WriteupArea`, `glossary?: string | GlossaryEntry[]` and `review?: ReviewVerdict`;
 `topics` maps slugs to `{ why, example?, body? }`, also Markdown. Decisions is
 required, with `null` representing no decisions section.
+`whyItMatters` is nonblank Markdown: what the change gives the product or prepares for.
+`area` is plain text, never Markdown. `WriteupArea` accepts 1–`areaChars` (60) characters,
+with non-whitespace text, well-formed UTF-16, no control or format characters (`Cc` or `Cf`),
+and no U+2028 or U+2029. Both fields are optional and additive under `/api/v1`.
 The fields `outOfScope`, `whereToLook`, `context`, `review`, `checked` and `notChecked` are optional, additive fields under `/api/v1`.
 `ReviewVerdict = { level: "skim" | "topics" | "everything", topics?: TopicSlug[], reason }` is the
 agent's advice on how deep to read. `topics` is required for level `topics` and refused for the
@@ -1276,14 +1284,14 @@ The renderer composes the Review section: a bold "Skim, then merge.", "Read ever
 Markdown and HTML stay literal; a bare URL, `www.` address or email in a title still becomes a
 hardened link, as in other writeup text. A `reason` with blank lines adds paragraphs. `checked` (what the
 agent ran or verified) and `notChecked` (what it did not) are Markdown with non-whitespace text.
-When any of the six is present (`outOfScope`, `whereToLook` and `context` count even as an empty
-string), sections render as TL;DR, Review, Checked,
+When any of these fields or `whyItMatters` or `area` is present (`outOfScope`, `whereToLook` and
+`context` count even as an empty string), sections render as TL;DR, Why it matters, Review, Checked,
 Not checked, Overview, Out of scope, Where to look, Context, Decisions and drift, Glossary, then
 topics; absent optional fields emit no section.
 Without them, the existing order stays Overview, TL;DR, Decisions and drift, Glossary, then topics,
 including when an import re-renders stored source.
 Every Markdown string is limited to `writeupSectionBytes` UTF-8 bytes; the sum of all present
-`overview`, `tldr`, `outOfScope`, `whereToLook`, `context`, `decisions`, `glossary`, `why`, `example`
+`overview`, `tldr`, `whyItMatters`, `outOfScope`, `whereToLook`, `context`, `decisions`, `glossary`, `why`, `example`
 and `body` strings, including every list glossary term, definition and alias, is limited to
 `writeupBytes`. The verdict's `reason`, `checked` and `notChecked` count toward both limits too.
 These limits measure UTF-8 bytes, not character count. Parsed `topics` has a null
@@ -1700,6 +1708,7 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `mediaPerRevision` | 50 writeup images (counted in `filesPerRevision`; each at most `assetBytes`) |
 | `agentNotesPerFile` | 8 notes |
 | `agentNotesPerRevision` | 64 notes |
+| `areaChars` | 60 characters of plain text in a writeup area |
 | `pathChars` | 4096 characters per path or source; also per publish URL or block id |
 | `pathSegmentChars` | 255 characters per published path segment |
 | `topicsPerReview` | 200 declared topics or writeup topic keys |
@@ -1739,7 +1748,7 @@ that exceed the remaining budget are listed as oversized without uploading their
 - Blob hashes are lowercase 64-character hex SHA-256 digests, addressed per owner.
 - Block ids are `<section>-<hash8>`. `hash8` is the first eight lowercase hex characters of SHA-256
   over block text normalized to NFC, whitespace runs collapsed to one space, and trimmed. Repeats
-  within a section append `-2`, `-3`, and so on. Section keys are `overview`, `tldr`, `review`,
+  within a section append `-2`, `-3`, and so on. Section keys are `overview`, `tldr`, `whyItMatters`, `review`,
   `checked`, `notChecked`, `outOfScope`, `whereToLook`, `context`, `decisions`, `glossary`,
   `t-<slug>-why`, `t-<slug>-example`, `t-<slug>-body`, and
   `doc-<hash8 of the doc path>`. The complete block id is bounded by `pathChars`.
