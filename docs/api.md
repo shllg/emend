@@ -1239,8 +1239,10 @@ Plan task 1.6 implements and tests these checks. Assets are collected during pub
 Markdown image discovery runs in a worker under the render timeout (10 seconds), for both
 path and `--manifest` publishing. Distinct references keep their first-seen order and total at
 most `markdownDocBytes` UTF-8 bytes; discovery stops when the next reference would exceed it.
+At that cap, the CLI warns once for the doc: `some images left out: too many image references`.
 If discovery fails or times out, the CLI warns once with an escaped argument or review path
-and a fixed reason, lists no images for that doc, and continues publishing.
+and the fixed reason `published without images: image discovery failed or timed out`.
+The doc still publishes, with no images.
 Markdown image references must pass the renderer's local-path normalization and every CLI
 asset path check. A leading `./` is allowed; encoded separators such as `%2F` are skipped.
 Image filenames that look secret-like are skipped as "may hold a secret", including

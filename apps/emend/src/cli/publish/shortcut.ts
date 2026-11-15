@@ -252,17 +252,21 @@ export async function shortcutManifest(
             .digest("hex")
             .slice(0, 16)}`);
   const docFolders = new Map([...folders].map(([file, origins]) => [reviewPath(file), origins]));
+  const skips = [...skipped].map(
+    ([file, reason]) => [file, { path: reviewPath(file), reason, referencedByMarkdown: false }] as const,
+  );
   return {
     manifest: parsed.data,
     key,
     titleFromMain,
     docFolders,
     excludedAssets,
+    walkedSecretPaths: new Map(skips.filter(([, skip]) => skip.reason === "may hold a secret")),
     retainedSources,
     folderRoots: folderArguments.map(({ root }) => root),
     namedFiles: new Set(explicit.keys()),
     skippedArguments,
-    skipped: [...skipped].map(([file, reason]) => ({ path: reviewPath(file), reason })),
+    skipped: skips.map(([, skip]) => skip),
     docArguments: new Map([...explicit].map(([file, argument]) => [reviewPath(file), argument])),
     folderArguments: folderArguments.map(({ root, argument }) => ({ path: reviewPath(root), argument })),
   };

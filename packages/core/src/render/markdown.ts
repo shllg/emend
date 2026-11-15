@@ -72,7 +72,7 @@ function sanitizedPipeline(lineBreaks = false) {
 
 const imageReferenceProcessor = sanitizedTreePipeline();
 /** Image sources the renderer sees after sanitize, before resolving declared local media. */
-export function markdownImageReferences(markdown: string): string[] {
+export function markdownImageReferences(markdown: string): { references: string[]; capped: boolean } {
   const { source, tables } = prepareTables(markdown);
   const tree = imageReferenceProcessor.runSync(imageReferenceProcessor.parse(source), {
     value: source,
@@ -91,7 +91,7 @@ export function markdownImageReferences(markdown: string): string[] {
       const ref = node.properties.src;
       if (!seen.has(ref)) {
         const size = encoder.encode(ref).byteLength;
-        if (bytes + size > LIMITS.markdownDocBytes) break;
+        if (bytes + size > LIMITS.markdownDocBytes) return { references: refs, capped: true };
         bytes += size;
         seen.add(ref);
         refs.push(ref);
@@ -103,7 +103,7 @@ export function markdownImageReferences(markdown: string): string[] {
         if (child) pending.push(child);
       }
   }
-  return refs;
+  return { references: refs, capped: false };
 }
 
 async function createProcessor() {

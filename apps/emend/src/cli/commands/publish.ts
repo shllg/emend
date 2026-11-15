@@ -171,6 +171,7 @@ export async function publishCommand(
     titleFromMain: shortcut?.titleFromMain,
     docFolders: shortcut?.docFolders,
     excludedAssets: shortcut?.excludedAssets,
+    walkedSecretPaths: shortcut?.walkedSecretPaths,
     retainedSources: shortcut?.retainedSources,
     folderRoots: shortcut?.folderRoots,
     namedFiles: shortcut?.namedFiles,
@@ -188,8 +189,8 @@ export async function publishCommand(
     warn(`emend: skipped ${escapeReference(argument)}: not a visible text doc\n`);
   const collected = await resolvePublish(manifest, options, stateDir, configDir, null, cwd, warn, context, configRoots);
   const published = new Set(collected.request.files.map((file) => file.path));
-  for (const { path, reason } of shortcut?.skipped ?? [])
-    if (!published.has(path)) warn(`emend: skipped ${escapeReference(path)}: ${reason}\n`);
+  for (const { path, reason, referencedByMarkdown } of shortcut?.skipped ?? [])
+    if (!published.has(path) || referencedByMarkdown) warn(`emend: skipped ${escapeReference(path)}: ${reason}\n`);
   const pair = await readAttachmentPair(stateDir);
   const localReviewId = pair
     ? await refuseUncopiedReview(

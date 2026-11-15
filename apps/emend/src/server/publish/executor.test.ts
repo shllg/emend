@@ -395,8 +395,15 @@ test("image discovery and size reads run in the worker and transfer their input 
     expect(await execute({ kind: "doc-images", bytes })).toEqual({
       kind: "doc-images",
       references: ["shot.png", "two.png"],
+      capped: false,
     });
     expect(bytes.byteLength).toBe(0);
+    expect(
+      await execute({
+        kind: "doc-images",
+        bytes: new TextEncoder().encode(`![First](first.png) ![Large](${"é".repeat(180000)}.png)`).buffer,
+      }),
+    ).toEqual({ kind: "doc-images", references: ["first.png"], capped: true });
     const head = Uint8Array.from(
       Buffer.from("89504e470d0a1a0a0000000d4948445200000003000000020806000000", "hex"),
     ).buffer;

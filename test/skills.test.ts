@@ -925,4 +925,6 @@ test.each(["docs/api.md", "docs/usage.md"])("%s explains Markdown image discover
   expect(text).toContain("secret-looking");
   expect(text).toContain("encoded separators");
   expect(text).toContain("warns once");
+  expect(text).toContain("published without images: image discovery failed or timed out");
+  expect(text).toContain("some images left out: too many image references");
 });

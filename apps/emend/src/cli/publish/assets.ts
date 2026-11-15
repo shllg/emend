@@ -18,6 +18,7 @@ import { isSecretPath } from "./shortcut-walk.ts";
 export const assetWarning = (raw: string, reason: string) => `emend: skipped ${escapeReference(raw)}: ${reason}\n`;
 
 export type AssetFormat = "html" | "markdown";
+export type WalkedSecretPaths = ReadonlyMap<string, { referencedByMarkdown: boolean }>;
 export const docAssetSizeError = (format: AssetFormat) =>
   format === "html" ? "HTML doc and assets exceed their size limit" : "Markdown doc and images exceed their size limit";
 
@@ -28,6 +29,7 @@ export function* assetCandidates(
   skipNodeModules = false,
   format: AssetFormat = "html",
   imageReferences: readonly string[] = [],
+  walkedSecretPaths?: WalkedSecretPaths,
 ) {
   const seen = new Set<string>();
   const references = format === "html" ? htmlAssetReferences(content) : imageReferences;
@@ -63,7 +65,10 @@ export function* assetCandidates(
       continue;
     }
     if (format === "markdown" && isSecretPath(basename(ref))) {
-      skip("may hold a secret");
+      // The shortcut prints the walk's warning once, using the file's review path.
+      const walked = walkedSecretPaths?.get(join(dirname(file), ref));
+      if (walked) walked.referencedByMarkdown = true;
+      else skip("may hold a secret");
       continue;
     }
     if (skipNodeModules && ref.split("/").includes("node_modules")) {

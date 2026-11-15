@@ -126,10 +126,15 @@ export async function renderRevision(
   for (const sha of docImages) {
     checkPublishSignal(signal);
     if (batchBytes + IMAGE_HEAD_BYTES > batchLimit) await flushSizes();
-    const head = writeupHeads.get(sha)?.slice(0) ?? (await readHead(sha));
-    const bounded = head.byteLength > IMAGE_HEAD_BYTES ? head.slice(0, IMAGE_HEAD_BYTES) : head;
-    batch.push([sha, bounded]);
-    batchBytes += bounded.byteLength;
+    try {
+      const head = writeupHeads.get(sha)?.slice(0) ?? (await readHead(sha));
+      const bounded = head.byteLength > IMAGE_HEAD_BYTES ? head.slice(0, IMAGE_HEAD_BYTES) : head;
+      batch.push([sha, bounded]);
+      batchBytes += bounded.byteLength;
+    } catch {
+      checkPublishSignal(signal);
+      // A failed head read leaves this image renderable without dimensions.
+    }
     await yieldToLoop("publish-render");
   }
   await flushSizes();

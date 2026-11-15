@@ -8,6 +8,7 @@ import {
 } from "@emend/core";
 import { expect, test, vi } from "vitest";
 import { WorkTimeout } from "./executor.ts";
+import { PublishAborted } from "./lifecycle.ts";
 import { renderRevision } from "./render.ts";
 import { executeWork, serializeRendered } from "./work.ts";
 
@@ -615,5 +616,54 @@ test("doc image heads are released in batches of at most 16 MiB and docs receive
     const html = stored.get(result.docBlobs.get(path) ?? "")?.toString();
     expect(html).toContain("emend-media-sized");
     expect(html).toContain('width=\\"3\\" height=\\"2\\"');
+  }
+});
+
+test.each([false, true])("doc image head failures honor cancellation (aborted: %s)", async (aborted) => {
+  const request = input(["plan.md", "other.md"]);
+  request.writeup.overview = "Synthetic overview";
+  const sha = "c".repeat(64);
+  for (const doc of request.files) doc.assets = ["shot.png"];
+  request.files.push({
+    path: "shot.png",
+    role: "asset",
+    parent: "plan.md",
+    oldPath: null,
+    oldBlob: null,
+    newBlob: sha,
+    flag: null,
+  });
+  const controller = new AbortController();
+  const stored = new Map<string, Buffer>();
+  const head = vi.fn(async () => {
+    if (aborted) controller.abort();
+    throw new Error("synthetic head read failure");
+  });
+  const rendered = renderRevision(
+    request,
+    executeWork,
+    async (hash) => Uint8Array.from(stored.get(hash) ?? Buffer.from("![Shot](shot.png)")).buffer,
+    head,
+    async (bytes) => {
+      const key = String(stored.size);
+      stored.set(key, bytes);
+      return key;
+    },
+    controller.signal,
+  );
+  if (aborted) {
+    await expect(rendered).rejects.toBeInstanceOf(PublishAborted);
+    expect(stored.size).toBe(0);
+    return;
+  }
+  const result = await rendered;
+  expect(head).toHaveBeenCalledExactlyOnceWith(sha);
+  expect(result.unrendered).toEqual([]);
+  expect(stored.get(result.renderedBlob)?.toString()).toContain("Synthetic overview");
+  for (const path of ["plan.md", "other.md"]) {
+    const blocks = JSON.parse(stored.get(result.docBlobs.get(path) ?? "")?.toString() ?? "[]") as Block[];
+    const html = blocks.map((block) => block.html).join("");
+    expect(html).toContain(`/api/v1/media/${sha}`);
+    expect(html).not.toMatch(/width=|height=|emend-media-sized/);
   }
 });

@@ -12,7 +12,7 @@ vi.mock("../../server/publish/executor.ts", async (original) => ({
   ...(await original<typeof import("../../server/publish/executor.ts")>()),
 }));
 
-async function fixture(mode: "shortcut" | "manifest", sources: Record<string, string>) {
+async function fixture(mode: "shortcut" | "manifest", sources: Record<string, string>, paths = ["."]) {
   const f = await directFixture();
   for (const [path, text] of Object.entries(sources)) {
     await mkdir(join(f.source, path, ".."), { recursive: true });
@@ -24,13 +24,13 @@ async function fixture(mode: "shortcut" | "manifest", sources: Record<string, st
     title: "Synthetic",
     topics: [],
     files: Object.keys(sources)
-      .filter((path) => path.endsWith(".md"))
+      .filter((path) => /\.(md|html)$/.test(path))
       .map((path) => ({ path, role: "doc" })),
     writeup: { overview: "", tldr: "", decisions: null, topics: {} },
   };
   const shortcut =
     mode === "shortcut"
-      ? await shortcutManifest({ paths: ["."], title: "Synthetic" }, f.stateDir, f.configDir, f.source, context)
+      ? await shortcutManifest({ paths, title: "Synthetic" }, f.stateDir, f.configDir, f.source, context)
       : undefined;
   const warnings: string[] = [];
   const publish = () =>
@@ -64,16 +64,16 @@ test.each(["shortcut", "manifest"] as const)(
     expect(result.request.files.find((file) => file.path === "bad.md")?.assets).toEqual([]);
     expect(result.request.files.find((file) => file.path === "good.md")?.assets).toEqual(["good.png"]);
     expect(result.request.files.filter((file) => file.role === "asset").map((file) => file.path)).toEqual(["good.png"]);
-    expect(f.warnings).toEqual(["emend: skipped bad.md: Markdown image discovery failed or timed out\n"]);
+    expect(f.warnings).toEqual(["emend: bad.md: published without images: image discovery failed or timed out\n"]);
     expect(factory).toHaveBeenCalledOnce();
     expect(close).toHaveBeenCalledOnce();
   },
   15000,
 );
 
-test.each(["shortcut", "manifest"] as const)("%s treats image discovery timeouts as a per-doc skip", async (mode) => {
+test.each(["shortcut", "manifest"] as const)("%s publishes after image discovery times out", async (mode) => {
   const f = await fixture(mode, {
-    "bad.md": "![Bad](bad.png)",
+    "bad\ufe0f.md": "![Bad](bad.png)",
     "good.md": "![Good](good.png)",
     "bad.png": "synthetic bad image",
     "good.png": "synthetic good image",
@@ -89,10 +89,52 @@ test.each(["shortcut", "manifest"] as const)("%s treats image discovery timeouts
   );
   vi.spyOn(executors, "workerExecutor").mockReturnValue(execute);
   const result = await f.publish();
-  expect(result.request.files.find((file) => file.path === "bad.md")?.assets).toEqual([]);
+  expect(result.request.files.find((file) => file.path === "bad\ufe0f.md")?.assets).toEqual([]);
   expect(result.request.files.find((file) => file.path === "good.md")?.assets).toEqual(["good.png"]);
-  expect(f.warnings).toEqual(["emend: skipped bad.md: Markdown image discovery failed or timed out\n"]);
+  expect(f.warnings).toEqual([
+    "emend: bad\\u{fe0f}.md: published without images: image discovery failed or timed out\n",
+  ]);
   expect(close).toHaveBeenCalledOnce();
+});
+
+test.each([
+  ["shortcut", true],
+  ["shortcut", false],
+  ["manifest", true],
+  ["manifest", false],
+] as const)("%s keeps a shared secret-named asset for HTML only (HTML first: %s)", async (mode, htmlFirst) => {
+  const docs = htmlFirst ? ["page.html", "plan.md"] : ["plan.md", "z-page.html"];
+  const page = htmlFirst ? "page.html" : "z-page.html";
+  const f = await fixture(
+    mode,
+    {
+      ...Object.fromEntries(
+        docs.map((path) => [path, path.endsWith(".html") ? '<img src="shot.png">' : "![](shot.png)"]),
+      ),
+      "api-key.png": "synthetic shared image",
+    },
+    docs,
+  );
+  await symlink("api-key.png", join(f.source, "shot.png"));
+  const result = await f.publish();
+  expect(result.request.files.find((file) => file.path === page)?.assets).toEqual(["shot.png"]);
+  expect(result.request.files.find((file) => file.path === "plan.md")?.assets).toEqual([]);
+  const assets = result.request.files.filter((file) => file.role === "asset");
+  expect(assets).toMatchObject([{ path: "shot.png", parent: page }]);
+  expect(await result.blobs.get(assets[0]?.newBlob ?? "")?.read()).toEqual(Buffer.from("synthetic shared image"));
+  expect(f.warnings).toEqual(["emend: skipped shot.png: may hold a secret\n"]);
+});
+
+test.each(["shortcut", "manifest"] as const)("%s warns once when image discovery reaches its cap", async (mode) => {
+  const f = await fixture(mode, {
+    "plan\ufe0f.md": `![First](first.png) ![Large](${"é".repeat(180000)}.png) ![Later](later.png)`,
+    "first.png": "synthetic first image",
+    "later.png": "synthetic later image",
+  });
+  const result = await f.publish();
+  expect(result.request.files.find((file) => file.path === "plan\ufe0f.md")?.assets).toEqual(["first.png"]);
+  expect(result.request.files.filter((file) => file.role === "asset").map((file) => file.path)).toEqual(["first.png"]);
+  expect(f.warnings).toEqual(["emend: plan\\u{fe0f}.md: some images left out: too many image references\n"]);
 });
 
 test.each(["shortcut", "manifest"] as const)(
@@ -112,7 +154,9 @@ test.each(["shortcut", "manifest"] as const)(
 );
 
 test.each(["shortcut", "manifest"] as const)("%s skips secret-looking Markdown image names", async (mode) => {
-  const f = await fixture(mode, { "plan.md": "![](shots/api-key.png)", "shots/api-key.png": "synthetic image" });
+  const f = await fixture(mode, { "plan.md": "![](shots/api-key.png)", "shots/api-key.png": "synthetic image" }, [
+    "plan.md",
+  ]);
   const result = await f.publish();
   expect(result.request.files.filter((file) => file.role === "asset")).toEqual([]);
   expect(f.warnings).toEqual(["emend: skipped shots/api-key.png: may hold a secret\n"]);

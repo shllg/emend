@@ -78,8 +78,11 @@ referenced relative to the doc, such as `![Alt](shots/before.png)`. Remote image
 Markdown image paths use the renderer's local-path rules: `./shots/before.png` is allowed;
 encoded separators such as `shots%2Fbefore.png` and secret-looking names such as `api-key.png`
 are skipped with a warning. Images are found in a worker under the render timeout. If discovery
-fails or times out, publish warns once for that doc, includes no images for it, and continues
-with the other docs. These rules also apply to `--manifest`.
+fails or times out, publish warns once with an escaped doc reference and the fixed reason
+`published without images: image discovery failed or timed out`; the doc still publishes, with
+no images. If the image-reference byte cap is reached, publish warns once for that doc:
+`some images left out: too many image references`. The images found before the cap still publish.
+These rules also apply to `--manifest`.
 
 The default key uses the instance and the sorted, distinct real input paths, so reordering the
 arguments keeps the URL. Adding files inside a named folder also keeps it; changing the set of

@@ -109,7 +109,7 @@ export type DocMetadata = { title?: string; headings: DocHeading[] };
 export type WorkResult =
   | { kind: "diff-counts"; counts: { additions: number; deletions: number } | null }
   | { kind: "diff-hunks"; hunks: DownloadDiffHunk[] | null | "too-long" }
-  | { kind: "doc-images"; references: string[] }
+  | { kind: "doc-images"; references: string[]; capped: boolean }
   | { kind: "image-sizes"; sizes: [string, ImageSize][] }
   | ({ kind: "doc-metadata" } & DocMetadata)
   | { kind: "line-count"; count: number }
@@ -177,8 +177,7 @@ export const executeWork: Executor = async (work) => {
       count: 0,
     };
   }
-  if (work.kind === "doc-images")
-    return { kind: "doc-images", references: markdownImageReferences(decode(work.bytes)) };
+  if (work.kind === "doc-images") return { kind: "doc-images", ...markdownImageReferences(decode(work.bytes)) };
   if (work.kind === "image-sizes") return { kind: "image-sizes", sizes: [...readImageSizes(work.heads)] };
   if (work.kind === "doc-metadata") {
     if (work.format === "html")

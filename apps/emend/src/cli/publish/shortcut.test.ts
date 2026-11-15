@@ -1942,6 +1942,25 @@ test.each(["bundle", "bundle/plan.md"])(
   },
 );
 
+test.each([false, true])(
+  "walked HTML assets warn for rejected Markdown references (Markdown: %s)",
+  async (markdown) => {
+    const f = await fixture();
+    await f.file("bundle/page.html", '<img src="api-key.png">');
+    await f.file("bundle/api-key.png", "synthetic HTML image");
+    if (markdown) await f.file("bundle/plan.md", "![](api-key.png)");
+    const capture = await f.capture();
+    const result = await f.publish("bundle");
+    expect(result.code, result.stderr.join("")).toBe(0);
+    const files = capture.requests[0]?.files;
+    expect(files?.find((file) => file.path === "page.html")?.assets).toEqual(["api-key.png"]);
+    if (markdown) expect(files?.find((file) => file.path === "plan.md")?.assets).toEqual([]);
+    expect(result.stderr.filter((line) => line.includes("may hold a secret"))).toEqual(
+      markdown ? ["emend: skipped api-key.png: may hold a secret\n"] : [],
+    );
+  },
+);
+
 test("Markdown image discovery retains fixed skip reasons and folder boundaries", async () => {
   const f = await fixture();
   await f.file("outside.png", "outside");
@@ -2016,20 +2035,21 @@ test("walked Markdown images keep the private-key scan and source view collects 
   expect(capture.requests[1]?.files[0]?.assets).toBeUndefined();
 });
 
-test.each(["bundle", "bundle/plan.md"])(
+test.each(["bundle", "bundle/plan.md", "bundle/nested"])(
   "publishing %s keeps the secret-image warning and uploads no secret-named image",
   async (path) => {
     const f = await fixture();
-    await f.file("bundle/plan.md", "# Plan\n\n![](shots/api-key.png) ![Public](shots/public.png)");
-    await f.file("bundle/shots/api-key.png", "synthetic excluded image");
-    await f.file("bundle/shots/public.png", "synthetic public image");
+    const folder = path === "bundle/nested" ? "bundle/nested/docs" : "bundle";
+    await f.file(`${folder}/plan.md`, "# Plan\n\n![](shots/api-key.png) ![Public](shots/public.png)");
+    await f.file(`${folder}/shots/api-key.png`, "synthetic excluded image");
+    await f.file(`${folder}/shots/public.png`, "synthetic public image");
     const capture = await f.capture();
     const result = await f.publish(path);
     expect(result.code, result.stderr.join("")).toBe(0);
     expect(capture.requests[0]?.files.filter((file) => file.role === "asset").map((file) => file.path)).toEqual([
-      "shots/public.png",
+      path === "bundle/nested" ? "docs/shots/public.png" : "shots/public.png",
     ]);
-    expect(result.stderr.join("")).toContain("emend: skipped shots/api-key.png: may hold a secret\n");
+    expect(result.stderr.join("").match(/api-key\.png: may hold a secret\n/g)).toHaveLength(1);
     const uploads = capture.fetcher.mock.calls
       .filter(([, init]) => init?.method === "PUT")
       .map(([, init]) => Buffer.from(init?.body as Uint8Array).toString());

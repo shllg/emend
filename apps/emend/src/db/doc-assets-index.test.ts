@@ -15,6 +15,14 @@ test.each(["media", "download"])(
     const db = openDb(join(dir, "test.db"));
     try {
       await migrate(db);
+      expect(
+        await db.read((q) =>
+          q.values(sql`SELECT origin FROM pragma_index_list('files') WHERE name = 'sqlite_autoindex_files_1'`),
+        ),
+      ).toEqual([["pk"]]);
+      expect(
+        await db.read((q) => q.values(sql`SELECT name FROM pragma_index_info('sqlite_autoindex_files_1')`)),
+      ).toEqual([["id"]]);
       const ownerId = "synthetic-owner";
       const plan = await db.read((q) => {
         const query =

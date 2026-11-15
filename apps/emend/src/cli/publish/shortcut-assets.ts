@@ -2,7 +2,13 @@ import { lstat, realpath, stat } from "node:fs/promises";
 import { basename, dirname, posix, relative, sep } from "node:path";
 import { LIMITS, type PublishFile } from "@emend/contract";
 import { CliError } from "../http.ts";
-import { type AssetFormat, assetCandidates, assetWarning, docAssetSizeError } from "./assets.ts";
+import {
+  type AssetFormat,
+  assetCandidates,
+  assetWarning,
+  docAssetSizeError,
+  type WalkedSecretPaths,
+} from "./assets.ts";
 import {
   checkPublishedFolders,
   GitFolderRead,
@@ -26,6 +32,7 @@ interface AssetSource {
   docs: Set<DocAssets>;
   size?: number;
   skipped?: string;
+  secretName?: boolean;
   hash?: string;
 }
 interface DocAssets {
@@ -47,6 +54,7 @@ export class ShortcutAssets {
   private folderRoots: readonly string[];
   private namedFiles: ReadonlySet<string>;
   private retainedSources: RetainedSources;
+  private walkedSecretPaths: WalkedSecretPaths;
 
   constructor(
     gitDirs: string[],
@@ -55,6 +63,7 @@ export class ShortcutAssets {
     folderRoots: readonly string[] = [],
     namedFiles: ReadonlySet<string> = new Set(),
     retainedSources = new RetainedSources(),
+    walkedSecretPaths: WalkedSecretPaths = new Map(),
   ) {
     this.gitDirs = gitDirs;
     this.warn = warn;
@@ -62,6 +71,7 @@ export class ShortcutAssets {
     this.folderRoots = folderRoots;
     this.namedFiles = namedFiles;
     this.retainedSources = retainedSources;
+    this.walkedSecretPaths = walkedSecretPaths;
   }
 
   add(
@@ -82,7 +92,15 @@ export class ShortcutAssets {
     this.docs.push(entry);
     const seen = new Set<string>();
     this.referenceBytes += 2; // Brackets for the assets array.
-    for (const candidate of assetCandidates(realSource, bytes.toString(), this.warn, true, format, imageReferences)) {
+    for (const candidate of assetCandidates(
+      realSource,
+      bytes.toString(),
+      this.warn,
+      true,
+      format,
+      imageReferences,
+      this.walkedSecretPaths,
+    )) {
       // The shortcut reports these skips once, using their walked paths.
       if (this.excludedAssets.has(candidate.file)) continue;
       const path = posix.join(posix.dirname(doc.path), candidate.ref);
@@ -111,8 +129,6 @@ export class ShortcutAssets {
   private pathIssue(asset: AssetSource, actual: string) {
     checkPublishedFolders(actual, [...asset.walkedFolders.values()]);
     if (this.excludedAssets.has(actual)) return "may hold a secret";
-    if ([...asset.docs].some((doc) => doc.format === "markdown") && isSecretPath(basename(actual)))
-      return "may hold a secret";
     if (actual.split(sep).includes("node_modules")) return "target is in node_modules";
     for (const folder of asset.docFolders) outsideGit(actual, this.gitDirs, [folder]);
     for (const folder of asset.docFolders) {
@@ -151,6 +167,8 @@ export class ShortcutAssets {
       const issue = this.pathIssue(asset, actual);
       if (issue)
         return issue === "source is outside the allowed doc roots" ? "target leaves the visible doc folder" : issue;
+      asset.secretName = isSecretPath(basename(actual));
+      if (asset.secretName && [...asset.docs].every((doc) => doc.format === "markdown")) return "may hold a secret";
       if (retained) {
         asset.size = retained.length;
         return;
@@ -182,7 +200,13 @@ export class ShortcutAssets {
     }
     const preReadPaths = new Set<string>();
     for (const entry of this.docs) {
-      const refs = entry.refs.filter(({ source }) => !source.skipped);
+      const refs = entry.refs.filter(({ source }) => {
+        if (entry.format === "markdown" && source.secretName) {
+          source.docs.delete(entry);
+          return false;
+        }
+        return !source.skipped;
+      });
       for (const { path } of refs) preReadPaths.add(path);
       if (fileCount + preReadPaths.size > LIMITS.filesPerRevision) throw new CliError("too many files in the review");
       this.checkSize({ ...entry, refs });
@@ -201,6 +225,8 @@ export class ShortcutAssets {
             throw new CliError(
               issue === "target is in node_modules" ? "asset target changed into node_modules" : issue,
             );
+          if ([...asset.docs].some((doc) => doc.format === "markdown") && isSecretPath(basename(actual)))
+            throw new CliError("asset target changed to a secret-looking name");
           scanPrivateKey = this.inScope(asset, actual);
           retainedPath = actual;
         };
@@ -259,8 +285,10 @@ export class ShortcutAssets {
     const paths = new Set<string>();
     for (const entry of this.docs) {
       entry.refs = entry.refs.filter(({ source, raw }) => {
-        if (!source.skipped) return true;
-        this.warn(assetWarning(raw, source.skipped));
+        const reason =
+          source.skipped ?? (entry.format === "markdown" && source.secretName ? "may hold a secret" : undefined);
+        if (!reason) return true;
+        this.warn(assetWarning(raw, reason));
         return false;
       });
       entry.doc.assets = entry.refs.map(({ path }) => path);

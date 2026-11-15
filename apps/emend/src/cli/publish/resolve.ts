@@ -19,7 +19,7 @@ import { DocRootError, readDocRoots, rootRules, validateDocRoot } from "../confi
 import { escapeReference } from "../escape.ts";
 import { createGitSession, GitFailed } from "../git.ts";
 import { CliError } from "../http.ts";
-import { assetWarning, collectAssets, docAssetSizeError } from "./assets.ts";
+import { collectAssets, docAssetSizeError, type WalkedSecretPaths } from "./assets.ts";
 import { collectChanges } from "./collect.ts";
 import { docsKey, normalizeRemote, projectKey, reviewKey } from "./key.ts";
 import {
@@ -50,6 +50,8 @@ export type PublishOptions = {
   docFolders?: ReadonlyMap<string, readonly PublishedFolder[]>;
   /** Absolute paths rejected by the walked-doc private-key content check. */
   excludedAssets?: ReadonlySet<string>;
+  /** Absolute paths whose secret-name warning is already supplied by the folder walk. */
+  walkedSecretPaths?: WalkedSecretPaths;
   retainedSources?: RetainedSources;
   /** Real paths of shortcut folder arguments and explicitly named files. */
   folderRoots?: readonly string[];
@@ -230,6 +232,7 @@ async function resolveWithWorker(
         options.folderRoots,
         options.namedFiles,
         options.retainedSources,
+        options.walkedSecretPaths,
       )
     : undefined;
   const roots = [
@@ -356,17 +359,14 @@ async function resolveWithWorker(
     const format = html ? "html" : "markdown";
     let imageReferences: string[] = [];
     if (!html) {
+      const label = escapeReference(options.docArguments?.get(file.path) ?? file.path);
       try {
         const result = await execute({ kind: "doc-images", bytes: Uint8Array.from(bytes).buffer });
         if (result.kind !== "doc-images") throw new Error("wrong result");
         imageReferences = result.references;
+        if (result.capped) warn(`emend: ${label}: some images left out: too many image references\n`);
       } catch {
-        warn(
-          assetWarning(
-            options.docArguments?.get(file.path) ?? file.path,
-            "Markdown image discovery failed or timed out",
-          ),
-        );
+        warn(`emend: ${label}: published without images: image discovery failed or timed out\n`);
       }
     }
     if (shortcutAssets) {
