@@ -24,6 +24,7 @@ import {
   htmlHeadings,
   inferDocTitle,
   markdownHeadings,
+  markdownImageReferences,
   markdownTitle,
   type PlaceContext,
   placeThread,
@@ -55,7 +56,9 @@ export type Work =
       reveal: DownloadDiffReveal[];
     }
   | { kind: "source"; path: string; source: ArrayBuffer; highlight?: boolean }
-  | { kind: "doc-metadata"; format: "html" | "markdown"; bytes: ArrayBuffer }
+  | { kind: "doc-images"; bytes: ArrayBuffer }
+  | { kind: "image-sizes"; heads: [string, ArrayBuffer][] }
+  | { kind: "doc-metadata"; format: "html" | "markdown"; bytes: ArrayBuffer; media?: [string, string][] }
   | { kind: "line-count"; bytes: ArrayBuffer }
   | { kind: "writeup-source"; bytes: ArrayBuffer }
   | { kind: "placement-doc"; format: "html" | "markdown" | "writeup"; bytes: ArrayBuffer }
@@ -77,7 +80,7 @@ export type Work =
       repoUrl?: string;
       docs?: DocLinks;
       media?: [string, string][];
-      mediaHeads?: [string, ArrayBuffer][];
+      mediaSizes?: [string, ImageSize][];
     }
   | { kind: "resection"; path: string; bytes: ArrayBuffer }
   | { kind: "comment-md"; bodies: string[]; repoUrl?: string }
@@ -106,6 +109,8 @@ export type DocMetadata = { title?: string; headings: DocHeading[] };
 export type WorkResult =
   | { kind: "diff-counts"; counts: { additions: number; deletions: number } | null }
   | { kind: "diff-hunks"; hunks: DownloadDiffHunk[] | null | "too-long" }
+  | { kind: "doc-images"; references: string[] }
+  | { kind: "image-sizes"; sizes: [string, ImageSize][] }
   | ({ kind: "doc-metadata" } & DocMetadata)
   | { kind: "line-count"; count: number }
   | { kind: "writeup-source"; source: WriteupInput; links?: PublishLinks; repoUrl?: string }
@@ -172,6 +177,9 @@ export const executeWork: Executor = async (work) => {
       count: 0,
     };
   }
+  if (work.kind === "doc-images")
+    return { kind: "doc-images", references: markdownImageReferences(decode(work.bytes)) };
+  if (work.kind === "image-sizes") return { kind: "image-sizes", sizes: [...readImageSizes(work.heads)] };
   if (work.kind === "doc-metadata") {
     if (work.format === "html")
       return {
@@ -179,7 +187,7 @@ export const executeWork: Executor = async (work) => {
         title: await inferDocTitle("html", new Uint8Array(work.bytes)),
         headings: htmlHeadings(decode(work.bytes)),
       };
-    const blocks = await renderMetadataBlocks(decode(work.bytes));
+    const blocks = await renderMetadataBlocks(decode(work.bytes), new Map(work.media));
     return { kind: "doc-metadata", title: markdownTitle(blocks), headings: markdownHeadings(blocks) };
   }
   if (work.kind === "line-count") {
@@ -238,7 +246,7 @@ export const executeWork: Executor = async (work) => {
       work.docs,
       effects,
       new Map(work.media),
-      readImageSizes(work.mediaHeads),
+      new Map(work.mediaSizes),
     );
     return {
       kind: "doc",

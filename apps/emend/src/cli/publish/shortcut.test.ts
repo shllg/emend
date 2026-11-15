@@ -126,8 +126,13 @@ test("reference-expansion main doc publishes with a bounded worker title", async
   const result = await f.publish("expansion.md");
   expect(result.code, result.stderr.join("")).toBe(0);
   expect(worker).toHaveBeenCalledOnce();
-  expect(execute).toHaveBeenCalledExactlyOnceWith(
+  expect(execute).toHaveBeenNthCalledWith(
+    1,
     expect.objectContaining({ kind: "doc-metadata", format: "markdown", bytes: expect.any(ArrayBuffer) }),
+  );
+  expect(execute).toHaveBeenNthCalledWith(
+    2,
+    expect.objectContaining({ kind: "doc-images", bytes: expect.any(ArrayBuffer) }),
   );
   const metadata = await execute.mock.results[0]?.value.catch(() => undefined);
   expect(capture.requests[0]?.title).toBe(
@@ -2010,3 +2015,25 @@ test("walked Markdown images keep the private-key scan and source view collects 
   expect(capture.requests[1]?.files[0]?.view).toBe("source");
   expect(capture.requests[1]?.files[0]?.assets).toBeUndefined();
 });
+
+test.each(["bundle", "bundle/plan.md"])(
+  "publishing %s keeps the secret-image warning and uploads no secret-named image",
+  async (path) => {
+    const f = await fixture();
+    await f.file("bundle/plan.md", "# Plan\n\n![](shots/api-key.png) ![Public](shots/public.png)");
+    await f.file("bundle/shots/api-key.png", "synthetic excluded image");
+    await f.file("bundle/shots/public.png", "synthetic public image");
+    const capture = await f.capture();
+    const result = await f.publish(path);
+    expect(result.code, result.stderr.join("")).toBe(0);
+    expect(capture.requests[0]?.files.filter((file) => file.role === "asset").map((file) => file.path)).toEqual([
+      "shots/public.png",
+    ]);
+    expect(result.stderr.join("")).toContain("emend: skipped shots/api-key.png: may hold a secret\n");
+    const uploads = capture.fetcher.mock.calls
+      .filter(([, init]) => init?.method === "PUT")
+      .map(([, init]) => Buffer.from(init?.body as Uint8Array).toString());
+    expect(uploads).not.toContain("synthetic excluded image");
+    expect(uploads).toContain("synthetic public image");
+  },
+);

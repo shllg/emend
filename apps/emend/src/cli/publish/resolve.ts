@@ -13,11 +13,13 @@ import {
   PublishRequest,
 } from "@emend/contract";
 import { decodeText, UnchangedFilesError, withOtherChanges } from "@emend/core";
+import { workerExecutor } from "../../server/publish/executor.ts";
+import type { Executor } from "../../server/publish/work.ts";
 import { DocRootError, readDocRoots, rootRules, validateDocRoot } from "../config.ts";
 import { escapeReference } from "../escape.ts";
 import { createGitSession, GitFailed } from "../git.ts";
 import { CliError } from "../http.ts";
-import { collectAssets, docAssetSizeError } from "./assets.ts";
+import { assetWarning, collectAssets, docAssetSizeError } from "./assets.ts";
 import { collectChanges } from "./collect.ts";
 import { docsKey, normalizeRemote, projectKey, reviewKey } from "./key.ts";
 import {
@@ -33,7 +35,7 @@ import { remoteToRepoUrl } from "./repo-url.ts";
 import type { RetainedSources } from "./retained.ts";
 import { gitFolders, worktreeRoot } from "./root.ts";
 import { ShortcutAssets } from "./shortcut-assets.ts";
-import { readSkipReason } from "./shortcut-walk.ts";
+import { isSecretPath, readSkipReason } from "./shortcut-walk.ts";
 import { readSide } from "./sides.ts";
 
 import { type BlobSource, readBlob } from "./upload.ts";
@@ -44,7 +46,7 @@ export type PublishOptions = {
   project?: string;
   key?: string | ((instanceId: string) => string);
   skipNodeModules?: boolean;
-  titleFromMain?: (bytes: Uint8Array) => string | Promise<string>;
+  titleFromMain?: (bytes: Uint8Array, execute: Executor) => string | Promise<string>;
   docFolders?: ReadonlyMap<string, readonly PublishedFolder[]>;
   /** Absolute paths rejected by the walked-doc private-key content check. */
   excludedAssets?: ReadonlySet<string>;
@@ -85,6 +87,36 @@ export async function publishContext(cwd: string, stateDir: string) {
   return { git, worktree, root, gitDirs };
 }
 export async function resolvePublish(
+  manifest: PublishManifest,
+  options: PublishOptions,
+  stateDir: string,
+  configDir: string,
+  instanceId: string | null,
+  cwd: string,
+  warn: (line: string) => void,
+  context?: Awaited<ReturnType<typeof publishContext>>,
+  configRoots?: readonly string[],
+) {
+  const execute = workerExecutor();
+  try {
+    return await resolveWithWorker(
+      execute,
+      manifest,
+      options,
+      stateDir,
+      configDir,
+      instanceId,
+      cwd,
+      warn,
+      context,
+      configRoots,
+    );
+  } finally {
+    await execute.close();
+  }
+}
+async function resolveWithWorker(
+  execute: Executor,
   manifest: PublishManifest,
   options: PublishOptions,
   stateDir: string,
@@ -306,7 +338,7 @@ export async function resolvePublish(
       if (file.source !== undefined) checkExtension(file.source);
       checkExtension(source);
     }
-    if (file.path === manifest.main && options.titleFromMain) title = await options.titleFromMain(bytes);
+    if (file.path === manifest.main && options.titleFromMain) title = await options.titleFromMain(bytes, execute);
     const resolvedDoc: PublishFile = {
       path: file.path,
       oldPath: null,
@@ -322,10 +354,25 @@ export async function resolvePublish(
     files.push(resolvedDoc);
     if (sourceView) continue;
     const format = html ? "html" : "markdown";
+    let imageReferences: string[] = [];
+    if (!html) {
+      try {
+        const result = await execute({ kind: "doc-images", bytes: Uint8Array.from(bytes).buffer });
+        if (result.kind !== "doc-images") throw new Error("wrong result");
+        imageReferences = result.references;
+      } catch {
+        warn(
+          assetWarning(
+            options.docArguments?.get(file.path) ?? file.path,
+            "Markdown image discovery failed or timed out",
+          ),
+        );
+      }
+    }
     if (shortcutAssets) {
       // source is the checked real path, so aliases use the target folder for assets.
       // readResolvedDoc/readDoc enforce the doc Git and published-folder rules here.
-      shortcutAssets.add(resolvedDoc, source, bytes, publishedFolders, format);
+      shortcutAssets.add(resolvedDoc, source, bytes, publishedFolders, format, imageReferences);
       continue;
     }
     const assets = await collectAssets(
@@ -336,6 +383,7 @@ export async function resolvePublish(
       options.skipNodeModules,
       publishedFolders,
       format,
+      imageReferences,
     );
     resolvedDoc.assets = assets.map((asset) => posix.join(posix.dirname(file.path), asset.ref));
     let size = bytes.length;
@@ -349,6 +397,7 @@ export async function resolvePublish(
     let actualSize = bytes.length;
     const readAsset = async (file: string, limit: number) => {
       const actual = await sourcePath(file, [dirname(source)], gitDirs, publishedFolders);
+      if (!html && isSecretPath(basename(actual))) throw new CliError("asset target changed to a secret-looking name");
       if (options.skipNodeModules && actual.split(sep).includes("node_modules"))
         throw new CliError("asset target changed into node_modules");
       return readRegular(
@@ -357,7 +406,11 @@ export async function resolvePublish(
         [dirname(source)],
         undefined,
         gitDirs,
-        (_info, opened) => checkPublishedFolders(opened, publishedFolders),
+        (_info, opened) => {
+          checkPublishedFolders(opened, publishedFolders);
+          if (!html && isSecretPath(basename(opened)))
+            throw new CliError("asset target changed to a secret-looking name");
+        },
       );
     };
     for (const asset of assets) {

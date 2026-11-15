@@ -5,7 +5,6 @@ import {
   importPublishInput,
   importRowCount,
   indexImportBundle,
-  isRenderedMarkdownDoc,
   LIMITS,
   PublishRequest,
   writeupMarkdown,
@@ -221,10 +220,9 @@ export async function prepareImport(
       }
       await validateNoteRanges(input.files, read, execute);
       revisionsToCount.push({ id: revision.id, files: input.files });
-      // Keep only this revision's and its predecessor's image heads.
-      const docImages = new Set(input.files.filter(isRenderedMarkdownDoc).flatMap((file) => file.assets ?? []));
+      // Keep only this revision's and its predecessor's writeup heads; doc heads are not retained.
       const media = input.files
-        .filter((f) => f.role === "asset" && (f.parent === undefined || docImages.has(f.path)) && f.newBlob)
+        .filter((f) => f.role === "asset" && f.parent === undefined && f.newBlob)
         .map((f) => f.newBlob as string);
       heads.keep([...media, ...previousMedia]);
       previousMedia = media;

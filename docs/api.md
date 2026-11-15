@@ -1236,6 +1236,15 @@ repository whose root is the filesystem root, the home folder or a folder that h
 folder that holds emend's state folder or sits inside it. A symlink leading outside these roots is
 refused. The role's size limit applies.
 Plan task 1.6 implements and tests these checks. Assets are collected during publish.
+Markdown image discovery runs in a worker under the render timeout (10 seconds), for both
+path and `--manifest` publishing. Distinct references keep their first-seen order and total at
+most `markdownDocBytes` UTF-8 bytes; discovery stops when the next reference would exceed it.
+If discovery fails or times out, the CLI warns once with an escaped argument or review path
+and a fixed reason, lists no images for that doc, and continues publishing.
+Markdown image references must pass the renderer's local-path normalization and every CLI
+asset path check. A leading `./` is allowed; encoded separators such as `%2F` are skipped.
+Image filenames that look secret-like are skipped as "may hold a secret", including
+secret-looking names such as `api-key.png`. HTML discovery is unchanged.
 
 The general `FileRole` vocabulary is `diff`, `doc`, `asset`; `FileStatus` is `added`, `modified`,
 `deleted`, `renamed`, `mode-changed`; `FileFlag` is `binary` or `oversized`.

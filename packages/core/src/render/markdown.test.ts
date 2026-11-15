@@ -280,3 +280,18 @@ test("image references come from the same sanitized tree as rendering", async ()
     ),
   ).toEqual(["shots/a.png", "shots/b.png", "shots/c.png", "shots/d.png", "shots/e.png", "shots/f.png"]);
 });
+
+test("image discovery returns distinct UTF-8 references in first-seen order", async () => {
+  const { markdownImageReferences } = await import("./markdown.ts");
+  const markdown =
+    "![One][a] ![Again][a] <img src='二.png'> ![Too large][b] ![Later](c.png)\n\n[a]: a.png\n[b]: long-name.png";
+  expect(markdownImageReferences(markdown)).toEqual(["a.png", "二.png", "long-name.png", "c.png"]);
+  expect(markdownImageReferences(`${"![a][r] ".repeat(1000)}\n\n[r]: shot.png`)).toEqual(["shot.png"]);
+});
+
+test("image discovery stops before expanded references exceed the Markdown byte limit", async () => {
+  const { markdownImageReferences } = await import("./markdown.ts");
+  // UTF-8 URL encoding expands this sub-limit source past the one-MiB result budget.
+  const markdown = `![First](first.png) ![Large](${"é".repeat(180000)}.png) ![Later](later.png)`;
+  expect(markdownImageReferences(markdown)).toEqual(["first.png"]);
+});

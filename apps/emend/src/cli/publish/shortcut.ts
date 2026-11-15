@@ -3,7 +3,7 @@ import { lstat } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
 import { docViewOf, isRenderedHtmlDoc, LIMITS, PublishManifest } from "@emend/contract";
 import { cleanDocTitle, decodeText } from "@emend/core";
-import { workerExecutor } from "../../server/publish/executor.ts";
+import type { Executor } from "../../server/publish/work.ts";
 import { readDocRoots } from "../config.ts";
 import { escapeReference } from "../escape.ts";
 import { CliError } from "../http.ts";
@@ -217,8 +217,7 @@ export async function shortcutManifest(
   const titleFromMain =
     givenTitle || docViewOf({ path: main, ...(options.source ? { view: "source" } : {}) }) === "source"
       ? undefined
-      : async (bytes: Uint8Array) => {
-          const execute = workerExecutor();
+      : async (bytes: Uint8Array, execute: Executor) => {
           try {
             const result = await execute({
               kind: "doc-metadata",
@@ -228,8 +227,6 @@ export async function shortcutManifest(
             return (result.kind === "doc-metadata" && result.title) || fallbackTitle;
           } catch {
             return fallbackTitle;
-          } finally {
-            await execute.close();
           }
         };
   const parsed = PublishManifest.safeParse(

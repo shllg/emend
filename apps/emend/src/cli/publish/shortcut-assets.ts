@@ -1,5 +1,5 @@
 import { lstat, realpath, stat } from "node:fs/promises";
-import { dirname, posix, relative, sep } from "node:path";
+import { basename, dirname, posix, relative, sep } from "node:path";
 import { LIMITS, type PublishFile } from "@emend/contract";
 import { CliError } from "../http.ts";
 import { type AssetFormat, assetCandidates, assetWarning, docAssetSizeError } from "./assets.ts";
@@ -16,7 +16,7 @@ import {
   sourcePath,
 } from "./read.ts";
 import { RetainedSources } from "./retained.ts";
-import { holdsPrivateKey } from "./shortcut-walk.ts";
+import { holdsPrivateKey, isSecretPath } from "./shortcut-walk.ts";
 import type { BlobSource } from "./upload.ts";
 
 interface AssetSource {
@@ -70,6 +70,7 @@ export class ShortcutAssets {
     bytes: Buffer,
     folders: readonly PublishedFolder[],
     format: AssetFormat = "html",
+    imageReferences: readonly string[] = [],
   ) {
     const entry: DocAssets = {
       format,
@@ -81,7 +82,7 @@ export class ShortcutAssets {
     this.docs.push(entry);
     const seen = new Set<string>();
     this.referenceBytes += 2; // Brackets for the assets array.
-    for (const candidate of assetCandidates(realSource, bytes.toString(), this.warn, true, format)) {
+    for (const candidate of assetCandidates(realSource, bytes.toString(), this.warn, true, format, imageReferences)) {
       // The shortcut reports these skips once, using their walked paths.
       if (this.excludedAssets.has(candidate.file)) continue;
       const path = posix.join(posix.dirname(doc.path), candidate.ref);
@@ -110,6 +111,8 @@ export class ShortcutAssets {
   private pathIssue(asset: AssetSource, actual: string) {
     checkPublishedFolders(actual, [...asset.walkedFolders.values()]);
     if (this.excludedAssets.has(actual)) return "may hold a secret";
+    if ([...asset.docs].some((doc) => doc.format === "markdown") && isSecretPath(basename(actual)))
+      return "may hold a secret";
     if (actual.split(sep).includes("node_modules")) return "target is in node_modules";
     for (const folder of asset.docFolders) outsideGit(actual, this.gitDirs, [folder]);
     for (const folder of asset.docFolders) {

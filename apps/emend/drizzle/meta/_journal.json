@@ -141,6 +141,13 @@
       "when": 1794565026377,
       "tag": "0019_daffy_kulan_gath",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1794774559734,
+      "tag": "0020_unknown_tarantula",
+      "breakpoints": true
     }
   ]
 }

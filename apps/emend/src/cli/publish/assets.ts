@@ -1,7 +1,7 @@
 import { lstat, realpath, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, sep } from "node:path";
 import { ASSET_EXTENSIONS, FilePath, LIMITS, MEDIA_EXTENSIONS } from "@emend/contract";
-import { htmlAssetReferences, markdownImageReferences } from "@emend/core";
+import { htmlAssetReferences, localMediaPath } from "@emend/core";
 import { escapeReference } from "../escape.ts";
 import {
   checkPublishedFolders,
@@ -13,6 +13,7 @@ import {
   PublishedFolderEscape,
   readRegular,
 } from "./read.ts";
+import { isSecretPath } from "./shortcut-walk.ts";
 
 export const assetWarning = (raw: string, reason: string) => `emend: skipped ${escapeReference(raw)}: ${reason}\n`;
 
@@ -26,14 +27,20 @@ export function* assetCandidates(
   warn: (line: string) => void,
   skipNodeModules = false,
   format: AssetFormat = "html",
+  imageReferences: readonly string[] = [],
 ) {
   const seen = new Set<string>();
-  const references = format === "html" ? htmlAssetReferences(content) : markdownImageReferences(content);
+  const references = format === "html" ? htmlAssetReferences(content) : imageReferences;
   const extensions = format === "html" ? ASSET_EXTENSIONS : MEDIA_EXTENSIONS;
   for (const raw of references) {
     if (seen.has(raw)) continue;
     seen.add(raw);
     const skip = (reason: string) => warn(assetWarning(raw, reason));
+    const local = format === "markdown" ? localMediaPath(raw) : undefined;
+    if (local === null) {
+      skip("not a local visible path");
+      continue;
+    }
     let ref = raw.split(/[?#]/, 1)[0]?.replace(/^(?:\.\/)+/, "") ?? "";
     if (
       !ref ||
@@ -46,13 +53,17 @@ export function* assetCandidates(
       continue;
     }
     try {
-      ref = decodeURIComponent(ref);
+      ref = local ?? decodeURIComponent(ref);
     } catch {
       skip("invalid URL encoding");
       continue;
     }
     if (!FilePath.safeParse(ref).success || ref.split("/").some((s) => s.startsWith(".")) || ref.includes(":")) {
       skip("invalid asset path");
+      continue;
+    }
+    if (format === "markdown" && isSecretPath(basename(ref))) {
+      skip("may hold a secret");
       continue;
     }
     if (skipNodeModules && ref.split("/").includes("node_modules")) {
@@ -75,6 +86,7 @@ export async function collectAssets(
   skipNodeModules = false,
   publishedFolders: readonly PublishedFolder[] = [],
   format: AssetFormat = "html",
+  imageReferences: readonly string[] = [],
 ): Promise<{ ref: string; file: string }[]> {
   const file = await realpath(docFile);
   checkPublishedFolders(file, publishedFolders);
@@ -93,11 +105,22 @@ export async function collectAssets(
     ).toString("utf8");
   const result: { ref: string; file: string }[] = [];
   const accepted = new Set<string>();
-  for (const { raw, ref, file: original } of assetCandidates(file, content, warn, skipNodeModules, format)) {
+  for (const { raw, ref, file: original } of assetCandidates(
+    file,
+    content,
+    warn,
+    skipNodeModules,
+    format,
+    imageReferences,
+  )) {
     const skip = (reason: string) => warn(assetWarning(raw, reason));
     try {
       const actual = await realpath(original);
       checkPublishedFolders(actual, publishedFolders);
+      if (format === "markdown" && isSecretPath(basename(actual))) {
+        skip("may hold a secret");
+        continue;
+      }
       if (skipNodeModules && actual.split(sep).includes("node_modules")) {
         skip("target is in node_modules");
         continue;

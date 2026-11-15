@@ -385,3 +385,27 @@ test("fix5: real worker transfers parsed writeup bytes and reuses them for place
     await execute.close();
   }
 });
+
+test("image discovery and size reads run in the worker and transfer their input bytes", async () => {
+  const execute = workerExecutor();
+  try {
+    const bytes = new TextEncoder().encode(
+      "![Shot][r] ![Again][r] <img src='two.png' onerror='bad()'>\n\n[r]: shot.png",
+    ).buffer;
+    expect(await execute({ kind: "doc-images", bytes })).toEqual({
+      kind: "doc-images",
+      references: ["shot.png", "two.png"],
+    });
+    expect(bytes.byteLength).toBe(0);
+    const head = Uint8Array.from(
+      Buffer.from("89504e470d0a1a0a0000000d4948445200000003000000020806000000", "hex"),
+    ).buffer;
+    expect(await execute({ kind: "image-sizes", heads: [["sha", head]] })).toEqual({
+      kind: "image-sizes",
+      sizes: [["sha", { width: 3, height: 2 }]],
+    });
+    expect(head.byteLength).toBe(0);
+  } finally {
+    await execute.close();
+  }
+});

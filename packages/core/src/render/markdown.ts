@@ -1,4 +1,4 @@
-import { BlockId } from "@emend/contract";
+import { BlockId, LIMITS } from "@emend/contract";
 import rehypeShiki from "@shikijs/rehype/core";
 import { toString as hastText } from "hast-util-to-string";
 import rehypeRaw from "rehype-raw";
@@ -79,9 +79,30 @@ export function markdownImageReferences(markdown: string): string[] {
     data: { largeTables: tables },
   });
   const refs: string[] = [];
-  visitElements(tree, (element) => {
-    if (element.tagName === "img" && typeof element.properties.src === "string") refs.push(element.properties.src);
-  });
+  const seen = new Set<string>();
+  const encoder = new TextEncoder();
+  let bytes = 0;
+  // Iterative traversal preserves source order and stops once the result budget is spent.
+  const pending: (typeof tree | (typeof tree.children)[number])[] = [tree];
+  while (pending.length) {
+    const node = pending.pop();
+    if (!node) break;
+    if (node.type === "element" && node.tagName === "img" && typeof node.properties.src === "string") {
+      const ref = node.properties.src;
+      if (!seen.has(ref)) {
+        const size = encoder.encode(ref).byteLength;
+        if (bytes + size > LIMITS.markdownDocBytes) break;
+        bytes += size;
+        seen.add(ref);
+        refs.push(ref);
+      }
+    }
+    if ("children" in node)
+      for (let i = node.children.length - 1; i >= 0; i--) {
+        const child = node.children[i];
+        if (child) pending.push(child);
+      }
+  }
   return refs;
 }
 
@@ -189,11 +210,11 @@ export async function renderDoc(
 
 const metadataProcessor = sanitizedPipeline().use(isolateDiagrams).use(rehypeStringify);
 /** The same sanitized blocks, without syntax highlighting, for publish metadata and CLI titles. */
-export async function renderMetadataBlocks(markdown: string): Promise<Block[]> {
+export async function renderMetadataBlocks(markdown: string, media?: ReadonlyMap<string, string>): Promise<Block[]> {
   const { source, tables } = prepareTables(markdown);
   const tree = await metadataProcessor.run(metadataProcessor.parse(source), {
     value: source,
-    data: { largeTables: tables },
+    data: { largeTables: tables, media },
   });
   return blocksFromTree(tree, "metadata", (node) =>
     metadataProcessor.stringify(node.type === "root" ? node : { type: "root", children: [node] }),

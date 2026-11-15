@@ -1,4 +1,4 @@
-import { and, eq, exists, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, exists, inArray, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import type { Queries } from "../db/client.ts";
 import { docAssets, files } from "../db/schema.ts";
@@ -19,11 +19,12 @@ export function mediaAsset(q: Queries, ownerId: string) {
           .select({ id: docAssets.assetId })
           .from(docAssets)
           .innerJoin(
-            doc,
+            // Probe the doc's primary key once per association; keep owner and revision checks below.
+            sql`${files} AS "media_doc" INDEXED BY "sqlite_autoindex_files_1"`,
             and(
               eq(doc.ownerId, ownerId),
               eq(doc.id, docAssets.docId),
-              eq(doc.revisionId, files.revisionId),
+              eq(doc.revisionId, docAssets.revisionId),
               eq(doc.role, "doc"),
               eq(doc.mediaType, "text/markdown"),
             ),

@@ -334,6 +334,7 @@ export const docAssets = sqliteTable(
   },
   (t) => [
     index("doc_assets_owner_idx").on(t.ownerId),
+    index("doc_assets_owner_asset_idx").on(t.ownerId, t.assetId),
     unique("doc_assets_owner_doc_asset_unique").on(t.ownerId, t.docId, t.assetId),
     ...[t.docId, t.assetId].map((fileId) =>
       foreignKey({

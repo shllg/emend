@@ -75,6 +75,11 @@ You can name several files or a folder. A folder bundles its visible text files 
 images and assets its documents reference; dotfiles, `.git/` and `node_modules/` are skipped. Symlinks
 leaving the folder are refused. Markdown docs show local PNG, JPEG, GIF, WebP and AVIF images
 referenced relative to the doc, such as `![Alt](shots/before.png)`. Remote image URLs do not show.
+Markdown image paths use the renderer's local-path rules: `./shots/before.png` is allowed;
+encoded separators such as `shots%2Fbefore.png` and secret-looking names such as `api-key.png`
+are skipped with a warning. Images are found in a worker under the render timeout. If discovery
+fails or times out, publish warns once for that doc, includes no images for it, and continues
+with the other docs. These rules also apply to `--manifest`.
 
 The default key uses the instance and the sorted, distinct real input paths, so reordering the
 arguments keeps the URL. Adding files inside a named folder also keeps it; changing the set of

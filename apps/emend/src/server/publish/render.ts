@@ -11,7 +11,7 @@ import {
 import { ApiError } from "../http/errors.ts";
 import { yieldToLoop } from "../pacing.ts";
 import { WorkTimeout } from "./executor.ts";
-import { IMAGE_HEAD_BYTES } from "./image-size.ts";
+import { IMAGE_HEAD_BYTES, type ImageSize } from "./image-size.ts";
 import { checkPublishSignal } from "./lifecycle.ts";
 import type { DocMetadata, Executor, RenderedBytes } from "./work.ts";
 
@@ -24,6 +24,18 @@ export async function renderRevision(
   signal?: AbortSignal,
   onRendered?: (bytes: number) => void,
 ) {
+  const assets = new Map(input.files.filter((file) => file.role === "asset").map((file) => [file.path, file.newBlob]));
+  const mediaByDoc = new Map<string, [string, string][]>();
+  for (const file of input.files) {
+    if (file.role !== "doc" || docViewOf(file) === "source" || isRenderedHtmlDoc(file)) continue;
+    const folder = file.path.slice(0, file.path.lastIndexOf("/") + 1);
+    const media: [string, string][] = [];
+    for (const path of file.assets ?? []) {
+      const sha = assets.get(path);
+      if (sha) media.push([path.slice(folder.length), sha]);
+    }
+    mediaByDoc.set(file.path, media);
+  }
   // Two passes let forward links resolve headings before any writeup/doc is rendered.
   // The worker parses hostile sources; only bounded metadata crosses back to the server.
   const sourceMetadata = new Map<string, DocMetadata>();
@@ -36,13 +48,14 @@ export async function renderRevision(
     if (file.role !== "doc") continue;
     const source = docViewOf(file) === "source";
     const format = isRenderedHtmlDoc(file) ? "html" : "markdown";
-    const key = `${format}:${file.newBlob}`;
+    const media = mediaByDoc.get(file.path);
+    const key = JSON.stringify([format, file.newBlob, media]);
     let own = source ? { headings: [] } : metadataCache.get(key);
     if (!own) {
       own = { headings: [] };
       if (file.newBlob && !source)
         try {
-          const result = await execute({ kind: "doc-metadata", format, bytes: await read(file.newBlob) });
+          const result = await execute({ kind: "doc-metadata", format, bytes: await read(file.newBlob), media });
           if (result.kind !== "doc-metadata") throw new Error("wrong result");
           own = { title: result.title, headings: result.headings };
         } catch {
@@ -82,25 +95,46 @@ export async function renderRevision(
   const media: [string, string][] = [];
   for (const file of input.files)
     if (file.role === "asset" && file.parent === undefined && file.newBlob) media.push([file.path, file.newBlob]);
-  // Cache bounded heads across writeup and docs; each worker transfer gets its own copy.
-  const heads = new Map<string, ArrayBuffer>();
-  const imageHeads = async (images: [string, string][]): Promise<[string, ArrayBuffer][]> => {
-    const result: [string, ArrayBuffer][] = [];
-    for (const sha of new Set(images.map(([, blob]) => blob))) {
+  // Writeup media stays on its bounded head path (at most 50 images).
+  const writeupHeads = new Map<string, ArrayBuffer>();
+  for (const sha of new Set(media.map(([, sha]) => sha))) {
+    checkPublishSignal(signal);
+    const head = await readHead(sha);
+    writeupHeads.set(sha, head.byteLength > IMAGE_HEAD_BYTES ? head.slice(0, IMAGE_HEAD_BYTES) : head);
+    await yieldToLoop("publish-render");
+  }
+  // Docs retain sizes only. Transfer and release each bounded batch before reading the next.
+  const imageSizes = new Map<string, ImageSize>();
+  const batchLimit = 16 * 1024 * 1024;
+  let batch: [string, ArrayBuffer][] = [];
+  let batchBytes = 0;
+  const flushSizes = async () => {
+    if (!batch.length) return;
+    try {
+      const result = await execute({ kind: "image-sizes", heads: batch });
+      if (result.kind !== "image-sizes") throw new Error("wrong result");
+      for (const [sha, size] of result.sizes) imageSizes.set(sha, size);
+    } catch {
       checkPublishSignal(signal);
-      let head = heads.get(sha);
-      if (!head) {
-        const bytes = await readHead(sha);
-        head = bytes.byteLength > IMAGE_HEAD_BYTES ? bytes.slice(0, IMAGE_HEAD_BYTES) : bytes;
-        heads.set(sha, head);
-        await yieldToLoop("publish-render");
-      }
-      result.push([sha, head.slice(0)]);
+      // Images still render without dimensions when the size worker fails.
+    } finally {
+      batch = [];
+      batchBytes = 0;
     }
-    return result;
   };
-  const assets = new Map(input.files.filter((file) => file.role === "asset").map((file) => [file.path, file.newBlob]));
-  const mediaHeads = await imageHeads(media);
+  const docImages = new Set([...mediaByDoc.values()].flatMap((images) => images.map(([, sha]) => sha)));
+  for (const sha of docImages) {
+    checkPublishSignal(signal);
+    if (batchBytes + IMAGE_HEAD_BYTES > batchLimit) await flushSizes();
+    const head = writeupHeads.get(sha)?.slice(0) ?? (await readHead(sha));
+    const bounded = head.byteLength > IMAGE_HEAD_BYTES ? head.slice(0, IMAGE_HEAD_BYTES) : head;
+    batch.push([sha, bounded]);
+    batchBytes += bounded.byteLength;
+    await yieldToLoop("publish-render");
+  }
+  await flushSizes();
+  const mediaHeads = [...writeupHeads];
+  writeupHeads.clear();
   let rendered: RenderedBytes;
   try {
     const result = await execute({
@@ -242,11 +276,7 @@ export async function renderRevision(
     }
     let result: RenderedBytes;
     const folder = file.path.slice(0, file.path.lastIndexOf("/") + 1);
-    const docMedia: [string, string][] = [];
-    for (const path of file.assets ?? []) {
-      const sha = assets.get(path);
-      if (sha) docMedia.push([path.slice(folder.length), sha]);
-    }
+    const docMedia = mediaByDoc.get(file.path) ?? [];
     const cacheKey = JSON.stringify([file.newBlob, docMedia]);
     const folderKey = JSON.stringify([cacheKey, folder]);
     const source = cache.get(cacheKey);
@@ -265,7 +295,10 @@ export async function renderRevision(
               repoUrl: input.repoUrl,
               docs,
               media: docMedia,
-              mediaHeads: await imageHeads(docMedia),
+              mediaSizes: [...new Set(docMedia.map(([, sha]) => sha))].flatMap((sha): [string, ImageSize][] => {
+                const size = imageSizes.get(sha);
+                return size ? [[sha, size]] : [];
+              }),
             }
           : { kind: "resection", path: file.path, bytes: await read(shared) },
       );

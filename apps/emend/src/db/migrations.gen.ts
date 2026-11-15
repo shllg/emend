@@ -274,5 +274,13 @@ export const MIGRATIONS: readonly { tag: string; when: number; hash: string; sta
       "PRAGMA foreign_keys=ON;",
       "CREATE INDEX `settings_owner_idx` ON `settings` (`owner_id`);"
     ]
+  },
+  {
+    "tag": "0020_unknown_tarantula",
+    "when": 1794774559734,
+    "hash": "5132266fea7b6b5cf58fe4450f2fa4fbcb1ca7e08a7e2220f6127e2f2905c89a",
+    "statements": [
+      "CREATE INDEX `doc_assets_owner_asset_idx` ON `doc_assets` (`owner_id`,`asset_id`);"
+    ]
   }
 ];

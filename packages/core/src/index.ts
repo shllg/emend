@@ -54,7 +54,7 @@ export {
   renderMetadataBlocks,
 } from "./render/markdown.ts";
 export { normalizeText } from "./render/normalize.ts";
-export type { MediaSize } from "./render/sanitize.ts";
+export { localMediaPath, type MediaSize } from "./render/sanitize.ts";
 export * from "./render/source.ts";
 export { type RenderedWriteup, renderWriteup } from "./render/writeup.ts";
 export { resolveShortcuts } from "./shortcuts.ts";

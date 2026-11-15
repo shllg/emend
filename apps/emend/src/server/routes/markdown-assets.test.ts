@@ -4,13 +4,31 @@ import { and, eq } from "drizzle-orm";
 import { expect, test, vi } from "vitest";
 import { blobs } from "../../db/schema.ts";
 import { error, mailboxFixture } from "../mailbox/test-support.ts";
+import * as mediaHeads from "../publish/media-head.ts";
 import { bundle, importFixture } from "./import-test-support.ts";
+
+vi.mock("../publish/media-head.ts", async (original) => ({
+  ...(await original<typeof import("../publish/media-head.ts")>()),
+}));
 
 const png = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489", "hex");
 
 test("import preserves Markdown associations and rebuilds their images and sizes", async () => {
   const f = await importFixture();
   try {
+    const kept: string[][] = [];
+    const memoize = mediaHeads.memoizedHeads;
+    vi.spyOn(mediaHeads, "memoizedHeads").mockImplementation((load) => {
+      const memo = memoize(load);
+      return {
+        read: memo.read,
+        keep: (hashes) => {
+          const list = [...hashes];
+          kept.push(list);
+          memo.keep(list);
+        },
+      };
+    });
     const input = ImportBundle.parse(await bundle(f));
     const doc = input.files[0];
     if (!doc) throw new Error("Missing fixture doc");
@@ -30,6 +48,8 @@ test("import preserves Markdown associations and rebuilds their images and sizes
     input.docAssets.push({ revisionId: doc.revisionId, docId: doc.id, assetId: asset.id });
     const imported = await f.importRequest("/import", input);
     expect(imported.status, await imported.text()).toBe(201);
+    expect(kept).not.toEqual([]);
+    expect(kept.flat()).not.toContain(hash);
     const revision = RevisionView.parse(
       await (await f.request(`/reviews/${input.review.id}/revisions/1`, "GET")).json(),
     );
@@ -41,6 +61,7 @@ test("import preserves Markdown associations and rebuilds their images and sizes
     expect(media.status).toBe(200);
     expect(Buffer.from(await media.arrayBuffer())).toEqual(png);
   } finally {
+    vi.restoreAllMocks();
     await f.cleanup();
   }
 });
@@ -144,6 +165,7 @@ test("a Markdown doc can share writeup media while HTML-only assets stay out of 
     expect(body).not.toContain(Buffer.concat([png, Buffer.from("html")]).toString("base64"));
     await error(await f.request(`/media/${htmlOnly}`, "GET"), 404, "not_found");
   } finally {
+    vi.restoreAllMocks();
     await f.cleanup();
   }
 });

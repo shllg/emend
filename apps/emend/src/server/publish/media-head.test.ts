@@ -108,3 +108,14 @@ test("ownerHead rejects with blob_missing when the blob is absent", async () => 
   expect(error).toBeInstanceOf(ApiError);
   expect(error.code).toBe("blob_missing");
 });
+
+test("keep limits future memoization to writeup heads, leaving doc heads unretained", async () => {
+  const load = vi.fn(async () => Uint8Array.from([1, 2, 3]).buffer);
+  const heads = memoizedHeads(load);
+  heads.keep(["writeup"]);
+  await heads.read("doc");
+  await heads.read("writeup");
+  await heads.read("doc");
+  await heads.read("writeup");
+  expect(load.mock.calls).toEqual([["doc"], ["writeup"], ["doc"]]);
+});

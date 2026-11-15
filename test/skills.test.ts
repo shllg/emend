@@ -405,8 +405,8 @@ test("moved writing rules appear once, in the shared writing reference", () => {
     "Prefer existing project meanings and omit general programming terms",
     "The alt text becomes the caption",
     "Only listed paths render",
-    "Images do not render in Markdown docs",
-    "Markdown shows no local images yet",
+    "In a Markdown document, put the image beside it",
+    "PNG, JPEG, GIF, WebP and AVIF show",
     "Keep the page self-contained",
     "loads nothing from other hosts",
     "Keep images and styles beside the file, using relative paths",
@@ -909,4 +909,20 @@ test.each(skillFiles)("%s handles a closed result and a deleted review", (path) 
   expect(text).toContain("only `go`, `approve` and `closed` results stay");
   expect(text).not.toContain("only `go` and `approve` results stay");
   expect(text).not.toContain("Keep only `go` and `approve` results");
+});
+
+test("CLI rules include bounded Markdown image discovery and secret-name filtering", () => {
+  const rules = read(".claude/rules/cli.md").replace(/\s+/g, " ");
+  expect(rules).toContain("images inside each rendered Markdown doc's folder");
+  expect(rules).toContain("image-extension rule (PNG, JPEG, GIF, WebP, AVIF)");
+  expect(rules).toContain("skip secret-looking names");
+  expect(rules).toContain("worker under the render timeout");
+});
+
+test.each(["docs/api.md", "docs/usage.md"])("%s explains Markdown image discovery and skipped paths", (path) => {
+  const text = read(path).replace(/\s+/g, " ");
+  expect(text).toContain("worker under the render timeout");
+  expect(text).toContain("secret-looking");
+  expect(text).toContain("encoded separators");
+  expect(text).toContain("warns once");
 });
