@@ -913,10 +913,8 @@ test.each(skillFiles)("%s handles a closed result and a deleted review", (path) 
 
 test("CLI rules include bounded Markdown image discovery and secret-name filtering", () => {
   const rules = read(".claude/rules/cli.md").replace(/\s+/g, " ");
-  expect(rules).toContain("images inside each rendered Markdown doc's folder");
-  expect(rules).toContain("image-extension rule (PNG, JPEG, GIF, WebP, AVIF)");
-  expect(rules).toContain("skip secret-looking names");
-  expect(rules).toContain("worker under the render timeout");
+  expect(rules).toContain("the assets inside each doc's folder");
+  expect(rules).toContain("Markdown images skip secret names; a worker finds them");
 });
 
 test.each(["docs/api.md", "docs/usage.md"])("%s explains Markdown image discovery and skipped paths", (path) => {

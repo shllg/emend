@@ -38,8 +38,7 @@ The CLI runs in repos under review: treat them as hostile.
   The CLI reads worktree files from disk and hashes them as git blobs itself. `cat-file` never
   takes `--filters` or `--textconv`.
 - Read only what the manifest names: the manifest itself, the changed paths through git, the doc
-  sources, the assets inside each HTML doc's folder and the images inside each rendered Markdown
-  doc's folder. Resolve real paths, read regular files
+  sources and the assets inside each doc's folder. Resolve real paths, read regular files
   only, skip symlinks that leave the doc's folder, and enforce the size, file-count and revision
   limits. A path behind a symlinked folder is absent, as git sees it, and no read or listing
   lands inside the git folder or the common git folder.
@@ -52,9 +51,8 @@ The CLI runs in repos under review: treat them as hostile.
   passwords, tfvars; not Markdown/HTML), too large, unreadable, or, shown as source, not text or
   holding a private key. Folders named exactly `secret(s)` or `credential(s)` (any case) below the
   argument are not entered. HTML assets keep the web-extension rule; below a folder argument, one
-  reached via such a folder or holding a private key is skipped. Markdown doc images keep the
-  image-extension rule (PNG, JPEG, GIF, WebP, AVIF), skip secret-looking names, and are found in the
-  worker under the render timeout. These and walked source docs upload one scanned read. Named
+  reached via such a folder or holding a private key is skipped. Markdown images skip
+  secret names; a worker finds them. These and walked source docs upload one scanned read. Named
   files and folders still publish. Never shrink the secret-name list.
 - The listing skips dotfiles and `node_modules`, checks each entry's type, and a regular file's
   name and extension, before any other call on it, and stops at the entry and folder limits; an asset
