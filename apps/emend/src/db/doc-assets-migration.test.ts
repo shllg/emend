@@ -25,9 +25,7 @@ test("migration backfills only parent-listed assets and keeps them serving", asy
       await q.exec(
         "CREATE TABLE __emend_migrations (hash text primary key, tag text not null, applied_at integer not null)",
       );
-      for (const migration of MIGRATIONS.filter(
-        (m) => !m.statements.some((s) => s.includes("CREATE TABLE `doc_assets`")),
-      )) {
+      for (const migration of MIGRATIONS.filter((m) => !m.statements.some((s) => s.includes("doc_assets")))) {
         for (const statement of migration.statements) await q.exec(statement);
         await q.run(sql`INSERT INTO __emend_migrations VALUES (${migration.hash}, ${migration.tag}, 0)`);
       }
@@ -68,7 +66,7 @@ test("migration backfills only parent-listed assets and keeps them serving", asy
         parentDocId: doc,
       });
     });
-    expect(await migrate(db)).toBe(1);
+    expect(await migrate(db)).toBe(2);
     expect(
       await db.read((q) =>
         q.values(sql`SELECT owner_id, revision_id, doc_id FROM doc_assets WHERE owner_id = ${owner}`),
