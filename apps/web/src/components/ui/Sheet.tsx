@@ -8,7 +8,9 @@ import { cn } from "./utils.ts";
 import "./Sheet.css";
 
 export interface SheetProps {
-  side?: "right" | "left" | "bottom";
+  side?: "right" | "left" | "bottom" | "full";
+  bodyClassName?: string;
+  "data-diff-scroll"?: boolean;
   title: ReactNode;
   description?: ReactNode;
   footer?: ReactNode;
@@ -26,6 +28,7 @@ export interface SheetProps {
 }
 
 const sides = {
+  full: "inset-0 h-[var(--visual-height,100dvh)] pb-[var(--sheet-safe-bottom,env(safe-area-inset-bottom))]",
   right:
     "inset-y-0 right-0 w-[min(400px,92%)] rounded-l-xl border-l border-line-1 animate-[em-sheet-right_var(--dur-3)_var(--ease-out)]",
   left: "inset-y-0 left-0 w-[min(340px,92%)] rounded-r-xl border-r border-line-1 animate-[em-sheet-left_var(--dur-3)_var(--ease-out)]",
@@ -35,6 +38,8 @@ const sides = {
 
 export function Sheet({
   side = "right",
+  bodyClassName,
+  "data-diff-scroll": diffScroll,
   title,
   description,
   footer,
@@ -55,7 +60,7 @@ export function Sheet({
     content.current = el;
     setNode(el);
   }, []);
-  useVisualViewportInset(side === "bottom" ? node : null);
+  useVisualViewportInset(side === "bottom" || side === "full" ? node : null);
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       {trigger && <Dialog.Trigger asChild>{trigger}</Dialog.Trigger>}
@@ -95,16 +100,29 @@ export function Sheet({
             <div data-sheet-grab aria-hidden="true" className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-[2px] bg-line-2" />
           )}
           <header className="flex min-h-[52px] shrink-0 items-center gap-2 border-b border-line-1 py-1.5 pr-2 pl-4">
-            <Dialog.Title className="m-0 flex-1 font-sans text-15 font-semibold leading-(--lh-snug) text-fg-1">
+            <Dialog.Title
+              className={cn(
+                "m-0 flex-1 font-sans text-15 font-semibold leading-(--lh-snug) text-fg-1",
+                side === "full" && "min-w-0 truncate",
+              )}
+            >
               {title}
             </Dialog.Title>
             <Dialog.Close asChild>
-              <IconButton label="Close" icon={X} size={side === "bottom" ? "lg" : "md"} tooltip={false} />
+              <IconButton
+                label="Close"
+                icon={X}
+                size={side === "bottom" || side === "full" ? "lg" : "md"}
+                tooltip={false}
+              />
             </Dialog.Close>
           </header>
           {/* The body yields all its height before the footer shrinks, so the footer scrolls only
               when the header and footer alone do not fit. */}
-          <div className="relative min-h-0 flex-[1_1000000_0%] space-y-4 overflow-auto p-4">
+          <div
+            data-diff-scroll={diffScroll || undefined}
+            className={cn("relative min-h-0 flex-[1_1000000_0%] space-y-4 overflow-auto p-4", bodyClassName)}
+          >
             {description && (
               <Dialog.Description className="m-0 font-sans text-14 font-normal leading-(--lh-body) text-fg-2">
                 {description}

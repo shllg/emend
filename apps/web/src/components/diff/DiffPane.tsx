@@ -1,7 +1,17 @@
 import { type FileView, OTHER_TOPIC, type RevisionView, type Target } from "@emend/contract";
 import { useIsMutating } from "@tanstack/react-query";
-import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { runningCommentSaves } from "../../api/mutations.ts";
+import { type CodeFocus, sameCodeFocus } from "../../lib/code-focus.ts";
 import { claimDraft } from "../../lib/composer-owner.ts";
 import { useDiffCounts } from "../../lib/diff-counts.ts";
 import { diffFiles, diffGroups } from "../../lib/diff-groups.ts";
@@ -32,6 +42,8 @@ import { TopicSection } from "./TopicSection.tsx";
 import { type FileLocation, isDiffTarget, resolveFile } from "./targets.ts";
 
 export type DiffPaneProps = {
+  focus?: CodeFocus;
+  focusBar?: ReactNode;
   reviewId: string;
   revision: RevisionView;
   parser?: DiffParser;
@@ -46,6 +58,8 @@ export type DiffPaneProps = {
   onViewed?: (paths: string[], viewed: boolean) => void;
 };
 export function DiffPane({
+  focus,
+  focusBar,
   reviewId,
   revision,
   parser,
@@ -117,6 +131,16 @@ export function DiffPane({
     () => diffFiles({ files: revision.files, topics: revision.topics }, shownOrder),
     [revision.files, revision.topics, shownOrder],
   );
+  const focusedGroup =
+    focus &&
+    [...groups.values()].find((group) =>
+      focus.kind === "topic" ? group.topic.slug === focus.slug : group.files.some((file) => file.id === focus.id),
+    );
+  const focusedIds = new Set(focusedGroup?.files.map((file) => file.id));
+  const visibleFiles = focus
+    ? orderedFiles.filter((file) => (focus.kind === "file" ? file.id === focus.id : focusedIds.has(file.id)))
+    : orderedFiles;
+  const visibleIds = new Set(visibleFiles.map((file) => file.id));
   const lastReachedFile = useRef<string | null>(null);
   useEffect(() => {
     const scroll = root.current?.closest<HTMLElement>("[data-diff-scroll]");
@@ -133,7 +157,7 @@ export function DiffPane({
     type CurrentFile = { index: number; header: HTMLElement; top: number; headerTop: number; visible: boolean };
     let atTop: CurrentFile | undefined;
     let firstVisible: CurrentFile | undefined;
-    for (const [i, file] of orderedFiles.entries()) {
+    for (const [i, file] of visibleFiles.entries()) {
       const element = document.getElementById(`diff-file-${file.id}`);
       if (!element || !pane.contains(element) || element.closest("[hidden]")) continue;
       // Sticky headers move with the viewport. Measure their original file position below the
@@ -160,7 +184,7 @@ export function DiffPane({
     const current = currentFile();
     if (!current) return false;
     const inside = current.headerTop < current.top;
-    const file = orderedFiles[current.index + (delta === -1 && inside ? 0 : delta)];
+    const file = visibleFiles[current.index + (delta === -1 && inside ? 0 : delta)];
     if (!file) return false;
     lastReachedFile.current = file.id;
     setJump(file);
@@ -211,6 +235,31 @@ export function DiffPane({
       });
     return changed;
   };
+  const previousFocus = useRef<CodeFocus>(undefined);
+  const savedScroll = useRef(0);
+  const restoreScroll = useRef(false);
+  useLayoutEffect(() => {
+    const scroll = root.current?.closest<HTMLElement>("[data-diff-scroll]");
+    // A hidden scroller has no layout box; retry its restoration when the Diff tab shows it.
+    if (!focus && restoreScroll.current && scroll && !scroll.closest("[hidden]")) {
+      scroll.scrollTop = savedScroll.current;
+      restoreScroll.current = false;
+    }
+    if (sameCodeFocus(previousFocus.current, focus)) return;
+    cancelHold.current?.();
+    lastReachedFile.current = null;
+    setJump(null);
+    if (focus) {
+      if (!previousFocus.current && !restoreScroll.current) savedScroll.current = scroll?.scrollTop ?? 0;
+      restoreScroll.current = false;
+      expand(focusedGroup?.topic.slug, focus.kind === "file" ? focus.id : undefined);
+      if (scroll) scroll.scrollTop = 0;
+    } else if (scroll) {
+      scroll.scrollTop = savedScroll.current;
+      restoreScroll.current = !!scroll.closest("[hidden]");
+    }
+    previousFocus.current = focus;
+  });
   const revealTarget = (target: FileLocation & { slug?: string }) => {
     const file = fileForTarget(target);
     return expand(target.kind === "topic" ? target.slug : file && topicForFile(file), file?.id);
@@ -326,29 +375,32 @@ export function DiffPane({
     <DiffNavigation value={navigateDiff}>
       <div ref={root} className="em-diff-pane" data-toolbar={layout !== "phone" || undefined}>
         <h2 className="sr-only">Diff</h2>
-        {layout !== "phone" && (
-          <DiffToolbar
-            groups={[...groups.values()]}
-            files={orderedFiles}
-            ranks={ranks}
-            counts={counts}
-            order={shownOrder}
-            orderLocked={saving}
-            onOrder={setOrder}
-            style={diffStyle}
-            splitDisabled={narrow !== false}
-            onStyle={setStyle}
-            wrap={wrap}
-            onWrap={setWrap}
-            notes={notes}
-            onNotes={(notes) => layoutStore.update({ notes })}
-            onJump={(file) => {
-              setJump(file);
-            }}
-          />
-        )}
+        {layout !== "phone" &&
+          (focus ? (
+            focusBar
+          ) : (
+            <DiffToolbar
+              groups={[...groups.values()]}
+              files={orderedFiles}
+              ranks={ranks}
+              counts={counts}
+              order={shownOrder}
+              orderLocked={saving}
+              onOrder={setOrder}
+              style={diffStyle}
+              splitDisabled={narrow !== false}
+              onStyle={setStyle}
+              wrap={wrap}
+              onWrap={setWrap}
+              notes={notes}
+              onNotes={(notes) => layoutStore.update({ notes })}
+              onJump={(file) => {
+                setJump(file);
+              }}
+            />
+          ))}
         {unplaced.length > 0 && (
-          <section aria-label="Unplaced comments" className="mb-5 space-y-3">
+          <section hidden={!!focus} aria-label="Unplaced comments" className="mb-5 space-y-3">
             <h3 className="font-semibold">Unplaced comments</h3>
             {unplaced.map((thread) => (
               <ThreadCard key={thread.id} surface="diff" {...context} thread={thread} />
@@ -356,26 +408,43 @@ export function DiffPane({
           </section>
         )}
         {shownOrder === "path" && (topicThreads.length > 0 || (active?.kind === "topic" && hasSection(active))) && (
-          <section aria-label="Topic comments" data-diff-section className="mb-5 space-y-3 px-3">
+          <section
+            hidden={focus?.kind === "file"}
+            aria-label="Topic comments"
+            data-diff-section
+            className="mb-5 space-y-3 px-3"
+          >
             <h3 className="font-semibold">Topic comments</h3>
             {active?.kind === "topic" && hasSection(active) && (
-              <Composer
-                surface="diff"
-                reviewId={reviewId}
-                revision={revision.seq}
-                target={active}
-                topics={revision.topics}
-                onSaved={() => onActive(null)}
-                onCancel={() => onActive(null)}
-              />
+              <div hidden={focus?.kind === "topic" && focus.slug !== active.slug}>
+                <Composer
+                  surface="diff"
+                  reviewId={reviewId}
+                  revision={revision.seq}
+                  target={active}
+                  topics={revision.topics}
+                  onSaved={() => onActive(null)}
+                  onCancel={() => onActive(null)}
+                />
+              </div>
             )}
             {topicThreads.map((thread) => (
-              <ThreadCard key={thread.id} surface="diff" {...context} thread={thread} />
+              <div
+                key={thread.id}
+                hidden={
+                  focus?.kind === "topic" &&
+                  thread.placement.status === "placed" &&
+                  thread.placement.location.kind === "topic" &&
+                  thread.placement.location.slug !== focus.slug
+                }
+              >
+                <ThreadCard surface="diff" {...context} thread={thread} />
+              </div>
             ))}
           </section>
         )}
         {active && isDiffTarget(active) && !hasSection(active) && (
-          <section data-diff-section className="space-y-2">
+          <section hidden={!!focus} data-diff-section className="space-y-2">
             <Composer
               surface="diff"
               reviewId={reviewId}
@@ -394,7 +463,13 @@ export function DiffPane({
           (shownOrder === "path" ? (
             <div className="px-3 pb-3">
               {orderedFiles.map((file) => (
-                <FileDiff key={file.id} file={file} topicCollapsed={false} {...context} />
+                <FileDiff
+                  key={file.id}
+                  file={file}
+                  hidden={!visibleIds.has(file.id)}
+                  topicCollapsed={false}
+                  {...context}
+                />
               ))}
             </div>
           ) : (
@@ -404,6 +479,8 @@ export function DiffPane({
                 {...context}
                 topic={topic}
                 files={files}
+                hidden={!!focus && topic.slug !== focusedGroup?.topic.slug}
+                onlyFile={focus?.kind === "file" ? focus.id : undefined}
                 rank={ranks.get(topic.slug)}
                 current={layout !== "phone" && writeupVisible && currentTopic === topic.slug}
                 writeupLink={

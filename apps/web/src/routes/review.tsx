@@ -1,6 +1,7 @@
 import { type ReviewView, type RevisionView, reviewDownloadPath } from "@emend/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams, useRouter } from "@tanstack/react-router";
+import { X } from "lucide-react";
 import {
   type ComponentProps,
   type MouseEvent,
@@ -36,7 +37,10 @@ import { threadCounts } from "../components/status/ThreadStateBadge.tsx";
 import { Composer } from "../components/threads/Composer.tsx";
 import { ThreadList } from "../components/threads/ThreadList.tsx";
 import { Button } from "../components/ui/Button.tsx";
+import { IconButton } from "../components/ui/IconButton.tsx";
+import { Sheet } from "../components/ui/Sheet.tsx";
 import { useToast } from "../components/ui/Toast.tsx";
+import { type CodeFocus, resolveCodeFocus, sameCodeFocus } from "../lib/code-focus.ts";
 import { claimDraft } from "../lib/composer-owner.ts";
 import { useDiffCounts } from "../lib/diff-counts.ts";
 import type { NavigateDiff } from "../lib/diff-navigation.ts";
@@ -50,6 +54,7 @@ import { openingView } from "../lib/opening-view.ts";
 import { focusReadingTarget } from "../lib/reading-focus.ts";
 import { readingPositionKey } from "../lib/reading-position.ts";
 import { revealReadingTarget } from "../lib/reading-reveal.ts";
+import { ignoreShortcut } from "../lib/shortcuts.ts";
 import {
   captureReadingPosition,
   type IntentState,
@@ -87,6 +92,7 @@ function Reading({
   onOpenDoc,
   onCurrentTopic,
   onNote,
+  code,
   visible,
   intentState,
   entry,
@@ -114,6 +120,7 @@ function Reading({
   onOpenDoc: (doc: RevisionView["docs"][number]) => void;
   onCurrentTopic?: (slug: string | undefined) => void;
   onNote: (id: string) => void;
+  code?: ComponentProps<typeof Writeup>["code"];
   visible: boolean;
   intentState: () => IntentState;
   entry: ReadingEntry;
@@ -194,6 +201,7 @@ function Reading({
       resumedBlockId={resumedBlockId}
       onCurrentTopic={onCurrentTopic}
       onNote={onNote}
+      code={code}
     />
   );
 }
@@ -369,6 +377,50 @@ function LoadedReview({
       ? (layout !== "phone" && paneMode === "tabs" && lastReadingTab) ||
         (hasWriteup ? "writeup" : hasDocs ? "docs" : "comments")
       : tab;
+  const [codeFocus, setCodeFocus] = useState<CodeFocus>();
+  const codeOpener = useRef<HTMLElement>(null);
+  const codePane = useRef<HTMLDivElement>(null);
+  const codeMode =
+    hasDiff && tab === "writeup" && readingTab === "writeup"
+      ? layout === "phone"
+        ? "sheet"
+        : paneMode === "tabs"
+          ? "panel"
+          : undefined
+      : undefined;
+  const resolvedCode = revision ? resolveCodeFocus(revision, codeFocus) : undefined;
+  // Keep a valid target across revision loads, but never resurrect it after leaving the writeup.
+  if (codeFocus && (tab !== "writeup" || paneMode === "split" || (revision && !resolvedCode))) setCodeFocus(undefined);
+  const openCode = codeMode && resolvedCode ? codeFocus : undefined;
+  const panelOpen = codeMode === "panel" && !!openCode;
+  const closeCode = useCallback(() => {
+    const active = document.activeElement;
+    const panel = codePane.current?.closest("[data-diff-scroll]");
+    const returnFocus = active === document.body || (!!active && !!panel?.contains(active));
+    setCodeFocus(undefined);
+    if (returnFocus && codeOpener.current?.isConnected) codeOpener.current.focus({ preventScroll: true });
+  }, []);
+  const onOpenCode = useCallback((focus: CodeFocus, opener: HTMLElement) => {
+    codeOpener.current = opener;
+    setCodeFocus((current) => (sameCodeFocus(current, focus) ? undefined : focus));
+  }, []);
+  useEffect(() => {
+    if (!panelOpen) return;
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || ignoreShortcut(event)) return;
+      event.preventDefault();
+      closeCode();
+    };
+    window.addEventListener("keydown", onEscape);
+    return () => window.removeEventListener("keydown", onEscape);
+  }, [panelOpen, closeCode]);
+  const code = useMemo(
+    () => (codeMode ? { current: openCode, onOpen: onOpenCode } : undefined),
+    [codeMode, openCode, onOpenCode],
+  );
+  const codeLink = openCode
+    ? `/r/${encodeURIComponent(review.id)}?tab=diff${search.rev === undefined ? "" : `&rev=${search.rev}`}#diff-${openCode.kind === "topic" ? `topic-${openCode.slug}` : `file-${openCode.id}`}`
+    : undefined;
   const docsVisible = readingTab === "docs" && (paneMode === "split" || tab !== "diff");
   const currentIntent = readingIntent(search, hash, seq);
   const openDoc = revision
@@ -826,11 +878,34 @@ function LoadedReview({
           returnFocus={downloadReturnFocus}
         />
       )}
+      {revision && (
+        <Sheet
+          side="full"
+          title={<bdi title={resolvedCode?.title}>{resolvedCode?.title}</bdi>}
+          open={codeMode === "sheet" && !!openCode}
+          onOpenChange={(open) => {
+            if (!open) setCodeFocus(undefined);
+          }}
+          returnFocus={() => codeOpener.current}
+          bodyClassName="p-0 space-y-0"
+          data-diff-scroll
+        >
+          <LazyDiffPane
+            key={seq}
+            reviewId={review.id}
+            revision={revision}
+            focus={openCode}
+            search={search}
+            onViewed={onViewed}
+          />
+        </Sheet>
+      )}
       <div className="contents" onClickCapture={followReadingLink} onAuxClickCapture={followReadingLink}>
         <Panes
           inbox={<ReviewInbox collapsed={collapsed} onCollapsedChange={setCollapsed} />}
           tab={tab}
           hasDiff={hasDiff}
+          codePanel={panelOpen ? `Code: ${resolvedCode?.title}` : undefined}
           readingLayout={docsVisible && openDoc?.kind === "html" ? "original" : undefined}
           phoneTabs={<PhoneTabs {...tabProps} />}
           tabs={<ReviewTabs {...tabProps} docsCount={revision?.docs.length ?? 0} idBase={readingId} />}
@@ -984,6 +1059,7 @@ function LoadedReview({
                         resumedBlockId={resumedBlockId}
                         onCurrentTopic={layout !== "phone" && hasDiff ? setCurrentTopic : undefined}
                         onNote={onNote}
+                        code={code}
                       />
                     )}
                   </ReadingFoldContext>
@@ -1012,7 +1088,8 @@ function LoadedReview({
           }
           diff={
             <div
-              {...(layout !== "phone" && paneMode === "tabs"
+              ref={codePane}
+              {...(layout !== "phone" && paneMode === "tabs" && tab === "diff"
                 ? {
                     role: "tabpanel",
                     id: `${readingId}-diff-panel`,
@@ -1025,6 +1102,20 @@ function LoadedReview({
                   key={seq}
                   reviewId={review.id}
                   revision={revision}
+                  focus={panelOpen ? openCode : undefined}
+                  focusBar={
+                    panelOpen && (
+                      <div className="em-diff-toolbar em-code-bar" data-diff-toolbar>
+                        <bdi className="min-w-0 flex-1 truncate" title={resolvedCode?.title}>
+                          {resolvedCode?.title}
+                        </bdi>
+                        <a className="shrink-0 text-12 text-fg-link" href={codeLink}>
+                          Open in Diff tab
+                        </a>
+                        <IconButton label="Close code panel" icon={X} size="sm" tooltip={false} onClick={closeCode} />
+                      </div>
+                    )
+                  }
                   resume={resumed?.target && isDiffTarget(resumed.target) ? resumed : undefined}
                   onResumeEnd={endResume}
                   onRendered={onDiffRendered}

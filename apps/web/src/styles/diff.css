@@ -18,6 +18,10 @@
     border-bottom: 1px solid var(--border-1);
     background: var(--bg-surface);
   }
+  .em-code-bar {
+    height: 41px;
+    font: 400 13px / 1.4 var(--font-sans);
+  }
   .em-diff-topic {
     scroll-margin-top: var(--diff-toolbar-height);
   }

@@ -14,6 +14,7 @@ export function Panes({
   hasDiff,
   tabs,
   readingLayout,
+  codePanel,
 }: {
   inbox: ReactNode;
   header: ReactNode;
@@ -25,10 +26,12 @@ export function Panes({
   hasDiff: boolean;
   tabs?: ReactNode;
   readingLayout?: "original";
+  codePanel?: string;
 }) {
   const layout = useLayout();
   const preferences = useLayoutPreferences();
   const split = layout !== "phone" && preferences.pane[layout] === "split";
+  const panel = layout !== "phone" && !split && tab !== "diff" ? codePanel : undefined;
   const showReadingHandle = split && hasDiff;
   const [inboxPreview, setInboxPreview] = useState<number>();
   const [readingPreview, setReadingPreview] = useState<number>();
@@ -118,11 +121,11 @@ export function Panes({
           {hasDiff && (layout !== "phone" || tab === "diff") && (
             <section
               key="diff"
-              aria-label="Diff"
+              aria-label={panel ?? "Diff"}
               data-testid="diff-pane"
               data-diff-scroll
-              hidden={!split && tab !== "diff"}
-              className="relative min-w-0 flex-1 overflow-y-auto"
+              hidden={!split && tab !== "diff" && !panel}
+              className={`relative min-w-0 overflow-y-auto ${panel ? "em-code-panel" : "flex-1"}`}
             >
               {diff}
             </section>
