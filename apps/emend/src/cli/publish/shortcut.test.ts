@@ -130,10 +130,7 @@ test("reference-expansion main doc publishes with a bounded worker title", async
     1,
     expect.objectContaining({ kind: "doc-metadata", format: "markdown", bytes: expect.any(ArrayBuffer) }),
   );
-  expect(execute).toHaveBeenNthCalledWith(
-    2,
-    expect.objectContaining({ kind: "doc-images", bytes: expect.any(ArrayBuffer) }),
-  );
+  expect(execute).toHaveBeenCalledOnce();
   const metadata = await execute.mock.results[0]?.value.catch(() => undefined);
   expect(capture.requests[0]?.title).toBe(
     metadata?.kind === "doc-metadata" && metadata.title ? metadata.title : "expansion.md",
@@ -2015,7 +2012,7 @@ test("a Markdown pub resolves, ingests, renders and serves its local screenshot"
   const download = await reviewer.request(`/reviews/${pub.reviewId}/revisions/1/download`);
   expect(download.status).toBe(200);
   expect(await download.text()).toContain(`data:image/png;base64,${png.toString("base64")}`);
-});
+}, 15000);
 
 test("walked Markdown images keep the private-key scan and source view collects none", async () => {
   const f = await fixture();

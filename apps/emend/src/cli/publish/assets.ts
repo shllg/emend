@@ -16,6 +16,12 @@ import {
 import { isSecretPath } from "./shortcut-walk.ts";
 
 export const assetWarning = (raw: string, reason: string) => `emend: skipped ${escapeReference(raw)}: ${reason}\n`;
+export const docImageWarning = (
+  label: string,
+  reason:
+    | "some images left out: too many image references"
+    | "published without images: image discovery failed or timed out",
+) => `emend: ${label}: ${reason}\n`;
 
 export type AssetFormat = "html" | "markdown";
 export type WalkedSecretPaths = ReadonlyMap<string, { referencedByMarkdown: boolean }>;

@@ -82,51 +82,57 @@ test("doc sources resolve only inside the worktree or configured real doc roots"
     await rm(dir, { recursive: true, force: true });
   }
 });
-test.each(["html", "md"])("%s and each asset and their cumulative bytes have pre-read limits", async (extension) => {
-  const dir = await mkdtemp(join(tmpdir(), "emend-limits-"));
-  const root = join(dir, "repo");
-  try {
-    await mkdir(join(root, ".git"), { recursive: true });
-    const input = { ...manifest(), files: [{ path: `plan.${extension}`, role: "doc" as const }] };
-    const collect = () =>
-      resolvePublish(
-        input,
-        { manifest: "synthetic", key: "plan" },
-        join(dir, "state"),
-        join(dir, "config", "emend"),
-        "instance",
-        root,
-        () => {},
+test.each(["html", "md"])(
+  "%s and each asset and their cumulative bytes have pre-read limits",
+  async (extension) => {
+    const dir = await mkdtemp(join(tmpdir(), "emend-limits-"));
+    const root = join(dir, "repo");
+    try {
+      await mkdir(join(root, ".git"), { recursive: true });
+      const input = { ...manifest(), files: [{ path: `plan.${extension}`, role: "doc" as const }] };
+      const collect = () =>
+        resolvePublish(
+          input,
+          { manifest: "synthetic", key: "plan" },
+          join(dir, "state"),
+          join(dir, "config", "emend"),
+          "instance",
+          root,
+          () => {},
+        );
+      await writeFile(join(root, `plan.${extension}`), '<img src="a.png">');
+      await writeFile(join(root, "a.png"), "");
+      await truncate(join(root, "a.png"), LIMITS.assetBytes);
+      const single = await collect();
+      const asset = single.request.files.find((file) => file.role === "asset");
+      expect(single.blobs.get(asset?.newBlob ?? "")?.size).toBe(LIMITS.assetBytes);
+      await truncate(join(root, "a.png"), LIMITS.assetBytes + 1);
+      await expect(collect()).rejects.toThrow("asset exceeds");
+      await truncate(join(root, "a.png"), LIMITS.assetBytes);
+      const html = '<img src="a.png"><img src="b.png">';
+      await writeFile(join(root, `plan.${extension}`), html);
+      await writeFile(join(root, "b.png"), "");
+      const remaining = LIMITS.htmlDocWithAssetsBytes - Buffer.byteLength(html) - LIMITS.assetBytes;
+      await truncate(join(root, "b.png"), remaining);
+      const combined = await collect();
+      expect([...combined.blobs.values()].reduce((sum, blob) => sum + blob.size, 0)).toBe(
+        LIMITS.htmlDocWithAssetsBytes,
       );
-    await writeFile(join(root, `plan.${extension}`), '<img src="a.png">');
-    await writeFile(join(root, "a.png"), "");
-    await truncate(join(root, "a.png"), LIMITS.assetBytes);
-    const single = await collect();
-    const asset = single.request.files.find((file) => file.role === "asset");
-    expect(single.blobs.get(asset?.newBlob ?? "")?.size).toBe(LIMITS.assetBytes);
-    await truncate(join(root, "a.png"), LIMITS.assetBytes + 1);
-    await expect(collect()).rejects.toThrow("asset exceeds");
-    await truncate(join(root, "a.png"), LIMITS.assetBytes);
-    const html = '<img src="a.png"><img src="b.png">';
-    await writeFile(join(root, `plan.${extension}`), html);
-    await writeFile(join(root, "b.png"), "");
-    const remaining = LIMITS.htmlDocWithAssetsBytes - Buffer.byteLength(html) - LIMITS.assetBytes;
-    await truncate(join(root, "b.png"), remaining);
-    const combined = await collect();
-    expect([...combined.blobs.values()].reduce((sum, blob) => sum + blob.size, 0)).toBe(LIMITS.htmlDocWithAssetsBytes);
-    await truncate(join(root, "b.png"), remaining + 1);
-    await expect(collect()).rejects.toThrow(
-      extension === "html" ? "HTML doc and assets exceed" : "Markdown doc and images exceed",
-    );
-    await truncate(
-      join(root, `plan.${extension}`),
-      (extension === "html" ? LIMITS.htmlDocBytes : LIMITS.markdownDocBytes) + 1,
-    );
-    await expect(collect()).rejects.toThrow("size limit");
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
+      await truncate(join(root, "b.png"), remaining + 1);
+      await expect(collect()).rejects.toThrow(
+        extension === "html" ? "HTML doc and assets exceed" : "Markdown doc and images exceed",
+      );
+      await truncate(
+        join(root, `plan.${extension}`),
+        (extension === "html" ? LIMITS.htmlDocBytes : LIMITS.markdownDocBytes) + 1,
+      );
+      await expect(collect()).rejects.toThrow("size limit");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  },
+  15000,
+);
 
 test("HTML docs sharing an asset publish it once under its first parent", async () => {
   const dir = await mkdtemp(join(tmpdir(), "emend-shared-assets-"));

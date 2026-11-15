@@ -19,7 +19,7 @@ import { DocRootError, readDocRoots, rootRules, validateDocRoot } from "../confi
 import { escapeReference } from "../escape.ts";
 import { createGitSession, GitFailed } from "../git.ts";
 import { CliError } from "../http.ts";
-import { collectAssets, docAssetSizeError, type WalkedSecretPaths } from "./assets.ts";
+import { collectAssets, docAssetSizeError, docImageWarning, type WalkedSecretPaths } from "./assets.ts";
 import { collectChanges } from "./collect.ts";
 import { docsKey, normalizeRemote, projectKey, reviewKey } from "./key.ts";
 import {
@@ -99,7 +99,11 @@ export async function resolvePublish(
   context?: Awaited<ReturnType<typeof publishContext>>,
   configRoots?: readonly string[],
 ) {
-  const execute = workerExecutor();
+  let worker: ReturnType<typeof workerExecutor> | undefined;
+  const execute: Executor = (work) => {
+    worker ??= workerExecutor();
+    return worker(work);
+  };
   try {
     return await resolveWithWorker(
       execute,
@@ -114,7 +118,7 @@ export async function resolvePublish(
       configRoots,
     );
   } finally {
-    await execute.close();
+    await worker?.close();
   }
 }
 async function resolveWithWorker(
@@ -358,15 +362,16 @@ async function resolveWithWorker(
     if (sourceView) continue;
     const format = html ? "html" : "markdown";
     let imageReferences: string[] = [];
-    if (!html) {
+    // Only image syntax can produce img elements; a pre-check miss only leaves an image out.
+    if (!html && /!\[|<im(?:g|age)/i.test(bytes.toString())) {
       const label = escapeReference(options.docArguments?.get(file.path) ?? file.path);
       try {
         const result = await execute({ kind: "doc-images", bytes: Uint8Array.from(bytes).buffer });
         if (result.kind !== "doc-images") throw new Error("wrong result");
         imageReferences = result.references;
-        if (result.capped) warn(`emend: ${label}: some images left out: too many image references\n`);
+        if (result.capped) warn(docImageWarning(label, "some images left out: too many image references"));
       } catch {
-        warn(`emend: ${label}: published without images: image discovery failed or timed out\n`);
+        warn(docImageWarning(label, "published without images: image discovery failed or timed out"));
       }
     }
     if (shortcutAssets) {

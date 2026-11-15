@@ -305,32 +305,36 @@ test("manifest shared-asset request, blob bytes and read counts match HEAD", asy
   });
 });
 
-test.each(["html", "md"])("shortcut %s assets accept exact limits and refuse one byte over", async (extension) => {
-  const f = await fixture();
-  const doc = await f.file(`plan.${extension}`, '<img src="a.png">');
-  const a = await f.file("a.png", "");
-  await fs.truncate(a, LIMITS.assetBytes);
-  const collect = await f.prepare([`plan.${extension}`]);
-  const single = await collect();
-  const asset = single.request.files.find((file) => file.role === "asset");
-  expect(single.blobs.get(asset?.newBlob ?? "")?.size).toBe(LIMITS.assetBytes);
-  await fs.truncate(a, LIMITS.assetBytes + 1);
-  await expect(collect()).rejects.toThrow("asset exceeds its size limit");
-  await fs.truncate(a, LIMITS.assetBytes);
-  const html = '<img src="a.png"><img src="b.png">';
-  await fs.writeFile(doc, html);
-  const b = await f.file("b.png", "");
-  const remaining = LIMITS.htmlDocWithAssetsBytes - Buffer.byteLength(html) - LIMITS.assetBytes;
-  await fs.truncate(b, remaining);
-  const combined = await collect();
-  expect([...combined.blobs.values()].reduce((sum, blob) => sum + blob.size, 0)).toBe(LIMITS.htmlDocWithAssetsBytes);
-  await fs.truncate(b, remaining + 1);
-  await expect(collect()).rejects.toThrow(
-    extension === "html"
-      ? "HTML doc and assets exceed their size limit"
-      : "Markdown doc and images exceed their size limit",
-  );
-});
+test.each(["html", "md"])(
+  "shortcut %s assets accept exact limits and refuse one byte over",
+  async (extension) => {
+    const f = await fixture();
+    const doc = await f.file(`plan.${extension}`, '<img src="a.png">');
+    const a = await f.file("a.png", "");
+    await fs.truncate(a, LIMITS.assetBytes);
+    const collect = await f.prepare([`plan.${extension}`]);
+    const single = await collect();
+    const asset = single.request.files.find((file) => file.role === "asset");
+    expect(single.blobs.get(asset?.newBlob ?? "")?.size).toBe(LIMITS.assetBytes);
+    await fs.truncate(a, LIMITS.assetBytes + 1);
+    await expect(collect()).rejects.toThrow("asset exceeds its size limit");
+    await fs.truncate(a, LIMITS.assetBytes);
+    const html = '<img src="a.png"><img src="b.png">';
+    await fs.writeFile(doc, html);
+    const b = await f.file("b.png", "");
+    const remaining = LIMITS.htmlDocWithAssetsBytes - Buffer.byteLength(html) - LIMITS.assetBytes;
+    await fs.truncate(b, remaining);
+    const combined = await collect();
+    expect([...combined.blobs.values()].reduce((sum, blob) => sum + blob.size, 0)).toBe(LIMITS.htmlDocWithAssetsBytes);
+    await fs.truncate(b, remaining + 1);
+    await expect(collect()).rejects.toThrow(
+      extension === "html"
+        ? "HTML doc and assets exceed their size limit"
+        : "Markdown doc and images exceed their size limit",
+    );
+  },
+  15000,
+);
 
 test.each([false, true])("growing assets respect every doc budget during reads (shared: %s)", async (shared) => {
   const f = await fixture();

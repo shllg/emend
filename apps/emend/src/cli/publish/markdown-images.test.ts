@@ -48,6 +48,55 @@ async function fixture(mode: "shortcut" | "manifest", sources: Record<string, st
 }
 
 test.each(["shortcut", "manifest"] as const)(
+  "%s does not create a worker executor for Markdown docs without image syntax",
+  async (mode) => {
+    const f = await fixture(
+      mode,
+      {
+        "plan.md": "# Plan\n\nPlain text and [a link](x.png).",
+        "details.md": "<p>More text</p>\n\n[ref]: x.png",
+      },
+      ["plan.md", "details.md"],
+    );
+    const factory = vi.spyOn(executors, "workerExecutor");
+    const result = await f.publish();
+    expect(factory).not.toHaveBeenCalled();
+    expect(result.request.files.map((file) => file.path).sort()).toEqual(["details.md", "plan.md"]);
+    expect(result.request.files.every((file) => file.role === "doc" && !file.assets?.length)).toBe(true);
+    expect(f.warnings).toEqual([]);
+  },
+);
+
+test.each(["shortcut", "manifest"] as const)(
+  "%s discovers and publishes inline, reference, uppercase HTML and legacy HTML images",
+  async (mode) => {
+    const docs = {
+      "inline.md": "![a](x.png)",
+      "reference.md": "![a][ref]\n\n[ref]: x.png",
+      "html.md": '<IMG src="x.png">',
+      "legacy-html.md": '<image src="x.png">',
+    };
+    const f = await fixture(mode, { ...docs, "x.png": "synthetic image" }, Object.keys(docs));
+    const real = executors.workerExecutor();
+    const close = vi.spyOn(real, "close");
+    const execute = Object.assign(vi.fn(real), { close });
+    const factory = vi.spyOn(executors, "workerExecutor").mockReturnValue(execute);
+    const result = await f.publish();
+    expect(factory).toHaveBeenCalledOnce();
+    expect(execute).toHaveBeenCalledTimes(Object.keys(docs).length);
+    for (const [path, text] of Object.entries(docs)) {
+      expect(execute).toHaveBeenCalledWith({ kind: "doc-images", bytes: new TextEncoder().encode(text).buffer });
+      expect(result.request.files.find((file) => file.path === path)?.assets).toEqual(["x.png"]);
+    }
+    const assets = result.request.files.filter((file) => file.role === "asset");
+    expect(assets).toMatchObject([{ path: "x.png" }]);
+    expect(await result.blobs.get(assets[0]?.newBlob ?? "")?.read()).toEqual(Buffer.from("synthetic image"));
+    expect(close).toHaveBeenCalledOnce();
+    expect(f.warnings).toEqual([]);
+  },
+);
+
+test.each(["shortcut", "manifest"] as const)(
   "%s isolates a failing image discovery and continues with the next doc",
   async (mode) => {
     const f = await fixture(mode, {
