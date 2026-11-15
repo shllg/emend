@@ -13,6 +13,7 @@ import { type Ref, useEffect, useState } from "react";
 import { plural } from "../../lib/count.ts";
 import { reviewLineTotals } from "../../lib/diff-totals.ts";
 import { sharedDiffFolder } from "../../lib/writeup-area.ts";
+import { usesOpeningCard } from "../../lib/writeup-facts.ts";
 import { LineTotals } from "../diff/LineTotals.tsx";
 import type { DiffCounts } from "../diff/presentation.ts";
 import { AgentStatus, agentStatusOf } from "../status/AgentStatus.tsx";
@@ -96,9 +97,10 @@ export function ReviewHeader({
       .filter(Boolean)
       .join(" → ");
   const safe = safeLinks(revision?.links);
-  const links = safe.filter((link) => link.kind !== "pr" && link.kind !== "issue");
-  const related = safe.filter((link) => link.kind === "pr" || link.kind === "issue");
-  const area = revision?.writeup.area ?? (revision ? sharedDiffFolder(revision.files) : undefined);
+  const openingCard = revision !== undefined && usesOpeningCard(revision.writeup);
+  const links = openingCard ? safe.filter((link) => link.kind !== "pr" && link.kind !== "issue") : safe;
+  const related = openingCard ? safe.filter((link) => link.kind === "pr" || link.kind === "issue") : [];
+  const area = openingCard ? (revision.writeup.area ?? sharedDiffFolder(revision.files)) : undefined;
   const breadcrumb = [review.project, area].filter((item): item is string => item != null);
   const total = revision ? reviewLineTotals(revision, counts) : null;
   const metaItem = "inline-flex min-w-0 items-center gap-[5px] wrap-anywhere";
@@ -109,7 +111,7 @@ export function ReviewHeader({
         phone ? "px-4 py-3" : "px-5 pt-3 pb-2.5",
       )}
     >
-      {(breadcrumb.length > 0 || related.length > 0) && (
+      {openingCard && (breadcrumb.length > 0 || related.length > 0) && (
         <nav aria-label="Breadcrumb" className="text-fg-3 [font:var(--type-meta)]">
           <ol className="m-0 flex min-w-0 list-none flex-wrap items-center gap-1.5 p-0">
             {breadcrumb.map((item, index) => (
@@ -196,6 +198,16 @@ export function ReviewHeader({
           <OriginBadge origin={review.origin} dot className="size-[7px] opacity-85" />
           {review.origin.name}
         </span>
+        {!openingCard && review.project !== null && (
+          <>
+            <span aria-hidden="true" className="text-line-strong">
+              ·
+            </span>
+            <span dir="auto" className="min-w-0 wrap-anywhere">
+              {review.project}
+            </span>
+          </>
+        )}
         {review.state !== "open" && (
           <>
             <span aria-hidden="true" className="text-line-strong">

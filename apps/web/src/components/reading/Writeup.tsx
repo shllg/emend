@@ -2,7 +2,7 @@ import type { RenderedWriteup, RevisionView } from "@emend/contract";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { plural } from "../../lib/count.ts";
 import { rankedTopics } from "../../lib/topics.ts";
-import { readFact, riskFact, sinceFact, undoFact } from "../../lib/writeup-facts.ts";
+import { readFact, riskFact, sinceFact, undoFact, usesOpeningCard } from "../../lib/writeup-facts.ts";
 import type { ReviewSearch } from "../../router.tsx";
 import { BlockReader, type ReaderGroup, type ReaderProps } from "./BlockReader.tsx";
 import { GlossaryTerms } from "./GlossaryTerms.tsx";
@@ -74,7 +74,7 @@ export function Writeup({
       if (slug) commentCounts.set(slug, (commentCounts.get(slug) ?? 0) + 1);
     }
     const groups: ReaderGroup[] = [];
-    const newLayout = writeup.area !== undefined || writeup.sections.some((section) => section.key === "whyItMatters");
+    const newLayout = usesOpeningCard({ sections: writeup.sections, area: writeup.area });
     if (newLayout) {
       const tldr = writeup.sections.find((section) => section.key === "tldr");
       const matters = writeup.sections.find((section) => section.key === "whyItMatters");
@@ -115,7 +115,22 @@ export function Writeup({
         ],
       ] as const;
       for (const [key, label, content] of computed) {
-        if (content !== undefined) facts.push({ key, label, content });
+        if (content !== undefined)
+          facts.push({
+            key,
+            label,
+            content:
+              typeof content === "string"
+                ? content
+                : content.map((part, index) =>
+                    part.agent ? (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: fact parts are text, rebuilt together in order.
+                      <bdi key={index}>{part.text}</bdi>
+                    ) : (
+                      part.text
+                    ),
+                  ),
+          });
       }
       if (facts.length) groups.push({ key: "facts", heading: "Facts", presentation: "facts", blocks: [], facts });
     }

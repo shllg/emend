@@ -3,7 +3,13 @@ import { WRITEUP_SECTION_NAMES } from "../components/diff/targets.ts";
 import { plural } from "./count.ts";
 import { rankedTopics } from "./topics.ts";
 
-export function riskFact(topics: TopicMeta[]): string | undefined {
+export function usesOpeningCard(writeup: RenderedWriteup): boolean {
+  return writeup.area !== undefined || writeup.sections.some((section) => section.key === "whyItMatters");
+}
+
+export type FactPart = { text: string; agent?: true };
+
+export function riskFact(topics: TopicMeta[]): FactPart[] | undefined {
   for (const [attention, label] of [
     ["critical", "High"],
     ["review", "Medium"],
@@ -11,35 +17,53 @@ export function riskFact(topics: TopicMeta[]): string | undefined {
   ] as const) {
     const matching = topics.filter((topic) => topic.attention === attention);
     if (!matching.length) continue;
-    const titles = matching
-      .slice(0, 3)
-      .map((topic) => topic.title)
-      .join(", ");
-    return `${label}: ${titles}${matching.length > 3 ? ` and ${matching.length - 3} more` : ""}`;
+    const parts: FactPart[] = [{ text: `${label}: ` }];
+    for (const [index, topic] of matching.slice(0, 3).entries()) {
+      if (index) parts.push({ text: ", " });
+      parts.push({ text: topic.title, agent: true });
+    }
+    if (matching.length > 3) parts.push({ text: ` and ${matching.length - 3} more` });
+    return parts;
   }
 }
 
-export function undoFact(writeup: RenderedWriteup, topics: TopicMeta[]): string | undefined {
+function undoText(text: string): string | undefined {
+  const normalized = text.replace(/\s+/gu, " ").trim();
+  for (let index = normalized.indexOf("Undo:"); index !== -1; index = normalized.indexOf("Undo:", index + 5)) {
+    if (index === 0 || (index >= 2 && normalized[index - 1] === " " && ".!?:".includes(normalized[index - 2] ?? ""))) {
+      return normalized.slice(index + 5).trim() || undefined;
+    }
+  }
+}
+
+function capUndo(text: string): string {
+  if (text.length <= 300) return text;
+  let end = 299;
+  const last = text.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end--;
+  return `${text.slice(0, end)}…`;
+}
+
+export function undoFact(writeup: RenderedWriteup, topics: TopicMeta[]): FactPart[] | undefined {
   const ranked = rankedTopics(topics);
   if (!ranked.length) return;
-  let hardest = { level: 0, text: "A revert" };
+  let hardest: { level: number; parts: FactPart[] } = { level: 0, parts: [{ text: "A revert" }] };
   for (const { topic } of ranked) {
     const blocks = writeup.sections.find((section) => section.key === `t-${topic.slug}-why`)?.blocks ?? [];
     let undo: string | undefined;
     for (const block of blocks.toReversed()) {
-      const match = /(?:^|[.!?:]\s+)Undo:\s*(\S.*)$/u.exec(block.text.trim());
-      if (match) {
-        undo = match[1];
-        break;
-      }
+      undo = undoText(block.text);
+      if (undo) break;
     }
     const level = undo ? (/cannot be undone/i.test(undo) ? 2 : 1) : topic.door === "one-way" ? 1 : 0;
     if (level > hardest.level) {
       const text = (undo || "A revert is not enough").replace(/\.$/u, "");
-      hardest = { level, text: text === "A revert" ? text : `${text} (${topic.title})` };
+      const parts: FactPart[] = [undo ? { text: capUndo(text), agent: true } : { text }];
+      if (text !== "A revert") parts.push({ text: " (" }, { text: topic.title, agent: true }, { text: ")" });
+      hardest = { level, parts };
     }
   }
-  return hardest.text;
+  return hardest.parts;
 }
 
 function minutesText(minutes: number): string {
@@ -55,34 +79,33 @@ export function readFact(
   files: RevisionView["files"],
 ): string | undefined {
   const words = (text: string) => text.match(/\S+/gu)?.length ?? 0;
+  const docWords = docs.reduce((sum, doc) => {
+    if (doc.kind === "markdown") return sum + doc.blocks.reduce((sum, block) => sum + words(block.text), 0);
+    if (doc.kind === "source")
+      return sum + doc.lines.reduce((sum, line) => sum + words(line.map((token) => token.text).join("")), 0);
+    return sum;
+  }, 0);
   const wordCount =
     writeup.sections.reduce(
       (sum, section) => sum + section.blocks.reduce((sum, block) => sum + words(block.text), 0),
       0,
-    ) +
-    docs.reduce(
-      (sum, doc) => sum + (doc.kind === "markdown" ? doc.blocks.reduce((sum, block) => sum + words(block.text), 0) : 0),
-      0,
-    );
+    ) + docWords;
   const lines = files.reduce(
     (sum, file) => sum + (file.role === "diff" && file.counts ? file.counts.additions + file.counts.deletions : 0),
     0,
   );
   if (!wordCount && !lines) return;
+  const skipped = docs.some((doc) => doc.kind === "html") ? "; HTML docs not counted" : "";
   // Eight changed lines a minute is the common ceiling of about 500 lines an hour for careful review.
   const rawMinutes = wordCount / 200 + lines / 8;
-  if (rawMinutes < 1) return "Under 1 min";
+  if (rawMinutes < 1) return `Under 1 min${skipped}`;
   const proseMinutes = Math.ceil(wordCount / 200);
   const diffMinutes = Math.ceil(lines / 8);
   const parts = [
-    ...(wordCount ? [`writeup and docs ${minutesText(proseMinutes)}`] : []),
+    ...(wordCount ? [`${docWords ? "writeup and docs" : "writeup"} ${minutesText(proseMinutes)}`] : []),
     ...(lines ? [`diff ${minutesText(diffMinutes)} (${lines} ${plural(lines, "line")})`] : []),
   ];
-  return `About ${minutesText(proseMinutes + diffMinutes)}: ${parts.join(", ")}`;
-}
-
-function joinNames(names: string[]): string {
-  return names.length < 2 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  return `About ${minutesText(proseMinutes + diffMinutes)}: ${parts.join(", ")}${skipped}`;
 }
 
 export function sinceFact({
@@ -101,28 +124,45 @@ export function sinceFact({
   revision: number;
   changedSince?: number;
   changedBlocks: RevisionView["changedBlocks"];
-}): string | undefined {
+}): FactPart[] | undefined {
   if (revision < 2 || changedSince === undefined || revision <= changedSince) return;
   const changed = new Set(changedBlocks.map((block) => block.blockId));
   const titles = new Map(topics.map((topic) => [topic.slug, topic.title]));
   const seenTopics = new Set<string>();
-  const names: string[] = [];
+  const names: FactPart[][] = [];
   for (const section of writeup.sections) {
     if (!section.blocks.some((block) => changed.has(block.id))) continue;
     if (section.topic) {
-      if (!seenTopics.has(section.topic)) names.push(`topic “${titles.get(section.topic) ?? section.topic}”`);
+      if (!seenTopics.has(section.topic))
+        names.push([
+          { text: "topic “" },
+          { text: titles.get(section.topic) ?? section.topic, agent: true },
+          { text: "”" },
+        ]);
       seenTopics.add(section.topic);
     } else {
       const name = WRITEUP_SECTION_NAMES[section.key as keyof typeof WRITEUP_SECTION_NAMES];
-      if (name) names.push(name);
+      if (name) names.push([{ text: name }]);
     }
   }
   for (const doc of docs) {
-    if (doc.kind === "markdown" && doc.blocks.some((block) => changed.has(block.id))) names.push(doc.title || doc.path);
+    if (doc.kind === "markdown" && doc.blocks.some((block) => changed.has(block.id)))
+      names.push([{ text: doc.path, agent: true }]);
   }
   const stale = files.filter((file) => file.viewed === "stale").length;
-  if (stale) names.push(`${stale} ${plural(stale, "file")} you viewed`);
-  return names.length
-    ? `Since revision ${changedSince}: ${joinNames(names)} changed.`
-    : `Since revision ${changedSince}, nothing in the writeup, the docs or the files you viewed changed.`;
+  if (!names.length && !stale) return;
+  const parts: FactPart[] = [{ text: `Since revision ${changedSince}: ` }];
+  if (names.length) {
+    parts.push({ text: "new or changed text in " });
+    for (const [index, name] of names.entries()) {
+      if (index) parts.push({ text: index === names.length - 1 ? " and " : ", " });
+      parts.push(...name);
+    }
+  }
+  if (stale) {
+    if (names.length) parts.push({ text: "; " });
+    parts.push({ text: `${stale} ${plural(stale, "file")} you viewed changed` });
+  }
+  parts.push({ text: "." });
+  return parts;
 }

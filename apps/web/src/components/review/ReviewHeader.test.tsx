@@ -418,40 +418,32 @@ test("a hostile title stays plain text in the phone heading and popover", async 
 });
 
 test.each(["Orchard", "<img src=x onerror=alert(1)>"])(
-  "header project %s is isolated text in the breadcrumb instead of the meta line",
+  "header project %s is isolated text after the machine",
   (project) => {
-    mount({ metadata: { ...review, project } });
-    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
-    const label = within(breadcrumb).getByText(project);
+    const { container } = mount({ metadata: { ...review, project } });
+    const label = screen.getByText(project);
     expect(label.getAttribute("dir")).toBe("auto");
     expect(label.classList.contains("wrap-anywhere")).toBe(true);
-    expect(within(breadcrumb).getAllByRole("listitem")).toHaveLength(1);
-    expect(screen.getByText("Workshop").parentElement?.contains(label)).toBe(false);
-    expect(document.querySelector("img")).toBeNull();
+    expect(label.previousElementSibling?.textContent).toBe("·");
+    expect(label.previousElementSibling?.getAttribute("aria-hidden")).toBe("true");
+    expect(label.previousElementSibling?.previousElementSibling).toBe(screen.getByText("Workshop"));
+    expect(container.querySelector("img")).toBeNull();
   },
 );
 
-test("a null project adds no breadcrumb item and does not change the meta line", () => {
+test("a null project adds no metadata or separator after the machine", () => {
   mount({ metadata: { ...review, project: null } });
-  expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull();
   const meta = screen.getByText("Workshop").parentElement;
   expect(meta?.querySelector('[dir="auto"]')).toBeNull();
   const count = meta?.children.length;
   cleanup();
   mount({ metadata: { ...review, project: "Orchard" } });
-  expect(screen.getByText("Workshop").parentElement?.children.length).toBe(count);
-  const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
-  expect(
-    within(breadcrumb)
-      .getAllByRole("listitem")
-      .map((item) => item.textContent),
-  ).toEqual(["Orchard"]);
+  expect(screen.getByText("Workshop").parentElement?.children.length).toBe((count ?? 0) + 2);
 });
 
 test("links show as chips that open in a new tab, and nothing shows without links", () => {
   const { unmount } = mount();
   expect(screen.queryByRole("list", { name: "Links" })).toBeNull();
-  expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull();
   unmount();
   mount({
     loaded: {
@@ -464,15 +456,11 @@ test("links show as chips that open in a new tab, and nothing shows without link
     },
   });
   const list = screen.getByRole("list", { name: "Links" });
-  const related = within(screen.getByRole("navigation", { name: "Breadcrumb" })).getAllByRole("link");
-  const other = within(list).getAllByRole("link");
-  expect(related.map((anchor) => anchor.querySelector("span")?.textContent)).toEqual(["PR 9", "Issue 3"]);
-  expect(other.map((anchor) => anchor.querySelector("span")?.textContent)).toEqual(["Design doc"]);
-  const anchors = [...related, ...other];
+  const anchors = within(list).getAllByRole("link");
+  expect(anchors.map((anchor) => anchor.querySelector("span")?.textContent)).toEqual(["PR 9", "Issue 3", "Design doc"]);
   for (const anchor of anchors) {
     expect(anchor.getAttribute("target")).toBe("_blank");
     expect(anchor.getAttribute("rel")).toBe("noopener noreferrer nofollow");
-    expect(anchor.querySelectorAll("span")[1]?.textContent).toBe(new URL(anchor.getAttribute("href") ?? "").host);
   }
 });
 
@@ -486,18 +474,12 @@ test("a chip shows the link's real host beside the agent's label, punycode for a
       ],
     },
   });
-  const anchors = within(screen.getByRole("navigation", { name: "Breadcrumb" })).getAllByRole("link");
-  const [real, fake] = anchors;
-  expect(screen.queryByRole("list", { name: "Links" })).toBeNull();
+  const [real, fake] = within(screen.getByRole("list", { name: "Links" })).getAllByRole("link");
   expect(real?.textContent).toContain("github.com");
   expect(real?.getAttribute("title")).toBe("https://github.com/o/r/pull/7");
   expect(fake?.textContent).toContain("xn--");
   expect(fake?.textContent).not.toContain("github.com");
   expect(fake?.getAttribute("title")).toContain("xn--");
-  for (const anchor of anchors) {
-    expect(anchor.getAttribute("target")).toBe("_blank");
-    expect(anchor.getAttribute("rel")).toBe("noopener noreferrer nofollow");
-  }
 });
 
 test("two links that share a URL both show", () => {
@@ -511,16 +493,11 @@ test("two links that share a URL both show", () => {
       ],
     },
   });
-  const related = within(screen.getByRole("navigation", { name: "Breadcrumb" })).getAllByRole("link");
-  const other = within(screen.getByRole("list", { name: "Links" })).getAllByRole("link");
-  expect(related.map((anchor) => anchor.querySelector("span")?.textContent)).toEqual(["PR 9"]);
-  expect(other.map((anchor) => anchor.querySelector("span")?.textContent)).toEqual(["Same PR"]);
-  for (const anchor of [...related, ...other]) {
-    expect(anchor.getAttribute("href")).toBe(url);
-    expect(anchor.getAttribute("target")).toBe("_blank");
-    expect(anchor.getAttribute("rel")).toBe("noopener noreferrer nofollow");
-    expect(anchor.querySelectorAll("span")[1]?.textContent).toBe("github.com");
-  }
+  expect(
+    within(screen.getByRole("list", { name: "Links" }))
+      .getAllByRole("link")
+      .map((anchor) => anchor.querySelector("span")?.textContent),
+  ).toEqual(["PR 9", "Same PR"]);
 });
 
 test("the header drops any link that is not plain https", () => {
@@ -824,6 +801,7 @@ test("the breadcrumb derives the deepest folder from the shown revision's diff f
   mount({
     loaded: {
       ...revision,
+      writeup: { sections: [{ key: "whyItMatters", label: "Why it matters", topic: null, blocks: [] }] },
       files: [
         { ...countedFile, path: "src/cli/run.ts" },
         { ...countedFile, path: "src/cli/commands/serve.ts" },
@@ -837,6 +815,7 @@ test("a root diff file leaves no derived area or empty breadcrumb", () => {
   mount({
     loaded: {
       ...revision,
+      writeup: { sections: [{ key: "whyItMatters", label: "Why it matters", topic: null, blocks: [] }] },
       files: [
         { ...countedFile, path: "README.md" },
         { ...countedFile, path: "src/cli/run.ts" },
@@ -846,15 +825,19 @@ test("a root diff file leaves no derived area or empty breadcrumb", () => {
   expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull();
 });
 
-test("a pub without diff files shows its project", () => {
+test("a pub without writeup fields keeps its project in the meta line", () => {
   mount({ metadata: { ...review, kind: "publish", project: "Garden guide" } });
-  expect(screen.getByRole("navigation", { name: "Breadcrumb" }).textContent).toBe("Garden guide");
+  expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull();
+  const project = screen.getByText("Garden guide");
+  expect(screen.getByText("Workshop").parentElement?.contains(project)).toBe(true);
+  expect(project.previousElementSibling?.textContent).toBe("·");
 });
 
 test("PR and issue chips move to Breadcrumb while other links stay in Links", () => {
   mount({
     loaded: {
       ...revision,
+      writeup: { sections: [{ key: "whyItMatters", label: "Why it matters", topic: null, blocks: [] }] },
       links: [
         { kind: "pr", label: "PR #7", url: "https://github.com/example/garden/pull/7" },
         { kind: "issue", label: "Issue #3", url: "https://github.com/example/garden/issues/3" },
@@ -885,4 +868,65 @@ test.each(["<img src=x onerror=alert(1)>", "x".repeat(1000)])("area is literal w
   expect(nav.textContent).toBe(area);
   expect(nav.querySelectorAll("img, script")).toHaveLength(0);
   expect(within(nav).getByText(area).classList.contains("wrap-anywhere")).toBe(true);
+});
+
+test.each(["Orchard", "<img src=x onerror=alert(1)>"])(
+  "opening-card header project %s is isolated in the breadcrumb instead of the meta line",
+  (project) => {
+    mount({
+      metadata: { ...review, project },
+      loaded: {
+        ...revision,
+        writeup: { sections: [{ key: "whyItMatters", label: "Why it matters", topic: null, blocks: [] }] },
+      },
+    });
+    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    const label = within(breadcrumb).getByText(project);
+    expect(label.getAttribute("dir")).toBe("auto");
+    expect(label.classList.contains("wrap-anywhere")).toBe(true);
+    expect(within(breadcrumb).getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByText("Workshop").parentElement?.contains(label)).toBe(false);
+    expect(document.querySelector("img")).toBeNull();
+  },
+);
+
+test.each([false, true])("the shown revision controls header layout, including before load (phone %s)", (phone) => {
+  const legacy: RevisionView = {
+    ...revision,
+    seq: 1,
+    files: [{ ...countedFile, path: "src/cli/run.ts" }],
+    links: [{ kind: "pr", label: "PR #7", url: "https://github.com/example/garden/pull/7" }],
+  };
+  const header = (shown?: RevisionView) => (
+    <ReviewHeader
+      review={{ ...review, project: "Garden" }}
+      revision={shown}
+      counts={new Map()}
+      seq={shown?.seq ?? 1}
+      ready={2}
+      phone={phone}
+      titleRef={null}
+      onRevisionChange={vi.fn()}
+    />
+  );
+  const expectLegacy = () => {
+    expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull();
+    expect(screen.getByText("Workshop").parentElement?.contains(screen.getByText("Garden"))).toBe(true);
+    expect(screen.queryByText("src/cli")).toBeNull();
+  };
+  const { rerender } = render(header());
+  expectLegacy();
+  rerender(header(legacy));
+  expectLegacy();
+  expect(within(screen.getByRole("list", { name: "Links" })).getByRole("link", { name: /PR #7/ })).toBeTruthy();
+  rerender(header({ ...legacy, seq: 2, writeup: { ...legacy.writeup, area: "Requests" } }));
+  const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+  expect(within(breadcrumb).getByText("Garden")).toBeTruthy();
+  expect(within(breadcrumb).getByText("Requests")).toBeTruthy();
+  expect(within(breadcrumb).getByRole("link", { name: /PR #7/ })).toBeTruthy();
+  expect(screen.getByText("Workshop").parentElement?.contains(screen.getByText("Garden"))).toBe(false);
+  expect(screen.queryByRole("list", { name: "Links" })).toBeNull();
+  rerender(header(legacy));
+  expectLegacy();
+  expect(within(screen.getByRole("list", { name: "Links" })).getByRole("link", { name: /PR #7/ })).toBeTruthy();
 });

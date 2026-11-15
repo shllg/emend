@@ -1049,8 +1049,9 @@ test("a fact block keeps its writeup-span target, change marker and Facts outlin
   expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body).target).toEqual(target);
 });
 
-test("computed fact strings remain literal text even when titles, undo text and doc titles are hostile", () => {
+test("computed facts isolate literal titles, undo text and doc paths even when hostile", () => {
   const hostile = "<img src=x onerror=alert(1)>";
+  const path = `docs/${hostile}.md`;
   const why: RenderedBlock = {
     ...block,
     id: "t-seed-why-12345678",
@@ -1070,7 +1071,7 @@ test("computed fact strings remain literal text even when titles, undo text and 
       topics={[{ ...topic, title: hostile, attention: "critical" }]}
       docs={[
         {
-          path: "docs/design.md",
+          path,
           title: hostile,
           kind: "markdown",
           blocks: [{ ...block, id: "doc-12345678-12345678", section: "doc-12345678" }],
@@ -1084,8 +1085,66 @@ test("computed fact strings remain literal text even when titles, undo text and 
   expect(facts?.querySelector('[data-fact="risk"] dd')?.textContent).toBe(`High: ${hostile}`);
   expect(facts?.querySelector('[data-fact="undo"] dd')?.textContent).toBe(`${hostile} (${hostile})`);
   expect(facts?.querySelector('[data-fact="since"] dd')?.textContent).toBe(
-    `Since revision 2: topic “${hostile}” and ${hostile} changed.`,
+    `Since revision 2: new or changed text in topic “${hostile}” and ${path}.`,
   );
+  expect([...(facts?.querySelectorAll("bdi") ?? [])].map((part) => part.textContent)).toEqual([
+    hostile,
+    hostile,
+    hostile,
+    hostile,
+    path,
+  ]);
+});
+
+test("bidi topic titles and undo text cannot consume emend's own fact punctuation", () => {
+  const title = "Seed \u202egarden";
+  const undo = "Restore \u202estate";
+  const why = { ...block, id: "t-seed-why-12345678", section: "t-seed-why" as const, text: `Undo: ${undo}` };
+  const { container } = mount(
+    <Writeup
+      {...props}
+      revision={3}
+      changedSince={2}
+      changedBlocks={[{ blockId: why.id, revision: 3 }]}
+      topics={[
+        { ...topic, title, attention: "critical" },
+        { ...second, attention: "critical" },
+      ]}
+      writeup={{ area: "Garden", sections: [{ ...section("seed", "why"), blocks: [why] }] }}
+    />,
+  );
+  for (const [key, expected, following] of [
+    ["risk", [title, second.title], [", ", undefined]],
+    ["undo", [undo, title], [" (", ")"]],
+    ["since", [title], ["”"]],
+  ] as const) {
+    const fact = container.querySelector(`[data-fact="${key}"] dd`);
+    const parts = [...(fact?.querySelectorAll("bdi") ?? [])];
+    expect(parts.map((part) => part.textContent)).toEqual(expected);
+    for (const [index, part] of parts.entries()) {
+      expect(part.parentElement).toBe(fact);
+      expect(part.nextSibling?.textContent).toBe(following[index]);
+      if (part.nextSibling) expect(part.nextSibling.nodeType).toBe(Node.TEXT_NODE);
+    }
+  }
+});
+
+test("a revision that only removed a paragraph has no Since fact", async () => {
+  const input = { area: "Garden", overview: "", decisions: "", topics: {} };
+  const before = RenderedWriteup.parse(await renderWriteup({ ...input, tldr: "Keep the soil.\n\nWater daily." }, []));
+  const after = RenderedWriteup.parse(await renderWriteup({ ...input, tldr: "Keep the soil." }, []));
+  const previous = new Set(before.sections.flatMap((section) => section.blocks.map((block) => block.id)));
+  const changedBlocks = after.sections.flatMap((section) =>
+    section.blocks.filter((block) => !previous.has(block.id)).map((block) => ({ blockId: block.id, revision: 3 })),
+  );
+  expect(before.sections[0]?.blocks).toHaveLength(2);
+  expect(after.sections[0]?.blocks).toHaveLength(1);
+  expect(changedBlocks).toEqual([]);
+  const { container } = mount(
+    <Writeup {...props} revision={3} changedSince={2} changedBlocks={changedBlocks} writeup={after} />,
+  );
+  expect(container.querySelector('[data-fact="read"]')).not.toBeNull();
+  expect(container.querySelector('[data-fact="since"]')).toBeNull();
 });
 
 test("comments on both paired overview blocks share a usable gutter chip when their first lines align", () => {
