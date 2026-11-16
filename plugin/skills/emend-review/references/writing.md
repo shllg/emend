@@ -32,7 +32,11 @@ Checked and Not checked are the exception. They are never empty.
 
 A review topic's `why` explains what the area does, the problem and the fix.
 Its `example` shows a concrete before/after case.
-Keep examples grounded in the actual change.
+Give every topic above Low risk (`skim`) an Example of at most six lines.
+Use real input and real output from the change.
+Write a before/after case in one paragraph, with lines starting `Before:` and `After:`.
+emend shows those lines as aligned rows.
+For two or more cases, you can use a table: `Input | Before | After`.
 A document that explains a change or a proposal gives the same why and a grounded example.
 
 ## Review verdict and risk
@@ -157,13 +161,18 @@ A document keeps its glossary as a list under a "Glossary" heading, one term per
 ## Screenshots
 
 A review writeup or a document can show images, such as before and after screenshots of a UI change.
+A change the user can see needs Before and After screenshots at the same viewport.
+Capture them with a headless browser.
+Each project picks its own capture tool.
+If you cannot capture one, say why under Where to look (`whereToLook`).
 
 In a review writeup:
 
 - List each image under `media`, as [the manifest reference](manifest.md) says.
 - Reference it from any writeup section with `![Alt](path)`. The alt text becomes the caption.
-- Put a before and an after image in one paragraph, with alt text "Before" and "After", to show them
-  side by side.
+- Put the pair in one paragraph: `![Before](media/before.png) ![After](media/after.png)`.
+  On the next line of that paragraph, state the effect in one line.
+  emend shows Before, After and Side by side controls, with the effect line underneath.
 - Only listed paths render. Any other image reference in the writeup is dropped.
 - Remote image URLs do not show. List the file under `media` instead.
 
