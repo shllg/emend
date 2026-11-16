@@ -1,10 +1,12 @@
 import type { ShortcutCommand } from "@emend/contract";
 import * as Primitive from "@radix-ui/react-dialog";
+import { X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { fuzzyMatch } from "../lib/fuzzy-match.ts";
 import { hasOpenOverlay, keyLabel, shortcutGroups, shortcutLabels } from "../lib/shortcuts.ts";
 import { useShortcut, useShortcutKeys, useShortcutRunner } from "../lib/use-shortcut.tsx";
 import { useVisualViewportInset } from "../lib/visual-viewport.ts";
+import { IconButton } from "./ui/IconButton.tsx";
 import { Kbd } from "./ui/Kbd.tsx";
 import { isToastInteraction, overlayClass } from "./ui/overlay.ts";
 import { cn } from "./ui/utils.ts";
@@ -159,7 +161,18 @@ export function CommandPalette() {
               }}
               className="min-w-0 flex-1 border-0 bg-transparent font-sans text-14 text-fg-1 outline-none placeholder:text-fg-3"
             />
-            <Kbd aria-hidden="true">Esc</Kbd>
+            <Kbd aria-hidden="true" className="[@media(pointer:coarse)]:hidden">
+              Esc
+            </Kbd>
+            <Primitive.Close asChild>
+              <IconButton
+                label="Close"
+                icon={X}
+                size="lg"
+                tooltip={false}
+                className="hidden [@media(pointer:coarse)]:inline-grid"
+              />
+            </Primitive.Close>
           </div>
           <div ref={listbox} id={listId} role="listbox" aria-label="Commands" className="min-h-0 overflow-y-auto p-1">
             {groups.map((group) => (

@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { type ComponentProps, type CSSProperties, type ReactNode, type RefObject, useRef } from "react";
 import { useAppUpdate } from "../../lib/app-update.ts";
-import { useLayout, useMedia } from "../../lib/layout.ts";
+import { useLayout } from "../../lib/layout.ts";
 import { layoutStore, readingMeasure, useLayoutPreferences } from "../../lib/layout-store.ts";
 import { requestPairingFromLink } from "../../lib/pairing-intent.ts";
 import { useRefresh } from "../../lib/refresh.ts";
@@ -57,7 +57,6 @@ function AppFrameContent({
   menuTriggerRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const layout = useLayout();
-  const wideBar = useMedia("(min-width: 1024px)");
   const runShortcut = useRunShortcut();
   const preferences = useLayoutPreferences();
   const router = useRouter();
@@ -199,9 +198,7 @@ function AppFrameContent({
             emend
           </Link>
         )}
-        {layout !== "phone" && wideBar && (
-          <PaletteButton variant="field" className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
-        )}
+        {layout !== "phone" && <PaletteButton />}
         {layout === "phone" ? (
           <Menu
             label="More"
@@ -212,7 +209,6 @@ function AppFrameContent({
           />
         ) : (
           <div className="flex items-center">
-            {!wideBar && <PaletteButton variant="icon" />}
             <IconButton
               label="Refresh"
               icon={RefreshCw}

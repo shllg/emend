@@ -82,20 +82,40 @@ let settings: SettingsView;
 let revision: RevisionView;
 let inbox: InboxItem[];
 let width: number;
+const mediaQueries = new Set<{ media: string; matches: boolean; events: EventTarget }>();
+function matchesWidth(query: string) {
+  const constraints = [...query.matchAll(/\((min|max)-width:\s*(\d+)px\)/g)];
+  if (!constraints.length) throw new Error(`Unsupported media query: ${query}`);
+  return constraints.every(([, bound, pixels]) =>
+    bound === "min" ? width >= Number(pixels) : width <= Number(pixels),
+  );
+}
+function resize(widthPx: number) {
+  width = widthPx;
+  for (const media of mediaQueries) {
+    const matches = matchesWidth(media.media);
+    if (matches === media.matches) continue;
+    media.matches = matches;
+    media.events.dispatchEvent(Object.assign(new Event("change"), { matches, media: media.media }));
+  }
+}
 let fetcher: ReturnType<typeof vi.fn<(path: string, init?: RequestInit) => Promise<Response>>>;
 beforeEach(() => {
   width = 1280;
+  mediaQueries.clear();
   localStorage.clear();
   layoutStore.update(defaultLayout);
   settings = defaultSettings();
   revision = structuredClone(initialRevision);
   inbox = structuredClone(items);
-  vi.stubGlobal("matchMedia", (query: string) => ({
-    matches: width >= Number(query.match(/\d+/)?.[0]),
-    media: query,
-    addEventListener() {},
-    removeEventListener() {},
-  }));
+  vi.stubGlobal("matchMedia", (query: string) => {
+    const media = { matches: matchesWidth(query), media: query, events: new EventTarget() };
+    mediaQueries.add(media);
+    return Object.assign(media, {
+      addEventListener: media.events.addEventListener.bind(media.events),
+      removeEventListener: media.events.removeEventListener.bind(media.events),
+    });
+  });
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     return this.classList.contains("em-diff-pane") ? new DOMRect(0, 0, 900, 600) : new DOMRect();
   });
@@ -189,7 +209,7 @@ test.each(["/", `/r/${ids[0]}`, "/settings", "/devices"])(
     const button = screen.getByRole("button", { name: "Search commands" });
     expect(button.tagName).toBe("BUTTON");
     expect(button.getAttribute("type")).toBe("button");
-    expect(button.hasAttribute("aria-label")).toBe(false);
+    expect(button.getAttribute("aria-label")).toBe("Search commands");
     expect(button.getAttribute("aria-haspopup")).toBe("dialog");
     expect(button.getAttribute("aria-keyshortcuts")).toBe("Control+Shift+P");
     expect(caps(button)).toEqual(["Ctrl", "Shift", "P"]);
@@ -277,6 +297,27 @@ test("the narrow top bar opens the palette from an icon before Refresh and resto
   await waitFor(() => expect(document.activeElement).toBe(button));
 });
 
+test.each([
+  [1280, 900],
+  [900, 1280],
+])("the palette keeps its opener and restores focus after resizing from %s to %s", async (from, to) => {
+  width = from;
+  vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
+  mount();
+  await ready();
+  const button = screen.getByRole("button", { name: "Search commands" });
+  fireEvent.click(button);
+  const dialog = await screen.findByRole("dialog", { name: "Command palette" });
+  const input = within(dialog).getByRole("combobox", { name: "Command" });
+  act(() => resize(to));
+  expect(screen.getByLabelText("Search commands", { selector: "button" })).toBe(button);
+  expect(caps(button)).toEqual(to >= 1024 ? ["Ctrl", "Shift", "P"] : []);
+  expect(document.activeElement).toBe(input);
+  press("Escape", {}, input);
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(button));
+});
+
 test.each(["/", `/r/${ids[0]}`])("the phone More menu opens the palette on %s and regains focus", async (path) => {
   width = 390;
   mount(path);
@@ -292,6 +333,25 @@ test.each(["/", `/r/${ids[0]}`])("the phone More menu opens the palette on %s an
   expect(screen.queryByRole("menu")).toBeNull();
   expect(document.activeElement).toBe(input);
   press("Escape", {}, input);
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(more));
+});
+
+test("the phone palette Close button dismisses it and returns focus to More", async () => {
+  width = 390;
+  mount("/");
+  await screen.findByRole("link", { name: /Review 1/ });
+  const more = screen.getByRole("button", { name: "More" });
+  fireEvent.pointerDown(more, { button: 0, ctrlKey: false });
+  const menu = await screen.findByRole("menu", { name: "More" });
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "Search commands" }));
+  const dialog = await screen.findByRole("dialog", { name: "Command palette" });
+  const close = within(dialog).getByRole("button", { name: "Close" });
+  expect(close.classList.contains("hidden")).toBe(true);
+  expect(close.classList.contains("[@media(pointer:coarse)]:inline-grid")).toBe(true);
+  expect(close.classList.contains("inline-grid")).toBe(false);
+  expect(within(dialog).getByText("Esc").classList.contains("[@media(pointer:coarse)]:hidden")).toBe(true);
+  fireEvent.click(close);
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull());
   await waitFor(() => expect(document.activeElement).toBe(more));
 });
