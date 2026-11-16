@@ -308,7 +308,7 @@ test("a thread jump to the After caption switches a Before-only pair to Side by 
   };
   const view = mount([after], [{ key: "overview", blocks: [pair] }]);
   const prose = view.container.querySelector("[data-block-id]");
-  fireEvent.click(screen.getByRole("button", { name: "Before", exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Before" }));
   expect(prose?.getAttribute("data-pair-mode")).toBe("before");
   view.update([after], after.id);
   expect(within(dialog()).getByRole("article").id).toBe(`thread-${after.id}`);
