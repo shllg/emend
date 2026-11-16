@@ -65,6 +65,69 @@ test("only the reading pane uses the reading background", () => {
   expect(screen.getByTestId("diff-pane").classList.contains("bg-reading")).toBe(false);
 });
 
+test("doc headers follow the tab row height only in Split mode", () => {
+  let tabsHeight = 57;
+  vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function (this: HTMLElement) {
+    return new DOMRect(
+      0,
+      0,
+      this.classList.contains("em-panes") ? layoutWidth : width,
+      this.classList.contains("em-review-tabs") ? tabsHeight : 800,
+    );
+  });
+  const resizes: (() => void)[] = [];
+  const observed: Element[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(callback: () => void) {
+        resizes.push(callback);
+      }
+      observe(node: Element) {
+        observed.push(node);
+      }
+      disconnect() {}
+    },
+  );
+  render(
+    <Panes
+      inbox={null}
+      header={null}
+      reading="Doc"
+      diff="Code"
+      phoneTabs={null}
+      tab="docs"
+      hasDiff
+      tabs={<div className="em-review-tabs">Tabs</div>}
+    />,
+  );
+  const pane = screen.getByTestId("reading-pane");
+  const tabRow = screen.getByText("Tabs");
+  expect(tabRow.parentElement).toBe(pane);
+  expect(pane.style.getPropertyValue("--reading-tabs-height")).toBe("57px");
+  expect(observed).toContain(tabRow);
+  act(() => {
+    tabsHeight = 73;
+    resizes.forEach((resize) => {
+      resize();
+    });
+  });
+  expect(pane.style.getPropertyValue("--reading-tabs-height")).toBe("73px");
+  act(() => layoutStore.update({ pane: { desktop: "tabs", tablet: "tabs" } }));
+  expect(pane.querySelector(".em-review-tabs")).toBeNull();
+  expect(pane.style.getPropertyValue("--reading-tabs-height")).toBe("");
+});
+
+test("doc headers and scroll targets leave room for tabs inside the reading pane", () => {
+  const css = readFileSync(resolve(import.meta.dirname, "../../styles/reading.css"), "utf8");
+  expect(css).toMatch(/\.em-doc-bar\s*\{\s*top: var\(--reading-tabs-height, 0px\);/);
+  expect(css).toMatch(/\.em-doc-row\s*\{\s*scroll-margin-top: var\(--reading-tabs-height, 0px\);/);
+  expect(css).toMatch(
+    /\.em-doc-view :is\(\[id\], h1, h2, h3, h4, h5, h6\)\s*\{\s*scroll-margin-top: calc\(var\(--reading-tabs-height, 0px\) \+ var\(--doc-bar-height\)\);/,
+  );
+  expect(css).not.toContain("var(--space-10) + var(--space-px)");
+});
+
 test("inbox keyboard steps, limits and reset expose their widths", () => {
   mount();
   expect(value(inbox())).toBe(280);

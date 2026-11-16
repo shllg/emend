@@ -441,6 +441,21 @@ test.each([1280, 768])(
   },
 );
 
+test("in Split mode the doc header makes room for the real tab row, and in Tabs mode it does not", async () => {
+  layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
+  width = 1280;
+  mount("?tab=docs&doc=seed.md");
+  await screen.findByRole("heading", { name: "seed.md" });
+  const tabs = await screen.findByRole("tablist", { name: "Reading tabs" });
+  const reading = screen.getByTestId("reading-pane");
+  expect(reading.contains(tabs)).toBe(true);
+  expect(reading.style.getPropertyValue("--reading-tabs-height")).toMatch(/^\d+(\.\d+)?px$/);
+
+  act(() => layoutStore.update({ pane: { desktop: "tabs", tablet: "tabs" } }));
+  expect(reading.contains(screen.getByRole("tablist", { name: "Reading tabs" }))).toBe(false);
+  expect(reading.style.getPropertyValue("--reading-tabs-height")).toBe("");
+});
+
 test("a diff search still labels the panel with the first visible reading tab", async () => {
   layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
   mount("?tab=diff");
