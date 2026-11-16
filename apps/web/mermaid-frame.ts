@@ -263,7 +263,9 @@ export function frameConfig(dark: boolean): MermaidConfig {
 }
 async function measure(
   source: string,
-): Promise<{ nodes: number; edges: number; sets: number; areas: number; maxEdges: number } | undefined> {
+): Promise<
+  { nodes: number; edges: number; sets: number; areas: number; maxAreaSets: number; maxEdges: number } | undefined
+> {
   const { db } = await mermaid.mermaidAPI.getDiagramFromText(source);
   if ("getData" in db && typeof db.getData === "function") {
     const data: unknown = db.getData();
@@ -290,6 +292,7 @@ async function measure(
         : 0,
       sets: 0,
       areas: 0,
+      maxAreaSets: 0,
       maxEdges: slowLayout ? MAX_EDGES_SLOW_LAYOUT : MAX_EDGES,
     };
   }
@@ -302,6 +305,7 @@ async function measure(
       edges: Array.isArray(edges) ? edges.length : 0,
       sets: 0,
       areas: 0,
+      maxAreaSets: 0,
       maxEdges: MAX_EDGES,
     };
   }
@@ -309,13 +313,15 @@ async function measure(
     const data: unknown = db.getSubsetData();
     const subsets: unknown[] = Array.isArray(data) ? data : [];
     const sets = new Set<string>();
+    let maxAreaSets = 0;
     for (const subset of subsets) {
       if (!subset || typeof subset !== "object" || !("sets" in subset) || !Array.isArray(subset.sets)) continue;
+      maxAreaSets = Math.max(maxAreaSets, subset.sets.length);
       for (const set of subset.sets) {
         if (typeof set === "string") sets.add(set);
       }
     }
-    return { nodes: 0, edges: 0, sets: sets.size, areas: subsets.length, maxEdges: MAX_EDGES };
+    return { nodes: 0, edges: 0, sets: sets.size, areas: subsets.length, maxAreaSets, maxEdges: MAX_EDGES };
   }
   return undefined;
 }
@@ -325,7 +331,13 @@ export async function exceedsLimits(source: string): Promise<boolean> {
     mermaid.mermaidAPI.reset();
     const count = await measure(source);
     if (!count) return false;
-    if (count.edges > count.maxEdges || count.sets > MAX_VENN_SETS || count.areas > MAX_VENN_AREAS) return true;
+    if (
+      count.edges > count.maxEdges ||
+      count.sets > MAX_VENN_SETS ||
+      count.areas > MAX_VENN_AREAS ||
+      count.maxAreaSets > MAX_VENN_SETS
+    )
+      return true;
     if (count.nodes <= MAX_NODES) return false;
     await mermaid.parse(source);
     const recounted = await measure(source);
@@ -334,7 +346,8 @@ export async function exceedsLimits(source: string): Promise<boolean> {
       (recounted.nodes > MAX_NODES ||
         recounted.edges > recounted.maxEdges ||
         recounted.sets > MAX_VENN_SETS ||
-        recounted.areas > MAX_VENN_AREAS)
+        recounted.areas > MAX_VENN_AREAS ||
+        recounted.maxAreaSets > MAX_VENN_SETS)
     );
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Edge limit exceeded")) return true;

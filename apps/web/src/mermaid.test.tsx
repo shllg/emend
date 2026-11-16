@@ -736,6 +736,37 @@ test.each([
 });
 
 test.each([
+  { names: 13, tooLarge: true },
+  { names: 12, tooLarge: false },
+])("venn counts $names identifiers in one entry including duplicates", async ({ names, tooLarge }) => {
+  const root = document.createElement("div");
+  document.body.append(root);
+  const identifiers = Array.from({ length: names }, (_, index) => (index % 2 === 0 ? "A" : "B"));
+  const source = `venn-beta\nset A\nset B\nunion ${identifiers.join(",")}`;
+  mermaid.mermaidAPI.getDiagramFromText.mockResolvedValueOnce({
+    db: { getSubsetData: () => [{ sets: identifiers }] },
+  });
+  mermaid.render.mockResolvedValue({ svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>A</text></svg>' });
+  const stop = startFrame(root);
+  try {
+    window.dispatchEvent(new MessageEvent("message", { source: window.parent, data: { type: "render", source } }));
+    if (tooLarge) {
+      await waitFor(() => expect(root.textContent).toContain("This diagram is too large to draw."));
+      expect(root.querySelector("pre")?.textContent).toBe(source);
+      expect(mermaid.render).not.toHaveBeenCalled();
+    } else {
+      await waitFor(() => expect(root.querySelector("svg")).not.toBeNull());
+      expect(mermaid.render).toHaveBeenCalledTimes(1);
+      expect(root.querySelector("pre")).toBeNull();
+    }
+    expect(mermaid.parse).not.toHaveBeenCalled();
+  } finally {
+    stop();
+    root.remove();
+  }
+});
+
+test.each([
   { nodes: 200, tooLarge: false },
   { nodes: 301, tooLarge: true },
 ])("a node-only excess is recounted as $nodes nodes under the diagram config", async ({ nodes, tooLarge }) => {

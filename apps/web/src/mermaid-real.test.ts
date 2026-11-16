@@ -138,6 +138,16 @@ test.each([
 });
 
 test.each([
+  { names: 13, expected: true },
+  { names: 12, expected: false },
+])("real Mermaid bounds a venn union with $names repeated identifiers", async ({ names, expected }) => {
+  mermaid.initialize(frameConfig(false));
+  const identifiers = Array.from({ length: names }, (_, index) => (index % 2 === 0 ? "A" : "B"));
+  const source = `venn-beta\nset A\nset B\nunion ${identifiers.join(",")}`;
+  await expect(exceedsLimits(source)).resolves.toBe(expected);
+});
+
+test.each([
   { length: 10, expected: true },
   { length: 1, expected: false },
 ])("real Mermaid weighs 16 flowchart links of length $length", async ({ length, expected }) => {
