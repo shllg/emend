@@ -146,14 +146,20 @@ test.each(["inherit", "capture"] as const)(
 );
 
 test("capture settles after exit even when a descendant holds stdout open", async () => {
-  const tree = await processTree("capture", undefined, true);
+  const timeout = vi.spyOn(globalThis, "setTimeout");
   try {
-    const result = await tree.pending;
-    expect(result).toMatchObject({ code: 0, signal: null, timedOut: false, error: false });
-  } finally {
-    killGroup(tree.group);
+    const tree = await processTree("capture", undefined, true);
     try {
-      process.kill(tree.pid, "SIGKILL");
-    } catch {}
+      const result = await tree.pending;
+      expect(result).toMatchObject({ code: 0, signal: null, timedOut: false, error: false });
+      expect(timeout).toHaveBeenCalledWith(expect.any(Function), 1000);
+    } finally {
+      killGroup(tree.group);
+      try {
+        process.kill(tree.pid, "SIGKILL");
+      } catch {}
+    }
+  } finally {
+    timeout.mockRestore();
   }
 }, 15000);
