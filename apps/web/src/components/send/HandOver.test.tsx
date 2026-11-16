@@ -198,6 +198,54 @@ test("switching to phone closes the resume dialog and switching back leaves it c
   expect(screen.getByRole("button", { name: "How to resume" })).toBeTruthy();
 });
 
+test("switching to phone before the resume menu callback runs keeps the dialog closed on desktop", async () => {
+  const { update } = mount({ agent: idle, lifecycle });
+  const menu = within(await openActions());
+  fireEvent.click(menu.getByRole("menuitem", { name: "How to resume" }));
+  // The menu's unmount autofocus runs its selected handler on the next timer tick.
+  update({ agent: idle, lifecycle, phone: true });
+  await settle();
+  update({ agent: idle, lifecycle });
+  await settle();
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+});
+
+test("approval closes the resume dialog and returns focus to the status column", async () => {
+  const { update } = mount({ agent: idle });
+  openResume();
+  update({ agent: idle, approved: true });
+  await settle();
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(screen.queryByRole("button", { name: "How to resume" })).toBeNull();
+  const status = screen.getByText("1 unsent comment").parentElement;
+  expect(status?.tabIndex).toBe(-1);
+  expect(document.activeElement).toBe(status);
+});
+
+test("an agent starting to wait closes the resume dialog and returns focus to the status column", async () => {
+  const { update } = mount({ agent: idle });
+  openResume();
+  update({ agent: waiting });
+  await settle();
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  const status = screen.getByText("1 unsent comment").parentElement;
+  expect(status?.tabIndex).toBe(-1);
+  expect(status?.textContent).toContain("An agent is waiting");
+  expect(document.activeElement).toBe(status);
+});
+
+test("an agent starting to wait closes the resume dialog opened from the menu and returns focus to its trigger", async () => {
+  const { update } = mount({ agent: idle, lifecycle });
+  const menu = within(await openActions());
+  fireEvent.click(menu.getByRole("menuitem", { name: "How to resume" }));
+  await settle();
+  expect(screen.getByRole("alertdialog", { name: "How to resume" })).toBeTruthy();
+  update({ agent: waiting, lifecycle });
+  await settle();
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "More review actions" }));
+});
+
 test("the phone bar and more-actions menu have no resume action", async () => {
   mount({ agent: idle, phone: true, lifecycle });
   expect(screen.queryByRole("button", { name: "How to resume" })).toBeNull();

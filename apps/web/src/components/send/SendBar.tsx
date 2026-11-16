@@ -123,7 +123,6 @@ export function SendBar({
   }, [phone, openDeferred]);
   useEffect(() => {
     if (phone) {
-      setResumeOpen(false);
       focusDesktop.current = false;
       return;
     }
@@ -144,6 +143,12 @@ export function SendBar({
   const retired = lifecycle?.state === "settled";
   // An approved review has nothing left to hand over; a retired one only says when the agent stopped waiting.
   const showNote = !approved && (!retired || !!agent?.releasedAt);
+  const canResume = !phone && showNote && !!agent && !agent.agentWaiting;
+  // A menu item runs its handler after the menu closes, and the bar can stop offering
+  // "How to resume" while the dialog is open.
+  useEffect(() => {
+    if (resumeOpen && !canResume) setResumeOpen(false);
+  }, [resumeOpen, canResume]);
   const unavailable =
     revision === undefined ? (revisionError ? "Could not load this revision." : "Loading revision…") : undefined;
   const olderReason =
@@ -324,7 +329,7 @@ export function SendBar({
       lifecycle={lifecycle}
       unsentCount={unsentCount}
       phone={phone}
-      onHowToResume={!phone && showNote && agent && !agent.agentWaiting ? () => setResumeOpen(true) : undefined}
+      onHowToResume={canResume ? () => setResumeOpen(true) : undefined}
     />
   );
   const status = (
@@ -358,7 +363,7 @@ export function SendBar({
         agent && (
           <span className="text-fg-3 [font:var(--type-meta)]">
             {agentStatusText(agent)}
-            {!agent.agentWaiting && (
+            {canResume && (
               <>
                 {" · "}
                 <button
