@@ -3237,11 +3237,46 @@ test("phone Diff navigation consumes pending heading focus before a later refetc
   expect(focus.mock.instances).not.toContain(heading);
 });
 
+test.each([1280, 900])(
+  "the review top bar places View directly before Settings at %s px; inbox omits it",
+  async (size) => {
+    width = size;
+    const { history } = mount(`/r/${id}`);
+    await screen.findByText("Overview");
+    const topbar = within(screen.getByRole("banner"));
+    const refresh = topbar.getByRole("button", { name: "Refresh" });
+    const devices = topbar.getByRole("link", { name: "Devices" });
+    const view = topbar.getByRole("button", { name: "View" });
+    const settings = topbar.getByRole("link", { name: "Settings" });
+    expect(refresh.nextElementSibling).toBe(devices);
+    expect(devices.nextElementSibling).toBe(view);
+    expect(view.nextElementSibling).toBe(settings);
+    await act(async () => history.push("/"));
+    await screen.findByRole("heading", { name: "Inbox", level: 1 });
+    expect(screen.queryByRole("button", { name: "View" })).toBeNull();
+  },
+);
+
 test("pane defaults and choices are independent across desktop, tablet and phone", async () => {
   const { history } = mount(`/r/${id}`);
   await screen.findByText("Overview");
-  const paneControls = () => within(screen.getByRole("radiogroup", { name: "Panes" }));
-  expect(paneControls().getByRole("radio", { name: "Tabs" }).getAttribute("aria-checked")).toBe("true");
+  const openView = async () => {
+    fireEvent.keyDown(screen.getByRole("button", { name: "View" }), { key: "ArrowDown" });
+    const menu = within(await screen.findByRole("menu", { name: "View" }));
+    expect(menu.getAllByRole("group").map((group) => group.getAttribute("aria-label"))).toEqual([
+      "Panes",
+      "Reading width",
+      "Writeup and docs",
+      "Code in diffs",
+    ]);
+    return within(menu.getByRole("group", { name: "Panes" }));
+  };
+  const closeView = async () => {
+    fireEvent.keyDown(screen.getByRole("menu", { name: "View" }), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu", { name: "View" })).toBeNull());
+  };
+  expect((await openView()).getByRole("menuitemradio", { name: "Tabs" }).getAttribute("aria-checked")).toBe("true");
+  await closeView();
   expect(screen.getByTestId("diff-pane").hidden).toBe(true);
   expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
     "Writeup",
@@ -3257,23 +3292,67 @@ test("pane defaults and choices are independent across desktop, tablet and phone
   expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(
     screen.getByRole("tab", { name: "Diff" }).id,
   );
-  fireEvent.click(paneControls().getByRole("radio", { name: "Split" }));
+  fireEvent.click((await openView()).getByRole("menuitemradio", { name: "Split" }));
+  await closeView();
   expect(screen.getByTestId("reading-pane")).toBeTruthy();
   expect(screen.getByTestId("diff-pane")).toBeTruthy();
   expect(screen.getByRole("tab", { name: "Writeup" }).getAttribute("aria-selected")).toBe("true");
   act(() => resize(900));
-  expect(paneControls().getByRole("radio", { name: "Tabs" }).getAttribute("aria-checked")).toBe("true");
-  fireEvent.click(paneControls().getByRole("radio", { name: "Split" }));
+  expect((await openView()).getByRole("menuitemradio", { name: "Tabs" }).getAttribute("aria-checked")).toBe("true");
+  await closeView();
+  fireEvent.click((await openView()).getByRole("menuitemradio", { name: "Split" }));
+  await closeView();
   expect(screen.getByRole("separator", { name: "Resize reading pane" })).toBeTruthy();
   expect(screen.queryByRole("separator", { name: "Resize inbox" })).toBeNull();
   act(() => resize(1280));
-  fireEvent.click(paneControls().getByRole("radio", { name: "Tabs" }));
+  fireEvent.click((await openView()).getByRole("menuitemradio", { name: "Tabs" }));
+  await closeView();
   act(() => resize(900));
-  expect(paneControls().getByRole("radio", { name: "Split" }).getAttribute("aria-checked")).toBe("true");
+  expect((await openView()).getByRole("menuitemradio", { name: "Split" }).getAttribute("aria-checked")).toBe("true");
+  await closeView();
   act(() => resize(390));
-  expect(screen.queryByRole("radiogroup", { name: "Panes" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "View" })).toBeNull();
+  expect(screen.queryByRole("group", { name: "Panes" })).toBeNull();
   expect(screen.queryByRole("separator")).toBeNull();
   expect(screen.getByRole("link", { name: "Diff" }).getAttribute("aria-current")).toBe("page");
+});
+
+test("the View menu changes panes by keyboard and returns focus to View", async () => {
+  onTestFinished(() => layoutStore.update(defaultLayout));
+  width = 1280;
+  mount(`/r/${id}`);
+  await screen.findByText("Overview");
+  const view = screen.getByRole("button", { name: "View" });
+  act(() => view.focus());
+  fireEvent.keyDown(view, { key: "ArrowDown" });
+  const menu = await screen.findByRole("menu", { name: "View" });
+  const panes = within(within(menu).getByRole("group", { name: "Panes" }));
+  const tabs = panes.getByRole("menuitemradio", { name: "Tabs", checked: true });
+  act(() => tabs.focus());
+  expect(document.activeElement).toBe(tabs);
+  fireEvent.keyDown(tabs, { key: "ArrowLeft" });
+  const split = panes.getByRole("menuitemradio", { name: "Split", checked: true });
+  expect(layoutStore.getSnapshot().pane.desktop).toBe("split");
+  expect(screen.getByRole("menu", { name: "View" })).toBe(menu);
+  expect(document.activeElement).toBe(split);
+
+  fireEvent.keyDown(split, { key: "Escape" });
+  await waitFor(() => {
+    expect(screen.queryByRole("menu", { name: "View" })).toBeNull();
+    expect(document.activeElement).toBe(view);
+  });
+
+  fireEvent.keyDown(view, { key: "ArrowDown" });
+  const reopened = within(await screen.findByRole("menu", { name: "View" }));
+  const readingWidth = within(reopened.getByRole("group", { name: "Reading width" }));
+  const wide = readingWidth.getByRole("menuitemradio", { name: "Wide 1248px" });
+  act(() => wide.focus());
+  fireEvent.keyDown(wide, { key: "Enter" });
+  expect(layoutStore.getSnapshot().readingWidth).toBe("wide");
+  await waitFor(() => {
+    expect(screen.queryByRole("menu", { name: "View" })).toBeNull();
+    expect(document.activeElement).toBe(view);
+  });
 });
 
 test("Tabs without code has no Diff tab or reading resize handle", async () => {
@@ -3339,8 +3418,8 @@ test.each([1280, 900, 390])("text menu changes validated app variables at %s px"
   const root = container.querySelector<HTMLElement>(".em-app");
   expect(root?.style.getPropertyValue("--reader-prose-size")).toBe("16px");
   expect(root?.style.getPropertyValue("--reader-code-size")).toBe("12px");
-  fireEvent.keyDown(screen.getByRole("button", { name: size < 768 ? "More" : "Text size" }), { key: "ArrowDown" });
-  const menu = within(await screen.findByRole("menu"));
+  fireEvent.keyDown(screen.getByRole("button", { name: size < 768 ? "More" : "View" }), { key: "ArrowDown" });
+  const menu = within(await screen.findByRole("menu", { name: size < 768 ? "More" : "View" }));
   fireEvent.click(menu.getByRole("menuitemradio", { name: "18 px" }));
   expect(root?.style.getPropertyValue("--reader-prose-size")).toBe("18px");
   fireEvent.click(menu.getByRole("menuitemradio", { name: "14 px" }));
@@ -3351,7 +3430,7 @@ test.each([1280, 900, 390])("text menu changes validated app variables at %s px"
   await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 });
 
-test.each([1280, 900])("Width menu changes the reading measure at %s px", async (size) => {
+test.each([1280, 900])("View menu changes the reading measure at %s px", async (size) => {
   width = size;
   const { container } = mount(`/r/${id}`);
   await screen.findByText("Overview");
@@ -3362,8 +3441,8 @@ test.each([1280, 900])("Width menu changes the reading measure at %s px", async 
     ["narrow", "Narrow 68ch", "68ch"],
     ["comfortable", "Comfortable 1024px", "1024px"],
   ]) {
-    fireEvent.keyDown(screen.getByRole("button", { name: "Reading width" }), { key: "ArrowDown" });
-    const menu = within(await screen.findByRole("menu", { name: "Reading width" }));
+    fireEvent.keyDown(screen.getByRole("button", { name: "View" }), { key: "ArrowDown" });
+    const menu = within(await screen.findByRole("menu", { name: "View" }));
     fireEvent.click(menu.getByRole("menuitemradio", { name: label }));
     expect(layoutStore.getSnapshot().readingWidth).toBe(value);
     expect(root?.style.getPropertyValue("--reader-measure")).toBe(measure);
@@ -3406,8 +3485,8 @@ test.each(["writeup", "Markdown doc", "Markdown pub"])(
       ["Wide 1248px", "1248px"],
       ["Narrow 68ch", "68ch"],
     ]) {
-      fireEvent.keyDown(screen.getByRole("button", { name: "Reading width" }), { key: "ArrowDown" });
-      const menu = within(await screen.findByRole("menu", { name: "Reading width" }));
+      fireEvent.keyDown(screen.getByRole("button", { name: "View" }), { key: "ArrowDown" });
+      const menu = within(await screen.findByRole("menu", { name: "View" }));
       fireEvent.click(menu.getByRole("menuitemradio", { name: label }));
       expect(container.querySelector(".em-app")).toBe(root);
       expect(screen.getByText(block.text).closest(".em-reading-column")?.closest(".em-app")).toBe(root);
@@ -3438,6 +3517,7 @@ test("phone menus omit reading width", async () => {
   width = 390;
   mount(`/r/${id}`);
   await screen.findByText("Overview");
+  expect(screen.queryByRole("button", { name: "View" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Reading width" })).toBeNull();
   fireEvent.keyDown(screen.getByRole("button", { name: "More" }), { key: "ArrowDown" });
   const menu = within(await screen.findByRole("menu", { name: "More" }));

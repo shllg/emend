@@ -24,7 +24,6 @@ import { Button } from "../ui/Button.tsx";
 import { CopyTextMenu } from "../ui/CopyTextMenu.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { cn } from "../ui/utils.ts";
-import { LayoutControls } from "./LayoutControls.tsx";
 import { RevisionPicker } from "./RevisionPicker.tsx";
 
 const linkIcon = { pr: GitPullRequest, issue: CircleDot, other: ExternalLink } as const;
@@ -98,12 +97,93 @@ export function ReviewHeader({
       .join(" → ");
   const safe = safeLinks(revision?.links);
   const openingCard = revision !== undefined && usesOpeningCard(revision.writeup);
-  const links = openingCard ? safe.filter((link) => link.kind !== "pr" && link.kind !== "issue") : safe;
-  const related = openingCard ? safe.filter((link) => link.kind === "pr" || link.kind === "issue") : [];
+  const links = phone && openingCard ? safe.filter((link) => link.kind !== "pr" && link.kind !== "issue") : safe;
+  const related = phone && openingCard ? safe.filter((link) => link.kind === "pr" || link.kind === "issue") : [];
   const area = openingCard ? (revision.writeup.area ?? sharedDiffFolder(revision.files)) : undefined;
   const breadcrumb = [review.project, area].filter((item): item is string => item != null);
   const total = revision ? reviewLineTotals(revision, counts) : null;
   const metaItem = "inline-flex min-w-0 items-center gap-[5px] wrap-anywhere";
+  const separator = (
+    <span aria-hidden="true" className="text-line-strong">
+      ·
+    </span>
+  );
+  const breadcrumbNav = openingCard && (breadcrumb.length > 0 || related.length > 0) && (
+    <nav aria-label="Breadcrumb" className="text-fg-3 [font:var(--type-meta)]">
+      <ol className="m-0 flex min-w-0 list-none flex-wrap items-center gap-1.5 p-0">
+        {breadcrumb.map((item, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: project and area have fixed positions and can share text.
+          <li key={index} className="flex min-w-0 items-center gap-1.5">
+            {index > 0 && <span aria-hidden="true">›</span>}
+            <span dir="auto" className="min-w-0 overflow-hidden wrap-anywhere">
+              {item}
+            </span>
+          </li>
+        ))}
+        {related.map((link, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: two links may share a URL; the list never reorders.
+          <li key={`${index}:${link.url}`} className="flex min-w-0 max-w-full items-center gap-1.5">
+            {(breadcrumb.length > 0 || index > 0) && <span aria-hidden="true">›</span>}
+            <LinkChip link={link} />
+          </li>
+        ))}
+      </ol>
+    </nav>
+  );
+  const linksList = links.length > 0 && (
+    <ul
+      aria-label="Links"
+      className="m-0 flex min-w-0 list-none flex-wrap items-center gap-1.5 p-0 text-12 leading-[1.2]"
+    >
+      {links.map((link, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: two links may share a URL; the list never reorders.
+        <li key={`${index}:${link.url}`} className="min-w-0 max-w-full">
+          <LinkChip link={link} />
+        </li>
+      ))}
+    </ul>
+  );
+  const contextRow = (
+    <div className="flex flex-wrap items-center gap-2 text-fg-3 [font:var(--type-meta)]">
+      <span className="inline-flex min-w-0 items-center gap-1.5 wrap-anywhere">
+        <OriginBadge origin={review.origin} dot className="size-[7px] opacity-85" />
+        {review.origin.name}
+      </span>
+      {!openingCard && review.project !== null && (
+        <>
+          {separator}
+          <span dir="auto" className="min-w-0 wrap-anywhere">
+            {review.project}
+          </span>
+        </>
+      )}
+      {!phone && openingCard && breadcrumbNav && (
+        <>
+          {separator}
+          {breadcrumbNav}
+        </>
+      )}
+      {review.state !== "open" && (
+        <>
+          {separator}
+          <StateBadge state={review.state} />
+        </>
+      )}
+      {review.snoozed && (
+        <>
+          {separator}
+          <SnoozeBadge until={review.snoozedUntil} now={Date.now()} />
+        </>
+      )}
+      {agent && agent !== "approved" && (
+        <>
+          {separator}
+          <AgentStatus status={agent} pickedUpAt={review.pickedUpAt} now={now} className="font-normal text-fg-3" />
+        </>
+      )}
+      {!phone && linksList}
+    </div>
+  );
   return (
     <div
       className={cn(
@@ -111,28 +191,7 @@ export function ReviewHeader({
         phone ? "px-4 py-3" : "px-5 pt-3 pb-2.5",
       )}
     >
-      {openingCard && (breadcrumb.length > 0 || related.length > 0) && (
-        <nav aria-label="Breadcrumb" className="text-fg-3 [font:var(--type-meta)]">
-          <ol className="m-0 flex min-w-0 list-none flex-wrap items-center gap-1.5 p-0">
-            {breadcrumb.map((item, index) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: project and area have fixed positions and can share text.
-              <li key={index} className="flex min-w-0 items-center gap-1.5">
-                {index > 0 && <span aria-hidden="true">›</span>}
-                <span dir="auto" className="min-w-0 overflow-hidden wrap-anywhere">
-                  {item}
-                </span>
-              </li>
-            ))}
-            {related.map((link, index) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: two links may share a URL; the list never reorders.
-              <li key={`${index}:${link.url}`} className="flex min-w-0 max-w-full items-center gap-1.5">
-                {(breadcrumb.length > 0 || index > 0) && <span aria-hidden="true">›</span>}
-                <LinkChip link={link} />
-              </li>
-            ))}
-          </ol>
-        </nav>
-      )}
+      {phone ? breadcrumbNav : openingCard && contextRow}
       <div className={phone ? "flex items-center gap-3" : "flex flex-wrap items-start gap-3"}>
         {phone ? (
           <CopyTextMenu
@@ -189,50 +248,10 @@ export function ReviewHeader({
             <Button variant="ghost" size="sm" icon={MessageSquarePlus} disabled={!revision} onClick={onCommentReview}>
               Comment on review
             </Button>
-            <LayoutControls />
           </div>
         )}
       </div>
-      <div className="flex flex-wrap items-center gap-2 text-fg-3 [font:var(--type-meta)]">
-        <span className="inline-flex min-w-0 items-center gap-1.5 wrap-anywhere">
-          <OriginBadge origin={review.origin} dot className="size-[7px] opacity-85" />
-          {review.origin.name}
-        </span>
-        {!openingCard && review.project !== null && (
-          <>
-            <span aria-hidden="true" className="text-line-strong">
-              ·
-            </span>
-            <span dir="auto" className="min-w-0 wrap-anywhere">
-              {review.project}
-            </span>
-          </>
-        )}
-        {review.state !== "open" && (
-          <>
-            <span aria-hidden="true" className="text-line-strong">
-              ·
-            </span>
-            <StateBadge state={review.state} />
-          </>
-        )}
-        {review.snoozed && (
-          <>
-            <span aria-hidden="true" className="text-line-strong">
-              ·
-            </span>
-            <SnoozeBadge until={review.snoozedUntil} now={Date.now()} />
-          </>
-        )}
-        {agent && agent !== "approved" && (
-          <>
-            <span aria-hidden="true" className="text-line-strong">
-              ·
-            </span>
-            <AgentStatus status={agent} pickedUpAt={review.pickedUpAt} now={now} className="font-normal text-fg-3" />
-          </>
-        )}
-      </div>
+      {(phone || !openingCard) && contextRow}
       {(!phone || review.branch || revision?.files.length === 0 || total) && (
         <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 font-mono text-12 leading-[1.2] font-stretch-mono text-fg-3">
           {review.branch && (
@@ -257,19 +276,7 @@ export function ReviewHeader({
           {!phone && <RevisionPicker review={review} seq={seq} onChange={onRevisionChange} />}
         </div>
       )}
-      {links.length > 0 && (
-        <ul
-          aria-label="Links"
-          className="m-0 flex min-w-0 list-none flex-wrap items-center gap-1.5 p-0 text-12 leading-[1.2]"
-        >
-          {links.map((link, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: two links may share a URL; the list never reorders.
-            <li key={`${index}:${link.url}`} className="min-w-0 max-w-full">
-              <LinkChip link={link} />
-            </li>
-          ))}
-        </ul>
-      )}
+      {phone && linksList}
       {review.importedAt && (
         <p className="m-0 wrap-anywhere text-fg-3 [font:var(--type-meta)]">
           Copied from {review.origin.name} on {new Date(review.importedAt).toLocaleDateString()}. Comments, Sends and

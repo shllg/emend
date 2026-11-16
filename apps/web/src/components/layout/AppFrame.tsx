@@ -21,7 +21,7 @@ import { requestPairingFromLink } from "../../lib/pairing-intent.ts";
 import { useRefresh } from "../../lib/refresh.ts";
 import { ShortcutProvider } from "../../lib/use-shortcut.tsx";
 import { CommandPalette } from "../CommandPalette.tsx";
-import { readingWidthItems, textSizeItems } from "../review/LayoutControls.tsx";
+import { readingWidthItems, textSizeItems, ViewMenu } from "../review/LayoutControls.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -216,6 +216,7 @@ function AppFrameContent({
             <IconButton label="Devices" icon={Smartphone} asChild>
               <Link to="/devices" />
             </IconButton>
+            {isReview && <ViewMenu />}
             <IconButton label="Settings" icon={Settings} asChild>
               <Link to="/settings" />
             </IconButton>

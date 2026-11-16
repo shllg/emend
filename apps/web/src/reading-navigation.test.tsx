@@ -226,11 +226,15 @@ test("a new desktop browser opens a review on Writeup in Tabs", async () => {
   mount("");
   await screen.findByRole("heading", { name: "Topic 1: Plant a seed" });
   expect(screen.getByRole("tab", { name: "Writeup" }).getAttribute("aria-selected")).toBe("true");
+  fireEvent.keyDown(screen.getByRole("button", { name: "View" }), { key: "ArrowDown" });
+  const menu = within(await screen.findByRole("menu", { name: "View" }));
   expect(
-    within(screen.getByRole("radiogroup", { name: "Panes" }))
-      .getByRole("radio", { name: "Tabs" })
+    within(menu.getByRole("group", { name: "Panes" }))
+      .getByRole("menuitemradio", { name: "Tabs" })
       .getAttribute("aria-checked"),
   ).toBe("true");
+  fireEvent.keyDown(screen.getByRole("menu", { name: "View" }), { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("menu", { name: "View" })).toBeNull());
   expect(screen.getByTestId("reading-pane").hidden).toBe(false);
   expect(screen.getByTestId("diff-pane").hidden).toBe(true);
   expect(screen.queryByRole("separator", { name: "Resize reading pane" })).toBeNull();
