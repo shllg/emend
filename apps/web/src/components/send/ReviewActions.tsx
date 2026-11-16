@@ -41,13 +41,13 @@ export function ReviewActions({
   lifecycle,
   unsentCount,
   phone,
-  onHowToResume,
+  howToResume,
 }: {
   reviewId: string;
   lifecycle: ReviewLifecycle;
   unsentCount: number;
   phone: boolean;
-  onHowToResume?: () => void;
+  howToResume?: { disabled: boolean; onSelect: () => void };
 }) {
   const { title, state, snoozed, onDeleted } = lifecycle;
   const [panel, setPanel] = useState<Panel>(null);
@@ -194,9 +194,15 @@ export function ReviewActions({
     }
   };
   const items: MenuItem[] = [];
-  if (onHowToResume)
+  if (howToResume)
     items.push(
-      { label: "How to resume", icon: Terminal, opensDialog: true, onSelect: onHowToResume },
+      {
+        label: "How to resume",
+        icon: Terminal,
+        opensDialog: true,
+        disabled: howToResume.disabled,
+        onSelect: howToResume.onSelect,
+      },
       { separator: true },
     );
   if (state === "open") {

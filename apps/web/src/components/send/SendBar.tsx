@@ -329,7 +329,9 @@ export function SendBar({
       lifecycle={lifecycle}
       unsentCount={unsentCount}
       phone={phone}
-      onHowToResume={canResume ? () => setResumeOpen(true) : undefined}
+      howToResume={
+        !phone && agent ? { disabled: !canResume || sending, onSelect: () => setResumeOpen(true) } : undefined
+      }
     />
   );
   const status = (
@@ -368,8 +370,9 @@ export function SendBar({
                 {" · "}
                 <button
                   type="button"
+                  disabled={sending}
                   className={cn(
-                    "border-0 bg-transparent p-0 text-(--fg-link) underline decoration-1 underline-offset-2 [font:inherit] hover:text-(--fg-link-hover)",
+                    "border-0 bg-transparent p-0 text-(--fg-link) underline decoration-1 underline-offset-2 [font:inherit] enabled:hover:text-(--fg-link-hover) disabled:cursor-not-allowed disabled:opacity-48",
                     focusRing,
                   )}
                   onClick={() => setResumeOpen(true)}

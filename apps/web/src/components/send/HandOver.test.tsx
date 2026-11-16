@@ -102,7 +102,11 @@ test("the desktop status says an agent is waiting without a resume action or an 
   expect(screen.queryByText(command)).toBeNull();
   expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
   expect(screen.getByRole("region", { name: "Send and approve" }).children).toHaveLength(1);
-  expect(within(await openActions()).queryByRole("menuitem", { name: "How to resume" })).toBeNull();
+  expect(
+    within(await openActions())
+      .getByRole("menuitem", { name: "How to resume" })
+      .getAttribute("aria-disabled"),
+  ).toBe("true");
 });
 
 test("the desktop status opens the resume command in a dialog and Close returns focus to the link", async () => {
@@ -150,12 +154,17 @@ test.each([
     name: "after retirement without a release date",
     props: { agent: idle, lifecycle: { ...lifecycle, state: "settled" as const } },
   },
-])("the desktop bar omits agent status and resume actions $name", async ({ props }) => {
+])("the desktop bar omits agent status and the resume link $name", async ({ props }) => {
   mount(props);
   expect(screen.queryByText(/agent is waiting|No agent|stopped waiting/)).toBeNull();
   expect(screen.queryByRole("button", { name: "How to resume" })).toBeNull();
   expect(screen.getByText("1 unsent comment").parentElement?.children).toHaveLength(1);
-  expect(within(await openActions()).queryByRole("menuitem", { name: "How to resume" })).toBeNull();
+  const menu = within(await openActions());
+  if ("agent" in props) {
+    expect(menu.getByRole("menuitem", { name: "How to resume" }).getAttribute("aria-disabled")).toBe("true");
+  } else {
+    expect(menu.queryByRole("menuitem", { name: "How to resume" })).toBeNull();
+  }
 });
 
 test("an invalid release date uses the no-agent status and explanation", () => {
@@ -183,6 +192,74 @@ test("the first more-actions item opens the resume dialog after the menu closes"
   expect(document.activeElement).toBe(screen.getByRole("button", { name: "More review actions" }));
   expect(document.body.style.pointerEvents).not.toBe("none");
   expect(fetchMock).not.toHaveBeenCalled();
+});
+
+test("agent wait changes preserve the focused more-actions item", async () => {
+  const { update } = mount({ agent: idle, lifecycle });
+  const menu = within(await openActions());
+  const move = menu.getByRole("menuitem", { name: "Move to group…" });
+  act(() => move.focus());
+  update({ agent: waiting, lifecycle });
+  await settle();
+  expect(document.activeElement?.getAttribute("role")).toBe("menuitem");
+  expect(document.activeElement?.textContent).toBe("Move to group…");
+  expect(document.activeElement).toBe(move);
+  expect(menu.getByRole("menuitem", { name: "How to resume" }).getAttribute("aria-disabled")).toBe("true");
+  update({ agent: idle, lifecycle });
+  await settle();
+  expect(document.activeElement?.getAttribute("role")).toBe("menuitem");
+  expect(document.activeElement?.textContent).toBe("Move to group…");
+  expect(document.activeElement).toBe(move);
+  expect(menu.getByRole("menuitem", { name: "How to resume" }).getAttribute("aria-disabled")).not.toBe("true");
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+test.each([
+  { name: "without more actions", lifecycle: undefined },
+  { name: "with more actions", lifecycle },
+])("a pending Send blocks resume $name and restores focus after Sent closes", async ({ lifecycle }) => {
+  const pending = Promise.withResolvers<Response>();
+  fetchMock.mockImplementation(() => pending.promise);
+  mount({ agent: idle, unsentCount: 1, lifecycle });
+  try {
+    await send();
+    const resume = screen.getByRole<HTMLButtonElement>("button", { name: "How to resume" });
+    expect(resume.disabled).toBe(true);
+    fireEvent.click(resume);
+    await settle();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    if (lifecycle) {
+      const menu = await openActions();
+      const item = within(menu).getByRole("menuitem", { name: "How to resume" });
+      expect(item.getAttribute("aria-disabled")).toBe("true");
+      fireEvent.click(item);
+      await settle();
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      fireEvent.keyDown(menu, { key: "Escape" });
+      await settle();
+      expect(screen.queryByRole("menu")).toBeNull();
+    }
+    await act(async () => pending.resolve(new Response(null, { status: 201 })));
+    await settle();
+    const sent = within(screen.getByRole("alertdialog", { name: "Sent" }));
+    fireEvent.click(sent.getByRole("button", { name: "Close" }));
+    await settle();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Instructions" }));
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "How to resume" }).disabled).toBe(false);
+    if (lifecycle) {
+      expect(
+        within(await openActions())
+          .getByRole("menuitem", { name: "How to resume" })
+          .getAttribute("aria-disabled"),
+      ).not.toBe("true");
+    }
+    expect(fetchMock).toHaveBeenCalledOnce();
+  } finally {
+    // Release the in-flight Send even if a regression assertion fails.
+    await act(async () => pending.resolve(new Response(null, { status: 201 })));
+    await settle();
+  }
 });
 
 test("switching to phone closes the resume dialog and switching back leaves it closed", async () => {
