@@ -236,9 +236,21 @@ export function DiffPane({
     return changed;
   };
   const previousFocus = useRef<CodeFocus>(undefined);
+  const currentFocus = useRef(focus);
+  const fullScroll = useRef(0);
   const savedScroll = useRef(0);
   const restoreScroll = useRef(false);
+  useEffect(() => {
+    const scroll = root.current?.closest<HTMLElement>("[data-diff-scroll]");
+    if (!scroll) return;
+    const rememberScroll = () => {
+      if (!currentFocus.current && !scroll.closest("[hidden]")) fullScroll.current = scroll.scrollTop;
+    };
+    scroll.addEventListener("scroll", rememberScroll);
+    return () => scroll.removeEventListener("scroll", rememberScroll);
+  }, []);
   useLayoutEffect(() => {
+    currentFocus.current = focus;
     const scroll = root.current?.closest<HTMLElement>("[data-diff-scroll]");
     // A hidden scroller has no layout box; retry its restoration when the Diff tab shows it.
     if (!focus && restoreScroll.current && scroll && !scroll.closest("[hidden]")) {
@@ -250,7 +262,8 @@ export function DiffPane({
     lastReachedFile.current = null;
     setJump(null);
     if (focus) {
-      if (!previousFocus.current && !restoreScroll.current) savedScroll.current = scroll?.scrollTop ?? 0;
+      // Filtering and unhiding already clamped scrollTop in this commit; use the full diff's last scroll.
+      if (!previousFocus.current && !restoreScroll.current) savedScroll.current = fullScroll.current;
       restoreScroll.current = false;
       expand(focusedGroup?.topic.slug, focus.kind === "file" ? focus.id : undefined);
       if (scroll) scroll.scrollTop = 0;
@@ -484,6 +497,7 @@ export function DiffPane({
                 rank={ranks.get(topic.slug)}
                 current={layout !== "phone" && writeupVisible && currentTopic === topic.slug}
                 writeupLink={
+                  !focus &&
                   (!revision.writeupEmpty || revision.main === "writeup") &&
                   topic.slug !== OTHER_TOPIC.slug &&
                   (layout === "phone" || !writeupVisible)

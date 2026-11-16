@@ -1139,6 +1139,16 @@ test.each(["full", "right", "left", "bottom"] as const)("Sheet %s preserves its 
   const body = screen.getByText("Diff body").parentElement;
   expect(dialog.classList.contains("inset-0")).toBe(side === "full");
   expect(dialog.classList.contains("h-[var(--visual-height,100dvh)]")).toBe(side === "full");
+  for (const padding of [
+    "pt-[env(safe-area-inset-top)]",
+    "pr-[env(safe-area-inset-right)]",
+    "pl-[env(safe-area-inset-left)]",
+  ]) {
+    expect(dialog.classList.contains(padding)).toBe(side === "full");
+  }
+  expect(dialog.classList.contains("pb-[var(--sheet-safe-bottom,env(safe-area-inset-bottom))]")).toBe(
+    side === "full" || side === "bottom",
+  );
   expect(body?.hasAttribute("data-diff-scroll")).toBe(side === "full");
   expect(body?.classList.contains("p-4")).toBe(side !== "full");
   expect(body?.classList.contains("p-0")).toBe(side === "full");

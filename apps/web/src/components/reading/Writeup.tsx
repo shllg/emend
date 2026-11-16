@@ -206,6 +206,7 @@ export function Writeup({
                 className="em-topic-code"
                 aria-label={`Code: ${topic.title}`}
                 aria-expanded={topicOpen}
+                data-code-target={`topic:${topic.slug}`}
                 onClick={(event) => code.onOpen(topicFocus, event.currentTarget)}
               >
                 Code <Chevron size={14} aria-hidden="true" />
@@ -251,6 +252,7 @@ export function Writeup({
                             dir="auto"
                             aria-label={`Code: ${file.path}`}
                             aria-expanded={sameCodeFocus(code.current, focus)}
+                            data-code-target={`file:${file.id}`}
                             onClick={(event) => code.onOpen(focus, event.currentTarget)}
                           >
                             {label}

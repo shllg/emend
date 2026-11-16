@@ -38,6 +38,7 @@ const loading = vi.hoisted(() => ({
   ready: undefined as Promise<void> | undefined,
   parser: undefined as DiffParser | undefined,
   rendering: "normal" as "normal" | "delayed" | "without-slots",
+  link: undefined as string | undefined,
 }));
 vi.mock("@pierre/diffs/react", async (original) => {
   const actual = await original<typeof import("@pierre/diffs/react")>();
@@ -58,14 +59,17 @@ vi.mock("./components/diff/LazyDiffPane.tsx", async (importOriginal) => {
   return {
     ...actual,
     LazyDiffPane: (props: DiffPaneProps) => (
-      <actual.LazyDiffPane
-        {...props}
-        parser={loading.parser}
-        load={async () => {
-          await loading.ready;
-          return import("./components/diff/DiffPane.tsx");
-        }}
-      />
+      <>
+        {props.focus && loading.link && <a href={loading.link}>Read the writeup</a>}
+        <actual.LazyDiffPane
+          {...props}
+          parser={loading.parser}
+          load={async () => {
+            await loading.ready;
+            return import("./components/diff/DiffPane.tsx");
+          }}
+        />
+      </>
     ),
   };
 });
@@ -168,6 +172,7 @@ beforeEach(() => {
   loading.ready = loaded.promise;
   loading.parser = undefined;
   loading.rendering = "normal";
+  loading.link = undefined;
   vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(function (this: HTMLElement) {
     const rect = this.getBoundingClientRect();
     return [rect.width || rect.height ? rect : new DOMRect(0, 100, 200, 20)] as unknown as DOMRectList;
@@ -4106,11 +4111,17 @@ test.each([1280, 768])(
     width = pixels;
     addCodeTopics();
     const { history } = mount();
-    const opener = await screen.findByRole("button", { name: "Code: Plant a seed" });
+    await screen.findByRole("button", { name: "Code: Plant a seed" });
     const pane = screen.getByTestId("diff-pane");
     const reading = screen.getByTestId("reading-pane");
     await act(async () => loaded.resolve());
+    fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    await waitFor(() => expect(pane.hidden).toBe(false));
     pane.scrollTop = 470;
+    fireEvent.scroll(pane);
+    fireEvent.click(screen.getByRole("tab", { name: "Writeup" }));
+    await waitFor(() => expect(pane.hidden).toBe(true));
+    const opener = await screen.findByRole("button", { name: "Code: Plant a seed" });
     act(() => opener.focus());
     fireEvent.click(opener);
     const seed = await screen.findByRole("region", { name: "Topic Plant a seed" });
@@ -4330,30 +4341,121 @@ test.each(["Docs", "Comments", "Files"])("leaving Code for %s closes it without 
   );
 });
 
-test("Code restores the Diff tab position when a hidden scroller cannot accept scrollTop", async () => {
-  mount();
-  const opener = await screen.findByRole("button", { name: "Code: Plant a seed" });
+test.each(["close then Diff", "directly to Diff"])(
+  "Code restores the full Diff offset after clamping: %s",
+  async (exit) => {
+    addCodeTopics();
+    mount("?tab=diff&rev=1");
+    await act(async () => loaded.resolve());
+    const pane = await screen.findByTestId("diff-pane");
+    await within(pane).findByRole("region", { name: "Topic Water the garden" });
+    let position = 0;
+    // Browsers clamp a newly visible scroller before layout effects can read it.
+    const maximum = () => (pane.querySelector("[data-diff-section][hidden]") ? 100 : 2000);
+    Object.defineProperty(pane, "scrollTop", {
+      configurable: true,
+      get: () => {
+        if (pane.hidden) return 0;
+        position = Math.min(position, maximum());
+        return position;
+      },
+      set: (next: number) => {
+        if (!pane.hidden) position = Math.min(next, maximum());
+      },
+    });
+    pane.scrollTop = 1200;
+    fireEvent.scroll(pane);
+    fireEvent.click(screen.getByRole("tab", { name: "Writeup" }));
+    const opener = await screen.findByRole("button", { name: "Code: Plant a seed" });
+    expect(pane.hidden).toBe(true);
+    fireEvent.scroll(pane);
+    fireEvent.click(opener);
+    expect(pane.scrollTop).toBe(0);
+    pane.scrollTop = 60;
+    fireEvent.scroll(pane);
+    if (exit === "close then Diff") {
+      fireEvent.click(screen.getByRole("button", { name: "Close code panel" }));
+      expect(pane.hidden).toBe(true);
+      fireEvent.scroll(pane);
+      // Reopening before the hidden scroller can restore must retain the full diff offset.
+      fireEvent.click(opener);
+      expect(pane.scrollTop).toBe(0);
+      fireEvent.click(screen.getByRole("button", { name: "Close code panel" }));
+    }
+    fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    await waitFor(() => expect(pane.hidden).toBe(false));
+    expect(pane.scrollTop).toBe(1200);
+  },
+);
+
+test("a link rendered in the phone Code sheet navigates in-app and closes the sheet", async () => {
+  width = 390;
+  addCodeTopics();
+  loading.link = `/r/${id}?tab=writeup&rev=1#topic-water`;
+  const { history } = mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Code: Plant a seed" }));
   await act(async () => loaded.resolve());
-  const pane = screen.getByTestId("diff-pane");
-  let position = 300;
-  Object.defineProperty(pane, "scrollTop", {
-    configurable: true,
-    get: () => (pane.hidden ? 0 : position),
-    set: (next: number) => {
-      if (!pane.hidden) position = next;
-    },
-  });
-  fireEvent.click(opener);
-  expect(pane.scrollTop).toBe(0);
-  fireEvent.click(screen.getByRole("button", { name: "Close code panel" }));
-  expect(pane.hidden).toBe(true);
-  fireEvent.click(opener);
-  expect(pane.scrollTop).toBe(0);
-  fireEvent.click(screen.getByRole("button", { name: "Close code panel" }));
-  fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
-  await waitFor(() => expect(pane.hidden).toBe(false));
-  expect(pane.scrollTop).toBe(300);
+  const sheet = await screen.findByRole("dialog", { name: "Plant a seed" });
+  const link = await within(sheet).findByRole("link", { name: "Read the writeup" });
+  // Cancelling the anchor's default action prevents a document navigation.
+  expect(fireEvent.click(link)).toBe(false);
+  await waitFor(() => expect(history.location.hash).toBe("#topic-water"));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(screen.getByRole("heading", { name: "Topic 2: Water the garden" })).toBeTruthy();
 });
+
+test.each([1280, 390])("focused Code at %s px omits the topic's Writeup link", async (pixels) => {
+  width = pixels;
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Code: Plant a seed" }));
+  await act(async () => loaded.resolve());
+  const topic = await screen.findByRole("region", { name: "Topic Plant a seed" });
+  expect(within(topic).queryByRole("link", { name: "Writeup" })).toBeNull();
+});
+
+test.each([1280, 390].flatMap((pixels) => ["Plant a seed", "seed.txt"].map((target) => ({ pixels, target }))))(
+  "Code at $pixels px returns focus to the replacement $target button after a revision change",
+  async ({ pixels, target }) => {
+    width = pixels;
+    const { history } = mount();
+    const opener = await screen.findByRole("button", { name: `Code: ${target}` });
+    act(() => opener.focus());
+    fireEvent.click(opener);
+    await act(async () => loaded.resolve());
+    await screen.findByRole("region", { name: "Topic Plant a seed" });
+    act(() => history.push(`/r/${id}?tab=writeup&rev=2`));
+    await waitFor(() => expect(opener.isConnected).toBe(false));
+    const close = await screen.findByRole("button", { name: pixels === 390 ? "Close" : "Close code panel" });
+    act(() => close.focus());
+    fireEvent.keyDown(close, { key: "Escape" });
+    const replacement = await screen.findByRole("button", { name: `Code: ${target}` });
+    expect(replacement).not.toBe(opener);
+    await waitFor(() => expect(document.activeElement === replacement).toBe(true));
+  },
+);
+
+test.each([1280, 768])(
+  "Diff tab at %s px keeps its controlled element through Code panel transitions",
+  async (pixels) => {
+    width = pixels;
+    mount();
+    const opener = await screen.findByRole("button", { name: "Code: Plant a seed" });
+    const tab = screen.getByRole("tab", { name: "Diff" });
+    const controlled = document.getElementById(tab.getAttribute("aria-controls") ?? "");
+    expect(controlled).not.toBeNull();
+    expect(controlled?.getAttribute("role")).toBe("tabpanel");
+    expect(controlled?.getAttribute("aria-labelledby")).toBe(tab.id);
+    expect(controlled?.closest("[hidden]")).toBeTruthy();
+    fireEvent.click(opener);
+    await act(async () => loaded.resolve());
+    expect(document.getElementById(tab.getAttribute("aria-controls") ?? "")).toBe(controlled);
+    expect(controlled?.hasAttribute("role")).toBe(false);
+    expect(controlled?.hasAttribute("aria-labelledby")).toBe(false);
+    fireEvent.click(tab);
+    expect(await screen.findByRole("tabpanel", { name: "Diff" })).toBe(controlled);
+    expect(controlled?.getAttribute("aria-labelledby")).toBe(tab.id);
+  },
+);
 
 test.each([1280, 390])("Code at %s px isolates hostile titles as text", async (pixels) => {
   width = pixels;

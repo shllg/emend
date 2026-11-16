@@ -28,7 +28,7 @@ export interface SheetProps {
 }
 
 const sides = {
-  full: "inset-0 h-[var(--visual-height,100dvh)] pb-[var(--sheet-safe-bottom,env(safe-area-inset-bottom))]",
+  full: "inset-0 h-[var(--visual-height,100dvh)] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[var(--sheet-safe-bottom,env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)]",
   right:
     "inset-y-0 right-0 w-[min(400px,92%)] rounded-l-xl border-l border-line-1 animate-[em-sheet-right_var(--dur-3)_var(--ease-out)]",
   left: "inset-y-0 left-0 w-[min(340px,92%)] rounded-r-xl border-r border-line-1 animate-[em-sheet-left_var(--dur-3)_var(--ease-out)]",

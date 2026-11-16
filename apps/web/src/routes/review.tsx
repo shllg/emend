@@ -393,13 +393,24 @@ function LoadedReview({
   if (codeFocus && (tab !== "writeup" || paneMode === "split" || (revision && !resolvedCode))) setCodeFocus(undefined);
   const openCode = codeMode && resolvedCode ? codeFocus : undefined;
   const panelOpen = codeMode === "panel" && !!openCode;
+  const codeReturnFocus = useCallback(() => {
+    if (codeOpener.current?.isConnected) return codeOpener.current;
+    const target = codeOpener.current?.getAttribute("data-code-target");
+    if (!target) return null;
+    // Reading remounts per revision. Compare target values without interpreting them as selectors.
+    return (
+      [...document.querySelectorAll<HTMLElement>("[data-code-target]")].find(
+        (element) => element.getAttribute("data-code-target") === target,
+      ) ?? null
+    );
+  }, []);
   const closeCode = useCallback(() => {
     const active = document.activeElement;
     const panel = codePane.current?.closest("[data-diff-scroll]");
     const returnFocus = active === document.body || (!!active && !!panel?.contains(active));
     setCodeFocus(undefined);
-    if (returnFocus && codeOpener.current?.isConnected) codeOpener.current.focus({ preventScroll: true });
-  }, []);
+    if (returnFocus) codeReturnFocus()?.focus({ preventScroll: true });
+  }, [codeReturnFocus]);
   const onOpenCode = useCallback((focus: CodeFocus, opener: HTMLElement) => {
     codeOpener.current = opener;
     setCodeFocus((current) => (sameCodeFocus(current, focus) ? undefined : focus));
@@ -552,6 +563,7 @@ function LoadedReview({
       for (const [key, value] of Object.entries(destination)) if (value !== undefined) params.set(key, String(value));
       window.open(`${url.pathname}?${params}${url.hash}`, "_blank", "noopener");
     } else {
+      if (codeMode === "sheet") setCodeFocus(undefined);
       navigateReading(
         destination,
         url.hash.slice(1),
@@ -878,29 +890,29 @@ function LoadedReview({
           returnFocus={downloadReturnFocus}
         />
       )}
-      {revision && (
-        <Sheet
-          side="full"
-          title={<bdi title={resolvedCode?.title}>{resolvedCode?.title}</bdi>}
-          open={codeMode === "sheet" && !!openCode}
-          onOpenChange={(open) => {
-            if (!open) setCodeFocus(undefined);
-          }}
-          returnFocus={() => codeOpener.current}
-          bodyClassName="p-0 space-y-0"
-          data-diff-scroll
-        >
-          <LazyDiffPane
-            key={seq}
-            reviewId={review.id}
-            revision={revision}
-            focus={openCode}
-            search={search}
-            onViewed={onViewed}
-          />
-        </Sheet>
-      )}
       <div className="contents" onClickCapture={followReadingLink} onAuxClickCapture={followReadingLink}>
+        {revision && (
+          <Sheet
+            side="full"
+            title={<bdi title={resolvedCode?.title}>{resolvedCode?.title}</bdi>}
+            open={codeMode === "sheet" && !!openCode}
+            onOpenChange={(open) => {
+              if (!open) setCodeFocus(undefined);
+            }}
+            returnFocus={codeReturnFocus}
+            bodyClassName="p-0 space-y-0"
+            data-diff-scroll
+          >
+            <LazyDiffPane
+              key={seq}
+              reviewId={review.id}
+              revision={revision}
+              focus={openCode}
+              search={search}
+              onViewed={onViewed}
+            />
+          </Sheet>
+        )}
         <Panes
           inbox={<ReviewInbox collapsed={collapsed} onCollapsedChange={setCollapsed} />}
           tab={tab}
@@ -1089,11 +1101,10 @@ function LoadedReview({
           diff={
             <div
               ref={codePane}
-              {...(layout !== "phone" && paneMode === "tabs" && tab === "diff"
+              {...(layout !== "phone" && paneMode === "tabs"
                 ? {
-                    role: "tabpanel",
                     id: `${readingId}-diff-panel`,
-                    "aria-labelledby": `${readingId}-tab-diff`,
+                    ...(!panelOpen ? { role: "tabpanel", "aria-labelledby": `${readingId}-tab-diff` } : {}),
                   }
                 : {})}
             >
