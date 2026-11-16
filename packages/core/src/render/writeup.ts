@@ -79,6 +79,7 @@ export async function renderWriteup(
         meta.effects,
         meta.mediaSizes,
         key === "glossary" ? undefined : matcher,
+        topic !== null && key === `t-${topic}-example` ? { exampleRows: true } : undefined,
       ),
     });
   };

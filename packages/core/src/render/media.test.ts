@@ -1,6 +1,12 @@
 import type { TopicMeta, WriteupInput } from "@emend/contract";
+import rehypeStringify from "rehype-stringify";
+import remarkParse from "remark-parse";
+import remarkRehype from "remark-rehype";
+import { unified } from "unified";
 import { describe, expect, test } from "vitest";
+import { blocksFromTree, blockText, visitElements } from "./blocks.ts";
 import { renderMarkdownWithBudget } from "./markdown.ts";
+import { hardenLinks } from "./sanitize.ts";
 import { renderWriteup } from "./writeup.ts";
 
 const shaA = "a".repeat(64);
@@ -108,7 +114,7 @@ describe("writeup media", () => {
 
   test("marks a paragraph of only images as a row, but not one with text", async () => {
     const two = await html("![Before](media/a.png) ![After](media/b.png)");
-    expect(two).toContain('<p class="emend-media-row">');
+    expect(two).toContain('<p class="emend-media-row emend-media-pair">');
     expect(two.match(/<span class="emend-media">/g)).toHaveLength(2);
     const mixed = await html("See ![Before](media/a.png) here");
     expect(mixed).not.toContain("emend-media-row");
@@ -321,4 +327,79 @@ describe("Markdown doc images", () => {
     expect(out).toContain("Raw HTML");
     expect(blocks.at(-1)).toMatchObject({ kind: "diagram", html: "", source: "graph TD; A-->B; click A callback" });
   });
+});
+
+const pairMarkdown = "![Before](media/a.png) ![After](media/b.png)";
+
+test.each([
+  ["", ""],
+  ["\nThe seed bed fits.", "The seed bed fits."],
+  ["  \nThe seed bed fits.", "The seed bed fits."],
+  [
+    "\n  The `seed` **fits** [here](https://example.com).",
+    'The <code>seed</code> <strong>fits</strong> <a href="https://example.com"',
+  ],
+  ["<br> \nThe seed bed fits.", "The seed bed fits."],
+])("pairs screenshots and preserves the effect after %j", async (suffix, effect) => {
+  const [block] = await render(pairMarkdown + suffix);
+  expect(block?.html).toContain('class="emend-media-row emend-media-pair"');
+  if (effect) expect(block?.html).toContain(`<span class="emend-media-effect">${effect}`);
+  else expect(block?.html).not.toContain("emend-media-effect");
+  expect(blockText(block?.html ?? "")).toBe(block?.text);
+});
+
+test.each([
+  ["![After](media/b.png) ![Before](media/a.png)", true],
+  [`${pairMarkdown} ![Third](media/x.png)`, true],
+  [`See ${pairMarkdown}`, false],
+  [`${pairMarkdown} Same line.\nLater line.`, false],
+  ["![Before](media/a.png) text ![After](media/b.png)", false],
+  ["![Beforehand](media/a.png) ![After](media/b.png)", true],
+  ["![Before](media/a.png)<br>![After](media/b.png)", false],
+])("keeps non-pair behavior for %s", async (md, row) => {
+  const out = await html(md);
+  expect(out).not.toContain("emend-media-pair");
+  expect(out).not.toContain("emend-media-effect");
+  expect(out.includes("emend-media-row")).toBe(row);
+});
+
+test("matches trimmed Before/After alts case-insensitively", async () => {
+  expect(await html("![ before change ](media/a.png) ![ AFTER change ](media/b.png)")).toContain("emend-media-pair");
+});
+
+test.each(["", "\nThe `seed` **fits**.", "  \nThe seed fits."])(
+  "pair wrappers preserve legacy block text and identity for %j",
+  async (suffix) => {
+    const md = pairMarkdown + suffix;
+    // Remove only the new wrappers from the parsed Markdown, keeping the existing media identity metadata.
+    const processor = unified().use(remarkParse).use(remarkRehype).use(hardenLinks).use(rehypeStringify);
+    const tree = await processor.run(processor.parse(md), { data: { media } });
+    visitElements(tree, (element) => {
+      if (element.tagName !== "p") return;
+      element.children = element.children.flatMap((child) =>
+        child.type === "element" && child.properties.className?.includes("emend-media-effect")
+          ? child.children
+          : [child],
+      );
+      delete element.properties.className;
+    });
+    const legacy = await blocksFromTree(tree, "overview", (node) =>
+      processor.stringify(node.type === "root" ? node : { type: "root", children: [node] }),
+    );
+    const [block] = await render(md);
+    expect(block?.text).toBe(legacy[0]?.text);
+    expect(block?.id).toBe(legacy[0]?.id);
+    expect(blockText(block?.html ?? "")).toBe(blockText(legacy[0]?.html ?? ""));
+  },
+);
+
+test("effect markup stays sanitized and author classes cannot forge a pair", async () => {
+  const out = await html(
+    `${pairMarkdown}\nEffect: <script>bad()</script><img src=x onerror=bad()> <svg onload=bad()></svg> [bad](javascript:bad()) <strong>safe</strong>\n\n<p class="emend-media-pair">Plain</p>\n\n<span class="emend-media-effect">Plain</span>`,
+  );
+  expect(out).toContain('<span class="emend-media-effect">Effect: ');
+  expect(out).toContain('class="user-content-emend-media-pair"');
+  expect(out).toContain('class="user-content-emend-media-effect"');
+  expect(out).not.toMatch(/<script|<svg|onerror|onload|javascript:/i);
+  expect(out).toContain("<strong>safe</strong>");
 });
