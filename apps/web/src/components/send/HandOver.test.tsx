@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { reconnectReviewEvents } from "../../lib/event-stream.ts";
+import { shortDate } from "../../lib/time.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
 import { HANDOFF_CLOSE_MS, HANDOFF_REFETCH_MS, HANDOFF_WAIT_MS, type SendAgent } from "./HandOver.tsx";
 import type { ReviewLifecycle } from "./ReviewActions.tsx";
@@ -78,43 +79,129 @@ async function send(phone = false) {
   fireEvent.click(screen.getByRole("button", { name: phone ? /^Send 1 comment/ : "Send" }));
   await settle();
 }
+function openResume() {
+  const trigger = screen.getByRole("button", { name: "How to resume" });
+  act(() => trigger.focus());
+  fireEvent.click(trigger);
+  return screen.getByRole("alertdialog", { name: "How to resume" });
+}
+async function openActions() {
+  fireEvent.keyDown(screen.getByRole("button", { name: "More review actions" }), { key: "ArrowDown" });
+  await settle();
+  return screen.getByRole("menu", { name: "More review actions" });
+}
 const refetches = (key: string) =>
   invalidate.mock.calls.filter((call: unknown[]) => (call[0] as { queryKey?: string[] })?.queryKey?.[0] === key).length;
 const reviewRefetches = () => refetches("review");
 const inboxRefetches = () => refetches("inbox");
 
-test("the Send bar says an agent is waiting and shows no command", () => {
-  mount({ agent: waiting });
-  expect(screen.getByText("An agent is waiting. It gets this now.")).toBeTruthy();
+test("the desktop status says an agent is waiting without a resume action or an extra row", async () => {
+  mount({ agent: waiting, lifecycle });
+  expect(screen.getByText("An agent is waiting").parentElement?.tabIndex).toBe(-1);
+  expect(screen.queryByRole("button", { name: "How to resume" })).toBeNull();
   expect(screen.queryByText(command)).toBeNull();
   expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
+  expect(screen.getByRole("region", { name: "Send and approve" }).children).toHaveLength(1);
+  expect(within(await openActions()).queryByRole("menuitem", { name: "How to resume" })).toBeNull();
 });
 
-test("the Send bar says no agent waits and gives the command, a Copy button and the line for other agents", () => {
+test("the desktop status opens the resume command in a dialog and Close returns focus to the link", async () => {
   mount({ agent: idle });
-  expect(screen.getByText("No agent is waiting. emend keeps this until an agent picks it up.")).toBeTruthy();
-  expect(screen.getByText(command)).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Copy" })).toBeTruthy();
-  expect(screen.getByText(`emend feedback ${reviewId}`).tagName).toBe("CODE");
-  expect(screen.getByText(/and handle the result with the emend-feedback skill\.$/)).toBeTruthy();
+  const trigger = screen.getByRole("button", { name: "How to resume" });
+  expect(trigger.parentElement?.textContent).toBe("No agent waiting · How to resume");
+  expect(trigger.getAttribute("type")).toBe("button");
+  expect(screen.queryByText(command)).toBeNull();
+  expect(screen.getByRole("region", { name: "Send and approve" }).children).toHaveLength(1);
+  const dialog = within(openResume());
+  expect(dialog.getByText("No agent is waiting. emend keeps this until an agent picks it up.")).toBeTruthy();
+  expect(dialog.getByText(command)).toBeTruthy();
+  expect(dialog.getByRole("button", { name: "Copy" })).toBeTruthy();
+  expect(dialog.getByText(`emend feedback ${reviewId}`).tagName).toBe("CODE");
+  expect(dialog.getByText(/and handle the result with the emend-feedback skill\.$/)).toBeTruthy();
+  const close = dialog.getByRole("button", { name: "Close" });
+  expect(document.activeElement).toBe(close);
+  fireEvent.click(close);
+  await settle();
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(document.activeElement).toBe(trigger);
+  expect(fetchMock).not.toHaveBeenCalled();
 });
 
 test.each<[string, Partial<ReviewLifecycle>, string]>([
   ["a snoozed review", { snoozed: true }, "The agent stopped waiting when you snoozed this on"],
   ["a retired review", { state: "settled" }, "The agent stopped waiting when you retired this on"],
   ["any other review", {}, "The agent stopped waiting on"],
-])("the Send bar says when emend ended the wait of %s, instead of the no-agent line", (_name, change, text) => {
-  mount({ agent: { ...idle, releasedAt: "2026-03-05T12:00:00.000Z" }, lifecycle: { ...lifecycle, ...change } });
-  expect(screen.getByText(new RegExp(`^${text} .*\\.$`))).toBeTruthy();
+])("the desktop status dates the ended wait of %s and its dialog explains why", (_name, change, text) => {
+  const releasedAt = "2026-03-05T12:00:00.000Z";
+  const date = shortDate(releasedAt);
+  mount({ agent: { ...idle, releasedAt }, lifecycle: { ...lifecycle, ...change } });
+  expect(screen.getByText(`The agent stopped waiting on ${date} ·`)).toBeTruthy();
+  expect(screen.queryByText(command)).toBeNull();
+  const dialog = within(openResume());
+  expect(dialog.getByText(`${text} ${date}.`)).toBeTruthy();
   expect(screen.queryByText(/No agent is waiting/)).toBeNull();
-  expect(screen.getByText(command)).toBeTruthy();
+  expect(dialog.getByText(command)).toBeTruthy();
 });
 
-test("the Send bar says nothing about the agent when it is not told, or when the review is approved", () => {
-  const { update } = mount();
+test.each([
+  { name: "without agent data", props: { lifecycle } },
+  { name: "after approval", props: { agent: idle, approved: true, lifecycle } },
+  {
+    name: "after retirement without a release date",
+    props: { agent: idle, lifecycle: { ...lifecycle, state: "settled" as const } },
+  },
+])("the desktop bar omits agent status and resume actions $name", async ({ props }) => {
+  mount(props);
   expect(screen.queryByText(/agent is waiting|No agent|stopped waiting/)).toBeNull();
-  update({ agent: idle, approved: true });
-  expect(screen.queryByText(/No agent is waiting/)).toBeNull();
+  expect(screen.queryByRole("button", { name: "How to resume" })).toBeNull();
+  expect(screen.getByText("1 unsent comment").parentElement?.children).toHaveLength(1);
+  expect(within(await openActions()).queryByRole("menuitem", { name: "How to resume" })).toBeNull();
+});
+
+test("an invalid release date uses the no-agent status and explanation", () => {
+  mount({ agent: { ...idle, releasedAt: "invalid" } });
+  expect(screen.getByText("No agent waiting ·")).toBeTruthy();
+  expect(
+    within(openResume()).getByText("No agent is waiting. emend keeps this until an agent picks it up."),
+  ).toBeTruthy();
+});
+
+test("the first more-actions item opens the resume dialog after the menu closes", async () => {
+  mount({ agent: idle, lifecycle });
+  const menu = within(await openActions());
+  const resume = menu.getByRole("menuitem", { name: "How to resume" });
+  expect(menu.getAllByRole("menuitem")[0]).toBe(resume);
+  expect(resume.nextElementSibling?.getAttribute("role")).toBe("separator");
+  fireEvent.click(resume);
+  await settle();
+  expect(screen.queryByRole("menu")).toBeNull();
+  const dialog = within(screen.getByRole("alertdialog", { name: "How to resume" }));
+  expect(dialog.getByText(command)).toBeTruthy();
+  expect(dialog.getByText("No agent is waiting. emend keeps this until an agent picks it up.")).toBeTruthy();
+  fireEvent.click(dialog.getByRole("button", { name: "Close" }));
+  await settle();
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "More review actions" }));
+  expect(document.body.style.pointerEvents).not.toBe("none");
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+test("switching to phone closes the resume dialog and switching back leaves it closed", async () => {
+  const { update } = mount({ agent: idle });
+  openResume();
+  update({ agent: idle, phone: true });
+  await settle();
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(screen.queryByRole("button", { name: "How to resume" })).toBeNull();
+  update({ agent: idle });
+  await settle();
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(screen.getByRole("button", { name: "How to resume" })).toBeTruthy();
+});
+
+test("the phone bar and more-actions menu have no resume action", async () => {
+  mount({ agent: idle, phone: true, lifecycle });
+  expect(screen.queryByRole("button", { name: "How to resume" })).toBeNull();
+  expect(within(await openActions()).queryByRole("menuitem", { name: "How to resume" })).toBeNull();
 });
 
 test("the phone puts the longer text in the Send sheet, not in the bar", () => {
@@ -231,6 +318,7 @@ test("Copy writes the command, reads Copied for 2 seconds and announces it", asy
   const writeText = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
   mount({ agent: idle });
+  openResume();
   fireEvent.click(screen.getByRole("button", { name: "Copy" }));
   expect(writeText).toHaveBeenCalledExactlyOnceWith(command);
   await settle();
@@ -246,6 +334,7 @@ test("a failed Copy selects the command text and asks the reader to copy it", as
   const writeText = vi.fn().mockRejectedValue(new Error("denied"));
   Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
   mount({ agent: idle });
+  openResume();
   fireEvent.click(screen.getByRole("button", { name: "Copy" }));
   await settle();
   expect(screen.getByText("Select and copy the command")).toBeTruthy();
@@ -256,6 +345,7 @@ test("a failed Copy selects the command text and asks the reader to copy it", as
 test("a missing clipboard counts as a failed Copy", async () => {
   Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
   mount({ agent: idle });
+  openResume();
   fireEvent.click(screen.getByRole("button", { name: "Copy" }));
   await settle();
   expect(screen.getByText("Select and copy the command")).toBeTruthy();
@@ -263,8 +353,9 @@ test("a missing clipboard counts as a failed Copy", async () => {
 
 test("the command renders as text, never HTML", () => {
   const hostile = "<img src=x onerror=alert(1)>";
-  const { container } = mount({ reviewId: hostile, agent: idle });
-  expect(container.querySelector("img")).toBeNull();
+  mount({ reviewId: hostile, agent: idle });
+  const dialog = openResume();
+  expect(dialog.querySelector("img")).toBeNull();
   expect(screen.getByText(`/emend:emend-feedback ${hostile}`)).toBeTruthy();
 });
 
@@ -438,6 +529,7 @@ test("Copy after unmount sets no state and starts no timer", async () => {
   const pending = Promise.withResolvers<void>();
   Object.defineProperty(navigator, "clipboard", { value: { writeText: () => pending.promise }, configurable: true });
   const view = mount({ agent: idle });
+  openResume();
   fireEvent.click(screen.getByRole("button", { name: "Copy" }));
   view.unmount();
   await act(async () => {
@@ -455,6 +547,7 @@ test("when the clipboard fails, an execCommand copy that succeeds reads as Copie
   const execCommand = vi.fn(() => true);
   Object.defineProperty(document, "execCommand", { value: execCommand, configurable: true, writable: true });
   mount({ agent: idle });
+  openResume();
   fireEvent.click(screen.getByRole("button", { name: "Copy" }));
   await settle();
   expect(execCommand).toHaveBeenCalledExactlyOnceWith("copy");
@@ -471,6 +564,7 @@ test("a repeated failure changes the announcement text so it is announced again"
   });
   Object.defineProperty(document, "execCommand", { value: () => false, configurable: true, writable: true });
   mount({ agent: idle });
+  openResume();
   fireEvent.click(screen.getByRole("button", { name: "Copy" }));
   await settle();
   const first = screen.getByText("Select and copy the command").textContent;

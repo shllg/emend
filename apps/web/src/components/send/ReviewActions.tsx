@@ -1,6 +1,6 @@
 import { type InboxGroup, LIMITS, type ReviewState } from "@emend/contract";
 import { useQuery } from "@tanstack/react-query";
-import { AlarmClock, Archive, BellOff, Ellipsis, FolderInput, Trash2, Undo2 } from "lucide-react";
+import { AlarmClock, Archive, BellOff, Ellipsis, FolderInput, Terminal, Trash2, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ApiError } from "../../api/client.ts";
 import {
@@ -41,11 +41,13 @@ export function ReviewActions({
   lifecycle,
   unsentCount,
   phone,
+  onHowToResume,
 }: {
   reviewId: string;
   lifecycle: ReviewLifecycle;
   unsentCount: number;
   phone: boolean;
+  onHowToResume?: () => void;
 }) {
   const { title, state, snoozed, onDeleted } = lifecycle;
   const [panel, setPanel] = useState<Panel>(null);
@@ -192,6 +194,11 @@ export function ReviewActions({
     }
   };
   const items: MenuItem[] = [];
+  if (onHowToResume)
+    items.push(
+      { label: "How to resume", icon: Terminal, opensDialog: true, onSelect: onHowToResume },
+      { separator: true },
+    );
   if (state === "open") {
     items.push({
       label: snoozed ? "Snooze again" : "Snooze",
