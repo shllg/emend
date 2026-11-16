@@ -8,7 +8,7 @@ export function LineTotals({ counts }: { counts: LineTotal | null }) {
   const missing = counts.uncounted > 0 ? `${counts.uncounted} ${plural(counts.uncounted, "file")} not counted` : null;
   return (
     <span
-      className="inline-flex shrink-0 gap-1.5 text-12 font-mono tabular-nums font-stretch-mono"
+      className="inline-flex shrink-0 gap-1.5 text-13 font-mono tabular-nums"
       title={missing ? `Partial: ${missing}` : undefined}
     >
       <span className="sr-only">

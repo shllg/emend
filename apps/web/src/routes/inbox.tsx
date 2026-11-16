@@ -272,7 +272,7 @@ export function Inbox({
               </>
             );
             const headingClass =
-              "m-0 flex items-center gap-2 px-2.5 pt-3 pb-1 font-mono text-12 font-semibold leading-(--lh-snug) font-stretch-mono tracking-(--tracking-label) text-fg-2 uppercase";
+              "m-0 flex items-center gap-2 px-2.5 pt-3 pb-1 text-13 font-semibold leading-(--lh-snug) tracking-(--tracking-label) text-fg-2 uppercase";
             return (
               <section key={key} aria-label={title}>
                 <Heading className={headingClass}>

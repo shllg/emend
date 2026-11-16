@@ -101,7 +101,7 @@ export function PairingCodeInput({
           const pasted = event.clipboardData.getData("text");
           update(input, input.value.slice(0, start) + pasted + input.value.slice(end), start + pasted.length);
         }}
-        className="box-border h-[60px] w-full rounded-lg border border-line-2 bg-surface px-3 text-center font-mono text-[26px] leading-none font-semibold font-stretch-mono tracking-[0.16em] text-fg-1 uppercase shadow-inset placeholder:text-fg-disabled focus:border-line-focus focus:outline-none focus:shadow-[0_0_0_3px_var(--accent-tint-2)] disabled:cursor-not-allowed disabled:bg-sunken disabled:text-fg-disabled aria-invalid:border-danger-solid aria-invalid:focus:shadow-[0_0_0_3px_var(--danger-bg)]"
+        className="box-border h-[60px] w-full rounded-lg border border-line-2 bg-surface px-3 text-center font-mono text-[28px] leading-none font-semibold tracking-[0.16em] text-fg-1 uppercase shadow-inset placeholder:text-fg-disabled focus:border-line-focus focus:outline-none focus:shadow-[0_0_0_3px_var(--accent-tint-2)] disabled:cursor-not-allowed disabled:bg-sunken disabled:text-fg-disabled aria-invalid:border-danger-solid aria-invalid:focus:shadow-[0_0_0_3px_var(--danger-bg)]"
       />
       <FieldMessage id={field.messageId} error={error} />
     </div>

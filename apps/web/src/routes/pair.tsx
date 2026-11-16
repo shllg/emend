@@ -53,7 +53,7 @@ export function PairPage() {
   }, [redeem]);
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col gap-5 px-6 pt-14 pb-6">
-      <p className="mb-3 font-mono text-30 font-medium leading-none font-stretch-mono text-fg-1">emend</p>
+      <p className="mb-3 font-mono text-[32px] font-medium leading-none text-fg-1">emend</p>
       <h1 className="text-24 font-semibold leading-(--lh-tight) tracking-(--tracking-tight)">
         {loopback ? "Sign in" : "Pair this device"}
       </h1>

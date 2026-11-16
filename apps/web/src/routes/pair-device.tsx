@@ -129,7 +129,7 @@ export function PairDevicePage() {
         ) : (
           <>
             Scan the QR code to pair with this hub, or open{" "}
-            {pairing ? <span className="font-mono text-12 wrap-anywhere">{pairing.origin}</span> : "this hub"} on your
+            {pairing ? <span className="font-mono text-13 wrap-anywhere">{pairing.origin}</span> : "this hub"} on your
             device and type the code.
           </>
         )
@@ -184,12 +184,8 @@ export function PairDevicePage() {
                   ))}
                 </svg>
                 <div className="flex min-w-0 flex-col items-start gap-2">
-                  <span className="font-mono text-11 font-medium font-stretch-mono tracking-(--tracking-label) text-fg-3 uppercase">
-                    Code
-                  </span>
-                  <p className="font-mono text-24 leading-none font-semibold font-stretch-mono tracking-[0.12em]">
-                    {pairing.code}
-                  </p>
+                  <span className="text-12 font-medium tracking-(--tracking-label) text-fg-3 uppercase">Code</span>
+                  <p className="font-mono text-[26px] leading-none font-semibold tracking-[0.12em]">{pairing.code}</p>
                   <p className="inline-flex items-center gap-1 text-12 text-fg-3">
                     <Icon icon={Clock} size={12} />
                     Expires in {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}

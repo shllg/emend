@@ -38,8 +38,8 @@ export function OriginBadge({
     <span
       title={`From ${origin.name}`}
       className={cn(
-        "inline-flex shrink-0 items-center whitespace-nowrap rounded-sm pr-1.5 pl-[5px] font-mono font-medium leading-none font-stretch-mono",
-        size === "sm" ? "h-[18px] text-[10px]" : "h-5 text-[10.5px]",
+        "inline-flex shrink-0 items-center whitespace-nowrap rounded-sm pr-1.5 pl-[5px] font-mono font-medium leading-none",
+        size === "sm" ? "h-[18px] text-[11px]" : "h-5 text-[11.5px]",
         tint?.[0],
         className,
       )}

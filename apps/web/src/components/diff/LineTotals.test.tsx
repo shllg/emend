@@ -16,7 +16,7 @@ test("totals format numbers, use diff colors and announce singular and plural li
     const span = screen.getByText(text);
     expect(span.getAttribute("aria-hidden")).toBe("true");
     expect(span.classList.contains(color)).toBe(true);
-    expect(span.parentElement?.className).toContain("font-mono tabular-nums font-stretch-mono");
+    expect(span.parentElement?.className).toContain("text-13 font-mono tabular-nums");
   }
 });
 

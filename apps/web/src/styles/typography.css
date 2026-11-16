@@ -1,8 +1,9 @@
 :root {
-  --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Martian Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  --mono-stretch: 87.5%;
-  /* scale (px). Body stays 14 for density; mono runs ~1px smaller because Martian has a tall x-height */
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* JetBrains Mono draws programming ligatures through calt; a review must show the characters as written. */
+  --mono-features: "calt" 0;
+  /* Scale (px). Body stays 14 for density; mono sizes run 1px above the previous mono sizes so JetBrains Mono keeps the same width and visual size. */
   --text-11: 11px;
   --text-12: 12px;
   --text-13: 13px;
@@ -27,7 +28,7 @@
   --tracking-label: 0.04em;
   /* semantic roles */
   --type-prose-size: var(--text-16);
-  --type-code-size: var(--text-12);
+  --type-code-size: var(--text-13);
   --type-display: 600 var(--text-30) / var(--lh-tight) var(--font-sans);
   --type-h1: 600 var(--text-24) / var(--lh-tight) var(--font-sans);
   --type-h2: 600 var(--text-18) / var(--lh-snug) var(--font-sans);
@@ -35,8 +36,8 @@
   --type-body: 400 var(--text-14) / var(--lh-body) var(--font-sans);
   --type-ui: 500 var(--text-13) / var(--lh-snug) var(--font-sans);
   --type-meta: 400 var(--text-12) / var(--lh-snug) var(--font-sans);
-  --type-label: 500 var(--text-11) / var(--lh-snug) var(--font-mono);
-  --type-path: 400 var(--text-12) / var(--lh-snug) var(--font-mono);
+  --type-label: 500 var(--text-12) / var(--lh-snug) var(--font-sans);
+  --type-path: 400 var(--text-13) / var(--lh-snug) var(--font-mono);
 }
 
 /* Resolve shorthands where preferences are set, before inheritance into the reader. */

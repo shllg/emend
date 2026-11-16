@@ -9,13 +9,14 @@ const webSource = fileURLToPath(new URL(".", import.meta.url));
 const webLicenses = fileURLToPath(new URL("../public/licenses/", import.meta.url));
 const webFonts = join(webSource, "fonts");
 const fontFiles = [
-  "hanken-grotesk-latin-wght-normal.woff2",
-  "hanken-grotesk-latin-ext-wght-normal.woff2",
-  "hanken-grotesk-latin-wght-italic.woff2",
-  "martian-mono-latin-standard-normal.woff2",
-  "martian-mono-latin-ext-standard-normal.woff2",
+  "geist-latin-wght-normal.woff2",
+  "geist-latin-ext-wght-normal.woff2",
+  "geist-latin-wght-italic.woff2",
+  "jetbrains-mono-latin-wght-normal.woff2",
+  "jetbrains-mono-latin-ext-wght-normal.woff2",
+  "jetbrains-mono-latin-wght-italic.woff2",
 ];
-const fontLicenses = ["hanken-grotesk-OFL.txt", "martian-mono-OFL.txt"];
+const fontLicenses = ["geist-OFL.txt", "jetbrains-mono-OFL.txt"];
 
 function webStylesheets() {
   return readdirSync(webSource, { recursive: true, encoding: "utf8" })
@@ -123,7 +124,10 @@ test("web CSS loads only relative bundled fonts and never imports a remote style
   }
 });
 
-test("the five variable fonts and their OFL licences ship with matching font-face sources", () => {
+test("the six variable fonts and their OFL licences ship with matching font-face sources", () => {
+  for (const directory of [webFonts, webLicenses]) {
+    expect(readdirSync(directory).filter((file) => /^(?:hanken-grotesk|martian-mono)-/.test(file))).toEqual([]);
+  }
   for (const file of fontFiles) {
     const bytes = readFileSync(join(webFonts, file));
     expect(bytes.subarray(0, 4).toString(), file).toBe("wOF2");
@@ -138,19 +142,76 @@ test("the five variable fonts and their OFL licences ship with matching font-fac
       const src = /\bsrc\s*:\s*([^;]+);/i.exec(declarations)?.[1] ?? "";
       const urls = cssUrls(src);
       expect(urls).toHaveLength(1);
+      expect(src).toContain('format("woff2")');
       expect(declarations).toMatch(/font-display:\s*swap\s*;/);
+      expect(declarations).not.toMatch(/font-stretch/);
       for (const url of urls) {
-        const martian = url.includes("martian-mono-");
+        const mono = url.includes("jetbrains-mono-");
         const italic = url.endsWith("-italic.woff2");
-        expect(declarations, url).toMatch(martian ? /font-weight:\s*100\s+800\s*;/ : /font-weight:\s*100\s+900\s*;/);
-        if (martian) expect(declarations, url).toMatch(/font-stretch:\s*75%\s+112\.5%\s*;/);
+        expect(declarations, url).toMatch(mono ? /font-family:\s*"JetBrains Mono"\s*;/ : /font-family:\s*"Geist"\s*;/);
+        expect(declarations, url).toMatch(mono ? /font-weight:\s*100\s+800\s*;/ : /font-weight:\s*100\s+900\s*;/);
         expect(declarations, url).toMatch(italic ? /font-style:\s*italic\s*;/ : /font-style:\s*normal\s*;/);
-        if (!italic) expect(declarations, url).toMatch(/unicode-range:\s*U\+[0-9a-f]/i);
+        if (italic) expect(declarations, url).not.toMatch(/unicode-range/);
+        else expect(declarations, url).toMatch(/unicode-range:\s*U\+[0-9a-f]/i);
         sources.push(resolve(dirname(path), url));
       }
     }
   }
   expect(sources.sort()).toEqual(fontFiles.map((file) => join(webFonts, file)).sort());
+});
+
+test("text and labels use the sans family and every mono declaration disables programming ligatures", () => {
+  const typography = readFileSync(join(webSource, "styles/typography.css"), "utf8");
+  expect(typography).toMatch(/--font-sans:\s*"Geist",/);
+  expect(typography).toMatch(/--font-mono:\s*"JetBrains Mono",/);
+  expect(typography).toMatch(/--mono-features:\s*"calt"\s+0\s*;/);
+  expect(typography).toMatch(/--type-label:\s*[^;]+var\(--font-sans\)\s*;/);
+  let monoDeclarations = 0;
+  for (const { path, css } of webStylesheets()) {
+    expect(css, path).not.toMatch(/--mono-stretch|font-stretch/);
+    for (const block of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const declarations = block[2] ?? "";
+      const context = `${path}: ${block[1]?.trim()}`;
+      const fonts = declarations.matchAll(
+        /(?:^|;)\s*font(?:-family)?:\s*[^;]*var\(--(?:font-mono|type-code|type-path)\)[^;]*(?=;)/g,
+      );
+      for (const font of fonts) {
+        monoDeclarations++;
+        expect(declarations.slice(font.index + font[0].length), context).toMatch(
+          /;\s*font-feature-settings:\s*var\(--mono-features\)\s*;/,
+        );
+      }
+    }
+  }
+  expect(monoDeclarations).toBeGreaterThan(0);
+  expect(readFileSync(join(webSource, "styles/diff.css"), "utf8")).toMatch(
+    /--diffs-font-features:\s*var\(--mono-features\)\s*;/,
+  );
+  expect(readFileSync(join(webSource, "styles/theme.css"), "utf8")).toMatch(
+    /--font-mono--font-feature-settings:\s*var\(--mono-features\)\s*;/,
+  );
+});
+
+test("mono text uses stylesheet rules or font-mono instead of arbitrary font utilities", () => {
+  const files = readdirSync(webSource, { recursive: true, encoding: "utf8" }).filter(
+    (path) => /\.tsx?$/.test(path) && !/\.test\.tsx?$/.test(path),
+  );
+  expect(files.length).toBeGreaterThan(0);
+  for (const file of files) {
+    const source = readFileSync(join(webSource, file), "utf8");
+    for (const utility of [
+      "[font-feature-settings:",
+      "[font:var(--type-path)]",
+      "[font:var(--type-code)]",
+      "[font:var(--font-mono)",
+    ]) {
+      expect(source, file).not.toContain(utility);
+    }
+  }
+  const css = readFileSync(join(webSource, "styles/diff.css"), "utf8");
+  expect(/\.em-path\s*\{([^}]+)\}/.exec(css)?.[1]).toMatch(
+    /font:\s*var\(--type-path\)\s*;\s*font-feature-settings:\s*var\(--mono-features\)\s*;/,
+  );
 });
 
 test("writeup images keep their own size, stay under half the screen and show a ring, using theme tokens only", () => {

@@ -29,9 +29,9 @@ function mount(children: ReactNode) {
   return render(children, { wrapper: TooltipProvider });
 }
 
-test("class merging keeps numeric type sizes, text colors, mono stretch and the custom shadow scale distinct", () => {
+test("class merging keeps numeric type sizes, text colors, font families and the custom shadow scale distinct", () => {
   expect(cn("text-13 text-fg-1", "text-12 text-success-fg")).toBe("text-12 text-success-fg");
-  expect(cn("font-sans", "font-mono font-stretch-mono")).toBe("font-mono font-stretch-mono");
+  expect(cn("font-sans font-medium", "font-mono")).toBe("font-medium font-mono");
   expect(cn("shadow-1", "shadow-3")).toBe("shadow-3");
   expect(cn("shadow-inset", "shadow-none")).toBe("shadow-none");
 });
@@ -1058,7 +1058,7 @@ function TextSizeMenuExample() {
             label: "Code in diffs",
             value: code,
             onValueChange: setCode,
-            items: [11, 12, 13, 14].map((size) => ({ value: String(size), label: `${size} px` })),
+            items: [12, 13, 14, 15].map((size) => ({ value: String(size), label: `${size} px` })),
           },
         },
       ]}
@@ -1071,7 +1071,9 @@ test("text menu row navigation keeps focus after deferred Radix handlers and sta
   fireEvent.keyDown(screen.getByRole("button", { name: "Text size" }), { key: "ArrowDown" });
   await screen.findByRole("menu");
   vi.useFakeTimers();
-  const option = (size: number) => screen.getByRole("menuitemradio", { name: `${size} px` });
+  const prose = within(screen.getByRole("group", { name: "Writeup and docs" }));
+  const code = within(screen.getByRole("group", { name: "Code in diffs" }));
+  const option = (size: number) => prose.getByRole("menuitemradio", { name: `${size} px` });
   // Focus and selection differ when moving through the menu without choosing a value.
   act(() => option(15).focus());
   fireEvent.keyDown(option(15), { key: "ArrowRight" });
@@ -1088,7 +1090,7 @@ test("text menu row navigation keeps focus after deferred Radix handlers and sta
   fireEvent.keyDown(option(15), { key: "ArrowLeft" });
   await act(() => vi.advanceTimersByTimeAsync(1));
   expect(document.activeElement).toBe(option(18));
-  expect(option(13).getAttribute("aria-checked")).toBe("true");
+  expect(code.getByRole("menuitemradio", { name: "13 px" }).getAttribute("aria-checked")).toBe("true");
 });
 
 test("Checkbox keeps React-node descriptions associated with existing help text", () => {

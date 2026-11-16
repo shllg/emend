@@ -29,8 +29,7 @@ export function FilePathMenu({ path, oldPath }: { path: string; oldPath?: string
       blocks={[
         {
           content: <Path path={path} />,
-          className:
-            "px-2.5 pt-2 pb-1 font-stretch-mono whitespace-pre-wrap text-fg-1 [font:var(--type-path)] [overflow-wrap:anywhere] select-text",
+          className: "em-path px-2.5 pt-2 pb-1 whitespace-pre-wrap text-fg-1 [overflow-wrap:anywhere] select-text",
         },
         ...(oldPath
           ? [
@@ -40,8 +39,7 @@ export function FilePathMenu({ path, oldPath }: { path: string; oldPath?: string
                     Renamed from <Path path={oldPath} />
                   </>
                 ),
-                className:
-                  "px-2.5 pb-1 font-stretch-mono whitespace-pre-wrap text-fg-3 [font:var(--type-path)] [overflow-wrap:anywhere] select-text",
+                className: "em-path px-2.5 pb-1 whitespace-pre-wrap text-fg-3 [overflow-wrap:anywhere] select-text",
               },
             ]
           : []),

@@ -43,7 +43,7 @@ export function FileHeader({
         onClick={onToggle}
       />
       <FileStatusMark status={file.status} />
-      <div className="min-w-0 flex-1 font-stretch-mono [font:var(--type-path)]">
+      <div className="em-path min-w-0 flex-1">
         <FilePathMenu path={file.path} oldPath={file.oldPath} />
         {file.oldPath && (
           <p className="em-file-path text-fg-3" title={`Renamed from ${file.oldPath}`}>
@@ -55,7 +55,7 @@ export function FileHeader({
         )}
       </div>
       {counts && !file.flag && (
-        <span className="flex shrink-0 gap-1.5 font-mono text-11 font-stretch-mono tabular-nums">
+        <span className="flex shrink-0 gap-1.5 font-mono text-12 tabular-nums">
           <span className="text-diff-add-fg">+{counts.additions}</span>
           <span className="text-diff-del-fg">−{counts.deletions}</span>
         </span>

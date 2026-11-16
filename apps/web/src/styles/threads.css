@@ -39,6 +39,7 @@
     margin-left: auto;
     color: var(--fg-2);
     font: var(--type-path);
+    font-feature-settings: var(--mono-features);
   }
   .em-agent-note__summary {
     font: 600 14px / 1.5 var(--font-sans);
@@ -51,7 +52,8 @@
     overflow-wrap: anywhere;
   }
   .em-note-ref {
-    font: 600 11px / 1.5 var(--font-mono);
+    font: 600 12px / 1.5 var(--font-mono);
+    font-feature-settings: var(--mono-features);
     background: var(--accent-tint);
     color: var(--accent-text);
     border-radius: 4px;
@@ -132,7 +134,7 @@
     align-items: center;
     gap: 6px;
     font: var(--type-path);
-    font-stretch: var(--mono-stretch);
+    font-feature-settings: var(--mono-features);
     color: var(--fg-2);
     white-space: nowrap;
   }
@@ -198,6 +200,7 @@
   }
   .em-thread-quote--code {
     font-family: var(--font-mono);
+    font-feature-settings: var(--mono-features);
     white-space: pre;
     overflow-x: auto;
   }

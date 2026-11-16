@@ -111,9 +111,7 @@ function DiagramFrame({ source }: { source: string }) {
       <div className="flex items-baseline gap-2">
         <details className="min-w-0 flex-1">
           <summary className="cursor-pointer text-fg-3 [font:var(--type-meta)]">Diagram source</summary>
-          <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-12 font-stretch-mono text-fg-2">
-            {source}
-          </pre>
+          <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-13 text-fg-2">{source}</pre>
         </details>
         <Button
           variant="ghost"

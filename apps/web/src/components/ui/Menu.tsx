@@ -153,7 +153,7 @@ export function Menu({ label, trigger, align = "right", size = "md", items, defa
                 <Primitive.Label
                   // biome-ignore lint/suspicious/noArrayIndexKey: Menu descriptions have no ids and may repeat labels.
                   key={index}
-                  className="px-2.5 pt-2 pb-1 font-mono text-11 font-medium leading-(--lh-snug) font-stretch-mono tracking-(--tracking-label) text-fg-3 uppercase"
+                  className="px-2.5 pt-2 pb-1 text-12 font-medium leading-(--lh-snug) tracking-(--tracking-label) text-fg-3 uppercase"
                 >
                   {item.heading}
                 </Primitive.Label>

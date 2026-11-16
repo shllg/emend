@@ -91,7 +91,7 @@ export function ReviewRow({
           {review.title}
         </span>
       </span>
-      <span className="col-start-1 row-start-3 truncate font-mono text-11 leading-[1.3] font-stretch-mono text-fg-3">
+      <span className="col-start-1 row-start-3 truncate font-mono text-12 leading-[1.3] text-fg-3">
         {review.movedTo ? `Moved to ${new URL(review.movedTo).host}` : review.branch}
       </span>
       {!review.movedTo && (

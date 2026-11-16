@@ -448,7 +448,7 @@ test.each(["touch", "pen", "mouse"])(
     expect(block.getAttribute("aria-hidden")).toBe("true");
     for (const name of ["whitespace-pre-wrap", "[overflow-wrap:anywhere]", "font-sans", "select-text"])
       expect(block.classList.contains(name)).toBe(true);
-    expect(block.classList.contains("font-stretch-mono")).toBe(false);
+    expect(block.classList.contains("font-mono")).toBe(false);
     const copy = within(menu).getByRole("menuitem", { name: "Copy title", description: titleName });
     expect(copy.getAttribute("aria-describedby")).toBe(block.id);
     expect(document.getElementById(block.id)).toBe(block);
@@ -1078,7 +1078,7 @@ test("phone with a long title: the heading truncates and the picker never shrink
 
 test("phone without a branch and with files renders no meta row", () => {
   const { container } = mount({ phone: true, metadata: { ...review, branch: null }, loaded: withFiles });
-  expect(container.querySelector(".font-mono.text-12")).toBeNull();
+  expect(container.querySelector(".font-mono.text-13")).toBeNull();
   expect(container.querySelector(".lucide-git-branch")).toBeNull();
   const header = container.firstElementChild as HTMLElement;
   expect(header.children).toHaveLength(2);

@@ -3412,21 +3412,30 @@ test("phone menu on the Diff tab still offers Long lines", async () => {
 
 test.each([1280, 900, 390])("text menu changes validated app variables at %s px", async (size) => {
   width = size;
-  localStorage.setItem("emend.layout.v1", JSON.stringify({ proseSize: "18px; color: red", codeSize: 100 }));
+  localStorage.setItem("emend.layout.v1", JSON.stringify({ proseSize: "18px; color: red", codePx: 100 }));
   const { container } = mount(`/r/${id}`);
   await screen.findByText("Overview");
   const root = container.querySelector<HTMLElement>(".em-app");
   expect(root?.style.getPropertyValue("--reader-prose-size")).toBe("16px");
-  expect(root?.style.getPropertyValue("--reader-code-size")).toBe("12px");
+  expect(root?.style.getPropertyValue("--reader-code-size")).toBe("13px");
   fireEvent.keyDown(screen.getByRole("button", { name: size < 768 ? "More" : "View" }), { key: "ArrowDown" });
   const menu = within(await screen.findByRole("menu", { name: size < 768 ? "More" : "View" }));
   fireEvent.click(menu.getByRole("menuitemradio", { name: "18 px" }));
   expect(root?.style.getPropertyValue("--reader-prose-size")).toBe("18px");
-  fireEvent.click(menu.getByRole("menuitemradio", { name: "14 px" }));
+  const code = within(menu.getByRole("group", { name: "Code in diffs" }));
+  expect(code.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
+    "12 px",
+    "13 px",
+    "14 px",
+    "15 px",
+  ]);
+  fireEvent.click(code.getByRole("menuitemradio", { name: "15 px" }));
+  expect(root?.style.getPropertyValue("--reader-code-size")).toBe("15px");
+  fireEvent.keyDown(code.getByRole("menuitemradio", { name: "15 px" }), { key: "ArrowLeft" });
   expect(root?.style.getPropertyValue("--reader-code-size")).toBe("14px");
-  fireEvent.keyDown(menu.getByRole("menuitemradio", { name: "14 px" }), { key: "ArrowLeft" });
-  expect(root?.style.getPropertyValue("--reader-code-size")).toBe("13px");
-  fireEvent.keyDown(menu.getByRole("menuitemradio", { name: "13 px" }), { key: "Escape" });
+  fireEvent.keyDown(code.getByRole("menuitemradio", { name: "14 px" }), { key: "Home" });
+  expect(root?.style.getPropertyValue("--reader-code-size")).toBe("12px");
+  fireEvent.keyDown(code.getByRole("menuitemradio", { name: "12 px" }), { key: "Escape" });
   await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 });
 

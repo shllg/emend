@@ -62,7 +62,7 @@ export function ResumeCommand({ reviewId, compact = false }: { reviewId: string;
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <code
           ref={text}
-          className="min-w-0 break-all rounded-sm border border-line-1 bg-sunken px-2 py-1 font-mono text-12 text-fg-1 select-all"
+          className="min-w-0 break-all rounded-sm border border-line-1 bg-sunken px-2 py-1 font-mono text-13 text-fg-1 select-all"
         >
           {command}
         </code>

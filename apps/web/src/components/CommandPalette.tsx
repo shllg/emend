@@ -169,7 +169,7 @@ export function CommandPalette() {
                 <div
                   id={`${id}-${group.label.replaceAll(" ", "-")}`}
                   role="presentation"
-                  className="px-2.5 pt-2 pb-1 font-mono text-11 font-medium leading-(--lh-snug) font-stretch-mono tracking-(--tracking-label) text-fg-3 uppercase"
+                  className="px-2.5 pt-2 pb-1 text-12 font-medium leading-(--lh-snug) tracking-(--tracking-label) text-fg-3 uppercase"
                 >
                   {group.label}
                 </div>

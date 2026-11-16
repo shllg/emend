@@ -87,7 +87,6 @@
   .em-dash-outline:is(:hover, :has(:focus-visible)) .em-dash-outline__count {
     flex: none;
     font: var(--type-label);
-    font-stretch: var(--mono-stretch);
     color: var(--fg-3);
   }
   .em-dash-outline:is(:hover, :has(:focus-visible)) .em-dash-outline__item:hover {

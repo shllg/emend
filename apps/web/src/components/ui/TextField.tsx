@@ -40,7 +40,7 @@ export function TextField({
           aria-describedby={field.describedBy}
           className={cn(
             inputClass,
-            mono && "font-mono text-12 font-normal font-stretch-mono",
+            mono && "font-mono text-13 font-normal",
             inputSizes[size],
             mono ? "leading-[1.6]" : "leading-(--lh-body)",
             icon && "pl-[30px]",

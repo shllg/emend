@@ -22,22 +22,32 @@ export const layoutSchema = z.object({
     .catch({ phone: false, tablet: true, desktop: true }),
   inboxCollapsed: z.boolean().catch(false),
   proseSize: z.union([z.literal(15), z.literal(16), z.literal(17), z.literal(18)]).catch(16),
-  // D.4 inherits --type-code, currently 12px, rather than Pierre's 13px fallback.
-  codeSize: z.union([z.literal(11), z.literal(12), z.literal(13), z.literal(14)]).catch(12),
+  // Code in diffs inherits --type-code, currently 13px.
+  codePx: z.union([z.literal(12), z.literal(13), z.literal(14), z.literal(15)]).catch(13),
 });
 export type LayoutPreferences = z.infer<typeof layoutSchema>;
 export type FileOrder = LayoutPreferences["fileOrder"];
 export type ReadingWidth = LayoutPreferences["readingWidth"];
 export const readingMeasure = { comfortable: "1024px", wide: "1248px", narrow: "68ch" } as const;
-type LayoutPatch = Partial<Omit<LayoutPreferences, "proseSize" | "codeSize">> & {
+type LayoutPatch = Partial<Omit<LayoutPreferences, "proseSize" | "codePx">> & {
   proseSize?: number;
-  codeSize?: number;
+  codePx?: number;
 };
 export const defaultLayout = layoutSchema.parse({});
 
 function parse(raw: string | null): LayoutPreferences {
   try {
     const value = JSON.parse(raw ?? "{}");
+    if (
+      value !== null &&
+      typeof value === "object" &&
+      Object.getPrototypeOf(value) === Object.prototype &&
+      ![12, 13, 14, 15].includes(value.codePx) &&
+      [11, 12, 13, 14].includes(value.codeSize)
+    ) {
+      // Legacy sizes use Martian Mono units; JetBrains Mono needs 1px more for the same visual size.
+      value.codePx = value.codeSize + 1;
+    }
     return layoutSchema.parse(value);
   } catch {
     return layoutSchema.parse({});
@@ -68,7 +78,8 @@ export function createLayoutStore() {
   };
   const persist = () => {
     try {
-      const raw = JSON.stringify(snapshot);
+      // Older tabs still use 11–14 units; keep their visual size in the same atomic write.
+      const raw = JSON.stringify({ ...snapshot, codeSize: snapshot.codePx - 1 });
       localStorage.setItem(layoutKey, raw);
       saved = raw;
     } catch {
@@ -130,7 +141,7 @@ export function createLayoutStore() {
       snapshot = layoutSchema.parse({
         ...next,
         proseSize: Math.round(Math.min(18, Math.max(15, next.proseSize))),
-        codeSize: Math.round(Math.min(14, Math.max(11, next.codeSize))),
+        codePx: Math.round(Math.min(15, Math.max(12, next.codePx))),
       });
       persist();
       notify();
