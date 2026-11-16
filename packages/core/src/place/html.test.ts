@@ -1,5 +1,16 @@
-import { expect, test } from "vitest";
-import { docText, placeHtmlSpan } from "./html.ts";
+import { defaultTreeAdapter } from "parse5";
+import { afterEach, expect, test, vi } from "vitest";
+import { docText, HTML_NESTING_LIMIT, placeHtmlSpan } from "./html.ts";
+
+afterEach(() => vi.restoreAllMocks());
+
+function expectNestingCap(input: string) {
+  const create = vi.spyOn(defaultTreeAdapter, "createElement");
+  expect(docText(input)).toBeNull();
+  expect(create.mock.calls.length).toBeGreaterThan(HTML_NESTING_LIMIT);
+  // These recoveries can create one implied element per nested div, plus html/head/body.
+  expect(create.mock.calls.length).toBeLessThanOrEqual(2 * HTML_NESTING_LIMIT + 3);
+}
 
 test.each([
   ["malformed attribute name", '<div a">', '">seed'],
@@ -8,11 +19,9 @@ test.each([
   ["MathML title", "<math><title>", "</title></math>seed"],
   ["quoted mixed attribute", `<div a='x"'>`, "</div>seed"],
   ["table foster parenting", "<table>", "</table>seed"],
-])("parser-stack cap handles %s with 50000 inner tags within 5 seconds", (_, before, after) => {
+])("parser-stack cap handles %s with 50000 inner tags", (_, before, after) => {
   const input = before + "<div>".repeat(50000) + after;
-  const started = Date.now();
-  expect(docText(input)).toBeNull();
-  expect(Date.now() - started).toBeLessThan(5000);
+  expectNestingCap(input);
 });
 
 test("malformed attributes cannot hide nesting from the parser-stack cap", () => {
@@ -43,11 +52,9 @@ test("caps the full parser stack at 512 entries including html and body", () => 
   expect(docText(chunk.repeat(3))).toBe("seedseedseed");
 });
 
-test.each([10000, 50000])("rejects %s nested elements within 5 seconds without throwing", (depth) => {
+test.each([10000, 50000])("rejects %s nested elements without throwing", (depth) => {
   const html = `${"<div>".repeat(depth)}seed${"</div>".repeat(depth)}`;
-  const started = Date.now();
-  expect(docText(html)).toBeNull();
-  expect(Date.now() - started).toBeLessThan(5000);
+  expectNestingCap(html);
 });
 
 test.each(["li", "p"])("keeps text from 600 unclosed optional-end %s elements", (tag) => {
@@ -69,17 +76,17 @@ test("raw-text end tags are case-insensitive and plaintext ends scanning", () =>
 });
 
 test.each(["<div/>", "<div></p>", "<div></span>"])("parser recovery cannot bypass the cap with %s", (tag) => {
-  const started = Date.now();
-  expect(docText(`${tag.repeat(50000)}seed`)).toBeNull();
-  expect(Date.now() - started).toBeLessThan(5000);
+  expectNestingCap(`${tag.repeat(50000)}seed`);
 });
 
 test("scripting-enabled parsing keeps noscript text raw and out of the body", () => {
   const nested = `${"<div>".repeat(50000)}seed${"</div>".repeat(50000)}`;
-  const started = Date.now();
+  const create = vi.spyOn(defaultTreeAdapter, "createElement");
   expect(docText(`<noscript>${nested}</noscript><p>visible</p>`)).toBe("visible");
+  expect(create).toHaveBeenCalledTimes(5);
+  create.mockClear();
   expect(docText(`<body>visible<noscript>${nested}`)).toBe("visible");
-  expect(Date.now() - started).toBeLessThan(5000);
+  expect(create).toHaveBeenCalledTimes(4);
 });
 
 test("keeps text around several noscript subtrees", () => {

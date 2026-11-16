@@ -2,6 +2,7 @@ import { LIMITS } from "@emend/contract";
 import * as html from "parse5";
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanDocTitle, inferDocTitle, TITLE_PREFIX_BYTES } from "./doc-title.ts";
+import * as markdown from "./render/markdown.ts";
 
 vi.mock("parse5", async (original) => ({ ...(await original<typeof import("parse5")>()) }));
 afterEach(() => vi.restoreAllMocks());
@@ -11,13 +12,11 @@ test.each(["<!--".repeat(2 * 1024 * 1024), `<textarea>${"<title>fake</title>".re
   "hostile HTML title parsing is a single bounded call",
   async (source) => {
     const parse = vi.spyOn(html, "parse");
-    const start = Date.now();
     expect(await inferDocTitle("html", encode(source))).toBeUndefined();
     expect(parse).toHaveBeenCalledOnce();
     expect(new TextEncoder().encode(String(parse.mock.calls[0]?.[0])).byteLength).toBeLessThanOrEqual(
       TITLE_PREFIX_BYTES,
     );
-    expect(Date.now() - start).toBeLessThan(2000);
   },
   15000,
 );
@@ -30,12 +29,14 @@ test("HTML inference recognizes real title elements and decodes their text", asy
   expect(await inferDocTitle("html", encode(`${" ".repeat(TITLE_PREFIX_BYTES)}<title>Late</title>`))).toBeUndefined();
 }, 15000);
 
-test("a megabyte of heading whitespace and a long closing hash run stay linear", async () => {
-  const start = Date.now();
-  expect(await inferDocTitle("markdown", encode(`#${"\t".repeat(1024 * 1024)}x`))).toBe("x");
-  expect(await inferDocTitle("markdown", encode(`# Title ${"#".repeat(1024 * 1024)}`))).toBe("Title");
-  // This now runs the full sanitized Markdown pipeline, including on loaded test workers.
-  expect(Date.now() - start).toBeLessThan(10000);
+test("a megabyte of heading whitespace and a long closing hash run keep their title text", async () => {
+  const render = vi.spyOn(markdown, "renderMetadataBlocks");
+  const whitespace = `#${"\t".repeat(1024 * 1024)}x`;
+  const hashes = `# Title ${"#".repeat(1024 * 1024)}`;
+  expect(await inferDocTitle("markdown", encode(whitespace))).toBe("x");
+  expect(await inferDocTitle("markdown", encode(hashes))).toBe("Title");
+  expect(render.mock.calls).toEqual([[whitespace], [hashes]]);
+  // The parser's synchronous scan is measured only by the benchmark.
 }, 15000);
 
 test.each([

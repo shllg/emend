@@ -1,6 +1,23 @@
 import { fromHtml } from "hast-util-from-html";
-import { describe, expect, test } from "vitest";
+import type { Processor } from "unified";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { renderCommentHtml, renderMarkdown } from "./markdown.ts";
+
+const { convert } = vi.hoisted(() => ({ convert: vi.fn() }));
+vi.mock("remark-rehype", async (original) => {
+  const module = await original<typeof import("remark-rehype")>();
+  return {
+    ...module,
+    default: function (this: Processor, ...args: Parameters<typeof module.default>) {
+      const transform = module.default.apply(this, args);
+      return (tree: Parameters<typeof transform>[0], file: Parameters<typeof transform>[1]) => {
+        convert(tree, file);
+        return transform(tree, file);
+      };
+    },
+  };
+});
+beforeEach(() => convert.mockClear());
 
 const repo = "https://github.com/owner/name";
 
@@ -50,22 +67,22 @@ describe("comment Markdown", () => {
     expect(await renderCommentHtml("# head\r\n\r\ntext")).not.toContain("\r");
   });
 
-  test("references that resolve to too much URL text fail fast, before conversion", async () => {
+  test("references that resolve to too much URL text are rejected before conversion", async () => {
     const wide = `[a]: https://x.test/${"€".repeat(10_000)}\n\n${"[a] ".repeat(2500)}`;
     expect(wide.length).toBeLessThan(21_000);
-    const started = Date.now();
     await expect(renderCommentHtml(wide)).rejects.toThrow("too much URL text");
     await expect(
       renderCommentHtml(`[a]: https://x.test/${"p".repeat(10_000)}\n\n${"![A] ".repeat(4)}`),
     ).rejects.toThrow();
-    expect(Date.now() - started).toBeLessThan(1500);
     const titled = `[a]: http://x "${"t".repeat(20_000)}"\n\n${"[a] ".repeat(2500)}`;
     await expect(renderCommentHtml(titled)).rejects.toThrow("too much URL text");
     // The cost does not depend on which definition comes first: a later empty one must not hide the long one.
     const hidden = `[a]: https://x.test/${"€".repeat(9990)}\n\n${"[a] ".repeat(2495)}\n\n[a]: <>`;
     await expect(renderCommentHtml(hidden)).rejects.toThrow("too much URL text");
+    expect(convert).not.toHaveBeenCalled();
     const smallTitle = `[a]: http://x "${"t".repeat(100)}"\n\n${"[a] ".repeat(50)}`;
     expect(await renderCommentHtml(smallTitle)).toContain("<a ");
+    expect(convert).toHaveBeenCalledOnce();
     const fine = `[a]: https://x.test/${"p".repeat(200)}\n\n${"[a] ".repeat(50)}`;
     expect(await renderCommentHtml(fine)).toContain("<a ");
     // An unresolved reference costs nothing, and docs are not limited.

@@ -1,8 +1,11 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { renderMarkdown } from "../render/markdown.ts";
 import { normalizeText } from "../render/normalize.ts";
 import { placeHtmlSpan } from "./html.ts";
+import * as search from "./search.ts";
 import { makeSpan, placeSpan } from "./span.ts";
+
+afterEach(() => vi.restoreAllMocks());
 
 async function block(text: string, section = "overview") {
   const [result] = await renderMarkdown(text, section);
@@ -125,7 +128,8 @@ describe("placeSpan", () => {
       location: { kind: "writeup-span", blockId: diagram.id, start: 0, end: text.length },
     });
   });
-  test("rejects a 2000-character quote with missing context in 8 MiB of repeated text within 5 seconds", () => {
+  test("rejects a 2000-character quote with missing context in 8 MiB of repeated text", () => {
+    const find = vi.spyOn(search, "firstTwoMatches");
     const text = "a".repeat(8 * 1024 * 1024);
     const target = {
       kind: "writeup-span" as const,
@@ -135,16 +139,22 @@ describe("placeSpan", () => {
       suffix: "",
     };
     const input = { id: target.blockId, section: "overview", kind: "paragraph" as const, text, html: "" };
-    const started = Date.now();
     expect(placeSpan([input], target)).toEqual({ status: "unplaced", reason: "block-gone" });
+    expect(find.mock.calls).toEqual([
+      [text, target.quote],
+      [text, target.prefix + target.quote],
+      [text, target.prefix + target.quote],
+    ]);
+    find.mockClear();
     expect(placeHtmlSpan(text, { ...target, kind: "html-span", path: "docs/seed.html" })).toEqual({
       status: "unplaced",
       reason: "block-gone",
     });
-    expect(Date.now() - started).toBeLessThan(5000);
+    expect(find).toHaveBeenCalledExactlyOnceWith(text, target.prefix + target.quote);
   });
 
-  test("detects ambiguous quotes in a 1 MiB repeated block within 5 seconds", () => {
+  test("detects ambiguous quotes in a 1 MiB repeated block", () => {
+    // The synchronous ambiguous scan is measured only by the benchmark.
     const input = {
       id: "overview-00000000",
       section: "overview",
@@ -152,11 +162,9 @@ describe("placeSpan", () => {
       text: "a".repeat(1024 * 1024),
       html: "",
     };
-    const started = Date.now();
     expect(
       placeSpan([input], { kind: "writeup-span", blockId: input.id, quote: "a".repeat(2000), prefix: "", suffix: "" }),
     ).toEqual({ status: "unplaced", reason: "ambiguous" });
-    expect(Date.now() - started).toBeLessThan(5000);
   });
 
   test("keeps the same id's unique quote even if generated surrounding text changed", async () => {

@@ -1,11 +1,13 @@
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import * as core from "../index.ts";
+import { sharedHighlighter } from "./highlighter.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { renderWriteup } from "./writeup.ts";
 
 const fence = (code: string, language = "ts") => `\`\`\`${language}\n${code}\n\`\`\``;
 // 256 short comment lines, exactly 16 KiB including the final newline added by remark.
 const budgetFence = (letter: string) => fence(`// ${letter.repeat(60)}\n`.repeat(256).slice(0, -1));
+afterEach(() => vi.restoreAllMocks());
 
 test("exports the exact highlighting limits", () => {
   expect(core).toMatchObject({
@@ -15,12 +17,19 @@ test("exports the exact highlighting limits", () => {
   });
 });
 
-test("a 20000-character single-line TypeScript fence renders in under 2000 ms", async () => {
-  const start = Date.now();
+test("a 20000-character single-line TypeScript fence renders", async () => {
+  const highlighter = await sharedHighlighter();
+  const highlight = vi.spyOn(highlighter, "codeToHast");
   const [block] = await renderMarkdown(fence("a".repeat(20000)), "overview");
-  expect(Date.now() - start).toBeLessThan(2000);
+  expect(highlight).not.toHaveBeenCalled();
   expect(block?.text).toBe(`${"a".repeat(20000)}\n`);
   expect(block?.html).not.toContain("shiki");
+  // Prove the spy observes the renderer's highlighter on an admitted fence.
+  await renderMarkdown(fence("const small = 1;"), "overview");
+  expect(highlight).toHaveBeenCalledOnce();
+  for (const [input] of highlight.mock.calls) {
+    expect(new TextEncoder().encode(input).byteLength).toBeLessThanOrEqual(core.HIGHLIGHT_FENCE_BYTES);
+  }
 });
 
 test("fences above 16 KiB stay plain, including multibyte UTF-8 text", async () => {

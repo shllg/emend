@@ -1,12 +1,34 @@
-import { expect, test } from "vitest";
+import type { Processor } from "unified";
+import { beforeEach, expect, test, vi } from "vitest";
 import { renderMarkdown } from "./markdown.ts";
+
+const { convert } = vi.hoisted(() => ({ convert: vi.fn() }));
+vi.mock("remark-rehype", async (original) => {
+  const module = await original<typeof import("remark-rehype")>();
+  return {
+    ...module,
+    default: function (this: Processor, ...args: Parameters<typeof module.default>) {
+      const transform = module.default.apply(this, args);
+      return (tree: Parameters<typeof transform>[0], file: Parameters<typeof transform>[1]) => {
+        convert(tree, file);
+        return transform(tree, file);
+      };
+    },
+  };
+});
+beforeEach(() => convert.mockClear());
 
 test("a narrow source with an enormous rectangular table stays a bounded code block", async () => {
   await renderMarkdown("warmup", "overview");
+  convert.mockClear();
   const source = `${"|x".repeat(1000)}|\n${"|-".repeat(1000)}|\n${"x\n".repeat(30000)}`;
-  const start = Date.now();
   const blocks = await renderMarkdown(source, "overview");
-  expect(Date.now() - start).toBeLessThan(1000);
+  expect(convert).toHaveBeenCalledOnce();
+  // The converter receives one code leaf, so it cannot expand 30 million table cells.
+  expect(convert.mock.calls[0]?.[0]).toMatchObject({
+    type: "root",
+    children: [{ type: "code", value: source.trimEnd() }],
+  });
   const output = JSON.stringify(blocks);
   expect(output).not.toContain("<table");
   expect(output).toContain("<pre");

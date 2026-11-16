@@ -1,11 +1,14 @@
 import { LIMITS } from "@emend/contract";
-import { expect, test } from "vitest";
+import { defaultTreeAdapter } from "parse5";
+import { afterEach, expect, test, vi } from "vitest";
 import { htmlHeadings, markdownHeadings } from "./doc-headings.ts";
 import { inferDocTitle } from "./doc-title.ts";
+import * as html from "./place/html.ts";
 import { docText, HTML_NESTING_LIMIT, htmlPart, nodeText, parseDocHtml } from "./place/html.ts";
 import { renderDoc } from "./render/markdown.ts";
 
 const encode = (text: string) => new TextEncoder().encode(text);
+afterEach(() => vi.restoreAllMocks());
 test.each(["script", "style", "textarea"])("Markdown titles ignore raw %s content", async (tag) => {
   expect(await inferDocTitle("markdown", encode(`<${tag}>\n# Hidden\n</${tag}>\n\n# **Visible**`))).toBe("Visible");
 });
@@ -93,9 +96,21 @@ test.each(["span", "script"])("bounded node text also stops after empty %s nodes
 test("nested headings over a large empty subtree have bounded text work", () => {
   const depth = Math.floor((HTML_NESTING_LIMIT - 4) / 2);
   const source = `${"<h2><span>".repeat(depth)}${"<b></b>".repeat(500000)}${"</span></h2>".repeat(depth)}`;
-  const started = Date.now();
+  const isText = vi.spyOn(defaultTreeAdapter, "isTextNode");
+  const readText = html.nodeText;
+  const visits: number[] = [];
+  const text = vi.spyOn(html, "nodeText").mockImplementation((...args) => {
+    isText.mockClear();
+    const result = readText(...args);
+    visits.push(isText.mock.calls.length);
+    return result;
+  });
   expect(htmlHeadings(source)).toEqual(Array.from({ length: depth }, () => ({ level: 2, text: "" })));
-  expect(Date.now() - started).toBeLessThan(5000);
+  expect(text).toHaveBeenCalledTimes(depth);
+  expect(text.mock.calls.every(([, limit]) => limit === 4 * LIMITS.headingTextChars)).toBe(true);
+  // nodeText visits at most eight nodes per requested character, including empty elements.
+  expect(visits).toHaveLength(depth);
+  for (const count of visits) expect(count).toBeLessThanOrEqual(8 * 4 * LIMITS.headingTextChars);
 }, 30000);
 
 test.each([

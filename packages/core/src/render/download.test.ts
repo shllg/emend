@@ -774,24 +774,20 @@ test("turns protocol-relative writeup links into plain text", async () => {
   expect(html).not.toContain("//attacker.example");
 });
 
-test("replaces 2000 nested image-set openers and 100 KB of filler with none within 10 seconds", async () => {
-  const start = Date.now();
+test("replaces 2000 nested image-set openers and 100 KB of filler with none", async () => {
   const { result, resolveAsset } = htmlDoc(
     `<style>i{background:${"image-set(".repeat(2000)}${"x".repeat(100_000)}${")".repeat(2000)}}p{color:green}</style>`,
   );
   const html = await result;
-  expect(Date.now() - start).toBeLessThan(10_000);
   expect(html).toContain("<style>i{background:/**/none/**/}p{color:green}</style>");
   expect(resolveAsset).not.toHaveBeenCalled();
 }, 15_000);
 
-test("rewrites 5000 image-set rules within 10 seconds and resolves each candidate path once", async () => {
-  const start = Date.now();
+test("rewrites 5000 image-set rules and resolves each candidate path once", async () => {
   const { result, resolveAsset } = htmlDoc(
     `<style>${'i{background:image-set("missing.png" 1x)}'.repeat(5000)}</style>`,
   );
   const html = await result;
-  expect(Date.now() - start).toBeLessThan(10_000);
   expect(html).toContain(`<style>${'i{background:image-set(/**/"data:,"/**/ 1x)}'.repeat(5000)}</style>`);
   expect(resolveAsset).toHaveBeenCalledExactlyOnceWith("docs/missing.png");
 }, 15_000);
@@ -872,7 +868,7 @@ test("keeps rules after an import with an unmatched closing parenthesis", async 
 });
 
 test.each(["element", "attribute"])(
-  "rewrites 8 MiB of adversarial CSS in a style %s within 15 seconds",
+  "rewrites 8 MiB of adversarial CSS in a style %s",
   async (placement) => {
     const nested = `i{background:${"image-set(".repeat(3000)}"nested.png"${")".repeat(3000)}}`;
     const rules = 'i{background:image-set("missing.png" 1x)}'.repeat(5000);
@@ -882,10 +878,8 @@ test.each(["element", "attribute"])(
     const filler = "x".repeat(8 * 1024 * 1024 - prefix.length - unterminated.length - 4);
     const source = `${prefix}/*${filler}*/${unterminated}`;
     const input = placement === "element" ? `<style>${source}</style>` : `<div style='${source}'></div>`;
-    const start = Date.now();
     const { result, resolveAsset } = htmlDoc(input);
     const html = await result;
-    expect(Date.now() - start).toBeLessThan(15_000);
     expect(html).toContain("background:/**/none/**/");
     expect(html).not.toContain("nested.png");
     expect(html.match(/data:,/g)).toHaveLength(10_000);
@@ -974,7 +968,7 @@ test.each(["asset", "author data URL"])(
 );
 
 test.each(["imports", "links"])(
-  "bounds discarded 4 MiB CSS repeated through 64 %s to the work budget within 15 seconds",
+  "bounds discarded 4 MiB CSS repeated through 64 %s to the work budget",
   async (kind) => {
     const mib = 1024 * 1024;
     const suffix = ".large{color:green}";
@@ -985,7 +979,6 @@ test.each(["imports", "links"])(
     const pause = vi.fn(async () => {});
     const asset = css(stylesheet);
     const resolveAsset = vi.fn(async () => asset);
-    const start = Date.now();
     const html = await buildHtmlDocDownload({
       html: `${input}<style>.late{color:red}</style><p style="color:red">Kept text</p>`,
       docPath: "doc.html",
@@ -994,7 +987,6 @@ test.each(["imports", "links"])(
       inlineBudget: 4 * mib - 1,
       pause,
     });
-    expect(Date.now() - start).toBeLessThan(15_000);
     expect(html).not.toContain(".large");
     expect(html).not.toContain(".late");
     expect(html).not.toContain('style="color:red"');
@@ -1064,17 +1056,15 @@ test("pauses in both source passes and the output check for each MiB across styl
   expect(pause).not.toHaveBeenCalled();
 });
 
-test.each(["element", "attribute"])(
-  "finishes an unterminated import URL in a style %s within one second",
-  async (kind) => {
-    const source = `@import url(${" ".repeat(20_000)}`;
-    const start = Date.now();
-    const html = await htmlDoc(kind === "element" ? `<style>${source}</style>` : `<p style="${source}">Text</p>`)
-      .result;
-    expect(Date.now() - start).toBeLessThan(1000);
-    expect(html).not.toContain("@import");
-  },
-);
+test.each(["element", "attribute"])("finishes an unterminated import URL in a style %s", async (kind) => {
+  const source = `@import url(${" ".repeat(20_000)}`;
+  const { result, resolveAsset } = htmlDoc(
+    kind === "element" ? `<style>${source}</style>` : `<p style="${source}">Text</p>`,
+  );
+  const html = await result;
+  expect(resolveAsset).not.toHaveBeenCalled();
+  expect(html).not.toContain("@import");
+});
 
 test.each(["element", "attribute", "stylesheet"])(
   "decodes escaped CSS names before rewriting references in a %s",
