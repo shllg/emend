@@ -4697,11 +4697,14 @@ for (const [index, [name, body, expected, bothTerms]] of round21Witnesses.entrie
 
 test("round 21 CX3: trailing-padding work scales linearly", (t) => {
   let ms = 0;
+  const ratios: string[] = [];
   for (const length of [16000, 32000, 64000]) {
     const body = `"${round20BinaryPrefix}AAAAAAAA\n${"=".repeat(length)}!"`;
     const budget = new ScanBudget();
     const limit = 12 * body.length;
     let paddingWork = 0;
+    let regexInput = 0;
+    const inputLimit = 238 * body.length;
     const exec = RegExp.prototype.exec;
     const paddingSuffix = new Map<string, boolean>();
     const chargePadding = (pattern: RegExp, input: string) => {
@@ -4741,6 +4744,8 @@ test("round 21 CX3: trailing-padding work scales linearly", (t) => {
             if (depth) return Reflect.apply(original, this, [input, ...args]);
             depth++;
             try {
+              regexInput += String(input).length;
+              if (regexInput > inputLimit) budget.spend(Infinity);
               chargePadding(this, input);
               if (method === Symbol.replace && typeof args[0] === "function") {
                 const replacer = args[0];
@@ -4770,6 +4775,8 @@ test("round 21 CX3: trailing-padding work scales linearly", (t) => {
       const start = performance.now();
       assert.deepEqual(checkText(body, "fixture.md", empty, { budget }), []);
       ms += performance.now() - start;
+      ratios.push(`${length}: ${(regexInput / body.length).toFixed(4)}`);
+      assert.ok(regexInput <= inputLimit, "regex input must stay linear");
       assert.ok(budget.inlineTerminatorWork >= body.length, "the padding scan must be counted");
       assert.ok(paddingWork + budget.inlineTerminatorWork <= limit, "padding work must stay linear");
       const padding = "=".repeat(16);
@@ -4796,13 +4803,24 @@ test("round 21 CX3: trailing-padding work scales linearly", (t) => {
         (input: string) => input.split(/=+$/),
         (input: string) => /=+$/.test(input),
       ]) {
+        regexInput = 0;
         paddingWork = 0;
         strip(padding);
         assert.equal(paddingWork, padding.length, "nested regex calls must not charge the same work twice");
+        regexInput = 0;
         paddingWork = 0;
         assert.throws(() => strip(body), /budget/);
         assert.ok(paddingWork > limit, "the quadratic padding work alone must exceed the bound");
       }
+      regexInput = 0;
+      paddingWork = 0;
+      const walk = (input: string) => {
+        let tail = input.length;
+        while (tail > 0 && /^=*$/.test(input.slice(tail - 1))) tail--;
+        return tail;
+      };
+      assert.throws(() => walk("=".repeat(length)), /budget/);
+      assert.ok(regexInput > inputLimit, "the per-position regex input must exceed the bound");
     } finally {
       for (const [method, descriptor] of descriptors) Object.defineProperty(RegExp.prototype, method, descriptor);
       for (const [method, descriptor] of descriptors)
@@ -4810,6 +4828,7 @@ test("round 21 CX3: trailing-padding work scales linearly", (t) => {
     }
   }
   t.diagnostic(`trailing-padding scan: ${ms.toFixed(1)} ms`);
+  t.diagnostic(`trailing-padding regex input/body: ${ratios.join(", ")}`);
 });
 
 test("round 21.1: hit-only joins do no work without a quote stop and resume only its suffix", () => {
