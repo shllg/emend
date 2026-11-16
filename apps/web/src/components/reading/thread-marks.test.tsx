@@ -10,6 +10,7 @@ import { claimDraft } from "../../lib/composer-owner.ts";
 import { docHeading, findDocHeadings } from "../../lib/doc-navigation.ts";
 import { draftKey, editDraftKey, saveDraft } from "../../lib/drafts.ts";
 import { applyAnchor, findAnchor } from "../../lib/reading-position.ts";
+import { revealReadingTarget } from "../../lib/reading-reveal.ts";
 import { useReadingPosition } from "../../lib/use-reading-position.ts";
 import type { ReadingEntry } from "../../lib/use-reading-trail.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
@@ -307,13 +308,35 @@ test("a thread jump to the After caption switches a Before-only pair to Side by 
     placement: { status: "placed", location: { kind: "writeup-span", blockId: pair.id, start: 7, end: 12 } },
   };
   const view = mount([after], [{ key: "overview", blocks: [pair] }]);
-  const prose = view.container.querySelector("[data-block-id]");
+  const prose = view.container.querySelector("[data-block-id]") as HTMLElement;
   fireEvent.click(screen.getByRole("button", { name: "Before" }));
-  expect(prose?.getAttribute("data-pair-mode")).toBe("before");
+  expect(prose.getAttribute("data-pair-mode")).toBe("before");
+  const modesAtScroll: (string | null)[] = [];
+  vi.spyOn(prose, "scrollIntoView").mockImplementation(() => {
+    modesAtScroll.push(prose.getAttribute("data-pair-mode"));
+  });
   view.update([after], after.id);
+  expect(modesAtScroll).toEqual(["side"]);
   expect(within(dialog()).getByRole("article").id).toBe(`thread-${after.id}`);
-  expect(prose?.getAttribute("data-pair-mode")).toBe("side");
+  expect(prose.getAttribute("data-pair-mode")).toBe("side");
   expect(screen.getByRole("button", { name: "Side by side" }).getAttribute("aria-pressed")).toBe("true");
+});
+
+test.each([
+  ["Before", "before", "after"],
+  ["Side by side", "side", "side"],
+])("revealing the After image synchronously updates a pair in %s mode", (label, initial, expected) => {
+  const pair: RenderedBlock = {
+    ...block,
+    text: "Before After",
+    html: `<p class="emend-media-row emend-media-pair"><span class="emend-media"><img src="/api/v1/media/${"a".repeat(64)}" alt="Before"><span class="emend-media-caption">Before</span></span> <span class="emend-media"><img src="/api/v1/media/${"b".repeat(64)}" alt="After"><span class="emend-media-caption">After</span></span></p>`,
+  };
+  const view = mount([], [{ key: "overview", blocks: [pair] }]);
+  const prose = view.container.querySelector("[data-block-id]") as HTMLElement;
+  fireEvent.click(screen.getByRole("button", { name: label }));
+  expect(prose.getAttribute("data-pair-mode")).toBe(initial);
+  revealReadingTarget(screen.getByAltText("After"));
+  expect(prose.getAttribute("data-pair-mode")).toBe(expected);
 });
 test("outside presses close a thread and starting a block comment closes it", () => {
   mount();

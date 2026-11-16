@@ -48,6 +48,8 @@ function ProseBlock({ block, attributes }: { block: RenderedBlock; attributes: R
     const reveal = (event: Event) => {
       const target = event.target instanceof Element ? event.target : null;
       if (target === prose && prose?.querySelector("p.emend-media-pair")) {
+        // Navigation scrolls and measures before React commits the state update.
+        prose.setAttribute("data-pair-mode", "side");
         setMode("side");
         return;
       }
@@ -55,7 +57,12 @@ function ProseBlock({ block, attributes }: { block: RenderedBlock; attributes: R
       if (!media || !prose?.contains(media)) return;
       const images = media.parentElement?.querySelectorAll(":scope > .emend-media");
       const next = images?.[0] === media ? "before" : images?.[1] === media ? "after" : undefined;
-      if (next) setMode((current) => (current === "side" ? current : next));
+      if (next) {
+        const current = prose.getAttribute("data-pair-mode") ?? "side";
+        const mode = current === "side" ? "side" : next;
+        prose.setAttribute("data-pair-mode", mode);
+        setMode(mode);
+      }
     };
     prose?.addEventListener("emend:reveal-reading", reveal);
     return () => prose?.removeEventListener("emend:reveal-reading", reveal);
