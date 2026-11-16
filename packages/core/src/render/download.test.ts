@@ -25,6 +25,10 @@ import {
 } from "./download-diff.ts";
 import { type DownloadThread, type FileThreads, routeDownloadThreads } from "./download-threads.ts";
 
+// Mirror the pacing thresholds in download.ts to count work without a clock.
+const CSS_PAUSE_BYTES = 1024 * 1024;
+const REFERENCE_PAUSE_COUNT = 1000;
+
 const sha = "a".repeat(64);
 const details = { project: "Sample", branch: "feature", seq: 2, publishedAt: "2026-01-02T23:00:00Z", links: [] };
 const png = { mediaType: "image/png", bytes: new Uint8Array([1, 2, 3]) };
@@ -242,11 +246,11 @@ test("uses the same page frame for Markdown and escaped source tokens", async ()
 });
 
 const css = (value: string) => ({ mediaType: "text/css", bytes: new TextEncoder().encode(value) });
-function htmlDoc(html: string, assets: Record<string, ResolveResult> = {}) {
+function htmlDoc(html: string, assets: Record<string, ResolveResult> = {}, pause?: () => Promise<void>) {
   const resolveAsset = vi.fn(async (path: string) => assets[path] ?? null);
   return {
     resolveAsset,
-    result: buildHtmlDocDownload({ html, docPath: "docs/index.html", title: "Fallback", resolveAsset }),
+    result: buildHtmlDocDownload({ html, docPath: "docs/index.html", title: "Fallback", resolveAsset, pause }),
   };
 }
 
@@ -775,12 +779,14 @@ test("turns protocol-relative writeup links into plain text", async () => {
 });
 
 test("replaces 2000 nested image-set openers and 100 KB of filler with none", async () => {
-  const { result, resolveAsset } = htmlDoc(
-    `<style>i{background:${"image-set(".repeat(2000)}${"x".repeat(100_000)}${")".repeat(2000)}}p{color:green}</style>`,
-  );
+  const source = `i{background:${"image-set(".repeat(2000)}${"x".repeat(100_000)}${")".repeat(2000)}}p{color:green}`;
+  const cssBytes = new TextEncoder().encode(source).byteLength;
+  const pause = vi.fn(async () => {});
+  const { result, resolveAsset } = htmlDoc(`<style>${source}</style>`, {}, pause);
   const html = await result;
   expect(html).toContain("<style>i{background:/**/none/**/}p{color:green}</style>");
   expect(resolveAsset).not.toHaveBeenCalled();
+  expect(pause.mock.calls.length).toBeLessThanOrEqual(Math.ceil(cssBytes / CSS_PAUSE_BYTES) + 1);
 }, 15_000);
 
 test("rewrites 5000 image-set rules and resolves each candidate path once", async () => {
@@ -877,13 +883,19 @@ test.each(["element", "attribute"])(
     const prefix = nested + rules + strings;
     const filler = "x".repeat(8 * 1024 * 1024 - prefix.length - unterminated.length - 4);
     const source = `${prefix}/*${filler}*/${unterminated}`;
+    const cssBytes = new TextEncoder().encode(source).byteLength;
     const input = placement === "element" ? `<style>${source}</style>` : `<div style='${source}'></div>`;
-    const { result, resolveAsset } = htmlDoc(input);
+    const pause = vi.fn(async () => {});
+    const { result, resolveAsset } = htmlDoc(input, {}, pause);
     const html = await result;
     expect(html).toContain("background:/**/none/**/");
     expect(html).not.toContain("nested.png");
     expect(html.match(/data:,/g)).toHaveLength(10_000);
     expect(resolveAsset).toHaveBeenCalledExactlyOnceWith("docs/missing.png");
+    // Two input passes and one output check, plus 10,000 resource references.
+    // Rewriting grows this fixture by less than one CSS pause interval.
+    const maxPauses = Math.ceil((3 * cssBytes) / CSS_PAUSE_BYTES) + Math.floor(10_000 / REFERENCE_PAUSE_COUNT) + 1;
+    expect(pause.mock.calls.length).toBeLessThanOrEqual(maxPauses);
   },
   20_000,
 );
@@ -1058,12 +1070,17 @@ test("pauses in both source passes and the output check for each MiB across styl
 
 test.each(["element", "attribute"])("finishes an unterminated import URL in a style %s", async (kind) => {
   const source = `@import url(${" ".repeat(20_000)}`;
+  const cssBytes = new TextEncoder().encode(source).byteLength;
+  const pause = vi.fn(async () => {});
   const { result, resolveAsset } = htmlDoc(
     kind === "element" ? `<style>${source}</style>` : `<p style="${source}">Text</p>`,
+    {},
+    pause,
   );
   const html = await result;
   expect(resolveAsset).not.toHaveBeenCalled();
   expect(html).not.toContain("@import");
+  expect(pause.mock.calls.length).toBeLessThanOrEqual(Math.ceil(cssBytes / CSS_PAUSE_BYTES) + 1);
 });
 
 test.each(["element", "attribute", "stylesheet"])(
