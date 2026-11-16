@@ -39,6 +39,7 @@ const base: ReviewView = {
   updatedAt: "2026-01-01T00:00:00.000Z",
   movedTo: null,
   list: "active",
+  groupId: null,
   snoozed: false,
   snoozedUntil: null,
   activeUntil: null,
@@ -733,4 +734,22 @@ test("a zero settings cap moves an accepted approval to Done while the inbox ref
   expect(client.getQueryData<ReviewView>(["review", reviewId])).toMatchObject(expected);
   expect(held.some(({ url }) => url === "/api/v1/reviews")).toBe(true);
   expect(client.getQueryState(["inbox"])?.fetchStatus).toBe("fetching");
+});
+
+test("a grouped accepted approval uses its window even when the inbox approval cap is zero", async () => {
+  const groupId = "22222222-2222-4222-8222-222222222222";
+  server = { ...base, unsentCount: 0, groupId };
+  await mount(<Inbox />);
+  client.setQueryData<InboxData>(["inbox"], (data) => data && { ...data, approvedActiveLimit: 0 });
+  mode = "held";
+  approve("Approve revision 3");
+  await settle();
+  const expected = {
+    groupId,
+    state: "approved",
+    list: "active",
+    activeUntil: new Date(Date.now() + APPROVED_ACTIVE_HOURS * 3_600_000).toISOString(),
+  };
+  expect(client.getQueryData<InboxData>(["inbox"])?.items[0]).toMatchObject(expected);
+  expect(client.getQueryData<ReviewView>(["review", reviewId])).toMatchObject(expected);
 });

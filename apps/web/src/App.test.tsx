@@ -32,6 +32,7 @@ const item: InboxItem = {
   updatedAt: "2026-01-01T00:00:00.000Z",
   movedTo: null,
   list: "active",
+  groupId: null,
   snoozed: false,
   snoozedUntil: null,
   activeUntil: null,
@@ -786,6 +787,7 @@ test("the first stream open recovers a publication after the initial inbox snaps
 test("the first inbox response establishes the baseline even when a stale cache was shown first", async () => {
   const arrival = { ...item, id: "22222222-2222-4222-8222-222222222222", title: "Already present at first response" };
   client.setQueryData<InboxData>(["inbox"], {
+    groups: [],
     approvedActiveHours: 12,
     approvedActiveLimit: 5,
     serverTime: new Date(Date.now()).toISOString(),
@@ -862,6 +864,7 @@ test("an arrival hidden by a filter consumes its highlight before the filter is 
   try {
     await act(async () => {
       client.setQueryData<InboxData>(["inbox"], {
+        groups: [],
         approvedActiveHours: 12,
         approvedActiveLimit: 5,
         serverTime: new Date(Date.now()).toISOString(),
@@ -912,6 +915,7 @@ test.each([false, true])(
       async function items(values: InboxItem[]) {
         await act(async () => {
           client.setQueryData<InboxData>(["inbox"], {
+            groups: [],
             approvedActiveHours: 12,
             approvedActiveLimit: 5,
             serverTime: new Date(Date.now()).toISOString(),
@@ -2204,6 +2208,7 @@ test("a project selection is ignored when it disappears from the inbox", async (
   withInbox(items);
   act(() =>
     client.setQueryData<InboxData>(["inbox"], {
+      groups: [],
       approvedActiveHours: 12,
       approvedActiveLimit: 5,
       serverTime: new Date().toISOString(),
@@ -2947,6 +2952,7 @@ test("in-memory collapsed preference survives the phone layout with unavailable 
 test("a row with an invalid cached timestamp has no time text", async () => {
   client.setQueryDefaults(["inbox"], { staleTime: Infinity });
   client.setQueryData<InboxData>(["inbox"], {
+    groups: [],
     approvedActiveHours: 12,
     approvedActiveLimit: 5,
     serverTime: new Date(Date.now()).toISOString(),

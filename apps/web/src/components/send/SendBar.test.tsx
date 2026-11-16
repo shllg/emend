@@ -754,6 +754,7 @@ const retiredLifecycle = {
   state: "settled" as const,
   snoozed: false,
   snoozedUntil: null,
+  groupId: null,
   onDeleted: vi.fn(),
 };
 test.each([false, true])("a retired review disables Send and Approve with the reason (phone %s)", (phone) => {

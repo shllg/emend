@@ -1,6 +1,7 @@
 import {
   Capabilities,
   REVIEW_BIN_FEATURE,
+  REVIEW_GROUPS_FEATURE,
   REVIEW_LIFECYCLE_FEATURE,
   SERVER_CHALLENGE_HEADER,
   SERVER_PROOF_HEADER,
@@ -30,6 +31,7 @@ export function capabilitiesRoutes(app: Hono<AppEnv>, key: string, canStop = fal
           "mcp",
           REVIEW_LIFECYCLE_FEATURE,
           REVIEW_BIN_FEATURE,
+          REVIEW_GROUPS_FEATURE,
           ...(canStop ? ["server-stop"] : []),
         ],
       }),

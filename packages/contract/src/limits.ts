@@ -1,5 +1,7 @@
 export const LIMITS = {
   inboxItems: 200,
+  groups: 50,
+  groupNameChars: 80,
   agentReviews: 100,
   binItems: 200,
   importRevisions: 1000,

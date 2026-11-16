@@ -29,6 +29,7 @@ test.each([-2, 0, 2])("inbox records both receipt clocks with the server %s hour
     response.resolve(Response.json({ approvedActiveHours: 12, approvedActiveLimit: 5, items: [], serverTime }));
     const data = await pending;
     expect(data).toEqual({
+      groups: [],
       approvedActiveHours: 12,
       approvedActiveLimit: 5,
       items: [],
@@ -55,6 +56,7 @@ test.each([
 ])("the server clock advances correctly after $scenario", ({ wallJump, elapsed, expected }) => {
   const serverTime = started + 2 * 3_600_000;
   const data: InboxData = {
+    groups: [],
     approvedActiveHours: 12,
     approvedActiveLimit: 5,
     items: [],

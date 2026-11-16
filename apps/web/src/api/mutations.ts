@@ -1,6 +1,7 @@
 import {
   APPROVED_ACTIVE_HOURS,
   APPROVED_ACTIVE_LIMIT,
+  InboxGroup,
   type InboxItem,
   type RetireRequest,
   type ReviewView,
@@ -22,7 +23,7 @@ import {
 } from "../lib/drafts.ts";
 import { refreshQueries } from "../lib/query-refresh.ts";
 import { viewedState } from "../lib/viewed-state.ts";
-import { ApiError, change } from "./client.ts";
+import { ApiError, change, patch, post } from "./client.ts";
 import { type InboxData, serverNow } from "./queries.ts";
 
 function applyViewed(view: RevisionView, body: ViewedRequest): RevisionView {
@@ -137,12 +138,12 @@ function applyAccepted(client: QueryClient, reviewId: string, { kind, revision }
   const inboxLimit = inbox?.approvedActiveLimit;
   const useSettingsLimit = settingsLimit !== undefined && (inboxLimit === undefined || !(settingsTime < inboxTime));
   const approvedActiveLimit = (useSettingsLimit ? settingsLimit : inboxLimit) ?? APPROVED_ACTIVE_LIMIT;
-  const activeUntil =
-    approvedActiveHours === 0 || approvedActiveLimit === 0
-      ? null
-      : new Date(estimate + approvedActiveHours * 3_600_000).toISOString();
-  const change = <T extends InboxItem>(item: T): T =>
-    kind === "approve"
+  const change = <T extends InboxItem>(item: T): T => {
+    const activeUntil =
+      approvedActiveHours === 0 || (approvedActiveLimit === 0 && item.groupId === null)
+        ? null
+        : new Date(estimate + approvedActiveHours * 3_600_000).toISOString();
+    return kind === "approve"
       ? {
           ...item,
           state: "approved",
@@ -152,6 +153,7 @@ function applyAccepted(client: QueryClient, reviewId: string, { kind, revision }
           activeUntil,
         }
       : { ...item, unsentCount: 0, pendingSend: true };
+  };
   // Only a loaded item changes; anything else in the cache is left to the refetch.
   client.setQueryData<ReviewView>(["review", reviewId], (view) => (view?.id === reviewId ? change(view) : view));
   client.setQueryData<InboxData>(["inbox"], (list) =>
@@ -268,4 +270,45 @@ export function useReviewMutation(reviewId: string, key?: string) {
     },
   });
   return { ...mutation, isPending: pending || mutation.isPending };
+}
+
+export function useCreateGroup() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => post("/api/v1/groups", { name }, InboxGroup),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ["inbox"] });
+    },
+  });
+}
+export function useRenameGroup() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: InboxGroup) => patch(`/api/v1/groups/${encodeURIComponent(id)}`, { name }, InboxGroup),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ["inbox"] });
+      void client.invalidateQueries({ queryKey: ["review"] });
+    },
+  });
+}
+export function useDeleteGroup() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => change(`/api/v1/groups/${encodeURIComponent(id)}`, "DELETE"),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ["inbox"] });
+      void client.invalidateQueries({ queryKey: ["review"] });
+    },
+  });
+}
+export function useMoveToGroup(reviewId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (groupId: string | null) =>
+      change(`/api/v1/reviews/${encodeURIComponent(reviewId)}/group`, "PUT", { groupId }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ["inbox"] });
+      void client.invalidateQueries({ queryKey: ["review", reviewId] });
+    },
+  });
 }

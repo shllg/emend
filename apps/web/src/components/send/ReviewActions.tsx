@@ -1,8 +1,16 @@
-import type { ReviewState } from "@emend/contract";
-import { AlarmClock, Archive, BellOff, Ellipsis, Trash2, Undo2 } from "lucide-react";
+import { type InboxGroup, LIMITS, type ReviewState } from "@emend/contract";
+import { useQuery } from "@tanstack/react-query";
+import { AlarmClock, Archive, BellOff, Ellipsis, FolderInput, Trash2, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ApiError } from "../../api/client.ts";
-import { type LifecycleAction, mutationMessage, useLifecycleMutation } from "../../api/mutations.ts";
+import {
+  type LifecycleAction,
+  mutationMessage,
+  useCreateGroup,
+  useLifecycleMutation,
+  useMoveToGroup,
+} from "../../api/mutations.ts";
+import { inboxQuery } from "../../api/queries.ts";
 import { plural } from "../../lib/count.ts";
 import { type SnoozeChoice, snoozeChoices, wakeTime } from "../../lib/time.ts";
 import { useShortcut } from "../../lib/use-shortcut.tsx";
@@ -10,10 +18,12 @@ import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Menu, type MenuItem } from "../ui/Menu.tsx";
+import { TextField } from "../ui/TextField.tsx";
 import { useToast } from "../ui/Toast.tsx";
 
 export interface ReviewLifecycle {
   title: string;
+  groupId: string | null;
   state: ReviewState;
   snoozed: boolean;
   snoozedUntil: string | null;
@@ -21,7 +31,7 @@ export interface ReviewLifecycle {
   onDeleted: () => void;
 }
 
-type Panel = "snooze" | "retire" | "delete" | null;
+type Panel = "snooze" | "retire" | "delete" | "group" | null;
 /** The discard button ignores presses this long after its label changed, so a late click cannot hit it. */
 const DISCARD_GUARD_MS = 1000;
 
@@ -45,12 +55,19 @@ export function ReviewActions({
   const [conflict, setConflict] = useState(false);
   const [guarded, setGuarded] = useState(false);
   const mutation = useLifecycleMutation(reviewId);
+  const createGroup = useCreateGroup();
+  const moveGroup = useMoveToGroup(reviewId);
+  const inbox = useQuery({ ...inboxQuery(), enabled: panel === "group" });
+  const groups = [...(inbox.data?.groups ?? [])].sort(
+    (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id),
+  );
+  const [groupName, setGroupName] = useState("");
   const toast = useToast();
   const trigger = useRef<HTMLButtonElement>(null);
   const mounted = useRef(true);
   const busy = useRef(false);
   const deleted = useRef(false);
-  const pending = mutation.isPending;
+  const pending = mutation.isPending || createGroup.isPending || moveGroup.isPending;
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -58,7 +75,8 @@ export function ReviewActions({
     };
   }, []);
   const open = (next: Exclude<Panel, null>) => {
-    if (deleted.current) return;
+    if (deleted.current || busy.current) return;
+    setGroupName("");
     setNow(Date.now());
     setConflict(false);
     setOpenedWith(unsentCount);
@@ -151,6 +169,28 @@ export function ReviewActions({
     onDeleted();
     toast.show({ tone: "success", title: `Moved “${title}” to the bin` });
   };
+  const move = async (group: InboxGroup | null, create = false) => {
+    if (busy.current || deleted.current || (create && !groupName.trim())) return;
+    busy.current = true;
+    try {
+      const target = create ? await createGroup.mutateAsync(groupName) : group;
+      await moveGroup.mutateAsync(target?.id ?? null);
+      if (mounted.current) setPanel(null);
+      const previous = groups.find((item) => item.id === lifecycle.groupId);
+      toast.show({
+        tone: "success",
+        title: target
+          ? `Moved to “${target.name}”`
+          : previous
+            ? `Removed from “${previous.name}”`
+            : "Removed from group",
+      });
+    } catch (error) {
+      toast.show({ tone: "danger", title: mutationMessage(error as Error) });
+    } finally {
+      busy.current = false;
+    }
+  };
   const items: MenuItem[] = [];
   if (state === "open") {
     items.push({
@@ -163,7 +203,8 @@ export function ReviewActions({
     items.push({ label: "Retire", icon: Archive, opensDialog: true, onSelect: () => open("retire") });
   }
   if (state === "settled") items.push({ label: "Reopen", icon: Undo2, onSelect: () => void reopen() });
-  if (items.length > 0) items.push({ separator: true });
+  items.push({ label: "Move to group…", icon: FolderInput, opensDialog: true, onSelect: () => open("group") });
+  items.push({ separator: true });
   items.push({ label: "Delete", icon: Trash2, danger: true, opensDialog: true, onSelect: () => open("delete") });
   const cancel = (
     <Button data-autofocus disabled={pending} onClick={close}>
@@ -195,11 +236,85 @@ export function ReviewActions({
         items={items}
       />
       <Dialog
+        open={panel === "group"}
+        returnFocus={trigger}
+        onOpenChange={(next) => !next && close()}
+        title={
+          <>
+            Move “<bdi>{title}</bdi>” to a group
+          </>
+        }
+        titleClassName="[overflow-wrap:anywhere]"
+        description="It stays in the group until you move it out. New revisions keep it there."
+        actions={cancel}
+      >
+        <div className="mt-3 flex flex-col gap-1.5">
+          {inbox.isPending && <p role="status">Loading groups…</p>}
+          {inbox.isError && (
+            <>
+              <p role="alert">Could not load groups.</p>
+              <Button onClick={() => void inbox.refetch()}>Retry</Button>
+            </>
+          )}
+          {groups.map((group) => (
+            <Button
+              key={group.id}
+              fullWidth
+              className="justify-between"
+              disabled={pending || group.id === lifecycle.groupId}
+              onClick={() => void move(group)}
+            >
+              <span dir="auto" className="min-w-0 truncate" title={group.name}>
+                {group.name}
+              </span>
+              {group.id === lifecycle.groupId && <span className="shrink-0 text-fg-3">Current</span>}
+            </Button>
+          ))}
+          {lifecycle.groupId && (
+            <Button fullWidth disabled={pending} onClick={() => void move(null)}>
+              Remove from group
+            </Button>
+          )}
+          {inbox.data &&
+            (groups.length >= LIMITS.groups ? (
+              <p className="text-13 text-fg-3">You have the most groups allowed.</p>
+            ) : (
+              <form
+                className="mt-3 flex flex-col gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void move(null, true);
+                }}
+              >
+                <TextField
+                  label="New group"
+                  dir="auto"
+                  value={groupName}
+                  maxLength={LIMITS.groupNameChars}
+                  disabled={pending}
+                  onChange={(event) => setGroupName(event.target.value)}
+                />
+                <Button
+                  type="submit"
+                  disabled={pending || !groupName.trim()}
+                  loading={createGroup.isPending || moveGroup.isPending}
+                >
+                  Create and move
+                </Button>
+              </form>
+            ))}
+        </div>
+      </Dialog>
+      <Dialog
         open={panel === "snooze"}
         returnFocus={trigger}
         onOpenChange={(next) => !next && close()}
         title="Snooze this review"
-        description="It leaves your active list until then. A new revision wakes it early."
+        description={
+          lifecycle.groupId !== null
+            ? "It stays in its group, snoozed until then. A new revision wakes it early."
+            : "It leaves your active list until then. A new revision wakes it early."
+        }
         actions={cancel}
       >
         <div className="mt-3 flex flex-col gap-1.5">
@@ -225,9 +340,12 @@ export function ReviewActions({
         onOpenChange={(next) => !next && close()}
         title="Retire this review?"
         description={
-          discard
-            ? `It moves to Done without an approval, and an agent waiting on it stops. Its ${unsentCount} unsent ${plural(unsentCount, "comment")} will be deleted.`
-            : "It moves to Done without an approval, and an agent waiting on it stops."
+          <>
+            {lifecycle.groupId !== null
+              ? "It stays in its group, closed without an approval, and an agent waiting on it stops."
+              : "It moves to Done without an approval, and an agent waiting on it stops."}
+            {discard && ` Its ${unsentCount} unsent ${plural(unsentCount, "comment")} will be deleted.`}
+          </>
         }
         actions={
           <>

@@ -134,6 +134,9 @@ server runs, it removes a Tailscale Serve route that a crashed `emend serve --ta
 
 The inbox lists every review and published doc, with the ones that need you first. A phone shows
 the same groups as a desktop.
+Choose “Move to group…” in a review's or doc's ⋯ menu to keep it in a named group, with its own
+section between Snoozed and Done. Rename or delete a group from the group's ⋯ menu.
+Deleting a group puts its items back in Active, Snoozed or Done.
 
 <p>
   <img src="images/inbox-desktop.png" alt="The inbox on a desktop, with six reviews and docs" width="73%"

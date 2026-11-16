@@ -99,6 +99,10 @@ a machine token reaches only reviews from its own instance.
 | POST | `/api/v1/publish` | Agent | Create a review or add a revision. |
 | POST | `/api/v1/import` | Agent | Copy one `ImportBundle`; return `ImportResult` (201, or 200 when skipped); machine tokens only. |
 | GET | `/api/v1/reviews` | Reviewer | List reviews in the inbox. |
+| POST | `/api/v1/groups` | Reviewer | Create a named inbox group (201 `InboxGroup`). |
+| PATCH | `/api/v1/groups/:id` | Reviewer | Rename an inbox group (200 `InboxGroup`). |
+| DELETE | `/api/v1/groups/:id` | Reviewer | Delete a group, returning its items to their normal lists (204). |
+| PUT | `/api/v1/reviews/:id/group` | Reviewer | Move a review or pub into a group, or remove it (204). |
 | GET | `/api/v1/agent/reviews` | Agent | List the token's own instance's reviews, newest first, as `AgentReviewList`; `?head=<sha>` keeps those whose approved or newest revision has that head. |
 | GET | `/api/v1/reviews/:id` | Reviewer | Read a review. |
 | GET | `/api/v1/reviews/:id/revisions/:seq` | Reviewer | Read one revision. |
@@ -528,7 +532,8 @@ retired review; clients label it "Retired".
 state: ReviewState, newestRevision, unsentCount, openThreads, agentWaiting, pendingSend,
 updatedAt, movedTo: string | null, list: "active" | "snoozed" | "done", snoozed: boolean,
 snoozedUntil: string | null, activeUntil: string | null, releasedAt: string | null, pickedUpAt: string | null,
-kind: "review" | "publish" }`. `repo` is the repository key, and
+kind: "review" | "publish", groupId: string | null }`. `groupId` is the inbox group UUID, null when ungrouped
+(the default when omitted). `repo` is the repository key, and
 `movedTo` is the review's destination URL. `list` places the review: `done` for `settled`, and for
 `approved` once the effective `approvedActiveHours` have passed since approval or it does not fit
 Active's approval cap or total cap; an approved review is `active` until then if it has a place.
@@ -569,10 +574,14 @@ period) or an unexpired direct-wait row for the same owner and review. Direct wa
 30-second expiry every 10 seconds and delete their row when they end. They emit no live event;
 views reflect direct writes on their next load.
 
-`GET /api/v1/reviews` returns `InboxList = { items: InboxItem[], serverTime: string,
+`GET /api/v1/reviews` returns `InboxList = { items: InboxItem[], groups: InboxListGroup[], serverTime: string,
 approvedActiveHours: ApprovedActiveHours, approvedActiveLimit: ApprovedActiveLimit }`.
 `approvedActiveHours` and `approvedActiveLimit` are the effective window and approval cap used
-for this response. Reviews in the bin are in none of the lists.
+for this response. `groups` contains all of the owner's groups, ordered by name then id,
+and defaults to `[]` when omitted. Each `InboxListGroup` is `{ id, name, members }`, where `members`
+is the nonnegative integer count of that owner's member reviews and pubs not in the bin,
+including members beyond the grouped block's row cap. Groups without members have `members: 0`.
+Reviews in the bin are in none of the lists.
 `serverTime` is the server's clock when it built the list, as an ISO 8601 UTC string.
 The Active list holds open reviews whose snooze is not in effect, selected by newest activity,
 then id ascending, up to `inboxItems` (200). Open reviews take the places first. Approved reviews
@@ -582,15 +591,20 @@ to the newest approvals by approval time, then id ascending, regardless of later
 Every other approved review is in Done with `activeUntil: null`. Because every approval has the
 same window length, a window ending cannot bring an older approval back into Active.
 
-Active is ordered by group, first match wins: open with an agent waiting; open with unsent
+Active is ordered by priority, first match wins: open with an agent waiting; open with unsent
 comments; open without a live Send on its newest revision (To review); open with such a Send
 (Answered); approved. A live Send is not set aside, whether its delivery is pending or confirmed.
-The group is not a wire field. Within each group, newest activity comes first: an open review uses
+The priority is not a wire field. Within each priority, newest activity comes first: an open review uses
 `updatedAt`, or the wake time of a timed snooze that has passed when that is later; an approved
 review uses `updatedAt`. Id ascending breaks ties. Approved reviews always follow every open review.
-Next is Snoozed (soonest wake first, a snooze until the next revision last), then Done (retired
-reviews and approvals without an Active place, newest `updatedAt` first). Id ascending breaks
-ties in each. Each list holds at most 200 rows, so at most 600 in all.
+Next is Snoozed (soonest wake first, a snooze until the next revision last), then the grouped
+block, then Done (retired reviews and approvals without an Active place, newest `updatedAt`
+first). Grouped reviews are in none of Active, Snoozed or Done and take no Active place or
+approval-cap place. Their block is newest activity first: an open review uses the later of
+`updatedAt` and the wake time of a timed snooze that has passed; others use `updatedAt`.
+Id ascending breaks ties in every block. Each block holds at most `inboxItems` (200) rows,
+so at most 800 in all. A grouped review's `list` and `activeUntil` follow the single-review
+rule below (approval window alone, no caps); clients place it by `groupId`.
 `GET /api/v1/reviews/:id` returns `ReviewView = InboxItem & { revisions: { seq, createdAt }[], importedAt: string | null }`,
 with revisions ascending by sequence. It places an approved review by the effective approval
 window alone, without Active's caps.
@@ -867,7 +881,7 @@ to make a read fit a per-Send or per-revision limit. The limits below apply to t
 
 | Field | Bound and write-side source |
 | --- | --- |
-| `InboxList.items` | `inboxItems` (200), the inbox query limit |
+| `InboxList.items` | `inboxItems` × 4 (800), the four inbox blocks |
 | `AgentReviewList.items` | `agentReviews` (100), the agent list query limit |
 | `AgentReviewItem.title` | `titleChars` (200), as in `InboxItem.title` |
 | `AgentReviewItem.branch` | As `InboxItem.branch`: the stored branch or `null` |
@@ -1508,6 +1522,39 @@ delivered first. `closed` is a status answer, not a hand-off: it repeats on ever
 the review stays retired or snoozed. Retire, snooze, bin and delete end a waiting take at once; `unsnooze`
 and `reopen` never end one.
 
+### Inbox groups
+
+All four routes use `/api/v1` and scope `send`, reviewer-only: an agent or admin bearer,
+or a reviewer token sent as a bearer, is refused before any lookup. Groups belong to the
+reviewer's owner on this server and are shared across that owner's devices. A missing or foreign
+group is `404 not_found`; a missing or foreign review is `404 unknown_review`. A malformed path
+UUID is 404. Each write runs in one transaction and emits its `groups` event after commit.
+
+- `POST /groups`, body `GroupRequest = { name: GroupName }`, returns 201 `InboxGroup = { id, name }`.
+- `PATCH /groups/:id`, the same body, returns 200 `InboxGroup`. Renaming to its own name is allowed.
+- `DELETE /groups/:id` returns 204. It removes membership and the group; its items return to
+  Active, Snoozed or Done according to their state and the normal caps.
+- `PUT /reviews/:id/group`, body `ReviewGroupRequest = { groupId: UUID | null }`, returns 204.
+  A UUID moves the review or pub to that group, replacing its previous membership; null removes
+  it from its group. A binned review is `409 review_in_bin`; a moved review is `409 review_moved`.
+
+Bodies are strict (unknown fields give `400 invalid_request`). `GroupName` trims surrounding
+whitespace and requires 1–`groupNameChars` (80) characters after trimming, with no Unicode `Cc`
+control characters or line/paragraph separators. Invalid names give `400 invalid_request`.
+Names also refuse bidi controls U+202A–U+202E and U+2066–U+2069; other format characters, including U+200D, are allowed.
+Names are unique per owner by exact match. A duplicate name gives `409 invalid_state` with the
+message "A group with this name exists.". Creating beyond `groups` (50) gives `409 invalid_state`
+with the message "You have the most groups allowed. Delete one first.".
+
+Membership changes nothing on the review: no state, snooze, approval or `updatedAt` change.
+The membership's `created_at` uses the server clock on both insertion and reassignment.
+It survives new revisions, snooze, retire, approve, reopen and the bin; restore brings the item
+back to its group. A hard delete removes membership. Attach/import copies no groups or membership.
+The agent list (`GET /api/v1/agent/reviews`), CLI, MCP and skills do not show groups.
+The move event carries `{ reviewId }`; create, rename and delete carry `{}`. Owner-wide streams
+receive both forms; per-review streams receive only events naming that review.
+Capabilities lists `review-groups` (`REVIEW_GROUPS_FEATURE`).
+
 ### Sends, replies and waiting
 
 `CreateThreadRequest = { revision, target: Target, body: CommentBody }` creates a thread
@@ -1552,7 +1599,7 @@ endpoints use `text/event-stream`, `Cache-Control: no-store` and a keepalive eve
 data and is not a `ReviewEvent`. (A comment line would fire no browser event, and an event with
 an empty data buffer is never dispatched.) A client may treat about 40 seconds without any frame
 (`ping` or review event) as a dead stream and reconnect. `ReviewEventName` is
-`publish | send | thread | waiting | claimed | confirmed | viewed | snooze | unsnooze | retire | reopen | delete | bin | restore`. `ReviewEvent` has a `type`
+`publish | send | thread | waiting | claimed | confirmed | viewed | snooze | unsnooze | retire | reopen | delete | bin | restore | groups`. `ReviewEvent` has a `type`
 discriminator and the same fields as its SSE payload. The SSE `event` line supplies
 `type`; the JSON `data` is:
 
@@ -1565,9 +1612,10 @@ discriminator and the same fields as its SSE payload. The SSE `event` line suppl
 | `claimed` | `{ reviewId, revision }` |
 | `confirmed` | `{ reviewId, revision, deliveryId }` |
 | `viewed` | `{ reviewId }` |
+| `groups` | `{ reviewId? }` |
 | `snooze`, `unsnooze`, `retire`, `reopen`, `delete`, `bin`, `restore` | `{ reviewId, revision }` |
 
-Events contain ids and, except for `viewed`, a positive revision sequence only, never paths, text bodies or
+Events contain ids and, except for `viewed` and `groups`, a positive revision sequence only, never paths, text bodies or
 instructions. `claimed` follows a successful take; `confirmed` follows a successful
 delivery confirmation. `viewed` follows a successful viewed-mark PUT and invalidates that
 review's revision queries. These events are emitted after the transaction commits. Events have no
@@ -1691,7 +1739,9 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 
 | Constant key | Maximum |
 | --- | ---: |
-| `inboxItems` | 200 reviews returned in the inbox |
+| `inboxItems` | 200 rows per inbox block (at most 800 in all) |
+| `groups` | 50 inbox groups per owner |
+| `groupNameChars` | 80 characters per trimmed group name |
 | `agentReviews` | 100 reviews returned in the agent list |
 | `binItems` | 200 reviews returned in the bin list |
 | `importRevisions` | 1000 revisions per import |

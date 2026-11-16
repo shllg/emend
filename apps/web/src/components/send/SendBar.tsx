@@ -510,7 +510,7 @@ export function SendBar({
           if (!open && !sending) setConfirmApprove(false);
         }}
         title={revision === undefined ? "Approve this revision?" : `Approve revision ${revision}?`}
-        description="The agent receives the approval, now if one is waiting and otherwise when it next picks up. The review moves to Done."
+        description={`The agent receives the approval, now if one is waiting and otherwise when it next picks up. The review ${lifecycle?.groupId ? "stays in its group" : "moves to Done"}.`}
         actions={
           <>
             <Button data-autofocus disabled={sending} onClick={() => setConfirmApprove(false)}>

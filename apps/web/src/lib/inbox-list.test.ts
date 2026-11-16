@@ -1,0 +1,148 @@
+import { InboxItem } from "@emend/contract";
+import { expect, test } from "vitest";
+import { inboxSections, inboxSequence } from "./inbox-list.ts";
+
+const a = { id: "11111111-1111-4111-8111-111111111111", name: "Alpha", members: 3 };
+const b = { id: "22222222-2222-4222-8222-222222222222", name: "Beta", members: 0 };
+const now = Date.parse("2026-11-04T12:00:00.000Z");
+function item(n: number, patch: Partial<InboxItem> = {}): InboxItem {
+  return InboxItem.parse({
+    id: `33333333-3333-4333-8333-${String(n).padStart(12, "0")}`,
+    title: `Item ${n}`,
+    origin: { id: a.id, name: "Workshop" },
+    repo: null,
+    branch: null,
+    state: "open",
+    newestRevision: 1,
+    unsentCount: 0,
+    openThreads: 0,
+    agentWaiting: false,
+    pendingSend: false,
+    updatedAt: "2026-11-04T10:00:00.000Z",
+    movedTo: null,
+    list: "active",
+    snoozed: false,
+    snoozedUntil: null,
+    activeUntil: null,
+    releasedAt: null,
+    pickedUpAt: null,
+    kind: "review",
+    ...patch,
+  });
+}
+test("group sections sort by name and id between Snoozed and Done, preserving server row order", () => {
+  const rows = [
+    item(1),
+    item(2, { list: "snoozed" }),
+    item(3, { groupId: b.id }),
+    item(4, { groupId: a.id }),
+    item(5, { groupId: a.id }),
+    item(6, { list: "done" }),
+  ];
+  const groups = [
+    { ...b, members: 1 },
+    { ...a, members: 2 },
+  ];
+  const sections = inboxSections(rows, now, { groups });
+  expect(sections.map((s) => s.key)).toEqual(["active", "snoozed", `group:${a.id}`, `group:${b.id}`, "done"]);
+  expect(sections.map((s) => s.rows.map((r) => r.id))).toEqual([
+    [rows[0]?.id],
+    [rows[1]?.id],
+    [rows[3]?.id, rows[4]?.id],
+    [rows[2]?.id],
+    [rows[5]?.id],
+  ]);
+  expect(sections.map((s) => s.expanded)).toEqual([true, false, false, false, false]);
+  expect(inboxSequence(sections)).toEqual([rows[0]]);
+  const expanded = inboxSections(rows, now, {
+    groups,
+    open: { snoozed: true, done: true, [`group:${a.id}`]: true, [`group:${b.id}`]: true },
+  });
+  expect(inboxSequence(expanded)).toEqual([rows[0], rows[1], rows[3], rows[4], rows[2], rows[5]]);
+  expect(
+    inboxSections([], now, { groups: [{ ...b, name: a.name }, a] })
+      .filter((s) => s.group)
+      .map((s) => s.group?.id),
+  ).toEqual([a.id, b.id]);
+});
+test("membership wins over approved, retired and snoozed states, even after the approval window", () => {
+  const rows = [
+    item(1, { groupId: a.id, state: "approved", activeUntil: "2026-11-04T11:00:00.000Z" }),
+    item(2, { groupId: a.id, state: "settled", list: "done" }),
+    item(3, { groupId: a.id, snoozed: true, list: "snoozed" }),
+  ];
+  const sections = inboxSections(rows, now, { groups: [a, b] });
+  expect(sections.find((s) => s.group?.id === a.id)?.rows).toEqual(rows);
+  expect(sections.filter((s) => !s.group).flatMap((s) => s.rows)).toEqual([]);
+  expect(sections[0]?.nothingActive).toBe(true);
+  expect(sections.find((s) => s.group?.id === b.id)?.empty).toBe(true);
+  expect(sections.find((s) => s.group?.id === a.id)?.empty).toBe(false);
+});
+test("an unknown group id behaves as ungrouped", () => {
+  const row = item(1, { groupId: a.id });
+  expect(inboxSections([row], now)[0]).toMatchObject({ rows: [row], nothingActive: false });
+});
+test("a group with members beyond the loaded rows is not empty", () => {
+  const sections = inboxSections([], now, { groups: [a, b] });
+  expect(sections.find((section) => section.group?.id === a.id)).toMatchObject({ rows: [], count: 3, empty: false });
+  expect(sections.find((section) => section.group?.id === b.id)).toMatchObject({ rows: [], count: 0, empty: true });
+});
+test.each([
+  [{}, 3],
+  [{ filter: "Item" }, 1],
+  [{ kind: "review" }, 1],
+  [{ machine: a.id }, 1],
+  [{ project: "One" }, 1],
+] as const)("section counts use total group membership unless narrowed by %j", (filters, count) => {
+  const rows = [
+    item(1, { groupId: a.id, project: "One" }),
+    item(2),
+    item(3, { list: "snoozed" }),
+    item(4, { list: "done" }),
+  ];
+  const sections = inboxSections(rows, now, { groups: [a], ...filters });
+  expect(sections.find((section) => section.group?.id === a.id)).toMatchObject({ rows: [rows[0]], count });
+  for (const section of sections.filter((section) => !section.group)) expect(section.count).toBe(section.rows.length);
+});
+test("only non-empty groups without loaded members are unloaded, regardless of filters", () => {
+  const capped = { id: "44444444-4444-4444-8444-444444444444", name: "Gamma", members: 1 };
+  const rows = [item(1, { groupId: a.id })];
+  for (const filter of ["", "missing"]) {
+    const sections = inboxSections(rows, now, { groups: [a, b, capped], filter });
+    expect(sections.find((section) => section.group?.id === capped.id)).toMatchObject({
+      rows: [],
+      unloaded: true,
+    });
+    expect(sections.find((section) => section.group?.id === b.id)).toMatchObject({
+      rows: [],
+      empty: true,
+      unloaded: false,
+    });
+    expect(sections.find((section) => section.group?.id === a.id)).toMatchObject({
+      rows: filter ? [] : rows,
+      unloaded: false,
+    });
+    for (const section of sections.filter((section) => !section.group)) expect(section.unloaded).toBe(false);
+  }
+});
+test("all filters apply within groups; search expands them, and filtered-out members do not mean empty", () => {
+  const rows = [
+    item(1, { groupId: a.id, project: "One" }),
+    item(2, { groupId: a.id, kind: "publish", project: "Two", origin: { id: b.id, name: "Machine B" } }),
+    item(3, { groupId: a.id, kind: "publish", agentWaiting: true }),
+  ];
+  for (const [filter, expected] of [
+    [{ filter: "Item 2" }, [rows[1]]],
+    [{ kind: "publish" as const }, [rows[1], rows[2]]],
+    [{ kind: "review" as const }, [rows[0], rows[2]]],
+    [{ machine: b.id }, [rows[1]]],
+    [{ project: "One" }, [rows[0]]],
+    [{ filter: "missing" }, []],
+  ] as const) {
+    const section = inboxSections(rows, now, { groups: [a], ...filter }).find((s) => s.group);
+    expect(section?.rows).toEqual(expected);
+    expect(section?.count).toBe(expected.length);
+    expect(section?.empty).toBe(false);
+    if ("filter" in filter) expect(section?.expanded).toBe(true);
+  }
+});

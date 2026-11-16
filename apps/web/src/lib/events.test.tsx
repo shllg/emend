@@ -678,3 +678,31 @@ test("relayed pings keep a visible follower from taking over", async () => {
   }
   expect(Events.opened).toHaveLength(1);
 });
+
+test("groups refresh inbox and either the moved review or all review views", async () => {
+  const { invalidate } = await mount();
+  act(() => source().emit("groups", { reviewId: id }));
+  await tick();
+  expect(invalidate.mock.calls.map(([options]) => options?.queryKey)).toEqual([["inbox"], ["review", id]]);
+  invalidate.mockClear();
+  act(() => source().emit("groups", {}));
+  await tick();
+  expect(invalidate.mock.calls.map(([options]) => options?.queryKey)).toEqual([["inbox"], ["review"]]);
+});
+
+test("a groups event after open refreshes every review updated within the reconnect batch", async () => {
+  const { client, invalidate } = await mount();
+  const review = observe(client, ["review", id], Date.now());
+  const second = observe(client, ["review", other], Date.now());
+  const revision = observe(client, ["revision", id, "1"], Date.now());
+  act(() => source().open());
+  await tick(100);
+  for (const reviewId of [id, other]) client.setQueryData(["review", reviewId], "loaded after open");
+  act(() => source().emit("groups", {}));
+  await tick(100);
+  expect(invalidate).toHaveBeenCalledOnce();
+  expect(review.fetcher).toHaveBeenCalledOnce();
+  expect(second.fetcher).toHaveBeenCalledOnce();
+  expect(revision.fetcher).not.toHaveBeenCalled();
+  for (const query of [review, second, revision]) query.stop();
+});

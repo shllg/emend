@@ -29,6 +29,7 @@ const lifecycle: ReviewLifecycle = {
   state: "open",
   snoozed: false,
   snoozedUntil: null,
+  groupId: null,
   onDeleted: () => {},
 };
 const pickedUp = "No agent has picked this up yet. emend keeps it until one does.";

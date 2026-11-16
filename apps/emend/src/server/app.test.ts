@@ -266,6 +266,7 @@ test("every documented API endpoint enforces its scope even before its handler e
         await response.body?.cancel();
       } else if (
         path === "/api/v1/publish" ||
+        path === "/api/v1/groups" ||
         path.startsWith("/api/v1/blobs/") ||
         (endpoint.method === "PUT" && path.endsWith("/viewed")) ||
         (endpoint.method === "POST" && /\/(threads|comments|sends|reply|snooze)$/.test(path)) ||

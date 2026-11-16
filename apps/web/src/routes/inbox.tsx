@@ -1,9 +1,10 @@
-import type { InboxItem } from "@emend/contract";
+import { type InboxItem, LIMITS } from "@emend/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { ChevronDown, ChevronRight, PanelLeftClose, Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { inboxQuery, serverNow } from "../api/queries.ts";
+import { GroupActions } from "../components/inbox/GroupActions.tsx";
 import { needsAttention, ReviewRow } from "../components/inbox/ReviewRow.tsx";
 import { AppFrame } from "../components/layout/AppFrame.tsx";
 import { Button } from "../components/ui/Button.tsx";
@@ -12,6 +13,7 @@ import { IconButton } from "../components/ui/IconButton.tsx";
 import { SegmentedControl } from "../components/ui/SegmentedControl.tsx";
 import { Select } from "../components/ui/Select.tsx";
 import { TextField } from "../components/ui/TextField.tsx";
+import { cn } from "../components/ui/utils.ts";
 import { plural } from "../lib/count.ts";
 import { useInboxArrivals } from "../lib/inbox-arrivals.tsx";
 import {
@@ -55,7 +57,7 @@ export function Inbox({
     } catch {}
   };
   const [now, setNow] = useState(Date.now);
-  const [open, setOpen] = useState({ snoozed: false, done: false });
+  const [open, setOpen] = useState<Record<string, boolean>>({});
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(interval);
@@ -101,6 +103,7 @@ export function Inbox({
     machine: machineFilter,
     project: projectFilter,
     open,
+    groups: query.data?.groups,
   });
   const filteredCount = sections.reduce((count, section) => count + section.rows.length, 0);
   const move = (delta: 1 | -1) => {
@@ -232,7 +235,9 @@ export function Inbox({
             <Button onClick={() => void query.refetch()}>Retry</Button>
           </div>
         )}
-        {query.data && items.length === 0 && <p className="p-4 text-fg-3">No reviews yet.</p>}
+        {query.data && items.length === 0 && !query.data.groups.length && (
+          <p className="p-4 text-fg-3">No reviews yet.</p>
+        )}
         {items.length > 0 && filteredCount === 0 && (
           <div className="p-4">
             <p className="text-fg-3">No reviews match this filter.</p>
@@ -250,37 +255,52 @@ export function Inbox({
           </div>
         )}
         {query.data &&
-          items.length > 0 &&
-          filteredCount > 0 &&
-          sections.map(({ list, title, rows, nothingActive, expanded }) => {
-            if (rows.length === 0 && !nothingActive) return null;
+          sections.map(({ key, list, title, count, rows, nothingActive, expanded, group, empty, unloaded }) => {
+            if (rows.length === 0 && !empty && !unloaded && !(nothingActive && items.length > 0 && filteredCount > 0))
+              return null;
             const collapsible = list !== "active";
             const heading = (
               <>
-                {title}
-                <span className="ml-1.5 font-normal tabular-nums text-fg-2">{rows.length}</span>
+                <span
+                  dir={group ? "auto" : undefined}
+                  className={group ? "min-w-0 truncate" : undefined}
+                  title={group ? title : undefined}
+                >
+                  {title}
+                </span>
+                <span className={cn("ml-1.5 font-normal tabular-nums text-fg-2", group && "shrink-0")}>{count}</span>
               </>
             );
             const headingClass =
               "m-0 flex items-center gap-2 px-2.5 pt-3 pb-1 font-mono text-12 font-semibold leading-(--lh-snug) font-stretch-mono tracking-(--tracking-label) text-fg-2 uppercase";
             return (
-              <section key={list} aria-label={title}>
+              <section key={key} aria-label={title}>
                 <Heading className={headingClass}>
                   {collapsible && needle === "" ? (
                     <button
                       type="button"
                       aria-expanded={expanded}
-                      className="inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 font-[inherit] text-[inherit] uppercase"
-                      onClick={() => setOpen((current) => ({ ...current, [list]: !current[list] }))}
+                      className={cn(
+                        "inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 font-[inherit] text-[inherit] uppercase",
+                        group && "min-w-0",
+                      )}
+                      onClick={() => setOpen((current) => ({ ...current, [key]: !current[key] }))}
                     >
                       <Icon icon={expanded ? ChevronDown : ChevronRight} size={12} />
                       {heading}
                     </button>
                   ) : (
-                    <span>{heading}</span>
+                    <span className={group ? "inline-flex min-w-0 items-center" : undefined}>{heading}</span>
                   )}
-                  <span aria-hidden="true" className="h-px flex-1 bg-line-2" />
+                  <span aria-hidden="true" className={cn("h-px flex-1 bg-line-2", group && "min-w-4 shrink-0")} />
+                  {group && <GroupActions group={group} compact={compact} afterDeleteFocus={input} />}
                 </Heading>
+                {expanded && empty && <p className="px-2.5 py-2 text-13 text-fg-3">No items in this group yet.</p>}
+                {expanded && unloaded && (
+                  <p className="px-2.5 py-2 text-13 text-fg-3">
+                    Its items are past the {LIMITS.inboxItems} grouped items the inbox shows.
+                  </p>
+                )}
                 {nothingActive && <p className="px-2.5 py-2 text-13 text-fg-3">No active reviews.</p>}
                 {expanded && rows.length > 0 && (
                   <ul>

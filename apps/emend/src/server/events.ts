@@ -47,11 +47,15 @@ export class ReviewEvents {
   emit(ownerId: string, value: ReviewEvent) {
     // Strip any accidental content fields even when the caller isn't type checked.
     const event = ReviewEvent.parse(value);
-    const waiting = this.waiting.get(ownedKey(ownerId, event.reviewId));
+    const waiting = event.reviewId === undefined ? undefined : this.waiting.get(ownedKey(ownerId, event.reviewId));
     if (waiting?.ownerId === ownerId && "revision" in event)
       waiting.revision = Math.max(waiting.revision, event.revision);
     const reviews = this.listeners.get(ownerId);
-    for (const listener of [...(reviews?.get(null) ?? []), ...(reviews?.get(event.reviewId) ?? [])]) listener(event);
+    for (const listener of [
+      ...(reviews?.get(null) ?? []),
+      ...(event.reviewId === undefined ? [] : (reviews?.get(event.reviewId) ?? [])),
+    ])
+      listener(event);
   }
   agentWaiting(ownerId: string, reviewId: string) {
     const state = this.waiting.get(ownedKey(ownerId, reviewId));

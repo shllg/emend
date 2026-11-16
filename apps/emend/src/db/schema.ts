@@ -147,6 +147,37 @@ export const reviewTombstones = sqliteTable(
   (t) => [primaryKey({ columns: [t.ownerId, t.reviewId] }), index("review_tombstones_owner_idx").on(t.ownerId)],
 );
 
+/** A named inbox group the reviewer made. Its members show in its own inbox section. */
+export const reviewGroups = sqliteTable(
+  "review_groups",
+  {
+    id: id(),
+    ownerId: ownerId(),
+    name: text("name").notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [...owned("review_groups", t), unique("review_groups_owner_name_unique").on(t.ownerId, t.name)],
+);
+
+/** A review's group, at most one per review. The repo deletes the row with its group or review. */
+export const reviewGroupMembers = sqliteTable(
+  "review_group_members",
+  {
+    ownerId: ownerId(),
+    reviewId: text("review_id").notNull(),
+    groupId: text("group_id").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.ownerId, t.reviewId] }),
+    index("review_group_members_owner_idx").on(t.ownerId),
+    index("review_group_members_owner_group_idx").on(t.ownerId, t.groupId),
+    foreignKey({ columns: [t.ownerId, t.reviewId], foreignColumns: [reviews.ownerId, reviews.id] }),
+    foreignKey({ columns: [t.ownerId, t.groupId], foreignColumns: [reviewGroups.ownerId, reviewGroups.id] }),
+  ],
+);
+
 export const revisions = sqliteTable(
   "revisions",
   {

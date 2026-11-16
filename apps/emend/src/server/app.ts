@@ -26,6 +26,7 @@ import { deviceRoutes } from "./routes/devices.ts";
 import { downloadRoutes } from "./routes/download.ts";
 import { eventRoutes } from "./routes/events.ts";
 import { fileRoutes } from "./routes/files.ts";
+import { groupRoutes } from "./routes/groups.ts";
 import { importRoutes } from "./routes/import.ts";
 import { lifecycleRoutes } from "./routes/lifecycle.ts";
 import { machineRoutes } from "./routes/machines.ts";
@@ -77,6 +78,10 @@ export const ENDPOINTS = [
   { method: "POST", path: "/api/v1/publish", scope: "publish" },
   { method: "POST", path: "/api/v1/import", scope: "publish" },
   { method: "GET", path: "/api/v1/agent/reviews", scope: "publish" },
+  { method: "POST", path: "/api/v1/groups", scope: "send" },
+  { method: "PATCH", path: "/api/v1/groups/:id", scope: "send" },
+  { method: "DELETE", path: "/api/v1/groups/:id", scope: "send" },
+  { method: "PUT", path: "/api/v1/reviews/:id/group", scope: "send" },
   { method: "GET", path: "/api/v1/reviews", scope: "read" },
   { method: "GET", path: "/api/v1/reviews/:id", scope: "read" },
   { method: "GET", path: "/api/v1/reviews/:id/revisions/:seq", scope: "read" },
@@ -187,6 +192,7 @@ export function createApp(deps: AppDeps) {
   reviewRoutes(app, deps);
   downloadRoutes(app, deps);
   lifecycleRoutes(app, deps);
+  groupRoutes(app, deps);
   viewedRoutes(app, deps);
   fileRoutes(app, deps);
   mediaRoutes(app, deps);

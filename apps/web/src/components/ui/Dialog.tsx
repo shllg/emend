@@ -1,9 +1,11 @@
 import * as Primitive from "@radix-ui/react-dialog";
 import { type ComponentProps, type ReactNode, type RefObject, useRef } from "react";
 import { isToastInteraction, overlayClass } from "./overlay.ts";
+import { cn } from "./utils.ts";
 
 export interface DialogProps {
-  title: string;
+  title: ReactNode;
+  titleClassName?: string;
   description: ReactNode;
   /** Mark the least destructive action (usually Cancel) with data-autofocus. */
   actions: ReactNode;
@@ -19,6 +21,7 @@ export interface DialogProps {
 
 export function Dialog({
   title,
+  titleClassName,
   description,
   actions,
   children,
@@ -60,7 +63,9 @@ export function Dialog({
           className="fixed top-1/2 left-1/2 z-[calc(var(--z-sheet)+1)] flex max-h-[85dvh] w-[min(440px,92%)] -translate-x-1/2 -translate-y-1/2 animate-[em-fade_var(--dur-2)_var(--ease-out)] flex-col overflow-y-auto rounded-xl border border-line-1 bg-surface shadow-3"
         >
           <div className="px-5 pt-5 pb-1">
-            <Primitive.Title className="m-0 mb-1.5 font-sans text-18 font-semibold leading-(--lh-snug) text-fg-1">
+            <Primitive.Title
+              className={cn("m-0 mb-1.5 font-sans text-18 font-semibold leading-(--lh-snug) text-fg-1", titleClassName)}
+            >
               {title}
             </Primitive.Title>
             <Primitive.Description className="m-0 font-sans text-14 font-normal leading-(--lh-body) text-pretty text-fg-2">

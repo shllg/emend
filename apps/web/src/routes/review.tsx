@@ -852,6 +852,7 @@ function LoadedReview({
               }}
               lifecycle={{
                 title: review.title,
+                groupId: review.groupId,
                 state: review.state,
                 snoozed: review.snoozed,
                 snoozedUntil: review.snoozedUntil,

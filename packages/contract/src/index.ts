@@ -8,6 +8,7 @@ export * from "./devices.ts";
 export * from "./doc.ts";
 export * from "./errors.ts";
 export * from "./events.ts";
+export * from "./groups.ts";
 export * from "./import.ts";
 export * from "./import-budget.ts";
 export * from "./import-index.ts";
