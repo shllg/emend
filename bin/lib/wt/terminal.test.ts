@@ -13,7 +13,10 @@ for (const [module, reader] of [
   ["github.ts", "markerTerminal"],
   ["worktree.ts", "terminal"],
 ]) {
-  test(`R9.1: ${reader} real reader waits for late FIFO input without touching process.stdin`, async () => {
+  // Hang guard only: a correct run takes milliseconds.
+  test(`R9.1: ${reader} real reader waits for late FIFO input without touching process.stdin`, {
+    timeout: 60_000,
+  }, async () => {
     const root = mkdtempSync(join(tmpdir(), "wt-tty-"));
     const fifo = join(root, "input");
     execFileSync("mkfifo", [fifo]);
