@@ -63,6 +63,30 @@ test("entity codes keep encoded and literal state identifiers distinct", () => {
   expect(encoded.source).toBe(source.replaceAll("#8212;", standIn));
 });
 
+test("entity codes keep encoded and HTML-referenced gitGraph identifiers distinct", () => {
+  // gitGraph decodes references in ids with <br>; Happy DOM's sanitizer differs, so this is a unit test.
+  const source = `gitGraph
+  commit id: "n#8212;<br>"
+  commit id: "n&mdash;<br>"`;
+  const encoded = encodeCodes(source);
+  const [standIn] = encoded.characters.keys();
+  if (!standIn) throw new Error("Missing entity stand-in");
+  expect(standIn).toMatch(/^[\u0100-\u024f]$/u);
+  expect(encoded.characters).toEqual(new Map([[standIn, "\u2014"]]));
+  expect(encoded.source).toBe(source.replaceAll("#8212;", standIn));
+});
+
+test("numeric HTML references prevent inlining entity codes in identifiers", () => {
+  const encoded = encodeCodes(`gitGraph
+  commit id: "n#8212;"
+  commit id: "n&#8212;"`);
+  const [standIn] = encoded.characters.keys();
+  if (!standIn) throw new Error("Missing entity stand-in");
+  expect(standIn).toMatch(/^[\u0100-\u024f]$/u);
+  expect(encoded.characters).toEqual(new Map([[standIn, "\u2014"]]));
+  expect(encoded.source).toContain(`commit id: "n${standIn}"`);
+});
+
 test("different codes for the same character stay distinct", () => {
   const encoded = encodeCodes("#8212; #mdash;");
   const [standIn] = encoded.characters.keys();
@@ -143,7 +167,7 @@ test.each([
 
 test("HTML references reserve their decoded characters before choosing stand-ins", () => {
   const encoded = encodeCodes("#quot; &Amacr; &#257; &#x102; &#259");
-  expect([...encoded.characters.values()]).toEqual(['"']);
+  expect([...encoded.characters.values()]).toEqual(['"', "\u0101"]);
   for (const standIn of encoded.characters.keys()) expect("\u0100\u0101\u0102\u0103").not.toContain(standIn);
 });
 
@@ -158,9 +182,11 @@ test.each(["&Amacr\u00b6\u00df", "\ufb02\u00b0Amacr\u00b6\u00df", "\ufb02\u00b0\
 
 test.each([
   { code: "#quot;", parses: 1 },
-  { code: "#8212;", parses: 0 },
+  { code: "#8212;", parses: 1 },
+  { code: "#quot; #8212; #65;", parses: 1 },
   { code: "", parses: 0 },
-])("reference scanning batches distinct references only when stand-ins are needed: $code", ({ code, parses }) => {
+  { code: "#nosuchentity;", parses: 0 },
+])("reference scanning batches distinct references once only when a code decodes: $code", ({ code, parses }) => {
   const parse = vi.spyOn(DOMParser.prototype, "parseFromString");
   const references = Array.from({ length: 50 }, (_, index) => `&a${index + 1};`);
   encodeCodes(`flowchart LR; a["${references.join(" ")} ${code}"]`);

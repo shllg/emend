@@ -6,8 +6,8 @@ const FONT_FAMILY = "system-ui, sans-serif";
 // Mermaid writes codes as entity text in SVG labels and decodes only &amp;, &lt; and &gt;.
 // Inline non-ASCII printable characters except Mermaid's markers; use stand-in letters
 // of about the same width for other codes, then write their characters back as text.
-// Inline a code only when its characters are unique in the source, so identifiers stay
-// distinct. Names the HTML parser decodes only in part stay as written.
+// Inline a code only when its characters are unique in the source and its HTML references,
+// so identifiers stay distinct. Names the HTML parser decodes only in part stay as written.
 export function encodeCodes(source: string): { source: string; characters: Map<string, string> } {
   if (source.includes("\uffff")) return { source, characters: new Map() };
   const encoded = source
@@ -21,6 +21,22 @@ export function encodeCodes(source: string): { source: string; characters: Map<s
     const decoded = (parser.parseFromString(`x${entity}`, "text/html").body.textContent ?? `x${entity}`).slice(1);
     decodedEntities.set(entity, decoded);
     return decoded;
+  };
+  let referenceCharacters: Set<string> | undefined;
+  const getReferenceCharacters = () => {
+    if (referenceCharacters) return referenceCharacters;
+    const decodedSource = source
+      .replace(/\ufb02\u00b0\u00b0/g, "&#")
+      .replace(/\ufb02\u00b0/g, "&")
+      .replace(/\u00b6\u00df/g, ";");
+    const references = new Set<string>();
+    for (const text of [source, decodedSource]) {
+      for (const [reference] of text.matchAll(/&(?:#[xX][0-9a-fA-F]+|#\d+|[A-Za-z][A-Za-z0-9]*);?/g)) {
+        references.add(reference);
+      }
+    }
+    referenceCharacters = new Set(references.size > 0 ? decode([...references].join("\n")) : "");
+    return referenceCharacters;
   };
   const present = new Set(source);
   const used = new Set([...source, "\u0130", "\u0131", "\u0149", "\u017f", "\u01f0"]);
@@ -38,9 +54,14 @@ export function encodeCodes(source: string): { source: string; characters: Map<s
       (!numeric && [...inner].some((_, index) => index > 0 && decoded.endsWith(`${inner.slice(index)};`)))
     ) {
       codes.set(code, code);
-    } else if (
+      continue;
+    }
+    const referenced = getReferenceCharacters();
+    if (
       /^[\p{L}\p{M}\p{N}\p{P}\p{S}\p{Co}]+$/u.test(decoded) &&
-      [...decoded].every((character) => character.charCodeAt(0) > 0x7f && !present.has(character)) &&
+      [...decoded].every(
+        (character) => character.charCodeAt(0) > 0x7f && !present.has(character) && !referenced.has(character),
+      ) &&
       !/[\u00b0\u00b6\u00df\ufb02]/u.test(decoded)
     ) {
       codes.set(code, decoded);
@@ -53,19 +74,7 @@ export function encodeCodes(source: string): { source: string; characters: Map<s
     }
   }
   if (pending.size > 0) {
-    const decodedSource = source
-      .replace(/\ufb02\u00b0\u00b0/g, "&#")
-      .replace(/\ufb02\u00b0/g, "&")
-      .replace(/\u00b6\u00df/g, ";");
-    const references = new Set<string>();
-    for (const text of [source, decodedSource]) {
-      for (const [reference] of text.matchAll(/&(?:#[xX][0-9a-fA-F]+|#\d+|[A-Za-z][A-Za-z0-9]*);?/g)) {
-        references.add(reference);
-      }
-    }
-    if (references.size > 0) {
-      for (const character of decode([...references].join("\n"))) used.add(character);
-    }
+    for (const character of getReferenceCharacters()) used.add(character);
     let context: CanvasRenderingContext2D | null;
     try {
       context = document.createElement("canvas").getContext("2d");
