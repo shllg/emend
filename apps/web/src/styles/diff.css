@@ -18,6 +18,22 @@
     border-bottom: 1px solid var(--border-1);
     background: var(--bg-surface);
   }
+  /* The diff toolbar in the tab row: it shares the row's line and wraps below the tabs when they do not both fit. */
+  .em-tab-tools {
+    display: flex;
+    flex: 1 0 auto;
+    border-bottom: 1px solid var(--border-1);
+  }
+  .em-tab-tools:empty {
+    display: none;
+  }
+  .em-tab-tools > .em-diff-toolbar {
+    position: static;
+    flex: 1;
+    min-height: 40px;
+    padding-block: 0;
+    border-bottom: 0;
+  }
   .em-code-bar {
     height: 41px;
     font: 400 13px / 1.4 var(--font-sans);

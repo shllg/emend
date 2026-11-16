@@ -4233,7 +4233,10 @@ test.each([1280, 768])(
     expect(reading.hidden).toBe(true);
     expect(pane.scrollTop).toBe(470);
     expect(pane.classList.contains("em-code-panel")).toBe(false);
-    expect(pane.querySelector(".em-diff-toolbar")).toBeTruthy();
+    // In Tabs mode the toolbar sits in the tab row, outside the diff pane.
+    await waitFor(() => expect(document.querySelector(".em-review-tabs .em-tab-tools .em-diff-toolbar")).toBeTruthy());
+    expect(pane.querySelector(".em-diff-toolbar")).toBeNull();
+    expect(pane.querySelector(".em-diff-pane")?.hasAttribute("data-toolbar")).toBe(false);
     expect(screen.queryByRole("button", { name: "Close code panel" })).toBeNull();
     expect(screen.getByRole("region", { name: "Topic Water the garden" })).toBeTruthy();
     expect(screen.getAllByRole("region", { name: /^File / })).toHaveLength(3);

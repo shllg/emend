@@ -1,6 +1,7 @@
 import { type FileView, OTHER_TOPIC, type RevisionView, type Target } from "@emend/contract";
 import { useIsMutating } from "@tanstack/react-query";
-import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { runningCommentSaves } from "../../api/mutations.ts";
 import { type CodeFocus, sameCodeFocus } from "../../lib/code-focus.ts";
 import { claimDraft } from "../../lib/composer-owner.ts";
@@ -16,9 +17,11 @@ import { rankedTopics } from "../../lib/topics.ts";
 import { useShortcut } from "../../lib/use-shortcut.tsx";
 import { useViewedCollapse } from "../../lib/viewed-collapse.ts";
 import type { ReviewSearch } from "../../router.tsx";
+import { useMoreMenuItems } from "../layout/more-menu.ts";
 import { Composer } from "../threads/Composer.tsx";
 import { ThreadCard } from "../threads/ThreadCard.tsx";
-import { DiffToolbar } from "./DiffToolbar.tsx";
+import { DiffToolbar, fileJumpMenu } from "./DiffToolbar.tsx";
+import { DiffChrome } from "./diff-chrome.ts";
 import { FileDiff } from "./FileDiff.tsx";
 import type { DiffParser } from "./parse-client.ts";
 import {
@@ -63,6 +66,8 @@ export function DiffPane({
   onViewed,
 }: DiffPaneProps) {
   const layout = useLayout();
+  const chrome = useContext(DiffChrome);
+  const slot = chrome?.toolbarSlot ?? null;
   // Phone focus has its own pane: omit unrelated content so its composers cannot portal sheets.
   // Larger layouts share the Diff tab's pane and keep hidden editors mounted.
   const phoneFocus = layout === "phone" && !!focus;
@@ -384,31 +389,43 @@ export function DiffPane({
     (!phoneFocus || (focus?.kind === "topic" && focus.slug === active.slug))
       ? active
       : undefined;
+  const menu = fileJumpMenu({
+    groups: [...groups.values()],
+    files: orderedFiles,
+    ranks,
+    counts,
+    order: shownOrder,
+    orderLocked: saving,
+    onOrder: setOrder,
+    onJump: setJump,
+  });
+  useMoreMenuItems(chrome && layout === "phone" && !focus ? [{ heading: menu.label }, ...menu.items] : undefined);
+  const toolbar = layout !== "phone" && !focus && (
+    <DiffToolbar
+      groups={[...groups.values()]}
+      files={orderedFiles}
+      ranks={ranks}
+      counts={counts}
+      order={shownOrder}
+      orderLocked={saving}
+      onOrder={setOrder}
+      style={diffStyle}
+      splitDisabled={narrow !== false}
+      onStyle={setStyle}
+      wrap={wrap}
+      onWrap={setWrap}
+      notes={notes}
+      onNotes={(notes) => layoutStore.update({ notes })}
+      onJump={(file) => {
+        setJump(file);
+      }}
+    />
+  );
   return (
     <DiffNavigation value={navigateDiff}>
-      <div ref={root} className="em-diff-pane" data-toolbar={layout !== "phone" || undefined}>
+      <div ref={root} className="em-diff-pane" data-toolbar={(layout !== "phone" && !slot) || undefined}>
         <h2 className="sr-only">Diff</h2>
-        {layout !== "phone" && !focus && (
-          <DiffToolbar
-            groups={[...groups.values()]}
-            files={orderedFiles}
-            ranks={ranks}
-            counts={counts}
-            order={shownOrder}
-            orderLocked={saving}
-            onOrder={setOrder}
-            style={diffStyle}
-            splitDisabled={narrow !== false}
-            onStyle={setStyle}
-            wrap={wrap}
-            onWrap={setWrap}
-            notes={notes}
-            onNotes={(notes) => layoutStore.update({ notes })}
-            onJump={(file) => {
-              setJump(file);
-            }}
-          />
-        )}
+        {slot && toolbar ? createPortal(toolbar, slot) : toolbar}
         {!phoneFocus && unplaced.length > 0 && (
           <section hidden={!!focus} aria-label="Unplaced comments" className="mb-5 space-y-3">
             <h3 className="font-semibold">Unplaced comments</h3>

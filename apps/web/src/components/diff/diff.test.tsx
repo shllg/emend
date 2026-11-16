@@ -2147,6 +2147,19 @@ test("paths keep their order in an isolated left-to-right run, and the rename so
   expect(diffStylesheet).toMatch(/\.em-file-from-label\s*\{[^}]*flex-shrink:\s*0;/);
 });
 
+test("the tab-row toolbar slot's stylesheet rules", () => {
+  expect(diffStylesheet).toMatch(
+    /\.em-tab-tools\s*\{[^}]*display:\s*flex;[^}]*flex:\s*1 0 auto;[^}]*border-bottom:\s*1px solid var\(--border-1\);/,
+  );
+  expect(diffStylesheet).toMatch(/\.em-tab-tools:empty\s*\{[^}]*display:\s*none;/);
+  const rule = diffStylesheet.match(/\.em-tab-tools > \.em-diff-toolbar\s*\{([^}]+)\}/)?.[1] ?? "";
+  expect(rule).toMatch(/position:\s*static;/);
+  expect(rule).toMatch(/flex:\s*1;/);
+  expect(rule).toMatch(/min-height:\s*40px;/);
+  expect(rule).toMatch(/padding-block:\s*0;/);
+  expect(rule).toMatch(/border-bottom:\s*0;/);
+});
+
 test("the toolbar offset is 0px on the phone, where the toolbar is hidden, and 41px beside it", async () => {
   expect(diffStylesheet).toMatch(/\.em-diff-pane\s*\{[^}]*--diff-toolbar-height:\s*0px;/);
   expect(diffStylesheet).toMatch(/\.em-diff-pane\[data-toolbar\]\s*\{[^}]*--diff-toolbar-height:\s*41px;/);
