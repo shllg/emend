@@ -455,6 +455,8 @@ test("oversize source stays text and is never passed to Mermaid", async () => {
 test.each([
   { statements: 501, separator: "\n", kind: "newlines", tooLarge: true },
   { statements: 500, separator: "\n", kind: "newlines", tooLarge: false },
+  { statements: 501, separator: "\r", kind: "CR line endings", tooLarge: true },
+  { statements: 500, separator: "\r\n", kind: "CRLF line endings", tooLarge: false },
   { statements: 501, separator: ";", kind: "semicolons", tooLarge: true },
   { statements: 500, separator: "\n \t\n\n", kind: "blank lines", tooLarge: false },
   { statements: 500, separator: "; \t; ;;", kind: "empty semicolon segments", tooLarge: false },

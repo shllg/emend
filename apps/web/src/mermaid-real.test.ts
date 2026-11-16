@@ -51,19 +51,20 @@ test.each([
 });
 
 test.each([
-  { states: 250, arrowsPerState: 3, tooLarge: true },
-  { states: 25, arrowsPerState: 2, tooLarge: false },
+  { states: 250, arrowsPerState: 3, separator: "\n", kind: "LF", tooLarge: true },
+  { states: 250, arrowsPerState: 3, separator: "\r", kind: "CR", tooLarge: true },
+  { states: 25, arrowsPerState: 2, separator: "\n", kind: "LF", tooLarge: false },
 ])(
-  "real Mermaid checks a $states-state chart with $arrowsPerState labelled arrows per state",
-  async ({ states, arrowsPerState, tooLarge }) => {
+  "real Mermaid checks a $states-state chart with $arrowsPerState labelled arrows per state ($kind)",
+  async ({ states, arrowsPerState, separator, tooLarge }) => {
     mermaid.initialize(frameConfig(false));
     const lines = Array.from({ length: states }, (_, from) =>
       Array.from(
         { length: arrowsPerState },
         (_, offset) => `s${from} --> s${(from + offset * 7 + 1) % states}: transition ${from}-${offset}`,
-      ).join("\n"),
+      ).join(separator),
     );
-    const source = `stateDiagram-v2\n${lines.join("\n")}`;
+    const source = `stateDiagram-v2${separator}${lines.join(separator)}`;
     // Mermaid freezes its API; copy it so the spy can call through to the real parser.
     const originalAPI = mermaid.mermaidAPI;
     mermaid.mermaidAPI = { ...originalAPI };

@@ -336,7 +336,7 @@ async function measure(
   return undefined;
 }
 function countStatements(source: string): number {
-  return source.split(/[\n;]/).filter((statement) => statement.trim() !== "").length;
+  return source.split(/[\r\n;]/).filter((statement) => statement.trim() !== "").length;
 }
 export async function exceedsLimits(source: string): Promise<boolean> {
   if (countStatements(source) > MAX_STATEMENTS) return true;
