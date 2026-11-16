@@ -52,7 +52,7 @@ test("entity codes use distinct Latin stand-ins and reuse repeated codes", () =>
 test("entity encoding preserves colours, unknown codes and existing letters", () => {
   const source = 'flowchart LR\n  a["\u0100 #quot; #nosuchentity;"]\n  classDef dark fill:#333;\n  style a fill:#f9f;';
   const encoded = encodeCodes(source);
-  expect(encoded.source).toContain("classDef dark fill:#333\n  style a fill:#f9f");
+  expect(encoded.source).toContain("classDef dark fill:#333;\n  style a fill:#f9f;");
   expect(encoded.source).toContain("#nosuchentity;");
   expect(encoded.source).toContain("\u0100");
   expect(encoded.characters.size).toBe(1);
@@ -63,9 +63,95 @@ test("entity encoding preserves colours, unknown codes and existing letters", ()
   expect(encoded.characters.get(standIn)).toBe('"');
 });
 
-test("source without entity codes stays unchanged", () => {
-  const source = "flowchart LR\n  a --> b";
+test.each([
+  "flowchart LR\n  a --> b",
+  "flowchart LR; A-->B; style A fill:#f00 ; B-->C;",
+  "classDef dark fill:#333;\nstyle a fill:#f9f;",
+])("source without label entity codes stays unchanged: %s", (source) => {
   expect(encodeCodes(source)).toEqual({ source, characters: new Map() });
+});
+
+test("source containing the semicolon placeholder stays unchanged", () => {
+  const source = 'flowchart LR\n  a["\uffff #quot;"]\n  style a fill:#f9f;';
+  expect(encodeCodes(source)).toEqual({ source, characters: new Map() });
+});
+
+test.each([
+  { source: "first#32;last", character: " ", prefix: "first", suffix: "last" },
+  { source: "tab#9;x", character: "\t", prefix: "tab", suffix: "x" },
+])("entity decoding preserves whitespace in $source", ({ source, character, prefix, suffix }) => {
+  const encoded = encodeCodes(source);
+  expect([...encoded.characters.values()]).toEqual([character]);
+  const [standIn] = encoded.characters.keys();
+  expect(encoded.source).toBe(`${prefix}${standIn}${suffix}`);
+});
+
+test("HTML references reserve their decoded characters before choosing stand-ins", () => {
+  const encoded = encodeCodes("#quot; &Amacr; &#257; &#x102; &#259");
+  expect([...encoded.characters.values()]).toEqual(['"']);
+  for (const standIn of encoded.characters.keys()) expect("\u0100\u0101\u0102\u0103").not.toContain(standIn);
+});
+
+test("non-ASCII letters are inlined and reserved before choosing stand-ins for ASCII", () => {
+  const encoded = encodeCodes("#quot; #26085; #228; #65; #257; #101;nd");
+  expect(encoded.source).toBe("\u0100 \u65e5 \u00e4 \u0102 \u0101 \u0103nd");
+  expect(encoded.characters).toEqual(
+    new Map([
+      ["\u0100", '"'],
+      ["\u0102", "A"],
+      ["\u0103", "e"],
+    ]),
+  );
+  expect(encoded.characters.has("\u0101")).toBe(false);
+});
+
+test("stand-ins use the nearest width in the frame font", () => {
+  const context = {
+    font: "",
+    measureText: vi.fn((text: string) => ({
+      width: ["\u2014", "\u0152"].includes(text) ? 100 : ['"', "\u013a"].includes(text) ? 30 : 50,
+    })),
+  };
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context as unknown as CanvasRenderingContext2D);
+  const encoded = encodeCodes("#8212; #quot; #8212;");
+  expect(encoded.source).toBe("\u0152 \u013a \u0152");
+  expect(encoded.characters).toEqual(
+    new Map([
+      ["\u0152", "\u2014"],
+      ["\u013a", '"'],
+    ]),
+  );
+  expect(context.font).toBe("100px system-ui, sans-serif");
+});
+
+test.each(["null", "throws"])("canvas %s falls back to the lowest available code points", (mode) => {
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => {
+    if (mode === "throws") throw new Error("Canvas unavailable");
+    return null;
+  });
+  const encoded = encodeCodes("#8212; #quot;");
+  expect(encoded.source).toBe("\u0100 \u0101");
+  expect(encoded.characters).toEqual(
+    new Map([
+      ["\u0100", "\u2014"],
+      ["\u0101", '"'],
+    ]),
+  );
+});
+
+test.each([
+  { firstFree: 0x0130, expected: "\u0132" },
+  { firstFree: 0x017f, expected: "\u0180" },
+])("stand-ins skip letters with ASCII case mappings at $firstFree", ({ firstFree, expected }) => {
+  const used = Array.from({ length: firstFree - 0x0100 }, (_, index) => String.fromCodePoint(0x0100 + index)).join("");
+  expect(encodeCodes(`${used} #quot;`).characters).toEqual(new Map([[expected, '"']]));
+});
+
+test("repeated unknown entities share one cached decode, including HTML references", () => {
+  const parse = vi.spyOn(DOMParser.prototype, "parseFromString");
+  const source = "#nosuchentity; #nosuchentity; &nosuchentity;";
+  expect(encodeCodes(source)).toEqual({ source, characters: new Map() });
+  expect(parse.mock.calls.filter(([input]) => input === "x&nosuchentity;")).toHaveLength(1);
 });
 
 test("running out of stand-ins returns the whole original source", () => {
@@ -74,28 +160,36 @@ test("running out of stand-ins returns the whole original source", () => {
   expect(encodeCodes(source)).toEqual({ source, characters: new Map() });
 });
 
-test("entity restoration changes SVG text, tspan and title but leaves styles and attributes alone", () => {
+test("entity restoration changes SVG text and accessible labels but leaves styles and other attributes alone", () => {
   const encoded = encodeCodes("#quot; #58; #8212; #lt;b#gt; #amp;");
   const svg = sanitizeSvg(
-    `<svg xmlns="http://www.w3.org/2000/svg" data-label="${encoded.source}"><style>${encoded.source}</style><text>${encoded.source}<tspan>${encoded.source}</tspan></text><title>${encoded.source}</title></svg>`,
+    `<svg xmlns="http://www.w3.org/2000/svg" aria-label="${encoded.source}" data-label="${encoded.source}" style="--label: ${encoded.source};"><style>${encoded.source}</style><a href="#${encoded.source}"><text aria-label="${encoded.source}">${encoded.source}<tspan>${encoded.source}</tspan></text></a><title>${encoded.source}</title></svg>`,
   );
   restoreCodes(svg, encoded.characters);
   const expected = '" : \u2014 <b> &';
   expect(svg.querySelector("text")?.firstChild?.textContent).toBe(expected);
   expect(svg.querySelector("tspan")?.textContent).toBe(expected);
   expect(svg.querySelector("title")?.textContent).toBe(expected);
+  expect(svg.getAttribute("aria-label")).toBe(expected);
+  expect(svg.querySelector("text")?.getAttribute("aria-label")).toBe(expected);
   expect(svg.querySelector("style")?.textContent).toBe(encoded.source);
   expect(svg.getAttribute("data-label")).toBe(encoded.source);
+  expect(svg.getAttribute("style")).toBe(`--label: ${encoded.source};`);
+  expect(svg.querySelector("a")?.getAttribute("href")).toBe(`#${encoded.source}`);
   expect(svg.querySelector("b")).toBeNull();
 });
 
 test("entity restoration does not replace decoded characters again", () => {
-  const encoded = encodeCodes("#257; #quot;");
-  expect(encoded.characters.get("\u0100")).toBe("\u0101");
-  expect(encoded.characters.get("\u0101")).toBe('"');
-  const svg = sanitizeSvg(`<svg xmlns="http://www.w3.org/2000/svg"><text>${encoded.source}</text></svg>`);
-  restoreCodes(svg, encoded.characters);
+  const characters = new Map([
+    ["\u0100", "\u0101"],
+    ["\u0101", '"'],
+  ]);
+  const svg = sanitizeSvg(
+    '<svg xmlns="http://www.w3.org/2000/svg" aria-label="\u0100 \u0101"><text>\u0100 \u0101</text></svg>',
+  );
+  restoreCodes(svg, characters);
   expect(svg.textContent).toBe('\u0101 "');
+  expect(svg.getAttribute("aria-label")).toBe('\u0101 "');
 });
 
 test("entity restoration with no stand-ins leaves SVG text alone", () => {
@@ -197,6 +291,39 @@ test("frame renders encoded labels and restores their characters as SVG text", a
     expect(mermaid.render).toHaveBeenCalledExactlyOnceWith("diagram-1", encoded.source, expect.any(HTMLElement));
     expect(mermaid.render.mock.calls[0]?.[1]).not.toContain("#quot;");
     expect(root.querySelector("b")).toBeNull();
+  } finally {
+    stop();
+    root.remove();
+  }
+});
+
+test.each([
+  { label: "#lt;script#gt;evil()#lt;/script#gt;", expected: "<script>evil()</script>", click: "" },
+  { label: "#lt;img src=x onerror=evil()#gt;", expected: "<img src=x onerror=evil()>", click: "" },
+  { label: "#106;avascript:evil()", expected: "javascript:evil()", click: '\nclick A href "#106;avascript:evil()"' },
+])("frame restores hostile entity-coded labels only as text: $label", async ({ label, expected, click }) => {
+  const root = document.createElement("div");
+  document.body.append(root);
+  const source = `flowchart LR\n  A["${label}"]${click}`;
+  mermaid.render.mockImplementation(async (_id: string, encoded: string) => {
+    const label = encoded.split('"')[1];
+    const href = encoded.split('"')[3] ?? label;
+    return {
+      svg: `<svg xmlns="http://www.w3.org/2000/svg" onload="evil()"><a href="${href}" onclick="evil()"><text aria-label="${label}">${label}</text></a><a href="#safe"/></svg>`,
+    };
+  });
+  const stop = startFrame(root);
+  try {
+    window.dispatchEvent(new MessageEvent("message", { source: window.parent, data: { type: "render", source } }));
+    await waitFor(() => expect(root.querySelector("text")?.textContent).toBe(expected));
+    expect(root.querySelector("text")?.getAttribute("aria-label")).toBe(expected);
+    expect(root.querySelector("script, img, foreignObject")).toBeNull();
+    for (const node of root.querySelectorAll("svg, svg *")) {
+      for (const attribute of node.attributes) {
+        expect(attribute.name.toLowerCase().startsWith("on")).toBe(false);
+        if (attribute.localName === "href") expect(attribute.value.startsWith("#")).toBe(true);
+      }
+    }
   } finally {
     stop();
     root.remove();

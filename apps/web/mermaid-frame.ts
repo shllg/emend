@@ -1,41 +1,97 @@
 import mermaid, { type MermaidConfig } from "mermaid";
 
 const MAX_SOURCE = 50000;
+const FONT_FAMILY = "system-ui, sans-serif";
 
-// Mermaid writes #quot; as &quot; in SVG labels and decodes only &amp;, &lt; and &gt;.
-// Swap codes for stand-in letters, then write the characters back as text.
+// Mermaid writes codes as entity text in SVG labels and decodes only &amp;, &lt; and &gt;.
+// Inline non-ASCII letters; swap other codes for stand-in letters of about the same width,
+// then write their characters back as text afterwards.
 export function encodeCodes(source: string): { source: string; characters: Map<string, string> } {
+  if (source.includes("\uffff")) return { source, characters: new Map() };
   const encoded = source
-    .replace(/style.*:\S*#.*;/g, (match) => match.slice(0, -1))
-    .replace(/classDef.*:\S*#.*;/g, (match) => match.slice(0, -1));
-  const codes = new Map<string, string>();
-  const characters = new Map<string, string>();
+    .replace(/style.*:\S*#.*;/g, (match) => `${match.slice(0, -1)}\uffff`)
+    .replace(/classDef.*:\S*#.*;/g, (match) => `${match.slice(0, -1)}\uffff`);
   const parser = new DOMParser();
-  let next = 0x0100;
+  const decodedEntities = new Map<string, string>();
+  const decode = (entity: string) => {
+    const cached = decodedEntities.get(entity);
+    if (cached !== undefined) return cached;
+    const decoded = (parser.parseFromString(`x${entity}`, "text/html").body.textContent ?? `x${entity}`).slice(1);
+    decodedEntities.set(entity, decoded);
+    return decoded;
+  };
+  const used = new Set([...source, "\u0130", "\u0131", "\u017f"]);
+  for (const [reference] of source.matchAll(/&(?:#[xX][0-9a-fA-F]+|#\d+|[A-Za-z][A-Za-z0-9]*);?/g)) {
+    for (const character of decode(reference)) used.add(character);
+  }
+  const codes = new Map<string, string>();
+  const pending = new Map<string, string>();
+  const characters = new Map<string, string>();
   for (const [code] of encoded.matchAll(/#\w+;/g)) {
-    if (codes.has(code)) continue;
+    if (codes.has(code) || pending.has(code)) continue;
     const inner = code.slice(1, -1);
     const entity = /^\d+$/.test(inner) ? `&#${inner};` : `&${inner};`;
-    const decoded = parser.parseFromString(entity, "text/html").body.textContent ?? entity;
-    if (decoded === entity) continue;
-    while (next <= 0x024f && source.includes(String.fromCodePoint(next))) next++;
-    if (next > 0x024f) return { source, characters: new Map() };
-    const standIn = String.fromCodePoint(next++);
-    codes.set(code, standIn);
-    characters.set(standIn, decoded);
+    const decoded = decode(entity);
+    if (decoded === entity) {
+      codes.set(code, code);
+    } else if (/^\p{L}+$/u.test(decoded) && [...decoded].every((character) => character.charCodeAt(0) > 0x7f)) {
+      codes.set(code, decoded);
+      for (const character of decoded) used.add(character);
+    } else {
+      pending.set(code, decoded);
+    }
   }
-  return { source: encoded.replace(/#\w+;/g, (code) => codes.get(code) ?? code), characters };
+  if (pending.size > 0) {
+    let context: CanvasRenderingContext2D | null;
+    try {
+      context = document.createElement("canvas").getContext("2d");
+    } catch {
+      context = null;
+    }
+    if (context) context.font = `100px ${FONT_FAMILY}`;
+    const width = (text: string) => context?.measureText(text).width ?? 0;
+    const candidates = new Map<string, number>();
+    for (let point = 0x0100; point <= 0x024f; point++) {
+      const character = String.fromCodePoint(point);
+      if (!used.has(character)) candidates.set(character, width(character));
+    }
+    if (pending.size > candidates.size) return { source, characters: new Map() };
+    for (const [code, decoded] of pending) {
+      const target = width(decoded);
+      let standIn = "";
+      let distance = Infinity;
+      for (const [candidate, measured] of candidates) {
+        const difference = Math.abs(measured - target);
+        if (difference < distance) {
+          standIn = candidate;
+          distance = difference;
+        }
+      }
+      candidates.delete(standIn);
+      codes.set(code, standIn);
+      characters.set(standIn, decoded);
+    }
+  }
+  return {
+    source: encoded.replace(/#\w+;/g, (code) => codes.get(code) ?? code).replaceAll("\uffff", ";"),
+    characters,
+  };
 }
 
 export function restoreCodes(svg: Element, characters: Map<string, string>): void {
   if (characters.size === 0) return;
   const standIns = [...characters.keys()].map((character) => `\\u{${character.charCodeAt(0).toString(16)}}`).join("");
   const pattern = new RegExp(`[${standIns}]`, "gu");
+  const replace = (text: string) => text.replace(pattern, (standIn) => characters.get(standIn) ?? standIn);
   const walker = svg.ownerDocument.createTreeWalker(svg, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     if (node.parentElement?.localName === "style") continue;
     const text = node as Text;
-    text.data = text.data.replace(pattern, (standIn) => characters.get(standIn) ?? standIn);
+    text.data = replace(text.data);
+  }
+  for (const node of [svg, ...svg.querySelectorAll("[aria-label]")]) {
+    const label = node.getAttribute("aria-label");
+    if (label !== null) node.setAttribute("aria-label", replace(label));
   }
 }
 
@@ -97,7 +153,7 @@ export function frameConfig(dark: boolean): MermaidConfig {
     : ["#f4f4f6", "#fdfdfe", "#111213", "#444547", "#5f6063", "#c4c6c8", "#c2f3f0", "#00807e"];
   return {
     theme: "base",
-    fontFamily: "system-ui, sans-serif",
+    fontFamily: FONT_FAMILY,
     themeVariables: {
       darkMode: dark,
       fontSize: "13px",
