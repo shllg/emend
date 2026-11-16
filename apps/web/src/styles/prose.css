@@ -277,6 +277,8 @@
   }
   .em-prose .emend-media-effect {
     flex: 1 0 100%;
+    min-width: 0;
+    overflow-wrap: anywhere;
     font: var(--type-prose);
     color: var(--fg-reading);
   }

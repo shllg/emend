@@ -295,6 +295,26 @@ test("a new jump token reveals an already open thread immediately without replay
   expect(scroll).not.toHaveBeenCalled();
   expect(within(dialog()).getByRole("article").id).toBe(`thread-${thread.id}`);
 });
+test("a thread jump to the After caption switches a Before-only pair to Side by side", () => {
+  const pair: RenderedBlock = {
+    ...block,
+    text: "Before After",
+    html: `<p class="emend-media-row emend-media-pair"><span class="emend-media"><img src="/api/v1/media/${"a".repeat(64)}" alt="Before"><span class="emend-media-caption">Before</span></span> <span class="emend-media"><img src="/api/v1/media/${"b".repeat(64)}" alt="After"><span class="emend-media-caption">After</span></span></p>`,
+  };
+  const after: ThreadView = {
+    ...thread,
+    target: { kind: "writeup-span", blockId: pair.id, quote: "After", prefix: "Before ", suffix: "" },
+    placement: { status: "placed", location: { kind: "writeup-span", blockId: pair.id, start: 7, end: 12 } },
+  };
+  const view = mount([after], [{ key: "overview", blocks: [pair] }]);
+  const prose = view.container.querySelector("[data-block-id]");
+  fireEvent.click(screen.getByRole("button", { name: "Before", exact: true }));
+  expect(prose?.getAttribute("data-pair-mode")).toBe("before");
+  view.update([after], after.id);
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${after.id}`);
+  expect(prose?.getAttribute("data-pair-mode")).toBe("side");
+  expect(screen.getByRole("button", { name: "Side by side" }).getAttribute("aria-pressed")).toBe("true");
+});
 test("outside presses close a thread and starting a block comment closes it", () => {
   mount();
   fireEvent.click(chip());

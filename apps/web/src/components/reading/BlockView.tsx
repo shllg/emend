@@ -47,6 +47,10 @@ function ProseBlock({ block, attributes }: { block: RenderedBlock; attributes: R
     }
     const reveal = (event: Event) => {
       const target = event.target instanceof Element ? event.target : null;
+      if (target === prose && prose?.querySelector("p.emend-media-pair")) {
+        setMode("side");
+        return;
+      }
       const media = target?.closest("p.emend-media-pair > .emend-media");
       if (!media || !prose?.contains(media)) return;
       const images = media.parentElement?.querySelectorAll(":scope > .emend-media");

@@ -1,5 +1,6 @@
 import { z } from "@emend/contract/browser";
 import { appElementId, docHeading, type HeadingDoc } from "./doc-navigation.ts";
+import { revealReadingTarget } from "./reading-reveal.ts";
 
 export const readingKey = "emend.reading.v1";
 export const readingCap = 200;
@@ -165,6 +166,8 @@ export function applyAnchor(
       ? document.getElementById(anchor.id)
       : undefined;
   if (!element || !scroller.contains(element) || element.closest("[data-reading-thread-popover]")) return undefined;
+  const closedDetails = element.closest("details:not([open])");
+  if (closedDetails && scroller.contains(closedDetails)) revealReadingTarget(element);
   const rect = element.getBoundingClientRect();
   const top = readingTop(scroller);
   let line = rect.top + anchor.fraction * rect.height;
