@@ -195,12 +195,15 @@ export function ReviewHeader({
       items={links.map((link) => ({
         label: link.label,
         icon: linkIcon[link.kind ?? "other"],
-        hint: link.host,
         title: link.href,
         asChild: true,
         children: (
           <a href={link.href} target="_blank" rel="noopener noreferrer nofollow">
-            <span className="min-w-0 truncate">{link.label}</span>
+            <span className="min-w-0 flex-1 truncate">{link.label}</span>
+            {/* An agent writes the label, so the host keeps its end, the registrable domain. */}
+            <span className="ml-auto min-w-0 max-w-[60%] shrink-0 truncate text-left font-sans text-12 font-normal leading-(--lh-snug) text-fg-3 [direction:rtl]">
+              <bdi className="[unicode-bidi:plaintext]">{link.host}</bdi>
+            </span>
           </a>
         ),
       }))}

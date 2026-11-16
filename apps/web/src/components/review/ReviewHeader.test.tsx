@@ -663,13 +663,45 @@ test("Links menu items keep safe hrefs, labels and full hosts and open in a new 
     expect(anchor.getAttribute("rel")).toBe("noopener noreferrer nofollow");
     const label = within(anchor).getByText(link.label);
     expect(label.classList.contains("min-w-0")).toBe(true);
+    expect(label.classList.contains("flex-1")).toBe(true);
     expect(label.classList.contains("truncate")).toBe(true);
     const host = within(anchor).getByText(new URL(link.url).host);
-    expect(host.classList.contains("shrink-0")).toBe(true);
-    expect(host.classList.contains("truncate")).toBe(false);
+    expect(host.tagName).toBe("BDI");
+    expect(host.textContent).toBe(new URL(link.url).host);
+    expect(host.classList.contains("[unicode-bidi:plaintext]")).toBe(true);
+    const hostSpan = host.parentElement as HTMLElement;
+    expect(hostSpan.tagName).toBe("SPAN");
+    for (const name of ["min-w-0", "max-w-[60%]", "shrink-0", "truncate", "text-left", "[direction:rtl]"])
+      expect(hostSpan.classList.contains(name)).toBe(true);
     const icon = ["lucide-git-pull-request", "lucide-circle-dot", "lucide-external-link"][index];
     expect(anchor.querySelector(`svg.${icon}`)).not.toBeNull();
   }
+});
+
+test("a long link host keeps its registrable domain at the end in the Links menu", () => {
+  const host = "github.com.pull-review-redirect-000000000000000000000000000000000000.attacker.example";
+  const url = `https://${host}/o/r/pull/9`;
+  mount({
+    phone: false,
+    loaded: {
+      ...revision,
+      writeup: { sections: [], area: "Requests" },
+      links: [{ url, label: "PR 9", kind: "pr" }],
+    },
+  });
+  fireEvent.pointerDown(screen.getByRole("button", { name: "Links (1)" }), { button: 0, pointerType: "mouse" });
+  const anchor = screen.getByRole("menuitem");
+  expect(anchor.getAttribute("href")).toBe(url);
+  const hostText = within(anchor).getByText(host);
+  expect(hostText.tagName).toBe("BDI");
+  expect(hostText.textContent).toBe(host);
+  expect(hostText.classList.contains("[unicode-bidi:plaintext]")).toBe(true);
+  const hostSpan = hostText.parentElement as HTMLElement;
+  expect(hostSpan.tagName).toBe("SPAN");
+  for (const name of ["min-w-0", "truncate", "[direction:rtl]"]) expect(hostSpan.classList.contains(name)).toBe(true);
+  expect(hostSpan.classList.contains("max-w-[60%]")).toBe(true);
+  const label = within(anchor).getByText("PR 9");
+  for (const name of ["min-w-0", "flex-1", "truncate"]) expect(label.classList.contains(name)).toBe(true);
 });
 
 test.each([1, 8])("%s links collapse into one button after the context badges off the phone", (count) => {
@@ -692,14 +724,22 @@ test.each([1, 8])("%s links collapse into one button after the context badges of
   );
 });
 
-test("a hostile link label stays text inside the Links menu", () => {
+test.each([false, true])("a hostile link label stays text (phone %s)", (phone) => {
   const label = "<img src=x onerror=alert(1)>";
-  mount({ loaded: { ...revision, links: [{ url: "https://example.test/doc", label }] } });
-  fireEvent.pointerDown(screen.getByRole("button", { name: "Links (1)" }), { button: 0, pointerType: "mouse" });
-  const menu = screen.getByRole("menu");
-  const item = within(menu).getByRole("menuitem");
+  mount({
+    phone,
+    loaded: {
+      ...revision,
+      writeup: { sections: [], area: "Requests" },
+      links: [{ url: "https://example.test/doc", label, kind: "other" }],
+    },
+  });
+  if (!phone)
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Links (1)" }), { button: 0, pointerType: "mouse" });
+  const links = phone ? screen.getByRole("list", { name: "Links" }) : screen.getByRole("menu");
+  const item = within(links).getByRole(phone ? "link" : "menuitem");
   expect(within(item).getByText(label).textContent).toBe(label);
-  expect(menu.querySelector("img,script,[onerror]")).toBeNull();
+  expect(links.querySelector("img,script,[onerror]")).toBeNull();
 });
 
 test.each(["Enter", "ArrowDown"])("%s opens Links and Escape returns focus to its trigger", async (key) => {
@@ -719,18 +759,45 @@ test.each(["Enter", "ArrowDown"])("%s opens Links and Escape returns focus to it
   });
 });
 
-test("a menu item shows the link's real host beside the agent's label, punycode for a lookalike", () => {
+test("Enter on a focused Links menu item activates its anchor and closes the menu", async () => {
+  mount({ loaded: linkedRevision });
+  const trigger = screen.getByRole("button", { name: "Links (3)" });
+  act(() => trigger.focus());
+  fireEvent.keyDown(trigger, { key: "ArrowDown" });
+  const menu = await screen.findByRole("menu");
+  const anchor = within(menu).getByRole("menuitem", { name: /Design/ });
+  await waitFor(() => expect(document.activeElement).toBe(anchor));
+  expect(anchor.tagName).toBe("A");
+  expect(anchor.getAttribute("href")).toBe("https://example.com/design");
+  const click = vi.fn((event: MouseEvent) => event.preventDefault());
+  // Cancel navigation after Radix handles the anchor's click and closes the menu.
+  document.addEventListener("click", click, { once: true });
+  try {
+    fireEvent.keyDown(anchor, { key: "Enter" });
+    expect(click).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ target: anchor }));
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  } finally {
+    document.removeEventListener("click", click);
+  }
+});
+
+test.each([false, true])("a link host shows punycode for a lookalike (phone %s)", (phone) => {
   mount({
+    phone,
     loaded: {
       ...revision,
+      writeup: { sections: [], area: "Requests" },
       links: [
         { url: "https://github.com/o/r/pull/7", label: "PR #7", kind: "pr" },
         { url: "https://gіthub.com/o/r/pull/7", label: "PR #7", kind: "pr" },
       ],
     },
   });
-  fireEvent.pointerDown(screen.getByRole("button", { name: "Links (2)" }), { button: 0, pointerType: "mouse" });
-  const [real, fake] = screen.getAllByRole("menuitem");
+  if (!phone)
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Links (2)" }), { button: 0, pointerType: "mouse" });
+  const [real, fake] = phone
+    ? within(screen.getByRole("navigation", { name: "Breadcrumb" })).getAllByRole("link")
+    : screen.getAllByRole("menuitem");
   expect(real?.textContent).toContain("github.com");
   expect(real?.getAttribute("title")).toBe("https://github.com/o/r/pull/7");
   expect(fake?.textContent).toContain("xn--");
@@ -738,19 +805,27 @@ test("a menu item shows the link's real host beside the agent's label, punycode 
   expect(fake?.getAttribute("title")).toContain("xn--");
 });
 
-test("two links that share a URL both show", () => {
+test.each([false, true])("two links that share a URL both show (phone %s)", (phone) => {
   const url = "https://github.com/o/r/pull/9";
   mount({
+    phone,
     loaded: {
       ...revision,
+      writeup: { sections: [], area: "Requests" },
       links: [
         { url, label: "PR 9", kind: "pr" },
         { url, label: "Same PR", kind: "other" },
       ],
     },
   });
-  fireEvent.pointerDown(screen.getByRole("button", { name: "Links (2)" }), { button: 0, pointerType: "mouse" });
-  const anchors = screen.getAllByRole("menuitem");
+  if (!phone)
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Links (2)" }), { button: 0, pointerType: "mouse" });
+  const anchors = phone
+    ? [
+        within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByRole("link"),
+        within(screen.getByRole("list", { name: "Links" })).getByRole("link"),
+      ]
+    : screen.getAllByRole("menuitem");
   expect(anchors.map((anchor) => anchor.querySelector("span")?.textContent)).toEqual(["PR 9", "Same PR"]);
   expect(anchors.map((anchor) => anchor.getAttribute("href"))).toEqual([url, url]);
 });
