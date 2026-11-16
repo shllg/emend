@@ -1,7 +1,12 @@
 import type { LinesTarget } from "@emend/contract";
-import { describe, expect, test } from "vitest";
-import { lineMap } from "./linemap.ts";
+import * as diff from "diff";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { LINE_MAP_MAX_EDIT_LENGTH, lineMap } from "./linemap.ts";
 import { placeLines } from "./lines.ts";
+import * as search from "./search.ts";
+
+vi.mock("diff", async (original) => ({ ...(await original<typeof import("diff")>()) }));
+afterEach(() => vi.restoreAllMocks());
 
 const target: LinesTarget = {
   kind: "lines",
@@ -150,16 +155,21 @@ describe("placeLines", () => {
     expect(placeLines(target, last, {})).toEqual({ status: "unplaced", reason: "file-gone" });
   });
 
-  test("bounds a 20000-line complete replacement and falls back to exact context within 5 seconds", () => {
+  test("bounds a 20000-line complete replacement and falls back to exact context", () => {
+    const compare = vi.spyOn(diff, "diffLines");
     const old = Array.from({ length: 20000 }, (_, index) => `old${index}`).join("\n");
     const next = Array.from({ length: 20000 }, (_, index) => `new${index}`).join("\n");
     const selected = { ...target, start: 1, end: 1, lines: ["old0"], before: [], after: ["old1"] };
-    const started = Date.now();
     expect(placeLines(selected, { start: 1, end: 1, sides: { newText: old } }, { newText: next })).toEqual({
       status: "unplaced",
       reason: "lines-gone",
     });
-    expect(Date.now() - started).toBeLessThan(5000);
+    expect(compare).toHaveBeenCalledExactlyOnceWith(old, next, {
+      stripTrailingCr: true,
+      ignoreNewlineAtEof: true,
+      maxEditLength: LINE_MAP_MAX_EDIT_LENGTH,
+    });
+    expect(compare.mock.results[0]?.value).toBeUndefined();
   });
 
   test("tier 2 can recover a quote when the diff exceeds its budget", () => {
@@ -171,24 +181,24 @@ describe("placeLines", () => {
     ).toEqual(location(1001, 1001));
   });
 
-  test.each([true, false])(
-    "searches identical lines in a 1 MiB file within 5 seconds (matching context: %s)",
-    (matching) => {
-      const repeated = "seed\n".repeat(Math.ceil((1024 * 1024) / 5));
-      const selected = {
-        ...target,
-        start: 1,
-        end: 200,
-        lines: Array<string>(200).fill("seed"),
-        before: [],
-        after: matching ? [] : ["weed"],
-      };
-      const started = Date.now();
-      expect(placeLines(selected, { start: 1, end: 200, sides: {} }, { newText: repeated })).toEqual({
-        status: "unplaced",
-        reason: matching ? "ambiguous" : "lines-gone",
-      });
-      expect(Date.now() - started).toBeLessThan(5000);
-    },
-  );
+  test.each([true, false])("searches identical lines in a 1 MiB file (matching context: %s)", (matching) => {
+    const find = vi.spyOn(search, "firstTwoMatches");
+    const repeated = "seed\n".repeat(Math.ceil((1024 * 1024) / 5));
+    const selected = {
+      ...target,
+      start: 1,
+      end: 200,
+      lines: Array<string>(200).fill("seed"),
+      before: [],
+      after: matching ? [] : ["weed"],
+    };
+    expect(placeLines(selected, { start: 1, end: 200, sides: {} }, { newText: repeated })).toEqual({
+      status: "unplaced",
+      reason: matching ? "ambiguous" : "lines-gone",
+    });
+    expect(find).toHaveBeenCalledOnce();
+    expect(find.mock.calls[0]?.[0].length).toBe(Math.ceil((1024 * 1024) / 5));
+    expect(find.mock.calls[0]?.[1]).toEqual([...selected.lines, ...selected.after]);
+    expect(find.mock.results[0]?.value).toHaveLength(matching ? 2 : 0);
+  });
 });

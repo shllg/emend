@@ -12,7 +12,7 @@ import {
   RevisionView,
 } from "@emend/contract";
 import { and, eq, sql } from "drizzle-orm";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import * as lifecycle from "../../db/repo/lifecycle.ts";
 import { requireReview } from "../../db/repo/thread-access.ts";
 import * as t from "../../db/schema.ts";
@@ -592,13 +592,23 @@ test("writeup media is hidden only while every review using it is binned", async
 test("a waiting take ends at once when the review is binned", async () => {
   const { reviewId } = await publishReview(f);
   const controller = new AbortController();
+  const started = Promise.withResolvers<void>();
+  const unsubscribe = f.deps.events?.subscribe(f.ownerId, reviewId, (event) => {
+    if (event.type === "waiting") started.resolve();
+  });
+  onTestFinished(() => {
+    controller.abort();
+    unsubscribe?.();
+    vi.useRealTimers();
+  });
+  // Keep the 25-second fallback frozen: only the bin event can settle this take.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const waiting = f.request(`/reviews/${reviewId}/take`, "POST", { waitSeconds: 25 }, "agent", controller.signal);
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await started.promise;
+  expect(f.deps.events?.agentWaiting(f.ownerId, reviewId)).toBe(true);
   expect((await post(reviewId, "bin")).status).toBe(204);
-  const response = await Promise.race([
-    waiting,
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("take still waiting")), 3000)),
-  ]);
+  const response = await waiting;
+  vi.useRealTimers();
   await error(response, 409, "review_in_bin");
   controller.abort();
 });

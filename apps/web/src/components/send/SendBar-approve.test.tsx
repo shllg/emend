@@ -18,6 +18,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   client.clear();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -108,9 +109,13 @@ test("Escape sends nothing", async () => {
 
 test("a press outside the dialog sends nothing", async () => {
   mount();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   fireEvent.click(trigger());
   // Radix listens for outside presses from the next tick on.
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  vi.useRealTimers();
   const overlay = document.querySelector(".bg-overlay");
   if (!overlay) throw new Error("No overlay");
   fireEvent.pointerDown(overlay, { button: 0, pointerType: "mouse" });

@@ -228,16 +228,18 @@ test.each([true, false])(
       new Set(dispatch.mock.calls.map(([event]) => event).filter((event) => event.type === "emend:reveal-reading"));
     const anchor = { id: `block-${folded ? b.id : a.id}`, fraction: 0.5 };
     saveReadingPosition(writeupKey, anchor);
+    fakeTimers();
     const { history } = mount();
-    await screen.findByText("Paragraph bbbb");
+    await tick(1);
+    expect(screen.getByText("Paragraph bbbb")).toBeTruthy();
     const details = () => screen.getByText("Details", { selector: "summary" }).closest("details");
     expect(details()?.open).toBe(folded);
-    await waitFor(() => expect(pane().scrollTop).toBe(folded ? 150 : 50));
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, (restoreDelays.at(-1) ?? 0) + 100));
-    });
+    expect(pane().scrollTop).toBe(folded ? 150 : 50);
+    // No later retry may reveal the topic again or overwrite its saved anchor.
+    await tick((restoreDelays.at(-1) ?? 0) + 1);
     expect(reveals().size).toBe(folded ? 1 : 0);
     expect(loadReadingPosition(writeupKey)).toEqual(anchor);
+    vi.useRealTimers();
 
     // Return at the top so a second anchor restore cannot reopen an unremembered fold.
     readerScroll(0);
@@ -256,11 +258,14 @@ test("a new revision with the same block restores; with the block gone it stays 
   revisions[2] = revisionWith(2, [a, c, block("dddd")]);
   await go(history, "?tab=diff&rev=1");
   await screen.findByText("Diff stub");
+  fakeTimers();
   await go(history, "?tab=writeup&rev=2");
-  await screen.findByText("Paragraph cccc");
+  await tick(1);
+  expect(screen.getByText("Paragraph cccc")).toBeTruthy();
   offsets.set(c.id, 100);
-  await new Promise((resolve) => setTimeout(resolve, restoreDelays[2] + 100));
+  await tick((restoreDelays.at(-1) ?? 0) + 1);
   expect(pane().scrollTop).toBe(0);
+  vi.useRealTimers();
 
   revisions[2] = revisionWith(2, [a, b, c]);
   client.clear();
@@ -276,10 +281,11 @@ test("a link with a hash wins over the saved anchor", async () => {
   await screen.findByText("Diff stub");
   const scrollIntoView = vi.fn();
   vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(scrollIntoView);
+  fakeTimers();
   await go(history, "?tab=writeup&rev=1", `#block-${c.id}`);
-  await screen.findByText("Paragraph cccc");
-  await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
-  await new Promise((resolve) => setTimeout(resolve, restoreDelays[2] + 100));
+  expect(screen.getByText("Paragraph cccc")).toBeTruthy();
+  expect(scrollIntoView).toHaveBeenCalled();
+  await tick((restoreDelays.at(-1) ?? 0) + 1);
   expect(pane().scrollTop).toBe(0);
 });
 
@@ -289,9 +295,10 @@ test("a thread jump to a thread of the revision wins even when the jump does not
   await go(history, "?tab=diff&rev=1");
   await screen.findByText("Diff stub");
   vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+  fakeTimers();
   await go(history, "?tab=writeup&rev=1", `#thread-${thread.id}`);
-  await screen.findAllByText("Paragraph bbbb");
-  await new Promise((resolve) => setTimeout(resolve, restoreDelays[2] + 100));
+  expect(screen.getAllByText("Paragraph bbbb").length).toBeGreaterThan(0);
+  await tick((restoreDelays.at(-1) ?? 0) + 1);
   expect(pane().scrollTop).toBe(0);
 });
 

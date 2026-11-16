@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import type { RenderedBlock, RenderedWriteup, Target, TopicMeta } from "@emend/contract";
 import { fromHtml } from "hast-util-from-html";
 import { toString as hastText } from "hast-util-to-string";
-import { expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { HtmlElement as Element, HtmlRoot as Root } from "./blocks.ts";
 import {
   buildCommentsDownload,
@@ -15,6 +15,7 @@ import {
   DOWNLOAD_FILE_CSP,
   type ResolveResult,
 } from "./download.ts";
+import * as downloadCss from "./download-css.ts";
 import { checkDownloadCss, cssTokenize } from "./download-css.ts";
 import {
   DOWNLOAD_DIFF_LINES,
@@ -24,6 +25,30 @@ import {
   downloadDiffHunks,
 } from "./download-diff.ts";
 import { type DownloadThread, type FileThreads, routeDownloadThreads } from "./download-threads.ts";
+
+vi.mock("./download-css.ts", async (original) => ({
+  ...(await original<typeof import("./download-css.ts")>()),
+}));
+beforeEach(() => {
+  vi.spyOn(downloadCss, "cssTokenize");
+  vi.spyOn(downloadCss, "checkDownloadCss");
+});
+afterEach(() => vi.restoreAllMocks());
+
+function expectCssPassWork(source: string, written: string) {
+  const tokenize = vi.mocked(downloadCss.cssTokenize);
+  const check = vi.mocked(downloadCss.checkDownloadCss);
+  expect(tokenize).toHaveBeenCalledTimes(2);
+  expect(check).toHaveBeenCalledOnce();
+  const characters = [...tokenize.mock.calls, ...check.mock.calls].reduce((total, [css]) => total + css.length, 0);
+  // nestedImageSets and rewriting scan the source; checkDownloadCss scans the written output.
+  expect(characters).toBeLessThanOrEqual(2 * source.length + written.length);
+  // Quadratic work within one tokenizer pass has no seam outside download.ts: download bench covers it (D4).
+}
+
+// Mirror the pacing thresholds in download.ts to count work without a clock.
+const CSS_PAUSE_BYTES = 1024 * 1024;
+const REFERENCE_PAUSE_COUNT = 1000;
 
 const sha = "a".repeat(64);
 const details = { project: "Sample", branch: "feature", seq: 2, publishedAt: "2026-01-02T23:00:00Z", links: [] };
@@ -242,11 +267,11 @@ test("uses the same page frame for Markdown and escaped source tokens", async ()
 });
 
 const css = (value: string) => ({ mediaType: "text/css", bytes: new TextEncoder().encode(value) });
-function htmlDoc(html: string, assets: Record<string, ResolveResult> = {}) {
+function htmlDoc(html: string, assets: Record<string, ResolveResult> = {}, pause?: () => Promise<void>) {
   const resolveAsset = vi.fn(async (path: string) => assets[path] ?? null);
   return {
     resolveAsset,
-    result: buildHtmlDocDownload({ html, docPath: "docs/index.html", title: "Fallback", resolveAsset }),
+    result: buildHtmlDocDownload({ html, docPath: "docs/index.html", title: "Fallback", resolveAsset, pause }),
   };
 }
 
@@ -774,24 +799,23 @@ test("turns protocol-relative writeup links into plain text", async () => {
   expect(html).not.toContain("//attacker.example");
 });
 
-test("replaces 2000 nested image-set openers and 100 KB of filler with none within 10 seconds", async () => {
-  const start = Date.now();
-  const { result, resolveAsset } = htmlDoc(
-    `<style>i{background:${"image-set(".repeat(2000)}${"x".repeat(100_000)}${")".repeat(2000)}}p{color:green}</style>`,
-  );
+test("replaces 2000 nested image-set openers and 100 KB of filler with none", async () => {
+  const source = `i{background:${"image-set(".repeat(2000)}${"x".repeat(100_000)}${")".repeat(2000)}}p{color:green}`;
+  const cssBytes = new TextEncoder().encode(source).byteLength;
+  const pause = vi.fn(async () => {});
+  const { result, resolveAsset } = htmlDoc(`<style>${source}</style>`, {}, pause);
   const html = await result;
-  expect(Date.now() - start).toBeLessThan(10_000);
   expect(html).toContain("<style>i{background:/**/none/**/}p{color:green}</style>");
   expect(resolveAsset).not.toHaveBeenCalled();
+  expect(pause.mock.calls.length).toBeLessThanOrEqual(Math.ceil(cssBytes / CSS_PAUSE_BYTES) + 1);
+  expectCssPassWork(source, "i{background:/**/none/**/}p{color:green}");
 }, 15_000);
 
-test("rewrites 5000 image-set rules within 10 seconds and resolves each candidate path once", async () => {
-  const start = Date.now();
+test("rewrites 5000 image-set rules and resolves each candidate path once", async () => {
   const { result, resolveAsset } = htmlDoc(
     `<style>${'i{background:image-set("missing.png" 1x)}'.repeat(5000)}</style>`,
   );
   const html = await result;
-  expect(Date.now() - start).toBeLessThan(10_000);
   expect(html).toContain(`<style>${'i{background:image-set(/**/"data:,"/**/ 1x)}'.repeat(5000)}</style>`);
   expect(resolveAsset).toHaveBeenCalledExactlyOnceWith("docs/missing.png");
 }, 15_000);
@@ -872,7 +896,7 @@ test("keeps rules after an import with an unmatched closing parenthesis", async 
 });
 
 test.each(["element", "attribute"])(
-  "rewrites 8 MiB of adversarial CSS in a style %s within 15 seconds",
+  "rewrites 8 MiB of adversarial CSS in a style %s",
   async (placement) => {
     const nested = `i{background:${"image-set(".repeat(3000)}"nested.png"${")".repeat(3000)}}`;
     const rules = 'i{background:image-set("missing.png" 1x)}'.repeat(5000);
@@ -881,15 +905,25 @@ test.each(["element", "attribute"])(
     const prefix = nested + rules + strings;
     const filler = "x".repeat(8 * 1024 * 1024 - prefix.length - unterminated.length - 4);
     const source = `${prefix}/*${filler}*/${unterminated}`;
+    const cssBytes = new TextEncoder().encode(source).byteLength;
     const input = placement === "element" ? `<style>${source}</style>` : `<div style='${source}'></div>`;
-    const start = Date.now();
-    const { result, resolveAsset } = htmlDoc(input);
+    const pause = vi.fn(async () => {});
+    const { result, resolveAsset } = htmlDoc(input, {}, pause);
     const html = await result;
-    expect(Date.now() - start).toBeLessThan(15_000);
     expect(html).toContain("background:/**/none/**/");
     expect(html).not.toContain("nested.png");
     expect(html.match(/data:,/g)).toHaveLength(10_000);
     expect(resolveAsset).toHaveBeenCalledExactlyOnceWith("docs/missing.png");
+    // Two input passes and one output check, plus 10,000 resource references.
+    // Rewriting grows this fixture by less than one CSS pause interval.
+    const maxPauses = Math.ceil((3 * cssBytes) / CSS_PAUSE_BYTES) + Math.floor(10_000 / REFERENCE_PAUSE_COUNT) + 1;
+    expect(pause.mock.calls.length).toBeLessThanOrEqual(maxPauses);
+    const nodes = parsed(html);
+    const written =
+      placement === "element"
+        ? hastText(nodes.find((node) => node.tagName === "style") as Element)
+        : String(nodes.find((node) => node.tagName === "div")?.properties.style);
+    expectCssPassWork(source, written);
   },
   20_000,
 );
@@ -974,7 +1008,7 @@ test.each(["asset", "author data URL"])(
 );
 
 test.each(["imports", "links"])(
-  "bounds discarded 4 MiB CSS repeated through 64 %s to the work budget within 15 seconds",
+  "bounds discarded 4 MiB CSS repeated through 64 %s to the work budget",
   async (kind) => {
     const mib = 1024 * 1024;
     const suffix = ".large{color:green}";
@@ -985,7 +1019,6 @@ test.each(["imports", "links"])(
     const pause = vi.fn(async () => {});
     const asset = css(stylesheet);
     const resolveAsset = vi.fn(async () => asset);
-    const start = Date.now();
     const html = await buildHtmlDocDownload({
       html: `${input}<style>.late{color:red}</style><p style="color:red">Kept text</p>`,
       docPath: "doc.html",
@@ -994,7 +1027,6 @@ test.each(["imports", "links"])(
       inlineBudget: 4 * mib - 1,
       pause,
     });
-    expect(Date.now() - start).toBeLessThan(15_000);
     expect(html).not.toContain(".large");
     expect(html).not.toContain(".late");
     expect(html).not.toContain('style="color:red"');
@@ -1064,17 +1096,26 @@ test("pauses in both source passes and the output check for each MiB across styl
   expect(pause).not.toHaveBeenCalled();
 });
 
-test.each(["element", "attribute"])(
-  "finishes an unterminated import URL in a style %s within one second",
-  async (kind) => {
-    const source = `@import url(${" ".repeat(20_000)}`;
-    const start = Date.now();
-    const html = await htmlDoc(kind === "element" ? `<style>${source}</style>` : `<p style="${source}">Text</p>`)
-      .result;
-    expect(Date.now() - start).toBeLessThan(1000);
-    expect(html).not.toContain("@import");
-  },
-);
+test.each(["element", "attribute"])("finishes an unterminated import URL in a style %s", async (kind) => {
+  const source = `@import url(${" ".repeat(20_000)}`;
+  const cssBytes = new TextEncoder().encode(source).byteLength;
+  const pause = vi.fn(async () => {});
+  const { result, resolveAsset } = htmlDoc(
+    kind === "element" ? `<style>${source}</style>` : `<p style="${source}">Text</p>`,
+    {},
+    pause,
+  );
+  const html = await result;
+  expect(resolveAsset).not.toHaveBeenCalled();
+  expect(html).not.toContain("@import");
+  expect(pause.mock.calls.length).toBeLessThanOrEqual(Math.ceil(cssBytes / CSS_PAUSE_BYTES) + 1);
+  const nodes = parsed(html);
+  const written =
+    kind === "element"
+      ? hastText(nodes.find((node) => node.tagName === "style") as Element)
+      : String(nodes.find((node) => node.tagName === "p")?.properties.style);
+  expectCssPassWork(source, written);
+});
 
 test.each(["element", "attribute", "stylesheet"])(
   "decodes escaped CSS names before rewriting references in a %s",

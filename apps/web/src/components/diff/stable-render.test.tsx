@@ -1,5 +1,5 @@
 import { DiffHunksRenderer } from "@pierre/diffs";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { DiffView } from "./FileDiff.tsx";
@@ -8,6 +8,7 @@ import { parsePair } from "./parse.worker.ts";
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 const parsed = () =>
@@ -71,21 +72,27 @@ async function mount(diff = parsed(), lines = [3], overflow?: "scroll" | "wrap")
   };
   return { view, handle: handle[0] as Harness, shadow, rows };
 }
-const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+async function settle(update: () => void) {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+  // Commit React's update before draining Pierre's queued render frames and timers.
+  await act(async () => update());
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+}
 
 test("a loaded file is not rebuilt when its parent re-renders with equal inputs", async () => {
   const { handle, rows } = await mount();
-  handle.bump();
-  await settle();
+  await settle(() => handle.bump());
   expect(rows()).toHaveLength(0);
 });
 
 test("annotation content updates without a rebuild", async () => {
   const { view, handle, rows } = await mount();
   await waitFor(() => expect(view.getByText("first 3")).toBeTruthy());
-  handle.setText("second");
+  await settle(() => handle.setText("second"));
+  vi.useRealTimers();
   await waitFor(() => expect(view.getByText("second 3")).toBeTruthy());
-  await settle();
   expect(rows()).toHaveLength(0);
 });
 

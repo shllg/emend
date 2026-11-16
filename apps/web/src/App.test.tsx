@@ -582,13 +582,26 @@ test("the phone menu starts with Refresh, which refetches and reconnects without
   fireEvent.keyDown(screen.getByRole("button", { name: "More" }), { key: "ArrowDown" });
   const menu = within(await screen.findByRole("menu", { name: "More" }));
   expect(menu.getAllByRole("menuitem")[0]?.textContent).toBe("Refresh");
-  fireEvent.click(menu.getByRole("menuitem", { name: "Refresh" }));
-  await waitFor(() => expect(Events.opened.length).toBe(streams + 1));
-  act(() => Events.opened.at(-1)?.open());
-  // The open refresh does the fetching; Refresh adds no second fetch of its own.
-  await waitFor(() => expect(reviewCalls()).toBe(before + 1));
-  await new Promise((resolve) => setTimeout(resolve, 700));
-  expect(reviewCalls()).toBe(before + 1);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await act(async () => {
+      fireEvent.click(menu.getByRole("menuitem", { name: "Refresh" }));
+    });
+    expect(Events.opened.length).toBe(streams + 1);
+    act(() => Events.opened.at(-1)?.open());
+    // Pass query-refresh's 200 ms batch and useRefresh's 300 ms settling delay.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(301);
+    });
+    expect(reviewCalls()).toBe(before + 1);
+    // Also pass reconnectReviewEvents' 3000 ms fallback deadline: no second fetch.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(reviewCalls()).toBe(before + 1);
+  } finally {
+    vi.useRealTimers();
+  }
   expect(localStorage.getItem(draft)).toBe("Keep me");
   expect(history.location.pathname).toBe(`/r/${id}`);
 });
@@ -3774,12 +3787,15 @@ test("viewed events update boxes without changing folds; focus alone does not re
     state = "stale";
     const reads = () => fetchMock.mock.calls.filter(([path]) => path.includes("/revisions/")).length;
     const before = reads();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     await act(async () => {
       focusManager.setFocused(false);
       focusManager.setFocused(true);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Flush QueryClient's resume promises, notifications and query-refresh's 200 ms batch window.
+      await vi.advanceTimersByTimeAsync(201);
     });
     expect(reads()).toBe(before);
+    vi.useRealTimers();
     await waitFor(() => expect(Events.opened.length).toBeGreaterThan(0));
     act(() => Events.opened.at(-1)?.emit("viewed", { reviewId: id }));
     await screen.findByRole("tab", { name: "Files 0/1" });
@@ -3795,6 +3811,7 @@ test("viewed events update boxes without changing folds; focus alone does not re
     await screen.findByRole("tab", { name: "Files 1/1" });
     expect(diff.getByRole("button", { name: "Collapse file" })).toBeTruthy();
   } finally {
+    vi.useRealTimers();
     focusManager.setFocused(undefined);
   }
 });

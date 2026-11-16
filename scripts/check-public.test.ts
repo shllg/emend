@@ -4697,20 +4697,139 @@ for (const [index, [name, body, expected, bothTerms]] of round21Witnesses.entrie
   });
 
 test("round 21 CX3: trailing-padding work scales linearly", (t) => {
-  const timings: number[] = [];
+  let ms = 0;
+  const ratios: string[] = [];
   for (const length of [16000, 32000, 64000]) {
     const body = `"${round20BinaryPrefix}AAAAAAAA\n${"=".repeat(length)}!"`;
-    checkText(body, "fixture.md", empty); // Warm the scanner before measuring.
-    const samples: number[] = [];
-    for (let run = 0; run < 3; run++) {
+    const budget = new ScanBudget();
+    const limit = 12 * body.length;
+    let paddingWork = 0;
+    let regexInput = 0;
+    const inputLimit = 238 * body.length;
+    const exec = RegExp.prototype.exec;
+    const paddingSuffix = new Map<string, boolean>();
+    const chargePadding = (pattern: RegExp, input: string) => {
+      const key = `${pattern.source}/${pattern.flags}`;
+      let suffix = paddingSuffix.get(key);
+      if (suffix === undefined) {
+        // Probe with the original exec and no cursor flags, without entering the wrappers.
+        const probe = new RegExp(pattern.source, pattern.flags.replaceAll("g", "").replaceAll("y", ""));
+        const trailing = exec.call(probe, "A====");
+        const followed = exec.call(probe, "A====!");
+        suffix = trailing !== null && trailing.index <= 1 && trailing.index + trailing[0].length === 5 &&
+          !(followed !== null && followed.index <= 1 && followed.index + followed[0].length >= 5);
+        paddingSuffix.set(key, suffix);
+      }
+      if (!suffix) return;
+      // An unanchored padding strip retries every '=' suffix when punctuation follows it.
+      for (let index = 0; index < input.length; index++) {
+        if (input[index] !== "=") continue;
+        const start = index;
+        while (input[index] === "=") index++;
+        const count = index - start;
+        paddingWork += index === input.length ? count : count * (count + 1) / 2;
+        // Reject the regressed work before executing the quadratic regex.
+        if (paddingWork + budget.inlineTerminatorWork > limit) budget.spend(Infinity);
+      }
+    };
+    let depth = 0;
+    // node:test mocks do not restore symbol-keyed methods; preserve their descriptors directly.
+    const descriptors = ([Symbol.replace, Symbol.match, Symbol.matchAll, Symbol.search, Symbol.split, "exec", "test"] as const)
+      .map((method) => [method, Object.getOwnPropertyDescriptor(RegExp.prototype, method)!] as const);
+    try {
+      for (const [method, descriptor] of descriptors) {
+        const original = descriptor.value;
+        Object.defineProperty(RegExp.prototype, method, {
+          ...descriptor,
+          value: function (this: RegExp, input: string, ...args: unknown[]) {
+            if (depth) return Reflect.apply(original, this, [input, ...args]);
+            depth++;
+            try {
+              regexInput += String(input).length;
+              if (regexInput > inputLimit) budget.spend(Infinity);
+              chargePadding(this, input);
+              if (method === Symbol.replace && typeof args[0] === "function") {
+                const replacer = args[0];
+                args[0] = function (this: unknown, ...values: unknown[]) {
+                  const savedDepth = depth;
+                  depth = 0;
+                  try { return Reflect.apply(replacer, this, values); } finally { depth = savedDepth; }
+                };
+              }
+              const result = Reflect.apply(original, this, [input, ...args]);
+              if (method !== Symbol.matchAll) return result;
+              // matchAll defers exec until iteration; guard those calls as well.
+              const matches = result as IterableIterator<RegExpMatchArray>;
+              return (function* () {
+                while (true) {
+                  let next: IteratorResult<RegExpMatchArray>;
+                  depth++;
+                  try { next = matches.next(); } finally { depth--; }
+                  if (next.done) return;
+                  yield next.value;
+                }
+              })();
+            } finally { depth--; }
+          },
+        });
+      }
       const start = performance.now();
-      assert.deepEqual(checkText(body, "fixture.md", empty), []);
-      samples.push(performance.now() - start);
+      assert.deepEqual(checkText(body, "fixture.md", empty, { budget }), []);
+      ms += performance.now() - start;
+      ratios.push(`${length}: ${(regexInput / body.length).toFixed(4)}`);
+      assert.ok(regexInput <= inputLimit, "regex input must stay linear");
+      assert.ok(budget.inlineTerminatorWork >= body.length, "the padding scan must be counted");
+      assert.ok(paddingWork + budget.inlineTerminatorWork <= limit, "padding work must stay linear");
+      const padding = "=".repeat(16);
+      for (const pattern of [/={1,2}$/, /=+/]) {
+        paddingWork = 0;
+        padding.replace(pattern, "");
+        assert.equal(paddingWork, 0, "bounded and unanchored strips must not charge padding work");
+      }
+      // Each former quadratic form must independently fail the same deterministic bound.
+      for (const strip of [
+        (input: string) => input.replace(/=+$/, ""),
+        (input: string) => input.replace(/[=]+$/, ""),
+        (input: string) => input.replace(/(?:=)+$/, ""),
+        (input: string) => input.replace(/\x3d+$/, ""),
+        (input: string) => input.replace(/[A-Za-z0-9+/=]+$/, ""),
+        (input: string) => input.replace(/=+(?=$)/, ""),
+        (input: string) => input.replace(/=+\s*$/, ""),
+        (input: string) => input.replace(/[\s\S]+/, (match) => match.replace(/=+$/, "")),
+        (input: string) => input.match(/=*$/),
+        (input: string) => /(=+)$/.exec(input),
+        (input: string) => input.search(/={1,}$/),
+        (input: string) => input.replaceAll(/=+$/g, ""),
+        (input: string) => [...input.matchAll(/=+$/g)],
+        (input: string) => input.split(/=+$/),
+        (input: string) => /=+$/.test(input),
+      ]) {
+        regexInput = 0;
+        paddingWork = 0;
+        strip(padding);
+        assert.equal(paddingWork, padding.length, "nested regex calls must not charge the same work twice");
+        regexInput = 0;
+        paddingWork = 0;
+        assert.throws(() => strip(body), /budget/);
+        assert.ok(paddingWork > limit, "the quadratic padding work alone must exceed the bound");
+      }
+      regexInput = 0;
+      paddingWork = 0;
+      const walk = (input: string) => {
+        let tail = input.length;
+        while (tail > 0 && /^=*$/.test(input.slice(tail - 1))) tail--;
+        return tail;
+      };
+      assert.throws(() => walk("=".repeat(length)), /budget/);
+      assert.ok(regexInput > inputLimit, "the per-position regex input must exceed the bound");
+    } finally {
+      for (const [method, descriptor] of descriptors) Object.defineProperty(RegExp.prototype, method, descriptor);
+      for (const [method, descriptor] of descriptors)
+        assert.strictEqual(RegExp.prototype[method], descriptor.value, `${String(method)} must be restored to its original function`);
     }
-    timings.push(samples.sort((a, b) => a - b)[1]!);
   }
-  t.diagnostic(`padding 16000/32000/64000: ${timings.map((ms) => ms.toFixed(2)).join(" / ")} ms (median of 3)`);
-  assert.ok(timings[2]! <= timings[0]! * 8 + 100, "4x input must stay within a generous linear bound");
+  t.diagnostic(`trailing-padding scan: ${ms.toFixed(1)} ms`);
+  t.diagnostic(`trailing-padding regex input/body: ${ratios.join(", ")}`);
 });
 
 test("round 21.1: hit-only joins do no work without a quote stop and resume only its suffix", () => {
