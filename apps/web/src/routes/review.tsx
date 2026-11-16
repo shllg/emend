@@ -17,6 +17,7 @@ import { placeSpan } from "../../../../packages/core/src/place/span.ts";
 import { ApiError, change } from "../api/client.ts";
 import { mutationMessage, useViewedErrors, useViewedMutation, useViewedRevision } from "../api/mutations.ts";
 import { reviewQuery, revisionQuery } from "../api/queries.ts";
+import { DiffChrome } from "../components/diff/diff-chrome.ts";
 import { LazyDiffPane } from "../components/diff/LazyDiffPane.tsx";
 import { isDiffTarget } from "../components/diff/targets.ts";
 import { FilesView } from "../components/files/FilesView.tsx";
@@ -380,6 +381,8 @@ function LoadedReview({
   const [codeFocus, setCodeFocus] = useState<CodeFocus>();
   const codeOpener = useRef<HTMLElement>(null);
   const codePane = useRef<HTMLDivElement>(null);
+  const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
+  const diffChrome = useMemo(() => ({ toolbarSlot }), [toolbarSlot]);
   const codeMode =
     hasDiff && tab === "writeup" && readingTab === "writeup"
       ? layout === "phone"
@@ -920,7 +923,14 @@ function LoadedReview({
           codePanel={panelOpen ? `Code: ${resolvedCode?.title}` : undefined}
           readingLayout={docsVisible && openDoc?.kind === "html" ? "original" : undefined}
           phoneTabs={<PhoneTabs {...tabProps} />}
-          tabs={<ReviewTabs {...tabProps} docsCount={revision?.docs.length ?? 0} idBase={readingId} />}
+          tabs={
+            <ReviewTabs
+              {...tabProps}
+              docsCount={revision?.docs.length ?? 0}
+              idBase={readingId}
+              toolbarSlot={setToolbarSlot}
+            />
+          }
           sendBar={
             <SendBar
               key={review.id}
@@ -1110,33 +1120,35 @@ function LoadedReview({
                 : {})}
             >
               {revision ? (
-                <LazyDiffPane
-                  key={seq}
-                  reviewId={review.id}
-                  revision={revision}
-                  focus={panelOpen ? openCode : undefined}
-                  focusBar={
-                    panelOpen && (
-                      <div className="em-diff-toolbar em-code-bar" data-diff-toolbar>
-                        <bdi className="min-w-0 flex-1 truncate" title={resolvedCode?.title}>
-                          {resolvedCode?.title}
-                        </bdi>
-                        <a className="shrink-0 text-12 text-fg-link" href={codeLink}>
-                          Open in Diff tab
-                        </a>
-                        <IconButton label="Close code panel" icon={X} size="sm" tooltip={false} onClick={closeCode} />
-                      </div>
-                    )
-                  }
-                  resume={resumed?.target && isDiffTarget(resumed.target) ? resumed : undefined}
-                  onResumeEnd={endResume}
-                  onRendered={onDiffRendered}
-                  onNavigator={onDiffNavigator}
-                  currentTopic={currentTopic}
-                  writeupVisible={readingTab === "writeup" && paneMode === "split"}
-                  search={search}
-                  onViewed={onViewed}
-                />
+                <DiffChrome value={diffChrome}>
+                  <LazyDiffPane
+                    key={seq}
+                    reviewId={review.id}
+                    revision={revision}
+                    focus={panelOpen ? openCode : undefined}
+                    focusBar={
+                      panelOpen && (
+                        <div className="em-diff-toolbar em-code-bar" data-diff-toolbar>
+                          <bdi className="min-w-0 flex-1 truncate" title={resolvedCode?.title}>
+                            {resolvedCode?.title}
+                          </bdi>
+                          <a className="shrink-0 text-12 text-fg-link" href={codeLink}>
+                            Open in Diff tab
+                          </a>
+                          <IconButton label="Close code panel" icon={X} size="sm" tooltip={false} onClick={closeCode} />
+                        </div>
+                      )
+                    }
+                    resume={resumed?.target && isDiffTarget(resumed.target) ? resumed : undefined}
+                    onResumeEnd={endResume}
+                    onRendered={onDiffRendered}
+                    onNavigator={onDiffNavigator}
+                    currentTopic={currentTopic}
+                    writeupVisible={readingTab === "writeup" && paneMode === "split"}
+                    search={search}
+                    onViewed={onViewed}
+                  />
+                </DiffChrome>
               ) : (
                 <p role={query.isError ? "alert" : "status"} className="p-5">
                   {query.isError ? "Could not load this revision." : "Loading revision…"}

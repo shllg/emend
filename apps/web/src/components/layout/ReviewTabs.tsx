@@ -27,7 +27,12 @@ export function ReviewTabs({
   viewedCount = 0,
   docsCount,
   idBase,
-}: ReviewTabsProps & { docsCount: number; idBase: string }) {
+  toolbarSlot,
+}: ReviewTabsProps & {
+  docsCount: number;
+  idBase: string;
+  toolbarSlot?: (element: HTMLDivElement | null) => void;
+}) {
   const navigate = useNavigate();
   const showDiff = usePaneMode() === "tabs" && hasDiff;
   const active =
@@ -56,11 +61,11 @@ export function ReviewTabs({
   useShortcut("tab.comments", () => changeTab("comments"));
   useShortcut("tab.diff", () => changeTab("diff"), { enabled: showDiff });
   return (
-    <div className="em-review-tabs sticky top-0 z-(--z-sticky) flex shrink-0 items-center border-b border-line-1 bg-surface">
+    <div className="em-review-tabs sticky top-0 z-(--z-sticky) flex shrink-0 flex-wrap items-stretch bg-surface">
       <Tabs
         idBase={idBase}
         label="Reading tabs"
-        className="min-w-0 flex-1 border-b-0"
+        className="min-w-0 flex-[999_1_auto]"
         value={value}
         items={[
           { id: "writeup", label: "Writeup", hidden: !hasWriteup },
@@ -77,6 +82,7 @@ export function ReviewTabs({
         ].map((item) => ({ ...item, "aria-controls": `${idBase}-${item.id === "diff" ? "diff" : "reading"}-panel` }))}
         onChange={changeTab}
       />
+      {value === "diff" && toolbarSlot && <div ref={toolbarSlot} className="em-tab-tools" />}
     </div>
   );
 }

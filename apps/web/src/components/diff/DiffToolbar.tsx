@@ -7,7 +7,7 @@ import { Menu, type MenuItem } from "../ui/Menu.tsx";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import type { DiffCounts, DiffStyle } from "./presentation.ts";
 
-export function DiffToolbar({
+export function fileJumpMenu({
   groups,
   files,
   ranks,
@@ -15,13 +15,6 @@ export function DiffToolbar({
   order,
   orderLocked,
   onOrder,
-  style,
-  splitDisabled,
-  onStyle,
-  wrap,
-  onWrap,
-  notes,
-  onNotes,
   onJump,
 }: {
   groups: { topic: TopicMeta; files: FileView[] }[];
@@ -31,15 +24,8 @@ export function DiffToolbar({
   order: FileOrder;
   orderLocked: boolean;
   onOrder: (order: FileOrder) => void;
-  style: DiffStyle;
-  splitDisabled: boolean;
-  onStyle: (style: DiffStyle) => void;
-  wrap: boolean;
-  onWrap: (wrap: boolean) => void;
-  notes: boolean;
-  onNotes: (notes: boolean) => void;
   onJump: (file: FileView) => void;
-}) {
+}): { label: string; items: MenuItem[] } {
   const topics = groups.filter(({ topic }) => topic.slug !== OTHER_TOPIC.slug).length;
   const label =
     order === "topics"
@@ -78,6 +64,43 @@ export function DiffToolbar({
           ...files.map(fileItem),
         ])),
   ];
+  return { label, items };
+}
+
+export function DiffToolbar({
+  groups,
+  files,
+  ranks,
+  counts,
+  order,
+  orderLocked,
+  onOrder,
+  style,
+  splitDisabled,
+  onStyle,
+  wrap,
+  onWrap,
+  notes,
+  onNotes,
+  onJump,
+}: {
+  groups: { topic: TopicMeta; files: FileView[] }[];
+  files: FileView[];
+  ranks: Map<string, number>;
+  counts: Map<string, DiffCounts>;
+  order: FileOrder;
+  orderLocked: boolean;
+  onOrder: (order: FileOrder) => void;
+  style: DiffStyle;
+  splitDisabled: boolean;
+  onStyle: (style: DiffStyle) => void;
+  wrap: boolean;
+  onWrap: (wrap: boolean) => void;
+  notes: boolean;
+  onNotes: (notes: boolean) => void;
+  onJump: (file: FileView) => void;
+}) {
+  const { label, items } = fileJumpMenu({ groups, files, ranks, counts, order, orderLocked, onOrder, onJump });
   return (
     <div data-diff-toolbar className="em-diff-toolbar">
       <Menu

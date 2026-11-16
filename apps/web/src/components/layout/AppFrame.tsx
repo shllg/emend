@@ -14,7 +14,7 @@ import {
   Settings,
   Smartphone,
 } from "lucide-react";
-import { type ComponentProps, type CSSProperties, type ReactNode, type RefObject, useRef } from "react";
+import { type ComponentProps, type CSSProperties, type ReactNode, type RefObject, useRef, useState } from "react";
 import { useAppUpdate } from "../../lib/app-update.ts";
 import { useLayout } from "../../lib/layout.ts";
 import { layoutStore, readingMeasure, useLayoutPreferences } from "../../lib/layout-store.ts";
@@ -29,6 +29,7 @@ import { IconButton } from "../ui/IconButton.tsx";
 import { Menu, type MenuItem } from "../ui/Menu.tsx";
 import { useToast } from "../ui/Toast.tsx";
 import { cn } from "../ui/utils.ts";
+import { MoreMenuItems } from "./more-menu.ts";
 import { PaletteButton } from "./PaletteButton.tsx";
 import { UpdateGateContext, useUpdateGate } from "./UpdateGate.tsx";
 
@@ -101,9 +102,12 @@ function AppFrameContent({
     asChild: true,
     children: <Link to="/settings">Settings</Link>,
   };
+  const [diffItems, setDiffItems] = useState<MenuItem[]>();
+  const phoneDiff = layout === "phone" && diffItems ? diffItems : undefined;
   const menuItems: MenuItem[] = isReview
     ? [
         ...updateItems,
+        ...(phoneDiff ? [...phoneDiff, { separator: true } as const] : []),
         refreshItem,
         { label: "Search commands", icon: Search, opensDialog: true, onSelect: () => void runShortcut("palette.open") },
         { label: "Copy link", icon: LinkIcon, onSelect: () => void copyLink() },
@@ -144,6 +148,25 @@ function AppFrameContent({
             ],
           },
         },
+        ...(phoneDiff
+          ? [
+              { heading: "Agent notes" },
+              {
+                radioGroup: {
+                  label: "Agent notes",
+                  segmented: true,
+                  value: preferences.notes ? "show" : "hide",
+                  onValueChange: (value: string) => {
+                    if (value === "hide" || value === "show") layoutStore.update({ notes: value === "show" });
+                  },
+                  items: [
+                    { value: "hide", label: "Hide" },
+                    { value: "show", label: "Show" },
+                  ],
+                },
+              },
+            ]
+          : []),
         { separator: true },
         { label: "Inbox", icon: Inbox, asChild: true, children: <Link to="/">Inbox</Link> },
         devices,
@@ -236,7 +259,9 @@ function AppFrameContent({
           </div>
         )}
       </div>
-      <UpdateGateContext.Provider value={gate.request}>{children}</UpdateGateContext.Provider>
+      <UpdateGateContext.Provider value={gate.request}>
+        <MoreMenuItems value={setDiffItems}>{children}</MoreMenuItems>
+      </UpdateGateContext.Provider>
       {gate.dialog}
     </div>
   );
