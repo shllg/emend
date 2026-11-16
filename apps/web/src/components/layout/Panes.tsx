@@ -37,6 +37,8 @@ export function Panes({
   const [readingPreview, setReadingPreview] = useState<number>();
   const frame = useRef<HTMLDivElement>(null);
   const area = useRef<HTMLDivElement>(null);
+  const readingPane = useRef<HTMLElement>(null);
+  const hasTabs = Boolean(tabs);
   const [areaWidth, setAreaWidth] = useState(0);
   const [layoutWidth, setLayoutWidth] = useState(0);
   useLayoutEffect(() => {
@@ -57,6 +59,30 @@ export function Panes({
     observer.observe(layoutElement);
     return () => observer.disconnect();
   }, []);
+  // Only Split puts tabs inside the reading scroller; sticky content offsets itself by their height.
+  useLayoutEffect(() => {
+    const element = readingPane.current;
+    if (!element || !split || !hasTabs) return;
+    const tabRow = element.querySelector<HTMLElement>(":scope > .em-review-tabs");
+    if (!tabRow) return;
+    const measure = () => {
+      element.style.setProperty("--reading-tabs-height", `${tabRow.getBoundingClientRect().height}px`);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => {
+        window.removeEventListener("resize", measure);
+        element.style.removeProperty("--reading-tabs-height");
+      };
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(tabRow);
+    return () => {
+      observer.disconnect();
+      element.style.removeProperty("--reading-tabs-height");
+    };
+  }, [split, hasTabs]);
   const maxReading = Math.max(360, areaWidth - RESIZE_HANDLE_WIDTH - 440);
   const preferredReading =
     preferences.readingShare === defaultLayout.readingShare
@@ -91,6 +117,7 @@ export function Panes({
           {(layout !== "phone" || tab !== "diff" || !hasDiff) && (
             <section
               key="reading"
+              ref={readingPane}
               aria-label="Reading"
               data-testid="reading-pane"
               data-reading-scroll
