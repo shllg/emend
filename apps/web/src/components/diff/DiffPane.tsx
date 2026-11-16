@@ -1,15 +1,6 @@
 import { type FileView, OTHER_TOPIC, type RevisionView, type Target } from "@emend/contract";
 import { useIsMutating } from "@tanstack/react-query";
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useEffectEvent,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { runningCommentSaves } from "../../api/mutations.ts";
 import { type CodeFocus, sameCodeFocus } from "../../lib/code-focus.ts";
 import { claimDraft } from "../../lib/composer-owner.ts";
@@ -43,7 +34,6 @@ import { type FileLocation, isDiffTarget, resolveFile } from "./targets.ts";
 
 export type DiffPaneProps = {
   focus?: CodeFocus;
-  focusBar?: ReactNode;
   reviewId: string;
   revision: RevisionView;
   parser?: DiffParser;
@@ -59,7 +49,6 @@ export type DiffPaneProps = {
 };
 export function DiffPane({
   focus,
-  focusBar,
   reviewId,
   revision,
   parser,
@@ -74,6 +63,9 @@ export function DiffPane({
   onViewed,
 }: DiffPaneProps) {
   const layout = useLayout();
+  // Phone focus has its own pane: omit unrelated content so its composers cannot portal sheets.
+  // Larger layouts share the Diff tab's pane and keep hidden editors mounted.
+  const phoneFocus = layout === "phone" && !!focus;
   const [style, setStyle] = useDiffStyle();
   const [wrap, setWrap] = useDiffWrap();
   const [order, setOrder, saving] = useFileOrder();
@@ -165,7 +157,7 @@ export function DiffPane({
       const sticky = getComputedStyle(element).position === "sticky";
       const topic = element.closest("[data-topic]")?.querySelector("[data-topic-header]");
       const stack = sticky
-        ? (pane.querySelector("[data-diff-toolbar]")?.getBoundingClientRect().height ?? 0) +
+        ? (scroll.querySelector("[data-diff-toolbar]")?.getBoundingClientRect().height ?? 0) +
           (topic?.getBoundingClientRect().height ?? 0)
         : 0;
       const section = (element.closest("[data-diff-file]") ?? element).getBoundingClientRect();
@@ -375,44 +367,49 @@ export function DiffPane({
   );
   const topicThreads =
     shownOrder === "path"
-      ? [...groups.keys()].flatMap((slug) =>
-          revision.threads.filter(
-            (thread) =>
-              thread.placement.status === "placed" &&
-              thread.placement.location.kind === "topic" &&
-              thread.placement.location.slug === slug,
-          ),
-        )
+      ? [...groups.keys()]
+          .filter((slug) => !phoneFocus || (focus?.kind === "topic" && focus.slug === slug))
+          .flatMap((slug) =>
+            revision.threads.filter(
+              (thread) =>
+                thread.placement.status === "placed" &&
+                thread.placement.location.kind === "topic" &&
+                thread.placement.location.slug === slug,
+            ),
+          )
       : [];
+  const activeTopic =
+    active?.kind === "topic" &&
+    hasSection(active) &&
+    (!phoneFocus || (focus?.kind === "topic" && focus.slug === active.slug))
+      ? active
+      : undefined;
   return (
     <DiffNavigation value={navigateDiff}>
       <div ref={root} className="em-diff-pane" data-toolbar={layout !== "phone" || undefined}>
         <h2 className="sr-only">Diff</h2>
-        {layout !== "phone" &&
-          (focus ? (
-            focusBar
-          ) : (
-            <DiffToolbar
-              groups={[...groups.values()]}
-              files={orderedFiles}
-              ranks={ranks}
-              counts={counts}
-              order={shownOrder}
-              orderLocked={saving}
-              onOrder={setOrder}
-              style={diffStyle}
-              splitDisabled={narrow !== false}
-              onStyle={setStyle}
-              wrap={wrap}
-              onWrap={setWrap}
-              notes={notes}
-              onNotes={(notes) => layoutStore.update({ notes })}
-              onJump={(file) => {
-                setJump(file);
-              }}
-            />
-          ))}
-        {unplaced.length > 0 && (
+        {layout !== "phone" && !focus && (
+          <DiffToolbar
+            groups={[...groups.values()]}
+            files={orderedFiles}
+            ranks={ranks}
+            counts={counts}
+            order={shownOrder}
+            orderLocked={saving}
+            onOrder={setOrder}
+            style={diffStyle}
+            splitDisabled={narrow !== false}
+            onStyle={setStyle}
+            wrap={wrap}
+            onWrap={setWrap}
+            notes={notes}
+            onNotes={(notes) => layoutStore.update({ notes })}
+            onJump={(file) => {
+              setJump(file);
+            }}
+          />
+        )}
+        {!phoneFocus && unplaced.length > 0 && (
           <section hidden={!!focus} aria-label="Unplaced comments" className="mb-5 space-y-3">
             <h3 className="font-semibold">Unplaced comments</h3>
             {unplaced.map((thread) => (
@@ -420,7 +417,7 @@ export function DiffPane({
             ))}
           </section>
         )}
-        {shownOrder === "path" && (topicThreads.length > 0 || (active?.kind === "topic" && hasSection(active))) && (
+        {shownOrder === "path" && (topicThreads.length > 0 || activeTopic) && (
           <section
             hidden={focus?.kind === "file"}
             aria-label="Topic comments"
@@ -428,13 +425,13 @@ export function DiffPane({
             className="mb-5 space-y-3 px-3"
           >
             <h3 className="font-semibold">Topic comments</h3>
-            {active?.kind === "topic" && hasSection(active) && (
-              <div hidden={focus?.kind === "topic" && focus.slug !== active.slug}>
+            {activeTopic && (
+              <div hidden={focus?.kind === "topic" && focus.slug !== activeTopic.slug}>
                 <Composer
                   surface="diff"
                   reviewId={reviewId}
                   revision={revision.seq}
-                  target={active}
+                  target={activeTopic}
                   topics={revision.topics}
                   onSaved={() => onActive(null)}
                   onCancel={() => onActive(null)}
@@ -456,7 +453,7 @@ export function DiffPane({
             ))}
           </section>
         )}
-        {active && isDiffTarget(active) && !hasSection(active) && (
+        {!phoneFocus && active && isDiffTarget(active) && !hasSection(active) && (
           <section hidden={!!focus} data-diff-section className="space-y-2">
             <Composer
               surface="diff"
@@ -475,7 +472,7 @@ export function DiffPane({
         {(layout === "phone" || narrow !== undefined) &&
           (shownOrder === "path" ? (
             <div className="px-3 pb-3">
-              {orderedFiles.map((file) => (
+              {(phoneFocus ? visibleFiles : orderedFiles).map((file) => (
                 <FileDiff
                   key={file.id}
                   file={file}
@@ -486,28 +483,30 @@ export function DiffPane({
               ))}
             </div>
           ) : (
-            [...groups.values()].map(({ topic, files }) => (
-              <TopicSection
-                key={topic.slug}
-                {...context}
-                topic={topic}
-                files={files}
-                hidden={!!focus && topic.slug !== focusedGroup?.topic.slug}
-                onlyFile={focus?.kind === "file" ? focus.id : undefined}
-                rank={ranks.get(topic.slug)}
-                current={layout !== "phone" && writeupVisible && currentTopic === topic.slug}
-                writeupLink={
-                  !focus &&
-                  (!revision.writeupEmpty || revision.main === "writeup") &&
-                  topic.slug !== OTHER_TOPIC.slug &&
-                  (layout === "phone" || !writeupVisible)
-                    ? `/r/${encodeURIComponent(reviewId)}?tab=writeup${search.rev === undefined ? "" : `&rev=${search.rev}`}#topic-${topic.slug}`
-                    : undefined
-                }
-                collapsed={collapsedTopics.has(topic.slug)}
-                onToggle={() => setCollapsedTopics((previous) => toggle(previous, topic.slug))}
-              />
-            ))
+            [...groups.values()]
+              .filter(({ topic }) => !phoneFocus || topic.slug === focusedGroup?.topic.slug)
+              .map(({ topic, files }) => (
+                <TopicSection
+                  key={topic.slug}
+                  {...context}
+                  topic={topic}
+                  files={files}
+                  hidden={!!focus && topic.slug !== focusedGroup?.topic.slug}
+                  onlyFile={focus?.kind === "file" ? focus.id : undefined}
+                  rank={ranks.get(topic.slug)}
+                  current={layout !== "phone" && writeupVisible && currentTopic === topic.slug}
+                  writeupLink={
+                    !focus &&
+                    (!revision.writeupEmpty || revision.main === "writeup") &&
+                    topic.slug !== OTHER_TOPIC.slug &&
+                    (layout === "phone" || !writeupVisible)
+                      ? `/r/${encodeURIComponent(reviewId)}?tab=writeup${search.rev === undefined ? "" : `&rev=${search.rev}`}#topic-${topic.slug}`
+                      : undefined
+                  }
+                  collapsed={collapsedTopics.has(topic.slug)}
+                  onToggle={() => setCollapsedTopics((previous) => toggle(previous, topic.slug))}
+                />
+              ))
           ))}
       </div>
     </DiffNavigation>

@@ -157,32 +157,36 @@ export function TopicSection({
           )}
         </div>
       )}
-      <div className="em-diff-discussion" hidden={onlyFile !== undefined}>
-        {active?.kind === "topic" && active.slug === topic.slug && (
-          <Composer
-            surface="diff"
-            reviewId={context.reviewId}
-            revision={context.revision}
-            target={active}
-            topics={context.topics}
-            onSaved={close}
-            onCancel={close}
-          />
-        )}
-        {threads.map((thread) => (
-          <ThreadCard surface="diff" key={thread.id} {...context} thread={thread} />
-        ))}
-      </div>
+      {(!phone || onlyFile === undefined) && (
+        <div className="em-diff-discussion" hidden={onlyFile !== undefined}>
+          {active?.kind === "topic" && active.slug === topic.slug && (
+            <Composer
+              surface="diff"
+              reviewId={context.reviewId}
+              revision={context.revision}
+              target={active}
+              topics={context.topics}
+              onSaved={close}
+              onCancel={close}
+            />
+          )}
+          {threads.map((thread) => (
+            <ThreadCard surface="diff" key={thread.id} {...context} thread={thread} />
+          ))}
+        </div>
+      )}
       <div hidden={collapsed} className="px-3 pb-3">
-        {files.map((file) => (
-          <FileDiff
-            key={file.id}
-            file={file}
-            hidden={onlyFile !== undefined && file.id !== onlyFile}
-            topicCollapsed={collapsed}
-            {...context}
-          />
-        ))}
+        {files
+          .filter((file) => !phone || onlyFile === undefined || file.id === onlyFile)
+          .map((file) => (
+            <FileDiff
+              key={file.id}
+              file={file}
+              hidden={onlyFile !== undefined && file.id !== onlyFile}
+              topicCollapsed={collapsed}
+              {...context}
+            />
+          ))}
       </div>
     </section>
   );

@@ -20,7 +20,6 @@ import { afterEach, beforeEach, describe, expect, onTestFinished, test, vi } fro
 import { renderWriteup } from "../../../packages/core/src/render/writeup.ts";
 import { App } from "./App.tsx";
 import type { InboxData } from "./api/queries.ts";
-import type { DiffPaneProps } from "./components/diff/DiffPane.tsx";
 import type { ParsedDiff } from "./components/diff/FileDiff.tsx";
 import { parsePair } from "./components/diff/parse.worker.ts";
 import type { DiffParser } from "./components/diff/parse-client.ts";
@@ -58,7 +57,7 @@ vi.mock("./components/diff/LazyDiffPane.tsx", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./components/diff/LazyDiffPane.tsx")>();
   return {
     ...actual,
-    LazyDiffPane: (props: DiffPaneProps) => (
+    LazyDiffPane: (props: ComponentProps<typeof actual.LazyDiffPane>) => (
       <>
         {props.focus && loading.link && <a href={loading.link}>Read the writeup</a>}
         <actual.LazyDiffPane
@@ -4105,6 +4104,37 @@ function addCodeTopics() {
   currentRevision.writeup.sections.push({ key: "t-water-body", label: "Water details", topic: "water", blocks: [] });
 }
 
+test.each([1280, 768].flatMap((pixels) => ["loading", "failed", "loaded"].map((state) => ({ pixels, state }))))(
+  "Code panel at $pixels px can close while its diff is $state",
+  async ({ pixels, state }) => {
+    width = pixels;
+    if (state === "failed") vi.spyOn(console, "error").mockImplementation(() => {});
+    mount();
+    const opener = await screen.findByRole("button", { name: "Code: Plant a seed" });
+    fireEvent.click(opener);
+    const pane = screen.getByTestId("diff-pane");
+    await within(pane).findByText("Loading diff…");
+    if (state === "failed") {
+      await act(async () => loaded.reject(new Error("Synthetic chunk outage")));
+      await within(pane).findByRole("alert");
+      expect(within(pane).getByText("Could not load the diff.")).toBeTruthy();
+    } else if (state === "loaded") {
+      await act(async () => loaded.resolve());
+      await within(pane).findByRole("region", { name: "Topic Plant a seed" });
+      expect(pane.querySelector(".em-diff-pane")?.hasAttribute("data-toolbar")).toBe(true);
+      expect(pane.querySelector(".em-diff-pane [data-diff-toolbar]")).toBeNull();
+    }
+    expect(pane.querySelectorAll("[data-diff-toolbar]")).toHaveLength(1);
+    expect(within(pane).getByRole("link", { name: "Open in Diff tab" })).toBeTruthy();
+    const close = within(pane).getByRole("button", { name: "Close code panel" });
+    act(() => close.focus());
+    fireEvent.click(close);
+    expect(pane.hidden).toBe(true);
+    expect(opener.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(opener);
+  },
+);
+
 test.each([1280, 768])(
   "Code panel at %s px switches targets, keeps IDs and restores the full Diff tab",
   async (pixels) => {
@@ -4266,6 +4296,53 @@ test("phone Code opens a full-screen sheet with one diff viewer and returns to t
   fireEvent.keyDown(fileSheet, { key: "Escape" });
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
+
+test.each((["topics", "path"] as const).flatMap((order) => ["topic", "file"].map((focus) => ({ order, focus }))))(
+  "phone Code $focus focus in $order order never opens unrelated saved replies",
+  async ({ order, focus }) => {
+    width = 390;
+    addCodeTopics();
+    layoutStore.update({ fileOrder: order });
+    const targets = [
+      { kind: "file", path: "seed.txt" },
+      { kind: "topic", slug: "seed" },
+      { kind: "file", path: "seedling.txt" },
+      { kind: "topic", slug: "water" },
+      { kind: "file", path: "water.txt" },
+      { kind: "topic", slug: "missing" },
+    ] satisfies Target[];
+    currentRevision.threads = targets.map((target, index) => ({
+      ...placedWriteupThread(),
+      id: `44444444-4444-4444-8444-${String(index).padStart(12, "0")}`,
+      target,
+      placement: { status: "placed", location: target },
+    }));
+    const unrelated = currentRevision.threads.slice(focus === "topic" ? 3 : 1);
+    const otherTopic = currentRevision.threads[3];
+    if (!otherTopic) throw new Error("Missing topic thread");
+    const key = draftKey(id, otherTopic.target, otherTopic.id);
+    localStorage.setItem(key, "Keep this reply");
+    mount();
+    const title = focus === "topic" ? "Plant a seed" : "seed.txt";
+    fireEvent.click(await screen.findByRole("button", { name: `Code: ${title}` }));
+    await act(async () => loaded.resolve());
+    const sheet = await screen.findByRole("dialog", { name: title });
+    await within(sheet).findByRole("region", { name: "File seed.txt" });
+    expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
+    expect(screen.queryByRole("dialog", { name: "Reply" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Comment" })).toBeNull();
+    expect(sheet.querySelectorAll("[data-diff-file]")).toHaveLength(focus === "topic" ? 2 : 1);
+    expect(sheet.querySelector('[aria-label="Unplaced comments"]')).toBeNull();
+    expect(sheet.querySelector("#diff-topic-water")).toBeNull();
+    expect(sheet.querySelector("#diff-thread-44444444-4444-4444-8444-000000000000")).toBeTruthy();
+    if (focus === "topic")
+      expect(sheet.querySelector("#diff-thread-44444444-4444-4444-8444-000000000001")).toBeTruthy();
+    for (const thread of unrelated) {
+      expect(sheet.querySelector(`#diff-thread-${thread.id}`)).toBeNull();
+    }
+    expect(localStorage.getItem(key)).toBe("Keep this reply");
+  },
+);
 
 test.each(["topics", "path"] as const)(
   "Code focus in %s order hides unrelated comments and keeps every file mounted",

@@ -24,24 +24,31 @@ class PaneBoundary extends Component<
     );
   }
 }
-export function LazyDiffPane({ load = loadDiff, ...props }: DiffPaneProps & { load?: Loader }) {
+export function LazyDiffPane({
+  load = loadDiff,
+  focusBar,
+  ...props
+}: DiffPaneProps & { load?: Loader; focusBar?: ReactNode }) {
   const [attempt, setAttempt] = useState(() => ({ Pane: lazy(load), number: 0 }));
   const Pane = attempt.Pane;
   return (
-    <PaneBoundary
-      key={attempt.number}
-      retried={attempt.number > 0}
-      retry={() => setAttempt({ Pane: lazy(load), number: attempt.number + 1 })}
-    >
-      <Suspense
-        fallback={
-          <p role="status" className="p-5">
-            Loading diff…
-          </p>
-        }
+    <>
+      {focusBar}
+      <PaneBoundary
+        key={attempt.number}
+        retried={attempt.number > 0}
+        retry={() => setAttempt({ Pane: lazy(load), number: attempt.number + 1 })}
       >
-        <Pane {...props} />
-      </Suspense>
-    </PaneBoundary>
+        <Suspense
+          fallback={
+            <p role="status" className="p-5">
+              Loading diff…
+            </p>
+          }
+        >
+          <Pane {...props} />
+        </Suspense>
+      </PaneBoundary>
+    </>
   );
 }
