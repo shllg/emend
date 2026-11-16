@@ -599,7 +599,10 @@ test("a waiting take ends at once when the review is binned", async () => {
   onTestFinished(() => {
     controller.abort();
     unsubscribe?.();
+    vi.useRealTimers();
   });
+  // Keep the 25-second fallback frozen: only the bin event can settle this take.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const waiting = f.request(`/reviews/${reviewId}/take`, "POST", { waitSeconds: 25 }, "agent", controller.signal);
   await started.promise;
   expect(f.deps.events?.agentWaiting(f.ownerId, reviewId)).toBe(true);
