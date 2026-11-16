@@ -44,6 +44,29 @@ test("Approve opens a confirmation and sends nothing", () => {
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
+test.each([
+  [null, "The review moves to Done."],
+  ["22222222-2222-4222-8222-222222222222", "The review stays in its group."],
+])("Approve describes the destination for group %s", (groupId, destination) => {
+  mount({
+    lifecycle: {
+      title: "Synthetic review",
+      groupId,
+      state: "open",
+      snoozed: false,
+      snoozedUntil: null,
+      onDeleted: vi.fn(),
+    },
+  });
+  fireEvent.click(trigger());
+  expect(
+    within(dialog()).getByText(
+      `The agent receives the approval, now if one is waiting and otherwise when it next picks up. ${destination}`,
+    ),
+  ).toBeTruthy();
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
 test("the phone's Approve asks first as well", () => {
   mount({ phone: true });
   fireEvent.click(screen.getByRole("button", { name: "Approve" }));

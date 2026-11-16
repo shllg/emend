@@ -22,6 +22,7 @@ const review: ReviewView = {
   updatedAt: "2026-01-01T00:00:00.000Z",
   movedTo: null,
   list: "active",
+  groupId: null,
   snoozed: false,
   snoozedUntil: null,
   activeUntil: null,

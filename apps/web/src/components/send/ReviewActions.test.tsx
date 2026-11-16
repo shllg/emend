@@ -16,6 +16,7 @@ const lifecycle: ReviewLifecycle = {
   state: "open",
   snoozed: false,
   snoozedUntil: null,
+  groupId: null,
   onDeleted: vi.fn(),
 };
 let client: QueryClient;
@@ -67,10 +68,10 @@ function sent() {
 }
 
 test.each([
-  ["open", false, ["Snooze", "Retire", "Delete"]],
-  ["open", true, ["Snooze again", "Unsnooze", "Retire", "Delete"]],
-  ["settled", false, ["Reopen", "Delete"]],
-  ["approved", false, ["Delete"]],
+  ["open", false, ["Snooze", "Retire", "Move to group…", "Delete"]],
+  ["open", true, ["Snooze again", "Unsnooze", "Retire", "Move to group…", "Delete"]],
+  ["settled", false, ["Reopen", "Move to group…", "Delete"]],
+  ["approved", false, ["Move to group…", "Delete"]],
 ] as const)("the %s review (snoozed %s) offers %j", async (state, snoozed, expected) => {
   mount({ lifecycle: { state, snoozed, snoozedUntil: snoozed ? "2026-11-05T09:00:00.000Z" : null } });
   openMenu();
@@ -97,11 +98,20 @@ test("the snooze choices show their wake times and send the right body at a late
     const view = mount();
     await choose("Snooze");
     const dialog = await screen.findByRole("alertdialog", { name: "Snooze this review" });
+    expect(dialog.textContent).toContain("It leaves your active list until then. A new revision wakes it early.");
     fireEvent.click(within(dialog).getByRole("button", { name }));
     await waitFor(() => expect(sent()).toEqual([["POST", `${base}/snooze`, JSON.stringify(body)]]));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     view.unmount();
   }
+});
+
+test("snoozing a grouped review says it stays in its group", async () => {
+  mount({ lifecycle: { groupId: groupA.id } });
+  await choose("Snooze");
+  const dialog = await screen.findByRole("alertdialog", { name: "Snooze this review" });
+  expect(dialog.textContent).toContain("It stays in its group, snoozed until then. A new revision wakes it early.");
+  expect(dialog.textContent).not.toContain("It leaves your active list");
 });
 
 test("Next week on a Monday goes a full week out; on a Sunday it is the next day", async () => {
@@ -139,8 +149,7 @@ test("retire without unsent comments sends an empty body", async () => {
   mount();
   await choose("Retire");
   const dialog = await screen.findByRole("alertdialog", { name: "Retire this review?" });
-  expect(dialog.textContent).toContain("moves to Done without an approval");
-  expect(dialog.textContent).toContain("agent waiting on it stops");
+  expect(dialog.textContent).toContain("It moves to Done without an approval, and an agent waiting on it stops.");
   expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Cancel" }));
   fireEvent.click(within(dialog).getByRole("button", { name: "Retire" }));
   await screen.findByText("Review retired");
@@ -151,6 +160,9 @@ test("retire with unsent comments discards them only through the explicit button
   mount({ unsentCount: 2 });
   await choose("Retire");
   const dialog = await screen.findByRole("alertdialog", { name: "Retire this review?" });
+  expect(dialog.textContent).toContain(
+    "It moves to Done without an approval, and an agent waiting on it stops. Its 2 unsent comments will be deleted.",
+  );
   expect(within(dialog).queryByRole("button", { name: "Retire" })).toBeNull();
   fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
@@ -160,6 +172,25 @@ test("retire with unsent comments discards them only through the explicit button
   await screen.findByText("Review retired");
   expect(sent()).toEqual([["POST", `${base}/retire`, JSON.stringify({ discardUnsent: true })]]);
 });
+
+test.each([
+  [0, ""],
+  [1, " Its 1 unsent comment will be deleted."],
+  [2, " Its 2 unsent comments will be deleted."],
+] as const)(
+  "retiring a grouped review with %i unsent comments says it stays in its group",
+  async (unsentCount, warning) => {
+    mount({ lifecycle: { groupId: groupA.id }, unsentCount });
+    await choose("Retire");
+    const dialog = await screen.findByRole("alertdialog", { name: "Retire this review?" });
+    expect(
+      within(dialog).getByText(
+        `It stays in its group, closed without an approval, and an agent waiting on it stops.${warning}`,
+      ),
+    ).toBeTruthy();
+    expect(dialog.textContent).not.toContain("It moves to Done");
+  },
+);
 
 function ReviewWithCount() {
   const { data } = useQuery(reviewQuery(reviewId));
@@ -287,9 +318,10 @@ test("a plain Retire sends no discardUnsent even after the count fell back to ze
   expect(sent()).toEqual([["POST", `${base}/retire`, "{}"]]);
 });
 
-test.each(["Snooze", "Retire", "Delete"])(
+test.each(["Snooze", "Retire", "Move to group…", "Delete"])(
   "the %s dialog returns focus to the trigger and unlocks the page",
   async (item) => {
+    if (item === "Move to group…") groupResponses();
     mount();
     const trigger = screen.getByRole("button", { name: "More review actions" });
     for (const how of ["Cancel", "Escape"]) {
@@ -303,7 +335,7 @@ test.each(["Snooze", "Retire", "Delete"])(
       expect([...document.body.children].filter((node) => node.hasAttribute("data-aria-hidden"))).toEqual([]);
       expect([...document.body.children].filter((node) => node.getAttribute("aria-hidden") === "true")).toEqual([]);
     }
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method)).toEqual([]);
   },
 );
 
@@ -422,4 +454,165 @@ test("on the phone the menu button is a 40px touch target with the same label", 
   expect(button.className).toContain("size-10");
   await choose("Snooze");
   expect(await screen.findByRole("alertdialog", { name: "Snooze this review" })).toBeTruthy();
+});
+
+const groupA = { id: "22222222-2222-4222-8222-222222222222", name: "Alpha" };
+const groupB = { id: "33333333-3333-4333-8333-333333333333", name: "Beta" };
+function groupResponses(initial = [groupB, groupA]) {
+  let groups = initial;
+  fetchMock.mockImplementation(async (path, init) => {
+    if (path === "/api/v1/reviews")
+      return Response.json({
+        items: [],
+        groups: groups.map((group) => ({ ...group, members: 0 })),
+        approvedActiveHours: 12,
+        approvedActiveLimit: 5,
+        serverTime: "2026-11-04T12:00:00.000Z",
+      });
+    if (path === "/api/v1/groups" && init?.method === "POST") {
+      const created = { id: "44444444-4444-4444-8444-444444444444", name: JSON.parse(String(init.body)).name.trim() };
+      groups = [...groups, created];
+      return Response.json(created, { status: 201 });
+    }
+    return new Response(null, { status: 204 });
+  });
+}
+const groupWrites = () => sent().filter(([method]) => method === "POST" || method === "PUT");
+
+test.each([lifecycle.title, "Synthetic \u202ereview"])("move dialog isolates the review title: %s", async (title) => {
+  groupResponses();
+  mount({ lifecycle: { title } });
+  await choose("Move to group…");
+  const dialog = await screen.findByRole("alertdialog");
+  const heading = within(dialog).getByRole("heading");
+  expect(heading.querySelector("bdi")?.textContent).toBe(title);
+  expect(heading.textContent).toBe(`Move “${title}” to a group`);
+  expect(heading.querySelector("b")).toBeNull();
+});
+
+test("move dialog sorts groups, marks the current group, moves and invalidates its review and inbox", async () => {
+  groupResponses();
+  const invalidate = vi.spyOn(client, "invalidateQueries");
+  mount({ lifecycle: { groupId: groupA.id } });
+  await choose("Move to group…");
+  const dialog = await screen.findByRole("alertdialog");
+  expect(within(dialog).getByRole("heading").textContent).toBe(`Move “${lifecycle.title}” to a group`);
+  const current = await within(dialog).findByRole<HTMLButtonElement>("button", { name: "Alpha Current" });
+  expect(current.disabled).toBe(true);
+  expect(
+    within(dialog)
+      .getAllByRole("button")
+      .slice(0, 2)
+      .map((button) => button.textContent),
+  ).toEqual(["AlphaCurrent", "Beta"]);
+  expect(dialog.textContent).toContain("It stays in the group until you move it out. New revisions keep it there.");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Beta" }));
+  await screen.findByText("Moved to “Beta”");
+  expect(groupWrites()).toEqual([["PUT", `${base}/group`, JSON.stringify({ groupId: groupB.id })]]);
+  expect(invalidate.mock.calls.map(([options]) => options?.queryKey)).toEqual([["inbox"], ["review", reviewId]]);
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "More review actions" }));
+});
+
+test("remove from group sends null and names the previous group", async () => {
+  groupResponses();
+  mount({ lifecycle: { groupId: groupA.id }, phone: true });
+  await choose("Move to group…");
+  await screen.findByRole("button", { name: "Alpha Current" });
+  fireEvent.click(screen.getByRole("button", { name: "Remove from group" }));
+  await screen.findByText("Removed from “Alpha”");
+  expect(groupWrites()).toEqual([["PUT", `${base}/group`, '{"groupId":null}']]);
+});
+
+test("create and move submits a name, then the returned id; whitespace cannot submit", async () => {
+  groupResponses();
+  mount();
+  await choose("Move to group…");
+  const field = await screen.findByRole<HTMLInputElement>("textbox", { name: "New group" });
+  expect(field.maxLength).toBe(80);
+  const create = screen.getByRole<HTMLButtonElement>("button", { name: "Create and move" });
+  expect(create.disabled).toBe(true);
+  fireEvent.change(field, { target: { value: "  " } });
+  expect(create.disabled).toBe(true);
+  fireEvent.submit(field.closest("form") as HTMLFormElement);
+  expect(groupWrites()).toEqual([]);
+  fireEvent.change(field, { target: { value: " New project " } });
+  fireEvent.submit(field.closest("form") as HTMLFormElement);
+  await screen.findByText("Moved to “New project”");
+  expect(groupWrites()).toEqual([
+    ["POST", "/api/v1/groups", JSON.stringify({ name: " New project " })],
+    ["PUT", `${base}/group`, JSON.stringify({ groupId: "44444444-4444-4444-8444-444444444444" })],
+  ]);
+});
+
+test("at the group limit the dialog keeps move choices and hides creation", async () => {
+  groupResponses(
+    Array.from({ length: 50 }, (_, i) => ({
+      id: `55555555-5555-4555-8555-${String(i).padStart(12, "0")}`,
+      name: `Group ${i}`,
+    })),
+  );
+  mount();
+  await choose("Move to group…");
+  await screen.findByText("You have the most groups allowed.");
+  expect(screen.queryByRole("textbox", { name: "New group" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Create and move" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Group 0" })).toBeTruthy();
+});
+
+test("group failures show the server message and do not start a move after a failed create", async () => {
+  groupResponses();
+  mount();
+  await choose("Move to group…");
+  const field = await screen.findByRole("textbox", { name: "New group" });
+  fetchMock.mockResolvedValueOnce(
+    Response.json({ error: { code: "invalid_state", message: "A group with this name exists." } }, { status: 409 }),
+  );
+  fireEvent.change(field, { target: { value: "Alpha" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create and move" }));
+  await screen.findByText("A group with this name exists.");
+  expect(groupWrites()).toEqual([["POST", "/api/v1/groups", '{"name":"Alpha"}']]);
+  expect(screen.getByRole("alertdialog")).toBeTruthy();
+});
+
+test("pending moves block duplicate submissions and cancellation, including after unmount", async () => {
+  groupResponses();
+  const { unmount } = mount();
+  await choose("Move to group…");
+  const target = await screen.findByRole("button", { name: "Alpha" });
+  const response = Promise.withResolvers<Response>();
+  fetchMock.mockImplementationOnce(() => response.promise);
+  fireEvent.click(target);
+  fireEvent.click(target);
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.getByRole("alertdialog")).toBeTruthy();
+  await waitFor(() => expect(groupWrites()).toHaveLength(1));
+  unmount();
+  await act(async () => response.resolve(new Response(null, { status: 204 })));
+  expect(groupWrites()).toHaveLength(1);
+});
+
+test.each(["<img src=x onerror=alert(1)>", "مشروع"])("move choices render group name as text: %s", async (name) => {
+  groupResponses([{ ...groupA, name }]);
+  mount();
+  await choose("Move to group…");
+  const choice = await screen.findByRole("button", { name });
+  expect(within(choice).getByText(name).getAttribute("dir")).toBe("auto");
+  expect(screen.getByRole("alertdialog").querySelector("img")).toBeNull();
+});
+
+test("move choices truncate long names, keep Current visible and wrap the dialog title", async () => {
+  const name = "x".repeat(80);
+  groupResponses([{ ...groupA, name }]);
+  mount({ lifecycle: { groupId: groupA.id, title: name }, phone: true });
+  await choose("Move to group…");
+  const choice = await screen.findByRole("button", { name: `${name} Current` });
+  const label = within(choice).getByText(name);
+  expect(label.classList.contains("min-w-0")).toBe(true);
+  expect(label.classList.contains("truncate")).toBe(true);
+  expect(label.getAttribute("title")).toBe(name);
+  expect(within(choice).getByText("Current").classList.contains("shrink-0")).toBe(true);
+  const heading = screen.getByRole("heading");
+  expect(heading.textContent).toBe(`Move “${name}” to a group`);
+  expect(heading.classList.contains("[overflow-wrap:anywhere]")).toBe(true);
 });

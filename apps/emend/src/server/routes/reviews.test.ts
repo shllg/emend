@@ -97,6 +97,7 @@ test("all three GETs parse their schemas and enforce reviewer scope and owner is
         approvedActiveHours: 12,
         approvedActiveLimit: 5,
         items: [],
+        groups: [],
         serverTime: new Date(f.deps.now()).toISOString(),
       });
   }
@@ -562,6 +563,7 @@ test("kind follows the newest revision's writeup: publish when empty, review oth
     approvedActiveHours: 12,
     approvedActiveLimit: 5,
     items: [],
+    groups: [],
     serverTime: new Date(f.deps.now()).toISOString(),
   });
 });

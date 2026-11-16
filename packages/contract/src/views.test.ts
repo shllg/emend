@@ -33,13 +33,13 @@ test("review views validate their states, limits, rendered blocks and doc varian
   expect(contract.InboxItem.safeParse(withoutPickedUp).success).toBe(false);
   expect(contract.InboxItem.parse(item).project).toBeNull();
   expect(contract.ReviewView.parse({ ...item, revisions: [] }).project).toBeNull();
-  // The cap of 200 applies to each of the three lists.
+  // The cap of 200 applies to each of the four inbox blocks.
   expect(
     contract.InboxList.safeParse({
       approvedActiveHours: 12,
       approvedActiveLimit: 5,
       serverTime: "2026-11-04T10:00:00.000Z",
-      items: Array.from({ length: 600 }, () => item),
+      items: Array.from({ length: 800 }, () => item),
     }).success,
   ).toBe(true);
   expect(
@@ -47,7 +47,7 @@ test("review views validate their states, limits, rendered blocks and doc varian
       approvedActiveHours: 12,
       approvedActiveLimit: 5,
       serverTime: "2026-11-04T10:00:00.000Z",
-      items: Array.from({ length: 601 }, () => item),
+      items: Array.from({ length: 801 }, () => item),
     }).success,
   ).toBe(false);
   expect(

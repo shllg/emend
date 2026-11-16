@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AgentNoteView } from "./agent-note.ts";
 import { DocHeadings, DocTitle, SourceContent } from "./doc.ts";
+import { InboxListGroup } from "./groups.ts";
 import { LIMITS } from "./limits.ts";
 import { PublishLinks, RepoUrl } from "./links.ts";
 import { WriteupArea } from "./manifest.ts";
@@ -48,6 +49,7 @@ export const InboxItem = z.object({
   updatedAt: z.iso.datetime(),
   movedTo: z.url({ protocol: /^https?$/ }).nullable(),
   list: ReviewList,
+  groupId: z.uuid().nullable().default(null),
   snoozed: z.boolean(),
   snoozedUntil: z.iso.datetime().nullable(),
   activeUntil: z.iso.datetime().nullable(),
@@ -57,9 +59,10 @@ export const InboxItem = z.object({
 });
 export type InboxItem = z.infer<typeof InboxItem>;
 export const InboxList = z.object({
+  groups: z.array(InboxListGroup).max(LIMITS.groups).default([]),
   approvedActiveHours: ApprovedActiveHours,
   approvedActiveLimit: ApprovedActiveLimit,
-  items: z.array(InboxItem).max(LIMITS.inboxItems * ReviewList.options.length),
+  items: z.array(InboxItem).max(LIMITS.inboxItems * (ReviewList.options.length + 1)),
   serverTime: z.iso.datetime(),
 });
 export type InboxList = z.infer<typeof InboxList>;

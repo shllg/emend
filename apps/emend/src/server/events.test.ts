@@ -367,3 +367,24 @@ test("all six SSE events carry ids and revisions, never comments or instructions
   expect(published.status).toBe(200);
   expect(new TextDecoder().decode((await reader.read()).value)).toContain("event: publish");
 });
+
+test("owner-wide groups events reach only their owner; review listeners receive only named moves", () => {
+  const events = new ReviewEvents(Date.now);
+  const id = randomUUID();
+  const all = vi.fn();
+  const own = vi.fn();
+  const another = vi.fn();
+  const foreign = vi.fn();
+  events.subscribe("owner", null, all);
+  events.subscribe("owner", id, own);
+  events.subscribe("owner", randomUUID(), another);
+  events.subscribe("foreign", null, foreign);
+  events.emit("owner", { type: "groups" });
+  expect(all).toHaveBeenCalledWith({ type: "groups" });
+  expect(own).not.toHaveBeenCalled();
+  events.emit("owner", { type: "groups", reviewId: id });
+  expect(all).toHaveBeenCalledTimes(2);
+  expect(own).toHaveBeenCalledExactlyOnceWith({ type: "groups", reviewId: id });
+  expect(another).not.toHaveBeenCalled();
+  expect(foreign).not.toHaveBeenCalled();
+});

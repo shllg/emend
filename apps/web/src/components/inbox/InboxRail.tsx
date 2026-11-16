@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { PanelLeftOpen } from "lucide-react";
-import { inboxQuery } from "../../api/queries.ts";
+import { inboxQuery, serverNow } from "../../api/queries.ts";
+import { inboxSections } from "../../lib/inbox-list.ts";
 import { OriginBadge } from "../status/OriginBadge.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Tooltip } from "../ui/Tooltip.tsx";
@@ -19,7 +20,8 @@ export function InboxRail({ onShow }: { onShow: () => void }) {
       <IconButton label="Show inbox" icon={PanelLeftOpen} onClick={onShow} />
       <div className="relative min-h-0 w-full flex-1 overflow-y-auto">
         <ul className="flex flex-col items-center gap-0.5">
-          {query.data?.items
+          {inboxSections(query.data?.items ?? [], serverNow(query.data), { groups: query.data?.groups })
+            .flatMap((section) => section.rows)
             .filter((review) => !review.movedTo)
             .map((review) => (
               <li key={review.id}>

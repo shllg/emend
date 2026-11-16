@@ -15,6 +15,7 @@ export const ReviewEventName = z.enum([
   "delete",
   "bin",
   "restore",
+  "groups",
 ]);
 export type ReviewEventName = z.infer<typeof ReviewEventName>;
 /** The SSE keepalive: sent as `event: ping` with `data: {}` every 25 s. It is not a ReviewEvent. */
@@ -37,5 +38,6 @@ export const ReviewEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("delete"), ...review }),
   z.object({ type: z.literal("bin"), ...review }),
   z.object({ type: z.literal("restore"), ...review }),
+  z.object({ type: z.literal("groups"), reviewId: z.uuid().optional() }),
 ]);
 export type ReviewEvent = z.infer<typeof ReviewEvent>;

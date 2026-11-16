@@ -246,7 +246,7 @@ test("approved review limits include both bounds and reject invalid values", () 
     expect(LimitSetting.safeParse({ ...setting, [field]: 201 }).success).toBe(false);
   }
   const list = { items: [], approvedActiveHours: 12, approvedActiveLimit: 5, serverTime: "2026-11-04T10:00:00.000Z" };
-  expect(InboxList.parse(list)).toEqual(list);
+  expect(InboxList.parse(list)).toEqual({ ...list, groups: [] });
   for (const value of [undefined, -1, 1.5, 201, "5"]) {
     expect(InboxList.safeParse({ ...list, approvedActiveLimit: value }).success).toBe(false);
   }

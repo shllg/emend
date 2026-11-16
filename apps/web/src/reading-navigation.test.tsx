@@ -86,6 +86,7 @@ const review: ReviewView = {
   updatedAt: "2026-01-01T00:00:00.000Z",
   movedTo: null,
   list: "active",
+  groupId: null,
   snoozed: false,
   snoozedUntil: null,
   activeUntil: null,
@@ -834,6 +835,7 @@ test.each(["row", "rail"])(
     await act(async () => {
       client.setQueryData(["review", id], currentReview);
       client.setQueryData<InboxData>(["inbox"], {
+        groups: [],
         approvedActiveHours: 12,
         approvedActiveLimit: 5,
         serverTime: new Date(Date.now()).toISOString(),

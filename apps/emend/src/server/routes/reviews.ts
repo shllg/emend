@@ -29,6 +29,7 @@ import {
 } from "drizzle-orm";
 import type { Hono } from "hono";
 import type { Queries } from "../../db/client.ts";
+import { listGroups } from "../../db/repo/groups.ts";
 import { snoozeInEffect } from "../../db/repo/snooze.ts";
 import {
   agentNotes,
@@ -40,6 +41,7 @@ import {
   instances,
   placements,
   repos,
+  reviewGroupMembers,
   reviews,
   revisions,
   sends,
@@ -94,12 +96,17 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
     q
       .select({
         review: reviews,
+        groupId: reviewGroupMembers.groupId,
         origin: { id: instances.id, name: instances.name },
         repo: repos.key,
         repoName: repos.name,
         newestRevision: latest.seq,
       })
       .from(reviews)
+      .leftJoin(
+        reviewGroupMembers,
+        and(eq(reviewGroupMembers.ownerId, ownerId), eq(reviewGroupMembers.reviewId, reviews.id)),
+      )
       .innerJoin(latest, eq(latest.reviewId, reviews.id))
       .innerJoin(instances, eq(instances.id, reviews.originInstanceId))
       .leftJoin(repos, and(eq(repos.ownerId, ownerId), eq(repos.id, reviews.repoId)))
@@ -128,14 +135,20 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
   const active =
     reviewId === undefined
       ? await select(
-          and(isOpen, not(asleep as SQL)),
+          and(isNull(reviewGroupMembers.groupId), isOpen, not(asleep as SQL)),
           [sql`max(${reviews.updatedAt}, coalesce(${reviews.snoozedUntil}, 0)) desc`, asc(reviews.id)],
           LIMITS.inboxItems,
         )
       : [];
   const places = Math.min(approvedActiveLimit, LIMITS.inboxItems - active.length);
   if (reviewId === undefined && approvedActiveHours > 0 && places > 0)
-    active.push(...(await select(recentlyApproved, [desc(reviews.approvedAt), asc(reviews.id)], places)));
+    active.push(
+      ...(await select(
+        and(isNull(reviewGroupMembers.groupId), recentlyApproved),
+        [desc(reviews.approvedAt), asc(reviews.id)],
+        places,
+      )),
+    );
   const activeApprovedIds = new Set(
     active.filter(({ review }) => review.state === "approved").map(({ review }) => review.id),
   );
@@ -144,12 +157,22 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
       ? [
           ...active,
           ...(await select(
-            and(isOpen, asleep),
+            and(isNull(reviewGroupMembers.groupId), isOpen, asleep),
             [asc(sql`${reviews.snoozedUntil} is null`), asc(reviews.snoozedUntil), asc(reviews.id)],
             LIMITS.inboxItems,
           )),
           ...(await select(
+            isNotNull(reviewGroupMembers.groupId),
+            [
+              sql`case when ${reviews.state} = 'open' and ${reviews.snoozedUntil} <= ${now}
+              then max(${reviews.updatedAt}, ${reviews.snoozedUntil}) else ${reviews.updatedAt} end desc`,
+              asc(reviews.id),
+            ],
+            LIMITS.inboxItems,
+          )),
+          ...(await select(
             and(
+              isNull(reviewGroupMembers.groupId),
               ne(reviews.state, "open"),
               activeApprovedIds.size ? notInArray(reviews.id, [...activeApprovedIds]) : undefined,
             ),
@@ -158,7 +181,8 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
           )),
         ]
       : await select(eq(reviews.id, reviewId), [asc(reviews.id)], 1);
-  if (!rows.length) return { items: [], serverTime, approvedActiveHours, approvedActiveLimit };
+  const groups = reviewId === undefined ? await listGroups(ownerId, q) : [];
+  if (!rows.length) return { items: [], groups, serverTime, approvedActiveHours, approvedActiveLimit };
   const ids = rows.map((row) => row.review.id);
   const drafts = await q
     .select({ id: comments.reviewId, count: count() })
@@ -269,17 +293,18 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
     )
     .groupBy(agentWaiters.reviewId);
   const waitingIds = new Set(directWaits.map((row) => row.reviewId));
-  const items = rows.map(({ review, origin, repo, repoName, newestRevision }) => {
+  const items = rows.map(({ review, origin, repo, repoName, newestRevision, groupId }) => {
     const snoozed = review.state === "open" && snoozeInEffect(review, now);
     const activeUntil =
       approvedActiveHours > 0 &&
       review.state === "approved" &&
       review.approvedAt !== null &&
-      (reviewId === undefined ? activeApprovedIds.has(review.id) : review.approvedAt > cutoff)
+      (reviewId === undefined && groupId === null ? activeApprovedIds.has(review.id) : review.approvedAt > cutoff)
         ? new Date(review.approvedAt + approvedWindow).toISOString()
         : null;
     return {
       id: review.id,
+      groupId,
       title: review.title,
       origin,
       repo,
@@ -316,6 +341,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
   };
   const activities = new Map(rows.map(({ review }) => [review.id, activity(review)]));
   return {
+    groups,
     serverTime,
     approvedActiveHours,
     approvedActiveLimit,
@@ -323,14 +349,14 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
       reviewId === undefined
         ? [
             ...items
-              .filter((item) => item.list === "active")
+              .filter((item) => item.groupId === null && item.list === "active")
               .sort(
                 (a, b) =>
                   group(a) - group(b) ||
                   (activities.get(b.id) ?? 0) - (activities.get(a.id) ?? 0) ||
                   (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
               ),
-            ...items.filter((item) => item.list !== "active"),
+            ...items.filter((item) => item.groupId !== null || item.list !== "active"),
           ]
         : items,
   };

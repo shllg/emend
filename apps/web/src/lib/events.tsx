@@ -16,6 +16,10 @@ export function ReviewEventsProvider({ children, enabled = true }: { children: R
       return;
     }
     const receive = (event: ReviewEvent) => {
+      if (event.type === "groups") {
+        refreshQueries(client, [["inbox"], event.reviewId ? ["review", event.reviewId] : ["review"]]);
+        return;
+      }
       const { reviewId } = event;
       if (event.type === "publish")
         setPublished((previous) =>

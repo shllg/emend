@@ -282,5 +282,19 @@ export const MIGRATIONS: readonly { tag: string; when: number; hash: string; sta
     "statements": [
       "CREATE INDEX `doc_assets_owner_asset_idx` ON `doc_assets` (`owner_id`,`asset_id`);"
     ]
+  },
+  {
+    "tag": "0021_abnormal_gideon",
+    "when": 1794786872845,
+    "hash": "117e5b6fa7229e277982b9309bb22d1c1c26ed1078d3c03583c825548651add0",
+    "statements": [
+      "CREATE TABLE `review_group_members` (\n\t`owner_id` text NOT NULL,\n\t`review_id` text NOT NULL,\n\t`group_id` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\tPRIMARY KEY(`owner_id`, `review_id`),\n\tFOREIGN KEY (`owner_id`) REFERENCES `owners`(`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`owner_id`,`review_id`) REFERENCES `reviews`(`owner_id`,`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`owner_id`,`group_id`) REFERENCES `review_groups`(`owner_id`,`id`) ON UPDATE no action ON DELETE no action\n);",
+      "CREATE INDEX `review_group_members_owner_idx` ON `review_group_members` (`owner_id`);",
+      "CREATE INDEX `review_group_members_owner_group_idx` ON `review_group_members` (`owner_id`,`group_id`);",
+      "CREATE TABLE `review_groups` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`owner_id` text NOT NULL,\n\t`name` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`updated_at` integer NOT NULL,\n\tFOREIGN KEY (`owner_id`) REFERENCES `owners`(`id`) ON UPDATE no action ON DELETE no action\n);",
+      "CREATE INDEX `review_groups_owner_idx` ON `review_groups` (`owner_id`);",
+      "CREATE UNIQUE INDEX `review_groups_owner_id_unique` ON `review_groups` (`owner_id`,`id`);",
+      "CREATE UNIQUE INDEX `review_groups_owner_name_unique` ON `review_groups` (`owner_id`,`name`);"
+    ]
   }
 ];

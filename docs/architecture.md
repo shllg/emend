@@ -87,6 +87,8 @@ that file is deleted, the next server start or direct-mode command creates a new
 reviews published before stay, but agents on this machine reach only the new instance's reviews.
 The next server start also revokes the old instance's admin and agent tokens and writes new ones.
 Tests always use temporary state directories.
+Inbox groups live in `review_groups` and `review_group_members`, scoped to the owner on this
+server; every reviewer device sees them, while agents and attach/import do not copy or expose them.
 
 ## Attached machines and the phone
 

@@ -34,7 +34,7 @@ export function refreshQueries(
   if (batch.timer !== undefined) return;
   const pending = batch;
   pending.timer = setTimeout(() => {
-    const keys = new Set(pending.keys),
+    const keys = [...pending.keys].map((key) => key.split(":")),
       before = pending.openedAt,
       settled = pending.settled;
     pending.keys.clear();
@@ -46,10 +46,11 @@ export function refreshQueries(
         {
           predicate: (query) =>
             !isSettledImmutableQuery(query) &&
-            (query.state.dataUpdatedAt < before || keys.has(query.queryKey.slice(0, 2).join(":"))),
+            (query.state.dataUpdatedAt < before ||
+              keys.some((key) => key.every((part, index) => query.queryKey[index] === part))),
         },
         { cancelRefetch: settled },
       );
-    } else for (const key of keys) void client.invalidateQueries({ queryKey: key.split(":") });
+    } else for (const queryKey of keys) void client.invalidateQueries({ queryKey });
   }, 200);
 }

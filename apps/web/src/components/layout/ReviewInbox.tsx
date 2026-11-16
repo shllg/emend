@@ -26,7 +26,9 @@ export function ReviewInbox({
   const mountedInbox = (layout === "desktop" && !collapsed) || (layout === "tablet" && open);
   const move = (delta: 1 | -1) => {
     if (!query.data) return false;
-    const sequence = inboxSequence(inboxSections(query.data.items, serverNow(query.data), { kind: readInboxKind() }));
+    const sequence = inboxSequence(
+      inboxSections(query.data.items, serverNow(query.data), { kind: readInboxKind(), groups: query.data.groups }),
+    );
     const item = adjacentInboxItem(sequence, reviewId, delta);
     if (!item) return false;
     void navigate({ to: "/r/$reviewId", params: { reviewId: item.id }, search: { rev: item.newestRevision } });
