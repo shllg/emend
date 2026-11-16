@@ -466,6 +466,28 @@ test("on a phone the More menu's file jump follows the Diff tab while the app st
   expect(menu.getByRole("menuitem", { name: "a.txt" })).toBeTruthy();
   expect(menu.getByRole("menuitemradio", { name: "Hide" })).toBeTruthy();
 });
+test("on a phone the More menu switches the File order", async () => {
+  width = 390;
+  layoutStore.update({ fileOrder: "topics" });
+  mount(`/r/${ids[0]}?tab=diff`);
+  await screen.findByRole("button", { name: "Approve" });
+  const pane = await screen.findByTestId("diff-pane");
+  await within(pane).findByRole("button", { name: "Mark a.txt as viewed" });
+  fireEvent.keyDown(screen.getByRole("button", { name: "More" }), { key: "ArrowDown" });
+  const menu = () => within(screen.getByRole("menu"));
+  await screen.findByRole("menu");
+  expect(menu().getByText("0 topics · 2 files")).toBeTruthy();
+  expect(menu().getByText("Other changes")).toBeTruthy();
+  fireEvent.click(menu().getByRole("menuitemradio", { name: "A to Z" }));
+  await waitFor(() => expect(layoutStore.getSnapshot().fileOrder).toBe("path"));
+  await waitFor(() => expect(menu().getByText("2 files")).toBeTruthy());
+  expect(menu().queryByText("0 topics · 2 files")).toBeNull();
+  expect(menu().queryByText("Other changes")).toBeNull();
+  fireEvent.click(menu().getByRole("menuitemradio", { name: "Topics" }));
+  await waitFor(() => expect(layoutStore.getSnapshot().fileOrder).toBe("topics"));
+  await waitFor(() => expect(menu().getByText("0 topics · 2 files")).toBeTruthy());
+  expect(menu().getByText("Other changes")).toBeTruthy();
+});
 test("on a phone the Writeup tab's More menu has no file jump or Agent notes", async () => {
   width = 390;
   mount(`/r/${ids[0]}?tab=writeup`);
