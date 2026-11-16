@@ -181,7 +181,10 @@ In a review writeup:
   `![Before](media/before.png) ![After](media/after.png)`.
   On the next line of that paragraph, state the effect in one line.
   emend shows Before, After and Side by side controls, with the effect line underneath.
-- Only listed paths render. Any other image reference in the writeup is dropped.
+- Every image path in the writeup must be listed under `media`.
+- Publish refuses an image path that is not listed, such as a typo in the file name.
+- `emend publish` names the path, so you can fix the link or list the file.
+- A path with `..`, a leading `/` or a backslash never shows. Use the listed path exactly.
 - Remote image URLs do not show. List the file under `media` instead.
 
 In a Markdown document, put the image beside it and reference it with a relative path,

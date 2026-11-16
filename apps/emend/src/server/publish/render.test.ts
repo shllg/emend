@@ -41,6 +41,53 @@ test("writeup work reports doc-base use without inspecting serialized HTML", asy
   });
   expect(rendered).toMatchObject({ kind: "writeup", pathDependent: true });
 });
+
+test("writeup work bounds unlisted paths and retains their full count", async () => {
+  const paths = Array.from({ length: 25 }, (_, i) => `media/${i}.png`);
+  const result = await executeWork({
+    kind: "writeup",
+    source: { overview: paths.map((path) => `![Before](${path})`).join(" "), tldr: "", decisions: null, topics: {} },
+    topics: [],
+    media: [],
+  });
+  expect(result).toMatchObject({ kind: "writeup", unlistedMedia: paths.slice(0, 20), unlistedMediaCount: 25 });
+});
+
+test("revision rendering reports only writeup effects, without refusing or collecting doc effects", async () => {
+  const request = input(["doc.md"]);
+  request.writeup.overview = "![Before](media/writeup.png)";
+  const result = await renderRevision(
+    request,
+    executeWork,
+    async () => new TextEncoder().encode("![Doc](media/doc.png)").buffer,
+    async () => new ArrayBuffer(0),
+    async () => "stored",
+  );
+  expect(result.unlistedMedia).toEqual(["media/writeup.png"]);
+  expect(result.unrendered).toEqual([]);
+  expect(result.docBlobs.has("doc.md")).toBe(true);
+});
+
+test("publish refuses unlisted media before storing blobs or rendering docs", async () => {
+  const request = input(["doc.md"]);
+  request.writeup.overview = "![Before](media/missing.png)";
+  const execute = vi.fn(executeWork);
+  const put = vi.fn(async () => "stored");
+  await expect(
+    renderRevision(
+      request,
+      execute,
+      async () => new TextEncoder().encode("# Synthetic doc").buffer,
+      async () => new ArrayBuffer(0),
+      put,
+      undefined,
+      undefined,
+      { refuseUnlistedMedia: true },
+    ),
+  ).rejects.toMatchObject({ code: "invalid_request", message: "A writeup image path is not listed under media." });
+  expect(put).not.toHaveBeenCalled();
+  expect(execute.mock.calls.map(([work]) => work.kind)).toEqual(["doc-metadata", "writeup"]);
+});
 test("one shared Markdown render produces exactly each path's normal block identities", async () => {
   const source =
     "# Title\n\nrepeat\n\nrepeat\n\nFoot[^1].\n\n[^1]: note\n\n<script>bad()</script>\n\n[bad](javascript:bad)";

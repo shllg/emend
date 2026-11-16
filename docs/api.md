@@ -175,8 +175,11 @@ row's stored media type, `X-Content-Type-Options: nosniff`, `Cross-Origin-Resour
 `Content-Security-Policy: sandbox; default-src 'none'`. That CSP replaces the app CSP on this
 route only. `HEAD` applies the same authorization and headers, with no body.
 
-An image keeps a source only when it names a declared media path of the same revision. Every other
-image source, relative or absolute, is dropped, in writeups, Markdown docs and comments alike. A declared
+An image keeps a source only when it names a declared media path of the same revision.
+Publish refuses a writeup image whose path normalizes as below but is not listed; see
+[Publish](#manifest-and-topics). A writeup image whose path the renderer refuses, and Markdown-doc
+and comment images with any other source, are still dropped silently.
+Remote writeup images are dropped too. A declared
 path never contains a colon. The renderer drops any query or fragment, strips a leading `./`, percent-decodes, and refuses a
 result with a `..` segment, a leading `/`, a scheme, a backslash, a control character or an
 invalid or encoded-slash escape. A match becomes
@@ -1200,6 +1203,11 @@ Publish resolves an explicit id only for the authenticated owner and origin inst
 atomically finds or creates by owner, token instance and review key. Missing referenced blobs
 return 400 `blob_missing`. Each successful publish adds a revision, reopens the review, and
 reports placement counts for that revision. Media types and role size limits are server enforced.
+Publish refuses a writeup image path that normalizes (see Writeup and Markdown doc media) but is not listed under
+`media` (a parentless asset in the request), with 400 `invalid_request` and "A writeup image path
+is not listed under media."
+No review, revision, file or writeup row is stored. Remote images are still dropped.
+Import continues to accept previously published writeups with unlisted image paths.
 Rendering and placement run in a worker: failed or timed-out Markdown docs have no rendered
 blocks; failed writeups return 400 `invalid_request` with "The writeup could not be rendered."
 A writeup exceeding 10 seconds returns 413 `too_large` with "The writeup rendering timed out."

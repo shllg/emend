@@ -11,9 +11,10 @@ import {
   type PublishFile,
   type PublishManifest,
   PublishRequest,
+  writeupMarkdown,
 } from "@emend/contract";
 import { decodeText, UnchangedFilesError, withOtherChanges } from "@emend/core";
-import { workerExecutor } from "../../server/publish/executor.ts";
+import { WorkTimeout, workerExecutor } from "../../server/publish/executor.ts";
 import type { Executor } from "../../server/publish/work.ts";
 import { DocRootError, readDocRoots, rootRules, validateDocRoot } from "../config.ts";
 import { escapeReference } from "../escape.ts";
@@ -59,6 +60,7 @@ export type PublishOptions = {
   docArguments?: ReadonlyMap<string, string>;
 };
 const sha256 = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
+const imageSyntax = /!\[|<im(?:g|age)/i;
 export function shortenRepoName(name: string): string {
   let end = LIMITS.titleChars;
   const before = name.charCodeAt(end - 1);
@@ -133,6 +135,36 @@ async function resolveWithWorker(
   context?: Awaited<ReturnType<typeof publishContext>>,
   configRoots?: readonly string[],
 ) {
+  // Every image needs one of these markers; the worker still decides what actually renders.
+  if (
+    options.manifest !== undefined &&
+    writeupMarkdown(manifest.writeup).some((text) => imageSyntax.test(text ?? ""))
+  ) {
+    const result = await execute({
+      kind: "writeup",
+      source: manifest.writeup,
+      topics: manifest.topics,
+      media: (manifest.media ?? []).map(({ path }) => [path, "0".repeat(64)]),
+    }).catch((error: unknown) => {
+      throw new CliError(
+        error instanceof WorkTimeout ? "the writeup rendering timed out" : "the writeup could not be rendered",
+      );
+    });
+    if (result.kind !== "writeup") throw new CliError("the writeup could not be rendered");
+    const paths = result.unlistedMedia ?? [];
+    if (paths.length) {
+      const shown = paths.slice(0, 5);
+      const count = result.unlistedMediaCount ?? paths.length;
+      const remaining = count - shown.length;
+      const labels = shown.map((path) => {
+        const points = Array.from(path);
+        return escapeReference(points.length > 200 ? `${points.slice(0, 200).join("")}…` : path);
+      });
+      throw new CliError(
+        `writeup image${count > 1 ? "s" : ""} not listed under media: ${labels.join(", ")}${remaining > 0 ? ` and ${remaining} more` : ""}`,
+      );
+    }
+  }
   const { git, worktree, root, gitDirs } = context ?? (await publishContext(cwd, stateDir));
   const code = manifest.base !== undefined;
   if (code && !worktree) throw new CliError("not a git repository");
@@ -363,7 +395,7 @@ async function resolveWithWorker(
     const format = html ? "html" : "markdown";
     let imageReferences: string[] = [];
     // Only image syntax can produce img elements; a pre-check miss only leaves an image out.
-    if (!html && /!\[|<im(?:g|age)/i.test(bytes.toString())) {
+    if (!html && imageSyntax.test(bytes.toString())) {
       const label = escapeReference(options.docArguments?.get(file.path) ?? file.path);
       try {
         const result = await execute({ kind: "doc-images", bytes: Uint8Array.from(bytes).buffer });

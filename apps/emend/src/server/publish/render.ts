@@ -23,6 +23,7 @@ export async function renderRevision(
   put: (bytes: Buffer) => Promise<string>,
   signal?: AbortSignal,
   onRendered?: (bytes: number) => void,
+  options: { refuseUnlistedMedia?: boolean } = {},
 ) {
   const assets = new Map(input.files.filter((file) => file.role === "asset").map((file) => [file.path, file.newBlob]));
   const mediaByDoc = new Map<string, [string, string][]>();
@@ -141,6 +142,7 @@ export async function renderRevision(
   const mediaHeads = [...writeupHeads];
   writeupHeads.clear();
   let rendered: RenderedBytes;
+  let unlistedMedia: string[];
   try {
     const result = await execute({
       kind: "writeup",
@@ -154,11 +156,13 @@ export async function renderRevision(
     });
     if (result.kind !== "writeup") throw new Error("wrong result");
     rendered = result;
+    unlistedMedia = result.unlistedMedia ?? [];
   } catch (error) {
     checkPublishSignal(signal);
     if (error instanceof WorkTimeout) throw new ApiError("too_large", "writeup_timeout");
     throw new ApiError("invalid_request", "writeup_failed");
   }
+  if (options.refuseUnlistedMedia && unlistedMedia.length) throw new ApiError("invalid_request", "media_unlisted");
   const ids = [rendered.ids];
   const renderedBytes = Buffer.from(rendered.bytes);
   onRendered?.(renderedBytes.length);
@@ -335,5 +339,16 @@ export async function renderRevision(
     }
     ids.push(result.ids);
   }
-  return { ids, renderedBlob, sourceBlob, docBlobs, count, unrendered, metadata, sourceMetadata, sourceBlobs };
+  return {
+    ids,
+    renderedBlob,
+    sourceBlob,
+    docBlobs,
+    count,
+    unrendered,
+    unlistedMedia,
+    metadata,
+    sourceMetadata,
+    sourceBlobs,
+  };
 }

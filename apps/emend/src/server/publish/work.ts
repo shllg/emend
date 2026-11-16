@@ -28,6 +28,7 @@ import {
   markdownTitle,
   type PlaceContext,
   placeThread,
+  type RenderEffects,
   type RenderedWriteup,
   renderCommentHtml,
   renderDoc,
@@ -115,7 +116,8 @@ export type WorkResult =
   | { kind: "line-count"; count: number }
   | { kind: "writeup-source"; source: WriteupInput; links?: PublishLinks; repoUrl?: string }
   | ({ kind: "placement-doc" } & EncodedPlacementDoc)
-  | ({ kind: "writeup" | "doc" | "source" } & RenderedBytes)
+  | ({ kind: "writeup"; unlistedMedia?: string[]; unlistedMediaCount?: number } & RenderedBytes)
+  | ({ kind: "doc" | "source" } & RenderedBytes)
   | { kind: "changed"; bytes: ArrayBuffer }
   | { kind: "comment-md"; html: (string | null)[] }
   | { kind: "place"; placements: { id: string; placement: Placement }[] };
@@ -221,7 +223,7 @@ export const executeWork: Executor = async (work) => {
     return { kind: "placement-doc", bytes, textBytes, encodedBytes: bytes.byteLength };
   }
   if (work.kind === "writeup") {
-    const effects: { docBaseUsed?: boolean } = {};
+    const effects: RenderEffects = {};
     const mediaSizes = readImageSizes(work.mediaHeads);
     const rendered = await renderWriteup(work.source, work.topics, {
       links: work.links,
@@ -231,9 +233,13 @@ export const executeWork: Executor = async (work) => {
       docs: work.docs,
       effects,
     });
+    const unlistedMedia = [...(effects.unlistedMedia ?? [])];
     return {
       kind: "writeup",
       ...serializeRendered(rendered, effects.docBaseUsed),
+      // Bound cloned paths while retaining the exact count for the CLI diagnostic.
+      unlistedMedia: unlistedMedia.slice(0, 20),
+      unlistedMediaCount: unlistedMedia.length,
     };
   }
   if (work.kind === "doc") {

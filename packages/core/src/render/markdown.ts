@@ -29,6 +29,13 @@ import {
 import { limitTables, prepareTables } from "./tables.ts";
 import { markTerms, type TermMatcher } from "./terms.ts";
 
+export type RenderEffects = {
+  docBaseUsed?: boolean;
+  docPathUsed?: boolean;
+  /** Normalized local image paths without declared media, in first-seen order. */
+  unlistedMedia?: Set<string>;
+};
+
 function isolateDiagrams() {
   return (tree: HtmlRoot) => {
     visitElements(tree, (element) => {
@@ -136,7 +143,7 @@ export async function renderMarkdownWithBudget(
   media?: ReadonlyMap<string, string>,
   docs?: DocLinks,
   docBase = "",
-  effects?: { docBaseUsed?: boolean; docPathUsed?: boolean },
+  effects?: RenderEffects,
   mediaSizes?: ReadonlyMap<string, MediaSize>,
   terms?: TermMatcher,
   options?: { exampleRows?: boolean },
@@ -168,6 +175,16 @@ export async function renderMarkdownWithBudget(
   });
   if (effects && data.docBaseUsed) effects.docBaseUsed = true;
   if (effects && data.docPathUsed) effects.docPathUsed = true;
+  if (effects)
+    visitElements(tree, (element) => {
+      if (element.tagName !== "img") return;
+      const path = renderData(element).emendUnlistedMediaPath;
+      // Shiki and diagram isolation can remove images marked by the link hardener.
+      if (path !== undefined) {
+        effects.unlistedMedia ??= new Set();
+        effects.unlistedMedia.add(path);
+      }
+    });
   return blocksFromTree(tree, section, (node) =>
     processor.stringify(node.type === "root" ? node : { type: "root", children: [node] }),
   );
@@ -195,7 +212,7 @@ export async function renderDoc(
   path: string,
   repoUrl?: string,
   docs?: DocLinks,
-  effects?: { docBaseUsed?: boolean; docPathUsed?: boolean },
+  effects?: RenderEffects,
   media?: ReadonlyMap<string, string>,
   mediaSizes?: ReadonlyMap<string, MediaSize>,
 ): Promise<Block[]> {

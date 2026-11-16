@@ -316,6 +316,8 @@ async function computePublish(
       ownerHead(deps.blobs, ownerId, deps.signal),
       (bytes) => deps.blobs.put(ownerId, bytes, "application/json"),
       deps.signal,
+      undefined,
+      { refuseUnlistedMedia: true },
     );
     counted ??= await countDiffFiles(ownerId, input.files, read, execute, deps.signal);
     const { ids, renderedBlob, sourceBlob, docBlobs, unrendered, metadata, sourceBlobs, sourceMetadata } = prepared;

@@ -360,7 +360,11 @@ export function hardenLinks() {
         // another review's media. An image keeps a source only when it names a declared media path.
         const path = media ? mediaKey(src, media) : null;
         if (path !== null) renderData(element).emendMediaPath = path;
-        else delete element.properties.src;
+        else {
+          const local = localMediaPath(src);
+          if (local !== null) renderData(element).emendUnlistedMediaPath = local;
+          delete element.properties.src;
+        }
       } else if (!isAbsoluteUrl(src, false)) delete element.properties.src;
     });
     // Generated classes are set after the namespaced author classes, on nodes made here.

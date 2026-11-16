@@ -41,6 +41,7 @@ const DETAILS = {
   publish_aborted: { code: "invalid_request", message: "The publish was cancelled." },
   writeup_blocks: { code: "too_large", message: "The writeup has too many blocks." },
   writeup_failed: { code: "invalid_request", message: "The writeup could not be rendered." },
+  media_unlisted: { code: "invalid_request", message: "A writeup image path is not listed under media." },
   writeup_timeout: { code: "too_large", message: "The writeup rendering timed out." },
   placement_timeout: { code: "too_large", message: "The placement timed out." },
   placement_failed: { code: "invalid_request", message: "The comments could not be placed." },

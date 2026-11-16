@@ -7,6 +7,9 @@ import { promisify } from "node:util";
 import { LIMITS, PublishRequest } from "@emend/contract";
 import { expect, onTestFinished, test, vi } from "vitest";
 import { run } from "../../main.ts";
+import * as executor from "../../server/publish/executor.ts";
+import * as direct from "../direct/index.ts";
+import * as http from "../http.ts";
 import { resolvePublish } from "../publish/resolve.ts";
 import { readBlob } from "../publish/upload.ts";
 import { commandFixture } from "../test-support.ts";
@@ -78,6 +81,143 @@ async function refused(f: Awaited<ReturnType<typeof fixture>>, extra: Record<str
   expect(f.uploaded).toEqual([]);
   expect(f.published).toEqual([]);
 }
+
+test("a manifest without image markers publishes without creating a worker or rendering a writeup", async () => {
+  const f = await fixture();
+  const execute = vi.fn(async () => {
+    throw new Error("unexpected worker job");
+  });
+  const close = vi.fn(async () => {});
+  const worker = vi.spyOn(executor, "workerExecutor").mockReturnValue(Object.assign(execute, { close }));
+  expect(
+    await f.publish({
+      writeup: { overview: "Plain overview.", tldr: "Plain summary.", decisions: null, topics: {} },
+    }),
+  ).toBe(0);
+  expect(f.published).toHaveLength(1);
+  expect(worker).not.toHaveBeenCalled();
+  expect(execute).not.toHaveBeenCalled();
+  expect(close).not.toHaveBeenCalled();
+});
+
+test.each([
+  ["an HTML image tag", { overview: 'Screenshot: <image src="media/missing.png" alt="Before">' }],
+  [
+    "uppercase HTML in a topic body",
+    { topics: { screenshots: { why: "Synthetic reason.", body: '<IMG src="media/missing.png">' } } },
+  ],
+  ["an image in a glossary definition", { glossary: [{ term: "Screenshot", definition: "![x](media/missing.png)" }] }],
+])("preflight catches %s", async (_name, content) => {
+  const f = await fixture();
+  const request = vi.spyOn(http, "apiRequest");
+  const worker = vi.spyOn(executor, "workerExecutor");
+  await refused(
+    f,
+    {
+      topics: [{ slug: "screenshots", title: "Screenshots", summary: "Synthetic topic.", importance: 10 }],
+      writeup: { overview: "Plain overview.", tldr: "", decisions: null, topics: {}, ...content },
+    },
+    "emend: writeup image not listed under media: media/missing.png\n",
+  );
+  expect(worker).toHaveBeenCalledOnce();
+  expect(request).not.toHaveBeenCalled();
+});
+
+test.each(["http", "direct"])("unlisted media refuses before any request or upload in %s mode", async (mode) => {
+  const f = await fixture();
+  if (mode === "direct") await rm(join(f.dir, "server.json"));
+  await writeFile(join(f.root, "listed.png"), png);
+  const request = vi.spyOn(http, "apiRequest");
+  const publishDirect = vi.spyOn(direct, "publishDirect");
+  const worker = vi.spyOn(executor, "workerExecutor");
+  await refused(
+    f,
+    {
+      media: [{ path: "media/listed.png", source: "listed.png" }],
+      writeup: { overview: "![Before](media/missing.png)", tldr: "", decisions: null, topics: {} },
+    },
+    "emend: writeup image not listed under media: media/missing.png\n",
+  );
+  expect(worker).toHaveBeenCalledOnce();
+  expect(request).not.toHaveBeenCalled();
+  expect(publishDirect).not.toHaveBeenCalled();
+  expect(f.fetcher).not.toHaveBeenCalled();
+});
+
+test.each([7, 25])("reports five paths and the exact remainder for %i unlisted paths", async (count) => {
+  const f = await fixture();
+  const request = vi.spyOn(http, "apiRequest");
+  const paths = Array.from({ length: count }, (_, i) => `media/${i}.png`);
+  await refused(
+    f,
+    {
+      writeup: { overview: paths.map((path) => `![Before](${path})`).join(" "), tldr: "", decisions: null, topics: {} },
+    },
+    `emend: writeup images not listed under media: media/0.png, media/1.png, media/2.png, media/3.png, media/4.png and ${count - 5} more\n`,
+  );
+  expect(request).not.toHaveBeenCalled();
+});
+
+test("escapes a terminal control in an unlisted local path", async () => {
+  const f = await fixture();
+  const request = vi.spyOn(http, "apiRequest");
+  // ASCII ESC is rejected by localMediaPath; C1 CSI is local and must be escaped for the terminal.
+  await refused(
+    f,
+    {
+      writeup: { overview: '<img src="media/\u009b31m.png" alt="Before">', tldr: "", decisions: null, topics: {} },
+    },
+    "emend: writeup image not listed under media: media/\\u{9b}31m.png\n",
+  );
+  expect(request).not.toHaveBeenCalled();
+});
+
+test("uses the plural diagnostic for two images", async () => {
+  const f = await fixture();
+  const request = vi.spyOn(http, "apiRequest");
+  await refused(
+    f,
+    {
+      writeup: { overview: "![a](media/a.png) ![b](media/b.png)", tldr: "", decisions: null, topics: {} },
+    },
+    "emend: writeup images not listed under media: media/a.png, media/b.png\n",
+  );
+  expect(request).not.toHaveBeenCalled();
+});
+
+test.each(["a", "🪴", "\u009b"])("caps a 1000-code-point path before escaping (%j)", async (point) => {
+  const f = await fixture();
+  const request = vi.spyOn(http, "apiRequest");
+  const path = point.repeat(1000);
+  const escaped = point === "\u009b" ? "\\u{9b}" : point;
+  await refused(
+    f,
+    {
+      writeup: { overview: `<img src="${path}" alt="Before">`, tldr: "", decisions: null, topics: {} },
+    },
+    `emend: writeup image not listed under media: ${escaped.repeat(200)}…\n`,
+  );
+  expect(request).not.toHaveBeenCalled();
+});
+
+test.each([
+  ["timeout", new executor.WorkTimeout(), "the writeup rendering timed out"],
+  ["failure", new Error("synthetic worker failure"), "the writeup could not be rendered"],
+] as const)("a preflight worker %s is explained and closed before any request", async (_kind, error, message) => {
+  const f = await fixture();
+  const request = vi.spyOn(http, "apiRequest");
+  const close = vi.fn(async () => {});
+  const execute = vi.fn(async () => {
+    throw error;
+  });
+  vi.spyOn(executor, "workerExecutor").mockReturnValue(Object.assign(execute, { close }));
+  expect(await f.publish({})).toBe(1);
+  expect(f.stdout).toEqual([]);
+  expect(f.stderr).toEqual([`emend: ${message}\n`]);
+  expect(execute).toHaveBeenCalledWith(expect.objectContaining({ kind: "writeup", media: [] }));
+  expect(close).toHaveBeenCalledOnce();
+  expect(request).not.toHaveBeenCalled();
+});
 
 test("publishes media as parentless assets read from the worktree and from a source", async () => {
   const f = await fixture();
@@ -196,6 +336,7 @@ test("media that collides with an HTML doc's asset is refused", async () => {
     {
       files: [{ path: "docs/plan.html", role: "doc" }],
       media: [{ path: "docs/a.png" }],
+      writeup: { overview: "![Before](docs/a.png)", tldr: "", decisions: null, topics: {} },
     },
     "emend: media path is already a doc asset: docs/a.png\n",
   );

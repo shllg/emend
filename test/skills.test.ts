@@ -404,7 +404,7 @@ test("moved writing rules appear once, in the shared writing reference", () => {
     "shows a concrete before/after case",
     "Prefer existing project meanings and omit general programming terms",
     "The alt text becomes the caption",
-    "Only listed paths render",
+    "Every image path in the writeup must be listed under",
     "In a Markdown document, put the image beside it",
     "PNG, JPEG, GIF, WebP and AVIF show",
     "Keep the page self-contained",

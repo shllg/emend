@@ -1,5 +1,7 @@
 import { PublishResponse, RevisionView } from "@emend/contract";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { blobs, files, reviews, revisions, writeups } from "../../db/schema.ts";
 import { mailboxFixture } from "../mailbox/test-support.ts";
 
 let f: Awaited<ReturnType<typeof mailboxFixture>>;
@@ -13,6 +15,55 @@ afterEach(async () => {
 // Synthetic PNG headers that differ in one trailing byte.
 const png = (tail: string) =>
   Buffer.from(`89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489${tail}`, "hex");
+
+test.each([false, true])(
+  "unlisted writeup media refuses without storing rows (existing review: %s)",
+  async (existing) => {
+    const newBlob = await f.deps.blobs.put(f.ownerId, png("00"), "image/png");
+    const docBlob = await f.deps.blobs.put(f.ownerId, Buffer.from("# Synthetic doc"), "text/markdown");
+    const snapshot = () =>
+      Promise.all(
+        [reviews, revisions, files, writeups, blobs].map((table) =>
+          f.db.read((q) => q.select().from(table).where(eq(table.ownerId, f.ownerId))),
+        ),
+      );
+    const before = await snapshot();
+    const response = await f.request(
+      "/publish",
+      "POST",
+      {
+        ...(existing ? { reviewId: f.reviewId } : {}),
+        reviewKey: "b".repeat(64),
+        repo: null,
+        branch: null,
+        title: "Synthetic refused review",
+        base: null,
+        head: null,
+        topics: [],
+        writeup: { overview: "![Before](media/missing.png)", tldr: "", decisions: null, topics: {} },
+        files: [
+          { path: "media/listed.png", role: "asset", oldPath: null, oldBlob: null, newBlob, flag: null },
+          { path: "doc.md", role: "doc", oldPath: null, oldBlob: null, newBlob: docBlob, flag: null },
+        ],
+      },
+      "agent",
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: { code: "invalid_request", message: "A writeup image path is not listed under media." },
+    });
+    expect(await snapshot()).toEqual(before);
+  },
+);
+
+test("listed writeup media publishes and serves its bytes to the reviewer", async () => {
+  const bytes = png("00");
+  const result = await publish(bytes);
+  const response = await f.request(`/media/${result.newBlob}`, "GET");
+  expect(response.status).toBe(200);
+  expect(response.headers.get("Content-Type")).toBe("image/png");
+  expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
+});
 
 async function publish(bytes: Buffer, reviewId?: string) {
   const newBlob = await f.deps.blobs.put(f.ownerId, bytes, "image/png");

@@ -33,6 +33,7 @@ type RenderData = NonNullable<HtmlElement["data"]> & {
   emendFootnoteMarker?: boolean;
   emendMedia?: string;
   emendMediaPath?: string;
+  emendUnlistedMediaPath?: string;
 };
 
 export function renderData(element: HtmlElement): RenderData {

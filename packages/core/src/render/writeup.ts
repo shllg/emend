@@ -9,7 +9,7 @@ import {
 } from "@emend/contract";
 import type { DocLinks } from "../links.ts";
 import type { Block } from "./blocks.ts";
-import { renderMarkdownWithBudget } from "./markdown.ts";
+import { type RenderEffects, renderMarkdownWithBudget } from "./markdown.ts";
 import { normalizeText } from "./normalize.ts";
 import type { MediaSize } from "./sanitize.ts";
 import { termMatcher } from "./terms.ts";
@@ -52,7 +52,7 @@ export async function renderWriteup(
     repoUrl?: string;
     media?: ReadonlyMap<string, string>;
     docs?: DocLinks;
-    effects?: { docBaseUsed?: boolean };
+    effects?: RenderEffects;
     /** Displayed pixel size per media SHA-256, read by the server from the stored bytes. */
     mediaSizes?: ReadonlyMap<string, MediaSize>;
   } = {},
