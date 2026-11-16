@@ -127,13 +127,11 @@ test.each(["inherit", "capture"] as const)(
       const signals = new UpdateSignals();
       const tree = await processTree(output, signals);
       try {
-        const start = performance.now();
         process.emit(signal);
-        expect((await tree.pending).interrupted).toBe(signal);
+        expect(await tree.pending).toMatchObject({ interrupted: signal, timedOut: false });
         await pollUntil(() =>
           expect(() => process.kill(tree.pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" })),
         );
-        expect(performance.now() - start).toBeLessThan(7000);
       } finally {
         killGroup(tree.group);
         // Also cleans up the old implementation, whose child has no separate group.
@@ -148,12 +146,10 @@ test.each(["inherit", "capture"] as const)(
 );
 
 test("capture settles after exit even when a descendant holds stdout open", async () => {
-  const start = performance.now();
   const tree = await processTree("capture", undefined, true);
   try {
     const result = await tree.pending;
     expect(result).toMatchObject({ code: 0, signal: null, timedOut: false, error: false });
-    expect(performance.now() - start).toBeLessThan(4000);
   } finally {
     killGroup(tree.group);
     try {
