@@ -253,7 +253,9 @@ test.each([0, 127, 1, 113])(
   async (status) => {
     const root = await mkdtemp(join(process.env.EMEND_HOME as string, "launchctl-"));
     const launchctl = join(root, "launchctl"),
-      count = join(root, "count");
+      count = join(root, "count"),
+      sleep = join(root, "sleep"),
+      sleeps = join(root, "sleeps");
     await writeFile(
       launchctl,
       `#!/bin/sh
@@ -266,17 +268,27 @@ exit ${status}
 `,
       { mode: 0o755 },
     );
+    await writeFile(sleep, `#!/bin/sh\nprintf '%s\\n' "$1" >> ${quoteShellArgument(sleeps)}\nexit 0\n`, {
+      mode: 0o755,
+    });
     const block = goBack({ ...defaults, platform: "darwin", hasService: true, launchctl });
     const stop = parts(block)[0]?.[1]?.trim().replace(/ &&$/, "");
     expect(stop).toBeDefined();
+    expect(stop?.split(" /bin/sleep 0.2;")).toHaveLength(2);
+    const command = stop?.replace(" /bin/sleep 0.2;", ` ${quoteShellArgument(sleep)} 0.2;`);
     const result = await runChild(
       "/bin/sh",
-      ["-c", `n=untouched; ${stop}; result=$?; [ "$n" = untouched ] || exit 99; exit "$result"`],
+      ["-c", `n=untouched; ${command}; result=$?; [ "$n" = untouched ] || exit 99; exit "$result"`],
       { cwd: root, env: { PATH: root, NODE_OPTIONS: "--require /hostile" }, timeoutMs: 14000, output: "capture" },
     );
     expect(result.timedOut).toBe(false);
     expect(result.code).toBe(status === 113 ? 0 : 1);
     expect(Number(await readFile(count, "utf8"))).toBe(status === 0 ? 52 : status === 113 ? 3 : 2);
+    const pauses = await readFile(sleeps, "utf8").catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return "";
+      throw error;
+    });
+    expect(pauses).toBe("0.2\n".repeat(status === 0 ? 50 : status === 113 ? 1 : 0));
   },
   15000,
 );
