@@ -1,6 +1,6 @@
 import mermaid from "mermaid";
 import { afterEach, expect, test } from "vitest";
-import { encodeCodes, frameConfig } from "../mermaid-frame.ts";
+import { encodeCodes, exceedsLimits, frameConfig } from "../mermaid-frame.ts";
 
 afterEach(() => mermaid.mermaidAPI.globalReset());
 
@@ -14,6 +14,34 @@ const stateSource = `stateDiagram-v2
   s1 --> s2
   s2 --> s3`;
 const flowchartSource = 'flowchart LR\n  a["quote #quot;a#quot;"] --> b["colon a#58; b"]';
+
+function diagramSource(type: string, nodes: number, edges: number): string {
+  const lines = [type, ...Array.from({ length: nodes }, (_, index) => `s${index}`)];
+  for (let index = 0; index < edges; index++) {
+    const from = index % nodes;
+    const round = Math.floor(index / nodes);
+    const to = round === 0 ? (from + 1) % nodes : (from * 7 + round * 3) % nodes;
+    lines.push(`s${from} --> s${to}`);
+  }
+  return lines.join("\n");
+}
+
+test.each([
+  { type: "stateDiagram-v2", nodes: 60, edges: 151, expected: true },
+  { type: "stateDiagram-v2", nodes: 25, edges: 50, expected: false },
+  { type: "flowchart LR", nodes: 60, edges: 151, expected: true },
+  { type: "flowchart LR", nodes: 60, edges: 150, expected: false },
+  { type: "stateDiagram-v2", nodes: 301, edges: 0, expected: true },
+])("real Mermaid checks $type limits with $nodes nodes and $edges edges", async ({ type, nodes, edges, expected }) => {
+  mermaid.initialize(frameConfig(false));
+  await expect(exceedsLimits(diagramSource(type, nodes, edges))).resolves.toBe(expected);
+});
+
+test("real Mermaid refuses a flowchart that tries to raise the arrow limit", async () => {
+  mermaid.initialize(frameConfig(false));
+  const source = `%%{init: {"maxEdges": 1000}}%%\n${diagramSource("flowchart LR", 60, 151)}`;
+  await expect(exceedsLimits(source)).resolves.toBe(true);
+});
 
 test.each([stateSource, flowchartSource])("real Mermaid parses entity stand-ins in %s", async (source) => {
   mermaid.initialize(frameConfig(false));

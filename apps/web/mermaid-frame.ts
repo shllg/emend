@@ -1,6 +1,9 @@
 import mermaid, { type MermaidConfig } from "mermaid";
 
 const MAX_SOURCE = 50000;
+// Mermaid lays out on the frame's main thread, shared by the page; time grows much faster than arrow count.
+const MAX_EDGES = 150;
+const MAX_NODES = 300;
 const FONT_FAMILY = "system-ui, sans-serif";
 
 // Mermaid writes codes as entity text in SVG labels and decodes only &amp;, &lt; and &gt;.
@@ -227,6 +230,7 @@ export function frameConfig(dark: boolean): MermaidConfig {
     htmlLabels: false,
     flowchart: { htmlLabels: false },
     maxTextSize: MAX_SOURCE,
+    maxEdges: MAX_EDGES,
     secure: [
       ...new Set([
         ...(mermaid.mermaidAPI.defaultConfig.secure ?? []),
@@ -247,6 +251,20 @@ export function frameConfig(dark: boolean): MermaidConfig {
       ]),
     ],
   };
+}
+export async function exceedsLimits(source: string): Promise<boolean> {
+  try {
+    const diagram = await mermaid.mermaidAPI.getDiagramFromText(source);
+    const { db } = diagram;
+    if (!("getData" in db) || typeof db.getData !== "function") return false;
+    const data: { nodes?: unknown; edges?: unknown } = db.getData();
+    const nodes = Array.isArray(data.nodes) ? data.nodes.length : 0;
+    const edges = Array.isArray(data.edges) ? data.edges.length : 0;
+    return edges > MAX_EDGES || nodes > MAX_NODES;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Edge limit exceeded")) return true;
+    throw error;
+  }
 }
 export function startFrame(root: HTMLElement) {
   mermaid.initialize(frameConfig(matchMedia("(prefers-color-scheme: dark)").matches));
@@ -286,12 +304,16 @@ export function startFrame(root: HTMLElement) {
         root.append(staging);
         try {
           const encoded = encodeCodes(source);
-          const result = await mermaid.render(`diagram-${++sequence}`, encoded.source, staging);
-          if (active && pending === undefined) {
-            const svg = sanitizeSvg(result.svg);
-            restoreCodes(svg, encoded.characters);
-            root.replaceChildren(svg);
-            natural = naturalSize(svg);
+          if (await exceedsLimits(encoded.source)) {
+            if (active && pending === undefined) fallback("This diagram is too large to draw.", source);
+          } else {
+            const result = await mermaid.render(`diagram-${++sequence}`, encoded.source, staging);
+            if (active && pending === undefined) {
+              const svg = sanitizeSvg(result.svg);
+              restoreCodes(svg, encoded.characters);
+              root.replaceChildren(svg);
+              natural = naturalSize(svg);
+            }
           }
         } catch {
           if (active && pending === undefined) fallback("This diagram could not be drawn.", source);
