@@ -2,7 +2,14 @@ import { expect, test, vi } from "vitest";
 import { activateShell, routeShellRequest, shellResponse } from "./sw-routing.ts";
 
 const origin = "https://hub.example.ts.net";
-const shell = ["/", "/index.html", "/assets/app-abcd1234.js", "/manifest.webmanifest", "/icons/icon-192.png"];
+const shell = [
+  "/",
+  "/index.html",
+  "/theme-boot.js",
+  "/assets/app-abcd1234.js",
+  "/manifest.webmanifest",
+  "/icons/icon-192.png",
+];
 const request = (path: string, mode = "navigate", method = "GET") =>
   ({ url: new URL(path, origin).href, mode, method }) as Request;
 test("routing never intercepts APIs, content, other paths, foreign origins, or mutations", () => {
@@ -18,8 +25,19 @@ test("routing never intercepts APIs, content, other paths, foreign origins, or m
     expect(routeShellRequest(request(path), origin, shell)).toBeNull();
   expect(routeShellRequest(request("/", "navigate", "POST"), origin, shell)).toBeNull();
   expect(routeShellRequest(request("/assets/app-abcd1234.js", "cors"), origin, shell)).toBe("asset");
+  expect(routeShellRequest(request("/theme-boot.js", "no-cors"), origin, shell)).toBe("asset");
   for (const path of ["/", "/devices", "/devices/pair", "/pair", "/r/11111111-1111-4111-8111-111111111111?tab=docs"])
     expect(routeShellRequest(request(path), origin, shell)).toBe("navigation");
+});
+test("the blocking theme script is served from the shell cache offline", async () => {
+  const cached = new Response("theme script");
+  const match = vi.fn(async () => cached);
+  const caches = { open: vi.fn(async () => ({ match })) } as unknown as CacheStorage;
+  const fetcher = vi.fn().mockRejectedValue(new TypeError("offline"));
+  const req = request("/theme-boot.js", "no-cors");
+  expect(await shellResponse(req, "asset", "emend-shell-new", caches, fetcher)).toBe(cached);
+  expect(match).toHaveBeenCalledWith(req);
+  expect(fetcher).not.toHaveBeenCalled();
 });
 test("navigation is network first and offline falls back to cached shell without caching review pages", async () => {
   const cached = new Response("cached shell");

@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   encodeCodes,
@@ -11,7 +11,8 @@ import {
   sanitizeSvg,
   startFrame,
 } from "../mermaid-frame.ts";
-import { MermaidBlock, parseFrameSize } from "./components/reading/MermaidBlock.tsx";
+import { LightboxDiagram, MermaidBlock, parseFrameSize } from "./components/reading/MermaidBlock.tsx";
+import { setThemePick } from "./lib/theme.ts";
 
 const mermaid = vi.hoisted(() => ({
   initialize: vi.fn(),
@@ -27,12 +28,16 @@ const mermaid = vi.hoisted(() => ({
 }));
 vi.mock("mermaid", () => ({ default: mermaid }));
 beforeEach(() => {
+  vi.stubGlobal("localStorage", new Storage());
+  setThemePick("system");
   mermaid.mermaidAPI.getDiagramFromText.mockReset().mockResolvedValue({ db: {} });
   mermaid.mermaidAPI.reset.mockReset();
   mermaid.parse.mockReset().mockResolvedValue({});
 });
 afterEach(() => {
   cleanup();
+  delete document.documentElement.dataset.theme;
+  document.documentElement.style.removeProperty("color-scheme");
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   mermaid.render.mockReset();
@@ -1014,7 +1019,7 @@ test("parent uses the minimal sandbox, posts only source after load, and validat
   const post = vi.fn();
   Object.defineProperty(frame, "contentWindow", { value: { postMessage: post } });
   fireEvent.load(frame);
-  expect(post).toHaveBeenCalledWith({ type: "render", source: "graph TD; A-->B" }, "*");
+  expect(post).toHaveBeenCalledWith({ type: "render", source: "graph TD; A-->B", theme: "light" }, "*");
   const initial = frame.style.height;
   const other = document.createElement("iframe");
   Object.defineProperty(other, "contentWindow", { value: { postMessage: vi.fn() } });
@@ -1126,7 +1131,10 @@ test("lazy frames receive source only on first load, with a fresh frame for chan
   Object.defineProperty(next, "contentWindow", { value: { postMessage: nextPost } });
   fireEvent.load(next);
   fireEvent.load(next);
-  expect(nextPost).toHaveBeenCalledExactlyOnceWith({ type: "render", source: "flowchart LR; B-->C" }, "*");
+  expect(nextPost).toHaveBeenCalledExactlyOnceWith(
+    { type: "render", source: "flowchart LR; B-->C", theme: "light" },
+    "*",
+  );
 });
 
 test.each([false, true])("frame locks its base theme to the embedding colour scheme (dark=%s)", (dark) => {
@@ -1181,6 +1189,80 @@ test.each([false, true])("frame locks its base theme to the embedding colour sch
         },
       }),
     );
+  } finally {
+    stop();
+  }
+});
+
+test.each([false, true])("inline and lightbox parents send resolved picks and redraw (OS dark=%s)", (dark) => {
+  let osDark = dark;
+  const changes = new Set<() => void>();
+  vi.spyOn(window, "matchMedia").mockImplementation(
+    () =>
+      ({
+        matches: osDark,
+        addEventListener: (_: string, listener: () => void) => changes.add(listener),
+        removeEventListener: (_: string, listener: () => void) => changes.delete(listener),
+      }) as unknown as MediaQueryList,
+  );
+  const source = "graph TD; A-->B";
+  const view = render(
+    <>
+      <MermaidBlock source={source} />
+      <LightboxDiagram source={source} onSize={() => {}} />
+    </>,
+  );
+  const load = (theme: string) => {
+    const frames = [...view.container.querySelectorAll("iframe")];
+    expect(frames).toHaveLength(2);
+    for (const frame of frames) {
+      const post = vi.fn();
+      Object.defineProperty(frame, "contentWindow", { value: { postMessage: post } });
+      fireEvent.load(frame);
+      expect(post).toHaveBeenCalledExactlyOnceWith({ type: "render", source, theme }, "*");
+      expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+    }
+    return frames;
+  };
+  let previous = load(dark ? "dark" : "light");
+  act(() => {
+    osDark = !dark;
+    for (const change of changes) change();
+  });
+  let next = load(osDark ? "dark" : "light");
+  expect(next.every((frame, index) => frame !== previous[index])).toBe(true);
+  for (const pick of [dark ? "dark" : "light", dark ? "light" : "dark"] as const) {
+    previous = next;
+    act(() => setThemePick(pick));
+    next = load(pick);
+    expect(next.every((frame, index) => frame !== previous[index])).toBe(true);
+  }
+});
+
+test.each([false, true])("frame validates the parent's theme and falls back to its OS (dark=%s)", async (dark) => {
+  vi.spyOn(window, "matchMedia").mockReturnValue({ matches: dark } as MediaQueryList);
+  const root = document.createElement("div");
+  mermaid.render.mockResolvedValue({ svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" />' });
+  const stop = startFrame(root);
+  const source = "graph TD; A-->B";
+  try {
+    const initial = mermaid.initialize.mock.calls.length;
+    window.dispatchEvent(
+      new MessageEvent("message", { source: null, data: { type: "render", source, theme: dark ? "light" : "dark" } }),
+    );
+    expect(mermaid.initialize).toHaveBeenCalledTimes(initial);
+    expect(document.documentElement.style.colorScheme).toBe(dark ? "dark" : "light");
+    expect(mermaid.render).not.toHaveBeenCalled();
+    for (const theme of ["dark", "light", "invalid", "DARK", {}, null, undefined]) {
+      mermaid.render.mockClear();
+      window.dispatchEvent(
+        new MessageEvent("message", { source: window.parent, data: { type: "render", source, theme } }),
+      );
+      await waitFor(() => expect(mermaid.render).toHaveBeenCalledTimes(1));
+      const expected = theme === "dark" || theme === "light" ? theme : dark ? "dark" : "light";
+      expect(mermaid.initialize).toHaveBeenLastCalledWith(frameConfig(expected === "dark"));
+      expect(document.documentElement.style.colorScheme).toBe(expected);
+    }
   } finally {
     stop();
   }

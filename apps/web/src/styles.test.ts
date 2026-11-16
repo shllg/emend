@@ -18,6 +18,30 @@ const fontFiles = [
 ];
 const fontLicenses = ["geist-OFL.txt", "jetbrains-mono-OFL.txt"];
 
+test("automatic dark styles skip explicit Light and retain their explicit Dark copies", () => {
+  for (const name of ["colors", "spacing", "prose"]) {
+    const css = readFileSync(join(webSource, `styles/${name}.css`), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const media = /@media\s*\(prefers-color-scheme:\s*dark\)\s*\{((?:[^{}]|\{[^{}]*\})*)\}/.exec(css)?.[1];
+    expect(media, name).toBeTruthy();
+    for (const rule of media?.matchAll(/([^{}]+)\{([^}]+)\}/g) ?? []) {
+      const selectors = rule[1]?.trim().split(/,\s*/);
+      expect(selectors?.length).toBeGreaterThan(0);
+      for (const selector of selectors ?? []) {
+        expect(selector).toMatch(/^:root:not\(\[data-theme="light"\]\)/);
+        const explicit = selector.replace(':root:not([data-theme="light"])', '[data-theme="dark"]');
+        expect(css).toContain(explicit);
+      }
+    }
+    // Removing only the guarded root prefix and whitespace leaves the original dark rules.
+    const normalize = (value: string) => value.replace(/\s+/g, "").replace("color-scheme:dark;", "");
+    const explicit = css.slice(css.indexOf('[data-theme="dark"]'));
+    const expected = normalize((media ?? "").replaceAll(':root:not([data-theme="light"])', '[data-theme="dark"]'));
+    expect(normalize(explicit).startsWith(expected), name).toBe(true);
+  }
+  const colors = readFileSync(join(webSource, "styles/colors.css"), "utf8");
+  expect(colors).toMatch(/\[data-theme="light"\]\s*\{\s*color-scheme:\s*light;/);
+});
+
 function webStylesheets() {
   return readdirSync(webSource, { recursive: true, encoding: "utf8" })
     .filter((path) => path.endsWith(".css"))

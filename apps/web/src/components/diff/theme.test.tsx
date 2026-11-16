@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { cleanup, render, waitFor } from "@testing-library/react";
-import { afterEach, expect, test } from "vitest";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { setThemePick } from "../../lib/theme.ts";
 import { DiffView } from "./FileDiff.tsx";
 import { parsePair } from "./parse.worker.ts";
 import { diffShadowCSS } from "./shadow.ts";
@@ -29,7 +30,74 @@ const overrides = {
   "--diffs-fg-number-override": "--fg-3",
 };
 
-afterEach(cleanup);
+beforeEach(() => {
+  vi.stubGlobal("localStorage", new Storage());
+  setThemePick("system");
+});
+afterEach(() => {
+  cleanup();
+  delete document.documentElement.dataset.theme;
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+test.each([false, true])(
+  "real diff follows both picks with OS dark=%s and retains its host and selection",
+  async (osDark) => {
+    vi.spyOn(window, "matchMedia").mockReturnValue({
+      matches: osDark,
+      addEventListener() {},
+      removeEventListener() {},
+    } as unknown as MediaQueryList);
+    const fileDiff = parsePair({
+      oldFile: null,
+      newFile: { name: "pick.ts", contents: "// gentle\nconst value = true;\n" },
+    });
+    const onSelect = vi.fn();
+    const { container } = render(
+      <DiffView
+        fileDiff={fileDiff}
+        diffStyle="unified"
+        selected={{ side: "additions", start: 1, end: 2 }}
+        annotations={[]}
+        onSelect={onSelect}
+      />,
+    );
+    const host = container.querySelector<HTMLElement>("diffs-container");
+    if (!host) throw new Error("Missing real diff host");
+    await waitFor(() =>
+      expect(host.shadowRoot?.querySelector('[data-line] span[style*="--diffs-token-keyword"]')).toBeTruthy(),
+    );
+    const themeCSS = () => host.shadowRoot?.querySelector("style[data-theme-css]")?.textContent ?? "";
+    expect(themeCSS()).toContain("@media (prefers-color-scheme: dark)");
+    const scroll = host.shadowRoot?.querySelector<HTMLElement>("[data-code]");
+    if (!scroll) throw new Error("Missing code scroll container");
+    scroll.scrollLeft = 48;
+    const selected = () => host.shadowRoot?.querySelectorAll("[data-selected-line]").length;
+    const selectedBefore = selected();
+    expect(selectedBefore).toBeGreaterThan(0);
+    for (const pick of ["dark", "light"] as const) {
+      act(() => setThemePick(pick));
+      await waitFor(() => expect(themeCSS()).toContain(`color-scheme: ${pick};`));
+      expect(themeCSS()).not.toContain("prefers-color-scheme");
+      expect(themeCSS()).toContain(`font-style: var(--diffs-token-${pick}-font-style, inherit)`);
+      const comment = [...(host.shadowRoot?.querySelectorAll("[data-line] span") ?? [])].find((span) =>
+        span.textContent?.includes("gentle"),
+      );
+      expect(comment?.getAttribute("style")).toContain(`--diffs-token-${pick}-font-style:italic`);
+      expect(comment?.getAttribute("style")).toContain("--diffs-token-comment");
+      expect(themeCSS()).toContain(`--diffs-${pick}-bg:var(--diffs-background, var(--bg-surface))`);
+      expect(container.querySelector("diffs-container")).toBe(host);
+      expect(host.shadowRoot?.querySelector("[data-code]")).toBe(scroll);
+      expect(scroll.scrollLeft).toBe(48);
+      expect(selected()).toBe(selectedBefore);
+    }
+    act(() => setThemePick("system"));
+    await waitFor(() => expect(themeCSS()).toContain("@media (prefers-color-scheme: dark)"));
+    expect(themeCSS()).not.toMatch(/color-scheme:\s*(?:dark|light);/);
+    expect(onSelect).not.toHaveBeenCalled();
+  },
+);
 test("annotation content cannot size the split columns and its controls wrap", () => {
   const annotation = stylesheet.match(/\.em-diff-annotation\s*\{([^}]+)\}/)?.[1];
   expect(annotation).toMatch(/contain:\s*inline-size;/);

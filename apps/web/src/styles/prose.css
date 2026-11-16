@@ -134,12 +134,12 @@
     color: var(--shiki-light, inherit);
   }
   @media (prefers-color-scheme: dark) {
-    .em-prose .shiki {
+    :root:not([data-theme="light"]) .em-prose .shiki {
       background-color: var(--shiki-dark-bg, var(--bg-sunken));
     }
-    .em-prose .shiki,
-    .em-prose .shiki span,
-    .em-source .em-source-code span {
+    :root:not([data-theme="light"]) .em-prose .shiki,
+    :root:not([data-theme="light"]) .em-prose .shiki span,
+    :root:not([data-theme="light"]) .em-source .em-source-code span {
       color: var(--shiki-dark, inherit);
     }
   }

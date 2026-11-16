@@ -18,6 +18,7 @@ const nativeReplaceState = window.history.replaceState;
 let removeListeners = () => {};
 beforeEach(() => {
   vi.resetModules();
+  vi.stubGlobal("localStorage", new Storage());
   vi.doMock("./router.tsx", async (original) => {
     const actual = await original<typeof import("./router.tsx")>();
     return {
@@ -38,7 +39,8 @@ beforeEach(() => {
   const added = vi.spyOn(window, "addEventListener");
   removeListeners = () => {
     for (const [event, listener, options] of added.mock.calls) {
-      if (event === "hashchange" || event === "popstate") window.removeEventListener(event, listener, options);
+      if (event === "hashchange" || event === "popstate" || event === "storage")
+        window.removeEventListener(event, listener, options);
     }
   };
 });
@@ -48,6 +50,7 @@ afterEach(() => {
   for (const router of routers.created.toReversed()) router.history.destroy();
   removeListeners();
   document.getElementById("root")?.remove();
+  delete document.documentElement.dataset.theme;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   window.history.pushState = nativePushState;
@@ -79,6 +82,25 @@ async function fragment(path: string, event: "hashchange" | "popstate") {
     window.dispatchEvent(event === "hashchange" ? new HashChangeEvent(event) : new PopStateEvent(event));
   });
 }
+test("startup applies the stored theme without the head script and follows other tabs", async () => {
+  window.history.replaceState(null, "", "/");
+  localStorage.setItem("emend.theme", "dark");
+  vi.stubGlobal("fetch", async () =>
+    Response.json({
+      approvedActiveHours: 12,
+      approvedActiveLimit: 5,
+      serverTime: new Date().toISOString(),
+      items: [],
+    }),
+  );
+  await boot();
+  expect(document.documentElement.dataset.theme).toBe("dark");
+  act(() => {
+    localStorage.setItem("emend.theme", "light");
+    window.dispatchEvent(new StorageEvent("storage", { key: "emend.theme", storageArea: localStorage }));
+  });
+  expect(document.documentElement.dataset.theme).toBe("light");
+});
 test.each(["/pair", "/pair/", "/Pair"])(
   "startup at %s hides the pairing fragment from Router and history, posts it once, and never invokes Function",
   async (path) => {

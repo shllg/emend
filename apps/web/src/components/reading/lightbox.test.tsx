@@ -849,7 +849,7 @@ test("lightbox frame sends only one render and accepts the first valid non-pendi
   expect(post).not.toHaveBeenCalled();
   fireEvent.load(frame);
   fireEvent.load(frame);
-  expect(post).toHaveBeenCalledExactlyOnceWith({ type: "render", source: diagramBlock.source }, "*");
+  expect(post).toHaveBeenCalledExactlyOnceWith({ type: "render", source: diagramBlock.source, theme: "dark" }, "*");
   const subject = diagramSubject();
   const hidden = () => {
     expect(subject.style.visibility).toBe("hidden");
@@ -995,7 +995,7 @@ test("diagram-only galleries have diagram labels and an invisible title without 
   fireEvent.click(button("Next diagram"));
   expect(within(dialog()).getByText("2 of 2")).toBeTruthy();
   const { post } = loadDiagram();
-  expect(post).toHaveBeenCalledExactlyOnceWith({ type: "render", source: diagramBlock.text }, "*");
+  expect(post).toHaveBeenCalledExactlyOnceWith({ type: "render", source: diagramBlock.text, theme: "dark" }, "*");
   expectUnavailable(button("Next diagram"));
 });
 

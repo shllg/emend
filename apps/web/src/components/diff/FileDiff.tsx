@@ -26,6 +26,7 @@ import { plural } from "../../lib/count.ts";
 import { diffLoads } from "../../lib/diff-loads.ts";
 import { linesErrorMessage } from "../../lib/line-context.ts";
 import { useStickyHeight } from "../../lib/sticky-stack.ts";
+import { useThemePick } from "../../lib/theme.ts";
 import { Composer } from "../threads/Composer.tsx";
 import { ThreadCard } from "../threads/ThreadCard.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -47,7 +48,7 @@ import {
 } from "./presentation.ts";
 import { diffShadowCSS } from "./shadow.ts";
 import type { FileLocation } from "./targets.ts";
-import { diffTheme } from "./theme.ts";
+import { diffThemes } from "./theme.ts";
 
 export type ParsedDiff = FileDiffMetadata;
 export type DiffPostRender = NonNullable<FileDiffOptions<ReactElement, undefined>["onPostRender"]>;
@@ -58,7 +59,7 @@ type SlotState = { names: Set<string>; rendered: boolean; failed: boolean };
 export const TOKENIZE_MAX_LINES = 5000;
 const poolOptions = { workerFactory: () => new DiffWorker(), poolSize: 2 };
 const highlighterOptions = {
-  theme: diffTheme.name,
+  theme: diffThemes,
   preferredHighlighter: "shiki-js" as const,
   tokenizeMaxLineLength: 1000,
 };
@@ -97,6 +98,7 @@ export function DiffView({
   selected: SelectedLineRange | null;
   onSlots?: (slots: SlotState) => void;
 }) {
+  const themePick = useThemePick();
   const [commentLines] = useState(createCommentLines);
   const hoveredLine = useRef<GetHoveredLineResult<"diff"> | undefined>(undefined);
   const expansionState = useRef<{
@@ -151,8 +153,8 @@ export function DiffView({
       preferredHighlighter: "shiki-js",
       tokenizeMaxLength: TOKENIZE_MAX_LINES,
       diffStyle,
-      theme: diffTheme.name,
-      themeType: "system",
+      theme: diffThemes,
+      themeType: themePick,
       lineDiffType: "word",
       diffIndicators: "classic",
       hunkSeparators: "line-info",
@@ -177,7 +179,7 @@ export function DiffView({
       onLineSelectionEnd: stableSelect,
       onPostRender: onPostRender as unknown as FileDiffOptions<string, undefined>["onPostRender"],
     }),
-    [diffStyle, overflow, stableSelect, onPostRender],
+    [diffStyle, overflow, stableSelect, onPostRender, themePick],
   );
   // Positions only: the array changes when an annotation is added, removed or moved,
   // not when a card's content changes.

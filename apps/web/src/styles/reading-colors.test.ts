@@ -16,7 +16,9 @@ function parseTokens(pattern: RegExp): Tokens {
 }
 
 const light = parseTokens(/^:root\s*\{([^}]+)\}/m);
-const systemDark = parseTokens(/@media\s*\(prefers-color-scheme:\s*dark\)\s*\{\s*:root\s*\{([^}]+)\}/);
+const systemDark = parseTokens(
+  /@media\s*\(prefers-color-scheme:\s*dark\)\s*\{\s*:root:not\(\[data-theme="light"\]\)\s*\{([^}]+)\}/,
+);
 const explicitDark = parseTokens(/\[data-theme="dark"\]\s*\{([^}]+)\}/);
 const readingNames = ["--bg-reading", "--bg-reading-card", "--fg-reading", "--fg-reading-muted", "--fg-reading-strong"];
 const readingTokens = (tokens: Tokens) => Object.fromEntries(readingNames.map((name) => [name, tokens.get(name)]));
@@ -99,6 +101,7 @@ test("both dark blocks declare the same reading colours", () => {
     "--fg-reading-strong": "var(--n-200)",
   });
   expect(readingTokens(explicitDark)).toEqual(readingTokens(systemDark));
+  expect(Object.fromEntries(explicitDark)).toEqual({ ...Object.fromEntries(systemDark) });
 });
 
 test.each([
