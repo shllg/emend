@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { Window as HappyWindow } from "happy-dom";
+import { afterEach, beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { setThemePick } from "../../lib/theme.ts";
 import { DiffView } from "./FileDiff.tsx";
 import { parsePair } from "./parse.worker.ts";
@@ -10,6 +11,7 @@ import { diffTheme, syntaxVariables } from "./theme.ts";
 
 const stylesheet = readFileSync(resolve(import.meta.dirname, "../../styles/diff.css"), "utf8");
 const typography = readFileSync(resolve(import.meta.dirname, "../../styles/typography.css"), "utf8");
+const colors = readFileSync(resolve(import.meta.dirname, "../../styles/colors.css"), "utf8");
 const installed = readFileSync(
   resolve(import.meta.dirname, "../../../node_modules/@pierre/diffs/dist/style.js"),
   "utf8",
@@ -44,11 +46,18 @@ afterEach(() => {
 test.each([false, true])(
   "real diff follows both picks with OS dark=%s and retains its host and selection",
   async (osDark) => {
-    vi.spyOn(window, "matchMedia").mockReturnValue({
-      matches: osDark,
-      addEventListener() {},
-      removeEventListener() {},
-    } as unknown as MediaQueryList);
+    const device = (window as unknown as HappyWindow).happyDOM.settings.device;
+    const previous = device.prefersColorScheme;
+    device.prefersColorScheme = osDark ? "dark" : "light";
+    const style = document.createElement("style");
+    // Happy DOM does not apply cascade layers; keep the real selectors and declarations.
+    style.textContent = colors + stylesheet.replace("@layer components {", "").replace(/}\s*$/, "");
+    document.head.append(style);
+    onTestFinished(() => {
+      style.remove();
+      device.prefersColorScheme = previous;
+    });
+    expect(window.matchMedia("(prefers-color-scheme: dark)").matches).toBe(osDark);
     const fileDiff = parsePair({
       oldFile: null,
       newFile: { name: "pick.ts", contents: "// gentle\nconst value = true;\n" },
@@ -69,32 +78,58 @@ test.each([false, true])(
       expect(host.shadowRoot?.querySelector('[data-line] span[style*="--diffs-token-keyword"]')).toBeTruthy(),
     );
     const themeCSS = () => host.shadowRoot?.querySelector("style[data-theme-css]")?.textContent ?? "";
-    expect(themeCSS()).toContain("@media (prefers-color-scheme: dark)");
+    const originalThemeCSS = themeCSS();
+    expect(originalThemeCSS).not.toContain("prefers-color-scheme");
+    const spans = () => [...(host.shadowRoot?.querySelectorAll("[data-line] span[style]") ?? [])];
+    const keyword = spans().find((span) => span.textContent === "const");
+    const comment = spans().find((span) => span.textContent?.includes("gentle"));
+    expect(keyword?.getAttribute("style")).toContain("color:var(--diffs-token-keyword, var(--syn-keyword))");
+    expect(comment?.getAttribute("style")).toContain("color:var(--diffs-token-comment, var(--syn-comment))");
+    expect(comment?.getAttribute("style")).toContain("font-style:italic");
+    for (const span of spans()) expect(span.getAttribute("style")).not.toMatch(/--diffs-token-(?:light|dark)/);
+    const paletteTokens = {
+      "--diffs-token-keyword": "--syn-keyword",
+      "--diffs-bg-addition-override": "--diff-add-bg",
+      "--diffs-bg-deletion-override": "--diff-del-bg",
+      "--diffs-background": "--bg-surface",
+    };
+    const palette = () =>
+      Object.keys(paletteTokens).map((name) => getComputedStyle(host).getPropertyValue(name).trim());
+    const systemPalette = palette();
     const scroll = host.shadowRoot?.querySelector<HTMLElement>("[data-code]");
     if (!scroll) throw new Error("Missing code scroll container");
     scroll.scrollLeft = 48;
     const selected = () => host.shadowRoot?.querySelectorAll("[data-selected-line]").length;
     const selectedBefore = selected();
     expect(selectedBefore).toBeGreaterThan(0);
+    const palettes: string[][] = [];
     for (const pick of ["dark", "light"] as const) {
       act(() => setThemePick(pick));
-      await waitFor(() => expect(themeCSS()).toContain(`color-scheme: ${pick};`));
-      expect(themeCSS()).not.toContain("prefers-color-scheme");
-      expect(themeCSS()).toContain(`font-style: var(--diffs-token-${pick}-font-style, inherit)`);
-      const comment = [...(host.shadowRoot?.querySelectorAll("[data-line] span") ?? [])].find((span) =>
-        span.textContent?.includes("gentle"),
-      );
-      expect(comment?.getAttribute("style")).toContain(`--diffs-token-${pick}-font-style:italic`);
-      expect(comment?.getAttribute("style")).toContain("--diffs-token-comment");
-      expect(themeCSS()).toContain(`--diffs-${pick}-bg:var(--diffs-background, var(--bg-surface))`);
+      // Happy DOM does not compute inherited color-scheme; verify both ends of the inheritance.
+      expect(getComputedStyle(document.documentElement).colorScheme).toBe(pick);
+      expect(host.style.colorScheme).toBe("inherit");
+      const computed = getComputedStyle(host);
+      for (const [name, token] of Object.entries({ ...paletteTokens, ...overrides })) {
+        const pageValue = getComputedStyle(document.documentElement).getPropertyValue(token).trim();
+        expect(pageValue).not.toBe("");
+        expect(computed.getPropertyValue(name).trim()).toBe(pageValue);
+      }
+      palettes.push(palette());
+      expect(themeCSS()).toBe(originalThemeCSS);
+      expect(spans().find((span) => span.textContent === "const")).toBe(keyword);
+      expect(spans().find((span) => span.textContent?.includes("gentle"))).toBe(comment);
       expect(container.querySelector("diffs-container")).toBe(host);
       expect(host.shadowRoot?.querySelector("[data-code]")).toBe(scroll);
       expect(scroll.scrollLeft).toBe(48);
       expect(selected()).toBe(selectedBefore);
     }
+    for (const [index, name] of Object.keys(paletteTokens).entries())
+      expect(palettes[0]?.[index], name).not.toBe(palettes[1]?.[index]);
+    expect(systemPalette).toEqual(palettes[osDark ? 0 : 1]);
     act(() => setThemePick("system"));
-    await waitFor(() => expect(themeCSS()).toContain("@media (prefers-color-scheme: dark)"));
-    expect(themeCSS()).not.toMatch(/color-scheme:\s*(?:dark|light);/);
+    expect(getComputedStyle(document.documentElement).colorScheme).toBe("light dark");
+    expect(palette()).toEqual(systemPalette);
+    expect(themeCSS()).toBe(originalThemeCSS);
     expect(onSelect).not.toHaveBeenCalled();
   },
 );

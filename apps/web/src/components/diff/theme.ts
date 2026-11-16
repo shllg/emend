@@ -20,9 +20,6 @@ export const syntaxVariables = {
   "token-changed": "var(--syn-plain)",
 };
 export const diffTheme = createCSSVariablesTheme({ name, variableDefaults: syntaxVariables, fontStyle: true });
-// A single name makes Pierre pin baseThemeType to the Shiki theme's dark type.
-// Both slots share our variable palette, while themeType controls font styles and light-dark().
-export const diffThemes = { light: name, dark: name };
 const variable = (key: keyof typeof syntaxVariables) => `var(--diffs-${key}, ${syntaxVariables[key]})`;
 const rule = (scope: string[], key: keyof typeof syntaxVariables, fontStyle = "") => ({
   scope,
