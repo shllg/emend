@@ -102,6 +102,7 @@ beforeEach(() => {
   fetcher = vi.fn(async (path, init) => {
     if (path === "/api/v1/session") return new Response(null, { status: 204 });
     if (path === "/api/v1/settings") return Response.json(settings);
+    if (path === "/api/v1/devices") return Response.json({ items: [] });
     if (path === "/api/v1/bin") return Response.json({ items: [], more: false, total: 0, version: "a".repeat(64) });
     if (path === "/api/v1/reviews")
       return Response.json({
@@ -171,6 +172,159 @@ const openPalette = async () => {
 const option = (label: string) => screen.getByRole("option", { name: new RegExp(`^${label}`) });
 const selected = () => screen.queryByRole("option", { selected: true });
 const search = (input: HTMLInputElement, value: string) => fireEvent.change(input, { target: { value } });
+const caps = (button: HTMLElement) => [...button.querySelectorAll("kbd")].map((cap) => cap.textContent);
+
+test.each(["/", `/r/${ids[0]}`, "/settings", "/devices"])(
+  "the wide top bar opens the palette on %s and restores focus on Escape",
+  async (path) => {
+    width = 1280;
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
+    mount(path);
+    if (path === "/") await screen.findByRole("link", { name: /Review 1/ });
+    else if (path === "/settings") await screen.findByText("The bin is empty.");
+    else if (path === "/devices") await screen.findByText("No paired devices.");
+    else await ready();
+    const buttons = screen.getAllByRole("button", { name: "Search commands" });
+    expect(buttons).toHaveLength(1);
+    const button = screen.getByRole("button", { name: "Search commands" });
+    expect(button.tagName).toBe("BUTTON");
+    expect(button.getAttribute("type")).toBe("button");
+    expect(button.hasAttribute("aria-label")).toBe(false);
+    expect(button.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(button.getAttribute("aria-keyshortcuts")).toBe("Control+Shift+P");
+    expect(caps(button)).toEqual(["Ctrl", "Shift", "P"]);
+    const description = document.getElementById(button.getAttribute("aria-describedby") ?? "");
+    expect(description?.textContent).toBe("Opens the command palette. Shortcut: Ctrl+Shift+P.");
+    expect(description?.hidden).toBe(true);
+    expect(description?.parentElement).toBe(button.parentElement);
+    fireEvent.click(button);
+    const dialog = await screen.findByRole("dialog", { name: "Command palette" });
+    const input = within(dialog).getByRole("combobox", { name: "Command" });
+    expect(document.activeElement).toBe(input);
+    press("Escape", {}, input);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(button));
+  },
+);
+
+test("the top bar follows changed and disabled palette keys and still opens on click", async () => {
+  vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
+  mount();
+  await ready();
+  const button = screen.getByRole("button", { name: "Search commands" });
+  expect(caps(button)).toEqual(["Ctrl", "Shift", "P"]);
+  for (const value of ["mod+k", null] as const) {
+    act(() =>
+      client.setQueryData<SettingsView>(
+        ["settings"],
+        (old) =>
+          old && {
+            ...old,
+            keys: {
+              ...old.keys,
+              commands: {
+                ...old.keys.commands,
+                "palette.open": { ...old.keys.commands["palette.open"], value },
+              },
+            },
+          },
+      ),
+    );
+    await waitFor(() => expect(caps(button)).toEqual(value === null ? [] : ["Ctrl", "K"]));
+    expect(button.getAttribute("aria-keyshortcuts")).toBe(value === null ? null : "Control+K");
+    expect(document.getElementById(button.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+      value === null ? "Opens the command palette." : "Opens the command palette. Shortcut: Ctrl+K.",
+    );
+  }
+  fireEvent.click(button);
+  const dialog = await screen.findByRole("dialog", { name: "Command palette" });
+  expect(document.activeElement).toBe(within(dialog).getByRole("combobox", { name: "Command" }));
+});
+
+test("the wide top bar uses Mac key caps and the Meta ARIA shortcut", async () => {
+  vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+  mount();
+  await ready();
+  const button = screen.getByRole("button", { name: "Search commands" });
+  expect(caps(button)).toEqual(["⌘", "⇧", "P"]);
+  expect(button.getAttribute("aria-keyshortcuts")).toBe("Meta+Shift+P");
+});
+
+test("the narrow top bar opens the palette from an icon before Refresh and restores focus", async () => {
+  width = 900;
+  vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
+  mount();
+  await ready();
+  expect(screen.getAllByRole("button", { name: "Search commands" })).toHaveLength(1);
+  const button = screen.getByRole("button", { name: "Search commands" });
+  const refresh = screen.getByRole("button", { name: "Refresh" });
+  expect(button.textContent).toBe("");
+  expect(button.getAttribute("aria-label")).toBe("Search commands");
+  expect(button.getAttribute("aria-haspopup")).toBe("dialog");
+  expect(button.getAttribute("aria-keyshortcuts")).toBe("Control+Shift+P");
+  expect(document.getElementById(button.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+    "Opens the command palette. Shortcut: Ctrl+Shift+P.",
+  );
+  expect(button.compareDocumentPosition(refresh) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+    Node.DOCUMENT_POSITION_FOLLOWING,
+  );
+  fireEvent.click(button);
+  const dialog = await screen.findByRole("dialog", { name: "Command palette" });
+  const input = within(dialog).getByRole("combobox", { name: "Command" });
+  expect(document.activeElement).toBe(input);
+  press("Escape", {}, input);
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(button));
+});
+
+test.each(["/", `/r/${ids[0]}`])("the phone More menu opens the palette on %s and regains focus", async (path) => {
+  width = 390;
+  mount(path);
+  if (path === "/") await screen.findByRole("link", { name: /Review 1/ });
+  else await screen.findByRole("button", { name: "Approve" });
+  expect(screen.queryByRole("button", { name: "Search commands" })).toBeNull();
+  const more = screen.getByRole("button", { name: "More" });
+  fireEvent.pointerDown(more, { button: 0, ctrlKey: false });
+  const menu = await screen.findByRole("menu", { name: "More" });
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "Search commands" }));
+  const dialog = await screen.findByRole("dialog", { name: "Command palette" });
+  const input = within(dialog).getByRole("combobox", { name: "Command" });
+  expect(screen.queryByRole("menu")).toBeNull();
+  expect(document.activeElement).toBe(input);
+  press("Escape", {}, input);
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(more));
+});
+
+test("the palette publishes the visual viewport height when opened and when the keyboard resizes", async () => {
+  mount();
+  await ready();
+  class FakeViewport extends EventTarget {
+    height = 500;
+    offsetTop = 0;
+    scale = 1;
+  }
+  const viewport = new FakeViewport();
+  const frames: FrameRequestCallback[] = [];
+  vi.stubGlobal("innerHeight", 800);
+  vi.stubGlobal("visualViewport", viewport);
+  vi.stubGlobal("requestAnimationFrame", (fn: FrameRequestCallback) => frames.push(fn));
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  fireEvent.click(screen.getByRole("button", { name: "Search commands" }));
+  const dialog = await screen.findByRole("dialog", { name: "Command palette" });
+  within(dialog).getByRole("combobox", { name: "Command" }).scrollIntoView = vi.fn();
+  act(() => {
+    for (const frame of frames.splice(0)) frame(0);
+  });
+  expect(dialog.style.getPropertyValue("--visual-height")).toBe("500px");
+  act(() => {
+    viewport.height = 360;
+    viewport.dispatchEvent(new Event("resize"));
+    viewport.dispatchEvent(new Event("scroll"));
+    for (const frame of frames.splice(0)) frame(0);
+  });
+  expect(dialog.style.getPropertyValue("--visual-height")).toBe("360px");
+});
 
 test.each([1280, 900])(
   "opens with Ctrl or Meta on width %s, focuses search and restores the opener on Escape",
