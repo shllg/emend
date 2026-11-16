@@ -173,6 +173,13 @@ test("writeup images keep their own size, stay under half the screen and show a 
   expect(media).not.toMatch(/#[0-9a-f]{3,8}\b|rgb\(|oklch\(/i);
 });
 
+test("screenshot effect lines shrink and wrap unbroken tokens on phones", () => {
+  const css = readFileSync(join(webSource, "styles/prose.css"), "utf8");
+  const effect = /\.em-prose \.emend-media-effect\s*\{([^}]+)\}/.exec(css)?.[1];
+  expect(effect).toMatch(/\bmin-width:\s*0\s*;/);
+  expect(effect).toMatch(/\boverflow-wrap:\s*anywhere\s*;/);
+});
+
 test("reading components use semantic colours, with white reserved for the isolated HTML document page", () => {
   const reading = join(webSource, "components/reading");
   for (const file of readdirSync(reading).filter((file) => file.endsWith(".tsx") && !file.endsWith(".test.tsx"))) {

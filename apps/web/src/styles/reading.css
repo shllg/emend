@@ -344,8 +344,18 @@
     border-radius: 8px;
     padding: 12px 16px;
   }
-  .em-writeup-why {
-    border-left-color: var(--topic);
+  .em-writeup-why .em-prose {
+    font-size: calc(var(--reader-prose-size, var(--type-prose-size)) + 2px);
+    color: var(--fg-reading-strong);
+  }
+  .em-writeup-example {
+    --reading-inset: 16px;
+    background: var(--topic-bg);
+    border-radius: 8px;
+    padding: 12px 16px;
+  }
+  .em-writeup-example > .em-writeup-kicker {
+    color: var(--topic-fg);
   }
   .em-writeup-decisions {
     border-left-color: var(--ochre-400);
@@ -474,20 +484,22 @@
     background: var(--accent-tint);
     box-shadow: 0 0 0 4px var(--accent-tint);
   }
-  .em-writeup-callout .em-prose:has(> table) {
+  :is(.em-writeup-callout, .em-writeup-example) .em-prose:has(> table) {
     overflow-x: auto;
   }
-  .em-writeup-callout .em-prose table {
+  :is(.em-writeup-callout, .em-writeup-example) .em-prose table {
     display: table;
     width: 100%;
     max-width: none;
   }
-  .em-writeup-glossary > summary {
+  .em-writeup-glossary > summary,
+  .em-writeup-details > summary {
     cursor: pointer;
     color: var(--fg-3);
     font-size: 14px;
   }
-  .em-writeup-glossary[open] > summary {
+  .em-writeup-glossary[open] > summary,
+  .em-writeup-details[open] > summary {
     margin-bottom: 12px;
   }
   @media (max-width: 767px) {

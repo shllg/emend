@@ -2587,7 +2587,7 @@ test.each(["hash", "map", "thread hash", "thread go to", "browser search"])(
     const scrolledId = navigation === "map" ? "topic-seed" : "block-t-seed-body-12345678";
     let visibleAtScroll = false;
     const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (this: HTMLElement) {
-      if (this.id === scrolledId) visibleAtScroll = !this.closest("[hidden]");
+      if (this.id === scrolledId) visibleAtScroll = !this.closest("[hidden], details:not([open])");
     });
     const { history } = mount(navigation === "thread go to" ? "?tab=comments&rev=1" : "?tab=writeup&rev=1");
     const navigate = async () => {
@@ -2616,6 +2616,9 @@ test.each(["hash", "map", "thread hash", "thread go to", "browser search"])(
     await navigate();
     const fold = await screen.findByRole("button", { name: "Topic 1: Plant a seed", expanded: true });
     expect(document.getElementById("block-t-seed-body-12345678")?.closest("[hidden]")).toBeNull();
+    if (navigation !== "map") {
+      expect(document.getElementById("block-t-seed-body-12345678")?.closest("details")?.open).toBe(true);
+    }
     if (navigation !== "browser search") {
       expect(scroll).toHaveBeenCalled();
       // A thread's go-to link points to its block and may carry the thread hash instead.
@@ -2871,6 +2874,7 @@ test("obsolete reading preferences do not affect comment marks", async () => {
   localStorage.setItem(layoutKey, '{"reading":"focus","compact":true}');
   currentRevision.threads = [placedWriteupThread()];
   mount();
+  fireEvent.click(await screen.findByText("Details", { selector: "summary" }));
   await screen.findByRole("button", { name: "1 comment", expanded: false });
   expect(screen.queryByRole("button", { name: "Compact comments" })).toBeNull();
   expect(document.getElementById(`thread-${id}`)).toBeNull();
@@ -3084,6 +3088,11 @@ test.each(["tab", "doc", "revision", "no thread", "other thread"])(
               ? "?tab=writeup&rev=1#thread-22222222-2222-4222-8222-222222222222"
               : "?tab=writeup&rev=1";
     await act(async () => history.push(`/r/${id}${next}`));
+    if (navigation === "revision") {
+      const details = await screen.findByText("Details", { selector: "summary" });
+      expect(details.closest("details")?.open).toBe(false);
+      fireEvent.click(details);
+    }
     if (navigation !== "tab")
       await waitFor(() => expect(document.querySelector(".em-thread-chip")?.textContent).toBe("1"));
     expect(document.getElementById(`thread-${id}`)).toBeNull();

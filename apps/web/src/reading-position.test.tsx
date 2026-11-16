@@ -208,6 +208,49 @@ test("Writeup, Diff, Writeup on the phone restores the anchor", async () => {
   await waitFor(() => expect(pane().scrollTop).toBe(150));
 });
 
+test.each([true, false])(
+  "restoring a saved block reveals and remembers only a closed topic Details (folded=%s)",
+  async (folded) => {
+    const value = revisions[1];
+    if (!value) throw new Error("Missing revision");
+    value.topics = [{ slug: "garden", title: "Garden", importance: 1, summary: "Synthetic garden changes" }];
+    value.writeup.sections = [
+      { key: "overview", label: "Body", topic: null, blocks: [a] },
+      { key: "t-garden-body", label: "Details", topic: "garden", blocks: [b, c] },
+    ];
+    const bounds = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.closest("details:not([open])") ? new DOMRect() : bounds.call(this);
+    });
+    const dispatch = vi.spyOn(HTMLElement.prototype, "dispatchEvent");
+    // happy-dom calls dispatchEvent again on each ancestor while the same event bubbles.
+    const reveals = () =>
+      new Set(dispatch.mock.calls.map(([event]) => event).filter((event) => event.type === "emend:reveal-reading"));
+    const anchor = { id: `block-${folded ? b.id : a.id}`, fraction: 0.5 };
+    saveReadingPosition(writeupKey, anchor);
+    const { history } = mount();
+    await screen.findByText("Paragraph bbbb");
+    const details = () => screen.getByText("Details", { selector: "summary" }).closest("details");
+    expect(details()?.open).toBe(folded);
+    await waitFor(() => expect(pane().scrollTop).toBe(folded ? 150 : 50));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, (restoreDelays.at(-1) ?? 0) + 100));
+    });
+    expect(reveals().size).toBe(folded ? 1 : 0);
+    expect(loadReadingPosition(writeupKey)).toEqual(anchor);
+
+    // Return at the top so a second anchor restore cannot reopen an unremembered fold.
+    readerScroll(0);
+    await go(history, "?tab=docs&doc=a.md&rev=1");
+    await screen.findByText("Doc a1a1a1a1 2222");
+    await act(async () => history.back());
+    await screen.findByText("Paragraph bbbb");
+    expect(pane().scrollTop).toBe(0);
+    expect(details()?.open).toBe(folded);
+    expect(reveals().size).toBe(folded ? 1 : 0);
+  },
+);
+
 test("a new revision with the same block restores; with the block gone it stays at the top", async () => {
   const { history } = await readWriteup();
   revisions[2] = revisionWith(2, [a, c, block("dddd")]);

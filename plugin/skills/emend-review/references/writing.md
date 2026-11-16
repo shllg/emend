@@ -32,7 +32,13 @@ Checked and Not checked are the exception. They are never empty.
 
 A review topic's `why` explains what the area does, the problem and the fix.
 Its `example` shows a concrete before/after case.
-Keep examples grounded in the actual change.
+Give every topic above Low risk (`skim`) an Example of at most six lines.
+Keep examples grounded in the actual change: use its real input and real output.
+Write a before/after case in one paragraph, with lines starting `Before:` and `After:`.
+emend shows those lines as aligned rows.
+A line without `Before:` or `After:` at its start continues the row above it.
+Put any other note in its own paragraph.
+For two or more cases, you can use a table: `Input | Before | After`.
 A document that explains a change or a proposal gives the same why and a grounded example.
 
 ## Review verdict and risk
@@ -157,18 +163,30 @@ A document keeps its glossary as a list under a "Glossary" heading, one term per
 ## Screenshots
 
 A review writeup or a document can show images, such as before and after screenshots of a UI change.
+A change the user can see needs Before and After screenshots at the same viewport.
+Capture them with a headless browser.
+Each project picks its own capture tool: use one the project or the user already provides.
+Never add a dependency or download a browser to capture.
+Capture Before from the base commit in a separate worktree or from an existing build.
+Never stash, reset or check out over the working tree to reach it.
+Capture with synthetic data, and crop to the change.
+Never show secrets, personal data, private hostnames, URLs or paths, or real customer or client content.
+If you cannot capture a shot, or a screen cannot avoid such data, skip it and say why under Where to look (`whereToLook`).
 
 In a review writeup:
 
 - List each image under `media`, as [the manifest reference](manifest.md) says.
 - Reference it from any writeup section with `![Alt](path)`. The alt text becomes the caption.
-- Put a before and an after image in one paragraph, with alt text "Before" and "After", to show them
-  side by side.
+- Put the pair in one paragraph, with alt text "Before" and "After":
+  `![Before](media/before.png) ![After](media/after.png)`.
+  On the next line of that paragraph, state the effect in one line.
+  emend shows Before, After and Side by side controls, with the effect line underneath.
 - Only listed paths render. Any other image reference in the writeup is dropped.
 - Remote image URLs do not show. List the file under `media` instead.
 
 In a Markdown document, put the image beside it and reference it with a relative path,
 `![Alt](shots/before.png)`. PNG, JPEG, GIF, WebP and AVIF show; remote image URLs do not.
+A Before and After pair shows the same way.
 
 ## HTML pages
 

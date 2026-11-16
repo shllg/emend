@@ -10,6 +10,7 @@ import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import type { DocLinks } from "../links.ts";
 import { type Block, blocksFromTree, type HtmlRoot, renderData, visitElements } from "./blocks.ts";
+import { exampleRows } from "./example-rows.ts";
 import { blockHash } from "./hash.ts";
 import { HIGHLIGHT_LINE_CHARS, type HighlightBudget, limitHighlighting } from "./highlight.ts";
 import { sharedHighlighter } from "./highlighter.ts";
@@ -109,6 +110,7 @@ export function markdownImageReferences(markdown: string): { references: string[
 async function createProcessor() {
   const highlighter = await sharedHighlighter();
   return sanitizedPipeline()
+    .use(exampleRows)
     .use(isolateDiagrams)
     .use(markTerms)
     .use(limitHighlighting, highlighter.getLoadedLanguages())
@@ -137,6 +139,7 @@ export async function renderMarkdownWithBudget(
   effects?: { docBaseUsed?: boolean; docPathUsed?: boolean },
   mediaSizes?: ReadonlyMap<string, MediaSize>,
   terms?: TermMatcher,
+  options?: { exampleRows?: boolean },
 ): Promise<Block[]> {
   // Check even an empty document: every emitted id must satisfy the contract.
   BlockId.parse(`${section}-00000000`);
@@ -153,6 +156,7 @@ export async function renderMarkdownWithBudget(
     media,
     mediaSizes,
     terms,
+    exampleRows: options?.exampleRows,
     docs,
     docBase,
     docBaseUsed: false,

@@ -16,6 +16,7 @@ import { ReadingGroup } from "./ReadingGroup.tsx";
 import { ReadingThreads } from "./ReadingThreads.tsx";
 import { type LightboxItem, useScreenshots } from "./screenshots.ts";
 import { useReaderThreads } from "./use-reader-threads.ts";
+import { WriteupDetails } from "./WriteupDetails.tsx";
 
 const emptyFiles: RevisionView["files"] = [];
 
@@ -43,6 +44,7 @@ export type ReaderGroup = {
   presentation?: "tldr" | "decisions" | "glossary" | "outOfScope" | "whereToLook" | "context" | "facts" | "pair";
   action?: ReactNode;
   meta?: ReactNode;
+  files?: ReactNode;
   facts?: { key: string; label: string; blocks?: RenderedBlock[]; content?: ReactNode }[];
   subsections?: {
     key: string;
@@ -327,21 +329,19 @@ export function BlockReader({
               ))}
             </dl>
           )}
-          {group.subsections?.map((section) => (
-            <div
-              key={section.key}
-              className={
-                section.kind === "body"
-                  ? "em-writeup-details"
-                  : section.kind === "matters"
-                    ? "em-writeup-matters"
-                    : `em-writeup-callout em-writeup-${section.kind}`
-              }
-            >
-              <h3 className={section.kind === "body" ? "sr-only" : "em-writeup-kicker"}>{section.heading}</h3>
-              {renderBlocks(section.blocks, group.path)}
-            </div>
-          ))}
+          {group.subsections?.map((section) =>
+            section.kind === "body" ? (
+              <WriteupDetails key={section.key} reviewId={reviewId} revision={revision} sectionKey={section.key}>
+                {renderBlocks(section.blocks, group.path)}
+              </WriteupDetails>
+            ) : (
+              <div key={section.key} className={`em-writeup-${section.kind}`}>
+                <h3 className={section.kind === "why" ? "sr-only" : "em-writeup-kicker"}>{section.heading}</h3>
+                {renderBlocks(section.blocks, group.path)}
+              </div>
+            ),
+          )}
+          {group.files}
         </ReadingGroup>
       ))}
       <ReadingThreads

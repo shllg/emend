@@ -214,7 +214,54 @@ function mediaSpan(image: HtmlElement, path: string, sha: string, sized: boolean
   return span;
 }
 
-const isMediaSpan = (node: HtmlNode) => node.type === "element" && renderData(node).emendMedia !== undefined;
+export const isMediaSpan = (node: HtmlNode) => node.type === "element" && renderData(node).emendMedia !== undefined;
+
+const isWhitespace = (node: HtmlNode) => node.type === "text" && node.value.trim() === "";
+
+/** Recognize ordered screenshot pairs without changing any text used by anchors. */
+function wrapMediaPair(paragraph: HtmlElement): boolean {
+  const indices = paragraph.children.flatMap((child, index) => (isMediaSpan(child) ? [index] : []));
+  const [before, after] = indices;
+  if (indices.length !== 2 || before === undefined || after === undefined) return false;
+  for (const [index, pattern] of [
+    [before, /^before\b/i],
+    [after, /^after\b/i],
+  ] as const) {
+    const wrapper = paragraph.children[index];
+    const image = wrapper?.type === "element" ? wrapper.children[0] : undefined;
+    if (image?.type !== "element" || !pattern.test(String(image.properties.alt ?? "").trim())) return false;
+  }
+  if (
+    !paragraph.children.slice(0, before).every(isWhitespace) ||
+    !paragraph.children.slice(before + 1, after).every(isWhitespace)
+  )
+    return false;
+  const tail = paragraph.children.slice(after + 1);
+  if (tail.every(isWhitespace)) return true;
+  let lineBreak = false;
+  for (const [index, child] of tail.entries()) {
+    if (child.type === "element" && child.tagName === "br") {
+      lineBreak = true;
+      continue;
+    }
+    const leading = child.type === "text" ? (/^\s*/.exec(child.value)?.[0] ?? "") : "";
+    if (leading.includes("\n")) lineBreak = true;
+    if (isWhitespace(child)) continue;
+    if (!lineBreak) return false;
+    const effect = tail.slice(index);
+    const prefix = paragraph.children.slice(0, after + 1 + index);
+    if (child.type === "text" && leading) {
+      prefix.push({ type: "text", value: leading });
+      effect[0] = { type: "text", value: child.value.slice(leading.length) };
+    }
+    paragraph.children = [
+      ...prefix,
+      { type: "element", tagName: "span", properties: { className: ["emend-media-effect"] }, children: effect },
+    ];
+    return true;
+  }
+  return false;
+}
 
 /** Wrap the images marked by the resolver and flag paragraphs that hold nothing else. */
 function wrapMedia(
@@ -246,9 +293,10 @@ function wrapMedia(
   if (node.type === "element" && node.tagName === "p") {
     const spans = node.children.filter(isMediaSpan);
     const rest = node.children.filter((child) => !isMediaSpan(child));
-    if (spans.length > 0 && rest.every((child) => child.type === "text" && child.value.trim() === "")) {
+    const pair = wrapMediaPair(node);
+    if (pair || (spans.length > 0 && rest.every(isWhitespace))) {
       const classes = Array.isArray(node.properties.className) ? node.properties.className : [];
-      node.properties.className = [...classes, "emend-media-row"];
+      node.properties.className = [...classes, "emend-media-row", ...(pair ? ["emend-media-pair"] : [])];
     }
   }
 }

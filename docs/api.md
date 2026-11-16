@@ -186,10 +186,26 @@ the image's displayed pixel size, read by the server from the stored bytes at pu
 orientation applied); they are absent when the server cannot read the size. The wrapper span also has
 the class `emend-media-sized` exactly when the server sent `width` and `height`. On a declared media image,
 author-written width and height are always dropped. A paragraph holding only
-such images also has the class `emend-media-row`. Author classes keep the `user-content-`
+such images also has the class `emend-media-row`.
+A paragraph with exactly two media spans gets `emend-media-row emend-media-pair` when their trimmed
+alts match `^before\b` and `^after\b`, case-insensitively, in that order.
+Only whitespace may precede or separate the images.
+An optional effect follows the second image after a newline in leading text whitespace or a `br`.
+Its content, including inline elements, goes in one `span.emend-media-effect` through the paragraph's end.
+The span starts at the first non-whitespace content; preceding whitespace and breaks stay outside it.
+Other text before the images or on the second image's line prevents a pair.
+The effect wrapper changes neither text nor block ids. Author classes keep the `user-content-`
 prefix, so they never match the generated classes. A block's id covers each image's alt text, path
 and SHA-256, so a re-shot image at the same path shows as changed. Markdown docs render their listed
 image assets with the same markup, resolved relative to the doc's folder. Remote images stay dropped.
+Markdown docs get the same pair and effect markup because they share the renderer.
+
+Only a writeup topic's Example turns labelled Before/After lines into aligned rows.
+The paragraph gets `emend-example-rows`; each labelled line gets `emend-example-row`.
+Its label through the colon gets `emend-example-label`, and its value gets `emend-example-value`.
+Introductory lines get `emend-example-line`; unlabelled lines after a label continue its value.
+Whitespace after a label stays in its value. Only separators before labelled lines stay between rows.
+Paragraphs containing media spans keep their media markup. Text and block ids stay unchanged.
 
 ### Downloads
 
