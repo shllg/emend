@@ -35,15 +35,15 @@ const stateSource = `stateDiagram-v2
 
 test("entity codes use distinct Latin stand-ins and reuse repeated codes", () => {
   const encoded = encodeCodes(stateSource);
-  expect([...encoded.characters.values()]).toEqual(['"', ":", "\u2014", "<"]);
+  expect([...encoded.characters.values()]).toEqual(['"', ":", "<"]);
   for (const standIn of encoded.characters.keys()) expect(standIn).toMatch(/^[\u0100-\u024f]$/u);
-  const [quote, colon, dash, less] = encoded.characters.keys();
-  if (!quote || !colon || !dash || !less) throw new Error("Missing entity stand-ins");
+  const [quote, colon, less] = encoded.characters.keys();
+  if (!quote || !colon || !less) throw new Error("Missing entity stand-ins");
   expect(encoded.source).toBe(
     stateSource
       .replaceAll("#quot;", quote)
       .replaceAll("#58;", colon)
-      .replaceAll("#8212;", dash)
+      .replaceAll("#8212;", "\u2014")
       .replaceAll("#lt;", less),
   );
   expect(encoded.source.split(quote)).toHaveLength(5);
@@ -92,6 +92,28 @@ test("HTML references reserve their decoded characters before choosing stand-ins
   for (const standIn of encoded.characters.keys()) expect("\u0100\u0101\u0102\u0103").not.toContain(standIn);
 });
 
+test.each(["&Amacr\u00b6\u00df", "\ufb02\u00b0Amacr\u00b6\u00df", "\ufb02\u00b0\u00b0256\u00b6\u00df"])(
+  "references formed from Mermaid markers reserve their decoded characters: %s",
+  (reference) => {
+    const encoded = encodeCodes(`flowchart LR; a["${reference} #65;"]`);
+    expect([...encoded.characters.values()]).toEqual(["A"]);
+    expect(encoded.characters.has("\u0100")).toBe(false);
+  },
+);
+
+test.each([
+  { code: "#quot;", parses: 1 },
+  { code: "#8212;", parses: 0 },
+  { code: "", parses: 0 },
+])("reference scanning batches distinct references only when stand-ins are needed: $code", ({ code, parses }) => {
+  const parse = vi.spyOn(DOMParser.prototype, "parseFromString");
+  const references = Array.from({ length: 50 }, (_, index) => `&a${index + 1};`);
+  encodeCodes(`flowchart LR; a["${references.join(" ")} ${code}"]`);
+  const calls = parse.mock.calls.filter(([input]) => input.includes("&a1;"));
+  expect(calls).toHaveLength(parses);
+  if (parses > 0) expect(calls[0]?.[0]).toBe(`x${references.join("\n")}`);
+});
+
 test("non-ASCII letters are inlined and reserved before choosing stand-ins for ASCII", () => {
   const encoded = encodeCodes("#quot; #26085; #228; #65; #257; #101;nd");
   expect(encoded.source).toBe("\u0100 \u65e5 \u00e4 \u0102 \u0101 \u0103nd");
@@ -105,19 +127,48 @@ test("non-ASCII letters are inlined and reserved before choosing stand-ins for A
   expect(encoded.characters.has("\u0101")).toBe(false);
 });
 
+test.each([
+  { source: "\u00b6#223;", prefix: "\u00b6", character: "\u00df" },
+  { source: "\ufb02#176;", prefix: "\ufb02", character: "\u00b0" },
+  { source: "#182;", prefix: "", character: "\u00b6" },
+  { source: "#64258;", prefix: "", character: "\ufb02" },
+])("entity codes never inline Mermaid marker characters: $source", ({ source, prefix, character }) => {
+  const encoded = encodeCodes(source);
+  expect([...encoded.characters.values()]).toEqual([character]);
+  const [standIn] = encoded.characters.keys();
+  expect(encoded.source).toBe(`${prefix}${standIn}`);
+  expect(encoded.source).not.toContain("\u00b6\u00df");
+  expect(encoded.source).not.toContain("\ufb02\u00b0");
+});
+
+test("non-ASCII printable characters are inlined for exact label measurements", () => {
+  const encoded = encodeCodes("#11835; #8212; #8594; #9829; #128512; e#769; #57344; #178;");
+  expect(encoded).toEqual({
+    source: "\u2e3b \u2014 \u2192 \u2665 \u{1f600} e\u0301 \ue000 \u00b2",
+    characters: new Map(),
+  });
+});
+
+test("spaces, controls, separators, format and unassigned characters use stand-ins", () => {
+  const encoded = encodeCodes("#160; #9; #8232; #8233; #8238; #65535; #888;");
+  expect([...encoded.characters.values()]).toEqual(["\u00a0", "\t", "\u2028", "\u2029", "\u202e", "\uffff", "\u0378"]);
+  expect(encoded.source).toMatch(/^[\u0100-\u024f ]+$/u);
+  expect(encoded.source).not.toContain("\uffff");
+});
+
 test("stand-ins use the nearest width in the frame font", () => {
   const context = {
     font: "",
     measureText: vi.fn((text: string) => ({
-      width: ["\u2014", "\u0152"].includes(text) ? 100 : ['"', "\u013a"].includes(text) ? 30 : 50,
+      width: ["@", "\u0152"].includes(text) ? 100 : ['"', "\u013a"].includes(text) ? 30 : 50,
     })),
   };
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context as unknown as CanvasRenderingContext2D);
-  const encoded = encodeCodes("#8212; #quot; #8212;");
+  const encoded = encodeCodes("#64; #quot; #64;");
   expect(encoded.source).toBe("\u0152 \u013a \u0152");
   expect(encoded.characters).toEqual(
     new Map([
-      ["\u0152", "\u2014"],
+      ["\u0152", "@"],
       ["\u013a", '"'],
     ]),
   );
@@ -129,11 +180,11 @@ test.each(["null", "throws"])("canvas %s falls back to the lowest available code
     if (mode === "throws") throw new Error("Canvas unavailable");
     return null;
   });
-  const encoded = encodeCodes("#8212; #quot;");
+  const encoded = encodeCodes("#64; #quot;");
   expect(encoded.source).toBe("\u0100 \u0101");
   expect(encoded.characters).toEqual(
     new Map([
-      ["\u0100", "\u2014"],
+      ["\u0100", "@"],
       ["\u0101", '"'],
     ]),
   );
@@ -147,7 +198,7 @@ test.each([
   expect(encodeCodes(`${used} #quot;`).characters).toEqual(new Map([[expected, '"']]));
 });
 
-test("repeated unknown entities share one cached decode, including HTML references", () => {
+test("repeated unknown entity codes share one cached decode", () => {
   const parse = vi.spyOn(DOMParser.prototype, "parseFromString");
   const source = "#nosuchentity; #nosuchentity; &nosuchentity;";
   expect(encodeCodes(source)).toEqual({ source, characters: new Map() });

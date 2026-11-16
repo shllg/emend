@@ -22,22 +22,25 @@ test.each([stateSource, flowchartSource])("real Mermaid parses entity stand-ins 
 
 // Real renders return empty SVG strings in Happy DOM, and link nodes lack getBBox.
 // Check real parser labels here; the frame tests cover sanitizing and text restoration.
-test("real Mermaid preserves stand-ins and inlined letters in state descriptions", async () => {
+test("real Mermaid preserves stand-ins and inlined printable characters in state descriptions", async () => {
   mermaid.initialize(frameConfig(false));
-  const encoded = encodeCodes(`${stateSource}\n  s4: letters #26085; #228; #257;\n  s3 --> s4`);
+  const encoded = encodeCodes(
+    `${stateSource}\n  s4: letters #26085; #228; #257;\n  s3 --> s4\n  s5: #8212; #9829; \u00b6#223;\n  s4 --> s5`,
+  );
   const diagram = await mermaid.mermaidAPI.getDiagramFromText(encoded.source);
   const db = diagram.db as typeof diagram.db & {
     getStates(): Map<string, { descriptions?: string[] }>;
     getRelations(): { relationTitle?: string }[];
   };
-  const [quote, colon, dash, less] = encoded.characters.keys();
-  expect(encoded.characters.size).toBe(4);
+  const [quote, colon, less, marker] = encoded.characters.keys();
+  expect([...encoded.characters.values()]).toEqual(['"', ":", "<", "\u00df"]);
   const states = db.getStates();
   expect(states.get("s0")?.descriptions).toEqual([`quote ${quote}a${quote}`]);
   expect(states.get("s1")?.descriptions).toEqual([`colon a${colon} b`]);
-  expect(states.get("s2")?.descriptions).toEqual([`em dash a ${dash} b`]);
+  expect(states.get("s2")?.descriptions).toEqual(["em dash a \u2014 b"]);
   expect(states.get("s3")?.descriptions).toEqual([`less a ${less} b`]);
   expect(states.get("s4")?.descriptions).toEqual(["letters \u65e5 \u00e4 \u0101"]);
+  expect(states.get("s5")?.descriptions).toEqual([`\u2014 \u2665 \u00b6${marker}`]);
   expect(db.getRelations()).toEqual(
     expect.arrayContaining([expect.objectContaining({ relationTitle: `next ${quote}step${quote}` })]),
   );
