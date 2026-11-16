@@ -5,7 +5,6 @@ import { closeSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
 import { markerTerminal } from "./github.ts";
 import { ttyDevice } from "./terminal.ts";
 import { terminal } from "./worktree.ts";
@@ -20,18 +19,25 @@ for (const [module, reader] of [
     execFileSync("mkfifo", [fifo]);
     const writer = openSync(fifo, "r+");
     const source = `
-      import { openSync } from 'node:fs';
+      import fs, { openSync, writeSync } from 'node:fs';
+      import { syncBuiltinESMExports } from 'node:module';
       import { ttyDevice } from ${JSON.stringify(new URL("./terminal.ts", import.meta.url).href)};
       import { ${reader} } from ${JSON.stringify(new URL(`./${module}`, import.meta.url).href)};
       Object.defineProperty(process, 'stdin', { get() { throw new Error('stdin was touched'); } });
       ${reader}.stdinTTY?.();
       ${reader}.isTTY?.();
       ttyDevice.path = ${JSON.stringify(fifo)};
-      ttyDevice.open = (path) => {
-        const fd = openSync(path, 'r');
-        process.stdout.write('ready\\n');
-        return fd;
+      ttyDevice.open = (path) => openSync(path, 'r');
+      const readSync = fs.readSync;
+      let signaled = false;
+      fs.readSync = (...args) => {
+        if (!signaled) {
+          signaled = true;
+          writeSync(1, 'ready\\n');
+        }
+        return readSync(...args);
       };
+      syncBuiltinESMExports();
       process.stdout.write(${reader}.readLine('') + '\\n');
     `;
     const child = spawn(process.execPath, ["--input-type=module", "-e", source], { stdio: ["ignore", "pipe", "pipe"] });
@@ -48,11 +54,10 @@ for (const [module, reader] of [
       await Promise.race([
         once(child.stdout, "data"),
         closed.then(() => {
-          throw new Error("reader exited before opening the test descriptor");
+          throw new Error("reader exited before reading the test descriptor");
         }),
       ]);
       assert.equal(output, "ready\n");
-      await delay(25); // Input deliberately arrives after the real blocking read begins.
       assert.equal(child.exitCode, null);
       writeSync(writer, "synthetic-answer\n");
       assert.deepEqual(await closed, [0, null]);

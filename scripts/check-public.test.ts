@@ -4696,20 +4696,32 @@ for (const [index, [name, body, expected, bothTerms]] of round21Witnesses.entrie
   });
 
 test("round 21 CX3: trailing-padding work scales linearly", (t) => {
-  const timings: number[] = [];
   for (const length of [16000, 32000, 64000]) {
     const body = `"${round20BinaryPrefix}AAAAAAAA\n${"=".repeat(length)}!"`;
-    checkText(body, "fixture.md", empty); // Warm the scanner before measuring.
-    const samples: number[] = [];
-    for (let run = 0; run < 3; run++) {
-      const start = performance.now();
-      assert.deepEqual(checkText(body, "fixture.md", empty), []);
-      samples.push(performance.now() - start);
-    }
-    timings.push(samples.sort((a, b) => a - b)[1]!);
+    const budget = new ScanBudget();
+    const limit = 12 * body.length;
+    let paddingWork = 0;
+    const replace = String.prototype.replace;
+    const replacements = t.mock.method(String.prototype, "replace", function (this: string, search: string | RegExp, replacement: string) {
+      // An unanchored padding strip retries every '=' suffix when punctuation follows it.
+      if (search instanceof RegExp && search.source === "=+$") {
+        for (const run of this.matchAll(/=+/g)) {
+          const count = run[0].length;
+          paddingWork += run.index + count === this.length ? count : count * (count + 1) / 2;
+          // Reject the regressed work before executing the quadratic regex.
+          if (paddingWork + budget.inlineTerminatorWork > limit) budget.spend(Infinity);
+        }
+      }
+      return replace.call(this, search, replacement);
+    });
+    try {
+      assert.deepEqual(checkText(body, "fixture.md", empty, { budget }), []);
+      assert.ok(budget.inlineTerminatorWork >= body.length, "the padding scan must be counted");
+      assert.ok(paddingWork + budget.inlineTerminatorWork <= limit, "padding work must stay linear");
+      // The former padding-strip operation must fail the same deterministic bound.
+      assert.throws(() => body.replace(/=+$/, ""), /budget/);
+    } finally { replacements.mock.restore(); }
   }
-  t.diagnostic(`padding 16000/32000/64000: ${timings.map((ms) => ms.toFixed(2)).join(" / ")} ms (median of 3)`);
-  assert.ok(timings[2]! <= timings[0]! * 8 + 100, "4x input must stay within a generous linear bound");
 });
 
 test("round 21.1: hit-only joins do no work without a quote stop and resume only its suffix", () => {

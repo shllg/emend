@@ -892,9 +892,8 @@ test("R19 CX7 nested body identity timing", (t) => {
     assert.equal(classify(command), undefined);
     const ms = performance.now() - start;
     measurements.push({ count, ms });
-    assert.ok(ms < 1000 + count * 5, `${count} statements exceeded the linear budget`);
   }
-  // Count serialized characters too: catch quadratic work even on fast machines.
+  // Serialized characters bound the work independently of machine speed.
   const measure = (source: string) => {
     let characters = 0;
     const pure = source.slice(0, source.indexOf("function mainCheckout(")).replace(/^import .*;\n/gm, "");
@@ -2600,7 +2599,6 @@ test("R18 CX6 OP3 timing and bounded analysis", (t) => {
     assert.equal(runner.inspect(command), count === 2000 ? "complex" : undefined);
     const ms = performance.now() - start;
     measurements.push({ count, nested, ms, ...runner.counters });
-    assert.ok(ms < 1000 + count * 5, "linear time budget");
     assert.equal(runner.counters.bodies, nested ? count + 1 : 1);
     assert.ok(runner.counters.targets >= count && runner.counters.targets <= count * 5);
     assert.ok(runner.counters.components >= count * 2 && runner.counters.components <= count * 20);
@@ -2625,7 +2623,6 @@ test("R20 CX6 assignment scope timing", (t) => {
     assert.equal(classify(command), count === 10000 ? "complex" : undefined);
     const ms = performance.now() - start;
     measurements.push({ count, ms });
-    assert.ok(ms < 1000 + count * 5, "linear assignment budget");
   }
   const copied = (source: string) => {
     let entries = 0;
@@ -2656,7 +2653,6 @@ test("R20 OP1 nested deep-path timing and charged work", (t) => {
     const ms = performance.now() - start;
     measurements.push({ count, depth, ms, finding: finding ?? "none" });
     assert.ok(finding === undefined || finding === "complex");
-    assert.ok(ms < 1000 + count * depth * 0.05, "linear deep-path budget");
   }
   const command = "for i in 1 2; do for j in 1 2; do touch " +
     Array.from({ length: 200 }, (_, i) => `/tmp/w${i}/${"q/".repeat(180)}`).join(" ") + "; done; done";
