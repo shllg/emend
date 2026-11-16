@@ -4696,32 +4696,83 @@ for (const [index, [name, body, expected, bothTerms]] of round21Witnesses.entrie
   });
 
 test("round 21 CX3: trailing-padding work scales linearly", (t) => {
+  let ms = 0;
   for (const length of [16000, 32000, 64000]) {
     const body = `"${round20BinaryPrefix}AAAAAAAA\n${"=".repeat(length)}!"`;
     const budget = new ScanBudget();
     const limit = 12 * body.length;
     let paddingWork = 0;
-    const replace = String.prototype.replace;
-    const replacements = t.mock.method(String.prototype, "replace", function (this: string, search: string | RegExp, replacement: string) {
+    const exec = RegExp.prototype.exec;
+    const paddingSuffix = /=(?:[+*?]|\{\d+(?:,\d*)?\})\??\)*\$/;
+    const chargePadding = (pattern: RegExp, input: string) => {
+      // Use the original exec: recognizing a pattern must not enter the mocks again.
+      if (!exec.call(paddingSuffix, pattern.source)) return;
       // An unanchored padding strip retries every '=' suffix when punctuation follows it.
-      if (search instanceof RegExp && search.source === "=+$") {
-        for (const run of this.matchAll(/=+/g)) {
-          const count = run[0].length;
-          paddingWork += run.index + count === this.length ? count : count * (count + 1) / 2;
-          // Reject the regressed work before executing the quadratic regex.
-          if (paddingWork + budget.inlineTerminatorWork > limit) budget.spend(Infinity);
-        }
+      for (let index = 0; index < input.length; index++) {
+        if (input[index] !== "=") continue;
+        const start = index;
+        while (input[index] === "=") index++;
+        const count = index - start;
+        paddingWork += index === input.length ? count : count * (count + 1) / 2;
+        // Reject the regressed work before executing the quadratic regex.
+        if (paddingWork + budget.inlineTerminatorWork > limit) budget.spend(Infinity);
       }
-      return replace.call(this, search, replacement);
-    });
+    };
+    let depth = 0;
+    const mocks: { mock: { restore(): void } }[] = [];
     try {
+      for (const method of [Symbol.replace, Symbol.match, Symbol.matchAll, Symbol.search, Symbol.split, "exec", "test"] as const) {
+        const original = RegExp.prototype[method];
+        mocks.push(t.mock.method(RegExp.prototype, method, function (this: RegExp, input: string, ...args: unknown[]) {
+          if (depth) return Reflect.apply(original, this, [input, ...args]);
+          depth++;
+          try {
+            chargePadding(this, input);
+            const result = Reflect.apply(original, this, [input, ...args]);
+            if (method !== Symbol.matchAll) return result;
+            // matchAll defers exec until iteration; guard those calls as well.
+            const matches = result as IterableIterator<RegExpMatchArray>;
+            return (function* () {
+              while (true) {
+                let next: IteratorResult<RegExpMatchArray>;
+                depth++;
+                try { next = matches.next(); } finally { depth--; }
+                if (next.done) return;
+                yield next.value;
+              }
+            })();
+          } finally { depth--; }
+        }));
+      }
+      const start = performance.now();
       assert.deepEqual(checkText(body, "fixture.md", empty, { budget }), []);
+      ms += performance.now() - start;
       assert.ok(budget.inlineTerminatorWork >= body.length, "the padding scan must be counted");
       assert.ok(paddingWork + budget.inlineTerminatorWork <= limit, "padding work must stay linear");
-      // The former padding-strip operation must fail the same deterministic bound.
-      assert.throws(() => body.replace(/=+$/, ""), /budget/);
-    } finally { replacements.mock.restore(); }
+      // Each former quadratic form must independently fail the same deterministic bound.
+      for (const strip of [
+        (input: string) => input.replace(/=+$/, ""),
+        (input: string) => input.match(/=*$/),
+        (input: string) => /(=+)$/.exec(input),
+        (input: string) => input.search(/={1,}$/),
+        (input: string) => input.replaceAll(/=+$/g, ""),
+        (input: string) => [...input.matchAll(/=+$/g)],
+        (input: string) => input.split(/=+$/),
+        (input: string) => /=+$/.test(input),
+      ]) {
+        const padding = "=".repeat(16);
+        paddingWork = 0;
+        strip(padding);
+        assert.equal(paddingWork, padding.length, "nested regex calls must not charge the same work twice");
+        paddingWork = 0;
+        assert.throws(() => strip(body), /budget/);
+        assert.ok(paddingWork > limit, "the quadratic padding work alone must exceed the bound");
+      }
+    } finally {
+      for (const mock of mocks.reverse()) mock.mock.restore();
+    }
   }
+  t.diagnostic(`trailing-padding scan: ${ms.toFixed(1)} ms`);
 });
 
 test("round 21.1: hit-only joins do no work without a quote stop and resume only its suffix", () => {
