@@ -1123,3 +1123,35 @@ test("Checkbox renders a zero description as a React node with its description i
   const checkbox = screen.getByRole("checkbox", { name: /Include document/, description: "0" });
   expect(document.getElementById(checkbox.getAttribute("aria-describedby") ?? "")?.textContent).toBe("0");
 });
+
+test.each(["full", "right", "left", "bottom"] as const)("Sheet %s preserves its sizing and body defaults", (side) => {
+  mount(
+    <Sheet
+      side={side}
+      title="Seed"
+      open
+      {...(side === "full" ? { bodyClassName: "p-0 space-y-0", "data-diff-scroll": true } : {})}
+    >
+      <p>Diff body</p>
+    </Sheet>,
+  );
+  const dialog = screen.getByRole("dialog", { name: "Seed" });
+  const body = screen.getByText("Diff body").parentElement;
+  expect(dialog.classList.contains("inset-0")).toBe(side === "full");
+  expect(dialog.classList.contains("h-[var(--visual-height,100dvh)]")).toBe(side === "full");
+  for (const padding of [
+    "pt-[env(safe-area-inset-top)]",
+    "pr-[env(safe-area-inset-right)]",
+    "pl-[env(safe-area-inset-left)]",
+  ]) {
+    expect(dialog.classList.contains(padding)).toBe(side === "full");
+  }
+  expect(dialog.classList.contains("pb-[var(--sheet-safe-bottom,env(safe-area-inset-bottom))]")).toBe(
+    side === "full" || side === "bottom",
+  );
+  expect(body?.hasAttribute("data-diff-scroll")).toBe(side === "full");
+  expect(body?.classList.contains("p-4")).toBe(side !== "full");
+  expect(body?.classList.contains("p-0")).toBe(side === "full");
+  expect(dialog.querySelector("[data-sheet-grab]") !== null).toBe(side === "bottom");
+  if (side === "full") expect(dialog.className).not.toContain("rounded");
+});

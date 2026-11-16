@@ -1,4 +1,9 @@
 @layer components {
+  .em-code-panel {
+    flex: 0 0 clamp(380px, 50%, 880px);
+    border-left: 1px solid var(--border-1);
+  }
+
   .em-resize-handle {
     position: relative;
     z-index: 1;

@@ -245,8 +245,9 @@ export type DiffContext = {
 export function FileDiff({
   file,
   topicCollapsed,
+  hidden,
   ...context
-}: DiffContext & { file: FileView; topicCollapsed: boolean }) {
+}: DiffContext & { file: FileView; topicCollapsed: boolean; hidden?: boolean }) {
   const ref = useRef<HTMLElement>(null);
   const header = useRef<HTMLElement>(null);
   const foldSpot = useRef<{ at: number; time: number }>(undefined);
@@ -344,6 +345,7 @@ export function FileDiff({
       ref={ref}
       data-diff-section
       data-diff-file
+      hidden={hidden}
       data-diff-loading={
         (mounted &&
           !collapsed &&

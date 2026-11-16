@@ -23,6 +23,8 @@ export function TopicSection({
   writeupLink,
   collapsed,
   onToggle,
+  hidden,
+  onlyFile,
   ...context
 }: DiffContext & {
   topic: Topic;
@@ -32,6 +34,8 @@ export function TopicSection({
   writeupLink?: string;
   collapsed: boolean;
   onToggle: () => void;
+  hidden?: boolean;
+  onlyFile?: string;
 }) {
   const layout = useLayout();
   const phone = layout === "phone";
@@ -88,6 +92,7 @@ export function TopicSection({
   return (
     <section
       ref={section}
+      hidden={hidden}
       id={`diff-topic-${topic.slug}`}
       data-diff-section
       data-topic={topic.slug}
@@ -127,6 +132,7 @@ export function TopicSection({
           />
           <IconButton
             label="Comment on topic"
+            hidden={onlyFile !== undefined}
             icon={MessageSquarePlus}
             size="sm"
             onClick={() => context.onActive({ kind: "topic", slug: topic.slug })}
@@ -151,26 +157,36 @@ export function TopicSection({
           )}
         </div>
       )}
-      <div className="em-diff-discussion">
-        {active?.kind === "topic" && active.slug === topic.slug && (
-          <Composer
-            surface="diff"
-            reviewId={context.reviewId}
-            revision={context.revision}
-            target={active}
-            topics={context.topics}
-            onSaved={close}
-            onCancel={close}
-          />
-        )}
-        {threads.map((thread) => (
-          <ThreadCard surface="diff" key={thread.id} {...context} thread={thread} />
-        ))}
-      </div>
+      {(!phone || onlyFile === undefined) && (
+        <div className="em-diff-discussion" hidden={onlyFile !== undefined}>
+          {active?.kind === "topic" && active.slug === topic.slug && (
+            <Composer
+              surface="diff"
+              reviewId={context.reviewId}
+              revision={context.revision}
+              target={active}
+              topics={context.topics}
+              onSaved={close}
+              onCancel={close}
+            />
+          )}
+          {threads.map((thread) => (
+            <ThreadCard surface="diff" key={thread.id} {...context} thread={thread} />
+          ))}
+        </div>
+      )}
       <div hidden={collapsed} className="px-3 pb-3">
-        {files.map((file) => (
-          <FileDiff key={file.id} file={file} topicCollapsed={collapsed} {...context} />
-        ))}
+        {files
+          .filter((file) => !phone || onlyFile === undefined || file.id === onlyFile)
+          .map((file) => (
+            <FileDiff
+              key={file.id}
+              file={file}
+              hidden={onlyFile !== undefined && file.id !== onlyFile}
+              topicCollapsed={collapsed}
+              {...context}
+            />
+          ))}
       </div>
     </section>
   );

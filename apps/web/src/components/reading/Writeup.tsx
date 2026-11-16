@@ -1,6 +1,9 @@
 import type { RenderedWriteup, RevisionView } from "@emend/contract";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { type CodeFocus, sameCodeFocus } from "../../lib/code-focus.ts";
 import { plural } from "../../lib/count.ts";
+import { diffGroups } from "../../lib/diff-groups.ts";
 import { rankedTopics } from "../../lib/topics.ts";
 import { readFact, riskFact, sinceFact, undoFact, usesOpeningCard } from "../../lib/writeup-facts.ts";
 import type { ReviewSearch } from "../../router.tsx";
@@ -26,6 +29,7 @@ export function Writeup({
   visible = true,
   onCurrentTopic,
   onNote,
+  code,
   ...props
 }: ReaderProps & {
   writeup: RenderedWriteup;
@@ -38,6 +42,7 @@ export function Writeup({
   visible?: boolean;
   onCurrentTopic?: (slug: string | undefined) => void;
   onNote?: (id: string) => void;
+  code?: { current?: CodeFocus; onOpen: (focus: CodeFocus, opener: HTMLElement) => void };
 }) {
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => () => onCurrentTopic?.(undefined), [onCurrentTopic]);
@@ -60,11 +65,8 @@ export function Writeup({
   const groups = useMemo(() => {
     const ranked = rankedTopics(topics);
     const bySlug = new Map(ranked.map((entry) => [entry.topic.slug, entry]));
-    const counts = new Map<string, number>();
-    for (const file of files) {
-      if (file.role === "diff" && file.topic) counts.set(file.topic, (counts.get(file.topic) ?? 0) + 1);
-    }
-    const fileCount = (slug: string) => counts.get(slug) ?? 0;
+    const diffs = diffGroups({ files, topics });
+    const fileCount = (slug: string) => diffs.get(slug)?.files.length ?? 0;
     const blockTopics = new Map(
       writeup.sections.flatMap((section) => section.blocks.map((block) => [block.id, section.topic] as const)),
     );
@@ -167,6 +169,15 @@ export function Writeup({
         continue;
       }
       const { topic, rank } = entry;
+      const topicFiles = diffs.get(topic.slug)?.files ?? [];
+      const topicFocus: CodeFocus = { kind: "topic", slug: topic.slug };
+      const topicOpen = sameCodeFocus(code?.current, topicFocus);
+      const Chevron = topicOpen ? ChevronLeft : ChevronRight;
+      const names = new Map<string, number>();
+      for (const file of topicFiles) {
+        const name = file.path.split("/").at(-1) ?? file.path;
+        names.set(name, (names.get(name) ?? 0) + 1);
+      }
       let group = groups.at(-1);
       if (group?.id !== `topic-${topic.slug}`) {
         group = {
@@ -187,16 +198,29 @@ export function Writeup({
           ),
           blocks: [],
           subsections: [],
-          action: fileCount(topic.slug) > 0 && (
-            <a
-              href={link(`diff-topic-${topic.slug}`, true)}
-              aria-label={`Files in diff: ${topic.title}`}
-              className="em-topic-files"
-            >
-              {fileCount(topic.slug)} {plural(fileCount(topic.slug), "file")} · Files in diff{" "}
-              <span aria-hidden="true">→</span>
-            </a>
-          ),
+          action:
+            topicFiles.length > 0 &&
+            (code ? (
+              <button
+                type="button"
+                className="em-topic-code"
+                aria-label={`Code: ${topic.title}`}
+                aria-expanded={topicOpen}
+                data-code-target={`topic:${topic.slug}`}
+                onClick={(event) => code.onOpen(topicFocus, event.currentTarget)}
+              >
+                Code <Chevron size={14} aria-hidden="true" />
+              </button>
+            ) : (
+              <a
+                href={link(`diff-topic-${topic.slug}`, true)}
+                aria-label={`Files in diff: ${topic.title}`}
+                className="em-topic-files"
+              >
+                {topicFiles.length} {plural(topicFiles.length, "file")} · Files in diff{" "}
+                <span aria-hidden="true">→</span>
+              </a>
+            )),
           meta: (
             <>
               <p
@@ -212,6 +236,36 @@ export function Writeup({
                 <p className="em-topic-blast">
                   Blast radius: <strong>{topic.blastRadius.scope}</strong> — {topic.blastRadius.note}
                 </p>
+              )}
+              {topicFiles.length > 0 && (
+                <ul aria-label="Files" className="em-topic-file-chips">
+                  {topicFiles.map((file) => {
+                    const name = file.path.split("/").at(-1) ?? file.path;
+                    const label = (names.get(name) ?? 0) > 1 ? file.path : name;
+                    const focus: CodeFocus = { kind: "file", id: file.id };
+                    return (
+                      <li key={file.id}>
+                        {code ? (
+                          <button
+                            type="button"
+                            title={file.path}
+                            dir="auto"
+                            aria-label={`Code: ${file.path}`}
+                            aria-expanded={sameCodeFocus(code.current, focus)}
+                            data-code-target={`file:${file.id}`}
+                            onClick={(event) => code.onOpen(focus, event.currentTarget)}
+                          >
+                            {label}
+                          </button>
+                        ) : (
+                          <a href={link(`diff-file-${file.id}`, true)} title={file.path} dir="auto">
+                            {label}
+                          </a>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
               )}
             </>
           ),
@@ -269,6 +323,7 @@ export function Writeup({
     docs,
     read,
     changedSince,
+    code,
     link,
     props.threads,
     props.revision,

@@ -20,7 +20,6 @@ import { afterEach, beforeEach, describe, expect, onTestFinished, test, vi } fro
 import { renderWriteup } from "../../../packages/core/src/render/writeup.ts";
 import { App } from "./App.tsx";
 import type { InboxData } from "./api/queries.ts";
-import type { DiffPaneProps } from "./components/diff/DiffPane.tsx";
 import type { ParsedDiff } from "./components/diff/FileDiff.tsx";
 import { parsePair } from "./components/diff/parse.worker.ts";
 import type { DiffParser } from "./components/diff/parse-client.ts";
@@ -38,6 +37,7 @@ const loading = vi.hoisted(() => ({
   ready: undefined as Promise<void> | undefined,
   parser: undefined as DiffParser | undefined,
   rendering: "normal" as "normal" | "delayed" | "without-slots",
+  link: undefined as string | undefined,
 }));
 vi.mock("@pierre/diffs/react", async (original) => {
   const actual = await original<typeof import("@pierre/diffs/react")>();
@@ -57,15 +57,18 @@ vi.mock("./components/diff/LazyDiffPane.tsx", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./components/diff/LazyDiffPane.tsx")>();
   return {
     ...actual,
-    LazyDiffPane: (props: DiffPaneProps) => (
-      <actual.LazyDiffPane
-        {...props}
-        parser={loading.parser}
-        load={async () => {
-          await loading.ready;
-          return import("./components/diff/DiffPane.tsx");
-        }}
-      />
+    LazyDiffPane: (props: ComponentProps<typeof actual.LazyDiffPane>) => (
+      <>
+        {props.focus && loading.link && <a href={loading.link}>Read the writeup</a>}
+        <actual.LazyDiffPane
+          {...props}
+          parser={loading.parser}
+          load={async () => {
+            await loading.ready;
+            return import("./components/diff/DiffPane.tsx");
+          }}
+        />
+      </>
     ),
   };
 });
@@ -169,6 +172,7 @@ beforeEach(() => {
   loading.ready = loaded.promise;
   loading.parser = undefined;
   loading.rendering = "normal";
+  loading.link = undefined;
   vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(function (this: HTMLElement) {
     const rect = this.getBoundingClientRect();
     return [rect.width || rect.height ? rect : new DOMRect(0, 100, 200, 20)] as unknown as DOMRectList;
@@ -338,51 +342,63 @@ test.each([
   },
 );
 
-test.each([1280, 768, 390])("Files in diff waits for lazy rendering and scrolls its topic at %s px", async (pixels) => {
-  width = pixels;
-  const scroll = vi.spyOn(diffPresentation, "holdDiffTarget");
-  const { history, container } = mount();
-  const link = await screen.findByRole("link", { name: "Files in diff: Plant a seed" });
-  const href = new URL((link as HTMLAnchorElement).href);
-  expect(href.searchParams.get("tab")).toBe(pixels < 768 ? "diff" : "writeup");
-  expect(href.searchParams.get("rev")).toBe("1");
-  expect(href.hash).toBe("#diff-topic-seed");
-  const block = container.querySelector("[data-block-id]");
-  const reading = screen.getByTestId("reading-pane");
-  reading.scrollTop = 80;
-  fireEvent.click(link);
-  await waitFor(() => expect(history.location.hash).toBe("#diff-topic-seed"));
-  expect(screen.getByText("Loading diff…")).toBeTruthy();
-  expect(scroll.mock.calls.some(([node]) => (node as HTMLElement).id === "diff-topic-seed")).toBe(false);
-  await act(async () => {
-    loaded.resolve();
-  });
-  await waitFor(() =>
-    expect(scroll.mock.calls.some(([node]) => (node as HTMLElement).id === "diff-topic-seed")).toBe(true),
-  );
-  if (pixels >= 1280) {
-    expect(container.querySelector("[data-block-id]")).toBe(block);
-    expect(screen.getByTestId("reading-pane")).toBe(reading);
-    expect(reading.scrollTop).toBe(80);
-    // A second click is a fresh scroll intent even when the URL is unchanged.
-    scroll.mockClear();
+test.each([1280, 768, 390])(
+  "writeup diff links wait for lazy rendering and scroll their topic at %s px",
+  async (pixels) => {
+    width = pixels;
+    if (pixels === 1280) layoutStore.update({ pane: { desktop: "split", tablet: "tabs" } });
+    // A topic without a writeup section keeps its map link to the full Diff tab on every layout.
+    if (pixels < 1280)
+      currentRevision.writeup.sections = currentRevision.writeup.sections.map((section) => ({
+        ...section,
+        topic: null,
+      }));
+    const scroll = vi.spyOn(diffPresentation, "holdDiffTarget");
+    const { history, container } = mount();
+    const link = await screen.findByRole("link", {
+      name: pixels === 1280 ? "Files in diff: Plant a seed" : "Plant a seed",
+    });
+    const href = new URL((link as HTMLAnchorElement).href);
+    expect(href.searchParams.get("tab")).toBe(pixels < 768 ? "diff" : "writeup");
+    expect(href.searchParams.get("rev")).toBe("1");
+    expect(href.hash).toBe("#diff-topic-seed");
+    const block = container.querySelector("[data-block-id]");
+    const reading = screen.getByTestId("reading-pane");
+    reading.scrollTop = 80;
     fireEvent.click(link);
+    await waitFor(() => expect(history.location.hash).toBe("#diff-topic-seed"));
+    expect(screen.getByText("Loading diff…")).toBeTruthy();
+    expect(scroll.mock.calls.some(([node]) => (node as HTMLElement).id === "diff-topic-seed")).toBe(false);
+    await act(async () => {
+      loaded.resolve();
+    });
     await waitFor(() =>
       expect(scroll.mock.calls.some(([node]) => (node as HTMLElement).id === "diff-topic-seed")).toBe(true),
     );
-  } else {
-    if (pixels < 768) {
-      expect(screen.queryByTestId("reading-pane")).toBeNull();
-      expect(screen.getByRole("link", { name: "Diff" }).getAttribute("aria-current")).toBe("page");
-      expect(screen.queryByRole("tabpanel")).toBeNull();
-    } else {
+    if (pixels >= 1280) {
+      expect(container.querySelector("[data-block-id]")).toBe(block);
       expect(screen.getByTestId("reading-pane")).toBe(reading);
-      expect(reading.hidden).toBe(true);
-      expect(screen.getByRole("tab", { name: "Diff" }).getAttribute("aria-selected")).toBe("true");
-      expect(screen.getByRole("tabpanel", { name: "Diff" })).toBeTruthy();
+      expect(reading.scrollTop).toBe(80);
+      // A second click is a fresh scroll intent even when the URL is unchanged.
+      scroll.mockClear();
+      fireEvent.click(link);
+      await waitFor(() =>
+        expect(scroll.mock.calls.some(([node]) => (node as HTMLElement).id === "diff-topic-seed")).toBe(true),
+      );
+    } else {
+      if (pixels < 768) {
+        expect(screen.queryByTestId("reading-pane")).toBeNull();
+        expect(screen.getByRole("link", { name: "Diff" }).getAttribute("aria-current")).toBe("page");
+        expect(screen.queryByRole("tabpanel")).toBeNull();
+      } else {
+        expect(screen.getByTestId("reading-pane")).toBe(reading);
+        expect(reading.hidden).toBe(true);
+        expect(screen.getByRole("tab", { name: "Diff" }).getAttribute("aria-selected")).toBe("true");
+        expect(screen.getByRole("tabpanel", { name: "Diff" })).toBeTruthy();
+      }
     }
-  }
-});
+  },
+);
 
 test.each([1280, 768])(
   "reading tabs have counts, keyboard navigation and a labelled panel at %s px",
@@ -432,7 +448,11 @@ test("a diff search still labels the panel with the first visible reading tab", 
 test.each(
   [1280, 390].flatMap((pixels) =>
     ["missing", "html"].flatMap((threadKind) =>
-      ["files", "map", "map-diff"].map((destination) => ({ pixels, threadKind, destination })),
+      (pixels === 390 ? ["map", "map-diff"] : ["files", "map", "map-diff"]).map((destination) => ({
+        pixels,
+        threadKind,
+        destination,
+      })),
     ),
   ),
 )(
@@ -4071,4 +4091,462 @@ test("R5.1 stored zero fraction is explicitly sent on reload and Back", async ()
   await waitFor(() =>
     expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 0, label: "First", fraction: 0 }, "*"),
   );
+});
+
+const waterFileId = "22222222-2222-4222-8222-222222222222";
+const seedFileId = "33333333-3333-4333-8333-333333333333";
+function addCodeTopics() {
+  const first = currentRevision.files[0];
+  if (!first) throw new Error("Missing file");
+  currentRevision.files.push(
+    { ...first, id: waterFileId, path: "water.txt", topic: "water", order: 1 },
+    { ...first, id: seedFileId, path: "seedling.txt", order: 2 },
+  );
+  currentRevision.topics.push({ slug: "water", title: "Water the garden", summary: "Add water", importance: 2 });
+  currentRevision.writeup.sections.push({ key: "t-water-body", label: "Water details", topic: "water", blocks: [] });
+}
+
+test.each([1280, 768].flatMap((pixels) => ["loading", "failed", "loaded"].map((state) => ({ pixels, state }))))(
+  "Code panel at $pixels px can close while its diff is $state",
+  async ({ pixels, state }) => {
+    width = pixels;
+    if (state === "failed") vi.spyOn(console, "error").mockImplementation(() => {});
+    mount();
+    const opener = await screen.findByRole("button", { name: "Code: Plant a seed" });
+    fireEvent.click(opener);
+    const pane = screen.getByTestId("diff-pane");
+    await within(pane).findByText("Loading diff…");
+    if (state === "failed") {
+      await act(async () => loaded.reject(new Error("Synthetic chunk outage")));
+      await within(pane).findByRole("alert");
+      expect(within(pane).getByText("Could not load the diff.")).toBeTruthy();
+    } else if (state === "loaded") {
+      await act(async () => loaded.resolve());
+      await within(pane).findByRole("region", { name: "Topic Plant a seed" });
+      expect(pane.querySelector(".em-diff-pane")?.hasAttribute("data-toolbar")).toBe(true);
+      expect(pane.querySelector(".em-diff-pane [data-diff-toolbar]")).toBeNull();
+    }
+    expect(pane.querySelectorAll("[data-diff-toolbar]")).toHaveLength(1);
+    expect(within(pane).getByRole("link", { name: "Open in Diff tab" })).toBeTruthy();
+    const close = within(pane).getByRole("button", { name: "Close code panel" });
+    act(() => close.focus());
+    fireEvent.click(close);
+    expect(pane.hidden).toBe(true);
+    expect(opener.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(opener);
+  },
+);
+
+test.each([1280, 768])(
+  "Code panel at %s px switches targets, keeps IDs and restores the full Diff tab",
+  async (pixels) => {
+    width = pixels;
+    addCodeTopics();
+    const { history } = mount();
+    await screen.findByRole("button", { name: "Code: Plant a seed" });
+    const pane = screen.getByTestId("diff-pane");
+    const reading = screen.getByTestId("reading-pane");
+    await act(async () => loaded.resolve());
+    fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    await waitFor(() => expect(pane.hidden).toBe(false));
+    pane.scrollTop = 470;
+    fireEvent.scroll(pane);
+    fireEvent.click(screen.getByRole("tab", { name: "Writeup" }));
+    await waitFor(() => expect(pane.hidden).toBe(true));
+    const opener = await screen.findByRole("button", { name: "Code: Plant a seed" });
+    act(() => opener.focus());
+    fireEvent.click(opener);
+    const seed = await screen.findByRole("region", { name: "Topic Plant a seed" });
+    expect(pane.hidden).toBe(false);
+    expect(pane.getAttribute("aria-label")).toBe("Code: Plant a seed");
+    expect(pane.classList.contains("em-code-panel")).toBe(true);
+    expect(reading.hidden).toBe(false);
+    expect(pane.querySelector('[role="tabpanel"]')).toBeNull();
+    expect(opener.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.queryByRole("region", { name: "Topic Water the garden" })).toBeNull();
+    expect(document.querySelectorAll("#diff-topic-seed")).toHaveLength(1);
+    expect(pane.scrollTop).toBe(0);
+    // The panel's normal fold controls still work after it reveals the destination.
+    fireEvent.click(within(seed).getByRole("button", { name: "Collapse topic" }));
+    expect(screen.queryByRole("region", { name: "File seed.txt" })).toBeNull();
+    const water = screen.getByRole("button", { name: "Code: Water the garden" });
+    pane.scrollTop = 123;
+    fireEvent.click(water);
+    expect(pane.scrollTop).toBe(0);
+    expect(screen.getByRole("region", { name: "Topic Water the garden" })).toBeTruthy();
+    expect(seed.hidden).toBe(true);
+    fireEvent.click(opener);
+    expect(screen.getByRole("region", { name: "File seed.txt" })).toBeTruthy();
+    expect(document.getElementById("diff-topic-seed")).toBe(seed);
+    const chip = screen.getByRole("button", { name: "Code: seedling.txt" });
+    fireEvent.click(chip);
+    expect(chip.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.queryByRole("region", { name: "File seed.txt" })).toBeNull();
+    expect(screen.getByRole("region", { name: "File seedling.txt" })).toBeTruthy();
+    expect(within(seed).queryByRole("button", { name: "Comment on topic" })).toBeNull();
+    const close = screen.getByRole("button", { name: "Close code panel" });
+    act(() => close.focus());
+    fireEvent.click(close);
+    expect(pane.hidden).toBe(true);
+    expect(pane.scrollTop).toBe(470);
+    expect(document.activeElement).toBe(chip);
+    fireEvent.click(opener);
+    act(() => screen.getByRole("button", { name: "Close code panel" }).focus());
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    expect(pane.hidden).toBe(true);
+    expect(document.activeElement).toBe(opener);
+    fireEvent.click(opener);
+    fireEvent.click(opener);
+    expect(pane.hidden).toBe(true);
+    fireEvent.click(opener);
+    fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    await waitFor(() => expect(history.location.search).toContain("tab=diff"));
+    expect(screen.getByTestId("diff-pane")).toBe(pane);
+    expect(reading.hidden).toBe(true);
+    expect(pane.scrollTop).toBe(470);
+    expect(pane.classList.contains("em-code-panel")).toBe(false);
+    expect(pane.querySelector(".em-diff-toolbar")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Close code panel" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Topic Water the garden" })).toBeTruthy();
+    expect(screen.getAllByRole("region", { name: /^File / })).toHaveLength(3);
+    expect(document.querySelectorAll("#diff-topic-seed")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("tab", { name: "Writeup" }));
+    await waitFor(() => expect(pane.hidden).toBe(true));
+    expect(screen.getByRole("button", { name: "Code: Plant a seed" }).getAttribute("aria-expanded")).toBe("false");
+  },
+);
+
+test.each([1280, 768])("Code panel Escape at %s px respects editors, handled events and overlays", async (pixels) => {
+  width = pixels;
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Code: Plant a seed" }));
+  await act(async () => loaded.resolve());
+  const pane = screen.getByTestId("diff-pane");
+  fireEvent.click(await within(pane).findByRole("button", { name: "Comment on topic" }));
+  const editor = screen.getByRole("textbox", { name: "Comment" });
+  fireEvent.change(editor, { target: { value: "Keep this draft" } });
+  fireEvent.keyDown(editor, { key: "Escape" });
+  expect(pane.hidden).toBe(false);
+  const handled = (event: KeyboardEvent) => event.preventDefault();
+  document.addEventListener("keydown", handled);
+  fireEvent.keyDown(document.body, { key: "Escape" });
+  document.removeEventListener("keydown", handled);
+  expect(pane.hidden).toBe(false);
+  const overlay = document.createElement("div");
+  overlay.setAttribute("role", "dialog");
+  document.body.append(overlay);
+  try {
+    fireEvent.keyDown(overlay, { key: "Escape" });
+    expect(pane.hidden).toBe(false);
+  } finally {
+    overlay.remove();
+  }
+  // Closing while reading has focus must not steal that focus.
+  const heading = screen.getByRole("heading", { name: "Topic 1: Plant a seed" });
+  heading.tabIndex = -1;
+  act(() => heading.focus());
+  fireEvent.keyDown(heading, { key: "Escape" });
+  expect(pane.hidden).toBe(true);
+  expect(document.activeElement).toBe(heading);
+});
+
+test.each([1280, 768])("Open in Diff tab at %s px navigates to the focused topic or file", async (pixels) => {
+  width = pixels;
+  const hold = vi.spyOn(diffPresentation, "holdDiffTarget");
+  const { history } = mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Code: Plant a seed" }));
+  await act(async () => loaded.resolve());
+  const link = await screen.findByRole("link", { name: "Open in Diff tab" });
+  expect(link.getAttribute("href")).toBe(`/r/${id}?tab=diff&rev=1#diff-topic-seed`);
+  fireEvent.click(link);
+  await waitFor(() => expect(hold.mock.calls.map(([node]) => node.id)).toContain("diff-topic-seed"));
+  expect(history.location.search).toContain("tab=diff");
+  expect(screen.getByTestId("reading-pane").hidden).toBe(true);
+  fireEvent.click(screen.getByRole("tab", { name: "Writeup" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Code: seed.txt" }));
+  fireEvent.click(await screen.findByRole("link", { name: "Open in Diff tab" }));
+  await waitFor(() => expect(hold.mock.calls.map(([node]) => node.id)).toContain(`diff-file-${id}`));
+  expect(document.querySelectorAll(`#diff-file-${id}`)).toHaveLength(1);
+});
+
+test("phone Code opens a full-screen sheet with one diff viewer and returns to the writeup", async () => {
+  width = 390;
+  addCodeTopics();
+  const { history } = mount();
+  const opener = await screen.findByRole("button", { name: "Code: Plant a seed" });
+  act(() => opener.focus());
+  fireEvent.click(opener);
+  const sheet = await screen.findByRole("dialog", { name: "Plant a seed" });
+  expect(sheet.classList.contains("inset-0")).toBe(true);
+  await act(async () => loaded.resolve());
+  await within(sheet).findByRole("region", { name: "Topic Plant a seed" });
+  expect(within(sheet).queryByRole("region", { name: "Topic Water the garden" })).toBeNull();
+  expect(screen.queryByTestId("diff-pane")).toBeNull();
+  expect(document.querySelectorAll(".em-diff-pane")).toHaveLength(1);
+  expect(document.querySelectorAll("#diff-topic-seed")).toHaveLength(1);
+  expect(sheet.querySelector("[data-diff-scroll]")).toBeTruthy();
+  fireEvent.click(within(sheet).getByRole("button", { name: /^Close$/ }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(screen.getByTestId("reading-pane").hidden).toBe(false);
+  expect(history.location.search).toContain("tab=writeup");
+  await waitFor(() => expect(document.activeElement).toBe(opener));
+  const chip = screen.getByRole("button", { name: "Code: seedling.txt" });
+  fireEvent.click(chip);
+  const fileSheet = await screen.findByRole("dialog", { name: "seedling.txt" });
+  expect(await within(fileSheet).findByRole("region", { name: "File seedling.txt" })).toBeTruthy();
+  expect(within(fileSheet).queryByRole("region", { name: "File seed.txt" })).toBeNull();
+  fireEvent.keyDown(fileSheet, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+test.each((["topics", "path"] as const).flatMap((order) => ["topic", "file"].map((focus) => ({ order, focus }))))(
+  "phone Code $focus focus in $order order never opens unrelated saved replies",
+  async ({ order, focus }) => {
+    width = 390;
+    addCodeTopics();
+    layoutStore.update({ fileOrder: order });
+    const targets = [
+      { kind: "file", path: "seed.txt" },
+      { kind: "topic", slug: "seed" },
+      { kind: "file", path: "seedling.txt" },
+      { kind: "topic", slug: "water" },
+      { kind: "file", path: "water.txt" },
+      { kind: "topic", slug: "missing" },
+    ] satisfies Target[];
+    currentRevision.threads = targets.map((target, index) => ({
+      ...placedWriteupThread(),
+      id: `44444444-4444-4444-8444-${String(index).padStart(12, "0")}`,
+      target,
+      placement: { status: "placed", location: target },
+    }));
+    const unrelated = currentRevision.threads.slice(focus === "topic" ? 3 : 1);
+    const otherTopic = currentRevision.threads[3];
+    if (!otherTopic) throw new Error("Missing topic thread");
+    const key = draftKey(id, otherTopic.target, otherTopic.id);
+    localStorage.setItem(key, "Keep this reply");
+    mount();
+    const title = focus === "topic" ? "Plant a seed" : "seed.txt";
+    fireEvent.click(await screen.findByRole("button", { name: `Code: ${title}` }));
+    await act(async () => loaded.resolve());
+    const sheet = await screen.findByRole("dialog", { name: title });
+    await within(sheet).findByRole("region", { name: "File seed.txt" });
+    expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
+    expect(screen.queryByRole("dialog", { name: "Reply" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Comment" })).toBeNull();
+    expect(sheet.querySelectorAll("[data-diff-file]")).toHaveLength(focus === "topic" ? 2 : 1);
+    expect(sheet.querySelector('[aria-label="Unplaced comments"]')).toBeNull();
+    expect(sheet.querySelector("#diff-topic-water")).toBeNull();
+    expect(sheet.querySelector("#diff-thread-44444444-4444-4444-8444-000000000000")).toBeTruthy();
+    if (focus === "topic")
+      expect(sheet.querySelector("#diff-thread-44444444-4444-4444-8444-000000000001")).toBeTruthy();
+    for (const thread of unrelated) {
+      expect(sheet.querySelector(`#diff-thread-${thread.id}`)).toBeNull();
+    }
+    expect(localStorage.getItem(key)).toBe("Keep this reply");
+  },
+);
+
+test.each(["topics", "path"] as const)(
+  "Code focus in %s order hides unrelated comments and keeps every file mounted",
+  async (order) => {
+    addCodeTopics();
+    layoutStore.update({ fileOrder: order });
+    currentRevision.threads = ["seed", "water", "missing"].map((slug, index) => {
+      const target = { kind: "topic" as const, slug };
+      return {
+        ...placedWriteupThread(),
+        id: `44444444-4444-4444-8444-${String(index).padStart(12, "0")}`,
+        target,
+        placement: { status: "placed" as const, location: target },
+      };
+    });
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: "Code: Plant a seed" }));
+    await act(async () => loaded.resolve());
+    const pane = screen.getByTestId("diff-pane");
+    await waitFor(() => expect(pane.querySelectorAll("[data-diff-file]")).toHaveLength(3));
+    const thread = (index: number) =>
+      document.getElementById(`diff-thread-44444444-4444-4444-8444-${String(index).padStart(12, "0")}`);
+    expect(thread(0)?.closest("[hidden]")).toBeNull();
+    expect(thread(1)?.closest("[hidden]")).toBeTruthy();
+    expect(thread(2)?.closest("[hidden]")).toBeTruthy();
+    expect(screen.getAllByRole("region", { name: /^File / })).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Code: seedling.txt" }));
+    expect(screen.getAllByRole("region", { name: /^File / })).toHaveLength(1);
+    expect(thread(0)?.closest("[hidden]")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Topic comments" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Close code panel" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    expect(await screen.findByRole("region", { name: "Unplaced comments" })).toBeTruthy();
+    expect(screen.getAllByRole("region", { name: /^File / })).toHaveLength(3);
+  },
+);
+
+test("Code focus survives a valid new revision and closes when its file disappears", async () => {
+  const { history } = mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Code: seed.txt" }));
+  await act(async () => loaded.resolve());
+  act(() => history.push(`/r/${id}?tab=writeup&rev=2`));
+  await waitFor(() => expect(screen.getByTestId("diff-pane").getAttribute("aria-label")).toBe("Code: seed.txt"));
+  await waitFor(() => expect(client.getQueryData(["revision", id, 2])).toBeTruthy());
+  act(() => client.setQueryData(["revision", id, 2], { ...currentRevision, seq: 2, files: [] }));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Close code panel" })).toBeNull());
+  act(() => client.setQueryData(["revision", id, 2], { ...currentRevision, seq: 2 }));
+  await waitFor(() => expect(screen.getByTestId("diff-pane").hidden).toBe(true));
+});
+
+test("Code file focus unfolds a viewed file once and leaves manual folding available", async () => {
+  currentRevision.files = currentRevision.files.map((file) => ({ ...file, viewed: "viewed" }));
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Code: seed.txt" }));
+  await act(async () => loaded.resolve());
+  const file = await screen.findByRole("region", { name: "File seed.txt" });
+  fireEvent.click(within(file).getByRole("button", { name: "Collapse file" }));
+  expect(within(file).getByRole("button", { name: "Expand file" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Close code panel" }));
+  fireEvent.click(screen.getByRole("button", { name: "Code: seed.txt" }));
+  expect(within(file).getByRole("button", { name: "Collapse file" })).toBeTruthy();
+});
+
+test.each(["Docs", "Comments", "Files"])("leaving Code for %s closes it without reopening on return", async (tab) => {
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Code: Plant a seed" }));
+  await act(async () => loaded.resolve());
+  fireEvent.click(screen.getByRole("tab", { name: new RegExp(`^${tab}`) }));
+  await waitFor(() => expect(screen.getByTestId("diff-pane").hidden).toBe(true));
+  fireEvent.click(screen.getByRole("tab", { name: "Writeup" }));
+  expect((await screen.findByRole("button", { name: "Code: Plant a seed" })).getAttribute("aria-expanded")).toBe(
+    "false",
+  );
+});
+
+test.each(["close then Diff", "directly to Diff"])(
+  "Code restores the full Diff offset after clamping: %s",
+  async (exit) => {
+    addCodeTopics();
+    mount("?tab=diff&rev=1");
+    await act(async () => loaded.resolve());
+    const pane = await screen.findByTestId("diff-pane");
+    await within(pane).findByRole("region", { name: "Topic Water the garden" });
+    let position = 0;
+    // Browsers clamp a newly visible scroller before layout effects can read it.
+    const maximum = () => (pane.querySelector("[data-diff-section][hidden]") ? 100 : 2000);
+    Object.defineProperty(pane, "scrollTop", {
+      configurable: true,
+      get: () => {
+        if (pane.hidden) return 0;
+        position = Math.min(position, maximum());
+        return position;
+      },
+      set: (next: number) => {
+        if (!pane.hidden) position = Math.min(next, maximum());
+      },
+    });
+    pane.scrollTop = 1200;
+    fireEvent.scroll(pane);
+    fireEvent.click(screen.getByRole("tab", { name: "Writeup" }));
+    const opener = await screen.findByRole("button", { name: "Code: Plant a seed" });
+    expect(pane.hidden).toBe(true);
+    fireEvent.scroll(pane);
+    fireEvent.click(opener);
+    expect(pane.scrollTop).toBe(0);
+    pane.scrollTop = 60;
+    fireEvent.scroll(pane);
+    if (exit === "close then Diff") {
+      fireEvent.click(screen.getByRole("button", { name: "Close code panel" }));
+      expect(pane.hidden).toBe(true);
+      fireEvent.scroll(pane);
+      // Reopening before the hidden scroller can restore must retain the full diff offset.
+      fireEvent.click(opener);
+      expect(pane.scrollTop).toBe(0);
+      fireEvent.click(screen.getByRole("button", { name: "Close code panel" }));
+    }
+    fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    await waitFor(() => expect(pane.hidden).toBe(false));
+    expect(pane.scrollTop).toBe(1200);
+  },
+);
+
+test("a link rendered in the phone Code sheet navigates in-app and closes the sheet", async () => {
+  width = 390;
+  addCodeTopics();
+  loading.link = `/r/${id}?tab=writeup&rev=1#topic-water`;
+  const { history } = mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Code: Plant a seed" }));
+  await act(async () => loaded.resolve());
+  const sheet = await screen.findByRole("dialog", { name: "Plant a seed" });
+  const link = await within(sheet).findByRole("link", { name: "Read the writeup" });
+  // Cancelling the anchor's default action prevents a document navigation.
+  expect(fireEvent.click(link)).toBe(false);
+  await waitFor(() => expect(history.location.hash).toBe("#topic-water"));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(screen.getByRole("heading", { name: "Topic 2: Water the garden" })).toBeTruthy();
+});
+
+test.each([1280, 390])("focused Code at %s px omits the topic's Writeup link", async (pixels) => {
+  width = pixels;
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Code: Plant a seed" }));
+  await act(async () => loaded.resolve());
+  const topic = await screen.findByRole("region", { name: "Topic Plant a seed" });
+  expect(within(topic).queryByRole("link", { name: "Writeup" })).toBeNull();
+});
+
+test.each([1280, 390].flatMap((pixels) => ["Plant a seed", "seed.txt"].map((target) => ({ pixels, target }))))(
+  "Code at $pixels px returns focus to the replacement $target button after a revision change",
+  async ({ pixels, target }) => {
+    width = pixels;
+    const { history } = mount();
+    const opener = await screen.findByRole("button", { name: `Code: ${target}` });
+    act(() => opener.focus());
+    fireEvent.click(opener);
+    await act(async () => loaded.resolve());
+    await screen.findByRole("region", { name: "Topic Plant a seed" });
+    act(() => history.push(`/r/${id}?tab=writeup&rev=2`));
+    await waitFor(() => expect(opener.isConnected).toBe(false));
+    const close = await screen.findByRole("button", { name: pixels === 390 ? "Close" : "Close code panel" });
+    act(() => close.focus());
+    fireEvent.keyDown(close, { key: "Escape" });
+    const replacement = await screen.findByRole("button", { name: `Code: ${target}` });
+    expect(replacement).not.toBe(opener);
+    await waitFor(() => expect(document.activeElement === replacement).toBe(true));
+  },
+);
+
+test.each([1280, 768])(
+  "Diff tab at %s px keeps its controlled element through Code panel transitions",
+  async (pixels) => {
+    width = pixels;
+    mount();
+    const opener = await screen.findByRole("button", { name: "Code: Plant a seed" });
+    const tab = screen.getByRole("tab", { name: "Diff" });
+    const controlled = document.getElementById(tab.getAttribute("aria-controls") ?? "");
+    expect(controlled).not.toBeNull();
+    expect(controlled?.getAttribute("role")).toBe("tabpanel");
+    expect(controlled?.getAttribute("aria-labelledby")).toBe(tab.id);
+    expect(controlled?.closest("[hidden]")).toBeTruthy();
+    fireEvent.click(opener);
+    await act(async () => loaded.resolve());
+    expect(document.getElementById(tab.getAttribute("aria-controls") ?? "")).toBe(controlled);
+    expect(controlled?.hasAttribute("role")).toBe(false);
+    expect(controlled?.hasAttribute("aria-labelledby")).toBe(false);
+    fireEvent.click(tab);
+    expect(await screen.findByRole("tabpanel", { name: "Diff" })).toBe(controlled);
+    expect(controlled?.getAttribute("aria-labelledby")).toBe(tab.id);
+  },
+);
+
+test.each([1280, 390])("Code at %s px isolates hostile titles as text", async (pixels) => {
+  width = pixels;
+  const hostile = "<img src=x onerror=evil()><script>evil()</script>";
+  currentRevision.topics = currentRevision.topics.map((topic) => ({ ...topic, title: hostile }));
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: `Code: ${hostile}` }));
+  await act(async () => loaded.resolve());
+  const panel =
+    pixels === 390
+      ? await screen.findByRole("dialog", { name: hostile })
+      : screen.getByRole("region", { name: `Code: ${hostile}` });
+  expect(panel.querySelector("bdi")?.textContent).toBe(hostile);
+  expect(panel.querySelector("script, img, [onerror]")).toBeNull();
 });

@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { renderWriteup } from "../../../../../packages/core/src/render/writeup.ts";
+import type { CodeFocus } from "../../lib/code-focus.ts";
 import { blockAnchor } from "../../lib/selection.ts";
 import * as writeupFacts from "../../lib/writeup-facts.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
@@ -1301,4 +1302,73 @@ test("comments on both paired overview blocks share a usable gutter chip when th
   expect(screen.getByText("Explain the goal")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Next" }));
   expect(screen.getByText("Explain the change")).toBeTruthy();
+});
+
+test("Code controls follow focus, preserve diff order and disambiguate file names", () => {
+  const onOpen = vi.fn();
+  const files = [
+    { ...file, id: "first", path: "src/seed.txt", order: 2 },
+    { ...file, id: "second", path: "test/seed.txt", order: 1 },
+    { ...file, id: "third", path: "src/water.txt", order: 3 },
+    { ...file, id: "doc", role: "doc" as const },
+  ];
+  const ui = (current?: CodeFocus) => (
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <Writeup
+          {...props}
+          topics={[topic]}
+          files={files}
+          writeup={{ sections: [section(topic.slug, "body")] }}
+          code={{ current, onOpen }}
+        />
+      </ToastProvider>
+    </QueryClientProvider>
+  );
+  const { rerender } = render(ui());
+  const code = screen.getByRole("button", { name: `Code: ${topic.title}` });
+  expect(code.textContent).toBe("Code ");
+  expect(code.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(code);
+  expect(onOpen).toHaveBeenLastCalledWith({ kind: "topic", slug: topic.slug }, code);
+  const chips = within(screen.getByRole("list", { name: "Files" })).getAllByRole("button");
+  expect(chips.map((chip) => chip.textContent)).toEqual(["test/seed.txt", "src/seed.txt", "water.txt"]);
+  expect(chips[2]?.title).toBe("src/water.txt");
+  rerender(ui({ kind: "topic", slug: topic.slug }));
+  expect(code.getAttribute("aria-expanded")).toBe("true");
+  const chip = chips[0];
+  if (!chip) throw new Error("Missing chip");
+  fireEvent.click(chip);
+  expect(onOpen).toHaveBeenLastCalledWith({ kind: "file", id: "second" }, chip);
+  rerender(ui({ kind: "file", id: "second" }));
+  expect(code.getAttribute("aria-expanded")).toBe("false");
+  expect(chip.getAttribute("aria-expanded")).toBe("true");
+});
+
+test("without Code controls the topic action and file chips remain diff links", () => {
+  mount(<Writeup {...props} topics={[topic]} files={[file]} writeup={{ sections: [section(topic.slug, "body")] }} />);
+  expect(screen.getByRole("link", { name: `Files in diff: ${topic.title}` }).getAttribute("href")).toContain(
+    "#diff-topic-seed",
+  );
+  const chip = within(screen.getByRole("list", { name: "Files" })).getByRole("link", { name: "seed.txt" });
+  expect(chip.getAttribute("href")).toContain(`#diff-file-${file.id}`);
+  expect(chip.title).toBe(file.path);
+  expect(chip.getAttribute("dir")).toBe("auto");
+});
+
+test("Code titles and file chips keep hostile text inert", () => {
+  const hostile = "<script>evil()</script><img src=x onerror=evil()><svg onload=evil()></svg>javascript:evil()";
+  const { container } = mount(
+    <Writeup
+      {...props}
+      topics={[{ ...topic, title: hostile }]}
+      files={[{ ...file, path: hostile }]}
+      writeup={{ sections: [section(topic.slug, "body")] }}
+      code={{ onOpen: vi.fn() }}
+    />,
+  );
+  const code = screen.getAllByRole("button", { name: `Code: ${hostile}` });
+  expect(code).toHaveLength(2);
+  expect(code[1]?.title).toBe(hostile);
+  expect(container.querySelector("script, img, [onerror], [onload], a[href^='javascript:']")).toBeNull();
 });

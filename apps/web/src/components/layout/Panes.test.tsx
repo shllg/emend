@@ -244,3 +244,45 @@ test.each(["mouse", "touch", "pen"])(
     expect(value(handle)).toBe(504);
   },
 );
+
+test.each([
+  { pixels: 1280, mode: "tabs", tab: "writeup", panel: true },
+  { pixels: 768, mode: "tabs", tab: "writeup", panel: true },
+  { pixels: 1280, mode: "split", tab: "writeup", panel: false },
+  { pixels: 1280, mode: "tabs", tab: "diff", panel: false },
+  { pixels: 390, mode: "tabs", tab: "diff", panel: false },
+  { pixels: 390, mode: "tabs", tab: "writeup", panel: false },
+] as const)("codePanel at $pixels px in $mode on $tab", ({ pixels, mode, tab, panel }) => {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: pixels >= Number(query.match(/\d+/)?.[0]),
+    addEventListener() {},
+    removeEventListener() {},
+  }));
+  layoutStore.update({ pane: { desktop: mode, tablet: mode } });
+  render(
+    <Panes
+      inbox={null}
+      header={null}
+      reading="Writeup"
+      diff="Code"
+      phoneTabs={null}
+      tab={tab}
+      hasDiff
+      codePanel="Code: Seed"
+    />,
+  );
+  const diff = screen.queryByTestId("diff-pane");
+  if (pixels === 390 && tab === "writeup") {
+    expect(diff).toBeNull();
+    return;
+  }
+  expect(diff?.hidden).toBe(false);
+  expect(diff?.classList.contains("em-code-panel")).toBe(panel);
+  expect(diff?.classList.contains("flex-1")).toBe(!panel);
+  expect(diff?.getAttribute("aria-label")).toBe(panel ? "Code: Seed" : "Diff");
+  if (panel) {
+    expect(screen.getByTestId("reading-pane").hidden).toBe(false);
+    expect(screen.getByTestId("reading-pane").classList.contains("flex-1")).toBe(true);
+    expect(screen.queryByRole("separator")).toBeNull();
+  }
+});

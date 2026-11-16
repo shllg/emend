@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { FileView, RevisionView, Target, ThreadView } from "@emend/contract";
+import { type FileView, OTHER_TOPIC, type RevisionView, type Target, type ThreadView } from "@emend/contract";
 import type { GetHoveredLineResult } from "@pierre/diffs";
 import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
@@ -2401,3 +2401,20 @@ test.each([1280, 390])("a later chevron fold discards an unused Viewed spot (%s 
   expect(pane.scrollTop).toBe(top);
   expect(scroll).not.toHaveBeenCalled();
 });
+
+test.each(["topics", "path"] as const)(
+  "Code focus on Other includes unknown and unassigned files in %s order",
+  async (order) => {
+    layoutStore.update({ fileOrder: order });
+    const files = [
+      file("known.txt", { flag: "binary" }),
+      file("unassigned.txt", { flag: "binary", topic: null }),
+      file("unknown.txt", { flag: "binary", topic: "missing" }),
+    ];
+    await mount(revision(files), { focus: { kind: "topic", slug: OTHER_TOPIC.slug } });
+    expect(screen.queryByRole("region", { name: "File known.txt" })).toBeNull();
+    expect(screen.getByRole("region", { name: "File unassigned.txt" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "File unknown.txt" })).toBeTruthy();
+    expect(document.querySelectorAll("[data-diff-file]")).toHaveLength(3);
+  },
+);
