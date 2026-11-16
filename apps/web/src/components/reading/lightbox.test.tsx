@@ -1,7 +1,11 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { RenderedBlock } from "@emend/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { type Element as HappyElement, PropertySymbol } from "happy-dom";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { revealReadingTarget } from "../../lib/reading-reveal.ts";
 import { blockAnchor } from "../../lib/selection.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
 import { BlockReader, type ReaderGroup } from "./BlockReader.tsx";
@@ -18,6 +22,26 @@ const row: RenderedBlock = {
   text: "Before After",
   html: `<p class="emend-media-row">${imageHtml("a", "Before")}${imageHtml("b", "After")}</p>`,
 };
+const pair: RenderedBlock = {
+  ...row,
+  text: "Before After\nMore room for seeds.",
+  html: `<p class="emend-media-row emend-media-pair">${imageHtml("a", "Before")} ${imageHtml("b", "After")}\n<span class="emend-media-effect">More room for seeds.</span></p>`,
+};
+function mountPairStyles() {
+  // Load the production hide rules directly without needing the app stylesheet bundle.
+  const css = readFileSync(resolve(import.meta.dirname, "../../styles/prose.css"), "utf8");
+  const modes = css.match(/\.em-prose\[data-pair-mode="before"\][^{]+\{[^}]+\}/)?.[0];
+  if (!modes) throw new Error("Missing screenshot mode styles");
+  render(<style>{modes}</style>);
+}
+function mediaDisplay(element: HTMLElement) {
+  // happy-dom misses ancestor attribute changes in cached descendant-selector matches.
+  // Clear its caches so each mode checks the production CSS against the current DOM.
+  const cache = (element as unknown as HappyElement)[PropertySymbol.cache];
+  cache.matches.clear();
+  cache.computedStyle = null;
+  return getComputedStyle(element).display;
+}
 const paragraph: RenderedBlock = {
   id: "overview-22222222",
   section: "overview",
@@ -1103,11 +1127,8 @@ test.each(["Close", "Escape"])("closing a diagram lightbox with %s returns focus
   return waitFor(() => expect(document.activeElement).toBe(enlarge));
 });
 
-test("a pair keeps both lightbox images and its comment anchor after changing modes", () => {
-  const pair = {
-    ...row,
-    html: `<p class="emend-media-row emend-media-pair">${imageHtml("a", "Before")} ${imageHtml("b", "After")}\n<span class="emend-media-effect">More room for seeds.</span></p>`,
-  };
+test("a pair keeps both lightbox images and its complete comment anchor after changing modes", async () => {
+  mountPairStyles();
   const { container } = mount([{ key: "overview", blocks: [pair] }]);
   const control = screen.getByRole("group", { name: "Compare screenshots" });
   const before = screen.getByRole("button", { name: "Open screenshot: Before" });
@@ -1127,4 +1148,86 @@ test("a pair keeps both lightbox images and its comment anchor after changing mo
       ?.querySelector("[data-block-id]")
       ?.getAttribute("data-block-id"),
   ).toBe(row.id);
+  const quote = screen.getByText("Before After More room for seeds.", { selector: "mark" });
+  expect(quote.textContent).toBe(blockAnchor(pair).quote);
+  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Explain the extra room." } });
+  fireEvent.click(button("Save comment"));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body).target).toEqual({ kind: "writeup-span", ...blockAnchor(pair) });
 });
+
+test.each([
+  ["blockquote", "<blockquote>", "</blockquote>", 1],
+  ["loose list", "<ul><li>", "</li></ul>", 1],
+  ["multiple pairs", "<blockquote>", "</blockquote>", 2],
+] as const)("one control hides the right images in a %s block", (name, start, end, count) => {
+  mountPairStyles();
+  const block: RenderedBlock = {
+    ...pair,
+    kind: name === "loose list" ? "item" : "quote",
+    text: pair.text.repeat(count),
+    html: `${start}${pair.html.repeat(count)}${end}`,
+  };
+  const { container } = mount([{ key: "overview", blocks: [block] }]);
+  expect(screen.getAllByRole("group", { name: "Compare screenshots" })).toHaveLength(1);
+  const control = screen.getByRole("group", { name: "Compare screenshots" });
+  const images = [...container.querySelectorAll<HTMLElement>("p.emend-media-pair > .emend-media")];
+  expect(images).toHaveLength(count * 2);
+  for (const [mode, label] of [
+    ["before", "Before"],
+    ["after", "After"],
+    ["side", "Side by side"],
+  ]) {
+    fireEvent.click(within(control).getByRole("button", { name: label }));
+    expect(container.querySelector(".em-prose")?.getAttribute("data-pair-mode")).toBe(mode);
+    for (const [index, image] of images.entries()) {
+      const hidden = mode === "before" ? index % 2 === 1 : mode === "after" && index % 2 === 0;
+      expect(image.isConnected, `${mode}: image ${index} stays mounted`).toBe(true);
+      expect(mediaDisplay(image) === "none", `${mode}: image ${index} visibility`).toBe(hidden);
+    }
+  }
+});
+
+test.each([
+  ["Before", "After", "after"],
+  ["After", "Before", "before"],
+  ["Side by side", "After", "side"],
+  ["Before", "Before", "before"],
+] as const)("revealing %s mode's %s image keeps the target visible", (initial, target, expected) => {
+  mountPairStyles();
+  const { container } = mount([
+    { key: "overview", blocks: [{ ...pair, html: `<blockquote>${pair.html}</blockquote>` }] },
+  ]);
+  const control = screen.getByRole("group", { name: "Compare screenshots" });
+  fireEvent.click(within(control).getByRole("button", { name: initial }));
+  const image = container.querySelector<HTMLImageElement>(`img[alt="${target}"]`);
+  if (!image?.parentElement) throw new Error("Missing pair image");
+  act(() => revealReadingTarget(image));
+  expect(container.querySelector(".em-prose")?.getAttribute("data-pair-mode")).toBe(expected);
+  expect(mediaDisplay(image.parentElement)).not.toBe("none");
+});
+
+test.each([false, true])(
+  "cancel after commenting on the hidden After image focuses it visibly (phone=%s)",
+  async (phone) => {
+    viewport(phone);
+    mountPairStyles();
+    const { container } = mount([{ key: "overview", blocks: [pair] }]);
+    const control = screen.getByRole("group", { name: "Compare screenshots" });
+    fireEvent.click(within(control).getByRole("button", { name: "Before" }));
+    const after = container.querySelector<HTMLImageElement>('img[alt="After"]');
+    if (!after?.parentElement) throw new Error("Missing After image");
+    expect(mediaDisplay(after.parentElement)).toBe("none");
+    open("Before");
+    fireEvent.click(button("Next screenshot"));
+    expect(within(dialog()).getByRole("heading", { name: "After" })).toBeTruthy();
+    fireEvent.click(button("Comment on screenshot"));
+    expect(screen.getByRole("textbox", { name: "Comment" })).toBeTruthy();
+    expect(container.querySelector(".em-prose")?.getAttribute("data-pair-mode")).toBe("after");
+    expect(mediaDisplay(after.parentElement)).not.toBe("none");
+    fireEvent.click(button("Cancel"));
+    await waitFor(() => expect(document.activeElement).toBe(after));
+    expect(document.activeElement).not.toBe(document.body);
+    expect(mediaDisplay(after.parentElement)).not.toBe("none");
+  },
+);

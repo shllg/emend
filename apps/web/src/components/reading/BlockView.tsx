@@ -24,7 +24,8 @@ function ProseBlock({ block, attributes }: { block: RenderedBlock; attributes: R
   // CSS cannot read attribute numbers in every browser yet, so the app copies them into custom properties.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the images change only when the block's HTML does.
   useLayoutEffect(() => {
-    setPair(!!ref.current?.querySelector(":scope > p.emend-media-pair"));
+    const prose = ref.current;
+    setPair(!!prose?.querySelector("p.emend-media-pair"));
     for (const image of ref.current?.querySelectorAll("span.emend-media > img") ?? []) {
       const wrapper = image.parentElement;
       if (!wrapper) continue;
@@ -44,6 +45,16 @@ function ProseBlock({ block, attributes }: { block: RenderedBlock; attributes: R
         wrapper.style.removeProperty("--emend-media-h");
       }
     }
+    const reveal = (event: Event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const media = target?.closest("p.emend-media-pair > .emend-media");
+      if (!media || !prose?.contains(media)) return;
+      const images = media.parentElement?.querySelectorAll(":scope > .emend-media");
+      const next = images?.[0] === media ? "before" : images?.[1] === media ? "after" : undefined;
+      if (next) setMode((current) => (current === "side" ? current : next));
+    };
+    prose?.addEventListener("emend:reveal-reading", reveal);
+    return () => prose?.removeEventListener("emend:reveal-reading", reveal);
   }, [block.html]);
   return (
     <>

@@ -277,11 +277,6 @@ export function Writeup({
       const heading = kind === "why" ? "Why" : kind === "example" ? "Example" : "Details";
       group.subsections?.push({ key: section.key, heading, kind, blocks: section.blocks });
     }
-    for (const group of groups) {
-      if (group.topic && group.files && !group.subsections?.some((section) => section.kind === "body")) {
-        group.subsections?.push({ key: `t-${group.topic.slug}-body`, heading: "Details", kind: "body", blocks: [] });
-      }
-    }
     if (ranked.length) {
       const written = new Set(groups.flatMap((group) => (group.id ? [group.id] : [])));
       const afterIntro =

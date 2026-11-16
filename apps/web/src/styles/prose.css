@@ -64,7 +64,7 @@
   }
   .em-prose p.emend-example-rows {
     display: grid;
-    grid-template-columns: minmax(4.5em, max-content) minmax(0, 1fr);
+    grid-template-columns: fit-content(40%) minmax(0, 1fr);
     column-gap: 0.75rem;
     row-gap: 0.25rem;
   }
@@ -72,6 +72,8 @@
     display: contents;
   }
   .em-prose .emend-example-label {
+    min-width: 4.5em;
+    overflow-wrap: anywhere;
     font-weight: 600;
     color: var(--fg-reading-strong);
   }
@@ -82,8 +84,6 @@
   .em-prose .emend-example-line {
     grid-column: 1 / -1;
   }
-  /* A hard break followed by a newline creates an empty line, which needs no grid row. */
-  .em-prose .emend-example-line:empty,
   .em-prose p.emend-example-rows > br {
     display: none;
   }

@@ -708,11 +708,14 @@ test("front matter cards, lead Why, Example panels and folded Details keep the o
   const details = summary.closest("details");
   expect(details?.className).toBe("em-writeup-details");
   expect(details?.open).toBe(false);
+  const files = screen.getByRole("list", { name: "Files" });
+  expect(files.previousElementSibling).toBe(details);
+  expect(files.closest("details")).toBeNull();
+  expect(files.parentElement?.lastElementChild).toBe(files);
   fireEvent.click(summary);
   expect(details?.open).toBe(true);
   expect(details?.querySelector("[data-block-id]")?.textContent).toBe("A detail.");
-  expect(details?.lastElementChild?.className).toBe("em-topic-file-chips");
-  expect(within(details as HTMLElement).getByRole("list", { name: "Files" })).toBeTruthy();
+  expect(details?.querySelector(".em-topic-file-chips")).toBeNull();
   const ids = writeup.sections.flatMap((section) => section.blocks.map((block) => block.id));
   expect(
     [...container.querySelectorAll("[data-block-id]")].map((element) => element.getAttribute("data-block-id")),
@@ -1344,7 +1347,6 @@ test("Code controls follow focus, preserve diff order and disambiguate file name
   expect(code.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(code);
   expect(onOpen).toHaveBeenLastCalledWith({ kind: "topic", slug: topic.slug }, code);
-  fireEvent.click(screen.getByText("Details"));
   const chips = within(screen.getByRole("list", { name: "Files" })).getAllByRole("button");
   expect(chips.map((chip) => chip.textContent)).toEqual(["test/seed.txt", "src/seed.txt", "water.txt"]);
   expect(chips[2]?.title).toBe("src/water.txt");
@@ -1361,7 +1363,6 @@ test("Code controls follow focus, preserve diff order and disambiguate file name
 
 test("without Code controls the topic action and file chips remain diff links", () => {
   mount(<Writeup {...props} topics={[topic]} files={[file]} writeup={{ sections: [section(topic.slug, "body")] }} />);
-  fireEvent.click(screen.getByText("Details"));
   expect(screen.getByRole("link", { name: `Files in diff: ${topic.title}` }).getAttribute("href")).toContain(
     "#diff-topic-seed",
   );
@@ -1388,25 +1389,54 @@ test("Code titles and file chips keep hostile text inert", () => {
   expect(container.querySelector("script, img, [onerror], [onload], a[href^='javascript:']")).toBeNull();
 });
 
-test.each([true, false])("files without body get their own Details fold only when needed (files=%s)", (hasFiles) => {
-  const { container } = mount(
+test("topic file chips stay visible after closed Details and follow the topic fold", () => {
+  mount(
     <Writeup
       {...props}
       topics={[topic]}
-      files={hasFiles ? [file] : []}
-      writeup={{ sections: [section(topic.slug, "why")] }}
+      files={[file]}
+      writeup={{ sections: [{ ...section(topic.slug, "body"), blocks: [block] }] }}
     />,
   );
-  const details = container.querySelector<HTMLDetailsElement>("details.em-writeup-details");
-  if (!hasFiles) {
-    expect(details).toBeNull();
-    return;
-  }
+  const details = screen.getByText("Details", { selector: "summary" }).closest("details");
+  const files = screen.getByRole("list", { name: "Files" });
   expect(details?.open).toBe(false);
-  expect(details?.querySelector("[data-block-id]")).toBeNull();
-  expect(details?.children).toHaveLength(2);
-  expect(details?.lastElementChild?.className).toBe("em-topic-file-chips");
+  expect(files.previousElementSibling).toBe(details);
+  expect(files.parentElement?.lastElementChild).toBe(files);
+  expect(files.closest("details, [hidden]")).toBeNull();
+  const fold = screen.getByRole("button", { name: "Topic 1: Plant a seed" });
+  fireEvent.click(fold);
+  expect(screen.queryByRole("list", { name: "Files" })).toBeNull();
+  fireEvent.click(fold);
+  expect(screen.getByRole("list", { name: "Files" })).toBe(files);
+  expect(details?.open).toBe(false);
 });
+
+test.each([true, false])(
+  "a topic without body has no Details fold and keeps its files visible (files=%s)",
+  (hasFiles) => {
+    const { container } = mount(
+      <Writeup
+        {...props}
+        topics={[topic]}
+        files={hasFiles ? [file] : []}
+        writeup={{ sections: [section(topic.slug, "why")] }}
+      />,
+    );
+    const details = container.querySelector<HTMLDetailsElement>("details.em-writeup-details");
+    expect(details).toBeNull();
+    const files = screen.queryByRole("list", { name: "Files" });
+    if (!hasFiles) expect(files).toBeNull();
+    else {
+      expect(files).toBeTruthy();
+      expect(files?.closest("details, [hidden]")).toBeNull();
+      expect(files?.parentElement?.lastElementChild).toBe(files);
+      fireEvent.click(screen.getByRole("button", { name: "Topic 1: Plant a seed" }));
+      expect(files?.closest("[hidden]")).toBeTruthy();
+      expect(screen.queryByRole("list", { name: "Files" })).toBeNull();
+    }
+  },
+);
 
 test("a body-only topic and its Details remember independent fold choices with files", async () => {
   const choices = new Map<string, boolean>();
@@ -1439,7 +1469,8 @@ test("a body-only topic and its Details remember independent fold choices with f
   await waitFor(() => expect(choices.get(detailsKey)).toBe(true));
   expect(choices.get(topicKey)).toBe(true);
   const files = screen.getByRole("list", { name: "Files" });
-  expect(files.closest("details")).toBe(summary().closest("details"));
+  expect(files.closest("details")).toBeNull();
+  expect(files.previousElementSibling).toBe(summary().closest("details"));
   expect(files.previousElementSibling?.querySelector("[data-block-id]")?.getAttribute("data-block-id")).toBe(body.id);
 
   fireEvent.click(topicToggle());

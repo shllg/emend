@@ -1,10 +1,20 @@
 import type { TopicMeta } from "@emend/contract";
+import { fromHtml } from "hast-util-from-html";
+import { toString as hastText } from "hast-util-to-string";
 import { expect, test } from "vitest";
-import { blockText } from "./blocks.ts";
+import { blockText, type HtmlElement, visitElements } from "./blocks.ts";
 import { renderMarkdownWithBudget } from "./markdown.ts";
 import { renderWriteup } from "./writeup.ts";
 
 const topic: TopicMeta = { slug: "garden", title: "Garden", summary: "Plant seeds.", importance: 1 };
+function withClass(html: string, className: string): HtmlElement[] {
+  const matches: HtmlElement[] = [];
+  visitElements(fromHtml(html, { fragment: true }), (element) => {
+    if (Array.isArray(element.properties.className) && element.properties.className.includes(className))
+      matches.push(element);
+  });
+  return matches;
+}
 const renderExample = async (markdown: string) => {
   const writeup = await renderWriteup(
     {
@@ -36,11 +46,11 @@ test.each([
   }
   const html = blocks[0]?.html ?? "";
   expect(html).toContain('<p class="emend-example-rows">');
-  expect(html).toContain(`<span class="emend-example-label">${before}</span> <span class="emend-example-value">`);
+  expect(html).toContain(`<span class="emend-example-label">${before}</span><span class="emend-example-value"> `);
   expect(html).toContain(`<span class="emend-example-label">${after}</span>`);
   expect(html.match(/class="emend-example-row"/g)).toHaveLength(2);
   if (md.startsWith("An intro")) expect(html).toContain('<span class="emend-example-line">An intro.</span>\n');
-  if (md.includes("  \n")) expect(html).toContain('</span><br><span class="emend-example-line"></span>\n');
+  if (md.includes("  \n")) expect(html).toContain("</span><br>\n");
 });
 
 test("a colon inside a longer bold span leaves that line unlabelled", async () => {
@@ -104,4 +114,96 @@ test("Example and glossary keep hostile HTML inert and isolate Mermaid click dir
     expect(section.blocks.find((block) => block.kind === "diagram")?.source).toBe(source);
     expect(html.includes("emend-example-rows")).toBe(section.key === "t-garden-example");
   }
+});
+
+test.each([
+  ["Before: one\nwrapped line\nAfter: two", " one\nwrapped line", undefined],
+  ["Before: one  \nwrapped line\nAfter: two", " one\nwrapped line", undefined],
+  [
+    "An intro.\nAnother intro.\nBefore: one\nwrapped line\nAfter: two",
+    " one\nwrapped line",
+    "An intro.\nAnother intro.",
+  ],
+  ["Before: one\n**Before: another note**\nAfter: two", " one\nBefore: another note", undefined],
+] as const)("keeps continuations in one value without changing text or ids: %s", async (md, before, intro) => {
+  const blocks = await renderExample(md);
+  const plain = await renderMarkdownWithBudget(md, "t-garden-example", { highlightedBytes: 0 });
+  expect(blocks.map(({ id, text }) => ({ id, text }))).toEqual(plain.map(({ id, text }) => ({ id, text })));
+  const html = blocks[0]?.html ?? "";
+  expect(blockText(html)).toBe(blockText(plain[0]?.html ?? ""));
+  const values = withClass(html, "emend-example-value");
+  expect(values).toHaveLength(2);
+  const first = values[0];
+  expect(first && hastText(first)).toBe(before);
+  const intros = withClass(html, "emend-example-line");
+  expect(intros).toHaveLength(intro ? 1 : 0);
+  if (intro) expect(intros[0] && hastText(intros[0])).toBe(intro);
+  if (!md.includes("**"))
+    expect(first?.children.filter((node) => node.type === "text")).toHaveLength(md.includes("  \n") ? 2 : 1);
+});
+
+test("a glossary term spanning a soft break stays marked inside one value", async () => {
+  const md = "Before: exceeds the rate\nlimit.\nAfter: accepted.";
+  const writeup = await renderWriteup(
+    {
+      overview: "",
+      tldr: "",
+      decisions: null,
+      glossary: [{ term: "rate limit", definition: "The allowed request count." }],
+      topics: { garden: { why: "A reason.", example: md } },
+    },
+    [topic],
+  );
+  const blocks = writeup.sections.find((section) => section.key === "t-garden-example")?.blocks ?? [];
+  const plain = await renderMarkdownWithBudget(md, "t-garden-example", { highlightedBytes: 0 });
+  expect(blocks.map(({ id, text }) => ({ id, text }))).toEqual(plain.map(({ id, text }) => ({ id, text })));
+  expect(blocks[0]?.html).toContain(
+    '<span class="emend-example-value"> exceeds the <span class="emend-term" data-emend-term="0">rate\nlimit</span>.</span>',
+  );
+  expect(blockText(blocks[0]?.html ?? "")).toBe(blockText(plain[0]?.html ?? ""));
+});
+
+test.each([" ", "&nbsp;"])("keeps %s after the label inside the value", async (space) => {
+  const md = `Before:${space}one\nAfter:${space}two`;
+  const blocks = await renderExample(md);
+  const plain = await renderMarkdownWithBudget(md, "t-garden-example", { highlightedBytes: 0 });
+  expect(blocks.map(({ id, text }) => ({ id, text }))).toEqual(plain.map(({ id, text }) => ({ id, text })));
+  const html = blocks[0]?.html ?? "";
+  expect(blockText(html)).toBe(blockText(plain[0]?.html ?? ""));
+  const rows = withClass(html, "emend-example-row");
+  expect(rows).toHaveLength(2);
+  for (const [index, row] of rows.entries()) {
+    expect(row.children).toHaveLength(2);
+    expect(row.children[0]).toMatchObject({ type: "element", properties: { className: ["emend-example-label"] } });
+    expect(row.children[1]).toMatchObject({
+      type: "element",
+      properties: { className: ["emend-example-value"] },
+      children: [{ type: "text", value: `${space === "&nbsp;" ? "\u00a0" : " "}${index === 0 ? "one" : "two"}` }],
+    });
+  }
+});
+
+test("Example screenshot captions with colons keep their media pair and effect", async () => {
+  const md = "![Before:](media/a.png) ![After:](media/b.png)\nMore room for seeds.";
+  const media = new Map([
+    ["media/a.png", "a".repeat(64)],
+    ["media/b.png", "b".repeat(64)],
+  ]);
+  const writeup = await renderWriteup(
+    { overview: "", tldr: "", decisions: null, topics: { garden: { why: "A reason.", example: md } } },
+    [topic],
+    { media },
+  );
+  const blocks = writeup.sections.find((section) => section.key === "t-garden-example")?.blocks ?? [];
+  const plain = await renderMarkdownWithBudget(md, "t-garden-example", { highlightedBytes: 0 }, undefined, media);
+  expect(blocks).toEqual(plain);
+  const html = blocks[0]?.html ?? "";
+  const pairs = withClass(html, "emend-media-pair");
+  expect(pairs).toHaveLength(1);
+  expect(pairs[0]?.tagName).toBe("p");
+  expect(
+    pairs[0]?.children.filter((node) => node.type === "element" && node.properties.className?.includes("emend-media")),
+  ).toHaveLength(2);
+  expect(withClass(html, "emend-media-effect")).toHaveLength(1);
+  expect(html).not.toContain("emend-example-");
 });

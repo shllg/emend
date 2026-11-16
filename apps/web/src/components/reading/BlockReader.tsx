@@ -333,7 +333,6 @@ export function BlockReader({
             section.kind === "body" ? (
               <WriteupDetails key={section.key} reviewId={reviewId} revision={revision} sectionKey={section.key}>
                 {renderBlocks(section.blocks, group.path)}
-                {group.files}
               </WriteupDetails>
             ) : (
               <div key={section.key} className={`em-writeup-${section.kind}`}>
@@ -342,6 +341,7 @@ export function BlockReader({
               </div>
             ),
           )}
+          {group.files}
         </ReadingGroup>
       ))}
       <ReadingThreads

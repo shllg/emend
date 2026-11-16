@@ -198,11 +198,14 @@ The effect wrapper changes neither text nor block ids. Author classes keep the `
 prefix, so they never match the generated classes. A block's id covers each image's alt text, path
 and SHA-256, so a re-shot image at the same path shows as changed. Markdown docs render their listed
 image assets with the same markup, resolved relative to the doc's folder. Remote images stay dropped.
+Markdown docs get the same pair and effect markup because they share the renderer.
 
 Only a writeup topic's Example turns labelled Before/After lines into aligned rows.
 The paragraph gets `emend-example-rows`; each labelled line gets `emend-example-row`.
 Its label through the colon gets `emend-example-label`, and its value gets `emend-example-value`.
-Unlabelled lines get `emend-example-line`. Separators, text and block ids stay unchanged.
+Introductory lines get `emend-example-line`; unlabelled lines after a label continue its value.
+Whitespace after a label stays in its value. Only separators before labelled lines stay between rows.
+Paragraphs containing media spans keep their media markup. Text and block ids stay unchanged.
 
 ### Downloads
 

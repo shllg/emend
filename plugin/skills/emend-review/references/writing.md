@@ -36,6 +36,8 @@ Give every topic above Low risk (`skim`) an Example of at most six lines.
 Use real input and real output from the change.
 Write a before/after case in one paragraph, with lines starting `Before:` and `After:`.
 emend shows those lines as aligned rows.
+A line without `Before:` or `After:` at its start continues the row above it.
+Put any other note in its own paragraph.
 For two or more cases, you can use a table: `Input | Before | After`.
 A document that explains a change or a proposal gives the same why and a grounded example.
 
@@ -163,6 +165,9 @@ A document keeps its glossary as a list under a "Glossary" heading, one term per
 A review writeup or a document can show images, such as before and after screenshots of a UI change.
 A change the user can see needs Before and After screenshots at the same viewport.
 Capture them with a headless browser.
+Capture with synthetic data.
+Never show tokens, keys, session data or real customer records.
+If a screen cannot avoid them, skip the shot and say why under Where to look.
 Each project picks its own capture tool.
 If you cannot capture one, say why under Where to look (`whereToLook`).
 
@@ -178,6 +183,7 @@ In a review writeup:
 
 In a Markdown document, put the image beside it and reference it with a relative path,
 `![Alt](shots/before.png)`. PNG, JPEG, GIF, WebP and AVIF show; remote image URLs do not.
+A Before and After pair shows the same way.
 
 ## HTML pages
 

@@ -1,15 +1,28 @@
 import { toString as hastText } from "hast-util-to-string";
 import type { HtmlElement, HtmlNode, HtmlRoot } from "./blocks.ts";
+import { isMediaSpan } from "./sanitize.ts";
 
 type Children = HtmlElement["children"];
+type Row = { label?: Children; value: Children };
+
+function mergeText(children: Children): Children {
+  const merged: Children = [];
+  for (const child of children) {
+    const last = merged.at(-1);
+    if (last?.type === "text" && child.type === "text") last.value += child.value;
+    else merged.push(child.type === "text" ? { ...child } : child);
+  }
+  return merged;
+}
+
 const span = (className: string, children: Children): HtmlElement => ({
   type: "element",
   tagName: "span",
   properties: { className: [className] },
-  children,
+  children: mergeText(children),
 });
 
-function labelledRow(children: Children): HtmlElement | undefined {
+function labelledRow(children: Children): Row | undefined {
   const match = /^\s*(before|after)\b[^:\n]{0,48}:/i.exec(children.map((child) => hastText(child)).join(""));
   if (!match) return;
   const label: Children = [];
@@ -30,23 +43,11 @@ function labelledRow(children: Children): HtmlElement | undefined {
     }
     remaining = Math.max(0, remaining - length);
   }
-  const whitespace: Children = [];
-  while (rest[0]?.type === "text") {
-    const first = rest[0];
-    const leading = /^\s*/.exec(first.value)?.[0] ?? "";
-    if (!leading) break;
-    whitespace.push({ type: "text", value: leading });
-    rest.shift();
-    if (leading.length < first.value.length) {
-      rest.unshift({ type: "text", value: first.value.slice(leading.length) });
-      break;
-    }
-  }
-  return span("emend-example-row", [
-    span("emend-example-label", label),
-    ...whitespace,
-    span("emend-example-value", rest),
-  ]);
+  return { label, value: rest };
+}
+
+function containsMedia(node: HtmlNode): boolean {
+  return isMediaSpan(node) || ("children" in node && node.children.some(containsMedia));
 }
 
 /** Trusted wrappers after sanitize; all original text and line separators survive. */
@@ -60,31 +61,57 @@ export function exampleRows() {
         for (const child of node.children) visit(child);
         return;
       }
-      const lines: Children[] = [[]];
-      const separators: Children = [];
+      if (containsMedia(node)) return;
+      const lines: { children: Children; before: Children }[] = [];
+      let line = { children: [] as Children, before: [] as Children };
+      lines.push(line);
+      const separate = (separator: Children[number]) => {
+        // Keep adjacent separators together, including the newline emitted after a hard break.
+        if (line.children.length) {
+          line = { children: [], before: [] };
+          lines.push(line);
+        }
+        line.before.push(separator);
+      };
       for (const child of node.children) {
-        if (child.type === "element" && child.tagName === "br") {
-          separators.push(child);
-          lines.push([]);
-        } else if (child.type === "text") {
+        if (child.type === "element" && child.tagName === "br") separate(child);
+        else if (child.type === "text") {
           for (const [index, value] of child.value.split("\n").entries()) {
-            if (index > 0) {
-              separators.push({ type: "text", value: "\n" });
-              lines.push([]);
-            }
-            if (value) lines.at(-1)?.push({ type: "text", value });
+            if (index > 0) separate({ type: "text", value: "\n" });
+            if (value) line.children.push({ type: "text", value });
           }
-        } else lines.at(-1)?.push(child);
+        } else line.children.push(child);
       }
-      const rows = lines.map(labelledRow);
+      const rows = lines.map((line) => labelledRow(line.children));
       if (!rows.some(Boolean)) return;
       const classes = Array.isArray(node.properties.className) ? node.properties.className : [];
       node.properties.className = [...classes, "emend-example-rows"];
-      node.children = lines.flatMap((line, index) => {
-        const separator = separators[index];
-        const row = rows[index] ?? span("emend-example-line", line);
-        return separator ? [row, separator] : [row];
-      });
+      const children: Children = [];
+      let current: Row | undefined;
+      const flush = () => {
+        if (!current) return;
+        children.push(
+          current.label
+            ? span("emend-example-row", [
+                span("emend-example-label", current.label),
+                span("emend-example-value", current.value),
+              ])
+            : span("emend-example-line", current.value),
+        );
+      };
+      for (const [index, line] of lines.entries()) {
+        const row = rows[index];
+        if (row) {
+          flush();
+          children.push(...line.before);
+          current = row;
+        } else {
+          current ??= { value: [] };
+          current.value.push(...line.before, ...line.children);
+        }
+      }
+      flush();
+      node.children = children;
     };
     visit(tree);
   };

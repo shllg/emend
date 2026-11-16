@@ -214,7 +214,7 @@ function mediaSpan(image: HtmlElement, path: string, sha: string, sized: boolean
   return span;
 }
 
-const isMediaSpan = (node: HtmlNode) => node.type === "element" && renderData(node).emendMedia !== undefined;
+export const isMediaSpan = (node: HtmlNode) => node.type === "element" && renderData(node).emendMedia !== undefined;
 
 const isWhitespace = (node: HtmlNode) => node.type === "text" && node.value.trim() === "";
 

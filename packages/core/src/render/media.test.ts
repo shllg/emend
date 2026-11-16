@@ -1,12 +1,10 @@
 import type { TopicMeta, WriteupInput } from "@emend/contract";
-import rehypeStringify from "rehype-stringify";
-import remarkParse from "remark-parse";
-import remarkRehype from "remark-rehype";
-import { unified } from "unified";
+import { fromHtml } from "hast-util-from-html";
 import { describe, expect, test } from "vitest";
-import { blocksFromTree, blockText, visitElements } from "./blocks.ts";
+import { blockText, type HtmlElement, visitElements } from "./blocks.ts";
+import { blockHash } from "./hash.ts";
 import { renderMarkdownWithBudget } from "./markdown.ts";
-import { hardenLinks } from "./sanitize.ts";
+import { normalizeText } from "./normalize.ts";
 import { renderWriteup } from "./writeup.ts";
 
 const shaA = "a".repeat(64);
@@ -367,31 +365,20 @@ test("matches trimmed Before/After alts case-insensitively", async () => {
   expect(await html("![ before change ](media/a.png) ![ AFTER change ](media/b.png)")).toContain("emend-media-pair");
 });
 
-test.each(["", "\nThe `seed` **fits**.", "  \nThe seed fits."])(
-  "pair wrappers preserve legacy block text and identity for %j",
-  async (suffix) => {
-    const md = pairMarkdown + suffix;
-    // Remove only the new wrappers from the parsed Markdown, keeping the existing media identity metadata.
-    const processor = unified().use(remarkParse).use(remarkRehype).use(hardenLinks).use(rehypeStringify);
-    const tree = await processor.run(processor.parse(md), { data: { media } });
-    visitElements(tree, (element) => {
-      if (element.tagName !== "p") return;
-      element.children = element.children.flatMap((child) =>
-        child.type === "element" && child.properties.className?.includes("emend-media-effect")
-          ? child.children
-          : [child],
-      );
-      delete element.properties.className;
-    });
-    const legacy = await blocksFromTree(tree, "overview", (node) =>
-      processor.stringify(node.type === "root" ? node : { type: "root", children: [node] }),
-    );
-    const [block] = await render(md);
-    expect(block?.text).toBe(legacy[0]?.text);
-    expect(block?.id).toBe(legacy[0]?.id);
-    expect(blockText(block?.html ?? "")).toBe(blockText(legacy[0]?.html ?? ""));
-  },
-);
+test.each([
+  ["", ""],
+  ["\nThe `seed` **fits**.", "\nThe seed fits."],
+  ["  \nThe seed fits.", "\nThe seed fits."],
+])("pair wrappers preserve legacy block text and identity for %j", async (suffix, effectText) => {
+  const md = pairMarkdown + suffix;
+  const identity = `\u0000media${JSON.stringify(["Before", "media/a.png", shaA])} \u0000media${JSON.stringify(["After", "media/b.png", shaB])}${effectText}`;
+  const expectedId = `overview-${await blockHash(normalizeText(identity))}`;
+  const expectedText = `Before After${effectText}`;
+  const [block] = await render(md);
+  expect(block?.text).toBe(expectedText);
+  expect(block?.id).toBe(expectedId);
+  expect(blockText(block?.html ?? "")).toBe(expectedText);
+});
 
 test("effect markup stays sanitized and author classes cannot forge a pair", async () => {
   const out = await html(
@@ -402,4 +389,41 @@ test("effect markup stays sanitized and author classes cannot forge a pair", asy
   expect(out).toContain('class="user-content-emend-media-effect"');
   expect(out).not.toMatch(/<script|<svg|onerror|onload|javascript:/i);
   expect(out).toContain("<strong>safe</strong>");
+});
+
+test.each(["string", "array"] as const)("hostile pair effects stay inert in a %s glossary", async (kind) => {
+  const source = 'graph TD; A-->B\nclick A "javascript:bad()"';
+  const markdown = `A synthetic comparison.\n\n${pairMarkdown}\nEffect: <script>bad()</script><img src=x onerror=bad()> [bad](javascript:bad()) <svg onload=bad()><circle/></svg> <strong>safe</strong>\n\n<p class="emend-media-pair">A forged pair.</p>\n\n\`\`\`mermaid\n${source}\n\`\`\``;
+  const writeup = await renderWriteup(
+    {
+      overview: "",
+      tldr: "",
+      decisions: null,
+      topics: {},
+      glossary: kind === "string" ? markdown : [{ term: "Comparison", definition: markdown }],
+    },
+    [],
+    { media },
+  );
+  const blocks = writeup.sections.find((section) => section.key === "glossary")?.blocks ?? [];
+  const pairs: HtmlElement[] = [];
+  for (const block of blocks) {
+    expect(block.html).not.toMatch(/<script|<svg|onerror|onload|javascript:/i);
+    visitElements(fromHtml(block.html, { fragment: true }), (element) => {
+      if (Array.isArray(element.properties.className) && element.properties.className.includes("emend-media-pair"))
+        pairs.push(element);
+    });
+  }
+  expect(blocks.find((block) => block.kind === "diagram")).toMatchObject({ html: "", source });
+  expect(pairs).toHaveLength(1);
+  expect(pairs[0]?.tagName).toBe("p");
+  expect(
+    pairs[0]?.children.filter((node) => node.type === "element" && node.properties.className?.includes("emend-media")),
+  ).toHaveLength(2);
+  expect(
+    pairs[0]?.children.some(
+      (node) => node.type === "element" && node.properties.className?.includes("emend-media-effect"),
+    ),
+  ).toBe(true);
+  expect(blocks.map((block) => block.html).join("")).toContain('class="user-content-emend-media-pair"');
 });
