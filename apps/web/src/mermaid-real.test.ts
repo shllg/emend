@@ -46,6 +46,28 @@ test("real Mermaid preserves stand-ins and inlined printable characters in state
   );
 });
 
+test.each(["n\u2014", "n#mdash;"])("real Mermaid keeps n#8212; and %s as distinct states", async (other) => {
+  mermaid.initialize(frameConfig(false));
+  const encoded = encodeCodes(`stateDiagram-v2
+  state "Encoded identifier" as n#8212;
+  state "Literal identifier" as ${other}
+  n#8212; --> ${other}`);
+  const diagram = await mermaid.mermaidAPI.getDiagramFromText(encoded.source);
+  const db = diagram.db as typeof diagram.db & {
+    getStates(): Map<string, { descriptions?: string[] }>;
+    getRelations(): { id1: string; id2: string }[];
+  };
+  const states = db.getStates();
+  const relations = db.getRelations();
+  expect(states.size).toBe(2);
+  expect(relations).toHaveLength(1);
+  const [relation] = relations;
+  if (!relation) throw new Error("Missing state relation");
+  expect(relation.id1).not.toBe(relation.id2);
+  expect(states.get(relation.id1)?.descriptions).toEqual(["Encoded identifier"]);
+  expect(states.get(relation.id2)?.descriptions).toEqual(["Literal identifier"]);
+});
+
 test("real Mermaid preserves stand-ins and inlined letters in flowchart vertices", async () => {
   mermaid.initialize(frameConfig(false));
   const encoded = encodeCodes(`${flowchartSource}\n  b --> c["letters #26085; #228; #257;"]`);

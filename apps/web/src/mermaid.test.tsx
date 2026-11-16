@@ -49,6 +49,39 @@ test("entity codes use distinct Latin stand-ins and reuse repeated codes", () =>
   expect(encoded.source.split(quote)).toHaveLength(5);
 });
 
+test("entity codes keep encoded and literal state identifiers distinct", () => {
+  const source = `stateDiagram-v2
+  state "Encoded identifier" as n#8212;
+  state "Literal identifier" as n\u2014
+  n#8212; --> n\u2014`;
+  const encoded = encodeCodes(source);
+  const [standIn] = encoded.characters.keys();
+  if (!standIn) throw new Error("Missing entity stand-in");
+  expect(standIn).toMatch(/^[\u0100-\u024f]$/u);
+  expect(standIn).not.toBe("\u2014");
+  expect(encoded.characters).toEqual(new Map([[standIn, "\u2014"]]));
+  expect(encoded.source).toBe(source.replaceAll("#8212;", standIn));
+});
+
+test("different codes for the same character stay distinct", () => {
+  const encoded = encodeCodes("#8212; #mdash;");
+  const [standIn] = encoded.characters.keys();
+  if (!standIn) throw new Error("Missing entity stand-in");
+  expect(standIn).toMatch(/^[\u0100-\u024f]$/u);
+  expect(standIn).not.toBe("\u2014");
+  expect(encoded.characters).toEqual(new Map([[standIn, "\u2014"]]));
+  expect(encoded.source).toBe(`\u2014 ${standIn}`);
+});
+
+test("literal characters elsewhere in the source prevent inlining", () => {
+  const encoded = encodeCodes("#9829; and \u2665");
+  const [standIn] = encoded.characters.keys();
+  if (!standIn) throw new Error("Missing entity stand-in");
+  expect(standIn).toMatch(/^[\u0100-\u024f]$/u);
+  expect(encoded.characters).toEqual(new Map([[standIn, "\u2665"]]));
+  expect(encoded.source).toBe(`${standIn} and \u2665`);
+});
+
 test("entity encoding preserves colours, unknown codes and existing letters", () => {
   const source = 'flowchart LR\n  a["\u0100 #quot; #nosuchentity;"]\n  classDef dark fill:#333;\n  style a fill:#f9f;';
   const encoded = encodeCodes(source);
@@ -61,6 +94,28 @@ test("entity encoding preserves colours, unknown codes and existing letters", ()
   expect(standIn).not.toBe("\u0100");
   expect(source).not.toContain(standIn);
   expect(encoded.characters.get(standIn)).toBe('"');
+});
+
+test.each(["#section;", "#region;", "#ltx;", "#notes;", "#lt_;", "#ampersand;"])(
+  "partially decoded entity names stay unchanged: %s",
+  (source) => {
+    expect(encodeCodes(source)).toEqual({ source, characters: new Map() });
+  },
+);
+
+test.each([
+  { code: "#sect;", character: "\u00a7", inline: true },
+  { code: "#not;", character: "\u00ac", inline: true },
+  { code: "#semi;", character: ";", inline: false },
+  { code: "#amp;", character: "&", inline: false },
+])("complete entity names still decode: $code", ({ code, character, inline }) => {
+  const encoded = encodeCodes(code);
+  if (inline) {
+    expect(encoded).toEqual({ source: character, characters: new Map() });
+  } else {
+    expect(encoded.source).toMatch(/^[\u0100-\u024f]$/u);
+    expect(encoded.characters).toEqual(new Map([[encoded.source, character]]));
+  }
 });
 
 test.each([
@@ -173,6 +228,19 @@ test("stand-ins use the nearest width in the frame font", () => {
     ]),
   );
   expect(context.font).toBe("100px system-ui, sans-serif");
+});
+
+test("stand-ins exclude reserved letters even when their width matches", () => {
+  const reserved = ["\u0130", "\u0131", "\u0149", "\u017f", "\u01f0"];
+  const context = {
+    font: "",
+    measureText: vi.fn((text: string) => ({ width: text === "@" || reserved.includes(text) ? 100 : 0 })),
+  };
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context as unknown as CanvasRenderingContext2D);
+  const encoded = encodeCodes("#64;");
+  expect(encoded.source).toMatch(/^[\u0100-\u024f]$/u);
+  expect(reserved).not.toContain(encoded.source);
+  expect(encoded.characters).toEqual(new Map([[encoded.source, "@"]]));
 });
 
 test.each(["null", "throws"])("canvas %s falls back to the lowest available code points", (mode) => {

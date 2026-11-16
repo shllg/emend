@@ -6,6 +6,8 @@ const FONT_FAMILY = "system-ui, sans-serif";
 // Mermaid writes codes as entity text in SVG labels and decodes only &amp;, &lt; and &gt;.
 // Inline non-ASCII printable characters except Mermaid's markers; use stand-in letters
 // of about the same width for other codes, then write their characters back as text.
+// Inline a code only when its characters are unique in the source, so identifiers stay
+// distinct. Names the HTML parser decodes only in part stay as written.
 export function encodeCodes(source: string): { source: string; characters: Map<string, string> } {
   if (source.includes("\uffff")) return { source, characters: new Map() };
   const encoded = source
@@ -20,24 +22,32 @@ export function encodeCodes(source: string): { source: string; characters: Map<s
     decodedEntities.set(entity, decoded);
     return decoded;
   };
-  const used = new Set([...source, "\u0130", "\u0131", "\u017f"]);
+  const present = new Set(source);
+  const used = new Set([...source, "\u0130", "\u0131", "\u0149", "\u017f", "\u01f0"]);
   const codes = new Map<string, string>();
   const pending = new Map<string, string>();
   const characters = new Map<string, string>();
   for (const [code] of encoded.matchAll(/#\w+;/g)) {
     if (codes.has(code) || pending.has(code)) continue;
     const inner = code.slice(1, -1);
-    const entity = /^\d+$/.test(inner) ? `&#${inner};` : `&${inner};`;
+    const numeric = /^\d+$/.test(inner);
+    const entity = numeric ? `&#${inner};` : `&${inner};`;
     const decoded = decode(entity);
-    if (decoded === entity) {
+    if (
+      decoded === entity ||
+      (!numeric && [...inner].some((_, index) => index > 0 && decoded.endsWith(`${inner.slice(index)};`)))
+    ) {
       codes.set(code, code);
     } else if (
       /^[\p{L}\p{M}\p{N}\p{P}\p{S}\p{Co}]+$/u.test(decoded) &&
-      [...decoded].every((character) => character.charCodeAt(0) > 0x7f) &&
+      [...decoded].every((character) => character.charCodeAt(0) > 0x7f && !present.has(character)) &&
       !/[\u00b0\u00b6\u00df\ufb02]/u.test(decoded)
     ) {
       codes.set(code, decoded);
-      for (const character of decoded) used.add(character);
+      for (const character of decoded) {
+        present.add(character);
+        used.add(character);
+      }
     } else {
       pending.set(code, decoded);
     }
