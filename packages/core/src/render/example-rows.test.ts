@@ -101,6 +101,32 @@ test("example wrappers cannot be forged and hostile inline content stays inert",
   expect(blocks.map(({ id, text }) => ({ id, text }))).toEqual(plain.map(({ id, text }) => ({ id, text })));
 });
 
+test("hostile continuation content stays sanitized inside the first row without changing text or ids", async () => {
+  const md =
+    'Before: one seed\nContinued: <script>bad()</script> <img src=x onerror=bad()> [bad](javascript:bad()) <svg onload=bad()></svg> <span class="emend-example-value">x</span>\nAfter: safe';
+  const blocks = await renderExample(md);
+  const plain = await renderMarkdownWithBudget(md, "t-garden-example", { highlightedBytes: 0 });
+  expect(blocks).toHaveLength(1);
+  expect(blocks.map(({ id, text }) => ({ id, text }))).toEqual(plain.map(({ id, text }) => ({ id, text })));
+  for (const [index, block] of blocks.entries()) {
+    expect(block.html).not.toMatch(/<script|<svg|onerror|onload|javascript:/i);
+    expect(blockText(block.html)).toBe(blockText(plain[index]?.html ?? ""));
+  }
+  const html = blocks[0]?.html ?? "";
+  expect(html).toContain('class="user-content-emend-example-value"');
+  const rows = withClass(html, "emend-example-row");
+  expect(rows).toHaveLength(2);
+  const before = rows[0]?.children[1];
+  if (before?.type !== "element") throw new Error("Missing first row value");
+  expect(before).toMatchObject({ tagName: "span", properties: { className: ["emend-example-value"] } });
+  expect(hastText(before)).toBe(" one seed\nContinued:   bad  x");
+  expect(before.children.find((node) => node.type === "element" && node.tagName === "span")).toMatchObject({
+    properties: { className: ["user-content-emend-example-value"] },
+    children: [{ type: "text", value: "x" }],
+  });
+  expect(rows[1] && hastText(rows[1])).toBe("After: safe");
+});
+
 test("Example and glossary keep hostile HTML inert and isolate Mermaid click directives", async () => {
   const source = 'graph TD; A-->B\nclick A "javascript:bad()"';
   const md = `Before: <script>bad()</script><img onerror=bad()><svg onload=bad()></svg> [bad](javascript:bad())\nAfter: safe\n\n\`\`\`mermaid\n${source}\n\`\`\``;
