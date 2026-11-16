@@ -1,6 +1,44 @@
 import mermaid, { type MermaidConfig } from "mermaid";
 
 const MAX_SOURCE = 50000;
+
+// Mermaid writes #quot; as &quot; in SVG labels and decodes only &amp;, &lt; and &gt;.
+// Swap codes for stand-in letters, then write the characters back as text.
+export function encodeCodes(source: string): { source: string; characters: Map<string, string> } {
+  const encoded = source
+    .replace(/style.*:\S*#.*;/g, (match) => match.slice(0, -1))
+    .replace(/classDef.*:\S*#.*;/g, (match) => match.slice(0, -1));
+  const codes = new Map<string, string>();
+  const characters = new Map<string, string>();
+  const parser = new DOMParser();
+  let next = 0x0100;
+  for (const [code] of encoded.matchAll(/#\w+;/g)) {
+    if (codes.has(code)) continue;
+    const inner = code.slice(1, -1);
+    const entity = /^\d+$/.test(inner) ? `&#${inner};` : `&${inner};`;
+    const decoded = parser.parseFromString(entity, "text/html").body.textContent ?? entity;
+    if (decoded === entity) continue;
+    while (next <= 0x024f && source.includes(String.fromCodePoint(next))) next++;
+    if (next > 0x024f) return { source, characters: new Map() };
+    const standIn = String.fromCodePoint(next++);
+    codes.set(code, standIn);
+    characters.set(standIn, decoded);
+  }
+  return { source: encoded.replace(/#\w+;/g, (code) => codes.get(code) ?? code), characters };
+}
+
+export function restoreCodes(svg: Element, characters: Map<string, string>): void {
+  if (characters.size === 0) return;
+  const standIns = [...characters.keys()].map((character) => `\\u{${character.charCodeAt(0).toString(16)}}`).join("");
+  const pattern = new RegExp(`[${standIns}]`, "gu");
+  const walker = svg.ownerDocument.createTreeWalker(svg, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (node.parentElement?.localName === "style") continue;
+    const text = node as Text;
+    text.data = text.data.replace(pattern, (standIn) => characters.get(standIn) ?? standIn);
+  }
+}
+
 export function naturalSize(svg: Element): { width: number; height: number } | null {
   const viewBox = svg
     .getAttribute("viewBox")
@@ -158,9 +196,11 @@ export function startFrame(root: HTMLElement) {
         staging.style.position = "absolute";
         root.append(staging);
         try {
-          const result = await mermaid.render(`diagram-${++sequence}`, source, staging);
+          const encoded = encodeCodes(source);
+          const result = await mermaid.render(`diagram-${++sequence}`, encoded.source, staging);
           if (active && pending === undefined) {
             const svg = sanitizeSvg(result.svg);
+            restoreCodes(svg, encoded.characters);
             root.replaceChildren(svg);
             natural = naturalSize(svg);
           }

@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { naturalSize, sanitizeSvg, startFrame } from "../mermaid-frame.ts";
+import { encodeCodes, naturalSize, restoreCodes, sanitizeSvg, startFrame } from "../mermaid-frame.ts";
 import { MermaidBlock, parseFrameSize } from "./components/reading/MermaidBlock.tsx";
 
 const mermaid = vi.hoisted(() => ({
@@ -22,6 +22,88 @@ afterEach(() => {
   mermaid.render.mockReset();
   mermaid.initialize.mockReset();
 });
+
+const stateSource = `stateDiagram-v2
+  s0: quote #quot;a#quot;
+  s1: colon a#58; b
+  s2: em dash a #8212; b
+  s3: less a #lt; b
+  [*] --> s0
+  s0 --> s1: next #quot;step#quot;
+  s1 --> s2
+  s2 --> s3`;
+
+test("entity codes use distinct Latin stand-ins and reuse repeated codes", () => {
+  const encoded = encodeCodes(stateSource);
+  expect([...encoded.characters.values()]).toEqual(['"', ":", "\u2014", "<"]);
+  for (const standIn of encoded.characters.keys()) expect(standIn).toMatch(/^[\u0100-\u024f]$/u);
+  const [quote, colon, dash, less] = encoded.characters.keys();
+  if (!quote || !colon || !dash || !less) throw new Error("Missing entity stand-ins");
+  expect(encoded.source).toBe(
+    stateSource
+      .replaceAll("#quot;", quote)
+      .replaceAll("#58;", colon)
+      .replaceAll("#8212;", dash)
+      .replaceAll("#lt;", less),
+  );
+  expect(encoded.source.split(quote)).toHaveLength(5);
+});
+
+test("entity encoding preserves colours, unknown codes and existing letters", () => {
+  const source = 'flowchart LR\n  a["\u0100 #quot; #nosuchentity;"]\n  classDef dark fill:#333;\n  style a fill:#f9f;';
+  const encoded = encodeCodes(source);
+  expect(encoded.source).toContain("classDef dark fill:#333\n  style a fill:#f9f");
+  expect(encoded.source).toContain("#nosuchentity;");
+  expect(encoded.source).toContain("\u0100");
+  expect(encoded.characters.size).toBe(1);
+  const [standIn] = encoded.characters.keys();
+  if (!standIn) throw new Error("Missing entity stand-in");
+  expect(standIn).not.toBe("\u0100");
+  expect(source).not.toContain(standIn);
+  expect(encoded.characters.get(standIn)).toBe('"');
+});
+
+test("source without entity codes stays unchanged", () => {
+  const source = "flowchart LR\n  a --> b";
+  expect(encodeCodes(source)).toEqual({ source, characters: new Map() });
+});
+
+test("running out of stand-ins returns the whole original source", () => {
+  const letters = Array.from({ length: 0x024f - 0x0100 }, (_, index) => String.fromCodePoint(0x0100 + index)).join("");
+  const source = `flowchart LR\n  a["${letters} #quot; #lt;"]\n  classDef dark fill:#333;`;
+  expect(encodeCodes(source)).toEqual({ source, characters: new Map() });
+});
+
+test("entity restoration changes SVG text, tspan and title but leaves styles and attributes alone", () => {
+  const encoded = encodeCodes("#quot; #58; #8212; #lt;b#gt; #amp;");
+  const svg = sanitizeSvg(
+    `<svg xmlns="http://www.w3.org/2000/svg" data-label="${encoded.source}"><style>${encoded.source}</style><text>${encoded.source}<tspan>${encoded.source}</tspan></text><title>${encoded.source}</title></svg>`,
+  );
+  restoreCodes(svg, encoded.characters);
+  const expected = '" : \u2014 <b> &';
+  expect(svg.querySelector("text")?.firstChild?.textContent).toBe(expected);
+  expect(svg.querySelector("tspan")?.textContent).toBe(expected);
+  expect(svg.querySelector("title")?.textContent).toBe(expected);
+  expect(svg.querySelector("style")?.textContent).toBe(encoded.source);
+  expect(svg.getAttribute("data-label")).toBe(encoded.source);
+  expect(svg.querySelector("b")).toBeNull();
+});
+
+test("entity restoration does not replace decoded characters again", () => {
+  const encoded = encodeCodes("#257; #quot;");
+  expect(encoded.characters.get("\u0100")).toBe("\u0101");
+  expect(encoded.characters.get("\u0101")).toBe('"');
+  const svg = sanitizeSvg(`<svg xmlns="http://www.w3.org/2000/svg"><text>${encoded.source}</text></svg>`);
+  restoreCodes(svg, encoded.characters);
+  expect(svg.textContent).toBe('\u0101 "');
+});
+
+test("entity restoration with no stand-ins leaves SVG text alone", () => {
+  const svg = sanitizeSvg('<svg xmlns="http://www.w3.org/2000/svg"><text>A</text></svg>');
+  restoreCodes(svg, new Map());
+  expect(svg.textContent).toBe("A");
+});
+
 test("web sources have one audited server HTML sink and no DOM string insertion", () => {
   const root = join(import.meta.dirname, "..");
   const files = readdirSync(root, { recursive: true, encoding: "utf8" }).filter(
@@ -89,7 +171,7 @@ test("oversize source stays text and is never passed to Mermaid", async () => {
   document.body.append(root);
   const stop = startFrame(root);
   try {
-    const source = "x".repeat(50001);
+    const source = `${"x".repeat(50001)}#quot;`;
     window.dispatchEvent(new MessageEvent("message", { source: window.parent, data: { type: "render", source } }));
     await waitFor(() => expect(root.textContent).toContain("This diagram is too large to draw."));
     expect(root.querySelector("pre")?.textContent).toBe(source);
@@ -99,6 +181,51 @@ test("oversize source stays text and is never passed to Mermaid", async () => {
     root.remove();
   }
 });
+
+test("frame renders encoded labels and restores their characters as SVG text", async () => {
+  const root = document.createElement("div");
+  document.body.append(root);
+  const source = 'flowchart LR\n  a["quote #quot;a#quot; colon #58; dash #8212; #lt;b#gt;"]';
+  const encoded = encodeCodes(source);
+  mermaid.render.mockImplementation(async (_id: string, source: string) => ({
+    svg: `<svg xmlns="http://www.w3.org/2000/svg"><text>${source.split('"')[1]}</text></svg>`,
+  }));
+  const stop = startFrame(root);
+  try {
+    window.dispatchEvent(new MessageEvent("message", { source: window.parent, data: { type: "render", source } }));
+    await waitFor(() => expect(root.querySelector("text")?.textContent).toBe('quote "a" colon : dash \u2014 <b>'));
+    expect(mermaid.render).toHaveBeenCalledExactlyOnceWith("diagram-1", encoded.source, expect.any(HTMLElement));
+    expect(mermaid.render.mock.calls[0]?.[1]).not.toContain("#quot;");
+    expect(root.querySelector("b")).toBeNull();
+  } finally {
+    stop();
+    root.remove();
+  }
+});
+
+test("failed rendering keeps the original entity codes in the source fallback", async () => {
+  const root = document.createElement("div");
+  document.body.append(root);
+  mermaid.render.mockRejectedValueOnce(new Error("Invalid diagram"));
+  const stop = startFrame(root);
+  try {
+    window.dispatchEvent(
+      new MessageEvent("message", { source: window.parent, data: { type: "render", source: stateSource } }),
+    );
+    await waitFor(() => expect(root.querySelector("pre")?.textContent).toBe(stateSource));
+    expect(root.textContent).toContain("This diagram could not be drawn.");
+    expect(mermaid.render).toHaveBeenCalledExactlyOnceWith(
+      "diagram-1",
+      encodeCodes(stateSource).source,
+      expect.any(HTMLElement),
+    );
+    expect(mermaid.render.mock.calls[0]?.[1]).not.toContain("#quot;");
+  } finally {
+    stop();
+    root.remove();
+  }
+});
+
 test("parent uses the minimal sandbox, posts only source after load, and validates the sending window and size", () => {
   const { container } = render(<MermaidBlock source="graph TD; A-->B" />);
   const frame = container.querySelector("iframe");
