@@ -1528,12 +1528,15 @@ test("counts wait for visible diffs and never exceed three concurrent background
       }),
   );
   await mount(revision([visible, ...background]));
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   near(visible.path);
-  await waitFor(() => expect(visibleLoads).toHaveLength(2));
+  // Drain diff-loads' next-task queue while the foreground responses remain held.
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.runAllTimersAsync();
   });
+  expect(visibleLoads).toHaveLength(2);
   expect(loads).toHaveLength(0);
+  vi.useRealTimers();
   await act(async () => {
     for (const release of visibleLoads) release();
   });

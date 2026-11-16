@@ -98,6 +98,7 @@ afterEach(() => {
   window.getSelection()?.removeAllRanges();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 function mount(readerGroups = groups) {
   const ui = (next: ReaderGroup[], id = reviewId, revision = 1) => (
@@ -359,11 +360,12 @@ test.each([false, true])(
     viewport(phone);
     mount();
     const opener = open("After");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     fireEvent.click(button("Comment on screenshot"));
     const input = screen.getByRole("textbox", { name: "Comment" });
     // Let FocusScope's delayed unmount restoration run before checking the new editor.
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await vi.runAllTimersAsync();
     });
     expect(document.activeElement).toBe(input);
     expect(screen.queryByRole("heading", { name: "After" })).toBeNull();
@@ -373,6 +375,7 @@ test.each([false, true])(
       expect(input.closest(".em-reading-block")?.querySelector("[data-block-id]")?.getAttribute("data-block-id")).toBe(
         row.id,
       );
+    vi.useRealTimers();
     fireEvent.click(button("Cancel"));
     await waitFor(() => expect(document.activeElement).toBe(opener));
   },
@@ -418,13 +421,14 @@ test.each(["skim topic", "glossary", "Details"])(
     expect(within(dialog()).getByText("3 of 3")).toBeTruthy();
     expect(within(dialog()).getByRole("heading", { name: "garden.png" })).toBeTruthy();
     expect(isFolded()).toBe(true);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     fireEvent.click(button("Comment on screenshot"));
     const input = screen.getByRole("textbox", { name: "Comment" });
     expect(section.contains(input)).toBe(true);
     expect(isFolded()).toBe(false);
     expect(input.closest("[hidden], details:not([open])")).toBeNull();
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await vi.runAllTimersAsync();
     });
     expect(document.activeElement).toBe(input);
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -437,10 +441,11 @@ test.each([
 ] as const)("changing the %s closes the gallery snapshot", async (_kind, id, revision) => {
   const { replace } = mount();
   const opener = open();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   replace(groups, id, revision);
   expect(screen.queryByRole("dialog")).toBeNull();
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.runAllTimersAsync();
   });
   expect(opener.isConnected).toBe(false);
   const nextOpener = open();

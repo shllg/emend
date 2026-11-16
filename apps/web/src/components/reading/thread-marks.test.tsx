@@ -396,10 +396,7 @@ test("a phone sheet shows a clamped quote and an unfocused inline reply field wi
   expect(within(sheet).getByRole("button", { name: "Resolve" })).toBeTruthy();
   fireEvent.change(input, { target: { value: "Another synthetic comment" } });
   fireEvent.click(within(sheet).getByRole("button", { name: "Save comment" }));
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  });
-  expect((input as HTMLTextAreaElement).value).toBe("");
+  await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe(""));
   expect(screen.getByRole("textbox", { name: "Reply" })).toBe(input);
 });
 

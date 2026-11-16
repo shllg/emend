@@ -245,9 +245,16 @@ test("a 409 unsent_comments refetches the review, shows the alert and the discar
   const plain = await screen.findByRole("button", { name: "Retire" });
   // Two comments arrive on another device before the press.
   serverCount = 2;
-  fireEvent.click(plain);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  await act(async () => {
+    fireEvent.click(plain);
+  });
+  // Commit the 200 ms query-refresh batch and its notifications before checking the changed label.
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(200);
+  });
   // The refetch lands through the real invalidation.
-  const discard = await screen.findByRole("button", { name: "Discard 2 unsent comments and retire" });
+  const discard = screen.getByRole("button", { name: "Discard 2 unsent comments and retire" });
   expect(invalidate).toHaveBeenCalledWith({ queryKey: ["revision", reviewId] });
   expect(screen.getByRole("alert").textContent).toBe("2 new unsent comments arrived.");
   expect(screen.queryByText("The review has unsent comments.")).toBeNull();
@@ -255,7 +262,12 @@ test("a 409 unsent_comments refetches the review, shows the alert and the discar
   // The label changed a moment ago: this press must not count.
   fireEvent.click(discard);
   expect(retires).toBe(1);
-  await new Promise((resolve) => setTimeout(resolve, 1100));
+  // ReviewActions' DISCARD_GUARD_MS is 1000 ms from the label change.
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1001);
+  });
+  expect(retires).toBe(1);
+  vi.useRealTimers();
   fireEvent.click(discard);
   await screen.findByText("Review retired");
   expect(sent().filter(([method]) => method === "POST")).toHaveLength(2);
@@ -309,10 +321,15 @@ test("a plain Retire sends no discardUnsent even after the count fell back to ze
   const view = mount({ unsentCount: 2 });
   await choose("Retire");
   await screen.findByRole("button", { name: "Discard 2 unsent comments and retire" });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   view.update({ unsentCount: 0 });
-  expect((await screen.findByRole("alert")).textContent).toBe("Some unsent comments were sent or deleted.");
+  expect(screen.getByRole("alert").textContent).toBe("Some unsent comments were sent or deleted.");
   const plain = screen.getByRole("button", { name: "Retire" });
-  await new Promise((resolve) => setTimeout(resolve, 1100));
+  // Pass DISCARD_GUARD_MS after the label returns to plain Retire.
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1001);
+  });
+  vi.useRealTimers();
   fireEvent.click(plain);
   await screen.findByText("Review retired");
   expect(sent()).toEqual([["POST", `${base}/retire`, "{}"]]);
@@ -391,8 +408,14 @@ test("after the server moved the review to the bin a further press is a no-op", 
   await waitFor(() => expect(lifecycle.onDeleted).toHaveBeenCalledOnce());
   // The dialog is closed at once, and the menu cannot open another one.
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
-  await choose("Delete");
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  openMenu();
+  const remove = await screen.findByRole("menuitem", { name: "Delete" });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  fireEvent.click(remove);
+  // Drain the menu's deferred focus restoration and any work the press scheduled.
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
   expect(screen.queryByRole("alertdialog")).toBeNull();
   expect(sent().filter(([method, path]) => method === "POST" && String(path).endsWith("/bin"))).toHaveLength(1);
   expect(lifecycle.onDeleted).toHaveBeenCalledOnce();
