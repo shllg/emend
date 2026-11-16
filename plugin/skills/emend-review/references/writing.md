@@ -33,7 +33,7 @@ Checked and Not checked are the exception. They are never empty.
 A review topic's `why` explains what the area does, the problem and the fix.
 Its `example` shows a concrete before/after case.
 Give every topic above Low risk (`skim`) an Example of at most six lines.
-Use real input and real output from the change.
+Keep examples grounded in the actual change: use its real input and real output.
 Write a before/after case in one paragraph, with lines starting `Before:` and `After:`.
 emend shows those lines as aligned rows.
 A line without `Before:` or `After:` at its start continues the row above it.
@@ -175,7 +175,8 @@ In a review writeup:
 
 - List each image under `media`, as [the manifest reference](manifest.md) says.
 - Reference it from any writeup section with `![Alt](path)`. The alt text becomes the caption.
-- Put the pair in one paragraph: `![Before](media/before.png) ![After](media/after.png)`.
+- Put the pair in one paragraph, with alt text "Before" and "After":
+  `![Before](media/before.png) ![After](media/after.png)`.
   On the next line of that paragraph, state the effect in one line.
   emend shows Before, After and Side by side controls, with the effect line underneath.
 - Only listed paths render. Any other image reference in the writeup is dropped.
