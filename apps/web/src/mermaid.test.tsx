@@ -2,14 +2,24 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { encodeCodes, frameConfig, naturalSize, restoreCodes, sanitizeSvg, startFrame } from "../mermaid-frame.ts";
+import {
+  encodeCodes,
+  exceedsLimits,
+  frameConfig,
+  naturalSize,
+  restoreCodes,
+  sanitizeSvg,
+  startFrame,
+} from "../mermaid-frame.ts";
 import { MermaidBlock, parseFrameSize } from "./components/reading/MermaidBlock.tsx";
 
 const mermaid = vi.hoisted(() => ({
   initialize: vi.fn(),
+  parse: vi.fn(),
   render: vi.fn(),
   mermaidAPI: {
     getDiagramFromText: vi.fn(),
+    reset: vi.fn(),
     defaultConfig: {
       secure: ["secure", "securityLevel", "startOnLoad", "maxTextSize", "suppressErrorRendering", "maxEdges"],
     },
@@ -18,6 +28,8 @@ const mermaid = vi.hoisted(() => ({
 vi.mock("mermaid", () => ({ default: mermaid }));
 beforeEach(() => {
   mermaid.mermaidAPI.getDiagramFromText.mockReset().mockResolvedValue({ db: {} });
+  mermaid.mermaidAPI.reset.mockReset();
+  mermaid.parse.mockReset().mockResolvedValue({});
 });
 afterEach(() => {
   cleanup();
@@ -373,8 +385,19 @@ test("SVG scrub drops executable elements, click handlers and non-fragment links
   ).toBe(true);
   expect(svg.querySelector("use")?.getAttribute("href")).toBe("#safe");
 });
-test("frame config secures the arrow limit", () => {
-  expect(frameConfig(false)).toMatchObject({ maxEdges: 150, secure: expect.arrayContaining(["maxEdges"]) });
+test("frame config secures the arrow limit and architecture iterations", () => {
+  expect(frameConfig(false)).toMatchObject({
+    maxEdges: 150,
+    secure: expect.arrayContaining(["maxEdges", "numIter", "layout"]),
+  });
+});
+test("diagram measurement resets site config before parsing", async () => {
+  await expect(exceedsLimits(stateSource)).resolves.toBe(false);
+  expect(mermaid.mermaidAPI.reset).toHaveBeenCalledTimes(1);
+  expect(mermaid.mermaidAPI.reset.mock.invocationCallOrder[0]).toBeLessThan(
+    mermaid.mermaidAPI.getDiagramFromText.mock.invocationCallOrder[0] ?? 0,
+  );
+  expect(mermaid.parse).not.toHaveBeenCalled();
 });
 test.each([
   'graph TD; A-->B; click A evil "click"',
@@ -435,7 +458,7 @@ test.each([
 ])("a diagram with $nodes nodes and $edges edges stays text", async ({ nodes, edges }) => {
   const root = document.createElement("div");
   document.body.append(root);
-  mermaid.mermaidAPI.getDiagramFromText.mockResolvedValueOnce({
+  mermaid.mermaidAPI.getDiagramFromText.mockResolvedValue({
     db: { getData: () => ({ nodes: Array.from({ length: nodes }), edges: Array.from({ length: edges }) }) },
   });
   const stop = startFrame(root);
@@ -446,6 +469,7 @@ test.each([
     await waitFor(() => expect(root.textContent).toContain("This diagram is too large to draw."));
     expect(root.querySelector("pre")?.textContent).toBe(stateSource);
     expect(mermaid.render).not.toHaveBeenCalled();
+    if (edges > 150) expect(mermaid.parse).not.toHaveBeenCalled();
   } finally {
     stop();
     root.remove();
@@ -467,6 +491,213 @@ test("a diagram with exactly 300 nodes and 150 edges still renders", async () =>
     await waitFor(() => expect(root.querySelector("svg")).not.toBeNull());
     expect(mermaid.render).toHaveBeenCalledTimes(1);
     expect(root.querySelector("pre")).toBeNull();
+    expect(mermaid.parse).not.toHaveBeenCalled();
+  } finally {
+    stop();
+    root.remove();
+  }
+});
+
+test.each([false, true])("a newer source skips stale parse work (too large: %s)", async (tooLarge) => {
+  const root = document.createElement("div");
+  document.body.append(root);
+  const first = Promise.withResolvers<{ db: object }>();
+  const second = Promise.withResolvers<{ db: object }>();
+  const sourceB = 'flowchart LR\n  b["B #quot;label#quot;"]';
+  mermaid.mermaidAPI.getDiagramFromText.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+  mermaid.render.mockResolvedValue({ svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>B</text></svg>' });
+  const stop = startFrame(root);
+  const send = (source: string) =>
+    window.dispatchEvent(new MessageEvent("message", { source: window.parent, data: { type: "render", source } }));
+  try {
+    send(stateSource);
+    send(sourceB);
+    expect(mermaid.mermaidAPI.getDiagramFromText).toHaveBeenCalledExactlyOnceWith(encodeCodes(stateSource).source);
+    first.resolve({ db: { getData: () => ({ edges: Array.from({ length: tooLarge ? 151 : 0 }) }) } });
+    await waitFor(() => expect(mermaid.mermaidAPI.getDiagramFromText).toHaveBeenCalledTimes(2));
+    expect(mermaid.render).not.toHaveBeenCalled();
+    expect(root.querySelector("p, pre, svg")).toBeNull();
+    second.resolve({ db: {} });
+    await waitFor(() => expect(root.querySelector("text")?.textContent).toBe("B"));
+    expect(mermaid.render).toHaveBeenCalledExactlyOnceWith(
+      "diagram-1",
+      encodeCodes(sourceB).source,
+      expect.any(HTMLElement),
+    );
+    expect(root.textContent).toBe("B");
+  } finally {
+    stop();
+    root.remove();
+  }
+});
+
+test.each([false, true])("stopping the frame skips pending parse work (too large: %s)", async (tooLarge) => {
+  const root = document.createElement("div");
+  document.body.append(root);
+  const parsed = Promise.withResolvers<{ db: object }>();
+  mermaid.mermaidAPI.getDiagramFromText.mockReturnValueOnce(parsed.promise);
+  const stop = startFrame(root);
+  try {
+    window.dispatchEvent(
+      new MessageEvent("message", { source: window.parent, data: { type: "render", source: stateSource } }),
+    );
+    expect(mermaid.mermaidAPI.getDiagramFromText).toHaveBeenCalledTimes(1);
+    expect(root.childElementCount).toBe(1);
+    stop();
+    parsed.resolve({ db: { getData: () => ({ edges: Array.from({ length: tooLarge ? 151 : 0 }) }) } });
+    await waitFor(() => expect(root.childElementCount).toBe(0));
+    expect(mermaid.render).not.toHaveBeenCalled();
+    expect(root.textContent).toBe("");
+  } finally {
+    stop();
+    root.remove();
+  }
+});
+
+test.each([
+  { edges: 16, tooLarge: true },
+  { edges: 15, tooLarge: false },
+])("a diagram with $edges links of length 10 checks weighted arrows", async ({ edges, tooLarge }) => {
+  const root = document.createElement("div");
+  document.body.append(root);
+  mermaid.mermaidAPI.getDiagramFromText.mockResolvedValueOnce({
+    db: { getData: () => ({ nodes: [], edges: Array.from({ length: edges }, () => ({ minlen: 10 })) }) },
+  });
+  mermaid.render.mockResolvedValue({ svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>A</text></svg>' });
+  const stop = startFrame(root);
+  try {
+    window.dispatchEvent(
+      new MessageEvent("message", { source: window.parent, data: { type: "render", source: stateSource } }),
+    );
+    if (tooLarge) {
+      await waitFor(() => expect(root.textContent).toContain("This diagram is too large to draw."));
+      expect(root.querySelector("pre")?.textContent).toBe(stateSource);
+      expect(mermaid.render).not.toHaveBeenCalled();
+    } else {
+      await waitFor(() => expect(root.querySelector("svg")).not.toBeNull());
+      expect(mermaid.render).toHaveBeenCalledTimes(1);
+      expect(root.querySelector("pre")).toBeNull();
+    }
+    expect(mermaid.parse).not.toHaveBeenCalled();
+  } finally {
+    stop();
+    root.remove();
+  }
+});
+
+test.each([
+  { nodes: 10, groups: 2, edges: 151, tooLarge: true },
+  { nodes: 200, groups: 101, edges: 20, tooLarge: true },
+  { nodes: 10, groups: 2, edges: 20, tooLarge: false },
+])("architecture counts $nodes nodes, $groups groups and $edges edges", async ({ nodes, groups, edges, tooLarge }) => {
+  const root = document.createElement("div");
+  document.body.append(root);
+  const source = "architecture-beta\n  service a\n  service b\n  a:R -- L:b";
+  mermaid.mermaidAPI.getDiagramFromText.mockResolvedValue({
+    db: {
+      getNodes: () => Array.from({ length: nodes }),
+      getGroups: () => Array.from({ length: groups }),
+      getEdges: () => Array.from({ length: edges }),
+    },
+  });
+  mermaid.render.mockResolvedValue({ svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>A</text></svg>' });
+  const stop = startFrame(root);
+  try {
+    window.dispatchEvent(new MessageEvent("message", { source: window.parent, data: { type: "render", source } }));
+    if (tooLarge) {
+      await waitFor(() => expect(root.textContent).toContain("This diagram is too large to draw."));
+      expect(root.querySelector("pre")?.textContent).toBe(source);
+      expect(mermaid.render).not.toHaveBeenCalled();
+    } else {
+      await waitFor(() => expect(root.querySelector("svg")).not.toBeNull());
+      expect(mermaid.render).toHaveBeenCalledTimes(1);
+      expect(root.querySelector("pre")).toBeNull();
+    }
+    if (nodes + groups > 300) {
+      expect(mermaid.parse).toHaveBeenCalledExactlyOnceWith(source);
+      expect(mermaid.mermaidAPI.getDiagramFromText).toHaveBeenCalledTimes(2);
+    } else {
+      expect(mermaid.parse).not.toHaveBeenCalled();
+    }
+  } finally {
+    stop();
+    root.remove();
+  }
+});
+
+test.each([
+  { sets: 13, tooLarge: true },
+  { sets: 12, tooLarge: false },
+])("venn counts $sets distinct sets across single sets and unions", async ({ sets, tooLarge }) => {
+  const root = document.createElement("div");
+  document.body.append(root);
+  const source = "venn-beta\nset A\nset B\nunion A,B";
+  mermaid.mermaidAPI.getDiagramFromText.mockResolvedValueOnce({
+    db: {
+      getSubsetData: () => [
+        ...Array.from({ length: sets - 2 }, (_, index) => ({ sets: [`s${index}`] })),
+        { sets: ["s0", `s${sets - 2}`, `s${sets - 1}`] },
+        { sets: ["s0", "s1"] },
+      ],
+    },
+  });
+  mermaid.render.mockResolvedValue({ svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>A</text></svg>' });
+  const stop = startFrame(root);
+  try {
+    window.dispatchEvent(new MessageEvent("message", { source: window.parent, data: { type: "render", source } }));
+    if (tooLarge) {
+      await waitFor(() => expect(root.textContent).toContain("This diagram is too large to draw."));
+      expect(root.querySelector("pre")?.textContent).toBe(source);
+      expect(mermaid.render).not.toHaveBeenCalled();
+    } else {
+      await waitFor(() => expect(root.querySelector("svg")).not.toBeNull());
+      expect(mermaid.render).toHaveBeenCalledTimes(1);
+      expect(root.querySelector("pre")).toBeNull();
+    }
+    expect(mermaid.parse).not.toHaveBeenCalled();
+  } finally {
+    stop();
+    root.remove();
+  }
+});
+
+test.each([
+  { nodes: 200, tooLarge: false },
+  { nodes: 301, tooLarge: true },
+])("a node-only excess is recounted as $nodes nodes under the diagram config", async ({ nodes, tooLarge }) => {
+  const root = document.createElement("div");
+  document.body.append(root);
+  const source = `---\nconfig: { class: { hierarchicalNamespaces: false } }\n---\n${stateSource}`;
+  const encoded = encodeCodes(source).source;
+  const initial = {
+    db: { getData: () => ({ nodes: Array.from({ length: 301 }), edges: Array.from({ length: 10 }) }) },
+  };
+  const configured = {
+    db: { getData: () => ({ nodes: Array.from({ length: nodes }), edges: Array.from({ length: 10 }) }) },
+  };
+  mermaid.mermaidAPI.getDiagramFromText.mockResolvedValue(initial);
+  mermaid.parse.mockImplementationOnce(async () => {
+    mermaid.mermaidAPI.getDiagramFromText.mockResolvedValue(configured);
+    return {};
+  });
+  mermaid.render.mockResolvedValue({ svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>A</text></svg>' });
+  const stop = startFrame(root);
+  try {
+    window.dispatchEvent(new MessageEvent("message", { source: window.parent, data: { type: "render", source } }));
+    if (tooLarge) {
+      await waitFor(() => expect(root.textContent).toContain("This diagram is too large to draw."));
+      expect(root.querySelector("pre")?.textContent).toBe(source);
+      expect(mermaid.render).not.toHaveBeenCalled();
+    } else {
+      await waitFor(() => expect(root.querySelector("svg")).not.toBeNull());
+      expect(mermaid.render).toHaveBeenCalledExactlyOnceWith("diagram-1", encoded, expect.any(HTMLElement));
+      expect(root.querySelector("pre")).toBeNull();
+    }
+    expect(mermaid.parse).toHaveBeenCalledExactlyOnceWith(encoded);
+    expect(mermaid.mermaidAPI.getDiagramFromText).toHaveBeenNthCalledWith(1, encoded);
+    expect(mermaid.mermaidAPI.getDiagramFromText).toHaveBeenNthCalledWith(2, encoded);
+    expect(mermaid.mermaidAPI.getDiagramFromText).toHaveBeenCalledTimes(2);
+    expect(mermaid.mermaidAPI.reset).toHaveBeenCalledTimes(1);
   } finally {
     stop();
     root.remove();

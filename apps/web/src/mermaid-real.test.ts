@@ -16,12 +16,19 @@ const stateSource = `stateDiagram-v2
 const flowchartSource = 'flowchart LR\n  a["quote #quot;a#quot;"] --> b["colon a#58; b"]';
 
 function diagramSource(type: string, nodes: number, edges: number): string {
-  const lines = [type, ...Array.from({ length: nodes }, (_, index) => `s${index}`)];
+  const prefix = type === "classDiagram" ? "class " : type === "architecture-beta" ? "service " : "";
+  const lines = [type, ...Array.from({ length: nodes }, (_, index) => `${prefix}s${index}`)];
   for (let index = 0; index < edges; index++) {
     const from = index % nodes;
     const round = Math.floor(index / nodes);
     const to = round === 0 ? (from + 1) % nodes : (from * 7 + round * 3) % nodes;
-    lines.push(`s${from} --> s${to}`);
+    if (type === "erDiagram") {
+      lines.push(`s${from} ||--o{ s${to} : relates`);
+    } else if (type === "architecture-beta") {
+      lines.push(`s${from}:R -- L:s${to}`);
+    } else {
+      lines.push(`s${from} --> s${to}`);
+    }
   }
   return lines.join("\n");
 }
@@ -32,15 +39,83 @@ test.each([
   { type: "flowchart LR", nodes: 60, edges: 151, expected: true },
   { type: "flowchart LR", nodes: 60, edges: 150, expected: false },
   { type: "stateDiagram-v2", nodes: 301, edges: 0, expected: true },
+  { type: "classDiagram", nodes: 60, edges: 151, expected: true },
+  { type: "classDiagram", nodes: 5, edges: 4, expected: false },
+  { type: "erDiagram", nodes: 60, edges: 151, expected: true },
+  { type: "erDiagram", nodes: 5, edges: 4, expected: false },
+  { type: "architecture-beta", nodes: 60, edges: 151, expected: true },
+  { type: "architecture-beta", nodes: 5, edges: 4, expected: false },
 ])("real Mermaid checks $type limits with $nodes nodes and $edges edges", async ({ type, nodes, edges, expected }) => {
   mermaid.initialize(frameConfig(false));
   await expect(exceedsLimits(diagramSource(type, nodes, edges))).resolves.toBe(expected);
 });
 
-test("real Mermaid refuses a flowchart that tries to raise the arrow limit", async () => {
+test.each([
+  { kind: "init directive", config: '%%{init: {"maxEdges": 1000}}%%' },
+  { kind: "front matter", config: "---\nconfig: { maxEdges: 1000 }\n---" },
+])("real Mermaid refuses an arrow limit override through $kind", async ({ config }) => {
   mermaid.initialize(frameConfig(false));
-  const source = `%%{init: {"maxEdges": 1000}}%%\n${diagramSource("flowchart LR", 60, 151)}`;
+  const source = `${config}\n${diagramSource("flowchart LR", 60, 151)}`;
+  await expect(mermaid.parse(source)).rejects.toThrow(/^Edge limit exceeded/);
   await expect(exceedsLimits(source)).resolves.toBe(true);
+});
+
+test.each([
+  { config: "", nodes: 400, expected: true },
+  { config: "---\nconfig: { class: { hierarchicalNamespaces: false } }\n---\n", nodes: 200, expected: false },
+])("real Mermaid counts $nodes class nodes with namespace config", async ({ config, nodes, expected }) => {
+  mermaid.initialize(frameConfig(false));
+  const namespaces = Array.from(
+    { length: 100 },
+    (_, index) => `namespace N${index}.Inner.Leaf {\n  class C${index}\n}`,
+  );
+  const source = `${config}classDiagram\n${namespaces.join("\n")}`;
+  await expect(exceedsLimits(source)).resolves.toBe(expected);
+  await mermaid.parse(source);
+  const diagram = await mermaid.mermaidAPI.getDiagramFromText(source);
+  const db = diagram.db as typeof diagram.db & { getData(): { nodes: unknown[] } };
+  expect(db.getData().nodes).toHaveLength(nodes);
+});
+
+test("real Mermaid ignores a diagram's architecture iteration override", async () => {
+  mermaid.initialize(frameConfig(false));
+  const source = `%%{init: {"architecture": {"numIter": 100000}}}%%\n${diagramSource("architecture-beta", 2, 1)}`;
+  await expect(mermaid.parse(source)).resolves.toBeTruthy();
+  expect(mermaid.mermaidAPI.getConfig().architecture?.numIter).not.toBe(100000);
+});
+
+test.each([
+  { layout: "elk.stress", config: "---\nconfig: { layout: elk.stress }\n---" },
+  { layout: "elk.force", config: '%%{init: {"layout": "elk.force"}}%%' },
+])("real Mermaid ignores a diagram's $layout layout override", async ({ layout, config }) => {
+  mermaid.initialize(frameConfig(false));
+  const source = `${config}\nflowchart LR\n  A --> B`;
+  await expect(mermaid.parse(source)).resolves.toBeTruthy();
+  expect(mermaid.mermaidAPI.getConfig().layout).not.toBe(layout);
+});
+
+test.each([
+  { sets: 13, expected: true },
+  { sets: 3, expected: false },
+])("real Mermaid checks venn limits with $sets sets", async ({ sets, expected }) => {
+  mermaid.initialize(frameConfig(false));
+  const lines = Array.from({ length: sets }, (_, index) => `set S${index}`);
+  const source = `venn-beta\n${lines.join("\n")}\nunion S0,S1`;
+  await expect(exceedsLimits(source)).resolves.toBe(expected);
+});
+
+test.each([
+  { length: 10, expected: true },
+  { length: 1, expected: false },
+])("real Mermaid weighs 16 flowchart links of length $length", async ({ length, expected }) => {
+  mermaid.initialize(frameConfig(false));
+  const link = `${"-".repeat(length + 1)}>`;
+  const lines = Array.from({ length: 16 }, (_, index) => `s${index} ${link} s${index + 1}`);
+  const source = `flowchart LR\n${lines.join("\n")}`;
+  const diagram = await mermaid.mermaidAPI.getDiagramFromText(source);
+  const db = diagram.db as typeof diagram.db & { getData(): { edges: { minlen: number }[] } };
+  expect(db.getData().edges.map((edge) => edge.minlen)).toEqual(Array.from({ length: 16 }, () => length));
+  await expect(exceedsLimits(source)).resolves.toBe(expected);
 });
 
 test.each([stateSource, flowchartSource])("real Mermaid parses entity stand-ins in %s", async (source) => {

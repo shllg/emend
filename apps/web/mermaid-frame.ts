@@ -1,9 +1,11 @@
 import mermaid, { type MermaidConfig } from "mermaid";
 
 const MAX_SOURCE = 50000;
-// Mermaid lays out on the frame's main thread, shared by the page; time grows much faster than arrow count.
+// Layout runs on the frame's main thread, which the page may share; time grows much faster than arrow count.
 const MAX_EDGES = 150;
 const MAX_NODES = 300;
+// Venn layout time grows roughly with the fourth power of the number of distinct sets.
+const MAX_VENN_SETS = 12;
 const FONT_FAMILY = "system-ui, sans-serif";
 
 // Mermaid writes codes as entity text in SVG labels and decodes only &amp;, &lt; and &gt;.
@@ -240,6 +242,8 @@ export function frameConfig(dark: boolean): MermaidConfig {
         "maxTextSize",
         "suppressErrorRendering",
         "maxEdges",
+        "numIter",
+        "layout",
         "htmlLabels",
         "flowchart",
         "themeCSS",
@@ -252,15 +256,61 @@ export function frameConfig(dark: boolean): MermaidConfig {
     ],
   };
 }
+async function measure(source: string): Promise<{ nodes: number; edges: number; sets: number } | undefined> {
+  const { db } = await mermaid.mermaidAPI.getDiagramFromText(source);
+  if ("getData" in db && typeof db.getData === "function") {
+    const data: unknown = db.getData();
+    const nodes = data && typeof data === "object" && "nodes" in data ? data.nodes : undefined;
+    const edges = data && typeof data === "object" && "edges" in data ? data.edges : undefined;
+    return {
+      nodes: Array.isArray(nodes) ? nodes.length : 0,
+      edges: Array.isArray(edges)
+        ? edges.reduce((total: number, edge: unknown) => {
+            const minlen = edge && typeof edge === "object" && "minlen" in edge ? edge.minlen : undefined;
+            return total + Math.max(1, typeof minlen === "number" && Number.isFinite(minlen) ? minlen : 1);
+          }, 0)
+        : 0,
+      sets: 0,
+    };
+  }
+  if ("getNodes" in db && typeof db.getNodes === "function" && "getEdges" in db && typeof db.getEdges === "function") {
+    const nodes: unknown = db.getNodes();
+    const groups: unknown = "getGroups" in db && typeof db.getGroups === "function" ? db.getGroups() : undefined;
+    const edges: unknown = db.getEdges();
+    return {
+      nodes: (Array.isArray(nodes) ? nodes.length : 0) + (Array.isArray(groups) ? groups.length : 0),
+      edges: Array.isArray(edges) ? edges.length : 0,
+      sets: 0,
+    };
+  }
+  if ("getSubsetData" in db && typeof db.getSubsetData === "function") {
+    const data: unknown = db.getSubsetData();
+    const subsets: unknown[] = Array.isArray(data) ? data : [];
+    const sets = new Set<string>();
+    for (const subset of subsets) {
+      if (!subset || typeof subset !== "object" || !("sets" in subset) || !Array.isArray(subset.sets)) continue;
+      for (const set of subset.sets) {
+        if (typeof set === "string") sets.add(set);
+      }
+    }
+    return { nodes: 0, edges: 0, sets: sets.size };
+  }
+  return undefined;
+}
 export async function exceedsLimits(source: string): Promise<boolean> {
   try {
-    const diagram = await mermaid.mermaidAPI.getDiagramFromText(source);
-    const { db } = diagram;
-    if (!("getData" in db) || typeof db.getData !== "function") return false;
-    const data: { nodes?: unknown; edges?: unknown } = db.getData();
-    const nodes = Array.isArray(data.nodes) ? data.nodes.length : 0;
-    const edges = Array.isArray(data.edges) ? data.edges.length : 0;
-    return edges > MAX_EDGES || nodes > MAX_NODES;
+    // Site config is an upper bound; apply the diagram's own config only before refusing on nodes alone.
+    mermaid.mermaidAPI.reset();
+    const count = await measure(source);
+    if (!count) return false;
+    if (count.edges > MAX_EDGES || count.sets > MAX_VENN_SETS) return true;
+    if (count.nodes <= MAX_NODES) return false;
+    await mermaid.parse(source);
+    const recounted = await measure(source);
+    return (
+      recounted !== undefined &&
+      (recounted.nodes > MAX_NODES || recounted.edges > MAX_EDGES || recounted.sets > MAX_VENN_SETS)
+    );
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Edge limit exceeded")) return true;
     throw error;
@@ -304,15 +354,18 @@ export function startFrame(root: HTMLElement) {
         root.append(staging);
         try {
           const encoded = encodeCodes(source);
-          if (await exceedsLimits(encoded.source)) {
-            if (active && pending === undefined) fallback("This diagram is too large to draw.", source);
-          } else {
-            const result = await mermaid.render(`diagram-${++sequence}`, encoded.source, staging);
-            if (active && pending === undefined) {
-              const svg = sanitizeSvg(result.svg);
-              restoreCodes(svg, encoded.characters);
-              root.replaceChildren(svg);
-              natural = naturalSize(svg);
+          const tooLarge = await exceedsLimits(encoded.source);
+          if (active && pending === undefined) {
+            if (tooLarge) {
+              fallback("This diagram is too large to draw.", source);
+            } else {
+              const result = await mermaid.render(`diagram-${++sequence}`, encoded.source, staging);
+              if (active && pending === undefined) {
+                const svg = sanitizeSvg(result.svg);
+                restoreCodes(svg, encoded.characters);
+                root.replaceChildren(svg);
+                natural = naturalSize(svg);
+              }
             }
           }
         } catch {
