@@ -1445,12 +1445,14 @@ export async function buildHtmlDocDownload(input: {
   html: string;
   docPath: string;
   title: string;
+  theme?: DownloadThemeValue;
   resolveAsset: DownloadResolver;
   inlineBudget?: number;
   pause?: () => Promise<void>;
   work?: DownloadWork;
 }): Promise<string> {
-  if (!parseDocHtml(input.html, HTML_ELEMENT_LIMIT)) return buildOmittedDownload({ title: input.title });
+  if (!parseDocHtml(input.html, HTML_ELEMENT_LIMIT))
+    return buildOmittedDownload({ title: input.title, theme: input.theme });
   const tree = fromHtml(input.html);
   const state = resolverState(input.resolveAsset, input.inlineBudget, input.pause, input.work);
   const resource = (value: string) => resourceUrl(value, input.docPath, state);

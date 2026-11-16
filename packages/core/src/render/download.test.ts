@@ -1305,11 +1305,26 @@ test.each(["markdown", "html"])("omits a %s input nested 2000 deep before buildi
   }
 });
 
-test("stops HTML parsing at the element limit", async () => {
-  const html = await htmlDoc("<b>x</b>".repeat(200_001)).result;
-  expect(html).toContain("Some content was left out");
-  expect(html).not.toContain("<b>");
-});
+test.each([undefined, "dark", "light"] as const)(
+  "stops HTML parsing at the element limit with theme=%s",
+  async (theme) => {
+    const html = await buildHtmlDocDownload({
+      html: "<b>x</b>".repeat(200_001),
+      title: "Too many elements",
+      docPath: "doc.html",
+      resolveAsset: async () => null,
+      theme,
+    });
+    expect(html).toContain("Some content was left out");
+    expect(html).not.toContain("<b>");
+    expect(html).toBe(await buildOmittedDownload({ title: "Too many elements", theme }));
+    if (theme) {
+      expect(html).toContain(`<meta name="color-scheme" content="${theme}">`);
+      expect(html).toContain(`:root{color-scheme:${theme};`);
+      expect(html).not.toContain("prefers-color-scheme");
+    } else expect(html).toContain("@media(prefers-color-scheme:dark)");
+  },
+);
 
 test("retains content nested 500 deep within the HTML nesting limit", async () => {
   const html = await htmlDoc(`${"<div>".repeat(500)}Retained content${"</div>".repeat(500)}`).result;

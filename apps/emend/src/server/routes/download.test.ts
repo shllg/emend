@@ -217,6 +217,32 @@ test("an HTML pub keeps its own look while its separate comments file follows th
   }
 });
 
+test.each([true, false])("an HTML doc over the parser element limit follows the theme, pub=%s", async (pub) => {
+  const hash = await f.deps.blobs.put(f.ownerId, Buffer.from("<p>Doc paragraph</p>"), "text/html");
+  const { reviewId } = await publish({
+    writeup: pub ? blank : { ...blank, overview: "Review overview" },
+    files: [{ path: "doc.html", role: "doc", assets: [], oldPath: null, oldBlob: null, newBlob: hash, flag: null }],
+  });
+  const view = await revisionView(reviewId);
+  const docId = view.files[0]?.id;
+  if (!docId) throw new Error("Missing doc id");
+  // Exercise the real download parser without publishing or storing a large fixture.
+  const oversized = Buffer.from("<b>x</b>".repeat(200_001));
+  const read = f.deps.blobs.get.bind(f.deps.blobs);
+  vi.spyOn(f.deps.blobs, "get").mockImplementation(async (ownerId, sha, q) =>
+    sha === hash ? oversized : read(ownerId, sha, q),
+  );
+  for (const theme of ["dark", "light"] as const) {
+    const path = reviewDownloadPath(reviewId, 1, pub ? [] : [docId], { theme }).slice("/api/v1".length);
+    const response = await f.request(path, "GET");
+    expect(response.status).toBe(200);
+    const html = pub ? await response.text() : ((await zipEntries(response))[1]?.html ?? "");
+    expect(html).toContain("Some content was left out");
+    expect(html).not.toContain("<b>");
+    expectDownloadTheme(html, theme);
+  }
+});
+
 test("validates diff before building for GET and HEAD", async () => {
   const { reviewId } = await publish();
   const read = vi.spyOn(f.deps.blobs, "get");

@@ -420,6 +420,7 @@ async function revisionDownload(
       html: new TextDecoder().decode(bytes),
       docPath: doc.path,
       title,
+      theme,
       resolveAsset: (path) => resolveFile(assets.get(path)),
       inlineBudget,
       pause,
