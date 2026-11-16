@@ -137,18 +137,25 @@ test("empty groups remain visible even without any reviews and show the empty me
 });
 
 test("groups with members outside the loaded block remain visible with actions and explain the cap on expansion", async () => {
-  fetchMock.mockResolvedValueOnce(
-    Response.json({
-      items: [],
-      groups: [
-        { ...alpha, members: 1 },
-        { ...beta, members: 0 },
-      ],
-      approvedActiveHours: 12,
-      approvedActiveLimit: 5,
-      serverTime: new Date().toISOString(),
-    }),
-  );
+  const fallback = fetchMock.getMockImplementation();
+  let served = false;
+  fetchMock.mockImplementation(async (input, init) => {
+    if (!served && String(input) === "/api/v1/reviews") {
+      served = true;
+      return Response.json({
+        items: [],
+        groups: [
+          { ...alpha, members: 1 },
+          { ...beta, members: 0 },
+        ],
+        approvedActiveHours: 12,
+        approvedActiveLimit: 5,
+        serverTime: new Date().toISOString(),
+      });
+    }
+    if (!fallback) throw new Error("fetch mock has no default implementation");
+    return fallback(input, init);
+  });
   mount();
   const unloaded = within(await screen.findByRole("region", { name: "Alpha" }));
   const message = "Its items are past the 200 grouped items the inbox shows.";

@@ -1,7 +1,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { layoutStore, useLayoutPreferences } from "./layout-store.ts";
 
-function useMedia(query: string) {
+export function useMedia(query: string) {
   const subscribe = useCallback(
     (notify: () => void) => {
       const media = window.matchMedia(query);

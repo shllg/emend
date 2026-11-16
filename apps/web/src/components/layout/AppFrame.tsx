@@ -10,6 +10,7 @@ import {
   QrCode,
   RefreshCw,
   RotateCw,
+  Search,
   Settings,
   Smartphone,
 } from "lucide-react";
@@ -19,7 +20,7 @@ import { useLayout } from "../../lib/layout.ts";
 import { layoutStore, readingMeasure, useLayoutPreferences } from "../../lib/layout-store.ts";
 import { requestPairingFromLink } from "../../lib/pairing-intent.ts";
 import { useRefresh } from "../../lib/refresh.ts";
-import { ShortcutProvider } from "../../lib/use-shortcut.tsx";
+import { ShortcutProvider, useRunShortcut } from "../../lib/use-shortcut.tsx";
 import { CommandPalette } from "../CommandPalette.tsx";
 import { readingWidthItems, textSizeItems, ViewMenu } from "../review/LayoutControls.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -28,6 +29,7 @@ import { IconButton } from "../ui/IconButton.tsx";
 import { Menu, type MenuItem } from "../ui/Menu.tsx";
 import { useToast } from "../ui/Toast.tsx";
 import { cn } from "../ui/utils.ts";
+import { PaletteButton } from "./PaletteButton.tsx";
 import { UpdateGateContext, useUpdateGate } from "./UpdateGate.tsx";
 
 export function AppFrame(props: ComponentProps<typeof AppFrameContent>) {
@@ -55,6 +57,7 @@ function AppFrameContent({
   menuTriggerRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const layout = useLayout();
+  const runShortcut = useRunShortcut();
   const preferences = useLayoutPreferences();
   const router = useRouter();
   const toast = useToast();
@@ -102,6 +105,7 @@ function AppFrameContent({
     ? [
         ...updateItems,
         refreshItem,
+        { label: "Search commands", icon: Search, opensDialog: true, onSelect: () => void runShortcut("palette.open") },
         { label: "Copy link", icon: LinkIcon, onSelect: () => void copyLink() },
         ...(onCommentReview
           ? [{ label: "Comment on review", icon: MessageSquarePlus, onSelect: onCommentReview }]
@@ -148,6 +152,7 @@ function AppFrameContent({
     : [
         ...updateItems,
         refreshItem,
+        { label: "Search commands", icon: Search, opensDialog: true, onSelect: () => void runShortcut("palette.open") },
         devices,
         settings,
         {
@@ -174,7 +179,7 @@ function AppFrameContent({
     >
       <header
         className={cn(
-          "flex shrink-0 items-center justify-between border-b border-line-1 bg-app pr-2 pl-4",
+          "relative flex shrink-0 items-center justify-between border-b border-line-1 bg-app pr-2 pl-4",
           layout === "phone"
             ? "h-[calc(var(--topbar-h)+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)]"
             : "h-(--topbar-h)",
@@ -193,6 +198,7 @@ function AppFrameContent({
             emend
           </Link>
         )}
+        {layout !== "phone" && <PaletteButton />}
         {layout === "phone" ? (
           <Menu
             label="More"

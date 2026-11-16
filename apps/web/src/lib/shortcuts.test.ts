@@ -1,5 +1,13 @@
 import { afterEach, expect, test } from "vitest";
-import { captureShortcut, hasOpenOverlay, ignoreShortcut, keyLabel, matchesShortcut } from "./shortcuts.ts";
+import {
+  ariaKeyShortcuts,
+  captureShortcut,
+  hasOpenOverlay,
+  ignoreShortcut,
+  keyCaps,
+  keyLabel,
+  matchesShortcut,
+} from "./shortcuts.ts";
 
 const key = (value: string, options: KeyboardEventInit = {}) =>
   new KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true, ...options });
@@ -85,6 +93,26 @@ test("key labels use the platform and preserve punctuation", () => {
     for (const value of ["j", "/", "?"]) expect(keyLabel(value, platform)).toBe(value);
     expect(keyLabel(null, platform)).toBe("Off");
   }
+});
+test.each([
+  ["MacIntel", ["⌘", "⇧", "P"], ["⌘", "K"], ["⇧", "A"]],
+  ["Linux x86_64", ["Ctrl", "Shift", "P"], ["Ctrl", "K"], ["Shift", "A"]],
+] as const)("key caps use %s and preserve plain keys", (platform, palette, mod, shift) => {
+  expect(keyCaps("mod+shift+p", platform)).toEqual(palette);
+  expect(keyCaps("mod+k", platform)).toEqual(mod);
+  expect(keyCaps("shift+a", platform)).toEqual(shift);
+  for (const value of ["j", "/", "?"]) expect(keyCaps(value, platform)).toEqual([value]);
+});
+test.each([
+  ["MacIntel", "Meta+Shift+P", "Meta+K"],
+  ["Linux x86_64", "Control+Shift+P", "Control+K"],
+])("ARIA key shortcuts use %s and name the plus key", (platform, palette, mod) => {
+  expect(ariaKeyShortcuts("mod+shift+p", platform)).toBe(palette);
+  expect(ariaKeyShortcuts("mod+k", platform)).toBe(mod);
+  expect(ariaKeyShortcuts("shift+a", platform)).toBe("Shift+A");
+  expect(ariaKeyShortcuts("j", platform)).toBe("J");
+  for (const value of ["/", "?"]) expect(ariaKeyShortcuts(value, platform)).toBe(value);
+  expect(ariaKeyShortcuts("+", platform)).toBe("Plus");
 });
 test.each(["text", "search", "number", "email", "password", "url", "tel", "date"])("ignores %s inputs", (type) => {
   const input = document.createElement("input");

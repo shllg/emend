@@ -63,13 +63,21 @@ function orderedHandlers(registry: Set<Registration>) {
   return [...registry].reverse().sort((a, b) => b.priority - a.priority);
 }
 
+function runShortcut(registry: Set<Registration>, command: ShortcutCommand) {
+  return orderedHandlers(registry).some((entry) => entry.command === command && entry.when() && entry.handle());
+}
+
+export function useRunShortcut() {
+  const registry = useContext(Shortcuts) ?? emptyRegistry;
+  return (command: ShortcutCommand) => runShortcut(registry.entries, command);
+}
+
 export function useShortcutRunner() {
   const registry = useContext(Shortcuts) ?? emptyRegistry;
   useSyncExternalStore(registry.subscribe, registry.getSnapshot);
   return {
     available: () => new Set([...registry.entries].filter((entry) => entry.when()).map((entry) => entry.command)),
-    run: (command: ShortcutCommand) =>
-      orderedHandlers(registry.entries).some((entry) => entry.command === command && entry.when() && entry.handle()),
+    run: (command: ShortcutCommand) => runShortcut(registry.entries, command),
   };
 }
 

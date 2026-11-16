@@ -32,13 +32,40 @@ export const shortcutGroups = [
   { label: "Everywhere", commands: ["shortcuts.show", "palette.open"] as ShortcutCommand[] },
 ];
 
-export function keyLabel(key: KeyBinding, platform = navigator.platform) {
-  if (key === null) return "Off";
+export function keyCaps(key: string, platform = navigator.platform): string[] {
   const mac = /Mac|iPhone|iPad|iPod/.test(platform);
   if (key.startsWith("mod+"))
-    return `${mac ? "⌘" : "Ctrl+"}${key.startsWith("mod+shift+") ? (mac ? "⇧" : "Shift+") : ""}${key.slice(-1).toUpperCase()}`;
-  if (key.startsWith("shift+")) return `${mac ? "⇧" : "Shift+"}${key.slice(6).toUpperCase()}`;
-  return key;
+    return [
+      mac ? "⌘" : "Ctrl",
+      ...(key.startsWith("mod+shift+") ? [mac ? "⇧" : "Shift"] : []),
+      key.slice(-1).toUpperCase(),
+    ];
+  if (key.startsWith("shift+")) return [mac ? "⇧" : "Shift", key.slice(6).toUpperCase()];
+  return [key];
+}
+
+export function keyLabel(key: KeyBinding, platform = navigator.platform) {
+  if (key === null) return "Off";
+  return keyCaps(key, platform).join(/Mac|iPhone|iPad|iPod/.test(platform) ? "" : "+");
+}
+
+export function ariaKeyShortcuts(key: string, platform = navigator.platform): string {
+  return keyCaps(key, platform)
+    .map((cap) => {
+      switch (cap) {
+        case "Ctrl":
+          return "Control";
+        case "⌘":
+          return "Meta";
+        case "⇧":
+          return "Shift";
+        case "+":
+          return "Plus";
+        default:
+          return /^[a-z]$/.test(cap) ? cap.toUpperCase() : cap;
+      }
+    })
+    .join("+");
 }
 
 type KeyEvent = Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "metaKey" | "altKey">;

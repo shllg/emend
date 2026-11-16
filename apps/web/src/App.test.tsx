@@ -451,7 +451,7 @@ test("inbox shows the origin and pending Send without a waiting agent", async ()
   expect(screen.getByRole("link", { name: /Synthetic review/ }).getAttribute("href")).toContain(`/r/${id}`);
 });
 test("moved inbox rows show the destination host without a navigable link", async () => {
-  fetchMock.mockResolvedValue(
+  fetchMock.mockImplementation(async () =>
     Response.json({
       approvedActiveHours: 12,
       approvedActiveLimit: 5,
