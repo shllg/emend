@@ -3,9 +3,13 @@ import mermaid, { type MermaidConfig } from "mermaid";
 const MAX_SOURCE = 50000;
 // Layout runs on the frame's main thread, which the page may share; time grows much faster than arrow count.
 const MAX_EDGES = 150;
+// Unmeasured or slow container algorithms need a lower arrow limit.
+const MAX_EDGES_SLOW_LAYOUT = 50;
 const MAX_NODES = 300;
 // Venn layout time grows roughly with the fourth power of the number of distinct sets.
 const MAX_VENN_SETS = 12;
+// Repeated Venn areas add layout work even when the set count stays small.
+const MAX_VENN_AREAS = 100;
 const FONT_FAMILY = "system-ui, sans-serif";
 
 // Mermaid writes codes as entity text in SVG labels and decodes only &amp;, &lt; and &gt;.
@@ -244,6 +248,7 @@ export function frameConfig(dark: boolean): MermaidConfig {
         "maxEdges",
         "numIter",
         "layout",
+        "elk",
         "htmlLabels",
         "flowchart",
         "themeCSS",
@@ -256,12 +261,25 @@ export function frameConfig(dark: boolean): MermaidConfig {
     ],
   };
 }
-async function measure(source: string): Promise<{ nodes: number; edges: number; sets: number } | undefined> {
+async function measure(
+  source: string,
+): Promise<{ nodes: number; edges: number; sets: number; areas: number; maxEdges: number } | undefined> {
   const { db } = await mermaid.mermaidAPI.getDiagramFromText(source);
   if ("getData" in db && typeof db.getData === "function") {
     const data: unknown = db.getData();
     const nodes = data && typeof data === "object" && "nodes" in data ? data.nodes : undefined;
     const edges = data && typeof data === "object" && "edges" in data ? data.edges : undefined;
+    const slowLayout =
+      Array.isArray(nodes) &&
+      nodes.some((node: unknown) => {
+        if (!node || typeof node !== "object" || !("metadata" in node)) return false;
+        const metadata = node.metadata;
+        if (!metadata || typeof metadata !== "object" || !("algorithm" in metadata)) return false;
+        return (
+          typeof metadata.algorithm === "string" &&
+          !["elk.layered", "elk.rectpacking", "elk.mrtree", "elk.sporeOverlap"].includes(metadata.algorithm)
+        );
+      });
     return {
       nodes: Array.isArray(nodes) ? nodes.length : 0,
       edges: Array.isArray(edges)
@@ -271,6 +289,8 @@ async function measure(source: string): Promise<{ nodes: number; edges: number; 
           }, 0)
         : 0,
       sets: 0,
+      areas: 0,
+      maxEdges: slowLayout ? MAX_EDGES_SLOW_LAYOUT : MAX_EDGES,
     };
   }
   if ("getNodes" in db && typeof db.getNodes === "function" && "getEdges" in db && typeof db.getEdges === "function") {
@@ -281,6 +301,8 @@ async function measure(source: string): Promise<{ nodes: number; edges: number; 
       nodes: (Array.isArray(nodes) ? nodes.length : 0) + (Array.isArray(groups) ? groups.length : 0),
       edges: Array.isArray(edges) ? edges.length : 0,
       sets: 0,
+      areas: 0,
+      maxEdges: MAX_EDGES,
     };
   }
   if ("getSubsetData" in db && typeof db.getSubsetData === "function") {
@@ -293,7 +315,7 @@ async function measure(source: string): Promise<{ nodes: number; edges: number; 
         if (typeof set === "string") sets.add(set);
       }
     }
-    return { nodes: 0, edges: 0, sets: sets.size };
+    return { nodes: 0, edges: 0, sets: sets.size, areas: subsets.length, maxEdges: MAX_EDGES };
   }
   return undefined;
 }
@@ -303,13 +325,16 @@ export async function exceedsLimits(source: string): Promise<boolean> {
     mermaid.mermaidAPI.reset();
     const count = await measure(source);
     if (!count) return false;
-    if (count.edges > MAX_EDGES || count.sets > MAX_VENN_SETS) return true;
+    if (count.edges > count.maxEdges || count.sets > MAX_VENN_SETS || count.areas > MAX_VENN_AREAS) return true;
     if (count.nodes <= MAX_NODES) return false;
     await mermaid.parse(source);
     const recounted = await measure(source);
     return (
       recounted !== undefined &&
-      (recounted.nodes > MAX_NODES || recounted.edges > MAX_EDGES || recounted.sets > MAX_VENN_SETS)
+      (recounted.nodes > MAX_NODES ||
+        recounted.edges > recounted.maxEdges ||
+        recounted.sets > MAX_VENN_SETS ||
+        recounted.areas > MAX_VENN_AREAS)
     );
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Edge limit exceeded")) return true;

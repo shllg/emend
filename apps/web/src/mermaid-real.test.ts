@@ -77,6 +77,22 @@ test.each([
   expect(db.getData().nodes).toHaveLength(nodes);
 });
 
+test.each([
+  { algorithm: "elk.force", edges: 51, expected: true },
+  { algorithm: "elk.force", edges: 50, expected: false },
+  { algorithm: "elk.layered", edges: 150, expected: false },
+])("real Mermaid checks $edges arrows inside an $algorithm subgraph", async ({ algorithm, edges, expected }) => {
+  mermaid.initialize(frameConfig(false));
+  const lines = Array.from({ length: edges }, (_, index) => `  a${index} --> a${index + 1}`);
+  const source = `flowchart LR\nsubgraph S\n${lines.join("\n")}\nend\nS@{ algorithm: ${algorithm} }`;
+  const diagram = await mermaid.mermaidAPI.getDiagramFromText(source);
+  const db = diagram.db as typeof diagram.db & {
+    getData(): { nodes: { id: string; metadata?: { algorithm?: string } }[] };
+  };
+  expect(db.getData().nodes.find((node) => node.id === "S")?.metadata?.algorithm).toBe(algorithm);
+  await expect(exceedsLimits(source)).resolves.toBe(expected);
+});
+
 test("real Mermaid ignores a diagram's architecture iteration override", async () => {
   mermaid.initialize(frameConfig(false));
   const source = `%%{init: {"architecture": {"numIter": 100000}}}%%\n${diagramSource("architecture-beta", 2, 1)}`;
@@ -94,6 +110,13 @@ test.each([
   expect(mermaid.mermaidAPI.getConfig().layout).not.toBe(layout);
 });
 
+test("real Mermaid ignores a diagram's ELK strategy override", async () => {
+  mermaid.initialize(frameConfig(false));
+  const source = '%%{init: {"elk": {"nodePlacementStrategy": "LINEAR_SEGMENTS"}}}%%\nflowchart LR\n  A --> B';
+  await expect(mermaid.parse(source)).resolves.toBeTruthy();
+  expect(mermaid.mermaidAPI.getConfig().elk?.nodePlacementStrategy).not.toBe("LINEAR_SEGMENTS");
+});
+
 test.each([
   { sets: 13, expected: true },
   { sets: 3, expected: false },
@@ -101,6 +124,16 @@ test.each([
   mermaid.initialize(frameConfig(false));
   const lines = Array.from({ length: sets }, (_, index) => `set S${index}`);
   const source = `venn-beta\n${lines.join("\n")}\nunion S0,S1`;
+  await expect(exceedsLimits(source)).resolves.toBe(expected);
+});
+
+test.each([
+  { areas: 101, expected: true },
+  { areas: 100, expected: false },
+])("real Mermaid counts $areas venn areas including duplicate unions", async ({ areas, expected }) => {
+  mermaid.initialize(frameConfig(false));
+  const unions = Array.from({ length: areas - 3 }, () => "union A,B,C");
+  const source = `venn-beta\nset A\nset B\nset C\n${unions.join("\n")}`;
   await expect(exceedsLimits(source)).resolves.toBe(expected);
 });
 
