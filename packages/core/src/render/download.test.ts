@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import type { RenderedBlock, RenderedWriteup, Target, TopicMeta } from "@emend/contract";
 import { fromHtml } from "hast-util-from-html";
 import { toString as hastText } from "hast-util-to-string";
-import { expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { HtmlElement as Element, HtmlRoot as Root } from "./blocks.ts";
 import {
   buildCommentsDownload,
@@ -15,6 +15,7 @@ import {
   DOWNLOAD_FILE_CSP,
   type ResolveResult,
 } from "./download.ts";
+import * as downloadCss from "./download-css.ts";
 import { checkDownloadCss, cssTokenize } from "./download-css.ts";
 import {
   DOWNLOAD_DIFF_LINES,
@@ -24,6 +25,26 @@ import {
   downloadDiffHunks,
 } from "./download-diff.ts";
 import { type DownloadThread, type FileThreads, routeDownloadThreads } from "./download-threads.ts";
+
+vi.mock("./download-css.ts", async (original) => ({
+  ...(await original<typeof import("./download-css.ts")>()),
+}));
+beforeEach(() => {
+  vi.spyOn(downloadCss, "cssTokenize");
+  vi.spyOn(downloadCss, "checkDownloadCss");
+});
+afterEach(() => vi.restoreAllMocks());
+
+function expectCssPassWork(source: string, written: string) {
+  const tokenize = vi.mocked(downloadCss.cssTokenize);
+  const check = vi.mocked(downloadCss.checkDownloadCss);
+  expect(tokenize).toHaveBeenCalledTimes(2);
+  expect(check).toHaveBeenCalledOnce();
+  const characters = [...tokenize.mock.calls, ...check.mock.calls].reduce((total, [css]) => total + css.length, 0);
+  // nestedImageSets and rewriting scan the source; checkDownloadCss scans the written output.
+  expect(characters).toBeLessThanOrEqual(2 * source.length + written.length);
+  // Quadratic work within one tokenizer pass has no seam outside download.ts: download bench covers it (D4).
+}
 
 // Mirror the pacing thresholds in download.ts to count work without a clock.
 const CSS_PAUSE_BYTES = 1024 * 1024;
@@ -787,6 +808,7 @@ test("replaces 2000 nested image-set openers and 100 KB of filler with none", as
   expect(html).toContain("<style>i{background:/**/none/**/}p{color:green}</style>");
   expect(resolveAsset).not.toHaveBeenCalled();
   expect(pause.mock.calls.length).toBeLessThanOrEqual(Math.ceil(cssBytes / CSS_PAUSE_BYTES) + 1);
+  expectCssPassWork(source, "i{background:/**/none/**/}p{color:green}");
 }, 15_000);
 
 test("rewrites 5000 image-set rules and resolves each candidate path once", async () => {
@@ -896,6 +918,12 @@ test.each(["element", "attribute"])(
     // Rewriting grows this fixture by less than one CSS pause interval.
     const maxPauses = Math.ceil((3 * cssBytes) / CSS_PAUSE_BYTES) + Math.floor(10_000 / REFERENCE_PAUSE_COUNT) + 1;
     expect(pause.mock.calls.length).toBeLessThanOrEqual(maxPauses);
+    const nodes = parsed(html);
+    const written =
+      placement === "element"
+        ? hastText(nodes.find((node) => node.tagName === "style") as Element)
+        : String(nodes.find((node) => node.tagName === "div")?.properties.style);
+    expectCssPassWork(source, written);
   },
   20_000,
 );
@@ -1081,6 +1109,12 @@ test.each(["element", "attribute"])("finishes an unterminated import URL in a st
   expect(resolveAsset).not.toHaveBeenCalled();
   expect(html).not.toContain("@import");
   expect(pause.mock.calls.length).toBeLessThanOrEqual(Math.ceil(cssBytes / CSS_PAUSE_BYTES) + 1);
+  const nodes = parsed(html);
+  const written =
+    kind === "element"
+      ? hastText(nodes.find((node) => node.tagName === "style") as Element)
+      : String(nodes.find((node) => node.tagName === "p")?.properties.style);
+  expectCssPassWork(source, written);
 });
 
 test.each(["element", "attribute", "stylesheet"])(
