@@ -608,6 +608,7 @@ test("a waiting take ends at once when the review is binned", async () => {
   expect(f.deps.events?.agentWaiting(f.ownerId, reviewId)).toBe(true);
   expect((await post(reviewId, "bin")).status).toBe(204);
   const response = await waiting;
+  vi.useRealTimers();
   await error(response, 409, "review_in_bin");
   controller.abort();
 });
