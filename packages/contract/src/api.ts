@@ -7,13 +7,14 @@ export function reviewDownloadPath(
   reviewId: string,
   seq: number,
   docIds: readonly string[] = [],
-  options: { comments?: boolean; diff?: boolean } = {},
+  options: { comments?: boolean; diff?: boolean; theme?: DownloadThemeValue } = {},
 ): string {
   const path = `${API_PREFIX}/reviews/${encodeURIComponent(reviewId)}/revisions/${seq}/download`;
   const query = [
     ...docIds.map((id) => `doc=${encodeURIComponent(id)}`),
     ...(options.comments ? ["comments=1"] : []),
     ...(options.diff ? ["diff=1"] : []),
+    ...(options.theme ? [`theme=${options.theme}`] : []),
   ];
   return query.length ? `${path}?${query.join("&")}` : path;
 }
@@ -23,6 +24,10 @@ export const DownloadComments = z.array(z.literal("1")).max(1);
 
 /** The `diff` query values: absent, or exactly one `1`. */
 export const DownloadDiff = z.array(z.literal("1")).max(1);
+
+/** The `theme` query values: absent, or exactly one `dark` or `light`. */
+export const DownloadTheme = z.array(z.enum(["dark", "light"])).max(1);
+export type DownloadThemeValue = z.infer<typeof DownloadTheme>[number];
 
 export const DownloadDocIds = z
   .array(z.uuid())

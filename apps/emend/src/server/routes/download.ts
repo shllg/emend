@@ -2,6 +2,8 @@ import {
   DownloadComments,
   DownloadDiff,
   DownloadDocIds,
+  DownloadTheme,
+  type DownloadThemeValue,
   LIMITS,
   RenderedBlock,
   RenderedWriteup,
@@ -97,6 +99,7 @@ async function revisionDownload(
   docIds: string[],
   withComments: boolean,
   withDiff: boolean,
+  theme: DownloadThemeValue | undefined,
 ) {
   const row = await q
     .select({ review: reviews, repoName: repos.name })
@@ -436,6 +439,7 @@ async function revisionDownload(
         });
       return buildDocDownload({
         title: review.title,
+        theme,
         details: { ...details, links: meta.links },
         resolveMedia,
         inlineBudget: budget,
@@ -459,6 +463,7 @@ async function revisionDownload(
       try {
         return await buildWriteupDownload({
           title: review.title,
+          theme,
           details: { ...details, links: publishMeta(stored).links },
           writeup: rendered,
           topics: parse(TopicMeta.array().max(LIMITS.topicsPerReview + 1), topicRows.map(topicView)),
@@ -487,7 +492,7 @@ async function revisionDownload(
     const title = selected.title ?? selected.path;
     const routedThreads = routed?.docs[index];
     const threads = routedThreads && hasThreads(routedThreads) ? routedThreads : undefined;
-    const omitted = () => buildOmittedDownload({ title, threads, inlineBudget, pause, work });
+    const omitted = () => buildOmittedDownload({ title, theme, threads, inlineBudget, pause, work });
     if (inlineBudget === 0) return omitted();
     // Do not cache doc bodies: each is released after its ZIP entry is compressed.
     const bytes = await readLimited(selected.mediaType === "text/html" ? selected.newBlob : selected.renderedBlob);
@@ -508,6 +513,7 @@ async function revisionDownload(
     const markdown = source ? undefined : RenderedBlock.array().max(LIMITS.blocksPerRevision).safeParse(stored);
     return buildDocDownload({
       title,
+      theme,
       details: { ...details, links: undefined },
       resolveMedia,
       inlineBudget,
@@ -527,6 +533,7 @@ async function revisionDownload(
       "comments.html",
       await buildCommentsDownload({
         title: review.title,
+        theme,
         details: { ...details, links: undefined },
         resolveMedia,
         threads: routed.comments,
@@ -566,6 +573,9 @@ export function downloadRoutes(
     const diffParsed = DownloadDiff.safeParse(c.req.queries("diff") ?? []);
     if (!diffParsed.success) throw new ApiError("invalid_request");
     const withDiff = diffParsed.data.length === 1;
+    const themeParsed = DownloadTheme.safeParse(c.req.queries("theme") ?? []);
+    if (!themeParsed.success) throw new ApiError("invalid_request");
+    const theme = themeParsed.data[0];
     const release = headOnly ? undefined : await acquireDownload(ownerId);
     try {
       const result = await deps.db.read((q) =>
@@ -581,6 +591,7 @@ export function downloadRoutes(
           docIds,
           withComments,
           withDiff,
+          theme,
         ),
       );
       c.header("Content-Type", result.zip ? "application/zip" : "text/html; charset=utf-8");

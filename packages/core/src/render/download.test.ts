@@ -1,6 +1,6 @@
 /// <reference types="node" />
 import { createHash } from "node:crypto";
-import type { RenderedBlock, RenderedWriteup, Target, TopicMeta } from "@emend/contract";
+import type { DownloadThemeValue, RenderedBlock, RenderedWriteup, Target, TopicMeta } from "@emend/contract";
 import { fromHtml } from "hast-util-from-html";
 import { toString as hastText } from "hast-util-to-string";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -25,6 +25,7 @@ import {
   downloadDiffHunks,
 } from "./download-diff.ts";
 import { type DownloadThread, type FileThreads, routeDownloadThreads } from "./download-threads.ts";
+import { renderMarkdown } from "./markdown.ts";
 
 vi.mock("./download-css.ts", async (original) => ({
   ...(await original<typeof import("./download-css.ts")>()),
@@ -69,8 +70,19 @@ function elements(node: Root | Element): Element[] {
 function parsed(html: string) {
   return elements(fromHtml(html.replace(/^\uFEFF/, "")));
 }
-const render = (blocks: RenderedBlock[], resolveMedia: (hash: string) => Promise<ResolveResult> = async () => png) =>
-  buildWriteupDownload({ title: "Review <script>", details, writeup: writeup(blocks), topics: [], resolveMedia });
+const render = (
+  blocks: RenderedBlock[],
+  resolveMedia: (hash: string) => Promise<ResolveResult> = async () => png,
+  theme?: DownloadThemeValue,
+) =>
+  buildWriteupDownload({
+    title: "Review <script>",
+    details,
+    writeup: writeup(blocks),
+    topics: [],
+    resolveMedia,
+    theme,
+  });
 const imageBlock = block(
   `<span><img src="/api/v1/media/${sha}"><span class="emend-media-caption">A caption</span></span>`,
 );
@@ -220,12 +232,18 @@ test.each([
   ]);
 });
 
-test("drops active hostile block HTML and unsafe style URLs", async () => {
-  const html = await render([
-    block(
-      '<script>alert(1)</script><img src=x onerror=alert(1)><a href="javascript:alert(1)">X</a><iframe>bad</iframe><svg><script>alert(2)</script></svg><span onclick="bad()" style="background:URL(x)">Y</span>',
-    ),
-  ]);
+test.each([undefined, "dark", "light"] as const)("drops active hostile block HTML with theme=%s", async (theme) => {
+  const html = await render(
+    [
+      block(
+        '<script>alert(1)</script><img src=x onerror=alert(1)><a href="javascript:alert(1)">X</a><iframe>bad</iframe><svg><script>alert(2)</script></svg><span onclick="bad()" style="background:URL(x)">Y</span>',
+      ),
+      { ...block(""), kind: "diagram", source: 'graph TD; A-->B; click A "javascript:alert(1)"' },
+    ],
+    undefined,
+    theme,
+  );
+  expectHead(html);
   for (const el of parsed(html)) {
     expect(["script", "iframe"]).not.toContain(el.tagName);
     for (const [key, value] of Object.entries(el.properties)) {
@@ -235,36 +253,54 @@ test("drops active hostile block HTML and unsafe style URLs", async () => {
   }
 });
 
-test("uses the same page frame for Markdown and escaped source tokens", async () => {
-  const markdown = await buildDocDownload({
-    title: "Doc",
-    details,
-    content: { kind: "markdown", blocks: [block("<p>Stored Markdown</p>")] },
-    resolveMedia: async () => null,
-  });
-  expectHead(markdown);
-  expect(markdown).toContain("Stored Markdown");
-  const source = await buildDocDownload({
-    title: "Source",
-    details,
-    content: {
-      kind: "source",
-      lines: [
-        [
-          { text: "<script>", light: "#123456", dark: "#abcdef" },
-          { text: "bad colour", light: "red;url(x)" },
+test.each([undefined, "dark", "light"] as const)(
+  "uses the same frame for Markdown and source with theme=%s",
+  async (theme) => {
+    const blocks = (await renderMarkdown('```ts\nconst value = "<script>";\n```', "overview")).map(({ html }) =>
+      block(html),
+    );
+    const markdown = await buildDocDownload({
+      title: "Doc",
+      theme,
+      details,
+      content: { kind: "markdown", blocks: [block("<p>Stored Markdown</p>"), ...blocks] },
+      resolveMedia: async () => null,
+    });
+    expectHead(markdown);
+    expect(markdown).toContain("Stored Markdown");
+    for (const html of [markdown, await render(blocks, undefined, theme)]) {
+      expect(html).toContain("--shiki-light:");
+      expect(html).toContain("--shiki-dark:");
+      expect(html).toContain(`color:var(--shiki-${theme ?? "light"},inherit)`);
+      if (theme === "light") expect(html).not.toContain("var(--shiki-dark");
+      if (theme) expect(html).not.toContain("prefers-color-scheme");
+    }
+    const source = await buildDocDownload({
+      title: "Source",
+      theme,
+      details,
+      content: {
+        kind: "source",
+        lines: [
+          [
+            { text: "<script>", light: "#123456", dark: "#abcdef" },
+            { text: "bad colour", light: "red;url(x)" },
+          ],
+          [{ text: "line 2" }],
         ],
-        [{ text: "line 2" }],
-      ],
-    },
-    resolveMedia: async () => null,
-  });
-  expectHead(source);
-  expect(source).toContain('style="--shiki-light:#123456;--shiki-dark:#abcdef"');
-  expect(source).not.toContain("red;url");
-  expect(parsed(source).some((el) => el.tagName === "script")).toBe(false);
-  expect(hastText(parsed(source).find((el) => el.tagName === "pre") as Element)).toBe("<script>bad colour\nline 2");
-});
+      },
+      resolveMedia: async () => null,
+    });
+    expectHead(source);
+    expect(source).toContain('style="--shiki-light:#123456;--shiki-dark:#abcdef"');
+    expect(source).toContain(`color:var(--shiki-${theme ?? "light"},inherit)`);
+    if (theme === "light") expect(source).not.toContain("var(--shiki-dark");
+    if (theme) expect(source).not.toContain("prefers-color-scheme");
+    expect(source).not.toContain("red;url");
+    expect(parsed(source).some((el) => el.tagName === "script")).toBe(false);
+    expect(hastText(parsed(source).find((el) => el.tagName === "pre") as Element)).toBe("<script>bad colour\nline 2");
+  },
+);
 
 const css = (value: string) => ({ mediaType: "text/css", bytes: new TextEncoder().encode(value) });
 function htmlDoc(html: string, assets: Record<string, ResolveResult> = {}, pause?: () => Promise<void>) {
@@ -2647,8 +2683,8 @@ const indexOfText = (html: string, needle: string) => {
 const sourceLines = [[{ text: "one" }], [{ text: "two" }], [{ text: "three" }]];
 
 const threadPageKinds = ["writeup", "markdown", "source", "comments", "omitted"] as const;
-const threadPage = (kind: (typeof threadPageKinds)[number], threads: FileThreads) => {
-  const input = { title: "Example", details, resolveMedia: async () => null, threads };
+const threadPage = (kind: (typeof threadPageKinds)[number], threads: FileThreads, theme?: DownloadThemeValue) => {
+  const input = { title: "Example", details, resolveMedia: async () => null, threads, theme };
   const blocks = [block("<ol><li>Item</li></ol><dl><dt>Term</dt><dd>Definition</dd></dl>")];
   switch (kind) {
     case "writeup":
@@ -2669,6 +2705,82 @@ const threadPage = (kind: (typeof threadPageKinds)[number], threads: FileThreads
       return buildOmittedDownload(input);
   }
 };
+
+// CSS hashes captured before fixed download themes; System must keep the same bytes.
+const systemStyleHashes = [
+  "2cdfba18a99ae6f510cdc4907337164744e451bba7e48d465478bf70f1b99305",
+  "4ccb0e73df0d25d3c35164825b62358d1f4475da66df85dff6e897350fce5e72",
+  "b498db6a7c457faef4b17a4b2343cc19b0c9eeaf59ae33752fb9aa18ba983f97",
+];
+const pageStyles = (html: string) =>
+  parsed(html)
+    .filter((el) => el.tagName === "style")
+    .map(hastText);
+function expectFixedTheme(html: string, theme: DownloadThemeValue) {
+  expectHead(html);
+  expect(html).toContain(`<meta name="color-scheme" content="${theme}">`);
+  const styles = pageStyles(html).join("\n");
+  expect(styles).toContain(`:root{color-scheme:${theme};`);
+  expect(styles).not.toContain("prefers-color-scheme");
+  expect(styles).toContain(`.shiki,.shiki span{color:var(--shiki-${theme},inherit)}`);
+  expect(styles).toContain(`.shiki{background-color:var(--shiki-${theme}-bg,var(--sunken))}`);
+  if (theme === "dark") {
+    expect(styles).toContain(":root{--bg:oklch(.18 .004 260)");
+    expect(styles).toContain("background:var(--sunken,#1c1c1f)");
+  } else {
+    expect(styles).toContain("--bg:oklch(.985 .001 260)");
+    expect(styles).not.toContain("--bg:oklch(.18 .004 260)");
+    expect(styles).not.toContain("var(--shiki-dark");
+    expect(styles).not.toContain("#1c1c1f");
+  }
+}
+
+test.each(threadPageKinds)("%s downloads keep System styles and support fixed themes", async (kind) => {
+  const threads = emptyThreads({ top: [sampleThread("Theme remark")] });
+  const system = await threadPage(kind, threads);
+  expect(pageStyles(system).map((css) => createHash("sha256").update(css).digest("hex"))).toEqual(
+    systemStyleHashes.slice(0, 2),
+  );
+  expect(system.includes('<meta name="color-scheme" content="light dark">')).toBe(kind !== "omitted");
+  for (const theme of ["dark", "light"] as const) {
+    const html = await threadPage(kind, threads, theme);
+    expectFixedTheme(html, theme);
+    expect(html.slice(html.indexOf("<body>"))).toBe(system.slice(system.indexOf("<body>")));
+  }
+});
+
+test("diff styles follow the same theme as the writeup and comments", async () => {
+  const input = {
+    ...diffInput,
+    threads: emptyThreads(),
+    diff: { files: [diffFile()], hunks: async () => [{ oldStart: 1, newStart: 1, lines: ["-before", "+after"] }] },
+  };
+  const system = await buildWriteupDownload(input);
+  expect(pageStyles(system).map((css) => createHash("sha256").update(css).digest("hex"))).toEqual(systemStyleHashes);
+  for (const theme of ["dark", "light"] as const) {
+    const html = await buildWriteupDownload({ ...input, theme });
+    expectFixedTheme(html, theme);
+    const styles = pageStyles(html).join("\n");
+    for (const [kind, hue] of [
+      ["add", 145],
+      ["delete", 25],
+    ] as const) {
+      expect(styles).toContain(`.em-diff-${kind}{background:oklch(${theme === "dark" ? ".27" : ".94"} .04 ${hue})}`);
+      if (theme === "light") expect(styles).not.toContain(`oklch(.27 .04 ${hue})`);
+    }
+  }
+});
+
+test.each(["dark", "light"] as const)("an HTML doc keeps its own look with theme=%s", async (theme) => {
+  const input = {
+    title: "Own look",
+    html: '<meta name="color-scheme" content="light dark"><style>p{color:red}@media(prefers-color-scheme:dark){p{color:blue}}</style><p>Doc</p>',
+    docPath: "doc.html",
+    resolveAsset: async () => null,
+  };
+  const withTheme = { ...input, theme };
+  expect(await buildHtmlDocDownload(withTheme)).toBe(await buildHtmlDocDownload(input));
+});
 
 test.each(threadPageKinds)("thread cards never have li, dd or dt ancestors in %s downloads", async (kind) => {
   const html = await threadPage(

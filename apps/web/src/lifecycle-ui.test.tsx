@@ -14,6 +14,7 @@ import { App } from "./App.tsx";
 import { type InboxData, revisionQuery } from "./api/queries.ts";
 import { doneDimmed } from "./components/inbox/ReviewRow.tsx";
 import { defaultLayout, layoutStore } from "./lib/layout-store.ts";
+import { setThemePick } from "./lib/theme.ts";
 import { wakeTime } from "./lib/time.ts";
 import { Events } from "./test/events.ts";
 
@@ -985,7 +986,8 @@ test("the desktop Download link follows the revision on screen", async () => {
   );
 });
 
-test("the phone review menu downloads the revision on screen", async () => {
+test.each(["system", "dark", "light"] as const)("the phone download link follows the %s pick", async (theme) => {
+  setThemePick(theme);
   width = 390;
   mount(`/r/${id}`);
   await screen.findByRole("heading", { name: "Synthetic review", level: 1 });
@@ -993,7 +995,9 @@ test("the phone review menu downloads the revision on screen", async () => {
   fireEvent.keyDown(screen.getByRole("button", { name: "More" }), { key: "ArrowDown" });
   const link = await screen.findByRole("menuitem", { name: "Download" });
   expect(link.tagName).toBe("A");
-  expect(link.getAttribute("href")).toBe(`/api/v1/reviews/${id}/revisions/1/download`);
+  expect(link.getAttribute("href")).toBe(
+    `/api/v1/reviews/${id}/revisions/1/download${theme === "system" ? "" : `?theme=${theme}`}`,
+  );
   expect(link.hasAttribute("download")).toBe(true);
 });
 
@@ -1229,12 +1233,29 @@ test.each([null, "doc-1.md"])("Download excludes a pub's base doc with main %s",
   );
 });
 
-test("a pub with only its base doc keeps the direct Download link", async () => {
+test.each(["system", "dark", "light"] as const)("a pub's direct Download link follows the %s pick", async (theme) => {
+  setThemePick(theme);
   withDownloadDocs(1, { writeupEmpty: true });
   mount(`/r/${id}`);
   const link = await screen.findByRole("link", { name: "Download" });
-  expect(link.getAttribute("href")).toBe(reviewDownloadPath(id, 1));
+  expect(link.getAttribute("href")).toBe(
+    `/api/v1/reviews/${id}/revisions/1/download${theme === "system" ? "" : `?theme=${theme}`}`,
+  );
   expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+});
+
+test("the Download dialog updates its link when the device theme pick changes", async () => {
+  const value = withDownloadDocs();
+  mount(`/r/${id}`);
+  fireEvent.click(await screen.findByRole("button", { name: "Download" }));
+  const dialog = within(await screen.findByRole("alertdialog", { name: "Download" }));
+  fireEvent.click(dialog.getByRole("checkbox", { name: /Plan title/ }));
+  for (const theme of ["dark", "light", "system"] as const) {
+    act(() => setThemePick(theme));
+    expect(dialog.getByRole("link", { name: "Download" }).getAttribute("href")).toBe(
+      `/api/v1/reviews/${id}/revisions/1/download?doc=${value.files[0]?.id}${theme === "system" ? "" : `&theme=${theme}`}`,
+    );
+  }
 });
 
 test("Download disables unticked docs at 50 and enables them when a choice is cleared", async () => {

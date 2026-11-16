@@ -96,6 +96,127 @@ async function topicDiffReview() {
   return { ...published, oldBlob, newBlob };
 }
 
+function expectDownloadTheme(html: string, theme: "dark" | "light") {
+  expect(html).toContain(`<meta name="color-scheme" content="${theme}">`);
+  expect(html).toContain(`:root{color-scheme:${theme};`);
+  expect(html).not.toContain("prefers-color-scheme");
+  expect(html).toContain(`color:var(--shiki-${theme},inherit)`);
+  if (theme === "dark") expect(html).toContain(":root{--bg:oklch(.18 .004 260)");
+  else expect(html).not.toContain("var(--shiki-dark");
+}
+
+test("invalid themes fail before a busy slot for GET and HEAD without reading blobs", async () => {
+  const { reviewId } = await mediaReview();
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const read = f.deps.blobs.get.bind(f.deps.blobs);
+  const reads = vi.spyOn(f.deps.blobs, "get").mockImplementationOnce(async (...args) => {
+    entered.resolve();
+    await release.promise;
+    return read(...args);
+  });
+  const building = Promise.resolve(get(reviewId));
+  try {
+    await entered.promise;
+    for (const query of [
+      "theme=system",
+      "theme=x",
+      "theme=",
+      "theme=dark&theme=light",
+      "theme=dark&theme=dark",
+      "theme=light&theme=light",
+    ])
+      for (const method of ["GET", "HEAD"]) {
+        const response = await f.request(`/reviews/${reviewId}/revisions/1/download?${query}`, method);
+        expect(response.status, `${method} ${query}`).toBe(400);
+        if (method === "GET") expect(await response.json()).toMatchObject({ error: { code: "invalid_request" } });
+      }
+    for (const theme of ["dark", "light"]) {
+      const head = await f.request(`/reviews/${reviewId}/revisions/1/download?theme=${theme}`, "HEAD");
+      expect(head.status).toBe(200);
+      expect(await head.text()).toBe("");
+    }
+    expect(reads).toHaveBeenCalledTimes(1);
+  } finally {
+    release.resolve();
+    await building;
+  }
+});
+
+test.each(["dark", "light"] as const)(
+  "theme=%s fixes writeups and ZIP docs without changing headers or HTML docs",
+  async (theme) => {
+    const { reviewId, ids } = await docsReview();
+    for (const docIds of [[], [...ids]]) {
+      const path = reviewDownloadPath(reviewId, 1, docIds).slice("/api/v1".length);
+      const themedPath = reviewDownloadPath(reviewId, 1, docIds, { theme }).slice("/api/v1".length);
+      const before = await f.request(path, "GET");
+      const response = await f.request(themedPath, "GET");
+      const read = vi.spyOn(f.deps.blobs, "get");
+      const head = await f.request(themedPath, "HEAD");
+      expect(read).not.toHaveBeenCalled();
+      read.mockRestore();
+      expect(response.status).toBe(200);
+      expect(head.status).toBe(200);
+      expect(await head.text()).toBe("");
+      for (const name of [
+        "Content-Type",
+        "Content-Disposition",
+        "Content-Security-Policy",
+        "X-Content-Type-Options",
+        "Cache-Control",
+        "Cross-Origin-Resource-Policy",
+      ])
+        for (const result of [response, head]) expect(result.headers.get(name)).toBe(before.headers.get(name));
+      if (!docIds.length) {
+        expectDownloadTheme(await response.text(), theme);
+      } else {
+        const original = await zipEntries(before);
+        const entries = await zipEntries(response);
+        expect(entries.map((entry) => entry.name)).toEqual(original.map((entry) => entry.name));
+        for (const entry of entries.slice(0, 2)) expectDownloadTheme(entry.html, theme);
+        expect(entries[2]?.data).toEqual(original[2]?.data);
+      }
+    }
+    const omitted = await zipEntries(await budgetApp(0).request(reviewDownloadPath(reviewId, 1, ids, { theme })));
+    for (const entry of omitted.slice(1)) {
+      expectDownloadTheme(entry.html, theme);
+      expect(entry.html).toContain("Some content was left out");
+    }
+  },
+);
+
+test.each([
+  ["markdown", true],
+  ["source", true],
+  ["markdown", false],
+  ["source", false],
+] as const)("fixed themes reach a %s doc and its comments, pub=%s", async (kind, pub) => {
+  const { reviewId, id } = await commentDocReview(kind, pub);
+  for (const theme of ["dark", "light"] as const) {
+    const path = reviewDownloadPath(reviewId, 1, pub ? [] : [id], { comments: true, theme }).slice("/api/v1".length);
+    const response = await f.request(path, "GET");
+    expect(response.status).toBe(200);
+    const html = pub ? await response.text() : ((await zipEntries(response))[1]?.html ?? "");
+    expectDownloadTheme(html, theme);
+    expect(html).toContain("Doc remark");
+    if (kind === "source") expect(html).toContain('class="shiki em-source"');
+  }
+});
+
+test("an HTML pub keeps its own look while its separate comments file follows the theme", async () => {
+  const { reviewId } = await commentDocReview("html", true);
+  const before = await (await get(reviewId)).text();
+  for (const theme of ["dark", "light"] as const) {
+    const entries = await zipEntries(await f.request(`${commentsPath(reviewId)}&theme=${theme}`, "GET"));
+    expect(entries).toHaveLength(2);
+    expect(entries[0]?.html.replace(/^\uFEFF/, "")).toBe(before);
+    expect(entries[1]?.name).toBe("comments.html");
+    expectDownloadTheme(entries[1]?.html ?? "", theme);
+    expect(entries[1]?.html).toContain("Doc remark");
+  }
+});
+
 test("validates diff before building for GET and HEAD", async () => {
   const { reviewId } = await publish();
   const read = vi.spyOn(f.deps.blobs, "get");
