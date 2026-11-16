@@ -343,7 +343,7 @@ export function ReviewHeader({
       </div>
       {(phone || !openingCard) && contextRow}
       {(!phone || review.branch || revision?.files.length === 0 || total) && (
-        <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 font-mono text-12 leading-[1.2] font-stretch-mono text-fg-3">
+        <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 font-mono text-13 leading-[1.2] text-fg-3">
           {review.branch && (
             <span className={metaItem}>
               <Icon icon={GitBranch} size={13} />

@@ -29,10 +29,10 @@ export function textSizeItems(preferences: LayoutPreferences): MenuItem[] {
         value: String(preferences.codeSize),
         onValueChange: (value) => {
           const codeSize = Number(value);
-          if (codeSize === 11 || codeSize === 12 || codeSize === 13 || codeSize === 14)
+          if (codeSize === 12 || codeSize === 13 || codeSize === 14 || codeSize === 15)
             layoutStore.update({ codeSize });
         },
-        items: [11, 12, 13, 14].map((size) => ({ value: String(size), label: `${size} px` })),
+        items: [12, 13, 14, 15].map((size) => ({ value: String(size), label: `${size} px` })),
       },
     },
   ];

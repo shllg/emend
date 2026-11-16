@@ -69,10 +69,7 @@ export function Textarea({
               id={countId}
               aria-live={near ? "polite" : "off"}
               aria-atomic="true"
-              className={cn(
-                "font-mono text-11 font-medium leading-(--lh-snug) font-stretch-mono text-fg-3",
-                over && "text-danger-fg",
-              )}
+              className={cn("font-mono text-12 font-medium leading-(--lh-snug) text-fg-3", over && "text-danger-fg")}
             >
               {count} / {maxLength}
             </span>

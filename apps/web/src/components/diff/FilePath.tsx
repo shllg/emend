@@ -30,7 +30,7 @@ export function FilePathMenu({ path, oldPath }: { path: string; oldPath?: string
         {
           content: <Path path={path} />,
           className:
-            "px-2.5 pt-2 pb-1 font-stretch-mono whitespace-pre-wrap text-fg-1 [font:var(--type-path)] [overflow-wrap:anywhere] select-text",
+            "px-2.5 pt-2 pb-1 [font-feature-settings:var(--mono-features)] whitespace-pre-wrap text-fg-1 [font:var(--type-path)] [overflow-wrap:anywhere] select-text",
         },
         ...(oldPath
           ? [
@@ -41,7 +41,7 @@ export function FilePathMenu({ path, oldPath }: { path: string; oldPath?: string
                   </>
                 ),
                 className:
-                  "px-2.5 pb-1 font-stretch-mono whitespace-pre-wrap text-fg-3 [font:var(--type-path)] [overflow-wrap:anywhere] select-text",
+                  "px-2.5 pb-1 [font-feature-settings:var(--mono-features)] whitespace-pre-wrap text-fg-3 [font:var(--type-path)] [overflow-wrap:anywhere] select-text",
               },
             ]
           : []),

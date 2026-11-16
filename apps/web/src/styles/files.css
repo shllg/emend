@@ -55,8 +55,8 @@
     text-align: left;
     cursor: pointer;
     color: var(--fg-1);
-    font: 400 12.5px / 1.4 var(--font-mono);
-    font-stretch: var(--mono-stretch);
+    font: 400 13.5px / 1.4 var(--font-mono);
+    font-feature-settings: var(--mono-features);
   }
   .em-files-row__path {
     flex: 1;

@@ -107,6 +107,7 @@
   /* Same-name tokens resolve from :root in the base layer. */
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
+  --font-mono--font-feature-settings: var(--mono-features);
   --radius-xs: var(--radius-xs);
   --radius-sm: var(--radius-sm);
   --radius-md: var(--radius-md);
@@ -136,8 +137,4 @@
   --text-30: var(--text-30);
   --text-30--line-height: var(--lh-tight);
   --text-40: var(--text-40);
-}
-
-@utility font-stretch-mono {
-  font-stretch: var(--mono-stretch);
 }

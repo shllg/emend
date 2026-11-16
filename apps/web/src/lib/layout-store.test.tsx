@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { useSyncExternalStore } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { createLayoutStore, defaultLayout, layoutKey, tabsDefaultKey } from "./layout-store.ts";
+import { codeSizeShiftKey, createLayoutStore, defaultLayout, layoutKey, tabsDefaultKey } from "./layout-store.ts";
 
 beforeEach(() => localStorage.clear());
 afterEach(() => {
@@ -9,7 +9,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-test("defaults include independent pane choices and D.4's 12px code size", () => {
+test("defaults include independent pane choices and D.4's 13px code size", () => {
   expect(createLayoutStore().getSnapshot()).toEqual({
     inboxWidth: 280,
     readingShare: 0.42,
@@ -23,9 +23,82 @@ test("defaults include independent pane choices and D.4's 12px code size", () =>
     details: { phone: false, tablet: true, desktop: true },
     inboxCollapsed: false,
     proseSize: 16,
-    codeSize: 12,
+    codeSize: 13,
   });
+  expect(localStorage.getItem(codeSizeShiftKey)).toBe("1");
+  expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}").codeSize).toBe(13);
+  expect(createLayoutStore().getSnapshot().codeSize).toBe(13);
 });
+
+test.each([11, 12, 13, 14])("saved code size %s shifts once, preserving other preferences", (codeSize) => {
+  localStorage.setItem(tabsDefaultKey, "1");
+  localStorage.setItem(layoutKey, JSON.stringify({ codeSize, proseSize: 18, wrap: true }));
+  const store = createLayoutStore();
+  expect(store.getSnapshot()).toMatchObject({ codeSize: codeSize + 1, proseSize: 18, wrap: true });
+  expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}")).toEqual(store.getSnapshot());
+  expect(localStorage.getItem(codeSizeShiftKey)).toBe("1");
+  expect(createLayoutStore().getSnapshot().codeSize).toBe(codeSize + 1);
+});
+
+test.each([12, 13, 14, 15])("the size marker preserves a saved %s without a second shift", (codeSize) => {
+  localStorage.setItem(tabsDefaultKey, "1");
+  localStorage.setItem(codeSizeShiftKey, "1");
+  localStorage.setItem(layoutKey, JSON.stringify({ codeSize }));
+  const write = vi.spyOn(localStorage, "setItem");
+  expect(createLayoutStore().getSnapshot().codeSize).toBe(codeSize);
+  expect(write).not.toHaveBeenCalled();
+});
+
+test.each([undefined, null, "12", 12.5, 100])(
+  "a missing or invalid saved code size %s keeps the fallback",
+  (codeSize) => {
+    // The Tabs migration also persists here, so it must not turn a fallback into a saved size to shift.
+    localStorage.setItem(layoutKey, JSON.stringify({ codeSize, pane: { desktop: "split", tablet: "split" } }));
+    expect(createLayoutStore().getSnapshot()).toMatchObject({ codeSize: 13, pane: { desktop: "tabs" } });
+    expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}").codeSize).toBe(13);
+    expect(localStorage.getItem(codeSizeShiftKey)).toBe("1");
+    expect(createLayoutStore().getSnapshot().codeSize).toBe(13);
+  },
+);
+
+test("a saved size outside the old range keeps its parsed value", () => {
+  localStorage.setItem(layoutKey, JSON.stringify({ codeSize: 15 }));
+  expect(createLayoutStore().getSnapshot().codeSize).toBe(15);
+  expect(localStorage.getItem(codeSizeShiftKey)).toBe("1");
+});
+
+test("an unreadable size marker leaves the saved code size alone", () => {
+  localStorage.setItem(tabsDefaultKey, "1");
+  localStorage.setItem(layoutKey, JSON.stringify({ codeSize: 14 }));
+  const storage = localStorage;
+  const write = vi.fn(storage.setItem.bind(storage));
+  vi.stubGlobal("localStorage", {
+    getItem(key: string) {
+      if (key === codeSizeShiftKey) throw Error("Denied");
+      return storage.getItem(key);
+    },
+    setItem: write,
+  });
+  expect(createLayoutStore().getSnapshot().codeSize).toBe(14);
+  expect(write).not.toHaveBeenCalled();
+});
+
+test("denied writes keep the shifted code size in memory", () => {
+  localStorage.setItem(layoutKey, JSON.stringify({ codeSize: 12 }));
+  const storage = localStorage;
+  vi.stubGlobal("localStorage", {
+    getItem: storage.getItem.bind(storage),
+    setItem() {
+      throw Error("Full");
+    },
+  });
+  const store = createLayoutStore();
+  expect(store.getSnapshot().codeSize).toBe(13);
+  expect(localStorage.getItem(codeSizeShiftKey)).toBeNull();
+  store.update({ codeSize: 15 });
+  expect(store.getSnapshot().codeSize).toBe(15);
+});
+
 test("details fall back per device class and keep valid choices", () => {
   localStorage.setItem(layoutKey, JSON.stringify({ details: { phone: true, tablet: "no", desktop: false } }));
   expect(createLayoutStore().getSnapshot().details).toEqual({ phone: true, tablet: true, desktop: false });
@@ -33,6 +106,7 @@ test("details fall back per device class and keep valid choices", () => {
   expect(createLayoutStore().getSnapshot().details).toEqual(defaultLayout.details);
 });
 test("invalid fields fall back independently, including each device choice", () => {
+  localStorage.setItem(codeSizeShiftKey, "1");
   localStorage.setItem(
     layoutKey,
     JSON.stringify({
@@ -105,7 +179,7 @@ test.each([undefined, "wide"] as const)(
     );
     const write = vi.spyOn(localStorage, "setItem");
     const store = createLayoutStore();
-    expect(write).toHaveBeenCalledTimes(2);
+    expect(write).toHaveBeenCalledTimes(3);
     expect(write).toHaveBeenCalledWith(tabsDefaultKey, "1");
     expect(localStorage.getItem(tabsDefaultKey)).toBe("1");
     expect(store.getSnapshot()).toEqual({
@@ -125,6 +199,7 @@ test.each([undefined, "wide"] as const)(
 );
 
 test("the marker preserves a chosen desktop Split even without a stored reading width", () => {
+  localStorage.setItem(codeSizeShiftKey, "1");
   localStorage.setItem(tabsDefaultKey, "1");
   localStorage.setItem(layoutKey, JSON.stringify({ pane: { desktop: "split", tablet: "tabs" } }));
   const write = vi.spyOn(localStorage, "setItem");
@@ -177,6 +252,7 @@ test("denied storage reads neither throw nor record the pane move", () => {
 });
 
 test("an unreadable marker leaves a saved Split alone", () => {
+  localStorage.setItem(codeSizeShiftKey, "1");
   localStorage.setItem(layoutKey, JSON.stringify({ pane: { desktop: "split", tablet: "split" } }));
   const storage = localStorage;
   const write = vi.fn(storage.setItem.bind(storage));
@@ -227,7 +303,7 @@ test.each(["read", "write", "both"])("denied %s keeps preferences in memory", (d
     },
   });
   const store = createLayoutStore();
-  expect(store.getSnapshot().codeSize).toBe(12);
+  expect(store.getSnapshot().codeSize).toBe(13);
   store.update({ proseSize: 18, inboxWidth: 400 });
   expect(store.getSnapshot()).toMatchObject({ proseSize: 18, inboxWidth: 400 });
   expect(store.getSnapshot()).toBe(store.getSnapshot());
@@ -263,8 +339,9 @@ test("migration writes during store creation, never during snapshot reads", () =
   localStorage.setItem("emend.diff.wrap", "true");
   const write = vi.spyOn(localStorage, "setItem");
   const store = createLayoutStore();
-  expect(write).toHaveBeenCalledTimes(2);
+  expect(write).toHaveBeenCalledTimes(3);
   expect(write).toHaveBeenCalledWith(tabsDefaultKey, "1");
+  expect(write).toHaveBeenCalledWith(codeSizeShiftKey, "1");
   write.mockClear();
   const initial = store.getSnapshot();
   expect(initial.wrap).toBe(true);
@@ -309,7 +386,7 @@ test("snapshot reads catch cross-tab writes before events without changing ident
 test("local numeric updates clamp to their ranges instead of restoring defaults", () => {
   const store = createLayoutStore();
   store.update({ inboxWidth: 999, readingShare: -1, proseSize: 25, codeSize: 1 });
-  expect(store.getSnapshot()).toMatchObject({ inboxWidth: 520, readingShare: 0, proseSize: 18, codeSize: 11 });
+  expect(store.getSnapshot()).toMatchObject({ inboxWidth: 520, readingShare: 0, proseSize: 18, codeSize: 12 });
   store.update({ inboxWidth: 1, readingShare: 2, proseSize: 3, codeSize: 99 });
-  expect(store.getSnapshot()).toMatchObject({ inboxWidth: 220, readingShare: 1, proseSize: 15, codeSize: 14 });
+  expect(store.getSnapshot()).toMatchObject({ inboxWidth: 220, readingShare: 1, proseSize: 15, codeSize: 15 });
 });

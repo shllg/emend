@@ -100,7 +100,6 @@
     border-radius: var(--radius-md);
   }
   .em-file-path {
-    font-stretch: var(--mono-stretch);
     overflow-wrap: anywhere;
   }
   .em-file-path-button {
@@ -112,6 +111,7 @@
     background: transparent;
     color: inherit;
     font: inherit;
+    font-feature-settings: var(--mono-features);
     text-align: start;
     overflow-wrap: anywhere;
     cursor: pointer;
@@ -183,7 +183,7 @@
   .em-diff-code,
   .em-diff-host {
     font: var(--type-code);
-    font-stretch: var(--mono-stretch);
+    font-feature-settings: var(--mono-features);
   }
   .em-diff-host {
     --diffs-foreground: var(--syn-plain);
@@ -216,6 +216,7 @@
     --diffs-bg-selection-override: var(--diff-select-bg);
     --diffs-fg-number-override: var(--fg-3);
     --diffs-font-family: var(--font-mono);
+    --diffs-font-features: var(--mono-features);
     --diffs-font-size: var(--reader-code-size, var(--type-code-size));
     --diffs-line-height: 1lh;
   }
@@ -232,6 +233,7 @@
     background: var(--ochre-400);
     color: var(--n-1000);
     font: 16px / 1 var(--font-mono);
+    font-feature-settings: var(--mono-features);
     cursor: pointer;
   }
 }

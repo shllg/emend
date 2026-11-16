@@ -1,6 +1,7 @@
 @layer components {
   .em-prose span[data-agent-note-ref] {
-    font: 600 11px / 1.5 var(--font-mono);
+    font: 600 12px / 1.5 var(--font-mono);
+    font-feature-settings: var(--mono-features);
     background: var(--accent-tint);
     color: var(--accent-text);
     border-radius: 4px;
@@ -33,8 +34,7 @@
     margin: 0 0 6px;
   }
   .em-prose h4 {
-    font: 600 11px / 1.3 var(--font-mono);
-    font-stretch: var(--mono-stretch);
+    font: 600 12px / 1.3 var(--font-sans);
     text-transform: uppercase;
     letter-spacing: var(--tracking-label);
     color: var(--fg-reading);
@@ -99,8 +99,8 @@
     color: var(--fg-reading);
   }
   .em-prose code {
-    font: 400 0.84em / 1 var(--font-mono);
-    font-stretch: var(--mono-stretch);
+    font: 400 0.9em / 1 var(--font-mono);
+    font-feature-settings: var(--mono-features);
     padding: 2px 4px;
     border-radius: 4px;
     background: var(--bg-sunken);
@@ -115,13 +115,14 @@
     background: var(--bg-sunken);
     overflow: auto;
     font: var(--type-code);
-    font-stretch: var(--mono-stretch);
+    font-feature-settings: var(--mono-features);
   }
   .em-prose pre code {
     padding: 0;
     border: 0;
     background: none;
     font: inherit;
+    font-feature-settings: var(--mono-features);
   }
   /* The renderer emits Shiki's theme colours as inline custom properties. */
   .em-prose .shiki {

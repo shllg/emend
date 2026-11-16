@@ -189,10 +189,7 @@ function AppFrameContent({
             Inbox
           </Link>
         ) : (
-          <Link
-            to="/"
-            className="font-mono text-14 font-medium leading-none font-stretch-mono text-fg-3 no-underline hover:text-fg-1"
-          >
+          <Link to="/" className="font-mono text-15 font-medium leading-none text-fg-3 no-underline hover:text-fg-1">
             emend
           </Link>
         )}

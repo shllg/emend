@@ -219,7 +219,7 @@ export function DocView({
                     <span dir="auto" className="truncate font-sans text-14 leading-[1.3] font-semibold text-fg-1">
                       {title}
                     </span>
-                    <span dir="auto" className="em-doc-path truncate font-stretch-mono text-fg-3">
+                    <span dir="auto" className="em-doc-path truncate text-fg-3">
                       {doc.path}
                     </span>
                     {doc.kind === "source" && <span className="text-fg-3 [font:var(--type-meta)]">Source</span>}

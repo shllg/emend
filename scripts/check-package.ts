@@ -52,6 +52,10 @@ try {
       check = `unexpected tarball entry ${JSON.stringify(name)}`;
       throw new Error("not allowed");
     }
+    check = `tarball excludes obsolete fonts ${JSON.stringify(name)}`;
+    assert(
+      !/^package\/dist\/web\/(?:licenses\/(?:hanken-grotesk|martian-mono)-OFL\.txt$|assets\/(?:.*\/)?(?:hanken-grotesk|martian-mono)-)/.test(name),
+    );
   }
   for (const name of [
     "README.md",
@@ -60,8 +64,8 @@ try {
     "dist/emend.mjs",
     "dist/publish-worker.mjs",
     "dist/web/index.html",
-    "dist/web/licenses/hanken-grotesk-OFL.txt",
-    "dist/web/licenses/martian-mono-OFL.txt",
+    "dist/web/licenses/geist-OFL.txt",
+    "dist/web/licenses/jetbrains-mono-OFL.txt",
     "dist/skills/emend-review/SKILL.md",
     "dist/skills/emend-review/references/writing.md",
     "dist/skills/emend-feedback/SKILL.md",

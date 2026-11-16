@@ -86,10 +86,12 @@ test.each(["light", "dark"])("real diff host uses the verified token overrides i
       expect(installed).toContain(name);
       expect(computed.getPropertyValue(name).trim()).toBe(tokens[token]);
     }
-    for (const name of ["--diffs-font-family", "--diffs-font-size", "--diffs-line-height"])
+    for (const name of ["--diffs-font-family", "--diffs-font-features", "--diffs-font-size", "--diffs-line-height"])
       expect(installed).toContain(name);
     expect(computed.getPropertyValue("--diffs-font-family").trim()).toBe("monospace");
-    expect(computed.getPropertyValue("--diffs-font-size").trim()).toBe("12px");
+    expect(computed.getPropertyValue("--diffs-font-features").trim()).toBe('"calt" 0');
+    expect(diffShadowCSS).toContain("font-feature-settings: var(--mono-features)");
+    expect(computed.getPropertyValue("--diffs-font-size").trim()).toBe("13px");
     expect(computed.getPropertyValue("--diffs-line-height").trim()).toBe("1lh");
     expect(host.style.colorScheme).toBe("inherit");
     expect(stylesheet).toContain("font: var(--type-code)");

@@ -16,7 +16,7 @@
   pre,
   samp {
     font-family: var(--font-mono);
-    font-stretch: var(--mono-stretch);
+    font-feature-settings: var(--mono-features);
   }
   a {
     color: var(--fg-link);

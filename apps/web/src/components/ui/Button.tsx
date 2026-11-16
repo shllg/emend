@@ -86,7 +86,7 @@ export function Button({
       <Slottable>{children}</Slottable>
       {iconRight && <Icon icon={iconRight} size={iconSize} />}
       {kbd && (
-        <kbd className="rounded-xs bg-[oklch(from_var(--bg-overlay)_l_c_h_/_0.08)] px-1 py-px font-mono text-11 font-medium leading-(--lh-snug) font-stretch-mono text-inherit opacity-75">
+        <kbd className="rounded-xs bg-[oklch(from_var(--bg-overlay)_l_c_h_/_0.08)] px-1 py-px font-mono text-12 font-medium leading-(--lh-snug) text-inherit opacity-75">
           {kbd}
         </kbd>
       )}

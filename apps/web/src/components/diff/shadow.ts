@@ -28,6 +28,7 @@ export const diffShadowCSS = `
   border-radius: 0;
   color: var(--fg-3);
   font-family: var(--font-mono);
+  font-feature-settings: var(--mono-features);
 }
 [data-separator="line-info"] [data-separator-wrapper],
 [data-separator="line-info"] [data-separator-content],

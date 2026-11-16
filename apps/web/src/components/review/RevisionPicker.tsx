@@ -37,13 +37,13 @@ export function RevisionPicker({
               </span>
             ) : (
               <>
-                <span className="font-mono text-11 font-semibold font-stretch-mono">{seq}</span>{" "}
+                <span className="font-mono text-12 font-semibold">{seq}</span>{" "}
                 <span className="text-fg-3">of {latest}</span>
               </>
             )
           ) : (
             <>
-              Revision <span className="font-mono text-11 font-semibold font-stretch-mono">{seq}</span>
+              Revision <span className="font-mono text-12 font-semibold">{seq}</span>
               {older ? (
                 <span className="font-semibold text-warning-fg">· {latest} is newer</span>
               ) : (

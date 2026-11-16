@@ -37,6 +37,7 @@
   }
   .em-doc-path {
     font: var(--type-path);
+    font-feature-settings: var(--mono-features);
   }
   .em-doc-view {
     --doc-bar-height: 112px;
@@ -304,7 +305,8 @@
     border: 1px solid var(--border-1);
     border-radius: 4px;
     color: var(--fg-3);
-    font: 400 12px / 1.5 var(--font-mono);
+    font: 400 13px / 1.5 var(--font-mono);
+    font-feature-settings: var(--mono-features);
     overflow-wrap: anywhere;
     cursor: pointer;
   }
@@ -331,8 +333,7 @@
   }
   .em-writeup-kicker {
     margin-bottom: 8px;
-    font: 600 11px / 1.4 var(--font-mono);
-    font-stretch: var(--mono-stretch);
+    font: 600 12px / 1.4 var(--font-sans);
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--fg-3);
@@ -425,8 +426,7 @@
     display: contents;
   }
   .em-writeup-fact dt {
-    font: 600 11px / 1.4 var(--font-mono);
-    font-stretch: var(--mono-stretch);
+    font: 600 12px / 1.4 var(--font-sans);
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--fg-3);

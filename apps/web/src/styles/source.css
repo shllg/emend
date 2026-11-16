@@ -22,7 +22,7 @@
     width: max-content;
     min-width: 100%;
     font: var(--type-code);
-    font-stretch: var(--mono-stretch);
+    font-feature-settings: var(--mono-features);
     color: var(--fg-1);
     height: var(--source-line-height);
     line-height: var(--source-line-height);
