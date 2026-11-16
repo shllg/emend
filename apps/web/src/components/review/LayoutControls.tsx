@@ -1,9 +1,9 @@
-import { Columns2, Files, MoveHorizontal, Type } from "lucide-react";
+import { Columns2, Files, PanelsTopLeft } from "lucide-react";
 import { useLayout } from "../../lib/layout.ts";
 import { type LayoutPreferences, layoutStore, useLayoutPreferences } from "../../lib/layout-store.ts";
-import { Button } from "../ui/Button.tsx";
+import { Icon } from "../ui/Icon.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
 import { Menu, type MenuItem } from "../ui/Menu.tsx";
-import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 
 export function textSizeItems(preferences: LayoutPreferences): MenuItem[] {
   return [
@@ -59,43 +59,52 @@ export function readingWidthItems(preferences: LayoutPreferences): MenuItem[] {
   ];
 }
 
-export function LayoutControls() {
+export function paneItems(preferences: LayoutPreferences, layout: "tablet" | "desktop"): MenuItem[] {
+  return [
+    { heading: "Panes" },
+    {
+      radioGroup: {
+        label: "Panes",
+        segmented: true,
+        value: preferences.pane[layout],
+        onValueChange: (value) => {
+          if (value === "split" || value === "tabs")
+            layoutStore.update({ pane: { ...preferences.pane, [layout]: value } });
+        },
+        items: [
+          {
+            value: "split",
+            label: (
+              <>
+                <Icon icon={Columns2} size={14} />
+                Split
+              </>
+            ),
+          },
+          {
+            value: "tabs",
+            label: (
+              <>
+                <Icon icon={Files} size={14} />
+                Tabs
+              </>
+            ),
+          },
+        ],
+      },
+    },
+  ];
+}
+
+export function ViewMenu() {
   const layout = useLayout();
   const preferences = useLayoutPreferences();
   if (layout === "phone") return null;
   return (
-    <div className="ml-auto flex flex-wrap items-center gap-2">
-      <SegmentedControl
-        label="Panes"
-        size="sm"
-        value={preferences.pane[layout]}
-        options={[
-          { value: "split", label: "Split", icon: Columns2 },
-          { value: "tabs", label: "Tabs", icon: Files },
-        ]}
-        onChange={(value) => {
-          if (value === "split" || value === "tabs")
-            layoutStore.update({ pane: { ...preferences.pane, [layout]: value } });
-        }}
-      />
-      <Menu
-        label="Reading width"
-        trigger={
-          <Button variant="ghost" size="sm" icon={MoveHorizontal}>
-            Width
-          </Button>
-        }
-        items={readingWidthItems(preferences)}
-      />
-      <Menu
-        label="Text size"
-        trigger={
-          <Button variant="ghost" size="sm" icon={Type}>
-            Text
-          </Button>
-        }
-        items={textSizeItems(preferences)}
-      />
-    </div>
+    <Menu
+      label="View"
+      trigger={<IconButton label="View" icon={PanelsTopLeft} />}
+      items={[...paneItems(preferences, layout), ...readingWidthItems(preferences), ...textSizeItems(preferences)]}
+    />
   );
 }
