@@ -4703,10 +4703,20 @@ test("round 21 CX3: trailing-padding work scales linearly", (t) => {
     const limit = 12 * body.length;
     let paddingWork = 0;
     const exec = RegExp.prototype.exec;
-    const paddingSuffix = /=(?:[+*?]|\{\d+(?:,\d*)?\})\??\)*\$/;
+    const paddingSuffix = new Map<string, boolean>();
     const chargePadding = (pattern: RegExp, input: string) => {
-      // Use the original exec: recognizing a pattern must not enter the mocks again.
-      if (!exec.call(paddingSuffix, pattern.source)) return;
+      const key = `${pattern.source}/${pattern.flags}`;
+      let suffix = paddingSuffix.get(key);
+      if (suffix === undefined) {
+        // Probe with the original exec and no cursor flags, without entering the wrappers.
+        const probe = new RegExp(pattern.source, pattern.flags.replaceAll("g", "").replaceAll("y", ""));
+        const trailing = exec.call(probe, "A====");
+        const followed = exec.call(probe, "A====!");
+        suffix = trailing !== null && trailing.index <= 1 && trailing.index + trailing[0].length === 5 &&
+          !(followed !== null && followed.index <= 1 && followed.index + followed[0].length >= 5);
+        paddingSuffix.set(key, suffix);
+      }
+      if (!suffix) return;
       // An unanchored padding strip retries every '=' suffix when punctuation follows it.
       for (let index = 0; index < input.length; index++) {
         if (input[index] !== "=") continue;
@@ -4719,39 +4729,65 @@ test("round 21 CX3: trailing-padding work scales linearly", (t) => {
       }
     };
     let depth = 0;
-    const mocks: { mock: { restore(): void } }[] = [];
+    // node:test mocks do not restore symbol-keyed methods; preserve their descriptors directly.
+    const descriptors = ([Symbol.replace, Symbol.match, Symbol.matchAll, Symbol.search, Symbol.split, "exec", "test"] as const)
+      .map((method) => [method, Object.getOwnPropertyDescriptor(RegExp.prototype, method)!] as const);
     try {
-      for (const method of [Symbol.replace, Symbol.match, Symbol.matchAll, Symbol.search, Symbol.split, "exec", "test"] as const) {
-        const original = RegExp.prototype[method];
-        mocks.push(t.mock.method(RegExp.prototype, method, function (this: RegExp, input: string, ...args: unknown[]) {
-          if (depth) return Reflect.apply(original, this, [input, ...args]);
-          depth++;
-          try {
-            chargePadding(this, input);
-            const result = Reflect.apply(original, this, [input, ...args]);
-            if (method !== Symbol.matchAll) return result;
-            // matchAll defers exec until iteration; guard those calls as well.
-            const matches = result as IterableIterator<RegExpMatchArray>;
-            return (function* () {
-              while (true) {
-                let next: IteratorResult<RegExpMatchArray>;
-                depth++;
-                try { next = matches.next(); } finally { depth--; }
-                if (next.done) return;
-                yield next.value;
+      for (const [method, descriptor] of descriptors) {
+        const original = descriptor.value;
+        Object.defineProperty(RegExp.prototype, method, {
+          ...descriptor,
+          value: function (this: RegExp, input: string, ...args: unknown[]) {
+            if (depth) return Reflect.apply(original, this, [input, ...args]);
+            depth++;
+            try {
+              chargePadding(this, input);
+              if (method === Symbol.replace && typeof args[0] === "function") {
+                const replacer = args[0];
+                args[0] = function (this: unknown, ...values: unknown[]) {
+                  const savedDepth = depth;
+                  depth = 0;
+                  try { return Reflect.apply(replacer, this, values); } finally { depth = savedDepth; }
+                };
               }
-            })();
-          } finally { depth--; }
-        }));
+              const result = Reflect.apply(original, this, [input, ...args]);
+              if (method !== Symbol.matchAll) return result;
+              // matchAll defers exec until iteration; guard those calls as well.
+              const matches = result as IterableIterator<RegExpMatchArray>;
+              return (function* () {
+                while (true) {
+                  let next: IteratorResult<RegExpMatchArray>;
+                  depth++;
+                  try { next = matches.next(); } finally { depth--; }
+                  if (next.done) return;
+                  yield next.value;
+                }
+              })();
+            } finally { depth--; }
+          },
+        });
       }
       const start = performance.now();
       assert.deepEqual(checkText(body, "fixture.md", empty, { budget }), []);
       ms += performance.now() - start;
       assert.ok(budget.inlineTerminatorWork >= body.length, "the padding scan must be counted");
       assert.ok(paddingWork + budget.inlineTerminatorWork <= limit, "padding work must stay linear");
+      const padding = "=".repeat(16);
+      for (const pattern of [/={1,2}$/, /=+/]) {
+        paddingWork = 0;
+        padding.replace(pattern, "");
+        assert.equal(paddingWork, 0, "bounded and unanchored strips must not charge padding work");
+      }
       // Each former quadratic form must independently fail the same deterministic bound.
       for (const strip of [
         (input: string) => input.replace(/=+$/, ""),
+        (input: string) => input.replace(/[=]+$/, ""),
+        (input: string) => input.replace(/(?:=)+$/, ""),
+        (input: string) => input.replace(/\x3d+$/, ""),
+        (input: string) => input.replace(/[A-Za-z0-9+/=]+$/, ""),
+        (input: string) => input.replace(/=+(?=$)/, ""),
+        (input: string) => input.replace(/=+\s*$/, ""),
+        (input: string) => input.replace(/[\s\S]+/, (match) => match.replace(/=+$/, "")),
         (input: string) => input.match(/=*$/),
         (input: string) => /(=+)$/.exec(input),
         (input: string) => input.search(/={1,}$/),
@@ -4760,7 +4796,6 @@ test("round 21 CX3: trailing-padding work scales linearly", (t) => {
         (input: string) => input.split(/=+$/),
         (input: string) => /=+$/.test(input),
       ]) {
-        const padding = "=".repeat(16);
         paddingWork = 0;
         strip(padding);
         assert.equal(paddingWork, padding.length, "nested regex calls must not charge the same work twice");
@@ -4769,7 +4804,9 @@ test("round 21 CX3: trailing-padding work scales linearly", (t) => {
         assert.ok(paddingWork > limit, "the quadratic padding work alone must exceed the bound");
       }
     } finally {
-      for (const mock of mocks.reverse()) mock.mock.restore();
+      for (const [method, descriptor] of descriptors) Object.defineProperty(RegExp.prototype, method, descriptor);
+      for (const [method, descriptor] of descriptors)
+        assert.strictEqual(RegExp.prototype[method], descriptor.value, `${String(method)} must be restored to its original function`);
     }
   }
   t.diagnostic(`trailing-padding scan: ${ms.toFixed(1)} ms`);
