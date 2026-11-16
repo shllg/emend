@@ -1,5 +1,5 @@
 import mermaid from "mermaid";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { encodeCodes, exceedsLimits, frameConfig } from "../mermaid-frame.ts";
 
 afterEach(() => mermaid.mermaidAPI.globalReset());
@@ -51,6 +51,38 @@ test.each([
 });
 
 test.each([
+  { states: 250, arrowsPerState: 3, tooLarge: true },
+  { states: 25, arrowsPerState: 2, tooLarge: false },
+])(
+  "real Mermaid checks a $states-state chart with $arrowsPerState labelled arrows per state",
+  async ({ states, arrowsPerState, tooLarge }) => {
+    mermaid.initialize(frameConfig(false));
+    const lines = Array.from({ length: states }, (_, from) =>
+      Array.from(
+        { length: arrowsPerState },
+        (_, offset) => `s${from} --> s${(from + offset * 7 + 1) % states}: transition ${from}-${offset}`,
+      ).join("\n"),
+    );
+    const source = `stateDiagram-v2\n${lines.join("\n")}`;
+    // Mermaid freezes its API; copy it so the spy can call through to the real parser.
+    const originalAPI = mermaid.mermaidAPI;
+    mermaid.mermaidAPI = { ...originalAPI };
+    const measure = vi.spyOn(mermaid.mermaidAPI, "getDiagramFromText");
+    try {
+      await expect(exceedsLimits(source)).resolves.toBe(tooLarge);
+      if (tooLarge) {
+        expect(measure).not.toHaveBeenCalled();
+      } else {
+        expect(measure).toHaveBeenCalledExactlyOnceWith(source);
+      }
+    } finally {
+      measure.mockRestore();
+      mermaid.mermaidAPI = originalAPI;
+    }
+  },
+);
+
+test.each([
   { kind: "init directive", config: '%%{init: {"maxEdges": 1000}}%%' },
   { kind: "front matter", config: "---\nconfig: { maxEdges: 1000 }\n---" },
 ])("real Mermaid refuses an arrow limit override through $kind", async ({ config }) => {
@@ -93,11 +125,47 @@ test.each([
   await expect(exceedsLimits(source)).resolves.toBe(expected);
 });
 
+test.each([
+  { edges: 21, expected: true },
+  { edges: 20, expected: false },
+])("real Mermaid checks $edges swimlane arrows across two lanes", async ({ edges, expected }) => {
+  mermaid.initialize(frameConfig(false));
+  const left = Array.from({ length: edges }, (_, index) => `a${index}`);
+  const right = Array.from({ length: edges }, (_, index) => `b${index}`);
+  const links = Array.from({ length: edges }, (_, index) => `a${index} --> b${index}`);
+  const source = `swimlane-beta LR\nsubgraph Left\n${left.join("\n")}\nend\nsubgraph Right\n${right.join("\n")}\nend\n${links.join("\n")}`;
+  const diagram = await mermaid.mermaidAPI.getDiagramFromText(source);
+  expect(diagram.type).toBe("swimlane");
+  const db = diagram.db as typeof diagram.db & { getData(): { edges: unknown[] } };
+  expect(db.getData().edges).toHaveLength(edges);
+  await expect(exceedsLimits(source)).resolves.toBe(expected);
+});
+
 test("real Mermaid ignores a diagram's architecture iteration override", async () => {
   mermaid.initialize(frameConfig(false));
   const source = `%%{init: {"architecture": {"numIter": 100000}}}%%\n${diagramSource("architecture-beta", 2, 1)}`;
   await expect(mermaid.parse(source)).resolves.toBeTruthy();
   expect(mermaid.mermaidAPI.getConfig().architecture?.numIter).not.toBe(100000);
+});
+
+test.each([
+  {
+    kind: "init directive",
+    config: '%%{init: {"architecture": {"iconSize": 10000000}, "venn": {"width": 1000000000, "height": 1000000000}}}%%',
+  },
+  {
+    kind: "front matter",
+    config:
+      "---\nconfig:\n  architecture: { iconSize: 10000000 }\n  venn: { width: 1000000000, height: 1000000000 }\n---",
+  },
+])("real Mermaid ignores architecture and venn sizing overrides through $kind", async ({ config }) => {
+  mermaid.initialize(frameConfig(false));
+  const source = `${config}\n${diagramSource("architecture-beta", 2, 1)}`;
+  await expect(mermaid.parse(source)).resolves.toBeTruthy();
+  const effective = mermaid.mermaidAPI.getConfig();
+  expect(effective.architecture?.iconSize).not.toBe(10000000);
+  expect(effective.venn?.width).not.toBe(1000000000);
+  expect(effective.venn?.height).not.toBe(1000000000);
 });
 
 test.each([

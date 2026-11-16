@@ -453,6 +453,40 @@ test("oversize source stays text and is never passed to Mermaid", async () => {
 });
 
 test.each([
+  { statements: 501, separator: "\n", kind: "newlines", tooLarge: true },
+  { statements: 500, separator: "\n", kind: "newlines", tooLarge: false },
+  { statements: 501, separator: ";", kind: "semicolons", tooLarge: true },
+  { statements: 500, separator: "\n \t\n\n", kind: "blank lines", tooLarge: false },
+  { statements: 500, separator: "; \t; ;;", kind: "empty semicolon segments", tooLarge: false },
+])("the statement limit checks $statements statements with $kind", async ({ statements, separator, tooLarge }) => {
+  const root = document.createElement("div");
+  document.body.append(root);
+  const source = ["flowchart LR", ...Array.from({ length: statements - 1 }, () => "  A")].join(separator);
+  mermaid.render.mockResolvedValue({ svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>A</text></svg>' });
+  const stop = startFrame(root);
+  try {
+    window.dispatchEvent(new MessageEvent("message", { source: window.parent, data: { type: "render", source } }));
+    if (tooLarge) {
+      await waitFor(() => expect(root.textContent).toContain("This diagram is too large to draw."));
+      expect(root.querySelector("pre")?.textContent).toBe(source);
+      expect(mermaid.mermaidAPI.reset).not.toHaveBeenCalled();
+      expect(mermaid.mermaidAPI.getDiagramFromText).not.toHaveBeenCalled();
+      expect(mermaid.render).not.toHaveBeenCalled();
+    } else {
+      await waitFor(() => expect(root.querySelector("svg")).not.toBeNull());
+      expect(mermaid.mermaidAPI.reset).toHaveBeenCalledTimes(1);
+      expect(mermaid.mermaidAPI.getDiagramFromText).toHaveBeenCalledExactlyOnceWith(source);
+      expect(mermaid.render).toHaveBeenCalledExactlyOnceWith("diagram-1", source, expect.any(HTMLElement));
+      expect(root.querySelector("pre")).toBeNull();
+    }
+    expect(mermaid.parse).not.toHaveBeenCalled();
+  } finally {
+    stop();
+    root.remove();
+  }
+});
+
+test.each([
   { nodes: 60, edges: 151 },
   { nodes: 301, edges: 2 },
 ])("a diagram with $nodes nodes and $edges edges stays text", async ({ nodes, edges }) => {
@@ -621,6 +655,41 @@ test.each([
     }
   },
 );
+
+test.each([
+  { algorithm: "elk.layered", edges: 21, tooLarge: true },
+  { algorithm: "elk.layered", edges: 20, tooLarge: false },
+  { algorithm: "elk.force", edges: 21, tooLarge: true },
+  { algorithm: "elk.force", edges: 20, tooLarge: false },
+])("swimlane checks $edges arrows with $algorithm", async ({ algorithm, edges, tooLarge }) => {
+  const root = document.createElement("div");
+  document.body.append(root);
+  const source = "swimlane-beta LR\nsubgraph Left\n  A\nend\nsubgraph Right\n  B\nend\nA --> B";
+  mermaid.mermaidAPI.getDiagramFromText.mockResolvedValueOnce({
+    type: "swimlane",
+    db: {
+      getData: () => ({ nodes: [{ metadata: { algorithm } }], edges: Array.from({ length: edges }) }),
+    },
+  });
+  mermaid.render.mockResolvedValue({ svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>A</text></svg>' });
+  const stop = startFrame(root);
+  try {
+    window.dispatchEvent(new MessageEvent("message", { source: window.parent, data: { type: "render", source } }));
+    if (tooLarge) {
+      await waitFor(() => expect(root.textContent).toContain("This diagram is too large to draw."));
+      expect(root.querySelector("pre")?.textContent).toBe(source);
+      expect(mermaid.render).not.toHaveBeenCalled();
+    } else {
+      await waitFor(() => expect(root.querySelector("svg")).not.toBeNull());
+      expect(mermaid.render).toHaveBeenCalledTimes(1);
+      expect(root.querySelector("pre")).toBeNull();
+    }
+    expect(mermaid.parse).not.toHaveBeenCalled();
+  } finally {
+    stop();
+    root.remove();
+  }
+});
 
 test.each([
   { nodes: 10, groups: 2, edges: 151, tooLarge: true },
@@ -1021,6 +1090,8 @@ test.each([
           "maxEdges",
           "htmlLabels",
           "flowchart",
+          "architecture",
+          "venn",
           "theme",
           "themeCSS",
           "themeVariables",

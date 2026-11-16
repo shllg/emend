@@ -1,10 +1,14 @@
 import mermaid, { type MermaidConfig } from "mermaid";
 
 const MAX_SOURCE = 50000;
+// Mermaid parses types like state charts at about 1 ms per statement; refuse longer diagrams before parsing.
+const MAX_STATEMENTS = 500;
 // Layout runs on the frame's main thread, which the page may share; time grows much faster than arrow count.
 const MAX_EDGES = 150;
 // Unmeasured or slow container algorithms need a lower arrow limit.
 const MAX_EDGES_SLOW_LAYOUT = 50;
+// Mermaid's swimlane layout grows quickly across lanes: 19 arrows took about 1 s, 50 about 10 s.
+const MAX_EDGES_SWIMLANE = 20;
 const MAX_NODES = 300;
 // Venn layout time grows roughly with the fourth power of the number of distinct sets.
 const MAX_VENN_SETS = 12;
@@ -251,6 +255,8 @@ export function frameConfig(dark: boolean): MermaidConfig {
         "elk",
         "htmlLabels",
         "flowchart",
+        "architecture",
+        "venn",
         "themeCSS",
         "theme",
         "themeVariables",
@@ -266,7 +272,8 @@ async function measure(
 ): Promise<
   { nodes: number; edges: number; sets: number; areas: number; maxAreaSets: number; maxEdges: number } | undefined
 > {
-  const { db } = await mermaid.mermaidAPI.getDiagramFromText(source);
+  const diagram = await mermaid.mermaidAPI.getDiagramFromText(source);
+  const { db } = diagram;
   if ("getData" in db && typeof db.getData === "function") {
     const data: unknown = db.getData();
     const nodes = data && typeof data === "object" && "nodes" in data ? data.nodes : undefined;
@@ -293,7 +300,10 @@ async function measure(
       sets: 0,
       areas: 0,
       maxAreaSets: 0,
-      maxEdges: slowLayout ? MAX_EDGES_SLOW_LAYOUT : MAX_EDGES,
+      maxEdges: Math.min(
+        diagram.type === "swimlane" ? MAX_EDGES_SWIMLANE : MAX_EDGES,
+        slowLayout ? MAX_EDGES_SLOW_LAYOUT : MAX_EDGES,
+      ),
     };
   }
   if ("getNodes" in db && typeof db.getNodes === "function" && "getEdges" in db && typeof db.getEdges === "function") {
@@ -325,7 +335,11 @@ async function measure(
   }
   return undefined;
 }
+function countStatements(source: string): number {
+  return source.split(/[\n;]/).filter((statement) => statement.trim() !== "").length;
+}
 export async function exceedsLimits(source: string): Promise<boolean> {
+  if (countStatements(source) > MAX_STATEMENTS) return true;
   try {
     // Site config is an upper bound; apply the diagram's own config only before refusing on nodes alone.
     mermaid.mermaidAPI.reset();
