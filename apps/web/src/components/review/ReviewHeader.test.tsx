@@ -342,6 +342,8 @@ test.each([false, true])("off the phone a separator sticks to the item before it
   expect(row.classList.contains("flex-wrap")).toBe(false);
   expect([...row.classList].some((name) => name.startsWith("gap-"))).toBe(false);
   for (const name of ["min-w-0", "wrap-anywhere", "leading-[1.9]!"]) expect(row.classList.contains(name)).toBe(true);
+  expect(row.classList.contains("[clip-path:inset(-4px)]")).toBe(true);
+  expect(origin.getAttribute("dir")).toBe("auto");
   const dot = within(origin).getByRole("img", { name: "From Workshop" });
   expect(dot.classList.contains("align-middle")).toBe(true);
   expect(dot.nextSibling?.textContent?.startsWith("\u00a0")).toBe(true);
@@ -401,6 +403,7 @@ test.each([false, true])(
       metaRow,
       links,
     ]);
+    expect(originRow.classList.contains("[clip-path:inset(-4px)]")).toBe(false);
     expect(within(originRow).queryByRole("link")).toBeNull();
     expect(within(originRow).queryByText("Garden") !== null).toBe(!openingCard);
     expect(
@@ -620,7 +623,11 @@ test.each(
 test("a null project adds no metadata or separator after the machine", () => {
   mount({ metadata: { ...review, project: null } });
   const meta = screen.getByText("Workshop").parentElement;
-  expect(meta?.querySelector('[dir="auto"]')).toBeNull();
+  expect(
+    Array.from(meta?.querySelectorAll('[dir="auto"]') ?? []).filter(
+      (element) => element !== screen.getByText("Workshop"),
+    ),
+  ).toHaveLength(0);
   const count = meta?.children.length;
   cleanup();
   mount({ metadata: { ...review, project: "Orchard" } });
@@ -1070,6 +1077,8 @@ test.each(
   expect(within(nav).getByText(area).getAttribute("dir")).toBe("auto");
   expect(within(nav).getByText(area).classList.contains("wrap-anywhere")).toBe(true);
   expect(within(nav).getByText(area).classList.contains("overflow-hidden")).toBe(phone);
+  if (!phone)
+    expect(within(nav).getByText(area).closest("div")?.classList.contains("[clip-path:inset(-4px)]")).toBe(true);
 });
 
 test.each(
@@ -1090,6 +1099,7 @@ test.each(
   expect(label.getAttribute("dir")).toBe("auto");
   expect(label.classList.contains("wrap-anywhere")).toBe(true);
   expect(label.classList.contains("overflow-hidden")).toBe(phone);
+  if (!phone) expect(label.closest("div")?.classList.contains("[clip-path:inset(-4px)]")).toBe(true);
   expect(within(breadcrumb).getAllByRole("listitem")).toHaveLength(1);
   const originRow = screen.getByText("Workshop").parentElement;
   expect(originRow?.contains(label)).toBe(!phone);

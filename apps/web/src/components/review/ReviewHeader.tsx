@@ -217,8 +217,9 @@ export function ReviewHeader({
     </div>
   ) : (
     // The font shorthand includes line-height; override it to leave room for wrapped chips.
-    <div className="min-w-0 wrap-anywhere leading-[1.9]! text-fg-3 [font:var(--type-meta)]">
-      <span className="wrap-anywhere">
+    // Clip agent-text ink with a 4px margin for link chips' focus rings.
+    <div className="min-w-0 wrap-anywhere leading-[1.9]! text-fg-3 [clip-path:inset(-4px)] [font:var(--type-meta)]">
+      <span dir="auto" className="wrap-anywhere">
         <OriginBadge origin={review.origin} dot className="size-[7px] align-middle opacity-85" />
         {"\u00a0"}
         {review.origin.name}
