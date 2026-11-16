@@ -165,11 +165,13 @@ A document keeps its glossary as a list under a "Glossary" heading, one term per
 A review writeup or a document can show images, such as before and after screenshots of a UI change.
 A change the user can see needs Before and After screenshots at the same viewport.
 Capture them with a headless browser.
-Capture with synthetic data.
-Never show tokens, keys, session data or real customer records.
-If a screen cannot avoid them, skip the shot and say why under Where to look.
-Each project picks its own capture tool.
-If you cannot capture one, say why under Where to look (`whereToLook`).
+Each project picks its own capture tool: use one the project or the user already provides.
+Never add a dependency or download a browser to capture.
+Capture Before from the base commit in a separate worktree or from an existing build.
+Never stash, reset or check out over the working tree to reach it.
+Capture with synthetic data, and crop to the change.
+Never show secrets, personal data, private hostnames, URLs or paths, or real customer or client content.
+If you cannot capture a shot, or a screen cannot avoid such data, skip it and say why under Where to look (`whereToLook`).
 
 In a review writeup:
 
