@@ -1,5 +1,6 @@
 import { type PublishLink, type ReviewView, type RevisionView, reviewDownloadPath } from "@emend/contract";
 import {
+  ChevronDown,
   CircleDot,
   ExternalLink,
   FileDown,
@@ -7,6 +8,7 @@ import {
   GitBranch,
   GitCommitHorizontal,
   GitPullRequest,
+  Link2,
   MessageSquarePlus,
 } from "lucide-react";
 import { type Ref, useEffect, useState } from "react";
@@ -23,6 +25,7 @@ import { Banner } from "../ui/Banner.tsx";
 import { Button } from "../ui/Button.tsx";
 import { CopyTextMenu } from "../ui/CopyTextMenu.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { Menu } from "../ui/Menu.tsx";
 import { cn } from "../ui/utils.ts";
 import { RevisionPicker } from "./RevisionPicker.tsx";
 
@@ -157,25 +160,51 @@ export function ReviewHeader({
         </ol>
       </nav>
     ));
-  const linksList = links.length > 0 && (
+  const linksList = phone && links.length > 0 && (
     <ul
       aria-label="Links"
-      className={
-        phone
-          ? "m-0 flex min-w-0 list-none flex-wrap items-center gap-1.5 p-0 text-12 leading-[1.2]"
-          : "m-0 inline list-none p-0 text-12 leading-[1.2]"
-      }
+      className="m-0 flex min-w-0 list-none flex-wrap items-center gap-1.5 p-0 text-12 leading-[1.2]"
     >
       {links.map((link, index) => (
         <li
           // biome-ignore lint/suspicious/noArrayIndexKey: two links may share a URL; the list never reorders.
           key={`${index}:${link.url}`}
-          className={phone ? "min-w-0 max-w-full" : "my-0.5 mr-1.5 inline-block max-w-full align-middle"}
+          className="min-w-0 max-w-full"
         >
           <LinkChip link={link} />
         </li>
       ))}
     </ul>
+  );
+  // Collapse links off the phone so many links do not add rows to the context line.
+  const linksMenu = !phone && links.length > 0 && (
+    <Menu
+      label={`Links (${links.length})`}
+      align="left"
+      trigger={
+        <button
+          type="button"
+          className="inline-flex max-w-full items-center gap-1 rounded-sm border border-line-1 px-1.5 py-[3px] align-middle text-12 leading-[1.2] text-fg-2 hover:bg-hover hover:text-fg-1"
+        >
+          <Icon icon={Link2} size={12} />
+          Links
+          <span className="text-fg-3">{links.length}</span>
+          <Icon icon={ChevronDown} size={12} />
+        </button>
+      }
+      items={links.map((link) => ({
+        label: link.label,
+        icon: linkIcon[link.kind ?? "other"],
+        hint: link.host,
+        title: link.href,
+        asChild: true,
+        children: (
+          <a href={link.href} target="_blank" rel="noopener noreferrer nofollow">
+            <span className="min-w-0 truncate">{link.label}</span>
+          </a>
+        ),
+      }))}
+    />
   );
   const statusBadges = (
     <>
@@ -239,7 +268,7 @@ export function ReviewHeader({
         </>
       )}
       {statusBadges}
-      {linksList && <> {linksList}</>}
+      {linksMenu && <> {linksMenu}</>}
     </div>
   );
   return (
