@@ -24,8 +24,15 @@ import { Icon } from "../ui/Icon.tsx";
 import { Sheet } from "../ui/Sheet.tsx";
 import { Textarea } from "../ui/Textarea.tsx";
 import { useToast } from "../ui/Toast.tsx";
-import { cn } from "../ui/utils.ts";
-import { HandOverNote, HandoffWindow, type SendAgent, type SendBaseline } from "./HandOver.tsx";
+import { cn, focusRing } from "../ui/utils.ts";
+import {
+  agentStatusText,
+  HandOverNote,
+  HandoffWindow,
+  ResumeDialog,
+  type SendAgent,
+  type SendBaseline,
+} from "./HandOver.tsx";
 import { ModePicker } from "./ModePicker.tsx";
 import { ReviewActions, type ReviewLifecycle } from "./ReviewActions.tsx";
 
@@ -60,6 +67,7 @@ export function SendBar({
   const reviewSending = useSyncExternalStore(subscribeDrafts, () => isReviewSending(reviewId));
   const shortcut = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "⌘↵" : "Ctrl ↵";
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [resumeOpen, setResumeOpen] = useState(false);
   const mounted = useRef(false);
   useEffect(() => {
     mounted.current = true;
@@ -135,6 +143,12 @@ export function SendBar({
   const retired = lifecycle?.state === "settled";
   // An approved review has nothing left to hand over; a retired one only says when the agent stopped waiting.
   const showNote = !approved && (!retired || !!agent?.releasedAt);
+  const canResume = !phone && showNote && !!agent && !agent.agentWaiting;
+  // A menu item runs its handler after the menu closes, and the bar can stop offering
+  // "How to resume" while the dialog is open.
+  useEffect(() => {
+    if (resumeOpen && !canResume) setResumeOpen(false);
+  }, [resumeOpen, canResume]);
   const unavailable =
     revision === undefined ? (revisionError ? "Could not load this revision." : "Loading revision…") : undefined;
   const olderReason =
@@ -276,6 +290,18 @@ export function SendBar({
       size={phone ? "lg" : "md"}
       icon={Check}
       disabled={approveDisabled}
+      title={
+        phone
+          ? undefined
+          : [
+              approveBlocked && "Send or delete before approving",
+              retiredReason ?? unsavedReason,
+              unavailable,
+              olderReason,
+            ]
+              .filter(Boolean)
+              .join(" ") || undefined
+      }
       aria-describedby={
         [
           approveBlocked && blocked,
@@ -298,7 +324,15 @@ export function SendBar({
     </Button>
   );
   const actions = lifecycle && (
-    <ReviewActions reviewId={reviewId} lifecycle={lifecycle} unsentCount={unsentCount} phone={phone} />
+    <ReviewActions
+      reviewId={reviewId}
+      lifecycle={lifecycle}
+      unsentCount={unsentCount}
+      phone={phone}
+      howToResume={
+        !phone && agent ? { disabled: !canResume || sending, onSelect: () => setResumeOpen(true) } : undefined
+      }
+    />
   );
   const status = (
     <div
@@ -324,12 +358,32 @@ export function SendBar({
             ? `${unsentCount} unsent ${plural(unsentCount, "comment")}`
             : "No unsent comments"}
       </span>
-      <span className="text-fg-3 [font:var(--type-meta)]">
-        {revision !== undefined && `Revision ${revision}`}
-        {!phone && approveBlocked && <> · {approvalReason}</>}
-        {!phone && sendReason && <> · {reason}</>}
-        {!phone && olderReason && <> · {olderMessage}</>}
-      </span>
+      {phone ? (
+        <span className="text-fg-3 [font:var(--type-meta)]">{revision !== undefined && `Revision ${revision}`}</span>
+      ) : (
+        showNote &&
+        agent && (
+          <span className="text-fg-3 [font:var(--type-meta)]">
+            {agentStatusText(agent)}
+            {canResume && (
+              <>
+                {" · "}
+                <button
+                  type="button"
+                  disabled={sending}
+                  className={cn(
+                    "border-0 bg-transparent p-0 text-(--fg-link) underline decoration-1 underline-offset-2 [font:inherit] enabled:hover:text-(--fg-link-hover) disabled:cursor-not-allowed disabled:opacity-48",
+                    focusRing,
+                  )}
+                  onClick={() => setResumeOpen(true)}
+                >
+                  How to resume
+                </button>
+              </>
+            )}
+          </span>
+        )
+      )}
     </div>
   );
   return (
@@ -493,14 +547,27 @@ export function SendBar({
               disabled={disabled || !!sendReason}
               loading={sending}
               aria-describedby={[describedBy, unsentCount > 0 && sendCountId].filter(Boolean).join(" ") || undefined}
+              title={[unavailable, sendReason, olderReason].filter(Boolean).join(" ") || undefined}
             >
               Send
             </Button>
           </div>
+          <div hidden>
+            {approveBlocked && approvalReason}
+            {reason}
+            {olderMessage}
+          </div>
         </form>
       )}
-      {!phone && showNote && agent && (
-        <HandOverNote reviewId={reviewId} agent={agent} lifecycle={lifecycle} className="px-4 pb-2" />
+      {!phone && agent && (
+        <ResumeDialog
+          reviewId={reviewId}
+          agent={agent}
+          lifecycle={lifecycle}
+          open={resumeOpen}
+          onOpenChange={setResumeOpen}
+          returnFocus={statusRef}
+        />
       )}
       <Dialog
         open={confirmApprove}

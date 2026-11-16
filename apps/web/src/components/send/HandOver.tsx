@@ -32,6 +32,12 @@ export const HANDOFF_REFETCH_MS = 3_000;
 /** How long the window stays open after a pick-up. */
 export const HANDOFF_CLOSE_MS = 3_000;
 
+export function agentStatusText(agent: SendAgent): string {
+  if (agent.agentWaiting) return "An agent is waiting";
+  const date = agent.releasedAt ? shortDate(agent.releasedAt) : "";
+  return date ? `The agent stopped waiting on ${date}` : "No agent waiting";
+}
+
 /** The text for a review nobody waits on, or "An agent is waiting" when one does. */
 export function handOverText(agent: SendAgent, lifecycle?: { state: string; snoozed: boolean }): string {
   if (agent.agentWaiting) return "An agent is waiting. It gets this now.";
@@ -42,20 +48,54 @@ export function handOverText(agent: SendAgent, lifecycle?: { state: string; snoo
   return `The agent stopped waiting on ${date}.`;
 }
 
-/** The line in the Send bar (desktop) or the Send sheet (phone) that says what an agent gets. */
-export function HandOverNote({
+export function ResumeDialog({
   reviewId,
   agent,
   lifecycle,
-  className,
+  open,
+  onOpenChange,
+  returnFocus,
 }: {
   reviewId: string;
   agent: SendAgent;
   lifecycle?: { state: string; snoozed: boolean };
-  className?: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  returnFocus?: RefObject<HTMLElement | null>;
 }) {
   return (
-    <div className={className}>
+    <Dialog
+      title="How to resume"
+      description={handOverText(agent, lifecycle)}
+      open={open}
+      onOpenChange={onOpenChange}
+      returnFocus={returnFocus}
+      actions={
+        <Button data-autofocus onClick={() => onOpenChange(false)}>
+          Close
+        </Button>
+      }
+    >
+      {!agent.agentWaiting && (
+        <div className="mt-3">
+          <ResumeCommand reviewId={reviewId} />
+        </div>
+      )}
+    </Dialog>
+  );
+}
+
+export function HandOverNote({
+  reviewId,
+  agent,
+  lifecycle,
+}: {
+  reviewId: string;
+  agent: SendAgent;
+  lifecycle?: { state: string; snoozed: boolean };
+}) {
+  return (
+    <div>
       <p className="m-0 text-fg-3 [font:var(--type-meta)]">{handOverText(agent, lifecycle)}</p>
       {!agent.agentWaiting && <ResumeCommand reviewId={reviewId} compact />}
     </div>

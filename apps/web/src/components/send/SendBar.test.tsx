@@ -69,7 +69,7 @@ function expectSend(body: object) {
   });
 }
 
-test.each([0, 1, 2, 3])("desktop count %s, Send eligibility and visible approval reason", (unsentCount) => {
+test.each([0, 1, 2, 3])("desktop count %s keeps disabled reasons in descriptions and titles", (unsentCount) => {
   mount({ unsentCount });
   const bar = within(screen.getByRole("region", { name: "Send and approve" }));
   expect(
@@ -87,7 +87,13 @@ test.each([0, 1, 2, 3])("desktop count %s, Send eligibility and visible approval
   if (unsentCount) {
     expect(bar.getByText(String(unsentCount)).getAttribute("aria-hidden")).toBe("true");
     expect(description(button("Approve revision 3"))).toBe("Send or delete before approving");
-  } else expect(description(button("Send"))).toBe("Write a comment or an instruction first.");
+    expect(button("Approve revision 3").title).toBe("Send or delete before approving");
+    expect(button("Send").hasAttribute("title")).toBe(false);
+  } else {
+    expect(description(button("Send"))).toBe("Write a comment or an instruction first.");
+    expect(button("Send").title).toBe("Write a comment or an instruction first.");
+    expect(button("Approve revision 3").hasAttribute("title")).toBe(false);
+  }
   if (unsentCount) {
     fireEvent.click(button("Approve revision 3"));
     expect(fetchMock).not.toHaveBeenCalled();
@@ -440,11 +446,13 @@ test("a newer revision arriving while the phone sheet is open blocks its footer 
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
-test("desktop reasons share the revision status line and never add an idle row", () => {
+test("desktop reasons stay hidden but describe the buttons and appear in their titles without adding a row", () => {
   const { rerender } = mount();
   const bar = screen.getByRole("region", { name: "Send and approve" });
   const reason = screen.getByText("Write a comment or an instruction first.");
-  expect(reason.parentElement?.textContent).toBe("Revision 3 · Write a comment or an instruction first.");
+  expect(reason.closest("[hidden]")).toBeTruthy();
+  expect(screen.queryByText("Revision 3")).toBeNull();
+  expect(screen.getByText("No unsent comments").parentElement?.textContent).toBe("No unsent comments");
   expect(bar.children).toHaveLength(1);
   rerender(<SendBar reviewId={reviewId} revision={1} newestRevision={2} unsentCount={1} />);
   fireEvent.change(input(), { target: { value: "x".repeat(4100) } });
@@ -453,12 +461,18 @@ test("desktop reasons share the revision status line and never add an idle row",
   const older = screen.getByText("Revision 2 is newer. Switch to it to send or approve.");
   expect(approval.parentElement).toBe(tooLong.parentElement);
   expect(older.parentElement).toBe(tooLong.parentElement);
-  expect(older.parentElement?.textContent).toBe(
-    "Revision 1 · Send or delete before approving · Shorten the instructions to 4000 characters. · Revision 2 is newer. Switch to it to send or approve.",
-  );
+  for (const reason of [approval, tooLong, older]) expect(reason.closest("[hidden]")).toBeTruthy();
+  expect(screen.queryByText("Revision 1")).toBeNull();
+  const status = screen.getByText("1 unsent comment").parentElement;
+  for (const reason of [approval, tooLong, older]) expect(status?.contains(reason)).toBe(false);
+  expect(status?.children).toHaveLength(1);
   expect(new Set([approval.id, tooLong.id, older.id]).size).toBe(3);
+  for (const reason of [approval, tooLong, older])
+    expect([...bar.querySelectorAll("[id]")].filter((node) => node.id === reason.id)).toHaveLength(1);
   expect(description(button("Send"))).toBe(`${tooLong.textContent} ${older.textContent} 1 to send`);
   expect(description(button("Approve revision 1"))).toBe(`${approval.textContent} ${older.textContent}`);
+  expect(button("Send").title).toBe(`${tooLong.textContent} ${older.textContent}`);
+  expect(button("Approve revision 1").title).toBe(`${approval.textContent} ${older.textContent}`);
   expect(bar.children).toHaveLength(1);
 });
 
