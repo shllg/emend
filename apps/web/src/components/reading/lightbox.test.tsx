@@ -354,50 +354,58 @@ test.each([false, true])(
   },
 );
 
-test.each(["skim topic", "glossary"])("commenting on a gallery screenshot reveals its folded %s", async (kind) => {
-  const folded: ReaderGroup = {
-    key: "folded",
-    heading: "Garden details",
-    blocks: [later],
-    ...(kind === "glossary"
-      ? { presentation: "glossary" as const }
-      : {
-          topic: {
-            slug: "garden",
-            title: "Garden details",
-            summary: "A synthetic garden",
-            importance: 1,
-            door: "two-way" as const,
-            attention: "skim" as const,
-          },
-        }),
-  };
-  const { container } = mount([{ key: "overview", blocks: [row, paragraph] }, folded]);
-  const section = container.querySelector<HTMLElement>('[data-reading-section="folded"]');
-  if (!section) throw new Error("Missing folded group");
-  const isFolded = () =>
-    kind === "glossary"
-      ? section.querySelector("details")?.open === false
-      : section.querySelector('[hidden="until-found"]') !== null;
-  expect(isFolded()).toBe(true);
-  open();
-  fireEvent.click(button("Next screenshot"));
-  expect(within(dialog()).getByRole("heading", { name: "After" })).toBeTruthy();
-  fireEvent.keyDown(dialog(), { key: "ArrowRight" });
-  expect(within(dialog()).getByText("3 of 3")).toBeTruthy();
-  expect(within(dialog()).getByRole("heading", { name: "garden.png" })).toBeTruthy();
-  expect(isFolded()).toBe(true);
-  fireEvent.click(button("Comment on screenshot"));
-  const input = screen.getByRole("textbox", { name: "Comment" });
-  expect(section.contains(input)).toBe(true);
-  expect(isFolded()).toBe(false);
-  expect(input.closest("[hidden], details:not([open])")).toBeNull();
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  });
-  expect(document.activeElement).toBe(input);
-  expect(screen.queryByRole("dialog")).toBeNull();
-});
+test.each(["skim topic", "glossary", "Details"])(
+  "commenting on a gallery screenshot reveals its folded %s",
+  async (kind) => {
+    const folded: ReaderGroup = {
+      key: "folded",
+      heading: "Garden details",
+      blocks: [later],
+      ...(kind === "glossary"
+        ? { presentation: "glossary" as const }
+        : kind === "Details"
+          ? {
+              blocks: [],
+              subsections: [{ key: "t-garden-body", kind: "body" as const, heading: "Details", blocks: [later] }],
+            }
+          : {
+              topic: {
+                slug: "garden",
+                title: "Garden details",
+                summary: "A synthetic garden",
+                importance: 1,
+                door: "two-way" as const,
+                attention: "skim" as const,
+              },
+            }),
+    };
+    const { container } = mount([{ key: "overview", blocks: [row, paragraph] }, folded]);
+    const section = container.querySelector<HTMLElement>('[data-reading-section="folded"]');
+    if (!section) throw new Error("Missing folded group");
+    const isFolded = () =>
+      kind !== "skim topic"
+        ? section.querySelector("details")?.open === false
+        : section.querySelector('[hidden="until-found"]') !== null;
+    expect(isFolded()).toBe(true);
+    open();
+    fireEvent.click(button("Next screenshot"));
+    expect(within(dialog()).getByRole("heading", { name: "After" })).toBeTruthy();
+    fireEvent.keyDown(dialog(), { key: "ArrowRight" });
+    expect(within(dialog()).getByText("3 of 3")).toBeTruthy();
+    expect(within(dialog()).getByRole("heading", { name: "garden.png" })).toBeTruthy();
+    expect(isFolded()).toBe(true);
+    fireEvent.click(button("Comment on screenshot"));
+    const input = screen.getByRole("textbox", { name: "Comment" });
+    expect(section.contains(input)).toBe(true);
+    expect(isFolded()).toBe(false);
+    expect(input.closest("[hidden], details:not([open])")).toBeNull();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(document.activeElement).toBe(input);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  },
+);
 
 test.each([
   ["revision", reviewId, 2],
@@ -1093,4 +1101,30 @@ test.each(["Close", "Escape"])("closing a diagram lightbox with %s returns focus
   else fireEvent.keyDown(dialog(), { key: "Escape" });
   expect(screen.queryByRole("dialog")).toBeNull();
   return waitFor(() => expect(document.activeElement).toBe(enlarge));
+});
+
+test("a pair keeps both lightbox images and its comment anchor after changing modes", () => {
+  const pair = {
+    ...row,
+    html: `<p class="emend-media-row emend-media-pair">${imageHtml("a", "Before")} ${imageHtml("b", "After")}\n<span class="emend-media-effect">More room for seeds.</span></p>`,
+  };
+  const { container } = mount([{ key: "overview", blocks: [pair] }]);
+  const control = screen.getByRole("group", { name: "Compare screenshots" });
+  const before = screen.getByRole("button", { name: "Open screenshot: Before" });
+  fireEvent.click(within(control).getByRole("button", { name: "Before" }));
+  expect(container.querySelector(".em-prose")?.getAttribute("data-pair-mode")).toBe("before");
+  expect(screen.getByRole("button", { name: "Open screenshot: Before" })).toBe(before);
+  open();
+  expect(within(dialog()).getByText("1 of 2")).toBeTruthy();
+  fireEvent.click(button("Next screenshot"));
+  expect(within(dialog()).getByRole("heading", { name: "After" })).toBeTruthy();
+  expect(within(dialog()).getByText("2 of 2")).toBeTruthy();
+  fireEvent.click(button("Comment on screenshot"));
+  expect(
+    screen
+      .getByRole("textbox", { name: "Comment" })
+      .closest(".em-reading-block")
+      ?.querySelector("[data-block-id]")
+      ?.getAttribute("data-block-id"),
+  ).toBe(row.id);
 });

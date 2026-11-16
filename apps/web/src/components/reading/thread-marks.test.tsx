@@ -469,7 +469,7 @@ test("clicking a different chip switches the dialog and Escape dismisses the rep
   expect(document.activeElement).toBe(chips[1]);
 });
 
-test("stepping reveals a folded topic and a closed glossary before opening their passages", () => {
+test("stepping reveals folded topic Details and a closed glossary before opening their passages", () => {
   const folded = { ...block, id: "t-garden-body-12345678", section: "t-garden-body" };
   const glossary = { ...block, id: "glossary-12345678", section: "glossary" };
   const placed = (id: string, value: RenderedBlock): ThreadView => ({
@@ -486,7 +486,8 @@ test("stepping reveals a folded topic and a closed glossary before opening their
         key: "garden",
         heading: "Garden",
         topic: { slug: "garden", title: "Garden", importance: 1, summary: "Synthetic plants", attention: "skim" },
-        blocks: [folded],
+        blocks: [],
+        subsections: [{ key: "t-garden-body", kind: "body", heading: "Details", blocks: [folded] }],
       },
       { key: "glossary", presentation: "glossary", blocks: [glossary] },
     ],
@@ -496,8 +497,9 @@ test("stepping reveals a folded topic and a closed glossary before opening their
   fireEvent.click(within(dialog()).getByRole("button", { name: "Next" }));
   expect(screen.getByRole("button", { name: "Garden" }).getAttribute("aria-expanded")).toBe("true");
   expect(within(dialog()).getByRole("article").id).toBe("thread-folded");
+  expect(document.querySelector<HTMLDetailsElement>("details.em-writeup-details")?.open).toBe(true);
   fireEvent.click(within(dialog()).getByRole("button", { name: "Next" }));
-  expect(document.querySelector("details")?.open).toBe(true);
+  expect(document.querySelector<HTMLDetailsElement>("details.em-writeup-glossary")?.open).toBe(true);
   expect(within(dialog()).getByRole("article").id).toBe("thread-glossary");
   expect(within(dialog()).getByText("3 of 3")).toBeTruthy();
 });
@@ -836,3 +838,26 @@ test.each([false, true])(
     expect(applyAnchor(scroller, { id: "h-user-content-document", fraction: 0 }, doc)).toBe(400);
   },
 );
+
+test("Details thread chips follow the native fold and thread jumps reveal it", async () => {
+  const view = mount(
+    [thread],
+    [
+      {
+        key: "garden",
+        blocks: [],
+        subsections: [{ key: "t-garden-body", kind: "body", heading: "Details", blocks: [block] }],
+      },
+    ],
+  );
+  const summary = screen.getByText("Details", { selector: "summary" });
+  expect(summary.closest("details")?.open).toBe(false);
+  expect(screen.queryByRole("button", { name: "1 comment" })).toBeNull();
+  fireEvent.click(summary);
+  await screen.findByRole("button", { name: "1 comment" });
+  fireEvent.click(summary);
+  await waitFor(() => expect(screen.queryByRole("button", { name: "1 comment" })).toBeNull());
+  view.update([thread], thread.id);
+  expect(summary.closest("details")?.open).toBe(true);
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${thread.id}`);
+});

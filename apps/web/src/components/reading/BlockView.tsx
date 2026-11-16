@@ -1,5 +1,6 @@
 import type { RenderedBlock } from "@emend/contract";
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { Button } from "../ui/Button.tsx";
 import { MermaidBlock } from "./MermaidBlock.tsx";
 
 /** A comment's server-rendered, sanitized Markdown. Like BlockView, the only other place that sets HTML. */
@@ -18,9 +19,12 @@ const MAX_SIDE = 65535;
  */
 function ProseBlock({ block, attributes }: { block: RenderedBlock; attributes: Record<string, string> }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [pair, setPair] = useState(false);
+  const [mode, setMode] = useState<"before" | "after" | "side">("side");
   // CSS cannot read attribute numbers in every browser yet, so the app copies them into custom properties.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the images change only when the block's HTML does.
   useLayoutEffect(() => {
+    setPair(!!ref.current?.querySelector(":scope > p.emend-media-pair"));
     for (const image of ref.current?.querySelectorAll("span.emend-media > img") ?? []) {
       const wrapper = image.parentElement;
       if (!wrapper) continue;
@@ -42,8 +46,45 @@ function ProseBlock({ block, attributes }: { block: RenderedBlock; attributes: R
     }
   }, [block.html]);
   return (
-    // biome-ignore lint/security/noDangerouslySetInnerHtml: RenderedBlock.html is sanitized by the server; this is the sole rendering boundary.
-    <div {...attributes} ref={ref} className="em-prose" dangerouslySetInnerHTML={{ __html: block.html }} />
+    <>
+      {pair && (
+        // biome-ignore lint/a11y/useSemanticElements: screenshot view buttons form an ARIA group, not a form fieldset.
+        <div
+          key="modes"
+          className="em-pair-modes mb-2 inline-flex select-none gap-0.5 rounded-md border border-line-1 bg-sunken p-0.5"
+          role="group"
+          aria-label="Compare screenshots"
+        >
+          {(
+            [
+              ["before", "Before"],
+              ["after", "After"],
+              ["side", "Side by side"],
+            ] as const
+          ).map(([value, label]) => (
+            <Button
+              key={value}
+              variant="ghost"
+              size="sm"
+              className="aria-pressed:bg-raised aria-pressed:text-fg-1 aria-pressed:shadow-1"
+              aria-pressed={mode === value}
+              onClick={() => setMode(value)}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+      )}
+      <div
+        key="prose"
+        {...attributes}
+        ref={ref}
+        className="em-prose"
+        data-pair-mode={pair ? mode : undefined}
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: RenderedBlock.html is sanitized by the server; this is the sole rendering boundary.
+        dangerouslySetInnerHTML={{ __html: block.html }}
+      />
+    </>
   );
 }
 

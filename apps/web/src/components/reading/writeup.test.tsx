@@ -18,6 +18,7 @@ import * as writeupFacts from "../../lib/writeup-facts.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
 import { BlockView } from "./BlockView.tsx";
 import { DocView } from "./DocView.tsx";
+import { ReadingFoldContext } from "./ReadingGroup.tsx";
 import { Writeup } from "./Writeup.tsx";
 
 const reviewId = "11111111-1111-4111-8111-111111111111";
@@ -399,7 +400,8 @@ test.each([
     within(seed)
       .getAllByRole("heading", { level: 3 })
       .map((h) => h.textContent),
-  ).toEqual(["Why", "Example", "Details"]);
+  ).toEqual(["Why", "Example"]);
+  expect(within(seed).getByText("Details").tagName).toBe("SUMMARY");
   expect(within(seed).getByText(/The seed bed/)).toBeTruthy();
   const unknown = screen.getByRole("region", { name: "Unknown topic — Why" });
   expect(within(unknown).queryByText(/Topic \d/)).toBeNull();
@@ -673,7 +675,7 @@ test.each([
   expect(container.textContent).not.toMatch(/One-way|Two-way/);
 });
 
-test("front matter cards, callouts and hidden Details keep the original comment anchors", async () => {
+test("front matter cards, lead Why, Example panels and folded Details keep the original comment anchors", async () => {
   const writeup = RenderedWriteup.parse(
     await renderWriteup(
       {
@@ -688,7 +690,7 @@ test("front matter cards, callouts and hidden Details keep the original comment 
       [topic],
     ),
   );
-  const { container } = mount(<Writeup {...props} topics={[topic]} writeup={writeup} />);
+  const { container } = mount(<Writeup {...props} topics={[topic]} files={[file]} writeup={writeup} />);
   expect(screen.getByRole("heading", { name: "TL;DR" }).closest(".em-writeup-card")).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Decisions & drift" }).closest(".em-writeup-decisions")).toBeTruthy();
   expect(container.querySelectorAll("[data-drift]")).toHaveLength(2);
@@ -698,8 +700,19 @@ test("front matter cards, callouts and hidden Details keep the original comment 
   const why = screen.getByRole("heading", { name: "Why", level: 3 });
   const example = screen.getByRole("heading", { name: "Example", level: 3 });
   expect(why.closest(".em-writeup-why")?.querySelector("[data-block-id]")?.textContent).toBe("A reason.");
+  expect(why.className).toBe("sr-only");
+  expect(why.closest(".em-writeup-callout")).toBeNull();
   expect(example.closest(".em-writeup-example")?.querySelector("table")).toBeTruthy();
-  expect(screen.getByRole("heading", { name: "Details", level: 3 }).className).toBe("sr-only");
+  expect(example.className).toBe("em-writeup-kicker");
+  const summary = screen.getByText("Details");
+  const details = summary.closest("details");
+  expect(details?.className).toBe("em-writeup-details");
+  expect(details?.open).toBe(false);
+  fireEvent.click(summary);
+  expect(details?.open).toBe(true);
+  expect(details?.querySelector("[data-block-id]")?.textContent).toBe("A detail.");
+  expect(details?.lastElementChild?.className).toBe("em-topic-file-chips");
+  expect(within(details as HTMLElement).getByRole("list", { name: "Files" })).toBeTruthy();
   const ids = writeup.sections.flatMap((section) => section.blocks.map((block) => block.id));
   expect(
     [...container.querySelectorAll("[data-block-id]")].map((element) => element.getAttribute("data-block-id")),
@@ -1331,6 +1344,7 @@ test("Code controls follow focus, preserve diff order and disambiguate file name
   expect(code.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(code);
   expect(onOpen).toHaveBeenLastCalledWith({ kind: "topic", slug: topic.slug }, code);
+  fireEvent.click(screen.getByText("Details"));
   const chips = within(screen.getByRole("list", { name: "Files" })).getAllByRole("button");
   expect(chips.map((chip) => chip.textContent)).toEqual(["test/seed.txt", "src/seed.txt", "water.txt"]);
   expect(chips[2]?.title).toBe("src/water.txt");
@@ -1347,6 +1361,7 @@ test("Code controls follow focus, preserve diff order and disambiguate file name
 
 test("without Code controls the topic action and file chips remain diff links", () => {
   mount(<Writeup {...props} topics={[topic]} files={[file]} writeup={{ sections: [section(topic.slug, "body")] }} />);
+  fireEvent.click(screen.getByText("Details"));
   expect(screen.getByRole("link", { name: `Files in diff: ${topic.title}` }).getAttribute("href")).toContain(
     "#diff-topic-seed",
   );
@@ -1371,4 +1386,156 @@ test("Code titles and file chips keep hostile text inert", () => {
   expect(code).toHaveLength(2);
   expect(code[1]?.title).toBe(hostile);
   expect(container.querySelector("script, img, [onerror], [onload], a[href^='javascript:']")).toBeNull();
+});
+
+test.each([true, false])("files without body get their own Details fold only when needed (files=%s)", (hasFiles) => {
+  const { container } = mount(
+    <Writeup
+      {...props}
+      topics={[topic]}
+      files={hasFiles ? [file] : []}
+      writeup={{ sections: [section(topic.slug, "why")] }}
+    />,
+  );
+  const details = container.querySelector<HTMLDetailsElement>("details.em-writeup-details");
+  if (!hasFiles) {
+    expect(details).toBeNull();
+    return;
+  }
+  expect(details?.open).toBe(false);
+  expect(details?.querySelector("[data-block-id]")).toBeNull();
+  expect(details?.children).toHaveLength(2);
+  expect(details?.lastElementChild?.className).toBe("em-topic-file-chips");
+});
+
+test("a body-only topic and its Details remember independent fold choices with files", async () => {
+  const choices = new Map<string, boolean>();
+  // Match review.tsx: one stable context value backed by the reading entry's fold map.
+  const readingFolds = { reviewId, revision: props.revision, choices };
+  const body = { ...block, id: "t-seed-body-12345678", section: "t-seed-body" };
+  const ui = (
+    <ReadingFoldContext value={readingFolds}>
+      <Writeup
+        {...props}
+        topics={[topic]}
+        files={[file]}
+        writeup={{ sections: [{ ...section(topic.slug, "body"), blocks: [body] }] }}
+      />
+    </ReadingFoldContext>
+  );
+  const topicToggle = () => screen.getByRole("button", { name: "Topic 1: Plant a seed" });
+  const summary = () => screen.getByText("Details", { selector: "summary" });
+  const topicKey = JSON.stringify([reviewId, props.revision, body.section]);
+  const detailsKey = JSON.stringify([reviewId, props.revision, body.section, "details"]);
+  const first = mount(ui);
+  expect(topicToggle().getAttribute("aria-expanded")).toBe("true");
+  expect(summary().closest("details")?.open).toBe(false);
+  fireEvent.click(topicToggle());
+  expect(topicToggle().getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(topicToggle());
+  expect(topicToggle().getAttribute("aria-expanded")).toBe("true");
+  expect(summary().closest("details")?.open).toBe(false);
+  fireEvent.click(summary());
+  await waitFor(() => expect(choices.get(detailsKey)).toBe(true));
+  expect(choices.get(topicKey)).toBe(true);
+  const files = screen.getByRole("list", { name: "Files" });
+  expect(files.closest("details")).toBe(summary().closest("details"));
+  expect(files.previousElementSibling?.querySelector("[data-block-id]")?.getAttribute("data-block-id")).toBe(body.id);
+
+  fireEvent.click(topicToggle());
+  expect(choices.get(topicKey)).toBe(false);
+  expect(choices.get(detailsKey)).toBe(true);
+  first.unmount();
+  const second = mount(ui);
+  expect(topicToggle().getAttribute("aria-expanded")).toBe("false");
+  expect(summary().closest("details")?.open).toBe(true);
+  fireEvent.click(topicToggle());
+  expect(summary().closest("details")?.open).toBe(true);
+  fireEvent.click(summary());
+  await waitFor(() => expect(choices.get(detailsKey)).toBe(false));
+  expect(choices.get(topicKey)).toBe(true);
+  second.unmount();
+  mount(ui);
+  expect(topicToggle().getAttribute("aria-expanded")).toBe("true");
+  expect(summary().closest("details")?.open).toBe(false);
+});
+
+test("Details remembers summary clicks, browser expansion and nested toggle isolation per revision", async () => {
+  const choices = new Map<string, boolean>();
+  const detailsKey = JSON.stringify([reviewId, props.revision, "t-seed-body", "details"]);
+  const ui = (revision = props.revision) => (
+    <ReadingFoldContext.Provider value={{ reviewId, revision, choices }}>
+      <Writeup
+        {...props}
+        revision={revision}
+        topics={[topic]}
+        writeup={{ sections: [{ ...section(topic.slug, "body"), blocks: [block] }] }}
+      />
+    </ReadingFoldContext.Provider>
+  );
+  const first = mount(ui());
+  const details = screen.getByText("Details").closest("details");
+  if (!details) throw new Error("Missing Details");
+  expect(details.open).toBe(false);
+  fireEvent.click(screen.getByText("Details"));
+  await waitFor(() => expect(choices.get(detailsKey)).toBe(true));
+  first.unmount();
+  const second = mount(ui());
+  const remembered = screen.getByText("Details").closest("details");
+  if (!remembered) throw new Error("Missing remembered Details");
+  expect(remembered.open).toBe(true);
+  fireEvent.click(screen.getByText("Details"));
+  await waitFor(() => expect(choices.get(detailsKey)).toBe(false));
+  const target = document.getElementById(`block-${block.id}`);
+  if (!target) throw new Error("Missing detail block");
+  fireEvent(target, new Event("toggle", { bubbles: true }));
+  expect(remembered.open).toBe(false);
+  act(() => {
+    remembered.open = true;
+  });
+  await waitFor(() => expect(choices.get(detailsKey)).toBe(true));
+  second.unmount();
+  mount(ui(props.revision + 1));
+  expect(screen.getByText("Details").closest("details")?.open).toBe(false);
+});
+
+test("pair controls preserve the prose element and switch only the trusted pair", () => {
+  const hash = "a".repeat(64);
+  const images = `<span class="emend-media"><img src="/api/v1/media/${hash}" alt="Before"></span> <span class="emend-media"><img src="/api/v1/media/${hash}" alt="After"></span>`;
+  const legacy = { ...block, html: `<p class="emend-media-row">${images}</p>` };
+  const pair = {
+    ...block,
+    html: `<p class="emend-media-row emend-media-pair">${images}\n<span class="emend-media-effect">More room for seeds.</span></p>`,
+  };
+  const { container, rerender } = render(<BlockView block={legacy} />);
+  const prose = container.querySelector(".em-prose");
+  expect(container.querySelectorAll("img")).toHaveLength(2);
+  expect(screen.queryByRole("group", { name: "Compare screenshots" })).toBeNull();
+  expect(prose?.hasAttribute("data-pair-mode")).toBe(false);
+  rerender(<BlockView block={pair} />);
+  const control = screen.getByRole("group", { name: "Compare screenshots" });
+  expect(control.classList.contains("em-pair-modes")).toBe(true);
+  expect(control.classList.contains("select-none")).toBe(true);
+  expect(control.nextElementSibling).toBe(prose);
+  expect(prose?.getAttribute("data-pair-mode")).toBe("side");
+  expect(within(control).getByRole("button", { name: "Side by side" }).getAttribute("aria-pressed")).toBe("true");
+  const image = prose?.querySelector("img");
+  for (const [mode, label] of [
+    ["before", "Before"],
+    ["after", "After"],
+    ["side", "Side by side"],
+  ]) {
+    fireEvent.click(within(control).getByRole("button", { name: label }));
+    expect(prose?.getAttribute("data-pair-mode")).toBe(mode);
+    expect(within(control).getAllByRole("button", { pressed: true })).toEqual([
+      within(control).getByRole("button", { name: label }),
+    ]);
+    expect(prose?.querySelector("img")).toBe(image);
+    expect(prose?.textContent).toContain("More room for seeds.");
+    expect(container.querySelectorAll("[data-block-id]")).toHaveLength(1);
+  }
+  rerender(<BlockView block={legacy} />);
+  expect(container.querySelector(".em-prose")).toBe(prose);
+  expect(screen.queryByRole("group", { name: "Compare screenshots" })).toBeNull();
+  expect(container.querySelectorAll("img")).toHaveLength(2);
 });

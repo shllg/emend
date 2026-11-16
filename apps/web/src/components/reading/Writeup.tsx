@@ -221,6 +221,36 @@ export function Writeup({
                 <span aria-hidden="true">→</span>
               </a>
             )),
+          files: topicFiles.length > 0 && (
+            <ul aria-label="Files" className="em-topic-file-chips">
+              {topicFiles.map((file) => {
+                const name = file.path.split("/").at(-1) ?? file.path;
+                const label = (names.get(name) ?? 0) > 1 ? file.path : name;
+                const focus: CodeFocus = { kind: "file", id: file.id };
+                return (
+                  <li key={file.id}>
+                    {code ? (
+                      <button
+                        type="button"
+                        title={file.path}
+                        dir="auto"
+                        aria-label={`Code: ${file.path}`}
+                        aria-expanded={sameCodeFocus(code.current, focus)}
+                        data-code-target={`file:${file.id}`}
+                        onClick={(event) => code.onOpen(focus, event.currentTarget)}
+                      >
+                        {label}
+                      </button>
+                    ) : (
+                      <a href={link(`diff-file-${file.id}`, true)} title={file.path} dir="auto">
+                        {label}
+                      </a>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          ),
           meta: (
             <>
               <p
@@ -237,36 +267,6 @@ export function Writeup({
                   Blast radius: <strong>{topic.blastRadius.scope}</strong> — {topic.blastRadius.note}
                 </p>
               )}
-              {topicFiles.length > 0 && (
-                <ul aria-label="Files" className="em-topic-file-chips">
-                  {topicFiles.map((file) => {
-                    const name = file.path.split("/").at(-1) ?? file.path;
-                    const label = (names.get(name) ?? 0) > 1 ? file.path : name;
-                    const focus: CodeFocus = { kind: "file", id: file.id };
-                    return (
-                      <li key={file.id}>
-                        {code ? (
-                          <button
-                            type="button"
-                            title={file.path}
-                            dir="auto"
-                            aria-label={`Code: ${file.path}`}
-                            aria-expanded={sameCodeFocus(code.current, focus)}
-                            data-code-target={`file:${file.id}`}
-                            onClick={(event) => code.onOpen(focus, event.currentTarget)}
-                          >
-                            {label}
-                          </button>
-                        ) : (
-                          <a href={link(`diff-file-${file.id}`, true)} title={file.path} dir="auto">
-                            {label}
-                          </a>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
             </>
           ),
         };
@@ -276,6 +276,11 @@ export function Writeup({
       const kind = suffix === "why" || suffix === "example" ? suffix : "body";
       const heading = kind === "why" ? "Why" : kind === "example" ? "Example" : "Details";
       group.subsections?.push({ key: section.key, heading, kind, blocks: section.blocks });
+    }
+    for (const group of groups) {
+      if (group.topic && group.files && !group.subsections?.some((section) => section.kind === "body")) {
+        group.subsections?.push({ key: `t-${group.topic.slug}-body`, heading: "Details", kind: "body", blocks: [] });
+      }
     }
     if (ranked.length) {
       const written = new Set(groups.flatMap((group) => (group.id ? [group.id] : [])));

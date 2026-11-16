@@ -62,6 +62,31 @@
   .em-prose p {
     margin: 0 0 12px;
   }
+  .em-prose p.emend-example-rows {
+    display: grid;
+    grid-template-columns: minmax(4.5em, max-content) minmax(0, 1fr);
+    column-gap: 0.75rem;
+    row-gap: 0.25rem;
+  }
+  .em-prose .emend-example-row {
+    display: contents;
+  }
+  .em-prose .emend-example-label {
+    font-weight: 600;
+    color: var(--fg-reading-strong);
+  }
+  .em-prose .emend-example-value {
+    grid-column: 2;
+    min-width: 0;
+  }
+  .em-prose .emend-example-line {
+    grid-column: 1 / -1;
+  }
+  /* A hard break followed by a newline creates an empty line, which needs no grid row. */
+  .em-prose .emend-example-line:empty,
+  .em-prose p.emend-example-rows > br {
+    display: none;
+  }
   .em-prose ul,
   .em-prose ol {
     margin: 0 0 12px;
@@ -245,6 +270,18 @@
   .em-prose p.emend-media-row > .emend-media {
     flex: 1 1 min(var(--emend-media-fit), 18rem);
     max-width: min(100%, max(var(--emend-media-fit), 10rem));
+  }
+  .em-prose[data-pair-mode="before"] p.emend-media-pair > .emend-media + .emend-media,
+  .em-prose[data-pair-mode="after"] p.emend-media-pair > .emend-media:first-child {
+    display: none;
+  }
+  .em-prose .emend-media-effect {
+    flex: 1 0 100%;
+    font: var(--type-prose);
+    color: var(--fg-reading);
+  }
+  .em-prose p.emend-media-pair > br {
+    display: none;
   }
   .em-prose > :first-child {
     margin-top: 0;

@@ -1,0 +1,53 @@
+import { type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { ReadingFoldContext } from "./ReadingGroup.tsx";
+
+export function WriteupDetails({
+  reviewId,
+  revision,
+  sectionKey,
+  children,
+}: {
+  reviewId: string;
+  revision: number;
+  sectionKey: string;
+  children: ReactNode;
+}) {
+  const root = useRef<HTMLDetailsElement>(null);
+  const folds = useContext(ReadingFoldContext);
+  const foldKey = JSON.stringify([reviewId, revision, sectionKey, "details"]);
+  const [choice, setChoice] = useState({ open: false });
+  const open = folds ? (folds.choices.get(foldKey) ?? false) : choice.open;
+  const rememberOpen = useCallback(
+    (next: boolean) => {
+      folds?.choices.set(foldKey, next);
+      setChoice({ open: next });
+    },
+    [folds, foldKey],
+  );
+  useEffect(() => {
+    const details = root.current;
+    const reveal = () => {
+      if (details) details.open = true;
+      rememberOpen(true);
+    };
+    details?.addEventListener("emend:reveal-reading", reveal);
+    details?.addEventListener("beforematch", reveal);
+    return () => {
+      details?.removeEventListener("emend:reveal-reading", reveal);
+      details?.removeEventListener("beforematch", reveal);
+    };
+  }, [rememberOpen]);
+  return (
+    <details
+      ref={root}
+      className="em-writeup-details"
+      open={open}
+      onToggle={(event) => {
+        if (event.target === event.currentTarget) rememberOpen(event.currentTarget.open);
+      }}
+    >
+      <summary>Details</summary>
+      {children}
+    </details>
+  );
+}
