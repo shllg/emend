@@ -168,7 +168,7 @@ function AppFrameContent({
         {
           "--reader-prose-size": `${preferences.proseSize}px`,
           "--reader-measure": readingMeasure[preferences.readingWidth],
-          "--reader-code-size": `${preferences.codeSize}px`,
+          "--reader-code-size": `${preferences.codePx}px`,
         } as CSSProperties
       }
     >

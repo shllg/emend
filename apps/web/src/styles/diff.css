@@ -99,6 +99,10 @@
   .em-file[data-collapsed] {
     border-radius: var(--radius-md);
   }
+  .em-path {
+    font: var(--type-path);
+    font-feature-settings: var(--mono-features);
+  }
   .em-file-path {
     overflow-wrap: anywhere;
   }

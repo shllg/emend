@@ -3412,7 +3412,7 @@ test("phone menu on the Diff tab still offers Long lines", async () => {
 
 test.each([1280, 900, 390])("text menu changes validated app variables at %s px", async (size) => {
   width = size;
-  localStorage.setItem("emend.layout.v1", JSON.stringify({ proseSize: "18px; color: red", codeSize: 100 }));
+  localStorage.setItem("emend.layout.v1", JSON.stringify({ proseSize: "18px; color: red", codePx: 100 }));
   const { container } = mount(`/r/${id}`);
   await screen.findByText("Overview");
   const root = container.querySelector<HTMLElement>(".em-app");

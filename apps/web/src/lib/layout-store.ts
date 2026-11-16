@@ -3,7 +3,6 @@ import { useSyncExternalStore } from "react";
 
 export const layoutKey = "emend.layout.v1";
 export const tabsDefaultKey = "emend.layout.tabs-default";
-export const codeSizeShiftKey = "emend.layout.code-size-shift";
 const paneChoice = z.enum(["split", "tabs"]);
 export const layoutSchema = z.object({
   inboxWidth: z.number().min(220).max(520).catch(280),
@@ -23,22 +22,32 @@ export const layoutSchema = z.object({
     .catch({ phone: false, tablet: true, desktop: true }),
   inboxCollapsed: z.boolean().catch(false),
   proseSize: z.union([z.literal(15), z.literal(16), z.literal(17), z.literal(18)]).catch(16),
-  // D.4 inherits --type-code, currently 13px.
-  codeSize: z.union([z.literal(12), z.literal(13), z.literal(14), z.literal(15)]).catch(13),
+  // Code in diffs inherits --type-code, currently 13px.
+  codePx: z.union([z.literal(12), z.literal(13), z.literal(14), z.literal(15)]).catch(13),
 });
 export type LayoutPreferences = z.infer<typeof layoutSchema>;
 export type FileOrder = LayoutPreferences["fileOrder"];
 export type ReadingWidth = LayoutPreferences["readingWidth"];
 export const readingMeasure = { comfortable: "1024px", wide: "1248px", narrow: "68ch" } as const;
-type LayoutPatch = Partial<Omit<LayoutPreferences, "proseSize" | "codeSize">> & {
+type LayoutPatch = Partial<Omit<LayoutPreferences, "proseSize" | "codePx">> & {
   proseSize?: number;
-  codeSize?: number;
+  codePx?: number;
 };
 export const defaultLayout = layoutSchema.parse({});
 
 function parse(raw: string | null): LayoutPreferences {
   try {
     const value = JSON.parse(raw ?? "{}");
+    if (
+      value !== null &&
+      typeof value === "object" &&
+      Object.getPrototypeOf(value) === Object.prototype &&
+      ![12, 13, 14, 15].includes(value.codePx) &&
+      [11, 12, 13, 14].includes(value.codeSize)
+    ) {
+      // Legacy sizes use Martian Mono units; JetBrains Mono needs 1px more for the same visual size.
+      value.codePx = value.codeSize + 1;
+    }
     return layoutSchema.parse(value);
   } catch {
     return layoutSchema.parse({});
@@ -55,7 +64,6 @@ function read(key: string): string | null | undefined {
 export function createLayoutStore() {
   let saved = read(layoutKey);
   const tabsDefault = read(tabsDefaultKey);
-  const codeSizeShift = read(codeSizeShiftKey);
   let snapshot =
     saved == null
       ? layoutSchema.parse({
@@ -70,25 +78,14 @@ export function createLayoutStore() {
   };
   const persist = () => {
     try {
-      const raw = JSON.stringify(snapshot);
+      // Older tabs still use 11–14 units; keep their visual size in the same atomic write.
+      const raw = JSON.stringify({ ...snapshot, codeSize: snapshot.codePx - 1 });
       localStorage.setItem(layoutKey, raw);
       saved = raw;
     } catch {
       // Preferences still work in memory when storage is denied or full.
     }
   };
-  // Read the original size before another migration persists parsed defaults.
-  if (saved != null && codeSizeShift === null) {
-    try {
-      const codeSize = JSON.parse(saved)?.codeSize;
-      if (codeSize === 11 || codeSize === 12 || codeSize === 13 || codeSize === 14) {
-        snapshot = layoutSchema.parse({ ...snapshot, codeSize: codeSize + 1 });
-        persist();
-      }
-    } catch {
-      // Malformed saved JSON already uses defaults; those must not shift.
-    }
-  }
   // A separate marker keeps older tabs that strip unknown layout fields from repeating the move.
   if (saved != null && tabsDefault === null) {
     snapshot = { ...snapshot, pane: { ...snapshot.pane, desktop: "tabs" } };
@@ -98,13 +95,6 @@ export function createLayoutStore() {
   if (tabsDefault === null) {
     try {
       localStorage.setItem(tabsDefaultKey, "1");
-    } catch {
-      // Preferences still work in memory when storage is denied or full.
-    }
-  }
-  if (codeSizeShift === null) {
-    try {
-      localStorage.setItem(codeSizeShiftKey, "1");
     } catch {
       // Preferences still work in memory when storage is denied or full.
     }
@@ -151,7 +141,7 @@ export function createLayoutStore() {
       snapshot = layoutSchema.parse({
         ...next,
         proseSize: Math.round(Math.min(18, Math.max(15, next.proseSize))),
-        codeSize: Math.round(Math.min(15, Math.max(12, next.codeSize))),
+        codePx: Math.round(Math.min(15, Math.max(12, next.codePx))),
       });
       persist();
       notify();

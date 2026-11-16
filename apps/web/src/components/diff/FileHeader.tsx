@@ -43,7 +43,7 @@ export function FileHeader({
         onClick={onToggle}
       />
       <FileStatusMark status={file.status} />
-      <div className="min-w-0 flex-1 [font-feature-settings:var(--mono-features)] [font:var(--type-path)]">
+      <div className="em-path min-w-0 flex-1">
         <FilePathMenu path={file.path} oldPath={file.oldPath} />
         {file.oldPath && (
           <p className="em-file-path text-fg-3" title={`Renamed from ${file.oldPath}`}>

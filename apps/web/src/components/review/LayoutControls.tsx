@@ -26,11 +26,10 @@ export function textSizeItems(preferences: LayoutPreferences): MenuItem[] {
       radioGroup: {
         label: "Code in diffs",
         segmented: true,
-        value: String(preferences.codeSize),
+        value: String(preferences.codePx),
         onValueChange: (value) => {
-          const codeSize = Number(value);
-          if (codeSize === 12 || codeSize === 13 || codeSize === 14 || codeSize === 15)
-            layoutStore.update({ codeSize });
+          const codePx = Number(value);
+          if (codePx === 12 || codePx === 13 || codePx === 14 || codePx === 15) layoutStore.update({ codePx });
         },
         items: [12, 13, 14, 15].map((size) => ({ value: String(size), label: `${size} px` })),
       },

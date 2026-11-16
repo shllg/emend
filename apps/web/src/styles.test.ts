@@ -192,6 +192,28 @@ test("text and labels use the sans family and every mono declaration disables pr
   );
 });
 
+test("mono text uses stylesheet rules or font-mono instead of arbitrary font utilities", () => {
+  const files = readdirSync(webSource, { recursive: true, encoding: "utf8" }).filter(
+    (path) => /\.tsx?$/.test(path) && !/\.test\.tsx?$/.test(path),
+  );
+  expect(files.length).toBeGreaterThan(0);
+  for (const file of files) {
+    const source = readFileSync(join(webSource, file), "utf8");
+    for (const utility of [
+      "[font-feature-settings:",
+      "[font:var(--type-path)]",
+      "[font:var(--type-code)]",
+      "[font:var(--font-mono)",
+    ]) {
+      expect(source, file).not.toContain(utility);
+    }
+  }
+  const css = readFileSync(join(webSource, "styles/diff.css"), "utf8");
+  expect(/\.em-path\s*\{([^}]+)\}/.exec(css)?.[1]).toMatch(
+    /font:\s*var\(--type-path\)\s*;\s*font-feature-settings:\s*var\(--mono-features\)\s*;/,
+  );
+});
+
 test("writeup images keep their own size, stay under half the screen and show a ring, using theme tokens only", () => {
   const css = readFileSync(join(webSource, "styles/prose.css"), "utf8");
   const rule = (selector: string) =>

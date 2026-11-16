@@ -3219,8 +3219,9 @@ test("round 8.8: RGBA pixel bytes are not scanned as text in inline PNGs", () =>
   assert.deepEqual(check(`data:image/png;base64,${bytes.toString("base64")}`), []);
 });
 
-test("round 8.8: Geist glyph data is not scanned as text in inline WOFF2", () => {
-  const bytes = readFileSync(new URL("../apps/web/src/fonts/geist-latin-wght-normal.woff2", import.meta.url));
+test("round 8.8: Geist italic glyph data is not scanned as text in inline WOFF2", () => {
+  const bytes = readFileSync(new URL("../apps/web/src/fonts/geist-latin-wght-italic.woff2", import.meta.url));
+  assert.ok(checkText(bytes.toString("latin1"), "fixture", empty).length > 0);
   assert.deepEqual(checkBuffer(bytes, "fixture.woff2", empty, false), []);
   assert.deepEqual(check(`data:font/woff2;base64,${bytes.toString("base64")}`), []);
 });
