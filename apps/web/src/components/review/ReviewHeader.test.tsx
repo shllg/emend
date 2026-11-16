@@ -279,14 +279,17 @@ test("an opening-card context row is above the title with origin, breadcrumb, ba
     screen.getByText("Snoozed until it changes"),
     screen.getByText("Agent waiting").parentElement,
   ]) {
-    expect(item?.previousElementSibling?.textContent).toBe("·");
+    expect(item?.previousElementSibling?.textContent).toBe("\u00a0·");
     expect(item?.previousElementSibling?.getAttribute("aria-hidden")).toBe("true");
   }
   expect(
     within(nav)
       .getAllByRole("listitem")
       .map((item) => item.textContent),
-  ).toEqual(["Garden", "›Requests"]);
+  ).toEqual(["Garden", "\u00a0› Requests"]);
+  expect(nav.classList.contains("inline")).toBe(true);
+  expect(within(nav).getByRole("list").className).toBe("m-0 inline list-none p-0");
+  for (const item of within(nav).getAllByRole("listitem")) expect(item.classList.contains("inline")).toBe(true);
   expect(within(nav).queryByRole("link")).toBeNull();
   const anchors = within(links).getAllByRole("link");
   expect(anchors.map((link) => link.textContent)).toEqual([
@@ -322,6 +325,44 @@ test("a plain review combines context below the title and has one fewer row than
   unmount();
   const phone = mount({ metadata: contextReview, loaded: linkedRevision, phone: true });
   expect(phone.container.firstElementChild?.children.length).toBe((rows ?? 0) + 1);
+});
+
+test.each([false, true])("off the phone a separator sticks to the item before it (opening card %s)", (openingCard) => {
+  mount({
+    metadata: { ...contextReview, project: "Garden with a long project name" },
+    loaded: {
+      ...linkedRevision,
+      writeup: { sections: [], ...(openingCard ? { area: "Requests with a long area name" } : {}) },
+    },
+  });
+  const origin = screen.getByText("Workshop");
+  const row = origin.parentElement as HTMLElement;
+  expect(row.tagName).toBe("DIV");
+  expect(row.classList.contains("flex")).toBe(false);
+  expect(row.classList.contains("flex-wrap")).toBe(false);
+  expect([...row.classList].some((name) => name.startsWith("gap-"))).toBe(false);
+  for (const name of ["min-w-0", "wrap-anywhere", "leading-[1.9]!"]) expect(row.classList.contains(name)).toBe(true);
+  const dot = within(origin).getByRole("img", { name: "From Workshop" });
+  expect(dot.classList.contains("align-middle")).toBe(true);
+  expect(dot.nextSibling?.textContent?.startsWith("\u00a0")).toBe(true);
+  const separators = [...row.querySelectorAll('span[aria-hidden="true"]')].filter((span) => span.textContent !== "");
+  expect(separators).toHaveLength(openingCard ? 5 : 4);
+  for (const separator of separators) {
+    expect(separator.textContent).toMatch(/^\u00a0[·›]$/);
+    if (separator.textContent === "\u00a0·") expect(separator.classList.contains("text-line-strong")).toBe(true);
+    expect(separator.nextSibling?.nodeType).toBe(Node.TEXT_NODE);
+    expect(separator.nextSibling?.textContent?.startsWith(" ")).toBe(true);
+  }
+  const links = within(row).getByRole("list", { name: "Links" });
+  expect(links.classList.contains("inline")).toBe(true);
+  expect(links.classList.contains("flex")).toBe(false);
+  expect(links.previousElementSibling).toBe(screen.getByText("Agent waiting").parentElement);
+  expect(links.previousSibling?.nodeType).toBe(Node.TEXT_NODE);
+  expect(links.previousSibling?.textContent).toBe(" ");
+  for (const chip of within(links).getAllByRole("listitem")) {
+    for (const name of ["inline-block", "max-w-full", "align-middle", "mr-1.5", "my-0.5"])
+      expect(chip.classList.contains(name)).toBe(true);
+  }
 });
 
 test.each([false, true])(
@@ -563,19 +604,18 @@ test("a hostile title stays plain text in the phone heading and popover", async 
   expect(writeText).toHaveBeenCalledExactlyOnceWith(title);
 });
 
-test.each(["Orchard", "<img src=x onerror=alert(1)>"])(
-  "header project %s is isolated text after the machine",
-  (project) => {
-    const { container } = mount({ metadata: { ...review, project } });
-    const label = screen.getByText(project);
-    expect(label.getAttribute("dir")).toBe("auto");
-    expect(label.classList.contains("wrap-anywhere")).toBe(true);
-    expect(label.previousElementSibling?.textContent).toBe("·");
-    expect(label.previousElementSibling?.getAttribute("aria-hidden")).toBe("true");
-    expect(label.previousElementSibling?.previousElementSibling).toBe(screen.getByText("Workshop"));
-    expect(container.querySelector("img")).toBeNull();
-  },
-);
+test.each(
+  ["Orchard", "<img src=x onerror=alert(1)>"].flatMap((project) => [false, true].map((phone) => ({ project, phone }))),
+)("header project $project is isolated text after the machine (phone $phone)", ({ project, phone }) => {
+  const { container } = mount({ metadata: { ...review, project }, phone });
+  const label = screen.getByText(project);
+  expect(label.getAttribute("dir")).toBe("auto");
+  expect(label.classList.contains("wrap-anywhere")).toBe(true);
+  expect(label.previousElementSibling?.textContent).toBe(phone ? "·" : "\u00a0·");
+  expect(label.previousElementSibling?.getAttribute("aria-hidden")).toBe("true");
+  expect(label.previousElementSibling?.previousElementSibling).toBe(screen.getByText("Workshop"));
+  expect(container.querySelector("img")).toBeNull();
+});
 
 test("a null project adds no metadata or separator after the machine", () => {
   mount({ metadata: { ...review, project: null } });
@@ -646,23 +686,28 @@ test("two links that share a URL both show", () => {
   ).toEqual(["PR 9", "Same PR"]);
 });
 
-test("the header drops any link that is not plain https", () => {
-  mount({
-    loaded: {
-      ...revision,
-      links: [
-        { url: "javascript:alert(1)", label: "Script" },
-        { url: "http://example.test/x", label: "Plain" },
-        { url: "https://user:pw@example.test/x", label: "Credentials" },
-        { url: "not a url", label: "Broken" },
-        { url: "https://example.test/ok", label: "Fine" },
-      ],
-    },
-  });
-  expect(within(screen.getByRole("list", { name: "Links" })).getAllByRole("link")).toHaveLength(1);
-  expect(screen.queryByText("Script")).toBeNull();
-  expect(screen.getByText("Fine")).toBeTruthy();
-});
+test.each([false, true].flatMap((phone) => [false, true].map((openingCard) => ({ phone, openingCard }))))(
+  "the header drops any link that is not plain https (phone $phone, opening card $openingCard)",
+  ({ phone, openingCard }) => {
+    mount({
+      phone,
+      loaded: {
+        ...revision,
+        writeup: { sections: [], ...(openingCard ? { area: "Requests" } : {}) },
+        links: [
+          { url: "javascript:alert(1)", label: "Script" },
+          { url: "http://example.test/x", label: "Plain" },
+          { url: "https://user:pw@example.test/x", label: "Credentials" },
+          { url: "not a url", label: "Broken" },
+          { url: "https://example.test/ok", label: "Fine" },
+        ],
+      },
+    });
+    expect(within(screen.getByRole("list", { name: "Links" })).getAllByRole("link")).toHaveLength(1);
+    expect(screen.queryByText("Script")).toBeNull();
+    expect(screen.getByText("Fine")).toBeTruthy();
+  },
+);
 
 test("header title, origin, branch, commits, doc count and focus ref use loaded metadata", () => {
   const { titleRef } = mount();
@@ -707,11 +752,11 @@ test.each([false, true])("a timed snooze is a pill in the wrapping meta line (ph
   for (const name of ["rounded-full", "bg-state-snoozed-bg", "text-state-snoozed-fg", "whitespace-nowrap", "shrink-0"])
     expect(pill.classList.contains(name)).toBe(true);
   expect(pill.querySelector("svg.lucide-bell-off")).not.toBeNull();
-  expect(pill.previousElementSibling?.textContent).toBe("·");
+  expect(pill.previousElementSibling?.textContent).toBe(phone ? "·" : "\u00a0·");
   expect(pill.previousElementSibling?.getAttribute("aria-hidden")).toBe("true");
   expect(pill.nextElementSibling?.nextElementSibling?.textContent).toBe("Agent waiting");
   expect(pill.parentElement).toBe(screen.getByText("Workshop").parentElement);
-  expect(pill.parentElement?.classList.contains("flex-wrap")).toBe(true);
+  expect(pill.parentElement?.classList.contains("flex-wrap")).toBe(phone);
 });
 
 test.each([
@@ -933,11 +978,11 @@ test.each([false, true])("the breadcrumb shows project and explicit area above t
     within(nav)
       .getAllByRole("listitem")
       .map((item) => item.textContent),
-  ).toEqual(["Garden", "›requests › retries"]);
+  ).toEqual(["Garden", phone ? "›requests › retries" : "\u00a0› requests › retries"]);
   for (const label of ["Garden", "requests › retries"]) {
     const text = within(nav).getByText(label);
     expect(text.getAttribute("dir")).toBe("auto");
-    expect(text.classList.contains("overflow-hidden")).toBe(true);
+    expect(text.classList.contains("overflow-hidden")).toBe(phone);
     expect(text.classList.contains("wrap-anywhere")).toBe(true);
   }
   expect(within(nav).getByText("›").getAttribute("aria-hidden")).toBe("true");
@@ -980,7 +1025,7 @@ test("a pub without writeup fields keeps its project in the meta line", () => {
   expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull();
   const project = screen.getByText("Garden guide");
   expect(screen.getByText("Workshop").parentElement?.contains(project)).toBe(true);
-  expect(project.previousElementSibling?.textContent).toBe("·");
+  expect(project.previousElementSibling?.textContent).toBe("\u00a0·");
 });
 
 test("phone PR and issue chips move to Breadcrumb while other links stay in Links", () => {
@@ -1013,17 +1058,19 @@ test("phone PR and issue chips move to Breadcrumb while other links stay in Link
   expect(screen.queryByText("Unsafe")).toBeNull();
 });
 
-test.each(["<img src=x onerror=alert(1)>", "x".repeat(1000), `a${"\u0301".repeat(59)}`])(
-  "area is clipped literal wrapping text: %j",
-  (area) => {
-    mount({ loaded: { ...revision, writeup: { sections: [], area } } });
-    const nav = screen.getByRole("navigation", { name: "Breadcrumb" });
-    expect(nav.textContent).toBe(area);
-    expect(nav.querySelectorAll("img, script")).toHaveLength(0);
-    expect(within(nav).getByText(area).classList.contains("wrap-anywhere")).toBe(true);
-    expect(within(nav).getByText(area).classList.contains("overflow-hidden")).toBe(true);
-  },
-);
+test.each(
+  ["<img src=x onerror=alert(1)>", "x".repeat(1000), `a${"\u0301".repeat(59)}`].flatMap((area) =>
+    [false, true].map((phone) => ({ area, phone })),
+  ),
+)("area $area is literal wrapping text (phone $phone)", ({ area, phone }) => {
+  mount({ loaded: { ...revision, writeup: { sections: [], area } }, phone });
+  const nav = screen.getByRole("navigation", { name: "Breadcrumb" });
+  expect(nav.textContent).toBe(area);
+  expect(nav.querySelectorAll("img, script")).toHaveLength(0);
+  expect(within(nav).getByText(area).getAttribute("dir")).toBe("auto");
+  expect(within(nav).getByText(area).classList.contains("wrap-anywhere")).toBe(true);
+  expect(within(nav).getByText(area).classList.contains("overflow-hidden")).toBe(phone);
+});
 
 test.each(
   ["Orchard", "<img src=x onerror=alert(1)>", `a${"\u0301".repeat(59)}`].flatMap((project) =>
@@ -1042,7 +1089,7 @@ test.each(
   const label = within(breadcrumb).getByText(project);
   expect(label.getAttribute("dir")).toBe("auto");
   expect(label.classList.contains("wrap-anywhere")).toBe(true);
-  expect(label.classList.contains("overflow-hidden")).toBe(true);
+  expect(label.classList.contains("overflow-hidden")).toBe(phone);
   expect(within(breadcrumb).getAllByRole("listitem")).toHaveLength(1);
   const originRow = screen.getByText("Workshop").parentElement;
   expect(originRow?.contains(label)).toBe(!phone);

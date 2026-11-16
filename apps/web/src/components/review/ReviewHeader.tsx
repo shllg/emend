@@ -103,66 +103,82 @@ export function ReviewHeader({
   const breadcrumb = [review.project, area].filter((item): item is string => item != null);
   const total = revision ? reviewLineTotals(revision, counts) : null;
   const metaItem = "inline-flex min-w-0 items-center gap-[5px] wrap-anywhere";
-  const separator = (
+  const separator = phone ? (
     <span aria-hidden="true" className="text-line-strong">
       ·
     </span>
+  ) : (
+    <>
+      <span aria-hidden="true" className="text-line-strong">
+        {"\u00a0·"}
+      </span>{" "}
+    </>
   );
-  const breadcrumbNav = openingCard && (breadcrumb.length > 0 || related.length > 0) && (
-    <nav aria-label="Breadcrumb" className="text-fg-3 [font:var(--type-meta)]">
-      <ol className="m-0 flex min-w-0 list-none flex-wrap items-center gap-1.5 p-0">
-        {breadcrumb.map((item, index) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: project and area have fixed positions and can share text.
-          <li key={index} className="flex min-w-0 items-center gap-1.5">
-            {index > 0 && <span aria-hidden="true">›</span>}
-            <span dir="auto" className="min-w-0 overflow-hidden wrap-anywhere">
-              {item}
-            </span>
-          </li>
-        ))}
-        {related.map((link, index) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: two links may share a URL; the list never reorders.
-          <li key={`${index}:${link.url}`} className="flex min-w-0 max-w-full items-center gap-1.5">
-            {(breadcrumb.length > 0 || index > 0) && <span aria-hidden="true">›</span>}
-            <LinkChip link={link} />
-          </li>
-        ))}
-      </ol>
-    </nav>
-  );
+  const breadcrumbNav =
+    openingCard &&
+    (breadcrumb.length > 0 || related.length > 0) &&
+    (phone ? (
+      <nav aria-label="Breadcrumb" className="text-fg-3 [font:var(--type-meta)]">
+        <ol className="m-0 flex min-w-0 list-none flex-wrap items-center gap-1.5 p-0">
+          {breadcrumb.map((item, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: project and area have fixed positions and can share text.
+            <li key={index} className="flex min-w-0 items-center gap-1.5">
+              {index > 0 && <span aria-hidden="true">›</span>}
+              <span dir="auto" className="min-w-0 overflow-hidden wrap-anywhere">
+                {item}
+              </span>
+            </li>
+          ))}
+          {related.map((link, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: two links may share a URL; the list never reorders.
+            <li key={`${index}:${link.url}`} className="flex min-w-0 max-w-full items-center gap-1.5">
+              {(breadcrumb.length > 0 || index > 0) && <span aria-hidden="true">›</span>}
+              <LinkChip link={link} />
+            </li>
+          ))}
+        </ol>
+      </nav>
+    ) : (
+      <nav aria-label="Breadcrumb" className="inline">
+        <ol className="m-0 inline list-none p-0">
+          {breadcrumb.map((item, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: project and area have fixed positions and can share text.
+            <li key={index} className="inline">
+              {index > 0 && (
+                <>
+                  <span aria-hidden="true">{"\u00a0›"}</span>{" "}
+                </>
+              )}
+              <span dir="auto" className="wrap-anywhere">
+                {item}
+              </span>
+            </li>
+          ))}
+        </ol>
+      </nav>
+    ));
   const linksList = links.length > 0 && (
     <ul
       aria-label="Links"
-      className="m-0 flex min-w-0 list-none flex-wrap items-center gap-1.5 p-0 text-12 leading-[1.2]"
+      className={
+        phone
+          ? "m-0 flex min-w-0 list-none flex-wrap items-center gap-1.5 p-0 text-12 leading-[1.2]"
+          : "m-0 inline list-none p-0 text-12 leading-[1.2]"
+      }
     >
       {links.map((link, index) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: two links may share a URL; the list never reorders.
-        <li key={`${index}:${link.url}`} className="min-w-0 max-w-full">
+        <li
+          // biome-ignore lint/suspicious/noArrayIndexKey: two links may share a URL; the list never reorders.
+          key={`${index}:${link.url}`}
+          className={phone ? "min-w-0 max-w-full" : "my-0.5 mr-1.5 inline-block max-w-full align-middle"}
+        >
           <LinkChip link={link} />
         </li>
       ))}
     </ul>
   );
-  const contextRow = (
-    <div className="flex flex-wrap items-center gap-2 text-fg-3 [font:var(--type-meta)]">
-      <span className="inline-flex min-w-0 items-center gap-1.5 wrap-anywhere">
-        <OriginBadge origin={review.origin} dot className="size-[7px] opacity-85" />
-        {review.origin.name}
-      </span>
-      {!openingCard && review.project !== null && (
-        <>
-          {separator}
-          <span dir="auto" className="min-w-0 wrap-anywhere">
-            {review.project}
-          </span>
-        </>
-      )}
-      {!phone && openingCard && breadcrumbNav && (
-        <>
-          {separator}
-          {breadcrumbNav}
-        </>
-      )}
+  const statusBadges = (
+    <>
       {review.state !== "open" && (
         <>
           {separator}
@@ -181,7 +197,48 @@ export function ReviewHeader({
           <AgentStatus status={agent} pickedUpAt={review.pickedUpAt} now={now} className="font-normal text-fg-3" />
         </>
       )}
-      {!phone && linksList}
+    </>
+  );
+  const contextRow = phone ? (
+    <div className="flex flex-wrap items-center gap-2 text-fg-3 [font:var(--type-meta)]">
+      <span className="inline-flex min-w-0 items-center gap-1.5 wrap-anywhere">
+        <OriginBadge origin={review.origin} dot className="size-[7px] opacity-85" />
+        {review.origin.name}
+      </span>
+      {!openingCard && review.project !== null && (
+        <>
+          {separator}
+          <span dir="auto" className="min-w-0 wrap-anywhere">
+            {review.project}
+          </span>
+        </>
+      )}
+      {statusBadges}
+    </div>
+  ) : (
+    // The font shorthand includes line-height; override it to leave room for wrapped chips.
+    <div className="min-w-0 wrap-anywhere leading-[1.9]! text-fg-3 [font:var(--type-meta)]">
+      <span className="wrap-anywhere">
+        <OriginBadge origin={review.origin} dot className="size-[7px] align-middle opacity-85" />
+        {"\u00a0"}
+        {review.origin.name}
+      </span>
+      {!openingCard && review.project !== null && (
+        <>
+          {separator}
+          <span dir="auto" className="wrap-anywhere">
+            {review.project}
+          </span>
+        </>
+      )}
+      {openingCard && breadcrumbNav && (
+        <>
+          {separator}
+          {breadcrumbNav}
+        </>
+      )}
+      {statusBadges}
+      {linksList && <> {linksList}</>}
     </div>
   );
   return (
