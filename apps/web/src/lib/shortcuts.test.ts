@@ -223,6 +223,29 @@ test.each([
   }
 });
 
+test("refuses Ctrl digit shortcuts when AltGraph is active", () => {
+  const event = {
+    key: "²",
+    code: "Digit2",
+    ctrlKey: true,
+    altKey: false,
+    metaKey: false,
+    shiftKey: false,
+    getModifierState: (key: string) => key === "AltGraph",
+  };
+  expect(matchesShortcut(event, "mod+2")).toBe(false);
+  expect(captureShortcut(event)).toEqual({ error: "Use Ctrl or ⌘ with one letter or digit." });
+});
+
+test("matches and captures Alt digit shortcuts when AltGraph is reported", () => {
+  const event = key("²", { altKey: true, code: "Digit2" });
+  Object.defineProperty(event, "getModifierState", {
+    value: (key: string) => key === "AltGraph",
+  });
+  expect(matchesShortcut(event, "alt+2")).toBe(true);
+  expect(captureShortcut(event)).toEqual({ key: "alt+2" });
+});
+
 test.each([
   { altKey: true, shiftKey: true },
   { altKey: true, ctrlKey: true },

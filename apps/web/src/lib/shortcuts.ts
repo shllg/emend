@@ -95,11 +95,18 @@ export function ariaKeyShortcuts(key: string, platform = navigator.platform): st
     .join("+");
 }
 
-type KeyEvent = Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "metaKey" | "altKey"> & { code?: string };
+type KeyEvent = Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "metaKey" | "altKey"> & {
+  code?: string;
+  getModifierState?: (key: "AltGraph") => boolean;
+};
 
 export function digitOf(event: Pick<KeyEvent, "key" | "code">): string | undefined {
   if (event.code) return event.code.length === 6 && /^Digit[0-9]$/.test(event.code) ? event.code.slice(-1) : undefined;
   return event.key.length === 1 && /^[0-9]$/.test(event.key) ? event.key : undefined;
+}
+
+function altGraph(event: KeyEvent) {
+  return event.getModifierState?.("AltGraph") === true;
 }
 
 function altDigit(event: KeyEvent) {
@@ -110,7 +117,7 @@ export function matchesShortcut(event: KeyEvent, key: KeyBinding) {
   if (/^alt\+[0-9]$/.test(key)) return altDigit(event) && digitOf(event) === key.slice(-1);
   if (event.altKey) return false;
   if (/^mod\+[0-9]$/.test(key))
-    return event.ctrlKey !== event.metaKey && !event.shiftKey && digitOf(event) === key.slice(-1);
+    return event.ctrlKey !== event.metaKey && !event.shiftKey && !altGraph(event) && digitOf(event) === key.slice(-1);
   if (key.startsWith("mod+"))
     return (
       event.ctrlKey !== event.metaKey &&
@@ -128,7 +135,7 @@ export function captureShortcut(event: KeyEvent): { key?: string; error?: string
   if (event.altKey)
     return altDigit(event) ? { key: `alt+${digitOf(event)}` } : { error: "Alt works only with a digit." };
   if (event.ctrlKey || event.metaKey) {
-    if (event.ctrlKey !== event.metaKey && !event.shiftKey && digitOf(event) !== undefined)
+    if (event.ctrlKey !== event.metaKey && !event.shiftKey && !altGraph(event) && digitOf(event) !== undefined)
       return { key: `mod+${digitOf(event)}` };
     if (event.ctrlKey === event.metaKey || !/^[a-z]$/i.test(event.key))
       return { error: "Use Ctrl or ⌘ with one letter or digit." };
