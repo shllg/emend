@@ -917,6 +917,7 @@ function LoadedReview({
         <Panes
           tab={tab}
           hasDiff={hasDiff}
+          pending={!revision}
           codePanel={panelOpen ? `Code: ${resolvedCode?.title}` : undefined}
           readingLayout={docsVisible && openDoc?.kind === "html" ? "original" : undefined}
           phoneTabs={<PhoneTabs {...tabProps} />}

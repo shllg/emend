@@ -67,6 +67,7 @@ export function Panes({
   sendBar,
   tab,
   hasDiff,
+  pending = false,
   tabs,
   readingLayout,
   codePanel,
@@ -78,6 +79,7 @@ export function Panes({
   sendBar?: ReactNode;
   tab: string;
   hasDiff: boolean;
+  pending?: boolean;
   tabs?: ReactNode;
   readingLayout?: "original";
   codePanel?: string;
@@ -89,8 +91,8 @@ export function Panes({
   const showReadingHandle = split && hasDiff;
   const setReadingHandle = useContext(ReadingHandleContext);
   useLayoutEffect(() => {
-    setReadingHandle(showReadingHandle);
-  }, [setReadingHandle, showReadingHandle]);
+    if (!pending) setReadingHandle(showReadingHandle);
+  }, [pending, setReadingHandle, showReadingHandle]);
   const [readingPreview, setReadingPreview] = useState<number>();
   const area = useRef<HTMLDivElement>(null);
   const readingPane = useRef<HTMLElement>(null);

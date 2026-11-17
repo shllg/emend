@@ -2612,6 +2612,62 @@ test("tablet cached navigation keeps heading focus and Close returns to Show inb
   }
 });
 
+test("tablet picking the already open review returns focus to Show inbox", async () => {
+  width = 900;
+  withInboxNavigation();
+  mount(`/r/${id}`);
+  await screen.findByText("Overview");
+  const opener = screen.getByRole("button", { name: "Show inbox" });
+  act(() => opener.focus());
+  fireEvent.click(opener);
+  const sheet = await screen.findByRole("dialog", { name: "Inbox" });
+  const destination = within(sheet).getByRole("link", { name: /Synthetic review/ });
+  act(() => destination.focus());
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+  try {
+    await act(async () => {
+      fireEvent.click(destination, { button: 0 });
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(screen.queryByRole("dialog", { name: "Inbox" })).toBeNull();
+    expect(screen.getByRole("heading", { name: item.title, level: 1 })).toBeTruthy();
+    expect(document.activeElement).toBe(opener);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("tablet picking a review that fails to load returns focus to Show inbox", async () => {
+  width = 900;
+  withInboxNavigation();
+  const fallback = fetchMock.getMockImplementation();
+  fetchMock.mockImplementation(async (path, init) =>
+    path === `/api/v1/reviews/${secondItem.id}`
+      ? Response.json({ error: { code: "failed", message: "Failed" } }, { status: 500 })
+      : (fallback?.(path, init) as Promise<Response>),
+  );
+  mount(`/r/${id}`);
+  await screen.findByText("Overview");
+  const opener = screen.getByRole("button", { name: "Show inbox" });
+  act(() => opener.focus());
+  fireEvent.click(opener);
+  const sheet = await screen.findByRole("dialog", { name: "Inbox" });
+  const destination = within(sheet).getByRole("link", { name: /Another proposal/ });
+  act(() => destination.focus());
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+  try {
+    await act(async () => {
+      fireEvent.click(destination, { button: 0 });
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(screen.queryByRole("dialog", { name: "Inbox" })).toBeNull();
+    expect(screen.getByRole("alert").textContent).toBe("Could not load this review.");
+    expect(document.activeElement).toBe(opener);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("phone inbox restores its search, open sections and page scroll after visiting a review", async () => {
   width = 390;
   withInboxNavigation();

@@ -87,7 +87,17 @@ export function ReviewInbox({
             if (!value) focusSearch.current = false;
           }}
           initialFocus={focusSearch.current ? search : undefined}
-          returnFocus={() => (openedReview.current ? false : null)}
+          returnFocus={() => {
+            if (!openedReview.current) return null;
+            const active = document.activeElement;
+            // Keep focus moved by navigation; otherwise return to the inbox opener.
+            return active instanceof HTMLElement &&
+              active !== document.body &&
+              active.isConnected &&
+              !active.closest('[role="dialog"]')
+              ? active
+              : null;
+          }}
         >
           <Inbox
             surface="sheet"

@@ -277,7 +277,7 @@ test("a 1280px Split layout reserves both CSS handle widths and keeps at least 4
   }
 });
 
-test("a loading placeholder keeps the clamped inbox width from Split", () => {
+test("a loading placeholder and pending revision keep the clamped inbox width from Split", () => {
   layoutWidth = 1280;
   localStorage.setItem(layoutKey, JSON.stringify({ ...layoutStore.getSnapshot(), inboxWidth: 520 }));
   const { rerender } = render(
@@ -295,6 +295,25 @@ test("a loading placeholder keeps the clamped inbox width from Split", () => {
   );
   expect(inbox().getAttribute("aria-valuenow")).toBe("464");
   expect(inbox().getAttribute("aria-valuemax")).toBe("464");
+  const content = (pending: boolean) => (
+    <PaneFrame inbox={<aside>Inbox</aside>}>
+      <Panes
+        header={null}
+        reading="Writeup"
+        diff={null}
+        phoneTabs={null}
+        tab="writeup"
+        hasDiff={false}
+        pending={pending}
+      />
+    </PaneFrame>
+  );
+  rerender(content(true));
+  expect(inbox().getAttribute("aria-valuenow")).toBe("464");
+  expect(inbox().getAttribute("aria-valuemax")).toBe("464");
+  rerender(content(false));
+  expect(inbox().getAttribute("aria-valuenow")).toBe("472");
+  expect(inbox().getAttribute("aria-valuemax")).toBe("472");
 });
 
 test.each([
