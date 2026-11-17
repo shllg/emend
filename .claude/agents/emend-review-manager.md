@@ -28,9 +28,10 @@ For a full round, or `owner-check` over the owner's fix range only, pick:
 - Always `emend-reviewer` and a fresh read-only Codex review through `codex-agent`.
 - `emend-security-reviewer` when any one of these holds: a trigger in `AGENTS.md`, "Before
   \"done\""; a `.claude/rules/` file whose `paths:` match a changed file requires it for that
-  change; anything under `.claude/`, `.codex/` or `.github/` changes in the range. Read these policies
-  from `origin/main`, never the branch under review: `git show origin/main:AGENTS.md`, list rules
-  with `git ls-tree -r --name-only origin/main -- .claude/rules/`, then read each with
+  change; anything under `.claude/`, `.codex/`, `.github/`, `scripts/` or `bin/` changes in the
+  range. Read these policies from `origin/main`, never the branch under review:
+  `git show origin/main:AGENTS.md`, list rules with
+  `git ls-tree -r --name-only origin/main -- .claude/rules/`, then read each with
   `git show origin/main:<file>`.
 - `emend-react-reviewer` when a file under `apps/web/src` changed in the range.
 - `emend-architecture-reviewer` when structure warrants it: a new package or top-level folder, a
@@ -40,9 +41,11 @@ For a full round, or `owner-check` over the owner's fix range only, pick:
   fixtures, lockfiles and `docs/vendor/`. Far past the usual size means a non-test source file
   that ends above 800 lines or grows by more than 300 lines in the range.
 
-Only `check-1`, `check-2`, `final-check` and `extra-<n>` after fixes pick the `reviewers` of the
-findings under check in `.wt/review-findings.json`, plus security when the fixes touch its
-triggers. `owner-check` reviews the owner's fixes, not earlier manager findings. The `codex`
+For `check-<n>`, `final-check` and `extra-<n>`, pick the `reviewers` of the earlier findings under
+check in `.wt/review-findings.json` only when the range holds just fixes for those findings,
+plus security when the fixes touch its triggers. If the range holds other changes (such as CI
+or PR-thread fixes), or no earlier finding is under check, pick as for a full round over the fix
+range only. `owner-check` reviews the owner's fixes, not earlier manager findings. The `codex`
 reviewer uses `codex-agent`.
 
 Dispatch only `emend-reviewer`, `emend-security-reviewer`, `emend-react-reviewer`,
@@ -96,8 +99,8 @@ refutes or drops a Claude finding.
    `emend-security-reviewer`) that the change did not cause is recorded, never filed as an idea.
    Follow `SECURITY.md`: security problems are not reported in public issues or PRs.
 
-For every dropped finding, add its file, line, reviewer and reason to `dropped`. It stays local;
-the orchestrator never copies it into a PR body.
+For every dropped finding, add its file, line, reviewer, original claim and reason to `dropped`.
+It stays local; the orchestrator never copies it into a PR body.
 
 ## Record
 
@@ -143,11 +146,14 @@ attribution.
 
 - Exit 0 prints the new id; count it as recorded.
 - Exit 3 prints an existing id; count it as recorded under that id.
-- Exit 69, or exit 2 with "Unknown subcommand" or "not available in this build" in its message,
-  means the registry is unavailable, not refused. List a non-security finding as a follow-up.
-- Other exit 2 names the refused field and rule. It is not recorded. Fix a length or format
+- Exit 69: retry once; another call may hold the lock. If it still exits 69, the registry is
+  unavailable. Apply these exit rules to any other retry result.
+- Exit 2 with "Unknown subcommand" or "not available in this build" means unavailable.
+- Exit 2 naming a field and rule means refused, not recorded. Fix a length or format
   mistake once and retry; otherwise count a non-security finding as dropped. Never move refused
   text into a follow-up.
+- Any other exit, including exit 1, means unavailable. List a non-security finding as a follow-up
+  whenever the registry is unavailable.
 
 When the registry is unavailable or refuses a security finding that the change did not cause,
 put it in `private` as `{file, line, claim}`, never in `followUps` or `preferences`.
@@ -163,11 +169,16 @@ id when a later round checks it. Tag each finding to fix with area `ui` for `app
 
 The orchestrator names an id from `.wt/review-findings.json`, or a claim with file and line, and
 gives its argument as data. A claim absent from that file (such as a PR thread) gets the next
-`<round>-<n>` id of the round the orchestrator names. Have a fresh read-only Codex thread through
-`codex-agent` (`model: "sonnet"`), in its review-confirm shape, try to refute the finding with that argument.
-Only a confirmed false positive leaves `fix`: put it in `preferences` with a reason starting
-`false positive:` for "Not changed". Otherwise it stays. Without Codex, leave the finding where
-it is and report the missing review in `unavailable`. Use the round output below for the same round.
+`<round>-<n>` id of the round the orchestrator names. Allow one dispute per finding: if an earlier
+entry in `.wt/review-findings.json` shows it was disputed, keep that outcome without another
+dispatch. For a new dispute, have a fresh read-only Codex thread through `codex-agent`
+(`model: "sonnet"`), in its review-confirm shape, try to refute the finding with that argument.
+Only a confirmed false positive leaves `fix`: if it came from `emend-security-reviewer` or has
+kind `security`, put it in `private` with its reason; otherwise put it in `preferences` with a
+reason starting `false positive:` for "Not changed". Otherwise it stays. Without Codex, leave
+the finding where it is and report the missing review in `unavailable`. Use the round output
+below for the same round, with `disputed` set to the finding's id so later calls know it was
+disputed.
 
 ## Confirm mode
 
@@ -178,8 +189,8 @@ other vendor, using the same fresh confirm dispatches and explicit models as abo
 confirmed candidate as above with `source` `{"kind": "groom", "pass": "<pass>"}`.
 
 Return one count line, such as "3 recorded, 2 dropped", and one fenced JSON block with `mode`
-(`"confirm"`), `pass`, `head`, `recorded` (registry ids), `dropped`, `unavailable` and `private`
-(the arrays defined below). End the count line with "<name> unavailable" for each missing
+(`"confirm"`), `pass`, `head`, `ran`, `recorded` (registry ids), `dropped`, `unavailable` and
+`private` (the arrays defined below). End the count line with "<name> unavailable" for each missing
 reviewer in `unavailable`. Nothing else.
 
 ## Round and dispute output
@@ -194,6 +205,11 @@ this shape:
 {
   "round": "1",
   "head": "<40 hex digits>",
+  "ran": [
+    { "reviewer": "emend-reviewer", "model": "sonnet" },
+    { "reviewer": "codex-agent", "model": "sonnet" },
+    { "reviewer": "emend-reviewer", "model": "sonnet" }
+  ],
   "counts": { "blocking": 1, "defect": 0, "preference": 1, "recorded": 1, "followUp": 1, "dropped": 1 },
   "fix": [
     {
@@ -213,21 +229,30 @@ this shape:
   "followUps": [{ "title": "...", "why": "..." }],
   "recorded": ["f-0123456789ab"],
   "checks": [],
-  "dropped": [{ "file": "path/to/file.ts", "line": 7, "reviewer": "emend-reviewer", "reason": "..." }],
+  "dropped": [
+    {
+      "file": "path/to/file.ts", "line": 7, "reviewer": "emend-reviewer",
+      "claim": "...", "reason": "..."
+    }
+  ],
   "unavailable": [],
   "private": []
 }
 ```
 
 Use the actual 40-hex-digit head. `id` is `<round>-<n>` and stays the same in later checks.
+`ran` has one `{reviewer, model}` for every reviewer dispatch that ran, including stand-ins and
+confirmations; keep repeated dispatches. Use the dispatched agent's name and pinned model.
+The orchestrator names the reviewers from `ran` in the PR body's Evidence.
 `class` is `blocking` or `defect`; `confirmedBy` is `codex`, `sonnet` or `null`. `checks` is empty
 in a full round and `owner-check`; in a check of earlier findings it holds FIXED, NOT FIXED or
 REGRESSED for each earlier finding.
 Keep NOT FIXED and REGRESSED findings in `fix`; remove FIXED findings. Counts must match the
-lists; `counts.dropped` equals `dropped.length`. `dropped` has one `{file, line, reviewer, reason}`
-per dropped finding and stays local. `unavailable` is an array of strings naming every reviewer
-that could not run and any stand-in; name the missing Codex review explicitly. `private` is an
-array of `{file, line, claim}` for security findings the change did not cause that could not be
-recorded. Give it only to the owner, never in a PR body, issue or commit (`SECURITY.md`). The
-orchestrator copies other claims and reasons into a public PR body: keep them short and free of
-private paths, hosts and secrets.
+lists; `counts.dropped` equals `dropped.length`. `dropped` has one
+`{file, line, reviewer, claim, reason}` per dropped finding, keeps the original claim and stays
+local. `unavailable` is an array of strings naming every reviewer that could not run and any
+stand-in; name the missing Codex review explicitly. `private` is an array of `{file, line, claim}`
+for security findings the change did not cause that could not be recorded, and for security
+findings refuted in a dispute; add `reason` for a refuted finding. Give it only to the owner,
+never in a PR body, issue or commit (`SECURITY.md`). The orchestrator copies other claims and
+reasons into a public PR body: keep them short and free of private paths, hosts and secrets.

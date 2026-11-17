@@ -34,11 +34,11 @@ defect.
 
 For `private`, run `<main>/bin/wt notify question` and say there are private findings. List them
 in the final report to the owner and the local emend hand-off writeup, never in a PR body, issue
-or commit (`SECURITY.md`). `dropped` stays local too.
+or commit (`SECURITY.md`). Send dropped findings a reviewer called blocking, a bug or a security
+issue, or from `emend-security-reviewer`, to the owner the same way; other `dropped` stay local.
 
 To dispute a blocking finding, send the argument to the manager in a new call, in dispute mode.
-It has a fresh Codex thread try to refute the finding. Only a confirmed false positive moves to
-"Not changed".
+It has a fresh Codex thread try to refute the finding. Only a confirmed false positive leaves `fix`.
 
 ## Rounds
 
@@ -52,11 +52,14 @@ It has a fresh Codex thread try to refute the finding. Only a confirmed false po
   or REGRESSED, plus anything the fixes broke. A check round does not review the rest of the change.
 - Stop at a round with nothing to fix, or at the budget.
 
-Any entry in `unavailable` leaves the round incomplete: dispatch the manager once more for the
-same round. When only the Codex review is still missing and a stand-in reviewed, the round counts;
-name the missing Codex review under Evidence in the PR body. When any other picked reviewer is
-still missing (for example `emend-security-reviewer`), the round stays open: run
-`<main>/bin/wt notify blocked`, name the missing reviewer, and wait for the owner.
+When `unavailable` holds only `codex` and `stand-in: emend-reviewer` and the stand-in reviewed,
+the round counts; name the missing Codex review under Evidence in the PR body. Otherwise, any
+entry leaves the round incomplete: dispatch the manager once more for the same round; if that
+reviewer is still missing, run `<main>/bin/wt notify blocked`, name it, and wait for the owner.
+
+A reply without exactly one parseable JSON block, with a `head` other than the reviewed commit,
+or with counts that do not match its lists is no round; dispatch the manager once more, then run
+`<main>/bin/wt notify blocked` if it still fails.
 
 ## Budget
 
@@ -84,7 +87,8 @@ still missing (for example `emend-security-reviewer`), the round stays open: run
 ## Log
 
 Append each manager JSON block to `.wt/review-findings.json` (gitignored), a JSON array with one
-element per call. Use the Edit tool, or the Write tool when the file is new.
+element per call. Use the Edit tool, or Write when the file is new; PR Evidence names reviewers
+from `ran`.
 
 Append one line per round to `.wt/review-log.md` in the worktree (gitignored), after the round's
 fixes are committed. Use the Edit tool, or the Write tool when the file is new. Never copy finding

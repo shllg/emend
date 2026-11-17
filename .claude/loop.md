@@ -177,7 +177,9 @@ without `merged`, or a `spawn-failed` line the owner has not cleared.
 4. **Standing note.** Send the new worker one message:
    - A finding that this change introduces gets fixed in this PR. For a finding that predates the
      change or lies outside the issue, the review manager records a bug or defect in the local
-     findings registry and lists an idea under "Follow-ups"; neither goes into the change.
+     findings registry and lists an idea under "Follow-ups"; neither goes into the change. An old
+     bug that stops the issue's "Done when" is the exception: it counts as caused and is fixed in
+     this PR.
    - Review in rounds, as `.claude/rules/review-rounds.md` says: round 1 over the whole change,
      then check rounds over the fixes only, within the budget, each logged in `.wt/review-log.md`.
    - When the issue's "Done when" holds and its review rounds are done, close out. Do not polish.
