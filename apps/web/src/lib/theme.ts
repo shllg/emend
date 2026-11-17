@@ -24,7 +24,6 @@ const themeColors = { dark: "#171717", light: "#fafafb" };
 const scaleSteps = new Set<string>(THEME_SCALE_STEPS);
 const applied = new Set<string>();
 type ThemeState = { pick: ThemePick; custom: ThemeValid | undefined };
-type CachedTheme = { savedAt: number; theme: ThemeValid };
 const serverState: ThemeState = { pick: "system", custom: undefined };
 
 export function pickedThemeName(pick: ThemePick): ThemeName | undefined {
@@ -42,13 +41,9 @@ function read(key: string) {
     return undefined;
   }
 }
-function parseCustom(raw: string | null | undefined): CachedTheme | undefined {
+function parseCustom(raw: string | null | undefined): ThemeValid | undefined {
   try {
-    const cached = JSON.parse(raw ?? "null");
-    if (!cached || typeof cached.savedAt !== "number" || !Number.isFinite(cached.savedAt) || cached.savedAt < 0)
-      return undefined;
-    const theme = ThemeValid.safeParse(cached.theme).data;
-    return theme ? { savedAt: cached.savedAt, theme } : undefined;
+    return ThemeValid.safeParse(JSON.parse(raw ?? "null")).data;
   } catch {
     return undefined;
   }
@@ -99,7 +94,7 @@ function apply(state: ThemeState) {
 export function createThemeStore() {
   let saved: string | null | undefined;
   let savedCustom: string | null | undefined;
-  let cache: CachedTheme | undefined;
+  let cache: ThemeValid | undefined;
   let state = serverState;
   const listeners = new Set<() => void>();
   const getState = () => {
@@ -113,7 +108,7 @@ export function createThemeStore() {
       savedCustom = rawCustom;
       // Validate untrusted storage only when its text changes, including writes by another tab.
       cache = parseCustom(rawCustom);
-      state = { ...state, custom: cache?.theme };
+      state = { ...state, custom: cache };
     }
     return state;
   };
@@ -158,19 +153,20 @@ export function createThemeStore() {
       writePick(parse(pick));
       notify();
     },
-    setCustom(entry: ThemeValid, savedAt: number, select = false) {
+    setCustom(entry: ThemeValid, select = false) {
       const parsed = ThemeValid.safeParse(entry);
-      if (!parsed.success || !Number.isFinite(savedAt) || savedAt < 0) return;
+      if (!parsed.success) return;
       getState();
       const custom = parsed.data;
       const pick = `theme:${custom.name}` as const;
       if (!select && state.pick !== pick) return;
-      if (cache?.theme.name !== custom.name || savedAt >= cache.savedAt) {
-        cache = { savedAt, theme: custom };
+      // Selection may come from Settings' older list; refreshes come from the per-pick query.
+      if (!select || cache?.name !== custom.name) {
+        cache = custom;
         state = { ...state, custom };
         try {
           const raw = JSON.stringify(cache);
-          localStorage.setItem(customThemeKey, raw);
+          if (raw !== savedCustom) localStorage.setItem(customThemeKey, raw);
           savedCustom = raw;
         } catch {
           // The validated last version also survives in memory when storage is unavailable.
@@ -184,8 +180,8 @@ export function createThemeStore() {
 
 const themeStore = createThemeStore();
 export const setThemePick = themeStore.set;
-export const updateCustomTheme = (entry: ThemeValid, savedAt: number) => themeStore.setCustom(entry, savedAt);
-export const selectCustomTheme = (entry: ThemeValid, savedAt: number) => themeStore.setCustom(entry, savedAt, true);
+export const updateCustomTheme = (entry: ThemeValid) => themeStore.setCustom(entry);
+export const selectCustomTheme = (entry: ThemeValid) => themeStore.setCustom(entry, true);
 export function useThemeState() {
   return useSyncExternalStore(themeStore.subscribe, themeStore.getState, () => serverState);
 }

@@ -20,6 +20,13 @@ export const THEME_READABILITY_PAIRS: readonly ThemeReadabilityPair[] = [
   ...pairs(["fg-1", "fg-2", "fg-3", "fg-link", "accent-text"], ["bg-app", "bg-surface", "bg-sunken", "bg-raised"]),
   ...pairs(["fg-inverse"], ["bg-inverse"]),
   ...pairs(["fg-reading", "fg-reading-strong", "fg-reading-muted"], ["bg-reading", "bg-reading-card"]),
+  ...pairs(["fg-reading", "fg-reading-strong"], ["bg-sunken"]),
+  ...pairs(["fg-reading-muted"], ["bg-sunken"], 3),
+  ...pairs(["fg-reading", "fg-reading-strong", "fg-reading-muted"], ["diff-add-bg", "diff-del-bg"]).map((pair) => ({
+    ...pair,
+    over: "bg-sunken" as const,
+    minimum: pair.foreground === "fg-reading-muted" ? 3 : 4.5,
+  })),
   ...pairs(["fg-link"], ["bg-reading"]),
   ...pairs(["fg-1"], ["bg-selected", "bg-hover", "bg-active", "accent-tint", "mark-bg", "mark-bg-active"]),
   { foreground: "fg-reading", background: "mark-bg", over: "bg-reading", minimum: 4.5 },
@@ -50,7 +57,7 @@ export const THEME_READABILITY_PAIRS: readonly ThemeReadabilityPair[] = [
   ...pairs(["fg-1"], ["diff-select-bg"]),
   ...pairs(
     ["syn-keyword", "syn-type", "syn-function", "syn-string", "syn-number", "syn-comment", "syn-punct"],
-    ["bg-surface", "diff-add-bg", "diff-del-bg"],
+    ["bg-surface", "diff-add-bg", "diff-del-bg", "diff-add-hover", "diff-del-hover", "diff-select-bg"],
     3,
   ),
 ];

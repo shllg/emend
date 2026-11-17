@@ -229,16 +229,13 @@ test("a custom pick applies allowlisted values, fonts and base, and removes its 
   const style = document.documentElement.style;
   style.setProperty("--unrelated", "7px");
   const set = vi.spyOn(style, "setProperty");
-  selectCustomTheme(
-    {
-      ...customTheme,
-      scales: { ...customTheme.scales, "unknown-name": "#123456" },
-      tokens: { ...customTheme.tokens, "font-sans": "#123456", "n-0": "#123456" },
-    },
-    100,
-  );
+  selectCustomTheme({
+    ...customTheme,
+    scales: { ...customTheme.scales, "unknown-name": "#123456" },
+    tokens: { ...customTheme.tokens, "font-sans": "#123456", "n-0": "#123456" },
+  });
   expect(localStorage.getItem(themeKey)).toBe("theme:mine");
-  expect(JSON.parse(localStorage.getItem(customThemeKey) ?? "null").theme.name).toBe("mine");
+  expect(JSON.parse(localStorage.getItem(customThemeKey) ?? "null").name).toBe("mine");
   expect(document.documentElement.dataset.theme).toBe("dark");
   expect(set.mock.calls).toEqual([
     ["--n-950", "#112233"],
@@ -250,7 +247,7 @@ test("a custom pick applies allowlisted values, fonts and base, and removes its 
   expect(
     [...document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')].map((meta) => meta.content),
   ).toEqual(["#112233", "#112233"]);
-  updateCustomTheme({ ...customTheme, base: "light", fonts: {}, scales: {}, tokens: { accent: "#aabbcc" } }, 200);
+  updateCustomTheme({ ...customTheme, base: "light", fonts: {}, scales: {}, tokens: { accent: "#aabbcc" } });
   for (const property of ["--n-950", "--bg-app", "--fg-1", "--font-sans", "--font-mono"])
     expect(style.getPropertyValue(property)).toBe("");
   expect(style.getPropertyValue("--accent")).toBe("#aabbcc");
@@ -272,7 +269,7 @@ test.each([
   { themeColor: "#112233;" },
 ])("a tampered cache is refused as a whole: %j", (changes) => {
   localStorage.setItem(themeKey, "theme:mine");
-  localStorage.setItem(customThemeKey, JSON.stringify({ savedAt: 100, theme: { ...customTheme, ...changes } }));
+  localStorage.setItem(customThemeKey, JSON.stringify({ ...customTheme, ...changes }));
   const set = vi.spyOn(document.documentElement.style, "setProperty");
   stop = initializeTheme();
   expect(set).not.toHaveBeenCalled();
@@ -281,13 +278,13 @@ test.each([
 
 test("cached custom picks resolve to their base and follow either storage key", () => {
   localStorage.setItem(themeKey, "theme:mine");
-  localStorage.setItem(customThemeKey, JSON.stringify({ savedAt: 100, theme: customTheme }));
+  localStorage.setItem(customThemeKey, JSON.stringify(customTheme));
   render(<Reader />);
   expect(screen.getByRole("status").textContent).toBe("theme:mine:dark");
   act(() => {
     localStorage.setItem(
       customThemeKey,
-      JSON.stringify({ savedAt: 200, theme: { ...customTheme, base: "light", scales: { "n-950": "#aabbcc" } } }),
+      JSON.stringify({ ...customTheme, base: "light", scales: { "n-950": "#aabbcc" } }),
     );
     window.dispatchEvent(new StorageEvent("storage", { key: customThemeKey, storageArea: localStorage }));
   });
@@ -311,44 +308,50 @@ test("denied cache writes keep the last valid custom theme in memory", () => {
   };
   vi.spyOn(localStorage, "setItem").mockImplementation(fail);
   render(<Reader />);
-  act(() => selectCustomTheme(customTheme, 100));
+  act(() => selectCustomTheme(customTheme));
   expect(screen.getByRole("status").textContent).toBe("theme:mine:dark");
   expect(document.documentElement.style.getPropertyValue("--n-950")).toBe("#112233");
 });
 
 test("cached themes are parsed only when the stored text changes", () => {
-  localStorage.setItem(customThemeKey, JSON.stringify({ savedAt: 100, theme: customTheme }));
+  localStorage.setItem(customThemeKey, JSON.stringify(customTheme));
   const parse = vi.spyOn(ThemeValid, "safeParse");
   const store = createThemeStore();
   const first = store.getState();
   expect(store.getState()).toBe(first);
   store.getSnapshot();
   expect(parse).toHaveBeenCalledTimes(1);
-  localStorage.setItem(customThemeKey, JSON.stringify({ savedAt: 200, theme: { ...customTheme, base: "light" } }));
+  localStorage.setItem(customThemeKey, JSON.stringify({ ...customTheme, base: "light" }));
   expect(store.getState().custom?.base).toBe("light");
   store.getState();
   expect(parse).toHaveBeenCalledTimes(2);
 });
 
-test("an older list cannot overwrite another tab's newer cache, even when selecting", () => {
+test("two identical refetch results write the cache only once", () => {
+  setThemePick("theme:mine");
+  const writes = vi.spyOn(localStorage, "setItem");
+  updateCustomTheme(customTheme);
+  updateCustomTheme(structuredClone(customTheme));
+  expect(writes.mock.calls).toEqual([[customThemeKey, JSON.stringify(customTheme)]]);
+});
+
+test("selecting from an older list preserves the same name cached by another tab", () => {
   const tabA = createThemeStore();
   const tabB = createThemeStore();
-  tabA.setCustom(customTheme, 100, true);
+  tabA.setCustom(customTheme, true);
   const newer = { ...customTheme, scales: { "n-950": "#223344" }, themeColor: "#223344" };
-  tabB.setCustom(newer, 200, true);
-  tabA.setCustom(customTheme, 100);
-  expect(tabA.getState().custom).toEqual(newer);
+  tabB.setCustom(newer);
   tabA.set("light");
-  tabA.setCustom(customTheme, 100, true);
+  tabA.setCustom(customTheme, true);
   expect(tabA.getSnapshot()).toBe("theme:mine");
   expect(tabA.getState().custom).toEqual(newer);
-  expect(JSON.parse(localStorage.getItem(customThemeKey) ?? "null")).toEqual({ savedAt: 200, theme: newer });
+  expect(JSON.parse(localStorage.getItem(customThemeKey) ?? "null")).toEqual(newer);
   expect(document.documentElement.style.getPropertyValue("--n-950")).toBe("#223344");
 });
 
 test("the boot script uses only a matching cache's base and hex browser colour", () => {
   localStorage.setItem(themeKey, "theme:mine");
-  localStorage.setItem(customThemeKey, JSON.stringify({ savedAt: 100, theme: customTheme }));
+  localStorage.setItem(customThemeKey, JSON.stringify(customTheme));
   const set = vi.spyOn(document.documentElement.style, "setProperty");
   runInNewContext(boot, { document, localStorage });
   expect(document.documentElement.dataset.theme).toBe("dark");
@@ -364,9 +367,7 @@ test.each([{ name: "another" }, { base: "evil" }, { valid: false }, null, "not j
     localStorage.setItem(themeKey, "theme:mine");
     localStorage.setItem(
       customThemeKey,
-      typeof changes === "string"
-        ? changes
-        : JSON.stringify(changes === null ? null : { savedAt: 100, theme: { ...customTheme, ...changes } }),
+      typeof changes === "string" ? changes : JSON.stringify(changes === null ? null : { ...customTheme, ...changes }),
     );
     runInNewContext(boot, { document, localStorage });
     expectApplied("system");
@@ -375,14 +376,11 @@ test.each([{ name: "another" }, { base: "evil" }, { valid: false }, null, "not j
 
 test("boot rejects unsafe meta colours and reserved theme names", () => {
   localStorage.setItem(themeKey, "theme:mine");
-  localStorage.setItem(
-    customThemeKey,
-    JSON.stringify({ savedAt: 100, theme: { ...customTheme, themeColor: "url(x)" } }),
-  );
+  localStorage.setItem(customThemeKey, JSON.stringify({ ...customTheme, themeColor: "url(x)" }));
   runInNewContext(boot, { document, localStorage });
   expectApplied("dark");
   localStorage.setItem(themeKey, "theme:dark");
-  localStorage.setItem(customThemeKey, JSON.stringify({ savedAt: 100, theme: { ...customTheme, name: "dark" } }));
+  localStorage.setItem(customThemeKey, JSON.stringify({ ...customTheme, name: "dark" }));
   runInNewContext(boot, { document, localStorage });
   expectApplied("system");
 });

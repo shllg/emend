@@ -54,7 +54,7 @@ export async function listThemeFiles(themesDir?: string): Promise<{
   if (!themesDir) return { files: [], folderError: false, status: "missing" };
   const files: string[] = [];
   try {
-    const directory = await opendir(themesDir, { bufferSize: 1 });
+    const directory = await opendir(themesDir);
     let count = 0;
     for await (const entry of directory) {
       // One overflow probe distinguishes exactly 1000 entries from a larger folder.

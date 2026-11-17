@@ -1383,7 +1383,7 @@ test.each(["desktop", "phone", "dialog"] as const)(
       if (!original) throw new Error("Missing fetch fixture");
       return original(path, init);
     });
-    selectCustomTheme(customTheme, 100);
+    selectCustomTheme(customTheme);
     if (surface === "phone") width = 390;
     if (surface === "dialog") withDownloadDocs();
     mount(`/r/${id}`);
@@ -1392,6 +1392,8 @@ test.each(["desktop", "phone", "dialog"] as const)(
     if (surface === "dialog") fireEvent.click(await screen.findByRole("button", { name: "Download" }));
     const link = await screen.findByRole(surface === "phone" ? "menuitem" : "link", { name: "Download" });
     await waitFor(() => expect(link.getAttribute("href")).toContain("theme=mine"));
+    expect(client.getQueryData(["themes", "pick", "mine"])).toEqual({ themes: [customTheme], folderError: false });
+    expect(client.getQueryData(["themes"])).toBeUndefined();
     refused = true;
     act(() => Events.opened.at(-1)?.emit("themes", {}));
     await waitFor(() =>

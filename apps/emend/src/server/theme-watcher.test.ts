@@ -32,7 +32,7 @@ beforeEach(async () => {
     return timer;
   });
   vi.spyOn(clock, "clearInterval");
-  stop = watchThemes(dir, events, { intervalMs: 17, clock });
+  stop = () => {};
 });
 afterEach(async () => {
   stop();
@@ -51,16 +51,20 @@ const seed = async (content = "{}") => {
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, "mine.json"), content);
 };
+const start = async () => {
+  stop = await watchThemes(dir, events, { intervalMs: 17, clock });
+};
 
 test("each file change emits once to every owner's global stream, never a review stream", async () => {
   const broadcast = vi.spyOn(events, "broadcast");
+  await start();
   const first = await stream("first");
   const second = await stream("second");
   const review = await stream("first", "review");
   expect(events.streamCount).toBe(3);
   expect(clock.setInterval).toHaveBeenCalledExactlyOnceWith(expect.any(Function), 17);
   expect(timer.hasRef()).toBe(false);
-  await tick(); // Missing-folder baseline, with no event.
+  await tick(); // The missing-folder baseline already exists; nothing changed.
   expect(broadcast).not.toHaveBeenCalled();
   const reviewRead = vi.fn();
   const pending = review.read().then(reviewRead);
@@ -78,12 +82,12 @@ test("each file change emits once to every owner's global stream, never a review
   expect(reviewRead).toHaveBeenCalledWith({ value: undefined, done: true });
 });
 
-test("polling starts without streams and a save just after opening emits once before any new baseline", async () => {
+test("a save immediately after start emits once at the first tick", async () => {
   const broadcast = vi.spyOn(events, "broadcast");
   await seed();
+  await start();
   expect(clock.setInterval).toHaveBeenCalledExactlyOnceWith(expect.any(Function), 17);
   expect(timer.hasRef()).toBe(false);
-  await tick();
   expect(broadcast).not.toHaveBeenCalled();
   const reader = await stream("owner");
   await seed("saved before the first tick since opening");
@@ -114,6 +118,7 @@ test("linked files, deletion and folder disappearance change the fingerprint", a
   const target = join(root, "target.json");
   await writeFile(target, "{}");
   await symlink(target, join(dir, "linked.json"));
+  await start();
   await stream("owner");
   const broadcast = vi.spyOn(events, "broadcast");
   await tick();
@@ -129,6 +134,7 @@ test("linked files, deletion and folder disappearance change the fingerprint", a
 
 test("ticks never overlap and an in-flight result cannot outlive the watcher", async () => {
   await seed();
+  await start();
   const reader = await stream("owner");
   await tick();
   const broadcast = vi.spyOn(events, "broadcast");
@@ -159,7 +165,7 @@ test("ticks never overlap and an in-flight result cannot outlive the watcher", a
 test("no configured folder allocates no timer", async () => {
   stop();
   vi.mocked(clock.setInterval).mockClear();
-  stop = watchThemes(undefined, events, { clock });
+  stop = await watchThemes(undefined, events, { clock });
   await stream("owner");
   expect(clock.setInterval).not.toHaveBeenCalled();
 });
@@ -167,6 +173,7 @@ test("no configured folder allocates no timer", async () => {
 test("fingerprints only the sorted, displayable 50 files the list shows", async () => {
   await seed();
   for (let i = 0; i < 50; i++) await writeFile(join(dir, `theme-${String(i).padStart(2, "0")}.json`), "");
+  await start();
   await stream("owner");
   const broadcast = vi.spyOn(events, "broadcast");
   await tick();
@@ -183,6 +190,7 @@ test("fingerprints only the sorted, displayable 50 files the list shows", async 
 test("a too-full folder has a stable fingerprint and returning to 1000 entries emits once", async () => {
   await seed();
   for (let i = 0; i < 999; i++) await writeFile(join(dir, `.ignored-${i}`), "");
+  await start();
   await stream("owner");
   const broadcast = vi.spyOn(events, "broadcast");
   await tick();

@@ -697,6 +697,29 @@ test("themes events refresh only the theme list, without a review id", async () 
   expect(invalidate).toHaveBeenCalledExactlyOnceWith({ queryKey: ["themes"] });
 });
 
+test.each(["themes", "open"])("%s refreshes the active per-pick theme query", async (event) => {
+  const { client } = await mount();
+  const queryFn = vi.fn(async () => ({ themes: [], folderError: false }));
+  const observer = new QueryObserver(client, {
+    queryKey: ["themes", "pick", "mine"],
+    queryFn,
+    gcTime: 0,
+  });
+  const unsubscribe = observer.subscribe(() => {});
+  try {
+    await tick();
+    expect(queryFn).toHaveBeenCalledTimes(1);
+    act(() => {
+      if (event === "open") source().open();
+      else source().emit("themes", {});
+    });
+    await tick();
+    expect(queryFn).toHaveBeenCalledTimes(2);
+  } finally {
+    unsubscribe();
+  }
+});
+
 test("a groups event after open refreshes every review updated within the reconnect batch", async () => {
   const { client, invalidate } = await mount();
   const review = observe(client, ["review", id], Date.now());

@@ -24,13 +24,13 @@ async function fingerprint(dir: string): Promise<string> {
 }
 
 /** Poll from server start, keeping one baseline across browser stream opens and closes. */
-export function watchThemes(
+export async function watchThemes(
   themesDir: string | undefined,
   events: ReviewEvents,
   { intervalMs = 2000, clock = globalThis }: ThemeWatcherOptions = {},
-): () => void {
+): Promise<() => void> {
   if (!themesDir) return () => {};
-  let baseline: string | undefined;
+  let baseline = await fingerprint(themesDir);
   let reading = false;
   let stopped = false;
   const tick = async () => {
@@ -39,7 +39,7 @@ export function watchThemes(
     try {
       const next = await fingerprint(themesDir);
       if (stopped) return;
-      const changed = baseline !== undefined && next !== baseline;
+      const changed = next !== baseline;
       baseline = next;
       if (changed) events.broadcast({ type: "themes" });
     } finally {

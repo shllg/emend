@@ -24,13 +24,29 @@ test.each(["dark", "light"] as const)("%s passes all readability pairs", (base) 
   expect(check({ version: 1, base })).toMatchObject({ base, scales: {}, tokens: {}, fonts: {} });
   expect(themeReadabilityProblems(resolveTheme(base), base)).toEqual([]);
 });
-test("the readability set covers exactly the design's 116 pairs", () => {
-  expect(THEME_READABILITY_PAIRS).toHaveLength(116);
-  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.minimum === 3)).toHaveLength(35);
-  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.over)).toHaveLength(17);
+test("the readability set covers exactly the design's 146 pairs", () => {
+  expect(THEME_READABILITY_PAIRS).toHaveLength(146);
+  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.minimum === 3)).toHaveLength(59);
+  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.over)).toHaveLength(23);
   expect(THEME_READABILITY_PAIRS).toEqual(
     expect.arrayContaining([
       { foreground: "fg-reading", background: "mark-bg", over: "bg-reading", minimum: 4.5 },
+      ...["fg-reading", "fg-reading-strong", "fg-reading-muted"].flatMap((foreground) =>
+        ["bg-sunken", "diff-add-bg", "diff-del-bg"].map((background) => ({
+          foreground,
+          background,
+          ...(background === "bg-sunken" ? {} : { over: "bg-sunken" }),
+          minimum: foreground === "fg-reading-muted" ? 3 : 4.5,
+        })),
+      ),
+      ...["syn-keyword", "syn-type", "syn-function", "syn-string", "syn-number", "syn-comment", "syn-punct"].flatMap(
+        (foreground) =>
+          ["diff-add-hover", "diff-del-hover", "diff-select-bg"].map((background) => ({
+            foreground,
+            background,
+            minimum: 3,
+          })),
+      ),
       ...[
         "syn-plain",
         "syn-keyword",
@@ -205,6 +221,50 @@ test("diff word backgrounds composite over their line, then the surface", () => 
   if (!surface || !line || !word) throw new Error("Bad test colour");
   expect(themeBackground(colors, "dark", "diff-add-word", "diff-add-bg")).toEqual(
     compositeThemeColor(word, compositeThemeColor(line, surface)),
+  );
+});
+test("refuses a theme whose Download hides reading text on diff lines", () => {
+  const tokens = {
+    "bg-surface": "#ffffff",
+    ...Object.fromEntries(THEME_TOKENS.filter((name) => name.startsWith("syn-")).map((name) => [name, "#767676"])),
+    "diff-add-bg": "#000000",
+    "diff-add-word": "#000000",
+    "diff-add-hover": "#000000",
+    "diff-add-fg": "#ffffff",
+    "diff-del-bg": "#ffffff",
+    "diff-del-word": "#ffffff",
+    "diff-del-hover": "#ffffff",
+    "diff-select-bg": "#ffffff",
+  };
+  expect(problems({ version: 1, base: "light", tokens })).toContainEqual(
+    expect.stringMatching(/^fg-reading-strong on diff-add-bg: .*needs 4.5 to 1\.$/),
+  );
+});
+test("Download diff backgrounds composite over bg-sunken", () => {
+  const colors = resolveTheme("dark");
+  colors["bg-sunken"] = "#ffffff";
+  colors["diff-add-bg"] = "#00000080";
+  const line = parseThemeColor(colors["diff-add-bg"])?.rgba;
+  const sunken = parseThemeColor(colors["bg-sunken"])?.rgba;
+  if (!line || !sunken) throw new Error("Bad test colour");
+  expect(themeBackground(colors, "dark", "diff-add-bg", "bg-sunken")).toEqual(compositeThemeColor(line, sunken));
+  expect(themeReadabilityProblems(colors, "dark")).toContainEqual(
+    expect.stringMatching(/^fg-reading-strong on diff-add-bg:/),
+  );
+});
+test("refuses syntax colours hidden by hovered and selected diff lines", () => {
+  const tokens = {
+    "syn-plain": "#000000",
+    "fg-1": "#000000",
+    "syn-string": "#7a7a7a",
+    "diff-add-hover": "#7a7a7a",
+    "diff-select-bg": "#7a7a7a",
+  };
+  expect(problems({ version: 1, base: "light", tokens })).toEqual(
+    expect.arrayContaining([
+      "syn-string on diff-add-hover: 1.00 to 1, needs 3 to 1.",
+      "syn-string on diff-select-bg: 1.00 to 1, needs 3 to 1.",
+    ]),
   );
 });
 test("translucent backgrounds composite through surfaces; valid meta colours use opaque bg-app", () => {

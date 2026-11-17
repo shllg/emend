@@ -104,11 +104,13 @@ test("lists at most 50 displayable names in sorted order", async () => {
 });
 
 test("1000 folder entries are allowed; 1001 refuses the whole list, including ignored entries", async () => {
+  const opendir = vi.spyOn(fs, "opendir");
   await seed("mine");
   for (let i = 0; i < 999; i++) await writeFile(join(dir, `.ignored-${i}`), "");
   expect(await listThemes(dir)).toMatchObject({ themes: [{ valid: true, name: "mine" }], folderError: false });
   await writeFile(join(dir, "overflow"), "");
   expect(await listThemes(dir)).toEqual({ themes: [], folderError: true });
+  expect(opendir.mock.calls).toEqual([[dir], [dir]]);
 });
 
 test("missing or unconfigured folders are empty; missing or unsafe names are absent", async () => {

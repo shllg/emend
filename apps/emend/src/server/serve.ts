@@ -86,8 +86,9 @@ export async function startServer(
   const key = randomBytes(32).toString("base64url");
   const server = createServer({ requireHostHeader: false });
   const events = new ReviewEvents(Date.now);
-  const stopThemes = watchThemes(opts.themesDir, events, opts.themeWatcher);
+  let stopThemes = () => {};
   try {
+    stopThemes = await watchThemes(opts.themesDir, events, opts.themeWatcher);
     const bound = await new Promise<{ url: string; port: number }>((resolve, reject) => {
       server.once("error", reject);
       server.listen({ host, port }, () => {

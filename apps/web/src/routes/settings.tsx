@@ -364,7 +364,7 @@ function AppearanceSettings() {
               )}
               onChange={(value) => {
                 const theme = themes.data?.themes.find((theme) => `theme:${theme.name}` === value);
-                if (theme?.valid) selectCustomTheme(theme, themes.dataUpdatedAt);
+                if (theme?.valid) selectCustomTheme(theme);
               }}
             />
           )}

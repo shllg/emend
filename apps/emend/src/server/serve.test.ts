@@ -1,10 +1,11 @@
-import { chmod, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { request as httpRequest } from "node:http";
+import * as fs from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { request as httpRequest, Server } from "node:http";
 import { createConnection } from "node:net";
 import { join } from "node:path";
 import { Capabilities } from "@emend/contract";
 import { and, eq } from "drizzle-orm";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { ensureServer } from "../cli/server-client.ts";
 import { openDb } from "../db/client.ts";
 import { instances, tokens } from "../db/schema.ts";
@@ -14,6 +15,37 @@ import { createApp } from "./app.ts";
 import { createToken, hashSecret, rotateLocalToken, verifyBearer } from "./auth/tokens.ts";
 import { APP_CSP } from "./http/headers.ts";
 import { initializeServerState, removeDiscovery, serverConfig, startServer } from "./serve.ts";
+
+vi.mock("node:fs/promises", async (original) => ({ ...(await original<typeof import("node:fs/promises")>()) }));
+
+test("startServer finishes the theme baseline before listening can accept a request", async () => {
+  const fixture = await testDb();
+  const themesDir = join(fixture.dir, "themes");
+  await mkdir(themesDir);
+  const themeFile = join(themesDir, "mine.json");
+  await writeFile(themeFile, "{}");
+  let baselineRead = false;
+  const original = fs.stat;
+  const fingerprint = vi.spyOn(fs, "stat").mockImplementation(async (...args) => {
+    const result = await Reflect.apply(original, undefined, args);
+    if (args[0] === themeFile) baselineRead = true;
+    return result;
+  });
+  const listen = vi.spyOn(Server.prototype, "listen").mockImplementation(() => {
+    expect(baselineRead).toBe(true);
+    throw new Error("Stopped before binding a test socket");
+  });
+  try {
+    await expect(startServer({ stateDir: join(fixture.dir, "server"), themesDir, port: 0 })).rejects.toThrow(
+      "Stopped before binding a test socket",
+    );
+    expect(listen).toHaveBeenCalledOnce();
+  } finally {
+    listen.mockRestore();
+    fingerprint.mockRestore();
+    await fixture.cleanup();
+  }
+});
 
 test("bootstrap repairs missing, unknown, expired and revoked token files without changing valid tokens", async () => {
   const fixture = await testDb();

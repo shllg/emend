@@ -561,7 +561,7 @@ beside the global `config.json` on each request, never from a reviewed repositor
 `dark` or `light`. Dotfiles are skipped. Invalid names are refused if the displayed name is
 1–80 characters with no Unicode control or format characters (`\p{C}`); otherwise they are skipped.
 At most 50 files are listed, sorted by name. Each file is at most 32 KiB. Folder enumeration uses
-`opendir` and caps processing at 1000 entries, counting skipped entries too, with one overflow
+`opendir` with its default buffer size and caps processing at 1000 entries, counting skipped entries too, with one overflow
 probe. A folder with more than 1000 entries returns an empty list and `folderError: true`.
 
 A file is a JSON object with `version: 1`, `base: "dark" | "light"` and optional `fonts`, `scales`
@@ -625,7 +625,8 @@ Invalid fonts say `fonts.text must be a plain font name: letters, digits, spaces
 Readability uses WCAG contrast after clipping linear sRGB channels to 0–1 and compositing in
 sRGB. Foregrounds composite over their background. Translucent backgrounds use `bg-surface`
 unless an `over` surface is specified. `diff-add-word` composites over `diff-add-bg`, and
-`diff-del-word` over `diff-del-bg`; each line background composites over `bg-surface`.
+`diff-del-word` over `diff-del-bg`; each line background composites over `bg-surface` in the app.
+Download diff lines composite over `bg-sunken` instead, as specified in the pairs below.
 The seven surfaces `bg-app`, `bg-surface`, `bg-sunken`, `bg-raised`, `bg-reading`, `bg-reading-card`
 and `bg-inverse` must resolve to alpha 1: the page stacks them on nested elements. A translucent
 surface is refused with `bg-app must be opaque: its colour has transparency.` (the token name
@@ -635,6 +636,8 @@ varies). Compare the unrounded ratio and report two decimals, for example
 - `fg-1`, `fg-2`, `fg-3`, `fg-link`, `accent-text` on `bg-app`, `bg-surface`, `bg-sunken`, `bg-raised`.
 - `fg-inverse` on `bg-inverse`; `fg-reading`, `fg-reading-strong`, `fg-reading-muted` on `bg-reading`
   and `bg-reading-card`; `fg-link` on `bg-reading`.
+- For the Download: `fg-reading` and `fg-reading-strong` on `bg-sunken`, `diff-add-bg` over
+  `bg-sunken`, and `diff-del-bg` over `bg-sunken`.
 - `fg-1` on `bg-selected`, `bg-hover`, `bg-active`, `accent-tint`, `mark-bg`, `mark-bg-active`;
   `fg-reading` on `mark-bg` over `bg-reading`.
 - `accent-fg` on `accent`, `accent-hover`, `accent-press`.
@@ -649,22 +652,35 @@ varies). Compare the unrounded ratio and report two decimals, for example
   `diff-add-hover`, `diff-del-hover` and `diff-select-bg`.
 
 `syn-keyword`, `syn-type`, `syn-function`, `syn-string`, `syn-number`, `syn-comment` and `syn-punct`
-on `bg-surface`, `diff-add-bg`, `diff-del-bg`, `diff-add-word` (over `diff-add-bg`) and `diff-del-word`
-(over `diff-del-bg`) require 3 to 1. Disabled text is exempt. Both built-in bases pass all 116 pairs.
+on `bg-surface`, `diff-add-bg`, `diff-del-bg`, `diff-add-word` (over `diff-add-bg`), `diff-del-word`
+(over `diff-del-bg`), `diff-add-hover`, `diff-del-hover` and `diff-select-bg` require 3 to 1.
+For the Download, `fg-reading-muted` on `bg-sunken`, `diff-add-bg` over `bg-sunken`, and
+`diff-del-bg` over `bg-sunken` also requires 3 to 1. Disabled text is exempt. Both built-in bases
+pass all 146 pairs.
 
-Every two seconds from server start, regardless of open streams, the watcher fingerprints exactly
-the files returned by the same capped, sorted folder listing, using size, mtime, ctime and inode.
-Missing and too-full folders have distinct, stable fingerprints. The first tick sets the baseline;
-each later change emits `{ type: "themes" }` only on global `/api/v1/events` streams, to every
-owner. Ticks never overlap; the timer is unref'd and stops with the server. When a stream opens,
-the browser refetches queries older than that open, covering saves before it connected.
+Before the HTTP server listens, `startServer` awaits the watcher's first fingerprint as its
+baseline. Every two seconds afterwards, regardless of open streams, the watcher fingerprints
+exactly the files returned by the same capped, sorted folder listing, using size, mtime, ctime
+and inode. Missing and too-full folders have distinct, stable fingerprints. Each change emits
+`{ type: "themes" }` only on global `/api/v1/events` streams, to every owner. Ticks never overlap;
+the timer is unref'd and stops with the server. When a stream opens, the browser refetches queries
+older than that open, including the picked theme's query.
 
 Open pages refresh within a few seconds. A page using a refused or removed theme keeps its last
 valid version and shows the reason in Settings. The choice stays per device. The browser caches
-`{ savedAt, theme }` in `emend.theme.custom`, with `savedAt` from the theme list's `dataUpdatedAt`,
-and parses it only when the stored text changes. An older list cannot replace a newer cache for
-the same name, even when selecting that name; selection still sets the pick. Downloads accept a
-valid theme's name; a page keeping a cached version uses its base for downloads.
+a bare `ThemeValid` in `emend.theme.custom` and parses it only when the stored text changes.
+It skips writes whose JSON equals the stored text. No timestamp orders versions: across tabs
+the last write wins, with no ordering promise between their fetches.
+
+The root sync uses its own query for each picked name, `["themes", "pick", <name>]`, with
+`gcTime: 0`. Leaving the pick drops that query's data; picking a name fetches anew. Only valid
+entries fetched while that name is picked in this tab update the cache; missing or refused
+entries keep the last valid version. Settings uses `["themes"]` for its list. Selecting there
+seeds the cache only when it does not already hold that name, then sets the pick so the root
+sync fetches it. An old Settings list therefore cannot replace a cached version of the same name.
+The `themes` event invalidates the `["themes"]` prefix, including the per-pick query; stream-open
+refresh also reaches it. Download links read that same per-pick query: they pass the name when
+it is valid there, otherwise the matching cached version's base.
 
 ### Review read views
 

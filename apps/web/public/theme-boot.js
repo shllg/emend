@@ -6,7 +6,7 @@
     pick = localStorage.getItem("emend.theme");
     if (pick?.startsWith("theme:")) {
       const name = pick.slice(6);
-      const cached = JSON.parse(localStorage.getItem("emend.theme.custom") || "null")?.theme;
+      const cached = JSON.parse(localStorage.getItem("emend.theme.custom") || "null");
       if (
         /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$(?![\s\S])/.test(name) &&
         !["system", "dark", "light"].includes(name) &&
