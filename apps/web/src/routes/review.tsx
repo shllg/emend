@@ -1184,7 +1184,7 @@ function BinNotice({ reviewId }: { reviewId: string }) {
     }
   };
   return (
-    <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+    <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
       <div className="flex flex-col items-start gap-3 p-5">
         <p role="status">This review is in the bin.</p>
         <Button variant="primary" loading={pending} onClick={() => void restore()}>
@@ -1219,7 +1219,7 @@ export function ReviewPage() {
   // A refetch that answers 404 keeps the old data, so this check comes first.
   if (query.error instanceof ApiError && query.error.status === 404 && query.error.code === "unknown_review")
     content = (
-      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+      <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
         <div className="p-5">
           <p role="status">This review was deleted or never existed.</p>
           <Link to="/">Back to the inbox</Link>
@@ -1235,7 +1235,7 @@ export function ReviewPage() {
     );
   else
     content = (
-      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+      <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
         <div className="p-5">
           {query.isError ? (
             <>

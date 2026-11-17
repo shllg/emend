@@ -20,7 +20,8 @@ export interface SheetProps {
   onOpenChange?: (open: boolean) => void;
   onInteractOutside?: ComponentProps<typeof Dialog.Content>["onInteractOutside"];
   initialFocus?: RefObject<HTMLElement | null>;
-  returnFocus?: () => HTMLElement | null;
+  /** Return false to skip restoring focus after navigation. */
+  returnFocus?: () => HTMLElement | null | false;
   /** A supplied container mounts content in the same commit as its navigation intent. */
   portalContainer?: HTMLElement;
   /** Called once the sheet has closed and unmounted, after focus went back. */
@@ -87,7 +88,8 @@ export function Sheet({
           }}
           onCloseAutoFocus={(event) => {
             const target = returnFocus?.() ?? opener.current;
-            if (!trigger && target?.isConnected) {
+            if (target === false) event.preventDefault();
+            else if (!trigger && target?.isConnected) {
               event.preventDefault();
               target.focus({ preventScroll: true });
             }

@@ -91,7 +91,6 @@ export function Panes({
   useLayoutEffect(() => {
     setReadingHandle(showReadingHandle);
   }, [setReadingHandle, showReadingHandle]);
-  useLayoutEffect(() => () => setReadingHandle(false), [setReadingHandle]);
   const [readingPreview, setReadingPreview] = useState<number>();
   const area = useRef<HTMLDivElement>(null);
   const readingPane = useRef<HTMLElement>(null);

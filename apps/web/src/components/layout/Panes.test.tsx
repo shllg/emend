@@ -277,6 +277,26 @@ test("a 1280px Split layout reserves both CSS handle widths and keeps at least 4
   }
 });
 
+test("a loading placeholder keeps the clamped inbox width from Split", () => {
+  layoutWidth = 1280;
+  localStorage.setItem(layoutKey, JSON.stringify({ ...layoutStore.getSnapshot(), inboxWidth: 520 }));
+  const { rerender } = render(
+    <PaneFrame inbox={<aside>Inbox</aside>}>
+      <Panes header={null} reading="Writeup" diff="Code" phoneTabs={null} tab="writeup" hasDiff />
+    </PaneFrame>,
+  );
+  const handle = inbox();
+  expect(handle.getAttribute("aria-valuenow")).toBe("464");
+  expect(handle.getAttribute("aria-valuemax")).toBe("464");
+  rerender(
+    <PaneFrame inbox={<aside>Inbox</aside>}>
+      <main>Loading review…</main>
+    </PaneFrame>,
+  );
+  expect(inbox().getAttribute("aria-valuenow")).toBe("464");
+  expect(inbox().getAttribute("aria-valuemax")).toBe("464");
+});
+
 test.each([
   { pane: "tabs", hasDiff: true },
   { pane: "split", hasDiff: false },

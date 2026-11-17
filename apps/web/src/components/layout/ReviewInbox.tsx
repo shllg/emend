@@ -23,6 +23,7 @@ export function ReviewInbox({
   const { reviewId } = useParams({ strict: false });
   const search = useRef<HTMLInputElement>(null);
   const focusSearch = useRef(false);
+  const openedReview = useRef(false);
   const mountedInbox = (layout === "desktop" && !collapsed) || (layout === "tablet" && open);
   const move = (delta: 1 | -1) => {
     if (!query.data) return false;
@@ -49,6 +50,9 @@ export function ReviewInbox({
   useEffect(() => {
     if (layout !== "tablet") setOpen(false);
   }, [layout]);
+  useEffect(() => {
+    if (open) openedReview.current = false;
+  }, [open]);
   if (layout === "desktop" && !collapsed)
     return (
       <aside
@@ -83,8 +87,18 @@ export function ReviewInbox({
             if (!value) focusSearch.current = false;
           }}
           initialFocus={focusSearch.current ? search : undefined}
+          returnFocus={() => (openedReview.current ? false : null)}
         >
-          <Inbox surface="sheet" compact hideHead searchRef={search} onOpen={() => setOpen(false)} />
+          <Inbox
+            surface="sheet"
+            compact
+            hideHead
+            searchRef={search}
+            onOpen={() => {
+              openedReview.current = true;
+              setOpen(false);
+            }}
+          />
         </Sheet>
       )}
     </>

@@ -12,6 +12,7 @@ import type { ReviewTabs, ReviewTabsProps } from "./components/layout/ReviewTabs
 import { clearDraft, draftKey, editDraftKey, saveDraft } from "./lib/drafts.ts";
 import { defaultLayout, layoutStore } from "./lib/layout-store.ts";
 import { rememberPairingSecret, takePairingSecret } from "./lib/pairing-secret.ts";
+import { loadReadingPosition, readingPositionKey } from "./lib/reading-position.ts";
 import { validateReviewSearch } from "./router.tsx";
 import { Events } from "./test/events.ts";
 
@@ -2575,6 +2576,42 @@ test("tablet inbox sheet restores open sections and its body scroll after row na
   expect(reopened.querySelector<HTMLElement>(".overflow-auto")?.scrollTop).toBe(280);
 });
 
+test("tablet cached navigation keeps heading focus and Close returns to Show inbox", async () => {
+  width = 900;
+  withInboxNavigation();
+  mount(`/r/${secondItem.id}`);
+  await screen.findByRole("heading", { name: secondItem.title, level: 1 });
+  await screen.findByText("Overview");
+  fireEvent.click(await screen.findByRole("link", { name: "Needs you: Synthetic review" }), { button: 0 });
+  await screen.findByRole("heading", { name: item.title, level: 1 });
+  const opener = screen.getByRole("button", { name: "Show inbox" });
+  act(() => opener.focus());
+  fireEvent.click(opener);
+  const sheet = await screen.findByRole("dialog", { name: "Inbox" });
+  const destination = within(sheet).getByRole("link", { name: /Another proposal/ });
+  act(() => destination.focus());
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+  try {
+    await act(async () => {
+      fireEvent.click(destination, { button: 0 });
+    });
+    const heading = screen.getByRole("heading", { name: secondItem.title, level: 1 });
+    expect(document.activeElement).toBe(heading);
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(screen.queryByRole("dialog", { name: "Inbox" })).toBeNull();
+    expect(document.activeElement).toBe(heading);
+    act(() => opener.focus());
+    fireEvent.click(opener);
+    const reopened = screen.getByRole("dialog", { name: "Inbox" });
+    fireEvent.click(within(reopened).getByRole("button", { name: "Close" }));
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(screen.queryByRole("dialog", { name: "Inbox" })).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("phone inbox restores its search, open sections and page scroll after visiting a review", async () => {
   width = 390;
   withInboxNavigation();
@@ -2614,6 +2651,49 @@ test("switching reviews opens their own tabs and keeps drafts with their review"
   expect(screen.getByRole("tab", { name: "Writeup" }).getAttribute("aria-selected")).toBe("true");
   fireEvent.click(screen.getByRole("tab", { name: "Comments" }));
   expect(await screen.findByText("Only for the first review")).toBeTruthy();
+});
+
+test("switching reviews restores each review's own reading position", async () => {
+  withInboxNavigation();
+  withDraftBlock();
+  const blockId = `block-${draftBlock.id}`;
+  const bounds = vi.mocked(HTMLElement.prototype.getBoundingClientRect).getMockImplementation();
+  vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function (this: HTMLElement) {
+    if (this.hasAttribute("data-reading-scroll")) return new DOMRect(0, 0, 400, 600);
+    if (this.id === blockId) {
+      const top = this.closest<HTMLElement>("[data-reading-scroll]")?.scrollTop ?? 0;
+      return new DOMRect(0, 100 - top, 400, 100);
+    }
+    return bounds?.call(this) ?? new DOMRect();
+  });
+  const firstKey = readingPositionKey(id, "writeup");
+  const secondKey = readingPositionKey(secondItem.id, "writeup");
+  mount(`/r/${id}`);
+  await screen.findByText("Plant a seed.");
+  const first = screen.getByTestId("reading-pane");
+  fireEvent.wheel(first, { deltaY: 150 });
+  first.scrollTop = 150;
+  fireEvent.scroll(first);
+  expect(loadReadingPosition(firstKey)).toEqual({ id: blockId, fraction: 0.5 });
+  fireEvent.click(await screen.findByRole("link", { name: /Another proposal/ }), { button: 0 });
+  await screen.findByRole("heading", { name: secondItem.title, level: 1 });
+  await screen.findByText("Plant a seed.");
+  const second = screen.getByTestId("reading-pane");
+  expect(second.scrollTop).toBe(0);
+  expect(loadReadingPosition(secondKey)).toBeUndefined();
+  fireEvent.wheel(second, { deltaY: 175 });
+  second.scrollTop = 175;
+  fireEvent.scroll(second);
+  expect(loadReadingPosition(secondKey)).toEqual({ id: blockId, fraction: 0.75 });
+  fireEvent.click(screen.getByRole("link", { name: /Synthetic review/ }), { button: 0 });
+  await screen.findByRole("heading", { name: item.title, level: 1 });
+  await screen.findByText("Plant a seed.");
+  await waitFor(() => expect(screen.getByTestId("reading-pane").scrollTop).toBe(150));
+  expect(loadReadingPosition(firstKey)).toEqual({ id: blockId, fraction: 0.5 });
+  expect(loadReadingPosition(secondKey)).toEqual({ id: blockId, fraction: 0.75 });
+  fireEvent.click(screen.getByRole("link", { name: /Another proposal/ }), { button: 0 });
+  await screen.findByRole("heading", { name: secondItem.title, level: 1 });
+  await waitFor(() => expect(screen.getByTestId("reading-pane").scrollTop).toBe(175));
 });
 
 test.each([1280, 900])("sidebar kind group hides the open review under Pubs at %s px", async (size) => {
