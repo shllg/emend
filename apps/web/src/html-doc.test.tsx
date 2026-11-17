@@ -9,6 +9,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { HtmlDocFrame } from "./components/reading/HtmlDocFrame.tsx";
 import { draftKey } from "./lib/drafts.ts";
 import { type DocNavigation, FrameToParent, ParentToFrame } from "./lib/frame-messages.ts";
+import { defaultLayout, type LayoutPreferences, layoutStore } from "./lib/layout-store.ts";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const path = "docs/seed.html";
@@ -26,6 +27,7 @@ let client: QueryClient;
 let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   localStorage.clear();
+  layoutStore.update(defaultLayout);
   window.dispatchEvent(new StorageEvent("storage", { key: null }));
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   fetchMock = vi.fn(async () => Response.json({ threadId: id, commentId: id }, { status: 201 }));
@@ -63,7 +65,16 @@ test.each(["emend", "custom", undefined] as const)("%s look uses the matching lo
   expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
 });
 
-test.each([true, false])("layout precedes restore on every ready and follows app width (wide=%s)", (initialWide) => {
+test.each(
+  [true, false].flatMap((initialWide) =>
+    (["emend", "custom", undefined] as const).map((look) => ({ initialWide, look })),
+  ),
+)("$look layout precedes restore on every ready and follows app width (wide=$initialWide)", ({ initialWide, look }) => {
+  layoutStore.update({ readingWidth: "narrow", proseSize: 17, codePx: 15 });
+  const layoutMessage = (wide: boolean) => {
+    const { readingWidth: width, proseSize: prose, codePx: code } = layoutStore.getSnapshot();
+    return look === "emend" ? { type: "emend:layout", wide, width, prose, code } : { type: "emend:layout", wide };
+  };
   let width = initialWide ? 820 : 700;
   const listeners = new Map<string, Set<() => void>>();
   vi.stubGlobal("matchMedia", (query: string) => {
@@ -100,6 +111,7 @@ test.each([true, false])("layout precedes restore on every ready and follows app
         path={path}
         contentUrl={doc.contentUrl}
         threads={[]}
+        look={look}
         headings={[{ level: 2, text: "Part" }]}
         docPaths={[path]}
         reading={reading}
@@ -114,17 +126,18 @@ test.each([true, false])("layout precedes restore on every ready and follows app
   expect(post).not.toHaveBeenCalled();
   fireEvent(window, new MessageEvent("message", { source: frame.contentWindow, data: { type: "emend:ready" } }));
   expect(post.mock.calls).toEqual([
-    [{ type: "emend:layout", wide: initialWide }, "*"],
+    [layoutMessage(initialWide), "*"],
     [{ type: "emend:highlight", anchors: [] }, "*"],
     [{ type: "emend:docs", paths: [path] }, "*"],
     [{ type: "emend:goto", heading: 0, label: "Part", fraction: 0.5 }, "*"],
   ]);
   post.mockClear();
   resize(!initialWide);
-  expect(post.mock.calls).toEqual([[{ type: "emend:layout", wide: !initialWide }, "*"]]);
+  expect(post.mock.calls).toEqual([[layoutMessage(!initialWide), "*"]]);
   fireEvent.load(frame);
   post.mockClear();
   resize(initialWide);
+  act(() => layoutStore.update({ readingWidth: "wide", proseSize: 18, codePx: 12 }));
   expect(post).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText(`Reload ${path}`));
   const next = frameByTitle();
@@ -136,7 +149,7 @@ test.each([true, false])("layout precedes restore on every ready and follows app
   expect(nextPost).not.toHaveBeenCalled();
   fireEvent(window, new MessageEvent("message", { source: next.contentWindow, data: { type: "emend:ready" } }));
   expect(nextPost.mock.calls).toEqual([
-    [{ type: "emend:layout", wide: !initialWide }, "*"],
+    [layoutMessage(!initialWide), "*"],
     [{ type: "emend:highlight", anchors: [] }, "*"],
     [{ type: "emend:docs", paths: [path] }, "*"],
     [{ type: "emend:goto", heading: 0, label: "Part", fraction: 0.5 }, "*"],
@@ -206,6 +219,60 @@ function mount(
     fragment: (fragment: string) => view.rerender(ui(threads, { type: "emend:navigate", path, fragment })),
   };
 }
+
+const preferenceChanges: Partial<LayoutPreferences>[] = [
+  ...(["comfortable", "wide", "narrow"] as const).map((readingWidth) => ({ readingWidth })),
+  ...([15, 16, 17, 18] as const).map((proseSize) => ({ proseSize })),
+  ...([12, 13, 14, 15] as const).map((codePx) => ({ codePx })),
+];
+
+test.each(preferenceChanges)("emend layout applies %j live and sends stored values on a fresh mount", (patch) => {
+  layoutStore.update({
+    readingWidth: patch.readingWidth === "comfortable" ? "wide" : "comfortable",
+    proseSize: patch.proseSize === 16 ? 15 : 16,
+    codePx: patch.codePx === 13 ? 12 : 13,
+  });
+  const layoutMessage = () => {
+    const { readingWidth: width, proseSize: prose, codePx: code } = layoutStore.getSnapshot();
+    return { type: "emend:layout", wide: window.matchMedia("(min-width: 768px)").matches, width, prose, code };
+  };
+  const view = mount([], undefined, undefined, "emend");
+  const src = view.frame.src;
+  fireEvent.load(view.frame);
+  expect(view.post).not.toHaveBeenCalled();
+  view.message({ type: "emend:ready" });
+  expect(view.post.mock.calls[0]).toEqual([layoutMessage(), "*"]);
+  view.post.mockClear();
+  act(() => layoutStore.update(patch));
+  expect(view.post.mock.calls).toEqual([[layoutMessage(), "*"]]);
+  expect(view.container.querySelector("iframe")).toBe(view.frame);
+  expect(view.frame.src).toBe(src);
+  view.post.mockClear();
+  act(() => layoutStore.update({ hideResolved: true }));
+  expect(view.post).not.toHaveBeenCalled();
+  view.unmount();
+  const fresh = mount([], undefined, undefined, "emend");
+  fireEvent.load(fresh.frame);
+  fresh.message({ type: "emend:ready" });
+  expect(fresh.post.mock.calls[0]).toEqual([layoutMessage(), "*"]);
+});
+
+test.each(["custom", undefined] as const)("%s look ignores View width and size changes", (look) => {
+  const view = mount([], undefined, undefined, look);
+  const src = view.frame.src;
+  fireEvent.load(view.frame);
+  view.message({ type: "emend:ready" });
+  expect(view.post.mock.calls[0]).toEqual([
+    { type: "emend:layout", wide: window.matchMedia("(min-width: 768px)").matches },
+    "*",
+  ]);
+  view.post.mockClear();
+  for (const patch of preferenceChanges) act(() => layoutStore.update(patch));
+  expect(view.post).not.toHaveBeenCalled();
+  expect(view.container.querySelector("iframe")).toBe(view.frame);
+  expect(view.frame.src).toBe(src);
+});
+
 test.each(["reply", "edit"])(
   "HTML docs retain draft-based %s restoration after dismissal and remount",
   async (kind) => {
@@ -276,12 +343,38 @@ test("closed strict message schemas enforce every contract limit", () => {
     expect(FrameToParent.safeParse({ type: "emend:navigate", path: "other.html", fragment }).success).toBe(true);
 });
 
-test("layout messages accept only a boolean wide value and no extra fields", () => {
-  for (const wide of [true, false])
+test("layout messages accept exactly the legacy shape or all three valid preferences", () => {
+  const full = { type: "emend:layout", wide: true, width: "comfortable", prose: 16, code: 13 };
+  for (const wide of [true, false]) {
     expect(ParentToFrame.parse({ type: "emend:layout", wide })).toEqual({ type: "emend:layout", wide });
-  for (const wide of [undefined, null, "wide", "true", 0, 1, {}, []])
+    for (const width of ["comfortable", "wide", "narrow"])
+      for (const prose of [15, 16, 17, 18])
+        for (const code of [12, 13, 14, 15]) {
+          const message = { ...full, wide, width, prose, code };
+          expect(ParentToFrame.parse(message)).toEqual(message);
+        }
+  }
+  for (const wide of [undefined, null, "wide", "true", 0, 1, {}, []]) {
     expect(ParentToFrame.safeParse({ type: "emend:layout", wide }).success).toBe(false);
+    expect(ParentToFrame.safeParse({ ...full, wide }).success).toBe(false);
+  }
+  for (const width of [undefined, null, "unknown", "1024px", 0, {}, []])
+    expect(ParentToFrame.safeParse({ ...full, width }).success).toBe(false);
+  for (const prose of [undefined, null, 14, 19, 16.5, "17", {}, [], true, NaN, Infinity])
+    expect(ParentToFrame.safeParse({ ...full, prose }).success).toBe(false);
+  for (const code of [undefined, null, 11, 16, 13.5, "13", {}, [], true, NaN, Infinity])
+    expect(ParentToFrame.safeParse({ ...full, code }).success).toBe(false);
+  for (const partial of [
+    { width: "wide" },
+    { prose: 17 },
+    { code: 14 },
+    { width: "wide", prose: 17 },
+    { width: "wide", code: 14 },
+    { prose: 17, code: 14 },
+  ])
+    expect(ParentToFrame.safeParse({ type: "emend:layout", wide: true, ...partial }).success).toBe(false);
   expect(ParentToFrame.safeParse({ type: "emend:layout", wide: true, extra: true }).success).toBe(false);
+  expect(ParentToFrame.safeParse({ ...full, extra: true }).success).toBe(false);
 });
 
 test("the drawer includes this doc's unplaced threads without offering a frame jump", () => {

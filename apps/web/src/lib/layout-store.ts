@@ -4,13 +4,16 @@ import { useSyncExternalStore } from "react";
 export const layoutKey = "emend.layout.v1";
 export const tabsDefaultKey = "emend.layout.tabs-default";
 const paneChoice = z.enum(["split", "tabs"]);
+export const readingWidthSchema = z.enum(["comfortable", "wide", "narrow"]);
+export const proseSizeSchema = z.union([z.literal(15), z.literal(16), z.literal(17), z.literal(18)]);
+export const codePxSchema = z.union([z.literal(12), z.literal(13), z.literal(14), z.literal(15)]);
 export const layoutSchema = z.object({
   inboxWidth: z.number().min(220).max(520).catch(280),
   readingShare: z.number().min(0).max(1).catch(0.42),
   pane: z
     .object({ desktop: paneChoice.catch("tabs"), tablet: paneChoice.catch("tabs") })
     .catch({ desktop: "tabs", tablet: "tabs" }),
-  readingWidth: z.enum(["comfortable", "wide", "narrow"]).catch("comfortable"),
+  readingWidth: readingWidthSchema.catch("comfortable"),
   hideResolved: z.boolean().catch(false),
   diffStyle: z.enum(["split", "unified"]).catch("split"),
   fileOrder: z.enum(["topics", "path"]).catch("topics"),
@@ -21,9 +24,9 @@ export const layoutSchema = z.object({
     .object({ phone: z.boolean().catch(false), tablet: z.boolean().catch(true), desktop: z.boolean().catch(true) })
     .catch({ phone: false, tablet: true, desktop: true }),
   inboxCollapsed: z.boolean().catch(false),
-  proseSize: z.union([z.literal(15), z.literal(16), z.literal(17), z.literal(18)]).catch(16),
+  proseSize: proseSizeSchema.catch(16),
   // Code in diffs inherits --type-code, currently 13px.
-  codePx: z.union([z.literal(12), z.literal(13), z.literal(14), z.literal(15)]).catch(13),
+  codePx: codePxSchema.catch(13),
 });
 export type LayoutPreferences = z.infer<typeof layoutSchema>;
 export type FileOrder = LayoutPreferences["fileOrder"];

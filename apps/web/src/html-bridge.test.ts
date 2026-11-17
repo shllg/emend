@@ -1,14 +1,14 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
-import { Window } from "happy-dom";
+import { type Element, Window } from "happy-dom";
 import { expect, test, vi } from "vitest";
 import { docText, placeHtmlSpan } from "../../../packages/core/src/place/html.ts";
 
 const corpus: { name: string; old: string; new: string }[] = JSON.parse(
   readFileSync(new URL("../../../packages/core/src/place/corpus/html.json", import.meta.url), "utf8"),
 );
-function bridge(html: string, customHighlights = true) {
+function bridge(html: string, customHighlights = true, prepare?: (window: Window) => void) {
   const window = new Window({
     url: `http://127.0.0.1:3636/content/${"k".repeat(43)}${"a".repeat(32)}/docs/seed.html`,
     settings: { enableJavaScriptEvaluation: false },
@@ -32,6 +32,7 @@ function bridge(html: string, customHighlights = true) {
     }
   }
   const replaceSync = vi.spyOn(window.CSSStyleSheet.prototype, "replaceSync");
+  prepare?.(window);
   runInNewContext(script, {
     window,
     document: window.document,
@@ -79,30 +80,391 @@ test.each(corpus)("bridge text equals server docText for corpus $name", async (e
   }
 });
 
-test("bridge applies parent layout booleans through prototype DOM calls", async () => {
+test("bridge applies parent layout preferences through prototype DOM calls", async () => {
   const b = bridge("<body><h2>Part</h2></body>");
+  // Attribute checks need no layout; the reflow harness supplies it explicitly.
+  const visible = vi.spyOn(b.window.Element.prototype, "checkVisibility").mockReturnValue(false);
   try {
     const root = b.window.document.documentElement;
     const clobbered = vi.fn();
     Object.defineProperty(root, "setAttribute", { value: clobbered });
+    Object.defineProperty(root, "getAttribute", { value: clobbered });
+    const attribute = (name: string) => b.window.Element.prototype.getAttribute.call(root, name);
     Object.defineProperty(b.window.document, "documentElement", {
       configurable: true,
       value: b.window.document.createElement("form"),
     });
     expect(root.hasAttribute("data-emend-layout")).toBe(false);
     b.message({ type: "emend:layout", wide: true });
-    expect(root.getAttribute("data-emend-layout")).toBe("wide");
-    b.message({ type: "emend:layout", wide: false });
-    expect(root.getAttribute("data-emend-layout")).toBe("narrow");
+    expect(attribute("data-emend-layout")).toBe("wide");
+    b.message({ type: "emend:layout", wide: false, width: "narrow", prose: 18, code: 15 });
+    expect(attribute("data-emend-layout")).toBe("narrow");
+    expect(attribute("data-emend-width")).toBe("narrow");
+    expect(attribute("data-emend-prose")).toBe("18");
+    expect(attribute("data-emend-code")).toBe("15");
     expect(clobbered).not.toHaveBeenCalled();
   } finally {
+    visible.mockRestore();
     Reflect.deleteProperty(b.window.document, "documentElement");
     await b.window.happyDOM.close();
   }
 });
 
+test("bridge sets each allowed preference and legacy layout leaves preferences alone", async () => {
+  const b = bridge("<h2>Part</h2>");
+  const visible = vi.spyOn(b.window.Element.prototype, "checkVisibility").mockReturnValue(false);
+  const set = vi.spyOn(b.window.Element.prototype, "setAttribute");
+  try {
+    const root = b.window.document.documentElement;
+    for (const wide of [true, false])
+      for (const width of ["comfortable", "wide", "narrow"])
+        for (const prose of [15, 16, 17, 18])
+          for (const code of [12, 13, 14, 15]) {
+            set.mockClear();
+            b.message({ type: "emend:layout", wide, width, prose, code });
+            expect(set.mock.calls).toEqual([
+              ["data-emend-layout", wide ? "wide" : "narrow"],
+              ["data-emend-width", width],
+              ["data-emend-prose", String(prose)],
+              ["data-emend-code", String(code)],
+            ]);
+            expect(set.mock.instances.every((element) => element === root)).toBe(true);
+            expect(root.getAttribute("data-emend-width")).toBe(width);
+            expect(root.getAttribute("data-emend-prose")).toBe(String(prose));
+            expect(root.getAttribute("data-emend-code")).toBe(String(code));
+          }
+    set.mockClear();
+    b.message({ type: "emend:layout", wide: true });
+    expect(set.mock.calls).toEqual([["data-emend-layout", "wide"]]);
+    expect(root.getAttribute("data-emend-width")).toBe("narrow");
+    expect(root.getAttribute("data-emend-prose")).toBe("18");
+    expect(root.getAttribute("data-emend-code")).toBe("15");
+  } finally {
+    set.mockRestore();
+    visible.mockRestore();
+    await b.window.happyDOM.close();
+  }
+});
+
+test("bridge ignores invalid or partial preferences and messages from anyone but its parent", async () => {
+  const b = bridge("<h2>Part</h2>");
+  const visible = vi.spyOn(b.window.Element.prototype, "checkVisibility").mockReturnValue(false);
+  const root = b.window.document.documentElement;
+  b.message({ type: "emend:layout", wide: false, width: "narrow", prose: 15, code: 12 });
+  const before = [...root.attributes].map(({ name, value }) => [name, value]);
+  const set = vi.spyOn(b.window.Element.prototype, "setAttribute");
+  try {
+    const full = { type: "emend:layout", wide: true, width: "wide", prose: 17, code: 14 };
+    const invalid = [
+      ...[undefined, null, "true", 1, {}, []].map((wide) => ({ ...full, wide })),
+      ...[undefined, null, "unknown", "68ch", 0, {}, []].map((width) => ({ ...full, width })),
+      ...[undefined, null, 14, 19, 16.5, "17", {}, [], true, NaN, Infinity].map((prose) => ({ ...full, prose })),
+      ...[undefined, null, 11, 16, 13.5, 16.5, "13", {}, [], true, NaN, Infinity].map((code) => ({ ...full, code })),
+      ...[
+        { width: "wide" },
+        { prose: 17 },
+        { code: 14 },
+        { width: "wide", prose: 17 },
+        { width: "wide", code: 14 },
+        { prose: 17, code: 14 },
+      ].map((partial) => ({ type: "emend:layout", wide: true, ...partial })),
+    ];
+    for (const data of invalid) b.message(data);
+    for (const source of [null, b.window, {}]) b.message(full, source);
+    expect(set).not.toHaveBeenCalled();
+    expect([...root.attributes].map(({ name, value }) => [name, value])).toEqual(before);
+  } finally {
+    set.mockRestore();
+    visible.mockRestore();
+    await b.window.happyDOM.close();
+  }
+});
+
+const initialLayout = { type: "emend:layout", wide: true, width: "comfortable", prose: 16, code: 13 };
+
+function layoutBridge(
+  html = "<h2>First</h2><h3>Second</h3><h2>Last</h2>",
+  {
+    offsets = [300, 350, 900],
+    wideScale = 2,
+    nested = false,
+    reverse = false,
+  }: {
+    offsets?: number[];
+    wideScale?: number;
+    nested?: boolean;
+    reverse?: boolean;
+  } = {},
+) {
+  const b = bridge(html, true, (window) => {
+    if (vi.isFakeTimers())
+      Object.assign(window, { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout });
+  });
+  const root = b.window.document.scrollingElement;
+  const container = nested ? b.window.document.querySelector("main") : root;
+  if (!container) throw new Error("Missing scroll container");
+  const { get: getTop, set: setTop } = Object.getOwnPropertyDescriptor(b.window.Element.prototype, "scrollTop") ?? {};
+  if (!getTop || !setTop) throw new Error("Missing scrollTop accessors");
+  const readTop = (element: Element): number => getTop.call(element);
+  const writeTop = (element: Element, top: number) => setTop.call(element, top);
+  const attribute = (name: string) => b.window.Element.prototype.getAttribute.call(root, name);
+  const headings = [...b.window.document.querySelectorAll("h2,h3")];
+  Object.defineProperty(b.window, "innerHeight", { configurable: true, value: 400 });
+  const assignedSlot = Object.getOwnPropertyDescriptor(b.window.Element.prototype, "assignedSlot");
+  if (!assignedSlot)
+    Object.defineProperty(b.window.Element.prototype, "assignedSlot", { configurable: true, get: () => null });
+  const scale = () => {
+    if (attribute("data-emend-width") === "wide") return wideScale;
+    return attribute("data-emend-prose") === "18" ||
+      attribute("data-emend-code") === "15" ||
+      attribute("data-emend-layout") === "narrow"
+      ? 2
+      : 1;
+  };
+  const limit = () => Math.max(0, 1100 * scale() - 400);
+  const offset = (element: Element) => (offsets[headings.indexOf(element)] ?? 0) * scale() - (reverse ? limit() : 0);
+  const clamp = (top: number) => (reverse ? Math.min(0, Math.max(-limit(), top)) : Math.max(0, Math.min(limit(), top)));
+  const visible = vi.spyOn(b.window.Element.prototype, "checkVisibility").mockReturnValue(true);
+  const scrollHeight = vi.spyOn(b.window.Element.prototype, "scrollHeight", "get").mockImplementation(function (
+    this: Element,
+  ) {
+    return nested && this !== container ? 400 : 1100 * scale();
+  });
+  const bounds = vi.spyOn(b.window.Element.prototype, "getBoundingClientRect").mockImplementation(function (
+    this: Element,
+  ) {
+    return new b.window.DOMRect(0, offset(this) - readTop(container) - (nested ? readTop(root) : 0), 400, 20);
+  });
+  const scroll = vi.spyOn(b.window.Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) {
+    writeTop(container, clamp(offset(this)));
+  });
+  const scrollTo = vi.spyOn(b.window.Element.prototype, "scrollTo").mockImplementation(function (
+    this: Element,
+    options: number | ScrollToOptions | undefined,
+  ) {
+    if (this === container && typeof options === "object" && options.behavior === "instant")
+      writeTop(this, clamp(Math.round(options.top ?? 0)));
+  });
+  b.message(initialLayout);
+  const restore = () => {
+    for (const spy of [visible, scrollHeight, bounds, scroll, scrollTo]) spy.mockRestore();
+    if (!assignedSlot) Reflect.deleteProperty(b.window.Element.prototype, "assignedSlot");
+  };
+  return { ...b, root, container, headings, visible, scroll, scrollTo, readTop, writeTop, restore };
+}
+
+test.each([{ prose: 18 }, { code: 15 }, { width: "wide" }, { wide: false }])(
+  "layout change %j keeps the scrolled heading and fraction through reflow",
+  async (change) => {
+    const b = layoutBridge();
+    try {
+      b.root.scrollTop = 500;
+      const fraction = (100 - (350 - b.root.scrollTop)) / (900 - 350);
+      b.message({ ...initialLayout, ...change });
+      expect(b.scroll).toHaveBeenCalledExactlyOnceWith({ block: "start", behavior: "instant" });
+      expect(b.scroll.mock.instances[0]).toBe(b.headings[1]);
+      expect(b.root.scrollTop).toBe(1100);
+      expect((100 - (700 - b.root.scrollTop)) / (1800 - 700)).toBeCloseTo(fraction);
+      expect(b.window.document.body.scrollTop).toBe(0);
+    } finally {
+      b.restore();
+      await b.window.happyDOM.close();
+    }
+  },
+);
+
+test.each([false, true])("layout change preserves only a pin that still holds (moved=%s)", async (moved) => {
+  const b = layoutBridge();
+  try {
+    b.message({ type: "emend:goto", heading: 0, label: "First", fraction: 0.25 });
+    expect(b.root.scrollTop).toBe(213); // Rounded landing is 0.26; the pin holds 0.25.
+    if (moved) b.root.scrollTop = 225; // The reader moved to fraction 0.5 before the next sample.
+    b.scroll.mockClear();
+    b.message({ ...initialLayout, prose: 18 });
+    expect(b.scroll.mock.instances).toEqual([b.headings[0]]);
+    expect(b.root.scrollTop).toBe(moved ? 550 : 525);
+  } finally {
+    b.restore();
+    await b.window.happyDOM.close();
+  }
+});
+
+test("layout keeps a pin clamped to zero when Wide fits and restores it on returning to Narrow", async () => {
+  vi.useFakeTimers();
+  const b = layoutBridge(undefined, { wideScale: 0.25 });
+  try {
+    const narrow = { ...initialLayout, width: "narrow" };
+    b.message(narrow);
+    b.root.scrollTop = 500;
+    const held = { type: "emend:position", heading: 1, fraction: 5 / 11 };
+    b.message({ ...initialLayout, width: "wide" });
+    expect(b.scroll.mock.instances).toEqual([b.headings[1]]);
+    expect(b.root.scrollTop).toBe(0);
+    vi.runAllTimers();
+    expect(b.post).toHaveBeenLastCalledWith(held, "*");
+    b.scroll.mockClear();
+    b.message(narrow);
+    expect(b.scroll.mock.instances).toEqual([b.headings[1]]);
+    expect(b.root.scrollTop).toBe(500);
+    vi.runAllTimers();
+    expect(b.post).toHaveBeenLastCalledWith(held, "*");
+  } finally {
+    b.restore();
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    await b.window.happyDOM.close();
+  }
+});
+
+const nestedLayoutHtml = '<main style="height:400px;overflow:auto"><h2>First</h2><h3>Second</h3><h2>Last</h2></main>';
+
+test("layout keeps the heading and fraction inside a scrolled container while the root stays at zero", async () => {
+  const b = layoutBridge(nestedLayoutHtml, { nested: true });
+  try {
+    b.container.scrollTop = 500;
+    const fraction = (100 - (350 - b.container.scrollTop)) / (900 - 350);
+    b.message({ ...initialLayout, prose: 18 });
+    expect(b.scroll.mock.instances).toEqual([b.headings[1]]);
+    expect(b.scrollTo.mock.instances).toContain(b.container);
+    expect(b.container.scrollTop).toBe(1100);
+    expect((100 - (700 - b.container.scrollTop)) / (1800 - 700)).toBeCloseTo(fraction);
+    expect(b.root.scrollTop).toBe(0);
+    expect(b.window.document.body.scrollTop).toBe(0);
+  } finally {
+    b.restore();
+    await b.window.happyDOM.close();
+  }
+});
+
+test("layout holds a negative scrollTop in a column-reverse container through a size change", async () => {
+  const b = layoutBridge(
+    '<main style="height:400px;overflow:auto;display:flex;flex-direction:column-reverse">' +
+      '<article style="flex-shrink:0"><h2>First</h2><h3>Second</h3><h2>Last</h2></article></main>',
+    { nested: true, reverse: true },
+  );
+  try {
+    b.container.scrollTop = -200;
+    const fraction = (100 - (-350 - b.container.scrollTop)) / 550;
+    b.message({ ...initialLayout, prose: 18 });
+    expect(b.scroll.mock.instances).toEqual([b.headings[1]]);
+    expect(b.scrollTo.mock.instances).toContain(b.container);
+    expect(b.container.scrollTop).toBe(-700);
+    expect((100 - (-1100 - b.container.scrollTop)) / 1100).toBeCloseTo(fraction);
+    expect(b.root.scrollTop).toBe(0);
+  } finally {
+    b.restore();
+    await b.window.happyDOM.close();
+  }
+});
+
+test("layout holds through prototype calls despite clobbered root and container members", async () => {
+  const b = layoutBridge(nestedLayoutHtml, { nested: true });
+  // happy-dom's scrollY getter reads root.scrollTop; a browser's native getter does not.
+  const scrollY = vi.spyOn(b.window, "scrollY", "get").mockImplementation(() => b.readTop(b.root));
+  const clobbered = vi.fn();
+  const members = [b.root, b.container].flatMap((element) =>
+    ["setAttribute", "getAttribute", "scrollTop"].map((name) => ({
+      element,
+      name,
+      descriptor: Object.getOwnPropertyDescriptor(element, name),
+    })),
+  );
+  try {
+    b.writeTop(b.container, 500);
+    for (const { element, name } of members)
+      Object.defineProperty(element, name, {
+        configurable: true,
+        ...(name === "scrollTop" ? { get: clobbered, set: clobbered } : { value: clobbered }),
+      });
+    b.message({ ...initialLayout, prose: 18 });
+    expect(b.scroll).toHaveBeenCalledExactlyOnceWith({ block: "start", behavior: "instant" });
+    expect(b.scroll.mock.instances).toEqual([b.headings[1]]);
+    expect(b.readTop(b.container)).toBe(1100);
+    expect((100 - (700 - b.readTop(b.container))) / 1100).toBeCloseTo(5 / 11);
+    expect(b.readTop(b.root)).toBe(0);
+    expect(b.window.Element.prototype.getAttribute.call(b.root, "data-emend-prose")).toBe("18");
+    expect(clobbered).not.toHaveBeenCalled();
+  } finally {
+    for (const { element, name, descriptor } of members) {
+      if (descriptor) Object.defineProperty(element, name, descriptor);
+      else Reflect.deleteProperty(element, name);
+    }
+    scrollY.mockRestore();
+    b.restore();
+    await b.window.happyDOM.close();
+  }
+});
+
+test("layout leaves an unscrolled doc at the top even when the first heading is above the reading line", async () => {
+  const b = layoutBridge(undefined, { offsets: [0, 350, 900] });
+  try {
+    b.message({ ...initialLayout, prose: 18 });
+    expect(b.scroll).not.toHaveBeenCalled();
+    expect(b.scrollTo).not.toHaveBeenCalled();
+    expect(b.root.scrollTop).toBe(0);
+  } finally {
+    b.restore();
+    await b.window.happyDOM.close();
+  }
+});
+
+test.each([false, true])(
+  "position samples keep restored and reflowed pins until the reader scrolls (nested=%s)",
+  async (nested) => {
+    vi.useFakeTimers();
+    const b = layoutBridge(nested ? nestedLayoutHtml : undefined, { nested });
+    try {
+      expect(b.post).toHaveBeenCalledWith({ type: "emend:ready" }, "*");
+      const held = { type: "emend:position", heading: 0, fraction: 0.25 };
+      b.message({ type: "emend:goto", heading: 0, label: "First", fraction: 0.25 });
+      expect(b.container.scrollTop).toBe(213);
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      vi.runAllTimers();
+      expect(b.post).toHaveBeenLastCalledWith(held, "*");
+
+      b.message({ ...initialLayout, prose: 18 });
+      expect(b.container.scrollTop).toBe(525);
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      vi.runAllTimers();
+      expect(b.post).toHaveBeenLastCalledWith(held, "*");
+
+      b.post.mockClear();
+      b.container.scrollTop = 900;
+      b.container.dispatchEvent(new b.window.Event("scroll"));
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      vi.runAllTimers();
+      expect(b.post).toHaveBeenCalledExactlyOnceWith({ type: "emend:position", heading: 1, fraction: 3 / 11 }, "*");
+      if (nested) expect(b.root.scrollTop).toBe(0);
+    } finally {
+      b.restore();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+      await b.window.happyDOM.close();
+    }
+  },
+);
+
+test.each(["top", "unchanged", "hidden", "no headings", "before headings"])(
+  "layout does not scroll at %s",
+  async (kind) => {
+    const b = layoutBridge(kind === "no headings" ? "<p>Introduction</p>" : undefined);
+    try {
+      b.root.scrollTop = kind === "top" ? 0 : kind === "before headings" ? 10 : 500;
+      if (kind === "hidden") b.visible.mockReturnValue(false);
+      b.message(kind === "unchanged" ? initialLayout : { ...initialLayout, prose: 18 });
+      expect(b.scroll).not.toHaveBeenCalled();
+      expect(b.scrollTo).not.toHaveBeenCalled();
+      expect(b.root.getAttribute("data-emend-prose")).toBe(kind === "unchanged" ? "16" : "18");
+    } finally {
+      b.restore();
+      await b.window.happyDOM.close();
+    }
+  },
+);
+
 test("bridge ignores non-boolean layouts and layouts from anyone but the parent", async () => {
   const b = bridge("<body><h2>Part</h2></body>");
+  const visible = vi.spyOn(b.window.Element.prototype, "checkVisibility").mockReturnValue(false);
   try {
     const root = b.window.document.documentElement;
     b.message({ type: "emend:layout", wide: false });
@@ -110,6 +472,7 @@ test("bridge ignores non-boolean layouts and layouts from anyone but the parent"
     for (const source of [null, b.window, {}]) b.message({ type: "emend:layout", wide: true }, source);
     expect(root.getAttribute("data-emend-layout")).toBe("narrow");
   } finally {
+    visible.mockRestore();
     await b.window.happyDOM.close();
   }
 });

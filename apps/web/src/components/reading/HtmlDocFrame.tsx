@@ -5,6 +5,7 @@ import { claimDraft, useDraftClaim } from "../../lib/composer-owner.ts";
 import { draftKey, listDrafts, subscribeDrafts } from "../../lib/drafts.ts";
 import { type DocNavigation, FrameToParent, type HtmlPosition, type ParentToFrame } from "../../lib/frame-messages.ts";
 import { useLayout, useMedia } from "../../lib/layout.ts";
+import { useLayoutPreferences } from "../../lib/layout-store.ts";
 import { focusReadingTarget } from "../../lib/reading-focus.ts";
 import { loadReadingPosition, saveReadingPosition } from "../../lib/reading-position.ts";
 import type { ReadingEntry } from "../../lib/use-reading-trail.ts";
@@ -57,6 +58,10 @@ export function HtmlDocFrame({
 }) {
   const phone = useLayout() === "phone";
   const wide = useMedia("(min-width: 768px)");
+  const { readingWidth, proseSize, codePx } = useLayoutPreferences();
+  const width = look === "emend" ? readingWidth : undefined;
+  const prose = look === "emend" ? proseSize : undefined;
+  const code = look === "emend" ? codePx : undefined;
   const savedDrafts = JSON.parse(
     useSyncExternalStore(subscribeDrafts, () =>
       JSON.stringify(
@@ -199,8 +204,11 @@ export function HtmlDocFrame({
     return () => window.removeEventListener("message", receive);
   }, [path, contentUrl, images, composing, composerOpen, onNavigate, headings, reading, onPosition, markAway]);
   useEffect(() => {
-    if (ready) post({ type: "emend:layout", wide });
-  }, [ready, wide, post]);
+    if (!ready) return;
+    if (width !== undefined && prose !== undefined && code !== undefined)
+      post({ type: "emend:layout", wide, width, prose, code });
+    else post({ type: "emend:layout", wide });
+  }, [ready, wide, width, prose, code, post]);
   useEffect(() => {
     if (ready && !gone.current)
       frame.current?.contentWindow?.postMessage({ type: "emend:highlight", anchors: JSON.parse(anchors) }, "*");

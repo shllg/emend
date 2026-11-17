@@ -3,7 +3,9 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { pubStylesheetSafe } from "@emend/contract";
 import { expect, test } from "vitest";
+import { readingMeasure } from "./lib/layout-store.ts";
 
 const webSource = fileURLToPath(new URL(".", import.meta.url));
 const webLicenses = fileURLToPath(new URL("../public/licenses/", import.meta.url));
@@ -222,11 +224,15 @@ test("pub defaults use tokens, stay inside one emend layer and define the docume
   }
   const flat = css.replace(/\s+/g, " ");
   const wide =
-    "--reading-max: 1024px; max-width: calc(var(--reading-max) + 112px); " +
+    "max-width: calc(var(--reading-max) + 112px); " +
     "padding: calc(var(--space-6) + var(--space-1)) 56px calc(var(--space-16) + var(--space-2)); " +
     "padding-right: clamp(var(--space-8), calc(100% - var(--reading-max) - 56px), 56px);";
-  expect(flat).toContain(`:root[data-emend-layout="wide"] body { ${wide} }`);
-  expect(flat).toContain(`@media (min-width: 768px) { :root:not([data-emend-layout]) body { ${wide} } }`);
+  expect(flat).toContain(
+    `:root[data-emend-layout="wide"] body { --reading-max: var(--reader-measure, 1024px); ${wide} }`,
+  );
+  expect(flat).toContain(
+    `@media (min-width: 768px) { :root:not([data-emend-layout]) body { --reading-max: 1024px; ${wide} } }`,
+  );
   const narrow = "grid-template-columns: minmax(0, 1fr);";
   expect(flat).toContain(`:root[data-emend-layout="narrow"] dl.facts { ${narrow} }`);
   expect(flat).toContain(`@media (max-width: 767px) { :root:not([data-emend-layout]) dl.facts { ${narrow} } }`);
@@ -235,6 +241,23 @@ test("pub defaults use tokens, stay inside one emend layer and define the docume
   const entry = readFileSync(join(webSource, "../pub-frame.css"), "utf8");
   for (const name of ["pub-fonts", "colors", "typography", "spacing"])
     expect(entry).toContain(`@import "./src/styles/${name}.css" layer(emend);`);
+});
+
+test("pub preferences match reading measures and sizes through safe root attribute rules", () => {
+  const css = readFileSync(join(webSource, "styles/pub.css"), "utf8");
+  expect(pubStylesheetSafe(css)).toBe(true);
+  const flat = css.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, " ");
+  for (const [width, measure] of Object.entries(readingMeasure)) {
+    if (width === "comfortable") {
+      expect(flat).toContain(
+        `:root[data-emend-layout="wide"] body { --reading-max: var(--reader-measure, ${measure});`,
+      );
+    } else expect(flat).toContain(`:root[data-emend-width="${width}"] { --reader-measure: ${measure}; }`);
+  }
+  for (const prose of [15, 16, 17, 18])
+    expect(flat).toContain(`:root[data-emend-prose="${prose}"] { --reader-prose-size: ${prose}px; }`);
+  for (const code of [12, 13, 14, 15])
+    expect(flat).toContain(`:root[data-emend-code="${code}"] { --reader-code-size: ${code}px; }`);
 });
 
 test("pub fonts reuse the app's exact faces without JetBrains Mono italic", () => {

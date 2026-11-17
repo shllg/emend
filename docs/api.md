@@ -946,11 +946,28 @@ navigating to another doc under the current doc's key still returns 404 and trig
 Other frame messages carry ready notifications, proposed quotes, quote highlights and thread
 scroll requests; saving a comment requires the reviewer's explicit action.
 
-After each `emend:ready`, the parent sends `{ type: "emend:layout", wide: boolean }` first, before
-highlights, doc paths or position restore. It sends layout again whenever the app crosses its
-768px breakpoint. The bridge sets `data-emend-layout` to `wide` or `narrow` on the root element.
-emend's look uses it to match the Markdown reader's layout. Until it arrives, the frame's own
-width decides.
+After each `emend:ready`, the parent sends `emend:layout` first, before highlights, doc paths or
+position restore. The message schema accepts exactly two strict shapes, with no extra fields:
+
+- `{ type: "emend:layout", wide: boolean }`
+- `{ type: "emend:layout", wide: boolean, width: "comfortable" | "wide" | "narrow", prose: 15 | 16 | 17 | 18, code: 12 | 13 | 14 | 15 }`
+
+The parent adds the View menu's width and sizes only for a frame in emend's look. It sends layout
+again whenever the app crosses its 768px breakpoint, or those preferences change for emend's look,
+without reloading the frame. Custom and legacy frames receive only `wide`.
+The bridge accepts layout only from its parent. When `width`, `prose` or `code` is present, all
+three must be present and valid; otherwise it ignores the whole message, `wide` included. It
+sets `data-emend-layout` to `wide` or `narrow` on the root element and, when supplied, sets
+`data-emend-width` to the width name, `data-emend-prose` and `data-emend-code` to the size strings.
+A message without preferences leaves the earlier width and size attributes alone. When these
+attributes change while a pinned position still holds, or any container on the reading heading's
+rendered path is scrolled (a nonzero `scrollTop`), the bridge returns to the same heading and
+fraction. Every `emend:goto` pins its target (a restore, a Contents pick or a `#h-` link), and so
+does the bridge's own return after a layout change; the pin holds until the view moves away from
+where it landed. This includes nested scrollers and a pinned position temporarily clamped to the
+top because the doc fits. A doc with nothing scrolled and no pin stays where it is. emend's look uses these attributes
+to match the Markdown reader's layout and sizes. On phones the measure stays 68ch; sizes still
+apply. Until layout arrives, the frame's own width decides.
 
 After `emend:ready`, the parent sends `{ type: "emend:docs", paths: FilePath[] }`, the exact doc
 paths in this revision. Bridge links resolve against the existing document base, decode each
