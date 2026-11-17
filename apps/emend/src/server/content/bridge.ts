@@ -430,9 +430,24 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   listen(window, "message", event => {
     if (event.source !== window.parent || !event.data || typeof event.data !== "object") return;
     if (event.data.type === "emend:layout" && typeof event.data.wide === "boolean") {
+      const data = event.data;
+      const preferences = "width" in data || "prose" in data || "code" in data;
+      if (preferences && (!["comfortable", "wide", "narrow"].includes(data.width) ||
+          !Number.isInteger(data.prose) || data.prose < 15 || data.prose > 18 ||
+          !Number.isInteger(data.code) || data.code < 12 || data.code > 15)) return;
       const root = documentElement();
       if (!root) return;
-      elementCall("setAttribute", root, "data-emend-layout", event.data.wide ? "wide" : "narrow");
+      const attributes = [["data-emend-layout", data.wide ? "wide" : "narrow"]];
+      if (preferences) attributes.push(["data-emend-width", data.width],
+        ["data-emend-prose", String(data.prose)], ["data-emend-code", String(data.code)]);
+      const changed = attributes.some(([name, value]) => elementCall("getAttribute", root, name) !== value);
+      let held;
+      if (changed && headings.length && elementValue("scrollTop", scroller()) > 0 && laidOut(root)) {
+        const current = position(measure());
+        held = pinnedPosition && samePosition(current, landing) ? pinnedPosition : current;
+      }
+      for (const [name, value] of attributes) elementCall("setAttribute", root, name, value);
+      if (held && held.heading !== null) goTo({ ...held, label: headings[held.heading].label });
       schedulePosition();
     }
     else if (event.data.type === "emend:goto") goTo(event.data);

@@ -773,11 +773,23 @@ navigating to another doc under the current doc's key still returns 404 and trig
 Other frame messages carry ready notifications, proposed quotes, quote highlights and thread
 scroll requests; saving a comment requires the reviewer's explicit action.
 
-After each `emend:ready`, the parent sends `{ type: "emend:layout", wide: boolean }` first, before
-highlights, doc paths or position restore. It sends layout again whenever the app crosses its
-768px breakpoint. The bridge sets `data-emend-layout` to `wide` or `narrow` on the root element.
-emend's look uses it to match the Markdown reader's layout. Until it arrives, the frame's own
-width decides.
+After each `emend:ready`, the parent sends `emend:layout` first, before highlights, doc paths or
+position restore. The message schema accepts exactly two strict shapes, with no extra fields:
+
+- `{ type: "emend:layout", wide: boolean }`
+- `{ type: "emend:layout", wide: boolean, width: "comfortable" | "wide" | "narrow", prose: 15 | 16 | 17 | 18, code: 12 | 13 | 14 | 15 }`
+
+The parent adds the View menu's width and sizes only for a frame in emend's look. It sends layout
+again whenever the app crosses its 768px breakpoint, or those preferences change for emend's look,
+without reloading the frame. Custom and legacy frames receive only `wide`.
+The bridge accepts layout only from its parent and ignores invalid or partial preferences. It
+sets `data-emend-layout` to `wide` or `narrow` on the root element and, when supplied, sets
+`data-emend-width` to the width name, `data-emend-prose` and `data-emend-code` to the size strings.
+A message without preferences leaves the earlier width and size attributes alone. When these
+attributes change while the doc is scrolled, the bridge keeps the reading position by returning
+to the same heading and fraction; a doc at the top stays there. emend's look uses these attributes
+to match the Markdown reader's layout and sizes. On phones the measure stays 68ch; sizes still
+apply. Until layout arrives, the frame's own width decides.
 
 After `emend:ready`, the parent sends `{ type: "emend:docs", paths: FilePath[] }`, the exact doc
 paths in this revision. Bridge links resolve against the existing document base, decode each

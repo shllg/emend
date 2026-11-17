@@ -1,4 +1,5 @@
 import { DocHeading, FilePath, FileView, HtmlDocPosition, HtmlSpanTarget, LIMITS, ThreadView } from "@emend/contract";
+import { codePxSchema, proseSizeSchema, readingWidthSchema } from "./layout-store.ts";
 
 export const HtmlPosition = HtmlDocPosition;
 export type HtmlPosition = typeof HtmlPosition._output;
@@ -39,6 +40,15 @@ export type DocNavigation = Extract<typeof FrameToParent._output, { type: "emend
 export const ParentToFrame = empty
   .extend({ type: literal("emend:highlight"), anchors: span.extend({ threadId }).array() })
   .or(empty.extend({ type: literal("emend:layout"), wide: FileView.shape.hasOld }))
+  .or(
+    empty.extend({
+      type: literal("emend:layout"),
+      wide: FileView.shape.hasOld,
+      width: readingWidthSchema,
+      prose: proseSizeSchema,
+      code: codePxSchema,
+    }),
+  )
   .or(empty.extend({ type: literal("emend:scroll"), threadId }))
   .or(
     empty.extend({

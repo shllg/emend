@@ -3,6 +3,36 @@
   :root {
     color-scheme: light dark;
   }
+  :root[data-emend-width="narrow"] {
+    --reader-measure: 68ch;
+  }
+  :root[data-emend-width="wide"] {
+    --reader-measure: 1248px;
+  }
+  :root[data-emend-prose="15"] {
+    --reader-prose-size: 15px;
+  }
+  :root[data-emend-prose="16"] {
+    --reader-prose-size: 16px;
+  }
+  :root[data-emend-prose="17"] {
+    --reader-prose-size: 17px;
+  }
+  :root[data-emend-prose="18"] {
+    --reader-prose-size: 18px;
+  }
+  :root[data-emend-code="12"] {
+    --reader-code-size: 12px;
+  }
+  :root[data-emend-code="13"] {
+    --reader-code-size: 13px;
+  }
+  :root[data-emend-code="14"] {
+    --reader-code-size: 14px;
+  }
+  :root[data-emend-code="15"] {
+    --reader-code-size: 15px;
+  }
   html {
     background: var(--bg-reading);
   }
@@ -23,7 +53,7 @@
     padding: var(--space-4) var(--space-10) var(--space-8);
   }
   :root[data-emend-layout="wide"] body {
-    --reading-max: 1024px;
+    --reading-max: var(--reader-measure, 1024px);
     max-width: calc(var(--reading-max) + 112px);
     padding: calc(var(--space-6) + var(--space-1)) 56px calc(var(--space-16) + var(--space-2));
     padding-right: clamp(var(--space-8), calc(100% - var(--reading-max) - 56px), 56px);
