@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { spawnSync } from "node:child_process";
+import fs, {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { delimiter, dirname, join } from "node:path";
 import { after, before, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import {
@@ -81,6 +92,76 @@ test("stale lock is replaced", () => {
   writeFileSync(lockPath(repo), `${deadPid()}\n`);
   const result = withRegistry(repo, (r) => Object.keys(r.worktrees).length);
   assert.equal(result, 0);
+});
+
+test("a symlinked registry lock is never read through or reaped", (t) => {
+  const lock = lockPath(repo);
+  mkdirSync(dirname(lock), { recursive: true });
+  const before = readdirSync(dirname(lock));
+  const outside = join(env.root, "outside-registry-lock");
+  const content = `${deadPid()}\n`;
+  writeFileSync(outside, content);
+  symlinkSync(outside, lock);
+  let now = 0;
+  const clock = t.mock.method(Date, "now", () => (now += 31_000));
+  const read = t.mock.method(fs, "readSync");
+  syncBuiltinESMExports();
+  try {
+    assert.throws(
+      () => withRegistry(repo, () => assert.fail("must not run")),
+      (error) =>
+        error instanceof WtError &&
+        error.code === 69 &&
+        error.message === "Another bin/wt call holds the registry lock. Try again in a moment.",
+    );
+    assert.equal(read.mock.callCount(), 0);
+    assert.equal(lstatSync(lock).isSymbolicLink(), true);
+    assert.equal(readFileSync(outside, "utf8"), content);
+    assert.deepEqual(readdirSync(dirname(lock)).sort(), [...before, "lock"].sort());
+  } finally {
+    clock.mock.restore();
+    read.mock.restore();
+    syncBuiltinESMExports();
+    rmSync(lock, { force: true });
+    rmSync(outside, { force: true });
+  }
+});
+
+test("a FIFO registry lock times out without blocking", async (t) => {
+  const mkfifo = env.realPath
+    .split(delimiter)
+    .filter(Boolean)
+    .map((dir) => join(dir, "mkfifo"))
+    .find(existsSync);
+  if (!mkfifo) return t.skip("mkfifo is unavailable");
+  const lock = lockPath(repo);
+  mkdirSync(dirname(lock), { recursive: true });
+  const before = readdirSync(dirname(lock));
+  const made = spawnSync(mkfifo, [lock], { encoding: "utf8", timeout: 5000 });
+  assert.equal(made.status, 0, made.stderr);
+  const script = `
+    import { withRegistry } from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, "registry.ts")).href)};
+    let now = 0;
+    Date.now = () => (now += 31_000);
+    try {
+      withRegistry(${JSON.stringify(repo)}, () => { throw new Error("must not run"); });
+    } catch (error) {
+      process.stderr.write(error.message + "\\n");
+      process.exitCode = error.code ?? 1;
+    }
+  `;
+  try {
+    const result = await runWt(process.execPath, ["--input-type=module", "-e", script], {
+      cwd: fx.main,
+      timeoutMs: 5000,
+    });
+    assert.equal(result.code, 69, result.stderr);
+    assert.equal(result.stderr, "Another bin/wt call holds the registry lock. Try again in a moment.\n");
+    assert.equal(lstatSync(lock).isFIFO(), true);
+    assert.deepEqual(readdirSync(dirname(lock)).sort(), [...before, "lock"].sort());
+  } finally {
+    rmSync(lock, { force: true });
+  }
 });
 
 test("a failing callback writes nothing and releases the lock", () => {
