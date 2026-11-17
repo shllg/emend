@@ -176,9 +176,9 @@ function claimTarget(value: unknown): { branch: string; worktree: string } {
     /[\p{Cf}\u2028\u2029]/u.test(worktree)
   )
     invalid("worktree");
-  // Local worktrees may live under a real home path; only secret shapes are refused here.
+  // Local worktrees may live under a real home path; refuse secret shapes and exhausted scans.
   const hits = checkText(worktree, "claim worktree", { terms: [], allowed: [], notes: [] }, { lineExemptions: false });
-  const hit = hits.find((hit) => hit === "claim worktree: secret shape");
+  const hit = hits.find((hit) => /: (?:secret shape|scan expansion budget exceeded)$/.test(hit));
   if (hit) throw new WtError(2, hit);
   return { branch, worktree };
 }

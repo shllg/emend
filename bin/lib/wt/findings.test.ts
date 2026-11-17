@@ -363,6 +363,22 @@ test("claim accepts and stores a worktree under a home folder", () => {
   assert.deepEqual(listFindings(repo), [{ ...record, orphaned: true }]);
 });
 
+test("claim worktree paths reject secrets in inline SVG images without changing storage", () => {
+  const id = addFinding(repo, input()).id;
+  const before = readFileSync(stored(id));
+  const secret = ["gh", "p_", "Ab01".repeat(9)].join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg"><text>${secret}</text></svg>`;
+  const worktree = `${env.root}/data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+  assert.throws(
+    () => claimFindings(repo, [id], { ...target(), worktree }),
+    (error) =>
+      error instanceof WtError && error.code === 2 && error.message === "claim worktree (inline image): secret shape",
+  );
+  assert.deepEqual(readFileSync(stored(id)), before);
+  assert.deepEqual(readdirSync(findingsDir(repo)), [`${id}.json`]);
+  assert.equal(existsSync(join(stateDir(repo), "findings.lock")), false);
+});
+
 test("claim worktree paths reject secrets, invisible text, separators and overlong input", () => {
   const id = addFinding(repo, input()).id;
   const before = readFileSync(stored(id));
