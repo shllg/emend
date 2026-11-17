@@ -75,10 +75,11 @@ refutes or drops a Claude finding.
 2. Check each finding at its file and line. Before dropping it as not real or calling it not
    caused by the change, if a reviewer called it blocking, a bug or a security issue (as
    `review-rounds.md` defines blocking), or it came from `emend-security-reviewer`, get the other
-   vendor's confirmation of that decision as in step 3. Send the decision itself as the claim to
-   confirm ("not real" or "not caused by the change in <range>"), with the file, line, original
-   claim and range. Without that confirmation it stays in `fix`. Drop what is not real only
-   after this check.
+   vendor's confirmation as in step 3. Send the original finding as the claim to confirm, with
+   the file, line, original claim and range, phrased as "this finding is real and the change in
+   <range> caused it". A finding leaves `fix` only on "false positive".
+   Use the confirmer's evidence to decide whether to drop it as not real or call it not caused.
+   "True positive", or no answer, keeps it in `fix`.
    Decide whether the change caused it: its lines are new or changed in the range, or the change
    altered what reaches them through a caller, input or config. An old bug that stops the task's
    "Done when" counts as caused. A reviewer's "in-change yes" or "in-change no" is a hint; you decide.

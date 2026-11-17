@@ -89,6 +89,12 @@ test("the review manager has exactly the tools it needs", () => {
   assert.deepEqual([...tools].sort(), ["Read", "Grep", "Glob", "Bash", "Agent"].sort());
 });
 
+test("the review manager removes a finding only on a false positive", () => {
+  const body = readFileSync(path.join(directory, "emend-review-manager.md"), "utf8");
+  assert.ok(!body.includes("Send the decision itself"));
+  assert.ok(body.includes('A finding leaves `fix` only on "false positive".'));
+});
+
 test("react and architecture reviewers have exactly the local read-only tools", () => {
   for (const name of ["emend-react-reviewer", "emend-architecture-reviewer"]) {
     const fields = agents.get(name);
