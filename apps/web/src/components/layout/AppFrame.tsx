@@ -14,7 +14,7 @@ import {
   Settings,
   Smartphone,
 } from "lucide-react";
-import { type ComponentProps, type CSSProperties, type ReactNode, type RefObject, useRef, useState } from "react";
+import { type ComponentProps, type CSSProperties, type ReactNode, useMemo, useRef, useState } from "react";
 import { useAppUpdate } from "../../lib/app-update.ts";
 import { useLayout } from "../../lib/layout.ts";
 import { layoutStore, readingMeasure, useLayoutPreferences } from "../../lib/layout-store.ts";
@@ -29,7 +29,7 @@ import { IconButton } from "../ui/IconButton.tsx";
 import { Menu, type MenuItem } from "../ui/Menu.tsx";
 import { useToast } from "../ui/Toast.tsx";
 import { cn } from "../ui/utils.ts";
-import { MoreMenuItems } from "./more-menu.ts";
+import { MoreMenuItems, type ReviewFrameActions, ReviewFrameContext } from "./more-menu.ts";
 import { PaletteButton } from "./PaletteButton.tsx";
 import { UpdateGateContext, useUpdateGate } from "./UpdateGate.tsx";
 
@@ -42,21 +42,7 @@ export function AppFrame(props: ComponentProps<typeof AppFrameContent>) {
   );
 }
 
-function AppFrameContent({
-  isReview = false,
-  children,
-  onCommentReview,
-  downloadHref,
-  onDownload,
-  menuTriggerRef,
-}: {
-  isReview?: boolean;
-  children: ReactNode;
-  onCommentReview?: () => void;
-  downloadHref?: string;
-  onDownload?: () => void;
-  menuTriggerRef?: RefObject<HTMLButtonElement | null>;
-}) {
+function AppFrameContent({ isReview = false, children }: { isReview?: boolean; children: ReactNode }) {
   const layout = useLayout();
   const runShortcut = useRunShortcut();
   const preferences = useLayoutPreferences();
@@ -66,8 +52,9 @@ function AppFrameContent({
   const update = useAppUpdate();
   // Menu-opened dialogs return focus to this trigger.
   const localMoreRef = useRef<HTMLButtonElement>(null);
-  const moreRef = menuTriggerRef ?? localMoreRef;
-  const gate = useUpdateGate(moreRef);
+  const [actions, setActions] = useState<ReviewFrameActions>();
+  const reviewFrame = useMemo(() => ({ setActions, menuTrigger: localMoreRef }), []);
+  const gate = useUpdateGate(localMoreRef);
   const updateItems: MenuItem[] =
     update.state === "available"
       ? [{ label: "Update available", icon: Download, opensDialog: true, onSelect: () => gate.request("update") }]
@@ -111,19 +98,19 @@ function AppFrameContent({
         refreshItem,
         { label: "Search commands", icon: Search, opensDialog: true, onSelect: () => void runShortcut("palette.open") },
         { label: "Copy link", icon: LinkIcon, onSelect: () => void copyLink() },
-        ...(onCommentReview
-          ? [{ label: "Comment on review", icon: MessageSquarePlus, onSelect: onCommentReview }]
+        ...(actions?.onCommentReview
+          ? [{ label: "Comment on review", icon: MessageSquarePlus, onSelect: actions.onCommentReview }]
           : []),
-        ...(onDownload
-          ? [{ label: "Download", icon: FileDown, opensDialog: true, onSelect: onDownload }]
-          : downloadHref
+        ...(actions?.onDownload
+          ? [{ label: "Download", icon: FileDown, opensDialog: true, onSelect: actions.onDownload }]
+          : actions?.downloadHref
             ? [
                 {
                   label: "Download",
                   icon: FileDown,
                   asChild: true,
                   children: (
-                    <a href={downloadHref} download>
+                    <a href={actions.downloadHref} download>
                       Download
                     </a>
                   ),
@@ -226,7 +213,7 @@ function AppFrameContent({
           <Menu
             label="More"
             size="lg"
-            triggerRef={moreRef}
+            triggerRef={localMoreRef}
             trigger={<IconButton label="More" icon={Ellipsis} size="lg" tooltip={false} />}
             items={menuItems}
           />
@@ -260,7 +247,9 @@ function AppFrameContent({
         )}
       </div>
       <UpdateGateContext.Provider value={gate.request}>
-        <MoreMenuItems value={setDiffItems}>{children}</MoreMenuItems>
+        <MoreMenuItems value={setDiffItems}>
+          <ReviewFrameContext.Provider value={reviewFrame}>{children}</ReviewFrameContext.Provider>
+        </MoreMenuItems>
       </UpdateGateContext.Provider>
       {gate.dialog}
     </div>

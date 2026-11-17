@@ -139,7 +139,6 @@ async function mount(view: RevisionView, props: Partial<DiffPaneProps> = {}) {
     component: () => (
       <QueryClientProvider client={client}>
         <Panes
-          inbox={null}
           header={null}
           reading={null}
           phoneTabs={null}

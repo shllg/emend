@@ -4,6 +4,7 @@ import { type ReactNode, useState } from "react";
 import { ToastProvider } from "./components/ui/Toast.tsx";
 import { TooltipProvider } from "./components/ui/Tooltip.tsx";
 import { ReviewEventsProvider } from "./lib/events.tsx";
+import { InboxViewProvider } from "./lib/inbox-view.tsx";
 import { createWebRouter } from "./router.tsx";
 
 function AppEvents({ children }: { children: ReactNode }) {
@@ -19,7 +20,9 @@ export function App({ queryClient, history }: { queryClient?: QueryClient; histo
     <QueryClientProvider client={client}>
       <TooltipProvider>
         <ToastProvider>
-          <RouterProvider router={router} InnerWrap={AppEvents} />
+          <InboxViewProvider>
+            <RouterProvider router={router} InnerWrap={AppEvents} />
+          </InboxViewProvider>
         </ToastProvider>
       </TooltipProvider>
     </QueryClientProvider>

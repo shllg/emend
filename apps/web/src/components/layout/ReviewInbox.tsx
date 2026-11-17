@@ -57,6 +57,7 @@ export function ReviewInbox({
         className="flex min-h-0 w-(--inbox-w) shrink-0 flex-col bg-app"
       >
         <Inbox
+          surface="pane"
           compact
           onCollapse={() => onCollapsedChange(true)}
           searchRef={(node) => {
@@ -83,7 +84,7 @@ export function ReviewInbox({
           }}
           initialFocus={focusSearch.current ? search : undefined}
         >
-          <Inbox compact hideHead searchRef={search} onOpen={() => setOpen(false)} />
+          <Inbox surface="sheet" compact hideHead searchRef={search} onOpen={() => setOpen(false)} />
         </Sheet>
       )}
     </>

@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { defaultLayout, layoutKey, layoutStore } from "../../lib/layout-store.ts";
-import { Panes } from "./Panes.tsx";
+import { PaneFrame, Panes } from "./Panes.tsx";
 
 let width: number;
 let layoutWidth: number;
@@ -17,11 +17,15 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     return new DOMRect(0, 0, this.classList.contains("em-panes") ? layoutWidth : width, 800);
   });
+  const measurements: (() => void)[] = [];
+  measure = () => {
+    for (const measure of measurements) measure();
+  };
   vi.stubGlobal(
     "ResizeObserver",
     class {
       constructor(callback: () => void) {
-        measure = callback;
+        measurements.push(callback);
       }
       observe() {}
       disconnect() {}
@@ -36,15 +40,16 @@ afterEach(() => {
 
 function mount(hasDiff = true) {
   const ui = (tab: string) => (
-    <Panes
-      inbox={<aside>Inbox</aside>}
-      header={null}
-      reading="Writeup"
-      diff={<input aria-label="Diff editor" defaultValue="Draft" />}
-      phoneTabs={null}
-      tab={tab}
-      hasDiff={hasDiff}
-    />
+    <PaneFrame inbox={<aside>Inbox</aside>}>
+      <Panes
+        header={null}
+        reading="Writeup"
+        diff={<input aria-label="Diff editor" defaultValue="Draft" />}
+        phoneTabs={null}
+        tab={tab}
+        hasDiff={hasDiff}
+      />
+    </PaneFrame>
   );
   const view = render(ui("writeup"));
   return { ...view, rerender: (tab: string) => view.rerender(ui(tab)) };
@@ -91,7 +96,6 @@ test("doc headers follow the tab row height only in Split mode", () => {
   );
   render(
     <Panes
-      inbox={null}
       header={null}
       reading="Doc"
       diff="Code"
@@ -323,16 +327,7 @@ test.each([
   }));
   layoutStore.update({ pane: { desktop: mode, tablet: mode } });
   render(
-    <Panes
-      inbox={null}
-      header={null}
-      reading="Writeup"
-      diff="Code"
-      phoneTabs={null}
-      tab={tab}
-      hasDiff
-      codePanel="Code: Seed"
-    />,
+    <Panes header={null} reading="Writeup" diff="Code" phoneTabs={null} tab={tab} hasDiff codePanel="Code: Seed" />,
   );
   const diff = screen.queryByTestId("diff-pane");
   if (pixels === 390 && tab === "writeup") {

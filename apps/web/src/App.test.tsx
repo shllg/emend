@@ -2460,6 +2460,162 @@ async function openReviewInbox() {
   return within(screen.getByTestId("inbox-pane"));
 }
 
+function withInboxNavigation() {
+  const done: InboxItem[] = Array.from({ length: 16 }, (_, index) => ({
+    ...item,
+    id: `33333333-3333-4333-8333-${String(index + 1).padStart(12, "0")}`,
+    title: `Finished review ${index + 1}`,
+    list: "done",
+    state: "settled",
+    unsentCount: 0,
+    openThreads: 0,
+    pendingSend: false,
+  }));
+  withInbox([item, secondItem, ...done]);
+  const fallback = fetchMock.getMockImplementation();
+  fetchMock.mockImplementation(async (path, init) =>
+    path === `/api/v1/reviews/${secondItem.id}`
+      ? Response.json({ ...secondItem, revisions: [{ seq: 1, createdAt: item.updatedAt }] })
+      : (fallback?.(path, init) as Promise<Response>),
+  );
+}
+
+function scrollInbox(element: HTMLElement | null, top: number) {
+  if (!element) throw new Error("Missing inbox scroller");
+  element.scrollTop = top;
+  fireEvent.scroll(element);
+  return element;
+}
+
+test("desktop row navigation keeps the inbox pane, open sections and scroll", async () => {
+  withInboxNavigation();
+  mount(`/r/${id}`);
+  const inbox = await openReviewInbox();
+  const pane = screen.getByTestId("inbox-pane");
+  fireEvent.click(await inbox.findByRole("button", { name: /Done/ }));
+  const list = scrollInbox(pane.querySelector<HTMLElement>(".overflow-y-auto"), 240);
+  fireEvent.click(inbox.getByRole("link", { name: /Another proposal/ }), { button: 0 });
+  await screen.findByRole("heading", { name: secondItem.title, level: 1 });
+  expect(screen.getByTestId("inbox-pane")).toBe(pane);
+  expect(inbox.getByRole("button", { name: /Done/ }).getAttribute("aria-expanded")).toBe("true");
+  expect(list.scrollTop).toBe(240);
+});
+
+test("desktop row navigation keeps the inbox search", async () => {
+  withInboxNavigation();
+  mount(`/r/${id}`);
+  const inbox = await openReviewInbox();
+  await inbox.findByRole("link", { name: /Another proposal/ });
+  fireEvent.change(inbox.getByRole("textbox", { name: "Filter reviews" }), { target: { value: "proposal" } });
+  fireEvent.click(inbox.getByRole("link", { name: /Another proposal/ }), { button: 0 });
+  await screen.findByRole("heading", { name: secondItem.title, level: 1 });
+  expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Filter reviews" }).value).toBe("proposal");
+});
+
+test("desktop keyboard and rail navigation keep inbox sections and scroll", async () => {
+  withInboxNavigation();
+  mount(`/r/${id}`);
+  const inbox = await openReviewInbox();
+  const pane = screen.getByTestId("inbox-pane");
+  fireEvent.click(await inbox.findByRole("button", { name: /Done/ }));
+  const list = scrollInbox(pane.querySelector<HTMLElement>(".overflow-y-auto"), 320);
+  fireEvent.keyDown(document.body, { key: "j" });
+  await screen.findByRole("heading", { name: secondItem.title, level: 1 });
+  expect(screen.getByTestId("inbox-pane")).toBe(pane);
+  expect(inbox.getByRole("button", { name: /Done/ }).getAttribute("aria-expanded")).toBe("true");
+  expect(list.scrollTop).toBe(320);
+  fireEvent.click(screen.getByRole("button", { name: "Collapse inbox" }));
+  const rail = within(screen.getByRole("complementary", { name: "Inbox" }));
+  fireEvent.click(rail.getByRole("link", { name: "Needs you: Synthetic review" }), { button: 0 });
+  await screen.findByRole("heading", { name: item.title, level: 1 });
+  fireEvent.click(screen.getByRole("button", { name: "Show inbox" }));
+  const reopened = screen.getByTestId("inbox-pane");
+  expect(within(reopened).getByRole("button", { name: /Done/ }).getAttribute("aria-expanded")).toBe("true");
+  expect(reopened.querySelector<HTMLElement>(".overflow-y-auto")?.scrollTop).toBe(320);
+});
+
+test("desktop keeps the inbox and top bar while the next review loads", async () => {
+  withInboxNavigation();
+  let releaseReview: () => void = () => {};
+  const ready = new Promise<void>((resolve) => {
+    releaseReview = resolve;
+  });
+  const fallback = fetchMock.getMockImplementation();
+  fetchMock.mockImplementation(async (path, init) => {
+    if (path === `/api/v1/reviews/${secondItem.id}`) await ready;
+    return fallback?.(path, init) as Promise<Response>;
+  });
+  mount(`/r/${id}`);
+  const inbox = await openReviewInbox();
+  const pane = screen.getByTestId("inbox-pane");
+  const banner = screen.getByRole("banner");
+  fireEvent.click(await inbox.findByRole("link", { name: /Another proposal/ }), { button: 0 });
+  await screen.findByText("Loading review…");
+  expect(screen.getByTestId("inbox-pane")).toBe(pane);
+  expect(screen.getByRole("banner")).toBe(banner);
+  await act(async () => releaseReview());
+  await screen.findByRole("heading", { name: secondItem.title, level: 1 });
+  expect(screen.getByTestId("inbox-pane")).toBe(pane);
+});
+
+test("tablet inbox sheet restores open sections and its body scroll after row navigation", async () => {
+  width = 900;
+  withInboxNavigation();
+  mount(`/r/${id}`);
+  const inbox = await openReviewInbox();
+  fireEvent.click(await inbox.findByRole("button", { name: /Done/ }));
+  const dialog = screen.getByRole("dialog", { name: "Inbox" });
+  scrollInbox(dialog.querySelector<HTMLElement>(".overflow-auto"), 280);
+  fireEvent.click(inbox.getByRole("link", { name: /Another proposal/ }), { button: 0 });
+  await screen.findByRole("heading", { name: secondItem.title, level: 1 });
+  expect(screen.queryByRole("dialog", { name: "Inbox" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Show inbox" }));
+  const reopened = await screen.findByRole("dialog", { name: "Inbox" });
+  expect(within(reopened).getByRole("button", { name: /Done/ }).getAttribute("aria-expanded")).toBe("true");
+  expect(reopened.querySelector<HTMLElement>(".overflow-auto")?.scrollTop).toBe(280);
+});
+
+test("phone inbox restores its search, open sections and page scroll after visiting a review", async () => {
+  width = 390;
+  withInboxNavigation();
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: /Done/ }));
+  scrollInbox(screen.getByRole("main"), 360);
+  fireEvent.change(screen.getByRole("textbox", { name: "Filter reviews" }), { target: { value: "review" } });
+  fireEvent.click(screen.getByRole("link", { name: /Synthetic review/ }), { button: 0 });
+  await screen.findByRole("heading", { name: item.title, level: 1 });
+  fireEvent.click(screen.getByRole("link", { name: "Inbox" }), { button: 0 });
+  await screen.findByRole("heading", { name: "Inbox", level: 1 });
+  expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Filter reviews" }).value).toBe("review");
+  expect(screen.getByRole("main").scrollTop).toBe(360);
+  fireEvent.change(screen.getByRole("textbox", { name: "Filter reviews" }), { target: { value: "" } });
+  expect(screen.getByRole("button", { name: /Done/ }).getAttribute("aria-expanded")).toBe("true");
+});
+
+test("switching reviews opens their own tabs and keeps drafts with their review", async () => {
+  withInboxNavigation();
+  saveDraft(draftKey(id, { kind: "review" }), "Only for the first review");
+  mount(`/r/${id}?tab=docs`);
+  await screen.findByRole("heading", { name: "plan.md" });
+  expect(screen.getByRole("tab", { name: /^Docs/ }).getAttribute("aria-selected")).toBe("true");
+  const inbox = await openReviewInbox();
+  fireEvent.click(await inbox.findByRole("link", { name: /Another proposal/ }), { button: 0 });
+  await screen.findByRole("heading", { name: secondItem.title, level: 1 });
+  await screen.findByText("Overview");
+  expect(screen.getByRole("tab", { name: /^Docs/ }).getAttribute("aria-selected")).toBe("false");
+  expect(screen.getByRole("tab", { name: "Writeup" }).getAttribute("aria-selected")).toBe("true");
+  fireEvent.click(screen.getByRole("tab", { name: "Comments" }));
+  await screen.findByText("No comments yet.");
+  expect(screen.queryByText("Only for the first review")).toBeNull();
+  expect(screen.queryByRole("region", { name: "Unsaved comments" })).toBeNull();
+  fireEvent.click(screen.getByRole("link", { name: /Synthetic review/ }), { button: 0 });
+  await screen.findByRole("heading", { name: item.title, level: 1 });
+  await screen.findByText("Overview");
+  expect(screen.getByRole("tab", { name: "Writeup" }).getAttribute("aria-selected")).toBe("true");
+  fireEvent.click(screen.getByRole("tab", { name: "Comments" }));
+  expect(await screen.findByText("Only for the first review")).toBeTruthy();
+});
+
 test.each([1280, 900])("sidebar kind group hides the open review under Pubs at %s px", async (size) => {
   width = size;
   const published = {
