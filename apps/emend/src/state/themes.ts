@@ -1,4 +1,4 @@
-import { lstat, readdir } from "node:fs/promises";
+import { lstat, opendir } from "node:fs/promises";
 import { join } from "node:path";
 import { LIMITS, type ThemeEntry, type ThemeList, ThemeName, ThemeRefused } from "@emend/contract";
 import { checkThemeDocument } from "@emend/core";
@@ -45,21 +45,35 @@ export async function readTheme(themesDir: string | undefined, name: string): Pr
   return readThemeFile(path, name);
 }
 
-export async function listThemes(themesDir?: string): Promise<ThemeList> {
-  if (!themesDir) return { themes: [], folderError: false };
-  let files: string[];
+/** Shared, bounded directory snapshot for the list and its change fingerprint. */
+export async function listThemeFiles(themesDir?: string): Promise<{
+  files: string[];
+  folderError: boolean;
+  status: "listed" | "missing" | "unreadable" | "too-full";
+}> {
+  if (!themesDir) return { files: [], folderError: false, status: "missing" };
+  const files: string[] = [];
   try {
-    files = await readdir(themesDir);
+    const directory = await opendir(themesDir, { bufferSize: 1 });
+    let count = 0;
+    for await (const entry of directory) {
+      // One overflow probe distinguishes exactly 1000 entries from a larger folder.
+      if (++count > 1000) return { files: [], folderError: true, status: "too-full" };
+      if (themeFileName(entry.name) && ThemeRefused.shape.name.safeParse(entry.name.slice(0, -5)).success)
+        files.push(entry.name);
+    }
   } catch (error) {
-    return { themes: [], folderError: (error as NodeJS.ErrnoException).code !== "ENOENT" };
+    const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
+    return { files: [], folderError: !missing, status: missing ? "missing" : "unreadable" };
   }
-  const names = files
-    .filter(themeFileName)
-    .map((file) => file.slice(0, -5))
-    .filter((name) => ThemeRefused.shape.name.safeParse(name).success)
-    .sort()
-    .slice(0, LIMITS.themes);
+  // Sort by the displayed name, without the extension.
+  files.sort((a, b) => (a.slice(0, -5) < b.slice(0, -5) ? -1 : 1));
+  return { files: files.slice(0, LIMITS.themes), folderError: false, status: "listed" };
+}
+
+export async function listThemes(themesDir?: string): Promise<ThemeList> {
+  const { files, folderError } = await listThemeFiles(themesDir);
   const themes: ThemeEntry[] = [];
-  for (const name of names) themes.push(await readThemeFile(join(themesDir, `${name}.json`), name));
-  return { themes, folderError: false };
+  if (themesDir) for (const file of files) themes.push(await readThemeFile(join(themesDir, file), file.slice(0, -5)));
+  return { themes, folderError };
 }

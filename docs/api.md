@@ -560,7 +560,9 @@ beside the global `config.json` on each request, never from a reviewed repositor
 `<name>.json`. Names match `/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/` and cannot be `system`,
 `dark` or `light`. Dotfiles are skipped. Invalid names are refused if the displayed name is
 1–80 characters with no Unicode control or format characters (`\p{C}`); otherwise they are skipped.
-At most 50 files are listed, sorted by name. Each file is at most 32 KiB.
+At most 50 files are listed, sorted by name. Each file is at most 32 KiB. Folder enumeration uses
+`opendir` and caps processing at 1000 entries, counting skipped entries too, with one overflow
+probe. A folder with more than 1000 entries returns an empty list and `folderError: true`.
 
 A file is a JSON object with `version: 1`, `base: "dark" | "light"` and optional `fonts`, `scales`
 and `tokens`. Other keys are refused. For example:
@@ -596,13 +598,14 @@ The named family precedes emend's default stack. `DEFAULT_THEME_FONTS` is
 `{ text: "Geist", code: "JetBrains Mono" }`.
 
 `ThemeList = { themes: ThemeEntry[], folderError: boolean }`. A missing folder gives an empty
-list. `folderError` is true when an existing folder cannot be listed. Each entry is one of:
+list. `folderError` is true when an existing folder cannot be listed or exceeds the folder cap.
+Each entry is one of:
 
 - `ThemeValid = { valid: true, name, base, fonts: { text?, code? }, scales, tokens, themeColor }`.
   The records hold only the file's overrides, normalized. Record keys match `/^[a-z0-9-]{1,40}$/`
   so older clients can read newer servers; clients apply only names they know. Scale values are
   `ThemeColor`; token values are `ThemeColor` or a known scale step name. `themeColor` is
-  resolved `bg-app` over the base canvas as `#rrggbb`, for the browser's theme-colour meta tag.
+  the resolved, opaque `bg-app` as `#rrggbb`, for the browser's theme-colour meta tag.
 - `ThemeRefused = { valid: false, name, base: "dark" | "light" | null, problems }`.
   There are 1–20 problems, each at most 200 characters. The last may say `…and N more problems.`
 
@@ -621,8 +624,12 @@ Invalid fonts say `fonts.text must be a plain font name: letters, digits, spaces
 
 Readability uses WCAG contrast after clipping linear sRGB channels to 0–1 and compositing in
 sRGB. Foregrounds composite over their background. Translucent backgrounds use `bg-surface`
-unless an `over` surface is specified; surfaces use `bg-app`, and `bg-app` uses a black canvas
-for Dark or white for Light. Compare the unrounded ratio and report two decimals, for example
+unless an `over` surface is specified. `diff-add-word` composites over `diff-add-bg`, and
+`diff-del-word` over `diff-del-bg`; each line background composites over `bg-surface`.
+The seven surfaces `bg-app`, `bg-surface`, `bg-sunken`, `bg-raised`, `bg-reading`, `bg-reading-card`
+and `bg-inverse` must resolve to alpha 1: the page stacks them on nested elements. A translucent
+surface is refused with `bg-app must be opaque: its colour has transparency.` (the token name
+varies). Compare the unrounded ratio and report two decimals, for example
 `fg-1 on bg-app: 2.10 to 1, needs 4.5 to 1.` These pairs require 4.5 to 1:
 
 - `fg-1`, `fg-2`, `fg-3`, `fg-link`, `accent-text` on `bg-app`, `bg-surface`, `bg-sunken`, `bg-raised`.
@@ -638,13 +645,25 @@ for Dark or white for Light. Compare the unrounded ratio and report two decimals
 - `syn-plain` on `bg-surface`, `diff-add-bg`, `diff-del-bg`; `diff-add-fg` on `diff-add-bg`;
   `diff-del-fg` on `diff-del-bg`; `fg-3` on `diff-gutter`; `fg-1`, `fg-2` on `diff-hunk-bg`;
   `fg-1` on `diff-select-bg`.
+- `syn-plain` on `diff-add-word` (over `diff-add-bg`), `diff-del-word` (over `diff-del-bg`),
+  `diff-add-hover`, `diff-del-hover` and `diff-select-bg`.
 
 `syn-keyword`, `syn-type`, `syn-function`, `syn-string`, `syn-number`, `syn-comment` and `syn-punct`
-on `bg-surface` require 3 to 1. Disabled text is exempt.
+on `bg-surface`, `diff-add-bg`, `diff-del-bg`, `diff-add-word` (over `diff-add-bg`) and `diff-del-word`
+(over `diff-del-bg`) require 3 to 1. Disabled text is exempt. Both built-in bases pass all 116 pairs.
 
-A file change emits `{ type: "themes" }` only on global `/api/v1/events` streams, to every owner.
+Every two seconds from server start, regardless of open streams, the watcher fingerprints exactly
+the files returned by the same capped, sorted folder listing, using size, mtime, ctime and inode.
+Missing and too-full folders have distinct, stable fingerprints. The first tick sets the baseline;
+each later change emits `{ type: "themes" }` only on global `/api/v1/events` streams, to every
+owner. Ticks never overlap; the timer is unref'd and stops with the server. When a stream opens,
+the browser refetches queries older than that open, covering saves before it connected.
+
 Open pages refresh within a few seconds. A page using a refused or removed theme keeps its last
-valid version and shows the reason in Settings. The choice stays per device. Downloads accept a
+valid version and shows the reason in Settings. The choice stays per device. The browser caches
+`{ savedAt, theme }` in `emend.theme.custom`, with `savedAt` from the theme list's `dataUpdatedAt`,
+and parses it only when the stored text changes. An older list cannot replace a newer cache for
+the same name, even when selecting that name; selection still sets the pick. Downloads accept a
 valid theme's name; a page keeping a cached version uses its base for downloads.
 
 ### Review read views

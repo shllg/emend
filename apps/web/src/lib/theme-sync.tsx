@@ -11,8 +11,8 @@ export function ThemeSync({ enabled = true }: { enabled?: boolean }) {
   useEffect(() => {
     if (!enabled || name === undefined) return;
     const entry = themes.data?.themes.find((entry) => entry.name === name);
-    if (entry?.valid) updateCustomTheme(entry);
-  }, [enabled, name, themes.data]);
+    if (entry?.valid) updateCustomTheme(entry, themes.dataUpdatedAt);
+  }, [enabled, name, themes.data, themes.dataUpdatedAt]);
   return null;
 }
 

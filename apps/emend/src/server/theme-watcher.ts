@@ -1,6 +1,6 @@
-import { readdir, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { themeFileName } from "../state/themes.ts";
+import { listThemeFiles } from "../state/themes.ts";
 import type { ReviewEvents } from "./events.ts";
 
 export interface ThemeWatcherOptions {
@@ -9,14 +9,10 @@ export interface ThemeWatcherOptions {
 }
 
 async function fingerprint(dir: string): Promise<string> {
-  let files: string[];
-  try {
-    files = await readdir(dir);
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : "unreadable";
-  }
+  const { files, status } = await listThemeFiles(dir);
+  if (status !== "listed") return status;
   const entries: unknown[] = [];
-  for (const name of files.filter(themeFileName).sort()) {
+  for (const name of files) {
     try {
       const info = await stat(join(dir, name), { bigint: true });
       entries.push([name, ...[info.size, info.mtimeNs, info.ctimeNs, info.ino].map(String)]);
@@ -27,25 +23,22 @@ async function fingerprint(dir: string): Promise<string> {
   return JSON.stringify(entries);
 }
 
-/** Poll metadata only while a browser stream is open. Each active period gets a fresh baseline. */
+/** Poll from server start, keeping one baseline across browser stream opens and closes. */
 export function watchThemes(
   themesDir: string | undefined,
   events: ReviewEvents,
   { intervalMs = 2000, clock = globalThis }: ThemeWatcherOptions = {},
 ): () => void {
   if (!themesDir) return () => {};
-  let timer: ReturnType<typeof setInterval> | undefined;
   let baseline: string | undefined;
-  let generation = 0;
   let reading = false;
   let stopped = false;
   const tick = async () => {
-    if (stopped || reading || events.streamCount === 0) return;
+    if (stopped || reading) return;
     reading = true;
-    const current = generation;
     try {
       const next = await fingerprint(themesDir);
-      if (stopped || current !== generation || events.streamCount === 0) return;
+      if (stopped) return;
       const changed = baseline !== undefined && next !== baseline;
       baseline = next;
       if (changed) events.broadcast({ type: "themes" });
@@ -53,22 +46,10 @@ export function watchThemes(
       reading = false;
     }
   };
-  const update = () => {
-    if (events.streamCount > 0 && !timer) {
-      timer = clock.setInterval(tick, intervalMs);
-      timer.unref();
-    } else if (events.streamCount === 0) {
-      if (timer) clock.clearInterval(timer);
-      timer = undefined;
-      baseline = undefined;
-      generation++;
-    }
-  };
-  const unsubscribe = events.onStreamCountChange(update);
-  update();
+  const timer = clock.setInterval(tick, intervalMs);
+  timer.unref();
   return () => {
     stopped = true;
-    unsubscribe();
-    if (timer) clock.clearInterval(timer);
+    clock.clearInterval(timer);
   };
 }

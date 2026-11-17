@@ -1383,7 +1383,7 @@ test.each(["desktop", "phone", "dialog"] as const)(
       if (!original) throw new Error("Missing fetch fixture");
       return original(path, init);
     });
-    selectCustomTheme(customTheme);
+    selectCustomTheme(customTheme, 100);
     if (surface === "phone") width = 390;
     if (surface === "dialog") withDownloadDocs();
     mount(`/r/${id}`);

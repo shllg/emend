@@ -47,16 +47,24 @@ See [api.md](api.md) for the command ids.
 Themes live in the `themes` folder beside emend's global `config.json`, on the server your
 browser reaches. Start with `emend theme copy dark mine`, or use `light` or another theme as
 the source. `emend theme list` shows valid and refused files. `emend theme check mine` reports
-invalid values and text that is too faint to read.
+invalid values and text that is too faint to read, including syntax colours on diff lines and
+changed words. Body text needs 4.5 to 1 contrast; syntax colours need 3 to 1.
 
 Edit `mine.json` to change colours or set `fonts.text` and `fonts.code` to installed font names.
 Emend's fonts stay as fallbacks. Each file names a Dark or Light base; omitted values use that
 base. A token can reference a scale step, so changing that step recolours every token built on
-it. A token set to a colour keeps its own value. See [api.md](api.md#themes) for the file format.
+it. A token set to a colour keeps its own value. The surfaces `bg-app`, `bg-surface`, `bg-sunken`,
+`bg-raised`, `bg-reading`, `bg-reading-card` and `bg-inverse` must be opaque, including when set
+through a scale reference. See [api.md](api.md#themes) for the file format and readability pairs.
+
+Emend lists up to 50 theme files in name order, each at most 32 KiB. Keep the folder at 1000 entries
+or fewer, including hidden files and other entries; a larger folder shows a folder error and no themes.
 
 Pick the theme in Settings → Appearance on each device, including your phone. Saving the file
-updates open pages within a few seconds. If it becomes invalid, pages keep the last valid
-version and Settings shows why. The pick applies to this device only.
+updates open pages within a few seconds. The server checks for changes every two seconds from
+startup, even without open pages; opening a page refreshes its older theme list. If a file becomes
+invalid, pages keep the last valid version and Settings shows why. An older tab's cached list
+cannot replace a newer valid version saved by another tab. The pick applies to this device only.
 
 ## Publish a doc
 

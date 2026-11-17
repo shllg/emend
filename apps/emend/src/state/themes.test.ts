@@ -103,6 +103,14 @@ test("lists at most 50 displayable names in sorted order", async () => {
   expect(await readTheme(dir, "theme-54")).toMatchObject({ valid: true });
 });
 
+test("1000 folder entries are allowed; 1001 refuses the whole list, including ignored entries", async () => {
+  await seed("mine");
+  for (let i = 0; i < 999; i++) await writeFile(join(dir, `.ignored-${i}`), "");
+  expect(await listThemes(dir)).toMatchObject({ themes: [{ valid: true, name: "mine" }], folderError: false });
+  await writeFile(join(dir, "overflow"), "");
+  expect(await listThemes(dir)).toEqual({ themes: [], folderError: true });
+});
+
 test("missing or unconfigured folders are empty; missing or unsafe names are absent", async () => {
   expect(await listThemes(join(root, "absent"))).toEqual({ themes: [], folderError: false });
   expect(await listThemes()).toEqual({ themes: [], folderError: false });
@@ -112,7 +120,7 @@ test("missing or unconfigured folders are empty; missing or unsafe names are abs
 });
 
 test("an unlistable existing folder sets folderError without returning the error", async () => {
-  vi.spyOn(fs, "readdir").mockRejectedValueOnce(Object.assign(new Error("sensitive failure"), { code: "EACCES" }));
+  vi.spyOn(fs, "opendir").mockRejectedValueOnce(Object.assign(new Error("sensitive failure"), { code: "EACCES" }));
   expect(await listThemes(dir)).toEqual({ themes: [], folderError: true });
 });
 

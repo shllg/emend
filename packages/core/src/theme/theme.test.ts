@@ -24,12 +24,32 @@ test.each(["dark", "light"] as const)("%s passes all readability pairs", (base) 
   expect(check({ version: 1, base })).toMatchObject({ base, scales: {}, tokens: {}, fonts: {} });
   expect(themeReadabilityProblems(resolveTheme(base), base)).toEqual([]);
 });
-test("the readability set covers exactly the design's 83 pairs", () => {
-  expect(THEME_READABILITY_PAIRS).toHaveLength(83);
-  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.minimum === 3)).toHaveLength(7);
-  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.over)).toEqual([
-    { foreground: "fg-reading", background: "mark-bg", over: "bg-reading", minimum: 4.5 },
-  ]);
+test("the readability set covers exactly the design's 116 pairs", () => {
+  expect(THEME_READABILITY_PAIRS).toHaveLength(116);
+  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.minimum === 3)).toHaveLength(35);
+  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.over)).toHaveLength(17);
+  expect(THEME_READABILITY_PAIRS).toEqual(
+    expect.arrayContaining([
+      { foreground: "fg-reading", background: "mark-bg", over: "bg-reading", minimum: 4.5 },
+      ...[
+        "syn-plain",
+        "syn-keyword",
+        "syn-type",
+        "syn-function",
+        "syn-string",
+        "syn-number",
+        "syn-comment",
+        "syn-punct",
+      ].flatMap((foreground) =>
+        ["add", "del"].map((kind) => ({
+          foreground,
+          background: `diff-${kind}-word`,
+          over: `diff-${kind}-bg`,
+          minimum: foreground === "syn-plain" ? 4.5 : 3,
+        })),
+      ),
+    ]),
+  );
   expect(THEME_READABILITY_PAIRS.some((pair) => pair.foreground === "fg-disabled")).toBe(false);
 });
 test.each([
@@ -153,7 +173,41 @@ test("a copied scale change still recolours dependent tokens", () => {
   copy.scales = { ...copy.scales, "n-950": "oklch(0.19 0.004 260)" };
   expect(resolveTheme(check(copy))["bg-reading"]).toBe("oklch(0.19 0.004 260)");
 });
-test("translucent surfaces and the meta colour composite through the base canvas", () => {
+test.each(["bg-app", "bg-surface", "bg-sunken", "bg-raised", "bg-reading", "bg-reading-card", "bg-inverse"])(
+  "%s must resolve to an opaque colour, including scale references",
+  (surface) => {
+    for (const value of ["#171717fe", "oklch(0.18 0.004 260 / 0.99)", "n-950"])
+      expect(problems({ ...document, scales: { "n-950": "#171717fe" }, tokens: { [surface]: value } })).toContain(
+        `${surface} must be opaque: its colour has transparency.`,
+      );
+  },
+);
+test("refuses the translucent app surface that passed contrast over a single canvas", () => {
+  expect(problems({ ...document, tokens: { "bg-app": "#ffffff4d", "fg-3": "#ffffff" } })).toContain(
+    "bg-app must be opaque: its colour has transparency.",
+  );
+});
+test.each([
+  { "diff-add-word": "oklch(0.18 0.004 260)", "diff-del-word": "oklch(0.18 0.004 260)" },
+  { "diff-add-bg": "#7c7c7c", "syn-string": "#7c7c7c", "syn-keyword": "#7c7c7c", "diff-add-fg": "#000000" },
+])("refuses unreadable diff colours: %j", (tokens) => {
+  expect(problems({ version: 1, base: "light", tokens })).toEqual(
+    expect.arrayContaining([expect.stringMatching(/^syn-\w+ on diff-(add|del)-(bg|word):/)]),
+  );
+});
+test("diff word backgrounds composite over their line, then the surface", () => {
+  const colors = resolveTheme("dark");
+  colors["diff-add-bg"] = "#ffffff40";
+  colors["diff-add-word"] = "#00000080";
+  const surface = parseThemeColor(colors["bg-surface"])?.rgba;
+  const line = parseThemeColor(colors["diff-add-bg"])?.rgba;
+  const word = parseThemeColor(colors["diff-add-word"])?.rgba;
+  if (!surface || !line || !word) throw new Error("Bad test colour");
+  expect(themeBackground(colors, "dark", "diff-add-word", "diff-add-bg")).toEqual(
+    compositeThemeColor(word, compositeThemeColor(line, surface)),
+  );
+});
+test("translucent backgrounds composite through surfaces; valid meta colours use opaque bg-app", () => {
   const colors = resolveTheme("dark");
   colors["bg-app"] = "#ffffff80";
   colors["bg-surface"] = "#00000080";
@@ -166,9 +220,9 @@ test("translucent surfaces and the meta colour composite through the base canvas
   const surface = compositeThemeColor(dark, app);
   expect(themeBackground(colors, "dark", "bg-surface")).toEqual(surface);
   expect(themeBackground(colors, "dark", "bg-hover")).toEqual(compositeThemeColor(white, surface));
-  const entry = check({ ...document, tokens: { "bg-app": "#00000080" } });
+  const entry = check({ ...document, tokens: { "bg-app": "#000000ff" } });
   expect(entry.themeColor).toBe("#000000");
-  expect(check({ version: 1, base: "light", tokens: { "bg-app": "#ffffff80" } }).themeColor).toBe("#ffffff");
+  expect(check({ version: 1, base: "light", tokens: { "bg-app": "#ffffffff" } }).themeColor).toBe("#ffffff");
   expect(themeColorHex(themeBackground(colors, "dark", "bg-app"))).toBe("#808080");
 });
 test("download look uses the nine resolved reading and diff colours", () => {

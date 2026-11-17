@@ -78,24 +78,35 @@ test("each file change emits once to every owner's global stream, never a review
   expect(reviewRead).toHaveBeenCalledWith({ value: undefined, done: true });
 });
 
-test("polling stops without streams and reopening sets a fresh baseline", async () => {
+test("polling starts without streams and a save just after opening emits once before any new baseline", async () => {
   const broadcast = vi.spyOn(events, "broadcast");
   await seed();
-  expect(clock.setInterval).not.toHaveBeenCalled();
-  const reader = await stream("owner");
+  expect(clock.setInterval).toHaveBeenCalledExactlyOnceWith(expect.any(Function), 17);
+  expect(timer.hasRef()).toBe(false);
   await tick();
+  expect(broadcast).not.toHaveBeenCalled();
+  const reader = await stream("owner");
+  await seed("saved before the first tick since opening");
+  await tick();
+  expect(broadcast).toHaveBeenCalledExactlyOnceWith({ type: "themes" });
+  expect(new TextDecoder().decode((await reader.read()).value)).toBe("event: themes\ndata: {}\n\n");
+  await tick();
+  expect(broadcast).toHaveBeenCalledTimes(1);
   await reader.cancel();
   expect(events.streamCount).toBe(0);
-  expect(clock.clearInterval).toHaveBeenCalledWith(timer);
+  expect(clock.clearInterval).not.toHaveBeenCalled();
   await seed("changed while closed");
   await tick();
+  expect(broadcast).toHaveBeenCalledTimes(2);
   await stream("owner");
+  await seed("saved immediately after reopening");
   await tick();
-  expect(broadcast).not.toHaveBeenCalled();
+  expect(broadcast).toHaveBeenCalledTimes(3);
   stop();
+  expect(clock.clearInterval).toHaveBeenCalledWith(timer);
   await seed("changed after stop");
   await tick();
-  expect(broadcast).not.toHaveBeenCalled();
+  expect(broadcast).toHaveBeenCalledTimes(3);
 });
 
 test("linked files, deletion and folder disappearance change the fingerprint", async () => {
@@ -116,7 +127,7 @@ test("linked files, deletion and folder disappearance change the fingerprint", a
   expect(broadcast).toHaveBeenCalledTimes(3);
 });
 
-test("ticks never overlap and an in-flight result cannot outlive its streams", async () => {
+test("ticks never overlap and an in-flight result cannot outlive the watcher", async () => {
   await seed();
   const reader = await stream("owner");
   await tick();
@@ -135,8 +146,8 @@ test("ticks never overlap and an in-flight result cannot outlive its streams", a
     await seed("changed");
     await tick();
     expect(stat).toHaveBeenCalledTimes(1);
+    stop();
     await reader.cancel();
-    await stream("owner");
   } finally {
     release.resolve();
     await pending;
@@ -147,7 +158,42 @@ test("ticks never overlap and an in-flight result cannot outlive its streams", a
 
 test("no configured folder allocates no timer", async () => {
   stop();
+  vi.mocked(clock.setInterval).mockClear();
   stop = watchThemes(undefined, events, { clock });
   await stream("owner");
   expect(clock.setInterval).not.toHaveBeenCalled();
+});
+
+test("fingerprints only the sorted, displayable 50 files the list shows", async () => {
+  await seed();
+  for (let i = 0; i < 50; i++) await writeFile(join(dir, `theme-${String(i).padStart(2, "0")}.json`), "");
+  await stream("owner");
+  const broadcast = vi.spyOn(events, "broadcast");
+  await tick();
+  await writeFile(join(dir, "theme-49.json"), "not listed");
+  await writeFile(join(dir, "bad\nname.json"), "not displayable");
+  await writeFile(join(dir, ".hidden.json"), "hidden");
+  await tick();
+  expect(broadcast).not.toHaveBeenCalled();
+  await writeFile(join(dir, "theme-48.json"), "listed");
+  await tick();
+  expect(broadcast).toHaveBeenCalledExactlyOnceWith({ type: "themes" });
+});
+
+test("a too-full folder has a stable fingerprint and returning to 1000 entries emits once", async () => {
+  await seed();
+  for (let i = 0; i < 999; i++) await writeFile(join(dir, `.ignored-${i}`), "");
+  await stream("owner");
+  const broadcast = vi.spyOn(events, "broadcast");
+  await tick();
+  await writeFile(join(dir, "overflow"), "");
+  await tick();
+  expect(broadcast).toHaveBeenCalledTimes(1);
+  await seed("changed while too full");
+  await tick();
+  expect(broadcast).toHaveBeenCalledTimes(1);
+  await rm(join(dir, "overflow"));
+  await tick();
+  await tick();
+  expect(broadcast).toHaveBeenCalledTimes(2);
 });

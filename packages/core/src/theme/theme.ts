@@ -13,8 +13,8 @@ import {
   type ThemeValid,
 } from "@emend/contract";
 import { THEME_BASES } from "./bases.ts";
-import { normalizeThemeColor, themeColorHex } from "./color.ts";
-import { type ResolvedTheme, themeBackground, themeReadabilityProblems } from "./readability.ts";
+import { normalizeThemeColor, parseThemeColor, themeColorHex } from "./color.ts";
+import { type ResolvedTheme, themeReadabilityProblems } from "./readability.ts";
 
 export type ThemeSource = ThemeBase | ThemeValid;
 export type ThemeDocument = {
@@ -130,7 +130,8 @@ export function checkThemeDocument(document: unknown, name: string): ThemeEntry 
   let themeColor = "#000000";
   if (base) {
     const colors = resolveTheme({ valid: true, name, base, fonts, scales, tokens, themeColor });
-    themeColor = themeColorHex(themeBackground(colors, base, "bg-app"));
+    const app = parseThemeColor(colors["bg-app"]);
+    if (app?.rgba.alpha === 1) themeColor = themeColorHex(app.rgba);
     for (const message of themeReadabilityProblems(colors, base)) problem(message);
   }
   if (count || !base) {

@@ -32,6 +32,17 @@ export const THEME_READABILITY_PAIRS: readonly ThemeReadabilityPair[] = [
   ...pairs(["topic-on-solid"], ["topic-solid"]),
   ...ownBackgrounds(Array.from({ length: 8 }, (_, i) => `origin-${i + 1}`)),
   ...pairs(["syn-plain"], ["bg-surface", "diff-add-bg", "diff-del-bg"]),
+  ...pairs(["syn-plain"], ["diff-add-hover", "diff-del-hover", "diff-select-bg"]),
+  ...["add", "del"].flatMap((kind) =>
+    pairs(
+      ["syn-plain", "syn-keyword", "syn-type", "syn-function", "syn-string", "syn-number", "syn-comment", "syn-punct"],
+      [`diff-${kind}-word` as ColorName],
+    ).map((pair) => ({
+      ...pair,
+      over: `diff-${kind}-bg` as ColorName,
+      minimum: pair.foreground === "syn-plain" ? 4.5 : 3,
+    })),
+  ),
   ...pairs(["diff-add-fg"], ["diff-add-bg"]),
   ...pairs(["diff-del-fg"], ["diff-del-bg"]),
   ...pairs(["fg-3"], ["diff-gutter"]),
@@ -39,12 +50,13 @@ export const THEME_READABILITY_PAIRS: readonly ThemeReadabilityPair[] = [
   ...pairs(["fg-1"], ["diff-select-bg"]),
   ...pairs(
     ["syn-keyword", "syn-type", "syn-function", "syn-string", "syn-number", "syn-comment", "syn-punct"],
-    ["bg-surface"],
+    ["bg-surface", "diff-add-bg", "diff-del-bg"],
     3,
   ),
 ];
 
 const surfaces = new Set<ColorName>([
+  "bg-app",
   "bg-surface",
   "bg-sunken",
   "bg-raised",
@@ -67,11 +79,18 @@ export function themeBackground(colors: ResolvedTheme, base: ThemeBase, name: Co
 }
 
 export function themeReadabilityProblems(colors: ResolvedTheme, base: ThemeBase): string[] {
-  return THEME_READABILITY_PAIRS.flatMap(({ foreground, background, minimum, over }) => {
-    const back = themeBackground(colors, base, background, over);
-    const front = parseThemeColor(colors[foreground]);
-    if (!front) throw new Error("Invalid resolved theme colour");
-    const ratio = themeContrast(compositeThemeColor(front.rgba, back), back);
-    return ratio < minimum ? [`${foreground} on ${background}: ${ratio.toFixed(2)} to 1, needs ${minimum} to 1.`] : [];
-  });
+  const problems = [...surfaces].flatMap((name) =>
+    parseThemeColor(colors[name])?.rgba.alpha === 1 ? [] : [`${name} must be opaque: its colour has transparency.`],
+  );
+  return problems.concat(
+    THEME_READABILITY_PAIRS.flatMap(({ foreground, background, minimum, over }) => {
+      const back = themeBackground(colors, base, background, over);
+      const front = parseThemeColor(colors[foreground]);
+      if (!front) throw new Error("Invalid resolved theme colour");
+      const ratio = themeContrast(compositeThemeColor(front.rgba, back), back);
+      return ratio < minimum
+        ? [`${foreground} on ${background}: ${ratio.toFixed(2)} to 1, needs ${minimum} to 1.`]
+        : [];
+    }),
+  );
 }
