@@ -25,3 +25,12 @@ values. If Codex cannot run (MCP unreachable, sandbox error,
 timeout), stop and report the cause, so the main session can route the work to a Sonnet
 sub-agent. Return only the thread id, a compact changed-file summary, the checks run with their
 results, and blockers; never raw MCP output. Never commit, push or run any other git mutation.
+
+Reviews end each finding with "in-change yes" or "in-change no" to say whether the change caused
+it. Two more commission shapes each start a fresh read-only session:
+
+- `review-confirm`: one claim (file, line, claim, and an argument when supplied). Codex checks it
+  and answers "true positive" or "false positive" with `file:line` evidence. Return only that
+  verdict and the evidence.
+- `scan`: a list of files. Codex returns candidates as one JSON array of objects with `path`,
+  `line`, `kind`, `title`, `detail` and `why`. Return only that JSON.

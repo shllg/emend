@@ -69,6 +69,21 @@ test("a pinned agent with the right model exits 0", () => {
   assert.equal(run(makeProject(), agentCall("emend-reviewer", "sonnet")).status, 0);
 });
 
+test("blocks a nested dispatch without the pinned model", () => {
+  const root = makeProject();
+  const input = {
+    tool_name: "Agent",
+    agent_id: "review-round-1",
+    agent_type: "emend-review-manager",
+    tool_input: { subagent_type: "emend-reviewer" },
+  };
+  assert.equal(run(root, JSON.stringify(input)).status, 2);
+  assert.equal(
+    run(root, JSON.stringify({ ...input, tool_input: { ...input.tool_input, model: "sonnet" } })).status,
+    0,
+  );
+});
+
 test("caller startup files never run in the test", () => {
   const root = makeProject();
   const startup = path.join(root, "startup.sh");
