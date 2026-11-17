@@ -447,7 +447,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
         if (pinnedPosition && samePosition(current, landing)) held = pinnedPosition;
         else if (current.heading !== null) {
           for (let node = headings[current.heading].element; node; node = renderedParent(node)) {
-            if (nodeType(node) === 1 && elementValue("scrollTop", node) > 0) { held = current; break; }
+            if (nodeType(node) === 1 && elementValue("scrollTop", node) !== 0) { held = current; break; }
             if (node === root) break;
           }
         }

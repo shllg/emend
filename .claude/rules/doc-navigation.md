@@ -40,9 +40,10 @@ to it. Any change here needs `emend-security-reviewer`.
   ready frame. For a frame in emend's look it also carries the View menu's `width` (`comfortable`,
   `wide` or `narrow`), `prose` (15 to 18) and `code` (12 to 15), all three or none. The bridge
   checks each against that list and sets only `data-emend-layout` (`wide` or `narrow`),
-  `data-emend-width`, `data-emend-prose` and `data-emend-code` on the root. When they change while a
-  restored position is still pinned or the reading heading's scroll path is scrolled, it returns to
-  the same declared heading and fraction; a doc with nothing scrolled stays where it is.
+  `data-emend-width`, `data-emend-prose` and `data-emend-code` on the root. When they change while
+  the position of the last `emend:goto` or Contents pick is still pinned, or the reading heading's
+  scroll path is scrolled, it returns to the same declared heading and fraction; a doc with nothing
+  scrolled and no pin stays where it is.
 - The bridge never changes `location`, handles links to a fragment of the same doc itself, and
   calls DOM methods from their prototypes, so doc markup cannot replace them.
 - Titles and Contents labels pass `cleanDocTitle` on the server and render as isolated text

@@ -188,10 +188,12 @@ function layoutBridge(
     offsets = [300, 350, 900],
     wideScale = 2,
     nested = false,
+    reverse = false,
   }: {
     offsets?: number[];
     wideScale?: number;
     nested?: boolean;
+    reverse?: boolean;
   } = {},
 ) {
   const b = bridge(html, true, (window) => {
@@ -201,21 +203,27 @@ function layoutBridge(
   const root = b.window.document.scrollingElement;
   const container = nested ? b.window.document.querySelector("main") : root;
   if (!container) throw new Error("Missing scroll container");
+  const { get: getTop, set: setTop } = Object.getOwnPropertyDescriptor(b.window.Element.prototype, "scrollTop") ?? {};
+  if (!getTop || !setTop) throw new Error("Missing scrollTop accessors");
+  const readTop = (element: Element): number => getTop.call(element);
+  const writeTop = (element: Element, top: number) => setTop.call(element, top);
+  const attribute = (name: string) => b.window.Element.prototype.getAttribute.call(root, name);
   const headings = [...b.window.document.querySelectorAll("h2,h3")];
   Object.defineProperty(b.window, "innerHeight", { configurable: true, value: 400 });
   const assignedSlot = Object.getOwnPropertyDescriptor(b.window.Element.prototype, "assignedSlot");
   if (!assignedSlot)
     Object.defineProperty(b.window.Element.prototype, "assignedSlot", { configurable: true, get: () => null });
   const scale = () => {
-    if (root.getAttribute("data-emend-width") === "wide") return wideScale;
-    return root.getAttribute("data-emend-prose") === "18" ||
-      root.getAttribute("data-emend-code") === "15" ||
-      root.getAttribute("data-emend-layout") === "narrow"
+    if (attribute("data-emend-width") === "wide") return wideScale;
+    return attribute("data-emend-prose") === "18" ||
+      attribute("data-emend-code") === "15" ||
+      attribute("data-emend-layout") === "narrow"
       ? 2
       : 1;
   };
-  const offset = (element: Element) => (offsets[headings.indexOf(element)] ?? 0) * scale();
-  const clamp = (top: number) => Math.max(0, Math.min(1100 * scale() - 400, top));
+  const limit = () => Math.max(0, 1100 * scale() - 400);
+  const offset = (element: Element) => (offsets[headings.indexOf(element)] ?? 0) * scale() - (reverse ? limit() : 0);
+  const clamp = (top: number) => (reverse ? Math.min(0, Math.max(-limit(), top)) : Math.max(0, Math.min(limit(), top)));
   const visible = vi.spyOn(b.window.Element.prototype, "checkVisibility").mockReturnValue(true);
   const scrollHeight = vi.spyOn(b.window.Element.prototype, "scrollHeight", "get").mockImplementation(function (
     this: Element,
@@ -225,24 +233,24 @@ function layoutBridge(
   const bounds = vi.spyOn(b.window.Element.prototype, "getBoundingClientRect").mockImplementation(function (
     this: Element,
   ) {
-    return new b.window.DOMRect(0, offset(this) - container.scrollTop - (nested ? root.scrollTop : 0), 400, 20);
+    return new b.window.DOMRect(0, offset(this) - readTop(container) - (nested ? readTop(root) : 0), 400, 20);
   });
   const scroll = vi.spyOn(b.window.Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) {
-    container.scrollTop = clamp(offset(this));
+    writeTop(container, clamp(offset(this)));
   });
   const scrollTo = vi.spyOn(b.window.Element.prototype, "scrollTo").mockImplementation(function (
     this: Element,
     options: number | ScrollToOptions | undefined,
   ) {
     if (this === container && typeof options === "object" && options.behavior === "instant")
-      this.scrollTop = clamp(Math.round(options.top ?? 0));
+      writeTop(this, clamp(Math.round(options.top ?? 0)));
   });
   b.message(initialLayout);
   const restore = () => {
     for (const spy of [visible, scrollHeight, bounds, scroll, scrollTo]) spy.mockRestore();
     if (!assignedSlot) Reflect.deleteProperty(b.window.Element.prototype, "assignedSlot");
   };
-  return { ...b, root, container, headings, visible, scroll, scrollTo, restore };
+  return { ...b, root, container, headings, visible, scroll, scrollTo, readTop, writeTop, restore };
 }
 
 test.each([{ prose: 18 }, { code: 15 }, { width: "wide" }, { wide: false }])(
@@ -323,6 +331,65 @@ test("layout keeps the heading and fraction inside a scrolled container while th
     expect(b.root.scrollTop).toBe(0);
     expect(b.window.document.body.scrollTop).toBe(0);
   } finally {
+    b.restore();
+    await b.window.happyDOM.close();
+  }
+});
+
+test("layout holds a negative scrollTop in a column-reverse container through a size change", async () => {
+  const b = layoutBridge(
+    '<main style="height:400px;overflow:auto;display:flex;flex-direction:column-reverse">' +
+      '<article style="flex-shrink:0"><h2>First</h2><h3>Second</h3><h2>Last</h2></article></main>',
+    { nested: true, reverse: true },
+  );
+  try {
+    b.container.scrollTop = -200;
+    const fraction = (100 - (-350 - b.container.scrollTop)) / 550;
+    b.message({ ...initialLayout, prose: 18 });
+    expect(b.scroll.mock.instances).toEqual([b.headings[1]]);
+    expect(b.scrollTo.mock.instances).toContain(b.container);
+    expect(b.container.scrollTop).toBe(-700);
+    expect((100 - (-1100 - b.container.scrollTop)) / 1100).toBeCloseTo(fraction);
+    expect(b.root.scrollTop).toBe(0);
+  } finally {
+    b.restore();
+    await b.window.happyDOM.close();
+  }
+});
+
+test("layout holds through prototype calls despite clobbered root and container members", async () => {
+  const b = layoutBridge(nestedLayoutHtml, { nested: true });
+  // happy-dom's scrollY getter reads root.scrollTop; a browser's native getter does not.
+  const scrollY = vi.spyOn(b.window, "scrollY", "get").mockImplementation(() => b.readTop(b.root));
+  const clobbered = vi.fn();
+  const members = [b.root, b.container].flatMap((element) =>
+    ["setAttribute", "getAttribute", "scrollTop"].map((name) => ({
+      element,
+      name,
+      descriptor: Object.getOwnPropertyDescriptor(element, name),
+    })),
+  );
+  try {
+    b.writeTop(b.container, 500);
+    for (const { element, name } of members)
+      Object.defineProperty(element, name, {
+        configurable: true,
+        ...(name === "scrollTop" ? { get: clobbered, set: clobbered } : { value: clobbered }),
+      });
+    b.message({ ...initialLayout, prose: 18 });
+    expect(b.scroll).toHaveBeenCalledExactlyOnceWith({ block: "start", behavior: "instant" });
+    expect(b.scroll.mock.instances).toEqual([b.headings[1]]);
+    expect(b.readTop(b.container)).toBe(1100);
+    expect((100 - (700 - b.readTop(b.container))) / 1100).toBeCloseTo(5 / 11);
+    expect(b.readTop(b.root)).toBe(0);
+    expect(b.window.Element.prototype.getAttribute.call(b.root, "data-emend-prose")).toBe("18");
+    expect(clobbered).not.toHaveBeenCalled();
+  } finally {
+    for (const { element, name, descriptor } of members) {
+      if (descriptor) Object.defineProperty(element, name, descriptor);
+      else Reflect.deleteProperty(element, name);
+    }
+    scrollY.mockRestore();
     b.restore();
     await b.window.happyDOM.close();
   }

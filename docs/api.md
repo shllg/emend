@@ -786,8 +786,9 @@ The bridge accepts layout only from its parent and ignores invalid or partial pr
 sets `data-emend-layout` to `wide` or `narrow` on the root element and, when supplied, sets
 `data-emend-width` to the width name, `data-emend-prose` and `data-emend-code` to the size strings.
 A message without preferences leaves the earlier width and size attributes alone. When these
-attributes change while a restored position is still pinned or any container on the reading
-heading's rendered path is scrolled, the bridge returns to the same heading and fraction. This
+attributes change while the position of the last `emend:goto` (a restore or a Contents pick) is
+still pinned, or any container on the reading heading's rendered path is scrolled (a nonzero
+`scrollTop`), the bridge returns to the same heading and fraction. This
 includes nested scrollers and a pinned position temporarily clamped to the top because the doc
 fits. A doc with nothing scrolled and no pin stays where it is. emend's look uses these attributes
 to match the Markdown reader's layout and sizes. On phones the measure stays 68ch; sizes still
