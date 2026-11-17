@@ -647,6 +647,72 @@ test("a set-aside Send on the newest revision does not count as answered", async
   expect((await inbox()).map((item) => item.id)).toEqual([first.reviewId, second.reviewId]);
 });
 
+test("a pub with a Send stays in To review by its newest change in both kind filters, next to Answered reviews", async () => {
+  const cases = [
+    ["publish", "waiting", 50_000],
+    ["publish", "unsent", 49_000],
+    ["publish", "to review", 40_000],
+    ["publish", "pending", 30_000],
+    ["publish", "picked up", 10_000],
+    ["review", "to review", 20_000],
+    ["review", "pending", 1000],
+    ["review", "picked up", 2000],
+    ["publish", "approved", 3000],
+    ["review", "approved", 4000],
+  ] as const;
+  const keys = "123456789bcd";
+  const rows: { id: string; kind: "publish" | "review"; updatedAt: number }[] = [];
+  const now = f.deps.now();
+  for (const [index, [kind, status, age]] of cases.entries()) {
+    const key = keys.charAt(index);
+    const title = `${kind === "publish" ? "pub" : "review"} ${status}`;
+    const { reviewId } = await publishReview(f, {
+      key,
+      title,
+      ...(kind === "publish"
+        ? { docs: { "notes.md": "# Notes" }, writeup: { overview: "", tldr: "", decisions: null, topics: {} } }
+        : {}),
+    });
+    if (status === "waiting" || status === "pending" || status === "picked up") await send(reviewId);
+    if (status === "picked up") await pickUp(reviewId);
+    if (status === "waiting" || status === "unsent") await userThread(reviewId);
+    if (status === "approved") await approve(reviewId);
+    if (status === "waiting")
+      await f.db.query((q) =>
+        q.insert(t.agentWaiters).values({ ownerId: f.ownerId, reviewId, expiresAt: now + 30_000 }),
+      );
+    rows.push({ id: reviewId, kind, updatedAt: now - age });
+  }
+  for (const row of rows) await stamp(row.id, row.updatedAt);
+  const items = await inbox();
+  for (const row of rows) expect(items.find((item) => item.id === row.id)?.kind).toBe(row.kind);
+  expect(items.map((item) => item.title)).toEqual([
+    "pub waiting",
+    "pub unsent",
+    "pub picked up",
+    "review to review",
+    "pub pending",
+    "pub to review",
+    "review pending",
+    "review picked up",
+    "pub approved",
+    "review approved",
+  ]);
+  expect(items.filter((item) => item.kind === "publish").map((item) => item.title)).toEqual([
+    "pub waiting",
+    "pub unsent",
+    "pub picked up",
+    "pub pending",
+    "pub to review",
+    "pub approved",
+  ]);
+  expect(items.find((item) => item.title === "pub pending")).toMatchObject({ pendingSend: true, pickedUpAt: null });
+  expect(items.find((item) => item.title === "pub picked up")).toMatchObject({
+    pendingSend: false,
+    pickedUpAt: iso(now),
+  });
+});
+
 function approvalRows(count: number) {
   const now = f.deps.now();
   return Array.from({ length: count }, (_, i) => ({

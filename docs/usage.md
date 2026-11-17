@@ -31,6 +31,7 @@ in Settings → Inbox; 0 keeps none.
 
 Active shows reviews that need you first (agent waiting, then unsent comments), followed by
 To review, Answered and Approved. The newest change comes first inside each group.
+A pub stays in To review after you send comments on it.
 
 Keyboard shortcuts work on desktop and tablet. Press `?` to list them. Settings → Keyboard shortcuts
 changes, turns off or resets a key. Ctrl+Shift+P (⌘⇧P on a Mac) opens the command palette; type a
