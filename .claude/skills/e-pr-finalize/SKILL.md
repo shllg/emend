@@ -269,9 +269,11 @@ referenced code and tests before you act.
   Send `resolveReviewThread` for the same thread as a checked JSON request in the same way.
   Neither mutation takes owner or name variables. A review-body item with no thread gets a PR
   comment through `gh pr comment --repo github.com/<owner>/<name> <n> --body-file <top>/.wt/reply-<n>.md` that links the original.
-- Disagree: before you reject, have a fresh Codex review try to refute you. Use `codex-agent` for this
-  one claim: give it the file path and the claim, and ask it to say whether the claim is a true or a
-  false positive. If it confirms a false positive, write the reply with the reason and post it
+- Disagree: before you reject, dispatch `emend-review-manager` (`model: "opus"`) in dispute mode
+  with the file path, line, claim, your argument, the round from the last line in
+  `.wt/review-log.md` that is not `final-skipped` (or `final` when there is none), the range
+  `origin/main...HEAD` and the task file `.wt/issue.md`. It has a fresh Codex thread try to refute
+  you. If it confirms a false positive, write the reply with the reason and post it
   as above. Leave the thread open; only the owner resolves a disagreement. If it flips to true,
   fix it as Valid. If the two of you cannot converge, report it to the owner.
 - Fork (risky, ambiguous, product- or security-sensitive): ask.
@@ -290,14 +292,11 @@ incomplete comment page. Threads you disagreed with stay open by design.
 
 ## 7. Final review
 
-Review in rounds as `.claude/rules/review-rounds.md` says, with these reviewers:
-
-- `emend-reviewer`;
-- a fresh read-only Codex review through `codex-agent`, never a reused thread;
-- `emend-security-reviewer` when `AGENTS.md` lists the change as security-relevant.
-
-Give each reviewer the intent and the range, and tell them to read the change themselves. Do not
-hand them your summary. Read `.wt/review-log.md` first to pick the round:
+Review in rounds as `.claude/rules/review-rounds.md` says. Dispatch `emend-review-manager`
+(`model: "opus"`) with the round, the range (`origin/main...HEAD` for a full round, the fix
+commits for a check round), the task file `.wt/issue.md` (or task text) and, for `final-check` and
+`owner-check`, `.wt/review-findings.json`. It picks and runs the reviewers. Do not hand it your
+summary. Fixes go to Codex. Read `.wt/review-log.md` first to pick the round:
 
 1. No `final` or `final-skipped` line: run the `final` round over the whole change,
    `origin/main...HEAD`, or skip it as the rule says.
@@ -307,6 +306,7 @@ hand them your summary. Read `.wt/review-log.md` first to pick the round:
      reviewed head. With one logged, no round; name the later fixes under Evidence.
 3. The head did not move, or moved only by a rebase: no round.
 
+Append each manager JSON to `.wt/review-findings.json` and log each round as the rule says.
 After each round, update the PR body as step 3 says. If a fix changed content, return to step 1
 for CI and threads; back here, the list above picks the next round.
 

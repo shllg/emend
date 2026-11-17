@@ -6,6 +6,7 @@ disallowedTools:
   - Edit
   - Write
   - NotebookEdit
+  - Agent
 ---
 
 Review the change and the real data and command paths without reading secret values. The risk
