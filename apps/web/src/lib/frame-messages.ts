@@ -10,7 +10,7 @@ const literal = <T extends string>(value: T) =>
   HtmlSpanTarget.shape.quote.refine((text) => text === value).transform(() => value);
 const threadId = ThreadView.shape.id;
 const image = empty.extend({
-  path: FilePath,
+  path: FileView.shape.mediaType.max(LIMITS.pathChars).refine((path) => path.isWellFormed()),
   caption: FileView.shape.mediaType.max(LIMITS.quoteChars).refine((caption) => caption.isWellFormed()),
 });
 const gallery = empty

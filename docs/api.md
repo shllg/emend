@@ -785,8 +785,11 @@ segment once, and use the same rejection rules as the core resolver. The parent 
 destination again before navigating.
 
 A primary click or tap without modifiers on a qualifying image sends
-`{ type: "emend:image", images: { path: FilePath, caption: string }[], index: number }`.
-Both objects are strict. The gallery contains 1 through `LIMITS.filesPerRevision` (10000) images
+`{ type: "emend:image", images: { path: string, caption: string }[], index: number }`.
+Both objects are strict. Each path is a well-formed string of at most `LIMITS.pathChars` (4096)
+characters; the message schema does not require it to be a `FilePath`. Exact membership in
+the doc's server-supplied `images` (all valid `FilePath`s) determines which entries may open.
+The gallery contains 1 through `LIMITS.filesPerRevision` (10000) images
 in flat-tree rendered order, including open shadow roots and slotted images. An open shadow
 root replaces its host's light children in the walk; a slot contributes its assigned nodes,
 or its fallback children when none are assigned. Script, style, template and noscript subtrees
@@ -807,7 +810,12 @@ rects. Loaded images smaller than 48 pixels in both dimensions, including broken
 excluded. Queries and fragments are ignored.
 The bridge uses `currentSrc` when available. For a pending responsive image, it approximates
 the browser's choice: in a `picture`, use the first preceding HTML `source` whose media query
-is absent or matches and whose type is absent or a supported raster media type. Sources whose
+is absent or matches and whose type is absent or a supported raster media type. The type is
+the part before the first `;`, trimmed and lowercased, so case and MIME parameters do not
+affect matching. A `media` attribute longer than 1024 characters counts as not matching,
+without calling `matchMedia`. Each source's choice is evaluated once per gallery build and
+cached, including empty choices for media mismatches, unsupported types and empty source sets.
+Each visit still consumes a gallery step. Sources whose
 `srcset` yields no candidates are skipped in favour of the next source. Otherwise use
 the image's own `srcset`, then its `src` when `srcset` is absent or yields no candidates.
 The picture scan examines at most 64 child nodes before reaching the image, counting text
@@ -823,15 +831,18 @@ text-walk budget. Every image examined, including rejected images and the clicke
 initial check, costs one step. Every ancestor step for image qualification or caption lookup
 and every child visited by the picture source scan also costs one step. Collection stops when
 this budget is spent. A click on an image not yet collected posts nothing.
-Gallery collection stops before the sum of `path.length + caption.length` would exceed
-1,000,000 characters, or at 10000 images. If the clicked image is outside that collected
+The sum of `path.length + caption.length` stays within 1,000,000 characters. If a caption
+would exceed the remaining budget, that image is added with an empty caption when its path
+alone still fits. Collection stops when the path alone does not fit, at 10000 images, or when
+the step budget is spent. If the clicked image is outside that collected
 prefix, no message is sent. The parent independently rejects a message above the same
 1,000,000-character total, before filtering unknown paths.
 The parent accepts this message only from the current trusted frame after its ready. It opens
 only paths in that doc's `images`: an unknown clicked path opens nothing, and other unknown
 entries are dropped while preserving order and the clicked entry. The parent builds each URL
 from the doc's own `/content/<docKey>/` prefix plus the path with each segment percent-encoded.
-The app's lightbox shows the gallery without a comment action, leaving the frame mounted and
+The parent uses the label "Screenshot" when an image's caption is empty. The app's lightbox
+shows the gallery without a comment action, leaving the frame mounted and
 its reading position unchanged on close. A new frame generation or navigation away closes it.
 
 HTML Contents addresses the server's h2/h3 list by zero-based index. The parent sends

@@ -470,6 +470,96 @@ test("pending pictures use window's own matchMedia to select the first matching 
   }
 });
 
+test.each([
+  {
+    name: "matching media",
+    media: "(min-width: 1px)",
+    type: "image/webp",
+    srcset: "chosen.webp 2x",
+    chosen: true,
+    reads: 1,
+  },
+  {
+    name: "media mismatch",
+    media: "(min-width: 10000px)",
+    type: "image/webp",
+    srcset: "chosen.webp 2x",
+    chosen: false,
+    reads: 0,
+  },
+  {
+    name: "unsupported type",
+    media: "(min-width: 1px)",
+    type: "image/svg+xml",
+    srcset: "vector.svg",
+    chosen: false,
+    reads: 0,
+  },
+  { name: "empty source set", media: "(min-width: 1px)", type: "image/webp", srcset: "", chosen: false, reads: 1 },
+])("picture source evaluation is cached once per click for $name", async ({ media, type, srcset, chosen, reads }) => {
+  const b = bridge(
+    `<body><img src="plain.png"><picture><source media="${media}" type="${type}" srcset="${srcset}">${"<img data-loading>".repeat(200)}<img id="last" data-loading src="own.png"></picture></body>`,
+  );
+  try {
+    const source = b.window.document.querySelector("source");
+    const attributes = vi.spyOn(b.window.Element.prototype, "getAttribute");
+    for (let click = 1; click <= 2; click++) {
+      // Start in the picture so the initial clicked-image check shares the same source cache.
+      expect(b.click("#last").defaultPrevented).toBe(true);
+      expect(b.matchMedia).toHaveBeenCalledTimes(click);
+      expect(b.matchMedia).toHaveBeenLastCalledWith(media);
+      expect(
+        attributes.mock.calls.filter(
+          ([name], index) => name === "srcset" && attributes.mock.contexts[index] === source,
+        ),
+      ).toHaveLength(reads * click);
+      expect(b.images()[click - 1]).toEqual({
+        type: "emend:image",
+        images: [
+          { path: "docs/plain.png", caption: "" },
+          ...(chosen
+            ? Array.from({ length: 201 }, () => ({ path: "docs/chosen.webp", caption: "" }))
+            : [{ path: "docs/own.png", caption: "" }]),
+        ],
+        index: chosen ? 201 : 1,
+      });
+    }
+  } finally {
+    await b.close();
+  }
+});
+
+test.each([1024, 1025])("picture media attributes of %i characters respect the parsing cap", async (length) => {
+  const media = "(min-width: 1px)".padEnd(length, " ");
+  const b = bridge(
+    `<body><picture><source media="${media}" srcset="first.webp"><source media="(min-width: 1px)" srcset="next.webp"><img data-loading src="own.png"></picture></body>`,
+  );
+  try {
+    expect(b.click("img").defaultPrevented).toBe(true);
+    expect(b.images()[0]?.images).toEqual([{ path: `docs/${length === 1024 ? "first" : "next"}.webp`, caption: "" }]);
+    expect(b.matchMedia).toHaveBeenCalledTimes(1);
+    expect(b.matchMedia).toHaveBeenCalledWith(length === 1024 ? media : "(min-width: 1px)");
+    if (length > 1024) expect(b.matchMedia).not.toHaveBeenCalledWith(media);
+  } finally {
+    await b.close();
+  }
+});
+
+test.each(["IMAGE/WEBP", "image/webp; x=y", "  Image/WEBP ; charset=x  "])(
+  "picture source type %j matches after removing parameters and normalizing case and whitespace",
+  async (type) => {
+    const b = bridge(
+      `<body><picture><source type="${type}" srcset="chosen.webp"><img data-loading src="fallback.png"></picture></body>`,
+    );
+    try {
+      expect(b.click("img").defaultPrevented).toBe(true);
+      expect(b.images()[0]?.images).toEqual([{ path: "docs/chosen.webp", caption: "" }]);
+    } finally {
+      await b.close();
+    }
+  },
+);
+
 test("pictures without a matching preceding source fall back to the image's own srcset or src", async () => {
   const b = bridge(`<body>
     <picture><source media="(min-width: 10000px)" srcset="other.png 2x">
@@ -626,7 +716,35 @@ test.each(["Shared caption", "\u200b\u202e "])(
   },
 );
 
-test("gallery stops at the total character budget and refuses a clicked image beyond it", async () => {
+test("gallery drops captions that do not fit so all 500 figure images remain reachable", async () => {
+  const caption = "x".repeat(2000);
+  const filenames = Array.from({ length: 500 }, (_, index) => `image-${String(index + 1).padStart(3, "0")}.png`);
+  const b = bridge(
+    `<body>${filenames.map((name, index) => `<figure><img id="image-${index + 1}" src="${name}"><figcaption>${caption}</figcaption></figure>`).join("")}</body>`,
+  );
+  try {
+    expect(b.click("#image-500").defaultPrevented).toBe(true);
+    const gallery = b.images()[0];
+    expect(gallery?.index).toBe(499);
+    expect(gallery?.images.map((image: { path: string }) => image.path)).toEqual(
+      filenames.map((name) => `docs/${name}`),
+    );
+    expect(gallery?.images.map((image: { caption: string }) => image.caption)).toEqual([
+      ...Array(495).fill(caption),
+      ...Array(5).fill(""),
+    ]);
+    expect(
+      gallery?.images.reduce(
+        (total: number, image: { path: string; caption: string }) => total + image.path.length + image.caption.length,
+        0,
+      ),
+    ).toBe(999_000);
+  } finally {
+    await b.close();
+  }
+});
+
+test("gallery stops when the next path alone exceeds the character budget and refuses a click beyond it", async () => {
   const path = "docs/image.png";
   const caption = "x".repeat(2000 - path.length);
   const b = bridge(

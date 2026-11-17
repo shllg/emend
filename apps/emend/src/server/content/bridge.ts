@@ -551,7 +551,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     budget.remaining--;
     return true;
   }
-  function pendingImageSource(element, steps) {
+  function pendingImageSource(element, sources, steps) {
     const parent = nodeValue("parentNode", element);
     if (parent && nodeType(parent) === 1 && namespace(parent) === "http://www.w3.org/1999/xhtml" && localName(parent) === "picture") {
       const siblings = children(parent)[Symbol.iterator]();
@@ -563,11 +563,17 @@ export const BRIDGE_SOURCE = String.raw`(() => {
         const child = next.value;
         if (child === element) break;
         if (nodeType(child) !== 1 || namespace(child) !== "http://www.w3.org/1999/xhtml" || localName(child) !== "source") continue;
-        const media = elementCall("getAttribute", child, "media");
-        const type = elementCall("getAttribute", child, "type");
-        if (media !== null && !read(window.MediaQueryList.prototype, "matches", matchMedia.call(window, media))) continue;
-        if (type !== null && !["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"].includes(type)) continue;
-        const choice = srcsetChoice(elementCall("getAttribute", child, "srcset") || "");
+        let choice = sources.get(child);
+        if (choice === undefined) {
+          // Cache misses too, so rejected sources cannot repeat parsing work for every image.
+          sources.set(child, "");
+          const media = elementCall("getAttribute", child, "media");
+          const type = elementCall("getAttribute", child, "type");
+          if (media !== null && (media.length > 1024 || !read(window.MediaQueryList.prototype, "matches", matchMedia.call(window, media)))) continue;
+          if (type !== null && !["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"].includes(type.split(";", 1)[0].trim().toLowerCase())) continue;
+          choice = srcsetChoice(elementCall("getAttribute", child, "srcset") || "");
+          sources.set(child, choice);
+        }
         if (choice) return choice;
       }
     }
@@ -575,7 +581,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     const srcset = elementCall("getAttribute", element, "srcset");
     return (srcset !== null ? srcsetChoice(srcset) : "") || elementCall("getAttribute", element, "src") || "";
   }
-  function imagePath(element, urls, steps) {
+  function imagePath(element, urls, sources, steps) {
     if (!element || nodeType(element) !== 1 || namespace(element) !== "http://www.w3.org/1999/xhtml" ||
         localName(element) !== "img") return null;
     if (!galleryStep(steps) || !imageVisible(element)) return null;
@@ -588,7 +594,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     }
     try {
       const prototype = window.HTMLImageElement.prototype;
-      const source = read(prototype, "currentSrc", element) || pendingImageSource(element, steps);
+      const source = read(prototype, "currentSrc", element) || pendingImageSource(element, sources, steps);
       if (!source) return null;
       const url = new window.URL(source, urls.base ??= nodeValue("baseURI", document));
       const entry = /^(\/content\/[A-Za-z0-9_-]{43}[0-9a-f]{32}\/)(.*)$/.exec(window.location.pathname);
@@ -645,19 +651,21 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   function imageGallery(clicked) {
     // Resolve the document base once per build; repeated DOM lookups can scan the whole pub.
     const urls = {};
+    const sources = new Map();
     const stepBudget = { remaining: 1000000 };
-    if (!body() || imagePath(clicked, urls, stepBudget) === null || !stepBudget.remaining) return null;
+    if (!body() || imagePath(clicked, urls, sources, stepBudget) === null || !stepBudget.remaining) return null;
     const images = [];
     const captions = new Map();
     const captionBudget = { remaining: 1000000 };
     let index = -1, size = 0;
     for (const node of imageNodes(body())) {
-      const path = imagePath(node, urls, stepBudget);
+      const path = imagePath(node, urls, sources, stepBudget);
       if (!stepBudget.remaining) break;
       if (path === null) continue;
-      const caption = imageCaption(node, captions, captionBudget, stepBudget);
+      if (size + path.length > 1000000) break;
+      let caption = imageCaption(node, captions, captionBudget, stepBudget);
       if (caption === null) break;
-      if (size + path.length + caption.length > 1000000) break;
+      if (size + path.length + caption.length > 1000000) caption = "";
       size += path.length + caption.length;
       if (node === clicked) index = images.length;
       images.push({ path, caption });

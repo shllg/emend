@@ -1,7 +1,7 @@
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { LIMITS, type ThreadView } from "@emend/contract";
+import { FilePath, LIMITS, type ThreadView } from "@emend/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
@@ -536,6 +536,31 @@ test("unknown non-clicked entries are dropped and duplicate paths keep the click
   expect(screen.getByRole("dialog", { name: "Screenshot" })).toBeTruthy();
 });
 
+test.each(["images/pending\u200b.png", "../outside.png", "/content/other/image.png"])(
+  "a non-FilePath entry %j is dropped without blocking listed images",
+  (path) => {
+    const { message } = mount([], undefined, pubImages);
+    message({ type: "emend:ready" });
+    expect(FilePath.safeParse(path).success).toBe(false);
+    const gallery = {
+      type: "emend:image",
+      images: [{ path, caption: "Unknown" }, imageMessage.images[0], imageMessage.images[2]],
+      index: 0,
+    };
+    expect(FrameToParent.safeParse(gallery).success).toBe(true);
+    message(gallery);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    message({ ...gallery, index: 1 });
+    expect(screen.getByRole("dialog", { name: "Caption 1" })).toBeTruthy();
+    expect(lightboxImage().getAttribute("src")).toBe(`/content/${"a".repeat(75)}/images/a%20%23%C3%A9.png`);
+    expect(screen.getByText("1 of 2")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Next screenshot" }));
+    expect(screen.getByRole("dialog", { name: "Screenshot" })).toBeTruthy();
+    expect(lightboxImage().getAttribute("src")).toBe(`/content/${"a".repeat(75)}/images/c.png`);
+    expect(screen.getByText("2 of 2")).toBeTruthy();
+  },
+);
+
 test.each(["load", "ready", "generation"])(
   "a %s change closes the gallery and refuses stale frame messages",
   (change) => {
@@ -562,6 +587,14 @@ test("image messages enforce strict objects, bounded well-formed captions, paths
     FrameToParent.safeParse({ ...imageMessage, images: [{ ...image, caption: "x".repeat(LIMITS.quoteChars) }] })
       .success,
   ).toBe(true);
+  for (const path of [
+    "",
+    "../outside.png",
+    "/content/other/image.png",
+    "images/pending\u200b.png",
+    "x".repeat(LIMITS.pathChars),
+  ])
+    expect(FrameToParent.safeParse({ ...imageMessage, images: [{ ...image, path }] }).success).toBe(true);
   expect(
     FrameToParent.safeParse({
       ...imageMessage,
@@ -576,14 +609,28 @@ test("image messages enforce strict objects, bounded well-formed captions, paths
     { ...imageMessage, images: Array.from({ length: LIMITS.filesPerRevision + 1 }, () => image) },
     ...[
       { ...image, extra: true },
-      { ...image, path: "../outside.png" },
-      { ...image, path: "/content/other/image.png" },
+      { ...image, path: "x".repeat(LIMITS.pathChars + 1) },
+      { ...image, path: "\ud800" },
+      { ...image, path: undefined },
+      { ...image, path: 42 },
       { ...image, caption: "x".repeat(LIMITS.quoteChars + 1) },
       { ...image, caption: "\ud800" },
       { ...image, caption: undefined },
     ].map((image) => ({ ...imageMessage, images: [image] })),
   ])
     expect(FrameToParent.safeParse(data).success).toBe(false);
+});
+
+test.each([
+  { name: "overlong", path: "x".repeat(LIMITS.pathChars + 1) },
+  { name: "ill-formed", path: "image\ud800.png" },
+])("an $name path rejects the whole gallery before allowlist filtering", ({ path }) => {
+  const { message } = mount([], undefined, pubImages);
+  message({ type: "emend:ready" });
+  const gallery = { ...imageMessage, images: [imageMessage.images[0], { path, caption: "Unknown" }] };
+  expect(FrameToParent.safeParse(gallery).success).toBe(false);
+  message(gallery);
+  expect(screen.queryByRole("dialog")).toBeNull();
 });
 
 test("image messages over the total character budget open nothing, even with allowed paths", () => {
