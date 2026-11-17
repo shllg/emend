@@ -18,6 +18,15 @@ export const SHORTCUT_DEFAULTS = {
   "inbox.filter": "f",
   "inbox.search": "/",
   "inbox.back": "u",
+  "inbox.jump1": "alt+1",
+  "inbox.jump2": "alt+2",
+  "inbox.jump3": "alt+3",
+  "inbox.jump4": "alt+4",
+  "inbox.jump5": "alt+5",
+  "inbox.jump6": "alt+6",
+  "inbox.jump7": "alt+7",
+  "inbox.jump8": "alt+8",
+  "inbox.jump9": "alt+9",
   "tab.writeup": "1",
   "tab.files": "2",
   "tab.docs": "3",
@@ -41,6 +50,15 @@ export const ShortcutCommand = z.enum([
   "inbox.filter",
   "inbox.search",
   "inbox.back",
+  "inbox.jump1",
+  "inbox.jump2",
+  "inbox.jump3",
+  "inbox.jump4",
+  "inbox.jump5",
+  "inbox.jump6",
+  "inbox.jump7",
+  "inbox.jump8",
+  "inbox.jump9",
   "tab.writeup",
   "tab.files",
   "tab.docs",
@@ -64,6 +82,7 @@ export const ShortcutKey = z
   .refine(
     (key) =>
       (key.length === 1 && key >= "!" && key <= "~" && !/[A-Z]/.test(key)) ||
+      (key.length === 5 && /^(alt|mod)\+[0-9]$/.test(key)) ||
       (key.length === 7 && /^shift\+[a-z]$/.test(key)) ||
       ((key.length === 5 || key.length === 11) && /^mod\+(shift\+)?[a-z]$/.test(key)),
     "Invalid shortcut key",
@@ -75,6 +94,7 @@ export function normalizeShortcutKey(input: unknown): ShortcutKey | undefined {
   if (parsed.success) return parsed.data;
   if (typeof input !== "string") return undefined;
   if (input.length === 1 && /^[A-Z]$/.test(input)) return `shift+${input.toLowerCase()}`;
+  if (input.length === 5 && /^(alt|mod)\+[0-9]$/i.test(input)) return input.toLowerCase();
   if (input.length === 7 && /^shift\+[a-z]$/i.test(input)) return input.toLowerCase();
   if ((input.length === 5 || input.length === 11) && /^mod\+(shift\+)?[a-z]$/i.test(input)) return input.toLowerCase();
   return undefined;

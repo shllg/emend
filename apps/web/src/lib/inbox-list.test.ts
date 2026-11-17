@@ -1,6 +1,6 @@
 import { InboxItem } from "@emend/contract";
 import { expect, test } from "vitest";
-import { inboxSections, inboxSequence } from "./inbox-list.ts";
+import { activeJumpRows, inboxSections, inboxSequence } from "./inbox-list.ts";
 
 const a = { id: "11111111-1111-4111-8111-111111111111", name: "Alpha", members: 3 };
 const b = { id: "22222222-2222-4222-8222-222222222222", name: "Beta", members: 0 };
@@ -145,4 +145,46 @@ test("all filters apply within groups; search expands them, and filtered-out mem
     expect(section?.empty).toBe(false);
     if ("filter" in filter) expect(section?.expanded).toBe(true);
   }
+});
+
+test("Active jumps take the first nine openable rows in display order", () => {
+  const rows = Array.from({ length: 12 }, (_, i) => item(i + 1));
+  expect(activeJumpRows(inboxSections(rows, now))).toEqual(rows.slice(0, 9));
+  rows[1] = item(2, { movedTo: "https://example.com/review" });
+  expect(activeJumpRows(inboxSections(rows, now))).toEqual([rows[0], ...rows.slice(2, 10)]);
+});
+
+test("Active jumps never fill spare places with snoozed, grouped, Done or expired rows", () => {
+  const rows = [
+    item(1),
+    item(2, { list: "snoozed", snoozed: true }),
+    item(3, { groupId: a.id }),
+    item(4, { list: "done" }),
+    item(5, { activeUntil: "2026-11-04T11:00:00.000Z" }),
+  ];
+  expect(
+    activeJumpRows(
+      inboxSections(rows, now, {
+        groups: [a],
+        open: { snoozed: true, done: true, [`group:${a.id}`]: true },
+      }),
+    ),
+  ).toEqual([rows[0]]);
+  expect(activeJumpRows(inboxSections(rows.slice(1), now, { groups: [a] }))).toEqual([]);
+});
+
+test("Active jumps count only rows shown by Kind, text, machine and project filters", () => {
+  const rows = [
+    item(1),
+    item(2, { kind: "publish", project: "One" }),
+    item(3, { kind: "publish", origin: { id: b.id, name: "Machine B" } }),
+  ];
+  for (const [filters, expected] of [
+    [{ kind: "publish" }, rows.slice(1)],
+    [{ filter: "Item 3" }, [rows[2]]],
+    [{ kind: "publish", filter: "Item 1" }, []],
+    [{ machine: b.id }, [rows[2]]],
+    [{ project: "One" }, [rows[1]]],
+  ] as const)
+    expect(activeJumpRows(inboxSections(rows, now, filters))).toEqual(expected);
 });

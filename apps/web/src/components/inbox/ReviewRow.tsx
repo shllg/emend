@@ -27,17 +27,30 @@ export function ReviewRow({
   now,
   onOpen,
   highlight = false,
+  jump,
+  keyShortcuts,
 }: {
   review: InboxItem;
   now: number;
   onOpen?: () => void;
   highlight?: boolean;
+  jump?: string;
+  keyShortcuts?: string;
 }) {
   const attention = needsAttention(review);
   const agent = agentStatusOf(review);
   const contents = (
     <>
       <span className="col-start-1 row-start-1 flex min-w-0 items-center gap-1.5 text-11 leading-[1.2] text-fg-3">
+        {jump && !review.movedTo && (
+          <span
+            aria-hidden="true"
+            data-jump-number
+            className="inline-grid h-[14px] min-w-[14px] shrink-0 place-items-center rounded-[3px] border border-line-2 px-[3px] font-mono text-[10px] font-medium leading-none text-fg-3 tabular-nums"
+          >
+            {jump}
+          </span>
+        )}
         <span aria-hidden="true" className="inline-flex [&>span]:size-[7px] [&>span]:opacity-85">
           <OriginBadge origin={review.origin} dot />
         </span>
@@ -134,6 +147,7 @@ export function ReviewRow({
       ) : (
         <Link
           data-inbox-row={review.id}
+          aria-keyshortcuts={keyShortcuts}
           to="/r/$reviewId"
           params={{ reviewId: review.id }}
           search={{ rev: review.newestRevision }}

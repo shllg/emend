@@ -15,7 +15,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
 import { adjacentInboxItem, inboxSections, inboxSequence } from "./lib/inbox-list.ts";
 import { defaultLayout, layoutStore } from "./lib/layout-store.ts";
-import { shortcutLabels } from "./lib/shortcuts.ts";
+import { shortcutGroups, shortcutLabels } from "./lib/shortcuts.ts";
 
 const ids = [
   "11111111-1111-4111-8111-111111111111",
@@ -865,7 +865,9 @@ test("? lists all commands, their effective keys, fixed keys and settings link",
   await ready();
   press("?", { shiftKey: true });
   const dialog = await screen.findByRole("alertdialog", { name: "Keyboard shortcuts" });
-  for (const label of Object.values(shortcutLabels)) expect(within(dialog).getByText(label)).toBeTruthy();
+  for (const command of shortcutGroups.flatMap((group) => group.commands))
+    expect(within(dialog).getByText(shortcutLabels[command])).toBeTruthy();
+  expect(within(dialog).getByText("Open Active row 1 to 9")).toBeTruthy();
   expect(within(dialog).getByText("x")).toBeTruthy();
   expect(within(dialog).getByText("Off")).toBeTruthy();
   expect(within(dialog).getByText("⌘↵ / Ctrl ↵: save a comment, or send from the instructions field")).toBeTruthy();
@@ -1013,8 +1015,8 @@ test("capture refuses modifiers, named keys and clashes, staying ready for anoth
   await openSettings();
   const button = change("inbox.next");
   for (const [key, options, message] of [
-    ["k", { altKey: true }, "Alt combinations stay with the browser."],
-    ["1", { ctrlKey: true }, "Use Ctrl or ⌘ with one letter."],
+    ["k", { altKey: true }, "Alt works only with a digit."],
+    ["?", { ctrlKey: true }, "Use Ctrl or ⌘ with one letter or digit."],
     ["Enter", {}, "Use a letter, a digit or a punctuation key."],
     ["k", {}, "Already used by Previous review or pub."],
   ] as const) {

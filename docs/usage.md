@@ -34,12 +34,18 @@ To review, Answered and Approved. The newest change comes first inside each grou
 A pub stays in To review after you send comments on it.
 
 Keyboard shortcuts work on desktop and tablet. Press `?` to list them. Settings → Keyboard shortcuts
-changes, turns off or resets a key. Ctrl+Shift+P (⌘⇧P on a Mac) opens the command palette; type a
-few letters of a command, move with the arrow keys and press Enter. Firefox keeps that key for a
+changes, turns off or resets a key. Alt+1 to Alt+9 (⌥1 to ⌥9 on a Mac) open the first nine rows
+of Active, top to bottom, as the small numbers in the inbox, the inbox pane and the collapsed rail
+show, counting only the rows shown when a filter is set. The rail ignores Kind and search.
+emend keeps these keys while its page has focus, also where the browser uses them to switch tabs.
+Settings can switch them to Ctrl (⌘ on a Mac) or turn them off to give them back to the browser.
+Ctrl+Shift+P (⌘⇧P on a Mac) opens the command palette; type a few letters of a command, move with
+the arrow keys and press Enter. Firefox keeps that key for a
 private window, so pick another one in Settings there. In the config file, use
 `"keys": { "inbox.next": "j", "file.toggleViewed": "shift+v", "review.snooze": null }`.
 `null` turns a shortcut off. A key is one letter, digit or punctuation character, or `shift+`,
-`mod+` or `mod+shift+` followed by a letter. `mod` means Ctrl, or ⌘ on a Mac.
+`mod+` or `mod+shift+` followed by a letter, or `alt+` or `mod+` followed by a digit.
+`mod` means Ctrl, or ⌘ on a Mac.
 See [api.md](api.md) for the command ids.
 
 ## Publish a doc

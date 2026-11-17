@@ -18,6 +18,8 @@ import { Kbd } from "../components/ui/Kbd.tsx";
 import { useLayout } from "./layout.ts";
 import {
   ignoreShortcut,
+  jumpCommands,
+  jumpKeysLabel,
   keyLabel,
   matchesShortcut,
   shortcutCommands,
@@ -112,10 +114,36 @@ export function useShortcut(
   }, [registry, command, enabled, priority]);
 }
 
+export function useJumpShortcuts(open: (index: number) => void, { enabled = true, priority = 0 } = {}) {
+  const registry = useContext(Shortcuts);
+  const latest = useRef(open);
+  useLayoutEffect(() => {
+    latest.current = open;
+  });
+  useEffect(() => {
+    if (!registry || !enabled) return;
+    const unregister = jumpCommands.map((command, index) =>
+      registry.register({
+        command,
+        priority,
+        handle: () => {
+          latest.current(index);
+          return true;
+        },
+        when: () => true,
+      }),
+    );
+    return () => {
+      for (const remove of unregister) remove();
+    };
+  }, [registry, enabled, priority]);
+}
+
 function GlobalShortcuts({ keys }: { keys: Record<ShortcutCommand, KeyBinding> }) {
   const router = useRouter();
   const path = useRouterState({ select: (state) => state.location.pathname });
   const [open, setOpen] = useState(false);
+  const jumpLabel = jumpKeysLabel(jumpCommands.map((command) => keys[command]));
   useShortcut(
     "inbox.back",
     () => {
@@ -154,6 +182,12 @@ function GlobalShortcuts({ keys }: { keys: Record<ShortcutCommand, KeyBinding> }
                 <dd>{keys[command] === null ? "Off" : <Kbd>{keyLabel(keys[command])}</Kbd>}</dd>
               </div>
             ))}
+            {group.jump && (
+              <div className="flex items-center justify-between gap-3">
+                <dt>Open Active row 1 to 9</dt>
+                <dd>{jumpLabel === "Off" ? "Off" : <Kbd>{jumpLabel}</Kbd>}</dd>
+              </div>
+            )}
           </dl>
         </section>
       ))}

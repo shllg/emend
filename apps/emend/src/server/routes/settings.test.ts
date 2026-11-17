@@ -665,3 +665,19 @@ test("an empty inbox still reports the effective approval cap", async () => {
   expect((await f.request(`/reviews/${f.reviewId}`, "DELETE")).status).toBe(204);
   expect(await inbox()).toMatchObject({ items: [], approvedActiveLimit: 10 });
 });
+
+test("digit jump keys normalize from config and persist through PATCH", async () => {
+  await config({ keys: { "inbox.jump1": "Mod+1" } });
+  expect((await keyView()).commands["inbox.jump1"]).toMatchObject({ value: "mod+1", source: "file", file: "mod+1" });
+  const view = await updateKeys({ "inbox.jump2": { key: "mod+2" } });
+  expect(view.keys.commands["inbox.jump2"]).toMatchObject({ value: "mod+2", source: "override", override: "mod+2" });
+  expect((await keyView()).commands["inbox.jump2"]).toMatchObject({ value: "mod+2", override: "mod+2" });
+  const stored = await f.db.read((q) =>
+    q
+      .select()
+      .from(settings)
+      .where(and(eq(settings.ownerId, f.ownerId), eq(settings.key, "keys")))
+      .get(),
+  );
+  expect(JSON.parse(stored?.value ?? "null")).toEqual({ "inbox.jump2": "mod+2" });
+});
