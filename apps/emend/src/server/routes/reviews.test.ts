@@ -793,15 +793,28 @@ test("revision views expose the Send baseline and round-trip the new writeup fie
   expect((await view(1)).changedSince).toBe(2);
 });
 
-test("HTML revision views list only each doc's linked image assets, sorted by path", async () => {
-  const assets = ["images/z.svg", "images/a.png", "style.css", "script.js", "font.woff2"];
+test("HTML revision views list only each doc's linked raster image assets, sorted by path", async () => {
+  const assets = [
+    "images/z.webp",
+    "images/a.png",
+    "images/j.jpeg",
+    "images/g.gif",
+    "images/v.avif",
+    "images/vector.svg",
+    "images/icon.ico",
+    "images/bitmap.bmp",
+    "style.css",
+    "script.js",
+    "font.woff2",
+  ];
   const entries = [
     { path: "first.html", role: "doc", assets },
-    { path: "second.html", role: "doc", assets: ["images/other.svg"] },
+    { path: "second.html", role: "doc", assets: ["images/other.png"] },
     { path: "empty.html", role: "doc", assets: [] },
+    { path: "vector.html", role: "doc", assets: ["images/vector.svg"] },
     ...assets.map((path) => ({ path, role: "asset", parent: "first.html" })),
-    { path: "images/other.svg", role: "asset", parent: "second.html" },
-    { path: "images/unlisted.svg", role: "asset", parent: "first.html" },
+    { path: "images/other.png", role: "asset", parent: "second.html" },
+    { path: "images/unlisted.png", role: "asset", parent: "first.html" },
   ];
   const response = await f.request(
     "/publish",
@@ -838,9 +851,10 @@ test("HTML revision views list only each doc's linked image assets, sorted by pa
     await (await get(`/${published.reviewId}/revisions/${published.revision}`)).json(),
   );
   expect(view.docs.map((doc) => doc.kind === "html" && { path: doc.path, images: doc.images })).toEqual([
-    { path: "first.html", images: ["images/a.png", "images/z.svg"] },
-    { path: "second.html", images: ["images/other.svg"] },
+    { path: "first.html", images: ["images/a.png", "images/g.gif", "images/j.jpeg", "images/v.avif", "images/z.webp"] },
+    { path: "second.html", images: ["images/other.png"] },
     { path: "empty.html", images: [] },
+    { path: "vector.html", images: [] },
   ]);
   await error(await get(`/${published.reviewId}/revisions/${published.revision}`, "foreign"), 404, "unknown_review");
 });

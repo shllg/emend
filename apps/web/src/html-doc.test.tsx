@@ -585,3 +585,16 @@ test("image messages enforce strict objects, bounded well-formed captions, paths
   ])
     expect(FrameToParent.safeParse(data).success).toBe(false);
 });
+
+test("image messages over the total character budget open nothing, even with allowed paths", () => {
+  const path = "image.png";
+  const { message } = mount([], undefined, [path]);
+  message({ type: "emend:ready" });
+  const images = Array.from({ length: 500 }, () => ({ path, caption: "x".repeat(2000 - path.length) }));
+  const atLimit = { type: "emend:image", images, index: 0 };
+  expect(FrameToParent.safeParse(atLimit).success).toBe(true);
+  const overLimit = { ...atLimit, images: [{ path, caption: "x".repeat(2001 - path.length) }, ...images.slice(1)] };
+  expect(FrameToParent.safeParse(overLimit).success).toBe(false);
+  message(overLimit);
+  expect(screen.queryByRole("dialog")).toBeNull();
+});

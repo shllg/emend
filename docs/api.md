@@ -684,8 +684,10 @@ Kinds are `heading | paragraph | item | code | table | quote | diagram`; diagram
 mirrors core's rendered writeup. These are server-rendered blocks, never browser-rendered Markdown.
 Markdown docs are `{ path, kind: "markdown", blocks: RenderedBlock[] }` (empty if unrendered).
 HTML docs are `{ path, kind: "html", contentUrl, look?: "emend" | "custom", images?: FilePath[] }`.
-The optional `images` lists the doc's own image assets (asset rows with an `image/` media type
-linked through `doc_assets`), sorted by path, with at most `LIMITS.filesPerRevision` entries.
+The optional `images` lists the doc's own raster image assets linked through `doc_assets`,
+sorted by path, with at most `LIMITS.filesPerRevision` entries. Only `image/png`, `image/jpeg`,
+`image/gif`, `image/webp` and `image/avif` qualify. SVG, ICO and BMP assets stay in the frame;
+they cannot open in the lightbox. HTML docs without qualifying assets get `images: []`.
 The optional `look` is recorded at publish time: `emend` adds emend's layered pub stylesheet, and `custom`
 keeps the page's own look. An absent `look` (a revision published before this field existed, or
 metadata that failed) shows as a custom page. The URL is
@@ -782,15 +784,36 @@ paths in this revision. Bridge links resolve against the existing document base,
 segment once, and use the same rejection rules as the core resolver. The parent validates the
 destination again before navigating.
 
-A primary click or tap without modifiers on an image outside a link sends
+A primary click or tap without modifiers on a qualifying image sends
 `{ type: "emend:image", images: { path: FilePath, caption: string }[], index: number }`.
-Both objects are strict. The gallery contains 1 through `LIMITS.filesPerRevision` images in page
-order; `index` is an integer in that array's bounds. Captions are well-formed strings of at most
-`LIMITS.quoteChars` (2000) characters, taken from the enclosing figure's direct `figcaption`,
-otherwise the image's alt text, otherwise empty. Only laid-out HTML images under the current
-doc key qualify; loaded images smaller than 48 pixels in both dimensions, including broken
-images, are excluded. Queries and fragments are ignored. Images inside links are not part of
-the gallery; clicking them keeps link handling.
+Both objects are strict. The gallery contains 1 through `LIMITS.filesPerRevision` (10000) images
+in flat-tree rendered order, including open shadow roots and slotted images. An open shadow
+root replaces its host's light children in the walk; a slot contributes its assigned nodes,
+or its fallback children when none are assigned. Script, style, template and noscript subtrees
+are skipped. The clicked image comes from the event's composed path, so shadow retargeting does
+not hide it. `index` is an integer in the gallery's bounds.
+Captions are well-formed strings of at most `LIMITS.quoteChars` (2000) characters, taken from
+the nearest enclosing figure's direct `figcaption`. An absent or cleaned-empty caption falls
+back to the image's cleaned alt text, then to empty. Each figure's caption is computed only
+once per gallery build. Figure and interactive-ancestor lookups follow rendered parents,
+including slots and shadow hosts. Images inside links or HTML `summary`, `label` or `button`
+elements are excluded from the gallery. Clicking those images preserves link handling or the
+control's default action, including toggling a summary.
+Only visible HTML images under the current doc key qualify. Image visibility checks include
+CSS visibility and opacity when `checkVisibility` is available; otherwise they require client
+rects. Loaded images smaller than 48 pixels in both dimensions, including broken images, are
+excluded. Queries and fragments are ignored.
+The bridge uses `currentSrc` when available. For a pending responsive image, it approximates
+the browser's choice: in a `picture`, use the first preceding HTML `source` whose media query
+is absent or matches and whose type is absent or a supported raster media type. Otherwise use
+the image's own `srcset`, then its `src` when `srcset` is absent. From a source's or image's
+`srcset`, choose the largest `w` or `x` descriptor (a missing descriptor counts as `1x`);
+on parse trouble, use the first candidate. Resolve the choice against the document base URI,
+then apply the same origin and content-path checks.
+Gallery collection stops before the sum of `path.length + caption.length` would exceed
+1,000,000 characters, or at 10000 images. If the clicked image is outside that collected
+prefix, no message is sent. The parent independently rejects a message above the same
+1,000,000-character total, before filtering unknown paths.
 The parent accepts this message only from the current trusted frame after its ready. It opens
 only paths in that doc's `images`: an unknown clicked path opens nothing, and other unknown
 entries are dropped while preserving order and the clicked entry. The parent builds each URL

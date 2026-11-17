@@ -3,7 +3,7 @@ import { alias } from "drizzle-orm/sqlite-core";
 import type { Queries } from "../db/client.ts";
 import { docAssets, files } from "../db/schema.ts";
 
-const MEDIA_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"];
+export const MEDIA_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"];
 const doc = alias(files, "media_doc");
 
 /** App-origin images: writeup media or an image listed by a Markdown doc of the same revision. */

@@ -19,7 +19,10 @@ const gallery = empty
     images: image.array().min(1).max(LIMITS.filesPerRevision),
     index: FileView.shape.order,
   })
-  .refine(({ images, index }) => index < images.length);
+  .refine(({ images, index }) => index < images.length)
+  .refine(
+    ({ images }) => images.reduce((total, image) => total + image.path.length + image.caption.length, 0) <= 1_000_000,
+  );
 export const FrameToParent = span
   .extend({ type: literal("emend:anchor") })
   .or(empty.extend({ type: literal("emend:ready") }))

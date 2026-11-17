@@ -18,7 +18,6 @@ import {
   inArray,
   isNotNull,
   isNull,
-  like,
   lte,
   max,
   ne,
@@ -55,6 +54,7 @@ import {
 import type { AppDeps } from "../app.ts";
 import type { AppEnv } from "../auth/principal.ts";
 import { ApiError } from "../http/errors.ts";
+import { MEDIA_TYPES } from "../media.ts";
 import { noteView } from "../publish/notes.ts";
 import { type FileSetting, readFileSetting, readSettings } from "../settings.ts";
 import { commentHtml } from "./comment-html.ts";
@@ -439,22 +439,28 @@ async function revisionView(ownerId: string, q: Queries, deps: AppDeps, reviewId
   };
   if (!writeup) throw new ApiError("not_found");
   const rendered = await readJson(writeup.hash);
-  const imageRows = await q
-    .select({ docId: docAssets.docId, path: files.path })
-    .from(docAssets)
-    .innerJoin(
-      files,
-      and(eq(files.ownerId, ownerId), eq(files.revisionId, revisionId), eq(files.id, docAssets.assetId)),
-    )
-    .where(
-      and(
-        eq(docAssets.ownerId, ownerId),
-        eq(docAssets.revisionId, revisionId),
-        eq(files.role, "asset"),
-        like(files.mediaType, "image/%"),
-      ),
-    )
-    .all();
+  const htmlDocIds = fileRows
+    .filter((file) => file.role === "doc" && file.mediaType === "text/html")
+    .map((file) => file.id);
+  const imageRows = htmlDocIds.length
+    ? await q
+        .select({ docId: docAssets.docId, path: files.path })
+        .from(docAssets)
+        .innerJoin(
+          files,
+          and(eq(files.ownerId, ownerId), eq(files.revisionId, revisionId), eq(files.id, docAssets.assetId)),
+        )
+        .where(
+          and(
+            eq(docAssets.ownerId, ownerId),
+            eq(docAssets.revisionId, revisionId),
+            inArray(docAssets.docId, htmlDocIds),
+            eq(files.role, "asset"),
+            inArray(files.mediaType, MEDIA_TYPES),
+          ),
+        )
+        .all()
+    : [];
   const imagesByDoc = new Map<string, string[]>();
   for (const { docId, path } of imageRows) {
     const images = imagesByDoc.get(docId) ?? [];
