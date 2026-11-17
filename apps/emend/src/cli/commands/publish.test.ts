@@ -48,6 +48,25 @@ test.each(["manifest", "shortcut", "json"])(
         "<a-\u001b></a-\u001b><button></button><canvas></canvas><form></form><iframe></iframe><input><x-widget></x-widget>",
         "shows in emend's look",
       ],
+      [
+        "safe-outside.html",
+        "<x-a></x-a><x-b></x-b><x-c></x-c><x-d></x-d><x-e></x-e><x-f></x-f>",
+        "shows in emend's look",
+      ],
+      ["omitted.html", `<x-\u00a0></x-\u00a0><x-${"a".repeat(31)}></x-${"a".repeat(31)}>`, "shows in emend's look"],
+      [
+        "capped.html",
+        Array.from(
+          { length: 21 },
+          (_, i) => `<x-${String(i).padStart(2, "0")}></x-${String(i).padStart(2, "0")}>`,
+        ).join(""),
+        "shows in emend's look",
+      ],
+      [
+        "failed.html",
+        '<meta name="emend-look" content="emend"><x-failure></x-failure>',
+        "shows as a custom page: emend could not read its structure",
+      ],
       ["plan.md", "# Plan", ""],
     ] as const;
     for (const [path, text] of sources) await writeFile(join(source, path), text);
@@ -56,7 +75,7 @@ test.each(["manifest", "shortcut", "json"])(
       revision: 1,
       placed: 0,
       unplaced: 0,
-      unrendered: [],
+      unrendered: ["failed.html"],
       url: "http://127.0.0.1:3636/r/synthetic",
     };
     f.setResponse(async (_url, init) => {
@@ -96,14 +115,29 @@ test.each(["manifest", "shortcut", "json"])(
       if (note) expect(f.stderr).toContain(`emend: ${path.replace("\u034f", "\\u{34f}")} ${note}\n`);
       else expect(f.stderr.join("")).not.toContain(path);
     }
-    expect(f.stderr.filter((line) => line.includes(" shows "))).toHaveLength(6);
+    expect(f.stderr.filter((line) => line.includes(" shows "))).toHaveLength(10);
+    expect(f.stderr).toContain("emend: could not render failed.html\n");
+    expect(f.stderr.join("")).not.toContain("failed.html shows in emend");
+    expect(f.stderr.join("")).not.toContain("<x-failure>");
     expect(f.stderr).toContain(
       "emend: structure.html uses elements outside emend's page structure: <x-one>; emend's look has no styles for them\n",
     );
-    expect(f.stderr.filter((line) => line.includes("uses elements outside"))).toHaveLength(2);
+    expect(f.stderr.filter((line) => line.includes("uses elements outside"))).toHaveLength(5);
     expect(f.stderr).toContain(
-      "emend: outside\\u{34f}.html uses elements outside emend's page structure: <a-\\u{1b}>, <button>, <canvas>, <form>, <iframe> and 2 more; emend's look has no styles for them\n",
+      "emend: outside\\u{34f}.html uses elements outside emend's page structure: <button>, <canvas>, <form>, <iframe>, <input> and more; emend's look has no styles for them\n",
     );
+    expect(f.stderr).toContain(
+      "emend: safe-outside.html uses elements outside emend's page structure: <x-a>, <x-b>, <x-c>, <x-d>, <x-e> and 1 more; emend's look has no styles for them\n",
+    );
+    expect(f.stderr).toContain(
+      "emend: omitted.html uses elements outside emend's page structure; emend's look has no styles for them\n",
+    );
+    expect(f.stderr).toContain(
+      "emend: capped.html uses elements outside emend's page structure: <x-00>, <x-01>, <x-02>, <x-03>, <x-04> and more; emend's look has no styles for them\n",
+    );
+    expect(f.stderr.join("")).not.toContain("\\u{1b}");
+    expect(f.stderr.join("")).not.toContain("\u00a0");
+    expect(f.stderr.join("")).not.toContain("a".repeat(31));
     for (const code of [0x1b, 0x34f]) expect(f.stderr.join("")).not.toContain(String.fromCodePoint(code));
   },
 );

@@ -3,10 +3,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { InboxList, PublishResponse, ReplyCreated, RevisionView, ThreadCreated, WaitResult } from "@emend/contract";
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import * as client from "../db/client.ts";
-import { instances, owners, reviews, revisions } from "../db/schema.ts";
+import { files, instances, owners, reviews, revisions } from "../db/schema.ts";
 import { run } from "../main.ts";
 import * as executors from "../server/publish/executor.ts";
 import { startServer } from "../server/serve.ts";
@@ -58,6 +58,54 @@ test("publish without a server never spawns, renders documents, and is visible t
   expect(inbox.items).toMatchObject([{ id: out.result.reviewId, agentWaiting: false }]);
   const view = RevisionView.parse(await (await server.request(`/reviews/${out.result.reviewId}/revisions/1`)).json());
   expect(view.docs[0]).toMatchObject({ kind: "markdown", blocks: expect.any(Array) });
+});
+
+test("direct HTML publish and an unchanged republish keep the look in rows and revision views", async () => {
+  const f = await directFixture();
+  const sources = [
+    { path: "structure.html", source: "<h1>Synthetic plan</h1>", look: "emend" },
+    { path: "styled.html", source: "<style>p{color:red}</style><p>Synthetic plan</p>", look: "custom" },
+    { path: "plan.md", source: "# Synthetic plan", look: null },
+  ];
+  for (const { path, source } of sources) await writeFile(join(f.source, path), source);
+  await writeFile(
+    f.manifest,
+    JSON.stringify({
+      version: 1,
+      title: "Synthetic looks",
+      topics: [],
+      files: sources.map(({ path }) => ({ path, role: "doc" })),
+      writeup: { overview: "", tldr: "", decisions: null, topics: {} },
+    }),
+  );
+  vi.mocked(spawn).mockClear();
+  const first = await f.publish();
+  const second = await f.publish();
+  expect(second.result).toMatchObject({ reviewId: first.result.reviewId, revision: 2, unrendered: [] });
+  expect(spawn).not.toHaveBeenCalled();
+  const server = await f.reviewer();
+  for (const seq of [1, 2]) {
+    const rows = await server.db.read((q) =>
+      q
+        .select({ path: files.path, look: files.look })
+        .from(files)
+        .innerJoin(revisions, and(eq(revisions.ownerId, server.ownerId), eq(revisions.id, files.revisionId)))
+        .where(
+          and(eq(files.ownerId, server.ownerId), eq(revisions.reviewId, first.result.reviewId), eq(revisions.seq, seq)),
+        )
+        .all(),
+    );
+    expect(rows).toHaveLength(sources.length);
+    for (const { path, look } of sources) expect(rows.find((file) => file.path === path)?.look).toBe(look);
+    const response = await server.request(`/reviews/${first.result.reviewId}/revisions/${seq}`);
+    expect(response.status).toBe(200);
+    const view = RevisionView.parse(await response.json());
+    expect(view.docs).toHaveLength(sources.length);
+    expect(view.docs.find((doc) => doc.path === "structure.html")).toMatchObject({ kind: "html", look: "emend" });
+    expect(view.docs.find((doc) => doc.path === "styled.html")).toMatchObject({ kind: "html", look: "custom" });
+    expect(view.docs.find((doc) => doc.path === "plan.md")).toMatchObject({ kind: "markdown" });
+    expect(view.docs.find((doc) => doc.path === "plan.md")).not.toHaveProperty("look");
+  }
 });
 
 test("publish against a discovered server uses the API without opening a database", async () => {

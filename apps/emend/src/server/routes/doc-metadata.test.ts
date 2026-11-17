@@ -1,8 +1,9 @@
 import { PublishResponse, RevisionView } from "@emend/contract";
 import { and, eq } from "drizzle-orm";
 import { expect, test } from "vitest";
-import { files } from "../../db/schema.ts";
+import { files, revisions } from "../../db/schema.ts";
 import { mailboxFixture } from "../mailbox/test-support.ts";
+import { WorkTimeout } from "../publish/executor.ts";
 import { executeWork } from "../publish/work.ts";
 
 test("publish records HTML look, leaves other and failed metadata null, and omits legacy looks from views", async () => {
@@ -40,6 +41,7 @@ test("publish records HTML look, leaves other and failed metadata null, and omit
     const response = await f.request("/publish", "POST", input, "agent");
     expect(response.status).toBe(200);
     const published = PublishResponse.parse(await response.json());
+    expect(published.unrendered).toEqual([]);
     const rows = await f.db.read((q) => q.select().from(files).where(eq(files.ownerId, f.ownerId)).all());
     for (const { path, look } of sources) expect(rows.find((file) => file.path === path)?.look).toBe(look);
     const viewPath = `/reviews/${published.reviewId}/revisions/1`;
@@ -47,6 +49,22 @@ test("publish records HTML look, leaves other and failed metadata null, and omit
     expect(view.docs[0]).toMatchObject({ kind: "html", look: "emend", headings: [{ level: 2, text: "Part" }] });
     expect(view.docs[1]).toMatchObject({ kind: "html", look: "custom" });
     for (const doc of view.docs.slice(2)) expect(doc).not.toHaveProperty("look");
+    const repeated = await f.request("/publish", "POST", { ...input, reviewId: published.reviewId }, "agent");
+    expect(repeated.status).toBe(200);
+    expect(PublishResponse.parse(await repeated.json())).toMatchObject({ revision: 2, unrendered: [] });
+    const repeatedView = RevisionView.parse(
+      await (await f.request(`/reviews/${published.reviewId}/revisions/2`, "GET")).json(),
+    );
+    expect(repeatedView.docs[0]).toMatchObject({ path: "structure.html", kind: "html", look: "emend" });
+    expect(repeatedView.docs[1]).toMatchObject({ path: "styled.html", kind: "html", look: "custom" });
+    for (const doc of repeatedView.docs.slice(2)) expect(doc).not.toHaveProperty("look");
+    const repeatedRows = await f.db.read((q) => q.select().from(files).where(eq(files.ownerId, f.ownerId)).all());
+    for (const { path, look } of sources) {
+      const matches = repeatedRows.filter((file) => file.path === path);
+      expect(matches).toHaveLength(2);
+      expect(new Set(matches.map((file) => file.revisionId)).size).toBe(2);
+      for (const file of matches) expect(file.look).toBe(look);
+    }
     await f.db.query((q) =>
       q
         .update(files)
@@ -56,16 +74,34 @@ test("publish records HTML look, leaves other and failed metadata null, and omit
     const legacy = RevisionView.parse(await (await f.request(viewPath, "GET")).json());
     expect(legacy.docs[0]).not.toHaveProperty("look");
 
-    f.deps.publishExecutor = async (work) => {
-      if (work.kind === "doc-metadata") throw new Error("Synthetic metadata failure");
-      return executeWork(work);
-    };
-    const failed = await f.request("/publish", "POST", { ...input, reviewId: published.reviewId }, "agent");
-    expect(failed.status).toBe(200);
-    const failedView = RevisionView.parse(
-      await (await f.request(`/reviews/${published.reviewId}/revisions/2`, "GET")).json(),
-    );
-    for (const doc of failedView.docs) expect(doc).not.toHaveProperty("look");
+    for (const [index, error] of [new Error("Synthetic metadata failure"), new WorkTimeout()].entries()) {
+      f.deps.publishExecutor = async (work) => {
+        if (work.kind === "doc-metadata") throw error;
+        return executeWork(work);
+      };
+      const failed = await f.request("/publish", "POST", { ...input, reviewId: published.reviewId }, "agent");
+      expect(failed.status).toBe(200);
+      expect(PublishResponse.parse(await failed.json())).toMatchObject({
+        revision: index + 3,
+        unrendered: ["structure.html", "styled.html", "deep.html"],
+      });
+      const failedView = RevisionView.parse(
+        await (await f.request(`/reviews/${published.reviewId}/revisions/${index + 3}`, "GET")).json(),
+      );
+      for (const doc of failedView.docs) expect(doc).not.toHaveProperty("look");
+      const failedRows = await f.db.read((q) =>
+        q
+          .select({ look: files.look })
+          .from(files)
+          .innerJoin(revisions, and(eq(revisions.ownerId, f.ownerId), eq(revisions.id, files.revisionId)))
+          .where(
+            and(eq(files.ownerId, f.ownerId), eq(revisions.reviewId, published.reviewId), eq(revisions.seq, index + 3)),
+          )
+          .all(),
+      );
+      expect(failedRows).toHaveLength(sources.length);
+      for (const file of failedRows) expect(file.look).toBeNull();
+    }
   } finally {
     await f.cleanup();
   }

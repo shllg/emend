@@ -56,6 +56,7 @@ test("exports the v1 API, limits, file vocabulary and reserved fallback", () => 
     sourceLinesPerRevision: 200000,
     sourceBytesPerRevision: 16777216,
     htmlDocBytes: 8388608,
+    pubStylesheetBytes: 1048576,
     downloadInlineBytes: 134217728,
     downloadCommentBytes: 33554432,
     downloadDocs: 50,

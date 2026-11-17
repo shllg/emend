@@ -83,7 +83,7 @@ export function parsePublishArgs(args: string[]): PublishArgs {
 export const publishTimeoutMs = (files: { role: string; path: string; view?: DocView }[]) =>
   30000 +
   15000 +
-  // Counting can exceed its budget by the executor's final render timeout.
+  // Counting can exceed its budget by the final render timeout of the executor.
   DIFF_COUNT_BUDGET_MS +
   10000 +
   10000 * (1 + files.filter((file) => file.role === "doc" && !isRenderedHtmlDoc(file)).length) +
@@ -163,7 +163,7 @@ export async function publishCommand(
     ? undefined
     : await shortcutManifest(parsed, stateDir, configDir, cwd, context, configRoots);
   const manifest = shortcut?.manifest ?? (await readManifest(parsed.manifest ?? "", cwd, context));
-  // Keep only bounded diagnostics from the upload's source read; print them only after success.
+  // Keep only bounded diagnostics from source bytes already read for upload; print them only after success.
   const htmlLooks = new Map<string, ReturnType<typeof htmlLook>>();
   const options: PublishOptions = {
     manifest: parsed.manifest,
@@ -269,20 +269,30 @@ export async function publishCommand(
       'shows as a custom page: it has its own styles; add <meta name="emend-look" content="emend"> to use emend\'s look under them',
     unreadable: "shows as a custom page: emend could not read its structure",
   };
+  const unrendered = new Set(result.data.unrendered);
   for (const file of collected.request.files) {
     if (!isRenderedHtmlDoc(file)) continue;
+    const path = escapeReference(file.path);
+    if (unrendered.has(file.path)) {
+      io.stderr(`emend: ${path} ${lookNotes.unreadable}\n`);
+      continue;
+    }
     const result = htmlLooks.get(file.path);
     if (!result) continue;
-    const path = escapeReference(file.path);
     io.stderr(`emend: ${path} ${lookNotes[result.reason]}\n`);
-    if (result.look === "emend" && result.outside.length) {
+    if (result.look === "emend" && (result.outside.length || result.otherOutside)) {
       const names = result.outside
         .slice(0, 5)
         .map((name) => `<${escapeReference(name)}>`)
         .join(", ");
-      const more = result.outside.length > 5 ? ` and ${result.outside.length - 5} more` : "";
+      const more = result.otherOutside
+        ? " and more"
+        : result.outside.length > 5
+          ? ` and ${result.outside.length - 5} more`
+          : "";
+      const elements = names ? `: ${names}${more}` : "";
       io.stderr(
-        `emend: ${path} uses elements outside emend's page structure: ${names}${more}; emend's look has no styles for them\n`,
+        `emend: ${path} uses elements outside emend's page structure${elements}; emend's look has no styles for them\n`,
       );
     }
   }

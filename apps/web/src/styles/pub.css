@@ -12,13 +12,12 @@
     box-sizing: border-box;
   }
   body {
-    --reading-max: 68ch;
     font: var(--type-prose);
     color: var(--fg-reading);
     text-wrap: pretty;
     overflow-wrap: break-word;
     width: 100%;
-    max-width: calc(var(--reading-max) + 2 * var(--space-4));
+    max-width: none;
     margin: 0 auto;
     padding: var(--space-4) var(--space-10) var(--space-8);
   }
@@ -82,7 +81,9 @@
   }
   a {
     color: var(--fg-link);
-    text-decoration: none;
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
   }
   a:hover {
     color: var(--fg-link-hover);
@@ -303,10 +304,40 @@
     color: var(--danger-fg);
     background: var(--danger-bg);
   }
-  :is(body, main, article, section, aside, blockquote) > :first-child {
+  /* Follow only the first/last content chain through plain wrappers. Ignore inert elements,
+     including the injected bridge, when finding the page edges. Interior wrappers keep their margins. */
+  body
+    :nth-child(1 of :not(script, style, meta, link, title, template)):not(
+      :where(
+        body
+          :not(
+            :where(main, article, section:not([class]), div, header, footer, nav):nth-child(
+              1 of :not(script, style, meta, link, title, template)
+            )
+          )
+          *
+      )
+    ) {
     margin-top: 0;
   }
-  :is(body, main, article, section, aside, blockquote) > :last-child {
+  body
+    :nth-last-child(1 of :not(script, style, meta, link, title, template)):not(
+      :where(
+        body
+          :not(
+            :where(main, article, section:not([class]), div, header, footer, nav):nth-last-child(
+              1 of :not(script, style, meta, link, title, template)
+            )
+          )
+          *
+      )
+    ) {
+    margin-bottom: 0;
+  }
+  :is(section.tldr, aside.note, aside.warning, blockquote, details, figure, dl.facts dd) > :first-child {
+    margin-top: 0;
+  }
+  :is(section.tldr, aside.note, aside.warning, blockquote, details, figure, dl.facts dd) > :last-child {
     margin-bottom: 0;
   }
 }

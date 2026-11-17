@@ -241,7 +241,9 @@ It changes no headers, filename or ZIP decision. The choice is off by default.
 
 An optional `theme=dark` or `theme=light` query parameter fixes the look of the files emend
 draws: the writeup, Markdown docs, docs shown as source, the comments file and the omitted-content
-note page. Without it, they follow the reader's colour scheme. An HTML doc keeps its own look.
+note page. Without it, they follow the reader's colour scheme. An HTML doc downloads as its own
+bytes: a custom page keeps its own look, and a page in emend's look downloads without emend's
+styles.
 Any other value or a repeat gets `400 invalid_request` before waiting for a slot, also on `HEAD`.
 It changes no headers, filename or ZIP decision.
 
@@ -705,7 +707,7 @@ the cascade ranks the outer document's rules above a shadow tree's.
 A doc whose `look` is `emend` also receives emend's pub stylesheet as one style element, placed
 after any leading byte order mark, whitespace, comments and doctype, so the doc never falls into
 quirks mode. The stylesheet is `pub-frame.css` from the web build: emend's tokens and element
-styles in the cascade layer `emend`, with its fonts as `data:` URLs. It contains no `<`; a missing
+styles in the cascade layer `emend`, with its fonts as `data:` URLs. It contains no `</`; a missing
 or invalid file gives a small fallback that sets `color-scheme: light dark` with system colours.
 Every unlayered rule of the doc's own CSS wins over it. The doc's headers stay exactly as above.
 
@@ -991,8 +993,10 @@ own listed assets must fit `htmlDocWithAssetsBytes`; shared assets count for eve
 their first parent, and their blob bytes count once toward the revision byte budget. Every rendered
 doc's full asset list is stored, so a shared asset loads under each doc that lists it. Existing
 revisions migrate their parent associations and retain parent-only asset access.
-`unrendered` lists Markdown docs whose rendering failed, timed out or exceeded rendered-output budgets
-(at most `filesPerRevision`). Rendered blocks and JSON bytes count every path, including the writeup.
+`unrendered` lists Markdown docs whose rendering failed, timed out or exceeded rendered-output budgets,
+and HTML docs whose metadata work (title, Contents headings, look) failed or timed out
+(at most `filesPerRevision`). Such an HTML doc still shows, as a custom page.
+Rendered blocks and JSON bytes count every path, including the writeup.
 Docs render in manifest order; once a doc exceeds either budget it and all later Markdown docs
 remain unrendered. A writeup alone exceeding either budget returns 413 `too_large` with
 "The writeup has too many blocks."
@@ -1807,6 +1811,7 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `diffSideBytes` | 1048576 bytes shown per side |
 | `markdownDocBytes` | 1048576 bytes |
 | `htmlDocBytes` | 8388608 bytes |
+| `pubStylesheetBytes` | 1048576 UTF-8 bytes for the built-in HTML pub stylesheet |
 | `downloadInlineBytes` | 134217728 bytes (128 MiB) of emitted built-in content per download, and the same read budget for stored assets, selected doc bodies and selected diff blobs; both shared by all files of a ZIP |
 | `downloadCommentBytes` | 32 MiB of thread cards per download, shared by all files of a ZIP, separate from the built-in content budget |
 | `downloadDocs` | 50 docs added to one download |

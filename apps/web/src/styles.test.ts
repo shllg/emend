@@ -205,6 +205,24 @@ test("pub defaults use tokens, stay inside one emend layer and define the docume
     expect(css).toMatch(new RegExp(`\\.${name}\\b`));
   expect(css).toContain("font: var(--type-prose)");
   expect(css).toContain("background: var(--bg-reading)");
+  const link = /(?:^|\s)a\s*\{([^}]+)\}/.exec(css)?.[1] ?? "";
+  expect(link).toContain("text-decoration: underline;");
+  expect(link).toContain("text-decoration-thickness: 1px;");
+  expect(link).toContain("text-underline-offset: 2px;");
+  expect(css).toMatch(/a:hover\s*\{\s*color: var\(--fg-link-hover\);/);
+  const body = /body\s*\{([^}]+)\}/.exec(css)?.[1] ?? "";
+  expect(body).toContain("max-width: none;");
+  expect(body).toContain("padding: var(--space-4) var(--space-10) var(--space-8);");
+  expect(css).not.toContain("68ch");
+  const boxedResets = [...css.matchAll(/(:is\([^{}]+?\)) > :(?:first|last)-child\s*\{\s*margin-(?:top|bottom): 0;/g)];
+  expect(boxedResets).toHaveLength(2);
+  for (const [, selector] of boxedResets) {
+    expect(selector).toBe(":is(section.tldr, aside.note, aside.warning, blockquote, details, figure, dl.facts dd)");
+    expect(selector).not.toMatch(/\b(?:main|article)\b|(?:\(|,\s*)section(?:\s*,|\))/);
+  }
+  const flat = css.replace(/\s+/g, " ");
+  for (const edge of ["nth-child", "nth-last-child"])
+    expect(flat).toContain(`body :${edge}(1 of :not(script, style, meta, link, title, template)):not(`);
   const entry = readFileSync(join(webSource, "../pub-frame.css"), "utf8");
   for (const name of ["pub-fonts", "colors", "typography", "spacing"])
     expect(entry).toContain(`@import "./src/styles/${name}.css" layer(emend);`);

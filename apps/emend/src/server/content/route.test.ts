@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { type FileHandle, mkdir, open, rename, symlink, truncate, utimes, writeFile } from "node:fs/promises";
 import { type ClientRequest, createServer, request as httpRequest } from "node:http";
 import { join } from "node:path";
-import { RevisionView } from "@emend/contract";
+import { LIMITS, RevisionView } from "@emend/contract";
 import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { devices, files, reviews, revisions } from "../../db/schema.ts";
@@ -139,13 +139,13 @@ test("emend look injects the installed stylesheet, caches it and leaves assets u
   expect(await asset.text()).toBe("p { color: green; }");
 });
 
-test.each(["missing", "less-than", "invalid-utf8", "oversize", "directory", "outside-root"])(
+test.each(["missing", "closing-tag", "invalid-utf8", "oversize", "directory", "outside-root"])(
   "emend look uses readable fallback for a %s stylesheet",
   async (kind) => {
     const path = join(f.dir, "pub-frame.css");
-    if (kind === "less-than") await writeFile(path, "</style><script>alert(1)</script>");
+    if (kind === "closing-tag") await writeFile(path, "</style><script>alert(1)</script>");
     if (kind === "invalid-utf8") await writeFile(path, Buffer.from([0xff]));
-    if (kind === "oversize") await writeFile(path, " ".repeat(1024 * 1024 + 1));
+    if (kind === "oversize") await writeFile(path, " ".repeat(LIMITS.pubStylesheetBytes + 1));
     if (kind === "directory") await mkdir(path);
     if (kind === "outside-root") {
       await writeFile(path, "outside stylesheet");

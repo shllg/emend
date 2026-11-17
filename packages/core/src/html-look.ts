@@ -14,8 +14,14 @@ export const HTML_STRUCTURE: ReadonlySet<string> = new Set(
   ).split(" "),
 );
 const lower = (value: string) => value.replace(/[A-Z]/g, (char) => char.toLowerCase());
+const styleAttributes = new Set(["style", "bgcolor", "color", "text", "link", "vlink", "alink"]);
 
-export function htmlLook(source: string): { look: HtmlLook; reason: HtmlLookReason; outside: string[] } {
+export function htmlLook(source: string): {
+  look: HtmlLook;
+  reason: HtmlLookReason;
+  outside: string[];
+  otherOutside: boolean;
+} {
   return htmlLookFromTree(parseDocHtml(source));
 }
 
@@ -24,11 +30,13 @@ export function htmlLookFromTree(tree: DefaultTreeAdapterTypes.Document | null):
   look: HtmlLook;
   reason: HtmlLookReason;
   outside: string[];
+  otherOutside: boolean;
 } {
-  if (!tree) return { look: "custom", reason: "unreadable", outside: [] };
+  if (!tree) return { look: "custom", reason: "unreadable", outside: [], otherOutside: false };
   let mark: HtmlLook | undefined;
   let ownStyles = false;
   const outside = new Set<string>();
+  let otherOutside = false;
   const pending = [{ nodes: tree.childNodes[Symbol.iterator](), foreign: false }];
   while (pending.length) {
     const frame = pending.at(-1);
@@ -48,6 +56,7 @@ export function htmlLookFromTree(tree: DefaultTreeAdapterTypes.Document | null):
     }
     if (
       name === "style" ||
+      (isHtml && !frame.foreign && node.attrs.some((attr) => styleAttributes.has(attr.name))) ||
       (isHtml &&
         name === "link" &&
         lower(attr("rel"))
@@ -56,16 +65,22 @@ export function htmlLookFromTree(tree: DefaultTreeAdapterTypes.Document | null):
     )
       ownStyles = true;
     if (!frame.foreign && isHtml && !HTML_STRUCTURE.has(name)) {
-      outside.add(name);
-      // Keep the lexically first twenty names without retaining an unbounded set of hostile names.
-      if (outside.size > 20) outside.delete([...outside].sort().at(-1) ?? "");
+      if (!/^[a-z][a-z0-9._-]{0,31}$/.test(name)) otherOutside = true;
+      else if (!outside.has(name)) {
+        if (outside.size < 20) outside.add(name);
+        else {
+          otherOutside = true;
+          const last = [...outside].sort().at(-1);
+          if (last && name < last) {
+            outside.delete(last);
+            outside.add(name);
+          }
+        }
+      }
     }
-    const children =
-      isHtml && name === "template"
-        ? defaultTreeAdapter.getTemplateContent(node as DefaultTreeAdapterTypes.Template).childNodes
-        : node.childNodes;
+    if (isHtml && name === "template") continue;
     pending.push({
-      nodes: children[Symbol.iterator](),
+      nodes: node.childNodes[Symbol.iterator](),
       foreign: frame.foreign || name === "svg" || name === "math",
     });
   }
@@ -73,5 +88,6 @@ export function htmlLookFromTree(tree: DefaultTreeAdapterTypes.Document | null):
     look: mark ?? (ownStyles ? "custom" : "emend"),
     reason: mark ? (mark === "emend" ? "marked-emend" : "marked-custom") : ownStyles ? "own-styles" : "structure",
     outside: [...outside].sort(),
+    otherOutside,
   };
 }

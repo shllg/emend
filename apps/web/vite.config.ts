@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { build, defineConfig, type Plugin } from "vite";
+import { checkPubStylesheet, pickPubStylesheet } from "./build/pub-frame.ts";
 import { serviceWorker } from "./build/service-worker.ts";
 import { diffBuildPruning } from "./diff-build.ts";
 
@@ -70,15 +71,8 @@ function pubFrame(): Plugin {
       });
       const output = Array.isArray(result) ? result[0] : result;
       if (!output || !("output" in output)) throw new Error("The pub stylesheet was not generated.");
-      const sheets = output.output.filter((file) => file.type === "asset" && file.fileName.endsWith(".css"));
-      const sheet = sheets[0];
-      if (sheets.length !== 1 || sheet?.type !== "asset") throw new Error("Expected one pub stylesheet.");
-      const css = typeof sheet.source === "string" ? sheet.source : new TextDecoder().decode(sheet.source);
-      if (
-        css.includes("<") ||
-        [...css.matchAll(/url\(/gi)].some((match) => !/^url\(\s*["']?data:/i.test(css.slice(match.index)))
-      )
-        throw new Error("The pub stylesheet must contain only inline data URLs and no less-than character.");
+      const css = pickPubStylesheet(output.output);
+      checkPubStylesheet(css);
       this.emitFile({ type: "asset", fileName: "pub-frame.css", source: css });
     },
   };

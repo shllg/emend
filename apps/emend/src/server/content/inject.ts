@@ -11,19 +11,34 @@ export function injectLook(html: string, css: string): string {
       continue;
     }
     if (html.startsWith("<!--", at)) {
-      const end = html.indexOf("-->", at + 4);
-      if (end < 0) {
-        // An incomplete leading comment is not a safe prefix; never back up past a doctype.
-        if (!doctype) at = 0;
-        break;
+      const content = at + 4;
+      if (html[content] === ">") at = content + 1;
+      else if (html.startsWith("->", content)) at = content + 2;
+      else {
+        const end = /--!?>/g;
+        end.lastIndex = content;
+        const match = end.exec(html);
+        if (!match) break;
+        at = match.index + match[0].length;
       }
-      at = end + 3;
       continue;
     }
-    const declaration = !doctype && /^<!doctype(?:[\t\n\f\r ][^>]*|)>/i.exec(html.slice(at));
-    if (declaration) {
-      at += declaration[0].length;
+    const declaration = /^<!doctype/i.test(html.slice(at));
+    if (declaration && !doctype) {
+      const end = html.indexOf(">", at + 9);
+      if (end < 0) break;
+      at = end + 1;
       doctype = true;
+      continue;
+    }
+    if (
+      html.startsWith("<?", at) ||
+      (html.startsWith("<!", at) && !declaration) ||
+      (html.startsWith("</", at) && at + 2 < html.length && !/[a-z]/i.test(html[at + 2] ?? ""))
+    ) {
+      const end = html.indexOf(">", at + 2);
+      if (end < 0) break;
+      at = end + 1;
       continue;
     }
     break;

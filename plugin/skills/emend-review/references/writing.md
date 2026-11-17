@@ -262,7 +262,8 @@ emend's look has no styles for them.
 When the user asks for a custom page, mark it in its `head` with
 `<meta name="emend-look" content="custom">`.
 emend then shows the page with its own styles only.
-A page with its own `style` element or stylesheet link and no mark also shows as a custom page.
+A page with its own `style` element, stylesheet link or `style` attributes and no mark also shows
+as a custom page.
 On a custom page:
 
 - Give the main column a max width of 1024px.
