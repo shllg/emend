@@ -32,6 +32,10 @@ findings registry with `bin/wt findings add`), a **follow-up** (an idea, listed 
 a bug or a security issue is blocking, and every `emend-security-reviewer` finding is at least a
 defect.
 
+The manager's `private` list holds security findings the change did not cause that could not be
+recorded. Give them to the owner: run `<main>/bin/wt notify question` and say there are private
+findings. Never put them in a PR body, issue or commit (`SECURITY.md`). `dropped` stays local too.
+
 To dispute a blocking finding, send the argument to the manager in a new call, in dispute mode.
 It has a fresh Codex thread try to refute the finding. Only a confirmed false positive moves to
 "Not changed".
@@ -47,6 +51,10 @@ It has a fresh Codex thread try to refute the finding. Only a confirmed false po
   range, task and `.wt/review-findings.json`. It checks the earlier findings as FIXED, NOT FIXED
   or REGRESSED, plus anything the fixes broke. A check round does not review the rest of the change.
 - Stop at a round with nothing to fix, or at the budget.
+
+If `unavailable` names the Codex review, the round is incomplete: dispatch the manager once more for the same round.
+If Codex still cannot run, follow "At the budget" for an open blocking finding only when one is open;
+otherwise name the missing review under Evidence.
 
 ## Budget
 

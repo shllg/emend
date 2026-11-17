@@ -132,3 +132,4 @@ From [You Might Not Need an Effect](https://react.dev/learn/you-might-not-need-a
 - [advanced-use-latest](vendor/vercel-agent-skills/react-best-practices/rules/advanced-use-latest.md) — LOW: Use a latest-value ref for callbacks that need current values without resubscribing their effect.
 
 A breach of a rule in this guide is a defect; anything beyond it is a preference.
+The non-negotiables in `AGENTS.md` and `.claude/rules/content-isolation.md` win over any rule here; a vendored rule that conflicts with them does not apply (for example third-party preconnects or scripts).

@@ -50,12 +50,29 @@ test("every agent file pins a model", () => {
   }
 });
 
+test("each agent uses its assigned model", () => {
+  for (const [name, model] of Object.entries({
+    "emend-review-manager": "opus",
+    "emend-reviewer": "sonnet",
+    "emend-security-reviewer": "opus",
+    "emend-react-reviewer": "sonnet",
+    "emend-architecture-reviewer": "opus",
+    "codex-agent": "sonnet",
+    "e-outside-reader": "opus",
+  })) {
+    const fields = agents.get(name);
+    assert.ok(fields, `${name} must exist`);
+    assert.deepEqual(fields.get("model"), [model], `${name} must use ${model}`);
+  }
+});
+
 test("reviewers cannot edit files or dispatch agents", () => {
   for (const name of [
     "emend-reviewer",
     "emend-security-reviewer",
     "emend-react-reviewer",
     "emend-architecture-reviewer",
+    "codex-agent",
   ]) {
     const fields = agents.get(name);
     assert.ok(fields, `${name} must exist`);

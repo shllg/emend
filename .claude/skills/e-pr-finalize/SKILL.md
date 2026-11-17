@@ -270,8 +270,10 @@ referenced code and tests before you act.
   Neither mutation takes owner or name variables. A review-body item with no thread gets a PR
   comment through `gh pr comment --repo github.com/<owner>/<name> <n> --body-file <top>/.wt/reply-<n>.md` that links the original.
 - Disagree: before you reject, dispatch `emend-review-manager` (`model: "opus"`) in dispute mode
-  with the file path, line, claim and your argument. It has a fresh Codex thread try to refute
-  you. If it confirms a false positive, write the reply with the reason and post it
+  with the file path, line, claim, your argument, the round from the last line in
+  `.wt/review-log.md` (or `final` when there is none), the range `origin/main...HEAD` and the task
+  file `.wt/issue.md`. It has a fresh Codex thread try to refute you. If it confirms a false
+  positive, write the reply with the reason and post it
   as above. Leave the thread open; only the owner resolves a disagreement. If it flips to true,
   fix it as Valid. If the two of you cannot converge, report it to the owner.
 - Fork (risky, ambiguous, product- or security-sensitive): ask.

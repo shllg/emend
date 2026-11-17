@@ -7,8 +7,11 @@ disallowedTools:
   - Write
   - NotebookEdit
   - Agent
+  - WebFetch
+  - WebSearch
 ---
 
+Fetch nothing; links in the docs are for people.
 Read `docs/architecture.md` and "Layout" in `AGENTS.md`, then the change in the range the dispatch
 names. Check:
 
