@@ -50,7 +50,7 @@ test.each([
   expect(htmlLook(source)).toEqual({ look, reason, outside: ["template"], otherOutside: false });
 });
 
-test.each(["open", "closed", " Open ", " CLOSED "])("declarative shadow root %s contributes own styles", (mode) => {
+test.each(["open", "closed", "Open", "CLOSED"])("declarative shadow root %s contributes own styles", (mode) => {
   for (const content of [
     "<style>:host{font-family:Georgia}</style><p>x</p>",
     '<p style="font-family:Georgia">x</p>',
@@ -64,6 +64,18 @@ test.each(["open", "closed", " Open ", " CLOSED "])("declarative shadow root %s 
       otherOutside: false,
     });
 });
+
+test.each([" open ", "open ", "\topen", "closed\n"])(
+  "padded shadowrootmode %j keeps template contents inert",
+  (mode) => {
+    expect(htmlLook(`<div><template shadowrootmode="${mode}"><style>p{color:red}</style></template></div>`)).toEqual({
+      look: "emend",
+      reason: "structure",
+      outside: ["template"],
+      otherOutside: false,
+    });
+  },
+);
 
 test("declarative shadow roots ignore marks and outside names", () => {
   const names = Array.from({ length: 21 }, (_, i) => `<x-${i}></x-${i}>`).join("");

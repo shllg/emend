@@ -87,7 +87,7 @@ export function htmlLookFromTree(tree: DefaultTreeAdapterTypes.Document | null):
     let children = node.childNodes;
     let shadow = frame.shadow;
     if (isHtml && name === "template") {
-      const mode = lower(attr("shadowrootmode").trim());
+      const mode = lower(attr("shadowrootmode"));
       if (mode !== "open" && mode !== "closed") continue;
       children = defaultTreeAdapter.getTemplateContent(node as DefaultTreeAdapterTypes.Template).childNodes;
       shadow = true;
