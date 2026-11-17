@@ -3,8 +3,11 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import * as themes from "../state/themes.ts";
 import { ReviewEvents } from "./events.ts";
-import { watchThemes } from "./theme-watcher.ts";
+import { type ThemeWatcherOptions, watchThemes } from "./theme-watcher.ts";
+
+vi.mock("../state/themes.ts", async (original) => ({ ...(await original<typeof import("../state/themes.ts")>()) }));
 
 vi.mock("node:fs/promises", async (original) => ({ ...(await original<typeof import("node:fs/promises")>()) }));
 
@@ -14,7 +17,9 @@ let events: ReviewEvents;
 let stop: () => void;
 let tick: () => Promise<void>;
 let timer: ReturnType<typeof setInterval>;
-let clock: Pick<typeof globalThis, "setInterval" | "clearInterval">;
+let clock: NonNullable<ThemeWatcherOptions["clock"]>;
+let waitTimer: ReturnType<typeof setTimeout>;
+let expireBaseline: () => void;
 const readers: ReadableStreamDefaultReader<Uint8Array>[] = [];
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "emend-theme-watcher-"));
@@ -22,7 +27,7 @@ beforeEach(async () => {
   vi.stubEnv("EMEND_HOME", join(root, "state"));
   dir = join(root, "config", "emend", "themes");
   events = new ReviewEvents(() => 0);
-  clock = { setInterval, clearInterval };
+  clock = { setInterval, clearInterval, setTimeout, clearTimeout };
   tick = async () => {};
   vi.spyOn(clock, "setInterval").mockImplementation((callback) => {
     tick = async () => {
@@ -32,6 +37,12 @@ beforeEach(async () => {
     return timer;
   });
   vi.spyOn(clock, "clearInterval");
+  vi.spyOn(clock, "setTimeout").mockImplementation((callback) => {
+    expireBaseline = () => callback();
+    waitTimer = setTimeout(() => {}, 60_000);
+    return waitTimer;
+  });
+  vi.spyOn(clock, "clearTimeout");
   stop = () => {};
 });
 afterEach(async () => {
@@ -168,6 +179,7 @@ test("no configured folder allocates no timer", async () => {
   stop = await watchThemes(undefined, events, { clock });
   await stream("owner");
   expect(clock.setInterval).not.toHaveBeenCalled();
+  expect(clock.setTimeout).not.toHaveBeenCalled();
 });
 
 test("fingerprints only the sorted, displayable 50 files the list shows", async () => {
@@ -204,4 +216,58 @@ test("a too-full folder has a stable fingerprint and returning to 1000 entries e
   await tick();
   await tick();
   expect(broadcast).toHaveBeenCalledTimes(2);
+});
+
+test("an in-time baseline emits nothing and clears its unref'd default wait timer", async () => {
+  const broadcast = vi.spyOn(events, "broadcast");
+  await start();
+  expect(clock.setTimeout).toHaveBeenCalledExactlyOnceWith(expect.any(Function), 1000);
+  expect(waitTimer.hasRef()).toBe(false);
+  expect(clock.clearTimeout).toHaveBeenCalledExactlyOnceWith(waitTimer);
+  expect(broadcast).not.toHaveBeenCalled();
+});
+
+test("a late baseline releases startup at the wait limit and broadcasts once when it finishes", async () => {
+  const pending = Promise.withResolvers<Awaited<ReturnType<typeof themes.listThemeFiles>>>();
+  const listing = vi.spyOn(themes, "listThemeFiles").mockReturnValue(pending.promise);
+  const broadcast = vi.spyOn(events, "broadcast");
+  const started = vi.fn();
+  const starting = watchThemes(dir, events, { clock, intervalMs: 17, baselineWaitMs: 37 }).then((close) => {
+    stop = close;
+    started();
+  });
+  expect(listing).toHaveBeenCalledOnce();
+  expect(clock.setTimeout).toHaveBeenCalledExactlyOnceWith(expect.any(Function), 37);
+  expect(waitTimer.hasRef()).toBe(false);
+  expect(started).not.toHaveBeenCalled();
+  expireBaseline();
+  await starting;
+  expect(started).toHaveBeenCalledOnce();
+  expect(clock.clearTimeout).toHaveBeenCalledWith(waitTimer);
+  expect(timer.hasRef()).toBe(false);
+  for (let i = 0; i < 3; i++) await tick();
+  expect(listing).toHaveBeenCalledOnce();
+  expect(broadcast).not.toHaveBeenCalled();
+  pending.resolve({ files: [], folderError: false, status: "missing" });
+  await pending.promise;
+  await tick();
+  expect(broadcast).toHaveBeenCalledExactlyOnceWith({ type: "themes" });
+  await tick();
+  expect(broadcast).toHaveBeenCalledOnce();
+});
+
+test("stopping before a late baseline ends prevents its broadcast", async () => {
+  const pending = Promise.withResolvers<Awaited<ReturnType<typeof themes.listThemeFiles>>>();
+  const listing = vi.spyOn(themes, "listThemeFiles").mockReturnValue(pending.promise);
+  const broadcast = vi.spyOn(events, "broadcast");
+  const starting = watchThemes(dir, events, { clock, baselineWaitMs: 37 });
+  expireBaseline();
+  stop = await starting;
+  stop();
+  expect(clock.clearInterval).toHaveBeenCalledWith(timer);
+  pending.resolve({ files: [], folderError: false, status: "missing" });
+  await pending.promise;
+  await tick();
+  expect(listing).toHaveBeenCalledOnce();
+  expect(broadcast).not.toHaveBeenCalled();
 });

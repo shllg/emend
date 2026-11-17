@@ -1392,7 +1392,7 @@ test.each(["desktop", "phone", "dialog"] as const)(
     if (surface === "dialog") fireEvent.click(await screen.findByRole("button", { name: "Download" }));
     const link = await screen.findByRole(surface === "phone" ? "menuitem" : "link", { name: "Download" });
     await waitFor(() => expect(link.getAttribute("href")).toContain("theme=mine"));
-    expect(client.getQueryData(["themes", "pick", "mine"])).toEqual({ themes: [customTheme], folderError: false });
+    expect(client.getQueryCache().findAll({ queryKey: ["themes"] })).toEqual([]);
     expect(client.getQueryData(["themes"])).toBeUndefined();
     refused = true;
     act(() => Events.opened.at(-1)?.emit("themes", {}));

@@ -58,7 +58,7 @@ import { focusReadingTarget } from "../lib/reading-focus.ts";
 import { readingPositionKey } from "../lib/reading-position.ts";
 import { revealReadingTarget } from "../lib/reading-reveal.ts";
 import { ignoreShortcut } from "../lib/shortcuts.ts";
-import { useDownloadTheme } from "../lib/theme-sync.tsx";
+import { useDownloadTheme } from "../lib/theme.ts";
 import {
   captureReadingPosition,
   type IntentState,

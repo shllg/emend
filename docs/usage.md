@@ -64,18 +64,36 @@ Emend lists up to 50 theme files in name order, each at most 32 KiB. Keep the fo
 or fewer, including hidden files and other entries; a larger folder shows a folder error and no themes.
 
 Pick the theme in Settings → Appearance on each device, including your phone. Saving the file
-updates open pages within a few seconds. Before accepting HTTP requests, the server takes a
-baseline of the theme files, then checks for changes every two seconds, even without open pages.
-Opening a stream refreshes older queries, including the picked theme. If a file becomes invalid,
-pages keep the last valid version and Settings shows why. The pick applies to this device only.
+updates open pages within a few seconds. Before accepting HTTP requests, the server waits at
+most one second for a baseline of the theme files. A baseline ready in time sends no event. If
+it takes longer, the server starts anyway. The first fingerprint keeps running and sends one
+theme event when it finishes. Stopping the watcher prevents that event. The server checks every
+two seconds after the wait, even without open pages, and skips checks while one is running. A
+hung fingerprint leaves the watcher idle without blocking server startup or shutdown.
 
-The browser stores the last valid theme as a bare `ThemeValid` in `emend.theme.custom`, without
-a timestamp, and skips identical writes. Each picked name gets a separate query that fetches
-while that name is picked and drops its data when you leave it. Settings seeds the cache only
-when it does not already hold that name; the pick's fresh fetch supplies updates. The last write
-from a fresh fetch wins across tabs, with no ordering promise between tabs. Download links use
-the same per-pick query: a valid theme's name, otherwise its cached base. See the API's
-[Themes section](api.md#themes) for the complete pairs and query rules.
+Each tab runs one theme fetch at a time. It fetches at start, when the picked name changes in
+this or another tab, on a theme event, and when the event stream opens. Several triggers during
+a fetch queue one more fetch after it ends. Results count only for the name still picked when
+they arrive. An error keeps the current version and waits for another trigger. Stopping the sync
+aborts its fetch and ignores its result; System, Dark and Light need no theme fetch.
+
+Each tab keeps its own last valid version. It ignores other tabs' saved copies of a theme it
+already holds. The browser saves a bare `ThemeValid` in `emend.theme.custom`, without a timestamp.
+That saved copy seeds a tab at load or on a switch to a theme it does not hold, if the name matches.
+The tab parses it only when it needs a seed and the text or name changed. After a fetch for the
+still-picked name, a valid entry updates the held version and the saved copy if they differ.
+Identical writes are skipped. An unchanged state causes no notification or CSS update. If a file
+becomes invalid or disappears, the tab keeps its held version and Settings shows why.
+
+Selecting in Settings keeps the version the tab holds for that name, else adopts a matching
+saved copy, else uses the selected entry. It saves that version before writing the pick so other
+tabs can find it. The pick change starts a sync. Settings' list has its own query, refreshed on
+theme events; stream open also refreshes older queries. The pick applies to this device only.
+
+Download links read the tab's store. System passes no theme; Dark and Light pass themselves.
+A custom name is passed when the tab's check for that name found it valid. Otherwise the link
+uses the base of its held version for that name, or passes no theme if none is held. See the API's
+[Themes section](api.md#themes) for the complete pairs and sync rules.
 
 ## Publish a doc
 

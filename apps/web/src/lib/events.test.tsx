@@ -3,9 +3,11 @@ import { act, cleanup, render, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { Channel, Events } from "../test/events.ts";
+import { customTheme } from "../test/themes.ts";
 import { reconnectReviewEvents } from "./event-stream.ts";
 import { ReviewEventsProvider, usePublishedRevision } from "./events.tsx";
 import { refreshQueries } from "./query-refresh.ts";
+import { customThemeKey, setThemePick, startThemeSync } from "./theme.ts";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const other = "22222222-2222-4222-8222-222222222222";
@@ -697,26 +699,62 @@ test("themes events refresh only the theme list, without a review id", async () 
   expect(invalidate).toHaveBeenCalledExactlyOnceWith({ queryKey: ["themes"] });
 });
 
-test.each(["themes", "open"])("%s refreshes the active per-pick theme query", async (event) => {
-  const { client } = await mount();
-  const queryFn = vi.fn(async () => ({ themes: [], folderError: false }));
-  const observer = new QueryObserver(client, {
-    queryKey: ["themes", "pick", "mine"],
-    queryFn,
-    gcTime: 0,
-  });
-  const unsubscribe = observer.subscribe(() => {});
+test.each(["themes", "open"])("%s triggers the tab sync even when the clock moves backwards", async (event) => {
+  vi.stubGlobal("localStorage", new Storage());
+  setThemePick("system");
+  await mount();
+  const first = Promise.withResolvers<Response>();
+  const second = Promise.withResolvers<Response>();
+  const fetcher = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+  vi.stubGlobal("fetch", fetcher);
+  setThemePick("theme:mine");
+  const stop = startThemeSync();
   try {
-    await tick();
-    expect(queryFn).toHaveBeenCalledTimes(1);
+    await act(async () => first.resolve(Response.json({ themes: [customTheme], folderError: false })));
+    expect(JSON.parse(localStorage.getItem(customThemeKey) ?? "null")).toEqual(customTheme);
+    vi.setSystemTime(Date.now() - 3_600_000);
     act(() => {
       if (event === "open") source().open();
       else source().emit("themes", {});
     });
-    await tick();
-    expect(queryFn).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const newer = { ...customTheme, scales: { "n-950": "#223344" }, themeColor: "#223344" };
+    await act(async () => second.resolve(Response.json({ themes: [newer], folderError: false })));
+    expect(JSON.parse(localStorage.getItem(customThemeKey) ?? "null")).toEqual(newer);
+    expect(document.documentElement.style.getPropertyValue("--n-950")).toBe("#223344");
   } finally {
-    unsubscribe();
+    stop();
+    setThemePick("system");
+  }
+});
+
+test("themes events during the first fetch queue one more fetch through the provider", async () => {
+  vi.stubGlobal("localStorage", new Storage());
+  setThemePick("system");
+  await mount();
+  const first = Promise.withResolvers<Response>();
+  const second = Promise.withResolvers<Response>();
+  const fetcher = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+  vi.stubGlobal("fetch", fetcher);
+  setThemePick("theme:pending");
+  const stop = startThemeSync();
+  try {
+    act(() => {
+      for (let i = 0; i < 5; i++) source().emit("themes", {});
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+    await act(async () =>
+      first.resolve(Response.json({ themes: [{ ...customTheme, name: "pending" }], folderError: false })),
+    );
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const newer = { ...customTheme, name: "pending", scales: { "n-950": "#223344" }, themeColor: "#223344" };
+    await act(async () => second.resolve(Response.json({ themes: [newer], folderError: false })));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(localStorage.getItem(customThemeKey) ?? "null")).toEqual(newer);
+    expect(document.documentElement.style.getPropertyValue("--n-950")).toBe("#223344");
+  } finally {
+    stop();
+    setThemePick("system");
   }
 });
 

@@ -4,6 +4,7 @@ import { createContext, type ReactNode, useContext, useEffect, useState } from "
 import { subscribeReviewEvents } from "./event-stream.ts";
 import { InboxArrivalsProvider } from "./inbox-arrivals.tsx";
 import { refreshQueries } from "./query-refresh.ts";
+import { requestThemeSync } from "./theme.ts";
 
 const PublishedRevisions = createContext<ReadonlyMap<string, number>>(new Map());
 
@@ -17,6 +18,7 @@ export function ReviewEventsProvider({ children, enabled = true }: { children: R
     }
     const receive = (event: ReviewEvent) => {
       if (event.type === "themes") {
+        requestThemeSync();
         refreshQueries(client, [["themes"]]);
         return;
       }
@@ -36,6 +38,7 @@ export function ReviewEventsProvider({ children, enabled = true }: { children: R
       refreshQueries(client, keys);
     };
     const stop = subscribeReviewEvents(receive, () => {
+      requestThemeSync();
       refreshQueries(client, [], { opened: true });
     });
     return () => {

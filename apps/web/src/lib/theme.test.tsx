@@ -16,7 +16,6 @@ import {
   setThemePick,
   themeFontStacks,
   themeKey,
-  updateCustomTheme,
   useResolvedTheme,
   useThemePick,
 } from "./theme.ts";
@@ -229,7 +228,8 @@ test("a custom pick applies allowlisted values, fonts and base, and removes its 
   const style = document.documentElement.style;
   style.setProperty("--unrelated", "7px");
   const set = vi.spyOn(style, "setProperty");
-  selectCustomTheme({
+  const store = createThemeStore();
+  store.selectCustomTheme({
     ...customTheme,
     scales: { ...customTheme.scales, "unknown-name": "#123456" },
     tokens: { ...customTheme.tokens, "font-sans": "#123456", "n-0": "#123456" },
@@ -247,7 +247,10 @@ test("a custom pick applies allowlisted values, fonts and base, and removes its 
   expect(
     [...document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')].map((meta) => meta.content),
   ).toEqual(["#112233", "#112233"]);
-  updateCustomTheme({ ...customTheme, base: "light", fonts: {}, scales: {}, tokens: { accent: "#aabbcc" } });
+  store.applyList("mine", {
+    themes: [{ ...customTheme, base: "light", fonts: {}, scales: {}, tokens: { accent: "#aabbcc" } }],
+    folderError: false,
+  });
   for (const property of ["--n-950", "--bg-app", "--fg-1", "--font-sans", "--font-mono"])
     expect(style.getPropertyValue(property)).toBe("");
   expect(style.getPropertyValue("--accent")).toBe("#aabbcc");
@@ -271,25 +274,27 @@ test.each([
   localStorage.setItem(themeKey, "theme:mine");
   localStorage.setItem(customThemeKey, JSON.stringify({ ...customTheme, ...changes }));
   const set = vi.spyOn(document.documentElement.style, "setProperty");
-  stop = initializeTheme();
+  stop = createThemeStore().subscribe(() => {});
   expect(set).not.toHaveBeenCalled();
   expectApplied("system");
 });
 
-test("cached custom picks resolve to their base and follow either storage key", () => {
-  localStorage.setItem(themeKey, "theme:mine");
-  localStorage.setItem(customThemeKey, JSON.stringify(customTheme));
+test("cached picks ignore saved copies of a held name and follow pick storage events", () => {
+  localStorage.setItem(themeKey, "theme:hookseed");
+  localStorage.setItem(customThemeKey, JSON.stringify({ ...customTheme, name: "hookseed" }));
   render(<Reader />);
-  expect(screen.getByRole("status").textContent).toBe("theme:mine:dark");
+  expect(screen.getByRole("status").textContent).toBe("theme:hookseed:dark");
+  const applied = vi.spyOn(document.documentElement.style, "setProperty");
   act(() => {
     localStorage.setItem(
       customThemeKey,
-      JSON.stringify({ ...customTheme, base: "light", scales: { "n-950": "#aabbcc" } }),
+      JSON.stringify({ ...customTheme, name: "hookseed", base: "light", scales: { "n-950": "#aabbcc" } }),
     );
     window.dispatchEvent(new StorageEvent("storage", { key: customThemeKey, storageArea: localStorage }));
   });
-  expect(screen.getByRole("status").textContent).toBe("theme:mine:light");
-  expect(document.documentElement.style.getPropertyValue("--n-950")).toBe("#aabbcc");
+  expect(screen.getByRole("status").textContent).toBe("theme:hookseed:dark");
+  expect(applied).not.toHaveBeenCalled();
+  expect(document.documentElement.style.getPropertyValue("--n-950")).toBe("#112233");
   act(() => {
     localStorage.setItem(themeKey, "theme:another");
     window.dispatchEvent(new StorageEvent("storage", { key: themeKey, storageArea: localStorage }));
@@ -313,7 +318,8 @@ test("denied cache writes keep the last valid custom theme in memory", () => {
   expect(document.documentElement.style.getPropertyValue("--n-950")).toBe("#112233");
 });
 
-test("cached themes are parsed only when the stored text changes", () => {
+test("cache parsing is limited to a new text or name when the tab needs a seed", () => {
+  localStorage.setItem(themeKey, "theme:mine");
   localStorage.setItem(customThemeKey, JSON.stringify(customTheme));
   const parse = vi.spyOn(ThemeValid, "safeParse");
   const store = createThemeStore();
@@ -322,32 +328,84 @@ test("cached themes are parsed only when the stored text changes", () => {
   store.getSnapshot();
   expect(parse).toHaveBeenCalledTimes(1);
   localStorage.setItem(customThemeKey, JSON.stringify({ ...customTheme, base: "light" }));
-  expect(store.getState().custom?.base).toBe("light");
+  expect(store.getState()).toBe(first);
+  expect(parse).toHaveBeenCalledTimes(1);
+  store.set("theme:another");
+  expect(parse).toHaveBeenCalledTimes(2);
   store.getState();
   expect(parse).toHaveBeenCalledTimes(2);
+  localStorage.setItem(customThemeKey, JSON.stringify({ ...customTheme, name: "another", base: "light" }));
+  expect(store.getState().custom?.base).toBe("light");
+  expect(parse).toHaveBeenCalledTimes(3);
 });
 
-test("two identical refetch results write the cache only once", () => {
-  setThemePick("theme:mine");
-  const writes = vi.spyOn(localStorage, "setItem");
-  updateCustomTheme(customTheme);
-  updateCustomTheme(structuredClone(customTheme));
-  expect(writes.mock.calls).toEqual([[customThemeKey, JSON.stringify(customTheme)]]);
+test.each(["mine", "another"])("boot seeds only a cache matching the pick: %s", (name) => {
+  localStorage.setItem(themeKey, "theme:mine");
+  localStorage.setItem(customThemeKey, JSON.stringify({ ...customTheme, name }));
+  const store = createThemeStore();
+  stop = store.subscribe(() => {});
+  expect(store.getState().custom).toEqual(name === "mine" ? customTheme : undefined);
+  expect(document.documentElement.style.getPropertyValue("--n-950")).toBe(name === "mine" ? "#112233" : "");
+  expect(store.getState().checked).toBeUndefined();
 });
 
-test("selecting from an older list preserves the same name cached by another tab", () => {
-  const tabA = createThemeStore();
-  const tabB = createThemeStore();
-  tabA.setCustom(customTheme, true);
+test("unchanged storage events preserve the snapshot and do not notify or reapply CSS", () => {
+  const store = createThemeStore();
+  store.selectCustomTheme(customTheme);
+  const listener = vi.fn();
+  stop = store.subscribe(listener);
+  const snapshot = store.getState();
+  const applied = vi.spyOn(document.documentElement.style, "setProperty");
+  for (const key of [themeKey, customThemeKey, null])
+    window.dispatchEvent(new StorageEvent("storage", { key, storageArea: localStorage }));
+  expect(store.getState()).toBe(snapshot);
+  expect(listener).not.toHaveBeenCalled();
+  expect(applied).not.toHaveBeenCalled();
+});
+
+test("Settings selection keeps a version already held for the same name", () => {
+  const store = createThemeStore();
   const newer = { ...customTheme, scales: { "n-950": "#223344" }, themeColor: "#223344" };
-  tabB.setCustom(newer);
-  tabA.set("light");
-  tabA.setCustom(customTheme, true);
-  expect(tabA.getSnapshot()).toBe("theme:mine");
-  expect(tabA.getState().custom).toEqual(newer);
-  expect(JSON.parse(localStorage.getItem(customThemeKey) ?? "null")).toEqual(newer);
+  store.selectCustomTheme(newer);
+  store.set("light");
+  localStorage.setItem(customThemeKey, JSON.stringify(customTheme));
+  const writes = vi.spyOn(localStorage, "setItem");
+  store.selectCustomTheme(customTheme);
+  expect(writes.mock.calls).toEqual([
+    [customThemeKey, JSON.stringify(newer)],
+    [themeKey, "theme:mine"],
+  ]);
+  expect(store.getState().custom).toEqual(newer);
   expect(document.documentElement.style.getPropertyValue("--n-950")).toBe("#223344");
 });
+
+test("Settings selection adopts a matching saved version before its older list entry", () => {
+  const store = createThemeStore();
+  const newer = { ...customTheme, scales: { "n-950": "#223344" }, themeColor: "#223344" };
+  localStorage.setItem(customThemeKey, JSON.stringify(newer));
+  const writes = vi.spyOn(localStorage, "setItem");
+  store.selectCustomTheme(customTheme);
+  expect(store.getState().custom).toEqual(newer);
+  expect(writes.mock.calls).toEqual([[themeKey, "theme:mine"]]);
+  expect(document.documentElement.style.getPropertyValue("--n-950")).toBe("#223344");
+});
+
+test.each([null, "not json", JSON.stringify({ ...customTheme, name: "another" })])(
+  "Settings selection seeds from its entry and writes the cache before the pick: %j",
+  (saved) => {
+    const store = createThemeStore();
+    if (saved !== null) localStorage.setItem(customThemeKey, saved);
+    const writes = vi.spyOn(localStorage, "setItem");
+    store.selectCustomTheme(customTheme);
+    expect(store.getState().custom).toEqual(customTheme);
+    expect(writes.mock.calls).toEqual([
+      [customThemeKey, JSON.stringify(customTheme)],
+      [themeKey, "theme:mine"],
+    ]);
+    const follower = createThemeStore();
+    expect(follower.getState().custom).toEqual(customTheme);
+  },
+);
 
 test("the boot script uses only a matching cache's base and hex browser colour", () => {
   localStorage.setItem(themeKey, "theme:mine");
@@ -385,19 +443,13 @@ test("boot rejects unsafe meta colours and reserved theme names", () => {
   expectApplied("system");
 });
 
-test("downloads use a currently valid name, otherwise the matching cached base", () => {
-  const state = { pick: "theme:mine" as const, custom: customTheme };
-  expect(downloadTheme(state, { themes: [customTheme], folderError: false })).toBe("mine");
-  for (const list of [
-    undefined,
-    { themes: [], folderError: false },
-    {
-      themes: [{ valid: false as const, name: "mine", base: "light" as const, problems: ["Unreadable."] }],
-      folderError: false,
-    },
-  ])
-    expect(downloadTheme(state, list)).toBe("dark");
-  expect(downloadTheme({ ...state, pick: "theme:another" }, undefined)).toBeUndefined();
-  expect(downloadTheme({ ...state, pick: "system" }, undefined)).toBeUndefined();
-  expect(downloadTheme({ ...state, pick: "light" }, undefined)).toBe("light");
+test("downloads read only the pick, its checked validity and its held base", () => {
+  const state = { pick: "theme:mine" as const, custom: customTheme, checked: undefined };
+  expect(downloadTheme({ ...state, checked: { name: "mine", valid: true } })).toBe("mine");
+  for (const checked of [undefined, { name: "mine", valid: false }, { name: "another", valid: true }])
+    expect(downloadTheme({ ...state, checked })).toBe("dark");
+  expect(downloadTheme({ ...state, pick: "theme:another" })).toBeUndefined();
+  expect(downloadTheme({ ...state, pick: "system" })).toBeUndefined();
+  expect(downloadTheme({ ...state, pick: "light" })).toBe("light");
+  expect(downloadTheme({ ...state, pick: "dark" })).toBe("dark");
 });

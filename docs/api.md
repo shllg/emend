@@ -651,36 +651,59 @@ varies). Compare the unrounded ratio and report two decimals, for example
 - `syn-plain` on `diff-add-word` (over `diff-add-bg`), `diff-del-word` (over `diff-del-bg`),
   `diff-add-hover`, `diff-del-hover` and `diff-select-bg`.
 
-`syn-keyword`, `syn-type`, `syn-function`, `syn-string`, `syn-number`, `syn-comment` and `syn-punct`
-on `bg-surface`, `diff-add-bg`, `diff-del-bg`, `diff-add-word` (over `diff-add-bg`), `diff-del-word`
-(over `diff-del-bg`), `diff-add-hover`, `diff-del-hover` and `diff-select-bg` require 3 to 1.
-For the Download, `fg-reading-muted` on `bg-sunken`, `diff-add-bg` over `bg-sunken`, and
-`diff-del-bg` over `bg-sunken` also requires 3 to 1. Disabled text is exempt. Both built-in bases
-pass all 146 pairs.
+These pairs require 3 to 1:
 
-Before the HTTP server listens, `startServer` awaits the watcher's first fingerprint as its
-baseline. Every two seconds afterwards, regardless of open streams, the watcher fingerprints
-exactly the files returned by the same capped, sorted folder listing, using size, mtime, ctime
-and inode. Missing and too-full folders have distinct, stable fingerprints. Each change emits
-`{ type: "themes" }` only on global `/api/v1/events` streams, to every owner. Ticks never overlap;
-the timer is unref'd and stops with the server. When a stream opens, the browser refetches queries
-older than that open, including the picked theme's query.
+- `syn-keyword`, `syn-type`, `syn-function`, `syn-string`, `syn-number`, `syn-comment` and
+  `syn-punct` on `bg-surface`, `diff-add-bg`, `diff-del-bg`, `diff-add-word` (over `diff-add-bg`),
+  `diff-del-word` (over `diff-del-bg`), `diff-add-hover`, `diff-del-hover` and `diff-select-bg`.
+- For the Download: `fg-reading-muted` on `bg-sunken`, on `diff-add-bg` over `bg-sunken` and on
+  `diff-del-bg` over `bg-sunken`.
+
+Disabled text is exempt. Both built-in bases pass all 146 pairs.
+
+Before the HTTP server listens, `startServer` awaits `watchThemes`, which waits at most
+`baselineWaitMs` (default 1000 ms) for its first fingerprint. In time, it becomes the baseline without an event. After
+the limit, the server listens while that fingerprint keeps running. When it finishes, it becomes
+the baseline and broadcasts one `{ type: "themes" }`. Stopping the watcher prevents that late
+event. The wait timer uses the injected clock, is unref'd and is cleared when the wait ends.
+
+Every two seconds after that wait, regardless of open streams, the watcher fingerprints exactly
+the files returned by the same capped, sorted folder listing, using size, mtime, ctime and inode.
+Missing and too-full folders have distinct, stable fingerprints. Each change emits
+`{ type: "themes" }` only on global `/api/v1/events` streams, to every owner. Ticks skip while a
+fingerprint is running. A fingerprint that never finishes leaves the watcher idle; the server can
+still start and stop. The interval timer is unref'd and stops with the server.
 
 Open pages refresh within a few seconds. A page using a refused or removed theme keeps its last
-valid version and shows the reason in Settings. The choice stays per device. The browser caches
-a bare `ThemeValid` in `emend.theme.custom` and parses it only when the stored text changes.
-It skips writes whose JSON equals the stored text. No timestamp orders versions: across tabs
-the last write wins, with no ordering promise between their fetches.
+valid version and shows the reason in Settings. The choice stays per device. Each tab holds its
+own last valid version in memory. Other tabs' saved copies of a theme it already holds are
+ignored. A bare `ThemeValid` in `emend.theme.custom` seeds a tab at load or when it switches to a
+name it does not hold, only if the saved name matches. The tab parses that text only when it needs
+a seed and the text or picked name changed since the last parse. Identical writes are skipped.
+Storage events notify listeners only when the state changed.
 
-The root sync uses its own query for each picked name, `["themes", "pick", <name>]`, with
-`gcTime: 0`. Leaving the pick drops that query's data; picking a name fetches anew. Only valid
-entries fetched while that name is picked in this tab update the cache; missing or refused
-entries keep the last valid version. Settings uses `["themes"]` for its list. Selecting there
-seeds the cache only when it does not already hold that name, then sets the pick so the root
-sync fetches it. An old Settings list therefore cannot replace a cached version of the same name.
-The `themes` event invalidates the `["themes"]` prefix, including the per-pick query; stream-open
-refresh also reaches it. Download links read that same per-pick query: they pass the name when
-it is valid there, otherwise the matching cached version's base.
+The root starts one sync loop per tab, outside React Query, with no clocks or timers. It fetches
+on start, a picked name change (including another tab's storage event), a `themes` event, and a
+stream open. It runs one fetch at a time. Triggers during a fetch queue exactly one more fetch
+after it ends. A stopped loop or a pick without a custom name fetches nothing. Stopping aborts
+the pending fetch and ignores its result; starting again works. An error changes nothing and
+waits for another trigger.
+
+A result counts only for the name still picked when the fetch ends. It records whether that name
+is valid. A valid entry replaces the tab's held version when its JSON differs and writes the saved
+copy when the stored text differs, even when the held version is unchanged. Missing or refused
+entries keep the held version. Listeners are notified and CSS reapplied only when the held version
+or checked validity changed. There is no timestamp ordering between tabs' writes.
+
+Settings uses the `["themes"]` query for its list only. Selecting an entry keeps a version this
+tab already holds for that name, else adopts a matching saved copy, else uses the selected entry.
+It saves that version before writing the pick, skipping identical writes, so other tabs following
+the pick can seed it. The pick change triggers the loop. A `themes` event also refreshes Settings'
+list; stream open keeps the existing refresh of queries older than the open.
+
+Download links read only the store. System passes no theme; Dark and Light pass themselves. For
+`theme:N`, a check of N that found it valid passes N. Otherwise the link passes the held version's
+base if the tab holds N, or no theme if it does not.
 
 ### Review read views
 

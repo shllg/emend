@@ -14,7 +14,7 @@ import {
 import { type Ref, useEffect, useState } from "react";
 import { plural } from "../../lib/count.ts";
 import { reviewLineTotals } from "../../lib/diff-totals.ts";
-import { useDownloadTheme } from "../../lib/theme-sync.tsx";
+import { useDownloadTheme } from "../../lib/theme.ts";
 import { sharedDiffFolder } from "../../lib/writeup-area.ts";
 import { usesOpeningCard } from "../../lib/writeup-facts.ts";
 import { LineTotals } from "../diff/LineTotals.tsx";

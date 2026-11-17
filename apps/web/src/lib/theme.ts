@@ -4,11 +4,12 @@ import {
   THEME_TOKENS,
   ThemeColor,
   ThemeFont,
-  type ThemeList,
+  ThemeList,
   ThemeName,
   ThemeValid,
 } from "@emend/contract";
 import { useSyncExternalStore } from "react";
+import { get } from "../api/client.ts";
 import { useMedia } from "./layout.ts";
 
 export type ThemePick = "system" | "dark" | "light" | `theme:${ThemeName}`;
@@ -23,8 +24,12 @@ export const themeFontStacks = {
 const themeColors = { dark: "#171717", light: "#fafafb" };
 const scaleSteps = new Set<string>(THEME_SCALE_STEPS);
 const applied = new Set<string>();
-type ThemeState = { pick: ThemePick; custom: ThemeValid | undefined };
-const serverState: ThemeState = { pick: "system", custom: undefined };
+type ThemeState = {
+  pick: ThemePick;
+  custom: ThemeValid | undefined;
+  checked: { name: ThemeName; valid: boolean } | undefined;
+};
+const serverState: ThemeState = { pick: "system", custom: undefined, checked: undefined };
 
 export function pickedThemeName(pick: ThemePick): ThemeName | undefined {
   return pick.startsWith("theme:") ? ThemeName.safeParse(pick.slice(6)).data : undefined;
@@ -93,27 +98,42 @@ function apply(state: ThemeState) {
 
 export function createThemeStore() {
   let saved: string | null | undefined;
-  let savedCustom: string | null | undefined;
-  let cache: ThemeValid | undefined;
+  let parsedText: string | null | undefined;
+  let parsedName: ThemeName | undefined;
+  let cached: ThemeValid | undefined;
   let state = serverState;
+  let notified: ThemeState | undefined;
   const listeners = new Set<() => void>();
+  const seed = (name: ThemeName) => {
+    const raw = read(customThemeKey);
+    if (raw !== parsedText || name !== parsedName) {
+      parsedText = raw;
+      parsedName = name;
+      cached = parseCustom(raw);
+    }
+    return cached?.name === name ? cached : undefined;
+  };
+  const changePick = (pick: ThemePick) => {
+    if (pick !== state.pick) state = { ...state, pick, checked: undefined };
+  };
   const getState = () => {
     const raw = read(themeKey);
-    const rawCustom = read(customThemeKey);
     if (raw !== undefined && raw !== saved) {
       saved = raw;
-      state = { ...state, pick: parse(raw) };
+      changePick(parse(raw));
     }
-    if (rawCustom !== undefined && rawCustom !== savedCustom) {
-      savedCustom = rawCustom;
-      // Validate untrusted storage only when its text changes, including writes by another tab.
-      cache = parseCustom(rawCustom);
-      state = { ...state, custom: cache };
+    const name = pickedThemeName(state.pick);
+    if (name !== undefined && state.custom?.name !== name) {
+      const custom = seed(name);
+      if (custom) state = { ...state, custom };
     }
     return state;
   };
   const notify = () => {
-    apply(getState());
+    const current = getState();
+    if (current === notified) return;
+    notified = current;
+    apply(current);
     for (const listener of listeners) listener();
   };
   const onStorage = (event: StorageEvent) => {
@@ -125,12 +145,23 @@ export function createThemeStore() {
     }
     notify();
   };
-  const writePick = (pick: ThemePick) => {
-    state = { ...state, pick };
+  const writeCustom = (custom: ThemeValid) => {
     try {
-      if (pick === "system") localStorage.removeItem(themeKey);
-      else localStorage.setItem(themeKey, pick);
-      saved = pick === "system" ? null : pick;
+      const raw = JSON.stringify(custom);
+      if (raw !== read(customThemeKey)) localStorage.setItem(customThemeKey, raw);
+    } catch {
+      // The validated last version also survives in memory when storage is unavailable.
+    }
+  };
+  const writePick = (pick: ThemePick) => {
+    changePick(pick);
+    try {
+      const raw = pick === "system" ? null : pick;
+      if (read(themeKey) !== raw) {
+        if (raw === null) localStorage.removeItem(themeKey);
+        else localStorage.setItem(themeKey, raw);
+      }
+      saved = raw;
     } catch {
       // The choice still applies to this page when storage is denied or full.
     }
@@ -153,35 +184,100 @@ export function createThemeStore() {
       writePick(parse(pick));
       notify();
     },
-    setCustom(entry: ThemeValid, select = false) {
+    selectCustomTheme(entry: ThemeValid) {
       const parsed = ThemeValid.safeParse(entry);
       if (!parsed.success) return;
       getState();
-      const custom = parsed.data;
-      const pick = `theme:${custom.name}` as const;
-      if (!select && state.pick !== pick) return;
-      // Selection may come from Settings' older list; refreshes come from the per-pick query.
-      if (!select || cache?.name !== custom.name) {
-        cache = custom;
+      const name = parsed.data.name;
+      if (state.custom?.name !== name) {
+        const custom = seed(name) ?? parsed.data;
         state = { ...state, custom };
-        try {
-          const raw = JSON.stringify(cache);
-          if (raw !== savedCustom) localStorage.setItem(customThemeKey, raw);
-          savedCustom = raw;
-        } catch {
-          // The validated last version also survives in memory when storage is unavailable.
-        }
       }
-      if (select) writePick(pick);
+      // Save before publishing the pick so other tabs find the matching version.
+      if (state.custom) writeCustom(state.custom);
+      writePick(`theme:${name}`);
+      notify();
+    },
+    applyList(name: ThemeName, list: ThemeList) {
+      if (pickedThemeName(getState().pick) !== name) return;
+      const entry = list.themes.find((entry) => entry.name === name);
+      const valid = entry?.valid === true;
+      if (state.checked?.name !== name || state.checked.valid !== valid) state = { ...state, checked: { name, valid } };
+      if (entry?.valid) {
+        if (JSON.stringify(state.custom) !== JSON.stringify(entry)) state = { ...state, custom: entry };
+        // A different tab may have overwritten the saved copy, even if ours is unchanged.
+        writeCustom(entry);
+      }
       notify();
     },
   };
 }
 
+export function createThemeSync(
+  store: ReturnType<typeof createThemeStore>,
+  fetchList: (signal: AbortSignal) => Promise<ThemeList> = (signal) => get("/api/v1/themes", ThemeList, signal),
+) {
+  let running: { controller?: AbortController; again: boolean; stop: () => void } | undefined;
+  const request = () => {
+    const run = running;
+    if (!run) return;
+    const name = pickedThemeName(store.getState().pick);
+    if (name === undefined) return;
+    if (run.controller) {
+      run.again = true;
+      return;
+    }
+    const controller = new AbortController();
+    run.controller = controller;
+    void (async () => {
+      try {
+        const list = await fetchList(controller.signal);
+        if (running === run) store.applyList(name, list);
+      } catch {
+        // Keep the held version; only another trigger requests a new attempt.
+      } finally {
+        if (running === run) {
+          run.controller = undefined;
+          if (run.again) {
+            run.again = false;
+            request();
+          }
+        }
+      }
+    })();
+  };
+  const start = () => {
+    if (running) return running.stop;
+    let name = pickedThemeName(store.getState().pick);
+    const unsubscribe = store.subscribe(() => {
+      const next = pickedThemeName(store.getState().pick);
+      if (next === name) return;
+      name = next;
+      request();
+    });
+    const run = {
+      controller: undefined as AbortController | undefined,
+      again: false,
+      stop: () => {
+        if (running !== run) return;
+        running = undefined;
+        unsubscribe();
+        run.controller?.abort();
+      },
+    };
+    running = run;
+    request();
+    return run.stop;
+  };
+  return { start, request };
+}
+
 const themeStore = createThemeStore();
+const themeSync = createThemeSync(themeStore);
+export const startThemeSync = themeSync.start;
+export const requestThemeSync = themeSync.request;
 export const setThemePick = themeStore.set;
-export const updateCustomTheme = (entry: ThemeValid) => themeStore.setCustom(entry);
-export const selectCustomTheme = (entry: ThemeValid) => themeStore.setCustom(entry, true);
+export const selectCustomTheme = themeStore.selectCustomTheme;
 export function useThemeState() {
   return useSyncExternalStore(themeStore.subscribe, themeStore.getState, () => serverState);
 }
@@ -196,11 +292,15 @@ export function useResolvedTheme(): "dark" | "light" {
   );
 }
 
-export function downloadTheme(state: ThemeState, list: ThemeList | undefined) {
+export function downloadTheme(state: ThemeState) {
   if (state.pick === "system") return undefined;
   if (state.pick === "dark" || state.pick === "light") return state.pick;
   const name = pickedThemeName(state.pick);
-  return list?.themes.some((entry) => entry.name === name && entry.valid) ? name : pickedTheme(state)?.base;
+  return state.checked?.name === name && state.checked?.valid ? name : pickedTheme(state)?.base;
+}
+
+export function useDownloadTheme() {
+  return downloadTheme(useThemeState());
 }
 
 /** Apply before React starts; keep tabs in sync even on pages without a theme hook. */

@@ -7,7 +7,7 @@ import {
   downloadHasComments,
   downloadHasDiff,
 } from "../../lib/download.ts";
-import { useDownloadTheme } from "../../lib/theme-sync.tsx";
+import { useDownloadTheme } from "../../lib/theme.ts";
 import { Button } from "../ui/Button.tsx";
 import { Checkbox } from "../ui/Checkbox.tsx";
 import { Dialog } from "../ui/Dialog.tsx";

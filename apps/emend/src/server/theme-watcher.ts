@@ -5,7 +5,8 @@ import type { ReviewEvents } from "./events.ts";
 
 export interface ThemeWatcherOptions {
   intervalMs?: number;
-  clock?: Pick<typeof globalThis, "setInterval" | "clearInterval">;
+  baselineWaitMs?: number;
+  clock?: Pick<typeof globalThis, "setInterval" | "clearInterval" | "setTimeout" | "clearTimeout">;
 }
 
 async function fingerprint(dir: string): Promise<string> {
@@ -27,10 +28,11 @@ async function fingerprint(dir: string): Promise<string> {
 export async function watchThemes(
   themesDir: string | undefined,
   events: ReviewEvents,
-  { intervalMs = 2000, clock = globalThis }: ThemeWatcherOptions = {},
+  { intervalMs = 2000, baselineWaitMs = 1000, clock = globalThis }: ThemeWatcherOptions = {},
 ): Promise<() => void> {
   if (!themesDir) return () => {};
-  let baseline = await fingerprint(themesDir);
+  let baseline: string | undefined;
+  let lateBaseline = false;
   let reading = false;
   let stopped = false;
   const tick = async () => {
@@ -39,13 +41,28 @@ export async function watchThemes(
     try {
       const next = await fingerprint(themesDir);
       if (stopped) return;
-      const changed = next !== baseline;
+      const changed = baseline === undefined ? lateBaseline : next !== baseline;
       baseline = next;
       if (changed) events.broadcast({ type: "themes" });
     } finally {
       reading = false;
     }
   };
+  let waitTimer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      tick(),
+      new Promise<void>((resolve) => {
+        waitTimer = clock.setTimeout(() => {
+          lateBaseline = true;
+          resolve();
+        }, baselineWaitMs);
+        waitTimer.unref();
+      }),
+    ]);
+  } finally {
+    clock.clearTimeout(waitTimer);
+  }
   const timer = clock.setInterval(tick, intervalMs);
   timer.unref();
   return () => {
