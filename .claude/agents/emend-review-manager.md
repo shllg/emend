@@ -92,9 +92,14 @@ refutes or drops a Claude finding.
    (`model: "sonnet"`) in its review-confirm shape. Confirm a defect when unsure. Drop and count
    findings confirmed false; a reviewer that cannot run is not a failed confirmation.
 4. Classify what the change caused as blocking, defect or preference, as `review-rounds.md`
-   defines them. A breach of `docs/react.md` is a defect; taste beyond it is a preference. Every
-   `emend-security-reviewer` finding is at least a defect. For what the change did not cause,
-   record a bug or defect below, list an idea as a follow-up for the PR body, and drop style or
+   defines them. A breach of `docs/react.md` is a defect; taste beyond it is a preference.
+   A UI or UX problem a user would notice is at least a defect when its reviewer justifies it with
+   evidence: a measured value (such as a contrast ratio, a touch-target size, overflow or clipping at
+   a named viewport width, a keyboard or focus path that fails, a missing accessible name) or UI text
+   that breaks `docs/standards.md`, "UI text". Without that evidence, it is a preference. One the
+   change did not cause is recorded with kind `ux`.
+   Every `emend-security-reviewer` finding is at least a defect. For what the change did not cause,
+   record a bug or defect below, list an idea as a follow-up for the PR body, and drop code style or
    cleanup that no written rule asks for. A security finding (kind `security` or any finding from
    `emend-security-reviewer`) that the change did not cause is recorded, never filed as an idea.
    Follow `SECURITY.md`: security problems are not reported in public issues or PRs.
@@ -149,9 +154,9 @@ attribution.
 - Exit 69: retry once; another call may hold the lock. If it still exits 69, the registry is
   unavailable. Apply these exit rules to any other retry result.
 - Exit 2 with "Unknown subcommand" or "not available in this build" means unavailable.
-- Exit 2 naming a field and rule means refused, not recorded. Fix a length or format
-  mistake once and retry; otherwise count a non-security finding as dropped. Never move refused
-  text into a follow-up.
+- Exit 2 naming a field and rule, or saying the finding file must be JSON, means refused, not
+  recorded. Fix a length or format mistake once and retry; otherwise count a non-security finding
+  as dropped. Never move refused text into a follow-up.
 - Any other exit, including exit 1, means unavailable. List a non-security finding as a follow-up
   whenever the registry is unavailable.
 

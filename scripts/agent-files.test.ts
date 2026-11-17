@@ -95,6 +95,20 @@ test("the review manager removes a finding only on a false positive", () => {
   assert.ok(body.includes('A finding leaves `fix` only on "false positive".'));
 });
 
+test("a measured UI or UX problem is at least a defect", () => {
+  const rounds = readFileSync(path.join(root, ".claude", "rules", "review-rounds.md"), "utf8").replace(
+    /\s+/g,
+    " ",
+  );
+  const manager = readFileSync(path.join(directory, "emend-review-manager.md"), "utf8").replace(
+    /\s+/g,
+    " ",
+  );
+  assert.ok(rounds.includes("a UI or UX problem the reviewer shows with measured evidence"));
+  assert.ok(manager.includes("is at least a defect when its reviewer justifies it with"));
+  assert.ok(manager.includes("Without that evidence, it is a preference."));
+});
+
 test("react and architecture reviewers have exactly the local read-only tools", () => {
   for (const name of ["emend-react-reviewer", "emend-architecture-reviewer"]) {
     const fields = agents.get(name);

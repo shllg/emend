@@ -21,16 +21,17 @@ The manager sorts every finding before the orchestrator acts on it:
 - **blocking:** a bug, a security hole, data loss, a broken contract, a broken non-negotiable, a
   failing check, or a "Done when" line the change does not meet;
 - **defect:** wrong or misleading text, a missing test for new behaviour, or another rule in
-  `AGENTS.md` that the change breaks; a breach of `docs/react.md` is a defect;
+  `AGENTS.md` that the change breaks; a breach of `docs/react.md` is a defect; so is a UI or UX
+  problem the reviewer shows with measured evidence;
 - **preference:** naming, structure, style or wording that is not wrong.
 
 The manager decides whether the change caused a finding: its lines are new or changed in the
 range, or the change altered what reaches them. An old bug that stops "Done when" counts as
 caused. What the change did not cause is **recorded** (a bug or defect, written to the local
 findings registry with `bin/wt findings add`), a **follow-up** (an idea, listed under
-"Follow-ups"), or dropped (style or cleanup no written rule asks for). A finding a reviewer calls
-a bug or a security issue is blocking, and every `emend-security-reviewer` finding is at least a
-defect.
+"Follow-ups"), or dropped (code style or cleanup no written rule asks for). A finding a reviewer
+calls a bug or a security issue is blocking, and every `emend-security-reviewer` finding is at
+least a defect.
 
 For `private`, run `<main>/bin/wt notify question` and say there are private findings. List them
 in the final report to the owner and the local emend hand-off writeup, never in a PR body, issue

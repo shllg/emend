@@ -22,4 +22,9 @@ Each finding gives `file:line`, the rule id from `docs/react.md` (or "taste" whe
 it), its class (a breach is a defect, taste a preference), and one sentence why. End each finding
 with "in-change yes" or "in-change no" to say whether the change caused it.
 
+For a UI or UX problem a user would notice, give the evidence that makes it measurable (such as a
+contrast ratio, a touch-target size, overflow at a named viewport width, a keyboard or focus path
+that fails, a missing accessible name) or the `docs/standards.md` "UI text" rule it breaks. Without
+that evidence, call it taste.
+
 Return only findings, ranked, then a one-line verdict. Never edit, commit or push.
