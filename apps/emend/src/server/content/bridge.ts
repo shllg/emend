@@ -601,9 +601,11 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       if (!entry || url.origin !== window.location.origin || !url.pathname.startsWith(entry[1])) return null;
       const parts = url.pathname.slice(entry[1].length).split("/").map(part => decodeURIComponent(part));
       if (parts.some(part => !part || part === "." || part === ".." || /[/\\\x00-\x1f\x7f-\x9f]/u.test(part))) return null;
+      const path = parts.join("/");
+      if (path.length > 4096) return null;
       if (read(prototype, "complete", element) && read(prototype, "naturalWidth", element) < 48 &&
           read(prototype, "naturalHeight", element) < 48) return null;
-      return parts.join("/");
+      return path;
     } catch { return null; }
   }
   function captionLabel(root, budget) {
@@ -654,24 +656,32 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     const sources = new Map();
     const stepBudget = { remaining: 1000000 };
     if (!body() || imagePath(clicked, urls, sources, stepBudget) === null || !stepBudget.remaining) return null;
-    const images = [];
-    const captions = new Map();
-    const captionBudget = { remaining: 1000000 };
+    const collected = [];
     let index = -1, size = 0;
     for (const node of imageNodes(body())) {
       const path = imagePath(node, urls, sources, stepBudget);
       if (!stepBudget.remaining) break;
       if (path === null) continue;
       if (size + path.length > 1000000) break;
-      let caption = imageCaption(node, captions, captionBudget, stepBudget);
-      if (caption === null) break;
-      if (size + path.length + caption.length > 1000000) caption = "";
-      size += path.length + caption.length;
-      if (node === clicked) index = images.length;
-      images.push({ path, caption });
-      if (images.length === 10000 || !stepBudget.remaining) break;
+      size += path.length;
+      if (node === clicked) index = collected.length;
+      collected.push({ node, path });
+      if (collected.length === 10000) break;
     }
-    return index < 0 ? null : { type: "emend:image", images, index };
+    if (index < 0) return null;
+    // Reserve every collected path before captions can spend the remaining message budget.
+    const images = collected.map(({ path }) => ({ path, caption: "" }));
+    const captions = new Map();
+    const captionBudget = { remaining: 1000000 };
+    for (let i = 0; i < collected.length; i++) {
+      if (!stepBudget.remaining || !captionBudget.remaining) break;
+      const caption = imageCaption(collected[i].node, captions, captionBudget, stepBudget);
+      if (caption === null || !captionBudget.remaining) break;
+      if (size + caption.length > 1000000) continue;
+      images[i].caption = caption;
+      size += caption.length;
+    }
+    return { type: "emend:image", images, index };
   }
   listen(document, "click", event => {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;

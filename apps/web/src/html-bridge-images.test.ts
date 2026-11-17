@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { type Element, type HTMLImageElement, Window } from "happy-dom";
 import { afterEach, expect, test, vi } from "vitest";
+import { FrameToParent } from "./lib/frame-messages.ts";
 
 const prefix = `/content/${"k".repeat(43)}${"a".repeat(32)}/`;
 const origin = "http://127.0.0.1:3636";
@@ -200,6 +201,36 @@ test("image path decoding happens once and caption caps preserve well-formed tex
       { path: "docs/alt.png", caption: "x".repeat(1999) },
       { path: "docs/malformed.png", caption: "a\ufffdb" },
     ]);
+  } finally {
+    await b.close();
+  }
+});
+
+test("overlong decoded paths are skipped while 4096-character paths remain in a valid message", async () => {
+  const directory = `docs/${"folder/".repeat(580)}`;
+  const atLimit = `${directory}${"é".repeat(4096 - directory.length - 4)}.png`;
+  const overLimit = `${directory}${"é".repeat(4097 - directory.length - 4)}.png`;
+  const src = (path: string) => prefix + path.split("/").map(encodeURIComponent).join("/");
+  const b = bridge(`<body><img src="first.png">
+    <img id="overlong" data-loading src="${src(overLimit)}">
+    <img id="at-limit" data-loading src="${src(atLimit)}">
+    <img id="last" src="last.png"></body>`);
+  try {
+    expect(b.click("#overlong").defaultPrevented).toBe(false);
+    expect(b.images()).toEqual([]);
+    expect(b.click("#last").defaultPrevented).toBe(true);
+    expect(b.images()[0]).toEqual({
+      type: "emend:image",
+      images: [
+        { path: "docs/first.png", caption: "" },
+        { path: atLimit, caption: "" },
+        { path: "docs/last.png", caption: "" },
+      ],
+      index: 2,
+    });
+    expect(FrameToParent.parse(b.images()[0])).toEqual(b.images()[0]);
+    expect(b.click("#at-limit").defaultPrevented).toBe(true);
+    expect(b.images()[1]).toEqual({ ...b.images()[0], index: 1 });
   } finally {
     await b.close();
   }
@@ -605,19 +636,19 @@ test.each([63, 64])("picture source selection at the scan boundary after %i chil
   }
 });
 
-test.each([7, 8])("gallery step budget %i includes the initial clicked-image check", async (gallerySteps) => {
+test.each([5, 7])("gallery step budget %i includes the initial clicked-image check", async (gallerySteps) => {
   const b = bridge('<body><img src="first.png"><img src="second.png"><img src="last.png"></body>', {
     gallerySteps,
   });
   try {
     expect(b.click("img").defaultPrevented).toBe(true);
-    // The initial check costs two steps; each collected image costs three more.
+    // The initial check and each path cost two steps; collection spends the budget before caption lookup.
     expect(b.images()).toEqual([
       {
         type: "emend:image",
         images: [
           { path: "docs/first.png", caption: "" },
-          ...(gallerySteps === 8 ? [{ path: "docs/second.png", caption: "" }] : []),
+          ...(gallerySteps === 7 ? [{ path: "docs/second.png", caption: "" }] : []),
         ],
         index: 0,
       },
@@ -646,17 +677,26 @@ test("rejected images consume the gallery step budget", async () => {
   }
 });
 
-test.each([13, 14])("image and caption ancestor walks share the %i-step gallery budget", async (gallerySteps) => {
-  const b = bridge('<body><img src="first.png"><div><div><div><img src="nested.png"></div></div></div></body>', {
-    gallerySteps,
-  });
+test.each([15, 16])("image and caption ancestor walks share the %i-step gallery budget", async (gallerySteps) => {
+  const b = bridge(
+    '<body><img src="first.png" alt="First"><div><div><div><img src="nested.png" alt="Nested"></div></div></div><img id="last" src="last.png" alt="Last"></body>',
+    { gallerySteps },
+  );
   try {
+    const attributes = vi.spyOn(b.window.Element.prototype, "getAttribute");
+    const last = b.window.document.querySelector("#last");
     expect(b.click("img").defaultPrevented).toBe(true);
-    // Five steps cover the first image; the nested image needs five to qualify and four for its caption lookup.
+    // All paths cost eleven steps including the initial check; captions need one, four, then one more.
     expect(b.images()[0]?.images).toEqual([
-      { path: "docs/first.png", caption: "" },
-      ...(gallerySteps === 14 ? [{ path: "docs/nested.png", caption: "" }] : []),
+      { path: "docs/first.png", caption: "First" },
+      { path: "docs/nested.png", caption: gallerySteps === 16 ? "Nested" : "" },
+      { path: "docs/last.png", caption: "" },
     ]);
+    expect(
+      attributes.mock.calls.filter(([name], index) => name === "alt" && attributes.mock.contexts[index] === last),
+    ).toHaveLength(0);
+    expect(b.click("#last").defaultPrevented).toBe(true);
+    expect(b.images()[1]).toEqual({ ...b.images()[0], index: 2 });
   } finally {
     await b.close();
   }
@@ -664,15 +704,15 @@ test.each([13, 14])("image and caption ancestor walks share the %i-step gallery 
 
 test.each([12, 13])("picture child scans share the %i-step gallery budget", async (gallerySteps) => {
   const b = bridge(
-    '<body><img src="first.png"><picture><!--one--><!--two--><img data-loading src="own.png"></picture></body>',
+    '<body><img src="first.png" alt="First"><picture><!--one--><!--two--><img data-loading src="own.png" alt="Own"></picture></body>',
     { gallerySteps },
   );
   try {
     expect(b.click("img").defaultPrevented).toBe(true);
-    // The picture adds three child visits to its image's qualification and caption ancestor walks.
+    // The picture adds three child visits; both paths fit before either caption lookup.
     expect(b.images()[0]?.images).toEqual([
-      { path: "docs/first.png", caption: "" },
-      ...(gallerySteps === 13 ? [{ path: "docs/own.png", caption: "" }] : []),
+      { path: "docs/first.png", caption: "First" },
+      { path: "docs/own.png", caption: gallerySteps === 13 ? "Own" : "" },
     ]);
   } finally {
     await b.close();
@@ -718,7 +758,9 @@ test.each(["Shared caption", "\u200b\u202e "])(
 
 test("gallery drops captions that do not fit so all 500 figure images remain reachable", async () => {
   const caption = "x".repeat(2000);
-  const filenames = Array.from({ length: 500 }, (_, index) => `image-${String(index + 1).padStart(3, "0")}.png`);
+  const filenames = Array.from({ length: 500 }, (_, index) =>
+    `image-${String(index + 1).padStart(3, "0")}.png`.padStart(48, "x"),
+  );
   const b = bridge(
     `<body>${filenames.map((name, index) => `<figure><img id="image-${index + 1}" src="${name}"><figcaption>${caption}</figcaption></figure>`).join("")}</body>`,
   );
@@ -730,25 +772,25 @@ test("gallery drops captions that do not fit so all 500 figure images remain rea
       filenames.map((name) => `docs/${name}`),
     );
     expect(gallery?.images.map((image: { caption: string }) => image.caption)).toEqual([
-      ...Array(495).fill(caption),
-      ...Array(5).fill(""),
+      ...Array(486).fill(caption),
+      ...Array(14).fill(""),
     ]);
     expect(
       gallery?.images.reduce(
         (total: number, image: { path: string; caption: string }) => total + image.path.length + image.caption.length,
         0,
       ),
-    ).toBe(999_000);
+    ).toBe(998_500);
+    expect(FrameToParent.parse(gallery)).toEqual(gallery);
   } finally {
     await b.close();
   }
 });
 
 test("gallery stops when the next path alone exceeds the character budget and refuses a click beyond it", async () => {
-  const path = "docs/image.png";
-  const caption = "x".repeat(2000 - path.length);
+  const path = `docs/${"folder/".repeat(280)}${"x".repeat(31)}.png`;
   const b = bridge(
-    `<body><figure><figcaption>${caption}</figcaption>${'<img src="image.png">'.repeat(501)}</figure></body>`,
+    `<body><figure><figcaption>Caption</figcaption>${`<img src="${prefix}${path}">`.repeat(501)}</figure></body>`,
   );
   try {
     expect(b.click("img:last-child").defaultPrevented).toBe(false);
@@ -757,12 +799,14 @@ test("gallery stops when the next path alone exceeds the character budget and re
     const gallery = b.images()[0];
     expect(gallery?.images).toHaveLength(500);
     expect(gallery?.index).toBe(499);
+    expect(gallery?.images).toEqual(Array.from({ length: 500 }, () => ({ path, caption: "" })));
     expect(
       gallery?.images.reduce(
         (total: number, image: { path: string; caption: string }) => total + image.path.length + image.caption.length,
         0,
       ),
     ).toBe(1_000_000);
+    expect(FrameToParent.parse(gallery)).toEqual(gallery);
   } finally {
     await b.close();
   }
@@ -815,7 +859,7 @@ test("pictures skip overlong source sets before trying a later source", async ()
   }
 });
 
-test("nested figures share a caption node budget and later images fall back to alt", async () => {
+test("nested figures share a caption node budget and keep later images with empty captions", async () => {
   const inner = '<figure><img src="inner.png" alt="Inner alt"><figcaption>Inner</figcaption></figure>';
   const middle = `<figure><img src="middle.png" alt="Middle alt"><figcaption>Middle${inner}</figcaption></figure>`;
   const b = bridge(
@@ -830,9 +874,9 @@ test("nested figures share a caption node budget and later images fall back to a
     // discards its partial text, and leaves both following captions unread.
     expect(b.images()[0]?.images).toEqual([
       { path: "docs/outer.png", caption: "OuterMiddleInner" },
-      { path: "docs/middle.png", caption: "Middle alt" },
-      { path: "docs/inner.png", caption: "Inner alt" },
-      { path: "docs/later.png", caption: "Later alt" },
+      { path: "docs/middle.png", caption: "" },
+      { path: "docs/inner.png", caption: "" },
+      { path: "docs/later.png", caption: "" },
     ]);
     expect(reads).toHaveBeenCalledTimes(4);
     expect(reads.mock.contexts).not.toContain(laterText);
@@ -851,7 +895,7 @@ test("omitted caption nodes still consume the shared node budget", async () => {
   );
   try {
     expect(b.click("img").defaultPrevented).toBe(true);
-    expect(b.images()[0]?.images).toEqual([{ path: "docs/image.png", caption: "Alt" }]);
+    expect(b.images()[0]?.images).toEqual([{ path: "docs/image.png", caption: "" }]);
   } finally {
     await b.close();
   }

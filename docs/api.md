@@ -800,14 +800,15 @@ the nearest enclosing figure's direct `figcaption`. An absent or cleaned-empty c
 back to the image's cleaned alt text, then to empty. Each figure's caption is computed only
 once per gallery build. All caption text walks share a budget of 1,000,000 node visits per
 gallery, including omitted nodes. When it is exhausted, unfinished and later captions count
-as empty and fall back to alt text. Figure and interactive-ancestor lookups follow rendered parents,
+as empty. Figure and interactive-ancestor lookups follow rendered parents,
 including slots and shadow hosts. Images inside links or HTML `summary`, `label` or `button`
 elements are excluded from the gallery. Clicking those images preserves link handling or the
 control's default action, including toggling a summary.
 Only visible HTML images under the current doc key qualify. Image visibility checks include
 CSS visibility and opacity when `checkVisibility` is available; otherwise they require client
 rects. Loaded images smaller than 48 pixels in both dimensions, including broken images, are
-excluded. Queries and fragments are ignored.
+excluded. Queries and fragments are ignored. A decoded path longer than `LIMITS.pathChars`
+(4096) characters is skipped; a path of exactly 4096 characters can qualify.
 The bridge uses `currentSrc` when available. For a pending responsive image, it approximates
 the browser's choice: in a `picture`, use the first preceding HTML `source` whose media query
 is absent or matches and whose type is absent or a supported raster media type. The type is
@@ -831,11 +832,16 @@ text-walk budget. Every image examined, including rejected images and the clicke
 initial check, costs one step. Every ancestor step for image qualification or caption lookup
 and every child visited by the picture source scan also costs one step. Collection stops when
 this budget is spent. A click on an image not yet collected posts nothing.
-The sum of `path.length + caption.length` stays within 1,000,000 characters. If a caption
-would exceed the remaining budget, that image is added with an empty caption when its path
-alone still fits. Collection stops when the path alone does not fit, at 10000 images, or when
-the step budget is spent. If the clicked image is outside that collected
-prefix, no message is sent. The parent independently rejects a message above the same
+The gallery is built in two passes. First, qualifying paths are collected in page order,
+stopping before their combined length would exceed 1,000,000 characters, at 10000 images,
+or when the step budget is spent. If the clicked image is outside that collected prefix,
+no message is sent. Second, captions are computed in page order using the remaining budgets.
+All collected paths' lengths are reserved before adding any captions: a caption is added
+only if that total plus the captions already added and this caption stays at most 1,000,000
+characters. Otherwise its caption is empty and the pass continues. When the caption node
+or step budget is exhausted, unfinished and remaining captions are empty and no further
+captions are computed. This second pass never removes an image. The parent independently
+rejects a message above the same
 1,000,000-character total, before filtering unknown paths.
 The parent accepts this message only from the current trusted frame after its ready. It opens
 only paths in that doc's `images`: an unknown clicked path opens nothing, and other unknown
