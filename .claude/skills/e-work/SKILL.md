@@ -66,10 +66,13 @@ Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not re
    sub-agent writes, and your report says so and why.
 3. Run `pnpm verify`. Fix failures at the root cause. Headless browser checks run Chromium directly
    (`chromium --headless=new …`).
-4. Before "done": `emend-reviewer`, a fresh read-only Codex review, and `emend-security-reviewer` when
-   `AGENTS.md` lists the change as security-relevant. Review in rounds as
+4. Before "done": dispatch `emend-review-manager` (`model: "opus"`) with the round, the range
+   (`origin/main...HEAD` for a full round, the fix commits for a check round), the task file
+   `.wt/issue.md` (or the description) and, for a check round, `.wt/review-findings.json`. It picks
+   and runs the reviewers. Fixes go to Codex. Review in rounds as
    `.claude/rules/review-rounds.md` says: commit first, round 1 over the whole change, then at most
-   two check rounds over the fixes. Log each round in `.wt/review-log.md`.
+   two check rounds over the fixes. Log each round in `.wt/review-log.md`. Append each manager JSON
+   to `.wt/review-findings.json` as the rule says.
 5. Apply the sync rule in `AGENTS.md`: check the change against the sibling project and add the
    `Sync:` trailer it asks for. `pnpm check:sync` holds the rule.
 

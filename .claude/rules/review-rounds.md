@@ -1,6 +1,7 @@
 ---
 paths:
   - ".wt/review-log.md"
+  - ".wt/review-findings.json"
 ---
 
 # Review rounds
@@ -8,32 +9,43 @@ paths:
 A review exists to ship a correct change, not a perfect one. `/e-work` and `/e-pr-finalize` review
 in rounds with a fixed budget. Never polish in an open loop.
 
+Dispatch `emend-review-manager` with `model: "opus"`. It picks and runs the reviewers and
+classifies their findings. The orchestrator fixes, commits and logs. Each call gets the round,
+the range (`origin/main...HEAD` for a full round, the fix commits for a check round), the task
+file `.wt/issue.md` (or task text), and, for a check round, `.wt/review-findings.json`.
+
 ## Classes
 
-Sort every finding before you act on it:
+The manager sorts every finding before the orchestrator acts on it:
 
 - **blocking:** a bug, a security hole, data loss, a broken contract, a broken non-negotiable, a
   failing check, or a "Done when" line the change does not meet;
 - **defect:** wrong or misleading text, a missing test for new behaviour, or another rule in
-  `AGENTS.md` that the change breaks;
+  `AGENTS.md` that the change breaks; a breach of `docs/react.md` is a defect;
 - **preference:** naming, structure, style or wording that is not wrong.
 
-A finding about code the change did not touch, or outside the issue, is a **follow-up**, whatever
-its class. A finding a reviewer calls a bug or a security issue is blocking, and every
-`emend-security-reviewer` finding is at least a defect. To dispute a blocking finding, have a fresh
-Codex review try to refute it, as `/e-pr-finalize` step 5 says. Only a confirmed false positive
-moves to "Not changed".
+The manager decides whether the change caused a finding: its lines are new or changed in the
+range, or the change altered what reaches them. An old bug that stops "Done when" counts as
+caused. What the change did not cause is **recorded** (a bug or defect, written to the local
+findings registry with `bin/wt findings add`), a **follow-up** (an idea, listed under
+"Follow-ups"), or dropped (style or cleanup no written rule asks for). A finding a reviewer calls
+a bug or a security issue is blocking, and every `emend-security-reviewer` finding is at least a
+defect.
+
+To dispute a blocking finding, send the argument to the manager in a new call, in dispute mode.
+It has a fresh Codex thread try to refute the finding. Only a confirmed false positive moves to
+"Not changed".
 
 ## Rounds
 
 - Commit before each round, so the reviewers read committed work and the log names that head.
 - **Round 1** reviews the whole change.
-- Fix every blocking finding and every defect, in one batch. Leave preferences as they are and list
-  each one under "Not changed" in the PR body, with one line of reason. List follow-ups under
-  "Follow-ups"; they never go into the change.
-- After a round with fixes, run a **check round**: give the reviewers the earlier findings and the
-  diff of the fixes only, and ask for each finding FIXED, NOT FIXED or REGRESSED, plus anything the
-  fixes broke. A check round does not review the rest of the change.
+- Fix every finding in the manager's `fix` list in one batch, through Codex. Leave preferences as
+  they are and list each under "Not changed" in the PR body, with one line of reason. List
+  follow-ups under "Follow-ups"; they never go into the change.
+- After a round with fixes, run a **check round**: call the manager with the check round, fix
+  range, task and `.wt/review-findings.json`. It checks the earlier findings as FIXED, NOT FIXED
+  or REGRESSED, plus anything the fixes broke. A check round does not review the rest of the change.
 - Stop at a round with nothing to fix, or at the budget.
 
 ## Budget
@@ -61,14 +73,18 @@ moves to "Not changed".
 
 ## Log
 
+Append each manager JSON block to `.wt/review-findings.json` (gitignored), a JSON array with one
+element per call. Use the Edit tool, or the Write tool when the file is new.
+
 Append one line per round to `.wt/review-log.md` in the worktree (gitignored), after the round's
 fixes are committed. Use the Edit tool, or the Write tool when the file is new. Never copy finding
 text into it. Each line holds the date and time, the skill, the round, the head the reviewers read,
 found/fixed for blocking findings and defects, the counts of preferences and follow-ups, and the
-blocking findings still open:
+blocking findings still open, then the recorded count:
 
-`2026-11-09 10:12 e-work check-1 3f2a91c blocking 1/1 defect 2/2 preference 3 follow-up 1 open 0`
+`2026-11-09 10:12 e-work check-1 3f2a91c blocking 1/1 defect 2/2 preference 3 follow-up 1 open 0 recorded 2`
 
 Round names: `1`, `check-1`, `check-2`, `final`, `final-skipped`, `final-check`, `owner-check`, and
-`extra-1`, `extra-2` for rounds the owner granted. The work loop reads only lines in this format,
-and from them only the round names and numbers.
+`extra-1`, `extra-2` for rounds the owner granted. A second manager call inside a round (a dispute
+or re-confirmation) adds no log line. The work loop reads only lines in this format, with or
+without the trailing `recorded N`, and from them only the round names and numbers.

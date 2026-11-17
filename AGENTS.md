@@ -117,8 +117,8 @@ Each line prevents a real failure. "Before you touch" names the rule file with t
 
 ## Who does what
 
-- **Claude Code, main session:** plans, reads, decides and adjudicates reviews. It does not write
-  implementation code.
+- **Claude Code, main session:** plans, reads and decides, and acts on the review manager's list.
+  It does not write implementation code.
 - **Codex:** writes the code, dispatched through the `codex-agent` sub-agent with explicit
   `model: "sonnet"`. Start it with `sandbox: "workspace-write"`, never `danger-full-access`, and
   decline its escalation requests. It never commits, pushes or installs dependencies, and it
@@ -128,11 +128,15 @@ Each line prevents a real failure. "Before you touch" names the rule file with t
   blocker.
 - **Codex unavailable** (sandbox, MCP, timeout, any error): a Sonnet sub-agent writes instead.
   Report that the fallback ran and why.
-- **Before "done":** `emend-reviewer` (Sonnet) and a fresh read-only Codex review through
-  `codex-agent` on every change. `emend-security-reviewer` (Opus) as well when the change touches
+- **Before "done":** `emend-review-manager` (Opus) runs every review. It picks the reviewers:
+  `emend-reviewer` (Sonnet) and a fresh read-only Codex review through `codex-agent` always;
+  `emend-security-reviewer` (Opus) when the change touches
   auth, tokens, pairing or attach, owner isolation, rendering of agent content, the content
   frames, hand-off, wait, take or claim, the MCP endpoint, CLI file or git access, a hook or rule
-  (`.claude/hooks/`, `.codex/`, CI) or dependencies. They run in rounds with a fixed budget:
+  (`.claude/hooks/`, `.codex/`, CI) or dependencies; `emend-react-reviewer` (Sonnet) when
+  `apps/web/src` changed; `emend-architecture-reviewer` (Opus) when the structure moves. It checks
+  and confirms the findings, records bugs the change did not cause, and returns one list to fix.
+  Rounds with a fixed budget:
   `.claude/rules/review-rounds.md`.
 - Every sub-agent dispatch names its model. `.claude/hooks/enforce-subagent-model.sh` blocks a
   mismatch.
