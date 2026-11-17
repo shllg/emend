@@ -88,3 +88,12 @@ test("the review manager has exactly the tools it needs", () => {
   const tools = fields.get("tools") ?? [];
   assert.deepEqual([...tools].sort(), ["Read", "Grep", "Glob", "Bash", "Agent"].sort());
 });
+
+test("react and architecture reviewers have exactly the local read-only tools", () => {
+  for (const name of ["emend-react-reviewer", "emend-architecture-reviewer"]) {
+    const fields = agents.get(name);
+    assert.ok(fields, `${name} must exist`);
+    const tools = fields.get("tools") ?? [];
+    assert.deepEqual([...tools].sort(), ["Read", "Grep", "Glob", "Bash"].sort(), name);
+  }
+});

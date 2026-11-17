@@ -34,7 +34,8 @@ read-only sandbox.
 Reviews end each finding with "in-change yes" or "in-change no" to say whether the change caused
 it. Two more commission shapes each start a fresh read-only session:
 
-- `review-confirm`: one claim (file, line, claim, and an argument when supplied). Codex checks it
+- `review-confirm`: one claim (file, line, claim, and an argument and range when supplied). Codex
+  checks it against `git diff <range>` when it is about whether the change caused something,
   and answers "true positive" or "false positive" with `file:line` evidence. Return only that
   verdict and the evidence.
 - `scan`: a list of files. Codex returns candidates as one JSON array of objects with `path`,

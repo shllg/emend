@@ -2,6 +2,7 @@
 name: emend-architecture-reviewer
 description: Opus architecture reviewer for emend. Checks that a change fits the structure, keeps module boundaries, package roles and dependency directions sound, and keeps the whole maintainable. Read-only.
 model: opus
+tools: Read, Grep, Glob, Bash
 disallowedTools:
   - Edit
   - Write

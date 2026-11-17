@@ -31,5 +31,7 @@ Return only actionable findings, ranked by severity, each with `file:line`, then
 verdict. End each finding with "in-change yes" or "in-change no" to say whether the change caused
 it. Never edit, commit or push.
 
-When the dispatch gives one claim to confirm (file, line, claim), check only that claim. Answer
-"true positive" or "false positive" with `file:line` evidence, and nothing else.
+When the dispatch gives one claim to confirm (file, line, claim, and a range when supplied),
+check only that claim. When it is about whether the change caused something, check it against
+`git diff <range>`. Answer "true positive" or "false positive" with `file:line` evidence, and
+nothing else.

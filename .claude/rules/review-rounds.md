@@ -32,9 +32,9 @@ findings registry with `bin/wt findings add`), a **follow-up** (an idea, listed 
 a bug or a security issue is blocking, and every `emend-security-reviewer` finding is at least a
 defect.
 
-The manager's `private` list holds security findings the change did not cause that could not be
-recorded. Give them to the owner: run `<main>/bin/wt notify question` and say there are private
-findings. Never put them in a PR body, issue or commit (`SECURITY.md`). `dropped` stays local too.
+For `private`, run `<main>/bin/wt notify question` and say there are private findings. List them
+in the final report to the owner and the local emend hand-off writeup, never in a PR body, issue
+or commit (`SECURITY.md`). `dropped` stays local too.
 
 To dispute a blocking finding, send the argument to the manager in a new call, in dispute mode.
 It has a fresh Codex thread try to refute the finding. Only a confirmed false positive moves to
@@ -52,9 +52,11 @@ It has a fresh Codex thread try to refute the finding. Only a confirmed false po
   or REGRESSED, plus anything the fixes broke. A check round does not review the rest of the change.
 - Stop at a round with nothing to fix, or at the budget.
 
-If `unavailable` names the Codex review, the round is incomplete: dispatch the manager once more for the same round.
-If Codex still cannot run, follow "At the budget" for an open blocking finding only when one is open;
-otherwise name the missing review under Evidence.
+Any entry in `unavailable` leaves the round incomplete: dispatch the manager once more for the
+same round. When only the Codex review is still missing and a stand-in reviewed, the round counts;
+name the missing Codex review under Evidence in the PR body. When any other picked reviewer is
+still missing (for example `emend-security-reviewer`), the round stays open: run
+`<main>/bin/wt notify blocked`, name the missing reviewer, and wait for the owner.
 
 ## Budget
 

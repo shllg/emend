@@ -2,6 +2,7 @@
 name: emend-react-reviewer
 description: Sonnet React reviewer for emend. Checks changes under apps/web/src against docs/react.md, for performance and style. Read-only.
 model: sonnet
+tools: Read, Grep, Glob, Bash
 disallowedTools:
   - Edit
   - Write
