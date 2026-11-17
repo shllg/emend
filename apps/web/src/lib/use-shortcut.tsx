@@ -18,6 +18,8 @@ import { Kbd } from "../components/ui/Kbd.tsx";
 import { useLayout } from "./layout.ts";
 import {
   ignoreShortcut,
+  jumpCommands,
+  jumpKeysLabel,
   keyLabel,
   matchesShortcut,
   shortcutCommands,
@@ -26,7 +28,13 @@ import {
 } from "./shortcuts.ts";
 
 type Handler = () => boolean;
-type Registration = { command: ShortcutCommand; priority: number; handle: Handler; when: () => boolean };
+type Registration = {
+  command: ShortcutCommand;
+  priority: number;
+  handle: Handler;
+  when: () => boolean;
+  holdRepeats?: boolean;
+};
 
 function createRegistry() {
   const entries = new Set<Registration>();
@@ -112,10 +120,37 @@ export function useShortcut(
   }, [registry, command, enabled, priority]);
 }
 
+export function useJumpShortcuts(open: (index: number) => void, { enabled = true, priority = 0 } = {}) {
+  const registry = useContext(Shortcuts);
+  const latest = useRef(open);
+  useLayoutEffect(() => {
+    latest.current = open;
+  });
+  useEffect(() => {
+    if (!registry || !enabled) return;
+    const unregister = jumpCommands.map((command, index) =>
+      registry.register({
+        command,
+        priority,
+        handle: () => {
+          latest.current(index);
+          return true;
+        },
+        when: () => true,
+        holdRepeats: true,
+      }),
+    );
+    return () => {
+      for (const remove of unregister) remove();
+    };
+  }, [registry, enabled, priority]);
+}
+
 function GlobalShortcuts({ keys }: { keys: Record<ShortcutCommand, KeyBinding> }) {
   const router = useRouter();
   const path = useRouterState({ select: (state) => state.location.pathname });
   const [open, setOpen] = useState(false);
+  const jumpLabel = jumpKeysLabel(jumpCommands.map((command) => keys[command]));
   useShortcut(
     "inbox.back",
     () => {
@@ -154,6 +189,12 @@ function GlobalShortcuts({ keys }: { keys: Record<ShortcutCommand, KeyBinding> }
                 <dd>{keys[command] === null ? "Off" : <Kbd>{keyLabel(keys[command])}</Kbd>}</dd>
               </div>
             ))}
+            {group.jump && (
+              <div className="flex items-center justify-between gap-3">
+                <dt>Open Active row 1 to 9</dt>
+                <dd>{jumpLabel === "Off" ? "Off" : <Kbd>{jumpLabel}</Kbd>}</dd>
+              </div>
+            )}
           </dl>
         </section>
       ))}
@@ -175,13 +216,23 @@ export function ShortcutProvider({ children }: { children: ReactNode }) {
   });
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
-      if (current.current === "phone" || ignoreShortcut(event)) return;
+      if (current.current === "phone" || ignoreShortcut(event, { allowRepeat: true })) return;
       // Cache writes take effect even before React Query's batched render notification.
       const settings = client.getQueryData<SettingsView>(["settings"]);
       const handlers = orderedHandlers(registry.entries);
       for (const entry of handlers) {
         const key = settings ? settings.keys.commands[entry.command].value : SHORTCUT_DEFAULTS[entry.command];
-        if (matchesShortcut(event, key) && entry.when() && entry.handle()) {
+        if (!matchesShortcut(event, key) || !entry.when()) continue;
+        if (event.repeat) {
+          // Held jump keys keep repeats from the browser's tab keys without opening anything again.
+          // This is stateless because each route mounts its own provider.
+          if (entry.holdRepeats) {
+            event.preventDefault();
+            break;
+          }
+          continue;
+        }
+        if (entry.handle()) {
           event.preventDefault();
           break;
         }

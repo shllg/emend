@@ -149,14 +149,13 @@ test("shortcut views contain every command and distinguish missing bindings from
   ).toEqual(off);
 });
 
-test("mod keys accept only normalized letters with an optional spelled-out Shift", () => {
+test("mod letter keys accept an optional spelled-out Shift", () => {
   for (const key of ["mod+a", "mod+z", "mod+shift+a", "mod+shift+z"]) expect(ShortcutKey.parse(key)).toBe(key);
   for (const key of [
     "ctrl+k",
     "cmd+k",
     "meta+k",
     "alt+k",
-    "mod+1",
     "mod+?",
     "mod+shift+1",
     "mod+shift+?",
@@ -183,7 +182,6 @@ test("config normalizes mod forms without inferring Shift from uppercase letters
     "alt+k",
     "shift+mod+p",
     "mod+alt+p",
-    "Mod+1",
     "Mod+?",
     "mod+",
     "mod+shift+",
@@ -263,5 +261,46 @@ test("comment stepping defaults, enum order and documented commands agree", () =
   const api = readFileSync(new URL("../../../docs/api.md", import.meta.url), "utf8");
   for (const [command, key] of Object.entries(SHORTCUT_DEFAULTS)) {
     expect(api).toContain(`| \`${command}\` | \`${key}\` |`);
+  }
+});
+
+test("jump commands follow inbox.back and default to Alt plus their row number", () => {
+  const commands = ShortcutCommand.options;
+  const jumps = commands.slice(commands.indexOf("inbox.back") + 1, commands.indexOf("tab.writeup"));
+  expect(jumps).toEqual(Array.from({ length: 9 }, (_, i) => `inbox.jump${i + 1}`));
+  expect(jumps.map((command) => SHORTCUT_DEFAULTS[command])).toEqual(
+    Array.from({ length: 9 }, (_, i) => `alt+${i + 1}`),
+  );
+});
+
+test("modified digits accept exactly one ASCII digit and config alone normalizes case", () => {
+  for (const modifier of ["alt", "mod"]) {
+    for (let digit = 0; digit <= 9; digit++) {
+      const key = `${modifier}+${digit}`;
+      expect(ShortcutKey.parse(key)).toBe(key);
+      expect(normalizeShortcutKey(key.toUpperCase())).toBe(key);
+    }
+  }
+  expect(normalizeShortcutKey("Alt+1")).toBe("alt+1");
+  expect(normalizeShortcutKey("Mod+1")).toBe("mod+1");
+  expect(normalizeShortcutKey("MOD+2")).toBe("mod+2");
+  for (const key of ["Alt+1", "Mod+1"]) expect(ShortcutKey.safeParse(key).success).toBe(false);
+  for (const key of [
+    "alt+k",
+    "alt+shift+1",
+    "shift+alt+1",
+    "mod+shift+1",
+    "mod+alt+1",
+    "alt+",
+    "alt+10",
+    "alt+1\n",
+    "mod+?",
+    "mod+10",
+    "mod+1\n",
+    "alt+١",
+    "mod+１",
+  ]) {
+    expect(ShortcutKey.safeParse(key).success, key).toBe(false);
+    expect(normalizeShortcutKey(key), key).toBeUndefined();
   }
 });

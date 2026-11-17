@@ -83,6 +83,15 @@ export function inboxSections(
   });
 }
 
+export function activeJumpRows(sections: ReturnType<typeof inboxSections>) {
+  return (
+    sections
+      .find((section) => section.list === "active")
+      ?.rows.filter((row) => !row.movedTo)
+      .slice(0, 9) ?? []
+  );
+}
+
 export function inboxSequence(sections: ReturnType<typeof inboxSections>) {
   return sections.flatMap(({ expanded, rows }) => (expanded ? rows.filter((row) => !row.movedTo) : []));
 }

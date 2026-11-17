@@ -17,6 +17,7 @@ import { cn } from "../components/ui/utils.ts";
 import { plural } from "../lib/count.ts";
 import { useInboxArrivals } from "../lib/inbox-arrivals.tsx";
 import {
+  activeJumpRows,
   adjacentInboxItem,
   type InboxKind,
   inboxKindKey,
@@ -25,7 +26,9 @@ import {
   readInboxKind,
 } from "../lib/inbox-list.ts";
 import { type InboxSurface, useInboxScroll, useInboxView } from "../lib/inbox-view.tsx";
-import { useShortcut } from "../lib/use-shortcut.tsx";
+import { useLayout } from "../lib/layout.ts";
+import { ariaKeyShortcuts, jumpBadge, jumpCommands } from "../lib/shortcuts.ts";
+import { useJumpShortcuts, useShortcut, useShortcutKeys } from "../lib/use-shortcut.tsx";
 import { useWakeTimer } from "../lib/wake-timer.ts";
 
 export function Inbox({
@@ -44,6 +47,9 @@ export function Inbox({
   searchRef?: React.Ref<HTMLInputElement>;
 }) {
   const query = useQuery(inboxQuery());
+  const layout = useLayout();
+  const numbered = surface !== "sheet" && layout !== "phone";
+  const keys = useShortcutKeys();
   const root = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -109,6 +115,16 @@ export function Inbox({
     open,
     groups: query.data?.groups,
   });
+  const jumpRows = numbered ? activeJumpRows(sections) : [];
+  useJumpShortcuts(
+    (index) => {
+      const item = jumpRows[index];
+      if (!item) return;
+      void navigate({ to: "/r/$reviewId", params: { reviewId: item.id }, search: { rev: item.newestRevision } });
+      onOpen?.();
+    },
+    { enabled: numbered, priority: 10 },
+  );
   const filteredCount = sections.reduce((count, section) => count + section.rows.length, 0);
   const move = (delta: 1 | -1) => {
     const sequence = inboxSequence(sections);
@@ -306,15 +322,21 @@ export function Inbox({
                 {nothingActive && <p className="px-2.5 py-2 text-13 text-fg-3">No active reviews.</p>}
                 {expanded && rows.length > 0 && (
                   <ul>
-                    {rows.map((review) => (
-                      <ReviewRow
-                        key={review.id}
-                        review={review}
-                        now={now}
-                        onOpen={onOpen}
-                        highlight={highlighted.has(review.id)}
-                      />
-                    ))}
+                    {rows.map((review) => {
+                      const command = jumpCommands[jumpRows.indexOf(review)];
+                      const key = command ? keys[command] : null;
+                      return (
+                        <ReviewRow
+                          key={review.id}
+                          review={review}
+                          now={now}
+                          onOpen={onOpen}
+                          highlight={highlighted.has(review.id)}
+                          jump={jumpBadge(key)}
+                          keyShortcuts={key === null ? undefined : ariaKeyShortcuts(key)}
+                        />
+                      );
+                    })}
                   </ul>
                 )}
               </section>

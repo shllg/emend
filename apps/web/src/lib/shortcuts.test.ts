@@ -2,8 +2,11 @@ import { afterEach, expect, test } from "vitest";
 import {
   ariaKeyShortcuts,
   captureShortcut,
+  digitOf,
   hasOpenOverlay,
   ignoreShortcut,
+  jumpBadge,
+  jumpKeysLabel,
   keyCaps,
   keyLabel,
   matchesShortcut,
@@ -40,22 +43,22 @@ test.each(["ctrlKey", "metaKey"])("%s is available only to mod bindings", (modif
   expect(captureShortcut(shifted)).toEqual({ key: "mod+shift+k" });
 });
 test.each([{ altKey: true }, { altKey: true, ctrlKey: true }, { altKey: true, metaKey: true }])(
-  "Alt combinations never match or capture (%j)",
+  "Alt letter combinations never match or capture (%j)",
   (options) => {
     const event = key("k", options);
     for (const binding of ["k", "mod+k", "mod+shift+k"]) expect(matchesShortcut(event, binding)).toBe(false);
     expect(ignoreShortcut(event)).toBe(true);
-    expect(captureShortcut(event)).toEqual({ error: "Alt combinations stay with the browser." });
+    expect(captureShortcut(event)).toEqual({ error: "Alt works only with a digit." });
   },
 );
 test.each([
-  ["1", { ctrlKey: true }],
+  ["1", { ctrlKey: true, shiftKey: true }],
   ["?", { metaKey: true }],
   ["Enter", { ctrlKey: true }],
   ["k", { ctrlKey: true, metaKey: true }],
   ["é", { metaKey: true }],
 ] as const)("refuses mod capture for %s (%j)", (typed, options) => {
-  expect(captureShortcut(key(typed, options))).toEqual({ error: "Use Ctrl or ⌘ with one letter." });
+  expect(captureShortcut(key(typed, options))).toEqual({ error: "Use Ctrl or ⌘ with one letter or digit." });
 });
 test("mod bindings require exactly one Ctrl or Meta and the matching letter", () => {
   expect(matchesShortcut(key("k"), "mod+k")).toBe(false);
@@ -142,6 +145,22 @@ test.each(["textarea", "select", "editable"])("ignores %s and editable descendan
 test.each([{ repeat: true }, { isComposing: true }, { keyCode: 229 }])("ignores %j", (options) => {
   expect(ignoreShortcut(key("j", options))).toBe(true);
 });
+test("allowRepeat preserves editable, overlay, composition and prevented-event guards", () => {
+  const options = { allowRepeat: true };
+  expect(ignoreShortcut(key("1", { altKey: true, code: "Digit1", repeat: true }), options)).toBe(false);
+  expect(ignoreShortcut(key("j", { repeat: true }), options)).toBe(false);
+  const input = document.createElement("textarea");
+  const event = key("j", { repeat: true });
+  input.dispatchEvent(event);
+  expect(ignoreShortcut(event, options)).toBe(true);
+  expect(ignoreShortcut(key("j", { repeat: true, isComposing: true }), options)).toBe(true);
+  const prevented = key("j", { repeat: true });
+  prevented.preventDefault();
+  expect(ignoreShortcut(prevented, options)).toBe(true);
+  const content = document.body.appendChild(document.createElement("div"));
+  content.setAttribute("role", "dialog");
+  expect(ignoreShortcut(key("j", { repeat: true }), options)).toBe(true);
+});
 test("ignores defaultPrevented", () => {
   const event = key("j");
   event.preventDefault();
@@ -183,4 +202,136 @@ test("mod bindings still stay out of text fields, dialogs and menus", () => {
     expect(ignoreShortcut(key("p", { metaKey: true, shiftKey: true }))).toBe(true);
     content.remove();
   }
+});
+
+test.each([
+  ["1", undefined, "1"],
+  ["1", "", "1"],
+  ["&", "Digit1", "1"],
+  ["¡", "Digit1", "1"],
+  ["0", "Digit0", "0"],
+  ["9", "Digit9", "9"],
+  ["1", "Numpad1", undefined],
+  ["1", "KeyA", undefined],
+  ["1", "Digit10", undefined],
+  ["1", "Digit1\n", undefined],
+  ["1\n", "", undefined],
+  ["&", "", undefined],
+  ["١", "", undefined],
+] as const)("physical digit for %s / %s is %s", (key, code, expected) => {
+  expect(digitOf({ key, code })).toBe(expected);
+});
+
+test.each([
+  ["1", "Digit1"],
+  ["&", "Digit1"],
+  ["¡", "Digit1"],
+  ["1", ""],
+])("matches and captures modified digit %s / %s", (typed, code) => {
+  for (const modifier of ["altKey", "ctrlKey", "metaKey"]) {
+    const event = key(typed, { code, [modifier]: true });
+    const binding = modifier === "altKey" ? "alt+1" : "mod+1";
+    expect(matchesShortcut(event, binding)).toBe(true);
+    expect(matchesShortcut(event, "1")).toBe(false);
+    expect(matchesShortcut(event, binding.replace("1", "2"))).toBe(false);
+    expect(captureShortcut(event)).toEqual({ key: binding });
+    expect(ignoreShortcut(event)).toBe(false);
+  }
+});
+
+test("refuses Ctrl digit shortcuts when AltGraph is active", () => {
+  const event = {
+    key: "²",
+    code: "Digit2",
+    ctrlKey: true,
+    altKey: false,
+    metaKey: false,
+    shiftKey: false,
+    getModifierState: (key: string) => key === "AltGraph",
+  };
+  expect(matchesShortcut(event, "mod+2")).toBe(false);
+  expect(captureShortcut(event)).toEqual({ error: "Use Ctrl or ⌘ with one letter or digit." });
+});
+
+test("matches and captures Alt digit shortcuts when AltGraph is reported", () => {
+  const event = key("²", { altKey: true, code: "Digit2" });
+  Object.defineProperty(event, "getModifierState", {
+    value: (key: string) => key === "AltGraph",
+  });
+  expect(matchesShortcut(event, "alt+2")).toBe(true);
+  expect(captureShortcut(event)).toEqual({ key: "alt+2" });
+});
+
+test.each([
+  { altKey: true, shiftKey: true },
+  { altKey: true, ctrlKey: true },
+  { altKey: true, metaKey: true },
+  { ctrlKey: true, metaKey: true },
+  { ctrlKey: true, shiftKey: true },
+  { metaKey: true, shiftKey: true },
+  { altKey: true, code: "Numpad1" },
+  { ctrlKey: true, code: "Numpad1" },
+  {},
+])("refuses digit jumps with extra modifiers, numpad or no modifier: %j", (options) => {
+  const event = key("1", { code: "Digit1", ...options });
+  expect(matchesShortcut(event, "alt+1")).toBe(false);
+  expect(matchesShortcut(event, "mod+1")).toBe(false);
+  if (event.altKey) {
+    expect(ignoreShortcut(event)).toBe(true);
+    expect(captureShortcut(event)).toEqual({ error: "Alt works only with a digit." });
+  } else if (event.ctrlKey || event.metaKey) {
+    expect(captureShortcut(event)).toEqual({ error: "Use Ctrl or ⌘ with one letter or digit." });
+  }
+});
+
+test("Alt digits still respect editable fields, overlays, repeat, composition and prevented events", () => {
+  const input = document.createElement("input");
+  const event = key("1", { altKey: true, code: "Digit1" });
+  input.dispatchEvent(event);
+  expect(ignoreShortcut(event)).toBe(true);
+  for (const options of [{ repeat: true }, { isComposing: true }, { keyCode: 229 }])
+    expect(ignoreShortcut(key("1", { altKey: true, code: "Digit1", ...options }))).toBe(true);
+  const prevented = key("1", { altKey: true });
+  prevented.preventDefault();
+  expect(ignoreShortcut(prevented)).toBe(true);
+  for (const role of ["dialog", "alertdialog", "menu"]) {
+    const content = document.body.appendChild(document.createElement("div"));
+    content.setAttribute("role", role);
+    expect(ignoreShortcut(key("1", { altKey: true }))).toBe(true);
+    content.remove();
+  }
+});
+
+test.each([
+  ["Linux x86_64", "Alt", "Ctrl", "Alt+1", "Ctrl+1", "Control+1"],
+  ["MacIntel", "⌥", "⌘", "⌥1", "⌘1", "Meta+1"],
+  ["iPad", "⌥", "⌘", "⌥1", "⌘1", "Meta+1"],
+])("digit key labels, caps, badges and ARIA use %s", (platform, alt, mod, altLabel, modLabel, modAria) => {
+  expect(keyCaps("alt+1", platform)).toEqual([alt, "1"]);
+  expect(keyCaps("mod+1", platform)).toEqual([mod, "1"]);
+  expect(keyLabel("alt+1", platform)).toBe(altLabel);
+  expect(keyLabel("mod+1", platform)).toBe(modLabel);
+  expect(ariaKeyShortcuts("alt+1", platform)).toBe("Alt+1");
+  expect(ariaKeyShortcuts("mod+1", platform)).toBe(modAria);
+  expect(
+    jumpKeysLabel(
+      Array.from({ length: 9 }, (_, i) => `alt+${i + 1}`),
+      platform,
+    ),
+  ).toBe(`${altLabel}–9`);
+  expect(
+    jumpKeysLabel(
+      Array.from({ length: 9 }, (_, i) => `mod+${i + 1}`),
+      platform,
+    ),
+  ).toBe(`${modLabel}–9`);
+  expect(jumpKeysLabel(Array(9).fill(null), platform)).toBe("Off");
+  expect(jumpKeysLabel(["alt+1", null, "mod+1", "j", "k", "l", "/", "?", "9"], platform)).toBe(
+    `${altLabel}, Off, ${modLabel}, j, k, l, /, ?, 9`,
+  );
+  expect(jumpBadge(null, platform)).toBeUndefined();
+  expect(jumpBadge("alt+1", platform)).toBe("1");
+  expect(jumpBadge("mod+0", platform)).toBe("0");
+  expect(jumpBadge("j", platform)).toBe("j");
+  expect(jumpBadge("mod+k", platform)).toBe(`${mod}${mod === "Ctrl" ? "+" : ""}K`);
 });

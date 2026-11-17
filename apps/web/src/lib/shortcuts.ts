@@ -1,12 +1,32 @@
 import { type KeyBinding, SHORTCUT_DEFAULTS, type ShortcutCommand } from "@emend/contract";
 
 export const shortcutCommands = Object.keys(SHORTCUT_DEFAULTS) as ShortcutCommand[];
+export const jumpCommands: ShortcutCommand[] = [
+  "inbox.jump1",
+  "inbox.jump2",
+  "inbox.jump3",
+  "inbox.jump4",
+  "inbox.jump5",
+  "inbox.jump6",
+  "inbox.jump7",
+  "inbox.jump8",
+  "inbox.jump9",
+];
 export const shortcutLabels: Record<ShortcutCommand, string> = {
   "inbox.next": "Next review or pub",
   "inbox.previous": "Previous review or pub",
   "inbox.filter": "Switch the inbox filter",
   "inbox.search": "Search the inbox",
   "inbox.back": "Back to the inbox",
+  "inbox.jump1": "Open Active row 1",
+  "inbox.jump2": "Open Active row 2",
+  "inbox.jump3": "Open Active row 3",
+  "inbox.jump4": "Open Active row 4",
+  "inbox.jump5": "Open Active row 5",
+  "inbox.jump6": "Open Active row 6",
+  "inbox.jump7": "Open Active row 7",
+  "inbox.jump8": "Open Active row 8",
+  "inbox.jump9": "Open Active row 9",
   "tab.writeup": "Writeup tab",
   "tab.files": "Files tab",
   "tab.docs": "Docs tab",
@@ -24,7 +44,11 @@ export const shortcutLabels: Record<ShortcutCommand, string> = {
   "palette.open": "Open the command palette",
 };
 export const shortcutGroups = [
-  { label: "Inbox", commands: shortcutCommands.filter((command) => command.startsWith("inbox.")) },
+  {
+    label: "Inbox",
+    commands: shortcutCommands.filter((command) => command.startsWith("inbox.") && !jumpCommands.includes(command)),
+    jump: true,
+  },
   {
     label: "Review page",
     commands: shortcutCommands.filter((command) => /^(tab|file|thread|review)\./.test(command)),
@@ -34,6 +58,7 @@ export const shortcutGroups = [
 
 export function keyCaps(key: string, platform = navigator.platform): string[] {
   const mac = /Mac|iPhone|iPad|iPod/.test(platform);
+  if (key.startsWith("alt+")) return [mac ? "⌥" : "Alt", key.slice(-1)];
   if (key.startsWith("mod+"))
     return [
       mac ? "⌘" : "Ctrl",
@@ -57,6 +82,8 @@ export function ariaKeyShortcuts(key: string, platform = navigator.platform): st
           return "Control";
         case "⌘":
           return "Meta";
+        case "⌥":
+          return "Alt";
         case "⇧":
           return "Shift";
         case "+":
@@ -68,9 +95,29 @@ export function ariaKeyShortcuts(key: string, platform = navigator.platform): st
     .join("+");
 }
 
-type KeyEvent = Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "metaKey" | "altKey">;
+type KeyEvent = Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "metaKey" | "altKey"> & {
+  code?: string;
+  getModifierState?: (key: "AltGraph") => boolean;
+};
+
+export function digitOf(event: Pick<KeyEvent, "key" | "code">): string | undefined {
+  if (event.code) return event.code.length === 6 && /^Digit[0-9]$/.test(event.code) ? event.code.slice(-1) : undefined;
+  return event.key.length === 1 && /^[0-9]$/.test(event.key) ? event.key : undefined;
+}
+
+function altGraph(event: KeyEvent) {
+  return event.getModifierState?.("AltGraph") === true;
+}
+
+function altDigit(event: KeyEvent) {
+  return event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && digitOf(event) !== undefined;
+}
 export function matchesShortcut(event: KeyEvent, key: KeyBinding) {
-  if (key === null || event.altKey) return false;
+  if (key === null) return false;
+  if (/^alt\+[0-9]$/.test(key)) return altDigit(event) && digitOf(event) === key.slice(-1);
+  if (event.altKey) return false;
+  if (/^mod\+[0-9]$/.test(key))
+    return event.ctrlKey !== event.metaKey && !event.shiftKey && !altGraph(event) && digitOf(event) === key.slice(-1);
   if (key.startsWith("mod+"))
     return (
       event.ctrlKey !== event.metaKey &&
@@ -85,10 +132,13 @@ export function matchesShortcut(event: KeyEvent, key: KeyBinding) {
 
 export function captureShortcut(event: KeyEvent): { key?: string; error?: string } {
   if (["Shift", "Control", "Meta", "Alt", "AltGraph"].includes(event.key)) return {};
-  if (event.altKey) return { error: "Alt combinations stay with the browser." };
+  if (event.altKey)
+    return altDigit(event) ? { key: `alt+${digitOf(event)}` } : { error: "Alt works only with a digit." };
   if (event.ctrlKey || event.metaKey) {
+    if (event.ctrlKey !== event.metaKey && !event.shiftKey && !altGraph(event) && digitOf(event) !== undefined)
+      return { key: `mod+${digitOf(event)}` };
     if (event.ctrlKey === event.metaKey || !/^[a-z]$/i.test(event.key))
-      return { error: "Use Ctrl or ⌘ with one letter." };
+      return { error: "Use Ctrl or ⌘ with one letter or digit." };
     return { key: `mod+${event.shiftKey ? "shift+" : ""}${event.key.toLowerCase()}` };
   }
   if (!/^[!-~]$/.test(event.key)) return { error: "Use a letter, a digit or a punctuation key." };
@@ -97,9 +147,16 @@ export function captureShortcut(event: KeyEvent): { key?: string; error?: string
   };
 }
 
-export function ignoreShortcut(event: KeyboardEvent) {
-  if (event.defaultPrevented || event.repeat || event.isComposing || event.keyCode === 229 || event.altKey) return true;
-  // Plain and mod keys both stay out of editable controls, including shadow roots. Frame events never reach here.
+export function ignoreShortcut(event: KeyboardEvent, { allowRepeat = false }: { allowRepeat?: boolean } = {}) {
+  if (
+    event.defaultPrevented ||
+    (event.repeat && !allowRepeat) ||
+    event.isComposing ||
+    event.keyCode === 229 ||
+    (event.altKey && !altDigit(event))
+  )
+    return true;
+  // Shortcuts stay out of editable controls, including shadow roots. Frame events never reach here.
   const target = event.composedPath()[0] ?? event.target;
   if (target instanceof Element) {
     if (target.closest("textarea, select")) return true;
@@ -122,4 +179,18 @@ export function hasOpenOverlay() {
       !content.closest("[hidden]") &&
       !content.hasAttribute("data-reading-thread-popover"),
   );
+}
+
+export function jumpKeysLabel(values: KeyBinding[], platform = navigator.platform): string {
+  for (const modifier of ["alt", "mod"]) {
+    if (values.length === 9 && values.every((value, index) => value === `${modifier}+${index + 1}`))
+      return keyLabel(`${modifier}+1`, platform).replace(/1$/, "1–9");
+  }
+  if (values.every((value) => value === null)) return "Off";
+  return values.map((value) => keyLabel(value, platform)).join(", ");
+}
+
+export function jumpBadge(key: KeyBinding, platform = navigator.platform): string | undefined {
+  if (key === null) return undefined;
+  return /^(alt|mod)\+[0-9]$/.test(key) ? key.slice(-1) : keyLabel(key, platform);
 }

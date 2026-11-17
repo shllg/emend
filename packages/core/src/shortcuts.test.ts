@@ -109,3 +109,9 @@ test("ties use command order even for lower-level losers and regardless of input
   expect(commands["inbox.previous"]).toMatchObject({ value: "k", source: "default", clashWith: "inbox.filter" });
   expect(commands["inbox.filter"]).toMatchObject({ value: "f", source: "default", clashWith: "inbox.previous" });
 });
+
+test("an override taking a jump key leaves the default jump off", () => {
+  const commands = resolve({}, { "tab.writeup": "alt+1" });
+  expect(commands["tab.writeup"]).toMatchObject({ value: "alt+1", source: "override" });
+  expect(commands["inbox.jump1"]).toMatchObject({ value: null, source: "default", clashWith: "tab.writeup" });
+});

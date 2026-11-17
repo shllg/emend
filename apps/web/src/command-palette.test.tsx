@@ -7,7 +7,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
 import { reviewQuery } from "./api/queries.ts";
 import { defaultLayout, layoutStore } from "./lib/layout-store.ts";
-import { keyLabel, shortcutGroups, shortcutLabels } from "./lib/shortcuts.ts";
+import { jumpCommands, keyLabel, shortcutGroups, shortcutLabels } from "./lib/shortcuts.ts";
 
 const ids = [
   "11111111-1111-4111-8111-111111111111",
@@ -418,7 +418,7 @@ test("lists every other command in its group with live keys and no hint for an o
   mount();
   await ready();
   await openPalette();
-  expect(screen.getAllByRole("option")).toHaveLength(Object.keys(SHORTCUT_DEFAULTS).length - 1);
+  expect(screen.getAllByRole("option")).toHaveLength(Object.keys(SHORTCUT_DEFAULTS).length - jumpCommands.length - 1);
   expect(screen.queryByRole("option", { name: /Open the command palette/ })).toBeNull();
   for (const group of shortcutGroups) {
     const section = screen.getByRole("group", { name: group.label });

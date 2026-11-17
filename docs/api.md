@@ -493,16 +493,20 @@ an unreadable or non-object file sets every `fileError`. An invalid file does no
 default or override from working.
 A missing file or absent key is not an error. `docRoots` and `openBrowser` are not settings in this API.
 
-`ShortcutKey` is a normalized string: one lowercase ASCII letter, `shift+` followed by one
-lowercase ASCII letter, `mod+` or `mod+shift+` followed by one lowercase ASCII letter,
-one ASCII digit, or one printable ASCII punctuation character (0x21–0x7E excluding letters
-and digits). `mod` means Ctrl, or ⌘ on a Mac; a client accepts either one, but not both together.
+`ShortcutKey` is a normalized string: one lowercase ASCII letter, one ASCII digit, one printable
+ASCII punctuation character (0x21–0x7E excluding letters and digits), `shift+`, `mod+` or
+`mod+shift+` followed by one lowercase ASCII letter, or `alt+` or `mod+` followed by one ASCII digit.
+`mod` means Ctrl, or ⌘ on a Mac; a client accepts either one, but not both together.
+`alt` means Alt (⌥ Option on a Mac), and a client matches `alt+` and `mod+` digit keys by the
+physical digit-row key, so Option symbols on a Mac and layouts where digits need Shift still match.
 Spaces, named keys (including Escape, Tab, Enter, arrows, PageUp/PageDown, Home, End and F-keys),
-spelled-out `ctrl+`, `cmd+`, `meta+` and `alt+` modifiers, and `shift+` or `mod+` before a
-non-letter are refused. The config file alone also accepts uppercase letters (`A` becomes
+spelled-out `ctrl+`, `cmd+` and `meta+` modifiers, `shift+` before a non-letter, `mod+` before
+anything but a letter or digit, `alt+` before anything but a digit, and `alt+` combined with
+another modifier are refused. The config file alone also accepts uppercase letters (`A` becomes
 `shift+a`), case-insensitive shift-letter combinations (`SHIFT+A` becomes `shift+a`) and
-case-insensitive mod forms (`Mod+K` becomes `mod+k`, `MOD+SHIFT+P` becomes `mod+shift+p`).
-Shift must be spelled out in mod forms.
+case-insensitive mod and alt forms (`Mod+K` becomes `mod+k`, `MOD+SHIFT+P` becomes `mod+shift+p`,
+`Alt+1` becomes `alt+1` and `Mod+1` becomes `mod+1`). Shift must be spelled out for mod bindings with letters.
+`inbox.jump1` to `inbox.jump9` open the first to ninth openable row of the Active section as the client shows it.
 
 The global config file format is `"keys": { "<command>": "<key>" | null }`. It is read once
 alongside `approvedActiveHours` and `approvedActiveLimit`. An absent `file` or `override` in a
@@ -528,6 +532,15 @@ reads the approval window and the approval cap on review reads, still without qu
 | `inbox.filter` | `f` |
 | `inbox.search` | `/` |
 | `inbox.back` | `u` |
+| `inbox.jump1` | `alt+1` |
+| `inbox.jump2` | `alt+2` |
+| `inbox.jump3` | `alt+3` |
+| `inbox.jump4` | `alt+4` |
+| `inbox.jump5` | `alt+5` |
+| `inbox.jump6` | `alt+6` |
+| `inbox.jump7` | `alt+7` |
+| `inbox.jump8` | `alt+8` |
+| `inbox.jump9` | `alt+9` |
 | `tab.writeup` | `1` |
 | `tab.files` | `2` |
 | `tab.docs` | `3` |
