@@ -1,6 +1,6 @@
 /// <reference types="node" />
 import { createHash } from "node:crypto";
-import type { DownloadThemeValue, RenderedBlock, RenderedWriteup, Target, TopicMeta } from "@emend/contract";
+import type { RenderedBlock, RenderedWriteup, Target, ThemeBase, TopicMeta } from "@emend/contract";
 import { fromHtml } from "hast-util-from-html";
 import { toString as hastText } from "hast-util-to-string";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -73,7 +73,7 @@ function parsed(html: string) {
 const render = (
   blocks: RenderedBlock[],
   resolveMedia: (hash: string) => Promise<ResolveResult> = async () => png,
-  theme?: DownloadThemeValue,
+  theme?: ThemeBase,
 ) =>
   buildWriteupDownload({
     title: "Review <script>",
@@ -2698,7 +2698,7 @@ const indexOfText = (html: string, needle: string) => {
 const sourceLines = [[{ text: "one" }], [{ text: "two" }], [{ text: "three" }]];
 
 const threadPageKinds = ["writeup", "markdown", "source", "comments", "omitted"] as const;
-const threadPage = (kind: (typeof threadPageKinds)[number], threads: FileThreads, theme?: DownloadThemeValue) => {
+const threadPage = (kind: (typeof threadPageKinds)[number], threads: FileThreads, theme?: ThemeBase) => {
   const input = { title: "Example", details, resolveMedia: async () => null, threads, theme };
   const blocks = [block("<ol><li>Item</li></ol><dl><dt>Term</dt><dd>Definition</dd></dl>")];
   switch (kind) {
@@ -2731,7 +2731,7 @@ const pageStyles = (html: string) =>
   parsed(html)
     .filter((el) => el.tagName === "style")
     .map(hastText);
-function expectFixedTheme(html: string, theme: DownloadThemeValue) {
+function expectFixedTheme(html: string, theme: ThemeBase) {
   expectHead(html);
   expect(html).toContain(`<meta name="color-scheme" content="${theme}">`);
   const styles = pageStyles(html).join("\n");

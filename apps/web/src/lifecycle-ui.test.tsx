@@ -14,9 +14,10 @@ import { App } from "./App.tsx";
 import { type InboxData, revisionQuery } from "./api/queries.ts";
 import { doneDimmed } from "./components/inbox/ReviewRow.tsx";
 import { defaultLayout, layoutStore } from "./lib/layout-store.ts";
-import { setThemePick } from "./lib/theme.ts";
+import { selectCustomTheme, setThemePick } from "./lib/theme.ts";
 import { wakeTime } from "./lib/time.ts";
 import { Events } from "./test/events.ts";
+import { customTheme } from "./test/themes.ts";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const other = (n: number) => `22222222-2222-4222-8222-22222222222${n}`;
@@ -1365,3 +1366,40 @@ test("an HTML pub explains that comments turn the download into a ZIP", async ()
     reviewDownloadPath(id, 1, [], { comments: true }),
   );
 });
+
+test.each(["desktop", "phone", "dialog"] as const)(
+  "%s download uses a valid custom theme name and its cached base after refusal",
+  async (surface) => {
+    let refused = false;
+    const original = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (path, init) => {
+      if (path === "/api/v1/themes")
+        return Response.json({
+          themes: refused
+            ? [{ valid: false, name: "mine", base: "light", problems: ["theme.json cannot be read."] }]
+            : [customTheme],
+          folderError: false,
+        });
+      if (!original) throw new Error("Missing fetch fixture");
+      return original(path, init);
+    });
+    selectCustomTheme(customTheme);
+    if (surface === "phone") width = 390;
+    if (surface === "dialog") withDownloadDocs();
+    mount(`/r/${id}`);
+    await screen.findByRole("heading", { name: "Synthetic review", level: 1 });
+    if (surface === "phone") fireEvent.keyDown(screen.getByRole("button", { name: "More" }), { key: "ArrowDown" });
+    if (surface === "dialog") fireEvent.click(await screen.findByRole("button", { name: "Download" }));
+    const link = await screen.findByRole(surface === "phone" ? "menuitem" : "link", { name: "Download" });
+    await waitFor(() => expect(link.getAttribute("href")).toContain("theme=mine"));
+    expect(client.getQueryCache().findAll({ queryKey: ["themes"] })).toEqual([]);
+    expect(client.getQueryData(["themes"])).toBeUndefined();
+    refused = true;
+    act(() => Events.opened.at(-1)?.emit("themes", {}));
+    await waitFor(() =>
+      expect(
+        screen.getByRole(surface === "phone" ? "menuitem" : "link", { name: "Download" }).getAttribute("href"),
+      ).toContain("theme=dark"),
+    );
+  },
+);

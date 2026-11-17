@@ -1,10 +1,20 @@
 import type { FileView, ReviewView, RevisionView } from "@emend/contract";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { createRef } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, fireEvent, render as renderUI, screen, waitFor, within } from "@testing-library/react";
+import { createRef, type ReactNode } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { relativeTime, wakeTime } from "../../lib/time.ts";
 import type { DiffCounts } from "../diff/presentation.ts";
 import { ReviewHeader } from "./ReviewHeader.tsx";
+
+const clients: QueryClient[] = [];
+function render(ui: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  clients.push(client);
+  return renderUI(ui, {
+    wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+  });
+}
 
 const review: ReviewView = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -138,6 +148,7 @@ test.each(["pub", "no files", "legacy"])("%s has no review total", (kind) => {
 });
 afterEach(() => {
   cleanup();
+  for (const client of clients.splice(0)) client.clear();
   window.getSelection()?.removeAllRanges();
   if (execCommandDescriptor) Object.defineProperty(document, "execCommand", execCommandDescriptor);
   else Reflect.deleteProperty(document, "execCommand");

@@ -5,6 +5,7 @@ import {
   type LimitSetting,
   type SettingsView,
   SHORTCUT_DEFAULTS,
+  type ThemeList,
 } from "@emend/contract";
 import { type InfiniteData, QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
@@ -12,11 +13,24 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { StrictMode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
-import { setThemePick } from "./lib/theme.ts";
+import {
+  createThemeStore,
+  customThemeKey,
+  selectCustomTheme,
+  setThemePick,
+  themeKey,
+  useDownloadTheme,
+  useThemeState,
+} from "./lib/theme.ts";
+import { Events } from "./test/events.ts";
+import { customTheme } from "./test/themes.ts";
+
+let themeResponse: ThemeList | Promise<Response>;
 
 beforeEach(() => {
   vi.stubGlobal("localStorage", new Storage());
   setThemePick("system");
+  themeResponse = { themes: [], folderError: false };
 });
 
 const clients: QueryClient[] = [];
@@ -56,6 +70,8 @@ function setup(
     serverTime: "2026-11-04T10:00:00.000Z",
   };
   const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
+    if (path === "/api/v1/themes")
+      return themeResponse instanceof Promise ? themeResponse : Response.json(themeResponse);
     if (path === "/api/v1/bin" || path.startsWith("/api/v1/bin?")) {
       if (init?.method === "DELETE") {
         bin = { items: [], total: 0, more: false, version: binVersion };
@@ -132,6 +148,7 @@ function setup(
 }
 afterEach(() => {
   cleanup();
+  setThemePick("system");
   delete document.documentElement.dataset.theme;
   for (const client of clients.splice(0)) client.clear();
   vi.restoreAllMocks();
@@ -590,4 +607,158 @@ test("Empty bin preserves the shown version and count while its confirmation is 
   fireEvent.click(within(dialog).getByRole("button", { name: "Empty bin" }));
   await screen.findByText("Emptied the bin");
   expect(JSON.parse(String(calls(f, "DELETE", "/api/v1/bin")[0]?.[1]?.body))).toEqual({ version: binVersion });
+});
+
+test("Appearance lists valid themes with their base and refused themes as text", async () => {
+  themeResponse = {
+    themes: [
+      customTheme,
+      { valid: false, name: "faint", base: "light", problems: ["fg-1 on bg-app: 2.10 to 1, needs 4.5 to 1."] },
+    ],
+    folderError: false,
+  };
+  const { patches } = setup();
+  const pick = await screen.findByRole("radio", { name: /^mine/ });
+  expect(screen.getByText("Dark base")).toBeTruthy();
+  expect(screen.getByText("faint")).toBeTruthy();
+  expect(screen.queryByRole("radio", { name: /faint/ })).toBeNull();
+  expect(screen.getByText("fg-1 on bg-app: 2.10 to 1, needs 4.5 to 1.")).toBeTruthy();
+  fireEvent.click(pick);
+  expect(localStorage.getItem(themeKey)).toBe("theme:mine");
+  expect(JSON.parse(localStorage.getItem(customThemeKey) ?? "null")).toEqual(customTheme);
+  expect(document.documentElement.dataset.theme).toBe("dark");
+  expect((pick as HTMLInputElement).checked).toBe(true);
+  expect(patches()).toHaveLength(0);
+});
+
+test("a theme event replaces Settings' pending first list with the refused theme and its reason", async () => {
+  const first = Promise.withResolvers<Response>();
+  themeResponse = first.promise;
+  const { client, fetcher, invalidate } = setup();
+  await screen.findByText("Loading themes…");
+  await waitFor(() => expect(Events.opened.some((source) => source.readyState !== Events.CLOSED)).toBe(true));
+  expect(client.getQueryData(["themes"])).toBeUndefined();
+  const themeCalls = () => fetcher.mock.calls.filter(([path]) => path === "/api/v1/themes");
+  const initialReads = themeCalls().length;
+  const reason = "syn-comment on bg-hover: 1.03 to 1, needs 3 to 1.";
+  themeResponse = {
+    themes: [{ valid: false, name: "mine", base: "light", problems: [reason] }],
+    folderError: false,
+  };
+  act(() => Events.opened.at(-1)?.emit("themes", {}));
+  // Keep the first response pending through the refresh batch: invalidation alone is swallowed.
+  await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["themes"] }));
+  await act(async () => first.resolve(Response.json({ themes: [customTheme], folderError: false })));
+  await screen.findByText(reason);
+  expect(themeCalls()).toHaveLength(initialReads + 1);
+  expect(client.getQueryData(["themes"])).toEqual(themeResponse);
+  expect(screen.getByText("mine")).toBeTruthy();
+  expect(screen.queryByRole("radio", { name: /^mine/ })).toBeNull();
+});
+
+test("theme events apply valid edits without reloading; refused and missing updates keep the last valid version", async () => {
+  themeResponse = { themes: [customTheme], folderError: false };
+  selectCustomTheme(customTheme);
+  const { fetcher, invalidate } = setup();
+  await screen.findByRole("radio", { name: /^mine/ });
+  await waitFor(() => expect(Events.opened.some((source) => source.readyState !== Events.CLOSED)).toBe(true));
+  const changed = { ...customTheme, scales: { "n-950": "#223344" }, themeColor: "#223344" };
+  themeResponse = { themes: [changed], folderError: false };
+  act(() => Events.opened.at(-1)?.emit("themes", {}));
+  await waitFor(() => expect(document.documentElement.style.getPropertyValue("--n-950")).toBe("#223344"));
+  await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["themes"] }));
+  expect(fetcher.mock.calls.filter(([path]) => path === "/api/v1/themes").length).toBeGreaterThanOrEqual(2);
+  const reason = "fg-1 on bg-app: 2.10 to 1, needs 4.5 to 1.";
+  themeResponse = { themes: [{ valid: false, name: "mine", base: "dark", problems: [reason] }], folderError: false };
+  act(() => Events.opened.at(-1)?.emit("themes", {}));
+  const note = await within(screen.getByRole("region", { name: "Appearance" })).findByRole("status");
+  expect(note.textContent).toContain("This device keeps its last valid version of mine.");
+  expect(note.textContent).toContain(reason);
+  expect(document.documentElement.style.getPropertyValue("--n-950")).toBe("#223344");
+  expect(JSON.parse(localStorage.getItem(customThemeKey) ?? "null")).toEqual(changed);
+  themeResponse = { themes: [], folderError: false };
+  act(() => Events.opened.at(-1)?.emit("themes", {}));
+  await screen.findByText(/The theme is no longer available on this server/);
+  expect(document.documentElement.style.getPropertyValue("--n-950")).toBe("#223344");
+});
+
+test("Appearance shows the empty hint, folder error, loading and retry states", async () => {
+  const pending = Promise.withResolvers<Response>();
+  themeResponse = pending.promise;
+  const { client } = setup();
+  expect(await screen.findByText("Loading themes…")).toBeTruthy();
+  await act(async () =>
+    pending.resolve(Response.json({ error: { code: "internal_error", message: "Unavailable" } }, { status: 500 })),
+  );
+  expect(await screen.findByText("Could not load themes.", { exact: false })).toBeTruthy();
+  themeResponse = { themes: [], folderError: false };
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByText("emend theme copy dark mine")).toBeTruthy();
+  themeResponse = { themes: [], folderError: true };
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["themes"] });
+  });
+  expect(await screen.findByText("The themes folder could not be read.")).toBeTruthy();
+  expect(screen.queryByText("emend theme copy dark mine")).toBeNull();
+});
+
+function DownloadTheme() {
+  const { checked } = useThemeState();
+  return (
+    <output aria-label="Download theme" data-checked={checked?.valid}>
+      {useDownloadTheme()}
+    </output>
+  );
+}
+
+test.each(["resume", "select"])(
+  "a tab without a held version seeds another tab's saved theme on %s after refusal",
+  async (action) => {
+    const entry = { ...customTheme, name: `seed-${action}` };
+    themeResponse = { themes: [entry], folderError: false };
+    const { client } = setup();
+    const pick = await screen.findByRole("radio", { name: new RegExp(`^${entry.name}`) });
+    expect(client.getQueryData(["themes"])).toEqual({ themes: [entry], folderError: false });
+    expect(localStorage.getItem(themeKey)).toBeNull();
+    const newer = { ...entry, scales: { "n-950": "#223344" }, themeColor: "#223344" };
+    const tabB = createThemeStore();
+    tabB.selectCustomTheme(newer);
+    const writes = vi.spyOn(localStorage, "setItem");
+    const applied = vi.spyOn(document.documentElement.style, "setProperty");
+    themeResponse = {
+      themes: [{ valid: false, name: entry.name, base: "dark", problems: ["theme.json is not valid JSON."] }],
+      folderError: false,
+    };
+    // Tab A resumes with its old query cache before the invalid response arrives.
+    if (action === "select") fireEvent.click(pick);
+    else act(() => window.dispatchEvent(new StorageEvent("storage", { key: themeKey, storageArea: localStorage })));
+    expect(localStorage.getItem(themeKey)).toBe(`theme:${entry.name}`);
+    expect(JSON.parse(localStorage.getItem(customThemeKey) ?? "null")).toEqual(newer);
+    render(<DownloadTheme />);
+    await waitFor(() => expect(screen.getByLabelText("Download theme").getAttribute("data-checked")).toBe("false"));
+    expect(screen.getByLabelText("Download theme").textContent).toBe("dark");
+    expect(client.getQueryData(["themes"])).toEqual({ themes: [entry], folderError: false });
+    expect(applied).not.toHaveBeenCalledWith("--n-950", "#112233");
+    expect(writes.mock.calls.filter(([key]) => key === customThemeKey)).toEqual([]);
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ["themes"] });
+    });
+    const note = await within(screen.getByRole("region", { name: "Appearance" })).findByRole("status");
+    expect(note.textContent).toContain(`This device keeps its last valid version of ${entry.name}.`);
+    expect(document.documentElement.style.getPropertyValue("--n-950")).toBe("#223344");
+    expect(JSON.parse(localStorage.getItem(customThemeKey) ?? "null")).toEqual(newer);
+  },
+);
+
+test("refused theme names and reasons render only as text", async () => {
+  themeResponse = {
+    themes: [
+      { valid: false, name: "<img src=x onerror=alert(1)>", base: null, problems: ["<script>alert(1)</script>"] },
+    ],
+    folderError: false,
+  };
+  setup();
+  expect(await screen.findByText("<img src=x onerror=alert(1)>")).toBeTruthy();
+  expect(screen.getByText("<script>alert(1)</script>")).toBeTruthy();
+  expect(document.querySelector("main img, main script")).toBeNull();
 });

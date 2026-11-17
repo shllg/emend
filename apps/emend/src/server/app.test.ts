@@ -258,7 +258,7 @@ test("every documented API endpoint enforces its scope even before its handler e
           expect(SettingsView.safeParse(await response.json()).success).toBe(true);
         } else await error(response, "invalid_request");
       } else if (path === "/api/v1/pairings") expect(response.status).toBe(201);
-      else if (["/api/v1/reviews", "/api/v1/devices", "/api/v1/agent/reviews"].includes(path))
+      else if (["/api/v1/reviews", "/api/v1/devices", "/api/v1/agent/reviews", "/api/v1/themes"].includes(path))
         expect(response.status).toBe(200);
       else if (path === "/api/v1/bin") expect(response.status).toBe(endpoint.method === "GET" ? 200 : 204);
       else if (path === "/api/v1/events") {

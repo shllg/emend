@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { LIMITS } from "./limits.ts";
 import { FilePath } from "./review.ts";
+import { ThemeName } from "./themes.ts";
 
 export const API_PREFIX = "/api/v1";
 export function reviewDownloadPath(
@@ -14,7 +15,7 @@ export function reviewDownloadPath(
     ...docIds.map((id) => `doc=${encodeURIComponent(id)}`),
     ...(options.comments ? ["comments=1"] : []),
     ...(options.diff ? ["diff=1"] : []),
-    ...(options.theme ? [`theme=${options.theme}`] : []),
+    ...(options.theme ? [`theme=${encodeURIComponent(options.theme)}`] : []),
   ];
   return query.length ? `${path}?${query.join("&")}` : path;
 }
@@ -25,8 +26,8 @@ export const DownloadComments = z.array(z.literal("1")).max(1);
 /** The `diff` query values: absent, or exactly one `1`. */
 export const DownloadDiff = z.array(z.literal("1")).max(1);
 
-/** The `theme` query values: absent, or exactly one `dark` or `light`. */
-export const DownloadTheme = z.array(z.enum(["dark", "light"])).max(1);
+/** The `theme` query values: absent, or exactly one built-in base or theme name. */
+export const DownloadTheme = z.array(z.union([z.enum(["dark", "light"]), ThemeName])).max(1);
 export type DownloadThemeValue = z.infer<typeof DownloadTheme>[number];
 
 export const DownloadDocIds = z

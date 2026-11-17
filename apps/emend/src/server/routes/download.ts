@@ -3,7 +3,6 @@ import {
   DownloadDiff,
   DownloadDocIds,
   DownloadTheme,
-  type DownloadThemeValue,
   LIMITS,
   RenderedBlock,
   RenderedWriteup,
@@ -21,10 +20,12 @@ import {
   type DownloadDiffHunk,
   type DownloadDiffReveal,
   type DownloadFile,
+  type DownloadRenderTheme,
   type DownloadThreadInput,
   type FileThreads,
   type ResolveResult,
   routeDownloadThreads,
+  themeDownloadLook,
 } from "@emend/core";
 import { and, eq, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
 import type { Hono } from "hono";
@@ -50,6 +51,7 @@ import { DOWNLOAD_CSP } from "../http/headers.ts";
 import { ZipWriter } from "../http/zip.ts";
 import { mediaAsset } from "../media.ts";
 import { type WorkerExecutor, workerExecutor } from "../publish/executor.ts";
+import { readThemeForRequest } from "../theme-reads.ts";
 import { commentHtml } from "./comment-html.ts";
 import { publishMeta, topicView } from "./reviews.ts";
 
@@ -99,7 +101,7 @@ async function revisionDownload(
   docIds: string[],
   withComments: boolean,
   withDiff: boolean,
-  theme: DownloadThemeValue | undefined,
+  theme: DownloadRenderTheme | undefined,
 ) {
   const row = await q
     .select({ review: reviews, repoName: repos.name })
@@ -576,7 +578,14 @@ export function downloadRoutes(
     const withDiff = diffParsed.data.length === 1;
     const themeParsed = DownloadTheme.safeParse(c.req.queries("theme") ?? []);
     if (!themeParsed.success) throw new ApiError("invalid_request");
-    const theme = themeParsed.data[0];
+    const selection = themeParsed.data[0];
+    let theme: DownloadRenderTheme | undefined;
+    if (selection === undefined || selection === "dark" || selection === "light") theme = selection;
+    else {
+      const entry = await readThemeForRequest(deps.themesDir, selection);
+      if (!entry?.valid) throw new ApiError("invalid_request");
+      theme = themeDownloadLook(entry);
+    }
     const release = headOnly ? undefined : await acquireDownload(ownerId);
     try {
       const result = await deps.db.read((q) =>

@@ -4,6 +4,7 @@ import { createContext, type ReactNode, useContext, useEffect, useState } from "
 import { subscribeReviewEvents } from "./event-stream.ts";
 import { InboxArrivalsProvider } from "./inbox-arrivals.tsx";
 import { refreshQueries } from "./query-refresh.ts";
+import { requestThemeSync } from "./theme.ts";
 
 const PublishedRevisions = createContext<ReadonlyMap<string, number>>(new Map());
 
@@ -16,6 +17,12 @@ export function ReviewEventsProvider({ children, enabled = true }: { children: R
       return;
     }
     const receive = (event: ReviewEvent) => {
+      if (event.type === "themes") {
+        requestThemeSync();
+        // A first fetch without data otherwise absorbs invalidation while it is pending.
+        void client.cancelQueries({ queryKey: ["themes"] }).then(() => refreshQueries(client, [["themes"]]));
+        return;
+      }
       if (event.type === "groups") {
         refreshQueries(client, [["inbox"], event.reviewId ? ["review", event.reviewId] : ["review"]]);
         return;
@@ -32,6 +39,7 @@ export function ReviewEventsProvider({ children, enabled = true }: { children: R
       refreshQueries(client, keys);
     };
     const stop = subscribeReviewEvents(receive, () => {
+      requestThemeSync();
       refreshQueries(client, [], { opened: true });
     });
     return () => {

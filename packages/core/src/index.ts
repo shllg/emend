@@ -23,6 +23,7 @@ export {
   createDownloadWork,
   DOWNLOAD_FILE_CSP,
   type DownloadAsset,
+  type DownloadRenderTheme,
   type DownloadWork,
   type ResolveResult,
 } from "./render/download.ts";
@@ -62,4 +63,5 @@ export { type RenderedWriteup, renderWriteup } from "./render/writeup.ts";
 export { resolveShortcuts } from "./shortcuts.ts";
 
 export * from "./text.ts";
+export * from "./theme/index.ts";
 export { type ChangedPath, UnchangedFilesError, withOtherChanges } from "./topics.ts";

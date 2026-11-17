@@ -1,4 +1,7 @@
 export const LIMITS = {
+  themes: 50,
+  themeFileBytes: 32768,
+  themeProblems: 20,
   inboxItems: 200,
   groups: 50,
   groupNameChars: 80,

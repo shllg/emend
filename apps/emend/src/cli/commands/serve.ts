@@ -105,6 +105,7 @@ export async function serveCommand(
     const starting = startServer({
       stateDir,
       configFile: configDir ? join(configDir, "config.json") : undefined,
+      themesDir: configDir ? join(configDir, "themes") : undefined,
       host: options.host,
       port: options.port,
       publicOrigin,

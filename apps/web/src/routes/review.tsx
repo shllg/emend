@@ -58,7 +58,7 @@ import { focusReadingTarget } from "../lib/reading-focus.ts";
 import { readingPositionKey } from "../lib/reading-position.ts";
 import { revealReadingTarget } from "../lib/reading-reveal.ts";
 import { ignoreShortcut } from "../lib/shortcuts.ts";
-import { useThemePick } from "../lib/theme.ts";
+import { useDownloadTheme } from "../lib/theme.ts";
 import {
   captureReadingPosition,
   type IntentState,
@@ -289,7 +289,7 @@ function LoadedReview({
   titleRef: Ref<HTMLHeadingElement>;
 }) {
   // Read search and hash from one location: route matches can lag during navigation.
-  const theme = useThemePick();
+  const theme = useDownloadTheme();
   const router = useRouter();
   const liveLocation = useLocation();
   const ownsAddress = useCallback(
@@ -876,7 +876,7 @@ function LoadedReview({
   const ready = Math.max(published, review.newestRevision);
   const downloadReturnFocus = useReviewFrameActions({
     onCommentReview: revision ? commentOnReview : undefined,
-    downloadHref: reviewDownloadPath(review.id, seq, [], { theme: theme === "system" ? undefined : theme }),
+    downloadHref: reviewDownloadPath(review.id, seq, [], { theme }),
     onDownload,
   });
   return (

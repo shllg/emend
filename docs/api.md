@@ -90,6 +90,7 @@ a machine token reaches only reviews from its own instance.
 | POST | `/api/v1/pairings` | Admin, reviewer | Create from `PairingRequest`; return `PairingCreated` (201). |
 | GET | `/api/v1/devices` | Admin, reviewer | Return `DeviceList` (200); live devices owned by the principal, newest first. |
 | GET | `/api/v1/settings` | Reviewer | Return `SettingsView` (200); requires `read`. |
+| GET | `/api/v1/themes` | Reviewer | Return `ThemeList` (200); requires `read`. |
 | PATCH | `/api/v1/settings` | Reviewer | Apply `SettingsUpdate` and return `SettingsView` (200); requires `settings:manage`. |
 | DELETE | `/api/v1/devices/:id` | Admin, reviewer | Revoke the device and every bound token atomically (204); missing, foreign or revoked is 404. |
 | POST | `/api/v1/machines` | Anyone with a pairing secret or code | Register `MachineRegistration`; return `MachineRegistered` (201); refuses device pairings. |
@@ -106,7 +107,7 @@ a machine token reaches only reviews from its own instance.
 | GET | `/api/v1/agent/reviews` | Agent | List the token's own instance's reviews, newest first, as `AgentReviewList`; `?head=<sha>` keeps those whose approved or newest revision has that head. |
 | GET | `/api/v1/reviews/:id` | Reviewer | Read a review. |
 | GET | `/api/v1/reviews/:id/revisions/:seq` | Reviewer | Read one revision. |
-| GET | `/api/v1/reviews/:id/revisions/:seq/download` | Reviewer | Download one offline HTML file, or a ZIP with docs selected by repeated `doc` parameters. Optional `comments=1` adds sent comments and replies; an HTML pub with comments downloads as a ZIP. Optional `diff=1` adds the code diff after the writeup. Optional `theme=dark` or `theme=light` fixes the look of files emend draws. |
+| GET | `/api/v1/reviews/:id/revisions/:seq/download` | Reviewer | Download one offline HTML file, or a ZIP with docs selected by repeated `doc` parameters. Optional `comments=1` adds sent comments and replies; an HTML pub with comments downloads as a ZIP. Optional `diff=1` adds the code diff after the writeup. Optional `theme=dark`, `theme=light` or `theme=<name>` sets the look of files emend draws. |
 | PUT | `/api/v1/reviews/:id/viewed` | Reviewer | Mark or unmark diff files as viewed; return 204. |
 | GET | `/api/v1/files/:fileId/old` | Reviewer | Read the old file side. |
 | GET | `/api/v1/files/:fileId/new` | Reviewer | Read the new file side. |
@@ -239,12 +240,13 @@ An optional `diff=1` query parameter adds the code diff after the writeup in the
 Any other value or a repeat gets `400 invalid_request` before waiting for a slot, also on `HEAD`.
 It changes no headers, filename or ZIP decision. The choice is off by default.
 
-An optional `theme=dark` or `theme=light` query parameter fixes the look of the files emend
+An optional `theme=dark`, `theme=light` or `theme=<name>` query parameter sets the look of the files emend
 draws: the writeup, Markdown docs, docs shown as source, the comments file and the omitted-content
 note page. Without it, they follow the reader's colour scheme. An HTML doc downloads as its own
 bytes: a custom page keeps its own look, and a page in emend's look downloads without emend's
-styles.
-Any other value or a repeat gets `400 invalid_request` before waiting for a slot, also on `HEAD`.
+styles. A theme name uses that theme’s resolved colours; fonts and code-block colours stay unchanged.
+An invalid value, a repeat, or a missing or refused theme gets `400 invalid_request` before waiting
+for a slot, also on `HEAD`.
 It changes no headers, filename or ZIP decision.
 
 A code review's file holds the review title and that revision's writeup: sections, topics, text,
@@ -550,6 +552,177 @@ all of them advance too, each recording the first other command at that level. R
 keys are unique. A command losing its default ends off with source `default`. Otherwise `value`
 and `source` name its final candidate. `clashWith` records the last clash, or null if there was
 none; `default`, `file`, `override` and `fileError` describe the inputs even after a clash.
+
+### Themes
+
+`GET /api/v1/themes` requires a reviewer session with `read` scope. It reads the `themes` folder
+beside the global `config.json`, without a repository check, like the server's reads of `keys`
+and `approvedActiveHours`. The CLI commands `emend theme list`, `copy` and `check` refuse a folder
+whose path, real path or any symlink hop lies inside a repository holding the working directory,
+with the same home-rooted dotfiles exception as `emend config`.
+There is one running read and at most one queued read per folder and per theme;
+each caller gets a read that started after its request. Settled results are not cached.
+Each theme is `<configDir>/themes/<name>/theme.json`. The folder name is the theme name.
+Names match `/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/` and cannot be `system`,
+`dark` or `light`. Top-level files and dot entries are skipped. A symlink counts only when it points
+to a folder; links to files, dangling links and link loops are skipped like top-level files.
+Invalid names are refused if the displayed name is
+1–80 characters with no Unicode control or format characters (`\p{C}`); otherwise they are skipped.
+At most 50 themes are listed, sorted by name. Each `theme.json` is at most 32 KiB. Folder enumeration uses
+`opendir` with its default buffer size and caps processing at 1000 entries, counting skipped entries too, with one overflow
+probe. A folder with more than 1000 entries returns an empty list and `folderError: true`.
+
+`emend theme copy <source> <name>` copies `dark`, `light` or a valid custom theme.
+It creates `themes/` if missing and a new `<name>/` folder, both with mode `0700`.
+An existing destination folder or file refuses with one stderr line naming the theme and nothing written.
+It writes `theme.json` with flag `wx` and mode `0600`, then prints `emend: wrote <escaped path of theme.json>`.
+If writing fails, it removes the `theme.json` it created and then its own folder when empty, and reports the error.
+A failure creating the `themes` folder reports `cannot write theme <path>`, with the escaped path of `theme.json`.
+
+A file is a JSON object with `version: 1`, `base: "dark" | "light"` and optional `fonts`, `scales`
+and `tokens`. Other keys are refused. For example:
+
+```json
+{
+  "version": 1,
+  "base": "dark",
+  "fonts": { "text": "Geist", "code": "JetBrains Mono" },
+  "scales": { "n-950": "oklch(0.18 0.004 260)" },
+  "tokens": { "bg-reading": "n-950" }
+}
+```
+
+`scales` accepts every neutral, ochre, green, blue, violet, teal and red scale step, and the
+16 origin tints, in `THEME_SCALE_STEPS`. `tokens` accepts every semantic colour in `THEME_TOKENS`,
+including `focus-color`. Names are the CSS custom properties without `--`. A scale value is a
+colour. A token value is a colour or a scale step name, never another token name. Omitted values
+come from the base. Changing a scale step recolours tokens built on it unless a token sets a colour.
+
+Colours accept hex `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa` in either case, or `oklch(L C H)` with
+optional ` / A` before `)`. Components are separated by whitespace. L is 0–1 or 0%–100%; C is
+0–0.5; H is finite, optionally followed by `deg`, and wraps to 0–360; A is 0–1 or 0%–100%.
+Numbers are plain decimals, with no exponent or sign except a minus on H. Inputs are at most
+64 characters. Names, other colour functions, URLs, CSS expressions, comments and quotes are refused.
+`ThemeColor` accepts only the normalized output: lowercase six- or eight-digit hex, or oklch
+with single spaces, numbers rounded to at most six decimals, no trailing zeros, a leading zero
+before the point, hue below 360 and alpha omitted when 1.
+
+`fonts` accepts optional `text` and `code` names matching
+`/^[\p{L}\p{N}](?:[\p{L}\p{N} _-]{0,62}[\p{L}\p{N}])?$/u`. Font files and CSS are not accepted.
+The named family precedes emend's default stack. `DEFAULT_THEME_FONTS` is
+`{ text: "Geist", code: "JetBrains Mono" }`.
+
+`ThemeList = { themes: ThemeEntry[], folderError: boolean }`. A missing folder gives an empty
+list. `folderError` is true when an existing folder cannot be listed or exceeds the folder cap.
+Each entry is one of:
+
+- `ThemeValid = { valid: true, name, base, fonts: { text?, code? }, scales, tokens, themeColor }`.
+  The records hold only the file's overrides, normalized. Record keys match `/^[a-z0-9-]{1,40}$/`
+  so older clients can read newer servers; clients apply only names they know. Scale values are
+  `ThemeColor`; token values are `ThemeColor` or a known scale step name. `themeColor` is
+  the resolved, opaque `bg-app` as `#rrggbb`, for the browser's theme-colour meta tag.
+- `ThemeRefused = { valid: false, name, base: "dark" | "light" | null, problems }`.
+  There are 1–20 problems, each at most 200 characters. The last may say `…and N more problems.`
+
+Any problem refuses the whole file. Reasons use fixed text, known names and numbers. An unknown
+key is named only if it matches `/^[a-z0-9]+(?:-[a-z0-9]+)*$/` and is at most 24 characters;
+otherwise it is called `an unknown name`. Reasons include `The folder has no theme.json.`,
+`theme.json cannot be read.`, `theme.json is larger than 32 KiB.`, `theme.json is not valid JSON.`,
+`The file must hold a JSON object.`, `version must be 1.`, `base must be "dark" or "light".`,
+`Unknown entry: colours.`, `scales has an unknown name: n-26.`,
+`scales.n-25 is not a colour. Use hex (#rrggbb) or oklch(L C H).` and
+`tokens.fg-1 is not a colour or a scale step name.` Invalid folder names say
+`The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark or light.`
+A missing theme folder or a name whose entry is not a folder is an unknown name.
+An existing folder without `theme.json` is refused.
+Invalid fonts say `fonts.text must be a plain font name: letters, digits, spaces, hyphens and underscores.`
+(`fonts.code` for the code font). A non-object section says `fonts must be a JSON object.`
+(or `scales` or `tokens`); unknown font or token keys use the same `has an unknown name` wording.
+
+Readability uses WCAG contrast after clipping linear sRGB channels to 0–1 and compositing in
+sRGB. Foregrounds composite over their background. Translucent backgrounds use `bg-surface`
+unless an `over` surface is specified. `diff-add-word` composites over `diff-add-bg`, and
+`diff-del-word` over `diff-del-bg`; each line background composites over `bg-surface` in the app.
+Download diff lines composite over `bg-sunken` instead, as specified in the pairs below.
+The seven surfaces `bg-app`, `bg-surface`, `bg-sunken`, `bg-raised`, `bg-reading`, `bg-reading-card`
+and `bg-inverse` must resolve to alpha 1: the page stacks them on nested elements. A translucent
+surface is refused with `bg-app must be opaque: its colour has transparency.` (the token name
+varies). Compare the unrounded ratio and report two decimals, for example
+`fg-1 on bg-app: 2.10 to 1, needs 4.5 to 1.` These pairs require 4.5 to 1:
+
+- `fg-1`, `fg-2`, `fg-3`, `fg-link`, `accent-text` on `bg-app`, `bg-surface`, `bg-sunken`, `bg-raised`.
+- `fg-inverse` on `bg-inverse`; `fg-reading`, `fg-reading-strong`, `fg-reading-muted` on `bg-reading`
+  and `bg-reading-card`; `fg-link` on `bg-reading`.
+- For the Download: `fg-reading` and `fg-reading-strong` on `bg-sunken`, `diff-add-bg` over
+  `bg-sunken`, and `diff-del-bg` over `bg-sunken`.
+- `fg-1` on `bg-selected`, `bg-hover`, `bg-active`, `accent-tint`, `mark-bg`, `mark-bg-active`;
+  `fg-reading` on `mark-bg` over `bg-reading`.
+- `accent-fg` on `accent`, `accent-hover`, `accent-press`.
+- `success-fg`, `info-fg`, `warning-fg`, `danger-fg` on their own `-bg` and on `bg-surface`.
+- `state-{open,approved,settled,snoozed}-fg`, `outcome-{fixed,explained,held,declined}-fg` and
+  `changed-fg` on their own `-bg`; `topic-fg` on `topic-bg`, `topic-bg-2`, `bg-surface`;
+  `topic-on-solid` on `topic-solid`; `origin-N-fg` on `origin-N-bg` for N = 1–8.
+- `syn-plain` on `bg-surface`, `bg-hover`, `diff-add-bg`, `diff-del-bg`; `diff-add-fg` on `diff-add-bg`;
+  `diff-del-fg` on `diff-del-bg`; `fg-3` on `diff-gutter`; `fg-1`, `fg-2` on `diff-hunk-bg`;
+  `fg-1` on `diff-select-bg`.
+- `syn-plain` on `diff-add-word` (over `diff-add-bg`), `diff-del-word` (over `diff-del-bg`),
+  `diff-add-hover`, `diff-del-hover` and `diff-select-bg`.
+
+These pairs require 3 to 1:
+
+- `syn-keyword`, `syn-type`, `syn-function`, `syn-string`, `syn-number`, `syn-comment` and
+  `syn-punct` on `bg-surface`, `bg-hover`, `diff-add-bg`, `diff-del-bg`, `diff-add-word` (over `diff-add-bg`),
+  `diff-del-word` (over `diff-del-bg`), `diff-add-hover`, `diff-del-hover` and `diff-select-bg`.
+- For the Download: `fg-reading-muted` on `bg-sunken`, on `diff-add-bg` over `bg-sunken` and on
+  `diff-del-bg` over `bg-sunken`.
+
+Hovered context lines use `bg-hover` composited over `bg-surface`. Disabled text is exempt.
+Both built-in bases pass all 154 pairs.
+
+Before the HTTP server listens, `startServer` awaits `watchThemes`, which waits at most
+`baselineWaitMs` (default 1000 ms) for its first fingerprint. In time, it becomes the baseline without an event. After
+the limit, the server listens while that fingerprint keeps running. When it finishes, it becomes
+the baseline and broadcasts one `{ type: "themes" }`. Stopping the watcher prevents that late
+event. The wait timer uses the injected clock, is unref'd and is cleared when the wait ends.
+
+Every two seconds after that wait, regardless of open streams, the watcher fingerprints each
+listed folder's `theme.json`, using size, mtime, ctime and inode. It uses the same capped, sorted listing.
+Missing or unreadable `theme.json` files have distinct markers.
+Missing and too-full folders have distinct, stable fingerprints. Each change emits
+`{ type: "themes" }` only on global `/api/v1/events` streams, to every owner. Ticks skip while a
+fingerprint is running. A fingerprint that never finishes leaves the watcher idle; the server can
+still start and stop. The interval timer is unref'd and stops with the server.
+
+Open pages refresh within a few seconds. A page using a refused or removed theme keeps its last
+valid version and shows the reason in Settings. The choice stays per device. Each tab holds its
+own last valid version in memory. Other tabs' saved copies of a theme it already holds are
+ignored. A bare `ThemeValid` in `emend.theme.custom` seeds a tab at load or when it switches to a
+name it does not hold, only if the saved name matches. The tab parses that text only when it needs
+a seed and the text or picked name changed since the last parse. Identical writes are skipped.
+Storage events notify listeners only when the state changed.
+
+The root starts one sync loop per tab, outside React Query, with no clocks or timers. It fetches
+on start, a picked name change (including another tab's storage event), a `themes` event, and a
+stream open. It runs one fetch at a time. Triggers during a fetch queue exactly one more fetch
+after it ends. A stopped loop or a pick without a custom name fetches nothing. Stopping aborts
+the pending fetch and ignores its result; starting again works. An error changes nothing and
+waits for another trigger.
+
+A result counts only for the name still picked when the fetch ends. It records whether that name
+is valid. A valid entry replaces the tab's held version when its JSON differs and writes the saved
+copy when the stored text differs, even when the held version is unchanged. Missing or refused
+entries keep the held version. Listeners are notified and CSS reapplied only when the held version
+or checked validity changed. There is no timestamp ordering between tabs' writes.
+
+Settings uses the `["themes"]` query for its list only. Selecting an entry keeps a version this
+tab already holds for that name, else adopts a matching saved copy, else uses the selected entry.
+It saves that version before writing the pick, skipping identical writes, so other tabs following
+the pick can seed it. The pick change triggers the loop. A `themes` event cancels any pending fetch
+of Settings' list before refreshing it; stream open keeps the existing refresh of queries older than the open.
+
+Download links read only the store. System passes no theme; Dark and Light pass themselves. For
+`theme:N`, a check of N that found it valid passes N. Otherwise the link passes the held version's
+base if the tab holds N, or no theme if it does not.
 
 ### Review read views
 
@@ -1732,7 +1905,7 @@ endpoints use `text/event-stream`, `Cache-Control: no-store` and a keepalive eve
 data and is not a `ReviewEvent`. (A comment line would fire no browser event, and an event with
 an empty data buffer is never dispatched.) A client may treat about 40 seconds without any frame
 (`ping` or review event) as a dead stream and reconnect. `ReviewEventName` is
-`publish | send | thread | waiting | claimed | confirmed | viewed | snooze | unsnooze | retire | reopen | delete | bin | restore | groups`. `ReviewEvent` has a `type`
+`publish | send | thread | waiting | claimed | confirmed | viewed | snooze | unsnooze | retire | reopen | delete | bin | restore | groups | themes`. `ReviewEvent` has a `type`
 discriminator and the same fields as its SSE payload. The SSE `event` line supplies
 `type`; the JSON `data` is:
 
@@ -1746,10 +1919,12 @@ discriminator and the same fields as its SSE payload. The SSE `event` line suppl
 | `confirmed` | `{ reviewId, revision, deliveryId }` |
 | `viewed` | `{ reviewId }` |
 | `groups` | `{ reviewId? }` |
+| `themes` | `{}`; global streams only, to every owner |
 | `snooze`, `unsnooze`, `retire`, `reopen`, `delete`, `bin`, `restore` | `{ reviewId, revision }` |
 
-Events contain ids and, except for `viewed` and `groups`, a positive revision sequence only, never paths, text bodies or
-instructions. `claimed` follows a successful take; `confirmed` follows a successful
+Review events contain ids and, except for `viewed` and `groups`, a positive revision sequence only,
+never paths, text bodies or instructions. `themes` carries no fields and goes only to global streams.
+`claimed` follows a successful take; `confirmed` follows a successful
 delivery confirmation. `viewed` follows a successful viewed-mark PUT and invalidates that
 review's revision queries. These events are emitted after the transaction commits. Events have no
 replay ids; clients refresh their cached state on every connection, including the first.
@@ -1872,6 +2047,9 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 
 | Constant key | Maximum |
 | --- | ---: |
+| `themes` | 50 files listed |
+| `themeFileBytes` | 32768 bytes per file |
+| `themeProblems` | 20 problems per theme |
 | `inboxItems` | 200 rows per inbox block (at most 800 in all) |
 | `groups` | 50 inbox groups per owner |
 | `groupNameChars` | 80 characters per trimmed group name |

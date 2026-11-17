@@ -42,6 +42,69 @@ private window, so pick another one in Settings there. In the config file, use
 `mod+` or `mod+shift+` followed by a letter. `mod` means Ctrl, or ⌘ on a Mac.
 See [api.md](api.md) for the command ids.
 
+### Themes
+
+Themes live in the `themes` folder beside emend's global `config.json`, on the server your
+browser reaches. `emend theme copy dark mine` writes `themes/mine/theme.json`.
+You can also use `light` or another theme as the source. Each theme has its own folder.
+`emend theme list` shows valid and refused themes. `emend theme check mine` reports
+invalid values and text that is too faint to read, including syntax colours on diff lines,
+changed words, hovered lines (including context lines on `bg-hover` over `bg-surface`) and selected lines.
+Body text and plain code need 4.5 to 1 contrast; the seven syntax highlight colours need 3 to 1.
+The Download also checks `fg-reading` and
+`fg-reading-strong` at 4.5 to 1, and `fg-reading-muted` at 3 to 1, on `bg-sunken` and on
+`diff-add-bg` / `diff-del-bg` composited over `bg-sunken`.
+
+The CLI commands refuse a themes folder whose path, real path or symlink hops lie inside a repository
+holding the working directory, with the same home-rooted dotfiles exception as `emend config`.
+The server reads this folder without that check, like `keys` and `approvedActiveHours`.
+
+Edit `themes/mine/theme.json` to change colours or set `fonts.text` and `fonts.code` to installed font names.
+Emend's fonts stay as fallbacks. Each file names a Dark or Light base; omitted values use that
+base. A token can reference a scale step, so changing that step recolours every token built on
+it. A token set to a colour keeps its own value. The surfaces `bg-app`, `bg-surface`, `bg-sunken`,
+`bg-raised`, `bg-reading`, `bg-reading-card` and `bg-inverse` must be opaque, including when set
+through a scale reference. See [api.md](api.md#themes) for the file format and readability pairs.
+
+Emend lists up to 50 theme folders in name order. Each `theme.json` is at most 32 KiB.
+Top-level files and dot entries are ignored. A symlink counts only when it points to a folder;
+links to files, missing targets and link loops are skipped like top-level files.
+Keep the `themes` folder at 1000 entries
+or fewer, including hidden files and other entries; a larger folder shows a folder error and no themes.
+
+Pick the theme in Settings → Appearance on each device, including your phone. Saving the file
+updates open pages within a few seconds. Before accepting HTTP requests, the server waits at
+most one second for a baseline of the themes. A baseline ready in time sends no event. If
+it takes longer, the server starts anyway. The first fingerprint keeps running and sends one
+theme event when it finishes. Stopping the watcher prevents that event. The server checks every
+two seconds after the wait, even without open pages, and skips checks while one is running. A
+hung fingerprint leaves the watcher idle without blocking server startup or shutdown.
+
+Each tab runs one theme fetch at a time. It fetches at start, when the picked name changes in
+this or another tab, on a theme event, and when the event stream opens. Several triggers during
+a fetch queue one more fetch after it ends. Results count only for the name still picked when
+they arrive. An error keeps the current version and waits for another trigger. Stopping the sync
+aborts its fetch and ignores its result; System, Dark and Light need no theme fetch.
+
+Each tab keeps its own last valid version. It ignores other tabs' saved copies of a theme it
+already holds. The browser saves a bare `ThemeValid` in `emend.theme.custom`, without a timestamp.
+That saved copy seeds a tab at load or on a switch to a theme it does not hold, if the name matches.
+The tab parses it only when it needs a seed and the text or name changed. After a fetch for the
+still-picked name, a valid entry updates the held version and the saved copy if they differ.
+Identical writes are skipped. An unchanged state causes no notification or CSS update. If a file
+becomes invalid or disappears, the tab keeps its held version and Settings shows why.
+
+Selecting in Settings keeps the version the tab holds for that name, else adopts a matching
+saved copy, else uses the selected entry. It saves that version before writing the pick so other
+tabs can find it. The pick change starts a sync. Settings' list has its own query; theme events
+cancel any pending list fetch before refreshing it. Stream open also refreshes older queries.
+The pick applies to this device only.
+
+Download links read the tab's store. System passes no theme; Dark and Light pass themselves.
+A custom name is passed when the tab's check for that name found it valid. Otherwise the link
+uses the base of its held version for that name, or passes no theme if none is held. See the API's
+[Themes section](api.md#themes) for the complete pairs and sync rules.
+
 ## Publish a doc
 
 Publish any UTF-8 text file and get its review URL:

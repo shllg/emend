@@ -14,7 +14,7 @@ import {
 import { type Ref, useEffect, useState } from "react";
 import { plural } from "../../lib/count.ts";
 import { reviewLineTotals } from "../../lib/diff-totals.ts";
-import { useThemePick } from "../../lib/theme.ts";
+import { useDownloadTheme } from "../../lib/theme.ts";
 import { sharedDiffFolder } from "../../lib/writeup-area.ts";
 import { usesOpeningCard } from "../../lib/writeup-facts.ts";
 import { LineTotals } from "../diff/LineTotals.tsx";
@@ -87,7 +87,7 @@ export function ReviewHeader({
   onCommentReview?: () => void;
   onDownload?: () => void;
 }) {
-  const theme = useThemePick();
+  const theme = useDownloadTheme();
   const agent = agentStatusOf(review);
   // The same minute clock the inbox rows use, so "Picked up 5m" stays current.
   const [now, setNow] = useState(Date.now);
@@ -332,10 +332,7 @@ export function ReviewHeader({
               </Button>
             ) : (
               <Button asChild variant="ghost" size="sm" icon={FileDown} title="Download this revision as one HTML file">
-                <a
-                  href={reviewDownloadPath(review.id, seq, [], { theme: theme === "system" ? undefined : theme })}
-                  download
-                >
+                <a href={reviewDownloadPath(review.id, seq, [], { theme })} download>
                   Download
                 </a>
               </Button>
