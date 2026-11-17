@@ -337,7 +337,8 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
     if (item.state === "approved") return 4;
     if (item.agentWaiting) return 0;
     if (item.unsentCount > 0) return 1;
-    return answeredIds.has(item.id) ? 3 : 2;
+    // A pub is a document to read, so a Send on it does not move it to Answered.
+    return item.kind === "review" && answeredIds.has(item.id) ? 3 : 2;
   };
   const activities = new Map(rows.map(({ review }) => [review.id, activity(review)]));
   return {

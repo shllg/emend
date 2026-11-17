@@ -617,8 +617,9 @@ Every other approved review is in Done with `activeUntil: null`. Because every a
 same window length, a window ending cannot bring an older approval back into Active.
 
 Active is ordered by priority, first match wins: open with an agent waiting; open with unsent
-comments; open without a live Send on its newest revision (To review); open with such a Send
-(Answered); approved. A live Send is not set aside, whether its delivery is pending or confirmed.
+comments; open without a live Send on its newest revision (To review); open reviews with such a Send
+(Answered); approved. A pub (`kind: "publish"`) with such a Send stays in To review. A live Send
+is not set aside, whether its delivery is pending or confirmed.
 The priority is not a wire field. Within each priority, newest activity comes first: an open review uses
 `updatedAt`, or the wake time of a timed snooze that has passed when that is later; an approved
 review uses `updatedAt`. Id ascending breaks ties. Approved reviews always follow every open review.
