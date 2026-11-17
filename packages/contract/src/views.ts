@@ -270,6 +270,7 @@ export const RevisionView = z
             path: FilePath,
             kind: z.literal("html"),
             contentUrl,
+            images: z.array(FilePath).max(LIMITS.filesPerRevision).optional(),
             look: z.enum(["emend", "custom"]).optional(),
             title: DocTitle.optional(),
             headings: DocHeadings.optional(),

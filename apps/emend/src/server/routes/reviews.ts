@@ -18,6 +18,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  like,
   lte,
   max,
   ne,
@@ -37,6 +38,7 @@ import {
   changedBlocks,
   comments,
   deliveries,
+  docAssets,
   files,
   instances,
   placements,
@@ -437,6 +439,29 @@ async function revisionView(ownerId: string, q: Queries, deps: AppDeps, reviewId
   };
   if (!writeup) throw new ApiError("not_found");
   const rendered = await readJson(writeup.hash);
+  const imageRows = await q
+    .select({ docId: docAssets.docId, path: files.path })
+    .from(docAssets)
+    .innerJoin(
+      files,
+      and(eq(files.ownerId, ownerId), eq(files.revisionId, revisionId), eq(files.id, docAssets.assetId)),
+    )
+    .where(
+      and(
+        eq(docAssets.ownerId, ownerId),
+        eq(docAssets.revisionId, revisionId),
+        eq(files.role, "asset"),
+        like(files.mediaType, "image/%"),
+      ),
+    )
+    .all();
+  const imagesByDoc = new Map<string, string[]>();
+  for (const { docId, path } of imageRows) {
+    const images = imagesByDoc.get(docId) ?? [];
+    images.push(path);
+    imagesByDoc.set(docId, images);
+  }
+  for (const images of imagesByDoc.values()) images.sort();
   const docs = [];
   for (const file of fileRows) {
     if (file.role !== "doc") continue;
@@ -460,6 +485,7 @@ async function revisionView(ownerId: string, q: Queries, deps: AppDeps, reviewId
         ...metadata,
         path: file.path,
         kind: "html",
+        images: imagesByDoc.get(file.id) ?? [],
         ...(file.look !== null ? { look: file.look } : {}),
         contentUrl: `/content/${revision.contentKey}${file.id.replaceAll("-", "")}/${file.path.split("/").map(encodeURIComponent).join("/")}`,
       });

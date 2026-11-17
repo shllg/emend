@@ -683,8 +683,10 @@ Kinds are `heading | paragraph | item | code | table | quote | diagram`; diagram
 `RenderedWriteup = { sections: { key, label, topic: string | null, blocks: RenderedBlock[] }[] }`
 mirrors core's rendered writeup. These are server-rendered blocks, never browser-rendered Markdown.
 Markdown docs are `{ path, kind: "markdown", blocks: RenderedBlock[] }` (empty if unrendered).
-HTML docs are `{ path, kind: "html", contentUrl, look?: "emend" | "custom" }`. The optional
-`look` is recorded at publish time: `emend` adds emend's layered pub stylesheet, and `custom`
+HTML docs are `{ path, kind: "html", contentUrl, look?: "emend" | "custom", images?: FilePath[] }`.
+The optional `images` lists the doc's own image assets (asset rows with an `image/` media type
+linked through `doc_assets`), sorted by path, with at most `LIMITS.filesPerRevision` entries.
+The optional `look` is recorded at publish time: `emend` adds emend's layered pub stylesheet, and `custom`
 keeps the page's own look. An absent `look` (a revision published before this field existed, or
 metadata that failed) shows as a custom page. The URL is
 `/content/<docKey>/<path>` with each path segment percent-encoded. The doc key is the revision's
@@ -779,6 +781,22 @@ After `emend:ready`, the parent sends `{ type: "emend:docs", paths: FilePath[] }
 paths in this revision. Bridge links resolve against the existing document base, decode each
 segment once, and use the same rejection rules as the core resolver. The parent validates the
 destination again before navigating.
+
+A primary click or tap without modifiers on an image outside a link sends
+`{ type: "emend:image", images: { path: FilePath, caption: string }[], index: number }`.
+Both objects are strict. The gallery contains 1 through `LIMITS.filesPerRevision` images in page
+order; `index` is an integer in that array's bounds. Captions are well-formed strings of at most
+`LIMITS.quoteChars` (2000) characters, taken from the enclosing figure's direct `figcaption`,
+otherwise the image's alt text, otherwise empty. Only laid-out HTML images under the current
+doc key qualify; loaded images smaller than 48 pixels in both dimensions, including broken
+images, are excluded. Queries and fragments are ignored. Images inside links are not part of
+the gallery; clicking them keeps link handling.
+The parent accepts this message only from the current trusted frame after its ready. It opens
+only paths in that doc's `images`: an unknown clicked path opens nothing, and other unknown
+entries are dropped while preserving order and the clicked entry. The parent builds each URL
+from the doc's own `/content/<docKey>/` prefix plus the path with each segment percent-encoded.
+The app's lightbox shows the gallery without a comment action, leaving the frame mounted and
+its reading position unchanged on close. A new frame generation or navigation away closes it.
 
 HTML Contents addresses the server's h2/h3 list by zero-based index. The parent sends
 `{ type: "emend:goto", heading: number, label: string }` for a pick; a restore also includes

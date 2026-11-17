@@ -1,7 +1,7 @@
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ThreadView } from "@emend/contract";
+import { LIMITS, type ThreadView } from "@emend/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
@@ -152,10 +152,14 @@ function FrameContent({
   values,
   docNavigation,
   navigation,
+  images,
+  look,
 }: {
   values: ThreadView[];
   docNavigation?: DocNavigation;
   navigation?: { threadId: string; intent: unknown };
+  images?: readonly string[];
+  look?: "emend" | "custom";
 }) {
   const [open, setOpen] = useState(values.length > 0);
   return (
@@ -165,6 +169,8 @@ function FrameContent({
       changedBlocks={[]}
       path={path}
       contentUrl={doc.contentUrl}
+      images={images}
+      look={look}
       threads={values}
       navigation={navigation}
       docNavigation={docNavigation}
@@ -173,10 +179,15 @@ function FrameContent({
     />
   );
 }
-function mount(threads: ThreadView[] = [], navigation?: { threadId: string; intent: unknown }) {
+function mount(
+  threads: ThreadView[] = [],
+  navigation?: { threadId: string; intent: unknown },
+  images?: readonly string[],
+  look?: "emend" | "custom",
+) {
   const ui = (values: ThreadView[], docNavigation?: DocNavigation) => (
     <QueryClientProvider client={client}>
-      <FrameContent values={values} docNavigation={docNavigation} navigation={navigation} />
+      <FrameContent values={values} docNavigation={docNavigation} navigation={navigation} images={images} look={look} />
     </QueryClientProvider>
   );
   const view = render(ui(threads));
@@ -436,4 +447,141 @@ test("R5.1 goto distinguishes a pick without fraction from a restore including z
   for (const fraction of [null, -1, 2, NaN, Infinity, "0"])
     expect(ParentToFrame.safeParse({ ...pick, fraction }).success).toBe(false);
   expect(ParentToFrame.safeParse({ ...pick, extra: true }).success).toBe(false);
+});
+
+const pubImages = ["images/a #é.png", "images/b%2F.png", "images/c.png"];
+const imageMessage = {
+  type: "emend:image",
+  images: pubImages.map((path, index) => ({ path, caption: index === 2 ? "" : `Caption ${index + 1}` })),
+  index: 0,
+};
+function lightboxImage() {
+  const image = screen.getByRole("dialog").querySelector("img");
+  if (!image) throw new Error("Missing lightbox image");
+  return image;
+}
+
+test.each(["emend", "custom"] as const)(
+  "%s pub images open in order without comments and preserve the frame on close",
+  async (look) => {
+    const { frame, message, container, post } = mount([], undefined, pubImages, look);
+    fireEvent.load(frame);
+    message({ type: "emend:ready" });
+    frame.focus();
+    const focus = vi.spyOn(frame, "focus");
+    const src = frame.getAttribute("src");
+    post.mockClear();
+    message(imageMessage);
+    expect(screen.getByRole("dialog", { name: "Caption 1" })).toBeTruthy();
+    expect(lightboxImage().getAttribute("src")).toBe(`/content/${"a".repeat(75)}/images/a%20%23%C3%A9.png`);
+    expect(screen.queryByRole("button", { name: /comment/i })).toBeNull();
+    expect(screen.getByText("1 of 3")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Next screenshot" }));
+    expect(screen.getByRole("dialog", { name: "Caption 2" })).toBeTruthy();
+    expect(lightboxImage().getAttribute("src")).toBe(`/content/${"a".repeat(75)}/images/b%252F.png`);
+    fireEvent.click(screen.getByRole("button", { name: "Next screenshot" }));
+    expect(screen.getByRole("dialog", { name: "Screenshot" })).toBeTruthy();
+    expect(lightboxImage().getAttribute("src")).toBe(`/content/${"a".repeat(75)}/images/c.png`);
+    expect(screen.getByText("3 of 3")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(container.querySelector("iframe")).toBe(frame);
+    expect(frame.getAttribute("src")).toBe(src);
+    expect(post).not.toHaveBeenCalled();
+    await waitFor(() => expect(focus).toHaveBeenCalledWith({ preventScroll: true }));
+  },
+);
+
+test("image messages require the ready current frame and a clicked path in this doc's allowlist", () => {
+  const { message } = mount([], undefined, pubImages);
+  message(imageMessage);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  message({ type: "emend:ready" });
+  message(imageMessage, window);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  for (const path of ["other-doc/image.png", "style.css", "other.html"])
+    message({ ...imageMessage, images: [{ path, caption: "Unknown" }] });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  message({ ...imageMessage, index: 1 });
+  expect(screen.getByRole("dialog", { name: "Caption 2" })).toBeTruthy();
+});
+
+test("legacy docs without an image allowlist open no gallery", () => {
+  const { message } = mount();
+  message({ type: "emend:ready" });
+  message(imageMessage);
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test("unknown non-clicked entries are dropped and duplicate paths keep the clicked occurrence", () => {
+  const { message } = mount([], undefined, pubImages);
+  message({ type: "emend:ready" });
+  message({
+    type: "emend:image",
+    images: [
+      { path: "other.png", caption: "Unknown" },
+      { path: pubImages[0], caption: "First occurrence" },
+      { path: "other-doc/image.png", caption: "Unknown" },
+      { path: pubImages[0], caption: "Clicked occurrence" },
+      imageMessage.images[2],
+    ],
+    index: 3,
+  });
+  expect(screen.getByRole("dialog", { name: "Clicked occurrence" })).toBeTruthy();
+  expect(screen.getByText("2 of 3")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Previous screenshot" }));
+  expect(screen.getByRole("dialog", { name: "First occurrence" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Next screenshot" }));
+  fireEvent.click(screen.getByRole("button", { name: "Next screenshot" }));
+  expect(screen.getByRole("dialog", { name: "Screenshot" })).toBeTruthy();
+});
+
+test.each(["load", "ready", "generation"])(
+  "a %s change closes the gallery and refuses stale frame messages",
+  (change) => {
+    const { frame, message, fragment, container } = mount([], undefined, pubImages);
+    fireEvent.load(frame);
+    message({ type: "emend:ready" });
+    message(imageMessage);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    if (change === "load") fireEvent.load(frame);
+    else if (change === "ready") message({ type: "emend:ready" });
+    else fragment("part");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    message(imageMessage);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    if (change === "generation") expect(container.querySelector("iframe")).not.toBe(frame);
+    else expect(screen.getByText("This doc navigated away.")).toBeTruthy();
+  },
+);
+
+test("image messages enforce strict objects, bounded well-formed captions, paths and gallery indices", () => {
+  expect(FrameToParent.parse(imageMessage)).toEqual(imageMessage);
+  const image = { path: "image.png", caption: "" };
+  expect(
+    FrameToParent.safeParse({ ...imageMessage, images: [{ ...image, caption: "x".repeat(LIMITS.quoteChars) }] })
+      .success,
+  ).toBe(true);
+  expect(
+    FrameToParent.safeParse({
+      ...imageMessage,
+      images: Array.from({ length: LIMITS.filesPerRevision }, () => image),
+      index: LIMITS.filesPerRevision - 1,
+    }).success,
+  ).toBe(true);
+  for (const data of [
+    { ...imageMessage, extra: true },
+    ...[-1, 3, 0.5, "0", NaN, Infinity].map((index) => ({ ...imageMessage, index })),
+    { ...imageMessage, images: [] },
+    { ...imageMessage, images: Array.from({ length: LIMITS.filesPerRevision + 1 }, () => image) },
+    ...[
+      { ...image, extra: true },
+      { ...image, path: "../outside.png" },
+      { ...image, path: "/content/other/image.png" },
+      { ...image, caption: "x".repeat(LIMITS.quoteChars + 1) },
+      { ...image, caption: "\ud800" },
+      { ...image, caption: undefined },
+    ].map((image) => ({ ...imageMessage, images: [image] })),
+  ])
+    expect(FrameToParent.safeParse(data).success).toBe(false);
 });

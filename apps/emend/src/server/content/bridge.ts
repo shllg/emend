@@ -52,22 +52,25 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       if (nodeType(node) === 1) pending.push(children(node)[Symbol.iterator]());
     }
   }
-  function label(root) {
-    let left = 800;
+  function label(root, maximum = 200, rawBudget = maximum * 4) {
+    let left = rawBudget;
     const parts = [];
-    for (const node of nodes(root, 6400)) {
+    for (const node of nodes(root, rawBudget * 8)) {
       if (nodeType(node) !== 3) continue;
       const part = textData(node).slice(0, left);
       parts.push(part);
       left -= part.length;
       if (!left) break;
     }
+    return cleanLabel(parts.join(""), maximum, rawBudget);
+  }
+  function cleanLabel(text, maximum = 200, rawBudget = maximum * 4) {
     const discarded = [[0,31],[127,159],[847,847],[1564,1564],[4447,4448],[8203,8207],[8234,8238],
       [8288,8303],[12644,12644],[65024,65039],[65279,65279],[65440,65440],[65529,65531],
       [917504,917631],[917760,917999]];
-    return Array.from(parts.join("").replace(/[\s\x85]/gu, " "))
+    return Array.from(text.slice(0, rawBudget).replace(/[\s\x85]/gu, " "))
       .filter(char => !discarded.some(([from, to]) => char.codePointAt(0) >= from && char.codePointAt(0) <= to))
-      .join("").replace(/ +/g, " ").trim().toWellFormed().slice(0, 200).replace(/[\uD800-\uDBFF]$/, "").trim();
+      .join("").replace(/ +/g, " ").trim().toWellFormed().slice(0, maximum).replace(/[\uD800-\uDBFF]$/, "").trim();
   }
   function collectHeadings() {
     if (!body()) return [];
@@ -480,11 +483,60 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     }
     return null;
   }
+  function imagePath(element) {
+    if (!element || nodeType(element) !== 1 || namespace(element) !== "http://www.w3.org/1999/xhtml" ||
+        localName(element) !== "img" || !laidOut(element)) return null;
+    for (let parent = nodeValue("parentNode", element); parent && parent !== body(); parent = nodeValue("parentNode", parent)) {
+      if (nodeType(parent) === 1 && linkHref(parent) !== null) return null;
+    }
+    try {
+      const prototype = window.HTMLImageElement.prototype;
+      const url = new window.URL(read(prototype, "currentSrc", element) || read(prototype, "src", element));
+      const entry = /^(\/content\/[A-Za-z0-9_-]{43}[0-9a-f]{32}\/)(.*)$/.exec(window.location.pathname);
+      if (!entry || url.origin !== window.location.origin || !url.pathname.startsWith(entry[1])) return null;
+      const parts = url.pathname.slice(entry[1].length).split("/").map(part => decodeURIComponent(part));
+      if (parts.some(part => !part || part === "." || part === ".." || /[/\\\x00-\x1f\x7f-\x9f]/u.test(part))) return null;
+      if (read(prototype, "complete", element) && read(prototype, "naturalWidth", element) < 48 &&
+          read(prototype, "naturalHeight", element) < 48) return null;
+      return parts.join("/");
+    } catch { return null; }
+  }
+  function imageCaption(element) {
+    for (let parent = nodeValue("parentNode", element); parent && parent !== body(); parent = nodeValue("parentNode", parent)) {
+      if (nodeType(parent) !== 1 || namespace(parent) !== "http://www.w3.org/1999/xhtml" || localName(parent) !== "figure") continue;
+      for (const child of children(parent)) {
+        if (nodeType(child) === 1 && namespace(child) === "http://www.w3.org/1999/xhtml" && localName(child) === "figcaption")
+          return label(child, 2000);
+      }
+      break;
+    }
+    return cleanLabel(elementCall("getAttribute", element, "alt") || "", 2000);
+  }
+  function imageGallery(clicked) {
+    if (!body() || imagePath(clicked) === null) return null;
+    const images = [];
+    let index = -1;
+    for (const node of nodes(body())) {
+      const path = imagePath(node);
+      if (path === null) continue;
+      if (node === clicked) index = images.length;
+      images.push({ path, caption: imageCaption(node) });
+      if (images.length === 10000) break;
+    }
+    return index < 0 ? null : { type: "emend:image", images, index };
+  }
   listen(document, "click", event => {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     const link = dom(window.Event.prototype, "composedPath", event)
       .find(node => node instanceof window.Element && linkHref(node) !== null);
-    if (!link) return;
+    if (!link) {
+      const gallery = imageGallery(read(window.Event.prototype, "target", event));
+      if (gallery) {
+        post(gallery);
+        dom(window.Event.prototype, "preventDefault", event);
+      }
+      return;
+    }
     try {
       const current = new window.URL(window.location.href);
       const href = linkHref(link);

@@ -1,6 +1,20 @@
 import { expect, test } from "vitest";
 import * as contract from "./index.ts";
 
+test("HTML doc images are optional, bounded asset paths", () => {
+  const schema = contract.RevisionView.shape.docs;
+  const doc = { path: "page.html", kind: "html", contentUrl: "/content/synthetic/page.html" };
+  for (const images of [[], ["images/first.png", "images/second image.svg"]])
+    expect(schema.parse([{ ...doc, images }])).toEqual([{ ...doc, images }]);
+  for (const images of [
+    ["../outside.png"],
+    ["https://example.com/image.png"],
+    [42],
+    Array.from({ length: contract.LIMITS.filesPerRevision + 1 }, () => "image.png"),
+  ])
+    expect(schema.safeParse([{ ...doc, images }]).success).toBe(false);
+});
+
 test("HTML doc looks accept emend, custom or absence, and reject other values", () => {
   const schema = contract.RevisionView.shape.docs;
   const doc = { path: "page.html", kind: "html", contentUrl: "/content/synthetic/page.html" };

@@ -13,11 +13,14 @@ import { ThreadCard } from "../threads/ThreadCard.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Sheet } from "../ui/Sheet.tsx";
 import type { ReaderProps } from "./BlockReader.tsx";
+import { Lightbox } from "./Lightbox.tsx";
+import type { LightboxSubject } from "./screenshots.ts";
 
 export type HtmlNavigation = { threadId: string; intent: unknown };
 export function HtmlDocFrame({
   path,
   contentUrl,
+  images = [],
   look,
   reviewId,
   revision,
@@ -38,6 +41,7 @@ export function HtmlDocFrame({
 }: ReaderProps & {
   path: string;
   contentUrl: string;
+  images?: readonly string[];
   look?: "emend" | "custom";
   navigation?: HtmlNavigation;
   docNavigation?: DocNavigation;
@@ -74,11 +78,14 @@ export function HtmlDocFrame({
   const [target, setTarget] = useState<HtmlSpanTarget | null>(null);
   const [composing, setComposing] = useState(false);
   const [show, setShow] = useState<HtmlNavigation>();
+  const [gallery, setGallery] = useState<{ items: LightboxSubject[]; index: number } | null>(null);
+  const closeGallery = useCallback(() => setGallery(null), []);
   const lastScroll = useRef<HtmlNavigation | undefined>(undefined);
   // A parent-requested src change mounts a fresh window and starts its load baseline.
   const mountFrame = useCallback((element: HTMLIFrameElement | null) => {
     frame.current = element;
     if (element) {
+      setGallery(null);
       loads.current = 0;
       gone.current = false;
       readyNow.current = false;
@@ -141,6 +148,7 @@ export function HtmlDocFrame({
     gone.current = true;
     readyNow.current = false;
     setAway(true);
+    setGallery(null);
     setReady(0);
     if (!composing) setTarget(null);
   }, [composing]);
@@ -166,6 +174,21 @@ export function HtmlDocFrame({
           reading.entry.positions.set(reading.key, anchor);
           saveReadingPosition(reading.key, anchor);
         }
+      } else if (parsed.data.type === "emend:image") {
+        if (!readyNow.current) return;
+        const allowed = new Set(images);
+        const clicked = parsed.data.images[parsed.data.index];
+        const prefix = /^\/content\/[A-Za-z0-9_-]+\//.exec(contentUrl)?.[0];
+        if (!clicked || !allowed.has(clicked.path) || !prefix) return;
+        const kept = parsed.data.images.filter((image) => allowed.has(image.path));
+        setGallery({
+          items: kept.map(({ path, caption }) => ({
+            kind: "image",
+            src: prefix + path.split("/").map(encodeURIComponent).join("/"),
+            caption: caption || "Screenshot",
+          })),
+          index: kept.indexOf(clicked),
+        });
       } else if (parsed.data.type === "emend:navigate") onNavigate?.(parsed.data);
       else if (!composing && !composerOpen) {
         const { quote, prefix, suffix } = parsed.data;
@@ -174,7 +197,7 @@ export function HtmlDocFrame({
     };
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
-  }, [path, composing, composerOpen, onNavigate, headings, reading, onPosition, markAway]);
+  }, [path, contentUrl, images, composing, composerOpen, onNavigate, headings, reading, onPosition, markAway]);
   useEffect(() => {
     if (ready) post({ type: "emend:layout", wide });
   }, [ready, wide, post]);
@@ -271,6 +294,7 @@ export function HtmlDocFrame({
           }}
         />
       </div>
+      {gallery && <Lightbox gallery={gallery} onClose={closeGallery} />}
       {away && (
         <div role="status" className="space-y-2">
           <p>This doc navigated away.</p>

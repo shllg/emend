@@ -792,3 +792,55 @@ test("revision views expose the Send baseline and round-trip the new writeup fie
   });
   expect((await view(1)).changedSince).toBe(2);
 });
+
+test("HTML revision views list only each doc's linked image assets, sorted by path", async () => {
+  const assets = ["images/z.svg", "images/a.png", "style.css", "script.js", "font.woff2"];
+  const entries = [
+    { path: "first.html", role: "doc", assets },
+    { path: "second.html", role: "doc", assets: ["images/other.svg"] },
+    { path: "empty.html", role: "doc", assets: [] },
+    ...assets.map((path) => ({ path, role: "asset", parent: "first.html" })),
+    { path: "images/other.svg", role: "asset", parent: "second.html" },
+    { path: "images/unlisted.svg", role: "asset", parent: "first.html" },
+  ];
+  const response = await f.request(
+    "/publish",
+    "POST",
+    {
+      reviewId: f.reviewId,
+      reviewKey: "a".repeat(64),
+      repo: null,
+      branch: null,
+      title: "Synthetic image assets",
+      base: null,
+      head: null,
+      topics: [],
+      writeup: { overview: "", tldr: "", decisions: null, topics: {} },
+      files: await Promise.all(
+        entries.map(async (entry) => ({
+          ...entry,
+          oldPath: null,
+          oldBlob: null,
+          newBlob: await f.deps.blobs.put(
+            f.ownerId,
+            Buffer.from(entry.role === "doc" ? "<h1>Images</h1>" : "synthetic asset"),
+            "application/octet-stream",
+          ),
+          flag: null,
+        })),
+      ),
+    },
+    "agent",
+  );
+  expect(response.status).toBe(200);
+  const published = contract.PublishResponse.parse(await response.json());
+  const view = contract.RevisionView.parse(
+    await (await get(`/${published.reviewId}/revisions/${published.revision}`)).json(),
+  );
+  expect(view.docs.map((doc) => doc.kind === "html" && { path: doc.path, images: doc.images })).toEqual([
+    { path: "first.html", images: ["images/a.png", "images/z.svg"] },
+    { path: "second.html", images: ["images/other.svg"] },
+    { path: "empty.html", images: [] },
+  ]);
+  await error(await get(`/${published.reviewId}/revisions/${published.revision}`, "foreign"), 404, "unknown_review");
+});

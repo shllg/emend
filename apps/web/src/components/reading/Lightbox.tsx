@@ -6,19 +6,19 @@ import { Button } from "../ui/Button.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { isToastInteraction } from "../ui/overlay.ts";
 import { LightboxDiagram } from "./MermaidBlock.tsx";
-import type { LightboxItem, ScreenshotGallery } from "./screenshots.ts";
+import type { LightboxSubject } from "./screenshots.ts";
 import { useLightboxView } from "./use-lightbox-view.ts";
 
-export function Lightbox({
+export function Lightbox<T extends LightboxSubject>({
   gallery,
   onClose,
   canComment,
   onComment,
 }: {
-  gallery: ScreenshotGallery;
+  gallery: { items: T[]; index: number };
   onClose: () => void;
-  canComment: (item: LightboxItem) => boolean;
-  onComment: (item: LightboxItem) => void;
+  canComment?: (item: T) => boolean;
+  onComment?: (item: T) => void;
 }) {
   const [index, setIndex] = useState(gallery.index);
   const item = gallery.items[index];
@@ -75,7 +75,7 @@ export function Lightbox({
             closeButton={closeButton}
             onStep={step}
             onComment={
-              canComment(item)
+              onComment && canComment?.(item)
                 ? () => {
                     commenting.current = true;
                     onClose();
@@ -100,7 +100,7 @@ function LightboxImage({
   onStep,
   onComment,
 }: {
-  item: LightboxItem;
+  item: LightboxSubject;
   imageView: ReturnType<typeof useLightboxView>;
   index: number;
   count: number;
