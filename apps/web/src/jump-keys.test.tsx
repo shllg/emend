@@ -206,6 +206,52 @@ test.each([1280, 900])(
   },
 );
 
+test("a held jump key keeps its repeats from the browser and opens its row once", async () => {
+  const history = mount();
+  await ready();
+  expect(jump(3).defaultPrevented).toBe(true);
+  await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(3)}`));
+  await screen.findByRole("heading", { name: "Review 3", level: 1 });
+  const length = history.length;
+  const location = history.location;
+  for (let n = 0; n < 3; n++) {
+    await act(async () => {
+      expect(press("3", { altKey: true, code: "Digit3", repeat: true }).defaultPrevented).toBe(true);
+    });
+    expect(history.length).toBe(length);
+    expect(history.location).toEqual(location);
+  }
+});
+
+test.each(["off", "search", "phone"])("repeats stay with the browser where the press would (%s)", async (context) => {
+  if (context === "off") setJumpKeys(null);
+  if (context === "phone") width = 767;
+  const history = mount();
+  await ready();
+  const length = history.length;
+  const location = history.location;
+  const digit = context === "search" ? "2" : "1";
+  const target = context === "search" ? screen.getByRole("textbox", { name: "Filter reviews" }) : document.body;
+  if (context === "search") act(() => target.focus());
+  if (context === "off") expect(jump(1).defaultPrevented).toBe(false);
+  for (let n = 0; n < 3; n++) {
+    await act(async () => {
+      expect(press(digit, { altKey: true, code: `Digit${digit}`, repeat: true }, target).defaultPrevented).toBe(false);
+    });
+    expect(history.length).toBe(length);
+    expect(history.location).toEqual(location);
+  }
+});
+
+test("repeats of other shortcuts are unchanged", async () => {
+  mount();
+  await ready();
+  expect(press("j").defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(rowLink(1));
+  expect(press("j", { repeat: true }).defaultPrevented).toBe(false);
+  expect(document.activeElement).toBe(rowLink(1));
+});
+
 test.each(["3", "£"])("open review pane accepts Alt/Option key %s by physical digit", async (key) => {
   const history = mount(`/r/${id(1)}`);
   await ready();

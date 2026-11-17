@@ -145,6 +145,22 @@ test.each(["textarea", "select", "editable"])("ignores %s and editable descendan
 test.each([{ repeat: true }, { isComposing: true }, { keyCode: 229 }])("ignores %j", (options) => {
   expect(ignoreShortcut(key("j", options))).toBe(true);
 });
+test("allowRepeat preserves editable, overlay, composition and prevented-event guards", () => {
+  const options = { allowRepeat: true };
+  expect(ignoreShortcut(key("1", { altKey: true, code: "Digit1", repeat: true }), options)).toBe(false);
+  expect(ignoreShortcut(key("j", { repeat: true }), options)).toBe(false);
+  const input = document.createElement("textarea");
+  const event = key("j", { repeat: true });
+  input.dispatchEvent(event);
+  expect(ignoreShortcut(event, options)).toBe(true);
+  expect(ignoreShortcut(key("j", { repeat: true, isComposing: true }), options)).toBe(true);
+  const prevented = key("j", { repeat: true });
+  prevented.preventDefault();
+  expect(ignoreShortcut(prevented, options)).toBe(true);
+  const content = document.body.appendChild(document.createElement("div"));
+  content.setAttribute("role", "dialog");
+  expect(ignoreShortcut(key("j", { repeat: true }), options)).toBe(true);
+});
 test("ignores defaultPrevented", () => {
   const event = key("j");
   event.preventDefault();

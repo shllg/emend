@@ -28,7 +28,13 @@ import {
 } from "./shortcuts.ts";
 
 type Handler = () => boolean;
-type Registration = { command: ShortcutCommand; priority: number; handle: Handler; when: () => boolean };
+type Registration = {
+  command: ShortcutCommand;
+  priority: number;
+  handle: Handler;
+  when: () => boolean;
+  holdRepeats?: boolean;
+};
 
 function createRegistry() {
   const entries = new Set<Registration>();
@@ -131,6 +137,7 @@ export function useJumpShortcuts(open: (index: number) => void, { enabled = true
           return true;
         },
         when: () => true,
+        holdRepeats: true,
       }),
     );
     return () => {
@@ -209,13 +216,23 @@ export function ShortcutProvider({ children }: { children: ReactNode }) {
   });
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
-      if (current.current === "phone" || ignoreShortcut(event)) return;
+      if (current.current === "phone" || ignoreShortcut(event, { allowRepeat: true })) return;
       // Cache writes take effect even before React Query's batched render notification.
       const settings = client.getQueryData<SettingsView>(["settings"]);
       const handlers = orderedHandlers(registry.entries);
       for (const entry of handlers) {
         const key = settings ? settings.keys.commands[entry.command].value : SHORTCUT_DEFAULTS[entry.command];
-        if (matchesShortcut(event, key) && entry.when() && entry.handle()) {
+        if (!matchesShortcut(event, key) || !entry.when()) continue;
+        if (event.repeat) {
+          // Held jump keys keep repeats from the browser's tab keys without opening anything again.
+          // This is stateless because each route mounts its own provider.
+          if (entry.holdRepeats) {
+            event.preventDefault();
+            break;
+          }
+          continue;
+        }
+        if (entry.handle()) {
           event.preventDefault();
           break;
         }

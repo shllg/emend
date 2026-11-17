@@ -147,10 +147,10 @@ export function captureShortcut(event: KeyEvent): { key?: string; error?: string
   };
 }
 
-export function ignoreShortcut(event: KeyboardEvent) {
+export function ignoreShortcut(event: KeyboardEvent, { allowRepeat = false }: { allowRepeat?: boolean } = {}) {
   if (
     event.defaultPrevented ||
-    event.repeat ||
+    (event.repeat && !allowRepeat) ||
     event.isComposing ||
     event.keyCode === 229 ||
     (event.altKey && !altDigit(event))
