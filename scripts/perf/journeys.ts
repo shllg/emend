@@ -96,6 +96,7 @@ async function prepare(page: Page, journey: Journey, seeded: Seeded, origin: str
       "the second file in Files",
     );
   }
+  await page.settleWorkers("the diff workers");
   await page.settle("the journey setup");
 }
 async function perform(

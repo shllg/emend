@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
 import { createSealedLifecycle } from "./screenshots/sealed.ts";
 import { canonicalPath, currentProtectedStateDirs } from "./screenshots/safety.ts";
-import { assertOutputFolder, assertRefFolder } from "./perf/guards.ts";
+import { assertOutputFolder, assertRefFolder, assertWorkspaceRoot } from "./perf/guards.ts";
 import { LAPTOP, measureJourneys } from "./perf/journeys.ts";
 import { distribution, REPETITIONS } from "./perf/metrics.ts";
 import { type PerfRun, writeReport } from "./perf/report.ts";
@@ -172,16 +172,17 @@ async function main() {
   const failurePaths: FailurePaths = {};
   try {
     const protectedDirs = currentProtectedStateDirs();
-    assertOutputFolder(options.out, protectedDirs, canonicalPath);
+    assertOutputFolder(options.out, protectedDirs, canonicalPath, "perf output");
     const { sealedRoot, env, tmpDir } = sealed.createRoot(options.out, IDENTITY);
     failurePaths.sealedRoot = sealedRoot;
     const git = (cwd: string, ...args: string[]) =>
-      sealed.git(cwd, { ...env, GIT_AUTHOR_DATE: FIXED_DATE, GIT_COMMITTER_DATE: FIXED_DATE }, ...args);
+      sealed.git(cwd, { ...env, GIT_OPTIONAL_LOCKS: "0", GIT_AUTHOR_DATE: FIXED_DATE, GIT_COMMITTER_DATE: FIXED_DATE }, ...args);
     const sha = resolveCommit(options.ref, (...args) => git(checkout, ...args));
     const [subject, date] = git(checkout, "show", "-s", "--format=%s%n%cI", sha).split("\n");
     run = {
       schemaVersion: 1,
-      commit: { sha, subject, date, dirty: options.ref ? false : !!git(checkout, "status", "--porcelain") },
+      // Exclude untracked files: the sealed git config omits the user's global excludes.
+      commit: { sha, subject, date, dirty: options.ref ? false : !!git(checkout, "status", "--porcelain", "--untracked-files=no") },
       date: new Date().toISOString(),
       ...(options.ref ? { ref: options.ref } : {}),
       node: process.version,
@@ -218,6 +219,7 @@ async function main() {
           group: true,
         });
         if (extracted.code !== 0) throw new Error(`Ref export exited with code ${extracted.code}`);
+        assertWorkspaceRoot(source);
         // Reuse only the package store path, never the parent's pnpm config or credentials.
         const modules = join(checkout, "node_modules/.modules.yaml");
         const store = localPnpmStore(existsSync(modules) ? readFileSync(modules, "utf8") : "");
@@ -307,9 +309,9 @@ async function main() {
         run.seal = sealStatus();
         run.loadEnd = loadavg();
         const states = currentProtectedStateDirs();
-        assertOutputFolder(options.out, states, canonicalPath);
+        assertOutputFolder(options.out, states, canonicalPath, "perf output");
         mkdirSync(options.out, { recursive: true });
-        assertOutputFolder(options.out, states, canonicalPath);
+        assertOutputFolder(options.out, states, canonicalPath, "perf output");
         console.log(`Wrote performance run: ${writeReport(options.out, run)}`);
       }
     } catch (error) {

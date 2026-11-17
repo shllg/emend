@@ -111,6 +111,9 @@ export class Browser {
   private readonly attachTasks = new Map<string, Promise<void>>();
   /** Open network requests per session, without long-lived streams. */
   private readonly inflight = new Map<string, Map<string, string>>();
+  /** Dedicated-worker activity is separate from the screenshot request/settle rules. */
+  private readonly workerRequests = new Map<string, Set<string>>();
+  private workerActivityAt = Date.now();
   private readonly sessions = new Map<string, { type: string; targetId: string; url: string }>();
   private readonly detachedSessions = new Set<string>();
 
@@ -275,6 +278,7 @@ export class Browser {
       const detached = params.sessionId as string;
       this.detachedSessions.add(detached);
       this.inflight.delete(detached);
+      if (this.workerRequests.delete(detached)) this.workerActivityAt = Date.now();
       this.sessions.delete(detached);
       for (const [id, waiter] of this.pending) {
         if (waiter.sessionId === undefined || waiter.sessionId !== detached) continue;
@@ -324,6 +328,11 @@ export class Browser {
         this.fail(new Error(`Blocked screenshot socket to ${blocked}`));
       }
     } else if (method === "Network.requestWillBeSent" && sessionId) {
+      const workerRequests = this.workerRequests.get(sessionId);
+      if (workerRequests) {
+        workerRequests.add(params.requestId as string);
+        this.workerActivityAt = Date.now();
+      }
       const type = params.type as string | undefined;
       if (type === "EventSource" || type === "WebSocket" || type === "Ping") return;
       // Worker scripts are reported by the creating page and never finish there. The page's own
@@ -334,6 +343,8 @@ export class Browser {
     } else if (method === "Network.loadingFinished" || method === "Network.loadingFailed") {
       // A worker's script is reported by its creator and finished by the worker's own session.
       for (const requests of this.inflight.values()) requests.delete(params.requestId as string);
+      for (const requests of this.workerRequests.values())
+        if (requests.delete(params.requestId as string)) this.workerActivityAt = Date.now();
     }
   }
 
@@ -350,6 +361,10 @@ export class Browser {
     }
     this.sessions.set(sessionId, { type: info.type, targetId: info.targetId, url: info.url });
     this.inflight.set(sessionId, new Map());
+    if (info.type === "worker") {
+      this.workerRequests.set(sessionId, new Set());
+      this.workerActivityAt = Date.now();
+    }
     const waiting = Boolean(params.waitingForDebugger);
     let resumed = false;
     const resume = () => {
@@ -443,6 +458,12 @@ export class Browser {
   /** Requests that are still open in every session of one page tree. */
   openRequests(): string[] {
     return [...this.inflight.values()].flatMap((requests) => [...requests.values()]);
+  }
+
+  /** No worker request is open; even activity between polls resets this timestamp. */
+  workersQuietSince(): number | undefined {
+    for (const requests of this.workerRequests.values()) if (requests.size) return undefined;
+    return this.workerActivityAt;
   }
 
   sessionType(sessionId: string | undefined): string | undefined {
@@ -660,6 +681,20 @@ export class Page {
       calm = loaded && quiet && drawn ? calm + 1 : 0;
       if (calm >= 3) return;
       if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what} to settle (${state})`);
+    }
+  }
+
+  /** Wait for dedicated-worker churn and requests to stop for a full calm period. */
+  async settleWorkers(what: string, calmMs = 1000, timeoutMs = 45_000): Promise<void> {
+    const started = Date.now();
+    const deadline = started + timeoutMs;
+    for (;;) {
+      this.browser.check();
+      const now = Date.now();
+      if (now >= deadline) throw new TimedOut(`${what} to settle`);
+      const quietSince = this.browser.workersQuietSince();
+      if (quietSince !== undefined && now - Math.max(started, quietSince) >= calmMs) return;
+      await new Promise<void>((resolve) => setTimeout(resolve, Math.min(50, deadline - now)));
     }
   }
 

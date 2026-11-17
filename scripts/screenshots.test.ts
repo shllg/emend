@@ -13,7 +13,7 @@ import {
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { BLOCK_SOCKETS, Browser, Page, SOCKET_BLOCKED_URLS } from "./screenshots/browser.ts";
@@ -319,11 +319,16 @@ test("the output folder may not overlap real state, also through a symlink", (t)
   mkdirSync(state, { recursive: true });
   assert.doesNotThrow(() => assertOutputFolder(join(fixture, "images"), [state], canonicalPath));
   for (const out of [state, join(state, "images"), join(fixture, "state")]) {
-    assert.throws(() => assertOutputFolder(out, [state], canonicalPath), /overlaps real emend state/);
+    assert.throws(() => assertOutputFolder(out, [state], canonicalPath), {
+      message: "The screenshot folder overlaps real emend state",
+    });
   }
   symlinkSync(state, join(fixture, "alias"), "dir");
   assert.throws(() => assertOutputFolder(join(fixture, "alias", "images"), [state], canonicalPath), /overlaps/);
-  assert.throws(() => assertOutputFolder("relative", [state], canonicalPath), /absolute/);
+  assert.throws(() => assertOutputFolder("relative", [state], canonicalPath), {
+    message: "The screenshot folder must be absolute",
+  });
+  assert.throws(() => canonicalPath("relative"), { message: "Paths must be absolute" });
 });
 
 test("fixture deletions stay inside the fixture repository", (t) => {
@@ -495,6 +500,161 @@ function fakeChromium(answer: (method: string, params: Record<string, unknown>) 
   };
   return { browser: new Browser(fromBrowser, toBrowser, origin), sent, events, emit, yieldOnce, toBrowser, release };
 }
+
+async function advanceBrowserClock(t: TestContext, fake: ReturnType<typeof fakeChromium>, ms: number) {
+  for (let remaining = ms; remaining > 0; remaining -= 50) {
+    t.mock.timers.tick(Math.min(50, remaining));
+    await fake.yieldOnce();
+  }
+}
+
+test("dedicated-worker attaches and requests restart the full calm period without changing openRequests", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
+  const fake = fakeChromium();
+  const page = new Page(fake.browser, "page");
+  let finished = false;
+  const waiting = page.settleWorkers("the diff workers").then(() => { finished = true; });
+  await advanceBrowserClock(t, fake, 950);
+  assert.equal(finished, false);
+  fake.emit("Target.attachedToTarget", {
+    sessionId: "worker", targetInfo: { targetId: "worker-target", type: "worker", url: `${origin}/worker.js` },
+    waitingForDebugger: true,
+  });
+  await fake.browser.idle();
+  await advanceBrowserClock(t, fake, 950);
+  assert.equal(finished, false, "an attach restarts the calm period");
+  fake.emit("Network.requestWillBeSent", {
+    requestId: "script", type: "Script", request: { url: `${origin}/chunk.js` },
+  }, "worker");
+  assert.deepEqual(fake.browser.openRequests(), [], "screenshot settling still excludes workers and scripts");
+  assert.equal(fake.browser.workersQuietSince(), undefined);
+  await advanceBrowserClock(t, fake, 1_100);
+  assert.equal(finished, false, "an open worker request prevents settling indefinitely");
+  fake.emit("Network.loadingFinished", { requestId: "script" }, "page");
+  await advanceBrowserClock(t, fake, 950);
+  assert.equal(finished, false, "a finish in another session starts a new full calm period");
+  await advanceBrowserClock(t, fake, 50);
+  await waiting;
+  assert.equal(finished, true, "an idle attached worker does not prevent settling");
+});
+
+test("worker requests that start and finish between polls still restart the calm period", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
+  const fake = fakeChromium();
+  fake.emit("Target.attachedToTarget", {
+    sessionId: "worker", targetInfo: { targetId: "worker-target", type: "worker", url: `${origin}/worker.js` },
+    waitingForDebugger: true,
+  });
+  await fake.browser.idle();
+  let finished = false;
+  const waiting = new Page(fake.browser, "page").settleWorkers("the diff workers", 200).then(() => { finished = true; });
+  await advanceBrowserClock(t, fake, 150);
+  fake.emit("Network.requestWillBeSent", {
+    requestId: "fast", type: "Fetch", request: { url: `${origin}/data` },
+  }, "worker");
+  fake.emit("Network.loadingFinished", { requestId: "fast" }, "worker");
+  await advanceBrowserClock(t, fake, 150);
+  assert.equal(finished, false, "polling must not miss a short request");
+  await advanceBrowserClock(t, fake, 50);
+  await waiting;
+});
+
+test("worker requests end on either completion event in any session, or on detach", async (t) => {
+  for (const end of ["Network.loadingFinished", "Network.loadingFailed", "Target.detachedFromTarget"]) {
+    await t.test(end, async (t) => {
+      t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
+      const fake = fakeChromium();
+      fake.emit("Target.attachedToTarget", {
+        sessionId: "worker", targetInfo: { targetId: "worker-target", type: "worker", url: `${origin}/worker.js` },
+        waitingForDebugger: true,
+      });
+      await fake.browser.idle();
+      for (const requestId of ["first", "second"])
+        fake.emit("Network.requestWillBeSent", {
+          requestId, type: "Script", request: { url: `${origin}/${requestId}.js` },
+        }, "worker");
+      let finished = false;
+      const waiting = new Page(fake.browser, "page").settleWorkers("the diff workers", 200).then(() => { finished = true; });
+      fake.emit("Network.loadingFinished", { requestId: "first" }, "another-session");
+      await advanceBrowserClock(t, fake, 250);
+      assert.equal(finished, false, "every open worker request must finish");
+      fake.emit(end, { requestId: "second", sessionId: "worker" }, "another-session");
+      await advanceBrowserClock(t, fake, 150);
+      assert.equal(finished, false, "completion or detach restarts the calm period");
+      await advanceBrowserClock(t, fake, 50);
+      await waiting;
+      assert.deepEqual(fake.browser.openRequests(), []);
+      assert.doesNotThrow(() => fake.browser.check());
+    });
+  }
+});
+
+test("an idle worker detaching restarts the calm period", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
+  const fake = fakeChromium();
+  fake.emit("Target.attachedToTarget", {
+    sessionId: "worker", targetInfo: { targetId: "worker-target", type: "worker", url: `${origin}/worker.js` },
+    waitingForDebugger: true,
+  });
+  await fake.browser.idle();
+  let finished = false;
+  const waiting = new Page(fake.browser, "page").settleWorkers("the diff workers", 200).then(() => { finished = true; });
+  await advanceBrowserClock(t, fake, 150);
+  fake.emit("Target.detachedFromTarget", { sessionId: "worker" });
+  await advanceBrowserClock(t, fake, 150);
+  assert.equal(finished, false);
+  await advanceBrowserClock(t, fake, 50);
+  await waiting;
+});
+
+test("service and shared workers do not affect dedicated-worker settling", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
+  const fake = fakeChromium();
+  const page = new Page(fake.browser, "page");
+  for (const phase of ["attach", "detach"]) {
+    let finished = false;
+    const waiting = page.settleWorkers("the diff workers", 200).then(() => { finished = true; });
+    await advanceBrowserClock(t, fake, 150);
+    for (const type of ["service_worker", "shared_worker"]) {
+      if (phase === "attach") {
+        fake.emit("Target.attachedToTarget", {
+          sessionId: type, targetInfo: { targetId: `${type}-target`, type, url: `${origin}/worker.js` },
+          waitingForDebugger: true,
+        });
+        await fake.browser.idle();
+        fake.emit("Network.requestWillBeSent", {
+          requestId: type, type: "Script", request: { url: `${origin}/chunk.js` },
+        }, type);
+      } else fake.emit("Target.detachedFromTarget", { sessionId: type });
+    }
+    await advanceBrowserClock(t, fake, 50);
+    assert.equal(finished, true, `${phase} must not restart dedicated-worker settling`);
+    await waiting;
+  }
+});
+
+test("worker settling is per browser and times out at its bound with the step name", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
+  const fake = fakeChromium();
+  fake.emit("Target.attachedToTarget", {
+    sessionId: "worker", targetInfo: { targetId: "worker-target", type: "worker", url: `${origin}/worker.js` },
+    waitingForDebugger: true,
+  });
+  await fake.browser.idle();
+  fake.emit("Network.requestWillBeSent", {
+    requestId: "stuck", type: "Script", request: { url: `${origin}/chunk.js` },
+  }, "worker");
+  const waiting = new Page(fake.browser, "page").settleWorkers("the diff workers", 200, 275);
+  let timedOut = false;
+  const rejected = assert.rejects(waiting, { message: "Timed out waiting for the diff workers to settle" })
+    .then(() => { timedOut = true; });
+  const other = new Page(fakeChromium().browser, "page").settleWorkers("other workers", 200);
+  await advanceBrowserClock(t, fake, 250);
+  await other;
+  assert.equal(timedOut, false);
+  await advanceBrowserClock(t, fake, 25);
+  await rejected;
+});
 
 test("detaching rejects only that session's pending commands immediately and clears their timers", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });

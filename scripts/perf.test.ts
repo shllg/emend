@@ -7,13 +7,13 @@ import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { inflateSync, gzipSync } from "node:zlib";
 import { buildSeedPlan, SEED } from "./perf/seed.ts";
-import { assertOutputFolder, assertRefFolder } from "./perf/guards.ts";
+import { assertOutputFolder, assertRefFolder, assertWorkspaceRoot } from "./perf/guards.ts";
 import { childEnvironment, chromiumArgs } from "./screenshots/safety.ts";
 import { isReportRun, type PerfRun, renderReport, writeReport } from "./perf/report.ts";
 import { distribution, NetworkMeasurement, REPETITIONS, routePattern } from "./perf/metrics.ts";
 import { buildEnvironment, checkBuildResult, localPnpmStore, OFFLINE_INSTALL, parseArgs, redactFailure, resolveCommit, runExitCode } from "./perf.ts";
-import { LAPTOP, sample, sampleMetrics } from "./perf/journeys.ts";
-import type { Page } from "./screenshots/browser.ts";
+import { JOURNEYS, LAPTOP, measureJourneys, sample, sampleMetrics } from "./perf/journeys.ts";
+import type { Browser, Page } from "./screenshots/browser.ts";
 
 test("seed plan is identical and has every declared size, including the two special reviews", () => {
   const plan = buildSeedPlan();
@@ -64,8 +64,13 @@ test("output protects real state; ref exports also reject the checkout and non-t
   const identity = (path: string) => path;
   const states = ["/state/emend"];
   for (const path of ["/state", "/state/emend", "/state/emend/perf"])
-    assert.throws(() => assertOutputFolder(path, states, identity), /overlaps/);
-  assert.doesNotThrow(() => assertOutputFolder("/checkout/.wt/perf", states, identity));
+    assert.throws(() => assertOutputFolder(path, states, identity, "perf output"), {
+      message: "The perf output folder overlaps real emend state",
+    });
+  assert.throws(() => assertOutputFolder("relative", states, identity, "perf output"), {
+    message: "The perf output folder must be absolute",
+  });
+  assert.doesNotThrow(() => assertOutputFolder("/checkout/.wt/perf", states, identity, "perf output"));
   for (const path of ["/tmp/checkout", "/tmp/checkout/ref", "/tmp", "/state/emend", "/outside/ref"])
     assert.throws(() => assertRefFolder(path, "/tmp/checkout", "/tmp", states, identity));
   assert.doesNotThrow(() => assertRefFolder("/tmp/ref", "/tmp/checkout", "/tmp", states, identity));
@@ -73,7 +78,47 @@ test("output protects real state; ref exports also reject the checkout and non-t
     assertRefFolder("/tmp/ref", "/tmp/checkout", "/tmp", states, (path) =>
       path === "/tmp/ref" ? "/state/emend/ref" : path,
     ),
+    { message: "The ref folder overlaps real emend state" },
   );
+  assert.throws(() => assertRefFolder("/state/emend", "/tmp/checkout", "/tmp", states, identity), {
+    message: "The ref folder overlaps real emend state",
+  });
+  const main = readFileSync(new URL("./perf.ts", import.meta.url), "utf8");
+  const checks = [...main.matchAll(/assertOutputFolder\(([^;]+)\);/g)];
+  assert.equal(checks.length, 3);
+  for (const [, args] of checks) assert.match(args, /, "perf output"$/);
+});
+
+test("a ref export requires its own three regular workspace files", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "emend-ref-workspace-test-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const files = ["package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml"];
+  for (const file of files) writeFileSync(join(root, file), "synthetic workspace file");
+  assert.doesNotThrow(() => assertWorkspaceRoot(root));
+  for (const file of files) {
+    for (const kind of ["missing", "symlink", "folder"]) {
+      await t.test(`${file}: ${kind}`, () => {
+        const path = join(root, file);
+        rmSync(path);
+        if (kind === "symlink") symlinkSync(join(root, files.find((other) => other !== file) as string), path);
+        if (kind === "folder") mkdirSync(path);
+        assert.throws(() => assertWorkspaceRoot(root), {
+          message: `The ref has no pnpm workspace root of its own: ${file} is missing or not a regular file`,
+        });
+        rmSync(path, { recursive: true, force: true });
+        writeFileSync(path, "synthetic workspace file");
+      });
+    }
+  }
+  const main = readFileSync(new URL("./perf.ts", import.meta.url), "utf8");
+  assert.match(main, /if \(extracted\.code !== 0\) throw new Error\([^;]+;\s*assertWorkspaceRoot\(source\);/);
+  assert(main.indexOf("assertWorkspaceRoot(source)") < main.indexOf("const install = await sealed.run("));
+});
+
+test("perf git lookups disable optional locks and dirty ignores untracked files", () => {
+  const main = readFileSync(new URL("./perf.ts", import.meta.url), "utf8");
+  assert.match(main, /sealed\.git\(cwd, \{ \.\.\.env, GIT_OPTIONAL_LOCKS: "0",[^}]*\}, \.\.\.args\)/);
+  assert.match(main, /dirty: options\.ref \? false : !!git\(checkout, "status", "--porcelain", "--untracked-files=no"\)/);
 });
 
 test("perf uses the shared sealed lifecycle, environment and headless browser, including ref builds", () => {
@@ -1067,13 +1112,74 @@ test("file preparation settles the loaded review after file readiness and before
       steps.push(what);
       if (what === "the loaded review") assert.equal(timeout, 45_000);
     },
+    settleWorkers: async (what: string) => { steps.push(what); },
   } as unknown as Page;
   await sample(page, "file", "cold", { largeId: "synthetic-review", pubFolder: root, reviewIds: [] }, root);
   assert.deepEqual(steps, [
     "open review", "the first file", "the loaded review", "the Files tab", "Files tab click",
-    "the second file in Files", "the journey setup", "recording started", "open second file",
+    "the second file in Files", "the diff workers", "the journey setup", "recording started", "open second file",
     "the journey readiness condition", "the measured journey", "recording stopped",
   ]);
+});
+
+test("file and composer preparation wait for workers immediately before the final settle", () => {
+  const source = readFileSync(new URL("./perf/journeys.ts", import.meta.url), "utf8");
+  const prepare = source.slice(source.indexOf("async function prepare("), source.indexOf("async function perform("));
+  assert.match(prepare, /if \(journey !== "file" && journey !== "composer"\) return;/);
+  assert.match(prepare, /await page\.settleWorkers\("the diff workers"\);\s*await page\.settle\("the journey setup"\);\s*\}/);
+});
+
+test("worker preparation timeouts skip samples without recording traffic or timings", async (t) => {
+  t.mock.method(console, "log", () => undefined);
+  const skipped: { step: string; reason: string }[] = [];
+  let workerWaits = 0, disposed = 0;
+  let journey: (typeof JOURNEYS)[number] = "inbox";
+  const page = {
+    send: async () => ({}),
+    eval: async (expression: string) => {
+      if (expression.includes("PerformanceObserver")) return;
+      if (journey !== "file" && journey !== "composer") throw new Error("Synthetic unavailable journey");
+      assert(expression.endsWith(".click()"), "no measurement or timing may start");
+    },
+    goto: async () => undefined,
+    waitFor: async () => undefined,
+    settle: async (what: string) => { assert.equal(what, "the loaded review"); },
+    settleWorkers: async (what: string) => {
+      workerWaits++;
+      throw new Error(`Timed out waiting for ${what} to settle`);
+    },
+  } as unknown as Page;
+  let context = 0;
+  const browser = {
+    origin: "http://127.0.0.1:43210",
+    freshContext: async () => String(context++),
+    newPage: async (_viewport: unknown, id: string) => {
+      journey = JOURNEYS[Math.floor(Number(id) / REPETITIONS) % JOURNEYS.length];
+      return page;
+    },
+    on: () => {
+      assert(journey !== "file" && journey !== "composer", "traffic recording must not start after failed preparation");
+      return () => undefined;
+    },
+    check: () => undefined,
+    disposeContext: async () => { disposed++; },
+  } as unknown as Browser;
+  Object.assign(page, { browser });
+  const results = await measureJourneys(browser, { largeId: "synthetic-review", pubFolder: "/synthetic/pub", reviewIds: [] }, "/synthetic/dist",
+    (step, error) => { skipped.push({ step, reason: (error as Error).message }); });
+  assert.deepEqual(results, []);
+  assert.equal(workerWaits, 2 * 2 * REPETITIONS);
+  assert.equal(disposed, 2 * JOURNEYS.length * REPETITIONS);
+  for (const viewport of ["laptop", "phone"])
+    for (const journey of ["file", "composer"])
+      for (let repeat = 1; repeat <= REPETITIONS; repeat++) {
+        assert.deepEqual(skipped.find(({ step }) => step === `${viewport}/${journey}/cold/${repeat}`), {
+          step: `${viewport}/${journey}/cold/${repeat}`, reason: "Timed out waiting for the diff workers to settle",
+        });
+        assert.deepEqual(skipped.find(({ step }) => step === `${viewport}/${journey}/warm/${repeat}`), {
+          step: `${viewport}/${journey}/warm/${repeat}`, reason: "Cold journey did not finish; no warm baseline",
+        });
+      }
 });
 
 test("cold samples record through worker activation and a second settle without extending timings", async (t) => {
