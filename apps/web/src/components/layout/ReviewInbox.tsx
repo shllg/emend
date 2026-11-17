@@ -22,7 +22,9 @@ export function ReviewInbox({
   const navigate = useNavigate();
   const { reviewId } = useParams({ strict: false });
   const search = useRef<HTMLInputElement>(null);
+  const showInbox = useRef<HTMLButtonElement>(null);
   const focusSearch = useRef(false);
+  const openedReview = useRef(false);
   const mountedInbox = (layout === "desktop" && !collapsed) || (layout === "tablet" && open);
   const move = (delta: 1 | -1) => {
     if (!query.data) return false;
@@ -49,6 +51,9 @@ export function ReviewInbox({
   useEffect(() => {
     if (layout !== "tablet") setOpen(false);
   }, [layout]);
+  useEffect(() => {
+    if (open) openedReview.current = false;
+  }, [open]);
   if (layout === "desktop" && !collapsed)
     return (
       <aside
@@ -57,6 +62,7 @@ export function ReviewInbox({
         className="flex min-h-0 w-(--inbox-w) shrink-0 flex-col bg-app"
       >
         <Inbox
+          surface="pane"
           compact
           onCollapse={() => onCollapsedChange(true)}
           searchRef={(node) => {
@@ -71,7 +77,7 @@ export function ReviewInbox({
     );
   return (
     <>
-      <InboxRail onShow={() => (layout === "tablet" ? setOpen(true) : onCollapsedChange(false))} />
+      <InboxRail showRef={showInbox} onShow={() => (layout === "tablet" ? setOpen(true) : onCollapsedChange(false))} />
       {layout === "tablet" && (
         <Sheet
           side="left"
@@ -82,8 +88,29 @@ export function ReviewInbox({
             if (!value) focusSearch.current = false;
           }}
           initialFocus={focusSearch.current ? search : undefined}
+          returnFocus={() => {
+            if (!openedReview.current) return null;
+            const active = document.activeElement;
+            // Keep focus moved by navigation; otherwise return to Show inbox.
+            return active instanceof HTMLElement &&
+              active !== document.body &&
+              active.isConnected &&
+              !active.closest('[role="dialog"]')
+              ? active
+              : showInbox.current;
+          }}
         >
-          <Inbox compact hideHead searchRef={search} onOpen={() => setOpen(false)} />
+          <Inbox
+            surface="sheet"
+            compact
+            hideHead
+            searchRef={search}
+            onOpen={() => {
+              openedReview.current = true;
+              focusSearch.current = false;
+              setOpen(false);
+            }}
+          />
         </Sheet>
       )}
     </>

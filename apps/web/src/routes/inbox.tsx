@@ -24,16 +24,19 @@ import {
   inboxSequence,
   readInboxKind,
 } from "../lib/inbox-list.ts";
+import { type InboxSurface, useInboxScroll, useInboxView } from "../lib/inbox-view.tsx";
 import { useShortcut } from "../lib/use-shortcut.tsx";
 import { useWakeTimer } from "../lib/wake-timer.ts";
 
 export function Inbox({
+  surface,
   compact = false,
   hideHead = false,
   onCollapse,
   onOpen,
   searchRef,
 }: {
+  surface: InboxSurface;
   compact?: boolean;
   hideHead?: boolean;
   onCollapse?: () => void;
@@ -42,12 +45,14 @@ export function Inbox({
 }) {
   const query = useQuery(inboxQuery());
   const root = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const { reviewId } = useParams({ strict: false });
-  const [filter, setFilter] = useState("");
-  const [machine, setMachine] = useState("");
-  const [project, setProject] = useState("");
+  const [{ filter, machine, project, open }, updateView] = useInboxView();
+  // The pane scrolls its list; the page and sheet scroll the inbox's parent.
+  const scroller = () => (surface === "pane" ? list.current : root.current?.parentElement);
+  useInboxScroll(surface, scroller, !!query.data);
   const [kind, setKindState] = useState<InboxKind>(readInboxKind);
   const setKind = (next: InboxKind) => {
     setKindState(next);
@@ -57,7 +62,6 @@ export function Inbox({
     } catch {}
   };
   const [now, setNow] = useState(Date.now);
-  const [open, setOpen] = useState<Record<string, boolean>>({});
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(interval);
@@ -179,7 +183,7 @@ export function Inbox({
           icon={Search}
           size="sm"
           value={filter}
-          onChange={(event) => setFilter(event.target.value)}
+          onChange={(event) => updateView({ filter: event.target.value })}
           className={compact ? "min-w-0" : "min-w-0 flex-[1_1_16rem]"}
         />
         {items.length > 0 && (
@@ -204,7 +208,7 @@ export function Inbox({
             size="sm"
             className="min-w-0 max-w-full"
             value={machineFilter}
-            onChange={(event) => setMachine(event.target.value)}
+            onChange={(event) => updateView({ machine: event.target.value })}
             options={[
               { value: "", label: "All machines" },
               ...origins.map((origin) => ({ value: origin.id, label: origin.name })),
@@ -218,12 +222,12 @@ export function Inbox({
             size="sm"
             className="min-w-0 max-w-full"
             value={projectFilter}
-            onChange={(event) => setProject(event.target.value)}
+            onChange={(event) => updateView({ project: event.target.value })}
             options={[{ value: "", label: "All projects" }, ...projects.map((name) => ({ value: name, label: name }))]}
           />
         )}
       </div>
-      <div className={compact ? "relative min-h-0 flex-1 overflow-y-auto px-1.5 pt-1 pb-3" : "py-1"}>
+      <div ref={list} className={compact ? "relative min-h-0 flex-1 overflow-y-auto px-1.5 pt-1 pb-3" : "py-1"}>
         {query.isPending && (
           <p role="status" className="p-4">
             Loading reviews…
@@ -244,9 +248,7 @@ export function Inbox({
             <Button
               variant="ghost"
               onClick={() => {
-                setFilter("");
-                setMachine("");
-                setProject("");
+                updateView({ filter: "", machine: "", project: "" });
                 setKind("");
               }}
             >
@@ -284,7 +286,7 @@ export function Inbox({
                         "inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 font-[inherit] text-[inherit] uppercase",
                         group && "min-w-0",
                       )}
-                      onClick={() => setOpen((current) => ({ ...current, [key]: !current[key] }))}
+                      onClick={() => updateView((view) => ({ open: { ...view.open, [key]: !view.open[key] } }))}
                     >
                       <Icon icon={expanded ? ChevronDown : ChevronRight} size={12} />
                       {heading}
@@ -326,7 +328,7 @@ export function InboxPage() {
   return (
     <AppFrame>
       <main className="relative min-h-0 flex-1 overflow-y-auto">
-        <Inbox />
+        <Inbox surface="page" />
       </main>
     </AppFrame>
   );

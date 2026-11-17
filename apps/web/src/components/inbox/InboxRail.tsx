@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { PanelLeftOpen } from "lucide-react";
+import type { Ref } from "react";
 import { inboxQuery, serverNow } from "../../api/queries.ts";
 import { inboxSections } from "../../lib/inbox-list.ts";
 import { OriginBadge } from "../status/OriginBadge.tsx";
@@ -9,7 +10,7 @@ import { Tooltip } from "../ui/Tooltip.tsx";
 import { cn } from "../ui/utils.ts";
 import { doneDimmed, looksDone, needsAttention } from "./ReviewRow.tsx";
 
-export function InboxRail({ onShow }: { onShow: () => void }) {
+export function InboxRail({ onShow, showRef }: { onShow: () => void; showRef?: Ref<HTMLButtonElement> }) {
   // The collapsed rail ignores kind and machine filters; the expanded inbox applies its kind choice.
   const query = useQuery(inboxQuery());
   return (
@@ -17,7 +18,7 @@ export function InboxRail({ onShow }: { onShow: () => void }) {
       aria-label="Inbox"
       className="flex w-(--inbox-w-collapsed) shrink-0 flex-col items-center gap-2 border-r border-line-1 bg-app py-2"
     >
-      <IconButton label="Show inbox" icon={PanelLeftOpen} onClick={onShow} />
+      <IconButton ref={showRef} label="Show inbox" icon={PanelLeftOpen} onClick={onShow} />
       <div className="relative min-h-0 w-full flex-1 overflow-y-auto">
         <ul className="flex flex-col items-center gap-0.5">
           {inboxSections(query.data?.items ?? [], serverNow(query.data), { groups: query.data?.groups })

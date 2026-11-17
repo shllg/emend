@@ -5,6 +5,7 @@ import { X } from "lucide-react";
 import {
   type ComponentProps,
   type MouseEvent,
+  type ReactNode,
   type Ref,
   useCallback,
   useEffect,
@@ -22,7 +23,8 @@ import { LazyDiffPane } from "../components/diff/LazyDiffPane.tsx";
 import { isDiffTarget } from "../components/diff/targets.ts";
 import { FilesView } from "../components/files/FilesView.tsx";
 import { AppFrame } from "../components/layout/AppFrame.tsx";
-import { Panes } from "../components/layout/Panes.tsx";
+import { useReviewFrameActions } from "../components/layout/more-menu.ts";
+import { PaneFrame, Panes } from "../components/layout/Panes.tsx";
 import { PhoneTabs } from "../components/layout/PhoneTabs.tsx";
 import { ReviewInbox } from "../components/layout/ReviewInbox.tsx";
 import { ReviewTabs } from "../components/layout/ReviewTabs.tsx";
@@ -280,15 +282,11 @@ function LoadedReview({
   review,
   published,
   titleRef,
-  collapsed,
-  setCollapsed,
 }: {
   routeId: string;
   review: ReviewView;
   published: number;
   titleRef: Ref<HTMLHeadingElement>;
-  collapsed: boolean;
-  setCollapsed: (collapsed: boolean) => void;
 }) {
   // Read search and hash from one location: route matches can lag during navigation.
   const theme = useThemePick();
@@ -342,7 +340,6 @@ function LoadedReview({
   const [currentTopic, setCurrentTopic] = useState<string>();
   const revision = useViewedRevision(review.id, query.data);
   const [downloadOpen, setDownloadOpen] = useState(false);
-  const downloadReturnFocus = useRef<HTMLButtonElement>(null);
   const onDownload =
     revision && (downloadDocChoices(revision).length > 0 || downloadHasComments(revision) || downloadHasDiff(revision))
       ? () => setDownloadOpen(true)
@@ -877,14 +874,13 @@ function LoadedReview({
     viewedCount: diffFiles.filter((file) => file.viewed === "viewed").length,
   };
   const ready = Math.max(published, review.newestRevision);
+  const downloadReturnFocus = useReviewFrameActions({
+    onCommentReview: revision ? commentOnReview : undefined,
+    downloadHref: reviewDownloadPath(review.id, seq, [], { theme: theme === "system" ? undefined : theme }),
+    onDownload,
+  });
   return (
-    <AppFrame
-      isReview
-      onCommentReview={revision ? commentOnReview : undefined}
-      downloadHref={reviewDownloadPath(review.id, seq, [], { theme: theme === "system" ? undefined : theme })}
-      onDownload={onDownload}
-      menuTriggerRef={downloadReturnFocus}
-    >
+    <>
       {revision && (
         <DownloadDialog
           key={`${review.id}:${seq}`}
@@ -919,9 +915,9 @@ function LoadedReview({
           </Sheet>
         )}
         <Panes
-          inbox={<ReviewInbox collapsed={collapsed} onCollapsedChange={setCollapsed} />}
           tab={tab}
           hasDiff={hasDiff}
+          pending={!revision}
           codePanel={panelOpen ? `Code: ${resolvedCode?.title}` : undefined}
           readingLayout={docsVisible && openDoc?.kind === "html" ? "original" : undefined}
           phoneTabs={<PhoneTabs {...tabProps} />}
@@ -1160,7 +1156,7 @@ function LoadedReview({
           }
         />
       </div>
-    </AppFrame>
+    </>
   );
 }
 /** A review in the bin keeps its address: say so, and offer Restore, the bin and the inbox. */
@@ -1189,16 +1185,16 @@ function BinNotice({ reviewId }: { reviewId: string }) {
     }
   };
   return (
-    <AppFrame isReview>
-      <main className="flex flex-col items-start gap-3 p-5">
+    <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+      <div className="flex flex-col items-start gap-3 p-5">
         <p role="status">This review is in the bin.</p>
         <Button variant="primary" loading={pending} onClick={() => void restore()}>
           Restore
         </Button>
         <Link to="/settings">Open the bin</Link>
         <Link to="/">Back to the inbox</Link>
-      </main>
-    </AppFrame>
+      </div>
+    </main>
   );
 }
 export function ReviewPage() {
@@ -1220,43 +1216,42 @@ export function ReviewPage() {
       titleRef.current?.focus();
     }
   }, [reviewId, query.data, query.isError]);
+  let content: ReactNode;
   // A refetch that answers 404 keeps the old data, so this check comes first.
   if (query.error instanceof ApiError && query.error.status === 404 && query.error.code === "unknown_review")
-    return (
-      <AppFrame isReview>
-        <main className="p-5">
+    content = (
+      <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+        <div className="p-5">
           <p role="status">This review was deleted or never existed.</p>
           <Link to="/">Back to the inbox</Link>
-        </main>
-      </AppFrame>
+        </div>
+      </main>
     );
   // Same reason: a refetch that answers 409 keeps the old data.
-  if (query.error instanceof ApiError && query.error.status === 409 && query.error.code === "review_in_bin")
-    return <BinNotice reviewId={reviewId} />;
-  if (query.data)
-    return (
-      <LoadedReview
-        key={reviewId}
-        routeId={reviewId}
-        review={query.data}
-        published={published}
-        titleRef={titleRef}
-        collapsed={collapsed}
-        setCollapsed={setCollapsed}
-      />
+  else if (query.error instanceof ApiError && query.error.status === 409 && query.error.code === "review_in_bin")
+    content = <BinNotice reviewId={reviewId} />;
+  else if (query.data)
+    content = (
+      <LoadedReview key={reviewId} routeId={reviewId} review={query.data} published={published} titleRef={titleRef} />
+    );
+  else
+    content = (
+      <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+        <div className="p-5">
+          {query.isError ? (
+            <>
+              <p role="alert">Could not load this review.</p>
+              <Button onClick={() => void query.refetch()}>Retry</Button>
+            </>
+          ) : (
+            <p role="status">Loading review…</p>
+          )}
+        </div>
+      </main>
     );
   return (
     <AppFrame isReview>
-      <main className="p-5">
-        {query.isError ? (
-          <>
-            <p role="alert">Could not load this review.</p>
-            <Button onClick={() => void query.refetch()}>Retry</Button>
-          </>
-        ) : (
-          <p role="status">Loading review…</p>
-        )}
-      </main>
+      <PaneFrame inbox={<ReviewInbox collapsed={collapsed} onCollapsedChange={setCollapsed} />}>{content}</PaneFrame>
     </AppFrame>
   );
 }

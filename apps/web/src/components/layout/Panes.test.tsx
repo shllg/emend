@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { defaultLayout, layoutKey, layoutStore } from "../../lib/layout-store.ts";
-import { Panes } from "./Panes.tsx";
+import { PaneFrame, Panes } from "./Panes.tsx";
 
 let width: number;
 let layoutWidth: number;
@@ -17,11 +17,15 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     return new DOMRect(0, 0, this.classList.contains("em-panes") ? layoutWidth : width, 800);
   });
+  const measurements: (() => void)[] = [];
+  measure = () => {
+    for (const measure of measurements) measure();
+  };
   vi.stubGlobal(
     "ResizeObserver",
     class {
       constructor(callback: () => void) {
-        measure = callback;
+        measurements.push(callback);
       }
       observe() {}
       disconnect() {}
@@ -36,15 +40,16 @@ afterEach(() => {
 
 function mount(hasDiff = true) {
   const ui = (tab: string) => (
-    <Panes
-      inbox={<aside>Inbox</aside>}
-      header={null}
-      reading="Writeup"
-      diff={<input aria-label="Diff editor" defaultValue="Draft" />}
-      phoneTabs={null}
-      tab={tab}
-      hasDiff={hasDiff}
-    />
+    <PaneFrame inbox={<aside>Inbox</aside>}>
+      <Panes
+        header={null}
+        reading="Writeup"
+        diff={<input aria-label="Diff editor" defaultValue="Draft" />}
+        phoneTabs={null}
+        tab={tab}
+        hasDiff={hasDiff}
+      />
+    </PaneFrame>
   );
   const view = render(ui("writeup"));
   return { ...view, rerender: (tab: string) => view.rerender(ui(tab)) };
@@ -91,7 +96,6 @@ test("doc headers follow the tab row height only in Split mode", () => {
   );
   render(
     <Panes
-      inbox={null}
       header={null}
       reading="Doc"
       diff="Code"
@@ -273,6 +277,45 @@ test("a 1280px Split layout reserves both CSS handle widths and keeps at least 4
   }
 });
 
+test("a loading placeholder and pending revision keep the clamped inbox width from Split", () => {
+  layoutWidth = 1280;
+  localStorage.setItem(layoutKey, JSON.stringify({ ...layoutStore.getSnapshot(), inboxWidth: 520 }));
+  const { rerender } = render(
+    <PaneFrame inbox={<aside>Inbox</aside>}>
+      <Panes header={null} reading="Writeup" diff="Code" phoneTabs={null} tab="writeup" hasDiff />
+    </PaneFrame>,
+  );
+  const handle = inbox();
+  expect(handle.getAttribute("aria-valuenow")).toBe("464");
+  expect(handle.getAttribute("aria-valuemax")).toBe("464");
+  rerender(
+    <PaneFrame inbox={<aside>Inbox</aside>}>
+      <main>Loading review…</main>
+    </PaneFrame>,
+  );
+  expect(inbox().getAttribute("aria-valuenow")).toBe("464");
+  expect(inbox().getAttribute("aria-valuemax")).toBe("464");
+  const content = (pending: boolean) => (
+    <PaneFrame inbox={<aside>Inbox</aside>}>
+      <Panes
+        header={null}
+        reading="Writeup"
+        diff={null}
+        phoneTabs={null}
+        tab="writeup"
+        hasDiff={false}
+        pending={pending}
+      />
+    </PaneFrame>
+  );
+  rerender(content(true));
+  expect(inbox().getAttribute("aria-valuenow")).toBe("464");
+  expect(inbox().getAttribute("aria-valuemax")).toBe("464");
+  rerender(content(false));
+  expect(inbox().getAttribute("aria-valuenow")).toBe("472");
+  expect(inbox().getAttribute("aria-valuemax")).toBe("472");
+});
+
 test.each([
   { pane: "tabs", hasDiff: true },
   { pane: "split", hasDiff: false },
@@ -323,16 +366,7 @@ test.each([
   }));
   layoutStore.update({ pane: { desktop: mode, tablet: mode } });
   render(
-    <Panes
-      inbox={null}
-      header={null}
-      reading="Writeup"
-      diff="Code"
-      phoneTabs={null}
-      tab={tab}
-      hasDiff
-      codePanel="Code: Seed"
-    />,
+    <Panes header={null} reading="Writeup" diff="Code" phoneTabs={null} tab={tab} hasDiff codePanel="Code: Seed" />,
   );
   const diff = screen.queryByTestId("diff-pane");
   if (pixels === 390 && tab === "writeup") {
