@@ -18,7 +18,7 @@ import {
 import net from "node:net";
 import { join } from "node:path";
 import type { Repo } from "./repo.ts";
-import { hcAddress, WtError } from "./validate.ts";
+import { hcAddress, readFileBytes, WtError } from "./validate.ts";
 
 export const PORT_MIN = 3637;
 export const PORT_MAX = 3656;
@@ -89,8 +89,10 @@ function pidAlive(pid: number): boolean {
 
 function readLockPid(path: string): number | null {
   try {
-    const n = Number.parseInt(readFileSync(path, "utf8").trim(), 10);
-    return Number.isInteger(n) && n > 0 ? n : null;
+    const text = readFileBytes(path, 64).toString("utf8").trim();
+    if (!/^[0-9]+$/.test(text)) return null;
+    const n = Number(text);
+    return Number.isSafeInteger(n) && n > 0 ? n : null;
   } catch {
     return null;
   }

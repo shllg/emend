@@ -101,6 +101,7 @@ function inputPath(value: unknown): string {
     [...value].length > 300 ||
     value.includes("\\") ||
     CONTROLS.test(value) ||
+    /[\p{Cf}\u2028\u2029]/u.test(value) ||
     value.split("/").some((part) => part === "" || part === "." || part === "..")
   )
     invalid("path");
@@ -165,9 +166,21 @@ function timestamp(value: unknown): void {
 function claimTarget(value: unknown): { branch: string; worktree: string } {
   const data = object(value, ["branch", "worktree"]);
   const branch = checkedBranch(data.branch);
-  if (typeof data.worktree !== "string" || !isAbsolute(data.worktree) || CONTROLS.test(data.worktree))
+  const worktree = data.worktree;
+  if (
+    typeof worktree !== "string" ||
+    worktree.length < 1 ||
+    [...worktree].length > 4096 ||
+    !isAbsolute(worktree) ||
+    CONTROLS.test(worktree) ||
+    /[\p{Cf}\u2028\u2029]/u.test(worktree)
+  )
     invalid("worktree");
-  return { branch, worktree: data.worktree };
+  // Local worktrees may live under a real home path; only secret shapes are refused here.
+  const hits = checkText(worktree, "claim worktree", { terms: [], allowed: [], notes: [] }, { lineExemptions: false });
+  const hit = hits.find((hit) => hit === "claim worktree: secret shape");
+  if (hit) throw new WtError(2, hit);
+  return { branch, worktree };
 }
 
 function sha256(value: string): string {
@@ -256,30 +269,67 @@ function readFinding(repo: Repo, id: string): Finding {
   }
 }
 
-function writeFinding(repo: Repo, finding: Finding): void {
-  storageDirectory(repo, true);
-  const temp = join(findingsDir(repo), `.${finding.id}.${randomBytes(12).toString("hex")}.tmp`);
-  let created = false;
+function stageFinding(repo: Repo, id: string, content: string | Buffer, temps: Set<string>): string {
+  const temp = join(findingsDir(repo), `.${id}.${randomBytes(12).toString("hex")}.tmp`);
+  const fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+  temps.add(temp);
   try {
-    const fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-    created = true;
-    try {
-      writeFileSync(fd, `${JSON.stringify(finding, null, 2)}\n`);
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
-    renameSync(temp, join(findingsDir(repo), `${finding.id}.json`));
-  } catch {
-    storageError();
+    writeFileSync(fd, content);
+    fsyncSync(fd);
   } finally {
-    if (created) {
+    closeSync(fd);
+  }
+  return temp;
+}
+
+function writeFindings(repo: Repo, findings: Finding[]): void {
+  storageDirectory(repo, true);
+  const temps = new Set<string>();
+  const renamed: { id: string; path: string; previous: Buffer | null }[] = [];
+  let failed = false;
+  let restored = true;
+  try {
+    // Preserve the original bytes, including whitespace, for a failed batch's rollback.
+    const staged = findings.map((finding) => {
+      const path = join(findingsDir(repo), `${finding.id}.json`);
+      const previous = lstatSync(path, { throwIfNoEntry: false }) ? readFileBytes(path) : null;
+      const temp = stageFinding(repo, finding.id, `${JSON.stringify(finding, null, 2)}\n`, temps);
+      return { id: finding.id, path, previous, temp };
+    });
+    for (const record of staged) {
+      renameSync(record.temp, record.path);
+      temps.delete(record.temp);
+      renamed.push(record);
+    }
+  } catch {
+    failed = true;
+    for (const record of renamed.reverse()) {
+      try {
+        if (record.previous === null) unlinkSync(record.path);
+        else {
+          const temp = stageFinding(repo, record.id, record.previous, temps);
+          renameSync(temp, record.path);
+          temps.delete(temp);
+        }
+      } catch {
+        restored = false;
+      }
+    }
+  } finally {
+    for (const temp of temps) {
       try {
         unlinkSync(temp);
       } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "ENOENT") storageError();
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
+          failed = true;
+          restored = false;
+        }
       }
     }
+  }
+  if (failed) {
+    if (!restored) throw new WtError(1, "Some findings may have changed; run `bin/wt findings list`.");
+    storageError();
   }
 }
 
@@ -315,7 +365,7 @@ export function addFinding(repo: Repo, value: unknown): { id: string; created: b
     const commit = headCommit(repo);
     const tree = runBytes(
       "git",
-      [...GIT_BASE, "--literal-pathspecs", "ls-tree", "-z", "--full-tree", "HEAD", "--", input.path],
+      [...GIT_BASE, "--literal-pathspecs", "ls-tree", "-z", "--full-tree", commit, "--", input.path],
       gitOptions(repo),
     );
     gitResult(tree.code, 2, "Could not read finding path at HEAD.");
@@ -329,9 +379,10 @@ export function addFinding(repo: Repo, value: unknown): { id: string; created: b
     } catch {
       invalid("path: expected UTF-8");
     }
-    const line = text.split("\n")[input.line - 1];
+    const lines = text === "" ? [] : text.split("\n");
+    if (text.endsWith("\n")) lines.pop();
+    const line = lines[input.line - 1];
     if (line === undefined) invalid("line");
-    if (headCommit(repo) !== commit) throw new WtError(1, "HEAD changed while reading the finding. Try again.");
     const anchor = sha256(line.trim());
     const hash = fingerprint(input, anchor);
     const id = `f-${hash.slice(0, 12)}`;
@@ -340,16 +391,18 @@ export function addFinding(repo: Repo, value: unknown): { id: string; created: b
       if (readFinding(repo, id).fingerprint !== hash) storageError();
       return { id, created: false };
     }
-    writeFinding(repo, {
-      ...input,
-      version: 1,
-      id,
-      fingerprint: hash,
-      commit,
-      anchor,
-      state: "open",
-      createdAt: new Date().toISOString(),
-    });
+    writeFindings(repo, [
+      {
+        ...input,
+        version: 1,
+        id,
+        fingerprint: hash,
+        commit,
+        anchor,
+        state: "open",
+        createdAt: new Date().toISOString(),
+      },
+    ]);
     return { id, created: true };
   });
 }
@@ -371,7 +424,11 @@ export function showFinding(repo: Repo, id: string): Finding & { orphaned: boole
   return withOrphaned(readFinding(repo, findingId(id)));
 }
 
-export function listFindings(repo: Repo, filters: FindingFilters = {}): (Finding & { orphaned: boolean })[] {
+export function listFindings(
+  repo: Repo,
+  filters: FindingFilters = {},
+  onSkipped?: (message: string) => void,
+): (Finding & { orphaned: boolean })[] {
   if (filters.state !== undefined) choice(filters.state, STATES, "state");
   if (filters.kind !== undefined) choice(filters.kind, KINDS, "kind");
   if (filters.path !== undefined) inputPath(filters.path);
@@ -382,13 +439,23 @@ export function listFindings(repo: Repo, filters: FindingFilters = {}): (Finding
   } catch {
     return storageError();
   }
-  return names
-    .filter((name) => name.endsWith(".json"))
-    .map((name) => {
-      const id = name.slice(0, -5);
-      if (!ID.test(id)) storageError();
-      return readFinding(repo, id);
-    })
+  const findings: Finding[] = [];
+  for (const name of names) {
+    if (!name.endsWith(".json")) continue;
+    const id = name.slice(0, -5);
+    if (!ID.test(id)) {
+      onSkipped?.("Skipped a finding file with an invalid name.");
+      continue;
+    }
+    try {
+      findings.push(readFinding(repo, id));
+    } catch {
+      // A bad record is skippable; an unsafe storage directory still fails the call.
+      storageDirectory(repo);
+      onSkipped?.(`Skipped unreadable finding ${id}.`);
+    }
+  }
+  return findings
     .filter(
       (finding) =>
         (filters.state === undefined || finding.state === filters.state) &&
@@ -411,7 +478,10 @@ export function claimFindings(repo: Repo, ids: string[], target: { branch: strin
     const findings = validIds.map((id) => readFinding(repo, id));
     if (findings.some((finding) => finding.state !== "open" || finding.kind === "security" || finding.size === "large"))
       throw new WtError(1, "Only open, small, non-security findings can be claimed. Nothing was changed.");
-    for (const finding of findings) writeFinding(repo, { ...finding, state: "claimed", claim });
+    writeFindings(
+      repo,
+      findings.map((finding) => ({ ...finding, state: "claimed", claim })),
+    );
   });
 }
 
@@ -421,10 +491,13 @@ export function releaseFindings(repo: Repo, ids: string[]): void {
     const findings = validIds.map((id) => readFinding(repo, id));
     if (findings.some((finding) => finding.state !== "claimed"))
       throw new WtError(1, "Only claimed findings can be released. Nothing was changed.");
-    for (const finding of findings) {
-      delete finding.claim;
-      writeFinding(repo, { ...finding, state: "open" });
-    }
+    writeFindings(
+      repo,
+      findings.map((finding) => {
+        delete finding.claim;
+        return { ...finding, state: "open" };
+      }),
+    );
   });
 }
 
@@ -454,7 +527,7 @@ export function resolveFinding(repo: Repo, id: string, value: FindingResolution)
       if (result.stdout.trim() !== "commit") invalid("fixed commit");
     }
     delete finding.claim;
-    writeFinding(repo, { ...finding, state, resolution: detail });
+    writeFindings(repo, [{ ...finding, state, resolution: detail }]);
   });
 }
 
@@ -484,11 +557,15 @@ export const commands: CommandTable = {
     }
     if (action === "list") {
       const { flags } = options(rest, { state: "string", kind: "string", path: "string", json: "boolean" });
-      const findings = listFindings(repo, {
-        state: flags.state as string | undefined,
-        kind: flags.kind as string | undefined,
-        path: flags.path as string | undefined,
-      });
+      const findings = listFindings(
+        repo,
+        {
+          state: flags.state as string | undefined,
+          kind: flags.kind as string | undefined,
+          path: flags.path as string | undefined,
+        },
+        (message) => process.stderr.write(`${message}\n`),
+      );
       if (flags.json) process.stdout.write(`${JSON.stringify(findings, null, 2)}\n`);
       else
         for (const finding of findings)

@@ -1,18 +1,22 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs, {
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
+import { pathToFileURL } from "node:url";
 import {
   addFinding,
   claimFindings,
@@ -203,6 +207,68 @@ test("add refuses untracked paths and lines beyond the committed blob", async ()
   assert.equal(addFinding(repo, input()).created, true);
 });
 
+test("a final newline ends a line and an empty blob has no lines", async () => {
+  commitFile(fx.main, "empty.md", "");
+  for (const value of [input({ line: 2 }), input({ path: "empty.md" })]) {
+    const result = await cli("add", "--file", inputFile(value));
+    assert.equal(result.code, 2, result.stderr);
+    assert.equal(result.stdout, "");
+    assert.equal(existsSync(findingsDir(repo)), false);
+  }
+  commitFile(fx.main, "two-lines.md", "a\nb");
+  const result = await cli("add", "--file", inputFile(input({ path: "two-lines.md", line: 2 })));
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(showFinding(repo, result.stdout.trim()).anchor, createHash("sha256").update("b").digest("hex"));
+});
+
+test("add and list path filters refuse invisible and line-separator characters", async () => {
+  for (const character of ["\u202e", "\u200b", "\u2028", "\u2029"]) {
+    const path = `docs/${character}note.md`;
+    const added = await cli("add", "--file", inputFile(input({ path })));
+    const listed = await cli("list", "--path", path);
+    for (const result of [added, listed]) {
+      assert.equal(result.code, 2, result.stderr);
+      assert.equal(result.stdout, "");
+      assert.equal(result.stderr.includes(path), false);
+    }
+    assert.equal(existsSync(stateDir(repo)), false);
+  }
+});
+
+test("add anchors the captured commit even when HEAD moves after rev-parse", () => {
+  const original = gitIn(fx.main, "rev-parse", "HEAD");
+  const later = commitFile(fx.main, "README.md", "replacement\n");
+  gitIn(fx.main, "update-ref", "HEAD", original);
+  const git = join(env.fakeBin, "git");
+  const realGit = realpathSync(git);
+  rmSync(git);
+  writeFileSync(
+    git,
+    `#!${process.execPath}
+const { spawnSync } = require("node:child_process");
+const args = process.argv.slice(2);
+const capturing = args.at(-2) === "rev-parse" && args.at(-1) === "HEAD";
+const result = spawnSync(${JSON.stringify(realGit)}, args, {
+  stdio: capturing ? ["inherit", "pipe", "inherit"] : "inherit",
+});
+if (capturing && result.status === 0) {
+  const moved = spawnSync(${JSON.stringify(realGit)}, ["update-ref", "HEAD", ${JSON.stringify(later)}], {
+    stdio: "inherit",
+  });
+  if (moved.status !== 0) process.exit(1);
+  process.stdout.write(result.stdout);
+}
+process.exitCode = result.status ?? 1;
+`,
+    { mode: 0o755 },
+  );
+  const result = addFinding(repo, input());
+  const finding = showFinding(repo, result.id);
+  assert.equal(finding.commit, original);
+  assert.equal(finding.anchor, createHash("sha256").update("fixture").digest("hex"));
+  assert.equal(gitIn(fx.main, "rev-parse", "HEAD"), later);
+});
+
 test("only regular tracked UTF-8 blobs are accepted, with literal paths", () => {
   commitFile(fx.main, "docs/note[1].md", "first\nsecond");
   assert.equal(addFinding(repo, input({ path: "docs/note[1].md", line: 2 })).created, true);
@@ -285,6 +351,115 @@ test("claim rejects security, large, non-open, unknown and invalid ids as one ba
   assert.throws(() => claimFindings(repo, [open], { ...target(), worktree: "relative" }), fails(2));
   assert.throws(() => claimFindings(repo, [open], { ...target(), branch: "main" }), fails(2));
   assert.deepEqual(listFindings(repo), before);
+});
+
+test("claim accepts and stores a worktree under a home folder", () => {
+  const id = addFinding(repo, input()).id;
+  const worktree = ["", "ho" + "me", "worker" + "-name", "src", "repo"].join("/");
+  claimFindings(repo, [id], { ...target(), worktree });
+  const record = JSON.parse(readFileSync(stored(id), "utf8"));
+  assert.equal(record.state, "claimed");
+  assert.equal(record.claim.worktree, worktree);
+  assert.deepEqual(listFindings(repo), [{ ...record, orphaned: true }]);
+});
+
+test("claim worktree paths reject secrets, invisible text, separators and overlong input", () => {
+  const id = addFinding(repo, input()).id;
+  const before = readFileSync(stored(id));
+  const secret = ["gh", "p_", "Ab01".repeat(9)].join("");
+  for (const suffix of [secret, "\u202e", "\u200b", "\u2028", "\u2029", "\n", "a".repeat(4096)]) {
+    const worktree = join(env.root, suffix);
+    assert.throws(
+      () => claimFindings(repo, [id], { ...target(), worktree }),
+      (error) =>
+        error instanceof WtError &&
+        error.code === 2 &&
+        !error.message.includes(worktree) &&
+        (suffix !== secret || (error.message.startsWith("claim worktree:") && !error.message.includes(secret))),
+    );
+    assert.deepEqual(readFileSync(stored(id)), before);
+    assert.deepEqual(readdirSync(findingsDir(repo)), [`${id}.json`]);
+    assert.equal(existsSync(join(stateDir(repo), "findings.lock")), false);
+  }
+});
+
+for (const action of ["claim", "release"] as const) {
+  for (const failure of ["staging", "rename"] as const) {
+    test(`${action} restores both records after a second-record ${failure} failure`, (t) => {
+      const ids = [addFinding(repo, input()).id, addFinding(repo, input({ rule: "second" })).id];
+      if (action === "release") claimFindings(repo, ids, target());
+      // Noncanonical whitespace must also survive rollback byte for byte.
+      for (const id of ids) {
+        const record = JSON.parse(readFileSync(stored(id), "utf8"));
+        writeFileSync(stored(id), ` ${JSON.stringify(record)}\n\n`);
+      }
+      const before = ids.map((id) => readFileSync(stored(id)));
+      const originalFsync = fs.fsyncSync;
+      const originalRename = fs.renameSync;
+      let staged = 0;
+      let renamed = 0;
+      const fsync = t.mock.method(fs, "fsyncSync", (fd: number) => {
+        if (++staged === 2 && failure === "staging") throw new Error("synthetic staging failure");
+        originalFsync(fd);
+      });
+      const rename = t.mock.method(fs, "renameSync", (...args: Parameters<typeof fs.renameSync>) => {
+        assert.ok(staged >= 2, "all records must be staged before the first rename");
+        if (++renamed === 2 && failure === "rename") throw new Error("synthetic rename failure");
+        originalRename(...args);
+      });
+      syncBuiltinESMExports();
+      try {
+        assert.throws(
+          () => (action === "claim" ? claimFindings(repo, ids, target()) : releaseFindings(repo, ids)),
+          (error) => error instanceof WtError && error.code === 1 && error.message.includes("Nothing was changed"),
+        );
+      } finally {
+        fsync.mock.restore();
+        rename.mock.restore();
+        syncBuiltinESMExports();
+      }
+      assert.equal(staged, failure === "staging" ? 2 : 3);
+      assert.equal(renamed, failure === "staging" ? 0 : 3);
+      assert.deepEqual(
+        ids.map((id) => readFileSync(stored(id))),
+        before,
+      );
+      assert.deepEqual(readdirSync(findingsDir(repo)).sort(), ids.map((id) => `${id}.json`).sort());
+      for (const id of ids) assert.equal(statSync(stored(id)).mode & 0o777, 0o600);
+      assert.equal(existsSync(join(stateDir(repo), "findings.lock")), false);
+    });
+  }
+}
+
+test("a failed rollback reports possible changes and cleans up remaining temp files", (t) => {
+  const first = addFinding(repo, input()).id;
+  const second = addFinding(repo, input({ rule: "second" })).id;
+  const originalRename = fs.renameSync;
+  let renamed = 0;
+  const mocked = t.mock.method(fs, "renameSync", (...args: Parameters<typeof fs.renameSync>) => {
+    if (++renamed >= 2) throw new Error("synthetic rename and rollback failure");
+    originalRename(...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    assert.throws(
+      () => claimFindings(repo, [first, second], target()),
+      (error) =>
+        error instanceof WtError &&
+        error.code === 1 &&
+        error.message.includes("Some findings may have changed") &&
+        error.message.includes("bin/wt findings list") &&
+        !error.message.includes("Nothing was changed"),
+    );
+  } finally {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+  }
+  assert.equal(renamed, 3);
+  assert.equal(showFinding(repo, first).state, "claimed");
+  assert.equal(showFinding(repo, second).state, "open");
+  assert.deepEqual(readdirSync(findingsDir(repo)).sort(), [`${first}.json`, `${second}.json`].sort());
+  assert.equal(existsSync(join(stateDir(repo), "findings.lock")), false);
 });
 
 test("resolve and release implement state transitions and clear claims", async () => {
@@ -428,12 +603,18 @@ test("symlinked state and findings folders are refused on reads and writes witho
   }
   writeFileSync(stateDir(repo), "not a directory");
   assert.throws(() => addFinding(repo, input()), fails(1));
+  assert.throws(() => listFindings(repo), fails(1));
   assert.equal(readFileSync(stateDir(repo), "utf8"), "not a directory");
+  rmSync(stateDir(repo));
+  mkdirSync(stateDir(repo));
+  writeFileSync(findingsDir(repo), "not a directory");
+  assert.throws(() => listFindings(repo), fails(1));
 });
 
 test("strict stored validation rejects corruption, extra fields and invalid state metadata", () => {
   const id = addFinding(repo, input()).id;
   const original = JSON.parse(readFileSync(stored(id), "utf8"));
+  const secret = ["gh", "p_", "Ab01".repeat(9)].join("");
   for (const patch of [
     { version: 2 },
     { id: "f-000000000000" },
@@ -450,6 +631,10 @@ test("strict stored validation rejects corruption, extra fields and invalid stat
     { claim: { ...target(), at: original.createdAt } },
     { state: "claimed" },
     { state: "claimed", claim: { ...target(), at: original.createdAt, extra: true } },
+    ...[secret, "\u202e", "\u200b", "\u2028", "\u2029", "\n", "a".repeat(4096)].map((suffix) => ({
+      state: "claimed",
+      claim: { ...target(), worktree: join(env.root, suffix), at: original.createdAt },
+    })),
     { state: "fixed" },
     { state: "fixed", resolution: { at: original.createdAt, commit: "bad" } },
     { state: "stale", resolution: { at: original.createdAt, reason: "extra" } },
@@ -460,13 +645,27 @@ test("strict stored validation rejects corruption, extra fields and invalid stat
     writeFileSync(stored(id), JSON.stringify({ ...original, ...patch }));
     const before = readFileSync(stored(id));
     assert.throws(() => showFinding(repo, id), fails(1));
-    assert.throws(() => listFindings(repo), fails(1));
+    const skipped: string[] = [];
+    assert.deepEqual(
+      listFindings(repo, {}, (message) => skipped.push(message)),
+      [],
+    );
+    assert.deepEqual(skipped, [`Skipped unreadable finding ${id}.`]);
     assert.throws(() => addFinding(repo, input()), fails(1));
+    assert.throws(() => claimFindings(repo, [id], target()), fails(1));
+    assert.throws(() => releaseFindings(repo, [id]), fails(1));
+    assert.throws(() => resolveFinding(repo, id, { stale: true }), fails(1));
     assert.deepEqual(readFileSync(stored(id)), before);
   }
   for (const bytes of [Buffer.from("{"), Buffer.from([0xff]), Buffer.alloc(1024 * 1024 + 1)]) {
     writeFileSync(stored(id), bytes);
     assert.throws(() => showFinding(repo, id), fails(1));
+    const skipped: string[] = [];
+    assert.deepEqual(
+      listFindings(repo, {}, (message) => skipped.push(message)),
+      [],
+    );
+    assert.deepEqual(skipped, [`Skipped unreadable finding ${id}.`]);
   }
   rmSync(stored(id));
   const outside = join(env.root, "record.json");
@@ -475,6 +674,40 @@ test("strict stored validation rejects corruption, extra fields and invalid stat
   assert.throws(() => addFinding(repo, input()), fails(1));
   assert.throws(() => showFinding(repo, id), fails(1));
   assert.deepEqual(JSON.parse(readFileSync(outside, "utf8")), original);
+});
+
+test("list skips corrupt, symlinked and invalidly named records with diagnostics only on stderr", async () => {
+  const valid = addFinding(repo, input()).id;
+  const corrupt = addFinding(repo, input({ rule: "corrupt" })).id;
+  const linked = addFinding(repo, input({ rule: "linked" })).id;
+  const outside = join(env.root, "outside.json");
+  const linkedBytes = readFileSync(stored(linked));
+  writeFileSync(outside, linkedBytes);
+  rmSync(stored(linked));
+  symlinkSync(outside, stored(linked));
+  writeFileSync(stored(corrupt), "{not json");
+  const invalidName = `${["gh", "p_", "Ab01".repeat(9)].join("")}\n\u202e.json`;
+  writeFileSync(join(findingsDir(repo), invalidName), "{}");
+  const expected = [
+    `Skipped unreadable finding ${corrupt}.`,
+    `Skipped unreadable finding ${linked}.`,
+    "Skipped a finding file with an invalid name.",
+  ].sort();
+  const skipped: string[] = [];
+  const findings = listFindings(repo, {}, (message) => skipped.push(message));
+  assert.deepEqual(findings, [showFinding(repo, valid)]);
+  assert.deepEqual(skipped.sort(), expected);
+  for (const flags of [[], ["--json"]]) {
+    const result = await cli("list", ...flags);
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(result.stderr.trimEnd().split("\n").sort(), expected);
+    if (flags.length) assert.deepEqual(JSON.parse(result.stdout), findings);
+    else assert.equal(result.stdout, `${valid}\topen\tbug\tmedium\tREADME.md:1\t${input().title}\n`);
+  }
+  assert.equal(readFileSync(stored(corrupt), "utf8"), "{not json");
+  assert.equal(lstatSync(stored(linked)).isSymbolicLink(), true);
+  assert.deepEqual(readFileSync(outside), linkedBytes);
+  assert.equal(existsSync(join(findingsDir(repo), invalidName)), true);
 });
 
 test("failed atomic rename removes its temp file and releases the lock", (t) => {
@@ -535,6 +768,83 @@ test("busy state locks name the lock and exit 69", (t) => {
     }
     assert.deepEqual(readdirSync(stateDir(repo)), [`${name}.lock`]);
     rmSync(lock);
+  }
+});
+
+test("a symlinked findings lock is never read through or reaped", (t) => {
+  mkdirSync(stateDir(repo));
+  const lock = join(stateDir(repo), "findings.lock");
+  const outside = join(env.root, "outside-lock");
+  const content = `${deadPid()}\n`;
+  writeFileSync(outside, content);
+  symlinkSync(outside, lock);
+  let now = 0;
+  const clock = t.mock.method(Date, "now", () => (now += 31_000));
+  const read = t.mock.method(fs, "readSync");
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => withStateLock(repo, "findings", () => assert.fail("must not run")), fails(69));
+    assert.equal(read.mock.callCount(), 0);
+  } finally {
+    clock.mock.restore();
+    read.mock.restore();
+    syncBuiltinESMExports();
+  }
+  assert.equal(lstatSync(lock).isSymbolicLink(), true);
+  assert.equal(readFileSync(outside, "utf8"), content);
+  assert.deepEqual(readdirSync(stateDir(repo)), ["findings.lock"]);
+});
+
+test("a FIFO findings lock times out without blocking", async (t) => {
+  const mkfifo = env.realPath
+    .split(delimiter)
+    .filter(Boolean)
+    .map((dir) => join(dir, "mkfifo"))
+    .find(existsSync);
+  if (!mkfifo) return t.skip("mkfifo is unavailable");
+  mkdirSync(stateDir(repo));
+  const lock = join(stateDir(repo), "findings.lock");
+  const made = spawnSync(mkfifo, [lock], { encoding: "utf8", timeout: 5000 });
+  assert.equal(made.status, 0, made.stderr);
+  const script = `
+    import { withStateLock } from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, "registry.ts")).href)};
+    let now = 0;
+    Date.now = () => (now += 31_000);
+    try {
+      withStateLock(${JSON.stringify(repo)}, "findings", () => { throw new Error("must not run"); });
+    } catch (error) {
+      process.stderr.write(error.message + "\\n");
+      process.exitCode = error.code ?? 1;
+    }
+  `;
+  const result = await runWt(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: fx.main,
+    timeoutMs: 5000,
+  });
+  assert.equal(result.code, 69, result.stderr);
+  assert.equal(result.stderr, "Another bin/wt call holds the findings lock. Try again in a moment.\n");
+  assert.equal(lstatSync(lock).isFIFO(), true);
+  assert.deepEqual(readdirSync(stateDir(repo)), ["findings.lock"]);
+});
+
+test("nonregular, oversized and malformed findings locks are left alone", (t) => {
+  mkdirSync(stateDir(repo));
+  const lock = join(stateDir(repo), "findings.lock");
+  const pid = deadPid();
+  for (const content of [null, `${pid}${" ".repeat(64)}`, `${pid}garbage`, "0", "9007199254740992", ""]) {
+    if (content === null) mkdirSync(lock);
+    else writeFileSync(lock, content);
+    let now = 0;
+    const mocked = t.mock.method(Date, "now", () => (now += 31_000));
+    try {
+      assert.throws(() => withStateLock(repo, "findings", () => assert.fail("must not run")), fails(69));
+    } finally {
+      mocked.mock.restore();
+    }
+    if (content === null) assert.equal(lstatSync(lock).isDirectory(), true);
+    else assert.equal(readFileSync(lock, "utf8"), content);
+    assert.deepEqual(readdirSync(stateDir(repo)), ["findings.lock"]);
+    rmSync(lock, { recursive: true });
   }
 });
 
