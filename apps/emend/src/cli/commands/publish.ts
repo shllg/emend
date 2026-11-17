@@ -260,7 +260,9 @@ export async function publishCommand(
     const count = [...published].filter((path) => !folder.path || path.startsWith(`${folder.path}/`)).length;
     io.stderr(`emend: published ${count} files from ${escapeReference(folder.argument)}\n`);
   }
-  for (const path of result.data.unrendered) io.stderr(`emend: could not render ${escapeReference(path)}\n`);
+  const htmlPaths = new Set(collected.request.files.filter(isRenderedHtmlDoc).map((file) => file.path));
+  for (const path of result.data.unrendered)
+    if (!htmlPaths.has(path)) io.stderr(`emend: could not render ${escapeReference(path)}\n`);
   const lookNotes: Record<HtmlLookReason, string> = {
     structure: "shows in emend's look",
     "marked-emend": "shows in emend's look: marked emend, its own styles apply on top",

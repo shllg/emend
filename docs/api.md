@@ -707,8 +707,10 @@ the cascade ranks the outer document's rules above a shadow tree's.
 A doc whose `look` is `emend` also receives emend's pub stylesheet as one style element, placed
 after any leading byte order mark, whitespace, comments and doctype, so the doc never falls into
 quirks mode. The stylesheet is `pub-frame.css` from the web build: emend's tokens and element
-styles in the cascade layer `emend`, with its fonts as `data:` URLs. It contains no `</`; a missing
-or invalid file gives a small fallback that sets `color-scheme: light dark` with system colours.
+styles in the cascade layer `emend`, with its fonts as `data:` URLs. It contains no `</`, backslash,
+`@import`, `image-set(` or `src(`. Every `url(` must use `data:`. The build and every server read
+check these rules and the `pubStylesheetBytes` limit. A missing or rejected sheet falls back to a
+minimal light and dark sheet with system colours.
 Every unlayered rule of the doc's own CSS wins over it. The doc's headers stay exactly as above.
 
 Asset and error responses under `/content/` send:
@@ -765,6 +767,12 @@ no further messages or commands are accepted until a parent-initiated reload or 
 navigating to another doc under the current doc's key still returns 404 and triggers that state.
 Other frame messages carry ready notifications, proposed quotes, quote highlights and thread
 scroll requests; saving a comment requires the reviewer's explicit action.
+
+After each `emend:ready`, the parent sends `{ type: "emend:layout", wide: boolean }` first, before
+highlights, doc paths or position restore. It sends layout again whenever the app crosses its
+768px breakpoint. The bridge sets `data-emend-layout` to `wide` or `narrow` on the root element.
+emend's look uses it to match the Markdown reader's layout. Until it arrives, the frame's own
+width decides.
 
 After `emend:ready`, the parent sends `{ type: "emend:docs", paths: FilePath[] }`, the exact doc
 paths in this revision. Bridge links resolve against the existing document base, decode each
@@ -1000,7 +1008,8 @@ Rendered blocks and JSON bytes count every path, including the writeup.
 Docs render in manifest order; once a doc exceeds either budget it and all later Markdown docs
 remain unrendered. A writeup alone exceeding either budget returns 413 `too_large` with
 "The writeup has too many blocks."
-The CLI warns `emend: could not render <path>` for each; the publish still succeeds.
+The CLI warns `emend: could not render <path>` for Markdown docs. For HTML docs, it reports only
+that the page shows as custom because emend could not read its structure. The publish still succeeds.
 The URL is `<baseUrl>/r/<reviewId>` (HTTP or HTTPS);
 it is bounded by `pathChars` (4096 characters). At each start the local server saves its listening URL in `server-url.json` in the state
 directory, mode 0600. With Tailscale, it replaces that value with the public origin only after

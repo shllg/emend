@@ -23,6 +23,7 @@ export const FrameToParent = span
 export type DocNavigation = Extract<typeof FrameToParent._output, { type: "emend:navigate" }>;
 export const ParentToFrame = empty
   .extend({ type: literal("emend:highlight"), anchors: span.extend({ threadId }).array() })
+  .or(empty.extend({ type: literal("emend:layout"), wide: FileView.shape.hasOld }))
   .or(empty.extend({ type: literal("emend:scroll"), threadId }))
   .or(
     empty.extend({

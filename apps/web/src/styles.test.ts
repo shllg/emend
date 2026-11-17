@@ -211,9 +211,9 @@ test("pub defaults use tokens, stay inside one emend layer and define the docume
   expect(link).toContain("text-underline-offset: 2px;");
   expect(css).toMatch(/a:hover\s*\{\s*color: var\(--fg-link-hover\);/);
   const body = /body\s*\{([^}]+)\}/.exec(css)?.[1] ?? "";
-  expect(body).toContain("max-width: none;");
+  expect(body).toContain("--reading-max: 68ch;");
+  expect(body).toContain("max-width: calc(var(--reading-max) + 2 * var(--space-4));");
   expect(body).toContain("padding: var(--space-4) var(--space-10) var(--space-8);");
-  expect(css).not.toContain("68ch");
   const boxedResets = [...css.matchAll(/(:is\([^{}]+?\)) > :(?:first|last)-child\s*\{\s*margin-(?:top|bottom): 0;/g)];
   expect(boxedResets).toHaveLength(2);
   for (const [, selector] of boxedResets) {
@@ -221,6 +221,15 @@ test("pub defaults use tokens, stay inside one emend layer and define the docume
     expect(selector).not.toMatch(/\b(?:main|article)\b|(?:\(|,\s*)section(?:\s*,|\))/);
   }
   const flat = css.replace(/\s+/g, " ");
+  const wide =
+    "--reading-max: 1024px; max-width: calc(var(--reading-max) + 112px); " +
+    "padding: calc(var(--space-6) + var(--space-1)) 56px calc(var(--space-16) + var(--space-2)); " +
+    "padding-right: clamp(var(--space-8), calc(100% - var(--reading-max) - 56px), 56px);";
+  expect(flat).toContain(`:root[data-emend-layout="wide"] body { ${wide} }`);
+  expect(flat).toContain(`@media (min-width: 768px) { :root:not([data-emend-layout]) body { ${wide} } }`);
+  const narrow = "grid-template-columns: minmax(0, 1fr);";
+  expect(flat).toContain(`:root[data-emend-layout="narrow"] dl.facts { ${narrow} }`);
+  expect(flat).toContain(`@media (max-width: 767px) { :root:not([data-emend-layout]) dl.facts { ${narrow} } }`);
   for (const edge of ["nth-child", "nth-last-child"])
     expect(flat).toContain(`body :${edge}(1 of :not(script, style, meta, link, title, template)):not(`);
   const entry = readFileSync(join(webSource, "../pub-frame.css"), "utf8");

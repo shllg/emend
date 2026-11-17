@@ -62,6 +62,92 @@ test.each(["emend", "custom", undefined] as const)("%s look uses the matching lo
   expect(frame.classList.contains("bg-[#fff]")).toBe(look !== "emend");
   expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
 });
+
+test.each([true, false])("layout precedes restore on every ready and follows app width (wide=%s)", (initialWide) => {
+  let width = initialWide ? 820 : 700;
+  const listeners = new Map<string, Set<() => void>>();
+  vi.stubGlobal("matchMedia", (query: string) => {
+    const changes = listeners.get(query) ?? new Set<() => void>();
+    listeners.set(query, changes);
+    return {
+      matches: width >= Number(query.match(/\d+/)?.[0] ?? Infinity),
+      addEventListener: (_type: string, notify: () => void) => changes.add(notify),
+      removeEventListener: (_type: string, notify: () => void) => changes.delete(notify),
+    };
+  });
+  const resize = (wide: boolean) =>
+    act(() => {
+      width = wide ? 820 : 700;
+      for (const changes of listeners.values()) for (const notify of changes) notify();
+    });
+  const reading = {
+    key: "layout",
+    entry: {
+      title: "Synthetic",
+      revision: 2,
+      folds: new Map<string, boolean>(),
+      positions: new Map([["layout", { id: "h-0", fraction: 0.5 }]]),
+    },
+    returning: true,
+    visit: {},
+  };
+  const view = render(
+    <QueryClientProvider client={client}>
+      <HtmlDocFrame
+        reviewId={id}
+        revision={2}
+        changedBlocks={[]}
+        path={path}
+        contentUrl={doc.contentUrl}
+        threads={[]}
+        headings={[{ level: 2, text: "Part" }]}
+        docPaths={[path]}
+        reading={reading}
+      />
+    </QueryClientProvider>,
+  );
+  const frame = frameByTitle();
+  frame.setAttribute("width", initialWide ? "740" : "900");
+  const post = vi.fn();
+  Object.defineProperty(frame, "contentWindow", { value: { postMessage: post } });
+  fireEvent.load(frame);
+  expect(post).not.toHaveBeenCalled();
+  fireEvent(window, new MessageEvent("message", { source: frame.contentWindow, data: { type: "emend:ready" } }));
+  expect(post.mock.calls).toEqual([
+    [{ type: "emend:layout", wide: initialWide }, "*"],
+    [{ type: "emend:highlight", anchors: [] }, "*"],
+    [{ type: "emend:docs", paths: [path] }, "*"],
+    [{ type: "emend:goto", heading: 0, label: "Part", fraction: 0.5 }, "*"],
+  ]);
+  post.mockClear();
+  resize(!initialWide);
+  expect(post.mock.calls).toEqual([[{ type: "emend:layout", wide: !initialWide }, "*"]]);
+  fireEvent.load(frame);
+  post.mockClear();
+  resize(initialWide);
+  expect(post).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText(`Reload ${path}`));
+  const next = frameByTitle();
+  expect(next).not.toBe(frame);
+  const nextPost = vi.fn();
+  Object.defineProperty(next, "contentWindow", { value: { postMessage: nextPost } });
+  fireEvent.load(next);
+  resize(!initialWide);
+  expect(nextPost).not.toHaveBeenCalled();
+  fireEvent(window, new MessageEvent("message", { source: next.contentWindow, data: { type: "emend:ready" } }));
+  expect(nextPost.mock.calls).toEqual([
+    [{ type: "emend:layout", wide: !initialWide }, "*"],
+    [{ type: "emend:highlight", anchors: [] }, "*"],
+    [{ type: "emend:docs", paths: [path] }, "*"],
+    [{ type: "emend:goto", heading: 0, label: "Part", fraction: 0.5 }, "*"],
+  ]);
+  nextPost.mockClear();
+  view.unmount();
+  resize(initialWide);
+  expect(nextPost).not.toHaveBeenCalled();
+  expect(post).not.toHaveBeenCalled();
+});
+
 function FrameContent({
   values,
   docNavigation,
@@ -177,6 +263,14 @@ test("closed strict message schemas enforce every contract limit", () => {
   expect(ParentToFrame.safeParse({ type: "emend:scroll", threadId: id }).success).toBe(true);
   for (const fragment of ["", "x".repeat(1024)])
     expect(FrameToParent.safeParse({ type: "emend:navigate", path: "other.html", fragment }).success).toBe(true);
+});
+
+test("layout messages accept only a boolean wide value and no extra fields", () => {
+  for (const wide of [true, false])
+    expect(ParentToFrame.parse({ type: "emend:layout", wide })).toEqual({ type: "emend:layout", wide });
+  for (const wide of [undefined, null, "wide", "true", 0, 1, {}, []])
+    expect(ParentToFrame.safeParse({ type: "emend:layout", wide }).success).toBe(false);
+  expect(ParentToFrame.safeParse({ type: "emend:layout", wide: true, extra: true }).success).toBe(false);
 });
 
 test("the drawer includes this doc's unplaced threads without offering a frame jump", () => {

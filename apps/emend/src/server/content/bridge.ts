@@ -424,7 +424,13 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   }
   listen(window, "message", event => {
     if (event.source !== window.parent || !event.data || typeof event.data !== "object") return;
-    if (event.data.type === "emend:goto") goTo(event.data);
+    if (event.data.type === "emend:layout" && typeof event.data.wide === "boolean") {
+      const root = documentElement();
+      if (!root) return;
+      elementCall("setAttribute", root, "data-emend-layout", event.data.wide ? "wide" : "narrow");
+      schedulePosition();
+    }
+    else if (event.data.type === "emend:goto") goTo(event.data);
     else if (event.data.type === "emend:docs" && Array.isArray(event.data.paths)) {
       docs.clear();
       for (const path of event.data.paths) if (typeof path === "string") docs.add(path);

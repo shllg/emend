@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import { join } from "node:path";
-import { LIMITS } from "@emend/contract";
+import { LIMITS, pubStylesheetSafe } from "@emend/contract";
 import { regularFile } from "../http/pages.ts";
 
 export const FALLBACK_PUB_CSS = "@layer emend{:root{color-scheme:light dark;background:Canvas;color:CanvasText}}";
@@ -15,7 +15,7 @@ export function pubStylesheet(webRoot: string): Promise<string> {
       const file = await regularFile(root, join(root, "pub-frame.css"), LIMITS.pubStylesheetBytes);
       if (!file) throw new Error("Missing or oversized pub stylesheet");
       const text = new TextDecoder("utf-8", { fatal: true }).decode(file.bytes);
-      if (text.includes("</")) throw new Error("Unsafe pub stylesheet");
+      if (!pubStylesheetSafe(text)) throw new Error("Unsafe pub stylesheet");
       return text;
     })().catch(() => {
       stylesheets.delete(webRoot);

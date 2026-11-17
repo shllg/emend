@@ -75,7 +75,7 @@ test.each(["manifest", "shortcut", "json"])(
       revision: 1,
       placed: 0,
       unplaced: 0,
-      unrendered: ["failed.html"],
+      unrendered: ["failed.html", "plan.md"],
       url: "http://127.0.0.1:3636/r/synthetic",
     };
     f.setResponse(async (_url, init) => {
@@ -113,10 +113,13 @@ test.each(["manifest", "shortcut", "json"])(
     ]);
     for (const [path, , note] of sources) {
       if (note) expect(f.stderr).toContain(`emend: ${path.replace("\u034f", "\\u{34f}")} ${note}\n`);
-      else expect(f.stderr.join("")).not.toContain(path);
+      else expect(f.stderr.join("")).not.toContain(`${path} shows `);
     }
     expect(f.stderr.filter((line) => line.includes(" shows "))).toHaveLength(10);
-    expect(f.stderr).toContain("emend: could not render failed.html\n");
+    expect(f.stderr.filter((line) => line.includes("failed.html"))).toEqual([
+      "emend: failed.html shows as a custom page: emend could not read its structure\n",
+    ]);
+    expect(f.stderr.filter((line) => line.includes("plan.md"))).toEqual(["emend: could not render plan.md\n"]);
     expect(f.stderr.join("")).not.toContain("failed.html shows in emend");
     expect(f.stderr.join("")).not.toContain("<x-failure>");
     expect(f.stderr).toContain(

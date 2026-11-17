@@ -14,6 +14,10 @@ async function fixture() {
 test.each([
   "</style><script>alert(1)</script>",
   "</unrelated>",
+  '@import "https://evil.example/a.css";',
+  "body{background:url(https://evil.example/a.png)}",
+  String.raw`body{background:u\72l(https://evil.example/a.png)}`,
+  '@font-face{src:src("data:font/woff2;base64,AA==")}',
   Buffer.from([0xff]),
   " ".repeat(LIMITS.pubStylesheetBytes + 1),
 ])("rejected stylesheets fall back and are retried %#", async (source) => {

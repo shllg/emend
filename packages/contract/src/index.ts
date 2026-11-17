@@ -17,6 +17,7 @@ export * from "./limits.ts";
 export * from "./links.ts";
 export * from "./manifest.ts";
 export * from "./placement.ts";
+export * from "./pub-stylesheet.ts";
 export * from "./publish.ts";
 export * from "./review.ts";
 export * from "./send.ts";

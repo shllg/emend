@@ -1,4 +1,4 @@
-import { LIMITS } from "@emend/contract";
+import { pubStylesheetSafe } from "@emend/contract";
 
 type BuildFile = { type: "asset"; fileName: string; source: string | Uint8Array } | { type: "chunk"; fileName: string };
 
@@ -12,11 +12,6 @@ export function pickPubStylesheet(output: readonly BuildFile[]): string {
 }
 
 export function checkPubStylesheet(css: string): void {
-  if (
-    new TextEncoder().encode(css).byteLength > LIMITS.pubStylesheetBytes ||
-    css.includes("</") ||
-    /@import\b|image-set\(/i.test(css) ||
-    [...css.matchAll(/url\(/gi)].some((match) => !/^url\(\s*["']?data:/i.test(css.slice(match.index)))
-  )
+  if (!pubStylesheetSafe(css))
     throw new Error("The pub stylesheet exceeds its byte limit or contains unsafe content or external assets.");
 }
