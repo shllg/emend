@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { inflateSync, gzipSync } from "node:zlib";
 import { buildSeedPlan, SEED } from "./perf/seed.ts";
-import { assertOutputFolder, assertPrivateAncestors, assertRefFolder, assertWorkspaceRoot, refParent } from "./perf/guards.ts";
+import {
+  assertOutputFolder, assertPrivateAncestors, assertRefFolder, assertWorkspaceRoot,
+  cacheHome, processAlive, refParent, removeStaleRefExports, writeRefMarker,
+} from "./perf/guards.ts";
 import { childEnvironment, chromiumArgs } from "./screenshots/safety.ts";
 import { isReportRun, type PerfRun, renderReport, writeReport } from "./perf/report.ts";
 import { distribution, NetworkMeasurement, REPETITIONS, routePattern } from "./perf/metrics.ts";
@@ -60,10 +63,179 @@ test("seed plan is identical and has every declared size, including the two spec
   assert.doesNotMatch(source, /Math\.random|Date\.now|new Date/);
 });
 
-test("ref parents use the user's cache folder with a home fallback", () => {
-  assert.equal(refParent({ XDG_CACHE_HOME: "/synthetic/cache" }, "/synthetic/account"), "/synthetic/cache/emend-perf");
-  assert.equal(refParent({}, "/synthetic/account"), "/synthetic/account/.cache/emend-perf");
-  assert.equal(refParent({ XDG_CACHE_HOME: "" }, "/synthetic/account"), "/synthetic/account/.cache/emend-perf");
+test("cache homes and ref parents use only absolute XDG cache folders with a home fallback", () => {
+  const variants = [
+    { parent: { XDG_CACHE_HOME: "/synthetic/cache" }, expected: "/synthetic/cache" },
+    { parent: {}, expected: "/synthetic/account/.cache" },
+    { parent: { XDG_CACHE_HOME: "" }, expected: "/synthetic/account/.cache" },
+    { parent: { XDG_CACHE_HOME: "relative/cache" }, expected: "/synthetic/account/.cache" },
+  ];
+  for (const { parent, expected } of variants) {
+    assert.equal(cacheHome(parent, "/synthetic/account"), expected);
+    assert.equal(refParent(parent, "/synthetic/account"), join(expected, "emend-perf"));
+  }
+});
+
+test("ref markers record the run privately and refuse to overwrite an existing marker", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "emend-ref-marker-test-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const marker = join(root, ".emend-perf-ref");
+  writeRefMarker(root, true, 123, "synthetic-host");
+  const contents = readFileSync(marker, "utf8");
+  assert.deepEqual(JSON.parse(contents), { pid: 123, host: "synthetic-host", keep: true });
+  assert.equal(lstatSync(marker).mode & 0o777, 0o600);
+  assert.throws(() => writeRefMarker(root, false, 456, "another-host"), { code: "EEXIST" });
+  assert.equal(readFileSync(marker, "utf8"), contents);
+  const defaults = join(root, "defaults");
+  mkdirSync(defaults);
+  writeRefMarker(defaults, false);
+  assert.deepEqual(JSON.parse(readFileSync(join(defaults, ".emend-perf-ref"), "utf8")), {
+    pid: process.pid, host: hostname(), keep: false,
+  });
+});
+
+test("process liveness uses signal zero and treats only ESRCH as a gone process", () => {
+  const calls: unknown[] = [];
+  assert.equal(processAlive(123, (pid, signal) => { calls.push([pid, signal]); return true; }), true);
+  assert.deepEqual(calls, [[123, 0]]);
+  for (const code of ["EPERM", "ESRCH", "EIO"]) {
+    assert.equal(processAlive(123, (pid, signal) => {
+      assert.equal(pid, 123);
+      assert.equal(signal, 0);
+      throw Object.assign(new Error("synthetic failure"), { code });
+    }), code !== "ESRCH");
+  }
+  for (const error of [new Error("unknown failure"), null, "unknown failure"])
+    assert.equal(processAlive(123, () => { throw error; }), true);
+});
+
+test("ref sweeping requires a valid marker for a gone process on this host without keep", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "emend-ref-sweep-test-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const marker = { pid: process.pid + 1, host: "synthetic-host", keep: false };
+  const cases: { name: string; marker?: string; alive?: boolean; removed?: boolean }[] = [
+    { name: "stale", marker: JSON.stringify(marker), removed: true },
+    { name: "live", marker: JSON.stringify(marker), alive: true },
+    { name: "current process", marker: JSON.stringify({ ...marker, pid: process.pid }) },
+    { name: "kept", marker: JSON.stringify({ ...marker, keep: true }) },
+    { name: "another host", marker: JSON.stringify({ ...marker, host: "another-host" }) },
+    { name: "missing marker" },
+    { name: "invalid JSON", marker: "{" },
+    { name: "null marker", marker: "null" },
+    { name: "array marker", marker: "[]" },
+    { name: "missing pid", marker: JSON.stringify({ host: marker.host, keep: false }) },
+    { name: "zero pid", marker: JSON.stringify({ ...marker, pid: 0 }) },
+    { name: "negative pid", marker: JSON.stringify({ ...marker, pid: -1 }) },
+    { name: "fractional pid", marker: JSON.stringify({ ...marker, pid: 1.5 }) },
+    { name: "string pid", marker: JSON.stringify({ ...marker, pid: "123" }) },
+    { name: "invalid host", marker: JSON.stringify({ ...marker, host: 123 }) },
+    { name: "missing keep", marker: JSON.stringify({ pid: marker.pid, host: marker.host }), removed: true },
+  ];
+  for (const variant of cases) {
+    await t.test(variant.name, () => {
+      const parent = mkdtempSync(join(root, "case-"));
+      const folder = mkdtempSync(join(parent, "ref-"));
+      const markerPath = join(folder, ".emend-perf-ref");
+      writeFileSync(join(folder, "payload"), "synthetic export");
+      if (variant.marker !== undefined) writeFileSync(markerPath, variant.marker);
+      const logs: string[] = [], probed: number[] = [];
+      removeStaleRefExports(parent, {
+        uid: lstatSync(parent).uid, host: marker.host,
+        alive: (pid) => { probed.push(pid); return variant.alive ?? false; },
+        log: (line) => logs.push(line),
+      });
+      assert.deepEqual(probed, variant.removed || variant.alive ? [marker.pid] : []);
+      assert.equal(existsSync(folder), !variant.removed);
+      assert.deepEqual(logs, variant.removed
+        ? [`- removed a leftover ref export of an earlier run (pid ${marker.pid})`] : []);
+      if (!variant.removed) {
+        assert.equal(readFileSync(join(folder, "payload"), "utf8"), "synthetic export");
+        if (variant.marker !== undefined) assert.equal(readFileSync(markerPath, "utf8"), variant.marker);
+        else assert.equal(existsSync(markerPath), false);
+      }
+    });
+  }
+});
+
+test("ref sweeping skips links, non-directories, non-file markers and names outside the export pattern", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "emend-ref-sweep-links-test-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const parent = join(root, "cache"), target = join(root, "outside");
+  mkdirSync(parent);
+  mkdirSync(target);
+  writeRefMarker(target, false, process.pid + 1, "synthetic-host");
+  writeFileSync(join(target, "payload"), "synthetic export");
+  const targetMarker = join(target, ".emend-perf-ref");
+  const contents = readFileSync(targetMarker, "utf8");
+  const exportLink = join(parent, "ref-XXXXXX");
+  symlinkSync(target, exportLink);
+  const markerLinkFolder = mkdtempSync(join(parent, "ref-"));
+  const markerLink = join(markerLinkFolder, ".emend-perf-ref");
+  symlinkSync(targetMarker, markerLink);
+  const directoryMarker = join(mkdtempSync(join(parent, "ref-")), ".emend-perf-ref");
+  mkdirSync(directoryMarker);
+  const file = join(parent, "ref-file01");
+  writeFileSync(file, "synthetic file");
+  const otherNames = ["other-ABC123", "ref-ABCDE", "ref-ABCDEFG", "ref-AB_CD1", "ref-ABC123\n"];
+  for (const name of otherNames) {
+    const folder = join(parent, name);
+    mkdirSync(folder);
+    writeRefMarker(folder, false, process.pid + 1, "synthetic-host");
+  }
+  const probed: number[] = [], logs: string[] = [];
+  removeStaleRefExports(parent, {
+    uid: lstatSync(parent).uid, host: "synthetic-host",
+    alive: (pid) => { probed.push(pid); return false; }, log: (line) => logs.push(line),
+  });
+  assert.deepEqual(probed, []);
+  assert.deepEqual(logs, []);
+  assert(lstatSync(exportLink).isSymbolicLink());
+  assert(lstatSync(markerLink).isSymbolicLink());
+  assert(lstatSync(directoryMarker).isDirectory());
+  assert.equal(readFileSync(file, "utf8"), "synthetic file");
+  assert.equal(readFileSync(targetMarker, "utf8"), contents);
+  assert.equal(readFileSync(join(target, "payload"), "utf8"), "synthetic export");
+  for (const name of otherNames) assert.equal(readFileSync(join(parent, name, ".emend-perf-ref"), "utf8"), contents);
+});
+
+test("ref sweeping keeps exports owned by another uid", (t) => {
+  const parent = mkdtempSync(join(tmpdir(), "emend-ref-sweep-owner-test-"));
+  t.after(() => rmSync(parent, { recursive: true, force: true }));
+  const folders = Array.from({ length: 2 }, () => mkdtempSync(join(parent, "ref-")));
+  for (const folder of folders) writeRefMarker(folder, false, process.pid + 1, "synthetic-host");
+  const probed: number[] = [], logs: string[] = [];
+  removeStaleRefExports(parent, {
+    uid: lstatSync(parent).uid + 1, host: "synthetic-host",
+    alive: (pid) => { probed.push(pid); return false; }, log: (line) => logs.push(line),
+  });
+  assert.deepEqual(probed, []);
+  assert.deepEqual(logs, []);
+  for (const folder of folders) assert(existsSync(join(folder, ".emend-perf-ref")));
+});
+
+test("a ref removal error logs one warning and the sweep continues", (t) => {
+  const parent = mkdtempSync(join(tmpdir(), "emend-ref-sweep-error-test-"));
+  t.after(() => rmSync(parent, { recursive: true, force: true }));
+  const folders = Array.from({ length: 2 }, () => mkdtempSync(join(parent, "ref-")));
+  const pid = process.pid + 1;
+  for (const folder of folders) writeRefMarker(folder, false, pid, "synthetic-host");
+  const attempted: string[] = [], logs: string[] = [];
+  removeStaleRefExports(parent, {
+    uid: lstatSync(parent).uid, host: "synthetic-host", alive: () => false, log: (line) => logs.push(line),
+  }, (folder, options) => {
+    assert.equal(typeof folder, "string");
+    attempted.push(String(folder));
+    assert.deepEqual(options, { recursive: true, force: true });
+    if (attempted.length === 1) throw Object.assign(new Error("synthetic removal failure"), { code: "EACCES" });
+    rmSync(folder, options);
+  });
+  assert.equal(attempted.length, 2);
+  assert(existsSync(attempted[0]));
+  assert(!existsSync(attempted[1]));
+  assert.deepEqual(logs, [
+    `- warning: could not remove leftover ref export ${attempted[0]} (EACCES)`,
+    `- removed a leftover ref export of an earlier run (pid ${pid})`,
+  ]);
 });
 
 test("private ref ancestors include the folder and root and allow only the current uid or root", () => {
@@ -88,10 +260,10 @@ test("private ref ancestors reject unsafe metadata at the first affected folder"
   const paths = ["/cache/emend-perf/ref-synthetic", "/cache/emend-perf", "/cache", "/"];
   const safe = { uid: 1000, mode: 0o40700, isDirectory: () => true, isSymbolicLink: () => false };
   const cases = [
-    { name: "group writable", entry: { ...safe, mode: 0o40770 }, reason: "is writable by group or others" },
-    { name: "other writable", entry: { ...safe, mode: 0o40702 }, reason: "is writable by group or others" },
-    { name: "sticky shared directory", entry: { ...safe, mode: 0o41777 }, reason: "is writable by group or others" },
-    { name: "another owner", entry: { ...safe, uid: 1001 }, reason: "is owned by another user" },
+    { name: "group writable", entry: { ...safe, mode: 0o40770 }, reason: "is writable by its group or by others, who could add modules that Node would load" },
+    { name: "other writable", entry: { ...safe, mode: 0o40702 }, reason: "is writable by its group or by others, who could add modules that Node would load" },
+    { name: "sticky shared directory", entry: { ...safe, mode: 0o41777 }, reason: "is writable by its group or by others, who could add modules that Node would load" },
+    { name: "another owner", entry: { ...safe, uid: 1001 }, reason: "is owned by another user, who could add modules that Node would load" },
     { name: "symbolic link", entry: { ...safe, isDirectory: () => false, isSymbolicLink: () => true }, reason: "is a symbolic link" },
     { name: "non-directory", entry: { ...safe, mode: 0o100600, isDirectory: () => false }, reason: "is not a directory" },
   ];
@@ -103,7 +275,7 @@ test("private ref ancestors reject unsafe metadata at the first affected folder"
           visited.push(path);
           return path === folder ? entry : safe;
         }), {
-          message: `The ref folder's parent ${folder} ${reason}; Node would load modules from its node_modules`,
+          message: `${folder === paths[0] ? "The ref folder" : "The ref folder's parent"} ${folder} ${reason}`,
         });
         assert.deepEqual(visited, paths.slice(0, paths.indexOf(folder) + 1));
       });
@@ -168,7 +340,7 @@ test("output protects real state; ref exports also reject the checkout and paths
   for (const [, args] of checks) assert.match(args, /, "perf output"$/);
 });
 
-test("ref exports use canonical cache paths and check private ancestors before and after creation", () => {
+test("ref exports guard the cache before sweeping and mark the export immediately after tracking it", () => {
   const main = readFileSync(new URL("./perf.ts", import.meta.url), "utf8");
   assert.doesNotMatch(main, /mkdtempSync\(join\(tmpDir,/);
   const start = main.indexOf("if (options.ref) {", main.indexOf("async function main()"));
@@ -177,15 +349,17 @@ test("ref exports use canonical cache paths and check private ancestors before a
   const branch = main.slice(start, end);
   const steps = [
     "const parent = refParent();",
+    'if (!process.getuid) throw new Error("--ref needs a POSIX system");',
+    "const uid = process.getuid();",
     'assertRefFolder(join(parent, "ref-candidate"), checkout, parent, protectedDirs, canonicalPath);',
     "mkdirSync(parent, { recursive: true, mode: 0o700 });",
     "const canonicalParent = canonicalPath(parent);",
-    'if (!process.getuid) throw new Error("--ref needs a POSIX system");',
-    "const uid = process.getuid();",
     "assertPrivateAncestors(canonicalParent, uid);",
     'assertRefFolder(join(canonicalParent, "ref-candidate"), checkout, canonicalParent, protectedDirs, canonicalPath);',
+    "removeStaleRefExports(canonicalParent, { uid });",
     'source = mkdtempSync(join(canonicalParent, "ref-"));',
     "sealed.addRoot(source);",
+    "writeRefMarker(source, options.keep);",
     "source = canonicalPath(source);",
     "assertPrivateAncestors(source, uid);",
     "assertRefFolder(source, checkout, canonicalParent, protectedDirs, canonicalPath);",
@@ -197,6 +371,9 @@ test("ref exports use canonical cache paths and check private ancestors before a
     previous = position;
   }
   assert.match(branch, /source = mkdtempSync\([^;]+;\s*sealed\.addRoot\(source\);/);
+  assert.match(branch, /sealed\.addRoot\(source\);\s*writeRefMarker\(source, options\.keep\);/);
+  assert.equal((main.match(/removeStaleRefExports\(/g) ?? []).length, 1, "only the --ref branch sweeps");
+  assert(end < main.indexOf('git(checkout, "archive",', start));
   assert(end < main.indexOf("const install = await sealed.run("));
 });
 
@@ -287,6 +464,8 @@ test("build children use Node then pnpm on PATH and reuse only the parent Corepa
     { parent, expected: "/synthetic/corepack" },
     { parent: { ...parent, COREPACK_HOME: undefined }, expected: "/synthetic/cache/node/corepack" },
     { parent: { ...parent, COREPACK_HOME: undefined, XDG_CACHE_HOME: undefined }, expected: "/synthetic/account/.cache/node/corepack" },
+    { parent: { ...parent, COREPACK_HOME: undefined, XDG_CACHE_HOME: "" }, expected: "/synthetic/account/.cache/node/corepack" },
+    { parent: { ...parent, COREPACK_HOME: undefined, XDG_CACHE_HOME: "relative/cache" }, expected: "/synthetic/account/.cache/node/corepack" },
   ];
   for (const variant of variants) {
     assert.deepEqual(buildEnvironment(sealed, "/synthetic/pnpm/bin/pnpm", variant.parent, "/synthetic/node/bin/node", "/synthetic/account"), {

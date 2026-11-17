@@ -1,13 +1,80 @@
-import { lstatSync, type Stats } from "node:fs";
-import { homedir } from "node:os";
+import { lstatSync, readFileSync, readdirSync, rmSync, type Stats, writeFileSync } from "node:fs";
+import { homedir, hostname } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { assertOutputFolder, inside } from "../screenshots/safety.ts";
+
+export function cacheHome(
+  parent: Record<string, string | undefined> = process.env,
+  parentHome = homedir(),
+): string {
+  return parent.XDG_CACHE_HOME && isAbsolute(parent.XDG_CACHE_HOME) ? parent.XDG_CACHE_HOME : join(parentHome, ".cache");
+}
 
 export function refParent(
   parent: Record<string, string | undefined> = process.env,
   parentHome = homedir(),
 ): string {
-  return join(parent.XDG_CACHE_HOME || join(parentHome, ".cache"), "emend-perf");
+  return join(cacheHome(parent, parentHome), "emend-perf");
+}
+
+export function writeRefMarker(folder: string, keep: boolean, pid = process.pid, host = hostname()): void {
+  writeFileSync(join(folder, ".emend-perf-ref"), JSON.stringify({ pid, host, keep }), { flag: "wx", mode: 0o600 });
+}
+
+export function processAlive(pid: number, kill = process.kill): boolean {
+  try {
+    kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !(error && typeof error === "object" && "code" in error && error.code === "ESRCH");
+  }
+}
+
+/** The caller guards the canonical parent before sweeping; uncertain entries stay. */
+export function removeStaleRefExports(
+  parent: string,
+  { uid, host = hostname(), alive = processAlive, log = console.log }: {
+    uid: number;
+    host?: string;
+    alive?: (pid: number) => boolean;
+    log?: (line: string) => void;
+  },
+  remove: typeof rmSync = rmSync,
+): void {
+  let names: string[];
+  try {
+    names = readdirSync(parent);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (name.length !== 10 || !/^ref-[A-Za-z0-9]{6}$/.test(name)) continue;
+    const folder = join(parent, name);
+    let pid: number;
+    try {
+      const entry = lstatSync(folder);
+      if (entry.isSymbolicLink() || !entry.isDirectory() || entry.uid !== uid) continue;
+      const markerPath = join(folder, ".emend-perf-ref");
+      const markerStat = lstatSync(markerPath);
+      if (markerStat.isSymbolicLink() || !markerStat.isFile()) continue;
+      const marker = JSON.parse(readFileSync(markerPath, "utf8"));
+      if (!marker || typeof marker !== "object" || !Number.isInteger(marker.pid) || marker.pid <= 0
+        || typeof marker.host !== "string" || marker.host !== host || marker.keep === true) continue;
+      pid = marker.pid;
+      if (pid === process.pid || alive(pid)) continue;
+    } catch {
+      // Missing, unreadable or invalid markers cannot prove that the run is gone.
+      continue;
+    }
+    try {
+      remove(folder, { recursive: true, force: true });
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? error.code : "unknown";
+      log(`- warning: could not remove leftover ref export ${folder} (${code})`);
+      continue;
+    }
+    log(`- removed a leftover ref export of an earlier run (pid ${pid})`);
+  }
 }
 
 /** Node can resolve modules from node_modules in any ancestor of the export. */
@@ -22,10 +89,9 @@ export function assertPrivateAncestors(
     let reason: string | undefined;
     if (entry.isSymbolicLink()) reason = "is a symbolic link";
     else if (!entry.isDirectory()) reason = "is not a directory";
-    else if (entry.uid !== uid && entry.uid !== 0) reason = "is owned by another user";
-    else if ((entry.mode & 0o022) !== 0) reason = "is writable by group or others";
-    if (reason)
-      throw new Error(`The ref folder's parent ${path} ${reason}; Node would load modules from its node_modules`);
+    else if (entry.uid !== uid && entry.uid !== 0) reason = "is owned by another user, who could add modules that Node would load";
+    else if ((entry.mode & 0o022) !== 0) reason = "is writable by its group or by others, who could add modules that Node would load";
+    if (reason) throw new Error(`${path === folder ? "The ref folder" : "The ref folder's parent"} ${path} ${reason}`);
     if (dirname(path) === path) return;
   }
 }

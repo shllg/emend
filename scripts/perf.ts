@@ -6,7 +6,10 @@ import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
 import { createSealedLifecycle } from "./screenshots/sealed.ts";
 import { canonicalPath, currentProtectedStateDirs } from "./screenshots/safety.ts";
-import { assertOutputFolder, assertPrivateAncestors, assertRefFolder, assertWorkspaceRoot, refParent } from "./perf/guards.ts";
+import {
+  assertOutputFolder, assertPrivateAncestors, assertRefFolder, assertWorkspaceRoot,
+  cacheHome, refParent, removeStaleRefExports, writeRefMarker,
+} from "./perf/guards.ts";
 import { LAPTOP, measureJourneys } from "./perf/journeys.ts";
 import { distribution, REPETITIONS } from "./perf/metrics.ts";
 import { type PerfRun, writeReport } from "./perf/report.ts";
@@ -61,7 +64,7 @@ export function buildEnvironment(
   return {
     ...sealed,
     PATH: `${dirname(node)}${delimiter}${dirname(pnpm)}${delimiter}${sealed.PATH}`,
-    COREPACK_HOME: parent.COREPACK_HOME || join(parent.XDG_CACHE_HOME || join(parentHome, ".cache"), "node", "corepack"),
+    COREPACK_HOME: parent.COREPACK_HOME || join(cacheHome(parent, parentHome), "node", "corepack"),
     COREPACK_ENABLE_NETWORK: "0",
     pnpm_config_pm_on_fail: "ignore",
     pnpm_config_verify_deps_before_run: "false",
@@ -207,16 +210,18 @@ async function main() {
       if (options.ref) {
         // Ref exports use the private cache so Node cannot load modules from shared temporary parents.
         const parent = refParent();
+        if (!process.getuid) throw new Error("--ref needs a POSIX system");
+        const uid = process.getuid();
         // Guard the folders before creation as well as after canonicalisation.
         assertRefFolder(join(parent, "ref-candidate"), checkout, parent, protectedDirs, canonicalPath);
         mkdirSync(parent, { recursive: true, mode: 0o700 });
         const canonicalParent = canonicalPath(parent);
-        if (!process.getuid) throw new Error("--ref needs a POSIX system");
-        const uid = process.getuid();
         assertPrivateAncestors(canonicalParent, uid);
         assertRefFolder(join(canonicalParent, "ref-candidate"), checkout, canonicalParent, protectedDirs, canonicalPath);
+        removeStaleRefExports(canonicalParent, { uid });
         source = mkdtempSync(join(canonicalParent, "ref-"));
         sealed.addRoot(source);
+        writeRefMarker(source, options.keep);
         failurePaths.refFolder = source;
         source = canonicalPath(source);
         assertPrivateAncestors(source, uid);
