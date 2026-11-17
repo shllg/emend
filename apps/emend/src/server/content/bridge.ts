@@ -442,9 +442,15 @@ export const BRIDGE_SOURCE = String.raw`(() => {
         ["data-emend-prose", String(data.prose)], ["data-emend-code", String(data.code)]);
       const changed = attributes.some(([name, value]) => elementCall("getAttribute", root, name) !== value);
       let held;
-      if (changed && headings.length && elementValue("scrollTop", scroller()) > 0 && laidOut(root)) {
+      if (changed && headings.length && laidOut(root)) {
         const current = position(measure());
-        held = pinnedPosition && samePosition(current, landing) ? pinnedPosition : current;
+        if (pinnedPosition && samePosition(current, landing)) held = pinnedPosition;
+        else if (current.heading !== null) {
+          for (let node = headings[current.heading].element; node; node = renderedParent(node)) {
+            if (nodeType(node) === 1 && elementValue("scrollTop", node) > 0) { held = current; break; }
+            if (node === root) break;
+          }
+        }
       }
       for (const [name, value] of attributes) elementCall("setAttribute", root, name, value);
       if (held && held.heading !== null) goTo({ ...held, label: headings[held.heading].label });
