@@ -782,15 +782,17 @@ position restore. The message schema accepts exactly two strict shapes, with no 
 The parent adds the View menu's width and sizes only for a frame in emend's look. It sends layout
 again whenever the app crosses its 768px breakpoint, or those preferences change for emend's look,
 without reloading the frame. Custom and legacy frames receive only `wide`.
-The bridge accepts layout only from its parent and ignores invalid or partial preferences. It
+The bridge accepts layout only from its parent. When `width`, `prose` or `code` is present, all
+three must be present and valid; otherwise it ignores the whole message, `wide` included. It
 sets `data-emend-layout` to `wide` or `narrow` on the root element and, when supplied, sets
 `data-emend-width` to the width name, `data-emend-prose` and `data-emend-code` to the size strings.
 A message without preferences leaves the earlier width and size attributes alone. When these
-attributes change while the position of the last `emend:goto` (a restore or a Contents pick) is
-still pinned, or any container on the reading heading's rendered path is scrolled (a nonzero
-`scrollTop`), the bridge returns to the same heading and fraction. This
-includes nested scrollers and a pinned position temporarily clamped to the top because the doc
-fits. A doc with nothing scrolled and no pin stays where it is. emend's look uses these attributes
+attributes change while a pinned position still holds, or any container on the reading heading's
+rendered path is scrolled (a nonzero `scrollTop`), the bridge returns to the same heading and
+fraction. Every `emend:goto` pins its target (a restore, a Contents pick or a `#h-` link), and so
+does the bridge's own return after a layout change; the pin holds until the view moves away from
+where it landed. This includes nested scrollers and a pinned position temporarily clamped to the
+top because the doc fits. A doc with nothing scrolled and no pin stays where it is. emend's look uses these attributes
 to match the Markdown reader's layout and sizes. On phones the measure stays 68ch; sizes still
 apply. Until layout arrives, the frame's own width decides.
 
