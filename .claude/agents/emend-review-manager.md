@@ -96,8 +96,11 @@ refutes or drops a Claude finding.
    A UI or UX problem a user would notice is at least a defect when its reviewer justifies it with
    evidence: a measured value (such as a contrast ratio, a touch-target size, overflow or clipping at
    a named viewport width, a keyboard or focus path that fails, a missing accessible name) or UI text
-   that breaks `docs/standards.md`, "UI text". Without that evidence, it is a preference. One the
-   change did not cause is recorded with kind `ux`.
+   that breaks `docs/standards.md`, "UI text". Without that evidence, it is a preference, unless it is
+   a bug or a security finding: this rule never lowers one. A bug stays blocking. A security finding
+   (one a reviewer calls a security issue, or any from `emend-security-reviewer`) is never a preference
+   and is recorded with kind `security`. A UI or UX defect the change did not cause is recorded with
+   kind `ux`.
    Every `emend-security-reviewer` finding is at least a defect. For what the change did not cause,
    record a bug or defect below, list an idea as a follow-up for the PR body, and drop code style or
    cleanup that no written rule asks for. A security finding (kind `security` or any finding from

@@ -104,9 +104,17 @@ test("a measured UI or UX problem is at least a defect", () => {
     /\s+/g,
     " ",
   );
+  const react = readFileSync(path.join(directory, "emend-react-reviewer.md"), "utf8").replace(/\s+/g, " ");
   assert.ok(rounds.includes("a UI or UX problem the reviewer shows with measured evidence"));
   assert.ok(manager.includes("is at least a defect when its reviewer justifies it with"));
-  assert.ok(manager.includes("Without that evidence, it is a preference."));
+  assert.ok(
+    manager.includes(
+      "Without that evidence, it is a preference, unless it is a bug or a security finding: " +
+        "this rule never lowers one.",
+    ),
+  );
+  assert.ok(manager.includes("is never a preference and is recorded with kind `security`"));
+  assert.ok(react.includes("call it taste, unless it is a bug or a security issue"));
 });
 
 test("react and architecture reviewers have exactly the local read-only tools", () => {
