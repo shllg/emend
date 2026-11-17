@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
 import { createSealedLifecycle } from "./screenshots/sealed.ts";
 import { canonicalPath, currentProtectedStateDirs } from "./screenshots/safety.ts";
-import { assertOutputFolder, assertRefFolder, assertWorkspaceRoot } from "./perf/guards.ts";
+import { assertOutputFolder, assertPrivateAncestors, assertRefFolder, assertWorkspaceRoot, refParent } from "./perf/guards.ts";
 import { LAPTOP, measureJourneys } from "./perf/journeys.ts";
 import { distribution, REPETITIONS } from "./perf/metrics.ts";
 import { type PerfRun, writeReport } from "./perf/report.ts";
@@ -173,7 +173,7 @@ async function main() {
   try {
     const protectedDirs = currentProtectedStateDirs();
     assertOutputFolder(options.out, protectedDirs, canonicalPath, "perf output");
-    const { sealedRoot, env, tmpDir } = sealed.createRoot(options.out, IDENTITY);
+    const { sealedRoot, env } = sealed.createRoot(options.out, IDENTITY);
     failurePaths.sealedRoot = sealedRoot;
     const git = (cwd: string, ...args: string[]) =>
       sealed.git(cwd, { ...env, GIT_OPTIONAL_LOCKS: "0", GIT_AUTHOR_DATE: FIXED_DATE, GIT_COMMITTER_DATE: FIXED_DATE }, ...args);
@@ -205,12 +205,22 @@ async function main() {
     let source = checkout;
     try {
       if (options.ref) {
-        // Guard before creation as well as after canonicalisation; no checkout worktree/git metadata changes.
-        assertRefFolder(join(tmpDir, "emend-perf-ref-candidate"), checkout, tmpDir, protectedDirs, canonicalPath);
-        source = mkdtempSync(join(tmpDir, "emend-perf-ref-"));
-        failurePaths.refFolder = source;
+        // Ref exports use the private cache so Node cannot load modules from shared temporary parents.
+        const parent = refParent();
+        // Guard the folders before creation as well as after canonicalisation.
+        assertRefFolder(join(parent, "ref-candidate"), checkout, parent, protectedDirs, canonicalPath);
+        mkdirSync(parent, { recursive: true, mode: 0o700 });
+        const canonicalParent = canonicalPath(parent);
+        if (!process.getuid) throw new Error("--ref needs a POSIX system");
+        const uid = process.getuid();
+        assertPrivateAncestors(canonicalParent, uid);
+        assertRefFolder(join(canonicalParent, "ref-candidate"), checkout, canonicalParent, protectedDirs, canonicalPath);
+        source = mkdtempSync(join(canonicalParent, "ref-"));
         sealed.addRoot(source);
-        assertRefFolder(source, checkout, tmpDir, protectedDirs, canonicalPath);
+        failurePaths.refFolder = source;
+        source = canonicalPath(source);
+        assertPrivateAncestors(source, uid);
+        assertRefFolder(source, checkout, canonicalParent, protectedDirs, canonicalPath);
         const archive = join(sealedRoot, "ref.tar");
         git(checkout, "archive", "--format=tar", "--output", archive, sha);
         const extracted = await sealed.run("tar", ["-xf", archive, "-C", source], {

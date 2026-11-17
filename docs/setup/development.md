@@ -71,6 +71,9 @@ comment, opening and switching publication docs, and CLI publication. It reuses 
 screenshot setup with synthetic data, a throwaway server and headless Chromium. JSON runs and a
 self-contained history report go in `.wt/perf/`. Pass `--ref <commit>` to export and build an older
 commit outside the checkout with an offline install, or `--no-build` to measure the current build.
+The export goes to a private folder under `$XDG_CACHE_HOME/emend-perf` (by default
+`~/.cache/emend-perf`), is removed after the run unless `--keep` is passed, and the run refuses when
+another user can write that folder or any of its parents.
 `--ref` builds and runs that commit's own build scripts, server and CLI, so it accepts only commits
 on `main`. A run of the current checkout fails when any step fails.
 `--out <dir>`, `--chromium <path>` and `--keep` work as for screenshots. Timings vary with machine

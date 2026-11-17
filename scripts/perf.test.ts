@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { inflateSync, gzipSync } from "node:zlib";
 import { buildSeedPlan, SEED } from "./perf/seed.ts";
-import { assertOutputFolder, assertRefFolder, assertWorkspaceRoot } from "./perf/guards.ts";
+import { assertOutputFolder, assertPrivateAncestors, assertRefFolder, assertWorkspaceRoot, refParent } from "./perf/guards.ts";
 import { childEnvironment, chromiumArgs } from "./screenshots/safety.ts";
 import { isReportRun, type PerfRun, renderReport, writeReport } from "./perf/report.ts";
 import { distribution, NetworkMeasurement, REPETITIONS, routePattern } from "./perf/metrics.ts";
@@ -60,7 +60,58 @@ test("seed plan is identical and has every declared size, including the two spec
   assert.doesNotMatch(source, /Math\.random|Date\.now|new Date/);
 });
 
-test("output protects real state; ref exports also reject the checkout and non-temp paths", () => {
+test("ref parents use the user's cache folder with a home fallback", () => {
+  assert.equal(refParent({ XDG_CACHE_HOME: "/synthetic/cache" }, "/synthetic/account"), "/synthetic/cache/emend-perf");
+  assert.equal(refParent({}, "/synthetic/account"), "/synthetic/account/.cache/emend-perf");
+  assert.equal(refParent({ XDG_CACHE_HOME: "" }, "/synthetic/account"), "/synthetic/account/.cache/emend-perf");
+});
+
+test("private ref ancestors include the folder and root and allow only the current uid or root", () => {
+  const paths = ["/cache/emend-perf/ref-synthetic", "/cache/emend-perf", "/cache", "/"];
+  const visited: string[] = [];
+  assert.doesNotThrow(() => assertPrivateAncestors(paths[0], 1000, (path) => {
+    visited.push(path);
+    return {
+      uid: path === "/cache" || path === "/" ? 0 : 1000,
+      mode: path === paths[0] ? 0o40700 : 0o40755,
+      isDirectory: () => true,
+      isSymbolicLink: () => false,
+    };
+  }));
+  assert.deepEqual(visited, paths);
+  assert.throws(() => assertPrivateAncestors("relative", 1000, () => {
+    assert.fail("relative paths must be refused before stat");
+  }), { message: "The ref folder must be absolute" });
+});
+
+test("private ref ancestors reject unsafe metadata at the first affected folder", async (t) => {
+  const paths = ["/cache/emend-perf/ref-synthetic", "/cache/emend-perf", "/cache", "/"];
+  const safe = { uid: 1000, mode: 0o40700, isDirectory: () => true, isSymbolicLink: () => false };
+  const cases = [
+    { name: "group writable", entry: { ...safe, mode: 0o40770 }, reason: "is writable by group or others" },
+    { name: "other writable", entry: { ...safe, mode: 0o40702 }, reason: "is writable by group or others" },
+    { name: "sticky shared directory", entry: { ...safe, mode: 0o41777 }, reason: "is writable by group or others" },
+    { name: "another owner", entry: { ...safe, uid: 1001 }, reason: "is owned by another user" },
+    { name: "symbolic link", entry: { ...safe, isDirectory: () => false, isSymbolicLink: () => true }, reason: "is a symbolic link" },
+    { name: "non-directory", entry: { ...safe, mode: 0o100600, isDirectory: () => false }, reason: "is not a directory" },
+  ];
+  for (const { name, entry, reason } of cases) {
+    for (const folder of paths) {
+      await t.test(`${name}: ${folder}`, () => {
+        const visited: string[] = [];
+        assert.throws(() => assertPrivateAncestors(paths[0], 1000, (path) => {
+          visited.push(path);
+          return path === folder ? entry : safe;
+        }), {
+          message: `The ref folder's parent ${folder} ${reason}; Node would load modules from its node_modules`,
+        });
+        assert.deepEqual(visited, paths.slice(0, paths.indexOf(folder) + 1));
+      });
+    }
+  }
+});
+
+test("output protects real state; ref exports also reject the checkout and paths outside their parent", () => {
   const identity = (path: string) => path;
   const states = ["/state/emend"];
   for (const path of ["/state", "/state/emend", "/state/emend/perf"])
@@ -71,22 +122,82 @@ test("output protects real state; ref exports also reject the checkout and non-t
     message: "The perf output folder must be absolute",
   });
   assert.doesNotThrow(() => assertOutputFolder("/checkout/.wt/perf", states, identity, "perf output"));
-  for (const path of ["/tmp/checkout", "/tmp/checkout/ref", "/tmp", "/state/emend", "/outside/ref"])
-    assert.throws(() => assertRefFolder(path, "/tmp/checkout", "/tmp", states, identity));
-  assert.doesNotThrow(() => assertRefFolder("/tmp/ref", "/tmp/checkout", "/tmp", states, identity));
+  const parent = "/cache/emend-perf";
+  const checkout = join(parent, "checkout");
+  const ref = join(parent, "ref");
+  for (const path of [checkout, join(checkout, "ref")])
+    assert.throws(() => assertRefFolder(path, checkout, parent, states, identity), {
+      message: "Ref folder overlaps the checkout",
+    });
+  assert.throws(() => assertRefFolder(ref, join(ref, "checkout"), parent, states, identity), {
+    message: "Ref folder overlaps the checkout",
+  });
+  for (const path of [parent, "/outside/ref"])
+    assert.throws(() => assertRefFolder(path, checkout, parent, states, identity), {
+      message: "Ref folder must be inside the ref parent folder",
+    });
+  assert.throws(() => assertRefFolder(ref, checkout, "relative", states, identity), {
+    message: "The ref parent folder must be absolute",
+  });
+  assert.throws(() => assertRefFolder("relative", checkout, parent, states, identity), {
+    message: "Ref paths must be absolute",
+  });
+  assert.throws(() => assertRefFolder(ref, "relative", parent, states, identity), {
+    message: "Ref paths must be absolute",
+  });
+  for (const stateParent of ["/state", "/state/emend", "/state/emend/cache"])
+    assert.throws(() => assertRefFolder(join(stateParent, "ref"), checkout, stateParent, states, identity), {
+      message: "The ref parent folder overlaps real emend state",
+    });
+  assert.throws(() => assertRefFolder(ref, checkout, parent, states, (path) => path === parent ? "/state" : path), {
+    message: "The ref parent folder overlaps real emend state",
+  });
+  assert.doesNotThrow(() => assertRefFolder(ref, checkout, parent, states, identity));
   assert.throws(() =>
-    assertRefFolder("/tmp/ref", "/tmp/checkout", "/tmp", states, (path) =>
-      path === "/tmp/ref" ? "/state/emend/ref" : path,
+    assertRefFolder(ref, checkout, parent, states, (path) =>
+      path === ref ? "/state/emend/ref" : path,
     ),
     { message: "The ref folder overlaps real emend state" },
   );
-  assert.throws(() => assertRefFolder("/state/emend", "/tmp/checkout", "/tmp", states, identity), {
+  assert.throws(() => assertRefFolder("/state/emend", checkout, parent, states, identity), {
     message: "The ref folder overlaps real emend state",
   });
   const main = readFileSync(new URL("./perf.ts", import.meta.url), "utf8");
   const checks = [...main.matchAll(/assertOutputFolder\(([^;]+)\);/g)];
   assert.equal(checks.length, 3);
   for (const [, args] of checks) assert.match(args, /, "perf output"$/);
+});
+
+test("ref exports use canonical cache paths and check private ancestors before and after creation", () => {
+  const main = readFileSync(new URL("./perf.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(main, /mkdtempSync\(join\(tmpDir,/);
+  const start = main.indexOf("if (options.ref) {", main.indexOf("async function main()"));
+  const end = main.indexOf("const archive =", start);
+  assert(start >= 0 && end > start);
+  const branch = main.slice(start, end);
+  const steps = [
+    "const parent = refParent();",
+    'assertRefFolder(join(parent, "ref-candidate"), checkout, parent, protectedDirs, canonicalPath);',
+    "mkdirSync(parent, { recursive: true, mode: 0o700 });",
+    "const canonicalParent = canonicalPath(parent);",
+    'if (!process.getuid) throw new Error("--ref needs a POSIX system");',
+    "const uid = process.getuid();",
+    "assertPrivateAncestors(canonicalParent, uid);",
+    'assertRefFolder(join(canonicalParent, "ref-candidate"), checkout, canonicalParent, protectedDirs, canonicalPath);',
+    'source = mkdtempSync(join(canonicalParent, "ref-"));',
+    "sealed.addRoot(source);",
+    "source = canonicalPath(source);",
+    "assertPrivateAncestors(source, uid);",
+    "assertRefFolder(source, checkout, canonicalParent, protectedDirs, canonicalPath);",
+  ];
+  let previous = -1;
+  for (const step of steps) {
+    const position = branch.indexOf(step);
+    assert(position > previous, `missing or out-of-order ref setup: ${step}`);
+    previous = position;
+  }
+  assert.match(branch, /source = mkdtempSync\([^;]+;\s*sealed\.addRoot\(source\);/);
+  assert(end < main.indexOf("const install = await sealed.run("));
 });
 
 test("a ref export requires its own three regular workspace files", async (t) => {
