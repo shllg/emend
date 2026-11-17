@@ -795,7 +795,9 @@ not hide it. `index` is an integer in the gallery's bounds.
 Captions are well-formed strings of at most `LIMITS.quoteChars` (2000) characters, taken from
 the nearest enclosing figure's direct `figcaption`. An absent or cleaned-empty caption falls
 back to the image's cleaned alt text, then to empty. Each figure's caption is computed only
-once per gallery build. Figure and interactive-ancestor lookups follow rendered parents,
+once per gallery build. All caption text walks share a budget of 1,000,000 node visits per
+gallery, including omitted nodes. When it is exhausted, unfinished and later captions count
+as empty and fall back to alt text. Figure and interactive-ancestor lookups follow rendered parents,
 including slots and shadow hosts. Images inside links or HTML `summary`, `label` or `button`
 elements are excluded from the gallery. Clicking those images preserves link handling or the
 control's default action, including toggling a summary.
@@ -805,10 +807,13 @@ rects. Loaded images smaller than 48 pixels in both dimensions, including broken
 excluded. Queries and fragments are ignored.
 The bridge uses `currentSrc` when available. For a pending responsive image, it approximates
 the browser's choice: in a `picture`, use the first preceding HTML `source` whose media query
-is absent or matches and whose type is absent or a supported raster media type. Otherwise use
-the image's own `srcset`, then its `src` when `srcset` is absent. From a source's or image's
+is absent or matches and whose type is absent or a supported raster media type. Sources whose
+`srcset` yields no candidates are skipped in favour of the next source. Otherwise use
+the image's own `srcset`, then its `src` when `srcset` is absent or yields no candidates.
+A `srcset` longer than 16384 characters is treated as having no candidates. From a source's or image's
 `srcset`, choose the largest `w` or `x` descriptor (a missing descriptor counts as `1x`);
-on parse trouble, use the first candidate. Resolve the choice against the document base URI,
+on parse trouble, including a descriptor longer than 32 characters, use the first candidate.
+Parsing uses linear scans within these limits. Resolve the choice against the document base URI,
 then apply the same origin and content-path checks.
 Gallery collection stops before the sum of `path.length + caption.length` would exceed
 1,000,000 characters, or at 10000 images. If the clicked image is outside that collected

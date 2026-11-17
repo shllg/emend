@@ -7,7 +7,7 @@ import { afterEach, expect, test, vi } from "vitest";
 const prefix = `/content/${"k".repeat(43)}${"a".repeat(32)}/`;
 const origin = "http://127.0.0.1:3636";
 afterEach(() => vi.restoreAllMocks());
-function bridge(html: string) {
+function bridge(html: string, options: { captionNodes?: number } = {}) {
   const window = new Window({
     url: `${origin}${prefix}docs/page.html`,
     settings: { enableJavaScriptEvaluation: false },
@@ -20,6 +20,16 @@ function bridge(html: string) {
   Object.defineProperty(window, "MediaQueryList", {
     value: Object.getPrototypeOf(window.matchMedia("all")).constructor,
   });
+  // Browser Window operations live on the instance, unlike happy-dom's prototype methods.
+  const nativeMatchMedia = window.matchMedia;
+  const matchMedia = vi.fn((media: string) => nativeMatchMedia.call(window, media));
+  Object.defineProperty(window, "matchMedia", { configurable: true, writable: true, value: matchMedia });
+  const prototypeMatchMedia = Object.getOwnPropertyDescriptor(window.Window.prototype, "matchMedia");
+  Object.defineProperty(window.Window.prototype, "matchMedia", { configurable: true, value: undefined });
+  const restoreMatchMedia = () => {
+    if (prototypeMatchMedia) Object.defineProperty(window.Window.prototype, "matchMedia", prototypeMatchMedia);
+    else Reflect.deleteProperty(window.Window.prototype, "matchMedia");
+  };
   const attr = (node: Element, name: string) => window.Element.prototype.getAttribute.call(node, name);
   vi.spyOn(window.Element.prototype, "checkVisibility").mockImplementation(function (this: Element, options) {
     const style = attr(this, "style") ? window.getComputedStyle(this) : null;
@@ -53,8 +63,20 @@ function bridge(html: string) {
   const parent = { postMessage: post };
   Object.defineProperty(window, "parent", { value: parent });
   const source = readFileSync(new URL("../../emend/src/server/content/bridge.ts", import.meta.url), "utf8");
-  const script = runInNewContext(`${source.replace("export const", "const")}; BRIDGE_SOURCE;`);
-  runInNewContext(script, { window, document: window.document, Intl });
+  try {
+    let script: string = runInNewContext(`${source.replace("export const", "const")}; BRIDGE_SOURCE;`);
+    if (options.captionNodes !== undefined) {
+      // Exercise exhaustion with a small fixture; the shipped bridge keeps its million-node default.
+      const declaration = "const captionBudget = { remaining: 1000000 };";
+      if (!script.includes(declaration)) throw new Error("Missing caption budget declaration");
+      script = script.replace(declaration, `const captionBudget = { remaining: ${options.captionNodes} };`);
+    }
+    runInNewContext(script, { window, document: window.document, Intl });
+  } catch (error) {
+    restoreMatchMedia();
+    void window.happyDOM.close();
+    throw error;
+  }
   window.document.dispatchEvent(new window.Event("DOMContentLoaded"));
   const click = (selector: string | Element, options = {}, prevented = false) => {
     const image = typeof selector === "string" ? window.document.querySelector(selector) : selector;
@@ -71,7 +93,14 @@ function bridge(html: string) {
     return event;
   };
   const images = () => post.mock.calls.filter(([data]) => data.type === "emend:image").map(([data]) => data);
-  return { window, post, click, images, baseReads, close: () => window.happyDOM.close() };
+  const close = async () => {
+    try {
+      await window.happyDOM.close();
+    } finally {
+      restoreMatchMedia();
+    }
+  };
+  return { window, post, click, images, baseReads, matchMedia, close };
 }
 
 test("image clicks report the page-order gallery and cleaned figure, alt and empty captions", async () => {
@@ -325,20 +354,25 @@ test("open shadow images and slotted light images form a gallery in flat-tree or
   }
 });
 
-test.each(["summary", "label", "button"])("images inside %s leave the control's default action intact", async (tag) => {
-  const control = `<${tag}><span><img id="control" src="control.png"></span></${tag}>`;
-  const b = bridge(
-    `<body>${tag === "summary" ? `<details>${control}</details>` : control}<img id="plain" src="plain.png"></body>`,
-  );
-  try {
-    expect(b.click("#control").defaultPrevented).toBe(false);
-    expect(b.images()).toEqual([]);
-    b.click("#plain");
-    expect(b.images()).toEqual([{ type: "emend:image", images: [{ path: "docs/plain.png", caption: "" }], index: 0 }]);
-  } finally {
-    await b.close();
-  }
-});
+test.each(["summary", "label", "button"])(
+  "light-DOM images inside %s leave the control's default action intact",
+  async (tag) => {
+    const control = `<${tag}><span><img id="control" src="control.png"></span></${tag}>`;
+    const b = bridge(
+      `<body>${tag === "summary" ? `<details>${control}</details>` : control}<img id="plain" src="plain.png"></body>`,
+    );
+    try {
+      expect(b.click("#control").defaultPrevented).toBe(false);
+      expect(b.images()).toEqual([]);
+      b.click("#plain");
+      expect(b.images()).toEqual([
+        { type: "emend:image", images: [{ path: "docs/plain.png", caption: "" }], index: 0 },
+      ]);
+    } finally {
+      await b.close();
+    }
+  },
+);
 
 test("interactive ancestors follow slots and cross shadow hosts", async () => {
   const b = shadowGallery();
@@ -397,6 +431,8 @@ test.each([
   ["small.png, large.png 2x, medium.png 1.5x", "large.png"],
   ["first.png 1x, bad.png invalid, large.png 3x", "first.png"],
   ["first.png 320w, mixed.png 2x", "first.png"],
+  ["small.png .5x, large.png 2.e0x", "large.png"],
+  ["small.png 1x, large.png 2e+0x", "large.png"],
 ])("pending srcset-only images choose the expected candidate from %s", async (srcset, expected) => {
   const b = bridge(`<head><base href="${prefix}images/"></head><body><img data-loading srcset="${srcset}"></body>`);
   try {
@@ -407,7 +443,7 @@ test.each([
   }
 });
 
-test("pending pictures select the first matching raster source before the image", async () => {
+test("pending pictures use window's own matchMedia to select the first matching raster source", async () => {
   const b = bridge(`<body><picture>
     <source media="(min-width: 10000px)" srcset="non-matching.png 2x">
     <source type="image/svg+xml" srcset="unsupported.svg 2x">
@@ -417,11 +453,12 @@ test("pending pictures select the first matching raster source before the image"
     <source srcset="after.png 4000w">
   </picture></body>`);
   try {
-    const matchMedia = vi.spyOn(b.window.Window.prototype, "matchMedia");
+    expect(Object.hasOwn(b.window, "matchMedia")).toBe(true);
+    expect(b.window.Window.prototype.matchMedia).toBeUndefined();
     expect(b.click("img").defaultPrevented).toBe(true);
     expect(b.images()[0]?.images).toEqual([{ path: "docs/chosen.webp", caption: "" }]);
-    expect(matchMedia).toHaveBeenCalledWith("(min-width: 10000px)");
-    expect(matchMedia).toHaveBeenCalledWith("(min-width: 1px)");
+    expect(b.matchMedia).toHaveBeenCalledWith("(min-width: 10000px)");
+    expect(b.matchMedia).toHaveBeenCalledWith("(min-width: 1px)");
   } finally {
     await b.close();
   }
@@ -491,6 +528,95 @@ test("gallery stops at the total character budget and refuses a clicked image be
         0,
       ),
     ).toBe(1_000_000);
+  } finally {
+    await b.close();
+  }
+});
+
+test.each(["", " \t, ,, "])("empty source sets %j fall back to src or the next picture source", async (srcset) => {
+  const b = bridge(`<body>
+    <img id="plain" loading="lazy" data-loading srcset="${srcset}" src="photo.png">
+    <picture><source srcset="${srcset}"><source srcset="b.png"><img data-loading src="c.png"></picture>
+  </body>`);
+  try {
+    expect(b.click("#plain").defaultPrevented).toBe(true);
+    expect(b.images()[0]?.images).toEqual([
+      { path: "docs/photo.png", caption: "" },
+      { path: "docs/b.png", caption: "" },
+    ]);
+  } finally {
+    await b.close();
+  }
+});
+
+test.each([
+  { name: "source set at the limit", srcset: "large.png 2x".padEnd(16384, " "), expected: "large.png" },
+  { name: "overlong source set", srcset: "large.png 2x".padEnd(16385, " "), expected: "fallback.png" },
+  { name: "descriptor at the limit", srcset: `first.png 1x, large.png ${"0".repeat(30)}2x`, expected: "large.png" },
+  { name: "overlong descriptor", srcset: `first.png 1x, large.png ${"0".repeat(31)}2x`, expected: "first.png" },
+  { name: "long digit run", srcset: `first.png ${"9".repeat(12000)}x, large.png 2x`, expected: "first.png" },
+  { name: "long trailing comma run", srcset: `first.png${",".repeat(12000)} tail.png 2x`, expected: "tail.png" },
+  { name: "long internal comma run", srcset: `first.png${",".repeat(12000)}suffix, tail.png 2x`, expected: "tail.png" },
+])("bounded responsive parsing handles $name", async ({ srcset, expected }) => {
+  const b = bridge(`<body><img data-loading srcset="${srcset}" src="fallback.png"></body>`);
+  try {
+    expect(b.click("img").defaultPrevented).toBe(true);
+    expect(b.images()[0]?.images).toEqual([{ path: `docs/${expected}`, caption: "" }]);
+  } finally {
+    await b.close();
+  }
+});
+
+test("pictures skip overlong source sets before trying a later source", async () => {
+  const b = bridge(`<body><picture>
+    <source srcset="${"large.png 2x".padEnd(16385, " ")}"><source srcset="next.png">
+    <img data-loading src="fallback.png">
+  </picture></body>`);
+  try {
+    expect(b.click("img").defaultPrevented).toBe(true);
+    expect(b.images()[0]?.images).toEqual([{ path: "docs/next.png", caption: "" }]);
+  } finally {
+    await b.close();
+  }
+});
+
+test("nested figures share a caption node budget and later images fall back to alt", async () => {
+  const inner = '<figure><img src="inner.png" alt="Inner alt"><figcaption>Inner</figcaption></figure>';
+  const middle = `<figure><img src="middle.png" alt="Middle alt"><figcaption>Middle${inner}</figcaption></figure>`;
+  const b = bridge(
+    `<body><figure><img id="first" src="outer.png" alt="Outer alt"><figcaption>Outer${middle}</figcaption></figure><figure><img id="later" src="later.png" alt="Later alt"><figcaption id="later-caption">Later</figcaption></figure></body>`,
+    { captionNodes: 12 },
+  );
+  try {
+    const laterText = b.window.document.querySelector("#later-caption")?.firstChild;
+    const reads = vi.spyOn(b.window.CharacterData.prototype, "data", "get");
+    expect(b.click("#first").defaultPrevented).toBe(true);
+    // The outer walk visits ten nodes. The middle walk spends the remaining two,
+    // discards its partial text, and leaves both following captions unread.
+    expect(b.images()[0]?.images).toEqual([
+      { path: "docs/outer.png", caption: "OuterMiddleInner" },
+      { path: "docs/middle.png", caption: "Middle alt" },
+      { path: "docs/inner.png", caption: "Inner alt" },
+      { path: "docs/later.png", caption: "Later alt" },
+    ]);
+    expect(reads).toHaveBeenCalledTimes(4);
+    expect(reads.mock.contexts).not.toContain(laterText);
+    expect(b.click("#later").defaultPrevented).toBe(true);
+    expect(b.images()[1]).toEqual({ ...b.images()[0], index: 3 });
+    expect(reads).toHaveBeenCalledTimes(8);
+  } finally {
+    await b.close();
+  }
+});
+
+test("omitted caption nodes still consume the shared node budget", async () => {
+  const b = bridge(
+    '<body><figure><img src="image.png" alt="Alt"><figcaption><script>hidden</script><style>hidden</style><template>hidden</template>Caption</figcaption></figure></body>',
+    { captionNodes: 4 },
+  );
+  try {
+    expect(b.click("img").defaultPrevented).toBe(true);
+    expect(b.images()[0]?.images).toEqual([{ path: "docs/image.png", caption: "Alt" }]);
   } finally {
     await b.close();
   }

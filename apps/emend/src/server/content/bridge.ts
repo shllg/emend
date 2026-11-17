@@ -1,5 +1,7 @@
 export const BRIDGE_SOURCE = String.raw`(() => {
   "use strict";
+  // Window is a global interface: matchMedia lives on the instance.
+  const matchMedia = window.matchMedia;
   const omitted = new Set(["script", "style", "template", "noscript"]);
   const post = message => window.parent.postMessage(message, "*");
   const ranges = new Map();
@@ -506,6 +508,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     ? elementCall("checkVisibility", element, { checkVisibilityCSS: true, visibilityProperty: true, opacityProperty: true })
     : elementCall("getClientRects", element).length > 0;
   function srcsetChoice(value) {
+    if (value.length > 16384) return "";
     const candidates = [];
     let cursor = 0;
     while (cursor < value.length) {
@@ -513,8 +516,11 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       const start = cursor;
       while (cursor < value.length && !/[\t\n\f\r ]/.test(value[cursor])) cursor++;
       let url = value.slice(start, cursor), descriptor = "";
-      if (url.endsWith(",")) url = url.replace(/,+$/, "");
-      else {
+      if (url.endsWith(",")) {
+        let end = url.length;
+        while (end > 0 && url[end - 1] === ",") end--;
+        url = url.slice(0, end);
+      } else {
         const start = cursor;
         while (cursor < value.length && value[cursor] !== ",") cursor++;
         descriptor = value.slice(start, cursor).trim();
@@ -525,12 +531,17 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     let best = first, largest = 0, kind;
     for (const candidate of candidates) {
       const descriptor = candidate.descriptor || "1x";
-      const match = /^((?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)(w|x)$/.exec(descriptor);
-      if (!match) return first;
-      const size = Number(match[1]);
-      if (!Number.isFinite(size) || size <= 0 || (match[2] === "w" && !/^\d+w$/.test(descriptor)) ||
-          (kind && kind !== match[2])) return first;
-      kind = match[2];
+      if (descriptor.length > 32) return first;
+      const unit = descriptor.at(-1);
+      if (unit === "w") {
+        if (!/^\d+w$/.test(descriptor)) return first;
+      } else if (unit === "x") {
+        // The alternatives require or exclude a decimal point, so digit runs cannot be repartitioned.
+        if (!/^(?:\d+|\d*\.\d+|\d+\.)(?:[eE][+-]?\d+)?x$/.test(descriptor)) return first;
+      } else return first;
+      const size = Number(descriptor.slice(0, -1));
+      if (!Number.isFinite(size) || size <= 0 || (kind && kind !== unit)) return first;
+      kind = unit;
       if (size > largest) { best = candidate.url; largest = size; }
     }
     return best;
@@ -543,13 +554,14 @@ export const BRIDGE_SOURCE = String.raw`(() => {
         if (nodeType(child) !== 1 || namespace(child) !== "http://www.w3.org/1999/xhtml" || localName(child) !== "source") continue;
         const media = elementCall("getAttribute", child, "media");
         const type = elementCall("getAttribute", child, "type");
-        if (media !== null && !read(window.MediaQueryList.prototype, "matches", dom(window.Window.prototype, "matchMedia", window, media))) continue;
+        if (media !== null && !read(window.MediaQueryList.prototype, "matches", matchMedia.call(window, media))) continue;
         if (type !== null && !["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"].includes(type)) continue;
-        return srcsetChoice(elementCall("getAttribute", child, "srcset") || "");
+        const choice = srcsetChoice(elementCall("getAttribute", child, "srcset") || "");
+        if (choice) return choice;
       }
     }
     const srcset = elementCall("getAttribute", element, "srcset");
-    return srcset !== null ? srcsetChoice(srcset) : elementCall("getAttribute", element, "src") || "";
+    return (srcset !== null ? srcsetChoice(srcset) : "") || elementCall("getAttribute", element, "src") || "";
   }
   function imagePath(element, urls) {
     if (!element || nodeType(element) !== 1 || namespace(element) !== "http://www.w3.org/1999/xhtml" ||
@@ -572,15 +584,35 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       return parts.join("/");
     } catch { return null; }
   }
-  function imageCaption(element, captions) {
-    for (let parent = renderedParent(element); parent && parent !== body(); parent = renderedParent(parent)) {
+  function captionLabel(root, budget) {
+    const pending = [[root][Symbol.iterator]()];
+    const parts = [];
+    let left = 8000, visits = 64000;
+    while (pending.length && left && visits && budget.remaining) {
+      const next = pending[pending.length - 1].next();
+      if (next.done) { pending.pop(); continue; }
+      visits--;
+      budget.remaining--;
+      const node = next.value;
+      if (nodeType(node) === 3) {
+        const part = textData(node).slice(0, left);
+        parts.push(part);
+        left -= part.length;
+      } else if (nodeType(node) === 1 && !omitted.has(localName(node))) {
+        pending.push(children(node)[Symbol.iterator]());
+      }
+    }
+    return budget.remaining ? cleanLabel(parts.join(""), 2000) : "";
+  }
+  function imageCaption(element, captions, budget) {
+    for (let parent = renderedParent(element); budget.remaining && parent && parent !== body(); parent = renderedParent(parent)) {
       if (nodeType(parent) !== 1 || namespace(parent) !== "http://www.w3.org/1999/xhtml" || localName(parent) !== "figure") continue;
       let caption = captions.get(parent);
       if (caption === undefined) {
         caption = "";
         for (const child of children(parent)) {
           if (nodeType(child) === 1 && namespace(child) === "http://www.w3.org/1999/xhtml" && localName(child) === "figcaption") {
-            caption = label(child, 2000);
+            caption = captionLabel(child, budget);
             break;
           }
         }
@@ -597,11 +629,12 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     if (!body() || imagePath(clicked, urls) === null) return null;
     const images = [];
     const captions = new Map();
+    const captionBudget = { remaining: 1000000 };
     let index = -1, size = 0;
     for (const node of imageNodes(body())) {
       const path = imagePath(node, urls);
       if (path === null) continue;
-      const caption = imageCaption(node, captions);
+      const caption = imageCaption(node, captions, captionBudget);
       if (size + path.length + caption.length > 1000000) break;
       size += path.length + caption.length;
       if (node === clicked) index = images.length;
