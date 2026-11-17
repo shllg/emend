@@ -7,7 +7,7 @@ import { afterEach, expect, test, vi } from "vitest";
 const prefix = `/content/${"k".repeat(43)}${"a".repeat(32)}/`;
 const origin = "http://127.0.0.1:3636";
 afterEach(() => vi.restoreAllMocks());
-function bridge(html: string, options: { captionNodes?: number } = {}) {
+function bridge(html: string, options: { captionNodes?: number; gallerySteps?: number } = {}) {
   const window = new Window({
     url: `${origin}${prefix}docs/page.html`,
     settings: { enableJavaScriptEvaluation: false },
@@ -70,6 +70,12 @@ function bridge(html: string, options: { captionNodes?: number } = {}) {
       const declaration = "const captionBudget = { remaining: 1000000 };";
       if (!script.includes(declaration)) throw new Error("Missing caption budget declaration");
       script = script.replace(declaration, `const captionBudget = { remaining: ${options.captionNodes} };`);
+    }
+    if (options.gallerySteps !== undefined) {
+      // Keep the shipped step limit while checking exhaustion with small, deterministic fixtures.
+      const declaration = "const stepBudget = { remaining: 1000000 };";
+      if (!script.includes(declaration)) throw new Error("Missing gallery step budget declaration");
+      script = script.replace(declaration, `const stepBudget = { remaining: ${options.gallerySteps} };`);
     }
     runInNewContext(script, { window, document: window.document, Intl });
   } catch (error) {
@@ -477,6 +483,117 @@ test("pictures without a matching preceding source fall back to the image's own 
       { path: "docs/own.png", caption: "" },
       { path: "docs/fallback.png", caption: "" },
     ]);
+  } finally {
+    await b.close();
+  }
+});
+
+test.each([
+  { kind: "images", children: '<img alt="x">'.repeat(70) },
+  { kind: "text and comments", children: " <!--padding-->".repeat(35) },
+])("picture scans stop after 64 child nodes, including $kind", async ({ children }) => {
+  const b = bridge(
+    `<body><picture>${children}<source srcset="late.png"><img id="target" data-loading src="own.png"></picture></body>`,
+  );
+  try {
+    expect(b.click("#target").defaultPrevented).toBe(true);
+    expect(b.images()).toEqual([{ type: "emend:image", images: [{ path: "docs/own.png", caption: "" }], index: 0 }]);
+  } finally {
+    await b.close();
+  }
+});
+
+test.each([63, 64])("picture source selection at the scan boundary after %i children", async (count) => {
+  const b = bridge(
+    `<body><picture>${"<!--padding-->".repeat(count)}<source srcset="source.png"><img data-loading srcset="own.png" src="fallback.png"></picture></body>`,
+  );
+  try {
+    expect(b.click("img").defaultPrevented).toBe(true);
+    expect(b.images()[0]?.images).toEqual([{ path: `docs/${count === 63 ? "source" : "own"}.png`, caption: "" }]);
+  } finally {
+    await b.close();
+  }
+});
+
+test.each([7, 8])("gallery step budget %i includes the initial clicked-image check", async (gallerySteps) => {
+  const b = bridge('<body><img src="first.png"><img src="second.png"><img src="last.png"></body>', {
+    gallerySteps,
+  });
+  try {
+    expect(b.click("img").defaultPrevented).toBe(true);
+    // The initial check costs two steps; each collected image costs three more.
+    expect(b.images()).toEqual([
+      {
+        type: "emend:image",
+        images: [
+          { path: "docs/first.png", caption: "" },
+          ...(gallerySteps === 8 ? [{ path: "docs/second.png", caption: "" }] : []),
+        ],
+        index: 0,
+      },
+    ]);
+    b.post.mockClear();
+    expect(b.click("img:last-child").defaultPrevented).toBe(false);
+    expect(b.images()).toEqual([]);
+  } finally {
+    await b.close();
+  }
+});
+
+test("rejected images consume the gallery step budget", async () => {
+  const b = bridge(
+    `<body><img id="first" src="first.png">${"<img data-hidden>".repeat(8)}<img id="last" src="last.png"></body>`,
+    { gallerySteps: 8 },
+  );
+  try {
+    expect(b.click("#first").defaultPrevented).toBe(true);
+    expect(b.images()).toEqual([{ type: "emend:image", images: [{ path: "docs/first.png", caption: "" }], index: 0 }]);
+    b.post.mockClear();
+    expect(b.click("#last").defaultPrevented).toBe(false);
+    expect(b.images()).toEqual([]);
+  } finally {
+    await b.close();
+  }
+});
+
+test.each([13, 14])("image and caption ancestor walks share the %i-step gallery budget", async (gallerySteps) => {
+  const b = bridge('<body><img src="first.png"><div><div><div><img src="nested.png"></div></div></div></body>', {
+    gallerySteps,
+  });
+  try {
+    expect(b.click("img").defaultPrevented).toBe(true);
+    // Five steps cover the first image; the nested image needs five to qualify and four for its caption lookup.
+    expect(b.images()[0]?.images).toEqual([
+      { path: "docs/first.png", caption: "" },
+      ...(gallerySteps === 14 ? [{ path: "docs/nested.png", caption: "" }] : []),
+    ]);
+  } finally {
+    await b.close();
+  }
+});
+
+test.each([12, 13])("picture child scans share the %i-step gallery budget", async (gallerySteps) => {
+  const b = bridge(
+    '<body><img src="first.png"><picture><!--one--><!--two--><img data-loading src="own.png"></picture></body>',
+    { gallerySteps },
+  );
+  try {
+    expect(b.click("img").defaultPrevented).toBe(true);
+    // The picture adds three child visits to its image's qualification and caption ancestor walks.
+    expect(b.images()[0]?.images).toEqual([
+      { path: "docs/first.png", caption: "" },
+      ...(gallerySteps === 13 ? [{ path: "docs/own.png", caption: "" }] : []),
+    ]);
+  } finally {
+    await b.close();
+  }
+});
+
+test("a picture containing thousands of sourceless images leaves only the valid image in the gallery", async () => {
+  const b = bridge(`<body><img id="valid" src="valid.png"><picture>${'<img alt="x">'.repeat(3000)}</picture></body>`);
+  try {
+    expect(b.click("#valid").defaultPrevented).toBe(true);
+    expect(b.images()).toEqual([{ type: "emend:image", images: [{ path: "docs/valid.png", caption: "" }], index: 0 }]);
   } finally {
     await b.close();
   }

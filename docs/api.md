@@ -810,11 +810,19 @@ the browser's choice: in a `picture`, use the first preceding HTML `source` whos
 is absent or matches and whose type is absent or a supported raster media type. Sources whose
 `srcset` yields no candidates are skipped in favour of the next source. Otherwise use
 the image's own `srcset`, then its `src` when `srcset` is absent or yields no candidates.
+The picture scan examines at most 64 child nodes before reaching the image, counting text
+and comments as well as elements. Sources beyond that limit are ignored; selection falls
+back to the image's own `srcset`, then `src`.
 A `srcset` longer than 16384 characters is treated as having no candidates. From a source's or image's
 `srcset`, choose the largest `w` or `x` descriptor (a missing descriptor counts as `1x`);
 on parse trouble, including a descriptor longer than 32 characters, use the first candidate.
 Parsing uses linear scans within these limits. Resolve the choice against the document base URI,
 then apply the same origin and content-path checks.
+Each gallery build also has a shared budget of 1,000,000 steps, separate from the caption
+text-walk budget. Every image examined, including rejected images and the clicked image's
+initial check, costs one step. Every ancestor step for image qualification or caption lookup
+and every child visited by the picture source scan also costs one step. Collection stops when
+this budget is spent. A click on an image not yet collected posts nothing.
 Gallery collection stops before the sum of `path.length + caption.length` would exceed
 1,000,000 characters, or at 10000 images. If the clicked image is outside that collected
 prefix, no message is sent. The parent independently rejects a message above the same

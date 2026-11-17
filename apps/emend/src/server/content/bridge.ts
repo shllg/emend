@@ -546,10 +546,21 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     }
     return best;
   }
-  function pendingImageSource(element) {
+  function galleryStep(budget) {
+    if (!budget.remaining) return false;
+    budget.remaining--;
+    return true;
+  }
+  function pendingImageSource(element, steps) {
     const parent = nodeValue("parentNode", element);
     if (parent && nodeType(parent) === 1 && namespace(parent) === "http://www.w3.org/1999/xhtml" && localName(parent) === "picture") {
-      for (const child of children(parent)) {
+      const siblings = children(parent)[Symbol.iterator]();
+      for (let scanned = 0; scanned < 64; scanned++) {
+        if (!steps.remaining) return "";
+        const next = siblings.next();
+        if (next.done) break;
+        galleryStep(steps);
+        const child = next.value;
         if (child === element) break;
         if (nodeType(child) !== 1 || namespace(child) !== "http://www.w3.org/1999/xhtml" || localName(child) !== "source") continue;
         const media = elementCall("getAttribute", child, "media");
@@ -560,19 +571,24 @@ export const BRIDGE_SOURCE = String.raw`(() => {
         if (choice) return choice;
       }
     }
+    if (!steps.remaining) return "";
     const srcset = elementCall("getAttribute", element, "srcset");
     return (srcset !== null ? srcsetChoice(srcset) : "") || elementCall("getAttribute", element, "src") || "";
   }
-  function imagePath(element, urls) {
+  function imagePath(element, urls, steps) {
     if (!element || nodeType(element) !== 1 || namespace(element) !== "http://www.w3.org/1999/xhtml" ||
-        localName(element) !== "img" || !imageVisible(element)) return null;
-    for (let parent = renderedParent(element); parent && parent !== body(); parent = renderedParent(parent)) {
+        localName(element) !== "img") return null;
+    if (!galleryStep(steps) || !imageVisible(element)) return null;
+    for (let parent = element; parent && parent !== body();) {
+      if (!galleryStep(steps)) return null;
+      parent = renderedParent(parent);
+      if (!parent || parent === body()) break;
       if (nodeType(parent) === 1 && (linkHref(parent) !== null ||
           (namespace(parent) === "http://www.w3.org/1999/xhtml" && ["summary", "label", "button"].includes(localName(parent))))) return null;
     }
     try {
       const prototype = window.HTMLImageElement.prototype;
-      const source = read(prototype, "currentSrc", element) || pendingImageSource(element);
+      const source = read(prototype, "currentSrc", element) || pendingImageSource(element, steps);
       if (!source) return null;
       const url = new window.URL(source, urls.base ??= nodeValue("baseURI", document));
       const entry = /^(\/content\/[A-Za-z0-9_-]{43}[0-9a-f]{32}\/)(.*)$/.exec(window.location.pathname);
@@ -604,8 +620,11 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     }
     return budget.remaining ? cleanLabel(parts.join(""), 2000) : "";
   }
-  function imageCaption(element, captions, budget) {
-    for (let parent = renderedParent(element); budget.remaining && parent && parent !== body(); parent = renderedParent(parent)) {
+  function imageCaption(element, captions, budget, steps) {
+    for (let parent = element; budget.remaining && parent && parent !== body();) {
+      if (!galleryStep(steps)) return null;
+      parent = renderedParent(parent);
+      if (!parent || parent === body()) break;
       if (nodeType(parent) !== 1 || namespace(parent) !== "http://www.w3.org/1999/xhtml" || localName(parent) !== "figure") continue;
       let caption = captions.get(parent);
       if (caption === undefined) {
@@ -626,20 +645,23 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   function imageGallery(clicked) {
     // Resolve the document base once per build; repeated DOM lookups can scan the whole pub.
     const urls = {};
-    if (!body() || imagePath(clicked, urls) === null) return null;
+    const stepBudget = { remaining: 1000000 };
+    if (!body() || imagePath(clicked, urls, stepBudget) === null || !stepBudget.remaining) return null;
     const images = [];
     const captions = new Map();
     const captionBudget = { remaining: 1000000 };
     let index = -1, size = 0;
     for (const node of imageNodes(body())) {
-      const path = imagePath(node, urls);
+      const path = imagePath(node, urls, stepBudget);
+      if (!stepBudget.remaining) break;
       if (path === null) continue;
-      const caption = imageCaption(node, captions, captionBudget);
+      const caption = imageCaption(node, captions, captionBudget, stepBudget);
+      if (caption === null) break;
       if (size + path.length + caption.length > 1000000) break;
       size += path.length + caption.length;
       if (node === clicked) index = images.length;
       images.push({ path, caption });
-      if (images.length === 10000) break;
+      if (images.length === 10000 || !stepBudget.remaining) break;
     }
     return index < 0 ? null : { type: "emend:image", images, index };
   }
