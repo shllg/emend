@@ -22,6 +22,7 @@ export function ReviewInbox({
   const navigate = useNavigate();
   const { reviewId } = useParams({ strict: false });
   const search = useRef<HTMLInputElement>(null);
+  const showInbox = useRef<HTMLButtonElement>(null);
   const focusSearch = useRef(false);
   const openedReview = useRef(false);
   const mountedInbox = (layout === "desktop" && !collapsed) || (layout === "tablet" && open);
@@ -76,7 +77,7 @@ export function ReviewInbox({
     );
   return (
     <>
-      <InboxRail onShow={() => (layout === "tablet" ? setOpen(true) : onCollapsedChange(false))} />
+      <InboxRail showRef={showInbox} onShow={() => (layout === "tablet" ? setOpen(true) : onCollapsedChange(false))} />
       {layout === "tablet" && (
         <Sheet
           side="left"
@@ -90,13 +91,13 @@ export function ReviewInbox({
           returnFocus={() => {
             if (!openedReview.current) return null;
             const active = document.activeElement;
-            // Keep focus moved by navigation; otherwise return to the inbox opener.
+            // Keep focus moved by navigation; otherwise return to Show inbox.
             return active instanceof HTMLElement &&
               active !== document.body &&
               active.isConnected &&
               !active.closest('[role="dialog"]')
               ? active
-              : null;
+              : showInbox.current;
           }}
         >
           <Inbox
@@ -106,6 +107,7 @@ export function ReviewInbox({
             searchRef={search}
             onOpen={() => {
               openedReview.current = true;
+              focusSearch.current = false;
               setOpen(false);
             }}
           />

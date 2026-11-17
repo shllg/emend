@@ -2559,6 +2559,50 @@ test("desktop keeps the inbox and top bar while the next review loads", async ()
   expect(screen.getByTestId("inbox-pane")).toBe(pane);
 });
 
+test("desktop keeps the clamped inbox width until the next review's revision loads", async () => {
+  width = 1280;
+  layoutStore.update({ inboxWidth: 520, pane: { desktop: "split", tablet: "tabs" } });
+  withInboxNavigation();
+  let releaseRevision: () => void = () => {};
+  const ready = new Promise<void>((resolve) => {
+    releaseRevision = resolve;
+  });
+  const fallback = fetchMock.getMockImplementation();
+  fetchMock.mockImplementation(async (path, init) => {
+    if (path === `/api/v1/reviews/${secondItem.id}/revisions/1`) {
+      await ready;
+      return Response.json({ ...revision, files: [] });
+    }
+    return fallback?.(path, init) as Promise<Response>;
+  });
+  const bounds = vi.mocked(HTMLElement.prototype.getBoundingClientRect).getMockImplementation();
+  vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function (this: HTMLElement) {
+    if (this.classList.contains("em-panes")) return new DOMRect(0, 0, 1280, 600);
+    return bounds?.call(this) ?? new DOMRect();
+  });
+  mount(`/r/${id}`);
+  const inbox = await openReviewInbox();
+  await screen.findByRole("separator", { name: "Resize reading pane" });
+  const handle = screen.getByRole("separator", { name: "Resize inbox" });
+  expect(handle.getAttribute("aria-valuenow")).toBe("464");
+  expect(handle.getAttribute("aria-valuemax")).toBe("464");
+  try {
+    fireEvent.click(await inbox.findByRole("link", { name: /Another proposal/ }), { button: 0 });
+    await screen.findByRole("heading", { name: secondItem.title, level: 1 });
+    expect(within(screen.getByTestId("reading-pane")).getByText("Loading revision…")).toBeTruthy();
+    expect(screen.getByRole("separator", { name: "Resize inbox" })).toBe(handle);
+    expect(handle.getAttribute("aria-valuenow")).toBe("464");
+    expect(handle.getAttribute("aria-valuemax")).toBe("464");
+  } finally {
+    await act(async () => releaseRevision());
+  }
+  await within(screen.getByTestId("reading-pane")).findByText("Overview");
+  expect(handle.getAttribute("aria-valuenow")).toBe("472");
+  expect(handle.getAttribute("aria-valuemax")).toBe("472");
+  expect(screen.queryByRole("separator", { name: "Resize reading pane" })).toBeNull();
+  expect(layoutStore.getSnapshot().inboxWidth).toBe(520);
+});
+
 test("tablet inbox sheet restores open sections and its body scroll after row navigation", async () => {
   width = 900;
   withInboxNavigation();
@@ -2574,6 +2618,37 @@ test("tablet inbox sheet restores open sections and its body scroll after row na
   const reopened = await screen.findByRole("dialog", { name: "Inbox" });
   expect(within(reopened).getByRole("button", { name: /Done/ }).getAttribute("aria-expanded")).toBe("true");
   expect(reopened.querySelector<HTMLElement>(".overflow-auto")?.scrollTop).toBe(280);
+});
+
+test("tablet search shortcut does not refocus search when the inbox reopens after a pick", async () => {
+  width = 900;
+  withInboxNavigation();
+  mount(`/r/${id}`);
+  const heading = await screen.findByRole("heading", { name: item.title, level: 1 });
+  await screen.findByText("Overview");
+  act(() => heading.focus());
+  fireEvent.keyDown(heading, { key: "/" });
+  const dialog = await screen.findByRole("dialog", { name: "Inbox" });
+  const inbox = within(dialog);
+  expect(document.activeElement).toBe(inbox.getByRole("textbox", { name: "Filter reviews" }));
+  fireEvent.click(await inbox.findByRole("button", { name: /Done/ }));
+  scrollInbox(dialog.querySelector<HTMLElement>(".overflow-auto"), 280);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+  try {
+    await act(async () => {
+      fireEvent.click(inbox.getByRole("link", { name: /Another proposal/ }), { button: 0 });
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(screen.getByRole("heading", { name: secondItem.title, level: 1 })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Inbox" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show inbox" }));
+    const reopened = screen.getByRole("dialog", { name: "Inbox" });
+    expect(document.activeElement).not.toBe(within(reopened).getByRole("textbox", { name: "Filter reviews" }));
+    expect(within(reopened).getByRole("button", { name: /Done/ }).getAttribute("aria-expanded")).toBe("true");
+    expect(reopened.querySelector<HTMLElement>(".overflow-auto")?.scrollTop).toBe(280);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("tablet cached navigation keeps heading focus and Close returns to Show inbox", async () => {
@@ -2637,36 +2712,46 @@ test("tablet picking the already open review returns focus to Show inbox", async
   }
 });
 
-test("tablet picking a review that fails to load returns focus to Show inbox", async () => {
-  width = 900;
-  withInboxNavigation();
-  const fallback = fetchMock.getMockImplementation();
-  fetchMock.mockImplementation(async (path, init) =>
-    path === `/api/v1/reviews/${secondItem.id}`
-      ? Response.json({ error: { code: "failed", message: "Failed" } }, { status: 500 })
-      : (fallback?.(path, init) as Promise<Response>),
-  );
-  mount(`/r/${id}`);
-  await screen.findByText("Overview");
-  const opener = screen.getByRole("button", { name: "Show inbox" });
-  act(() => opener.focus());
-  fireEvent.click(opener);
-  const sheet = await screen.findByRole("dialog", { name: "Inbox" });
-  const destination = within(sheet).getByRole("link", { name: /Another proposal/ });
-  act(() => destination.focus());
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
-  try {
-    await act(async () => {
-      fireEvent.click(destination, { button: 0 });
-    });
-    await act(async () => vi.advanceTimersByTimeAsync(1000));
-    expect(screen.queryByRole("dialog", { name: "Inbox" })).toBeNull();
-    expect(screen.getByRole("alert").textContent).toBe("Could not load this review.");
-    expect(document.activeElement).toBe(opener);
-  } finally {
-    vi.useRealTimers();
-  }
-});
+test.each(["Show inbox", "/"])(
+  "tablet picking a review that fails to load returns focus to Show inbox (opened with %s)",
+  async (openWith) => {
+    width = 900;
+    withInboxNavigation();
+    const fallback = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (path, init) =>
+      path === `/api/v1/reviews/${secondItem.id}`
+        ? Response.json({ error: { code: "failed", message: "Failed" } }, { status: 500 })
+        : (fallback?.(path, init) as Promise<Response>),
+    );
+    mount(`/r/${id}`);
+    await screen.findByText("Overview");
+    const opener = screen.getByRole("button", { name: "Show inbox" });
+    if (openWith === "/") {
+      const heading = screen.getByRole("heading", { name: item.title, level: 1 });
+      act(() => heading.focus());
+      expect(document.activeElement).toBe(heading);
+      fireEvent.keyDown(heading, { key: "/" });
+    } else {
+      act(() => opener.focus());
+      fireEvent.click(opener);
+    }
+    const sheet = await screen.findByRole("dialog", { name: "Inbox" });
+    const destination = within(sheet).getByRole("link", { name: /Another proposal/ });
+    act(() => destination.focus());
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+    try {
+      await act(async () => {
+        fireEvent.click(destination, { button: 0 });
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(1000));
+      expect(screen.queryByRole("dialog", { name: "Inbox" })).toBeNull();
+      expect(screen.getByRole("alert").textContent).toBe("Could not load this review.");
+      expect(document.activeElement).toBe(opener);
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
 
 test("phone inbox restores its search, open sections and page scroll after visiting a review", async () => {
   width = 390;
