@@ -12,16 +12,17 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { useRef, useState } from "react";
 import { ApiError, change, patch } from "../api/client.ts";
 import { mutationMessage } from "../api/mutations.ts";
-import { binQuery, settingsQuery } from "../api/queries.ts";
+import { binQuery, settingsQuery, themesQuery } from "../api/queries.ts";
 import { AppFrame } from "../components/layout/AppFrame.tsx";
 import { ShortcutSettings } from "../components/ShortcutSettings.tsx";
 import { Button } from "../components/ui/Button.tsx";
 import { Dialog } from "../components/ui/Dialog.tsx";
+import { RadioGroup } from "../components/ui/RadioGroup.tsx";
 import { SegmentedControl } from "../components/ui/SegmentedControl.tsx";
 import { TextField } from "../components/ui/TextField.tsx";
 import { useToast } from "../components/ui/Toast.tsx";
 import { plural } from "../lib/count.ts";
-import { setThemePick, useThemePick } from "../lib/theme.ts";
+import { pickedTheme, pickedThemeName, selectCustomTheme, setThemePick, useThemeState } from "../lib/theme.ts";
 import { relativeTime } from "../lib/time.ts";
 
 const numericSettings = {
@@ -283,7 +284,12 @@ function BinSettings() {
 }
 
 function AppearanceSettings() {
-  const pick = useThemePick();
+  const state = useThemeState();
+  const { pick } = state;
+  const themes = useQuery(themesQuery());
+  const name = pickedThemeName(pick);
+  const entry = themes.data?.themes.find((entry) => entry.name === name);
+  const unavailable = name !== undefined && themes.data && !entry?.valid;
   return (
     <section aria-labelledby="appearance-settings" className="mt-6">
       <h2 id="appearance-settings" className="mb-4 text-16 font-semibold">
@@ -302,6 +308,84 @@ function AppearanceSettings() {
         }}
       />
       <p className="mt-2 text-14 text-fg-3">Applies to this device only.</p>
+      {themes.isPending && (
+        <p role="status" className="mt-3 text-14 text-fg-3">
+          Loading themes…
+        </p>
+      )}
+      {themes.isError && (
+        <p role="alert" className="mt-3 text-14 text-fg-3">
+          Could not load themes.{" "}
+          <Button size="sm" onClick={() => void themes.refetch()}>
+            Try again
+          </Button>
+        </p>
+      )}
+      {themes.data?.folderError && <p className="mt-3 text-14 text-fg-3">The themes folder could not be read.</p>}
+      {unavailable && (
+        <p role="status" className="mt-3 text-14 text-fg-3 wrap-anywhere">
+          {pickedTheme(state) ? (
+            <>
+              This device keeps its last valid version of <bdi>{name}</bdi>.
+            </>
+          ) : (
+            <>
+              No valid version of <bdi>{name}</bdi> is saved on this device.
+            </>
+          )}{" "}
+          {entry && !entry.valid
+            ? `The update was refused: ${entry.problems.join(" ")}`
+            : themes.data?.folderError
+              ? "The themes folder could not be read."
+              : "The theme is no longer available on this server."}
+        </p>
+      )}
+      {themes.data?.themes.length === 0 && !themes.data.folderError && (
+        <p className="mt-3 text-14 text-fg-3 wrap-anywhere">
+          Create a theme with <code>emend theme copy dark mine</code>.
+        </p>
+      )}
+      {(themes.data?.themes.length ?? 0) > 0 && (
+        <div className="mt-4 flex min-w-0 flex-col gap-3 wrap-anywhere">
+          {themes.data?.themes.some((theme) => theme.valid) && (
+            <RadioGroup
+              label="Custom themes"
+              value={pick}
+              options={themes.data.themes.flatMap((theme) =>
+                theme.valid
+                  ? [
+                      {
+                        value: `theme:${theme.name}`,
+                        label: theme.name,
+                        description: `${theme.base === "dark" ? "Dark" : "Light"} base`,
+                      },
+                    ]
+                  : [],
+              )}
+              onChange={(value) => {
+                const theme = themes.data?.themes.find((theme) => `theme:${theme.name}` === value);
+                if (theme?.valid) selectCustomTheme(theme);
+              }}
+            />
+          )}
+          {themes.data?.themes
+            .filter((theme) => !theme.valid)
+            .map((theme) => (
+              <div key={theme.name} className="min-w-0 text-14 text-fg-3">
+                <p>
+                  <bdi>{theme.name}</bdi> · Refused
+                  {theme.base ? ` · ${theme.base === "dark" ? "Dark" : "Light"} base` : ""}
+                </p>
+                <ul className="mt-1 list-disc pl-5">
+                  {theme.problems.map((problem, index) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: refusal reasons may repeat and have no identity.
+                    <li key={index}>{problem}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+        </div>
+      )}
     </section>
   );
 }

@@ -42,6 +42,22 @@ private window, so pick another one in Settings there. In the config file, use
 `mod+` or `mod+shift+` followed by a letter. `mod` means Ctrl, or ⌘ on a Mac.
 See [api.md](api.md) for the command ids.
 
+### Themes
+
+Themes live in the `themes` folder beside emend's global `config.json`, on the server your
+browser reaches. Start with `emend theme copy dark mine`, or use `light` or another theme as
+the source. `emend theme list` shows valid and refused files. `emend theme check mine` reports
+invalid values and text that is too faint to read.
+
+Edit `mine.json` to change colours or set `fonts.text` and `fonts.code` to installed font names.
+Emend's fonts stay as fallbacks. Each file names a Dark or Light base; omitted values use that
+base. A token can reference a scale step, so changing that step recolours every token built on
+it. A token set to a colour keeps its own value. See [api.md](api.md#themes) for the file format.
+
+Pick the theme in Settings → Appearance on each device, including your phone. Saving the file
+updates open pages within a few seconds. If it becomes invalid, pages keep the last valid
+version and Settings shows why. The pick applies to this device only.
+
 ## Publish a doc
 
 Publish any UTF-8 text file and get its review URL:

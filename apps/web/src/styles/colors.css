@@ -100,7 +100,8 @@
   --border-2: var(--n-300);
   --border-strong: var(--n-500);
   --border-focus: var(--ochre-500);
-  --focus-ring: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--ochre-500);
+  --focus-color: var(--ochre-500);
+  --focus-ring: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--focus-color);
   /* reading views: the writeup, Markdown docs and comment bodies; light mode keeps the app colours */
   --bg-reading: var(--bg-app);
   --bg-reading-card: var(--bg-surface);
@@ -219,7 +220,8 @@
     --fg-reading: oklch(0.79 0.004 260);
     --fg-reading-muted: var(--n-400);
     --fg-reading-strong: var(--n-200);
-    --focus-ring: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--ochre-400);
+    --focus-color: var(--ochre-400);
+    --focus-ring: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--focus-color);
     --accent-text: var(--ochre-300);
     --accent-tint: oklch(0.8 0.155 77 / 0.1);
     --accent-tint-2: oklch(0.8 0.155 77 / 0.18);
@@ -329,7 +331,8 @@
   --fg-reading: oklch(0.79 0.004 260);
   --fg-reading-muted: var(--n-400);
   --fg-reading-strong: var(--n-200);
-  --focus-ring: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--ochre-400);
+  --focus-color: var(--ochre-400);
+  --focus-ring: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--focus-color);
   --accent-text: var(--ochre-300);
   --accent-tint: oklch(0.8 0.155 77 / 0.1);
   --accent-tint-2: oklch(0.8 0.155 77 / 0.18);

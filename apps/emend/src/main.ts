@@ -40,6 +40,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   emend update                   Update emend and restart its service
   emend skills install [--dir <path>] [--dry-run]
   emend config [list] | add docRoots <folder> | remove docRoots <folder> | set openBrowser true|false
+  emend theme list | copy <source> <name> | check <name>
   emend --version
 `);
     return 0;
@@ -61,6 +62,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       "update",
       "skills",
       "config",
+      "theme",
       "pair",
       "devices",
       "attach",
@@ -88,6 +90,11 @@ export async function run(argv: string[], io: Io): Promise<number> {
       if (argv[0] === "config") {
         const { configCommand } = await import("./cli/commands/config.ts");
         await configCommand(defaultStateDir(io.env), defaultConfigDir(io.env), argv.slice(1), io, process.cwd());
+        return 0;
+      }
+      if (argv[0] === "theme") {
+        const { themeCommand } = await import("./cli/commands/theme.ts");
+        await themeCommand(defaultConfigDir(io.env), argv.slice(1), io);
         return 0;
       }
       const command = await commands[argv[0] as keyof typeof commands]();

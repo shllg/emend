@@ -8,11 +8,12 @@ import { ERROR_STATUS, type ErrorCode } from "@emend/contract";
 import { getRequestListener } from "@hono/node-server";
 import { writeSecretFile } from "../state/files.ts";
 import { type AppDeps, createApp } from "./app.ts";
+import { ReviewEvents } from "./events.ts";
 import { errorBody } from "./http/errors.ts";
 import { headersForPath } from "./http/headers.ts";
 import { closeCommentRenderer } from "./routes/comment-html.ts";
-
 import { initializeServerState } from "./state.ts";
+import { type ThemeWatcherOptions, watchThemes } from "./theme-watcher.ts";
 
 export { initializeServerState } from "./state.ts";
 
@@ -61,6 +62,8 @@ export function serverConfig(
 export interface ServerOptions {
   stateDir: string;
   configFile?: string;
+  themesDir?: string;
+  themeWatcher?: ThemeWatcherOptions;
   host?: string;
   port?: number;
   publicOrigin?: string;
@@ -82,6 +85,8 @@ export async function startServer(
   const state = await initializeServerState(opts.stateDir);
   const key = randomBytes(32).toString("base64url");
   const server = createServer({ requireHostHeader: false });
+  const events = new ReviewEvents(Date.now);
+  const stopThemes = watchThemes(opts.themesDir, events, opts.themeWatcher);
   try {
     const bound = await new Promise<{ url: string; port: number }>((resolve, reject) => {
       server.once("error", reject);
@@ -95,6 +100,8 @@ export async function startServer(
             now: Date.now,
             config,
             configFile: opts.configFile,
+            themesDir: opts.themesDir,
+            events,
             onStopRequest: opts.onStopRequest,
           });
           server.on("request", nodeRequestHandler(app, config));
@@ -122,6 +129,7 @@ export async function startServer(
       },
       close() {
         closing ??= (async () => {
+          stopThemes();
           try {
             await stopServer(server);
           } finally {
@@ -134,6 +142,7 @@ export async function startServer(
       },
     };
   } catch (error) {
+    stopThemes();
     await stopServer(server);
     await state.db.close();
     throw error;

@@ -25,6 +25,9 @@ test("exports the v1 API, limits, file vocabulary and reserved fallback", () => 
   expect(API_PREFIX).toBe("/api/v1");
   expect(MIN_CLIENT_VERSION).toBe("0.1.0");
   expect(LIMITS).toEqual({
+    themes: 50,
+    themeFileBytes: 32768,
+    themeProblems: 20,
     inboxItems: 200,
     groups: 50,
     groupNameChars: 80,
@@ -251,9 +254,9 @@ test("download paths add diff=1 after docs and comments", () => {
   expect(reviewDownloadPath("review", 2, [], { diff: false })).toBe(path);
 });
 
-test("download themes accept nothing or one dark or light", () => {
-  for (const value of [[], ["dark"], ["light"]]) expect(DownloadTheme.parse(value)).toEqual(value);
-  for (const value of [["system"], ["x"], [""], ["Dark"], ["dark", "dark"], ["light", "light"], ["dark", "light"]])
+test("download themes accept nothing or one base or name", () => {
+  for (const value of [[], ["dark"], ["light"], ["x"]]) expect(DownloadTheme.parse(value)).toEqual(value);
+  for (const value of [["system"], [""], ["Dark"], ["dark", "dark"], ["light", "light"], ["dark", "light"]])
     expect(DownloadTheme.safeParse(value).success).toBe(false);
 });
 

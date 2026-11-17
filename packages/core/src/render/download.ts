@@ -1,11 +1,12 @@
 import {
-  type DownloadThemeValue,
   LIMITS,
   OTHER_TOPIC,
   type PublishLinks,
   type RenderedBlock,
   type RenderedWriteup,
   type SourceContent,
+  ThemeBase,
+  ThemeColor,
   type TopicMeta,
 } from "@emend/contract";
 import { fromHtml } from "hast-util-from-html";
@@ -14,6 +15,7 @@ import rehypeStringify from "rehype-stringify";
 import { unified } from "unified";
 import { isLockfile } from "../lockfiles.ts";
 import { parseDocHtml } from "../place/html.ts";
+import type { DownloadLook } from "../theme/download.ts";
 import type { HtmlElement as Element, HtmlRoot as Root } from "./blocks.ts";
 import {
   asciiLower,
@@ -69,9 +71,11 @@ export function createDownloadWork(commentBytes: number = LIMITS.downloadComment
   return { [cssWork]: 0, [commentWork]: commentBytes };
 }
 
+export type DownloadRenderTheme = ThemeBase | DownloadLook;
+
 type PageInput = {
   title: string;
-  theme?: DownloadThemeValue;
+  theme?: DownloadRenderTheme;
   details: DownloadDetails;
   resolveMedia: DownloadResolver;
   inlineBudget?: number;
@@ -108,10 +112,28 @@ const DIFF_STYLES = {
   dark: `.em-diff-add{background:oklch(.27 .04 145)}.em-diff-delete{background:oklch(.27 .04 25)}`,
 };
 // Only these built-in styles pass here; keep System's CSS bytes unchanged.
-function downloadStyles(styles: { base: string; dark: string }, theme?: DownloadThemeValue): string {
+function downloadStyles(styles: { base: string; dark: string }, selection?: DownloadRenderTheme): string {
+  const theme = downloadThemeBase(selection);
   const base = styles.base.replace("color-scheme:light dark;", `color-scheme:${theme ?? "light dark"};`);
   if (theme === "light") return base;
   return `${base}${theme === "dark" ? styles.dark : `@media(prefers-color-scheme:dark){${styles.dark}}`}\n`;
+}
+function downloadThemeBase(theme?: DownloadRenderTheme): ThemeBase | undefined {
+  return theme === undefined ? undefined : ThemeBase.parse(typeof theme === "object" ? theme.base : theme);
+}
+
+function downloadLookStyles(theme?: DownloadRenderTheme): string | null {
+  if (theme === undefined || typeof theme === "string") return null;
+  ThemeBase.parse(theme.base);
+  // Check every value before composing any CSS, including values unused on this page.
+  const keys = ["bg", "sunken", "fg", "strong", "muted", "border", "link", "diffAdd", "diffDel"] as const;
+  const colors = Object.fromEntries(keys.map((key) => [key, ThemeColor.parse(theme.colors[key])]));
+  return (
+    `:root{${keys
+      .slice(0, 7)
+      .map((key) => `--${key}:${colors[key]}`)
+      .join(";")}}` + `.em-diff-add{background:${colors.diffAdd}}.em-diff-delete{background:${colors.diffDel}}`
+  );
 }
 const rel = ["noopener", "noreferrer", "nofollow"];
 const imageTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
@@ -272,6 +294,7 @@ function frame(
   threadStyles = false,
   diffStyles = false,
 ): string {
+  const lookStyles = downloadLookStyles(input.theme);
   const { title, details } = input;
   const links = (details.links ?? []).flatMap((link) => {
     try {
@@ -305,11 +328,12 @@ function frame(
           element("head", [
             ...headMetas(),
             element("meta", [], { name: "viewport", content: "width=device-width, initial-scale=1" }),
-            element("meta", [], { name: "color-scheme", content: input.theme ?? "light dark" }),
+            element("meta", [], { name: "color-scheme", content: downloadThemeBase(input.theme) ?? "light dark" }),
             element("title", [text(title)]),
             style(downloadStyles(READING_STYLES, input.theme)),
             ...(threadStyles ? [style(downloadStyles(THREAD_STYLES, input.theme))] : []),
             ...(diffStyles ? [style(downloadStyles(DIFF_STYLES, input.theme))] : []),
+            ...(lookStyles ? [style(lookStyles)] : []),
           ]),
           element("body", [
             element(
@@ -1406,12 +1430,13 @@ const cssResourceAttributes = new Set([
 ]);
 export async function buildOmittedDownload(input: {
   title: string;
-  theme?: DownloadThemeValue;
+  theme?: DownloadRenderTheme;
   threads?: FileThreads;
   inlineBudget?: number;
   pause?: () => Promise<void>;
   work?: DownloadWork;
 }): Promise<string> {
+  const lookStyles = downloadLookStyles(input.theme);
   const content: ElementContent[] = [note()];
   if (input.threads) {
     const state = resolverState(async () => null, input.inlineBudget, input.pause, input.work);
@@ -1429,10 +1454,13 @@ export async function buildOmittedDownload(input: {
         [
           element("head", [
             ...headMetas(),
-            ...(input.theme ? [element("meta", [], { name: "color-scheme", content: input.theme })] : []),
+            ...(input.theme
+              ? [element("meta", [], { name: "color-scheme", content: downloadThemeBase(input.theme) })]
+              : []),
             element("title", [text(input.title)]),
             style(downloadStyles(READING_STYLES, input.theme)),
             ...(input.threads ? [style(downloadStyles(THREAD_STYLES, input.theme))] : []),
+            ...(lookStyles ? [style(lookStyles)] : []),
           ]),
           element("body", content),
         ],
@@ -1445,12 +1473,13 @@ export async function buildHtmlDocDownload(input: {
   html: string;
   docPath: string;
   title: string;
-  theme?: DownloadThemeValue;
+  theme?: DownloadRenderTheme;
   resolveAsset: DownloadResolver;
   inlineBudget?: number;
   pause?: () => Promise<void>;
   work?: DownloadWork;
 }): Promise<string> {
+  downloadLookStyles(input.theme);
   if (!parseDocHtml(input.html, HTML_ELEMENT_LIMIT))
     return buildOmittedDownload({ title: input.title, theme: input.theme });
   const tree = fromHtml(input.html);

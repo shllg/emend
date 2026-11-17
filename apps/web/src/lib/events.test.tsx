@@ -690,6 +690,13 @@ test("groups refresh inbox and either the moved review or all review views", asy
   expect(invalidate.mock.calls.map(([options]) => options?.queryKey)).toEqual([["inbox"], ["review"]]);
 });
 
+test("themes events refresh only the theme list, without a review id", async () => {
+  const { invalidate } = await mount();
+  act(() => source().emit("themes", {}));
+  await tick();
+  expect(invalidate).toHaveBeenCalledExactlyOnceWith({ queryKey: ["themes"] });
+});
+
 test("a groups event after open refreshes every review updated within the reconnect batch", async () => {
   const { client, invalidate } = await mount();
   const review = observe(client, ["review", id], Date.now());

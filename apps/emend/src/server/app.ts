@@ -38,6 +38,7 @@ import { sendRoutes } from "./routes/sends.ts";
 import { serverRoutes } from "./routes/server.ts";
 import { sessionRoutes } from "./routes/session.ts";
 import { settingsRoutes } from "./routes/settings.ts";
+import { themeRoutes } from "./routes/themes.ts";
 import { threadRoutes } from "./routes/threads.ts";
 import { viewedRoutes } from "./routes/viewed.ts";
 
@@ -47,6 +48,7 @@ export interface AppDeps {
   instance: Instance;
   now: () => number;
   configFile?: string;
+  themesDir?: string;
   publishExecutor?: Executor;
   events?: ReviewEvents;
   onStopRequest?: () => void;
@@ -69,6 +71,7 @@ export const ENDPOINTS = [
   { method: "POST", path: "/api/v1/pairings", scope: "pairings:create" },
   { method: "GET", path: "/api/v1/devices", scope: "devices:manage" },
   { method: "GET", path: "/api/v1/settings", scope: "read" },
+  { method: "GET", path: "/api/v1/themes", scope: "read" },
   { method: "PATCH", path: "/api/v1/settings", scope: "settings:manage" },
   { method: "DELETE", path: "/api/v1/devices/:id", scope: "devices:manage" },
   { method: "POST", path: "/api/v1/machines", scope: "public" },
@@ -182,6 +185,7 @@ export function createApp(deps: AppDeps) {
   pairingRoutes(app, deps);
   deviceRoutes(app, deps);
   settingsRoutes(app, deps);
+  themeRoutes(app, deps);
   const redemptions = pairingRedemptions(deps.now);
   sessionRoutes(app, deps, redemptions);
   machineRoutes(app, deps, redemptions);

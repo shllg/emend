@@ -43,5 +43,5 @@ test("manifest is installable and every placeholder PNG has the promised size", 
   const worker = await readFile(new URL("../build/service-worker.ts", import.meta.url), "utf8");
   expect(worker).toContain('"/theme-boot.js"');
   expect(worker).toContain('"public/theme-boot.js"');
-  expect((await publicFile("theme-boot.js")).byteLength).toBeLessThan(1024);
+  expect((await publicFile("theme-boot.js")).byteLength).toBeLessThan(2048);
 });

@@ -16,11 +16,30 @@ export class ReviewEvents {
   private listeners = new Map<string, Map<string | null, Set<Listener>>>();
   private waiting = new Map<string, Waiting>();
   private streams = new Map<string, number>();
+  private streamListeners = new Set<() => void>();
   private sessions = new Map<string, Set<() => void>>();
   private waitingByOwner = new Map<string, number>();
   private now: () => number;
   constructor(now: () => number) {
     this.now = now;
+  }
+
+  get streamCount(): number {
+    let count = 0;
+    for (const streams of this.streams.values()) count += streams;
+    return count;
+  }
+  onStreamCountChange(listener: () => void): () => void {
+    this.streamListeners.add(listener);
+    return () => {
+      this.streamListeners.delete(listener);
+    };
+  }
+
+  /** Server-wide notices go only to global listeners, regardless of owner. */
+  broadcast(value: ReviewEvent) {
+    const event = ReviewEvent.parse(value);
+    for (const reviews of this.listeners.values()) for (const listener of reviews.get(null) ?? []) listener(event);
   }
 
   subscribe(ownerId: string, reviewId: string | null, listener: Listener) {
@@ -47,13 +66,14 @@ export class ReviewEvents {
   emit(ownerId: string, value: ReviewEvent) {
     // Strip any accidental content fields even when the caller isn't type checked.
     const event = ReviewEvent.parse(value);
-    const waiting = event.reviewId === undefined ? undefined : this.waiting.get(ownedKey(ownerId, event.reviewId));
+    const reviewId = "reviewId" in event ? event.reviewId : undefined;
+    const waiting = reviewId === undefined ? undefined : this.waiting.get(ownedKey(ownerId, reviewId));
     if (waiting?.ownerId === ownerId && "revision" in event)
       waiting.revision = Math.max(waiting.revision, event.revision);
     const reviews = this.listeners.get(ownerId);
     for (const listener of [
       ...(reviews?.get(null) ?? []),
-      ...(event.reviewId === undefined ? [] : (reviews?.get(event.reviewId) ?? [])),
+      ...(reviewId === undefined ? [] : (reviews?.get(reviewId) ?? [])),
     ])
       listener(event);
   }
@@ -130,6 +150,7 @@ export class ReviewEvents {
     const count = this.streams.get(ownerId) ?? 0;
     if (count >= 32) throw new ApiError("rate_limited", "event_streams");
     this.streams.set(ownerId, count + 1);
+    for (const listener of this.streamListeners) listener();
     const encoder = new TextEncoder();
     let cleanup = () => {};
     return new ReadableStream<Uint8Array>(
@@ -183,6 +204,7 @@ export class ReviewEvents {
             const remaining = (this.streams.get(ownerId) ?? 1) - 1;
             if (remaining) this.streams.set(ownerId, remaining);
             else this.streams.delete(ownerId);
+            for (const listener of this.streamListeners) listener();
           };
           const enqueue = (text: string) => {
             if (closed) return;

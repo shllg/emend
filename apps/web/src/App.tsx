@@ -5,12 +5,18 @@ import { ToastProvider } from "./components/ui/Toast.tsx";
 import { TooltipProvider } from "./components/ui/Tooltip.tsx";
 import { ReviewEventsProvider } from "./lib/events.tsx";
 import { InboxViewProvider } from "./lib/inbox-view.tsx";
+import { ThemeSync } from "./lib/theme-sync.tsx";
 import { createWebRouter } from "./router.tsx";
 
 function AppEvents({ children }: { children: ReactNode }) {
   const pairing = useRouterState({ select: (state) => /^\/pair\/?$/i.test(state.location.pathname) });
   // An unauthenticated EventSource gets a terminal 401; start after pairing instead.
-  return <ReviewEventsProvider enabled={!pairing}>{children}</ReviewEventsProvider>;
+  return (
+    <ReviewEventsProvider enabled={!pairing}>
+      <ThemeSync enabled={!pairing} />
+      {children}
+    </ReviewEventsProvider>
+  );
 }
 
 export function App({ queryClient, history }: { queryClient?: QueryClient; history?: RouterHistory } = {}) {

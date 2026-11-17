@@ -109,7 +109,10 @@ fi
   try {
     expect(await result).toBe(0);
     expect(startServer).toHaveBeenCalledWith(
-      expect.objectContaining({ configFile: join(env.XDG_CONFIG_HOME as string, "emend", "config.json") }),
+      expect.objectContaining({
+        configFile: join(env.XDG_CONFIG_HOME as string, "emend", "config.json"),
+        themesDir: join(env.XDG_CONFIG_HOME as string, "emend", "themes"),
+      }),
     );
     expect(stdout).toHaveBeenCalledExactlyOnceWith(`emend: serving https://${dnsName}\n`);
     expect(close).toHaveBeenCalledOnce();

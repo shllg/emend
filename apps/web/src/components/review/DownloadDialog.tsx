@@ -7,7 +7,7 @@ import {
   downloadHasComments,
   downloadHasDiff,
 } from "../../lib/download.ts";
-import { useThemePick } from "../../lib/theme.ts";
+import { useDownloadTheme } from "../../lib/theme-sync.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Checkbox } from "../ui/Checkbox.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
@@ -25,7 +25,7 @@ export function DownloadDialog({
   onOpenChange: (open: boolean) => void;
   returnFocus?: RefObject<HTMLElement | null>;
 }) {
-  const theme = useThemePick();
+  const theme = useDownloadTheme();
   const [tickedIds, setTickedIds] = useState<string[]>([]);
   const [comments, setComments] = useState(false);
   const [diff, setDiff] = useState(false);
@@ -74,7 +74,7 @@ export function DownloadDialog({
               href={reviewDownloadPath(reviewId, revision.seq, tickedIds, {
                 comments,
                 diff,
-                theme: theme === "system" ? undefined : theme,
+                theme,
               })}
               download
               onClick={() => onOpenChange(false)}

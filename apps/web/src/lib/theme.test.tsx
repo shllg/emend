@@ -5,7 +5,20 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import type { Window as HappyWindow } from "happy-dom";
 import type { CSSProperties } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { createThemeStore, initializeTheme, setThemePick, themeKey, useResolvedTheme, useThemePick } from "./theme.ts";
+import { customTheme } from "../test/themes.ts";
+import {
+  createThemeStore,
+  customThemeKey,
+  downloadTheme,
+  initializeTheme,
+  selectCustomTheme,
+  setThemePick,
+  themeFontStacks,
+  themeKey,
+  updateCustomTheme,
+  useResolvedTheme,
+  useThemePick,
+} from "./theme.ts";
 
 const boot = readFileSync(resolve(import.meta.dirname, "../../public/theme-boot.js"), "utf8");
 const index = readFileSync(resolve(import.meta.dirname, "../../index.html"), "utf8");
@@ -19,6 +32,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  setThemePick("system");
   stop();
   stop = () => {};
   for (const meta of document.querySelectorAll('meta[name="theme-color"]')) meta.remove();
@@ -203,3 +217,150 @@ test.each(["light", "dark"].flatMap((os) => (["system", "dark", "light"] as cons
     }
   },
 );
+
+test("custom font fallbacks match the complete typography declarations", () => {
+  const css = readFileSync(resolve(import.meta.dirname, "../styles/typography.css"), "utf8");
+  expect(css.match(/--font-sans:\s*([^;]+);/)?.[1]).toBe(themeFontStacks.text);
+  expect(css.match(/--font-mono:\s*([^;]+);/)?.[1]).toBe(themeFontStacks.code);
+});
+
+test("a custom pick applies allowlisted values, fonts and base, and removes its previous overrides", () => {
+  const style = document.documentElement.style;
+  style.setProperty("--unrelated", "7px");
+  const set = vi.spyOn(style, "setProperty");
+  selectCustomTheme({
+    ...customTheme,
+    scales: { ...customTheme.scales, "unknown-name": "#123456" },
+    tokens: { ...customTheme.tokens, "font-sans": "#123456", "n-0": "#123456" },
+  });
+  expect(localStorage.getItem(themeKey)).toBe("theme:mine");
+  expect(JSON.parse(localStorage.getItem(customThemeKey) ?? "null").name).toBe("mine");
+  expect(document.documentElement.dataset.theme).toBe("dark");
+  expect(set.mock.calls).toEqual([
+    ["--n-950", "#112233"],
+    ["--bg-app", "var(--n-950)"],
+    ["--fg-1", "#eeeeee"],
+    ["--font-sans", `"Example Sans", ${themeFontStacks.text}`],
+    ["--font-mono", `"Example Mono", ${themeFontStacks.code}`],
+  ]);
+  expect(
+    [...document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')].map((meta) => meta.content),
+  ).toEqual(["#112233", "#112233"]);
+  updateCustomTheme({ ...customTheme, base: "light", fonts: {}, scales: {}, tokens: { accent: "#aabbcc" } });
+  for (const property of ["--n-950", "--bg-app", "--fg-1", "--font-sans", "--font-mono"])
+    expect(style.getPropertyValue(property)).toBe("");
+  expect(style.getPropertyValue("--accent")).toBe("#aabbcc");
+  setThemePick("dark");
+  expect(style.getPropertyValue("--accent")).toBe("");
+  expect(style.getPropertyValue("--unrelated")).toBe("7px");
+  style.removeProperty("--unrelated");
+});
+
+test.each([
+  { name: "../mine" },
+  { name: "dark" },
+  { scales: { "n-950": "url(x)" } },
+  { tokens: { "bg-app": "red;}" } },
+  { tokens: { "bg-app": "var(--n-950)" } },
+  { tokens: { "bg-app": "unknown-step" } },
+  { fonts: { text: 'Bad"; color: red' } },
+  { fonts: { code: "url(x)" } },
+  { themeColor: "#112233;" },
+])("a tampered cache is refused as a whole: %j", (changes) => {
+  localStorage.setItem(themeKey, "theme:mine");
+  localStorage.setItem(customThemeKey, JSON.stringify({ ...customTheme, ...changes }));
+  const set = vi.spyOn(document.documentElement.style, "setProperty");
+  stop = initializeTheme();
+  expect(set).not.toHaveBeenCalled();
+  expectApplied("system");
+});
+
+test("cached custom picks resolve to their base and follow either storage key", () => {
+  localStorage.setItem(themeKey, "theme:mine");
+  localStorage.setItem(customThemeKey, JSON.stringify(customTheme));
+  render(<Reader />);
+  expect(screen.getByRole("status").textContent).toBe("theme:mine:dark");
+  act(() => {
+    localStorage.setItem(
+      customThemeKey,
+      JSON.stringify({ ...customTheme, base: "light", scales: { "n-950": "#aabbcc" } }),
+    );
+    window.dispatchEvent(new StorageEvent("storage", { key: customThemeKey, storageArea: localStorage }));
+  });
+  expect(screen.getByRole("status").textContent).toBe("theme:mine:light");
+  expect(document.documentElement.style.getPropertyValue("--n-950")).toBe("#aabbcc");
+  act(() => {
+    localStorage.setItem(themeKey, "theme:another");
+    window.dispatchEvent(new StorageEvent("storage", { key: themeKey, storageArea: localStorage }));
+  });
+  expect(document.documentElement.style.getPropertyValue("--n-950")).toBe("");
+  act(() => {
+    localStorage.clear();
+    window.dispatchEvent(new StorageEvent("storage", { key: null, storageArea: localStorage }));
+  });
+  expectApplied("system");
+});
+
+test("denied cache writes keep the last valid custom theme in memory", () => {
+  const fail = () => {
+    throw new Error("full");
+  };
+  vi.spyOn(localStorage, "setItem").mockImplementation(fail);
+  render(<Reader />);
+  act(() => selectCustomTheme(customTheme));
+  expect(screen.getByRole("status").textContent).toBe("theme:mine:dark");
+  expect(document.documentElement.style.getPropertyValue("--n-950")).toBe("#112233");
+});
+
+test("the boot script uses only a matching cache's base and hex browser colour", () => {
+  localStorage.setItem(themeKey, "theme:mine");
+  localStorage.setItem(customThemeKey, JSON.stringify(customTheme));
+  const set = vi.spyOn(document.documentElement.style, "setProperty");
+  runInNewContext(boot, { document, localStorage });
+  expect(document.documentElement.dataset.theme).toBe("dark");
+  expect(
+    [...document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')].map((meta) => meta.content),
+  ).toEqual(["#112233", "#112233"]);
+  expect(set).not.toHaveBeenCalled();
+});
+
+test.each([{ name: "another" }, { base: "evil" }, { valid: false }, null, "not json"])(
+  "boot ignores a mismatching or malformed custom cache: %j",
+  (changes) => {
+    localStorage.setItem(themeKey, "theme:mine");
+    localStorage.setItem(
+      customThemeKey,
+      typeof changes === "string" ? changes : JSON.stringify(changes === null ? null : { ...customTheme, ...changes }),
+    );
+    runInNewContext(boot, { document, localStorage });
+    expectApplied("system");
+  },
+);
+
+test("boot rejects unsafe meta colours and reserved theme names", () => {
+  localStorage.setItem(themeKey, "theme:mine");
+  localStorage.setItem(customThemeKey, JSON.stringify({ ...customTheme, themeColor: "url(x)" }));
+  runInNewContext(boot, { document, localStorage });
+  expectApplied("dark");
+  localStorage.setItem(themeKey, "theme:dark");
+  localStorage.setItem(customThemeKey, JSON.stringify({ ...customTheme, name: "dark" }));
+  runInNewContext(boot, { document, localStorage });
+  expectApplied("system");
+});
+
+test("downloads use a currently valid name, otherwise the matching cached base", () => {
+  const state = { pick: "theme:mine" as const, custom: customTheme };
+  expect(downloadTheme(state, { themes: [customTheme], folderError: false })).toBe("mine");
+  for (const list of [
+    undefined,
+    { themes: [], folderError: false },
+    {
+      themes: [{ valid: false as const, name: "mine", base: "light" as const, problems: ["Unreadable."] }],
+      folderError: false,
+    },
+  ])
+    expect(downloadTheme(state, list)).toBe("dark");
+  expect(downloadTheme({ ...state, pick: "theme:another" }, undefined)).toBeUndefined();
+  expect(downloadTheme({ ...state, pick: "system" }, undefined)).toBeUndefined();
+  expect(downloadTheme({ ...state, pick: "light" }, undefined)).toBe("light");
+});
