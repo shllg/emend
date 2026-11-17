@@ -58,9 +58,9 @@ async function stream(owner: string, review: string | null = null) {
   expect(new TextDecoder().decode((await reader.read()).value)).toBe(": connected\n\n");
   return reader;
 }
-const seed = async (content = "{}") => {
-  await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, "mine.json"), content);
+const seed = async (content = "{}", name = "mine") => {
+  await mkdir(join(dir, name), { recursive: true });
+  await writeFile(join(dir, name, "theme.json"), content);
 };
 const start = async () => {
   stop = await watchThemes(dir, events, { intervalMs: 17, clock });
@@ -124,23 +124,64 @@ test("saves emit after start, while streams are closed and after reopening", asy
   expect(broadcast).toHaveBeenCalledTimes(3);
 });
 
-test("linked files, deletion and folder disappearance change the fingerprint", async () => {
+test("a new folder, created, saved and deleted theme.json, and a removed folder each emit once", async () => {
+  await mkdir(dir, { recursive: true });
+  await start();
+  const broadcast = vi.spyOn(events, "broadcast");
+  const folder = join(dir, "mine");
+  const path = join(folder, "theme.json");
+  const changes = [
+    () => mkdir(folder),
+    () => writeFile(path, "{}"),
+    () => writeFile(path, '{"version":1}'),
+    () => rm(path),
+    () => rm(folder, { recursive: true }),
+  ];
+  for (const [index, change] of changes.entries()) {
+    await change();
+    await tick();
+    expect(broadcast).toHaveBeenCalledTimes(index + 1);
+    expect(broadcast).toHaveBeenLastCalledWith({ type: "themes" });
+    await tick();
+    expect(broadcast).toHaveBeenCalledTimes(index + 1);
+  }
+});
+
+test("linked theme folders, deletion and folder disappearance change the fingerprint", async () => {
   await seed();
-  const target = join(root, "target.json");
+  const targetFolder = join(root, "target");
+  await mkdir(targetFolder);
+  const target = join(targetFolder, "theme.json");
   await writeFile(target, "{}");
-  await symlink(target, join(dir, "linked.json"));
+  await symlink(targetFolder, join(dir, "linked"));
   await start();
   await stream("owner");
   const broadcast = vi.spyOn(events, "broadcast");
   await tick();
   await writeFile(target, "changed target");
   await tick();
-  await rm(join(dir, "mine.json"));
+  await rm(join(dir, "mine", "theme.json"));
   await tick();
   await rm(dir, { recursive: true });
   await tick();
   await tick();
   expect(broadcast).toHaveBeenCalledTimes(3);
+});
+
+test("missing and unreadable theme.json have distinct, stable fingerprints", async () => {
+  await mkdir(join(dir, "mine"), { recursive: true });
+  await start();
+  const broadcast = vi.spyOn(events, "broadcast");
+  await tick();
+  expect(broadcast).not.toHaveBeenCalled();
+  const stat = vi.spyOn(fs, "stat").mockRejectedValue(Object.assign(new Error("unreadable"), { code: "EACCES" }));
+  await tick();
+  await tick();
+  expect(broadcast).toHaveBeenCalledExactlyOnceWith({ type: "themes" });
+  stat.mockRestore();
+  await tick();
+  await tick();
+  expect(broadcast).toHaveBeenCalledTimes(2);
 });
 
 test("ticks never overlap and an in-flight result cannot outlive the watcher", async () => {
@@ -182,19 +223,21 @@ test("no configured folder allocates no timer", async () => {
   expect(clock.setTimeout).not.toHaveBeenCalled();
 });
 
-test("fingerprints only the sorted, displayable 50 files the list shows", async () => {
+test("fingerprints only theme.json in the sorted, displayable 50 folders the list shows", async () => {
   await seed();
-  for (let i = 0; i < 50; i++) await writeFile(join(dir, `theme-${String(i).padStart(2, "0")}.json`), "");
+  for (let i = 0; i < 50; i++) await seed("", `theme-${String(i).padStart(2, "0")}`);
   await start();
   await stream("owner");
   const broadcast = vi.spyOn(events, "broadcast");
   await tick();
-  await writeFile(join(dir, "theme-49.json"), "not listed");
-  await writeFile(join(dir, "bad\nname.json"), "not displayable");
-  await writeFile(join(dir, ".hidden.json"), "hidden");
+  await seed("not listed", "theme-49");
+  await seed("not displayable", "bad\nname");
+  await seed("hidden", ".hidden");
+  await writeFile(join(dir, "x.json"), "ignored top-level file");
+  await writeFile(join(dir, "mine", "extra.txt"), "ignored theme extension");
   await tick();
   expect(broadcast).not.toHaveBeenCalled();
-  await writeFile(join(dir, "theme-48.json"), "listed");
+  await seed("listed", "theme-48");
   await tick();
   expect(broadcast).toHaveBeenCalledExactlyOnceWith({ type: "themes" });
 });
@@ -228,8 +271,8 @@ test("an in-time baseline emits nothing and clears its unref'd default wait time
 });
 
 test("a late baseline releases startup at the wait limit and broadcasts once when it finishes", async () => {
-  const pending = Promise.withResolvers<Awaited<ReturnType<typeof themes.listThemeFiles>>>();
-  const listing = vi.spyOn(themes, "listThemeFiles").mockReturnValue(pending.promise);
+  const pending = Promise.withResolvers<Awaited<ReturnType<typeof themes.listThemeFolders>>>();
+  const listing = vi.spyOn(themes, "listThemeFolders").mockReturnValue(pending.promise);
   const broadcast = vi.spyOn(events, "broadcast");
   const started = vi.fn();
   const starting = watchThemes(dir, events, { clock, intervalMs: 17, baselineWaitMs: 37 }).then((close) => {
@@ -248,7 +291,7 @@ test("a late baseline releases startup at the wait limit and broadcasts once whe
   for (let i = 0; i < 3; i++) await tick();
   expect(listing).toHaveBeenCalledOnce();
   expect(broadcast).not.toHaveBeenCalled();
-  pending.resolve({ files: [], folderError: false, status: "missing" });
+  pending.resolve({ folders: [], folderError: false, status: "missing" });
   await pending.promise;
   await tick();
   expect(broadcast).toHaveBeenCalledExactlyOnceWith({ type: "themes" });
@@ -257,15 +300,15 @@ test("a late baseline releases startup at the wait limit and broadcasts once whe
 });
 
 test("stopping before a late baseline ends prevents its broadcast", async () => {
-  const pending = Promise.withResolvers<Awaited<ReturnType<typeof themes.listThemeFiles>>>();
-  const listing = vi.spyOn(themes, "listThemeFiles").mockReturnValue(pending.promise);
+  const pending = Promise.withResolvers<Awaited<ReturnType<typeof themes.listThemeFolders>>>();
+  const listing = vi.spyOn(themes, "listThemeFolders").mockReturnValue(pending.promise);
   const broadcast = vi.spyOn(events, "broadcast");
   const starting = watchThemes(dir, events, { clock, baselineWaitMs: 37 });
   expireBaseline();
   stop = await starting;
   stop();
   expect(clock.clearInterval).toHaveBeenCalledWith(timer);
-  pending.resolve({ files: [], folderError: false, status: "missing" });
+  pending.resolve({ folders: [], folderError: false, status: "missing" });
   await pending.promise;
   await tick();
   expect(listing).toHaveBeenCalledOnce();

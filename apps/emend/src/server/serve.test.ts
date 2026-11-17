@@ -21,8 +21,8 @@ vi.mock("node:fs/promises", async (original) => ({ ...(await original<typeof imp
 test("startServer finishes the theme baseline before listening can accept a request", async () => {
   const fixture = await testDb();
   const themesDir = join(fixture.dir, "themes");
-  await mkdir(themesDir);
-  const themeFile = join(themesDir, "mine.json");
+  await mkdir(join(themesDir, "mine"), { recursive: true });
+  const themeFile = join(themesDir, "mine", "theme.json");
   await writeFile(themeFile, "{}");
   let baselineRead = false;
   const original = fs.stat;

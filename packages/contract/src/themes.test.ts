@@ -21,7 +21,7 @@ import {
 } from "./index.ts";
 
 const valid = { valid: true, name: "mine", base: "dark", fonts: {}, scales: {}, tokens: {}, themeColor: "#090a0c" };
-const refused = { valid: false, name: "Wrong Name", base: null, problems: ["The file cannot be read."] };
+const refused = { valid: false, name: "Wrong Name", base: null, problems: ["theme.json cannot be read."] };
 
 test.each([
   "#ffffff",

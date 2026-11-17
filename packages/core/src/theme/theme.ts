@@ -68,7 +68,7 @@ const problemName = (name: string) =>
 
 /** Validate an already parsed JSON document. File reads, byte limits and JSON parsing belong to the caller. */
 export function checkThemeDocument(document: unknown, name: string): ThemeEntry {
-  // Folder readers skip file names that cannot be displayed under the API contract.
+  // Folder readers skip names that cannot be displayed under the API contract.
   ThemeRefused.shape.name.parse(name);
   const problems: string[] = [];
   let count = 0;
@@ -77,7 +77,9 @@ export function checkThemeDocument(document: unknown, name: string): ThemeEntry 
     if (problems.length < LIMITS.themeProblems) problems.push(message);
   }
   if (!ThemeName.safeParse(name).success)
-    problem("The file name must use lowercase letters, digits and hyphens, at most 40, and not system, dark or light.");
+    problem(
+      "The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark or light.",
+    );
   let base: ThemeBase | null = null;
   const fonts: ThemeValid["fonts"] = {};
   const scales: ThemeValid["scales"] = {};

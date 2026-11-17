@@ -45,8 +45,9 @@ See [api.md](api.md) for the command ids.
 ### Themes
 
 Themes live in the `themes` folder beside emend's global `config.json`, on the server your
-browser reaches. Start with `emend theme copy dark mine`, or use `light` or another theme as
-the source. `emend theme list` shows valid and refused files. `emend theme check mine` reports
+browser reaches. `emend theme copy dark mine` writes `themes/mine/theme.json`.
+You can also use `light` or another theme as the source. Each theme has its own folder.
+`emend theme list` shows valid and refused themes. `emend theme check mine` reports
 invalid values and text that is too faint to read, including syntax colours on diff lines,
 changed words, hovered lines (including context lines on `bg-hover` over `bg-surface`) and selected lines.
 Body text and plain code need 4.5 to 1 contrast; the seven syntax highlight colours need 3 to 1.
@@ -58,14 +59,16 @@ The CLI commands refuse a themes folder whose path, real path or symlink hops li
 holding the working directory, with the same home-rooted dotfiles exception as `emend config`.
 The server reads this folder without that check, like `keys` and `approvedActiveHours`.
 
-Edit `mine.json` to change colours or set `fonts.text` and `fonts.code` to installed font names.
+Edit `themes/mine/theme.json` to change colours or set `fonts.text` and `fonts.code` to installed font names.
 Emend's fonts stay as fallbacks. Each file names a Dark or Light base; omitted values use that
 base. A token can reference a scale step, so changing that step recolours every token built on
 it. A token set to a colour keeps its own value. The surfaces `bg-app`, `bg-surface`, `bg-sunken`,
 `bg-raised`, `bg-reading`, `bg-reading-card` and `bg-inverse` must be opaque, including when set
 through a scale reference. See [api.md](api.md#themes) for the file format and readability pairs.
 
-Emend lists up to 50 theme files in name order, each at most 32 KiB. Keep the folder at 1000 entries
+Emend lists up to 50 theme folders in name order. Each `theme.json` is at most 32 KiB.
+Top-level files and dot entries are ignored. Symlinked theme folders are followed.
+Keep the `themes` folder at 1000 entries
 or fewer, including hidden files and other entries; a larger folder shows a folder error and no themes.
 
 Pick the theme in Settings → Appearance on each device, including your phone. Saving the file

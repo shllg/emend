@@ -1,4 +1,5 @@
-import { lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import * as fs from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { THEME_SCALE_STEPS, THEME_TOKENS } from "@emend/contract";
@@ -8,6 +9,8 @@ import { type Io, run } from "../../main.ts";
 import { escapeReference } from "../escape.ts";
 import { CliSignalExit } from "../http.ts";
 import { themeCommand } from "./theme.ts";
+
+vi.mock("node:fs/promises", async (original) => ({ ...(await original<typeof import("node:fs/promises")>()) }));
 
 let root: string;
 let dir: string;
@@ -46,8 +49,8 @@ async function command(...args: string[]) {
   return { code, stdout: [...stdout], stderr: [...stderr] };
 }
 async function seed(name: string, document: unknown) {
-  await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, `${name}.json`), JSON.stringify(document));
+  await mkdir(join(dir, name), { recursive: true });
+  await writeFile(join(dir, name, "theme.json"), JSON.stringify(document));
 }
 
 test("list of an absent folder names it and explains how to copy a theme", async () => {
@@ -75,14 +78,14 @@ test("list shows valid and refused themes with their base and remaining problem 
 });
 
 test.each(["dark", "light"] as const)(
-  "copy %s fills every colour, creates private files, and passes check",
+  "copy %s fills every colour, creates a private folder and file, and passes check",
   async (base) => {
     expect(await command("copy", base, "mine")).toEqual({
       code: 0,
-      stdout: [`emend: wrote ${dir}/mine.json\n`],
+      stdout: [`emend: wrote ${dir}/mine/theme.json\n`],
       stderr: [],
     });
-    const path = join(dir, "mine.json");
+    const path = join(dir, "mine", "theme.json");
     const text = await readFile(path, "utf8");
     const document = JSON.parse(text);
     expect(Object.keys(document.scales)).toEqual([...THEME_SCALE_STEPS]);
@@ -91,6 +94,7 @@ test.each(["dark", "light"] as const)(
     expect(text).toBe(`${JSON.stringify(document, null, 2)}\n`);
     expect((await stat(path)).mode & 0o777).toBe(0o600);
     expect((await stat(dir)).mode & 0o777).toBe(0o700);
+    expect((await stat(join(dir, "mine"))).mode & 0o777).toBe(0o700);
     expect(await command("check", "mine")).toEqual({ code: 0, stdout: ["emend: mine is valid\n"], stderr: [] });
   },
 );
@@ -98,32 +102,69 @@ test.each(["dark", "light"] as const)(
 test("copy accepts an existing valid theme and retains its colours and fonts", async () => {
   await seed("source", { version: 1, base: "dark", fonts: { text: "Example Font" }, tokens: { "border-1": "#abc" } });
   expect((await command("copy", "source", "mine")).code).toBe(0);
-  const document = JSON.parse(await readFile(join(dir, "mine.json"), "utf8"));
+  const document = JSON.parse(await readFile(join(dir, "mine", "theme.json"), "utf8"));
   expect(document.tokens["border-1"]).toBe("#aabbcc");
   expect(document.fonts.text).toBe("Example Font");
   expect((await command("check", "mine")).code).toBe(0);
 });
 
-test.each(["file", "link", "dangling link", "directory"])(
+test.each(["file", "link", "dangling link", "directory", "theme folder"])(
   "copy refuses an existing %s without replacing it",
   async (kind) => {
     await mkdir(dir, { recursive: true });
-    const path = join(dir, "mine.json");
-    const target = join(root, "target.json");
+    const path = join(dir, "mine");
+    const target = join(root, "target");
     if (kind === "file") await writeFile(path, "kept");
     else if (kind === "directory") await mkdir(path);
-    else {
-      if (kind === "link") await writeFile(target, "kept");
+    else if (kind === "theme folder") {
+      await mkdir(path);
+      await writeFile(join(path, "theme.json"), "kept");
+    } else {
+      if (kind === "link") {
+        await mkdir(target);
+        await writeFile(join(target, "theme.json"), "kept");
+      }
       await symlink(target, path);
     }
+    const write = vi.spyOn(fs, "writeFile");
+    const remove = vi.spyOn(fs, "rmdir");
     expect(await command("copy", "dark", "mine")).toEqual({
       code: 1,
       stdout: [],
-      stderr: [`emend: ${path} already exists\n`],
+      stderr: ["emend: theme mine already exists\n"],
     });
+    expect(write).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
     if (kind === "file") expect(await readFile(path, "utf8")).toBe("kept");
+    if (kind === "directory") expect(await readdir(path)).toEqual([]);
+    if (kind === "theme folder") expect(await readFile(join(path, "theme.json"), "utf8")).toBe("kept");
     if (kind.includes("link")) expect((await lstat(path)).isSymbolicLink()).toBe(true);
-    if (kind === "link") expect(await readFile(target, "utf8")).toBe("kept");
+    if (kind === "link") expect(await readFile(join(target, "theme.json"), "utf8")).toBe("kept");
+  },
+);
+
+test.each(["empty", "partial theme.json", "another file"])(
+  "a failed copy removes only its own empty folder: %s",
+  async (contents) => {
+    const folder = join(dir, "mine");
+    const path = join(folder, "theme.json");
+    const kept = join(folder, contents === "another file" ? "keep.txt" : "theme.json");
+    const original = fs.writeFile;
+    const write = vi.spyOn(fs, "writeFile").mockImplementationOnce(async () => {
+      if (contents !== "empty") await original(kept, "kept");
+      throw Object.assign(new Error("sensitive write failure"), { code: "EIO" });
+    });
+    const remove = vi.spyOn(fs, "rmdir");
+    expect(await command("copy", "dark", "mine")).toEqual({
+      code: 1,
+      stdout: [],
+      stderr: [`emend: cannot write theme ${path}\n`],
+    });
+    expect(write).toHaveBeenCalledExactlyOnceWith(path, expect.any(String), { flag: "wx", mode: 0o600 });
+    expect(remove).toHaveBeenCalledExactlyOnceWith(folder);
+    expect((await stat(dir)).isDirectory()).toBe(true);
+    if (contents === "empty") await expect(stat(folder)).rejects.toMatchObject({ code: "ENOENT" });
+    else expect(await readFile(kept, "utf8")).toBe("kept");
   },
 );
 
@@ -152,7 +193,27 @@ test("copy refuses a missing or refused source", async () => {
     stdout: [],
     stderr: ["emend: theme refused is refused: version must be 1.\n"],
   });
-  await expect(stat(join(dir, "mine.json"))).rejects.toMatchObject({ code: "ENOENT" });
+  await mkdir(join(dir, "empty"));
+  expect(await command("copy", "empty", "mine")).toEqual({
+    code: 1,
+    stdout: [],
+    stderr: ["emend: theme empty is refused: The folder has no theme.json.\n"],
+  });
+  await expect(stat(join(dir, "mine"))).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("list and check refuse a folder without theme.json", async () => {
+  await mkdir(join(dir, "empty"), { recursive: true });
+  expect(await command("list")).toEqual({
+    code: 0,
+    stdout: ["empty\t-\trefused: The folder has no theme.json.\n"],
+    stderr: [],
+  });
+  expect(await command("check", "empty")).toEqual({
+    code: 1,
+    stdout: ["emend: empty: The folder has no theme.json.\n"],
+    stderr: [],
+  });
 });
 
 test("check names faint pairs on stdout and uses a silent exit 1", async () => {
@@ -226,8 +287,8 @@ test.each(["config folder", "themes link", "intermediate link", "repository link
           `emend: the emend themes folder ${escapeReference(dir)} sits inside the repository at ${escapeReference(repo)}; run emend theme outside it\n`,
         ],
       });
-      await expect(stat(join(dir, "mine.json"))).rejects.toMatchObject({ code: "ENOENT" });
-      await expect(stat(join(outside, "mine.json"))).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(stat(join(dir, "mine"))).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(stat(join(outside, "mine"))).rejects.toMatchObject({ code: "ENOENT" });
     }
     if (kind === "config folder") await expect(stat(dir)).rejects.toMatchObject({ code: "ENOENT" });
   },
@@ -237,7 +298,7 @@ test("paths and displayed names use terminal escaping, and help includes theme",
   io.env.XDG_CONFIG_HOME = join(root, "config\nfolder");
   const escaped = escapeReference(join(io.env.XDG_CONFIG_HOME, "emend", "themes"));
   expect((await command("list")).stdout[0]).toContain(escaped);
-  expect((await command("copy", "dark", "mine")).stdout).toEqual([`emend: wrote ${escaped}/mine.json\n`]);
+  expect((await command("copy", "dark", "mine")).stdout).toEqual([`emend: wrote ${escaped}/mine/theme.json\n`]);
   io.env.XDG_CONFIG_HOME = join(root, "config");
   await seed("name\u2028line", { version: 1, base: "dark" });
   expect((await command("list")).stdout[0]).toContain("name\\u{2028}line");

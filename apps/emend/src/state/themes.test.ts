@@ -23,8 +23,10 @@ afterEach(async () => {
   vi.unstubAllEnvs();
   await rm(root, { recursive: true, force: true });
 });
-const seed = (name: string, document: unknown = { version: 1, base: "dark" }) =>
-  writeFile(join(dir, `${name}.json`), JSON.stringify(document));
+async function seed(name: string, document: unknown = { version: 1, base: "dark" }) {
+  await mkdir(join(dir, name));
+  await writeFile(join(dir, name, "theme.json"), JSON.stringify(document));
+}
 
 test("lists normalized valid themes and fixed refusal reasons in name order", async () => {
   await seed("zeta", { version: 1, base: "light", tokens: { "border-1": "#ABC" } });
@@ -41,8 +43,10 @@ test("lists normalized valid themes and fixed refusal reasons in name order", as
   expect(await readTheme(dir, "zeta")).toEqual(list.themes[1]);
 });
 
-test("refuses displayable bad names and skips dotfiles, other extensions and undisplayable names", async () => {
-  for (const name of ["Bad Name", "dark", ".hidden", "bad\nname", "x".repeat(81), ""]) await seed(name);
+test("refuses displayable bad names and skips dot folders, top-level files and undisplayable names", async () => {
+  for (const name of ["Bad Name", "dark", ".hidden", "bad\nname", "x".repeat(81)]) await seed(name);
+  await writeFile(join(dir, "x.json"), JSON.stringify({ version: 1, base: "dark" }));
+  await writeFile(join(dir, "plain"), "{}");
   await writeFile(join(dir, "other.txt"), "{}");
   const list = ThemeList.parse(await listThemes(dir));
   expect(list.themes.map((entry) => entry.name)).toEqual(["Bad Name", "dark"]);
@@ -50,46 +54,74 @@ test("refuses displayable bad names and skips dotfiles, other extensions and und
     expect(entry).toMatchObject({
       valid: false,
       problems: [
-        "The file name must use lowercase letters, digits and hyphens, at most 40, and not system, dark or light.",
+        "The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark or light.",
       ],
     });
 });
 
 test.each([
-  ["large", " ".repeat(LIMITS.themeFileBytes + 1), "The file is larger than 32 KiB."],
-  ["broken", "{ sensitive content", "The file is not valid JSON."],
+  ["large", " ".repeat(LIMITS.themeFileBytes + 1), "theme.json is larger than 32 KiB."],
+  ["broken", "{ sensitive content", "theme.json is not valid JSON."],
   ["array", "[]", "The file must hold a JSON object."],
 ])("refuses %s files without exposing content", async (name, content, problem) => {
-  await writeFile(join(dir, `${name}.json`), content);
+  await mkdir(join(dir, name));
+  await writeFile(join(dir, name, "theme.json"), content);
   expect(await readTheme(dir, name)).toEqual({ valid: false, name, base: null, problems: [problem] });
 });
 
-test("refuses directories and dangling links and follows links to regular files and folders", async () => {
-  await mkdir(join(dir, "folder.json"));
+test("lists and reads symlinked theme folders and follows links to theme.json and the themes folder", async () => {
   await seed("original");
-  await symlink(join(dir, "original.json"), join(dir, "linked.json"));
-  await symlink(join(dir, "missing.json"), join(dir, "dangling.json"));
+  await symlink(join(dir, "original"), join(dir, "linked"));
+  await mkdir(join(dir, "file-link"));
+  await symlink(join(dir, "original", "theme.json"), join(dir, "file-link", "theme.json"));
   await symlink(dir, join(root, "theme-link"));
-  for (const name of ["folder", "dangling"])
+  const list = ThemeList.parse(await listThemes(dir));
+  expect(list.themes.map((entry) => [entry.name, entry.valid])).toEqual([
+    ["file-link", true],
+    ["linked", true],
+    ["original", true],
+  ]);
+  expect(await readTheme(dir, "linked")).toMatchObject({ name: "linked", valid: true });
+  expect(await readTheme(dir, "file-link")).toMatchObject({ name: "file-link", valid: true });
+  expect(await readTheme(join(root, "theme-link"), "linked")).toMatchObject({ valid: true });
+  expect(await listThemes(join(root, "theme-link"))).toEqual(list);
+});
+
+test("a folder without theme.json and a dangling folder link are refused, not missing", async () => {
+  await mkdir(join(dir, "empty"));
+  await symlink(join(root, "missing"), join(dir, "dangling"));
+  const list = ThemeList.parse(await listThemes(dir));
+  expect(list.themes.map((entry) => entry.name)).toEqual(["dangling", "empty"]);
+  for (const name of ["dangling", "empty"]) {
+    const entry = { valid: false, name, base: null, problems: ["The folder has no theme.json."] };
+    expect(await readTheme(dir, name)).toEqual(entry);
+    expect(list.themes).toContainEqual(entry);
+  }
+  expect(await readTheme(dir, "missing")).toBeNull();
+});
+
+test("refuses a directory as theme.json and a file as a theme folder", async () => {
+  await mkdir(join(dir, "folder", "theme.json"), { recursive: true });
+  await writeFile(join(dir, "file"), "{}");
+  for (const name of ["folder", "file"])
     expect(await readTheme(dir, name)).toEqual({
       valid: false,
       name,
       base: null,
-      problems: ["The file cannot be read."],
+      problems: ["theme.json cannot be read."],
     });
-  expect(await readTheme(join(root, "theme-link"), "linked")).toMatchObject({ valid: true });
-  expect(await listThemes(join(root, "theme-link"))).toEqual(await listThemes(dir));
 });
 
-test("bad names still report the filename problem when the contents cannot be parsed", async () => {
-  await writeFile(join(dir, "Bad.json"), "{");
+test("bad names still report the folder name problem when the contents cannot be parsed", async () => {
+  await mkdir(join(dir, "Bad"));
+  await writeFile(join(dir, "Bad", "theme.json"), "{");
   expect(await readTheme(dir, "Bad")).toEqual({
     valid: false,
     name: "Bad",
     base: null,
     problems: [
-      "The file name must use lowercase letters, digits and hyphens, at most 40, and not system, dark or light.",
-      "The file is not valid JSON.",
+      "The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark or light.",
+      "theme.json is not valid JSON.",
     ],
   });
 });
@@ -116,7 +148,7 @@ test("1000 folder entries are allowed; 1001 refuses the whole list, including ig
 test("missing or unconfigured folders are empty; missing or unsafe names are absent", async () => {
   expect(await listThemes(join(root, "absent"))).toEqual({ themes: [], folderError: false });
   expect(await listThemes()).toEqual({ themes: [], folderError: false });
-  for (const name of ["missing", "../outside", "/outside", "a\\b", "bad\nname"])
+  for (const name of ["missing", "../outside", "/outside", "a\\b", "bad\nname", "", ".hidden"])
     expect(await readTheme(dir, name)).toBeNull();
   expect(await readTheme(undefined, "mine")).toBeNull();
 });
@@ -133,12 +165,13 @@ test("unreadable files have a fixed refusal", async () => {
     valid: false,
     name: "mine",
     base: null,
-    problems: ["The file cannot be read."],
+    problems: ["theme.json cannot be read."],
   });
 });
 
 test("config reads retain the default limit and themes allow exactly their byte limit", async () => {
-  const file = join(dir, "mine.json");
+  await mkdir(join(dir, "mine"));
+  const file = join(dir, "mine", "theme.json");
   const content = JSON.stringify({ version: 1, base: "dark" });
   await writeFile(file, content.padEnd(LIMITS.themeFileBytes));
   expect(await readTheme(dir, "mine")).toMatchObject({ valid: true });

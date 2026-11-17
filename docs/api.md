@@ -562,12 +562,20 @@ whose path, real path or any symlink hop lies inside a repository holding the wo
 with the same home-rooted dotfiles exception as `emend config`.
 There is one running read and at most one queued read per folder and per theme file;
 each caller gets a read that started after its request. Settled results are not cached.
-Files are `<name>.json`. Names match `/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/` and cannot be `system`,
-`dark` or `light`. Dotfiles are skipped. Invalid names are refused if the displayed name is
+Each theme is `<configDir>/themes/<name>/theme.json`. The folder name is the theme name.
+Names match `/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/` and cannot be `system`,
+`dark` or `light`. Top-level files and dot entries are skipped. Symlinked theme folders are followed.
+Invalid names are refused if the displayed name is
 1–80 characters with no Unicode control or format characters (`\p{C}`); otherwise they are skipped.
-At most 50 files are listed, sorted by name. Each file is at most 32 KiB. Folder enumeration uses
+At most 50 themes are listed, sorted by name. Each `theme.json` is at most 32 KiB. Folder enumeration uses
 `opendir` with its default buffer size and caps processing at 1000 entries, counting skipped entries too, with one overflow
 probe. A folder with more than 1000 entries returns an empty list and `folderError: true`.
+
+`emend theme copy <source> <name>` copies `dark`, `light` or a valid custom theme.
+It creates `themes/` if missing and a new `<name>/` folder, both with mode `0700`.
+An existing destination folder or file refuses with one stderr line naming the theme and nothing written.
+It writes `theme.json` with flag `wx` and mode `0600`, then prints `emend: wrote <escaped path of theme.json>`.
+If writing fails, it removes only the folder it created, only when empty, and reports the error.
 
 A file is a JSON object with `version: 1`, `base: "dark" | "light"` and optional `fonts`, `scales`
 and `tokens`. Other keys are refused. For example:
@@ -616,13 +624,14 @@ Each entry is one of:
 
 Any problem refuses the whole file. Reasons use fixed text, known names and numbers. An unknown
 key is named only if it matches `/^[a-z0-9]+(?:-[a-z0-9]+)*$/` and is at most 24 characters;
-otherwise it is called `an unknown name`. Reasons include `The file cannot be read.`,
-`The file is larger than 32 KiB.`, `The file is not valid JSON.`,
+otherwise it is called `an unknown name`. Reasons include `The folder has no theme.json.`,
+`theme.json cannot be read.`, `theme.json is larger than 32 KiB.`, `theme.json is not valid JSON.`,
 `The file must hold a JSON object.`, `version must be 1.`, `base must be "dark" or "light".`,
 `Unknown entry: colours.`, `scales has an unknown name: n-26.`,
 `scales.n-25 is not a colour. Use hex (#rrggbb) or oklch(L C H).` and
-`tokens.fg-1 is not a colour or a scale step name.` Invalid file names say
-`The file name must use lowercase letters, digits and hyphens, at most 40, and not system, dark or light.`
+`tokens.fg-1 is not a colour or a scale step name.` Invalid folder names say
+`The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark or light.`
+A missing theme folder is an unknown name. An existing folder without `theme.json` is refused.
 Invalid fonts say `fonts.text must be a plain font name: letters, digits, spaces, hyphens and underscores.`
 (`fonts.code` for the code font). A non-object section says `fonts must be a JSON object.`
 (or `scales` or `tokens`); unknown font or token keys use the same `has an unknown name` wording.
@@ -673,8 +682,9 @@ the limit, the server listens while that fingerprint keeps running. When it fini
 the baseline and broadcasts one `{ type: "themes" }`. Stopping the watcher prevents that late
 event. The wait timer uses the injected clock, is unref'd and is cleared when the wait ends.
 
-Every two seconds after that wait, regardless of open streams, the watcher fingerprints exactly
-the files returned by the same capped, sorted folder listing, using size, mtime, ctime and inode.
+Every two seconds after that wait, regardless of open streams, the watcher fingerprints each
+listed folder's `theme.json`, using size, mtime, ctime and inode. It uses the same capped, sorted listing.
+Missing or unreadable `theme.json` files have distinct markers.
 Missing and too-full folders have distinct, stable fingerprints. Each change emits
 `{ type: "themes" }` only on global `/api/v1/events` streams, to every owner. Ticks skip while a
 fingerprint is running. A fingerprint that never finishes leaves the watcher idle; the server can

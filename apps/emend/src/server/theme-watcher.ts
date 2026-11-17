@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { listThemeFiles } from "../state/themes.ts";
+import { listThemeFolders } from "../state/themes.ts";
 import type { ReviewEvents } from "./events.ts";
 
 export interface ThemeWatcherOptions {
@@ -10,15 +10,15 @@ export interface ThemeWatcherOptions {
 }
 
 async function fingerprint(dir: string): Promise<string> {
-  const { files, status } = await listThemeFiles(dir);
+  const { folders, status } = await listThemeFolders(dir);
   if (status !== "listed") return status;
   const entries: unknown[] = [];
-  for (const name of files) {
+  for (const name of folders) {
     try {
-      const info = await stat(join(dir, name), { bigint: true });
+      const info = await stat(join(dir, name, "theme.json"), { bigint: true });
       entries.push([name, ...[info.size, info.mtimeNs, info.ctimeNs, info.ino].map(String)]);
-    } catch {
-      entries.push([name, "unreadable"]);
+    } catch (error) {
+      entries.push([name, (error as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : "unreadable"]);
     }
   }
   return JSON.stringify(entries);

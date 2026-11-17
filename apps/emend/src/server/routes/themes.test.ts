@@ -20,7 +20,8 @@ afterEach(async () => {
 });
 
 test("reviewer sessions get a contract-checked list read afresh each time", async () => {
-  await writeFile(join(dir, "mine.json"), JSON.stringify({ version: 1, base: "dark" }));
+  await mkdir(join(dir, "mine"));
+  await writeFile(join(dir, "mine", "theme.json"), JSON.stringify({ version: 1, base: "dark" }));
   for (const who of ["reviewer", "foreign"] as const) {
     const response = await f.request("/themes", "GET", undefined, who);
     expect(response.status).toBe(200);
@@ -29,12 +30,20 @@ test("reviewer sessions get a contract-checked list read afresh each time", asyn
       themes: [{ name: "mine", valid: true, base: "dark" }],
     });
   }
-  await writeFile(join(dir, "mine.json"), "{");
+  await writeFile(join(dir, "mine", "theme.json"), "{");
   const response = await f.request("/themes", "GET");
   expect(ThemeList.parse(await response.json()).themes[0]).toMatchObject({
     valid: false,
-    problems: ["The file is not valid JSON."],
+    problems: ["theme.json is not valid JSON."],
   });
+  await rm(join(dir, "mine", "theme.json"));
+  const missingFile = await f.request("/themes", "GET");
+  expect(ThemeList.parse(await missingFile.json()).themes).toEqual([
+    { name: "mine", valid: false, base: null, problems: ["The folder has no theme.json."] },
+  ]);
+  await rm(join(dir, "mine"), { recursive: true });
+  const missingFolder = await f.request("/themes", "GET");
+  expect(ThemeList.parse(await missingFolder.json()).themes).toEqual([]);
 });
 
 test("bearer tokens get 403 just as they do for settings", async () => {

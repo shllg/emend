@@ -24,8 +24,9 @@ afterEach(async () => {
 });
 
 test("a named theme supplies the download colours, and HEAD validates it too", async () => {
+  await mkdir(join(dir, "mine"));
   await writeFile(
-    join(dir, "mine.json"),
+    join(dir, "mine", "theme.json"),
     JSON.stringify({ version: 1, base: "dark", tokens: { "bg-reading": "#000000", "border-1": "#123456" } }),
   );
   const response = await f.request(`${path}?theme=mine`, "GET");
@@ -41,8 +42,12 @@ test("a named theme supplies the download colours, and HEAD validates it too", a
 });
 
 test("missing, refused and invalid names fail before a busy slot, for GET and HEAD", async () => {
-  await writeFile(join(dir, "faint.json"), JSON.stringify({ version: 1, base: "dark", tokens: { "fg-1": "#111" } }));
-  await writeFile(join(dir, "broken.json"), "{");
+  for (const name of ["faint", "broken", "empty"]) await mkdir(join(dir, name));
+  await writeFile(
+    join(dir, "faint", "theme.json"),
+    JSON.stringify({ version: 1, base: "dark", tokens: { "fg-1": "#111" } }),
+  );
+  await writeFile(join(dir, "broken", "theme.json"), "{");
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   const get = f.deps.blobs.get.bind(f.deps.blobs);
@@ -54,7 +59,7 @@ test("missing, refused and invalid names fail before a busy slot, for GET and HE
   const building = Promise.resolve(f.request(path, "GET"));
   try {
     await entered.promise;
-    for (const name of ["missing", "faint", "broken", "../escape", "Bad Name", "system"]) {
+    for (const name of ["missing", "empty", "faint", "broken", "../escape", "Bad Name", "system"]) {
       for (const method of ["GET", "HEAD"]) {
         const response = await f.request(`${path}?theme=${encodeURIComponent(name)}`, method);
         expect(response.status).toBe(400);

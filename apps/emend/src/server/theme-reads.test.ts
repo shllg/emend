@@ -13,8 +13,8 @@ let dir: string;
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "emend-theme-reads-"));
   dir = join(root, "themes");
-  await mkdir(dir);
-  await writeFile(join(dir, "mine.json"), JSON.stringify({ version: 1, base: "dark" }));
+  await mkdir(join(dir, "mine"), { recursive: true });
+  await writeFile(join(dir, "mine", "theme.json"), JSON.stringify({ version: 1, base: "dark" }));
 });
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -25,7 +25,7 @@ const refused: ThemeEntry = {
   valid: false,
   name: "mine",
   base: "dark",
-  problems: ["The file is not valid JSON."],
+  problems: ["theme.json is not valid JSON."],
 };
 
 test.each(["fulfilled", "rejected"] as const)(

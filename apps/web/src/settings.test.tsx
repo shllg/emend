@@ -726,7 +726,7 @@ test.each(["resume", "select"])(
     const writes = vi.spyOn(localStorage, "setItem");
     const applied = vi.spyOn(document.documentElement.style, "setProperty");
     themeResponse = {
-      themes: [{ valid: false, name: entry.name, base: "dark", problems: ["The file is not valid JSON."] }],
+      themes: [{ valid: false, name: entry.name, base: "dark", problems: ["theme.json is not valid JSON."] }],
       folderError: false,
     };
     // Tab A resumes with its old query cache before the invalid response arrives.

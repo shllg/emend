@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rmdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ThemeName } from "@emend/contract";
 import { type ThemeSource, themeCopyDocument } from "@emend/core";
@@ -51,14 +51,19 @@ export async function themeCommand(configDir: string, args: string[], io: Io): P
     if (!entry.valid) throw new CliError(`theme ${escapeReference(source)} is refused: ${entry.problems[0]}`);
     from = entry;
   }
-  const path = join(dir, `${name}.json`);
+  const folder = join(dir, name);
+  const path = join(folder, "theme.json");
   const document = `${JSON.stringify(themeCopyDocument(from), null, 2)}\n`;
+  let created = false;
   try {
     await mkdir(dir, { recursive: true, mode: 0o700 });
+    await mkdir(folder, { mode: 0o700 });
+    created = true;
     await writeFile(path, document, { flag: "wx", mode: 0o600 });
   } catch (error) {
+    if (created) await rmdir(folder).catch(() => {});
     if ((error as NodeJS.ErrnoException).code === "EEXIST")
-      throw new CliError(`${escapeReference(path)} already exists`);
+      throw new CliError(`theme ${escapeReference(name)} already exists`);
     throw new CliError(`cannot write theme ${escapeReference(path)}`);
   }
   io.stdout(`emend: wrote ${escapeReference(path)}\n`);

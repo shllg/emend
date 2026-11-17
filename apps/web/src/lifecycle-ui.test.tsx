@@ -1376,7 +1376,7 @@ test.each(["desktop", "phone", "dialog"] as const)(
       if (path === "/api/v1/themes")
         return Response.json({
           themes: refused
-            ? [{ valid: false, name: "mine", base: "light", problems: ["The file cannot be read."] }]
+            ? [{ valid: false, name: "mine", base: "light", problems: ["theme.json cannot be read."] }]
             : [customTheme],
           folderError: false,
         });

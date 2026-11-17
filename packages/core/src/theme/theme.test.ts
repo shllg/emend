@@ -99,9 +99,9 @@ test.each([
   [{ ...document, tokens: { "fg-1": "red" } }, "tokens.fg-1 is not a colour or a scale step name."],
   [{ ...document, tokens: { other: "#fff" } }, "tokens has an unknown name: other."],
 ])("document validation uses safe fixed reasons: %j", (input, expected) => expect(problems(input)).toContain(expected));
-test("invalid file names get the specified reason and base when known", () => {
+test("invalid folder names get the specified reason and base when known", () => {
   expect(problems(document, "Dark")).toEqual([
-    "The file name must use lowercase letters, digits and hyphens, at most 40, and not system, dark or light.",
+    "The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark or light.",
   ]);
   expect(checkThemeDocument(null, "mine")).toMatchObject({ base: null });
   expect(checkThemeDocument({ base: "unknown" }, "mine")).toMatchObject({ base: null });
