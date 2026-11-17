@@ -87,6 +87,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), mermaidFrame(), pubFrame(), diffBuildPruning(), serviceWorker()],
   worker: { format: "es", plugins: () => [diffBuildPruning(true)] },
   build: {
+    manifest: true,
     rolldownOptions: {
       input: {
         app: fileURLToPath(new URL("./index.html", import.meta.url)),

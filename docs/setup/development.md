@@ -65,3 +65,19 @@ build is there. Prefer a Chromium installed from your system packages or `--chro
 or flatpak build may ignore the throwaway profile folder.
 Pass `--keep` to keep that folder for debugging. Every run changes timestamps and commit hashes in
 the images, so commit only the images you want to change.
+
+`pnpm perf` measures inbox and large-review loading, switching and scrolling files, typing a
+comment, opening and switching publication docs, and CLI publication. It reuses the sealed
+screenshot setup with synthetic data, a throwaway server and headless Chromium. JSON runs and a
+self-contained history report go in `.wt/perf/`. Pass `--ref <commit>` to export and build an older
+commit outside the checkout with an offline install, or `--no-build` to measure the current build.
+`--ref` builds and runs that commit's own build scripts, server and CLI, so it accepts only commits
+on `main`. A run of the current checkout fails when any step fails.
+`--out <dir>`, `--chromium <path>` and `--keep` work as for screenshots. Timings vary with machine
+load and never gate; unavailable steps in older builds are recorded as skipped.
+
+`pnpm check:bundle`, part of `verify:build`, checks gzip sizes of the entry and each route's
+static JavaScript imports, the review's worker scripts and the boot script against
+`apps/web/bundle-budget.json`. Raising a budget requires a
+reviewed change to that file. Budgets should allow about ten percent above measured sizes,
+rounded up; missing manifest roots also fail the check. The build manifest stays out of the package.

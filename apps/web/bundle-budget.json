@@ -1,0 +1,34 @@
+{
+  "entry": {
+    "roots": ["index.html"],
+    "gzipBytes": 126400
+  },
+  "inbox": {
+    "roots": ["index.html", "src/App.tsx"],
+    "gzipBytes": 336900
+  },
+  "review": {
+    "roots": ["index.html", "src/App.tsx", "src/components/diff/DiffPane.tsx"],
+    "gzipBytes": 487500
+  },
+  "pub": {
+    "roots": ["index.html", "src/App.tsx"],
+    "gzipBytes": 336900
+  },
+  "pair": {
+    "roots": ["index.html", "src/App.tsx"],
+    "gzipBytes": 336900
+  },
+  "devices": {
+    "roots": ["index.html", "src/App.tsx"],
+    "gzipBytes": 336900
+  },
+  "device-pair": {
+    "roots": ["index.html", "src/App.tsx"],
+    "gzipBytes": 336900
+  },
+  "settings": {
+    "roots": ["index.html", "src/App.tsx"],
+    "gzipBytes": 336900
+  }
+}
