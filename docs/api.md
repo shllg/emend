@@ -560,11 +560,12 @@ beside the global `config.json`, without a repository check, like the server's r
 and `approvedActiveHours`. The CLI commands `emend theme list`, `copy` and `check` refuse a folder
 whose path, real path or any symlink hop lies inside a repository holding the working directory,
 with the same home-rooted dotfiles exception as `emend config`.
-There is one running read and at most one queued read per folder and per theme file;
+There is one running read and at most one queued read per folder and per theme;
 each caller gets a read that started after its request. Settled results are not cached.
 Each theme is `<configDir>/themes/<name>/theme.json`. The folder name is the theme name.
 Names match `/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/` and cannot be `system`,
-`dark` or `light`. Top-level files and dot entries are skipped. Symlinked theme folders are followed.
+`dark` or `light`. Top-level files and dot entries are skipped. A symlink counts only when it points
+to a folder; links to files, dangling links and link loops are skipped like top-level files.
 Invalid names are refused if the displayed name is
 1–80 characters with no Unicode control or format characters (`\p{C}`); otherwise they are skipped.
 At most 50 themes are listed, sorted by name. Each `theme.json` is at most 32 KiB. Folder enumeration uses
@@ -575,7 +576,8 @@ probe. A folder with more than 1000 entries returns an empty list and `folderErr
 It creates `themes/` if missing and a new `<name>/` folder, both with mode `0700`.
 An existing destination folder or file refuses with one stderr line naming the theme and nothing written.
 It writes `theme.json` with flag `wx` and mode `0600`, then prints `emend: wrote <escaped path of theme.json>`.
-If writing fails, it removes only the folder it created, only when empty, and reports the error.
+If writing fails, it removes the `theme.json` it created and then its own folder when empty, and reports the error.
+A failure creating the `themes` folder reports `cannot write theme <path>`, with the escaped path of `theme.json`.
 
 A file is a JSON object with `version: 1`, `base: "dark" | "light"` and optional `fonts`, `scales`
 and `tokens`. Other keys are refused. For example:
@@ -631,7 +633,8 @@ otherwise it is called `an unknown name`. Reasons include `The folder has no the
 `scales.n-25 is not a colour. Use hex (#rrggbb) or oklch(L C H).` and
 `tokens.fg-1 is not a colour or a scale step name.` Invalid folder names say
 `The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark or light.`
-A missing theme folder is an unknown name. An existing folder without `theme.json` is refused.
+A missing theme folder or a name whose entry is not a folder is an unknown name.
+An existing folder without `theme.json` is refused.
 Invalid fonts say `fonts.text must be a plain font name: letters, digits, spaces, hyphens and underscores.`
 (`fonts.code` for the code font). A non-object section says `fonts must be a JSON object.`
 (or `scales` or `tokens`); unknown font or token keys use the same `has an unknown name` wording.

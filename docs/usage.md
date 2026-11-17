@@ -67,13 +67,14 @@ it. A token set to a colour keeps its own value. The surfaces `bg-app`, `bg-surf
 through a scale reference. See [api.md](api.md#themes) for the file format and readability pairs.
 
 Emend lists up to 50 theme folders in name order. Each `theme.json` is at most 32 KiB.
-Top-level files and dot entries are ignored. Symlinked theme folders are followed.
+Top-level files and dot entries are ignored. A symlink counts only when it points to a folder;
+links to files, missing targets and link loops are skipped like top-level files.
 Keep the `themes` folder at 1000 entries
 or fewer, including hidden files and other entries; a larger folder shows a folder error and no themes.
 
 Pick the theme in Settings → Appearance on each device, including your phone. Saving the file
 updates open pages within a few seconds. Before accepting HTTP requests, the server waits at
-most one second for a baseline of the theme files. A baseline ready in time sends no event. If
+most one second for a baseline of the themes. A baseline ready in time sends no event. If
 it takes longer, the server starts anyway. The first fingerprint keeps running and sends one
 theme event when it finishes. Stopping the watcher prevents that event. The server checks every
 two seconds after the wait, even without open pages, and skips checks while one is running. A

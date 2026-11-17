@@ -29,7 +29,7 @@ checks catch a copy inside the repo.
   link inside the repository could point the file at one the repository writes, whose `docRoots`
   would let `publish` read a folder such as `~/.ssh`. The server reads only `approvedActiveHours` and
   `keys` from that file, a bounded integer and a map of shortcut keys, without this check. It also
-  reads the theme files in the `themes` folder beside it without this check: every value must be a
+  reads each theme's `theme.json` in the `themes` folder beside it without this check: every value must be a
   checked colour, a scale step name or a font name, and none applies until the reviewer picks the
   theme. `emend theme list`, `copy` and `check` refuse a themes folder inside such a repository.
 - Every helper program (git, systemctl, launchctl, tailscale, the browser opener, and mise, npm

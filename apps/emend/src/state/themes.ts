@@ -1,4 +1,4 @@
-import { lstat, opendir } from "node:fs/promises";
+import { opendir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { LIMITS, type ThemeEntry, type ThemeList, ThemeName, ThemeRefused } from "@emend/contract";
 import { checkThemeDocument } from "@emend/core";
@@ -29,17 +29,21 @@ async function readThemeFile(path: string, name: string): Promise<ThemeEntry> {
   return checkThemeDocument(document, name);
 }
 
+async function themeFolderState(path: string): Promise<"folder" | "none" | "unreadable"> {
+  try {
+    return (await stat(path)).isDirectory() ? "folder" : "none";
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP" ? "none" : "unreadable";
+  }
+}
+
 /** Read only a single folder entry; a missing name is distinct from an unreadable file. */
 export async function readTheme(themesDir: string | undefined, name: string): Promise<ThemeEntry | null> {
   if (!themesDir || name.startsWith(".") || /[/\\]/.test(name) || !ThemeRefused.shape.name.safeParse(name).success)
     return null;
   const folder = join(themesDir, name);
-  try {
-    await lstat(folder);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    return unreadableTheme(name, "theme.json cannot be read.");
-  }
+  if ((await themeFolderState(folder)) === "none") return null;
   return readThemeFile(join(folder, "theme.json"), name);
 }
 
@@ -50,7 +54,7 @@ export async function listThemeFolders(themesDir?: string): Promise<{
   status: "listed" | "missing" | "unreadable" | "too-full";
 }> {
   if (!themesDir) return { folders: [], folderError: false, status: "missing" };
-  const folders: string[] = [];
+  const candidates = new Map<string, boolean>();
   try {
     const directory = await opendir(themesDir);
     let count = 0;
@@ -62,14 +66,18 @@ export async function listThemeFolders(themesDir?: string): Promise<{
         ThemeRefused.shape.name.safeParse(entry.name).success &&
         (entry.isDirectory() || entry.isSymbolicLink())
       )
-        folders.push(entry.name);
+        candidates.set(entry.name, entry.isDirectory());
     }
   } catch (error) {
     const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
     return { folders: [], folderError: !missing, status: missing ? "missing" : "unreadable" };
   }
-  folders.sort();
-  return { folders: folders.slice(0, LIMITS.themes), folderError: false, status: "listed" };
+  const folders: string[] = [];
+  for (const name of [...candidates.keys()].sort()) {
+    if (candidates.get(name) || (await themeFolderState(join(themesDir, name))) !== "none") folders.push(name);
+    if (folders.length === LIMITS.themes) break;
+  }
+  return { folders, folderError: false, status: "listed" };
 }
 
 export async function listThemes(themesDir?: string): Promise<ThemeList> {

@@ -126,14 +126,16 @@ test.each(["file", "link", "dangling link", "directory", "theme folder"])(
       }
       await symlink(target, path);
     }
-    const write = vi.spyOn(fs, "writeFile");
+    const open = vi.spyOn(fs, "open");
+    const unlink = vi.spyOn(fs, "unlink");
     const remove = vi.spyOn(fs, "rmdir");
     expect(await command("copy", "dark", "mine")).toEqual({
       code: 1,
       stdout: [],
       stderr: ["emend: theme mine already exists\n"],
     });
-    expect(write).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+    expect(unlink).not.toHaveBeenCalled();
     expect(remove).not.toHaveBeenCalled();
     if (kind === "file") expect(await readFile(path, "utf8")).toBe("kept");
     if (kind === "directory") expect(await readdir(path)).toEqual([]);
@@ -143,28 +145,87 @@ test.each(["file", "link", "dangling link", "directory", "theme folder"])(
   },
 );
 
+test("copy reports cannot write when themes is a regular file and leaves it untouched", async () => {
+  io.env.XDG_CONFIG_HOME = join(root, "config\nfolder");
+  dir = join(io.env.XDG_CONFIG_HOME, "emend", "themes");
+  await mkdir(join(io.env.XDG_CONFIG_HOME, "emend"), { recursive: true });
+  await writeFile(dir, "kept");
+  const open = vi.spyOn(fs, "open");
+  const unlink = vi.spyOn(fs, "unlink");
+  const remove = vi.spyOn(fs, "rmdir");
+  expect(await command("copy", "dark", "mine")).toEqual({
+    code: 1,
+    stdout: [],
+    stderr: [`emend: cannot write theme ${escapeReference(join(dir, "mine", "theme.json"))}\n`],
+  });
+  expect(open).not.toHaveBeenCalled();
+  expect(unlink).not.toHaveBeenCalled();
+  expect(remove).not.toHaveBeenCalled();
+  expect(await readFile(dir, "utf8")).toBe("kept");
+});
+
+test("copy refuses theme.json created before open without writing or removing it", async () => {
+  const path = join(dir, "mine", "theme.json");
+  const original = fs.open;
+  const open = vi.spyOn(fs, "open").mockImplementationOnce(async (...args) => {
+    await writeFile(path, "kept");
+    return original(...args);
+  });
+  const unlink = vi.spyOn(fs, "unlink");
+  expect(await command("copy", "dark", "mine")).toEqual({
+    code: 1,
+    stdout: [],
+    stderr: ["emend: theme mine already exists\n"],
+  });
+  expect(open).toHaveBeenCalledExactlyOnceWith(path, "wx", 0o600);
+  expect(unlink).not.toHaveBeenCalled();
+  expect(await readFile(path, "utf8")).toBe("kept");
+});
+
 test.each(["empty", "partial theme.json", "another file"])(
   "a failed copy removes only its own empty folder: %s",
   async (contents) => {
     const folder = join(dir, "mine");
     const path = join(folder, "theme.json");
-    const kept = join(folder, contents === "another file" ? "keep.txt" : "theme.json");
-    const original = fs.writeFile;
-    const write = vi.spyOn(fs, "writeFile").mockImplementationOnce(async () => {
-      if (contents !== "empty") await original(kept, "kept");
-      throw Object.assign(new Error("sensitive write failure"), { code: "EIO" });
+    const kept = join(folder, "keep.txt");
+    const failure = Object.assign(new Error("sensitive write failure"), { code: "EIO" });
+    const original = fs.open;
+    let handle: fs.FileHandle | undefined;
+    const open = vi.spyOn(fs, "open").mockImplementationOnce(async (...args) => {
+      if (contents === "empty") throw failure;
+      const opened = await original(...args);
+      handle = opened;
+      vi.spyOn(opened, "writeFile").mockImplementationOnce(async () => {
+        await opened.write("partial");
+        if (contents === "another file") await writeFile(kept, "kept");
+        throw failure;
+      });
+      vi.spyOn(opened, "close");
+      return opened;
     });
+    const unlink = vi.spyOn(fs, "unlink");
     const remove = vi.spyOn(fs, "rmdir");
     expect(await command("copy", "dark", "mine")).toEqual({
       code: 1,
       stdout: [],
       stderr: [`emend: cannot write theme ${path}\n`],
     });
-    expect(write).toHaveBeenCalledExactlyOnceWith(path, expect.any(String), { flag: "wx", mode: 0o600 });
+    expect(open).toHaveBeenCalledExactlyOnceWith(path, "wx", 0o600);
+    if (contents === "empty") expect(unlink).not.toHaveBeenCalled();
+    else {
+      expect(handle?.writeFile).toHaveBeenCalledExactlyOnceWith(
+        `${JSON.stringify(themeCopyDocument("dark"), null, 2)}\n`,
+      );
+      expect(handle?.close).toHaveBeenCalledOnce();
+      expect(unlink).toHaveBeenCalledExactlyOnceWith(path);
+    }
     expect(remove).toHaveBeenCalledExactlyOnceWith(folder);
     expect((await stat(dir)).isDirectory()).toBe(true);
-    if (contents === "empty") await expect(stat(folder)).rejects.toMatchObject({ code: "ENOENT" });
-    else expect(await readFile(kept, "utf8")).toBe("kept");
+    await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
+    if (contents === "another file") {
+      expect(await readFile(kept, "utf8")).toBe("kept");
+      expect(await readdir(folder)).toEqual(["keep.txt"]);
+    } else await expect(stat(folder)).rejects.toMatchObject({ code: "ENOENT" });
   },
 );
 

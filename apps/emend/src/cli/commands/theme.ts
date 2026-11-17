@@ -1,4 +1,4 @@
-import { mkdir, rmdir, writeFile } from "node:fs/promises";
+import { type FileHandle, mkdir, open, rmdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { ThemeName } from "@emend/contract";
 import { type ThemeSource, themeCopyDocument } from "@emend/core";
@@ -54,15 +54,26 @@ export async function themeCommand(configDir: string, args: string[], io: Io): P
   const folder = join(dir, name);
   const path = join(folder, "theme.json");
   const document = `${JSON.stringify(themeCopyDocument(from), null, 2)}\n`;
-  let created = false;
   try {
     await mkdir(dir, { recursive: true, mode: 0o700 });
+  } catch {
+    throw new CliError(`cannot write theme ${escapeReference(path)}`);
+  }
+  let created = false;
+  let handle: FileHandle | undefined;
+  try {
     await mkdir(folder, { mode: 0o700 });
     created = true;
-    await writeFile(path, document, { flag: "wx", mode: 0o600 });
+    handle = await open(path, "wx", 0o600);
+    await handle.writeFile(document);
+    await handle.close();
   } catch (error) {
+    if (handle) {
+      await handle.close().catch(() => {});
+      await unlink(path).catch(() => {});
+    }
     if (created) await rmdir(folder).catch(() => {});
-    if ((error as NodeJS.ErrnoException).code === "EEXIST")
+    if (!handle && (error as NodeJS.ErrnoException).code === "EEXIST")
       throw new CliError(`theme ${escapeReference(name)} already exists`);
     throw new CliError(`cannot write theme ${escapeReference(path)}`);
   }

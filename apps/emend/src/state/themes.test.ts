@@ -87,12 +87,24 @@ test("lists and reads symlinked theme folders and follows links to theme.json an
   expect(await listThemes(join(root, "theme-link"))).toEqual(list);
 });
 
-test("a folder without theme.json and a dangling folder link are refused, not missing", async () => {
+test.each(["file", "dangling", "loop", "non-directory parent"])(
+  "skips %s symlinks when listing and reading themes",
+  async (kind) => {
+    const path = join(dir, "linked");
+    const target = join(root, "target");
+    if (kind === "file" || kind === "non-directory parent") await writeFile(target, "{}");
+    await symlink(kind === "loop" ? path : kind === "non-directory parent" ? join(target, "child") : target, path);
+    expect(await listThemes(dir)).toEqual({ themes: [], folderError: false });
+    expect(await readTheme(dir, "linked")).toBeNull();
+  },
+);
+
+test("a folder without theme.json and a symlink to it are refused, not missing", async () => {
   await mkdir(join(dir, "empty"));
-  await symlink(join(root, "missing"), join(dir, "dangling"));
+  await symlink(join(dir, "empty"), join(dir, "linked"));
   const list = ThemeList.parse(await listThemes(dir));
-  expect(list.themes.map((entry) => entry.name)).toEqual(["dangling", "empty"]);
-  for (const name of ["dangling", "empty"]) {
+  expect(list.themes.map((entry) => entry.name)).toEqual(["empty", "linked"]);
+  for (const name of ["empty", "linked"]) {
     const entry = { valid: false, name, base: null, problems: ["The folder has no theme.json."] };
     expect(await readTheme(dir, name)).toEqual(entry);
     expect(list.themes).toContainEqual(entry);
@@ -100,16 +112,27 @@ test("a folder without theme.json and a dangling folder link are refused, not mi
   expect(await readTheme(dir, "missing")).toBeNull();
 });
 
-test("refuses a directory as theme.json and a file as a theme folder", async () => {
+test("unreadable symlink targets are listed and read as refused themes", async () => {
+  const target = join(root, "target");
+  await mkdir(target);
+  await writeFile(join(target, "theme.json"), "{}");
+  await symlink(target, join(dir, "linked"));
+  vi.spyOn(fs, "stat").mockRejectedValue(Object.assign(new Error("sensitive failure"), { code: "EACCES" }));
+  const entry = { valid: false, name: "linked", base: null, problems: ["theme.json cannot be read."] };
+  expect(await listThemes(dir)).toEqual({ themes: [entry], folderError: false });
+  expect(await readTheme(dir, "linked")).toEqual(entry);
+});
+
+test("refuses a directory as theme.json and treats a top-level file as an unknown name", async () => {
   await mkdir(join(dir, "folder", "theme.json"), { recursive: true });
   await writeFile(join(dir, "file"), "{}");
-  for (const name of ["folder", "file"])
-    expect(await readTheme(dir, name)).toEqual({
-      valid: false,
-      name,
-      base: null,
-      problems: ["theme.json cannot be read."],
-    });
+  expect(await readTheme(dir, "folder")).toEqual({
+    valid: false,
+    name: "folder",
+    base: null,
+    problems: ["theme.json cannot be read."],
+  });
+  expect(await readTheme(dir, "file")).toBeNull();
 });
 
 test("bad names still report the folder name problem when the contents cannot be parsed", async () => {
@@ -133,6 +156,14 @@ test("lists at most 50 displayable names in sorted order", async () => {
     Array.from({ length: 50 }, (_, i) => `theme-${String(i).padStart(2, "0")}`),
   );
   expect(await readTheme(dir, "theme-54")).toMatchObject({ valid: true });
+});
+
+test("60 links to files sorted before a theme folder do not consume theme slots", async () => {
+  const target = join(root, "file");
+  await writeFile(target, "{}");
+  for (let i = 0; i < 60; i++) await symlink(target, join(dir, `link-${String(i).padStart(2, "0")}`));
+  await seed("zeta");
+  expect(await listThemes(dir)).toMatchObject({ themes: [{ valid: true, name: "zeta" }], folderError: false });
 });
 
 test("1000 folder entries are allowed; 1001 refuses the whole list, including ignored entries", async () => {
