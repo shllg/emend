@@ -1,5 +1,7 @@
 export const BRIDGE_SOURCE = String.raw`(() => {
   "use strict";
+  // Window is a global interface: matchMedia lives on the instance.
+  const matchMedia = window.matchMedia;
   const omitted = new Set(["script", "style", "template", "noscript"]);
   const post = message => window.parent.postMessage(message, "*");
   const ranges = new Map();
@@ -52,22 +54,25 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       if (nodeType(node) === 1) pending.push(children(node)[Symbol.iterator]());
     }
   }
-  function label(root) {
-    let left = 800;
+  function label(root, maximum = 200, rawBudget = maximum * 4) {
+    let left = rawBudget;
     const parts = [];
-    for (const node of nodes(root, 6400)) {
+    for (const node of nodes(root, rawBudget * 8)) {
       if (nodeType(node) !== 3) continue;
       const part = textData(node).slice(0, left);
       parts.push(part);
       left -= part.length;
       if (!left) break;
     }
+    return cleanLabel(parts.join(""), maximum, rawBudget);
+  }
+  function cleanLabel(text, maximum = 200, rawBudget = maximum * 4) {
     const discarded = [[0,31],[127,159],[847,847],[1564,1564],[4447,4448],[8203,8207],[8234,8238],
       [8288,8303],[12644,12644],[65024,65039],[65279,65279],[65440,65440],[65529,65531],
       [917504,917631],[917760,917999]];
-    return Array.from(parts.join("").replace(/[\s\x85]/gu, " "))
+    return Array.from(text.slice(0, rawBudget).replace(/[\s\x85]/gu, " "))
       .filter(char => !discarded.some(([from, to]) => char.codePointAt(0) >= from && char.codePointAt(0) <= to))
-      .join("").replace(/ +/g, " ").trim().toWellFormed().slice(0, 200).replace(/[\uD800-\uDBFF]$/, "").trim();
+      .join("").replace(/ +/g, " ").trim().toWellFormed().slice(0, maximum).replace(/[\uD800-\uDBFF]$/, "").trim();
   }
   function collectHeadings() {
     if (!body()) return [];
@@ -480,11 +485,216 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     }
     return null;
   }
+  // Images alone follow the rendered tree; heading and quote traversal stays unchanged.
+  function* imageNodes(root) {
+    const pending = [[root][Symbol.iterator]()];
+    while (pending.length) {
+      const next = pending[pending.length - 1].next();
+      if (next.done) { pending.pop(); continue; }
+      const node = next.value;
+      if (nodeType(node) !== 1 || omitted.has(localName(node))) continue;
+      if (namespace(node) === "http://www.w3.org/1999/xhtml" && localName(node) === "img") yield node;
+      let branch = children(node);
+      const shadow = elementValue("shadowRoot", node);
+      if (shadow) branch = children(shadow);
+      else if (namespace(node) === "http://www.w3.org/1999/xhtml" && localName(node) === "slot") {
+        const assigned = dom(window.HTMLSlotElement.prototype, "assignedNodes", node, { flatten: false });
+        if (assigned.length) branch = assigned;
+      }
+      pending.push(branch[Symbol.iterator]());
+    }
+  }
+  const imageVisible = element => typeof window.Element.prototype.checkVisibility === "function"
+    ? elementCall("checkVisibility", element, { checkVisibilityCSS: true, visibilityProperty: true, opacityProperty: true })
+    : elementCall("getClientRects", element).length > 0;
+  function srcsetChoice(value) {
+    if (value.length > 16384) return "";
+    const candidates = [];
+    let cursor = 0;
+    while (cursor < value.length) {
+      while (cursor < value.length && /[\t\n\f\r ,]/.test(value[cursor])) cursor++;
+      const start = cursor;
+      while (cursor < value.length && !/[\t\n\f\r ]/.test(value[cursor])) cursor++;
+      let url = value.slice(start, cursor), descriptor = "";
+      if (url.endsWith(",")) {
+        let end = url.length;
+        while (end > 0 && url[end - 1] === ",") end--;
+        url = url.slice(0, end);
+      } else {
+        const start = cursor;
+        while (cursor < value.length && value[cursor] !== ",") cursor++;
+        descriptor = value.slice(start, cursor).trim();
+      }
+      if (url) candidates.push({ url, descriptor });
+    }
+    const first = candidates[0]?.url || "";
+    let best = first, largest = 0, kind;
+    for (const candidate of candidates) {
+      const descriptor = candidate.descriptor || "1x";
+      if (descriptor.length > 32) return first;
+      const unit = descriptor.at(-1);
+      if (unit === "w") {
+        if (!/^\d+w$/.test(descriptor)) return first;
+      } else if (unit === "x") {
+        // The alternatives require or exclude a decimal point, so digit runs cannot be repartitioned.
+        if (!/^(?:\d+|\d*\.\d+|\d+\.)(?:[eE][+-]?\d+)?x$/.test(descriptor)) return first;
+      } else return first;
+      const size = Number(descriptor.slice(0, -1));
+      if (!Number.isFinite(size) || size <= 0 || (kind && kind !== unit)) return first;
+      kind = unit;
+      if (size > largest) { best = candidate.url; largest = size; }
+    }
+    return best;
+  }
+  function galleryStep(budget) {
+    if (!budget.remaining) return false;
+    budget.remaining--;
+    return true;
+  }
+  function pendingImageSource(element, sources, steps) {
+    const parent = nodeValue("parentNode", element);
+    if (parent && nodeType(parent) === 1 && namespace(parent) === "http://www.w3.org/1999/xhtml" && localName(parent) === "picture") {
+      const siblings = children(parent)[Symbol.iterator]();
+      for (let scanned = 0; scanned < 64; scanned++) {
+        if (!steps.remaining) return "";
+        const next = siblings.next();
+        if (next.done) break;
+        galleryStep(steps);
+        const child = next.value;
+        if (child === element) break;
+        if (nodeType(child) !== 1 || namespace(child) !== "http://www.w3.org/1999/xhtml" || localName(child) !== "source") continue;
+        let choice = sources.get(child);
+        if (choice === undefined) {
+          // Cache misses too, so rejected sources cannot repeat parsing work for every image.
+          sources.set(child, "");
+          const media = elementCall("getAttribute", child, "media");
+          const type = elementCall("getAttribute", child, "type");
+          if (media !== null && (media.length > 1024 || !read(window.MediaQueryList.prototype, "matches", matchMedia.call(window, media)))) continue;
+          if (type !== null && !["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"].includes(type.split(";", 1)[0].trim().toLowerCase())) continue;
+          choice = srcsetChoice(elementCall("getAttribute", child, "srcset") || "");
+          sources.set(child, choice);
+        }
+        if (choice) return choice;
+      }
+    }
+    if (!steps.remaining) return "";
+    const srcset = elementCall("getAttribute", element, "srcset");
+    return (srcset !== null ? srcsetChoice(srcset) : "") || elementCall("getAttribute", element, "src") || "";
+  }
+  function imagePath(element, urls, sources, steps) {
+    if (!element || nodeType(element) !== 1 || namespace(element) !== "http://www.w3.org/1999/xhtml" ||
+        localName(element) !== "img") return null;
+    if (!galleryStep(steps) || !imageVisible(element)) return null;
+    for (let parent = element; parent && parent !== body();) {
+      if (!galleryStep(steps)) return null;
+      parent = renderedParent(parent);
+      if (!parent || parent === body()) break;
+      if (nodeType(parent) === 1 && (linkHref(parent) !== null ||
+          (namespace(parent) === "http://www.w3.org/1999/xhtml" && ["summary", "label", "button"].includes(localName(parent))))) return null;
+    }
+    try {
+      const prototype = window.HTMLImageElement.prototype;
+      const source = read(prototype, "currentSrc", element) || pendingImageSource(element, sources, steps);
+      if (!source) return null;
+      const url = new window.URL(source, urls.base ??= nodeValue("baseURI", document));
+      const entry = /^(\/content\/[A-Za-z0-9_-]{43}[0-9a-f]{32}\/)(.*)$/.exec(window.location.pathname);
+      if (!entry || url.origin !== window.location.origin || !url.pathname.startsWith(entry[1])) return null;
+      const parts = url.pathname.slice(entry[1].length).split("/").map(part => decodeURIComponent(part));
+      if (parts.some(part => !part || part === "." || part === ".." || /[/\\\x00-\x1f\x7f-\x9f]/u.test(part))) return null;
+      const path = parts.join("/");
+      if (path.length > 4096) return null;
+      if (read(prototype, "complete", element) && read(prototype, "naturalWidth", element) < 48 &&
+          read(prototype, "naturalHeight", element) < 48) return null;
+      return path;
+    } catch { return null; }
+  }
+  function captionLabel(root, budget) {
+    const pending = [[root][Symbol.iterator]()];
+    const parts = [];
+    let left = 8000, visits = 64000;
+    while (pending.length && left && visits && budget.remaining) {
+      const next = pending[pending.length - 1].next();
+      if (next.done) { pending.pop(); continue; }
+      visits--;
+      budget.remaining--;
+      const node = next.value;
+      if (nodeType(node) === 3) {
+        const part = textData(node).slice(0, left);
+        parts.push(part);
+        left -= part.length;
+      } else if (nodeType(node) === 1 && !omitted.has(localName(node))) {
+        pending.push(children(node)[Symbol.iterator]());
+      }
+    }
+    return budget.remaining ? cleanLabel(parts.join(""), 2000) : "";
+  }
+  function imageCaption(element, captions, budget, steps) {
+    for (let parent = element; budget.remaining && parent && parent !== body();) {
+      if (!galleryStep(steps)) return null;
+      parent = renderedParent(parent);
+      if (!parent || parent === body()) break;
+      if (nodeType(parent) !== 1 || namespace(parent) !== "http://www.w3.org/1999/xhtml" || localName(parent) !== "figure") continue;
+      let caption = captions.get(parent);
+      if (caption === undefined) {
+        caption = "";
+        for (const child of children(parent)) {
+          if (nodeType(child) === 1 && namespace(child) === "http://www.w3.org/1999/xhtml" && localName(child) === "figcaption") {
+            caption = captionLabel(child, budget);
+            break;
+          }
+        }
+        captions.set(parent, caption);
+      }
+      if (caption) return caption;
+      break;
+    }
+    return cleanLabel(elementCall("getAttribute", element, "alt") || "", 2000);
+  }
+  function imageGallery(clicked) {
+    // Resolve the document base once per build; repeated DOM lookups can scan the whole pub.
+    const urls = {};
+    const sources = new Map();
+    const stepBudget = { remaining: 1000000 };
+    if (!body() || imagePath(clicked, urls, sources, stepBudget) === null || !stepBudget.remaining) return null;
+    const collected = [];
+    let index = -1, size = 0;
+    for (const node of imageNodes(body())) {
+      const path = imagePath(node, urls, sources, stepBudget);
+      if (!stepBudget.remaining) break;
+      if (path === null) continue;
+      if (size + path.length > 1000000) break;
+      size += path.length;
+      if (node === clicked) index = collected.length;
+      collected.push({ node, path });
+      if (collected.length === 10000) break;
+    }
+    if (index < 0) return null;
+    // Reserve every collected path before captions can spend the remaining message budget.
+    const images = collected.map(({ path }) => ({ path, caption: "" }));
+    const captions = new Map();
+    const captionBudget = { remaining: 1000000 };
+    for (let i = 0; i < collected.length; i++) {
+      if (!stepBudget.remaining || !captionBudget.remaining) break;
+      const caption = imageCaption(collected[i].node, captions, captionBudget, stepBudget);
+      if (caption === null || !captionBudget.remaining) break;
+      if (size + caption.length > 1000000) continue;
+      images[i].caption = caption;
+      size += caption.length;
+    }
+    return { type: "emend:image", images, index };
+  }
   listen(document, "click", event => {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    const link = dom(window.Event.prototype, "composedPath", event)
-      .find(node => node instanceof window.Element && linkHref(node) !== null);
-    if (!link) return;
+    const path = dom(window.Event.prototype, "composedPath", event);
+    const link = path.find(node => node instanceof window.Element && linkHref(node) !== null);
+    if (!link) {
+      const gallery = imageGallery(path.find(node => node instanceof window.Element));
+      if (gallery) {
+        post(gallery);
+        dom(window.Event.prototype, "preventDefault", event);
+      }
+      return;
+    }
     try {
       const current = new window.URL(window.location.href);
       const href = linkHref(link);

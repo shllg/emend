@@ -163,6 +163,7 @@ export function DocView({
         path={openDoc.path}
         contentUrl={openDoc.contentUrl}
         look={openDoc.look}
+        images={openDoc.images}
         navigation={navigation}
         docNavigation={destination?.path === openDoc.path ? destination : undefined}
         onNavigate={follow}

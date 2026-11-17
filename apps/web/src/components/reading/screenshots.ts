@@ -1,5 +1,7 @@
 import { type RefObject, useCallback, useLayoutEffect, useState } from "react";
 
+export type LightboxSubject = { kind: "image"; src: string; caption: string } | { kind: "diagram"; source: string };
+
 export type LightboxItem =
   | {
       kind: "image";

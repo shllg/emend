@@ -16,11 +16,15 @@ import {
   wheelScale,
   zoomAt,
 } from "../../lib/lightbox-view.ts";
-import type { LightboxItem } from "./screenshots.ts";
+import type { LightboxSubject } from "./screenshots.ts";
 
 type Model = { bounds: Bounds; view: View };
 
-export function useLightboxView(item: LightboxItem | undefined, onStep: (delta: number) => void, onClose: () => void) {
+export function useLightboxView(
+  item: LightboxSubject | undefined,
+  onStep: (delta: number) => void,
+  onClose: () => void,
+) {
   const [stage, setStage] = useState<HTMLDivElement | null>(null);
   const [image, setImage] = useState<Size | null>(null);
   const [failed, setFailed] = useState(false);

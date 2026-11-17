@@ -1,4 +1,4 @@
-import { DocHeading, FilePath, FileView, HtmlDocPosition, HtmlSpanTarget, ThreadView } from "@emend/contract";
+import { DocHeading, FilePath, FileView, HtmlDocPosition, HtmlSpanTarget, LIMITS, ThreadView } from "@emend/contract";
 
 export const HtmlPosition = HtmlDocPosition;
 export type HtmlPosition = typeof HtmlPosition._output;
@@ -9,10 +9,25 @@ const empty = HtmlSpanTarget.pick({}).strict();
 const literal = <T extends string>(value: T) =>
   HtmlSpanTarget.shape.quote.refine((text) => text === value).transform(() => value);
 const threadId = ThreadView.shape.id;
+const image = empty.extend({
+  path: FileView.shape.mediaType.max(LIMITS.pathChars).refine((path) => path.isWellFormed()),
+  caption: FileView.shape.mediaType.max(LIMITS.quoteChars).refine((caption) => caption.isWellFormed()),
+});
+const gallery = empty
+  .extend({
+    type: literal("emend:image"),
+    images: image.array().min(1).max(LIMITS.filesPerRevision),
+    index: FileView.shape.order,
+  })
+  .refine(({ images, index }) => index < images.length)
+  .refine(
+    ({ images }) => images.reduce((total, image) => total + image.path.length + image.caption.length, 0) <= 1_000_000,
+  );
 export const FrameToParent = span
   .extend({ type: literal("emend:anchor") })
   .or(empty.extend({ type: literal("emend:ready") }))
   .or(HtmlPosition.safeExtend({ type: literal("emend:position") }))
+  .or(gallery)
   .or(
     empty.extend({
       type: literal("emend:navigate"),

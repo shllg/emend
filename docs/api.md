@@ -683,8 +683,12 @@ Kinds are `heading | paragraph | item | code | table | quote | diagram`; diagram
 `RenderedWriteup = { sections: { key, label, topic: string | null, blocks: RenderedBlock[] }[] }`
 mirrors core's rendered writeup. These are server-rendered blocks, never browser-rendered Markdown.
 Markdown docs are `{ path, kind: "markdown", blocks: RenderedBlock[] }` (empty if unrendered).
-HTML docs are `{ path, kind: "html", contentUrl, look?: "emend" | "custom" }`. The optional
-`look` is recorded at publish time: `emend` adds emend's layered pub stylesheet, and `custom`
+HTML docs are `{ path, kind: "html", contentUrl, look?: "emend" | "custom", images?: FilePath[] }`.
+The optional `images` lists the doc's own raster image assets linked through `doc_assets`,
+sorted by path, with at most `LIMITS.filesPerRevision` entries. Only `image/png`, `image/jpeg`,
+`image/gif`, `image/webp` and `image/avif` qualify. SVG, ICO and BMP assets stay in the frame;
+they cannot open in the lightbox. HTML docs without qualifying assets get `images: []`.
+The optional `look` is recorded at publish time: `emend` adds emend's layered pub stylesheet, and `custom`
 keeps the page's own look. An absent `look` (a revision published before this field existed, or
 metadata that failed) shows as a custom page. The URL is
 `/content/<docKey>/<path>` with each path segment percent-encoded. The doc key is the revision's
@@ -779,6 +783,73 @@ After `emend:ready`, the parent sends `{ type: "emend:docs", paths: FilePath[] }
 paths in this revision. Bridge links resolve against the existing document base, decode each
 segment once, and use the same rejection rules as the core resolver. The parent validates the
 destination again before navigating.
+
+A primary click or tap without modifiers on a qualifying image sends
+`{ type: "emend:image", images: { path: string, caption: string }[], index: number }`.
+Both objects are strict. Each path is a well-formed string of at most `LIMITS.pathChars` (4096)
+characters; the message schema does not require it to be a `FilePath`. Exact membership in
+the doc's server-supplied `images` (all valid `FilePath`s) determines which entries may open.
+The gallery contains 1 through `LIMITS.filesPerRevision` (10000) images
+in flat-tree rendered order, including open shadow roots and slotted images. An open shadow
+root replaces its host's light children in the walk; a slot contributes its assigned nodes,
+or its fallback children when none are assigned. Script, style, template and noscript subtrees
+are skipped. The clicked image comes from the event's composed path, so shadow retargeting does
+not hide it. `index` is an integer in the gallery's bounds.
+Captions are well-formed strings of at most `LIMITS.quoteChars` (2000) characters, taken from
+the nearest enclosing figure's direct `figcaption`. An absent or cleaned-empty caption falls
+back to the image's cleaned alt text, then to empty. Each figure's caption is computed only
+once per gallery build. All caption text walks share a budget of 1,000,000 node visits per
+gallery, including omitted nodes. When it is exhausted, unfinished and later captions count
+as empty. Figure and interactive-ancestor lookups follow rendered parents,
+including slots and shadow hosts. Images inside links or HTML `summary`, `label` or `button`
+elements are excluded from the gallery. Clicking those images preserves link handling or the
+control's default action, including toggling a summary.
+Only visible HTML images under the current doc key qualify. Image visibility checks include
+CSS visibility and opacity when `checkVisibility` is available; otherwise they require client
+rects. Loaded images smaller than 48 pixels in both dimensions, including broken images, are
+excluded. Queries and fragments are ignored. A decoded path longer than `LIMITS.pathChars`
+(4096) characters is skipped; a path of exactly 4096 characters can qualify.
+The bridge uses `currentSrc` when available. For a pending responsive image, it approximates
+the browser's choice: in a `picture`, use the first preceding HTML `source` whose media query
+is absent or matches and whose type is absent or a supported raster media type. The type is
+the part before the first `;`, trimmed and lowercased, so case and MIME parameters do not
+affect matching. A `media` attribute longer than 1024 characters counts as not matching,
+without calling `matchMedia`. Each source's choice is evaluated once per gallery build and
+cached, including empty choices for media mismatches, unsupported types and empty source sets.
+Each visit still consumes a gallery step. Sources whose
+`srcset` yields no candidates are skipped in favour of the next source. Otherwise use
+the image's own `srcset`, then its `src` when `srcset` is absent or yields no candidates.
+The picture scan examines at most 64 child nodes before reaching the image, counting text
+and comments as well as elements. Sources beyond that limit are ignored; selection falls
+back to the image's own `srcset`, then `src`.
+A `srcset` longer than 16384 characters is treated as having no candidates. From a source's or image's
+`srcset`, choose the largest `w` or `x` descriptor (a missing descriptor counts as `1x`);
+on parse trouble, including a descriptor longer than 32 characters, use the first candidate.
+Parsing uses linear scans within these limits. Resolve the choice against the document base URI,
+then apply the same origin and content-path checks.
+Each gallery build also has a shared budget of 1,000,000 steps, separate from the caption
+text-walk budget. Every image examined, including rejected images and the clicked image's
+initial check, costs one step. Every ancestor step for image qualification or caption lookup
+and every child visited by the picture source scan also costs one step. Collection stops when
+this budget is spent. A click on an image not yet collected posts nothing.
+The gallery is built in two passes. First, qualifying paths are collected in page order,
+stopping before their combined length would exceed 1,000,000 characters, at 10000 images,
+or when the step budget is spent. If the clicked image is outside that collected prefix,
+no message is sent. Second, captions are computed in page order using the remaining budgets.
+All collected paths' lengths are reserved before adding any captions: a caption is added
+only if that total plus the captions already added and this caption stays at most 1,000,000
+characters. Otherwise its caption is empty and the pass continues. When the caption node
+or step budget is exhausted, unfinished and remaining captions are empty and no further
+captions are computed. This second pass never removes an image. The parent independently
+rejects a message above the same
+1,000,000-character total, before filtering unknown paths.
+The parent accepts this message only from the current trusted frame after its ready. It opens
+only paths in that doc's `images`: an unknown clicked path opens nothing, and other unknown
+entries are dropped while preserving order and the clicked entry. The parent builds each URL
+from the doc's own `/content/<docKey>/` prefix plus the path with each segment percent-encoded.
+The parent uses the label "Screenshot" when an image's caption is empty. The app's lightbox
+shows the gallery without a comment action, leaving the frame mounted and
+its reading position unchanged on close. A new frame generation or navigation away closes it.
 
 HTML Contents addresses the server's h2/h3 list by zero-based index. The parent sends
 `{ type: "emend:goto", heading: number, label: string }` for a pick; a restore also includes
