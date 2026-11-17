@@ -631,6 +631,31 @@ test("Appearance lists valid themes with their base and refused themes as text",
   expect(patches()).toHaveLength(0);
 });
 
+test("a theme event replaces Settings' pending first list with the refused theme and its reason", async () => {
+  const first = Promise.withResolvers<Response>();
+  themeResponse = first.promise;
+  const { client, fetcher, invalidate } = setup();
+  await screen.findByText("Loading themes…");
+  await waitFor(() => expect(Events.opened.some((source) => source.readyState !== Events.CLOSED)).toBe(true));
+  expect(client.getQueryData(["themes"])).toBeUndefined();
+  const themeCalls = () => fetcher.mock.calls.filter(([path]) => path === "/api/v1/themes");
+  const initialReads = themeCalls().length;
+  const reason = "syn-comment on bg-hover: 1.03 to 1, needs 3 to 1.";
+  themeResponse = {
+    themes: [{ valid: false, name: "mine", base: "light", problems: [reason] }],
+    folderError: false,
+  };
+  act(() => Events.opened.at(-1)?.emit("themes", {}));
+  // Keep the first response pending through the refresh batch: invalidation alone is swallowed.
+  await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["themes"] }));
+  await act(async () => first.resolve(Response.json({ themes: [customTheme], folderError: false })));
+  await screen.findByText(reason);
+  expect(themeCalls()).toHaveLength(initialReads + 1);
+  expect(client.getQueryData(["themes"])).toEqual(themeResponse);
+  expect(screen.getByText("mine")).toBeTruthy();
+  expect(screen.queryByRole("radio", { name: /^mine/ })).toBeNull();
+});
+
 test("theme events apply valid edits without reloading; refused and missing updates keep the last valid version", async () => {
   themeResponse = { themes: [customTheme], folderError: false };
   selectCustomTheme(customTheme);

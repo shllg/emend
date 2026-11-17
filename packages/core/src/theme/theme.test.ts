@@ -24,9 +24,9 @@ test.each(["dark", "light"] as const)("%s passes all readability pairs", (base) 
   expect(check({ version: 1, base })).toMatchObject({ base, scales: {}, tokens: {}, fonts: {} });
   expect(themeReadabilityProblems(resolveTheme(base), base)).toEqual([]);
 });
-test("the readability set covers exactly the design's 146 pairs", () => {
-  expect(THEME_READABILITY_PAIRS).toHaveLength(146);
-  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.minimum === 3)).toHaveLength(59);
+test("the readability set covers exactly the design's 154 pairs", () => {
+  expect(THEME_READABILITY_PAIRS).toHaveLength(154);
+  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.minimum === 3)).toHaveLength(66);
   expect(THEME_READABILITY_PAIRS.filter((pair) => pair.over)).toHaveLength(23);
   expect(THEME_READABILITY_PAIRS).toEqual(
     expect.arrayContaining([
@@ -41,12 +41,13 @@ test("the readability set covers exactly the design's 146 pairs", () => {
       ),
       ...["syn-keyword", "syn-type", "syn-function", "syn-string", "syn-number", "syn-comment", "syn-punct"].flatMap(
         (foreground) =>
-          ["diff-add-hover", "diff-del-hover", "diff-select-bg"].map((background) => ({
+          ["bg-hover", "diff-add-hover", "diff-del-hover", "diff-select-bg"].map((background) => ({
             foreground,
             background,
             minimum: 3,
           })),
       ),
+      { foreground: "syn-plain", background: "bg-hover", minimum: 4.5 },
       ...[
         "syn-plain",
         "syn-keyword",
@@ -67,6 +68,11 @@ test("the readability set covers exactly the design's 146 pairs", () => {
     ]),
   );
   expect(THEME_READABILITY_PAIRS.some((pair) => pair.foreground === "fg-disabled")).toBe(false);
+});
+test("hovered context lines refuse faint syntax colours on bg-hover", () => {
+  expect(problems({ version: 1, base: "light", tokens: { "bg-hover": "#7c7c7c" } })).toContainEqual(
+    expect.stringMatching(/^syn-comment on bg-hover: .* to 1, needs 3 to 1\.$/),
+  );
 });
 test.each([
   [null, "The file must hold a JSON object."],

@@ -16,6 +16,7 @@ let stdout: string[];
 let stderr: string[];
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "emend-theme-command-"));
+  vi.spyOn(process, "cwd").mockReturnValue(root);
   const configHome = join(root, "config");
   const state = join(root, "state");
   vi.stubEnv("XDG_CONFIG_HOME", configHome);
@@ -190,6 +191,47 @@ test.each([
     stderr: ["emend: Usage: emend theme list | copy <source> <name> | check <name>.\n"],
   });
 });
+
+test.each(["config folder", "themes link", "intermediate link", "repository link pointing outside"])(
+  "theme commands refuse a repository %s without writing and escape the refusal",
+  async (kind) => {
+    const repo = join(root, "reviewed\nrepo");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/main\n");
+    vi.spyOn(process, "cwd").mockReturnValue(repo);
+    const outside = join(root, "outside");
+    if (kind === "config folder" || kind === "repository link pointing outside") {
+      io.env.XDG_CONFIG_HOME = join(repo, "config");
+      dir = join(io.env.XDG_CONFIG_HOME, "emend", "themes");
+      if (kind === "repository link pointing outside") {
+        await mkdir(join(io.env.XDG_CONFIG_HOME, "emend"), { recursive: true });
+        await mkdir(outside);
+        await symlink(outside, dir);
+      }
+    } else {
+      const target = join(repo, "themes");
+      await mkdir(join(root, "config", "emend"), { recursive: true });
+      if (kind === "themes link") await mkdir(target);
+      else {
+        await mkdir(outside);
+        await symlink(outside, target);
+      }
+      await symlink(target, dir);
+    }
+    for (const args of [["list"], ["check", "mine"], ["copy", "dark", "mine"]]) {
+      expect(await command(...args)).toEqual({
+        code: 1,
+        stdout: [],
+        stderr: [
+          `emend: the emend themes folder ${escapeReference(dir)} sits inside the repository at ${escapeReference(repo)}; run emend theme outside it\n`,
+        ],
+      });
+      await expect(stat(join(dir, "mine.json"))).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(stat(join(outside, "mine.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    }
+    if (kind === "config folder") await expect(stat(dir)).rejects.toMatchObject({ code: "ENOENT" });
+  },
+);
 
 test("paths and displayed names use terminal escaping, and help includes theme", async () => {
   io.env.XDG_CONFIG_HOME = join(root, "config\nfolder");

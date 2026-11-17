@@ -16,24 +16,11 @@ export class ReviewEvents {
   private listeners = new Map<string, Map<string | null, Set<Listener>>>();
   private waiting = new Map<string, Waiting>();
   private streams = new Map<string, number>();
-  private streamListeners = new Set<() => void>();
   private sessions = new Map<string, Set<() => void>>();
   private waitingByOwner = new Map<string, number>();
   private now: () => number;
   constructor(now: () => number) {
     this.now = now;
-  }
-
-  get streamCount(): number {
-    let count = 0;
-    for (const streams of this.streams.values()) count += streams;
-    return count;
-  }
-  onStreamCountChange(listener: () => void): () => void {
-    this.streamListeners.add(listener);
-    return () => {
-      this.streamListeners.delete(listener);
-    };
   }
 
   /** Server-wide notices go only to global listeners, regardless of owner. */
@@ -150,7 +137,6 @@ export class ReviewEvents {
     const count = this.streams.get(ownerId) ?? 0;
     if (count >= 32) throw new ApiError("rate_limited", "event_streams");
     this.streams.set(ownerId, count + 1);
-    for (const listener of this.streamListeners) listener();
     const encoder = new TextEncoder();
     let cleanup = () => {};
     return new ReadableStream<Uint8Array>(
@@ -204,7 +190,6 @@ export class ReviewEvents {
             const remaining = (this.streams.get(ownerId) ?? 1) - 1;
             if (remaining) this.streams.set(ownerId, remaining);
             else this.streams.delete(ownerId);
-            for (const listener of this.streamListeners) listener();
           };
           const enqueue = (text: string) => {
             if (closed) return;

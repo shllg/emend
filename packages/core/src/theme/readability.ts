@@ -38,7 +38,7 @@ export const THEME_READABILITY_PAIRS: readonly ThemeReadabilityPair[] = [
   ...pairs(["topic-fg"], ["topic-bg", "topic-bg-2", "bg-surface"]),
   ...pairs(["topic-on-solid"], ["topic-solid"]),
   ...ownBackgrounds(Array.from({ length: 8 }, (_, i) => `origin-${i + 1}`)),
-  ...pairs(["syn-plain"], ["bg-surface", "diff-add-bg", "diff-del-bg"]),
+  ...pairs(["syn-plain"], ["bg-surface", "bg-hover", "diff-add-bg", "diff-del-bg"]),
   ...pairs(["syn-plain"], ["diff-add-hover", "diff-del-hover", "diff-select-bg"]),
   ...["add", "del"].flatMap((kind) =>
     pairs(
@@ -57,7 +57,7 @@ export const THEME_READABILITY_PAIRS: readonly ThemeReadabilityPair[] = [
   ...pairs(["fg-1"], ["diff-select-bg"]),
   ...pairs(
     ["syn-keyword", "syn-type", "syn-function", "syn-string", "syn-number", "syn-comment", "syn-punct"],
-    ["bg-surface", "diff-add-bg", "diff-del-bg", "diff-add-hover", "diff-del-hover", "diff-select-bg"],
+    ["bg-surface", "bg-hover", "diff-add-bg", "diff-del-bg", "diff-add-hover", "diff-del-hover", "diff-select-bg"],
     3,
   ),
 ];

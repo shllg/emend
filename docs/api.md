@@ -556,8 +556,13 @@ none; `default`, `file`, `override` and `fileError` describe the inputs even aft
 ### Themes
 
 `GET /api/v1/themes` requires a reviewer session with `read` scope. It reads the `themes` folder
-beside the global `config.json` on each request, never from a reviewed repository. Files are
-`<name>.json`. Names match `/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/` and cannot be `system`,
+beside the global `config.json`, without a repository check, like the server's reads of `keys`
+and `approvedActiveHours`. The CLI commands `emend theme list`, `copy` and `check` refuse a folder
+whose path, real path or any symlink hop lies inside a repository holding the working directory,
+with the same home-rooted dotfiles exception as `emend config`.
+There is one running read and at most one queued read per folder and per theme file;
+each caller gets a read that started after its request. Settled results are not cached.
+Files are `<name>.json`. Names match `/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/` and cannot be `system`,
 `dark` or `light`. Dotfiles are skipped. Invalid names are refused if the displayed name is
 1–80 characters with no Unicode control or format characters (`\p{C}`); otherwise they are skipped.
 At most 50 files are listed, sorted by name. Each file is at most 32 KiB. Folder enumeration uses
@@ -645,7 +650,7 @@ varies). Compare the unrounded ratio and report two decimals, for example
 - `state-{open,approved,settled,snoozed}-fg`, `outcome-{fixed,explained,held,declined}-fg` and
   `changed-fg` on their own `-bg`; `topic-fg` on `topic-bg`, `topic-bg-2`, `bg-surface`;
   `topic-on-solid` on `topic-solid`; `origin-N-fg` on `origin-N-bg` for N = 1–8.
-- `syn-plain` on `bg-surface`, `diff-add-bg`, `diff-del-bg`; `diff-add-fg` on `diff-add-bg`;
+- `syn-plain` on `bg-surface`, `bg-hover`, `diff-add-bg`, `diff-del-bg`; `diff-add-fg` on `diff-add-bg`;
   `diff-del-fg` on `diff-del-bg`; `fg-3` on `diff-gutter`; `fg-1`, `fg-2` on `diff-hunk-bg`;
   `fg-1` on `diff-select-bg`.
 - `syn-plain` on `diff-add-word` (over `diff-add-bg`), `diff-del-word` (over `diff-del-bg`),
@@ -654,12 +659,13 @@ varies). Compare the unrounded ratio and report two decimals, for example
 These pairs require 3 to 1:
 
 - `syn-keyword`, `syn-type`, `syn-function`, `syn-string`, `syn-number`, `syn-comment` and
-  `syn-punct` on `bg-surface`, `diff-add-bg`, `diff-del-bg`, `diff-add-word` (over `diff-add-bg`),
+  `syn-punct` on `bg-surface`, `bg-hover`, `diff-add-bg`, `diff-del-bg`, `diff-add-word` (over `diff-add-bg`),
   `diff-del-word` (over `diff-del-bg`), `diff-add-hover`, `diff-del-hover` and `diff-select-bg`.
 - For the Download: `fg-reading-muted` on `bg-sunken`, on `diff-add-bg` over `bg-sunken` and on
   `diff-del-bg` over `bg-sunken`.
 
-Disabled text is exempt. Both built-in bases pass all 146 pairs.
+Hovered context lines use `bg-hover` composited over `bg-surface`. Disabled text is exempt.
+Both built-in bases pass all 154 pairs.
 
 Before the HTTP server listens, `startServer` awaits `watchThemes`, which waits at most
 `baselineWaitMs` (default 1000 ms) for its first fingerprint. In time, it becomes the baseline without an event. After
@@ -698,8 +704,8 @@ or checked validity changed. There is no timestamp ordering between tabs' writes
 Settings uses the `["themes"]` query for its list only. Selecting an entry keeps a version this
 tab already holds for that name, else adopts a matching saved copy, else uses the selected entry.
 It saves that version before writing the pick, skipping identical writes, so other tabs following
-the pick can seed it. The pick change triggers the loop. A `themes` event also refreshes Settings'
-list; stream open keeps the existing refresh of queries older than the open.
+the pick can seed it. The pick change triggers the loop. A `themes` event cancels any pending fetch
+of Settings' list before refreshing it; stream open keeps the existing refresh of queries older than the open.
 
 Download links read only the store. System passes no theme; Dark and Light pass themselves. For
 `theme:N`, a check of N that found it valid passes N. Otherwise the link passes the held version's

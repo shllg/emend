@@ -72,7 +72,6 @@ test("each file change emits once to every owner's global stream, never a review
   const first = await stream("first");
   const second = await stream("second");
   const review = await stream("first", "review");
-  expect(events.streamCount).toBe(3);
   expect(clock.setInterval).toHaveBeenCalledExactlyOnceWith(expect.any(Function), 17);
   expect(timer.hasRef()).toBe(false);
   await tick(); // The missing-folder baseline already exists; nothing changed.
@@ -93,7 +92,7 @@ test("each file change emits once to every owner's global stream, never a review
   expect(reviewRead).toHaveBeenCalledWith({ value: undefined, done: true });
 });
 
-test("a save immediately after start emits once at the first tick", async () => {
+test("saves emit after start, while streams are closed and after reopening", async () => {
   const broadcast = vi.spyOn(events, "broadcast");
   await seed();
   await start();
@@ -108,15 +107,16 @@ test("a save immediately after start emits once at the first tick", async () => 
   await tick();
   expect(broadcast).toHaveBeenCalledTimes(1);
   await reader.cancel();
-  expect(events.streamCount).toBe(0);
+  expect(await reader.read()).toEqual({ value: undefined, done: true });
   expect(clock.clearInterval).not.toHaveBeenCalled();
   await seed("changed while closed");
   await tick();
   expect(broadcast).toHaveBeenCalledTimes(2);
-  await stream("owner");
+  const reopened = await stream("owner");
   await seed("saved immediately after reopening");
   await tick();
   expect(broadcast).toHaveBeenCalledTimes(3);
+  expect(new TextDecoder().decode((await reopened.read()).value)).toBe("event: themes\ndata: {}\n\n");
   stop();
   expect(clock.clearInterval).toHaveBeenCalledWith(timer);
   await seed("changed after stop");

@@ -19,7 +19,8 @@ export function ReviewEventsProvider({ children, enabled = true }: { children: R
     const receive = (event: ReviewEvent) => {
       if (event.type === "themes") {
         requestThemeSync();
-        refreshQueries(client, [["themes"]]);
+        // A first fetch without data otherwise absorbs invalidation while it is pending.
+        void client.cancelQueries({ queryKey: ["themes"] }).then(() => refreshQueries(client, [["themes"]]));
         return;
       }
       if (event.type === "groups") {

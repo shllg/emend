@@ -4,6 +4,7 @@ import { ThemeName } from "@emend/contract";
 import { type ThemeSource, themeCopyDocument } from "@emend/core";
 import type { Io } from "../../main.ts";
 import { listThemes, readTheme } from "../../state/themes.ts";
+import { checkThemesFolder } from "../config.ts";
 import { escapeReference } from "../escape.ts";
 import { CliError, CliSignalExit, CliUsageError } from "../http.ts";
 
@@ -13,6 +14,7 @@ export async function themeCommand(configDir: string, args: string[], io: Io): P
   const [action, source, name] = args;
   const dir = join(configDir, "themes");
   if (action === "list" && args.length === 1) {
+    await checkThemesFolder(dir);
     const { themes, folderError } = await listThemes(dir);
     if (folderError) throw new CliError(`cannot list themes in ${escapeReference(dir)}`);
     if (!themes.length) io.stdout(`emend: no themes in ${escapeReference(dir)}; use emend theme copy dark <name>\n`);
@@ -25,6 +27,7 @@ export async function themeCommand(configDir: string, args: string[], io: Io): P
     return;
   }
   if (action === "check" && args.length === 2 && source) {
+    await checkThemesFolder(dir);
     const entry = await readTheme(dir, source);
     if (!entry) throw new CliError(`unknown theme ${escapeReference(source)}`);
     if (entry.valid) io.stdout(`emend: ${escapeReference(source)} is valid\n`);
@@ -39,6 +42,7 @@ export async function themeCommand(configDir: string, args: string[], io: Io): P
     throw new CliUsageError(
       `invalid theme name ${escapeReference(name)}; use lowercase letters, digits and hyphens, at most 40, and not system, dark or light.`,
     );
+  await checkThemesFolder(dir);
   let from: ThemeSource;
   if (source === "dark" || source === "light") from = source;
   else {

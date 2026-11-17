@@ -43,7 +43,6 @@ import {
   topics,
   writeups,
 } from "../../db/schema.ts";
-import { readTheme } from "../../state/themes.ts";
 import type { AppDeps } from "../app.ts";
 import type { AppEnv } from "../auth/principal.ts";
 import { downloadDocNames } from "../http/download-names.ts";
@@ -52,6 +51,7 @@ import { DOWNLOAD_CSP } from "../http/headers.ts";
 import { ZipWriter } from "../http/zip.ts";
 import { mediaAsset } from "../media.ts";
 import { type WorkerExecutor, workerExecutor } from "../publish/executor.ts";
+import { readThemeForRequest } from "../theme-reads.ts";
 import { commentHtml } from "./comment-html.ts";
 import { publishMeta, topicView } from "./reviews.ts";
 
@@ -582,7 +582,7 @@ export function downloadRoutes(
     let theme: DownloadRenderTheme | undefined;
     if (selection === undefined || selection === "dark" || selection === "light") theme = selection;
     else {
-      const entry = await readTheme(deps.themesDir, selection);
+      const entry = await readThemeForRequest(deps.themesDir, selection);
       if (!entry?.valid) throw new ApiError("invalid_request");
       theme = themeDownloadLook(entry);
     }

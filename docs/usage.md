@@ -48,10 +48,15 @@ Themes live in the `themes` folder beside emend's global `config.json`, on the s
 browser reaches. Start with `emend theme copy dark mine`, or use `light` or another theme as
 the source. `emend theme list` shows valid and refused files. `emend theme check mine` reports
 invalid values and text that is too faint to read, including syntax colours on diff lines,
-changed words, hovered lines and selected lines. Body text and plain code need 4.5 to 1 contrast;
-the seven syntax highlight colours need 3 to 1. The Download also checks `fg-reading` and
+changed words, hovered lines (including context lines on `bg-hover` over `bg-surface`) and selected lines.
+Body text and plain code need 4.5 to 1 contrast; the seven syntax highlight colours need 3 to 1.
+The Download also checks `fg-reading` and
 `fg-reading-strong` at 4.5 to 1, and `fg-reading-muted` at 3 to 1, on `bg-sunken` and on
 `diff-add-bg` / `diff-del-bg` composited over `bg-sunken`.
+
+The CLI commands refuse a themes folder whose path, real path or symlink hops lie inside a repository
+holding the working directory, with the same home-rooted dotfiles exception as `emend config`.
+The server reads this folder without that check, like `keys` and `approvedActiveHours`.
 
 Edit `mine.json` to change colours or set `fonts.text` and `fonts.code` to installed font names.
 Emend's fonts stay as fallbacks. Each file names a Dark or Light base; omitted values use that
@@ -87,8 +92,9 @@ becomes invalid or disappears, the tab keeps its held version and Settings shows
 
 Selecting in Settings keeps the version the tab holds for that name, else adopts a matching
 saved copy, else uses the selected entry. It saves that version before writing the pick so other
-tabs can find it. The pick change starts a sync. Settings' list has its own query, refreshed on
-theme events; stream open also refreshes older queries. The pick applies to this device only.
+tabs can find it. The pick change starts a sync. Settings' list has its own query; theme events
+cancel any pending list fetch before refreshing it. Stream open also refreshes older queries.
+The pick applies to this device only.
 
 Download links read the tab's store. System passes no theme; Dark and Light pass themselves.
 A custom name is passed when the tab's check for that name found it valid. Otherwise the link
