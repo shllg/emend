@@ -4,6 +4,7 @@ import {
   closeSync,
   fsyncSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -61,7 +62,7 @@ export function emptyRegistry(): Registry {
   return { version: 1, worktrees: {} };
 }
 
-function stateDir(repo: Repo): string {
+export function stateDir(repo: Repo): string {
   return join(repo.commonDir, "emend-wt");
 }
 
@@ -126,7 +127,7 @@ function reapIfStale(path: string): boolean {
   }
 }
 
-function acquireLock(path: string): () => void {
+function acquireLock(path: string, name = "registry"): () => void {
   const tmp = `${path}.${process.pid}.${randomBytes(4).toString("hex")}`;
   writeFileSync(tmp, `${process.pid}\n`, { mode: 0o600 });
   const deadline = Date.now() + LOCK_WAIT_MS;
@@ -148,7 +149,7 @@ function acquireLock(path: string): () => void {
       }
       if (reapIfStale(path)) continue;
       if (Date.now() >= deadline) {
-        throw new WtError(69, "Another bin/wt call holds the registry lock. Try again in a moment.");
+        throw new WtError(69, `Another bin/wt call holds the ${name} lock. Try again in a moment.`);
       }
       sleepSync(25);
     }
@@ -208,7 +209,40 @@ function writeRegistryFile(repo: Repo, registry: Registry): void {
 }
 
 let held = false;
+const heldStateLocks = new Set<string>();
 let afterLockHook: (() => void) | null = null;
+
+/** A separate, synchronous lock for local state; callbacks must not take the same named lock again. */
+export function withStateLock<T>(repo: Repo, name: "findings" | "groom", fn: () => T): T {
+  if (heldStateLocks.has(name)) throw new Error("withStateLock is not re-entrant per name");
+  const dir = stateDir(repo);
+  try {
+    if (!lstatSync(repo.commonDir).isDirectory()) throw new Error("invalid common directory");
+    try {
+      mkdirSync(dir, { mode: 0o700 });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    }
+    if (!lstatSync(dir).isDirectory()) throw new Error("invalid state directory");
+    chmodSync(dir, 0o700);
+  } catch {
+    throw new WtError(1, "The local state folder must be a real directory. Nothing was changed.");
+  }
+  let release: () => void;
+  try {
+    release = acquireLock(join(dir, `${name}.lock`), name);
+  } catch (e) {
+    if (e instanceof WtError) throw e;
+    throw new WtError(1, "Could not lock the local state folder. Nothing was changed.");
+  }
+  heldStateLocks.add(name);
+  try {
+    return fn();
+  } finally {
+    heldStateLocks.delete(name);
+    release();
+  }
+}
 
 /** Test seam: runs right after withRegistry took the lock, before it reads. Production code never calls this. */
 export function setAfterLockHookForTests(hook: (() => void) | null): void {

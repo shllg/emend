@@ -2,7 +2,8 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { CommandTable } from "./command.ts";
-import { assertNoLocalHooksPath, resolveRepo } from "./repo.ts";
+import { run } from "./proc.ts";
+import { assertNoLocalHooksPath, type Repo, resolveRepo } from "./repo.ts";
 import { WtError } from "./validate.ts";
 
 /**
@@ -31,6 +32,7 @@ const OWNERS: Record<string, string> = {
   land: "history.ts",
   "sync-main": "history.ts",
   digest: "history.ts",
+  findings: "findings.ts",
 };
 
 const HELP = `bin/wt: worktrees and the pull request lifecycle
@@ -44,6 +46,11 @@ Local:
   cleanup [--discard] [--close-workspace] [<branch|path>]
   gc [--prune]                                     report or remove orphans
   repo                                            print origin's GitHub owner/name
+  findings add --file <file>                       record a local finding (3 when already recorded)
+  findings list [--state <s>] [--kind <k>] [--path <p>] [--json]
+  findings show <id>
+  findings release <id>...
+  findings resolve <id> (--fixed <sha> | --dismissed <reason> | --stale)
 
 herdr / herdr desktop:
   spawn --issue <n> [--mode github] [--model <m>] [--effort <e>]
@@ -96,7 +103,14 @@ async function main(argv: string[]): Promise<number> {
     fail(2, "Unknown subcommand. Run bin/wt help.");
   }
 
-  const repo = resolveRepo(process.cwd());
+  let repo: Repo;
+  try {
+    repo = resolveRepo(process.cwd());
+  } catch (e) {
+    if (sub === "findings" && run("git", ["--version"], { cwd: process.cwd(), gitNoLazyFetch: true }).code === 127)
+      fail(69, "Git is unavailable.");
+    throw e;
+  }
   assertNoLocalHooksPath(repo);
 
   if (sub === undefined) {
