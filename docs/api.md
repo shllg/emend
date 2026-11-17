@@ -680,7 +680,10 @@ Kinds are `heading | paragraph | item | code | table | quote | diagram`; diagram
 `RenderedWriteup = { sections: { key, label, topic: string | null, blocks: RenderedBlock[] }[] }`
 mirrors core's rendered writeup. These are server-rendered blocks, never browser-rendered Markdown.
 Markdown docs are `{ path, kind: "markdown", blocks: RenderedBlock[] }` (empty if unrendered).
-HTML docs are `{ path, kind: "html", contentUrl }`, where the URL is
+HTML docs are `{ path, kind: "html", contentUrl, look?: "emend" | "custom" }`. The optional
+`look` is recorded at publish time: `emend` adds emend's layered pub stylesheet, and `custom`
+keeps the page's own look. An absent `look` (a revision published before this field existed, or
+metadata that failed) shows as a custom page. The URL is
 `/content/<docKey>/<path>` with each path segment percent-encoded. The doc key is the revision's
 43-character base64url `contentKey` followed by that doc's file UUID with dashes removed (32
 lowercase hex characters); its exact shape is `^[A-Za-z0-9_-]{43}[0-9a-f]{32}$`.
@@ -698,6 +701,13 @@ The bridge also inserts one style element first in the doc's head, in the cascad
 document-level rule of the doc's own CSS, so a code block the doc leaves unstyled scrolls inside its
 own box instead of widening the doc. A `::slotted(pre)` rule in a shadow root does not override it:
 the cascade ranks the outer document's rules above a shadow tree's.
+
+A doc whose `look` is `emend` also receives emend's pub stylesheet as one style element, placed
+after any leading byte order mark, whitespace, comments and doctype, so the doc never falls into
+quirks mode. The stylesheet is `pub-frame.css` from the web build: emend's tokens and element
+styles in the cascade layer `emend`, with its fonts as `data:` URLs. It contains no `<`; a missing
+or invalid file gives a small fallback that sets `color-scheme: light dark` with system colours.
+Every unlayered rule of the doc's own CSS wins over it. The doc's headers stay exactly as above.
 
 Asset and error responses under `/content/` send:
 

@@ -3,6 +3,73 @@ import { and, eq } from "drizzle-orm";
 import { expect, test } from "vitest";
 import { files } from "../../db/schema.ts";
 import { mailboxFixture } from "../mailbox/test-support.ts";
+import { executeWork } from "../publish/work.ts";
+
+test("publish records HTML look, leaves other and failed metadata null, and omits legacy looks from views", async () => {
+  const f = await mailboxFixture();
+  try {
+    const sources = [
+      { path: "structure.html", source: "<h1>Plan</h1><h2>Part</h2>", look: "emend" },
+      { path: "styled.html", source: "<style>p{color:red}</style><p>Plan</p>", look: "custom" },
+      { path: "plan.md", source: "# Plan", look: null },
+      { path: "source.html", source: "<h1>Source</h1>", view: "source", look: null },
+      { path: "deep.html", source: "<div>".repeat(2000), look: null },
+    ];
+    const input = {
+      reviewKey: "e".repeat(64),
+      repo: null,
+      branch: null,
+      title: "Synthetic looks",
+      base: null,
+      head: null,
+      topics: [],
+      writeup: { overview: "", tldr: "", decisions: null, topics: {} },
+      files: await Promise.all(
+        sources.map(async ({ path, source, view }) => ({
+          path,
+          view,
+          role: "doc",
+          oldPath: null,
+          oldBlob: null,
+          newBlob: await f.deps.blobs.put(f.ownerId, Buffer.from(source), "text/plain"),
+          flag: null,
+          ...(path.endsWith(".html") && !view ? { assets: [] } : {}),
+        })),
+      ),
+    };
+    const response = await f.request("/publish", "POST", input, "agent");
+    expect(response.status).toBe(200);
+    const published = PublishResponse.parse(await response.json());
+    const rows = await f.db.read((q) => q.select().from(files).where(eq(files.ownerId, f.ownerId)).all());
+    for (const { path, look } of sources) expect(rows.find((file) => file.path === path)?.look).toBe(look);
+    const viewPath = `/reviews/${published.reviewId}/revisions/1`;
+    const view = RevisionView.parse(await (await f.request(viewPath, "GET")).json());
+    expect(view.docs[0]).toMatchObject({ kind: "html", look: "emend", headings: [{ level: 2, text: "Part" }] });
+    expect(view.docs[1]).toMatchObject({ kind: "html", look: "custom" });
+    for (const doc of view.docs.slice(2)) expect(doc).not.toHaveProperty("look");
+    await f.db.query((q) =>
+      q
+        .update(files)
+        .set({ look: null })
+        .where(and(eq(files.ownerId, f.ownerId), eq(files.path, "structure.html"))),
+    );
+    const legacy = RevisionView.parse(await (await f.request(viewPath, "GET")).json());
+    expect(legacy.docs[0]).not.toHaveProperty("look");
+
+    f.deps.publishExecutor = async (work) => {
+      if (work.kind === "doc-metadata") throw new Error("Synthetic metadata failure");
+      return executeWork(work);
+    };
+    const failed = await f.request("/publish", "POST", { ...input, reviewId: published.reviewId }, "agent");
+    expect(failed.status).toBe(200);
+    const failedView = RevisionView.parse(
+      await (await f.request(`/reviews/${published.reviewId}/revisions/2`, "GET")).json(),
+    );
+    for (const doc of failedView.docs) expect(doc).not.toHaveProperty("look");
+  } finally {
+    await f.cleanup();
+  }
+}, 15000);
 
 test("publish stores and serves doc metadata, cleans manifest titles, and resolves forward links", async () => {
   const f = await mailboxFixture();

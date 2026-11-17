@@ -48,6 +48,8 @@ export type PublishOptions = {
   key?: string | ((instanceId: string) => string);
   skipNodeModules?: boolean;
   titleFromMain?: (bytes: Uint8Array, execute: Executor) => string | Promise<string>;
+  /** Observe the existing source read without retaining or re-reading doc bytes for diagnostics. */
+  onHtmlDoc?: (path: string, bytes: Buffer) => void;
   docFolders?: ReadonlyMap<string, readonly PublishedFolder[]>;
   /** Absolute paths rejected by the walked-doc private-key content check. */
   excludedAssets?: ReadonlySet<string>;
@@ -368,6 +370,7 @@ async function resolveWithWorker(
       return readResolvedDoc(actual);
     };
     const bytes = retained ?? (await readResolvedDoc(source));
+    if (html) options.onHtmlDoc?.(file.path, bytes);
     if (sourceView) {
       try {
         decodeText(bytes);

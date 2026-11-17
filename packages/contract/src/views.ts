@@ -266,6 +266,7 @@ export const RevisionView = z
             path: FilePath,
             kind: z.literal("html"),
             contentUrl,
+            look: z.enum(["emend", "custom"]).optional(),
             title: DocTitle.optional(),
             headings: DocHeadings.optional(),
           }),

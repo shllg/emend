@@ -42,6 +42,26 @@ function frameByTitle() {
   if (!frame) throw new Error("Missing titled frame");
   return frame;
 }
+
+test.each(["emend", "custom", undefined] as const)("%s look uses the matching loading background", (look) => {
+  render(
+    <QueryClientProvider client={client}>
+      <HtmlDocFrame
+        reviewId={id}
+        revision={2}
+        changedBlocks={[]}
+        path={path}
+        contentUrl={doc.contentUrl}
+        threads={[]}
+        look={look}
+      />
+    </QueryClientProvider>,
+  );
+  const frame = frameByTitle();
+  expect(frame.classList.contains("bg-reading")).toBe(look === "emend");
+  expect(frame.classList.contains("bg-[#fff]")).toBe(look !== "emend");
+  expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+});
 function FrameContent({
   values,
   docNavigation,

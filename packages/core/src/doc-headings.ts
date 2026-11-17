@@ -1,11 +1,13 @@
 import { type DocHeading, LIMITS } from "@emend/contract";
 import { fromHtml } from "hast-util-from-html";
-import { defaultTreeAdapter, html } from "parse5";
+import { type DefaultTreeAdapterTypes, defaultTreeAdapter, html } from "parse5";
 import { cleanDocTitle } from "./doc-title.ts";
 import { docNodes, htmlPart, nodeText, parseDocHtml } from "./place/html.ts";
 import type { Block } from "./render/blocks.ts";
 export function htmlHeadings(source: string): DocHeading[] {
-  const tree = parseDocHtml(source);
+  return htmlHeadingsFromTree(parseDocHtml(source));
+}
+export function htmlHeadingsFromTree(tree: DefaultTreeAdapterTypes.Document | null): DocHeading[] {
   const body = tree ? htmlPart(tree, "body") : undefined;
   const headings: DocHeading[] = [];
   if (body)

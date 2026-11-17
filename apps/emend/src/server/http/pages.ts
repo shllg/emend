@@ -16,16 +16,30 @@ const TYPES: Record<string, string> = {
   ".json": "application/json",
   ".txt": "text/plain; charset=utf-8",
 };
-async function regularFile(root: string, path: string) {
+export async function regularFile(root: string, path: string, maxBytes = Infinity) {
   try {
     const real = await realpath(path);
     const suffix = relative(root, real);
     if (suffix === ".." || suffix.startsWith(`..${sep}`) || isAbsolute(suffix)) return null;
     const file = await open(real, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
     try {
-      if (!(await file.stat()).isFile()) return null;
+      const stat = await file.stat();
+      if (!stat.isFile() || stat.size > maxBytes) return null;
+      let bytes: Uint8Array<ArrayBuffer>;
+      if (Number.isFinite(maxBytes)) {
+        // Bound the read too: the file may grow after stat.
+        const buffer = new Uint8Array(maxBytes + 1);
+        let length = 0;
+        while (length < buffer.length) {
+          const { bytesRead } = await file.read(buffer, length, buffer.length - length, null);
+          if (!bytesRead) break;
+          length += bytesRead;
+        }
+        if (length > maxBytes) return null;
+        bytes = buffer.subarray(0, length);
+      } else bytes = new Uint8Array(await file.readFile());
       return {
-        bytes: new Uint8Array(await file.readFile()),
+        bytes,
         type: TYPES[extname(real).toLowerCase()] ?? "application/octet-stream",
       };
     } finally {

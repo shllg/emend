@@ -560,6 +560,7 @@ async function computePublish(
               file.role === "doc"
                 ? ((docViewOf(file) === "source" ? sourceMetadata : metadata).get(file.path)?.headings ?? null)
                 : null,
+            look: isRenderedHtmlDoc(file) ? (metadata.get(file.path)?.look ?? null) : null,
             renderedBlob:
               file.role === "doc"
                 ? ((docViewOf(file) === "source" ? sourceBlobs : docBlobs).get(file.path) ?? null)

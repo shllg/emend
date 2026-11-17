@@ -58,7 +58,7 @@ export async function renderRevision(
         try {
           const result = await execute({ kind: "doc-metadata", format, bytes: await read(file.newBlob), media });
           if (result.kind !== "doc-metadata") throw new Error("wrong result");
-          own = { title: result.title, headings: result.headings };
+          own = { title: result.title, headings: result.headings, look: result.look };
         } catch {
           checkPublishSignal(signal);
         }
@@ -68,6 +68,7 @@ export async function renderRevision(
       title:
         cleanDocTitle(file.title ?? "") || own.title || cleanDocTitle(file.path.split("/").at(-1) ?? "") || "Document",
       headings: own.headings,
+      ...(format === "html" && own.look ? { look: own.look } : {}),
     };
     const size = Buffer.byteLength(JSON.stringify(doc));
     metadataBytes += size;

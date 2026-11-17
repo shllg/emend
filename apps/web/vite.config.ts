@@ -50,13 +50,47 @@ function mermaidFrame(): Plugin {
   };
 }
 
+function pubFrame(): Plugin {
+  return {
+    name: "pub-frame",
+    apply: "build",
+    async buildStart() {
+      const result = await build({
+        configFile: false,
+        root: fileURLToPath(new URL(".", import.meta.url)),
+        publicDir: false,
+        logLevel: "silent",
+        build: {
+          write: false,
+          minify: true,
+          cssMinify: true,
+          assetsInlineLimit: () => true,
+          rolldownOptions: { input: fileURLToPath(new URL("./pub-frame.css", import.meta.url)) },
+        },
+      });
+      const output = Array.isArray(result) ? result[0] : result;
+      if (!output || !("output" in output)) throw new Error("The pub stylesheet was not generated.");
+      const sheets = output.output.filter((file) => file.type === "asset" && file.fileName.endsWith(".css"));
+      const sheet = sheets[0];
+      if (sheets.length !== 1 || sheet?.type !== "asset") throw new Error("Expected one pub stylesheet.");
+      const css = typeof sheet.source === "string" ? sheet.source : new TextDecoder().decode(sheet.source);
+      if (
+        css.includes("<") ||
+        [...css.matchAll(/url\(/gi)].some((match) => !/^url\(\s*["']?data:/i.test(css.slice(match.index)))
+      )
+        throw new Error("The pub stylesheet must contain only inline data URLs and no less-than character.");
+      this.emitFile({ type: "asset", fileName: "pub-frame.css", source: css });
+    },
+  };
+}
+
 const emendPackage: { version: string } = JSON.parse(
   readFileSync(fileURLToPath(new URL("../emend/package.json", import.meta.url)), "utf8"),
 );
 
 export default defineConfig({
   define: { __EMEND_VERSION__: JSON.stringify(emendPackage.version) },
-  plugins: [react(), tailwindcss(), mermaidFrame(), diffBuildPruning(), serviceWorker()],
+  plugins: [react(), tailwindcss(), mermaidFrame(), pubFrame(), diffBuildPruning(), serviceWorker()],
   worker: { format: "es", plugins: () => [diffBuildPruning(true)] },
   build: {
     rolldownOptions: {

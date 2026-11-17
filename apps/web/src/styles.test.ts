@@ -181,7 +181,40 @@ test("the six variable fonts and their OFL licences ship with matching font-face
       }
     }
   }
-  expect(sources.sort()).toEqual(fontFiles.map((file) => join(webFonts, file)).sort());
+  const pubFonts = fontFiles.filter((file) => file !== "jetbrains-mono-latin-wght-italic.woff2");
+  expect(sources.sort()).toEqual([...fontFiles, ...pubFonts].map((file) => join(webFonts, file)).sort());
+});
+
+test("pub defaults use tokens, stay inside one emend layer and define the documented classes", () => {
+  const css = readFileSync(join(webSource, "styles/pub.css"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .trim();
+  expect(css).not.toMatch(/#[0-9a-f]{3,8}\b|rgb\(|oklch\(/i);
+  expect(css).toMatch(/^@layer emend\s*\{/);
+  // Only the last closing brace may end the outer layer; nested media rules remain inside it.
+  let depth = 0;
+  for (let i = css.indexOf("{"); i < css.length; i++) {
+    if (css[i] === "{") depth++;
+    if (css[i] === "}") {
+      depth--;
+      if (depth === 0) expect(i).toBe(css.length - 1);
+    }
+  }
+  expect(depth).toBe(0);
+  for (const name of ["tldr", "facts", "note", "warning", "pair", "status", "ok", "warn", "bad"])
+    expect(css).toMatch(new RegExp(`\\.${name}\\b`));
+  expect(css).toContain("font: var(--type-prose)");
+  expect(css).toContain("background: var(--bg-reading)");
+  const entry = readFileSync(join(webSource, "../pub-frame.css"), "utf8");
+  for (const name of ["pub-fonts", "colors", "typography", "spacing"])
+    expect(entry).toContain(`@import "./src/styles/${name}.css" layer(emend);`);
+});
+
+test("pub fonts reuse the app's exact faces without JetBrains Mono italic", () => {
+  const fonts = readFileSync(join(webSource, "styles/fonts.css"), "utf8");
+  const pub = readFileSync(join(webSource, "styles/pub-fonts.css"), "utf8");
+  const faces = (css: string) => [...css.matchAll(/@font-face\s*\{[^}]+\}/g)].map((match) => match[0]);
+  expect(faces(pub)).toEqual(faces(fonts).filter((face) => !face.includes("jetbrains-mono-latin-wght-italic.woff2")));
 });
 
 test("text and labels use the sans family and every mono declaration disables programming ligatures", () => {

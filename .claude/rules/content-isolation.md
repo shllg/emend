@@ -70,10 +70,12 @@ with the reviewer's session can send instructions to the waiting agent in the re
   `Access-Control-Allow-Origin: *`, because the frame's opaque origin makes every asset load
   cross-origin and every font a CORS request. `sandbox allow-scripts` is there for the bridge
   alone; `connect-src 'none'` keeps the bridge off the network.
+- Look `emend` adds one `<style>` after the doctype: `pub-frame.css`, emend's CSS, no `<`, `data:`
+  URLs only.
 - Mermaid frame: `default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src
-  data:`, plus `X-Frame-Options: SAMEORIGIN` on that path only, so the app page can frame it.
+  data:`, plus `X-Frame-Options: SAMEORIGIN` on that path only.
 - Never weaken the app CSP, `X-Frame-Options: DENY`, the content path's CSP or the frame
-  sandbox. Any change to headers, sandbox attributes, the bridge or the sanitize schema needs
-  `emend-security-reviewer`.
+  sandbox. Any change to headers, sandbox attributes, the bridge, the pub style or the sanitize
+  schema needs `emend-security-reviewer`.
 - Each renderer change adds hostile-input tests: `<script>`, `<img onerror>`, `javascript:`
   links, raw HTML in Markdown and the glossary, SVG, a Mermaid `click` directive.

@@ -1,6 +1,15 @@
 import { expect, test } from "vitest";
 import * as contract from "./index.ts";
 
+test("HTML doc looks accept emend, custom or absence, and reject other values", () => {
+  const schema = contract.RevisionView.shape.docs;
+  const doc = { path: "page.html", kind: "html", contentUrl: "/content/synthetic/page.html" };
+  expect(schema.parse([doc])).toEqual([doc]);
+  for (const look of ["emend", "custom"]) expect(schema.parse([{ ...doc, look }])).toEqual([{ ...doc, look }]);
+  for (const look of ["other", "EMEND", "", null, false])
+    expect(schema.safeParse([{ ...doc, look }]).success).toBe(false);
+});
+
 test("review views validate their states, limits, rendered blocks and doc variants", () => {
   expect(contract.ReviewState.options).toEqual(["open", "approved", "settled"]);
   expect(contract.LIMITS.inboxItems).toBe(200);

@@ -1,6 +1,7 @@
 import { lstat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { type DocView, isRenderedHtmlDoc, LIMITS, PublishManifest, PublishResponse } from "@emend/contract";
+import { type HtmlLookReason, htmlLook } from "@emend/core";
 import type { Io } from "../../main.ts";
 import { DIFF_COUNT_BUDGET_MS } from "../../server/publish/counts.ts";
 import { readDocRoots } from "../config.ts";
@@ -162,6 +163,8 @@ export async function publishCommand(
     ? undefined
     : await shortcutManifest(parsed, stateDir, configDir, cwd, context, configRoots);
   const manifest = shortcut?.manifest ?? (await readManifest(parsed.manifest ?? "", cwd, context));
+  // Keep only bounded diagnostics from the upload's source read; print them only after success.
+  const htmlLooks = new Map<string, ReturnType<typeof htmlLook>>();
   const options: PublishOptions = {
     manifest: parsed.manifest,
     key: shortcut?.key ?? parsed.key,
@@ -176,6 +179,7 @@ export async function publishCommand(
     folderRoots: shortcut?.folderRoots,
     namedFiles: shortcut?.namedFiles,
     docArguments: shortcut?.docArguments,
+    onHtmlDoc: (path, bytes) => htmlLooks.set(path, htmlLook(bytes.toString())),
   };
   if (!manifest.base && !options.key && !options.review) throw new CliError("pass --review or --key");
   // Resolve all paths and unchanged-file checks before creating any server state.
@@ -257,6 +261,31 @@ export async function publishCommand(
     io.stderr(`emend: published ${count} files from ${escapeReference(folder.argument)}\n`);
   }
   for (const path of result.data.unrendered) io.stderr(`emend: could not render ${escapeReference(path)}\n`);
+  const lookNotes: Record<HtmlLookReason, string> = {
+    structure: "shows in emend's look",
+    "marked-emend": "shows in emend's look: marked emend, its own styles apply on top",
+    "marked-custom": "shows as a custom page: marked custom",
+    "own-styles":
+      'shows as a custom page: it has its own styles; add <meta name="emend-look" content="emend"> to use emend\'s look under them',
+    unreadable: "shows as a custom page: emend could not read its structure",
+  };
+  for (const file of collected.request.files) {
+    if (!isRenderedHtmlDoc(file)) continue;
+    const result = htmlLooks.get(file.path);
+    if (!result) continue;
+    const path = escapeReference(file.path);
+    io.stderr(`emend: ${path} ${lookNotes[result.reason]}\n`);
+    if (result.look === "emend" && result.outside.length) {
+      const names = result.outside
+        .slice(0, 5)
+        .map((name) => `<${escapeReference(name)}>`)
+        .join(", ");
+      const more = result.outside.length > 5 ? ` and ${result.outside.length - 5} more` : "";
+      io.stderr(
+        `emend: ${path} uses elements outside emend's page structure: ${names}${more}; emend's look has no styles for them\n`,
+      );
+    }
+  }
   io.stderr(`emend: published revision ${result.data.revision}: ${escapeReference(result.data.url)}\n`);
   if (target.via === "direct")
     io.stderr("emend: emend is not running; the review opens once it runs (emend serve, or emend service install)\n");

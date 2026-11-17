@@ -64,6 +64,7 @@ try {
     "dist/emend.mjs",
     "dist/publish-worker.mjs",
     "dist/web/index.html",
+    "dist/web/pub-frame.css",
     "dist/web/licenses/geist-OFL.txt",
     "dist/web/licenses/jetbrains-mono-OFL.txt",
     "dist/skills/emend-review/SKILL.md",

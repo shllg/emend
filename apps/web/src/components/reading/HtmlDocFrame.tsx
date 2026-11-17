@@ -18,6 +18,7 @@ export type HtmlNavigation = { threadId: string; intent: unknown };
 export function HtmlDocFrame({
   path,
   contentUrl,
+  look,
   reviewId,
   revision,
   threads,
@@ -37,6 +38,7 @@ export function HtmlDocFrame({
 }: ReaderProps & {
   path: string;
   contentUrl: string;
+  look?: "emend" | "custom";
   navigation?: HtmlNavigation;
   docNavigation?: DocNavigation;
   onNavigate?: (navigation: DocNavigation) => void;
@@ -258,7 +260,7 @@ export function HtmlDocFrame({
           src={src}
           title={path}
           referrerPolicy="no-referrer"
-          className="h-full min-h-0 w-full border-0 bg-[#fff]"
+          className={`h-full min-h-0 w-full border-0 ${look === "emend" ? "bg-reading" : "bg-[#fff]"}`}
           onLoad={() => {
             if (++loads.current <= 1) return;
             markAway();

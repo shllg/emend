@@ -1,15 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { type FileHandle, open, rename, truncate, utimes, writeFile } from "node:fs/promises";
+import { type FileHandle, mkdir, open, rename, symlink, truncate, utimes, writeFile } from "node:fs/promises";
 import { type ClientRequest, createServer, request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { RevisionView } from "@emend/contract";
 import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { devices, files, reviews, revisions } from "../../db/schema.ts";
+import { HTML_DOC_CSP } from "../http/headers.ts";
 import { mailboxFixture } from "../mailbox/test-support.ts";
 import { nodeRequestHandler } from "../serve.ts";
 import { BRIDGE_SOURCE } from "./bridge.ts";
+import { injectBridge, injectLook } from "./inject.ts";
+import { FALLBACK_PUB_CSS } from "./look.ts";
 
 let f: Awaited<ReturnType<typeof mailboxFixture>>;
 let docUrl: string;
@@ -102,6 +105,87 @@ function headers(response: Response, asset = false) {
   expect(response.headers.has("X-Frame-Options")).toBe(false);
   expect(response.headers.get("Access-Control-Allow-Origin")).toBe(asset ? "*" : null);
 }
+
+async function setDocLook(look: "emend" | "custom" | null, newBlob?: string) {
+  await f.db.query((q) =>
+    q
+      .update(files)
+      .set({ look, ...(newBlob ? { newBlob } : {}) })
+      .where(and(eq(files.ownerId, f.ownerId), eq(files.path, "docs/a #é.html"))),
+  );
+}
+
+test.each(["custom", null] as const)("%s look preserves the previous response bytes", async (look) => {
+  await setDocLook(look);
+  await writeFile(join(f.dir, "pub-frame.css"), "@layer emend{body{margin:0}}");
+  const response = await request(docUrl);
+  headers(response);
+  expect(await response.text()).toBe(injectBridge(source));
+});
+
+test("emend look injects the installed stylesheet, caches it and leaves assets unchanged", async () => {
+  const css =
+    "@layer emend{body{color:var(--fg-reading)}@font-face{font-family:Synthetic;src:url(data:font/woff2;base64,AA==)}}";
+  await writeFile(join(f.dir, "pub-frame.css"), css);
+  await setDocLook("emend");
+  const response = await request(docUrl);
+  headers(response);
+  expect(response.headers.get("Content-Security-Policy")).toBe(HTML_DOC_CSP);
+  expect(await response.text()).toBe(injectBridge(injectLook(source, css)));
+  await writeFile(join(f.dir, "pub-frame.css"), "changed");
+  expect(await (await request(docUrl)).text()).toBe(injectBridge(injectLook(source, css)));
+  const asset = await request(new URL("shared.css", origin + docUrl).pathname);
+  headers(asset, true);
+  expect(await asset.text()).toBe("p { color: green; }");
+});
+
+test.each(["missing", "less-than", "invalid-utf8", "oversize", "directory", "outside-root"])(
+  "emend look uses readable fallback for a %s stylesheet",
+  async (kind) => {
+    const path = join(f.dir, "pub-frame.css");
+    if (kind === "less-than") await writeFile(path, "</style><script>alert(1)</script>");
+    if (kind === "invalid-utf8") await writeFile(path, Buffer.from([0xff]));
+    if (kind === "oversize") await writeFile(path, " ".repeat(1024 * 1024 + 1));
+    if (kind === "directory") await mkdir(path);
+    if (kind === "outside-root") {
+      await writeFile(path, "outside stylesheet");
+      const root = join(f.dir, "web");
+      await mkdir(root);
+      await symlink(path, join(root, "pub-frame.css"));
+      f.deps.config.webRoot = root;
+    }
+    await setDocLook("emend");
+    const response = await request(docUrl);
+    headers(response);
+    expect(await response.text()).toBe(injectBridge(injectLook(source, FALLBACK_PUB_CSS)));
+  },
+);
+
+test("hostile marked-emend content retains the exact CSP and cannot enter the injected pub style", async () => {
+  const css = "@layer emend{body{color:var(--fg-reading)}}";
+  await writeFile(join(f.dir, "pub-frame.css"), css);
+  const hostile =
+    '<!doctype html><meta name="emend-look" content="emend"><body><script>alert(1)</script>' +
+    '<img src=x onerror=alert(1)><a href="javascript:alert(1)">Link</a>' +
+    '<style>@import url("https://evil.example/x.css"); body{background:url(https://evil.example/a.png)}</style></body>';
+  const newBlob = await f.deps.blobs.put(f.ownerId, Buffer.from(hostile), "text/html");
+  await setDocLook("emend", newBlob);
+  const response = await request(docUrl);
+  headers(response);
+  expect(response.headers.get("Content-Security-Policy")).toBe(HTML_DOC_CSP);
+  expect(HTML_DOC_CSP).toContain(`script-src 'sha256-${createHash("sha256").update(BRIDGE_SOURCE).digest("base64")}'`);
+  for (const directive of [
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "connect-src 'none'",
+  ])
+    expect(HTML_DOC_CSP).toContain(directive);
+  const html = await response.text();
+  expect(html).toBe(injectBridge(injectLook(hostile, css)));
+  expect(/<style>([\s\S]*?)<\/style>/.exec(html)?.[1]).toBe(css);
+  expect(html.split(BRIDGE_SOURCE)).toHaveLength(2);
+});
 
 async function assetHandlePrototype() {
   const handle = await open(join(f.dir, "state", "blobs", bigSha.slice(0, 2), bigSha), "r");

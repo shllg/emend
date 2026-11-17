@@ -6,7 +6,8 @@ import type { AppDeps } from "../app.ts";
 import type { AppEnv } from "../auth/principal.ts";
 import { ApiError } from "../http/errors.ts";
 import { HTML_DOC_CSP } from "../http/headers.ts";
-import { injectBridge } from "./inject.ts";
+import { injectBridge, injectLook } from "./inject.ts";
+import { pubStylesheet } from "./look.ts";
 
 export function contentRoutes(app: Hono<AppEnv>, deps: AppDeps) {
   app.get("/content/:docKey/*", async (c) => {
@@ -57,14 +58,16 @@ export function contentRoutes(app: Hono<AppEnv>, deps: AppDeps) {
       if (isDoc) {
         const bytes = await deps.blobs.get(revision.ownerId, file.newBlob, q);
         if (!bytes) throw new ApiError("not_found");
-        return { bytes, mediaType: file.mediaType, isDoc: true as const };
+        return { bytes, mediaType: file.mediaType, look: file.look, isDoc: true as const };
       }
       return { ownerId: revision.ownerId, sha: file.newBlob, mediaType: file.mediaType, isDoc: false as const };
     });
     const type = result.mediaType;
     const contentType = /^(?:text\/|application\/json$|image\/svg\+xml$)/.test(type) ? `${type}; charset=utf-8` : type;
     if (result.isDoc) {
-      const html = injectBridge(new TextDecoder().decode(result.bytes));
+      let html = new TextDecoder().decode(result.bytes);
+      if (result.look === "emend") html = injectLook(html, await pubStylesheet(deps.config.webRoot));
+      html = injectBridge(html);
       c.header("Content-Type", contentType);
       c.header("Content-Security-Policy", HTML_DOC_CSP);
       return c.body(html);

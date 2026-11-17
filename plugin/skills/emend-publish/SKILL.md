@@ -26,6 +26,7 @@ If you wrote it elsewhere, copy it into a doc root as step 1 says.
    Prefer one Markdown file or one HTML file.
    Before you write it, read [the writing reference](../emend-review/references/writing.md) and
    follow it. It covers sentences, the TL;DR, the glossary, images and HTML pages.
+   Build an HTML page from its page structure unless the user asks for a custom page.
    emend renders Markdown on its server: GFM tables, code colours, and ```` ```mermaid ```` fences become diagrams.
    Keep it out of hidden folders: folder publishing skips dotfiles and hidden folders.
    Tell the user the path of the file you wrote.
@@ -71,7 +72,7 @@ emend publish <path> --title "<title>"
 When publish prints `source is outside the allowed doc roots`, stop and ask the user to run `emend config add docRoots <folder>` for that folder, or to move the doc into the repository. Never run `emend config` or edit emend's configuration yourself.
 
 Pass every `emend:` note on stderr to the user.
-Examples are skipped files, documents that could not render, or a stopped server.
+Examples are skipped files, documents that could not render, an HTML page's look, or a stopped server.
 When the server is stopped, publish still saves the review and prints its URL.
 
 Do not publish a hunk-review HTML writeup with emend yet.

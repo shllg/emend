@@ -1,11 +1,12 @@
 export { htmlAssetReferences } from "./assets.ts";
 export { DIFF_COUNT_TIMEOUT_MS, diffLineCounts } from "./diff-counts.ts";
-export { htmlHeadings, markdownHeadings } from "./doc-headings.ts";
+export { htmlHeadings, htmlHeadingsFromTree, markdownHeadings } from "./doc-headings.ts";
 export { cleanDocTitle, inferDocTitle, markdownTitle } from "./doc-title.ts";
 export { headingLookups } from "./heading-lookups.ts";
+export { HTML_STRUCTURE, type HtmlLook, type HtmlLookReason, htmlLook, htmlLookFromTree } from "./html-look.ts";
 export { type DocLinks, resolveDocLink } from "./links.ts";
 export { isLockfile } from "./lockfiles.ts";
-export { docText, placeHtmlSpan } from "./place/html.ts";
+export { docText, parseDocHtml, placeHtmlSpan } from "./place/html.ts";
 export { lineMap } from "./place/linemap.ts";
 export { type FileSides, placeLines } from "./place/lines.ts";
 export { type PlaceContext, placeThread } from "./place/place.ts";
