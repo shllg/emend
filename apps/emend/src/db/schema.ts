@@ -278,6 +278,7 @@ export const files = sqliteTable(
     deletions: integer("deletions"),
     title: text("title"),
     headings: text("headings", { mode: "json" }).$type<DocHeading[]>(),
+    look: text("look", { enum: ["emend", "custom"] }),
     flag: text("flag", { enum: enumValues(FileFlag.options) }),
     parentDocId: text("parent_doc_id"),
   },

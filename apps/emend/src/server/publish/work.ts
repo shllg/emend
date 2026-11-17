@@ -21,12 +21,15 @@ import {
   docText,
   downloadDiffHunks,
   type FileSides,
-  htmlHeadings,
+  type HtmlLook,
+  htmlHeadingsFromTree,
+  htmlLookFromTree,
   inferDocTitle,
   markdownHeadings,
   markdownImageReferences,
   markdownTitle,
   type PlaceContext,
+  parseDocHtml,
   placeThread,
   type RenderEffects,
   type RenderedWriteup,
@@ -106,7 +109,7 @@ export type Work =
         carried?: { path: string | null; side?: "old" | "new" };
       }[];
     };
-export type DocMetadata = { title?: string; headings: DocHeading[] };
+export type DocMetadata = { title?: string; headings: DocHeading[]; look?: HtmlLook };
 export type WorkResult =
   | { kind: "diff-counts"; counts: { additions: number; deletions: number } | null }
   | { kind: "diff-hunks"; hunks: DownloadDiffHunk[] | null | "too-long" }
@@ -182,12 +185,15 @@ export const executeWork: Executor = async (work) => {
   if (work.kind === "doc-images") return { kind: "doc-images", ...markdownImageReferences(decode(work.bytes)) };
   if (work.kind === "image-sizes") return { kind: "image-sizes", sizes: [...readImageSizes(work.heads)] };
   if (work.kind === "doc-metadata") {
-    if (work.format === "html")
+    if (work.format === "html") {
+      const tree = parseDocHtml(decode(work.bytes));
       return {
         kind: "doc-metadata",
         title: await inferDocTitle("html", new Uint8Array(work.bytes)),
-        headings: htmlHeadings(decode(work.bytes)),
+        headings: htmlHeadingsFromTree(tree),
+        ...(tree ? { look: htmlLookFromTree(tree).look } : {}),
       };
+    }
     const blocks = await renderMetadataBlocks(decode(work.bytes), new Map(work.media));
     return { kind: "doc-metadata", title: markdownTitle(blocks), headings: markdownHeadings(blocks) };
   }

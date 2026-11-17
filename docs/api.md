@@ -241,7 +241,9 @@ It changes no headers, filename or ZIP decision. The choice is off by default.
 
 An optional `theme=dark` or `theme=light` query parameter fixes the look of the files emend
 draws: the writeup, Markdown docs, docs shown as source, the comments file and the omitted-content
-note page. Without it, they follow the reader's colour scheme. An HTML doc keeps its own look.
+note page. Without it, they follow the reader's colour scheme. An HTML doc downloads as its own
+bytes: a custom page keeps its own look, and a page in emend's look downloads without emend's
+styles.
 Any other value or a repeat gets `400 invalid_request` before waiting for a slot, also on `HEAD`.
 It changes no headers, filename or ZIP decision.
 
@@ -681,7 +683,10 @@ Kinds are `heading | paragraph | item | code | table | quote | diagram`; diagram
 `RenderedWriteup = { sections: { key, label, topic: string | null, blocks: RenderedBlock[] }[] }`
 mirrors core's rendered writeup. These are server-rendered blocks, never browser-rendered Markdown.
 Markdown docs are `{ path, kind: "markdown", blocks: RenderedBlock[] }` (empty if unrendered).
-HTML docs are `{ path, kind: "html", contentUrl }`, where the URL is
+HTML docs are `{ path, kind: "html", contentUrl, look?: "emend" | "custom" }`. The optional
+`look` is recorded at publish time: `emend` adds emend's layered pub stylesheet, and `custom`
+keeps the page's own look. An absent `look` (a revision published before this field existed, or
+metadata that failed) shows as a custom page. The URL is
 `/content/<docKey>/<path>` with each path segment percent-encoded. The doc key is the revision's
 43-character base64url `contentKey` followed by that doc's file UUID with dashes removed (32
 lowercase hex characters); its exact shape is `^[A-Za-z0-9_-]{43}[0-9a-f]{32}$`.
@@ -699,6 +704,15 @@ The bridge also inserts one style element first in the doc's head, in the cascad
 document-level rule of the doc's own CSS, so a code block the doc leaves unstyled scrolls inside its
 own box instead of widening the doc. A `::slotted(pre)` rule in a shadow root does not override it:
 the cascade ranks the outer document's rules above a shadow tree's.
+
+A doc whose `look` is `emend` also receives emend's pub stylesheet as one style element, placed
+after any leading byte order mark, whitespace, comments and doctype, so the doc never falls into
+quirks mode. The stylesheet is `pub-frame.css` from the web build: emend's tokens and element
+styles in the cascade layer `emend`, with its fonts as `data:` URLs. It contains no `</`, backslash,
+`@import`, `image-set(` or `src(`. Every `url(` must use `data:`. The build and every server read
+check these rules and the `pubStylesheetBytes` limit. A missing or rejected sheet falls back to a
+minimal light and dark sheet with system colours.
+Every unlayered rule of the doc's own CSS wins over it. The doc's headers stay exactly as above.
 
 Asset and error responses under `/content/` send:
 
@@ -754,6 +768,12 @@ no further messages or commands are accepted until a parent-initiated reload or 
 navigating to another doc under the current doc's key still returns 404 and triggers that state.
 Other frame messages carry ready notifications, proposed quotes, quote highlights and thread
 scroll requests; saving a comment requires the reviewer's explicit action.
+
+After each `emend:ready`, the parent sends `{ type: "emend:layout", wide: boolean }` first, before
+highlights, doc paths or position restore. It sends layout again whenever the app crosses its
+768px breakpoint. The bridge sets `data-emend-layout` to `wide` or `narrow` on the root element.
+emend's look uses it to match the Markdown reader's layout. Until it arrives, the frame's own
+width decides.
 
 After `emend:ready`, the parent sends `{ type: "emend:docs", paths: FilePath[] }`, the exact doc
 paths in this revision. Bridge links resolve against the existing document base, decode each
@@ -974,20 +994,31 @@ expired sessions are unauthorized. Session deletion revokes both and clears the 
 If a code matches multiple live device pairings, redemption is unauthorized and consumes none;
 the individual secret links remain usable.
 
-`PublishResponse = { reviewId, revision, url, placed, unplaced, unrendered: FilePath[] }`.
+`PublishResponse = { reviewId, revision, url, placed, unplaced, unrendered: FilePath[], htmlLooks? }`.
 An omitted `unrendered` field defaults to `[]`.
+`htmlLooks` is an optional array of `{ path: FilePath, look: "emend" | "custom" }`, with at most
+`filesPerRevision` entries. It lists every rendered HTML doc's look in the new revision, using the
+same metadata stored for that revision, including unchanged re-publishes. A null stored look means
+`custom`. HTML docs whose metadata work failed are in `unrendered` instead and are not listed.
+New servers include `htmlLooks` even when empty. Older servers omit it; it has no default.
+Without it, the CLI prints no HTML look or outside-elements notes. With it, the CLI reports the
+server's look. It adds a local reason and outside-elements advice only when its classification agrees.
 HTML doc entries include `assets: FilePath[]`; rendered Markdown docs may include image assets.
 Each listed path must be an asset in the request inside that doc's folder. The doc source plus its
 own listed assets must fit `htmlDocWithAssetsBytes`; shared assets count for every doc listing them. Asset rows retain
 their first parent, and their blob bytes count once toward the revision byte budget. Every rendered
 doc's full asset list is stored, so a shared asset loads under each doc that lists it. Existing
 revisions migrate their parent associations and retain parent-only asset access.
-`unrendered` lists Markdown docs whose rendering failed, timed out or exceeded rendered-output budgets
-(at most `filesPerRevision`). Rendered blocks and JSON bytes count every path, including the writeup.
+`unrendered` lists Markdown docs whose rendering failed, timed out or exceeded rendered-output budgets,
+and HTML docs whose metadata work (title, Contents headings, look) failed or timed out
+(at most `filesPerRevision`). Such an HTML doc still shows, as a custom page.
+Rendered blocks and JSON bytes count every path, including the writeup.
 Docs render in manifest order; once a doc exceeds either budget it and all later Markdown docs
 remain unrendered. A writeup alone exceeding either budget returns 413 `too_large` with
 "The writeup has too many blocks."
-The CLI warns `emend: could not render <path>` for each; the publish still succeeds.
+The CLI warns `emend: could not render <path>` for Markdown docs. When `htmlLooks` is present,
+it reports only that a failed HTML doc shows as custom because emend could not read its structure.
+The publish still succeeds.
 The URL is `<baseUrl>/r/<reviewId>` (HTTP or HTTPS);
 it is bounded by `pathChars` (4096 characters). At each start the local server saves its listening URL in `server-url.json` in the state
 directory, mode 0600. With Tailscale, it replaces that value with the public origin only after
@@ -1798,6 +1829,7 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `diffSideBytes` | 1048576 bytes shown per side |
 | `markdownDocBytes` | 1048576 bytes |
 | `htmlDocBytes` | 8388608 bytes |
+| `pubStylesheetBytes` | 1048576 UTF-8 bytes for the built-in HTML pub stylesheet |
 | `downloadInlineBytes` | 134217728 bytes (128 MiB) of emitted built-in content per download, and the same read budget for stored assets, selected doc bodies and selected diff blobs; both shared by all files of a ZIP |
 | `downloadCommentBytes` | 32 MiB of thread cards per download, shared by all files of a ZIP, separate from the built-in content budget |
 | `downloadDocs` | 50 docs added to one download |

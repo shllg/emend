@@ -40,7 +40,7 @@ test.each([false, true])("settings migration preserves existing data (previous=%
         (await snapshot()).map(([name, ddl]) => [
           name,
           name === "files" && typeof ddl === "string"
-            ? ddl.replace(", `additions` integer, `deletions` integer", "")
+            ? ddl.replace(", `additions` integer, `deletions` integer", "").replace(", `look` text", "")
             : ddl,
         ]),
       ).toEqual(before);

@@ -162,6 +162,7 @@ export function DocView({
         {...props}
         path={openDoc.path}
         contentUrl={openDoc.contentUrl}
+        look={openDoc.look}
         navigation={navigation}
         docNavigation={destination?.path === openDoc.path ? destination : undefined}
         onNavigate={follow}

@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { build, defineConfig, type Plugin } from "vite";
+import { checkPubStylesheet, pickPubStylesheet } from "./build/pub-frame.ts";
 import { serviceWorker } from "./build/service-worker.ts";
 import { diffBuildPruning } from "./diff-build.ts";
 
@@ -50,13 +51,40 @@ function mermaidFrame(): Plugin {
   };
 }
 
+function pubFrame(): Plugin {
+  return {
+    name: "pub-frame",
+    apply: "build",
+    async buildStart() {
+      const result = await build({
+        configFile: false,
+        root: fileURLToPath(new URL(".", import.meta.url)),
+        publicDir: false,
+        logLevel: "silent",
+        build: {
+          write: false,
+          minify: true,
+          cssMinify: true,
+          assetsInlineLimit: () => true,
+          rolldownOptions: { input: fileURLToPath(new URL("./pub-frame.css", import.meta.url)) },
+        },
+      });
+      const output = Array.isArray(result) ? result[0] : result;
+      if (!output || !("output" in output)) throw new Error("The pub stylesheet was not generated.");
+      const css = pickPubStylesheet(output.output);
+      checkPubStylesheet(css);
+      this.emitFile({ type: "asset", fileName: "pub-frame.css", source: css });
+    },
+  };
+}
+
 const emendPackage: { version: string } = JSON.parse(
   readFileSync(fileURLToPath(new URL("../emend/package.json", import.meta.url)), "utf8"),
 );
 
 export default defineConfig({
   define: { __EMEND_VERSION__: JSON.stringify(emendPackage.version) },
-  plugins: [react(), tailwindcss(), mermaidFrame(), diffBuildPruning(), serviceWorker()],
+  plugins: [react(), tailwindcss(), mermaidFrame(), pubFrame(), diffBuildPruning(), serviceWorker()],
   worker: { format: "es", plugins: () => [diffBuildPruning(true)] },
   build: {
     rolldownOptions: {

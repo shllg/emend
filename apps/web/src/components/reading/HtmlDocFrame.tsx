@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { claimDraft, useDraftClaim } from "../../lib/composer-owner.ts";
 import { draftKey, listDrafts, subscribeDrafts } from "../../lib/drafts.ts";
 import { type DocNavigation, FrameToParent, type HtmlPosition, type ParentToFrame } from "../../lib/frame-messages.ts";
-import { useLayout } from "../../lib/layout.ts";
+import { useLayout, useMedia } from "../../lib/layout.ts";
 import { focusReadingTarget } from "../../lib/reading-focus.ts";
 import { loadReadingPosition, saveReadingPosition } from "../../lib/reading-position.ts";
 import type { ReadingEntry } from "../../lib/use-reading-trail.ts";
@@ -18,6 +18,7 @@ export type HtmlNavigation = { threadId: string; intent: unknown };
 export function HtmlDocFrame({
   path,
   contentUrl,
+  look,
   reviewId,
   revision,
   threads,
@@ -37,6 +38,7 @@ export function HtmlDocFrame({
 }: ReaderProps & {
   path: string;
   contentUrl: string;
+  look?: "emend" | "custom";
   navigation?: HtmlNavigation;
   docNavigation?: DocNavigation;
   onNavigate?: (navigation: DocNavigation) => void;
@@ -50,6 +52,7 @@ export function HtmlDocFrame({
   returnFocus?: () => HTMLElement | null;
 }) {
   const phone = useLayout() === "phone";
+  const wide = useMedia("(min-width: 768px)");
   const savedDrafts = JSON.parse(
     useSyncExternalStore(subscribeDrafts, () =>
       JSON.stringify(
@@ -173,6 +176,9 @@ export function HtmlDocFrame({
     return () => window.removeEventListener("message", receive);
   }, [path, composing, composerOpen, onNavigate, headings, reading, onPosition, markAway]);
   useEffect(() => {
+    if (ready) post({ type: "emend:layout", wide });
+  }, [ready, wide, post]);
+  useEffect(() => {
     if (ready && !gone.current)
       frame.current?.contentWindow?.postMessage({ type: "emend:highlight", anchors: JSON.parse(anchors) }, "*");
   }, [ready, anchors]);
@@ -258,7 +264,7 @@ export function HtmlDocFrame({
           src={src}
           title={path}
           referrerPolicy="no-referrer"
-          className="h-full min-h-0 w-full border-0 bg-[#fff]"
+          className={`h-full min-h-0 w-full border-0 ${look === "emend" ? "bg-reading" : "bg-[#fff]"}`}
           onLoad={() => {
             if (++loads.current <= 1) return;
             markAway();

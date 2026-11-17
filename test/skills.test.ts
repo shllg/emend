@@ -424,6 +424,16 @@ test("the writing reference defines HTML pages and both TL;DR locations", () => 
     "Give the main column a max width of 1024px.",
     "Use body text around 18px with a line height around 1.65.",
     "Keep the page self-contained.",
+    "Use emend's page structure below unless the user asks for a custom page.",
+    "Build the page from these elements and write no CSS.",
+    '<section class="tldr">',
+    '<dl class="facts">',
+    '<div class="pair">',
+    '<aside class="note">',
+    '<span class="status">',
+    '<meta name="emend-look" content="custom">',
+    '<meta name="emend-look" content="emend">',
+    "says for each HTML page whether it shows in emend's look or as a custom page",
   ]) {
     expect(html).toContain(rule);
   }

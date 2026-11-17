@@ -43,6 +43,8 @@ export async function renderRevision(
   const sourceBlobs = new Map<string, string>();
   const metadata = new Map<string, DocMetadata>();
   const metadataCache = new Map<string, DocMetadata>();
+  const failedMetadata = new Set<string>();
+  const unrendered: string[] = [];
   let metadataBytes = 0;
   for (const file of input.files) {
     checkPublishSignal(signal);
@@ -58,16 +60,19 @@ export async function renderRevision(
         try {
           const result = await execute({ kind: "doc-metadata", format, bytes: await read(file.newBlob), media });
           if (result.kind !== "doc-metadata") throw new Error("wrong result");
-          own = { title: result.title, headings: result.headings };
+          own = { title: result.title, headings: result.headings, look: result.look };
         } catch {
           checkPublishSignal(signal);
+          failedMetadata.add(key);
         }
       metadataCache.set(key, own);
     }
+    if (format === "html" && failedMetadata.has(key)) unrendered.push(file.path);
     const doc = {
       title:
         cleanDocTitle(file.title ?? "") || own.title || cleanDocTitle(file.path.split("/").at(-1) ?? "") || "Document",
       headings: own.headings,
+      ...(format === "html" && own.look ? { look: own.look } : {}),
     };
     const size = Buffer.byteLength(JSON.stringify(doc));
     metadataBytes += size;
@@ -190,7 +195,6 @@ export async function renderRevision(
   const cache = new Map<string, string | null>();
   const folderCache = new Map<string, string>();
   const docBlobs = new Map<string, string>();
-  const unrendered: string[] = [];
   const markUnrendered = (path: string) => {
     unrendered.push(path);
     const doc = metadata.get(path);

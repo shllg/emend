@@ -198,5 +198,79 @@ These rules hold for every HTML document you write to publish.
 - Keep the page self-contained. emend runs none of its scripts and loads nothing from other hosts.
   Use no CDN scripts, styles or fonts.
 - Keep images and styles beside the file, using relative paths.
+- Use emend's page structure below unless the user asks for a custom page.
+
+### emend's page structure
+
+Build the page from these elements and write no CSS.
+emend adds its own styles when it serves the page.
+The page then has the fonts, colours, sizes and spacing of a Markdown document.
+It follows the device's light or dark mode.
+
+- Title and sections: `h1` for the title, `h2` and `h3` for sections.
+  Contents lists the `h2` and `h3` headings.
+- Text: `p`, `ul`, `ol`, `a`, `strong`, `em`, `code`, `pre` with `code`, `blockquote`, `table`,
+  `hr`, `kbd` and `dl`.
+- TL;DR: `<section class="tldr">` with the "TL;DR" heading first. It shows as the writeup's card.
+- Key facts: `<dl class="facts">`, with one `div` holding a `dt` and a `dd` per fact.
+- Figure: `figure` with an `img` and a `figcaption`.
+- Before and After: `<div class="pair">` with two figures captioned "Before" and "After".
+  A `p` after them states the effect.
+- Callout: `<aside class="note">` or `<aside class="warning">`.
+- Collapsible section: `details` with a `summary`.
+- Status label: `<span class="status">`. Add `ok`, `warn` or `bad` for green, amber or red.
+- Containers such as `main`, `section`, `div` and `span` are fine.
+
+`emend publish` names the elements a page uses outside this structure.
+emend's look has no styles for them.
+
+```html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Search cache</title>
+</head>
+<body>
+<h1>Search cache</h1>
+<section class="tldr">
+  <h2>TL;DR</h2>
+  <p>Search now answers from a five-minute cache. A search takes 40 ms instead of 900 ms.</p>
+</section>
+<dl class="facts">
+  <div><dt>Status</dt><dd><span class="status ok">Live</span></dd></div>
+  <div><dt>Undo</dt><dd>Turn the cache flag off.</dd></div>
+</dl>
+<h2>What changed</h2>
+<p>Search reads the cache first and falls back to the database.</p>
+<aside class="warning"><p>A price change shows after at most five minutes.</p></aside>
+<div class="pair">
+  <figure><img src="shots/before.png" alt="Search page with a spinner"><figcaption>Before</figcaption></figure>
+  <figure><img src="shots/after.png" alt="Search page with results"><figcaption>After</figcaption></figure>
+  <p>Results appear without the spinner.</p>
+</div>
+<details>
+  <summary>How it was measured</summary>
+  <p>1000 searches for the same term, run against a local build.</p>
+</details>
+</body>
+</html>
+```
+
+### Custom pages
+
+When the user asks for a custom page, mark it in its `head` with
+`<meta name="emend-look" content="custom">`.
+emend then shows the page with its own styles only.
+A page with its own `style` element, stylesheet link or `style` attributes, including in a declarative
+shadow root, and no mark also shows as a custom page.
+On a custom page:
+
 - Give the main column a max width of 1024px.
 - Use body text around 18px with a line height around 1.65.
+
+To keep emend's look and add a few styles of your own, mark the page with
+`<meta name="emend-look" content="emend">`.
+Your own rules then win over emend's.
+`emend publish` says for each HTML page whether it shows in emend's look or as a custom page,
+and why.

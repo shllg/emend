@@ -296,5 +296,13 @@ export const MIGRATIONS: readonly { tag: string; when: number; hash: string; sta
       "CREATE UNIQUE INDEX `review_groups_owner_id_unique` ON `review_groups` (`owner_id`,`id`);",
       "CREATE UNIQUE INDEX `review_groups_owner_name_unique` ON `review_groups` (`owner_id`,`name`);"
     ]
+  },
+  {
+    "tag": "0022_fixed_blockbuster",
+    "when": 1794878521351,
+    "hash": "cbd7da293d1e6c9bea9edbcddc26cab67c68396ef95f8baddfd7657497339901",
+    "statements": [
+      "ALTER TABLE `files` ADD `look` text;"
+    ]
   }
 ];

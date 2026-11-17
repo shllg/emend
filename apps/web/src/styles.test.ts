@@ -181,7 +181,67 @@ test("the six variable fonts and their OFL licences ship with matching font-face
       }
     }
   }
-  expect(sources.sort()).toEqual(fontFiles.map((file) => join(webFonts, file)).sort());
+  const pubFonts = fontFiles.filter((file) => file !== "jetbrains-mono-latin-wght-italic.woff2");
+  expect(sources.sort()).toEqual([...fontFiles, ...pubFonts].map((file) => join(webFonts, file)).sort());
+});
+
+test("pub defaults use tokens, stay inside one emend layer and define the documented classes", () => {
+  const css = readFileSync(join(webSource, "styles/pub.css"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .trim();
+  expect(css).not.toMatch(/#[0-9a-f]{3,8}\b|rgb\(|oklch\(/i);
+  expect(css).toMatch(/^@layer emend\s*\{/);
+  // Only the last closing brace may end the outer layer; nested media rules remain inside it.
+  let depth = 0;
+  for (let i = css.indexOf("{"); i < css.length; i++) {
+    if (css[i] === "{") depth++;
+    if (css[i] === "}") {
+      depth--;
+      if (depth === 0) expect(i).toBe(css.length - 1);
+    }
+  }
+  expect(depth).toBe(0);
+  for (const name of ["tldr", "facts", "note", "warning", "pair", "status", "ok", "warn", "bad"])
+    expect(css).toMatch(new RegExp(`\\.${name}\\b`));
+  expect(css).toContain("font: var(--type-prose)");
+  expect(css).toContain("background: var(--bg-reading)");
+  const link = /(?:^|\s)a\s*\{([^}]+)\}/.exec(css)?.[1] ?? "";
+  expect(link).toContain("text-decoration: underline;");
+  expect(link).toContain("text-decoration-thickness: 1px;");
+  expect(link).toContain("text-underline-offset: 2px;");
+  expect(css).toMatch(/a:hover\s*\{\s*color: var\(--fg-link-hover\);/);
+  const body = /body\s*\{([^}]+)\}/.exec(css)?.[1] ?? "";
+  expect(body).toContain("--reading-max: 68ch;");
+  expect(body).toContain("max-width: calc(var(--reading-max) + 2 * var(--space-4));");
+  expect(body).toContain("padding: var(--space-4) var(--space-10) var(--space-8);");
+  const boxedResets = [...css.matchAll(/(:is\([^{}]+?\)) > :(?:first|last)-child\s*\{\s*margin-(?:top|bottom): 0;/g)];
+  expect(boxedResets).toHaveLength(2);
+  for (const [, selector] of boxedResets) {
+    expect(selector).toBe(":is(section.tldr, aside.note, aside.warning, blockquote, details, figure, dl.facts dd)");
+    expect(selector).not.toMatch(/\b(?:main|article)\b|(?:\(|,\s*)section(?:\s*,|\))/);
+  }
+  const flat = css.replace(/\s+/g, " ");
+  const wide =
+    "--reading-max: 1024px; max-width: calc(var(--reading-max) + 112px); " +
+    "padding: calc(var(--space-6) + var(--space-1)) 56px calc(var(--space-16) + var(--space-2)); " +
+    "padding-right: clamp(var(--space-8), calc(100% - var(--reading-max) - 56px), 56px);";
+  expect(flat).toContain(`:root[data-emend-layout="wide"] body { ${wide} }`);
+  expect(flat).toContain(`@media (min-width: 768px) { :root:not([data-emend-layout]) body { ${wide} } }`);
+  const narrow = "grid-template-columns: minmax(0, 1fr);";
+  expect(flat).toContain(`:root[data-emend-layout="narrow"] dl.facts { ${narrow} }`);
+  expect(flat).toContain(`@media (max-width: 767px) { :root:not([data-emend-layout]) dl.facts { ${narrow} } }`);
+  for (const edge of ["nth-child", "nth-last-child"])
+    expect(flat).toContain(`body :${edge}(1 of :not(script, style, meta, link, title, template)):not(`);
+  const entry = readFileSync(join(webSource, "../pub-frame.css"), "utf8");
+  for (const name of ["pub-fonts", "colors", "typography", "spacing"])
+    expect(entry).toContain(`@import "./src/styles/${name}.css" layer(emend);`);
+});
+
+test("pub fonts reuse the app's exact faces without JetBrains Mono italic", () => {
+  const fonts = readFileSync(join(webSource, "styles/fonts.css"), "utf8");
+  const pub = readFileSync(join(webSource, "styles/pub-fonts.css"), "utf8");
+  const faces = (css: string) => [...css.matchAll(/@font-face\s*\{[^}]+\}/g)].map((match) => match[0]);
+  expect(faces(pub)).toEqual(faces(fonts).filter((face) => !face.includes("jetbrains-mono-latin-wght-italic.woff2")));
 });
 
 test("text and labels use the sans family and every mono declaration disables programming ligatures", () => {

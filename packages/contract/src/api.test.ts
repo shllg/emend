@@ -56,6 +56,7 @@ test("exports the v1 API, limits, file vocabulary and reserved fallback", () => 
     sourceLinesPerRevision: 200000,
     sourceBytesPerRevision: 16777216,
     htmlDocBytes: 8388608,
+    pubStylesheetBytes: 1048576,
     downloadInlineBytes: 134217728,
     downloadCommentBytes: 33554432,
     downloadDocs: 50,
@@ -178,6 +179,34 @@ test("validates publish response ids, revision, URL and placement counts", () =>
   ]) {
     expect(PublishResponse.safeParse({ ...response, ...change }).success).toBe(false);
   }
+});
+
+test("publish HTML looks are optional, bounded and never defaulted", () => {
+  const response = {
+    reviewId: "11111111-1111-4111-8111-111111111111",
+    revision: 1,
+    url: "http://127.0.0.1:3636/r/11111111-1111-4111-8111-111111111111",
+    placed: 0,
+    unplaced: 0,
+  };
+  expect(PublishResponse.parse(response)).not.toHaveProperty("htmlLooks");
+  expect(PublishResponse.parse({ ...response, htmlLooks: [] }).htmlLooks).toEqual([]);
+  const htmlLooks = [
+    { path: "structure.html", look: "emend" },
+    { path: "styled.html", look: "custom" },
+  ];
+  expect(PublishResponse.parse({ ...response, htmlLooks }).htmlLooks).toEqual(htmlLooks);
+  const maximum = Array.from({ length: LIMITS.filesPerRevision }, (_, i) => ({ path: `${i}.html`, look: "emend" }));
+  expect(PublishResponse.safeParse({ ...response, htmlLooks: maximum }).success).toBe(true);
+  for (const invalid of [
+    null,
+    {},
+    [{ path: "page.html", look: "other" }],
+    [{ path: "page.html" }],
+    [{ path: "../page.html", look: "custom" }],
+    [...maximum, { path: "extra.html", look: "emend" }],
+  ])
+    expect(PublishResponse.safeParse({ ...response, htmlLooks: invalid }).success).toBe(false);
 });
 
 test("builds a revision download path with an encoded review id", () => {

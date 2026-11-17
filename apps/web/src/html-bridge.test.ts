@@ -79,6 +79,53 @@ test.each(corpus)("bridge text equals server docText for corpus $name", async (e
   }
 });
 
+test("bridge applies parent layout booleans through prototype DOM calls", async () => {
+  const b = bridge("<body><h2>Part</h2></body>");
+  try {
+    const root = b.window.document.documentElement;
+    const clobbered = vi.fn();
+    Object.defineProperty(root, "setAttribute", { value: clobbered });
+    Object.defineProperty(b.window.document, "documentElement", {
+      configurable: true,
+      value: b.window.document.createElement("form"),
+    });
+    expect(root.hasAttribute("data-emend-layout")).toBe(false);
+    b.message({ type: "emend:layout", wide: true });
+    expect(root.getAttribute("data-emend-layout")).toBe("wide");
+    b.message({ type: "emend:layout", wide: false });
+    expect(root.getAttribute("data-emend-layout")).toBe("narrow");
+    expect(clobbered).not.toHaveBeenCalled();
+  } finally {
+    Reflect.deleteProperty(b.window.document, "documentElement");
+    await b.window.happyDOM.close();
+  }
+});
+
+test("bridge ignores non-boolean layouts and layouts from anyone but the parent", async () => {
+  const b = bridge("<body><h2>Part</h2></body>");
+  try {
+    const root = b.window.document.documentElement;
+    b.message({ type: "emend:layout", wide: false });
+    for (const wide of [undefined, null, "wide", "true", 0, 1, {}, []]) b.message({ type: "emend:layout", wide });
+    for (const source of [null, b.window, {}]) b.message({ type: "emend:layout", wide: true }, source);
+    expect(root.getAttribute("data-emend-layout")).toBe("narrow");
+  } finally {
+    await b.window.happyDOM.close();
+  }
+});
+
+test("bridge ignores layout when the document has no root", async () => {
+  const b = bridge("<body><h2>Part</h2></body>");
+  try {
+    const root = b.window.document.documentElement;
+    b.window.document.removeChild(root);
+    expect(() => b.message({ type: "emend:layout", wide: true })).not.toThrow();
+    expect(root.hasAttribute("data-emend-layout")).toBe(false);
+  } finally {
+    await b.window.happyDOM.close();
+  }
+});
+
 test("bridge posts a touch selection from a debounced selectionchange and keeps the 2000 character limit", async () => {
   vi.useFakeTimers();
   const b = bridge(`<body><p>Alpha beta gamma</p><p>${"x".repeat(2001)}</p></body>`);

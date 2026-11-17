@@ -49,6 +49,46 @@ beforeEach(async () => {
   f = await importFixture();
   onTestFinished(() => f.cleanup());
 });
+test("import preserves HTML looks and omits look when metadata has no classification", async () => {
+  const input = ImportBundle.parse(await bundle(f));
+  const file = required(input.files[0]);
+  const sources = [
+    { path: "structure.html", source: "<h1>Synthetic plan</h1>", look: "emend" },
+    { path: "styled.html", source: "<style>p{color:red}</style><p>Synthetic plan</p>", look: "custom" },
+    { path: "deep.html", source: "<div>".repeat(600), look: null },
+    { path: "plan.md", source: "# Synthetic plan", look: null },
+  ];
+  input.files = await Promise.all(
+    sources.map(async ({ path, source }, ord) => ({
+      ...file,
+      id: randomUUID(),
+      path,
+      ord,
+      newBlob: await f.deps.blobs.put(f.ownerId, Buffer.from(source), "text/plain"),
+    })),
+  );
+  expect((await f.importRequest("/import", input)).status).toBe(201);
+  const rows = await f.db.read((q) =>
+    q
+      .select()
+      .from(tables.files)
+      .where(and(eq(tables.files.ownerId, f.ownerId), eq(tables.files.revisionId, file.revisionId)))
+      .all(),
+  );
+  expect(rows).toHaveLength(sources.length);
+  for (const { path, look } of sources) expect(rows.find((row) => row.path === path)?.look).toBe(look);
+  const response = await f.request(`/reviews/${input.review.id}/revisions/1`, "GET");
+  expect(response.status).toBe(200);
+  const view = RevisionView.parse(await response.json());
+  expect(view.docs).toHaveLength(sources.length);
+  expect(view.docs.find((doc) => doc.path === "structure.html")).toMatchObject({ kind: "html", look: "emend" });
+  expect(view.docs.find((doc) => doc.path === "styled.html")).toMatchObject({ kind: "html", look: "custom" });
+  expect(view.docs.find((doc) => doc.path === "deep.html")).toMatchObject({ kind: "html" });
+  expect(view.docs.find((doc) => doc.path === "plan.md")).toMatchObject({ kind: "markdown" });
+  for (const path of ["deep.html", "plan.md"])
+    expect(view.docs.find((doc) => doc.path === path)).not.toHaveProperty("look");
+});
+
 test("import places topic quotes using revision title and summary text", async () => {
   const input = ImportBundle.parse(await bundle(f));
   const target = {

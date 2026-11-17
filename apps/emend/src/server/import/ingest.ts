@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { ImportBundle } from "@emend/contract";
-import { docViewOf } from "@emend/contract";
+import { docViewOf, isRenderedHtmlDoc } from "@emend/contract";
 import { and, eq, type InferInsertModel, sql } from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import type { Queries } from "../../db/client.ts";
@@ -211,6 +211,9 @@ export async function importReview(principal: Principal, bundle: ImportBundle, d
                     .get(r.revisionId)
                     ?.[docViewOf(r) === "source" ? "sourceMetadata" : "metadata"].get(r.path)?.headings ?? null)
                 : null,
+            look: isRenderedHtmlDoc(r)
+              ? (prepared.rendered.get(r.revisionId)?.metadata.get(r.path)?.look ?? null)
+              : null,
             mediaType: fileMediaType(r),
             ...(r.role === "diff" ? prepared.counted.get(r.revisionId)?.get(r.path) : {}),
             renderedBlob:

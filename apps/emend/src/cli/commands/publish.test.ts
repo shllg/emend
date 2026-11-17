@@ -5,14 +5,235 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import { promisify } from "node:util";
-import { LIMITS, type PublishManifest, PublishRequest } from "@emend/contract";
+import { LIMITS, type PublishManifest, PublishRequest, PublishResponse } from "@emend/contract";
 import { afterEach, expect, onTestFinished, test, vi } from "vitest";
 import { run } from "../../main.ts";
 import { projectKey } from "../publish/key.ts";
+import * as roots from "../publish/root.ts";
 import { commandFixture, provenTestServer } from "../test-support.ts";
 import { manifestJsonError, parsePublishArgs, publishCommand, publishTimeoutMs } from "./publish.ts";
 
 afterEach(() => vi.unstubAllGlobals());
+
+test.each(["manifest", "shortcut", "json"])(
+  "%s publishes report each HTML look on stderr without changing stdout",
+  async (mode) => {
+    const f = await commandFixture();
+    const source = await realpath(await mkdtemp(join(tmpdir(), "emend-pub-look-")));
+    onTestFinished(() => rm(source, { recursive: true, force: true }));
+    vi.spyOn(roots, "worktreeRoot").mockResolvedValue(null);
+    await mkdir(f.configDir, { recursive: true });
+    await writeFile(join(f.configDir, "config.json"), JSON.stringify({ docRoots: [source] }));
+    await writeFile(join(f.dir, "instance.json"), JSON.stringify({ id: randomUUID() }));
+    const sources = [
+      ["structure.html", "<h1>Plan</h1><x-one></x-one>", "shows in emend's look"],
+      [
+        "marked.html",
+        '<meta name="emend-look" content="emend"><style>p{}</style>',
+        "shows in emend's look: marked emend, its own styles apply on top",
+      ],
+      [
+        "custom.html",
+        '<meta name="emend-look" content="custom"><script>alert(1)</script>',
+        "shows as a custom page: marked custom",
+      ],
+      [
+        "styled.html",
+        "<style>p{}</style>",
+        'shows as a custom page: it has its own styles; add <meta name="emend-look" content="emend"> to use emend\'s look under them',
+      ],
+      ["deep.html", "<div>".repeat(600), "shows as a custom page: emend could not read its structure"],
+      [
+        "outside\u034f.html",
+        "<a-\u001b></a-\u001b><button></button><canvas></canvas><form></form><iframe></iframe><input><x-widget></x-widget>",
+        "shows in emend's look",
+      ],
+      [
+        "safe-outside.html",
+        "<x-a></x-a><x-b></x-b><x-c></x-c><x-d></x-d><x-e></x-e><x-f></x-f>",
+        "shows in emend's look",
+      ],
+      ["omitted.html", `<x-\u00a0></x-\u00a0><x-${"a".repeat(31)}></x-${"a".repeat(31)}>`, "shows in emend's look"],
+      [
+        "capped.html",
+        Array.from(
+          { length: 21 },
+          (_, i) => `<x-${String(i).padStart(2, "0")}></x-${String(i).padStart(2, "0")}>`,
+        ).join(""),
+        "shows in emend's look",
+      ],
+      [
+        "failed.html",
+        '<meta name="emend-look" content="emend"><x-failure></x-failure>',
+        "shows as a custom page: emend could not read its structure",
+      ],
+      ["plan.md", "# Plan", ""],
+    ] as const;
+    for (const [path, text] of sources) await writeFile(join(source, path), text);
+    const response = {
+      reviewId: randomUUID(),
+      revision: 1,
+      placed: 0,
+      unplaced: 0,
+      unrendered: ["failed.html", "plan.md"],
+      htmlLooks: sources.flatMap(([path, , note]) =>
+        path === "failed.html" || path === "plan.md"
+          ? []
+          : [{ path, look: note.startsWith("shows in") ? "emend" : "custom" }],
+      ),
+      url: "http://127.0.0.1:3636/r/synthetic",
+    };
+    f.setResponse(async (_url, init) => {
+      if (init?.method === "HEAD") return new Response(null, { status: 404 });
+      if (init?.method === "PUT") return new Response(null, { status: 204 });
+      // Remove the files after upload: look diagnostics must never read them again.
+      for (const [path] of sources) await rm(join(source, path));
+      return Response.json(response);
+    });
+    const manifest = join(source, "review.json");
+    await writeFile(
+      manifest,
+      JSON.stringify({
+        version: 1,
+        title: "Synthetic",
+        topics: [],
+        files: sources.map(([path]) => ({ path, role: "doc" })),
+        writeup: { overview: "", tldr: "", decisions: null, topics: {} },
+      }),
+    );
+    const args =
+      mode === "manifest"
+        ? ["--manifest", manifest, "--key", "synthetic"]
+        : [
+            ...sources.map(([path]) => path),
+            "--title",
+            "Synthetic",
+            "--key",
+            "synthetic",
+            ...(mode === "json" ? ["--json"] : []),
+          ];
+    await publishCommand(f.dir, f.configDir, args, f.io, source);
+    expect(f.stdout).toEqual([
+      mode === "shortcut" ? `${response.url}\n` : `${JSON.stringify(PublishResponse.parse(response))}\n`,
+    ]);
+    for (const [path, , note] of sources) {
+      if (note) expect(f.stderr).toContain(`emend: ${path.replace("\u034f", "\\u{34f}")} ${note}\n`);
+      else expect(f.stderr.join("")).not.toContain(`${path} shows `);
+    }
+    expect(f.stderr.filter((line) => line.includes(" shows "))).toHaveLength(10);
+    expect(f.stderr.filter((line) => line.includes("failed.html"))).toEqual([
+      "emend: failed.html shows as a custom page: emend could not read its structure\n",
+    ]);
+    expect(f.stderr.filter((line) => line.includes("plan.md"))).toEqual(["emend: could not render plan.md\n"]);
+    expect(f.stderr.join("")).not.toContain("failed.html shows in emend");
+    expect(f.stderr.join("")).not.toContain("<x-failure>");
+    expect(f.stderr).toContain(
+      "emend: structure.html uses elements outside emend's page structure: <x-one>; emend's look has no styles for them\n",
+    );
+    expect(f.stderr.filter((line) => line.includes("uses elements outside"))).toHaveLength(5);
+    expect(f.stderr).toContain(
+      "emend: outside\\u{34f}.html uses elements outside emend's page structure: <button>, <canvas>, <form>, <iframe>, <input> and more; emend's look has no styles for them\n",
+    );
+    expect(f.stderr).toContain(
+      "emend: safe-outside.html uses elements outside emend's page structure: <x-a>, <x-b>, <x-c>, <x-d>, <x-e> and 1 more; emend's look has no styles for them\n",
+    );
+    expect(f.stderr).toContain(
+      "emend: omitted.html uses elements outside emend's page structure; emend's look has no styles for them\n",
+    );
+    expect(f.stderr).toContain(
+      "emend: capped.html uses elements outside emend's page structure: <x-00>, <x-01>, <x-02>, <x-03>, <x-04> and more; emend's look has no styles for them\n",
+    );
+    expect(f.stderr.join("")).not.toContain("\\u{1b}");
+    expect(f.stderr.join("")).not.toContain("\u00a0");
+    expect(f.stderr.join("")).not.toContain("a".repeat(31));
+    for (const code of [0x1b, 0x34f]) expect(f.stderr.join("")).not.toContain(String.fromCodePoint(code));
+  },
+);
+
+test.each(["legacy", "empty", "different"])("%s server look metadata controls HTML notes", async (mode) => {
+  const f = await commandFixture();
+  const source = await realpath(await mkdtemp(join(tmpdir(), "emend-server-look-")));
+  onTestFinished(() => rm(source, { recursive: true, force: true }));
+  vi.spyOn(roots, "worktreeRoot").mockResolvedValue(null);
+  await mkdir(f.configDir, { recursive: true });
+  await writeFile(join(f.configDir, "config.json"), JSON.stringify({ docRoots: [source] }));
+  await writeFile(join(f.dir, "instance.json"), JSON.stringify({ id: randomUUID() }));
+  const sources = {
+    "emend.html": '<meta name="emend-look" content="emend"><x-extra></x-extra>',
+    "custom.html": "<style>p{}</style><x-extra></x-extra>",
+    "failed.html": "<h1>Fails remotely</h1>",
+    "plan.md": "# Plan",
+  };
+  for (const [path, text] of Object.entries(sources)) await writeFile(join(source, path), text);
+  const htmlLooks =
+    mode === "different"
+      ? [
+          { path: "emend.html", look: "custom" },
+          { path: "custom.html", look: "emend" },
+        ]
+      : [];
+  const response = {
+    reviewId: randomUUID(),
+    revision: 1,
+    placed: 0,
+    unplaced: 0,
+    unrendered: ["failed.html", "plan.md"],
+    ...(mode === "legacy" ? {} : { htmlLooks }),
+    url: "http://127.0.0.1:3636/r/synthetic",
+  };
+  f.setResponse(async (_url, init) => {
+    if (init?.method === "HEAD" || init?.method === "PUT") return new Response(null, { status: 204 });
+    return Response.json(response);
+  });
+  await publishCommand(
+    f.dir,
+    f.configDir,
+    [...Object.keys(sources), "--title", "Synthetic", "--key", "synthetic", "--json"],
+    f.io,
+    source,
+  );
+  expect(f.stdout).toEqual([`${JSON.stringify(PublishResponse.parse(response))}\n`]);
+  expect(f.stderr.filter((line) => line.includes(" shows "))).toEqual([
+    ...(mode === "different"
+      ? ["emend: custom.html shows in emend's look\n", "emend: emend.html shows as a custom page\n"]
+      : []),
+    ...(mode === "legacy" ? [] : ["emend: failed.html shows as a custom page: emend could not read its structure\n"]),
+  ]);
+  expect(f.stderr.join("")).not.toContain("uses elements outside");
+  expect(f.stderr.filter((line) => line.includes("could not render"))).toEqual(["emend: could not render plan.md\n"]);
+});
+
+test("source HTML and Markdown publish without look diagnostics", async () => {
+  const f = await commandFixture();
+  const source = await realpath(await mkdtemp(join(tmpdir(), "emend-pub-source-")));
+  onTestFinished(() => rm(source, { recursive: true, force: true }));
+  vi.spyOn(roots, "worktreeRoot").mockResolvedValue(null);
+  await mkdir(f.configDir, { recursive: true });
+  await writeFile(join(f.configDir, "config.json"), JSON.stringify({ docRoots: [source] }));
+  await writeFile(join(f.dir, "instance.json"), JSON.stringify({ id: randomUUID() }));
+  await writeFile(join(source, "page.html"), "<h1>Plan</h1>");
+  await writeFile(join(source, "plan.md"), "# Plan");
+  f.setResponse(async (_url, init) => {
+    if (init?.method === "HEAD") return new Response(null, { status: 204 });
+    return Response.json({
+      reviewId: randomUUID(),
+      revision: 1,
+      placed: 0,
+      unplaced: 0,
+      unrendered: [],
+      url: "http://127.0.0.1:3636/r/synthetic",
+    });
+  });
+  await publishCommand(
+    f.dir,
+    f.configDir,
+    ["page.html", "plan.md", "--source", "--title", "Synthetic", "--key", "synthetic"],
+    f.io,
+    source,
+  );
+  expect(f.stderr.some((line) => line.includes(" shows ") || line.includes("page structure"))).toBe(false);
+  expect(f.stdout).toEqual(["http://127.0.0.1:3636/r/synthetic\n"]);
+});
 
 test("help lists the project option for both publish forms", async () => {
   const stdout: string[] = [];

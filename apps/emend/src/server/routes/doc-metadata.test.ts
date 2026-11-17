@@ -1,8 +1,128 @@
 import { PublishResponse, RevisionView } from "@emend/contract";
 import { and, eq } from "drizzle-orm";
 import { expect, test } from "vitest";
-import { files } from "../../db/schema.ts";
+import { files, revisions } from "../../db/schema.ts";
 import { mailboxFixture } from "../mailbox/test-support.ts";
+import { WorkTimeout } from "../publish/executor.ts";
+import { executeWork } from "../publish/work.ts";
+
+test("publish records HTML look, leaves other and failed metadata null, and omits legacy looks from views", async () => {
+  const f = await mailboxFixture();
+  try {
+    const sources = [
+      { path: "structure.html", source: "<h1>Plan</h1><h2>Part</h2>", look: "emend" },
+      { path: "styled.html", source: "<style>p{color:red}</style><p>Plan</p>", look: "custom" },
+      { path: "plan.md", source: "# Plan", look: null },
+      { path: "source.html", source: "<h1>Source</h1>", view: "source", look: null },
+      { path: "deep.html", source: "<div>".repeat(2000), look: null },
+      { path: "failed.html", source: "<h1>Metadata fails</h1>", look: null },
+    ];
+    const execute = f.deps.publishExecutor ?? executeWork;
+    f.deps.publishExecutor = async (work) => {
+      if (work.kind === "doc-metadata" && Buffer.from(work.bytes).toString() === "<h1>Metadata fails</h1>")
+        throw new Error("Synthetic metadata failure");
+      return execute(work);
+    };
+    const input = {
+      reviewKey: "e".repeat(64),
+      repo: null,
+      branch: null,
+      title: "Synthetic looks",
+      base: null,
+      head: null,
+      topics: [],
+      writeup: { overview: "", tldr: "", decisions: null, topics: {} },
+      files: await Promise.all(
+        sources.map(async ({ path, source, view }) => ({
+          path,
+          view,
+          role: "doc",
+          oldPath: null,
+          oldBlob: null,
+          newBlob: await f.deps.blobs.put(f.ownerId, Buffer.from(source), "text/plain"),
+          flag: null,
+          ...(path.endsWith(".html") && !view ? { assets: [] } : {}),
+        })),
+      ),
+    };
+    const response = await f.request("/publish", "POST", input, "agent");
+    expect(response.status).toBe(200);
+    const published = PublishResponse.parse(await response.json());
+    expect(published.unrendered).toEqual(["failed.html"]);
+    expect(published.htmlLooks).toEqual([
+      { path: "structure.html", look: "emend" },
+      { path: "styled.html", look: "custom" },
+      { path: "deep.html", look: "custom" },
+    ]);
+    const rows = await f.db.read((q) => q.select().from(files).where(eq(files.ownerId, f.ownerId)).all());
+    for (const { path, look } of sources) expect(rows.find((file) => file.path === path)?.look).toBe(look);
+    const viewPath = `/reviews/${published.reviewId}/revisions/1`;
+    const view = RevisionView.parse(await (await f.request(viewPath, "GET")).json());
+    expect(view.docs[0]).toMatchObject({ kind: "html", look: "emend", headings: [{ level: 2, text: "Part" }] });
+    expect(view.docs[1]).toMatchObject({ kind: "html", look: "custom" });
+    for (const doc of view.docs.slice(2)) expect(doc).not.toHaveProperty("look");
+    const repeated = await f.request("/publish", "POST", { ...input, reviewId: published.reviewId }, "agent");
+    expect(repeated.status).toBe(200);
+    expect(PublishResponse.parse(await repeated.json())).toMatchObject({
+      revision: 2,
+      unrendered: ["failed.html"],
+      htmlLooks: published.htmlLooks,
+    });
+    const repeatedView = RevisionView.parse(
+      await (await f.request(`/reviews/${published.reviewId}/revisions/2`, "GET")).json(),
+    );
+    expect(repeatedView.docs[0]).toMatchObject({ path: "structure.html", kind: "html", look: "emend" });
+    expect(repeatedView.docs[1]).toMatchObject({ path: "styled.html", kind: "html", look: "custom" });
+    for (const doc of repeatedView.docs.slice(2)) expect(doc).not.toHaveProperty("look");
+    const repeatedRows = await f.db.read((q) => q.select().from(files).where(eq(files.ownerId, f.ownerId)).all());
+    for (const { path, look } of sources) {
+      const matches = repeatedRows.filter((file) => file.path === path);
+      expect(matches).toHaveLength(2);
+      expect(new Set(matches.map((file) => file.revisionId)).size).toBe(2);
+      for (const file of matches) expect(file.look).toBe(look);
+    }
+    await f.db.query((q) =>
+      q
+        .update(files)
+        .set({ look: null })
+        .where(and(eq(files.ownerId, f.ownerId), eq(files.path, "structure.html"))),
+    );
+    const legacy = RevisionView.parse(await (await f.request(viewPath, "GET")).json());
+    expect(legacy.docs[0]).not.toHaveProperty("look");
+
+    for (const [index, error] of [new Error("Synthetic metadata failure"), new WorkTimeout()].entries()) {
+      f.deps.publishExecutor = async (work) => {
+        if (work.kind === "doc-metadata") throw error;
+        return executeWork(work);
+      };
+      const failed = await f.request("/publish", "POST", { ...input, reviewId: published.reviewId }, "agent");
+      expect(failed.status).toBe(200);
+      expect(PublishResponse.parse(await failed.json())).toMatchObject({
+        revision: index + 3,
+        unrendered: ["structure.html", "styled.html", "deep.html", "failed.html"],
+        htmlLooks: [],
+      });
+      const failedView = RevisionView.parse(
+        await (await f.request(`/reviews/${published.reviewId}/revisions/${index + 3}`, "GET")).json(),
+      );
+      for (const doc of failedView.docs) expect(doc).not.toHaveProperty("look");
+      const failedRows = await f.db.read((q) =>
+        q
+          .select({ look: files.look })
+          .from(files)
+          .innerJoin(revisions, and(eq(revisions.ownerId, f.ownerId), eq(revisions.id, files.revisionId)))
+          .where(
+            and(eq(files.ownerId, f.ownerId), eq(revisions.reviewId, published.reviewId), eq(revisions.seq, index + 3)),
+          )
+          .all(),
+      );
+      expect(failedRows).toHaveLength(sources.length);
+      for (const file of failedRows) expect(file.look).toBeNull();
+    }
+  } finally {
+    await f.cleanup();
+  }
+}, 15000);
 
 test("publish stores and serves doc metadata, cleans manifest titles, and resolves forward links", async () => {
   const f = await mailboxFixture();

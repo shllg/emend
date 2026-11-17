@@ -36,6 +36,8 @@ to it. Any change here needs `emend-security-reviewer`.
 - `emend:goto` carries only a declared heading and is posted only to a ready frame that has not
   navigated away. `emend:position` is accepted only from the current trusted frame after its
   ready, parsed with zod, with a declared heading and a fraction in [0, 1].
+- `emend:layout` carries only `wide`, a boolean from the app's 768px breakpoint, and goes first
+  to each ready frame. The bridge sets only `data-emend-layout` (`wide` or `narrow`) on the root.
 - The bridge never changes `location`, handles links to a fragment of the same doc itself, and
   calls DOM methods from their prototypes, so doc markup cannot replace them.
 - Titles and Contents labels pass `cleanDocTitle` on the server and render as isolated text
