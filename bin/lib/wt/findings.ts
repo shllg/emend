@@ -176,9 +176,9 @@ function claimTarget(value: unknown): { branch: string; worktree: string } {
     /[\p{Cf}\u2028\u2029]/u.test(worktree)
   )
     invalid("worktree");
-  // Local worktrees may live under a real home path; refuse secret shapes and exhausted scans.
+  // Local worktrees may live under a real home path; refuse every other check-public hit.
   const hits = checkText(worktree, "claim worktree", { terms: [], allowed: [], notes: [] }, { lineExemptions: false });
-  const hit = hits.find((hit) => /: (?:secret shape|scan expansion budget exceeded)$/.test(hit));
+  const hit = hits.find((hit) => hit !== "claim worktree: real home path");
   if (hit) throw new WtError(2, hit);
   return { branch, worktree };
 }
@@ -433,28 +433,31 @@ export function listFindings(
   if (filters.kind !== undefined) choice(filters.kind, KINDS, "kind");
   if (filters.path !== undefined) inputPath(filters.path);
   if (!storageDirectory(repo)) return [];
-  let names: string[];
-  try {
-    names = readdirSync(findingsDir(repo));
-  } catch {
-    return storageError();
-  }
-  const findings: Finding[] = [];
-  for (const name of names) {
-    if (!name.endsWith(".json")) continue;
-    const id = name.slice(0, -5);
-    if (!ID.test(id)) {
-      onSkipped?.("Skipped a finding file with an invalid name.");
-      continue;
-    }
+  const findings = withStateLock(repo, "findings", () => {
+    let names: string[];
     try {
-      findings.push(readFinding(repo, id));
+      names = readdirSync(findingsDir(repo));
     } catch {
-      // A bad record is skippable; an unsafe storage directory still fails the call.
-      storageDirectory(repo);
-      onSkipped?.(`Skipped unreadable finding ${id}.`);
+      return storageError();
     }
-  }
+    const findings: Finding[] = [];
+    for (const name of names) {
+      if (!name.endsWith(".json")) continue;
+      const id = name.slice(0, -5);
+      if (!ID.test(id)) {
+        onSkipped?.("Skipped a finding file with an invalid name.");
+        continue;
+      }
+      try {
+        findings.push(readFinding(repo, id));
+      } catch {
+        // A bad record is skippable; an unsafe storage directory still fails the call.
+        storageDirectory(repo);
+        onSkipped?.(`Skipped unreadable finding ${id}.`);
+      }
+    }
+    return findings;
+  });
   return findings
     .filter(
       (finding) =>

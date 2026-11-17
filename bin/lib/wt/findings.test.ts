@@ -363,6 +363,26 @@ test("claim accepts and stores a worktree under a home folder", () => {
   assert.deepEqual(listFindings(repo), [{ ...record, orphaned: true }]);
 });
 
+test("claim worktree paths reject combining-mark runs and URL passwords without changing storage", () => {
+  const id = addFinding(repo, input()).id;
+  const before = readFileSync(stored(id));
+  const secret = ["gh", "p_", "Ab01".repeat(9)].join("");
+  const url = ["https://", "user", ":", "synthetic", "-password", "@", "host", "/x"].join("");
+  for (const [suffix, label] of [
+    [`${"\u0301".repeat(40)}${secret}`, "combining-mark run"],
+    [url, "URL password"],
+  ]) {
+    const worktree = `${env.root}/${suffix}`;
+    assert.throws(
+      () => claimFindings(repo, [id], { ...target(), worktree }),
+      (error) => error instanceof WtError && error.code === 2 && error.message === `claim worktree: ${label}`,
+    );
+    assert.deepEqual(readFileSync(stored(id)), before);
+    assert.deepEqual(readdirSync(findingsDir(repo)), [`${id}.json`]);
+    assert.deepEqual(readdirSync(stateDir(repo)), ["findings"]);
+  }
+});
+
 test("claim worktree paths reject secrets in inline SVG images without changing storage", () => {
   const id = addFinding(repo, input()).id;
   const before = readFileSync(stored(id));
@@ -785,6 +805,31 @@ test("busy state locks name the lock and exit 69", (t) => {
     assert.deepEqual(readdirSync(stateDir(repo)), [`${name}.lock`]);
     rmSync(lock);
   }
+});
+
+test("list waits for the findings lock when the findings folder exists", (t) => {
+  const id = addFinding(repo, input()).id;
+  const before = readFileSync(stored(id));
+  const lock = join(stateDir(repo), "findings.lock");
+  const content = `${process.pid}\n`;
+  writeFileSync(lock, content);
+  let now = 0;
+  const mocked = t.mock.method(Date, "now", () => (now += 31_000));
+  try {
+    assert.throws(
+      () => listFindings(repo),
+      (error) =>
+        error instanceof WtError &&
+        error.code === 69 &&
+        error.message === "Another bin/wt call holds the findings lock. Try again in a moment.",
+    );
+  } finally {
+    mocked.mock.restore();
+  }
+  assert.equal(showFinding(repo, id).state, "open");
+  assert.deepEqual(readFileSync(stored(id)), before);
+  assert.equal(readFileSync(lock, "utf8"), content);
+  assert.deepEqual(readdirSync(stateDir(repo)).sort(), ["findings", "findings.lock"]);
 });
 
 test("a symlinked findings lock is never read through or reaped", (t) => {
