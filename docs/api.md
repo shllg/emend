@@ -106,7 +106,7 @@ a machine token reaches only reviews from its own instance.
 | GET | `/api/v1/agent/reviews` | Agent | List the token's own instance's reviews, newest first, as `AgentReviewList`; `?head=<sha>` keeps those whose approved or newest revision has that head. |
 | GET | `/api/v1/reviews/:id` | Reviewer | Read a review. |
 | GET | `/api/v1/reviews/:id/revisions/:seq` | Reviewer | Read one revision. |
-| GET | `/api/v1/reviews/:id/revisions/:seq/download` | Reviewer | Download one offline HTML file, or a ZIP with docs selected by repeated `doc` parameters. Optional `comments=1` adds sent comments and replies; an HTML pub with comments downloads as a ZIP. Optional `diff=1` adds the code diff after the writeup. |
+| GET | `/api/v1/reviews/:id/revisions/:seq/download` | Reviewer | Download one offline HTML file, or a ZIP with docs selected by repeated `doc` parameters. Optional `comments=1` adds sent comments and replies; an HTML pub with comments downloads as a ZIP. Optional `diff=1` adds the code diff after the writeup. Optional `theme=dark` or `theme=light` fixes the look of files emend draws. |
 | PUT | `/api/v1/reviews/:id/viewed` | Reviewer | Mark or unmark diff files as viewed; return 204. |
 | GET | `/api/v1/files/:fileId/old` | Reviewer | Read the old file side. |
 | GET | `/api/v1/files/:fileId/new` | Reviewer | Read the new file side. |
@@ -238,6 +238,12 @@ the same headers, using only the revision and doc metadata to identify the base 
 An optional `diff=1` query parameter adds the code diff after the writeup in the base file.
 Any other value or a repeat gets `400 invalid_request` before waiting for a slot, also on `HEAD`.
 It changes no headers, filename or ZIP decision. The choice is off by default.
+
+An optional `theme=dark` or `theme=light` query parameter fixes the look of the files emend
+draws: the writeup, Markdown docs, docs shown as source, the comments file and the omitted-content
+note page. Without it, they follow the reader's colour scheme. An HTML doc keeps its own look.
+Any other value or a repeat gets `400 invalid_request` before waiting for a slot, also on `HEAD`.
+It changes no headers, filename or ZIP decision.
 
 A code review's file holds the review title and that revision's writeup: sections, topics, text,
 code blocks and images with captions. The base file holds no docs, no diff unless `diff=1` is set,

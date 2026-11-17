@@ -369,9 +369,14 @@ export async function exceedsLimits(source: string): Promise<boolean> {
   }
 }
 export function startFrame(root: HTMLElement) {
-  mermaid.initialize(frameConfig(matchMedia("(prefers-color-scheme: dark)").matches));
+  const systemTheme = () => (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const applyTheme = (theme: "dark" | "light") => {
+    mermaid.initialize(frameConfig(theme === "dark"));
+    document.documentElement.style.colorScheme = theme;
+  };
+  applyTheme(systemTheme());
   let active = true;
-  let pending: string | undefined;
+  let pending: { source: string; theme: "dark" | "light" } | undefined;
   let rendering = false;
   let sequence = 0;
   let natural: ReturnType<typeof naturalSize> | undefined;
@@ -393,8 +398,9 @@ export function startFrame(root: HTMLElement) {
     rendering = true;
     try {
       while (active && pending !== undefined) {
-        const source = pending;
+        const { source, theme } = pending;
         pending = undefined;
+        applyTheme(theme);
         if (source.length > MAX_SOURCE) {
           fallback("This diagram is too large to draw.", source);
           size();
@@ -443,7 +449,8 @@ export function startFrame(root: HTMLElement) {
       typeof data.source !== "string"
     )
       return;
-    pending = data.source;
+    const theme = "theme" in data && (data.theme === "dark" || data.theme === "light") ? data.theme : systemTheme();
+    pending = { source: data.source, theme };
     void draw();
   };
   const observer = new ResizeObserver(size);

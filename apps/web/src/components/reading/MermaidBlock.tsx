@@ -1,6 +1,7 @@
 import { Maximize2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Size } from "../../lib/lightbox-view.ts";
+import { useResolvedTheme } from "../../lib/theme.ts";
 import { Button } from "../ui/Button.tsx";
 
 function dimension(value: unknown): value is number {
@@ -34,6 +35,18 @@ export function parseFrameSize(data: unknown): { height: number; natural?: Size 
 export const DIAGRAM_DRAW_TIMEOUT_MS = 20_000;
 
 export function LightboxDiagram({ source, onSize }: { source: string; onSize: (natural: Size | null) => void }) {
+  const theme = useResolvedTheme();
+  return <LightboxDiagramFrame key={`${theme}:${source}`} source={source} theme={theme} onSize={onSize} />;
+}
+function LightboxDiagramFrame({
+  source,
+  theme,
+  onSize,
+}: {
+  source: string;
+  theme: "dark" | "light";
+  onSize: (natural: Size | null) => void;
+}) {
   const loaded = useRef(false);
   const reported = useRef(false);
   const frame = useRef<HTMLIFrameElement>(null);
@@ -69,16 +82,17 @@ export function LightboxDiagram({ source, onSize }: { source: string; onSize: (n
       onLoad={() => {
         if (loaded.current) return;
         loaded.current = true;
-        frame.current?.contentWindow?.postMessage({ type: "render", source }, "*");
+        frame.current?.contentWindow?.postMessage({ type: "render", source, theme }, "*");
       }}
     />
   );
 }
 
 export function MermaidBlock({ source }: { source: string }) {
-  return <DiagramFrame key={source} source={source} />;
+  const theme = useResolvedTheme();
+  return <DiagramFrame key={`${theme}:${source}`} source={source} theme={theme} />;
 }
-function DiagramFrame({ source }: { source: string }) {
+function DiagramFrame({ source, theme }: { source: string; theme: "dark" | "light" }) {
   const loaded = useRef(false);
   const frame = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(160);
@@ -105,7 +119,7 @@ function DiagramFrame({ source }: { source: string }) {
         onLoad={() => {
           if (loaded.current) return;
           loaded.current = true;
-          frame.current?.contentWindow?.postMessage({ type: "render", source }, "*");
+          frame.current?.contentWindow?.postMessage({ type: "render", source, theme }, "*");
         }}
       />
       <div className="flex items-baseline gap-2">

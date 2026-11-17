@@ -35,5 +35,13 @@ test("manifest is installable and every placeholder PNG has the promised size", 
   const html = await readFile(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
   expect(html).toContain('rel="manifest" href="/manifest.webmanifest"');
   expect(html).toContain('rel="apple-touch-icon" href="/icons/apple-touch-icon.png"');
-  expect(html).toContain('name="theme-color" content="#171717"');
+  expect(html).toContain('name="theme-color" media="(prefers-color-scheme: light)" content="#fafafb"');
+  expect(html).toContain('name="theme-color" media="(prefers-color-scheme: dark)" content="#171717"');
+  const head = html.split("</head>")[0] ?? "";
+  expect(head).toContain('<script src="/theme-boot.js"></script>');
+  expect(head).not.toMatch(/<link[^>]+rel="stylesheet"[\s\S]*theme-boot/);
+  const worker = await readFile(new URL("../build/service-worker.ts", import.meta.url), "utf8");
+  expect(worker).toContain('"/theme-boot.js"');
+  expect(worker).toContain('"public/theme-boot.js"');
+  expect((await publicFile("theme-boot.js")).byteLength).toBeLessThan(1024);
 });

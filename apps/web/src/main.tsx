@@ -3,8 +3,10 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { appUpdate } from "./lib/app-update.ts";
 import { rememberPairingSecret } from "./lib/pairing-secret.ts";
+import { initializeTheme } from "./lib/theme.ts";
 import "./styles.css";
 
+initializeTheme();
 configureBrowserValidation();
 function capturePairingSecret() {
   if (!/^\/pair\/?$/i.test(location.pathname) || !location.hash) return;

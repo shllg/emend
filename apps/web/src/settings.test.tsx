@@ -10,8 +10,14 @@ import { type InfiniteData, QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
+import { setThemePick } from "./lib/theme.ts";
+
+beforeEach(() => {
+  vi.stubGlobal("localStorage", new Storage());
+  setThemePick("system");
+});
 
 const clients: QueryClient[] = [];
 const binVersion = "a".repeat(64);
@@ -40,6 +46,7 @@ function setup(
   binned: BinView = { items: [], total: 0, more: false, version: binVersion },
   pageSize = 200,
   limit: Partial<LimitSetting> = {},
+  settingsResponse?: Promise<Response>,
 ) {
   let bin = binned;
   let view: SettingsView = {
@@ -73,6 +80,7 @@ function setup(
       return new Response(null, { status: 204 });
     }
     if (path === "/api/v1/settings") {
+      if (init?.method !== "PATCH" && settingsResponse) return settingsResponse;
       if (init?.method === "PATCH") {
         if (patchResponse) return patchResponse;
         const update = JSON.parse(String(init.body)) as {
@@ -124,6 +132,7 @@ function setup(
 }
 afterEach(() => {
   cleanup();
+  delete document.documentElement.dataset.theme;
   for (const client of clients.splice(0)) client.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -134,6 +143,36 @@ const hoursForm = () =>
   );
 const field = () => screen.findByRole<HTMLInputElement>("spinbutton", { name: "Keep approved reviews in Active for" });
 const save = () => hoursForm().getByRole<HTMLButtonElement>("button", { name: "Save" });
+
+test("Appearance is first, defaults to System and applies every choice immediately", async () => {
+  const f = setup();
+  const group = within(await screen.findByRole("radiogroup", { name: "Appearance" }));
+  expect(group.getAllByRole("radio").map((radio) => radio.textContent)).toEqual(["System", "Dark", "Light"]);
+  expect(group.getByRole("radio", { name: "System" }).getAttribute("aria-checked")).toBe("true");
+  expect(screen.getByText("Applies to this device only.")).toBeTruthy();
+  expect(screen.getAllByRole("heading", { level: 2 })[0]?.textContent).toBe("Appearance");
+  for (const label of ["Dark", "Light", "System"]) {
+    fireEvent.click(group.getByRole("radio", { name: label }));
+    expect(document.documentElement.dataset.theme).toBe(label === "System" ? undefined : label.toLowerCase());
+    expect(group.getByRole("radio", { name: label }).getAttribute("aria-checked")).toBe("true");
+  }
+  expect(f.patches()).toHaveLength(0);
+});
+
+test("Appearance works while server settings load and after they fail", async () => {
+  let respond: (response: Response) => void = () => {};
+  const pending = new Promise<Response>((resolve) => {
+    respond = resolve;
+  });
+  setup({}, "/settings", undefined, undefined, undefined, undefined, pending);
+  await screen.findByText("Loading settings…");
+  fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
+  expect(document.documentElement.dataset.theme).toBe("dark");
+  await act(async () => respond(new Response(null, { status: 500 })));
+  await screen.findByText("Could not load settings. Try again.");
+  fireEvent.click(screen.getByRole("radio", { name: "Light" }));
+  expect(document.documentElement.dataset.theme).toBe("light");
+});
 
 test.each([
   { source: "default", value: 12, input: "", note: "Default." },

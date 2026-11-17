@@ -194,7 +194,7 @@
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg-app: var(--n-1000);
     --bg-surface: var(--n-950);
     --bg-sunken: oklch(0.125 0.004 260);
@@ -299,6 +299,9 @@
     --origin-8-bg: oklch(0.6 0.14 270 / 0.2);
     --origin-8-fg: oklch(0.8 0.1 270);
   }
+}
+[data-theme="light"] {
+  color-scheme: light;
 }
 [data-theme="dark"] {
   color-scheme: dark;

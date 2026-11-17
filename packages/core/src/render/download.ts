@@ -1,4 +1,5 @@
 import {
+  type DownloadThemeValue,
   LIMITS,
   OTHER_TOPIC,
   type PublishLinks,
@@ -70,6 +71,7 @@ export function createDownloadWork(commentBytes: number = LIMITS.downloadComment
 
 type PageInput = {
   title: string;
+  theme?: DownloadThemeValue;
   details: DownloadDetails;
   resolveMedia: DownloadResolver;
   inlineBudget?: number;
@@ -86,19 +88,31 @@ const HTML_ELEMENT_LIMIT = 200_000;
 const BASE64_CHUNK_BYTES = 3 * 1024 * 1024;
 
 // Literal reading tokens keep the exported page independent of the app and its fonts.
-const READING_STYLES = `
+const READING_STYLES = {
+  base: `
 :root{color-scheme:light dark;--bg:oklch(.985 .001 260);--sunken:oklch(.968 .002 260);--fg:oklch(.49 .004 260);--strong:oklch(.18 .004 260);--muted:oklch(.55 .004 260);--border:oklch(.895 .003 260);--link:oklch(.42 .09 60)}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:400 16px/1.7 ui-sans-serif,system-ui,sans-serif}.em-download{max-width:68ch;margin:auto;padding:32px 20px;overflow-wrap:break-word}h1,h2,h3,h5,h6,strong,code{color:var(--strong)}h1{font-size:24px;line-height:1.2;letter-spacing:-.015em;margin:0 0 16px}h2{font-size:19px;line-height:1.3;letter-spacing:-.01em;margin:36px 0 12px}h3{font-size:16px;line-height:1.35;margin:24px 0 6px}h4{font:600 11px/1.3 ui-monospace,"SF Mono",Menlo,monospace;text-transform:uppercase;letter-spacing:.04em}h1,h2,h3{font-weight:600}p,ul,ol{margin:0 0 12px}ul,ol{padding-left:22px}li{margin:6px 0}a{color:var(--link)}a :is(strong,code){color:inherit}.em-doc-link{color:inherit}code{font:400 .84em/1 ui-monospace,"SF Mono",Menlo,monospace;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--sunken)}pre{margin:0 0 14px;padding:12px 14px;border:1px solid var(--border);border-radius:6px;background:var(--sunken);overflow:auto;font:400 12px/1.6 ui-monospace,"SF Mono",Menlo,monospace}pre code{padding:0;border:0;background:none;font:inherit}.shiki{background-color:var(--shiki-light-bg,var(--sunken))}.shiki,.shiki span{color:var(--shiki-light,inherit)}blockquote{margin:0 0 12px;padding-left:14px;border-left:2px solid var(--border)}table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;margin:0 0 14px;font-size:14px}th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)}th{font-weight:500}hr{border:0;border-top:1px solid var(--border);margin:24px 0}img{max-width:100%;height:auto}.emend-media{display:inline-block;max-width:100%;vertical-align:top}.emend-media img{display:block;border-radius:6px}.emend-media-caption{display:block;margin-top:6px;overflow-wrap:anywhere}.em-meta,.emend-media-caption,figcaption,footer,.em-topic-blast,.em-link-host{font:400 12px/1.4 ui-sans-serif,system-ui,sans-serif;color:var(--muted)}.em-links{list-style:none;padding:0}.em-link-host{margin-left:6px}.em-diagram{margin:16px 0}.em-diagram figcaption{margin-bottom:6px}.em-download-note{padding:12px 14px;border:1px solid var(--border);border-radius:6px;background:var(--sunken)}footer{border-top:1px solid var(--border);margin-top:36px;padding-top:16px}
-@media(prefers-color-scheme:dark){:root{--bg:oklch(.18 .004 260);--sunken:oklch(.125 .004 260);--fg:oklch(.79 .004 260);--strong:oklch(.895 .003 260);--muted:oklch(.7 .004 260);--border:oklch(.25 .004 260);--link:oklch(.85 .14 81)}.shiki{background-color:var(--shiki-dark-bg,var(--sunken))}.shiki,.shiki span{color:var(--shiki-dark,inherit)}}
-`;
-const THREAD_STYLES = `
+`,
+  dark: `:root{--bg:oklch(.18 .004 260);--sunken:oklch(.125 .004 260);--fg:oklch(.79 .004 260);--strong:oklch(.895 .003 260);--muted:oklch(.7 .004 260);--border:oklch(.25 .004 260);--link:oklch(.85 .14 81)}.shiki{background-color:var(--shiki-dark-bg,var(--sunken))}.shiki,.shiki span{color:var(--shiki-dark,inherit)}`,
+};
+const THREAD_STYLES = {
+  base: `
 .em-threads{margin:24px 0}.em-thread{margin:12px 0;padding:10px 14px;border:1px solid var(--border,#d4d4d8);border-left:3px solid var(--link,#7c5a1e);border-radius:6px;background:var(--sunken,#f7f7f8);color:var(--fg,#3f3f46);font:400 14px/1.55 ui-sans-serif,system-ui,sans-serif;text-align:left}.em-thread[data-state=resolved]{border-left-color:var(--muted,#71717a)}.em-thread-head,.em-thread-note,.em-thread-omitted,.em-comment-head{margin:0 0 6px;font-size:12px;line-height:1.4;color:var(--muted,#71717a)}.em-thread-where,.em-comment-head strong{color:var(--strong,#18181b)}.em-thread-quote{margin:0 0 8px;padding-left:10px;border-left:2px solid var(--border,#d4d4d8)}.em-thread-quote p{margin:0}.em-thread-lines{margin:0 0 8px;padding:8px 10px;overflow:auto;font:400 12px/1.5 ui-monospace,"SF Mono",Menlo,monospace}.em-comments{margin:0;padding:0}.em-comment{margin:8px 0 0;padding-top:8px;border-top:1px solid var(--border,#d4d4d8)}.em-comment:first-child{margin-top:0;padding-top:0;border-top:0}.em-comment-text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.em-comment-body{overflow-wrap:anywhere}.em-comment-body>*{margin-top:0}.em-comment-body>:last-child{margin-bottom:0}
-@media(prefers-color-scheme:dark){.em-thread{border-color:var(--border,#3f3f46);background:var(--sunken,#1c1c1f);color:var(--fg,#d4d4d8)}.em-thread-head,.em-thread-note,.em-thread-omitted,.em-comment-head{color:var(--muted,#a1a1aa)}.em-thread-where,.em-comment-head strong{color:var(--strong,#f4f4f5)}.em-thread-quote,.em-comment{border-color:var(--border,#3f3f46)}}
-`;
-const DIFF_STYLES = `
+`,
+  dark: `.em-thread{border-color:var(--border,#3f3f46);background:var(--sunken,#1c1c1f);color:var(--fg,#d4d4d8)}.em-thread-head,.em-thread-note,.em-thread-omitted,.em-comment-head{color:var(--muted,#a1a1aa)}.em-thread-where,.em-comment-head strong{color:var(--strong,#f4f4f5)}.em-thread-quote,.em-comment{border-color:var(--border,#3f3f46)}`,
+};
+const DIFF_STYLES = {
+  base: `
 .em-diff-file{margin:20px 0 8px;font:600 12px/1.5 ui-monospace,"SF Mono",Menlo,monospace;color:var(--strong);text-transform:none;overflow-wrap:anywhere}.em-diff{overflow:auto;font-size:12px}.em-diff-line{display:inline-block;min-width:100%}.em-diff-add{background:oklch(.94 .04 145)}.em-diff-delete{background:oklch(.94 .04 25)}.em-diff-numbers,.em-diff-hunk,.em-diff-marker{color:var(--muted)}.em-diff-numbers{user-select:none}
-@media(prefers-color-scheme:dark){.em-diff-add{background:oklch(.27 .04 145)}.em-diff-delete{background:oklch(.27 .04 25)}}
-`;
+`,
+  dark: `.em-diff-add{background:oklch(.27 .04 145)}.em-diff-delete{background:oklch(.27 .04 25)}`,
+};
+// Only these built-in styles pass here; keep System's CSS bytes unchanged.
+function downloadStyles(styles: { base: string; dark: string }, theme?: DownloadThemeValue): string {
+  const base = styles.base.replace("color-scheme:light dark;", `color-scheme:${theme ?? "light dark"};`);
+  if (theme === "light") return base;
+  return `${base}${theme === "dark" ? styles.dark : `@media(prefers-color-scheme:dark){${styles.dark}}`}\n`;
+}
 const rel = ["noopener", "noreferrer", "nofollow"];
 const imageTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
 const text = (value: string): Text => ({ type: "text", value });
@@ -291,11 +305,11 @@ function frame(
           element("head", [
             ...headMetas(),
             element("meta", [], { name: "viewport", content: "width=device-width, initial-scale=1" }),
-            element("meta", [], { name: "color-scheme", content: "light dark" }),
+            element("meta", [], { name: "color-scheme", content: input.theme ?? "light dark" }),
             element("title", [text(title)]),
-            style(READING_STYLES),
-            ...(threadStyles ? [style(THREAD_STYLES)] : []),
-            ...(diffStyles ? [style(DIFF_STYLES)] : []),
+            style(downloadStyles(READING_STYLES, input.theme)),
+            ...(threadStyles ? [style(downloadStyles(THREAD_STYLES, input.theme))] : []),
+            ...(diffStyles ? [style(downloadStyles(DIFF_STYLES, input.theme))] : []),
           ]),
           element("body", [
             element(
@@ -1392,6 +1406,7 @@ const cssResourceAttributes = new Set([
 ]);
 export async function buildOmittedDownload(input: {
   title: string;
+  theme?: DownloadThemeValue;
   threads?: FileThreads;
   inlineBudget?: number;
   pause?: () => Promise<void>;
@@ -1414,9 +1429,10 @@ export async function buildOmittedDownload(input: {
         [
           element("head", [
             ...headMetas(),
+            ...(input.theme ? [element("meta", [], { name: "color-scheme", content: input.theme })] : []),
             element("title", [text(input.title)]),
-            style(READING_STYLES),
-            ...(input.threads ? [style(THREAD_STYLES)] : []),
+            style(downloadStyles(READING_STYLES, input.theme)),
+            ...(input.threads ? [style(downloadStyles(THREAD_STYLES, input.theme))] : []),
           ]),
           element("body", content),
         ],
@@ -1429,12 +1445,14 @@ export async function buildHtmlDocDownload(input: {
   html: string;
   docPath: string;
   title: string;
+  theme?: DownloadThemeValue;
   resolveAsset: DownloadResolver;
   inlineBudget?: number;
   pause?: () => Promise<void>;
   work?: DownloadWork;
 }): Promise<string> {
-  if (!parseDocHtml(input.html, HTML_ELEMENT_LIMIT)) return buildOmittedDownload({ title: input.title });
+  if (!parseDocHtml(input.html, HTML_ELEMENT_LIMIT))
+    return buildOmittedDownload({ title: input.title, theme: input.theme });
   const tree = fromHtml(input.html);
   const state = resolverState(input.resolveAsset, input.inlineBudget, input.pause, input.work);
   const resource = (value: string) => resourceUrl(value, input.docPath, state);

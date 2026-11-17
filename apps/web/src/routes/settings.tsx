@@ -17,9 +17,11 @@ import { AppFrame } from "../components/layout/AppFrame.tsx";
 import { ShortcutSettings } from "../components/ShortcutSettings.tsx";
 import { Button } from "../components/ui/Button.tsx";
 import { Dialog } from "../components/ui/Dialog.tsx";
+import { SegmentedControl } from "../components/ui/SegmentedControl.tsx";
 import { TextField } from "../components/ui/TextField.tsx";
 import { useToast } from "../components/ui/Toast.tsx";
 import { plural } from "../lib/count.ts";
+import { setThemePick, useThemePick } from "../lib/theme.ts";
 import { relativeTime } from "../lib/time.ts";
 
 const numericSettings = {
@@ -280,6 +282,30 @@ function BinSettings() {
   );
 }
 
+function AppearanceSettings() {
+  const pick = useThemePick();
+  return (
+    <section aria-labelledby="appearance-settings" className="mt-6">
+      <h2 id="appearance-settings" className="mb-4 text-16 font-semibold">
+        Appearance
+      </h2>
+      <SegmentedControl
+        label="Appearance"
+        value={pick}
+        options={[
+          { value: "system", label: "System" },
+          { value: "dark", label: "Dark" },
+          { value: "light", label: "Light" },
+        ]}
+        onChange={(value) => {
+          if (value === "system" || value === "dark" || value === "light") setThemePick(value);
+        }}
+      />
+      <p className="mt-2 text-14 text-fg-3">Applies to this device only.</p>
+    </section>
+  );
+}
+
 export function SettingsPage() {
   const settings = useQuery(settingsQuery());
   return (
@@ -287,6 +313,7 @@ export function SettingsPage() {
       <main className="relative min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[760px] px-5 pt-8 pb-20">
           <h1 className="text-24 font-semibold leading-(--lh-tight) tracking-(--tracking-tight)">Settings</h1>
+          <AppearanceSettings />
           {settings.isPending && <p role="status">Loading settings…</p>}
           {settings.isError && <p role="alert">Could not load settings. Try again.</p>}
           {settings.data && <InboxSettings settings={settings.data} />}

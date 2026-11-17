@@ -49,7 +49,7 @@
   --z-tooltip: 70;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --shadow-1: 0 0 0 1px oklch(1 0 0 / 0.04);
     --shadow-2: 0 0 0 1px oklch(1 0 0 / 0.05), 0 4px 14px oklch(0 0 0 / 0.4);
     --shadow-3: 0 0 0 1px oklch(1 0 0 / 0.06), 0 16px 40px oklch(0 0 0 / 0.55);

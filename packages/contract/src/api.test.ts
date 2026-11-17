@@ -5,6 +5,7 @@ import {
   DownloadComments,
   DownloadDiff,
   DownloadDocIds,
+  DownloadTheme,
   FileFlag,
   FileRole,
   FileStatus,
@@ -219,6 +220,21 @@ test("download paths add diff=1 after docs and comments", () => {
   );
   expect(reviewDownloadPath("review", 2, [], { comments: true, diff: true })).toBe(`${path}?comments=1&diff=1`);
   expect(reviewDownloadPath("review", 2, [], { diff: false })).toBe(path);
+});
+
+test("download themes accept nothing or one dark or light", () => {
+  for (const value of [[], ["dark"], ["light"]]) expect(DownloadTheme.parse(value)).toEqual(value);
+  for (const value of [["system"], ["x"], [""], ["Dark"], ["dark", "dark"], ["light", "light"], ["dark", "light"]])
+    expect(DownloadTheme.safeParse(value).success).toBe(false);
+});
+
+test.each(["dark", "light"] as const)("download paths add theme=%s last", (theme) => {
+  const path = reviewDownloadPath("review", 2);
+  expect(reviewDownloadPath("review", 2, [], { theme })).toBe(`${path}?theme=${theme}`);
+  expect(reviewDownloadPath("review", 2, ["a", "b"], { comments: true, diff: true, theme })).toBe(
+    `${path}?doc=a&doc=b&comments=1&diff=1&theme=${theme}`,
+  );
+  expect(reviewDownloadPath("review", 2, [], { theme: undefined })).toBe(path);
 });
 
 test("download ids are distinct UUIDs with at most 50 entries", () => {

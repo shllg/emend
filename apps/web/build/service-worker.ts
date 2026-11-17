@@ -14,6 +14,7 @@ export function serviceWorker(): Plugin {
         const shell = [
           "/",
           "/index.html",
+          "/theme-boot.js",
           "/manifest.webmanifest",
           "/icons/icon-192.png",
           "/icons/icon-512.png",
@@ -25,6 +26,7 @@ export function serviceWorker(): Plugin {
         for (const path of [
           "src/sw.ts",
           "src/sw-routing.ts",
+          "public/theme-boot.js",
           "public/manifest.webmanifest",
           "public/icons/icon-192.png",
           "public/icons/icon-512.png",
