@@ -37,7 +37,7 @@ export function htmlLookFromTree(tree: DefaultTreeAdapterTypes.Document | null):
   let ownStyles = false;
   const outside = new Set<string>();
   let otherOutside = false;
-  const pending = [{ nodes: tree.childNodes[Symbol.iterator](), foreign: false }];
+  const pending = [{ nodes: tree.childNodes[Symbol.iterator](), foreign: false, shadow: false }];
   while (pending.length) {
     const frame = pending.at(-1);
     const next = frame?.nodes.next();
@@ -50,7 +50,13 @@ export function htmlLookFromTree(tree: DefaultTreeAdapterTypes.Document | null):
     const name = node.tagName.toLowerCase();
     const isHtml = node.namespaceURI === html.NS.HTML;
     const attr = (key: string) => node.attrs.find((attr) => attr.name === key)?.value ?? "";
-    if (isHtml && name === "meta" && mark === undefined && lower(attr("name").trim()) === "emend-look") {
+    if (
+      !frame.shadow &&
+      isHtml &&
+      name === "meta" &&
+      mark === undefined &&
+      lower(attr("name").trim()) === "emend-look"
+    ) {
       const value = lower(attr("content").trim());
       if (value === "emend" || value === "custom") mark = value;
     }
@@ -64,7 +70,7 @@ export function htmlLookFromTree(tree: DefaultTreeAdapterTypes.Document | null):
           .includes("stylesheet"))
     )
       ownStyles = true;
-    if (!frame.foreign && isHtml && !HTML_STRUCTURE.has(name)) {
+    if (!frame.shadow && !frame.foreign && isHtml && !HTML_STRUCTURE.has(name)) {
       if (!/^[a-z][a-z0-9._-]{0,31}$/.test(name)) otherOutside = true;
       else if (!outside.has(name)) {
         if (outside.size < 20) outside.add(name);
@@ -78,10 +84,18 @@ export function htmlLookFromTree(tree: DefaultTreeAdapterTypes.Document | null):
         }
       }
     }
-    if (isHtml && name === "template") continue;
+    let children = node.childNodes;
+    let shadow = frame.shadow;
+    if (isHtml && name === "template") {
+      const mode = lower(attr("shadowrootmode").trim());
+      if (mode !== "open" && mode !== "closed") continue;
+      children = defaultTreeAdapter.getTemplateContent(node as DefaultTreeAdapterTypes.Template).childNodes;
+      shadow = true;
+    }
     pending.push({
-      nodes: node.childNodes[Symbol.iterator](),
+      nodes: children[Symbol.iterator](),
       foreign: frame.foreign || name === "svg" || name === "math",
+      shadow,
     });
   }
   return {

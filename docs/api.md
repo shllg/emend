@@ -993,8 +993,15 @@ expired sessions are unauthorized. Session deletion revokes both and clears the 
 If a code matches multiple live device pairings, redemption is unauthorized and consumes none;
 the individual secret links remain usable.
 
-`PublishResponse = { reviewId, revision, url, placed, unplaced, unrendered: FilePath[] }`.
+`PublishResponse = { reviewId, revision, url, placed, unplaced, unrendered: FilePath[], htmlLooks? }`.
 An omitted `unrendered` field defaults to `[]`.
+`htmlLooks` is an optional array of `{ path: FilePath, look: "emend" | "custom" }`, with at most
+`filesPerRevision` entries. It lists every rendered HTML doc's look in the new revision, using the
+same metadata stored for that revision, including unchanged re-publishes. A null stored look means
+`custom`. HTML docs whose metadata work failed are in `unrendered` instead and are not listed.
+New servers include `htmlLooks` even when empty. Older servers omit it; it has no default.
+Without it, the CLI prints no HTML look or outside-elements notes. With it, the CLI reports the
+server's look. It adds a local reason and outside-elements advice only when its classification agrees.
 HTML doc entries include `assets: FilePath[]`; rendered Markdown docs may include image assets.
 Each listed path must be an asset in the request inside that doc's folder. The doc source plus its
 own listed assets must fit `htmlDocWithAssetsBytes`; shared assets count for every doc listing them. Asset rows retain
@@ -1008,8 +1015,9 @@ Rendered blocks and JSON bytes count every path, including the writeup.
 Docs render in manifest order; once a doc exceeds either budget it and all later Markdown docs
 remain unrendered. A writeup alone exceeding either budget returns 413 `too_large` with
 "The writeup has too many blocks."
-The CLI warns `emend: could not render <path>` for Markdown docs. For HTML docs, it reports only
-that the page shows as custom because emend could not read its structure. The publish still succeeds.
+The CLI warns `emend: could not render <path>` for Markdown docs. When `htmlLooks` is present,
+it reports only that a failed HTML doc shows as custom because emend could not read its structure.
+The publish still succeeds.
 The URL is `<baseUrl>/r/<reviewId>` (HTTP or HTTPS);
 it is bounded by `pathChars` (4096 characters). At each start the local server saves its listening URL in `server-url.json` in the state
 directory, mode 0600. With Tailscale, it replaces that value with the public origin only after

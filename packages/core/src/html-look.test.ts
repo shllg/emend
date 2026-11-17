@@ -50,6 +50,67 @@ test.each([
   expect(htmlLook(source)).toEqual({ look, reason, outside: ["template"], otherOutside: false });
 });
 
+test.each(["open", "closed", " Open ", " CLOSED "])("declarative shadow root %s contributes own styles", (mode) => {
+  for (const content of [
+    "<style>:host{font-family:Georgia}</style><p>x</p>",
+    '<p style="font-family:Georgia">x</p>',
+    '<link rel="Stylesheet preload" href="a.css"><p>x</p>',
+    '<p color="red">x</p>',
+  ])
+    expect(htmlLook(`<div><template shadowrootmode="${mode}">${content}</template></div>`)).toEqual({
+      look: "custom",
+      reason: "own-styles",
+      outside: ["template"],
+      otherOutside: false,
+    });
+});
+
+test("declarative shadow roots ignore marks and outside names", () => {
+  const names = Array.from({ length: 21 }, (_, i) => `<x-${i}></x-${i}>`).join("");
+  const source =
+    '<div><template shadowrootmode="open"><meta name="emend-look" content="custom">' +
+    `<form></form><x-\u00a0></x-\u00a0>${names}</template></div>`;
+  expect(htmlLook(source)).toEqual({ look: "emend", reason: "structure", outside: ["template"], otherOutside: false });
+  expect(htmlLook(`${source}<meta name="emend-look" content="emend">`)).toMatchObject({
+    look: "emend",
+    reason: "marked-emend",
+  });
+  expect(
+    htmlLook(
+      '<div><template shadowrootmode="open"><meta name="emend-look" content="emend"><style>p{}</style></template></div>',
+    ),
+  ).toMatchObject({ look: "custom", reason: "own-styles" });
+});
+
+test("declarative shadow roots traverse nested roots but leave other templates inert", () => {
+  const inner = '<div><template shadowrootmode="closed"><style>p{}</style></template></div>';
+  expect(htmlLook(`<div><template shadowrootmode="open">${inner}</template></div>`)).toEqual({
+    look: "custom",
+    reason: "own-styles",
+    outside: ["template"],
+    otherOutside: false,
+  });
+  for (const source of [
+    '<div><template shadowrootmode="other"><style>p{}</style></template></div>',
+    `<div><template shadowrootmode="other">${inner}</template></div>`,
+    `<div><template shadowrootmode="open"><template>${inner}</template></template></div>`,
+  ])
+    expect(htmlLook(source)).toEqual({
+      look: "emend",
+      reason: "structure",
+      outside: ["template"],
+      otherOutside: false,
+    });
+});
+
+test("a document emend mark wins over declarative shadow styles", () => {
+  expect(
+    htmlLook(
+      '<meta name="emend-look" content="emend"><div><template shadowrootmode="open"><style>:host{font-family:Georgia}</style></template></div>',
+    ),
+  ).toMatchObject({ look: "emend", reason: "marked-emend" });
+});
+
 test("outside names are HTML-only, distinct, sorted and limited to the first twenty", () => {
   const source =
     "<script></script><iframe></iframe><form></form><x-widget></x-widget><form></form>" +

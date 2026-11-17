@@ -321,6 +321,7 @@ async function computePublish(
     );
     counted ??= await countDiffFiles(ownerId, input.files, read, execute, deps.signal);
     const { ids, renderedBlob, sourceBlob, docBlobs, unrendered, metadata, sourceBlobs, sourceMetadata } = prepared;
+    const unrenderedPaths = new Set(unrendered);
     const sideTexts = new Map<string, ArrayBuffer>();
     const sideText = async (sha: string) => {
       let value = sideTexts.get(sha);
@@ -531,11 +532,14 @@ async function computePublish(
         const ordered = input.files
           .map((file, ord) => ({ file, ord }))
           .sort((a, b) => Number(a.file.role === "asset") - Number(b.file.role === "asset"));
+        const htmlLooks: NonNullable<PublishResponse["htmlLooks"]> = [];
         let inserted = 0;
         for (const { file, ord } of ordered) {
           checkPublishSignal(deps.signal);
           const fileId = ids.get(fileKey(file));
           if (!fileId) throw new Error("Missing file id");
+          const htmlDoc = isRenderedHtmlDoc(file);
+          const look = htmlDoc ? (metadata.get(file.path)?.look ?? null) : null;
           await q.insert(files).values({
             id: fileId,
             ownerId,
@@ -560,12 +564,13 @@ async function computePublish(
               file.role === "doc"
                 ? ((docViewOf(file) === "source" ? sourceMetadata : metadata).get(file.path)?.headings ?? null)
                 : null,
-            look: isRenderedHtmlDoc(file) ? (metadata.get(file.path)?.look ?? null) : null,
+            look,
             renderedBlob:
               file.role === "doc"
                 ? ((docViewOf(file) === "source" ? sourceBlobs : docBlobs).get(file.path) ?? null)
                 : null,
           });
+          if (htmlDoc && !unrenderedPaths.has(file.path)) htmlLooks.push({ path: file.path, look: look ?? "custom" });
           for (const [noteOrd, note] of (file.notes ?? []).entries())
             await q.insert(agentNotes).values({
               ownerId,
@@ -637,6 +642,7 @@ async function computePublish(
           placed: placedRows.filter((p) => p.placement.status === "placed").length,
           unplaced: placedRows.filter((p) => p.placement.status === "unplaced").length,
           unrendered,
+          htmlLooks,
         };
       },
       { offThread: true },

@@ -30,3 +30,16 @@ test("pub stylesheet accepts data fonts, media comparisons and the exact UTF-8 b
   expect(pubStylesheetSafe('body::before{content:"<"}')).toBe(true);
   expect(pubStylesheetSafe("é".repeat(LIMITS.pubStylesheetBytes / 2))).toBe(true);
 });
+
+test("pub stylesheet permits only CSS whitespace before data URLs", () => {
+  for (const whitespace of ["\u00a0", "\ufeff"])
+    for (const quote of ["", '"', "'"])
+      expect(pubStylesheetSafe(`body{background:url(${whitespace}${quote}data:image/png;base64,AA==${quote})}`)).toBe(
+        false,
+      );
+  for (const whitespace of [" ", "\t", "\n", "\r", "\f", "\t\n"])
+    for (const quote of ["", '"', "'"])
+      expect(pubStylesheetSafe(`body{background:url(${whitespace}${quote}data:image/png;base64,AA==${quote})}`)).toBe(
+        true,
+      );
+});

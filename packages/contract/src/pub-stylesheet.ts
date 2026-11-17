@@ -6,6 +6,6 @@ export function pubStylesheetSafe(css: string): boolean {
     !css.includes("</") &&
     !css.includes("\\") &&
     !/@import|image-set\(|src\(/i.test(css) &&
-    [...css.matchAll(/url\(/gi)].every((match) => /^url\(\s*["']?data:/i.test(css.slice(match.index)))
+    [...css.matchAll(/url\(/gi)].every((match) => /^url\([\t\n\f\r ]*["']?data:/i.test(css.slice(match.index)))
   );
 }

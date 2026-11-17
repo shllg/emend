@@ -207,6 +207,7 @@ test("same key appends a revision, reopens and counts placed and unplaced thread
     placed: 1,
     unplaced: 1,
     unrendered: [],
+    htmlLooks: [],
   });
   const rows = await f.db.query((q) => q.select().from(revisions).where(eq(revisions.ownerId, f.ownerId)));
   expect(new Set(rows.map((r) => r.contentKey)).size).toBe(2);

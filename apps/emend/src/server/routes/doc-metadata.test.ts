@@ -15,7 +15,14 @@ test("publish records HTML look, leaves other and failed metadata null, and omit
       { path: "plan.md", source: "# Plan", look: null },
       { path: "source.html", source: "<h1>Source</h1>", view: "source", look: null },
       { path: "deep.html", source: "<div>".repeat(2000), look: null },
+      { path: "failed.html", source: "<h1>Metadata fails</h1>", look: null },
     ];
+    const execute = f.deps.publishExecutor ?? executeWork;
+    f.deps.publishExecutor = async (work) => {
+      if (work.kind === "doc-metadata" && Buffer.from(work.bytes).toString() === "<h1>Metadata fails</h1>")
+        throw new Error("Synthetic metadata failure");
+      return execute(work);
+    };
     const input = {
       reviewKey: "e".repeat(64),
       repo: null,
@@ -41,7 +48,12 @@ test("publish records HTML look, leaves other and failed metadata null, and omit
     const response = await f.request("/publish", "POST", input, "agent");
     expect(response.status).toBe(200);
     const published = PublishResponse.parse(await response.json());
-    expect(published.unrendered).toEqual([]);
+    expect(published.unrendered).toEqual(["failed.html"]);
+    expect(published.htmlLooks).toEqual([
+      { path: "structure.html", look: "emend" },
+      { path: "styled.html", look: "custom" },
+      { path: "deep.html", look: "custom" },
+    ]);
     const rows = await f.db.read((q) => q.select().from(files).where(eq(files.ownerId, f.ownerId)).all());
     for (const { path, look } of sources) expect(rows.find((file) => file.path === path)?.look).toBe(look);
     const viewPath = `/reviews/${published.reviewId}/revisions/1`;
@@ -51,7 +63,11 @@ test("publish records HTML look, leaves other and failed metadata null, and omit
     for (const doc of view.docs.slice(2)) expect(doc).not.toHaveProperty("look");
     const repeated = await f.request("/publish", "POST", { ...input, reviewId: published.reviewId }, "agent");
     expect(repeated.status).toBe(200);
-    expect(PublishResponse.parse(await repeated.json())).toMatchObject({ revision: 2, unrendered: [] });
+    expect(PublishResponse.parse(await repeated.json())).toMatchObject({
+      revision: 2,
+      unrendered: ["failed.html"],
+      htmlLooks: published.htmlLooks,
+    });
     const repeatedView = RevisionView.parse(
       await (await f.request(`/reviews/${published.reviewId}/revisions/2`, "GET")).json(),
     );
@@ -83,7 +99,8 @@ test("publish records HTML look, leaves other and failed metadata null, and omit
       expect(failed.status).toBe(200);
       expect(PublishResponse.parse(await failed.json())).toMatchObject({
         revision: index + 3,
-        unrendered: ["structure.html", "styled.html", "deep.html"],
+        unrendered: ["structure.html", "styled.html", "deep.html", "failed.html"],
+        htmlLooks: [],
       });
       const failedView = RevisionView.parse(
         await (await f.request(`/reviews/${published.reviewId}/revisions/${index + 3}`, "GET")).json(),

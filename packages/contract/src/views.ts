@@ -24,6 +24,10 @@ export const PublishResponse = z.object({
   placed: z.int().nonnegative(),
   unplaced: z.int().nonnegative(),
   unrendered: z.array(FilePath).max(LIMITS.filesPerRevision).default([]),
+  htmlLooks: z
+    .array(z.object({ path: FilePath, look: z.enum(["emend", "custom"]) }))
+    .max(LIMITS.filesPerRevision)
+    .optional(),
 });
 export type PublishResponse = z.infer<typeof PublishResponse>;
 

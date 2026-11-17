@@ -81,6 +81,11 @@ test("direct HTML publish and an unchanged republish keep the look in rows and r
   vi.mocked(spawn).mockClear();
   const first = await f.publish();
   const second = await f.publish();
+  for (const { result } of [first, second])
+    expect(result.htmlLooks).toEqual([
+      { path: "structure.html", look: "emend" },
+      { path: "styled.html", look: "custom" },
+    ]);
   expect(second.result).toMatchObject({ reviewId: first.result.reviewId, revision: 2, unrendered: [] });
   expect(spawn).not.toHaveBeenCalled();
   const server = await f.reviewer();

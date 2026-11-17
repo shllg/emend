@@ -76,6 +76,11 @@ test.each(["manifest", "shortcut", "json"])(
       placed: 0,
       unplaced: 0,
       unrendered: ["failed.html", "plan.md"],
+      htmlLooks: sources.flatMap(([path, , note]) =>
+        path === "failed.html" || path === "plan.md"
+          ? []
+          : [{ path, look: note.startsWith("shows in") ? "emend" : "custom" }],
+      ),
       url: "http://127.0.0.1:3636/r/synthetic",
     };
     f.setResponse(async (_url, init) => {
@@ -144,6 +149,59 @@ test.each(["manifest", "shortcut", "json"])(
     for (const code of [0x1b, 0x34f]) expect(f.stderr.join("")).not.toContain(String.fromCodePoint(code));
   },
 );
+
+test.each(["legacy", "empty", "different"])("%s server look metadata controls HTML notes", async (mode) => {
+  const f = await commandFixture();
+  const source = await realpath(await mkdtemp(join(tmpdir(), "emend-server-look-")));
+  onTestFinished(() => rm(source, { recursive: true, force: true }));
+  vi.spyOn(roots, "worktreeRoot").mockResolvedValue(null);
+  await mkdir(f.configDir, { recursive: true });
+  await writeFile(join(f.configDir, "config.json"), JSON.stringify({ docRoots: [source] }));
+  await writeFile(join(f.dir, "instance.json"), JSON.stringify({ id: randomUUID() }));
+  const sources = {
+    "emend.html": '<meta name="emend-look" content="emend"><x-extra></x-extra>',
+    "custom.html": "<style>p{}</style><x-extra></x-extra>",
+    "failed.html": "<h1>Fails remotely</h1>",
+    "plan.md": "# Plan",
+  };
+  for (const [path, text] of Object.entries(sources)) await writeFile(join(source, path), text);
+  const htmlLooks =
+    mode === "different"
+      ? [
+          { path: "emend.html", look: "custom" },
+          { path: "custom.html", look: "emend" },
+        ]
+      : [];
+  const response = {
+    reviewId: randomUUID(),
+    revision: 1,
+    placed: 0,
+    unplaced: 0,
+    unrendered: ["failed.html", "plan.md"],
+    ...(mode === "legacy" ? {} : { htmlLooks }),
+    url: "http://127.0.0.1:3636/r/synthetic",
+  };
+  f.setResponse(async (_url, init) => {
+    if (init?.method === "HEAD" || init?.method === "PUT") return new Response(null, { status: 204 });
+    return Response.json(response);
+  });
+  await publishCommand(
+    f.dir,
+    f.configDir,
+    [...Object.keys(sources), "--title", "Synthetic", "--key", "synthetic", "--json"],
+    f.io,
+    source,
+  );
+  expect(f.stdout).toEqual([`${JSON.stringify(PublishResponse.parse(response))}\n`]);
+  expect(f.stderr.filter((line) => line.includes(" shows "))).toEqual([
+    ...(mode === "different"
+      ? ["emend: custom.html shows in emend's look\n", "emend: emend.html shows as a custom page\n"]
+      : []),
+    ...(mode === "legacy" ? [] : ["emend: failed.html shows as a custom page: emend could not read its structure\n"]),
+  ]);
+  expect(f.stderr.join("")).not.toContain("uses elements outside");
+  expect(f.stderr.filter((line) => line.includes("could not render"))).toEqual(["emend: could not render plan.md\n"]);
+});
 
 test("source HTML and Markdown publish without look diagnostics", async () => {
   const f = await commandFixture();

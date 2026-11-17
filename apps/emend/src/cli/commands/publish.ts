@@ -272,15 +272,22 @@ export async function publishCommand(
     unreadable: "shows as a custom page: emend could not read its structure",
   };
   const unrendered = new Set(result.data.unrendered);
+  const serverLooks = result.data.htmlLooks && new Map(result.data.htmlLooks.map(({ path, look }) => [path, look]));
   for (const file of collected.request.files) {
-    if (!isRenderedHtmlDoc(file)) continue;
+    if (!isRenderedHtmlDoc(file) || !serverLooks) continue;
     const path = escapeReference(file.path);
     if (unrendered.has(file.path)) {
       io.stderr(`emend: ${path} ${lookNotes.unreadable}\n`);
       continue;
     }
+    const serverLook = serverLooks.get(file.path);
+    if (!serverLook) continue;
     const result = htmlLooks.get(file.path);
-    if (!result) continue;
+    if (!result || result.look !== serverLook) {
+      const note = serverLook === "emend" ? lookNotes.structure : "shows as a custom page";
+      io.stderr(`emend: ${path} ${note}\n`);
+      continue;
+    }
     io.stderr(`emend: ${path} ${lookNotes[result.reason]}\n`);
     if (result.look === "emend" && (result.outside.length || result.otherOutside)) {
       const names = result.outside
