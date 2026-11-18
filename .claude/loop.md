@@ -183,6 +183,9 @@ without `merged`, or a `spawn-failed` line the owner has not cleared.
      this PR.
    - Review in rounds, as `.claude/rules/review-rounds.md` says: round 1 over the whole change,
      then check rounds over the fixes only, within the budget, each logged in `.wt/review-log.md`.
+   - Full `pnpm verify` gates, `pnpm bundle:diff` runs and `pnpm perf` runs go one at a time across
+     workers. Ask this session for a go before each and say when it ends, with the exit code.
+     While one runs, no other worker starts a build or test run.
    - When the issue's "Done when" holds and its review rounds are done, close out. Do not polish.
    - Ask this session about scope, order or process by replying to this message. Ask the owner, in
      the workspace, only what this session cannot answer.
@@ -194,9 +197,10 @@ Start at most one worker per pass when the queue holds several bugs that touch t
 
 1. Due when the journal's last `perf` or `perf-failed` line is more than seven days old, or there
    is none.
-2. Timings need a quiet machine. Start it only in a pass where no worker runs a gate or a perf
-   run. While it runs, give no worker a go for a gate. Tell a worker that asks to wait until it
-   ends.
+2. Timings need a quiet machine. This session's weekly run follows the go rule in step 3.4's
+   standing note. Start it only in a pass where no worker runs a build or test. While it runs,
+   give no worker a go for a gate, bundle diff or perf run. Tell a worker that asks to wait until
+   it ends.
 3. Run `<main>/bin/wt fetch`, read `git -C '<main>' rev-parse origin/main`, and run
    `pnpm perf --ref <commit>` in `<main>`, with the commit written literally and
    `run_in_background: true`. It measures main's newest commit, the week's last. Its runs and

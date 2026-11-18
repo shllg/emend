@@ -66,7 +66,8 @@ Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not re
    sub-agent writes, and your report says so and why.
 3. Run `pnpm verify`. Fix failures at the root cause. Headless browser checks run Chromium directly
    (`chromium --headless=new …`).
-   Right after each green `pnpm verify`, run `pnpm bundle:diff --json .wt/bundle-diff.json`.
+   Before each review round, with the change committed and `pnpm verify` green at that commit,
+   run `pnpm bundle:diff --json .wt/bundle-diff.json`.
 4. Before "done": dispatch `emend-review-manager` (`model: "opus"`) with the round, the range
    (`origin/main...HEAD` for a full round, the fix commits for a check round), the task file
    `.wt/issue.md` (or the description), `.wt/bundle-diff.json`, `.wt/bundle-reason.md` when it

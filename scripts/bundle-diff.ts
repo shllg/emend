@@ -1,5 +1,4 @@
 // Compare route gzip sizes with main; growth is reported, never a command failure.
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -110,7 +109,7 @@ export function validateBaseCache(value: unknown, sha: string): value is BaseCac
     && validSizes(value.sizes) && validSizes(value.budgets);
 }
 
-function readCache(path: string, sha: string): BaseCache | undefined {
+export function readCache(path: string, sha: string): BaseCache | undefined {
   try {
     const value: unknown = JSON.parse(readFileSync(path, "utf8"));
     return validateBaseCache(value, sha) ? value : undefined;
@@ -119,7 +118,7 @@ function readCache(path: string, sha: string): BaseCache | undefined {
   }
 }
 
-function writeCache(path: string, cache: BaseCache): void {
+export function writeCache(path: string, cache: BaseCache): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   chmodSync(dirname(path), 0o700);
   const temporary = `${path}.${randomUUID()}.tmp`;
@@ -131,7 +130,7 @@ function writeCache(path: string, cache: BaseCache): void {
   }
 }
 
-function measureCheckout(source: string, allowMissingBudget = false): BundleSizes {
+export function measureCheckout(source: string, allowMissingBudget = false): BundleSizes {
   const web = join(source, "apps/web");
   let budgetText: string;
   try {
@@ -150,12 +149,6 @@ function measureCheckout(source: string, allowMissingBudget = false): BundleSize
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const git = (cwd: string, ...args: string[]) => execFileSync("git", args, {
-    cwd, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
-  if (git(checkout, "status", "--porcelain")) throw new Error("The checkout has uncommitted changes; commit first");
-  const head = git(checkout, "rev-parse", "HEAD");
-  const base = resolveCommit(options.base ?? git(checkout, "merge-base", "origin/main", "HEAD"), (...args) => git(checkout, ...args));
   const out = join(checkout, ".wt/bundle-base");
   const sealed = createSealedLifecycle("bundle-diff");
   const failurePaths: { sealedRoot?: string; refFolder?: string } = {};
@@ -163,6 +156,12 @@ async function main() {
   try {
     const { sealedRoot, env, realStateDirs } = sealed.createRoot(out, { name: "Bundle Diff", email: "bundle@example.test" });
     failurePaths.sealedRoot = sealedRoot;
+    const git = (cwd: string, ...args: string[]) =>
+      sealed.git(cwd, { ...env, GIT_OPTIONAL_LOCKS: "0" }, ...args);
+    // The sealed git config omits the user's global excludes.
+    if (git(checkout, "status", "--porcelain", "--untracked-files=no")) throw new Error("The checkout has uncommitted changes; commit first");
+    const head = git(checkout, "rev-parse", "HEAD");
+    const base = resolveCommit(options.base ?? git(checkout, "merge-base", "origin/main", "HEAD"), (...args) => git(checkout, ...args));
     const pnpm = pnpmExecutable();
     const build = async (source: string) => {
       const result = await sealed.run(pnpm, ["--dir", "apps/web", "build"], {
@@ -176,8 +175,7 @@ async function main() {
     let baseSizes: BundleSizes | undefined = readCache(cachePath, base);
     if (!baseSizes) {
       const source = await exportMainCommit({
-        sealed, env, sealedRoot, sha: base, keep: false, protectedDirs: realStateDirs, failurePaths,
-        git: (cwd, ...args) => sealed.git(cwd, { ...env, GIT_OPTIONAL_LOCKS: "0" }, ...args),
+        sealed, env, sealedRoot, sha: base, keep: false, protectedDirs: realStateDirs, failurePaths, git,
       });
       await build(source);
       baseSizes = measureCheckout(source, true);

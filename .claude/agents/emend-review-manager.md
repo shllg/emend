@@ -114,25 +114,29 @@ It stays local; the orchestrator never copies it into a PR body.
 
 ## Bundle growth
 
-The orchestrator runs `pnpm bundle:diff --json .wt/bundle-diff.json` right after a green
-`pnpm verify` and before each round, at the head under review. It builds the checkout and the merge
-base on main, and compares each route's gzip size. A route in its `over` list grew by more than
-5 KB gzip against main. The orchestrator answers that finding with a change that shrinks the route,
-or accepts the growth: one line per route in `.wt/bundle-reason.md` (gitignored),
-`<route>: <reason>`, saying why the growth is needed. The PR body's Summary and the emend hand-off
-carry that reason, and the owner accepts or rejects it at approval.
+The orchestrator runs `pnpm bundle:diff --json .wt/bundle-diff.json` at the committed head under
+review, after a green `pnpm verify` at that commit and before each round. The command refuses
+uncommitted changes. It builds the checkout and the merge base on main, and compares each route's
+gzip size. A route in its `over` list grew by more than 5 KB gzip against main. After that finding
+exists, the orchestrator answers it with a change that shrinks the route, or accepts the growth:
+a line in `.wt/bundle-reason.md` (gitignored), `<route>[, <route>...] <bytes>: <reason>`, saying why
+the growth is needed. `<bytes>` is the accepted growth in gzip bytes, the route's `delta` from
+`.wt/bundle-diff.json`. One line may name several routes that share a growth. The PR body's Summary
+and the emend hand-off carry that reason, and the owner accepts or rejects it at approval.
 
 In every round, but not dispute or confirm mode, read `.wt/bundle-diff.json`. When it is missing,
 does not parse, or its `head` is not the reviewed head, list `bundle-diff` in `unavailable`.
-For each route in `over` that `.wt/bundle-reason.md` does not name with a line starting
-`<route>:`, add a blocking finding to `fix`. Use file `apps/web/bundle-budget.json`, the line of
-that route's key, area `code`, a claim naming the route and its growth against main, `instances`
-with that one place, `reviewers: ["bundle-diff"]` and `confirmedBy: null`.
+For each route in `over`, add a blocking finding to `fix` unless an earlier element of
+`.wt/review-findings.json` holds a bundle finding for that route and a reason line names the route
+with `<bytes>` at least its current `delta`. So round 1 always raises it, a reason written before
+the finding does not stop it, and growth beyond the accepted bytes raises it again. Group the routes that need a finding and have the same `delta`
+into one finding. Use file `apps/web/bundle-budget.json`, the line of the first route's key, area
+`code`, a claim naming the routes and their growth against main, and one `instances` entry per
+route at the line of its key. Use `reviewers: ["bundle-diff"]` and `confirmedBy: null`.
 
 This is a measurement: no reviewer finds it, no other vendor confirms it, and it is never
-dropped. In a check round, mark it FIXED when the route is no longer over or the reason file
-names it. Do not dispatch a reviewer for it. Never raise it again for a route the reason file
-names.
+dropped. In a check round, mark it FIXED when no named route is over any more, or every named route
+has a reason line with `<bytes>` at least its current `delta`. Do not dispatch a reviewer for it.
 
 ## Record
 

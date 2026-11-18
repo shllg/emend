@@ -350,7 +350,8 @@ stop the loop.
 
 - `go`: handle it with `emend-feedback`. Fixes go back through steps 1 to 7 (commit, push, CI,
   threads, and one `owner-check` round over these fixes in step 7). Then publish the next revision
-  with `head` at the new head commit, append its line to `heads.txt`, run
+  with `head` at the new head commit, carrying the bundle summary and reasons for that head as
+  step 8.3 says, from a `.wt/bundle-diff.json` whose `head` equals that commit. Append its line to `heads.txt`, run
   `<main>/bin/wt notify review-ready`, and wait again.
 - `approve`: the result names a review id and a revision. Find the line in `heads.txt` that matches
   both.
@@ -359,6 +360,8 @@ stop the loop.
     literal review folder `<top>/.wt/review` as a locator. `/e-pr-merge` checks the approval itself and
     does not take it from this call. Do not ask. Approval does not authorize anything else.
   - The heads differ: say so, and republish the current head as a new revision for a new approval.
+    Carry the bundle summary and reasons for that head as step 8.3 says, from a
+    `.wt/bundle-diff.json` whose `head` equals that head.
   - A draft PR: report the approval and stop. Marking it ready is the owner's step.
 - `closed` or a non-zero exit: report as `emend-feedback` says and stop. Silence is not approval.
 

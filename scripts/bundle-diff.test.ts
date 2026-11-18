@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
-import { resolve } from "node:path";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
-import { compareBundles, formatBundleSummary, parseArgs, USAGE, validateBaseCache } from "./bundle-diff.ts";
+import {
+  compareBundles, formatBundleSummary, measureCheckout, parseArgs, readCache, USAGE, validateBaseCache, writeCache,
+} from "./bundle-diff.ts";
 
 const sha = "abcdef0123456789abcdef0123456789abcdef01";
 const bundles = (sizes: Record<string, number>, budgets: Record<string, number> = {}) => ({ sizes, budgets });
@@ -100,6 +104,52 @@ test("cache accepts only the matching schema and sha with safe non-negative inte
       assert(!validateBaseCache({ ...cache, [field]: value }, sha));
   }
   for (const value of [null, undefined, [], "invalid", {}]) assert(!validateBaseCache(value, sha));
+});
+
+test("a base without a budget makes every head route new and every ceiling added", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "emend-bundle-diff-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  mkdirSync(join(folder, "apps/web"), { recursive: true });
+  const base = measureCheckout(folder, true);
+  assert.deepEqual(base, bundles({}));
+  assert.throws(() => measureCheckout(folder), { code: "ENOENT" });
+  const result = compareBundles(base, bundles({ inbox: 12000, review: 18000 }, { inbox: 15000, review: 20000 }));
+  assert.deepEqual(result.rows, [
+    { route: "inbox", base: null, head: 12000, delta: null, status: "new" },
+    { route: "review", base: null, head: 18000, delta: null, status: "new" },
+  ]);
+  assert.deepEqual(result.ceilings, [
+    { route: "inbox", old: null, new: 15000, change: "added" },
+    { route: "review", old: null, new: 20000, change: "added" },
+  ]);
+  assert.deepEqual(result.over, []);
+});
+
+test("cache round trips sizes and budgets with private permissions and ignores unusable files", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "emend-bundle-cache-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const path = join(folder, "cache", `${sha}.json`);
+  const cache = { schemaVersion: 1 as const, sha, ...bundles({ inbox: 12000, review: 18000 }, { inbox: 15000, review: 20000 }) };
+  writeCache(path, cache);
+  assert.deepEqual(readCache(path, sha), cache);
+  assert.equal(statSync(dirname(path)).mode & 0o777, 0o700);
+  assert.equal(statSync(path).mode & 0o777, 0o600);
+  assert.equal(readCache(path, "b".repeat(40)), undefined);
+  writeFileSync(path, "{corrupt");
+  assert.equal(readCache(path, sha), undefined);
+  rmSync(path);
+  assert.equal(readCache(path, sha), undefined);
+});
+
+test("git lookups use only the sealed environment, disable optional locks and ignore untracked files", () => {
+  const source = readFileSync(new URL("./bundle-diff.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /execFileSync|node:child_process|process\.env/);
+  assert.match(source, /const git = \(cwd: string, \.\.\.args: string\[\]\) =>\s*sealed\.git\(cwd, \{ \.\.\.env, GIT_OPTIONAL_LOCKS: "0" \}, \.\.\.args\)/);
+  assert(source.indexOf("sealed.createRoot(") < source.indexOf("const git ="));
+  assert.match(source, /git\(checkout, "status", "--porcelain", "--untracked-files=no"\)/);
+  assert.match(source, /git\(checkout, "rev-parse", "HEAD"\)/);
+  assert.match(source, /resolveCommit\(options\.base \?\? git\(checkout, "merge-base", "origin\/main", "HEAD"\), \(\.\.\.args\) => git\(checkout, \.\.\.args\)\)/);
+  assert.match(source, /exportMainCommit\(\{[^}]*\bgit,?\s*\}\)/);
 });
 
 test("route names are own keys even when they match object prototype names", () => {
