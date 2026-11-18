@@ -33,6 +33,7 @@ const OWNERS: Record<string, string> = {
   "sync-main": "history.ts",
   digest: "history.ts",
   findings: "findings.ts",
+  groom: "findings.ts",
 };
 
 const HELP = `bin/wt: worktrees and the pull request lifecycle
@@ -51,6 +52,8 @@ Local:
   findings show <id>
   findings release <id>...
   findings resolve <id> (--fixed <sha> | --dismissed <reason> | --stale)
+  groom next [--count N]                           the files the groomer reads next (JSON; N from 1 to 50, default 5)
+  groom visited <path> --blob <sha> --findings N     record a groom visit (2 when the blob is not HEAD's)
 
 herdr / herdr desktop:
   spawn --issue <n> [--mode github] [--model <m>] [--effort <e>]
@@ -107,7 +110,10 @@ async function main(argv: string[]): Promise<number> {
   try {
     repo = resolveRepo(process.cwd());
   } catch (e) {
-    if (sub === "findings" && run("git", ["--version"], { cwd: process.cwd(), gitNoLazyFetch: true }).code === 127)
+    if (
+      (sub === "findings" || sub === "groom") &&
+      run("git", ["--version"], { cwd: process.cwd(), gitNoLazyFetch: true }).code === 127
+    )
       fail(69, "Git is unavailable.");
     throw e;
   }
