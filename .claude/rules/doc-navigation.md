@@ -47,9 +47,9 @@ to it. Any change here needs `emend-security-reviewer`.
   heading and fraction; a doc with nothing scrolled and no pin stays where it is.
 - `emend:theme` carries only `mode` and theme colours to a ready frame in emend's look that has not
   navigated away; a light-only frame receives only `light`. The content path's `theme` query picks
-  one of two fixed start tags, never writes the raw query and never overrides a light-only doc. The bridge
-  validates every key and value and ignores the whole message on any invalid entry; it sets only
-  `data-theme` on the root and one constructed stylesheet in layer `emend`.
+  one of two fixed start tags, never writes the raw query and never overrides a light-only doc.
+  The bridge validates every key and value and ignores the whole message on any invalid entry; it
+  sets only `data-theme` on the root and one constructed stylesheet in layer `emend`.
 - The bridge never changes `location`, handles links to a fragment of the same doc itself, and
   calls DOM methods from their prototypes, so doc markup cannot replace them.
 - Titles and Contents labels pass `cleanDocTitle` on the server and render as isolated text
