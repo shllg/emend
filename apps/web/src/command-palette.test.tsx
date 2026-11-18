@@ -1069,15 +1069,18 @@ test("Done stays outside the truncating metadata when the branch is long", async
   expect(metadata?.contains(done)).toBe(false);
   expect(done.closest(".truncate")).toBeNull();
   expect(done.classList.contains("shrink-0")).toBe(true);
+  expect(done.classList.contains("whitespace-pre")).toBe(true);
+  expect(done.textContent).toBe(" · Done");
   expect(done.previousElementSibling).toBe(metadata);
   expect(done.parentElement?.classList.contains("flex")).toBe(true);
 });
 
 test.each(["review", "publish"] as const)("isolates remote metadata from %s and Done labels", async (kind) => {
+  const popIsolate = String.fromCharCode(0x2069);
   const override = String.fromCharCode(0x202e);
-  const machine = `${override}Workshop`;
-  const project = `${override}Toolkit`;
-  const branch = `${override}emend-175-harness`;
+  const machine = `${popIsolate}${override}Workshop`;
+  const project = `${popIsolate}${override}Toolkit`;
+  const branch = `${popIsolate}${override}emend-175-harness`;
   inbox[1] = {
     ...(inbox[1] as InboxItem),
     kind,
@@ -1091,11 +1094,13 @@ test.each(["review", "publish"] as const)("isolates remote metadata from %s and 
   const input = await openPalette();
   search(input, "Review 2");
   const row = option("Review 2");
-  for (const value of [machine, project, branch]) {
-    const isolated = within(row).getByText(value).closest('bdi, [dir="auto"]');
+  expect(row.textContent).not.toContain(popIsolate);
+  expect(row.textContent).not.toContain(override);
+  for (const value of ["Workshop", "Toolkit", "emend-175-harness"]) {
+    const isolated = within(row).getByText(value).closest("bdi");
     expect(isolated?.textContent).toBe(value);
   }
-  expect(within(row).getByText(branch).classList.contains("font-mono")).toBe(true);
+  expect(within(row).getByText("emend-175-harness").classList.contains("font-mono")).toBe(true);
   const label = kind === "review" ? "Review" : "Pub";
   expect(
     within(row)

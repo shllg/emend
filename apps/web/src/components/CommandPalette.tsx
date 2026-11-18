@@ -15,6 +15,8 @@ import { Kbd } from "./ui/Kbd.tsx";
 import { isToastInteraction, overlayClass } from "./ui/overlay.ts";
 import { cn } from "./ui/utils.ts";
 
+const BIDI_CONTROL = /\p{Bidi_Control}/gu;
+
 type PaletteRow = { score: number } & (
   | { key: `command:${ShortcutCommand}`; command: ShortcutCommand }
   | { key: `item:${string}`; item: InboxItem; done: boolean }
@@ -252,28 +254,29 @@ export function CommandPalette() {
                         </span>
                         <span className="flex text-12 text-fg-3">
                           <span className="min-w-0 truncate">
-                            {row.item.kind === "review" ? "Review" : "Pub"} · <bdi>{row.item.origin.name}</bdi>
+                            {row.item.kind === "review" ? "Review" : "Pub"} ·{" "}
+                            <bdi>{row.item.origin.name.replace(BIDI_CONTROL, "")}</bdi>
                             {row.item.project !== null && (
                               <>
                                 {" · "}
-                                <bdi>{row.item.project}</bdi>
+                                <bdi>{row.item.project.replace(BIDI_CONTROL, "")}</bdi>
                               </>
                             )}
                             {row.item.movedTo ? (
                               <>
                                 {" · Moved to "}
-                                <bdi>{new URL(row.item.movedTo).host}</bdi>
+                                <bdi>{new URL(row.item.movedTo).host.replace(BIDI_CONTROL, "")}</bdi>
                               </>
                             ) : (
                               row.item.branch !== null && (
                                 <>
                                   {" · "}
-                                  <bdi className="font-mono">{row.item.branch}</bdi>
+                                  <bdi className="font-mono">{row.item.branch.replace(BIDI_CONTROL, "")}</bdi>
                                 </>
                               )
                             )}
                           </span>
-                          {row.done && <span className="shrink-0"> · Done</span>}
+                          {row.done && <span className="shrink-0 whitespace-pre"> · Done</span>}
                         </span>
                       </span>
                     )}
