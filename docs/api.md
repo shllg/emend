@@ -1041,10 +1041,12 @@ sent, or empty maps when no custom theme is selected.
 
 The bridge accepts theme messages only from its parent and validates the whole message before
 changing anything: mode must be exactly `dark` or `light`; both maps must be non-null, non-array
-objects with at most 256 own entries each. Keys are at most 40 characters and match
-`^[a-z0-9]+(?:-[a-z0-9]+)*$`. Scale values must be colours; token values may also be keys naming
-scale steps. Colours match `^#[0-9a-f]{6}(?:[0-9a-f]{2})?$` or
-`^oklch\([0-9.]{1,8} [0-9.]{1,8} [0-9.]{1,8}(?: \/ [0-9.]{1,8})?\)$`.
+objects with at most 256 own entries each. Keys in both maps and token step values are names of
+lowercase letters and digits in dash-separated parts, at most 40 characters, matching
+`^[a-z0-9]+(?:-[a-z0-9]+)*$`. The bridge accepts any such name; the parent sends only emend's own
+scale-step and token names. Scale values must be colours; token values may also be step names.
+Colours match `^#[0-9a-f]{6}(?:[0-9a-f]{2})?$` or `^oklch\(N N N(?: / N)?\)$`, where each `N` is
+`(?:0|[1-9][0-9]{0,2})(?:\.[0-9]{0,5}[1-9])?`. Range checks stay with the contract.
 Any invalid entry rejects the whole message. The bridge sets only the root's `data-theme` and
 replaces the text of one constructed stylesheet, created and adopted once, with
 `@layer emend{:root:root:root{--<key>:<value>;...}}`; token steps become `var(--<step>)`.

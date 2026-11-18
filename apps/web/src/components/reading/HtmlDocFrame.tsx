@@ -1,6 +1,6 @@
 import type { DocHeading, HtmlSpanTarget } from "@emend/contract";
 import { TextSelect } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { claimDraft, useDraftClaim } from "../../lib/composer-owner.ts";
 import { draftKey, listDrafts, subscribeDrafts } from "../../lib/drafts.ts";
 import { type DocNavigation, FrameToParent, type HtmlPosition, type ParentToFrame } from "../../lib/frame-messages.ts";
@@ -71,7 +71,9 @@ export function HtmlDocFrame({
     emendLook && custom && (!lightOnly || custom.base === "light") ? themeColors(custom) : { scales: {}, tokens: {} },
   );
   const currentMode = useRef(mode);
-  currentMode.current = mode;
+  useLayoutEffect(() => {
+    currentMode.current = mode;
+  }, [mode]);
   const frameSrc = useCallback(
     (fragment?: string) =>
       `${contentUrl}${emendLook && !lightOnly ? `?theme=${currentMode.current}` : ""}${fragment === undefined ? "" : `#${encodeURIComponent(fragment)}`}`,

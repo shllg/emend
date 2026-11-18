@@ -70,6 +70,7 @@ const revision = {
 let width = 1280;
 const mediaQueries = new Set<{ media: string; matches: boolean; events: EventTarget }>();
 function matchesWidth(query: string) {
+  if (query === "(prefers-color-scheme: dark)") return false;
   const constraints = [...query.matchAll(/\((min|max)-width:\s*(\d+)px\)/g)];
   if (!constraints.length) throw new Error(`Unsupported media query: ${query}`);
   return constraints.every(([, bound, pixels]) =>

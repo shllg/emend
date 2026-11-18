@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
+import { ThemeColor } from "@emend/contract";
 import { type Element, Window } from "happy-dom";
 import { expect, test, vi } from "vitest";
 import { docText, placeHtmlSpan } from "../../../packages/core/src/place/html.ts";
@@ -141,6 +142,57 @@ test("theme messages replace one layered sheet, set only the root mode, and neve
   } finally {
     Reflect.deleteProperty(b.window.document, "documentElement");
     Reflect.deleteProperty(b.window.document, "adoptedStyleSheets");
+    vi.restoreAllMocks();
+    await b.window.happyDOM.close();
+  }
+});
+
+test.each([
+  "#ffffff",
+  "#aabbcc00",
+  "oklch(0.995 0.001 260)",
+  "oklch(0 0 0)",
+  "oklch(1 0.5 359.999999 / 0.5)",
+  "oklch(0.000001 0.1 0 / 0)",
+  "oklch(0.2 0.01 260.123456)",
+  "oklch(0.123456 0.123456 123.123456 / 0.123456)",
+  "oklch(1 0.5 359.999999 / 0.999999)",
+])("theme bridge accepts the contract colour %s in both maps", async (color) => {
+  expect(ThemeColor.parse(color)).toBe(color);
+  const b = bridge("<p>Seed</p>");
+  try {
+    b.message({ type: "emend:theme", mode: "dark", scales: { "n-950": color }, tokens: { "bg-app": color } });
+    expect(b.window.document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(b.replaceSync).toHaveBeenCalledExactlyOnceWith(
+      `@layer emend{:root:root:root{--n-950:${color};--bg-app:${color};}}`,
+    );
+  } finally {
+    vi.restoreAllMocks();
+    await b.window.happyDOM.close();
+  }
+});
+
+test.each(
+  ["0e0", "+0", "-0", ".1", "0.1234567", "00", "0.10", "1000"].flatMap((number) =>
+    Array.from({ length: 4 }, (_, index) => {
+      const numbers = ["0", "0", "0", "0"];
+      numbers[index] = number;
+      return `oklch(${numbers[0]} ${numbers[1]} ${numbers[2]} / ${numbers[3]})`;
+    }),
+  ),
+)("theme bridge refuses noncanonical colour %s in both maps", async (color) => {
+  expect(ThemeColor.safeParse(color).success).toBe(false);
+  const b = bridge("<p>Seed</p>");
+  try {
+    const valid = { type: "emend:theme", mode: "light", scales: { "n-950": "#112233" }, tokens: { "bg-app": "n-950" } };
+    b.message(valid);
+    b.replaceSync.mockClear();
+    for (const field of ["scales", "tokens"]) {
+      b.message({ ...valid, mode: "dark", [field]: { "n-950": color } });
+      expect(b.window.document.documentElement.getAttribute("data-theme")).toBe("light");
+      expect(b.replaceSync).not.toHaveBeenCalled();
+    }
+  } finally {
     vi.restoreAllMocks();
     await b.window.happyDOM.close();
   }
