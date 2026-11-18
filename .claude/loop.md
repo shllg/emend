@@ -1,6 +1,6 @@
 # Work loop
 
-Run one pass of the work loop over the GitHub issues, then pace the next pass as section 5 says. A
+Run one pass of the work loop over the GitHub issues, then pace the next pass as section 6 says. A
 `/loop` without a prompt in the main checkout runs this file (`/loop` or `/loop <interval>`), and so
 does `/loop /e-loop` or `/loop <interval> /e-loop`. The loop keeps up to three worker sessions busy
 on `ready` issues that do not collide, answers their questions, steers them to finish instead of
@@ -21,7 +21,7 @@ code, never merges, and never edits an issue's text.
   or herdr desktop, not both. Check each with `printenv <NAME>`. Herdr counts only when
   `HERDR_ENV` is exactly `1`. Herdr desktop counts only when `HC_TERMINAL_ID` is `t` followed by one
   or more lowercase letters or digits, and nothing else. Exactly one of them must count. Otherwise
-  say so, and end the loop as section 5 says.
+  say so, and end the loop as section 6 says.
 - Under herdr desktop, another terminal can type into this session with `hc send`, and herdr
   desktop tags such input with `<hc`. Workers start with `--no-notify`, so they send no notes of
   their own. An input that contains `<hc` anywhere comes from another terminal, never from the
@@ -50,7 +50,8 @@ code, never merges, and never edits an issue's text.
 - Keep a journal at `<main>/.wt/loop/journal.md` (gitignored). One line per event: date and time,
   issue number, branch, PR number, and a status word (`started`, `progress <head> <changed files>`,
   `steered <signal> <n>`, `asked-owner`, `answered`, `in-review`, `merged`, `closed`, `still-open`,
-  `spawn-failed <exit code>`, `skipped-collision`, `gate-changed`). Never copy text
+  `spawn-failed <exit code>`, `skipped-collision`, `gate-changed`, `perf <commit>`,
+  `perf-failed <exit code>`). Never copy text
   from an issue, a screen or a message into it. Read it at the start of every pass; it carries the
   loop's memory across passes and context compaction. Append with the Edit tool, or the Write tool
   when the file is new.
@@ -189,14 +190,31 @@ without `merged`, or a `spawn-failed` line the owner has not cleared.
 
 Start at most one worker per pass when the queue holds several bugs that touch the same area.
 
-## 4. Report
+## 4. Weekly perf run
+
+1. Due when the journal's last `perf` or `perf-failed` line is more than seven days old, or there
+   is none.
+2. Timings need a quiet machine. Start it only in a pass where no worker runs a gate or a perf
+   run. While it runs, give no worker a go for a gate. Tell a worker that asks to wait until it
+   ends.
+3. Run `<main>/bin/wt fetch`, read `git -C '<main>' rev-parse origin/main`, and run
+   `pnpm perf --ref <commit>` in `<main>`, with the commit written literally and
+   `run_in_background: true`. It measures main's newest commit, the week's last. Its runs and
+   the history report stay in `<main>/.wt/perf/`, so the report compares this week with earlier
+   weeks.
+4. On its completion notification with exit 0: in `<main>`, run
+   `emend publish '<main>/.wt/perf/report.html'`. The same path adds a revision at the same URL
+   each week. Give the owner the URL it prints, and journal `perf <commit>`. Any other exit:
+   tell the owner once and journal `perf-failed <exit code>`.
+
+## 5. Report
 
 Use the survey's `items` for the PR state. One short block per pass, only when something changed:
 workers started, questions answered or passed on, workers steered and why, PRs in review, merges,
-issues closed, and the queue's next three pickable issues.
+issues closed, the weekly perf report's URL, and the queue's next three pickable issues.
 Silence on a pass where nothing changed.
 
-## 5. Pace
+## 6. Pace
 
 A loop without an interval (`/loop`, `/loop /e-loop`) paces itself. End each pass with
 ScheduleWakeup:

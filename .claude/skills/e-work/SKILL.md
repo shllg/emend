@@ -66,10 +66,13 @@ Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not re
    sub-agent writes, and your report says so and why.
 3. Run `pnpm verify`. Fix failures at the root cause. Headless browser checks run Chromium directly
    (`chromium --headless=new …`).
+   Right after each green `pnpm verify`, run `pnpm bundle:diff --json .wt/bundle-diff.json`.
 4. Before "done": dispatch `emend-review-manager` (`model: "opus"`) with the round, the range
    (`origin/main...HEAD` for a full round, the fix commits for a check round), the task file
-   `.wt/issue.md` (or the description) and, for a check round, `.wt/review-findings.json`. It picks
-   and runs the reviewers. Fixes go to Codex. Review in rounds as
+   `.wt/issue.md` (or the description), `.wt/bundle-diff.json`, `.wt/bundle-reason.md` when it
+   exists, and, for a check round, `.wt/review-findings.json`. See "Bundle growth" in
+   `.claude/agents/emend-review-manager.md`. It picks and runs the reviewers. Fixes go to
+   Codex. Review in rounds as
    `.claude/rules/review-rounds.md` says: commit first, round 1 over the whole change, then at most
    two check rounds over the fixes. Log each round in `.wt/review-log.md`. Append each manager JSON
    to `.wt/review-findings.json` as the rule says.

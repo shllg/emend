@@ -101,6 +101,9 @@ content, or after a review round in step 7, bring them up to date. When either i
 `<main>/bin/wt pr edit --title-file <top>/.wt/pr-title.txt` after writing the title there, or write the body to `<top>/.wt/pr-body.md` and run
 `<main>/bin/wt pr edit --body-file <top>/.wt/pr-body.md`.
 
+The bundle lines follow `/e-pr`'s rule. Their `.wt/bundle-diff.json` must have `head` equal to
+the PR head. Run `pnpm bundle:diff --json <top>/.wt/bundle-diff.json` first when it does not.
+
 ## 4. Fetch the whole feedback surface
 
 Run `<main>/bin/wt fetch`, then read
@@ -294,8 +297,10 @@ incomplete comment page. Threads you disagreed with stay open by design.
 
 Review in rounds as `.claude/rules/review-rounds.md` says. Dispatch `emend-review-manager`
 (`model: "opus"`) with the round, the range (`origin/main...HEAD` for a full round, the fix
-commits for a check round), the task file `.wt/issue.md` (or task text) and, for `final-check` and
-`owner-check`, `.wt/review-findings.json`. It picks and runs the reviewers. Do not hand it your
+commits for a check round), the task file `.wt/issue.md` (or task text), `.wt/bundle-diff.json`,
+`.wt/bundle-reason.md` when it exists, and, for `final-check` and `owner-check`,
+`.wt/review-findings.json`. The bundle files follow "Bundle growth" in
+`.claude/agents/emend-review-manager.md`. It picks and runs the reviewers. Do not hand it your
 summary. Fixes go to Codex. Read `.wt/review-log.md` first to pick the round:
 
 1. No `final` or `final-skipped` line: run the `final` round over the whole change,
@@ -318,6 +323,10 @@ for CI and threads; back here, the list above picks the next round.
    and gitignored, and only this worktree's session writes it.
 3. Start `emend-review` in a fresh subagent and tell it "publish only". Give it the target
    `origin/main`, with `head` set to the full PR head commit, and the PR URL for `links`. Tell it to use `<top>/.wt/review` as the review folder, in place of a new temporary one.
+   Also give it the `summary` from `<top>/.wt/bundle-diff.json` (its `head` equals the PR head)
+   and each reason from `.wt/bundle-reason.md`. Tell it to list the summary under `checked`.
+   When a route is over 5 KB, tell it to name that growth and its reason as the **Biggest risk**
+   in `whereToLook`.
    It returns the review id, the revision, the URL, the literal review folder, the directory it
    published from and the wait command.
 4. A subagent cannot wait, so this session waits. The subagent set `decisions` to `null`. If this
