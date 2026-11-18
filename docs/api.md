@@ -631,7 +631,9 @@ before the point, hue below 360 and alpha omitted when 1.
 
 `fonts` accepts optional `text` and `code` names matching
 `/^[\p{L}\p{N}](?:[\p{L}\p{N} _-]{0,62}[\p{L}\p{N}])?$/u`, and an optional `files` list. CSS is not accepted.
-The named family precedes emend's default stack. `DEFAULT_THEME_FONTS` is
+The named family precedes emend's default stack. When the theme names files for that font, the
+faces from those files precede emend's default stack instead and the name is not used.
+`DEFAULT_THEME_FONTS` is
 `{ text: "Geist", code: "JetBrains Mono" }`.
 
 Font files live directly in `<configDir>/themes/fonts/`, shared by all themes. For example:
@@ -673,7 +675,8 @@ using the lowercased extension), `X-Content-Type-Options: nosniff`, `Cache-Contr
 `Cross-Origin-Resource-Policy: same-origin`, `Content-Security-Policy: sandbox; default-src 'none'`
 and `Content-Length`. HEAD sends the same headers without the body.
 The app CSP stays unchanged: `font-src 'self'`. The browser registers the picked theme's files
-with `FontFace`, using `display: "swap"`; missing or refused files fall back to emend's fonts.
+with `FontFace` under the aliases `_emend-theme-text` and `_emend-theme-code`, using
+`display: "swap"`; missing or refused files fall back to emend's fonts.
 The Download continues to use system fonts.
 
 For a valid theme, `emend theme check <name>` checks each distinct font file. With no problems it

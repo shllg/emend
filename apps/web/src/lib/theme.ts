@@ -24,7 +24,8 @@ export const themeFontStacks = {
   code: `"${DEFAULT_THEME_FONTS.code}", ui-monospace, "SF Mono", Menlo, monospace`,
 };
 // Plain identifiers work whether an engine parses FontFace families as CSS or literal names.
-const themeFontAliases = { text: "emend-theme-text", code: "emend-theme-code" };
+// Leading underscores keep these aliases outside ThemeFont's accepted names.
+const themeFontAliases = { text: "_emend-theme-text", code: "_emend-theme-code" };
 type FontFileEntry = { family: string; source: string; descriptors: FontFaceDescriptors };
 // Light --bg-app = --n-25 = oklch(0.985 0.001 260), rounded to sRGB bytes.
 const defaultThemeColors = { dark: "#171717", light: "#fafafb" };
@@ -115,10 +116,10 @@ function applyFontFiles(entries: FontFileEntry[], retryFailed = false) {
   };
   if (appliedFaces?.key === key && appliedFaces.fonts === fonts) {
     if (retryFailed) {
-      for (const applied of appliedFaces.faces) {
-        if (applied.face.status !== "error") continue;
-        fonts.delete(applied.face);
-        applied.face = addFace(applied.entry);
+      for (const record of appliedFaces.faces) {
+        if (record.face.status !== "error") continue;
+        fonts.delete(record.face);
+        record.face = addFace(record.entry);
       }
     }
     return;
@@ -155,10 +156,8 @@ function apply(state: ThemeState) {
     ] as const) {
       const name = custom.fonts[font];
       if (name !== undefined && ThemeFont.safeParse(name).success) {
-        const alias = entries.some((entry) => entry.family === themeFontAliases[font])
-          ? `"${themeFontAliases[font]}", `
-          : "";
-        set(property, `${alias}"${name}", ${themeFontStacks[font]}`);
+        const family = entries.some((entry) => entry.family === themeFontAliases[font]) ? themeFontAliases[font] : name;
+        set(property, `"${family}", ${themeFontStacks[font]}`);
       }
     }
   }

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { runInNewContext } from "node:vm";
-import { ThemeValid } from "@emend/contract";
+import { ThemeFont, ThemeValid } from "@emend/contract";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import type { Window as HappyWindow } from "happy-dom";
 import type { CSSProperties } from "react";
@@ -273,22 +273,22 @@ test("the picked theme registers faces with safe URLs, formats and descriptors a
   store.selectCustomTheme(theme);
   expect(face.mock.calls).toEqual([
     [
-      "emend-theme-text",
+      "_emend-theme-text",
       'url("/api/v1/themes/mine/fonts/Sans.WOFF2") format("woff2")',
       { weight: "100 900", style: "normal", display: "swap" },
     ],
     [
-      "emend-theme-text",
+      "_emend-theme-text",
       'url("/api/v1/themes/mine/fonts/Sans-Italic.woff") format("woff")',
       { weight: "100 900", style: "italic", display: "swap" },
     ],
     [
-      "emend-theme-code",
+      "_emend-theme-code",
       'url("/api/v1/themes/mine/fonts/Mono.ttf") format("truetype")',
       { weight: "400", style: "normal", display: "swap" },
     ],
     [
-      "emend-theme-code",
+      "_emend-theme-code",
       'url("/api/v1/themes/mine/fonts/Mono-Bold.otf") format("opentype")',
       { weight: "700", style: "normal", display: "swap" },
     ],
@@ -300,10 +300,10 @@ test("the picked theme registers faces with safe URLs, formats and descriptors a
   expect(remove).not.toHaveBeenCalled();
   expect([...fonts]).toEqual(original);
   expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(
-    `"emend-theme-text", "Example Sans", ${themeFontStacks.text}`,
+    `"_emend-theme-text", ${themeFontStacks.text}`,
   );
   expect(document.documentElement.style.getPropertyValue("--font-mono")).toBe(
-    `"emend-theme-code", "Example Mono", ${themeFontStacks.code}`,
+    `"_emend-theme-code", ${themeFontStacks.code}`,
   );
   store.set("dark");
   expect(remove.mock.calls).toEqual(original.map((face) => [face]));
@@ -337,6 +337,9 @@ test.each([false, true])("a successful list retries only failed faces with alrea
   const failedFace = original[0];
   if (failedFace === undefined) throw new Error("Expected the original text font face");
   for (const [index, face] of original.entries()) Object.assign(face, { status: index === 0 ? "error" : "loaded" });
+  expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(
+    `"_emend-theme-text", ${themeFontStacks.text}`,
+  );
 
   store.applyList("mine", list);
 
@@ -451,12 +454,12 @@ test("changes to a theme's file list replace all its faces without removing othe
   expect(face).toHaveBeenCalledTimes(5);
   expect(face).toHaveBeenNthCalledWith(
     4,
-    "emend-theme-text",
+    "_emend-theme-text",
     'url("/api/v1/themes/mine/fonts/New.woff2") format("woff2")',
     { weight: "400", style: "normal", display: "swap" },
   );
   expect(face).toHaveBeenLastCalledWith(
-    "emend-theme-code",
+    "_emend-theme-code",
     'url("/api/v1/themes/mine/fonts/Mono.woff2") format("woff2")',
     { weight: "400", style: "normal", display: "swap" },
   );
@@ -466,7 +469,7 @@ test("changes to a theme's file list replace all its faces without removing othe
     fonts: { text: "New Family", files: [{ font: "text", file: "New.woff2" }] },
   });
   expect(face).toHaveBeenLastCalledWith(
-    "emend-theme-text",
+    "_emend-theme-text",
     'url("/api/v1/themes/another/fonts/New.woff2") format("woff2")',
     { weight: "400", style: "normal", display: "swap" },
   );
@@ -496,12 +499,35 @@ test("applying a theme revalidates file entries and their family names", () => {
   });
   expect(face.mock.calls).toEqual(
     ["Good.woff2", "Extra.woff2"].map((file) => [
-      "emend-theme-text",
+      "_emend-theme-text",
       `url("/api/v1/themes/mine/fonts/${file}") format("woff2")`,
       { weight: "400", style: "normal", display: "swap" },
     ]),
   );
   expect(fonts.size).toBe(2);
+});
+
+test.each(["_emend-theme-text", "_emend-theme-code"])("font alias %s cannot be a theme font name", (alias) => {
+  expect(ThemeFont.safeParse(alias).success).toBe(false);
+});
+
+test("a text font named emend-theme-code cannot use the code file's alias", () => {
+  const { face } = stubFontFaces();
+  const theme: ThemeValid = {
+    ...customTheme,
+    fonts: {
+      text: "emend-theme-code",
+      code: "Example Mono",
+      files: [{ font: "code", file: "Mono.woff2" }],
+    },
+  };
+  expect(ThemeValid.safeParse(theme).success).toBe(true);
+  createThemeStore().selectCustomTheme(theme);
+  expect(face.mock.calls.map(([name]) => name)).toEqual(["_emend-theme-code"]);
+  const style = document.documentElement.style;
+  expect(style.getPropertyValue("--font-sans")).toBe(`"emend-theme-code", ${themeFontStacks.text}`);
+  expect(style.getPropertyValue("--font-sans")).not.toContain("_emend-theme-");
+  expect(style.getPropertyValue("--font-mono")).toBe(`"_emend-theme-code", ${themeFontStacks.code}`);
 });
 
 test.each(["123 Font", "serif", "A  B", "字体"])("font files use fixed aliases for the family %s", (family) => {
@@ -517,12 +543,12 @@ test.each(["123 Font", "serif", "A  B", "字体"])("font files use fixed aliases
       ],
     },
   });
-  expect(face.mock.calls.map(([name]) => name)).toEqual(["emend-theme-text", "emend-theme-code"]);
+  expect(face.mock.calls.map(([name]) => name)).toEqual(["_emend-theme-text", "_emend-theme-code"]);
   expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(
-    `"emend-theme-text", "${family}", ${themeFontStacks.text}`,
+    `"_emend-theme-text", ${themeFontStacks.text}`,
   );
   expect(document.documentElement.style.getPropertyValue("--font-mono")).toBe(
-    `"emend-theme-code", "${family}", ${themeFontStacks.code}`,
+    `"_emend-theme-code", ${themeFontStacks.code}`,
   );
 });
 
@@ -533,13 +559,13 @@ test.each(["text", "code"] as const)("only the %s role with a usable file gets a
     ...customTheme,
     fonts: { ...customTheme.fonts, files: [{ font, file: "Example.woff2" }] },
   });
-  expect(face.mock.calls.map(([name]) => name)).toEqual([`emend-theme-${font}`]);
+  expect(face.mock.calls.map(([name]) => name)).toEqual([`_emend-theme-${font}`]);
   const style = document.documentElement.style;
   expect(style.getPropertyValue("--font-sans")).toBe(
-    `${font === "text" ? '"emend-theme-text", ' : ""}"Example Sans", ${themeFontStacks.text}`,
+    `"${font === "text" ? "_emend-theme-text" : "Example Sans"}", ${themeFontStacks.text}`,
   );
   expect(style.getPropertyValue("--font-mono")).toBe(
-    `${font === "code" ? '"emend-theme-code", ' : ""}"Example Mono", ${themeFontStacks.code}`,
+    `"${font === "code" ? "_emend-theme-code" : "Example Mono"}", ${themeFontStacks.code}`,
   );
   store.applyList("mine", {
     themes: [{ ...customTheme, fonts: { ...customTheme.fonts, files: [{ font, file: "Bad.css" }] } }],
@@ -549,7 +575,7 @@ test.each(["text", "code"] as const)("only the %s role with a usable file gets a
   expect(style.getPropertyValue("--font-mono")).toBe(`"Example Mono", ${themeFontStacks.code}`);
 });
 
-test("changing only the named font preserves registered faces and updates the fallback", () => {
+test("changing only the named font preserves registered faces and emend's fallback", () => {
   const { face, fonts, remove } = stubFontFaces();
   const store = createThemeStore();
   const theme: ThemeValid = {
@@ -566,7 +592,7 @@ test("changing only the named font preserves registered faces and updates the fa
   expect(remove).not.toHaveBeenCalled();
   expect([...fonts][0]).toBe(original);
   expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(
-    `"emend-theme-text", "New Family", ${themeFontStacks.text}`,
+    `"_emend-theme-text", ${themeFontStacks.text}`,
   );
 });
 
@@ -581,7 +607,7 @@ test.each(["FontFace", "document.fonts"])("font registration does nothing withou
   expect(face).not.toHaveBeenCalled();
   expect(add).not.toHaveBeenCalled();
   expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(
-    `"emend-theme-text", "Example", ${themeFontStacks.text}`,
+    `"_emend-theme-text", ${themeFontStacks.text}`,
   );
 });
 
