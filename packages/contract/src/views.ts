@@ -25,7 +25,7 @@ export const PublishResponse = z.object({
   unplaced: z.int().nonnegative(),
   unrendered: z.array(FilePath).max(LIMITS.filesPerRevision).default([]),
   htmlLooks: z
-    .array(z.object({ path: FilePath, look: z.enum(["emend", "custom"]) }))
+    .array(z.object({ path: FilePath, look: z.enum(["emend", "custom"]), colorScheme: z.enum(["light"]).optional() }))
     .max(LIMITS.filesPerRevision)
     .optional(),
 });
@@ -272,6 +272,7 @@ export const RevisionView = z
             contentUrl,
             images: z.array(FilePath).max(LIMITS.filesPerRevision).optional(),
             look: z.enum(["emend", "custom"]).optional(),
+            colorScheme: z.enum(["light"]).optional(),
             title: DocTitle.optional(),
             headings: DocHeadings.optional(),
           }),

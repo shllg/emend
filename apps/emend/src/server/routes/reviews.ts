@@ -493,6 +493,7 @@ async function revisionView(ownerId: string, q: Queries, deps: AppDeps, reviewId
         kind: "html",
         images: imagesByDoc.get(file.id) ?? [],
         ...(file.look !== null ? { look: file.look } : {}),
+        ...(file.colorScheme !== null ? { colorScheme: file.colorScheme } : {}),
         contentUrl: `/content/${revision.contentKey}${file.id.replaceAll("-", "")}/${file.path.split("/").map(encodeURIComponent).join("/")}`,
       });
     } else {

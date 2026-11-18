@@ -869,14 +869,37 @@ Kinds are `heading | paragraph | item | code | table | quote | diagram`; diagram
 `RenderedWriteup = { sections: { key, label, topic: string | null, blocks: RenderedBlock[] }[] }`
 mirrors core's rendered writeup. These are server-rendered blocks, never browser-rendered Markdown.
 Markdown docs are `{ path, kind: "markdown", blocks: RenderedBlock[] }` (empty if unrendered).
-HTML docs are `{ path, kind: "html", contentUrl, look?: "emend" | "custom", images?: FilePath[] }`.
+HTML docs are `{ path, kind: "html", contentUrl, look?: "emend" | "custom", colorScheme?: "light", images?: FilePath[] }`.
 The optional `images` lists the doc's own raster image assets linked through `doc_assets`,
 sorted by path, with at most `LIMITS.filesPerRevision` entries. Only `image/png`, `image/jpeg`,
 `image/gif`, `image/webp` and `image/avif` qualify. SVG, ICO and BMP assets stay in the frame;
 they cannot open in the lightbox. HTML docs without qualifying assets get `images: []`.
 The optional `look` is recorded at publish time: `emend` adds emend's layered pub stylesheet, and `custom`
-keeps the page's own look. An absent `look` (a revision published before this field existed, or
-metadata that failed) shows as a custom page. The URL is
+keeps the page's own look. A page gets `custom` only when its head carries
+`<meta name="emend-look" content="custom">`. Every other page gets `emend`, with or without its own
+styles. The mark `content="emend"` is still accepted and changes nothing. A revision keeps the look
+stored with it: a page with its own styles published before this rule stays `custom`. An absent
+`look` (a revision published before this field existed, or metadata that failed) shows as a custom
+page.
+The optional `colorScheme: "light"` is recorded at publish time too, only with `look: "emend"`. It
+marks a page whose own styles set colours but have no dark-mode rule. emend shows that page in light
+mode, also while emend is dark, so its text stays readable. Without the field the page follows
+emend's mode. A page sets colours when:
+
+- a `style` element or a `style` attribute declares `color`, `background`, `fill`, `stroke` or a
+  property ending in `-color`, with a value other than `inherit`, `initial`, `unset`, `revert`,
+  `revert-layer`, `currentcolor`, `transparent` or `none`;
+- an HTML element carries `bgcolor`, `color`, `text`, `link`, `vlink` or `alink`;
+- an SVG element carries `fill`, `stroke`, `color`, `stop-color`, `flood-color` or `lighting-color`
+  with a value other than those keywords;
+- it links a stylesheet, or a style element uses `@import`. emend does not read those files.
+
+A dark-mode rule is `prefers-color-scheme` or `light-dark(` in a style element, `light-dark(` in a
+`style` attribute or an SVG colour attribute, or `prefers-color-scheme` in the `media` attribute of
+a style element or a stylesheet link. Both checks read CSS outside comments, strings and `url()`
+values, and cover declarative shadow roots, not inert templates.
+
+The URL is
 `/content/<docKey>/<path>` with each path segment percent-encoded. The doc key is the revision's
 43-character base64url `contentKey` followed by that doc's file UUID with dashes removed (32
 lowercase hex characters); its exact shape is `^[A-Za-z0-9_-]{43}[0-9a-f]{32}$`.
@@ -903,6 +926,10 @@ styles in the cascade layer `emend`, with its fonts as `data:` URLs. It contains
 check these rules and the `pubStylesheetBytes` limit. A missing or rejected sheet falls back to a
 minimal light and dark sheet with system colours.
 Every unlayered rule of the doc's own CSS wins over it. The doc's headers stay exactly as above.
+A doc whose `colorScheme` is `light` also gets the fixed start tag `<html data-theme="light">` right
+before that style element. The HTML parser gives the root element this attribute first, and a later
+`html` tag of the doc only adds attributes the root lacks, so the doc cannot change it. The sheet's
+dark colours, and the fallback's dark scheme, apply only without `data-theme="light"`.
 
 Asset and error responses under `/content/` send:
 
@@ -1270,13 +1297,16 @@ the individual secret links remain usable.
 
 `PublishResponse = { reviewId, revision, url, placed, unplaced, unrendered: FilePath[], htmlLooks? }`.
 An omitted `unrendered` field defaults to `[]`.
-`htmlLooks` is an optional array of `{ path: FilePath, look: "emend" | "custom" }`, with at most
-`filesPerRevision` entries. It lists every rendered HTML doc's look in the new revision, using the
-same metadata stored for that revision, including unchanged re-publishes. A null stored look means
-`custom`. HTML docs whose metadata work failed are in `unrendered` instead and are not listed.
+`htmlLooks` is an optional array of `{ path: FilePath, look: "emend" | "custom", colorScheme?: "light" }`,
+with at most `filesPerRevision` entries. It lists every rendered HTML doc's look in the new revision,
+using the same metadata stored for that revision, including unchanged re-publishes. A null stored
+look means `custom`. `colorScheme` is present only when that doc is stored as light-only, as in the
+HTML doc view. HTML docs whose metadata work failed are in `unrendered` instead and are not listed.
 New servers include `htmlLooks` even when empty. Older servers omit it; it has no default.
 Without it, the CLI prints no HTML look or outside-elements notes. With it, the CLI reports the
-server's look. It adds a local reason and outside-elements advice only when its classification agrees.
+server's look, and a light-mode note when the server stored the doc as light-only. It adds a local
+reason and outside-elements advice only when its look and light-mode classification agree with the
+server's.
 HTML doc entries include `assets: FilePath[]`; rendered Markdown docs may include image assets.
 Each listed path must be an asset in the request inside that doc's folder. The doc source plus its
 own listed assets must fit `htmlDocWithAssetsBytes`; shared assets count for every doc listing them. Asset rows retain
@@ -1396,7 +1426,7 @@ Unknown keys, including owner ids, moved-to URLs, content keys, media types, `pl
 | `review` | `id, originInstanceId, reviewKey: Sha256, repo: {key: Sha256, name} or null, project?: string or null, branch, title, state, approvedRevision: UUID or null, createdAt, updatedAt` |
 | `revisions` | `id, reviewId, seq, base, head, main, writeupEmpty, createdAt` |
 | `topics` | `id, revisionId` plus `TopicMeta` (optional door and blastRadius) |
-| `files` | `id, revisionId, path, oldPath, role, status, topicSlug, ord, oldBlob, newBlob, renderedBlob, flag, parentDocId, title?, view?: DocView`; nullable sides, status, topic, flag, parent |
+| `files` | `id, revisionId, path, oldPath, role, status, topicSlug, ord, oldBlob, newBlob, renderedBlob, flag, parentDocId, title?, view?: DocView, look?: "emend" \| "custom" \| null, colorScheme?: "light" \| null`; nullable sides, status, topic, flag, parent |
 | `docAssets` | `revisionId, docId, assetId` |
 | `agentNotes` | `id, fileId, ord` plus `AgentNote`; optional array, ordered per file, at most 8 per file and 64 per revision |
 | `writeups` | `id, revisionId, sourceBlob, renderedBlob` |
@@ -1420,6 +1450,12 @@ and comment limits. Each revision has exactly one writeup. Blob references are o
 upload them first using HEAD/PUT blobs. A missing reference gives `400 blob_missing` without writing.
 Media types are chosen on the hub. Rendered writeup and Markdown blobs are untrusted derived
 content: the hub regenerates them from source through the normal sanitizer and rendering budgets.
+A file row that carries `look` keeps the stored look on the hub, null included, so a pub keeps the
+look it was published with; `colorScheme` is kept only with `look: "emend"`. Both apply only to a
+rendered HTML doc and are null on every other row. A row without `look` comes from an exporter
+older than the default look, so its pub was published under the earlier rule, and the hub applies
+that rule to the doc's source: the `emend-look` mark decides, else a page with its own styles is
+`custom`, else `emend`. Such a row never gets `colorScheme`.
 HTML content capability keys are freshly minted. `agent_waiters` and event state are not copied.
 Confirmed deliveries are retained; unconfirmed deliveries are dropped and their Sends have both
 `deliveryId` and `setAsideAt` cleared, making them available to the next take.

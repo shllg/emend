@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { Writable } from "node:stream";
 import { promisify } from "node:util";
 import { LIMITS, type PublishManifest, PublishRequest, PublishResponse } from "@emend/contract";
+import * as core from "@emend/core";
 import { afterEach, expect, onTestFinished, test, vi } from "vitest";
 import { run } from "../../main.ts";
 import { projectKey } from "../publish/key.ts";
@@ -14,6 +15,41 @@ import { commandFixture, provenTestServer } from "../test-support.ts";
 import { manifestJsonError, parsePublishArgs, publishCommand, publishTimeoutMs } from "./publish.ts";
 
 afterEach(() => vi.unstubAllGlobals());
+
+test("a local HTML classifier error still publishes and prints the server's generic look note", async () => {
+  const f = await commandFixture();
+  const source = await realpath(await mkdtemp(join(tmpdir(), "emend-pub-look-error-")));
+  onTestFinished(() => rm(source, { recursive: true, force: true }));
+  vi.spyOn(roots, "worktreeRoot").mockResolvedValue(null);
+  const classify = vi.spyOn(core, "htmlLook").mockImplementation(() => {
+    throw new RangeError("Synthetic classifier failure");
+  });
+  await mkdir(f.configDir, { recursive: true });
+  await writeFile(join(f.configDir, "config.json"), JSON.stringify({ docRoots: [source] }));
+  await writeFile(join(f.dir, "instance.json"), JSON.stringify({ id: randomUUID() }));
+  await writeFile(join(source, "page.html"), "<style>p{margin:0}</style><p>Synthetic plan</p>");
+  const response = {
+    reviewId: randomUUID(),
+    revision: 1,
+    placed: 0,
+    unplaced: 0,
+    unrendered: [],
+    htmlLooks: [{ path: "page.html", look: "emend" }],
+    url: "http://127.0.0.1:3636/r/synthetic",
+  };
+  f.setResponse(async (_url, init) => {
+    if (init?.method === "HEAD") return new Response(null, { status: 404 });
+    if (init?.method === "PUT") return new Response(null, { status: 204 });
+    return Response.json(response);
+  });
+  await publishCommand(f.dir, f.configDir, ["page.html", "--title", "Synthetic", "--key", "synthetic"], f.io, source);
+  expect(classify).toHaveBeenCalled();
+  expect(f.stdout).toEqual([`${response.url}\n`]);
+  expect(f.stderr).toEqual([
+    "emend: page.html shows in emend's look\n",
+    `emend: published revision 1: ${response.url}\n`,
+  ]);
+});
 
 test.each(["manifest", "shortcut", "json"])(
   "%s publishes report each HTML look on stderr without changing stdout",
@@ -30,17 +66,19 @@ test.each(["manifest", "shortcut", "json"])(
       [
         "marked.html",
         '<meta name="emend-look" content="emend"><style>p{}</style>',
-        "shows in emend's look: marked emend, its own styles apply on top",
+        "shows in emend's look; its own styles apply on top",
       ],
       [
         "custom.html",
         '<meta name="emend-look" content="custom"><script>alert(1)</script>',
-        "shows as a custom page: marked custom",
+        "shows as a custom page with its own styles only: marked custom",
       ],
+      ["styled.html", "<style>p{}</style>", "shows in emend's look; its own styles apply on top"],
+      ["light.html", "<style>p{color:#222}</style>", "shows in emend's look; its own styles apply on top"],
       [
-        "styled.html",
-        "<style>p{}</style>",
-        'shows as a custom page: it has its own styles; add <meta name="emend-look" content="emend"> to use emend\'s look under them',
+        "dark.html",
+        "<style>p{color:#222}@media(prefers-color-scheme:dark){p{color:white}}</style>",
+        "shows in emend's look; its own styles apply on top",
       ],
       ["deep.html", "<div>".repeat(600), "shows as a custom page: emend could not read its structure"],
       [
@@ -79,7 +117,13 @@ test.each(["manifest", "shortcut", "json"])(
       htmlLooks: sources.flatMap(([path, , note]) =>
         path === "failed.html" || path === "plan.md"
           ? []
-          : [{ path, look: note.startsWith("shows in") ? "emend" : "custom" }],
+          : [
+              {
+                path,
+                look: note.startsWith("shows in") ? "emend" : "custom",
+                ...(path === "light.html" ? { colorScheme: "light" } : {}),
+              },
+            ],
       ),
       url: "http://127.0.0.1:3636/r/synthetic",
     };
@@ -120,7 +164,13 @@ test.each(["manifest", "shortcut", "json"])(
       if (note) expect(f.stderr).toContain(`emend: ${path.replace("\u034f", "\\u{34f}")} ${note}\n`);
       else expect(f.stderr.join("")).not.toContain(`${path} shows `);
     }
-    expect(f.stderr.filter((line) => line.includes(" shows "))).toHaveLength(10);
+    expect(f.stderr.filter((line) => line.includes(" shows "))).toHaveLength(13);
+    const lightLine =
+      "emend: light.html shows in light mode, also while emend is dark: its styles set colours but have no dark-mode rule; add a prefers-color-scheme: dark rule in a style element so it follows dark mode\n";
+    expect(f.stderr.filter((line) => line.includes("shows in light mode"))).toEqual([lightLine]);
+    expect(f.stderr[f.stderr.indexOf(lightLine) - 1]).toBe(
+      "emend: light.html shows in emend's look; its own styles apply on top\n",
+    );
     expect(f.stderr.filter((line) => line.includes("failed.html"))).toEqual([
       "emend: failed.html shows as a custom page: emend could not read its structure\n",
     ]);
@@ -150,58 +200,73 @@ test.each(["manifest", "shortcut", "json"])(
   },
 );
 
-test.each(["legacy", "empty", "different"])("%s server look metadata controls HTML notes", async (mode) => {
-  const f = await commandFixture();
-  const source = await realpath(await mkdtemp(join(tmpdir(), "emend-server-look-")));
-  onTestFinished(() => rm(source, { recursive: true, force: true }));
-  vi.spyOn(roots, "worktreeRoot").mockResolvedValue(null);
-  await mkdir(f.configDir, { recursive: true });
-  await writeFile(join(f.configDir, "config.json"), JSON.stringify({ docRoots: [source] }));
-  await writeFile(join(f.dir, "instance.json"), JSON.stringify({ id: randomUUID() }));
-  const sources = {
-    "emend.html": '<meta name="emend-look" content="emend"><x-extra></x-extra>',
-    "custom.html": "<style>p{}</style><x-extra></x-extra>",
-    "failed.html": "<h1>Fails remotely</h1>",
-    "plan.md": "# Plan",
-  };
-  for (const [path, text] of Object.entries(sources)) await writeFile(join(source, path), text);
-  const htmlLooks =
-    mode === "different"
-      ? [
-          { path: "emend.html", look: "custom" },
-          { path: "custom.html", look: "emend" },
-        ]
-      : [];
-  const response = {
-    reviewId: randomUUID(),
-    revision: 1,
-    placed: 0,
-    unplaced: 0,
-    unrendered: ["failed.html", "plan.md"],
-    ...(mode === "legacy" ? {} : { htmlLooks }),
-    url: "http://127.0.0.1:3636/r/synthetic",
-  };
-  f.setResponse(async (_url, init) => {
-    if (init?.method === "HEAD" || init?.method === "PUT") return new Response(null, { status: 204 });
-    return Response.json(response);
-  });
-  await publishCommand(
-    f.dir,
-    f.configDir,
-    [...Object.keys(sources), "--title", "Synthetic", "--key", "synthetic", "--json"],
-    f.io,
-    source,
-  );
-  expect(f.stdout).toEqual([`${JSON.stringify(PublishResponse.parse(response))}\n`]);
-  expect(f.stderr.filter((line) => line.includes(" shows "))).toEqual([
-    ...(mode === "different"
-      ? ["emend: custom.html shows in emend's look\n", "emend: emend.html shows as a custom page\n"]
-      : []),
-    ...(mode === "legacy" ? [] : ["emend: failed.html shows as a custom page: emend could not read its structure\n"]),
-  ]);
-  expect(f.stderr.join("")).not.toContain("uses elements outside");
-  expect(f.stderr.filter((line) => line.includes("could not render"))).toEqual(["emend: could not render plan.md\n"]);
-});
+test.each(["legacy", "empty", "different", "scheme-omitted", "scheme-added"])(
+  "%s server look metadata controls HTML notes",
+  async (mode) => {
+    const f = await commandFixture();
+    const source = await realpath(await mkdtemp(join(tmpdir(), "emend-server-look-")));
+    onTestFinished(() => rm(source, { recursive: true, force: true }));
+    vi.spyOn(roots, "worktreeRoot").mockResolvedValue(null);
+    await mkdir(f.configDir, { recursive: true });
+    await writeFile(join(f.configDir, "config.json"), JSON.stringify({ docRoots: [source] }));
+    await writeFile(join(f.dir, "instance.json"), JSON.stringify({ id: randomUUID() }));
+    const sources = {
+      "emend.html": '<meta name="emend-look" content="emend"><x-extra></x-extra>',
+      "custom.html": '<meta name="emend-look" content="custom"><style>p{}</style><x-extra></x-extra>',
+      "light.html": "<style>p{color:#222}</style><x-extra></x-extra>",
+      "failed.html": "<h1>Fails remotely</h1>",
+      "plan.md": "# Plan",
+    };
+    for (const [path, text] of Object.entries(sources)) await writeFile(join(source, path), text);
+    const htmlLooks =
+      mode === "different"
+        ? [
+            { path: "emend.html", look: "custom" },
+            { path: "custom.html", look: "emend" },
+          ]
+        : mode === "scheme-omitted"
+          ? [{ path: "light.html", look: "emend" }]
+          : mode === "scheme-added"
+            ? [{ path: "emend.html", look: "emend", colorScheme: "light" }]
+            : [];
+    const response = {
+      reviewId: randomUUID(),
+      revision: 1,
+      placed: 0,
+      unplaced: 0,
+      unrendered: ["failed.html", "plan.md"],
+      ...(mode === "legacy" ? {} : { htmlLooks }),
+      url: "http://127.0.0.1:3636/r/synthetic",
+    };
+    f.setResponse(async (_url, init) => {
+      if (init?.method === "HEAD" || init?.method === "PUT") return new Response(null, { status: 204 });
+      return Response.json(response);
+    });
+    await publishCommand(
+      f.dir,
+      f.configDir,
+      [...Object.keys(sources), "--title", "Synthetic", "--key", "synthetic", "--json"],
+      f.io,
+      source,
+    );
+    expect(f.stdout).toEqual([`${JSON.stringify(PublishResponse.parse(response))}\n`]);
+    expect(f.stderr.filter((line) => line.includes(" shows "))).toEqual([
+      ...(mode === "different"
+        ? ["emend: custom.html shows in emend's look\n", "emend: emend.html shows as a custom page\n"]
+        : []),
+      ...(mode === "scheme-added"
+        ? [
+            "emend: emend.html shows in emend's look\n",
+            "emend: emend.html shows in light mode, also while emend is dark: its styles set colours but have no dark-mode rule; add a prefers-color-scheme: dark rule in a style element so it follows dark mode\n",
+          ]
+        : []),
+      ...(mode === "legacy" ? [] : ["emend: failed.html shows as a custom page: emend could not read its structure\n"]),
+      ...(mode === "scheme-omitted" ? ["emend: light.html shows in emend's look\n"] : []),
+    ]);
+    expect(f.stderr.join("")).not.toContain("uses elements outside");
+    expect(f.stderr.filter((line) => line.includes("could not render"))).toEqual(["emend: could not render plan.md\n"]);
+  },
+);
 
 test("source HTML and Markdown publish without look diagnostics", async () => {
   const f = await commandFixture();

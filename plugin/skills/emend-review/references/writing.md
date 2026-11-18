@@ -202,10 +202,10 @@ These rules hold for every HTML document you write to publish.
 
 ### emend's page structure
 
-Build the page from these elements and write no CSS.
-emend adds its own styles when it serves the page.
+Build the page from these elements. It needs no CSS.
+emend adds its own styles to every page it serves, unless the page is marked custom.
 The page then has the fonts, colours, sizes and spacing of a Markdown document.
-It follows the device's light or dark mode.
+It follows emend's light or dark mode.
 
 - Title and sections: `h1` for the title, `h2` and `h3` for sections.
   Contents lists the `h2` and `h3` headings.
@@ -257,20 +257,29 @@ emend's look has no styles for them.
 </html>
 ```
 
+### Your own styles
+
+emend's styles sit in a cascade layer, so each of your own rules wins over them.
+Add a few rules when the structure above is not enough. The rest of the page keeps emend's look.
+
+When your styles set colours, style both modes.
+Put the dark colours in a `@media (prefers-color-scheme: dark)` rule in a `style` element, or use
+`light-dark()`.
+A page that sets colours without such a rule shows in light mode only, also while emend is dark,
+so its text stays readable.
+Colours count when a `style` element or `style` attribute sets one, when an attribute such as
+`bgcolor` or an SVG `fill` or `stroke` sets one, and when the page links or imports a stylesheet:
+emend does not read those files.
+
 ### Custom pages
 
 When the user asks for a custom page, mark it in its `head` with
 `<meta name="emend-look" content="custom">`.
 emend then shows the page with its own styles only.
-A page with its own `style` element, stylesheet link or `style` attributes, including in a declarative
-shadow root, and no mark also shows as a custom page.
 On a custom page:
 
 - Give the main column a max width of 1024px.
 - Use body text around 18px with a line height around 1.65.
 
-To keep emend's look and add a few styles of your own, mark the page with
-`<meta name="emend-look" content="emend">`.
-Your own rules then win over emend's.
 `emend publish` says for each HTML page whether it shows in emend's look or as a custom page,
-and why.
+and why. It also says when a page shows in light mode only.

@@ -1,7 +1,7 @@
 import { lstat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { type DocView, isRenderedHtmlDoc, LIMITS, PublishManifest, PublishResponse } from "@emend/contract";
-import { type HtmlLookReason, htmlLook } from "@emend/core";
+import { htmlLook } from "@emend/core";
 import type { Io } from "../../main.ts";
 import { DIFF_COUNT_BUDGET_MS } from "../../server/publish/counts.ts";
 import { readDocRoots } from "../config.ts";
@@ -179,7 +179,14 @@ export async function publishCommand(
     folderRoots: shortcut?.folderRoots,
     namedFiles: shortcut?.namedFiles,
     docArguments: shortcut?.docArguments,
-    onHtmlDoc: (path, bytes) => htmlLooks.set(path, htmlLook(bytes.toString())),
+    onHtmlDoc: (path, bytes) => {
+      try {
+        htmlLooks.set(path, htmlLook(bytes.toString()));
+      } catch {
+        // Local diagnostics are optional; the server's look still supplies a generic note.
+        htmlLooks.delete(path);
+      }
+    },
   };
   if (!manifest.base && !options.key && !options.review) throw new CliError("pass --review or --key");
   // Resolve all paths and unchanged-file checks before creating any server state.
@@ -263,32 +270,39 @@ export async function publishCommand(
   const htmlPaths = new Set(collected.request.files.filter(isRenderedHtmlDoc).map((file) => file.path));
   for (const path of result.data.unrendered)
     if (!htmlPaths.has(path)) io.stderr(`emend: could not render ${escapeReference(path)}\n`);
-  const lookNotes: Record<HtmlLookReason, string> = {
-    structure: "shows in emend's look",
-    "marked-emend": "shows in emend's look: marked emend, its own styles apply on top",
-    "marked-custom": "shows as a custom page: marked custom",
-    "own-styles":
-      'shows as a custom page: it has its own styles; add <meta name="emend-look" content="emend"> to use emend\'s look under them',
-    unreadable: "shows as a custom page: emend could not read its structure",
-  };
+  const unreadableNote = "shows as a custom page: emend could not read its structure";
+  const lightNote =
+    "shows in light mode, also while emend is dark: its styles set colours but have no dark-mode rule; add a prefers-color-scheme: dark rule in a style element so it follows dark mode";
   const unrendered = new Set(result.data.unrendered);
-  const serverLooks = result.data.htmlLooks && new Map(result.data.htmlLooks.map(({ path, look }) => [path, look]));
+  const serverLooks = result.data.htmlLooks && new Map(result.data.htmlLooks.map((entry) => [entry.path, entry]));
   for (const file of collected.request.files) {
     if (!isRenderedHtmlDoc(file) || !serverLooks) continue;
     const path = escapeReference(file.path);
     if (unrendered.has(file.path)) {
-      io.stderr(`emend: ${path} ${lookNotes.unreadable}\n`);
+      io.stderr(`emend: ${path} ${unreadableNote}\n`);
       continue;
     }
     const serverLook = serverLooks.get(file.path);
     if (!serverLook) continue;
     const result = htmlLooks.get(file.path);
-    if (!result || result.look !== serverLook) {
-      const note = serverLook === "emend" ? lookNotes.structure : "shows as a custom page";
+    if (
+      !result ||
+      result.look !== serverLook.look ||
+      (result.colorScheme === "light") !== (serverLook.colorScheme === "light")
+    ) {
+      const note = serverLook.look === "emend" ? "shows in emend's look" : "shows as a custom page";
       io.stderr(`emend: ${path} ${note}\n`);
+      if (serverLook.colorScheme === "light") io.stderr(`emend: ${path} ${lightNote}\n`);
       continue;
     }
-    io.stderr(`emend: ${path} ${lookNotes[result.reason]}\n`);
+    const note =
+      result.reason === "unreadable"
+        ? unreadableNote
+        : result.reason === "marked-custom"
+          ? "shows as a custom page with its own styles only: marked custom"
+          : `shows in emend's look${result.ownStyles ? "; its own styles apply on top" : ""}`;
+    io.stderr(`emend: ${path} ${note}\n`);
+    if (result.colorScheme === "light") io.stderr(`emend: ${path} ${lightNote}\n`);
     if (result.look === "emend" && (result.outside.length || result.otherOutside)) {
       const names = result.outside
         .slice(0, 5)

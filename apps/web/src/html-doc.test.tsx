@@ -45,7 +45,11 @@ function frameByTitle() {
   return frame;
 }
 
-test.each(["emend", "custom", undefined] as const)("%s look uses the matching loading background", (look) => {
+test.each(
+  (["emend", "custom", undefined] as const).flatMap((look) =>
+    (["light", undefined] as const).map((colorScheme) => ({ look, colorScheme })),
+  ),
+)("$look look, $colorScheme colour scheme uses the matching loading background", ({ look, colorScheme }) => {
   render(
     <QueryClientProvider client={client}>
       <HtmlDocFrame
@@ -56,12 +60,13 @@ test.each(["emend", "custom", undefined] as const)("%s look uses the matching lo
         contentUrl={doc.contentUrl}
         threads={[]}
         look={look}
+        colorScheme={colorScheme}
       />
     </QueryClientProvider>,
   );
   const frame = frameByTitle();
-  expect(frame.classList.contains("bg-reading")).toBe(look === "emend");
-  expect(frame.classList.contains("bg-[#fff]")).toBe(look !== "emend");
+  expect(frame.classList.contains("bg-reading")).toBe(look === "emend" && colorScheme !== "light");
+  expect(frame.classList.contains("bg-[#fff]")).toBe(look !== "emend" || colorScheme === "light");
   expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
 });
 

@@ -197,6 +197,7 @@ test("publish HTML looks are optional, bounded and never defaulted", () => {
   const htmlLooks = [
     { path: "structure.html", look: "emend" },
     { path: "styled.html", look: "custom" },
+    { path: "light.html", look: "emend", colorScheme: "light" },
   ];
   expect(PublishResponse.parse({ ...response, htmlLooks }).htmlLooks).toEqual(htmlLooks);
   const maximum = Array.from({ length: LIMITS.filesPerRevision }, (_, i) => ({ path: `${i}.html`, look: "emend" }));
@@ -205,6 +206,7 @@ test("publish HTML looks are optional, bounded and never defaulted", () => {
     null,
     {},
     [{ path: "page.html", look: "other" }],
+    ...["auto", "dark", "", null, false].map((colorScheme) => [{ path: "page.html", look: "emend", colorScheme }]),
     [{ path: "page.html" }],
     [{ path: "../page.html", look: "custom" }],
     [...maximum, { path: "extra.html", look: "emend" }],

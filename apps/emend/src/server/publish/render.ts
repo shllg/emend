@@ -60,7 +60,13 @@ export async function renderRevision(
         try {
           const result = await execute({ kind: "doc-metadata", format, bytes: await read(file.newBlob), media });
           if (result.kind !== "doc-metadata") throw new Error("wrong result");
-          own = { title: result.title, headings: result.headings, look: result.look };
+          own = {
+            title: result.title,
+            headings: result.headings,
+            look: result.look,
+            legacyLook: result.legacyLook,
+            colorScheme: result.colorScheme,
+          };
         } catch {
           checkPublishSignal(signal);
           failedMetadata.add(key);
@@ -73,6 +79,8 @@ export async function renderRevision(
         cleanDocTitle(file.title ?? "") || own.title || cleanDocTitle(file.path.split("/").at(-1) ?? "") || "Document",
       headings: own.headings,
       ...(format === "html" && own.look ? { look: own.look } : {}),
+      ...(format === "html" && own.legacyLook ? { legacyLook: own.legacyLook } : {}),
+      ...(format === "html" && own.colorScheme ? { colorScheme: own.colorScheme } : {}),
     };
     const size = Buffer.byteLength(JSON.stringify(doc));
     metadataBytes += size;

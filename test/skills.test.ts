@@ -425,18 +425,21 @@ test("the writing reference defines HTML pages and both TL;DR locations", () => 
     "Use body text around 18px with a line height around 1.65.",
     "Keep the page self-contained.",
     "Use emend's page structure below unless the user asks for a custom page.",
-    "Build the page from these elements and write no CSS.",
+    "Build the page from these elements. It needs no CSS.",
     '<section class="tldr">',
     '<dl class="facts">',
     '<div class="pair">',
     '<aside class="note">',
     '<span class="status">',
     '<meta name="emend-look" content="custom">',
-    '<meta name="emend-look" content="emend">',
+    "emend's styles sit in a cascade layer, so each of your own rules wins over them.",
+    "`@media (prefers-color-scheme: dark)`",
+    "A page that sets colours without such a rule shows in light mode only, also while emend is dark,",
     "says for each HTML page whether it shows in emend's look or as a custom page",
   ]) {
     expect(html).toContain(rule);
   }
+  expect(html).not.toContain('<meta name="emend-look" content="emend">');
   const tldr = text.split("## TL;DR\n")[1]?.split("\n## ")[0] ?? "";
   expect(tldr).toContain("A review writeup holds it in `tldr`.");
   expect(tldr).toContain('A document opens with it, under a "TL;DR" heading right after the title.');

@@ -49,12 +49,30 @@ beforeEach(async () => {
   f = await importFixture();
   onTestFinished(() => f.cleanup());
 });
-test("import preserves HTML looks and omits look when metadata has no classification", async () => {
+test("import uses the earlier HTML look rule for bundles without stored appearance", async () => {
   const input = ImportBundle.parse(await bundle(f));
   const file = required(input.files[0]);
+  const css = "@layer emend{body{margin:0}}";
+  await writeFile(join(f.dir, "pub-frame.css"), css);
   const sources = [
     { path: "structure.html", source: "<h1>Synthetic plan</h1>", look: "emend" },
-    { path: "styled.html", source: "<style>p{color:red}</style><p>Synthetic plan</p>", look: "custom" },
+    { path: "styled.html", source: "<style>p{font-family:serif}</style><p>Synthetic plan</p>", look: "custom" },
+    { path: "light-only.html", source: "<style>p{color:#222}</style><p>Synthetic plan</p>", look: "custom" },
+    {
+      path: "custom.html",
+      source: '<meta name="emend-look" content="custom"><style>p{color:red}</style>',
+      look: "custom",
+    },
+    {
+      path: "emend.html",
+      source: '<meta name="emend-look" content="emend"><style>p{color:#222}</style>',
+      look: "emend",
+    },
+    {
+      path: "dark.html",
+      source: "<style>p{color:#222}@media(prefers-color-scheme:dark){p{color:white}}</style>",
+      look: "custom",
+    },
     { path: "deep.html", source: "<div>".repeat(600), look: null },
     { path: "plan.md", source: "# Synthetic plan", look: null },
   ];
@@ -67,6 +85,7 @@ test("import preserves HTML looks and omits look when metadata has no classifica
       newBlob: await f.deps.blobs.put(f.ownerId, Buffer.from(source), "text/plain"),
     })),
   );
+  expect(input.files.every((row) => row.look === undefined)).toBe(true);
   expect((await f.importRequest("/import", input)).status).toBe(201);
   const rows = await f.db.read((q) =>
     q
@@ -76,17 +95,119 @@ test("import preserves HTML looks and omits look when metadata has no classifica
       .all(),
   );
   expect(rows).toHaveLength(sources.length);
-  for (const { path, look } of sources) expect(rows.find((row) => row.path === path)?.look).toBe(look);
+  for (const { path, look } of sources)
+    expect(rows.find((row) => row.path === path)).toMatchObject({
+      look,
+      colorScheme: null,
+    });
   const response = await f.request(`/reviews/${input.review.id}/revisions/1`, "GET");
   expect(response.status).toBe(200);
   const view = RevisionView.parse(await response.json());
   expect(view.docs).toHaveLength(sources.length);
-  expect(view.docs.find((doc) => doc.path === "structure.html")).toMatchObject({ kind: "html", look: "emend" });
-  expect(view.docs.find((doc) => doc.path === "styled.html")).toMatchObject({ kind: "html", look: "custom" });
+  for (const { path, source, look } of sources) {
+    const doc = required(view.docs.find((doc) => doc.path === path));
+    expect(doc).not.toHaveProperty("colorScheme");
+    if (look === null) continue;
+    expect(doc).toMatchObject({ kind: "html", look });
+    if (doc.kind !== "html") continue;
+    const served = await f.app.request(`http://127.0.0.1:3636${doc.contentUrl}`, {
+      headers: { Host: "127.0.0.1:3636" },
+    });
+    expect(served.status).toBe(200);
+    const body = await served.text();
+    expect(body).toContain(source);
+    expect(body.includes(css)).toBe(look === "emend");
+    expect(body).not.toContain('<html data-theme="light">');
+  }
   expect(view.docs.find((doc) => doc.path === "deep.html")).toMatchObject({ kind: "html" });
   expect(view.docs.find((doc) => doc.path === "plan.md")).toMatchObject({ kind: "markdown" });
   for (const path of ["deep.html", "plan.md"])
     expect(view.docs.find((doc) => doc.path === path)).not.toHaveProperty("look");
+});
+
+test("import preserves stored HTML appearance, including null, and clears it for other docs", async () => {
+  const input = ImportBundle.parse(await bundle(f));
+  const file = required(input.files[0]);
+  const source = "<style>p{color:#222}</style><p>Synthetic plan</p>";
+  const newBlob = await f.deps.blobs.put(f.ownerId, Buffer.from(source), "text/html");
+  const css = "@layer emend{body{margin:0}}";
+  await writeFile(join(f.dir, "pub-frame.css"), css);
+  const cases = [
+    { path: "custom.html", appearance: { look: "custom" }, look: "custom", colorScheme: null },
+    { path: "unclassified.html", appearance: { look: null }, look: null, colorScheme: null },
+    {
+      path: "light.html",
+      appearance: { look: "emend", colorScheme: "light" },
+      look: "emend",
+      colorScheme: "light",
+    },
+    {
+      path: "custom-scheme.html",
+      appearance: { look: "custom", colorScheme: "light" },
+      look: "custom",
+      colorScheme: null,
+    },
+    { path: "null-scheme.html", appearance: { look: null, colorScheme: "light" }, look: null, colorScheme: null },
+    { path: "auto.html", appearance: { look: "emend" }, look: "emend", colorScheme: null },
+    {
+      path: "explicit-auto.html",
+      appearance: { look: "emend", colorScheme: null },
+      look: "emend",
+      colorScheme: null,
+    },
+    { path: "older.html", appearance: {}, look: "custom", colorScheme: null },
+    { path: "older-scheme.html", appearance: { colorScheme: null }, look: "custom", colorScheme: null },
+    { path: "older-light.html", appearance: { colorScheme: "light" }, look: "custom", colorScheme: null },
+    {
+      path: "plan.md",
+      appearance: { look: "emend", colorScheme: "light" },
+      look: null,
+      colorScheme: null,
+    },
+    {
+      path: "source.html",
+      appearance: { look: "emend", colorScheme: "light" },
+      look: null,
+      colorScheme: null,
+    },
+  ] as const;
+  input.files = cases.map(({ path, appearance }, ord) => ({
+    ...file,
+    id: randomUUID(),
+    path,
+    ord,
+    newBlob,
+    ...appearance,
+    ...(path === "source.html" ? { view: "source" as const } : {}),
+  }));
+  expect((await f.importRequest("/import", input)).status).toBe(201);
+  const rows = await f.db.read((q) =>
+    q
+      .select()
+      .from(tables.files)
+      .where(and(eq(tables.files.ownerId, f.ownerId), eq(tables.files.revisionId, file.revisionId)))
+      .all(),
+  );
+  const response = await f.request(`/reviews/${input.review.id}/revisions/1`, "GET");
+  expect(response.status).toBe(200);
+  const view = RevisionView.parse(await response.json());
+  for (const { path, look, colorScheme } of cases) {
+    expect(rows.find((row) => row.path === path)).toMatchObject({ look, colorScheme });
+    const doc = required(view.docs.find((doc) => doc.path === path));
+    if (look === null) expect(doc).not.toHaveProperty("look");
+    else expect(doc).toMatchObject({ look });
+    if (colorScheme === null) expect(doc).not.toHaveProperty("colorScheme");
+    else expect(doc).toMatchObject({ colorScheme });
+    if (doc.kind !== "html") continue;
+    const served = await f.app.request(`http://127.0.0.1:3636${doc.contentUrl}`, {
+      headers: { Host: "127.0.0.1:3636" },
+    });
+    expect(served.status).toBe(200);
+    const body = await served.text();
+    expect(body).toContain(source);
+    expect(body.includes(css)).toBe(look === "emend");
+    expect(body.includes('<html data-theme="light">')).toBe(colorScheme === "light");
+  }
 });
 
 test("import places topic quotes using revision title and summary text", async () => {

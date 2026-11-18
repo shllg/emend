@@ -1,7 +1,7 @@
 import { BRIDGE_SOURCE } from "./bridge.ts";
 
 /** Preserve the leading doctype so adding the stylesheet never forces quirks mode. */
-export function injectLook(html: string, css: string): string {
+export function injectLook(html: string, css: string, light = false): string {
   let at = html.startsWith("\uFEFF") ? 1 : 0;
   let doctype = false;
   while (at < html.length) {
@@ -43,7 +43,7 @@ export function injectLook(html: string, css: string): string {
     }
     break;
   }
-  return `${html.slice(0, at)}<style>${css}</style>${html.slice(at)}`;
+  return `${html.slice(0, at)}${light ? '<html data-theme="light">' : ""}<style>${css}</style>${html.slice(at)}`;
 }
 
 export function injectBridge(html: string): string {

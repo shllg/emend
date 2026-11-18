@@ -304,5 +304,13 @@ export const MIGRATIONS: readonly { tag: string; when: number; hash: string; sta
     "statements": [
       "ALTER TABLE `files` ADD `look` text;"
     ]
+  },
+  {
+    "tag": "0023_previous_songbird",
+    "when": 1794967184815,
+    "hash": "949e1e2ebe59f520cb0ef96ae5fc64054be60baec6babb300f4a8bdae9052199",
+    "statements": [
+      "ALTER TABLE `files` ADD `color_scheme` text;"
+    ]
   }
 ];
