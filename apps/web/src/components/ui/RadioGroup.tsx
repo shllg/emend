@@ -42,7 +42,7 @@ export function RadioGroup({ label, options, value, onChange, name, variant = "c
           />
           <span
             aria-hidden="true"
-            className="mt-0.5 grid size-4 shrink-0 place-items-center rounded-full border-[1.5px] border-line-strong bg-surface peer-checked:border-fg-1 peer-checked:after:size-2 peer-checked:after:rounded-full peer-checked:after:bg-fg-1 peer-checked:after:content-['']"
+            className="mt-[0.125rem] grid size-[1rem] shrink-0 place-items-center rounded-full border-[1.5px] border-line-strong bg-surface peer-checked:border-fg-1 peer-checked:after:size-[0.5rem] peer-checked:after:rounded-full peer-checked:after:bg-fg-1 peer-checked:after:content-['']"
           />
           <span className="flex flex-col gap-0.5 font-sans text-13 font-medium leading-(--lh-snug) text-fg-1">
             {option.label}

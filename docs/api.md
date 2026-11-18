@@ -594,18 +594,24 @@ It writes `theme.json` with flag `wx` and mode `0600`, then prints `emend: wrote
 If writing fails, it removes the `theme.json` it created and then its own folder when empty, and reports the error.
 A failure creating the `themes` folder reports `cannot write theme <path>`, with the escaped path of `theme.json`.
 
-A file is a JSON object with `version: 1`, `base: "dark" | "light"` and optional `fonts`, `scales`
+A file is a JSON object with `version: 1`, `base: "dark" | "light"` and optional `density`, `fonts`, `scales`
 and `tokens`. Other keys are refused. For example:
 
 ```json
 {
   "version": 1,
   "base": "dark",
+  "density": "regular",
   "fonts": { "text": "Geist", "code": "JetBrains Mono" },
   "scales": { "n-950": "oklch(0.18 0.004 260)" },
   "tokens": { "bg-reading": "n-950" }
 }
 ```
+
+`density` accepts `"compact"`, `"regular"` or `"roomy"`, with `"regular"` as the default.
+It scales app spacing (padding, gaps and row heights), never text size; on touch screens compact
+keeps regular spacing so tap targets never shrink. HTML doc contents inside sandboxed frames keep
+their own spacing. `emend theme copy` always writes the source density, or `"regular"` when absent.
 
 `scales` accepts every neutral, ochre, green, blue, violet, teal and red scale step, and the
 16 origin tints, in `THEME_SCALE_STEPS`. `tokens` accepts every semantic colour in `THEME_TOKENS`,
@@ -631,7 +637,8 @@ The named family precedes emend's default stack. `DEFAULT_THEME_FONTS` is
 list. `folderError` is true when an existing folder cannot be listed or exceeds the folder cap.
 Each entry is one of:
 
-- `ThemeValid = { valid: true, name, base, fonts: { text?, code? }, scales, tokens, themeColor }`.
+- `ThemeValid = { valid: true, name, base, density?, fonts: { text?, code? }, scales, tokens, themeColor }`.
+  `density` is included only when the file sets it; older servers and saved copies may omit it.
   The records hold only the file's overrides, normalized. Record keys match `/^[a-z0-9-]{1,40}$/`
   so older clients can read newer servers; clients apply only names they know. Scale values are
   `ThemeColor`; token values are `ThemeColor` or a known scale step name. `themeColor` is
@@ -644,6 +651,7 @@ key is named only if it matches `/^[a-z0-9]+(?:-[a-z0-9]+)*$/` and is at most 24
 otherwise it is called `an unknown name`. Reasons include `The folder has no theme.json.`,
 `theme.json cannot be read.`, `theme.json is larger than 32 KiB.`, `theme.json is not valid JSON.`,
 `The file must hold a JSON object.`, `version must be 1.`, `base must be "dark" or "light".`,
+`density must be "compact", "regular" or "roomy".`,
 `Unknown entry: colours.`, `scales has an unknown name: n-26.`,
 `scales.n-25 is not a colour. Use hex (#rrggbb) or oklch(L C H).` and
 `tokens.fg-1 is not a colour or a scale step name.` Invalid folder names say

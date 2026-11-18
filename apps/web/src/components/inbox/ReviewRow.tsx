@@ -135,7 +135,7 @@ export function ReviewRow({
     </>
   );
   const className = cn(
-    "group relative grid w-full grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_auto_auto] gap-x-2 gap-y-[3px] rounded-sm px-2.5 pt-2 pb-[9px] text-left text-fg-2 no-underline",
+    "group relative grid w-full grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_auto_auto] gap-x-2 gap-y-0.75 rounded-sm px-2.5 pt-2 pb-2.25 text-left text-fg-2 no-underline",
     highlight && "em-inbox-new",
   );
   return (

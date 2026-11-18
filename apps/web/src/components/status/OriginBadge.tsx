@@ -31,7 +31,7 @@ export function OriginBadge({
       <span
         role="img"
         aria-label={`From ${origin.name}`}
-        className={cn("inline-block size-2 shrink-0 rounded-[2px]", tint?.[1], className)}
+        className={cn("inline-block size-[0.5rem] shrink-0 rounded-[2px]", tint?.[1], className)}
       />
     );
   return (
@@ -39,7 +39,7 @@ export function OriginBadge({
       title={`From ${origin.name}`}
       className={cn(
         "inline-flex shrink-0 items-center whitespace-nowrap rounded-sm pr-1.5 pl-[5px] font-mono font-medium leading-none",
-        size === "sm" ? "h-[18px] text-[11px]" : "h-5 text-[11.5px]",
+        size === "sm" ? "h-[18px] text-[11px]" : "h-[1.25rem] text-[11.5px]",
         tint?.[0],
         className,
       )}

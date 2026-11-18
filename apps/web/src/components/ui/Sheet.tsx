@@ -99,7 +99,7 @@ export function Sheet({
           {side === "bottom" && (
             <div data-sheet-grab aria-hidden="true" className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-[2px] bg-line-2" />
           )}
-          <header className="flex min-h-[52px] shrink-0 items-center gap-2 border-b border-line-1 py-1.5 pr-2 pl-4">
+          <header className="flex min-h-13 shrink-0 items-center gap-2 border-b border-line-1 py-1.5 pr-2 pl-4">
             <Dialog.Title
               className={cn(
                 "m-0 flex-1 font-sans text-15 font-semibold leading-(--lh-snug) text-fg-1",

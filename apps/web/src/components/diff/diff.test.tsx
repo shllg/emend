@@ -2154,14 +2154,25 @@ test("the tab-row toolbar slot's stylesheet rules", () => {
   const rule = diffStylesheet.match(/\.em-tab-tools > \.em-diff-toolbar\s*\{([^}]+)\}/)?.[1] ?? "";
   expect(rule).toMatch(/position:\s*static;/);
   expect(rule).toMatch(/flex:\s*1;/);
+  expect(rule).toMatch(/height:\s*auto;/);
   expect(rule).toMatch(/min-height:\s*40px;/);
   expect(rule).toMatch(/padding-block:\s*0;/);
   expect(rule).toMatch(/border-bottom:\s*0;/);
 });
 
-test("the toolbar offset is 0px on the phone, where the toolbar is hidden, and 41px beside it", async () => {
+test("the toolbar and its offsets share a density-aware height, with no offset on the phone", async () => {
   expect(diffStylesheet).toMatch(/\.em-diff-pane\s*\{[^}]*--diff-toolbar-height:\s*0px;/);
-  expect(diffStylesheet).toMatch(/\.em-diff-pane\[data-toolbar\]\s*\{[^}]*--diff-toolbar-height:\s*41px;/);
+  const height = diffStylesheet.match(
+    /\.em-diff-toolbar,\s*\.em-diff-pane\[data-toolbar\]\s*\{[^}]*--diff-toolbar-height:\s*calc\((\d+)px \* var\(--density\) \+ (\d+)px\);/,
+  );
+  expect(height).not.toBeNull();
+  expect(Number(height?.[1]) * 1 + Number(height?.[2])).toBe(41);
+  expect(Number(height?.[1]) * 0.75 + Number(height?.[2])).toBe(34);
+  expect(Number(height?.[1]) * 1.25 + Number(height?.[2])).toBe(48);
+  const toolbar = diffStylesheet.match(/\.em-diff-toolbar\s*\{([^}]+)\}/)?.[1] ?? "";
+  expect(toolbar).toMatch(/box-sizing:\s*border-box;/);
+  expect(toolbar).toMatch(/height:\s*var\(--diff-toolbar-height\);/);
+  expect(diffStylesheet.match(/\.em-code-bar\s*\{([^}]+)\}/)?.[1]).not.toMatch(/\bheight:/);
   stubWidth(390);
   const phone = await mount(detailed());
   expect(document.querySelector(".em-diff-pane")?.hasAttribute("data-toolbar")).toBe(false);

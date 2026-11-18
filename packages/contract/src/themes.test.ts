@@ -6,10 +6,12 @@ import {
   ReviewEvent,
   ReviewEventName,
   reviewDownloadPath,
+  THEME_DENSITIES,
   THEME_SCALE_STEPS,
   THEME_TOKENS,
   ThemeBase,
   ThemeColor,
+  ThemeDensity,
   ThemeEntry,
   ThemeFont,
   ThemeList,
@@ -86,6 +88,7 @@ test("names and vocabulary have the specified boundaries", () => {
   expect(ThemeScaleStep.options).toEqual(THEME_SCALE_STEPS);
   expect(ThemeToken.options).toEqual(THEME_TOKENS);
   expect(ThemeBase.options).toEqual(["dark", "light"]);
+  expect(ThemeDensity.options).toEqual(THEME_DENSITIES);
   expect(ThemeScaleStep.safeParse("fg-1").success).toBe(false);
   expect(ThemeToken.safeParse("n-25").success).toBe(false);
 });
@@ -132,6 +135,15 @@ test("valid entries carry overrides and permit future record names", () => {
     { themeColor: "#AABBCC" },
   ])
     expect(ThemeValid.safeParse({ ...valid, ...patch }).success).toBe(false);
+});
+test.each(["compact", "regular", "roomy"])("valid entries accept %s density", (density) => {
+  expect(ThemeValid.parse({ ...valid, density })).toEqual({ ...valid, density });
+});
+test("valid entries accept an absent density for older servers and saved themes", () => {
+  expect(ThemeValid.parse(valid)).toEqual(valid);
+});
+test.each(["dense", "Compact", "", 1, null, {}, []])("valid entries refuse invalid density %j", (density) => {
+  expect(ThemeValid.safeParse({ ...valid, density }).success).toBe(false);
 });
 test("refused entries and theme lists enforce wire limits", () => {
   expect(ThemeEntry.parse(refused)).toEqual(refused);

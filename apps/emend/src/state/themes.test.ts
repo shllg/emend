@@ -29,7 +29,7 @@ async function seed(name: string, document: unknown = { version: 1, base: "dark"
 }
 
 test("lists normalized valid themes and fixed refusal reasons in name order", async () => {
-  await seed("zeta", { version: 1, base: "light", tokens: { "border-1": "#ABC" } });
+  await seed("zeta", { version: 1, base: "light", density: "roomy", tokens: { "border-1": "#ABC" } });
   await seed("alpha", { version: 1, base: "dark", tokens: { "fg-1": "#111" } });
   const list = ThemeList.parse(await listThemes(dir));
   expect(list.folderError).toBe(false);
@@ -39,7 +39,12 @@ test("lists normalized valid themes and fixed refusal reasons in name order", as
     base: "dark",
     problems: expect.arrayContaining([expect.stringContaining("fg-1 on bg-app:")]),
   });
-  expect(list.themes[1]).toMatchObject({ valid: true, base: "light", tokens: { "border-1": "#aabbcc" } });
+  expect(list.themes[1]).toMatchObject({
+    valid: true,
+    base: "light",
+    density: "roomy",
+    tokens: { "border-1": "#aabbcc" },
+  });
   expect(await readTheme(dir, "zeta")).toEqual(list.themes[1]);
 });
 

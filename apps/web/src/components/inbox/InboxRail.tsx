@@ -51,7 +51,7 @@ export function InboxRail({ onShow, showRef }: { onShow: () => void; showRef?: R
                       activeOptions={{ includeSearch: false }}
                       activeProps={{ "aria-current": "page" }}
                       className={cn(
-                        "relative grid h-8 w-9 place-items-center rounded-[6px] no-underline hover:bg-hover aria-[current=page]:bg-selected [&>span[role=img]]:size-2.5",
+                        "relative grid h-8 w-9 place-items-center rounded-[6px] no-underline hover:bg-hover aria-[current=page]:bg-selected [&>span[role=img]]:size-[0.625rem]",
                         looksDone(review) && doneDimmed,
                       )}
                     >
@@ -68,7 +68,7 @@ export function InboxRail({ onShow, showRef }: { onShow: () => void; showRef?: R
                       {needsAttention(review) && (
                         <span
                           aria-hidden="true"
-                          className="absolute top-1.5 right-[7px] size-1.5 rounded-full bg-accent"
+                          className="absolute top-1.5 right-[7px] size-[0.375rem] rounded-full bg-accent"
                         />
                       )}
                     </Link>

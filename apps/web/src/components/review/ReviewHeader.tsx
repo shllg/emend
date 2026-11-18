@@ -54,7 +54,7 @@ function LinkChip({ link }: { link: ReturnType<typeof safeLinks>[number] }) {
       title={link.href}
       target="_blank"
       rel="noopener noreferrer nofollow"
-      className="inline-flex max-w-full items-center gap-1 rounded-sm border border-line-1 px-1.5 py-[3px] text-fg-2 no-underline hover:bg-hover hover:text-fg-1"
+      className="inline-flex max-w-full items-center gap-1 rounded-sm border border-line-1 px-1.5 py-0.75 text-fg-2 no-underline hover:bg-hover hover:text-fg-1"
     >
       <Icon icon={linkIcon[link.kind ?? "other"]} size={12} />
       <span className="min-w-0 shrink-[0.2] truncate">{link.label}</span>
@@ -107,7 +107,7 @@ export function ReviewHeader({
   const area = openingCard ? (revision.writeup.area ?? sharedDiffFolder(revision.files)) : undefined;
   const breadcrumb = [review.project, area].filter((item): item is string => item != null);
   const total = revision ? reviewLineTotals(revision, counts) : null;
-  const metaItem = "inline-flex min-w-0 items-center gap-[5px] wrap-anywhere";
+  const metaItem = "inline-flex min-w-0 items-center gap-1.25 wrap-anywhere";
   const separator = phone ? (
     <span aria-hidden="true" className="text-line-strong">
       ·
@@ -186,7 +186,7 @@ export function ReviewHeader({
       trigger={
         <button
           type="button"
-          className="inline-flex max-w-full items-center gap-1 rounded-sm border border-line-1 px-1.5 py-[3px] align-middle text-12 leading-[1.2] text-fg-2 hover:bg-hover hover:text-fg-1"
+          className="inline-flex max-w-full items-center gap-1 rounded-sm border border-line-1 px-1.5 py-0.75 align-middle text-12 leading-[1.2] text-fg-2 hover:bg-hover hover:text-fg-1"
         >
           <Icon icon={Link2} size={12} />
           Links

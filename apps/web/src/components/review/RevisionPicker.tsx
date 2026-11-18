@@ -66,7 +66,7 @@ export function RevisionPicker({
                   <>
                     Revision {revision.seq}
                     {revision.seq === latest && (
-                      <span className="inline-flex h-4 shrink-0 items-center rounded-xs bg-accent px-[5px] text-[9.5px] font-semibold leading-none tracking-[.04em] text-accent-fg uppercase">
+                      <span className="inline-flex h-[1rem] shrink-0 items-center rounded-xs bg-accent px-[5px] text-[9.5px] font-semibold leading-none tracking-[.04em] text-accent-fg uppercase">
                         Latest
                       </span>
                     )}

@@ -28,9 +28,9 @@ const variants = {
     "bg-transparent text-danger-fg border-line-2 [&:not(:disabled):not([aria-disabled=true])]:hover:bg-danger-bg [&:not(:disabled):not([aria-disabled=true])]:hover:border-[color-mix(in_oklch,var(--danger-solid)_40%,var(--border-2))] [&:not(:disabled):not([aria-disabled=true])]:active:bg-active",
 };
 const sizes = {
-  sm: "h-7 gap-[5px] rounded-sm px-[9px] text-12",
-  md: "h-8 gap-1.5 px-3",
-  lg: "h-10 gap-2 px-4 text-14",
+  sm: "h-7 gap-[0.3125rem] rounded-sm px-[0.5625rem] text-12",
+  md: "h-8 gap-[0.375rem] px-[0.75rem]",
+  lg: "h-10 gap-[0.5rem] px-[1rem] text-14",
 };
 
 export function Button({
@@ -86,7 +86,7 @@ export function Button({
       <Slottable>{children}</Slottable>
       {iconRight && <Icon icon={iconRight} size={iconSize} />}
       {kbd && (
-        <kbd className="rounded-xs bg-[oklch(from_var(--bg-overlay)_l_c_h_/_0.08)] px-1 py-px font-mono text-12 font-medium leading-(--lh-snug) text-inherit opacity-75">
+        <kbd className="rounded-xs bg-[oklch(from_var(--bg-overlay)_l_c_h_/_0.08)] px-[0.25rem] py-px font-mono text-12 font-medium leading-(--lh-snug) text-inherit opacity-75">
           {kbd}
         </kbd>
       )}

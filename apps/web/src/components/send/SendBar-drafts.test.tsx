@@ -261,7 +261,7 @@ test("fix1 instruction fallback sizing handles input, restore and clearing, with
   });
   const view = mount(bar());
   expect(instructions().style.height).toBe("");
-  expect(instructions().className).toContain("h-7");
+  expect(instructions().className.split(" ")).toContain("h-[1.75rem]");
   fireEvent.change(instructions(), { target: { value: "Line 1\nLine 2\nLine 3" } });
   expect(Number.parseFloat(instructions().style.height)).toBeGreaterThanOrEqual(66);
   expect(instructions().className).toContain("max-h-32");
@@ -273,7 +273,7 @@ test("fix1 instruction fallback sizing handles input, restore and clearing, with
   expect(Number.parseFloat(instructions().style.height)).toBeLessThan(66);
   fireEvent.change(instructions(), { target: { value: "" } });
   expect(instructions().style.height).toBe("");
-  expect(instructions().className.split(" ")).toContain("h-7");
+  expect(instructions().className.split(" ")).toContain("h-[1.75rem]");
 });
 
 test("fix1 supported field sizing grows natively and keeps empty instructions one row high", () => {
@@ -285,7 +285,7 @@ test("fix1 supported field sizing grows natively and keeps empty instructions on
   expect(instructions().style.height).toBe("");
   fireEvent.change(instructions(), { target: { value: "" } });
   expect(instructions().className).not.toContain("[field-sizing:content]");
-  expect(instructions().className.split(" ")).toContain("h-7");
+  expect(instructions().className.split(" ")).toContain("h-[1.75rem]");
 });
 
 test.each([false, true])("unsaved comments live-update both actions and reasons (phone %s)", async (phone) => {

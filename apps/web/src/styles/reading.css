@@ -198,7 +198,7 @@
     top: 2px;
   }
   .em-reading-block:has(> .em-reading-block__marker) > .em-reading-block__comment {
-    top: calc(2px + var(--space-5) + var(--space-1-5));
+    top: calc(2px + 1.25rem + var(--space-1-5));
   }
   @media (pointer: fine) {
     .em-reading-block__comment {

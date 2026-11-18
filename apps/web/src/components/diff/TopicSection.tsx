@@ -106,7 +106,7 @@ export function TopicSection({
         ) : (
           <span
             aria-hidden="true"
-            className="inline-grid h-5 min-w-[22px] place-items-center rounded-sm bg-active font-mono text-12 text-fg-3"
+            className="inline-grid h-[1.25rem] min-w-[22px] place-items-center rounded-sm bg-active font-mono text-12 text-fg-3"
           >
             —
           </span>

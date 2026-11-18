@@ -4,6 +4,7 @@ import {
   THEME_SCALE_STEPS,
   THEME_TOKENS,
   ThemeBase,
+  ThemeDensity,
   type ThemeEntry,
   ThemeFont,
   ThemeName,
@@ -20,6 +21,7 @@ export type ThemeSource = ThemeBase | ThemeValid;
 export type ThemeDocument = {
   version: 1;
   base: ThemeBase;
+  density?: ThemeDensity;
   fonts?: { text?: string; code?: string };
   scales?: Partial<Record<ThemeScaleStep, string>>;
   tokens?: Partial<Record<ThemeToken, string>>;
@@ -81,6 +83,7 @@ export function checkThemeDocument(document: unknown, name: string): ThemeEntry 
       "The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark or light.",
     );
   let base: ThemeBase | null = null;
+  let density: ThemeDensity | undefined;
   const fonts: ThemeValid["fonts"] = {};
   const scales: ThemeValid["scales"] = {};
   const tokens: ThemeValid["tokens"] = {};
@@ -92,8 +95,13 @@ export function checkThemeDocument(document: unknown, name: string): ThemeEntry 
     if (checkedBase.success) base = checkedBase.data;
     else problem('base must be "dark" or "light".');
     for (const key of Object.keys(document)) {
-      if (!["version", "base", "fonts", "scales", "tokens"].includes(key))
+      if (!["version", "base", "density", "fonts", "scales", "tokens"].includes(key))
         problem(`Unknown entry: ${problemName(key)}.`);
+    }
+    if (Object.hasOwn(document, "density")) {
+      const checkedDensity = ThemeDensity.safeParse(document.density);
+      if (checkedDensity.success) density = checkedDensity.data;
+      else problem('density must be "compact", "regular" or "roomy".');
     }
     if (Object.hasOwn(document, "fonts")) {
       if (!object(document.fonts)) problem("fonts must be a JSON object.");
@@ -141,7 +149,7 @@ export function checkThemeDocument(document: unknown, name: string): ThemeEntry 
       problems[LIMITS.themeProblems - 1] = `…and ${count - LIMITS.themeProblems + 1} more problems.`;
     return { valid: false, name, base, problems };
   }
-  return { valid: true, name, base, fonts, scales, tokens, themeColor };
+  return { valid: true, name, base, ...(density === undefined ? {} : { density }), fonts, scales, tokens, themeColor };
 }
 
 /** The caller writes JSON.stringify(document, null, 2) followed by a newline. */
@@ -160,6 +168,7 @@ export function themeCopyDocument(source: ThemeSource): ThemeDocument {
   return {
     version: 1,
     base: typeof source === "string" ? source : source.base,
+    density: typeof source === "string" ? "regular" : (source.density ?? "regular"),
     fonts: { ...DEFAULT_THEME_FONTS, ...(typeof source === "string" ? {} : source.fonts) },
     scales,
     tokens,

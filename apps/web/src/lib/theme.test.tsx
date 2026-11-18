@@ -37,6 +37,7 @@ afterEach(() => {
   stop = () => {};
   for (const meta of document.querySelectorAll('meta[name="theme-color"]')) meta.remove();
   delete document.documentElement.dataset.theme;
+  delete document.documentElement.dataset.density;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -224,6 +225,46 @@ test("custom font fallbacks match the complete typography declarations", () => {
   expect(css.match(/--font-mono:\s*([^;]+);/)?.[1]).toBe(themeFontStacks.code);
 });
 
+test.each(["compact", "roomy"] as const)("a custom theme applies %s density", (density) => {
+  createThemeStore().selectCustomTheme({ ...customTheme, density });
+  expect(document.documentElement.dataset.density).toBe(density);
+});
+
+test.each(["regular", undefined] as const)("a custom theme with %s density clears the previous density", (density) => {
+  const store = createThemeStore();
+  store.selectCustomTheme({ ...customTheme, density: "compact" });
+  expect(document.documentElement.dataset.density).toBe("compact");
+  store.applyList("mine", {
+    themes: [{ ...customTheme, ...(density === undefined ? {} : { density }) }],
+    folderError: false,
+  });
+  expect(document.documentElement.hasAttribute("data-density")).toBe(false);
+});
+
+test.each(["dark", "light", "system", "theme:missing"] as const)(
+  "switching from compact to %s clears density",
+  (pick) => {
+    const store = createThemeStore();
+    store.selectCustomTheme({ ...customTheme, density: "compact" });
+    expect(document.documentElement.dataset.density).toBe("compact");
+    store.set(pick);
+    expect(document.documentElement.hasAttribute("data-density")).toBe(false);
+  },
+);
+
+test("a saved custom theme without density still parses and applies with regular spacing", () => {
+  expect(customTheme).not.toHaveProperty("density");
+  localStorage.setItem(themeKey, "theme:mine");
+  localStorage.setItem(customThemeKey, JSON.stringify(customTheme));
+  document.documentElement.dataset.density = "compact";
+  const store = createThemeStore();
+  stop = store.subscribe(() => {});
+  expect(store.getState().custom).toEqual(customTheme);
+  expect(document.documentElement.dataset.theme).toBe(customTheme.base);
+  expect(document.documentElement.style.getPropertyValue("--fg-1")).toBe(customTheme.tokens["fg-1"]);
+  expect(document.documentElement.hasAttribute("data-density")).toBe(false);
+});
+
 test("a custom pick applies allowlisted values, fonts and base, and removes its previous overrides", () => {
   const style = document.documentElement.style;
   style.setProperty("--unrelated", "7px");
@@ -263,6 +304,7 @@ test("a custom pick applies allowlisted values, fonts and base, and removes its 
 test.each([
   { name: "../mine" },
   { name: "dark" },
+  { density: "dense" },
   { scales: { "n-950": "url(x)" } },
   { tokens: { "bg-app": "red;}" } },
   { tokens: { "bg-app": "var(--n-950)" } },

@@ -3,14 +3,18 @@
     --diff-toolbar-height: 0px;
     background: var(--bg-surface);
   }
+  .em-diff-toolbar,
   .em-diff-pane[data-toolbar] {
-    --diff-toolbar-height: 41px;
+    /* A small control plus 6px padding on each side and the bottom border. */
+    --diff-toolbar-height: calc(28px * var(--density) + 13px);
   }
   .em-diff-toolbar {
     position: sticky;
     top: 0;
     z-index: calc(var(--z-sticky) + 1);
     display: flex;
+    box-sizing: border-box;
+    height: var(--diff-toolbar-height);
     align-items: center;
     justify-content: space-between;
     gap: 8px;
@@ -30,12 +34,12 @@
   .em-tab-tools > .em-diff-toolbar {
     position: static;
     flex: 1;
+    height: auto;
     min-height: 40px;
     padding-block: 0;
     border-bottom: 0;
   }
   .em-code-bar {
-    height: 41px;
     font: 400 13px / 1.4 var(--font-sans);
   }
   .em-diff-topic {

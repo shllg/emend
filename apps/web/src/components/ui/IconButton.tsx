@@ -15,6 +15,12 @@ export interface IconButtonProps extends ComponentProps<"button"> {
   tooltip?: boolean;
 }
 
+const sizes = {
+  sm: "h-7 w-[1.75rem] rounded-sm",
+  md: "h-8 w-[2rem]",
+  lg: "h-10 w-[2.5rem]",
+};
+
 export function IconButton({
   label,
   icon,
@@ -55,7 +61,7 @@ export function IconButton({
       className={cn(
         "relative inline-grid shrink-0 place-items-center rounded-md border border-transparent bg-transparent text-fg-2 no-underline transition-[background,color] duration-(--dur-1) ease-(--ease-out) [-webkit-tap-highlight-color:transparent] [&:not(:disabled):not([aria-disabled=true])]:hover:bg-hover [&:not(:disabled):not([aria-disabled=true])]:hover:text-fg-1 [&:not(:disabled):not([aria-disabled=true])]:active:bg-active [&:not(:disabled):not([aria-disabled=true])]:active:text-fg-1 aria-pressed:bg-active aria-pressed:text-fg-1 aria-expanded:bg-active aria-expanded:text-fg-1 disabled:cursor-not-allowed disabled:opacity-45 aria-disabled:cursor-not-allowed aria-disabled:opacity-45",
         focusRing,
-        size === "sm" ? "size-7 rounded-sm" : size === "lg" ? "size-10" : "size-8",
+        sizes[size],
         variant === "secondary" && "border-line-2 bg-surface shadow-1",
         className,
       )}
@@ -70,7 +76,7 @@ export function IconButton({
       {hasBadge && (
         <span
           aria-hidden="true"
-          className="absolute top-0.5 right-0.5 h-3.5 min-w-3.5 rounded-md bg-accent px-[3px] text-center font-sans text-[9px] leading-[14px] font-semibold text-accent-fg"
+          className="absolute top-0.5 right-0.5 h-[0.875rem] min-w-[0.875rem] rounded-md bg-accent px-[3px] text-center font-sans text-[9px] leading-[14px] font-semibold text-accent-fg"
         >
           {badge}
         </span>

@@ -24,6 +24,18 @@ test.each(["dark", "light"] as const)("%s passes all readability pairs", (base) 
   expect(check({ version: 1, base })).toMatchObject({ base, scales: {}, tokens: {}, fonts: {} });
   expect(themeReadabilityProblems(resolveTheme(base), base)).toEqual([]);
 });
+test.each(["compact", "regular", "roomy"] as const)("keeps %s density when the file sets it", (density) => {
+  expect(check({ ...document, density }).density).toBe(density);
+});
+test("does not add density when the file omits it", () => {
+  expect(check(document)).not.toHaveProperty("density");
+});
+test.each(["dense", "Compact", "REGULAR", "roomy ", "", 0, 1, null, {}, [], true, undefined])(
+  "refuses invalid density %j with a fixed reason",
+  (density) => {
+    expect(problems({ ...document, density })).toEqual(['density must be "compact", "regular" or "roomy".']);
+  },
+);
 test("the readability set covers exactly the design's 196 pairs", () => {
   expect(THEME_READABILITY_PAIRS).toHaveLength(196);
   expect(THEME_READABILITY_PAIRS.filter((pair) => pair.minimum === 3)).toHaveLength(102);
@@ -228,6 +240,8 @@ test.each(["dark", "light"] as const)(
   "copying %s lists every colour, keeps references and resolves identically",
   (base) => {
     const copy = themeCopyDocument(base);
+    expect(Object.keys(copy)).toEqual(["version", "base", "density", "fonts", "scales", "tokens"]);
+    expect(copy.density).toBe("regular");
     expect(Object.keys(copy.scales ?? {})).toEqual(THEME_SCALE_STEPS);
     expect(Object.keys(copy.tokens ?? {})).toEqual(THEME_TOKENS);
     expect(copy.fonts).toEqual(DEFAULT_THEME_FONTS);
@@ -236,6 +250,12 @@ test.each(["dark", "light"] as const)(
     expect(themeCopyDocument(check(copy))).toEqual(copy);
   },
 );
+test.each(["compact", "regular", "roomy"] as const)("copying a custom theme preserves %s density", (density) => {
+  const copy = themeCopyDocument(check({ ...document, density }));
+  expect(copy.density).toBe(density);
+  expect(Object.keys(copy)).toEqual(["version", "base", "density", "fonts", "scales", "tokens"]);
+  expect(check(copy).density).toBe(density);
+});
 test("copying a theme preserves fonts and stops references at custom token colours", () => {
   const entry = check({
     ...document,
@@ -244,6 +264,7 @@ test("copying a theme preserves fonts and stops references at custom token colou
     tokens: { "bg-surface": "#101010", "agent-none": "n-400" },
   });
   const copy = themeCopyDocument(entry);
+  expect(copy.density).toBe("regular");
   expect(copy.fonts).toEqual({ text: "Example Sans", code: DEFAULT_THEME_FONTS.code });
   expect(copy.tokens?.["bg-reading"]).toBe("#101010");
   expect(copy.tokens?.["agent-none"]).toBe("n-400");
