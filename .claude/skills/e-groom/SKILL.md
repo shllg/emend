@@ -22,8 +22,9 @@ description: Walk the code a few files per pass and record confirmed findings lo
 1. Create a temporary folder outside the repository with `mktemp -d`. Create a new file there
    with `mktemp '<temp>/status-before.XXXXXX'`. Save `git -C '<main>' status --porcelain` to it.
    Run `git -C '<main>' status --porcelain --untracked-files=no`. If it prints anything, report
-   that `/e-groom` needs a clean main checkout, remove the temporary folder, and stop before
-   starting the pass. End the loop too, with ScheduleWakeup `stop: true`.
+   that `/e-groom` needs a clean main checkout, run `<main>/bin/wt notify blocked`, remove the
+   temporary folder, and stop before starting the pass. End the loop too, with ScheduleWakeup
+   `stop: true`.
    Keep the folder and file paths for this pass. If a command fails, the pass is incomplete;
    record no visits. Still do the status comparison in step 8 and the cleanup in step 10.
 2. Name the pass `g-` plus the output of `date -u +%Y%m%d-%H%M%S`. Check that it matches
@@ -73,6 +74,8 @@ description: Walk the code a few files per pass and record confirmed findings lo
 
 A plain `/e-groom` runs one pass. `/loop /e-groom` paces itself: after each pass, call
 ScheduleWakeup with about 1200 seconds and the same prompt. Keep the consecutive incomplete
-pass count between wakeups; a complete pass resets it. Stop on the owner's word, after a pass
-whose status check failed, or after two incomplete passes in a row. To stop, call ScheduleWakeup
-with `stop: true`. Only the owner starts a groomer session; nothing starts one on its own.
+pass count between wakeups; a complete pass resets it. Stop on the owner's word, on a dirty main
+checkout at the start of a pass, after a pass whose status check failed, or after two incomplete
+passes in a row. Every stop other than the owner's word runs `<main>/bin/wt notify blocked`
+first. To stop, call ScheduleWakeup with `stop: true`. Only the owner starts a groomer session;
+nothing starts one on its own.
