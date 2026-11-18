@@ -1,4 +1,4 @@
-import { InboxItem } from "@emend/contract";
+import { InboxItem, LIMITS } from "@emend/contract";
 import { expect, test } from "vitest";
 import { activeJumpRows, inboxSections, inboxSequence, matchInboxItems } from "./inbox-list.ts";
 
@@ -210,6 +210,26 @@ test("palette ranks the branch carrying an issue number above separated digits a
   const apart = item(2, { title: "1 thing, 7 tasks, 5 results" });
   const reversed = item(3, { branch: "emend-157-foo" });
   expect(matchInboxItems([apart, reversed, match], now, "175").map(({ item }) => item)).toEqual([match, apart]);
+});
+
+test.each([
+  ["175", "emend-175-a-perf-harness", "emend-1750-other"],
+  ["18", "emend-18-x", "emend-184-y"],
+] as const)("palette ranks issue %s above a longer number despite inbox order", (query, branch, longerBranch) => {
+  const match = item(1, { branch });
+  const longer = item(2, { branch: longerBranch });
+  expect(matchInboxItems([longer, match], now, query).map(({ item }) => item)).toEqual([match, longer]);
+});
+
+test("palette finds an issue number at the start of a long branch", () => {
+  const match = item(1, { branch: `emend-175-${"x".repeat(4000)}` });
+  expect(matchInboxItems([match], now, "175").map(({ item }) => item)).toEqual([match]);
+});
+
+test("palette only searches the first title limit characters of a branch", () => {
+  const outside = item(1, { branch: `${"x".repeat(LIMITS.titleChars)}needle` });
+  const inside = item(2, { branch: `${"x".repeat(LIMITS.titleChars - "needle".length)}needle` });
+  expect(matchInboxItems([outside, inside], now, "needle").map(({ item }) => item)).toEqual([inside]);
 });
 
 test("palette ranks every active match above Done even when Done scores higher", () => {

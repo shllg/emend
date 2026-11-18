@@ -14,6 +14,20 @@ test("favors word starts and consecutive letters", () => {
   expect(fuzzyMatch("nf", "Next-file")).toBe(fuzzyMatch("nf", "Next file"));
 });
 
+test("favors complete issue numbers over longer numbers with the same prefix", () => {
+  expect(fuzzyMatch("175", "emend-175-a")).toBeGreaterThan(fuzzyMatch("175", "emend-1750-other") as number);
+  expect(fuzzyMatch("18", "emend-18-x")).toBeGreaterThan(fuzzyMatch("18", "emend-184-y") as number);
+  expect(fuzzyMatch("175", "emend-175")).toBeGreaterThan(fuzzyMatch("175", "emend-1750") as number);
+});
+
+test("rejects missing first or middle letters without affecting repeated calls", () => {
+  const score = fuzzyMatch("nxtfl", "Next file");
+  expect(score).not.toBeNull();
+  expect(fuzzyMatch("zxtfl", "Next file")).toBeNull();
+  expect(fuzzyMatch("nxzfl", "Next file")).toBeNull();
+  expect(fuzzyMatch("nxtfl", "Next file")).toBe(score);
+});
+
 test("matches every query word independently of word order", () => {
   expect(fuzzyMatch("tab files", "Files tab")).not.toBeNull();
   expect(fuzzyMatch("files tab", "Files tab")).toBe(fuzzyMatch("tab files", "Files tab"));

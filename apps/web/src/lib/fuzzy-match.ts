@@ -4,10 +4,12 @@ export function fuzzyMatch(query: string, text: string): number | null {
   const lower = text.toLowerCase();
   let total = 0;
   for (const word of words) {
-    let previous: number[] = [];
+    let previous = new Array<number>(lower.length).fill(-Infinity);
+    let scores = new Array<number>(lower.length);
     for (let letter = 0; letter < word.length; letter++) {
-      const scores = new Array<number>(lower.length).fill(-Infinity);
+      scores.fill(-Infinity);
       let bestEarlier = -Infinity;
+      let hasMatch = false;
       for (let index = 0; index < lower.length; index++) {
         const adjacent = previous[index - 1] ?? -Infinity;
         bestEarlier = Math.max(bestEarlier, adjacent);
@@ -15,10 +17,15 @@ export function fuzzyMatch(query: string, text: string): number | null {
         const boundary = index === 0 || !/[a-z0-9]/.test(lower.charAt(index - 1)) ? 6 : 0;
         // Keep every ending position: a later match may gain a consecutive-letter or word-start bonus.
         scores[index] = 10 + boundary + (letter === 0 ? -index * 0.01 : Math.max(bestEarlier, adjacent + 8));
+        if (Number.isFinite(scores[index])) hasMatch = true;
       }
-      previous = scores;
+      if (!hasMatch) return null;
+      [previous, scores] = [scores, previous];
     }
-    const best = previous.reduce((best, score) => Math.max(best, score), -Infinity);
+    const best = previous.reduce((best, score, index) => {
+      const boundary = index === lower.length - 1 || !/[a-z0-9]/.test(lower.charAt(index + 1)) ? 6 : 0;
+      return Math.max(best, score + boundary);
+    }, -Infinity);
     if (best === -Infinity) return null;
     total += best;
   }

@@ -1030,12 +1030,22 @@ test("an issue number selects the branch carrying it before decoys", async () =>
   inbox[0] = { ...(inbox[0] as InboxItem), branch: "emend-157-foo" };
   inbox[1] = { ...(inbox[1] as InboxItem), branch: "emend-175-a-perf-harness" };
   inbox[2] = { ...(inbox[2] as InboxItem), title: "1 thing, 7 tasks, 5 results" };
+  inbox.unshift({
+    ...(inbox[0] as InboxItem),
+    id: "44444444-4444-4444-8444-444444444444",
+    title: "Longer issue number",
+    branch: "emend-1750-other",
+  });
   mount();
   await ready();
   const input = await openPalette();
   search(input, "175");
   expect(selected()).toBe(option("Review 2"));
-  expect(screen.getAllByRole("option")).toEqual([option("Review 2"), option("1 thing")]);
+  const options = screen.getAllByRole("option");
+  expect(options).toHaveLength(3);
+  expect(options[0]).toBe(option("Review 2"));
+  expect(options).toContain(option("Longer issue number"));
+  expect(options).toContain(option("1 thing"));
 });
 
 test("Done follows active matches and its higher score determines the item group's position", async () => {
