@@ -3,7 +3,7 @@ import * as Primitive from "@radix-ui/react-dialog";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { X } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { inboxQuery, serverNow } from "../api/queries.ts";
 import { fuzzyMatch } from "../lib/fuzzy-match.ts";
 import { matchInboxItems } from "../lib/inbox-list.ts";
@@ -20,6 +20,7 @@ type PaletteRow = { score: number } & (
   | { key: `item:${string}`; item: InboxItem; done: boolean }
 );
 type RowKey = PaletteRow["key"];
+type PendingTarget = { command: ShortcutCommand } | { reviewId: string; rev: number };
 
 function matchingGroups(query: string, items: ReturnType<typeof matchInboxItems>) {
   const groups: { label: string; rows: PaletteRow[]; score: number }[] = shortcutGroups.map((group) => {
@@ -52,17 +53,21 @@ export function CommandPalette() {
   const input = useRef<HTMLInputElement>(null);
   const listbox = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
-  const pending = useRef<RowKey | null>(null);
+  const pending = useRef<PendingTarget | null>(null);
   const armed = useRef<RowKey | null>(null);
   const id = useId();
   const listId = `${id}-results`;
   const rowId = (key: RowKey) => `${id}-${key}`;
   const navigate = useNavigate();
-  const { data } = useQuery({ ...inboxQuery(), enabled: open });
+  const { data } = useQuery({ ...inboxQuery(), enabled: open, subscribed: open });
   const keys = useShortcutKeys();
   const runner = useShortcutRunner();
   const available = runner.available();
-  const matches = matchInboxItems(data?.items ?? [], serverNow(data), query, data?.groups);
+  // Large inboxes match on each keystroke; selection changes must not repeat that work.
+  const matches = useMemo(
+    () => (open ? matchInboxItems(data?.items ?? [], serverNow(data), query, data?.groups) : []),
+    [open, data, query],
+  );
   const groups = matchingGroups(query, matches);
   const rows = new Map(groups.flatMap((group) => group.rows.map((row) => [row.key, row] as const)));
   const isAvailable = (row: PaletteRow) => ("command" in row ? available.has(row.command) : !row.item.movedTo);
@@ -91,7 +96,8 @@ export function CommandPalette() {
   function choose(key: RowKey) {
     const row = rows.get(key);
     if (!row || ("command" in row ? !runner.available().has(row.command) : row.item.movedTo)) return;
-    pending.current = key;
+    pending.current =
+      "command" in row ? { command: row.command } : { reviewId: row.item.id, rev: row.item.newestRevision };
     changeOpen(false);
   }
 
@@ -117,15 +123,15 @@ export function CommandPalette() {
             event.preventDefault();
             if (opener.current?.isConnected) opener.current.focus({ preventScroll: true });
             // Focus-dependent handlers need the opener back; dialogs must start after this modal layer unmounts.
-            const row = pending.current ? rows.get(pending.current) : undefined;
+            const target = pending.current;
             pending.current = null;
-            if (!row || hasOpenOverlay()) return;
-            if ("command" in row) runner.run(row.command);
-            else if (!row.item.movedTo)
+            if (!target || hasOpenOverlay()) return;
+            if ("command" in target) runner.run(target.command);
+            else
               void navigate({
                 to: "/r/$reviewId",
-                params: { reviewId: row.item.id },
-                search: { rev: row.item.newestRevision },
+                params: { reviewId: target.reviewId },
+                search: { rev: target.rev },
               });
           }}
           className="fixed top-[12vh] left-1/2 z-[calc(var(--z-sheet)+1)] flex max-h-[min(70dvh,calc(var(--visual-height,100dvh)_-_12vh_-_16px))] w-[min(560px,92%)] -translate-x-1/2 animate-[em-fade_var(--dur-2)_var(--ease-out)] flex-col overflow-hidden rounded-xl border border-line-1 bg-surface shadow-3"
@@ -244,18 +250,30 @@ export function CommandPalette() {
                         <span dir="auto" className="block truncate">
                           {row.item.title}
                         </span>
-                        <span className="block truncate text-12 text-fg-3">
-                          {row.item.kind === "review" ? "Review" : "Pub"} · {row.item.origin.name}
-                          {row.item.project !== null && ` · ${row.item.project}`}
-                          {(row.item.movedTo || row.item.branch !== null) && (
-                            <>
-                              {" · "}
-                              <span className="font-mono">
-                                {row.item.movedTo ? `Moved to ${new URL(row.item.movedTo).host}` : row.item.branch}
-                              </span>
-                            </>
-                          )}
-                          {row.done && " · Done"}
+                        <span className="flex text-12 text-fg-3">
+                          <span className="min-w-0 truncate">
+                            {row.item.kind === "review" ? "Review" : "Pub"} · <bdi>{row.item.origin.name}</bdi>
+                            {row.item.project !== null && (
+                              <>
+                                {" · "}
+                                <bdi>{row.item.project}</bdi>
+                              </>
+                            )}
+                            {row.item.movedTo ? (
+                              <>
+                                {" · Moved to "}
+                                <bdi>{new URL(row.item.movedTo).host}</bdi>
+                              </>
+                            ) : (
+                              row.item.branch !== null && (
+                                <>
+                                  {" · "}
+                                  <bdi className="font-mono">{row.item.branch}</bdi>
+                                </>
+                              )
+                            )}
+                          </span>
+                          {row.done && <span className="shrink-0"> · Done</span>}
                         </span>
                       </span>
                     )}

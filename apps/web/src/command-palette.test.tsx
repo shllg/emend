@@ -976,6 +976,31 @@ test.each([
   expect(writes()).toHaveLength(0);
 });
 
+test.each(["Enter", "click"])("opens the chosen item after it leaves the inbox while closing (%s)", async (method) => {
+  inbox[1] = { ...(inbox[1] as InboxItem), newestRevision: 3 };
+  const history = mount();
+  await ready();
+  const input = await openPalette();
+  search(input, "Review 2");
+  const row = option("Review 2");
+  expect(selected()).toBe(row);
+  if (method === "Enter") keyDown("Enter", {}, input);
+  act(() => {
+    if (method === "Enter") fireEvent.keyUp(input, { key: "Enter" });
+    else fireEvent.click(row);
+    expect(history.location.pathname).toBe(`/r/${ids[0]}`);
+    client.setQueryData(
+      inboxQuery().queryKey,
+      (old) => old && { ...old, items: old.items.filter((item) => item.id !== ids[1]) },
+    );
+  });
+  expect(client.getQueryData(inboxQuery().queryKey)?.items.some((item) => item.id === ids[1])).toBe(false);
+  await waitFor(() => expect(history.location.pathname).toBe(`/r/${ids[1]}`));
+  expect(new URLSearchParams(history.location.search).get("rev")).toBe("3");
+  expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
+  expect(writes()).toHaveLength(0);
+});
+
 test("command groups win score ties and arrows and pointer move between commands and items", async () => {
   inbox[1] = { ...(inbox[1] as InboxItem), title: "Show keyboard shortcuts" };
   mount();
@@ -1030,6 +1055,56 @@ test("Done follows active matches and its higher score determines the item group
   expect(selected()).toBe(rows[0]);
 });
 
+test("Done stays outside the truncating metadata when the branch is long", async () => {
+  const branch = `emend-175-${"long-branch-name-".repeat(100)}`;
+  inbox[1] = { ...(inbox[1] as InboxItem), branch, list: "done" };
+  mount();
+  await ready();
+  const input = await openPalette();
+  search(input, "Review 2");
+  const row = option("Review 2");
+  const metadata = within(row).getByText(branch).closest(".truncate");
+  const done = within(row).getByText("· Done");
+  expect(metadata?.classList.contains("min-w-0")).toBe(true);
+  expect(metadata?.contains(done)).toBe(false);
+  expect(done.closest(".truncate")).toBeNull();
+  expect(done.classList.contains("shrink-0")).toBe(true);
+  expect(done.previousElementSibling).toBe(metadata);
+  expect(done.parentElement?.classList.contains("flex")).toBe(true);
+});
+
+test.each(["review", "publish"] as const)("isolates remote metadata from %s and Done labels", async (kind) => {
+  const override = String.fromCharCode(0x202e);
+  const machine = `${override}Workshop`;
+  const project = `${override}Toolkit`;
+  const branch = `${override}emend-175-harness`;
+  inbox[1] = {
+    ...(inbox[1] as InboxItem),
+    kind,
+    list: "done",
+    origin: { id: ids[0], name: machine },
+    project,
+    branch,
+  };
+  mount();
+  await ready();
+  const input = await openPalette();
+  search(input, "Review 2");
+  const row = option("Review 2");
+  for (const value of [machine, project, branch]) {
+    const isolated = within(row).getByText(value).closest('bdi, [dir="auto"]');
+    expect(isolated?.textContent).toBe(value);
+  }
+  expect(within(row).getByText(branch).classList.contains("font-mono")).toBe(true);
+  const label = kind === "review" ? "Review" : "Pub";
+  expect(
+    within(row)
+      .getByText(new RegExp(`^${label} ·`))
+      .closest('bdi, [dir="auto"]'),
+  ).toBeNull();
+  expect(within(row).getByText("· Done").closest('bdi, [dir="auto"]')).toBeNull();
+});
+
 test("uses the server clock and group membership when labelling Done", async () => {
   inbox[1] = { ...(inbox[1] as InboxItem), title: "Harness grouped", groupId: ids[0], list: "done" };
   inbox[2] = {
@@ -1072,6 +1147,7 @@ test("moved items are listed as unavailable, skipped by selection and never open
   expect(screen.getAllByRole("option")).toEqual([moved, available]);
   expect(moved.getAttribute("aria-disabled")).toBe("true");
   expect(moved.textContent).toContain("Moved to example.com");
+  expect(within(moved).getByText("example.com").closest('bdi, [dir="auto"]')?.textContent).toBe("example.com");
   expect(selected()).toBe(available);
   for (const key of ["ArrowDown", "ArrowUp"]) {
     press(key, {}, input);
