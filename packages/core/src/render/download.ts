@@ -137,14 +137,38 @@ function downloadThemeBase(theme?: DownloadRenderTheme): ThemeBase | undefined {
 function downloadLookStyles(theme?: DownloadRenderTheme): string | null {
   if (theme === undefined || typeof theme === "string") return null;
   ThemeBase.parse(theme.base);
+  const syntax = [
+    ["synPlain", "syn-plain"],
+    ["synKeyword", "syn-keyword"],
+    ["synType", "syn-type"],
+    ["synFunction", "syn-function"],
+    ["synString", "syn-string"],
+    ["synNumber", "syn-number"],
+    ["synComment", "syn-comment"],
+    ["synPunct", "syn-punct"],
+    ["diffAddFg", "diff-add-fg"],
+    ["diffDelFg", "diff-del-fg"],
+  ] as const;
   // Check every value before composing any CSS, including values unused on this page.
-  const keys = ["bg", "sunken", "fg", "strong", "muted", "border", "link", "diffAdd", "diffDel"] as const;
+  const keys = [
+    "bg",
+    "sunken",
+    "fg",
+    "strong",
+    "muted",
+    "border",
+    "link",
+    "diffAdd",
+    "diffDel",
+    ...syntax.map(([key]) => key),
+  ] as const;
   const colors = Object.fromEntries(keys.map((key) => [key, ThemeColor.parse(theme.colors[key])]));
   return (
     `:root{${keys
       .slice(0, 7)
       .map((key) => `--${key}:${colors[key]}`)
-      .join(";")}}` + `.em-diff-add{background:${colors.diffAdd}}.em-diff-delete{background:${colors.diffDel}}`
+      .join(";")};${syntax.map(([key, token]) => `--${token}:${colors[key]}`).join(";")}}` +
+    `.em-diff-add{background:${colors.diffAdd}}.em-diff-delete{background:${colors.diffDel}}`
   );
 }
 const rel = ["noopener", "noreferrer", "nofollow"];

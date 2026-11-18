@@ -244,7 +244,9 @@ An optional `theme=dark`, `theme=light` or `theme=<name>` query parameter sets t
 draws: the writeup, Markdown docs, docs shown as source, the comments file and the omitted-content
 note page. Without it, they follow the reader's colour scheme. An HTML doc downloads as its own
 bytes: a custom page keeps its own look, and a page in emend's look downloads without emend's
-styles. A theme name uses that theme’s resolved colours; fonts and code-block colours stay unchanged.
+styles. A theme name uses that theme’s resolved colours, including syntax colours for code blocks
+and docs shown as source; fonts stay unchanged. Revisions published before #136 keep their stored
+GitHub code colours.
 An invalid value, a repeat, or a missing or refused theme gets `400 invalid_request` before waiting
 for a slot, also on `HEAD`.
 It changes no headers, filename or ZIP decision.
@@ -668,29 +670,31 @@ varies). Compare the unrounded ratio and report two decimals, for example
   and `bg-reading-card`; `fg-link` on `bg-reading`.
 - For the Download: `fg-reading` and `fg-reading-strong` on `bg-sunken`, `diff-add-bg` over
   `bg-sunken`, and `diff-del-bg` over `bg-sunken`.
-- `fg-1` on `bg-selected`, `bg-hover`, `bg-active`, `accent-tint`, `mark-bg`, `mark-bg-active`;
+- `fg-1` on `bg-selected`, `bg-hover`, `bg-active`, `accent-tint`, `mark-bg`, `mark-bg-active`, `topic-bg-2`;
   `fg-reading` on `mark-bg` over `bg-reading`.
 - `accent-fg` on `accent`, `accent-hover`, `accent-press`.
 - `success-fg`, `info-fg`, `warning-fg`, `danger-fg` on their own `-bg` and on `bg-surface`.
 - `state-{open,approved,settled,snoozed}-fg`, `outcome-{fixed,explained,held,declined}-fg` and
   `changed-fg` on their own `-bg`; `topic-fg` on `topic-bg`, `topic-bg-2`, `bg-surface`;
   `topic-on-solid` on `topic-solid`; `origin-N-fg` on `origin-N-bg` for N = 1–8.
-- `syn-plain` on `bg-surface`, `bg-hover`, `diff-add-bg`, `diff-del-bg`; `diff-add-fg` on `diff-add-bg`;
-  `diff-del-fg` on `diff-del-bg`; `fg-3` on `diff-gutter`; `fg-1`, `fg-2` on `diff-hunk-bg`;
-  `fg-1` on `diff-select-bg`.
+- `syn-plain` on `bg-surface`, `bg-sunken`, `bg-hover`, `diff-add-bg`, `diff-del-bg`;
+  `diff-add-fg` on `diff-add-bg`; `diff-del-fg` on `diff-del-bg`; `fg-3` on `diff-gutter`;
+  `fg-1`, `fg-2` on `diff-hunk-bg`; `fg-1` on `diff-select-bg`.
 - `syn-plain` on `diff-add-word` (over `diff-add-bg`), `diff-del-word` (over `diff-del-bg`),
   `diff-add-hover`, `diff-del-hover` and `diff-select-bg`.
 
 These pairs require 3 to 1:
 
 - `syn-keyword`, `syn-type`, `syn-function`, `syn-string`, `syn-number`, `syn-comment` and
-  `syn-punct` on `bg-surface`, `bg-hover`, `diff-add-bg`, `diff-del-bg`, `diff-add-word` (over `diff-add-bg`),
-  `diff-del-word` (over `diff-del-bg`), `diff-add-hover`, `diff-del-hover` and `diff-select-bg`.
+  `syn-punct` on `bg-surface`, `bg-sunken`, `bg-hover`, `diff-add-bg`, `diff-del-bg`,
+  `diff-add-word` (over `diff-add-bg`), `diff-del-word` (over `diff-del-bg`), `diff-add-hover`,
+  `diff-del-hover` and `diff-select-bg`.
+- `diff-add-fg` and `diff-del-fg` on `bg-sunken` for inserted and deleted code tokens.
 - For the Download: `fg-reading-muted` on `bg-sunken`, on `diff-add-bg` over `bg-sunken` and on
   `diff-del-bg` over `bg-sunken`.
 
 Hovered context lines use `bg-hover` composited over `bg-surface`. Disabled text is exempt.
-Both built-in bases pass all 154 pairs.
+Both built-in bases pass all 165 pairs.
 
 Before the HTTP server listens, `startServer` awaits `watchThemes`, which waits at most
 `baselineWaitMs` (default 1000 ms) for its first fingerprint. In time, it becomes the baseline without an event. After

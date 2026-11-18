@@ -28,7 +28,10 @@ export const THEME_READABILITY_PAIRS: readonly ThemeReadabilityPair[] = [
     minimum: pair.foreground === "fg-reading-muted" ? 3 : 4.5,
   })),
   ...pairs(["fg-link"], ["bg-reading"]),
-  ...pairs(["fg-1"], ["bg-selected", "bg-hover", "bg-active", "accent-tint", "mark-bg", "mark-bg-active"]),
+  ...pairs(
+    ["fg-1"],
+    ["bg-selected", "bg-hover", "bg-active", "accent-tint", "mark-bg", "mark-bg-active", "topic-bg-2"],
+  ),
   { foreground: "fg-reading", background: "mark-bg", over: "bg-reading", minimum: 4.5 },
   ...pairs(["accent-fg"], ["accent", "accent-hover", "accent-press"]),
   ...ownBackgrounds(["success", "info", "warning", "danger"]),
@@ -38,7 +41,7 @@ export const THEME_READABILITY_PAIRS: readonly ThemeReadabilityPair[] = [
   ...pairs(["topic-fg"], ["topic-bg", "topic-bg-2", "bg-surface"]),
   ...pairs(["topic-on-solid"], ["topic-solid"]),
   ...ownBackgrounds(Array.from({ length: 8 }, (_, i) => `origin-${i + 1}`)),
-  ...pairs(["syn-plain"], ["bg-surface", "bg-hover", "diff-add-bg", "diff-del-bg"]),
+  ...pairs(["syn-plain"], ["bg-surface", "bg-sunken", "bg-hover", "diff-add-bg", "diff-del-bg"]),
   ...pairs(["syn-plain"], ["diff-add-hover", "diff-del-hover", "diff-select-bg"]),
   ...["add", "del"].flatMap((kind) =>
     pairs(
@@ -52,12 +55,22 @@ export const THEME_READABILITY_PAIRS: readonly ThemeReadabilityPair[] = [
   ),
   ...pairs(["diff-add-fg"], ["diff-add-bg"]),
   ...pairs(["diff-del-fg"], ["diff-del-bg"]),
+  ...pairs(["diff-add-fg", "diff-del-fg"], ["bg-sunken"], 3),
   ...pairs(["fg-3"], ["diff-gutter"]),
   ...pairs(["fg-1", "fg-2"], ["diff-hunk-bg"]),
   ...pairs(["fg-1"], ["diff-select-bg"]),
   ...pairs(
     ["syn-keyword", "syn-type", "syn-function", "syn-string", "syn-number", "syn-comment", "syn-punct"],
-    ["bg-surface", "bg-hover", "diff-add-bg", "diff-del-bg", "diff-add-hover", "diff-del-hover", "diff-select-bg"],
+    [
+      "bg-surface",
+      "bg-sunken",
+      "bg-hover",
+      "diff-add-bg",
+      "diff-del-bg",
+      "diff-add-hover",
+      "diff-del-hover",
+      "diff-select-bg",
+    ],
     3,
   ),
 ];

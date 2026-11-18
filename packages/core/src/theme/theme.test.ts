@@ -24,9 +24,9 @@ test.each(["dark", "light"] as const)("%s passes all readability pairs", (base) 
   expect(check({ version: 1, base })).toMatchObject({ base, scales: {}, tokens: {}, fonts: {} });
   expect(themeReadabilityProblems(resolveTheme(base), base)).toEqual([]);
 });
-test("the readability set covers exactly the design's 154 pairs", () => {
-  expect(THEME_READABILITY_PAIRS).toHaveLength(154);
-  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.minimum === 3)).toHaveLength(66);
+test("the readability set covers exactly the design's 165 pairs", () => {
+  expect(THEME_READABILITY_PAIRS).toHaveLength(165);
+  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.minimum === 3)).toHaveLength(75);
   expect(THEME_READABILITY_PAIRS.filter((pair) => pair.over)).toHaveLength(23);
   expect(THEME_READABILITY_PAIRS).toEqual(
     expect.arrayContaining([
@@ -68,6 +68,24 @@ test("the readability set covers exactly the design's 154 pairs", () => {
     ]),
   );
   expect(THEME_READABILITY_PAIRS.some((pair) => pair.foreground === "fg-disabled")).toBe(false);
+});
+test.each([
+  ["syn-plain", "bg-sunken", 4.5],
+  ["syn-keyword", "bg-sunken", 3],
+  ["syn-type", "bg-sunken", 3],
+  ["syn-function", "bg-sunken", 3],
+  ["syn-string", "bg-sunken", 3],
+  ["syn-number", "bg-sunken", 3],
+  ["syn-comment", "bg-sunken", 3],
+  ["syn-punct", "bg-sunken", 3],
+  ["diff-add-fg", "bg-sunken", 3],
+  ["diff-del-fg", "bg-sunken", 3],
+  ["fg-1", "topic-bg-2", 4.5],
+] as const)("refuses unreadable code or diagram text: %s on %s", (foreground, background, minimum) => {
+  // A full copy keeps other foregrounds independent of the failing token.
+  const theme = themeCopyDocument("light");
+  theme.tokens = { ...theme.tokens, [foreground]: resolveTheme("light")[background] };
+  expect(problems(theme)).toContain(`${foreground} on ${background}: 1.00 to 1, needs ${minimum} to 1.`);
 });
 test("hovered context lines refuse faint syntax colours on bg-hover", () => {
   expect(problems({ version: 1, base: "light", tokens: { "bg-hover": "#7c7c7c" } })).toContainEqual(
@@ -291,7 +309,7 @@ test("translucent backgrounds composite through surfaces; valid meta colours use
   expect(check({ version: 1, base: "light", tokens: { "bg-app": "#ffffffff" } }).themeColor).toBe("#ffffff");
   expect(themeColorHex(themeBackground(colors, "dark", "bg-app"))).toBe("#808080");
 });
-test("download look uses the nine resolved reading and diff colours", () => {
+test("download look uses the resolved reading, diff and syntax colours", () => {
   const source = check({ ...document, tokens: { "fg-link": "#ffffff" } });
   const colors = resolveTheme(source);
   expect(themeDownloadLook(source)).toEqual({
@@ -306,6 +324,16 @@ test("download look uses the nine resolved reading and diff colours", () => {
       link: "#ffffff",
       diffAdd: colors["diff-add-bg"],
       diffDel: colors["diff-del-bg"],
+      synPlain: colors["syn-plain"],
+      synKeyword: colors["syn-keyword"],
+      synType: colors["syn-type"],
+      synFunction: colors["syn-function"],
+      synString: colors["syn-string"],
+      synNumber: colors["syn-number"],
+      synComment: colors["syn-comment"],
+      synPunct: colors["syn-punct"],
+      diffAddFg: colors["diff-add-fg"],
+      diffDelFg: colors["diff-del-fg"],
     },
   });
 });

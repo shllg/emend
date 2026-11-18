@@ -1181,10 +1181,30 @@ test.each([false, true])("frame locks its base theme to the embedding colour sch
           actorLineColor: border,
           labelBoxBorderColor: border,
           secondaryColor: topicBg,
+          ...(dark ? { edgeLabelBackground: sunken } : {}),
           noteBkgColor: topicBg,
           noteBorderColor: topicBg,
           activationBkgColor: topicBg,
           activationBorderColor: topic,
+          archEdgeColor: fg3,
+          archEdgeArrowColor: fg3,
+          archGroupBorderColor: border,
+          pieOuterStrokeColor: border,
+          pieStrokeColor: sunken,
+          gridColor: fg3,
+          doneTaskBorderColor: border,
+          critBorderColor: border,
+          todayLineColor: fg3,
+          vertLineColor: fg3,
+          radar: { graticuleColor: fg3 },
+          cynefin: { cliffColor: fg3 },
+          wardleyEvolutionColor: fg3,
+          emUiStroke: border,
+          emProcessorStroke: border,
+          emReadModelStroke: border,
+          emCommandStroke: border,
+          emEventStroke: border,
+          emSwimlaneBackgroundStroke: border,
         },
         sequence: {
           mirrorActors: false,
@@ -1445,6 +1465,15 @@ const ownColors = {
   accent: "#607080",
 };
 
+test.each([false, true])("frame edge labels use checked theme backgrounds (dark=%s)", (dark) => {
+  for (const colors of [undefined, ownColors]) {
+    const variables = frameConfig(dark, colors).themeVariables;
+    expect(variables).toHaveProperty("secondaryColor", colors?.accentBg ?? (dark ? "#043232" : "#c2f3f0"));
+    if (dark) expect(variables).toHaveProperty("edgeLabelBackground", colors?.background ?? "#060708");
+    else expect(variables).not.toHaveProperty("edgeLabelBackground");
+  }
+});
+
 test.each([ownColors, undefined])(
   "both diagram views read colours at load and post only a complete palette (%j)",
   (colors) => {
@@ -1560,6 +1589,25 @@ test.each([false, true])("frame accepts exactly eight lowercase hex colours (dar
       noteBorderColor: ownColors.accentBg,
       activationBkgColor: ownColors.accentBg,
       activationBorderColor: ownColors.accent,
+      archEdgeColor: ownColors.line,
+      archEdgeArrowColor: ownColors.line,
+      archGroupBorderColor: ownColors.border,
+      pieOuterStrokeColor: ownColors.border,
+      pieStrokeColor: ownColors.background,
+      gridColor: ownColors.line,
+      doneTaskBorderColor: ownColors.border,
+      critBorderColor: ownColors.border,
+      todayLineColor: ownColors.line,
+      vertLineColor: ownColors.line,
+      radar: { graticuleColor: ownColors.line },
+      cynefin: { cliffColor: ownColors.line },
+      wardleyEvolutionColor: ownColors.line,
+      emUiStroke: ownColors.border,
+      emProcessorStroke: ownColors.border,
+      emReadModelStroke: ownColors.border,
+      emCommandStroke: ownColors.border,
+      emEventStroke: ownColors.border,
+      emSwimlaneBackgroundStroke: ownColors.border,
     });
     const invalidValues = [
       "red",
