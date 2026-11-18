@@ -12,6 +12,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type ReactElement,
   type ReactNode,
+  use,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -48,6 +49,7 @@ import {
 import { diffShadowCSS } from "./shadow.ts";
 import type { FileLocation } from "./targets.ts";
 import { diffTheme } from "./theme.ts";
+import { DiffWorkersHold } from "./worker-hold.ts";
 
 export type ParsedDiff = FileDiffMetadata;
 export type DiffPostRender = NonNullable<FileDiffOptions<ReactElement, undefined>["onPostRender"]>;
@@ -72,7 +74,18 @@ export function HighlightNote({ diff }: { diff: ParsedDiff }) {
     </p>
   );
 }
+function DiffWorkersKeeper() {
+  return (
+    <WorkerPoolContextProvider poolOptions={poolOptions} highlighterOptions={highlighterOptions}>
+      {null}
+    </WorkerPoolContextProvider>
+  );
+}
 export function DiffWorkers({ children, workerFactory }: { children: ReactNode; workerFactory?: () => Worker }) {
+  const hold = use(DiffWorkersHold);
+  useEffect(() => {
+    hold?.(<DiffWorkersKeeper />);
+  }, [hold]);
   const pool = useMemo(() => (workerFactory ? { ...poolOptions, workerFactory } : poolOptions), [workerFactory]);
   return (
     <WorkerPoolContextProvider poolOptions={pool} highlighterOptions={highlighterOptions}>
