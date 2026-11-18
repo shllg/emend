@@ -170,7 +170,7 @@ test("Appearance shows the theme skill prompt and copies its exact text", async 
   const prompt = appearance.getByText(/Make me a custom theme for emend/);
   expect(prompt.textContent).toBe(themeSkillPrompt(__EMEND_VERSION__));
   expect(prompt.textContent).toContain(
-    "https://raw.githubusercontent.com/shllg/emend/main/docs/skills/emend-theme/SKILL.md",
+    "https://raw.githubusercontent.com/shllg/emend/refs/heads/main/docs/skills/emend-theme/SKILL.md",
   );
   fireEvent.click(appearance.getByRole("button", { name: "Copy" }));
   expect(writeText).toHaveBeenCalledExactlyOnceWith(themeSkillPrompt(__EMEND_VERSION__));

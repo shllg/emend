@@ -23,9 +23,14 @@ The choice applies to that device only.
    Fix every problem it prints.
    Run it again until it prints `emend: <name> is valid`.
 4. Never write a theme into a repository.
-   Run the commands from a folder outside any repository, such as the home folder.
-   The CLI refuses a themes folder inside a repository that holds the working directory.
-   This check includes the folder's real path and symlink hops.
+   Before `emend theme copy`, resolve `<config folder>/themes` with `realpath`.
+   If `themes` does not exist, resolve the config folder and use its `themes` child as the destination.
+   Without running git, look for a `.git` entry in the resolved folder and every parent up to the filesystem root.
+   Ignore only the `.git` entry in the resolved home folder itself.
+   If you find another, stop, write nothing and tell the person the real themes folder path.
+   If you cannot resolve or inspect the path, stop without writing and report the problem.
+   After copying, resolve the path in `emend: wrote <path>` and confirm it is `<name>/theme.json` inside the checked themes folder.
+   The CLI also refuses a themes folder inside a repository that holds the working directory.
 5. Edit only `theme.json` inside the theme's folder.
 
 ## Where themes live
@@ -202,47 +207,59 @@ A copy shows which scale step each token names.
 The neutral ramp runs from `n-0` (lightest) to `n-1000` (darkest).
 The colour ramps serve accent, status, review and topic colours.
 Some steps are available for your own references but have no token pointing to them in either base.
-Colours written directly into tokens do not change when a similar-looking scale step changes.
-Origin pairs colour source badges directly through the app's colour utilities.
+
+Tokens that hold their own colour do not change when you change a ramp.
+In Dark, the neutral colours of `bg-sunken`, `bg-hover`, `bg-active`, `bg-overlay` and `fg-reading` are their own values.
+In Light, this applies to `bg-hover`, `bg-active`, `bg-overlay` and `fg-reading-muted`.
+Many Dark tints also hold their own transparent colours, including `accent-tint`, `mark-bg`,
+`success-bg`, `info-bg`, `warning-bg`, `danger-bg` and the diff backgrounds.
+For a whole ramp retint, change these independent colours too when the person's request includes them.
+The copy shows them as colours rather than step names.
+
+The app also uses steps directly: `n-500`, `n-1000`, `ochre-200`, `ochre-400`, `ochre-500`,
+`ochre-600`, `green-400`, `blue-400`, `red-400` and the origin pairs.
+Button highlights reference `n-0` but fix the result to translucent white.
+The rows below name these direct uses alongside the roles reached through tokens.
+Origin pairs colour source badges and compact source dots.
 The source id chooses one of eight pairs, so a number does not name a fixed machine or project.
 
 | Step | What it colours |
 | --- | --- |
-| `n-0` | Lightest neutral: Light panels, raised menus, reading cards and text on solid topic badges. Dark has no token pointing to it. |
+| `n-0` | Light panels, raised menus, reading cards and solid topic badge text. Both bases reference it for button inner highlights, but fix those to translucent white. |
 | `n-25` | Light page and reading background, plus text on inverse surfaces. Dark has no token pointing to it. |
 | `n-50` | Dark primary text and plain diff code. Light sunken areas, settled badges and diff gutters. |
 | `n-100` | Dark inverse surfaces such as tooltips. Light Open badge backgrounds. |
 | `n-200` | Dark strong reading text. Light subtle borders. |
 | `n-300` | Dark secondary interface text. Light stronger borders. |
 | `n-400` | Dark muted interface and reading text, settled labels and syntax punctuation. Light disabled text. |
-| `n-500` | Both bases use it for idle agent marks, resolved thread rings and syntax comments. Light also uses it for strong borders. |
+| `n-500` | Both bases' idle agent marks, resolved thread rings and syntax comments; Light strong borders. Tooltip key borders use its hue and chroma with fixed lightness and opacity. |
 | `n-600` | Dark disabled text and strong borders. Light muted interface text, settled labels and syntax punctuation. |
 | `n-700` | Light secondary interface text. Dark has no token pointing to it. |
 | `n-800` | Dark stronger borders. Light has no token pointing to it. |
 | `n-850` | Dark subtle borders and Open badge backgrounds. Light has no token pointing to it. |
 | `n-900` | Dark raised menus, reading cards and settled badge backgrounds. Light inverse surfaces. |
 | `n-950` | Dark panels, reading background, diff gutters and inverse text. Light primary text, reading text and plain diff code. |
-| `n-1000` | Darkest neutral: Dark page background and text on solid topic badges. Both bases use it for accent button text and selected text. |
+| `n-1000` | Dark page background and solid topic badge text. Both bases use it for accent button text, browser-selected text and diff comment-button text. |
 | `ochre-50` | Light selected backgrounds, accent tint, warning backgrounds and Held badges. Dark uses separate transparent colours for these. |
 | `ochre-100` | Light stronger accent tint and selected diff lines. Dark uses separate transparent colours. |
 | `ochre-200` | Dark hovered links and both bases' browser text-selection background. |
 | `ochre-300` | Both bases' hovered accent buttons. Dark links, accent text, warning text and Held labels. |
-| `ochre-400` | Both bases' accent buttons and diff comment buttons. Dark focus rings, mark underlines and open thread dots also use it. |
-| `ochre-500` | Both bases' focused field borders, pressed accent buttons and warning borders. Light focus rings and mark underlines also use it. |
+| `ochre-400` | Both bases' `accent` token, neutral toast icons, decisions borders and diff comment-button fills. Dark focus rings, mark underlines, open thread dots and reserved `agent-working` also use it. |
+| `ochre-500` | Both bases' `border-focus`, `accent-press`, `warning-solid`, desktop tab focus rings and active underlines, and selected radio-card borders. Light also uses it for general focus rings, mark underlines and reserved `agent-working`. |
 | `ochre-600` | Light open thread dots and both bases' accent button border mix. |
 | `ochre-700` | Light accent text, such as comment counts and note references. Dark has no token pointing to it. |
 | `ochre-800` | Light links, warning text and Held labels. Dark has no token pointing to it. |
 | `ochre-900` | Light hovered links. Dark has no token pointing to it. |
 | `green-50` | Light success, Approved and Fixed badge backgrounds. Dark uses separate transparent colours. |
 | `green-100` | Pale green available for success or addition tints. Neither base points a token to it. |
-| `green-400` | Dark success, Approved, Fixed and addition text. It also supplies the reserved approved-agent colour. |
+| `green-400` | Dark success, Approved, Fixed and addition text, plus reserved `agent-approved`. Both bases use it directly for success toast icons. |
 | `green-500` | Light reserved approved-agent colour. Dark has no token pointing to it. |
 | `green-600` | Both bases' solid success colour, mixed into Approve button borders. |
 | `green-700` | Light success, Approved, Fixed and addition text. Dark has no token pointing to it. |
 | `green-900` | Deep green available for success or addition colours. Neither base points a token to it. |
 | `blue-50` | Light information, Snoozed and Explained backgrounds, plus diff hunk headers. Dark uses separate transparent colours. |
 | `blue-100` | Pale blue available for information tints. Neither base points a token to it. |
-| `blue-400` | Dark information, Snoozed and Explained text, waiting-agent dots and sent-thread marks. |
+| `blue-400` | Dark information, Snoozed and Explained text, waiting-agent dots and sent-thread marks. Both bases use it directly for information toast icons. |
 | `blue-500` | Light waiting-agent dots. Dark has no token pointing to it. |
 | `blue-600` | Both bases' solid information colour for banner borders. Light also uses it for sent-thread marks. |
 | `blue-700` | Light information, Snoozed and Explained text. Dark has no token pointing to it. |
@@ -262,7 +279,7 @@ The source id chooses one of eight pairs, so a number does not name a fixed mach
 | `teal-700` | Light topic text. Dark has no token pointing to it. |
 | `red-50` | Light danger and Declined badge backgrounds. Dark uses separate transparent colours. |
 | `red-100` | Pale red available for danger or deletion tints. Neither base points a token to it. |
-| `red-400` | Dark danger, Declined and deletion text. |
+| `red-400` | Dark danger, Declined and deletion text. Both bases use it directly for danger toast icons. |
 | `red-500` | Middle red available for danger or deletion colours. Neither base points a token to it. |
 | `red-600` | Both bases' solid danger colour for destructive button borders and error borders. |
 | `red-700` | Light danger, Declined and deletion text. Dark has no token pointing to it. |
@@ -287,9 +304,17 @@ The source id chooses one of eight pairs, so a number does not name a fixed mach
 ## Tokens
 
 These names describe the colour's role, regardless of its base value.
-Emend-styled HTML docs also use reading, border, link, mark and status colours through `pub.css`.
-The offline Download carries the reading, sunken, border, link and diff colours noted below.
-HTML docs shown with their original look can supply their own colours.
+Custom colours and fonts apply to the app document, not to HTML doc contents inside sandboxed frames.
+HTML docs in emend's look use built-in Dark or Light colours from the static `pub-frame.css`.
+Its `prefers-color-scheme` query follows the embedding page's colour scheme, which a custom theme sets to its base.
+The doc's own `data-theme` attribute or CSS can override that look.
+
+A Download with a custom theme uses nine resolved token colours for the files emend draws:
+the writeup, Markdown docs, docs shown as source, the comments file and omitted-content note pages.
+These are `bg-reading`, `bg-sunken`, `fg-reading`, `fg-reading-strong`, `fg-reading-muted`,
+`border-1`, `fg-link`, `diff-add-bg` and `diff-del-bg`.
+Fonts and code-block colours stay unchanged.
+An HTML doc downloads as its own bytes, without emend's injected styles.
 
 ### Surfaces
 
@@ -311,11 +336,11 @@ HTML docs shown with their original look can supply their own colours.
 | --- | --- |
 | `fg-1` | Primary interface text, labels and input text. |
 | `fg-2` | Secondary interface text, descriptions and file headers. |
-| `fg-3` | Muted metadata, hints, captions and diff line numbers. |
+| `fg-3` | Muted metadata, hints, captions, diff line numbers and hunk labels. |
 | `fg-disabled` | Disabled input text and placeholders. |
 | `fg-inverse` | Text in tooltips and toasts. |
-| `fg-link` | Links in docs and the interface. Also links in the offline Download. |
-| `fg-link-hover` | Hovered links, including links in emend-styled HTML docs. |
+| `fg-link` | Links in Markdown docs, writeups and the interface. Also links in the offline Download. |
+| `fg-link-hover` | Hovered links in Markdown docs, writeups and the interface. |
 
 ### Borders and focus
 
@@ -325,15 +350,15 @@ HTML docs shown with their original look can supply their own colours.
 | `border-2` | Input outlines, blockquote lines and stronger table separators. |
 | `border-strong` | Radio outlines and hovered input borders. |
 | `border-focus` | Focused input borders. |
-| `focus-color` | The outer keyboard-focus ring around controls and focusable content. |
+| `focus-color` | The general outer keyboard-focus ring around controls and focusable content. |
 
 ### Reading
 
 | Token | What it colours |
 | --- | --- |
-| `bg-reading` | The document reading pane and emend-styled HTML page background. Also the offline Download page. |
-| `bg-reading-card` | Writeup summary cards and summary sections in emend-styled HTML docs. |
-| `fg-reading` | Body text in docs and writeups. Also body text in the offline Download. |
+| `bg-reading` | The document reading pane background. Also the offline Download page. |
+| `bg-reading-card` | Writeup summary cards. |
+| `fg-reading` | Body text in Markdown docs, writeups and comments. Also body text in the offline Download. |
 | `fg-reading-muted` | Quiet and muted writeup sections. Also metadata and muted text in the offline Download. |
 | `fg-reading-strong` | Reading headings, strong text and inline code. Also strong text in the offline Download. |
 
@@ -341,19 +366,19 @@ HTML docs shown with their original look can supply their own colours.
 
 | Token | What it colours |
 | --- | --- |
-| `accent` | Primary action buttons, highlighted count badges and active-tab lines. |
+| `accent` | Primary buttons, count and revision badges, unread dots and phone-tab underlines. Also thread card borders, note-reference focus outlines, source selection lines, active diff-comment lines and active pane dividers. |
 | `accent-hover` | Primary action buttons while hovered. |
 | `accent-press` | Primary action buttons while pressed. |
 | `accent-fg` | Text and icons on primary action buttons and accent count badges. |
 | `accent-text` | Comment counts, note references and highlighted comment controls. |
-| `accent-tint` | Selected radio cards, note references and blocks whose comment anchors moved. |
-| `accent-tint-2` | The soft ring around focused input fields. |
+| `accent-tint` | Selected radio cards, note references, selected source lines, hovered source line numbers and blocks whose comment anchors moved. Also rings around comment composers and hovered thread cards. |
+| `accent-tint-2` | The soft ring around focused input fields and focused or jumped-to thread cards. |
 
 ### Marks
 
 | Token | What it colours |
 | --- | --- |
-| `mark-bg` | Highlighted comment quotes, marked text and marked source lines. Also marked text in emend-styled HTML docs. |
+| `mark-bg` | Highlighted comment quotes, marked text and marked source lines. |
 | `mark-bg-active` | The currently active comment highlight. |
 | `mark-line` | Underlines beneath marked text and the line beside marked source lines. |
 
@@ -361,17 +386,17 @@ HTML docs shown with their original look can supply their own colours.
 
 | Token | What it colours |
 | --- | --- |
-| `success-fg` | Approve button text, inline Approved labels and success status text in emend-styled HTML docs. |
-| `success-bg` | The hovered Approve button and success status backgrounds in emend-styled HTML docs. |
+| `success-fg` | Approve button text and inline Approved labels and icons. |
+| `success-bg` | The hovered Approve button background. |
 | `success-solid` | The success colour mixed into the Approve button border. |
-| `info-fg` | Information banner text, renamed-file marks and note borders in emend-styled HTML docs. |
+| `info-fg` | Information banner text and renamed-file marks. |
 | `info-bg` | Information banner backgrounds. |
 | `info-solid` | The information colour mixed into banner borders. |
-| `warning-fg` | Warning text and icons, including thread placement warnings. Also warning status text and note borders in emend-styled HTML docs. |
-| `warning-bg` | Warning banners and thread placement warnings. Also warning notes and statuses in emend-styled HTML docs. |
+| `warning-fg` | Warning text and icons, including thread placement warnings. |
+| `warning-bg` | Warning banners and thread placement warnings. |
 | `warning-solid` | The warning colour mixed into banner borders. |
-| `danger-fg` | Error messages, destructive menu text and invalid field labels. Also bad status text in emend-styled HTML docs. |
-| `danger-bg` | Error field rings, destructive hover areas and danger banners. Also bad status backgrounds in emend-styled HTML docs. |
+| `danger-fg` | Error messages, destructive menu text and invalid field labels. |
+| `danger-bg` | Error field rings, destructive hover areas and danger banners. |
 | `danger-solid` | Invalid field borders and the colour mixed into destructive button and danger banner borders. |
 
 ### Review states
@@ -400,7 +425,7 @@ HTML docs shown with their original look can supply their own colours.
 
 | Token | What it colours |
 | --- | --- |
-| `thread-open` | Open thread dots and dashed unsent-thread rings. |
+| `thread-open` | Open thread dots, dashed unsent-thread rings and draft, unsent or open card state lines. |
 | `thread-sent` | Sent thread dots and card state lines. |
 | `thread-answered` | Answered thread dots and card state lines. |
 | `thread-resolved` | Resolved thread rings. |
