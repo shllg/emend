@@ -23,13 +23,15 @@ The choice applies to that device only.
    Fix every problem it prints.
    Run it again until it prints `emend: <name> is valid`.
 4. Never write a theme into a repository.
-   Before `emend theme copy`, resolve `<config folder>/themes` with `realpath`.
-   If `themes` does not exist, resolve the config folder and use its `themes` child as the destination.
-   Without running git, look for a `.git` entry in the resolved folder and every parent up to the filesystem root.
-   Ignore only the `.git` entry in the resolved home folder itself.
-   If you find another, stop, write nothing and tell the person the real themes folder path.
-   If you cannot resolve or inspect the path, stop without writing and report the problem.
-   After copying, resolve the path in `emend: wrote <path>` and confirm it is `<name>/theme.json` inside the checked themes folder.
+   Run the commands from a folder outside any repository, such as the home folder.
+   Before `emend theme copy`, find where the themes folder really is, without running git.
+   Take `<config folder>/themes`, go up to the nearest folder on that path that exists, resolve it with `realpath`, and add back the parts that do not exist yet.
+   Look for a `.git` entry in that folder and in every folder above it, up to the filesystem root.
+   A `.git` entry in the home folder itself does not count.
+   If you find one, or cannot resolve the path, stop, write nothing and tell the person the real themes folder path.
+   After the copy, resolve the path in `emend: wrote <path>` with `realpath`.
+   It must be `<name>/theme.json` inside the themes folder you checked.
+   If it is not, stop, edit nothing and tell the person that path.
    The CLI also refuses a themes folder inside a repository that holds the working directory.
 5. Edit only `theme.json` inside the theme's folder.
 
@@ -208,13 +210,16 @@ The neutral ramp runs from `n-0` (lightest) to `n-1000` (darkest).
 The colour ramps serve accent, status, review and topic colours.
 Some steps are available for your own references but have no token pointing to them in either base.
 
-Tokens that hold their own colour do not change when you change a ramp.
-In Dark, the neutral colours of `bg-sunken`, `bg-hover`, `bg-active`, `bg-overlay` and `fg-reading` are their own values.
-In Light, this applies to `bg-hover`, `bg-active`, `bg-overlay` and `fg-reading-muted`.
-Many Dark tints also hold their own transparent colours, including `accent-tint`, `mark-bg`,
-`success-bg`, `info-bg`, `warning-bg`, `danger-bg` and the diff backgrounds.
-For a whole ramp retint, change these independent colours too when the person's request includes them.
-The copy shows them as colours rather than step names.
+In the copy, a token whose value starts with `#` or `oklch(` holds its own colour and stays unchanged when you change a ramp.
+Before retinting a ramp, list those tokens and change only the ones the person's request covers.
+Dark's neutral examples are `bg-sunken`, `bg-hover`, `bg-active`, `bg-overlay` and `fg-reading`.
+Light's neutral examples are `bg-hover`, `bg-active`, `bg-overlay` and `fg-reading-muted`.
+Both bases store their own colours for marks (`mark-bg` and `mark-bg-active`) and syntax
+(`syn-keyword`, `syn-type`, `syn-function`, `syn-string` and `syn-number`).
+Both bases also do this for `diff-add-bg`, `diff-add-word`, `diff-add-hover`, `diff-del-bg`, `diff-del-word` and `diff-del-hover`.
+Dark's transparent tints include `accent-tint`, `accent-tint-2`, `bg-selected`, `success-bg`, `info-bg`, `warning-bg` and `danger-bg`.
+Others are `state-approved-bg`, `outcome-fixed-bg`, `outcome-explained-bg`, `outcome-held-bg`, `outcome-declined-bg`,
+`changed-bg`, `topic-bg`, `topic-bg-2`, `diff-hunk-bg` and `diff-select-bg`.
 
 The app also uses steps directly: `n-500`, `n-1000`, `ochre-200`, `ochre-400`, `ochre-500`,
 `ochre-600`, `green-400`, `blue-400`, `red-400` and the origin pairs.
@@ -245,7 +250,7 @@ The source id chooses one of eight pairs, so a number does not name a fixed mach
 | `ochre-200` | Dark hovered links and both bases' browser text-selection background. |
 | `ochre-300` | Both bases' hovered accent buttons. Dark links, accent text, warning text and Held labels. |
 | `ochre-400` | Both bases' `accent` token, neutral toast icons, decisions borders and diff comment-button fills. Dark focus rings, mark underlines, open thread dots and reserved `agent-working` also use it. |
-| `ochre-500` | Both bases' `border-focus`, `accent-press`, `warning-solid`, desktop tab focus rings and active underlines, and selected radio-card borders. Light also uses it for general focus rings, mark underlines and reserved `agent-working`. |
+| `ochre-500` | Both bases' `border-focus`, `accent-press`, `warning-solid`, tablet and desktop tab focus rings and active underlines, and selected radio-card borders. Light also uses it for general focus rings, mark underlines and reserved `agent-working`. |
 | `ochre-600` | Light open thread dots and both bases' accent button border mix. |
 | `ochre-700` | Light accent text, such as comment counts and note references. Dark has no token pointing to it. |
 | `ochre-800` | Light links, warning text and Held labels. Dark has no token pointing to it. |
@@ -313,8 +318,9 @@ A Download with a custom theme uses nine resolved token colours for the files em
 the writeup, Markdown docs, docs shown as source, the comments file and omitted-content note pages.
 These are `bg-reading`, `bg-sunken`, `fg-reading`, `fg-reading-strong`, `fg-reading-muted`,
 `border-1`, `fg-link`, `diff-add-bg` and `diff-del-bg`.
-Fonts and code-block colours stay unchanged.
-An HTML doc downloads as its own bytes, without emend's injected styles.
+Fonts and syntax colours stay unchanged.
+Code blocks use the custom border, sunken background and strong text colours.
+A downloaded HTML doc keeps its own styles and gets no theme colours.
 
 ### Surfaces
 
@@ -360,13 +366,13 @@ An HTML doc downloads as its own bytes, without emend's injected styles.
 | `bg-reading-card` | Writeup summary cards. |
 | `fg-reading` | Body text in Markdown docs, writeups and comments. Also body text in the offline Download. |
 | `fg-reading-muted` | Quiet and muted writeup sections. Also metadata and muted text in the offline Download. |
-| `fg-reading-strong` | Reading headings, strong text and inline code. Also strong text in the offline Download. |
+| `fg-reading-strong` | Reading headings, strong text and inline code. Also strong text and plain code text in the offline Download. |
 
 ### Accent
 
 | Token | What it colours |
 | --- | --- |
-| `accent` | Primary buttons, count and revision badges, unread dots and phone-tab underlines. Also thread card borders, note-reference focus outlines, source selection lines, active diff-comment lines and active pane dividers. |
+| `accent` | Primary buttons, count and revision badges, unread dots and active phone-tab underlines. Also thread card borders, note-reference focus outlines, source selection lines, active diff-comment lines and active pane dividers. |
 | `accent-hover` | Primary action buttons while hovered. |
 | `accent-press` | Primary action buttons while pressed. |
 | `accent-fg` | Text and icons on primary action buttons and accent count badges. |
