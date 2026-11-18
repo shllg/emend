@@ -1,4 +1,14 @@
-import { DocHeading, FilePath, FileView, HtmlDocPosition, HtmlSpanTarget, LIMITS, ThreadView } from "@emend/contract";
+import {
+  DocHeading,
+  FilePath,
+  FileView,
+  HtmlDocPosition,
+  HtmlSpanTarget,
+  LIMITS,
+  ThemeBase,
+  ThemeValid,
+  ThreadView,
+} from "@emend/contract";
 import { codePxSchema, proseSizeSchema, readingWidthSchema } from "./layout-store.ts";
 
 export const HtmlPosition = HtmlDocPosition;
@@ -47,6 +57,14 @@ export const ParentToFrame = empty
       width: readingWidthSchema,
       prose: proseSizeSchema,
       code: codePxSchema,
+    }),
+  )
+  .or(
+    empty.extend({
+      type: literal("emend:theme"),
+      mode: ThemeBase,
+      scales: ThemeValid.shape.scales,
+      tokens: ThemeValid.shape.tokens,
     }),
   )
   .or(empty.extend({ type: literal("emend:scroll"), threadId }))

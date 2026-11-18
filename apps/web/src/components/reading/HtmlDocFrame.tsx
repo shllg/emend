@@ -1,6 +1,6 @@
 import type { DocHeading, HtmlSpanTarget } from "@emend/contract";
 import { TextSelect } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { claimDraft, useDraftClaim } from "../../lib/composer-owner.ts";
 import { draftKey, listDrafts, subscribeDrafts } from "../../lib/drafts.ts";
 import { type DocNavigation, FrameToParent, type HtmlPosition, type ParentToFrame } from "../../lib/frame-messages.ts";
@@ -8,6 +8,7 @@ import { useLayout, useMedia } from "../../lib/layout.ts";
 import { useLayoutPreferences } from "../../lib/layout-store.ts";
 import { focusReadingTarget } from "../../lib/reading-focus.ts";
 import { loadReadingPosition, saveReadingPosition } from "../../lib/reading-position.ts";
+import { pickedTheme, themeColors, useResolvedTheme, useThemeState } from "../../lib/theme.ts";
 import type { ReadingEntry } from "../../lib/use-reading-trail.ts";
 import { Composer } from "../threads/Composer.tsx";
 import { ThreadCard } from "../threads/ThreadCard.tsx";
@@ -61,9 +62,26 @@ export function HtmlDocFrame({
   const phone = useLayout() === "phone";
   const wide = useMedia("(min-width: 768px)");
   const { readingWidth, proseSize, codePx } = useLayoutPreferences();
-  const width = look === "emend" ? readingWidth : undefined;
-  const prose = look === "emend" ? proseSize : undefined;
-  const code = look === "emend" ? codePx : undefined;
+  const emendLook = look === "emend";
+  const lightOnly = colorScheme === "light";
+  const resolvedTheme = useResolvedTheme();
+  const mode = lightOnly ? "light" : resolvedTheme;
+  const custom = pickedTheme(useThemeState());
+  const colors = JSON.stringify(
+    emendLook && custom && (!lightOnly || custom.base === "light") ? themeColors(custom) : { scales: {}, tokens: {} },
+  );
+  const currentMode = useRef(mode);
+  useLayoutEffect(() => {
+    currentMode.current = mode;
+  }, [mode]);
+  const frameSrc = useCallback(
+    (fragment?: string) =>
+      `${contentUrl}${emendLook && !lightOnly ? `?theme=${currentMode.current}` : ""}${fragment === undefined ? "" : `#${encodeURIComponent(fragment)}`}`,
+    [contentUrl, emendLook, lightOnly],
+  );
+  const width = emendLook ? readingWidth : undefined;
+  const prose = emendLook ? proseSize : undefined;
+  const code = emendLook ? codePx : undefined;
   const savedDrafts = JSON.parse(
     useSyncExternalStore(subscribeDrafts, () =>
       JSON.stringify(
@@ -79,7 +97,7 @@ export function HtmlDocFrame({
   const gone = useRef(false);
   const [away, setAway] = useState(false);
   const [generation, setGeneration] = useState(0);
-  const [src, setSrc] = useState(contentUrl);
+  const [src, setSrc] = useState(() => frameSrc());
   const readyNow = useRef(false);
   const [ready, setReady] = useState(0);
   const [target, setTarget] = useState<HtmlSpanTarget | null>(null);
@@ -100,12 +118,12 @@ export function HtmlDocFrame({
   }, []);
   useEffect(() => {
     if (!docNavigation) return;
-    setSrc(`${contentUrl}#${encodeURIComponent(docNavigation.fragment)}`);
+    setSrc(frameSrc(docNavigation.fragment));
     setReady(0);
     setAway(false);
     setShow(undefined);
     setGeneration((value) => value + 1);
-  }, [contentUrl, docNavigation]);
+  }, [frameSrc, docNavigation]);
   const placed = threads
     .filter(
       (thread) =>
@@ -212,6 +230,9 @@ export function HtmlDocFrame({
     else post({ type: "emend:layout", wide });
   }, [ready, wide, width, prose, code, post]);
   useEffect(() => {
+    if (ready && emendLook) post({ type: "emend:theme", mode, ...JSON.parse(colors) });
+  }, [ready, emendLook, mode, colors, post]);
+  useEffect(() => {
     if (ready && !gone.current)
       frame.current?.contentWindow?.postMessage({ type: "emend:highlight", anchors: JSON.parse(anchors) }, "*");
   }, [ready, anchors]);
@@ -260,12 +281,12 @@ export function HtmlDocFrame({
     }
     // An explicit top or missing target must also reset an already mounted frame.
     if (previous && previous.reading !== reading && ((restoreEntry && !entrySaved) || reading.target !== undefined)) {
-      setSrc(contentUrl);
+      setSrc(frameSrc());
       setReady(0);
       setGeneration((value) => value + 1);
     }
     if (!navigation && !docNavigation) reading.entry.positions.set(reading.key, null);
-  }, [ready, reading, headings, navigation, docNavigation, post, contentUrl]);
+  }, [ready, reading, headings, navigation, docNavigation, post, frameSrc]);
   useEffect(() => {
     setShow(navigation);
   }, [navigation]);
@@ -310,7 +331,7 @@ export function HtmlDocFrame({
           <p>This doc navigated away.</p>
           <Button
             onClick={() => {
-              setSrc(contentUrl);
+              setSrc(frameSrc());
               setAway(false);
               setReady(0);
               lastScroll.current = undefined;

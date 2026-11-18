@@ -427,6 +427,36 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       dom(window.HighlightRegistry.prototype, "set", CSS.highlights, "emend-quotes", new Highlight(...ranges.values()));
     }
   }
+  let themeSheet;
+  function theme(data) {
+    if (data.mode !== "dark" && data.mode !== "light") return;
+    const key = value => typeof value === "string" && value.length <= 40 && /^[a-z0-9]+(?:-[a-z0-9]+)*$(?![\s\S])/.test(value);
+    const number = "(?:0|[1-9][0-9]{0,2})(?:\\.[0-9]{0,5}[1-9])?";
+    const oklch = new RegExp("^oklch\\(" + number + " " + number + " " + number + "(?: / " + number + ")?\\)$(?![\\s\\S])");
+    const color = value => typeof value === "string" &&
+      (/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$(?![\s\S])/.test(value) || oklch.test(value));
+    const entries = [];
+    for (const [values, tokens] of [[data.scales, false], [data.tokens, true]]) {
+      if (!values || typeof values !== "object" || Array.isArray(values)) return;
+      const own = Object.entries(values);
+      if (own.length > 256 || own.some(([name, value]) => !key(name) || !(color(value) || (tokens && key(value))))) return;
+      entries.push(...own);
+    }
+    const root = documentElement();
+    if (!root) return;
+    elementCall("setAttribute", root, "data-theme", data.mode);
+    if (typeof CSSStyleSheet !== "undefined" && descriptor(window.Document.prototype, "adoptedStyleSheets")) {
+      try {
+        if (!themeSheet) {
+          const sheet = new CSSStyleSheet();
+          write(window.Document.prototype, "adoptedStyleSheets", document, [...documentValue("adoptedStyleSheets"), sheet]);
+          themeSheet = sheet;
+        }
+        const css = entries.map(([name, value]) => "--" + name + ":" + (color(value) ? value : "var(--" + value + ")") + ";").join("");
+        dom(window.CSSStyleSheet.prototype, "replaceSync", themeSheet, css ? "@layer emend{:root:root:root{" + css + "}}" : "");
+      } catch { /* The mode still applies without constructed stylesheet support. */ }
+    }
+  }
   listen(window, "message", event => {
     if (event.source !== window.parent || !event.data || typeof event.data !== "object") return;
     if (event.data.type === "emend:layout" && typeof event.data.wide === "boolean") {
@@ -456,6 +486,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       if (held && held.heading !== null) goTo({ ...held, label: headings[held.heading].label });
       schedulePosition();
     }
+    else if (event.data.type === "emend:theme") theme(event.data);
     else if (event.data.type === "emend:goto") goTo(event.data);
     else if (event.data.type === "emend:docs" && Array.isArray(event.data.paths)) {
       docs.clear();
@@ -721,7 +752,8 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       const href = linkHref(link);
       const base = new window.URL(nodeValue("baseURI", document));
       const url = new window.URL(href, base);
-      const sameDoc = url.href.split("#")[0] === current.href.split("#")[0];
+      const sameDoc = url.origin === current.origin && url.pathname === current.pathname &&
+        (!url.search || url.search === current.search);
       // URL parsing normalizes whitespace and accepts fragments that the resolver refuses.
       // Suppress the browser first, even when no bridge navigation is allowed below.
       if (sameDoc) {

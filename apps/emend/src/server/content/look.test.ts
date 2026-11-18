@@ -11,6 +11,12 @@ async function fixture() {
   return { root, path: join(root, "pub-frame.css") };
 }
 
+test("the fallback fixes each explicit root scheme within the emend layer", () => {
+  expect(FALLBACK_PUB_CSS).toBe(
+    "@layer emend{:root{color-scheme:light dark;background:Canvas;color:CanvasText}:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}}",
+  );
+});
+
 test.each([
   "</style><script>alert(1)</script>",
   "</unrelated>",

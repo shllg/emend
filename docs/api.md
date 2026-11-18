@@ -950,9 +950,14 @@ check these rules and the `pubStylesheetBytes` limit. A missing or rejected shee
 minimal light and dark sheet with system colours.
 Every unlayered rule of the doc's own CSS wins over it. The doc's headers stay exactly as above.
 A doc whose `colorScheme` is `light` also gets the fixed start tag `<html data-theme="light">` right
-before that style element. The HTML parser gives the root element this attribute first, and a later
-`html` tag of the doc only adds attributes the root lacks, so the doc cannot change it. The sheet's
-dark colours, and the fallback's dark scheme, apply only without `data-theme="light"`.
+before that style element, regardless of the query. Other docs in emend's look accept an optional
+`theme=light` or `theme=dark` query, adding the matching fixed start tag (`<html data-theme="light">`
+or `<html data-theme="dark">`) there for the first paint. All other values, including an empty value,
+are ignored; custom and legacy looks ignore the query entirely. The raw query is never emitted.
+The HTML parser gives the root element this attribute first, and a later `html` tag of the doc only
+adds attributes the root lacks, so the doc cannot change it. The sheet's dark colours and the
+fallback's dark scheme apply with `data-theme="dark"`, or when the browser prefers dark and the
+root has no `data-theme="light"`. An explicit light or dark root uses that `color-scheme`.
 
 Asset and error responses under `/content/` send:
 
@@ -985,8 +990,10 @@ another HTML or Markdown doc under this doc key send
 `{ type: "emend:navigate", path: FilePath, fragment: string }` to the parent. The path and fragment
 are decoded; the fragment excludes `#` and is at most 1024 characters. The parent accepts this
 strict message only from the current trusted frame and only for another doc in the same revision.
-It opens that doc as a new history entry. For an HTML target with a fragment, the newly mounted frame's src is its own
-content URL plus `#` and the percent-encoded fragment. Same-doc HTML `a` and `area` links and SVG
+It opens that doc as a new history entry. Every frame src is the doc's own content URL; for a doc in
+emend's look that is not light-only, it adds `?theme=` and the mode the app shows at that moment. For
+an HTML target with a fragment, the newly mounted frame's src then adds `#` and the percent-encoded
+fragment. Same-doc HTML `a` and `area` links and SVG
 `a` links (`href` or `xlink:href`), in the document or an open shadow root, are handled by the bridge
 without changing `location` or browser history. It prevents browser navigation even when the
 resolver refuses the href: accepted fragments scroll to their targets, empty or absent fragments
@@ -1031,6 +1038,33 @@ where it landed. This includes nested scrollers and a pinned position temporaril
 top because the doc fits. A doc with nothing scrolled and no pin stays where it is. emend's look uses these attributes
 to match the Markdown reader's layout and sizes. On phones the measure stays 68ch; sizes still
 apply. Until layout arrives, the frame's own width decides.
+
+For a frame in emend's look, the parent sends the strict message
+`{ type: "emend:theme", mode: "dark" | "light", scales: Record<string, ThemeColor>, tokens: Record<string, ThemeColor | ThemeScaleStep> }`
+after `emend:layout` on each ready. It sends it again whenever the pick, the OS mode under System,
+or the custom theme's colours change, without reloading. Only supported scale and token names are
+sent; fonts are excluded. A light-only doc always receives `light`, with colours only from a
+light-based custom theme. Otherwise the resolved mode and the selected custom theme's colours are
+sent, or empty maps when no custom theme is selected.
+
+The bridge accepts theme messages only from its parent and validates the whole message before
+changing anything: mode must be exactly `dark` or `light`; both maps must be non-null, non-array
+objects with at most 256 own entries each. Keys in both maps and token step values are names of
+lowercase letters and digits in dash-separated parts, at most 40 characters, matching
+`^[a-z0-9]+(?:-[a-z0-9]+)*$`. The bridge accepts any such name; the parent sends only emend's own
+scale-step and token names. Scale values must be colours; token values may also be step names.
+Colours match `^#[0-9a-f]{6}(?:[0-9a-f]{2})?$` or `^oklch\(N N N(?: / N)?\)$`, where each `N` is
+`(?:0|[1-9][0-9]{0,2})(?:\.[0-9]{0,5}[1-9])?`. Range checks stay with the contract.
+Any invalid entry rejects the whole message. The bridge sets only the root's `data-theme` and
+replaces the text of one constructed stylesheet, created and adopted once, with
+`@layer emend{:root:root:root{--<key>:<value>;...}}`; token steps become `var(--<step>)`.
+Empty maps clear the sheet. The layer lets the doc's unlayered CSS win, while the selector beats
+emend's default colour rules. Without constructed stylesheets, only `data-theme` is set. Theme
+messages neither scroll nor post messages nor change other attributes.
+
+Custom and legacy pubs receive no theme message. Their frames inherit the app's `color-scheme`,
+which current Chromium and Firefox pass to the frame's `prefers-color-scheme`, so a custom pub
+with its own dark rules follows the pick in those browsers.
 
 After `emend:ready`, the parent sends `{ type: "emend:docs", paths: FilePath[] }`, the exact doc
 paths in this revision. Bridge links resolve against the existing document base, decode each

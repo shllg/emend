@@ -10,6 +10,8 @@ import { HtmlDocFrame } from "./components/reading/HtmlDocFrame.tsx";
 import { draftKey } from "./lib/drafts.ts";
 import { type DocNavigation, FrameToParent, ParentToFrame } from "./lib/frame-messages.ts";
 import { defaultLayout, type LayoutPreferences, layoutStore } from "./lib/layout-store.ts";
+import { selectCustomTheme, setThemePick, startThemeSync, themeColors } from "./lib/theme.ts";
+import { customTheme } from "./test/themes.ts";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const path = "docs/seed.html";
@@ -27,6 +29,7 @@ let client: QueryClient;
 let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   localStorage.clear();
+  setThemePick("system");
   layoutStore.update(defaultLayout);
   window.dispatchEvent(new StorageEvent("storage", { key: null }));
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -132,6 +135,7 @@ test.each(
   fireEvent(window, new MessageEvent("message", { source: frame.contentWindow, data: { type: "emend:ready" } }));
   expect(post.mock.calls).toEqual([
     [layoutMessage(initialWide), "*"],
+    ...(look === "emend" ? [[{ type: "emend:theme", mode: "light", scales: {}, tokens: {} }, "*"]] : []),
     [{ type: "emend:highlight", anchors: [] }, "*"],
     [{ type: "emend:docs", paths: [path] }, "*"],
     [{ type: "emend:goto", heading: 0, label: "Part", fraction: 0.5 }, "*"],
@@ -155,6 +159,7 @@ test.each(
   fireEvent(window, new MessageEvent("message", { source: next.contentWindow, data: { type: "emend:ready" } }));
   expect(nextPost.mock.calls).toEqual([
     [layoutMessage(!initialWide), "*"],
+    ...(look === "emend" ? [[{ type: "emend:theme", mode: "light", scales: {}, tokens: {} }, "*"]] : []),
     [{ type: "emend:highlight", anchors: [] }, "*"],
     [{ type: "emend:docs", paths: [path] }, "*"],
     [{ type: "emend:goto", heading: 0, label: "Part", fraction: 0.5 }, "*"],
@@ -172,12 +177,14 @@ function FrameContent({
   navigation,
   images,
   look,
+  colorScheme,
 }: {
   values: ThreadView[];
   docNavigation?: DocNavigation;
   navigation?: { threadId: string; intent: unknown };
   images?: readonly string[];
   look?: "emend" | "custom";
+  colorScheme?: "light";
 }) {
   const [open, setOpen] = useState(values.length > 0);
   return (
@@ -189,6 +196,7 @@ function FrameContent({
       contentUrl={doc.contentUrl}
       images={images}
       look={look}
+      colorScheme={colorScheme}
       threads={values}
       navigation={navigation}
       docNavigation={docNavigation}
@@ -202,10 +210,18 @@ function mount(
   navigation?: { threadId: string; intent: unknown },
   images?: readonly string[],
   look?: "emend" | "custom",
+  colorScheme?: "light",
 ) {
   const ui = (values: ThreadView[], docNavigation?: DocNavigation) => (
     <QueryClientProvider client={client}>
-      <FrameContent values={values} docNavigation={docNavigation} navigation={navigation} images={images} look={look} />
+      <FrameContent
+        values={values}
+        docNavigation={docNavigation}
+        navigation={navigation}
+        images={images}
+        look={look}
+        colorScheme={colorScheme}
+      />
     </QueryClientProvider>
   );
   const view = render(ui(threads));
@@ -224,6 +240,221 @@ function mount(
     fragment: (fragment: string) => view.rerender(ui(threads, { type: "emend:navigate", path, fragment })),
   };
 }
+
+function systemTheme(initialDark: boolean) {
+  let dark = initialDark;
+  const listeners = new Set<() => void>();
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query === "(prefers-color-scheme: dark)" && dark,
+    addEventListener: (_type: string, notify: () => void) => {
+      if (query === "(prefers-color-scheme: dark)") listeners.add(notify);
+    },
+    removeEventListener: (_type: string, notify: () => void) => listeners.delete(notify),
+  }));
+  return (next: boolean) =>
+    act(() => {
+      dark = next;
+      for (const notify of listeners) notify();
+    });
+}
+
+test.each([
+  { pick: "dark", osDark: false, mode: "dark" },
+  { pick: "light", osDark: true, mode: "light" },
+  { pick: "system", osDark: false, mode: "light" },
+  { pick: "system", osDark: true, mode: "dark" },
+] as const)("HTML emend look follows $pick with OS dark=$osDark without reloading", ({ pick, osDark, mode }) => {
+  const changeOS = systemTheme(osDark);
+  setThemePick(pick);
+  const view = mount([], undefined, undefined, "emend");
+  const src = `${doc.contentUrl}?theme=${mode}`;
+  expect(view.frame.getAttribute("src")).toBe(src);
+  expect(view.post).not.toHaveBeenCalled();
+  fireEvent.load(view.frame);
+  view.message({ type: "emend:ready" });
+  expect(view.post.mock.calls.slice(0, 2)).toEqual([
+    [{ type: "emend:layout", wide: false, width: "comfortable", prose: 16, code: 13 }, "*"],
+    [{ type: "emend:theme", mode, scales: {}, tokens: {} }, "*"],
+  ]);
+  view.post.mockClear();
+  const nextMode = mode === "dark" ? "light" : "dark";
+  if (pick === "system") changeOS(!osDark);
+  else act(() => setThemePick(nextMode));
+  expect(view.post.mock.calls).toEqual([[{ type: "emend:theme", mode: nextMode, scales: {}, tokens: {} }, "*"]]);
+  expect(frameByTitle()).toBe(view.frame);
+  expect(view.frame.getAttribute("src")).toBe(src);
+  view.post.mockClear();
+  if (pick !== "system") {
+    changeOS(!osDark);
+    expect(view.post).not.toHaveBeenCalled();
+  }
+  fireEvent.load(view.frame);
+  act(() => setThemePick(mode));
+  expect(view.post).not.toHaveBeenCalled();
+});
+
+test.each(["emend", "custom", undefined] as const)("%s URLs use the current mode on navigation and Reload", (look) => {
+  setThemePick("dark");
+  const view = mount([], undefined, undefined, look);
+  const query = (mode: string) => (look === "emend" ? `?theme=${mode}` : "");
+  expect(view.frame.getAttribute("src")).toBe(`${doc.contentUrl}${query("dark")}`);
+  fireEvent.load(view.frame);
+  view.message({ type: "emend:ready" });
+  act(() => setThemePick("light"));
+  fireEvent.load(view.frame);
+  fireEvent.click(screen.getByText(`Reload ${path}`));
+  const reloaded = frameByTitle();
+  expect(reloaded.getAttribute("src")).toBe(`${doc.contentUrl}${query("light")}`);
+  act(() => setThemePick("dark"));
+  expect(frameByTitle()).toBe(reloaded);
+  view.fragment("part #é");
+  expect(frameByTitle().getAttribute("src")).toBe(`${doc.contentUrl}${query("dark")}#part%20%23%C3%A9`);
+});
+
+test("resetting an emend doc to the top uses the current mode", () => {
+  setThemePick("dark");
+  const reading = {
+    key: "theme-top",
+    entry: { title: "Synthetic", revision: 2, folds: new Map<string, boolean>(), positions: new Map() },
+    returning: false,
+    visit: {},
+  };
+  const ui = (target?: string) => (
+    <QueryClientProvider client={client}>
+      <HtmlDocFrame
+        reviewId={id}
+        revision={2}
+        changedBlocks={[]}
+        path={path}
+        contentUrl={doc.contentUrl}
+        threads={[]}
+        look="emend"
+        reading={{ ...reading, target }}
+      />
+    </QueryClientProvider>
+  );
+  const view = render(ui());
+  const frame = frameByTitle();
+  Object.defineProperty(frame, "contentWindow", { value: { postMessage: vi.fn() } });
+  fireEvent(window, new MessageEvent("message", { source: frame.contentWindow, data: { type: "emend:ready" } }));
+  act(() => setThemePick("light"));
+  expect(frameByTitle()).toBe(frame);
+  view.rerender(ui("top"));
+  expect(frameByTitle()).not.toBe(frame);
+  expect(frameByTitle().getAttribute("src")).toBe(`${doc.contentUrl}?theme=light`);
+});
+
+test.each(["custom", undefined] as const)("%s look never receives colours or theme messages", (look) => {
+  const changeOS = systemTheme(false);
+  const view = mount([], undefined, undefined, look);
+  view.message({ type: "emend:ready" });
+  expect(view.post.mock.calls.map(([message]) => message.type)).toEqual([
+    "emend:layout",
+    "emend:highlight",
+    "emend:docs",
+  ]);
+  view.post.mockClear();
+  for (const pick of ["dark", "light", "system"] as const) act(() => setThemePick(pick));
+  changeOS(true);
+  act(() => selectCustomTheme(customTheme));
+  expect(view.post).not.toHaveBeenCalled();
+  expect(frameByTitle()).toBe(view.frame);
+  expect(view.frame.getAttribute("src")).toBe(doc.contentUrl);
+});
+
+test("themeColors filters names and unsafe values without modifying the theme", () => {
+  const theme = Object.freeze({
+    ...customTheme,
+    scales: Object.freeze({ ...customTheme.scales, unknown: "#112233", "n-25": "url(x)" }),
+    tokens: Object.freeze({ ...customTheme.tokens, unknown: "#112233", accent: "red", "fg-2": "unknown" }),
+  });
+  expect(themeColors(theme)).toEqual({ scales: customTheme.scales, tokens: customTheme.tokens });
+});
+
+test("an open HTML frame receives filtered custom colours and live colour updates", async () => {
+  const entry = {
+    ...customTheme,
+    name: "html-colors",
+    scales: { ...customTheme.scales, unknown: "#aabbcc" },
+    tokens: { ...customTheme.tokens, unknown: "#aabbcc" },
+  };
+  selectCustomTheme(entry);
+  const view = mount([], undefined, undefined, "emend");
+  const src = view.frame.src;
+  view.message({ type: "emend:ready" });
+  expect(view.post.mock.calls[1]).toEqual([
+    { type: "emend:theme", mode: "dark", scales: customTheme.scales, tokens: customTheme.tokens },
+    "*",
+  ]);
+  view.post.mockClear();
+  const updated = { ...entry, scales: { "n-950": "#223344" }, tokens: { "fg-1": "#abcdef" } };
+  fetchMock.mockResolvedValue(Response.json({ themes: [updated], folderError: false }));
+  let stop = () => {};
+  await act(async () => {
+    stop = startThemeSync();
+  });
+  try {
+    await waitFor(() =>
+      expect(view.post.mock.calls).toEqual([
+        [{ type: "emend:theme", mode: "dark", scales: updated.scales, tokens: updated.tokens }, "*"],
+      ]),
+    );
+    expect(frameByTitle()).toBe(view.frame);
+    expect(view.frame.src).toBe(src);
+    view.post.mockClear();
+    act(() => setThemePick("dark"));
+    expect(view.post.mock.calls).toEqual([[{ type: "emend:theme", mode: "dark", scales: {}, tokens: {} }, "*"]]);
+  } finally {
+    stop();
+  }
+});
+
+test.each(["dark", "light"] as const)("light-only docs take colours only from a light base (%s)", (base) => {
+  selectCustomTheme({ ...customTheme, name: `html-${base}`, base });
+  const view = mount([], undefined, undefined, "emend", "light");
+  view.message({ type: "emend:ready" });
+  expect(view.post.mock.calls[1]).toEqual([
+    {
+      type: "emend:theme",
+      mode: "light",
+      scales: base === "light" ? customTheme.scales : {},
+      tokens: base === "light" ? customTheme.tokens : {},
+    },
+    "*",
+  ]);
+  expect(view.frame.getAttribute("src")).toBe(doc.contentUrl);
+  view.post.mockClear();
+  act(() => setThemePick("dark"));
+  if (base === "light")
+    expect(view.post.mock.calls).toEqual([[{ type: "emend:theme", mode: "light", scales: {}, tokens: {} }, "*"]]);
+  else expect(view.post).not.toHaveBeenCalled();
+  view.fragment("part");
+  expect(frameByTitle().getAttribute("src")).toBe(`${doc.contentUrl}#part`);
+});
+
+test("theme messages reuse strict contract colours and mode", () => {
+  const valid = { type: "emend:theme", mode: "dark", scales: customTheme.scales, tokens: customTheme.tokens };
+  expect(ParentToFrame.parse(valid)).toEqual(valid);
+  expect(ParentToFrame.parse({ ...valid, mode: "light", scales: {}, tokens: {} })).toEqual({
+    ...valid,
+    mode: "light",
+    scales: {},
+    tokens: {},
+  });
+  for (const patch of [
+    { extra: true },
+    { fonts: {} },
+    { mode: "system" },
+    { mode: "DARK" },
+    { mode: undefined },
+    { scales: [] },
+    { scales: null },
+    { scales: { "n-950": "red" } },
+    { tokens: { "fg-1": "url(x)" } },
+    { tokens: { "bg-app": "unknown" } },
+  ])
+    expect(ParentToFrame.safeParse({ ...valid, ...patch }).success).toBe(false);
+});
 
 const preferenceChanges: Partial<LayoutPreferences>[] = [
   ...(["comfortable", "wide", "narrow"] as const).map((readingWidth) => ({ readingWidth })),

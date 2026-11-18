@@ -119,9 +119,43 @@ async function setDocLook(look: "emend" | "custom" | null, newBlob?: string) {
 test.each(["custom", null] as const)("%s look preserves the previous response bytes", async (look) => {
   await setDocLook(look);
   await writeFile(join(f.dir, "pub-frame.css"), "@layer emend{body{margin:0}}");
-  const response = await request(docUrl);
+  for (const query of ["", "?theme=dark", "?theme=light"]) {
+    const response = await request(docUrl + query);
+    headers(response);
+    expect(await response.text()).toBe(injectBridge(source));
+  }
+});
+
+test.each([
+  { query: "?theme=dark", theme: "dark" },
+  { query: "?theme=light", theme: "light" },
+  ...["?theme=DARK", "?theme=dark%20", "?theme=%3Chtml%20data-theme%3Ddark%3E", "?theme=", ""].map((query) => ({
+    query,
+    theme: undefined,
+  })),
+])("emend look accepts only an exact theme query: $query", async ({ query, theme }) => {
+  const page = '<!doctype html><html lang="en"><body>Plan</body></html>';
+  const sha = await f.deps.blobs.put(f.ownerId, Buffer.from(page), "text/html");
+  await setDocLook("emend", sha);
+  const css = "@layer emend{body{margin:0}}";
+  await writeFile(join(f.dir, "pub-frame.css"), css);
+  const response = await request(docUrl + query);
   headers(response);
-  expect(await response.text()).toBe(injectBridge(source));
+  const start = theme ? `<html data-theme="${theme}">` : "";
+  expect(await response.text()).toBe(injectBridge(`<!doctype html>${start}<style>${css}</style>${page.slice(15)}`));
+});
+
+test("a light-only doc ignores a dark theme query", async () => {
+  await setDocLook("emend");
+  await f.db.query((q) =>
+    q
+      .update(files)
+      .set({ colorScheme: "light" })
+      .where(and(eq(files.ownerId, f.ownerId), eq(files.path, "docs/a #é.html"))),
+  );
+  const response = await request(`${docUrl}?theme=dark`);
+  headers(response);
+  expect(await response.text()).toBe(injectBridge(injectLook(source, FALLBACK_PUB_CSS, "light")));
 });
 
 test.each([
@@ -196,7 +230,7 @@ test.each([
     const served = await request(doc.contentUrl);
     headers(served);
     const body = await served.text();
-    expect(body).toBe(injectBridge(look === "emend" ? injectLook(page, css, light) : page));
+    expect(body).toBe(injectBridge(look === "emend" ? injectLook(page, css, light ? "light" : undefined) : page));
     if (look === "emend") {
       expect(body.indexOf(css)).toBeLessThan(body.indexOf(rules));
       expect(body).toContain(`<style>${rules}</style>`);

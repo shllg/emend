@@ -17,6 +17,7 @@ import { ThreadList } from "./components/threads/ThreadList.tsx";
 import { ToastProvider } from "./components/ui/Toast.tsx";
 import { claimDraft } from "./lib/composer-owner.ts";
 import { clearDraftIfUnchanged, draftKey, hasDraft, isDraftSaving, loadDraft, saveDraft } from "./lib/drafts.ts";
+import { setThemePick } from "./lib/theme.ts";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const target: Target = { kind: "writeup-span", blockId: "overview-12345678", quote: "seed", prefix: "", suffix: "" };
@@ -914,6 +915,104 @@ test("a pending Resume or open intent cancels another key's kept handoff", () =>
   expect(document.activeElement).not.toBe(within(replacement.container).getByLabelText("Comment"));
   const second = mount(<Composer reviewId={id} revision={2} target={other} />);
   expect(document.activeElement).toBe(within(second.container).getByLabelText("Comment"));
+});
+
+test.each([
+  { pick: "dark", osDark: false, mode: "dark" },
+  { pick: "light", osDark: true, mode: "light" },
+  { pick: "system", osDark: false, mode: "light" },
+  { pick: "system", osDark: true, mode: "dark" },
+] as const)("a Markdown pub follows $pick with OS dark=$osDark, including its diagram", ({ pick, osDark, mode }) => {
+  let dark = osDark;
+  const listeners = new Set<() => void>();
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query === "(prefers-color-scheme: dark)" && dark,
+    addEventListener: (_type: string, notify: () => void) => {
+      if (query === "(prefers-color-scheme: dark)") listeners.add(notify);
+    },
+    removeEventListener: (_type: string, notify: () => void) => listeners.delete(notify),
+  }));
+  setThemePick(pick);
+  const source = "graph TD; A-->B";
+  const image = `/api/v1/media/${"a".repeat(64)}`;
+  // Synthetic server-rendered Markdown blocks, including the media and code wrappers.
+  const blocks: RenderedBlock[] = [
+    { ...block, text: "Theme preview", html: "<p>Theme preview</p>" },
+    {
+      ...block,
+      kind: "code",
+      text: "const seed = 1;",
+      html: '<pre class="shiki"><code><span class="line"><span class="em-syntax-keyword">const</span> seed = 1;</span></code></pre>',
+    },
+    {
+      ...block,
+      kind: "table",
+      text: "Plant Count Seed 1",
+      html: "<table><thead><tr><th>Plant</th><th>Count</th></tr></thead><tbody><tr><td>Seed</td><td>1</td></tr></tbody></table>",
+    },
+    { ...block, kind: "diagram", text: source, source, html: "" },
+    {
+      ...block,
+      text: "Seed image",
+      html: `<p class="emend-media-row"><span class="emend-media"><img src="${image}" alt="Seed image"><span class="emend-media-caption">Seed image</span></span></p>`,
+    },
+  ];
+  const doc = {
+    path: "theme.md",
+    kind: "markdown" as const,
+    blocks: blocks.map((entry, index) => ({
+      ...entry,
+      id: `doc-12345678-${String(index).padStart(8, "0")}`,
+      section: "doc-12345678",
+    })),
+  };
+  const view = mount(
+    <DocView
+      reviewId={id}
+      revision={1}
+      docs={[doc]}
+      openDoc={doc}
+      search={{ tab: "docs", doc: doc.path }}
+      targeted={false}
+      onOpenDoc={() => {}}
+      changedBlocks={[]}
+      threads={[]}
+    />,
+  );
+  const text = screen.getByText("Theme preview");
+  const code = required(view.container.querySelector("pre.shiki"));
+  const table = screen.getByRole("table");
+  const media = required(screen.getByAltText("Seed image").closest(".emend-media"));
+  for (const element of [text, code, table, media]) {
+    expect(element.closest(".em-prose")).not.toBeNull();
+    expect(element.closest("[data-theme]")).toBe(pick === "system" ? null : document.documentElement);
+  }
+  const diagram = (theme: string) => {
+    const frame = required(view.container.querySelector("iframe"));
+    const post = vi.fn();
+    Object.defineProperty(frame, "contentWindow", { value: { postMessage: post } });
+    fireEvent.load(frame);
+    expect(post).toHaveBeenCalledExactlyOnceWith({ type: "render", source, theme }, "*");
+  };
+  expect(document.documentElement.dataset.theme).toBe(pick === "system" ? undefined : pick);
+  diagram(mode);
+  if (pick === "system") {
+    act(() => {
+      dark = !dark;
+      for (const notify of listeners) notify();
+    });
+    expect(document.documentElement.dataset.theme).toBeUndefined();
+    diagram(mode === "dark" ? "light" : "dark");
+  }
+  const next = mode === "dark" ? "light" : "dark";
+  act(() => setThemePick(next));
+  expect(document.documentElement.dataset.theme).toBe(next);
+  diagram(next);
+  for (const element of [text, code, table, media]) {
+    expect(element.isConnected).toBe(true);
+    expect(element.closest("[data-theme]")).toBe(document.documentElement);
+  }
+  act(() => setThemePick("system"));
 });
 
 test("a Markdown image in the docs tab opens the lightbox on click", async () => {

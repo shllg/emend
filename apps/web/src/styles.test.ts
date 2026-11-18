@@ -193,6 +193,7 @@ test("pub defaults use tokens, stay inside one emend layer and define the docume
     .trim();
   expect(css).not.toMatch(/#[0-9a-f]{3,8}\b|rgb\(|oklch\(/i);
   expect(css).toMatch(/^@layer emend\s*\{/);
+  expect(css).toMatch(/:root\[data-theme="dark"\]\s*\{\s*color-scheme:\s*dark;\s*\}/);
   // Only the last closing brace may end the outer layer; nested media rules remain inside it.
   let depth = 0;
   for (let i = css.indexOf("{"); i < css.length; i++) {

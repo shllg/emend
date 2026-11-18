@@ -160,6 +160,45 @@ test.each(["#part", "a.html#part"])("C3 same-document %s scrolls without history
   }
 });
 
+test.each([
+  "#x",
+  "seed.html#x",
+  "seed.html#a%2fb",
+  "seed.html#%E0",
+  "seed.html?theme=dark#x",
+  `http://127.0.0.1:3636${prefix}docs/seed.html#x`,
+  `http://127.0.0.1:3636${prefix}docs/seed.html?theme=dark#x`,
+])("theme query keeps same-document link %s from navigating the frame", async (href) => {
+  const b = bridge(`<body><h2 id="x">Target</h2><a href="${href}">Link</a></body>`, "docs/seed.html?theme=dark");
+  try {
+    const before = { href: b.window.location.href, length: b.window.history.length };
+    expect(click(b, required(b.window.document.querySelector("a"))).defaultPrevented).toBe(true);
+    expect({ href: b.window.location.href, length: b.window.history.length }).toEqual(before);
+    expect(b.post.mock.calls.filter(([data]) => data.type === "emend:navigate")).toEqual([]);
+  } finally {
+    await b.close();
+  }
+});
+
+test("theme query does not suppress a same-path link with another query", async () => {
+  const b = bridge('<body><a href="seed.html?x=1#y">Link</a></body>', "docs/seed.html?theme=dark");
+  try {
+    const link = required(b.window.document.querySelector("a"));
+    let prevented: boolean | undefined;
+    link.addEventListener("click", (event) => {
+      prevented = event.defaultPrevented;
+      event.preventDefault();
+    });
+    click(b, link);
+    expect(prevented).toBe(false);
+    expect(b.scroll).not.toHaveBeenCalled();
+    expect(b.scrollTo).not.toHaveBeenCalled();
+    expect(b.post.mock.calls.filter(([data]) => data.type === "emend:navigate")).toEqual([]);
+  } finally {
+    await b.close();
+  }
+});
+
 const corpus: { name: string; old: string; new: string }[] = JSON.parse(
   readFileSync(new URL("../../../packages/core/src/place/corpus/html.json", import.meta.url), "utf8"),
 );
