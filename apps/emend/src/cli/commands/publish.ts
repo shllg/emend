@@ -179,7 +179,14 @@ export async function publishCommand(
     folderRoots: shortcut?.folderRoots,
     namedFiles: shortcut?.namedFiles,
     docArguments: shortcut?.docArguments,
-    onHtmlDoc: (path, bytes) => htmlLooks.set(path, htmlLook(bytes.toString())),
+    onHtmlDoc: (path, bytes) => {
+      try {
+        htmlLooks.set(path, htmlLook(bytes.toString()));
+      } catch {
+        // Local diagnostics are optional; the server's look still supplies a generic note.
+        htmlLooks.delete(path);
+      }
+    },
   };
   if (!manifest.base && !options.key && !options.review) throw new CliError("pass --review or --key");
   // Resolve all paths and unchanged-file checks before creating any server state.

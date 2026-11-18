@@ -2,7 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
 import { expect, test } from "vitest";
-import { repos, reviews } from "../../db/schema.ts";
+import { files, repos, reviews } from "../../db/schema.ts";
 import { directFixture } from "../direct-test-support.ts";
 import { snapshot } from "./bundle.ts";
 
@@ -86,6 +86,64 @@ test("export rows keep doc titles but omit recomputable headings", async () => {
   expect(exported.bundle.files[0]?.title).toBe("Named");
   expect(exported.bundle.files[0]).not.toHaveProperty("headings");
   expect(JSON.parse(exported.json).files[0]).not.toHaveProperty("headings");
+});
+
+test("export carries stored HTML appearance and explicit nulls for every other file row", async () => {
+  const fixture = await directFixture();
+  const appearances = [
+    { path: "custom.html", look: "custom", colorScheme: null },
+    { path: "unclassified.html", look: null, colorScheme: null },
+    { path: "light.html", look: "emend", colorScheme: "light" },
+    { path: "auto.html", look: "emend", colorScheme: null },
+    { path: "plan.md", look: null, colorScheme: null },
+    { path: "source.html", look: null, colorScheme: null },
+  ] as const;
+  for (const { path } of appearances)
+    await writeFile(join(fixture.source, path), "<style>p{color:#222}</style><p>Synthetic plan</p>");
+  await writeFile(
+    fixture.manifest,
+    JSON.stringify({
+      version: 1,
+      title: "Synthetic appearance export",
+      topics: [],
+      files: appearances.map(({ path }) => ({
+        path,
+        role: "doc",
+        ...(path === "source.html" ? { view: "source" } : {}),
+      })),
+      writeup: { overview: "", tldr: "", decisions: null, topics: {} },
+    }),
+  );
+  const { result } = await fixture.publish();
+  const server = await fixture.reviewer();
+  // Simulate stored looks from before the default changed, without marks in the source.
+  for (const { path, look, colorScheme } of appearances)
+    if (path !== "plan.md" && path !== "source.html")
+      await server.db.query((q) =>
+        q
+          .update(files)
+          .set({ look, colorScheme })
+          .where(and(eq(files.ownerId, server.ownerId), eq(files.path, path))),
+      );
+  const exported = await server.db.transaction((q) =>
+    snapshot(
+      q,
+      server.ownerId,
+      server.instance.id,
+      result.reviewId,
+      `https://hub.example/r/${result.reviewId}`,
+      Date.now(),
+      false,
+    ),
+  );
+  if (exported.kind !== "bundle") throw new Error("missing bundle");
+  const appearance = ({ path, look, colorScheme }: (typeof exported.bundle.files)[number]) => ({
+    path,
+    look,
+    colorScheme,
+  });
+  expect(exported.bundle.files.map(appearance)).toEqual(appearances);
+  expect(JSON.parse(exported.json).files.map(appearance)).toEqual(appearances);
 });
 
 test.each([

@@ -125,6 +125,49 @@ test("import strips heading declarations while preserving a doc title", () => {
   expect(result.files[0]).not.toHaveProperty("headings");
   expect(result.files[0]?.title).toBe("Named");
 });
+
+test("import preserves optional, nullable HTML appearance fields and rejects unknown values", () => {
+  const input = bundle();
+  const file = {
+    id: randomUUID(),
+    revisionId: input.revisions[0]?.id,
+    path: "doc.html",
+    oldPath: null,
+    role: "doc",
+    status: null,
+    topicSlug: null,
+    ord: 0,
+    oldBlob: null,
+    newBlob: "a".repeat(64),
+    renderedBlob: null,
+    flag: null,
+    parentDocId: null,
+  };
+  expect(ImportBundle.parse({ ...input, files: [file] }).files[0]).toEqual(file);
+  for (const look of ["emend", "custom", null]) {
+    const withLook = { ...file, look };
+    expect(ImportBundle.parse({ ...input, files: [withLook] }).files[0]).toEqual(withLook);
+    for (const colorScheme of ["light", null]) {
+      const withBoth = { ...withLook, colorScheme };
+      expect(ImportBundle.parse({ ...input, files: [withBoth] }).files[0]).toEqual(withBoth);
+    }
+  }
+  for (const colorScheme of ["light", null]) {
+    const withScheme = { ...file, colorScheme };
+    expect(ImportBundle.parse({ ...input, files: [withScheme] }).files[0]).toEqual(withScheme);
+  }
+  for (const appearance of [
+    { look: "other" },
+    { look: "EMEND" },
+    { look: false },
+    { colorScheme: "dark" },
+    { colorScheme: "auto" },
+    { colorScheme: "LIGHT" },
+    { colorScheme: 1 },
+  ])
+    expect(ImportBundle.safeParse({ ...input, files: [{ ...file, ...appearance }] }).success).toBe(false);
+});
+
 test("imported notes keep ids and order, count as rows and reject foreign files, duplicate refs and ordinals", () => {
   const input = bundle();
   const file = {

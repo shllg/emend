@@ -36,10 +36,70 @@ const colorKeywords = new Set([
   "transparent",
   "none",
 ]);
-// Each comment character matches exactly one branch; an unclosed comment consumes the remainder.
-const withoutComments = (css: string) => css.replace(/\/\*(?:[^*]|\*(?!\/))*(?:\*\/|$)/g, "");
+const cssWhitespace = (char: string | undefined) =>
+  char === " " || char === "\t" || char === "\n" || char === "\r" || char === "\f";
+function cssIdentifierChar(code: number): boolean {
+  return (
+    (code >= 48 && code <= 57) ||
+    (code >= 65 && code <= 90) ||
+    (code >= 97 && code <= 122) ||
+    code === 95 ||
+    code === 45 ||
+    code === 92 ||
+    code >= 128
+  );
+}
+
+/** Ignore CSS data without recursion or a regexp stack proportional to the document size. */
+function cssCodeOnly(css: string): string {
+  const parts: string[] = [];
+  let start = 0;
+  let i = 0;
+  while (i < css.length) {
+    const char = css[i];
+    if (char === "/" && css[i + 1] === "*") {
+      parts.push(css.slice(start, i), " ");
+      const end = css.indexOf("*/", i + 2);
+      i = end === -1 ? css.length : end + 2;
+      start = i;
+    } else if (char === '"' || char === "'") {
+      parts.push(css.slice(start, i), char, char);
+      i++;
+      while (i < css.length) {
+        if (css[i] === "\\") i = Math.min(i + 2, css.length);
+        else if (css[i] === char) {
+          i++;
+          break;
+        } else if (css[i] === "\n" || css[i] === "\r" || css[i] === "\f") break;
+        else i++;
+      }
+      start = i;
+    } else if (
+      (char === "u" || char === "U") &&
+      (css[i + 1] === "r" || css[i + 1] === "R") &&
+      (css[i + 2] === "l" || css[i + 2] === "L") &&
+      css[i + 3] === "(" &&
+      !cssIdentifierChar(css.charCodeAt(i - 1))
+    ) {
+      let value = i + 4;
+      while (cssWhitespace(css[value])) value++;
+      if (css[value] === '"' || css[value] === "'") {
+        // Keep the function; the next iteration strips its quoted string.
+        i = value;
+      } else {
+        parts.push(css.slice(start, i), "url()");
+        const end = css.indexOf(")", value);
+        i = end === -1 ? css.length : end + 1;
+        start = i;
+      }
+    } else i++;
+  }
+  parts.push(css.slice(start));
+  return parts.join("");
+}
 const setsColor = (value: string) => !colorKeywords.has(lower(value.replace(/!\s*important/gi, "").trim()));
 function colorDeclarations(css: string): boolean {
+  // Only cleaned code reaches this scan; the repetitions are simple character classes.
   for (const match of css.matchAll(/(?:^|[{;])\s*([-a-zA-Z]+)\s*:\s*([^;{}]*)/g)) {
     const property = lower(match[1] ?? "");
     if (
@@ -113,7 +173,7 @@ export function htmlLookFromTree(tree: DefaultTreeAdapterTypes.Document | null):
     )
       ownStyles = true;
     if (name === "style" && (isHtml || node.namespaceURI === html.NS.SVG)) {
-      const css = withoutComments(
+      const css = cssCodeOnly(
         node.childNodes
           .filter(defaultTreeAdapter.isTextNode)
           .map((text) => text.value)
@@ -124,7 +184,7 @@ export function htmlLookFromTree(tree: DefaultTreeAdapterTypes.Document | null):
     }
     if (name === "style" || stylesheet) darkRule ||= /prefers-color-scheme/i.test(attr("media"));
     colors ||= stylesheet;
-    const inline = withoutComments(attr("style"));
+    const inline = cssCodeOnly(attr("style"));
     colors ||= colorDeclarations(`;${inline}`);
     darkRule ||= /light-dark\(/i.test(inline);
     if (isHtml && !frame.foreign)
@@ -132,7 +192,12 @@ export function htmlLookFromTree(tree: DefaultTreeAdapterTypes.Document | null):
         ({ name, value }) => name !== "style" && styleAttributes.has(name) && value.trim() !== "",
       );
     if (node.namespaceURI === html.NS.SVG)
-      colors ||= node.attrs.some(({ name, value }) => svgColorAttributes.has(name) && setsColor(value));
+      for (const { name, value } of node.attrs) {
+        if (!svgColorAttributes.has(name)) continue;
+        const code = cssCodeOnly(value);
+        colors ||= setsColor(code);
+        darkRule ||= /light-dark\(/i.test(code);
+      }
     if (!frame.shadow && !frame.foreign && isHtml && !HTML_STRUCTURE.has(name)) {
       if (!/^[a-z][a-z0-9._-]{0,31}$/.test(name)) otherOutside = true;
       else if (!outside.has(name)) {

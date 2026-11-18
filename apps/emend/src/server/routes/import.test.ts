@@ -49,7 +49,7 @@ beforeEach(async () => {
   f = await importFixture();
   onTestFinished(() => f.cleanup());
 });
-test("import preserves HTML looks and omits look when metadata has no classification", async () => {
+test("import recomputes HTML looks for older bundles without stored appearance", async () => {
   const input = ImportBundle.parse(await bundle(f));
   const file = required(input.files[0]);
   const sources = [
@@ -109,6 +109,90 @@ test("import preserves HTML looks and omits look when metadata has no classifica
   expect(view.docs.find((doc) => doc.path === "plan.md")).toMatchObject({ kind: "markdown" });
   for (const path of ["deep.html", "plan.md"])
     expect(view.docs.find((doc) => doc.path === path)).not.toHaveProperty("look");
+});
+
+test("import preserves stored HTML appearance, including null, and clears it for other docs", async () => {
+  const input = ImportBundle.parse(await bundle(f));
+  const file = required(input.files[0]);
+  const source = "<style>p{color:#222}</style><p>Synthetic plan</p>";
+  const newBlob = await f.deps.blobs.put(f.ownerId, Buffer.from(source), "text/html");
+  const css = "@layer emend{body{margin:0}}";
+  await writeFile(join(f.dir, "pub-frame.css"), css);
+  const cases = [
+    { path: "custom.html", appearance: { look: "custom" }, look: "custom", colorScheme: null },
+    { path: "unclassified.html", appearance: { look: null }, look: null, colorScheme: null },
+    {
+      path: "light.html",
+      appearance: { look: "emend", colorScheme: "light" },
+      look: "emend",
+      colorScheme: "light",
+    },
+    {
+      path: "custom-scheme.html",
+      appearance: { look: "custom", colorScheme: "light" },
+      look: "custom",
+      colorScheme: null,
+    },
+    { path: "null-scheme.html", appearance: { look: null, colorScheme: "light" }, look: null, colorScheme: null },
+    { path: "auto.html", appearance: { look: "emend" }, look: "emend", colorScheme: null },
+    {
+      path: "explicit-auto.html",
+      appearance: { look: "emend", colorScheme: null },
+      look: "emend",
+      colorScheme: null,
+    },
+    { path: "older.html", appearance: {}, look: "emend", colorScheme: "light" },
+    { path: "older-scheme.html", appearance: { colorScheme: null }, look: "emend", colorScheme: "light" },
+    {
+      path: "plan.md",
+      appearance: { look: "emend", colorScheme: "light" },
+      look: null,
+      colorScheme: null,
+    },
+    {
+      path: "source.html",
+      appearance: { look: "emend", colorScheme: "light" },
+      look: null,
+      colorScheme: null,
+    },
+  ] as const;
+  input.files = cases.map(({ path, appearance }, ord) => ({
+    ...file,
+    id: randomUUID(),
+    path,
+    ord,
+    newBlob,
+    ...appearance,
+    ...(path === "source.html" ? { view: "source" as const } : {}),
+  }));
+  expect((await f.importRequest("/import", input)).status).toBe(201);
+  const rows = await f.db.read((q) =>
+    q
+      .select()
+      .from(tables.files)
+      .where(and(eq(tables.files.ownerId, f.ownerId), eq(tables.files.revisionId, file.revisionId)))
+      .all(),
+  );
+  const response = await f.request(`/reviews/${input.review.id}/revisions/1`, "GET");
+  expect(response.status).toBe(200);
+  const view = RevisionView.parse(await response.json());
+  for (const { path, look, colorScheme } of cases) {
+    expect(rows.find((row) => row.path === path)).toMatchObject({ look, colorScheme });
+    const doc = required(view.docs.find((doc) => doc.path === path));
+    if (look === null) expect(doc).not.toHaveProperty("look");
+    else expect(doc).toMatchObject({ look });
+    if (colorScheme === null) expect(doc).not.toHaveProperty("colorScheme");
+    else expect(doc).toMatchObject({ colorScheme });
+    if (doc.kind !== "html") continue;
+    const served = await f.app.request(`http://127.0.0.1:3636${doc.contentUrl}`, {
+      headers: { Host: "127.0.0.1:3636" },
+    });
+    expect(served.status).toBe(200);
+    const body = await served.text();
+    expect(body).toContain(source);
+    expect(body.includes(css)).toBe(look === "emend");
+    expect(body.includes('<html data-theme="light">')).toBe(colorScheme === "light");
+  }
 });
 
 test("import places topic quotes using revision title and summary text", async () => {

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { Writable } from "node:stream";
 import { promisify } from "node:util";
 import { LIMITS, type PublishManifest, PublishRequest, PublishResponse } from "@emend/contract";
+import * as core from "@emend/core";
 import { afterEach, expect, onTestFinished, test, vi } from "vitest";
 import { run } from "../../main.ts";
 import { projectKey } from "../publish/key.ts";
@@ -14,6 +15,41 @@ import { commandFixture, provenTestServer } from "../test-support.ts";
 import { manifestJsonError, parsePublishArgs, publishCommand, publishTimeoutMs } from "./publish.ts";
 
 afterEach(() => vi.unstubAllGlobals());
+
+test("a local HTML classifier error still publishes and prints the server's generic look note", async () => {
+  const f = await commandFixture();
+  const source = await realpath(await mkdtemp(join(tmpdir(), "emend-pub-look-error-")));
+  onTestFinished(() => rm(source, { recursive: true, force: true }));
+  vi.spyOn(roots, "worktreeRoot").mockResolvedValue(null);
+  const classify = vi.spyOn(core, "htmlLook").mockImplementation(() => {
+    throw new RangeError("Synthetic classifier failure");
+  });
+  await mkdir(f.configDir, { recursive: true });
+  await writeFile(join(f.configDir, "config.json"), JSON.stringify({ docRoots: [source] }));
+  await writeFile(join(f.dir, "instance.json"), JSON.stringify({ id: randomUUID() }));
+  await writeFile(join(source, "page.html"), "<style>p{margin:0}</style><p>Synthetic plan</p>");
+  const response = {
+    reviewId: randomUUID(),
+    revision: 1,
+    placed: 0,
+    unplaced: 0,
+    unrendered: [],
+    htmlLooks: [{ path: "page.html", look: "emend" }],
+    url: "http://127.0.0.1:3636/r/synthetic",
+  };
+  f.setResponse(async (_url, init) => {
+    if (init?.method === "HEAD") return new Response(null, { status: 404 });
+    if (init?.method === "PUT") return new Response(null, { status: 204 });
+    return Response.json(response);
+  });
+  await publishCommand(f.dir, f.configDir, ["page.html", "--title", "Synthetic", "--key", "synthetic"], f.io, source);
+  expect(classify).toHaveBeenCalled();
+  expect(f.stdout).toEqual([`${response.url}\n`]);
+  expect(f.stderr).toEqual([
+    "emend: page.html shows in emend's look\n",
+    `emend: published revision 1: ${response.url}\n`,
+  ]);
+});
 
 test.each(["manifest", "shortcut", "json"])(
   "%s publishes report each HTML look on stderr without changing stdout",

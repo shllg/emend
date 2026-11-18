@@ -212,10 +212,16 @@ export async function importReview(principal: Principal, bundle: ImportBundle, d
                     ?.[docViewOf(r) === "source" ? "sourceMetadata" : "metadata"].get(r.path)?.headings ?? null)
                 : null,
             look: isRenderedHtmlDoc(r)
-              ? (prepared.rendered.get(r.revisionId)?.metadata.get(r.path)?.look ?? null)
+              ? r.look !== undefined
+                ? r.look
+                : (prepared.rendered.get(r.revisionId)?.metadata.get(r.path)?.look ?? null)
               : null,
             colorScheme: isRenderedHtmlDoc(r)
-              ? (prepared.rendered.get(r.revisionId)?.metadata.get(r.path)?.colorScheme ?? null)
+              ? r.look !== undefined
+                ? r.look === "emend"
+                  ? (r.colorScheme ?? null)
+                  : null
+                : (prepared.rendered.get(r.revisionId)?.metadata.get(r.path)?.colorScheme ?? null)
               : null,
             mediaType: fileMediaType(r),
             ...(r.role === "diff" ? prepared.counted.get(r.revisionId)?.get(r.path) : {}),

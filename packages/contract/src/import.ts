@@ -62,6 +62,8 @@ const ImportRows = z.object({
         renderedBlob: Sha256.nullable(),
         title: DocTitle.nullable().optional(),
         view: DocView.optional(),
+        look: z.enum(["emend", "custom"]).nullable().optional(),
+        colorScheme: z.enum(["light"]).nullable().optional(),
         flag: FileFlag.nullable(),
         parentDocId: id.nullable(),
       })

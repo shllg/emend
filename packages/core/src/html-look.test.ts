@@ -273,7 +273,75 @@ test.each(["bgcolor", "color", "text", "link", "vlink", "alink"])(
 );
 
 test.each(["fill", "stroke", "color", "stop-color", "flood-color", "lighting-color"])("SVG %s sets colours", (name) => {
-  expect(htmlLook(`<svg><path ${name}="#000"/></svg>`)).toMatchObject({ ownStyles: false, colorScheme: "light" });
+  expect(htmlLook(`<svg><path ${name}="#222"/></svg>`)).toMatchObject({ ownStyles: false, colorScheme: "light" });
+  for (const value of ["light-dark(#222, white)", "LIGHT-DARK(#222, white)"])
+    expect(htmlLook(`<svg><path ${name}="${value}"/></svg>`)).toMatchObject({
+      ownStyles: false,
+      colorScheme: "auto",
+    });
+});
+
+test.each([
+  ['p::before{content:"/*"}p{color:#222}', "light"],
+  ['p{color:#222}p::after{content:"prefers-color-scheme: dark"}', "light"],
+  ['p{color:#222}p::after{content:"light-dark("}', "light"],
+  ['p::before{content:";color:red"}', "auto"],
+  ["div{background:url(prefers-color-scheme.png)}", "light"],
+  ['p::before{content:"/*"}p{color:#222}@media (prefers-color-scheme: dark){p{color:#eee}}', "auto"],
+  ["p::before{content:'/*'}p{color:#222}", "light"],
+  [String.raw`p::before{content:"escaped \";color:red"}`, "auto"],
+  [String.raw`p::before{content:'escaped \';color:red'}`, "auto"],
+  ['p::before{content:"bad\n;color:#222}', "light"],
+  ['p::before{content:"bad\n;content:"light-dark("}p{color:#222}', "light"],
+  ['p::before{content:"escaped\\\n;light-dark("}p{color:#222}', "light"],
+  ['p::before{content:"@import page.css"}', "auto"],
+  ["p::before{content:url(data:;color:red;@import)}", "auto"],
+  ["div{background:URL( \t\nprefers-color-scheme.png)}", "light"],
+  ['div{background:url( "prefers-color-scheme.png")}', "light"],
+  ["div{background:url('light-dark(.png')}", "light"],
+  ["div{background:url(prefers-color-scheme.png", "light"],
+  ["div{background:url(page.png)}@media(prefers-color-scheme:dark){div{color:white}}", "auto"],
+  ['@import url("page.css");', "light"],
+  ["p{co/**/lor:red}", "auto"],
+])("CSS data does not become a colour declaration or dark rule: %s", (css, colorScheme) => {
+  expect(htmlLook(`<style>${css}</style>`)).toMatchObject({ look: "emend", colorScheme });
+});
+
+test.each(["a", "Z", "0", "_", "-", "\\", "é"])("URL scanning respects a preceding %j", (prefix) => {
+  expect(htmlLook(`<style>p{color:#222;--value:${prefix}url(prefers-color-scheme)}</style>`)).toMatchObject({
+    colorScheme: "auto",
+  });
+});
+
+test.each([
+  ['content:"light-dark(";color:#222', "light"],
+  ['content:";color:red"', "auto"],
+  ['content:"/*";color:#222', "light"],
+  ["background:url(prefers-color-scheme.png)", "light"],
+  ['content:"light-dark(";color:light-dark(#222,white)', "auto"],
+])("style attribute strings and URLs remain data: %s", (css, colorScheme) => {
+  expect(htmlLook(`<p style='${css}'>Plan</p>`)).toMatchObject({ look: "emend", colorScheme });
+});
+
+test.each([
+  ["unclosed comment", "/*", "", "auto"],
+  ["closed comment", "/*", "*/color:#222", "light"],
+  ["unclosed string", 'content:"', "", "auto"],
+  ["long declaration value", "color:", "", "light"],
+])("near-limit %s scans without throwing in a style element and attribute", (_name, prefix, suffix, colorScheme) => {
+  const css = prefix + "x".repeat(8_380_000 - prefix.length - suffix.length) + suffix;
+  // Exercise both classifier paths with the same large input, without repeatedly parsing 8 MiB of HTML.
+  for (const inline of [false, true]) {
+    const tree = defaultTreeAdapter.createDocument();
+    const element = defaultTreeAdapter.createElement(
+      inline ? "p" : "style",
+      html.NS.HTML,
+      inline ? [{ name: "style", value: css }] : [],
+    );
+    if (!inline) defaultTreeAdapter.insertText(element, `p{${css}}`);
+    defaultTreeAdapter.appendChild(tree, element);
+    expect(htmlLookFromTree(tree)).toMatchObject({ look: "emend", ownStyles: true, colorScheme });
+  }
 });
 
 test("own styles are independent of the selected look and colour scheme", () => {

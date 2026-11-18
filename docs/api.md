@@ -894,9 +894,10 @@ emend's mode. A page sets colours when:
   with a value other than those keywords;
 - it links a stylesheet, or a style element uses `@import`. emend does not read those files.
 
-A dark-mode rule is `prefers-color-scheme` or `light-dark(` in a style element outside comments,
-`light-dark(` in a `style` attribute, or `prefers-color-scheme` in the `media` attribute of a style
-element or a stylesheet link. Both checks cover declarative shadow roots, not inert templates.
+A dark-mode rule is `prefers-color-scheme` or `light-dark(` in a style element, `light-dark(` in a
+`style` attribute or an SVG colour attribute, or `prefers-color-scheme` in the `media` attribute of
+a style element or a stylesheet link. Both checks read CSS outside comments, strings and `url()`
+values, and cover declarative shadow roots, not inert templates.
 
 The URL is
 `/content/<docKey>/<path>` with each path segment percent-encoded. The doc key is the revision's
@@ -1425,7 +1426,7 @@ Unknown keys, including owner ids, moved-to URLs, content keys, media types, `pl
 | `review` | `id, originInstanceId, reviewKey: Sha256, repo: {key: Sha256, name} or null, project?: string or null, branch, title, state, approvedRevision: UUID or null, createdAt, updatedAt` |
 | `revisions` | `id, reviewId, seq, base, head, main, writeupEmpty, createdAt` |
 | `topics` | `id, revisionId` plus `TopicMeta` (optional door and blastRadius) |
-| `files` | `id, revisionId, path, oldPath, role, status, topicSlug, ord, oldBlob, newBlob, renderedBlob, flag, parentDocId, title?, view?: DocView`; nullable sides, status, topic, flag, parent |
+| `files` | `id, revisionId, path, oldPath, role, status, topicSlug, ord, oldBlob, newBlob, renderedBlob, flag, parentDocId, title?, view?: DocView, look?: "emend" \| "custom" \| null, colorScheme?: "light" \| null`; nullable sides, status, topic, flag, parent |
 | `docAssets` | `revisionId, docId, assetId` |
 | `agentNotes` | `id, fileId, ord` plus `AgentNote`; optional array, ordered per file, at most 8 per file and 64 per revision |
 | `writeups` | `id, revisionId, sourceBlob, renderedBlob` |
@@ -1449,6 +1450,10 @@ and comment limits. Each revision has exactly one writeup. Blob references are o
 upload them first using HEAD/PUT blobs. A missing reference gives `400 blob_missing` without writing.
 Media types are chosen on the hub. Rendered writeup and Markdown blobs are untrusted derived
 content: the hub regenerates them from source through the normal sanitizer and rendering budgets.
+A file row that carries `look` keeps the stored look on the hub, null included, so a pub keeps the
+look it was published with; `colorScheme` is kept only with `look: "emend"`. Both apply only to a
+rendered HTML doc and are null on every other row. A row without `look` (from an older exporter)
+gets the look and colour scheme the hub works out from the doc's source, as a publish does.
 HTML content capability keys are freshly minted. `agent_waiters` and event state are not copied.
 Confirmed deliveries are retained; unconfirmed deliveries are dropped and their Sends have both
 `deliveryId` and `setAsideAt` cleared, making them available to the next take.
