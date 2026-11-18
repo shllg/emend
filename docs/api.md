@@ -660,9 +660,12 @@ unless an `over` surface is specified. `diff-add-word` composites over `diff-add
 `diff-del-word` over `diff-del-bg`; each line background composites over `bg-surface` in the app.
 Download diff lines composite over `bg-sunken` instead, as specified in the pairs below.
 The seven surfaces `bg-app`, `bg-surface`, `bg-sunken`, `bg-raised`, `bg-reading`, `bg-reading-card`
-and `bg-inverse` must resolve to alpha 1: the page stacks them on nested elements. A translucent
-surface is refused with `bg-app must be opaque: its colour has transparency.` (the token name
-varies). Compare the unrounded ratio and report two decimals, for example
+and `bg-inverse` must resolve to alpha 1: the page stacks them on nested elements. Diagram text
+colours `fg-1`, `fg-2` and `fg-3` must also resolve to alpha 1, including through scale references:
+the frame receives one colour per Mermaid variable, and Mermaid draws it on several backgrounds.
+A translucent colour in either group is refused with
+`bg-app must be opaque: its colour has transparency.` (the token name varies).
+Compare the unrounded ratio and report two decimals, for example
 `fg-1 on bg-app: 2.10 to 1, needs 4.5 to 1.` These pairs require 4.5 to 1:
 
 - `fg-1`, `fg-2`, `fg-3`, `fg-link`, `accent-text` on `bg-app`, `bg-surface`, `bg-sunken`, `bg-raised`.
@@ -672,8 +675,9 @@ varies). Compare the unrounded ratio and report two decimals, for example
   `bg-sunken`, and `diff-del-bg` over `bg-sunken`.
 - `fg-1` on `bg-selected`, `bg-hover`, `bg-active`, `accent-tint`, `mark-bg`, `mark-bg-active`, `topic-bg-2`;
   `fg-reading` on `mark-bg` over `bg-reading`.
-- For diagram notes: `fg-1` on `topic-bg-2` over `bg-sunken`. Node and edge labels use
-  the existing `fg-1` on `bg-surface` pair.
+- For diagram notes and Light edge labels: `fg-1` on `topic-bg-2` over `bg-sunken`, in addition
+  to the pair over `bg-surface` above. Diagram text also uses the existing `fg-1`, `fg-2` and
+  `fg-3` pairs on `bg-surface` and `bg-sunken`.
 - `accent-fg` on `accent`, `accent-hover`, `accent-press`.
 - `success-fg`, `info-fg`, `warning-fg`, `danger-fg` on their own `-bg` and on `bg-surface`.
 - `state-{open,approved,settled,snoozed}-fg`, `outcome-{fixed,explained,held,declined}-fg` and

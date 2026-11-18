@@ -197,18 +197,7 @@ function parseColors(value: unknown): MermaidColors | undefined {
   if (!value || typeof value !== "object") return;
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) return;
-  const keys = [
-    "background",
-    "surface",
-    "text",
-    "text2",
-    "line",
-    "border",
-    "accentBg",
-    "accent",
-    "nodeText",
-    "noteText",
-  ] as const;
+  const keys = ["background", "surface", "text", "text2", "line", "border", "accentBg", "accent"] as const;
   if (Reflect.ownKeys(value).length !== keys.length) return;
   for (const key of keys) {
     const color: unknown = Object.getOwnPropertyDescriptor(value, key)?.value;
@@ -244,10 +233,10 @@ export function frameConfig(dark: boolean, colors?: MermaidColors): MermaidConfi
       labelBoxBkgColor: sunken,
       primaryColor: surface,
       actorBkg: surface,
-      primaryTextColor: colors?.nodeText ?? fg,
+      primaryTextColor: fg,
       textColor: fg,
-      noteTextColor: colors?.noteText ?? fg,
-      actorTextColor: colors?.nodeText ?? fg,
+      noteTextColor: fg,
+      actorTextColor: fg,
       signalColor: fg2,
       signalTextColor: fg2,
       labelTextColor: fg2,
@@ -258,7 +247,7 @@ export function frameConfig(dark: boolean, colors?: MermaidColors): MermaidConfi
       actorLineColor: border,
       labelBoxBorderColor: border,
       secondaryColor: topicBg,
-      edgeLabelBackground: surface,
+      ...(dark ? { edgeLabelBackground: sunken } : {}),
       noteBkgColor: topicBg,
       noteBorderColor: topicBg,
       activationBkgColor: topicBg,

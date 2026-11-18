@@ -62,8 +62,10 @@ Inserted and deleted code tokens (`diff-add-fg` / `diff-del-fg`) need 3 to 1 on 
 Docs shown as source check all ten code colours on `bg-reading`, and on commented rows'
 `mark-bg` and active or selected rows' `accent-tint`, each composited over `bg-reading`:
 plain code needs 4.5 to 1; the other nine colours need 3 to 1.
-Diagram text (`fg-1`) needs 4.5 to 1 on `bg-surface` for node and edge labels, and on
-`topic-bg-2` for notes, composited over both `bg-surface` and the diagram's `bg-sunken`.
+Diagram text colours `fg-1`, `fg-2` and `fg-3` must be opaque: the frame receives one colour per
+Mermaid variable, and Mermaid draws it on several backgrounds. They need 4.5 to 1 on `bg-surface`
+and `bg-sunken`. `fg-1` also needs 4.5 to 1 on `topic-bg-2` for notes and Light edge labels,
+composited over both `bg-surface` and the diagram's `bg-sunken`.
 The Download also checks `fg-reading` and
 `fg-reading-strong` at 4.5 to 1, and `fg-reading-muted` at 3 to 1, on `bg-sunken` and on
 `diff-add-bg` / `diff-del-bg` composited over `bg-sunken`.
@@ -76,8 +78,9 @@ Edit `themes/mine/theme.json` to change colours or set `fonts.text` and `fonts.c
 Emend's fonts stay as fallbacks. Each file names a Dark or Light base; omitted values use that
 base. A token can reference a scale step, so changing that step recolours every token built on
 it. A token set to a colour keeps its own value. The surfaces `bg-app`, `bg-surface`, `bg-sunken`,
-`bg-raised`, `bg-reading`, `bg-reading-card` and `bg-inverse` must be opaque, including when set
-through a scale reference. See [api.md](api.md#themes) for the file format and readability pairs.
+`bg-raised`, `bg-reading`, `bg-reading-card` and `bg-inverse`, and the diagram text colours `fg-1`,
+`fg-2` and `fg-3`, must be opaque, including when set through a scale reference.
+See [api.md](api.md#themes) for the file format and readability pairs.
 
 Emend lists up to 50 theme folders in name order. Each `theme.json` is at most 32 KiB.
 Top-level files and dot entries are ignored. A symlink counts only when it points to a folder;

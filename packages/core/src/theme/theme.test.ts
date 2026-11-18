@@ -263,6 +263,20 @@ test.each(["bg-app", "bg-surface", "bg-sunken", "bg-raised", "bg-reading", "bg-r
       );
   },
 );
+test.each(["fg-1", "fg-2", "fg-3"] as const)(
+  "%s must be opaque even when contrast passes, including scale references",
+  (foreground) => {
+    const theme = themeCopyDocument("dark");
+    // Dark does not otherwise use n-0, so only this foreground gets transparency.
+    theme.scales = { ...theme.scales, "n-0": "#fffffffe" };
+    for (const value of ["#fffffffe", "oklch(0.968 0.002 260 / 0.99)", "n-0"]) {
+      theme.tokens = { ...theme.tokens, [foreground]: value };
+      expect(problems(theme)).toEqual([`${foreground} must be opaque: its colour has transparency.`]);
+    }
+    theme.tokens = { ...theme.tokens, [foreground]: "#ffffffff" };
+    check(theme);
+  },
+);
 test("refuses the translucent app surface that passed contrast over a single canvas", () => {
   expect(problems({ ...document, tokens: { "bg-app": "#ffffff4d", "fg-3": "#ffffff" } })).toContain(
     "bg-app must be opaque: its colour has transparency.",

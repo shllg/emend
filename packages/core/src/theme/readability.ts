@@ -123,6 +123,9 @@ export function themeReadabilityProblems(colors: ResolvedTheme, base: ThemeBase)
     parseThemeColor(colors[name])?.rgba.alpha === 1 ? [] : [`${name} must be opaque: its colour has transparency.`],
   );
   return problems.concat(
+    (["fg-1", "fg-2", "fg-3"] as const).flatMap((name) =>
+      parseThemeColor(colors[name])?.rgba.alpha === 1 ? [] : [`${name} must be opaque: its colour has transparency.`],
+    ),
     THEME_READABILITY_PAIRS.flatMap(({ foreground, background, minimum, over }) => {
       const back = themeBackground(colors, base, background, over);
       const front = parseThemeColor(colors[foreground]);
