@@ -5,7 +5,7 @@ import { Icon } from "../ui/Icon.tsx";
 import { cn } from "../ui/utils.ts";
 
 const baseClasses = "inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-11 leading-none";
-const pillClasses = "h-5 rounded-full pr-[7px] pl-[5px] font-semibold tracking-[.01em]";
+const pillClasses = "h-[1.25rem] rounded-full pr-[7px] pl-[5px] font-semibold tracking-[.01em]";
 
 const states = {
   open: { icon: CircleDot, label: "Open", pill: "bg-state-open-bg text-state-open-fg", inline: "text-state-open-fg" },

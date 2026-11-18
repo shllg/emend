@@ -88,6 +88,7 @@ test.each(["dark", "light"] as const)(
     const path = join(dir, "mine", "theme.json");
     const text = await readFile(path, "utf8");
     const document = JSON.parse(text);
+    expect(document.density).toBe("regular");
     expect(Object.keys(document.scales)).toEqual([...THEME_SCALE_STEPS]);
     expect(Object.keys(document.tokens)).toEqual([...THEME_TOKENS]);
     expect(document).toEqual(themeCopyDocument(base));
@@ -275,6 +276,20 @@ test("list and check refuse a folder without theme.json", async () => {
     stdout: ["emend: empty: The folder has no theme.json.\n"],
     stderr: [],
   });
+});
+
+test("check refuses an invalid density with its fixed reason and exit 1", async () => {
+  await seed("mine", { version: 1, base: "dark", density: "dense" });
+  expect(await command("check", "mine")).toEqual({
+    code: 1,
+    stdout: ['emend: mine: density must be "compact", "regular" or "roomy".\n'],
+    stderr: [],
+  });
+});
+
+test("check accepts compact density", async () => {
+  await seed("mine", { version: 1, base: "dark", density: "compact" });
+  expect(await command("check", "mine")).toEqual({ code: 0, stdout: ["emend: mine is valid\n"], stderr: [] });
 });
 
 test("check names faint pairs on stdout and uses a silent exit 1", async () => {

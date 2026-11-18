@@ -46,7 +46,7 @@ function AppSection({ now }: { now: number }) {
         App
       </h2>
       <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-line-1 bg-surface px-3.5 py-3">
-        <div className="min-w-0 flex-1 basis-60">
+        <div className="min-w-0 flex-1 basis-[15rem]">
           <p className="text-14 font-semibold">{`emend ${__EMEND_VERSION__}${tag ? ` (${tag})` : ""}`}</p>
           <p aria-live="polite" className="mt-0.5 text-12 text-fg-3">
             {updateStatus(update)}
@@ -119,7 +119,7 @@ export function DevicesPage() {
       <main className="relative min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[760px] px-5 pt-8 pb-20">
           <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
-            <div className="min-w-0 flex-1 basis-80">
+            <div className="min-w-0 flex-1 basis-[20rem]">
               <h1 className="text-24 font-semibold leading-(--lh-tight) tracking-(--tracking-tight)">Devices</h1>
               <p className="mt-1 text-14 text-fg-3">
                 Browsers and machines that can use this hub. Sign-ins last 30 days and renew while in use.
@@ -141,7 +141,7 @@ export function DevicesPage() {
                   <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-sunken text-fg-2">
                     <Icon icon={device.kind === "browser" ? MonitorSmartphone : Server} size={18} />
                   </span>
-                  <div className="min-w-0 flex-1 basis-36">
+                  <div className="min-w-0 flex-1 basis-[9rem]">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <p className="min-w-0 text-14 font-semibold wrap-anywhere">{device.name}</p>
                       {device.current && (

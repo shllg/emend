@@ -63,7 +63,7 @@ export function AgentStatus({
       {status === "approved" ? (
         <Icon icon={Check} size={13} strokeWidth={2.25} />
       ) : (
-        <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", agentDotClasses[status])} />
+        <span aria-hidden="true" className={cn("size-[0.5rem] shrink-0 rounded-full", agentDotClasses[status])} />
       )}
       <span>{agentStatusLabels[status]}</span>
       {when && <time dateTime={pickedUpAt ?? undefined}>{when}</time>}

@@ -389,7 +389,7 @@ export function SendBar({
   return (
     <section aria-label="Send and approve" className="shrink-0 border-t border-line-1 bg-surface">
       {phone ? (
-        <div className="flex min-h-[52px] flex-nowrap items-center gap-2.5 py-1.5 pr-2.5 pl-3.5">
+        <div className="flex min-h-13 flex-nowrap items-center gap-2.5 py-1.5 pr-2.5 pl-3.5">
           {status}
           <div className="flex shrink-0 flex-nowrap items-center gap-1.5 [&>*]:shrink-0">
             {actions}
@@ -509,7 +509,7 @@ export function SendBar({
                 className={cn(
                   inputClass,
                   inputSizes.sm,
-                  "min-h-7 max-h-32 resize-none overflow-y-auto py-[3px] pl-[30px] leading-5",
+                  "min-h-7 max-h-32 resize-none overflow-y-auto py-[3px] pl-[30px] leading-[1.25rem]",
                   instruction && "h-auto [field-sizing:content]",
                 )}
                 maxLength={LIMITS.instructionChars}

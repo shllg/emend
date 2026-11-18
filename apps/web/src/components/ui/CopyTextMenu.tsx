@@ -149,7 +149,7 @@ export function CopyTextMenu({
           align="start"
           sideOffset={4}
           collisionPadding={8}
-          className="relative z-[calc(var(--z-sheet)+2)] max-h-(--radix-dropdown-menu-content-available-height) min-w-52 max-w-[min(36rem,var(--radix-dropdown-menu-content-available-width))] animate-[em-fade_var(--dur-1)_var(--ease-out)] overflow-y-auto rounded-lg border border-line-1 bg-raised p-1 shadow-3"
+          className="relative z-[calc(var(--z-sheet)+2)] max-h-(--radix-dropdown-menu-content-available-height) min-w-[13rem] max-w-[min(36rem,var(--radix-dropdown-menu-content-available-width))] animate-[em-fade_var(--dur-1)_var(--ease-out)] overflow-y-auto rounded-lg border border-line-1 bg-raised p-1 shadow-3"
         >
           {textBlocks.map((block, index) => (
             <div

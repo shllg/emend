@@ -21,13 +21,13 @@ afterEach(async () => {
 
 test("reviewer sessions get a contract-checked list read afresh each time", async () => {
   await mkdir(join(dir, "mine"));
-  await writeFile(join(dir, "mine", "theme.json"), JSON.stringify({ version: 1, base: "dark" }));
+  await writeFile(join(dir, "mine", "theme.json"), JSON.stringify({ version: 1, base: "dark", density: "compact" }));
   for (const who of ["reviewer", "foreign"] as const) {
     const response = await f.request("/themes", "GET", undefined, who);
     expect(response.status).toBe(200);
     expect(ThemeList.parse(await response.json())).toMatchObject({
       folderError: false,
-      themes: [{ name: "mine", valid: true, base: "dark" }],
+      themes: [{ name: "mine", valid: true, base: "dark", density: "compact" }],
     });
   }
   await writeFile(join(dir, "mine", "theme.json"), "{");

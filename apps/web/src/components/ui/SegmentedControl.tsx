@@ -58,11 +58,11 @@ export function SegmentedControl({ options, value, onChange, size = "md", label,
               }
             }}
             className={cn(
-              "inline-flex h-[26px] items-center gap-1.5 rounded-sm border-0 bg-transparent px-2.5 font-sans text-13 font-medium leading-(--lh-snug) text-fg-3 transition-[background,color] duration-(--dur-1) hover:text-fg-1 aria-checked:bg-raised aria-checked:text-fg-1 aria-checked:shadow-1",
+              "inline-flex h-6.5 items-center gap-1.5 rounded-sm border-0 bg-transparent px-2.5 font-sans text-13 font-medium leading-(--lh-snug) text-fg-3 transition-[background,color] duration-(--dur-1) hover:text-fg-1 aria-checked:bg-raised aria-checked:text-fg-1 aria-checked:shadow-1",
               focusRing,
               "disabled:cursor-not-allowed disabled:opacity-48 disabled:hover:text-fg-3",
               description && "pointer-events-none",
-              size === "sm" && "h-[22px] px-2 text-12 leading-(--lh-snug)",
+              size === "sm" && "h-5.5 px-2 text-12 leading-(--lh-snug)",
             )}
           >
             {option.icon && <Icon icon={option.icon} size={14} />}

@@ -143,7 +143,7 @@ function LightboxImage({
           size="lg"
           aria-label={zoomPercent ? `Fit to screen, ${zoomPercent}` : "Fit to screen"}
           aria-disabled={zoomUnavailable}
-          className="min-w-16 px-2 tabular-nums"
+          className="min-w-[4rem] px-2 tabular-nums"
           onClick={() => {
             if (!zoomUnavailable) zoom();
           }}

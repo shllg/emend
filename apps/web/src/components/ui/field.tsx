@@ -25,7 +25,7 @@ export function FieldMessage({ id, hint, error }: { id: string; hint?: string; e
       <span
         id={id}
         role="alert"
-        className="flex items-center gap-[5px] font-sans text-12 font-normal leading-(--lh-snug) text-danger-fg"
+        className="flex items-center gap-1.25 font-sans text-12 font-normal leading-(--lh-snug) text-danger-fg"
       >
         <Icon icon={CircleAlert} size={13} />
         {error}

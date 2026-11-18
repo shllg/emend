@@ -1,23 +1,23 @@
 @layer components {
   .em-files-view {
-    padding: 6px 8px 24px;
+    padding: calc(6px * var(--density)) calc(8px * var(--density)) calc(24px * var(--density));
   }
   .em-files-order {
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    min-height: 32px;
-    padding: 4px 0 8px 8px;
+    min-height: calc(32px * var(--density));
+    padding: calc(4px * var(--density)) 0 calc(8px * var(--density)) calc(8px * var(--density));
   }
   .em-files-group {
-    margin-bottom: 8px;
+    margin-bottom: calc(8px * var(--density));
   }
   .em-files-group__head {
     display: flex;
     align-items: center;
-    gap: 8px;
-    min-height: 32px;
-    padding-left: 8px;
+    gap: calc(8px * var(--density));
+    min-height: calc(32px * var(--density));
+    padding-left: calc(8px * var(--density));
   }
   .em-files-group__title {
     flex: 1;
@@ -36,7 +36,7 @@
   .em-files-row {
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: calc(2px * var(--density));
     border-radius: var(--radius-sm);
   }
   .em-files-row:hover {
@@ -47,9 +47,9 @@
     flex: 1;
     min-width: 0;
     align-items: center;
-    gap: 8px;
-    min-height: 30px;
-    padding: 0 6px 0 14px;
+    gap: calc(8px * var(--density));
+    min-height: calc(30px * var(--density));
+    padding: 0 calc(6px * var(--density)) 0 calc(14px * var(--density));
     border: 0;
     background: none;
     text-align: left;
@@ -75,7 +75,7 @@
   }
   .em-files-row__counts {
     display: flex;
-    gap: 5px;
+    gap: calc(5px * var(--density));
     font-size: 11px;
     white-space: nowrap;
     color: var(--fg-3);
@@ -88,10 +88,10 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 5px;
-    min-width: 30px;
-    min-height: 30px;
-    padding: 0 6px;
+    gap: calc(5px * var(--density));
+    min-width: calc(30px * var(--density));
+    min-height: calc(30px * var(--density));
+    padding: 0 calc(6px * var(--density));
     flex: none;
     border: 0;
     background: none;
@@ -133,8 +133,8 @@
   .em-files-progress {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin: 10px 8px 0;
+    gap: calc(10px * var(--density));
+    margin: calc(10px * var(--density)) calc(8px * var(--density)) 0;
     font: var(--type-meta);
     color: var(--fg-3);
     white-space: nowrap;

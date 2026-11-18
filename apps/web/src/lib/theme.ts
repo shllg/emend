@@ -3,6 +3,7 @@ import {
   THEME_SCALE_STEPS,
   THEME_TOKENS,
   ThemeColor,
+  ThemeDensity,
   ThemeFont,
   ThemeList,
   ThemeName,
@@ -65,6 +66,9 @@ function apply(state: ThemeState) {
   const base = custom?.base ?? (state.pick === "dark" || state.pick === "light" ? state.pick : undefined);
   if (base) root.dataset.theme = base;
   else delete root.dataset.theme;
+  const density = ThemeDensity.safeParse(custom?.density).data;
+  if (density === "compact" || density === "roomy") root.dataset.density = density;
+  else delete root.dataset.density;
   const set = (name: string, value: string) => {
     root.style.setProperty(`--${name}`, value);
     applied.add(`--${name}`);

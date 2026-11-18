@@ -72,8 +72,8 @@ export function Menu({ label, trigger, align = "right", size = "md", items, defa
           sideOffset={4}
           collisionPadding={8}
           className={cn(
-            "relative z-[calc(var(--z-sheet)+2)] max-h-(--radix-dropdown-menu-content-available-height) min-w-52 max-w-[min(36rem,var(--radix-dropdown-menu-content-available-width))] animate-[em-fade_var(--dur-1)_var(--ease-out)] overflow-y-auto rounded-lg border border-line-1 bg-raised p-1 shadow-3",
-            items.some((item) => "radioGroup" in item) && "min-w-60",
+            "relative z-[calc(var(--z-sheet)+2)] max-h-(--radix-dropdown-menu-content-available-height) min-w-[13rem] max-w-[min(36rem,var(--radix-dropdown-menu-content-available-width))] animate-[em-fade_var(--dur-1)_var(--ease-out)] overflow-y-auto rounded-lg border border-line-1 bg-raised p-1 shadow-3",
+            items.some((item) => "radioGroup" in item) && "min-w-[15rem]",
           )}
         >
           {items.map((item, index) => {
@@ -124,7 +124,7 @@ export function Menu({ label, trigger, align = "right", size = "md", items, defa
                       )}
                     >
                       {!item.radioGroup.segmented && (
-                        <span aria-hidden="true" className="mt-0.5 size-3.5 shrink-0">
+                        <span aria-hidden="true" className="mt-[0.125rem] size-[0.875rem] shrink-0">
                           <Primitive.ItemIndicator>
                             <Icon icon={Check} size={14} />
                           </Primitive.ItemIndicator>

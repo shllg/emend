@@ -31,7 +31,7 @@ export function Checkbox({ label, description, className, id, ...props }: Checkb
       />
       <span
         aria-hidden="true"
-        className="mt-0.5 grid size-4 shrink-0 place-items-center rounded-[4px] border-[1.5px] border-line-strong bg-surface text-transparent transition-[background,border-color] duration-(--dur-1) group-hover:border-fg-2 peer-checked:border-fg-1 peer-checked:bg-fg-1 peer-checked:text-surface peer-focus-visible:shadow-(--focus-ring) peer-disabled:opacity-50"
+        className="mt-[0.125rem] grid size-[1rem] shrink-0 place-items-center rounded-[4px] border-[1.5px] border-line-strong bg-surface text-transparent transition-[background,border-color] duration-(--dur-1) group-hover:border-fg-2 peer-checked:border-fg-1 peer-checked:bg-fg-1 peer-checked:text-surface peer-focus-visible:shadow-(--focus-ring) peer-disabled:opacity-50"
       >
         <Icon icon={Check} size={12} strokeWidth={3} />
       </span>

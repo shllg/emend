@@ -188,6 +188,9 @@ export const ThemeToken = z.enum(THEME_TOKENS);
 export type ThemeToken = z.infer<typeof ThemeToken>;
 export const ThemeBase = z.enum(["dark", "light"]);
 export type ThemeBase = z.infer<typeof ThemeBase>;
+export const THEME_DENSITIES = ["compact", "regular", "roomy"] as const;
+export const ThemeDensity = z.enum(THEME_DENSITIES);
+export type ThemeDensity = z.infer<typeof ThemeDensity>;
 export const ThemeName = z
   .string()
   .max(40)
@@ -221,6 +224,7 @@ export const ThemeValid = z.object({
   valid: z.literal(true),
   name: ThemeName,
   base: ThemeBase,
+  density: ThemeDensity.optional(),
   fonts: z.object({ text: ThemeFont.optional(), code: ThemeFont.optional() }),
   scales: z.record(key, ThemeColor),
   tokens: z.record(key, z.union([ThemeColor, ThemeScaleStep])),

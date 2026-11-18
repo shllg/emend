@@ -12,7 +12,7 @@ export function OutcomeBadge({ outcome }: { outcome: Outcome }) {
   const { icon, label, colors } = outcomes[outcome];
   return (
     <span
-      className={`inline-flex h-5 shrink-0 items-center gap-1 whitespace-nowrap rounded-sm pr-[7px] pl-[5px] text-11 font-semibold leading-none ${colors}`}
+      className={`inline-flex h-[1.25rem] shrink-0 items-center gap-1 whitespace-nowrap rounded-sm pr-[7px] pl-[5px] text-11 font-semibold leading-none ${colors}`}
     >
       <Icon icon={icon} size={12} strokeWidth={2.25} />
       {label}

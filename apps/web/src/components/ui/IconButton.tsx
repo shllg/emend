@@ -70,7 +70,7 @@ export function IconButton({
       {hasBadge && (
         <span
           aria-hidden="true"
-          className="absolute top-0.5 right-0.5 h-3.5 min-w-3.5 rounded-md bg-accent px-[3px] text-center font-sans text-[9px] leading-[14px] font-semibold text-accent-fg"
+          className="absolute top-0.5 right-0.5 h-[0.875rem] min-w-[0.875rem] rounded-md bg-accent px-[3px] text-center font-sans text-[9px] leading-[14px] font-semibold text-accent-fg"
         >
           {badge}
         </span>

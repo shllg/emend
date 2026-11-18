@@ -1,6 +1,6 @@
 ---
 name: emend-theme
-description: Make or change a custom colour theme for emend, the review app. Use when the person asks for an emend theme or wants emend's colours or fonts changed.
+description: Make or change a custom theme for emend, the review app. Use when the person asks for an emend theme or wants emend's colours, fonts or spacing density changed.
 ---
 
 # Make an emend theme
@@ -65,6 +65,7 @@ Use the full file made by the copy command for your changes.
 {
   "version": 1,
   "base": "dark",
+  "density": "regular",
   "fonts": {
     "text": "Geist",
     "code": "JetBrains Mono"
@@ -80,6 +81,7 @@ Use the full file made by the copy command for your changes.
 
 `version` must be `1`.
 `base` must be `"dark"` or `"light"`.
+`density` is optional and must be `"compact"`, `"regular"` or `"roomy"`.
 `fonts`, `scales` and `tokens` are optional objects.
 Unknown fields, font keys, scale names and token names are refused.
 
@@ -113,7 +115,18 @@ These surfaces must be opaque, including when set through a scale step:
 
 `emend theme copy` writes every scale step as a resolved colour.
 It writes every token as the scale step it names or as its own colour.
-It also writes both fonts.
+It also writes both fonts and the density, using `"regular"` when the source has no density.
+
+## Density
+
+`"compact"` gives tighter padding, gaps and rows, so more rows fit on a laptop.
+`"roomy"` gives them more space.
+`"regular"` keeps today's spacing and is the default.
+Text size never changes with density.
+On touch screens, compact keeps regular spacing so tap targets keep their size.
+Density applies to the app, not to HTML doc contents inside sandboxed frames.
+When the person asks for tighter or looser spacing, set this field instead of pixel values.
+Per-token spacing is not supported.
 
 ## Fonts by name
 
@@ -310,7 +323,7 @@ The source id chooses one of eight pairs, so a number does not name a fixed mach
 ## Tokens
 
 These names describe the colour's role, regardless of its base value.
-Custom colours and fonts apply to the app document, not to HTML doc contents inside sandboxed frames.
+Custom colours, fonts and density apply to the app document, not to HTML doc contents inside sandboxed frames.
 HTML docs in emend's look use built-in Dark or Light colours from the static `pub-frame.css`.
 Its `prefers-color-scheme` query follows the embedding page's colour scheme, which a custom theme sets to its base.
 The doc's own `data-theme` attribute or CSS can override that look.

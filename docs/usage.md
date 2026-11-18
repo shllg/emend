@@ -101,6 +101,9 @@ it. A token set to a colour keeps its own value. The surfaces `bg-app`, `bg-surf
 `fg-2` and `fg-3`, must be opaque, including when set through a scale reference.
 See [api.md](api.md#themes) for the file format and readability pairs.
 
+A theme can set `density` to `"compact"`, `"regular"` (the default) or `"roomy"` to change spacing, never text size.
+On touch screens, compact keeps regular spacing so tap targets keep their size.
+
 Emend lists up to 50 theme folders in name order. Each `theme.json` is at most 32 KiB.
 Top-level files and dot entries are ignored. A symlink counts only when it points to a folder;
 links to files, missing targets and link loops are skipped like top-level files.
