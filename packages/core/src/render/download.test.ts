@@ -2723,7 +2723,7 @@ const threadPage = (kind: (typeof threadPageKinds)[number], threads: FileThreads
 
 // Reading CSS includes syntax base tokens; thread and diff CSS retain their original bytes.
 const systemStyleHashes = [
-  "445c4526be329501d4839d7321c9e91c1b656393e62b15e92a48c55b872f6da1",
+  "e8ad87f22b73ed3fb3cb4fd1db9b3f4af61947bf3a443216dd011dfc409ec743",
   "4ccb0e73df0d25d3c35164825b62358d1f4475da66df85dff6e897350fce5e72",
   "b498db6a7c457faef4b17a4b2343cc19b0c9eeaf59ae33752fb9aa18ba983f97",
 ];
@@ -2771,6 +2771,7 @@ test("diff styles follow the same theme as the writeup and comments", async () =
     diff: { files: [diffFile()], hunks: async () => [{ oldStart: 1, newStart: 1, lines: ["-before", "+after"] }] },
   };
   const system = await buildWriteupDownload(input);
+  expect(pageStyles(system).join("\n")).toContain("pre code{padding:0;border:0;background:none;font:inherit}");
   expect(pageStyles(system).map((css) => createHash("sha256").update(css).digest("hex"))).toEqual(systemStyleHashes);
   for (const theme of ["dark", "light"] as const) {
     const html = await buildWriteupDownload({ ...input, theme });
@@ -2914,14 +2915,14 @@ async function commentsOffOutputs(builders: CompatibilityBuilders) {
 
 // Baseline without comments, updated for the syntax base CSS; HTML docs retain their original bytes.
 const commentsOffHashes = {
-  writeup: "ee015982cc43e7811f4c88a4b140b829bf15d7e9a2cbb2ff728a54b33998b53b",
-  markdown: "8928141039d330df18ce7ec389b725552881fe1ad1f2ba9430a3f34349b1bc34",
-  source: "05bb4ce53f45e6040c34894825e3ecc94f36fc4057ca0609a864bb820a36817a",
-  emptySource: "cd9c3ca4afcd9bdab40739487c2a3c5b3fc569e26c66aa945f1317eb46d448f7",
-  unrenderedSource: "6997f35f9b8957c1d4c85a6aacf973cfef2a3a7aadd5b2917f2da34bc148fd21",
+  writeup: "b07862159a7a2dd03dda987b58d882c0bf98c70845a6f5e352b818595cc91a1f",
+  markdown: "f2497eacab182f0e439f1300796aa6371bbedfa292d33fcbf5bbe2833487f083",
+  source: "1fe7dcefe4433b02a50f1271fbae932a179311049bb9adc95720ca2a04e71101",
+  emptySource: "723811ada88f2768503c7968cdd09b20d1264ed24ff0f3adb402cb60da2e9d11",
+  unrenderedSource: "ea9b6014078db41407d1be02f6e78c681121a11b8d092ba3bf7fbc8bf1e44dbc",
   html: "ebd1d21e1b7d438fa77910ed4a617b0850bbc687dc44b06aab36d42194f329e7",
-  overLimitHtml: "3801a3ca2ea493d95456811aa422e62b627ff2cf4950d3448ac850fd301e65ae",
-  omitted: "3801a3ca2ea493d95456811aa422e62b627ff2cf4950d3448ac850fd301e65ae",
+  overLimitHtml: "f35bf5eb55421865ecff63cba0231faca4a5e71717c4ae6e4040dd4fffeaeea5",
+  omitted: "f35bf5eb55421865ecff63cba0231faca4a5e71717c4ae6e4040dd4fffeaeea5",
 };
 test("comments-off output matches the pinned builder hashes", async () => {
   const outputs = await commentsOffOutputs({
