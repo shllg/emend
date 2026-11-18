@@ -72,8 +72,12 @@ export function contentRoutes(app: Hono<AppEnv>, deps: AppDeps) {
     const contentType = /^(?:text\/|application\/json$|image\/svg\+xml$)/.test(type) ? `${type}; charset=utf-8` : type;
     if (result.isDoc) {
       let html = new TextDecoder().decode(result.bytes);
-      if (result.look === "emend")
-        html = injectLook(html, await pubStylesheet(deps.config.webRoot), result.colorScheme === "light");
+      if (result.look === "emend") {
+        const query = c.req.query("theme");
+        const theme =
+          result.colorScheme === "light" ? "light" : query === "dark" || query === "light" ? query : undefined;
+        html = injectLook(html, await pubStylesheet(deps.config.webRoot), theme);
+      }
       html = injectBridge(html);
       c.header("Content-Type", contentType);
       c.header("Content-Security-Policy", HTML_DOC_CSP);

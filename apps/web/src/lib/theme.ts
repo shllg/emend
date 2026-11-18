@@ -21,7 +21,7 @@ export const themeFontStacks = {
   code: `"${DEFAULT_THEME_FONTS.code}", ui-monospace, "SF Mono", Menlo, monospace`,
 };
 // Light --bg-app = --n-25 = oklch(0.985 0.001 260), rounded to sRGB bytes.
-const themeColors = { dark: "#171717", light: "#fafafb" };
+const defaultThemeColors = { dark: "#171717", light: "#fafafb" };
 const scaleSteps = new Set<string>(THEME_SCALE_STEPS);
 const applied = new Set<string>();
 type ThemeState = {
@@ -57,6 +57,20 @@ export function pickedTheme({ pick, custom }: ThemeState) {
   return custom?.name === pickedThemeName(pick) ? custom : undefined;
 }
 
+export function themeColors(custom: ThemeValid): { scales: Record<string, string>; tokens: Record<string, string> } {
+  const scales: Record<string, string> = {};
+  const tokens: Record<string, string> = {};
+  for (const name of THEME_SCALE_STEPS) {
+    const value = custom.scales[name];
+    if (value !== undefined && ThemeColor.safeParse(value).success) scales[name] = value;
+  }
+  for (const name of THEME_TOKENS) {
+    const value = custom.tokens[name];
+    if (value !== undefined && (ThemeColor.safeParse(value).success || scaleSteps.has(value))) tokens[name] = value;
+  }
+  return { scales, tokens };
+}
+
 function apply(state: ThemeState) {
   const root = document.documentElement;
   for (const property of applied) root.style.removeProperty(property);
@@ -70,16 +84,9 @@ function apply(state: ThemeState) {
     applied.add(`--${name}`);
   };
   if (custom) {
-    for (const name of THEME_SCALE_STEPS) {
-      const value = custom.scales[name];
-      if (value !== undefined && ThemeColor.safeParse(value).success) set(name, value);
-    }
-    for (const name of THEME_TOKENS) {
-      const value = custom.tokens[name];
-      if (value === undefined) continue;
-      if (ThemeColor.safeParse(value).success) set(name, value);
-      else if (scaleSteps.has(value)) set(name, `var(--${value})`);
-    }
+    const { scales, tokens } = themeColors(custom);
+    for (const [name, value] of Object.entries(scales)) set(name, value);
+    for (const [name, value] of Object.entries(tokens)) set(name, scaleSteps.has(value) ? `var(--${value})` : value);
     for (const [font, property] of [
       ["text", "font-sans"],
       ["code", "font-mono"],
@@ -92,7 +99,7 @@ function apply(state: ThemeState) {
     const meta = document.querySelector<HTMLMetaElement>(
       `meta[name="theme-color"][media="(prefers-color-scheme: ${scheme})"]`,
     );
-    if (meta) meta.content = custom?.themeColor ?? themeColors[base ?? scheme];
+    if (meta) meta.content = custom?.themeColor ?? defaultThemeColors[base ?? scheme];
   }
 }
 

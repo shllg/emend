@@ -6,6 +6,9 @@
   :root[data-theme="light"] {
     color-scheme: light;
   }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+  }
   :root[data-emend-width="narrow"] {
     --reader-measure: 68ch;
   }

@@ -80,6 +80,151 @@ test.each(corpus)("bridge text equals server docText for corpus $name", async (e
   }
 });
 
+test("theme messages replace one layered sheet, set only the root mode, and never scroll or post", async () => {
+  const b = bridge('<html lang="en"><body><h2>Part</h2></body></html>');
+  const root = b.window.document.documentElement;
+  const set = vi.spyOn(b.window.Element.prototype, "setAttribute");
+  const adopt = vi.spyOn(b.window.Document.prototype, "adoptedStyleSheets", "set");
+  const scroll = vi.spyOn(b.window.Element.prototype, "scrollIntoView");
+  const scrollTo = vi.spyOn(b.window.Element.prototype, "scrollTo");
+  const windowScroll = vi.spyOn(b.window, "scrollTo");
+  const clobbered = vi.fn();
+  Object.defineProperty(root, "setAttribute", { value: clobbered });
+  Object.defineProperty(b.window.document, "documentElement", {
+    configurable: true,
+    value: b.window.document.createElement("form"),
+  });
+  b.post.mockClear();
+  try {
+    b.message({
+      type: "emend:theme",
+      mode: "dark",
+      scales: { "n-950": "#112233" },
+      tokens: { "fg-1": "#eeeeee", "bg-app": "n-950" },
+    });
+    expect(root.getAttribute("data-theme")).toBe("dark");
+    expect(b.replaceSync).toHaveBeenCalledExactlyOnceWith(
+      "@layer emend{:root:root:root{--n-950:#112233;--fg-1:#eeeeee;--bg-app:var(--n-950);}}",
+    );
+    const sheets = b.window.document.adoptedStyleSheets;
+    expect(sheets).toHaveLength(1);
+    const sheet = sheets[0];
+    if (!sheet) throw new Error("Missing theme sheet");
+    Object.defineProperty(sheet, "replaceSync", { value: clobbered });
+    Object.defineProperty(b.window.document, "adoptedStyleSheets", {
+      configurable: true,
+      get: clobbered,
+      set: clobbered,
+    });
+    b.message({
+      type: "emend:theme",
+      mode: "light",
+      scales: { "n-25": "oklch(0.98 0.01 260 / 0.5)" },
+      tokens: { "fg-1": "#112233ff" },
+    });
+    expect(root.getAttribute("data-theme")).toBe("light");
+    expect(b.replaceSync).toHaveBeenLastCalledWith(
+      "@layer emend{:root:root:root{--n-25:oklch(0.98 0.01 260 / 0.5);--fg-1:#112233ff;}}",
+    );
+    b.message({ type: "emend:theme", mode: "dark", scales: {}, tokens: {} });
+    expect(b.replaceSync).toHaveBeenLastCalledWith("");
+    expect(b.replaceSync.mock.instances).toEqual([sheet, sheet, sheet]);
+    expect(adopt).toHaveBeenCalledExactlyOnceWith([sheet]);
+    expect(set.mock.calls).toEqual([
+      ["data-theme", "dark"],
+      ["data-theme", "light"],
+      ["data-theme", "dark"],
+    ]);
+    expect(set.mock.instances).toEqual([root, root, root]);
+    expect(root.getAttribute("lang")).toBe("en");
+    for (const spy of [clobbered, scroll, scrollTo, windowScroll, b.post]) expect(spy).not.toHaveBeenCalled();
+  } finally {
+    Reflect.deleteProperty(b.window.document, "documentElement");
+    Reflect.deleteProperty(b.window.document, "adoptedStyleSheets");
+    vi.restoreAllMocks();
+    await b.window.happyDOM.close();
+  }
+});
+
+test("theme messages reject invalid entries and foreign sources without changing any state", async () => {
+  const b = bridge("<h2>Part</h2>");
+  const valid = { type: "emend:theme", mode: "dark", scales: { "n-950": "#112233" }, tokens: { "bg-app": "n-950" } };
+  b.message({ ...valid, mode: "light" });
+  const root = b.window.document.documentElement;
+  const sheets = [...b.window.document.adoptedStyleSheets];
+  const set = vi.spyOn(b.window.Element.prototype, "setAttribute");
+  const adopt = vi.spyOn(b.window.Document.prototype, "adoptedStyleSheets", "set");
+  const scroll = vi.spyOn(b.window.Element.prototype, "scrollIntoView");
+  const scrollTo = vi.spyOn(b.window.Element.prototype, "scrollTo");
+  b.replaceSync.mockClear();
+  b.post.mockClear();
+  try {
+    const invalid = [
+      ...[undefined, null, "DARK", "dark\n", "system", {}, [], 1].map((mode) => ({ ...valid, mode })),
+      ...["scales", "tokens"].flatMap((field) => [
+        ...[
+          undefined,
+          null,
+          [],
+          "colors",
+          1,
+          Object.fromEntries(Array.from({ length: 257 }, (_, i) => [`n-${i}`, "#112233"])),
+        ].map((value) => ({ ...valid, [field]: value })),
+        ...["N-950", "n--950", "--", "-n", "n-", "a".repeat(41), "n\n", ""].map((name) => ({
+          ...valid,
+          [field]: { [name]: "#112233" },
+        })),
+        ...["#fff;}", "url(x)", "var(--a)", "oklch(1 0 0);x", "expression(1)", "#abcdef\n", "#ABCDEF", null, 1].map(
+          (value) => ({ ...valid, [field]: { "n-950": value } }),
+        ),
+      ]),
+      { ...valid, scales: { "n-950": "red" } },
+      { ...valid, scales: { "n-950": "n-25" } },
+      ...["N-950", "n--950", "-n", "n-", "a".repeat(41)].map((value) => ({ ...valid, tokens: { "bg-app": value } })),
+    ];
+    for (const data of invalid) b.message(data);
+    for (const source of [null, b.window, {}]) b.message(valid, source);
+    expect(root.getAttribute("data-theme")).toBe("light");
+    expect(b.window.document.adoptedStyleSheets).toEqual(sheets);
+    for (const spy of [set, adopt, b.replaceSync, scroll, scrollTo, b.post]) expect(spy).not.toHaveBeenCalled();
+  } finally {
+    vi.restoreAllMocks();
+    await b.window.happyDOM.close();
+  }
+});
+
+test("theme maps accept the entry and key length boundaries", async () => {
+  const b = bridge("<p>Seed</p>");
+  try {
+    const scales = Object.fromEntries(Array.from({ length: 256 }, (_, i) => [`n-${i}`, "#112233"]));
+    b.message({ type: "emend:theme", mode: "dark", scales, tokens: { ["a".repeat(40)]: "oklch(1 0 0)" } });
+    expect(b.window.document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(b.replaceSync).toHaveBeenCalledExactlyOnceWith(
+      `@layer emend{:root:root:root{${Object.keys(scales)
+        .map((name) => `--${name}:#112233;`)
+        .join("")}--${"a".repeat(40)}:oklch(1 0 0);}}`,
+    );
+  } finally {
+    vi.restoreAllMocks();
+    await b.window.happyDOM.close();
+  }
+});
+
+test("theme mode applies without constructed stylesheets", async () => {
+  const b = bridge("<p>Seed</p>", true, (window) => {
+    Object.defineProperty(window, "CSSStyleSheet", { value: undefined });
+  });
+  try {
+    b.message({ type: "emend:theme", mode: "dark", scales: { "n-950": "#112233" }, tokens: {} });
+    expect(b.window.document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(b.window.document.adoptedStyleSheets).toEqual([]);
+    expect(b.replaceSync).not.toHaveBeenCalled();
+  } finally {
+    vi.restoreAllMocks();
+    await b.window.happyDOM.close();
+  }
+});
+
 test("bridge applies parent layout preferences through prototype DOM calls", async () => {
   const b = bridge("<body><h2>Part</h2></body>");
   // Attribute checks need no layout; the reflow harness supplies it explicitly.

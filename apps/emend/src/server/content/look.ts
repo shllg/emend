@@ -4,7 +4,7 @@ import { LIMITS, pubStylesheetSafe } from "@emend/contract";
 import { regularFile } from "../http/pages.ts";
 
 export const FALLBACK_PUB_CSS =
-  "@layer emend{:root{color-scheme:light dark;background:Canvas;color:CanvasText}:root[data-theme=light]{color-scheme:light}}";
+  "@layer emend{:root{color-scheme:light dark;background:Canvas;color:CanvasText}:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}}";
 const stylesheets = new Map<string, Promise<string>>();
 
 /** The installed web build is trusted only after confinement, size and raw-text checks. */

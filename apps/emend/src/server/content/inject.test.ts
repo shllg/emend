@@ -42,19 +42,25 @@ test.each([
 ])("inserts the pub stylesheet after the safe prefix: %s", (source, prefix, rest) => {
   const css = "@layer emend{p{color:var(--fg-reading)}}";
   expect(injectLook(source, css)).toBe(`${prefix}<style>${css}</style>${rest}`);
-  expect(injectLook(source, css, true)).toBe(`${prefix}<html data-theme="light"><style>${css}</style>${rest}`);
+  for (const theme of ["light", "dark"] as const)
+    expect(injectLook(source, css, theme)).toBe(`${prefix}<html data-theme="${theme}"><style>${css}</style>${rest}`);
 });
 
-test("the fixed light root wins over the page's theme and retains its other attributes", () => {
-  const source = '<!doctype html><html data-theme="dark" lang="en"><body>Plan</body></html>';
-  const injected = injectLook(source, "@layer emend{}", true);
-  expect(injected).toBe(`<!doctype html><html data-theme="light"><style>@layer emend{}</style>${source.slice(15)}`);
-  const root = parseDocHtml(injected)?.childNodes.find((node) => node.nodeName === "html");
-  expect(root && "attrs" in root ? root.attrs : []).toEqual([
-    { name: "data-theme", value: "light" },
-    { name: "lang", value: "en" },
-  ]);
-});
+test.each(["light", "dark"] as const)(
+  "the fixed %s root wins over the page's theme and retains its other attributes",
+  (theme) => {
+    const source = `<!doctype html><html data-theme="${theme === "light" ? "dark" : "light"}" lang="en"><body>Plan</body></html>`;
+    const injected = injectLook(source, "@layer emend{}", theme);
+    expect(injected).toBe(
+      `<!doctype html><html data-theme="${theme}"><style>@layer emend{}</style>${source.slice(15)}`,
+    );
+    const root = parseDocHtml(injected)?.childNodes.find((node) => node.nodeName === "html");
+    expect(root && "attrs" in root ? root.attrs : []).toEqual([
+      { name: "data-theme", value: theme },
+      { name: "lang", value: "en" },
+    ]);
+  },
+);
 
 test("adding the look leaves exactly one bridge with the hash allowed by the unchanged CSP", () => {
   const css = "@layer emend{body{margin:0}}";
