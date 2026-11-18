@@ -1040,6 +1040,27 @@ test("groom skips invalid UTF-8 and every path that findings would refuse", () =
   );
 });
 
+test("groom excludes leading dashes and single quotes but keeps later dashes in paths", async () => {
+  const skipped = ["-dash.md", "it's.md", "docs/it's.md"];
+  const kept = ["docs/a-b.md", "docs/-x.md"];
+  for (const path of [...skipped, ...kept]) commitFile(fx.main, path, "synthetic\n");
+  const result = await groomCli("next", "--count", "50");
+  assert.equal(result.code, 0, result.stderr);
+  const next: { path: string }[] = JSON.parse(result.stdout);
+  assert.ok(next.length < 50);
+  const paths = next.map(({ path }) => path);
+  for (const path of skipped) assert.equal(paths.includes(path), false, path);
+  for (const path of kept) assert.ok(paths.includes(path), path);
+  assert.equal(existsSync(visitsPath()), false);
+  for (const path of skipped) {
+    assert.throws(() => groomVisited(repo, path, headBlob(path), 0), {
+      code: 2,
+      message: "The path is not a groom candidate at HEAD.",
+    });
+    assert.equal(existsSync(visitsPath()), false);
+  }
+});
+
 test("groom next defaults to five JSON candidates and leaves absent groom storage absent", async () => {
   const result = await groomCli("next");
   assert.equal(result.code, 0, result.stderr);

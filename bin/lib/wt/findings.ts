@@ -578,7 +578,7 @@ function groomCandidates(repo: Repo): Map<string, string> {
     } catch {
       continue;
     }
-    if (!validInputPath(path)) continue;
+    if (!validInputPath(path) || path.startsWith("-") || path.includes("'")) continue;
     const parts = path.split("/");
     if (
       parts.at(-1) === "pnpm-lock.yaml" ||

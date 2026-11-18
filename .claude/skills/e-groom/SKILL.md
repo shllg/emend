@@ -21,6 +21,9 @@ description: Walk the code a few files per pass and record confirmed findings lo
 
 1. Create a temporary folder outside the repository with `mktemp -d`. Create a new file there
    with `mktemp '<temp>/status-before.XXXXXX'`. Save `git -C '<main>' status --porcelain` to it.
+   Run `git -C '<main>' status --porcelain --untracked-files=no`. If it prints anything, report
+   that `/e-groom` needs a clean main checkout, remove the temporary folder, and stop before
+   starting the pass. End the loop too, with ScheduleWakeup `stop: true`.
    Keep the folder and file paths for this pass. If a command fails, the pass is incomplete;
    record no visits. Still do the status comparison in step 8 and the cleanup in step 10.
 2. Name the pass `g-` plus the output of `date -u +%Y%m%d-%H%M%S`. Check that it matches
@@ -57,10 +60,10 @@ description: Walk the code a few files per pass and record confirmed findings lo
    Count the recorded ids per file of the pass; a file with none has count 0. Resolve all ids
    before recording any visit; a failed lookup makes the pass incomplete. For each file run
    `<main>/bin/wt groom visited '<path>' --blob <blob> --findings <count>`, using the blob from
-   step 3 and enclosing the path in single quotes. Skip a path holding a single quote and name
-   it in the report. An exit 2 means HEAD moved: skip that file and name it; it comes back in a
-   later pass. An incomplete pass records no visits. On any other visit failure, stop recording
-   and report the failure and the visits already saved.
+   step 3 and enclosing the path in single quotes. An exit 2 means HEAD moved or the file is no
+   longer a candidate: skip that file and name it in the report. An incomplete pass records no
+   visits. On any other visit failure, stop recording and report the failure and the visits
+   already saved.
 10. Print one report line per pass, for example:
     `g-20261118-101200: 5 files (3 new, 1 changed, 1 oldest), 7 candidates, 2 recorded, 5 dropped, 5 visited`.
     Include the stand-in, skipped files or the reason a pass was incomplete, when applicable.
