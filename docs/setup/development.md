@@ -72,11 +72,12 @@ screenshot setup with synthetic data, a throwaway server and headless Chromium. 
 self-contained history report go in `.wt/perf/`. Pass `--ref <commit>` to export and build an older
 commit outside the checkout with an offline install, or `--no-build` to measure the current build.
 The export goes to a private folder under `$XDG_CACHE_HOME/emend-perf` (by default
-`~/.cache/emend-perf`) and is removed after the run unless `--keep` is passed. The run refuses when
-that folder or any of its parents is a symbolic link, is not a directory, belongs to a user other
-than you or root, or is writable by its group or by others. An export left behind by a killed run
-is removed at the start of the next `--ref` run once its process is gone, and an export kept with
-`--keep` stays until you remove it.
+`~/.cache/emend-perf`) and is removed after the run unless `--keep` is passed. The run resolves
+symbolic links in that path, then refuses when the resolved folder or any of its parents is not a
+directory, belongs to a user other than you or root, or is writable by its group or by others. An
+export left behind by a killed run is removed at the start of the next `--ref` run once its process
+is gone, and an export kept with `--keep` stays until you remove it. An export from another pid
+namespace (for example a container) also stays.
 `--ref` builds and runs that commit's own build scripts, server and CLI, so it accepts only commits
 on `main`. A run of the current checkout fails when any step fails.
 `--out <dir>`, `--chromium <path>` and `--keep` work as for screenshots. Timings vary with machine

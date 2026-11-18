@@ -1,4 +1,4 @@
-import { lstatSync, readFileSync, readdirSync, rmSync, type Stats, writeFileSync } from "node:fs";
+import { lstatSync, readFileSync, readdirSync, readlinkSync, rmSync, type Stats, writeFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { assertOutputFolder, inside } from "../screenshots/safety.ts";
@@ -17,8 +17,17 @@ export function refParent(
   return join(cacheHome(parent, parentHome), "emend-perf");
 }
 
-export function writeRefMarker(folder: string, keep: boolean, pid = process.pid, host = hostname()): void {
-  writeFileSync(join(folder, ".emend-perf-ref"), JSON.stringify({ pid, host, keep }), { flag: "wx", mode: 0o600 });
+export function pidNamespace(platform = process.platform, readlink: (path: string) => string = readlinkSync): string | null | undefined {
+  if (platform !== "linux") return null;
+  try {
+    return readlink("/proc/self/ns/pid");
+  } catch {
+    return undefined;
+  }
+}
+
+export function writeRefMarker(folder: string, keep: boolean, pid = process.pid, host = hostname(), pidns = pidNamespace()): void {
+  writeFileSync(join(folder, ".emend-perf-ref"), JSON.stringify({ pid, host, pidns: pidns === undefined ? false : pidns, keep }), { flag: "wx", mode: 0o600 });
 }
 
 export function processAlive(pid: number, kill = process.kill): boolean {
@@ -33,14 +42,18 @@ export function processAlive(pid: number, kill = process.kill): boolean {
 /** The caller guards the canonical parent before sweeping; uncertain entries stay. */
 export function removeStaleRefExports(
   parent: string,
-  { uid, host = hostname(), alive = processAlive, log = console.log }: {
+  options: {
     uid: number;
     host?: string;
+    pidns?: string | null | undefined;
     alive?: (pid: number) => boolean;
     log?: (line: string) => void;
   },
   remove: typeof rmSync = rmSync,
 ): void {
+  const { uid, host = hostname(), alive = processAlive, log = console.log } = options;
+  const pidns = "pidns" in options ? options.pidns : pidNamespace();
+  if (typeof pidns !== "string" && pidns !== null) return;
   let names: string[];
   try {
     names = readdirSync(parent);
@@ -59,7 +72,7 @@ export function removeStaleRefExports(
       if (markerStat.isSymbolicLink() || !markerStat.isFile()) continue;
       const marker = JSON.parse(readFileSync(markerPath, "utf8"));
       if (!marker || typeof marker !== "object" || !Number.isInteger(marker.pid) || marker.pid <= 0
-        || typeof marker.host !== "string" || marker.host !== host || marker.keep === true) continue;
+        || typeof marker.host !== "string" || marker.host !== host || marker.pidns !== pidns || marker.keep === true) continue;
       pid = marker.pid;
       if (pid === process.pid || alive(pid)) continue;
     } catch {

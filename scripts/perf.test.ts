@@ -9,7 +9,7 @@ import { inflateSync, gzipSync } from "node:zlib";
 import { buildSeedPlan, SEED } from "./perf/seed.ts";
 import {
   assertOutputFolder, assertPrivateAncestors, assertRefFolder, assertWorkspaceRoot,
-  cacheHome, processAlive, refParent, removeStaleRefExports, writeRefMarker,
+  cacheHome, pidNamespace, processAlive, refParent, removeStaleRefExports, writeRefMarker,
 } from "./perf/guards.ts";
 import { childEnvironment, chromiumArgs } from "./screenshots/safety.ts";
 import { isReportRun, type PerfRun, renderReport, writeReport } from "./perf/report.ts";
@@ -76,21 +76,37 @@ test("cache homes and ref parents use only absolute XDG cache folders with a hom
   }
 });
 
+test("pid namespaces read the Linux link and distinguish unreadable from non-Linux", () => {
+  assert.equal(pidNamespace("linux", (path) => {
+    assert.equal(path, "/proc/self/ns/pid");
+    return "pid:[4026531836]";
+  }), "pid:[4026531836]");
+  assert.equal(pidNamespace("linux", () => { throw new Error("synthetic unreadable namespace"); }), undefined);
+  assert.equal(pidNamespace("darwin", () => { assert.fail("non-Linux platforms must not read procfs"); }), null);
+});
+
 test("ref markers record the run privately and refuse to overwrite an existing marker", (t) => {
   const root = mkdtempSync(join(tmpdir(), "emend-ref-marker-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const marker = join(root, ".emend-perf-ref");
-  writeRefMarker(root, true, 123, "synthetic-host");
+  writeRefMarker(root, true, 123, "synthetic-host", "pid:[101]");
   const contents = readFileSync(marker, "utf8");
-  assert.deepEqual(JSON.parse(contents), { pid: 123, host: "synthetic-host", keep: true });
+  assert.deepEqual(JSON.parse(contents), { pid: 123, host: "synthetic-host", pidns: "pid:[101]", keep: true });
   assert.equal(lstatSync(marker).mode & 0o777, 0o600);
   assert.throws(() => writeRefMarker(root, false, 456, "another-host"), { code: "EEXIST" });
   assert.equal(readFileSync(marker, "utf8"), contents);
+  const nonLinux = join(root, "non-linux");
+  mkdirSync(nonLinux);
+  writeRefMarker(nonLinux, false, 456, "synthetic-host", null);
+  assert.deepEqual(JSON.parse(readFileSync(join(nonLinux, ".emend-perf-ref"), "utf8")), {
+    pid: 456, host: "synthetic-host", pidns: null, keep: false,
+  });
   const defaults = join(root, "defaults");
   mkdirSync(defaults);
   writeRefMarker(defaults, false);
+  const pidns = pidNamespace();
   assert.deepEqual(JSON.parse(readFileSync(join(defaults, ".emend-perf-ref"), "utf8")), {
-    pid: process.pid, host: hostname(), keep: false,
+    pid: process.pid, host: hostname(), pidns: pidns === undefined ? false : pidns, keep: false,
   });
 });
 
@@ -109,10 +125,10 @@ test("process liveness uses signal zero and treats only ESRCH as a gone process"
     assert.equal(processAlive(123, () => { throw error; }), true);
 });
 
-test("ref sweeping requires a valid marker for a gone process on this host without keep", async (t) => {
+test("ref sweeping requires a valid marker for a gone process on this host and namespace without keep", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "emend-ref-sweep-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const marker = { pid: process.pid + 1, host: "synthetic-host", keep: false };
+  const marker = { pid: process.pid + 1, host: "synthetic-host", pidns: "pid:[101]", keep: false };
   const cases: { name: string; marker?: string; alive?: boolean; removed?: boolean }[] = [
     { name: "stale", marker: JSON.stringify(marker), removed: true },
     { name: "live", marker: JSON.stringify(marker), alive: true },
@@ -123,13 +139,13 @@ test("ref sweeping requires a valid marker for a gone process on this host witho
     { name: "invalid JSON", marker: "{" },
     { name: "null marker", marker: "null" },
     { name: "array marker", marker: "[]" },
-    { name: "missing pid", marker: JSON.stringify({ host: marker.host, keep: false }) },
+    { name: "missing pid", marker: JSON.stringify({ host: marker.host, pidns: marker.pidns, keep: false }) },
     { name: "zero pid", marker: JSON.stringify({ ...marker, pid: 0 }) },
     { name: "negative pid", marker: JSON.stringify({ ...marker, pid: -1 }) },
     { name: "fractional pid", marker: JSON.stringify({ ...marker, pid: 1.5 }) },
     { name: "string pid", marker: JSON.stringify({ ...marker, pid: "123" }) },
     { name: "invalid host", marker: JSON.stringify({ ...marker, host: 123 }) },
-    { name: "missing keep", marker: JSON.stringify({ pid: marker.pid, host: marker.host }), removed: true },
+    { name: "missing keep", marker: JSON.stringify({ pid: marker.pid, host: marker.host, pidns: marker.pidns }), removed: true },
   ];
   for (const variant of cases) {
     await t.test(variant.name, () => {
@@ -140,7 +156,7 @@ test("ref sweeping requires a valid marker for a gone process on this host witho
       if (variant.marker !== undefined) writeFileSync(markerPath, variant.marker);
       const logs: string[] = [], probed: number[] = [];
       removeStaleRefExports(parent, {
-        uid: lstatSync(parent).uid, host: marker.host,
+        uid: lstatSync(parent).uid, host: marker.host, pidns: marker.pidns,
         alive: (pid) => { probed.push(pid); return variant.alive ?? false; },
         log: (line) => logs.push(line),
       });
@@ -157,13 +173,57 @@ test("ref sweeping requires a valid marker for a gone process on this host witho
   }
 });
 
+test("ref sweeping removes stale exports only in a known matching pid namespace", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "emend-ref-sweep-namespace-test-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const cases: { name: string; pidns: string | null | undefined; markerPidns?: string | null | false; removed?: boolean }[] = [
+    { name: "same namespace", pidns: "pid:[101]", markerPidns: "pid:[101]", removed: true },
+    { name: "another namespace", pidns: "pid:[101]", markerPidns: "pid:[102]" },
+    { name: "legacy marker", pidns: "pid:[101]" },
+    { name: "unreadable marker namespace", pidns: "pid:[101]", markerPidns: false },
+    { name: "unknown own namespace with a Linux marker", pidns: undefined, markerPidns: "pid:[101]" },
+    { name: "unknown own namespace with a legacy marker", pidns: undefined },
+    { name: "unknown own namespace with an unreadable marker", pidns: undefined, markerPidns: false },
+    { name: "unknown own namespace with a non-Linux marker", pidns: undefined, markerPidns: null },
+    { name: "both non-Linux", pidns: null, markerPidns: null, removed: true },
+    { name: "Linux with a non-Linux marker", pidns: "pid:[101]", markerPidns: null },
+    { name: "non-Linux with a Linux marker", pidns: null, markerPidns: "pid:[101]" },
+    { name: "non-Linux with a legacy marker", pidns: null },
+    { name: "non-Linux with an unreadable marker", pidns: null, markerPidns: false },
+  ];
+  for (const variant of cases) {
+    await t.test(variant.name, () => {
+      const parent = mkdtempSync(join(root, "case-"));
+      const folder = mkdtempSync(join(parent, "ref-"));
+      const markerPath = join(folder, ".emend-perf-ref");
+      const pid = process.pid + 1;
+      const marker = JSON.stringify({ pid, host: "synthetic-host", pidns: variant.markerPidns, keep: false });
+      writeFileSync(markerPath, marker);
+      writeFileSync(join(folder, "payload"), "synthetic export");
+      const probed: number[] = [], logs: string[] = [];
+      removeStaleRefExports(parent, {
+        uid: lstatSync(parent).uid, host: "synthetic-host", pidns: variant.pidns,
+        alive: (value) => { probed.push(value); return false; }, log: (line) => logs.push(line),
+      });
+      assert.deepEqual(probed, variant.removed ? [pid] : []);
+      assert.equal(existsSync(folder), !variant.removed);
+      assert.deepEqual(logs, variant.removed
+        ? [`- removed a leftover ref export of an earlier run (pid ${pid})`] : []);
+      if (!variant.removed) {
+        assert.equal(readFileSync(markerPath, "utf8"), marker);
+        assert.equal(readFileSync(join(folder, "payload"), "utf8"), "synthetic export");
+      }
+    });
+  }
+});
+
 test("ref sweeping skips links, non-directories, non-file markers and names outside the export pattern", (t) => {
   const root = mkdtempSync(join(tmpdir(), "emend-ref-sweep-links-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const parent = join(root, "cache"), target = join(root, "outside");
   mkdirSync(parent);
   mkdirSync(target);
-  writeRefMarker(target, false, process.pid + 1, "synthetic-host");
+  writeRefMarker(target, false, process.pid + 1, "synthetic-host", "pid:[101]");
   writeFileSync(join(target, "payload"), "synthetic export");
   const targetMarker = join(target, ".emend-perf-ref");
   const contents = readFileSync(targetMarker, "utf8");
@@ -180,11 +240,11 @@ test("ref sweeping skips links, non-directories, non-file markers and names outs
   for (const name of otherNames) {
     const folder = join(parent, name);
     mkdirSync(folder);
-    writeRefMarker(folder, false, process.pid + 1, "synthetic-host");
+    writeRefMarker(folder, false, process.pid + 1, "synthetic-host", "pid:[101]");
   }
   const probed: number[] = [], logs: string[] = [];
   removeStaleRefExports(parent, {
-    uid: lstatSync(parent).uid, host: "synthetic-host",
+    uid: lstatSync(parent).uid, host: "synthetic-host", pidns: "pid:[101]",
     alive: (pid) => { probed.push(pid); return false; }, log: (line) => logs.push(line),
   });
   assert.deepEqual(probed, []);
@@ -202,10 +262,10 @@ test("ref sweeping keeps exports owned by another uid", (t) => {
   const parent = mkdtempSync(join(tmpdir(), "emend-ref-sweep-owner-test-"));
   t.after(() => rmSync(parent, { recursive: true, force: true }));
   const folders = Array.from({ length: 2 }, () => mkdtempSync(join(parent, "ref-")));
-  for (const folder of folders) writeRefMarker(folder, false, process.pid + 1, "synthetic-host");
+  for (const folder of folders) writeRefMarker(folder, false, process.pid + 1, "synthetic-host", "pid:[101]");
   const probed: number[] = [], logs: string[] = [];
   removeStaleRefExports(parent, {
-    uid: lstatSync(parent).uid + 1, host: "synthetic-host",
+    uid: lstatSync(parent).uid + 1, host: "synthetic-host", pidns: "pid:[101]",
     alive: (pid) => { probed.push(pid); return false; }, log: (line) => logs.push(line),
   });
   assert.deepEqual(probed, []);
@@ -218,10 +278,10 @@ test("a ref removal error logs one warning and the sweep continues", (t) => {
   t.after(() => rmSync(parent, { recursive: true, force: true }));
   const folders = Array.from({ length: 2 }, () => mkdtempSync(join(parent, "ref-")));
   const pid = process.pid + 1;
-  for (const folder of folders) writeRefMarker(folder, false, pid, "synthetic-host");
+  for (const folder of folders) writeRefMarker(folder, false, pid, "synthetic-host", "pid:[101]");
   const attempted: string[] = [], logs: string[] = [];
   removeStaleRefExports(parent, {
-    uid: lstatSync(parent).uid, host: "synthetic-host", alive: () => false, log: (line) => logs.push(line),
+    uid: lstatSync(parent).uid, host: "synthetic-host", pidns: "pid:[101]", alive: () => false, log: (line) => logs.push(line),
   }, (folder, options) => {
     assert.equal(typeof folder, "string");
     attempted.push(String(folder));
