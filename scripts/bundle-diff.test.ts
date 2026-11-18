@@ -141,15 +141,26 @@ test("cache round trips sizes and budgets with private permissions and ignores u
   assert.equal(readCache(path, sha), undefined);
 });
 
-test("git lookups use only the sealed environment, disable optional locks and ignore untracked files", () => {
+test("git lookups use only the sealed environment, disable optional locks and include untracked files", () => {
   const source = readFileSync(new URL("./bundle-diff.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /execFileSync|node:child_process|process\.env/);
   assert.match(source, /const git = \(cwd: string, \.\.\.args: string\[\]\) =>\s*sealed\.git\(cwd, \{ \.\.\.env, GIT_OPTIONAL_LOCKS: "0" \}, \.\.\.args\)/);
   assert(source.indexOf("sealed.createRoot(") < source.indexOf("const git ="));
-  assert.match(source, /git\(checkout, "status", "--porcelain", "--untracked-files=no"\)/);
+  assert.match(source, /git\(checkout, "status", "--porcelain"\)/);
+  assert.doesNotMatch(source, /--untracked-files=no/);
   assert.match(source, /git\(checkout, "rev-parse", "HEAD"\)/);
   assert.match(source, /resolveCommit\(options\.base \?\? git\(checkout, "merge-base", "origin\/main", "HEAD"\), \(\.\.\.args\) => git\(checkout, \.\.\.args\)\)/);
   assert.match(source, /exportMainCommit\(\{[^}]*\bgit,?\s*\}\)/);
+});
+
+test("lifecycle failures are reported only by sealed.finish", () => {
+  const source = readFileSync(new URL("./bundle-diff.ts", import.meta.url), "utf8");
+  const main = source.slice(source.indexOf("async function main()"));
+  const caught = main.match(/catch \(error\) \{([\s\S]*?)\} finally \{/);
+  assert(caught);
+  assert.match(caught[1], /failure = new Error\(redactFailure\(error, failurePaths\)\)/);
+  assert.doesNotMatch(caught[1], /console\.error/);
+  assert.match(main, /finally \{\s*sealed\.finish\(failure\);/);
 });
 
 test("route names are own keys even when they match object prototype names", () => {

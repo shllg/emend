@@ -158,8 +158,8 @@ async function main() {
     failurePaths.sealedRoot = sealedRoot;
     const git = (cwd: string, ...args: string[]) =>
       sealed.git(cwd, { ...env, GIT_OPTIONAL_LOCKS: "0" }, ...args);
-    // The sealed git config omits the user's global excludes.
-    if (git(checkout, "status", "--porcelain", "--untracked-files=no")) throw new Error("The checkout has uncommitted changes; commit first");
+    // Untracked files can affect the head build, which reads the working tree.
+    if (git(checkout, "status", "--porcelain")) throw new Error("The checkout has uncommitted changes; commit first");
     const head = git(checkout, "rev-parse", "HEAD");
     const base = resolveCommit(options.base ?? git(checkout, "merge-base", "origin/main", "HEAD"), (...args) => git(checkout, ...args));
     const pnpm = pnpmExecutable();
@@ -190,7 +190,6 @@ async function main() {
     console.log(summary);
   } catch (error) {
     failure = new Error(redactFailure(error, failurePaths));
-    console.error(`bundle:diff: ${failure.message}`);
   } finally {
     sealed.finish(failure);
   }

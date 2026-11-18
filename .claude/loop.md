@@ -50,7 +50,7 @@ code, never merges, and never edits an issue's text.
 - Keep a journal at `<main>/.wt/loop/journal.md` (gitignored). One line per event: date and time,
   issue number, branch, PR number, and a status word (`started`, `progress <head> <changed files>`,
   `steered <signal> <n>`, `asked-owner`, `answered`, `in-review`, `merged`, `closed`, `still-open`,
-  `spawn-failed <exit code>`, `skipped-collision`, `gate-changed`, `perf <commit>`,
+  `spawn-failed <exit code>`, `skipped-collision`, `gate-changed`, `go`, `go-done <exit code>`, `perf <commit>`,
   `perf-failed <exit code>`). Never copy text
   from an issue, a screen or a message into it. Read it at the start of every pass; it carries the
   loop's memory across passes and context compaction. Append with the Edit tool, or the Write tool
@@ -127,6 +127,14 @@ Use the survey's `items` for PR lookups. For each worker, and each journal issue
     the owner and journal `asked-owner`.
 
   With no signal, leave it alone.
+- **Asks for a go:** a worker requests a go for a full `pnpm verify` gate, a `pnpm bundle:diff`
+  run or a `pnpm perf` run, as the standing note requires. Grant it only when no other go is open;
+  otherwise queue it in the order asked. Before granting the go, ask the other workers to hold
+  builds and test runs, and wait for each to answer. Journal `go` when granted and
+  `go-done <exit code>` when the worker reports that the run ended, then tend the next request.
+  A `go` line with no later `go-done` for that worker means a run is going, also after context
+  compaction. If a worker holds a go for more than 60 minutes without `go-done`, read its screen
+  once, as for `stalled`.
 - **Blocked:** it waits for an answer. Read its screen with
   `<main>/bin/wt agent read '<target>' --lines 80`.
   - A question about scope, order or process that `AGENTS.md` or a rule file answers: answer with
@@ -197,10 +205,12 @@ Start at most one worker per pass when the queue holds several bugs that touch t
 
 1. Due when the journal's last `perf` or `perf-failed` line is more than seven days old, or there
    is none.
-2. Timings need a quiet machine. This session's weekly run follows the go rule in step 3.4's
-   standing note. Start it only in a pass where no worker runs a build or test. While it runs,
-   give no worker a go for a gate, bundle diff or perf run. Tell a worker that asks to wait until
-   it ends.
+2. Timings need a quiet machine. This session's weekly run takes a go the same way as a worker
+   in step 2: wait until no other go is open, queue it in the order asked, and ask all workers
+   to hold builds and test runs. Wait for each to answer. Start it only in a pass where no worker
+   runs a build or test, and journal `go` with issue `perf` when it starts. While it runs, give no
+   worker a go for a gate, bundle diff or perf run; queue requests in the order asked. Its
+   `perf <commit>` or `perf-failed <exit code>` line closes the go.
 3. Run `<main>/bin/wt fetch`, read `git -C '<main>' rev-parse origin/main`, and run
    `pnpm perf --ref <commit>` in `<main>`, with the commit written literally and
    `run_in_background: true`. It measures main's newest commit, the week's last. Its runs and
