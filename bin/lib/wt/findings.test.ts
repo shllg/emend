@@ -1361,3 +1361,13 @@ test("groom maps unavailable git and other git failures without creating visit s
     assert.throws(call, { code: 69, message: "Git is unavailable." });
   assert.equal(existsSync(join(stateDir(repo), "groom")), false);
 });
+
+test("groom CLI maps missing git to unavailable without creating visit storage", async () => {
+  rmSync(join(env.fakeBin, "git"));
+  const next = await groomCli("next");
+  assert.equal(next.code, 69, next.stderr);
+  assert.equal(existsSync(join(stateDir(repo), "groom")), false);
+  const visited = await groomCli("visited", "README.md", "--blob", "0".repeat(40), "--findings", "0");
+  assert.equal(visited.code, 69, visited.stderr);
+  assert.equal(existsSync(join(stateDir(repo), "groom")), false);
+});

@@ -110,7 +110,10 @@ async function main(argv: string[]): Promise<number> {
   try {
     repo = resolveRepo(process.cwd());
   } catch (e) {
-    if (sub === "findings" && run("git", ["--version"], { cwd: process.cwd(), gitNoLazyFetch: true }).code === 127)
+    if (
+      (sub === "findings" || sub === "groom") &&
+      run("git", ["--version"], { cwd: process.cwd(), gitNoLazyFetch: true }).code === 127
+    )
       fail(69, "Git is unavailable.");
     throw e;
   }
