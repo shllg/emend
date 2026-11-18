@@ -225,14 +225,12 @@ export const ThemeFontFileName = z
   .refine((name) => !name.includes(".."));
 export type ThemeFontFileName = z.infer<typeof ThemeFontFileName>;
 const fontWeight = z.number().int().min(1).max(1000);
-export const ThemeFontFile = z
-  .object({
-    font: z.enum(["text", "code"]),
-    file: ThemeFontFileName,
-    weight: z.union([fontWeight, z.tuple([fontWeight, fontWeight]).refine(([min, max]) => min <= max)]).optional(),
-    style: z.enum(["normal", "italic"]).optional(),
-  })
-  .strict();
+export const ThemeFontFile = z.object({
+  font: z.enum(["text", "code"]),
+  file: ThemeFontFileName,
+  weight: z.union([fontWeight, z.tuple([fontWeight, fontWeight]).refine(([min, max]) => min <= max)]).optional(),
+  style: z.enum(["normal", "italic"]).optional(),
+});
 export type ThemeFontFile = z.infer<typeof ThemeFontFile>;
 
 /** The response type comes from the allowlisted extension, never from file contents. */

@@ -144,7 +144,7 @@ test.each([
   ["Font.otf", "font/otf"],
   ["Font.css", undefined],
 ] as const)("font file %s has a server-chosen type", (file, type) => expect(themeFontType(file)).toBe(type));
-test("font entries validate descriptors, reject unknown keys and bound the list", () => {
+test("font entries validate descriptors and bound the list", () => {
   const entry = { font: "text", file: "Example.woff2" };
   for (const weight of [undefined, 1, 400, 1000, [1, 1000], [400, 400]])
     for (const style of [undefined, "normal", "italic"])
@@ -152,7 +152,6 @@ test("font entries validate descriptors, reject unknown keys and bound the list"
   for (const patch of [
     { font: "other" },
     { file: "x.svg" },
-    { extra: true },
     { style: "oblique" },
     { style: null },
     ...[null, "400", 0, 1001, 1.5, [900, 100], [0, 400], [1, 1001], [1.5, 400], [1], [1, 2, 3]].map((weight) => ({
@@ -164,6 +163,16 @@ test("font entries validate descriptors, reject unknown keys and bound the list"
   expect(ThemeValid.parse({ ...valid, fonts }).fonts).toEqual(fonts);
   expect(ThemeValid.safeParse({ ...valid, fonts: { ...fonts, files: [...fonts.files, entry] } }).success).toBe(false);
   expect(LIMITS).toMatchObject({ themeFontFiles: 16, themeFontBytes: 4194304 });
+});
+test("font entries and theme lists strip unknown entry keys for additive API fields", () => {
+  const entry = { font: "text", file: "Example.woff2", weight: [100, 900], style: "italic" };
+  const extended = { ...entry, extra: true };
+  expect(ThemeFontFile.parse(extended)).toEqual(entry);
+  const theme = { ...valid, fonts: { text: "Example", files: [extended] } };
+  expect(ThemeList.parse({ themes: [theme], folderError: false })).toEqual({
+    themes: [{ ...theme, fonts: { text: "Example", files: [entry] } }],
+    folderError: false,
+  });
 });
 test("valid entries carry overrides and permit future record names", () => {
   const entry = {

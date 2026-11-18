@@ -656,7 +656,9 @@ and a `file` name; its corresponding family must be set in `fonts.text` or `font
 control characters. No subfolders, slashes, backslashes or leading dot are allowed.
 Optional `weight` is an integer from 1 to 1000 or two such integers `[min, max]`, lowest first,
 for a variable font. Its default is 400. Optional `style` is `"normal"` (the default) or `"italic"`.
-Unknown entry keys refuse the theme. `emend theme copy` keeps the source's `files` list unchanged.
+Unknown entry keys in `theme.json` refuse the theme. The API's `ThemeFontFile` schema strips
+unknown keys in responses so additive fields stay in v1.
+`emend theme copy` keeps the source's `files` list unchanged.
 
 `GET /api/v1/themes/:name/fonts/:file` requires a reviewer session with `read` scope, like the
 list route: no session gives 401 and a bearer gives 403. The theme name and file name must pass

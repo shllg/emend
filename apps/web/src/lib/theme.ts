@@ -75,7 +75,7 @@ export function themeColors(custom: ThemeValid): { scales: Record<string, string
   return { scales, tokens };
 }
 
-function applyFontFiles(custom: ThemeValid | undefined) {
+function applyFontFiles(custom: ThemeValid | undefined, retryFailed = false) {
   if (typeof FontFace === "undefined" || !document.fonts) return;
   const formats = { "font/woff2": "woff2", "font/woff": "woff", "font/ttf": "truetype", "font/otf": "opentype" };
   const entries: { family: string; source: string; descriptors: FontFaceDescriptors }[] = [];
@@ -100,12 +100,16 @@ function applyFontFiles(custom: ThemeValid | undefined) {
     }
   }
   const key = JSON.stringify(entries);
-  if (appliedFaces?.key === key && appliedFaces.fonts === document.fonts) return;
+  if (
+    appliedFaces?.key === key &&
+    appliedFaces.fonts === document.fonts &&
+    (!retryFailed || !appliedFaces.faces.some((face) => face.status === "error"))
+  )
+    return;
   if (appliedFaces) for (const face of appliedFaces.faces) appliedFaces.fonts.delete(face);
   const faces: FontFace[] = [];
   for (const { family, source, descriptors } of entries) {
-    // Quoting also permits family names that start with a digit or match a CSS keyword.
-    const face = new FontFace(`"${family}"`, source, descriptors);
+    const face = new FontFace(family, source, descriptors);
     document.fonts.add(face);
     faces.push(face);
   }
@@ -259,6 +263,8 @@ export function createThemeStore() {
         if (JSON.stringify(state.custom) !== JSON.stringify(entry)) state = { ...state, custom: entry };
         // A different tab may have overwritten the saved copy, even if ours is unchanged.
         writeCustom(entry);
+        // A successful list fetch proves a session, so retry fonts that failed before sign-in.
+        applyFontFiles(entry, true);
       }
       notify();
     },

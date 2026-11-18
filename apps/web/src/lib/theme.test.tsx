@@ -243,6 +243,7 @@ function stubFontFaces() {
       family: string;
       source: string;
       descriptors: FontFaceDescriptors;
+      status: FontFaceLoadStatus = "unloaded";
       constructor(family: string, source: string, descriptors: FontFaceDescriptors) {
         this.family = family;
         this.source = source;
@@ -272,22 +273,22 @@ test("the picked theme registers faces with safe URLs, formats and descriptors a
   store.selectCustomTheme(theme);
   expect(face.mock.calls).toEqual([
     [
-      '"Example Sans"',
+      "Example Sans",
       'url("/api/v1/themes/mine/fonts/Sans.WOFF2") format("woff2")',
       { weight: "100 900", style: "normal", display: "swap" },
     ],
     [
-      '"Example Sans"',
+      "Example Sans",
       'url("/api/v1/themes/mine/fonts/Sans-Italic.woff") format("woff")',
       { weight: "100 900", style: "italic", display: "swap" },
     ],
     [
-      '"Example Mono"',
+      "Example Mono",
       'url("/api/v1/themes/mine/fonts/Mono.ttf") format("truetype")',
       { weight: "400", style: "normal", display: "swap" },
     ],
     [
-      '"Example Mono"',
+      "Example Mono",
       'url("/api/v1/themes/mine/fonts/Mono-Bold.otf") format("opentype")',
       { weight: "700", style: "normal", display: "swap" },
     ],
@@ -304,6 +305,96 @@ test("the picked theme registers faces with safe URLs, formats and descriptors a
   store.set("dark");
   expect(remove.mock.calls).toEqual(original.map((face) => [face]));
   expect(fonts.size).toBe(0);
+});
+
+test.each([false, true])("a successful list retries failed cached faces with already checked = %s", (checked) => {
+  const { face, fonts, add, remove } = stubFontFaces();
+  const theme: ThemeValid = {
+    ...customTheme,
+    fonts: {
+      ...customTheme.fonts,
+      files: [
+        { font: "text", file: "Sans.woff2", weight: [100, 900], style: "italic" },
+        { font: "code", file: "Mono.ttf", weight: 700 },
+      ],
+    },
+  };
+  localStorage.setItem(themeKey, "theme:mine");
+  localStorage.setItem(customThemeKey, JSON.stringify(theme));
+  const store = createThemeStore();
+  const listener = vi.fn();
+  stop = store.subscribe(listener);
+  const list = { themes: [theme], folderError: false };
+  if (checked) store.applyList("mine", list);
+  const state = store.getState();
+  listener.mockClear();
+  const original = [...fonts];
+  const registrations = face.mock.calls.slice();
+  expect(original).toHaveLength(2);
+  for (const [index, face] of original.entries()) Object.assign(face, { status: index === 0 ? "error" : "loaded" });
+
+  store.applyList("mine", list);
+
+  expect(remove.mock.calls).toEqual(original.map((face) => [face]));
+  expect(add).toHaveBeenCalledTimes(4);
+  expect(face.mock.calls).toEqual([...registrations, ...registrations]);
+  const retried = [...fonts];
+  expect(retried).toHaveLength(2);
+  for (const face of original) expect(fonts.has(face)).toBe(false);
+  for (const face of retried) expect(face.status).toBe("unloaded");
+  if (checked) {
+    expect(store.getState()).toBe(state);
+    expect(listener).not.toHaveBeenCalled();
+  }
+  store.set("dark");
+  expect(remove.mock.calls).toEqual([...original, ...retried].map((face) => [face]));
+  expect(fonts.size).toBe(0);
+});
+
+test.each(["unloaded", "loading", "loaded"] as const)(
+  "a successful list keeps unchanged faces whose status is %s",
+  (status) => {
+    const { face, fonts, add, remove } = stubFontFaces();
+    const theme: ThemeValid = {
+      ...customTheme,
+      fonts: { text: "Example", files: [{ font: "text", file: "Sans.woff2" }] },
+    };
+    const store = createThemeStore();
+    store.selectCustomTheme(theme);
+    const original = [...fonts];
+    for (const face of original) Object.assign(face, { status });
+    const list = { themes: [theme], folderError: false };
+    store.applyList("mine", list);
+    const state = store.getState();
+    store.applyList("mine", list);
+    expect(store.getState()).toBe(state);
+    expect(face).toHaveBeenCalledTimes(1);
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(remove).not.toHaveBeenCalled();
+    expect([...fonts][0]).toBe(original[0]);
+  },
+);
+
+test("a refused theme or another pick's list does not retry failed faces", () => {
+  const { face, fonts, remove } = stubFontFaces();
+  const theme: ThemeValid = {
+    ...customTheme,
+    fonts: { text: "Example", files: [{ font: "text", file: "Sans.woff2" }] },
+  };
+  const store = createThemeStore();
+  store.selectCustomTheme(theme);
+  const original = [...fonts];
+  for (const face of original) Object.assign(face, { status: "error" });
+  const state = store.getState();
+  store.applyList("mine", {
+    themes: [{ valid: false, name: "mine", base: "dark", problems: ["theme.json cannot be read."] }],
+    folderError: false,
+  });
+  expect(store.getState()).not.toBe(state);
+  store.applyList("another", { themes: [theme], folderError: false });
+  expect(face).toHaveBeenCalledTimes(1);
+  expect(remove).not.toHaveBeenCalled();
+  expect([...fonts][0]).toBe(original[0]);
 });
 
 test("changes to a theme's files or family replace its faces without removing other fonts", () => {
@@ -323,7 +414,7 @@ test("changes to a theme's files or family replace its faces without removing ot
   expect(remove).toHaveBeenCalledExactlyOnceWith(old);
   expect(fonts.has(builtin)).toBe(true);
   expect(fonts.size).toBe(2);
-  expect(face).toHaveBeenLastCalledWith('"New Family"', 'url("/api/v1/themes/mine/fonts/New.woff2") format("woff2")', {
+  expect(face).toHaveBeenLastCalledWith("New Family", 'url("/api/v1/themes/mine/fonts/New.woff2") format("woff2")', {
     weight: "400",
     style: "normal",
     display: "swap",
@@ -333,11 +424,11 @@ test("changes to a theme's files or family replace its faces without removing ot
     name: "another",
     fonts: { text: "New Family", files: [{ font: "text", file: "New.woff2" }] },
   });
-  expect(face).toHaveBeenLastCalledWith(
-    '"New Family"',
-    'url("/api/v1/themes/another/fonts/New.woff2") format("woff2")',
-    { weight: "400", style: "normal", display: "swap" },
-  );
+  expect(face).toHaveBeenLastCalledWith("New Family", 'url("/api/v1/themes/another/fonts/New.woff2") format("woff2")', {
+    weight: "400",
+    style: "normal",
+    display: "swap",
+  });
   store.applyList("another", { themes: [{ ...customTheme, name: "another" }], folderError: false });
   expect([...fonts]).toEqual([builtin]);
 });
@@ -362,21 +453,40 @@ test("applying a theme revalidates file entries and their family names", () => {
     themes: [{ ...customTheme, fonts: { text: "Example", code: "url(x)", files } }],
     folderError: false,
   });
-  expect(face).toHaveBeenCalledExactlyOnceWith(
-    '"Example"',
-    'url("/api/v1/themes/mine/fonts/Good.woff2") format("woff2")',
-    { weight: "400", style: "normal", display: "swap" },
+  expect(face.mock.calls).toEqual(
+    ["Good.woff2", "Extra.woff2"].map((file) => [
+      "Example",
+      `url("/api/v1/themes/mine/fonts/${file}") format("woff2")`,
+      { weight: "400", style: "normal", display: "swap" },
+    ]),
   );
-  expect(fonts.size).toBe(1);
+  expect(fonts.size).toBe(2);
 });
 
-test.each(["123 Font", "serif", "字体"])("font registration quotes family %s as a CSS string", (family) => {
+test.each(["123 Font", "serif", "字体"])("font registration passes the bare family %s", (family) => {
   const { face } = stubFontFaces();
   createThemeStore().selectCustomTheme({
     ...customTheme,
     fonts: { text: family, files: [{ font: "text", file: "Example.woff2" }] },
   });
-  expect(face.mock.calls[0]?.[0]).toBe(`"${family}"`);
+  expect(face.mock.calls[0]?.[0]).toBe(family);
+});
+
+test("registered text and code font families never start or end with quotes", () => {
+  const { face } = stubFontFaces();
+  createThemeStore().selectCustomTheme({
+    ...customTheme,
+    fonts: {
+      text: "Probe Script",
+      code: "Probe Mono",
+      files: [
+        { font: "text", file: "Script.woff2" },
+        { font: "code", file: "Mono.woff2" },
+      ],
+    },
+  });
+  expect(face).toHaveBeenCalledTimes(2);
+  for (const [family] of face.mock.calls) expect(family).not.toMatch(/^["']|["']$/);
 });
 
 test.each(["FontFace", "document.fonts"])("font registration does nothing without %s", (missing) => {
