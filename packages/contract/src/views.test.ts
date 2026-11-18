@@ -22,6 +22,9 @@ test("HTML doc looks accept emend, custom or absence, and reject other values", 
   for (const look of ["emend", "custom"]) expect(schema.parse([{ ...doc, look }])).toEqual([{ ...doc, look }]);
   for (const look of ["other", "EMEND", "", null, false])
     expect(schema.safeParse([{ ...doc, look }]).success).toBe(false);
+  expect(schema.parse([{ ...doc, colorScheme: "light" }])).toEqual([{ ...doc, colorScheme: "light" }]);
+  for (const colorScheme of ["auto", "dark", "", null, false])
+    expect(schema.safeParse([{ ...doc, colorScheme }]).success).toBe(false);
 });
 
 test("review views validate their states, limits, rendered blocks and doc variants", () => {

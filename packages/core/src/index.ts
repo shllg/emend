@@ -3,7 +3,14 @@ export { DIFF_COUNT_TIMEOUT_MS, diffLineCounts } from "./diff-counts.ts";
 export { htmlHeadings, htmlHeadingsFromTree, markdownHeadings } from "./doc-headings.ts";
 export { cleanDocTitle, inferDocTitle, markdownTitle } from "./doc-title.ts";
 export { headingLookups } from "./heading-lookups.ts";
-export { HTML_STRUCTURE, type HtmlLook, type HtmlLookReason, htmlLook, htmlLookFromTree } from "./html-look.ts";
+export {
+  HTML_STRUCTURE,
+  type HtmlColorScheme,
+  type HtmlLook,
+  type HtmlLookReason,
+  htmlLook,
+  htmlLookFromTree,
+} from "./html-look.ts";
 export { type DocLinks, resolveDocLink } from "./links.ts";
 export { isLockfile } from "./lockfiles.ts";
 export { docText, parseDocHtml, placeHtmlSpan } from "./place/html.ts";

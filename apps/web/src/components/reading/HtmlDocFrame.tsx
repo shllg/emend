@@ -23,6 +23,7 @@ export function HtmlDocFrame({
   contentUrl,
   images = [],
   look,
+  colorScheme,
   reviewId,
   revision,
   threads,
@@ -44,6 +45,7 @@ export function HtmlDocFrame({
   contentUrl: string;
   images?: readonly string[];
   look?: "emend" | "custom";
+  colorScheme?: "light";
   navigation?: HtmlNavigation;
   docNavigation?: DocNavigation;
   onNavigate?: (navigation: DocNavigation) => void;
@@ -295,7 +297,7 @@ export function HtmlDocFrame({
           src={src}
           title={path}
           referrerPolicy="no-referrer"
-          className={`h-full min-h-0 w-full border-0 ${look === "emend" ? "bg-reading" : "bg-[#fff]"}`}
+          className={`h-full min-h-0 w-full border-0 ${look === "emend" && colorScheme !== "light" ? "bg-reading" : "bg-[#fff]"}`}
           onLoad={() => {
             if (++loads.current <= 1) return;
             markAway();

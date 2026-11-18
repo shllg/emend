@@ -64,7 +64,17 @@ test("direct HTML publish and an unchanged republish keep the look in rows and r
   const f = await directFixture();
   const sources = [
     { path: "structure.html", source: "<h1>Synthetic plan</h1>", look: "emend" },
-    { path: "styled.html", source: "<style>p{color:red}</style><p>Synthetic plan</p>", look: "custom" },
+    { path: "styled.html", source: "<style>p{color:red}</style><p>Synthetic plan</p>", look: "emend" },
+    {
+      path: "custom.html",
+      source: '<meta name="emend-look" content="custom"><style>p{color:red}</style>',
+      look: "custom",
+    },
+    {
+      path: "dark.html",
+      source: "<style>p{color:#222}@media(prefers-color-scheme:dark){p{color:white}}</style>",
+      look: "emend",
+    },
     { path: "plan.md", source: "# Synthetic plan", look: null },
   ];
   for (const { path, source } of sources) await writeFile(join(f.source, path), source);
@@ -84,15 +94,25 @@ test("direct HTML publish and an unchanged republish keep the look in rows and r
   for (const { result } of [first, second])
     expect(result.htmlLooks).toEqual([
       { path: "structure.html", look: "emend" },
-      { path: "styled.html", look: "custom" },
+      { path: "styled.html", look: "emend", colorScheme: "light" },
+      { path: "custom.html", look: "custom" },
+      { path: "dark.html", look: "emend" },
     ]);
+  for (const { stderr } of [first, second]) {
+    expect(stderr).toContain("emend: styled.html shows in emend's look; its own styles apply on top\n");
+    expect(stderr).toContain("emend: custom.html shows as a custom page with its own styles only: marked custom\n");
+    expect(stderr).toContain("emend: dark.html shows in emend's look; its own styles apply on top\n");
+    expect(stderr.filter((line) => line.includes("shows in light mode"))).toEqual([
+      "emend: styled.html shows in light mode, also while emend is dark: its styles set colours but have no dark-mode rule; add a prefers-color-scheme: dark rule in a style element so it follows dark mode\n",
+    ]);
+  }
   expect(second.result).toMatchObject({ reviewId: first.result.reviewId, revision: 2, unrendered: [] });
   expect(spawn).not.toHaveBeenCalled();
   const server = await f.reviewer();
   for (const seq of [1, 2]) {
     const rows = await server.db.read((q) =>
       q
-        .select({ path: files.path, look: files.look })
+        .select({ path: files.path, look: files.look, colorScheme: files.colorScheme })
         .from(files)
         .innerJoin(revisions, and(eq(revisions.ownerId, server.ownerId), eq(revisions.id, files.revisionId)))
         .where(
@@ -101,13 +121,25 @@ test("direct HTML publish and an unchanged republish keep the look in rows and r
         .all(),
     );
     expect(rows).toHaveLength(sources.length);
-    for (const { path, look } of sources) expect(rows.find((file) => file.path === path)?.look).toBe(look);
+    for (const { path, look } of sources)
+      expect(rows.find((file) => file.path === path)).toMatchObject({
+        look,
+        colorScheme: path === "styled.html" ? "light" : null,
+      });
     const response = await server.request(`/reviews/${first.result.reviewId}/revisions/${seq}`);
     expect(response.status).toBe(200);
     const view = RevisionView.parse(await response.json());
     expect(view.docs).toHaveLength(sources.length);
     expect(view.docs.find((doc) => doc.path === "structure.html")).toMatchObject({ kind: "html", look: "emend" });
-    expect(view.docs.find((doc) => doc.path === "styled.html")).toMatchObject({ kind: "html", look: "custom" });
+    expect(view.docs.find((doc) => doc.path === "styled.html")).toMatchObject({
+      kind: "html",
+      look: "emend",
+      colorScheme: "light",
+    });
+    expect(view.docs.find((doc) => doc.path === "custom.html")).toMatchObject({ kind: "html", look: "custom" });
+    expect(view.docs.find((doc) => doc.path === "dark.html")).toMatchObject({ kind: "html", look: "emend" });
+    for (const doc of view.docs.filter((doc) => doc.path !== "styled.html"))
+      expect(doc).not.toHaveProperty("colorScheme");
     expect(view.docs.find((doc) => doc.path === "plan.md")).toMatchObject({ kind: "markdown" });
     expect(view.docs.find((doc) => doc.path === "plan.md")).not.toHaveProperty("look");
   }

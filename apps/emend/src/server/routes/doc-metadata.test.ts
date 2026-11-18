@@ -11,7 +11,7 @@ test("publish records HTML look, leaves other and failed metadata null, and omit
   try {
     const sources = [
       { path: "structure.html", source: "<h1>Plan</h1><h2>Part</h2>", look: "emend" },
-      { path: "styled.html", source: "<style>p{color:red}</style><p>Plan</p>", look: "custom" },
+      { path: "styled.html", source: "<style>p{color:red}</style><p>Plan</p>", look: "emend" },
       { path: "plan.md", source: "# Plan", look: null },
       { path: "source.html", source: "<h1>Source</h1>", view: "source", look: null },
       { path: "deep.html", source: "<div>".repeat(2000), look: null },
@@ -51,15 +51,20 @@ test("publish records HTML look, leaves other and failed metadata null, and omit
     expect(published.unrendered).toEqual(["failed.html"]);
     expect(published.htmlLooks).toEqual([
       { path: "structure.html", look: "emend" },
-      { path: "styled.html", look: "custom" },
+      { path: "styled.html", look: "emend", colorScheme: "light" },
       { path: "deep.html", look: "custom" },
     ]);
     const rows = await f.db.read((q) => q.select().from(files).where(eq(files.ownerId, f.ownerId)).all());
-    for (const { path, look } of sources) expect(rows.find((file) => file.path === path)?.look).toBe(look);
+    for (const { path, look } of sources) {
+      expect(rows.find((file) => file.path === path)).toMatchObject({
+        look,
+        colorScheme: path === "styled.html" ? "light" : null,
+      });
+    }
     const viewPath = `/reviews/${published.reviewId}/revisions/1`;
     const view = RevisionView.parse(await (await f.request(viewPath, "GET")).json());
     expect(view.docs[0]).toMatchObject({ kind: "html", look: "emend", headings: [{ level: 2, text: "Part" }] });
-    expect(view.docs[1]).toMatchObject({ kind: "html", look: "custom" });
+    expect(view.docs[1]).toMatchObject({ kind: "html", look: "emend", colorScheme: "light" });
     for (const doc of view.docs.slice(2)) expect(doc).not.toHaveProperty("look");
     const repeated = await f.request("/publish", "POST", { ...input, reviewId: published.reviewId }, "agent");
     expect(repeated.status).toBe(200);
@@ -72,14 +77,20 @@ test("publish records HTML look, leaves other and failed metadata null, and omit
       await (await f.request(`/reviews/${published.reviewId}/revisions/2`, "GET")).json(),
     );
     expect(repeatedView.docs[0]).toMatchObject({ path: "structure.html", kind: "html", look: "emend" });
-    expect(repeatedView.docs[1]).toMatchObject({ path: "styled.html", kind: "html", look: "custom" });
+    expect(repeatedView.docs[1]).toMatchObject({
+      path: "styled.html",
+      kind: "html",
+      look: "emend",
+      colorScheme: "light",
+    });
     for (const doc of repeatedView.docs.slice(2)) expect(doc).not.toHaveProperty("look");
     const repeatedRows = await f.db.read((q) => q.select().from(files).where(eq(files.ownerId, f.ownerId)).all());
     for (const { path, look } of sources) {
       const matches = repeatedRows.filter((file) => file.path === path);
       expect(matches).toHaveLength(2);
       expect(new Set(matches.map((file) => file.revisionId)).size).toBe(2);
-      for (const file of matches) expect(file.look).toBe(look);
+      for (const file of matches)
+        expect(file).toMatchObject({ look, colorScheme: path === "styled.html" ? "light" : null });
     }
     await f.db.query((q) =>
       q
@@ -105,10 +116,13 @@ test("publish records HTML look, leaves other and failed metadata null, and omit
       const failedView = RevisionView.parse(
         await (await f.request(`/reviews/${published.reviewId}/revisions/${index + 3}`, "GET")).json(),
       );
-      for (const doc of failedView.docs) expect(doc).not.toHaveProperty("look");
+      for (const doc of failedView.docs) {
+        expect(doc).not.toHaveProperty("look");
+        expect(doc).not.toHaveProperty("colorScheme");
+      }
       const failedRows = await f.db.read((q) =>
         q
-          .select({ look: files.look })
+          .select({ look: files.look, colorScheme: files.colorScheme })
           .from(files)
           .innerJoin(revisions, and(eq(revisions.ownerId, f.ownerId), eq(revisions.id, files.revisionId)))
           .where(
@@ -117,7 +131,7 @@ test("publish records HTML look, leaves other and failed metadata null, and omit
           .all(),
       );
       expect(failedRows).toHaveLength(sources.length);
-      for (const file of failedRows) expect(file.look).toBeNull();
+      for (const file of failedRows) expect(file).toEqual({ look: null, colorScheme: null });
     }
   } finally {
     await f.cleanup();

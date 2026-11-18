@@ -109,7 +109,7 @@ export type Work =
         carried?: { path: string | null; side?: "old" | "new" };
       }[];
     };
-export type DocMetadata = { title?: string; headings: DocHeading[]; look?: HtmlLook };
+export type DocMetadata = { title?: string; headings: DocHeading[]; look?: HtmlLook; colorScheme?: "light" };
 export type WorkResult =
   | { kind: "diff-counts"; counts: { additions: number; deletions: number } | null }
   | { kind: "diff-hunks"; hunks: DownloadDiffHunk[] | null | "too-long" }
@@ -187,11 +187,13 @@ export const executeWork: Executor = async (work) => {
   if (work.kind === "doc-metadata") {
     if (work.format === "html") {
       const tree = parseDocHtml(decode(work.bytes));
+      const appearance = htmlLookFromTree(tree);
       return {
         kind: "doc-metadata",
         title: await inferDocTitle("html", new Uint8Array(work.bytes)),
         headings: htmlHeadingsFromTree(tree),
-        ...(tree ? { look: htmlLookFromTree(tree).look } : {}),
+        ...(tree ? { look: appearance.look } : {}),
+        ...(appearance.colorScheme === "light" ? { colorScheme: "light" as const } : {}),
       };
     }
     const blocks = await renderMetadataBlocks(decode(work.bytes), new Map(work.media));

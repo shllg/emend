@@ -214,6 +214,9 @@ export async function importReview(principal: Principal, bundle: ImportBundle, d
             look: isRenderedHtmlDoc(r)
               ? (prepared.rendered.get(r.revisionId)?.metadata.get(r.path)?.look ?? null)
               : null,
+            colorScheme: isRenderedHtmlDoc(r)
+              ? (prepared.rendered.get(r.revisionId)?.metadata.get(r.path)?.colorScheme ?? null)
+              : null,
             mediaType: fileMediaType(r),
             ...(r.role === "diff" ? prepared.counted.get(r.revisionId)?.get(r.path) : {}),
             renderedBlob:

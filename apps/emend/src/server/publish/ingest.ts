@@ -540,6 +540,7 @@ async function computePublish(
           if (!fileId) throw new Error("Missing file id");
           const htmlDoc = isRenderedHtmlDoc(file);
           const look = htmlDoc ? (metadata.get(file.path)?.look ?? null) : null;
+          const colorScheme = htmlDoc ? (metadata.get(file.path)?.colorScheme ?? null) : null;
           await q.insert(files).values({
             id: fileId,
             ownerId,
@@ -565,12 +566,18 @@ async function computePublish(
                 ? ((docViewOf(file) === "source" ? sourceMetadata : metadata).get(file.path)?.headings ?? null)
                 : null,
             look,
+            colorScheme,
             renderedBlob:
               file.role === "doc"
                 ? ((docViewOf(file) === "source" ? sourceBlobs : docBlobs).get(file.path) ?? null)
                 : null,
           });
-          if (htmlDoc && !unrenderedPaths.has(file.path)) htmlLooks.push({ path: file.path, look: look ?? "custom" });
+          if (htmlDoc && !unrenderedPaths.has(file.path))
+            htmlLooks.push({
+              path: file.path,
+              look: look ?? "custom",
+              ...(colorScheme === "light" ? { colorScheme } : {}),
+            });
           for (const [noteOrd, note] of (file.notes ?? []).entries())
             await q.insert(agentNotes).values({
               ownerId,

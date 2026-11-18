@@ -54,7 +54,17 @@ test("import preserves HTML looks and omits look when metadata has no classifica
   const file = required(input.files[0]);
   const sources = [
     { path: "structure.html", source: "<h1>Synthetic plan</h1>", look: "emend" },
-    { path: "styled.html", source: "<style>p{color:red}</style><p>Synthetic plan</p>", look: "custom" },
+    { path: "styled.html", source: "<style>p{color:red}</style><p>Synthetic plan</p>", look: "emend" },
+    {
+      path: "custom.html",
+      source: '<meta name="emend-look" content="custom"><style>p{color:red}</style>',
+      look: "custom",
+    },
+    {
+      path: "dark.html",
+      source: "<style>p{color:#222}@media(prefers-color-scheme:dark){p{color:white}}</style>",
+      look: "emend",
+    },
     { path: "deep.html", source: "<div>".repeat(600), look: null },
     { path: "plan.md", source: "# Synthetic plan", look: null },
   ];
@@ -76,13 +86,25 @@ test("import preserves HTML looks and omits look when metadata has no classifica
       .all(),
   );
   expect(rows).toHaveLength(sources.length);
-  for (const { path, look } of sources) expect(rows.find((row) => row.path === path)?.look).toBe(look);
+  for (const { path, look } of sources)
+    expect(rows.find((row) => row.path === path)).toMatchObject({
+      look,
+      colorScheme: path === "styled.html" ? "light" : null,
+    });
   const response = await f.request(`/reviews/${input.review.id}/revisions/1`, "GET");
   expect(response.status).toBe(200);
   const view = RevisionView.parse(await response.json());
   expect(view.docs).toHaveLength(sources.length);
   expect(view.docs.find((doc) => doc.path === "structure.html")).toMatchObject({ kind: "html", look: "emend" });
-  expect(view.docs.find((doc) => doc.path === "styled.html")).toMatchObject({ kind: "html", look: "custom" });
+  expect(view.docs.find((doc) => doc.path === "styled.html")).toMatchObject({
+    kind: "html",
+    look: "emend",
+    colorScheme: "light",
+  });
+  expect(view.docs.find((doc) => doc.path === "custom.html")).toMatchObject({ kind: "html", look: "custom" });
+  expect(view.docs.find((doc) => doc.path === "dark.html")).toMatchObject({ kind: "html", look: "emend" });
+  for (const doc of view.docs.filter((doc) => doc.path !== "styled.html"))
+    expect(doc).not.toHaveProperty("colorScheme");
   expect(view.docs.find((doc) => doc.path === "deep.html")).toMatchObject({ kind: "html" });
   expect(view.docs.find((doc) => doc.path === "plan.md")).toMatchObject({ kind: "markdown" });
   for (const path of ["deep.html", "plan.md"])

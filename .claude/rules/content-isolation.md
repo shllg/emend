@@ -70,7 +70,8 @@ with the reviewer's session can send instructions to the waiting agent in the re
   `Access-Control-Allow-Origin: *`, because the frame's opaque origin makes every asset load
   cross-origin and every font a CORS request. `sandbox allow-scripts` is there for the bridge
   alone; `connect-src 'none'` keeps the bridge off the network.
-- Look `emend` injects emend's `pub-frame.css`: no `</`, `\` or non-`data:` URL.
+- Look `emend` injects emend's `pub-frame.css`: no `</`, `\` or non-`data:` URL. A light-only doc
+  also gets the fixed `<html data-theme="light">` before it; no doc text enters what emend injects.
 - Mermaid frame: `default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src
   data:`, plus `X-Frame-Options: SAMEORIGIN` on that path only, so the app page can frame it.
 - Never weaken the app CSP, `X-Frame-Options: DENY`, the content path's CSP or the frame
