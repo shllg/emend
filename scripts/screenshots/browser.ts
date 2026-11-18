@@ -14,10 +14,22 @@ type Handler = (params: Json, sessionId: string | undefined) => void;
 
 export const DESKTOP = { width: 1600, height: 1000, scale: 2, mobile: false } as const;
 export const PHONE = { width: 390, height: 844, scale: 3, mobile: true } as const;
-export type Viewport = typeof DESKTOP | typeof PHONE;
+export interface Viewport { width: number; height: number; scale: number; mobile: boolean }
+export interface VanishedRequestEvent {
+  readonly kind: "gone" | "invalid-interception";
+  readonly resourceType: string;
+  readonly path: string;
+  readonly attached: boolean;
+}
 
 const COMMAND_TIMEOUT_MS = 30_000;
 const FRAME_WATCHDOG_MS = 2_000;
+
+class TargetGone extends Error {
+  constructor() {
+    super("The target is gone");
+  }
+}
 
 const HIDE_CARET_AND_MOTION =
   "(() => { const add = () => { const s = document.createElement('style'); " +
@@ -34,9 +46,11 @@ const HIDE_CARET_AND_MOTION =
 //   out-of-process frame skips the script.
 // - In dedicated workers, also nested ones, the same stub is evaluated with Runtime.evaluate while
 //   the worker is paused on start, before the resume; the listener got no handshake.
-// - Service and shared workers have no stub hook: the app's CSP (connect-src) stops their sockets,
-//   and Network.webSocketCreated / webTransportCreated records a violation as a backstop, which fails
-//   the run after the handshake went out (to the sealed origin at most, with the app's CSP).
+// - Service and shared workers have no stub hook: their sockets stay under the app's CSP
+//   (connect-src), host-resolver rules and Network.webSocketCreated / webTransportCreated backstop.
+//   For a paused service worker, Network.enable answers only after resume, so that backstop starts
+//   with the resume. It fails the run after a handshake went out (to the sealed origin at most,
+//   with the app's CSP); HTTP stays under the Fetch filter confirmed before the resume.
 export const SOCKET_BLOCKED_URLS = ["ws://*", "wss://*"];
 const SOCKET_NAMES = ["WebSocket", "WebSocketStream", "WebTransport", "RTCPeerConnection", "webkitRTCPeerConnection"];
 export const BLOCK_SOCKETS =
@@ -82,20 +96,30 @@ export class Browser {
   private buffer = "";
   private readonly pending = new Map<
     number,
-    { resolve: (value: Json) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
+    { resolve: (value: Json) => void; reject: (error: Error) => void; timer: NodeJS.Timeout; sessionId: string | undefined }
   >();
   private readonly handlers: Handler[] = [];
   private violation: Error | undefined;
+  private vanishedRequestCount = 0;
+  private vanishedTargetCount = 0;
+  private readonly vanishedRequestKinds = { gone: 0, "invalid-interception": 0 };
+  private readonly vanishedRequestLog: VanishedRequestEvent[] = [];
   private closed = false;
+  private readonly hideMotion: boolean;
   private readonly tasks = new Set<Promise<void>>();
   /** The attach task of each target, so a caller can wait for exactly its target's seal. */
   private readonly attachTasks = new Map<string, Promise<void>>();
   /** Open network requests per session, without long-lived streams. */
   private readonly inflight = new Map<string, Map<string, string>>();
+  /** Dedicated-worker activity is separate from the screenshot request/settle rules. */
+  private readonly workerRequests = new Map<string, Set<string>>();
+  private workerActivityAt = Date.now();
   private readonly sessions = new Map<string, { type: string; targetId: string; url: string }>();
+  private readonly detachedSessions = new Set<string>();
 
   /** The streams are the CDP pipe: `input` is Chromium's fd 3, `output` its fd 4. Tests pass fakes. */
-  constructor(input: Writable, output: Readable, origin: string, child?: ChildProcess) {
+  constructor(input: Writable, output: Readable, origin: string, child?: ChildProcess, hideMotion = true) {
+    this.hideMotion = hideMotion;
     this.origin = sealedOrigin(Number(new URL(origin).port));
     this.child = child;
     this.input = input;
@@ -118,6 +142,7 @@ export class Browser {
     port: number;
     platform: string;
     onSpawn?: (child: ChildProcess) => void;
+    preserveMotion?: boolean;
   }): Promise<Browser> {
     const origin = sealedOrigin(options.port);
     const child = spawn(options.executable, chromiumArgs(options.profile, options.platform), {
@@ -132,7 +157,7 @@ export class Browser {
       child.once("spawn", resolve);
       child.once("error", reject);
     });
-    const browser = new Browser(child.stdio[3] as Writable, child.stdio[4] as Readable, origin, child);
+    const browser = new Browser(child.stdio[3] as Writable, child.stdio[4] as Readable, origin, child, !options.preserveMotion);
     // Browser and tab targets are the browser's own; everything else attaches, and attach() decides.
     await browser.send("Target.setAutoAttach", {
       autoAttach: true,
@@ -152,6 +177,25 @@ export class Browser {
   check(): void {
     if (this.violation) throw this.violation;
     if (this.closed) throw new Error("Chromium exited");
+  }
+
+  /** Allowed continues tolerated because the intercepted request had already gone away. */
+  get vanishedRequests(): number {
+    return this.vanishedRequestCount;
+  }
+
+  /** Fully sealed targets that detached while their resume reply was still pending. */
+  get vanishedTargets(): number {
+    return this.vanishedTargetCount;
+  }
+
+  get vanishedRequestsByKind(): Readonly<Record<VanishedRequestEvent["kind"], number>> {
+    return Object.freeze({ ...this.vanishedRequestKinds });
+  }
+
+  /** The first 50 tolerated continues; totals keep counting after this diagnostic list fills. */
+  get vanishedRequestEvents(): readonly VanishedRequestEvent[] {
+    return Object.freeze([...this.vanishedRequestLog]);
   }
 
   private receive(chunk: string): void {
@@ -182,8 +226,9 @@ export class Browser {
     }
   }
 
-  on(handler: Handler): void {
+  on(handler: Handler): () => void {
     this.handlers.push(handler);
+    return () => { const index = this.handlers.indexOf(handler); if (index >= 0) this.handlers.splice(index, 1); };
   }
 
   send(method: string, params: Json = {}, sessionId?: string): Promise<Json> {
@@ -193,13 +238,14 @@ export class Browser {
 
   // Bypasses check(): blocking a request must still work after a violation was recorded.
   private rawSend(method: string, params: Json, sessionId?: string): Promise<Json> {
+    if (sessionId !== undefined && this.detachedSessions.has(sessionId)) return Promise.reject(new TargetGone());
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`The browser did not answer ${method}`));
       }, COMMAND_TIMEOUT_MS);
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, sessionId });
       try {
         this.input.write(`${JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })}\0`);
       } catch (error) {
@@ -230,14 +276,39 @@ export class Browser {
       void task.finally(() => this.tasks.delete(task));
     } else if (method === "Target.detachedFromTarget") {
       const detached = params.sessionId as string;
+      this.detachedSessions.add(detached);
       this.inflight.delete(detached);
+      if (this.workerRequests.delete(detached)) this.workerActivityAt = Date.now();
       this.sessions.delete(detached);
+      for (const [id, waiter] of this.pending) {
+        if (waiter.sessionId === undefined || waiter.sessionId !== detached) continue;
+        this.pending.delete(id);
+        clearTimeout(waiter.timer);
+        waiter.reject(new TargetGone());
+      }
     } else if (method === "Fetch.requestPaused" && sessionId) {
       const request = params.request as { url: string };
       const requestId = params.requestId as string;
       try {
         assertRequestAllowed(request.url, this.origin);
-        void this.rawSend("Fetch.continueRequest", { requestId }, sessionId).catch((error: Error) => this.fail(error));
+        void this.rawSend("Fetch.continueRequest", { requestId }, sessionId).catch((error: Error) => {
+          // A cancelled request or detached session cannot proceed. Count both tolerated races;
+          // retain bounded diagnostics without query strings or fragments. Other errors break the seal.
+          const kind = error instanceof TargetGone ? "gone" :
+            /^Invalid InterceptionId\.?$/.test(error.message) ? "invalid-interception" : undefined;
+          if (!kind) {
+            this.fail(error);
+            return;
+          }
+          this.vanishedRequestCount++;
+          this.vanishedRequestKinds[kind]++;
+          if (this.vanishedRequestLog.length < 50) this.vanishedRequestLog.push(Object.freeze({
+            kind,
+            resourceType: typeof params.resourceType === "string" ? params.resourceType : "Other",
+            path: new URL(request.url).pathname,
+            attached: this.sessions.has(sessionId),
+          }));
+        });
       } catch (error) {
         this.fail(error as Error);
         void this.rawSend("Fetch.failRequest", { requestId, errorReason: "BlockedByClient" }, sessionId).catch(
@@ -257,6 +328,11 @@ export class Browser {
         this.fail(new Error(`Blocked screenshot socket to ${blocked}`));
       }
     } else if (method === "Network.requestWillBeSent" && sessionId) {
+      const workerRequests = this.workerRequests.get(sessionId);
+      if (workerRequests) {
+        workerRequests.add(params.requestId as string);
+        this.workerActivityAt = Date.now();
+      }
       const type = params.type as string | undefined;
       if (type === "EventSource" || type === "WebSocket" || type === "Ping") return;
       // Worker scripts are reported by the creating page and never finish there. The page's own
@@ -267,6 +343,8 @@ export class Browser {
     } else if (method === "Network.loadingFinished" || method === "Network.loadingFailed") {
       // A worker's script is reported by its creator and finished by the worker's own session.
       for (const requests of this.inflight.values()) requests.delete(params.requestId as string);
+      for (const requests of this.workerRequests.values())
+        if (requests.delete(params.requestId as string)) this.workerActivityAt = Date.now();
     }
   }
 
@@ -283,8 +361,18 @@ export class Browser {
     }
     this.sessions.set(sessionId, { type: info.type, targetId: info.targetId, url: info.url });
     this.inflight.set(sessionId, new Map());
+    if (info.type === "worker") {
+      this.workerRequests.set(sessionId, new Set());
+      this.workerActivityAt = Date.now();
+    }
     const waiting = Boolean(params.waitingForDebugger);
-    const resume = () => this.rawSend("Runtime.runIfWaitingForDebugger", {}, sessionId);
+    let resumed = false;
+    const resume = () => {
+      // A resume refused before sending is still a target that went away before it could run.
+      if (this.detachedSessions.has(sessionId)) return Promise.reject(new TargetGone());
+      resumed = true;
+      return this.rawSend("Runtime.runIfWaitingForDebugger", {}, sessionId);
+    };
     const reason = (error: unknown) => String((error as Error)?.message).slice(0, 80);
     const autoAttach = () =>
       this.rawSend("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, sessionId);
@@ -292,28 +380,46 @@ export class Browser {
     const blockSockets = () =>
       this.rawSend("Network.setBlockedURLs", { urls: SOCKET_BLOCKED_URLS }, sessionId);
 
-    // Every target is sealed before it runs: a paused target answers these commands at once, so
-    // waiting for them cannot deadlock, and a target that fails any of them is never resumed. A
-    // dedicated worker differs in two places. It has no Fetch domain ("'Fetch.enable' wasn't found";
+    // Fetch is confirmed before a controlled target resumes. A paused service worker answers
+    // Fetch.enable at once but Network.enable only after resume (Chromium 155). Queue its Network,
+    // socket and auto-attach commands ahead of the resume, then await all their answers. Its HTTP
+    // stays under Fetch; sockets stay under the app's CSP, host-resolver rules and the Network
+    // backstop, which starts with the resume. Setup failures still fail the run after resume.
+    // Other target types keep awaiting their setup commands before resume. A dedicated worker
+    // differs in two places. It has no Fetch domain ("'Fetch.enable' wasn't found";
     // its requests are paused through its parent's Fetch session, checked against real Chromium), so
     // that command is fire-and-forget. And it has no script hook, so the socket stub is evaluated in
     // it before the resume. It can host nested workers, so Network.enable and Target.setAutoAttach
     // are required: a nested worker is attached, sealed and stubbed the same way. A worker terminated
     // during setup (the diff parsers are) reports a detach, and its lost commands are no gap.
+    // A fully sealed target may also detach before its resume reply arrives: count that race.
+    // For service workers, setup must have resolved too; a detach with unconfirmed setup fails.
     const worker = info.type === "worker";
-    let resumed = false;
+    let sealConfirmed = false;
     try {
       const fetchEnable = this.rawSend("Fetch.enable", { patterns: [{ urlPattern: "*" }] }, sessionId);
       if (worker) void fetchEnable.catch(() => undefined);
       else await fetchEnable;
+      if (info.type === "service_worker") {
+        const setup = Promise.all([
+          this.rawSend("Network.enable", {}, sessionId),
+          blockSockets(),
+          autoAttach(),
+        ]).then(() => { sealConfirmed = true; });
+        if (waiting) {
+          // Observe both promises together: a setup failure must not wait for a stuck resume.
+          await Promise.all([resume(), setup]);
+        } else await setup;
+        return;
+      }
       await this.rawSend("Network.enable", {}, sessionId);
       await blockSockets();
       if (info.type === "page" || info.type === "iframe" || worker) await autoAttach();
-      else await autoAttach().catch(() => undefined); // Service and shared workers may refuse it.
+      else await autoAttach().catch(() => undefined); // Shared workers may refuse it.
       if (info.type === "page" || info.type === "iframe") {
         // Without Page.enable an out-of-process frame does not run the injected script.
         await this.rawSend("Page.enable", {}, sessionId);
-        const source = info.type === "page" ? `${BLOCK_SOCKETS}\n${HIDE_CARET_AND_MOTION}` : BLOCK_SOCKETS;
+        const source = info.type === "page" && this.hideMotion ? `${BLOCK_SOCKETS}\n${HIDE_CARET_AND_MOTION}` : BLOCK_SOCKETS;
         await this.rawSend("Page.addScriptToEvaluateOnNewDocument", { source }, sessionId);
       }
       if (worker) {
@@ -322,17 +428,22 @@ export class Browser {
         };
         if (stub.exceptionDetails) throw new Error("the socket stub failed");
       }
+      sealConfirmed = true;
       if (waiting) {
-        resumed = true;
         await resume();
       }
     } catch (error) {
       // A target that was attached paused and detached before it was ever resumed never ran,
       // sealed or not. A removed Mermaid frame is one; it must not fail the run.
-      const gone = !this.sessions.has(sessionId) || /not found|closed|detach/i.test(reason(error));
+      const attached = this.sessions.has(sessionId);
+      const gone = !attached || /not found|closed|detach/i.test(reason(error));
       if (waiting && !resumed && gone) return;
+      if (sealConfirmed && resumed && !attached && error instanceof TargetGone) {
+        this.vanishedTargetCount++;
+        return;
+      }
       // Record first, so check() fails at once even if the close below stalls.
-      const failure = new Error(`Could not seal a ${info.type} target (${reason(error)})`);
+      const failure = new Error(`Could not seal a ${info.type} target (${reason(error)})${resumed && attached ? " (still attached)" : ""}`);
       this.fail(failure);
       await this.rawSend("Target.closeTarget", { targetId: info.targetId }).catch(() => undefined);
       throw failure;
@@ -349,6 +460,16 @@ export class Browser {
     return [...this.inflight.values()].flatMap((requests) => [...requests.values()]);
   }
 
+  /** No worker request is open; even activity between polls resets this timestamp. */
+  workersQuietSince(): number | undefined {
+    for (const requests of this.workerRequests.values()) if (requests.size) return undefined;
+    return this.workerActivityAt;
+  }
+
+  sessionType(sessionId: string | undefined): string | undefined {
+    return sessionId === undefined ? undefined : this.sessions.get(sessionId)?.type;
+  }
+
   diagramSessions(): string[] {
     return [...this.sessions.entries()]
       .filter(([, session]) => session.type === "iframe" && session.url.endsWith("/mermaid-frame.html"))
@@ -360,12 +481,32 @@ export class Browser {
     this.inflight.get(sessionId)?.clear();
   }
 
-  async newPage(viewport: Viewport): Promise<Page> {
-    const created = (await this.send("Target.createTarget", { url: "about:blank" })) as { targetId: string };
+  async newPage(viewport: Viewport, browserContextId?: string): Promise<Page> {
+    const created = (await this.send("Target.createTarget", { url: "about:blank", ...(browserContextId ? { browserContextId } : {}) })) as { targetId: string };
     const sessionId = await this.sealedSession(created.targetId);
     const page = new Page(this, sessionId);
     await page.configure(viewport);
     return page;
+  }
+
+  /** Empty storage/cache/SW partition; only this sealed origin's sign-in cookies cross over. */
+  async freshContext(): Promise<string> {
+    const { cookies } = await this.send("Storage.getCookies") as { cookies: Json[] };
+    const { browserContextId } = await this.send("Target.createBrowserContext", { disposeOnDetach: true }) as { browserContextId: string };
+    const hostname = new URL(this.origin).hostname;
+    const copied = cookies.filter((cookie) => cookie.domain === hostname).map((cookie) => ({
+      name: cookie.name, value: cookie.value, domain: hostname, path: cookie.path,
+      secure: cookie.secure, httpOnly: cookie.httpOnly, sameSite: cookie.sameSite,
+      ...(typeof cookie.expires === "number" && cookie.expires > 0 ? { expires: cookie.expires } : {}),
+    }));
+    await this.send("Storage.setCookies", { browserContextId, cookies: copied });
+    return browserContextId;
+  }
+
+  async disposeContext(browserContextId: string): Promise<void> {
+    await this.send("Target.disposeBrowserContext", { browserContextId });
+    await this.idle();
+    this.check();
   }
 
   /** Waits for the target's whole attach (seal confirmed, then resumed), then returns its session. */
@@ -477,7 +618,7 @@ export class Page {
    * is not in front gets no frames, so a stalled wait re-activates the page and asks again; this
    * watchdog never counts as readiness, which still needs the frames to come.
    */
-  private async frames(deadline: number): Promise<void> {
+  private async frames(deadline: number, what: string): Promise<void> {
     for (;;) {
       this.browser.check();
       try {
@@ -489,8 +630,9 @@ export class Page {
         return;
       } catch (error) {
         // Only a missed frame is a stall; any other failure is real.
-        if (!(error instanceof TimedOut) || Date.now() >= deadline) throw error;
-        await within(this.send("Page.bringToFront"), deadline, "re-activating the page");
+        if (!(error instanceof TimedOut)) throw error;
+        if (Date.now() >= deadline) throw new TimedOut(what);
+        await within(this.send("Page.bringToFront"), deadline, what);
       }
     }
   }
@@ -505,7 +647,7 @@ export class Page {
         return false;
       });
       if (done) return;
-      await this.frames(deadline);
+      await this.frames(deadline, what);
     }
   }
 
@@ -517,7 +659,7 @@ export class Page {
     for (;;) {
       this.browser.check();
       // Let the layout and any observers triggered by the last scroll or render run first.
-      await this.frames(deadline);
+      await this.frames(deadline, what);
       const loaded = await within(
         this.eval<boolean>(
           "document.fonts.ready.then(() => document.readyState === 'complete' && " +
@@ -539,6 +681,20 @@ export class Page {
       calm = loaded && quiet && drawn ? calm + 1 : 0;
       if (calm >= 3) return;
       if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what} to settle (${state})`);
+    }
+  }
+
+  /** Wait for dedicated-worker churn and requests to stop for a full calm period. */
+  async settleWorkers(what: string, calmMs = 1000, timeoutMs = 45_000): Promise<void> {
+    const started = Date.now();
+    const deadline = started + timeoutMs;
+    for (;;) {
+      this.browser.check();
+      const now = Date.now();
+      if (now >= deadline) throw new TimedOut(`${what} to settle`);
+      const quietSince = this.browser.workersQuietSince();
+      if (quietSince !== undefined && now - Math.max(started, quietSince) >= calmMs) return;
+      await new Promise<void>((resolve) => setTimeout(resolve, Math.min(50, deadline - now)));
     }
   }
 

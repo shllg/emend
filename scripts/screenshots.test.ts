@@ -13,10 +13,10 @@ import {
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { BLOCK_SOCKETS, Browser, SOCKET_BLOCKED_URLS } from "./screenshots/browser.ts";
+import { BLOCK_SOCKETS, Browser, Page, SOCKET_BLOCKED_URLS } from "./screenshots/browser.ts";
 import { applyFixture } from "./screenshots/content.ts";
 import { writeImages } from "./screenshots/images.ts";
 import {
@@ -319,11 +319,16 @@ test("the output folder may not overlap real state, also through a symlink", (t)
   mkdirSync(state, { recursive: true });
   assert.doesNotThrow(() => assertOutputFolder(join(fixture, "images"), [state], canonicalPath));
   for (const out of [state, join(state, "images"), join(fixture, "state")]) {
-    assert.throws(() => assertOutputFolder(out, [state], canonicalPath), /overlaps real emend state/);
+    assert.throws(() => assertOutputFolder(out, [state], canonicalPath), {
+      message: "The screenshot folder overlaps real emend state",
+    });
   }
   symlinkSync(state, join(fixture, "alias"), "dir");
   assert.throws(() => assertOutputFolder(join(fixture, "alias", "images"), [state], canonicalPath), /overlaps/);
-  assert.throws(() => assertOutputFolder("relative", [state], canonicalPath), /absolute/);
+  assert.throws(() => assertOutputFolder("relative", [state], canonicalPath), {
+    message: "The screenshot folder must be absolute",
+  });
+  assert.throws(() => canonicalPath("relative"), { message: "Paths must be absolute" });
 });
 
 test("fixture deletions stay inside the fixture repository", (t) => {
@@ -463,12 +468,13 @@ test("PNG metadata chunks are dropped and pixel and colour chunks stay", () => {
 
 // A fake Chromium on the other end of the CDP pipe: records commands, answers by rule.
 type Reply = { error: { message: string } } | { result: Record<string, unknown> } | "hold" | undefined;
-function fakeChromium(answer: (method: string) => Reply = () => undefined) {
+function fakeChromium(answer: (method: string, params: Record<string, unknown>) => Reply = () => undefined) {
   const toBrowser = new PassThrough();
   const fromBrowser = new PassThrough();
   const sent: { method: string; params: Record<string, unknown>; sessionId?: string }[] = [];
+  const events: { method: string; phase: "sent" | "answered"; sessionId?: string }[] = [];
   // Replies the fake was told to hold back; `release()` sends them.
-  const held: (() => void)[] = [];
+  const held: ((override?: Exclude<Reply, "hold" | undefined>) => void)[] = [];
   let buffer = "";
   fromBrowser.on("data", (data: Buffer) => {
     buffer += data.toString();
@@ -476,9 +482,12 @@ function fakeChromium(answer: (method: string) => Reply = () => undefined) {
       const message = JSON.parse(buffer.slice(0, end));
       buffer = buffer.slice(end + 1);
       sent.push({ method: message.method, params: message.params, sessionId: message.sessionId });
-      const reply = answer(message.method);
-      const write = () =>
-        toBrowser.write(`${JSON.stringify({ id: message.id, ...(reply === "hold" || !reply ? { result: {} } : reply) })}\0`);
+      events.push({ method: message.method, phase: "sent", sessionId: message.sessionId });
+      const reply = answer(message.method, message.params);
+      const write = (override?: Exclude<Reply, "hold" | undefined>) => {
+        events.push({ method: message.method, phase: "answered", sessionId: message.sessionId });
+        toBrowser.write(`${JSON.stringify({ id: message.id, ...(override ?? (reply === "hold" || !reply ? { result: {} } : reply)) })}\0`);
+      };
       if (reply === "hold") held.push(write);
       else write();
     }
@@ -486,11 +495,258 @@ function fakeChromium(answer: (method: string) => Reply = () => undefined) {
   const emit = (method: string, params: Record<string, unknown>, sessionId?: string) =>
     toBrowser.write(`${JSON.stringify({ method, params, ...(sessionId ? { sessionId } : {}) })}\0`);
   const yieldOnce = () => new Promise((done) => setImmediate(done));
-  const release = () => {
-    for (const write of held.splice(0)) write();
+  const release = (override?: Exclude<Reply, "hold" | undefined>) => {
+    for (const write of held.splice(0)) write(override);
   };
-  return { browser: new Browser(fromBrowser, toBrowser, origin), sent, emit, yieldOnce, toBrowser, release };
+  return { browser: new Browser(fromBrowser, toBrowser, origin), sent, events, emit, yieldOnce, toBrowser, release };
 }
+
+async function advanceBrowserClock(t: TestContext, fake: ReturnType<typeof fakeChromium>, ms: number) {
+  for (let remaining = ms; remaining > 0; remaining -= 50) {
+    t.mock.timers.tick(Math.min(50, remaining));
+    await fake.yieldOnce();
+  }
+}
+
+test("dedicated-worker attaches and requests restart the full calm period without changing openRequests", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
+  const fake = fakeChromium();
+  const page = new Page(fake.browser, "page");
+  let finished = false;
+  const waiting = page.settleWorkers("the diff workers").then(() => { finished = true; });
+  await advanceBrowserClock(t, fake, 950);
+  assert.equal(finished, false);
+  fake.emit("Target.attachedToTarget", {
+    sessionId: "worker", targetInfo: { targetId: "worker-target", type: "worker", url: `${origin}/worker.js` },
+    waitingForDebugger: true,
+  });
+  await fake.browser.idle();
+  await advanceBrowserClock(t, fake, 950);
+  assert.equal(finished, false, "an attach restarts the calm period");
+  fake.emit("Network.requestWillBeSent", {
+    requestId: "script", type: "Script", request: { url: `${origin}/chunk.js` },
+  }, "worker");
+  assert.deepEqual(fake.browser.openRequests(), [], "screenshot settling still excludes workers and scripts");
+  assert.equal(fake.browser.workersQuietSince(), undefined);
+  await advanceBrowserClock(t, fake, 1_100);
+  assert.equal(finished, false, "an open worker request prevents settling indefinitely");
+  fake.emit("Network.loadingFinished", { requestId: "script" }, "page");
+  await advanceBrowserClock(t, fake, 950);
+  assert.equal(finished, false, "a finish in another session starts a new full calm period");
+  await advanceBrowserClock(t, fake, 50);
+  await waiting;
+  assert.equal(finished, true, "an idle attached worker does not prevent settling");
+});
+
+test("worker requests that start and finish between polls still restart the calm period", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
+  const fake = fakeChromium();
+  fake.emit("Target.attachedToTarget", {
+    sessionId: "worker", targetInfo: { targetId: "worker-target", type: "worker", url: `${origin}/worker.js` },
+    waitingForDebugger: true,
+  });
+  await fake.browser.idle();
+  let finished = false;
+  const waiting = new Page(fake.browser, "page").settleWorkers("the diff workers", 200).then(() => { finished = true; });
+  await advanceBrowserClock(t, fake, 150);
+  fake.emit("Network.requestWillBeSent", {
+    requestId: "fast", type: "Fetch", request: { url: `${origin}/data` },
+  }, "worker");
+  fake.emit("Network.loadingFinished", { requestId: "fast" }, "worker");
+  await advanceBrowserClock(t, fake, 150);
+  assert.equal(finished, false, "polling must not miss a short request");
+  await advanceBrowserClock(t, fake, 50);
+  await waiting;
+});
+
+test("worker requests end on either completion event in any session, or on detach", async (t) => {
+  for (const end of ["Network.loadingFinished", "Network.loadingFailed", "Target.detachedFromTarget"]) {
+    await t.test(end, async (t) => {
+      t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
+      const fake = fakeChromium();
+      fake.emit("Target.attachedToTarget", {
+        sessionId: "worker", targetInfo: { targetId: "worker-target", type: "worker", url: `${origin}/worker.js` },
+        waitingForDebugger: true,
+      });
+      await fake.browser.idle();
+      for (const requestId of ["first", "second"])
+        fake.emit("Network.requestWillBeSent", {
+          requestId, type: "Script", request: { url: `${origin}/${requestId}.js` },
+        }, "worker");
+      let finished = false;
+      const waiting = new Page(fake.browser, "page").settleWorkers("the diff workers", 200).then(() => { finished = true; });
+      fake.emit("Network.loadingFinished", { requestId: "first" }, "another-session");
+      await advanceBrowserClock(t, fake, 250);
+      assert.equal(finished, false, "every open worker request must finish");
+      fake.emit(end, { requestId: "second", sessionId: "worker" }, "another-session");
+      await advanceBrowserClock(t, fake, 150);
+      assert.equal(finished, false, "completion or detach restarts the calm period");
+      await advanceBrowserClock(t, fake, 50);
+      await waiting;
+      assert.deepEqual(fake.browser.openRequests(), []);
+      assert.doesNotThrow(() => fake.browser.check());
+    });
+  }
+});
+
+test("an idle worker detaching restarts the calm period", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
+  const fake = fakeChromium();
+  fake.emit("Target.attachedToTarget", {
+    sessionId: "worker", targetInfo: { targetId: "worker-target", type: "worker", url: `${origin}/worker.js` },
+    waitingForDebugger: true,
+  });
+  await fake.browser.idle();
+  let finished = false;
+  const waiting = new Page(fake.browser, "page").settleWorkers("the diff workers", 200).then(() => { finished = true; });
+  await advanceBrowserClock(t, fake, 150);
+  fake.emit("Target.detachedFromTarget", { sessionId: "worker" });
+  await advanceBrowserClock(t, fake, 150);
+  assert.equal(finished, false);
+  await advanceBrowserClock(t, fake, 50);
+  await waiting;
+});
+
+test("service and shared workers do not affect dedicated-worker settling", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
+  const fake = fakeChromium();
+  const page = new Page(fake.browser, "page");
+  for (const phase of ["attach", "detach"]) {
+    let finished = false;
+    const waiting = page.settleWorkers("the diff workers", 200).then(() => { finished = true; });
+    await advanceBrowserClock(t, fake, 150);
+    for (const type of ["service_worker", "shared_worker"]) {
+      if (phase === "attach") {
+        fake.emit("Target.attachedToTarget", {
+          sessionId: type, targetInfo: { targetId: `${type}-target`, type, url: `${origin}/worker.js` },
+          waitingForDebugger: true,
+        });
+        await fake.browser.idle();
+        fake.emit("Network.requestWillBeSent", {
+          requestId: type, type: "Script", request: { url: `${origin}/chunk.js` },
+        }, type);
+      } else fake.emit("Target.detachedFromTarget", { sessionId: type });
+    }
+    await advanceBrowserClock(t, fake, 50);
+    assert.equal(finished, true, `${phase} must not restart dedicated-worker settling`);
+    await waiting;
+  }
+});
+
+test("worker settling is per browser and times out at its bound with the step name", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
+  const fake = fakeChromium();
+  fake.emit("Target.attachedToTarget", {
+    sessionId: "worker", targetInfo: { targetId: "worker-target", type: "worker", url: `${origin}/worker.js` },
+    waitingForDebugger: true,
+  });
+  await fake.browser.idle();
+  fake.emit("Network.requestWillBeSent", {
+    requestId: "stuck", type: "Script", request: { url: `${origin}/chunk.js` },
+  }, "worker");
+  const waiting = new Page(fake.browser, "page").settleWorkers("the diff workers", 200, 275);
+  let timedOut = false;
+  const rejected = assert.rejects(waiting, { message: "Timed out waiting for the diff workers to settle" })
+    .then(() => { timedOut = true; });
+  const other = new Page(fakeChromium().browser, "page").settleWorkers("other workers", 200);
+  await advanceBrowserClock(t, fake, 250);
+  await other;
+  assert.equal(timedOut, false);
+  await advanceBrowserClock(t, fake, 25);
+  await rejected;
+});
+
+test("detaching rejects only that session's pending commands immediately and clears their timers", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const clear = t.mock.method(globalThis, "clearTimeout");
+  const fake = fakeChromium(() => "hold");
+  t.after(() => fake.release());
+  const first = assert.rejects(fake.browser.send("Runtime.evaluate", {}, "gone"), { message: "The target is gone" });
+  const second = assert.rejects(fake.browser.send("Network.enable", {}, "gone"), { message: "The target is gone" });
+  let otherFinished = false, rootFinished = false;
+  const other = fake.browser.send("Runtime.evaluate", {}, "other").then(() => { otherFinished = true; });
+  const root = fake.browser.send("Browser.getVersion").then(() => { rootFinished = true; });
+  const clearedBefore = clear.mock.callCount();
+  fake.emit("Target.detachedFromTarget", { sessionId: "gone" });
+  assert.equal(clear.mock.callCount(), clearedBefore + 2);
+  await Promise.all([first, second]);
+  const sentBefore = fake.sent.length;
+  await assert.rejects(fake.browser.send("Runtime.evaluate", {}, "gone"), { message: "The target is gone" });
+  assert.equal(fake.sent.length, sentBefore, "commands for a detached session never reach the pipe");
+  assert.equal(otherFinished, false);
+  assert.equal(rootFinished, false);
+  fake.release(); // Late replies to the detached session are ignored; the other commands still answer.
+  await Promise.all([other, root]);
+  assert.equal(otherFinished, true);
+  assert.equal(rootFinished, true);
+  assert.doesNotThrow(() => fake.browser.check());
+});
+
+test("session types are available while targets attach and removed when they detach", async () => {
+  const fake = fakeChromium();
+  assert.equal(fake.browser.sessionType(undefined), undefined);
+  assert.equal(fake.browser.sessionType("unknown"), undefined);
+  for (const type of ["page", "iframe", "worker", "service_worker", "shared_worker"]) {
+    fake.emit("Target.attachedToTarget", {
+      sessionId: type, targetInfo: { targetId: `${type}-target`, type, url: `${origin}/` }, waitingForDebugger: true,
+    });
+    assert.equal(fake.browser.sessionType(type), type);
+  }
+  await fake.browser.idle();
+  fake.browser.check();
+  for (const type of ["page", "iframe", "worker", "service_worker", "shared_worker"]) {
+    fake.emit("Target.detachedFromTarget", { sessionId: type });
+    assert.equal(fake.browser.sessionType(type), undefined);
+  }
+});
+
+for (const operation of ["waitFor", "settle"] as const) {
+  test(`${operation} names the waiting step when its deadline passes inside a frame wait`, async (t) => {
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
+    const fake = fakeChromium((method, params) => {
+      if (method !== "Runtime.evaluate") return;
+      if (String(params.expression).includes("requestAnimationFrame")) return "hold";
+      return { result: { result: { value: false } } };
+    });
+    t.after(() => fake.release());
+    const page = new Page(fake.browser, "page");
+    const label = "the second file in Files";
+    const waiting = operation === "waitFor" ? page.waitFor("false", label, 1_000) : page.settle(label, 1_000);
+    const rejected = assert.rejects(waiting, { message: `Timed out waiting for ${label}` });
+    await fake.yieldOnce();
+    assert(fake.sent.some((entry) => String(entry.params.expression).includes("requestAnimationFrame")));
+    t.mock.timers.tick(1_000);
+    await rejected;
+    assert(!fake.sent.some((entry) => entry.method === "Page.bringToFront"), "the overall deadline ends retries");
+  });
+}
+
+test("a missed frame before the deadline reactivates the page and waits for frames again", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
+  let frames = 0;
+  const fake = fakeChromium((method, params) => {
+    if (method !== "Runtime.evaluate") return;
+    if (String(params.expression).includes("requestAnimationFrame")) {
+      frames++;
+      return "hold";
+    }
+    return { result: { result: { value: frames >= 2 } } };
+  });
+  t.after(() => fake.release());
+  const page = new Page(fake.browser, "page");
+  let finished = false;
+  const waiting = page.waitFor("syntheticReady", "the file", 5_000).then(() => { finished = true; });
+  await fake.yieldOnce();
+  assert.equal(frames, 1);
+  t.mock.timers.tick(2_000);
+  await fake.yieldOnce();
+  assert.equal(fake.sent.filter((entry) => entry.method === "Page.bringToFront").length, 1);
+  assert.equal(frames, 2);
+  assert.equal(finished, false, "a missed frame is not readiness");
+  fake.release();
+  await waiting;
+  assert.equal(finished, true);
+});
 
 test("Fetch.requestPaused continues the sealed origin and fails everything else", async () => {
   const fake = fakeChromium();
@@ -505,10 +761,133 @@ test("Fetch.requestPaused continues the sealed origin and fails everything else"
     ],
   );
   assert.doesNotThrow(() => fake.browser.check());
+  assert.equal(fake.browser.vanishedRequests, 0);
   fake.emit("Fetch.requestPaused", { requestId: "bad", request: { url: "https://example.invalid/x?synthetic" } }, "s1");
   await fake.yieldOnce();
   assert.equal(fake.sent.at(-1)?.method, "Fetch.failRequest");
   assert.throws(() => fake.browser.check(), { message: "Blocked screenshot request to https://example.invalid" });
+});
+
+test("continuing an allowed request that lost its interception id is harmless", async () => {
+  let message = "";
+  const fake = fakeChromium((method) => method === "Fetch.continueRequest" ? { error: { message } } : undefined);
+  fake.emit("Target.attachedToTarget", {
+    sessionId: "page", targetInfo: { targetId: "page-target", type: "page", url: `${origin}/` }, waitingForDebugger: true,
+  });
+  await fake.browser.idle();
+  assert.equal(fake.browser.vanishedRequests, 0);
+  assert.equal(Reflect.set(fake.browser, "vanishedRequests", 10), false, "the public count is read-only");
+  for (message of ["Invalid InterceptionId.", "Invalid InterceptionId"]) {
+    const before = fake.browser.vanishedRequests;
+    fake.emit("Fetch.requestPaused", { requestId: "cancelled", resourceType: "Script", request: { url: `${origin}/assets/app.js?synthetic=query#fragment` } }, "page");
+    await fake.yieldOnce();
+    assert.equal(fake.sent.at(-1)?.method, "Fetch.continueRequest");
+    assert.doesNotThrow(() => fake.browser.check());
+    assert.equal(fake.browser.vanishedRequests, before + 1);
+    assert.deepEqual(fake.browser.vanishedRequestEvents.at(-1), {
+      kind: "invalid-interception", resourceType: "Script", path: "/assets/app.js", attached: true,
+    });
+  }
+  assert.deepEqual(fake.browser.vanishedRequestsByKind, { gone: 0, "invalid-interception": 2 });
+});
+
+test("allowed continues interrupted by detach or attempted after it are recorded as gone", async (t) => {
+  const fake = fakeChromium((method) => method === "Fetch.continueRequest" ? "hold" : undefined);
+  t.after(() => fake.release());
+  fake.emit("Target.attachedToTarget", {
+    sessionId: "page", targetInfo: { targetId: "page-target", type: "page", url: `${origin}/` }, waitingForDebugger: true,
+  });
+  await fake.browser.idle();
+  fake.emit("Fetch.requestPaused", {
+    requestId: "pending", resourceType: "Script", request: { url: `${origin}/assets/app.js?synthetic=query#fragment` },
+  }, "page");
+  assert.equal(fake.sent.at(-1)?.method, "Fetch.continueRequest");
+  fake.emit("Target.detachedFromTarget", { sessionId: "page" });
+  await fake.yieldOnce();
+  assert.doesNotThrow(() => fake.browser.check());
+  assert.equal(fake.browser.vanishedRequests, 1);
+  const snapshot = fake.browser.vanishedRequestEvents;
+  assert.deepEqual(snapshot, [{ kind: "gone", resourceType: "Script", path: "/assets/app.js", attached: false }]);
+  const sentBefore = fake.sent.length;
+  fake.emit("Fetch.requestPaused", {
+    requestId: "late", resourceType: "Fetch", request: { url: `${origin}/api/v1/reviews?synthetic=query#fragment` },
+  }, "page");
+  await fake.yieldOnce();
+  assert.doesNotThrow(() => fake.browser.check());
+  assert.equal(fake.sent.length, sentBefore);
+  assert.equal(fake.browser.vanishedRequests, 2);
+  assert.equal(snapshot.length, 1, "readers receive a stable snapshot");
+  assert.deepEqual(fake.browser.vanishedRequestEvents.at(-1), {
+    kind: "gone", resourceType: "Fetch", path: "/api/v1/reviews", attached: false,
+  });
+  assert.deepEqual(fake.browser.vanishedRequestsByKind, { gone: 2, "invalid-interception": 0 });
+  fake.release();
+  await fake.yieldOnce();
+  assert.equal(fake.browser.vanishedRequests, 2, "a late continue reply cannot count twice");
+});
+
+test("request diagnostics are read-only and capped at 50 while per-kind totals keep counting", async () => {
+  const fake = fakeChromium((method) => method === "Fetch.continueRequest" ? { error: { message: "Invalid InterceptionId." } } : undefined);
+  fake.emit("Target.attachedToTarget", {
+    sessionId: "page", targetInfo: { targetId: "page-target", type: "page", url: `${origin}/` }, waitingForDebugger: true,
+  });
+  await fake.browser.idle();
+  for (let i = 0; i < 55; i++) fake.emit("Fetch.requestPaused", {
+    requestId: `invalid-${i}`, resourceType: "Script", request: { url: `${origin}/assets/${i}.js?synthetic=query#fragment` },
+  }, "page");
+  await fake.yieldOnce();
+  fake.emit("Target.detachedFromTarget", { sessionId: "page" });
+  for (let i = 0; i < 6; i++) fake.emit("Fetch.requestPaused", {
+    requestId: `gone-${i}`, resourceType: "Fetch", request: { url: `${origin}/api/v1/reviews?synthetic=query#fragment` },
+  }, "page");
+  await fake.yieldOnce();
+  assert.doesNotThrow(() => fake.browser.check());
+  assert.equal(fake.browser.vanishedRequests, 61);
+  assert.deepEqual(fake.browser.vanishedRequestsByKind, { gone: 6, "invalid-interception": 55 });
+  const events = fake.browser.vanishedRequestEvents;
+  assert.equal(events.length, 50);
+  assert.deepEqual(events, Array.from({ length: 50 }, (_, i) => ({
+    kind: "invalid-interception", resourceType: "Script", path: `/assets/${i}.js`, attached: true,
+  })));
+  assert.equal(Reflect.set(fake.browser, "vanishedRequestEvents", []), false);
+  assert.equal(Reflect.set(events, "0", {}), false);
+  assert.equal(Reflect.set(events[0], "path", "/changed"), false);
+  assert.equal(Reflect.set(fake.browser.vanishedRequestsByKind, "gone", 100), false);
+});
+
+test("every other continue failure is still a seal violation", async () => {
+  for (const message of ["synthetic failure", "Invalid InterceptionId. More details", "Prefix: Invalid InterceptionId."]) {
+    const fake = fakeChromium((method) => method === "Fetch.continueRequest" ? { error: { message } } : undefined);
+    fake.emit("Fetch.requestPaused", { requestId: "allowed", request: { url: `${origin}/assets/app.js` } }, "page");
+    await fake.yieldOnce();
+    assert.throws(() => fake.browser.check(), { message });
+    assert.equal(fake.browser.vanishedRequests, 0);
+    assert.deepEqual(fake.browser.vanishedRequestEvents, []);
+    assert.deepEqual(fake.browser.vanishedRequestsByKind, { gone: 0, "invalid-interception": 0 });
+  }
+});
+
+test("a blocked request stays a violation when failRequest loses its interception id", async () => {
+  const fake = fakeChromium((method) => method === "Fetch.failRequest" ? { error: { message: "Invalid InterceptionId." } } : undefined);
+  fake.emit("Fetch.requestPaused", { requestId: "blocked", request: { url: "https://example.invalid/app.js" } }, "page");
+  await fake.yieldOnce();
+  assert.deepEqual(fake.sent.map((entry) => entry.method), ["Fetch.failRequest"]);
+  assert.throws(() => fake.browser.check(), { message: "Blocked screenshot request to https://example.invalid" });
+  assert.equal(fake.browser.vanishedRequests, 0);
+  assert.deepEqual(fake.browser.vanishedRequestEvents, []);
+});
+
+test("blocked requests remain violations after their session is gone and send no command", async () => {
+  const fake = fakeChromium();
+  fake.emit("Target.detachedFromTarget", { sessionId: "page" });
+  fake.emit("Fetch.requestPaused", {
+    requestId: "blocked", resourceType: "Script", request: { url: "https://example.invalid/app.js?synthetic=query#fragment" },
+  }, "page");
+  await fake.yieldOnce();
+  assert.deepEqual(fake.sent, []);
+  assert.throws(() => fake.browser.check(), { message: "Blocked screenshot request to https://example.invalid" });
+  assert.equal(fake.browser.vanishedRequests, 0);
+  assert.deepEqual(fake.browser.vanishedRequestEvents, []);
 });
 
 test("sockets outside the sealed origin are violations, because Fetch does not see them", async () => {
@@ -540,7 +919,7 @@ test("a message the seal cannot read is a violation, never an exception", async 
   assert.throws(() => odd.browser.check());
 });
 
-test("targets are sealed before they resume; a failed seal closes the target and never resumes it", async () => {
+test("targets preserve their required setup ordering and fail closed", async () => {
   const target = (type: string, url = "http://127.0.0.1:49231/") => ({
     sessionId: "s2",
     targetInfo: { targetId: "t2", type, url },
@@ -555,7 +934,7 @@ test("targets are sealed before they resume; a failed seal closes the target and
     await fake.browser.idle();
   };
 
-  // Every controlled type but a dedicated worker: a failed command means no resume and a closeTarget.
+  // These commands must succeed before resume; service-worker Network setup is tested below.
   for (const [type, failing] of [
     ["page", "Fetch.enable"],
     ["page", "Network.enable"],
@@ -564,7 +943,6 @@ test("targets are sealed before they resume; a failed seal closes the target and
     ["iframe", "Target.setAutoAttach"],
     ["page", "Network.setBlockedURLs"],
     ["iframe", "Network.setBlockedURLs"],
-    ["service_worker", "Network.setBlockedURLs"],
     ["service_worker", "Fetch.enable"],
     ["shared_worker", "Network.enable"],
   ] as const) {
@@ -576,7 +954,7 @@ test("targets are sealed before they resume; a failed seal closes the target and
     assert.equal(closed?.params.targetId, "t2", `${type} ${failing} not closed`);
   }
 
-  // The seal is in place before the resume, in this order.
+  // Setup commands are sent before the resume, in this order.
   for (const [type, expected] of [
     [
       "page",
@@ -608,8 +986,8 @@ test("targets are sealed before they resume; a failed seal closes the target and
     assert.deepEqual(methodsOf(fake), [...expected, "Runtime.runIfWaitingForDebugger"], type);
   }
 
-  // Service and shared workers may refuse nested attach; that alone is not a failure.
-  for (const type of ["service_worker", "shared_worker"]) {
+  // Shared workers may refuse nested attach; keep their existing behaviour.
+  for (const type of ["shared_worker"]) {
     const fake = fakeChromium(reject("Target.setAutoAttach"));
     await attach(fake, type);
     assert.doesNotThrow(() => fake.browser.check());
@@ -688,11 +1066,13 @@ test("targets are sealed before they resume; a failed seal closes the target and
   await running.browser.idle();
   assert.throws(() => running.browser.check(), /Could not seal an? iframe target/);
   const afterResume = fakeChromium(reject("Runtime.runIfWaitingForDebugger"));
-  afterResume.emit("Target.attachedToTarget", target("iframe"));
+  await attach(afterResume, "iframe");
+  assert.throws(() => afterResume.browser.check(), /Could not seal an? iframe target .*\(still attached\)$/);
   afterResume.emit("Target.detachedFromTarget", { sessionId: "s2" });
   await afterResume.yieldOnce();
   await afterResume.browser.idle();
   assert.throws(() => afterResume.browser.check(), /Could not seal an? iframe target/);
+  assert.equal(afterResume.browser.vanishedTargets, 0, "a later detach does not excuse a failed resume");
 
   const unknown = fakeChromium();
   await attach(unknown, "synthetic_unknown");
@@ -702,6 +1082,192 @@ test("targets are sealed before they resume; a failed seal closes the target and
   await attach(inert, "other", "chrome://omnibox-popup.top-chrome/");
   assert.doesNotThrow(() => inert.browser.check());
   assert.deepEqual(methodsOf(inert), ["Runtime.runIfWaitingForDebugger", "Target.detachFromTarget"]);
+});
+
+test("paused dedicated workers and other sealed targets that detach before resume replies are counted", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const fake = fakeChromium((method) => method === "Runtime.runIfWaitingForDebugger" ? "hold" : undefined);
+  t.after(() => fake.release());
+  assert.equal(fake.browser.vanishedTargets, 0);
+  assert.equal(Reflect.set(fake.browser, "vanishedTargets", 10), false, "the count is read-only");
+  for (const type of ["worker", "service_worker", "iframe"]) {
+    const before = fake.browser.vanishedTargets;
+    fake.emit("Target.attachedToTarget", {
+      sessionId: type, targetInfo: { targetId: `${type}-target`, type, url: `${origin}/` }, waitingForDebugger: true,
+    });
+    await fake.yieldOnce();
+    const events = fake.events.filter((event) => event.sessionId === type);
+    assert(events.some((event) => event.method === "Runtime.runIfWaitingForDebugger" && event.phase === "sent"));
+    assert(!events.some((event) => event.method === "Runtime.runIfWaitingForDebugger" && event.phase === "answered"));
+    for (const method of ["Network.enable", "Network.setBlockedURLs", "Target.setAutoAttach", ...(type === "worker" ? ["Runtime.evaluate"] : [])])
+      assert(events.some((event) => event.method === method && event.phase === "answered"), `${type}: ${method} confirmed`);
+    fake.emit("Target.detachedFromTarget", { sessionId: type });
+    await fake.browser.idle();
+    assert.doesNotThrow(() => fake.browser.check());
+    assert.equal(fake.browser.vanishedTargets, before + 1);
+    fake.emit("Target.detachedFromTarget", { sessionId: type });
+    fake.release();
+    await fake.yieldOnce();
+    assert.equal(fake.browser.vanishedTargets, before + 1, "late replies and repeated detaches do not count again");
+  }
+  assert(!fake.sent.some((entry) => entry.method === "Target.closeTarget"));
+});
+
+test("a paused worker gone after setup confirms but before resume sends is not counted as a lost resume", async () => {
+  const fake = fakeChromium((method) => {
+    if (method === "Runtime.evaluate")
+      queueMicrotask(() => fake.emit("Target.detachedFromTarget", { sessionId: "worker" }));
+    return undefined;
+  });
+  fake.emit("Target.attachedToTarget", {
+    sessionId: "worker", targetInfo: { targetId: "worker-target", type: "worker", url: `${origin}/worker.js` },
+    waitingForDebugger: true,
+  });
+  await fake.browser.idle();
+  assert.doesNotThrow(() => fake.browser.check());
+  assert(fake.events.some((event) => event.method === "Runtime.evaluate" && event.phase === "answered"));
+  assert(!fake.sent.some((entry) => entry.method === "Runtime.runIfWaitingForDebugger"));
+  assert.equal(fake.browser.vanishedTargets, 0);
+});
+
+test("a worker resume timeout while still attached remains a violation with attachment status", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const fake = fakeChromium((method) => method === "Runtime.runIfWaitingForDebugger" ? "hold" : undefined);
+  t.after(() => fake.release());
+  fake.emit("Target.attachedToTarget", {
+    sessionId: "worker", targetInfo: { targetId: "worker-target", type: "worker", url: `${origin}/worker.js` },
+    waitingForDebugger: true,
+  });
+  await fake.yieldOnce();
+  assert.equal(fake.sent.at(-1)?.method, "Runtime.runIfWaitingForDebugger");
+  t.mock.timers.tick(30_000);
+  await fake.browser.idle();
+  assert.throws(() => fake.browser.check(), {
+    message: "Could not seal a worker target (The browser did not answer Runtime.runIfWaitingForDebugger) (still attached)",
+  });
+  assert.equal(fake.browser.vanishedTargets, 0);
+  assert.equal(fake.sent.at(-1)?.method, "Target.closeTarget");
+});
+
+test("a service worker detached after resume with unconfirmed setup still fails the seal", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const held of ["Network.enable", "Network.setBlockedURLs", "Target.setAutoAttach"]) {
+    for (const resumePending of [true, false]) {
+      const fake = fakeChromium((method) => method === held || (resumePending && method === "Runtime.runIfWaitingForDebugger") ? "hold" : undefined);
+      t.after(() => fake.release());
+      fake.emit("Target.attachedToTarget", {
+        sessionId: "sw", targetInfo: { targetId: "sw-target", type: "service_worker", url: `${origin}/sw.js` },
+        waitingForDebugger: true,
+      });
+      await fake.yieldOnce();
+      assert(fake.sent.some((entry) => entry.method === "Runtime.runIfWaitingForDebugger"));
+      fake.emit("Target.detachedFromTarget", { sessionId: "sw" });
+      await fake.browser.idle();
+      assert.throws(() => fake.browser.check(), { message: "Could not seal a service_worker target (The target is gone)" });
+      assert.equal(fake.browser.vanishedTargets, 0);
+      assert.equal(fake.sent.at(-1)?.method, "Target.closeTarget");
+      fake.release();
+      await fake.yieldOnce();
+      assert.equal(fake.browser.vanishedTargets, 0, "late setup replies cannot confirm a detached target's seal");
+    }
+  }
+});
+
+test("paused service workers confirm Fetch before resuming and receive Network answers only after resume", async (t) => {
+  const fake = fakeChromium((method) => {
+    if (method === "Fetch.enable" || method === "Network.enable") return "hold";
+    if (method === "Runtime.runIfWaitingForDebugger") fake.release();
+    return undefined;
+  });
+  t.after(() => fake.release());
+  // Chromium attaches the same worker through both the browser and page sessions.
+  for (const sessionId of ["sw-browser", "sw-page"]) {
+    fake.emit("Target.attachedToTarget", {
+      sessionId,
+      targetInfo: { targetId: "sw", type: "service_worker", url: `${origin}/sw.js` },
+      waitingForDebugger: true,
+    }, sessionId === "sw-page" ? "page" : undefined);
+  }
+  await fake.yieldOnce();
+  assert.deepEqual(fake.sent.map((entry) => entry.method), ["Fetch.enable", "Fetch.enable"]);
+  fake.release(); // Confirm Fetch; the fake still holds Network until each resume is sent.
+  await fake.yieldOnce();
+  assert.equal(fake.sent.filter((entry) => entry.method === "Runtime.runIfWaitingForDebugger").length, 2);
+  await fake.browser.idle();
+  assert.doesNotThrow(() => fake.browser.check());
+  for (const sessionId of ["sw-browser", "sw-page"]) {
+    const events = fake.events.filter((event) => event.sessionId === sessionId);
+    const at = (method: string, phase: "sent" | "answered") => {
+      const index = events.findIndex((event) => event.method === method && event.phase === phase);
+      assert(index >= 0, `${sessionId}: missing ${method} ${phase}`);
+      return index;
+    };
+    const resume = at("Runtime.runIfWaitingForDebugger", "sent");
+    assert(at("Fetch.enable", "answered") < resume);
+    for (const method of ["Network.enable", "Network.setBlockedURLs", "Target.setAutoAttach"])
+      assert(at(method, "sent") < resume, `${sessionId}: ${method} must be queued before resume`);
+    assert(at("Network.enable", "answered") > resume);
+  }
+});
+
+test("a service worker with failed Fetch is closed without ever resuming", async () => {
+  const fake = fakeChromium((method) => method === "Fetch.enable" ? { error: { message: "synthetic Fetch failure" } } : undefined);
+  fake.emit("Target.attachedToTarget", {
+    sessionId: "sw-session", targetInfo: { targetId: "sw", type: "service_worker", url: `${origin}/sw.js` },
+    waitingForDebugger: true,
+  });
+  await fake.browser.idle();
+  assert.throws(() => fake.browser.check(), /Could not seal a service_worker target \(synthetic Fetch failure\)/);
+  assert.deepEqual(fake.sent.map((entry) => entry.method), ["Fetch.enable", "Target.closeTarget"]);
+});
+
+test("service-worker setup failures after resume still record a violation and close the target", async (t) => {
+  for (const failing of ["Network.enable", "Network.setBlockedURLs", "Target.setAutoAttach"]) {
+    const fake = fakeChromium((method) => {
+      if (method === failing) return "hold";
+      if (method === "Runtime.runIfWaitingForDebugger") fake.release({ error: { message: "synthetic failure after resume" } });
+      return undefined;
+    });
+    t.after(() => fake.release());
+    fake.emit("Target.attachedToTarget", {
+      sessionId: "sw-session", targetInfo: { targetId: "sw", type: "service_worker", url: `${origin}/sw.js` },
+      waitingForDebugger: true,
+    });
+    await fake.yieldOnce();
+    assert(fake.sent.some((entry) => entry.method === "Runtime.runIfWaitingForDebugger"), failing);
+    await fake.browser.idle();
+    assert.throws(() => fake.browser.check(), /Could not seal a service_worker target \(synthetic failure after resume\)/, failing);
+    assert.equal(fake.sent.find((entry) => entry.method === "Target.closeTarget")?.params.targetId, "sw", failing);
+  }
+});
+
+test("a service-worker Network timeout after resume remains a seal violation", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const fake = fakeChromium((method) => method === "Network.enable" ? "hold" : undefined);
+  fake.emit("Target.attachedToTarget", {
+    sessionId: "sw-session", targetInfo: { targetId: "sw", type: "service_worker", url: `${origin}/sw.js` },
+    waitingForDebugger: true,
+  });
+  await fake.yieldOnce();
+  assert(fake.sent.some((entry) => entry.method === "Runtime.runIfWaitingForDebugger"));
+  t.mock.timers.tick(30_000);
+  await fake.browser.idle();
+  assert.throws(() => fake.browser.check(), /Could not seal a service_worker target \(The browser did not answer Network.enable\)/);
+});
+
+test("a page still waits for Network.enable to answer before resume", async (t) => {
+  const fake = fakeChromium((method) => method === "Network.enable" ? "hold" : undefined);
+  t.after(() => fake.release());
+  fake.emit("Target.attachedToTarget", {
+    sessionId: "page-session", targetInfo: { targetId: "page", type: "page", url: `${origin}/` },
+    waitingForDebugger: true,
+  });
+  await fake.yieldOnce();
+  assert.deepEqual(fake.sent.map((entry) => entry.method), ["Fetch.enable", "Network.enable"]);
+  fake.release();
+  await fake.browser.idle();
+  assert.doesNotThrow(() => fake.browser.check());
+  assert.equal(fake.sent.at(-1)?.method, "Runtime.runIfWaitingForDebugger");
 });
 
 test("a failed seal is recorded before the target is closed, even if the close never answers", async () => {
@@ -843,7 +1409,7 @@ function hasEnvOption(call: string): boolean {
 
 test("the parent's environment is read only to find Chromium, and every child gets an env", () => {
   const dir = fileURLToPath(new URL(".", import.meta.url));
-  const runner = readFileSync(join(dir, "screenshots.ts"), "utf8");
+  const runner = readFileSync(join(dir, "screenshots.ts"), "utf8") + readFileSync(join(dir, "screenshots", "sealed.ts"), "utf8");
   const browser = readFileSync(join(dir, "screenshots", "browser.ts"), "utf8");
   const lookup = browser.slice(browser.indexOf("export function findChromium"), browser.indexOf("export class Browser"));
   assert(lookup.includes("process.env"));
@@ -876,7 +1442,7 @@ test("the parent's environment is read only to find Chromium, and every child ge
   assert(/import\s*\{[^}]*\benv\b[^}]*\}\s*from\s*["'](?:node:)?process["']/.test('import { env } from "node:process";'));
 });
 
-test("sockets are blocked before the resume, in every controlled session and in the page source", async () => {
+test("socket blocking is queued before resume in every controlled session, with page stubs", async () => {
   assert.deepEqual(SOCKET_BLOCKED_URLS, ["ws://*", "wss://*"]);
   for (const name of ["WebSocket", "WebSocketStream", "WebTransport", "RTCPeerConnection", "webkitRTCPeerConnection"])
     assert(BLOCK_SOCKETS.includes(`"${name}"`), name);
@@ -933,12 +1499,37 @@ test("the runner imports every safety guard it calls", () => {
   const exported = [...readFileSync(join(dir, "screenshots", "safety.ts"), "utf8").matchAll(/^export (?:async )?function (\w+)/gm)].map(
     (match) => match[1] as string,
   );
-  const runner = readFileSync(join(dir, "screenshots.ts"), "utf8");
-  const imported = runner.match(/import\s*\{([^}]*)\}\s*from\s*"\.\/screenshots\/safety\.ts"/)?.[1] ?? "";
+  const runner = readFileSync(join(dir, "screenshots.ts"), "utf8") + readFileSync(join(dir, "screenshots", "sealed.ts"), "utf8");
+  const imported = [...runner.matchAll(/import\s*\{([^}]*)\}\s*from\s*"\.\/(?:screenshots\/)?safety\.ts"/g)].map((match) => match[1]).join(",");
   const names = new Set(imported.split(",").map((name) => name.trim()));
   assert(exported.length > 5 && names.size > 5);
   for (const name of exported) {
     const body = runner.replace(/import[^;]*;/g, "");
     if (new RegExp(`\\b${name}\\(`).test(body)) assert(names.has(name), `${name} is called but not imported`);
   }
+});
+
+test("fresh performance contexts copy only sealed cookies and new pages still fail closed", async () => {
+  const fake = fakeChromium((method) => {
+    if (method === "Storage.getCookies") return { result: { cookies: [
+      { name: "session", value: "synthetic", domain: "127.0.0.1", path: "/", httpOnly: true, secure: false, sameSite: "Strict", expires: -1, size: 20 },
+      { name: "foreign", value: "ignored", domain: "example.invalid", path: "/" },
+    ] } };
+    if (method === "Target.createBrowserContext") return { result: { browserContextId: "fresh" } };
+    if (method === "Target.createTarget") return { result: { targetId: "fresh-page" } };
+    if (method === "Fetch.enable") return { error: { message: "synthetic seal failure" } };
+  });
+  const context = await fake.browser.freshContext();
+  assert.equal(context, "fresh");
+  assert.deepEqual(fake.sent.find((entry) => entry.method === "Storage.setCookies")?.params, {
+    browserContextId: "fresh", cookies: [{ name: "session", value: "synthetic", domain: "127.0.0.1", path: "/", httpOnly: true, secure: false, sameSite: "Strict" }],
+  });
+  const opened = fake.browser.newPage({ width: 1440, height: 900, scale: 2, mobile: false }, context);
+  const rejected = assert.rejects(opened, /Could not seal a page target/);
+  await fake.yieldOnce();
+  assert.equal(fake.sent.find((entry) => entry.method === "Target.createTarget")?.params.browserContextId, "fresh");
+  fake.emit("Target.attachedToTarget", { sessionId: "fresh-session", targetInfo: { targetId: "fresh-page", type: "page", url: "about:blank" }, waitingForDebugger: true });
+  await rejected;
+  assert(!fake.sent.some((entry) => entry.method === "Runtime.runIfWaitingForDebugger"));
+  assert(!fake.sent.some((entry) => entry.method === "Page.navigate"));
 });

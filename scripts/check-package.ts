@@ -48,7 +48,8 @@ try {
   for (const name of entries) {
     const permitted =
       allowed.has(name) || name.startsWith("package/dist/web/") || name.startsWith("package/dist/skills/");
-    if (!permitted || name.endsWith(".map") || name.split("/").some((part) => part === "." || part === "..")) {
+    if (!permitted || name.startsWith("package/dist/web/.vite/") ||
+        name.endsWith(".map") || name.split("/").some((part) => part === "." || part === "..")) {
       check = `unexpected tarball entry ${JSON.stringify(name)}`;
       throw new Error("not allowed");
     }

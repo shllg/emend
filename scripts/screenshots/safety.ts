@@ -23,7 +23,7 @@ export function protectedStateDirs(env: Environment, platform: string, home: str
 // Resolve existing ancestors even when the state directory itself does not exist yet.
 // In particular, a dangling symlink is an error, not permission to treat the path as safe.
 export function canonicalPath(path: string): string {
-  if (!isAbsolute(path)) throw new Error("Screenshot paths must be absolute");
+  if (!isAbsolute(path)) throw new Error("Paths must be absolute");
   try {
     lstatSync(path);
   } catch (error) {
@@ -230,12 +230,17 @@ export function parsePairingLink(output: string, origin: string): string {
 
 // ---- Output folder, fixture paths ---------------------------------------------------------------
 
-/** The screenshot folder must not overlap real emend state; PNGs are written into it. */
-export function assertOutputFolder(out: string, realStateDirs: readonly string[], canonicalize: (path: string) => string): void {
-  if (!isAbsolute(out)) throw new Error("The screenshot folder must be absolute");
+/** An output folder must not overlap real emend state. */
+export function assertOutputFolder(
+  out: string,
+  realStateDirs: readonly string[],
+  canonicalize: (path: string) => string,
+  label = "screenshot",
+): void {
+  if (!isAbsolute(out)) throw new Error(`The ${label} folder must be absolute`);
   const folder = canonicalize(out);
   for (const state of realStateDirs) {
-    if (overlaps(folder, canonicalize(state))) throw new Error("The screenshot folder overlaps real emend state");
+    if (overlaps(folder, canonicalize(state))) throw new Error(`The ${label} folder overlaps real emend state`);
   }
 }
 
