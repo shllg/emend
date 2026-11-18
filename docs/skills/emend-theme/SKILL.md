@@ -365,9 +365,9 @@ A downloaded HTML doc keeps its own styles and gets no theme colours.
 | --- | --- |
 | `bg-reading` | The document reading pane background. Also the offline Download page. |
 | `bg-reading-card` | Writeup summary cards. |
-| `fg-reading` | Body text in Markdown docs, writeups and comments. Also body text in the offline Download. |
+| `fg-reading` | Body text in Markdown docs and writeups. Also body text in the offline Download. |
 | `fg-reading-muted` | Quiet and muted writeup sections. Also metadata and muted text in the offline Download. |
-| `fg-reading-strong` | Reading headings, strong text and inline code. Also strong text and plain code text in the offline Download. |
+| `fg-reading-strong` | Reading headings, strong text, inline code and comment text. Also strong text and plain code text in the offline Download. |
 
 ### Accent
 

@@ -136,7 +136,8 @@ Each line prevents a real failure. "Before you touch" names the rule file with t
   `emend-security-reviewer` (Opus) when the change touches
   auth, tokens, pairing or attach, owner isolation, rendering of agent content, the content
   frames, hand-off, wait, take or claim, the MCP endpoint, CLI file or git access, a hook or rule
-  (`.claude/hooks/`, `.codex/`, CI) or dependencies; `emend-react-reviewer` (Sonnet) when
+  (`.claude/hooks/`, `.codex/`, CI), a skill an agent follows from a link (`docs/skills/`)
+  or dependencies; `emend-react-reviewer` (Sonnet) when
   `apps/web/src` changed; `emend-architecture-reviewer` (Opus) when the structure moves. It checks
   and confirms the findings, records bugs the change did not cause, and returns one list to fix.
   Rounds with a fixed budget:
