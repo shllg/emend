@@ -22,6 +22,8 @@ import {
   claimFindings,
   type FindingInput,
   findingsDir,
+  groomNext,
+  groomVisited,
   listFindings,
   releaseFindings,
   resolveFinding,
@@ -932,4 +934,409 @@ test("bin/wt help lists findings", async () => {
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /findings add --file/);
   assert.match(result.stdout, /findings resolve/);
+});
+
+function groomCli(...args: string[]) {
+  return runWt(join(fx.main, "bin", "wt"), ["groom", ...args], { cwd: fx.main });
+}
+
+function visitsPath(): string {
+  return join(stateDir(repo), "groom", "visits.json");
+}
+
+function headBlob(path = "README.md"): string {
+  return gitIn(fx.main, "rev-parse", `HEAD:${path}`);
+}
+
+const GROOM_STORAGE_ERROR = "Groom storage is unreadable, corrupt or symlinked. Nothing was changed.";
+
+test("groom orders new paths by code unit, changed paths by age, then unchanged visits by age", () => {
+  const paths = ["new/a.ts", "new/Z.ts", "changed/a.ts", "changed/Z.ts", "changed/old.ts", "old/a.ts", "old/Z.ts"];
+  for (const path of paths) commitFile(fx.main, path, "before\n");
+  const candidates = groomNext(repo, 50);
+  assert.ok(candidates.length < 50);
+  const visits = new Map(
+    candidates
+      .filter(({ path }) => !path.startsWith("new/"))
+      .map(({ path, blob }) => [path, { blob, at: "2026-03-01T00:00:00.000Z", findings: 0 }]),
+  );
+  for (const [path, visit] of visits) {
+    if (path.startsWith("old/")) visit.at = "2026-01-01T00:00:00.000Z";
+    if (path === "changed/old.ts") visit.at = "2026-02-01T00:00:00.000Z";
+  }
+  mkdirSync(join(stateDir(repo), "groom"));
+  writeFileSync(visitsPath(), JSON.stringify({ version: 1, visits: Object.fromEntries(visits) }));
+  for (const path of paths.filter((path) => path.startsWith("changed/"))) commitFile(fx.main, path, "after\n");
+  const before = readFileSync(visitsPath());
+  const mtime = statSync(visitsPath()).mtimeMs;
+  const next = groomNext(repo, 50);
+  assert.deepEqual(
+    next.filter(({ path }) => paths.includes(path)).map(({ path, reason }) => [path, reason]),
+    [
+      ["new/Z.ts", "new"],
+      ["new/a.ts", "new"],
+      ["changed/old.ts", "changed"],
+      ["changed/Z.ts", "changed"],
+      ["changed/a.ts", "changed"],
+      ["old/Z.ts", "oldest"],
+      ["old/a.ts", "oldest"],
+    ],
+  );
+  assert.deepEqual(groomNext(repo, 3), next.slice(0, 3));
+  for (const { path, blob } of next) assert.equal(blob, headBlob(path));
+  assert.deepEqual(readFileSync(visitsPath()), before);
+  assert.equal(statSync(visitsPath()).mtimeMs, mtime);
+});
+
+test("groom skips generated paths, fixtures, image and font extensions, symlinks and gitlinks", () => {
+  const skipped = [
+    "pnpm-lock.yaml",
+    "nested/pnpm-lock.yaml",
+    "apps/emend/drizzle/0001.sql",
+    "docs/images/a.md",
+    "docs/vendor/a.md",
+    "fixtures/a.ts",
+    "nested/fixtures/a.ts",
+    ...["PNG", "jpg", "jpeg", "gif", "webp", "ico", "svg", "woff", "woff2", "ttf"].map((ext) => `asset.${ext}`),
+  ];
+  const kept = ["docs/imagesx/a.md", "docs/vendorx/a.md", "fixtures.md", "nested/fixturesx/a.ts", "run.sh"];
+  for (const path of [...skipped, ...kept]) {
+    mkdirSync(join(fx.main, path, ".."), { recursive: true });
+    writeFileSync(join(fx.main, path), "synthetic\n");
+  }
+  symlinkSync("README.md", join(fx.main, "linked.md"));
+  gitIn(fx.main, "add", "-A");
+  gitIn(fx.main, "update-index", "--chmod=+x", "run.sh");
+  gitIn(fx.main, "update-index", "--add", "--cacheinfo", `160000,${gitIn(fx.main, "rev-parse", "HEAD")},submodule`);
+  gitIn(fx.main, "commit", "--quiet", "-m", "candidate paths");
+  const paths = groomNext(repo, 50).map(({ path }) => path);
+  for (const path of [...skipped, "linked.md", "submodule"]) assert.equal(paths.includes(path), false, path);
+  for (const path of kept) assert.ok(paths.includes(path), path);
+});
+
+test("groom skips invalid UTF-8 and every path that findings would refuse", () => {
+  const secret = ["gh", "p_", "Ab01".repeat(9)].join("");
+  const skipped = [
+    "back\\slash",
+    "line\nbreak",
+    "hidden\u200btext",
+    "split\u2028text",
+    secret,
+    `${"a".repeat(200)}/${"b".repeat(101)}`,
+  ];
+  for (const path of skipped) {
+    mkdirSync(join(fx.main, path, ".."), { recursive: true });
+    writeFileSync(join(fx.main, path), "synthetic\n");
+  }
+  writeFileSync(Buffer.concat([Buffer.from(`${fx.main}/invalid-`), Buffer.from([0xff])]), "synthetic\n");
+  gitIn(fx.main, "add", "-A");
+  gitIn(fx.main, "commit", "--quiet", "-m", "unusual paths");
+  const paths = groomNext(repo, 50).map(({ path }) => path);
+  assert.ok(paths.includes("README.md"));
+  for (const path of skipped) assert.equal(paths.includes(path), false);
+  assert.equal(
+    paths.some((path) => path.startsWith("invalid-")),
+    false,
+  );
+});
+
+test("groom next defaults to five JSON candidates and leaves absent groom storage absent", async () => {
+  const result = await groomCli("next");
+  assert.equal(result.code, 0, result.stderr);
+  const next = JSON.parse(result.stdout);
+  assert.equal(next.length, 5);
+  assert.deepEqual(next, groomNext(repo, 5));
+  assert.equal(result.stdout, `${JSON.stringify(next, null, 2)}\n`);
+  for (const entry of next) {
+    assert.deepEqual(Object.keys(entry), ["path", "blob", "reason"]);
+    assert.match(entry.blob, /^[0-9a-f]{40}$/);
+    assert.equal(entry.reason, "new");
+  }
+  assert.equal(existsSync(join(stateDir(repo), "groom")), false);
+  assert.deepEqual(readdirSync(stateDir(repo)), []);
+  const help = await runWt(join(fx.main, "bin", "wt"), ["help"], { cwd: fx.main });
+  assert.match(help.stdout, /groom next \[--count N\]/);
+  assert.match(help.stdout, /groom visited <path> --blob <sha> --findings N/);
+});
+
+test("groom visits write private version 1 storage and preserve prototype-named paths", async () => {
+  for (const path of ["__proto__", "constructor"]) commitFile(fx.main, path, "synthetic\n");
+  const start = Date.now();
+  for (const path of ["__proto__", "constructor"]) {
+    const result = await groomCli("visited", path, "--blob", headBlob(path), "--findings", "2");
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout, "");
+  }
+  const stored = JSON.parse(readFileSync(visitsPath(), "utf8"));
+  assert.deepEqual(Object.keys(stored), ["version", "visits"]);
+  assert.equal(stored.version, 1);
+  assert.deepEqual(Object.keys(stored.visits), ["__proto__", "constructor"]);
+  for (const path of Object.keys(stored.visits)) {
+    const visit = stored.visits[path];
+    assert.deepEqual(visit, { blob: headBlob(path), at: visit.at, findings: 2 });
+    assert.equal(new Date(visit.at).toISOString(), visit.at);
+    assert.ok(Date.parse(visit.at) >= start && Date.parse(visit.at) <= Date.now());
+    assert.equal(groomNext(repo, 50).find((entry) => entry.path === path)?.reason, "oldest");
+  }
+  assert.equal(statSync(join(stateDir(repo), "groom")).mode & 0o777, 0o700);
+  assert.equal(statSync(visitsPath()).mode & 0o777, 0o600);
+  assert.deepEqual(readdirSync(join(stateDir(repo), "groom")), ["visits.json"]);
+});
+
+for (const action of ["next", "visited"] as const) {
+  test(`groom ${action} prunes deleted, renamed and no longer regular visits`, () => {
+    for (const path of ["deleted.md", "renamed.md", "linked.md"]) {
+      commitFile(fx.main, path, "synthetic\n");
+      groomVisited(repo, path, headBlob(path), 0);
+    }
+    gitIn(fx.main, "rm", "deleted.md");
+    gitIn(fx.main, "mv", "renamed.md", "new-name.md");
+    rmSync(join(fx.main, "linked.md"));
+    symlinkSync("README.md", join(fx.main, "linked.md"));
+    gitIn(fx.main, "add", "linked.md");
+    gitIn(fx.main, "commit", "--quiet", "-m", "remove old candidates");
+    const stored = JSON.parse(readFileSync(visitsPath(), "utf8"));
+    stored.visits["fixtures/old.ts"] = { blob: headBlob(), at: "2026-01-01T00:00:00.000Z", findings: 0 };
+    writeFileSync(visitsPath(), JSON.stringify(stored));
+    if (action === "visited") {
+      groomVisited(repo, "README.md", headBlob(), 1);
+      assert.deepEqual(Object.keys(JSON.parse(readFileSync(visitsPath(), "utf8")).visits), ["README.md"]);
+    }
+    const next = groomNext(repo, 50);
+    assert.equal(
+      next.some(({ path }) => ["deleted.md", "renamed.md", "linked.md"].includes(path)),
+      false,
+    );
+    assert.equal(next.find(({ path }) => path === "new-name.md")?.reason, "new");
+    assert.deepEqual(
+      Object.keys(JSON.parse(readFileSync(visitsPath(), "utf8")).visits),
+      action === "next" ? [] : ["README.md"],
+    );
+  });
+}
+
+test("groom refuses noncandidates and mismatched blobs without changing visits", async () => {
+  commitFile(fx.main, "pnpm-lock.yaml", "synthetic\n");
+  symlinkSync("README.md", join(fx.main, "linked.md"));
+  gitIn(fx.main, "add", "linked.md");
+  gitIn(fx.main, "commit", "--quiet", "-m", "linked path");
+  writeFileSync(join(fx.main, "untracked.md"), "synthetic\n");
+  groomVisited(repo, "README.md", headBlob(), 0);
+  const before = readFileSync(visitsPath());
+  for (const [path, blob, message] of [
+    ["README.md", "0".repeat(40), "The blob does not match HEAD for that path."],
+    ...["untracked.md", "pnpm-lock.yaml", "linked.md"].map((path) => [
+      path,
+      headBlob(),
+      "The path is not a groom candidate at HEAD.",
+    ]),
+  ]) {
+    const result = await groomCli("visited", path as string, "--blob", blob as string, "--findings", "0");
+    assert.equal(result.code, 2, result.stderr);
+    assert.equal(result.stderr.trim(), message);
+    assert.deepEqual(readFileSync(visitsPath()), before);
+  }
+});
+
+test("groom validates API inputs before taking the lock", () => {
+  const blob = headBlob();
+  for (const count of [0, 51, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])
+    assert.throws(() => groomNext(repo, count), { code: 2, message: "Invalid groom count." });
+  for (const path of [
+    "",
+    "/README.md",
+    "a//b",
+    "a/./b",
+    "../README.md",
+    "back\\slash",
+    "line\nbreak",
+    "hidden\u200b",
+    "a".repeat(301),
+  ])
+    assert.throws(() => groomVisited(repo, path, blob, 0), { code: 2, message: "Invalid groom path." });
+  for (const value of ["", "A".repeat(40), "0".repeat(39), "g".repeat(40), `${blob}\n`])
+    assert.throws(() => groomVisited(repo, "README.md", value, 0), { code: 2, message: "Invalid groom blob." });
+  for (const count of [-1, 10001, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])
+    assert.throws(() => groomVisited(repo, "README.md", blob, count), {
+      code: 2,
+      message: "Invalid groom findings count.",
+    });
+  assert.equal(existsSync(stateDir(repo)), false);
+});
+
+test("groom CLI refuses malformed counts, options and actions without changing visits", async () => {
+  const blob = headBlob();
+  groomVisited(repo, "README.md", blob, 0);
+  const before = readFileSync(visitsPath());
+  for (const count of ["0", "51", "5x", "01", "1.5", "1e1", "9007199254740992", "5\n"]) {
+    const result = await groomCli("next", "--count", count);
+    assert.equal(result.code, 2, result.stderr);
+  }
+  for (const count of ["-1", "01", "5x", "1.5", "10001", "9007199254740992", "0\n"]) {
+    const result = await groomCli("visited", "README.md", "--blob", blob, `--findings=${count}`);
+    assert.equal(result.code, 2, result.stderr);
+  }
+  for (const args of [
+    ["next", "extra"],
+    ["next", "--unknown"],
+    ["next", "--count"],
+    ["next", "--count", "5", "--count", "6"],
+    ["visited", "README.md"],
+    ["visited", "--blob", blob, "--findings", "0"],
+    ["visited", "README.md", "extra", "--blob", blob, "--findings", "0"],
+    ["visited", "README.md", "--blob", blob],
+    ["visited", "README.md", "--findings", "0"],
+  ]) {
+    const result = await groomCli(...args);
+    assert.equal(result.code, 2, result.stderr);
+    assert.equal(result.stderr.trim(), "Invalid groom options.");
+  }
+  for (const args of [[], ["unknown"]]) {
+    const result = await groomCli(...args);
+    assert.equal(result.code, 2, result.stderr);
+    assert.equal(result.stderr.trim(), "Unknown groom action. Run bin/wt help.");
+  }
+  assert.deepEqual(readFileSync(visitsPath()), before);
+});
+
+test("groom reads main HEAD from a worktree and ignores staged changes in main", async () => {
+  const blob = headBlob();
+  const worktree = join(env.root, "worktree");
+  gitIn(fx.main, "worktree", "add", "--quiet", "-b", "emend-groom", worktree);
+  commitFile(worktree, "README.md", "worktree content\n");
+  writeFileSync(join(fx.main, "README.md"), "staged content\n");
+  gitIn(fx.main, "add", "README.md");
+  const result = await runWt(join(fx.main, "bin", "wt"), ["groom", "next", "--count", "50"], { cwd: worktree });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).find((entry: { path: string }) => entry.path === "README.md").blob, blob);
+  groomVisited(resolveRepo(worktree), "README.md", blob, 0);
+  assert.equal(JSON.parse(readFileSync(visitsPath(), "utf8")).visits["README.md"].blob, blob);
+});
+
+test("groom refuses symlinked storage and nonregular directories before writing", async () => {
+  const outside = join(env.root, "outside");
+  mkdirSync(outside);
+  const blob = headBlob();
+  const content = JSON.stringify({ version: 1, visits: {} });
+  const target = join(outside, "visits.json");
+  writeFileSync(target, content);
+  for (const path of [stateDir(repo), join(stateDir(repo), "groom"), visitsPath()]) {
+    mkdirSync(join(path, ".."), { recursive: true });
+    symlinkSync(path === visitsPath() ? target : outside, path);
+    for (const args of [["next"], ["visited", "README.md", "--blob", blob, "--findings", "0"]]) {
+      const result = await groomCli(...args);
+      assert.equal(result.code, 1, result.stderr);
+      assert.equal(result.stderr.trim(), GROOM_STORAGE_ERROR);
+    }
+    assert.equal(lstatSync(path).isSymbolicLink(), true);
+    assert.equal(readFileSync(target, "utf8"), content);
+    assert.deepEqual(readdirSync(outside), ["visits.json"]);
+    rmSync(stateDir(repo), { recursive: true });
+  }
+  for (const path of [stateDir(repo), join(stateDir(repo), "groom")]) {
+    mkdirSync(join(path, ".."), { recursive: true });
+    writeFileSync(path, "not a directory");
+    assert.throws(() => groomNext(repo, 5), { code: 1, message: GROOM_STORAGE_ERROR });
+    assert.equal(readFileSync(path, "utf8"), "not a directory");
+    rmSync(stateDir(repo), { recursive: true });
+  }
+  const commonLink = join(env.root, "common-link");
+  symlinkSync(repo.commonDir, commonLink);
+  assert.throws(() => groomNext({ ...repo, commonDir: commonLink }, 5), { code: 1, message: GROOM_STORAGE_ERROR });
+});
+
+test("groom refuses corrupt or nonregular visit storage without altering it", async () => {
+  const blob = headBlob();
+  groomVisited(repo, "README.md", blob, 0);
+  const visit = { blob, at: "2026-01-01T00:00:00.000Z", findings: 0 };
+  const values: unknown[] = [
+    null,
+    [],
+    {},
+    { version: 2, visits: {} },
+    { version: 1, visits: {}, extra: true },
+    { version: 1, visits: [] },
+  ];
+  for (const bad of [
+    null,
+    [],
+    {},
+    { ...visit, extra: true },
+    { ...visit, blob: "A".repeat(40) },
+    { ...visit, blob: `${blob}\n` },
+    { ...visit, at: "2026-01-01" },
+    { ...visit, at: "bad" },
+    { ...visit, findings: -1 },
+    { ...visit, findings: 10001 },
+    { ...visit, findings: 1.5 },
+    { ...visit, findings: "0" },
+  ])
+    values.push({ version: 1, visits: { "README.md": bad } });
+  for (const path of ["../bad", "a//b", "a\\b", "a\u200b", "a".repeat(301)])
+    values.push({ version: 1, visits: { [path]: visit } });
+  const bytes = [
+    ...values.map((value) => Buffer.from(JSON.stringify(value))),
+    Buffer.from("{"),
+    Buffer.from([0xff]),
+    Buffer.alloc(1024 * 1024 + 1),
+  ];
+  for (const content of bytes) {
+    writeFileSync(visitsPath(), content);
+    for (const call of [() => groomNext(repo, 5), () => groomVisited(repo, "README.md", blob, 0)])
+      assert.throws(call, { code: 1, message: GROOM_STORAGE_ERROR });
+    assert.deepEqual(readFileSync(visitsPath()), content);
+  }
+  writeFileSync(visitsPath(), "{bad json");
+  assert.equal((await groomCli("next")).code, 1);
+  rmSync(visitsPath());
+  mkdirSync(visitsPath());
+  assert.throws(() => groomNext(repo, 5), { code: 1, message: GROOM_STORAGE_ERROR });
+  assert.deepEqual(readdirSync(visitsPath()), []);
+});
+
+for (const failure of ["fsyncSync", "renameSync"] as const) {
+  test(`groom cleans temporary files and preserves visits after ${failure} fails`, (t) => {
+    const blob = headBlob();
+    groomVisited(repo, "README.md", blob, 0);
+    const before = readFileSync(visitsPath());
+    const mocked = t.mock.method(fs, failure, () => {
+      throw new Error("synthetic write failure");
+    });
+    syncBuiltinESMExports();
+    try {
+      assert.throws(() => groomVisited(repo, "README.md", blob, 1), { code: 1, message: GROOM_STORAGE_ERROR });
+    } finally {
+      mocked.mock.restore();
+      syncBuiltinESMExports();
+    }
+    assert.deepEqual(readFileSync(visitsPath()), before);
+    assert.deepEqual(readdirSync(join(stateDir(repo), "groom")), ["visits.json"]);
+    assert.equal(existsSync(join(stateDir(repo), "groom.lock")), false);
+  });
+}
+
+test("groom reads and writes both wait for the groom lock", (t) => {
+  const blob = headBlob();
+  mkdirSync(stateDir(repo));
+  const lock = join(stateDir(repo), "groom.lock");
+  writeFileSync(lock, `${process.pid}\n`);
+  let now = 0;
+  const mocked = t.mock.method(Date, "now", () => (now += 31_000));
+  try {
+    for (const call of [() => groomNext(repo, 5), () => groomVisited(repo, "README.md", blob, 0)])
+      assert.throws(call, { code: 69, message: "Another bin/wt call holds the groom lock. Try again in a moment." });
+  } finally {
+    mocked.mock.restore();
+  }
+  assert.deepEqual(readdirSync(stateDir(repo)), ["groom.lock"]);
+});
+
+test("groom maps unavailable git and other git failures without creating visit storage", () => {
+  const blob = headBlob();
+  gitIn(fx.main, "update-ref", "-d", "refs/heads/main");
+  assert.throws(() => groomNext(repo, 5), { code: 1, message: "Could not read HEAD of the main checkout." });
+  rmSync(join(env.fakeBin, "git"));
+  for (const call of [() => groomNext(repo, 5), () => groomVisited(repo, "README.md", blob, 0)])
+    assert.throws(call, { code: 69, message: "Git is unavailable." });
+  assert.equal(existsSync(join(stateDir(repo), "groom")), false);
 });

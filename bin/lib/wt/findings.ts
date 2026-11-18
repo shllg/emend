@@ -27,6 +27,8 @@ const INPUT_KEYS = ["title", "detail", "path", "line", "kind", "severity", "size
 const ID = /^f-[0-9a-f]{12}$/;
 const HASH = /^[0-9a-f]{64}$/;
 const CONTROLS = /\p{Cc}/u;
+const BLOB = /^[0-9a-f]{40}$/;
+type Store = "findings" | "groom";
 
 export interface FindingInput {
   title: string;
@@ -64,8 +66,9 @@ function invalid(field: string): never {
   throw new WtError(2, `Invalid finding ${field}.`);
 }
 
-function storageError(): never {
-  throw new WtError(1, "Finding storage is unreadable, corrupt or symlinked. Nothing was changed.");
+function storageError(store: Store = "findings"): never {
+  const label = store === "groom" ? "Groom" : "Finding";
+  throw new WtError(1, `${label} storage is unreadable, corrupt or symlinked. Nothing was changed.`);
 }
 
 function object(value: unknown, required: string[], optional: string[] = []): Record<string, unknown> {
@@ -107,6 +110,15 @@ function inputPath(value: unknown): string {
     invalid("path");
   publicText(value, "path");
   return value;
+}
+
+function validInputPath(value: unknown): value is string {
+  try {
+    inputPath(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function sourceTag(value: unknown, field: string): string {
@@ -231,10 +243,10 @@ export function findingsDir(repo: Repo): string {
 }
 
 /** lstat each component before descending; reads never create a directory. */
-function storageDirectory(repo: Repo, create = false): boolean {
+function storageDirectory(repo: Repo, create = false, store: Store = "findings"): boolean {
   try {
-    if (!lstatSync(repo.commonDir).isDirectory()) storageError();
-    for (const path of [stateDir(repo), findingsDir(repo)]) {
+    if (!lstatSync(repo.commonDir).isDirectory()) storageError(store);
+    for (const path of [stateDir(repo), join(stateDir(repo), store)]) {
       let entry = lstatSync(path, { throwIfNoEntry: false });
       if (!entry) {
         if (!create) return false;
@@ -245,12 +257,12 @@ function storageDirectory(repo: Repo, create = false): boolean {
         }
         entry = lstatSync(path);
       }
-      if (!entry.isDirectory()) storageError();
+      if (!entry.isDirectory()) storageError(store);
       if (create) chmodSync(path, 0o700);
     }
     return true;
   } catch {
-    return storageError();
+    return storageError(store);
   }
 }
 
@@ -269,8 +281,8 @@ function readFinding(repo: Repo, id: string): Finding {
   }
 }
 
-function stageFinding(repo: Repo, id: string, content: string | Buffer, temps: Set<string>): string {
-  const temp = join(findingsDir(repo), `.${id}.${randomBytes(12).toString("hex")}.tmp`);
+function stageFile(directory: string, id: string, content: string | Buffer, temps: Set<string>): string {
+  const temp = join(directory, `.${id}.${randomBytes(12).toString("hex")}.tmp`);
   const fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   temps.add(temp);
   try {
@@ -293,7 +305,7 @@ function writeFindings(repo: Repo, findings: Finding[]): void {
     const staged = findings.map((finding) => {
       const path = join(findingsDir(repo), `${finding.id}.json`);
       const previous = lstatSync(path, { throwIfNoEntry: false }) ? readFileBytes(path) : null;
-      const temp = stageFinding(repo, finding.id, `${JSON.stringify(finding, null, 2)}\n`, temps);
+      const temp = stageFile(findingsDir(repo), finding.id, `${JSON.stringify(finding, null, 2)}\n`, temps);
       return { id: finding.id, path, previous, temp };
     });
     for (const record of staged) {
@@ -307,7 +319,7 @@ function writeFindings(repo: Repo, findings: Finding[]): void {
       try {
         if (record.previous === null) unlinkSync(record.path);
         else {
-          const temp = stageFinding(repo, record.id, record.previous, temps);
+          const temp = stageFile(findingsDir(repo), record.id, record.previous, temps);
           renameSync(temp, record.path);
           temps.delete(temp);
         }
@@ -333,14 +345,14 @@ function writeFindings(repo: Repo, findings: Finding[]): void {
   }
 }
 
-function mutate<T>(repo: Repo, fn: () => T): T {
-  // Check the findings folder before even writing a lock in its parent.
-  storageDirectory(repo);
+function mutate<T>(repo: Repo, fn: () => T, store: Store = "findings"): T {
+  // Check the storage folder before even writing a lock in its parent.
+  storageDirectory(repo, false, store);
   try {
-    return withStateLock(repo, "findings", fn);
+    return withStateLock(repo, store, fn);
   } catch (e) {
     if (e instanceof WtError) throw e;
-    return storageError();
+    return storageError(store);
   }
 }
 
@@ -534,15 +546,188 @@ export function resolveFinding(repo: Repo, id: string, value: FindingResolution)
   });
 }
 
-function options(args: string[], spec: Parameters<typeof parseFlags>[1], max = 0) {
+interface GroomVisit {
+  blob: string;
+  at: string;
+  findings: number;
+}
+
+function groomCandidates(repo: Repo): Map<string, string> {
+  const opts = { cwd: repo.mainRoot, gitNoLazyFetch: true };
+  const message = "Could not read HEAD of the main checkout.";
+  const head = run("git", [...GIT_BASE, "rev-parse", "HEAD"], opts);
+  gitResult(head.code, 1, message);
+  const commit = head.stdout.trim();
+  if (!BLOB.test(commit)) throw new WtError(1, message);
+  const tree = runBytes("git", [...GIT_BASE, "ls-tree", "-r", "-z", "--full-tree", commit], opts);
+  gitResult(tree.code, 1, message);
+  const candidates = new Map<string, string>();
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+  for (let start = 0; start < tree.stdout.length; ) {
+    const end = tree.stdout.indexOf(0, start);
+    if (end === -1) throw new WtError(1, message);
+    const entry = tree.stdout.subarray(start, end);
+    start = end + 1;
+    const tab = entry.indexOf(9);
+    if (tab === -1) throw new WtError(1, message);
+    const header = /^(100644|100755) blob ([0-9a-f]{40})$/.exec(entry.subarray(0, tab).toString("ascii"));
+    if (!header) continue;
+    let path: string;
+    try {
+      path = decoder.decode(entry.subarray(tab + 1));
+    } catch {
+      continue;
+    }
+    if (!validInputPath(path)) continue;
+    const parts = path.split("/");
+    if (
+      parts.at(-1) === "pnpm-lock.yaml" ||
+      ["apps/emend/drizzle/", "docs/images/", "docs/vendor/"].some((prefix) => path.startsWith(prefix)) ||
+      parts.slice(0, -1).includes("fixtures") ||
+      /\.(png|jpg|jpeg|gif|webp|ico|svg|woff|woff2|ttf)$/i.test(path)
+    )
+      continue;
+    candidates.set(path, header[2] as string);
+  }
+  return candidates;
+}
+
+function groomFindingsCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 10000;
+}
+
+function readVisits(repo: Repo): Map<string, GroomVisit> {
+  const visits = new Map<string, GroomVisit>();
+  if (!storageDirectory(repo, false, "groom")) return visits;
+  try {
+    const path = join(stateDir(repo), "groom", "visits.json");
+    if (!lstatSync(path, { throwIfNoEntry: false })) return visits;
+    const data = object(JSON.parse(readTextFile(path)), ["version", "visits"]);
+    if (data.version !== 1 || typeof data.visits !== "object" || data.visits === null || Array.isArray(data.visits))
+      storageError("groom");
+    for (const [path, value] of Object.entries(data.visits)) {
+      const visit = object(value, ["blob", "at", "findings"]);
+      if (
+        !validInputPath(path) ||
+        typeof visit.blob !== "string" ||
+        visit.blob.length !== 40 ||
+        !BLOB.test(visit.blob) ||
+        !groomFindingsCount(visit.findings)
+      )
+        storageError("groom");
+      timestamp(visit.at);
+      visits.set(path, { blob: visit.blob, at: visit.at as string, findings: visit.findings });
+    }
+    return visits;
+  } catch {
+    return storageError("groom");
+  }
+}
+
+function writeVisits(repo: Repo, visits: Map<string, GroomVisit>): void {
+  const content = `${JSON.stringify({ version: 1, visits: Object.fromEntries(visits) }, null, 2)}\n`;
+  // Never write a file that the bounded reader would refuse on the next pass.
+  if (Buffer.byteLength(content) > 1024 * 1024) storageError("groom");
+  storageDirectory(repo, true, "groom");
+  const directory = join(stateDir(repo), "groom");
+  const temps = new Set<string>();
+  try {
+    const temp = stageFile(directory, "visits", content, temps);
+    renameSync(temp, join(directory, "visits.json"));
+    temps.delete(temp);
+  } catch {
+    storageError("groom");
+  } finally {
+    for (const temp of temps) unlinkSync(temp);
+  }
+}
+
+function pruneVisits(visits: Map<string, GroomVisit>, candidates: Map<string, string>): boolean {
+  let dropped = false;
+  for (const path of visits.keys()) {
+    if (candidates.has(path)) continue;
+    visits.delete(path);
+    dropped = true;
+  }
+  return dropped;
+}
+
+export function groomNext(
+  repo: Repo,
+  count: number,
+): { path: string; blob: string; reason: "new" | "changed" | "oldest" }[] {
+  if (!Number.isSafeInteger(count) || count < 1 || count > 50) throw new WtError(2, "Invalid groom count.");
+  return mutate(
+    repo,
+    () => {
+      const candidates = groomCandidates(repo);
+      const visits = readVisits(repo);
+      if (pruneVisits(visits, candidates)) writeVisits(repo, visits);
+      const ranked = [...candidates].map(([path, blob]) => {
+        const visit = visits.get(path);
+        const reason = !visit ? "new" : visit.blob !== blob ? "changed" : "oldest";
+        return { path, blob, reason, at: visit ? Date.parse(visit.at) : 0 } as const;
+      });
+      const priority = { new: 0, changed: 1, oldest: 2 };
+      ranked.sort(
+        (a, b) =>
+          priority[a.reason] - priority[b.reason] || a.at - b.at || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
+      );
+      return ranked.slice(0, count).map(({ path, blob, reason }) => ({ path, blob, reason }));
+    },
+    "groom",
+  );
+}
+
+export function groomVisited(repo: Repo, path: string, blob: string, findings: number): void {
+  if (!validInputPath(path)) throw new WtError(2, "Invalid groom path.");
+  if (typeof blob !== "string" || blob.length !== 40 || !BLOB.test(blob)) throw new WtError(2, "Invalid groom blob.");
+  if (!groomFindingsCount(findings)) throw new WtError(2, "Invalid groom findings count.");
+  mutate(
+    repo,
+    () => {
+      const candidates = groomCandidates(repo);
+      if (!candidates.has(path)) throw new WtError(2, "The path is not a groom candidate at HEAD.");
+      if (candidates.get(path) !== blob) throw new WtError(2, "The blob does not match HEAD for that path.");
+      const visits = readVisits(repo);
+      pruneVisits(visits, candidates);
+      visits.set(path, { blob, at: new Date().toISOString(), findings });
+      writeVisits(repo, visits);
+    },
+    "groom",
+  );
+}
+
+function options(args: string[], spec: Parameters<typeof parseFlags>[1], max = 0, store: Store = "findings") {
   try {
     return parseFlags(args, spec, max);
   } catch {
-    throw new WtError(2, "Invalid findings options.");
+    throw new WtError(2, `Invalid ${store} options.`);
   }
 }
 
 export const commands: CommandTable = {
+  groom({ repo, args }) {
+    const [action, ...rest] = args;
+    if (action === "next") {
+      const { flags } = options(rest, { count: "string" }, 0, "groom");
+      const count = flags.count ?? "5";
+      if (typeof count !== "string" || count.trim() !== count || !/^[1-9][0-9]*$/.test(count))
+        throw new WtError(2, "Invalid groom count.");
+      process.stdout.write(`${JSON.stringify(groomNext(repo, Number(count)), null, 2)}\n`);
+      return 0;
+    }
+    if (action === "visited") {
+      const { flags, positionals } = options(rest, { blob: "string", findings: "string" }, 1, "groom");
+      if (positionals.length !== 1 || typeof flags.blob !== "string" || typeof flags.findings !== "string")
+        throw new WtError(2, "Invalid groom options.");
+      if (flags.findings.trim() !== flags.findings || !/^(0|[1-9][0-9]*)$/.test(flags.findings))
+        throw new WtError(2, "Invalid groom findings count.");
+      groomVisited(repo, positionals[0] as string, flags.blob, Number(flags.findings));
+      return 0;
+    }
+    throw new WtError(2, "Unknown groom action. Run bin/wt help.");
+  },
   findings({ repo, args }) {
     const [action, ...rest] = args;
     if (action === "add") {
