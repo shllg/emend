@@ -17,6 +17,7 @@ const SKILLS = [
   "e-issue",
   "e-outside",
   "e-loop",
+  "e-groom",
 ];
 
 // Built from parts so this file does not match its own patterns.
