@@ -672,6 +672,8 @@ varies). Compare the unrounded ratio and report two decimals, for example
   `bg-sunken`, and `diff-del-bg` over `bg-sunken`.
 - `fg-1` on `bg-selected`, `bg-hover`, `bg-active`, `accent-tint`, `mark-bg`, `mark-bg-active`, `topic-bg-2`;
   `fg-reading` on `mark-bg` over `bg-reading`.
+- For diagram notes: `fg-1` on `topic-bg-2` over `bg-sunken`. Node and edge labels use
+  the existing `fg-1` on `bg-surface` pair.
 - `accent-fg` on `accent`, `accent-hover`, `accent-press`.
 - `success-fg`, `info-fg`, `warning-fg`, `danger-fg` on their own `-bg` and on `bg-surface`.
 - `state-{open,approved,settled,snoozed}-fg`, `outcome-{fixed,explained,held,declined}-fg` and
@@ -682,6 +684,8 @@ varies). Compare the unrounded ratio and report two decimals, for example
   `fg-1`, `fg-2` on `diff-hunk-bg`; `fg-1` on `diff-select-bg`.
 - `syn-plain` on `diff-add-word` (over `diff-add-bg`), `diff-del-word` (over `diff-del-bg`),
   `diff-add-hover`, `diff-del-hover` and `diff-select-bg`.
+- For docs shown as source: `syn-plain` on `bg-reading`, `mark-bg` over `bg-reading`, and
+  `accent-tint` over `bg-reading`.
 
 These pairs require 3 to 1:
 
@@ -690,11 +694,13 @@ These pairs require 3 to 1:
   `diff-add-word` (over `diff-add-bg`), `diff-del-word` (over `diff-del-bg`), `diff-add-hover`,
   `diff-del-hover` and `diff-select-bg`.
 - `diff-add-fg` and `diff-del-fg` on `bg-sunken` for inserted and deleted code tokens.
+- For docs shown as source: the seven syntax highlight colours above, `diff-add-fg` and
+  `diff-del-fg` on `bg-reading`, `mark-bg` over `bg-reading`, and `accent-tint` over `bg-reading`.
 - For the Download: `fg-reading-muted` on `bg-sunken`, on `diff-add-bg` over `bg-sunken` and on
   `diff-del-bg` over `bg-sunken`.
 
 Hovered context lines use `bg-hover` composited over `bg-surface`. Disabled text is exempt.
-Both built-in bases pass all 165 pairs.
+Both built-in bases pass all 196 pairs.
 
 Before the HTTP server listens, `startServer` awaits `watchThemes`, which waits at most
 `baselineWaitMs` (default 1000 ms) for its first fingerprint. In time, it becomes the baseline without an event. After

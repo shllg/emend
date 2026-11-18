@@ -1,12 +1,15 @@
+// Backdrops precede the colours drawn over them, so every blend uses an opaque sRGB colour.
 const colorTokens = {
-  background: "--bg-sunken",
-  surface: "--bg-surface",
-  text: "--fg-1",
-  text2: "--fg-2",
-  line: "--fg-3",
-  border: "--border-2",
-  accentBg: "--topic-bg-2",
-  accent: "--topic-solid",
+  background: ["--bg-sunken", null],
+  surface: ["--bg-surface", "background"],
+  accentBg: ["--topic-bg-2", "background"],
+  text: ["--fg-1", "background"],
+  text2: ["--fg-2", "background"],
+  line: ["--fg-3", "background"],
+  border: ["--border-2", "background"],
+  accent: ["--topic-solid", "background"],
+  nodeText: ["--fg-1", "surface"],
+  noteText: ["--fg-1", "accentBg"],
 } as const;
 export type MermaidColors = Record<keyof typeof colorTokens, string>;
 
@@ -18,9 +21,6 @@ export function readMermaidColors(): MermaidColors | undefined {
     const context = canvas.getContext("2d", { colorSpace: "srgb", alpha: false });
     if (!context) return;
     const computed = getComputedStyle(document.documentElement);
-    const values = Object.fromEntries(
-      Object.entries(colorTokens).map(([key, token]) => [key, computed.getPropertyValue(token).trim()]),
-    ) as MermaidColors;
     const fill = (value: string) => {
       if (!value) throw new Error("Missing colour");
       // An invalid canvas colour leaves fillStyle unchanged. Two sentinels also accept either sentinel as input.
@@ -38,16 +38,13 @@ export function readMermaidColors(): MermaidColors | undefined {
       if (r === undefined || g === undefined || b === undefined || alpha !== 255) throw new Error("Invalid pixel");
       return `#${[r, g, b].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
     };
-    fill(values.background);
-    const background = hex();
-    return Object.fromEntries(
-      Object.entries(values).map(([key, value]) => {
-        if (key === "background") return [key, background];
-        fill(background);
-        fill(value);
-        return [key, hex()];
-      }),
-    ) as MermaidColors;
+    const colors = {} as MermaidColors;
+    for (const [key, [token, backdrop]] of Object.entries(colorTokens)) {
+      if (backdrop) fill(colors[backdrop]);
+      fill(computed.getPropertyValue(token).trim());
+      colors[key as keyof MermaidColors] = hex();
+    }
+    return colors;
   } catch {
     // Missing canvas support or an unconvertible token keeps the frame's built-in palette.
     return;

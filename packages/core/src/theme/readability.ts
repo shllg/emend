@@ -33,6 +33,7 @@ export const THEME_READABILITY_PAIRS: readonly ThemeReadabilityPair[] = [
     ["bg-selected", "bg-hover", "bg-active", "accent-tint", "mark-bg", "mark-bg-active", "topic-bg-2"],
   ),
   { foreground: "fg-reading", background: "mark-bg", over: "bg-reading", minimum: 4.5 },
+  { foreground: "fg-1", background: "topic-bg-2", over: "bg-sunken", minimum: 4.5 },
   ...pairs(["accent-fg"], ["accent", "accent-hover", "accent-press"]),
   ...ownBackgrounds(["success", "info", "warning", "danger"]),
   ...pairs(["success-fg", "info-fg", "warning-fg", "danger-fg"], ["bg-surface"]),
@@ -43,6 +44,25 @@ export const THEME_READABILITY_PAIRS: readonly ThemeReadabilityPair[] = [
   ...ownBackgrounds(Array.from({ length: 8 }, (_, i) => `origin-${i + 1}`)),
   ...pairs(["syn-plain"], ["bg-surface", "bg-sunken", "bg-hover", "diff-add-bg", "diff-del-bg"]),
   ...pairs(["syn-plain"], ["diff-add-hover", "diff-del-hover", "diff-select-bg"]),
+  ...pairs(
+    [
+      "syn-plain",
+      "syn-keyword",
+      "syn-type",
+      "syn-function",
+      "syn-string",
+      "syn-number",
+      "syn-comment",
+      "syn-punct",
+      "diff-add-fg",
+      "diff-del-fg",
+    ],
+    ["bg-reading", "mark-bg", "accent-tint"],
+  ).map((pair) => ({
+    ...pair,
+    ...(pair.background === "bg-reading" ? {} : { over: "bg-reading" as const }),
+    minimum: pair.foreground === "syn-plain" ? 4.5 : 3,
+  })),
   ...["add", "del"].flatMap((kind) =>
     pairs(
       ["syn-plain", "syn-keyword", "syn-type", "syn-function", "syn-string", "syn-number", "syn-comment", "syn-punct"],

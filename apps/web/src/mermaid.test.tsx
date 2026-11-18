@@ -1181,7 +1181,7 @@ test.each([false, true])("frame locks its base theme to the embedding colour sch
           actorLineColor: border,
           labelBoxBorderColor: border,
           secondaryColor: topicBg,
-          ...(dark ? { edgeLabelBackground: sunken } : {}),
+          edgeLabelBackground: surface,
           noteBkgColor: topicBg,
           noteBorderColor: topicBg,
           activationBkgColor: topicBg,
@@ -1463,14 +1463,24 @@ const ownColors = {
   border: "#605040",
   accentBg: "#304050",
   accent: "#607080",
+  nodeText: "#e0d0c0",
+  noteText: "#d0c0b0",
 };
 
 test.each([false, true])("frame edge labels use checked theme backgrounds (dark=%s)", (dark) => {
   for (const colors of [undefined, ownColors]) {
     const variables = frameConfig(dark, colors).themeVariables;
     expect(variables).toHaveProperty("secondaryColor", colors?.accentBg ?? (dark ? "#043232" : "#c2f3f0"));
-    if (dark) expect(variables).toHaveProperty("edgeLabelBackground", colors?.background ?? "#060708");
-    else expect(variables).not.toHaveProperty("edgeLabelBackground");
+    const surface = colors?.surface ?? (dark ? "#111213" : "#fdfdfe");
+    const nodeText = colors?.nodeText ?? (dark ? "#f4f4f6" : "#111213");
+    expect(variables).toMatchObject({
+      primaryColor: surface,
+      actorBkg: surface,
+      edgeLabelBackground: surface,
+      primaryTextColor: nodeText,
+      actorTextColor: nodeText,
+      noteTextColor: colors?.noteText ?? (dark ? "#f4f4f6" : "#111213"),
+    });
   }
 });
 
@@ -1542,7 +1552,7 @@ test("both diagram views reload when an own theme is picked or its colours chang
   expect(frames()).toEqual(stable);
 });
 
-test.each([false, true])("frame accepts exactly eight lowercase hex colours (dark=%s)", async (dark) => {
+test.each([false, true])("frame accepts exactly ten lowercase hex colours (dark=%s)", async (dark) => {
   const root = document.createElement("div");
   const source = 'graph TD; A-->B; click A "javascript:alert(1)"';
   mermaid.render.mockResolvedValue({
@@ -1571,10 +1581,10 @@ test.each([false, true])("frame accepts exactly eight lowercase hex colours (dar
       labelBoxBkgColor: ownColors.background,
       primaryColor: ownColors.surface,
       actorBkg: ownColors.surface,
-      primaryTextColor: ownColors.text,
+      primaryTextColor: ownColors.nodeText,
       textColor: ownColors.text,
-      noteTextColor: ownColors.text,
-      actorTextColor: ownColors.text,
+      noteTextColor: ownColors.noteText,
+      actorTextColor: ownColors.nodeText,
       signalColor: ownColors.text2,
       signalTextColor: ownColors.text2,
       labelTextColor: ownColors.text2,
@@ -1585,6 +1595,7 @@ test.each([false, true])("frame accepts exactly eight lowercase hex colours (dar
       actorLineColor: ownColors.border,
       labelBoxBorderColor: ownColors.border,
       secondaryColor: ownColors.accentBg,
+      edgeLabelBackground: ownColors.surface,
       noteBkgColor: ownColors.accentBg,
       noteBorderColor: ownColors.accentBg,
       activationBkgColor: ownColors.accentBg,
@@ -1620,11 +1631,11 @@ test.each([false, true])("frame accepts exactly eight lowercase hex colours (dar
       null,
       1,
     ];
-    const missing = { background: ownColors.background };
     for (const colors of [
       ...Object.keys(ownColors).flatMap((key) => invalidValues.map((value) => ({ ...ownColors, [key]: value }))),
+      ...Object.keys(ownColors).map((key) => Object.fromEntries(Object.entries(ownColors).filter(([k]) => k !== key))),
       { ...ownColors, extra: "#abcdef" },
-      missing,
+      { background: ownColors.background },
       null,
       [],
       "#ffffff",

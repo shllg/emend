@@ -2725,7 +2725,7 @@ const threadPage = (kind: (typeof threadPageKinds)[number], threads: FileThreads
 
 // Reading CSS includes syntax base tokens; thread and diff CSS retain their original bytes.
 const systemStyleHashes = [
-  "2acc5db4a523f24046fa4808c664d656e34c1c2a89b633d3ea72e087912acab9",
+  "39dd863644fe28083056a3bf37a039251672cd5050f5ed048de6e88410128cc2",
   "4ccb0e73df0d25d3c35164825b62358d1f4475da66df85dff6e897350fce5e72",
   "b498db6a7c457faef4b17a4b2343cc19b0c9eeaf59ae33752fb9aa18ba983f97",
 ];
@@ -2983,14 +2983,14 @@ async function commentsOffOutputs(builders: CompatibilityBuilders) {
 
 // Baseline without comments, updated for the syntax base CSS; HTML docs retain their original bytes.
 const commentsOffHashes = {
-  writeup: "1273df9aacdb64226ca10ee01b78aeb9049ba553712004b87a28ef238b824200",
-  markdown: "b1aa218a298a850f8500b2e1aca8156e0ff713df87638dfc4ddaf6f37f375f56",
-  source: "5b9b9b012e333b203af5d9112a1841f1978fc38e91e4c017c4c907143f4d91a7",
-  emptySource: "0c60a13682dd5938334a5d9c945754e91e7c56f90ba05646a80a534c4b50d600",
-  unrenderedSource: "25c1b515c1fdb093375b60628b957c82c9a4d0fba5b9ea14fe2521ce20c22901",
+  writeup: "599537df4bce2fbabee2af7809feb7ad7206e39c3d23eb2908d57fd5f105c7ca",
+  markdown: "f956df6e2ce53e2b4fe18db84588faa615aef76e55747da10ab1de22fe9ba842",
+  source: "a87967f30e8e49fc10a5236ab903a47d42baac6ce46a0613360ba55386603533",
+  emptySource: "7d5b76b40111b0a8e49bf4149f7265677bd321a0f54d30e4ee37264830ed7a99",
+  unrenderedSource: "d259e459fc2a0b6769658c42c1b8703b137bf52a3caf5b1f0ac119b4f03d5d28",
   html: "ebd1d21e1b7d438fa77910ed4a617b0850bbc687dc44b06aab36d42194f329e7",
-  overLimitHtml: "86da97434d5be4da584370b3bcd82517608189ce41237baf78fce8178e6e4aa1",
-  omitted: "86da97434d5be4da584370b3bcd82517608189ce41237baf78fce8178e6e4aa1",
+  overLimitHtml: "be2a7658625e0d556ec94d6b3757a834af3655504f254d89c0404592a5ef427b",
+  omitted: "be2a7658625e0d556ec94d6b3757a834af3655504f254d89c0404592a5ef427b",
 };
 test("comments-off output matches the pinned builder hashes", async () => {
   const outputs = await commentsOffOutputs({

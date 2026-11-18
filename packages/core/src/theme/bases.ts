@@ -270,6 +270,7 @@ export const DARK_THEME: ThemeBaseTable = {
   "syn-function": "oklch(0.8 0.07 245)",
   "syn-string": "oklch(0.8 0.08 145)",
   "syn-number": "oklch(0.8 0.08 55)",
+  "syn-comment": "oklch(0.61 0.004 260)",
   "syn-punct": "n-400",
   "diff-add-bg": "oklch(0.63 0.15 150 / 0.085)",
   "diff-add-word": "oklch(0.63 0.15 150 / 0.16)",

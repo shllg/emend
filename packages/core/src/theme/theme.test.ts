@@ -24,13 +24,34 @@ test.each(["dark", "light"] as const)("%s passes all readability pairs", (base) 
   expect(check({ version: 1, base })).toMatchObject({ base, scales: {}, tokens: {}, fonts: {} });
   expect(themeReadabilityProblems(resolveTheme(base), base)).toEqual([]);
 });
-test("the readability set covers exactly the design's 165 pairs", () => {
-  expect(THEME_READABILITY_PAIRS).toHaveLength(165);
-  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.minimum === 3)).toHaveLength(75);
-  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.over)).toHaveLength(23);
+test("the readability set covers exactly the design's 196 pairs", () => {
+  expect(THEME_READABILITY_PAIRS).toHaveLength(196);
+  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.minimum === 3)).toHaveLength(102);
+  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.over)).toHaveLength(44);
   expect(THEME_READABILITY_PAIRS).toEqual(
     expect.arrayContaining([
       { foreground: "fg-reading", background: "mark-bg", over: "bg-reading", minimum: 4.5 },
+      { foreground: "fg-1", background: "topic-bg-2", minimum: 4.5 },
+      { foreground: "fg-1", background: "topic-bg-2", over: "bg-sunken", minimum: 4.5 },
+      ...[
+        "syn-plain",
+        "syn-keyword",
+        "syn-type",
+        "syn-function",
+        "syn-string",
+        "syn-number",
+        "syn-comment",
+        "syn-punct",
+        "diff-add-fg",
+        "diff-del-fg",
+      ].flatMap((foreground) =>
+        ["bg-reading", "mark-bg", "accent-tint"].map((background) => ({
+          foreground,
+          background,
+          ...(background === "bg-reading" ? {} : { over: "bg-reading" }),
+          minimum: foreground === "syn-plain" ? 4.5 : 3,
+        })),
+      ),
       ...["fg-reading", "fg-reading-strong", "fg-reading-muted"].flatMap((foreground) =>
         ["bg-sunken", "diff-add-bg", "diff-del-bg"].map((background) => ({
           foreground,
@@ -91,6 +112,26 @@ test("hovered context lines refuse faint syntax colours on bg-hover", () => {
   expect(problems({ version: 1, base: "light", tokens: { "bg-hover": "#7c7c7c" } })).toContainEqual(
     expect.stringMatching(/^syn-comment on bg-hover: .* to 1, needs 3 to 1\.$/),
   );
+});
+test("refuses a theme whose only unreadable pair is syntax on bg-reading", () => {
+  const theme = themeCopyDocument("light");
+  theme.tokens = { ...theme.tokens, "fg-reading-muted": "#000000", "mark-bg": "#ffffff" };
+  check(theme);
+  theme.tokens["bg-reading"] = "#d0d0d0";
+  expect(problems(theme)).toEqual([expect.stringMatching(/^syn-comment on bg-reading: .* to 1, needs 3 to 1\.$/)]);
+});
+test("refuses syntax hidden by accent-tint over bg-reading", () => {
+  const theme = themeCopyDocument("light");
+  check(theme);
+  theme.tokens = { ...theme.tokens, "accent-tint": "#00000030" };
+  expect(problems(theme)).toEqual([expect.stringMatching(/^syn-comment on accent-tint: .* to 1, needs 3 to 1\.$/)]);
+});
+test("refuses note text readable on topic-bg-2 over bg-surface but hidden over bg-sunken", () => {
+  const theme = themeCopyDocument("light");
+  theme.tokens = { ...theme.tokens, "fg-1": "#505050", "topic-fg": "#000000", "topic-bg-2": "#00000030" };
+  check(theme);
+  theme.tokens["bg-sunken"] = "#e8e8e8";
+  expect(problems(theme)).toEqual([expect.stringMatching(/^fg-1 on topic-bg-2: .* to 1, needs 4.5 to 1\.$/)]);
 });
 test.each([
   [null, "The file must hold a JSON object."],

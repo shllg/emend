@@ -22,8 +22,10 @@ function mockCanvas(tokens: Record<string, string> = values) {
     if (value === values["--bg-sunken"]) return [32, 64, 96, 1];
     if (value === "rgba(32, 64, 96, 0.5)") return [32, 64, 96, 0.5];
     if (value === values["--fg-2"]) return [255, 255, 255, 0.5];
-    if (/^#[0-9a-f]{6}$/i.test(value))
-      return [1, 3, 5].map((i) => Number.parseInt(value.slice(i, i + 2), 16)).concat(1);
+    if (/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(value))
+      return [1, 3, 5]
+        .map((i) => Number.parseInt(value.slice(i, i + 2), 16))
+        .concat(value.length === 9 ? Number.parseInt(value.slice(7), 16) / 255 : 1);
     return;
   };
   let fillStyle = "#000000";
@@ -60,6 +62,8 @@ test("reads applied tokens and converts to opaque lowercase sRGB, compositing ov
     border: "#010203",
     accentBg: "#040506",
     accent: "#abcdef",
+    nodeText: "#ffffff",
+    noteText: "#ffffff",
   });
   expect(getContext).toHaveBeenCalledExactlyOnceWith("2d", { colorSpace: "srgb", alpha: false });
   expect(getContext.mock.instances[0]).toMatchObject({ width: 1, height: 1 });
@@ -78,6 +82,24 @@ test.each(["", "var(--missing)", "url(x)", "not-a-colour"])(
 test("a translucent background is made opaque once before compositing the other tokens", () => {
   mockCanvas({ ...values, "--bg-sunken": "rgba(32, 64, 96, 0.5)" });
   expect(readMermaidColors()).toMatchObject({ background: "#102030", text2: "#889098" });
+});
+
+test("translucent text composites over its node, note and diagram backgrounds", () => {
+  mockCanvas({
+    ...values,
+    "--bg-sunken": "#000000",
+    "--bg-surface": "#303030",
+    "--fg-1": "#ffffff80",
+    "--topic-bg-2": "#20406080",
+  });
+  expect(readMermaidColors()).toMatchObject({
+    background: "#000000",
+    surface: "#303030",
+    accentBg: "#102030",
+    text: "#808080",
+    nodeText: "#989898",
+    noteText: "#889098",
+  });
 });
 
 test("omits colours without a canvas or readable pixels", () => {
