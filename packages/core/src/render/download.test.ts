@@ -269,9 +269,9 @@ test.each([undefined, "dark", "light"] as const)(
     expectHead(markdown);
     expect(markdown).toContain("Stored Markdown");
     for (const html of [markdown, await render(blocks, undefined, theme)]) {
-      expect(html).toContain("--shiki-light:");
-      expect(html).toContain("--shiki-dark:");
-      expect(html).toContain(`color:var(--shiki-${theme ?? "light"},inherit)`);
+      expect(html).toContain("color:var(--syn-keyword)");
+      expect(html).toContain("--syn-plain:");
+      expect(html).toContain(`color:var(--shiki-${theme ?? "light"},var(--syn-plain))`);
       if (theme === "light") expect(html).not.toContain("var(--shiki-dark");
       if (theme) expect(html).not.toContain("prefers-color-scheme");
     }
@@ -293,7 +293,7 @@ test.each([undefined, "dark", "light"] as const)(
     });
     expectHead(source);
     expect(source).toContain('style="--shiki-light:#123456;--shiki-dark:#abcdef"');
-    expect(source).toContain(`color:var(--shiki-${theme ?? "light"},inherit)`);
+    expect(source).toContain(`color:var(--shiki-${theme ?? "light"},var(--syn-plain))`);
     if (theme === "light") expect(source).not.toContain("var(--shiki-dark");
     if (theme) expect(source).not.toContain("prefers-color-scheme");
     expect(source).not.toContain("red;url");
@@ -2691,7 +2691,7 @@ const serializedCard = (html: string) => {
   return card;
 };
 const indexOfText = (html: string, needle: string) => {
-  const at = html.indexOf(needle);
+  const at = html.indexOf(needle, html.indexOf("<body>"));
   expect(at, needle).toBeGreaterThan(-1);
   return at;
 };
@@ -2721,9 +2721,9 @@ const threadPage = (kind: (typeof threadPageKinds)[number], threads: FileThreads
   }
 };
 
-// CSS hashes captured before fixed download themes; System must keep the same bytes.
+// Reading CSS includes syntax base tokens; thread and diff CSS retain their original bytes.
 const systemStyleHashes = [
-  "2cdfba18a99ae6f510cdc4907337164744e451bba7e48d465478bf70f1b99305",
+  "445c4526be329501d4839d7321c9e91c1b656393e62b15e92a48c55b872f6da1",
   "4ccb0e73df0d25d3c35164825b62358d1f4475da66df85dff6e897350fce5e72",
   "b498db6a7c457faef4b17a4b2343cc19b0c9eeaf59ae33752fb9aa18ba983f97",
 ];
@@ -2737,7 +2737,7 @@ function expectFixedTheme(html: string, theme: ThemeBase) {
   const styles = pageStyles(html).join("\n");
   expect(styles).toContain(`:root{color-scheme:${theme};`);
   expect(styles).not.toContain("prefers-color-scheme");
-  expect(styles).toContain(`.shiki,.shiki span{color:var(--shiki-${theme},inherit)}`);
+  expect(styles).toContain(`.shiki,.shiki span{color:var(--shiki-${theme},var(--syn-plain))}`);
   expect(styles).toContain(`.shiki{background-color:var(--shiki-${theme}-bg,var(--sunken))}`);
   if (theme === "dark") {
     expect(styles).toContain(":root{--bg:oklch(.18 .004 260)");
@@ -2912,18 +2912,18 @@ async function commentsOffOutputs(builders: CompatibilityBuilders) {
   };
 }
 
-// Hashes come from the builder before comments existed; change only with an intended markup change.
+// Baseline without comments, updated for the syntax base CSS; HTML docs retain their original bytes.
 const commentsOffHashes = {
-  writeup: "7ef645b00c7986fd9c2cf1892e682d0fd4828609b9d2aa2d03373debef3e1c36",
-  markdown: "8999a91827a926e16583a2ce3d19a563b8f710fbf43c6c64e9b993ceaccba705",
-  source: "3eb892ff22a6cde3105a940cca2c0ad8b8f88ac804a1f515e66b23029855bbf6",
-  emptySource: "7c9b648a61a96a406da701dcc70b7637cc3ff9a2ff32f269fe0ec43d9d0f77ff",
-  unrenderedSource: "ac1fd35ef0394b7c543bde51ef13fad63da31a980f188a2a36b1fceec466725e",
+  writeup: "ee015982cc43e7811f4c88a4b140b829bf15d7e9a2cbb2ff728a54b33998b53b",
+  markdown: "8928141039d330df18ce7ec389b725552881fe1ad1f2ba9430a3f34349b1bc34",
+  source: "05bb4ce53f45e6040c34894825e3ecc94f36fc4057ca0609a864bb820a36817a",
+  emptySource: "cd9c3ca4afcd9bdab40739487c2a3c5b3fc569e26c66aa945f1317eb46d448f7",
+  unrenderedSource: "6997f35f9b8957c1d4c85a6aacf973cfef2a3a7aadd5b2917f2da34bc148fd21",
   html: "ebd1d21e1b7d438fa77910ed4a617b0850bbc687dc44b06aab36d42194f329e7",
-  overLimitHtml: "9123b3e00b6e45188b0858cfea33b2216c843dc60f3ea45714e10aac0586b6b6",
-  omitted: "9123b3e00b6e45188b0858cfea33b2216c843dc60f3ea45714e10aac0586b6b6",
+  overLimitHtml: "3801a3ca2ea493d95456811aa422e62b627ff2cf4950d3448ac850fd301e65ae",
+  omitted: "3801a3ca2ea493d95456811aa422e62b627ff2cf4950d3448ac850fd301e65ae",
 };
-test("comments-off output matches the pre-comments builder hashes", async () => {
+test("comments-off output matches the pinned builder hashes", async () => {
   const outputs = await commentsOffOutputs({
     buildWriteupDownload,
     buildDocDownload,

@@ -26,10 +26,10 @@ with the reviewer's session can send instructions to the waiting agent in the re
 - `dangerouslySetInnerHTML` takes only server-rendered HTML, and only in `BlockView.tsx`: blocks
   from the pipeline above, and comment `html` from the same pipeline through the link hardener,
   without Shiki. Client code never sets `innerHTML`, `outerHTML` or `insertAdjacentHTML`.
-- A doc shown as source never becomes HTML. The server turns it into Shiki tokens (raw text plus
-  light and dark colors the contract checks as hex); the web renders each token as React text whose
-  only style is `--shiki-light` and `--shiki-dark` from those colors. Its row is a `text/plain` doc
-  that the content path never serves, also when its path ends in `.html`.
+- A doc shown as source never becomes HTML. The server makes Shiki tokens: raw text and a syntax
+  role (older revisions: hex colors) the contract checks, shown as React text styled only by the
+  role's variable or `--shiki-light`/`--shiki-dark`. Its row is a `text/plain` doc that the content
+  path never serves, also when its path ends in `.html`.
 - Never serve agent-written HTML, JS or CSS on the app origin. HTML docs and their assets load
   only from `/content/<doc key>/…` with `Content-Security-Policy: sandbox allow-scripts; …` (plan,
   Global Constraints), in an iframe with `sandbox="allow-scripts"` and nothing else. Never add
@@ -51,8 +51,8 @@ with the reviewer's session can send instructions to the waiting agent in the re
 - Mermaid: one frame per diagram from `/mermaid-frame.html` (built from
   `apps/web/mermaid-frame.html` and `mermaid-frame.ts`), `sandbox="allow-scripts"`
   without `allow-same-origin`, a bundled and pinned Mermaid (never a CDN), `securityLevel:
-  "strict"`, `startOnLoad: false`. The frame accepts messages only from its parent. A diagram is
-  commented on as a whole block.
+  "strict"`, `startOnLoad: false`. The frame accepts messages only from its parent; colors only
+  `#rrggbb`. A diagram is commented on as a whole block.
 - Block ids are `<section>-<hash8>` over the normalized text. Never derive an id from position.
 - Diff text renders as text through `@pierre/diffs`, never as HTML.
 - App pages: `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'

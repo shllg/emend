@@ -359,3 +359,17 @@ test("reading components use semantic colours, with white reserved for the isola
   expect(frame).toMatch(/:root\s*\{\s*color-scheme:\s*light dark/);
   expect(frame).toMatch(/body\s*\{\s*background:\s*transparent/);
 });
+
+test("code blocks keep legacy Shiki theme rules and use syntax plain as their fallback", () => {
+  const prose = readFileSync(join(webSource, "styles/prose.css"), "utf8");
+  for (const mode of ["light", "dark"]) {
+    expect(prose).toContain(`color: var(--shiki-${mode}, var(--syn-plain));`);
+    expect(prose).toContain(`background-color: var(--shiki-${mode}-bg, var(--bg-sunken));`);
+  }
+  expect(prose).toContain(':root:not([data-theme="light"]) .em-prose .shiki span');
+  expect(prose).toContain('[data-theme="dark"] .em-prose .shiki span');
+  expect(prose).toMatch(/\.em-prose pre code\s*\{[^}]*color: var\(--syn-plain\)/);
+  expect(readFileSync(join(webSource, "styles/source.css"), "utf8")).toMatch(
+    /\.em-source-code\s*\{[^}]*color: var\(--syn-plain\)/,
+  );
+});

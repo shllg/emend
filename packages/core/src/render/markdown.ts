@@ -122,8 +122,14 @@ async function createProcessor() {
     .use(markTerms)
     .use(limitHighlighting, highlighter.getLoadedLanguages())
     .use(rehypeShiki, highlighter, {
-      themes: { light: "github-light", dark: "github-dark" },
-      defaultColor: false,
+      theme: "emend",
+      transformers: [
+        {
+          pre(node) {
+            delete node.properties.style;
+          },
+        },
+      ],
       stripEndNewline: false,
       tokenizeMaxLineLength: HIGHLIGHT_LINE_CHARS,
       // Unknown languages stay plain; lazy loading and metadata transformers are disabled.

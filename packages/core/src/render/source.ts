@@ -2,6 +2,7 @@ import type { SourceContent, SourceToken } from "@emend/contract";
 import { splitLines } from "../place/linemap.ts";
 import { HIGHLIGHT_LINE_CHARS } from "./highlight.ts";
 import { sharedHighlighter } from "./highlighter.ts";
+import { syntaxRole } from "./syntax-theme.ts";
 
 // Synthetic TS, Node 26: 64 KiB 379 ms, 256 KiB 997 ms, 1 MiB 3879 ms.
 export const HIGHLIGHT_SOURCE_BYTES = 256 * 1024;
@@ -44,9 +45,9 @@ export async function renderSource(text: string, path: string, highlight = true)
   const plain = () => raw.map((text) => [{ text }]);
   if (language === "text" || !raw.length) return { language, lines: plain() };
   const highlighter = await sharedHighlighter();
-  const tokens = highlighter.codeToTokensWithThemes(raw.join("\n"), {
+  const { tokens } = highlighter.codeToTokens(raw.join("\n"), {
     lang: language,
-    themes: { light: "github-light", dark: "github-dark" },
+    theme: "emend",
     tokenizeMaxLineLength: HIGHLIGHT_LINE_CHARS,
   });
   // Shiki may split lone CRs; placement deliberately does not. Preserve the original lines.
@@ -55,11 +56,11 @@ export async function renderSource(text: string, path: string, highlight = true)
     if (line.map((token) => token.content).join("") !== raw[index]) return [{ text: raw[index] ?? "" }];
     const merged: SourceToken[] = [];
     for (const token of line) {
-      const light = token.variants.light?.color;
-      const dark = token.variants.dark?.color;
+      const role = syntaxRole(token.color);
+      const syntax = role === "plain" ? undefined : role;
       const previous = merged.at(-1);
-      if (previous && previous.light === light && previous.dark === dark) previous.text += token.content;
-      else merged.push({ text: token.content, ...(light ? { light } : {}), ...(dark ? { dark } : {}) });
+      if (previous && previous.syntax === syntax) previous.text += token.content;
+      else merged.push({ text: token.content, ...(syntax ? { syntax } : {}) });
     }
     return merged;
   });

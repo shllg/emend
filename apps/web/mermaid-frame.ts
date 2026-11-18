@@ -1,4 +1,5 @@
 import mermaid, { type MermaidConfig } from "mermaid";
+import type { MermaidColors } from "./src/components/reading/mermaid-colors.ts";
 
 const MAX_SOURCE = 50000;
 // Mermaid parses types like state charts at about 1 ms per statement; refuse longer diagrams before parsing.
@@ -192,11 +193,35 @@ export function sanitizeSvg(source: string): SVGElement {
   }
   return document.importNode(svg, true) as unknown as SVGElement;
 }
-export function frameConfig(dark: boolean): MermaidConfig {
+function parseColors(value: unknown): MermaidColors | undefined {
+  if (!value || typeof value !== "object") return;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return;
+  const keys = ["background", "surface", "text", "text2", "line", "border", "accentBg", "accent"] as const;
+  if (Reflect.ownKeys(value).length !== keys.length) return;
+  for (const key of keys) {
+    const color: unknown = Object.getOwnPropertyDescriptor(value, key)?.value;
+    if (typeof color !== "string" || !/^#[0-9a-f]{6}$(?![\s\S])/.test(color)) return;
+  }
+  return value as MermaidColors;
+}
+
+export function frameConfig(dark: boolean, colors?: MermaidColors): MermaidConfig {
   // sRGB: bg-sunken, bg-surface, fg-1/2/3, border-2, topic-bg-2 and topic-solid.
-  const [sunken, surface, fg, fg2, fg3, border, topicBg, topic] = dark
-    ? ["#060708", "#111213", "#f4f4f6", "#c4c6c8", "#9d9ea1", "#2a2b2d", "#043232", "#00a19d"]
-    : ["#f4f4f6", "#fdfdfe", "#111213", "#444547", "#5f6063", "#c4c6c8", "#c2f3f0", "#00807e"];
+  const [sunken, surface, fg, fg2, fg3, border, topicBg, topic] = colors
+    ? [
+        colors.background,
+        colors.surface,
+        colors.text,
+        colors.text2,
+        colors.line,
+        colors.border,
+        colors.accentBg,
+        colors.accent,
+      ]
+    : dark
+      ? ["#060708", "#111213", "#f4f4f6", "#c4c6c8", "#9d9ea1", "#2a2b2d", "#043232", "#00a19d"]
+      : ["#f4f4f6", "#fdfdfe", "#111213", "#444547", "#5f6063", "#c4c6c8", "#c2f3f0", "#00807e"];
   return {
     theme: "base",
     fontFamily: FONT_FAMILY,
@@ -370,13 +395,13 @@ export async function exceedsLimits(source: string): Promise<boolean> {
 }
 export function startFrame(root: HTMLElement) {
   const systemTheme = () => (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-  const applyTheme = (theme: "dark" | "light") => {
-    mermaid.initialize(frameConfig(theme === "dark"));
+  const applyTheme = (theme: "dark" | "light", colors?: MermaidColors) => {
+    mermaid.initialize(frameConfig(theme === "dark", colors));
     document.documentElement.style.colorScheme = theme;
   };
   applyTheme(systemTheme());
   let active = true;
-  let pending: { source: string; theme: "dark" | "light" } | undefined;
+  let pending: { source: string; theme: "dark" | "light"; colors?: MermaidColors } | undefined;
   let rendering = false;
   let sequence = 0;
   let natural: ReturnType<typeof naturalSize> | undefined;
@@ -398,9 +423,9 @@ export function startFrame(root: HTMLElement) {
     rendering = true;
     try {
       while (active && pending !== undefined) {
-        const { source, theme } = pending;
+        const { source, theme, colors } = pending;
         pending = undefined;
-        applyTheme(theme);
+        applyTheme(theme, colors);
         if (source.length > MAX_SOURCE) {
           fallback("This diagram is too large to draw.", source);
           size();
@@ -450,7 +475,7 @@ export function startFrame(root: HTMLElement) {
     )
       return;
     const theme = "theme" in data && (data.theme === "dark" || data.theme === "light") ? data.theme : systemTheme();
-    pending = { source: data.source, theme };
+    pending = { source: data.source, theme, colors: parseColors("colors" in data ? data.colors : undefined) };
     void draw();
   };
   const observer = new ResizeObserver(size);

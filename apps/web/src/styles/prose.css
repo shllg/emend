@@ -118,20 +118,21 @@
     font-feature-settings: var(--mono-features);
   }
   .em-prose pre code {
+    color: var(--syn-plain);
     padding: 0;
     border: 0;
     background: none;
     font: inherit;
     font-feature-settings: var(--mono-features);
   }
-  /* The renderer emits Shiki's theme colours as inline custom properties. */
+  /* Keep Shiki custom properties for legacy blocks; new spans use syntax tokens directly. */
   .em-prose .shiki {
     background-color: var(--shiki-light-bg, var(--bg-sunken));
   }
   .em-prose .shiki,
   .em-prose .shiki span,
   .em-source .em-source-code span {
-    color: var(--shiki-light, inherit);
+    color: var(--shiki-light, var(--syn-plain));
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .em-prose .shiki {
@@ -140,7 +141,7 @@
     :root:not([data-theme="light"]) .em-prose .shiki,
     :root:not([data-theme="light"]) .em-prose .shiki span,
     :root:not([data-theme="light"]) .em-source .em-source-code span {
-      color: var(--shiki-dark, inherit);
+      color: var(--shiki-dark, var(--syn-plain));
     }
   }
   [data-theme="dark"] .em-prose .shiki {
@@ -149,7 +150,7 @@
   [data-theme="dark"] .em-prose .shiki,
   [data-theme="dark"] .em-prose .shiki span,
   [data-theme="dark"] .em-source .em-source-code span {
-    color: var(--shiki-dark, inherit);
+    color: var(--shiki-dark, var(--syn-plain));
   }
   .em-prose blockquote {
     margin: 0 0 12px;

@@ -1,4 +1,4 @@
-import type { RevisionView, SourceLinesTarget, SourceToken } from "@emend/contract";
+import type { RevisionView, SourceLinesTarget, SourceToken, SyntaxRole } from "@emend/contract";
 import { type CSSProperties, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ComposerVisibilityContext } from "../../lib/composer-owner.ts";
 import { Composer } from "../threads/Composer.tsx";
@@ -6,6 +6,19 @@ import { ThreadCard } from "../threads/ThreadCard.tsx";
 import type { ReaderProps } from "./BlockReader.tsx";
 import { BlockThreads } from "./BlockThreads.tsx";
 import { ThreadComposerContext } from "./ThreadComposerContext.ts";
+
+const syntaxColors = {
+  plain: "var(--syn-plain)",
+  keyword: "var(--syn-keyword)",
+  type: "var(--syn-type)",
+  function: "var(--syn-function)",
+  string: "var(--syn-string)",
+  number: "var(--syn-number)",
+  comment: "var(--syn-comment)",
+  punct: "var(--syn-punct)",
+  inserted: "var(--diff-add-fg)",
+  deleted: "var(--diff-del-fg)",
+} as const satisfies Record<SyntaxRole, string>;
 
 // Plain rows have no subscriptions or thread components. Stable tokens and the select callback
 // let memo skip every row whose selection/highlight did not change, even for very large docs.
@@ -46,9 +59,11 @@ const SourceLine = memo(function SourceLine({
             // biome-ignore lint/suspicious/noArrayIndexKey: A source row is replaced as a whole on revision changes.
             key={index}
             style={
-              token.light || token.dark
-                ? ({ "--shiki-light": token.light, "--shiki-dark": token.dark } as CSSProperties)
-                : undefined
+              token.syntax
+                ? { color: syntaxColors[token.syntax] }
+                : token.light || token.dark
+                  ? ({ "--shiki-light": token.light, "--shiki-dark": token.dark } as CSSProperties)
+                  : undefined
             }
           >
             {token.text}

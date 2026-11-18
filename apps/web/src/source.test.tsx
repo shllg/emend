@@ -1,5 +1,5 @@
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
-import { LIMITS, type ReviewView, RevisionView, type ThreadView } from "@emend/contract";
+import { LIMITS, type ReviewView, RevisionView, SyntaxRole, type ThreadView } from "@emend/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -586,4 +586,33 @@ test("a jump to a distant source thread mounts its chunk before scrolling the ca
   expect(document.activeElement?.id).toBe(`thread-${id}`);
   expect(container.querySelector('[data-source-line="90000"]')).toBeTruthy();
   expect(container.querySelectorAll("[data-source-line]").length).toBeLessThanOrEqual(600);
+});
+
+test("source lines render every syntax role through fixed CSS variables and keep hostile text inert", async () => {
+  const colors = [
+    "syn-plain",
+    "syn-keyword",
+    "syn-type",
+    "syn-function",
+    "syn-string",
+    "syn-number",
+    "syn-comment",
+    "syn-punct",
+    "diff-add-fg",
+    "diff-del-fg",
+  ];
+  const text =
+    '<script>alert(1)</script><img onerror="alert(1)"><a href="javascript:alert(1)">raw</a><div>HTML</div><svg onload="alert(1)"></svg> click A "javascript:alert(1)"';
+  revision.docs = [
+    { ...source, lines: SyntaxRole.options.map((syntax) => [{ text, syntax, light: "#123456", dark: "#abcdef" }]) },
+  ];
+  const { container } = mount();
+  await screen.findByRole("button", { name: "Comment on line 10" });
+  const spans = [...container.querySelectorAll(".em-source-code span")];
+  expect(spans).toHaveLength(10);
+  for (const [i, span] of spans.entries()) {
+    expect(span.textContent).toBe(text);
+    expect(span.getAttribute("style")).toBe(`color: var(--${colors[i]});`);
+  }
+  expect(container.querySelector(".em-source script, .em-source img, .em-source a, .em-source svg")).toBeNull();
 });

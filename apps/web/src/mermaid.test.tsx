@@ -12,7 +12,9 @@ import {
   startFrame,
 } from "../mermaid-frame.ts";
 import { LightboxDiagram, MermaidBlock, parseFrameSize } from "./components/reading/MermaidBlock.tsx";
-import { setThemePick } from "./lib/theme.ts";
+import * as mermaidColors from "./components/reading/mermaid-colors.ts";
+import { requestThemeSync, selectCustomTheme, setThemePick, startThemeSync } from "./lib/theme.ts";
+import { customTheme } from "./test/themes.ts";
 
 const mermaid = vi.hoisted(() => ({
   initialize: vi.fn(),
@@ -405,6 +407,11 @@ test("diagram measurement resets site config before parsing", async () => {
   expect(mermaid.parse).not.toHaveBeenCalled();
 });
 test.each([
+  'graph TD; A["<script>alert(1)</script>"]',
+  'graph TD; A["<img src=x onerror=alert(1)>"]',
+  'graph TD; A["<a href=javascript:alert(1)>link</a>"]',
+  'graph TD; A["<div onclick=alert(1)>raw HTML</div>"]',
+  'graph TD; A["<svg onload=alert(1)></svg>"]',
   'graph TD; A-->B; click A evil "click"',
   '%%{init: {"theme": "dark", "securityLevel": "loose"}}%%\ngraph TD; A-->B; click A evil "click"',
 ])("frame config is strict, ignores strangers and never binds a Mermaid click directive: %s", async (source) => {
@@ -412,7 +419,7 @@ test.each([
   document.body.append(root);
   const bindFunctions = vi.fn();
   mermaid.render.mockResolvedValue({
-    svg: '<svg xmlns="http://www.w3.org/2000/svg"><a onclick="evil()" href="javascript:evil()"><text>A</text></a></svg>',
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" onload="evil()"><script>evil()</script><foreignObject><div xmlns="http://www.w3.org/1999/xhtml"><img src="x" onerror="evil()"/></div></foreignObject><a onclick="evil()" href="javascript:evil()"><text>A</text></a></svg>',
     bindFunctions,
   });
   const stop = startFrame(root);
@@ -425,7 +432,7 @@ test.each([
     window.dispatchEvent(new MessageEvent("message", { source: window.parent, data: { type: "render", source } }));
     await waitFor(() => expect(root.querySelector("svg")).not.toBeNull());
     expect(bindFunctions).not.toHaveBeenCalled();
-    expect(root.querySelector("[onclick], [href]")).toBeNull();
+    expect(root.querySelector("[onclick], [href], script, foreignObject, img")).toBeNull();
     for (const node of root.querySelectorAll("svg, svg *"))
       expect([...node.attributes].some((attr) => attr.name.toLowerCase().startsWith("on"))).toBe(false);
     expect(mermaid.initialize).toHaveBeenCalledWith(
@@ -1258,7 +1265,7 @@ test.each([false, true])("frame validates the parent's theme and falls back to i
       window.dispatchEvent(
         new MessageEvent("message", { source: window.parent, data: { type: "render", source, theme } }),
       );
-      await waitFor(() => expect(mermaid.render).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(mermaid.render).toHaveBeenCalledTimes(1), { interval: 1 });
       const expected = theme === "dark" || theme === "light" ? theme : dark ? "dark" : "light";
       expect(mermaid.initialize).toHaveBeenLastCalledWith(frameConfig(expected === "dark"));
       expect(document.documentElement.style.colorScheme).toBe(expected);
@@ -1425,4 +1432,162 @@ test("inline Enlarge leaves the source disclosure and selection capture separate
   expect(details?.querySelector("pre")?.textContent).toBe(source);
   fireEvent.click(getByText("Diagram source"));
   expect(details?.open).toBe(false);
+});
+
+const ownColors = {
+  background: "#102030",
+  surface: "#203040",
+  text: "#f0e0d0",
+  text2: "#c0b0a0",
+  line: "#908070",
+  border: "#605040",
+  accentBg: "#304050",
+  accent: "#607080",
+};
+
+test.each([ownColors, undefined])(
+  "both diagram views read colours at load and post only a complete palette (%j)",
+  (colors) => {
+    const read = vi.spyOn(mermaidColors, "readMermaidColors").mockReturnValue(colors);
+    const source = "graph TD; A-->B";
+    const { container } = render(
+      <>
+        <MermaidBlock source={source} />
+        <LightboxDiagram source={source} onSize={() => {}} />
+      </>,
+    );
+    expect(read).not.toHaveBeenCalled();
+    for (const frame of container.querySelectorAll("iframe")) {
+      const post = vi.fn();
+      Object.defineProperty(frame, "contentWindow", { value: { postMessage: post } });
+      fireEvent.load(frame);
+      expect(post).toHaveBeenCalledExactlyOnceWith(
+        { type: "render", source, theme: "light", ...(colors ? { colors } : {}) },
+        "*",
+      );
+      fireEvent.load(frame);
+      expect(post).toHaveBeenCalledTimes(1);
+    }
+    expect(read).toHaveBeenCalledTimes(2);
+  },
+);
+
+test("both diagram views reload when an own theme is picked or its colours change", async () => {
+  const source = "graph TD; A-->B";
+  const view = render(
+    <>
+      <MermaidBlock source={source} />
+      <LightboxDiagram source={source} onSize={() => {}} />
+    </>,
+  );
+  const frames = () => [...view.container.querySelectorAll("iframe")];
+  let previous = frames();
+  for (const entry of [customTheme, { ...customTheme, name: "another" }]) {
+    act(() => selectCustomTheme(entry));
+    const next = frames();
+    expect(next.every((frame, i) => frame !== previous[i])).toBe(true);
+    previous = next;
+  }
+  const updated = { ...customTheme, name: "another", tokens: { "fg-1": "#aabbcc" } };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => Response.json({ themes: [updated], folderError: false })),
+  );
+  let stop = () => {};
+  await act(async () => {
+    stop = startThemeSync();
+    requestThemeSync();
+  });
+  try {
+    await waitFor(() => expect(frames().every((frame, i) => frame !== previous[i])).toBe(true));
+  } finally {
+    stop();
+  }
+  const stable = frames();
+  view.rerender(
+    <>
+      <MermaidBlock source={source} />
+      <LightboxDiagram source={source} onSize={() => {}} />
+    </>,
+  );
+  expect(frames()).toEqual(stable);
+});
+
+test.each([false, true])("frame accepts exactly eight lowercase hex colours (dark=%s)", async (dark) => {
+  const root = document.createElement("div");
+  const source = 'graph TD; A-->B; click A "javascript:alert(1)"';
+  mermaid.render.mockResolvedValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg"><a href="javascript:alert(1)" onclick="alert(1)"><text>A</text></a></svg>',
+  });
+  const stop = startFrame(root);
+  const send = async (colors: unknown) => {
+    mermaid.initialize.mockClear();
+    mermaid.render.mockClear();
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        source: window.parent,
+        data: { type: "render", source, theme: dark ? "dark" : "light", colors },
+      }),
+    );
+    await waitFor(() => expect(mermaid.render).toHaveBeenCalledTimes(1), { interval: 1 });
+    expect(root.querySelector("[href], [onclick], script")).toBeNull();
+  };
+  try {
+    await send(ownColors);
+    const config = frameConfig(dark, ownColors);
+    expect(mermaid.initialize).toHaveBeenCalledExactlyOnceWith(config);
+    expect(config.themeVariables).toMatchObject({
+      background: ownColors.background,
+      tertiaryColor: ownColors.background,
+      labelBoxBkgColor: ownColors.background,
+      primaryColor: ownColors.surface,
+      actorBkg: ownColors.surface,
+      primaryTextColor: ownColors.text,
+      textColor: ownColors.text,
+      noteTextColor: ownColors.text,
+      actorTextColor: ownColors.text,
+      signalColor: ownColors.text2,
+      signalTextColor: ownColors.text2,
+      labelTextColor: ownColors.text2,
+      loopTextColor: ownColors.text2,
+      lineColor: ownColors.line,
+      primaryBorderColor: ownColors.border,
+      actorBorder: ownColors.border,
+      actorLineColor: ownColors.border,
+      labelBoxBorderColor: ownColors.border,
+      secondaryColor: ownColors.accentBg,
+      noteBkgColor: ownColors.accentBg,
+      noteBorderColor: ownColors.accentBg,
+      activationBkgColor: ownColors.accentBg,
+      activationBorderColor: ownColors.accent,
+    });
+    const invalidValues = [
+      "red",
+      "#fff",
+      "#ffffff;}</style><script>",
+      "var(--x)",
+      "url(x)",
+      "#ABCDEF",
+      "#abcdef\n",
+      null,
+      1,
+    ];
+    const missing = { background: ownColors.background };
+    for (const colors of [
+      ...Object.keys(ownColors).flatMap((key) => invalidValues.map((value) => ({ ...ownColors, [key]: value }))),
+      { ...ownColors, extra: "#abcdef" },
+      missing,
+      null,
+      [],
+      "#ffffff",
+      1,
+      Object.create(ownColors),
+      new Date(),
+    ]) {
+      await send(colors);
+      expect(mermaid.initialize).toHaveBeenCalledExactlyOnceWith(frameConfig(dark));
+    }
+  } finally {
+    stop();
+  }
 });

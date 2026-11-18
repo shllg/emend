@@ -1,8 +1,9 @@
 import { Maximize2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Size } from "../../lib/lightbox-view.ts";
-import { useResolvedTheme } from "../../lib/theme.ts";
+import { pickedTheme, useResolvedTheme, useThemeState } from "../../lib/theme.ts";
 import { Button } from "../ui/Button.tsx";
+import { readMermaidColors } from "./mermaid-colors.ts";
 
 function dimension(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 1 && value <= 10000;
@@ -34,9 +35,15 @@ export function parseFrameSize(data: unknown): { height: number; natural?: Size 
 
 export const DIAGRAM_DRAW_TIMEOUT_MS = 20_000;
 
+function useDiagramThemeKey() {
+  const state = useThemeState();
+  return JSON.stringify([state.pick, pickedTheme(state)]);
+}
+
 export function LightboxDiagram({ source, onSize }: { source: string; onSize: (natural: Size | null) => void }) {
   const theme = useResolvedTheme();
-  return <LightboxDiagramFrame key={`${theme}:${source}`} source={source} theme={theme} onSize={onSize} />;
+  const themeKey = useDiagramThemeKey();
+  return <LightboxDiagramFrame key={`${themeKey}:${theme}:${source}`} source={source} theme={theme} onSize={onSize} />;
 }
 function LightboxDiagramFrame({
   source,
@@ -82,7 +89,11 @@ function LightboxDiagramFrame({
       onLoad={() => {
         if (loaded.current) return;
         loaded.current = true;
-        frame.current?.contentWindow?.postMessage({ type: "render", source, theme }, "*");
+        const colors = readMermaidColors();
+        frame.current?.contentWindow?.postMessage(
+          { type: "render", source, theme, ...(colors ? { colors } : {}) },
+          "*",
+        );
       }}
     />
   );
@@ -90,7 +101,8 @@ function LightboxDiagramFrame({
 
 export function MermaidBlock({ source }: { source: string }) {
   const theme = useResolvedTheme();
-  return <DiagramFrame key={`${theme}:${source}`} source={source} theme={theme} />;
+  const themeKey = useDiagramThemeKey();
+  return <DiagramFrame key={`${themeKey}:${theme}:${source}`} source={source} theme={theme} />;
 }
 function DiagramFrame({ source, theme }: { source: string; theme: "dark" | "light" }) {
   const loaded = useRef(false);
@@ -119,7 +131,11 @@ function DiagramFrame({ source, theme }: { source: string; theme: "dark" | "ligh
         onLoad={() => {
           if (loaded.current) return;
           loaded.current = true;
-          frame.current?.contentWindow?.postMessage({ type: "render", source, theme }, "*");
+          const colors = readMermaidColors();
+          frame.current?.contentWindow?.postMessage(
+            { type: "render", source, theme, ...(colors ? { colors } : {}) },
+            "*",
+          );
         }}
       />
       <div className="flex items-baseline gap-2">

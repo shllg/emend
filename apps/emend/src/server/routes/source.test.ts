@@ -71,7 +71,8 @@ it("publishes highlighted source and both views of Markdown", async () => {
   expect(source).toMatchObject({ kind: "source", language: "ts", title: "sample.ts" });
   if (source?.kind !== "source") throw new Error("missing source");
   expect(source.lines).toHaveLength(1);
-  expect(source.lines.flat().some((token) => token.light && token.dark)).toBe(true);
+  expect(source.lines.flat().some((token) => token.syntax !== undefined)).toBe(true);
+  expect(source.lines.flat().every((token) => !("light" in token) && !("dark" in token))).toBe(true);
   const raw = revision.docs.find((doc) => doc.path === "notes.md" && doc.kind === "source");
   if (raw?.kind !== "source") throw new Error("missing raw Markdown");
   expect(

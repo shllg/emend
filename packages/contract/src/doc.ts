@@ -47,8 +47,22 @@ export function validateDocView(file: { role: string; path: string; view?: DocVi
     ctx.addIssue({ code: "custom", path: ["view"], message: "only Markdown and HTML docs render" });
 }
 export const Color = z.string().regex(/^#[0-9a-fA-F]{3,8}$/);
+export const SyntaxRole = z.enum([
+  "plain",
+  "keyword",
+  "type",
+  "function",
+  "string",
+  "number",
+  "comment",
+  "punct",
+  "inserted",
+  "deleted",
+]);
+export type SyntaxRole = z.infer<typeof SyntaxRole>;
 export const SourceToken = z.object({
   text: z.string().max(LIMITS.markdownDocBytes),
+  syntax: SyntaxRole.optional(),
   light: Color.optional(),
   dark: Color.optional(),
 });

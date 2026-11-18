@@ -2285,8 +2285,11 @@ The size limit is `LIMITS.markdownDocBytes` (1048576 bytes, 1 MiB). The server s
 as role `doc`, media type `text/plain`; source HTML never has a content URL or content-route access.
 
 `RevisionView.docs[]` includes `{ path, kind: "source", title?, language, lines, unrendered?: true }`, where `lines`
-is `SourceToken[][]` and a token is `{ text: string, light?: Color, dark?: Color }`. Colors strictly
-match `^#[0-9a-fA-F]{3,8}$`; light/dark come from github-light/github-dark. Text is raw data, never HTML. `language` is a loaded Shiki language id
+is `SourceToken[][]` and a token is `{ text: string, syntax?: SyntaxRole, light?: Color, dark?: Color }`.
+New renders carry `syntax`: `plain`, `keyword`, `type`, `function`, `string`, `number`, `comment`,
+`punct`, `inserted` or `deleted`; absent means plain. These roles use the reader's theme colours.
+The optional `light`/`dark` colours remain accepted for revisions published earlier and strictly
+match `^#[0-9a-fA-F]{3,8}$`. Text is raw data, never HTML. `language` is a loaded Shiki language id
 (`ts`, `tsx`, `js`, `jsx`, `json`, `css`, `html`, `md`, `yaml`, `sh`, `go`, `py`, `sql`, `diff`), or
 `text` for unknown extensions, files above the 256 KiB highlighting budget, or docs past the
 1 MiB per-revision highlighting budget. Highlighting also
