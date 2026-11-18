@@ -1,4 +1,11 @@
-import { DEFAULT_THEME_FONTS, THEME_SCALE_STEPS, THEME_TOKENS, ThemeEntry, type ThemeValid } from "@emend/contract";
+import {
+  DEFAULT_THEME_FONTS,
+  LIMITS,
+  THEME_SCALE_STEPS,
+  THEME_TOKENS,
+  ThemeEntry,
+  type ThemeValid,
+} from "@emend/contract";
 import { expect, test } from "vitest";
 import { compositeThemeColor, parseThemeColor, themeColorHex } from "./color.ts";
 import { themeDownloadLook } from "./download.ts";
@@ -29,6 +36,69 @@ test.each(["compact", "regular", "roomy"] as const)("keeps %s density when the f
 });
 test("does not add density when the file omits it", () => {
   expect(check(document)).not.toHaveProperty("density");
+});
+test("font files retain families and descriptors when checked and copied", () => {
+  const fonts = {
+    text: "Example Sans",
+    code: "Example Mono",
+    files: [
+      { font: "text", file: "Sans.woff2", weight: [100, 900] },
+      { font: "text", file: "Sans-Italic.woff2", weight: [100, 900], style: "italic" },
+      { font: "code", file: "Mono.ttf" },
+      { font: "code", file: "Mono-Bold.otf", weight: 700, style: "normal" },
+    ],
+  };
+  const entry = check({ ...document, fonts });
+  expect(entry.fonts).toEqual(fonts);
+  const copy = themeCopyDocument(entry);
+  expect(copy.fonts?.files).toEqual(fonts.files);
+  expect(check(copy).fonts).toEqual(fonts);
+  expect(check({ ...document, fonts: { files: [] } }).fonts).toEqual({ files: [] });
+});
+test.each([null, {}, "Sans.woff2", 1, undefined])("font files must be a list: %j", (files) => {
+  expect(problems({ ...document, fonts: { files } })).toEqual(["fonts.files must be a list."]);
+});
+test.each([null, [], "Sans.woff2", 1])("font file entries must be objects: %j", (entry) => {
+  expect(problems({ ...document, fonts: { files: [entry] } })).toEqual(["fonts.files[0] must be a JSON object."]);
+});
+test.each<[object, string]>([
+  [{ extra: true }, "fonts.files[0] has an unknown name: extra."],
+  [{ "bad\nkey": true }, "fonts.files[0] has an unknown name: an unknown name."],
+  [{ font: "other" }, 'fonts.files[0].font must be "text" or "code".'],
+  [{ font: undefined }, 'fonts.files[0].font must be "text" or "code".'],
+  [
+    { file: "unsafe\nfile.css" },
+    "fonts.files[0].file must be a .woff2, .woff, .ttf or .otf file name: letters, digits, dots, hyphens and underscores.",
+  ],
+  [{ style: "oblique" }, 'fonts.files[0].style must be "normal" or "italic".'],
+  ...[null, "400", 0, 1001, 1.5, [900, 100], [0, 400], [1, 1001], [1.5, 400], [1], [1, 2, 3]].map(
+    (weight): [object, string] => [
+      { weight },
+      "fonts.files[0].weight must be a whole number from 1 to 1000, or two of them in a list, lowest first.",
+    ],
+  ),
+])("font file problems use fixed text: %j", (patch, reason) => {
+  const files = [{ font: "text", file: "Sans.woff2", ...patch }];
+  expect(problems({ ...document, fonts: { text: "Example", files } })).toEqual([reason]);
+});
+test.each(["text", "code"])("a file for an unnamed %s family refuses the theme", (font) => {
+  expect(problems({ ...document, fonts: { files: [{ font, file: "Example.woff2" }] } })).toEqual([
+    `fonts.files[0] is for the ${font} font, but fonts.${font} is not set.`,
+  ]);
+});
+test("file diagnostics name the entry index and bound the list", () => {
+  const entry = { font: "text", file: "Sans.woff2" };
+  expect(problems({ ...document, fonts: { text: "Example", files: [entry, null] } })).toEqual([
+    "fonts.files[1] must be a JSON object.",
+  ]);
+  const files = Array(LIMITS.themeFontFiles).fill(entry);
+  expect(check({ ...document, fonts: { text: "Example", files } }).fonts.files).toHaveLength(16);
+  expect(problems({ ...document, fonts: { text: "Example", files: [...files, entry] } })).toEqual([
+    "fonts.files has more than 16 entries.",
+  ]);
+  expect(problems(document, "fonts")).toEqual([
+    "The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark, light or fonts.",
+  ]);
 });
 test.each(["dense", "Compact", "REGULAR", "roomy ", "", 0, 1, null, {}, [], true, undefined])(
   "refuses invalid density %j with a fixed reason",
@@ -172,7 +242,7 @@ test.each([
 ])("document validation uses safe fixed reasons: %j", (input, expected) => expect(problems(input)).toContain(expected));
 test("invalid folder names get the specified reason and base when known", () => {
   expect(problems(document, "Dark")).toEqual([
-    "The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark or light.",
+    "The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark, light or fonts.",
   ]);
   expect(checkThemeDocument(null, "mine")).toMatchObject({ base: null });
   expect(checkThemeDocument({ base: "unknown" }, "mine")).toMatchObject({ base: null });

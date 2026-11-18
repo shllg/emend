@@ -23,6 +23,7 @@ import {
 const boot = readFileSync(resolve(import.meta.dirname, "../../public/theme-boot.js"), "utf8");
 const index = readFileSync(resolve(import.meta.dirname, "../../index.html"), "utf8");
 let stop = () => {};
+let restoreFonts = () => {};
 beforeEach(() => {
   vi.stubGlobal("localStorage", new Storage());
   setThemePick("system");
@@ -35,6 +36,8 @@ afterEach(() => {
   setThemePick("system");
   stop();
   stop = () => {};
+  restoreFonts();
+  restoreFonts = () => {};
   for (const meta of document.querySelectorAll('meta[name="theme-color"]')) meta.remove();
   delete document.documentElement.dataset.theme;
   delete document.documentElement.dataset.density;
@@ -223,6 +226,170 @@ test("custom font fallbacks match the complete typography declarations", () => {
   const css = readFileSync(resolve(import.meta.dirname, "../styles/typography.css"), "utf8");
   expect(css.match(/--font-sans:\s*([^;]+);/)?.[1]).toBe(themeFontStacks.text);
   expect(css.match(/--font-mono:\s*([^;]+);/)?.[1]).toBe(themeFontStacks.code);
+});
+
+function stubFontFaces() {
+  const descriptor = Object.getOwnPropertyDescriptor(document, "fonts");
+  const fonts = new Set<FontFace>();
+  const add = vi.spyOn(fonts, "add");
+  const remove = vi.spyOn(fonts, "delete");
+  Object.defineProperty(document, "fonts", { configurable: true, value: fonts });
+  restoreFonts = () => {
+    if (descriptor) Object.defineProperty(document, "fonts", descriptor);
+    else Reflect.deleteProperty(document, "fonts");
+  };
+  const face = vi.fn(
+    class {
+      family: string;
+      source: string;
+      descriptors: FontFaceDescriptors;
+      constructor(family: string, source: string, descriptors: FontFaceDescriptors) {
+        this.family = family;
+        this.source = source;
+        this.descriptors = descriptors;
+      }
+    },
+  );
+  vi.stubGlobal("FontFace", face);
+  return { face, fonts, add, remove };
+}
+
+test("the picked theme registers faces with safe URLs, formats and descriptors and keeps unchanged faces", () => {
+  const { face, fonts, add, remove } = stubFontFaces();
+  const theme: ThemeValid = {
+    ...customTheme,
+    fonts: {
+      ...customTheme.fonts,
+      files: [
+        { font: "text", file: "Sans.WOFF2", weight: [100, 900] },
+        { font: "text", file: "Sans-Italic.woff", weight: [100, 900], style: "italic" },
+        { font: "code", file: "Mono.ttf" },
+        { font: "code", file: "Mono-Bold.otf", weight: 700, style: "normal" },
+      ],
+    },
+  };
+  const store = createThemeStore();
+  store.selectCustomTheme(theme);
+  expect(face.mock.calls).toEqual([
+    [
+      '"Example Sans"',
+      'url("/api/v1/themes/mine/fonts/Sans.WOFF2") format("woff2")',
+      { weight: "100 900", style: "normal", display: "swap" },
+    ],
+    [
+      '"Example Sans"',
+      'url("/api/v1/themes/mine/fonts/Sans-Italic.woff") format("woff")',
+      { weight: "100 900", style: "italic", display: "swap" },
+    ],
+    [
+      '"Example Mono"',
+      'url("/api/v1/themes/mine/fonts/Mono.ttf") format("truetype")',
+      { weight: "400", style: "normal", display: "swap" },
+    ],
+    [
+      '"Example Mono"',
+      'url("/api/v1/themes/mine/fonts/Mono-Bold.otf") format("opentype")',
+      { weight: "700", style: "normal", display: "swap" },
+    ],
+  ]);
+  expect(add).toHaveBeenCalledTimes(4);
+  const original = [...fonts];
+  store.applyList("mine", { themes: [{ ...theme, tokens: { accent: "#abcdef" } }], folderError: false });
+  expect(face).toHaveBeenCalledTimes(4);
+  expect(remove).not.toHaveBeenCalled();
+  expect([...fonts]).toEqual(original);
+  expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(
+    `"Example Sans", ${themeFontStacks.text}`,
+  );
+  store.set("dark");
+  expect(remove.mock.calls).toEqual(original.map((face) => [face]));
+  expect(fonts.size).toBe(0);
+});
+
+test("changes to a theme's files or family replace its faces without removing other fonts", () => {
+  const { face, fonts, remove } = stubFontFaces();
+  const builtin = new FontFace("Built In", 'url("/builtin.woff2")');
+  fonts.add(builtin);
+  const store = createThemeStore();
+  store.selectCustomTheme({
+    ...customTheme,
+    fonts: { text: "Example", files: [{ font: "text", file: "Old.woff2" }] },
+  });
+  const old = [...fonts].find((font) => font !== builtin);
+  store.applyList("mine", {
+    themes: [{ ...customTheme, fonts: { text: "New Family", files: [{ font: "text", file: "New.woff2" }] } }],
+    folderError: false,
+  });
+  expect(remove).toHaveBeenCalledExactlyOnceWith(old);
+  expect(fonts.has(builtin)).toBe(true);
+  expect(fonts.size).toBe(2);
+  expect(face).toHaveBeenLastCalledWith('"New Family"', 'url("/api/v1/themes/mine/fonts/New.woff2") format("woff2")', {
+    weight: "400",
+    style: "normal",
+    display: "swap",
+  });
+  store.selectCustomTheme({
+    ...customTheme,
+    name: "another",
+    fonts: { text: "New Family", files: [{ font: "text", file: "New.woff2" }] },
+  });
+  expect(face).toHaveBeenLastCalledWith(
+    '"New Family"',
+    'url("/api/v1/themes/another/fonts/New.woff2") format("woff2")',
+    { weight: "400", style: "normal", display: "swap" },
+  );
+  store.applyList("another", { themes: [{ ...customTheme, name: "another" }], folderError: false });
+  expect([...fonts]).toEqual([builtin]);
+});
+
+test("applying a theme revalidates file entries and their family names", () => {
+  const { face, fonts } = stubFontFaces();
+  const store = createThemeStore();
+  store.selectCustomTheme(customTheme);
+  const files = [
+    { font: "text", file: "Good.woff2" },
+    ...["../Bad.woff2", "sub/Bad.woff2", "Bad.css", 'Bad");url(x).woff2', "Bad.woff2\n"].map((file) => ({
+      font: "text",
+      file,
+    })),
+    { font: "code", file: "InvalidFamily.woff2" },
+    { font: "other", file: "Other.woff2" },
+    { font: "text", file: "Weight.woff2", weight: [900, 100] },
+    { font: "text", file: "Style.woff2", style: "oblique" },
+    { font: "text", file: "Extra.woff2", extra: true },
+  ] as ThemeValid["fonts"]["files"];
+  store.applyList("mine", {
+    themes: [{ ...customTheme, fonts: { text: "Example", code: "url(x)", files } }],
+    folderError: false,
+  });
+  expect(face).toHaveBeenCalledExactlyOnceWith(
+    '"Example"',
+    'url("/api/v1/themes/mine/fonts/Good.woff2") format("woff2")',
+    { weight: "400", style: "normal", display: "swap" },
+  );
+  expect(fonts.size).toBe(1);
+});
+
+test.each(["123 Font", "serif", "字体"])("font registration quotes family %s as a CSS string", (family) => {
+  const { face } = stubFontFaces();
+  createThemeStore().selectCustomTheme({
+    ...customTheme,
+    fonts: { text: family, files: [{ font: "text", file: "Example.woff2" }] },
+  });
+  expect(face.mock.calls[0]?.[0]).toBe(`"${family}"`);
+});
+
+test.each(["FontFace", "document.fonts"])("font registration does nothing without %s", (missing) => {
+  const { face, add } = stubFontFaces();
+  if (missing === "FontFace") vi.stubGlobal("FontFace", undefined);
+  else Object.defineProperty(document, "fonts", { configurable: true, value: undefined });
+  createThemeStore().selectCustomTheme({
+    ...customTheme,
+    fonts: { text: "Example", files: [{ font: "text", file: "Example.woff2" }] },
+  });
+  expect(face).not.toHaveBeenCalled();
+  expect(add).not.toHaveBeenCalled();
+  expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(`"Example", ${themeFontStacks.text}`);
 });
 
 test.each(["compact", "roomy"] as const)("a custom theme applies %s density", (density) => {
@@ -474,13 +641,13 @@ test.each([{ name: "another" }, { base: "evil" }, { valid: false }, null, "not j
   },
 );
 
-test("boot rejects unsafe meta colours and reserved theme names", () => {
+test.each(["system", "dark", "light", "fonts"])("boot rejects unsafe meta colours and reserved name %s", (name) => {
   localStorage.setItem(themeKey, "theme:mine");
   localStorage.setItem(customThemeKey, JSON.stringify({ ...customTheme, themeColor: "url(x)" }));
   runInNewContext(boot, { document, localStorage });
   expectApplied("dark");
-  localStorage.setItem(themeKey, "theme:dark");
-  localStorage.setItem(customThemeKey, JSON.stringify({ ...customTheme, name: "dark" }));
+  localStorage.setItem(themeKey, `theme:${name}`);
+  localStorage.setItem(customThemeKey, JSON.stringify({ ...customTheme, name }));
   runInNewContext(boot, { document, localStorage });
   expectApplied("system");
 });

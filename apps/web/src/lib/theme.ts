@@ -5,9 +5,11 @@ import {
   ThemeColor,
   ThemeDensity,
   ThemeFont,
+  ThemeFontFile,
   ThemeList,
   ThemeName,
   ThemeValid,
+  themeFontType,
 } from "@emend/contract";
 import { useSyncExternalStore } from "react";
 import { get } from "../api/client.ts";
@@ -25,6 +27,7 @@ export const themeFontStacks = {
 const defaultThemeColors = { dark: "#171717", light: "#fafafb" };
 const scaleSteps = new Set<string>(THEME_SCALE_STEPS);
 const applied = new Set<string>();
+let appliedFaces: { key: string; fonts: FontFaceSet; faces: FontFace[] } | undefined;
 type ThemeState = {
   pick: ThemePick;
   custom: ThemeValid | undefined;
@@ -72,11 +75,49 @@ export function themeColors(custom: ThemeValid): { scales: Record<string, string
   return { scales, tokens };
 }
 
+function applyFontFiles(custom: ThemeValid | undefined) {
+  if (typeof FontFace === "undefined" || !document.fonts) return;
+  const formats = { "font/woff2": "woff2", "font/woff": "woff", "font/ttf": "truetype", "font/otf": "opentype" };
+  const entries: { family: string; source: string; descriptors: FontFaceDescriptors }[] = [];
+  if (custom && ThemeName.safeParse(custom.name).success && Array.isArray(custom.fonts.files)) {
+    for (const value of custom.fonts.files) {
+      const checked = ThemeFontFile.safeParse(value);
+      if (!checked.success) continue;
+      const entry = checked.data;
+      const family = ThemeFont.safeParse(custom.fonts[entry.font]);
+      const type = themeFontType(entry.file);
+      if (!family.success || !type) continue;
+      const url = `/api/v1/themes/${encodeURIComponent(custom.name)}/fonts/${encodeURIComponent(entry.file)}`;
+      entries.push({
+        family: family.data,
+        source: `url("${url}") format("${formats[type]}")`,
+        descriptors: {
+          weight: Array.isArray(entry.weight) ? entry.weight.join(" ") : String(entry.weight ?? 400),
+          style: entry.style ?? "normal",
+          display: "swap",
+        },
+      });
+    }
+  }
+  const key = JSON.stringify(entries);
+  if (appliedFaces?.key === key && appliedFaces.fonts === document.fonts) return;
+  if (appliedFaces) for (const face of appliedFaces.faces) appliedFaces.fonts.delete(face);
+  const faces: FontFace[] = [];
+  for (const { family, source, descriptors } of entries) {
+    // Quoting also permits family names that start with a digit or match a CSS keyword.
+    const face = new FontFace(`"${family}"`, source, descriptors);
+    document.fonts.add(face);
+    faces.push(face);
+  }
+  appliedFaces = { key, fonts: document.fonts, faces };
+}
+
 function apply(state: ThemeState) {
   const root = document.documentElement;
   for (const property of applied) root.style.removeProperty(property);
   applied.clear();
   const custom = pickedTheme(state);
+  applyFontFiles(custom);
   const base = custom?.base ?? (state.pick === "dark" || state.pick === "light" ? state.pick : undefined);
   if (base) root.dataset.theme = base;
   else delete root.dataset.theme;

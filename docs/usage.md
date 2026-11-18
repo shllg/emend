@@ -94,6 +94,8 @@ holding the working directory, with the same home-rooted dotfiles exception as `
 The server reads this folder without that check, like `keys` and `approvedActiveHours`.
 
 Edit `themes/mine/theme.json` to change colours or set `fonts.text` and `fonts.code` to installed font names.
+To use a font on every device, including your phone, put its files in `themes/fonts/` and name them in `fonts.files`;
+see [api.md](api.md#themes) for the format and limits. `emend theme check mine` reports missing or refused font files.
 Emend's fonts stay as fallbacks. Each file names a Dark or Light base; omitted values use that
 base. A token can reference a scale step, so changing that step recolours every token built on
 it. A token set to a colour keeps its own value. The surfaces `bg-app`, `bg-surface`, `bg-sunken`,
@@ -105,7 +107,8 @@ A theme can set `density` to `"compact"`, `"regular"` (the default) or `"roomy"`
 On touch screens, compact keeps regular spacing so tap targets keep their size.
 
 Emend lists up to 50 theme folders in name order. Each `theme.json` is at most 32 KiB.
-Top-level files and dot entries are ignored. A symlink counts only when it points to a folder;
+The names `system`, `dark`, `light` and `fonts` are reserved.
+The shared `fonts` folder, top-level files and dot entries are ignored. A symlink counts only when it points to a folder;
 links to files, missing targets and link loops are skipped like top-level files.
 Keep the `themes` folder at 1000 entries
 or fewer, including hidden files and other entries; a larger folder shows a folder error and no themes.

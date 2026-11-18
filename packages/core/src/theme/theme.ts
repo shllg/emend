@@ -7,6 +7,7 @@ import {
   ThemeDensity,
   type ThemeEntry,
   ThemeFont,
+  ThemeFontFile,
   ThemeName,
   ThemeRefused,
   ThemeScaleStep,
@@ -22,7 +23,7 @@ export type ThemeDocument = {
   version: 1;
   base: ThemeBase;
   density?: ThemeDensity;
-  fonts?: { text?: string; code?: string };
+  fonts?: ThemeValid["fonts"];
   scales?: Partial<Record<ThemeScaleStep, string>>;
   tokens?: Partial<Record<ThemeToken, string>>;
 };
@@ -80,7 +81,7 @@ export function checkThemeDocument(document: unknown, name: string): ThemeEntry 
   }
   if (!ThemeName.safeParse(name).success)
     problem(
-      "The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark or light.",
+      "The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark, light or fonts.",
     );
   let base: ThemeBase | null = null;
   let density: ThemeDensity | undefined;
@@ -105,13 +106,50 @@ export function checkThemeDocument(document: unknown, name: string): ThemeEntry 
     }
     if (Object.hasOwn(document, "fonts")) {
       if (!object(document.fonts)) problem("fonts must be a JSON object.");
-      else
+      else {
         for (const [key, value] of Object.entries(document.fonts)) {
+          if (key === "files") continue;
           if (key !== "text" && key !== "code") problem(`fonts has an unknown name: ${problemName(key)}.`);
           else if (!ThemeFont.safeParse(value).success)
             problem(`fonts.${key} must be a plain font name: letters, digits, spaces, hyphens and underscores.`);
           else fonts[key] = value as string;
         }
+        if (Object.hasOwn(document.fonts, "files")) {
+          const files = document.fonts.files;
+          if (!Array.isArray(files)) problem("fonts.files must be a list.");
+          else if (files.length > LIMITS.themeFontFiles)
+            problem(`fonts.files has more than ${LIMITS.themeFontFiles} entries.`);
+          else {
+            fonts.files = [];
+            for (const [index, entry] of files.entries()) {
+              const prefix = `fonts.files[${index}]`;
+              if (!object(entry)) {
+                problem(`${prefix} must be a JSON object.`);
+                continue;
+              }
+              for (const key of Object.keys(entry))
+                if (!["font", "file", "weight", "style"].includes(key))
+                  problem(`${prefix} has an unknown name: ${problemName(key)}.`);
+              const font = ThemeFontFile.shape.font.safeParse(entry.font);
+              if (!font.success) problem(`${prefix}.font must be "text" or "code".`);
+              else if (fonts[font.data] === undefined)
+                problem(`${prefix} is for the ${font.data} font, but fonts.${font.data} is not set.`);
+              if (!ThemeFontFile.shape.file.safeParse(entry.file).success)
+                problem(
+                  `${prefix}.file must be a .woff2, .woff, .ttf or .otf file name: letters, digits, dots, hyphens and underscores.`,
+                );
+              if (!ThemeFontFile.shape.weight.safeParse(entry.weight).success)
+                problem(
+                  `${prefix}.weight must be a whole number from 1 to 1000, or two of them in a list, lowest first.`,
+                );
+              if (!ThemeFontFile.shape.style.safeParse(entry.style).success)
+                problem(`${prefix}.style must be "normal" or "italic".`);
+              const checked = ThemeFontFile.safeParse(entry);
+              if (checked.success) fonts.files.push(checked.data);
+            }
+          }
+        }
+      }
     }
     for (const section of ["scales", "tokens"] as const) {
       if (!Object.hasOwn(document, section)) continue;

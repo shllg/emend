@@ -91,6 +91,7 @@ a machine token reaches only reviews from its own instance.
 | GET | `/api/v1/devices` | Admin, reviewer | Return `DeviceList` (200); live devices owned by the principal, newest first. |
 | GET | `/api/v1/settings` | Reviewer | Return `SettingsView` (200); requires `read`. |
 | GET | `/api/v1/themes` | Reviewer | Return `ThemeList` (200); requires `read`. |
+| GET | `/api/v1/themes/:name/fonts/:file` | Reviewer | Return a font file named by a valid theme (200); requires `read`. |
 | PATCH | `/api/v1/settings` | Reviewer | Apply `SettingsUpdate` and return `SettingsView` (200); requires `settings:manage`. |
 | DELETE | `/api/v1/devices/:id` | Admin, reviewer | Revoke the device and every bound token atomically (204); missing, foreign or revoked is 404. |
 | POST | `/api/v1/machines` | Anyone with a pairing secret or code | Register `MachineRegistration`; return `MachineRegistered` (201); refuses device pairings. |
@@ -579,7 +580,7 @@ There is one running read and at most one queued read per folder and per theme;
 each caller gets a read that started after its request. Settled results are not cached.
 Each theme is `<configDir>/themes/<name>/theme.json`. The folder name is the theme name.
 Names match `/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/` and cannot be `system`,
-`dark` or `light`. Top-level files and dot entries are skipped. A symlink counts only when it points
+`dark`, `light` or `fonts`. The shared `fonts` entry, top-level files and dot entries are skipped. A symlink counts only when it points
 to a folder; links to files, dangling links and link loops are skipped like top-level files.
 Invalid names are refused if the displayed name is
 1–80 characters with no Unicode control or format characters (`\p{C}`); otherwise they are skipped.
@@ -629,15 +630,63 @@ with single spaces, numbers rounded to at most six decimals, no trailing zeros, 
 before the point, hue below 360 and alpha omitted when 1.
 
 `fonts` accepts optional `text` and `code` names matching
-`/^[\p{L}\p{N}](?:[\p{L}\p{N} _-]{0,62}[\p{L}\p{N}])?$/u`. Font files and CSS are not accepted.
+`/^[\p{L}\p{N}](?:[\p{L}\p{N} _-]{0,62}[\p{L}\p{N}])?$/u`, and an optional `files` list. CSS is not accepted.
 The named family precedes emend's default stack. `DEFAULT_THEME_FONTS` is
 `{ text: "Geist", code: "JetBrains Mono" }`.
+
+Font files live directly in `<configDir>/themes/fonts/`, shared by all themes. For example:
+
+```json
+"fonts": {
+  "text": "Inter",
+  "code": "Iosevka",
+  "files": [
+    { "font": "text", "file": "InterVariable.woff2", "weight": [100, 900] },
+    { "font": "text", "file": "InterVariable-Italic.woff2", "weight": [100, 900], "style": "italic" },
+    { "font": "code", "file": "Iosevka-Regular.woff2" },
+    { "font": "code", "file": "Iosevka-Bold.woff2", "weight": 700 }
+  ]
+}
+```
+
+`files` holds at most `LIMITS.themeFontFiles` (16) entries. Each entry has `font: "text" | "code"`
+and a `file` name; its corresponding family must be set in `fonts.text` or `fonts.code`.
+`ThemeFontFileName` accepts at most 100 characters matching
+`/^[A-Za-z0-9][A-Za-z0-9._-]*\.(?:woff2|woff|ttf|otf)$/i`, with no `..` anywhere and no trailing
+control characters. No subfolders, slashes, backslashes or leading dot are allowed.
+Optional `weight` is an integer from 1 to 1000 or two such integers `[min, max]`, lowest first,
+for a variable font. Its default is 400. Optional `style` is `"normal"` (the default) or `"italic"`.
+Unknown entry keys refuse the theme. `emend theme copy` keeps the source's `files` list unchanged.
+
+`GET /api/v1/themes/:name/fonts/:file` requires a reviewer session with `read` scope, like the
+list route: no session gives 401 and a bearer gives 403. The theme name and file name must pass
+their contract schemas, the theme must be valid, and its `fonts.files` must name the file exactly.
+A file is at most `LIMITS.themeFontBytes` (4194304 bytes, 4 MiB) and must be a regular file
+directly inside the real `fonts` folder. The folder itself may be a symlink; a file link may
+point to another file directly in that same real folder, but never outside it or into a subfolder.
+The reader checks the opened file's identity and bounds the read. Missing or refused files and
+invalid, unknown or unreferencing themes all return 404 without disclosing the reason.
+Success sends a server-chosen `Content-Type` (`font/woff2`, `font/woff`, `font/ttf` or `font/otf`,
+using the lowercased extension), `X-Content-Type-Options: nosniff`, `Cache-Control: no-store`,
+`Cross-Origin-Resource-Policy: same-origin`, `Content-Security-Policy: sandbox; default-src 'none'`
+and `Content-Length`. HEAD sends the same headers without the body.
+The app CSP stays unchanged: `font-src 'self'`. The browser registers the picked theme's files
+with `FontFace`, using `display: "swap"`; missing or refused files fall back to emend's fonts.
+The Download continues to use system fonts.
+
+For a valid theme, `emend theme check <name>` checks each distinct font file. With no problems it
+prints `emend: <name> is valid` and exits 0. Otherwise it prints one escaped
+`emend: <name>: font file <file> <reason>; the theme uses emend's font instead.` line per file
+and exits 1, without the valid line. The reasons are `is missing`,
+`is not a regular file directly in the fonts folder`, `is larger than 4 MiB` and `cannot be read`.
+`emend theme list` continues to report document validity only.
 
 `ThemeList = { themes: ThemeEntry[], folderError: boolean }`. A missing folder gives an empty
 list. `folderError` is true when an existing folder cannot be listed or exceeds the folder cap.
 Each entry is one of:
 
-- `ThemeValid = { valid: true, name, base, density?, fonts: { text?, code? }, scales, tokens, themeColor }`.
+- `ThemeValid = { valid: true, name, base, density?, fonts: { text?, code?, files? }, scales, tokens, themeColor }`.
+  `files` is additive; older clients strip it.
   `density` is included only when the file sets it; older servers and saved copies may omit it.
   The records hold only the file's overrides, normalized. Record keys match `/^[a-z0-9-]{1,40}$/`
   so older clients can read newer servers; clients apply only names they know. Scale values are
@@ -646,7 +695,8 @@ Each entry is one of:
 - `ThemeRefused = { valid: false, name, base: "dark" | "light" | null, problems }`.
   There are 1–20 problems, each at most 200 characters. The last may say `…and N more problems.`
 
-Any problem refuses the whole file. Reasons use fixed text, known names and numbers. An unknown
+Any document validation problem refuses the whole theme. Font file read problems only prevent
+serving that font; they do not refuse an otherwise valid theme. Reasons use fixed text, known names and numbers. An unknown
 key is named only if it matches `/^[a-z0-9]+(?:-[a-z0-9]+)*$/` and is at most 24 characters;
 otherwise it is called `an unknown name`. Reasons include `The folder has no theme.json.`,
 `theme.json cannot be read.`, `theme.json is larger than 32 KiB.`, `theme.json is not valid JSON.`,
@@ -655,12 +705,23 @@ otherwise it is called `an unknown name`. Reasons include `The folder has no the
 `Unknown entry: colours.`, `scales has an unknown name: n-26.`,
 `scales.n-25 is not a colour. Use hex (#rrggbb) or oklch(L C H).` and
 `tokens.fg-1 is not a colour or a scale step name.` Invalid folder names say
-`The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark or light.`
+`The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark, light or fonts.`
 A missing theme folder or a name whose entry is not a folder is an unknown name.
 An existing folder without `theme.json` is refused.
 Invalid fonts say `fonts.text must be a plain font name: letters, digits, spaces, hyphens and underscores.`
 (`fonts.code` for the code font). A non-object section says `fonts must be a JSON object.`
 (or `scales` or `tokens`); unknown font or token keys use the same `has an unknown name` wording.
+Font file entries use their zero-based index in fixed reasons, never the unchecked file name:
+
+- `fonts.files must be a list.`
+- `fonts.files has more than 16 entries.`
+- `fonts.files[0] must be a JSON object.`
+- `fonts.files[0] has an unknown name: extra.` (unknown keys use the name rule above).
+- `fonts.files[0].font must be "text" or "code".`
+- `fonts.files[0].file must be a .woff2, .woff, .ttf or .otf file name: letters, digits, dots, hyphens and underscores.`
+- `fonts.files[0].weight must be a whole number from 1 to 1000, or two of them in a list, lowest first.`
+- `fonts.files[0].style must be "normal" or "italic".`
+- `fonts.files[0] is for the text font, but fonts.text is not set.` (or `code`).
 
 Readability uses WCAG contrast after clipping linear sRGB channels to 0–1 and compositing in
 sRGB. Foregrounds composite over their background. Translucent backgrounds use `bg-surface`
@@ -2172,6 +2233,8 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | --- | ---: |
 | `themes` | 50 files listed |
 | `themeFileBytes` | 32768 bytes per file |
+| `themeFontFiles` | 16 font entries per theme |
+| `themeFontBytes` | 4194304 bytes per font file (4 MiB) |
 | `themeProblems` | 20 problems per theme |
 | `inboxItems` | 200 rows per inbox block (at most 800 in all) |
 | `groups` | 50 inbox groups per owner |

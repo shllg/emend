@@ -14,12 +14,15 @@ import {
   ThemeDensity,
   ThemeEntry,
   ThemeFont,
+  ThemeFontFile,
+  ThemeFontFileName,
   ThemeList,
   ThemeName,
   ThemeRefused,
   ThemeScaleStep,
   ThemeToken,
   ThemeValid,
+  themeFontType,
 } from "./index.ts";
 
 const valid = { valid: true, name: "mine", base: "dark", fonts: {}, scales: {}, tokens: {}, themeColor: "#090a0c" };
@@ -75,6 +78,7 @@ test("names and vocabulary have the specified boundaries", () => {
     "system",
     "dark",
     "light",
+    "fonts",
     "Dark",
     "two words",
     "x_y",
@@ -111,6 +115,55 @@ test("fonts are plain bounded Unicode names", () => {
     "x\u200b",
   ])
     expect(ThemeFont.safeParse(name).success, name).toBe(false);
+});
+test.each(["InterVariable.woff2", "A.woff", "A_1-B.ttf", "A.B.OTF", `${"a".repeat(94)}.woff2`])(
+  "accepts font file name %s",
+  (file) => expect(ThemeFontFileName.parse(file)).toBe(file),
+);
+test.each([
+  "",
+  "x.css",
+  "x.svg",
+  "x.woff2.js",
+  "sub/x.woff2",
+  "/x.woff2",
+  "sub\\x.woff2",
+  "../x.woff2",
+  "x..woff2",
+  "x%2Fy.woff2",
+  ".x.woff2",
+  "x y.woff2",
+  "x.woff2\n",
+  "x\0.woff2",
+  `${"a".repeat(95)}.woff2`,
+])("refuses unsafe font file name %j", (file) => expect(ThemeFontFileName.safeParse(file).success).toBe(false));
+test.each([
+  ["Font.WOFF2", "font/woff2"],
+  ["Font.woff", "font/woff"],
+  ["Font.TTF", "font/ttf"],
+  ["Font.otf", "font/otf"],
+  ["Font.css", undefined],
+] as const)("font file %s has a server-chosen type", (file, type) => expect(themeFontType(file)).toBe(type));
+test("font entries validate descriptors, reject unknown keys and bound the list", () => {
+  const entry = { font: "text", file: "Example.woff2" };
+  for (const weight of [undefined, 1, 400, 1000, [1, 1000], [400, 400]])
+    for (const style of [undefined, "normal", "italic"])
+      expect(ThemeFontFile.safeParse({ ...entry, weight, style }).success).toBe(true);
+  for (const patch of [
+    { font: "other" },
+    { file: "x.svg" },
+    { extra: true },
+    { style: "oblique" },
+    { style: null },
+    ...[null, "400", 0, 1001, 1.5, [900, 100], [0, 400], [1, 1001], [1.5, 400], [1], [1, 2, 3]].map((weight) => ({
+      weight,
+    })),
+  ])
+    expect(ThemeFontFile.safeParse({ ...entry, ...patch }).success).toBe(false);
+  const fonts = { text: "Example", files: Array(LIMITS.themeFontFiles).fill(entry) };
+  expect(ThemeValid.parse({ ...valid, fonts }).fonts).toEqual(fonts);
+  expect(ThemeValid.safeParse({ ...valid, fonts: { ...fonts, files: [...fonts.files, entry] } }).success).toBe(false);
+  expect(LIMITS).toMatchObject({ themeFontFiles: 16, themeFontBytes: 4194304 });
 });
 test("valid entries carry overrides and permit future record names", () => {
   const entry = {

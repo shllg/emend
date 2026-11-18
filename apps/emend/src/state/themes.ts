@@ -7,7 +7,9 @@ import { ConfigFileTooLargeError, readConfigJson } from "./read-config.ts";
 function unreadableTheme(name: string, problem: string): ThemeRefused {
   const problems = ThemeName.safeParse(name).success
     ? []
-    : ["The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark or light."];
+    : [
+        "The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark, light or fonts.",
+      ];
   return { valid: false, name, base: null, problems: [...problems, problem] };
 }
 
@@ -40,7 +42,13 @@ async function themeFolderState(path: string): Promise<"folder" | "none" | "unre
 
 /** Read only a single folder entry; a missing name is distinct from an unreadable file. */
 export async function readTheme(themesDir: string | undefined, name: string): Promise<ThemeEntry | null> {
-  if (!themesDir || name.startsWith(".") || /[/\\]/.test(name) || !ThemeRefused.shape.name.safeParse(name).success)
+  if (
+    !themesDir ||
+    name === "fonts" ||
+    name.startsWith(".") ||
+    /[/\\]/.test(name) ||
+    !ThemeRefused.shape.name.safeParse(name).success
+  )
     return null;
   const folder = join(themesDir, name);
   if ((await themeFolderState(folder)) === "none") return null;
@@ -62,6 +70,7 @@ export async function listThemeFolders(themesDir?: string): Promise<{
       // One overflow probe distinguishes exactly 1000 entries from a larger folder.
       if (++count > 1000) return { folders: [], folderError: true, status: "too-full" };
       if (
+        entry.name !== "fonts" &&
         !entry.name.startsWith(".") &&
         ThemeRefused.shape.name.safeParse(entry.name).success &&
         (entry.isDirectory() || entry.isSymbolicLink())

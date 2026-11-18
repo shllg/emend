@@ -9,7 +9,7 @@
       const cached = JSON.parse(localStorage.getItem("emend.theme.custom") || "null");
       if (
         /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$(?![\s\S])/.test(name) &&
-        !["system", "dark", "light"].includes(name) &&
+        !["system", "dark", "light", "fonts"].includes(name) &&
         cached?.valid === true &&
         cached.name === name &&
         (cached.base === "dark" || cached.base === "light")
