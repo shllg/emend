@@ -5,6 +5,7 @@ import { X } from "lucide-react";
 import {
   type ComponentProps,
   type MouseEvent,
+  type ReactElement,
   type ReactNode,
   type Ref,
   useCallback,
@@ -21,6 +22,7 @@ import { reviewQuery, revisionQuery } from "../api/queries.ts";
 import { DiffChrome } from "../components/diff/diff-chrome.ts";
 import { LazyDiffPane } from "../components/diff/LazyDiffPane.tsx";
 import { isDiffTarget } from "../components/diff/targets.ts";
+import { DiffWorkersHold } from "../components/diff/worker-hold.ts";
 import { FilesView } from "../components/files/FilesView.tsx";
 import { AppFrame } from "../components/layout/AppFrame.tsx";
 import { useReviewFrameActions } from "../components/layout/more-menu.ts";
@@ -330,6 +332,10 @@ function LoadedReview({
   const layout = useLayout();
   const paneMode = usePaneMode();
   const readingId = useId();
+  const [diffWorkers, setDiffWorkers] = useState<ReactElement | null>(null);
+  const holdDiffWorkers = useCallback((keeper: ReactElement) => {
+    setDiffWorkers((current) => current ?? keeper);
+  }, []);
   // Resolving the lazy pane does not otherwise rerender this route's pending scroll effect.
   const [, setDiffRendered] = useState(0);
   const onDiffRendered = useCallback(() => setDiffRendered((value) => value + 1), []);
@@ -880,7 +886,8 @@ function LoadedReview({
     onDownload,
   });
   return (
-    <>
+    <DiffWorkersHold value={holdDiffWorkers}>
+      {diffWorkers}
       {revision && (
         <DownloadDialog
           key={`${review.id}:${seq}`}
@@ -1156,7 +1163,7 @@ function LoadedReview({
           }
         />
       </div>
-    </>
+    </DiffWorkersHold>
   );
 }
 /** A review in the bin keeps its address: say so, and offer Restore, the bin and the inbox. */
