@@ -18,9 +18,11 @@ function assertInert(html: string) {
           expect(String(value)).toMatch(key === "href" ? /^(https?:|mailto:)/i : /^https?:/i);
         }
         if (key === "style") {
-          expect(["pre", "span"]).toContain(node.tagName);
+          expect(node.tagName).toBe("span");
           for (const declaration of String(value).split(";").filter(Boolean)) {
-            expect(declaration).toMatch(/^--shiki-(light|dark)(?:-[a-z-]+)?:/);
+            expect(declaration).toMatch(
+              /^(?:color:var\(--(?:syn-(?:plain|keyword|type|function|string|number|comment|punct)|diff-(?:add|del)-fg)\)|font-style:italic|font-weight:bold)$/,
+            );
           }
         }
       }
@@ -191,22 +193,23 @@ test("keeps ordered list start values and task items disabled", async () => {
   expect(tasks[0]?.html).toContain("user-content-task-list-item");
 });
 
-test("Shiki uses light/dark CSS variables and works with WebAssembly disabled", async () => {
+test("Shiki uses syntax CSS variables and works with WebAssembly disabled", async () => {
   vi.stubGlobal("WebAssembly", undefined);
   try {
     // A fresh module ensures this also covers first-time engine initialization.
     vi.resetModules();
     const { renderMarkdown: freshRender } = await import("./markdown.ts");
-    const blocks = await freshRender(
-      '<p style="color:red">Author</p>\n\n```ts\nconst count: number = 2;\n```',
-      "overview",
-    );
+    const markdown = '<p style="color:red">Author</p>\n\n```ts\nconst count: number = 2;\n```';
+    const blocks = await freshRender(markdown, "overview");
     expect(blocks[0]?.html).not.toContain("style=");
     expect(blocks[1]?.html).toContain("shiki");
-    expect(blocks[1]?.html).toContain("--shiki-light:");
-    expect(blocks[1]?.html).toContain("--shiki-dark:");
-    expect(blocks[1]?.html).toContain("--shiki-light-bg:");
+    expect(blocks[1]?.html).toContain("color:var(--syn-keyword)");
+    expect(blocks[1]?.html).not.toMatch(/<pre[^>]*style=|--shiki-/);
     for (const block of blocks) assertInert(block.html);
+    // Warm the grammar before asserting late tokens; cold scans can exhaust the per-line limit under load.
+    const warmBlocks = await freshRender(markdown, "overview");
+    expect(warmBlocks[1]?.html).toContain("color:var(--syn-number)");
+    for (const block of warmBlocks) assertInert(block.html);
   } finally {
     vi.unstubAllGlobals();
   }
@@ -303,4 +306,28 @@ test("image discovery stops before expanded references exceed the Markdown byte 
   // UTF-8 URL encoding expands this sub-limit source past the one-MiB result budget.
   const markdown = `![First](first.png) ![Large](${"é".repeat(180000)}.png) ![Later](later.png)`;
   expect(markdownImageReferences(markdown)).toEqual({ references: ["first.png"], capped: true });
+});
+
+test.each([
+  "<script>alert(1)</script>",
+  '<img src=x onerror="alert(1)">',
+  '<a href="javascript:alert(1)">link</a>',
+  '<div style="color:red" onclick="alert(1)">raw HTML</div>',
+  '<svg onload="alert(1)"><script>alert(1)</script></svg>',
+  'graph TD; A-->B; click A "javascript:alert(1)"',
+])("code fences keep hostile content as text: %s", async (payload) => {
+  const blocks = await render(`\`\`\`html\n${payload}\n\`\`\`\n\n${payload}`);
+  expect(blocks[0]?.text).toBe(`${payload}\n`);
+  expect(blocks[0]?.html).toContain('class="shiki');
+  expect(blocks[0]?.html).not.toMatch(/<pre[^>]*style=/);
+});
+
+test("code spans preserve the theme's italic and bold styles", async () => {
+  const markdown = "```ts\n// comment\n```\n\n```md\n# Heading\n**bold** *italic*\n```";
+  // Warm both grammars so cold scans under load do not cut the line short before its italic token.
+  await render(markdown);
+  const blocks = await render(markdown);
+  expect(blocks[0]?.html).toContain("font-style:italic");
+  expect(blocks[1]?.html).toContain("font-weight:bold");
+  expect(blocks[1]?.html).toContain("font-style:italic");
 });

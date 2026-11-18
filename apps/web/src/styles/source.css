@@ -46,6 +46,7 @@
     background: var(--accent-tint);
   }
   .em-source-code {
+    color: var(--syn-plain);
     padding-inline: 12px;
     white-space: pre;
     font: inherit;

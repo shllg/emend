@@ -1,11 +1,13 @@
 import { createHighlighterCore } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 
+import { syntaxTheme } from "./syntax-theme.ts";
+
 async function createHighlighter() {
   // Explicit imports keep the server bundle to these grammars and the JavaScript engine.
   return createHighlighterCore({
     engine: createJavaScriptRegexEngine(),
-    themes: [import("shiki/themes/github-light.mjs"), import("shiki/themes/github-dark.mjs")],
+    themes: [syntaxTheme],
     langs: [
       import("shiki/langs/ts.mjs"),
       import("shiki/langs/tsx.mjs"),

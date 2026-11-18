@@ -100,7 +100,7 @@ function expectDownloadTheme(html: string, theme: "dark" | "light") {
   expect(html).toContain(`<meta name="color-scheme" content="${theme}">`);
   expect(html).toContain(`:root{color-scheme:${theme};`);
   expect(html).not.toContain("prefers-color-scheme");
-  expect(html).toContain(`color:var(--shiki-${theme},inherit)`);
+  expect(html).toContain(`color:var(--shiki-${theme},var(--syn-plain))`);
   if (theme === "dark") expect(html).toContain(":root{--bg:oklch(.18 .004 260)");
   else expect(html).not.toContain("var(--shiki-dark");
 }
@@ -759,7 +759,7 @@ test("a source pub downloads stored highlighted tokens as escaped text", async (
   });
   const html = await (await get(reviewId)).text();
   expect(html).toContain('class="shiki em-source"');
-  expect(html).toContain("--shiki-light:");
+  expect(html).toContain('<span style="color:var(--syn-keyword)">');
   expect(html).not.toContain("<script>");
 });
 
@@ -1314,7 +1314,7 @@ test.each(["missing", "malformed", "invalid"])(
     );
     expect(entries).toHaveLength(4);
     expect(entries[1]?.html).toContain('class="shiki em-source"');
-    expect(entries[1]?.html).toContain("--shiki-light:");
+    expect(entries[1]?.html).toContain('<span style="color:var(--syn-keyword)">');
     expect(entries[1]?.html).toContain("&#x3C;script>");
     expect(entries[1]?.html).not.toContain("<script>");
     expect(entries[2]?.html).toContain("<p>This file could not be shown.</p>");

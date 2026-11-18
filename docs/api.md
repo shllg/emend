@@ -244,7 +244,9 @@ An optional `theme=dark`, `theme=light` or `theme=<name>` query parameter sets t
 draws: the writeup, Markdown docs, docs shown as source, the comments file and the omitted-content
 note page. Without it, they follow the reader's colour scheme. An HTML doc downloads as its own
 bytes: a custom page keeps its own look, and a page in emend's look downloads without emend's
-styles. A theme name uses that theme’s resolved colours; fonts and code-block colours stay unchanged.
+styles. A theme name uses that theme’s resolved colours, including syntax colours for code blocks
+and docs shown as source; fonts stay unchanged. Revisions published before #136 keep their stored
+GitHub code colours.
 An invalid value, a repeat, or a missing or refused theme gets `400 invalid_request` before waiting
 for a slot, also on `HEAD`.
 It changes no headers, filename or ZIP decision.
@@ -658,9 +660,12 @@ unless an `over` surface is specified. `diff-add-word` composites over `diff-add
 `diff-del-word` over `diff-del-bg`; each line background composites over `bg-surface` in the app.
 Download diff lines composite over `bg-sunken` instead, as specified in the pairs below.
 The seven surfaces `bg-app`, `bg-surface`, `bg-sunken`, `bg-raised`, `bg-reading`, `bg-reading-card`
-and `bg-inverse` must resolve to alpha 1: the page stacks them on nested elements. A translucent
-surface is refused with `bg-app must be opaque: its colour has transparency.` (the token name
-varies). Compare the unrounded ratio and report two decimals, for example
+and `bg-inverse` must resolve to alpha 1: the page stacks them on nested elements. Diagram text
+colours `fg-1`, `fg-2` and `fg-3` must also resolve to alpha 1, including through scale references:
+the frame receives one colour per Mermaid variable, and Mermaid draws it on several backgrounds.
+A translucent colour in either group is refused with
+`bg-app must be opaque: its colour has transparency.` (the token name varies).
+Compare the unrounded ratio and report two decimals, for example
 `fg-1 on bg-app: 2.10 to 1, needs 4.5 to 1.` These pairs require 4.5 to 1:
 
 - `fg-1`, `fg-2`, `fg-3`, `fg-link`, `accent-text` on `bg-app`, `bg-surface`, `bg-sunken`, `bg-raised`.
@@ -668,29 +673,39 @@ varies). Compare the unrounded ratio and report two decimals, for example
   and `bg-reading-card`; `fg-link` on `bg-reading`.
 - For the Download: `fg-reading` and `fg-reading-strong` on `bg-sunken`, `diff-add-bg` over
   `bg-sunken`, and `diff-del-bg` over `bg-sunken`.
-- `fg-1` on `bg-selected`, `bg-hover`, `bg-active`, `accent-tint`, `mark-bg`, `mark-bg-active`;
+- `fg-1` on `bg-selected`, `bg-hover`, `bg-active`, `accent-tint`, `mark-bg`, `mark-bg-active`, `topic-bg-2`;
   `fg-reading` on `mark-bg` over `bg-reading`.
+- For diagram notes: `fg-1` on `topic-bg-2` over `bg-sunken`, in addition to the pair over
+  `bg-surface` above. Diagram text also uses the existing `fg-1`, `fg-2` and `fg-3` pairs on
+  `bg-surface` and `bg-sunken`. Mermaid draws edge-label and state-label boxes at half opacity
+  over the diagram background; no pair checks that blend yet.
 - `accent-fg` on `accent`, `accent-hover`, `accent-press`.
 - `success-fg`, `info-fg`, `warning-fg`, `danger-fg` on their own `-bg` and on `bg-surface`.
 - `state-{open,approved,settled,snoozed}-fg`, `outcome-{fixed,explained,held,declined}-fg` and
   `changed-fg` on their own `-bg`; `topic-fg` on `topic-bg`, `topic-bg-2`, `bg-surface`;
   `topic-on-solid` on `topic-solid`; `origin-N-fg` on `origin-N-bg` for N = 1–8.
-- `syn-plain` on `bg-surface`, `bg-hover`, `diff-add-bg`, `diff-del-bg`; `diff-add-fg` on `diff-add-bg`;
-  `diff-del-fg` on `diff-del-bg`; `fg-3` on `diff-gutter`; `fg-1`, `fg-2` on `diff-hunk-bg`;
-  `fg-1` on `diff-select-bg`.
+- `syn-plain` on `bg-surface`, `bg-sunken`, `bg-hover`, `diff-add-bg`, `diff-del-bg`;
+  `diff-add-fg` on `diff-add-bg`; `diff-del-fg` on `diff-del-bg`; `fg-3` on `diff-gutter`;
+  `fg-1`, `fg-2` on `diff-hunk-bg`; `fg-1` on `diff-select-bg`.
 - `syn-plain` on `diff-add-word` (over `diff-add-bg`), `diff-del-word` (over `diff-del-bg`),
   `diff-add-hover`, `diff-del-hover` and `diff-select-bg`.
+- For docs shown as source: `syn-plain` on `bg-reading`, `mark-bg` over `bg-reading`, and
+  `accent-tint` over `bg-reading`.
 
 These pairs require 3 to 1:
 
 - `syn-keyword`, `syn-type`, `syn-function`, `syn-string`, `syn-number`, `syn-comment` and
-  `syn-punct` on `bg-surface`, `bg-hover`, `diff-add-bg`, `diff-del-bg`, `diff-add-word` (over `diff-add-bg`),
-  `diff-del-word` (over `diff-del-bg`), `diff-add-hover`, `diff-del-hover` and `diff-select-bg`.
+  `syn-punct` on `bg-surface`, `bg-sunken`, `bg-hover`, `diff-add-bg`, `diff-del-bg`,
+  `diff-add-word` (over `diff-add-bg`), `diff-del-word` (over `diff-del-bg`), `diff-add-hover`,
+  `diff-del-hover` and `diff-select-bg`.
+- `diff-add-fg` and `diff-del-fg` on `bg-sunken` for inserted and deleted code tokens.
+- For docs shown as source: the seven syntax highlight colours above, `diff-add-fg` and
+  `diff-del-fg` on `bg-reading`, `mark-bg` over `bg-reading`, and `accent-tint` over `bg-reading`.
 - For the Download: `fg-reading-muted` on `bg-sunken`, on `diff-add-bg` over `bg-sunken` and on
   `diff-del-bg` over `bg-sunken`.
 
 Hovered context lines use `bg-hover` composited over `bg-surface`. Disabled text is exempt.
-Both built-in bases pass all 154 pairs.
+Both built-in bases pass all 196 pairs.
 
 Before the HTTP server listens, `startServer` awaits `watchThemes`, which waits at most
 `baselineWaitMs` (default 1000 ms) for its first fingerprint. In time, it becomes the baseline without an event. After
@@ -2321,8 +2336,11 @@ The size limit is `LIMITS.markdownDocBytes` (1048576 bytes, 1 MiB). The server s
 as role `doc`, media type `text/plain`; source HTML never has a content URL or content-route access.
 
 `RevisionView.docs[]` includes `{ path, kind: "source", title?, language, lines, unrendered?: true }`, where `lines`
-is `SourceToken[][]` and a token is `{ text: string, light?: Color, dark?: Color }`. Colors strictly
-match `^#[0-9a-fA-F]{3,8}$`; light/dark come from github-light/github-dark. Text is raw data, never HTML. `language` is a loaded Shiki language id
+is `SourceToken[][]` and a token is `{ text: string, syntax?: SyntaxRole, light?: Color, dark?: Color }`.
+New renders carry `syntax`: `plain`, `keyword`, `type`, `function`, `string`, `number`, `comment`,
+`punct`, `inserted` or `deleted`; absent means plain. These roles use the reader's theme colours.
+The optional `light`/`dark` colours remain accepted for revisions published earlier and strictly
+match `^#[0-9a-fA-F]{3,8}$`. Text is raw data, never HTML. `language` is a loaded Shiki language id
 (`ts`, `tsx`, `js`, `jsx`, `json`, `css`, `html`, `md`, `yaml`, `sh`, `go`, `py`, `sql`, `diff`), or
 `text` for unknown extensions, files above the 256 KiB highlighting budget, or docs past the
 1 MiB per-revision highlighting budget. Highlighting also

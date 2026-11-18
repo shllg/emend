@@ -29,6 +29,7 @@ const rule = (scope: string[], key: keyof typeof syntaxVariables, fontStyle = ""
 // The stock Shiki CSS-variable scopes conflate types/functions and properties/constants.
 // Register a TextMate specialization under the SAME name; shiki-js prefers it over the
 // shared descriptor. Both resolve on the main thread and travel in resolvedThemes.
+// Keep the token rules in step with packages/core/src/render/syntax-theme.ts.
 export const syntaxTheme = {
   name,
   type: "dark" as const,

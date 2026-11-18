@@ -24,13 +24,34 @@ test.each(["dark", "light"] as const)("%s passes all readability pairs", (base) 
   expect(check({ version: 1, base })).toMatchObject({ base, scales: {}, tokens: {}, fonts: {} });
   expect(themeReadabilityProblems(resolveTheme(base), base)).toEqual([]);
 });
-test("the readability set covers exactly the design's 154 pairs", () => {
-  expect(THEME_READABILITY_PAIRS).toHaveLength(154);
-  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.minimum === 3)).toHaveLength(66);
-  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.over)).toHaveLength(23);
+test("the readability set covers exactly the design's 196 pairs", () => {
+  expect(THEME_READABILITY_PAIRS).toHaveLength(196);
+  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.minimum === 3)).toHaveLength(102);
+  expect(THEME_READABILITY_PAIRS.filter((pair) => pair.over)).toHaveLength(44);
   expect(THEME_READABILITY_PAIRS).toEqual(
     expect.arrayContaining([
       { foreground: "fg-reading", background: "mark-bg", over: "bg-reading", minimum: 4.5 },
+      { foreground: "fg-1", background: "topic-bg-2", minimum: 4.5 },
+      { foreground: "fg-1", background: "topic-bg-2", over: "bg-sunken", minimum: 4.5 },
+      ...[
+        "syn-plain",
+        "syn-keyword",
+        "syn-type",
+        "syn-function",
+        "syn-string",
+        "syn-number",
+        "syn-comment",
+        "syn-punct",
+        "diff-add-fg",
+        "diff-del-fg",
+      ].flatMap((foreground) =>
+        ["bg-reading", "mark-bg", "accent-tint"].map((background) => ({
+          foreground,
+          background,
+          ...(background === "bg-reading" ? {} : { over: "bg-reading" }),
+          minimum: foreground === "syn-plain" ? 4.5 : 3,
+        })),
+      ),
       ...["fg-reading", "fg-reading-strong", "fg-reading-muted"].flatMap((foreground) =>
         ["bg-sunken", "diff-add-bg", "diff-del-bg"].map((background) => ({
           foreground,
@@ -69,10 +90,48 @@ test("the readability set covers exactly the design's 154 pairs", () => {
   );
   expect(THEME_READABILITY_PAIRS.some((pair) => pair.foreground === "fg-disabled")).toBe(false);
 });
+test.each([
+  ["syn-plain", "bg-sunken", 4.5],
+  ["syn-keyword", "bg-sunken", 3],
+  ["syn-type", "bg-sunken", 3],
+  ["syn-function", "bg-sunken", 3],
+  ["syn-string", "bg-sunken", 3],
+  ["syn-number", "bg-sunken", 3],
+  ["syn-comment", "bg-sunken", 3],
+  ["syn-punct", "bg-sunken", 3],
+  ["diff-add-fg", "bg-sunken", 3],
+  ["diff-del-fg", "bg-sunken", 3],
+  ["fg-1", "topic-bg-2", 4.5],
+] as const)("refuses unreadable code or diagram text: %s on %s", (foreground, background, minimum) => {
+  // A full copy keeps other foregrounds independent of the failing token.
+  const theme = themeCopyDocument("light");
+  theme.tokens = { ...theme.tokens, [foreground]: resolveTheme("light")[background] };
+  expect(problems(theme)).toContain(`${foreground} on ${background}: 1.00 to 1, needs ${minimum} to 1.`);
+});
 test("hovered context lines refuse faint syntax colours on bg-hover", () => {
   expect(problems({ version: 1, base: "light", tokens: { "bg-hover": "#7c7c7c" } })).toContainEqual(
     expect.stringMatching(/^syn-comment on bg-hover: .* to 1, needs 3 to 1\.$/),
   );
+});
+test("refuses a theme whose only unreadable pair is syntax on bg-reading", () => {
+  const theme = themeCopyDocument("light");
+  theme.tokens = { ...theme.tokens, "fg-reading-muted": "#000000", "mark-bg": "#ffffff" };
+  check(theme);
+  theme.tokens["bg-reading"] = "#d0d0d0";
+  expect(problems(theme)).toEqual([expect.stringMatching(/^syn-comment on bg-reading: .* to 1, needs 3 to 1\.$/)]);
+});
+test("refuses syntax hidden by accent-tint over bg-reading", () => {
+  const theme = themeCopyDocument("light");
+  check(theme);
+  theme.tokens = { ...theme.tokens, "accent-tint": "#00000030" };
+  expect(problems(theme)).toEqual([expect.stringMatching(/^syn-comment on accent-tint: .* to 1, needs 3 to 1\.$/)]);
+});
+test("refuses note text readable on topic-bg-2 over bg-surface but hidden over bg-sunken", () => {
+  const theme = themeCopyDocument("light");
+  theme.tokens = { ...theme.tokens, "fg-1": "#505050", "topic-fg": "#000000", "topic-bg-2": "#00000030" };
+  check(theme);
+  theme.tokens["bg-sunken"] = "#e8e8e8";
+  expect(problems(theme)).toEqual([expect.stringMatching(/^fg-1 on topic-bg-2: .* to 1, needs 4.5 to 1\.$/)]);
 });
 test.each([
   [null, "The file must hold a JSON object."],
@@ -204,6 +263,20 @@ test.each(["bg-app", "bg-surface", "bg-sunken", "bg-raised", "bg-reading", "bg-r
       );
   },
 );
+test.each(["fg-1", "fg-2", "fg-3"] as const)(
+  "%s must be opaque even when contrast passes, including scale references",
+  (foreground) => {
+    const theme = themeCopyDocument("dark");
+    // Dark does not otherwise use n-0, so only this foreground gets transparency.
+    theme.scales = { ...theme.scales, "n-0": "#fffffffe" };
+    for (const value of ["#fffffffe", "oklch(0.968 0.002 260 / 0.99)", "n-0"]) {
+      theme.tokens = { ...theme.tokens, [foreground]: value };
+      expect(problems(theme)).toEqual([`${foreground} must be opaque: its colour has transparency.`]);
+    }
+    theme.tokens = { ...theme.tokens, [foreground]: "#ffffffff" };
+    check(theme);
+  },
+);
 test("refuses the translucent app surface that passed contrast over a single canvas", () => {
   expect(problems({ ...document, tokens: { "bg-app": "#ffffff4d", "fg-3": "#ffffff" } })).toContain(
     "bg-app must be opaque: its colour has transparency.",
@@ -291,7 +364,7 @@ test("translucent backgrounds composite through surfaces; valid meta colours use
   expect(check({ version: 1, base: "light", tokens: { "bg-app": "#ffffffff" } }).themeColor).toBe("#ffffff");
   expect(themeColorHex(themeBackground(colors, "dark", "bg-app"))).toBe("#808080");
 });
-test("download look uses the nine resolved reading and diff colours", () => {
+test("download look uses the resolved reading, diff and syntax colours", () => {
   const source = check({ ...document, tokens: { "fg-link": "#ffffff" } });
   const colors = resolveTheme(source);
   expect(themeDownloadLook(source)).toEqual({
@@ -306,6 +379,16 @@ test("download look uses the nine resolved reading and diff colours", () => {
       link: "#ffffff",
       diffAdd: colors["diff-add-bg"],
       diffDel: colors["diff-del-bg"],
+      synPlain: colors["syn-plain"],
+      synKeyword: colors["syn-keyword"],
+      synType: colors["syn-type"],
+      synFunction: colors["syn-function"],
+      synString: colors["syn-string"],
+      synNumber: colors["syn-number"],
+      synComment: colors["syn-comment"],
+      synPunct: colors["syn-punct"],
+      diffAddFg: colors["diff-add-fg"],
+      diffDelFg: colors["diff-del-fg"],
     },
   });
 });

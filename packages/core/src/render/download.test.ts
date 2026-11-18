@@ -4,6 +4,8 @@ import type { RenderedBlock, RenderedWriteup, Target, ThemeBase, TopicMeta } fro
 import { fromHtml } from "hast-util-from-html";
 import { toString as hastText } from "hast-util-to-string";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { themeDownloadLook } from "../theme/download.ts";
+import { checkThemeDocument } from "../theme/theme.ts";
 import type { HtmlElement as Element, HtmlRoot as Root } from "./blocks.ts";
 import {
   buildCommentsDownload,
@@ -269,9 +271,9 @@ test.each([undefined, "dark", "light"] as const)(
     expectHead(markdown);
     expect(markdown).toContain("Stored Markdown");
     for (const html of [markdown, await render(blocks, undefined, theme)]) {
-      expect(html).toContain("--shiki-light:");
-      expect(html).toContain("--shiki-dark:");
-      expect(html).toContain(`color:var(--shiki-${theme ?? "light"},inherit)`);
+      expect(html).toContain("color:var(--syn-keyword)");
+      expect(html).toContain("--syn-plain:");
+      expect(html).toContain(`color:var(--shiki-${theme ?? "light"},var(--syn-plain))`);
       if (theme === "light") expect(html).not.toContain("var(--shiki-dark");
       if (theme) expect(html).not.toContain("prefers-color-scheme");
     }
@@ -293,7 +295,7 @@ test.each([undefined, "dark", "light"] as const)(
     });
     expectHead(source);
     expect(source).toContain('style="--shiki-light:#123456;--shiki-dark:#abcdef"');
-    expect(source).toContain(`color:var(--shiki-${theme ?? "light"},inherit)`);
+    expect(source).toContain(`color:var(--shiki-${theme ?? "light"},var(--syn-plain))`);
     if (theme === "light") expect(source).not.toContain("var(--shiki-dark");
     if (theme) expect(source).not.toContain("prefers-color-scheme");
     expect(source).not.toContain("red;url");
@@ -2691,7 +2693,7 @@ const serializedCard = (html: string) => {
   return card;
 };
 const indexOfText = (html: string, needle: string) => {
-  const at = html.indexOf(needle);
+  const at = html.indexOf(needle, html.indexOf("<body>"));
   expect(at, needle).toBeGreaterThan(-1);
   return at;
 };
@@ -2721,9 +2723,9 @@ const threadPage = (kind: (typeof threadPageKinds)[number], threads: FileThreads
   }
 };
 
-// CSS hashes captured before fixed download themes; System must keep the same bytes.
+// Reading CSS includes syntax base tokens; thread and diff CSS retain their original bytes.
 const systemStyleHashes = [
-  "2cdfba18a99ae6f510cdc4907337164744e451bba7e48d465478bf70f1b99305",
+  "39dd863644fe28083056a3bf37a039251672cd5050f5ed048de6e88410128cc2",
   "4ccb0e73df0d25d3c35164825b62358d1f4475da66df85dff6e897350fce5e72",
   "b498db6a7c457faef4b17a4b2343cc19b0c9eeaf59ae33752fb9aa18ba983f97",
 ];
@@ -2731,13 +2733,79 @@ const pageStyles = (html: string) =>
   parsed(html)
     .filter((el) => el.tagName === "style")
     .map(hastText);
+
+test.each(["", "unknown-emend-language"])(
+  "Markdown fence downloads use syntax colours without highlighting (language=%j)",
+  async (language) => {
+    const blocks = (await renderMarkdown(`\`\`\`${language}\nplain <code>\n\`\`\``, "overview")).map(({ html }) =>
+      block(html),
+    );
+    const html = await buildDocDownload({
+      title: "Plain fences",
+      details,
+      resolveMedia: async () => null,
+      content: { kind: "markdown", blocks },
+    });
+    const codes = parsed(html).filter((el) => el.tagName === "code");
+    expect(codes.map(hastText)).toEqual(["plain <code>\n"]);
+    expect(html).not.toContain('class="shiki');
+    const styles = pageStyles(html).join("\n");
+    expect(styles).toContain("pre code{padding:0;border:0;background:none;font:inherit}");
+    expect(styles).toContain("pre:not([class]) code{color:var(--syn-plain)}");
+    expect(styles).toContain("prefers-color-scheme:dark");
+  },
+);
+
+test.each(["system", "light", "dark", "own"] as const)(
+  "diff text colour rules stay scoped with theme=%s",
+  async (pick) => {
+    const own = checkThemeDocument(
+      { version: 1, base: "dark", tokens: { "fg-reading-strong": "#ffffff", "syn-plain": "#eeeeee" } },
+      "own",
+    );
+    expect(own.valid, JSON.stringify(own)).toBe(true);
+    if (!own.valid) throw new Error("Expected a valid theme");
+    const theme = pick === "system" ? undefined : pick === "own" ? themeDownloadLook(own) : pick;
+    const html = await buildWriteupDownload({
+      ...diffInput,
+      theme,
+      threads: emptyThreads(),
+      diff: { files: [diffFile()], hunks: async () => [{ oldStart: 1, newStart: 1, lines: ["-before", "+after"] }] },
+    });
+    expect(diffNodes(html, "em-diff")).toHaveLength(1);
+    const allowed = [
+      ["h1,h2,h3,h5,h6,strong,code", "var(--strong)"],
+      ["a :is(strong,code)", "inherit"],
+      ["pre:not([class]) code", "var(--syn-plain)"],
+      [".shiki,.shiki span", "var(--shiki-light,var(--syn-plain))"],
+      [".shiki,.shiki span", "var(--shiki-dark,var(--syn-plain))"],
+      [".em-diff-file", "var(--strong)"],
+      [".em-diff-numbers,.em-diff-hunk,.em-diff-marker", "var(--muted)"],
+    ];
+    const pairs: [string, string][] = [];
+    const styles = pageStyles(html).join("\n");
+    // Match leaf rules too, including those inside System's dark-mode media query.
+    for (const rule of styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const selector = rule[1]?.trim() ?? "";
+      if (!/pre|code|em-diff|shiki/i.test(selector)) continue;
+      for (const declaration of (rule[2] ?? "").matchAll(/(?:^|;)\s*color\s*:\s*([^;]+)/gi)) {
+        const pair: [string, string] = [selector, declaration[1]?.trim() ?? ""];
+        expect(allowed, `${pick}: ${rule[0]}`).toContainEqual(pair);
+        pairs.push(pair);
+      }
+    }
+    expect(pairs).toContainEqual(["h1,h2,h3,h5,h6,strong,code", "var(--strong)"]);
+    expect(pairs).toContainEqual(["pre:not([class]) code", "var(--syn-plain)"]);
+  },
+);
+
 function expectFixedTheme(html: string, theme: ThemeBase) {
   expectHead(html);
   expect(html).toContain(`<meta name="color-scheme" content="${theme}">`);
   const styles = pageStyles(html).join("\n");
   expect(styles).toContain(`:root{color-scheme:${theme};`);
   expect(styles).not.toContain("prefers-color-scheme");
-  expect(styles).toContain(`.shiki,.shiki span{color:var(--shiki-${theme},inherit)}`);
+  expect(styles).toContain(`.shiki,.shiki span{color:var(--shiki-${theme},var(--syn-plain))}`);
   expect(styles).toContain(`.shiki{background-color:var(--shiki-${theme}-bg,var(--sunken))}`);
   if (theme === "dark") {
     expect(styles).toContain(":root{--bg:oklch(.18 .004 260)");
@@ -2771,6 +2839,7 @@ test("diff styles follow the same theme as the writeup and comments", async () =
     diff: { files: [diffFile()], hunks: async () => [{ oldStart: 1, newStart: 1, lines: ["-before", "+after"] }] },
   };
   const system = await buildWriteupDownload(input);
+  expect(pageStyles(system).join("\n")).toContain("pre code{padding:0;border:0;background:none;font:inherit}");
   expect(pageStyles(system).map((css) => createHash("sha256").update(css).digest("hex"))).toEqual(systemStyleHashes);
   for (const theme of ["dark", "light"] as const) {
     const html = await buildWriteupDownload({ ...input, theme });
@@ -2912,18 +2981,18 @@ async function commentsOffOutputs(builders: CompatibilityBuilders) {
   };
 }
 
-// Hashes come from the builder before comments existed; change only with an intended markup change.
+// Baseline without comments, updated for the syntax base CSS; HTML docs retain their original bytes.
 const commentsOffHashes = {
-  writeup: "7ef645b00c7986fd9c2cf1892e682d0fd4828609b9d2aa2d03373debef3e1c36",
-  markdown: "8999a91827a926e16583a2ce3d19a563b8f710fbf43c6c64e9b993ceaccba705",
-  source: "3eb892ff22a6cde3105a940cca2c0ad8b8f88ac804a1f515e66b23029855bbf6",
-  emptySource: "7c9b648a61a96a406da701dcc70b7637cc3ff9a2ff32f269fe0ec43d9d0f77ff",
-  unrenderedSource: "ac1fd35ef0394b7c543bde51ef13fad63da31a980f188a2a36b1fceec466725e",
+  writeup: "599537df4bce2fbabee2af7809feb7ad7206e39c3d23eb2908d57fd5f105c7ca",
+  markdown: "f956df6e2ce53e2b4fe18db84588faa615aef76e55747da10ab1de22fe9ba842",
+  source: "a87967f30e8e49fc10a5236ab903a47d42baac6ce46a0613360ba55386603533",
+  emptySource: "7d5b76b40111b0a8e49bf4149f7265677bd321a0f54d30e4ee37264830ed7a99",
+  unrenderedSource: "d259e459fc2a0b6769658c42c1b8703b137bf52a3caf5b1f0ac119b4f03d5d28",
   html: "ebd1d21e1b7d438fa77910ed4a617b0850bbc687dc44b06aab36d42194f329e7",
-  overLimitHtml: "9123b3e00b6e45188b0858cfea33b2216c843dc60f3ea45714e10aac0586b6b6",
-  omitted: "9123b3e00b6e45188b0858cfea33b2216c843dc60f3ea45714e10aac0586b6b6",
+  overLimitHtml: "be2a7658625e0d556ec94d6b3757a834af3655504f254d89c0404592a5ef427b",
+  omitted: "be2a7658625e0d556ec94d6b3757a834af3655504f254d89c0404592a5ef427b",
 };
-test("comments-off output matches the pre-comments builder hashes", async () => {
+test("comments-off output matches the pinned builder hashes", async () => {
   const outputs = await commentsOffOutputs({
     buildWriteupDownload,
     buildDocDownload,

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { PublishManifest, PublishRequest, RevisionView, Target } from "./index.ts";
+import { PublishManifest, PublishRequest, RevisionView, SourceToken, SyntaxRole, Target } from "./index.ts";
 
 const writeup = { overview: "", tldr: "", decisions: null, topics: {} };
 const manifest = { version: 1, title: "Source", topics: [], writeup };
@@ -61,4 +61,14 @@ it("validates source line ranges and strict token colors", () => {
   expect(
     RevisionView.shape.docs.safeParse([{ ...doc, lines: [[{ text: "x", light: "red;display:none" }]] }]).success,
   ).toBe(false);
+});
+
+it("accepts all syntax roles, plain tokens and legacy colours, but rejects unknown roles", () => {
+  for (const syntax of SyntaxRole.options)
+    expect(SourceToken.parse({ text: "x", syntax })).toEqual({ text: "x", syntax });
+  expect(SourceToken.parse({ text: "x" })).toEqual({ text: "x" });
+  const legacy = { text: "x", light: "#abcdef", dark: "#123456" };
+  expect(SourceToken.parse(legacy)).toEqual(legacy);
+  for (const syntax of ["unknown", "var(--syn-keyword)", "__proto__", "constructor"])
+    expect(SourceToken.safeParse({ text: "x", syntax }).success).toBe(false);
 });

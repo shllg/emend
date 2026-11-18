@@ -28,8 +28,12 @@ export const THEME_READABILITY_PAIRS: readonly ThemeReadabilityPair[] = [
     minimum: pair.foreground === "fg-reading-muted" ? 3 : 4.5,
   })),
   ...pairs(["fg-link"], ["bg-reading"]),
-  ...pairs(["fg-1"], ["bg-selected", "bg-hover", "bg-active", "accent-tint", "mark-bg", "mark-bg-active"]),
+  ...pairs(
+    ["fg-1"],
+    ["bg-selected", "bg-hover", "bg-active", "accent-tint", "mark-bg", "mark-bg-active", "topic-bg-2"],
+  ),
   { foreground: "fg-reading", background: "mark-bg", over: "bg-reading", minimum: 4.5 },
+  { foreground: "fg-1", background: "topic-bg-2", over: "bg-sunken", minimum: 4.5 },
   ...pairs(["accent-fg"], ["accent", "accent-hover", "accent-press"]),
   ...ownBackgrounds(["success", "info", "warning", "danger"]),
   ...pairs(["success-fg", "info-fg", "warning-fg", "danger-fg"], ["bg-surface"]),
@@ -38,8 +42,27 @@ export const THEME_READABILITY_PAIRS: readonly ThemeReadabilityPair[] = [
   ...pairs(["topic-fg"], ["topic-bg", "topic-bg-2", "bg-surface"]),
   ...pairs(["topic-on-solid"], ["topic-solid"]),
   ...ownBackgrounds(Array.from({ length: 8 }, (_, i) => `origin-${i + 1}`)),
-  ...pairs(["syn-plain"], ["bg-surface", "bg-hover", "diff-add-bg", "diff-del-bg"]),
+  ...pairs(["syn-plain"], ["bg-surface", "bg-sunken", "bg-hover", "diff-add-bg", "diff-del-bg"]),
   ...pairs(["syn-plain"], ["diff-add-hover", "diff-del-hover", "diff-select-bg"]),
+  ...pairs(
+    [
+      "syn-plain",
+      "syn-keyword",
+      "syn-type",
+      "syn-function",
+      "syn-string",
+      "syn-number",
+      "syn-comment",
+      "syn-punct",
+      "diff-add-fg",
+      "diff-del-fg",
+    ],
+    ["bg-reading", "mark-bg", "accent-tint"],
+  ).map((pair) => ({
+    ...pair,
+    ...(pair.background === "bg-reading" ? {} : { over: "bg-reading" as const }),
+    minimum: pair.foreground === "syn-plain" ? 4.5 : 3,
+  })),
   ...["add", "del"].flatMap((kind) =>
     pairs(
       ["syn-plain", "syn-keyword", "syn-type", "syn-function", "syn-string", "syn-number", "syn-comment", "syn-punct"],
@@ -52,12 +75,22 @@ export const THEME_READABILITY_PAIRS: readonly ThemeReadabilityPair[] = [
   ),
   ...pairs(["diff-add-fg"], ["diff-add-bg"]),
   ...pairs(["diff-del-fg"], ["diff-del-bg"]),
+  ...pairs(["diff-add-fg", "diff-del-fg"], ["bg-sunken"], 3),
   ...pairs(["fg-3"], ["diff-gutter"]),
   ...pairs(["fg-1", "fg-2"], ["diff-hunk-bg"]),
   ...pairs(["fg-1"], ["diff-select-bg"]),
   ...pairs(
     ["syn-keyword", "syn-type", "syn-function", "syn-string", "syn-number", "syn-comment", "syn-punct"],
-    ["bg-surface", "bg-hover", "diff-add-bg", "diff-del-bg", "diff-add-hover", "diff-del-hover", "diff-select-bg"],
+    [
+      "bg-surface",
+      "bg-sunken",
+      "bg-hover",
+      "diff-add-bg",
+      "diff-del-bg",
+      "diff-add-hover",
+      "diff-del-hover",
+      "diff-select-bg",
+    ],
     3,
   ),
 ];
@@ -90,6 +123,9 @@ export function themeReadabilityProblems(colors: ResolvedTheme, base: ThemeBase)
     parseThemeColor(colors[name])?.rgba.alpha === 1 ? [] : [`${name} must be opaque: its colour has transparency.`],
   );
   return problems.concat(
+    (["fg-1", "fg-2", "fg-3"] as const).flatMap((name) =>
+      parseThemeColor(colors[name])?.rgba.alpha === 1 ? [] : [`${name} must be opaque: its colour has transparency.`],
+    ),
     THEME_READABILITY_PAIRS.flatMap(({ foreground, background, minimum, over }) => {
       const back = themeBackground(colors, base, background, over);
       const front = parseThemeColor(colors[foreground]);
