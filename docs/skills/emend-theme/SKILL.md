@@ -27,8 +27,9 @@ The choice applies to that device only.
    Before `emend theme copy`, find where the themes folder really is, without running git.
    Take `<config folder>/themes`, go up to the nearest folder on that path that exists, resolve it with `realpath`, and add back the parts that do not exist yet.
    Look for a `.git` entry in that folder and in every folder above it, up to the filesystem root.
-   A `.git` entry in the home folder itself does not count.
-   If you find one, or cannot resolve the path, stop, write nothing and tell the person the real themes folder path.
+   A `.git` entry in the home folder itself does not count; compare with the home folder's real path (`realpath ~`).
+   If you find one, stop, write nothing and tell the person the real themes folder path.
+   If you cannot resolve the path, stop, write nothing and tell the person the path you tried and the error.
    After the copy, resolve the path in `emend: wrote <path>` with `realpath`.
    It must be `<name>/theme.json` inside the themes folder you checked.
    If it is not, stop, edit nothing and tell the person that path.
@@ -218,8 +219,8 @@ Both bases store their own colours for marks (`mark-bg` and `mark-bg-active`) an
 (`syn-keyword`, `syn-type`, `syn-function`, `syn-string` and `syn-number`).
 Both bases also do this for `diff-add-bg`, `diff-add-word`, `diff-add-hover`, `diff-del-bg`, `diff-del-word` and `diff-del-hover`.
 Dark's transparent tints include `accent-tint`, `accent-tint-2`, `bg-selected`, `success-bg`, `info-bg`, `warning-bg` and `danger-bg`.
-Others are `state-approved-bg`, `outcome-fixed-bg`, `outcome-explained-bg`, `outcome-held-bg`, `outcome-declined-bg`,
-`changed-bg`, `topic-bg`, `topic-bg-2`, `diff-hunk-bg` and `diff-select-bg`.
+Others are `state-approved-bg`, `state-snoozed-bg`, `outcome-fixed-bg`, `outcome-explained-bg`,
+`outcome-held-bg`, `outcome-declined-bg`, `changed-bg`, `topic-bg`, `topic-bg-2`, `diff-hunk-bg` and `diff-select-bg`.
 
 The app also uses steps directly: `n-500`, `n-1000`, `ochre-200`, `ochre-400`, `ochre-500`,
 `ochre-600`, `green-400`, `blue-400`, `red-400` and the origin pairs.
@@ -319,7 +320,7 @@ the writeup, Markdown docs, docs shown as source, the comments file and omitted-
 These are `bg-reading`, `bg-sunken`, `fg-reading`, `fg-reading-strong`, `fg-reading-muted`,
 `border-1`, `fg-link`, `diff-add-bg` and `diff-del-bg`.
 Fonts and syntax colours stay unchanged.
-Code blocks use the custom border, sunken background and strong text colours.
+Plain code (inline code, code blocks without highlighting and docs shown as source) uses the custom sunken background and strong text colours; highlighted code blocks keep their highlighter's background and text colours, and only their border is custom.
 A downloaded HTML doc keeps its own styles and gets no theme colours.
 
 ### Surfaces
@@ -328,7 +329,7 @@ A downloaded HTML doc keeps its own styles and gets no theme colours.
 | --- | --- |
 | `bg-app` | The page behind all panels and the image lightbox background. |
 | `bg-surface` | Panels, dialogs, input fields and the diff's unchanged lines. |
-| `bg-sunken` | Recessed areas such as code blocks, file headers and quote boxes. Also code and diff containers in the offline Download. |
+| `bg-sunken` | Recessed areas such as code blocks, file headers and quote boxes. Also plain code and diff backgrounds in the offline Download; highlighted code blocks keep their own background. |
 | `bg-raised` | Menus, popovers and the active segment in a segmented control. |
 | `bg-hover` | Hovered buttons, menu items and unchanged diff lines. |
 | `bg-active` | Pressed controls and small count badges on tabs. |
