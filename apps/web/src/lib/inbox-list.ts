@@ -1,4 +1,5 @@
 import type { InboxItem, InboxListGroup } from "@emend/contract";
+import { fuzzyMatchFields } from "./fuzzy-match.ts";
 
 export type InboxKind = "" | "review" | "publish";
 export const inboxKindKey = "emend:inbox-kind";
@@ -90,6 +91,22 @@ export function activeJumpRows(sections: ReturnType<typeof inboxSections>) {
       ?.rows.filter((row) => !row.movedTo)
       .slice(0, 9) ?? []
   );
+}
+
+/** Palette matches keep the inbox's display order on ties, with Done after every other section. */
+export function matchInboxItems(items: InboxItem[], now: number, query: string, groups: InboxListGroup[] = []) {
+  if (!query.trim()) return [];
+  return inboxSections(items, now, { groups })
+    .flatMap(({ rows, list }) =>
+      rows.flatMap((item) => {
+        const fields = [item.title, item.origin.name];
+        if (item.branch !== null) fields.push(item.branch);
+        if (item.project !== null) fields.push(item.project);
+        const score = fuzzyMatchFields(query, fields);
+        return score === null ? [] : [{ item, score, done: list === "done" }];
+      }),
+    )
+    .toSorted((a, b) => Number(a.done) - Number(b.done) || b.score - a.score);
 }
 
 export function inboxSequence(sections: ReturnType<typeof inboxSections>) {

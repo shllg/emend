@@ -24,3 +24,20 @@ export function fuzzyMatch(query: string, text: string): number | null {
   }
   return total;
 }
+
+const queryWords = /\S+/g;
+
+/** Each word uses its best field, without joining letters across fields. */
+export function fuzzyMatchFields(query: string, texts: readonly string[]): number | null {
+  let total = 0;
+  for (const word of query.match(queryWords) ?? []) {
+    let best: number | null = null;
+    for (const text of texts) {
+      const score = fuzzyMatch(word, text);
+      if (score !== null && (best === null || score > best)) best = score;
+    }
+    if (best === null) return null;
+    total += best;
+  }
+  return total;
+}

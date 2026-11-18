@@ -1,6 +1,6 @@
 import { InboxItem } from "@emend/contract";
 import { expect, test } from "vitest";
-import { activeJumpRows, inboxSections, inboxSequence } from "./inbox-list.ts";
+import { activeJumpRows, inboxSections, inboxSequence, matchInboxItems } from "./inbox-list.ts";
 
 const a = { id: "11111111-1111-4111-8111-111111111111", name: "Alpha", members: 3 };
 const b = { id: "22222222-2222-4222-8222-222222222222", name: "Beta", members: 0 };
@@ -187,4 +187,61 @@ test("Active jumps count only rows shown by Kind, text, machine and project filt
     [{ project: "One" }, [rows[1]]],
   ] as const)
     expect(activeJumpRows(inboxSections(rows, now, filters))).toEqual(expected);
+});
+
+test.each([
+  ["title", { title: "Needle" }],
+  ["branch", { branch: "emend-needle" }],
+  ["project", { project: "Needle" }],
+  ["machine", { origin: { id: b.id, name: "Needle" } }],
+] as const)("palette matches the %s", (_field, patch) => {
+  const match = item(1, patch);
+  expect(matchInboxItems([item(2), match], now, "needle").map(({ item }) => item)).toEqual([match]);
+});
+
+test("palette finds a title's initials and words in different fields", () => {
+  const match = item(1, { title: "Performance Harness Results", branch: "emend-175-harness" });
+  expect(matchInboxItems([match], now, "phr").map(({ item }) => item)).toEqual([match]);
+  expect(matchInboxItems([match], now, "175 results workshop").map(({ item }) => item)).toEqual([match]);
+});
+
+test("palette ranks the branch carrying an issue number above separated digits and rejects reversed digits", () => {
+  const match = item(1, { branch: "emend-175-a-perf-harness" });
+  const apart = item(2, { title: "1 thing, 7 tasks, 5 results" });
+  const reversed = item(3, { branch: "emend-157-foo" });
+  expect(matchInboxItems([apart, reversed, match], now, "175").map(({ item }) => item)).toEqual([match, apart]);
+});
+
+test("palette ranks every active match above Done even when Done scores higher", () => {
+  const done = item(1, { title: "Harness", list: "done" });
+  const active = item(2, { title: "Performance harness" });
+  const matches = matchInboxItems([done, active], now, "harness");
+  expect(matches.map(({ item, done }) => [item, done])).toEqual([
+    [active, false],
+    [done, true],
+  ]);
+  expect(matches[1]?.score).toBeGreaterThan(matches[0]?.score as number);
+});
+
+test("palette uses section membership for Done and preserves the inbox order on ties", () => {
+  const active = item(1);
+  const expired = item(2, { activeUntil: "2026-11-04T11:00:00.000Z" });
+  const snoozed = item(3, { snoozed: true, list: "snoozed" });
+  const grouped = item(4, { groupId: a.id, list: "done", activeUntil: expired.activeUntil });
+  const done = item(5, { list: "done", updatedAt: "2026-11-04T11:00:00.000Z" });
+  const matches = matchInboxItems([done, grouped, expired, snoozed, active], now, "item", [a]);
+  expect(matches.map(({ item, done }) => [item, done])).toEqual([
+    [active, false],
+    [snoozed, false],
+    [grouped, false],
+    [done, true],
+    [expired, true],
+  ]);
+});
+
+test("palette keeps moved matches and returns nothing for blank queries", () => {
+  const moved = item(1, { movedTo: "https://example.com/review" });
+  expect(matchInboxItems([moved], now, "item").map(({ item }) => item)).toEqual([moved]);
+  expect(matchInboxItems([moved], now, "")).toEqual([]);
+  expect(matchInboxItems([moved], now, " \t\n")).toEqual([]);
 });

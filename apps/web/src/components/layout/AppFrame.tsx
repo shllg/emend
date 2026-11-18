@@ -96,7 +96,12 @@ function AppFrameContent({ isReview = false, children }: { isReview?: boolean; c
         ...updateItems,
         ...(phoneDiff ? [...phoneDiff, { separator: true } as const] : []),
         refreshItem,
-        { label: "Search commands", icon: Search, opensDialog: true, onSelect: () => void runShortcut("palette.open") },
+        {
+          label: "Search reviews and commands",
+          icon: Search,
+          opensDialog: true,
+          onSelect: () => void runShortcut("palette.open"),
+        },
         { label: "Copy link", icon: LinkIcon, onSelect: () => void copyLink() },
         ...(actions?.onCommentReview
           ? [{ label: "Comment on review", icon: MessageSquarePlus, onSelect: actions.onCommentReview }]
@@ -162,7 +167,12 @@ function AppFrameContent({ isReview = false, children }: { isReview?: boolean; c
     : [
         ...updateItems,
         refreshItem,
-        { label: "Search commands", icon: Search, opensDialog: true, onSelect: () => void runShortcut("palette.open") },
+        {
+          label: "Search reviews and commands",
+          icon: Search,
+          opensDialog: true,
+          onSelect: () => void runShortcut("palette.open"),
+        },
         devices,
         settings,
         {

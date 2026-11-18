@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { StrictMode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
-import { reviewQuery } from "./api/queries.ts";
+import { inboxQuery, reviewQuery } from "./api/queries.ts";
 import { defaultLayout, layoutStore } from "./lib/layout-store.ts";
 import { jumpCommands, keyLabel, shortcutGroups, shortcutLabels } from "./lib/shortcuts.ts";
 
@@ -142,11 +142,18 @@ beforeEach(() => {
       return new Response(null, { status: 204 });
     }
     if (path.endsWith("/threads")) return new Response(null, { status: 201 });
-    if (path.includes("/revisions/")) return Response.json(revision);
+    if (path.includes("/revisions/")) return Response.json({ ...revision, seq: Number(path.split("/").at(-1)) });
     const item =
       inbox.find((item) => path === `/api/v1/reviews/${item.id}`) ??
       (path === `/api/v1/reviews/${ids[0]}` ? items[0] : undefined);
-    if (item) return Response.json({ ...item, revisions: [{ seq: 1, createdAt: item.updatedAt }] });
+    if (item)
+      return Response.json({
+        ...item,
+        revisions: Array.from({ length: item.newestRevision }, (_, index) => ({
+          seq: index + 1,
+          createdAt: item.updatedAt,
+        })),
+      });
     throw new Error(`Unexpected request: ${path}`);
   });
   vi.stubGlobal("fetch", fetcher);
@@ -187,7 +194,7 @@ const openPalette = async () => {
     document.activeElement instanceof HTMLElement ? document.activeElement : document.body,
   );
   const dialog = await screen.findByRole("dialog", { name: "Command palette" });
-  return within(dialog).getByRole<HTMLInputElement>("combobox", { name: "Command" });
+  return within(dialog).getByRole<HTMLInputElement>("combobox", { name: "Search" });
 };
 const option = (label: string) => screen.getByRole("option", { name: new RegExp(`^${label}`) });
 const selected = () => screen.queryByRole("option", { selected: true });
@@ -204,12 +211,12 @@ test.each(["/", `/r/${ids[0]}`, "/settings", "/devices"])(
     else if (path === "/settings") await screen.findByText("The bin is empty.");
     else if (path === "/devices") await screen.findByText("No paired devices.");
     else await ready();
-    const buttons = screen.getAllByRole("button", { name: "Search commands" });
+    const buttons = screen.getAllByRole("button", { name: "Search reviews and commands" });
     expect(buttons).toHaveLength(1);
-    const button = screen.getByRole("button", { name: "Search commands" });
+    const button = screen.getByRole("button", { name: "Search reviews and commands" });
     expect(button.tagName).toBe("BUTTON");
     expect(button.getAttribute("type")).toBe("button");
-    expect(button.getAttribute("aria-label")).toBe("Search commands");
+    expect(button.getAttribute("aria-label")).toBe("Search reviews and commands");
     expect(button.getAttribute("aria-haspopup")).toBe("dialog");
     expect(button.getAttribute("aria-keyshortcuts")).toBe("Control+Shift+P");
     expect(caps(button)).toEqual(["Ctrl", "Shift", "P"]);
@@ -219,7 +226,7 @@ test.each(["/", `/r/${ids[0]}`, "/settings", "/devices"])(
     expect(description?.parentElement).toBe(button.parentElement);
     fireEvent.click(button);
     const dialog = await screen.findByRole("dialog", { name: "Command palette" });
-    const input = within(dialog).getByRole("combobox", { name: "Command" });
+    const input = within(dialog).getByRole("combobox", { name: "Search" });
     expect(document.activeElement).toBe(input);
     press("Escape", {}, input);
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull());
@@ -231,7 +238,7 @@ test("the top bar follows changed and disabled palette keys and still opens on c
   vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
   mount();
   await ready();
-  const button = screen.getByRole("button", { name: "Search commands" });
+  const button = screen.getByRole("button", { name: "Search reviews and commands" });
   expect(caps(button)).toEqual(["Ctrl", "Shift", "P"]);
   for (const value of ["mod+k", null] as const) {
     act(() =>
@@ -258,14 +265,14 @@ test("the top bar follows changed and disabled palette keys and still opens on c
   }
   fireEvent.click(button);
   const dialog = await screen.findByRole("dialog", { name: "Command palette" });
-  expect(document.activeElement).toBe(within(dialog).getByRole("combobox", { name: "Command" }));
+  expect(document.activeElement).toBe(within(dialog).getByRole("combobox", { name: "Search" }));
 });
 
 test("the wide top bar uses Mac key caps and the Meta ARIA shortcut", async () => {
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
   mount();
   await ready();
-  const button = screen.getByRole("button", { name: "Search commands" });
+  const button = screen.getByRole("button", { name: "Search reviews and commands" });
   expect(caps(button)).toEqual(["⌘", "⇧", "P"]);
   expect(button.getAttribute("aria-keyshortcuts")).toBe("Meta+Shift+P");
 });
@@ -275,11 +282,11 @@ test("the narrow top bar opens the palette from an icon before Refresh and resto
   vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
   mount();
   await ready();
-  expect(screen.getAllByRole("button", { name: "Search commands" })).toHaveLength(1);
-  const button = screen.getByRole("button", { name: "Search commands" });
+  expect(screen.getAllByRole("button", { name: "Search reviews and commands" })).toHaveLength(1);
+  const button = screen.getByRole("button", { name: "Search reviews and commands" });
   const refresh = screen.getByRole("button", { name: "Refresh" });
   expect(button.textContent).toBe("");
-  expect(button.getAttribute("aria-label")).toBe("Search commands");
+  expect(button.getAttribute("aria-label")).toBe("Search reviews and commands");
   expect(button.getAttribute("aria-haspopup")).toBe("dialog");
   expect(button.getAttribute("aria-keyshortcuts")).toBe("Control+Shift+P");
   expect(document.getElementById(button.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
@@ -290,7 +297,7 @@ test("the narrow top bar opens the palette from an icon before Refresh and resto
   );
   fireEvent.click(button);
   const dialog = await screen.findByRole("dialog", { name: "Command palette" });
-  const input = within(dialog).getByRole("combobox", { name: "Command" });
+  const input = within(dialog).getByRole("combobox", { name: "Search" });
   expect(document.activeElement).toBe(input);
   press("Escape", {}, input);
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull());
@@ -305,12 +312,12 @@ test.each([
   vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
   mount();
   await ready();
-  const button = screen.getByRole("button", { name: "Search commands" });
+  const button = screen.getByRole("button", { name: "Search reviews and commands" });
   fireEvent.click(button);
   const dialog = await screen.findByRole("dialog", { name: "Command palette" });
-  const input = within(dialog).getByRole("combobox", { name: "Command" });
+  const input = within(dialog).getByRole("combobox", { name: "Search" });
   act(() => resize(to));
-  expect(screen.getByLabelText("Search commands", { selector: "button" })).toBe(button);
+  expect(screen.getByLabelText("Search reviews and commands", { selector: "button" })).toBe(button);
   expect(caps(button)).toEqual(to >= 1024 ? ["Ctrl", "Shift", "P"] : []);
   expect(document.activeElement).toBe(input);
   press("Escape", {}, input);
@@ -323,13 +330,13 @@ test.each(["/", `/r/${ids[0]}`])("the phone More menu opens the palette on %s an
   mount(path);
   if (path === "/") await screen.findByRole("link", { name: /Review 1/ });
   else await screen.findByRole("button", { name: "Approve" });
-  expect(screen.queryByRole("button", { name: "Search commands" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Search reviews and commands" })).toBeNull();
   const more = screen.getByRole("button", { name: "More" });
   fireEvent.pointerDown(more, { button: 0, ctrlKey: false });
   const menu = await screen.findByRole("menu", { name: "More" });
-  fireEvent.click(within(menu).getByRole("menuitem", { name: "Search commands" }));
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "Search reviews and commands" }));
   const dialog = await screen.findByRole("dialog", { name: "Command palette" });
-  const input = within(dialog).getByRole("combobox", { name: "Command" });
+  const input = within(dialog).getByRole("combobox", { name: "Search" });
   expect(screen.queryByRole("menu")).toBeNull();
   expect(document.activeElement).toBe(input);
   press("Escape", {}, input);
@@ -344,7 +351,7 @@ test("the phone palette Close button dismisses it and returns focus to More", as
   const more = screen.getByRole("button", { name: "More" });
   fireEvent.pointerDown(more, { button: 0, ctrlKey: false });
   const menu = await screen.findByRole("menu", { name: "More" });
-  fireEvent.click(within(menu).getByRole("menuitem", { name: "Search commands" }));
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "Search reviews and commands" }));
   const dialog = await screen.findByRole("dialog", { name: "Command palette" });
   const close = within(dialog).getByRole("button", { name: "Close" });
   expect(close.classList.contains("hidden")).toBe(true);
@@ -370,9 +377,9 @@ test("the palette publishes the visual viewport height when opened and when the 
   vi.stubGlobal("visualViewport", viewport);
   vi.stubGlobal("requestAnimationFrame", (fn: FrameRequestCallback) => frames.push(fn));
   vi.stubGlobal("cancelAnimationFrame", () => {});
-  fireEvent.click(screen.getByRole("button", { name: "Search commands" }));
+  fireEvent.click(screen.getByRole("button", { name: "Search reviews and commands" }));
   const dialog = await screen.findByRole("dialog", { name: "Command palette" });
-  within(dialog).getByRole("combobox", { name: "Command" }).scrollIntoView = vi.fn();
+  within(dialog).getByRole("combobox", { name: "Search" }).scrollIntoView = vi.fn();
   act(() => {
     for (const frame of frames.splice(0)) frame(0);
   });
@@ -396,17 +403,17 @@ test.each([1280, 900])(
     const input = await openPalette();
     const focus = vi.spyOn(opener, "focus");
     expect(document.activeElement).toBe(input);
-    expect(input.placeholder).toBe("Type a command…");
+    expect(input.placeholder).toBe("Find a review, pub or command…");
     expect(input.getAttribute("aria-expanded")).toBe("true");
     expect(input.getAttribute("aria-autocomplete")).toBe("list");
-    expect(input.getAttribute("aria-controls")).toBe(screen.getByRole("listbox", { name: "Commands" }).id);
+    expect(input.getAttribute("aria-controls")).toBe(screen.getByRole("listbox", { name: "Results" }).id);
     search(input, "files");
     press("Escape", {}, input);
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(opener));
     expect(focus).toHaveBeenCalledWith({ preventScroll: true });
     press("P", { metaKey: true, shiftKey: true }, opener);
-    const reopened = await screen.findByRole<HTMLInputElement>("combobox", { name: "Command" });
+    const reopened = await screen.findByRole<HTMLInputElement>("combobox", { name: "Search" });
     expect(reopened.value).toBe("");
     expect(document.activeElement).toBe(reopened);
   },
@@ -473,7 +480,7 @@ test("finds letters with gaps, resets selection on search and shows when no comm
   expect(input.getAttribute("aria-activedescendant")).toBe(selected()?.id);
   search(input, "xyz");
   expect(screen.queryAllByRole("option")).toHaveLength(0);
-  expect(screen.getByText("No command matches.")).toBe(status);
+  expect(screen.getByText("Nothing matches.")).toBe(status);
   expect(input.hasAttribute("aria-activedescendant")).toBe(false);
   expect(press("ArrowDown", {}, input).defaultPrevented).toBe(true);
   press("Enter", {}, input);
@@ -521,7 +528,7 @@ test("arrows wrap through available rows, skip unavailable rows and leave text e
   expect(document.activeElement).toBe(input);
   search(input, "");
   search(input, "review");
-  expect(selected()).toBe(option("Next review or pub"));
+  expect(selected()).toBe(option("Review 1"));
 });
 
 test("lists review commands as unavailable on the inbox and never selects or runs them", async () => {
@@ -924,3 +931,239 @@ test("comment stepping commands appear in the Review page group", async () => {
   expect(group.getByRole("option", { name: /^Next comment/ }).querySelector("kbd")?.textContent).toBe(".");
   expect(group.getByRole("option", { name: /^Previous comment/ }).querySelector("kbd")?.textContent).toBe(",");
 });
+
+test.each([
+  ["/", "Enter", "review"],
+  [`/r/${ids[0]}`, "Enter", "publish"],
+  ["/", "click", "publish"],
+  [`/r/${ids[0]}`, "click", "review"],
+] as const)("opens a matching item from %s with %s (%s)", async (path, method, kind) => {
+  inbox[1] = {
+    ...(inbox[1] as InboxItem),
+    title: "Performance harness results",
+    project: "Toolkit",
+    branch: "emend-175-a-perf-harness",
+    newestRevision: 3,
+    kind,
+  };
+  const history = mount(path);
+  if (path === "/") await screen.findByRole("link", { name: /Review 1/ });
+  else await ready();
+  const opener = screen.getByRole("button", { name: "Search reviews and commands" });
+  act(() => opener.focus());
+  const focus = vi.spyOn(opener, "focus");
+  const input = await openPalette();
+  search(input, "perf");
+  const group = await screen.findByRole("group", { name: "Reviews and pubs" });
+  const row = within(group).getByRole("option", { name: /^Performance harness results/ });
+  expect(row.textContent).toBe(
+    `Performance harness results${kind === "review" ? "Review" : "Pub"} · Workshop · Toolkit · emend-175-a-perf-harness`,
+  );
+  expect(within(row).getByText("Performance harness results").getAttribute("dir")).toBe("auto");
+  expect(selected()).toBe(row);
+  expect(input.getAttribute("aria-activedescendant")).toBe(row.id);
+  if (method === "Enter") {
+    keyDown("Enter", {}, input);
+    for (let repeat = 0; repeat < 3; repeat++) keyDown("Enter", { repeat: true }, input);
+    expect(history.location.pathname).toBe(path);
+    expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
+    fireEvent.keyUp(input, { key: "Enter" });
+  } else fireEvent.click(row);
+  await waitFor(() => expect(history.location.pathname).toBe(`/r/${ids[1]}`));
+  expect(new URLSearchParams(history.location.search).get("rev")).toBe("3");
+  expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
+  expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+  expect(writes()).toHaveLength(0);
+});
+
+test("command groups win score ties and arrows and pointer move between commands and items", async () => {
+  inbox[1] = { ...(inbox[1] as InboxItem), title: "Show keyboard shortcuts" };
+  mount();
+  await ready();
+  const input = await openPalette();
+  search(input, "keyboard");
+  const results = screen.getByRole("listbox", { name: "Results" });
+  expect(within(results).getAllByRole("group")).toHaveLength(2);
+  const [command, item] = within(results).getAllByRole("option");
+  expect(command?.closest('[role="group"]')?.getAttribute("aria-labelledby")).toContain("Everywhere");
+  expect(item?.closest('[role="group"]')?.getAttribute("aria-labelledby")).toContain("Reviews-and-pubs");
+  expect(selected()).toBe(command);
+  press("ArrowDown", {}, input);
+  expect(selected()).toBe(item);
+  expect(input.getAttribute("aria-activedescendant")).toBe(item?.id);
+  press("ArrowUp", {}, input);
+  expect(selected()).toBe(command);
+  fireEvent.pointerMove(item as HTMLElement);
+  expect(selected()).toBe(item);
+  expect(document.activeElement).toBe(input);
+  search(input, "keyboar");
+  expect(selected()).toBe(command);
+  expect(within(screen.getByRole("group", { name: "Reviews and pubs" })).getByRole("option").id).toBe(item?.id);
+});
+
+test("an issue number selects the branch carrying it before decoys", async () => {
+  inbox[0] = { ...(inbox[0] as InboxItem), branch: "emend-157-foo" };
+  inbox[1] = { ...(inbox[1] as InboxItem), branch: "emend-175-a-perf-harness" };
+  inbox[2] = { ...(inbox[2] as InboxItem), title: "1 thing, 7 tasks, 5 results" };
+  mount();
+  await ready();
+  const input = await openPalette();
+  search(input, "175");
+  expect(selected()).toBe(option("Review 2"));
+  expect(screen.getAllByRole("option")).toEqual([option("Review 2"), option("1 thing")]);
+});
+
+test("Done follows active matches and its higher score determines the item group's position", async () => {
+  inbox[1] = { ...(inbox[1] as InboxItem), title: "Notes on keyboard", list: "active" };
+  inbox[2] = { ...(inbox[2] as InboxItem), title: "Keyboard", list: "done" };
+  mount();
+  await ready();
+  const input = await openPalette();
+  search(input, "keyboard");
+  const groups = within(screen.getByRole("listbox", { name: "Results" })).getAllByRole("group");
+  expect(groups[0]).toBe(screen.getByRole("group", { name: "Reviews and pubs" }));
+  const rows = within(groups[0] as HTMLElement).getAllByRole("option");
+  expect(rows.map((row) => row.textContent)).toEqual([
+    "Notes on keyboardReview · Workshop · main",
+    "KeyboardPub · Workshop · main · Done",
+  ]);
+  expect(selected()).toBe(rows[0]);
+});
+
+test("uses the server clock and group membership when labelling Done", async () => {
+  inbox[1] = { ...(inbox[1] as InboxItem), title: "Harness grouped", groupId: ids[0], list: "done" };
+  inbox[2] = {
+    ...(inbox[2] as InboxItem),
+    title: "Harness expired",
+    activeUntil: "2030-01-01T00:00:00.000Z",
+  };
+  mount();
+  await ready();
+  const input = await openPalette();
+  await waitFor(() => expect(client.getQueryData(inboxQuery().queryKey)).toBeDefined());
+  act(() =>
+    client.setQueryData(inboxQuery().queryKey, (old) =>
+      old
+        ? {
+            ...old,
+            groups: [{ id: ids[0], name: "Saved", members: 1 }],
+            serverTime: "2030-01-02T00:00:00.000Z",
+            receivedAt: Date.now(),
+            receivedMono: performance.now(),
+          }
+        : old,
+    ),
+  );
+  search(input, "harness");
+  await waitFor(() => expect(option("Harness expired").textContent).toContain(" · Done"));
+  expect(option("Harness grouped").textContent).not.toContain("Done");
+  expect(selected()).toBe(option("Harness grouped"));
+});
+
+test("moved items are listed as unavailable, skipped by selection and never opened", async () => {
+  inbox[1] = { ...(inbox[1] as InboxItem), title: "Harness moved", movedTo: "https://example.com/review" };
+  inbox[2] = { ...(inbox[2] as InboxItem), title: "Harness available" };
+  const history = mount();
+  await ready();
+  const input = await openPalette();
+  search(input, "harness");
+  const moved = option("Harness moved");
+  const available = option("Harness available");
+  expect(screen.getAllByRole("option")).toEqual([moved, available]);
+  expect(moved.getAttribute("aria-disabled")).toBe("true");
+  expect(moved.textContent).toContain("Moved to example.com");
+  expect(selected()).toBe(available);
+  for (const key of ["ArrowDown", "ArrowUp"]) {
+    press(key, {}, input);
+    expect(selected()).toBe(available);
+  }
+  fireEvent.pointerMove(moved);
+  expect(selected()).toBe(available);
+  fireEvent.click(moved);
+  search(input, "moved");
+  expect(selected()).toBeNull();
+  expect(input.hasAttribute("aria-activedescendant")).toBe(false);
+  press("Enter", {}, input);
+  expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
+  expect(history.location.pathname).toBe(`/r/${ids[0]}`);
+});
+
+test("blank queries show commands only, including after searching", async () => {
+  mount();
+  await ready();
+  const input = await openPalette();
+  for (const value of ["", "   "]) {
+    search(input, value);
+    expect(screen.queryByRole("group", { name: "Reviews and pubs" })).toBeNull();
+    expect(screen.queryByRole("option", { name: /^Review 1/ })).toBeNull();
+    expect(screen.getAllByRole("option")).toHaveLength(Object.keys(SHORTCUT_DEFAULTS).length - jumpCommands.length - 1);
+    search(input, "review");
+    expect(screen.getByRole("group", { name: "Reviews and pubs" })).toBeTruthy();
+  }
+});
+
+test("agent-written titles and metadata render only as text", async () => {
+  const title = "<img src=x onerror=alert(1)>";
+  inbox[1] = {
+    ...(inbox[1] as InboxItem),
+    title,
+    project: "<script>alert(1)</script>",
+    branch: "<svg onload=alert(1)>",
+    origin: { id: ids[0], name: "<b>Workshop</b>" },
+  };
+  mount();
+  await ready();
+  const input = await openPalette();
+  search(input, "img");
+  const group = screen.getByRole("group", { name: "Reviews and pubs" });
+  expect(within(group).getByText(title).textContent).toBe(title);
+  expect(within(group).getByRole("option").textContent).toContain(
+    "Review · <b>Workshop</b> · <script>alert(1)</script> · <svg onload=alert(1)>",
+  );
+  expect(group.querySelector("img, script, svg, b")).toBeNull();
+});
+
+test("settings fetches the inbox only when the palette opens and selects results arriving after typing", async () => {
+  mount("/settings");
+  await screen.findByText("The bin is empty.");
+  expect(fetcher.mock.calls.filter(([path]) => path === "/api/v1/reviews")).toHaveLength(0);
+  const respond = fetcher.getMockImplementation();
+  let release = () => {};
+  const response = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  fetcher.mockImplementation(async (path, init) => {
+    if (path === "/api/v1/reviews") await response;
+    if (!respond) throw new Error("Missing fixture response");
+    return respond(path, init);
+  });
+  const input = await openPalette();
+  search(input, "Review 2");
+  expect(selected()).toBeNull();
+  expect(fetcher.mock.calls.filter(([path]) => path === "/api/v1/reviews")).toHaveLength(1);
+  release();
+  await waitFor(() => expect(selected()).toBe(option("Review 2")));
+});
+
+test.each(["repeat", "typing", "pointer", "arrows"])(
+  "%s does not release a stale Enter into an item",
+  async (action) => {
+    const history = mount();
+    await ready();
+    const input = await openPalette();
+    search(input, "review");
+    expect(selected()).toBe(option("Review 1"));
+    keyDown("Enter", { repeat: action === "repeat" }, input);
+    if (action === "typing") search(input, "revie");
+    else if (action === "pointer") {
+      fireEvent.pointerMove(option("Review 2"));
+      fireEvent.pointerMove(option("Review 1"));
+    } else if (action === "arrows") {
+      press("ArrowDown", {}, input);
+      press("ArrowUp", {}, input);
+    }
+    fireEvent.keyUp(input, { key: "Enter" });
+    expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
+    expect(history.location.pathname).toBe(`/r/${ids[0]}`);
+  },
+);

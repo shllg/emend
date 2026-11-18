@@ -1,8 +1,12 @@
-import type { ShortcutCommand } from "@emend/contract";
+import type { InboxItem, ShortcutCommand } from "@emend/contract";
 import * as Primitive from "@radix-ui/react-dialog";
+import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
+import { inboxQuery, serverNow } from "../api/queries.ts";
 import { fuzzyMatch } from "../lib/fuzzy-match.ts";
+import { matchInboxItems } from "../lib/inbox-list.ts";
 import { hasOpenOverlay, keyLabel, shortcutGroups, shortcutLabels } from "../lib/shortcuts.ts";
 import { useShortcut, useShortcutKeys, useShortcutRunner } from "../lib/use-shortcut.tsx";
 import { useVisualViewportInset } from "../lib/visual-viewport.ts";
@@ -11,59 +15,65 @@ import { Kbd } from "./ui/Kbd.tsx";
 import { isToastInteraction, overlayClass } from "./ui/overlay.ts";
 import { cn } from "./ui/utils.ts";
 
-function matchingGroups(query: string) {
-  return shortcutGroups
-    .map((group) => {
-      const rows = group.commands
-        .filter((command) => command !== "palette.open")
-        .flatMap((command) => {
-          const score = fuzzyMatch(query, shortcutLabels[command]);
-          return score === null ? [] : [{ command, score }];
-        })
-        .sort((a, b) => b.score - a.score);
-      return { label: group.label, rows, score: rows[0]?.score ?? 0 };
-    })
-    .filter((group) => group.rows.length > 0)
-    .sort((a, b) => b.score - a.score);
+type PaletteRow = { score: number } & (
+  | { key: `command:${ShortcutCommand}`; command: ShortcutCommand }
+  | { key: `item:${string}`; item: InboxItem; done: boolean }
+);
+type RowKey = PaletteRow["key"];
+
+function matchingGroups(query: string, items: ReturnType<typeof matchInboxItems>) {
+  const groups: { label: string; rows: PaletteRow[]; score: number }[] = shortcutGroups.map((group) => {
+    const rows = group.commands
+      .filter((command) => command !== "palette.open")
+      .flatMap<PaletteRow>((command) => {
+        const score = fuzzyMatch(query, shortcutLabels[command]);
+        return score === null ? [] : [{ key: `command:${command}`, command, score }];
+      })
+      .toSorted((a, b) => b.score - a.score);
+    return { label: group.label, rows, score: rows[0]?.score ?? 0 };
+  });
+  if (items.length > 0) {
+    groups.push({
+      label: "Reviews and pubs",
+      rows: items.map((match) => ({ ...match, key: `item:${match.item.id}` })),
+      score: items.reduce((best, match) => Math.max(best, match.score), -Infinity),
+    });
+  }
+  return groups.filter((group) => group.rows.length > 0).toSorted((a, b) => b.score - a.score);
 }
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<ShortcutCommand | null>(null);
+  // Null follows the first available result, including results that arrive after opening or typing.
+  const [selected, setSelected] = useState<RowKey | null>(null);
   const [node, setNode] = useState<HTMLDivElement | null>(null);
   useVisualViewportInset(node);
   const input = useRef<HTMLInputElement>(null);
   const listbox = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
-  const pending = useRef<ShortcutCommand | null>(null);
-  const armed = useRef<ShortcutCommand | null>(null);
+  const pending = useRef<RowKey | null>(null);
+  const armed = useRef<RowKey | null>(null);
   const id = useId();
-  const listId = `${id}-commands`;
-  const rowId = (command: ShortcutCommand) => `${id}-${command}`;
+  const listId = `${id}-results`;
+  const rowId = (key: RowKey) => `${id}-${key}`;
+  const navigate = useNavigate();
+  const { data } = useQuery({ ...inboxQuery(), enabled: open });
   const keys = useShortcutKeys();
   const runner = useShortcutRunner();
   const available = runner.available();
-  const groups = matchingGroups(query);
-  const selectable: ShortcutCommand[] = groups
-    .flatMap((group) => group.rows.map((row) => row.command))
-    .filter((command) => available.has(command));
-  const active = selected !== null && selectable.includes(selected) ? selected : null;
+  const matches = matchInboxItems(data?.items ?? [], serverNow(data), query, data?.groups);
+  const groups = matchingGroups(query, matches);
+  const rows = new Map(groups.flatMap((group) => group.rows.map((row) => [row.key, row] as const)));
+  const isAvailable = (row: PaletteRow) => ("command" in row ? available.has(row.command) : !row.item.movedTo);
+  const selectable = [...rows.values()].filter(isAvailable).map((row) => row.key);
+  const active = selected === null ? (selectable[0] ?? null) : selectable.includes(selected) ? selected : null;
   const activeId = active ? rowId(active) : undefined;
-
-  function firstAvailable(value: string) {
-    const commands = runner.available();
-    return (
-      matchingGroups(value)
-        .flatMap((group) => group.rows.map((row) => row.command))
-        .find((command) => commands.has(command)) ?? null
-    );
-  }
 
   useShortcut("palette.open", () => {
     armed.current = null;
     setQuery("");
-    setSelected(firstAvailable(""));
+    setSelected(null);
     setOpen(true);
     return true;
   });
@@ -78,9 +88,10 @@ export function CommandPalette() {
     setOpen(value);
   }
 
-  function choose(command: ShortcutCommand) {
-    if (!runner.available().has(command)) return;
-    pending.current = command;
+  function choose(key: RowKey) {
+    const row = rows.get(key);
+    if (!row || ("command" in row ? !runner.available().has(row.command) : row.item.movedTo)) return;
+    pending.current = key;
     changeOpen(false);
   }
 
@@ -106,9 +117,16 @@ export function CommandPalette() {
             event.preventDefault();
             if (opener.current?.isConnected) opener.current.focus({ preventScroll: true });
             // Focus-dependent handlers need the opener back; dialogs must start after this modal layer unmounts.
-            const command = pending.current;
+            const row = pending.current ? rows.get(pending.current) : undefined;
             pending.current = null;
-            if (command && !hasOpenOverlay()) runner.run(command);
+            if (!row || hasOpenOverlay()) return;
+            if ("command" in row) runner.run(row.command);
+            else if (!row.item.movedTo)
+              void navigate({
+                to: "/r/$reviewId",
+                params: { reviewId: row.item.id },
+                search: { rev: row.item.newestRevision },
+              });
           }}
           className="fixed top-[12vh] left-1/2 z-[calc(var(--z-sheet)+1)] flex max-h-[min(70dvh,calc(var(--visual-height,100dvh)_-_12vh_-_16px))] w-[min(560px,92%)] -translate-x-1/2 animate-[em-fade_var(--dur-2)_var(--ease-out)] flex-col overflow-hidden rounded-xl border border-line-1 bg-surface shadow-3"
         >
@@ -117,8 +135,8 @@ export function CommandPalette() {
             <input
               ref={input}
               type="text"
-              placeholder="Type a command…"
-              aria-label="Command"
+              placeholder="Find a review, pub or command…"
+              aria-label="Search"
               role="combobox"
               aria-expanded="true"
               aria-controls={listId}
@@ -130,7 +148,7 @@ export function CommandPalette() {
               onChange={(event) => {
                 armed.current = null;
                 setQuery(event.target.value);
-                setSelected(firstAvailable(event.target.value));
+                setSelected(null);
               }}
               onKeyDown={(event) => {
                 if (event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -153,11 +171,11 @@ export function CommandPalette() {
               onKeyUp={(event) => {
                 if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                 if (event.key !== "Enter") return;
-                const command = armed.current;
+                const key = armed.current;
                 armed.current = null;
                 if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
                 event.preventDefault();
-                if (command && command === active) choose(command);
+                if (key && key === active) choose(key);
               }}
               className="min-w-0 flex-1 border-0 bg-transparent font-sans text-14 text-fg-1 outline-none placeholder:text-fg-3"
             />
@@ -174,7 +192,7 @@ export function CommandPalette() {
               />
             </Primitive.Close>
           </div>
-          <div ref={listbox} id={listId} role="listbox" aria-label="Commands" className="min-h-0 overflow-y-auto p-1">
+          <div ref={listbox} id={listId} role="listbox" aria-label="Results" className="min-h-0 overflow-y-auto p-1">
             {groups.map((group) => (
               // biome-ignore lint/a11y/useSemanticElements: Grouped listboxes use ARIA groups for options, not form fieldsets.
               <div
@@ -190,38 +208,64 @@ export function CommandPalette() {
                 >
                   {group.label}
                 </div>
-                {group.rows.map(({ command }) => (
+                {group.rows.map((row) => (
                   <button
-                    key={command}
-                    id={rowId(command)}
+                    key={row.key}
+                    id={rowId(row.key)}
                     type="button"
                     role="option"
                     tabIndex={-1}
-                    aria-selected={command === active}
-                    aria-disabled={!available.has(command)}
+                    aria-selected={row.key === active}
+                    aria-disabled={!isAvailable(row)}
                     onPointerMove={() => {
-                      if (available.has(command) && command !== selected) {
+                      if (isAvailable(row) && row.key !== active) {
                         armed.current = null;
-                        setSelected(command);
+                        setSelected(row.key);
                       }
                     }}
                     onPointerDown={(event) => event.preventDefault()}
-                    onClick={() => choose(command)}
+                    onClick={() => choose(row.key)}
                     className={cn(
-                      "flex h-8 w-full items-center gap-2.5 rounded-[6px] border-0 px-2.5 text-left font-sans text-13 font-medium leading-(--lh-snug) font-[450] text-fg-1 aria-disabled:opacity-45 [@media(pointer:coarse)]:h-11",
-                      command === active ? "bg-hover" : "bg-transparent",
-                      available.has(command) && "hover:bg-hover",
+                      "flex w-full items-center gap-2.5 rounded-[6px] border-0 px-2.5 text-left font-sans text-13 font-medium leading-(--lh-snug) font-[450] text-fg-1 aria-disabled:opacity-45",
+                      "command" in row ? "h-8 [@media(pointer:coarse)]:h-11" : "min-h-11 py-1.5",
+                      row.key === active ? "bg-hover" : "bg-transparent",
+                      isAvailable(row) && "hover:bg-hover",
                     )}
                   >
-                    <span>{shortcutLabels[command]}</span>
-                    {keys[command] !== null && <Kbd className="ml-auto shrink-0">{keyLabel(keys[command])}</Kbd>}
+                    {"command" in row ? (
+                      <>
+                        <span>{shortcutLabels[row.command]}</span>
+                        {keys[row.command] !== null && (
+                          <Kbd className="ml-auto shrink-0">{keyLabel(keys[row.command])}</Kbd>
+                        )}
+                      </>
+                    ) : (
+                      <span className="min-w-0 flex-1">
+                        <span dir="auto" className="block truncate">
+                          {row.item.title}
+                        </span>
+                        <span className="block truncate text-12 text-fg-3">
+                          {row.item.kind === "review" ? "Review" : "Pub"} · {row.item.origin.name}
+                          {row.item.project !== null && ` · ${row.item.project}`}
+                          {(row.item.movedTo || row.item.branch !== null) && (
+                            <>
+                              {" · "}
+                              <span className="font-mono">
+                                {row.item.movedTo ? `Moved to ${new URL(row.item.movedTo).host}` : row.item.branch}
+                              </span>
+                            </>
+                          )}
+                          {row.done && " · Done"}
+                        </span>
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
             ))}
           </div>
           <p role="status" className="px-4 py-3 text-14 text-fg-2 empty:p-0">
-            {groups.length === 0 ? "No command matches." : ""}
+            {groups.length === 0 ? "Nothing matches." : ""}
           </p>
         </Primitive.Content>
       </Primitive.Portal>
