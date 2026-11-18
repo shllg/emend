@@ -50,6 +50,11 @@ See [api.md](api.md) for the command ids.
 
 ### Themes
 
+Settings → Appearance shows a short text with a Copy button to paste into any coding agent.
+It links to the [emend-theme skill](skills/emend-theme/SKILL.md) at the running version's tag,
+or at `main` for a build without a release.
+The agent copies a theme, changes what you asked for and checks it; the skill is never installed.
+
 Themes live in the `themes` folder beside emend's global `config.json`, on the server your
 browser reaches. `emend theme copy dark mine` writes `themes/mine/theme.json`.
 You can also use `light` or another theme as the source. Each theme has its own folder.

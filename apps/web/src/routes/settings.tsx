@@ -15,6 +15,7 @@ import { mutationMessage } from "../api/mutations.ts";
 import { binQuery, settingsQuery, themesQuery } from "../api/queries.ts";
 import { AppFrame } from "../components/layout/AppFrame.tsx";
 import { ShortcutSettings } from "../components/ShortcutSettings.tsx";
+import { ThemeSkillPrompt } from "../components/ThemeSkillPrompt.tsx";
 import { Button } from "../components/ui/Button.tsx";
 import { Dialog } from "../components/ui/Dialog.tsx";
 import { RadioGroup } from "../components/ui/RadioGroup.tsx";
@@ -386,6 +387,7 @@ function AppearanceSettings() {
             ))}
         </div>
       )}
+      <ThemeSkillPrompt />
     </section>
   );
 }

@@ -46,6 +46,8 @@ try {
     "package/dist/publish-worker.mjs",
   ]);
   for (const name of entries) {
+    check = `tarball excludes the theme skill ${JSON.stringify(name)}`;
+    assert(!name.includes("emend-theme"));
     const permitted =
       allowed.has(name) || name.startsWith("package/dist/web/") || name.startsWith("package/dist/skills/");
     if (!permitted || name.startsWith("package/dist/web/.vite/") ||

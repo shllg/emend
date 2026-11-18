@@ -26,6 +26,8 @@ invent work.
 - `apps/emend`: the `emend` command (CLI, local server, MCP, headless service), published as
   `@shllg/emend`. It serves the build of `apps/web`.
 - `apps/web`: the browser app (React + Vite).
+- `docs/skills/`: skills an agent reads from a link (the theme skill); never installed, and neither
+  the plugin nor the npm package ships them.
 - `packages/contract`: zod schemas for the API, the review manifest, file roles, capabilities.
 - `packages/core`: pure logic (Markdown to safe blocks, block ids, placing comments, topics). No
   Node-only and no browser-only API; WebCrypto is fine.
