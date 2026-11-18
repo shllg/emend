@@ -4,6 +4,8 @@ import type { RenderedBlock, RenderedWriteup, Target, ThemeBase, TopicMeta } fro
 import { fromHtml } from "hast-util-from-html";
 import { toString as hastText } from "hast-util-to-string";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { themeDownloadLook } from "../theme/download.ts";
+import { checkThemeDocument } from "../theme/theme.ts";
 import type { HtmlElement as Element, HtmlRoot as Root } from "./blocks.ts";
 import {
   buildCommentsDownload,
@@ -2723,7 +2725,7 @@ const threadPage = (kind: (typeof threadPageKinds)[number], threads: FileThreads
 
 // Reading CSS includes syntax base tokens; thread and diff CSS retain their original bytes.
 const systemStyleHashes = [
-  "e8ad87f22b73ed3fb3cb4fd1db9b3f4af61947bf3a443216dd011dfc409ec743",
+  "2acc5db4a523f24046fa4808c664d656e34c1c2a89b633d3ea72e087912acab9",
   "4ccb0e73df0d25d3c35164825b62358d1f4475da66df85dff6e897350fce5e72",
   "b498db6a7c457faef4b17a4b2343cc19b0c9eeaf59ae33752fb9aa18ba983f97",
 ];
@@ -2731,6 +2733,72 @@ const pageStyles = (html: string) =>
   parsed(html)
     .filter((el) => el.tagName === "style")
     .map(hastText);
+
+test.each(["", "unknown-emend-language"])(
+  "Markdown fence downloads use syntax colours without highlighting (language=%j)",
+  async (language) => {
+    const blocks = (await renderMarkdown(`\`\`\`${language}\nplain <code>\n\`\`\``, "overview")).map(({ html }) =>
+      block(html),
+    );
+    const html = await buildDocDownload({
+      title: "Plain fences",
+      details,
+      resolveMedia: async () => null,
+      content: { kind: "markdown", blocks },
+    });
+    const codes = parsed(html).filter((el) => el.tagName === "code");
+    expect(codes.map(hastText)).toEqual(["plain <code>\n"]);
+    expect(html).not.toContain('class="shiki');
+    const styles = pageStyles(html).join("\n");
+    expect(styles).toContain("pre code{padding:0;border:0;background:none;font:inherit}");
+    expect(styles).toContain("pre:not([class]) code{color:var(--syn-plain)}");
+    expect(styles).toContain("prefers-color-scheme:dark");
+  },
+);
+
+test.each(["system", "light", "dark", "own"] as const)(
+  "diff text colour rules stay scoped with theme=%s",
+  async (pick) => {
+    const own = checkThemeDocument(
+      { version: 1, base: "dark", tokens: { "fg-reading-strong": "#ffffff", "syn-plain": "#eeeeee" } },
+      "own",
+    );
+    expect(own.valid, JSON.stringify(own)).toBe(true);
+    if (!own.valid) throw new Error("Expected a valid theme");
+    const theme = pick === "system" ? undefined : pick === "own" ? themeDownloadLook(own) : pick;
+    const html = await buildWriteupDownload({
+      ...diffInput,
+      theme,
+      threads: emptyThreads(),
+      diff: { files: [diffFile()], hunks: async () => [{ oldStart: 1, newStart: 1, lines: ["-before", "+after"] }] },
+    });
+    expect(diffNodes(html, "em-diff")).toHaveLength(1);
+    const allowed = [
+      ["h1,h2,h3,h5,h6,strong,code", "var(--strong)"],
+      ["a :is(strong,code)", "inherit"],
+      ["pre:not([class]) code", "var(--syn-plain)"],
+      [".shiki,.shiki span", "var(--shiki-light,var(--syn-plain))"],
+      [".shiki,.shiki span", "var(--shiki-dark,var(--syn-plain))"],
+      [".em-diff-file", "var(--strong)"],
+      [".em-diff-numbers,.em-diff-hunk,.em-diff-marker", "var(--muted)"],
+    ];
+    const pairs: [string, string][] = [];
+    const styles = pageStyles(html).join("\n");
+    // Match leaf rules too, including those inside System's dark-mode media query.
+    for (const rule of styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const selector = rule[1]?.trim() ?? "";
+      if (!/pre|code|em-diff|shiki/i.test(selector)) continue;
+      for (const declaration of (rule[2] ?? "").matchAll(/(?:^|;)\s*color\s*:\s*([^;]+)/gi)) {
+        const pair: [string, string] = [selector, declaration[1]?.trim() ?? ""];
+        expect(allowed, `${pick}: ${rule[0]}`).toContainEqual(pair);
+        pairs.push(pair);
+      }
+    }
+    expect(pairs).toContainEqual(["h1,h2,h3,h5,h6,strong,code", "var(--strong)"]);
+    expect(pairs).toContainEqual(["pre:not([class]) code", "var(--syn-plain)"]);
+  },
+);
+
 function expectFixedTheme(html: string, theme: ThemeBase) {
   expectHead(html);
   expect(html).toContain(`<meta name="color-scheme" content="${theme}">`);
@@ -2915,14 +2983,14 @@ async function commentsOffOutputs(builders: CompatibilityBuilders) {
 
 // Baseline without comments, updated for the syntax base CSS; HTML docs retain their original bytes.
 const commentsOffHashes = {
-  writeup: "b07862159a7a2dd03dda987b58d882c0bf98c70845a6f5e352b818595cc91a1f",
-  markdown: "f2497eacab182f0e439f1300796aa6371bbedfa292d33fcbf5bbe2833487f083",
-  source: "1fe7dcefe4433b02a50f1271fbae932a179311049bb9adc95720ca2a04e71101",
-  emptySource: "723811ada88f2768503c7968cdd09b20d1264ed24ff0f3adb402cb60da2e9d11",
-  unrenderedSource: "ea9b6014078db41407d1be02f6e78c681121a11b8d092ba3bf7fbc8bf1e44dbc",
+  writeup: "1273df9aacdb64226ca10ee01b78aeb9049ba553712004b87a28ef238b824200",
+  markdown: "b1aa218a298a850f8500b2e1aca8156e0ff713df87638dfc4ddaf6f37f375f56",
+  source: "5b9b9b012e333b203af5d9112a1841f1978fc38e91e4c017c4c907143f4d91a7",
+  emptySource: "0c60a13682dd5938334a5d9c945754e91e7c56f90ba05646a80a534c4b50d600",
+  unrenderedSource: "25c1b515c1fdb093375b60628b957c82c9a4d0fba5b9ea14fe2521ce20c22901",
   html: "ebd1d21e1b7d438fa77910ed4a617b0850bbc687dc44b06aab36d42194f329e7",
-  overLimitHtml: "f35bf5eb55421865ecff63cba0231faca4a5e71717c4ae6e4040dd4fffeaeea5",
-  omitted: "f35bf5eb55421865ecff63cba0231faca4a5e71717c4ae6e4040dd4fffeaeea5",
+  overLimitHtml: "86da97434d5be4da584370b3bcd82517608189ce41237baf78fce8178e6e4aa1",
+  omitted: "86da97434d5be4da584370b3bcd82517608189ce41237baf78fce8178e6e4aa1",
 };
 test("comments-off output matches the pinned builder hashes", async () => {
   const outputs = await commentsOffOutputs({
