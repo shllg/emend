@@ -38,6 +38,14 @@ const colorKeywords = new Set([
 ]);
 const cssWhitespace = (char: string | undefined) =>
   char === " " || char === "\t" || char === "\n" || char === "\r" || char === "\f";
+const cssNewline = (char: string | undefined) => char === "\n" || char === "\r" || char === "\f";
+const cssEscape = (css: string, i: number) => css[i] === "\\" && i + 1 < css.length && !cssNewline(css[i + 1]);
+function cssHexDigit(code: number): number {
+  if (code >= 48 && code <= 57) return code - 48;
+  if (code >= 65 && code <= 70) return code - 55;
+  if (code >= 97 && code <= 102) return code - 87;
+  return -1;
+}
 function cssIdentifierChar(code: number): boolean {
   return (
     (code >= 48 && code <= 57) ||
@@ -45,7 +53,6 @@ function cssIdentifierChar(code: number): boolean {
     (code >= 97 && code <= 122) ||
     code === 95 ||
     code === 45 ||
-    code === 92 ||
     code >= 128
   );
 }
@@ -66,30 +73,63 @@ function cssCodeOnly(css: string): string {
       parts.push(css.slice(start, i), char, char);
       i++;
       while (i < css.length) {
-        if (css[i] === "\\") i = Math.min(i + 2, css.length);
-        else if (css[i] === char) {
+        if (css[i] === "\\") {
+          i = Math.min(i + (css[i + 1] === "\r" && css[i + 2] === "\n" ? 3 : 2), css.length);
+        } else if (css[i] === char) {
           i++;
           break;
-        } else if (css[i] === "\n" || css[i] === "\r" || css[i] === "\f") break;
+        } else if (cssNewline(css[i])) break;
         else i++;
       }
       start = i;
-    } else if (
-      (char === "u" || char === "U") &&
-      (css[i + 1] === "r" || css[i + 1] === "R") &&
-      (css[i + 2] === "l" || css[i + 2] === "L") &&
-      css[i + 3] === "(" &&
-      !cssIdentifierChar(css.charCodeAt(i - 1))
-    ) {
-      let value = i + 4;
+    } else if (cssIdentifierChar(css.charCodeAt(i)) || cssEscape(css, i)) {
+      // Decode only to compare with "url", keeping long identifiers out of intermediate strings.
+      let length = 0;
+      let url = true;
+      while (i < css.length) {
+        let code = css.charCodeAt(i);
+        if (cssEscape(css, i)) {
+          i++;
+          const hexStart = i;
+          let value = 0;
+          while (i - hexStart < 6) {
+            const digit = cssHexDigit(css.charCodeAt(i));
+            if (digit < 0) break;
+            value = value * 16 + digit;
+            i++;
+          }
+          if (i > hexStart) {
+            code = value;
+            if (cssWhitespace(css[i])) {
+              if (css[i] === "\r" && css[i + 1] === "\n") i++;
+              i++;
+            }
+          } else {
+            code = css.codePointAt(i) ?? 0;
+            i += code > 0xffff ? 2 : 1;
+          }
+        } else if (cssIdentifierChar(code)) i++;
+        else break;
+        const folded = code >= 65 && code <= 90 ? code + 32 : code;
+        if (length >= 3 || folded !== "url".charCodeAt(length)) url = false;
+        length++;
+      }
+      if (!url || length !== 3 || css[i] !== "(") continue;
+      let value = i + 1;
       while (cssWhitespace(css[value])) value++;
       if (css[value] === '"' || css[value] === "'") {
         // Keep the function; the next iteration strips its quoted string.
         i = value;
       } else {
-        parts.push(css.slice(start, i), "url()");
-        const end = css.indexOf(")", value);
-        i = end === -1 ? css.length : end + 1;
+        parts.push(css.slice(start, i + 1), ")");
+        i = value;
+        while (i < css.length) {
+          if (cssEscape(css, i)) i += 2;
+          else if (css[i] === ")") {
+            i++;
+            break;
+          } else i++;
+        }
         start = i;
       }
     } else i++;

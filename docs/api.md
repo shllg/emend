@@ -1452,8 +1452,10 @@ Media types are chosen on the hub. Rendered writeup and Markdown blobs are untru
 content: the hub regenerates them from source through the normal sanitizer and rendering budgets.
 A file row that carries `look` keeps the stored look on the hub, null included, so a pub keeps the
 look it was published with; `colorScheme` is kept only with `look: "emend"`. Both apply only to a
-rendered HTML doc and are null on every other row. A row without `look` (from an older exporter)
-gets the look and colour scheme the hub works out from the doc's source, as a publish does.
+rendered HTML doc and are null on every other row. A row without `look` comes from an exporter
+older than the default look, so its pub was published under the earlier rule, and the hub applies
+that rule to the doc's source: the `emend-look` mark decides, else a page with its own styles is
+`custom`, else `emend`. Such a row never gets `colorScheme`.
 HTML content capability keys are freshly minted. `agent_waiters` and event state are not copied.
 Confirmed deliveries are retained; unconfirmed deliveries are dropped and their Sends have both
 `deliveryId` and `setAsideAt` cleared, making them available to the next take.

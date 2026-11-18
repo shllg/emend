@@ -303,14 +303,67 @@ test.each([
   ["div{background:url(page.png)}@media(prefers-color-scheme:dark){div{color:white}}", "auto"],
   ['@import url("page.css");', "light"],
   ["p{co/**/lor:red}", "auto"],
+  [String.raw`.quote\"{color:#222}`, "light"],
+  [String.raw`.a\/*b{color:#222}`, "light"],
+  [String.raw`div{background:url(icon\)prefers-color-scheme.png)}p{color:#222}`, "light"],
+  [String.raw`p{color:#222}div{background:\75 rl(prefers-color-scheme.png)}`, "light"],
+  [String.raw`p{color:#222}div{background:u\72 l(light-dark\(.png)}`, "light"],
+  [String.raw`p{color:#222;--value:\url(prefers-color-scheme)}`, "light"],
+  [String.raw`.quote\"{color:#222}@media (prefers-color-scheme: dark){p{color:#eee}}`, "auto"],
+  [String.raw`p{color:#222;--value:url\(prefers-color-scheme)}`, "auto"],
+  [".a\\\n{color:#222}", "light"],
+  ["p{color:#222}\\", "light"],
 ])("CSS data does not become a colour declaration or dark rule: %s", (css, colorScheme) => {
   expect(htmlLook(`<style>${css}</style>`)).toMatchObject({ look: "emend", colorScheme });
 });
 
-test.each(["a", "Z", "0", "_", "-", "\\", "é"])("URL scanning respects a preceding %j", (prefix) => {
+test.each(["a", "Z", "0", "_", "-", "é"])("URL scanning respects a preceding %j", (prefix) => {
   expect(htmlLook(`<style>p{color:#222;--value:${prefix}url(prefers-color-scheme)}</style>`)).toMatchObject({
     colorScheme: "auto",
   });
+});
+
+test.each([
+  String.raw`\000075rl`,
+  String.raw`\000075 rl`,
+  String.raw`\55\52\4c`,
+  String.raw`u\72\l`,
+  "\\75\trl",
+  "\\75\nrl",
+  "\\75\rrl",
+  "\\75\frl",
+])("escaped URL identifier %j keeps its value as data", (name) => {
+  for (const value of ["prefers-color-scheme.png", '"light-dark(.png"', "'light-dark(.png'"])
+    expect(htmlLook(`<style>p{color:#222}div{background:${name}(${value})}</style>`)).toMatchObject({
+      colorScheme: "light",
+    });
+});
+
+test.each([String.raw`\0rl`, String.raw`\d875rl`, String.raw`\110075rl`, String.raw`\0000750rl`])(
+  "non-URL escaped identifier %j keeps its arguments as code",
+  (name) => {
+    expect(htmlLook(`<style>p{color:#222;--value:${name}(prefers-color-scheme)}</style>`)).toMatchObject({
+      colorScheme: "auto",
+    });
+  },
+);
+
+test.each([
+  'p::before{content:"escaped\\\r\n;light-dark("}p{color:#222}',
+  "p{color:#222}div{background:\\75\r\nrl(prefers-color-scheme.png)}",
+])("CSS escapes consume CRLF together: %j", (css) => {
+  // Pass raw CSS to the scanner: the HTML parser would normalize CRLF to LF first.
+  for (const inline of [false, true]) {
+    const tree = defaultTreeAdapter.createDocument();
+    const element = defaultTreeAdapter.createElement(
+      inline ? "p" : "style",
+      html.NS.HTML,
+      inline ? [{ name: "style", value: css }] : [],
+    );
+    if (!inline) defaultTreeAdapter.insertText(element, css);
+    defaultTreeAdapter.appendChild(tree, element);
+    expect(htmlLookFromTree(tree)).toMatchObject({ look: "emend", colorScheme: "light" });
+  }
 });
 
 test.each([
@@ -324,25 +377,31 @@ test.each([
 });
 
 test.each([
-  ["unclosed comment", "/*", "", "auto"],
-  ["closed comment", "/*", "*/color:#222", "light"],
-  ["unclosed string", 'content:"', "", "auto"],
-  ["long declaration value", "color:", "", "light"],
-])("near-limit %s scans without throwing in a style element and attribute", (_name, prefix, suffix, colorScheme) => {
-  const css = prefix + "x".repeat(8_380_000 - prefix.length - suffix.length) + suffix;
-  // Exercise both classifier paths with the same large input, without repeatedly parsing 8 MiB of HTML.
-  for (const inline of [false, true]) {
-    const tree = defaultTreeAdapter.createDocument();
-    const element = defaultTreeAdapter.createElement(
-      inline ? "p" : "style",
-      html.NS.HTML,
-      inline ? [{ name: "style", value: css }] : [],
-    );
-    if (!inline) defaultTreeAdapter.insertText(element, `p{${css}}`);
-    defaultTreeAdapter.appendChild(tree, element);
-    expect(htmlLookFromTree(tree)).toMatchObject({ look: "emend", ownStyles: true, colorScheme });
-  }
-});
+  ["unclosed comment", "/*", "", "auto", "x"],
+  ["closed comment", "/*", "*/color:#222", "light", "x"],
+  ["unclosed string", 'content:"', "", "auto", "x"],
+  ["long declaration value", "color:", "", "light", "x"],
+  ["repeated backslash escapes", "", "\n;color:#222", "light", String.raw`\";`],
+  ["long escaped identifier", "--", "\n;color:#222", "light", String.raw`\78`],
+])(
+  "near-limit %s scans without throwing in a style element and attribute",
+  (_name, prefix, suffix, colorScheme, fill) => {
+    const length = 8_380_000 - prefix.length - suffix.length;
+    const css = prefix + fill.repeat(Math.ceil(length / fill.length)).slice(0, length) + suffix;
+    // Exercise both classifier paths with the same large input, without repeatedly parsing 8 MiB of HTML.
+    for (const inline of [false, true]) {
+      const tree = defaultTreeAdapter.createDocument();
+      const element = defaultTreeAdapter.createElement(
+        inline ? "p" : "style",
+        html.NS.HTML,
+        inline ? [{ name: "style", value: css }] : [],
+      );
+      if (!inline) defaultTreeAdapter.insertText(element, `p{${css}}`);
+      defaultTreeAdapter.appendChild(tree, element);
+      expect(htmlLookFromTree(tree)).toMatchObject({ look: "emend", ownStyles: true, colorScheme });
+    }
+  },
+);
 
 test("own styles are independent of the selected look and colour scheme", () => {
   for (const source of ["<style>p{}</style>", '<p style="">Plan</p>', '<link rel="stylesheet">', '<body bgcolor="">'])

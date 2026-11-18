@@ -109,7 +109,14 @@ export type Work =
         carried?: { path: string | null; side?: "old" | "new" };
       }[];
     };
-export type DocMetadata = { title?: string; headings: DocHeading[]; look?: HtmlLook; colorScheme?: "light" };
+export type DocMetadata = {
+  title?: string;
+  headings: DocHeading[];
+  look?: HtmlLook;
+  // Look before emend became the default; only for import rows from exporters that send no look.
+  legacyLook?: HtmlLook;
+  colorScheme?: "light";
+};
 export type WorkResult =
   | { kind: "diff-counts"; counts: { additions: number; deletions: number } | null }
   | { kind: "diff-hunks"; hunks: DownloadDiffHunk[] | null | "too-long" }
@@ -192,7 +199,12 @@ export const executeWork: Executor = async (work) => {
         kind: "doc-metadata",
         title: await inferDocTitle("html", new Uint8Array(work.bytes)),
         headings: htmlHeadingsFromTree(tree),
-        ...(tree ? { look: appearance.look } : {}),
+        ...(tree
+          ? {
+              look: appearance.look,
+              legacyLook: appearance.reason === "default" && appearance.ownStyles ? "custom" : appearance.look,
+            }
+          : {}),
         ...(appearance.colorScheme === "light" ? { colorScheme: "light" as const } : {}),
       };
     }

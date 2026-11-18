@@ -196,42 +196,41 @@ export async function importReview(principal: Principal, bundle: ImportBundle, d
         await insert(
           t.files,
           [...bundle.files].sort((a, b) => Number(a.role === "asset") - Number(b.role === "asset")),
-          (r) => ({
-            ...r,
-            ownerId,
-            title:
-              r.role === "doc"
-                ? (prepared.rendered
-                    .get(r.revisionId)
-                    ?.[docViewOf(r) === "source" ? "sourceMetadata" : "metadata"].get(r.path)?.title ?? null)
-                : null,
-            headings:
-              r.role === "doc"
-                ? (prepared.rendered
-                    .get(r.revisionId)
-                    ?.[docViewOf(r) === "source" ? "sourceMetadata" : "metadata"].get(r.path)?.headings ?? null)
-                : null,
-            look: isRenderedHtmlDoc(r)
-              ? r.look !== undefined
-                ? r.look
-                : (prepared.rendered.get(r.revisionId)?.metadata.get(r.path)?.look ?? null)
-              : null,
-            colorScheme: isRenderedHtmlDoc(r)
-              ? r.look !== undefined
-                ? r.look === "emend"
-                  ? (r.colorScheme ?? null)
-                  : null
-                : (prepared.rendered.get(r.revisionId)?.metadata.get(r.path)?.colorScheme ?? null)
-              : null,
-            mediaType: fileMediaType(r),
-            ...(r.role === "diff" ? prepared.counted.get(r.revisionId)?.get(r.path) : {}),
-            renderedBlob:
-              r.role === "doc"
-                ? (prepared.rendered
-                    .get(r.revisionId)
-                    ?.[docViewOf(r) === "source" ? "sourceBlobs" : "docBlobs"].get(r.path) ?? null)
-                : null,
-          }),
+          (r) => {
+            const appearance = !isRenderedHtmlDoc(r)
+              ? { look: null, colorScheme: null }
+              : r.look === undefined
+                ? {
+                    look: prepared.rendered.get(r.revisionId)?.metadata.get(r.path)?.legacyLook ?? null,
+                    colorScheme: null,
+                  }
+                : { look: r.look, colorScheme: r.look === "emend" ? (r.colorScheme ?? null) : null };
+            return {
+              ...r,
+              ownerId,
+              title:
+                r.role === "doc"
+                  ? (prepared.rendered
+                      .get(r.revisionId)
+                      ?.[docViewOf(r) === "source" ? "sourceMetadata" : "metadata"].get(r.path)?.title ?? null)
+                  : null,
+              headings:
+                r.role === "doc"
+                  ? (prepared.rendered
+                      .get(r.revisionId)
+                      ?.[docViewOf(r) === "source" ? "sourceMetadata" : "metadata"].get(r.path)?.headings ?? null)
+                  : null,
+              ...appearance,
+              mediaType: fileMediaType(r),
+              ...(r.role === "diff" ? prepared.counted.get(r.revisionId)?.get(r.path) : {}),
+              renderedBlob:
+                r.role === "doc"
+                  ? (prepared.rendered
+                      .get(r.revisionId)
+                      ?.[docViewOf(r) === "source" ? "sourceBlobs" : "docBlobs"].get(r.path) ?? null)
+                  : null,
+            };
+          },
         );
         await insert(t.agentNotes, bundle.agentNotes ?? [], (note) => ({
           ...note,

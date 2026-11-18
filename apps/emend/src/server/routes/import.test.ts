@@ -49,21 +49,29 @@ beforeEach(async () => {
   f = await importFixture();
   onTestFinished(() => f.cleanup());
 });
-test("import recomputes HTML looks for older bundles without stored appearance", async () => {
+test("import uses the earlier HTML look rule for bundles without stored appearance", async () => {
   const input = ImportBundle.parse(await bundle(f));
   const file = required(input.files[0]);
+  const css = "@layer emend{body{margin:0}}";
+  await writeFile(join(f.dir, "pub-frame.css"), css);
   const sources = [
     { path: "structure.html", source: "<h1>Synthetic plan</h1>", look: "emend" },
-    { path: "styled.html", source: "<style>p{color:red}</style><p>Synthetic plan</p>", look: "emend" },
+    { path: "styled.html", source: "<style>p{font-family:serif}</style><p>Synthetic plan</p>", look: "custom" },
+    { path: "light-only.html", source: "<style>p{color:#222}</style><p>Synthetic plan</p>", look: "custom" },
     {
       path: "custom.html",
       source: '<meta name="emend-look" content="custom"><style>p{color:red}</style>',
       look: "custom",
     },
     {
+      path: "emend.html",
+      source: '<meta name="emend-look" content="emend"><style>p{color:#222}</style>',
+      look: "emend",
+    },
+    {
       path: "dark.html",
       source: "<style>p{color:#222}@media(prefers-color-scheme:dark){p{color:white}}</style>",
-      look: "emend",
+      look: "custom",
     },
     { path: "deep.html", source: "<div>".repeat(600), look: null },
     { path: "plan.md", source: "# Synthetic plan", look: null },
@@ -77,6 +85,7 @@ test("import recomputes HTML looks for older bundles without stored appearance",
       newBlob: await f.deps.blobs.put(f.ownerId, Buffer.from(source), "text/plain"),
     })),
   );
+  expect(input.files.every((row) => row.look === undefined)).toBe(true);
   expect((await f.importRequest("/import", input)).status).toBe(201);
   const rows = await f.db.read((q) =>
     q
@@ -89,22 +98,27 @@ test("import recomputes HTML looks for older bundles without stored appearance",
   for (const { path, look } of sources)
     expect(rows.find((row) => row.path === path)).toMatchObject({
       look,
-      colorScheme: path === "styled.html" ? "light" : null,
+      colorScheme: null,
     });
   const response = await f.request(`/reviews/${input.review.id}/revisions/1`, "GET");
   expect(response.status).toBe(200);
   const view = RevisionView.parse(await response.json());
   expect(view.docs).toHaveLength(sources.length);
-  expect(view.docs.find((doc) => doc.path === "structure.html")).toMatchObject({ kind: "html", look: "emend" });
-  expect(view.docs.find((doc) => doc.path === "styled.html")).toMatchObject({
-    kind: "html",
-    look: "emend",
-    colorScheme: "light",
-  });
-  expect(view.docs.find((doc) => doc.path === "custom.html")).toMatchObject({ kind: "html", look: "custom" });
-  expect(view.docs.find((doc) => doc.path === "dark.html")).toMatchObject({ kind: "html", look: "emend" });
-  for (const doc of view.docs.filter((doc) => doc.path !== "styled.html"))
+  for (const { path, source, look } of sources) {
+    const doc = required(view.docs.find((doc) => doc.path === path));
     expect(doc).not.toHaveProperty("colorScheme");
+    if (look === null) continue;
+    expect(doc).toMatchObject({ kind: "html", look });
+    if (doc.kind !== "html") continue;
+    const served = await f.app.request(`http://127.0.0.1:3636${doc.contentUrl}`, {
+      headers: { Host: "127.0.0.1:3636" },
+    });
+    expect(served.status).toBe(200);
+    const body = await served.text();
+    expect(body).toContain(source);
+    expect(body.includes(css)).toBe(look === "emend");
+    expect(body).not.toContain('<html data-theme="light">');
+  }
   expect(view.docs.find((doc) => doc.path === "deep.html")).toMatchObject({ kind: "html" });
   expect(view.docs.find((doc) => doc.path === "plan.md")).toMatchObject({ kind: "markdown" });
   for (const path of ["deep.html", "plan.md"])
@@ -141,8 +155,9 @@ test("import preserves stored HTML appearance, including null, and clears it for
       look: "emend",
       colorScheme: null,
     },
-    { path: "older.html", appearance: {}, look: "emend", colorScheme: "light" },
-    { path: "older-scheme.html", appearance: { colorScheme: null }, look: "emend", colorScheme: "light" },
+    { path: "older.html", appearance: {}, look: "custom", colorScheme: null },
+    { path: "older-scheme.html", appearance: { colorScheme: null }, look: "custom", colorScheme: null },
+    { path: "older-light.html", appearance: { colorScheme: "light" }, look: "custom", colorScheme: null },
     {
       path: "plan.md",
       appearance: { look: "emend", colorScheme: "light" },
