@@ -663,8 +663,11 @@ unknown keys in responses so additive fields stay in v1.
 `emend theme copy` keeps the source's `files` list unchanged.
 
 `GET /api/v1/themes/:name/fonts/:file` requires a reviewer session with `read` scope, like the
-list route: no session gives 401 and a bearer gives 403. The theme name and file name must pass
-their contract schemas, the theme must be valid, and its `fonts.files` must name the file exactly.
+list route. Without a valid credential it answers `401 unauthorized`; agent and admin bearers
+receive `403 forbidden`, and a reviewer credential used as a bearer is refused with
+`401 unauthorized`.
+The theme name and file name must pass their contract schemas, the theme must be valid, and its
+`fonts.files` must name the file exactly.
 A file is at most `LIMITS.themeFontBytes` (4194304 bytes, 4 MiB) and must be a regular file
 directly inside the real `fonts` folder. The folder itself may be a symlink; a file link may
 point to another file directly in that same real folder, but never outside it or into a subfolder.
