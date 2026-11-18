@@ -26,6 +26,7 @@ export const SHIPPED_PATHS = [
   "LICENSE",
   "docs/setup.md",
   "docs/setup/",
+  "docs/skills/",
   "docs/usage.md",
   "package.json",
   "pnpm-lock.yaml",

@@ -20,7 +20,9 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { copySkills } from "../apps/emend/src/build/skill-copy-filter.ts";
 import { run } from "../apps/emend/src/main.ts";
-import { PublishManifest, WaitResult } from "../packages/contract/src/index.ts";
+import { VERSION } from "../apps/emend/src/version.ts";
+import { THEME_SKILL_PATH, UNRELEASED_VERSION } from "../apps/web/src/lib/theme-skill.ts";
+import { PublishManifest, THEME_SCALE_STEPS, THEME_TOKENS, WaitResult } from "../packages/contract/src/index.ts";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
 const read = (path: string) => readFileSync(join(repo, path), "utf8");
@@ -323,7 +325,7 @@ test("skill text rejects inline commands and executable fence openings", () => {
 });
 
 gitTest("every indexed skill file has safe metadata and no command markers", () => {
-  for (const path of gitFiles("--", "plugin/skills")) {
+  for (const path of gitFiles("--", "plugin/skills", "docs/skills")) {
     const text = read(path);
     expect(hasSkillCommands(text), path).toBe(false);
     if (basename(path) === "SKILL.md") {
@@ -445,9 +447,10 @@ test("the writing reference defines HTML pages and both TL;DR locations", () => 
   expect(tldr).toContain('A document opens with it, under a "TL;DR" heading right after the title.');
 });
 
-test.each(names)("%s has only safe frontmatter and registered commands", async (name) => {
-  const text = read(`plugin/skills/${name}/SKILL.md`);
+test.each([...names, "emend-theme"])("%s has only safe frontmatter and registered commands", async (name) => {
+  const text = read(name === "emend-theme" ? THEME_SKILL_PATH : `plugin/skills/${name}/SKILL.md`);
   expect(safeSkillFrontmatter(text, name)).toBe(true);
+  expect(hasSkillCommands(text)).toBe(false);
   const shell = [...text.matchAll(/```sh\n([\s\S]*?)\n```/g)].map((match) => match[1]).join("\n");
   const commands = [...shell.matchAll(/^emend ([a-z][a-z-]*)/gm), ...text.matchAll(/`emend ([a-z][a-z-]*)/g)].map(
     (match) => match[1] as string,
@@ -458,6 +461,50 @@ test.each(names)("%s has only safe frontmatter and registered commands", async (
     await run([command, "--invalid-skill-command-probe"], { env, stdout: vi.fn(), stderr });
     expect(stderr.mock.calls.flat().join("")).not.toContain("unknown command");
   }
+});
+
+function themeTableNames(text: string, heading: string): string[] {
+  const section = text.split(`## ${heading}\n`)[1]?.split(/^## /m)[0] ?? "";
+  return [...section.matchAll(/^\|\s*`([^`]+)`\s*\|/gm)].map((match) => match[1] as string);
+}
+
+test("the linked theme skill lists every scale step and token in contract order", () => {
+  const text = read(THEME_SKILL_PATH);
+  expect(THEME_SKILL_PATH).toBe("docs/skills/emend-theme/SKILL.md");
+  expect(themeTableNames(text, "Scale steps")).toEqual(THEME_SCALE_STEPS);
+  expect(themeTableNames(text, "Tokens")).toEqual(THEME_TOKENS);
+});
+
+test("theme tables expose missing, extra and duplicate names without reading other sections", () => {
+  const table = (names: string[]) =>
+    `## Scale steps\n\n| Step | What it colours |\n| --- | --- |\n${names.map((name) => `| \`${name}\` | Synthetic colour. |`).join("\n")}\n## Tokens\n| \`other\` | Other section. |\n`;
+  const expected = ["n-0", "n-25"];
+  expect(themeTableNames(table(expected), "Scale steps")).toEqual(expected);
+  for (const names of [["n-0"], [...expected, "extra"], [...expected, "n-0"]]) {
+    expect(themeTableNames(table(names), "Scale steps")).toEqual(names);
+    expect(themeTableNames(table(names), "Scale steps")).not.toEqual(expected);
+  }
+  expect(
+    themeTableNames("## Tokens\n### Surfaces\n| `bg-app` | Canvas. |\n### Text\n| `fg-1` | Text. |", "Tokens"),
+  ).toEqual(["bg-app", "fg-1"]);
+});
+
+test("the unreleased version matches both main placeholders", () => {
+  expect(UNRELEASED_VERSION).toBe(json("apps/emend/package.json").version);
+  expect(UNRELEASED_VERSION).toBe(VERSION);
+});
+
+test("the plugin and copied package skills exclude the linked theme skill", async () => {
+  expect(
+    readdirSync(join(repo, "plugin"), { recursive: true, encoding: "utf8" }).some((path) =>
+      path.includes("emend-theme"),
+    ),
+  ).toBe(false);
+  const output = join(temporary, "dist/skills");
+  await copySkills(repo, output);
+  const entries = readdirSync(output, { recursive: true, encoding: "utf8" });
+  expect(entries).toContain("emend-review/SKILL.md");
+  expect(entries.some((path) => path.includes("emend-theme"))).toBe(false);
 });
 
 test.each(["plugin/skills/emend-review/SKILL.md", "plugin/skills/emend-review/references/manifest.md"])(

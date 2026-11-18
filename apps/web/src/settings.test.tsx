@@ -22,6 +22,7 @@ import {
   useDownloadTheme,
   useThemeState,
 } from "./lib/theme.ts";
+import { themeSkillPrompt } from "./lib/theme-skill.ts";
 import { Events } from "./test/events.ts";
 import { customTheme } from "./test/themes.ts";
 
@@ -160,6 +161,32 @@ const hoursForm = () =>
   );
 const field = () => screen.findByRole<HTMLInputElement>("spinbutton", { name: "Keep approved reviews in Active for" });
 const save = () => hoursForm().getByRole<HTMLButtonElement>("button", { name: "Save" });
+
+test("Appearance shows the theme skill prompt and copies its exact text", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.spyOn(navigator, "clipboard", "get").mockReturnValue({ writeText } as unknown as Clipboard);
+  setup();
+  const appearance = within(await screen.findByRole("region", { name: "Appearance" }));
+  const prompt = appearance.getByText(/Make me a custom theme for emend/);
+  expect(prompt.textContent).toBe(themeSkillPrompt(__EMEND_VERSION__));
+  expect(prompt.textContent).toContain(
+    "https://raw.githubusercontent.com/shllg/emend/refs/heads/main/docs/skills/emend-theme/SKILL.md",
+  );
+  fireEvent.click(appearance.getByRole("button", { name: "Copy" }));
+  expect(writeText).toHaveBeenCalledExactlyOnceWith(themeSkillPrompt(__EMEND_VERSION__));
+  expect(await appearance.findByRole("button", { name: "Copied" })).toBeTruthy();
+  expect(appearance.getByText("Text copied").closest('[role="status"]')).toBeTruthy();
+});
+
+test("a failed prompt copy selects the text and announces how to copy it", async () => {
+  const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+  vi.spyOn(navigator, "clipboard", "get").mockReturnValue({ writeText } as unknown as Clipboard);
+  setup();
+  const appearance = within(await screen.findByRole("region", { name: "Appearance" }));
+  fireEvent.click(appearance.getByRole("button", { name: "Copy" }));
+  expect((await appearance.findByText("Select and copy the text")).closest('[role="status"]')).toBeTruthy();
+  expect(window.getSelection()?.toString()).toBe(themeSkillPrompt(__EMEND_VERSION__));
+});
 
 test("Appearance is first, defaults to System and applies every choice immediately", async () => {
   const f = setup();
@@ -671,7 +698,11 @@ test("theme events apply valid edits without reloading; refused and missing upda
   const reason = "fg-1 on bg-app: 2.10 to 1, needs 4.5 to 1.";
   themeResponse = { themes: [{ valid: false, name: "mine", base: "dark", problems: [reason] }], folderError: false };
   act(() => Events.opened.at(-1)?.emit("themes", {}));
-  const note = await within(screen.getByRole("region", { name: "Appearance" })).findByRole("status");
+  const note = await screen.findByText(
+    (_, element) =>
+      element?.getAttribute("role") === "status" &&
+      element.textContent.includes("This device keeps its last valid version of mine."),
+  );
   expect(note.textContent).toContain("This device keeps its last valid version of mine.");
   expect(note.textContent).toContain(reason);
   expect(document.documentElement.style.getPropertyValue("--n-950")).toBe("#223344");
@@ -687,18 +718,28 @@ test("Appearance shows the empty hint, folder error, loading and retry states", 
   themeResponse = pending.promise;
   const { client } = setup();
   expect(await screen.findByText("Loading themes…")).toBeTruthy();
+  const expectPrompt = () => {
+    expect(screen.getByText(/Make me a custom theme for emend/).textContent).toBe(themeSkillPrompt(__EMEND_VERSION__));
+    expect(
+      within(screen.getByRole("region", { name: "Appearance" })).getByRole("button", { name: "Copy" }),
+    ).toBeTruthy();
+  };
+  expectPrompt();
   await act(async () =>
     pending.resolve(Response.json({ error: { code: "internal_error", message: "Unavailable" } }, { status: 500 })),
   );
   expect(await screen.findByText("Could not load themes.", { exact: false })).toBeTruthy();
+  expectPrompt();
   themeResponse = { themes: [], folderError: false };
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
   expect(await screen.findByText("emend theme copy dark mine")).toBeTruthy();
+  expectPrompt();
   themeResponse = { themes: [], folderError: true };
   await act(async () => {
     await client.invalidateQueries({ queryKey: ["themes"] });
   });
   expect(await screen.findByText("The themes folder could not be read.")).toBeTruthy();
+  expectPrompt();
   expect(screen.queryByText("emend theme copy dark mine")).toBeNull();
 });
 
@@ -743,7 +784,11 @@ test.each(["resume", "select"])(
     await act(async () => {
       await client.invalidateQueries({ queryKey: ["themes"] });
     });
-    const note = await within(screen.getByRole("region", { name: "Appearance" })).findByRole("status");
+    const note = await screen.findByText(
+      (_, element) =>
+        element?.getAttribute("role") === "status" &&
+        element.textContent.includes(`This device keeps its last valid version of ${entry.name}.`),
+    );
     expect(note.textContent).toContain(`This device keeps its last valid version of ${entry.name}.`);
     expect(document.documentElement.style.getPropertyValue("--n-950")).toBe("#223344");
     expect(JSON.parse(localStorage.getItem(customThemeKey) ?? "null")).toEqual(newer);

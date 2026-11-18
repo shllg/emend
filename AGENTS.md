@@ -26,6 +26,8 @@ invent work.
 - `apps/emend`: the `emend` command (CLI, local server, MCP, headless service), published as
   `@shllg/emend`. It serves the build of `apps/web`.
 - `apps/web`: the browser app (React + Vite).
+- `docs/skills/`: skills an agent reads from a link (the theme skill); never installed, and neither
+  the plugin nor the npm package ships them.
 - `packages/contract`: zod schemas for the API, the review manifest, file roles, capabilities.
 - `packages/core`: pure logic (Markdown to safe blocks, block ids, placing comments, topics). No
   Node-only and no browser-only API; WebCrypto is fine.
@@ -134,7 +136,8 @@ Each line prevents a real failure. "Before you touch" names the rule file with t
   `emend-security-reviewer` (Opus) when the change touches
   auth, tokens, pairing or attach, owner isolation, rendering of agent content, the content
   frames, hand-off, wait, take or claim, the MCP endpoint, CLI file or git access, a hook or rule
-  (`.claude/hooks/`, `.codex/`, CI) or dependencies; `emend-react-reviewer` (Sonnet) when
+  (`.claude/hooks/`, `.codex/`, CI), a skill an agent follows from a link (`docs/skills/`)
+  or dependencies; `emend-react-reviewer` (Sonnet) when
   `apps/web/src` changed; `emend-architecture-reviewer` (Opus) when the structure moves. It checks
   and confirms the findings, records bugs the change did not cause, and returns one list to fix.
   Rounds with a fixed budget:
