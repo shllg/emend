@@ -9,7 +9,7 @@
 :root[data-density="roomy"] {
   --density: 1.25;
 }
-@media (pointer: coarse) {
+@media (any-pointer: coarse) {
   :root[data-density="compact"] {
     --density: 1;
   }

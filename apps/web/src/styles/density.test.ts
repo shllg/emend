@@ -20,10 +20,10 @@ test("compact and roomy scale spacing while regular keeps the default without an
   expect(density).not.toMatch(/data-density=["']?regular/);
 });
 
-test("coarse pointers reset compact to regular spacing after its desktop rule", () => {
+test("any coarse pointer resets compact to regular spacing, including hybrid touch devices", () => {
   const coarse = density.slice(density.indexOf("@media"));
   expect(coarse).toMatch(
-    /^@media \(pointer: coarse\)\s*\{\s*:root\[data-density="compact"\]\s*\{\s*--density: 1;\s*\}\s*\}/,
+    /^@media \(any-pointer: coarse\)\s*\{\s*:root\[data-density="compact"\]\s*\{\s*--density: 1;\s*\}\s*\}/,
   );
   expect(density.indexOf("@media")).toBeGreaterThan(density.indexOf("--density: 0.75;"));
 });
@@ -51,6 +51,15 @@ test("Files keeps phone touch minimums, viewed boxes and progress bar height fix
   expect(mobile).not.toContain("--density");
   expect(files).toMatch(/\.em-viewed-mark__box\s*\{[^}]*width: 14px;\s*height: 14px;/);
   expect(files).toMatch(/\.em-files-progress__bar\s*\{[^}]*height: 3px;/);
+});
+
+test("reading comment offsets use the fixed Changed badge height and its scaled margin", () => {
+  const reading = readFileSync(new URL("./reading.css", import.meta.url), "utf8");
+  const marker = readFileSync(new URL("../components/status/ChangedMarker.tsx", import.meta.url), "utf8");
+  expect(marker).toContain("h-[1.25rem]");
+  expect(reading).toMatch(
+    /\.em-reading-block:has\(> \.em-reading-block__marker\) > \.em-reading-block__comment\s*\{\s*top: calc\(2px \+ 1\.25rem \+ var\(--space-1-5\)\);/,
+  );
 });
 
 test("app text never uses Tailwind line heights that scale with the spacing unit", () => {

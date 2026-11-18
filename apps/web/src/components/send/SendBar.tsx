@@ -510,7 +510,7 @@ export function SendBar({
                 className={cn(
                   inputClass,
                   inputSizes.sm,
-                  "min-h-7 max-h-32 resize-none overflow-y-auto py-[3px] pl-[30px] leading-[1.25rem]",
+                  "h-[1.75rem] min-h-[1.75rem] max-h-32 resize-none overflow-y-auto py-[3px] pl-[30px] leading-[1.25rem]",
                   instruction && "h-auto [field-sizing:content]",
                 )}
                 maxLength={LIMITS.instructionChars}

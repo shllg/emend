@@ -108,7 +108,14 @@ test("blank instructions do not enable Send and Ctrl+Enter posts the selected mo
   expect(instructions.getAttribute("enterkeyhint")).toBe("enter");
   expect(instructions.getAttribute("placeholder")).toBe("Instructions for the agent (optional)");
   expect(instructions.maxLength).toBe(LIMITS.instructionChars);
+  expect(instructions.classList.contains("h-[1.75rem]")).toBe(true);
+  expect(instructions.classList.contains("min-h-[1.75rem]")).toBe(true);
+  expect(instructions.classList.contains("h-7")).toBe(false);
+  expect(instructions.classList.contains("min-h-7")).toBe(false);
   fireEvent.change(instructions, { target: { value: "  " } });
+  expect(instructions.classList.contains("h-auto")).toBe(true);
+  expect(instructions.classList.contains("h-[1.75rem]")).toBe(false);
+  expect(instructions.classList.contains("min-h-[1.75rem]")).toBe(true);
   expect(button("Send").disabled).toBe(true);
   fireEvent.submit(instructions.closest("form") as HTMLFormElement);
   expect(fetchMock).not.toHaveBeenCalled();
@@ -127,6 +134,7 @@ test("blank instructions do not enable Send and Ctrl+Enter posts the selected mo
   await closeSent();
   expectSend({ revision: 3, kind: "go", mode: "explain", instruction: "  Explain the boundary  " });
   expect(instructions.value).toBe("");
+  expect(instructions.classList.contains("h-[1.75rem]")).toBe(true);
   expect(button("Send").disabled).toBe(true);
   expect(screen.queryByRole("alert")).toBeNull();
 });
