@@ -4,10 +4,11 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import {
-  compareBundles, formatBundleSummary, measureCheckout, parseArgs, readCache, USAGE, validateBaseCache, writeCache,
+  checkBase, compareBundles, formatBundleSummary, ignoredEnvFiles, measureCheckout, parseArgs, readCache, USAGE, validateBaseCache, writeCache,
 } from "./bundle-diff.ts";
 
 const sha = "abcdef0123456789abcdef0123456789abcdef01";
+const measurer = "a".repeat(40);
 const bundles = (sizes: Record<string, number>, budgets: Record<string, number> = {}) => ({ sizes, budgets });
 
 test("growth below the threshold and shrinking are listed without findings", () => {
@@ -90,20 +91,26 @@ test("every ceiling change is listed even when sizes do not change", () => {
   ].join("\n"));
 });
 
-test("cache accepts only the matching schema and sha with safe non-negative integer maps", () => {
-  const cache = { schemaVersion: 1, sha, sizes: { entry: 0 }, budgets: { entry: 1000 } };
-  assert(validateBaseCache(cache, sha));
-  assert(validateBaseCache({ ...cache, sizes: {}, budgets: {} }, sha));
-  assert(!validateBaseCache(cache, "b".repeat(40)));
-  assert(!validateBaseCache({ ...cache, schemaVersion: 2 }, sha));
-  assert(!validateBaseCache({ ...cache, sha: "bad" }, "bad"));
+test("cache accepts only the matching schema, sha and measurer with safe non-negative integer maps", () => {
+  const cache = { schemaVersion: 2, sha, measurer, sizes: { entry: 0 }, budgets: { entry: 1000 } };
+  assert(validateBaseCache(cache, sha, measurer));
+  assert(validateBaseCache({ ...cache, sizes: {}, budgets: {} }, sha, measurer));
+  assert(!validateBaseCache(cache, "b".repeat(40), measurer));
+  assert(!validateBaseCache(cache, sha, "b".repeat(40)));
+  const missingMeasurer: Record<string, unknown> = { ...cache };
+  delete missingMeasurer.measurer;
+  assert(!validateBaseCache(missingMeasurer, sha, measurer));
+  for (const invalid of ["a".repeat(39), "a".repeat(41), "g".repeat(40)])
+    assert(!validateBaseCache({ ...cache, measurer: invalid }, sha, invalid));
+  assert(!validateBaseCache({ ...cache, schemaVersion: 1 }, sha, measurer));
+  assert(!validateBaseCache({ ...cache, sha: "bad" }, "bad", measurer));
   for (const field of ["sizes", "budgets"]) {
     for (const value of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, "100", null])
-      assert(!validateBaseCache({ ...cache, [field]: { entry: value } }, sha));
+      assert(!validateBaseCache({ ...cache, [field]: { entry: value } }, sha, measurer));
     for (const value of [undefined, null, [], 1, "invalid"])
-      assert(!validateBaseCache({ ...cache, [field]: value }, sha));
+      assert(!validateBaseCache({ ...cache, [field]: value }, sha, measurer));
   }
-  for (const value of [null, undefined, [], "invalid", {}]) assert(!validateBaseCache(value, sha));
+  for (const value of [null, undefined, [], "invalid", {}]) assert(!validateBaseCache(value, sha, measurer));
 });
 
 test("a base without a budget makes every head route new and every ceiling added", (t) => {
@@ -129,16 +136,39 @@ test("cache round trips sizes and budgets with private permissions and ignores u
   const folder = mkdtempSync(join(tmpdir(), "emend-bundle-cache-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   const path = join(folder, "cache", `${sha}.json`);
-  const cache = { schemaVersion: 1 as const, sha, ...bundles({ inbox: 12000, review: 18000 }, { inbox: 15000, review: 20000 }) };
+  const cache = { schemaVersion: 2 as const, sha, measurer, ...bundles({ inbox: 12000, review: 18000 }, { inbox: 15000, review: 20000 }) };
   writeCache(path, cache);
-  assert.deepEqual(readCache(path, sha), cache);
+  assert.deepEqual(readCache(path, sha, measurer), cache);
   assert.equal(statSync(dirname(path)).mode & 0o777, 0o700);
   assert.equal(statSync(path).mode & 0o777, 0o600);
-  assert.equal(readCache(path, "b".repeat(40)), undefined);
+  assert.equal(readCache(path, "b".repeat(40), measurer), undefined);
+  assert.equal(readCache(path, sha, "b".repeat(40)), undefined);
   writeFileSync(path, "{corrupt");
-  assert.equal(readCache(path, sha), undefined);
+  assert.equal(readCache(path, sha, measurer), undefined);
   rmSync(path);
-  assert.equal(readCache(path, sha), undefined);
+  assert.equal(readCache(path, sha, measurer), undefined);
+});
+
+test("base must be an ancestor of HEAD", () => {
+  const head = "b".repeat(40);
+  const calls: string[][] = [];
+  checkBase(sha, head, (...args) => {
+    calls.push(args);
+    return "";
+  });
+  assert.deepEqual(calls, [["merge-base", "--is-ancestor", sha, head]]);
+  assert.throws(() => checkBase(sha, head, () => { throw new Error("not an ancestor"); }),
+    { message: "--base must be a commit on main that HEAD contains" });
+});
+
+test("ignored web env files are listed without empty lines", () => {
+  const calls: string[][] = [];
+  assert.deepEqual(ignoredEnvFiles((...args) => {
+    calls.push(args);
+    return "apps/web/.env.local\n";
+  }), ["apps/web/.env.local"]);
+  assert.deepEqual(calls, [["ls-files", "--others", "--ignored", "--exclude-standard", "--", "apps/web/.env", "apps/web/.env.*"]]);
+  assert.deepEqual(ignoredEnvFiles(() => ""), []);
 });
 
 test("git lookups use only the sealed environment, disable optional locks and include untracked files", () => {
@@ -147,9 +177,14 @@ test("git lookups use only the sealed environment, disable optional locks and in
   assert.match(source, /const git = \(cwd: string, \.\.\.args: string\[\]\) =>\s*sealed\.git\(cwd, \{ \.\.\.env, GIT_OPTIONAL_LOCKS: "0" \}, \.\.\.args\)/);
   assert(source.indexOf("sealed.createRoot(") < source.indexOf("const git ="));
   assert.match(source, /git\(checkout, "status", "--porcelain"\)/);
+  const main = source.slice(source.indexOf("async function main()"));
+  assert.match(main, /ignoredEnvFiles\(\(\.\.\.args\) => git\(checkout, \.\.\.args\)\)/);
+  assert(main.indexOf('git(checkout, "status", "--porcelain")') < main.indexOf("ignoredEnvFiles("));
   assert.doesNotMatch(source, /--untracked-files=no/);
   assert.match(source, /git\(checkout, "rev-parse", "HEAD"\)/);
+  assert.match(source, /git\(checkout, "rev-parse", "HEAD:scripts"\)/);
   assert.match(source, /resolveCommit\(options\.base \?\? git\(checkout, "merge-base", "origin\/main", "HEAD"\), \(\.\.\.args\) => git\(checkout, \.\.\.args\)\)/);
+  assert.match(source, /checkBase\(base, head, \(\.\.\.args\) => git\(checkout, \.\.\.args\)\)/);
   assert.match(source, /exportMainCommit\(\{[^}]*\bgit,?\s*\}\)/);
 });
 

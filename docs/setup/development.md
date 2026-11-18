@@ -89,9 +89,11 @@ static JavaScript imports, the review's worker scripts and the boot script again
 reviewed change to that file. Budgets should allow about ten percent above measured sizes,
 rounded up; missing manifest roots also fail the check. The build manifest stays out of the package.
 
-`pnpm bundle:diff` needs a clean, committed checkout. It builds this checkout's web app and the
-merge base with `origin/main`, or `--base <commit>` on main. The base uses the same private export
-and offline install as `pnpm perf --ref`. Base sizes are cached in `.wt/bundle-base/`. It prints
+`pnpm bundle:diff` needs a clean, committed checkout. It also refuses while `apps/web` holds an `.env`
+file that git ignores, because Vite would load it into this checkout's build only. It builds this
+checkout's web app and the merge base with `origin/main`, or `--base <commit>`, a commit on main that
+HEAD contains. The base uses the same private export and offline install as `pnpm perf --ref`.
+Base sizes are cached in `.wt/bundle-base/` per base commit and version of `scripts/`. It prints
 a summary such as `Bundle vs main abcdef0 (gzip): entry +0.4 KB; review +3.1 KB; others unchanged.`
 Ceiling changes get their own lines with the old and new values. Pass `--json <file>` to save
 the comparison and summary. 1 KB is 1,000 bytes. A route grown by more than 5 KB is listed as over,

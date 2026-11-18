@@ -25,8 +25,9 @@ interface CeilingChange {
   change: "raised" | "lowered" | "added" | "removed";
 }
 interface BaseCache extends BundleSizes {
-  schemaVersion: 1;
+  schemaVersion: 2;
   sha: string;
+  measurer: string;
 }
 
 const checkout = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -101,18 +102,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function validateBaseCache(value: unknown, sha: string): value is BaseCache {
+export function validateBaseCache(value: unknown, sha: string, measurer: string): value is BaseCache {
   const validSizes = (sizes: unknown) => isRecord(sizes) && Object.values(sizes).every(
     (bytes) => typeof bytes === "number" && Number.isSafeInteger(bytes) && bytes >= 0,
   );
-  return isRecord(value) && value.schemaVersion === 1 && value.sha === sha && /^[a-f0-9]{40}$/.test(sha)
+  return isRecord(value) && value.schemaVersion === 2 && value.sha === sha && /^[a-f0-9]{40}$/.test(sha)
+    && value.measurer === measurer && /^[a-f0-9]{40}$/.test(measurer)
     && validSizes(value.sizes) && validSizes(value.budgets);
 }
 
-export function readCache(path: string, sha: string): BaseCache | undefined {
+export function readCache(path: string, sha: string, measurer: string): BaseCache | undefined {
   try {
     const value: unknown = JSON.parse(readFileSync(path, "utf8"));
-    return validateBaseCache(value, sha) ? value : undefined;
+    return validateBaseCache(value, sha, measurer) ? value : undefined;
   } catch {
     return undefined;
   }
@@ -147,6 +149,19 @@ export function measureCheckout(source: string, allowMissingBudget = false): Bun
   };
 }
 
+export function ignoredEnvFiles(git: (...args: string[]) => string): string[] {
+  return git("ls-files", "--others", "--ignored", "--exclude-standard", "--", "apps/web/.env", "apps/web/.env.*")
+    .split("\n").filter((line) => line.length > 0);
+}
+
+export function checkBase(base: string, head: string, git: (...args: string[]) => string): void {
+  try {
+    git("merge-base", "--is-ancestor", base, head);
+  } catch {
+    throw new Error("--base must be a commit on main that HEAD contains");
+  }
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const out = join(checkout, ".wt/bundle-base");
@@ -160,8 +175,12 @@ async function main() {
       sealed.git(cwd, { ...env, GIT_OPTIONAL_LOCKS: "0" }, ...args);
     // Untracked files can affect the head build, which reads the working tree.
     if (git(checkout, "status", "--porcelain")) throw new Error("The checkout has uncommitted changes; commit first");
+    const paths = ignoredEnvFiles((...args) => git(checkout, ...args));
+    if (paths.length) throw new Error(`${paths.join(", ")} change the web build but git ignores them; move them away first`);
     const head = git(checkout, "rev-parse", "HEAD");
     const base = resolveCommit(options.base ?? git(checkout, "merge-base", "origin/main", "HEAD"), (...args) => git(checkout, ...args));
+    checkBase(base, head, (...args) => git(checkout, ...args));
+    const measurer = git(checkout, "rev-parse", "HEAD:scripts");
     const pnpm = pnpmExecutable();
     const build = async (source: string) => {
       const result = await sealed.run(pnpm, ["--dir", "apps/web", "build"], {
@@ -172,14 +191,14 @@ async function main() {
     await build(checkout);
     const headSizes = measureCheckout(checkout);
     const cachePath = join(out, `${base}.json`);
-    let baseSizes: BundleSizes | undefined = readCache(cachePath, base);
+    let baseSizes: BundleSizes | undefined = readCache(cachePath, base, measurer);
     if (!baseSizes) {
       const source = await exportMainCommit({
         sealed, env, sealedRoot, sha: base, keep: false, protectedDirs: realStateDirs, failurePaths, git,
       });
       await build(source);
       baseSizes = measureCheckout(source, true);
-      writeCache(cachePath, { schemaVersion: 1, sha: base, ...baseSizes });
+      writeCache(cachePath, { schemaVersion: 2, sha: base, measurer, ...baseSizes });
     }
     const result = compareBundles(baseSizes, headSizes);
     const summary = formatBundleSummary(result, base);
