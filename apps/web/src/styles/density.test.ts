@@ -61,3 +61,11 @@ test("app text never uses Tailwind line heights that scale with the spacing unit
     expect(readFileSync(new URL(path, source), "utf8"), path).not.toMatch(/\bleading-\d/);
   }
 });
+
+test.each(["Button", "IconButton"])("%s sizes keep horizontal dimensions independent of density", (name) => {
+  const source = readFileSync(new URL(`../components/ui/${name}.tsx`, import.meta.url), "utf8");
+  const sizes = /const sizes = \{([^}]+)\}/.exec(source)?.[1];
+  expect(sizes).toBeTruthy();
+  // Density changes button heights, not widths.
+  expect(sizes).not.toMatch(/\b(w|px|gap|size)-\d/);
+});

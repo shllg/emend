@@ -471,10 +471,11 @@ test("a failed action shows the server's message in a toast and keeps the dialog
   expect(screen.getByRole("alertdialog", { name: "Retire this review?" })).toBeTruthy();
 });
 
-test("on the phone the menu button is a 40px touch target with the same label", async () => {
+test("on the phone the menu button keeps its width while its height follows density", async () => {
   mount({ phone: true });
   const button = screen.getByRole<HTMLButtonElement>("button", { name: "More review actions" });
-  expect(button.className).toContain("size-10");
+  expect(button.className).toContain("h-10");
+  expect(button.className).toContain("w-[2.5rem]");
   await choose("Snooze");
   expect(await screen.findByRole("alertdialog", { name: "Snooze this review" })).toBeTruthy();
 });
