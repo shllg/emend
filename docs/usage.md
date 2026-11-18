@@ -50,10 +50,23 @@ See [api.md](api.md) for the command ids.
 
 ### Themes
 
-Settings → Appearance shows a short text with a Copy button to paste into any coding agent.
+To make your own theme, ask a coding agent such as Claude Code or Codex.
+Settings → Appearance shows the text to paste, with a Copy button.
 It links to the [emend-theme skill](skills/emend-theme/SKILL.md) at the running version's tag,
 or at `main` for a build without a release.
-The agent copies a theme, changes what you asked for and checks it; the skill is never installed.
+Write what you want after "What I want:". This example links to `main`:
+
+```text
+Make me a custom theme for emend. Read the skill at https://raw.githubusercontent.com/shllg/emend/refs/heads/main/docs/skills/emend-theme/SKILL.md and follow it.
+
+What I want: a dark theme called forest, with deep green backgrounds and a warm amber accent. Keep it easy to read.
+```
+
+Other wishes work the same way, such as "a light theme called paper, with warm off-white
+backgrounds and blue links" or "a theme called mono, based on Dark, with Iosevka for code and
+Inter for text". The agent copies Dark, Light or one of your themes with `emend theme copy`,
+changes only what you asked for and runs `emend theme check` until the theme is valid.
+The skill is never installed. Then pick the theme in Settings → Appearance.
 
 Themes live in the `themes` folder beside emend's global `config.json`, on the server your
 browser reaches. `emend theme copy dark mine` writes `themes/mine/theme.json`.
