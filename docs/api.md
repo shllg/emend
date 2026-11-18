@@ -675,9 +675,10 @@ Compare the unrounded ratio and report two decimals, for example
   `bg-sunken`, and `diff-del-bg` over `bg-sunken`.
 - `fg-1` on `bg-selected`, `bg-hover`, `bg-active`, `accent-tint`, `mark-bg`, `mark-bg-active`, `topic-bg-2`;
   `fg-reading` on `mark-bg` over `bg-reading`.
-- For diagram notes and Light edge labels: `fg-1` on `topic-bg-2` over `bg-sunken`, in addition
-  to the pair over `bg-surface` above. Diagram text also uses the existing `fg-1`, `fg-2` and
-  `fg-3` pairs on `bg-surface` and `bg-sunken`.
+- For diagram notes: `fg-1` on `topic-bg-2` over `bg-sunken`, in addition to the pair over
+  `bg-surface` above. Diagram text also uses the existing `fg-1`, `fg-2` and `fg-3` pairs on
+  `bg-surface` and `bg-sunken`. Mermaid draws edge-label and state-label boxes at half opacity
+  over the diagram background; no pair checks that blend yet.
 - `accent-fg` on `accent`, `accent-hover`, `accent-press`.
 - `success-fg`, `info-fg`, `warning-fg`, `danger-fg` on their own `-bg` and on `bg-surface`.
 - `state-{open,approved,settled,snoozed}-fg`, `outcome-{fixed,explained,held,declined}-fg` and
