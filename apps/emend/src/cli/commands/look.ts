@@ -61,7 +61,7 @@ async function writeHtml(path: string, arg: string, text: string, info: Stats): 
     handle = await open(
       temporary,
       constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
-      info.mode & 0o7777,
+      0o600,
     );
     created = true;
     await handle.writeFile(text, "utf8");
@@ -72,7 +72,7 @@ async function writeHtml(path: string, arg: string, text: string, info: Stats): 
         throw new CliError(`cannot write ${arg}: cannot keep its group`);
       }
     }
-    // open applies the umask and chown can clear set-id bits; restore the original mode last.
+    // Keep the file private until its group is restored; chown can clear set-id bits, so restore the mode last.
     await handle.chmod(info.mode & 0o7777);
     await handle.sync();
     await handle.close();

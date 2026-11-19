@@ -1025,13 +1025,15 @@ the cascade ranks the outer document's rules above a shadow tree's.
 
 A doc whose `look` is `emend` also receives emend's pub stylesheet as one style element, placed
 after any leading byte order mark, whitespace, comments and doctype, so the doc never falls into
-quirks mode. The stylesheet is `pub-frame.css` from the web build: emend's tokens and element
+quirks mode. The route first removes the leading copy `emend look` writes (recognised as described
+under the colour checks), so the frame shows the page the Download shows.
+The stylesheet is `pub-frame.css` from the web build: emend's tokens and element
 styles in the cascade layer `emend`, with its fonts as `data:` URLs. It contains no `</`, backslash,
 `@import`, `image-set(` or `src(`. Every `url(` must use `data:`. The build and every server read
 check these rules and the `pubStylesheetBytes` limit. A missing or rejected sheet falls back to a
 minimal light and dark sheet with system colours.
-The stylesheet declares `@layer emend-file, emend;`, so a page's `emend-file` copy never
-overrides emend's look inside emend.
+The stylesheet declares `@layer emend-file, emend;`, so page CSS in the layer `emend-file` never
+overrides emend's look.
 Every unlayered rule of the doc's own CSS wins over it. The doc's headers stay exactly as above.
 A doc whose `colorScheme` is `light` also gets the fixed start tag `<html data-theme="light">` right
 before that style element, regardless of the query. Other docs in emend's look accept an optional

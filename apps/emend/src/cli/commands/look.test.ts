@@ -351,14 +351,15 @@ test.each([
   expect((await lstat(path)).ino).toBe(info.ino);
 });
 
-test.each([false, true])("preserves a different original group or refuses safely: chown fails=%s", async (fails) => {
+test.each([false, true])("restores group before mode on a private temporary file: chown fails=%s", async (fails) => {
   const path = await page();
   await chmod(path, 0o2764);
   const before = await readFile(path);
   const info = await lstat(path);
   const original = fs.open;
   const chown = vi.fn();
-  vi.spyOn(fs, "open").mockImplementation(async (...args) => {
+  const setMode = vi.fn();
+  const open = vi.spyOn(fs, "open").mockImplementation(async (...args) => {
     const handle = await original(...args);
     if (String(args[0]).includes(".emend-look-")) {
       const temporaryInfo = await handle.stat();
@@ -370,16 +371,23 @@ test.each([false, true])("preserves a different original group or refuses safely
         if (fails) throw new Error("sensitive chown failure");
         await changeOwner(uid, gid);
       });
+      const changeMode = handle.chmod.bind(handle);
+      vi.spyOn(handle, "chmod").mockImplementation(async (mode) => {
+        setMode(mode);
+        await changeMode(mode);
+      });
     }
     return handle;
   });
   const result = await command("page.html", "--no-theme");
+  expect(open).toHaveBeenCalledWith(expect.stringContaining(".emend-look-"), expect.any(Number), 0o600);
   expect(chown).toHaveBeenCalledExactlyOnceWith(info.uid, info.gid);
   const after = await lstat(path);
   expect(after.mode & 0o7777).toBe(info.mode & 0o7777);
   expect(after.uid).toBe(info.uid);
   expect(after.gid).toBe(info.gid);
   if (fails) {
+    expect(setMode).not.toHaveBeenCalled();
     expect(result).toEqual({
       code: 1,
       stdout: [],
@@ -388,6 +396,8 @@ test.each([false, true])("preserves a different original group or refuses safely
     expect(await readFile(path)).toEqual(before);
     expect(after.ino).toBe(info.ino);
   } else {
+    expect(setMode).toHaveBeenCalledExactlyOnceWith(info.mode & 0o7777);
+    expect(chown).toHaveBeenCalledBefore(setMode);
     expect(result).toEqual({ code: 0, stdout: ["emend: gave page.html emend's look\n"], stderr: [] });
     expect(stripHtmlLook(await readFile(path, "utf8"))).toBe(before.toString("utf8"));
     expect(after.ino).not.toBe(info.ino);

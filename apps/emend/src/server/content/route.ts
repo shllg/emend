@@ -1,4 +1,5 @@
 import { FilePath } from "@emend/contract";
+import { stripHtmlLook } from "@emend/core";
 import { and, eq } from "drizzle-orm";
 import type { Hono } from "hono";
 import { docAssets, files, revisions } from "../../db/schema.ts";
@@ -76,7 +77,7 @@ export function contentRoutes(app: Hono<AppEnv>, deps: AppDeps) {
         const query = c.req.query("theme");
         const theme =
           result.colorScheme === "light" ? "light" : query === "dark" || query === "light" ? query : undefined;
-        html = injectLook(html, await pubStylesheet(deps.config.webRoot), theme);
+        html = injectLook(stripHtmlLook(html), await pubStylesheet(deps.config.webRoot), theme);
       }
       html = injectBridge(html);
       c.header("Content-Type", contentType);
