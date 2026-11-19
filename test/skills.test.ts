@@ -21,6 +21,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { copySkills } from "../apps/emend/src/build/skill-copy-filter.ts";
 import { run } from "../apps/emend/src/main.ts";
 import { VERSION } from "../apps/emend/src/version.ts";
+import { BUILT_IN_FONTS } from "../apps/web/src/lib/built-in-fonts.ts";
 import { THEME_SKILL_PATH, UNRELEASED_VERSION } from "../apps/web/src/lib/theme-skill.ts";
 import { PublishManifest, THEME_SCALE_STEPS, THEME_TOKENS, WaitResult } from "../packages/contract/src/index.ts";
 
@@ -473,6 +474,11 @@ test("the linked theme skill lists every scale step and token in contract order"
   expect(THEME_SKILL_PATH).toBe("docs/skills/emend-theme/SKILL.md");
   expect(themeTableNames(text, "Scale steps")).toEqual(THEME_SCALE_STEPS);
   expect(themeTableNames(text, "Tokens")).toEqual(THEME_TOKENS);
+});
+
+test("the linked theme skill names every built-in font family", () => {
+  const text = read(THEME_SKILL_PATH);
+  for (const { family } of BUILT_IN_FONTS) expect(text).toContain(family);
 });
 
 test("theme tables expose missing, extra and duplicate names without reading other sections", () => {

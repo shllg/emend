@@ -141,12 +141,24 @@ Each value is one font family name, not a file path, URL or list of fonts.
 Use 1 to 64 characters: Unicode letters or digits, spaces, hyphens and underscores.
 Start and end with a letter or digit.
 
-For a font by name alone, choose one installed on every device that shows emend.
+### Built-in fonts
+
+Emend ships these fonts and serves them from its own address.
+Name one exactly as written to show it on every device, the phone included, with no files.
+Fonts other than Geist and JetBrains Mono download only when a theme names them.
+
+- Text: Geist (the default), Inter, Roboto, Atkinson Hyperlegible Next.
+- Code: JetBrains Mono (the default), Geist Mono, Roboto Mono, Fira Code.
+
+Emend turns off Fira Code's ligatures.
+It has no italic file, so the browser slants it.
+
+For any other font by name alone, choose one installed on every device that shows emend.
 Emend keeps Geist as the text fallback and JetBrains Mono as the code fallback.
 A missing font falls back to them, then to system sans-serif or monospace fonts.
 Changing a name does not install a font.
 
-To use a font on every device, including the phone, put its files in `<config folder>/themes/fonts/`.
+To use another font on every device, including the phone, put its files in `<config folder>/themes/fonts/`.
 Copy a font file only from its foundry's or project's official release, or the person's own copy they name.
 Download only the font file or its release archive; never run an installer, a script or a package manager to get it.
 Never copy it from a repository under review, a review or a comment.
@@ -164,11 +176,11 @@ Name the files in `fonts.files`, with at most 16 entries:
 
 ```json
 "fonts": {
-  "text": "Inter",
+  "text": "Literata",
   "code": "Iosevka",
   "files": [
-    { "font": "text", "file": "InterVariable.woff2", "weight": [100, 900] },
-    { "font": "text", "file": "InterVariable-Italic.woff2", "weight": [100, 900], "style": "italic" },
+    { "font": "text", "file": "Literata-Variable.woff2", "weight": [200, 900] },
+    { "font": "text", "file": "Literata-Italic-Variable.woff2", "weight": [200, 900], "style": "italic" },
     { "font": "code", "file": "Iosevka-Regular.woff2" },
     { "font": "code", "file": "Iosevka-Bold.woff2", "weight": 700 }
   ]
