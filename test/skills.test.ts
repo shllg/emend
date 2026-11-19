@@ -476,9 +476,20 @@ test("the linked theme skill lists every scale step and token in contract order"
   expect(themeTableNames(text, "Tokens")).toEqual(THEME_TOKENS);
 });
 
-test("the linked theme skill names every built-in font family", () => {
+test("the linked theme skill lists built-in font families and defaults in order", () => {
   const text = read(THEME_SKILL_PATH);
-  for (const { family } of BUILT_IN_FONTS) expect(text).toContain(family);
+  const section = text.split("### Built-in fonts\n")[1]?.split(/^#{1,3} /m)[0] ?? "";
+  for (const role of ["text", "code"] as const) {
+    const prefix = `- ${role === "text" ? "Text" : "Code"}: `;
+    const lines = section.split("\n").filter((line) => line.startsWith(prefix));
+    expect(lines).toHaveLength(1);
+    const entries = (lines[0] ?? "").slice(prefix.length).replace(/\.$/, "").split(", ");
+    const fonts = BUILT_IN_FONTS.filter((font) => font.role === role);
+    expect(entries.map((entry) => entry.replace(/ \(the default\)$/, ""))).toEqual(fonts.map(({ family }) => family));
+    expect(entries.filter((entry) => entry.endsWith(" (the default)"))).toEqual(
+      fonts.filter((font) => font.default).map(({ family }) => `${family} (the default)`),
+    );
+  }
 });
 
 test("theme tables expose missing, extra and duplicate names without reading other sections", () => {
