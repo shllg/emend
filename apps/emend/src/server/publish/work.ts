@@ -39,6 +39,7 @@ import {
   renderSource,
   renderWriteup,
   resectionBlocks,
+  stripHtmlLook,
 } from "@emend/core";
 import { type ImageSize, imageSize } from "./image-size.ts";
 
@@ -193,7 +194,7 @@ export const executeWork: Executor = async (work) => {
   if (work.kind === "image-sizes") return { kind: "image-sizes", sizes: [...readImageSizes(work.heads)] };
   if (work.kind === "doc-metadata") {
     if (work.format === "html") {
-      const tree = parseDocHtml(decode(work.bytes));
+      const tree = parseDocHtml(stripHtmlLook(decode(work.bytes)));
       const appearance = htmlLookFromTree(tree);
       return {
         kind: "doc-metadata",

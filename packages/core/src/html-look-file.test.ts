@@ -43,6 +43,17 @@ test("strips only one directly following newline", () => {
   expect(stripHtmlLook(`${marker}body{}</style><p>Seeds</p>`)).toBe("<p>Seeds</p>");
 });
 
+test.each([
+  `<!doctype html>${marker}p{}</STYLE><p>Shown in emend</p><!-- </style><p>Only in the download</p> -->`,
+  `${marker}p{}</style ><p>Kept</p><!-- </style> -->`,
+  `${marker}p{}</style data-end><p>Kept</p><!-- </style> -->`,
+  `${marker}p{content:"</not-style>"}</style><p>Kept</p>`,
+])("keeps a leading chunk whose first closing sequence is not exactly </style>: %s", (page) => {
+  expect(stripHtmlLook(page)).toBe(page);
+  const lightPage = page.replace(marker, `<html data-theme="light">${marker}`);
+  expect(stripHtmlLook(lightPage)).toBe(lightPage);
+});
+
 test("light-only pages get a removable light root before the charset and style", () => {
   const page = '<!doctype html><html lang="en"><style>p{color:#222}</style><p>Seeds</p></html>';
   const styled = applyHtmlLook(page, { ...input, lightOnly: true });

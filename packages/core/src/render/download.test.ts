@@ -3649,6 +3649,23 @@ test("HTML downloads add theme variables in the bridge's layer and strip the fil
   ]);
 });
 
+test("HTML downloads keep the body after an unrecognised leading look chunk", async () => {
+  const source =
+    '<!doctype html><meta charset="utf-8"><style data-emend-look>p{}</STYLE>' +
+    "<p>Shown in emend</p><!-- </style><p>Only in the download</p> -->";
+  const html = await buildHtmlDocDownload({
+    html: source,
+    docPath: "plan.html",
+    title: "Plan",
+    resolveAsset: async () => null,
+    look: { css: pubCss },
+  });
+  expect(html).toContain("<p>Shown in emend</p>");
+  expect(html).not.toContain("Only in the download");
+  const body = parsed(html).find((node) => node.tagName === "body");
+  expect(body && hastText(body)).toBe("Shown in emend");
+});
+
 test.each(["</style><script>bad()</script>", "body{background:url(https://example.com/a)}"])(
   "HTML downloads refuse an unsafe pub stylesheet: %s",
   async (css) => {

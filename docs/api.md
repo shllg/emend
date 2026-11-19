@@ -998,8 +998,11 @@ A dark-mode rule is `prefers-color-scheme` or `light-dark(` in a style element, 
 `style` attribute or an SVG colour attribute, or `prefers-color-scheme` in the `media` attribute of
 a style element or a stylesheet link. Both checks read CSS outside comments, strings and `url()`
 values, and cover declarative shadow roots, not inert templates.
-An HTML `style` element outside a shadow root carrying `data-emend-look` (the copy `emend look`
-writes) counts for neither check, nor as the page’s own styles.
+The leading copy `emend look` writes counts for neither check, nor as the page’s own styles,
+when recognised exactly as written: `<meta charset="utf-8"><style data-emend-look>` at the start
+of the page, after a doctype and comments, optionally after `<html data-theme="light">`, ending
+at the first `</`, which must be exactly `</style>`. Any other `style` element counts as usual,
+including one carrying `data-emend-look`.
 
 The URL is
 `/content/<docKey>/<path>` with each path segment percent-encoded. The doc key is the revision's

@@ -4,7 +4,7 @@ import { type FileHandle, lstat, open, rename, unlink } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { LIMITS, ThemeName, type ThemeValid } from "@emend/contract";
-import { applyHtmlLook, htmlLook, stripHtmlLook } from "@emend/core";
+import { applyHtmlLook, htmlLook } from "@emend/core";
 import type { Io } from "../../main.ts";
 import { readPubStylesheet } from "../../server/content/look.ts";
 import { listThemes, readTheme } from "../../state/themes.ts";
@@ -65,16 +65,24 @@ async function writeHtml(path: string, arg: string, text: string, info: Stats): 
     );
     created = true;
     await handle.writeFile(text, "utf8");
-    // open applies the process umask; retain the original permission bits exactly.
+    if ((await handle.stat()).gid !== info.gid) {
+      try {
+        await handle.chown(info.uid, info.gid);
+      } catch {
+        throw new CliError(`cannot write ${arg}: cannot keep its group`);
+      }
+    }
+    // open applies the umask and chown can clear set-id bits; restore the original mode last.
     await handle.chmod(info.mode & 0o7777);
     await handle.sync();
     await handle.close();
     handle = undefined;
     if (!sameFile(info, await lstat(path))) throw new Error("HTML file replaced");
     await rename(temporary, path);
-  } catch {
+  } catch (error) {
     await handle?.close().catch(() => {});
     if (created) await unlink(temporary).catch(() => {});
+    if (error instanceof CliError) throw error;
     throw new CliError(`cannot write ${arg}`);
   }
 }
@@ -104,7 +112,7 @@ export async function lookCommand(
   let theme: ThemeValid | undefined;
   if (selection !== false) {
     const dir = join(configDir, "themes");
-    await checkThemesFolder(dir, options.cwd);
+    await checkThemesFolder(dir, options.cwd, "look");
     if (selection !== undefined) {
       const entry = await readTheme(dir, selection);
       if (!entry) throw new CliError(`unknown theme ${escapeReference(selection)}`);
@@ -132,8 +140,7 @@ export async function lookCommand(
     const arg = escapeReference(file);
     const path = resolve(options.cwd ?? process.cwd(), file);
     const { text, info } = await readHtml(path, arg);
-    const stripped = stripHtmlLook(text);
-    const look = htmlLook(stripped);
+    const look = htmlLook(text);
     if (look.reason === "unreadable") {
       io.stdout(`emend: left ${arg} unchanged: emend could not read its structure, so it shows as a custom page\n`);
       continue;
@@ -143,11 +150,16 @@ export async function lookCommand(
       continue;
     }
     const lightOnly = look.colorScheme === "light";
-    const next = applyHtmlLook(stripped, { css, lightOnly, theme });
+    const next = applyHtmlLook(text, { css, lightOnly, theme });
+    if (Buffer.byteLength(next, "utf8") > LIMITS.htmlDocBytes)
+      throw new CliError(`${arg} would be larger than ${LIMITS.htmlDocBytes / 1024 / 1024} MiB with emend's look`);
     if (next === text) {
       io.stdout(`emend: ${arg} already has emend's look\n`);
       continue;
     }
+    if (process.getuid && info.uid !== process.getuid())
+      throw new CliError(`${arg} belongs to another user; emend look changes only your own files`);
+    if ((info.mode & 0o200) === 0) throw new CliError(`${arg} is read-only`);
     await writeHtml(path, arg, next, info);
     const themeNote =
       theme && (!lightOnly || theme.base === "light") ? ` and the colours of theme ${escapeReference(theme.name)}` : "";

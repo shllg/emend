@@ -1,4 +1,5 @@
 import { type DefaultTreeAdapterTypes, defaultTreeAdapter, html } from "parse5";
+import { stripHtmlLook } from "./html-look-file.ts";
 import { parseDocHtml } from "./place/html.ts";
 
 export type HtmlLook = "emend" | "custom";
@@ -157,7 +158,7 @@ function colorDeclarations(css: string): boolean {
 }
 
 export function htmlLook(source: string): HtmlLookResult {
-  return htmlLookFromTree(parseDocHtml(source));
+  return htmlLookFromTree(parseDocHtml(stripHtmlLook(source)));
 }
 
 /** Shares the bounded parse with headings. Lazy iterators keep even wide documents inexpensive to walk. */
@@ -190,8 +191,6 @@ export function htmlLookFromTree(tree: DefaultTreeAdapterTypes.Document | null):
     const name = node.tagName.toLowerCase();
     const isHtml = node.namespaceURI === html.NS.HTML;
     const attr = (key: string) => node.attrs.find((attr) => attr.name === key)?.value ?? "";
-    if (!frame.shadow && isHtml && name === "style" && node.attrs.some((attr) => attr.name === "data-emend-look"))
-      continue;
     if (
       !frame.shadow &&
       isHtml &&

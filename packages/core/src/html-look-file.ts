@@ -90,8 +90,8 @@ const marker = '<meta charset="utf-8"><style data-emend-look>';
 export function stripHtmlLook(html: string): string {
   const at = htmlLookInsertAt(html);
   if (!html.startsWith(marker, at) && !html.startsWith(lightStart + marker, at)) return html;
-  const close = html.indexOf("</style>", at);
-  if (close < 0) return html;
+  const close = html.indexOf("</", at);
+  if (close < 0 || !html.startsWith("</style>", close)) return html;
   let end = close + "</style>".length;
   if (html[end] === "\n") end++;
   return html.slice(0, at) + html.slice(end);

@@ -164,6 +164,25 @@ test("unknown and refused themes fail without touching the file", async () => {
   expect(await readFile(path, "utf8")).toBe("<!doctype html><p>Seeds</p>");
 });
 
+test("a repository themes folder refuses look with its own command name", async () => {
+  const path = await page();
+  const before = await readFile(path);
+  await mkdir(join(root, ".git"));
+  await writeFile(join(root, ".git", "HEAD"), "ref: refs/heads/main\n");
+  const list = vi.spyOn(themes, "listThemes");
+  const read = vi.spyOn(themes, "readTheme");
+  expect(await command("page.html")).toEqual({
+    code: 1,
+    stdout: [],
+    stderr: [
+      `emend: the emend themes folder ${escapeReference(join(configDir, "themes"))} sits inside the repository at ${escapeReference(root)}; run emend look outside it\n`,
+    ],
+  });
+  expect(list).not.toHaveBeenCalled();
+  expect(read).not.toHaveBeenCalled();
+  expect(await readFile(path)).toEqual(before);
+});
+
 test("--no-theme skips even a repository themes folder and removes old theme colours", async () => {
   const path = await page();
   await seed("mine", { version: 1, base: "dark", tokens: { "border-1": "#123456" } });
@@ -217,6 +236,19 @@ test.each([
   expect(await command(name)).toEqual({ code: 1, stdout: [], stderr: [`emend: ${message}\n`] });
 });
 
+test("refuses a page that fits on input but exceeds the UTF-8 byte limit with the look", async () => {
+  const path = await page(`<p>${"é".repeat(Math.floor((LIMITS.htmlDocBytes - 7) / 2))}</p>`);
+  const before = await readFile(path);
+  expect(before.byteLength).toBeLessThanOrEqual(LIMITS.htmlDocBytes);
+  expect(await command("page.html", "--no-theme")).toEqual({
+    code: 1,
+    stdout: [],
+    stderr: ["emend: page.html would be larger than 8 MiB with emend's look\n"],
+  });
+  expect((await readFile(path)).equals(before)).toBe(true);
+  expect((await readdir(root)).filter((name) => name.startsWith(".emend-look-"))).toEqual([]);
+});
+
 test.each([null, "</style><script>bad()</script>", "body{background:url(https://example.com/a)}"])(
   "a missing or damaged installed stylesheet refuses the command: %s",
   async (source) => {
@@ -253,18 +285,114 @@ test.each([
   });
 });
 
-test("keeps mode bits, accepts case-insensitive HTML extensions and stops in argument order", async () => {
+test("keeps mode and group, accepts case-insensitive HTML extensions and stops in argument order", async () => {
   const first = await page("<p>First</p>", "first.HTM");
   const last = await page("<p>Last</p>", "last.HTML");
   await chmod(first, 0o764);
+  const before = await lstat(first);
   expect(await command("first.HTM", "missing.html", "last.HTML")).toEqual({
     code: 1,
     stdout: ["emend: gave first.HTM emend's look\n"],
     stderr: ["emend: cannot read missing.html\n"],
   });
-  expect((await lstat(first)).mode & 0o7777).toBe(0o764);
+  const after = await lstat(first);
+  expect(after.mode & 0o7777).toBe(0o764);
+  expect(after.uid).toBe(before.uid);
+  expect(after.gid).toBe(before.gid);
   expect(await readFile(last, "utf8")).toBe("<p>Last</p>");
   expect((await command("last.HTML")).code).toBe(0);
+});
+
+test("refuses a read-only file without changing it", async () => {
+  const path = await page();
+  await chmod(path, 0o444);
+  const before = await readFile(path);
+  const info = await lstat(path);
+  expect(await command("page.html", "--no-theme")).toEqual({
+    code: 1,
+    stdout: [],
+    stderr: ["emend: page.html is read-only\n"],
+  });
+  expect(await readFile(path)).toEqual(before);
+  expect((await lstat(path)).ino).toBe(info.ino);
+});
+
+test.skipIf(!process.getuid)("refuses a file owned by another user without changing it", async () => {
+  const path = await page();
+  const before = await readFile(path);
+  const info = await lstat(path);
+  vi.spyOn(process, "getuid").mockReturnValue(info.uid + 1);
+  expect(await command("page.html", "--no-theme")).toEqual({
+    code: 1,
+    stdout: [],
+    stderr: ["emend: page.html belongs to another user; emend look changes only your own files\n"],
+  });
+  expect(await readFile(path)).toEqual(before);
+  expect((await lstat(path)).ino).toBe(info.ino);
+});
+
+test.each([
+  [applyHtmlLook("<p>Seeds</p>", { css, lightOnly: false }), "emend: page.html already has emend's look\n"],
+  [
+    '<meta name="emend-look" content="custom"><p>Seeds</p>',
+    'emend: left page.html unchanged: it is marked custom with <meta name="emend-look" content="custom">\n',
+  ],
+  [
+    "<div>".repeat(600),
+    "emend: left page.html unchanged: emend could not read its structure, so it shows as a custom page\n",
+  ],
+])("does not require write permission or ownership for a page it leaves alone: %s", async (text, message) => {
+  const path = await page(text);
+  await chmod(path, 0o444);
+  const info = await lstat(path);
+  if (process.getuid) vi.spyOn(process, "getuid").mockReturnValue(info.uid + 1);
+  expect(await command("page.html", "--no-theme")).toEqual({ code: 0, stdout: [message], stderr: [] });
+  expect(await readFile(path, "utf8")).toBe(text);
+  expect((await lstat(path)).ino).toBe(info.ino);
+});
+
+test.each([false, true])("preserves a different original group or refuses safely: chown fails=%s", async (fails) => {
+  const path = await page();
+  await chmod(path, 0o2764);
+  const before = await readFile(path);
+  const info = await lstat(path);
+  const original = fs.open;
+  const chown = vi.fn();
+  vi.spyOn(fs, "open").mockImplementation(async (...args) => {
+    const handle = await original(...args);
+    if (String(args[0]).includes(".emend-look-")) {
+      const temporaryInfo = await handle.stat();
+      temporaryInfo.gid = info.gid + 1;
+      vi.spyOn(handle, "stat").mockResolvedValueOnce(temporaryInfo);
+      const changeOwner = handle.chown.bind(handle);
+      vi.spyOn(handle, "chown").mockImplementation(async (uid, gid) => {
+        chown(uid, gid);
+        if (fails) throw new Error("sensitive chown failure");
+        await changeOwner(uid, gid);
+      });
+    }
+    return handle;
+  });
+  const result = await command("page.html", "--no-theme");
+  expect(chown).toHaveBeenCalledExactlyOnceWith(info.uid, info.gid);
+  const after = await lstat(path);
+  expect(after.mode & 0o7777).toBe(info.mode & 0o7777);
+  expect(after.uid).toBe(info.uid);
+  expect(after.gid).toBe(info.gid);
+  if (fails) {
+    expect(result).toEqual({
+      code: 1,
+      stdout: [],
+      stderr: ["emend: cannot write page.html: cannot keep its group\n"],
+    });
+    expect(await readFile(path)).toEqual(before);
+    expect(after.ino).toBe(info.ino);
+  } else {
+    expect(result).toEqual({ code: 0, stdout: ["emend: gave page.html emend's look\n"], stderr: [] });
+    expect(stripHtmlLook(await readFile(path, "utf8"))).toBe(before.toString("utf8"));
+    expect(after.ino).not.toBe(info.ino);
+  }
+  expect((await readdir(root)).filter((name) => name.startsWith(".emend-look-"))).toEqual([]);
 });
 
 test("failed replacement cleans its temporary file and keeps the original", async () => {
