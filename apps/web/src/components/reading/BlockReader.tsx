@@ -138,6 +138,8 @@ export function BlockReader({
     if (!target) latched.current = null;
   }, [target]);
   const changes = new Map(changedBlocks.map((block) => [block.blockId, block.revision]));
+  const latestChange = (blocks: RenderedBlock[]) =>
+    blocks.reduce((latest, block) => Math.max(latest, changes.get(block.id) ?? 0), 0) || undefined;
   const targets = useMemo(
     () => new Map(groups.flatMap((group) => groupBlocks(group).map((block) => [block.id, group.path] as const))),
     [groups],
@@ -308,9 +310,7 @@ export function BlockReader({
           key={`${reviewId}:${revision}:${group.key}`}
           group={group}
           headingId={`${headingBase}-${index}`}
-          changedIn={
-            groupBlocks(group).reduce((latest, block) => Math.max(latest, changes.get(block.id) ?? 0), 0) || undefined
-          }
+          changedIn={latestChange(groupBlocks(group))}
           onCommentTopic={(slug, from) => openComposer({ kind: "topic", slug }, from)}
           discussion={group.topic && target?.kind === "topic" && target.slug === group.topic.slug && composer}
         >
@@ -331,7 +331,13 @@ export function BlockReader({
           )}
           {group.subsections?.map((section) =>
             section.kind === "body" ? (
-              <WriteupDetails key={section.key} reviewId={reviewId} revision={revision} sectionKey={section.key}>
+              <WriteupDetails
+                key={section.key}
+                reviewId={reviewId}
+                revision={revision}
+                sectionKey={section.key}
+                changedIn={latestChange(section.blocks)}
+              >
                 {renderBlocks(section.blocks, group.path)}
               </WriteupDetails>
             ) : (

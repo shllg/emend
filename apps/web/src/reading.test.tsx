@@ -105,7 +105,8 @@ test("changed runs restart for each group and subsection", () => {
       ]}
     />,
   );
-  expect(screen.getAllByText("Changed in rev 2")).toHaveLength(4);
+  expect(screen.getAllByText("Changed in rev 2", { selector: ".em-reading-block *" })).toHaveLength(4);
+  expect(within(screen.getByText("Details", { selector: "summary" })).getAllByText("Changed in rev 2")).toHaveLength(1);
   expect(container.querySelectorAll(".bg-changed-line")).toHaveLength(4);
   expect(container.querySelector("[data-change-continuation]")).toBeNull();
 });

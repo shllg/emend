@@ -1,15 +1,18 @@
 import { type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { ChangedMarker } from "../status/ChangedMarker.tsx";
 import { ReadingFoldContext } from "./ReadingGroup.tsx";
 
 export function WriteupDetails({
   reviewId,
   revision,
   sectionKey,
+  changedIn,
   children,
 }: {
   reviewId: string;
   revision: number;
   sectionKey: string;
+  changedIn?: number;
   children: ReactNode;
 }) {
   const root = useRef<HTMLDetailsElement>(null);
@@ -46,7 +49,10 @@ export function WriteupDetails({
         if (event.target === event.currentTarget) rememberOpen(event.currentTarget.open);
       }}
     >
-      <summary>Details</summary>
+      <summary>
+        Details
+        {!open && changedIn !== undefined && <ChangedMarker revision={changedIn} className="ml-2 align-middle" />}
+      </summary>
       {children}
     </details>
   );
