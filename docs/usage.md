@@ -98,6 +98,8 @@ The server reads this folder without that check, like `keys` and `approvedActive
 Edit `themes/mine/theme.json` to change colours or set `fonts.text` and `fonts.code` to a built-in font
 (Geist, Inter, Roboto, Atkinson Hyperlegible Next, JetBrains Mono, Geist Mono, Roboto Mono or Fira Code)
 or an installed font name.
+Built-in names use emend's copy even when that font is installed; it covers Latin and Latin Extended
+only, so other scripts fall back to a system font.
 To use another font on every device, including your phone, put its files in `themes/fonts/` and name them in `fonts.files`;
 see [api.md](api.md#themes) for the format and limits. `emend theme check mine` reports missing or refused font files.
 Emend's fonts stay as fallbacks. Each file names a Dark or Light base; omitted values use that

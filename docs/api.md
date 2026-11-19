@@ -637,6 +637,8 @@ faces from those files precede emend's default stack instead and the name is not
 `{ text: "Geist", code: "JetBrains Mono" }`.
 The other built-in families, Inter, Roboto, Atkinson Hyperlegible Next, Geist Mono, Roboto Mono
 and Fira Code, load from the app's own origin only when a theme names them.
+Built-in names use emend's copy even when that font is installed; it covers Latin and Latin Extended
+only, so other scripts fall back to a system font.
 
 Font files live directly in `<configDir>/themes/fonts/`, shared by all themes. For example:
 
