@@ -11,6 +11,8 @@ const execArgv = process.versions.node.split(".")[0] === "24" ? ["--no-wasm-code
 export default defineConfig({
   test: {
     fileParallelism: process.env.EMEND_BENCH !== "1",
+    // Local runs leave half the cores for git, Vite and server processes tests start; CI keeps Vitest's default.
+    maxWorkers: process.env.CI ? undefined : "50%",
     projects: [
       // Only pnpm bench opts in; ordinary and sharded runs never discover this project.
       ...(process.env.EMEND_BENCH === "1"

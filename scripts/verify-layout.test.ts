@@ -1,7 +1,9 @@
 // Guards accidental drift between pnpm verify and CI; unexpected keys or layout fail closed.
 // Deliberate CI changes are reviewed like any other code.
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { test } from "node:test";
 
 const { scripts } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
@@ -154,11 +156,26 @@ function checkVitestConfig(source: string): void {
   assert.equal(source.split("\n").filter((line) => line === execArgv).length, 1, "pin the Node 24 execArgv expression");
   assert.equal([...source.matchAll(/^ +execArgv,$/gm)].length, 3, "exactly three project execArgv shorthands");
   assert.equal([...source.matchAll(/\bexecArgv\b/g)].length, 4, "one definition and three project shorthands only");
-  assert.doesNotMatch(source, /\b(?:execArgv|env|pool|poolOptions)["']?\s*:|NODE_OPTIONS/, "no worker overrides");
   const parallelism = '    fileParallelism: process.env.EMEND_BENCH !== "1",';
   assert.equal(source.split(parallelism).length - 1, 1);
   assert.equal([...source.matchAll(/\bfileParallelism\s*:/g)].length, 1, "no parallelism override");
   assert.match(source, /^    fileParallelism: process\.env\.EMEND_BENCH !== "1",$/m);
+  const workerComment =
+    "    // Local runs leave half the cores for git, Vite and server processes tests start; CI keeps Vitest's default.";
+  const maxWorkers = '    maxWorkers: process.env.CI ? undefined : "50%",';
+  assert.doesNotMatch(
+    source.replace(maxWorkers, ""),
+    /\b(?:execArgv|env|pool|poolOptions|maxWorkers)["']?\s*:|NODE_OPTIONS/,
+    "no worker overrides",
+  );
+  for (const line of [workerComment, maxWorkers]) {
+    assert.equal(source.split("\n").filter((candidate) => candidate === line).length, 1, "pin the local worker cap");
+  }
+  assert(
+    source.includes(["export default defineConfig({", "  test: {", parallelism, workerComment, maxWorkers].join("\n")),
+    "the local worker cap must directly follow root fileParallelism",
+  );
+  assert.equal([...source.matchAll(/\bmaxWorkers\b/g)].length, 1, "one root maxWorkers key only");
   const bench = source.match(
     /^      \.\.\.\(process\.env\.EMEND_BENCH === "1"\n        \? \[\n([\s\S]*?)^          \]\n        : \[\]\),$/m,
   );
@@ -167,12 +184,16 @@ function checkVitestConfig(source: string): void {
   const benchTest = bench[1].match(/^              test: \{\n([\s\S]*?)^              \},$/m);
   assert(benchTest, "expected the bench test block");
   assert.equal([...benchTest[1].matchAll(/^                execArgv,$/gm)].length, 1, "bench must set execArgv");
-  const remaining = source.replace(parallelism, "").replace(bench[0], "");
+  const remaining = source
+    .replace(parallelism, "")
+    .replace(workerComment, "")
+    .replace(maxWorkers, "")
+    .replace(bench[0], "");
   assert.doesNotMatch(remaining, /process\s*\.\s*env|EMEND_BENCH|\bCI\b/);
   assert.deepEqual(
     source.match(/process\s*\.\s*env[^\n]*/g),
-    ['process.env.EMEND_BENCH !== "1",', 'process.env.EMEND_BENCH === "1"'],
-    "only the two explicit bench conditions may read the environment",
+    ['process.env.EMEND_BENCH !== "1",', 'process.env.CI ? undefined : "50%",', 'process.env.EMEND_BENCH === "1"'],
+    "only the two bench conditions and local worker cap may read the environment",
   );
   assert.deepEqual(
     [...source.matchAll(/^ +name: (.+),$/gm)].map((match) => match[1]),
@@ -252,6 +273,58 @@ test("the Vitest guard rejects changed worker flags, missing project flags and p
     () => checkVitestConfig(source.replace("  test: {", '  test: {\n    pool: "forks",')),
     /no worker overrides/,
   );
+});
+
+test("the Vitest guard rejects changed worker caps, missing CI conditions and project overrides", () => {
+  const source = readFileSync(new URL("../vitest.config.ts", import.meta.url), "utf8");
+  const mutations = [
+    source.replace('maxWorkers: process.env.CI ? undefined : "50%",', 'maxWorkers: process.env.CI ? undefined : "75%",'),
+    source.replace('maxWorkers: process.env.CI ? undefined : "50%",', 'maxWorkers: "50%",'),
+    source.replace(/^( {8}test: \{\n)/m, '$1          maxWorkers: "50%",\n'),
+  ];
+  for (const mutated of mutations) {
+    assert.notEqual(mutated, source, "the mutation must change the source");
+    assert.throws(() => checkVitestConfig(mutated));
+  }
+});
+
+test("local Vitest runs use half the cores as workers and CI keeps Vitest's default", () => {
+  const env = { ...process.env };
+  delete env.CI;
+  delete env.VITEST_MAX_WORKERS;
+  const script = `
+    import { createVitest } from "vitest/node";
+    const extra = JSON.parse(process.argv[1]);
+    const v = await createVitest("test", { run: true, watch: false, ...extra });
+    console.log(JSON.stringify({
+      root: v.config.maxWorkers,
+      projects: v.projects.map((p) => [p.name, p.config.maxWorkers]),
+    }));
+    await v.close();
+  `;
+  function workers(childEnv: NodeJS.ProcessEnv, extra = {}): { root: number; projects: [string, number][] } {
+    const stdout = execFileSync(process.execPath, ["--input-type=module", "-e", script, JSON.stringify(extra)], {
+      cwd: new URL("../", import.meta.url),
+      env: childEnv,
+      encoding: "utf8",
+    });
+    const lastLine = stdout.split("\n").filter((line) => line.trim()).at(-1);
+    assert(lastLine, "expected resolved Vitest worker counts");
+    return JSON.parse(lastLine);
+  }
+  const local = workers(env);
+  const ci = workers({ ...env, CI: "true" });
+  const defaults = workers({ ...env, CI: "true" }, { config: false });
+  for (const [actual, expected] of [
+    [local, Math.max(1, Math.round(availableParallelism() / 2))],
+    [ci, defaults.root],
+  ] as const) {
+    assert.equal(actual.root, expected);
+    assert.deepEqual(
+      actual.projects,
+      ["packages/contract", "packages/core", "apps/emend", "apps/web"].map((name) => [name, expected]),
+    );
+  }
 });
 
 test("verification jobs and steps allow only the keys needed to run their checks", () => {

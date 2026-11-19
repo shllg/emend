@@ -45,6 +45,7 @@ invent work.
   and `verify:harness` (test:harness). CI runs them in parallel on Node 24 and 26 with 4 Vitest shards.
 - `pnpm lint`: Biome checks formatting and lint. `pnpm typecheck`: TypeScript project references.
 - `pnpm test`: Vitest (Node for packages and CLI, happy-dom for the web app), with temporary state.
+  Local runs use half the CPU cores as Vitest workers; CI (the CI variable set) keeps Vitest's default.
 - `pnpm bench`: non-gating measurements with temporary state; prints JSON lines, with no timing assertions.
 - `pnpm perf`: sealed browser measurements and a history report in `.wt/perf/`; timings never gate.
 - `pnpm build`: builds the web app, then bundles the CLI and copies the web build into its dist.
