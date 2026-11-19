@@ -403,7 +403,7 @@ test("output protects real state; ref exports also reject the checkout and paths
 test("ref exports guard the cache before sweeping and mark the export immediately after tracking it", () => {
   const main = readFileSync(new URL("./perf.ts", import.meta.url), "utf8");
   assert.doesNotMatch(main, /mkdtempSync\(join\(tmpDir,/);
-  const start = main.indexOf("if (options.ref) {", main.indexOf("async function main()"));
+  const start = main.indexOf("export async function exportMainCommit(");
   const end = main.indexOf("const archive =", start);
   assert(start >= 0 && end > start);
   const branch = main.slice(start, end);
@@ -419,7 +419,7 @@ test("ref exports guard the cache before sweeping and mark the export immediatel
     "removeStaleRefExports(canonicalParent, { uid });",
     'source = mkdtempSync(join(canonicalParent, "ref-"));',
     "sealed.addRoot(source);",
-    "writeRefMarker(source, options.keep);",
+    "writeRefMarker(source, keep);",
     "source = canonicalPath(source);",
     "assertPrivateAncestors(source, uid);",
     "assertRefFolder(source, checkout, canonicalParent, protectedDirs, canonicalPath);",
@@ -431,8 +431,9 @@ test("ref exports guard the cache before sweeping and mark the export immediatel
     previous = position;
   }
   assert.match(branch, /source = mkdtempSync\([^;]+;\s*sealed\.addRoot\(source\);/);
-  assert.match(branch, /sealed\.addRoot\(source\);\s*writeRefMarker\(source, options\.keep\);/);
-  assert.equal((main.match(/removeStaleRefExports\(/g) ?? []).length, 1, "only the --ref branch sweeps");
+  assert.match(branch, /sealed\.addRoot\(source\);\s*writeRefMarker\(source, keep\);/);
+  assert.equal((main.match(/removeStaleRefExports\(/g) ?? []).length, 1, "only the shared export sweeps");
+  assert.match(main, /if \(options\.ref\) \{\s*source = await exportMainCommit\(/);
   assert(end < main.indexOf('git(checkout, "archive",', start));
   assert(end < main.indexOf("const install = await sealed.run("));
 });

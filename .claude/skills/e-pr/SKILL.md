@@ -64,6 +64,10 @@ instructions; they do not go into the body.
 
 - Summary: one to three lines on what changes for the owner. When `.wt/worktree.json` names an
   issue, the Summary's first line is `Closes #<n>`; `bin/wt pr create` refuses a body without it.
+  After that line, include the `summary` of `.wt/bundle-diff.json` as written. It shows each
+  route's growth against main, or says that no chunk changed size, and names every ceiling
+  changed in `apps/web/bundle-budget.json` with its old and new value. For each route in `over`,
+  add its reason from `.wt/bundle-reason.md`.
 - Follow-ups: when the work found gaps outside the issue's scope, list them under the Summary as
   "Follow-ups", one line each. They become issues only through the owner.
 - Not changed: findings left as they are under `.claude/rules/review-rounds.md`, listed under
@@ -91,6 +95,8 @@ Without one, run `<main>/bin/wt notify question`, show the title and body, and a
 1. `pnpm verify` must be green at exactly the content you push, and the tree must be clean. Run it
    now unless a green run on this exact HEAD is on record. Red: stop. Never publish red, not even
    as a draft.
+   After the green `pnpm verify`, run `pnpm bundle:diff --json <top>/.wt/bundle-diff.json` unless
+   that file's `head` already equals HEAD.
 2. Write the body to `<top>/.wt/pr-body.md` with the Write tool.
 3. Run `<main>/bin/wt push`. It pushes the checked HEAD commit and sets the upstream.
 4. Write the title to `<top>/.wt/pr-title.txt`. Run

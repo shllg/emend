@@ -11,5 +11,5 @@ A `/loop` with a prompt, such as `/loop /e-loop`, skips it, so this skill hands 
 1. Find `<main>`: the parent of `git rev-parse --path-format=absolute --git-common-dir`.
 2. Read `<main>/.claude/loop.md` in full, on every pass, and follow it as written. It holds every
    rule of the loop; this skill adds none and waives none.
-3. A plain `/e-loop`, outside `/loop`, does one pass and skips the pacing of section 5.
+3. A plain `/e-loop`, outside `/loop`, does one pass and skips the pacing of section 6.
    Say that `/loop /e-loop` or a bare `/loop` keeps it running.

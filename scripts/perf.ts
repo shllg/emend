@@ -40,7 +40,7 @@ export function parseArgs(argv: string[], root = checkout) {
   return options;
 }
 // Only executable lookup reads the parent's PATH; build children use the harness's Node first.
-function pnpmExecutable(): string {
+export function pnpmExecutable(): string {
   for (const path of (process.env.PATH ?? "").split(":")) {
     if (!path.startsWith("/")) continue;
     const candidate = join(path, "pnpm");
@@ -160,6 +160,65 @@ export const OFFLINE_INSTALL = [
   "--package-import-method=copy",
 ];
 
+export async function exportMainCommit({ sealed, env, sealedRoot, sha, keep, protectedDirs, failurePaths, git }: {
+  sealed: ReturnType<typeof createSealedLifecycle>;
+  env: Record<string, string>;
+  sealedRoot: string;
+  sha: string;
+  keep: boolean;
+  protectedDirs: string[];
+  failurePaths: FailurePaths;
+  git: (cwd: string, ...args: string[]) => string;
+}): Promise<string> {
+  // Ref exports use the private cache so Node cannot load modules from shared temporary parents.
+  const parent = refParent();
+  if (!process.getuid) throw new Error("--ref needs a POSIX system");
+  const uid = process.getuid();
+  // Guard the folders before creation as well as after canonicalisation.
+  assertRefFolder(join(parent, "ref-candidate"), checkout, parent, protectedDirs, canonicalPath);
+  mkdirSync(parent, { recursive: true, mode: 0o700 });
+  const canonicalParent = canonicalPath(parent);
+  assertPrivateAncestors(canonicalParent, uid);
+  assertRefFolder(join(canonicalParent, "ref-candidate"), checkout, canonicalParent, protectedDirs, canonicalPath);
+  removeStaleRefExports(canonicalParent, { uid });
+  let source = mkdtempSync(join(canonicalParent, "ref-"));
+  sealed.addRoot(source);
+  writeRefMarker(source, keep);
+  failurePaths.refFolder = source;
+  source = canonicalPath(source);
+  assertPrivateAncestors(source, uid);
+  assertRefFolder(source, checkout, canonicalParent, protectedDirs, canonicalPath);
+  const archive = join(sealedRoot, "ref.tar");
+  git(checkout, "archive", "--format=tar", "--output", archive, sha);
+  const extracted = await sealed.run("tar", ["-xf", archive, "-C", source], {
+    cwd: sealedRoot,
+    env,
+    group: true,
+  });
+  if (extracted.code !== 0) throw new Error(`Ref export exited with code ${extracted.code}`);
+  assertWorkspaceRoot(source);
+  // Reuse only the package store path, never the parent's pnpm config or credentials.
+  const modules = join(checkout, "node_modules/.modules.yaml");
+  const store = localPnpmStore(existsSync(modules) ? readFileSync(modules, "utf8") : "");
+  const pnpm = pnpmExecutable();
+  const install = await sealed.run(
+    pnpm,
+    [...OFFLINE_INSTALL, "--store-dir", store],
+    {
+      cwd: source,
+      env: buildEnvironment(env, pnpm),
+      group: true,
+      timeoutMs: 600_000,
+    },
+  );
+  checkBuildResult(
+    install,
+    `Offline ref install exited with code ${install.code}; dependencies may be absent from the local store`,
+    failurePaths,
+  );
+  return source;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const sealed = createSealedLifecycle("perf");
@@ -208,52 +267,9 @@ async function main() {
     let source = checkout;
     try {
       if (options.ref) {
-        // Ref exports use the private cache so Node cannot load modules from shared temporary parents.
-        const parent = refParent();
-        if (!process.getuid) throw new Error("--ref needs a POSIX system");
-        const uid = process.getuid();
-        // Guard the folders before creation as well as after canonicalisation.
-        assertRefFolder(join(parent, "ref-candidate"), checkout, parent, protectedDirs, canonicalPath);
-        mkdirSync(parent, { recursive: true, mode: 0o700 });
-        const canonicalParent = canonicalPath(parent);
-        assertPrivateAncestors(canonicalParent, uid);
-        assertRefFolder(join(canonicalParent, "ref-candidate"), checkout, canonicalParent, protectedDirs, canonicalPath);
-        removeStaleRefExports(canonicalParent, { uid });
-        source = mkdtempSync(join(canonicalParent, "ref-"));
-        sealed.addRoot(source);
-        writeRefMarker(source, options.keep);
-        failurePaths.refFolder = source;
-        source = canonicalPath(source);
-        assertPrivateAncestors(source, uid);
-        assertRefFolder(source, checkout, canonicalParent, protectedDirs, canonicalPath);
-        const archive = join(sealedRoot, "ref.tar");
-        git(checkout, "archive", "--format=tar", "--output", archive, sha);
-        const extracted = await sealed.run("tar", ["-xf", archive, "-C", source], {
-          cwd: sealedRoot,
-          env,
-          group: true,
+        source = await exportMainCommit({
+          sealed, env, sealedRoot, sha, keep: options.keep, protectedDirs, failurePaths, git,
         });
-        if (extracted.code !== 0) throw new Error(`Ref export exited with code ${extracted.code}`);
-        assertWorkspaceRoot(source);
-        // Reuse only the package store path, never the parent's pnpm config or credentials.
-        const modules = join(checkout, "node_modules/.modules.yaml");
-        const store = localPnpmStore(existsSync(modules) ? readFileSync(modules, "utf8") : "");
-        const pnpm = pnpmExecutable();
-        const install = await sealed.run(
-          pnpm,
-          [...OFFLINE_INSTALL, "--store-dir", store],
-          {
-            cwd: source,
-            env: buildEnvironment(env, pnpm),
-            group: true,
-            timeoutMs: 600_000,
-          },
-        );
-        checkBuildResult(
-          install,
-          `Offline ref install exited with code ${install.code}; dependencies may be absent from the local store`,
-          failurePaths,
-        );
       }
       if (options.ref || !options.noBuild) {
         console.log("- building the measured checkout");

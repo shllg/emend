@@ -1,0 +1,212 @@
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { test } from "node:test";
+import {
+  checkBase, compareBundles, formatBundleSummary, ignoredEnvFiles, measureCheckout, parseArgs, readCache, USAGE, validateBaseCache, writeCache,
+} from "./bundle-diff.ts";
+
+const sha = "abcdef0123456789abcdef0123456789abcdef01";
+const measurer = "a".repeat(40);
+const bundles = (sizes: Record<string, number>, budgets: Record<string, number> = {}) => ({ sizes, budgets });
+
+test("growth below the threshold and shrinking are listed without findings", () => {
+  const result = compareBundles(bundles({ entry: 10000, review: 20000, inbox: 1000 }),
+    bundles({ entry: 10400, review: 18800, inbox: 1000 }));
+  assert.deepEqual(result.rows, [
+    { route: "entry", base: 10000, head: 10400, delta: 400, status: "grew" },
+    { route: "review", base: 20000, head: 18800, delta: -1200, status: "shrank" },
+    { route: "inbox", base: 1000, head: 1000, delta: 0, status: "same" },
+  ]);
+  assert.deepEqual(result.over, []);
+  assert.equal(formatBundleSummary(result, sha),
+    "Bundle vs main abcdef0 (gzip): entry +0.4 KB; review -1.2 KB; others unchanged.");
+});
+
+test("unchanged sizes and empty comparisons use the exact no-change line", () => {
+  for (const sizes of [{}, { entry: 1000 }]) {
+    const result = compareBundles(bundles(sizes), bundles(sizes));
+    assert.equal(formatBundleSummary(result, sha),
+      "Bundle vs main abcdef0 (gzip): no chunk changed size.");
+    assert.deepEqual(result.over, []);
+  }
+});
+
+test("head routes come first, then removed routes in base order, and neither new nor removed is over", () => {
+  const result = compareBundles(bundles({ pair: 336900, entry: 1000, old: 2000 }),
+    bundles({ settings: 336900, entry: 1000 }));
+  assert.deepEqual(result.rows, [
+    { route: "settings", base: null, head: 336900, delta: null, status: "new" },
+    { route: "entry", base: 1000, head: 1000, delta: 0, status: "same" },
+    { route: "pair", base: 336900, head: null, delta: null, status: "removed" },
+    { route: "old", base: 2000, head: null, delta: null, status: "removed" },
+  ]);
+  assert.deepEqual(result.over, []);
+  assert.equal(formatBundleSummary(result, sha),
+    "Bundle vs main abcdef0 (gzip): settings new 336.9 KB; pair removed (was 336.9 KB); old removed (was 2.0 KB); others unchanged.");
+});
+
+test("only growth strictly greater than 5000 bytes is over", () => {
+  const base = bundles({ exact: 1000, over: 1000, shrink: 9000 });
+  const head = bundles({ exact: 6000, over: 6001, shrink: 0 });
+  const result = compareBundles(base, head);
+  assert.deepEqual(result.over, [result.rows[1]]);
+  assert.equal(formatBundleSummary(result, sha).split("\n")[1], "Over 5 KB: over +5.0 KB");
+  assert.deepEqual(compareBundles(base, head, 5001).over, []);
+  assert.deepEqual(compareBundles(base, head, 4999).over.map((row) => row.route), ["exact", "over"]);
+});
+
+test("equal exact deltas group in row order, without grouping rounded matches or opposite signs", () => {
+  const result = compareBundles(bundles({ inbox: 10000, review: 10000, pub: 10000, settings: 10000, entry: 10000 }),
+    bundles({ inbox: 13100, review: 6900, pub: 13100, settings: 13100, entry: 13101 }));
+  assert.equal(formatBundleSummary(result, sha),
+    "Bundle vs main abcdef0 (gzip): inbox, pub, settings +3.1 KB; review -3.1 KB; entry +3.1 KB.");
+});
+
+test("deltas under 100 bytes use bytes and larger deltas use decimal KB", () => {
+  const result = compareBundles(bundles({ tiny: 0, smaller: 1000, boundary: 0, negative: 1000 }),
+    bundles({ tiny: 42, smaller: 901, boundary: 100, negative: 900 }));
+  assert.equal(formatBundleSummary(result, sha),
+    "Bundle vs main abcdef0 (gzip): tiny +42 B; smaller -99 B; boundary +0.1 KB; negative -0.1 KB.");
+});
+
+test("every ceiling change is listed even when sizes do not change", () => {
+  const result = compareBundles(
+    bundles({ entry: 100 }, { removed: 0, lowered: 20000, raised: 10000, same: 30000 }),
+    bundles({ entry: 100 }, { raised: 12000, lowered: 19000, added: 0, same: 30000 }),
+  );
+  assert.deepEqual(result.ceilings, [
+    { route: "raised", old: 10000, new: 12000, change: "raised" },
+    { route: "lowered", old: 20000, new: 19000, change: "lowered" },
+    { route: "added", old: null, new: 0, change: "added" },
+    { route: "removed", old: 0, new: null, change: "removed" },
+  ]);
+  assert.equal(formatBundleSummary(result, sha), [
+    "Bundle vs main abcdef0 (gzip): no chunk changed size.",
+    "Ceiling raised: raised from 10000 to 12000 gzip bytes.",
+    "Ceiling lowered: lowered from 20000 to 19000 gzip bytes.",
+    "Ceiling added: added 0 gzip bytes.",
+    "Ceiling removed: removed (was 0 gzip bytes).",
+  ].join("\n"));
+});
+
+test("cache accepts only the matching schema, sha and measurer with safe non-negative integer maps", () => {
+  const cache = { schemaVersion: 2, sha, measurer, sizes: { entry: 0 }, budgets: { entry: 1000 } };
+  assert(validateBaseCache(cache, sha, measurer));
+  assert(validateBaseCache({ ...cache, sizes: {}, budgets: {} }, sha, measurer));
+  assert(!validateBaseCache(cache, "b".repeat(40), measurer));
+  assert(!validateBaseCache(cache, sha, "b".repeat(40)));
+  const missingMeasurer: Record<string, unknown> = { ...cache };
+  delete missingMeasurer.measurer;
+  assert(!validateBaseCache(missingMeasurer, sha, measurer));
+  for (const invalid of ["a".repeat(39), "a".repeat(41), "g".repeat(40)])
+    assert(!validateBaseCache({ ...cache, measurer: invalid }, sha, invalid));
+  assert(!validateBaseCache({ ...cache, schemaVersion: 1 }, sha, measurer));
+  assert(!validateBaseCache({ ...cache, sha: "bad" }, "bad", measurer));
+  for (const field of ["sizes", "budgets"]) {
+    for (const value of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, "100", null])
+      assert(!validateBaseCache({ ...cache, [field]: { entry: value } }, sha, measurer));
+    for (const value of [undefined, null, [], 1, "invalid"])
+      assert(!validateBaseCache({ ...cache, [field]: value }, sha, measurer));
+  }
+  for (const value of [null, undefined, [], "invalid", {}]) assert(!validateBaseCache(value, sha, measurer));
+});
+
+test("a base without a budget makes every head route new and every ceiling added", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "emend-bundle-diff-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  mkdirSync(join(folder, "apps/web"), { recursive: true });
+  const base = measureCheckout(folder, true);
+  assert.deepEqual(base, bundles({}));
+  assert.throws(() => measureCheckout(folder), { code: "ENOENT" });
+  const result = compareBundles(base, bundles({ inbox: 12000, review: 18000 }, { inbox: 15000, review: 20000 }));
+  assert.deepEqual(result.rows, [
+    { route: "inbox", base: null, head: 12000, delta: null, status: "new" },
+    { route: "review", base: null, head: 18000, delta: null, status: "new" },
+  ]);
+  assert.deepEqual(result.ceilings, [
+    { route: "inbox", old: null, new: 15000, change: "added" },
+    { route: "review", old: null, new: 20000, change: "added" },
+  ]);
+  assert.deepEqual(result.over, []);
+});
+
+test("cache round trips sizes and budgets with private permissions and ignores unusable files", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "emend-bundle-cache-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const path = join(folder, "cache", `${sha}.json`);
+  const cache = { schemaVersion: 2 as const, sha, measurer, ...bundles({ inbox: 12000, review: 18000 }, { inbox: 15000, review: 20000 }) };
+  writeCache(path, cache);
+  assert.deepEqual(readCache(path, sha, measurer), cache);
+  assert.equal(statSync(dirname(path)).mode & 0o777, 0o700);
+  assert.equal(statSync(path).mode & 0o777, 0o600);
+  assert.equal(readCache(path, "b".repeat(40), measurer), undefined);
+  assert.equal(readCache(path, sha, "b".repeat(40)), undefined);
+  writeFileSync(path, "{corrupt");
+  assert.equal(readCache(path, sha, measurer), undefined);
+  rmSync(path);
+  assert.equal(readCache(path, sha, measurer), undefined);
+});
+
+test("base must be an ancestor of HEAD", () => {
+  const head = "b".repeat(40);
+  const calls: string[][] = [];
+  checkBase(sha, head, (...args) => {
+    calls.push(args);
+    return "";
+  });
+  assert.deepEqual(calls, [["merge-base", "--is-ancestor", sha, head]]);
+  assert.throws(() => checkBase(sha, head, () => { throw new Error("not an ancestor"); }),
+    { message: "--base must be a commit on main that HEAD contains" });
+});
+
+test("ignored web env files are listed without empty lines", () => {
+  const calls: string[][] = [];
+  assert.deepEqual(ignoredEnvFiles((...args) => {
+    calls.push(args);
+    return "apps/web/.env.local\n";
+  }), ["apps/web/.env.local"]);
+  assert.deepEqual(calls, [["ls-files", "--others", "--ignored", "--exclude-standard", "--", "apps/web/.env", "apps/web/.env.*"]]);
+  assert.deepEqual(ignoredEnvFiles(() => ""), []);
+});
+
+test("git lookups use only the sealed environment, disable optional locks and include untracked files", () => {
+  const source = readFileSync(new URL("./bundle-diff.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /execFileSync|node:child_process|process\.env/);
+  assert.match(source, /const git = \(cwd: string, \.\.\.args: string\[\]\) =>\s*sealed\.git\(cwd, \{ \.\.\.env, GIT_OPTIONAL_LOCKS: "0" \}, \.\.\.args\)/);
+  assert(source.indexOf("sealed.createRoot(") < source.indexOf("const git ="));
+  assert.match(source, /git\(checkout, "status", "--porcelain"\)/);
+  const main = source.slice(source.indexOf("async function main()"));
+  assert.match(main, /ignoredEnvFiles\(\(\.\.\.args\) => git\(checkout, \.\.\.args\)\)/);
+  assert(main.indexOf('git(checkout, "status", "--porcelain")') < main.indexOf("ignoredEnvFiles("));
+  assert.doesNotMatch(source, /--untracked-files=no/);
+  assert.match(source, /git\(checkout, "rev-parse", "HEAD"\)/);
+  assert.match(source, /git\(checkout, "rev-parse", "HEAD:scripts"\)/);
+  assert.match(source, /resolveCommit\(options\.base \?\? git\(checkout, "merge-base", "origin\/main", "HEAD"\), \(\.\.\.args\) => git\(checkout, \.\.\.args\)\)/);
+  assert.match(source, /checkBase\(base, head, \(\.\.\.args\) => git\(checkout, \.\.\.args\)\)/);
+  assert.match(source, /exportMainCommit\(\{[^}]*\bgit,?\s*\}\)/);
+});
+
+test("lifecycle failures are reported only by sealed.finish", () => {
+  const source = readFileSync(new URL("./bundle-diff.ts", import.meta.url), "utf8");
+  const main = source.slice(source.indexOf("async function main()"));
+  const caught = main.match(/catch \(error\) \{([\s\S]*?)\} finally \{/);
+  assert(caught);
+  assert.match(caught[1], /failure = new Error\(redactFailure\(error, failurePaths\)\)/);
+  assert.doesNotMatch(caught[1], /console\.error/);
+  assert.match(main, /finally \{\s*sealed\.finish\(failure\);/);
+});
+
+test("route names are own keys even when they match object prototype names", () => {
+  const result = compareBundles(bundles({ toString: 1000 }), bundles(JSON.parse('{"__proto__": 0}')));
+  assert.deepEqual(result.rows.map((row) => [row.route, row.status]), [["__proto__", "new"], ["toString", "removed"]]);
+});
+
+test("arguments accept base and JSON output and reject unknown flags or missing values", () => {
+  assert.deepEqual(parseArgs([]), { base: undefined, json: undefined });
+  assert.deepEqual(parseArgs(["--base", "main~1", "--json", "result.json"]),
+    { base: "main~1", json: resolve("result.json") });
+  for (const args of [["--unknown"], ["main"], ["--base"], ["--json"], ["--base", "--json", "file"], ["--json", "--base", "main"], ["--base", ""]])
+    assert.throws(() => parseArgs(args), { message: USAGE });
+});
