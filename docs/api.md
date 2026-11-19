@@ -105,6 +105,7 @@ a machine token reaches only reviews from its own instance.
 | PATCH | `/api/v1/groups/:id` | Reviewer | Rename an inbox group (200 `InboxGroup`). |
 | DELETE | `/api/v1/groups/:id` | Reviewer | Delete a group, returning its items to their normal lists (204). |
 | PUT | `/api/v1/reviews/:id/group` | Reviewer | Move a review or pub into a group, or remove it (204). |
+| PUT | `/api/v1/reviews/:id/pin` | Reviewer | Pin or unpin a review or pub (204). |
 | GET | `/api/v1/agent/reviews` | Agent | List the token's own instance's reviews, newest first, as `AgentReviewList`; `?head=<sha>` keeps those whose approved or newest revision has that head. |
 | GET | `/api/v1/reviews/:id` | Reviewer | Read a review. |
 | GET | `/api/v1/reviews/:id/revisions/:seq` | Reviewer | Read one revision. |
@@ -557,6 +558,7 @@ reads the approval window and the approval cap on review reads, still without qu
 | `review.instructions` | `s` |
 | `review.approve` | `shift+a` |
 | `review.snooze` | `z` |
+| `review.pin` | `shift+p` |
 | `shortcuts.show` | `?` |
 | `palette.open` | `mod+shift+p` |
 
@@ -843,7 +845,9 @@ retired review; clients label it "Retired".
 state: ReviewState, newestRevision, unsentCount, openThreads, agentWaiting, pendingSend,
 updatedAt, movedTo: string | null, list: "active" | "snoozed" | "done", snoozed: boolean,
 snoozedUntil: string | null, activeUntil: string | null, releasedAt: string | null, pickedUpAt: string | null,
-kind: "review" | "publish", groupId: string | null }`. `groupId` is the inbox group UUID, null when ungrouped
+kind: "review" | "publish", groupId: string | null, pinnedAt: string | null }`.
+`groupId` is the inbox group UUID, null when ungrouped (the default when omitted).
+`pinnedAt` is when the reviewer pinned it, as an ISO 8601 UTC string, null when unpinned
 (the default when omitted). `repo` is the repository key, and
 `movedTo` is the review's destination URL. `list` places the review: `done` for `settled`, and for
 `approved` once the effective `approvedActiveHours` have passed since approval or it does not fit
@@ -894,12 +898,12 @@ is the nonnegative integer count of that owner's member reviews and pubs not in 
 including members beyond the grouped block's row cap. Groups without members have `members: 0`.
 Reviews in the bin are in none of the lists.
 `serverTime` is the server's clock when it built the list, as an ISO 8601 UTC string.
-The Active list holds open reviews whose snooze is not in effect, selected by newest activity,
+The Active list holds ungrouped, unpinned open reviews whose snooze is not in effect, selected by newest activity,
 then id ascending, up to `inboxItems` (200). Open reviews take the places first. Approved reviews
 qualify only inside the approval window (12 hours by default), up to `approvedActiveLimit`
 (5 by default) or the number of remaining Active places, whichever is smaller. These places go
 to the newest approvals by approval time, then id ascending, regardless of later activity.
-Every other approved review is in Done with `activeUntil: null`. Because every approval has the
+Every other ungrouped, unpinned approved review is in Done with `activeUntil: null`. Because every approval has the
 same window length, a window ending cannot bring an older approval back into Active.
 
 Active is ordered by priority, first match wins: open with an agent waiting; open with unsent
@@ -914,9 +918,14 @@ block, then Done (retired reviews and approvals without an Active place, newest 
 first). Grouped reviews are in none of Active, Snoozed or Done and take no Active place or
 approval-cap place. Their block is newest activity first: an open review uses the later of
 `updatedAt` and the wake time of a timed snooze that has passed; others use `updatedAt`.
-Id ascending breaks ties in every block. Each block holds at most `inboxItems` (200) rows,
-so at most 800 in all. A grouped review's `list` and `activeUntil` follow the single-review
-rule below (approval window alone, no caps); clients place it by `groupId`.
+Id ascending breaks ties in every block. Each block holds at most `inboxItems` (200) rows.
+Pinned reviews take no Active place and no approval-cap place. A pinned review that would be
+in Active is in none of the four blocks; pins otherwise keep their normal place and order in
+Snoozed, the grouped block or Done. Every pinned review not already in those blocks follows
+Done, oldest pin first (pin time, then id ascending), up to `pins` (50). This includes pins beyond
+their normal block's row cap. The response carries each review once, at most 850 rows in all.
+A grouped or pinned review's `list` and `activeUntil` follow the single-review rule below
+(approval window alone, no caps); clients place it by `pinnedAt` and `groupId`.
 `GET /api/v1/reviews/:id` returns `ReviewView = InboxItem & { revisions: { seq, createdAt }[], importedAt: string | null }`,
 with revisions ascending by sequence. It places an approved review by the effective approval
 window alone, without Active's caps.
@@ -1360,7 +1369,7 @@ to make a read fit a per-Send or per-revision limit. The limits below apply to t
 
 | Field | Bound and write-side source |
 | --- | --- |
-| `InboxList.items` | `inboxItems` × 4 (800), the four inbox blocks |
+| `InboxList.items` | `inboxItems` × 4 + `pins` (850), the four inbox blocks plus pinned rows missing from them |
 | `AgentReviewList.items` | `agentReviews` (100), the agent list query limit |
 | `AgentReviewItem.title` | `titleChars` (200), as in `InboxItem.title` |
 | `AgentReviewItem.branch` | As `InboxItem.branch`: the stored branch or `null` |
@@ -2059,6 +2068,30 @@ The move event carries `{ reviewId }`; create, rename and delete carry `{}`. Own
 receive both forms; per-review streams receive only events naming that review.
 Capabilities lists `review-groups` (`REVIEW_GROUPS_FEATURE`).
 
+### Inbox pins
+
+`PUT /reviews/:id/pin` uses `/api/v1` and scope `send`, reviewer-only: an agent or admin
+bearer, or a reviewer token sent as a bearer, is refused before any lookup. Pins belong to the
+reviewer's owner on this server and are shared across that owner's devices.
+The body `ReviewPinRequest = { pinned: boolean }` is strict (unknown fields give
+`400 invalid_request`); success returns 204. `pinned: true` pins a review or pub at the bottom
+of Pinned; pinning a pinned review keeps its pin time. `pinned: false` removes the pin;
+unpinning an unpinned review is a 204 no-op.
+
+A missing or foreign review is `404 unknown_review`; a malformed path UUID is 404.
+A binned review is `409 review_in_bin`; a moved review is `409 review_moved`.
+Pinning beyond `pins` (50, counting pinned reviews in the bin) gives `409 invalid_state`
+with the message "You have the most pins allowed. Unpin one first.".
+Each write runs in one transaction and emits a `pins` event `{ reviewId }` after commit;
+owner-wide streams and that review's streams receive it.
+
+A pin changes nothing on the review: no state, snooze, approval or `updatedAt` change.
+It survives new revisions, snooze, retire, approve, reopen, a move to a group and the bin.
+A binned review is in no list; restore brings it back pinned with its old pin time.
+A hard delete removes the pin. Attach/import copies no pins.
+The agent list (`GET /api/v1/agent/reviews`), CLI, MCP and skills do not show pins.
+Capabilities lists `review-pins` (`REVIEW_PINS_FEATURE`).
+
 ### Sends, replies and waiting
 
 `CreateThreadRequest = { revision, target: Target, body: CommentBody }` creates a thread
@@ -2103,7 +2136,7 @@ endpoints use `text/event-stream`, `Cache-Control: no-store` and a keepalive eve
 data and is not a `ReviewEvent`. (A comment line would fire no browser event, and an event with
 an empty data buffer is never dispatched.) A client may treat about 40 seconds without any frame
 (`ping` or review event) as a dead stream and reconnect. `ReviewEventName` is
-`publish | send | thread | waiting | claimed | confirmed | viewed | snooze | unsnooze | retire | reopen | delete | bin | restore | groups | themes`. `ReviewEvent` has a `type`
+`publish | send | thread | waiting | claimed | confirmed | viewed | snooze | unsnooze | retire | reopen | delete | bin | restore | groups | pins | themes`. `ReviewEvent` has a `type`
 discriminator and the same fields as its SSE payload. The SSE `event` line supplies
 `type`; the JSON `data` is:
 
@@ -2117,10 +2150,11 @@ discriminator and the same fields as its SSE payload. The SSE `event` line suppl
 | `confirmed` | `{ reviewId, revision, deliveryId }` |
 | `viewed` | `{ reviewId }` |
 | `groups` | `{ reviewId? }` |
+| `pins` | `{ reviewId }` |
 | `themes` | `{}`; global streams only, to every owner |
 | `snooze`, `unsnooze`, `retire`, `reopen`, `delete`, `bin`, `restore` | `{ reviewId, revision }` |
 
-Review events contain ids and, except for `viewed` and `groups`, a positive revision sequence only,
+Review events contain ids and, except for `viewed`, `groups` and `pins`, a positive revision sequence only,
 never paths, text bodies or instructions. `themes` carries no fields and goes only to global streams.
 `claimed` follows a successful take; `confirmed` follows a successful
 delivery confirmation. `viewed` follows a successful viewed-mark PUT and invalidates that
@@ -2250,8 +2284,9 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `themeFontFiles` | 16 font entries per theme |
 | `themeFontBytes` | 4194304 bytes per font file (4 MiB) |
 | `themeProblems` | 20 problems per theme |
-| `inboxItems` | 200 rows per inbox block (at most 800 in all) |
+| `inboxItems` | 200 rows per inbox block (at most 800, plus 50 pinned rows missing from those blocks) |
 | `groups` | 50 inbox groups per owner |
+| `pins` | 50 pinned reviews and pubs per owner, the bin included |
 | `groupNameChars` | 80 characters per trimmed group name |
 | `agentReviews` | 100 reviews returned in the agent list |
 | `binItems` | 200 reviews returned in the bin list |

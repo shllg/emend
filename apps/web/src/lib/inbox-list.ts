@@ -18,9 +18,9 @@ function effectiveList(review: InboxItem, now: number) {
   return review.activeUntil !== null && new Date(review.activeUntil).getTime() <= now ? "done" : review.list;
 }
 
-/** Active starts open; every other section starts folded. */
+/** Pinned and Active start open; every other section starts folded. */
 export function sectionOpen(open: Readonly<Record<string, boolean>>, key: string) {
-  return open[key] ?? key === "active";
+  return open[key] ?? (key === "pinned" || key === "active");
 }
 
 /** One display order for rendered sections and keyboard navigation, including collapsed sections. */
@@ -46,20 +46,25 @@ export function inboxSections(
   const groupIds = new Set(groups.map((group) => group.id));
   const sectionKey = (review: InboxItem) =>
     review.groupId && groupIds.has(review.groupId) ? `group:${review.groupId}` : effectiveList(review, now);
-  const lists: { key: string; list: "active" | "snoozed" | "group" | "done"; title: string; group?: InboxListGroup }[] =
-    [
-      { key: "active", list: "active", title: "Active" },
-      { key: "snoozed", list: "snoozed", title: "Snoozed" },
-      ...[...groups]
-        .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
-        .map((group) => ({
-          key: `group:${group.id}`,
-          list: "group" as const,
-          title: group.name,
-          group,
-        })),
-      { key: "done", list: "done", title: "Done" },
-    ];
+  const lists: {
+    key: string;
+    list: "pinned" | "active" | "snoozed" | "group" | "done";
+    title: string;
+    group?: InboxListGroup;
+  }[] = [
+    { key: "pinned", list: "pinned", title: "Pinned" },
+    { key: "active", list: "active", title: "Active" },
+    { key: "snoozed", list: "snoozed", title: "Snoozed" },
+    ...[...groups]
+      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+      .map((group) => ({
+        key: `group:${group.id}`,
+        list: "group" as const,
+        title: group.name,
+        group,
+      })),
+    { key: "done", list: "done", title: "Done" },
+  ];
   const needle = filter.toLocaleLowerCase();
   const filtered = items.filter(
     (review) =>
@@ -72,7 +77,16 @@ export function inboxSections(
       ),
   );
   return lists.map(({ key, list, title, group }) => {
-    const rows = filtered.filter((review) => sectionKey(review) === key);
+    const rows = filtered.filter((review) =>
+      list === "pinned"
+        ? review.pinnedAt !== null
+        : sectionKey(review) === key && (list !== "active" || review.pinnedAt === null),
+    );
+    if (list === "pinned")
+      rows.sort(
+        (a, b) =>
+          Date.parse(a.pinnedAt ?? "") - Date.parse(b.pinnedAt ?? "") || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      );
     if (list === "done")
       rows.sort(
         (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
@@ -86,23 +100,29 @@ export function inboxSections(
       empty: group?.members === 0,
       unloaded: group !== undefined && group.members > 0 && !items.some((review) => review.groupId === group.id),
       rows,
-      nothingActive: list === "active" && !items.some((review) => sectionKey(review) === "active"),
+      nothingActive:
+        list === "active" && !items.some((review) => review.pinnedAt === null && sectionKey(review) === "active"),
       expanded: sectionOpen(open, key) || needle !== "",
     };
   });
 }
 
-export function activeJumpRows(sections: ReturnType<typeof inboxSections>) {
-  const active = sections.find((section) => section.list === "active");
-  return active?.expanded ? active.rows.filter((row) => !row.movedTo).slice(0, 9) : [];
+export function jumpRows(sections: ReturnType<typeof inboxSections>) {
+  return sections
+    .flatMap(({ list, expanded, rows }) => (expanded && (list === "pinned" || list === "active") ? rows : []))
+    .filter((row) => !row.movedTo)
+    .slice(0, 9);
 }
 
 /** Palette matches keep the inbox's display order on ties, with Done after every other section. */
 export function matchInboxItems(items: InboxItem[], now: number, query: string, groups: InboxListGroup[] = []) {
   if (!query.trim()) return [];
+  const seen = new Set<string>();
   return inboxSections(items, now, { groups })
     .flatMap(({ rows, list }) =>
       rows.flatMap((item) => {
+        if (seen.has(item.id)) return [];
+        seen.add(item.id);
         const fields = [item.title, item.origin.name];
         if (item.branch !== null) fields.push(item.branch);
         if (item.project !== null) fields.push(item.project);
@@ -117,7 +137,16 @@ export function matchInboxItems(items: InboxItem[], now: number, query: string, 
 }
 
 export function inboxSequence(sections: ReturnType<typeof inboxSections>) {
-  return sections.flatMap(({ expanded, rows }) => (expanded ? rows.filter((row) => !row.movedTo) : []));
+  const seen = new Set<string>();
+  return sections.flatMap(({ expanded, rows }) =>
+    expanded
+      ? rows.filter((row) => {
+          if (row.movedTo || seen.has(row.id)) return false;
+          seen.add(row.id);
+          return true;
+        })
+      : [],
+  );
 }
 
 export function adjacentInboxItem(items: InboxItem[], current: string | undefined, delta: 1 | -1) {

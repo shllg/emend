@@ -53,6 +53,7 @@ test.each([
     lifecycle: {
       title: "Synthetic review",
       groupId,
+      pinned: false,
       state: "open",
       snoozed: false,
       snoozedUntil: null,

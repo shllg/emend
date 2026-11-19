@@ -22,6 +22,7 @@ import {
   placements,
   repos,
   reviewGroupMembers,
+  reviewPins,
   reviews,
   reviewTombstones,
   revisions,
@@ -228,6 +229,7 @@ export function deleteReview(ownerId: string, db: Db, reviewId: string, now: num
     await q
       .delete(reviewGroupMembers)
       .where(and(eq(reviewGroupMembers.ownerId, ownerId), eq(reviewGroupMembers.reviewId, reviewId)));
+    await q.delete(reviewPins).where(and(eq(reviewPins.ownerId, ownerId), eq(reviewPins.reviewId, reviewId)));
     await q.delete(placements).where(and(eq(placements.ownerId, ownerId), eq(placements.reviewId, reviewId)));
     await q.delete(comments).where(and(eq(comments.ownerId, ownerId), eq(comments.reviewId, reviewId)));
     await q.delete(sends).where(and(eq(sends.ownerId, ownerId), eq(sends.reviewId, reviewId)));

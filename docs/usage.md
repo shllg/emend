@@ -35,9 +35,9 @@ A pub stays in To review after you send comments on it.
 
 Keyboard shortcuts work on desktop and tablet. Press `?` to list them. Settings → Keyboard shortcuts
 changes, turns off or resets a key. Alt+1 to Alt+9 (⌥1 to ⌥9 on a Mac) open the first nine rows
-of Active, top to bottom, as the small numbers in the inbox, the inbox pane and the collapsed rail
-show, counting only the rows shown when a filter is set; the inbox and inbox pane number none while
-Active is folded, but the collapsed rail always numbers them. The rail ignores Kind and search.
+of Pinned, then Active, as the small numbers in the inbox, the inbox pane and the collapsed rail
+show, counting only the rows shown when a filter is set. The inbox and inbox pane number no rows
+of a folded section; the collapsed rail always numbers them. The rail ignores Kind and search.
 emend keeps these keys while its page has focus, also where the browser uses them to switch tabs.
 Settings can switch them to Ctrl (⌘ on a Mac) or turn them off to give them back to the browser.
 Ctrl+Shift+P (⌘⇧P on a Mac) opens the command palette. Type a few letters of a command, or find
@@ -251,6 +251,12 @@ the same groups as a desktop.
 Choose “Move to group…” in a review's or doc's ⋯ menu to keep it in a named group, with its own
 section between Snoozed and Done. Rename or delete a group from the group's ⋯ menu.
 Deleting a group puts its items back in Active, Snoozed or Done.
+
+Choose “Pin” in a review's or doc's ⋯ menu, or “Pin or unpin the review” in the command palette
+(Shift+P), to keep it in Pinned at the top of the inbox. The oldest pin sits on top.
+A pinned item that would be in Active shows only in Pinned. One in Snoozed, a group or Done
+shows in both, with a pin mark in its own section. “Unpin” takes it out of Pinned.
+Pins show on every device.
 
 <p>
   <img src="images/inbox-desktop.png" alt="The inbox on a desktop, with six reviews and docs" width="73%"

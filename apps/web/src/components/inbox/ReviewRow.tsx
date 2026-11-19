@@ -1,6 +1,6 @@
 import type { InboxItem } from "@emend/contract";
 import { Link } from "@tanstack/react-router";
-import { MessageSquare, Pencil } from "lucide-react";
+import { MessageSquare, Pencil, Pin } from "lucide-react";
 import { plural } from "../../lib/count.ts";
 import { relativeTime, wakeHasPassed, wakeTime } from "../../lib/time.ts";
 import { agentDotClasses, agentStatusOf, agentStatusText } from "../status/AgentStatus.tsx";
@@ -27,6 +27,7 @@ export function ReviewRow({
   now,
   onOpen,
   highlight = false,
+  pinned = false,
   jump,
   keyShortcuts,
 }: {
@@ -34,6 +35,7 @@ export function ReviewRow({
   now: number;
   onOpen?: () => void;
   highlight?: boolean;
+  pinned?: boolean;
   jump?: string;
   keyShortcuts?: string;
 }) {
@@ -67,6 +69,11 @@ export function ReviewRow({
         )}
       </span>
       <span className="col-start-2 row-start-1 inline-flex items-center whitespace-nowrap text-12 font-normal text-fg-3 tabular-nums">
+        {pinned && (
+          <span role="img" aria-label="Pinned" className="mr-1.5 inline-flex text-fg-3">
+            <Icon icon={Pin} size={11} />
+          </span>
+        )}
         {review.snoozed ? (
           review.snoozedUntil ? (
             wakeHasPassed(review.snoozedUntil, now) ? (

@@ -692,6 +692,13 @@ test("groups refresh inbox and either the moved review or all review views", asy
   expect(invalidate.mock.calls.map(([options]) => options?.queryKey)).toEqual([["inbox"], ["review"]]);
 });
 
+test("pins refresh only the inbox and the pinned review", async () => {
+  const { invalidate } = await mount();
+  act(() => source().emit("pins", { reviewId: id }));
+  await tick();
+  expect(invalidate.mock.calls.map(([options]) => options?.queryKey)).toEqual([["inbox"], ["review", id]]);
+});
+
 test("themes events refresh only the theme list, without a review id", async () => {
   const { invalidate } = await mount();
   act(() => source().emit("themes", {}));

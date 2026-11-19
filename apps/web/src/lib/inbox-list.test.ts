@@ -1,6 +1,6 @@
 import { InboxItem, LIMITS } from "@emend/contract";
 import { expect, test } from "vitest";
-import { activeJumpRows, inboxSections, inboxSequence, matchInboxItems } from "./inbox-list.ts";
+import { inboxSections, inboxSequence, jumpRows, matchInboxItems, sectionOpen } from "./inbox-list.ts";
 
 const a = { id: "11111111-1111-4111-8111-111111111111", name: "Alpha", members: 3 };
 const b = { id: "22222222-2222-4222-8222-222222222222", name: "Beta", members: 0 };
@@ -44,15 +44,16 @@ test("group sections sort by name and id between Snoozed and Done, preserving se
     { ...a, members: 2 },
   ];
   const sections = inboxSections(rows, now, { groups });
-  expect(sections.map((s) => s.key)).toEqual(["active", "snoozed", `group:${a.id}`, `group:${b.id}`, "done"]);
+  expect(sections.map((s) => s.key)).toEqual(["pinned", "active", "snoozed", `group:${a.id}`, `group:${b.id}`, "done"]);
   expect(sections.map((s) => s.rows.map((r) => r.id))).toEqual([
+    [],
     [rows[0]?.id],
     [rows[1]?.id],
     [rows[3]?.id, rows[4]?.id],
     [rows[2]?.id],
     [rows[5]?.id],
   ]);
-  expect(sections.map((s) => s.expanded)).toEqual([true, false, false, false, false]);
+  expect(sections.map((s) => s.expanded)).toEqual([true, true, false, false, false, false]);
   expect(inboxSequence(sections)).toEqual([rows[0]]);
   const expanded = inboxSections(rows, now, {
     groups,
@@ -68,20 +69,20 @@ test("group sections sort by name and id between Snoozed and Done, preserving se
 test("Active starts open, can fold, and expands for a filter without changing its fold state", () => {
   const rows = [item(1), item(2)];
   const open = { active: false };
-  expect(inboxSections(rows, now)[0]).toMatchObject({ expanded: true, rows });
-  expect(inboxSections(rows, now, { open })[0]).toMatchObject({ expanded: false, rows });
-  expect(inboxSections(rows, now, { open, filter: "Item 2" })[0]).toMatchObject({
+  expect(inboxSections(rows, now)[1]).toMatchObject({ expanded: true, rows });
+  expect(inboxSections(rows, now, { open })[1]).toMatchObject({ expanded: false, rows });
+  expect(inboxSections(rows, now, { open, filter: "Item 2" })[1]).toMatchObject({
     expanded: true,
     rows: [rows[1]],
   });
-  expect(inboxSections(rows, now, { open })[0]?.expanded).toBe(false);
+  expect(inboxSections(rows, now, { open })[1]?.expanded).toBe(false);
 });
 test("the inbox sequence skips folded Active rows and keeps the other open sections in order", () => {
   const rows = [item(1), item(2, { list: "snoozed" }), item(3, { groupId: a.id }), item(4, { list: "done" })];
   const options = { groups: [a], open: { active: false, snoozed: true, [`group:${a.id}`]: true, done: true } };
   const sections = inboxSections(rows, now, options);
   expect(inboxSequence(sections)).toEqual(rows.slice(1));
-  expect(activeJumpRows(sections)).toEqual([]);
+  expect(jumpRows(sections)).toEqual([]);
   expect(inboxSequence(inboxSections(rows, now, { ...options, filter: "Item" }))).toEqual(rows);
 });
 test("membership wins over approved, retired and snoozed states, even after the approval window", () => {
@@ -93,13 +94,13 @@ test("membership wins over approved, retired and snoozed states, even after the 
   const sections = inboxSections(rows, now, { groups: [a, b] });
   expect(sections.find((s) => s.group?.id === a.id)?.rows).toEqual(rows);
   expect(sections.filter((s) => !s.group).flatMap((s) => s.rows)).toEqual([]);
-  expect(sections[0]?.nothingActive).toBe(true);
+  expect(sections[1]?.nothingActive).toBe(true);
   expect(sections.find((s) => s.group?.id === b.id)?.empty).toBe(true);
   expect(sections.find((s) => s.group?.id === a.id)?.empty).toBe(false);
 });
 test("an unknown group id behaves as ungrouped", () => {
   const row = item(1, { groupId: a.id });
-  expect(inboxSections([row], now)[0]).toMatchObject({ rows: [row], nothingActive: false });
+  expect(inboxSections([row], now)[1]).toMatchObject({ rows: [row], nothingActive: false });
 });
 test("a group with members beyond the loaded rows is not empty", () => {
   const sections = inboxSections([], now, { groups: [a, b] });
@@ -170,9 +171,9 @@ test.each([{}, { open: { active: true } }, { open: { active: false }, filter: "I
   "Active jumps take the first nine openable rows in display order with %j",
   (options) => {
     const rows = Array.from({ length: 12 }, (_, i) => item(i + 1));
-    expect(activeJumpRows(inboxSections(rows, now, options))).toEqual(rows.slice(0, 9));
+    expect(jumpRows(inboxSections(rows, now, options))).toEqual(rows.slice(0, 9));
     rows[1] = item(2, { movedTo: "https://example.com/review" });
-    expect(activeJumpRows(inboxSections(rows, now, options))).toEqual([rows[0], ...rows.slice(2, 10)]);
+    expect(jumpRows(inboxSections(rows, now, options))).toEqual([rows[0], ...rows.slice(2, 10)]);
   },
 );
 
@@ -185,14 +186,14 @@ test("Active jumps never fill spare places with snoozed, grouped, Done or expire
     item(5, { activeUntil: "2026-11-04T11:00:00.000Z" }),
   ];
   expect(
-    activeJumpRows(
+    jumpRows(
       inboxSections(rows, now, {
         groups: [a],
         open: { snoozed: true, done: true, [`group:${a.id}`]: true },
       }),
     ),
   ).toEqual([rows[0]]);
-  expect(activeJumpRows(inboxSections(rows.slice(1), now, { groups: [a] }))).toEqual([]);
+  expect(jumpRows(inboxSections(rows.slice(1), now, { groups: [a] }))).toEqual([]);
 });
 
 test("Active jumps count only rows shown by Kind, text, machine and project filters", () => {
@@ -208,7 +209,7 @@ test("Active jumps count only rows shown by Kind, text, machine and project filt
     [{ machine: b.id }, [rows[2]]],
     [{ project: "One" }, [rows[1]]],
   ] as const)
-    expect(activeJumpRows(inboxSections(rows, now, filters))).toEqual(expected);
+    expect(jumpRows(inboxSections(rows, now, filters))).toEqual(expected);
 });
 
 test.each([
@@ -286,4 +287,107 @@ test("palette keeps moved matches and returns nothing for blank queries", () => 
   expect(matchInboxItems([moved], now, "item").map(({ item }) => item)).toEqual([moved]);
   expect(matchInboxItems([moved], now, "")).toEqual([]);
   expect(matchInboxItems([moved], now, " \t\n")).toEqual([]);
+});
+
+const pinnedAt = "2026-11-04T09:00:00.000Z";
+test("Pinned comes first, ordered by oldest pin then id, and takes pinned Active items out of Active", () => {
+  const oldest = item(3, { pinnedAt: "2026-11-03T09:00:00.000Z" });
+  const first = item(1, { pinnedAt });
+  const second = item(2, { pinnedAt });
+  const active = item(4);
+  const rows = [second, active, first, oldest];
+  const sections = inboxSections(rows, now);
+  expect(sections[0]).toMatchObject({
+    key: "pinned",
+    list: "pinned",
+    title: "Pinned",
+    count: 3,
+    expanded: true,
+    rows: [oldest, first, second],
+  });
+  expect(sections[1]).toMatchObject({ rows: [active], nothingActive: false });
+  expect(inboxSections([first], now)[1]).toMatchObject({ rows: [], nothingActive: true });
+  expect(rows).toEqual([second, active, first, oldest]);
+});
+
+test("pinned Snoozed, grouped, Done and expired items stay in their own sections too", () => {
+  const snoozed = item(1, { pinnedAt, list: "snoozed", snoozed: true });
+  const grouped = item(2, { pinnedAt, groupId: a.id });
+  const done = item(3, { pinnedAt, list: "done", state: "settled" });
+  const expired = item(4, { pinnedAt, state: "approved", activeUntil: "2026-11-04T11:00:00.000Z" });
+  const rows = [snoozed, grouped, done, expired];
+  const sections = inboxSections(rows, now, { groups: [a] });
+  expect(sections[0]?.rows).toEqual(rows);
+  expect(sections.find((s) => s.list === "snoozed")?.rows).toEqual([snoozed]);
+  expect(sections.find((s) => s.group?.id === a.id)?.rows).toEqual([grouped]);
+  expect(sections.find((s) => s.list === "done")?.rows).toEqual([done, expired]);
+  expect(sections[1]).toMatchObject({ rows: [], nothingActive: true });
+});
+
+test("Pinned is empty without pins, starts open and uses the same fold map as Active", () => {
+  expect(inboxSections([item(1)], now)[0]).toMatchObject({ rows: [], count: 0 });
+  expect(sectionOpen({}, "pinned")).toBe(true);
+  expect(sectionOpen({ pinned: false }, "pinned")).toBe(false);
+  const rows = [item(1, { pinnedAt })];
+  const open = { pinned: false };
+  expect(inboxSections(rows, now)[0]).toMatchObject({ expanded: true, rows });
+  expect(inboxSections(rows, now, { open })[0]).toMatchObject({ expanded: false, rows });
+  expect(inboxSections(rows, now, { open, filter: "Item" })[0]?.expanded).toBe(true);
+  expect(inboxSections(rows, now, { open })[0]?.expanded).toBe(false);
+});
+
+test("Kind, search, machine and project filters limit Pinned rows and their count", () => {
+  const rows = [
+    item(1, { pinnedAt, project: "One" }),
+    item(2, { pinnedAt, kind: "publish", project: "Two", origin: { id: b.id, name: "Machine B" } }),
+    item(3, { pinnedAt, kind: "publish", agentWaiting: true }),
+    item(4),
+  ];
+  for (const [filters, expected] of [
+    [{ kind: "publish" }, [rows[1], rows[2]]],
+    [{ kind: "review" }, [rows[0], rows[2]]],
+    [{ filter: "Item 2" }, [rows[1]]],
+    [{ kind: "publish", filter: "Item 1" }, []],
+    [{ machine: b.id }, [rows[1]]],
+    [{ project: "One" }, [rows[0]]],
+  ] as const)
+    expect(inboxSections(rows, now, filters)[0]).toMatchObject({ rows: expected, count: expected.length });
+});
+
+test("jumps take Pinned then Active, skip moved rows and folded sections, and stop at nine", () => {
+  const active = Array.from({ length: 10 }, (_, i) => item(i + 1));
+  const pinned = item(20, { pinnedAt, list: "done" });
+  const movedPin = item(21, { pinnedAt, movedTo: "https://example.com/review" });
+  const movedActive = item(22, { movedTo: "https://example.com/review" });
+  const rows = [movedActive, ...active, movedPin, pinned];
+  expect(jumpRows(inboxSections(rows, now))).toEqual([pinned, ...active.slice(0, 8)]);
+  expect(jumpRows(inboxSections(rows, now, { open: { pinned: false } }))).toEqual(active.slice(0, 9));
+  expect(jumpRows(inboxSections(rows, now, { open: { active: false } }))).toEqual([pinned]);
+  expect(jumpRows(inboxSections(rows, now, { open: { pinned: false, active: false, done: true } }))).toEqual([]);
+  const pins = active.map((row) => ({ ...row, pinnedAt }));
+  expect(jumpRows(inboxSections([...pins, item(30)], now))).toEqual(pins.slice(0, 9));
+});
+
+test("the sequence visits a pinned Done item once at its first expanded section", () => {
+  const active = item(1);
+  const pinned = item(2, { pinnedAt, list: "done" });
+  const done = item(3, { list: "done" });
+  const rows = [active, done, pinned];
+  expect(inboxSequence(inboxSections(rows, now, { open: { done: true } }))).toEqual([pinned, active, done]);
+  expect(inboxSequence(inboxSections(rows, now, { open: { done: true, pinned: false } }))).toEqual([
+    active,
+    pinned,
+    done,
+  ]);
+});
+
+test("palette matches include a pinned Done item once at its first place", () => {
+  const active = item(1, { title: "Needle" });
+  const pinned = item(2, { title: "Needle", pinnedAt, list: "done" });
+  const done = item(3, { title: "Needle", list: "done" });
+  expect(matchInboxItems([active, done, pinned], now, "Needle").map(({ item, done }) => [item, done])).toEqual([
+    [pinned, false],
+    [active, false],
+    [done, true],
+  ]);
 });

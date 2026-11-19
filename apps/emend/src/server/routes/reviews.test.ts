@@ -81,7 +81,8 @@ test("all three GETs parse their schemas and enforce reviewer scope and owner is
   const approved = await f.request(`/reviews/${f.reviewId}/sends`, "POST", { kind: "approve", revision: 1 });
   expect(approved.status).toBe(201);
   const own = contract.InboxList.parse(await (await get()).json());
-  expect(own.items).toMatchObject([{ id: f.reviewId, state: "approved", list: "active" }]);
+  expect(own.items).toMatchObject([{ id: f.reviewId, state: "approved", list: "active", pinnedAt: null }]);
+  expect(await (await get(`/${f.reviewId}`)).json()).toMatchObject({ pinnedAt: null });
   for (const [path, schema] of [
     ["", contract.InboxList],
     [`/${f.reviewId}`, contract.ReviewView],

@@ -17,12 +17,12 @@ import { cn } from "../components/ui/utils.ts";
 import { plural } from "../lib/count.ts";
 import { useInboxArrivals } from "../lib/inbox-arrivals.tsx";
 import {
-  activeJumpRows,
   adjacentInboxItem,
   type InboxKind,
   inboxKindKey,
   inboxSections,
   inboxSequence,
+  jumpRows,
   readInboxKind,
   sectionOpen,
 } from "../lib/inbox-list.ts";
@@ -116,10 +116,10 @@ export function Inbox({
     open,
     groups: query.data?.groups,
   });
-  const jumpRows = numbered ? activeJumpRows(sections) : [];
+  const numberedRows = numbered ? jumpRows(sections) : [];
   useJumpShortcuts(
     (index) => {
-      const item = jumpRows[index];
+      const item = numberedRows[index];
       if (!item) return;
       void navigate({ to: "/r/$reviewId", params: { reviewId: item.id }, search: { rev: item.newestRevision } });
       onOpen?.();
@@ -274,7 +274,7 @@ export function Inbox({
           </div>
         )}
         {query.data &&
-          sections.map(({ key, title, count, rows, nothingActive, expanded, group, empty, unloaded }) => {
+          sections.map(({ key, list, title, count, rows, nothingActive, expanded, group, empty, unloaded }) => {
             if (rows.length === 0 && !empty && !unloaded && !(nothingActive && items.length > 0 && filteredCount > 0))
               return null;
             const heading = (
@@ -325,12 +325,14 @@ export function Inbox({
                 {expanded && rows.length > 0 && (
                   <ul>
                     {rows.map((review) => {
-                      const command = jumpCommands[jumpRows.indexOf(review)];
+                      const command =
+                        list === "pinned" || list === "active" ? jumpCommands[numberedRows.indexOf(review)] : undefined;
                       const key = command ? keys[command] : null;
                       return (
                         <ReviewRow
                           key={review.id}
                           review={review}
+                          pinned={list !== "pinned" && review.pinnedAt !== null}
                           now={now}
                           onOpen={onOpen}
                           highlight={highlighted.has(review.id)}

@@ -32,6 +32,7 @@ import { lifecycleRoutes } from "./routes/lifecycle.ts";
 import { machineRoutes } from "./routes/machines.ts";
 import { mediaRoutes } from "./routes/media.ts";
 import { pairingRoutes } from "./routes/pairings.ts";
+import { pinRoutes } from "./routes/pins.ts";
 import { publishRoutes } from "./routes/publish.ts";
 import { reviewRoutes } from "./routes/reviews.ts";
 import { sendRoutes } from "./routes/sends.ts";
@@ -86,6 +87,7 @@ export const ENDPOINTS = [
   { method: "PATCH", path: "/api/v1/groups/:id", scope: "send" },
   { method: "DELETE", path: "/api/v1/groups/:id", scope: "send" },
   { method: "PUT", path: "/api/v1/reviews/:id/group", scope: "send" },
+  { method: "PUT", path: "/api/v1/reviews/:id/pin", scope: "send" },
   { method: "GET", path: "/api/v1/reviews", scope: "read" },
   { method: "GET", path: "/api/v1/reviews/:id", scope: "read" },
   { method: "GET", path: "/api/v1/reviews/:id/revisions/:seq", scope: "read" },
@@ -198,6 +200,7 @@ export function createApp(deps: AppDeps) {
   downloadRoutes(app, deps);
   lifecycleRoutes(app, deps);
   groupRoutes(app, deps);
+  pinRoutes(app, deps);
   viewedRoutes(app, deps);
   fileRoutes(app, deps);
   mediaRoutes(app, deps);

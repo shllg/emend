@@ -169,6 +169,13 @@
       "when": 1794967184815,
       "tag": "0023_previous_songbird",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1795125366662,
+      "tag": "0024_cute_rattler",
+      "breakpoints": true
     }
   ]
 }

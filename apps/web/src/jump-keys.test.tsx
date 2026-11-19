@@ -35,6 +35,7 @@ function activeItems(count: number): InboxItem[] {
     movedTo: null,
     list: "active",
     groupId: null,
+    pinnedAt: null,
     snoozed: false,
     snoozedUntil: null,
     activeUntil: null,
@@ -169,7 +170,7 @@ const numbers = (scope: ParentNode = document) =>
 const patches = () =>
   fetcher.mock.calls.filter(([path, init]) => path === "/api/v1/settings" && init?.method === "PATCH");
 const patchBody = (index: number) => JSON.parse(String(patches()[index]?.[1]?.body));
-const jumpRow = () => within(screen.getByRole("group", { name: "Open Active row 1 to 9" }));
+const jumpRow = () => within(screen.getByRole("group", { name: "Open row 1 to 9 of Pinned and Active" }));
 async function openSettings() {
   mount("/settings");
   await screen.findByRole("heading", { name: "Keyboard shortcuts" });
@@ -505,16 +506,16 @@ test.each([false, true])("? lists jumps as one row and the palette excludes them
   await ready();
   press("?", { shiftKey: true });
   const dialog = await screen.findByRole("alertdialog", { name: "Keyboard shortcuts" });
-  const label = within(dialog).getByText("Open Active row 1 to 9");
+  const label = within(dialog).getByText("Open row 1 to 9 of Pinned and Active");
   expect(label.tagName).toBe("DT");
   expect(label.nextElementSibling?.textContent).toBe(off ? "Off" : "Alt+1–9");
   expect(label.nextElementSibling?.querySelector("kbd") !== null).toBe(!off);
-  expect(within(dialog).queryByText("Open Active row 1", { exact: true })).toBeNull();
+  expect(within(dialog).queryByText("Open row 1 of Pinned and Active", { exact: true })).toBeNull();
   fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   press("P", { ctrlKey: true, shiftKey: true });
   const palette = await screen.findByRole("dialog", { name: "Command palette" });
-  expect(within(palette).queryByRole("option", { name: /Open Active row/ })).toBeNull();
+  expect(within(palette).queryByRole("option", { name: /Open row .* of Pinned and Active/ })).toBeNull();
 });
 
 test.each([

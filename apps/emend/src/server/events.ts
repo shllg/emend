@@ -53,6 +53,7 @@ export class ReviewEvents {
   emit(ownerId: string, value: ReviewEvent) {
     // Strip any accidental content fields even when the caller isn't type checked.
     const event = ReviewEvent.parse(value);
+    // Pins and membership moves reach both the owner's inbox and the named review.
     const reviewId = "reviewId" in event ? event.reviewId : undefined;
     const waiting = reviewId === undefined ? undefined : this.waiting.get(ownedKey(ownerId, reviewId));
     if (waiting?.ownerId === ownerId && "revision" in event)

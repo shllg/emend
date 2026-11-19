@@ -1,6 +1,17 @@
 import { type InboxGroup, LIMITS, type ReviewState } from "@emend/contract";
 import { useQuery } from "@tanstack/react-query";
-import { AlarmClock, Archive, BellOff, Ellipsis, FolderInput, Terminal, Trash2, Undo2 } from "lucide-react";
+import {
+  AlarmClock,
+  Archive,
+  BellOff,
+  Ellipsis,
+  FolderInput,
+  Pin,
+  PinOff,
+  Terminal,
+  Trash2,
+  Undo2,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ApiError } from "../../api/client.ts";
 import {
@@ -9,6 +20,7 @@ import {
   useCreateGroup,
   useLifecycleMutation,
   useMoveToGroup,
+  usePinReview,
 } from "../../api/mutations.ts";
 import { inboxQuery } from "../../api/queries.ts";
 import { plural } from "../../lib/count.ts";
@@ -24,6 +36,7 @@ import { useToast } from "../ui/Toast.tsx";
 export interface ReviewLifecycle {
   title: string;
   groupId: string | null;
+  pinned: boolean;
   state: ReviewState;
   snoozed: boolean;
   snoozedUntil: string | null;
@@ -49,7 +62,7 @@ export function ReviewActions({
   phone: boolean;
   howToResume?: { disabled: boolean; onSelect: () => void };
 }) {
-  const { title, state, snoozed, onDeleted } = lifecycle;
+  const { title, state, snoozed, pinned, onDeleted } = lifecycle;
   const [panel, setPanel] = useState<Panel>(null);
   const [now, setNow] = useState(Date.now);
   // Retire: the unsent count when the dialog opened, and whether the server refused for new comments.
@@ -59,6 +72,7 @@ export function ReviewActions({
   const mutation = useLifecycleMutation(reviewId);
   const createGroup = useCreateGroup();
   const moveGroup = useMoveToGroup(reviewId);
+  const pinReview = usePinReview(reviewId);
   const inbox = useQuery({ ...inboxQuery(), enabled: panel === "group" });
   const groups = [...(inbox.data?.groups ?? [])].sort(
     (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id),
@@ -69,7 +83,7 @@ export function ReviewActions({
   const mounted = useRef(true);
   const busy = useRef(false);
   const deleted = useRef(false);
-  const pending = mutation.isPending || createGroup.isPending || moveGroup.isPending;
+  const pending = mutation.isPending || createGroup.isPending || moveGroup.isPending || pinReview.isPending;
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -95,6 +109,27 @@ export function ReviewActions({
       return true;
     },
     { enabled: state === "open" && !pending },
+  );
+  const togglePin = async () => {
+    if (pending || busy.current || deleted.current) return;
+    busy.current = true;
+    try {
+      await pinReview.mutateAsync(!pinned);
+      toast.show({ tone: "success", title: pinned ? "Unpinned" : "Pinned" });
+    } catch (error) {
+      toast.show({ tone: "danger", title: mutationMessage(error as Error) });
+    } finally {
+      busy.current = false;
+    }
+  };
+  useShortcut(
+    "review.pin",
+    () => {
+      if (pending || busy.current || deleted.current) return false;
+      void togglePin();
+      return true;
+    },
+    { enabled: !pending },
   );
   /** Returns whether the server accepted the action. A failure shows the server's message in a toast. */
   const run = async (input: LifecycleAction) => {
@@ -216,6 +251,7 @@ export function ReviewActions({
     items.push({ label: "Retire", icon: Archive, opensDialog: true, onSelect: () => open("retire") });
   }
   if (state === "settled") items.push({ label: "Reopen", icon: Undo2, onSelect: () => void reopen() });
+  items.push({ label: pinned ? "Unpin" : "Pin", icon: pinned ? PinOff : Pin, onSelect: () => void togglePin() });
   items.push({ label: "Move to group…", icon: FolderInput, opensDialog: true, onSelect: () => open("group") });
   items.push({ separator: true });
   items.push({ label: "Delete", icon: Trash2, danger: true, opensDialog: true, onSelect: () => open("delete") });

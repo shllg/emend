@@ -89,6 +89,8 @@ The next server start also revokes the old instance's admin and agent tokens and
 Tests always use temporary state directories.
 Inbox groups live in `review_groups` and `review_group_members`, scoped to the owner on this
 server; every reviewer device sees them, while agents and attach/import do not copy or expose them.
+Inbox pins live in `review_pins`, scoped to the owner on this server; every reviewer device sees
+them, while agents and attach/import neither copy nor expose them.
 
 ## Attached machines and the phone
 

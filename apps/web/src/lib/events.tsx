@@ -23,7 +23,7 @@ export function ReviewEventsProvider({ children, enabled = true }: { children: R
         void client.cancelQueries({ queryKey: ["themes"] }).then(() => refreshQueries(client, [["themes"]]));
         return;
       }
-      if (event.type === "groups") {
+      if (event.type === "groups" || event.type === "pins") {
         refreshQueries(client, [["inbox"], event.reviewId ? ["review", event.reviewId] : ["review"]]);
         return;
       }

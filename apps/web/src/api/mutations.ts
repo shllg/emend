@@ -312,3 +312,14 @@ export function useMoveToGroup(reviewId: string) {
     },
   });
 }
+
+export function usePinReview(reviewId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (pinned: boolean) => change(`/api/v1/reviews/${encodeURIComponent(reviewId)}/pin`, "PUT", { pinned }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ["inbox"] });
+      void client.invalidateQueries({ queryKey: ["review", reviewId] });
+    },
+  });
+}
