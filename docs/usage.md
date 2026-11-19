@@ -95,8 +95,14 @@ The CLI commands refuse a themes folder whose path, real path or symlink hops li
 holding the working directory, with the same home-rooted dotfiles exception as `emend config`.
 The server reads this folder without that check, like `keys` and `approvedActiveHours`.
 
-Edit `themes/mine/theme.json` to change colours or set `fonts.text` and `fonts.code` to installed font names.
-To use a font on every device, including your phone, put its files in `themes/fonts/` and name them in `fonts.files`;
+Edit `themes/mine/theme.json` to change colours or set `fonts.text` and `fonts.code` to a built-in font
+(Geist, Inter, Roboto, Atkinson Hyperlegible Next, JetBrains Mono, Geist Mono, Roboto Mono or Fira Code)
+or an installed font name.
+Built-in names use emend's copy even when that font is installed.
+The built-in files cover Latin and most Latin Extended letters in upright text.
+Italic files cover basic Latin and Latin-1 only.
+Most Vietnamese letters with tone marks and other scripts fall back to a system font.
+To use another font on every device, including your phone, put its files in `themes/fonts/` and name them in `fonts.files`;
 see [api.md](api.md#themes) for the format and limits. `emend theme check mine` reports missing or refused font files.
 Emend's fonts stay as fallbacks. Each file names a Dark or Light base; omitted values use that
 base. A token can reference a scale step, so changing that step recolours every token built on

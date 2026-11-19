@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { build, type Plugin } from "vite";
+import { shouldPrecacheAsset } from "../src/lib/built-in-fonts.ts";
 
 export function serviceWorker(): Plugin {
   return {
@@ -19,7 +20,9 @@ export function serviceWorker(): Plugin {
           "/icons/icon-192.png",
           "/icons/icon-512.png",
           "/icons/apple-touch-icon.png",
-          ...files.filter((file) => file.fileName.startsWith("assets/")).map((file) => `/${file.fileName}`),
+          ...files
+            .filter((file) => file.fileName.startsWith("assets/") && shouldPrecacheAsset(file.fileName))
+            .map((file) => `/${file.fileName}`),
         ];
         const hash = createHash("sha256");
         for (const file of files) hash.update(file.fileName).update(file.type === "chunk" ? file.code : file.source);

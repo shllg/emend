@@ -635,16 +635,22 @@ The named family precedes emend's default stack. When the theme names files for 
 faces from those files precede emend's default stack instead and the name is not used.
 `DEFAULT_THEME_FONTS` is
 `{ text: "Geist", code: "JetBrains Mono" }`.
+The other built-in families, Inter, Roboto, Atkinson Hyperlegible Next, Geist Mono, Roboto Mono
+and Fira Code, load from the app's own origin only when a theme names them.
+Built-in names use emend's copy even when that font is installed.
+The built-in files cover Latin and most Latin Extended letters in upright text.
+Italic files cover basic Latin and Latin-1 only.
+Most Vietnamese letters with tone marks and other scripts fall back to a system font.
 
 Font files live directly in `<configDir>/themes/fonts/`, shared by all themes. For example:
 
 ```json
 "fonts": {
-  "text": "Inter",
+  "text": "Literata",
   "code": "Iosevka",
   "files": [
-    { "font": "text", "file": "InterVariable.woff2", "weight": [100, 900] },
-    { "font": "text", "file": "InterVariable-Italic.woff2", "weight": [100, 900], "style": "italic" },
+    { "font": "text", "file": "Literata-Variable.woff2", "weight": [200, 900] },
+    { "font": "text", "file": "Literata-Italic-Variable.woff2", "weight": [200, 900], "style": "italic" },
     { "font": "code", "file": "Iosevka-Regular.woff2" },
     { "font": "code", "file": "Iosevka-Bold.woff2", "weight": 700 }
   ]

@@ -5,20 +5,23 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pubStylesheetSafe } from "@emend/contract";
 import { expect, test } from "vitest";
+import { BUILT_IN_FONTS } from "./lib/built-in-fonts.ts";
 import { readingMeasure } from "./lib/layout-store.ts";
 
 const webSource = fileURLToPath(new URL(".", import.meta.url));
 const webLicenses = fileURLToPath(new URL("../public/licenses/", import.meta.url));
 const webFonts = join(webSource, "fonts");
-const fontFiles = [
-  "geist-latin-wght-normal.woff2",
-  "geist-latin-ext-wght-normal.woff2",
-  "geist-latin-wght-italic.woff2",
-  "jetbrains-mono-latin-wght-normal.woff2",
-  "jetbrains-mono-latin-ext-wght-normal.woff2",
-  "jetbrains-mono-latin-wght-italic.woff2",
-];
-const fontLicenses = ["geist-OFL.txt", "jetbrains-mono-OFL.txt"];
+const fontSources = BUILT_IN_FONTS.flatMap((font) =>
+  ["latin-wght-normal", "latin-ext-wght-normal", ...(font.italic ? ["latin-wght-italic"] : [])].map((suffix) => ({
+    font,
+    file: `${font.slug}-${suffix}.woff2`,
+  })),
+);
+const fontFiles = fontSources.map(({ file }) => file);
+const fontLicenses = BUILT_IN_FONTS.map((font) => `${font.slug}-OFL.txt`);
+const pubFontFiles = fontSources
+  .filter(({ font, file }) => font.default && file !== "jetbrains-mono-latin-wght-italic.woff2")
+  .map(({ file }) => file);
 
 test("automatic dark styles skip explicit Light and retain their explicit Dark copies", () => {
   for (const name of ["colors", "spacing", "prose"]) {
@@ -150,7 +153,7 @@ test("web CSS loads only relative bundled fonts and never imports a remote style
   }
 });
 
-test("the six variable fonts and their OFL licences ship with matching font-face sources", () => {
+test("every built-in font and its OFL licence ship with matching font-face sources", () => {
   for (const directory of [webFonts, webLicenses]) {
     expect(readdirSync(directory).filter((file) => /^(?:hanken-grotesk|martian-mono)-/.test(file))).toEqual([]);
   }
@@ -161,6 +164,16 @@ test("the six variable fonts and their OFL licences ship with matching font-face
   for (const file of fontLicenses) {
     expect(readFileSync(join(webLicenses, file), "utf8"), file).toContain("SIL OPEN FONT LICENSE Version 1.1");
   }
+  expect(
+    readdirSync(webFonts)
+      .filter((file) => file.endsWith(".woff2"))
+      .sort(),
+  ).toEqual([...fontFiles].sort());
+  expect(
+    readdirSync(webLicenses)
+      .filter((file) => file.endsWith("-OFL.txt"))
+      .sort(),
+  ).toEqual([...fontLicenses].sort());
   const sources: string[] = [];
   for (const { path, css } of webStylesheets()) {
     for (const face of css.matchAll(/@font-face\s*\{([^}]+)\}/gi)) {
@@ -172,10 +185,15 @@ test("the six variable fonts and their OFL licences ship with matching font-face
       expect(declarations).toMatch(/font-display:\s*swap\s*;/);
       expect(declarations).not.toMatch(/font-stretch/);
       for (const url of urls) {
-        const mono = url.includes("jetbrains-mono-");
+        const matches = fontSources.filter(({ file }) => url === `../fonts/${file}`);
+        expect(matches, url).toHaveLength(1);
+        const font = matches[0]?.font;
+        if (!font) throw new Error(`Unknown built-in font source: ${url}`);
         const italic = url.endsWith("-italic.woff2");
-        expect(declarations, url).toMatch(mono ? /font-family:\s*"JetBrains Mono"\s*;/ : /font-family:\s*"Geist"\s*;/);
-        expect(declarations, url).toMatch(mono ? /font-weight:\s*100\s+800\s*;/ : /font-weight:\s*100\s+900\s*;/);
+        expect(/font-family:\s*([^;]+);/.exec(declarations)?.[1]?.trim(), url).toBe(`"${font.family}"`);
+        expect(/font-weight:\s*([^;]+);/.exec(declarations)?.[1]?.trim().replace(/\s+/g, " "), url).toBe(
+          font.weight.join(" "),
+        );
         expect(declarations, url).toMatch(italic ? /font-style:\s*italic\s*;/ : /font-style:\s*normal\s*;/);
         if (italic) expect(declarations, url).not.toMatch(/unicode-range/);
         else expect(declarations, url).toMatch(/unicode-range:\s*U\+[0-9a-f]/i);
@@ -183,8 +201,7 @@ test("the six variable fonts and their OFL licences ship with matching font-face
       }
     }
   }
-  const pubFonts = fontFiles.filter((file) => file !== "jetbrains-mono-latin-wght-italic.woff2");
-  expect(sources.sort()).toEqual([...fontFiles, ...pubFonts].map((file) => join(webFonts, file)).sort());
+  expect(sources.sort()).toEqual([...fontFiles, ...pubFontFiles].map((file) => join(webFonts, file)).sort());
 });
 
 test("pub defaults use tokens, stay inside one emend layer and define the documented classes", () => {
@@ -261,11 +278,13 @@ test("pub preferences match reading measures and sizes through safe root attribu
     expect(flat).toContain(`:root[data-emend-code="${code}"] { --reader-code-size: ${code}px; }`);
 });
 
-test("pub fonts reuse the app's exact faces without JetBrains Mono italic", () => {
+test("pub fonts reuse only the app's default faces without JetBrains Mono italic", () => {
   const fonts = readFileSync(join(webSource, "styles/fonts.css"), "utf8");
   const pub = readFileSync(join(webSource, "styles/pub-fonts.css"), "utf8");
   const faces = (css: string) => [...css.matchAll(/@font-face\s*\{[^}]+\}/g)].map((match) => match[0]);
-  expect(faces(pub)).toEqual(faces(fonts).filter((face) => !face.includes("jetbrains-mono-latin-wght-italic.woff2")));
+  expect(faces(pub)).toEqual(
+    faces(fonts).filter((face) => pubFontFiles.some((file) => face.includes(`../fonts/${file}`))),
+  );
 });
 
 test("text and labels use the sans family and every mono declaration disables programming ligatures", () => {

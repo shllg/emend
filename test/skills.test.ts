@@ -21,6 +21,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { copySkills } from "../apps/emend/src/build/skill-copy-filter.ts";
 import { run } from "../apps/emend/src/main.ts";
 import { VERSION } from "../apps/emend/src/version.ts";
+import { BUILT_IN_FONTS } from "../apps/web/src/lib/built-in-fonts.ts";
 import { THEME_SKILL_PATH, UNRELEASED_VERSION } from "../apps/web/src/lib/theme-skill.ts";
 import { PublishManifest, THEME_SCALE_STEPS, THEME_TOKENS, WaitResult } from "../packages/contract/src/index.ts";
 
@@ -473,6 +474,22 @@ test("the linked theme skill lists every scale step and token in contract order"
   expect(THEME_SKILL_PATH).toBe("docs/skills/emend-theme/SKILL.md");
   expect(themeTableNames(text, "Scale steps")).toEqual(THEME_SCALE_STEPS);
   expect(themeTableNames(text, "Tokens")).toEqual(THEME_TOKENS);
+});
+
+test("the linked theme skill lists built-in font families and defaults in order", () => {
+  const text = read(THEME_SKILL_PATH);
+  const section = text.split("### Built-in fonts\n")[1]?.split(/^#{1,3} /m)[0] ?? "";
+  for (const role of ["text", "code"] as const) {
+    const prefix = `- ${role === "text" ? "Text" : "Code"}: `;
+    const lines = section.split("\n").filter((line) => line.startsWith(prefix));
+    expect(lines).toHaveLength(1);
+    const entries = (lines[0] ?? "").slice(prefix.length).replace(/\.$/, "").split(", ");
+    const fonts = BUILT_IN_FONTS.filter((font) => font.role === role);
+    expect(entries.map((entry) => entry.replace(/ \(the default\)$/, ""))).toEqual(fonts.map(({ family }) => family));
+    expect(entries.filter((entry) => entry.endsWith(" (the default)"))).toEqual(
+      fonts.filter((font) => font.default).map(({ family }) => `${family} (the default)`),
+    );
+  }
 });
 
 test("theme tables expose missing, extra and duplicate names without reading other sections", () => {

@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { BUILT_IN_FONTS } from "../apps/web/src/lib/built-in-fonts.ts";
 import { cleanPackageDocs } from "./package-docs.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -68,13 +69,16 @@ try {
     "dist/publish-worker.mjs",
     "dist/web/index.html",
     "dist/web/pub-frame.css",
-    "dist/web/licenses/geist-OFL.txt",
-    "dist/web/licenses/jetbrains-mono-OFL.txt",
     "dist/skills/emend-review/SKILL.md",
     "dist/skills/emend-review/references/writing.md",
     "dist/skills/emend-feedback/SKILL.md",
     "dist/skills/emend-publish/SKILL.md",
   ]) {
+    check = `tarball includes ${name}`;
+    assert(entries.has(`package/${name}`));
+  }
+  for (const { slug } of BUILT_IN_FONTS) {
+    const name = `dist/web/licenses/${slug}-OFL.txt`;
     check = `tarball includes ${name}`;
     assert(entries.has(`package/${name}`));
   }

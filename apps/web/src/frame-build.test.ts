@@ -7,6 +7,7 @@ import { constants, runInNewContext } from "node:vm";
 import { Window } from "happy-dom";
 import { build } from "vite";
 import { expect, onTestFinished, test, vi } from "vitest";
+import { BUILT_IN_FONTS } from "./lib/built-in-fonts.ts";
 
 // The real web build and ten Mermaid renders under a code-generation ban are the subject.
 test("built frame rejects diagram theme overrides without dynamic code generation", async () => {
@@ -70,11 +71,20 @@ test("built frame rejects diagram theme overrides without dynamic code generatio
       "/icons/apple-touch-icon.png",
     ]),
   );
+  const assets = result.output.filter((file) => file.fileName.startsWith("assets/")).map((file) => `/${file.fileName}`);
+  const defaultFontAssets: string[] = [];
+  for (const font of BUILT_IN_FONTS) {
+    const emitted = assets.filter((path) => path.startsWith(`/assets/${font.slug}-latin-`) && path.endsWith(".woff2"));
+    expect(emitted.length, font.family).toBeGreaterThan(0);
+    if (font.default) {
+      expect(emitted, font.family).toHaveLength(3);
+      defaultFontAssets.push(...emitted);
+    }
+    for (const path of emitted) expect(shell.includes(path), path).toBe(font.default);
+  }
+  expect(defaultFontAssets).toHaveLength(6);
   expect(shell.filter((path) => path.startsWith("/assets/")).sort()).toEqual(
-    result.output
-      .filter((file) => file.fileName.startsWith("assets/"))
-      .map((file) => `/${file.fileName}`)
-      .sort(),
+    assets.filter((path) => !path.endsWith(".woff2") || defaultFontAssets.includes(path)).sort(),
   );
   for (const path of ["/api/v1/devices", "/content/key/doc.html", "/other"])
     handlers.get("fetch")?.({
