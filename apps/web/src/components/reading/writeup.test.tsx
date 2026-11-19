@@ -781,6 +781,81 @@ test.each(["critical", "review", "skim", undefined] as const)(
   },
 );
 
+test("Details shows a hidden block's change only while folded", async () => {
+  const body = { ...block, id: "t-seed-body-12345678", section: "t-seed-body" };
+  mount(
+    <Writeup
+      {...props}
+      revision={2}
+      topics={[topic]}
+      changedBlocks={[{ blockId: body.id, revision: 2 }]}
+      writeup={{ sections: [{ ...section(topic.slug, "body"), blocks: [body] }] }}
+    />,
+  );
+  const summary = screen.getByText("Details", { selector: "summary" });
+  const details = summary.closest("details");
+  if (!details) throw new Error("Missing Details");
+  expect(within(summary).getByText("Changed in rev 2")).toBeTruthy();
+  expect(summary.textContent).toContain("Changed in revision 2");
+  expect(details.open).toBe(false);
+
+  fireEvent.click(summary);
+  await waitFor(() => expect(within(summary).queryByText(/Changed in rev/)).toBeNull());
+  expect(details.open).toBe(true);
+  const changedBlock = details.querySelector<HTMLElement>(".em-reading-block");
+  if (!changedBlock) throw new Error("Missing changed detail block");
+  expect(within(changedBlock).getByText("Changed in rev 2")).toBeTruthy();
+
+  fireEvent.click(summary);
+  await waitFor(() => expect(within(summary).getByText("Changed in rev 2")).toBeTruthy());
+  expect(details.open).toBe(false);
+});
+
+test("closed Details shows the newest change among its body blocks", () => {
+  const older = { ...block, id: "t-seed-body-12345678", section: "t-seed-body" };
+  const newer = { ...block, id: "t-seed-body-23456789", section: "t-seed-body" };
+  mount(
+    <Writeup
+      {...props}
+      revision={3}
+      topics={[topic]}
+      changedBlocks={[
+        { blockId: newer.id, revision: 3 },
+        { blockId: older.id, revision: 2 },
+      ]}
+      writeup={{ sections: [{ ...section(topic.slug, "body"), blocks: [newer, older] }] }}
+    />,
+  );
+  const summary = screen.getByText("Details", { selector: "summary" });
+  expect(within(summary).getByText("Changed in rev 3")).toBeTruthy();
+  expect(within(summary).queryByText("Changed in rev 2")).toBeNull();
+  expect(summary.closest("details")?.open).toBe(false);
+});
+
+test.each([false, true])("unchanged Details has no summary marker (changed why=%s)", (changedWhy) => {
+  const why = { ...block, id: "t-seed-why-12345678", section: "t-seed-why" };
+  const body = { ...block, id: "t-seed-body-23456789", section: "t-seed-body" };
+  mount(
+    <Writeup
+      {...props}
+      topics={[topic]}
+      changedBlocks={changedWhy ? [{ blockId: why.id, revision: 2 }] : []}
+      writeup={{
+        sections: [
+          { ...section(topic.slug, "why"), blocks: [why] },
+          { ...section(topic.slug, "body"), blocks: [body] },
+        ],
+      }}
+    />,
+  );
+  const summary = screen.getByText("Details", { selector: "summary" });
+  expect(summary.closest("details")?.open).toBe(false);
+  expect(within(summary).queryByText(/Changed in rev/)).toBeNull();
+  fireEvent.click(summary);
+  expect(summary.closest("details")?.open).toBe(true);
+  expect(within(summary).queryByText(/Changed in rev/)).toBeNull();
+});
+
 test("a changed glossary stays folded and opens on navigation", () => {
   mount(
     <Writeup
@@ -798,6 +873,46 @@ test("a changed glossary stays folded and opens on navigation", () => {
   });
   expect(glossary?.open).toBe(true);
   expect(glossary && within(glossary).getByRole("button", { name: "Comment on block" })).toBeTruthy();
+});
+
+test("a glossary shows an entry's change only while folded", async () => {
+  const entry = { ...block, id: "glossary-12345678", section: "glossary" };
+  mount(
+    <Writeup
+      {...props}
+      revision={2}
+      changedBlocks={[{ blockId: entry.id, revision: 2 }]}
+      writeup={{ sections: [{ ...plain("glossary", "Glossary"), blocks: [entry] }] }}
+    />,
+  );
+  const summary = screen.getByText("Glossary · 1 term");
+  const glossary = summary.closest("details");
+  if (!glossary) throw new Error("Missing glossary");
+  expect(within(summary).getByText("Changed in rev 2")).toBeTruthy();
+  expect(summary.textContent).toContain("Changed in revision 2");
+  expect(glossary.open).toBe(false);
+
+  fireEvent.click(summary);
+  await waitFor(() => expect(within(summary).queryByText(/Changed in rev/)).toBeNull());
+  expect(glossary.open).toBe(true);
+  const changedBlock = glossary.querySelector<HTMLElement>(".em-reading-block");
+  if (!changedBlock) throw new Error("Missing changed glossary entry");
+  expect(within(changedBlock).getByText("Changed in rev 2")).toBeTruthy();
+
+  fireEvent.click(summary);
+  await waitFor(() => expect(within(summary).getByText("Changed in rev 2")).toBeTruthy());
+  expect(glossary.open).toBe(false);
+});
+
+test("an unchanged glossary has no summary marker", () => {
+  const entry = { ...block, id: "glossary-12345678", section: "glossary" };
+  mount(<Writeup {...props} writeup={{ sections: [{ ...plain("glossary", "Glossary"), blocks: [entry] }] }} />);
+  const summary = screen.getByText("Glossary · 1 term");
+  expect(summary.closest("details")?.open).toBe(false);
+  expect(within(summary).queryByText(/Changed in rev/)).toBeNull();
+  fireEvent.click(summary);
+  expect(summary.closest("details")?.open).toBe(true);
+  expect(within(summary).queryByText(/Changed in rev/)).toBeNull();
 });
 
 test("loose-list and blockquote Drift blocks are tinted without changing their text or anchors", async () => {

@@ -162,6 +162,7 @@ export function ReadingGroup({
         >
           <summary id={headingId}>
             Glossary · {terms} {plural(terms, "term")}
+            {!open && changedIn !== undefined && <ChangedMarker revision={changedIn} className="ml-2 align-middle" />}
           </summary>
           {children}
         </details>
