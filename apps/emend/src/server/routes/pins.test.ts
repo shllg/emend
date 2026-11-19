@@ -29,6 +29,13 @@ const createGroup = async () => {
   return InboxGroup.parse(await response.json());
 };
 const move = (id: string, groupId: string | null) => f.request(`/reviews/${id}/group`, "PUT", { groupId });
+const markMoved = (id: string) =>
+  f.db.query((q) =>
+    q
+      .update(t.reviews)
+      .set({ movedToUrl: "https://example.com/r/synthetic" })
+      .where(and(eq(t.reviews.ownerId, f.ownerId), eq(t.reviews.id, id))),
+  );
 async function seedMany(count: number, extra: (i: number) => Partial<typeof t.reviews.$inferInsert> = () => ({})) {
   const rows = Array.from({ length: count }, (_, i) => {
     const id = randomUUID();
@@ -83,20 +90,21 @@ test("pin and unpin reviews and pubs without changing their records; repeated wr
   expect(await pins()).toEqual([]);
 });
 
-test("pinned tail follows Done, oldest pin first and id ascending on ties; a new pin joins the bottom", async () => {
-  const done = await seed({ state: "settled" });
-  const first = await seed();
-  const tie = await seed();
-  const newest = await seed();
+test("pinning and repinning keep Active's activity order regardless of pin time", async () => {
+  await seed({ state: "settled" });
+  const first = await seed({ updatedAt: f.deps.now() - 1000 });
+  const tie = await seed({ updatedAt: f.deps.now() - 1000 });
+  const newest = await seed({ updatedAt: f.deps.now() - 2000 });
+  const before = (await inbox()).items.map((item) => item.id);
   for (const id of [first, tie].sort().reverse()) expect((await pin(id)).status).toBe(204);
   f.advance(1000);
   expect((await pin(newest)).status).toBe(204);
   f.advance(1000);
   expect((await pin(first)).status).toBe(204);
-  expect((await inbox()).items.map((item) => item.id)).toEqual([f.reviewId, done, ...[first, tie].sort(), newest]);
+  expect((await inbox()).items.map((item) => item.id)).toEqual(before);
   expect((await pin(first, false)).status).toBe(204);
   expect((await pin(first)).status).toBe(204);
-  expect((await inbox()).items.map((item) => item.id)).toEqual([f.reviewId, done, tie, newest, first]);
+  expect((await inbox()).items.map((item) => item.id)).toEqual(before);
 });
 
 test("agent/admin bearers and a reviewer token as bearer are refused before path, body or review lookup", async () => {
@@ -195,58 +203,96 @@ test("bin hides a pin and refuses changes, restore keeps its time, and delete fo
   expect(await pins()).toEqual([]);
 });
 
-test("moved reviews refuse pin and unpin without changing the pin", async () => {
+test("moved reviews show as unpinned and refuse pin and unpin without changing the pin row", async () => {
   expect((await pin(f.reviewId)).status).toBe(204);
   const before = await pins();
-  await f.db.query((q) =>
-    q
-      .update(t.reviews)
-      .set({ movedToUrl: "https://example.com/r/synthetic" })
-      .where(and(eq(t.reviews.ownerId, f.ownerId), eq(t.reviews.id, f.reviewId))),
-  );
+  await markMoved(f.reviewId);
   for (const pinned of [true, false]) await error(await pin(f.reviewId, pinned), 409, "review_moved");
   expect(await pins()).toEqual(before);
+  expect((await inbox()).items).toMatchObject([{ id: f.reviewId, pinnedAt: null }]);
+  expect(await view(f.reviewId)).toMatchObject({ id: f.reviewId, pinnedAt: null });
 });
 
-test("a pinned open review takes no Active place and stays out of the sorted Active part even at the cap", async () => {
+test("a moved pin keeps its row but leaves room for a new pin among 49 other pins", async () => {
+  expect((await pin(f.reviewId)).status).toBe(204);
+  const ids = await seedMany(LIMITS.pins - 1);
+  await f.db.query((q) =>
+    q.insert(t.reviewPins).values(ids.map((reviewId) => ({ ownerId: f.ownerId, reviewId, createdAt: f.deps.now() }))),
+  );
+  const next = await seed();
+  await error(await pin(next), 409, "invalid_state");
+  await markMoved(f.reviewId);
+  const before = await pins();
+  expect((await pin(next)).status).toBe(204);
+  expect(await pins()).toHaveLength(LIMITS.pins + 1);
+  expect(await pins()).toEqual(expect.arrayContaining(before));
+  expect((await inbox()).items.filter((item) => item.pinnedAt !== null)).toHaveLength(LIMITS.pins);
+  await error(await pin(await seed()), 409, "invalid_state");
+});
+
+test("a pinned open review takes an Active place and stays in the sorted Active part at the cap", async () => {
   expect((await pin(f.reviewId)).status).toBe(204);
   const ids = await seedMany(LIMITS.inboxItems, (i) => ({ updatedAt: f.deps.now() - i - 1 }));
   const done = await seed({ state: "settled" });
   const { items } = await inbox();
-  expect(items).toHaveLength(LIMITS.inboxItems + 2);
-  expect(items.slice(0, LIMITS.inboxItems).map((item) => item.id)).toEqual(ids);
-  expect(items.slice(LIMITS.inboxItems).map((item) => item.id)).toEqual([done, f.reviewId]);
-  expect(items.at(-1)).toMatchObject({ id: f.reviewId, list: "active", groupId: null, pinnedAt: expect.any(String) });
+  expect(items).toHaveLength(LIMITS.inboxItems + 1);
+  expect(items.slice(0, LIMITS.inboxItems).map((item) => item.id)).toEqual([f.reviewId, ...ids.slice(0, -1)]);
+  expect(items.at(-1)?.id).toBe(done);
+  expect(items[0]).toMatchObject({ id: f.reviewId, list: "active", groupId: null, pinnedAt: expect.any(String) });
   expect(items.filter((item) => item.id === f.reviewId)).toHaveLength(1);
 });
 
-test("pinned approvals take no approval-cap place and use the window alone even with no Active places", async () => {
+test("pinned approvals take approval-cap places and stay in Done when the approval or Active cap is full", async () => {
   const pinned = await seed({ state: "approved", approvedAt: f.deps.now() });
   expect((await pin(pinned)).status).toBe(204);
   const approvals = await seedMany(6, (i) => ({ state: "approved", approvedAt: f.deps.now() - i - 1 }));
   const { items } = await inbox();
-  expect(
-    items
-      .filter((item) => item.state === "approved" && item.list === "active" && item.pinnedAt === null)
-      .map((item) => item.id),
-  ).toEqual(approvals.slice(0, 5).sort());
-  expect(items.find((item) => item.id === approvals[5])).toMatchObject({ list: "done", activeUntil: null });
+  expect(items.filter((item) => item.state === "approved" && item.list === "active").map((item) => item.id)).toEqual(
+    [pinned, ...approvals.slice(0, 4)].sort(),
+  );
+  const overflow = approvals[5];
+  if (!overflow) throw new Error("Missing approval");
+  expect(items.find((item) => item.id === overflow)).toMatchObject({ list: "done", activeUntil: null });
+  expect((await pin(overflow)).status).toBe(204);
+  expect((await inbox()).items.find((item) => item.id === overflow)).toMatchObject({
+    list: "done",
+    activeUntil: null,
+    pinnedAt: expect.any(String),
+  });
   const activeUntil = new Date(f.deps.now() + 12 * 3_600_000).toISOString();
-  expect(items.at(-1)).toMatchObject({ id: pinned, list: "active", activeUntil });
+  expect(items.find((item) => item.id === pinned)).toMatchObject({ list: "active", activeUntil });
   expect(items.filter((item) => item.id === pinned)).toHaveLength(1);
   expect((await f.request("/settings", "PATCH", { approvedActiveLimit: 0 })).status).toBe(200);
-  expect((await inbox()).items.at(-1)).toMatchObject({ id: pinned, list: "active", activeUntil });
+  const atZero = await inbox();
+  for (const id of [pinned, ...approvals])
+    expect(atZero.items.find((item) => item.id === id)).toMatchObject({ list: "done", activeUntil: null });
+  expect(await view(pinned)).toMatchObject({ list: "active", activeUntil });
+  expect((await f.request("/settings", "PATCH", { approvedActiveLimit: 5 })).status).toBe(200);
   await seedMany(LIMITS.inboxItems);
-  expect((await inbox()).items.at(-1)).toMatchObject({ id: pinned, list: "active", activeUntil });
+  expect((await inbox()).items.find((item) => item.id === pinned)).toMatchObject({ list: "done", activeUntil: null });
   f.advance(12 * 3_600_000);
   expect((await inbox()).items.find((item) => item.id === pinned)).toMatchObject({ list: "done", activeUntil: null });
 });
 
+test("a pinned open review beyond the Active cap appears once in Active before the other blocks", async () => {
+  const ids = await seedMany(LIMITS.inboxItems, (i) => ({ updatedAt: f.deps.now() - i - 1 }));
+  const pinned = ids.at(-1);
+  if (!pinned) throw new Error("Missing review");
+  expect((await pin(pinned)).status).toBe(204);
+  const done = await seed({ state: "settled" });
+  const { items } = await inbox();
+  expect(items.map((item) => item.id)).toEqual([f.reviewId, ...ids, done]);
+  expect(items.filter((item) => item.id === pinned)).toHaveLength(1);
+  expect(items.find((item) => item.id === pinned)).toMatchObject({ list: "active", pinnedAt: expect.any(String) });
+  await markMoved(pinned);
+  expect((await inbox()).items.map((item) => item.id)).toEqual([f.reviewId, ...ids.slice(0, -1), done]);
+});
+
 test.each(["snoozed", "grouped", "done"] as const)(
-  "a pinned %s item beyond its block cap is still returned once",
+  "pinned %s overflow follows capped rows in block order and excludes moved reviews",
   async (block) => {
     const group = block === "grouped" ? await createGroup() : null;
-    const ids = await seedMany(LIMITS.inboxItems + 1, (i) => ({
+    const ids = await seedMany(LIMITS.inboxItems + 2, (i) => ({
       state: block === "done" ? "settled" : "open",
       updatedAt: f.deps.now() - i,
       snoozedAt: block === "snoozed" ? f.deps.now() : null,
@@ -258,18 +304,25 @@ test.each(["snoozed", "grouped", "done"] as const)(
           .insert(t.reviewGroupMembers)
           .values(ids.map((reviewId) => ({ ownerId: f.ownerId, reviewId, groupId: group.id }))),
       );
-    const pinned = ids.at(-1);
-    if (!pinned) throw new Error("Missing review");
-    expect((await pin(pinned)).status).toBe(204);
+    const overflow = ids.slice(LIMITS.inboxItems);
+    for (const id of overflow.toReversed()) {
+      expect((await pin(id)).status).toBe(204);
+      f.advance(1);
+    }
     const { items } = await inbox();
     expect(items.map((item) => item.id)).toEqual([f.reviewId, ...ids]);
-    expect(items.filter((item) => item.id === pinned)).toHaveLength(1);
-    expect(items.at(-1)).toMatchObject({
-      id: pinned,
-      pinnedAt: expect.any(String),
-      groupId: group?.id ?? null,
-      list: block === "grouped" ? "active" : block,
-    });
+    for (const id of overflow) {
+      expect(items.filter((item) => item.id === id)).toHaveLength(1);
+      expect(items.find((item) => item.id === id)).toMatchObject({
+        pinnedAt: expect.any(String),
+        groupId: group?.id ?? null,
+        list: block === "grouped" ? "active" : block,
+      });
+    }
+    const moved = overflow[0];
+    if (!moved) throw new Error("Missing review");
+    await markMoved(moved);
+    expect((await inbox()).items.map((item) => item.id)).toEqual([f.reviewId, ...ids.filter((id) => id !== moved)]);
   },
 );
 
@@ -282,18 +335,18 @@ test("pinned Snoozed, grouped and Done items keep their normal block position an
   for (const id of [grouped, groupedLast]) expect((await move(id, group.id)).status).toBe(204);
   const done = await seed({ state: "settled" });
   const doneLast = await seed({ state: "approved", approvedAt: null, updatedAt: f.deps.now() - 1 });
-  const tail = await seed();
-  for (const id of [tail, done, grouped, snoozed]) expect((await pin(id)).status).toBe(204);
+  const active = await seed({ updatedAt: f.deps.now() - 1 });
+  for (const id of [active, done, grouped, snoozed]) expect((await pin(id)).status).toBe(204);
   const { items } = await inbox();
   expect(items.map((item) => item.id)).toEqual([
     f.reviewId,
+    active,
     snoozed,
     snoozedLast,
     grouped,
     groupedLast,
     done,
     doneLast,
-    tail,
   ]);
   expect(new Set(items.map((item) => item.id)).size).toBe(items.length);
 });

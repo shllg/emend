@@ -225,6 +225,50 @@ test("a pending pin ignores another Shift+P and disables its palette command", a
   expect(pinWrites()).toHaveLength(1);
 });
 
+test("a pin stays pending until the review refetch lands, then Shift+P sends the opposite value", async () => {
+  mount(`/r/${id(1)}`);
+  const trigger = await screen.findByRole("button", { name: "More review actions" });
+  await ready();
+  await expectPinned(id(1), false);
+  const refetch = Promise.withResolvers<void>();
+  const started = Promise.withResolvers<void>();
+  const fallback = fetchMock.getMockImplementation();
+  fetchMock.mockImplementation(async (input, init) => {
+    if (String(input) === `/api/v1/reviews/${id(1)}`) {
+      started.resolve();
+      await refetch.promise;
+    }
+    if (!fallback) throw new Error("fetch mock has no default implementation");
+    return fallback(input, init);
+  });
+  await act(async () => {
+    expect(press("P", { shiftKey: true }).defaultPrevented).toBe(true);
+    await started.promise;
+  });
+  await waitFor(() => {
+    expect(client.getQueryState(["inbox"])?.fetchStatus).toBe("idle");
+    expect(within(screen.getByRole("region", { name: "Pinned" })).getByText("Item 1")).toBeTruthy();
+  });
+  expect(client.getQueryState(["review", id(1)])?.fetchStatus).toBe("fetching");
+  expect(client.getQueryData<ReviewView>(["review", id(1)])?.pinnedAt).toBeNull();
+  expect(client.isMutating()).toBe(1);
+  expect(trigger.getAttribute("aria-busy")).toBe("true");
+  expect(press("P", { shiftKey: true }).defaultPrevented).toBe(false);
+  expect(pinWrites()).toHaveLength(1);
+  expect(pinWrites()[0]?.[1]?.body).toBe(JSON.stringify({ pinned: true }));
+
+  await act(async () => refetch.resolve());
+  await expectPinned(id(1), true);
+  await waitFor(() => {
+    expect(client.isMutating()).toBe(0);
+    expect(trigger.getAttribute("aria-busy")).not.toBe("true");
+  });
+  expect(press("P", { shiftKey: true }).defaultPrevented).toBe(true);
+  await expectPinned(id(1), false);
+  expect(pinWrites()).toHaveLength(2);
+  expect(pinWrites()[1]?.[1]?.body).toBe(JSON.stringify({ pinned: false }));
+});
+
 test("Pinned shows its count above Active, opens at start and folds", async () => {
   const { container } = mount();
   const section = within(await screen.findByRole("region", { name: "Pinned" }));

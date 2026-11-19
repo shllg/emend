@@ -847,7 +847,7 @@ updatedAt, movedTo: string | null, list: "active" | "snoozed" | "done", snoozed:
 snoozedUntil: string | null, activeUntil: string | null, releasedAt: string | null, pickedUpAt: string | null,
 kind: "review" | "publish", groupId: string | null, pinnedAt: string | null }`.
 `groupId` is the inbox group UUID, null when ungrouped (the default when omitted).
-`pinnedAt` is when the reviewer pinned it, as an ISO 8601 UTC string, null when unpinned
+`pinnedAt` is when the reviewer pinned it, as an ISO 8601 UTC string, null when unpinned or moved
 (the default when omitted). `repo` is the repository key, and
 `movedTo` is the review's destination URL. `list` places the review: `done` for `settled`, and for
 `approved` once the effective `approvedActiveHours` have passed since approval or it does not fit
@@ -898,12 +898,12 @@ is the nonnegative integer count of that owner's member reviews and pubs not in 
 including members beyond the grouped block's row cap. Groups without members have `members: 0`.
 Reviews in the bin are in none of the lists.
 `serverTime` is the server's clock when it built the list, as an ISO 8601 UTC string.
-The Active list holds ungrouped, unpinned open reviews whose snooze is not in effect, selected by newest activity,
+The Active list holds ungrouped open reviews whose snooze is not in effect, selected by newest activity,
 then id ascending, up to `inboxItems` (200). Open reviews take the places first. Approved reviews
 qualify only inside the approval window (12 hours by default), up to `approvedActiveLimit`
 (5 by default) or the number of remaining Active places, whichever is smaller. These places go
 to the newest approvals by approval time, then id ascending, regardless of later activity.
-Every other ungrouped, unpinned approved review is in Done with `activeUntil: null`. Because every approval has the
+Every other ungrouped approved review is in Done with `activeUntil: null`. Because every approval has the
 same window length, a window ending cannot bring an older approval back into Active.
 
 Active is ordered by priority, first match wins: open with an agent waiting; open with unsent
@@ -918,14 +918,17 @@ block, then Done (retired reviews and approvals without an Active place, newest 
 first). Grouped reviews are in none of Active, Snoozed or Done and take no Active place or
 approval-cap place. Their block is newest activity first: an open review uses the later of
 `updatedAt` and the wake time of a timed snooze that has passed; others use `updatedAt`.
-Id ascending breaks ties in every block. Each block holds at most `inboxItems` (200) rows.
-Pinned reviews take no Active place and no approval-cap place. A pinned review that would be
-in Active is in none of the four blocks; pins otherwise keep their normal place and order in
-Snoozed, the grouped block or Done. Every pinned review not already in those blocks follows
-Done, oldest pin first (pin time, then id ascending), up to `pins` (50). This includes pins beyond
-their normal block's row cap. The response carries each review once, at most 850 rows in all.
-A grouped or pinned review's `list` and `activeUntil` follow the single-review rule below
-(approval window alone, no caps); clients place it by `pinnedAt` and `groupId`.
+Id ascending breaks ties in every block. Each block has a row cap of `inboxItems` (200).
+A pinned review is placed exactly like an unpinned one. It takes an Active place and an
+approval-cap place when it qualifies. Each of the Active, Snoozed, grouped and Done blocks
+also carries its pinned reviews beyond its row cap, after its capped rows and in its own order.
+The approval cap still applies: a pinned approval without an Active place is in Done.
+Every pinned review outside the bin is in the response, except moved reviews, which show as
+unpinned. The response carries each review once, at most 850 rows in all.
+Clients show a pinned review in Pinned, and also in its own section unless that section is Active.
+Pinned is oldest pin first (pin time, then id ascending).
+A grouped review's `list` and `activeUntil` follow the single-review rule below
+(approval window alone, no caps); clients place it by `groupId`.
 `GET /api/v1/reviews/:id` returns `ReviewView = InboxItem & { revisions: { seq, createdAt }[], importedAt: string | null }`,
 with revisions ascending by sequence. It places an approved review by the effective approval
 window alone, without Active's caps.
@@ -1369,7 +1372,7 @@ to make a read fit a per-Send or per-revision limit. The limits below apply to t
 
 | Field | Bound and write-side source |
 | --- | --- |
-| `InboxList.items` | `inboxItems` × 4 + `pins` (850), the four inbox blocks plus pinned rows missing from them |
+| `InboxList.items` | `inboxItems` × 4 + `pins` (850), the four inbox blocks plus each block's pinned rows beyond its cap |
 | `AgentReviewList.items` | `agentReviews` (100), the agent list query limit |
 | `AgentReviewItem.title` | `titleChars` (200), as in `InboxItem.title` |
 | `AgentReviewItem.branch` | As `InboxItem.branch`: the stored branch or `null` |
@@ -2079,8 +2082,8 @@ of Pinned; pinning a pinned review keeps its pin time. `pinned: false` removes t
 unpinning an unpinned review is a 204 no-op.
 
 A missing or foreign review is `404 unknown_review`; a malformed path UUID is 404.
-A binned review is `409 review_in_bin`; a moved review is `409 review_moved`.
-Pinning beyond `pins` (50, counting pinned reviews in the bin) gives `409 invalid_state`
+A binned review is `409 review_in_bin`. Pin and unpin of a moved review are `409 review_moved`.
+Pinning beyond `pins` (50, counting pinned reviews in the bin but not moved reviews) gives `409 invalid_state`
 with the message "You have the most pins allowed. Unpin one first.".
 Each write runs in one transaction and emits a `pins` event `{ reviewId }` after commit;
 owner-wide streams and that review's streams receive it.
@@ -2088,6 +2091,8 @@ owner-wide streams and that review's streams receive it.
 A pin changes nothing on the review: no state, snooze, approval or `updatedAt` change.
 It survives new revisions, snooze, retire, approve, reopen, a move to a group and the bin.
 A binned review is in no list; restore brings it back pinned with its old pin time.
+A moved review shows `pinnedAt: null` in the list and single-review view and is in no Pinned section.
+It keeps its pin row but does not count toward `pins`.
 A hard delete removes the pin. Attach/import copies no pins.
 The agent list (`GET /api/v1/agent/reviews`), CLI, MCP and skills do not show pins.
 Capabilities lists `review-pins` (`REVIEW_PINS_FEATURE`).
@@ -2284,9 +2289,9 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `themeFontFiles` | 16 font entries per theme |
 | `themeFontBytes` | 4194304 bytes per font file (4 MiB) |
 | `themeProblems` | 20 problems per theme |
-| `inboxItems` | 200 rows per inbox block (at most 800, plus 50 pinned rows missing from those blocks) |
+| `inboxItems` | 200 rows per inbox block (at most 800, plus each block's pinned rows beyond its cap, at most 50 in all) |
 | `groups` | 50 inbox groups per owner |
-| `pins` | 50 pinned reviews and pubs per owner, the bin included |
+| `pins` | 50 pinned reviews and pubs per owner, the bin included, moved reviews excluded |
 | `groupNameChars` | 80 characters per trimmed group name |
 | `agentReviews` | 100 reviews returned in the agent list |
 | `binItems` | 200 reviews returned in the bin list |
