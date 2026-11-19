@@ -1,4 +1,5 @@
 import mermaid, { type MermaidConfig } from "mermaid";
+import { statechartClassCSS } from "./src/components/reading/mermaid-classes.ts";
 import type { MermaidColors } from "./src/components/reading/mermaid-colors.ts";
 
 const MAX_SOURCE = 50000;
@@ -225,6 +226,7 @@ export function frameConfig(dark: boolean, colors?: MermaidColors): MermaidConfi
   return {
     theme: "base",
     fontFamily: FONT_FAMILY,
+    themeCSS: statechartClassCSS(dark, surface, fg),
     themeVariables: {
       darkMode: dark,
       fontSize: "13px",

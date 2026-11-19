@@ -261,6 +261,14 @@ A plan or other doc that comes with a review opens next to its diff, with its di
 your comments beside the text. A tinted passage, or the count in the margin, opens its thread
 beside the text. Press `,` and `.` to step through the comments.
 
+Diagrams colour the classes `blue`, `orange`, `purple`, `yellow`, `teal`, `tan` and `pink` as group
+fills in light and dark. They mark states with `breaks` (red), `mayBreak` (orange), `bugPath` (a blue
+border) and `repeats` (a dashed purple border) in both modes. These are the names the statechart
+skill writes. The colours apply to states, composite states, flowchart nodes and subgraphs.
+A mark shows over a group fill. A `classDef` for one of these names in the diagram wins over
+emend's colours for that class. A hand-drawn diagram (`look: handDrawn`) keeps Mermaid's sketched
+fills, so give it a `classDef` instead.
+
 ![A plan doc with a state diagram and a comment thread](images/doc-desktop.png)
 
 Comments stay unsent until you press Send. The Comments tab lists them, and the Send bar lets you

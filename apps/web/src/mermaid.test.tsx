@@ -12,6 +12,7 @@ import {
   startFrame,
 } from "../mermaid-frame.ts";
 import { LightboxDiagram, MermaidBlock, parseFrameSize } from "./components/reading/MermaidBlock.tsx";
+import { statechartClassCSS } from "./components/reading/mermaid-classes.ts";
 import * as mermaidColors from "./components/reading/mermaid-colors.ts";
 import { requestThemeSync, selectCustomTheme, setThemePick, startThemeSync } from "./lib/theme.ts";
 import { customTheme } from "./test/themes.ts";
@@ -397,6 +398,13 @@ test("frame config secures the arrow limit and architecture iterations", () => {
     maxEdges: 150,
     secure: expect.arrayContaining(["maxEdges", "numIter", "layout", "elk"]),
   });
+});
+test("frame config derives class colours from the built-in and supplied theme palettes", () => {
+  expect(frameConfig(false).themeCSS).toBe(statechartClassCSS(false, "#fdfdfe", "#111213"));
+  expect(frameConfig(true).themeCSS).toBe(statechartClassCSS(true, "#111213", "#f4f4f6"));
+  for (const dark of [false, true]) {
+    expect(frameConfig(dark, ownColors).themeCSS).toBe(statechartClassCSS(dark, ownColors.surface, ownColors.text));
+  }
 });
 test("diagram measurement resets site config before parsing", async () => {
   await expect(exceedsLimits(stateSource)).resolves.toBe(false);

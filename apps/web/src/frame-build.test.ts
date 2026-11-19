@@ -7,9 +7,10 @@ import { constants, runInNewContext } from "node:vm";
 import { Window } from "happy-dom";
 import { build } from "vite";
 import { expect, onTestFinished, test, vi } from "vitest";
+import { statechartClassColors } from "./components/reading/mermaid-classes.ts";
 import { BUILT_IN_FONTS } from "./lib/built-in-fonts.ts";
 
-// The real web build and ten Mermaid renders under a code-generation ban are the subject.
+// The real web build and Mermaid renders under a code-generation ban are the subject.
 test("built frame rejects diagram theme overrides without dynamic code generation", async () => {
   const workerModules = new Map<string, string[]>();
   const result = await build({
@@ -277,6 +278,22 @@ test("built frame rejects diagram theme overrides without dynamic code generatio
     '%%{init: {"fontFamily": "x; .probeFontInit{fill:rgb(7,8,9)}"}}%%\nflowchart LR\n  F01a --> F01b',
     '---\nconfig:\n  fontFamily: "x; .probeFontFm{fill:rgb(7,8,9)}"\n---\nflowchart LR\n  F01a --> F01b',
     "flowchart LR\n C01a --> C01b\n classDef synthetic fill:#123456,stroke:#654321;\n class C01a synthetic;\n style C01b fill:#abcdef,stroke:#fedcba;",
+    `stateDiagram-v2
+  [*] --> S01a
+  S01a --> S01b
+  S01b --> S01c
+  state S01c {
+    [*] --> S01d
+  }
+  S01c --> S01e
+  classDef teal fill:#ffd6e7,stroke:#a3004f,color:#4a0020
+  class S01a blue
+  class S01b teal
+  class S01b bugPath
+  class S01c purple
+  class S01e teal`,
+    // Hand-drawn diagrams cannot render in happy-dom; mermaid-classes.test.ts checks emend's rules skip them.
+    "flowchart LR\n  subgraph G01 [G01]\n    G01a --> G01b\n  end\n  G01 --> G01c\n  class G01 teal\n  class G01b breaks",
     '%%{init: {"themeVariables": {"fontSize": ["16px;} text{fill:rgb(7,8,9) !important} .z{color:x"]}}}%%\nflowchart LR\n  B05a --> B05b',
     '%%{initialize: {"themeVariables": {"fontSize": ["16px;} text{fill:rgb(7,8,9) !important} .z{color:x"]}}}%%\nflowchart LR\n  B05a --> B05b',
     '---\nconfig:\n  themeVariables:\n    fontSize: ["16px;} text{fill:rgb(7,8,9) !important} .z{color:x"]\n---\nflowchart LR\n  B05a --> B05b',
@@ -284,7 +301,7 @@ test("built frame rejects diagram theme overrides without dynamic code generatio
     root.replaceChildren();
     const rendered = Promise.withResolvers<void>();
     const observer = new window.MutationObserver(() => {
-      if (root.firstElementChild?.localName === "svg") rendered.resolve();
+      if (root.firstElementChild?.localName === "svg" || root.firstElementChild?.localName === "p") rendered.resolve();
     });
     observer.observe(root, { childList: true });
     // A render that never happens ends the test by timeout without unwinding; onTestFinished still runs.
@@ -311,6 +328,55 @@ test("built frame rejects diagram theme overrides without dynamic code generatio
     }
     const styles = [...root.querySelectorAll("svg style")];
     expect(styles.length).toBeGreaterThan(0);
+    const css = styles.map((style) => style.textContent).join("\n");
+    if (source.includes("class S01c purple")) {
+      const blue = root.querySelector("g.node.blue");
+      if (!blue) throw new Error("Missing blue state");
+      expect(blue.textContent).toContain("S01a");
+      expect(blue.matches(".node.blue:not([data-look=handDrawn])")).toBe(true);
+      expect(root.querySelector("g.node.teal.bugPath")?.textContent).toContain("S01b");
+      const parent = root.querySelector("g.statediagram-cluster.purple");
+      const stateNodes = [...root.querySelectorAll("g.node")];
+      const child = stateNodes.find((node) => node.textContent.includes("S01d"));
+      if (!parent || !child) throw new Error("Missing composite state or its child");
+      expect(parent.matches(".statediagram-cluster.purple:not([data-look=handDrawn])")).toBe(true);
+      expect(parent.contains(child)).toBe(false);
+      const own = stateNodes.find((node) => node.textContent.includes("S01e"));
+      expect(own?.querySelector("rect, path")?.getAttribute("style")).toMatch(/fill:\s*#ffd6e7/);
+
+      const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      const colors = statechartClassColors(dark, dark ? "#111213" : "#fdfdfe", dark ? "#f4f4f6" : "#111213");
+      const blueFill = colors.find((color) => color.name === "blue")?.fill;
+      expect(blueFill).toBeDefined();
+      expect(css).toMatch(
+        new RegExp(
+          `\\.node\\.blue:not\\(\\[data-look=handDrawn\\]\\)\\s+rect\\b[^{}]*\\{[^{}]*\\bfill\\s*:\\s*${blueFill}\\s*(?:;|\\})`,
+        ),
+      );
+      expect(css).toMatch(/\.statediagram-cluster\.purple:not\(\[data-look=handDrawn\]\)\s+rect\.inner\b/);
+
+      // Scoped selectors distinguish emend's defaults from Mermaid's classDef rules.
+      const names = colors.map((color) => color.name).join("|");
+      const defaults = new RegExp(`\\.(?:node|cluster|statediagram-cluster)\\.(?:${names})\\b`);
+      for (const [, selectors = "", declarations = ""] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        if (defaults.test(selectors)) expect(declarations).not.toContain("!important");
+      }
+      const tealDefault = css.search(/\.node\.teal:not\(\[data-look=handDrawn\]\)\s+rect\b/);
+      const tealClassDef = /(?:^|\s)\.teal\s+rect\s*\{[^{}]*\bfill\s*:\s*#ffd6e7\s*!important\b[^{}]*\}/.exec(css);
+      expect(tealDefault).toBeGreaterThanOrEqual(0);
+      expect(tealClassDef?.index).toBeGreaterThan(tealDefault);
+    }
+    if (source.includes("class G01 teal")) {
+      const cluster = root.querySelector("g.cluster.teal");
+      const node = [...root.querySelectorAll("g.node")].find((node) => node.textContent.includes("G01b"));
+      if (!cluster || !node) throw new Error("Missing classic subgraph or its child");
+      expect(cluster.querySelector("rect")).not.toBeNull();
+      expect(cluster.getAttribute("data-look")).not.toBe("handDrawn");
+      expect(cluster.matches(".cluster.teal:not([data-look=handDrawn])")).toBe(true);
+      expect(node.matches("g.node.breaks")).toBe(true);
+      expect(cluster.contains(node)).toBe(false);
+      expect(css).toMatch(/\.cluster\.teal:not\(\[data-look=handDrawn\]\)\s+rect\b/);
+    }
     for (const style of styles) {
       expect
         .soft(style.textContent.match(/\.probe(?:ThemeInit|ThemeInitialize|FontInit|FontFm)\b/g) ?? [], source)
