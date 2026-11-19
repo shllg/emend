@@ -65,6 +65,25 @@ test("group sections sort by name and id between Snoozed and Done, preserving se
       .map((s) => s.group?.id),
   ).toEqual([a.id, b.id]);
 });
+test("Active starts open, can fold, and expands for a filter without changing its fold state", () => {
+  const rows = [item(1), item(2)];
+  const open = { active: false };
+  expect(inboxSections(rows, now)[0]).toMatchObject({ expanded: true, rows });
+  expect(inboxSections(rows, now, { open })[0]).toMatchObject({ expanded: false, rows });
+  expect(inboxSections(rows, now, { open, filter: "Item 2" })[0]).toMatchObject({
+    expanded: true,
+    rows: [rows[1]],
+  });
+  expect(inboxSections(rows, now, { open })[0]?.expanded).toBe(false);
+});
+test("the inbox sequence skips folded Active rows and keeps the other open sections in order", () => {
+  const rows = [item(1), item(2, { list: "snoozed" }), item(3, { groupId: a.id }), item(4, { list: "done" })];
+  const options = { groups: [a], open: { active: false, snoozed: true, [`group:${a.id}`]: true, done: true } };
+  const sections = inboxSections(rows, now, options);
+  expect(inboxSequence(sections)).toEqual(rows.slice(1));
+  expect(activeJumpRows(sections)).toEqual([]);
+  expect(inboxSequence(inboxSections(rows, now, { ...options, filter: "Item" }))).toEqual(rows);
+});
 test("membership wins over approved, retired and snoozed states, even after the approval window", () => {
   const rows = [
     item(1, { groupId: a.id, state: "approved", activeUntil: "2026-11-04T11:00:00.000Z" }),
@@ -147,12 +166,15 @@ test("all filters apply within groups; search expands them, and filtered-out mem
   }
 });
 
-test("Active jumps take the first nine openable rows in display order", () => {
-  const rows = Array.from({ length: 12 }, (_, i) => item(i + 1));
-  expect(activeJumpRows(inboxSections(rows, now))).toEqual(rows.slice(0, 9));
-  rows[1] = item(2, { movedTo: "https://example.com/review" });
-  expect(activeJumpRows(inboxSections(rows, now))).toEqual([rows[0], ...rows.slice(2, 10)]);
-});
+test.each([{}, { open: { active: true } }, { open: { active: false }, filter: "Item" }] as const)(
+  "Active jumps take the first nine openable rows in display order with %j",
+  (options) => {
+    const rows = Array.from({ length: 12 }, (_, i) => item(i + 1));
+    expect(activeJumpRows(inboxSections(rows, now, options))).toEqual(rows.slice(0, 9));
+    rows[1] = item(2, { movedTo: "https://example.com/review" });
+    expect(activeJumpRows(inboxSections(rows, now, options))).toEqual([rows[0], ...rows.slice(2, 10)]);
+  },
+);
 
 test("Active jumps never fill spare places with snoozed, grouped, Done or expired rows", () => {
   const rows = [

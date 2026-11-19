@@ -206,6 +206,32 @@ test.each([1280, 900])(
   },
 );
 
+test.each(["page", "pane"])("folding Active removes %s numbers and jumps until it opens again", async (surface) => {
+  const path = surface === "page" ? "/" : `/r/${id(2)}`;
+  const history = mount(path);
+  await ready();
+  const toggle = screen.getByRole("button", { name: "Active 12" });
+  expect(numbers()).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(numbers()).toEqual([]);
+  expect(screen.queryByRole("link", { name: /Review 1(?:\s|$)/ })).toBeNull();
+  const location = history.location;
+  const length = history.length;
+  await act(async () => {
+    expect(jump(1).defaultPrevented).toBe(true);
+  });
+  expect(history.location).toEqual(location);
+  expect(history.length).toBe(length);
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(numbers()).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+  expect(rowLink(1).getAttribute("aria-keyshortcuts")).toBe("Alt+1");
+  expect(jump(1).defaultPrevented).toBe(true);
+  await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(1)}`));
+  expect(history.location.search).toBe("?rev=1");
+});
+
 test("a held jump key keeps its repeats from the browser and opens its row once", async () => {
   const history = mount();
   await ready();
@@ -308,6 +334,31 @@ test.each([1280, 768, 1023])("rail at %s numbers its own rows and ignores Kind",
   expect(rowLink(3, rail).getAttribute("aria-keyshortcuts")).toBe("Alt+3");
   expect(jump(3).defaultPrevented).toBe(true);
   await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(3)}`));
+});
+
+test("collapsing a pane with folded Active restores the rail's numbers and jumps", async () => {
+  const history = mount(`/r/${id(2)}`);
+  await ready();
+  fireEvent.click(screen.getByRole("button", { name: "Active 12" }));
+  expect(numbers()).toEqual([]);
+  fireEvent.click(screen.getByRole("button", { name: "Collapse inbox" }));
+  const rail = await screen.findByRole("complementary", { name: "Inbox" });
+  expect(screen.queryByTestId("inbox-pane")).toBeNull();
+  expect(numbers(rail)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+  expect(badge(rowLink(1, rail))).toBe("1");
+  expect(rowLink(1, rail).getAttribute("aria-keyshortcuts")).toBe("Alt+1");
+  expect(jump(1).defaultPrevented).toBe(true);
+  await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(1)}`));
+  expect(history.location.search).toBe("?rev=1");
+  fireEvent.click(screen.getByRole("button", { name: "Show inbox" }));
+  const pane = await screen.findByTestId("inbox-pane");
+  expect(within(pane).getByRole("button", { name: "Active 12" }).getAttribute("aria-expanded")).toBe("false");
+  expect(numbers()).toEqual([]);
+  const location = history.location;
+  await act(async () => {
+    expect(jump(3).defaultPrevented).toBe(true);
+  });
+  expect(history.location).toEqual(location);
 });
 
 test("collapsing a searched pane switches jumps to the rail's unfiltered rows", async () => {

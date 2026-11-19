@@ -24,6 +24,7 @@ import {
   inboxSections,
   inboxSequence,
   readInboxKind,
+  sectionOpen,
 } from "../lib/inbox-list.ts";
 import { type InboxSurface, useInboxScroll, useInboxView } from "../lib/inbox-view.tsx";
 import { useLayout } from "../lib/layout.ts";
@@ -273,10 +274,9 @@ export function Inbox({
           </div>
         )}
         {query.data &&
-          sections.map(({ key, list, title, count, rows, nothingActive, expanded, group, empty, unloaded }) => {
+          sections.map(({ key, title, count, rows, nothingActive, expanded, group, empty, unloaded }) => {
             if (rows.length === 0 && !empty && !unloaded && !(nothingActive && items.length > 0 && filteredCount > 0))
               return null;
-            const collapsible = list !== "active";
             const heading = (
               <>
                 <span
@@ -294,7 +294,7 @@ export function Inbox({
             return (
               <section key={key} aria-label={title}>
                 <Heading className={headingClass}>
-                  {collapsible && needle === "" ? (
+                  {needle === "" ? (
                     <button
                       type="button"
                       aria-expanded={expanded}
@@ -302,7 +302,9 @@ export function Inbox({
                         "inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 font-[inherit] text-[inherit] uppercase",
                         group && "min-w-0",
                       )}
-                      onClick={() => updateView((view) => ({ open: { ...view.open, [key]: !view.open[key] } }))}
+                      onClick={() =>
+                        updateView((view) => ({ open: { ...view.open, [key]: !sectionOpen(view.open, key) } }))
+                      }
                     >
                       <Icon icon={expanded ? ChevronDown : ChevronRight} size={12} />
                       {heading}
@@ -319,7 +321,7 @@ export function Inbox({
                     Its items are past the {LIMITS.inboxItems} grouped items the inbox shows.
                   </p>
                 )}
-                {nothingActive && <p className="px-2.5 py-2 text-13 text-fg-3">No active reviews.</p>}
+                {expanded && nothingActive && <p className="px-2.5 py-2 text-13 text-fg-3">No active reviews.</p>}
                 {expanded && rows.length > 0 && (
                   <ul>
                     {rows.map((review) => {

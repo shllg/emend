@@ -296,6 +296,91 @@ test("the inbox shows Active, Snoozed and Done in order with counts, wake times 
   expect(screen.queryByRole("link", { name: /Done approved/ })).toBeNull();
 });
 
+test.each([
+  [1280, "page"],
+  [900, "page"],
+  [390, "page"],
+  [1280, "pane"],
+  [900, "sheet"],
+] as const)("Active starts open and toggles its rows at %s px in the %s", async (pixels, surface) => {
+  width = pixels;
+  inbox = inboxItems();
+  mount(surface === "page" ? "/" : `/r/${id}`);
+  let root = document.body;
+  if (surface === "pane") root = await screen.findByTestId("inbox-pane");
+  if (surface === "sheet") {
+    fireEvent.click(await screen.findByRole("button", { name: "Show inbox" }));
+    root = await screen.findByRole("dialog", { name: "Inbox" });
+  }
+  const section = within(await within(root).findByRole("region", { name: "Active" }));
+  const toggle = section.getByRole("button", { name: "Active 2" });
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(toggle.querySelector("svg")).not.toBeNull();
+  expect(section.getAllByRole("link")).toHaveLength(2);
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(section.queryByRole("link")).toBeNull();
+  expect(section.queryByText("No active reviews.")).toBeNull();
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(section.getAllByRole("link")).toHaveLength(2);
+});
+
+test.each([false, true])("folding empty Active hides its note in the compact=%s inbox", async (compact) => {
+  inbox = inboxItems().filter((entry) => entry.list !== "active");
+  mount(compact ? `/r/${id}` : "/");
+  const toggle = await screen.findByRole("button", { name: "Active 0" });
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByText("No active reviews.")).toBeTruthy();
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(screen.queryByText("No active reviews.")).toBeNull();
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByText("No active reviews.")).toBeTruthy();
+});
+
+test.each(["Enter", " "])("the focused Active button toggles with %j", async (key) => {
+  inbox = inboxItems();
+  mount();
+  const toggle = await screen.findByRole("button", { name: "Active 2" });
+  expect(toggle.tagName).toBe("BUTTON");
+  expect(toggle.getAttribute("type")).toBe("button");
+  act(() => toggle.focus());
+  for (const expanded of [false, true]) {
+    expect(fireEvent.keyDown(toggle, { key })).toBe(true);
+    // happy-dom needs the native click supplied: Enter on keydown, Space on keyup.
+    if (key === "Enter") fireEvent.click(toggle, { detail: 0 });
+    expect(fireEvent.keyUp(toggle, { key })).toBe(true);
+    if (key === " ") fireEvent.click(toggle, { detail: 0 });
+    expect(toggle.getAttribute("aria-expanded")).toBe(String(expanded));
+    expect(screen.queryAllByRole("link", { name: /Active (one|two)/ })).toHaveLength(expanded ? 2 : 0);
+    expect(document.activeElement).toBe(toggle);
+  }
+});
+
+test("j and k skip folded Active and move between the other open sections", async () => {
+  inbox = inboxItems();
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Active 2" }));
+  fireEvent.click(screen.getByRole("button", { name: "Snoozed 2" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done 2" }));
+  for (const [key, title] of [
+    ["j", "Snoozed timed"],
+    ["j", "Snoozed revision"],
+    ["j", "Done approved"],
+    ["j", "Done retired"],
+    ["k", "Done approved"],
+    ["k", "Snoozed revision"],
+    ["k", "Snoozed timed"],
+    ["k", "Snoozed timed"],
+  ] as const) {
+    fireEvent.keyDown(document.body, { key });
+    expect(document.activeElement).toBe(row(title));
+  }
+  expect(screen.queryByRole("link", { name: /Active (one|two)/ })).toBeNull();
+});
+
 test("Snoozed starts collapsed with its count and toggles independently of Done", async () => {
   inbox = inboxItems();
   mount();
@@ -617,6 +702,31 @@ test("an approval expires at the next minute tick after sleep even when refetche
     within(screen.getByRole("region", { name: "Done" })).getByRole("link", { name: /Recently approved/ }),
   ).toBeTruthy();
 });
+
+test.each([false, true])(
+  "filtering folded Active shows matching rows and clearing restores its fold in the compact=%s inbox",
+  async (compact) => {
+    inbox = inboxItems();
+    mount(compact ? `/r/${id}` : "/");
+    fireEvent.click(await screen.findByRole("button", { name: "Active 2" }));
+    const filter = screen.getByRole("textbox", { name: "Filter reviews" });
+    fireEvent.change(filter, { target: { value: "Active one" } });
+    const active = within(screen.getByRole("region", { name: "Active" }));
+    expect(active.getByRole("heading").textContent).toBe("Active1");
+    expect(active.queryByRole("button")).toBeNull();
+    expect(active.getByRole("link", { name: /Active one/ })).toBeTruthy();
+    expect(active.queryByRole("link", { name: /Active two/ })).toBeNull();
+    fireEvent.change(filter, { target: { value: "" } });
+    const toggle = active.getByRole("button", { name: "Active 2" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(active.queryByRole("link")).toBeNull();
+    fireEvent.click(toggle);
+    fireEvent.change(filter, { target: { value: "Active one" } });
+    fireEvent.change(filter, { target: { value: "" } });
+    expect(active.getByRole("button", { name: "Active 2" }).getAttribute("aria-expanded")).toBe("true");
+    expect(active.getAllByRole("link")).toHaveLength(2);
+  },
+);
 
 test("a non-empty filter shows Done expanded under a plain heading; clearing it restores the reader's choice", async () => {
   inbox = inboxItems();
