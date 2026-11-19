@@ -146,9 +146,14 @@ Start and end with a letter or digit.
 Emend ships these fonts and serves them from its own address.
 Name one exactly as written to show it on every device, the phone included, with no files.
 Fonts other than Geist and JetBrains Mono download only when a theme names them.
-The built-in files cover Latin and Latin Extended only; other scripts fall back to a system font.
+The built-in files cover Latin and most Latin Extended letters in upright text.
+Italic files cover basic Latin and Latin-1 only.
+Most Vietnamese letters with tone marks and other scripts fall back to a system font.
 A built-in name uses emend's copy even when that font is installed on the device.
-If the person's text needs another script, bring the font's own files with `fonts.files` as described below.
+If the person needs another script, tell them the built-in fonts do not cover it.
+Add the font's own files with `fonts.files` only when they ask for it.
+Each font file must be at most 4 MiB, as described below.
+Many CJK fonts exceed this limit and cannot be added this way.
 
 - Text: Geist (the default), Inter, Roboto, Atkinson Hyperlegible Next.
 - Code: JetBrains Mono (the default), Geist Mono, Roboto Mono, Fira Code.
