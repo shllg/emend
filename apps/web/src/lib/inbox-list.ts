@@ -18,6 +18,11 @@ function effectiveList(review: InboxItem, now: number) {
   return review.activeUntil !== null && new Date(review.activeUntil).getTime() <= now ? "done" : review.list;
 }
 
+/** Active starts open; every other section starts folded. */
+export function sectionOpen(open: Readonly<Record<string, boolean>>, key: string) {
+  return open[key] ?? key === "active";
+}
+
 /** One display order for rendered sections and keyboard navigation, including collapsed sections. */
 export function inboxSections(
   items: InboxItem[],
@@ -82,18 +87,14 @@ export function inboxSections(
       unloaded: group !== undefined && group.members > 0 && !items.some((review) => review.groupId === group.id),
       rows,
       nothingActive: list === "active" && !items.some((review) => sectionKey(review) === "active"),
-      expanded: list === "active" || (open[key] ?? false) || needle !== "",
+      expanded: sectionOpen(open, key) || needle !== "",
     };
   });
 }
 
 export function activeJumpRows(sections: ReturnType<typeof inboxSections>) {
-  return (
-    sections
-      .find((section) => section.list === "active")
-      ?.rows.filter((row) => !row.movedTo)
-      .slice(0, 9) ?? []
-  );
+  const active = sections.find((section) => section.list === "active");
+  return active?.expanded ? active.rows.filter((row) => !row.movedTo).slice(0, 9) : [];
 }
 
 /** Palette matches keep the inbox's display order on ties, with Done after every other section. */
