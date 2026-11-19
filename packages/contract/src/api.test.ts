@@ -27,6 +27,8 @@ test("exports the v1 API, limits, file vocabulary and reserved fallback", () => 
   expect(LIMITS).toEqual({
     themes: 50,
     themeFileBytes: 32768,
+    themeFontFiles: 16,
+    themeFontBytes: 4194304,
     themeProblems: 20,
     inboxItems: 200,
     groups: 50,

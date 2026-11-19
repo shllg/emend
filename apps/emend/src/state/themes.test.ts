@@ -1,11 +1,15 @@
+import { execFile } from "node:child_process";
+import { constants } from "node:fs";
 import * as fs from "node:fs/promises";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LIMITS, ThemeList } from "@emend/contract";
+import { promisify } from "node:util";
+import { LIMITS, ThemeList, type ThemeValid } from "@emend/contract";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { readConfigJson } from "./read-config.ts";
-import { listThemes, readTheme } from "./themes.ts";
+import { readThemeFont, themeFontProblems } from "./theme-fonts.ts";
+import { listThemeFolders, listThemes, readTheme } from "./themes.ts";
 
 vi.mock("node:fs/promises", async (original) => ({ ...(await original<typeof import("node:fs/promises")>()) }));
 
@@ -59,7 +63,7 @@ test("refuses displayable bad names and skips dot folders, top-level files and u
     expect(entry).toMatchObject({
       valid: false,
       problems: [
-        "The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark or light.",
+        "The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark, light or fonts.",
       ],
     });
 });
@@ -148,7 +152,7 @@ test("bad names still report the folder name problem when the contents cannot be
     name: "Bad",
     base: null,
     problems: [
-      "The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark or light.",
+      "The folder name must use lowercase letters, digits and hyphens, at most 40, and not system, dark, light or fonts.",
       "theme.json is not valid JSON.",
     ],
   });
@@ -217,4 +221,191 @@ test("config reads retain the default limit and themes allow exactly their byte 
   expect(await readConfigJson(file)).toEqual({});
   await writeFile(file, "{}".padEnd(LIMITS.publicJsonBytes + 1));
   await expect(readConfigJson(file)).rejects.toThrow();
+});
+
+async function fontFile(file = "Example.woff2", bytes = Buffer.from("synthetic font bytes")) {
+  await mkdir(join(dir, "fonts"), { recursive: true });
+  const path = join(dir, "fonts", file);
+  await writeFile(path, bytes);
+  return path;
+}
+
+test("the shared fonts folder is neither listed nor read as a theme", async () => {
+  await seed("fonts");
+  await seed("mine");
+  expect((await listThemeFolders(dir)).folders).toEqual(["mine"]);
+  expect((await listThemes(dir)).themes.map((entry) => entry.name)).toEqual(["mine"]);
+  expect(await readTheme(dir, "fonts")).toBeNull();
+});
+
+test("font reads serve synthetic bytes with the type chosen from the extension", async () => {
+  const bytes = Buffer.from("synthetic font bytes");
+  const path = await fontFile("Example.WOFF2", bytes);
+  const open = vi.spyOn(fs, "open");
+  expect(await readThemeFont(dir, "Example.WOFF2")).toEqual({ bytes, type: "font/woff2" });
+  expect(open).toHaveBeenCalledExactlyOnceWith(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+});
+
+test.each([
+  "Example.css",
+  "sub/x.woff2",
+  "sub\\x.woff2",
+  "../x.woff2",
+  "x..woff2",
+  "x%2Fy.woff2",
+  ".x.woff2",
+  "x\0.woff2",
+  "x.woff2\n",
+])("font reads refuse unsafe name %j before accessing files", async (file) => {
+  const resolve = vi.spyOn(fs, "realpath");
+  expect(await readThemeFont(dir, file)).toBe("outside");
+  expect(resolve).not.toHaveBeenCalled();
+});
+
+test.each(["directory", "directory link", "outside link", "subfolder link"])("font reads refuse a %s", async (kind) => {
+  await mkdir(join(dir, "fonts"));
+  const path = join(dir, "fonts", "Example.woff2");
+  if (kind === "directory") await mkdir(path);
+  else if (kind === "directory link") {
+    await mkdir(join(dir, "fonts", "folder"));
+    await symlink(join(dir, "fonts", "folder"), path);
+  } else {
+    const target = kind === "outside link" ? root : join(dir, "fonts", "sub");
+    await mkdir(target, { recursive: true });
+    await writeFile(join(target, "target.woff2"), "synthetic font bytes");
+    await symlink(join(target, "target.woff2"), path);
+  }
+  const open = vi.spyOn(fs, "open");
+  expect(await readThemeFont(dir, "Example.woff2")).toBe("outside");
+  expect(open).not.toHaveBeenCalled();
+});
+
+test("font reads follow a file link only within the same real folder", async () => {
+  const path = await fontFile();
+  await symlink(path, join(dir, "fonts", "Alias.woff2"));
+  expect(await readThemeFont(dir, "Alias.woff2")).toEqual(await readThemeFont(dir, "Example.woff2"));
+});
+
+test("the shared fonts folder may itself be a symlink", async () => {
+  const folder = join(root, "shared-fonts");
+  await mkdir(folder);
+  const bytes = Buffer.from("synthetic font bytes");
+  await writeFile(join(folder, "Example.woff2"), bytes);
+  await symlink(folder, join(dir, "fonts"));
+  expect(await readThemeFont(dir, "Example.woff2")).toEqual({ bytes, type: "font/woff2" });
+  expect((await listThemeFolders(dir)).folders).toEqual([]);
+});
+
+test.skipIf(process.platform === "win32")("font reads refuse a FIFO without opening it", async () => {
+  await mkdir(join(dir, "fonts"));
+  await promisify(execFile)("mkfifo", [join(dir, "fonts", "Pipe.woff2")]);
+  const open = vi.spyOn(fs, "open");
+  expect(await readThemeFont(dir, "Pipe.woff2")).toBe("outside");
+  expect(open).not.toHaveBeenCalled();
+});
+
+test("font reads allow exactly the byte cap and refuse one more byte", async () => {
+  const bytes = Buffer.alloc(LIMITS.themeFontBytes, 42);
+  await fontFile("Exact.woff2", bytes);
+  const result = await readThemeFont(dir, "Exact.woff2");
+  if (typeof result === "string") throw new Error(`Expected font bytes, got ${result}`);
+  expect(result.type).toBe("font/woff2");
+  expect(result.bytes.equals(bytes)).toBe(true);
+  await fontFile("Large.woff2", Buffer.alloc(LIMITS.themeFontBytes + 1));
+  expect(await readThemeFont(dir, "Large.woff2")).toBe("too-large");
+});
+
+test("font reads report missing and unreadable files without exposing errors", async () => {
+  expect(await readThemeFont(undefined, "Missing.woff2")).toBe("missing");
+  expect(await readThemeFont(dir, "Missing.woff2")).toBe("missing");
+  await fontFile();
+  expect(await readThemeFont(dir, "Missing.woff2")).toBe("missing");
+  vi.spyOn(fs, "open").mockRejectedValueOnce(Object.assign(new Error("sensitive failure"), { code: "EACCES" }));
+  expect(await readThemeFont(dir, "Example.woff2")).toBe("unreadable");
+});
+
+test.each(["file", "outside link"])("font reads refuse replacement with a new %s before open", async (kind) => {
+  const path = await fontFile();
+  const outside = join(root, "Outside.woff2");
+  await writeFile(outside, "synthetic outside bytes");
+  const original = fs.open;
+  vi.spyOn(fs, "open").mockImplementationOnce(async (...args) => {
+    await fs.rename(path, join(dir, "fonts", "Previous.woff2"));
+    if (kind === "file") await writeFile(path, "synthetic replacement bytes");
+    else await symlink(outside, path);
+    return original(...args);
+  });
+  expect(await readThemeFont(dir, "Example.woff2")).toBe(kind === "file" ? "unreadable" : "outside");
+});
+
+test.each(["growth", "over cap", "truncation"])("font reads refuse %s after fstat and close the file", async (kind) => {
+  const path = await fontFile();
+  const original = fs.open;
+  let handle: fs.FileHandle | undefined;
+  vi.spyOn(fs, "open").mockImplementationOnce(async (...args) => {
+    const opened = await original(...args);
+    handle = opened;
+    const info = await opened.stat();
+    if (kind === "truncation") await fs.truncate(path, 0);
+    else await fs.appendFile(path, kind === "over cap" ? Buffer.alloc(LIMITS.themeFontBytes) : "more");
+    vi.spyOn(opened, "stat").mockResolvedValueOnce(info);
+    vi.spyOn(opened, "close");
+    return opened;
+  });
+  expect(await readThemeFont(dir, "Example.woff2")).toBe(kind === "over cap" ? "too-large" : "unreadable");
+  expect(handle?.close).toHaveBeenCalledOnce();
+});
+
+test.skipIf(process.platform !== "linux")(
+  "font reads verify the opened descriptor's real path before reading",
+  async () => {
+    await fontFile();
+    const originalPath = fs.realpath;
+    vi.spyOn(fs, "realpath").mockImplementation(async (...args) => {
+      if (String(args[0]).startsWith("/proc/self/fd/")) return join(root, "Outside.woff2");
+      return originalPath(...args);
+    });
+    const originalOpen = fs.open;
+    let handle: fs.FileHandle | undefined;
+    vi.spyOn(fs, "open").mockImplementationOnce(async (...args) => {
+      const opened = await originalOpen(...args);
+      handle = opened;
+      vi.spyOn(opened, "read");
+      vi.spyOn(opened, "close");
+      return opened;
+    });
+    expect(await readThemeFont(dir, "Example.woff2")).toBe("outside");
+    expect(handle?.read).not.toHaveBeenCalled();
+    expect(handle?.close).toHaveBeenCalledOnce();
+  },
+);
+
+test("font diagnostics report one fixed line per distinct problem file", async () => {
+  await fontFile("Good.woff2");
+  await fontFile("Large.woff2", Buffer.alloc(LIMITS.themeFontBytes + 1));
+  await mkdir(join(dir, "fonts", "Folder.woff2"));
+  const entry: ThemeValid = {
+    valid: true,
+    name: "mine",
+    base: "dark",
+    fonts: {
+      text: "Example",
+      files: ["Good.woff2", "Missing.woff2", "Large.woff2", "Folder.woff2", "Missing.woff2"].map((file) => ({
+        font: "text",
+        file,
+      })),
+    },
+    scales: {},
+    tokens: {},
+    themeColor: "#171717",
+  };
+  expect(await themeFontProblems(dir, entry)).toEqual([
+    "font file Missing.woff2 is missing; the theme uses emend's font instead.",
+    "font file Large.woff2 is larger than 4 MiB; the theme uses emend's font instead.",
+    "font file Folder.woff2 is not a regular file directly in the fonts folder; the theme uses emend's font instead.",
+  ]);
+  vi.spyOn(fs, "open").mockRejectedValueOnce(Object.assign(new Error("sensitive failure"), { code: "EACCES" }));
+  expect((await themeFontProblems(dir, entry))[0]).toBe(
+    "font file Good.woff2 cannot be read; the theme uses emend's font instead.",
+  );
 });

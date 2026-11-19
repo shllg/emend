@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { runInNewContext } from "node:vm";
-import { ThemeValid } from "@emend/contract";
+import { ThemeFont, ThemeValid } from "@emend/contract";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import type { Window as HappyWindow } from "happy-dom";
 import type { CSSProperties } from "react";
@@ -23,6 +23,7 @@ import {
 const boot = readFileSync(resolve(import.meta.dirname, "../../public/theme-boot.js"), "utf8");
 const index = readFileSync(resolve(import.meta.dirname, "../../index.html"), "utf8");
 let stop = () => {};
+let restoreFonts = () => {};
 beforeEach(() => {
   vi.stubGlobal("localStorage", new Storage());
   setThemePick("system");
@@ -35,6 +36,8 @@ afterEach(() => {
   setThemePick("system");
   stop();
   stop = () => {};
+  restoreFonts();
+  restoreFonts = () => {};
   for (const meta of document.querySelectorAll('meta[name="theme-color"]')) meta.remove();
   delete document.documentElement.dataset.theme;
   delete document.documentElement.dataset.density;
@@ -223,6 +226,389 @@ test("custom font fallbacks match the complete typography declarations", () => {
   const css = readFileSync(resolve(import.meta.dirname, "../styles/typography.css"), "utf8");
   expect(css.match(/--font-sans:\s*([^;]+);/)?.[1]).toBe(themeFontStacks.text);
   expect(css.match(/--font-mono:\s*([^;]+);/)?.[1]).toBe(themeFontStacks.code);
+});
+
+function stubFontFaces() {
+  const descriptor = Object.getOwnPropertyDescriptor(document, "fonts");
+  const fonts = new Set<FontFace>();
+  const add = vi.spyOn(fonts, "add");
+  const remove = vi.spyOn(fonts, "delete");
+  Object.defineProperty(document, "fonts", { configurable: true, value: fonts });
+  restoreFonts = () => {
+    if (descriptor) Object.defineProperty(document, "fonts", descriptor);
+    else Reflect.deleteProperty(document, "fonts");
+  };
+  const face = vi.fn(
+    class {
+      family: string;
+      source: string;
+      descriptors: FontFaceDescriptors;
+      status: FontFaceLoadStatus = "unloaded";
+      constructor(family: string, source: string, descriptors: FontFaceDescriptors) {
+        this.family = family;
+        this.source = source;
+        this.descriptors = descriptors;
+      }
+    },
+  );
+  vi.stubGlobal("FontFace", face);
+  return { face, fonts, add, remove };
+}
+
+test("the picked theme registers faces with safe URLs, formats and descriptors and keeps unchanged faces", () => {
+  const { face, fonts, add, remove } = stubFontFaces();
+  const theme: ThemeValid = {
+    ...customTheme,
+    fonts: {
+      ...customTheme.fonts,
+      files: [
+        { font: "text", file: "Sans.WOFF2", weight: [100, 900] },
+        { font: "text", file: "Sans-Italic.woff", weight: [100, 900], style: "italic" },
+        { font: "code", file: "Mono.ttf" },
+        { font: "code", file: "Mono-Bold.otf", weight: 700, style: "normal" },
+      ],
+    },
+  };
+  const store = createThemeStore();
+  store.selectCustomTheme(theme);
+  expect(face.mock.calls).toEqual([
+    [
+      "_emend-theme-text",
+      'url("/api/v1/themes/mine/fonts/Sans.WOFF2") format("woff2")',
+      { weight: "100 900", style: "normal", display: "swap" },
+    ],
+    [
+      "_emend-theme-text",
+      'url("/api/v1/themes/mine/fonts/Sans-Italic.woff") format("woff")',
+      { weight: "100 900", style: "italic", display: "swap" },
+    ],
+    [
+      "_emend-theme-code",
+      'url("/api/v1/themes/mine/fonts/Mono.ttf") format("truetype")',
+      { weight: "400", style: "normal", display: "swap" },
+    ],
+    [
+      "_emend-theme-code",
+      'url("/api/v1/themes/mine/fonts/Mono-Bold.otf") format("opentype")',
+      { weight: "700", style: "normal", display: "swap" },
+    ],
+  ]);
+  expect(add).toHaveBeenCalledTimes(4);
+  const original = [...fonts];
+  store.applyList("mine", { themes: [{ ...theme, tokens: { accent: "#abcdef" } }], folderError: false });
+  expect(face).toHaveBeenCalledTimes(4);
+  expect(remove).not.toHaveBeenCalled();
+  expect([...fonts]).toEqual(original);
+  expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(
+    `"_emend-theme-text", ${themeFontStacks.text}`,
+  );
+  expect(document.documentElement.style.getPropertyValue("--font-mono")).toBe(
+    `"_emend-theme-code", ${themeFontStacks.code}`,
+  );
+  store.set("dark");
+  expect(remove.mock.calls).toEqual(original.map((face) => [face]));
+  expect(fonts.size).toBe(0);
+});
+
+test.each([false, true])("a successful list retries only failed faces with already checked = %s", (checked) => {
+  const { face, fonts, add, remove } = stubFontFaces();
+  const theme: ThemeValid = {
+    ...customTheme,
+    fonts: {
+      ...customTheme.fonts,
+      files: [
+        { font: "text", file: "Sans.woff2", weight: [100, 900], style: "italic" },
+        { font: "code", file: "Mono.ttf", weight: 700 },
+      ],
+    },
+  };
+  localStorage.setItem(themeKey, "theme:mine");
+  localStorage.setItem(customThemeKey, JSON.stringify(theme));
+  const store = createThemeStore();
+  const listener = vi.fn();
+  stop = store.subscribe(listener);
+  const list = { themes: [theme], folderError: false };
+  if (checked) store.applyList("mine", list);
+  const state = store.getState();
+  listener.mockClear();
+  const original = [...fonts];
+  const registrations = face.mock.calls.slice();
+  expect(original).toHaveLength(2);
+  const failedFace = original[0];
+  if (failedFace === undefined) throw new Error("Expected the original text font face");
+  for (const [index, face] of original.entries()) Object.assign(face, { status: index === 0 ? "error" : "loaded" });
+  expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(
+    `"_emend-theme-text", ${themeFontStacks.text}`,
+  );
+
+  store.applyList("mine", list);
+
+  expect(remove).toHaveBeenCalledExactlyOnceWith(failedFace);
+  expect(add).toHaveBeenCalledTimes(3);
+  expect(face.mock.calls).toEqual([...registrations, registrations[0]]);
+  const retried = [...fonts];
+  expect(retried).toHaveLength(2);
+  expect(fonts.has(failedFace)).toBe(false);
+  expect(retried[0]).toBe(original[1]);
+  expect(retried[0]?.status).toBe("loaded");
+  expect(retried[1]).not.toBe(failedFace);
+  expect(retried[1]?.status).toBe("unloaded");
+  if (checked) {
+    expect(store.getState()).toBe(state);
+    expect(listener).not.toHaveBeenCalled();
+  }
+  store.applyList("mine", list);
+  expect(face).toHaveBeenCalledTimes(3);
+  expect(add).toHaveBeenCalledTimes(3);
+  expect(remove).toHaveBeenCalledExactlyOnceWith(failedFace);
+  expect([...fonts][0]).toBe(retried[0]);
+  expect([...fonts][1]).toBe(retried[1]);
+  store.set("dark");
+  expect(remove).toHaveBeenCalledTimes(3);
+  for (const face of retried) expect(remove).toHaveBeenCalledWith(face);
+  expect(fonts.size).toBe(0);
+});
+
+test.each(["unloaded", "loading", "loaded"] as const)(
+  "a successful list keeps unchanged faces whose status is %s",
+  (status) => {
+    const { face, fonts, add, remove } = stubFontFaces();
+    const theme: ThemeValid = {
+      ...customTheme,
+      fonts: { text: "Example", files: [{ font: "text", file: "Sans.woff2" }] },
+    };
+    const store = createThemeStore();
+    store.selectCustomTheme(theme);
+    const original = [...fonts];
+    for (const face of original) Object.assign(face, { status });
+    const list = { themes: [theme], folderError: false };
+    store.applyList("mine", list);
+    const state = store.getState();
+    store.applyList("mine", list);
+    expect(store.getState()).toBe(state);
+    expect(face).toHaveBeenCalledTimes(1);
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(remove).not.toHaveBeenCalled();
+    expect([...fonts][0]).toBe(original[0]);
+  },
+);
+
+test("a refused theme or another pick's list does not retry failed faces", () => {
+  const { face, fonts, remove } = stubFontFaces();
+  const theme: ThemeValid = {
+    ...customTheme,
+    fonts: { text: "Example", files: [{ font: "text", file: "Sans.woff2" }] },
+  };
+  const store = createThemeStore();
+  store.selectCustomTheme(theme);
+  const original = [...fonts];
+  for (const face of original) Object.assign(face, { status: "error" });
+  const state = store.getState();
+  store.applyList("mine", {
+    themes: [{ valid: false, name: "mine", base: "dark", problems: ["theme.json cannot be read."] }],
+    folderError: false,
+  });
+  expect(store.getState()).not.toBe(state);
+  store.applyList("another", { themes: [theme], folderError: false });
+  expect(face).toHaveBeenCalledTimes(1);
+  expect(remove).not.toHaveBeenCalled();
+  expect([...fonts][0]).toBe(original[0]);
+});
+
+test("changes to a theme's file list replace all its faces without removing other fonts", () => {
+  const { face, fonts, remove } = stubFontFaces();
+  const builtin = new FontFace("Built In", 'url("/builtin.woff2")');
+  fonts.add(builtin);
+  const store = createThemeStore();
+  store.selectCustomTheme({
+    ...customTheme,
+    fonts: {
+      ...customTheme.fonts,
+      files: [
+        { font: "text", file: "Old.woff2" },
+        { font: "code", file: "Mono.woff2" },
+      ],
+    },
+  });
+  const original = [...fonts].filter((font) => font !== builtin);
+  for (const face of original) Object.assign(face, { status: "loaded" });
+  store.applyList("mine", {
+    themes: [
+      {
+        ...customTheme,
+        fonts: {
+          ...customTheme.fonts,
+          files: [
+            { font: "text", file: "New.woff2" },
+            { font: "code", file: "Mono.woff2" },
+          ],
+        },
+      },
+    ],
+    folderError: false,
+  });
+  expect(remove.mock.calls).toEqual(original.map((face) => [face]));
+  for (const face of original) expect(fonts.has(face)).toBe(false);
+  expect(fonts.has(builtin)).toBe(true);
+  expect(fonts.size).toBe(3);
+  expect(face).toHaveBeenCalledTimes(5);
+  expect(face).toHaveBeenNthCalledWith(
+    4,
+    "_emend-theme-text",
+    'url("/api/v1/themes/mine/fonts/New.woff2") format("woff2")',
+    { weight: "400", style: "normal", display: "swap" },
+  );
+  expect(face).toHaveBeenLastCalledWith(
+    "_emend-theme-code",
+    'url("/api/v1/themes/mine/fonts/Mono.woff2") format("woff2")',
+    { weight: "400", style: "normal", display: "swap" },
+  );
+  store.selectCustomTheme({
+    ...customTheme,
+    name: "another",
+    fonts: { text: "New Family", files: [{ font: "text", file: "New.woff2" }] },
+  });
+  expect(face).toHaveBeenLastCalledWith(
+    "_emend-theme-text",
+    'url("/api/v1/themes/another/fonts/New.woff2") format("woff2")',
+    { weight: "400", style: "normal", display: "swap" },
+  );
+  store.applyList("another", { themes: [{ ...customTheme, name: "another" }], folderError: false });
+  expect([...fonts]).toEqual([builtin]);
+});
+
+test("applying a theme revalidates file entries and their family names", () => {
+  const { face, fonts } = stubFontFaces();
+  const store = createThemeStore();
+  store.selectCustomTheme(customTheme);
+  const files = [
+    { font: "text", file: "Good.woff2" },
+    ...["../Bad.woff2", "sub/Bad.woff2", "Bad.css", 'Bad");url(x).woff2', "Bad.woff2\n"].map((file) => ({
+      font: "text",
+      file,
+    })),
+    { font: "code", file: "InvalidFamily.woff2" },
+    { font: "other", file: "Other.woff2" },
+    { font: "text", file: "Weight.woff2", weight: [900, 100] },
+    { font: "text", file: "Style.woff2", style: "oblique" },
+    { font: "text", file: "Extra.woff2", extra: true },
+  ] as ThemeValid["fonts"]["files"];
+  store.applyList("mine", {
+    themes: [{ ...customTheme, fonts: { text: "Example", code: "url(x)", files } }],
+    folderError: false,
+  });
+  expect(face.mock.calls).toEqual(
+    ["Good.woff2", "Extra.woff2"].map((file) => [
+      "_emend-theme-text",
+      `url("/api/v1/themes/mine/fonts/${file}") format("woff2")`,
+      { weight: "400", style: "normal", display: "swap" },
+    ]),
+  );
+  expect(fonts.size).toBe(2);
+});
+
+test.each(["_emend-theme-text", "_emend-theme-code"])("font alias %s cannot be a theme font name", (alias) => {
+  expect(ThemeFont.safeParse(alias).success).toBe(false);
+});
+
+test("a text font named emend-theme-code cannot use the code file's alias", () => {
+  const { face } = stubFontFaces();
+  const theme: ThemeValid = {
+    ...customTheme,
+    fonts: {
+      text: "emend-theme-code",
+      code: "Example Mono",
+      files: [{ font: "code", file: "Mono.woff2" }],
+    },
+  };
+  expect(ThemeValid.safeParse(theme).success).toBe(true);
+  createThemeStore().selectCustomTheme(theme);
+  expect(face.mock.calls.map(([name]) => name)).toEqual(["_emend-theme-code"]);
+  const style = document.documentElement.style;
+  expect(style.getPropertyValue("--font-sans")).toBe(`"emend-theme-code", ${themeFontStacks.text}`);
+  expect(style.getPropertyValue("--font-sans")).not.toContain("_emend-theme-");
+  expect(style.getPropertyValue("--font-mono")).toBe(`"_emend-theme-code", ${themeFontStacks.code}`);
+});
+
+test.each(["123 Font", "serif", "A  B", "字体"])("font files use fixed aliases for the family %s", (family) => {
+  const { face } = stubFontFaces();
+  createThemeStore().selectCustomTheme({
+    ...customTheme,
+    fonts: {
+      text: family,
+      code: family,
+      files: [
+        { font: "text", file: "Example.woff2" },
+        { font: "code", file: "Mono.woff2" },
+      ],
+    },
+  });
+  expect(face.mock.calls.map(([name]) => name)).toEqual(["_emend-theme-text", "_emend-theme-code"]);
+  expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(
+    `"_emend-theme-text", ${themeFontStacks.text}`,
+  );
+  expect(document.documentElement.style.getPropertyValue("--font-mono")).toBe(
+    `"_emend-theme-code", ${themeFontStacks.code}`,
+  );
+});
+
+test.each(["text", "code"] as const)("only the %s role with a usable file gets an alias", (font) => {
+  const { face } = stubFontFaces();
+  const store = createThemeStore();
+  store.selectCustomTheme({
+    ...customTheme,
+    fonts: { ...customTheme.fonts, files: [{ font, file: "Example.woff2" }] },
+  });
+  expect(face.mock.calls.map(([name]) => name)).toEqual([`_emend-theme-${font}`]);
+  const style = document.documentElement.style;
+  expect(style.getPropertyValue("--font-sans")).toBe(
+    `"${font === "text" ? "_emend-theme-text" : "Example Sans"}", ${themeFontStacks.text}`,
+  );
+  expect(style.getPropertyValue("--font-mono")).toBe(
+    `"${font === "code" ? "_emend-theme-code" : "Example Mono"}", ${themeFontStacks.code}`,
+  );
+  store.applyList("mine", {
+    themes: [{ ...customTheme, fonts: { ...customTheme.fonts, files: [{ font, file: "Bad.css" }] } }],
+    folderError: false,
+  });
+  expect(style.getPropertyValue("--font-sans")).toBe(`"Example Sans", ${themeFontStacks.text}`);
+  expect(style.getPropertyValue("--font-mono")).toBe(`"Example Mono", ${themeFontStacks.code}`);
+});
+
+test("changing only the named font preserves registered faces and emend's fallback", () => {
+  const { face, fonts, remove } = stubFontFaces();
+  const store = createThemeStore();
+  const theme: ThemeValid = {
+    ...customTheme,
+    fonts: { text: "Example", files: [{ font: "text", file: "Example.woff2" }] },
+  };
+  store.selectCustomTheme(theme);
+  const original = [...fonts][0];
+  store.applyList("mine", {
+    themes: [{ ...theme, fonts: { ...theme.fonts, text: "New Family" } }],
+    folderError: false,
+  });
+  expect(face).toHaveBeenCalledTimes(1);
+  expect(remove).not.toHaveBeenCalled();
+  expect([...fonts][0]).toBe(original);
+  expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(
+    `"_emend-theme-text", ${themeFontStacks.text}`,
+  );
+});
+
+test.each(["FontFace", "document.fonts"])("font registration does nothing without %s", (missing) => {
+  const { face, add } = stubFontFaces();
+  if (missing === "FontFace") vi.stubGlobal("FontFace", undefined);
+  else Object.defineProperty(document, "fonts", { configurable: true, value: undefined });
+  createThemeStore().selectCustomTheme({
+    ...customTheme,
+    fonts: { text: "Example", files: [{ font: "text", file: "Example.woff2" }] },
+  });
+  expect(face).not.toHaveBeenCalled();
+  expect(add).not.toHaveBeenCalled();
+  expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(
+    `"_emend-theme-text", ${themeFontStacks.text}`,
+  );
 });
 
 test.each(["compact", "roomy"] as const)("a custom theme applies %s density", (density) => {
@@ -474,13 +860,13 @@ test.each([{ name: "another" }, { base: "evil" }, { valid: false }, null, "not j
   },
 );
 
-test("boot rejects unsafe meta colours and reserved theme names", () => {
+test.each(["system", "dark", "light", "fonts"])("boot rejects unsafe meta colours and reserved name %s", (name) => {
   localStorage.setItem(themeKey, "theme:mine");
   localStorage.setItem(customThemeKey, JSON.stringify({ ...customTheme, themeColor: "url(x)" }));
   runInNewContext(boot, { document, localStorage });
   expectApplied("dark");
-  localStorage.setItem(themeKey, "theme:dark");
-  localStorage.setItem(customThemeKey, JSON.stringify({ ...customTheme, name: "dark" }));
+  localStorage.setItem(themeKey, `theme:${name}`);
+  localStorage.setItem(customThemeKey, JSON.stringify({ ...customTheme, name }));
   runInNewContext(boot, { document, localStorage });
   expectApplied("system");
 });

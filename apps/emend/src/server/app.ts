@@ -72,6 +72,7 @@ export const ENDPOINTS = [
   { method: "GET", path: "/api/v1/devices", scope: "devices:manage" },
   { method: "GET", path: "/api/v1/settings", scope: "read" },
   { method: "GET", path: "/api/v1/themes", scope: "read" },
+  { method: "GET", path: "/api/v1/themes/:name/fonts/:file", scope: "read" },
   { method: "PATCH", path: "/api/v1/settings", scope: "settings:manage" },
   { method: "DELETE", path: "/api/v1/devices/:id", scope: "devices:manage" },
   { method: "POST", path: "/api/v1/machines", scope: "public" },

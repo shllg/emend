@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises";
 import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { THEME_SCALE_STEPS, THEME_TOKENS } from "@emend/contract";
+import { LIMITS, THEME_SCALE_STEPS, THEME_TOKENS } from "@emend/contract";
 import { themeCopyDocument } from "@emend/core";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { type Io, run } from "../../main.ts";
@@ -230,7 +230,7 @@ test.each(["empty", "partial theme.json", "another file"])(
   },
 );
 
-test.each(["system", "dark", "light", "Bad", "../escape", "bad\nname", "x".repeat(41)])(
+test.each(["system", "dark", "light", "fonts", "Bad", "../escape", "bad\nname", "x".repeat(41)])(
   "copy refuses bad destination %j",
   async (name) => {
     const result = await command("copy", "dark", name);
@@ -238,6 +238,7 @@ test.each(["system", "dark", "light", "Bad", "../escape", "bad\nname", "x".repea
     expect(result.stdout).toEqual([]);
     expect(result.stderr).toHaveLength(1);
     expect(result.stderr[0]).toContain(escapeReference(name));
+    expect(result.stderr[0]).toContain("not system, dark, light or fonts.");
     expect(result.stderr[0]?.split("\n")).toHaveLength(2);
     await expect(stat(dir)).rejects.toMatchObject({ code: "ENOENT" });
   },
@@ -290,6 +291,48 @@ test("check refuses an invalid density with its fixed reason and exit 1", async 
 test("check accepts compact density", async () => {
   await seed("mine", { version: 1, base: "dark", density: "compact" });
   expect(await command("check", "mine")).toEqual({ code: 0, stdout: ["emend: mine is valid\n"], stderr: [] });
+});
+
+test.each([
+  ["missing", "is missing"],
+  ["large", "is larger than 4 MiB"],
+  ["outside", "is not a regular file directly in the fonts folder"],
+])("check exits 1 and names a %s font file once", async (kind, reason) => {
+  await seed("mine", {
+    version: 1,
+    base: "dark",
+    fonts: {
+      text: "Example",
+      files: [
+        { font: "text", file: "Example.woff2" },
+        { font: "text", file: "Example.woff2", weight: 700 },
+      ],
+    },
+  });
+  await mkdir(join(dir, "fonts"));
+  if (kind === "large") await writeFile(join(dir, "fonts", "Example.woff2"), Buffer.alloc(LIMITS.themeFontBytes + 1));
+  if (kind === "outside") {
+    await writeFile(join(root, "Example.woff2"), "synthetic font bytes");
+    await symlink(join(root, "Example.woff2"), join(dir, "fonts", "Example.woff2"));
+  }
+  expect(await command("check", "mine")).toEqual({
+    code: 1,
+    stdout: [`emend: mine: font file Example.woff2 ${reason}; the theme uses emend's font instead.\n`],
+    stderr: [],
+  });
+  expect(await command("list")).toEqual({ code: 0, stdout: ["mine\tdark\tvalid\n"], stderr: [] });
+});
+
+test("check accepts a good font file and copy retains its shared file reference", async () => {
+  const fonts = { text: "Example", files: [{ font: "text", file: "Example.woff2", weight: [100, 900] }] };
+  await seed("mine", { version: 1, base: "dark", fonts });
+  await mkdir(join(dir, "fonts"));
+  await writeFile(join(dir, "fonts", "Example.woff2"), "synthetic font bytes");
+  expect(await command("check", "mine")).toEqual({ code: 0, stdout: ["emend: mine is valid\n"], stderr: [] });
+  expect((await command("copy", "mine", "copy")).code).toBe(0);
+  const copy = JSON.parse(await readFile(join(dir, "copy", "theme.json"), "utf8"));
+  expect(copy.fonts.files).toEqual(fonts.files);
+  expect(await command("check", "copy")).toEqual({ code: 0, stdout: ["emend: copy is valid\n"], stderr: [] });
 });
 
 test("check names faint pairs on stdout and uses a silent exit 1", async () => {

@@ -195,7 +195,7 @@ export const ThemeName = z
   .string()
   .max(40)
   .regex(/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$(?![\s\S])/)
-  .refine((name) => !["system", "dark", "light"].includes(name));
+  .refine((name) => !["system", "dark", "light", "fonts"].includes(name));
 export type ThemeName = z.infer<typeof ThemeName>;
 
 // Canonical decimals only: no exponent, redundant zero, sign or trailing fractional zero.
@@ -218,6 +218,37 @@ export const ThemeColor = z
 export type ThemeColor = z.infer<typeof ThemeColor>;
 export const ThemeFont = z.string().regex(/^[\p{L}\p{N}](?:[\p{L}\p{N} _-]{0,62}[\p{L}\p{N}])?$(?![\s\S])/u);
 export type ThemeFont = z.infer<typeof ThemeFont>;
+export const ThemeFontFileName = z
+  .string()
+  .max(100)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*\.(?:woff2|woff|ttf|otf)$(?![\s\S])/i)
+  .refine((name) => !name.includes(".."));
+export type ThemeFontFileName = z.infer<typeof ThemeFontFileName>;
+const fontWeight = z.number().int().min(1).max(1000);
+export const ThemeFontFile = z.object({
+  font: z.enum(["text", "code"]),
+  file: ThemeFontFileName,
+  weight: z.union([fontWeight, z.tuple([fontWeight, fontWeight]).refine(([min, max]) => min <= max)]).optional(),
+  style: z.enum(["normal", "italic"]).optional(),
+});
+export type ThemeFontFile = z.infer<typeof ThemeFontFile>;
+
+/** The response type comes from the allowlisted extension, never from file contents. */
+export function themeFontType(file: string): "font/woff2" | "font/woff" | "font/ttf" | "font/otf" | undefined {
+  switch (file.slice(file.lastIndexOf(".") + 1).toLowerCase()) {
+    case "woff2":
+      return "font/woff2";
+    case "woff":
+      return "font/woff";
+    case "ttf":
+      return "font/ttf";
+    case "otf":
+      return "font/otf";
+    default:
+      return undefined;
+  }
+}
+
 export const DEFAULT_THEME_FONTS = { text: "Geist", code: "JetBrains Mono" } as const;
 const key = z.string().regex(/^[a-z0-9-]{1,40}$(?![\s\S])/);
 export const ThemeValid = z.object({
@@ -225,7 +256,11 @@ export const ThemeValid = z.object({
   name: ThemeName,
   base: ThemeBase,
   density: ThemeDensity.optional(),
-  fonts: z.object({ text: ThemeFont.optional(), code: ThemeFont.optional() }),
+  fonts: z.object({
+    text: ThemeFont.optional(),
+    code: ThemeFont.optional(),
+    files: z.array(ThemeFontFile).max(LIMITS.themeFontFiles).optional(),
+  }),
   scales: z.record(key, ThemeColor),
   tokens: z.record(key, z.union([ThemeColor, ThemeScaleStep])),
   themeColor: z.string().regex(/^#[0-9a-f]{6}$(?![\s\S])/),

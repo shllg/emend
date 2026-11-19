@@ -5,9 +5,11 @@ import {
   ThemeColor,
   ThemeDensity,
   ThemeFont,
+  ThemeFontFile,
   ThemeList,
   ThemeName,
   ThemeValid,
+  themeFontType,
 } from "@emend/contract";
 import { useSyncExternalStore } from "react";
 import { get } from "../api/client.ts";
@@ -21,10 +23,15 @@ export const themeFontStacks = {
   text: `"${DEFAULT_THEME_FONTS.text}", ui-sans-serif, system-ui, sans-serif`,
   code: `"${DEFAULT_THEME_FONTS.code}", ui-monospace, "SF Mono", Menlo, monospace`,
 };
+// Plain identifiers work whether an engine parses FontFace families as CSS or literal names.
+// Leading underscores keep these aliases outside ThemeFont's accepted names.
+const themeFontAliases = { text: "_emend-theme-text", code: "_emend-theme-code" };
+type FontFileEntry = { family: string; source: string; descriptors: FontFaceDescriptors };
 // Light --bg-app = --n-25 = oklch(0.985 0.001 260), rounded to sRGB bytes.
 const defaultThemeColors = { dark: "#171717", light: "#fafafb" };
 const scaleSteps = new Set<string>(THEME_SCALE_STEPS);
 const applied = new Set<string>();
+let appliedFaces: { key: string; fonts: FontFaceSet; faces: { entry: FontFileEntry; face: FontFace }[] } | undefined;
 type ThemeState = {
   pick: ThemePick;
   custom: ThemeValid | undefined;
@@ -72,11 +79,63 @@ export function themeColors(custom: ThemeValid): { scales: Record<string, string
   return { scales, tokens };
 }
 
+function fontFileEntries(custom: ThemeValid | undefined): FontFileEntry[] {
+  const formats = { "font/woff2": "woff2", "font/woff": "woff", "font/ttf": "truetype", "font/otf": "opentype" };
+  const entries: FontFileEntry[] = [];
+  if (custom && ThemeName.safeParse(custom.name).success && Array.isArray(custom.fonts.files)) {
+    for (const value of custom.fonts.files) {
+      const checked = ThemeFontFile.safeParse(value);
+      if (!checked.success) continue;
+      const entry = checked.data;
+      const family = ThemeFont.safeParse(custom.fonts[entry.font]);
+      const type = themeFontType(entry.file);
+      if (!family.success || !type) continue;
+      const url = `/api/v1/themes/${encodeURIComponent(custom.name)}/fonts/${encodeURIComponent(entry.file)}`;
+      entries.push({
+        family: themeFontAliases[entry.font],
+        source: `url("${url}") format("${formats[type]}")`,
+        descriptors: {
+          weight: Array.isArray(entry.weight) ? entry.weight.join(" ") : String(entry.weight ?? 400),
+          style: entry.style ?? "normal",
+          display: "swap",
+        },
+      });
+    }
+  }
+  return entries;
+}
+
+function applyFontFiles(entries: FontFileEntry[], retryFailed = false) {
+  if (typeof FontFace === "undefined" || !document.fonts) return;
+  const fonts = document.fonts;
+  const key = JSON.stringify(entries);
+  const addFace = ({ family, source, descriptors }: FontFileEntry) => {
+    const face = new FontFace(family, source, descriptors);
+    fonts.add(face);
+    return face;
+  };
+  if (appliedFaces?.key === key && appliedFaces.fonts === fonts) {
+    if (retryFailed) {
+      for (const record of appliedFaces.faces) {
+        if (record.face.status !== "error") continue;
+        fonts.delete(record.face);
+        record.face = addFace(record.entry);
+      }
+    }
+    return;
+  }
+  if (appliedFaces) for (const { face } of appliedFaces.faces) appliedFaces.fonts.delete(face);
+  const faces = entries.map((entry) => ({ entry, face: addFace(entry) }));
+  appliedFaces = { key, fonts, faces };
+}
+
 function apply(state: ThemeState) {
   const root = document.documentElement;
   for (const property of applied) root.style.removeProperty(property);
   applied.clear();
   const custom = pickedTheme(state);
+  const entries = fontFileEntries(custom);
+  applyFontFiles(entries);
   const base = custom?.base ?? (state.pick === "dark" || state.pick === "light" ? state.pick : undefined);
   if (base) root.dataset.theme = base;
   else delete root.dataset.theme;
@@ -96,7 +155,10 @@ function apply(state: ThemeState) {
       ["code", "font-mono"],
     ] as const) {
       const name = custom.fonts[font];
-      if (name !== undefined && ThemeFont.safeParse(name).success) set(property, `"${name}", ${themeFontStacks[font]}`);
+      if (name !== undefined && ThemeFont.safeParse(name).success) {
+        const family = entries.some((entry) => entry.family === themeFontAliases[font]) ? themeFontAliases[font] : name;
+        set(property, `"${family}", ${themeFontStacks[font]}`);
+      }
     }
   }
   for (const scheme of ["light", "dark"] as const) {
@@ -218,6 +280,8 @@ export function createThemeStore() {
         if (JSON.stringify(state.custom) !== JSON.stringify(entry)) state = { ...state, custom: entry };
         // A different tab may have overwritten the saved copy, even if ours is unchanged.
         writeCustom(entry);
+        // A successful list fetch proves a session, so retry fonts that failed before sign-in.
+        applyFontFiles(fontFileEntries(entry), true);
       }
       notify();
     },
