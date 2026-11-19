@@ -144,7 +144,7 @@ test("invalid themes fail before a busy slot for GET and HEAD without reading bl
 });
 
 test.each(["dark", "light"] as const)(
-  "theme=%s fixes writeups and ZIP docs without changing headers or HTML docs",
+  "theme=%s fixes writeups and ZIP docs without changing headers or light-only HTML docs",
   async (theme) => {
     const { reviewId, ids } = await docsReview();
     for (const docIds of [[], [...ids]]) {
@@ -205,7 +205,11 @@ test.each([
 });
 
 test("an HTML pub keeps its own look while its separate comments file follows the theme", async () => {
-  const { reviewId } = await commentDocReview("html", true);
+  const { reviewId } = await commentDocReview(
+    "html",
+    true,
+    '<meta name="emend-look" content="custom"><p>Doc paragraph</p>',
+  );
   const before = await (await get(reviewId)).text();
   for (const theme of ["dark", "light"] as const) {
     const entries = await zipEntries(await f.request(`${commentsPath(reviewId)}&theme=${theme}`, "GET"));

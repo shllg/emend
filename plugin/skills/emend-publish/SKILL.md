@@ -27,6 +27,7 @@ If you wrote it elsewhere, copy it into a doc root as step 1 says.
    Before you write it, read [the writing reference](../emend-review/references/writing.md) and
    follow it. It covers sentences, the TL;DR, the glossary, images and HTML pages.
    Build an HTML page from its page structure unless the user asks for a custom page.
+   For HTML opened alone, run `emend look <path>` first.
    emend renders Markdown on its server: GFM tables, code colours, and ```` ```mermaid ```` fences become diagrams.
    Keep it out of hidden folders: folder publishing skips dotfiles and hidden folders.
    Tell the user the path of the file you wrote.

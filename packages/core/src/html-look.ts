@@ -190,6 +190,8 @@ export function htmlLookFromTree(tree: DefaultTreeAdapterTypes.Document | null):
     const name = node.tagName.toLowerCase();
     const isHtml = node.namespaceURI === html.NS.HTML;
     const attr = (key: string) => node.attrs.find((attr) => attr.name === key)?.value ?? "";
+    if (!frame.shadow && isHtml && name === "style" && node.attrs.some((attr) => attr.name === "data-emend-look"))
+      continue;
     if (
       !frame.shadow &&
       isHtml &&

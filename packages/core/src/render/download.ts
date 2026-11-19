@@ -2,6 +2,7 @@ import {
   LIMITS,
   OTHER_TOPIC,
   type PublishLinks,
+  pubStylesheetSafe,
   type RenderedBlock,
   type RenderedWriteup,
   type SourceContent,
@@ -13,6 +14,7 @@ import { fromHtml } from "hast-util-from-html";
 import { toString as hastText } from "hast-util-to-string";
 import rehypeStringify from "rehype-stringify";
 import { unified } from "unified";
+import { type HtmlLookTheme, htmlLookThemeVars, stripHtmlLook } from "../html-look-file.ts";
 import { isLockfile } from "../lockfiles.ts";
 import { parseDocHtml } from "../place/html.ts";
 import type { DownloadLook } from "../theme/download.ts";
@@ -1512,15 +1514,17 @@ export async function buildHtmlDocDownload(input: {
   docPath: string;
   title: string;
   theme?: DownloadRenderTheme;
+  look?: { css: string; mode?: "light" | "dark"; theme?: HtmlLookTheme };
   resolveAsset: DownloadResolver;
   inlineBudget?: number;
   pause?: () => Promise<void>;
   work?: DownloadWork;
 }): Promise<string> {
   downloadLookStyles(input.theme);
-  if (!parseDocHtml(input.html, HTML_ELEMENT_LIMIT))
+  const source = input.look ? stripHtmlLook(input.html) : input.html;
+  if (!parseDocHtml(source, HTML_ELEMENT_LIMIT))
     return buildOmittedDownload({ title: input.title, theme: input.theme });
-  const tree = fromHtml(input.html);
+  const tree = fromHtml(source);
   const state = resolverState(input.resolveAsset, input.inlineBudget, input.pause, input.work);
   const resource = (value: string) => resourceUrl(value, input.docPath, state);
   async function walk(parent: Root | Element): Promise<void> {
@@ -1634,7 +1638,15 @@ export async function buildHtmlDocDownload(input: {
     head = element("head");
     html.children.unshift(head);
   }
-  head.children.unshift(...headMetas());
+  if (input.look?.mode) html.properties.dataTheme = input.look.mode;
+  const lookStyles: Element[] = [];
+  if (input.look) {
+    if (!pubStylesheetSafe(input.look.css)) throw new Error("Unsafe pub stylesheet");
+    lookStyles.push(style(input.look.css));
+    if (input.look.theme)
+      lookStyles.push(style(`@layer emend{:root:root:root{${htmlLookThemeVars(input.look.theme)}}}`));
+  }
+  head.children.unshift(...headMetas(), ...lookStyles);
   if (!head.children.some((node) => node.type === "element" && node.tagName === "title"))
     head.children.push(element("title", [text(input.title)]));
   let body = html.children.find((node): node is Element => node.type === "element" && node.tagName === "body");

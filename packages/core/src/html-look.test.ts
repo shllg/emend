@@ -2,6 +2,7 @@ import { defaultTreeAdapter, html } from "parse5";
 import { expect, test } from "vitest";
 import { htmlHeadings, htmlHeadingsFromTree } from "./doc-headings.ts";
 import { HTML_STRUCTURE, htmlLook, htmlLookFromTree } from "./html-look.ts";
+import { applyHtmlLook } from "./html-look-file.ts";
 import { HTML_NESTING_LIMIT, parseDocHtml } from "./place/html.ts";
 
 test.each([
@@ -426,4 +427,25 @@ test("hostile CSS declarations and an unclosed comment scan in linear time", () 
   const start = performance.now();
   expect(htmlLook(source)).toMatchObject({ look: "emend", ownStyles: true, colorScheme: "auto" });
   expect(performance.now() - start).toBeLessThan(2000);
+});
+
+test.each([
+  "<p>Plain page</p>",
+  "<style>p{color:#222;background:white}</style><p>Light-only page</p>",
+  "<style>p{color:#222}@media(prefers-color-scheme:dark){p{color:white}}</style><p>Both modes</p>",
+])("the file look preserves all appearance metadata: %s", (page) => {
+  const before = htmlLook(page);
+  const styled = applyHtmlLook(page, {
+    css: "@layer emend{:root{color:black}@media(prefers-color-scheme:dark){:root{color:white}}}",
+    lightOnly: before.colorScheme === "light",
+  });
+  expect(htmlLook(styled)).toEqual(before);
+});
+
+test("the look marker does not exempt SVG styles or shadow-root styles", () => {
+  for (const page of [
+    "<svg><style data-emend-look>text{fill:red}</style></svg>",
+    '<div><template shadowrootmode="open"><style data-emend-look>p{color:red}</style></template></div>',
+  ])
+    expect(htmlLook(page)).toMatchObject({ look: "emend", ownStyles: true, colorScheme: "light" });
 });

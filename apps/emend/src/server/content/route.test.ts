@@ -4,7 +4,7 @@ import { type FileHandle, mkdir, open, rename, symlink, truncate, utimes, writeF
 import { type ClientRequest, createServer, request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { LIMITS, PublishResponse, RevisionView } from "@emend/contract";
-import { parseDocHtml } from "@emend/core";
+import { applyHtmlLook, htmlLook, parseDocHtml } from "@emend/core";
 import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { devices, files, reviews, revisions } from "../../db/schema.ts";
@@ -175,11 +175,15 @@ test.each([
     light: false,
   },
   { name: "no colours", mark: "", rules: "p{margin:1px}", look: "emend", light: false },
+  { name: "command-styled light-only", mark: "", rules: "p{color:#222}", look: "emend", light: true, styled: true },
+  { name: "command-styled plain", mark: "", rules: "", look: "emend", light: false, styled: true },
 ])(
   "published $name page stores and serves its appearance with unchanged headers",
-  async ({ mark, rules, look, light }) => {
-    const page = `<!doctype html><html data-theme="dark" lang="en"><head>${mark}<style>${rules}</style></head><body><p>Plan</p></body></html>`;
+  async ({ mark, rules, look, light, styled }) => {
+    const original = `<!doctype html><html data-theme="dark" lang="en"><head>${mark}<style>${rules}</style></head><body><p>Plan</p></body></html>`;
     const css = "@layer emend{:root{color-scheme:light dark}:root[data-theme=light]{color-scheme:light}}";
+    const page = styled ? applyHtmlLook(original, { css, lightOnly: light }) : original;
+    expect(htmlLook(page)).toEqual(htmlLook(original));
     await writeFile(join(f.dir, "pub-frame.css"), css);
     const response = await f.request(
       "/publish",
@@ -232,7 +236,11 @@ test.each([
     const body = await served.text();
     expect(body).toBe(injectBridge(look === "emend" ? injectLook(page, css, light ? "light" : undefined) : page));
     if (look === "emend") {
-      expect(body.indexOf(css)).toBeLessThan(body.indexOf(rules));
+      if (rules) expect(body.indexOf(css)).toBeLessThan(body.indexOf(rules));
+      if (styled) {
+        expect(body.indexOf(`<style>${css}</style>`)).toBeLessThan(body.indexOf("<style data-emend-look>"));
+        expect(body).toContain(`@layer emend-file{${css}}`);
+      }
       expect(body).toContain(`<style>${rules}</style>`);
     } else expect(body).not.toContain(css);
     if (light) {

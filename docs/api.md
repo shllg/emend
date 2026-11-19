@@ -243,11 +243,13 @@ It changes no headers, filename or ZIP decision. The choice is off by default.
 
 An optional `theme=dark`, `theme=light` or `theme=<name>` query parameter sets the look of the files emend
 draws: the writeup, Markdown docs, docs shown as source, the comments file and the omitted-content
-note page. Without it, they follow the reader's colour scheme. An HTML doc downloads as its own
-bytes: a custom page keeps its own look, and a page in emend's look downloads without emend's
-styles. A theme name uses that theme’s resolved colours, including syntax colours for code blocks
-and docs shown as source; fonts stay unchanged. Revisions published before #136 keep their stored
-GitHub code colours.
+note page. Without it, they follow the reader's colour scheme. A custom HTML page keeps its own
+look. An HTML page in emend's look downloads with emend's stylesheet and its default fonts.
+`theme=dark|light` fixes its mode; a theme name fixes its base mode and adds its colours.
+A light-only page stays light and takes a theme's colours only from a light-base theme.
+Without `theme`, the page follows the reader's mode. For the files emend draws, a theme name uses
+that theme’s resolved colours, including syntax colours for code blocks and docs shown as source;
+fonts stay unchanged. Revisions published before #136 keep their stored GitHub code colours.
 An invalid value, a repeat, or a missing or refused theme gets `400 invalid_request` before waiting
 for a slot, also on `HEAD`.
 It changes no headers, filename or ZIP decision.
@@ -996,6 +998,8 @@ A dark-mode rule is `prefers-color-scheme` or `light-dark(` in a style element, 
 `style` attribute or an SVG colour attribute, or `prefers-color-scheme` in the `media` attribute of
 a style element or a stylesheet link. Both checks read CSS outside comments, strings and `url()`
 values, and cover declarative shadow roots, not inert templates.
+An HTML `style` element outside a shadow root carrying `data-emend-look` (the copy `emend look`
+writes) counts for neither check, nor as the page’s own styles.
 
 The URL is
 `/content/<docKey>/<path>` with each path segment percent-encoded. The doc key is the revision's
@@ -1023,6 +1027,8 @@ styles in the cascade layer `emend`, with its fonts as `data:` URLs. It contains
 `@import`, `image-set(` or `src(`. Every `url(` must use `data:`. The build and every server read
 check these rules and the `pubStylesheetBytes` limit. A missing or rejected sheet falls back to a
 minimal light and dark sheet with system colours.
+The stylesheet declares `@layer emend-file, emend;`, so a page's `emend-file` copy never
+overrides emend's look inside emend.
 Every unlayered rule of the doc's own CSS wins over it. The doc's headers stay exactly as above.
 A doc whose `colorScheme` is `light` also gets the fixed start tag `<html data-theme="light">` right
 before that style element, regardless of the query. Other docs in emend's look accept an optional

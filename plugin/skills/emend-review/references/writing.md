@@ -257,6 +257,18 @@ emend's look has no styles for them.
 </html>
 ```
 
+### The page's own copy of emend's look
+
+emend adds its look only while it serves the page.
+To give the file itself that look when opened on its own, run `emend look <file.html>` after writing it.
+Run it again after each change.
+The file follows the reader's light or dark mode.
+It uses the user's theme when exactly one is valid.
+`--theme <name>` picks one; `--no-theme` uses none.
+The file stays self-contained, with about 260 KB more for the fonts.
+A custom page is left unchanged.
+Publishing still works the same.
+
 ### Your own styles
 
 emend's styles sit in a cascade layer, so each of your own rules wins over them.

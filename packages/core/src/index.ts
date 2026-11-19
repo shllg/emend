@@ -11,6 +11,15 @@ export {
   htmlLook,
   htmlLookFromTree,
 } from "./html-look.ts";
+export {
+  applyHtmlLook,
+  HTML_LOOK_FILE_LAYER,
+  type HtmlLookTheme,
+  htmlLookInsertAt,
+  htmlLookThemeRules,
+  htmlLookThemeVars,
+  stripHtmlLook,
+} from "./html-look-file.ts";
 export { type DocLinks, resolveDocLink } from "./links.ts";
 export { isLockfile } from "./lockfiles.ts";
 export { docText, parseDocHtml, placeHtmlSpan } from "./place/html.ts";

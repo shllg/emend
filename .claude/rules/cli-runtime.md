@@ -11,7 +11,7 @@ A repo under review may try to run its own code through emend: under mise, its t
 point `emend`, `node` or `git` at code it controls, and agents run emend with full rights. These
 checks catch a copy inside the repo.
 
-- `publish`, `wait`, `feedback`, `reply`, `mcp`, `stop`, `service`, `update` and `skills` refuse
+- `publish`, `look`, `wait`, `feedback`, `reply`, `mcp`, `stop`, `service`, `update` and `skills` refuse
   an emend whose Node.js or entry resolves inside a repository that holds the working directory
   (`apps/emend/src/cli.ts`, `runtime-repository.ts`). The refusal comes before `main.ts` loads.
 - A `.git` folder counts unless it has no `HEAD` (git never accepts one without), so an empty one

@@ -4,6 +4,7 @@ import type { RenderedBlock, RenderedWriteup, Target, ThemeBase, TopicMeta } fro
 import { fromHtml } from "hast-util-from-html";
 import { toString as hastText } from "hast-util-to-string";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { applyHtmlLook, type HtmlLookTheme } from "../html-look-file.ts";
 import { themeDownloadLook } from "../theme/download.ts";
 import { checkThemeDocument } from "../theme/theme.ts";
 import type { HtmlElement as Element, HtmlRoot as Root } from "./blocks.ts";
@@ -3596,4 +3597,83 @@ test("an omitted doc keeps all its threads in input order, with labels and a bud
     }
     expect(html.match(/class="em-thread-where"/g)).toHaveLength(4);
   }
+});
+
+const pubCss =
+  '@layer emend-file,emend;@font-face{font-family:Example;src:url("data:font/woff2;base64,AA==")}@layer emend{body{color:CanvasText}}';
+
+test.each([undefined, "dark", "light"] as const)(
+  "HTML downloads put the pub stylesheet before page styles with mode=%s",
+  async (mode) => {
+    const html = await buildHtmlDocDownload({
+      html: '<!doctype html><html lang="en"><head><title>Plan</title><style>p{margin:1px}</style></head><body><p>Seeds</p></body></html>',
+      docPath: "plan.html",
+      title: "Plan",
+      resolveAsset: async () => null,
+      look: { css: pubCss, mode },
+    });
+    expectHead(html);
+    const nodes = parsed(html);
+    const root = nodes.find((node) => node.tagName === "html");
+    expect(root?.properties.dataTheme).toBe(mode);
+    expect(root?.properties.lang).toBe("en");
+    const head = nodes.find((node) => node.tagName === "head");
+    const first = head?.children[3];
+    expect(first).toMatchObject({ tagName: "style" });
+    expect(first && first.type === "element" ? hastText(first) : "").toBe(pubCss);
+    expect(html.indexOf(pubCss)).toBeLessThan(html.indexOf("p{margin:1px}"));
+    expect(html).toContain("<p>Seeds</p>");
+  },
+);
+
+test("HTML downloads add theme variables in the bridge's layer and strip the file's copy", async () => {
+  const theme: HtmlLookTheme = { base: "light", scales: { "n-0": "#ffffff" }, tokens: { "bg-app": "n-0" } };
+  const original = "<!doctype html><style>p{color:#222}</style><p>Seeds</p>";
+  const html = await buildHtmlDocDownload({
+    html: applyHtmlLook(original, { css: pubCss, lightOnly: true, theme }),
+    docPath: "plan.html",
+    title: "Plan",
+    resolveAsset: async () => null,
+    look: { css: pubCss, mode: "light", theme },
+  });
+  expect(html.split(pubCss)).toHaveLength(2);
+  expect(html).not.toContain("data-emend-look");
+  expect(html).not.toContain("@layer emend-file{");
+  const styles = parsed(html)
+    .filter((node) => node.tagName === "style")
+    .map(hastText);
+  expect(styles).toEqual([
+    pubCss,
+    "@layer emend{:root:root:root{--n-0:#ffffff;--bg-app:var(--n-0);}}",
+    "p{color:#222}",
+  ]);
+});
+
+test.each(["</style><script>bad()</script>", "body{background:url(https://example.com/a)}"])(
+  "HTML downloads refuse an unsafe pub stylesheet: %s",
+  async (css) => {
+    await expect(
+      buildHtmlDocDownload({
+        html: "<p>Seeds</p>",
+        docPath: "plan.html",
+        title: "Plan",
+        resolveAsset: async () => null,
+        look: { css },
+      }),
+    ).rejects.toThrow("Unsafe pub stylesheet");
+  },
+);
+
+test("adding the pub look keeps the HTML download's hostile-content filtering", async () => {
+  const html = await buildHtmlDocDownload({
+    html: '<script>bad()</script><img onerror="bad()" src="https://example.com/a"><a href="javascript:bad()">Seeds</a><svg><script>bad()</script></svg><iframe src="https://example.com/"></iframe>',
+    docPath: "plan.html",
+    title: "Plan",
+    resolveAsset: async () => null,
+    look: { css: pubCss },
+  });
+  expectHead(html);
+  expect(html).toContain(pubCss);
+  for (const forbidden of ["<script", "onerror", "javascript:", "https://example.com", "<iframe"])
+    expect(html).not.toContain(forbidden);
 });

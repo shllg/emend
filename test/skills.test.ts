@@ -420,6 +420,10 @@ test("moved writing rules appear once, in the shared writing reference", () => {
   }
 });
 
+test.each([publishSkill, writingReference])("%s names the local HTML look command", (path) => {
+  expect(read(path)).toContain("emend look");
+});
+
 test("the writing reference defines HTML pages and both TL;DR locations", () => {
   const text = read(writingReference);
   const html = (text.split("## HTML pages\n")[1]?.split("\n## ")[0] ?? "").replace(/\s+/g, " ");
