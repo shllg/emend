@@ -225,7 +225,7 @@ writes nothing. The file follows the reader's light or dark mode. When exactly o
 it uses that theme's colours. Pick one with `--theme <name>`, or use `--no-theme` for emend's own
 colours. With several valid themes, it uses emend's own colours and says how to pick one.
 A page marked `<meta name="emend-look" content="custom">` stays unchanged.
-The file stays self-contained, adding about 260 KB for the default fonts. Publishing still works
+The file stays self-contained, adding about 200 KB for the default fonts. Publishing still works
 the same.
 
 ## List your reviews and check the connection

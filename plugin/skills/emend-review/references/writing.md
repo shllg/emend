@@ -265,7 +265,7 @@ Run it again after each change.
 The file follows the reader's light or dark mode.
 It uses the user's theme when exactly one is valid.
 `--theme <name>` picks one; `--no-theme` uses none.
-The file stays self-contained, with about 260 KB more for the fonts.
+The file stays self-contained, with about 200 KB more for the fonts.
 A custom page is left unchanged.
 Publishing still works the same.
 
