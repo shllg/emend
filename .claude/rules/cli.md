@@ -46,12 +46,6 @@ The CLI runs in repos under review: treat them as hostile.
   text files found by listing each folder argument. Markdown and HTML render; other text files and
   docs under `--source` show as source. `--main` only picks one of those docs. Every source still
   sits in the worktree or a `docRoots` folder.
-- `emend look <file>...` reads and rewrites only the files it names, never a folder: a regular
-  file, not a symlink, named `.html` or `.htm`, UTF-8 without NUL, at most `htmlDocBytes` before
-  and after the change. It opens it with `O_NOFOLLOW` and checks device and inode against `lstat`,
-  writes a new file beside it, and renames that over the original after checking the original is
-  unchanged, keeping its mode and group. It refuses a file another user owns or one without owner
-  write permission. It runs no git, and its themes come only from the config folder.
 - A source doc is UTF-8 without NUL; a named one that is not is refused, naming the argument. A
   walked file is skipped with a warning when its name looks binary or secret (keys, credentials,
   passwords, tfvars; not Markdown/HTML), too large, unreadable, or, shown as source, not text or
