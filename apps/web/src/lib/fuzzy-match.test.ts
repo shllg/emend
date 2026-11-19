@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { fuzzyMatch } from "./fuzzy-match.ts";
+import { fuzzyMatch, fuzzyMatchFields } from "./fuzzy-match.ts";
 
 test("matches ordered letters with gaps and refuses missing or reversed letters", () => {
   expect(fuzzyMatch("nxtfl", "Next file")).not.toBeNull();
@@ -12,6 +12,20 @@ test("favors word starts and consecutive letters", () => {
   expect(fuzzyMatch("nf", "Next file")).toBeGreaterThan(fuzzyMatch("nf", "Switch the inbox filter") as number);
   expect(fuzzyMatch("snoo", "Snooze")).toBeGreaterThan(fuzzyMatch("snoo", "See new options only") as number);
   expect(fuzzyMatch("nf", "Next-file")).toBe(fuzzyMatch("nf", "Next file"));
+});
+
+test("favors complete issue numbers over longer numbers with the same prefix", () => {
+  expect(fuzzyMatch("175", "emend-175-a")).toBeGreaterThan(fuzzyMatch("175", "emend-1750-other") as number);
+  expect(fuzzyMatch("18", "emend-18-x")).toBeGreaterThan(fuzzyMatch("18", "emend-184-y") as number);
+  expect(fuzzyMatch("175", "emend-175")).toBeGreaterThan(fuzzyMatch("175", "emend-1750") as number);
+});
+
+test("rejects missing first or middle letters without affecting repeated calls", () => {
+  const score = fuzzyMatch("nxtfl", "Next file");
+  expect(score).not.toBeNull();
+  expect(fuzzyMatch("zxtfl", "Next file")).toBeNull();
+  expect(fuzzyMatch("nxzfl", "Next file")).toBeNull();
+  expect(fuzzyMatch("nxtfl", "Next file")).toBe(score);
 });
 
 test("matches every query word independently of word order", () => {
@@ -32,4 +46,28 @@ test("chooses the best alignment even after an earlier matching start or letter"
   expect(fuzzyMatch("snoo", "s nothing Snooze")).toBeGreaterThan(fuzzyMatch("snoo", "s nothing only once") as number);
   expect(fuzzyMatch("abc", "a bxybc")).toBeGreaterThan(fuzzyMatch("abc", "a bxyxc") as number);
   expect(fuzzyMatch("files", "Files")).toBeGreaterThan(fuzzyMatch("files", "Open Files") as number);
+});
+
+test("matches words across fields independently of case and word order", () => {
+  const texts = ["Performance harness", "emend-175-harness", "Workshop"] as const;
+  const score = (fuzzyMatch("175", texts[1]) as number) + (fuzzyMatch("perf", texts[0]) as number);
+  expect(fuzzyMatchFields("175 PERF", texts)).toBe(score);
+  expect(fuzzyMatchFields("perf\t175", texts)).toBe(score);
+});
+
+test("never joins letters from different fields for one word", () => {
+  expect(fuzzyMatchFields("abc", ["ab", "c"])).toBeNull();
+  expect(fuzzyMatchFields("alpha missing", ["Alpha", "Beta"])).toBeNull();
+  expect(fuzzyMatchFields("alpha", [])).toBeNull();
+});
+
+test("blank field queries score zero, including without fields", () => {
+  expect(fuzzyMatchFields("", ["Alpha"])).toBe(0);
+  expect(fuzzyMatchFields(" \t\n", [])).toBe(0);
+});
+
+test("uses only the best matching field for each word", () => {
+  const texts = ["Open Files", "Files", "files"];
+  expect(fuzzyMatchFields("files", texts)).toBe(fuzzyMatch("files", "Files"));
+  expect(fuzzyMatchFields("files", texts.toReversed())).toBe(fuzzyMatch("files", "Files"));
 });
