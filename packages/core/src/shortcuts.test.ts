@@ -129,7 +129,6 @@ for (const source of ["override", "file"] as const) {
   test.each([
     [null, null],
     ["mod", null],
-    ["alt", "alt+0"],
   ] as const)(`a saved ${source} group of %s fills row ten with %s without mutating the input`, (modifier, tenth) => {
     const group = Object.freeze(jumpGroup(modifier));
     const commands = source === "override" ? resolve({}, group) : resolve(group);
@@ -138,6 +137,19 @@ for (const source of ["override", "file"] as const) {
       source,
       default: "alt+0",
       [source]: tenth,
+      fileError: false,
+      clashWith: null,
+    });
+    expect(Object.hasOwn(group, "inbox.jump10")).toBe(false);
+  });
+
+  test(`an Alt ${source} group leaves row ten at its default without mutating the input`, () => {
+    const group = Object.freeze(jumpGroup("alt"));
+    const commands = source === "override" ? resolve({}, group) : resolve(group);
+    expect(commands["inbox.jump10"]).toEqual({
+      value: "alt+0",
+      source: "default",
+      default: "alt+0",
       fileError: false,
       clashWith: null,
     });
@@ -162,7 +174,7 @@ for (const source of ["override", "file"] as const) {
   test.each([
     [null, "x"],
     ["alt", null],
-  ] as const)(`an explicit tenth ${source} key wins over the %s group fill`, (modifier, tenth) => {
+  ] as const)(`an explicit tenth ${source} key takes precedence over the saved %s group`, (modifier, tenth) => {
     const group = { ...jumpGroup(modifier), "inbox.jump10": tenth };
     const commands = source === "override" ? resolve({}, group) : resolve(group);
     expect(commands["inbox.jump10"]).toMatchObject({ value: tenth, source, [source]: tenth });
@@ -170,12 +182,12 @@ for (const source of ["override", "file"] as const) {
 }
 
 test("file and override jump groups fill independently, with the override taking precedence", () => {
-  const commands = resolve(jumpGroup("alt"), jumpGroup("mod"));
+  const commands = resolve(jumpGroup(null), jumpGroup("mod"));
   expect(commands["inbox.jump10"]).toEqual({
     value: null,
     source: "override",
     default: "alt+0",
-    file: "alt+0",
+    file: null,
     override: null,
     fileError: false,
     clashWith: null,
@@ -202,24 +214,40 @@ test("a file error for row ten blocks the file fill but allows an override fill"
   });
 });
 
-test("a filled override wins a clash with a file binding", () => {
-  const commands = resolve({ "tab.writeup": "alt+0" }, jumpGroup("alt"));
-  expect(commands["inbox.jump10"]).toMatchObject({
-    value: "alt+0",
-    source: "override",
-    override: "alt+0",
-    clashWith: null,
-  });
-  expect(commands["tab.writeup"]).toMatchObject({ value: "1", source: "default", clashWith: "inbox.jump10" });
-});
-
-test("a filled file binding loses a clash with an override", () => {
-  const commands = resolve(jumpGroup("alt"), { "tab.writeup": "alt+0" });
-  expect(commands["inbox.jump10"]).toMatchObject({
+test("an Alt override group leaves row ten's default below another command's override", () => {
+  const commands = resolve({}, { ...jumpGroup("alt"), "tab.writeup": "alt+0" });
+  expect(commands["inbox.jump10"]).toEqual({
     value: null,
     source: "default",
-    file: "alt+0",
+    default: "alt+0",
+    fileError: false,
     clashWith: "tab.writeup",
   });
-  expect(commands["tab.writeup"]).toMatchObject({ value: "alt+0", source: "override", clashWith: null });
+  expect(commands["tab.writeup"]).toEqual({
+    value: "alt+0",
+    source: "override",
+    default: "1",
+    override: "alt+0",
+    fileError: false,
+    clashWith: null,
+  });
+});
+
+test("an Alt override group leaves row ten's default below another command's file binding", () => {
+  const commands = resolve({ "tab.writeup": "alt+0" }, jumpGroup("alt"));
+  expect(commands["inbox.jump10"]).toEqual({
+    value: null,
+    source: "default",
+    default: "alt+0",
+    fileError: false,
+    clashWith: "tab.writeup",
+  });
+  expect(commands["tab.writeup"]).toEqual({
+    value: "alt+0",
+    source: "file",
+    default: "1",
+    file: "alt+0",
+    fileError: false,
+    clashWith: null,
+  });
 });

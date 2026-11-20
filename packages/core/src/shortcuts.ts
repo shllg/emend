@@ -20,7 +20,6 @@ function fillTenthJump(keys: Partial<Record<ShortcutCommand, KeyBinding>>) {
   const values = commands.map((command) => keys[command]);
   if (values.every((value) => value === null) || values.every((value, index) => value === `mod+${index + 1}`))
     return { ...keys, "inbox.jump10": null };
-  if (values.every((value, index) => value === `alt+${index + 1}`)) return { ...keys, "inbox.jump10": "alt+0" };
   return keys;
 }
 
@@ -33,7 +32,8 @@ export function resolveShortcuts({
   fileErrors: ReadonlySet<ShortcutCommand>;
   overrides: Partial<Record<ShortcutCommand, KeyBinding>>;
 }): Record<ShortcutCommand, KeySetting> {
-  // Groups saved before inbox.jump10 existed keep working as one group.
+  // Older off and Ctrl groups keep row ten off. Alt groups leave its default at level 0,
+  // so any saved or file key wins a clash; a filled off value never clashes.
   overrides = fillTenthJump(overrides);
   if (!fileErrors.has("inbox.jump10")) file = fillTenthJump(file);
   const states: CommandState[] = ShortcutCommand.options.map((command) => {
