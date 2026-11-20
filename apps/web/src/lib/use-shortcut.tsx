@@ -19,6 +19,7 @@ import { useLayout } from "./layout.ts";
 import {
   ignoreShortcut,
   jumpCommands,
+  jumpGroupLabel,
   jumpKeysLabel,
   keyLabel,
   matchesShortcut,
@@ -191,7 +192,7 @@ function GlobalShortcuts({ keys }: { keys: Record<ShortcutCommand, KeyBinding> }
             ))}
             {group.jump && (
               <div className="flex items-center justify-between gap-3">
-                <dt>Open row 1 to 9 of Pinned and Active</dt>
+                <dt>{jumpGroupLabel}</dt>
                 <dd>{jumpLabel === "Off" ? "Off" : <Kbd>{jumpLabel}</Kbd>}</dd>
               </div>
             )}

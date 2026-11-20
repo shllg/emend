@@ -107,11 +107,21 @@ export function inboxSections(
   });
 }
 
-export function jumpRows(sections: ReturnType<typeof inboxSections>) {
-  return sections
-    .flatMap(({ list, expanded, rows }) => (expanded && (list === "pinned" || list === "active") ? rows : []))
-    .filter((row) => !row.movedTo)
-    .slice(0, 9);
+function openInboxRows(sections: ReturnType<typeof inboxSections>): { key: string; row: InboxItem }[] {
+  const seen = new Set<string>();
+  return sections.flatMap(({ key, expanded, rows }) =>
+    expanded
+      ? rows.flatMap((row) => {
+          if (row.movedTo || seen.has(row.id)) return [];
+          seen.add(row.id);
+          return [{ key, row }];
+        })
+      : [],
+  );
+}
+
+export function jumpRows(sections: ReturnType<typeof inboxSections>, count: number) {
+  return openInboxRows(sections).slice(0, count);
 }
 
 /** Palette matches keep the inbox's display order on ties, with Done after every other section. */
@@ -137,16 +147,7 @@ export function matchInboxItems(items: InboxItem[], now: number, query: string, 
 }
 
 export function inboxSequence(sections: ReturnType<typeof inboxSections>) {
-  const seen = new Set<string>();
-  return sections.flatMap(({ expanded, rows }) =>
-    expanded
-      ? rows.filter((row) => {
-          if (row.movedTo || seen.has(row.id)) return false;
-          seen.add(row.id);
-          return true;
-        })
-      : [],
-  );
+  return openInboxRows(sections).map(({ row }) => row);
 }
 
 export function adjacentInboxItem(items: InboxItem[], current: string | undefined, delta: 1 | -1) {

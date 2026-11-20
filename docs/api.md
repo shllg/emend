@@ -512,7 +512,8 @@ another modifier are refused. The config file alone also accepts uppercase lette
 `shift+a`), case-insensitive shift-letter combinations (`SHIFT+A` becomes `shift+a`) and
 case-insensitive mod and alt forms (`Mod+K` becomes `mod+k`, `MOD+SHIFT+P` becomes `mod+shift+p`,
 `Alt+1` becomes `alt+1` and `Mod+1` becomes `mod+1`). Shift must be spelled out for mod bindings with letters.
-`inbox.jump1` to `inbox.jump9` open the first to ninth openable row of the Active section as the client shows it.
+`inbox.jump1` to `inbox.jump10` open the first to tenth row the client numbers: the rows of every
+open inbox section from the top, an item shown twice counted once.
 
 The global config file format is `"keys": { "<command>": "<key>" | null }`. It is read once
 alongside `approvedActiveHours` and `approvedActiveLimit`. An absent `file` or `override` in a
@@ -547,6 +548,7 @@ reads the approval window and the approval cap on review reads, still without qu
 | `inbox.jump7` | `alt+7` |
 | `inbox.jump8` | `alt+8` |
 | `inbox.jump9` | `alt+9` |
+| `inbox.jump10` | `alt+0` |
 | `tab.writeup` | `1` |
 | `tab.files` | `2` |
 | `tab.docs` | `3` |

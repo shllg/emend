@@ -3,7 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { PanelLeftOpen } from "lucide-react";
 import type { Ref } from "react";
 import { inboxQuery, serverNow } from "../../api/queries.ts";
-import { inboxSections, inboxSequence, jumpRows } from "../../lib/inbox-list.ts";
+import { inboxSections, inboxSequence } from "../../lib/inbox-list.ts";
 import { ariaKeyShortcuts, jumpBadge, jumpCommands } from "../../lib/shortcuts.ts";
 import { useJumpShortcuts, useShortcutKeys } from "../../lib/use-shortcut.tsx";
 import { OriginBadge } from "../status/OriginBadge.tsx";
@@ -13,15 +13,15 @@ import { cn } from "../ui/utils.ts";
 import { doneDimmed, looksDone, needsAttention } from "./ReviewRow.tsx";
 
 export function InboxRail({ onShow, showRef }: { onShow: () => void; showRef?: Ref<HTMLButtonElement> }) {
-  // The collapsed rail ignores Kind, search, machine and project filters; jumps follow its own rows.
+  // The collapsed rail ignores Kind, search, machine and project filters and folds.
+  // It numbers its first ten rows, pinned items first.
   const query = useQuery(inboxQuery());
   const navigate = useNavigate();
   const keys = useShortcutKeys();
   const sections = inboxSections(query.data?.items ?? [], serverNow(query.data), { groups: query.data?.groups });
-  const numberedRows = jumpRows(sections);
   const rows = inboxSequence(sections.map((section) => ({ ...section, expanded: true })));
   useJumpShortcuts((index) => {
-    const item = numberedRows[index];
+    const item = rows[index];
     if (!item) return;
     void navigate({ to: "/r/$reviewId", params: { reviewId: item.id }, search: { rev: item.newestRevision } });
   });
@@ -33,8 +33,8 @@ export function InboxRail({ onShow, showRef }: { onShow: () => void; showRef?: R
       <IconButton ref={showRef} label="Show inbox" icon={PanelLeftOpen} onClick={onShow} />
       <div className="relative min-h-0 w-full flex-1 overflow-y-auto">
         <ul className="flex flex-col items-center gap-0.5">
-          {rows.map((review) => {
-            const command = jumpCommands[numberedRows.indexOf(review)];
+          {rows.map((review, index) => {
+            const command = jumpCommands[index];
             const key = command ? keys[command] : null;
             const badge = jumpBadge(key);
             return (

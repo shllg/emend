@@ -868,7 +868,7 @@ test("? lists all commands, their effective keys, fixed keys and settings link",
   const dialog = await screen.findByRole("alertdialog", { name: "Keyboard shortcuts" });
   for (const command of shortcutGroups.flatMap((group) => group.commands))
     expect(within(dialog).getByText(shortcutLabels[command])).toBeTruthy();
-  expect(within(dialog).getByText("Open row 1 to 9 of Pinned and Active")).toBeTruthy();
+  expect(within(dialog).getByText("Open inbox row 1 to 10")).toBeTruthy();
   expect(within(dialog).getByText("x")).toBeTruthy();
   expect(within(dialog).getByText("Off")).toBeTruthy();
   expect(within(dialog).getByText("⌘↵ / Ctrl ↵: save a comment, or send from the instructions field")).toBeTruthy();

@@ -345,6 +345,7 @@ test.each(["page", "pane", "rail"])("Alt+1 opens Pinned and Alt+2 opens Active f
 });
 
 test("folded Pinned and Active sections contribute no jump badges", async () => {
+  items.push(item(3, { list: "done" }));
   const { history } = mount();
   const pinned = within(await screen.findByRole("region", { name: "Pinned" }));
   await ready();
@@ -355,6 +356,12 @@ test("folded Pinned and Active sections contribute no jump badges", async () => 
   expect(document.querySelectorAll("[data-jump-number]")).toHaveLength(0);
   press("1", { altKey: true, code: "Digit1" });
   expect(history.location.pathname).toBe("/");
+  fireEvent.click(screen.getByRole("button", { name: "Done 1" }));
+  const done = within(screen.getByRole("region", { name: "Done" })).getByRole("link");
+  expect(done.querySelector("[data-jump-number]")?.textContent).toBe("1");
+  expect(document.querySelectorAll("[data-jump-number]")).toHaveLength(1);
+  press("1", { altKey: true, code: "Digit1" });
+  await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(3)}`));
 });
 
 test("j and k visit a pinned Done item once, in Pinned", async () => {
@@ -408,12 +415,7 @@ test("the collapsed rail lists each review once, pins first, and keeps its jump 
   await ready();
   const links = rail.getAllByRole("link");
   expect(links.map((link) => link.getAttribute("aria-label"))).toEqual(["Item 2", "Item 3", "Item 1", "Item 4"]);
-  expect(links.map((link) => link.querySelector("[data-jump-number]")?.textContent)).toEqual([
-    "1",
-    "2",
-    "3",
-    undefined,
-  ]);
+  expect(links.map((link) => link.querySelector("[data-jump-number]")?.textContent)).toEqual(["1", "2", "3", "4"]);
 });
 
 test("a pins event refreshes the inbox and the open review", async () => {

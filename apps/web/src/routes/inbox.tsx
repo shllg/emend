@@ -117,10 +117,10 @@ export function Inbox({
     open,
     groups: query.data?.groups,
   });
-  const numberedRows = numbered ? jumpRows(sections) : [];
+  const numberedRows = numbered ? jumpRows(sections, jumpCommands.length) : [];
   useJumpShortcuts(
     (index) => {
-      const item = numberedRows[index];
+      const item = numberedRows[index]?.row;
       if (!item) return;
       void navigate({ to: "/r/$reviewId", params: { reviewId: item.id }, search: { rev: item.newestRevision } });
       onOpen?.();
@@ -330,8 +330,10 @@ export function Inbox({
                   <ul>
                     {rows.map((review) => {
                       const command =
-                        list === "pinned" || list === "active" ? jumpCommands[numberedRows.indexOf(review)] : undefined;
-                      const key = command ? keys[command] : null;
+                        jumpCommands[
+                          numberedRows.findIndex((entry) => entry.key === key && entry.row.id === review.id)
+                        ];
+                      const binding = command ? keys[command] : null;
                       return (
                         <ReviewRow
                           key={review.id}
@@ -340,8 +342,8 @@ export function Inbox({
                           now={now}
                           onOpen={onOpen}
                           highlight={highlighted.has(review.id)}
-                          jump={jumpBadge(key)}
-                          keyShortcuts={key === null ? undefined : ariaKeyShortcuts(key)}
+                          jump={jumpBadge(binding)}
+                          keyShortcuts={binding === null ? undefined : ariaKeyShortcuts(binding)}
                         />
                       );
                     })}

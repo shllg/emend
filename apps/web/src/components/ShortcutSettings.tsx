@@ -12,6 +12,8 @@ import { patch } from "../api/client.ts";
 import {
   captureShortcut,
   jumpCommands,
+  jumpGroupLabel,
+  jumpKey,
   jumpKeysLabel,
   keyLabel,
   shortcutCommands,
@@ -165,7 +167,7 @@ function JumpShortcutSetting({ keys }: { keys: KeysSetting }) {
     <fieldset aria-labelledby={`${id}-label`} className="border-b border-line-1 py-3">
       <div className="flex flex-wrap items-center gap-3">
         <span id={`${id}-label`} className="min-w-0 flex-1 text-14">
-          Open row 1 to 9 of Pinned and Active
+          {jumpGroupLabel}
         </span>
         {label === "Off" ? <span className="text-14">Off</span> : <Kbd>{label}</Kbd>}
         <Button
@@ -204,8 +206,8 @@ function JumpShortcutSetting({ keys }: { keys: KeysSetting }) {
               );
               return;
             }
-            const modifier = captured.key.slice(0, 3);
-            const values = jumpCommands.map((_, index) => `${modifier}+${index + 1}`);
+            const modifier = captured.key.startsWith("alt+") ? "alt" : "mod";
+            const values = jumpCommands.map((_, index) => jumpKey(modifier, index));
             const clash = shortcutCommands.find((command) => {
               const value = keys.commands[command].value;
               return !jumpCommands.includes(command) && value !== null && values.includes(value);
