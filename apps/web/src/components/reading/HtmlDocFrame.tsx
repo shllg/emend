@@ -3,7 +3,13 @@ import { TextSelect } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { claimDraft, useDraftClaim } from "../../lib/composer-owner.ts";
 import { draftKey, listDrafts, subscribeDrafts } from "../../lib/drafts.ts";
-import { type DocNavigation, FrameToParent, type HtmlPosition, type ParentToFrame } from "../../lib/frame-messages.ts";
+import {
+  type DiagramJob,
+  type DocNavigation,
+  FrameToParent,
+  type HtmlPosition,
+  type ParentToFrame,
+} from "../../lib/frame-messages.ts";
 import { useLayout, useMedia } from "../../lib/layout.ts";
 import { useLayoutPreferences } from "../../lib/layout-store.ts";
 import { focusReadingTarget } from "../../lib/reading-focus.ts";
@@ -15,6 +21,7 @@ import { ThreadCard } from "../threads/ThreadCard.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Sheet } from "../ui/Sheet.tsx";
 import type { ReaderProps } from "./BlockReader.tsx";
+import { HtmlDiagramRenderer } from "./HtmlDiagramRenderer.tsx";
 import { Lightbox } from "./Lightbox.tsx";
 import type { LightboxSubject } from "./screenshots.ts";
 
@@ -104,6 +111,7 @@ export function HtmlDocFrame({
   const [composing, setComposing] = useState(false);
   const [show, setShow] = useState<HtmlNavigation>();
   const [gallery, setGallery] = useState<{ items: LightboxSubject[]; index: number } | null>(null);
+  const [diagramJob, setDiagramJob] = useState<DiagramJob | null>(null);
   const closeGallery = useCallback(() => setGallery(null), []);
   const lastScroll = useRef<HtmlNavigation | undefined>(undefined);
   // A parent-requested src change mounts a fresh window and starts its load baseline.
@@ -111,6 +119,7 @@ export function HtmlDocFrame({
     frame.current = element;
     if (element) {
       setGallery(null);
+      setDiagramJob(null);
       loads.current = 0;
       gone.current = false;
       readyNow.current = false;
@@ -174,6 +183,7 @@ export function HtmlDocFrame({
     readyNow.current = false;
     setAway(true);
     setGallery(null);
+    setDiagramJob(null);
     setReady(0);
     if (!composing) setTarget(null);
   }, [composing]);
@@ -199,6 +209,8 @@ export function HtmlDocFrame({
           reading.entry.positions.set(reading.key, anchor);
           saveReadingPosition(reading.key, anchor);
         }
+      } else if (parsed.data.type === "emend:diagrams") {
+        if (readyNow.current) setDiagramJob(parsed.data);
       } else if (parsed.data.type === "emend:image") {
         if (!readyNow.current) return;
         const allowed = new Set(images);
@@ -326,6 +338,9 @@ export function HtmlDocFrame({
         />
       </div>
       {gallery && <Lightbox gallery={gallery} onClose={closeGallery} />}
+      {diagramJob && ready && !away ? (
+        <HtmlDiagramRenderer key={generation} job={diagramJob} look={look} post={post} />
+      ) : null}
       {away && (
         <div role="status" className="space-y-2">
           <p>This doc navigated away.</p>

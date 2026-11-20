@@ -261,6 +261,9 @@ It follows emend's light or dark mode.
 - TL;DR: `<section class="tldr">` with the "TL;DR" heading first. It shows as the writeup's card.
 - Key facts: `<dl class="facts">`, with one `div` holding a `dt` and a `dd` per fact.
 - Figure: `figure` with an `img` and a `figcaption`.
+- Diagram: `<pre class="mermaid">` holding Mermaid source.
+  emend draws it with its own Mermaid, in light and dark mode, also on a custom page.
+  Opened on its own outside emend, the page shows the source.
 - Before and After: `<div class="pair">` with two figures captioned "Before" and "After".
   A `p` after them states the effect.
 - Callout: `<aside class="note">` or `<aside class="warning">`.
@@ -290,6 +293,11 @@ emend's look has no styles for them.
 </dl>
 <h2>What changed</h2>
 <p>Search reads the cache first and falls back to the database.</p>
+<pre class="mermaid">
+flowchart LR
+  Search --> Cache
+  Cache -->|Miss| Database
+</pre>
 <aside class="warning"><p>A price change shows after at most five minutes.</p></aside>
 <div class="pair">
   <figure><img src="shots/before.png" alt="Search page with a spinner"><figcaption>Before</figcaption></figure>
@@ -335,6 +343,7 @@ emend does not read those files.
 When the user asks for a custom page, mark it in its `head` with
 `<meta name="emend-look" content="custom">`.
 emend then shows the page with its own styles only.
+Diagrams use the same `<pre class="mermaid">` markup.
 On a custom page:
 
 - Give the main column a max width of 1024px.

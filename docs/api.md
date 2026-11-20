@@ -1160,7 +1160,8 @@ replaces the text of one constructed stylesheet, created and adopted once, with
 `@layer emend{:root:root:root{--<key>:<value>;...}}`; token steps become `var(--<step>)`.
 Empty maps clear the sheet. The layer lets the doc's unlayered CSS win, while the selector beats
 emend's default colour rules. Without constructed stylesheets, only `data-theme` is set. Theme
-messages neither scroll nor post messages nor change other attributes.
+messages do not scroll or change other attributes. An applied theme can request diagrams again
+when their computed text colour changes mode, as described below.
 
 Custom and legacy pubs receive no theme message. Their frames inherit the app's `color-scheme`,
 which current Chromium and Firefox pass to the frame's `prefers-color-scheme`, so a custom pub
@@ -1170,6 +1171,74 @@ After `emend:ready`, the parent sends `{ type: "emend:docs", paths: FilePath[] }
 paths in this revision. Bridge links resolve against the existing document base, decode each
 segment once, and use the same rejection rules as the core resolver. The parent validates the
 destination again before navigating.
+
+HTML diagrams use `<pre class="mermaid">` in both emend's look and custom pages. Only an
+HTML-namespace `pre` with the exact `mermaid` class token (split on ASCII whitespace) qualifies.
+The bridge walks light DOM in document order, skipping script, style, template and noscript
+subtrees, and any `pre` inside an earlier diagram `pre`. Nested `code` contributes text;
+`div.mermaid` and `code.language-mermaid` alone do not qualify. Source is the `pre`'s unchanged
+`textContent`, read through `Node.prototype`. Empty-after-trimming sources and sources over
+50,000 characters stay as text. The scan keeps at most 50 diagrams and stops before the sum of
+source lengths would exceed 1,000,000.
+
+Immediately after `emend:ready`, a nonempty scan sends the strict message
+`{ type: "emend:diagrams", request: number, diagrams: { source: string, mode: "light" | "dark", width: number }[] }`.
+`request` is an integer from 1 through 2147483647, starting at 1 and increasing on every post.
+There are 1..50 entries; sources are well-formed strings of 1..50000 characters, with a total
+of at most 1,000,000. Width is the rounded bounding rectangle width, clamped to 1..10000.
+Mode comes from the computed `color` of the `pre`'s parent (or the document element): a 1x1
+sRGB canvas converts it to unpremultiplied RGB bytes, ignoring alpha. Linearised sRGB relative
+luminance uses weights 0.2126, 0.7152 and 0.0722; a value above 0.179 means light text and mode
+`dark`, otherwise `light`. Any conversion failure means `light`. The bridge captures
+`getComputedStyle` at startup and uses prototype calls for DOM, CSSOM and canvas access.
+After an applied theme message, and on `prefers-color-scheme: dark` changes, it checks modes
+again. Only a changed mode sends the next request, containing all diagrams with current modes
+and widths. Rejected theme messages and width changes alone send nothing.
+
+Only a ready content frame that has not navigated away can submit a job. The parent renders
+its latest job sequentially in one hidden, laid-out `/mermaid-frame.html` iframe with only
+`sandbox="allow-scripts"`, `aria-hidden`, `tabIndex=-1`, a title and no lazy loading. It is fixed
+outside the reading flow, invisible and noninteractive, with width clamped to 240..2400 px.
+On load, and after each answer, it sends `{ type: "render", source, theme: mode, reply: "svg", colors? }`.
+Source drops leading and trailing blank lines and the common leading whitespace of nonblank
+lines. Colours come from `readMermaidColors()` only in emend's look when the diagram mode matches
+the app's resolved mode; otherwise the frame uses its built-in palette. A new request, app theme
+key or resolved mode restarts the whole job with a fresh frame. Each diagram gets
+`DIAGRAM_DRAW_TIMEOUT_MS` (20000 ms); a timeout reports failure, replaces the render frame and
+continues. A new content generation, Reload, navigation away or unmount drops the job.
+
+The Mermaid frame answers only when `reply` is exactly `"svg"`. After `sanitizeSvg` and
+`restoreCodes`, it serialises the SVG with `XMLSerializer`, setting width and height attributes
+to `naturalSize`, and posts the strict shape `{ type: "svg", svg: string, width: number, height: number }`.
+An unknown natural size or a fallback (too large or undrawable) posts `{ type: "svg", svg: null }`.
+Existing `size` messages continue; without `reply: "svg"`, behaviour is unchanged. The parent
+accepts answers only from its render frame's current window. The SVG must be well-formed,
+1..4000000 characters, and start with `<svg`; dimensions must be integers in 1..10000. Extra
+keys, `size` messages and other invalid replies are ignored.
+
+The parent relays only through its existing guarded content-frame post:
+`{ type: "emend:diagram", request, index, svg, width, height }` or
+`{ type: "emend:diagram", request, index, svg: null }`. Both shapes are strict. The same request,
+SVG and dimension limits apply, and `index` is an integer in 0..49. The bridge accepts only its
+parent, the current request and an index within its current list; any invalid field rejects the
+whole message. For a string SVG it inserts a `div` with empty `data-emend-diagram` directly
+before the `pre`, with a closed shadow root containing one `img`. The image has `alt="Diagram"`,
+the supplied width and height, and CSSOM-set `display: block; max-width: 100%; height: auto`.
+Its last-set attribute is `src`, containing `data:image/svg+xml;charset=utf-8,` plus the encoded
+SVG. Later answers update only image dimensions and source. No doc attributes are copied.
+The bridge remembers the `pre`'s inline display value and priority, then hides it with
+`display: none !important`. A null answer removes the host and restores display exactly,
+removing the property if originally absent. It never changes the `pre`'s children. Quote text,
+highlight anchors and headings remain intact, and diagram images never enter the image gallery.
+Placement and removal hold reading position with the same pin and scroll-path rules as layout.
+Only emend's look gives the host the margin, padding, border, radius, sunken background and
+overflow of a code block. Custom pages receive no host styles.
+
+The app never inserts this SVG into its own DOM. Mermaid still uses `securityLevel: "strict"`
+and its existing sandbox and headers. The content frame shows SVG only as an image, which runs
+no scripts, fetches no resources and takes no input. Content CSP still has `frame-src 'none'`,
+`connect-src 'none'` and only the bridge's script hash. No sandbox, header or sanitize schema
+changes. Download and files opened outside emend, including after `emend look`, show source.
 
 A primary click or tap without modifiers on a qualifying image sends
 `{ type: "emend:image", images: { path: string, caption: string }[], index: number }`.

@@ -1647,3 +1647,86 @@ test.each([false, true])("frame accepts exactly eight lowercase hex colours (dar
     stop();
   }
 });
+
+test.each(["click A call alert()", 'click A "javascript:alert(1)"'])(
+  "SVG reply scrubs hostile output for %s",
+  async (directive) => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const post = vi.spyOn(window.parent, "postMessage").mockImplementation(() => {});
+    mermaid.render.mockImplementation(async (_id, source: string) => {
+      const standIn = /A\["(.*)"\]/.exec(source)?.[1] ?? "";
+      return {
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" onload="evil()"><script>evil()</script><foreignObject><div xmlns="http://www.w3.org/1999/xhtml">evil</div></foreignObject><a href="javascript:alert(1)" onclick="evil()"><text>${standIn}</text></a><a href="#local"/></svg>`,
+      };
+    });
+    const stop = startFrame(root);
+    try {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source: window.parent,
+          data: {
+            type: "render",
+            source: `flowchart LR\n A["#quot;"] --> B\n ${directive}`,
+            reply: "svg",
+          },
+        }),
+      );
+      await waitFor(() => expect(post.mock.calls.some(([data]) => data.type === "svg")).toBe(true));
+      const answer = post.mock.calls.find(([data]) => data.type === "svg")?.[0];
+      expect(answer).toMatchObject({ type: "svg", width: 400, height: 200 });
+      expect(answer.svg.startsWith("<svg")).toBe(true);
+      const svg = new DOMParser().parseFromString(answer.svg, "image/svg+xml").documentElement;
+      expect(svg.getAttribute("width")).toBe("400");
+      expect(svg.getAttribute("height")).toBe("200");
+      expect(svg.querySelector("text")?.textContent).toBe('"');
+      expect(svg.querySelector("script,foreignObject")).toBeNull();
+      for (const node of [svg, ...svg.querySelectorAll("*")])
+        for (const attribute of node.attributes) {
+          expect(attribute.name.startsWith("on")).toBe(false);
+          if (attribute.localName === "href") expect(attribute.value.startsWith("#")).toBe(true);
+        }
+      expect(post.mock.calls.some(([data]) => data.type === "size")).toBe(true);
+    } finally {
+      stop();
+      root.remove();
+    }
+  },
+);
+
+test.each(["too long", "too many statements", "broken", "unmeasured"])(
+  "SVG reply returns null for %s",
+  async (kind) => {
+    const root = document.createElement("div");
+    const post = vi.spyOn(window.parent, "postMessage").mockImplementation(() => {});
+    mermaid.render.mockResolvedValue({ svg: '<svg xmlns="http://www.w3.org/2000/svg"/>' });
+    if (kind === "broken") mermaid.render.mockRejectedValue(new Error("Broken"));
+    const source =
+      kind === "too long" ? "x".repeat(50001) : kind === "too many statements" ? "a;".repeat(501) : "graph LR";
+    const stop = startFrame(root);
+    try {
+      window.dispatchEvent(
+        new MessageEvent("message", { source: window.parent, data: { type: "render", source, reply: "svg" } }),
+      );
+      await waitFor(() => expect(post).toHaveBeenCalledWith({ type: "svg", svg: null }, "*"));
+    } finally {
+      stop();
+    }
+  },
+);
+
+test.each([undefined, null, true, "SVG", "size"])("render sends no SVG answer with reply %j", async (reply) => {
+  const root = document.createElement("div");
+  const post = vi.spyOn(window.parent, "postMessage").mockImplementation(() => {});
+  mermaid.render.mockResolvedValue({ svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"/>' });
+  const stop = startFrame(root);
+  try {
+    window.dispatchEvent(
+      new MessageEvent("message", { source: window.parent, data: { type: "render", source: "graph LR", reply } }),
+    );
+    await waitFor(() => expect(root.querySelector("svg")).not.toBeNull());
+    expect(post.mock.calls.some(([data]) => data.type === "svg")).toBe(false);
+  } finally {
+    stop();
+  }
+});

@@ -92,6 +92,12 @@ server; every reviewer device sees them, while agents and attach/import do not c
 Inbox pins live in `review_pins`, scoped to the owner on this server; every reviewer device sees
 them, while agents and attach/import neither copy nor expose them.
 
+HTML pubs keep their content sandbox and allow only emend's bridge script. The bridge sends
+`pre.mermaid` sources to the app, which renders them sequentially in its sandboxed Mermaid frame.
+The app relays scrubbed SVG text without inserting it into its DOM. The content frame shows each
+diagram as a data-URL image in a closed shadow root and keeps the original source nodes for
+comments. Custom pages use the same path. Downloads and `emend look` keep diagrams as source.
+
 ## Attached machines and the phone
 
 An always-on machine can serve as the hub. `emend serve --tailscale` exposes its server through

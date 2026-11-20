@@ -423,7 +423,7 @@ export function startFrame(root: HTMLElement) {
   };
   applyTheme(systemTheme());
   let active = true;
-  let pending: { source: string; theme: "dark" | "light"; colors?: MermaidColors } | undefined;
+  let pending: { source: string; theme: "dark" | "light"; colors?: MermaidColors; reply: boolean } | undefined;
   let rendering = false;
   let sequence = 0;
   let natural: ReturnType<typeof naturalSize> | undefined;
@@ -445,14 +445,19 @@ export function startFrame(root: HTMLElement) {
     rendering = true;
     try {
       while (active && pending !== undefined) {
-        const { source, theme, colors } = pending;
+        const { source, theme, colors, reply } = pending;
         pending = undefined;
         applyTheme(theme, colors);
         if (source.length > MAX_SOURCE) {
           fallback("This diagram is too large to draw.", source);
           size();
+          if (reply) window.parent.postMessage({ type: "svg", svg: null }, "*");
           continue;
         }
+        let answer: { type: "svg"; svg: string; width: number; height: number } | { type: "svg"; svg: null } = {
+          type: "svg",
+          svg: null,
+        };
         const staging = document.createElement("div");
         staging.style.visibility = "hidden";
         staging.style.position = "absolute";
@@ -470,6 +475,11 @@ export function startFrame(root: HTMLElement) {
                 restoreCodes(svg, encoded.characters);
                 root.replaceChildren(svg);
                 natural = naturalSize(svg);
+                if (reply && natural) {
+                  svg.setAttribute("width", String(natural.width));
+                  svg.setAttribute("height", String(natural.height));
+                  answer = { type: "svg", svg: new XMLSerializer().serializeToString(svg), ...natural };
+                }
               }
             }
           }
@@ -479,6 +489,7 @@ export function startFrame(root: HTMLElement) {
           staging.remove();
         }
         if (active) size();
+        if (active && pending === undefined && reply) window.parent.postMessage(answer, "*");
       }
     } finally {
       rendering = false;
@@ -497,7 +508,12 @@ export function startFrame(root: HTMLElement) {
     )
       return;
     const theme = "theme" in data && (data.theme === "dark" || data.theme === "light") ? data.theme : systemTheme();
-    pending = { source: data.source, theme, colors: parseColors("colors" in data ? data.colors : undefined) };
+    pending = {
+      source: data.source,
+      theme,
+      colors: parseColors("colors" in data ? data.colors : undefined),
+      reply: "reply" in data && data.reply === "svg",
+    };
     void draw();
   };
   const observer = new ResizeObserver(size);

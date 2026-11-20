@@ -227,7 +227,7 @@ it uses that theme's colours. Pick one with `--theme <name>`, or use `--no-theme
 colours. With several valid themes, it uses emend's own colours and says how to pick one.
 A page marked `<meta name="emend-look" content="custom">` stays unchanged.
 The file stays self-contained, adding about 200 KB for the default fonts. Publishing still works
-the same.
+the same. Diagrams remain source text when the file opens outside emend.
 
 ## List your reviews and check the connection
 
@@ -282,6 +282,9 @@ Pins show on every device.
 A plan or other doc that comes with a review opens next to its diff, with its diagrams drawn and
 your comments beside the text. A tinted passage, or the count in the margin, opens its thread
 beside the text. Press `,` and `.` to step through the comments.
+
+HTML pages use `<pre class="mermaid">` containing Mermaid source. emend draws it in light and
+dark mode, also on custom pages. The page's own scripts never run.
 
 Diagrams colour the classes `blue`, `orange`, `purple`, `yellow`, `teal`, `tan` and `pink` as group
 fills in light and dark. They mark states with `breaks` (red), `mayBreak` (orange), `bugPath` (a blue

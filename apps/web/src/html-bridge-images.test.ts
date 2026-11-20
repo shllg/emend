@@ -537,7 +537,7 @@ test.each([
     for (let click = 1; click <= 2; click++) {
       // Start in the picture so the initial clicked-image check shares the same source cache.
       expect(b.click("#last").defaultPrevented).toBe(true);
-      expect(b.matchMedia).toHaveBeenCalledTimes(click);
+      expect(b.matchMedia).toHaveBeenCalledTimes(click + 1); // Includes the diagram mode subscription at startup.
       expect(b.matchMedia).toHaveBeenLastCalledWith(media);
       expect(
         attributes.mock.calls.filter(
@@ -568,7 +568,7 @@ test.each([1024, 1025])("picture media attributes of %i characters respect the p
   try {
     expect(b.click("img").defaultPrevented).toBe(true);
     expect(b.images()[0]?.images).toEqual([{ path: `docs/${length === 1024 ? "first" : "next"}.webp`, caption: "" }]);
-    expect(b.matchMedia).toHaveBeenCalledTimes(1);
+    expect(b.matchMedia).toHaveBeenCalledTimes(2); // Includes the diagram mode subscription at startup.
     expect(b.matchMedia).toHaveBeenCalledWith(length === 1024 ? media : "(min-width: 1px)");
     if (length > 1024) expect(b.matchMedia).not.toHaveBeenCalledWith(media);
   } finally {

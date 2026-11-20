@@ -1,7 +1,8 @@
 import { Maximize2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Size } from "../../lib/lightbox-view.ts";
-import { pickedTheme, useResolvedTheme, useThemeState } from "../../lib/theme.ts";
+import { useResolvedTheme } from "../../lib/theme.ts";
+import { useDiagramThemeKey } from "../../lib/use-diagram-theme-key.ts";
 import { Button } from "../ui/Button.tsx";
 import { readMermaidColors } from "./mermaid-colors.ts";
 
@@ -34,11 +35,6 @@ export function parseFrameSize(data: unknown): { height: number; natural?: Size 
 }
 
 export const DIAGRAM_DRAW_TIMEOUT_MS = 20_000;
-
-function useDiagramThemeKey() {
-  const state = useThemeState();
-  return JSON.stringify([state.pick, pickedTheme(state)]);
-}
 
 export function LightboxDiagram({ source, onSize }: { source: string; onSize: (natural: Size | null) => void }) {
   const theme = useResolvedTheme();

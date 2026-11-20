@@ -321,3 +321,12 @@ test.each([
   expect(mermaid.mermaidAPI.getConfig()).toMatchObject({ theme: "base", securityLevel: "strict" });
   expect(mermaid.mermaidAPI.getConfig().sequence?.theme).toBe(sequenceTheme);
 });
+
+test.each(["click A call alert()", 'click A "javascript:alert(1)"'])(
+  "real Mermaid parses %s under strict frame config",
+  async (directive) => {
+    mermaid.initialize(frameConfig(false));
+    await expect(mermaid.parse(`flowchart LR\n A --> B\n ${directive}`)).resolves.toBeTruthy();
+    expect(mermaid.mermaidAPI.getConfig().securityLevel).toBe("strict");
+  },
+);

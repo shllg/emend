@@ -2,6 +2,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   "use strict";
   // Window is a global interface: matchMedia lives on the instance.
   const matchMedia = window.matchMedia;
+  const getComputedStyle = window.getComputedStyle;
   const omitted = new Set(["script", "style", "template", "noscript"]);
   const post = message => window.parent.postMessage(message, "*");
   const ranges = new Map();
@@ -427,6 +428,125 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       dom(window.HighlightRegistry.prototype, "set", CSS.highlights, "emend-quotes", new Highlight(...ranges.values()));
     }
   }
+  // Shared by layout and diagram placement: keep only a live pin or a scrolled reading path.
+  function holdPosition(change, changed = true) {
+    const root = documentElement();
+    let held;
+    if (changed && root && headings.length && laidOut(root)) {
+      const current = position(measure());
+      if (pinnedPosition && samePosition(current, landing)) held = pinnedPosition;
+      else if (current.heading !== null) {
+        for (let node = headings[current.heading].element; node; node = renderedParent(node)) {
+          if (nodeType(node) === 1 && elementValue("scrollTop", node) !== 0) { held = current; break; }
+          if (node === root) break;
+        }
+      }
+    }
+    change();
+    if (held && held.heading !== null) goTo({ ...held, label: headings[held.heading].label });
+    schedulePosition();
+  }
+  // Kept in parity with frame-messages.ts by the diagram bridge tests.
+  const DIAGRAM_SOURCE_MAX = 50000;
+  const DIAGRAM_COUNT_MAX = 50;
+  const DIAGRAM_TOTAL_MAX = 1000000;
+  const DIAGRAM_SVG_MAX = 4000000;
+  const DIAGRAM_DIMENSION_MAX = 10000;
+  const DIAGRAM_REQUEST_MAX = 2147483647;
+  let diagrams = [], diagramRequest = 0;
+  const styleOf = element => read(window.HTMLElement.prototype, "style", element);
+  const styleCall = (method, style, ...args) => dom(window.CSSStyleDeclaration.prototype, method, style, ...args);
+  const createElement = name => dom(window.Document.prototype, "createElement", document, name);
+  function diagramMode(pre) {
+    try {
+      const parent = nodeValue("parentElement", pre) || documentElement();
+      const computed = getComputedStyle.call(window, parent);
+      const color = styleCall("getPropertyValue", computed, "color");
+      const canvas = createElement("canvas");
+      write(window.HTMLCanvasElement.prototype, "width", canvas, 1);
+      write(window.HTMLCanvasElement.prototype, "height", canvas, 1);
+      const context = dom(window.HTMLCanvasElement.prototype, "getContext", canvas, "2d", { colorSpace: "srgb" });
+      if (!context) return "light";
+      const prototype = window.CanvasRenderingContext2D.prototype;
+      write(prototype, "fillStyle", context, color);
+      dom(prototype, "fillRect", context, 0, 0, 1, 1);
+      const pixel = dom(prototype, "getImageData", context, 0, 0, 1, 1);
+      const rgb = read(window.ImageData.prototype, "data", pixel);
+      const linear = byte => { const value = byte / 255; return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4; };
+      return linear(rgb[0]) * 0.2126 + linear(rgb[1]) * 0.7152 + linear(rgb[2]) * 0.0722 > 0.179 ? "dark" : "light";
+    } catch { return "light"; }
+  }
+  function postDiagrams() {
+    if (!diagrams.length || diagramRequest === DIAGRAM_REQUEST_MAX) return;
+    post({ type: "emend:diagrams", request: ++diagramRequest, diagrams: diagrams.map(({ pre, source, mode }) => ({
+      source, mode, width: Math.max(1, Math.min(DIAGRAM_DIMENSION_MAX, Math.round(bounds(pre).width) || 1))
+    })) });
+  }
+  function scanDiagrams() {
+    if (!body()) return;
+    let total = 0, earlier;
+    for (const pre of nodes(body())) {
+      if (nodeType(pre) !== 1 || namespace(pre) !== "http://www.w3.org/1999/xhtml" || localName(pre) !== "pre" ||
+          !(elementCall("getAttribute", pre, "class") || "").split(/[\t\n\f\r ]+/).includes("mermaid")) continue;
+      if (earlier && dom(window.Node.prototype, "contains", earlier, pre)) continue;
+      earlier = pre;
+      const source = nodeValue("textContent", pre);
+      if (!source.trim() || source.length > DIAGRAM_SOURCE_MAX) continue;
+      if (total + source.length > DIAGRAM_TOTAL_MAX) break;
+      total += source.length;
+      diagrams.push({ pre, source, mode: diagramMode(pre) });
+      if (diagrams.length === DIAGRAM_COUNT_MAX) break;
+    }
+    postDiagrams();
+  }
+  function checkDiagramModes() {
+    let changed = false;
+    for (const diagram of diagrams) {
+      const mode = diagramMode(diagram.pre);
+      if (mode !== diagram.mode) { diagram.mode = mode; changed = true; }
+    }
+    if (changed) postDiagrams();
+  }
+  function placeDiagram(data) {
+    if (data.request !== diagramRequest || !Number.isInteger(data.index) || data.index < 0 || data.index >= diagrams.length) return;
+    const dimension = value => Number.isInteger(value) && value >= 1 && value <= DIAGRAM_DIMENSION_MAX;
+    const keys = data.svg === null ? ["type", "request", "index", "svg"] : ["type", "request", "index", "svg", "width", "height"];
+    if (Object.keys(data).length !== keys.length || Object.keys(data).some(key => !keys.includes(key))) return;
+    if (data.svg !== null && (typeof data.svg !== "string" || data.svg.length > DIAGRAM_SVG_MAX ||
+        !data.svg.startsWith("<svg") || !data.svg.isWellFormed() || !dimension(data.width) || !dimension(data.height))) return;
+    const diagram = diagrams[data.index];
+    if (data.svg === null && !diagram.host) return;
+    holdPosition(() => {
+      const style = styleOf(diagram.pre);
+      if (data.svg === null) {
+        dom(window.Node.prototype, "removeChild", nodeValue("parentNode", diagram.host), diagram.host);
+        diagram.host = diagram.img = undefined;
+        if (diagram.display) styleCall("setProperty", style, "display", diagram.display, diagram.priority);
+        else styleCall("removeProperty", style, "display");
+        return;
+      }
+      if (!diagram.host) {
+        const host = createElement("div");
+        elementCall("setAttribute", host, "data-emend-diagram", "");
+        const shadow = elementCall("attachShadow", host, { mode: "closed" });
+        const img = createElement("img");
+        elementCall("setAttribute", img, "alt", "Diagram");
+        const imageStyle = styleOf(img);
+        for (const [name, value] of [["display", "block"], ["max-width", "100%"], ["height", "auto"]])
+          styleCall("setProperty", imageStyle, name, value);
+        dom(window.Node.prototype, "appendChild", shadow, img);
+        dom(window.Node.prototype, "insertBefore", nodeValue("parentNode", diagram.pre), host, diagram.pre);
+        diagram.host = host;
+        diagram.img = img;
+        diagram.display = styleCall("getPropertyValue", style, "display");
+        diagram.priority = styleCall("getPropertyPriority", style, "display");
+        styleCall("setProperty", style, "display", "none", "important");
+      }
+      elementCall("setAttribute", diagram.img, "width", String(data.width));
+      elementCall("setAttribute", diagram.img, "height", String(data.height));
+      elementCall("setAttribute", diagram.img, "src", "data:image/svg+xml;charset=utf-8," + encodeURIComponent(data.svg));
+    });
+  }
   let themeSheet;
   function theme(data) {
     if (data.mode !== "dark" && data.mode !== "light") return;
@@ -456,6 +576,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
         dom(window.CSSStyleSheet.prototype, "replaceSync", themeSheet, css ? "@layer emend{:root:root:root{" + css + "}}" : "");
       } catch { /* The mode still applies without constructed stylesheet support. */ }
     }
+    checkDiagramModes();
   }
   listen(window, "message", event => {
     if (event.source !== window.parent || !event.data || typeof event.data !== "object") return;
@@ -471,21 +592,11 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       if (preferences) attributes.push(["data-emend-width", data.width],
         ["data-emend-prose", String(data.prose)], ["data-emend-code", String(data.code)]);
       const changed = attributes.some(([name, value]) => elementCall("getAttribute", root, name) !== value);
-      let held;
-      if (changed && headings.length && laidOut(root)) {
-        const current = position(measure());
-        if (pinnedPosition && samePosition(current, landing)) held = pinnedPosition;
-        else if (current.heading !== null) {
-          for (let node = headings[current.heading].element; node; node = renderedParent(node)) {
-            if (nodeType(node) === 1 && elementValue("scrollTop", node) !== 0) { held = current; break; }
-            if (node === root) break;
-          }
-        }
-      }
-      for (const [name, value] of attributes) elementCall("setAttribute", root, name, value);
-      if (held && held.heading !== null) goTo({ ...held, label: headings[held.heading].label });
-      schedulePosition();
+      holdPosition(() => {
+        for (const [name, value] of attributes) elementCall("setAttribute", root, name, value);
+      }, changed);
     }
+    else if (event.data.type === "emend:diagram") placeDiagram(event.data);
     else if (event.data.type === "emend:theme") theme(event.data);
     else if (event.data.type === "emend:goto") goTo(event.data);
     else if (event.data.type === "emend:docs" && Array.isArray(event.data.paths)) {
@@ -789,7 +900,8 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   listen(document, "scroll", onScroll, { capture: true, passive: true });
   for (const type of ["wheel", "touchmove", "keydown", "pointerdown", "touchend", "pointerup"])
     listen(document, type, schedulePosition, { capture: true, passive: true });
-  const ready = () => { headings = collectHeadings(); post({ type: "emend:ready" }); schedulePosition(); };
+  listen(matchMedia.call(window, "(prefers-color-scheme: dark)"), "change", checkDiagramModes);
+  const ready = () => { headings = collectHeadings(); post({ type: "emend:ready" }); scanDiagrams(); schedulePosition(); };
   if (documentValue("readyState") === "loading") listen(document, "DOMContentLoaded", ready, { once: true });
   else ready();
 })();`;
