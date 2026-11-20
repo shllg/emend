@@ -153,3 +153,18 @@ export function adjacentInboxItem(items: InboxItem[], current: string | undefine
   const index = items.findIndex((item) => item.id === current);
   return items[index < 0 ? (delta === 1 ? 0 : items.length - 1) : index + delta];
 }
+
+/** Visit first occurrences only, starting from the focused row's own position. */
+export function adjacentInboxRow(ids: string[], focused: number, delta: 1 | -1): number {
+  const seen = new Set<string>();
+  const canonical = ids.map((id) => {
+    const first = !seen.has(id);
+    seen.add(id);
+    return first;
+  });
+  const start = focused < 0 ? (delta === 1 ? 0 : ids.length - 1) : focused + delta;
+  for (let index = start; index >= 0 && index < ids.length; index += delta) {
+    if (canonical[index]) return index;
+  }
+  return -1;
+}

@@ -375,6 +375,24 @@ test("j and k visit a pinned Done item once, in Pinned", async () => {
   }
 });
 
+test("j and k start from the focused Done duplicate's position", async () => {
+  items = [item(1), item(2, { pinnedAt, list: "done", state: "settled" }), item(3, { list: "done", state: "settled" })];
+  mount();
+  await screen.findByRole("region", { name: "Pinned" });
+  await ready();
+  fireEvent.click(screen.getByRole("button", { name: "Done 2" }));
+  const done = within(screen.getByRole("region", { name: "Done" }));
+  const duplicate = done.getByRole("link", { name: /Item 2/ });
+  duplicate.focus();
+  press("j");
+  expect(document.activeElement).toBe(done.getByRole("link", { name: /Item 3/ }));
+  duplicate.focus();
+  press("k");
+  expect(document.activeElement).toBe(
+    within(screen.getByRole("region", { name: "Active" })).getByRole("link", { name: /Item 1/ }),
+  );
+});
+
 test("the collapsed rail lists each review once, pins first, and keeps its jump badges", async () => {
   localStorage.setItem("emend:inbox-kind", "review");
   layoutStore.update({ inboxCollapsed: true });

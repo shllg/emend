@@ -2086,7 +2086,7 @@ unpinning an unpinned review is a 204 no-op.
 A missing or foreign review is `404 unknown_review`; a malformed path UUID is 404.
 A binned review is `409 review_in_bin`. Pin and unpin of a moved review are `409 review_moved`.
 Pinning beyond `pins` (50, counting pinned reviews in the bin but not moved reviews) gives `409 invalid_state`
-with the message "You have the most pins allowed. Unpin one first.".
+with the message "You have the most pins allowed, pins in the bin included. Unpin one first.".
 Each write runs in one transaction and emits a `pins` event `{ reviewId }` after commit;
 owner-wide streams and that review's streams receive it.
 

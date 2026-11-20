@@ -130,7 +130,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
   let remainingPins: number = LIMITS.pins;
   const selectBlock = async (where: SQL | undefined, order: SQL[]) => {
     const rows = await select(where, order, LIMITS.inboxItems);
-    if (remainingPins === 0) return rows;
+    if (remainingPins === 0 || rows.length < LIMITS.inboxItems) return rows;
     const listed = new Set(rows.map(({ review }) => review.id));
     const pinned = await select(
       and(

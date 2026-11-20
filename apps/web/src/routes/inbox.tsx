@@ -18,6 +18,7 @@ import { plural } from "../lib/count.ts";
 import { useInboxArrivals } from "../lib/inbox-arrivals.tsx";
 import {
   adjacentInboxItem,
+  adjacentInboxRow,
   type InboxKind,
   inboxKindKey,
   inboxSections,
@@ -128,16 +129,19 @@ export function Inbox({
   );
   const filteredCount = sections.reduce((count, section) => count + section.rows.length, 0);
   const move = (delta: 1 | -1) => {
-    const sequence = inboxSequence(sections);
-    const links = [...(root.current?.querySelectorAll<HTMLAnchorElement>("a[data-inbox-row]") ?? [])];
-    const focusedId = links.find((link) => link === document.activeElement)?.dataset.inboxRow;
-    const item = adjacentInboxItem(sequence, reviewId ?? focusedId, delta);
-    if (!item) return false;
     if (reviewId) {
+      const item = adjacentInboxItem(inboxSequence(sections), reviewId, delta);
+      if (!item) return false;
       void navigate({ to: "/r/$reviewId", params: { reviewId: item.id }, search: { rev: item.newestRevision } });
       onOpen?.();
     } else {
-      const link = links.find((link) => link.dataset.inboxRow === item.id);
+      const links = [...(root.current?.querySelectorAll<HTMLAnchorElement>("a[data-inbox-row]") ?? [])];
+      const index = adjacentInboxRow(
+        links.map((link) => link.dataset.inboxRow ?? ""),
+        links.findIndex((link) => link === document.activeElement),
+        delta,
+      );
+      const link = links[index];
       if (!link) return false;
       link.focus();
       link.scrollIntoView({ block: "nearest" });

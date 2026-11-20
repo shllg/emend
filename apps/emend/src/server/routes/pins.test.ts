@@ -173,7 +173,10 @@ test("only 50 pins per owner including binned pins; idempotent writes still work
   const response = await pin(next);
   expect(response.status).toBe(409);
   expect(await response.json()).toEqual({
-    error: { code: "invalid_state", message: "You have the most pins allowed. Unpin one first." },
+    error: {
+      code: "invalid_state",
+      message: "You have the most pins allowed, pins in the bin included. Unpin one first.",
+    },
   });
   expect((await pin(next, false)).status).toBe(204);
   expect(await pins()).toEqual(before);

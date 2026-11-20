@@ -1,6 +1,13 @@
 import { InboxItem, LIMITS } from "@emend/contract";
 import { expect, test } from "vitest";
-import { inboxSections, inboxSequence, jumpRows, matchInboxItems, sectionOpen } from "./inbox-list.ts";
+import {
+  adjacentInboxRow,
+  inboxSections,
+  inboxSequence,
+  jumpRows,
+  matchInboxItems,
+  sectionOpen,
+} from "./inbox-list.ts";
 
 const a = { id: "11111111-1111-4111-8111-111111111111", name: "Alpha", members: 3 };
 const b = { id: "22222222-2222-4222-8222-222222222222", name: "Beta", members: 0 };
@@ -379,6 +386,35 @@ test("the sequence visits a pinned Done item once at its first expanded section"
     pinned,
     done,
   ]);
+});
+
+test("row navigation skips duplicate links in both directions", () => {
+  const ids = ["pinned", "active", "pinned", "done", "active"];
+  expect(adjacentInboxRow(ids, 0, 1)).toBe(1);
+  expect(adjacentInboxRow(ids, 1, 1)).toBe(3);
+  expect(adjacentInboxRow(ids, 3, -1)).toBe(1);
+  expect(adjacentInboxRow(ids, 1, -1)).toBe(0);
+});
+
+test("row navigation starts from a duplicate link's own position", () => {
+  const ids = ["pinned", "active", "pinned", "done"];
+  expect(adjacentInboxRow(ids, 2, 1)).toBe(3);
+  expect(adjacentInboxRow(ids, 2, -1)).toBe(1);
+});
+
+test("row navigation without focus starts at the first or last canonical link", () => {
+  const ids = ["pinned", "active", "pinned", "done", "active"];
+  expect(adjacentInboxRow(ids, -1, 1)).toBe(0);
+  expect(adjacentInboxRow(ids, -1, -1)).toBe(3);
+});
+
+test("row navigation stops at the ends and has no target without links", () => {
+  const ids = ["pinned", "active", "pinned", "done", "active"];
+  expect(adjacentInboxRow(ids, 0, -1)).toBe(-1);
+  expect(adjacentInboxRow(ids, 3, 1)).toBe(-1);
+  expect(adjacentInboxRow(ids, 4, 1)).toBe(-1);
+  expect(adjacentInboxRow([], -1, 1)).toBe(-1);
+  expect(adjacentInboxRow([], -1, -1)).toBe(-1);
 });
 
 test("palette matches include a pinned Done item once at its first place", () => {
