@@ -459,7 +459,8 @@ test("the writing reference asks for a state diagram in a topic that changes a s
   );
   for (const rule of [
     "This section applies to a review writeup.",
-    "Write a Mermaid `stateDiagram-v2` in a `mermaid` code fence at the start of the topic's `body`.",
+    "Put a Mermaid `stateDiagram-v2` in a `mermaid` code fence in the topic's `why`, right after the **Fix:** paragraph.",
+    "An **Undo:** paragraph still comes last.",
     "Name states and arrows in the reviewer's words, not with code names.",
     "Keep a diagram to about 20 arrows.",
     "Leave out the chart's `classDef` lines for `breaks` and `mayBreak`",
@@ -471,7 +472,7 @@ test("the writing reference asks for a state diagram in a topic that changes a s
     expect(section).toContain(rule);
   }
   expect(read("plugin/skills/emend-review/SKILL.md").replace(/\s+/g, " ")).toContain(
-    "A topic that changes a state flow opens its `body` with a state diagram, as the writing reference says.",
+    "A topic that changes a state flow shows a state diagram in its `why`, as the writing reference says.",
   );
 });
 

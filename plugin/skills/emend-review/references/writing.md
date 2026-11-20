@@ -48,7 +48,9 @@ When a topic changes how something moves between states, show those states as a 
 A lifecycle, a protocol, retries and a hand-off are such changes.
 Other topics need no diagram.
 
-- Write a Mermaid `stateDiagram-v2` in a `mermaid` code fence at the start of the topic's `body`.
+- Put a Mermaid `stateDiagram-v2` in a `mermaid` code fence in the topic's `why`, right after the **Fix:** paragraph.
+  The `why` shows open; `body` starts folded under Details.
+  An **Undo:** paragraph still comes last.
 - Name states and arrows in the reviewer's words, not with code names.
   Write "Waiting for review", not `PENDING_REVIEW`.
 - Keep a diagram to about 20 arrows.
@@ -66,6 +68,8 @@ The statechart skill is never required. Never install it.
 A hand-drawn diagram for the retry topic in the worked examples below:
 
 ````markdown
+**Fix:** The loop stops after three attempts.
+
 ```mermaid
 stateDiagram-v2
   [*] --> Sending

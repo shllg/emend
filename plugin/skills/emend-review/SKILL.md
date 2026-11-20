@@ -180,7 +180,7 @@ Write the opening fields below. The app groups them for the reviewer.
 - `glossary`: the glossary, as the writing reference says.
 - `topics[slug]`: `why` and `example` as the writing reference says; `body` gives the decisions,
   trade-offs and checks. A request to explain something in the writeup belongs here.
-  A topic that changes a state flow opens its `body` with a state diagram, as the writing reference says.
+  A topic that changes a state flow shows a state diagram in its `why`, as the writing reference says.
 
 The app adds Risk, Undo, Read and Since to Facts from the topics, diff and earlier revisions.
 Write nothing for them.
