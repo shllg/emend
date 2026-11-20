@@ -512,7 +512,14 @@ another modifier are refused. The config file alone also accepts uppercase lette
 `shift+a`), case-insensitive shift-letter combinations (`SHIFT+A` becomes `shift+a`) and
 case-insensitive mod and alt forms (`Mod+K` becomes `mod+k`, `MOD+SHIFT+P` becomes `mod+shift+p`,
 `Alt+1` becomes `alt+1` and `Mod+1` becomes `mod+1`). Shift must be spelled out for mod bindings with letters.
-`inbox.jump1` to `inbox.jump9` open the first to ninth openable row of the Active section as the client shows it.
+`inbox.jump1` to `inbox.jump10` open the first to tenth row the client numbers: the rows of every
+open inbox section from the top, an item shown twice counted once.
+When no level sets `inbox.jump10`, it follows the highest level (override, then file) that sets
+all of `inbox.jump1` to `inbox.jump9` as one group: all off or `mod+1` to `mod+9` set
+`inbox.jump10` off at that level, and `alt+1` to `alt+9` leave it at its default `alt+0`, which
+loses a clash to any saved or file key. A level with an incomplete or mixed set decides nothing.
+An unusable `inbox.jump10` file entry counts as absent. The filled off value appears in that
+level's `override` or `file` field.
 
 The global config file format is `"keys": { "<command>": "<key>" | null }`. It is read once
 alongside `approvedActiveHours` and `approvedActiveLimit`. An absent `file` or `override` in a
@@ -547,6 +554,7 @@ reads the approval window and the approval cap on review reads, still without qu
 | `inbox.jump7` | `alt+7` |
 | `inbox.jump8` | `alt+8` |
 | `inbox.jump9` | `alt+9` |
+| `inbox.jump10` | `alt+0` |
 | `tab.writeup` | `1` |
 | `tab.files` | `2` |
 | `tab.docs` | `3` |

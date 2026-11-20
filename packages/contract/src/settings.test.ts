@@ -264,12 +264,12 @@ test("comment stepping defaults, enum order and documented commands agree", () =
   }
 });
 
-test("jump commands follow inbox.back and default to Alt plus their row number", () => {
+test("ten jump commands follow inbox.back and default to Alt+1 through Alt+9, then Alt+0", () => {
   const commands = ShortcutCommand.options;
   const jumps = commands.slice(commands.indexOf("inbox.back") + 1, commands.indexOf("tab.writeup"));
-  expect(jumps).toEqual(Array.from({ length: 9 }, (_, i) => `inbox.jump${i + 1}`));
+  expect(jumps).toEqual(Array.from({ length: 10 }, (_, i) => `inbox.jump${i + 1}`));
   expect(jumps.map((command) => SHORTCUT_DEFAULTS[command])).toEqual(
-    Array.from({ length: 9 }, (_, i) => `alt+${i + 1}`),
+    Array.from({ length: 10 }, (_, i) => `alt+${(i + 1) % 10}`),
   );
 });
 

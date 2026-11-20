@@ -6,6 +6,7 @@ import {
   hasOpenOverlay,
   ignoreShortcut,
   jumpBadge,
+  jumpKey,
   jumpKeysLabel,
   keyCaps,
   keyLabel,
@@ -315,23 +316,60 @@ test.each([
   expect(ariaKeyShortcuts("mod+1", platform)).toBe(modAria);
   expect(
     jumpKeysLabel(
-      Array.from({ length: 9 }, (_, i) => `alt+${i + 1}`),
+      Array.from({ length: 10 }, (_, i) => `alt+${(i + 1) % 10}`),
       platform,
     ),
-  ).toBe(`${altLabel}–9`);
+  ).toBe(`${altLabel}–9, ${altLabel.replace(/1$/, "0")}`);
   expect(
     jumpKeysLabel(
-      Array.from({ length: 9 }, (_, i) => `mod+${i + 1}`),
+      Array.from({ length: 10 }, (_, i) => `mod+${(i + 1) % 10}`),
       platform,
     ),
-  ).toBe(`${modLabel}–9`);
-  expect(jumpKeysLabel(Array(9).fill(null), platform)).toBe("Off");
-  expect(jumpKeysLabel(["alt+1", null, "mod+1", "j", "k", "l", "/", "?", "9"], platform)).toBe(
-    `${altLabel}, Off, ${modLabel}, j, k, l, /, ?, 9`,
+  ).toBe(`${modLabel}–9, ${modLabel.replace(/1$/, "0")}`);
+  expect(jumpKeysLabel(Array(10).fill(null), platform)).toBe("Off");
+  expect(jumpKeysLabel(["alt+1", null, "mod+1", "j", "k", "l", "/", "?", "9", "0"], platform)).toBe(
+    `${altLabel}, Off, ${modLabel}, j, k, l, /, ?, 9, 0`,
   );
   expect(jumpBadge(null, platform)).toBeUndefined();
   expect(jumpBadge("alt+1", platform)).toBe("1");
   expect(jumpBadge("mod+0", platform)).toBe("0");
   expect(jumpBadge("j", platform)).toBe("j");
   expect(jumpBadge("mod+k", platform)).toBe(`${mod}${mod === "Ctrl" ? "+" : ""}K`);
+});
+
+test.each(["alt", "mod"] as const)("jumpKey maps the first nine %s keys to digits 1 through 9", (modifier) => {
+  expect(Array.from({ length: 9 }, (_, index) => jumpKey(modifier, index))).toEqual(
+    ["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => `${modifier}+${digit}`),
+  );
+});
+
+test("jumpKey binds Alt+0 for row ten and leaves Ctrl+0 and ⌘0 to reset the zoom", () => {
+  expect(jumpKey("mod", 9)).toBeNull();
+  expect(jumpKey("alt", 9)).toBe("alt+0");
+});
+
+test.each([
+  ["Linux x86_64", "Ctrl+1–9, Alt+0"],
+  ["MacIntel", "⌘1–9, ⌥0"],
+])("a configured Ctrl range with Alt+0 shows both in the label on %s", (platform, label) => {
+  expect(jumpKeysLabel([...Array.from({ length: 9 }, (_, index) => `mod+${index + 1}`), "alt+0"], platform)).toBe(
+    label,
+  );
+});
+
+test.each([
+  ["Linux x86_64", "alt", "Alt+1–9"],
+  ["MacIntel", "alt", "⌥1–9"],
+  ["Linux x86_64", "mod", "Ctrl+1–9"],
+  ["MacIntel", "mod", "⌘1–9"],
+])("a disabled tenth key leaves only the first nine in the %s %s label", (platform, modifier, label) => {
+  expect(jumpKeysLabel([...Array.from({ length: 9 }, (_, index) => `${modifier}+${index + 1}`), null], platform)).toBe(
+    label,
+  );
+});
+
+test("a custom tenth key follows the compressed range", () => {
+  expect(jumpKeysLabel([...Array.from({ length: 9 }, (_, index) => `alt+${index + 1}`), "mod+k"], "Linux x86_64")).toBe(
+    "Alt+1–9, Ctrl+K",
+  );
 });

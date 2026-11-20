@@ -170,7 +170,7 @@ const numbers = (scope: ParentNode = document) =>
 const patches = () =>
   fetcher.mock.calls.filter(([path, init]) => path === "/api/v1/settings" && init?.method === "PATCH");
 const patchBody = (index: number) => JSON.parse(String(patches()[index]?.[1]?.body));
-const jumpRow = () => within(screen.getByRole("group", { name: "Open row 1 to 9 of Pinned and Active" }));
+const jumpRow = () => within(screen.getByRole("group", { name: "Open inbox row 1 to 10" }));
 async function openSettings() {
   mount("/settings");
   await screen.findByRole("heading", { name: "Keyboard shortcuts" });
@@ -184,35 +184,32 @@ function change() {
 }
 function setJumpKeys(modifier: "mod" | null) {
   for (const [index, command] of jumpCommands.entries()) {
-    const value = modifier === null ? null : `${modifier}+${index + 1}`;
+    const value = modifier === null || index === 9 ? null : `${modifier}+${index + 1}`;
     Object.assign(settings.keys.commands[command], { value, source: "override", override: value });
   }
 }
 
-test.each([1280, 900])(
-  "inbox at %s numbers the first nine of twelve rows and Alt+3 opens row three",
-  async (pixels) => {
-    width = pixels;
-    const history = mount();
-    await ready();
-    expect(numbers()).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
-    for (let n = 1; n <= 12; n++) {
-      const link = rowLink(n);
-      expect(badge(link)).toBe(n <= 9 ? String(n) : undefined);
-      expect(link.getAttribute("aria-keyshortcuts")).toBe(n <= 9 ? `Alt+${n}` : null);
-    }
-    expect(jump(3).defaultPrevented).toBe(true);
-    await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(3)}`));
-    expect(history.location.search).toBe("?rev=3");
-  },
-);
+test.each([1280, 900])("inbox at %s numbers the first ten of twelve rows and Alt+0 opens row ten", async (pixels) => {
+  width = pixels;
+  const history = mount();
+  await ready();
+  expect(numbers()).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]);
+  for (let n = 1; n <= 12; n++) {
+    const link = rowLink(n);
+    expect(badge(link)).toBe(n <= 10 ? String(n % 10) : undefined);
+    expect(link.getAttribute("aria-keyshortcuts")).toBe(n <= 10 ? `Alt+${n % 10}` : null);
+  }
+  expect(jump(0).defaultPrevented).toBe(true);
+  await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(10)}`));
+  expect(history.location.search).toBe("?rev=10");
+});
 
 test.each(["page", "pane"])("folding Active removes %s numbers and jumps until it opens again", async (surface) => {
   const path = surface === "page" ? "/" : `/r/${id(2)}`;
   const history = mount(path);
   await ready();
   const toggle = screen.getByRole("button", { name: "Active 12" });
-  expect(numbers()).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+  expect(numbers()).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]);
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   expect(numbers()).toEqual([]);
@@ -226,11 +223,90 @@ test.each(["page", "pane"])("folding Active removes %s numbers and jumps until i
   expect(history.length).toBe(length);
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
-  expect(numbers()).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+  expect(numbers()).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]);
   expect(rowLink(1).getAttribute("aria-keyshortcuts")).toBe("Alt+1");
   expect(jump(1).defaultPrevented).toBe(true);
   await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(1)}`));
   expect(history.location.search).toBe("?rev=1");
+});
+
+test("Done's first row follows three Active rows and Alt+4 opens it", async () => {
+  inbox = activeItems(5).map((item, index) => (index >= 3 ? { ...item, list: "done" } : item));
+  const history = mount();
+  await ready();
+  fireEvent.click(screen.getByRole("button", { name: "Done 2" }));
+  expect(numbers()).toEqual(["1", "2", "3", "4", "5"]);
+  expect(badge(rowLink(4))).toBe("4");
+  expect(jump(4).defaultPrevented).toBe(true);
+  await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(4)}`));
+  expect(history.location.search).toBe("?rev=4");
+});
+
+test("Done starts folded and contributes no jump numbers", async () => {
+  inbox = activeItems(5).map((item, index) => (index >= 3 ? { ...item, list: "done" } : item));
+  const history = mount();
+  await ready();
+  const done = screen.getByRole("region", { name: "Done" });
+  expect(within(done).getByRole("button", { name: "Done 2" }).getAttribute("aria-expanded")).toBe("false");
+  expect(within(done).queryByRole("link")).toBeNull();
+  expect(numbers(done)).toEqual([]);
+  expect(numbers()).toEqual(["1", "2", "3"]);
+  const location = history.location;
+  await act(async () => {
+    expect(jump(4).defaultPrevented).toBe(true);
+  });
+  expect(history.location).toEqual(location);
+});
+
+test("folded Active lets open Done start at 1 and Alt+1 opens it", async () => {
+  inbox = activeItems(5).map((item, index) => (index >= 3 ? { ...item, list: "done" } : item));
+  const history = mount();
+  await ready();
+  fireEvent.click(screen.getByRole("button", { name: "Done 2" }));
+  fireEvent.click(screen.getByRole("button", { name: "Active 3" }));
+  expect(numbers()).toEqual(["1", "2"]);
+  expect(badge(rowLink(4))).toBe("1");
+  expect(jump(1).defaultPrevented).toBe(true);
+  await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(4)}`));
+});
+
+test("a pinned Done item is numbered only in Pinned and the next Done row continues the count", async () => {
+  inbox = activeItems(3).map((item, index) => ({
+    ...item,
+    list: index > 0 ? "done" : "active",
+    pinnedAt: index === 1 ? "2026-01-01T00:00:00.000Z" : null,
+  }));
+  const history = mount();
+  await ready();
+  fireEvent.click(screen.getByRole("button", { name: "Done 2" }));
+  const pinned = screen.getByRole("region", { name: "Pinned" });
+  const done = screen.getByRole("region", { name: "Done" });
+  expect(badge(rowLink(2, pinned))).toBe("1");
+  expect(badge(rowLink(2, done))).toBeUndefined();
+  expect(rowLink(2, done).getAttribute("aria-keyshortcuts")).toBeNull();
+  expect(badge(rowLink(3, done))).toBe("3");
+  expect(numbers()).toEqual(["1", "2", "3"]);
+  expect(jump(3).defaultPrevented).toBe(true);
+  await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(3)}`));
+});
+
+test("folded Pinned gives its Done copy a number in Done", async () => {
+  inbox = activeItems(3).map((item, index) => ({
+    ...item,
+    list: index > 0 ? "done" : "active",
+    pinnedAt: index === 1 ? "2026-01-01T00:00:00.000Z" : null,
+  }));
+  const history = mount();
+  await ready();
+  fireEvent.click(screen.getByRole("button", { name: "Done 2" }));
+  fireEvent.click(screen.getByRole("button", { name: "Pinned 1" }));
+  const done = screen.getByRole("region", { name: "Done" });
+  expect(numbers(screen.getByRole("region", { name: "Pinned" }))).toEqual([]);
+  expect(badge(rowLink(1))).toBe("1");
+  expect(badge(rowLink(2, done))).toBe("2");
+  expect(badge(rowLink(3, done))).toBe("3");
+  expect(jump(2).defaultPrevented).toBe(true);
+  await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(2)}`));
 });
 
 test("a held jump key keeps its repeats from the browser and opens its row once", async () => {
@@ -301,6 +377,28 @@ test("Pubs numbers only the shown pubs and Alt+1 opens the first pub", async () 
   await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(2)}`));
 });
 
+test("Pubs counts only the pubs shown across Pinned, Active, Snoozed, groups and Done", async () => {
+  inbox = activeItems(10).map((item, index) => ({
+    ...item,
+    kind: index % 2 ? "publish" : "review",
+    pinnedAt: index < 2 ? "2026-01-01T00:00:00.000Z" : null,
+    list: index >= 8 ? "done" : index >= 4 && index < 6 ? "snoozed" : "active",
+    snoozed: index >= 4 && index < 6,
+    groupId: index >= 6 && index < 8 ? id(200) : null,
+  }));
+  groups = [{ id: id(200), name: "Later", members: 2 }];
+  const history = mount();
+  await ready();
+  for (const name of ["Snoozed 2", "Later 2", "Done 2"]) fireEvent.click(screen.getByRole("button", { name }));
+  fireEvent.click(screen.getByRole("radio", { name: "Pubs" }));
+  expect(numbers()).toEqual(["1", "2", "3", "4", "5"]);
+  for (const n of [1, 3, 5, 7, 9])
+    expect(screen.queryByRole("link", { name: new RegExp(`Review ${n}(?:\\s|$)`) })).toBeNull();
+  for (const [index, n] of [2, 4, 6, 8, 10].entries()) expect(badge(rowLink(n))).toBe(String(index + 1));
+  expect(jump(5).defaultPrevented).toBe(true);
+  await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(10)}`));
+});
+
 test.each(["search", "machine", "project"])("%s narrows both numbers and the jump destination", async (filter) => {
   inbox = inbox.map((item, i) => ({
     ...item,
@@ -330,12 +428,49 @@ test.each([1280, 768, 1023])("rail at %s numbers its own rows and ignores Kind",
   await ready();
   const rail = screen.getByRole("complementary", { name: "Inbox" });
   expect(screen.queryByTestId("inbox-pane")).toBeNull();
-  expect(numbers(rail)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+  expect(numbers(rail)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]);
   expect(badge(rowLink(3, rail))).toBe("3");
   expect(rowLink(3, rail).getAttribute("aria-keyshortcuts")).toBe("Alt+3");
   expect(jump(3).defaultPrevented).toBe(true);
   await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(3)}`));
 });
+
+test.each([1280, 900])(
+  "rail at %s numbers ten rows across Pinned, Active and Done with matching jumps",
+  async (pixels) => {
+    width = pixels;
+    layoutStore.update({ inboxCollapsed: true });
+    inbox = inbox.map((item, index) => ({
+      ...item,
+      list: index >= 3 ? "done" : "active",
+      pinnedAt: index === 10 ? "2026-01-01T00:00:00.000Z" : null,
+    }));
+    const history = mount(`/r/${id(2)}`);
+    await ready();
+    const rail = screen.getByRole("complementary", { name: "Inbox" });
+    const order = [11, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12];
+    expect(
+      within(rail)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("aria-label")),
+    ).toEqual(order.map((n) => `Review ${n}`));
+    expect(numbers(rail)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]);
+    for (const [index, n] of order.entries()) {
+      expect(badge(rowLink(n, rail))).toBe(index < 10 ? String((index + 1) % 10) : undefined);
+      expect(rowLink(n, rail).getAttribute("aria-keyshortcuts")).toBe(index < 10 ? `Alt+${(index + 1) % 10}` : null);
+    }
+    for (const [digit, n] of [
+      [1, 11],
+      [4, 3],
+      [0, 9],
+    ] as const) {
+      expect(jump(digit).defaultPrevented).toBe(true);
+      await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(n)}`));
+      expect(history.location.search).toBe(`?rev=${n}`);
+      await screen.findByRole("heading", { name: `Review ${n}`, level: 1 });
+    }
+  },
+);
 
 test("collapsing a pane with folded Active restores the rail's numbers and jumps", async () => {
   const history = mount(`/r/${id(2)}`);
@@ -345,7 +480,7 @@ test("collapsing a pane with folded Active restores the rail's numbers and jumps
   fireEvent.click(screen.getByRole("button", { name: "Collapse inbox" }));
   const rail = await screen.findByRole("complementary", { name: "Inbox" });
   expect(screen.queryByTestId("inbox-pane")).toBeNull();
-  expect(numbers(rail)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+  expect(numbers(rail)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]);
   expect(badge(rowLink(1, rail))).toBe("1");
   expect(rowLink(1, rail).getAttribute("aria-keyshortcuts")).toBe("Alt+1");
   expect(jump(1).defaultPrevented).toBe(true);
@@ -384,39 +519,36 @@ test("tablet sheet shows no numbers and blocks jumps while the rail keeps its ow
   fireEvent.click(screen.getByRole("button", { name: "Show inbox" }));
   const sheet = await screen.findByRole("dialog", { name: "Inbox" });
   expect(numbers(sheet)).toEqual([]);
-  expect(numbers()).toHaveLength(9);
+  expect(numbers()).toHaveLength(10);
   expect(jump(3, sheet).defaultPrevented).toBe(false);
   expect(history.location.pathname).toBe(`/r/${id(1)}`);
 });
 
-test.each(["page", "rail"])(
-  "%s skips moved, snoozed, grouped and Done rows with fewer than nine Active rows",
-  async (surface) => {
-    inbox = activeItems(6).map((item, i) => {
-      if (i === 0) return { ...item, movedTo: "https://example.com/review" };
-      if (i === 2) return { ...item, list: "snoozed", snoozed: true };
-      if (i === 3) return { ...item, groupId: id(200) };
-      if (i === 4) return { ...item, list: "done" };
-      return item;
-    });
-    groups = [{ id: id(200), name: "Later", members: 1 }];
-    layoutStore.update({ inboxCollapsed: true });
-    const history = mount(surface === "page" ? "/" : `/r/${id(2)}`);
-    await screen.findByRole("link", { name: /Review 2(?:\s|$)/ });
-    if (surface === "page") {
-      for (const name of [/^Snoozed/, /^Later/, /^Done/]) fireEvent.click(screen.getByRole("button", { name }));
-      const moved = screen.getByText("Review 1").closest('[aria-disabled="true"]');
-      expect(moved).not.toBeNull();
-      expect(moved?.querySelector("[data-jump-number]")).toBeNull();
-    }
-    expect(numbers()).toEqual(["1", "2"]);
-    expect(badge(rowLink(2))).toBe("1");
-    expect(badge(rowLink(6))).toBe("2");
-    for (const n of [3, 4, 5]) expect(badge(rowLink(n))).toBeUndefined();
-    expect(jump(2).defaultPrevented).toBe(true);
-    await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(6)}`));
-  },
-);
+test.each(["page", "rail"])("%s numbers every open section and skips moved rows", async (surface) => {
+  inbox = activeItems(6).map((item, i) => {
+    if (i === 0) return { ...item, movedTo: "https://example.com/review" };
+    if (i === 2) return { ...item, list: "snoozed", snoozed: true };
+    if (i === 3) return { ...item, groupId: id(200) };
+    if (i === 4) return { ...item, list: "done" };
+    return item;
+  });
+  groups = [{ id: id(200), name: "Later", members: 1 }];
+  layoutStore.update({ inboxCollapsed: true });
+  const history = mount(surface === "page" ? "/" : `/r/${id(2)}`);
+  await screen.findByRole("link", { name: /Review 2(?:\s|$)/ });
+  if (surface === "page") {
+    for (const name of [/^Snoozed/, /^Later/, /^Done/]) fireEvent.click(screen.getByRole("button", { name }));
+    const moved = screen.getByText("Review 1").closest('[aria-disabled="true"]');
+    expect(moved).not.toBeNull();
+    expect(moved?.querySelector("[data-jump-number]")).toBeNull();
+  }
+  expect(numbers()).toEqual(["1", "2", "3", "4", "5"]);
+  expect(badge(rowLink(2))).toBe("1");
+  expect(badge(rowLink(6))).toBe("2");
+  for (const n of [3, 4, 5]) expect(badge(rowLink(n))).toBe(String(n));
+  expect(jump(2).defaultPrevented).toBe(true);
+  await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(6)}`));
+});
 
 test("numbers and jumps follow a refreshed server order", async () => {
   const history = mount();
@@ -455,19 +587,46 @@ test.each(["page", "rail"])("off jump keys remove %s badges and give Alt+1 back 
   expect(numbers()).toEqual([]);
   expect(rowLink(1).hasAttribute("aria-keyshortcuts")).toBe(false);
   expect(jump(1).defaultPrevented).toBe(false);
+  expect(jump(0).defaultPrevented).toBe(false);
   expect(history.location.pathname).toBe(path);
 });
 
-test("remapped jumps handle Ctrl+1 and leave Alt+1 alone", async () => {
+test.each([1, 2, 3, 4, 5, 6, 7, 8, 9])("remapped jumps handle Ctrl+%s and leave Alt alone", async (digit) => {
   setJumpKeys("mod");
   const history = mount();
   await ready();
-  expect(badge(rowLink(1))).toBe("1");
-  expect(rowLink(1).getAttribute("aria-keyshortcuts")).toBe("Control+1");
-  expect(jump(1).defaultPrevented).toBe(false);
+  expect(badge(rowLink(digit))).toBe(String(digit));
+  expect(rowLink(digit).getAttribute("aria-keyshortcuts")).toBe(`Control+${digit}`);
+  expect(jump(digit).defaultPrevented).toBe(false);
   expect(history.location.pathname).toBe("/");
-  expect(press("1", { ctrlKey: true, code: "Digit1" }).defaultPrevented).toBe(true);
-  await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(1)}`));
+  expect(press(String(digit), { ctrlKey: true, code: `Digit${digit}` }).defaultPrevented).toBe(true);
+  await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(digit)}`));
+});
+
+test.each([
+  ["page", 12],
+  ["pane", 12],
+  ["rail", 12],
+  ["page", 2],
+  ["pane", 2],
+  ["rail", 2],
+] as const)("Ctrl jumps on the %s with %s rows leave Ctrl+0 and ⌘0 to the browser", async (surface, count) => {
+  inbox = activeItems(count);
+  setJumpKeys("mod");
+  layoutStore.update({ inboxCollapsed: surface === "rail" });
+  const path = surface === "page" ? "/" : `/r/${id(1)}`;
+  const history = mount(path);
+  await ready();
+  if (count >= 10) {
+    expect(badge(rowLink(10))).toBeUndefined();
+    expect(rowLink(10).getAttribute("aria-keyshortcuts")).toBeNull();
+  }
+  for (const modifier of ["ctrlKey", "metaKey"]) {
+    expect(press("0", { [modifier]: true, code: "Digit0" }).defaultPrevented).toBe(false);
+    await act(async () => {});
+    expect(history.location.pathname).toBe(path);
+  }
+  expect(jump(0).defaultPrevented).toBe(false);
 });
 
 test("a custom single jump key appears on its row and works", async () => {
@@ -481,13 +640,37 @@ test("a custom single jump key appears on its row and works", async () => {
   await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(1)}`));
 });
 
-test("Alt+1 stays in the inbox search field", async () => {
+test("Alt+0 stays in the inbox search field", async () => {
   const history = mount();
   await ready();
   const input = screen.getByRole("textbox", { name: "Filter reviews" });
   act(() => input.focus());
-  expect(jump(1, input).defaultPrevented).toBe(false);
+  const length = history.length;
+  await act(async () => {
+    expect(jump(0, input).defaultPrevented).toBe(false);
+  });
   expect(history.location.pathname).toBe("/");
+  expect(history.length).toBe(length);
+  expect(document.activeElement).toBe(input);
+});
+
+test("Alt+digit stays in the real comment composer on a review", async () => {
+  const history = mount(`/r/${id(1)}`);
+  await ready();
+  fireEvent.click(await screen.findByRole("button", { name: "Comment on review" }));
+  const input = await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "Comment" });
+  expect(input.tagName).toBe("TEXTAREA");
+  act(() => input.focus());
+  const location = history.location;
+  const length = history.length;
+  for (const digit of [2, 0]) {
+    await act(async () => {
+      expect(jump(digit, input).defaultPrevented).toBe(false);
+    });
+    expect(document.activeElement).toBe(input);
+    expect(history.location).toEqual(location);
+    expect(history.length).toBe(length);
+  }
 });
 
 test.each(["/", `/r/${id(1)}`])("phone shows no jump numbers or handlers on %s", async (path) => {
@@ -497,6 +680,7 @@ test.each(["/", `/r/${id(1)}`])("phone shows no jump numbers or handlers on %s",
   else await screen.findByRole("button", { name: "Approve" });
   expect(numbers()).toEqual([]);
   expect(jump(1).defaultPrevented).toBe(false);
+  expect(jump(0).defaultPrevented).toBe(false);
   expect(history.location.pathname).toBe(path);
 });
 
@@ -506,16 +690,16 @@ test.each([false, true])("? lists jumps as one row and the palette excludes them
   await ready();
   press("?", { shiftKey: true });
   const dialog = await screen.findByRole("alertdialog", { name: "Keyboard shortcuts" });
-  const label = within(dialog).getByText("Open row 1 to 9 of Pinned and Active");
+  const label = within(dialog).getByText("Open inbox row 1 to 10");
   expect(label.tagName).toBe("DT");
-  expect(label.nextElementSibling?.textContent).toBe(off ? "Off" : "Alt+1–9");
+  expect(label.nextElementSibling?.textContent).toBe(off ? "Off" : "Alt+1–9, Alt+0");
   expect(label.nextElementSibling?.querySelector("kbd") !== null).toBe(!off);
-  expect(within(dialog).queryByText("Open row 1 of Pinned and Active", { exact: true })).toBeNull();
+  expect(within(dialog).queryByText("Open inbox row 1", { exact: true })).toBeNull();
   fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   press("P", { ctrlKey: true, shiftKey: true });
   const palette = await screen.findByRole("dialog", { name: "Command palette" });
-  expect(within(palette).queryByRole("option", { name: /Open row .* of Pinned and Active/ })).toBeNull();
+  expect(within(palette).queryByRole("option", { name: /Open inbox row / })).toBeNull();
 });
 
 test.each([
@@ -523,36 +707,47 @@ test.each([
   ["&", { metaKey: true, code: "Digit1" }, "mod"],
   ["¡", { altKey: true, code: "Digit1" }, "alt"],
   ["0", { ctrlKey: true, code: "Digit0" }, "mod"],
-] as const)("Settings captures %s (%j) as one patch for all nine %s keys", async (key, options, modifier) => {
+] as const)("Settings captures %s (%j) as one patch for all ten %s keys", async (key, options, modifier) => {
   await openSettings();
-  expect(jumpRow().getByText("Alt+1–9")).toBeTruthy();
+  expect(jumpRow().getByText("Alt+1–9, Alt+0")).toBeTruthy();
   expect(jumpRow().getByText("Default.")).toBeTruthy();
   expect(jumpRow().queryByRole("button", { name: "Reset" })).toBeNull();
   expect(press(key, options, change()).defaultPrevented).toBe(true);
   await jumpRow().findByText("Set here.");
   expect(patches()).toHaveLength(1);
+  expect(Object.keys(patchBody(0).keys)).toHaveLength(10);
   expect(patchBody(0)).toEqual({
-    keys: Object.fromEntries(jumpCommands.map((command, index) => [command, { key: `${modifier}+${index + 1}` }])),
+    keys: Object.fromEntries(
+      jumpCommands.map((command, index) => [
+        command,
+        { key: modifier === "mod" && index === 9 ? null : `${modifier}+${(index + 1) % 10}` },
+      ]),
+    ),
   });
-  expect(jumpRow().getByText(modifier === "mod" ? "Ctrl+1–9" : "Alt+1–9")).toBeTruthy();
+  expect(patchBody(0).keys["inbox.jump10"]).toEqual({ key: modifier === "mod" ? null : "alt+0" });
+  expect(jumpRow().getByText(modifier === "mod" ? "Ctrl+1–9" : "Alt+1–9, Alt+0")).toBeTruthy();
   for (const [index, command] of jumpCommands.entries())
     expect(client.getQueryData<SettingsView>(["settings"])?.keys.commands[command].value).toBe(
-      `${modifier}+${index + 1}`,
+      modifier === "mod" && index === 9 ? null : `${modifier}+${(index + 1) % 10}`,
     );
 });
 
-test("Turn off and Reset each patch all nine commands once", async () => {
+test("Turn off and Reset each patch all ten commands once", async () => {
   await openSettings();
   fireEvent.click(jumpRow().getByRole("button", { name: "Turn off" }));
   await jumpRow().findByText("Off");
   expect(jumpRow().queryByRole("button", { name: "Turn off" })).toBeNull();
   expect(patches()).toHaveLength(1);
   expect(patchBody(0)).toEqual({ keys: Object.fromEntries(jumpCommands.map((command) => [command, { key: null }])) });
+  expect(Object.keys(patchBody(0).keys)).toHaveLength(10);
+  expect(patchBody(0).keys["inbox.jump10"]).toEqual({ key: null });
   fireEvent.click(jumpRow().getByRole("button", { name: "Reset" }));
   await jumpRow().findByText("Default.");
   expect(patches()).toHaveLength(2);
   expect(patchBody(1)).toEqual({ keys: Object.fromEntries(jumpCommands.map((command) => [command, null])) });
-  expect(jumpRow().getByText("Alt+1–9")).toBeTruthy();
+  expect(Object.keys(patchBody(1).keys)).toHaveLength(10);
+  expect(patchBody(1).keys["inbox.jump10"]).toBeNull();
+  expect(jumpRow().getByText("Alt+1–9, Alt+0")).toBeTruthy();
 });
 
 test.each(["Linux x86_64", "MacIntel"])("jump capture reports invalid combinations on %s", async (platform) => {
@@ -574,12 +769,25 @@ test.each(["Linux x86_64", "MacIntel"])("jump capture reports invalid combinatio
   }
 });
 
-test("jump capture checks the full range against non-jump commands", async () => {
+test("jump capture checks Ctrl+9 against non-jump commands", async () => {
   settings.keys.commands["tab.writeup"].value = "mod+9";
   await openSettings();
   press("1", { ctrlKey: true, code: "Digit1" }, change());
   expect(jumpRow().getByRole("alert").textContent).toBe("Already used by Writeup tab.");
   expect(patches()).toHaveLength(0);
+});
+
+test.each(["mod+0", null])("a non-jump command set to %s does not clash with the Ctrl group", async (binding) => {
+  settings.keys.commands["tab.writeup"].value = binding;
+  await openSettings();
+  press("1", { ctrlKey: true, code: "Digit1" }, change());
+  await jumpRow().findByText("Set here.");
+  expect(jumpRow().queryByRole("alert")).toBeNull();
+  expect(jumpRow().getByText("Ctrl+1–9")).toBeTruthy();
+  expect(patches()).toHaveLength(1);
+  expect(Object.keys(patchBody(0).keys)).toHaveLength(10);
+  expect(patchBody(0).keys["inbox.jump10"]).toEqual({ key: null });
+  expect(client.getQueryData<SettingsView>(["settings"])?.keys.commands["tab.writeup"].value).toBe(binding);
 });
 
 test("capture ignores repeats and composition, waits for modifiers, and cancels on Tab, Escape or blur", async () => {
@@ -608,7 +816,7 @@ test("combined source reports file entries, overrides, file errors and the first
   expect(jumpRow().getByText("Some config file keys can't be used, so they are ignored.")).toBeTruthy();
   expect(jumpRow().getByText("Some of its keys are used by Writeup tab.")).toBeTruthy();
   expect(jumpRow().queryByText("Some of its keys are used by Docs tab.")).toBeNull();
-  expect(jumpRow().getByText("Ctrl+1, Off, Off, Alt+4, Alt+5, Alt+6, Alt+7, Alt+8, Alt+9")).toBeTruthy();
+  expect(jumpRow().getByText("Ctrl+1, Off, Off, Alt+4, Alt+5, Alt+6, Alt+7, Alt+8, Alt+9, Alt+0")).toBeTruthy();
   fireEvent.click(jumpRow().getByRole("button", { name: "Turn off" }));
   await jumpRow().findByText("Set here.");
   fireEvent.click(jumpRow().getByRole("button", { name: "Reset" }));

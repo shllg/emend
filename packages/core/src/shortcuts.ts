@@ -13,6 +13,15 @@ interface CommandState {
   clashWith: ShortcutCommand | null;
 }
 
+function classifyJumpGroup(keys: Partial<Record<ShortcutCommand, KeyBinding>>): "off" | "alt" | undefined {
+  const commands = Array.from({ length: 9 }, (_, index) => `inbox.jump${index + 1}` as ShortcutCommand);
+  if (!commands.every((command) => Object.hasOwn(keys, command))) return undefined;
+  const values = commands.map((command) => keys[command]);
+  if (values.every((value) => value === null) || values.every((value, index) => value === `mod+${index + 1}`))
+    return "off";
+  return values.every((value, index) => value === `alt+${index + 1}`) ? "alt" : undefined;
+}
+
 export function resolveShortcuts({
   file,
   fileErrors,
@@ -22,6 +31,16 @@ export function resolveShortcuts({
   fileErrors: ReadonlySet<ShortcutCommand>;
   overrides: Partial<Record<ShortcutCommand, KeyBinding>>;
 }): Record<ShortcutCommand, KeySetting> {
+  // Without an explicit row ten, the highest complete group decides: off/Ctrl fills off
+  // at that level only; Alt leaves the level-0 default, which loses to any saved or file key.
+  if (
+    !Object.hasOwn(overrides, "inbox.jump10") &&
+    (!Object.hasOwn(file, "inbox.jump10") || fileErrors.has("inbox.jump10"))
+  ) {
+    const overrideGroup = classifyJumpGroup(overrides);
+    if (overrideGroup === "off") overrides = { ...overrides, "inbox.jump10": null };
+    else if (overrideGroup === undefined && classifyJumpGroup(file) === "off") file = { ...file, "inbox.jump10": null };
+  }
   const states: CommandState[] = ShortcutCommand.options.map((command) => {
     const candidates: Candidate[] = [];
     const override = overrides[command],

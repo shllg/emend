@@ -11,22 +11,32 @@ export const jumpCommands: ShortcutCommand[] = [
   "inbox.jump7",
   "inbox.jump8",
   "inbox.jump9",
+  "inbox.jump10",
 ];
+export const jumpGroupLabel = "Open inbox row 1 to 10";
+
+export function jumpKey(modifier: "alt" | "mod", index: number): KeyBinding {
+  // Ctrl+0 and ⌘0 reset the browser's zoom.
+  if (modifier === "mod" && index === 9) return null;
+  return `${modifier}+${(index + 1) % 10}`;
+}
+
 export const shortcutLabels: Record<ShortcutCommand, string> = {
   "inbox.next": "Next review or pub",
   "inbox.previous": "Previous review or pub",
   "inbox.filter": "Switch the inbox filter",
   "inbox.search": "Search the inbox",
   "inbox.back": "Back to the inbox",
-  "inbox.jump1": "Open row 1 of Pinned and Active",
-  "inbox.jump2": "Open row 2 of Pinned and Active",
-  "inbox.jump3": "Open row 3 of Pinned and Active",
-  "inbox.jump4": "Open row 4 of Pinned and Active",
-  "inbox.jump5": "Open row 5 of Pinned and Active",
-  "inbox.jump6": "Open row 6 of Pinned and Active",
-  "inbox.jump7": "Open row 7 of Pinned and Active",
-  "inbox.jump8": "Open row 8 of Pinned and Active",
-  "inbox.jump9": "Open row 9 of Pinned and Active",
+  "inbox.jump1": "Open inbox row 1",
+  "inbox.jump2": "Open inbox row 2",
+  "inbox.jump3": "Open inbox row 3",
+  "inbox.jump4": "Open inbox row 4",
+  "inbox.jump5": "Open inbox row 5",
+  "inbox.jump6": "Open inbox row 6",
+  "inbox.jump7": "Open inbox row 7",
+  "inbox.jump8": "Open inbox row 8",
+  "inbox.jump9": "Open inbox row 9",
+  "inbox.jump10": "Open inbox row 10",
   "tab.writeup": "Writeup tab",
   "tab.files": "Files tab",
   "tab.docs": "Docs tab",
@@ -183,11 +193,14 @@ export function hasOpenOverlay() {
 }
 
 export function jumpKeysLabel(values: KeyBinding[], platform = navigator.platform): string {
-  for (const modifier of ["alt", "mod"]) {
-    if (values.length === 9 && values.every((value, index) => value === `${modifier}+${index + 1}`))
-      return keyLabel(`${modifier}+1`, platform).replace(/1$/, "1–9");
-  }
   if (values.every((value) => value === null)) return "Off";
+  for (const modifier of ["alt", "mod"]) {
+    if (values.length === 10 && values.slice(0, 9).every((value, index) => value === `${modifier}+${index + 1}`)) {
+      const range = keyLabel(`${modifier}+1`, platform).replace(/1$/, "1–9");
+      const tenth = values[9];
+      return tenth == null ? range : `${range}, ${keyLabel(tenth, platform)}`;
+    }
+  }
   return values.map((value) => keyLabel(value, platform)).join(", ");
 }
 
