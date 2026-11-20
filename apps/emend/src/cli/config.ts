@@ -221,13 +221,17 @@ async function configRepository(path: string, actual: string, options: ConfigRea
   }
 }
 
-/** Theme commands use the same repository and symlink-hop checks as emend config. */
-export async function checkThemesFolder(path: string, cwd = process.cwd()): Promise<void> {
+/** Theme and look commands use the same repository and symlink-hop checks as emend config. */
+export async function checkThemesFolder(
+  path: string,
+  cwd = process.cwd(),
+  command: "theme" | "look" = "theme",
+): Promise<void> {
   const actual = await checkedConfigPath(path);
   const repository = await configRepository(path, actual, { cwd });
   if (repository)
     throw new CliError(
-      `the emend themes folder ${escapeReference(path)} sits inside the repository at ${escapeReference(repository)}; run emend theme outside it`,
+      `the emend themes folder ${escapeReference(path)} sits inside the repository at ${escapeReference(repository)}; run emend ${command} outside it`,
     );
 }
 

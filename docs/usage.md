@@ -213,6 +213,22 @@ Docs must be in the current worktree or an allowed `docRoots` folder. For anothe
 Publishing while the server is stopped saves the review and prints its URL; run `emend` or
 `emend service install` to open it. An attached machine publishes to its hub.
 
+### An HTML file in emend's look
+
+Give a local HTML file emend's look before opening it on its own:
+
+```sh
+emend look docs/plan.html
+```
+
+The command changes the file in place. Run it again after editing; a second run without changes
+writes nothing. The file follows the reader's light or dark mode. When exactly one theme is valid,
+it uses that theme's colours. Pick one with `--theme <name>`, or use `--no-theme` for emend's own
+colours. With several valid themes, it uses emend's own colours and says how to pick one.
+A page marked `<meta name="emend-look" content="custom">` stays unchanged.
+The file stays self-contained, adding about 200 KB for the default fonts. Publishing still works
+the same.
+
 ## List your reviews and check the connection
 
 `emend ls` lists the reviews this machine published, newest first, one line each: id, state, last

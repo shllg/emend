@@ -7,6 +7,7 @@ import {
   RenderedBlock,
   RenderedWriteup,
   SourceContent,
+  type ThemeValid,
   TopicMeta,
 } from "@emend/contract";
 import {
@@ -45,6 +46,7 @@ import {
 } from "../../db/schema.ts";
 import type { AppDeps } from "../app.ts";
 import type { AppEnv } from "../auth/principal.ts";
+import { pubStylesheet } from "../content/look.ts";
 import { downloadDocNames } from "../http/download-names.ts";
 import { ApiError } from "../http/errors.ts";
 import { DOWNLOAD_CSP } from "../http/headers.ts";
@@ -102,6 +104,8 @@ async function revisionDownload(
   withComments: boolean,
   withDiff: boolean,
   theme: DownloadRenderTheme | undefined,
+  selection: string | undefined,
+  entry: ThemeValid | undefined,
 ) {
   const row = await q
     .select({ review: reviews, repoName: repos.name })
@@ -393,6 +397,7 @@ async function revisionDownload(
     });
   };
   const routed = withComments ? await loadThreads() : undefined;
+  let pubCss: string | undefined;
   const buildHtmlDoc = async (
     doc: typeof files.$inferSelect,
     title: string,
@@ -418,11 +423,22 @@ async function revisionDownload(
     const assets = new Map(
       rows.filter(({ file }) => file.mediaType !== "text/javascript").map(({ file }) => [file.path, file]),
     );
+    let look: Parameters<typeof buildHtmlDocDownload>[0]["look"];
+    if (doc.look === "emend") {
+      pubCss ??= await pubStylesheet(deps.config.webRoot);
+      const lightOnly = doc.colorScheme === "light";
+      look = {
+        css: pubCss,
+        mode: lightOnly ? "light" : selection === "dark" || selection === "light" ? selection : entry?.base,
+        theme: entry && (!lightOnly || entry.base === "light") ? entry : undefined,
+      };
+    }
     return buildHtmlDocDownload({
       html: new TextDecoder().decode(bytes),
       docPath: doc.path,
       title,
       theme,
+      look,
       resolveAsset: (path) => resolveFile(assets.get(path)),
       inlineBudget,
       pause,
@@ -580,10 +596,12 @@ export function downloadRoutes(
     if (!themeParsed.success) throw new ApiError("invalid_request");
     const selection = themeParsed.data[0];
     let theme: DownloadRenderTheme | undefined;
+    let entry: ThemeValid | undefined;
     if (selection === undefined || selection === "dark" || selection === "light") theme = selection;
     else {
-      const entry = await readThemeForRequest(deps.themesDir, selection);
-      if (!entry?.valid) throw new ApiError("invalid_request");
+      const selected = await readThemeForRequest(deps.themesDir, selection);
+      if (!selected?.valid) throw new ApiError("invalid_request");
+      entry = selected;
       theme = themeDownloadLook(entry);
     }
     const release = headOnly ? undefined : await acquireDownload(ownerId);
@@ -602,6 +620,8 @@ export function downloadRoutes(
           withComments,
           withDiff,
           theme,
+          selection,
+          entry,
         ),
       );
       c.header("Content-Type", result.zip ? "application/zip" : "text/html; charset=utf-8");

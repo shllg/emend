@@ -11,7 +11,7 @@ A repo under review may try to run its own code through emend: under mise, its t
 point `emend`, `node` or `git` at code it controls, and agents run emend with full rights. These
 checks catch a copy inside the repo.
 
-- `publish`, `wait`, `feedback`, `reply`, `mcp`, `stop`, `service`, `update` and `skills` refuse
+- `publish`, `look`, `wait`, `feedback`, `reply`, `mcp`, `stop`, `service`, `update` and `skills` refuse
   an emend whose Node.js or entry resolves inside a repository that holds the working directory
   (`apps/emend/src/cli.ts`, `runtime-repository.ts`). The refusal comes before `main.ts` loads.
 - A `.git` folder counts unless it has no `HEAD` (git never accepts one without), so an empty one
@@ -31,7 +31,8 @@ checks catch a copy inside the repo.
   `keys` from that file, a bounded integer and a map of shortcut keys, without this check. It also
   reads each theme's `theme.json` in the `themes` folder beside it without this check: every value must be a
   checked colour, a scale step name, a font name or a density (`compact`, `regular` or `roomy`), and
-  none applies until the reviewer picks the theme. `emend theme list`, `copy` and `check` refuse a themes folder inside such a repository.
+  none applies until the reviewer picks the theme. `emend theme list`, `copy` and `check`, and
+  `emend look` unless it gets `--no-theme`, refuse a themes folder inside such a repository.
 - Every helper program (git, systemctl, launchctl, tailscale, the browser opener, and mise, npm
   and pnpm for `emend update`) comes from `findExecutable` (`executable.ts`): absolute `PATH`
   entries without `.` or `..` parts, where no part of the entry's path or of the program's path,

@@ -243,11 +243,13 @@ It changes no headers, filename or ZIP decision. The choice is off by default.
 
 An optional `theme=dark`, `theme=light` or `theme=<name>` query parameter sets the look of the files emend
 draws: the writeup, Markdown docs, docs shown as source, the comments file and the omitted-content
-note page. Without it, they follow the reader's colour scheme. An HTML doc downloads as its own
-bytes: a custom page keeps its own look, and a page in emend's look downloads without emend's
-styles. A theme name uses that theme’s resolved colours, including syntax colours for code blocks
-and docs shown as source; fonts stay unchanged. Revisions published before #136 keep their stored
-GitHub code colours.
+note page. Without it, they follow the reader's colour scheme. A custom HTML page keeps its own
+look. An HTML page in emend's look downloads with emend's stylesheet and its default fonts.
+`theme=dark|light` fixes its mode; a theme name fixes its base mode and adds its colours.
+A light-only page stays light and takes a theme's colours only from a light-base theme.
+Without `theme`, the page follows the reader's mode. For the files emend draws, a theme name uses
+that theme’s resolved colours, including syntax colours for code blocks and docs shown as source;
+fonts stay unchanged. Revisions published before #136 keep their stored GitHub code colours.
 An invalid value, a repeat, or a missing or refused theme gets `400 invalid_request` before waiting
 for a slot, also on `HEAD`.
 It changes no headers, filename or ZIP decision.
@@ -996,6 +998,11 @@ A dark-mode rule is `prefers-color-scheme` or `light-dark(` in a style element, 
 `style` attribute or an SVG colour attribute, or `prefers-color-scheme` in the `media` attribute of
 a style element or a stylesheet link. Both checks read CSS outside comments, strings and `url()`
 values, and cover declarative shadow roots, not inert templates.
+The leading copy `emend look` writes counts for neither check, nor as the page’s own styles,
+when recognised exactly as written: `<meta charset="utf-8"><style data-emend-look>` at the start
+of the page, after a doctype and comments, optionally after `<html data-theme="light">`, ending
+at the first `</`, which must be exactly `</style>`. Any other `style` element counts as usual,
+including one carrying `data-emend-look`.
 
 The URL is
 `/content/<docKey>/<path>` with each path segment percent-encoded. The doc key is the revision's
@@ -1018,11 +1025,15 @@ the cascade ranks the outer document's rules above a shadow tree's.
 
 A doc whose `look` is `emend` also receives emend's pub stylesheet as one style element, placed
 after any leading byte order mark, whitespace, comments and doctype, so the doc never falls into
-quirks mode. The stylesheet is `pub-frame.css` from the web build: emend's tokens and element
+quirks mode. The route first removes the leading copy `emend look` writes (recognised as described
+under the colour checks), so the frame shows the page the Download shows.
+The stylesheet is `pub-frame.css` from the web build: emend's tokens and element
 styles in the cascade layer `emend`, with its fonts as `data:` URLs. It contains no `</`, backslash,
 `@import`, `image-set(` or `src(`. Every `url(` must use `data:`. The build and every server read
 check these rules and the `pubStylesheetBytes` limit. A missing or rejected sheet falls back to a
 minimal light and dark sheet with system colours.
+The stylesheet declares `@layer emend-file, emend;`, so page CSS in the layer `emend-file` never
+overrides emend's look.
 Every unlayered rule of the doc's own CSS wins over it. The doc's headers stay exactly as above.
 A doc whose `colorScheme` is `light` also gets the fixed start tag `<html data-theme="light">` right
 before that style element, regardless of the query. Other docs in emend's look accept an optional
@@ -2393,10 +2404,11 @@ escaped line on stderr.
 `PublishManifest.files[].title` and `PublishRequest.files[].title` are optional strings, nonblank
 and at most `LIMITS.titleChars` (200), allowed only on files whose role is `doc`; other roles reject
 a title. At publish the server applies `cleanDocTitle`; an empty result is ignored. Doc titles
-fall back to the document's own title, then its filename. HTML uses
-only `head > title`, then the first HTML-namespace `h1` in the body. Markdown uses the first
-rendered `h1` heading block, so removed raw HTML cannot supply a title. CLI inferred review titles
-use the same extraction. Titles and heading labels are plain cleaned text.
+fall back to the document's own title, then its filename. HTML uses only `head > title`, then the
+first HTML-namespace `h1` in the body. Both are read after the leading copy `emend look` writes is
+removed. Markdown uses the first rendered `h1` heading block, so removed raw HTML cannot supply a
+title. CLI inferred review titles use the same extraction. Titles and heading labels are plain
+cleaned text.
 
 Each `RevisionView.docs[]` optionally includes `title: string` and
 `headings: { level: 2 | 3; text: string; id?: string }[]`. Older revisions without either field

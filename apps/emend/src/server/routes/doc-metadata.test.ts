@@ -1,10 +1,48 @@
 import { PublishResponse, RevisionView } from "@emend/contract";
+import { applyHtmlLook } from "@emend/core";
 import { and, eq } from "drizzle-orm";
 import { expect, test } from "vitest";
 import { files, revisions } from "../../db/schema.ts";
 import { mailboxFixture } from "../mailbox/test-support.ts";
 import { WorkTimeout } from "../publish/executor.ts";
 import { executeWork } from "../publish/work.ts";
+
+test("the file look keeps light-only HTML metadata and headings unchanged", async () => {
+  const source = "<!doctype html><title>Plan</title><style>p{color:#222}</style><h2>Seeds</h2><p>Plan</p>";
+  const styled = applyHtmlLook(source, {
+    css: "@layer emend{:root{color:black}@media(prefers-color-scheme:dark){:root{color:white}}}",
+    lightOnly: true,
+  });
+  const metadata = (text: string) =>
+    executeWork({ kind: "doc-metadata", format: "html", bytes: new TextEncoder().encode(text).buffer });
+  const before = await metadata(source);
+  expect(before).toMatchObject({
+    kind: "doc-metadata",
+    title: "Plan",
+    look: "emend",
+    legacyLook: "custom",
+    colorScheme: "light",
+    headings: [{ level: 2, text: "Seeds" }],
+  });
+  expect(await metadata(styled)).toEqual(before);
+});
+
+test("the file look keeps HTML titles when its stylesheet exceeds the title prefix limit", async () => {
+  const source = "<!doctype html><title>Plan</title><h1>Overview</h1><h2>Seeds</h2><p>Plan</p>";
+  const css = `@layer emend{${".a{color:red}".repeat(6000)}}`;
+  expect(Buffer.byteLength(css, "utf8")).toBeGreaterThan(64 * 1024);
+  const styled = applyHtmlLook(source, { css, lightOnly: false });
+  const metadata = (text: string) =>
+    executeWork({ kind: "doc-metadata", format: "html", bytes: new TextEncoder().encode(text).buffer });
+  const before = await metadata(source);
+  expect(before).toMatchObject({
+    kind: "doc-metadata",
+    title: "Plan",
+    look: "emend",
+    headings: [{ level: 2, text: "Seeds" }],
+  });
+  expect(await metadata(styled)).toEqual(before);
+});
 
 test("publish records HTML look, leaves other and failed metadata null, and omits legacy looks from views", async () => {
   const f = await mailboxFixture();

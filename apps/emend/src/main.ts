@@ -30,6 +30,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   emend devices [--revoke <id>]  List or revoke devices
   emend publish <path>... [--title T] [--key K | --new] [--review ID] [--main PATH] [--source] [--json] [--project NAME]
   emend publish --manifest <file> [--review <id>] [--key <name>] [--project NAME]
+  emend look <file.html>... [--theme <name> | --no-theme]  Give HTML files emend's look
   emend wait <review> [--timeout <seconds>] [--save <folder>]
   emend feedback <review> [--save <folder>]
   emend reply <comment> --status <outcome> (--body <text> | --body-file <path | ->)
@@ -63,6 +64,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       "skills",
       "config",
       "theme",
+      "look",
       "pair",
       "devices",
       "attach",
@@ -90,6 +92,11 @@ export async function run(argv: string[], io: Io): Promise<number> {
       if (argv[0] === "config") {
         const { configCommand } = await import("./cli/commands/config.ts");
         await configCommand(defaultStateDir(io.env), defaultConfigDir(io.env), argv.slice(1), io, process.cwd());
+        return 0;
+      }
+      if (argv[0] === "look") {
+        const { lookCommand } = await import("./cli/commands/look.ts");
+        await lookCommand(defaultConfigDir(io.env), argv.slice(1), io);
         return 0;
       }
       if (argv[0] === "theme") {

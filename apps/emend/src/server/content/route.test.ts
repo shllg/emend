@@ -4,7 +4,7 @@ import { type FileHandle, mkdir, open, rename, symlink, truncate, utimes, writeF
 import { type ClientRequest, createServer, request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { LIMITS, PublishResponse, RevisionView } from "@emend/contract";
-import { parseDocHtml } from "@emend/core";
+import { applyHtmlLook, htmlLook, parseDocHtml, stripHtmlLook } from "@emend/core";
 import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { devices, files, reviews, revisions } from "../../db/schema.ts";
@@ -175,11 +175,15 @@ test.each([
     light: false,
   },
   { name: "no colours", mark: "", rules: "p{margin:1px}", look: "emend", light: false },
+  { name: "command-styled light-only", mark: "", rules: "p{color:#222}", look: "emend", light: true, styled: true },
+  { name: "command-styled plain", mark: "", rules: "", look: "emend", light: false, styled: true },
 ])(
   "published $name page stores and serves its appearance with unchanged headers",
-  async ({ mark, rules, look, light }) => {
-    const page = `<!doctype html><html data-theme="dark" lang="en"><head>${mark}<style>${rules}</style></head><body><p>Plan</p></body></html>`;
+  async ({ mark, rules, look, light, styled }) => {
+    const original = `<!doctype html><html data-theme="dark" lang="en"><head>${mark}<style>${rules}</style></head><body><p>Plan</p></body></html>`;
     const css = "@layer emend{:root{color-scheme:light dark}:root[data-theme=light]{color-scheme:light}}";
+    const page = styled ? applyHtmlLook(original, { css, lightOnly: light }) : original;
+    expect(htmlLook(page)).toEqual(htmlLook(original));
     await writeFile(join(f.dir, "pub-frame.css"), css);
     const response = await f.request(
       "/publish",
@@ -230,13 +234,20 @@ test.each([
     const served = await request(doc.contentUrl);
     headers(served);
     const body = await served.text();
-    expect(body).toBe(injectBridge(look === "emend" ? injectLook(page, css, light ? "light" : undefined) : page));
+    expect(body).toBe(
+      injectBridge(look === "emend" ? injectLook(stripHtmlLook(page), css, light ? "light" : undefined) : page),
+    );
     if (look === "emend") {
-      expect(body.indexOf(css)).toBeLessThan(body.indexOf(rules));
+      if (rules) expect(body.indexOf(css)).toBeLessThan(body.indexOf(rules));
+      if (styled) {
+        expect(body).not.toContain("<style data-emend-look>");
+        expect(body).not.toContain("@layer emend-file{");
+      }
       expect(body).toContain(`<style>${rules}</style>`);
     } else expect(body).not.toContain(css);
     if (light) {
       expect(body).toContain('<!doctype html><html data-theme="light"><style>');
+      expect(body.match(/<html data-theme="light">/g)).toHaveLength(1);
       const root = parseDocHtml(body)?.childNodes.find((node) => node.nodeName === "html");
       expect(root && "attrs" in root ? root.attrs : []).toEqual([
         { name: "data-theme", value: "light" },
@@ -245,6 +256,53 @@ test.each([
     } else expect(body).not.toContain('<html data-theme="light">');
   },
 );
+
+test("a leading look copy cannot hide content that the Download shows", async () => {
+  const page =
+    '<!doctype html><meta charset="utf-8"><style data-emend-look>.x{display:none}</style><p>Seen</p><p class="x">Only in the download</p>';
+  const response = await f.request(
+    "/publish",
+    "POST",
+    {
+      reviewId: f.reviewId,
+      reviewKey: "a".repeat(64),
+      repo: null,
+      branch: null,
+      title: "Synthetic leading look copy",
+      base: null,
+      head: null,
+      topics: [],
+      writeup: { overview: "", tldr: "", decisions: null, topics: {} },
+      files: [
+        {
+          path: "page.html",
+          role: "doc",
+          oldPath: null,
+          oldBlob: null,
+          newBlob: await f.deps.blobs.put(f.ownerId, Buffer.from(page), "text/html"),
+          flag: null,
+          assets: [],
+        },
+      ],
+    },
+    "agent",
+  );
+  expect(response.status).toBe(200);
+  const published = PublishResponse.parse(await response.json());
+  expect(published.htmlLooks).toEqual([{ path: "page.html", look: "emend" }]);
+  const view = RevisionView.parse(
+    await (await f.request(`/reviews/${f.reviewId}/revisions/${published.revision}`, "GET")).json(),
+  );
+  const doc = view.docs[0];
+  if (doc?.kind !== "html") throw new Error("Missing HTML doc");
+  const served = await request(doc.contentUrl);
+  headers(served);
+  const body = await served.text();
+  expect(body).not.toContain(".x{display:none}");
+  expect(body).not.toContain("data-emend-look");
+  expect(body).toContain("<p>Seen</p>");
+  expect(body).toContain('<p class="x">Only in the download</p>');
+});
 
 test("emend look injects the installed stylesheet, caches it and leaves assets unchanged", async () => {
   const css =

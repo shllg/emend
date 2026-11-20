@@ -1,4 +1,5 @@
 import { type DefaultTreeAdapterTypes, defaultTreeAdapter, html } from "parse5";
+import { stripHtmlLook } from "./html-look-file.ts";
 import { parseDocHtml } from "./place/html.ts";
 
 export type HtmlLook = "emend" | "custom";
@@ -157,7 +158,7 @@ function colorDeclarations(css: string): boolean {
 }
 
 export function htmlLook(source: string): HtmlLookResult {
-  return htmlLookFromTree(parseDocHtml(source));
+  return htmlLookFromTree(parseDocHtml(stripHtmlLook(source)));
 }
 
 /** Shares the bounded parse with headings. Lazy iterators keep even wide documents inexpensive to walk. */

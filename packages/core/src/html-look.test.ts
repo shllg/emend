@@ -2,6 +2,7 @@ import { defaultTreeAdapter, html } from "parse5";
 import { expect, test } from "vitest";
 import { htmlHeadings, htmlHeadingsFromTree } from "./doc-headings.ts";
 import { HTML_STRUCTURE, htmlLook, htmlLookFromTree } from "./html-look.ts";
+import { applyHtmlLook } from "./html-look-file.ts";
 import { HTML_NESTING_LIMIT, parseDocHtml } from "./place/html.ts";
 
 test.each([
@@ -426,4 +427,34 @@ test("hostile CSS declarations and an unclosed comment scan in linear time", () 
   const start = performance.now();
   expect(htmlLook(source)).toMatchObject({ look: "emend", ownStyles: true, colorScheme: "auto" });
   expect(performance.now() - start).toBeLessThan(2000);
+});
+
+test.each([
+  "<p>Plain page</p>",
+  "<style>p{color:#222;background:white}</style><p>Light-only page</p>",
+  "<style>p{color:#222}@media(prefers-color-scheme:dark){p{color:white}}</style><p>Both modes</p>",
+])("the file look preserves all appearance metadata: %s", (page) => {
+  const before = htmlLook(page);
+  const styled = applyHtmlLook(page, {
+    css: "@layer emend{:root{color:black}@media(prefers-color-scheme:dark){:root{color:white}}}",
+    lightOnly: before.colorScheme === "light",
+  });
+  expect(htmlLook(styled)).toEqual(before);
+});
+
+test("the look marker does not exempt styles outside the recognised leading chunk", () => {
+  for (const page of [
+    "<style data-emend-look>p{color:red}</style><p>Plan</p>",
+    '<!doctype html><title>Plan</title><meta charset="utf-8"><style data-emend-look>p{color:red}</style>',
+    "<svg><style data-emend-look>text{fill:red}</style></svg>",
+    '<div><template shadowrootmode="open"><style data-emend-look>p{color:red}</style></template></div>',
+  ])
+    expect(htmlLook(page)).toMatchObject({ look: "emend", ownStyles: true, colorScheme: "light" });
+});
+
+test("an unrecognised leading chunk retains its styles and the page's custom mark", () => {
+  const page =
+    '<!doctype html><meta charset="utf-8"><style data-emend-look>p{color:red}</STYLE>' +
+    '<meta name="emend-look" content="custom"><p>Kept</p><!-- </style> -->';
+  expect(htmlLook(page)).toMatchObject({ look: "custom", reason: "marked-custom", ownStyles: true });
 });

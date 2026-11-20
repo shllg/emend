@@ -257,6 +257,7 @@ test("pub defaults use tokens, stay inside one emend layer and define the docume
   for (const edge of ["nth-child", "nth-last-child"])
     expect(flat).toContain(`body :${edge}(1 of :not(script, style, meta, link, title, template)):not(`);
   const entry = readFileSync(join(webSource, "../pub-frame.css"), "utf8");
+  expect(entry.startsWith("@layer emend-file, emend;\n")).toBe(true);
   for (const name of ["pub-fonts", "colors", "typography", "spacing"])
     expect(entry).toContain(`@import "./src/styles/${name}.css" layer(emend);`);
 });

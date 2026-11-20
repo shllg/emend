@@ -1,6 +1,8 @@
 let refusal: string | undefined;
 if (
-  ["publish", "wait", "feedback", "reply", "mcp", "stop", "service", "update", "skills"].includes(process.argv[2] ?? "")
+  ["publish", "look", "wait", "feedback", "reply", "mcp", "stop", "service", "update", "skills"].includes(
+    process.argv[2] ?? "",
+  )
 ) {
   try {
     const { runtimeInRepository } = await import("./cli/runtime-repository.ts");

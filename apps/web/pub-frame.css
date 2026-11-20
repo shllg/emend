@@ -1,3 +1,4 @@
+@layer emend-file, emend;
 @import "./src/styles/pub-fonts.css" layer(emend);
 @import "./src/styles/colors.css" layer(emend);
 @import "./src/styles/typography.css" layer(emend);
