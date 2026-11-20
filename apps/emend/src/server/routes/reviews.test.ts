@@ -149,8 +149,8 @@ test("inbox sorts newest first and caps the result at 200", async () => {
   selects = 0;
   const response = await get();
   expect(response.status).toBe(200);
-  // A full Active list skips the one approval-selection query; aggregates stay independent of row count.
-  expect(selects).toBe(singleReviewSelects - 1);
+  // A full Active list runs its one pinned-overflow query and skips the one approval-selection query; aggregates stay independent of row count.
+  expect(selects).toBe(singleReviewSelects);
   const list = contract.InboxList.parse(await response.json());
   expect(list.items).toHaveLength(contract.LIMITS.inboxItems);
   expect(list.items[0]?.title).toBe("Review 201");
