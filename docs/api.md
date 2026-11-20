@@ -923,6 +923,8 @@ A pinned review is placed exactly like an unpinned one. It takes an Active place
 approval-cap place when it qualifies. Each of the Active, Snoozed, grouped and Done blocks
 also carries its pinned reviews beyond its row cap, after its capped rows and in its own order.
 These rows are at most `pins` (50) in all, shared across the blocks in block order.
+Every pinned review outside the bin, except moved reviews, is in the response while the owner
+has at most `pins` (50) live pins.
 The approval cap still applies: a pinned approval without an Active place is in Done.
 Moved reviews show as unpinned. The response carries each review once, at most 850 rows in all.
 Clients show a pinned review in Pinned, and also in its own section unless that section is Active.

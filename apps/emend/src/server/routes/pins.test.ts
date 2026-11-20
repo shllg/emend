@@ -369,6 +369,37 @@ test("pinned overflow shares one budget across blocks when more than 50 pins are
   expect(items.length).toBeLessThanOrEqual(LIMITS.inboxItems * 4 + LIMITS.pins);
 });
 
+test("all Snoozed overflow pins follow capped rows when its pins exceed the remaining budget", async () => {
+  const remainingBudget = 20;
+  const active = [
+    f.reviewId,
+    ...(await seedMany(LIMITS.inboxItems + LIMITS.pins - remainingBudget - 1, (i) => ({
+      updatedAt: f.deps.now() - i - 1,
+    }))),
+  ];
+  const snoozed = await seedMany(LIMITS.inboxItems + 10, (i) => ({
+    snoozedAt: f.deps.now(),
+    snoozedUntil: f.deps.now() + (i + 1) * 1000,
+  }));
+  const overflow = snoozed.slice(LIMITS.inboxItems);
+  const pinned = [...active.slice(LIMITS.inboxItems), ...snoozed.slice(0, remainingBudget), ...overflow];
+  await f.db.query((q) =>
+    q.insert(t.reviewPins).values(
+      pinned.toReversed().map((reviewId, i) => ({
+        ownerId: f.ownerId,
+        reviewId,
+        createdAt: f.deps.now() + i,
+      })),
+    ),
+  );
+
+  const { items } = await inbox();
+  expect(items.map((item) => item.id)).toEqual([...active, ...snoozed]);
+  expect(items.slice(active.length + LIMITS.inboxItems)).toMatchObject(
+    overflow.map((id) => ({ id, list: "snoozed", pinnedAt: expect.any(String) })),
+  );
+});
+
 test("pinned Snoozed, grouped and Done items keep their normal block position and appear once", async () => {
   const group = await createGroup();
   const snoozed = await seed({ snoozedAt: f.deps.now(), snoozedUntil: f.deps.now() + 1000 });

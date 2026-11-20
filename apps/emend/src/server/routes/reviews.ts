@@ -133,7 +133,12 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
     if (remainingPins === 0) return rows;
     const listed = new Set(rows.map(({ review }) => review.id));
     const pinned = await select(
-      and(where, isNotNull(reviewPins.reviewId), isNull(reviews.movedToUrl)),
+      and(
+        where,
+        isNotNull(reviewPins.reviewId),
+        isNull(reviews.movedToUrl),
+        listed.size ? notInArray(reviews.id, [...listed]) : undefined,
+      ),
       order,
       remainingPins,
     );
