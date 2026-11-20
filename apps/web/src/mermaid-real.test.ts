@@ -1,6 +1,23 @@
-import mermaid from "mermaid";
-import { afterEach, expect, test, vi } from "vitest";
-import { encodeCodes, exceedsLimits, frameConfig } from "../mermaid-frame.ts";
+import { afterAll, afterEach, expect, onTestFinished, test, vi } from "vitest";
+
+// DOMPurify captures this native getter when Mermaid loads. Happy DOM's base
+// getter returns an empty name; delegate to the concrete getter as browsers do.
+const nativeNodeName = Object.getOwnPropertyDescriptor(Node.prototype, "nodeName")?.get;
+if (!nativeNodeName) throw new Error("Missing nodeName getter");
+const nodeName = vi.spyOn(Node.prototype, "nodeName", "get").mockImplementation(function (this: Node) {
+  for (
+    let prototype = Object.getPrototypeOf(this);
+    prototype && prototype !== Node.prototype;
+    prototype = Object.getPrototypeOf(prototype)
+  ) {
+    const getter = Object.getOwnPropertyDescriptor(prototype, "nodeName")?.get;
+    if (getter) return getter.call(this);
+  }
+  return nativeNodeName.call(this);
+});
+afterAll(() => nodeName.mockRestore());
+const { default: mermaid } = await import("mermaid");
+const { encodeCodes, exceedsLimits, frameConfig, startFrame } = await import("../mermaid-frame.ts");
 
 afterEach(() => mermaid.mermaidAPI.globalReset());
 
@@ -235,7 +252,6 @@ test.each([stateSource, flowchartSource])("real Mermaid parses entity stand-ins 
   await expect(mermaid.parse(encodeCodes(source).source)).resolves.toBeTruthy();
 });
 
-// Real renders return empty SVG strings in Happy DOM, and link nodes lack getBBox.
 // Check real parser labels here; the frame tests cover sanitizing and text restoration.
 test("real Mermaid preserves stand-ins and inlined printable characters in state descriptions", async () => {
   mermaid.initialize(frameConfig(false));
@@ -320,4 +336,132 @@ test.each([
   await expect(mermaid.parse(source)).resolves.toBeTruthy();
   expect(mermaid.mermaidAPI.getConfig()).toMatchObject({ theme: "base", securityLevel: "strict" });
   expect(mermaid.mermaidAPI.getConfig().sequence?.theme).toBe(sequenceTheme);
+});
+
+test.each(["click A call alert()", 'click A "javascript:alert(1)"'])(
+  "real Mermaid parses %s under strict frame config",
+  async (directive) => {
+    mermaid.initialize(frameConfig(false));
+    await expect(mermaid.parse(`flowchart LR\n A --> B\n ${directive}`)).resolves.toBeTruthy();
+    expect(mermaid.mermaidAPI.getConfig().securityLevel).toBe("strict");
+  },
+);
+
+function realSvgFrame() {
+  // As in frame-build.test.ts, preserve SVG style children through Happy DOM's
+  // HTML parser and supply layout measurements without replacing Mermaid's render.
+  const parse = DOMParser.prototype.parseFromString;
+  const parser = vi.spyOn(DOMParser.prototype, "parseFromString").mockImplementation(function (
+    this: DOMParser,
+    source,
+    type,
+  ) {
+    if (type === "text/html" && source.startsWith("<svg")) {
+      const xml = parse.call(this, source, "image/svg+xml");
+      const html = parse.call(this, "", "text/html");
+      html.body.append(html.importNode(xml.documentElement, true));
+      return html;
+    }
+    return parse.call(this, source, type);
+  });
+  onTestFinished(() => parser.mockRestore());
+  for (const [name, value] of [
+    ["getBBox", () => new DOMRect(0, 0, 80, 20)],
+    ["getComputedTextLength", () => 80],
+  ] as const) {
+    const previous = Object.getOwnPropertyDescriptor(SVGElement.prototype, name);
+    Object.defineProperty(SVGElement.prototype, name, { configurable: true, value });
+    onTestFinished(() => {
+      if (previous) Object.defineProperty(SVGElement.prototype, name, previous);
+      else Reflect.deleteProperty(SVGElement.prototype, name);
+    });
+  }
+  const bounds = vi.spyOn(SVGGraphicsElement.prototype, "getBBox").mockImplementation(() => new DOMRect(0, 0, 80, 20));
+  onTestFinished(() => bounds.mockRestore());
+  const root = document.createElement("div");
+  document.body.append(root);
+  onTestFinished(() => root.remove());
+  const reply = Promise.withResolvers<{ type: "svg"; svg: string | null; width?: number; height?: number }>();
+  const post = vi.spyOn(window.parent, "postMessage").mockImplementation((data) => {
+    if (data.type === "svg") reply.resolve(data);
+  });
+  onTestFinished(() => post.mockRestore());
+  const render = vi.spyOn(mermaid, "render");
+  onTestFinished(() => render.mockRestore());
+  const stop = startFrame(root);
+  onTestFinished(stop);
+  return { root, reply: reply.promise, render };
+}
+
+test("real Mermaid SVG replies refuse restored XML-forbidden label codes", async () => {
+  const { root, reply } = realSvgFrame();
+  window.dispatchEvent(
+    new MessageEvent("message", {
+      source: window.parent,
+      data: { type: "render", source: 'flowchart LR\n A["#65535;"] --> B', reply: "svg" },
+    }),
+  );
+  expect(await reply).toEqual({ type: "svg", svg: null });
+  expect(root.querySelector("svg")?.textContent).toContain("\uffff");
+});
+
+test("real Mermaid SVG replies strip click directives and executable markup", async () => {
+  const { root, reply, render } = realSvgFrame();
+  window.dispatchEvent(
+    new MessageEvent("message", {
+      source: window.parent,
+      data: {
+        type: "render",
+        source: `flowchart LR
+  A --> B --> C --> D
+  click A call alert()
+  click B "javascript:alert(1)"
+  click C href "javascript:alert(2)"
+  click D href "https://example.com/synthetic"`,
+        reply: "svg",
+      },
+    }),
+  );
+  const answer = await reply;
+  const rendered = await render.mock.results[0]?.value;
+  // Mermaid's own output: the click lines were applied, and node D's allowed link is still there for
+  // the frame to remove.
+  const own = new DOMParser().parseFromString(rendered.svg, "image/svg+xml").documentElement;
+  const wrapper = (root: Element, id: string) =>
+    root.querySelector(`[id$="flowchart-${id}-${"ABCD".indexOf(id)}"]`)?.closest("a");
+  const link = (anchor: Element | null | undefined) =>
+    anchor?.getAttribute("href") ?? anchor?.getAttribute("xlink:href");
+  expect(own.querySelectorAll(".node")).toHaveLength(4);
+  expect(wrapper(own, "A")).toBeNull();
+  expect(wrapper(own, "B")).toBeInstanceOf(Element);
+  expect(wrapper(own, "C")).toBeInstanceOf(Element);
+  expect(link(wrapper(own, "D"))).toBe("https://example.com/synthetic");
+  for (const node of [own, ...own.querySelectorAll("*")]) {
+    for (const attribute of node.attributes) expect(attribute.name).not.toMatch(/^on/i);
+  }
+  expect(answer.width).toBeGreaterThan(0);
+  expect(answer.height).toBeGreaterThan(0);
+  if (answer.svg === null) throw new Error(`Missing SVG reply: ${root.textContent}`);
+  expect(answer.svg).toMatch(/^<svg\b/);
+  expect(answer.svg).not.toMatch(/\bon[\w:-]*\s*=|javascript:|<(?:script|foreignObject)\b/i);
+  const parsed = new DOMParser().parseFromString(answer.svg, "image/svg+xml");
+  expect(parsed.querySelector("parsererror")).toBeNull();
+  const svg = parsed.documentElement;
+  expect(svg.localName).toBe("svg");
+  expect(svg.querySelectorAll(".node")).toHaveLength(4);
+  for (const id of ["B", "C", "D"]) expect(wrapper(svg, id)).toBeInstanceOf(Element);
+  expect(answer.svg).not.toContain("example.com");
+  for (const node of [svg, ...svg.querySelectorAll("*")]) {
+    for (const name of ["href", "xlink:href"]) {
+      const value = node.getAttribute(name);
+      if (value !== null) expect(value.startsWith("#")).toBe(true);
+    }
+    expect(["script", "foreignobject"]).not.toContain(node.localName.toLowerCase());
+    expect(node.textContent).not.toMatch(/javascript:/i);
+    for (const attribute of node.attributes) {
+      expect(attribute.name).not.toMatch(/^on/i);
+      expect(attribute.value).not.toMatch(/javascript:/i);
+      if (attribute.localName === "href") expect(attribute.value.startsWith("#")).toBe(true);
+    }
+  }
 });

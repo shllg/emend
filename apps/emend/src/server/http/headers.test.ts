@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { APP_CSP, headersForPath } from "./headers.ts";
+import { APP_CSP, HTML_DOC_CSP, headersForPath } from "./headers.ts";
 
 test("content paths default to the exact script-free CSP until a doc is served", () => {
   for (const path of ["/content/key/doc.html", "/content/key/font.woff2", "/content/missing"])
@@ -24,6 +24,9 @@ test("only the exact Mermaid frame path gets the frame CSP and SAMEORIGIN", () =
     "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data:",
     "X-Frame-Options": "SAMEORIGIN",
   });
+  expect(HTML_DOC_CSP).toContain("frame-src 'none'");
+  expect(HTML_DOC_CSP).toContain("connect-src 'none'");
+  expect(HTML_DOC_CSP.match(/'sha256-[^']+'/g)).toHaveLength(1);
   for (const path of ["/", "/r/synthetic", "/assets/mermaid.js", "/mermaid-frame.html/", "/another/mermaid-frame.html"])
     expect(headersForPath(path)).toEqual({ ...shared, "Content-Security-Policy": APP_CSP, "X-Frame-Options": "DENY" });
   expect(headersForPath("/api/v1/reviews")).toEqual({

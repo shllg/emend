@@ -194,6 +194,16 @@ export function sanitizeSvg(source: string): SVGElement {
   }
   return document.importNode(svg, true) as unknown as SVGElement;
 }
+export function canSendSvg(serialized: string): boolean {
+  if (/[^\t\n\r -\ud7ff\ue000-\ufffd\u{10000}-\u{10ffff}]/u.test(serialized)) return false;
+  const parsed = new DOMParser().parseFromString(serialized, "image/svg+xml");
+  const svg = parsed.documentElement;
+  return (
+    !parsed.querySelector("parsererror") &&
+    svg?.localName === "svg" &&
+    svg.namespaceURI === "http://www.w3.org/2000/svg"
+  );
+}
 function parseColors(value: unknown): MermaidColors | undefined {
   if (!value || typeof value !== "object") return;
   const prototype = Object.getPrototypeOf(value);
@@ -423,7 +433,7 @@ export function startFrame(root: HTMLElement) {
   };
   applyTheme(systemTheme());
   let active = true;
-  let pending: { source: string; theme: "dark" | "light"; colors?: MermaidColors } | undefined;
+  let pending: { source: string; theme: "dark" | "light"; colors?: MermaidColors; reply: boolean } | undefined;
   let rendering = false;
   let sequence = 0;
   let natural: ReturnType<typeof naturalSize> | undefined;
@@ -445,14 +455,19 @@ export function startFrame(root: HTMLElement) {
     rendering = true;
     try {
       while (active && pending !== undefined) {
-        const { source, theme, colors } = pending;
+        const { source, theme, colors, reply } = pending;
         pending = undefined;
         applyTheme(theme, colors);
         if (source.length > MAX_SOURCE) {
           fallback("This diagram is too large to draw.", source);
           size();
+          if (reply) window.parent.postMessage({ type: "svg", svg: null }, "*");
           continue;
         }
+        let answer: { type: "svg"; svg: string; width: number; height: number } | { type: "svg"; svg: null } = {
+          type: "svg",
+          svg: null,
+        };
         const staging = document.createElement("div");
         staging.style.visibility = "hidden";
         staging.style.position = "absolute";
@@ -470,6 +485,12 @@ export function startFrame(root: HTMLElement) {
                 restoreCodes(svg, encoded.characters);
                 root.replaceChildren(svg);
                 natural = naturalSize(svg);
+                if (reply && natural) {
+                  svg.setAttribute("width", String(natural.width));
+                  svg.setAttribute("height", String(natural.height));
+                  const serialized = new XMLSerializer().serializeToString(svg);
+                  if (canSendSvg(serialized)) answer = { type: "svg", svg: serialized, ...natural };
+                }
               }
             }
           }
@@ -479,6 +500,7 @@ export function startFrame(root: HTMLElement) {
           staging.remove();
         }
         if (active) size();
+        if (active && pending === undefined && reply) window.parent.postMessage(answer, "*");
       }
     } finally {
       rendering = false;
@@ -497,7 +519,12 @@ export function startFrame(root: HTMLElement) {
     )
       return;
     const theme = "theme" in data && (data.theme === "dark" || data.theme === "light") ? data.theme : systemTheme();
-    pending = { source: data.source, theme, colors: parseColors("colors" in data ? data.colors : undefined) };
+    pending = {
+      source: data.source,
+      theme,
+      colors: parseColors("colors" in data ? data.colors : undefined),
+      reply: "reply" in data && data.reply === "svg",
+    };
     void draw();
   };
   const observer = new ResizeObserver(size);

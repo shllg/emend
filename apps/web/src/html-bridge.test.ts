@@ -15,6 +15,12 @@ function bridge(html: string, customHighlights = true, prepare?: (window: Window
     settings: { enableJavaScriptEvaluation: false },
   });
   window.document.write(html);
+  // Browser Node.textContent includes elements; happy-dom implements it on Element instead.
+  const textContent = Object.getOwnPropertyDescriptor(window.Element.prototype, "textContent")?.get;
+  if (!textContent) throw new Error("Missing textContent getter");
+  vi.spyOn(window.Node.prototype, "textContent", "get").mockImplementation(function (this: Element) {
+    return textContent.call(this);
+  });
   // Unlike browsers, happy-dom's Node baseURI getter cannot run on a Document.
   const baseURI = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(window.Document.prototype), "baseURI")?.get;
   if (!baseURI) throw new Error("Missing document baseURI getter");
@@ -418,14 +424,16 @@ function layoutBridge(
       ? 2
       : 1;
   };
-  const limit = () => Math.max(0, 1100 * scale() - 400);
-  const offset = (element: Element) => (offsets[headings.indexOf(element)] ?? 0) * scale() - (reverse ? limit() : 0);
+  const diagramHeight = () => (b.window.document.querySelector("[data-emend-diagram]") ? 200 : 0);
+  const limit = () => Math.max(0, 1100 * scale() + diagramHeight() - 400);
+  const offset = (element: Element) =>
+    (offsets[headings.indexOf(element)] ?? 0) * scale() + diagramHeight() - (reverse ? limit() : 0);
   const clamp = (top: number) => (reverse ? Math.min(0, Math.max(-limit(), top)) : Math.max(0, Math.min(limit(), top)));
   const visible = vi.spyOn(b.window.Element.prototype, "checkVisibility").mockReturnValue(true);
   const scrollHeight = vi.spyOn(b.window.Element.prototype, "scrollHeight", "get").mockImplementation(function (
     this: Element,
   ) {
-    return nested && this !== container ? 400 : 1100 * scale();
+    return nested && this !== container ? 400 : 1100 * scale() + diagramHeight();
   });
   const bounds = vi.spyOn(b.window.Element.prototype, "getBoundingClientRect").mockImplementation(function (
     this: Element,
@@ -918,3 +926,25 @@ test("the layout fallback lands in the parser-created head of a bare fragment", 
     await b.window.happyDOM.close();
   }
 });
+
+test.each(["pin", "root", "nested", "top"])(
+  "diagram placement and removal preserve the %s reading position",
+  async (kind) => {
+    const html = '<main><pre class="mermaid">graph LR</pre><h2>First</h2><h3>Second</h3><h2>Last</h2></main>';
+    const b = layoutBridge(html, { nested: kind === "nested" });
+    try {
+      if (kind === "pin") b.message({ type: "emend:goto", heading: 0, label: "First", fraction: 0.25 });
+      else if (kind !== "top") b.container.scrollTop = 500;
+      const before = b.container.scrollTop;
+      b.message({ type: "emend:diagram", request: 1, index: 0, svg: "<svg/>", width: 300, height: 200 });
+      expect(b.window.document.querySelector("[data-emend-diagram]")).not.toBeNull();
+      expect(b.container.scrollTop).toBe(kind === "top" ? 0 : before + 200);
+      b.message({ type: "emend:diagram", request: 1, index: 0, svg: null });
+      expect(b.container.scrollTop).toBe(before);
+    } finally {
+      b.restore();
+      await b.window.happyDOM.close();
+      vi.restoreAllMocks();
+    }
+  },
+);

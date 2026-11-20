@@ -50,6 +50,17 @@ to it. Any change here needs `emend-security-reviewer`.
   one of two fixed start tags, never writes the raw query and never overrides a light-only doc.
   The bridge validates every key and value and ignores the whole message on any invalid entry; it
   sets only `data-theme` on the root and one constructed stylesheet in layer `emend`.
+- Diagrams: after ready, the bridge sends `emend:diagrams` with only the text of HTML
+  `pre.mermaid` elements (at most 50, each up to 50,000 characters, 1,000,000 in all), a mode and a
+  width each. An applied theme, a colour-scheme change, and the end or cancel of a transition or
+  animation on an element that holds a diagram check the modes again; only a changed mode sends a
+  new request.
+  The app takes it only from a ready frame that has not navigated away, draws one diagram at a
+  time in one hidden Mermaid frame, never puts the SVG into its own DOM, and relays it as
+  `emend:diagram` only to that frame generation. The bridge accepts only the current request and
+  a valid index, shows the SVG only as a `data:` image in a closed shadow root, and never changes
+  the source `pre`'s text. Comments anchor in that text as in any HTML doc, and it shows below the
+  image while a quote's range touches it.
 - The bridge never changes `location`, handles links to a fragment of the same doc itself, and
   calls DOM methods from their prototypes, so doc markup cannot replace them.
 - Titles and Contents labels pass `cleanDocTitle` on the server and render as isolated text

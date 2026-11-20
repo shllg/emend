@@ -148,13 +148,16 @@
     background: var(--bg-sunken);
     border: 1px solid var(--border-1);
   }
-  pre {
+  pre,
+  [data-emend-diagram] {
     margin: 0 0 calc(var(--space-3) + var(--space-0-5));
     padding: var(--space-3) calc(var(--space-3) + var(--space-0-5));
     border: 1px solid var(--border-1);
     border-radius: var(--radius-md);
     background: var(--bg-sunken);
     overflow: auto;
+  }
+  pre {
     font: var(--type-code);
     font-feature-settings: var(--mono-features);
     text-wrap: nowrap;

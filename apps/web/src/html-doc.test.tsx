@@ -7,6 +7,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { useState } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { HtmlDocFrame } from "./components/reading/HtmlDocFrame.tsx";
+import { DIAGRAM_DRAW_TIMEOUT_MS } from "./components/reading/MermaidBlock.tsx";
+import * as mermaidColors from "./components/reading/mermaid-colors.ts";
 import { draftKey } from "./lib/drafts.ts";
 import { type DocNavigation, FrameToParent, ParentToFrame } from "./lib/frame-messages.ts";
 import { defaultLayout, type LayoutPreferences, layoutStore } from "./lib/layout-store.ts";
@@ -973,4 +975,178 @@ test("image messages over the total character budget open nothing, even with all
   expect(FrameToParent.safeParse(overLimit).success).toBe(false);
   message(overLimit);
   expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+const diagramsJob = {
+  type: "emend:diagrams",
+  request: 1,
+  diagrams: [
+    { source: "\n    graph LR\n      A --> B\n    ", mode: "light", width: 100 },
+    { source: "graph TD; C --> D", mode: "dark", width: 10000 },
+  ],
+};
+const svgAnswer = { type: "svg", svg: '<svg xmlns="http://www.w3.org/2000/svg"/>', width: 320, height: 160 };
+function renderFrame() {
+  const frame = screen.getByTitle("HTML diagram renderer");
+  if (!(frame instanceof HTMLIFrameElement)) throw new Error("Missing render frame");
+  const post = vi.fn();
+  Object.defineProperty(frame, "contentWindow", { configurable: true, value: { postMessage: post } });
+  const reply = (data: unknown = svgAnswer) =>
+    fireEvent(window, new MessageEvent("message", { source: frame.contentWindow, data }));
+  return { frame, post, reply };
+}
+
+test.each(["emend", "custom", undefined] as const)(
+  "%s diagrams render sequentially with matching theme colours only",
+  (look) => {
+    setThemePick("light");
+    const colors = {
+      background: "#ffffff",
+      surface: "#eeeeee",
+      text: "#111111",
+      text2: "#222222",
+      line: "#333333",
+      border: "#444444",
+      accentBg: "#555555",
+      accent: "#666666",
+    };
+    const read = vi.spyOn(mermaidColors, "readMermaidColors").mockReturnValue(colors);
+    const view = mount([], undefined, undefined, look);
+    view.message(diagramsJob);
+    expect(screen.queryByTitle("HTML diagram renderer")).toBeNull();
+    view.message({ type: "emend:ready" });
+    view.message(diagramsJob, null);
+    expect(screen.queryByTitle("HTML diagram renderer")).toBeNull();
+    view.message(diagramsJob);
+    const draw = renderFrame();
+    expect(draw.frame.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(draw.frame.getAttribute("aria-hidden")).toBe("true");
+    expect(draw.frame.tabIndex).toBe(-1);
+    expect(draw.frame.hasAttribute("loading")).toBe(false);
+    expect(draw.frame.style).toMatchObject({
+      visibility: "hidden",
+      position: "fixed",
+      pointerEvents: "none",
+      width: "240px",
+    });
+    expect(draw.frame.style.display).not.toBe("none");
+    view.post.mockClear();
+    draw.reply(); // No request before load.
+    expect(view.post).not.toHaveBeenCalled();
+    fireEvent.load(draw.frame);
+    expect(draw.post).toHaveBeenCalledExactlyOnceWith(
+      {
+        type: "render",
+        source: "graph LR\n  A --> B",
+        theme: "light",
+        reply: "svg",
+        ...(look === "emend" ? { colors } : {}),
+      },
+      "*",
+    );
+    view.message(svgAnswer);
+    for (const data of [
+      { type: "size", height: 100 },
+      { ...svgAnswer, extra: true },
+      { ...svgAnswer, width: 1.5 },
+      { ...svgAnswer, svg: "<script/>" },
+    ])
+      draw.reply(data);
+    expect(view.post).not.toHaveBeenCalled();
+    draw.reply();
+    expect(view.post).toHaveBeenCalledExactlyOnceWith(
+      { ...svgAnswer, type: "emend:diagram", request: 1, index: 0 },
+      "*",
+    );
+    expect(screen.getByTitle("HTML diagram renderer")).toBe(draw.frame);
+    expect(draw.frame.style.width).toBe("2400px");
+    expect(draw.post).toHaveBeenLastCalledWith(
+      { type: "render", source: "graph TD; C --> D", theme: "dark", reply: "svg" },
+      "*",
+    );
+    expect(read).toHaveBeenCalledTimes(look === "emend" ? 1 : 0);
+    draw.reply({ type: "svg", svg: null });
+    expect(view.post).toHaveBeenLastCalledWith({ type: "emend:diagram", request: 1, index: 1, svg: null }, "*");
+    expect(screen.queryByTitle("HTML diagram renderer")).toBeNull();
+    expect(view.container.querySelector("svg:not([class])")).toBeNull();
+  },
+);
+
+test("diagram timeout reports null and gives the next diagram a fresh frame", () => {
+  vi.useFakeTimers();
+  try {
+    const view = mount();
+    view.message({ type: "emend:ready" });
+    view.message(diagramsJob);
+    const first = renderFrame();
+    act(() => vi.advanceTimersByTime(DIAGRAM_DRAW_TIMEOUT_MS - 1));
+    fireEvent.load(first.frame);
+    view.post.mockClear();
+    act(() => vi.advanceTimersByTime(1));
+    expect(view.post).toHaveBeenCalledExactlyOnceWith({ type: "emend:diagram", request: 1, index: 0, svg: null }, "*");
+    const next = renderFrame();
+    expect(next.frame).not.toBe(first.frame);
+    first.reply();
+    expect(view.post).toHaveBeenCalledTimes(1);
+    fireEvent.load(next.frame);
+    expect(next.post).toHaveBeenLastCalledWith(
+      { type: "render", source: diagramsJob.diagrams[1]?.source, theme: "dark", reply: "svg" },
+      "*",
+    );
+    next.reply();
+    act(() => vi.advanceTimersByTime(DIAGRAM_DRAW_TIMEOUT_MS));
+    expect(view.post).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test.each(["request", "mode", "theme"])("a new diagram %s restarts the whole job", (change) => {
+  setThemePick("light");
+  const view = mount([], undefined, undefined, "emend");
+  view.message({ type: "emend:ready" });
+  view.message(diagramsJob);
+  const first = renderFrame();
+  fireEvent.load(first.frame);
+  first.reply();
+  if (change === "request") view.message({ ...diagramsJob, request: 2 });
+  else if (change === "mode") act(() => setThemePick("dark"));
+  else act(() => selectCustomTheme({ ...customTheme, base: "light" }));
+  const next = renderFrame();
+  expect(next.frame).not.toBe(first.frame);
+  view.post.mockClear();
+  first.reply();
+  expect(view.post).not.toHaveBeenCalled();
+  fireEvent.load(next.frame);
+  expect(next.post).toHaveBeenLastCalledWith(
+    expect.objectContaining({ source: "graph LR\n  A --> B", reply: "svg" }),
+    "*",
+  );
+  next.reply();
+  expect(view.post).toHaveBeenLastCalledWith(
+    { ...svgAnswer, type: "emend:diagram", request: change === "request" ? 2 : 1, index: 0 },
+    "*",
+  );
+});
+
+test.each(["away", "generation", "unmount"])("diagram jobs stop on content %s", (change) => {
+  const view = mount();
+  fireEvent.load(view.frame);
+  view.message({ type: "emend:ready" });
+  view.message(diagramsJob);
+  const draw = renderFrame();
+  fireEvent.load(draw.frame);
+  if (change === "away") fireEvent.load(view.frame);
+  else if (change === "generation") view.fragment("new");
+  else view.unmount();
+  view.post.mockClear();
+  draw.reply();
+  expect(view.post).not.toHaveBeenCalled();
+  expect(screen.queryByTitle("HTML diagram renderer")).toBeNull();
+  if (change === "away") {
+    view.message(diagramsJob);
+    expect(screen.queryByTitle("HTML diagram renderer")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: `Reload ${path}` }));
+    expect(screen.queryByTitle("HTML diagram renderer")).toBeNull();
+  }
 });

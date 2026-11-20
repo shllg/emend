@@ -225,6 +225,16 @@ test("pub defaults use tokens, stay inside one emend layer and define the docume
     expect(css).toMatch(new RegExp(`\\.${name}\\b`));
   expect(css).toContain("font: var(--type-prose)");
   expect(css).toContain("background: var(--bg-reading)");
+  const diagramBox = /pre,\s*\[data-emend-diagram\]\s*\{([^}]+)\}/.exec(css)?.[1] ?? "";
+  for (const property of [
+    "margin:",
+    "padding:",
+    "border:",
+    "border-radius:",
+    "background: var(--bg-sunken)",
+    "overflow: auto",
+  ])
+    expect(diagramBox).toContain(property);
   const link = /(?:^|\s)a\s*\{([^}]+)\}/.exec(css)?.[1] ?? "";
   expect(link).toContain("text-decoration: underline;");
   expect(link).toContain("text-decoration-thickness: 1px;");

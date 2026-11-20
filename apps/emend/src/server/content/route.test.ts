@@ -26,7 +26,7 @@ const docCsp = csp.replace(
   `script-src 'sha256-${createHash("sha256").update(BRIDGE_SOURCE).digest("base64")}'`,
 );
 const source =
-  '<body><p>Synthetic seeds</p><link rel="stylesheet" href="shared.css"><script src="classic.js"></script><img src="seed.svg"></body>';
+  '<body><p>Synthetic seeds</p><pre class="mermaid" onclick="alert(1)">flowchart LR; A --&gt; B</pre><link rel="stylesheet" href="shared.css"><script src="classic.js"></script><img src="seed.svg"></body>';
 const bigCss = "/* synthetic */\n".padEnd(200 * 1024, " ");
 const bigSha = createHash("sha256").update(bigCss).digest("hex");
 beforeEach(async () => {
@@ -99,6 +99,13 @@ function request(path: string, method = "GET", headers: Record<string, string> =
 }
 function headers(response: Response, asset = false) {
   expect(response.headers.get("Content-Security-Policy")).toBe(response.ok && !asset ? docCsp : csp);
+  if (response.ok && !asset) {
+    expect(response.headers.get("Content-Security-Policy")).toContain("frame-src 'none'");
+    expect(response.headers.get("Content-Security-Policy")).toContain("connect-src 'none'");
+    expect(response.headers.get("Content-Security-Policy")?.match(/script-src ([^;]+)/)?.[1]).toBe(
+      `'sha256-${createHash("sha256").update(BRIDGE_SOURCE).digest("base64")}'`,
+    );
+  }
   expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
   expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
   expect(response.headers.get("Cross-Origin-Resource-Policy")).toBe(asset ? "cross-origin" : "same-origin");
