@@ -39,6 +39,7 @@ const items: InboxItem[] = ids.map((id, index) => ({
   movedTo: null,
   list: "active",
   groupId: null,
+  pinnedAt: null,
   snoozed: false,
   snoozedUntil: null,
   activeUntil: null,
@@ -867,7 +868,7 @@ test("? lists all commands, their effective keys, fixed keys and settings link",
   const dialog = await screen.findByRole("alertdialog", { name: "Keyboard shortcuts" });
   for (const command of shortcutGroups.flatMap((group) => group.commands))
     expect(within(dialog).getByText(shortcutLabels[command])).toBeTruthy();
-  expect(within(dialog).getByText("Open Active row 1 to 9")).toBeTruthy();
+  expect(within(dialog).getByText("Open row 1 to 9 of Pinned and Active")).toBeTruthy();
   expect(within(dialog).getByText("x")).toBeTruthy();
   expect(within(dialog).getByText("Off")).toBeTruthy();
   expect(within(dialog).getByText("⌘↵ / Ctrl ↵: save a comment, or send from the instructions field")).toBeTruthy();
@@ -967,9 +968,10 @@ test("phone layout never handles shortcuts", async () => {
   await screen.findByRole("button", { name: "Approve" });
   for (const key of Object.values(SHORTCUT_DEFAULTS))
     expect(
-      press(key === "mod+shift+p" ? "P" : key === "shift+a" ? "A" : key, {
-        shiftKey: key === "shift+a" || key === "mod+shift+p",
-        ctrlKey: key === "mod+shift+p",
+      press(key.includes("+") ? key.slice(-1).toUpperCase() : key, {
+        shiftKey: key.includes("shift+"),
+        ctrlKey: key.startsWith("mod+"),
+        altKey: key.startsWith("alt+"),
       }).defaultPrevented,
     ).toBe(false);
   expect(history.location.pathname).toBe(`/r/${ids[0]}`);

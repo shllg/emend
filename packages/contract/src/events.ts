@@ -16,6 +16,7 @@ export const ReviewEventName = z.enum([
   "bin",
   "restore",
   "groups",
+  "pins",
   "themes",
 ]);
 export type ReviewEventName = z.infer<typeof ReviewEventName>;
@@ -40,6 +41,7 @@ export const ReviewEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("bin"), ...review }),
   z.object({ type: z.literal("restore"), ...review }),
   z.object({ type: z.literal("groups"), reviewId: z.uuid().optional() }),
+  z.object({ type: z.literal("pins"), reviewId: z.uuid() }),
   z.object({ type: z.literal("themes") }),
 ]);
 export type ReviewEvent = z.infer<typeof ReviewEvent>;

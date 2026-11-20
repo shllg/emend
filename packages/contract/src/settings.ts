@@ -40,6 +40,7 @@ export const SHORTCUT_DEFAULTS = {
   "review.instructions": "s",
   "review.approve": "shift+a",
   "review.snooze": "z",
+  "review.pin": "shift+p",
   "shortcuts.show": "?",
   "palette.open": "mod+shift+p",
 } as const;
@@ -72,6 +73,7 @@ export const ShortcutCommand = z.enum([
   "review.instructions",
   "review.approve",
   "review.snooze",
+  "review.pin",
   "shortcuts.show",
   "palette.open",
 ]);

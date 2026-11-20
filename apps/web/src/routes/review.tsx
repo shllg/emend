@@ -955,6 +955,7 @@ function LoadedReview({
               lifecycle={{
                 title: review.title,
                 groupId: review.groupId,
+                pinned: review.pinnedAt !== null,
                 state: review.state,
                 snoozed: review.snoozed,
                 snoozedUntil: review.snoozedUntil,

@@ -43,6 +43,7 @@ import {
   placements,
   repos,
   reviewGroupMembers,
+  reviewPins,
   reviews,
   revisions,
   sends,
@@ -99,6 +100,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
       .select({
         review: reviews,
         groupId: reviewGroupMembers.groupId,
+        pinnedAt: reviewPins.createdAt,
         origin: { id: instances.id, name: instances.name },
         repo: repos.key,
         repoName: repos.name,
@@ -110,6 +112,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
         and(eq(reviewGroupMembers.ownerId, ownerId), eq(reviewGroupMembers.reviewId, reviews.id)),
       )
       .innerJoin(latest, eq(latest.reviewId, reviews.id))
+      .leftJoin(reviewPins, and(eq(reviewPins.ownerId, ownerId), eq(reviewPins.reviewId, reviews.id)))
       .innerJoin(instances, eq(instances.id, reviews.originInstanceId))
       .leftJoin(repos, and(eq(repos.ownerId, ownerId), eq(repos.id, reviews.repoId)))
       .where(
@@ -124,6 +127,25 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
       .orderBy(...order)
       .limit(limit)
       .all();
+  let remainingPins: number = LIMITS.pins;
+  const selectBlock = async (where: SQL | undefined, order: SQL[]) => {
+    const rows = await select(where, order, LIMITS.inboxItems);
+    if (remainingPins === 0 || rows.length < LIMITS.inboxItems) return rows;
+    const listed = new Set(rows.map(({ review }) => review.id));
+    const pinned = await select(
+      and(
+        where,
+        isNotNull(reviewPins.reviewId),
+        isNull(reviews.movedToUrl),
+        listed.size ? notInArray(reviews.id, [...listed]) : undefined,
+      ),
+      order,
+      remainingPins,
+    );
+    const overflow = pinned.filter(({ review }) => !listed.has(review.id));
+    remainingPins -= overflow.length;
+    return [...rows, ...overflow];
+  };
   const asleep = and(isNotNull(reviews.snoozedAt), or(isNull(reviews.snoozedUntil), gt(reviews.snoozedUntil, now)));
   const isOpen = eq(reviews.state, "open");
   const recentlyApproved = and(
@@ -136,11 +158,10 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
     review.state === "open" ? Math.max(review.updatedAt, review.snoozedUntil ?? 0) : review.updatedAt;
   const active =
     reviewId === undefined
-      ? await select(
-          and(isNull(reviewGroupMembers.groupId), isOpen, not(asleep as SQL)),
-          [sql`max(${reviews.updatedAt}, coalesce(${reviews.snoozedUntil}, 0)) desc`, asc(reviews.id)],
-          LIMITS.inboxItems,
-        )
+      ? await selectBlock(and(isNull(reviewGroupMembers.groupId), isOpen, not(asleep as SQL)), [
+          sql`max(${reviews.updatedAt}, coalesce(${reviews.snoozedUntil}, 0)) desc`,
+          asc(reviews.id),
+        ])
       : [];
   const places = Math.min(approvedActiveLimit, LIMITS.inboxItems - active.length);
   if (reviewId === undefined && approvedActiveHours > 0 && places > 0)
@@ -158,28 +179,23 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
     reviewId === undefined
       ? [
           ...active,
-          ...(await select(
-            and(isNull(reviewGroupMembers.groupId), isOpen, asleep),
-            [asc(sql`${reviews.snoozedUntil} is null`), asc(reviews.snoozedUntil), asc(reviews.id)],
-            LIMITS.inboxItems,
-          )),
-          ...(await select(
-            isNotNull(reviewGroupMembers.groupId),
-            [
-              sql`case when ${reviews.state} = 'open' and ${reviews.snoozedUntil} <= ${now}
+          ...(await selectBlock(and(isNull(reviewGroupMembers.groupId), isOpen, asleep), [
+            asc(sql`${reviews.snoozedUntil} is null`),
+            asc(reviews.snoozedUntil),
+            asc(reviews.id),
+          ])),
+          ...(await selectBlock(isNotNull(reviewGroupMembers.groupId), [
+            sql`case when ${reviews.state} = 'open' and ${reviews.snoozedUntil} <= ${now}
               then max(${reviews.updatedAt}, ${reviews.snoozedUntil}) else ${reviews.updatedAt} end desc`,
-              asc(reviews.id),
-            ],
-            LIMITS.inboxItems,
-          )),
-          ...(await select(
+            asc(reviews.id),
+          ])),
+          ...(await selectBlock(
             and(
               isNull(reviewGroupMembers.groupId),
               ne(reviews.state, "open"),
               activeApprovedIds.size ? notInArray(reviews.id, [...activeApprovedIds]) : undefined,
             ),
             [desc(reviews.updatedAt), asc(reviews.id)],
-            LIMITS.inboxItems,
           )),
         ]
       : await select(eq(reviews.id, reviewId), [asc(reviews.id)], 1);
@@ -295,7 +311,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
     )
     .groupBy(agentWaiters.reviewId);
   const waitingIds = new Set(directWaits.map((row) => row.reviewId));
-  const items = rows.map(({ review, origin, repo, repoName, newestRevision, groupId }) => {
+  const items = rows.map(({ review, origin, repo, repoName, newestRevision, groupId, pinnedAt }) => {
     const snoozed = review.state === "open" && snoozeInEffect(review, now);
     const activeUntil =
       approvedActiveHours > 0 &&
@@ -307,6 +323,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
     return {
       id: review.id,
       groupId,
+      pinnedAt: pinnedAt === null || review.movedToUrl !== null ? null : new Date(pinnedAt).toISOString(),
       title: review.title,
       origin,
       repo,

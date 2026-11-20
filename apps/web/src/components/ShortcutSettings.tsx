@@ -165,7 +165,7 @@ function JumpShortcutSetting({ keys }: { keys: KeysSetting }) {
     <fieldset aria-labelledby={`${id}-label`} className="border-b border-line-1 py-3">
       <div className="flex flex-wrap items-center gap-3">
         <span id={`${id}-label`} className="min-w-0 flex-1 text-14">
-          Open Active row 1 to 9
+          Open row 1 to 9 of Pinned and Active
         </span>
         {label === "Off" ? <span className="text-14">Off</span> : <Kbd>{label}</Kbd>}
         <Button

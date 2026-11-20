@@ -81,7 +81,8 @@ test("all three GETs parse their schemas and enforce reviewer scope and owner is
   const approved = await f.request(`/reviews/${f.reviewId}/sends`, "POST", { kind: "approve", revision: 1 });
   expect(approved.status).toBe(201);
   const own = contract.InboxList.parse(await (await get()).json());
-  expect(own.items).toMatchObject([{ id: f.reviewId, state: "approved", list: "active" }]);
+  expect(own.items).toMatchObject([{ id: f.reviewId, state: "approved", list: "active", pinnedAt: null }]);
+  expect(await (await get(`/${f.reviewId}`)).json()).toMatchObject({ pinnedAt: null });
   for (const [path, schema] of [
     ["", contract.InboxList],
     [`/${f.reviewId}`, contract.ReviewView],
@@ -148,8 +149,8 @@ test("inbox sorts newest first and caps the result at 200", async () => {
   selects = 0;
   const response = await get();
   expect(response.status).toBe(200);
-  // A full Active list skips the one approval-selection query; aggregates stay independent of row count.
-  expect(selects).toBe(singleReviewSelects - 1);
+  // A full Active list runs its one pinned-overflow query and skips the one approval-selection query; aggregates stay independent of row count.
+  expect(selects).toBe(singleReviewSelects);
   const list = contract.InboxList.parse(await response.json());
   expect(list.items).toHaveLength(contract.LIMITS.inboxItems);
   expect(list.items[0]?.title).toBe("Review 201");

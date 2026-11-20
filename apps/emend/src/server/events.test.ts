@@ -95,23 +95,26 @@ test("waiting covers concurrent takes and 35 seconds of grace, emitting only tra
   expect(owner.mock.calls.map(([event]) => event)).toEqual(changes);
   expect(foreign).not.toHaveBeenCalled();
 });
-test("a viewed event without a revision preserves the waiting revision through expiry", async () => {
-  vi.useFakeTimers();
-  onTestFinished(() => {
-    vi.useRealTimers();
-  });
-  const events = new ReviewEvents(Date.now);
-  const reviewId = randomUUID();
-  const listener = vi.fn();
-  events.subscribe("owner", reviewId, listener);
-  const end = events.beginWaiting("owner", reviewId, 2);
-  events.emit("owner", { type: "viewed", reviewId });
-  expect(listener).toHaveBeenLastCalledWith({ type: "viewed", reviewId });
-  end();
-  await vi.advanceTimersByTimeAsync(35000);
-  expect(events.agentWaiting("owner", reviewId)).toBe(false);
-  expect(listener).toHaveBeenLastCalledWith({ type: "waiting", reviewId, revision: 2 });
-});
+test.each(["viewed", "pins"] as const)(
+  "a %s event without a revision preserves the waiting revision through expiry",
+  async (type) => {
+    vi.useFakeTimers();
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const events = new ReviewEvents(Date.now);
+    const reviewId = randomUUID();
+    const listener = vi.fn();
+    events.subscribe("owner", reviewId, listener);
+    const end = events.beginWaiting("owner", reviewId, 2);
+    events.emit("owner", { type, reviewId });
+    expect(listener).toHaveBeenLastCalledWith({ type, reviewId });
+    end();
+    await vi.advanceTimersByTimeAsync(35000);
+    expect(events.agentWaiting("owner", reviewId)).toBe(false);
+    expect(listener).toHaveBeenLastCalledWith({ type: "waiting", reviewId, revision: 2 });
+  },
+);
 test("both stream kinds share the 32-stream owner cap and release slots on cancellation and abort", async () => {
   const f = await mailboxFixture();
   onTestFinished(() => f.cleanup());
@@ -387,4 +390,29 @@ test("owner-wide groups events reach only their owner; review listeners receive 
   expect(own).toHaveBeenCalledExactlyOnceWith({ type: "groups", reviewId: id });
   expect(another).not.toHaveBeenCalled();
   expect(foreign).not.toHaveBeenCalled();
+});
+
+test("pins reach the owner's global and named review listeners only and do not wake Send waiters", async () => {
+  const events = new ReviewEvents(Date.now);
+  const reviewId = randomUUID();
+  const all = vi.fn();
+  const own = vi.fn();
+  const another = vi.fn();
+  const foreign = vi.fn();
+  events.subscribe("owner", null, all);
+  events.subscribe("owner", reviewId, own);
+  events.subscribe("owner", randomUUID(), another);
+  events.subscribe("foreign", null, foreign);
+  events.subscribe("foreign", reviewId, foreign);
+  const wait = events.waitForSend("owner", reviewId, 25);
+  onTestFinished(() => wait.cancel());
+  const woke = vi.fn();
+  void wait.promise.then(woke);
+  events.emit("owner", { type: "pins", reviewId });
+  expect(all).toHaveBeenCalledExactlyOnceWith({ type: "pins", reviewId });
+  expect(own).toHaveBeenCalledExactlyOnceWith({ type: "pins", reviewId });
+  expect(another).not.toHaveBeenCalled();
+  expect(foreign).not.toHaveBeenCalled();
+  await Promise.resolve();
+  expect(woke).not.toHaveBeenCalled();
 });

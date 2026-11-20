@@ -31,6 +31,10 @@ const MESSAGES: Record<ErrorCode, string> = {
 const DETAILS = {
   group_exists: { code: "invalid_state", message: "A group with this name exists." },
   group_limit: { code: "invalid_state", message: "You have the most groups allowed. Delete one first." },
+  pin_limit: {
+    code: "invalid_state",
+    message: "You have the most pins allowed, pins in the bin included. Unpin one first.",
+  },
   bin_changed: { code: "invalid_state", message: "The bin changed. Check it and try again." },
   import_aborted: { code: "invalid_request", message: "The import was cancelled." },
   import_busy: { code: "rate_limited", message: "The server is busy importing; try again." },

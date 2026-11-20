@@ -191,7 +191,7 @@ function GlobalShortcuts({ keys }: { keys: Record<ShortcutCommand, KeyBinding> }
             ))}
             {group.jump && (
               <div className="flex items-center justify-between gap-3">
-                <dt>Open Active row 1 to 9</dt>
+                <dt>Open row 1 to 9 of Pinned and Active</dt>
                 <dd>{jumpLabel === "Off" ? "Off" : <Kbd>{jumpLabel}</Kbd>}</dd>
               </div>
             )}

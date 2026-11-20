@@ -17,6 +17,7 @@ const lifecycle: ReviewLifecycle = {
   snoozed: false,
   snoozedUntil: null,
   groupId: null,
+  pinned: false,
   onDeleted: vi.fn(),
 };
 let client: QueryClient;
@@ -68,10 +69,10 @@ function sent() {
 }
 
 test.each([
-  ["open", false, ["Snooze", "Retire", "Move to group…", "Delete"]],
-  ["open", true, ["Snooze again", "Unsnooze", "Retire", "Move to group…", "Delete"]],
-  ["settled", false, ["Reopen", "Move to group…", "Delete"]],
-  ["approved", false, ["Move to group…", "Delete"]],
+  ["open", false, ["Snooze", "Retire", "Pin", "Move to group…", "Delete"]],
+  ["open", true, ["Snooze again", "Unsnooze", "Retire", "Pin", "Move to group…", "Delete"]],
+  ["settled", false, ["Reopen", "Pin", "Move to group…", "Delete"]],
+  ["approved", false, ["Pin", "Move to group…", "Delete"]],
 ] as const)("the %s review (snoozed %s) offers %j", async (state, snoozed, expected) => {
   mount({ lifecycle: { state, snoozed, snoozedUntil: snoozed ? "2026-11-05T09:00:00.000Z" : null } });
   openMenu();
@@ -143,6 +144,53 @@ test("unsnooze and reopen call their routes without a body", async () => {
   await choose("Reopen");
   await screen.findByText("Review reopened");
   expect(sent()).toEqual([["POST", `${base}/reopen`, undefined]]);
+});
+
+test.each([false, true])(
+  "pinning (already pinned: %s) refreshes the review and inbox and shows a toast",
+  async (pinned) => {
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    mount({ lifecycle: { pinned } });
+    await choose(pinned ? "Unpin" : "Pin");
+    await screen.findByText(pinned ? "Unpinned" : "Pinned");
+    expect(sent()).toEqual([["PUT", `${base}/pin`, JSON.stringify({ pinned: !pinned })]]);
+    expect(invalidate.mock.calls.map(([options]) => options?.queryKey)).toEqual([["inbox"], ["review", reviewId]]);
+  },
+);
+
+test("a pin failure shows the server message and leaves Pin available", async () => {
+  fetchMock.mockResolvedValueOnce(
+    Response.json({ error: { code: "invalid_state", message: "Pin limit reached." } }, { status: 409 }),
+  );
+  mount();
+  await choose("Pin");
+  await screen.findByText("Pin limit reached.");
+  openMenu();
+  expect(await screen.findByRole("menuitem", { name: "Pin" })).toBeTruthy();
+});
+
+test("a pending pin disables more actions until it finishes", async () => {
+  const response = Promise.withResolvers<Response>();
+  fetchMock.mockReturnValueOnce(response.promise);
+  mount();
+  await choose("Pin");
+  const trigger = screen.getByRole("button", { name: "More review actions" });
+  await waitFor(() => expect(trigger.getAttribute("aria-busy")).toBe("true"));
+  openMenu();
+  expect(screen.queryByRole("menu")).toBeNull();
+  expect(sent()).toHaveLength(1);
+  await act(async () => response.resolve(new Response(null, { status: 204 })));
+  await waitFor(() => expect(trigger.getAttribute("aria-busy")).toBe("false"));
+});
+
+test("a review moved to the bin cannot then be pinned", async () => {
+  mount();
+  await choose("Delete");
+  fireEvent.click(await screen.findByRole("button", { name: "Move to bin" }));
+  await waitFor(() => expect(lifecycle.onDeleted).toHaveBeenCalledOnce());
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  await choose("Pin");
+  expect(sent().filter(([method]) => method === "PUT")).toEqual([]);
 });
 
 test("retire without unsent comments sends an empty body", async () => {

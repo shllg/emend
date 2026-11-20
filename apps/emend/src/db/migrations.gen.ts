@@ -312,5 +312,14 @@ export const MIGRATIONS: readonly { tag: string; when: number; hash: string; sta
     "statements": [
       "ALTER TABLE `files` ADD `color_scheme` text;"
     ]
+  },
+  {
+    "tag": "0024_cute_rattler",
+    "when": 1795125366662,
+    "hash": "df0b5dbd7ed0076b08adacb0dea401f42117602ad900a8b5ccd6c09af81694e8",
+    "statements": [
+      "CREATE TABLE `review_pins` (\n\t`owner_id` text NOT NULL,\n\t`review_id` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\tPRIMARY KEY(`owner_id`, `review_id`),\n\tFOREIGN KEY (`owner_id`) REFERENCES `owners`(`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`owner_id`,`review_id`) REFERENCES `reviews`(`owner_id`,`id`) ON UPDATE no action ON DELETE no action\n);",
+      "CREATE INDEX `review_pins_owner_idx` ON `review_pins` (`owner_id`);"
+    ]
   }
 ];

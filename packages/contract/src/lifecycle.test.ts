@@ -39,6 +39,7 @@ const item = {
   movedTo: null,
   list: "active",
   groupId: null,
+  pinnedAt: null,
   snoozed: false,
   snoozedUntil: null,
   activeUntil: null,
@@ -114,8 +115,8 @@ test("the inbox requires a server clock as an ISO datetime", () => {
   expect(InboxList.parse(list)).toEqual({ ...list, groups: [] });
 });
 
-test("the inbox cap applies per list", () => {
-  const items = Array.from({ length: LIMITS.inboxItems * 4 }, () => item);
+test("the inbox cap includes four blocks and each block's pins beyond its cap", () => {
+  const items = Array.from({ length: LIMITS.inboxItems * 4 + LIMITS.pins }, () => item);
   const list = { approvedActiveHours: 12, approvedActiveLimit: 5, serverTime: "2026-11-04T10:00:00.000Z", items };
   expect(InboxList.safeParse(list).success).toBe(true);
   expect(InboxList.safeParse({ ...list, items: [...items, item] }).success).toBe(false);

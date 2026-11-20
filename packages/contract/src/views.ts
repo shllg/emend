@@ -54,6 +54,7 @@ export const InboxItem = z.object({
   movedTo: z.url({ protocol: /^https?$/ }).nullable(),
   list: ReviewList,
   groupId: z.uuid().nullable().default(null),
+  pinnedAt: z.iso.datetime().nullable().default(null),
   snoozed: z.boolean(),
   snoozedUntil: z.iso.datetime().nullable(),
   activeUntil: z.iso.datetime().nullable(),
@@ -66,7 +67,7 @@ export const InboxList = z.object({
   groups: z.array(InboxListGroup).max(LIMITS.groups).default([]),
   approvedActiveHours: ApprovedActiveHours,
   approvedActiveLimit: ApprovedActiveLimit,
-  items: z.array(InboxItem).max(LIMITS.inboxItems * (ReviewList.options.length + 1)),
+  items: z.array(InboxItem).max(LIMITS.inboxItems * (ReviewList.options.length + 1) + LIMITS.pins),
   serverTime: z.iso.datetime(),
 });
 export type InboxList = z.infer<typeof InboxList>;

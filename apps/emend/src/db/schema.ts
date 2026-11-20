@@ -178,6 +178,21 @@ export const reviewGroupMembers = sqliteTable(
   ],
 );
 
+/** A pinned review or pub; its time orders the Pinned section. */
+export const reviewPins = sqliteTable(
+  "review_pins",
+  {
+    ownerId: ownerId(),
+    reviewId: text("review_id").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.ownerId, t.reviewId] }),
+    index("review_pins_owner_idx").on(t.ownerId),
+    foreignKey({ columns: [t.ownerId, t.reviewId], foreignColumns: [reviews.ownerId, reviews.id] }),
+  ],
+);
+
 export const revisions = sqliteTable(
   "revisions",
   {

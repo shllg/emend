@@ -6,6 +6,7 @@ export const LIMITS = {
   themeProblems: 20,
   inboxItems: 200,
   groups: 50,
+  pins: 50,
   groupNameChars: 80,
   agentReviews: 100,
   binItems: 200,

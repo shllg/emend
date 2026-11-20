@@ -77,6 +77,7 @@ test("migrations apply to an empty file and a second run applies nothing", async
       "repos",
       "review_group_members",
       "review_groups",
+      "review_pins",
       "review_tombstones",
       "reviews",
       "revisions",

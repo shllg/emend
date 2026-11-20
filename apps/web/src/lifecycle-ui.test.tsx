@@ -38,6 +38,7 @@ const item: InboxItem = {
   movedTo: null,
   list: "active",
   groupId: null,
+  pinnedAt: null,
   snoozed: false,
   snoozedUntil: null,
   activeUntil: null,
