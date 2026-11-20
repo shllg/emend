@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { constants, type Stats } from "node:fs";
+import { type BigIntStats, constants, type Stats } from "node:fs";
 import { type FileHandle, lstat, open, rename, unlink } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,7 +16,7 @@ const usage = "Usage: emend look <file.html>... [--theme <name> | --no-theme].";
 const sameFile = (before: Stats, after: Stats) =>
   after.isFile() && before.dev === after.dev && before.ino === after.ino;
 
-async function readHtml(path: string, arg: string): Promise<{ text: string; info: Stats }> {
+async function readHtml(path: string, arg: string): Promise<{ text: string; info: Stats; version: BigIntStats }> {
   let info: Stats;
   try {
     info = await lstat(path);
@@ -29,13 +29,22 @@ async function readHtml(path: string, arg: string): Promise<{ text: string; info
   if (info.size > LIMITS.htmlDocBytes) throw tooLarge();
   let handle: FileHandle | undefined;
   let bytes: Buffer;
+  let version: BigIntStats;
   try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const opened = await handle.stat();
     if (!sameFile(info, opened)) throw new CliError(`cannot read ${arg}`);
-    if (opened.size > LIMITS.htmlDocBytes) throw tooLarge();
-    bytes = await handle.readFile();
-    if (bytes.byteLength > LIMITS.htmlDocBytes) throw tooLarge();
+    version = await handle.stat({ bigint: true });
+    if (version.size > BigInt(LIMITS.htmlDocBytes)) throw tooLarge();
+    const changed = () => new CliError(`cannot read ${arg}: it changed while emend look read it`);
+    bytes = Buffer.alloc(Number(version.size));
+    let offset = 0;
+    while (offset < bytes.length) {
+      const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+      if (!bytesRead) throw changed();
+      offset += bytesRead;
+    }
+    if ((await handle.read(Buffer.alloc(1), 0, 1, offset)).bytesRead) throw changed();
     await handle.close();
     handle = undefined;
   } catch (error) {
@@ -47,13 +56,13 @@ async function readHtml(path: string, arg: string): Promise<{ text: string; info
   try {
     const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
     if (text.includes("\0")) throw new Error("NUL in HTML");
-    return { text, info };
+    return { text, info, version };
   } catch {
     throw new CliError(`${arg} is not UTF-8 text`);
   }
 }
 
-async function writeHtml(path: string, arg: string, text: string, info: Stats): Promise<void> {
+async function writeHtml(path: string, arg: string, text: string, info: Stats, version: BigIntStats): Promise<void> {
   const temporary = join(dirname(path), `.emend-look-${randomUUID()}.tmp`);
   let handle: FileHandle | undefined;
   let created = false;
@@ -77,7 +86,16 @@ async function writeHtml(path: string, arg: string, text: string, info: Stats): 
     await handle.sync();
     await handle.close();
     handle = undefined;
-    if (!sameFile(info, await lstat(path))) throw new Error("HTML file replaced");
+    const current = await lstat(path, { bigint: true });
+    if (
+      !current.isFile() ||
+      current.dev !== version.dev ||
+      current.ino !== version.ino ||
+      current.size !== version.size ||
+      current.mtimeNs !== version.mtimeNs ||
+      current.ctimeNs !== version.ctimeNs
+    )
+      throw new CliError(`cannot write ${arg}: it changed while emend look ran`);
     await rename(temporary, path);
   } catch (error) {
     await handle?.close().catch(() => {});
@@ -139,7 +157,7 @@ export async function lookCommand(
   for (const file of files) {
     const arg = escapeReference(file);
     const path = resolve(options.cwd ?? process.cwd(), file);
-    const { text, info } = await readHtml(path, arg);
+    const { text, info, version } = await readHtml(path, arg);
     const look = htmlLook(text);
     if (look.reason === "unreadable") {
       io.stdout(`emend: left ${arg} unchanged: emend could not read its structure, so it shows as a custom page\n`);
@@ -160,7 +178,7 @@ export async function lookCommand(
     if (process.getuid && info.uid !== process.getuid())
       throw new CliError(`${arg} belongs to another user; emend look changes only your own files`);
     if ((info.mode & 0o200) === 0) throw new CliError(`${arg} is read-only`);
-    await writeHtml(path, arg, next, info);
+    await writeHtml(path, arg, next, info, version);
     const themeNote =
       theme && (!lightOnly || theme.base === "light") ? ` and the colours of theme ${escapeReference(theme.name)}` : "";
     io.stdout(`emend: gave ${arg} emend's look${themeNote}\n`);

@@ -194,11 +194,12 @@ export const executeWork: Executor = async (work) => {
   if (work.kind === "image-sizes") return { kind: "image-sizes", sizes: [...readImageSizes(work.heads)] };
   if (work.kind === "doc-metadata") {
     if (work.format === "html") {
-      const tree = parseDocHtml(stripHtmlLook(decode(work.bytes)));
+      const source = stripHtmlLook(decode(work.bytes));
+      const tree = parseDocHtml(source);
       const appearance = htmlLookFromTree(tree);
       return {
         kind: "doc-metadata",
-        title: await inferDocTitle("html", new Uint8Array(work.bytes)),
+        title: await inferDocTitle("html", new TextEncoder().encode(source)),
         headings: htmlHeadingsFromTree(tree),
         ...(tree
           ? {

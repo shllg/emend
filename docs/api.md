@@ -2404,10 +2404,11 @@ escaped line on stderr.
 `PublishManifest.files[].title` and `PublishRequest.files[].title` are optional strings, nonblank
 and at most `LIMITS.titleChars` (200), allowed only on files whose role is `doc`; other roles reject
 a title. At publish the server applies `cleanDocTitle`; an empty result is ignored. Doc titles
-fall back to the document's own title, then its filename. HTML uses
-only `head > title`, then the first HTML-namespace `h1` in the body. Markdown uses the first
-rendered `h1` heading block, so removed raw HTML cannot supply a title. CLI inferred review titles
-use the same extraction. Titles and heading labels are plain cleaned text.
+fall back to the document's own title, then its filename. HTML uses only `head > title`, then the
+first HTML-namespace `h1` in the body. Both are read after the leading copy `emend look` writes is
+removed. Markdown uses the first rendered `h1` heading block, so removed raw HTML cannot supply a
+title. CLI inferred review titles use the same extraction. Titles and heading labels are plain
+cleaned text.
 
 Each `RevisionView.docs[]` optionally includes `title: string` and
 `headings: { level: 2 | 3; text: string; id?: string }[]`. Older revisions without either field

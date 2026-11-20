@@ -1,5 +1,19 @@
+import { constants } from "node:fs";
 import * as fs from "node:fs/promises";
-import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, truncate, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  symlink,
+  truncate,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LIMITS } from "@emend/contract";
@@ -414,6 +428,39 @@ test("failed replacement cleans its temporary file and keeps the original", asyn
   expect((await readdir(root)).filter((name) => name.startsWith(".emend-look-"))).toEqual([]);
 });
 
+test("opens the named file with non-blocking reads", async () => {
+  const path = await page();
+  const open = vi.spyOn(fs, "open");
+  expect((await command("page.html", "--no-theme")).code).toBe(0);
+  expect(open).toHaveBeenCalledWith(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+});
+
+test("a file that grows after the descriptor stat is refused without changing it", async () => {
+  const source = "<!doctype html><p>Seeds</p>";
+  const appended = "<p>Added while reading</p>";
+  const path = await page(source);
+  const original = fs.open;
+  vi.spyOn(fs, "open").mockImplementation(async (...args) => {
+    const handle = await original(...args);
+    if (args[0] === path) {
+      const stat = handle.stat.bind(handle);
+      vi.spyOn(handle, "stat").mockImplementation(async (options) => {
+        const info = await stat(options);
+        if (options?.bigint) await appendFile(path, appended);
+        return info;
+      });
+    }
+    return handle;
+  });
+  expect(await command("page.html", "--no-theme")).toEqual({
+    code: 1,
+    stdout: [],
+    stderr: ["emend: cannot read page.html: it changed while emend look read it\n"],
+  });
+  expect(await readFile(path, "utf8")).toBe(source + appended);
+  expect((await readdir(root)).filter((name) => name.startsWith(".emend-look-"))).toEqual([]);
+});
+
 test("a file replaced by a symlink before open is refused without reading its target", async () => {
   const path = await page();
   const target = await page("<p>Kept</p>", "target.html");
@@ -451,9 +498,32 @@ test("a replaced original is never overwritten", async () => {
   expect(await command("page.html", "--no-theme")).toEqual({
     code: 1,
     stdout: [],
-    stderr: ["emend: cannot write page.html\n"],
+    stderr: ["emend: cannot write page.html: it changed while emend look ran\n"],
   });
   expect((await lstat(path)).isSymbolicLink()).toBe(true);
+  expect((await readdir(root)).filter((name) => name.startsWith(".emend-look-"))).toEqual([]);
+});
+
+test("an original edited in place is never overwritten", async () => {
+  const path = await page();
+  const past = new Date(2000, 0, 1);
+  await utimes(path, past, past);
+  const before = await lstat(path);
+  const edited = "<!doctype html><p>Trees</p>";
+  expect(Buffer.byteLength(edited, "utf8")).toBe(before.size);
+  const original = fs.open;
+  vi.spyOn(fs, "open").mockImplementation(async (...args) => {
+    const handle = await original(...args);
+    if (String(args[0]).includes(".emend-look-")) await writeFile(path, edited);
+    return handle;
+  });
+  expect(await command("page.html", "--no-theme")).toEqual({
+    code: 1,
+    stdout: [],
+    stderr: ["emend: cannot write page.html: it changed while emend look ran\n"],
+  });
+  expect(await readFile(path, "utf8")).toBe(edited);
+  expect((await lstat(path)).ino).toBe(before.ino);
   expect((await readdir(root)).filter((name) => name.startsWith(".emend-look-"))).toEqual([]);
 });
 
