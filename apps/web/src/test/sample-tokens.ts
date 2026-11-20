@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { globSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { type SampleView, THEME_TOKENS } from "@emend/contract";
 import { SAMPLE_HTML } from "../../../../packages/core/src/sample/content.ts";
@@ -17,6 +17,54 @@ function cssFiles(dir: string): string[] {
 const sources = [...cssFiles("src/styles"), ...cssFiles("src/components")].map(read);
 const references = (value: string) => [...value.matchAll(/var\(\s*--([\w-]+)/g)].map((match) => match[1] ?? "");
 const tokens = new Set<string>(THEME_TOKENS);
+
+// No emend element uses these tokens; remove a token as soon as an element uses it.
+export const TOKENS_NO_ELEMENT_USES = ["agent-working", "agent-approved"] as const;
+
+const escapePattern = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+type TokenReference = { path: string; line: number; reference: string };
+
+/** Match supplied source text without reading files, including Tailwind aliases from @theme inline. */
+export function findTokenReferencesInSource(
+  token: string,
+  source: string,
+  theme: string,
+  path = "synthetic",
+): TokenReference[] {
+  const name = escapePattern(token);
+  const aliases = [...theme.matchAll(/@theme\s+inline\s*\{([^{}]*)\}/g)].flatMap((block) =>
+    [...(block[1] ?? "").matchAll(/--color-([\w-]+)\s*:\s*var\(\s*--([\w-]+)\s*\)/g)].flatMap((match) =>
+      match[1] && match[2] === token ? [escapePattern(match[1])] : [],
+    ),
+  );
+  const patterns = [`var\\(\\s*--${name}(?=\\s*[,)])`, `(["'\`])(?:--)?${name}\\1`];
+  if (aliases.length)
+    patterns.push(
+      `(?<![\\w-])(?:bg|text|border(?:-[xysetrbl])?|outline|ring(?:-offset)?|inset-ring|decoration|fill|stroke|divide|placeholder|caret|accent|(?:inset-|text-)?shadow|from|via|to)-(?:${aliases.join("|")})(?![\\w-])`,
+    );
+
+  const definition =
+    path === "src/styles/colors.css" ? `--${name}` : path === "src/styles/theme.css" ? `--color-${name}` : null;
+  // Mask only this token's own definition/alias, preserving line numbers and other uses in these files.
+  const searchable = definition
+    ? source.replace(new RegExp(`${definition}\\s*:[^;{}]*;`, "g"), (value) => value.replace(/[^\n]/g, " "))
+    : source;
+  return [...searchable.matchAll(new RegExp(patterns.join("|"), "g"))].map((match) => ({
+    path,
+    line: searchable.slice(0, match.index).split("\n").length,
+    reference: match[0],
+  }));
+}
+
+export function findWebTokenReferences(token: string): TokenReference[] {
+  const theme = read("src/styles/theme.css");
+  return globSync(["src/**/*.{ts,tsx,css}", "pub-frame.css", "mermaid-frame.ts"], {
+    cwd: web,
+    exclude: ["src/**/*.test.*", "src/test/**"],
+  })
+    .sort()
+    .flatMap((path) => findTokenReferencesInSource(token, read(path), theme, path));
+}
 
 /** Read leaf rules through @layer/@media wrappers; declarations alone never count as usage. */
 function rules(source: string): { selector: string; body: string }[] {

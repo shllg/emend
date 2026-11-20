@@ -7,7 +7,12 @@ import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import { buildSampleView } from "../../../../packages/core/src/sample/build.ts";
 import { App } from "../App.tsx";
 import { requestThemeSync, setThemePick, themeKey } from "../lib/theme.ts";
-import { collectSampleTokens } from "../test/sample-tokens.ts";
+import {
+  collectSampleTokens,
+  findTokenReferencesInSource,
+  findWebTokenReferences,
+  TOKENS_NO_ELEMENT_USES,
+} from "../test/sample-tokens.ts";
 import { customTheme } from "../test/themes.ts";
 
 vi.mock("../components/diff/parse-client.ts", async () => {
@@ -214,10 +219,80 @@ test.each([390, 834, 1440])("renders real content and stays read-only at %ipx", 
 test("every theme token is carried by a rendered emend element", async () => {
   await setup();
   const used = collectSampleTokens(document, sample);
+  const noElement = new Set<string>(TOKENS_NO_ELEMENT_USES);
   expect(
-    THEME_TOKENS.filter((token) => !used.has(token)),
+    THEME_TOKENS.filter((token) => !noElement.has(token) && !used.has(token)),
     "Theme tokens without a sample element",
   ).toEqual([]);
+});
+
+test.each(TOKENS_NO_ELEMENT_USES)("%s is a theme token no emend element uses", (token) => {
+  expect(THEME_TOKENS).toContain(token);
+  expect(
+    findWebTokenReferences(token),
+    `${token} is now used by an element; remove it from TOKENS_NO_ELEMENT_USES so the sample page must show that element`,
+  ).toEqual([]);
+});
+
+const referenceTheme = `@theme inline {
+  --color-agent-working: var(--agent-working);
+  --color-agent-approved: var(--agent-approved);
+  --color-progress: var(--agent-working);
+}`;
+
+test.each([
+  ["agent-working", '<span className="hover:bg-agent-working/50" />'],
+  ["agent-approved", '<span className="dark:group-hover:text-agent-approved/75" />'],
+  ["agent-working", '<span className="[&:nth-child(2)]:border-progress/50" />'],
+  ["agent-approved", "color: var(--agent-approved)"],
+  ["agent-working", "color: var(\n  --agent-working, red)"],
+  ["agent-working", 'const token = "agent-working";'],
+  ["agent-approved", "const token = 'agent-approved';"],
+  ["agent-approved", "const token = `agent-approved`;"],
+  ["agent-working", 'getPropertyValue("--agent-working")'],
+])("the guard detects a reference to %s in %s", (token, source) => {
+  expect(findTokenReferencesInSource(token, source, referenceTheme)).toHaveLength(1);
+});
+
+test("the guard reports every reference with its source line", () => {
+  expect(
+    findTokenReferencesInSource(
+      "agent-working",
+      '<span className="bg-agent-working text-progress" />\ncolor: var(--agent-working);',
+      referenceTheme,
+      "src/example.tsx",
+    ),
+  ).toEqual([
+    { path: "src/example.tsx", line: 1, reference: "bg-agent-working" },
+    { path: "src/example.tsx", line: 1, reference: "text-progress" },
+    { path: "src/example.tsx", line: 2, reference: "var(--agent-working" },
+  ]);
+});
+
+test.each([
+  ["src/styles/colors.css", ":root { --agent-working: var(--agent-working, red); }"],
+  ["src/styles/theme.css", "@theme inline { --color-agent-working: var(--agent-working); }"],
+])("the guard ignores only the token's own definition in %s", (path, definition) => {
+  expect(findTokenReferencesInSource("agent-working", definition, referenceTheme, path)).toEqual([]);
+  expect(
+    findTokenReferencesInSource(
+      "agent-working",
+      `${definition}\n.element { color: var(--agent-working); }`,
+      referenceTheme,
+      path,
+    ),
+  ).toEqual([{ path, line: 2, reference: "var(--agent-working" }]);
+});
+
+test("the guard requires an exact token or a mapped Tailwind utility", () => {
+  const source = `
+    <span className="bg-agent-working-extra not-bg-agent-working bg-unmapped" />
+    color: var(--agent-working-extra);
+    const token = "agent-working-extra";
+    --agent-working: red;
+  `;
+  expect(findTokenReferencesInSource("agent-working", source, referenceTheme)).toEqual([]);
+  expect(findTokenReferencesInSource("agent-working", '"bg-agent-working"', "")).toEqual([]);
 });
 
 test("the collector detects missing diff coverage when the diff is removed", async () => {
