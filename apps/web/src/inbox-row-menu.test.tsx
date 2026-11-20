@@ -772,6 +772,31 @@ test("a menu follows live inbox state and disappears when its row is removed els
   await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 });
 
+test.each(["removed", "moved"])("a menu stays closed when its %s row returns", async (state) => {
+  mount();
+  await rowMenu();
+  act(() =>
+    client.setQueryData<InboxData>(
+      ["inbox"],
+      (data) =>
+        data && {
+          ...data,
+          items:
+            state === "removed"
+              ? data.items.filter((row) => row.id !== targetId)
+              : data.items.map((row) =>
+                  row.id === targetId ? { ...row, movedTo: "https://example.com/r/synthetic" } : row,
+                ),
+        },
+    ),
+  );
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  act(() => client.setQueryData<InboxData>(["inbox"], (data) => data && { ...data, items: inbox }));
+  await waitFor(() => expect(screen.getByText("Row review").closest("a")).not.toBeNull());
+  expect(screen.queryByRole("menu")).toBeNull();
+  expect(document.activeElement?.closest('[role="menu"]')).toBeNull();
+});
+
 test("resume availability follows the row's agent and current sends", async () => {
   mount();
   await choose("How to resume");

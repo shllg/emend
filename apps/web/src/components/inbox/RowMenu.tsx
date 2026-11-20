@@ -98,6 +98,7 @@ export function RowMenuProvider({ children }: { children: ReactNode }) {
     row?.focus({ preventScroll: true });
   }, [inbox.data, request]);
   const item = inbox.data?.items.find((item) => item.id === menu?.request.reviewId);
+  if (menu?.open && (!item || item.movedTo)) setMenu({ ...menu, open: false });
   return (
     <RowMenuContext value={open}>
       {children}
