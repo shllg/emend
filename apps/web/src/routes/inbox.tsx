@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { inboxQuery, serverNow } from "../api/queries.ts";
 import { GroupActions } from "../components/inbox/GroupActions.tsx";
 import { needsAttention, ReviewRow } from "../components/inbox/ReviewRow.tsx";
+import { RowMenuProvider } from "../components/inbox/RowMenu.tsx";
 import { AppFrame } from "../components/layout/AppFrame.tsx";
 import { Button } from "../components/ui/Button.tsx";
 import { Icon } from "../components/ui/Icon.tsx";
@@ -277,81 +278,83 @@ export function Inbox({
             </Button>
           </div>
         )}
-        {query.data &&
-          sections.map(({ key, list, title, count, rows, nothingActive, expanded, group, empty, unloaded }) => {
-            if (rows.length === 0 && !empty && !unloaded && !(nothingActive && items.length > 0 && filteredCount > 0))
-              return null;
-            const heading = (
-              <>
-                <span
-                  dir={group ? "auto" : undefined}
-                  className={group ? "min-w-0 truncate" : undefined}
-                  title={group ? title : undefined}
-                >
-                  {title}
-                </span>
-                <span className={cn("ml-1.5 font-normal tabular-nums text-fg-2", group && "shrink-0")}>{count}</span>
-              </>
-            );
-            const headingClass =
-              "m-0 flex items-center gap-2 px-2.5 pt-3 pb-1 text-13 font-semibold leading-(--lh-snug) tracking-(--tracking-label) text-fg-2 uppercase";
-            return (
-              <section key={key} aria-label={title}>
-                <Heading className={headingClass}>
-                  {needle === "" ? (
-                    <button
-                      type="button"
-                      aria-expanded={expanded}
-                      className={cn(
-                        "inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 font-[inherit] text-[inherit] uppercase",
-                        group && "min-w-0",
-                      )}
-                      onClick={() =>
-                        updateView((view) => ({ open: { ...view.open, [key]: !sectionOpen(view.open, key) } }))
-                      }
-                    >
-                      <Icon icon={expanded ? ChevronDown : ChevronRight} size={12} />
-                      {heading}
-                    </button>
-                  ) : (
-                    <span className={group ? "inline-flex min-w-0 items-center" : undefined}>{heading}</span>
+        <RowMenuProvider>
+          {query.data &&
+            sections.map(({ key, list, title, count, rows, nothingActive, expanded, group, empty, unloaded }) => {
+              if (rows.length === 0 && !empty && !unloaded && !(nothingActive && items.length > 0 && filteredCount > 0))
+                return null;
+              const heading = (
+                <>
+                  <span
+                    dir={group ? "auto" : undefined}
+                    className={group ? "min-w-0 truncate" : undefined}
+                    title={group ? title : undefined}
+                  >
+                    {title}
+                  </span>
+                  <span className={cn("ml-1.5 font-normal tabular-nums text-fg-2", group && "shrink-0")}>{count}</span>
+                </>
+              );
+              const headingClass =
+                "m-0 flex items-center gap-2 px-2.5 pt-3 pb-1 text-13 font-semibold leading-(--lh-snug) tracking-(--tracking-label) text-fg-2 uppercase";
+              return (
+                <section key={key} aria-label={title}>
+                  <Heading className={headingClass}>
+                    {needle === "" ? (
+                      <button
+                        type="button"
+                        aria-expanded={expanded}
+                        className={cn(
+                          "inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 font-[inherit] text-[inherit] uppercase",
+                          group && "min-w-0",
+                        )}
+                        onClick={() =>
+                          updateView((view) => ({ open: { ...view.open, [key]: !sectionOpen(view.open, key) } }))
+                        }
+                      >
+                        <Icon icon={expanded ? ChevronDown : ChevronRight} size={12} />
+                        {heading}
+                      </button>
+                    ) : (
+                      <span className={group ? "inline-flex min-w-0 items-center" : undefined}>{heading}</span>
+                    )}
+                    <span aria-hidden="true" className={cn("h-px flex-1 bg-line-2", group && "min-w-4 shrink-0")} />
+                    {group && <GroupActions group={group} compact={compact} afterDeleteFocus={input} />}
+                  </Heading>
+                  {expanded && empty && <p className="px-2.5 py-2 text-13 text-fg-3">No items in this group yet.</p>}
+                  {expanded && unloaded && (
+                    <p className="px-2.5 py-2 text-13 text-fg-3">
+                      Its items are past the {LIMITS.inboxItems} grouped items the inbox shows.
+                    </p>
                   )}
-                  <span aria-hidden="true" className={cn("h-px flex-1 bg-line-2", group && "min-w-4 shrink-0")} />
-                  {group && <GroupActions group={group} compact={compact} afterDeleteFocus={input} />}
-                </Heading>
-                {expanded && empty && <p className="px-2.5 py-2 text-13 text-fg-3">No items in this group yet.</p>}
-                {expanded && unloaded && (
-                  <p className="px-2.5 py-2 text-13 text-fg-3">
-                    Its items are past the {LIMITS.inboxItems} grouped items the inbox shows.
-                  </p>
-                )}
-                {expanded && nothingActive && <p className="px-2.5 py-2 text-13 text-fg-3">No active reviews.</p>}
-                {expanded && rows.length > 0 && (
-                  <ul>
-                    {rows.map((review) => {
-                      const command =
-                        jumpCommands[
-                          numberedRows.findIndex((entry) => entry.key === key && entry.row.id === review.id)
-                        ];
-                      const binding = command ? keys[command] : null;
-                      return (
-                        <ReviewRow
-                          key={review.id}
-                          review={review}
-                          pinned={list !== "pinned" && review.pinnedAt !== null}
-                          now={now}
-                          onOpen={onOpen}
-                          highlight={highlighted.has(review.id)}
-                          jump={jumpBadge(binding)}
-                          keyShortcuts={binding === null ? undefined : ariaKeyShortcuts(binding)}
-                        />
-                      );
-                    })}
-                  </ul>
-                )}
-              </section>
-            );
-          })}
+                  {expanded && nothingActive && <p className="px-2.5 py-2 text-13 text-fg-3">No active reviews.</p>}
+                  {expanded && rows.length > 0 && (
+                    <ul>
+                      {rows.map((review) => {
+                        const command =
+                          jumpCommands[
+                            numberedRows.findIndex((entry) => entry.key === key && entry.row.id === review.id)
+                          ];
+                        const binding = command ? keys[command] : null;
+                        return (
+                          <ReviewRow
+                            key={review.id}
+                            review={review}
+                            pinned={list !== "pinned" && review.pinnedAt !== null}
+                            now={now}
+                            onOpen={onOpen}
+                            highlight={highlighted.has(review.id)}
+                            jump={jumpBadge(binding)}
+                            keyShortcuts={binding === null ? undefined : ariaKeyShortcuts(binding)}
+                          />
+                        );
+                      })}
+                    </ul>
+                  )}
+                </section>
+              );
+            })}
+        </RowMenuProvider>
       </div>
     </div>
   );

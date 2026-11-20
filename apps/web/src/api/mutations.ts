@@ -272,6 +272,12 @@ export function useReviewMutation(reviewId: string, key?: string) {
   return { ...mutation, isPending: pending || mutation.isPending };
 }
 
+/** Drop a deleted review's cached detail and revisions after leaving its route. */
+export function removeReviewQueries(client: QueryClient, reviewId: string) {
+  client.removeQueries({ queryKey: ["review", reviewId] });
+  client.removeQueries({ queryKey: ["revision", reviewId] });
+}
+
 export function useCreateGroup() {
   const client = useQueryClient();
   return useMutation({

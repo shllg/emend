@@ -1,13 +1,18 @@
 import type { InboxItem } from "@emend/contract";
 import { Link } from "@tanstack/react-router";
-import { MessageSquare, Pencil, Pin } from "lucide-react";
+import { Ellipsis, MessageSquare, Pencil, Pin } from "lucide-react";
+import { useRef } from "react";
 import { plural } from "../../lib/count.ts";
+import { useLayout } from "../../lib/layout.ts";
 import { relativeTime, wakeHasPassed, wakeTime } from "../../lib/time.ts";
+import { useRowSwipe } from "../../lib/use-row-swipe.ts";
 import { agentDotClasses, agentStatusOf, agentStatusText } from "../status/AgentStatus.tsx";
 import { OriginBadge } from "../status/OriginBadge.tsx";
 import { StateBadge } from "../status/StateBadge.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
 import { cn } from "../ui/utils.ts";
+import { useRowMenu, useRowMenuTrigger } from "./RowMenu.tsx";
 
 /** Approved and Done reviews need no work: dim them until the reviewer points at or focuses one. */
 export const doneDimmed = "opacity-60 hover:opacity-100 focus-within:opacity-100 aria-[current=page]:opacity-100";
@@ -39,6 +44,11 @@ export function ReviewRow({
   jump?: string;
   keyShortcuts?: string;
 }) {
+  const openMenu = useRowMenu();
+  const menuTrigger = useRowMenuTrigger(review);
+  const swipe = useRowSwipe(!!openMenu && !review.movedTo);
+  const link = useRef<HTMLAnchorElement>(null);
+  const phone = useLayout() === "phone";
   const attention = needsAttention(review);
   const agent = agentStatusOf(review);
   const contents = (
@@ -146,13 +156,17 @@ export function ReviewRow({
     highlight && "em-inbox-new",
   );
   return (
-    <li>
+    <li ref={swipe.row} className={cn("relative", swipe.offset !== 0 && "overflow-hidden")}>
       {review.movedTo ? (
         <div className={cn(className, "opacity-50")} aria-disabled="true">
           {contents}
         </div>
       ) : (
         <Link
+          ref={link}
+          {...menuTrigger}
+          {...swipe.handlers}
+          style={{ transform: swipe.offset !== 0 ? `translateX(${swipe.offset}px)` : undefined }}
           data-inbox-row={review.id}
           aria-keyshortcuts={keyShortcuts}
           to="/r/$reviewId"
@@ -161,6 +175,7 @@ export function ReviewRow({
           activeOptions={{ includeSearch: false }}
           activeProps={{ "aria-current": "page" }}
           onClick={(event) => {
+            swipe.guardClick(event);
             if (
               !event.defaultPrevented &&
               event.button === 0 &&
@@ -173,12 +188,36 @@ export function ReviewRow({
           }}
           className={cn(
             className,
-            "hover:bg-hover hover:text-fg-2 aria-[current=page]:bg-active",
+            "touch-pan-y touch-pinch-zoom hover:bg-hover hover:text-fg-2 aria-[current=page]:bg-active motion-reduce:transition-none",
+            !swipe.dragging && "transition-transform duration-(--dur-2) ease-(--ease-out)",
             looksDone(review) && doneDimmed,
           )}
         >
           {contents}
         </Link>
+      )}
+      {swipe.offset < 0 && openMenu && !review.movedTo && (
+        <div
+          className="absolute inset-y-0 right-0 flex items-center justify-end overflow-hidden"
+          style={{ width: -swipe.offset }}
+        >
+          <IconButton
+            icon={Ellipsis}
+            label={`Actions for “${review.title}”`}
+            tooltip={false}
+            size={phone ? "lg" : "md"}
+            onClick={(event) => {
+              if (!link.current) return;
+              openMenu({
+                reviewId: review.id,
+                anchor: event.currentTarget.getBoundingClientRect(),
+                align: "end",
+                row: link.current,
+                onClose: swipe.hide,
+              });
+            }}
+          />
+        </div>
       )}
     </li>
   );

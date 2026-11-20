@@ -1,3 +1,4 @@
+import type { InboxItem } from "@emend/contract";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { PanelLeftOpen } from "lucide-react";
@@ -11,6 +12,7 @@ import { IconButton } from "../ui/IconButton.tsx";
 import { Tooltip } from "../ui/Tooltip.tsx";
 import { cn } from "../ui/utils.ts";
 import { doneDimmed, looksDone, needsAttention } from "./ReviewRow.tsx";
+import { RowMenuProvider, useRowMenuTrigger } from "./RowMenu.tsx";
 
 export function InboxRail({ onShow, showRef }: { onShow: () => void; showRef?: Ref<HTMLButtonElement> }) {
   // The collapsed rail ignores Kind, search, machine and project filters and folds.
@@ -32,50 +34,55 @@ export function InboxRail({ onShow, showRef }: { onShow: () => void; showRef?: R
     >
       <IconButton ref={showRef} label="Show inbox" icon={PanelLeftOpen} onClick={onShow} />
       <div className="relative min-h-0 w-full flex-1 overflow-y-auto">
-        <ul className="flex flex-col items-center gap-0.5">
-          {rows.map((review, index) => {
-            const command = jumpCommands[index];
-            const key = command ? keys[command] : null;
-            const badge = jumpBadge(key);
-            return (
-              <li key={review.id}>
-                <Tooltip content={review.title}>
-                  <Link
-                    aria-keyshortcuts={key === null ? undefined : ariaKeyShortcuts(key)}
-                    to="/r/$reviewId"
-                    params={{ reviewId: review.id }}
-                    search={{ rev: review.newestRevision }}
-                    aria-label={`${needsAttention(review) ? "Needs you: " : ""}${review.title}`}
-                    activeOptions={{ includeSearch: false }}
-                    activeProps={{ "aria-current": "page" }}
-                    className={cn(
-                      "relative grid h-8 w-9 place-items-center rounded-[6px] no-underline hover:bg-hover aria-[current=page]:bg-selected [&>span[role=img]]:size-[0.625rem]",
-                      looksDone(review) && doneDimmed,
-                    )}
-                  >
-                    {badge && (
-                      <span
-                        aria-hidden="true"
-                        data-jump-number
-                        className="absolute top-1/2 left-0.5 -translate-y-1/2 font-mono text-[10px] font-medium leading-none text-fg-3 tabular-nums"
-                      >
-                        {badge}
-                      </span>
-                    )}
-                    <OriginBadge origin={review.origin} dot />
-                    {needsAttention(review) && (
-                      <span
-                        aria-hidden="true"
-                        className="absolute top-1.5 right-[7px] size-[0.375rem] rounded-full bg-accent"
-                      />
-                    )}
-                  </Link>
-                </Tooltip>
-              </li>
-            );
-          })}
-        </ul>
+        <RowMenuProvider>
+          <ul className="flex flex-col items-center gap-0.5">
+            {rows.map((review, index) => {
+              const command = jumpCommands[index];
+              const key = command ? keys[command] : null;
+              return <RailRow key={review.id} review={review} binding={key} />;
+            })}
+          </ul>
+        </RowMenuProvider>
       </div>
     </aside>
+  );
+}
+
+function RailRow({ review, binding: key }: { review: InboxItem; binding: string | null }) {
+  const menuTrigger = useRowMenuTrigger(review, { side: "right" });
+  const badge = jumpBadge(key);
+  return (
+    <li>
+      <Tooltip content={review.title}>
+        <Link
+          {...menuTrigger}
+          aria-keyshortcuts={key === null ? undefined : ariaKeyShortcuts(key)}
+          to="/r/$reviewId"
+          params={{ reviewId: review.id }}
+          search={{ rev: review.newestRevision }}
+          aria-label={`${needsAttention(review) ? "Needs you: " : ""}${review.title}`}
+          activeOptions={{ includeSearch: false }}
+          activeProps={{ "aria-current": "page" }}
+          className={cn(
+            "relative grid h-8 w-9 place-items-center rounded-[6px] no-underline hover:bg-hover aria-[current=page]:bg-selected [&>span[role=img]]:size-[0.625rem]",
+            looksDone(review) && doneDimmed,
+          )}
+        >
+          {badge && (
+            <span
+              aria-hidden="true"
+              data-jump-number
+              className="absolute top-1/2 left-0.5 -translate-y-1/2 font-mono text-[10px] font-medium leading-none text-fg-3 tabular-nums"
+            >
+              {badge}
+            </span>
+          )}
+          <OriginBadge origin={review.origin} dot />
+          {needsAttention(review) && (
+            <span aria-hidden="true" className="absolute top-1.5 right-[7px] size-[0.375rem] rounded-full bg-accent" />
+          )}
+        </Link>
+      </Tooltip>
+    </li>
   );
 }

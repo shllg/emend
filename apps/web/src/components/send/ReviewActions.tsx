@@ -12,7 +12,7 @@ import {
   Trash2,
   Undo2,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 import { ApiError } from "../../api/client.ts";
 import {
   type LifecycleAction,
@@ -48,20 +48,14 @@ type Panel = "snooze" | "retire" | "delete" | "group" | null;
 /** The discard button ignores presses this long after its label changed, so a late click cannot hit it. */
 const DISCARD_GUARD_MS = 1000;
 
-/** The "More review actions" menu beside Approve, and the dialogs it opens. */
-export function ReviewActions({
-  reviewId,
-  lifecycle,
-  unsentCount,
-  phone,
-  howToResume,
-}: {
+interface ReviewActionsOptions {
   reviewId: string;
   lifecycle: ReviewLifecycle;
   unsentCount: number;
-  phone: boolean;
   howToResume?: { disabled: boolean; onSelect: () => void };
-}) {
+}
+
+export function useReviewActions({ reviewId, lifecycle, unsentCount, howToResume }: ReviewActionsOptions) {
   const { title, state, snoozed, pinned, onDeleted } = lifecycle;
   const [panel, setPanel] = useState<Panel>(null);
   const [now, setNow] = useState(Date.now);
@@ -79,7 +73,6 @@ export function ReviewActions({
   );
   const [groupName, setGroupName] = useState("");
   const toast = useToast();
-  const trigger = useRef<HTMLButtonElement>(null);
   const mounted = useRef(true);
   const busy = useRef(false);
   const deleted = useRef(false);
@@ -101,15 +94,6 @@ export function ReviewActions({
   const close = () => {
     if (!busy.current) setPanel(null);
   };
-  useShortcut(
-    "review.snooze",
-    () => {
-      if (state !== "open" || pending || busy.current || deleted.current) return false;
-      open("snooze");
-      return true;
-    },
-    { enabled: state === "open" && !pending },
-  );
   const togglePin = async () => {
     if (pending || busy.current || deleted.current) return;
     busy.current = true;
@@ -122,15 +106,6 @@ export function ReviewActions({
       busy.current = false;
     }
   };
-  useShortcut(
-    "review.pin",
-    () => {
-      if (pending || busy.current || deleted.current) return false;
-      void togglePin();
-      return true;
-    },
-    { enabled: !pending },
-  );
   /** Returns whether the server accepted the action. A failure shows the server's message in a toast. */
   const run = async (input: LifecycleAction) => {
     if (busy.current || deleted.current) return false;
@@ -255,6 +230,65 @@ export function ReviewActions({
   items.push({ label: "Move to group…", icon: FolderInput, opensDialog: true, onSelect: () => open("group") });
   items.push({ separator: true });
   items.push({ label: "Delete", icon: Trash2, danger: true, opensDialog: true, onSelect: () => open("delete") });
+  return {
+    items,
+    pending,
+    panel,
+    open,
+    close,
+    togglePin,
+    busy,
+    deleted,
+    lifecycle,
+    unsentCount,
+    now,
+    inbox,
+    groups,
+    groupName,
+    setGroupName,
+    createGroup,
+    moveGroup,
+    move,
+    snooze,
+    retire,
+    remove,
+    discard,
+    guarded,
+    retireLabel,
+    unsentAlert,
+  };
+}
+
+export function ReviewActionDialogs({
+  actions,
+  returnFocus,
+}: {
+  actions: ReturnType<typeof useReviewActions>;
+  returnFocus: RefObject<HTMLElement | null>;
+}) {
+  const {
+    pending,
+    panel,
+    close,
+    lifecycle,
+    unsentCount,
+    now,
+    inbox,
+    groups,
+    groupName,
+    setGroupName,
+    createGroup,
+    moveGroup,
+    move,
+    snooze,
+    retire,
+    remove,
+    discard,
+    guarded,
+    retireLabel,
+    unsentAlert,
+  } = actions;
+  const { title } = lifecycle;
   const cancel = (
     <Button data-autofocus disabled={pending} onClick={close}>
       Cancel
@@ -262,31 +296,9 @@ export function ReviewActions({
   );
   return (
     <>
-      <Menu
-        label="More review actions"
-        size={phone ? "lg" : "md"}
-        triggerRef={trigger}
-        trigger={
-          // aria-disabled, not disabled: the trigger keeps keyboard focus while an action runs.
-          <IconButton
-            label="More review actions"
-            icon={Ellipsis}
-            size={phone ? "lg" : "md"}
-            tooltip={false}
-            aria-disabled={pending}
-            aria-busy={pending}
-            onPointerDown={(event) => pending && event.preventDefault()}
-            onKeyDown={(event) => {
-              // Only the keys that open the menu; Tab and the rest still work.
-              if (pending && [" ", "Enter", "ArrowDown", "ArrowUp"].includes(event.key)) event.preventDefault();
-            }}
-          />
-        }
-        items={items}
-      />
       <Dialog
         open={panel === "group"}
-        returnFocus={trigger}
+        returnFocus={returnFocus}
         onOpenChange={(next) => !next && close()}
         title={
           <>
@@ -356,7 +368,7 @@ export function ReviewActions({
       </Dialog>
       <Dialog
         open={panel === "snooze"}
-        returnFocus={trigger}
+        returnFocus={returnFocus}
         onOpenChange={(next) => !next && close()}
         title="Snooze this review"
         description={
@@ -385,7 +397,7 @@ export function ReviewActions({
       </Dialog>
       <Dialog
         open={panel === "retire"}
-        returnFocus={trigger}
+        returnFocus={returnFocus}
         onOpenChange={(next) => !next && close()}
         title="Retire this review?"
         description={
@@ -418,7 +430,7 @@ export function ReviewActions({
       </Dialog>
       <Dialog
         open={panel === "delete"}
-        returnFocus={trigger}
+        returnFocus={returnFocus}
         onOpenChange={(next) => !next && close()}
         title={`Delete “${title}”?`}
         description="It moves to the bin in Settings, where you can restore it or delete it for good. It leaves the inbox, and an agent waiting on it stops."
@@ -431,6 +443,59 @@ export function ReviewActions({
           </>
         }
       />
+    </>
+  );
+}
+
+/** The "More review actions" menu beside Approve, and the dialogs it opens. */
+export function ReviewActions({ phone, ...options }: ReviewActionsOptions & { phone: boolean }) {
+  const actions = useReviewActions(options);
+  const { pending, busy, deleted, open, togglePin } = actions;
+  const { state } = options.lifecycle;
+  const trigger = useRef<HTMLButtonElement>(null);
+  useShortcut(
+    "review.snooze",
+    () => {
+      if (state !== "open" || pending || busy.current || deleted.current) return false;
+      open("snooze");
+      return true;
+    },
+    { enabled: state === "open" && !pending },
+  );
+  useShortcut(
+    "review.pin",
+    () => {
+      if (pending || busy.current || deleted.current) return false;
+      void togglePin();
+      return true;
+    },
+    { enabled: !pending },
+  );
+  return (
+    <>
+      <Menu
+        label="More review actions"
+        size={phone ? "lg" : "md"}
+        triggerRef={trigger}
+        trigger={
+          // aria-disabled, not disabled: the trigger keeps keyboard focus while an action runs.
+          <IconButton
+            label="More review actions"
+            icon={Ellipsis}
+            size={phone ? "lg" : "md"}
+            tooltip={false}
+            aria-disabled={pending}
+            aria-busy={pending}
+            onPointerDown={(event) => pending && event.preventDefault()}
+            onKeyDown={(event) => {
+              // Only the keys that open the menu; Tab and the rest still work.
+              if (pending && [" ", "Enter", "ArrowDown", "ArrowUp"].includes(event.key)) event.preventDefault();
+            }}
+          />
+        }
+        items={actions.items}
+      />
+      <ReviewActionDialogs actions={actions} returnFocus={trigger} />
     </>
   );
 }

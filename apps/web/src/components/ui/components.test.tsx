@@ -485,6 +485,19 @@ test("Menu asChild navigation retains the link and its decorations", async () =>
   expect(onClick).toHaveBeenCalledOnce();
 });
 
+test("Menu preserves the browser context menu inside its content", async () => {
+  mount(
+    <Menu
+      label="Navigate"
+      defaultOpen
+      items={[{ label: "Devices", asChild: true, children: <a href="/devices">Devices</a> }]}
+    />,
+  );
+  const menu = await screen.findByRole("menu");
+  expect(fireEvent.contextMenu(menu)).toBe(true);
+  expect(fireEvent.contextMenu(within(menu).getByRole("menuitem", { name: "Devices" }))).toBe(true);
+});
+
 test("Menu opened inside a Sheet is above the modal content", async () => {
   mount(
     <Sheet open title="Inbox">

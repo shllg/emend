@@ -17,7 +17,13 @@ import {
 } from "react";
 import { placeSpan } from "../../../../packages/core/src/place/span.ts";
 import { ApiError, change } from "../api/client.ts";
-import { mutationMessage, useViewedErrors, useViewedMutation, useViewedRevision } from "../api/mutations.ts";
+import {
+  mutationMessage,
+  removeReviewQueries,
+  useViewedErrors,
+  useViewedMutation,
+  useViewedRevision,
+} from "../api/mutations.ts";
 import { reviewQuery, revisionQuery } from "../api/queries.ts";
 import { DiffChrome } from "../components/diff/diff-chrome.ts";
 import { LazyDiffPane } from "../components/diff/LazyDiffPane.tsx";
@@ -961,8 +967,7 @@ function LoadedReview({
                 snoozedUntil: review.snoozedUntil,
                 onDeleted: () => {
                   void navigate({ to: "/" }).then(() => {
-                    client.removeQueries({ queryKey: ["review", review.id] });
-                    client.removeQueries({ queryKey: ["revision", review.id] });
+                    removeReviewQueries(client, review.id);
                   });
                 },
               }}
