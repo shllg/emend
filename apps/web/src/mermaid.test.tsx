@@ -1652,11 +1652,19 @@ test.each([false, true])("frame accepts exactly eight lowercase hex colours (dar
 test.each([
   { name: "U+FFFF", character: "\uffff" },
   { name: "U+FFFE", character: "\ufffe" },
+  { name: "U+0000", character: "\u0000" },
   { name: "U+0001", character: "\u0001" },
   { name: "U+000C", character: "\u000c" },
   { name: "lone surrogate", character: "\ud800" },
 ])("SVG replies refuse XML-forbidden $name", ({ character }) => {
   expect(canSendSvg(`<svg xmlns="http://www.w3.org/2000/svg"><text>${character}</text></svg>`)).toBe(false);
+});
+
+test("SVG replies refuse malformed XML with allowed characters", () => {
+  const malformed = '<svg xmlns="http://www.w3.org/2000/svg"><g></svg>';
+  const parsed = new DOMParser().parseFromString(malformed, "image/svg+xml");
+  expect(parsed.querySelector("parsererror")).not.toBeNull();
+  expect(canSendSvg(malformed)).toBe(false);
 });
 
 test("SVG replies refuse parser errors and roots outside SVG", () => {

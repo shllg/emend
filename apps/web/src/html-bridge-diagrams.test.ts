@@ -202,35 +202,26 @@ test("modes use parent colour, sRGB luminance ignoring alpha, and only changes r
   expect(b.jobs().at(-1)).toMatchObject({ request: 5, diagrams: [{ mode: "light" }] });
 });
 
-test.each(["theme", "colour scheme"])("a color transition after a %s change rechecks diagram modes", (trigger) => {
+test.each(
+  ["theme", "colour scheme"].flatMap((trigger) =>
+    ["transitionend", "transitioncancel", "animationend", "animationcancel"].map((event) => ({ trigger, event })),
+  ),
+)("$event after a $trigger change rechecks diagram modes", ({ trigger, event }) => {
   const b = bridge('<section><div><pre class="mermaid">graph LR</pre></div></section><aside>Other</aside>');
-  // Happy DOM has no TransitionEvent; provide its browser prototype getter.
-  class TransitionEvent extends b.window.Event {
-    #propertyName: string;
-    constructor(propertyName: string) {
-      super("transitionend");
-      this.#propertyName = propertyName;
-    }
-    get propertyName() {
-      return this.#propertyName;
-    }
-  }
-  Object.defineProperty(b.window, "TransitionEvent", { value: TransitionEvent });
   const ancestor = b.window.document.querySelector("section");
   const outside = b.window.document.querySelector("aside");
-  if (!ancestor || !outside) throw new Error("Missing transition targets");
+  if (!ancestor || !outside) throw new Error("Missing event targets");
   expect(b.jobs()[0]).toMatchObject({ request: 1, diagrams: [{ mode: "light" }] });
   if (trigger === "theme") b.message({ type: "emend:theme", mode: "dark", scales: {}, tokens: {} });
   else b.media.dispatchEvent(new b.window.Event("change"));
   expect(b.jobs()).toHaveLength(1);
   b.pixels.rgb = [255, 255, 255, 255];
-  ancestor.dispatchEvent(new TransitionEvent("opacity"));
-  outside.dispatchEvent(new TransitionEvent("color"));
+  outside.dispatchEvent(new b.window.Event(event));
   expect(b.jobs()).toHaveLength(1);
-  ancestor.dispatchEvent(new TransitionEvent("color"));
+  ancestor.dispatchEvent(new b.window.Event(event));
   expect(b.jobs()).toHaveLength(2);
   expect(b.jobs()[1]).toMatchObject({ request: 2, diagrams: [{ mode: "dark" }] });
-  ancestor.dispatchEvent(new TransitionEvent("color"));
+  ancestor.dispatchEvent(new b.window.Event(event));
   expect(b.jobs()).toHaveLength(2);
 });
 
