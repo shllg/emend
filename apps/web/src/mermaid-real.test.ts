@@ -1,6 +1,23 @@
-import mermaid from "mermaid";
-import { afterEach, expect, test, vi } from "vitest";
-import { encodeCodes, exceedsLimits, frameConfig } from "../mermaid-frame.ts";
+import { afterAll, afterEach, expect, onTestFinished, test, vi } from "vitest";
+
+// DOMPurify captures this native getter when Mermaid loads. Happy DOM's base
+// getter returns an empty name; delegate to the concrete getter as browsers do.
+const nativeNodeName = Object.getOwnPropertyDescriptor(Node.prototype, "nodeName")?.get;
+if (!nativeNodeName) throw new Error("Missing nodeName getter");
+const nodeName = vi.spyOn(Node.prototype, "nodeName", "get").mockImplementation(function (this: Node) {
+  for (
+    let prototype = Object.getPrototypeOf(this);
+    prototype && prototype !== Node.prototype;
+    prototype = Object.getPrototypeOf(prototype)
+  ) {
+    const getter = Object.getOwnPropertyDescriptor(prototype, "nodeName")?.get;
+    if (getter) return getter.call(this);
+  }
+  return nativeNodeName.call(this);
+});
+afterAll(() => nodeName.mockRestore());
+const { default: mermaid } = await import("mermaid");
+const { encodeCodes, exceedsLimits, frameConfig, startFrame } = await import("../mermaid-frame.ts");
 
 afterEach(() => mermaid.mermaidAPI.globalReset());
 
@@ -235,7 +252,6 @@ test.each([stateSource, flowchartSource])("real Mermaid parses entity stand-ins 
   await expect(mermaid.parse(encodeCodes(source).source)).resolves.toBeTruthy();
 });
 
-// Real renders return empty SVG strings in Happy DOM, and link nodes lack getBBox.
 // Check real parser labels here; the frame tests cover sanitizing and text restoration.
 test("real Mermaid preserves stand-ins and inlined printable characters in state descriptions", async () => {
   mermaid.initialize(frameConfig(false));
@@ -330,3 +346,80 @@ test.each(["click A call alert()", 'click A "javascript:alert(1)"'])(
     expect(mermaid.mermaidAPI.getConfig().securityLevel).toBe("strict");
   },
 );
+
+test("real Mermaid SVG replies strip click directives and executable markup", async () => {
+  // As in frame-build.test.ts, preserve SVG style children through Happy DOM's
+  // HTML parser and supply layout measurements without replacing Mermaid's render.
+  const parse = DOMParser.prototype.parseFromString;
+  const parser = vi.spyOn(DOMParser.prototype, "parseFromString").mockImplementation(function (
+    this: DOMParser,
+    source,
+    type,
+  ) {
+    if (type === "text/html" && source.startsWith("<svg")) {
+      const xml = parse.call(this, source, "image/svg+xml");
+      const html = parse.call(this, "", "text/html");
+      html.body.append(html.importNode(xml.documentElement, true));
+      return html;
+    }
+    return parse.call(this, source, type);
+  });
+  onTestFinished(() => parser.mockRestore());
+  for (const [name, value] of [
+    ["getBBox", () => new DOMRect(0, 0, 80, 20)],
+    ["getComputedTextLength", () => 80],
+  ] as const) {
+    const previous = Object.getOwnPropertyDescriptor(SVGElement.prototype, name);
+    Object.defineProperty(SVGElement.prototype, name, { configurable: true, value });
+    onTestFinished(() => {
+      if (previous) Object.defineProperty(SVGElement.prototype, name, previous);
+      else Reflect.deleteProperty(SVGElement.prototype, name);
+    });
+  }
+  const bounds = vi.spyOn(SVGGraphicsElement.prototype, "getBBox").mockImplementation(() => new DOMRect(0, 0, 80, 20));
+  onTestFinished(() => bounds.mockRestore());
+  const root = document.createElement("div");
+  document.body.append(root);
+  onTestFinished(() => root.remove());
+  const reply = Promise.withResolvers<{ type: "svg"; svg: string | null; width?: number; height?: number }>();
+  const post = vi.spyOn(window.parent, "postMessage").mockImplementation((data) => {
+    if (data.type === "svg") reply.resolve(data);
+  });
+  onTestFinished(() => post.mockRestore());
+  const stop = startFrame(root);
+  onTestFinished(stop);
+  window.dispatchEvent(
+    new MessageEvent("message", {
+      source: window.parent,
+      data: {
+        type: "render",
+        source: `flowchart LR
+  A --> B --> C
+  click A call alert()
+  click B "javascript:alert(1)"
+  click C href "javascript:alert(2)"`,
+        reply: "svg",
+      },
+    }),
+  );
+  const answer = await reply.promise;
+  expect(answer.width).toBeGreaterThan(0);
+  expect(answer.height).toBeGreaterThan(0);
+  if (answer.svg === null) throw new Error(`Missing SVG reply: ${root.textContent}`);
+  expect(answer.svg).toMatch(/^<svg\b/);
+  expect(answer.svg).not.toMatch(/\bon[\w:-]*\s*=|javascript:|<(?:script|foreignObject)\b/i);
+  const parsed = new DOMParser().parseFromString(answer.svg, "image/svg+xml");
+  expect(parsed.querySelector("parsererror")).toBeNull();
+  const svg = parsed.documentElement;
+  expect(svg.localName).toBe("svg");
+  expect(svg.querySelectorAll(".node")).toHaveLength(3);
+  for (const node of [svg, ...svg.querySelectorAll("*")]) {
+    expect(["script", "foreignobject"]).not.toContain(node.localName.toLowerCase());
+    expect(node.textContent).not.toMatch(/javascript:/i);
+    for (const attribute of node.attributes) {
+      expect(attribute.name).not.toMatch(/^on/i);
+      expect(attribute.value).not.toMatch(/javascript:/i);
+      if (attribute.localName === "href") expect(attribute.value.startsWith("#")).toBe(true);
+    }
+  }
+});

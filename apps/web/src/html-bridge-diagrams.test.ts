@@ -211,8 +211,30 @@ test.each([0, 450.6, 10001])("width %s is rounded and clamped; width alone never
   expect(b.jobs()).toHaveLength(1);
 });
 
+test.each([0, 720.6, 10001])("redraws measure the placed host's width %s", (width) => {
+  const b = bridge('<pre class="mermaid">graph LR</pre>', (window) => {
+    vi.spyOn(window.Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      const measured = this.hasAttribute("data-emend-diagram")
+        ? width
+        : window.getComputedStyle(this).display === "none"
+          ? 0
+          : 450.6;
+      return new window.DOMRect(0, 0, measured, 20);
+    });
+  });
+  expect(b.jobs()[0].diagrams[0].width).toBe(451);
+  b.message(b.result);
+  expect(b.window.document.querySelector("pre")?.style.display).toBe("none");
+  b.pixels.rgb = [255, 255, 255, 255];
+  b.message({ type: "emend:theme", mode: "dark", scales: {}, tokens: {} });
+  expect(b.jobs()[1].diagrams[0].width).toBe(Math.max(1, Math.min(10000, Math.round(width))));
+  b.pixels.rgb = [0, 0, 0, 255];
+  b.media.dispatchEvent(new b.window.Event("change"));
+  expect(b.jobs()[2].diagrams[0].width).toBe(Math.max(1, Math.min(10000, Math.round(width))));
+});
+
 test.each(["", "display: inline", "display: grid !important"])(
-  "placement preserves text, anchors and original display %s",
+  "placement preserves text, earlier highlights and original display %s",
   (style) => {
     const b = bridge(
       `<body><h2>Heading</h2><pre class="mermaid" style="${style}"><code>graph LR</code></pre><p>After</p></body>`,
@@ -239,12 +261,12 @@ test.each(["", "display: inline", "display: grid !important"])(
     expect(img?.getAttribute("height")).toBe("240");
     expect(img?.getAttribute("src")).toBe(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(b.result.svg)}`);
     expect(img?.style.cssText).toBe("display: block; max-width: 100%; height: auto;");
-    expect(pre.style.getPropertyValue("display")).toBe("none");
-    expect(pre.style.getPropertyPriority("display")).toBe("important");
+    expect([pre.style.getPropertyValue("display"), pre.style.getPropertyPriority("display")]).toEqual(original);
     b.message({ ...b.result, width: 120, height: 60 });
     expect(pre.previousElementSibling).toBe(host);
     expect(b.shadows).toHaveLength(1);
     expect(img?.width).toBe(120);
+    expect([pre.style.getPropertyValue("display"), pre.style.getPropertyPriority("display")]).toEqual(original);
     expect(b.window.document.body.textContent).toBe(text);
     expect([...pre.childNodes]).toEqual(nodes);
     expect(range.toString()).toBe("graph LR");
@@ -254,6 +276,111 @@ test.each(["", "display: inline", "display: grid !important"])(
     expect(host?.isConnected).toBe(false);
     expect([pre.style.getPropertyValue("display"), pre.style.getPropertyPriority("display")]).toEqual(original);
     expect(range.toString()).toBe("graph LR");
+  },
+);
+
+test.each(["", "display: inline", "display: grid !important"])(
+  "highlights reveal placed source with original display %s and hide it again",
+  (style) => {
+    const b = bridge(`<body><pre class="mermaid" style="${style}"><code>graph LR</code></pre><p>After</p></body>`);
+    const pre = b.window.document.querySelector("pre");
+    if (!pre) throw new Error("Missing pre");
+    const original = [pre.style.getPropertyValue("display"), pre.style.getPropertyPriority("display")];
+    b.message(b.result);
+    const host = pre.previousElementSibling;
+    expect(host?.getAttribute("data-emend-diagram")).toBe("");
+    expect(pre.style.getPropertyValue("display")).toBe("none");
+    expect(pre.style.getPropertyPriority("display")).toBe("important");
+    const outside = { threadId: "outside", quote: "After", prefix: "", suffix: "" };
+    b.message({
+      type: "emend:highlight",
+      anchors: [outside, { threadId: "source", quote: "graph LR", prefix: "", suffix: "" }],
+    });
+    expect(pre.previousElementSibling).toBe(host);
+    expect([pre.style.getPropertyValue("display"), pre.style.getPropertyPriority("display")]).toEqual(original);
+    const scroll = vi.spyOn(b.window.Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) {
+      expect(this).toBe(pre.querySelector("code"));
+      expect([pre.style.getPropertyValue("display"), pre.style.getPropertyPriority("display")]).toEqual(original);
+    });
+    b.message({ type: "emend:scroll", threadId: "source" });
+    expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: "center" });
+    b.message({ type: "emend:highlight", anchors: [outside] });
+    expect(pre.previousElementSibling).toBe(host);
+    expect(pre.style.getPropertyValue("display")).toBe("none");
+    expect(pre.style.getPropertyPriority("display")).toBe("important");
+    b.message({ type: "emend:diagram", request: 1, index: 0, svg: null });
+    expect(host?.isConnected).toBe(false);
+    expect([pre.style.getPropertyValue("display"), pre.style.getPropertyPriority("display")]).toEqual(original);
+  },
+);
+
+test.each(["no diagrams", "unplaced diagrams", "hidden sources", "shown sources", "mixed sources"])(
+  "highlights with unchanged visibility leave pins and scroll calls alone: %s",
+  (state) => {
+    vi.useFakeTimers();
+    try {
+      const sources = state === "no diagrams" ? [] : ["graph LR", "graph TD"];
+      const b = bridge(
+        `<body><h2>First</h2>${sources.map((source) => `<pre class="mermaid">${source}</pre>`).join("")}<h3>Second</h3><h2>Last</h2></body>`,
+        (window) => Object.assign(window, { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout }),
+      );
+      const root = b.window.document.scrollingElement;
+      const headings = [...b.window.document.querySelectorAll("h2,h3")];
+      Object.defineProperty(b.window, "innerHeight", { configurable: true, value: 400 });
+      const scale = () => (root.getAttribute("data-emend-prose") === "18" ? 2 : 1);
+      const offset = (element: Element) => ([300, 350, 900][headings.indexOf(element)] ?? 0) * scale();
+      const clamp = (top: number) => Math.max(0, Math.min(1100 * scale() - 400, Math.round(top)));
+      vi.spyOn(b.window.Element.prototype, "checkVisibility").mockReturnValue(true);
+      vi.spyOn(b.window.Element.prototype, "scrollHeight", "get").mockImplementation(() => 1100 * scale());
+      vi.spyOn(b.window.Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+        return new b.window.DOMRect(0, offset(this) - root.scrollTop, 400, 20);
+      });
+      const scroll = vi.spyOn(b.window.Element.prototype, "scrollIntoView").mockImplementation(function (
+        this: Element,
+      ) {
+        root.scrollTop = clamp(offset(this));
+      });
+      const scrollTo = vi.spyOn(b.window.Element.prototype, "scrollTo").mockImplementation(function (
+        this: Element,
+        options: number | ScrollToOptions | undefined,
+      ) {
+        if (this === root && typeof options === "object") root.scrollTop = clamp(options.top ?? 0);
+      });
+      const windowScroll = vi.spyOn(b.window, "scrollTo");
+      if (state.endsWith("sources")) {
+        b.message(b.result);
+        b.message({ ...b.result, index: 1 });
+      }
+      const shown = state === "shown sources" ? 2 : state === "mixed sources" ? 1 : 0;
+      const anchors = sources.slice(0, shown).map((quote) => ({ threadId: quote, quote, prefix: "", suffix: "" }));
+      b.message({ type: "emend:highlight", anchors });
+      b.message({ type: "emend:goto", heading: 0, label: "First", fraction: 0.25 });
+      expect(root.scrollTop).toBe(213); // Rounded landing is 0.26; the pin must keep 0.25.
+      vi.runAllTimers();
+      for (const spy of [scroll, scrollTo, windowScroll, b.post]) spy.mockClear();
+      const timer = vi.spyOn(b.window, "setTimeout");
+
+      b.message({
+        type: "emend:highlight",
+        anchors: [...anchors, { threadId: "outside", quote: "Last", prefix: "", suffix: "" }],
+      });
+      expect(timer).not.toHaveBeenCalled();
+      vi.runAllTimers();
+      for (const spy of [scroll, scrollTo, windowScroll, b.post]) expect(spy).not.toHaveBeenCalled();
+      expect(root.scrollTop).toBe(213);
+      const pres = [...b.window.document.querySelectorAll("pre")];
+      expect(pres.map((pre) => pre.style.display)).toEqual(
+        sources.map((_, index) => (state.endsWith("sources") && index >= shown ? "none" : "")),
+      );
+
+      // A later layout change still restores the original pin, without rounding drift.
+      b.message({ type: "emend:layout", wide: true, width: "comfortable", prose: 18, code: 13 });
+      expect(scroll.mock.instances).toEqual([headings[0]]);
+      expect(root.scrollTop).toBe(525);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
   },
 );
 

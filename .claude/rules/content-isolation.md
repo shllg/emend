@@ -48,11 +48,11 @@ with the reviewer's session can send instructions to the waiting agent in the re
   it, so never allow a doc's own script.
 - Links: only `http:`, `https:` and `mailto:`, with `rel="noopener noreferrer nofollow"`. Relative
   links keep no `href`, except links between docs as `doc-navigation.md` defines them.
-- Mermaid: frames from `/mermaid-frame.html` (from `apps/web/mermaid-frame.*`),
-  `sandbox="allow-scripts"` without `allow-same-origin`, a bundled, pinned Mermaid (never a
-  CDN), `securityLevel: "strict"`, `startOnLoad: false`. The frame accepts messages only from its
-  parent; colors only `#rrggbb`. A diagram is commented on as a whole block. HTML pubs show its
-  SVG only as a `data:` image.
+- Mermaid: one frame per Markdown diagram, one hidden frame at a time per HTML doc
+  (`doc-navigation.md`), from `/mermaid-frame.html`, `sandbox="allow-scripts"` without
+  `allow-same-origin`, a bundled, pinned Mermaid (never a CDN), `securityLevel: "strict"`,
+  `startOnLoad: false`. The frame accepts messages only from its parent; colors only `#rrggbb`. A
+  diagram is commented on as one block.
 - Block ids are `<section>-<hash8>` over the normalized text. Never derive an id from position.
 - Diff text renders as text through `@pierre/diffs`, never as HTML.
 - App pages: `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'

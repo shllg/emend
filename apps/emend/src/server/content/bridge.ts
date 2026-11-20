@@ -427,6 +427,10 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       }
       dom(window.HighlightRegistry.prototype, "set", CSS.highlights, "emend-quotes", new Highlight(...ranges.values()));
     }
+    const changed = diagrams.filter(diagram => diagram.host && diagramSourceShown(diagram) !== diagram.sourceShown);
+    if (changed.length) holdPosition(() => {
+      for (const diagram of changed) updateDiagramSource(diagram);
+    });
   }
   // Shared by layout and diagram placement: keep only a live pin or a scrolled reading path.
   function holdPosition(change, changed = true) {
@@ -478,8 +482,8 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   }
   function postDiagrams() {
     if (!diagrams.length || diagramRequest === DIAGRAM_REQUEST_MAX) return;
-    post({ type: "emend:diagrams", request: ++diagramRequest, diagrams: diagrams.map(({ pre, source, mode }) => ({
-      source, mode, width: Math.max(1, Math.min(DIAGRAM_DIMENSION_MAX, Math.round(bounds(pre).width) || 1))
+    post({ type: "emend:diagrams", request: ++diagramRequest, diagrams: diagrams.map(({ pre, host, source, mode }) => ({
+      source, mode, width: Math.max(1, Math.min(DIAGRAM_DIMENSION_MAX, Math.round(bounds(host || pre).width) || 1))
     })) });
   }
   function scanDiagrams() {
@@ -507,6 +511,17 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     }
     if (changed) postDiagrams();
   }
+  function diagramSourceShown(diagram) {
+    return !diagram.host || Array.from(ranges.values()).some(range => rangeCall("intersectsNode", range, diagram.pre));
+  }
+  function updateDiagramSource(diagram) {
+    const style = styleOf(diagram.pre);
+    const shown = diagramSourceShown(diagram);
+    if (!shown) styleCall("setProperty", style, "display", "none", "important");
+    else if (diagram.display) styleCall("setProperty", style, "display", diagram.display, diagram.priority);
+    else styleCall("removeProperty", style, "display");
+    diagram.sourceShown = shown;
+  }
   function placeDiagram(data) {
     if (data.request !== diagramRequest || !Number.isInteger(data.index) || data.index < 0 || data.index >= diagrams.length) return;
     const dimension = value => Number.isInteger(value) && value >= 1 && value <= DIAGRAM_DIMENSION_MAX;
@@ -521,8 +536,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       if (data.svg === null) {
         dom(window.Node.prototype, "removeChild", nodeValue("parentNode", diagram.host), diagram.host);
         diagram.host = diagram.img = undefined;
-        if (diagram.display) styleCall("setProperty", style, "display", diagram.display, diagram.priority);
-        else styleCall("removeProperty", style, "display");
+        updateDiagramSource(diagram);
         return;
       }
       if (!diagram.host) {
@@ -540,11 +554,11 @@ export const BRIDGE_SOURCE = String.raw`(() => {
         diagram.img = img;
         diagram.display = styleCall("getPropertyValue", style, "display");
         diagram.priority = styleCall("getPropertyPriority", style, "display");
-        styleCall("setProperty", style, "display", "none", "important");
       }
       elementCall("setAttribute", diagram.img, "width", String(data.width));
       elementCall("setAttribute", diagram.img, "height", String(data.height));
       elementCall("setAttribute", diagram.img, "src", "data:image/svg+xml;charset=utf-8," + encodeURIComponent(data.svg));
+      updateDiagramSource(diagram);
     });
   }
   let themeSheet;

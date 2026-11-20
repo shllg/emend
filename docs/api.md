@@ -1185,7 +1185,8 @@ Immediately after `emend:ready`, a nonempty scan sends the strict message
 `{ type: "emend:diagrams", request: number, diagrams: { source: string, mode: "light" | "dark", width: number }[] }`.
 `request` is an integer from 1 through 2147483647, starting at 1 and increasing on every post.
 There are 1..50 entries; sources are well-formed strings of 1..50000 characters, with a total
-of at most 1,000,000. Width is the rounded bounding rectangle width, clamped to 1..10000.
+of at most 1,000,000. Width is the host's bounding rectangle width once placed, otherwise the
+`pre`'s, rounded and clamped to 1..10000.
 Mode comes from the computed `color` of the `pre`'s parent (or the document element): a 1x1
 sRGB canvas converts it to unpremultiplied RGB bytes, ignoring alpha. Linearised sRGB relative
 luminance uses weights 0.2126, 0.7152 and 0.0722; a value above 0.179 means light text and mode
@@ -1227,10 +1228,13 @@ the supplied width and height, and CSSOM-set `display: block; max-width: 100%; h
 Its last-set attribute is `src`, containing `data:image/svg+xml;charset=utf-8,` plus the encoded
 SVG. Later answers update only image dimensions and source. No doc attributes are copied.
 The bridge remembers the `pre`'s inline display value and priority, then hides it with
-`display: none !important`. A null answer removes the host and restores display exactly,
-removing the property if originally absent. It never changes the `pre`'s children. Quote text,
-highlight anchors and headings remain intact, and diagram images never enter the image gallery.
-Placement and removal hold reading position with the same pin and scroll-path rules as layout.
+`display: none !important` unless a current comment highlight intersects it. While a comment's
+quote lies in the source, it shows below the image with its original inline display restored;
+when no highlight intersects it, it is hidden again. A null answer removes the host and restores
+display exactly, removing the property if originally absent. It never changes the `pre`'s children.
+Quote text, highlight anchors and headings remain intact, and diagram images never enter the image gallery.
+Placement, removal and source visibility changes hold reading position with the same pin and
+scroll-path rules as layout.
 Only emend's look gives the host the margin, padding, border, radius, sunken background and
 overflow of a code block. Custom pages receive no host styles.
 
