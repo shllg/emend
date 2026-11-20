@@ -386,6 +386,8 @@ test("real Mermaid SVG replies strip click directives and executable markup", as
     if (data.type === "svg") reply.resolve(data);
   });
   onTestFinished(() => post.mockRestore());
+  const render = vi.spyOn(mermaid, "render");
+  onTestFinished(() => render.mockRestore());
   const stop = startFrame(root);
   onTestFinished(stop);
   window.dispatchEvent(
@@ -394,15 +396,32 @@ test("real Mermaid SVG replies strip click directives and executable markup", as
       data: {
         type: "render",
         source: `flowchart LR
-  A --> B --> C
+  A --> B --> C --> D
   click A call alert()
   click B "javascript:alert(1)"
-  click C href "javascript:alert(2)"`,
+  click C href "javascript:alert(2)"
+  click D href "https://example.com/synthetic"`,
         reply: "svg",
       },
     }),
   );
   const answer = await reply.promise;
+  const rendered = await render.mock.results[0]?.value;
+  // Mermaid's own output: the click lines were applied, and node D's allowed link is still there for
+  // the frame to remove.
+  const own = new DOMParser().parseFromString(rendered.svg, "image/svg+xml").documentElement;
+  const wrapper = (root: Element, id: string) =>
+    root.querySelector(`[id$="flowchart-${id}-${"ABCD".indexOf(id)}"]`)?.closest("a");
+  const link = (anchor: Element | null | undefined) =>
+    anchor?.getAttribute("href") ?? anchor?.getAttribute("xlink:href");
+  expect(own.querySelectorAll(".node")).toHaveLength(4);
+  expect(wrapper(own, "A")).toBeNull();
+  expect(wrapper(own, "B")).not.toBeNull();
+  expect(wrapper(own, "C")).not.toBeNull();
+  expect(link(wrapper(own, "D"))).toBe("https://example.com/synthetic");
+  for (const node of [own, ...own.querySelectorAll("*")]) {
+    for (const attribute of node.attributes) expect(attribute.name).not.toMatch(/^on/i);
+  }
   expect(answer.width).toBeGreaterThan(0);
   expect(answer.height).toBeGreaterThan(0);
   if (answer.svg === null) throw new Error(`Missing SVG reply: ${root.textContent}`);
@@ -412,8 +431,14 @@ test("real Mermaid SVG replies strip click directives and executable markup", as
   expect(parsed.querySelector("parsererror")).toBeNull();
   const svg = parsed.documentElement;
   expect(svg.localName).toBe("svg");
-  expect(svg.querySelectorAll(".node")).toHaveLength(3);
+  expect(svg.querySelectorAll(".node")).toHaveLength(4);
+  for (const id of ["B", "C", "D"]) expect(wrapper(svg, id)).not.toBeNull();
+  expect(answer.svg).not.toContain("example.com");
   for (const node of [svg, ...svg.querySelectorAll("*")]) {
+    for (const name of ["href", "xlink:href"]) {
+      const value = node.getAttribute(name);
+      if (value !== null) expect(value.startsWith("#")).toBe(true);
+    }
     expect(["script", "foreignobject"]).not.toContain(node.localName.toLowerCase());
     expect(node.textContent).not.toMatch(/javascript:/i);
     for (const attribute of node.attributes) {
