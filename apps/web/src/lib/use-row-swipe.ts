@@ -31,9 +31,10 @@ export function useRowSwipe<T extends HTMLElement = HTMLAnchorElement>(enabled: 
   const revealed = offset === -SWIPE_REVEAL_PX && !dragging;
   const hide = useCallback(() => {
     gesture.current = null;
+    writeOffset(0);
     setDragging(false);
     setOffset(0);
-  }, []);
+  }, [writeOffset]);
   useEffect(() => {
     if (!revealed) return;
     const outside = (event: globalThis.PointerEvent) => {
@@ -80,7 +81,9 @@ export function useRowSwipe<T extends HTMLElement = HTMLAnchorElement>(enabled: 
       if (!current || current.pointerId !== event.pointerId) return;
       gesture.current = null;
       if (current.dragging) {
-        setOffset(current.offset <= -SWIPE_REVEAL_PX / 2 ? -SWIPE_REVEAL_PX : 0);
+        const settled = current.offset <= -SWIPE_REVEAL_PX / 2 ? -SWIPE_REVEAL_PX : 0;
+        writeOffset(settled);
+        setOffset(settled);
         setDragging(false);
         swallowClickAt.current = performance.now();
       } else if (current.start < 0) {
@@ -91,6 +94,7 @@ export function useRowSwipe<T extends HTMLElement = HTMLAnchorElement>(enabled: 
     onPointerCancel(event: PointerEvent<HTMLElement>) {
       const current = gesture.current;
       if (!current || current.pointerId !== event.pointerId) return;
+      writeOffset(current.start);
       setOffset(current.start);
       setDragging(false);
       gesture.current = null;

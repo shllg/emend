@@ -36,12 +36,16 @@ export interface RowMenuRequest {
 
 const RowMenuContext = createContext<((request: RowMenuRequest) => void) | null>(null);
 
-type RowMenuTarget = RowMenuRequest & { surface: Element | null };
+type RowMenuTarget = RowMenuRequest & { surface: Element | null; candidateIds: string[] };
 
 function rowToFocus(request: RowMenuTarget): HTMLElement | null {
   if (request.row.isConnected) return request.row;
   if (!request.surface?.isConnected) return null;
-  return request.surface.querySelector<HTMLElement>(`[data-row-menu="${CSS.escape(request.reviewId)}"]`);
+  for (const id of request.candidateIds) {
+    const row = request.surface.querySelector<HTMLElement>(`[data-row-menu="${CSS.escape(id)}"]`);
+    if (row) return row;
+  }
+  return null;
 }
 
 export function RowMenuProvider({ children }: { children: ReactNode }) {
@@ -50,7 +54,14 @@ export function RowMenuProvider({ children }: { children: ReactNode }) {
   const inbox = useQuery(inboxQuery());
   const open = useCallback((request: RowMenuRequest) => {
     followedRow.current = null;
-    setMenu({ request: { ...request, surface: request.row.closest("[data-row-menu-surface]") }, open: true });
+    const surface = request.row.closest("[data-row-menu-surface]");
+    const rows = Array.from(surface?.querySelectorAll<HTMLElement>("[data-row-menu]") ?? []);
+    const index = rows.indexOf(request.row);
+    const candidateIds = [
+      request.reviewId,
+      ...[...rows.slice(index + 1), ...rows.slice(0, index).reverse()].map((row) => row.dataset.rowMenu ?? ""),
+    ];
+    setMenu({ request: { ...request, surface, candidateIds }, open: true });
   }, []);
   const request = menu?.request;
   useEffect(() => {
@@ -60,19 +71,31 @@ export function RowMenuProvider({ children }: { children: ReactNode }) {
       const row = rowToFocus(request);
       followedRow.current = row && event.target === row ? row : null;
     };
+    const onBlur = (event: FocusEvent) => {
+      const followed = followedRow.current;
+      if (!followed || event.target !== followed) return;
+      // A reader can blur to the body without a focusin; removal must still let focus follow.
+      queueMicrotask(() => {
+        if (followedRow.current === followed && followed.isConnected) followedRow.current = null;
+      });
+    };
     document.addEventListener("focusin", onFocus);
-    return () => document.removeEventListener("focusin", onFocus);
+    document.addEventListener("focusout", onBlur);
+    return () => {
+      document.removeEventListener("focusin", onFocus);
+      document.removeEventListener("focusout", onBlur);
+    };
   }, [request]);
   useLayoutEffect(() => {
     const followed = followedRow.current;
-    if (!request || !inbox.data || !followed || document.activeElement === followed) return;
-    if (followed.isConnected || (document.activeElement && document.activeElement !== document.body)) {
+    if (!request || !inbox.data || !followed || followed.isConnected) return;
+    if (document.activeElement && document.activeElement !== document.body) {
       followedRow.current = null;
       return;
     }
     const row = rowToFocus(request);
     followedRow.current = row;
-    row?.focus();
+    row?.focus({ preventScroll: true });
   }, [inbox.data, request]);
   const item = inbox.data?.items.find((item) => item.id === menu?.request.reviewId);
   return (

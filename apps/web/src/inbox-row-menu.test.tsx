@@ -39,6 +39,11 @@ const item: InboxItem = {
   pickedUpAt: null,
   kind: "review",
 };
+const neighbour: InboxItem = {
+  ...item,
+  id: "44444444-4444-4444-8444-444444444444",
+  title: "Neighbour review",
+};
 const revision: RevisionView = {
   seq: 1,
   base: null,
@@ -295,8 +300,10 @@ test.each([{ key: "F10", shiftKey: true }, { key: "ContextMenu" }])(
       expect(document.activeElement).toBe(within(menu).getByRole("menuitem", { name: "How to resume" })),
     );
     expect(fireEvent.contextMenu(menu)).toBe(false);
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
     await escapeMenu();
     await waitFor(() => expect(document.activeElement).toBe(row));
+    expect(focus).toHaveBeenLastCalledWith({ preventScroll: true });
   },
 );
 
@@ -367,12 +374,16 @@ test("an outside click activates its button and leaves focus there", async () =>
 
 test("scrolling the inbox closes its row menu, but scrolling inside the menu keeps it open", async () => {
   mount();
+  const row = await rowLink();
   const menu = await rowMenu();
   fireEvent.scroll(menu);
   fireEvent.scroll(within(menu).getByRole("menuitem", { name: "Pin" }));
   expect(screen.getByRole("menu")).toBe(menu);
+  const focus = vi.spyOn(HTMLElement.prototype, "focus");
   fireEvent.scroll(screen.getByRole("region", { name: "Active" }));
   await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(row));
+  expect(focus).toHaveBeenLastCalledWith({ preventScroll: true });
 });
 
 test("Pin from a keyboard menu follows the row from Active to Pinned", async () => {
@@ -441,6 +452,41 @@ test("focus follows a snoozed row when the inbox refetch arrives after the dialo
   await waitFor(() => expect(document.activeElement).toBe(moved));
 });
 
+test.each(["next", "previous"])(
+  "Snooze into the folded section returns focus to the %s Active row",
+  async (direction) => {
+    inbox.splice(direction === "next" ? 2 : 1, 0, neighbour);
+    mount();
+    const row = await rowLink();
+    const adjacent = await rowLink("Neighbour review");
+    act(() => row.focus());
+    fireEvent.keyDown(row, { key: "ContextMenu" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Snooze" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Snooze this review" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Until it changes" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    await waitFor(() => expect(row.isConnected).toBe(false));
+    expect(screen.getByRole("button", { name: /^Snoozed / }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("link", { name: /Row review/ })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(adjacent));
+  },
+);
+
+test("Delete through the dialog returns focus to the next row", async () => {
+  inbox.push(neighbour);
+  mount();
+  const row = await rowLink();
+  const next = await rowLink("Neighbour review");
+  act(() => row.focus());
+  fireEvent.keyDown(row, { key: "ContextMenu" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+  const dialog = await screen.findByRole("alertdialog", { name: "Delete “Row review”?" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Move to bin" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  await waitFor(() => expect(row.isConnected).toBe(false));
+  await waitFor(() => expect(document.activeElement).toBe(next));
+});
+
 test("a returned row stops following focus after the reader focuses another control", async () => {
   mount();
   const row = await rowLink();
@@ -460,9 +506,35 @@ test("a returned row stops following focus after the reader focuses another cont
   expect(document.activeElement).toBe(document.body);
 });
 
-test("a row moving to a folded section leaves focus in place", async () => {
+test("a returned row stops following focus after a click on non-focusable content", async () => {
   mount();
   const row = await rowLink();
+  await rowMenu();
+  await escapeMenu();
+  await waitFor(() => expect(document.activeElement).toBe(row));
+  const heading = screen.getByRole("heading", { name: "Inbox", level: 1 });
+  await act(async () => {
+    fireEvent.pointerDown(heading, { button: 0, pointerType: "mouse" });
+    // happy-dom does not blur the row as the browser's pointerdown default would.
+    row.blur();
+    fireEvent.click(heading, { detail: 1 });
+  });
+  expect(row.isConnected).toBe(true);
+  expect(document.activeElement).toBe(document.body);
+  target({ pinnedAt: item.updatedAt });
+  await act(async () => {
+    await client.invalidateQueries(inboxQuery());
+  });
+  const pinned = await screen.findByRole("region", { name: "Pinned" });
+  expect(within(pinned).getByRole("link", { name: /Row review/ })).not.toBe(row);
+  expect(row.isConnected).toBe(false);
+  expect(document.activeElement).toBe(document.body);
+});
+
+test("a row moving to a folded section returns focus to its previous neighbour", async () => {
+  mount();
+  const row = await rowLink();
+  const previous = await rowLink("Open review");
   await rowMenu();
   await escapeMenu();
   await waitFor(() => expect(document.activeElement).toBe(row));
@@ -472,7 +544,7 @@ test("a row moving to a folded section leaves focus in place", async () => {
   });
   await waitFor(() => expect(row.isConnected).toBe(false));
   expect(screen.queryByRole("link", { name: /Row review/ })).toBeNull();
-  expect(document.activeElement).toBe(document.body);
+  await waitFor(() => expect(document.activeElement).toBe(previous));
 });
 
 test.each(["Snooze", "Retire", "Move to group…", "Delete", "How to resume"])(
@@ -619,6 +691,17 @@ test.each(["mouse", "pen", "vertical", "short", "cancel"])(
     expect(row.style.transform).toBe("");
   },
 );
+
+test.each(["release", "cancel"])("a quick swipe %s resets the row before the drag renders", async (end) => {
+  width = 390;
+  mount();
+  const row = await rowLink();
+  act(() => {
+    drag(row, -SWIPE_SLOP_PX - 1, 0, "touch", end === "cancel");
+  });
+  expect(row.style.transform).toBe("");
+  expect(actionsButton()).toBeNull();
+});
 
 test("a phone tap still opens the review", async () => {
   width = 390;

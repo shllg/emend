@@ -145,7 +145,7 @@ export function AnchoredMenu({
           event.preventDefault();
           if (!outside.current) {
             const target = returnFocus();
-            if (target?.isConnected) target.focus();
+            if (target?.isConnected) target.focus({ preventScroll: true });
           }
           outside.current = false;
           entered.current = false;
