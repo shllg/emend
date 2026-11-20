@@ -41,6 +41,53 @@ Put any other note in its own paragraph.
 For two or more cases, you can use a table: `Input | Before | After`.
 A document that explains a change or a proposal gives the same why and a grounded example.
 
+## State diagrams
+
+This section applies to a review writeup.
+When a topic changes how something moves between states, show those states as a diagram in that topic.
+A lifecycle, a protocol, retries and a hand-off are such changes.
+Other topics need no diagram.
+
+- Put a Mermaid `stateDiagram-v2` in a `mermaid` code fence in the topic's `why`, right after the **Fix:** paragraph.
+  The `why` shows open; `body` starts folded under Details.
+  An **Undo:** paragraph still comes last.
+- Name states and arrows in the reviewer's words, not with code names.
+  Write "Waiting for review", not `PENDING_REVIEW`.
+- Keep a diagram to about 20 arrows.
+  For a bigger flow, merge states into broader ones, or split it into one diagram per part.
+- Keep arrow labels as short as state names, or they overlap.
+
+When the statechart skill is installed and the change is risky enough to model, use its checked chart.
+A flow that can lose work, repeat a step or hang is risky enough.
+Leave out the chart's `classDef` lines for `breaks` and `mayBreak`, so emend's light and dark colours apply.
+Under the chart, list each bug path as one item: the rule, the reader's sentence for it, and the path.
+
+Otherwise, write under the diagram that it was drawn by hand and not checked.
+The statechart skill is never required. Never install it.
+
+A hand-drawn diagram for the retry topic in the worked examples below:
+
+````markdown
+**Fix:** The loop stops after three attempts.
+
+```mermaid
+stateDiagram-v2
+  [*] --> Sending
+  Sending --> Done: answered
+  Sending --> Waiting: failed, tries left
+  Waiting --> Sending: pause over
+  Sending --> Failed: third failure
+```
+
+Drawn by hand, not checked.
+````
+
+A bug path from a checked chart, as one item:
+
+```markdown
+- `ChargedOnce`: an order is charged at most once. Path: Checkout → Charging → Timed out → Charging.
+```
+
 ## Review verdict and risk
 
 This section applies to a review writeup. It tells the reviewer how deep to read, and why.

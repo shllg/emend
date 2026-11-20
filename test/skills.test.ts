@@ -452,6 +452,30 @@ test("the writing reference defines HTML pages and both TL;DR locations", () => 
   expect(tldr).toContain('A document opens with it, under a "TL;DR" heading right after the title.');
 });
 
+test("the writing reference asks for a state diagram in a topic that changes a state flow", () => {
+  const section = (read(writingReference).split("## State diagrams\n")[1]?.split("\n## ")[0] ?? "").replace(
+    /\s+/g,
+    " ",
+  );
+  for (const rule of [
+    "This section applies to a review writeup.",
+    "Put a Mermaid `stateDiagram-v2` in a `mermaid` code fence in the topic's `why`, right after the **Fix:** paragraph.",
+    "An **Undo:** paragraph still comes last.",
+    "Name states and arrows in the reviewer's words, not with code names.",
+    "Keep a diagram to about 20 arrows.",
+    "Leave out the chart's `classDef` lines for `breaks` and `mayBreak`",
+    "the rule, the reader's sentence for it, and the path.",
+    "write under the diagram that it was drawn by hand and not checked.",
+    "The statechart skill is never required.",
+    "Drawn by hand, not checked.",
+  ]) {
+    expect(section).toContain(rule);
+  }
+  expect(read("plugin/skills/emend-review/SKILL.md").replace(/\s+/g, " ")).toContain(
+    "A topic that changes a state flow shows a state diagram in its `why`, as the writing reference says.",
+  );
+});
+
 test.each([...names, "emend-theme"])("%s has only safe frontmatter and registered commands", async (name) => {
   const text = read(name === "emend-theme" ? THEME_SKILL_PATH : `plugin/skills/${name}/SKILL.md`);
   expect(safeSkillFrontmatter(text, name)).toBe(true);

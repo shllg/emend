@@ -143,7 +143,7 @@ If no related docs are found, write "No design doc is cited." in the writeup's `
 ## Write for the reviewer
 
 Read [the writing reference](references/writing.md) before you write the writeup. It holds the
-writing rules: sentences, the TL;DR, Why and Example, the glossary and screenshots.
+writing rules: sentences, the TL;DR, Why and Example, state diagrams, the glossary and screenshots.
 
 Author Markdown in `writeup`, except the plain-text `area`.
 
@@ -180,6 +180,7 @@ Write the opening fields below. The app groups them for the reviewer.
 - `glossary`: the glossary, as the writing reference says.
 - `topics[slug]`: `why` and `example` as the writing reference says; `body` gives the decisions,
   trade-offs and checks. A request to explain something in the writeup belongs here.
+  A topic that changes a state flow shows a state diagram in its `why`, as the writing reference says.
 
 The app adds Risk, Undo, Read and Since to Facts from the topics, diff and earlier revisions.
 Write nothing for them.
