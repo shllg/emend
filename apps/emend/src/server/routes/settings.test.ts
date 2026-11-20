@@ -681,3 +681,23 @@ test("digit jump keys normalize from config and persist through PATCH", async ()
   );
   expect(JSON.parse(stored?.value ?? "null")).toEqual({ "inbox.jump2": "mod+2" });
 });
+
+test.each([null, "mod"] as const)("GET settings keeps row ten off for a stored nine-key %s group", async (modifier) => {
+  const overrides = Object.fromEntries(
+    Array.from({ length: 9 }, (_, index) => [
+      `inbox.jump${index + 1}`,
+      modifier === null ? null : `${modifier}+${index + 1}`,
+    ]),
+  );
+  await f.db.query((q) =>
+    q.insert(settings).values({ ownerId: f.ownerId, key: "keys", value: JSON.stringify(overrides) }),
+  );
+  expect((await keyView()).commands["inbox.jump10"]).toEqual({
+    value: null,
+    source: "override",
+    default: "alt+0",
+    override: null,
+    fileError: false,
+    clashWith: null,
+  });
+});

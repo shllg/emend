@@ -13,6 +13,17 @@ interface CommandState {
   clashWith: ShortcutCommand | null;
 }
 
+function fillTenthJump(keys: Partial<Record<ShortcutCommand, KeyBinding>>) {
+  if (Object.hasOwn(keys, "inbox.jump10")) return keys;
+  const commands = Array.from({ length: 9 }, (_, index) => `inbox.jump${index + 1}` as ShortcutCommand);
+  if (!commands.every((command) => Object.hasOwn(keys, command))) return keys;
+  const values = commands.map((command) => keys[command]);
+  if (values.every((value) => value === null) || values.every((value, index) => value === `mod+${index + 1}`))
+    return { ...keys, "inbox.jump10": null };
+  if (values.every((value, index) => value === `alt+${index + 1}`)) return { ...keys, "inbox.jump10": "alt+0" };
+  return keys;
+}
+
 export function resolveShortcuts({
   file,
   fileErrors,
@@ -22,6 +33,9 @@ export function resolveShortcuts({
   fileErrors: ReadonlySet<ShortcutCommand>;
   overrides: Partial<Record<ShortcutCommand, KeyBinding>>;
 }): Record<ShortcutCommand, KeySetting> {
+  // Groups saved before inbox.jump10 existed keep working as one group.
+  overrides = fillTenthJump(overrides);
+  if (!fileErrors.has("inbox.jump10")) file = fillTenthJump(file);
   const states: CommandState[] = ShortcutCommand.options.map((command) => {
     const candidates: Candidate[] = [];
     const override = overrides[command],

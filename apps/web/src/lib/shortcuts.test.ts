@@ -337,26 +337,35 @@ test.each([
   expect(jumpBadge("mod+k", platform)).toBe(`${mod}${mod === "Ctrl" ? "+" : ""}K`);
 });
 
-test.each(["alt", "mod"] as const)("jumpKey maps ten %s keys to digits 1 through 9, then 0", (modifier) => {
-  expect(Array.from({ length: 10 }, (_, index) => jumpKey(modifier, index))).toEqual(
-    ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"].map((digit) => `${modifier}+${digit}`),
+test.each(["alt", "mod"] as const)("jumpKey maps the first nine %s keys to digits 1 through 9", (modifier) => {
+  expect(Array.from({ length: 9 }, (_, index) => jumpKey(modifier, index))).toEqual(
+    ["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => `${modifier}+${digit}`),
   );
+});
+
+test("jumpKey binds Alt+0 for row ten and leaves Ctrl+0 and ⌘0 to reset the zoom", () => {
+  expect(jumpKey("mod", 9)).toBeNull();
+  expect(jumpKey("alt", 9)).toBe("alt+0");
 });
 
 test.each([
   ["Linux x86_64", "Ctrl+1–9, Alt+0"],
   ["MacIntel", "⌘1–9, ⌥0"],
-])("a previously remapped range keeps its default tenth key in the label on %s", (platform, label) => {
+])("a configured Ctrl range with Alt+0 shows both in the label on %s", (platform, label) => {
   expect(jumpKeysLabel([...Array.from({ length: 9 }, (_, index) => `mod+${index + 1}`), "alt+0"], platform)).toBe(
     label,
   );
 });
 
 test.each([
-  ["Linux x86_64", "Alt+1–9"],
-  ["MacIntel", "⌥1–9"],
-])("a disabled tenth key leaves only the first nine in the label on %s", (platform, label) => {
-  expect(jumpKeysLabel([...Array.from({ length: 9 }, (_, index) => `alt+${index + 1}`), null], platform)).toBe(label);
+  ["Linux x86_64", "alt", "Alt+1–9"],
+  ["MacIntel", "alt", "⌥1–9"],
+  ["Linux x86_64", "mod", "Ctrl+1–9"],
+  ["MacIntel", "mod", "⌘1–9"],
+])("a disabled tenth key leaves only the first nine in the %s %s label", (platform, modifier, label) => {
+  expect(jumpKeysLabel([...Array.from({ length: 9 }, (_, index) => `${modifier}+${index + 1}`), null], platform)).toBe(
+    label,
+  );
 });
 
 test("a custom tenth key follows the compressed range", () => {

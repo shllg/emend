@@ -184,7 +184,7 @@ function change() {
 }
 function setJumpKeys(modifier: "mod" | null) {
   for (const [index, command] of jumpCommands.entries()) {
-    const value = modifier === null ? null : `${modifier}+${(index + 1) % 10}`;
+    const value = modifier === null || index === 9 ? null : `${modifier}+${index + 1}`;
     Object.assign(settings.keys.commands[command], { value, source: "override", override: value });
   }
 }
@@ -591,19 +591,42 @@ test.each(["page", "rail"])("off jump keys remove %s badges and give Alt+1 back 
   expect(history.location.pathname).toBe(path);
 });
 
-test.each([
-  [1, 1],
-  [0, 10],
-])("remapped jumps handle Ctrl+%s for row %s and leave Alt alone", async (digit, row) => {
+test.each([1, 2, 3, 4, 5, 6, 7, 8, 9])("remapped jumps handle Ctrl+%s and leave Alt alone", async (digit) => {
   setJumpKeys("mod");
   const history = mount();
   await ready();
-  expect(badge(rowLink(row))).toBe(String(digit));
-  expect(rowLink(row).getAttribute("aria-keyshortcuts")).toBe(`Control+${digit}`);
+  expect(badge(rowLink(digit))).toBe(String(digit));
+  expect(rowLink(digit).getAttribute("aria-keyshortcuts")).toBe(`Control+${digit}`);
   expect(jump(digit).defaultPrevented).toBe(false);
   expect(history.location.pathname).toBe("/");
   expect(press(String(digit), { ctrlKey: true, code: `Digit${digit}` }).defaultPrevented).toBe(true);
-  await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(row)}`));
+  await waitFor(() => expect(history.location.pathname).toBe(`/r/${id(digit)}`));
+});
+
+test.each([
+  ["page", 12],
+  ["pane", 12],
+  ["rail", 12],
+  ["page", 2],
+  ["pane", 2],
+  ["rail", 2],
+] as const)("Ctrl jumps on the %s with %s rows leave Ctrl+0 and ⌘0 to the browser", async (surface, count) => {
+  inbox = activeItems(count);
+  setJumpKeys("mod");
+  layoutStore.update({ inboxCollapsed: surface === "rail" });
+  const path = surface === "page" ? "/" : `/r/${id(1)}`;
+  const history = mount(path);
+  await ready();
+  if (count >= 10) {
+    expect(badge(rowLink(10))).toBeUndefined();
+    expect(rowLink(10).getAttribute("aria-keyshortcuts")).toBeNull();
+  }
+  for (const modifier of ["ctrlKey", "metaKey"]) {
+    expect(press("0", { [modifier]: true, code: "Digit0" }).defaultPrevented).toBe(false);
+    await act(async () => {});
+    expect(history.location.pathname).toBe(path);
+  }
+  expect(jump(0).defaultPrevented).toBe(false);
 });
 
 test("a custom single jump key appears on its row and works", async () => {
@@ -695,13 +718,17 @@ test.each([
   expect(Object.keys(patchBody(0).keys)).toHaveLength(10);
   expect(patchBody(0)).toEqual({
     keys: Object.fromEntries(
-      jumpCommands.map((command, index) => [command, { key: `${modifier}+${(index + 1) % 10}` }]),
+      jumpCommands.map((command, index) => [
+        command,
+        { key: modifier === "mod" && index === 9 ? null : `${modifier}+${(index + 1) % 10}` },
+      ]),
     ),
   });
-  expect(jumpRow().getByText(modifier === "mod" ? "Ctrl+1–9, Ctrl+0" : "Alt+1–9, Alt+0")).toBeTruthy();
+  expect(patchBody(0).keys["inbox.jump10"]).toEqual({ key: modifier === "mod" ? null : "alt+0" });
+  expect(jumpRow().getByText(modifier === "mod" ? "Ctrl+1–9" : "Alt+1–9, Alt+0")).toBeTruthy();
   for (const [index, command] of jumpCommands.entries())
     expect(client.getQueryData<SettingsView>(["settings"])?.keys.commands[command].value).toBe(
-      `${modifier}+${(index + 1) % 10}`,
+      modifier === "mod" && index === 9 ? null : `${modifier}+${(index + 1) % 10}`,
     );
 });
 
@@ -742,12 +769,25 @@ test.each(["Linux x86_64", "MacIntel"])("jump capture reports invalid combinatio
   }
 });
 
-test.each(["mod+9", "mod+0"])("jump capture checks %s against non-jump commands", async (binding) => {
-  settings.keys.commands["tab.writeup"].value = binding;
+test("jump capture checks Ctrl+9 against non-jump commands", async () => {
+  settings.keys.commands["tab.writeup"].value = "mod+9";
   await openSettings();
   press("1", { ctrlKey: true, code: "Digit1" }, change());
   expect(jumpRow().getByRole("alert").textContent).toBe("Already used by Writeup tab.");
   expect(patches()).toHaveLength(0);
+});
+
+test.each(["mod+0", null])("a non-jump command set to %s does not clash with the Ctrl group", async (binding) => {
+  settings.keys.commands["tab.writeup"].value = binding;
+  await openSettings();
+  press("1", { ctrlKey: true, code: "Digit1" }, change());
+  await jumpRow().findByText("Set here.");
+  expect(jumpRow().queryByRole("alert")).toBeNull();
+  expect(jumpRow().getByText("Ctrl+1–9")).toBeTruthy();
+  expect(patches()).toHaveLength(1);
+  expect(Object.keys(patchBody(0).keys)).toHaveLength(10);
+  expect(patchBody(0).keys["inbox.jump10"]).toEqual({ key: null });
+  expect(client.getQueryData<SettingsView>(["settings"])?.keys.commands["tab.writeup"].value).toBe(binding);
 });
 
 test("capture ignores repeats and composition, waits for modifiers, and cancels on Tab, Escape or blur", async () => {

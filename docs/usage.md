@@ -41,7 +41,8 @@ next open section. An item pinned and shown in its own section too gets its numb
 With a filter set, only the rows shown count. The collapsed rail numbers its own list, pinned
 items first, ignores folds, Kind and search, and stops after ten.
 emend keeps these keys while its page has focus, also where the browser uses them to switch tabs.
-Settings can switch them to Ctrl (⌘ on a Mac) or turn them off to give them back to the browser.
+Settings can switch rows 1 to 9 to Ctrl (⌘ on a Mac), leaving row ten without a key, or turn them
+all off to give them back to the browser. Ctrl+0 (⌘0 on a Mac) keeps resetting the browser's zoom.
 Ctrl+Shift+P (⌘⇧P on a Mac) opens the command palette. Type a few letters of a command, or find
 reviews and pubs by title, branch, project or machine. An issue number finds the branch that carries
 it. Done items appear after active ones. Move with the arrow keys and press Enter to open the chosen

@@ -15,7 +15,9 @@ export const jumpCommands: ShortcutCommand[] = [
 ];
 export const jumpGroupLabel = "Open inbox row 1 to 10";
 
-export function jumpKey(modifier: "alt" | "mod", index: number) {
+export function jumpKey(modifier: "alt" | "mod", index: number): KeyBinding {
+  // Ctrl+0 and ⌘0 reset the browser's zoom.
+  if (modifier === "mod" && index === 9) return null;
   return `${modifier}+${(index + 1) % 10}`;
 }
 
