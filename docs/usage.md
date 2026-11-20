@@ -277,6 +277,9 @@ A pinned item that would be in Active shows only in Pinned. One in Snoozed, a gr
 shows in both, with a pin mark in its own section. “Unpin” takes it out of Pinned.
 Pins show on every device.
 
+Right-click an inbox row to open the same actions as the review's ⋯ menu for that row.
+On a focused row, press Shift+F10 or the menu key. On a touch screen, swipe left and tap ⋯.
+
 <p>
   <img src="images/inbox-desktop.png" alt="The inbox on a desktop, with six reviews and docs" width="73%"
   >&emsp;<img src="images/inbox-phone.png" alt="The inbox on a phone" width="21%">

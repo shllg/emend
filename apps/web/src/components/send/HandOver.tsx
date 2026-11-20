@@ -32,6 +32,11 @@ export const HANDOFF_REFETCH_MS = 3_000;
 /** How long the window stays open after a pick-up. */
 export const HANDOFF_CLOSE_MS = 3_000;
 
+/** Whether the hand-over note shows: an approved review has nothing left to hand over; a retired one only says when the agent stopped waiting. */
+export function showsHandOver(review: { approved: boolean; retired: boolean; releasedAt: string | null }): boolean {
+  return !review.approved && (!review.retired || !!review.releasedAt);
+}
+
 export function agentStatusText(agent: SendAgent): string {
   if (agent.agentWaiting) return "An agent is waiting";
   const date = agent.releasedAt ? shortDate(agent.releasedAt) : "";

@@ -32,6 +32,7 @@ import {
   ResumeDialog,
   type SendAgent,
   type SendBaseline,
+  showsHandOver,
 } from "./HandOver.tsx";
 import { ModePicker } from "./ModePicker.tsx";
 import { ReviewActions, type ReviewLifecycle } from "./ReviewActions.tsx";
@@ -141,8 +142,7 @@ export function SendBar({
   const revisionStatus = useId();
   const olderReasonId = useId();
   const retired = lifecycle?.state === "settled";
-  // An approved review has nothing left to hand over; a retired one only says when the agent stopped waiting.
-  const showNote = !approved && (!retired || !!agent?.releasedAt);
+  const showNote = showsHandOver({ approved, retired, releasedAt: agent?.releasedAt ?? null });
   const canResume = !phone && showNote && !!agent && !agent.agentWaiting;
   // A menu item runs its handler after the menu closes, and the bar can stop offering
   // "How to resume" while the dialog is open.
