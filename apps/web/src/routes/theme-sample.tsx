@@ -1,11 +1,12 @@
 import { SAMPLE_REVIEW_ID, type SampleView } from "@emend/contract";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { sampleQuery, themesQuery } from "../api/queries.ts";
 import { FileTextsContext } from "../components/diff/file-texts.ts";
 import { LazyDiffPane } from "../components/diff/LazyDiffPane.tsx";
 import { AppFrame } from "../components/layout/AppFrame.tsx";
+import type { ReaderProps } from "../components/reading/BlockReader.tsx";
 import { DocView } from "../components/reading/DocView.tsx";
 import { Writeup } from "../components/reading/Writeup.tsx";
 import { SampleBadges } from "../components/sample/SampleBadges.tsx";
@@ -13,6 +14,7 @@ import { SampleControls } from "../components/sample/SampleControls.tsx";
 import { SendBar } from "../components/send/SendBar.tsx";
 import { ThreadCard } from "../components/threads/ThreadCard.tsx";
 import { Select } from "../components/ui/Select.tsx";
+import { docHeading } from "../lib/doc-navigation.ts";
 import { useLayout } from "../lib/layout.ts";
 import { ReadOnlyReview } from "../lib/read-only-review.ts";
 import { selectCustomTheme, setThemePick, useThemeState } from "../lib/theme.ts";
@@ -52,6 +54,26 @@ function ThemeSwitch() {
   );
 }
 
+function SampleDoc({ doc, ...reader }: ReaderProps & { doc: SampleView["revision"]["docs"][number] }) {
+  const root = useRef<HTMLDivElement>(null);
+  return (
+    <div ref={root} data-reading-scroll className={doc.kind === "html" ? "flex h-[650px] flex-col" : undefined}>
+      <DocView
+        {...reader}
+        docs={[doc]}
+        openDoc={doc}
+        search={{}}
+        targeted={false}
+        onOpenDoc={() => {}}
+        onHeading={(id) => {
+          if (root.current && doc.kind === "markdown")
+            docHeading(root.current, doc, id)?.scrollIntoView({ block: "start" });
+        }}
+      />
+    </div>
+  );
+}
+
 function SampleContent({ sample }: { sample: SampleView }) {
   const phone = useLayout() === "phone";
   const { revision } = sample;
@@ -72,7 +94,7 @@ function SampleContent({ sample }: { sample: SampleView }) {
     topics: revision.topics,
   };
   return (
-    <FileTextsContext value={texts}>
+    <FileTextsContext value={{ scope: "sample", read: texts }}>
       <div className="mx-auto w-full max-w-[1200px] space-y-8 pb-10">
         <p className="px-4 pt-5 text-fg-3">Fixed sample content. Nothing can be commented on, sent or approved.</p>
         <section aria-label="Sample writeup" className="bg-reading" data-reading-scroll>
@@ -88,9 +110,7 @@ function SampleContent({ sample }: { sample: SampleView }) {
         </section>
         <section aria-label="Sample documents" className="space-y-6 bg-reading">
           {revision.docs.map((doc) => (
-            <div key={doc.path} className={doc.kind === "html" ? "flex h-[650px] flex-col" : undefined}>
-              <DocView {...reader} docs={[doc]} openDoc={doc} search={{}} targeted={false} onOpenDoc={() => {}} />
-            </div>
+            <SampleDoc key={doc.path} {...reader} doc={doc} />
           ))}
         </section>
         <section aria-label="Sample diff" data-diff-scroll className="bg-surface">

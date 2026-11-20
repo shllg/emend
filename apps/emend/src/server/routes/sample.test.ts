@@ -40,16 +40,19 @@ function counts() {
   }
 }
 
-test("sample needs a session, memoizes rendering, and leaves all tables and the inbox unchanged", async () => {
+test("sample needs a session, retries failed rendering, memoizes success, and leaves stored data unchanged", async () => {
   expect((await request("/api/v1/sample")).status).toBe(401);
-  const render = vi.spyOn(core, "buildSampleView");
+  const render = vi.spyOn(core, "buildSampleView").mockRejectedValueOnce(new Error("Synthetic render failure"));
   const inbox = await (await f.request("/reviews", "GET")).json();
   const before = counts();
+  const failed = await f.request("/sample", "GET");
+  expect(failed.status).toBe(500);
+  expect(await failed.json()).toMatchObject({ error: { code: "internal" } });
   const [first, second] = await Promise.all([f.request("/sample", "GET"), f.request("/sample", "GET")]);
   expect(first.status).toBe(200);
   const view = SampleView.parse(await first.json());
   expect(await second.json()).toEqual(view);
-  expect(render).toHaveBeenCalledTimes(1);
+  expect(render).toHaveBeenCalledTimes(2);
   expect(counts()).toEqual(before);
   expect(await (await f.request("/reviews", "GET")).json()).toEqual(inbox);
   for (const method of ["POST", "PUT", "PATCH", "DELETE"])
@@ -96,9 +99,13 @@ test("sample HTML uses the stored doc path's headers, bridge and theme handling 
     expect((await request(`/content/sample/${path}`)).status, path).toBe(404);
 });
 
-test("only the fixed sample SVG hash gets the synthetic image exception", async () => {
+test("sample media retries a failed hash and grants the synthetic image exception only to the fixed SVG", async () => {
   const sha = await core.sampleImageHash();
+  const hash = vi.spyOn(core, "sampleImageHash").mockRejectedValueOnce(new Error("Synthetic hash failure"));
   const before = counts();
+  const failed = await f.request(`/media/${sha}`, "GET");
+  expect(failed.status).toBe(500);
+  expect(await failed.json()).toMatchObject({ error: { code: "internal" } });
   for (const method of ["GET", "HEAD"]) {
     const response = await f.request(`/media/${sha}`, method);
     expect(response.status).toBe(200);
@@ -110,6 +117,7 @@ test("only the fixed sample SVG hash gets the synthetic image exception", async 
     expect(await response.text()).toBe(method === "GET" ? core.SAMPLE_SVG : "");
   }
   expect((await f.request(`/media/${"0".repeat(64)}`, "GET")).status).toBe(404);
+  expect(hash).toHaveBeenCalledTimes(2);
   expect(counts()).toEqual(before);
 });
 

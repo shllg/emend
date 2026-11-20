@@ -34,7 +34,7 @@ import { AgentNoteCard } from "./AgentNoteCard.tsx";
 import { annotationExpansions } from "./annotation-expansion.ts";
 import { CommentLinesContext, createCommentLines } from "./comment-lines.ts";
 import { FileHeader } from "./FileHeader.tsx";
-import { type FileTexts, useFileTexts } from "./file-texts.ts";
+import { fileSideQuery, useFileTexts } from "./file-texts.ts";
 import { GutterComment } from "./GutterComment.tsx";
 import { LineComposer } from "./LineComposer.tsx";
 import { linesTarget } from "./linesTarget.ts";
@@ -485,22 +485,19 @@ function Summary({ text, onExpand }: { text: string; onExpand: () => void }) {
     </div>
   );
 }
-function fileSideQuery(file: FileView, side: "old" | "new", texts: FileTexts) {
+function parsedFileQuery(file: FileView, old: string, next: string, parser: DiffParser | undefined, scope: string) {
   return {
-    queryKey: ["file", file.id, side],
-    queryFn: ({ signal }: { signal: AbortSignal }) => texts(file.id, side, signal),
-    staleTime: Infinity,
-  };
-}
-function parsedFileQuery(file: FileView, old: string, next: string, parser: DiffParser | undefined) {
-  return {
-    queryKey: ["file-diff", file.id],
+    queryKey: ["file-diff", scope, file.id],
     staleTime: Infinity,
     queryFn: ({ signal }: { signal: AbortSignal }) =>
       (parser ?? parseOffThread)(
         {
-          oldFile: file.hasOld ? { name: file.oldPath ?? file.path, contents: old, cacheKey: `${file.id}:old` } : null,
-          newFile: file.hasNew ? { name: file.path, contents: next, cacheKey: `${file.id}:new` } : null,
+          oldFile: file.hasOld
+            ? { name: file.oldPath ?? file.path, contents: old, cacheKey: JSON.stringify([scope, file.id, "old"]) }
+            : null,
+          newFile: file.hasNew
+            ? { name: file.path, contents: next, cacheKey: JSON.stringify([scope, file.id, "new"]) }
+            : null,
         },
         signal,
       ),
@@ -513,13 +510,13 @@ function useParsedFile(
   onParsed: DiffContext["onParsed"],
 ) {
   const texts = useFileTexts();
-  const old = useQuery({ ...fileSideQuery(file, "old", texts), enabled: file.hasOld });
-  const next = useQuery({ ...fileSideQuery(file, "new", texts), enabled: file.hasNew });
+  const old = useQuery({ ...fileSideQuery(file.id, "old", texts), enabled: file.hasOld });
+  const next = useQuery({ ...fileSideQuery(file.id, "new", texts), enabled: file.hasNew });
   const ready = (!file.hasOld || old.isSuccess) && (!file.hasNew || next.isSuccess);
   const lines = ready ? splitLines(old.data ?? "").length + splitLines(next.data ?? "").length : 0;
   const collapsed = !expanded && lines > 20000;
   const parsed = useQuery({
-    ...parsedFileQuery(file, old.data ?? "", next.data ?? "", parser),
+    ...parsedFileQuery(file, old.data ?? "", next.data ?? "", parser, texts.scope),
     enabled: ready && !collapsed,
   });
   useEffect(() => {
@@ -531,16 +528,16 @@ function FileCounts({ file, parser, onParsed }: Pick<DiffContext, "parser" | "on
   const texts = useFileTexts();
   const client = useQueryClient();
   const { data } = useQuery({
-    queryKey: ["file-counts", file.id],
+    queryKey: ["file-counts", texts.scope, file.id],
     staleTime: Infinity,
     queryFn: ({ signal }) =>
       diffLoads(client).run(signal, async () => {
-        const old = file.hasOld ? await client.fetchQuery(fileSideQuery(file, "old", texts)) : "";
+        const old = file.hasOld ? await client.fetchQuery(fileSideQuery(file.id, "old", texts)) : "";
         signal.throwIfAborted();
-        const next = file.hasNew ? await client.fetchQuery(fileSideQuery(file, "new", texts)) : "";
+        const next = file.hasNew ? await client.fetchQuery(fileSideQuery(file.id, "new", texts)) : "";
         signal.throwIfAborted();
         if (splitLines(old).length + splitLines(next).length > 20000) return null;
-        const parsed = await client.fetchQuery(parsedFileQuery(file, old, next, parser));
+        const parsed = await client.fetchQuery(parsedFileQuery(file, old, next, parser, texts.scope));
         return diffCounts(parsed);
       }),
   });

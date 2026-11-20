@@ -1,11 +1,16 @@
 import { type SampleView, THEME_TOKENS, type ThemeList } from "@emend/contract";
-import { QueryClient } from "@tanstack/react-query";
-import { createMemoryHistory } from "@tanstack/react-router";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import { buildSampleView } from "../../../../packages/core/src/sample/build.ts";
 import { App } from "../App.tsx";
+import { AgentNoteCard } from "../components/diff/AgentNoteCard.tsx";
+import { DiffPane } from "../components/diff/DiffPane.tsx";
+import { FileTextsContext } from "../components/diff/file-texts.ts";
+import { parsePair } from "../components/diff/parse.worker.ts";
+import { Panes } from "../components/layout/Panes.tsx";
 import { requestThemeSync, setThemePick, themeKey } from "../lib/theme.ts";
 import {
   collectSampleTokens,
@@ -26,12 +31,14 @@ vi.mock("@pierre/diffs/react", async (original) => {
 vi.mock("@pierre/diffs/worker/worker.js?worker", () => ({ default: class {} }));
 
 let sample: SampleView;
+let initialSample: SampleView;
 let themes: ThemeList;
 const clients: QueryClient[] = [];
 beforeAll(async () => {
-  sample = await buildSampleView();
+  initialSample = await buildSampleView();
 });
 beforeEach(() => {
+  sample = structuredClone(initialSample);
   vi.stubGlobal("localStorage", new Storage());
   setThemePick("system");
   themes = {
@@ -68,7 +75,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function setup(path = "/settings/sample", width = 1440) {
+const reviewTexts = { old: "const reviewBefore = 1;\n", new: "const reviewAfter = 2;\nconst extra = 3;\n" };
+
+async function setup(
+  path = "/settings/sample",
+  width = 1440,
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   const matchMedia = window.matchMedia.bind(window);
   vi.stubGlobal("matchMedia", (query: string) => {
     const media = matchMedia(query);
@@ -79,6 +92,8 @@ async function setup(path = "/settings/sample", width = 1440) {
   const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
     if (init?.method && init.method !== "GET") throw new Error(`Unexpected write: ${path}`);
     if (path === "/api/v1/sample") return Response.json(sample);
+    const side = ["old", "new"].find((side) => path === `/api/v1/files/${sample.revision.files[0]?.id}/${side}`);
+    if (side) return new Response(reviewTexts[side as keyof typeof reviewTexts]);
     if (path === "/api/v1/themes") return Response.json(themes);
     if (path === "/api/v1/settings")
       return Response.json({
@@ -105,13 +120,153 @@ async function setup(path = "/settings/sample", width = 1440) {
     throw new Error(`Unexpected request: ${path}`);
   });
   vi.stubGlobal("fetch", fetcher);
+  clients.push(client);
+  const history = createMemoryHistory({ initialEntries: [path] });
+  const view = render(<App queryClient={client} history={history} />);
+  await screen.findByRole("heading", { name: path === "/settings" ? "Settings" : "Theme sample", level: 1 });
+  if (path !== "/settings")
+    await waitFor(() =>
+      expect(document.querySelectorAll(".em-diff-host")).toHaveLength(
+        sample.revision.files.filter((file) => file.role === "diff" && file.viewed !== "viewed").length,
+      ),
+    );
+  return { ...view, fetcher, client, history };
+}
+
+async function mountReviewDiff(client: QueryClient, collapsed: boolean) {
+  const file = sample.revision.files[0];
+  if (!file) throw new Error("Missing sample file");
+  const revision = {
+    ...sample.revision,
+    threads: [],
+    files: [{ ...file, counts: undefined, notes: [], viewed: collapsed ? ("viewed" as const) : undefined }],
+  };
+  const root = createRootRoute({
+    component: () => (
+      <QueryClientProvider client={client}>
+        <Panes
+          header={null}
+          reading={null}
+          phoneTabs={null}
+          tab="diff"
+          hasDiff
+          diff={<DiffPane reviewId="11111111-1111-4111-8111-111111111111" revision={revision} parser={parsePair} />}
+        />
+      </QueryClientProvider>
+    ),
+  });
+  const router = createRouter({ routeTree: root, history: createMemoryHistory({ initialEntries: ["/"] }) });
+  const view = render(<RouterProvider router={router} />);
+  await screen.findByRole("region", { name: `File ${file.path}` });
+  return view;
+}
+
+test.each([false, true].flatMap((collapsed) => ["sample", "review"].map((first) => ({ first, collapsed }))))(
+  "sample and review file caches stay separate ($first first, collapsed: $collapsed)",
+  async ({ first, collapsed }) => {
+    const file = sample.revision.files[0];
+    if (!file) throw new Error("Missing sample file");
+    if (collapsed) {
+      file.counts = undefined;
+      file.viewed = "viewed";
+    }
+    const { client, unmount } = await setup("/settings");
+    unmount();
+    const fileRequests = new Set<string>();
+    for (const source of [first, first === "sample" ? "review" : "sample", first]) {
+      const view =
+        source === "sample" ? await setup("/settings/sample", 1440, client) : await mountReviewDiff(client, collapsed);
+      const region = await screen.findByRole("region", { name: `File ${file.path}` });
+      const expected = source === "sample" ? { additions: 1, deletions: 1 } : { additions: 2, deletions: 1 };
+      await waitFor(() => expect(within(region).getByText(`+${expected.additions}`)).toBeTruthy());
+      await waitFor(() =>
+        expect(
+          client
+            .getQueryData<Map<string, unknown>>(["diff-counts", source === "sample" ? "sample" : "reviews"])
+            ?.get(file.id),
+        ).toEqual(expected),
+      );
+      const expand = within(region).queryByRole("button", { name: "Expand file" });
+      if (expand) fireEvent.click(expand);
+      await waitFor(() => {
+        const lines = [...(region.querySelector("diffs-container")?.shadowRoot?.querySelectorAll("[data-line]") ?? [])]
+          .map((line) => line.textContent)
+          .join("\n");
+        expect(lines).toContain(
+          source === "sample" ? 'return size > 2 ? "large" : "small";' : "const reviewAfter = 2;",
+        );
+        expect(lines).not.toContain(source === "sample" ? "const reviewAfter" : "return size");
+      });
+      for (const [path] of vi.mocked(fetch).mock.calls) fileRequests.add(String(path));
+      if (source === "review")
+        for (const side of ["old", "new"]) expect(fileRequests.has(`/api/v1/files/${file.id}/${side}`)).toBe(true);
+      view.unmount();
+    }
+    const sampleDiff = client.getQueryData<{ cacheKey?: string }>(["file-diff", "sample", file.id]);
+    const reviewDiff = client.getQueryData<{ cacheKey?: string }>(["file-diff", "reviews", file.id]);
+    expect(sampleDiff?.cacheKey).toBeTruthy();
+    expect(reviewDiff?.cacheKey).toBeTruthy();
+    expect(sampleDiff?.cacheKey).not.toBe(reviewDiff?.cacheKey);
+  },
+);
+
+test("agent notes quote the context's file source without using another source's cached text", async () => {
+  const file = sample.revision.files[0];
+  const note = file?.notes?.[0];
+  if (!file || !note) throw new Error("Missing sample note");
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.push(client);
-  const view = render(<App queryClient={client} history={createMemoryHistory({ initialEntries: [path] })} />);
-  await screen.findByRole("heading", { name: path === "/settings" ? "Settings" : "Theme sample", level: 1 });
-  if (path !== "/settings") await waitFor(() => expect(document.querySelectorAll(".em-diff-host")).toHaveLength(4));
-  return { ...view, fetcher, client };
-}
+  client.setQueryData(["file", "reviews", file.id, "new"], "Review line\n");
+  const read = vi.fn(async () => "Context line\n");
+  const comment = vi.fn();
+  const fetcher = vi.fn();
+  vi.stubGlobal("fetch", fetcher);
+  render(
+    <QueryClientProvider client={client}>
+      <FileTextsContext value={{ scope: "sample", read }}>
+        <AgentNoteCard file={file} note={{ ...note, start: 1, end: 1 }} onComment={comment} />
+      </FileTextsContext>
+    </QueryClientProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Comment on these lines" }));
+  await waitFor(() => expect(comment).toHaveBeenCalledWith(expect.objectContaining({ lines: ["Context line"] })));
+  expect(read).toHaveBeenCalledWith(file.id, "new", expect.any(AbortSignal));
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+test.each([390, 1440])("sample Contents scrolls only the picked doc's declared heading at %ipx", async (width) => {
+  const doc = sample.revision.docs.find((doc) => doc.kind === "markdown");
+  if (doc?.kind !== "markdown") throw new Error("Missing sample Markdown doc");
+  // Three headings expose Contents; the fixed sample currently has only two h2/h3 headings.
+  doc.blocks.push({
+    id: "doc-12345678-abcdef12",
+    section: "doc-12345678",
+    kind: "heading",
+    html: '<h2 id="user-content-delivery">Delivery</h2>',
+    text: "Delivery",
+  });
+  doc.headings?.push({ id: "user-content-delivery", level: 2, text: "Delivery" });
+  const { history } = await setup("/settings/sample", width);
+  const before = history.location.href;
+  const heading = within(screen.getByRole("region", { name: "Sample documents" })).getByRole("heading", {
+    name: "Packing",
+  });
+  const scroll = vi.spyOn(heading, "scrollIntoView").mockImplementation(() => {});
+  const outside = document.createElement("h3");
+  outside.id = heading.id;
+  document.body.prepend(outside);
+  const outsideScroll = vi.spyOn(outside, "scrollIntoView").mockImplementation(() => {});
+  try {
+    if (width === 390) fireEvent.click(screen.getByRole("button", { name: "Contents" }));
+    const contents = await screen.findByRole("navigation", { name: "Document contents" });
+    fireEvent.click(within(contents).getByRole("button", { name: "Packing" }));
+    await waitFor(() => expect(scroll).toHaveBeenCalledWith({ block: "start" }));
+    expect(outsideScroll).not.toHaveBeenCalled();
+    expect(history.location.href).toBe(before);
+  } finally {
+    outside.remove();
+  }
+});
 
 test.each([390, 834, 1440])("Settings opens the sample and shares the theme pick at %ipx", async (width) => {
   await setup("/settings", width);
@@ -244,6 +399,12 @@ test.each([
   ["agent-working", '<span className="hover:bg-agent-working/50" />'],
   ["agent-approved", '<span className="dark:group-hover:text-agent-approved/75" />'],
   ["agent-working", '<span className="[&:nth-child(2)]:border-progress/50" />'],
+  ["agent-working", '<span className="bg-(--agent-working)" />'],
+  ["agent-approved", '<span className="text-(--agent-approved)" />'],
+  ["agent-working", '<span className="hover:bg-(--agent-working)/50" />'],
+  ["agent-approved", '<span className="dark:group-hover:text-(--agent-approved)/75" />'],
+  ["agent-working", '<span className="[&:nth-child(2)]:shadow-(--agent-working)/50" />'],
+  ["agent-approved", '<span className="sm:leading-(--agent-approved)" />'],
   ["agent-approved", "color: var(--agent-approved)"],
   ["agent-working", "color: var(\n  --agent-working, red)"],
   ["agent-working", 'const token = "agent-working";'],
@@ -286,7 +447,7 @@ test.each([
 
 test("the guard requires an exact token or a mapped Tailwind utility", () => {
   const source = `
-    <span className="bg-agent-working-extra not-bg-agent-working bg-unmapped" />
+    <span className="bg-agent-working-extra not-bg-agent-working bg-unmapped bg-(--agent-working-extra)" />
     color: var(--agent-working-extra);
     const token = "agent-working-extra";
     --agent-working: red;

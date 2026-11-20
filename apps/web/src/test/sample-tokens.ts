@@ -37,7 +37,7 @@ export function findTokenReferencesInSource(
       match[1] && match[2] === token ? [escapePattern(match[1])] : [],
     ),
   );
-  const patterns = [`var\\(\\s*--${name}(?=\\s*[,)])`, `(["'\`])(?:--)?${name}\\1`];
+  const patterns = [`var\\(\\s*--${name}(?=\\s*[,)])`, `(["'\`])(?:--)?${name}\\1`, `[\\w-]+-\\(--${name}\\)`];
   if (aliases.length)
     patterns.push(
       `(?<![\\w-])(?:bg|text|border(?:-[xysetrbl])?|outline|ring(?:-offset)?|inset-ring|decoration|fill|stroke|divide|placeholder|caret|accent|(?:inset-|text-)?shadow|from|via|to)-(?:${aliases.join("|")})(?![\\w-])`,

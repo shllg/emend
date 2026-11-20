@@ -6,7 +6,7 @@ export type ParsePair = { oldFile: ParseFile | null; newFile: ParseFile | null }
 export type DiffParser = (pair: ParsePair, signal: AbortSignal) => ParsedDiff | Promise<ParsedDiff>;
 
 // A cancellable worker per active parse: leaving the viewport also stops CPU work.
-// The immutable result is cached by file id by the caller.
+// The immutable result is cached by source scope and file id by the caller.
 export function createParser(factory: () => Worker): DiffParser {
   return (pair, signal) =>
     new Promise((resolve, reject) => {

@@ -24,7 +24,10 @@ export function mediaRoutes(app: Hono<AppEnv>, deps: AppDeps) {
     const ownerId = c.get("principal").ownerId;
     const hash = c.req.param("sha256");
     if (!/^[0-9a-f]{64}$/.test(hash)) throw new ApiError("not_found");
-    sampleHash ??= sampleImageHash();
+    sampleHash ??= sampleImageHash().catch((error) => {
+      sampleHash = undefined;
+      throw error;
+    });
     if (hash === (await sampleHash)) {
       const bytes = new TextEncoder().encode(SAMPLE_SVG);
       mediaHeaders(c, "image/svg+xml", bytes.byteLength);

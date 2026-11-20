@@ -2,10 +2,10 @@ import type { AgentNoteView, FileView, Target } from "@emend/contract";
 import { useQueryClient } from "@tanstack/react-query";
 import { Bot } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { getText } from "../../api/client.ts";
 import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { useThreadJump } from "../../lib/thread-jump.ts";
 import { Button } from "../ui/Button.tsx";
+import { fileSideQuery, useFileTexts } from "./file-texts.ts";
 import { linesTarget } from "./linesTarget.ts";
 
 export function AgentNoteCard({
@@ -21,6 +21,7 @@ export function AgentNoteCard({
   const cardId = `diff-note-${note.id}`;
   const jump = useThreadJump(cardId);
   const client = useQueryClient();
+  const texts = useFileTexts();
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const live = useRef(true);
@@ -35,11 +36,7 @@ export function AgentNoteCard({
     setError("");
     setPending(true);
     try {
-      const text = await client.fetchQuery({
-        queryKey: ["file", file.id, note.side],
-        staleTime: Infinity,
-        queryFn: ({ signal }) => getText(`/api/v1/files/${encodeURIComponent(file.id)}/${note.side}`, signal),
-      });
+      const text = await client.fetchQuery(fileSideQuery(file.id, note.side, texts));
       if (!live.current) return;
       const target = linesTarget(file, note.side, note.start, note.end, text);
       if ("error" in target) setError("This range is too large to quote. Select fewer lines in the diff.");

@@ -346,7 +346,7 @@ test("near sections alone load, immutable sides cache across remount and absent 
   await screen.findByTestId("rendered-diff");
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(fetchMock.mock.calls[0]?.[0]).toBe(`/api/v1/files/${added.id}/new`);
-  expect(client.getQueryData(["file", added.id, "new"])).toBe("one\ntwo\nthree\n");
+  expect(client.getQueryData(["file", "reviews", added.id, "new"])).toBe("one\ntwo\nthree\n");
   expect(parser.mock.calls[0]?.[0]).toMatchObject({ oldFile: null, newFile: { name: "added.ts" } });
   near("added.ts", false);
   expect(screen.queryByTestId("rendered-diff")).toBeNull();
@@ -1480,7 +1480,7 @@ test("a viewed file parses counts while collapsed without rendering its body, an
   expect(onParsed).toHaveBeenCalledWith(value.id, { additions: 2, deletions: 1 });
   expect(parser).toHaveBeenCalledOnce();
   mounted.unmount();
-  client.removeQueries({ queryKey: ["file-diff", value.id] });
+  client.removeQueries({ queryKey: ["file-diff", "reviews", value.id] });
   await mount(revision([value]));
   expect(within(document.getElementById(`diff-file-${value.id}`) as HTMLElement).getByText("+2")).toBeTruthy();
   expect(parser).toHaveBeenCalledOnce();
@@ -1494,12 +1494,12 @@ test("counts-only loading respects the line limit, lockfiles and flagged content
     async (path: string) => new Response(path.endsWith("/old") ? "line\n".repeat(20001) : ""),
   );
   await mount(revision([large, lock, flagged]));
-  await waitFor(() => expect(client.getQueryState(["file-counts", large.id])?.status).toBe("success"));
+  await waitFor(() => expect(client.getQueryState(["file-counts", "reviews", large.id])?.status).toBe("success"));
   expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(fetchMock.mock.calls.every(([path]) => String(path).includes(large.id))).toBe(true);
   expect(parser).not.toHaveBeenCalled();
   expect(screen.queryByTestId("rendered-diff")).toBeNull();
-  expect(client.getQueryData(["file-counts", large.id])).toBeNull();
+  expect(client.getQueryData(["file-counts", "reviews", large.id])).toBeNull();
 });
 
 test("counts wait for visible diffs and never exceed three concurrent background loads", async () => {
