@@ -514,12 +514,12 @@ case-insensitive mod and alt forms (`Mod+K` becomes `mod+k`, `MOD+SHIFT+P` becom
 `Alt+1` becomes `alt+1` and `Mod+1` becomes `mod+1`). Shift must be spelled out for mod bindings with letters.
 `inbox.jump1` to `inbox.jump10` open the first to tenth row the client numbers: the rows of every
 open inbox section from the top, an item shown twice counted once.
-A level (override or file) that sets all of `inbox.jump1` to `inbox.jump9` but not `inbox.jump10`
-sets `inbox.jump10` off at that level when all nine are off or `mod+1` to `mod+9`. Any other mix,
-including `alt+1` to `alt+9`, leaves it unset there, so it falls back to its default `alt+0`, which
-loses a clash to any saved or file key. An unusable `inbox.jump10` file entry blocks this fill, so
-it stays ignored and falls back to the default.
-The filled off value appears in that command's `override` or `file` field.
+When no level sets `inbox.jump10`, it follows the highest level (override, then file) that sets
+all of `inbox.jump1` to `inbox.jump9` as one group: all off or `mod+1` to `mod+9` set
+`inbox.jump10` off at that level, and `alt+1` to `alt+9` leave it at its default `alt+0`, which
+loses a clash to any saved or file key. A level with an incomplete or mixed set decides nothing.
+An unusable `inbox.jump10` file entry counts as absent. The filled off value appears in that
+level's `override` or `file` field.
 
 The global config file format is `"keys": { "<command>": "<key>" | null }`. It is read once
 alongside `approvedActiveHours` and `approvedActiveLimit`. An absent `file` or `override` in a

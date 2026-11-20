@@ -181,34 +181,77 @@ for (const source of ["override", "file"] as const) {
   });
 }
 
-test("file and override jump groups fill independently, with the override taking precedence", () => {
-  const commands = resolve(jumpGroup(null), jumpGroup("mod"));
+test.each([null, "mod"] as const)(
+  "an Alt override group keeps row ten at its default over a %s file group",
+  (modifier) => {
+    const commands = resolve(jumpGroup(modifier), jumpGroup("alt"));
+    expect(commands["inbox.jump10"]).toEqual({
+      value: "alt+0",
+      source: "default",
+      default: "alt+0",
+      fileError: false,
+      clashWith: null,
+    });
+  },
+);
+
+test.each([
+  [null, "alt"],
+  ["mod", null],
+] as const)(
+  "a %s override group fills row ten off without filling the %s file group",
+  (overrideModifier, fileModifier) => {
+    const commands = resolve(jumpGroup(fileModifier), jumpGroup(overrideModifier));
+    expect(commands["inbox.jump10"]).toEqual({
+      value: null,
+      source: "override",
+      default: "alt+0",
+      override: null,
+      fileError: false,
+      clashWith: null,
+    });
+  },
+);
+
+test.each(["partial", "mixed"])("a %s override group lets an off file group decide row ten", (kind) => {
+  const overrides = jumpGroup("alt");
+  if (kind === "partial") delete overrides["inbox.jump9"];
+  else overrides["inbox.jump9"] = "mod+9";
+  const commands = resolve(jumpGroup(null), overrides);
   expect(commands["inbox.jump10"]).toEqual({
     value: null,
-    source: "override",
+    source: "file",
     default: "alt+0",
     file: null,
-    override: null,
     fileError: false,
     clashWith: null,
   });
 });
 
-test("a file error for row ten blocks the file fill but allows an override fill", () => {
+test.each([null, "x"] as const)(
+  "an explicit file row ten of %s prevents an off override group from filling it",
+  (tenth) => {
+    const commands = resolve({ ...jumpGroup("alt"), "inbox.jump10": tenth }, jumpGroup(null));
+    expect(commands["inbox.jump10"]).toEqual({
+      value: tenth,
+      source: "file",
+      default: "alt+0",
+      file: tenth,
+      fileError: false,
+      clashWith: null,
+    });
+  },
+);
+
+test.each(["override", "file"] as const)("an unusable file row ten lets an off %s group fill it", (source) => {
   const file = Object.freeze(jumpGroup(null));
+  const overrides = Object.freeze(source === "override" ? jumpGroup(null) : {});
   const fileErrors = new Set<ShortcutCommand>(["inbox.jump10"]);
-  expect(resolve(file, {}, fileErrors)["inbox.jump10"]).toEqual({
-    value: "alt+0",
-    source: "default",
-    default: "alt+0",
-    fileError: true,
-    clashWith: null,
-  });
-  expect(resolve(file, jumpGroup("mod"), fileErrors)["inbox.jump10"]).toEqual({
+  expect(resolve(file, overrides, fileErrors)["inbox.jump10"]).toEqual({
     value: null,
-    source: "override",
+    source,
     default: "alt+0",
-    override: null,
+    [source]: null,
     fileError: true,
     clashWith: null,
   });

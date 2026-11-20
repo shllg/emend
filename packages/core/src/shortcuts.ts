@@ -13,14 +13,13 @@ interface CommandState {
   clashWith: ShortcutCommand | null;
 }
 
-function fillTenthJump(keys: Partial<Record<ShortcutCommand, KeyBinding>>) {
-  if (Object.hasOwn(keys, "inbox.jump10")) return keys;
+function classifyJumpGroup(keys: Partial<Record<ShortcutCommand, KeyBinding>>): "off" | "alt" | undefined {
   const commands = Array.from({ length: 9 }, (_, index) => `inbox.jump${index + 1}` as ShortcutCommand);
-  if (!commands.every((command) => Object.hasOwn(keys, command))) return keys;
+  if (!commands.every((command) => Object.hasOwn(keys, command))) return undefined;
   const values = commands.map((command) => keys[command]);
   if (values.every((value) => value === null) || values.every((value, index) => value === `mod+${index + 1}`))
-    return { ...keys, "inbox.jump10": null };
-  return keys;
+    return "off";
+  return values.every((value, index) => value === `alt+${index + 1}`) ? "alt" : undefined;
 }
 
 export function resolveShortcuts({
@@ -32,10 +31,16 @@ export function resolveShortcuts({
   fileErrors: ReadonlySet<ShortcutCommand>;
   overrides: Partial<Record<ShortcutCommand, KeyBinding>>;
 }): Record<ShortcutCommand, KeySetting> {
-  // Older off and Ctrl groups keep row ten off. Alt groups leave its default at level 0,
-  // so any saved or file key wins a clash; a filled off value never clashes.
-  overrides = fillTenthJump(overrides);
-  if (!fileErrors.has("inbox.jump10")) file = fillTenthJump(file);
+  // Without an explicit row ten, the highest complete group decides: off/Ctrl fills off
+  // at that level only; Alt leaves the level-0 default, which loses to any saved or file key.
+  if (
+    !Object.hasOwn(overrides, "inbox.jump10") &&
+    (!Object.hasOwn(file, "inbox.jump10") || fileErrors.has("inbox.jump10"))
+  ) {
+    const overrideGroup = classifyJumpGroup(overrides);
+    if (overrideGroup === "off") overrides = { ...overrides, "inbox.jump10": null };
+    else if (overrideGroup === undefined && classifyJumpGroup(file) === "off") file = { ...file, "inbox.jump10": null };
+  }
   const states: CommandState[] = ShortcutCommand.options.map((command) => {
     const candidates: Candidate[] = [];
     const override = overrides[command],
