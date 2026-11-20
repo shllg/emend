@@ -326,6 +326,49 @@ test.each(["snoozed", "grouped", "done"] as const)(
   },
 );
 
+test("pinned overflow shares one budget across blocks when more than 50 pins are live", async () => {
+  const overflowPerBlock = Math.floor(LIMITS.pins / 2) + 1;
+  const active = [
+    f.reviewId,
+    ...(await seedMany(LIMITS.inboxItems + overflowPerBlock - 1, (i) => ({ updatedAt: f.deps.now() - i - 1 }))),
+  ];
+  const snoozed = await seedMany(LIMITS.inboxItems + overflowPerBlock, (i) => ({
+    snoozedAt: f.deps.now(),
+    snoozedUntil: f.deps.now() + (i + 1) * 1000,
+  }));
+  const group = await createGroup();
+  const grouped = await seedMany(LIMITS.inboxItems, (i) => ({ updatedAt: f.deps.now() - i }));
+  await f.db.query((q) =>
+    q
+      .insert(t.reviewGroupMembers)
+      .values(grouped.map((reviewId) => ({ ownerId: f.ownerId, reviewId, groupId: group.id }))),
+  );
+  const done = await seedMany(LIMITS.inboxItems, (i) => ({ state: "settled", updatedAt: f.deps.now() - i }));
+  const overflow = [...active.slice(LIMITS.inboxItems), ...snoozed.slice(LIMITS.inboxItems)];
+  expect(overflow.length).toBeGreaterThan(LIMITS.pins);
+  // A move rollback can leave more live pins than the pin route allows.
+  await f.db.query((q) =>
+    q
+      .insert(t.reviewPins)
+      .values([f.reviewId, ...overflow].map((reviewId) => ({ ownerId: f.ownerId, reviewId, createdAt: f.deps.now() }))),
+  );
+
+  const response = await f.request("/reviews", "GET");
+  expect(response.status).toBe(200);
+  const { items } = InboxList.parse(await response.json());
+  const overflowIds = new Set(overflow);
+  expect(items.filter((item) => overflowIds.has(item.id)).map((item) => item.id)).toEqual(
+    overflow.slice(0, LIMITS.pins),
+  );
+  expect(items.map((item) => item.id)).toEqual([
+    ...active,
+    ...snoozed.slice(0, LIMITS.inboxItems + LIMITS.pins - overflowPerBlock),
+    ...grouped,
+    ...done,
+  ]);
+  expect(items.length).toBeLessThanOrEqual(LIMITS.inboxItems * 4 + LIMITS.pins);
+});
+
 test("pinned Snoozed, grouped and Done items keep their normal block position and appear once", async () => {
   const group = await createGroup();
   const snoozed = await seed({ snoozedAt: f.deps.now(), snoozedUntil: f.deps.now() + 1000 });

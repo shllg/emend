@@ -127,15 +127,19 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
       .orderBy(...order)
       .limit(limit)
       .all();
+  let remainingPins: number = LIMITS.pins;
   const selectBlock = async (where: SQL | undefined, order: SQL[]) => {
     const rows = await select(where, order, LIMITS.inboxItems);
+    if (remainingPins === 0) return rows;
     const listed = new Set(rows.map(({ review }) => review.id));
     const pinned = await select(
       and(where, isNotNull(reviewPins.reviewId), isNull(reviews.movedToUrl)),
       order,
-      LIMITS.pins,
+      remainingPins,
     );
-    return [...rows, ...pinned.filter(({ review }) => !listed.has(review.id))];
+    const overflow = pinned.filter(({ review }) => !listed.has(review.id));
+    remainingPins -= overflow.length;
+    return [...rows, ...overflow];
   };
   const asleep = and(isNotNull(reviews.snoozedAt), or(isNull(reviews.snoozedUntil), gt(reviews.snoozedUntil, now)));
   const isOpen = eq(reviews.state, "open");

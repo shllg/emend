@@ -922,9 +922,9 @@ Id ascending breaks ties in every block. Each block has a row cap of `inboxItems
 A pinned review is placed exactly like an unpinned one. It takes an Active place and an
 approval-cap place when it qualifies. Each of the Active, Snoozed, grouped and Done blocks
 also carries its pinned reviews beyond its row cap, after its capped rows and in its own order.
+These rows are at most `pins` (50) in all, shared across the blocks in block order.
 The approval cap still applies: a pinned approval without an Active place is in Done.
-Every pinned review outside the bin is in the response, except moved reviews, which show as
-unpinned. The response carries each review once, at most 850 rows in all.
+Moved reviews show as unpinned. The response carries each review once, at most 850 rows in all.
 Clients show a pinned review in Pinned, and also in its own section unless that section is Active.
 Pinned is oldest pin first (pin time, then id ascending).
 A grouped review's `list` and `activeUntil` follow the single-review rule below
