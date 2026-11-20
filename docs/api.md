@@ -1177,7 +1177,8 @@ HTML-namespace `pre` with the exact `mermaid` class token (split on ASCII whites
 The bridge walks light DOM in document order, skipping script, style, template and noscript
 subtrees, and any `pre` inside an earlier diagram `pre`. Nested `code` contributes text;
 `div.mermaid` and `code.language-mermaid` alone do not qualify. Source is the `pre`'s unchanged
-`textContent`, read through `Node.prototype`. Empty-after-trimming sources and sources over
+`textContent`, read through `Node.prototype`. Markup inside the `pre` is not part of the source,
+so authors escape `<` as `&lt;` and `&` as `&amp;`. Empty-after-trimming sources and sources over
 50,000 characters stay as text. The scan keeps at most 50 diagrams and stops before the sum of
 source lengths would exceed 1,000,000.
 
@@ -1192,8 +1193,9 @@ sRGB canvas converts it to unpremultiplied RGB bytes, ignoring alpha. Linearised
 luminance uses weights 0.2126, 0.7152 and 0.0722; a value above 0.179 means light text and mode
 `dark`, otherwise `light`. Any conversion failure means `light`. The bridge captures
 `getComputedStyle` at startup and uses prototype calls for DOM, CSSOM and canvas access.
-After an applied theme message, and on `prefers-color-scheme: dark` changes, it checks modes
-again. Only a changed mode sends the next request, containing all diagrams with current modes
+After an applied theme message, on `prefers-color-scheme: dark` changes, and at the end of a
+`color` transition on an element that holds a diagram, it checks modes again.
+Only a changed mode sends the next request, containing all diagrams with current modes
 and widths. Rejected theme messages and width changes alone send nothing.
 
 Only a ready content frame that has not navigated away can submit a job. The parent renders
@@ -1212,6 +1214,8 @@ The Mermaid frame answers only when `reply` is exactly `"svg"`. After `sanitizeS
 `restoreCodes`, it serialises the SVG with `XMLSerializer`, setting width and height attributes
 to `naturalSize`, and posts the strict shape `{ type: "svg", svg: string, width: number, height: number }`.
 An unknown natural size or a fallback (too large or undrawable) posts `{ type: "svg", svg: null }`.
+The frame also answers `svg: null` when its serialised SVG holds a character XML forbids or does
+not parse as SVG.
 Existing `size` messages continue; without `reply: "svg"`, behaviour is unchanged. The parent
 accepts answers only from its render frame's current window. The SVG must be well-formed,
 1..4000000 characters, and start with `<svg`; dimensions must be integers in 1..10000. Extra

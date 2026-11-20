@@ -347,7 +347,7 @@ test.each(["click A call alert()", 'click A "javascript:alert(1)"'])(
   },
 );
 
-test("real Mermaid SVG replies strip click directives and executable markup", async () => {
+function realSvgFrame() {
   // As in frame-build.test.ts, preserve SVG style children through Happy DOM's
   // HTML parser and supply layout measurements without replacing Mermaid's render.
   const parse = DOMParser.prototype.parseFromString;
@@ -390,6 +390,23 @@ test("real Mermaid SVG replies strip click directives and executable markup", as
   onTestFinished(() => render.mockRestore());
   const stop = startFrame(root);
   onTestFinished(stop);
+  return { root, reply: reply.promise, render };
+}
+
+test("real Mermaid SVG replies refuse restored XML-forbidden label codes", async () => {
+  const { root, reply } = realSvgFrame();
+  window.dispatchEvent(
+    new MessageEvent("message", {
+      source: window.parent,
+      data: { type: "render", source: 'flowchart LR\n A["#65535;"] --> B', reply: "svg" },
+    }),
+  );
+  expect(await reply).toEqual({ type: "svg", svg: null });
+  expect(root.querySelector("svg")?.textContent).toContain("\uffff");
+});
+
+test("real Mermaid SVG replies strip click directives and executable markup", async () => {
+  const { root, reply, render } = realSvgFrame();
   window.dispatchEvent(
     new MessageEvent("message", {
       source: window.parent,
@@ -405,7 +422,7 @@ test("real Mermaid SVG replies strip click directives and executable markup", as
       },
     }),
   );
-  const answer = await reply.promise;
+  const answer = await reply;
   const rendered = await render.mock.results[0]?.value;
   // Mermaid's own output: the click lines were applied, and node D's allowed link is still there for
   // the frame to remove.
@@ -416,8 +433,8 @@ test("real Mermaid SVG replies strip click directives and executable markup", as
     anchor?.getAttribute("href") ?? anchor?.getAttribute("xlink:href");
   expect(own.querySelectorAll(".node")).toHaveLength(4);
   expect(wrapper(own, "A")).toBeNull();
-  expect(wrapper(own, "B")).not.toBeNull();
-  expect(wrapper(own, "C")).not.toBeNull();
+  expect(wrapper(own, "B")).toBeInstanceOf(Element);
+  expect(wrapper(own, "C")).toBeInstanceOf(Element);
   expect(link(wrapper(own, "D"))).toBe("https://example.com/synthetic");
   for (const node of [own, ...own.querySelectorAll("*")]) {
     for (const attribute of node.attributes) expect(attribute.name).not.toMatch(/^on/i);
@@ -432,7 +449,7 @@ test("real Mermaid SVG replies strip click directives and executable markup", as
   const svg = parsed.documentElement;
   expect(svg.localName).toBe("svg");
   expect(svg.querySelectorAll(".node")).toHaveLength(4);
-  for (const id of ["B", "C", "D"]) expect(wrapper(svg, id)).not.toBeNull();
+  for (const id of ["B", "C", "D"]) expect(wrapper(svg, id)).toBeInstanceOf(Element);
   expect(answer.svg).not.toContain("example.com");
   for (const node of [svg, ...svg.querySelectorAll("*")]) {
     for (const name of ["href", "xlink:href"]) {

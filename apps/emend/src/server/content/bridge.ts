@@ -915,6 +915,12 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   for (const type of ["wheel", "touchmove", "keydown", "pointerdown", "touchend", "pointerup"])
     listen(document, type, schedulePosition, { capture: true, passive: true });
   listen(matchMedia.call(window, "(prefers-color-scheme: dark)"), "change", checkDiagramModes);
+  listen(document, "transitionend", event => {
+    if (read(window.TransitionEvent.prototype, "propertyName", event) !== "color") return;
+    const target = read(window.Event.prototype, "target", event);
+    if (target instanceof window.Node && diagrams.some(({ pre }) => dom(window.Node.prototype, "contains", target, pre)))
+      checkDiagramModes();
+  }, true);
   const ready = () => { headings = collectHeadings(); post({ type: "emend:ready" }); scanDiagrams(); schedulePosition(); };
   if (documentValue("readyState") === "loading") listen(document, "DOMContentLoaded", ready, { once: true });
   else ready();

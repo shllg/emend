@@ -194,6 +194,16 @@ export function sanitizeSvg(source: string): SVGElement {
   }
   return document.importNode(svg, true) as unknown as SVGElement;
 }
+export function canSendSvg(serialized: string): boolean {
+  if (/[^\t\n\r -\ud7ff\ue000-\ufffd\u{10000}-\u{10ffff}]/u.test(serialized)) return false;
+  const parsed = new DOMParser().parseFromString(serialized, "image/svg+xml");
+  const svg = parsed.documentElement;
+  return (
+    !parsed.querySelector("parsererror") &&
+    svg?.localName === "svg" &&
+    svg.namespaceURI === "http://www.w3.org/2000/svg"
+  );
+}
 function parseColors(value: unknown): MermaidColors | undefined {
   if (!value || typeof value !== "object") return;
   const prototype = Object.getPrototypeOf(value);
@@ -478,7 +488,8 @@ export function startFrame(root: HTMLElement) {
                 if (reply && natural) {
                   svg.setAttribute("width", String(natural.width));
                   svg.setAttribute("height", String(natural.height));
-                  answer = { type: "svg", svg: new XMLSerializer().serializeToString(svg), ...natural };
+                  const serialized = new XMLSerializer().serializeToString(svg);
+                  if (canSendSvg(serialized)) answer = { type: "svg", svg: serialized, ...natural };
                 }
               }
             }

@@ -51,7 +51,7 @@ with the reviewer's session can send instructions to the waiting agent in the re
 - Mermaid: one frame per Markdown diagram, one hidden frame at a time per HTML doc
   (`doc-navigation.md`), from `/mermaid-frame.html`, `sandbox="allow-scripts"` without
   `allow-same-origin`, a bundled, pinned Mermaid (never a CDN), `securityLevel: "strict"`,
-  `startOnLoad: false`. The frame accepts messages only from its parent; colors only `#rrggbb`. A
+  `startOnLoad: false`. It takes messages only from its parent; colors only `#rrggbb`. A Markdown
   diagram is commented on as one block.
 - Block ids are `<section>-<hash8>` over the normalized text. Never derive an id from position.
 - Diff text renders as text through `@pierre/diffs`, never as HTML.

@@ -57,7 +57,8 @@ to it. Any change here needs `emend-security-reviewer`.
   time in one hidden Mermaid frame, never puts the SVG into its own DOM, and relays it as
   `emend:diagram` only to that frame generation. The bridge accepts only the current request and
   a valid index, shows the SVG only as a `data:` image in a closed shadow root, and never changes
-  the source `pre`'s text.
+  the source `pre`'s text. Comments anchor in that text as in any HTML doc, and it shows below the
+  image while a quote lies in it.
 - The bridge never changes `location`, handles links to a fragment of the same doc itself, and
   calls DOM methods from their prototypes, so doc markup cannot replace them.
 - Titles and Contents labels pass `cleanDocTitle` on the server and render as isolated text

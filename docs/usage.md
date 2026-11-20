@@ -285,6 +285,7 @@ beside the text. Press `,` and `.` to step through the comments.
 
 HTML pages use `<pre class="mermaid">` containing Mermaid source. emend draws it in light and
 dark mode, also on custom pages. The page's own scripts never run.
+Escape `<` as `&lt;` and `&` as `&amp;` in the source, because emend reads the `pre`'s text.
 
 Diagrams colour the classes `blue`, `orange`, `purple`, `yellow`, `teal`, `tan` and `pink` as group
 fills in light and dark. They mark states with `breaks` (red), `mayBreak` (orange), `bugPath` (a blue

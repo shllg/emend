@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
+  canSendSvg,
   encodeCodes,
   exceedsLimits,
   frameConfig,
@@ -1646,6 +1647,30 @@ test.each([false, true])("frame accepts exactly eight lowercase hex colours (dar
   } finally {
     stop();
   }
+});
+
+test.each([
+  { name: "U+FFFF", character: "\uffff" },
+  { name: "U+FFFE", character: "\ufffe" },
+  { name: "U+0001", character: "\u0001" },
+  { name: "U+000C", character: "\u000c" },
+  { name: "lone surrogate", character: "\ud800" },
+])("SVG replies refuse XML-forbidden $name", ({ character }) => {
+  expect(canSendSvg(`<svg xmlns="http://www.w3.org/2000/svg"><text>${character}</text></svg>`)).toBe(false);
+});
+
+test("SVG replies refuse parser errors and roots outside SVG", () => {
+  expect(canSendSvg('<svg xmlns="http://www.w3.org/2000/svg"><parsererror>Invalid XML</parsererror></svg>')).toBe(
+    false,
+  );
+  expect(canSendSvg('<g xmlns="http://www.w3.org/2000/svg"/>')).toBe(false);
+  expect(canSendSvg('<svg xmlns="http://www.w3.org/1999/xhtml"/>')).toBe(false);
+});
+
+test("SVG replies accept XML whitespace, emoji and the replacement character", () => {
+  expect(canSendSvg('<svg xmlns="http://www.w3.org/2000/svg"><text>label\t\n\r\u{1f600}\ufffd</text></svg>')).toBe(
+    true,
+  );
 });
 
 test.each(["click A call alert()", 'click A "javascript:alert(1)"'])(
