@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Check, ChevronRight, Search } from "lucide-react";
-import { createRef, type ReactNode, useState } from "react";
+import { createRef, type ReactNode, useRef, useState } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { Banner } from "./Banner.tsx";
 import { Button } from "./Button.tsx";
@@ -8,7 +8,7 @@ import { Checkbox } from "./Checkbox.tsx";
 import { Dialog } from "./Dialog.tsx";
 import { Icon } from "./Icon.tsx";
 import { IconButton } from "./IconButton.tsx";
-import { Menu } from "./Menu.tsx";
+import { AnchoredMenu, Menu } from "./Menu.tsx";
 import { PairingCodeInput } from "./PairingCodeInput.tsx";
 import { RadioGroup } from "./RadioGroup.tsx";
 import { SegmentedControl } from "./SegmentedControl.tsx";
@@ -496,6 +496,113 @@ test("Menu preserves the browser context menu inside its content", async () => {
   const menu = await screen.findByRole("menu");
   expect(fireEvent.contextMenu(menu)).toBe(true);
   expect(fireEvent.contextMenu(within(menu).getByRole("menuitem", { name: "Devices" }))).toBe(true);
+});
+
+function AnchoredMenuExample({
+  focusFirstItem = false,
+  onSelect,
+  onOutside,
+}: {
+  focusFirstItem?: boolean;
+  onSelect?: () => void;
+  onOutside?: () => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const row = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <Button ref={row} onClick={() => setOpen(true)}>
+        Row
+      </Button>
+      <Button onClick={onOutside}>Outside</Button>
+      <AnchoredMenu
+        label="Row actions"
+        open={open}
+        onOpenChange={setOpen}
+        anchor={{ x: 20, y: 40, width: 0, height: 0 }}
+        focusFirstItem={focusFirstItem}
+        returnFocus={() => row.current}
+        items={[
+          { heading: "Review" },
+          { label: "Unavailable", disabled: true },
+          { separator: true },
+          { label: "Copy link", onSelect },
+          { label: "Devices" },
+        ]}
+      />
+    </>
+  );
+}
+
+test.each([false, true])(
+  "AnchoredMenu chooses initial focus for its opening gesture (keyboard: %s)",
+  async (keyboard) => {
+    const onSelect = vi.fn();
+    mount(<AnchoredMenuExample focusFirstItem={keyboard} onSelect={onSelect} />);
+    const menu = await screen.findByRole("menu", { name: "Row actions" });
+    const first = within(menu).getByRole("menuitem", { name: "Copy link" });
+    await waitFor(() => expect(document.activeElement).toBe(keyboard ? first : menu));
+    expect(fireEvent.contextMenu(menu)).toBe(false);
+    if (keyboard) {
+      fireEvent.keyDown(first, { key: "Enter" });
+      expect(onSelect).toHaveBeenCalledOnce();
+      await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Row" })));
+    }
+  },
+);
+
+test("AnchoredMenu focuses the first item only once per keyboard opening", async () => {
+  mount(<AnchoredMenuExample focusFirstItem />);
+  const menu = await screen.findByRole("menu", { name: "Row actions" });
+  const first = within(menu).getByRole("menuitem", { name: "Copy link" });
+  const second = within(menu).getByRole("menuitem", { name: "Devices" });
+  await waitFor(() => expect(document.activeElement).toBe(first));
+  fireEvent.keyDown(first, { key: "ArrowDown" });
+  await waitFor(() => expect(document.activeElement).toBe(second));
+  act(() => menu.focus());
+  await waitFor(() => expect(document.activeElement).not.toBe(first));
+  fireEvent.keyDown(menu, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  const row = screen.getByRole("button", { name: "Row" });
+  await waitFor(() => expect(document.activeElement).toBe(row));
+  fireEvent.click(row);
+  const reopened = await screen.findByRole("menu", { name: "Row actions" });
+  await waitFor(() =>
+    expect(document.activeElement).toBe(within(reopened).getByRole("menuitem", { name: "Copy link" })),
+  );
+});
+
+test("AnchoredMenu lets an outside button receive its click and keep focus", async () => {
+  const onOutside = vi.fn();
+  mount(<AnchoredMenuExample onOutside={onOutside} />);
+  await screen.findByRole("menu");
+  expect(document.body.style.pointerEvents).not.toBe("none");
+  const button = screen.getByRole("button", { name: "Outside" });
+  fireEvent.pointerDown(button, { button: 0, pointerType: "mouse" });
+  // happy-dom does not perform the browser's pointerdown focus default.
+  act(() => button.focus());
+  fireEvent.click(button, { detail: 1 });
+  expect(onOutside).toHaveBeenCalledOnce();
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(button));
+});
+
+test("AnchoredMenu closes on outside scroll, preserves inside scroll, and cleans up after closing", async () => {
+  mount(<AnchoredMenuExample />);
+  const menu = await screen.findByRole("menu");
+  fireEvent.scroll(menu);
+  fireEvent.scroll(within(menu).getByRole("menuitem", { name: "Copy link" }));
+  expect(screen.getByRole("menu")).toBe(menu);
+  fireEvent.scroll(document);
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  const row = screen.getByRole("button", { name: "Row" });
+  await waitFor(() => expect(document.activeElement).toBe(row));
+  fireEvent.scroll(document);
+  fireEvent.click(row);
+  await screen.findByRole("menu");
+  fireEvent.scroll(row);
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 });
 
 test("Menu opened inside a Sheet is above the modal content", async () => {

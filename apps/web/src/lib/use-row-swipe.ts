@@ -1,7 +1,8 @@
-import { type MouseEvent, type PointerEvent, useCallback, useEffect, useRef, useState } from "react";
+import { type MouseEvent, type PointerEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export const SWIPE_REVEAL_PX = 56;
 export const SWIPE_SLOP_PX = 10;
+export const SWIPE_CLICK_WINDOW_MS = 600;
 
 interface Gesture {
   pointerId: number;
@@ -12,12 +13,21 @@ interface Gesture {
   dragging: boolean;
 }
 
-export function useRowSwipe(enabled: boolean) {
+export function useRowSwipe<T extends HTMLElement = HTMLAnchorElement>(enabled: boolean) {
   const row = useRef<HTMLLIElement>(null);
+  const content = useRef<T>(null);
+  const actions = useRef<HTMLDivElement>(null);
   const gesture = useRef<Gesture | null>(null);
-  const swallowClick = useRef(false);
+  const swallowClickAt = useRef<number | null>(null);
   const [offset, setOffset] = useState(0);
   const [dragging, setDragging] = useState(false);
+  const writeOffset = useCallback((value: number) => {
+    if (content.current) content.current.style.transform = value === 0 ? "" : `translateX(${value}px)`;
+    if (actions.current) actions.current.style.width = `${-value}px`;
+  }, []);
+  useLayoutEffect(() => {
+    writeOffset(dragging && gesture.current ? gesture.current.offset : offset);
+  }, [offset, dragging, writeOffset]);
   const revealed = offset === -SWIPE_REVEAL_PX && !dragging;
   const hide = useCallback(() => {
     gesture.current = null;
@@ -34,7 +44,7 @@ export function useRowSwipe(enabled: boolean) {
   }, [revealed, hide]);
   const handlers = {
     onPointerDown(event: PointerEvent<HTMLElement>) {
-      swallowClick.current = false;
+      swallowClickAt.current = null;
       if (!enabled || event.pointerType !== "touch") return;
       gesture.current = {
         pointerId: event.pointerId,
@@ -63,7 +73,7 @@ export function useRowSwipe(enabled: boolean) {
         }
       }
       current.offset = Math.max(-SWIPE_REVEAL_PX, Math.min(0, current.start + dx));
-      setOffset(current.offset);
+      writeOffset(current.offset);
     },
     onPointerUp(event: PointerEvent<HTMLElement>) {
       const current = gesture.current;
@@ -72,10 +82,10 @@ export function useRowSwipe(enabled: boolean) {
       if (current.dragging) {
         setOffset(current.offset <= -SWIPE_REVEAL_PX / 2 ? -SWIPE_REVEAL_PX : 0);
         setDragging(false);
-        swallowClick.current = true;
+        swallowClickAt.current = performance.now();
       } else if (current.start < 0) {
         hide();
-        swallowClick.current = true;
+        swallowClickAt.current = performance.now();
       }
     },
     onPointerCancel(event: PointerEvent<HTMLElement>) {
@@ -88,14 +98,16 @@ export function useRowSwipe(enabled: boolean) {
   };
   return {
     row,
+    content,
+    actions,
     offset,
     dragging,
     hide,
     handlers,
     guardClick(event: MouseEvent<HTMLElement>) {
-      if (!swallowClick.current) return;
-      swallowClick.current = false;
-      event.preventDefault();
+      const at = swallowClickAt.current;
+      swallowClickAt.current = null;
+      if (event.detail > 0 && at !== null && performance.now() - at <= SWIPE_CLICK_WINDOW_MS) event.preventDefault();
     },
   };
 }

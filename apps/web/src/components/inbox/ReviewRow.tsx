@@ -1,9 +1,7 @@
 import type { InboxItem } from "@emend/contract";
 import { Link } from "@tanstack/react-router";
 import { Ellipsis, MessageSquare, Pencil, Pin } from "lucide-react";
-import { useRef } from "react";
 import { plural } from "../../lib/count.ts";
-import { useLayout } from "../../lib/layout.ts";
 import { relativeTime, wakeHasPassed, wakeTime } from "../../lib/time.ts";
 import { useRowSwipe } from "../../lib/use-row-swipe.ts";
 import { agentDotClasses, agentStatusOf, agentStatusText } from "../status/AgentStatus.tsx";
@@ -47,8 +45,7 @@ export function ReviewRow({
   const openMenu = useRowMenu();
   const menuTrigger = useRowMenuTrigger(review);
   const swipe = useRowSwipe(!!openMenu && !review.movedTo);
-  const link = useRef<HTMLAnchorElement>(null);
-  const phone = useLayout() === "phone";
+  const link = swipe.content;
   const attention = needsAttention(review);
   const agent = agentStatusOf(review);
   const contents = (
@@ -156,7 +153,7 @@ export function ReviewRow({
     highlight && "em-inbox-new",
   );
   return (
-    <li ref={swipe.row} className={cn("relative", swipe.offset !== 0 && "overflow-hidden")}>
+    <li ref={swipe.row} className={cn("relative", (swipe.dragging || swipe.offset !== 0) && "overflow-hidden")}>
       {review.movedTo ? (
         <div className={cn(className, "opacity-50")} aria-disabled="true">
           {contents}
@@ -166,8 +163,8 @@ export function ReviewRow({
           ref={link}
           {...menuTrigger}
           {...swipe.handlers}
-          style={{ transform: swipe.offset !== 0 ? `translateX(${swipe.offset}px)` : undefined }}
           data-inbox-row={review.id}
+          data-row-menu={review.id}
           aria-keyshortcuts={keyShortcuts}
           to="/r/$reviewId"
           params={{ reviewId: review.id }}
@@ -196,20 +193,25 @@ export function ReviewRow({
           {contents}
         </Link>
       )}
-      {swipe.offset < 0 && openMenu && !review.movedTo && (
+      {(swipe.dragging || swipe.offset < 0) && openMenu && !review.movedTo && (
         <div
-          className="absolute inset-y-0 right-0 flex items-center justify-end overflow-hidden"
-          style={{ width: -swipe.offset }}
+          ref={swipe.actions}
+          className={cn(
+            "absolute inset-y-0 right-0 flex items-center justify-end overflow-hidden motion-reduce:transition-none",
+            !swipe.dragging && "transition-[width] duration-(--dur-2) ease-(--ease-out)",
+          )}
         >
           <IconButton
             icon={Ellipsis}
             label={`Actions for “${review.title}”`}
             tooltip={false}
-            size={phone ? "lg" : "md"}
+            size="lg"
+            className="size-11"
             onClick={(event) => {
               if (!link.current) return;
               openMenu({
                 reviewId: review.id,
+                via: "pointer",
                 anchor: event.currentTarget.getBoundingClientRect(),
                 align: "end",
                 row: link.current,

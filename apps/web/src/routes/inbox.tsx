@@ -174,6 +174,7 @@ export function Inbox({
   return (
     <div
       ref={root}
+      data-row-menu-surface
       className={compact ? "flex min-h-0 flex-1 flex-col" : "mx-auto w-full max-w-[760px] px-5 pt-8 pb-20"}
     >
       {!hideHead &&

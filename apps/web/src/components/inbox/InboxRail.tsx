@@ -30,6 +30,7 @@ export function InboxRail({ onShow, showRef }: { onShow: () => void; showRef?: R
   return (
     <aside
       aria-label="Inbox"
+      data-row-menu-surface
       className="flex w-(--inbox-w-collapsed) shrink-0 flex-col items-center gap-2 border-r border-line-1 bg-app py-2"
     >
       <IconButton ref={showRef} label="Show inbox" icon={PanelLeftOpen} onClick={onShow} />
@@ -56,6 +57,7 @@ function RailRow({ review, binding: key }: { review: InboxItem; binding: string 
       <Tooltip content={review.title}>
         <Link
           {...menuTrigger}
+          data-row-menu={review.id}
           aria-keyshortcuts={key === null ? undefined : ariaKeyShortcuts(key)}
           to="/r/$reviewId"
           params={{ reviewId: review.id }}

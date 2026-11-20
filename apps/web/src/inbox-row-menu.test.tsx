@@ -2,13 +2,14 @@ import type { InboxItem, RevisionView } from "@emend/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { Profiler } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
 import { type InboxData, inboxQuery } from "./api/queries.ts";
 import { useRowMenuTrigger } from "./components/inbox/RowMenu.tsx";
 import { beginReviewSend, finishReviewSend } from "./lib/drafts.ts";
 import { defaultLayout, layoutStore } from "./lib/layout-store.ts";
-import { SWIPE_REVEAL_PX, SWIPE_SLOP_PX, useRowSwipe } from "./lib/use-row-swipe.ts";
+import { SWIPE_CLICK_WINDOW_MS, SWIPE_REVEAL_PX, SWIPE_SLOP_PX, useRowSwipe } from "./lib/use-row-swipe.ts";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const targetId = "22222222-2222-4222-8222-222222222222";
@@ -127,6 +128,7 @@ afterEach(() => {
   cleanup();
   client.clear();
   finishReviewSend(targetId);
+  vi.restoreAllMocks();
 });
 function target(patch: Partial<InboxItem>) {
   inbox = inbox.map((row) => (row.id === targetId ? { ...row, ...patch } : row));
@@ -289,9 +291,30 @@ test.each([{ key: "F10", shiftKey: true }, { key: "ContextMenu" }])(
     act(() => row.focus());
     expect(fireEvent.keyDown(row, key)).toBe(false);
     const menu = await screen.findByRole("menu", { name: "Actions for “Row review”" });
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(menu).getByRole("menuitem", { name: "How to resume" })),
+    );
     expect(fireEvent.contextMenu(menu)).toBe(false);
     await escapeMenu();
     await waitFor(() => expect(document.activeElement).toBe(row));
+  },
+);
+
+test.each([{ key: "F10", shiftKey: true }, { key: "ContextMenu" }])(
+  "$key skips disabled items and Enter runs the first enabled action",
+  async (key) => {
+    target({ agentWaiting: true });
+    mount();
+    const row = await rowLink();
+    act(() => row.focus());
+    fireEvent.keyDown(row, key);
+    const menu = await screen.findByRole("menu");
+    const resume = within(menu).getByRole("menuitem", { name: "How to resume" });
+    expect(resume.getAttribute("aria-disabled")).toBe("true");
+    const snooze = within(menu).getByRole("menuitem", { name: "Snooze" });
+    await waitFor(() => expect(document.activeElement).toBe(snooze));
+    fireEvent.keyDown(snooze, { key: "Enter" });
+    await screen.findByRole("alertdialog", { name: "Snooze this review" });
   },
 );
 
@@ -301,7 +324,10 @@ test("right-click anchors at the pointer; a keyboard context event uses the row 
   vi.spyOn(row, "getBoundingClientRect").mockReturnValue(new DOMRect(12, 20, 200, 64));
   for (const point of [true, false]) {
     fireEvent.contextMenu(row, point ? { clientX: 50, clientY: 60 } : {});
-    await screen.findByRole("menu");
+    const menu = await screen.findByRole("menu");
+    await waitFor(() =>
+      expect(document.activeElement).toBe(point ? menu : within(menu).getByRole("menuitem", { name: "How to resume" })),
+    );
     const anchor = document.querySelector<HTMLElement>('span[aria-label="Actions for “Row review”"]');
     expect(anchor?.style.left).toBe(point ? "50px" : "12px");
     expect(anchor?.style.top).toBe(point ? "60px" : "20px");
@@ -311,14 +337,142 @@ test("right-click anchors at the pointer; a keyboard context event uses the row 
   }
 });
 
-test("outside dismissal leaves focus on the outside control", async () => {
+test("right-clicking another row replaces the open menu without blocking the pointer", async () => {
+  mount();
+  const row = await rowLink("Open review");
+  await rowMenu();
+  expect(document.body.style.pointerEvents).not.toBe("none");
+  fireEvent.pointerDown(row, { button: 2, pointerType: "mouse", clientX: 72, clientY: 96 });
+  expect(fireEvent.contextMenu(row, { button: 2, clientX: 72, clientY: 96 })).toBe(false);
+  const menu = await screen.findByRole("menu", { name: "Actions for “Open review”" });
+  await waitFor(() => expect(screen.getAllByRole("menu")).toEqual([menu]));
+  const anchor = document.querySelector<HTMLElement>('span[aria-label="Actions for “Open review”"]');
+  expect(anchor?.style.left).toBe("72px");
+  expect(anchor?.style.top).toBe("96px");
+});
+
+test("an outside click activates its button and leaves focus there", async () => {
   mount();
   await rowMenu();
-  const input = screen.getByRole("textbox", { name: "Filter reviews", hidden: true });
-  fireEvent.pointerDown(input, { pointerType: "mouse" });
-  act(() => input.focus());
+  expect(document.body.style.pointerEvents).not.toBe("none");
+  const button = screen.getByRole("button", { name: /^Active / });
+  fireEvent.pointerDown(button, { button: 0, pointerType: "mouse" });
+  // happy-dom does not perform the browser's pointerdown focus default.
+  act(() => button.focus());
+  fireEvent.click(button, { detail: 1 });
   await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
-  await waitFor(() => expect(document.activeElement).toBe(input));
+  expect(button.getAttribute("aria-expanded")).toBe("false");
+  await waitFor(() => expect(document.activeElement).toBe(button));
+});
+
+test("scrolling the inbox closes its row menu, but scrolling inside the menu keeps it open", async () => {
+  mount();
+  const menu = await rowMenu();
+  fireEvent.scroll(menu);
+  fireEvent.scroll(within(menu).getByRole("menuitem", { name: "Pin" }));
+  expect(screen.getByRole("menu")).toBe(menu);
+  fireEvent.scroll(screen.getByRole("region", { name: "Active" }));
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+});
+
+test("Pin from a keyboard menu follows the row from Active to Pinned", async () => {
+  mount();
+  const row = await rowLink();
+  const active = screen.getByRole("region", { name: "Active" });
+  expect(within(active).getByRole("link", { name: /Row review/ })).toBe(row);
+  act(() => row.focus());
+  fireEvent.keyDown(row, { key: "ContextMenu" });
+  const pin = await screen.findByRole("menuitem", { name: "Pin" });
+  act(() => pin.focus());
+  fireEvent.keyDown(pin, { key: "Enter" });
+  const pinned = await screen.findByRole("region", { name: "Pinned" });
+  const moved = within(pinned).getByRole("link", { name: /Row review/ });
+  expect(moved).not.toBe(row);
+  expect(row.isConnected).toBe(false);
+  await waitFor(() => expect(document.activeElement).toBe(moved));
+});
+
+test("Snooze returns focus to the moved row in the expanded Snoozed section", async () => {
+  inbox = inbox.map((entry) => (entry.id === id ? { ...entry, snoozed: true, list: "snoozed" } : entry));
+  mount();
+  const row = await rowLink();
+  const snoozed = screen.getByRole("region", { name: "Snoozed" });
+  expect(
+    within(snoozed)
+      .getByRole("button", { name: /^Snoozed / })
+      .getAttribute("aria-expanded"),
+  ).toBe("true");
+  act(() => row.focus());
+  fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Snooze" }));
+  const dialog = await screen.findByRole("alertdialog", { name: "Snooze this review" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Until it changes" }));
+  const moved = await within(snoozed).findByRole("link", { name: /Row review/ });
+  expect(moved).not.toBe(row);
+  expect(row.isConnected).toBe(false);
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(moved));
+});
+
+test("focus follows a snoozed row when the inbox refetch arrives after the dialog closed", async () => {
+  inbox = inbox.map((entry) => (entry.id === id ? { ...entry, snoozed: true, list: "snoozed" } : entry));
+  mount();
+  const row = await rowLink();
+  await choose("Snooze");
+  const dialog = await screen.findByRole("alertdialog", { name: "Snooze this review" });
+  const fetch = fetchMock.getMockImplementation();
+  if (!fetch) throw new Error("Missing fetch mock");
+  let releaseInbox: () => void = () => {
+    throw new Error("Missing inbox refetch");
+  };
+  fetchMock.mockImplementation((path, init) => {
+    if (path !== "/api/v1/reviews") return fetch(path, init);
+    return new Promise<Response>((resolve) => {
+      releaseInbox = () => resolve(fetch(path, init));
+    });
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Until it changes" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(row));
+  releaseInbox();
+  const snoozed = screen.getByRole("region", { name: "Snoozed" });
+  const moved = await within(snoozed).findByRole("link", { name: /Row review/ });
+  expect(row.isConnected).toBe(false);
+  await waitFor(() => expect(document.activeElement).toBe(moved));
+});
+
+test("a returned row stops following focus after the reader focuses another control", async () => {
+  mount();
+  const row = await rowLink();
+  await rowMenu();
+  await escapeMenu();
+  await waitFor(() => expect(document.activeElement).toBe(row));
+  const input = screen.getByRole("textbox", { name: "Filter reviews" });
+  act(() => {
+    input.focus();
+    input.blur();
+  });
+  target({ pinnedAt: item.updatedAt });
+  await act(async () => {
+    await client.invalidateQueries(inboxQuery());
+  });
+  await waitFor(() => expect(row.isConnected).toBe(false));
+  expect(document.activeElement).toBe(document.body);
+});
+
+test("a row moving to a folded section leaves focus in place", async () => {
+  mount();
+  const row = await rowLink();
+  await rowMenu();
+  await escapeMenu();
+  await waitFor(() => expect(document.activeElement).toBe(row));
+  target({ snoozed: true, list: "snoozed" });
+  await act(async () => {
+    await client.invalidateQueries(inboxQuery());
+  });
+  await waitFor(() => expect(row.isConnected).toBe(false));
+  expect(screen.queryByRole("link", { name: /Row review/ })).toBeNull();
+  expect(document.activeElement).toBe(document.body);
 });
 
 test.each(["Snooze", "Retire", "Move to group…", "Delete", "How to resume"])(
@@ -387,12 +541,15 @@ test("phone swipe reveals actions, suppresses navigation and opens the shared Sn
   const row = await rowLink();
   expect(row.style.transform).toBe("");
   drag(row, -80);
-  expect(fireEvent.click(row)).toBe(false);
+  expect(fireEvent.click(row, { detail: 1 })).toBe(false);
   expect(history.location.pathname).toBe("/");
   expect(row.style.transform).toBe(`translateX(-${SWIPE_REVEAL_PX}px)`);
   const button = actionsButton();
   expect(button).toBeTruthy();
   if (!button) throw new Error("Missing swipe action");
+  expect(button.classList.contains("size-11")).toBe(true);
+  expect(button.classList.contains("h-10")).toBe(false);
+  expect(button.classList.contains("w-[2.5rem]")).toBe(false);
   fireEvent.click(button);
   expect(labels(await screen.findByRole("menu"))).toEqual(expected);
   fireEvent.click(screen.getByRole("menuitem", { name: "Snooze" }));
@@ -404,6 +561,39 @@ test("phone swipe reveals actions, suppresses navigation and opens the shared Sn
     expect(writes()).toEqual([["POST", `/api/v1/reviews/${targetId}/snooze`, '{"untilRevision":true}']]),
   );
   expect(history.location.pathname).toBe("/");
+});
+
+test.each([390, 900, 1280])("the swipe action has a 44 px target at %s px", async (pixels) => {
+  width = pixels;
+  mount();
+  drag(await rowLink(), -80);
+  const button = actionsButton();
+  expect(button?.classList.contains("size-11")).toBe(true);
+  expect(button?.classList.contains("h-10")).toBe(false);
+  expect(button?.classList.contains("w-[2.5rem]")).toBe(false);
+});
+
+test("a keyboard activation opens the row after a drag that fired no click", async () => {
+  width = 390;
+  const { history } = mount();
+  const row = await rowLink();
+  drag(row, -80);
+  fireEvent.click(row, { detail: 0 });
+  await screen.findByRole("heading", { name: "Row review", level: 1 });
+  expect(history.location.pathname).toBe(`/r/${targetId}`);
+});
+
+test("a pointer click after the swipe click window opens the row", async () => {
+  width = 390;
+  const { history } = mount();
+  const row = await rowLink();
+  const now = vi.spyOn(performance, "now").mockReturnValue(1000);
+  drag(row, -80);
+  now.mockReturnValue(1000 + SWIPE_CLICK_WINDOW_MS + 1);
+  fireEvent.click(row, { detail: 1 });
+  now.mockRestore();
+  await screen.findByRole("heading", { name: "Row review", level: 1 });
+  expect(history.location.pathname).toBe(`/r/${targetId}`);
 });
 
 test.each(["mouse", "pen", "vertical", "short", "cancel"])(
@@ -447,12 +637,12 @@ test.each(["tap", "outside", "back", "cancel"])(
     const { history } = mount();
     const row = await rowLink();
     drag(row, -80);
-    fireEvent.click(row);
+    fireEvent.click(row, { detail: 1 });
     expect(actionsButton()).toBeTruthy();
     if (gesture === "outside") fireEvent.pointerDown(screen.getByRole("textbox", { name: "Filter reviews" }));
     else {
       drag(row, gesture === "tap" ? 0 : 80, 0, "touch", gesture === "cancel");
-      if (gesture !== "cancel") expect(fireEvent.click(row)).toBe(false);
+      if (gesture !== "cancel") expect(fireEvent.click(row, { detail: 1 })).toBe(false);
     }
     expect(!!actionsButton()).toBe(gesture === "cancel");
     expect(history.location.pathname).toBe("/");
@@ -545,23 +735,69 @@ test("rows without a menu provider have no context-menu handlers", () => {
 });
 
 function SwipeProbe({ enabled = true }: { enabled?: boolean }) {
-  const swipe = useRowSwipe(enabled);
+  const swipe = useRowSwipe<HTMLButtonElement>(enabled);
   return (
     <ul>
       <li ref={swipe.row}>
         <button
           type="button"
+          ref={swipe.content}
           {...swipe.handlers}
           onClick={swipe.guardClick}
-          style={{ transform: `translateX(${swipe.offset}px)` }}
           data-dragging={swipe.dragging}
         >
           Swipe
         </button>
+        {(swipe.dragging || swipe.offset < 0) && <div ref={swipe.actions} data-testid="swipe-actions" />}
       </li>
     </ul>
   );
 }
+
+test("several swipe moves render only at drag start and release while updating the row and action width", () => {
+  const rendered = vi.fn();
+  render(
+    <Profiler id="swipe-row" onRender={rendered}>
+      <SwipeProbe />
+    </Profiler>,
+  );
+  const button = screen.getByRole("button", { name: "Swipe" });
+  rendered.mockClear();
+  const pointer = { pointerId: 1, pointerType: "touch", clientY: 0 };
+  fireEvent.pointerDown(button, { ...pointer, clientX: 100 });
+  for (const x of [88, 80, 68, 55, 40]) {
+    fireEvent.pointerMove(button, { ...pointer, clientX: x });
+    const offset = Math.max(-SWIPE_REVEAL_PX, x - 100);
+    expect(button.style.transform).toBe(`translateX(${offset}px)`);
+    expect(screen.getByTestId("swipe-actions").style.width).toBe(`${-offset}px`);
+  }
+  expect(rendered).toHaveBeenCalledOnce();
+  fireEvent.pointerUp(button, { ...pointer, clientX: 40 });
+  expect(rendered.mock.calls.length).toBeLessThanOrEqual(2);
+  expect(button.getAttribute("data-dragging")).toBe("false");
+  expect(button.style.transform).toBe(`translateX(-${SWIPE_REVEAL_PX}px)`);
+});
+
+test.each([0, SWIPE_CLICK_WINDOW_MS, SWIPE_CLICK_WINDOW_MS + 1])(
+  "a pointer click %s ms after a swipe is guarded only within the gesture window",
+  (elapsed) => {
+    render(<SwipeProbe />);
+    const button = screen.getByRole("button", { name: "Swipe" });
+    const now = vi.spyOn(performance, "now").mockReturnValue(1000);
+    drag(button, -80);
+    now.mockReturnValue(1000 + elapsed);
+    expect(fireEvent.click(button, { detail: 1 })).toBe(elapsed > SWIPE_CLICK_WINDOW_MS);
+    expect(fireEvent.click(button, { detail: 1 })).toBe(true);
+  },
+);
+
+test("a keyboard click clears a pending swipe click without swallowing either activation", () => {
+  render(<SwipeProbe />);
+  const button = screen.getByRole("button", { name: "Swipe" });
+  drag(button, -80);
+  expect(fireEvent.click(button, { detail: 0 })).toBe(true);
+  expect(fireEvent.click(button, { detail: 1 })).toBe(true);
+});
 
 test.each([
   [-SWIPE_SLOP_PX + 1, 0, false],
@@ -575,18 +811,18 @@ test.each([
   const capture = vi.fn();
   Object.defineProperty(button, "setPointerCapture", { value: capture });
   drag(button, dx);
-  expect(button.style.transform).toBe(`translateX(${offset}px)`);
+  expect(button.style.transform).toBe(offset === 0 ? "" : `translateX(${offset}px)`);
   expect(button.getAttribute("data-dragging")).toBe("false");
   expect(capture.mock.calls).toHaveLength(dragged ? 1 : 0);
-  expect(fireEvent.click(button)).toBe(!dragged);
-  expect(fireEvent.click(button)).toBe(true);
+  expect(fireEvent.click(button, { detail: 1 })).toBe(!dragged);
+  expect(fireEvent.click(button, { detail: 1 })).toBe(true);
 });
 
 test("a disabled swipe ignores touch", () => {
   render(<SwipeProbe enabled={false} />);
   const button = screen.getByRole("button", { name: "Swipe" });
   drag(button, -80);
-  expect(button.style.transform).toBe("translateX(0px)");
+  expect(button.style.transform).toBe("");
   expect(fireEvent.click(button)).toBe(true);
 });
 
@@ -608,6 +844,6 @@ test("swipe tolerates failed pointer capture and ignores another pointer's event
   expect(button.style.transform).toBe("translateX(-20px)");
   expect(button.getAttribute("data-dragging")).toBe("true");
   fireEvent.pointerCancel(button, { pointerId: 1, pointerType: "touch" });
-  expect(button.style.transform).toBe("translateX(0px)");
+  expect(button.style.transform).toBe("");
   expect(button.getAttribute("data-dragging")).toBe("false");
 });

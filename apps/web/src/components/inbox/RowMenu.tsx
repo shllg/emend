@@ -9,6 +9,8 @@ import {
   use,
   useCallback,
   useEffect,
+  useLayoutEffect,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -22,6 +24,7 @@ import { AnchoredMenu } from "../ui/Menu.tsx";
 
 export interface RowMenuRequest {
   reviewId: string;
+  via: "keyboard" | "pointer";
   anchor: { x: number; y: number; width: number; height: number };
   side?: "bottom" | "right";
   align?: "start" | "end";
@@ -33,10 +36,44 @@ export interface RowMenuRequest {
 
 const RowMenuContext = createContext<((request: RowMenuRequest) => void) | null>(null);
 
+type RowMenuTarget = RowMenuRequest & { surface: Element | null };
+
+function rowToFocus(request: RowMenuTarget): HTMLElement | null {
+  if (request.row.isConnected) return request.row;
+  if (!request.surface?.isConnected) return null;
+  return request.surface.querySelector<HTMLElement>(`[data-row-menu="${CSS.escape(request.reviewId)}"]`);
+}
+
 export function RowMenuProvider({ children }: { children: ReactNode }) {
-  const [menu, setMenu] = useState<{ request: RowMenuRequest; open: boolean } | null>(null);
+  const [menu, setMenu] = useState<{ request: RowMenuTarget; open: boolean } | null>(null);
+  const followedRow = useRef<HTMLElement | null>(null);
   const inbox = useQuery(inboxQuery());
-  const open = useCallback((request: RowMenuRequest) => setMenu({ request, open: true }), []);
+  const open = useCallback((request: RowMenuRequest) => {
+    followedRow.current = null;
+    setMenu({ request: { ...request, surface: request.row.closest("[data-row-menu-surface]") }, open: true });
+  }, []);
+  const request = menu?.request;
+  useEffect(() => {
+    if (!request) return;
+    // Dialogs can restore their saved opener without reading returnFocus again.
+    const onFocus = (event: FocusEvent) => {
+      const row = rowToFocus(request);
+      followedRow.current = row && event.target === row ? row : null;
+    };
+    document.addEventListener("focusin", onFocus);
+    return () => document.removeEventListener("focusin", onFocus);
+  }, [request]);
+  useLayoutEffect(() => {
+    const followed = followedRow.current;
+    if (!request || !inbox.data || !followed || document.activeElement === followed) return;
+    if (followed.isConnected || (document.activeElement && document.activeElement !== document.body)) {
+      followedRow.current = null;
+      return;
+    }
+    const row = rowToFocus(request);
+    followedRow.current = row;
+    row?.focus();
+  }, [inbox.data, request]);
   const item = inbox.data?.items.find((item) => item.id === menu?.request.reviewId);
   return (
     <RowMenuContext value={open}>
@@ -65,18 +102,23 @@ export function useRowMenu(): ((request: RowMenuRequest) => void) | null {
 export function useRowMenuTrigger(review: InboxItem, options?: { side?: "bottom" | "right" }) {
   const open = useRowMenu();
   if (!open || review.movedTo) return undefined;
-  const show = (row: HTMLElement, anchor: RowMenuRequest["anchor"]) =>
-    open({ reviewId: review.id, row, anchor, side: options?.side });
+  const show = (row: HTMLElement, anchor: RowMenuRequest["anchor"], via: RowMenuRequest["via"]) =>
+    open({ reviewId: review.id, row, anchor, via, side: options?.side });
   return {
     onContextMenu(event: MouseEvent<HTMLElement>) {
       event.preventDefault();
       const { clientX: x, clientY: y, currentTarget: row } = event;
-      show(row, x === 0 && y === 0 ? row.getBoundingClientRect() : { x, y, width: 0, height: 0 });
+      const keyboard = x === 0 && y === 0;
+      show(
+        row,
+        keyboard ? row.getBoundingClientRect() : { x, y, width: 0, height: 0 },
+        keyboard ? "keyboard" : "pointer",
+      );
     },
     onKeyDown(event: KeyboardEvent<HTMLElement>) {
       if (event.key !== "ContextMenu" && !(event.key === "F10" && event.shiftKey)) return;
       event.preventDefault();
-      show(event.currentTarget, event.currentTarget.getBoundingClientRect());
+      show(event.currentTarget, event.currentTarget.getBoundingClientRect(), "keyboard");
     },
   };
 }
@@ -88,7 +130,7 @@ function RowActions({
   onOpenChange,
 }: {
   item: InboxItem;
-  request: RowMenuRequest;
+  request: RowMenuTarget;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -128,7 +170,7 @@ function RowActions({
   });
   const returnFocus = {
     get current() {
-      return request.row.isConnected ? request.row : null;
+      return rowToFocus(request);
     },
   };
   return (
@@ -142,6 +184,7 @@ function RowActions({
         align={request.align}
         size={phone ? "lg" : "md"}
         items={actions.items}
+        focusFirstItem={request.via === "keyboard"}
         returnFocus={() => returnFocus.current}
       />
       <ReviewActionDialogs actions={actions} returnFocus={returnFocus} />

@@ -1,7 +1,7 @@
 import * as Primitive from "@radix-ui/react-dropdown-menu";
 import { Slottable } from "@radix-ui/react-slot";
 import { Check, Ellipsis } from "lucide-react";
-import { type ComponentProps, type ReactElement, type ReactNode, type Ref, useRef } from "react";
+import { type ComponentProps, type ReactElement, type ReactNode, type Ref, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Icon, type IconComponent } from "./Icon.tsx";
 import { IconButton } from "./IconButton.tsx";
@@ -76,6 +76,8 @@ export interface AnchoredMenuProps {
   align?: "start" | "end";
   size?: "sm" | "md" | "lg";
   items: MenuItem[];
+  /** A keyboard opening starts on the first enabled item. */
+  focusFirstItem?: boolean;
   /** Gets focus on close unless the reader clicked or tapped outside. */
   returnFocus: () => HTMLElement | null;
 }
@@ -89,11 +91,23 @@ export function AnchoredMenu({
   align = "start",
   size = "md",
   items,
+  focusFirstItem = false,
   returnFocus,
 }: AnchoredMenuProps) {
   const outside = useRef(false);
+  const entered = useRef(false);
+  const content = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = (event: Event) => {
+      if (event.target instanceof Node && content.current?.contains(event.target)) return;
+      onOpenChange(false);
+    };
+    document.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    return () => document.removeEventListener("scroll", onScroll, true);
+  }, [open, onOpenChange]);
   return (
-    <Primitive.Root open={open} onOpenChange={onOpenChange}>
+    <Primitive.Root open={open} onOpenChange={onOpenChange} modal={false}>
       {createPortal(
         <Primitive.Trigger asChild aria-label={label}>
           <span
@@ -111,6 +125,7 @@ export function AnchoredMenu({
         document.body,
       )}
       <MenuContent
+        ref={content}
         aria-label={label}
         items={items}
         size={size}
@@ -118,14 +133,22 @@ export function AnchoredMenu({
         align={align}
         sideOffset={anchor.width === 0 && anchor.height === 0 ? 2 : 4}
         onContextMenu={(event) => event.preventDefault()}
+        onFocus={(event) => {
+          if (!focusFirstItem || entered.current || event.target !== event.currentTarget) return;
+          entered.current = true;
+          content.current?.querySelector<HTMLElement>('[role="menuitem"]:not([data-disabled])')?.focus();
+        }}
         onInteractOutside={() => {
           outside.current = true;
         }}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
-          const target = returnFocus();
-          if (!outside.current && target?.isConnected) target.focus();
+          if (!outside.current) {
+            const target = returnFocus();
+            if (target?.isConnected) target.focus();
+          }
           outside.current = false;
+          entered.current = false;
         }}
       />
     </Primitive.Root>
