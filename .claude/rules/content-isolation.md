@@ -35,7 +35,9 @@ with the reviewer's session can send instructions to the waiting agent in the re
   Global Constraints), in an iframe with `sandbox="allow-scripts"` and nothing else. Never add
   `allow-same-origin`, `allow-top-navigation`, `allow-popups` or `allow-forms`.
 - The content path never reads cookies. Its key names one HTML doc of one revision, and it serves
-  only that doc and the assets that doc lists.
+  only that doc and the assets that doc lists. The one exception is `/content/sample/sample.html`:
+  it serves only the fixed synthetic theme sample doc from `packages/core/src/sample/`, with the
+  same look, bridge and headers, and every other path under `/content/sample/` is `404`.
 - Frame messages: the parent accepts a message only when `event.source` is that frame's
   `contentWindow` and it parses with the contract's limits. A proposed anchor is shown to the
   reviewer and saved only by the reviewer. The parent posts only that doc's quotes into the

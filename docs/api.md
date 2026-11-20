@@ -90,6 +90,7 @@ a machine token reaches only reviews from its own instance.
 | POST | `/api/v1/pairings` | Admin, reviewer | Create from `PairingRequest`; return `PairingCreated` (201). |
 | GET | `/api/v1/devices` | Admin, reviewer | Return `DeviceList` (200); live devices owned by the principal, newest first. |
 | GET | `/api/v1/settings` | Reviewer | Return `SettingsView` (200); requires `read`. |
+| GET | `/api/v1/sample` | Reviewer | Return `SampleView` (200); requires `read`. |
 | GET | `/api/v1/themes` | Reviewer | Return `ThemeList` (200); requires `read`. |
 | GET | `/api/v1/themes/:name/fonts/:file` | Reviewer | Return a font file named by a valid theme (200); requires `read`. |
 | PATCH | `/api/v1/settings` | Reviewer | Apply `SettingsUpdate` and return `SettingsView` (200); requires `settings:manage`. |
@@ -136,7 +137,7 @@ a machine token reaches only reviews from its own instance.
 | POST | `/api/v1/reviews/:id/take` | Agent | Claim a delivery with `{waitSeconds?: 0..25, maxBytes?: 65536..16777216, accepts?: ["closed"]}`. |
 | POST | `/api/v1/deliveries/:id/confirm` | Agent | Confirm receipt of a claimed delivery. |
 | POST | `/api/v1/comments/:id/reply` | Agent | Answer a comment with an outcome. |
-| GET | `/content/:contentKey/*` | Holder of the key | Read isolated HTML docs and assets from a revision. |
+| GET | `/content/:contentKey/*` | Holder of the key | Read isolated HTML docs and assets from a revision. The sole exception is `/content/sample/sample.html`: only the fixed synthetic sample doc, with the same look, bridge and headers; every other `/content/sample/` path is 404. |
 
 Only an admin bearer with `server:stop` may call `/api/v1/server/stop`. The server sends its
 202 response before shutting down through the same cleanup as SIGTERM and exiting 0. Repeated
@@ -1046,7 +1047,10 @@ The URL is
 `/content/<docKey>/<path>` with each path segment percent-encoded. The doc key is the revision's
 43-character base64url `contentKey` followed by that doc's file UUID with dashes removed (32
 lowercase hex characters); its exact shape is `^[A-Za-z0-9_-]{43}[0-9a-f]{32}$`.
-GET and HEAD serve only that HTML doc and the assets it lists in the same owner and revision.
+The sole exception is `/content/sample/sample.html`, which serves only the fixed synthetic sample
+doc with the same look, bridge and headers. Every other `/content/sample/` path receives 404.
+For revision content, GET and HEAD serve only that HTML doc and the assets it lists in the same
+owner and revision.
 The key is the capability: neither cookies nor Authorization are read, and the owner comes from
 the revision. Wrong keys, missing files, other docs, diff files, unlisted assets and invalid paths
 receive 404, and so does a stored blob whose size or bytes do not match its hash, before any byte
