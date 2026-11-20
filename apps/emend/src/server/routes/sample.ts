@@ -1,0 +1,12 @@
+import { SampleView } from "@emend/contract";
+import { buildSampleView } from "@emend/core";
+import type { Hono } from "hono";
+import type { AppEnv } from "../auth/principal.ts";
+
+let sample: Promise<SampleView> | undefined;
+export function sampleRoutes(app: Hono<AppEnv>) {
+  app.get("/api/v1/sample", async (c) => {
+    sample ??= buildSampleView().then((view) => SampleView.parse(view));
+    return c.json(await sample);
+  });
+}

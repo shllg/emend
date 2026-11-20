@@ -3,6 +3,7 @@ import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { claimDraft } from "../../lib/composer-owner.ts";
 import { draftKey } from "../../lib/drafts.ts";
 import { linesErrorMessage } from "../../lib/line-context.ts";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import type { ReaderProps } from "./BlockReader.tsx";
 import { SourceLines } from "./SourceLines.tsx";
 import { sourceLinesTarget } from "./sourceLinesTarget.ts";
@@ -19,6 +20,7 @@ export const SourceView = memo(function SourceView({
   activeThreadId,
   threadJump,
 }: ReaderProps & { doc: SourceDoc }) {
+  const readOnly = useReadOnlyReview();
   const root = useRef<HTMLDivElement>(null);
   const anchor = useRef<number | undefined>(undefined);
   const opener = useRef<HTMLButtonElement | null>(null);
@@ -54,6 +56,7 @@ export const SourceView = memo(function SourceView({
   }, [threads, doc.path, texts.length, activeThreadId, threadJump?.threadId]);
   const select = useCallback(
     (line: number, extend: boolean, button: HTMLButtonElement) => {
+      if (readOnly) return;
       if (!extend || anchor.current === undefined) anchor.current = line;
       opener.current = button;
       const next = sourceLinesTarget(doc.path, texts, Math.min(anchor.current, line), Math.max(anchor.current, line));
@@ -66,7 +69,7 @@ export const SourceView = memo(function SourceView({
       setTarget(next);
       setError("");
     },
-    [doc.path, texts, reviewId],
+    [readOnly, doc.path, texts, reviewId],
   );
   const close = useCallback(() => {
     setTarget(null);

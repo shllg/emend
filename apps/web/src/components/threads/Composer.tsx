@@ -14,6 +14,7 @@ import {
   subscribeDrafts,
 } from "../../lib/drafts.ts";
 import { useLayout } from "../../lib/layout.ts";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { clipText } from "../../lib/selection.ts";
 import { useCommentCard } from "../diff/comment-lines.ts";
 import { targetLabel } from "../diff/targets.ts";
@@ -26,7 +27,12 @@ function canRestoreInlineFocus(form: HTMLFormElement | null | undefined) {
   return !active || active === document.body || !!form?.contains(active);
 }
 
-export function Composer({
+export function Composer(props: Parameters<typeof WritableComposer>[0]) {
+  const readOnly = useReadOnlyReview();
+  return readOnly ? null : <WritableComposer {...props} />;
+}
+
+function WritableComposer({
   reviewId,
   revision,
   target,

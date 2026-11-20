@@ -22,10 +22,10 @@ import {
 } from "react";
 import { isLockfile } from "../../../../../packages/core/src/lockfiles.ts";
 import { splitLines } from "../../../../../packages/core/src/place/linemap.ts";
-import { getText } from "../../api/client.ts";
 import { plural } from "../../lib/count.ts";
 import { diffLoads } from "../../lib/diff-loads.ts";
 import { linesErrorMessage } from "../../lib/line-context.ts";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { useStickyHeight } from "../../lib/sticky-stack.ts";
 import { Composer } from "../threads/Composer.tsx";
 import { ThreadCard } from "../threads/ThreadCard.tsx";
@@ -34,6 +34,7 @@ import { AgentNoteCard } from "./AgentNoteCard.tsx";
 import { annotationExpansions } from "./annotation-expansion.ts";
 import { CommentLinesContext, createCommentLines } from "./comment-lines.ts";
 import { FileHeader } from "./FileHeader.tsx";
+import { type FileTexts, useFileTexts } from "./file-texts.ts";
 import { GutterComment } from "./GutterComment.tsx";
 import { LineComposer } from "./LineComposer.tsx";
 import { linesTarget } from "./linesTarget.ts";
@@ -110,6 +111,7 @@ export function DiffView({
   selected: SelectedLineRange | null;
   onSlots?: (slots: SlotState) => void;
 }) {
+  const readOnly = useReadOnlyReview();
   const [commentLines] = useState(createCommentLines);
   const hoveredLine = useRef<GetHoveredLineResult<"diff"> | undefined>(undefined);
   const expansionState = useRef<{
@@ -170,7 +172,7 @@ export function DiffView({
       diffIndicators: "classic",
       hunkSeparators: "line-info",
       lineHoverHighlight: "both",
-      enableGutterUtility: true,
+      enableGutterUtility: !readOnly,
       onLineEnter: ({ lineNumber, annotationSide, numberElement }) => {
         hoveredLine.current = { lineNumber, side: annotationSide };
         // 1.6.1 pins the utility to a selection's end. This pointer affordance
@@ -185,12 +187,12 @@ export function DiffView({
       unsafeCSS: diffShadowCSS,
       overflow,
       disableFileHeader: true,
-      enableLineSelection: true,
+      enableLineSelection: !readOnly,
       expandUnchanged: false,
       onLineSelectionEnd: stableSelect,
       onPostRender: onPostRender as unknown as FileDiffOptions<string, undefined>["onPostRender"],
     }),
-    [diffStyle, overflow, stableSelect, onPostRender],
+    [readOnly, diffStyle, overflow, stableSelect, onPostRender],
   );
   // Positions only: the array changes when an annotation is added, removed or moved,
   // not when a card's content changes.
@@ -261,6 +263,7 @@ export function FileDiff({
   hidden,
   ...context
 }: DiffContext & { file: FileView; topicCollapsed: boolean; hidden?: boolean }) {
+  const readOnly = useReadOnlyReview();
   const ref = useRef<HTMLElement>(null);
   const header = useRef<HTMLElement>(null);
   const foldSpot = useRef<{ at: number; time: number }>(undefined);
@@ -321,7 +324,7 @@ export function FileDiff({
       context.fileForTarget(thread.placement.location)?.id === file.id,
   );
   const close = () => context.onActive(null);
-  const active = context.active;
+  const active = readOnly ? null : context.active;
   const selected = active?.kind === "lines" && context.fileForTarget(active)?.id === file.id ? active : null;
   const mounted = near || !!selected || context.revealedFile === file.id;
   const lockfile = isLockfile(file.path);
@@ -482,11 +485,10 @@ function Summary({ text, onExpand }: { text: string; onExpand: () => void }) {
     </div>
   );
 }
-function fileSideQuery(file: FileView, side: "old" | "new") {
+function fileSideQuery(file: FileView, side: "old" | "new", texts: FileTexts) {
   return {
     queryKey: ["file", file.id, side],
-    queryFn: ({ signal }: { signal: AbortSignal }) =>
-      getText(`/api/v1/files/${encodeURIComponent(file.id)}/${side}`, signal),
+    queryFn: ({ signal }: { signal: AbortSignal }) => texts(file.id, side, signal),
     staleTime: Infinity,
   };
 }
@@ -510,8 +512,9 @@ function useParsedFile(
   expanded: boolean,
   onParsed: DiffContext["onParsed"],
 ) {
-  const old = useQuery({ ...fileSideQuery(file, "old"), enabled: file.hasOld });
-  const next = useQuery({ ...fileSideQuery(file, "new"), enabled: file.hasNew });
+  const texts = useFileTexts();
+  const old = useQuery({ ...fileSideQuery(file, "old", texts), enabled: file.hasOld });
+  const next = useQuery({ ...fileSideQuery(file, "new", texts), enabled: file.hasNew });
   const ready = (!file.hasOld || old.isSuccess) && (!file.hasNew || next.isSuccess);
   const lines = ready ? splitLines(old.data ?? "").length + splitLines(next.data ?? "").length : 0;
   const collapsed = !expanded && lines > 20000;
@@ -525,15 +528,16 @@ function useParsedFile(
   return { old, next, parsed, collapsed, lines };
 }
 function FileCounts({ file, parser, onParsed }: Pick<DiffContext, "parser" | "onParsed"> & { file: FileView }) {
+  const texts = useFileTexts();
   const client = useQueryClient();
   const { data } = useQuery({
     queryKey: ["file-counts", file.id],
     staleTime: Infinity,
     queryFn: ({ signal }) =>
       diffLoads(client).run(signal, async () => {
-        const old = file.hasOld ? await client.fetchQuery(fileSideQuery(file, "old")) : "";
+        const old = file.hasOld ? await client.fetchQuery(fileSideQuery(file, "old", texts)) : "";
         signal.throwIfAborted();
-        const next = file.hasNew ? await client.fetchQuery(fileSideQuery(file, "new")) : "";
+        const next = file.hasNew ? await client.fetchQuery(fileSideQuery(file, "new", texts)) : "";
         signal.throwIfAborted();
         if (splitLines(old).length + splitLines(next).length > 20000) return null;
         const parsed = await client.fetchQuery(parsedFileQuery(file, old, next, parser));
@@ -561,15 +565,17 @@ function FileBody({
   onBodyState: (state: BodyState) => void;
   onExpand: () => void;
 }) {
+  const readOnly = useReadOnlyReview();
   const { old, next, parsed, collapsed, lines } = useParsedFile(file, context.parser, expanded, context.onParsed);
   const loading = !old.isError && !next.isError && !parsed.isError && !collapsed && !parsed.isSuccess;
   useEffect(() => {
     onBodyState({ diff: parsed.data, blocked: collapsed, loading });
   }, [onBodyState, parsed.data, collapsed, loading]);
   const [error, setError] = useState("");
-  const active = context.active;
+  const active = readOnly ? null : context.active;
   const selected = active?.kind === "lines" && context.fileForTarget(active)?.id === file.id ? active : null;
   const onSelect = (range: SelectedLineRange | null) => {
+    if (readOnly) return;
     setError("");
     if (!range) {
       context.onActive(null);

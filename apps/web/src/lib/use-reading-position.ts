@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from "react";
 import { appElementId, docHeading, type HeadingDoc } from "./doc-navigation.ts";
+import { useReadOnlyReview } from "./read-only-review.ts";
 import { onReaderInput } from "./reader-input.ts";
 import { focusReadingTarget, isReadingFocusMove } from "./reading-focus.ts";
 import {
@@ -24,8 +25,9 @@ const lastVisits = new WeakMap<Element, { key: string; entry?: ReadingEntry }>()
 const filesPositions = new Map<string, number>();
 
 export function useFilesPosition({ storageKey, active }: { storageKey: string; active: boolean }) {
+  const readOnly = useReadOnlyReview();
   useLayoutEffect(() => {
-    if (!active) return;
+    if (readOnly || !active) return;
     const scroller = document.querySelector<HTMLElement>("[data-reading-scroll]");
     if (!scroller) return;
     scroller.scrollTop = filesPositions.get(storageKey) ?? 0;
@@ -52,7 +54,7 @@ export function useFilesPosition({ storageKey, active }: { storageKey: string; a
       scroller.removeEventListener("scroll", onScroll);
       scroller.removeEventListener("focusin", rememberFocus);
     };
-  }, [active, storageKey]);
+  }, [readOnly, active, storageKey]);
 }
 
 /** What the route knows about navigation intents that scroll (a link, a thread jump, a Resume). */
@@ -95,12 +97,13 @@ export function useReadingPosition({
   /** A diff-only navigation leaves the mounted reading pane in place. */
   preserve?: boolean;
 }) {
+  const readOnly = useReadOnlyReview();
   const latestDoc = useRef(doc);
   latestDoc.current = doc;
   const latestIntentState = useRef(intentState);
   latestIntentState.current = intentState;
   useLayoutEffect(() => {
-    if (!active) return;
+    if (readOnly || !active) return;
     const scroller = document.querySelector<HTMLElement>("[data-reading-scroll]");
     if (!scroller) return;
     const timers = new Set<ReturnType<typeof setTimeout>>();
@@ -244,5 +247,5 @@ export function useReadingPosition({
       window.removeEventListener("pagehide", write);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [active, storageKey, selector, entry, preserve]);
+  }, [readOnly, active, storageKey, selector, entry, preserve]);
 }

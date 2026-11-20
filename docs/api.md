@@ -143,6 +143,22 @@ Only an admin bearer with `server:stop` may call `/api/v1/server/stop`. The serv
 requests while stopping return 202 without starting another shutdown. Capabilities advertises
 `server-stop` only when a stop handler is available; otherwise the route returns `404 not_found`.
 
+## Theme sample
+
+`GET /api/v1/sample` requires a credential with scope `read` and returns
+`SampleView = { revision: RevisionView, fileTexts: Record<UUID, { old: string, new: string }> }`.
+Only GET (and its HEAD equivalent) is supported. The fixed synthetic content is rendered lazily
+once per process. It is never stored, never enters the inbox, and has no mutation endpoints.
+The browser displays it read-only at `/settings/sample`, using the non-UUID review id `theme-sample`.
+
+`/content/sample/sample.html` serves the one synthetic HTML doc without reading cookies. It uses
+the same look injection, optional `?theme=dark|light`, bridge, CSP and content headers as stored
+HTML docs. Every other path under `/content/sample/` returns `404 not_found`.
+
+The sample's fixed SVG is available through `/api/v1/media/<sha256>` for exactly the hash of its
+bundled bytes, with the media route's restrictive headers. This exception accepts no uploaded SVG;
+all other hashes retain the existing owner-filtered image lookup.
+
 ## Schemas
 
 ### Diff file sides

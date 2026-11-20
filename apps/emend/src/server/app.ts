@@ -35,6 +35,7 @@ import { pairingRoutes } from "./routes/pairings.ts";
 import { pinRoutes } from "./routes/pins.ts";
 import { publishRoutes } from "./routes/publish.ts";
 import { reviewRoutes } from "./routes/reviews.ts";
+import { sampleRoutes } from "./routes/sample.ts";
 import { sendRoutes } from "./routes/sends.ts";
 import { serverRoutes } from "./routes/server.ts";
 import { sessionRoutes } from "./routes/session.ts";
@@ -72,6 +73,7 @@ export const ENDPOINTS = [
   { method: "POST", path: "/api/v1/pairings", scope: "pairings:create" },
   { method: "GET", path: "/api/v1/devices", scope: "devices:manage" },
   { method: "GET", path: "/api/v1/settings", scope: "read" },
+  { method: "GET", path: "/api/v1/sample", scope: "read" },
   { method: "GET", path: "/api/v1/themes", scope: "read" },
   { method: "GET", path: "/api/v1/themes/:name/fonts/:file", scope: "read" },
   { method: "PATCH", path: "/api/v1/settings", scope: "settings:manage" },
@@ -188,6 +190,7 @@ export function createApp(deps: AppDeps) {
   pairingRoutes(app, deps);
   deviceRoutes(app, deps);
   settingsRoutes(app, deps);
+  sampleRoutes(app);
   themeRoutes(app, deps);
   const redemptions = pairingRedemptions(deps.now);
   sessionRoutes(app, deps, redemptions);

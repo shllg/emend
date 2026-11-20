@@ -11,6 +11,7 @@ import { DiffNavigation, type NavigateDiff } from "../../lib/diff-navigation.ts"
 import { draftKey, type SavedDraft } from "../../lib/drafts.ts";
 import { useLayout } from "../../lib/layout.ts";
 import { layoutStore, useLayoutPreferences } from "../../lib/layout-store.ts";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { onReaderInput } from "../../lib/reader-input.ts";
 import { useTopicFolds } from "../../lib/topic-folds.ts";
 import { rankedTopics } from "../../lib/topics.ts";
@@ -65,6 +66,7 @@ export function DiffPane({
   onParsed: reportParsed,
   onViewed,
 }: DiffPaneProps) {
+  const readOnly = useReadOnlyReview();
   const layout = useLayout();
   const chrome = useContext(DiffChrome);
   const slot = chrome?.toolbarSlot ?? null;
@@ -116,6 +118,7 @@ export function DiffPane({
   }, [onRendered, collapsedTopics, collapsedFiles, revealedFile, notes, shownOrder]);
   const [active, setActive] = useState<Target | null>(null);
   const onActive = (target: Target | null) => {
+    if (readOnly) return;
     if (target) {
       claimDraft(draftKey(reviewId, target), "diff");
       revealTarget(target);
@@ -276,11 +279,11 @@ export function DiffPane({
   };
   const revealResumed = useEffectEvent(revealTarget);
   useEffect(() => {
-    if (resume?.target && isDiffTarget(resume.target)) {
+    if (!readOnly && resume?.target && isDiffTarget(resume.target)) {
       revealResumed(resume.target);
       setActive(resume.target);
     }
-  }, [resume]);
+  }, [readOnly, resume]);
   const navigateDiff: NavigateDiff = ({ elementId, element, target, commentId }) => {
     const noteFile = revision.files.find((file) => file.notes?.some((note) => `diff-note-${note.id}` === elementId));
     const note = noteFile?.notes?.find((note) => `diff-note-${note.id}` === elementId);
@@ -357,7 +360,7 @@ export function DiffPane({
     overflow: wrap ? ("wrap" as const) : ("scroll" as const),
     counts,
     onParsed,
-    onViewed,
+    onViewed: readOnly ? undefined : onViewed,
     notes,
     collapsedFiles,
     revealedFile,
@@ -513,6 +516,7 @@ export function DiffPane({
                   rank={ranks.get(topic.slug)}
                   current={layout !== "phone" && writeupVisible && currentTopic === topic.slug}
                   writeupLink={
+                    !readOnly &&
                     !focus &&
                     (!revision.writeupEmpty || revision.main === "writeup") &&
                     topic.slug !== OTHER_TOPIC.slug &&

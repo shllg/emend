@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Bot } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { getText } from "../../api/client.ts";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { useThreadJump } from "../../lib/thread-jump.ts";
 import { Button } from "../ui/Button.tsx";
 import { linesTarget } from "./linesTarget.ts";
@@ -16,6 +17,7 @@ export function AgentNoteCard({
   file: FileView;
   onComment: (target: Target) => void;
 }) {
+  const readOnly = useReadOnlyReview();
   const cardId = `diff-note-${note.id}`;
   const jump = useThreadJump(cardId);
   const client = useQueryClient();
@@ -29,6 +31,7 @@ export function AgentNoteCard({
     };
   }, []);
   const comment = async () => {
+    if (readOnly) return;
     setError("");
     setPending(true);
     try {
@@ -62,11 +65,13 @@ export function AgentNoteCard({
         {note.rationale && <p className="em-agent-note__rationale">{note.rationale}</p>}
         {error && <p role="alert">{error}</p>}
       </div>
-      <div className="em-card__foot">
-        <Button size="sm" variant="ghost" disabled={pending} onClick={() => void comment()}>
-          Comment on these lines
-        </Button>
-      </div>
+      {!readOnly && (
+        <div className="em-card__foot">
+          <Button size="sm" variant="ghost" disabled={pending} onClick={() => void comment()}>
+            Comment on these lines
+          </Button>
+        </div>
+      )}
     </article>
   );
 }

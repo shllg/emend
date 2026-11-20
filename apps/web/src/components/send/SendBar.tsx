@@ -16,6 +16,7 @@ import {
   saveDraft,
   subscribeDrafts,
 } from "../../lib/drafts.ts";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { useShortcut } from "../../lib/use-shortcut.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
@@ -60,10 +61,11 @@ export function SendBar({
   agent?: SendAgent;
   phone?: boolean;
 }) {
+  const readOnly = useReadOnlyReview();
   const [mode, setMode] = useState<GoMode>(DEFAULT_MODE);
   const storageKey = instructionKey(reviewId);
-  const instruction = useSyncExternalStore(subscribeDrafts, () => loadDraft(storageKey));
-  const unsavedCount = useSyncExternalStore(subscribeDrafts, () => listDrafts(reviewId).length);
+  const instruction = useSyncExternalStore(subscribeDrafts, () => (readOnly ? "" : loadDraft(storageKey)));
+  const unsavedCount = useSyncExternalStore(subscribeDrafts, () => (readOnly ? 0 : listDrafts(reviewId).length));
   const commentSaving = useSyncExternalStore(subscribeDrafts, () => isReviewDraftSaving(reviewId));
   const reviewSending = useSyncExternalStore(subscribeDrafts, () => isReviewSending(reviewId));
   const shortcut = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "⌘↵" : "Ctrl ↵";
@@ -155,9 +157,10 @@ export function SendBar({
     revision !== undefined && revision < newestRevision
       ? `Revision ${newestRevision} is newer. Switch to it to send or approve.`
       : undefined;
-  const disabled = sending || commentSaving || unsavedCount > 0 || revision === undefined || !!olderReason || retired;
+  const disabled =
+    readOnly || sending || commentSaving || unsavedCount > 0 || revision === undefined || !!olderReason || retired;
   const approveDisabled = disabled || unsentCount > 0 || approved;
-  const instructionsDisabled = sending;
+  const instructionsDisabled = readOnly || sending;
   useShortcut(
     "review.instructions",
     () => {
@@ -205,6 +208,7 @@ export function SendBar({
     : undefined;
   const retiredReason = retired ? "This review is retired. Reopen it to send or approve." : undefined;
   const sendReason =
+    (readOnly ? "This is a sample. Nothing is sent." : undefined) ??
     retiredReason ??
     unsavedReason ??
     (instruction.length > LIMITS.instructionChars
@@ -214,6 +218,7 @@ export function SendBar({
         : undefined);
   const commentCount = `${unsentCount} ${plural(unsentCount, "comment")}`;
   const changeInstruction = (value: string) => {
+    if (readOnly) return;
     if (!submitting.current) mutation.reset();
     if (value) saveDraft(storageKey, value);
     else clearDraft(storageKey);
@@ -323,7 +328,7 @@ export function SendBar({
       {approved ? "Approved" : phone || revision === undefined ? "Approve" : `Approve revision ${revision}`}
     </Button>
   );
-  const actions = lifecycle && (
+  const actions = !readOnly && lifecycle && (
     <ReviewActions
       reviewId={reviewId}
       lifecycle={lifecycle}
@@ -388,6 +393,7 @@ export function SendBar({
   );
   return (
     <section aria-label="Send and approve" className="shrink-0 border-t border-line-1 bg-surface">
+      {readOnly && <p className="px-4 pt-2 text-13 text-fg-3">This is a sample. Nothing is sent.</p>}
       {phone ? (
         <div className="flex min-h-13 flex-nowrap items-center gap-[0.625rem] py-1.5 pr-[0.625rem] pl-[0.875rem]">
           {/* This row fills the phone width exactly, so density changes only its height. */}
@@ -474,7 +480,7 @@ export function SendBar({
                   void submit("go");
                 }}
               >
-                <ModePicker cards value={mode} onChange={changeMode} disabled={sending} />
+                <ModePicker cards value={mode} onChange={changeMode} disabled={sending || readOnly} />
                 <Textarea
                   label="Instructions"
                   placeholder="Optional. Applies to every comment in this Send."
@@ -531,7 +537,7 @@ export function SendBar({
               />
               <kbd className="ml-1.5 shrink-0 text-fg-3 [font:var(--type-meta)]">{shortcut}</kbd>
             </div>
-            <ModePicker value={mode} onChange={changeMode} disabled={sending} />
+            <ModePicker value={mode} onChange={changeMode} disabled={sending || readOnly} />
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {actions}

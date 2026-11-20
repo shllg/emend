@@ -25,6 +25,7 @@ import {
   saveDraft,
   subscribeDrafts,
 } from "../../lib/drafts.ts";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { useThreadActionFocus } from "../../lib/thread-action-focus.ts";
 import { useThreadJump } from "../../lib/thread-jump.ts";
 import type { ReviewSearch } from "../../router.tsx";
@@ -114,6 +115,7 @@ export function ThreadCard({
   surface = "reading",
   replyInFooter = false,
 }: ThreadProps) {
+  const readOnly = useReadOnlyReview();
   const location = thread.placement.status === "placed" ? thread.placement.location : null;
   const highlightCard = useCommentCard(thread.id, surface === "diff" ? location : null);
   const cardId = `${surface === "diff" ? "diff-thread" : "thread"}-${thread.id}`;
@@ -123,7 +125,7 @@ export function ThreadCard({
   const keys = [key, ...thread.comments.map((comment) => editDraftKey(reviewId, comment.id))];
   const claim = useDraftClaim(keys, surface);
   const { open: requestedReply, close: closeReply } = useReplyComposer(key, !replyInFooter);
-  const replyOpen = requestedReply && !replyInFooter;
+  const replyOpen = !readOnly && requestedReply && !replyInFooter;
   const replyButton = useThreadActionFocus(reviewId, thread.id, surface, "reply", replyOpen);
   const [collapse, setCollapsed] = useState(
     () => surface === "comments" && thread.state === "resolved" && !keys.some((key) => loadDraft(key).trim()),
@@ -171,12 +173,16 @@ export function ThreadCard({
         </span>
         {showChanged && (
           <a
-            href={blockLink(
-              reviewId,
-              revision,
-              location.blockId,
-              location.kind === "doc-span" ? location.path : undefined,
-            )}
+            href={
+              readOnly
+                ? `#block-${location.blockId}`
+                : blockLink(
+                    reviewId,
+                    revision,
+                    location.blockId,
+                    location.kind === "doc-span" ? location.path : undefined,
+                  )
+            }
           >
             <ChangedMarker revision={changed.revision} />
           </a>
@@ -207,7 +213,7 @@ export function ThreadCard({
               <Icon icon={Unlink} size={14} className="mt-px" />
               <span>
                 {reasons[thread.placement.reason]}
-                {thread.createdOn !== revision && (
+                {!readOnly && thread.createdOn !== revision && (
                   <>
                     {" "}
                     Made on{" "}
@@ -241,7 +247,7 @@ export function ThreadCard({
             </ol>
             {mutation.error && <p role="alert">{mutationMessage(mutation.error)}</p>}
           </div>
-          {(canReply || resolved || replyOpen) && (
+          {!readOnly && (canReply || resolved || replyOpen) && (
             <footer className="em-card__foot" data-reply-open={replyOpen ? "" : undefined}>
               {(canReply || resolved) && (
                 <div className={replyOpen ? "em-card__foot" : "contents"}>
@@ -307,6 +313,7 @@ function Comment({
   comment: ThreadView["comments"][number];
   inlineComposer: boolean;
 } & Pick<ThreadProps, "reviewId" | "revision" | "thread" | "topics" | "surface">) {
+  const readOnly = useReadOnlyReview();
   const key = editDraftKey(reviewId, comment.id);
   const draftExists = useSyncExternalStore(subscribeDrafts, () => hasDraft(key));
   const { open: editOpen, close: closeEdit } = useEditComposer(key);
@@ -315,7 +322,7 @@ function Comment({
   const editButton = useThreadActionFocus(reviewId, thread.id, surface, comment.id, editing);
   const mutation = useReviewMutation(reviewId, key);
   const agent = comment.author === "agent";
-  const editable = !agent && !comment.sent;
+  const editable = !readOnly && !agent && !comment.sent;
   useThreadComposer(editable && editing);
   return (
     <li className="em-comment" data-agent={agent ? "" : undefined}>

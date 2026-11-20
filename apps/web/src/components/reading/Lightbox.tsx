@@ -2,6 +2,7 @@ import * as Primitive from "@radix-ui/react-dialog";
 import { ChevronLeft, ChevronRight, MessageSquarePlus, Minus, Plus, X } from "lucide-react";
 import { type RefObject, useCallback, useRef, useState } from "react";
 import { isAtFit, maxScale, type Size } from "../../lib/lightbox-view.ts";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { Button } from "../ui/Button.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { isToastInteraction } from "../ui/overlay.ts";
@@ -24,6 +25,7 @@ export function Lightbox<T extends LightboxSubject>({
   const item = gallery.items[index];
   const opener = useRef<HTMLElement | null>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
+  const readOnly = useReadOnlyReview();
   const commenting = useRef(false);
   const step = useCallback(
     (delta: number) => setIndex((value) => Math.max(0, Math.min(gallery.items.length - 1, value + delta))),
@@ -75,7 +77,7 @@ export function Lightbox<T extends LightboxSubject>({
             closeButton={closeButton}
             onStep={step}
             onComment={
-              onComment && canComment?.(item)
+              !readOnly && onComment && canComment?.(item)
                 ? () => {
                     commenting.current = true;
                     onClose();

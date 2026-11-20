@@ -8,7 +8,9 @@ export function routeShellRequest(request: Request, origin: string, shell: reado
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/content/")) return null;
   if (
     request.mode === "navigate" &&
-    /^(?:\/|\/index\.html|\/pair\/?|\/devices(?:\/pair)?\/?|\/r\/[0-9a-f-]{36}\/?)$/i.test(url.pathname)
+    /^(?:\/|\/index\.html|\/pair\/?|\/devices(?:\/pair)?\/?|\/settings(?:\/sample)?\/?|\/r\/[0-9a-f-]{36}\/?)$/i.test(
+      url.pathname,
+    )
   )
     return "navigation";
   if (!url.search && shell.includes(url.pathname))

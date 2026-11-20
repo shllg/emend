@@ -66,3 +66,9 @@ test("activate deletes only old app shell caches", async () => {
   );
   expect(remove.mock.calls).toEqual([["emend-shell-old"]]);
 });
+
+test("settings and its sample hard loads use the app shell", () => {
+  for (const path of ["/settings", "/settings/sample", "/settings/sample/"])
+    expect(routeShellRequest(request(path), origin, shell)).toBe("navigation");
+  expect(routeShellRequest(request("/settings/unknown"), origin, shell)).toBeNull();
+});

@@ -1,6 +1,7 @@
 import type { RenderedBlock } from "@emend/contract";
 import { MessageSquarePlus } from "lucide-react";
 import type { ReactNode } from "react";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { blockAnchor } from "../../lib/selection.ts";
 import { ChangedMarker } from "../status/ChangedMarker.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -23,6 +24,7 @@ export function Block({
   onComment: () => void;
   children?: ReactNode;
 }) {
+  const readOnly = useReadOnlyReview();
   return (
     <div
       className="em-reading-block relative rounded-sm"
@@ -41,7 +43,7 @@ export function Block({
         </>
       )}
       <BlockView block={block} />
-      {block.kind !== "heading" && blockAnchor(block).quote !== "" && (
+      {!readOnly && block.kind !== "heading" && blockAnchor(block).quote !== "" && (
         <span className="em-reading-block__comment">
           <IconButton
             icon={MessageSquarePlus}

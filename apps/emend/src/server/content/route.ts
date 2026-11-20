@@ -1,7 +1,7 @@
 import { FilePath } from "@emend/contract";
-import { stripHtmlLook } from "@emend/core";
+import { SAMPLE_HTML, SAMPLE_HTML_PATH, stripHtmlLook } from "@emend/core";
 import { and, eq } from "drizzle-orm";
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { docAssets, files, revisions } from "../../db/schema.ts";
 import type { AppDeps } from "../app.ts";
 import type { AppEnv } from "../auth/principal.ts";
@@ -10,8 +10,30 @@ import { HTML_DOC_CSP } from "../http/headers.ts";
 import { injectBridge, injectLook } from "./inject.ts";
 import { pubStylesheet } from "./look.ts";
 
+/** Both stored and synthetic HTML use this isolated response path. */
+async function htmlDocResponse(
+  c: Context<AppEnv>,
+  deps: AppDeps,
+  html: string,
+  look: string | null,
+  colorScheme: string | null,
+) {
+  if (look === "emend") {
+    const query = c.req.query("theme");
+    const theme = colorScheme === "light" ? "light" : query === "dark" || query === "light" ? query : undefined;
+    html = injectLook(stripHtmlLook(html), await pubStylesheet(deps.config.webRoot), theme);
+  }
+  c.header("Content-Type", "text/html; charset=utf-8");
+  c.header("Content-Security-Policy", HTML_DOC_CSP);
+  return c.body(injectBridge(html));
+}
+
 export function contentRoutes(app: Hono<AppEnv>, deps: AppDeps) {
   app.get("/content/:docKey/*", async (c) => {
+    if (c.req.param("docKey") === "sample") {
+      if (new URL(c.req.url).pathname !== `/content/sample/${SAMPLE_HTML_PATH}`) throw new ApiError("not_found");
+      return htmlDocResponse(c, deps, SAMPLE_HTML, "emend", null);
+    }
     // Parse the raw path once: encoded slashes must not create new path segments.
     const match = /^\/content\/([A-Za-z0-9_-]{43})([0-9a-f]{32})\/(.+)$/.exec(c.req.path);
     if (!match?.[1] || !match[2] || !match[3]) throw new ApiError("not_found");
@@ -71,19 +93,8 @@ export function contentRoutes(app: Hono<AppEnv>, deps: AppDeps) {
     });
     const type = result.mediaType;
     const contentType = /^(?:text\/|application\/json$|image\/svg\+xml$)/.test(type) ? `${type}; charset=utf-8` : type;
-    if (result.isDoc) {
-      let html = new TextDecoder().decode(result.bytes);
-      if (result.look === "emend") {
-        const query = c.req.query("theme");
-        const theme =
-          result.colorScheme === "light" ? "light" : query === "dark" || query === "light" ? query : undefined;
-        html = injectLook(stripHtmlLook(html), await pubStylesheet(deps.config.webRoot), theme);
-      }
-      html = injectBridge(html);
-      c.header("Content-Type", contentType);
-      c.header("Content-Security-Policy", HTML_DOC_CSP);
-      return c.body(html);
-    }
+    if (result.isDoc)
+      return htmlDocResponse(c, deps, new TextDecoder().decode(result.bytes), result.look, result.colorScheme);
     const read = await deps.blobs.open(result.ownerId, result.sha, c.req.raw.signal);
     if (!read) throw new ApiError("not_found");
     let body: ReadableStream<Uint8Array> | null = null;

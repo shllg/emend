@@ -9,6 +9,7 @@ import {
   SettingsView,
 } from "@emend/contract";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { ApiError, change, patch } from "../api/client.ts";
 import { mutationMessage } from "../api/mutations.ts";
@@ -387,6 +388,9 @@ function AppearanceSettings() {
             ))}
         </div>
       )}
+      <p className="mt-4">
+        <Link to="/settings/sample">Open the theme sample page</Link>
+      </p>
       <ThemeSkillPrompt />
     </section>
   );

@@ -22,6 +22,7 @@ import {
   trackReviewDraftSave,
 } from "../lib/drafts.ts";
 import { refreshQueries } from "../lib/query-refresh.ts";
+import { useReadOnlyReview } from "../lib/read-only-review.ts";
 import { viewedState } from "../lib/viewed-state.ts";
 import { ApiError, change, patch, post } from "./client.ts";
 import { type InboxData, serverNow } from "./queries.ts";
@@ -63,13 +64,18 @@ export function useViewedRevision(reviewId: string, view: RevisionView | undefin
   );
 }
 export function useViewedMutation(reviewId: string) {
+  const readOnly = useReadOnlyReview();
   const client = useQueryClient();
   const store = viewedState(client);
   return useMutation({
     scope: { id: `viewed:${reviewId}` },
-    mutationFn: (body: ViewedRequest) => change(`/api/v1/reviews/${encodeURIComponent(reviewId)}/viewed`, "PUT", body),
-    onMutate: (body) => store.start(reviewId, body),
+    mutationFn: (body: ViewedRequest) => {
+      if (readOnly) throw new Error("This is a sample. Nothing is saved.");
+      return change(`/api/v1/reviews/${encodeURIComponent(reviewId)}/viewed`, "PUT", body);
+    },
+    onMutate: (body) => (readOnly ? undefined : store.start(reviewId, body)),
     onSettled: (_data, error, _body, id) => {
+      if (readOnly) return;
       if (id !== undefined) store.settle(id, error);
       refreshQueries(client, [["revision", reviewId]], { settled: true });
     },
@@ -202,6 +208,7 @@ export const runningCommentSaves: MutationFilters = {
 };
 
 export function useReviewMutation(reviewId: string, key?: string) {
+  const readOnly = useReadOnlyReview();
   const client = useQueryClient();
   const pending = useSyncExternalStore(subscribeDrafts, () => (key ? isDraftSaving(key) : false));
   const mutation = useMutation({
@@ -232,6 +239,7 @@ export function useReviewMutation(reviewId: string, key?: string) {
        */
       accepted?: Accepted;
     }) => {
+      if (readOnly) throw new Error("This is a sample. Nothing is saved.");
       if (draft && !beginDraftSave(draft.key)) throw new Error("This draft is already saving.");
       const finishReviewSave = draft || deleteDraft ? trackReviewDraftSave(reviewId) : undefined;
       try {

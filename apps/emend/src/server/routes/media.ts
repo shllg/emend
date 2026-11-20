@@ -1,10 +1,22 @@
+import { SAMPLE_SVG, sampleImageHash } from "@emend/core";
 import { and, eq, isNotNull, isNull, or } from "drizzle-orm";
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { files, reviews, revisions } from "../../db/schema.ts";
 import type { AppDeps } from "../app.ts";
 import type { AppEnv } from "../auth/principal.ts";
 import { ApiError } from "../http/errors.ts";
 import { mediaAsset } from "../media.ts";
+
+function mediaHeaders(c: Context<AppEnv>, type: string, size: number) {
+  c.header("Content-Type", type);
+  c.header("X-Content-Type-Options", "nosniff");
+  c.header("Cross-Origin-Resource-Policy", "same-origin");
+  c.header("Cache-Control", "no-store");
+  c.header("Content-Security-Policy", "sandbox; default-src 'none'");
+  c.header("Content-Disposition", "inline");
+  c.header("Content-Length", String(size));
+}
+let sampleHash: Promise<string> | undefined;
 
 /** Serves writeup and Markdown doc images by content hash with a locked-down response. */
 export function mediaRoutes(app: Hono<AppEnv>, deps: AppDeps) {
@@ -12,6 +24,12 @@ export function mediaRoutes(app: Hono<AppEnv>, deps: AppDeps) {
     const ownerId = c.get("principal").ownerId;
     const hash = c.req.param("sha256");
     if (!/^[0-9a-f]{64}$/.test(hash)) throw new ApiError("not_found");
+    sampleHash ??= sampleImageHash();
+    if (hash === (await sampleHash)) {
+      const bytes = new TextEncoder().encode(SAMPLE_SVG);
+      mediaHeaders(c, "image/svg+xml", bytes.byteLength);
+      return c.req.method === "HEAD" ? c.body(null) : c.body(bytes);
+    }
     const type = await deps.db.read(async (q) => {
       const file = await q
         .select({ mediaType: files.mediaType })
@@ -46,14 +64,7 @@ export function mediaRoutes(app: Hono<AppEnv>, deps: AppDeps) {
         throw error;
       }
     }
-    // The app-wide middleware set its defaults earlier; these replace them for this route only.
-    c.header("Content-Type", type);
-    c.header("X-Content-Type-Options", "nosniff");
-    c.header("Cross-Origin-Resource-Policy", "same-origin");
-    c.header("Cache-Control", "no-store");
-    c.header("Content-Security-Policy", "sandbox; default-src 'none'");
-    c.header("Content-Disposition", "inline");
-    c.header("Content-Length", String(read.size));
+    mediaHeaders(c, type, read.size);
     return body === null ? c.body(null) : c.body(body);
   });
 }
