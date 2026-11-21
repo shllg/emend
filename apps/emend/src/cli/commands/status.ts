@@ -1,13 +1,23 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { LIMITS } from "@emend/contract";
+import { type AgentReviewItem, AgentReviewList, LIMITS } from "@emend/contract";
 import type { Io } from "../../main.ts";
 import { VERSION } from "../../version.ts";
 import { escapeReference } from "../escape.ts";
-import { CliUsageError, printTerminalJson, sandboxHint } from "../http.ts";
+import { createGitSession } from "../git.ts";
+import { apiRequest, CliUsageError, printTerminalJson, sandboxHint } from "../http.ts";
+import { codeRoot } from "../publish/context.ts";
+import { reviewKey } from "../publish/key.ts";
 import { readRegular } from "../publish/read.ts";
 import { discover } from "../server-client.ts";
-import { hubCapabilities, readAttachment } from "../target.ts";
+import {
+  attachedTarget,
+  type HttpTarget,
+  hubCapabilities,
+  localTarget,
+  readAttachment,
+  readAttachmentPair,
+} from "../target.ts";
 
 /** Read this machine's instance name. It creates nothing; a missing or unreadable file reads as none. */
 async function instanceName(stateDir: string): Promise<string | null> {
@@ -20,10 +30,67 @@ async function instanceName(stateDir: string): Promise<string | null> {
   }
 }
 
-/** Where this machine's agent commands go. It only reads: no token, and no file or folder is created. */
+/** A fixed status line containing only revision numbers from the server. */
+export function statusLineText(item: AgentReviewItem): string | null {
+  if (item.newest === null) return null;
+  if (item.state === "approved") return `emend r${item.approved?.revision ?? item.newest.revision} · approved`;
+  const revision = `emend r${item.newest.revision}`;
+  if (item.state === "settled") return `${revision} · retired`;
+  if (item.turn === "reviewer") return `${revision} · your turn`;
+  if (item.turn === "agent") return `${revision} · agent's turn`;
+  return revision;
+}
+
+async function statusLine(stateDir: string, io: Io): Promise<void> {
+  try {
+    const signal = AbortSignal.timeout(2000);
+    const git = createGitSession();
+    const { worktree, root } = await codeRoot(process.cwd(), stateDir, git);
+    if (!worktree) return;
+    const branch = (await git(root, ["rev-parse", "--abbrev-ref", "HEAD"])).toString().trim();
+    if (!branch || branch === "HEAD") return;
+    const instance = JSON.parse(
+      (await readRegular(join(stateDir, "instance.json"), LIMITS.publicJsonBytes)).toString(),
+    );
+    if (typeof instance.id !== "string" || !/^[a-f0-9-]{36}$/i.test(instance.id)) return;
+    const key = reviewKey(instance.id, root, branch);
+    signal.throwIfAborted();
+    const pair = await readAttachmentPair(stateDir);
+    let target: HttpTarget;
+    if (pair) {
+      target = attachedTarget(pair);
+      await hubCapabilities(target.url, signal, stateDir);
+    } else {
+      const server = await discover(stateDir, 1000);
+      if (!server) return;
+      target = await localTarget(stateDir, server.url);
+    }
+    const result = AgentReviewList.safeParse(
+      await apiRequest(stateDir, target, `/agent/reviews?key=${key}`, {
+        method: "GET",
+        signal,
+        timeoutMs: 1500,
+        ...(target.via === "local"
+          ? { verifyLocal: async () => (await discover(stateDir, 1000, target.url)) !== null }
+          : {}),
+      }),
+    );
+    if (!result.success) return;
+    const item = result.data.items.find((item) => item.branch === branch);
+    if (!item) return;
+    const line = statusLineText(item);
+    signal.throwIfAborted();
+    if (line !== null) io.stdout(`${line}\n`);
+  } catch {
+    // A status line stays silent on every error, including a failed stdout write.
+  }
+}
+
+/** Where this machine's agent commands go, or the branch's review. It creates no file or folder. */
 export async function statusCommand(stateDir: string, args: string[], io: Io) {
-  if (args.length > 1 || (args.length === 1 && args[0] !== "--json"))
-    throw new CliUsageError("Usage: emend status [--json].");
+  if (args.length > 1 || (args.length === 1 && args[0] !== "--json" && args[0] !== "--line"))
+    throw new CliUsageError("Usage: emend status [--json | --line].");
+  if (args[0] === "--line") return statusLine(stateDir, io);
   // A missing state folder is reported, never created: a sandbox may hide the real one.
   const missing = await stat(stateDir).then(
     () => false,

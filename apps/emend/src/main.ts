@@ -35,7 +35,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   emend feedback <review> [--save <folder>]
   emend reply <comment> --status <outcome> (--body <text> | --body-file <path | ->)
   emend ls [--json] [--head <sha>]
-  emend status [--json]
+  emend status [--json | --line]
   emend mcp
   emend service install [serve options] | uninstall | status
   emend update                   Update emend and restart its service

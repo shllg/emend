@@ -67,6 +67,7 @@ test("an agent token lists its own instance's reviews newest first, with a revie
     title: "Newer review",
     branch: null,
     state: "approved",
+    turn: null,
     newest: null,
     approved: null,
     updatedAt: new Date(f.deps.now() + 3_000).toISOString(),
@@ -98,6 +99,7 @@ test("the list never carries comment bodies or any other field", async () => {
     "newest",
     "state",
     "title",
+    "turn",
     "updatedAt",
     "url",
   ]);
@@ -160,6 +162,8 @@ test("snoozed and settled reviews are listed with their stored state", async () 
   ).items;
   expect(items.find((item) => item.id === snoozed)?.state).toBe("open");
   expect(items.find((item) => item.id === settled)?.state).toBe("settled");
+  expect(items.find((item) => item.id === snoozed)?.turn).toBeNull();
+  expect(items.find((item) => item.id === settled)?.turn).toBeNull();
 });
 
 test("a reviewer session and a missing credential are refused", async () => {
@@ -209,6 +213,66 @@ async function items(query = "", who: "agent" | "stranger" = "agent") {
   expect(response.status).toBe(200);
   return AgentReviewList.parse(await response.json()).items;
 }
+
+test("the turn follows a live Send on the newest revision and clears on approval", async () => {
+  const first = await publishAs("agent", "d", shaA);
+  const current = async () => (await items()).find((row) => row.id === first.reviewId);
+  expect(await current()).toMatchObject({ state: "open", turn: "reviewer" });
+  const sent = await f.request(`/reviews/${first.reviewId}/sends`, "POST", {
+    revision: 1,
+    kind: "go",
+    instruction: "Synthetic feedback",
+  });
+  expect(sent.status).toBe(201);
+  expect(await current()).toMatchObject({ state: "open", turn: "agent" });
+  await publishAs("agent", "d", shaB);
+  expect(await current()).toMatchObject({ newest: { revision: 2 }, turn: "reviewer" });
+  await approve(first.reviewId, 2);
+  expect(await current()).toMatchObject({ state: "approved", turn: null });
+});
+
+test("a Send that was set aside does not pass the turn to the agent", async () => {
+  await f.send({ revision: 1, kind: "go", instruction: "Synthetic feedback" });
+  expect((await items()).find((row) => row.id === f.reviewId)?.turn).toBe("agent");
+  await f.db.query((q) => q.update(sends).set({ setAsideAt: f.deps.now() }).where(eq(sends.reviewId, f.reviewId)));
+  expect((await items()).find((row) => row.id === f.reviewId)?.turn).toBe("reviewer");
+});
+
+test("a retired review has no turn even with a Send on its newest revision", async () => {
+  await f.send({ revision: 1, kind: "go", instruction: "Synthetic feedback" });
+  await f.db.query((q) => q.update(reviews).set({ state: "settled" }).where(eq(reviews.id, f.reviewId)));
+  expect((await items()).find((row) => row.id === f.reviewId)).toMatchObject({ state: "settled", turn: null });
+});
+
+test("the key lookup keeps only the exact key within the owner and origin instance", async () => {
+  const own = await publishAs("agent", "d", shaA);
+  await publishAs("agent", "e", shaA);
+  await publishAs("otherAgent", "d", shaA);
+  const foreign = await publishAs("stranger", "d", shaA);
+  const query = `?key=${"d".repeat(64)}`;
+  expect((await items(query)).map((row) => row.id)).toEqual([own.reviewId]);
+  expect((await items(query, "stranger")).map((row) => row.id)).toEqual([foreign.reviewId]);
+  expect(await items(`?key=${"f".repeat(64)}`)).toEqual([]);
+});
+
+test("a malformed or repeated key is a 400", async () => {
+  for (const query of [
+    "?key=",
+    `?key=${"a".repeat(63)}`,
+    `?key=${"A".repeat(64)}`,
+    `?key=${"a".repeat(64)}&key=${"a".repeat(64)}`,
+  ])
+    await error(await f.request(`/agent/reviews${query}`, "GET", undefined, "agent"), 400, "invalid_request");
+});
+
+test("key and head filters must both match", async () => {
+  const own = await publishAs("agent", "d", shaA);
+  await publishAs("agent", "e", shaB);
+  const query = `?key=${"d".repeat(64)}`;
+  expect((await items(`${query}&head=${shaA}`)).map((row) => row.id)).toEqual([own.reviewId]);
+  expect(await items(`${query}&head=${shaB}`)).toEqual([]);
+  expect(await items(`?key=${"f".repeat(64)}&head=${shaA}`)).toEqual([]);
+});
 
 test("an approved review names its approved commit, equal to the newest revision", async () => {
   const { reviewId } = await publishAs("agent", "d", shaA);
@@ -285,7 +349,7 @@ test("the head lookup keeps owner and origin-instance isolation", async () => {
   expect(other[0]?.id).not.toBe(own.reviewId);
 });
 
-test("the head filter applies before the row limit", async () => {
+test("the head and key filters apply before the row limit", async () => {
   const target = await publishAs("agent", "d", shaA);
   await f.db.query((q) =>
     q.insert(reviews).values(
@@ -301,9 +365,10 @@ test("the head filter applies before the row limit", async () => {
     ),
   );
   expect((await items(`?head=${shaA}`)).map((row) => row.id)).toEqual([target.reviewId]);
+  expect((await items(`?key=${"d".repeat(64)}`)).map((row) => row.id)).toEqual([target.reviewId]);
 });
 
-test("listing, with and without a head, changes no row and takes or confirms no delivery", async () => {
+test("listing with head and key filters changes no row and takes or confirms no delivery", async () => {
   const first = await publishAs("agent", "d", shaA);
   await publishAs("agent", "9", shaB);
   await f.thread("Synthetic feedback");
@@ -324,7 +389,8 @@ test("listing, with and without a head, changes no row and takes or confirms no 
       repos: await q.select().from(repos).all(),
     }));
   const before = await snapshot();
-  for (const query of ["", `?head=${shaA}`, `?head=${shaB}`, `?head=${shaC}`, ""]) await items(query);
+  for (const query of ["", `?head=${shaA}`, `?head=${shaB}`, `?head=${shaC}`, `?key=${"d".repeat(64)}`, ""])
+    await items(query);
   expect(await snapshot()).toEqual(before);
   expect(before.deliveries.every((row) => row.confirmedAt === null)).toBe(true);
 });
