@@ -16,17 +16,26 @@ import { IMAGE_HEAD_BYTES, type ImageSize } from "./image-size.ts";
 import { checkPublishSignal } from "./lifecycle.ts";
 import type { DocMetadata, Executor, RenderedBytes } from "./work.ts";
 
-export function chargeHtmlParts(state: { count: number; exhausted: boolean }, own: DocMetadata): string[] | undefined {
+export type HtmlPartBudget = { count: number; exhausted: boolean; limit: number };
+
+export function chargeHtmlParts(budgets: readonly HtmlPartBudget[], own: DocMetadata): string[] | undefined {
   const parts = own.parts;
   if (parts === undefined) return;
-  // Cache plus stored docs retain at most htmlPartsPerRevision hashes; only the current
-  // worker result (at most htmlPartsPerDoc) is extra.
-  if (state.exhausted || state.count + parts.length > LIMITS.htmlPartsPerRevision) {
-    state.exhausted = true;
+  // Across all retained revisions, cache plus stored docs stay within the operation's budget:
+  // htmlPartsPerRevision for publish, htmlPartsPerImport for import. Only the current worker
+  // result (at most htmlPartsPerDoc) is extra.
+  let cut = false;
+  for (const budget of budgets) {
+    if (budget.exhausted || budget.count + parts.length > budget.limit) {
+      budget.exhausted = true;
+      cut = true;
+    }
+  }
+  if (cut) {
     delete own.parts;
     return;
   }
-  state.count += parts.length;
+  for (const budget of budgets) budget.count += parts.length;
   return parts;
 }
 
@@ -38,7 +47,7 @@ export async function renderRevision(
   put: (bytes: Buffer) => Promise<string>,
   signal?: AbortSignal,
   onRendered?: (bytes: number) => void,
-  options: { refuseUnlistedMedia?: boolean } = {},
+  options: { refuseUnlistedMedia?: boolean; htmlParts?: HtmlPartBudget } = {},
 ) {
   const assets = new Map(input.files.filter((file) => file.role === "asset").map((file) => [file.path, file.newBlob]));
   const mediaByDoc = new Map<string, [string, string][]>();
@@ -62,7 +71,8 @@ export async function renderRevision(
   const failedMetadata = new Set<string>();
   const unrendered: string[] = [];
   let metadataBytes = 0;
-  const htmlPartBudget = { count: 0, exhausted: false };
+  const revisionBudget = { count: 0, exhausted: false, limit: LIMITS.htmlPartsPerRevision };
+  const htmlPartBudgets = [revisionBudget, ...(options.htmlParts ? [options.htmlParts] : [])];
   for (const file of input.files) {
     checkPublishSignal(signal);
     if (file.role !== "doc") continue;
@@ -92,7 +102,7 @@ export async function renderRevision(
       metadataCache.set(key, own);
     }
     if (format === "html" && failedMetadata.has(key)) unrendered.push(file.path);
-    const parts = format === "html" ? chargeHtmlParts(htmlPartBudget, own) : undefined;
+    const parts = format === "html" ? chargeHtmlParts(htmlPartBudgets, own) : undefined;
     const doc = {
       title:
         cleanDocTitle(file.title ?? "") || own.title || cleanDocTitle(file.path.split("/").at(-1) ?? "") || "Document",

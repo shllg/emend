@@ -1398,6 +1398,54 @@ test.each([
       : [],
   );
 });
+test("import shares the HTML part budget across all revisions it retains", async () => {
+  const input = ImportBundle.parse(await bundle(f));
+  const first = required(input.revisions[0]);
+  const writeup = required(input.writeups[0]);
+  const file = required(input.files[0]);
+  for (let seq = input.revisions.length + 1; seq <= 11; seq++)
+    input.revisions.push({ ...first, id: randomUUID(), seq });
+  input.writeups = input.revisions.map((revision) => ({
+    ...writeup,
+    id: randomUUID(),
+    revisionId: revision.id,
+  }));
+  input.files = input.revisions.flatMap((revision) =>
+    Array.from({ length: 10 }, (_, ord) => ({
+      ...file,
+      id: randomUUID(),
+      revisionId: revision.id,
+      path: `doc-${ord}.html`,
+      ord,
+    })),
+  );
+  // All paths share a tiny source blob; synthetic worker metadata supplies the bounded parts.
+  const parts = Array.from({ length: LIMITS.htmlPartsPerDoc }, (_, index) => index.toString(16).padStart(8, "0"));
+  const execute = required(f.deps.publishExecutor);
+  f.deps.publishExecutor = async (work) => {
+    if (work.kind === "doc-metadata" && work.format === "html") return { kind: "doc-metadata", headings: [], parts };
+    return execute(work);
+  };
+  expect((await f.importRequest("/import", input)).status).toBe(201);
+  for (const [index, stored] of [
+    [9, true],
+    [10, false],
+  ] as const) {
+    const revision = required(input.revisions[index]);
+    const rows = await f.db.read((q) =>
+      q
+        .select({ parts: tables.files.parts })
+        .from(tables.files)
+        .where(and(eq(tables.files.ownerId, f.ownerId), eq(tables.files.revisionId, revision.id))),
+    );
+    expect(rows).toHaveLength(10);
+    for (const row of rows) {
+      if (stored) expect(row.parts).toHaveLength(LIMITS.htmlPartsPerDoc);
+      else expect(row.parts).toBeNull();
+    }
+  }
+});
+
 test("fix2: abort during blob size lookup stops before the next lookup", async () => {
   const input = await bundle(f);
   const abort = new AbortController();

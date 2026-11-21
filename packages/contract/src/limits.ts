@@ -30,6 +30,7 @@ export const LIMITS = {
   headingsPerDoc: 1024,
   htmlPartsPerDoc: 10000,
   htmlPartsPerRevision: 100000,
+  htmlPartsPerImport: 1000000,
   headingTextChars: 200,
   headingIdChars: 256,
   headingLookupBytesPerRevision: 33554432,

@@ -159,6 +159,7 @@ export async function prepareImport(
     let previousSourceHash: string | undefined;
     let previousMedia: string[] = [];
     const revisionsToCount: { id: string; files: PublishRequest["files"] }[] = [];
+    const htmlPartBudget = { count: 0, exhausted: false, limit: LIMITS.htmlPartsPerImport };
     for (const revision of bundle.revisions) {
       checkImportSignal(signal);
       current.clear();
@@ -231,7 +232,9 @@ export async function prepareImport(
         .map((f) => f.newBlob as string);
       heads.keep([...media, ...previousMedia]);
       previousMedia = media;
-      const result = await renderRevision(input, execute, read, heads.read, put, signal, onRendered);
+      const result = await renderRevision(input, execute, read, heads.read, put, signal, onRendered, {
+        htmlParts: htmlPartBudget,
+      });
       if (!rows) throw new ApiError("invalid_request");
       if (previous) {
         const previousBlobs: Extract<Work, { kind: "changed" }>["previous"] = [];

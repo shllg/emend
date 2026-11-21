@@ -984,6 +984,10 @@ Across a revision, at most `htmlPartsPerRevision` (100000) parts are stored, cou
 even when paths share a blob. In manifest order, the first HTML doc that would exceed the cap
 and every later HTML doc store no parts. They still render and are served, but show no marks;
 their null parts also suppress marks in the next revision's comparison.
+Across an import, at most `htmlPartsPerImport` (1000000) parts are stored, counted the same way
+in revision order. The first HTML doc that would exceed this cap and every later HTML doc in
+that or later revisions store no parts; they still render, show no marks, and their null parts
+suppress marks in the next comparison.
 `links` and `repoUrl` are the revision's publish-level links (see "Links and repoUrl" below);
 both fields are optional in the view, and revisions published before they existed omit them.
 `RenderedWriteup.area?: WriteupArea` is the plain-text area, with whitespace collapsed and trimmed.
@@ -1685,6 +1689,7 @@ conservatively even when already present. An excess is `400 invalid_request` bef
 transaction starts. `importRenderedBytes` (1073741824, 1 GiB) bounds cumulative rendered writeup
 and Markdown output plus doc title/heading metadata, counting each rendering even when content hashes repeat. Exceeding it stops
 the import with `413 too_large`, without database rows; immutable files already staged may remain.
+`htmlPartsPerImport` (1000000) bounds stored HTML part hashes across the import.
 
 `importDerivedBytes` (67108864, 64 MiB) bounds the bytes of the hub-derived placement and
 changed-block rows as stored: the UTF-8 byte lengths of every text and serialized JSON column
@@ -2473,6 +2478,7 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `headingsPerDoc` | 1024 h2/h3 entries per doc |
 | `htmlPartsPerDoc` | 10000 nonempty own-text parts per HTML doc |
 | `htmlPartsPerRevision` | 100000 HTML parts across doc paths; the first doc that would exceed this and every later HTML doc store no parts |
+| `htmlPartsPerImport` | 1000000 HTML parts across imported revisions; the first doc that would exceed this and every later HTML doc store no parts |
 | `headingTextChars` | 200 characters per cleaned heading label |
 | `headingIdChars` | 256 characters per declared Markdown heading ID, including its prefix |
 | `headingLookupBytesPerRevision` | 33554432 bytes (32 MiB) across distinct heading lookup maps: UTF-8 name and target ID bytes plus 32 bytes per entry |

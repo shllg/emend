@@ -11,7 +11,7 @@ import {
 import { expect, test, vi } from "vitest";
 import { WorkTimeout } from "./executor.ts";
 import { PublishAborted } from "./lifecycle.ts";
-import { chargeHtmlParts, renderRevision } from "./render.ts";
+import { chargeHtmlParts, type HtmlPartBudget, renderRevision } from "./render.ts";
 import { type DocMetadata, executeWork, serializeRendered } from "./work.ts";
 
 const input = (paths: string[]): PublishRequest => ({
@@ -67,34 +67,72 @@ test("HTML metadata shares parsing but full part IDs remain path-specific and se
 });
 
 test("HTML part charging releases cut and later cached parts while retaining charged parts", () => {
-  const state = { count: LIMITS.htmlPartsPerRevision - 2, exhausted: false };
+  const limit = LIMITS.htmlPartsPerRevision;
+  const state = { count: limit - 2, exhausted: false, limit };
   const kept: DocMetadata = { headings: [], parts: ["aaaaaaaa"] };
-  const stored = chargeHtmlParts(state, kept);
+  const stored = chargeHtmlParts([state], kept);
   expect(stored).toBe(kept.parts);
   expect(kept.parts).toEqual(["aaaaaaaa"]);
   expect(state.count).toBe(LIMITS.htmlPartsPerRevision - 1);
   const cut: DocMetadata = { title: "Cut doc", headings: [], parts: ["bbbbbbbb", "cccccccc"] };
-  expect(chargeHtmlParts(state, cut)).toBeUndefined();
+  expect(chargeHtmlParts([state], cut)).toBeUndefined();
   expect(cut).toEqual({ title: "Cut doc", headings: [] });
   const later: DocMetadata = { headings: [], parts: ["dddddddd"] };
-  expect(chargeHtmlParts(state, later)).toBeUndefined();
+  expect(chargeHtmlParts([state], later)).toBeUndefined();
   expect(later).not.toHaveProperty("parts");
-  expect(state).toEqual({ count: LIMITS.htmlPartsPerRevision - 1, exhausted: true });
+  expect(state).toEqual({ count: limit - 1, exhausted: true, limit });
   expect(kept.parts).toBe(stored);
 });
 
 test("HTML part charging counts cached aliases per path and preserves earlier stored parts", () => {
-  const state = { count: LIMITS.htmlPartsPerRevision - 4, exhausted: false };
+  const limit = LIMITS.htmlPartsPerRevision;
+  const state = { count: limit - 4, exhausted: false, limit };
   const parts = ["aaaaaaaa", "bbbbbbbb"];
   const own: DocMetadata = { headings: [], parts };
-  expect(chargeHtmlParts(state, own)).toBe(parts);
-  expect(state).toEqual({ count: LIMITS.htmlPartsPerRevision - 2, exhausted: false });
-  expect(chargeHtmlParts(state, own)).toBe(parts);
-  expect(state).toEqual({ count: LIMITS.htmlPartsPerRevision, exhausted: false });
-  expect(chargeHtmlParts(state, own)).toBeUndefined();
+  expect(chargeHtmlParts([state], own)).toBe(parts);
+  expect(state).toEqual({ count: limit - 2, exhausted: false, limit });
+  expect(chargeHtmlParts([state], own)).toBe(parts);
+  expect(state).toEqual({ count: limit, exhausted: false, limit });
+  expect(chargeHtmlParts([state], own)).toBeUndefined();
   expect(own).not.toHaveProperty("parts");
-  expect(state).toEqual({ count: LIMITS.htmlPartsPerRevision, exhausted: true });
+  expect(state).toEqual({ count: limit, exhausted: true, limit });
   expect(parts).toEqual(["aaaaaaaa", "bbbbbbbb"]);
+});
+
+test("HTML parts charge all fitting budgets and exhaust only budgets that overflow", () => {
+  const revision = (): HtmlPartBudget => ({ count: 0, exhausted: false, limit: 2 });
+  const imported: HtmlPartBudget = { count: 0, exhausted: false, limit: 4 };
+  let current = revision();
+  const kept: DocMetadata = { headings: [], parts: ["aaaaaaaa", "bbbbbbbb"] };
+  expect(chargeHtmlParts([current, imported], kept)).toBe(kept.parts);
+  expect(current).toEqual({ count: 2, exhausted: false, limit: 2 });
+  expect(imported).toEqual({ count: 2, exhausted: false, limit: 4 });
+
+  const revisionCut: DocMetadata = { headings: [], parts: ["cccccccc"] };
+  expect(chargeHtmlParts([current, imported], revisionCut)).toBeUndefined();
+  expect(revisionCut).not.toHaveProperty("parts");
+  expect(current).toEqual({ count: 2, exhausted: true, limit: 2 });
+  expect(imported).toEqual({ count: 2, exhausted: false, limit: 4 });
+
+  current = revision();
+  const resumed: DocMetadata = { headings: [], parts: ["dddddddd"] };
+  expect(chargeHtmlParts([current, imported], resumed)).toBe(resumed.parts);
+  expect(current).toEqual({ count: 1, exhausted: false, limit: 2 });
+  expect(imported).toEqual({ count: 3, exhausted: false, limit: 4 });
+
+  current = revision();
+  const importCut: DocMetadata = { headings: [], parts: ["eeeeeeee", "ffffffff"] };
+  expect(chargeHtmlParts([current, imported], importCut)).toBeUndefined();
+  expect(importCut).not.toHaveProperty("parts");
+  expect(current).toEqual({ count: 0, exhausted: false, limit: 2 });
+  expect(imported).toEqual({ count: 3, exhausted: true, limit: 4 });
+
+  current = revision();
+  const later: DocMetadata = { headings: [], parts: ["11111111"] };
+  expect(chargeHtmlParts([current, imported], later)).toBeUndefined();
+  expect(later).not.toHaveProperty("parts");
+  expect(current).toEqual({ count: 0, exhausted: false, limit: 2 });
+  expect(imported).toEqual({ count: 3, exhausted: true, limit: 4 });
 });
 
 test("the HTML part cap omits the first over-budget doc and every later HTML doc", async () => {
@@ -172,6 +210,41 @@ test("the HTML part cap counts shared blobs per path and allows exactly the limi
   for (const path of paths.slice(allowed)) expect(result.metadata.get(path)).not.toHaveProperty("parts");
   expect([...result.htmlParts.values()].reduce((sum, ids) => sum + ids.length, 0)).toBe(LIMITS.htmlPartsPerRevision);
   expect(result.unrendered).toEqual([]);
+});
+
+test("revision rendering shares an import part budget across calls", async () => {
+  const parts = Array.from({ length: LIMITS.htmlPartsPerDoc }, (_, index) => index.toString(16).padStart(8, "0"));
+  const paths = Array.from({ length: 10 }, (_, index) => `doc-${index}.html`);
+  const imported: HtmlPartBudget = { count: 0, exhausted: false, limit: LIMITS.htmlPartsPerImport };
+  const execute = vi.fn(async (work: Parameters<typeof executeWork>[0]) => {
+    if (work.kind === "doc-metadata") return { kind: "doc-metadata" as const, headings: [], parts };
+    if (work.kind === "writeup") return { kind: "writeup" as const, ...serializeRendered({ sections: [] }) };
+    throw new Error("unexpected work");
+  });
+  for (let revision = 1; revision <= 11; revision++) {
+    const result = await renderRevision(
+      input(paths),
+      execute,
+      async () => new ArrayBuffer(0),
+      async () => new ArrayBuffer(0),
+      async () => "stored",
+      undefined,
+      undefined,
+      { htmlParts: imported },
+    );
+    for (const path of paths) {
+      if (revision <= 10) {
+        expect(result.metadata.get(path)?.parts).toBe(parts);
+        expect(result.htmlParts.get(path)).toHaveLength(parts.length);
+      } else {
+        expect(result.metadata.get(path)).not.toHaveProperty("parts");
+        expect(result.htmlParts.has(path)).toBe(false);
+      }
+    }
+    expect(result.unrendered).toEqual([]);
+    expect(imported.count).toBe(Math.min(revision, 10) * LIMITS.htmlPartsPerRevision);
+  }
+  expect(imported).toEqual({ count: LIMITS.htmlPartsPerImport, exhausted: true, limit: LIMITS.htmlPartsPerImport });
 });
 
 test("writeup work bounds unlisted paths and retains their full count", async () => {
