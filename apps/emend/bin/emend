@@ -3,6 +3,8 @@ set -eu
 status_line=
 if [ "$#" -eq 2 ] && [ "$1" = status ] && [ "$2" = --line ]; then
   trap 'exit 0' EXIT
+  # Closing stderr first keeps a failed open of /dev/null silent.
+  exec 2>&-
   exec 2>/dev/null
   status_line=1
 fi
@@ -31,10 +33,10 @@ if [ ! -f "$directory/../dist/emend.mjs" ]; then
 fi
 
 if [ "${status_line:-}" = 1 ]; then
+  # Set before node starts; $! holds node's pid from the moment it forks.
+  trap 'if [ -n "${!:-}" ]; then kill -KILL "$!" 2>/dev/null || :; wait "$!" 2>/dev/null || :; fi; exit 0' HUP INT TERM
   node "$directory/../dist/emend.mjs" "$@" &
-  child=$!
-  trap 'kill -KILL "$child" 2>/dev/null || :; wait "$child" 2>/dev/null || :; exit 0' HUP INT TERM
-  wait "$child" || :
+  wait "$!" || :
   exit 0
 fi
 
