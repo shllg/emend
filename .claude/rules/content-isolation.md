@@ -31,7 +31,7 @@ with the reviewer's session can send instructions to the waiting agent in the re
   role's variable or `--shiki-light`/`--shiki-dark`. Its row is a `text/plain` doc that the content
   path never serves, also when its path ends in `.html`.
 - Never serve agent-written HTML, JS or CSS on the app origin. HTML docs and their assets load
-  only from `/content/<doc key>/…` with `Content-Security-Policy: sandbox allow-scripts; …`,
+  only from `/content/<key>/…` with `Content-Security-Policy: sandbox allow-scripts; …`,
   in an iframe with `sandbox="allow-scripts"` and nothing else. Never add
   `allow-same-origin`, `allow-top-navigation`, `allow-popups` or `allow-forms`.
 - The content path never reads cookies. Its key names one HTML doc of one revision, and it serves
