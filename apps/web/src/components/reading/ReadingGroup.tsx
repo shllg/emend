@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { plural } from "../../lib/count.ts";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { ChangedMarker } from "../status/ChangedMarker.tsx";
 import { TopicRank } from "../status/TopicRank.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -48,6 +49,7 @@ export function ReadingGroup({
   discussion?: ReactNode;
   children: ReactNode;
 }) {
+  const readOnly = useReadOnlyReview();
   const root = useRef<HTMLElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const folds = useContext(ReadingFoldContext);
@@ -59,10 +61,10 @@ export function ReadingGroup({
   const open = folds ? (folds.choices.get(foldKey) ?? defaultOpen) : choice.open;
   const rememberOpen = useCallback(
     (next: boolean) => {
-      folds?.choices.set(foldKey, next);
+      if (!readOnly) folds?.choices.set(foldKey, next);
       setChoice({ open: next });
     },
-    [folds, foldKey],
+    [readOnly, folds, foldKey],
   );
   const bodyId = `${headingId}-body`;
   useLayoutEffect(() => {
@@ -130,7 +132,7 @@ export function ReadingGroup({
       )}
       {group.topic && !open && changedIn !== undefined && <ChangedMarker revision={changedIn} />}
       {group.action}
-      {group.topic && (
+      {!readOnly && group.topic && (
         <IconButton
           label="Comment on topic"
           icon={MessageSquarePlus}

@@ -12,6 +12,7 @@ import {
 } from "../../lib/frame-messages.ts";
 import { useLayout, useMedia } from "../../lib/layout.ts";
 import { useLayoutPreferences } from "../../lib/layout-store.ts";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { focusReadingTarget } from "../../lib/reading-focus.ts";
 import { loadReadingPosition, saveReadingPosition } from "../../lib/reading-position.ts";
 import { pickedTheme, themeColors, useResolvedTheme, useThemeState } from "../../lib/theme.ts";
@@ -66,6 +67,7 @@ export function HtmlDocFrame({
   onCommentsOpenChange?: (open: boolean) => void;
   returnFocus?: () => HTMLElement | null;
 }) {
+  const readOnly = useReadOnlyReview();
   const phone = useLayout() === "phone";
   const wide = useMedia("(min-width: 768px)");
   const { readingWidth, proseSize, codePx } = useLayoutPreferences();
@@ -92,7 +94,7 @@ export function HtmlDocFrame({
   const savedDrafts = JSON.parse(
     useSyncExternalStore(subscribeDrafts, () =>
       JSON.stringify(
-        listDrafts(reviewId).filter(
+        (readOnly ? [] : listDrafts(reviewId)).filter(
           (draft) => !draft.threadId && draft.target?.kind === "html-span" && draft.target.path === path,
         ),
       ),
@@ -203,7 +205,7 @@ export function HtmlDocFrame({
         if (!readyNow.current || (parsed.data.heading !== null && !headings[parsed.data.heading])) return;
         const position = { heading: parsed.data.heading, fraction: parsed.data.fraction };
         onPosition?.(position);
-        if (reading) {
+        if (reading && !readOnly) {
           const anchor =
             position.heading === null ? null : { id: `h-${position.heading}`, fraction: position.fraction };
           reading.entry.positions.set(reading.key, anchor);
@@ -227,14 +229,26 @@ export function HtmlDocFrame({
           index: kept.indexOf(clicked),
         });
       } else if (parsed.data.type === "emend:navigate") onNavigate?.(parsed.data);
-      else if (!composing && !composerOpen) {
+      else if (!readOnly && !composing && !composerOpen) {
         const { quote, prefix, suffix } = parsed.data;
         setTarget({ kind: "html-span", path, quote, prefix, suffix });
       }
     };
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
-  }, [path, contentUrl, images, composing, composerOpen, onNavigate, headings, reading, onPosition, markAway]);
+  }, [
+    readOnly,
+    path,
+    contentUrl,
+    images,
+    composing,
+    composerOpen,
+    onNavigate,
+    headings,
+    reading,
+    onPosition,
+    markAway,
+  ]);
   useEffect(() => {
     if (!ready) return;
     if (width !== undefined && prose !== undefined && code !== undefined)
@@ -254,7 +268,7 @@ export function HtmlDocFrame({
     if (ready && !gone.current) post({ type: "emend:docs", paths: JSON.parse(paths) });
   }, [ready, paths, post]);
   useEffect(() => {
-    if (!ready || gone.current || !reading) return;
+    if (readOnly || !ready || gone.current || !reading) return;
     const currentWindow = frame.current?.contentWindow ?? null;
     const previous = handledPosition.current;
     if (previous?.reading === reading && previous.window === currentWindow) return;
@@ -298,7 +312,7 @@ export function HtmlDocFrame({
       setGeneration((value) => value + 1);
     }
     if (!navigation && !docNavigation) reading.entry.positions.set(reading.key, null);
-  }, [ready, reading, headings, navigation, docNavigation, post, frameSrc]);
+  }, [readOnly, ready, reading, headings, navigation, docNavigation, post, frameSrc]);
   useEffect(() => {
     setShow(navigation);
   }, [navigation]);
@@ -401,7 +415,7 @@ export function HtmlDocFrame({
               Resume selection comment
             </Button>
           ))}
-        {target && composing && !composerOpen && (
+        {!readOnly && target && composing && !composerOpen && (
           <Composer
             reviewId={reviewId}
             revision={revision}
@@ -413,7 +427,7 @@ export function HtmlDocFrame({
           />
         )}
       </Sheet>
-      {target && !composing && !composerOpen && (
+      {!readOnly && target && !composing && !composerOpen && (
         <div className="em-html-selection">
           <Button
             variant="primary"

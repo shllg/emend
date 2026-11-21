@@ -1,5 +1,6 @@
 import type { GetHoveredLineResult, SelectedLineRange } from "@pierre/diffs";
 import { useState } from "react";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { Tooltip } from "../ui/Tooltip.tsx";
 
 export function GutterComment({
@@ -9,7 +10,9 @@ export function GutterComment({
   getHoveredLine: () => GetHoveredLineResult<"diff"> | undefined;
   onSelect: (range: SelectedLineRange) => void;
 }) {
+  const readOnly = useReadOnlyReview();
   const [line, setLine] = useState<number>();
+  if (readOnly) return null;
   return (
     <Tooltip content={`Comment on line ${line ?? ""} · drag to select lines`}>
       <button

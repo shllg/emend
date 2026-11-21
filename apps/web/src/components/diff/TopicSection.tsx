@@ -4,6 +4,7 @@ import { useId, useLayoutEffect, useRef } from "react";
 import { plural } from "../../lib/count.ts";
 import { lineTotals } from "../../lib/diff-totals.ts";
 import { useLayout, useTopicDetails } from "../../lib/layout.ts";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { useStickyHeight } from "../../lib/sticky-stack.ts";
 import { BlastRadius, TopicMeta } from "../reading/TopicMeta.tsx";
 import { TopicRank } from "../status/TopicRank.tsx";
@@ -37,6 +38,7 @@ export function TopicSection({
   hidden?: boolean;
   onlyFile?: string;
 }) {
+  const readOnly = useReadOnlyReview();
   const layout = useLayout();
   const phone = layout === "phone";
   const [full, setFull] = useTopicDetails();
@@ -130,13 +132,15 @@ export function TopicSection({
             aria-controls={hasDetails ? detailsId : undefined}
             onClick={toggleDetails}
           />
-          <IconButton
-            label="Comment on topic"
-            hidden={onlyFile !== undefined}
-            icon={MessageSquarePlus}
-            size="sm"
-            onClick={() => context.onActive({ kind: "topic", slug: topic.slug })}
-          />
+          {!readOnly && (
+            <IconButton
+              label="Comment on topic"
+              hidden={onlyFile !== undefined}
+              icon={MessageSquarePlus}
+              size="sm"
+              onClick={() => context.onActive({ kind: "topic", slug: topic.slug })}
+            />
+          )}
           <IconButton
             label={collapsed ? "Expand topic" : "Collapse topic"}
             icon={collapsed ? ChevronRight : ChevronDown}
@@ -159,7 +163,7 @@ export function TopicSection({
       )}
       {(!phone || onlyFile === undefined) && (
         <div className="em-diff-discussion" hidden={onlyFile !== undefined}>
-          {active?.kind === "topic" && active.slug === topic.slug && (
+          {!readOnly && active?.kind === "topic" && active.slug === topic.slug && (
             <Composer
               surface="diff"
               reviewId={context.reviewId}

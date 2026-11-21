@@ -7,6 +7,7 @@ import { PairPage } from "./routes/pair.tsx";
 import { PairDevicePage } from "./routes/pair-device.tsx";
 import { ReviewPage } from "./routes/review.tsx";
 import { SettingsPage } from "./routes/settings.tsx";
+import { ThemeSamplePage } from "./routes/theme-sample.tsx";
 
 export type ReviewSearch = {
   rev?: number;
@@ -56,10 +57,11 @@ const review = createRoute({
 const pair = createRoute({ getParentRoute: () => root, path: "/pair", component: PairPage });
 const devices = createRoute({ getParentRoute: () => root, path: "/devices", component: DevicesPage });
 const settings = createRoute({ getParentRoute: () => root, path: "/settings", component: SettingsPage });
+const sample = createRoute({ getParentRoute: () => root, path: "/settings/sample", component: ThemeSamplePage });
 const pairDevice = createRoute({ getParentRoute: () => devices, path: "pair", component: PairDevicePage });
 export const createWebRouter = (history?: RouterHistory) => {
   const router = createRouter({
-    routeTree: root.addChildren([inbox, review, pair, devices.addChildren([pairDevice]), settings]),
+    routeTree: root.addChildren([inbox, review, pair, devices.addChildren([pairDevice]), settings, sample]),
     history,
     search: { strict: true },
   });

@@ -1,6 +1,7 @@
 import type { RevisionView, SourceLinesTarget, SourceToken, SyntaxRole } from "@emend/contract";
 import { type CSSProperties, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ComposerVisibilityContext } from "../../lib/composer-owner.ts";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { Composer } from "../threads/Composer.tsx";
 import { ThreadCard } from "../threads/ThreadCard.tsx";
 import type { ReaderProps } from "./BlockReader.tsx";
@@ -35,6 +36,7 @@ const SourceLine = memo(function SourceLine({
   commented: boolean;
   active: boolean;
 }) {
+  const readOnly = useReadOnlyReview();
   return (
     <div
       className="em-source-line"
@@ -43,15 +45,19 @@ const SourceLine = memo(function SourceLine({
       data-commented={commented ? "" : undefined}
       data-active={active ? "" : undefined}
     >
-      <button
-        type="button"
-        className="em-source-number"
-        aria-label={`Comment on line ${number}`}
-        aria-pressed={selected}
-        data-source-number={number}
-      >
-        {number}
-      </button>
+      {readOnly ? (
+        <span className="em-source-number">{number}</span>
+      ) : (
+        <button
+          type="button"
+          className="em-source-number"
+          aria-label={`Comment on line ${number}`}
+          aria-pressed={selected}
+          data-source-number={number}
+        >
+          {number}
+        </button>
+      )}
       <code className="em-source-code">
         {tokens.map((token, index) => (
           // Tokens have no identity beyond their place within this immutable server row.
@@ -104,6 +110,7 @@ export const SourceLines = memo(function SourceLines({
   onClose: () => void;
   returnFocus: () => HTMLElement | null;
 }) {
+  const readOnly = useReadOnlyReview();
   const root = useRef<HTMLDivElement>(null);
   const height = useRef<number | undefined>(undefined);
   const [near, setNear] = useState(start <= 400);
@@ -163,7 +170,7 @@ export const SourceLines = memo(function SourceLines({
       {lines.flatMap((tokens, index) => {
         const number = start + index;
         const placed = byEnd.get(number);
-        const composing = target?.end === number;
+        const composing = !readOnly && target?.end === number;
         const row = (
           <SourceLine
             key={number}

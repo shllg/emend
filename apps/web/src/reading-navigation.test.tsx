@@ -297,8 +297,8 @@ test.each([
     block.text = "Decision ref A. ref Z ref A and more";
     const large = path === "large.txt";
     const guarded = large || path === "pnpm-lock.yaml";
-    client.setQueryData(["file", id, "old"], large ? "before\n".repeat(10001) : "before\nsecond\n");
-    client.setQueryData(["file", id, "new"], large ? "after\n".repeat(10001) : "after\nsecond\n");
+    client.setQueryData(["file", "reviews", id, "old"], large ? "before\n".repeat(10001) : "before\nsecond\n");
+    client.setQueryData(["file", "reviews", id, "new"], large ? "after\n".repeat(10001) : "after\nsecond\n");
     loading.parser = vi.fn(parsePair);
     const scroll = vi.spyOn(diffPresentation, "holdDiffTarget");
     const { history } = mount();

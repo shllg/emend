@@ -1,4 +1,5 @@
 import { type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { ChangedMarker } from "../status/ChangedMarker.tsx";
 import { ReadingFoldContext } from "./ReadingGroup.tsx";
 
@@ -15,6 +16,7 @@ export function WriteupDetails({
   changedIn?: number;
   children: ReactNode;
 }) {
+  const readOnly = useReadOnlyReview();
   const root = useRef<HTMLDetailsElement>(null);
   const folds = useContext(ReadingFoldContext);
   const foldKey = JSON.stringify([reviewId, revision, sectionKey, "details"]);
@@ -22,10 +24,10 @@ export function WriteupDetails({
   const open = folds ? (folds.choices.get(foldKey) ?? false) : choice.open;
   const rememberOpen = useCallback(
     (next: boolean) => {
-      folds?.choices.set(foldKey, next);
+      if (!readOnly) folds?.choices.set(foldKey, next);
       setChoice({ open: next });
     },
-    [folds, foldKey],
+    [readOnly, folds, foldKey],
   );
   useEffect(() => {
     const details = root.current;

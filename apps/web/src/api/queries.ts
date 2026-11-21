@@ -1,4 +1,13 @@
-import { type BinQuery, BinView, InboxList, ReviewView, RevisionView, SettingsView, ThemeList } from "@emend/contract";
+import {
+  type BinQuery,
+  BinView,
+  InboxList,
+  ReviewView,
+  RevisionView,
+  SampleView,
+  SettingsView,
+  ThemeList,
+} from "@emend/contract";
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { viewedState } from "../lib/viewed-state.ts";
 import { get } from "./client.ts";
@@ -69,5 +78,12 @@ export const revisionQuery = (id: string, seq: number) =>
       viewedState(client).fetch(id, seq, signal, () =>
         get(`/api/v1/reviews/${encodeURIComponent(id)}/revisions/${seq}`, RevisionView, signal),
       ),
+    staleTime: Infinity,
+  });
+
+export const sampleQuery = () =>
+  queryOptions({
+    queryKey: ["sample"],
+    queryFn: ({ signal }) => get("/api/v1/sample", SampleView, signal),
     staleTime: Infinity,
   });

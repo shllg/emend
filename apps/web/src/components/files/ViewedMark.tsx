@@ -1,5 +1,6 @@
 import type { FileView } from "@emend/contract";
 import { Check } from "lucide-react";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { Icon } from "../ui/Icon.tsx";
 
 export function ViewedMark({
@@ -17,6 +18,7 @@ export function ViewedMark({
   disabled?: boolean;
   onToggle: () => void;
 }) {
+  const readOnly = useReadOnlyReview();
   const viewed = state === "viewed",
     stale = state === "stale";
   const staleLabel = `Viewed in revision ${viewedOn ?? "unknown"}; this revision differs. Mark ${label} as viewed`;
@@ -28,8 +30,8 @@ export function ViewedMark({
       aria-label={stale ? staleLabel : `${viewed ? "Unmark" : "Mark"} ${label} as viewed`}
       title={stale ? staleLabel : viewed ? "Viewed. Click to unmark" : "Mark as viewed"}
       data-stale={stale || undefined}
-      disabled={disabled}
-      onClick={onToggle}
+      disabled={disabled || readOnly}
+      onClick={readOnly ? undefined : onToggle}
     >
       {stale ? <span className="em-viewed-mark__stale">changed</span> : null}
       <span className="em-viewed-mark__box" aria-hidden="true">

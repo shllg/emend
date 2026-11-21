@@ -2,6 +2,7 @@ import { type MouseEvent, type RefObject, useEffect, useLayoutEffect, useRef, us
 import { useDraftClaim } from "../../lib/composer-owner.ts";
 import { draftKey, editDraftKey } from "../../lib/drafts.ts";
 import { useLayout } from "../../lib/layout.ts";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { focusReadingTarget } from "../../lib/reading-focus.ts";
 import { Composer } from "../threads/Composer.tsx";
 import { canReplyToThread, ThreadCard } from "../threads/ThreadCard.tsx";
@@ -20,6 +21,7 @@ export function ReadingThreads({
   state: State;
   root: RefObject<HTMLDivElement | null>;
 }) {
+  const readOnly = useReadOnlyReview();
   const phone = useLayout() === "phone";
   const { openEntry, popover, chips, chipsRef, index, total, step, close } = state;
   const [position, setPosition] = useState({ top: 0, maxHeight: 400 });
@@ -165,6 +167,7 @@ export function ReadingThreads({
               if (!open) close();
             }}
             footer={
+              !readOnly &&
               canReplyToThread(openEntry.thread) && (
                 <div className="w-full" onClickCapture={ignoreContinuationClick}>
                   <Composer

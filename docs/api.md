@@ -90,6 +90,7 @@ a machine token reaches only reviews from its own instance.
 | POST | `/api/v1/pairings` | Admin, reviewer | Create from `PairingRequest`; return `PairingCreated` (201). |
 | GET | `/api/v1/devices` | Admin, reviewer | Return `DeviceList` (200); live devices owned by the principal, newest first. |
 | GET | `/api/v1/settings` | Reviewer | Return `SettingsView` (200); requires `read`. |
+| GET | `/api/v1/sample` | Reviewer | Return `SampleView` (200); requires `read`. |
 | GET | `/api/v1/themes` | Reviewer | Return `ThemeList` (200); requires `read`. |
 | GET | `/api/v1/themes/:name/fonts/:file` | Reviewer | Return a font file named by a valid theme (200); requires `read`. |
 | PATCH | `/api/v1/settings` | Reviewer | Apply `SettingsUpdate` and return `SettingsView` (200); requires `settings:manage`. |
@@ -136,12 +137,29 @@ a machine token reaches only reviews from its own instance.
 | POST | `/api/v1/reviews/:id/take` | Agent | Claim a delivery with `{waitSeconds?: 0..25, maxBytes?: 65536..16777216, accepts?: ["closed"]}`. |
 | POST | `/api/v1/deliveries/:id/confirm` | Agent | Confirm receipt of a claimed delivery. |
 | POST | `/api/v1/comments/:id/reply` | Agent | Answer a comment with an outcome. |
-| GET | `/content/:contentKey/*` | Holder of the key | Read isolated HTML docs and assets from a revision. |
+| GET | `/content/:contentKey/*` | Holder of the key | Read isolated HTML docs and assets from a revision. The sole exception is `/content/sample/sample.html`: only the fixed synthetic sample doc, with the same look, bridge and headers; every other `/content/sample/` path is 404. |
 
 Only an admin bearer with `server:stop` may call `/api/v1/server/stop`. The server sends its
 202 response before shutting down through the same cleanup as SIGTERM and exiting 0. Repeated
 requests while stopping return 202 without starting another shutdown. Capabilities advertises
 `server-stop` only when a stop handler is available; otherwise the route returns `404 not_found`.
+
+## Theme sample
+
+`GET /api/v1/sample` requires a credential with scope `read` and returns
+`SampleView = { revision: RevisionView, fileTexts: Record<UUID, { old: string, new: string }> }`.
+Only GET (and its HEAD equivalent) is supported. The fixed synthetic content is rendered lazily
+and a successful render is cached for the life of the process; a failed render is retried on the
+next request. It is never stored, never enters the inbox, and has no mutation endpoints.
+The browser displays it read-only at `/settings/sample`, using the non-UUID review id `theme-sample`.
+
+`/content/sample/sample.html` serves the one synthetic HTML doc without reading cookies. It uses
+the same look injection, optional `?theme=dark|light`, bridge, CSP and content headers as stored
+HTML docs. Every other path under `/content/sample/` returns `404 not_found`.
+
+The sample's fixed SVG is available through `/api/v1/media/<sha256>` for exactly the hash of its
+bundled bytes, with the media route's restrictive headers. This exception accepts no uploaded SVG;
+all other hashes retain the existing owner-filtered image lookup.
 
 ## Schemas
 
@@ -1030,7 +1048,10 @@ The URL is
 `/content/<docKey>/<path>` with each path segment percent-encoded. The doc key is the revision's
 43-character base64url `contentKey` followed by that doc's file UUID with dashes removed (32
 lowercase hex characters); its exact shape is `^[A-Za-z0-9_-]{43}[0-9a-f]{32}$`.
-GET and HEAD serve only that HTML doc and the assets it lists in the same owner and revision.
+The sole exception is `/content/sample/sample.html`, which serves only the fixed synthetic sample
+doc with the same look, bridge and headers. Every other `/content/sample/` path receives 404.
+For revision content, GET and HEAD serve only that HTML doc and the assets it lists in the same
+owner and revision.
 The key is the capability: neither cookies nor Authorization are read, and the owner comes from
 the revision. Wrong keys, missing files, other docs, diff files, unlisted assets and invalid paths
 receive 404, and so does a stored blob whose size or bytes do not match its hash, before any byte

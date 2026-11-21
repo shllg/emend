@@ -48,7 +48,11 @@ The values below are binding. Limits and ids are in `docs/api.md` once it exists
   one-time and expire after 10 minutes; codes lock after five wrong tries. Never log a secret.
 - Blobs are addressed by SHA-256 per owner. Verify the hash and the size on upload. Build content
   paths from validated ids only; reject `..`, absolute paths, backslashes, NUL and control
-  characters.
+  characters. A content path's key names one HTML doc of one revision. The one exception is
+  `/content/sample/sample.html`: it serves only the fixed synthetic theme sample doc from
+  `packages/core/src/sample/`, with the same look, bridge and headers, and every other path under
+  `/content/sample/` is `404`. The media route serves the fixed synthetic sample SVG for its one
+  hash to every session; every other hash keeps the owner-filtered lookup.
 - Serve stored content with a server-chosen `Content-Type` and `X-Content-Type-Options: nosniff`.
 - Errors use one shape: `{"error":{"code","message"}}`. No stack traces and no other owner's ids.
 - Every change here needs `emend-security-reviewer`.

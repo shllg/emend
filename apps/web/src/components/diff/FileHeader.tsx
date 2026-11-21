@@ -1,6 +1,7 @@
 import type { FileView } from "@emend/contract";
 import { ChevronDown, ChevronRight, MessageSquarePlus } from "lucide-react";
 import type { Ref } from "react";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { ViewedMark } from "../files/ViewedMark.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { FilePathMenu, Path } from "./FilePath.tsx";
@@ -27,6 +28,7 @@ export function FileHeader({
   onComment: () => void;
   onViewed?: (paths: string[], viewed: boolean) => void;
 }) {
+  const readOnly = useReadOnlyReview();
   return (
     <header
       ref={ref}
@@ -61,7 +63,7 @@ export function FileHeader({
         </span>
       )}
       <ThreadCount count={threads} />
-      <IconButton label="Comment on file" icon={MessageSquarePlus} size="sm" onClick={onComment} />
+      {!readOnly && <IconButton label="Comment on file" icon={MessageSquarePlus} size="sm" onClick={onComment} />}
       {onViewed && (
         <ViewedMark
           state={file.viewed}

@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useId, useLayoutEffect, useMemo, useRef, use
 import { claimDraft } from "../../lib/composer-owner.ts";
 import { draftKey } from "../../lib/drafts.ts";
 import { useLayout } from "../../lib/layout.ts";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { revealReadingTarget } from "../../lib/reading-reveal.ts";
 import { blockAnchor, selectionToAnchor } from "../../lib/selection.ts";
 import { Composer } from "../threads/Composer.tsx";
@@ -77,6 +78,7 @@ export function BlockReader({
   files?: RevisionView["files"];
   onNote?: (id: string) => void;
 }) {
+  const readOnly = useReadOnlyReview();
   const headingBase = useId();
   const root = useRef<HTMLDivElement>(null);
   useAgentNoteRefs(root, groups, files, onNote);
@@ -115,6 +117,7 @@ export function BlockReader({
   // biome-ignore lint/correctness/useExhaustiveDependencies: A gallery's DOM snapshot belongs to one review revision.
   useLayoutEffect(() => closeGallery(), [reviewId, revision, closeGallery]);
   const openComposer = (next: Target, from?: HTMLElement) => {
+    if (readOnly) return;
     readingThreads.close();
     screenshotOpener.current = from ?? null;
     opener.current =
@@ -193,7 +196,7 @@ export function BlockReader({
   });
   useEffect(() => {
     const capture = (event?: Event) => {
-      if (!root.current || composing) return;
+      if (readOnly || !root.current || composing) return;
       if (event?.target instanceof Node && selectionPrompt.current?.contains(event.target)) return;
       const selection = window.getSelection();
       if (!event) {
@@ -264,8 +267,8 @@ export function BlockReader({
       element?.removeEventListener("mouseup", capture);
       element?.removeEventListener("keyup", capture);
     };
-  }, [composing, targets]);
-  const composer = composing && target && (
+  }, [readOnly, composing, targets]);
+  const composer = !readOnly && composing && target && (
     <Composer
       reviewId={reviewId}
       revision={revision}
@@ -358,7 +361,7 @@ export function BlockReader({
         changedBlocks={changedBlocks}
         topics={topics}
       />
-      {!composing && (error || target) && (
+      {!readOnly && !composing && (error || target) && (
         <div
           ref={selectionPrompt}
           className="sticky bottom-0 space-y-3 rounded-lg border border-line-2 bg-raised p-3 shadow-2"

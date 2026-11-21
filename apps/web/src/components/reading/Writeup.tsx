@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { type CodeFocus, sameCodeFocus } from "../../lib/code-focus.ts";
 import { plural } from "../../lib/count.ts";
 import { diffGroups } from "../../lib/diff-groups.ts";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { rankedTopics } from "../../lib/topics.ts";
 import { readFact, riskFact, sinceFact, undoFact, usesOpeningCard } from "../../lib/writeup-facts.ts";
 import type { ReviewSearch } from "../../router.tsx";
@@ -44,16 +45,18 @@ export function Writeup({
   onNote?: (id: string) => void;
   code?: { current?: CodeFocus; onOpen: (focus: CodeFocus, opener: HTMLElement) => void };
 }) {
+  const readOnly = useReadOnlyReview();
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => () => onCurrentTopic?.(undefined), [onCurrentTopic]);
   const link = useCallback(
     (hash: string, diff = false) => {
+      if (readOnly) return `#${hash}`;
       const next = { tab: diff && phone ? "diff" : search.tab, rev: search.rev };
       const params = new URLSearchParams();
       for (const [key, value] of Object.entries(next)) if (value !== undefined) params.set(key, String(value));
       return `/r/${encodeURIComponent(props.reviewId)}${params.size ? `?${params}` : ""}#${hash}`;
     },
-    [phone, search.tab, search.rev, props.reviewId],
+    [readOnly, phone, search.tab, search.rev, props.reviewId],
   );
   const read = useMemo(
     () =>

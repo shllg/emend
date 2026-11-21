@@ -2,6 +2,7 @@ import type { RevisionView } from "@emend/contract";
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { type SetStateAction, useEffect, useMemo, useState } from "react";
 import { useViewedChanges } from "../api/mutations.ts";
+import { useReadOnlyReview } from "./read-only-review.ts";
 
 type Folds = {
   review: string;
@@ -17,6 +18,7 @@ const kept = new WeakMap<QueryClient, Map<string, Folds>>();
 /** Server refetches update marks, never the reader's current fold choices. */
 export function useViewedCollapse(reviewId: string, revision: RevisionView) {
   const changes = useViewedChanges(reviewId);
+  const readOnly = useReadOnlyReview();
   const client = useQueryClient();
   const initial = (): Folds => {
     const server = client.getQueryData<RevisionView>(["revision", reviewId, revision.seq]) ?? revision;
@@ -48,10 +50,11 @@ export function useViewedCollapse(reviewId: string, revision: RevisionView) {
   };
   const [state, setState] = useState(() => kept.get(client)?.get(reviewId) ?? initial());
   useEffect(() => {
+    if (readOnly) return;
     const reviews = kept.get(client) ?? new Map<string, Folds>();
     reviews.set(state.review, state);
     kept.set(client, reviews);
-  }, [client, state]);
+  }, [readOnly, client, state]);
   if (state.seq !== revision.seq || state.review !== reviewId) setState(initial());
   else if (state.changes !== changes) {
     const next = {
