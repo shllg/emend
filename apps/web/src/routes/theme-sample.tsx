@@ -113,7 +113,11 @@ function SampleContent({ sample }: { sample: SampleView }) {
             <SampleDoc key={doc.path} {...reader} doc={doc} />
           ))}
         </section>
-        <section aria-label="Sample diff" data-diff-scroll className="bg-surface">
+        <section
+          aria-label="Sample diff"
+          data-diff-scroll
+          className="relative h-[70dvh] min-w-0 overflow-y-auto bg-surface"
+        >
           <LazyDiffPane reviewId={SAMPLE_REVIEW_ID} revision={revision} currentTopic={currentTopic} />
         </section>
         <section aria-label="Sample comment threads" className="space-y-3 px-4">

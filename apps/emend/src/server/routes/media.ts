@@ -1,4 +1,4 @@
-import { SAMPLE_SVG, sampleImageHash } from "@emend/core";
+import { SAMPLE_IMAGE_HASH, SAMPLE_SVG } from "@emend/core";
 import { and, eq, isNotNull, isNull, or } from "drizzle-orm";
 import type { Context, Hono } from "hono";
 import { files, reviews, revisions } from "../../db/schema.ts";
@@ -16,7 +16,6 @@ function mediaHeaders(c: Context<AppEnv>, type: string, size: number) {
   c.header("Content-Disposition", "inline");
   c.header("Content-Length", String(size));
 }
-let sampleHash: Promise<string> | undefined;
 
 /** Serves writeup and Markdown doc images by content hash with a locked-down response. */
 export function mediaRoutes(app: Hono<AppEnv>, deps: AppDeps) {
@@ -24,11 +23,7 @@ export function mediaRoutes(app: Hono<AppEnv>, deps: AppDeps) {
     const ownerId = c.get("principal").ownerId;
     const hash = c.req.param("sha256");
     if (!/^[0-9a-f]{64}$/.test(hash)) throw new ApiError("not_found");
-    sampleHash ??= sampleImageHash().catch((error) => {
-      sampleHash = undefined;
-      throw error;
-    });
-    if (hash === (await sampleHash)) {
+    if (hash === SAMPLE_IMAGE_HASH) {
       const bytes = new TextEncoder().encode(SAMPLE_SVG);
       mediaHeaders(c, "image/svg+xml", bytes.byteLength);
       return c.req.method === "HEAD" ? c.body(null) : c.body(bytes);

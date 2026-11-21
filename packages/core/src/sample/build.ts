@@ -11,19 +11,19 @@ import {
   SAMPLE_DIFFS,
   SAMPLE_HTML,
   SAMPLE_HTML_PATH,
+  SAMPLE_IMAGE_HASH,
   SAMPLE_MARKDOWN,
   SAMPLE_SOURCE,
   SAMPLE_SOURCE_PATH,
   SAMPLE_TOPICS,
   SAMPLE_WRITEUP,
-  sampleImageHash,
 } from "./content.ts";
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
 /** Pure, deterministic sample data; the server owns caching and transport. */
 export async function buildSampleView(): Promise<SampleView> {
-  const sha = await sampleImageHash();
+  const sha = SAMPLE_IMAGE_HASH;
   const media = new Map([["sample.svg", sha]]);
   const mediaSizes = new Map([[sha, { width: 240, height: 120 }]]);
   const writeup = await renderWriteup(SAMPLE_WRITEUP, SAMPLE_TOPICS, { media, mediaSizes, effects: {} });

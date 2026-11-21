@@ -77,7 +77,7 @@ export { localMediaPath, type MediaSize } from "./render/sanitize.ts";
 export * from "./render/source.ts";
 export { type RenderedWriteup, renderWriteup } from "./render/writeup.ts";
 export { buildSampleView } from "./sample/build.ts";
-export { SAMPLE_HTML, SAMPLE_HTML_PATH, SAMPLE_SVG, sampleImageHash } from "./sample/content.ts";
+export { SAMPLE_HTML, SAMPLE_HTML_PATH, SAMPLE_IMAGE_HASH, SAMPLE_SVG, sampleImageHash } from "./sample/content.ts";
 export { resolveShortcuts } from "./shortcuts.ts";
 export * from "./text.ts";
 export * from "./theme/index.ts";

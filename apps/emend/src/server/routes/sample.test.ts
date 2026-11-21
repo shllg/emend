@@ -99,13 +99,9 @@ test("sample HTML uses the stored doc path's headers, bridge and theme handling 
     expect((await request(`/content/sample/${path}`)).status, path).toBe(404);
 });
 
-test("sample media retries a failed hash and grants the synthetic image exception only to the fixed SVG", async () => {
-  const sha = await core.sampleImageHash();
-  const hash = vi.spyOn(core, "sampleImageHash").mockRejectedValueOnce(new Error("Synthetic hash failure"));
+test("sample media grants the synthetic image exception only to the fixed SVG", async () => {
+  const sha = core.SAMPLE_IMAGE_HASH;
   const before = counts();
-  const failed = await f.request(`/media/${sha}`, "GET");
-  expect(failed.status).toBe(500);
-  expect(await failed.json()).toMatchObject({ error: { code: "internal" } });
   for (const method of ["GET", "HEAD"]) {
     const response = await f.request(`/media/${sha}`, method);
     expect(response.status).toBe(200);
@@ -117,8 +113,32 @@ test("sample media retries a failed hash and grants the synthetic image exceptio
     expect(await response.text()).toBe(method === "GET" ? core.SAMPLE_SVG : "");
   }
   expect((await f.request(`/media/${"0".repeat(64)}`, "GET")).status).toBe(404);
-  expect(hash).toHaveBeenCalledTimes(2);
   expect(counts()).toEqual(before);
+});
+
+test("stored media still uses the owner-filtered lookup", async () => {
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489", "hex");
+  const sha = await f.deps.blobs.put(f.ownerId, png, "image/png");
+  await f.db.query((q) =>
+    q.insert(files).values({
+      id: randomUUID(),
+      ownerId: f.ownerId,
+      revisionId: f.revisionId,
+      path: "parcel.png",
+      role: "asset",
+      ord: 0,
+      mediaType: "image/png",
+      newBlob: sha,
+    }),
+  );
+  for (const method of ["GET", "HEAD"]) {
+    const response = await f.request(`/media/${sha}`, method);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("image/png");
+    expect(response.headers.get("Content-Length")).toBe(String(png.length));
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(method === "GET" ? png : Buffer.alloc(0));
+    expect((await f.request(`/media/${sha}`, method, undefined, "foreign")).status).toBe(404);
+  }
 });
 
 test("hard-loading the sample address returns the app shell", async () => {

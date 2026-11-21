@@ -1,8 +1,14 @@
 import { Outcome, SampleView, ThreadState } from "@emend/contract";
 import { describe, expect, it } from "vitest";
 import { buildSampleView } from "./build.ts";
+import { SAMPLE_IMAGE_HASH, sampleImageHash } from "./content.ts";
 
 describe("theme sample", () => {
+  it("pins the sample image hash to the SVG bytes", async () => {
+    expect(SAMPLE_IMAGE_HASH).toMatch(/^[0-9a-f]{64}$/);
+    expect(SAMPLE_IMAGE_HASH).toBe(await sampleImageHash());
+  });
+
   it("renders deterministic contract data with content, anchors and every feedback state", async () => {
     const sample = await buildSampleView();
     expect(SampleView.parse(sample)).toEqual(await buildSampleView());
@@ -49,6 +55,17 @@ describe("theme sample", () => {
       "modified",
       "added",
       "deleted",
+    ]);
+    const diffFiles = sample.revision.files.filter((file) => file.role === "diff");
+    expect(sample.revision.topics.map((topic) => diffFiles.filter((file) => file.topic === topic.slug).length)).toEqual(
+      [1, 2, 1],
+    );
+    const delivery = diffFiles.find((file) => file.path === "delivery.ts");
+    const note = delivery?.notes?.[0];
+    if (!delivery || !note) throw new Error("Missing delivery sample note");
+    expect(delivery.counts).toEqual({ additions: 1, deletions: 1 });
+    expect(sample.fileTexts[delivery.id]?.[note.side].split("\n").slice(note.start - 1, note.end)).toEqual([
+      '  return size > 2 ? "large" : "small";',
     ]);
   });
 });

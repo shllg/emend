@@ -3,6 +3,7 @@ import type { TopicMeta, WriteupInput } from "@emend/contract";
 export const SAMPLE_HTML_PATH = "sample.html";
 export const SAMPLE_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="120" viewBox="0 0 240 120"><rect width="240" height="120" rx="12" fill="#e2e8f0"/><circle cx="60" cy="60" r="30" fill="#2563eb"/><path d="M120 85l35-50 45 50z" fill="#16a34a"/></svg>';
+export const SAMPLE_IMAGE_HASH = "89a297498c0b36424ce76d7386145e65e9736529c4800dbf1253426c1410a0a1";
 export async function sampleImageHash(): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(SAMPLE_SVG));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -145,12 +146,31 @@ export const SAMPLE_HTML = `<!doctype html>
 export const SAMPLE_SOURCE_PATH = "parcel.ts";
 export const SAMPLE_SOURCE =
   "// Prepare a parcel.\ninterface Parcel { label: string; size: number }\nexport function pack(parcel: Parcel): string {\n  const count = 2;\n  return parcel.label + count;\n}\n";
+// Unchanged context gives the diff a collapsible region and a hunk separator.
+const deliveryContext = `
+interface Parcel {
+  label: string;
+  destination: string;
+}
+
+export function prepare(parcel: Parcel): string {
+  return parcel.label + ": " + parcel.destination;
+}
+`;
 export const SAMPLE_DIFFS = [
   {
     path: "delivery.ts",
     topic: "delivery",
-    old: 'export function label(size: number): string {\n  // Prepare a label.\n  return "small";\n}\n',
-    new: 'export function label(size: number): string {\n  // Prepare a label.\n  return size > 2 ? "large" : "small";\n}\n',
+    old: `export function label(size: number): string {
+  // Prepare a label.
+  return "small";
+}
+${deliveryContext}`,
+    new: `export function label(size: number): string {
+  // Prepare a label.
+  return size > 2 ? "large" : "small";
+}
+${deliveryContext}`,
   },
   {
     path: "queue.json",

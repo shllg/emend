@@ -332,6 +332,10 @@ test.each([390, 834, 1440])("renders real content and stays read-only at %ipx", 
     "Sample controls",
   ])
     expect(screen.getByRole("region", { name: label })).toBeTruthy();
+  const diffScroll = screen.getByRole("region", { name: "Sample diff" });
+  expect(diffScroll.hasAttribute("data-diff-scroll")).toBe(true);
+  for (const cls of ["relative", "h-[70dvh]", "min-w-0", "overflow-y-auto"])
+    expect(diffScroll.classList.contains(cls), `Diff scroller needs ${cls}`).toBe(true);
   const send = screen.getByRole("region", { name: "Send and approve" });
   for (const button of within(send).getAllByRole("button", { name: /Send|Approve/ })) {
     expect((button as HTMLButtonElement).disabled).toBe(true);
@@ -373,12 +377,50 @@ test.each([390, 834, 1440])("renders real content and stays read-only at %ipx", 
 
 test("every theme token is carried by a rendered emend element", async () => {
   await setup();
+  await waitFor(() =>
+    expect(
+      [...document.querySelectorAll("diffs-container")].some((diff) =>
+        diff.shadowRoot?.querySelector('[data-separator="line-info"]'),
+      ),
+    ).toBe(true),
+  );
   const used = collectSampleTokens(document, sample);
   const noElement = new Set<string>(TOKENS_NO_ELEMENT_USES);
   expect(
     THEME_TOKENS.filter((token) => !noElement.has(token) && !used.has(token)),
     "Theme tokens without a sample element",
   ).toEqual([]);
+});
+
+test.each([0, 1])("does not collect hunk colors when %i collapsed context lines draw no separator", async (extra) => {
+  const delivery = sample.revision.files.find((file) => file.path === "delivery.ts");
+  if (!delivery) throw new Error("Missing delivery sample");
+  // Pierre keeps four lines of patch context and expands a one-line gap automatically.
+  const context = "// Pack the parcel.\n".repeat(extra === 0 ? 0 : 4);
+  sample.fileTexts[delivery.id] = {
+    old: `export function label(size: number): string {
+  // Prepare a label.
+  return "small";
+}
+${context}`,
+    new: `export function label(size: number): string {
+  // Prepare a label.
+  return size > 2 ? "large" : "small";
+}
+${context}`,
+  };
+  await setup();
+  await waitFor(() => {
+    const diffs = [...document.querySelectorAll("diffs-container")];
+    expect(diffs).toHaveLength(4);
+    expect(diffs.every((diff) => diff.shadowRoot?.querySelector("[data-line]"))).toBe(true);
+  });
+  for (const diff of document.querySelectorAll("diffs-container"))
+    expect(diff.shadowRoot?.querySelector("[data-separator]")).toBeNull();
+  const used = collectSampleTokens(document, sample);
+  expect(used.has("diff-hunk-bg")).toBe(false);
+  expect(used.has("diff-add-word")).toBe(true);
+  expect(used.has("diff-del-word")).toBe(true);
 });
 
 test.each(TOKENS_NO_ELEMENT_USES)("%s is a theme token no emend element uses", (token) => {
