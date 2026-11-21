@@ -23,7 +23,7 @@ export function chargeHtmlParts(budgets: readonly HtmlPartBudget[], own: DocMeta
   if (parts === undefined) return;
   // Across all retained revisions, cache plus stored docs stay within the operation's budget:
   // htmlPartsPerRevision for publish, htmlPartsPerImport for import. Only the current worker
-  // result (at most htmlPartsPerDoc) is extra.
+  // result (at most htmlPartsPerDoc) is extra. After exhaustion, later docs are not hashed.
   let cut = false;
   for (const budget of budgets) {
     if (budget.exhausted || budget.count + parts.length > budget.limit) {
@@ -79,13 +79,20 @@ export async function renderRevision(
     const source = docViewOf(file) === "source";
     const format = isRenderedHtmlDoc(file) ? "html" : "markdown";
     const media = mediaByDoc.get(file.path);
+    // Exhaustion never resets within this call, so the cache key need not include the parts request.
     const key = JSON.stringify([format, file.newBlob, media]);
     let own = source ? { headings: [] } : metadataCache.get(key);
     if (!own) {
       own = { headings: [] };
       if (file.newBlob && !source)
         try {
-          const result = await execute({ kind: "doc-metadata", format, bytes: await read(file.newBlob), media });
+          const result = await execute({
+            kind: "doc-metadata",
+            format,
+            bytes: await read(file.newBlob),
+            media,
+            parts: format === "html" && !htmlPartBudgets.some((budget) => budget.exhausted),
+          });
           if (result.kind !== "doc-metadata") throw new Error("wrong result");
           own = {
             title: result.title,

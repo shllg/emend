@@ -64,7 +64,13 @@ export type Work =
   | { kind: "source"; path: string; source: ArrayBuffer; highlight?: boolean }
   | { kind: "doc-images"; bytes: ArrayBuffer }
   | { kind: "image-sizes"; heads: [string, ArrayBuffer][] }
-  | { kind: "doc-metadata"; format: "html" | "markdown"; bytes: ArrayBuffer; media?: [string, string][] }
+  | {
+      kind: "doc-metadata";
+      format: "html" | "markdown";
+      bytes: ArrayBuffer;
+      media?: [string, string][];
+      parts?: boolean;
+    }
   | { kind: "line-count"; bytes: ArrayBuffer }
   | { kind: "writeup-source"; bytes: ArrayBuffer }
   | { kind: "placement-doc"; format: "html" | "markdown" | "writeup"; bytes: ArrayBuffer }
@@ -214,7 +220,7 @@ export const executeWork: Executor = async (work) => {
         kind: "doc-metadata",
         title: await inferDocTitle("html", new TextEncoder().encode(source)),
         headings: htmlHeadingsFromTree(tree),
-        parts: await htmlPartHashes(tree),
+        ...(work.parts === true ? { parts: await htmlPartHashes(tree) } : {}),
         ...(tree
           ? {
               look: appearance.look,

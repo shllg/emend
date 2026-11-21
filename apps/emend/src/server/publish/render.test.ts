@@ -247,6 +247,47 @@ test("revision rendering shares an import part budget across calls", async () =>
   expect(imported).toEqual({ count: LIMITS.htmlPartsPerImport, exhausted: true, limit: LIMITS.htmlPartsPerImport });
 });
 
+test.each([false, true])(
+  "HTML metadata stops requesting hashes after exhaustion (import already exhausted: %s)",
+  async (importExhausted) => {
+    const parts = Array.from({ length: LIMITS.htmlPartsPerDoc }, (_, index) => index.toString(16).padStart(8, "0"));
+    const allowed = LIMITS.htmlPartsPerRevision / parts.length;
+    const paths = Array.from({ length: allowed + 3 }, (_, index) => `doc-${index}.html`);
+    const request = input(paths);
+    for (const [index, file] of request.files.entries()) file.newBlob = index.toString(16).padStart(64, "0");
+    const imported: HtmlPartBudget = {
+      count: importExhausted ? LIMITS.htmlPartsPerImport : 0,
+      exhausted: importExhausted,
+      limit: LIMITS.htmlPartsPerImport,
+    };
+    const execute = vi.fn(async (work: Parameters<typeof executeWork>[0]) => {
+      if (work.kind === "doc-metadata")
+        return { kind: "doc-metadata" as const, headings: [], ...(work.parts === true ? { parts } : {}) };
+      if (work.kind === "writeup") return { kind: "writeup" as const, ...serializeRendered({ sections: [] }) };
+      throw new Error("unexpected work");
+    });
+    const result = await renderRevision(
+      request,
+      execute,
+      async () => new ArrayBuffer(0),
+      async () => new ArrayBuffer(0),
+      async () => "stored",
+      undefined,
+      undefined,
+      { htmlParts: imported },
+    );
+    const requested = execute.mock.calls.flatMap(([work]) =>
+      work.kind === "doc-metadata" && work.format === "html" ? [work.parts === true] : [],
+    );
+    // The first over-budget doc is hashed; only its result can tell chargeHtmlParts to cut.
+    expect(requested).toEqual(paths.map((_, index) => !importExhausted && index <= allowed));
+    expect([...result.htmlParts.keys()]).toEqual(importExhausted ? [] : paths.slice(0, allowed));
+    for (const path of paths.slice(importExhausted ? 0 : allowed))
+      expect(result.metadata.get(path)).not.toHaveProperty("parts");
+    expect(result.unrendered).toEqual([]);
+  },
+);
+
 test("writeup work bounds unlisted paths and retains their full count", async () => {
   const paths = Array.from({ length: 25 }, (_, i) => `media/${i}.png`);
   const result = await executeWork({
