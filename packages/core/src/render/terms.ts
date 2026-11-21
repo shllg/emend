@@ -172,7 +172,9 @@ export function markTerms() {
           skipped.has(node.tagName) ||
           renderData(node).emendMedia !== undefined ||
           renderData(node).emendDiagram !== undefined ||
-          (Array.isArray(node.properties.className) && node.properties.className.includes("emend-term"))
+          (Array.isArray(node.properties.className) &&
+            (node.properties.className.includes("emend-term") ||
+              node.properties.className.includes("emend-callout-marker")))
         )
           continue;
         stack.push({ parent: node, index: 0 });

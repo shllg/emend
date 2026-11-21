@@ -53,6 +53,47 @@ test.each([
   if (md.includes("  \n")) expect(html).toContain("</span><br>\n");
 });
 
+test.each([
+  ["> [!NOTE]\n> Before: seed\n> After: plant", "\n"],
+  ["> [!NOTE]\\\n> Before: seed\n> After: plant", '<br class="emend-callout-marker-break">\n'],
+  [
+    "<blockquote><p>[!NOTE] \t<br>Before: seed\nAfter: plant</p></blockquote>",
+    ' \t<br class="emend-callout-marker-break">',
+  ],
+])("keeps a callout marker and its separators outside example rows: %s", async (md, separator) => {
+  const blocks = await renderExample(md);
+  const plain = await renderMarkdownWithBudget(md, "t-garden-example", { highlightedBytes: 0 });
+  expect(blocks.map(({ id, text }) => ({ id, text }))).toEqual(plain.map(({ id, text }) => ({ id, text })));
+  const html = blocks[0]?.html ?? "";
+  expect(html).toContain(`<p class="emend-example-rows"><span class="emend-callout-marker">[!NOTE]</span>${separator}`);
+  const paragraph = withClass(html, "emend-example-rows")[0];
+  expect(paragraph?.children[0]).toMatchObject({
+    type: "element",
+    tagName: "span",
+    properties: { className: ["emend-callout-marker"] },
+    children: [{ type: "text", value: "[!NOTE]" }],
+  });
+  const rows = paragraph?.children.filter(
+    (child) =>
+      child.type === "element" &&
+      Array.isArray(child.properties.className) &&
+      child.properties.className.includes("emend-example-row"),
+  );
+  expect(rows?.map((row) => hastText(row))).toEqual(["Before: seed", "After: plant"]);
+  expect(withClass(html, "emend-example-line")).toHaveLength(0);
+});
+
+test("a callout introduction stays outside its marker's prefix", async () => {
+  const md = "> [!NOTE]\n> An intro.\n> Before: seed\n> After: plant";
+  const blocks = await renderExample(md);
+  const plain = await renderMarkdownWithBudget(md, "t-garden-example", { highlightedBytes: 0 });
+  expect(blocks.map(({ id, text }) => ({ id, text }))).toEqual(plain.map(({ id, text }) => ({ id, text })));
+  const html = blocks[0]?.html ?? "";
+  expect(html).toContain(
+    '<span class="emend-callout-marker">[!NOTE]</span>\n<span class="emend-example-line">An intro.</span>',
+  );
+});
+
 test("a colon inside a longer bold span leaves that line unlabelled", async () => {
   const [block] = await renderExample("**Before: one seed**\nAfter: two seeds");
   expect(block?.html).toContain('<span class="emend-example-line"><strong>Before: one seed</strong></span>');
@@ -67,6 +108,9 @@ test.each([
   "| Before: | After: |\n| --- | --- |\n| One | Two |",
   "```text\nBefore: one seed\nAfter: two seeds\n```",
   "**Before\nAfter:** seeds",
+  "> [!NOTE]\n> Body",
+  "> [!NOTE]\n> **Before: seed**",
+  "> [!NOTE]\n> Beforehand: seed\n> Afterwards: plant",
 ])("leaves other markup alone: %s", async (md) => {
   const blocks = await renderExample(md);
   const plain = await renderMarkdownWithBudget(md, "t-garden-example", { highlightedBytes: 0 });

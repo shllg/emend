@@ -1,6 +1,7 @@
+import { fromHtml } from "hast-util-from-html";
 import { describe, expect, test } from "vitest";
 import { makeSpan, placeSpan } from "../place/span.ts";
-import { blockText } from "./blocks.ts";
+import { blockText, type HtmlElement, visitElements } from "./blocks.ts";
 import { blockHash } from "./hash.ts";
 import { renderCommentHtml, renderDoc, renderMarkdown } from "./markdown.ts";
 import { normalizeText } from "./normalize.ts";
@@ -105,6 +106,17 @@ describe("GitHub alert callouts", () => {
     expect(html).toContain(marker);
   });
 
+  test.each(["> [!NOTE]<br>", "> [!NOTE]\n> <br>", "<blockquote><p>[!NOTE]<br><br></p></blockquote>"])(
+    "line breaks alone after a marker leave the quote plain: %s",
+    async (markdown) => {
+      const [block] = await renderMarkdown(markdown, "overview");
+      expect(block?.kind).toBe("quote");
+      expect(block?.html).toContain("[!NOTE]");
+      expect(block?.html).toContain("<br>");
+      expect(block?.html).not.toContain("emend-callout");
+    },
+  );
+
   test.each([
     "> [!NOTE] \t\n> Body",
     "> [!NOTE]  \n> Body",
@@ -118,23 +130,44 @@ describe("GitHub alert callouts", () => {
     expect(block?.html).not.toContain("emend-callout-title");
   });
 
+  test("a later hard break stays visible and keeps the quote's text and id", async () => {
+    const section = "overview";
+    const oldText = "\n[!NOTE]\nline one\nline two\n";
+    const [block] = await renderMarkdown("> [!NOTE]\n> line one  \n> line two", section);
+    expect(block?.html).toContain('class="emend-callout emend-callout-note"');
+    expect(block?.html).toContain("line one<br>\nline two");
+    expect(block?.html).not.toContain("emend-callout-marker-break");
+    expect(block?.text).toBe(oldText);
+    expect(block?.id).toBe(`${section}-${await blockHash(normalizeText(oldText))}`);
+  });
+
+  test("only the hard break ending the marker line gets the generated break class", async () => {
+    const [block] = await renderMarkdown("> [!NOTE]\\\n> Body", "overview");
+    expect(block?.html).toContain(
+      '<span class="emend-callout-marker">[!NOTE]</span><br class="emend-callout-marker-break">\nBody',
+    );
+    expect(block?.text).toBe("\n[!NOTE]\nBody\n");
+  });
+
   test("preserves whitespace and a hard break after the marker", async () => {
     const [block] = await renderMarkdown("<blockquote><p>[!note] \t<br>Body</p></blockquote>", "overview");
     expect(block?.html).toBe(
       '<blockquote class="emend-callout emend-callout-note">' +
-        '<p><span class="emend-callout-marker">[!note]</span> \t<br>Body</p></blockquote>',
+        '<p><span class="emend-callout-marker">[!note]</span> \t' +
+        '<br class="emend-callout-marker-break">Body</p></blockquote>',
     );
   });
 
   test("a marker-only paragraph keeps its author classes, whitespace and breaks", async () => {
     const [block] = await renderMarkdown(
-      '<blockquote><p class="marker">[!NOTE] \t<br>\n</p><p>Body</p></blockquote>',
+      '<blockquote><p class="marker">[!NOTE] \t<br class="break">\n</p><p>Body</p></blockquote>',
       "overview",
     );
     expect(block?.html).toBe(
       '<blockquote class="emend-callout emend-callout-note">' +
         '<p class="user-content-marker emend-callout-marker-line">' +
-        '<span class="emend-callout-marker">[!NOTE]</span> \t<br>\n</p><p>Body</p></blockquote>',
+        '<span class="emend-callout-marker">[!NOTE]</span> \t' +
+        '<br class="user-content-break emend-callout-marker-break">\n</p><p>Body</p></blockquote>',
     );
   });
 
@@ -177,6 +210,33 @@ describe("GitHub alert callouts", () => {
     );
   });
 
+  test("author marker classes stay namespaced inside a real callout", async () => {
+    const markdown = [
+      "> [!NOTE]",
+      '> Body <span class="emend-callout-marker">forged</span>',
+      ">",
+      '> <p class="emend-callout-marker-line">forged line</p>',
+      ">",
+      '> <br class="emend-callout-marker-break">',
+    ].join("\n");
+    const blocks = await renderMarkdown(markdown, "overview");
+    expect(blocks).toHaveLength(1);
+    const html = blocks[0]?.html ?? "";
+    expect(html).toContain('class="emend-callout emend-callout-note"');
+    expect(html).toContain('<span class="user-content-emend-callout-marker">forged</span>');
+    expect(html).toContain('<p class="user-content-emend-callout-marker-line">forged line</p>');
+    expect(html).toContain('<br class="user-content-emend-callout-marker-break">');
+    const markers: HtmlElement[] = [];
+    visitElements(fromHtml(html, { fragment: true }), (element) => {
+      if (Array.isArray(element.properties.className) && element.properties.className.includes("emend-callout-marker"))
+        markers.push(element);
+    });
+    expect(markers).toHaveLength(1);
+    expect(markers[0]).toMatchObject({ tagName: "span", children: [{ type: "text", value: "[!NOTE]" }] });
+    expect(html).not.toContain('class="emend-callout-marker-line"');
+    expect(html).not.toContain('class="emend-callout-marker-break"');
+  });
+
   test("keeps namespaced author classes before generated callout classes", async () => {
     const [block] = await renderMarkdown('<blockquote class="note"><p>[!NOTE]\nBody</p></blockquote>', "overview");
     expect(block?.html).toContain('class="user-content-note emend-callout emend-callout-note"');
@@ -185,7 +245,9 @@ describe("GitHub alert callouts", () => {
   test("comments keep the marker and its line break", async () => {
     const html = await renderCommentHtml("> [!NOTE]\n> Body");
     expect(html).toContain('class="emend-callout emend-callout-note"');
-    expect(html).toContain('<span class="emend-callout-marker">[!NOTE]</span><br>\nBody</p>');
+    expect(html).toContain(
+      '<span class="emend-callout-marker">[!NOTE]</span><br class="emend-callout-marker-break">\nBody</p>',
+    );
     expect(html).not.toContain("emend-callout-title");
   });
 

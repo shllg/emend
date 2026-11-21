@@ -335,7 +335,7 @@
   }
   /* The marker stays in the text for comment anchors; only its display is hidden. */
   .em-prose .emend-callout .emend-callout-marker,
-  .em-prose .emend-callout .emend-callout-marker + br,
+  .em-prose .emend-callout br.emend-callout-marker-break,
   .em-prose .emend-callout > p.emend-callout-marker-line {
     display: none;
   }

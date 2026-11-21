@@ -2,7 +2,8 @@ import type { HtmlElement, HtmlNode, HtmlRoot } from "./blocks.ts";
 
 const isWhitespace = (node: HtmlNode) => node.type === "text" && node.value.trim() === "";
 const isBreak = (node: HtmlNode | undefined) => node?.type === "element" && node.tagName === "br";
-const hasContent = (node: HtmlNode) => node.type === "element" || (node.type === "text" && !isWhitespace(node));
+const hasContent = (node: HtmlNode) =>
+  (node.type === "element" && !isBreak(node)) || (node.type === "text" && !isWhitespace(node));
 
 function hasDiagram(quote: HtmlElement): boolean {
   const pending: HtmlNode[] = [quote];
@@ -46,6 +47,10 @@ export function markCallouts() {
       // Diagram splitting copies quote classes to each text piece, so leave the whole quote plain.
       if (hasDiagram(quote)) continue;
 
+      if (breakAfter && next?.type === "element") {
+        const classes = Array.isArray(next.properties.className) ? next.properties.className : [];
+        next.properties.className = [...classes, "emend-callout-marker-break"];
+      }
       const span: HtmlElement = {
         type: "element",
         tagName: "span",
