@@ -30,22 +30,76 @@ async function entryFixture() {
     const stdout = await open(stdoutPath, "w", 0o600);
     const stderr = await open(stderrPath, "w", 0o600);
     try {
-      const code = await new Promise<number | null>((resolve, reject) => {
-        const child = spawn(process.execPath, [...nodeArgs, entry, ...args], {
-          cwd,
-          env,
-          stdio: ["ignore", stdout.fd, stderr.fd],
-          timeout,
-        });
-        child.once("error", reject);
-        child.once("close", resolve);
+      const child = spawn(process.execPath, [...nodeArgs, entry, ...args], {
+        cwd,
+        env,
+        stdio: ["ignore", stdout.fd, stderr.fd],
+        timeout: timeout ?? 12000,
+        // A timeout must not look like the status line's own SIGKILL ending.
+        killSignal: "SIGTERM",
       });
-      return { code, stdout: await readFile(stdoutPath, "utf8"), stderr: await readFile(stderrPath, "utf8") };
+      const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", (code, signal) => resolve({ code, signal }));
+      });
+      onTestFinished(async () => {
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        await closed;
+      });
+      const result = await closed;
+      return { ...result, stdout: await readFile(stdoutPath, "utf8"), stderr: await readFile(stderrPath, "utf8") };
     } finally {
       await Promise.all([stdout.close(), stderr.close()]);
     }
   };
   return { directory, state, entry, env, invoke };
+}
+
+async function statusRepository(f: Awaited<ReturnType<typeof entryFixture>>) {
+  const repo = join(f.directory, "repo");
+  await mkdir(repo);
+  const git = (...args: string[]) =>
+    promisify(execFile)(
+      "git",
+      [
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "commit.gpgSign=false",
+        "-c",
+        "user.name=Synthetic",
+        "-c",
+        "user.email=synthetic@example.test",
+        ...args,
+      ],
+      {
+        cwd: repo,
+        env: { ...f.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
+        timeout: 5000,
+        killSignal: "SIGKILL",
+      },
+    );
+  await git("init", "-b", "synthetic-feature");
+  await git("commit", "--allow-empty", "-m", "synthetic base");
+  return repo;
+}
+
+async function blockedWorkerPreload(f: Awaited<ReturnType<typeof entryFixture>>, source: string) {
+  const fifo = join(f.directory, "blocked-open");
+  await promisify(execFile)("mkfifo", [fifo], { env: f.env, timeout: 5000, killSignal: "SIGKILL" });
+  const guard = join(f.directory, "blocked-worker.mjs");
+  const marker = join(f.directory, "worker-stalled");
+  await writeFile(
+    guard,
+    `import fs from "node:fs/promises";
+import { writeFileSync } from "node:fs";
+function blockWorker() {
+  void fs.open(${JSON.stringify(fifo)}, "r");
+  writeFileSync(${JSON.stringify(marker)}, "stalled");
+}
+${source}\n`,
+  );
+  return { guard, marker };
 }
 
 test.each([
@@ -62,39 +116,53 @@ test.each([
   const f = await entryFixture();
   expect(await f.invoke(dirname(dirname(f.entry)), args)).toEqual({
     code: 1,
+    signal: null,
     stdout: "",
     stderr: `emend: this emend runs from inside the current repository (${escapeReference(f.entry)}); run emend from an install outside the repository.\n`,
   });
   expect(await readdir(f.state)).toEqual([]);
 });
 
-test.each([false, true])("a refused entry never loads main.ts (status line %s)", async (statusLine) => {
-  const f = await entryFixture();
-  const guard = join(f.directory, "guard.mjs");
-  await writeFile(
-    guard,
-    `import { registerHooks } from "node:module";
+test.each([false, true])(
+  "a refused entry never loads main.ts (status line %s)",
+  async (statusLine) => {
+    const f = await entryFixture();
+    if (statusLine) f.env.EMEND_STATUS_LINE_DEADLINE_MS = "10000";
+    const guard = join(f.directory, "guard.mjs");
+    const marker = join(f.directory, "main-loaded");
+    await writeFile(
+      guard,
+      `import { writeFileSync } from "node:fs";
+import { registerHooks } from "node:module";
 registerHooks({ resolve(specifier, context, next) {
-  if (specifier === "./main.ts") throw new Error("main loaded before refusal");
+  if (specifier === "./main.ts") {
+    writeFileSync(${JSON.stringify(marker)}, "loaded");
+    throw new Error("main loaded before refusal");
+  }
   return next(specifier, context);
 } });\n`,
-  );
-  const args = statusLine ? ["status", "--line"] : ["stop"];
-  expect(await f.invoke(dirname(dirname(f.entry)), args, ["--import", guard])).toEqual({
-    code: statusLine ? 0 : 1,
-    stdout: "",
-    stderr: statusLine
-      ? ""
-      : `emend: this emend runs from inside the current repository (${escapeReference(f.entry)}); run emend from an install outside the repository.\n`,
-  });
-  expect(await readdir(f.state)).toEqual([]);
-});
+    );
+    const args = statusLine ? ["status", "--line"] : ["stop"];
+    expect(await f.invoke(dirname(dirname(f.entry)), args, ["--import", guard])).toEqual({
+      code: statusLine ? null : 1,
+      signal: statusLine ? "SIGKILL" : null,
+      stdout: "",
+      stderr: statusLine
+        ? ""
+        : `emend: this emend runs from inside the current repository (${escapeReference(f.entry)}); run emend from an install outside the repository.\n`,
+    });
+    await expect(access(marker)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readdir(f.state)).toEqual([]);
+  },
+  15000,
+);
 
 test("the real feedback entry allows a working directory outside any repository", async () => {
   const f = await entryFixture();
   const result = await f.invoke(f.directory, ["feedback", syntheticId]);
   expect(result).toEqual({
     code: 1,
+    signal: null,
     stdout: "",
     stderr: `emend: review ${syntheticId} was deleted or never existed\n`,
   });
@@ -104,16 +172,19 @@ test.each([false, true])(
   "the real entry fails closed on an invalid repository entry (status line %s)",
   async (statusLine) => {
     const f = await entryFixture();
+    if (statusLine) f.env.EMEND_STATUS_LINE_DEADLINE_MS = "10000";
     const repo = join(f.directory, "repo");
     await mkdir(repo);
     await writeFile(join(repo, ".git"), "not a repository\n");
     expect(await f.invoke(repo, statusLine ? ["status", "--line"] : ["feedback", syntheticId])).toEqual({
-      code: statusLine ? 0 : 1,
+      code: statusLine ? null : 1,
+      signal: statusLine ? "SIGKILL" : null,
       stdout: "",
       stderr: statusLine ? "" : "emend: could not check where this emend runs; nothing was changed.\n",
     });
     expect(await readdir(f.state)).toEqual([]);
   },
+  15000,
 );
 
 test("the real status line kills a blocked libuv worker during the runtime pre-check", async () => {
@@ -122,7 +193,7 @@ test("the real status line kills a blocked libuv worker during the runtime pre-c
   await mkdir(join(repo, ".git"), { recursive: true });
   await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/synthetic-feature\n");
   const fifo = join(f.directory, "blocked-open");
-  await promisify(execFile)("mkfifo", [fifo], { env: f.env });
+  await promisify(execFile)("mkfifo", [fifo], { env: f.env, timeout: 5000, killSignal: "SIGKILL" });
   const guard = join(f.directory, "stalled-precheck.mjs");
   const marker = join(f.directory, "precheck-stalled");
   await writeFile(
@@ -146,9 +217,9 @@ syncBuiltinESMExports();\n`,
   const started = performance.now();
   const child = spawn(process.execPath, ["--import", guard, f.entry, "status", "--line"], {
     cwd: repo,
-    env: { ...f.env, EMEND_STATUS_LINE_DEADLINE_MS: "500" },
+    env: { ...f.env, EMEND_STATUS_LINE_DEADLINE_MS: "1500" },
     stdio: ["ignore", "pipe", "pipe"],
-    timeout: 4500,
+    timeout: 6000,
     killSignal: "SIGKILL",
   });
   const stdout: Buffer[] = [];
@@ -169,33 +240,158 @@ syncBuiltinESMExports();\n`,
   expect(Buffer.concat(stdout).toString()).toBe("");
   expect(Buffer.concat(stderr).toString()).toBe("");
   expect(await readFile(marker, "utf8")).toBe("stalled");
-  expect(elapsed).toBeLessThan(3000);
+  expect(elapsed).toBeLessThan(4500);
   expect(await readdir(f.state)).toEqual([]);
 }, 10000);
+
+test("the real status line ends normally while a libuv worker is blocked", async () => {
+  const f = await entryFixture();
+  f.env.EMEND_STATUS_LINE_DEADLINE_MS = "10000";
+  const { guard, marker } = await blockedWorkerPreload(f, "blockWorker();");
+  const started = performance.now();
+  const result = await f.invoke(f.directory, ["status", "--line"], ["--import", guard]);
+  const elapsed = performance.now() - started;
+  expect(result).toEqual({ code: null, signal: "SIGKILL", stdout: "", stderr: "" });
+  expect(await readFile(marker, "utf8")).toBe("stalled");
+  expect(elapsed).toBeLessThan(3000);
+  expect(await readdir(f.state)).toEqual([]);
+}, 20000);
+
+test("the real status line refuses promptly while a libuv worker is blocked", async () => {
+  const f = await entryFixture();
+  f.env.EMEND_STATUS_LINE_DEADLINE_MS = "10000";
+  const { guard, marker } = await blockedWorkerPreload(
+    f,
+    `import { syncBuiltinESMExports } from "node:module";
+const realpath = fs.realpath;
+fs.realpath = async (...args) => {
+  if (args[0] === process.cwd()) {
+    blockWorker();
+    throw new Error("synthetic pre-check failure");
+  }
+  return realpath(...args);
+};
+syncBuiltinESMExports();`,
+  );
+  const started = performance.now();
+  const result = await f.invoke(f.directory, ["status", "--line"], ["--import", guard]);
+  const elapsed = performance.now() - started;
+  expect(result).toEqual({ code: null, signal: "SIGKILL", stdout: "", stderr: "" });
+  expect(await readFile(marker, "utf8")).toBe("stalled");
+  expect(elapsed).toBeLessThan(3000);
+  expect(await readdir(f.state)).toEqual([]);
+}, 20000);
+
+test.each(["uncaught exception", "unhandled rejection"])(
+  "the real status line ends silently on an %s with a blocked libuv worker",
+  async (kind) => {
+    const f = await entryFixture();
+    f.env.EMEND_STATUS_LINE_DEADLINE_MS = "10000";
+    const failure =
+      kind === "uncaught exception"
+        ? 'throw new Error("synthetic timer failure");'
+        : 'void Promise.reject(new Error("synthetic timer rejection"));';
+    const { guard, marker } = await blockedWorkerPreload(
+      f,
+      `import { syncBuiltinESMExports } from "node:module";
+const realpath = fs.realpath;
+fs.realpath = async (...args) => {
+  if (args[0] === process.cwd()) {
+    blockWorker();
+    setTimeout(() => { ${failure} }, 50);
+    return new Promise(() => {});
+  }
+  return realpath(...args);
+};
+syncBuiltinESMExports();`,
+    );
+    const started = performance.now();
+    const result = await f.invoke(f.directory, ["status", "--line"], ["--import", guard]);
+    const elapsed = performance.now() - started;
+    expect(result).toEqual({ code: null, signal: "SIGKILL", stdout: "", stderr: "" });
+    expect(await readFile(marker, "utf8")).toBe("stalled");
+    expect(elapsed).toBeLessThan(3000);
+    expect(await readdir(f.state)).toEqual([]);
+  },
+  20000,
+);
+
+test.each([
+  { blockedLookup: 2, timeoutMs: 1500 },
+  { blockedLookup: 1, timeoutMs: 5000 },
+])(
+  "the real status line ends at the hub timeout with DNS lookup $blockedLookup blocked",
+  async ({ blockedLookup, timeoutMs }) => {
+    const f = await entryFixture();
+    f.env.EMEND_STATUS_LINE_DEADLINE_MS = "10000";
+    const repo = await statusRepository(f);
+    const requests: string[] = [];
+    const server = createServer((request, response) => {
+      requests.push(request.url ?? "");
+      // A fresh connection makes the review request perform the second lookup.
+      response.setHeader("Connection", "close");
+      response.setHeader("Content-Type", "application/json");
+      if (request.url === "/api/v1/capabilities") {
+        response.end(JSON.stringify({ api: 1, version: "0.1.0", features: [AGENT_REVIEW_KEY_FEATURE] }));
+      } else {
+        response.writeHead(404).end();
+      }
+    });
+    onTestFinished(async () => {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("missing fixture server address");
+    await Promise.all([
+      writeFile(
+        join(f.state, "attach.json"),
+        JSON.stringify({ hubId: syntheticId, hubName: "Synthetic hub", hubUrl: `http://localhost:${address.port}` }),
+        { mode: 0o600 },
+      ),
+      writeFile(join(f.state, "instance.json"), JSON.stringify({ id: syntheticId, name: "Synthetic machine" }), {
+        mode: 0o600,
+      }),
+      writeFile(join(f.state, "hub.token"), `em_${"b".repeat(43)}`, { mode: 0o600 }),
+    ]);
+    const { guard, marker } = await blockedWorkerPreload(
+      f,
+      `import dns from "node:dns";
+import { syncBuiltinESMExports } from "node:module";
+const lookup = dns.lookup;
+let lookups = 0;
+dns.lookup = (hostname, ...args) => {
+  if (hostname !== "localhost") throw new Error("unexpected fixture hostname");
+  if (++lookups === ${blockedLookup}) {
+    blockWorker();
+    return;
+  }
+  return lookup("127.0.0.1", ...args);
+};
+syncBuiltinESMExports();`,
+    );
+    const started = performance.now();
+    const result = await f.invoke(repo, ["status", "--line"], ["--import", guard]);
+    const elapsed = performance.now() - started;
+    expect(result).toEqual({ code: null, signal: "SIGKILL", stdout: "", stderr: "" });
+    expect(await readFile(marker, "utf8")).toBe("stalled");
+    expect(requests.filter((url) => url.startsWith("/api/"))).toEqual(
+      blockedLookup === 2 ? ["/api/v1/capabilities"] : [],
+    );
+    expect(elapsed).toBeGreaterThanOrEqual(timeoutMs);
+    expect(elapsed).toBeLessThan(timeoutMs + 2500);
+  },
+  30000,
+);
 
 test("the real status line exits silently when stdout is already closed", async () => {
   const f = await entryFixture();
   f.env.EMEND_STATUS_LINE_DEADLINE_MS = "10000";
-  const repo = join(f.directory, "repo");
-  await mkdir(repo);
-  const git = (...args: string[]) =>
-    promisify(execFile)(
-      "git",
-      [
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "commit.gpgSign=false",
-        "-c",
-        "user.name=Synthetic",
-        "-c",
-        "user.email=synthetic@example.test",
-        ...args,
-      ],
-      { cwd: repo, env: { ...f.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } },
-    );
-  await git("init", "-b", "synthetic-feature");
-  await git("commit", "--allow-empty", "-m", "synthetic base");
+  const repo = await statusRepository(f);
   const key = Buffer.alloc(32, 3).toString("base64url");
   const requests: string[] = [];
   const server = createServer((request, response) => {
@@ -254,7 +450,8 @@ test("the real status line exits silently when stdout is already closed", async 
   ]);
   // Prove this fixture reaches the write before testing a real closed pipe.
   expect(await f.invoke(repo, ["status", "--line"], [], 12000)).toEqual({
-    code: 0,
+    code: null,
+    signal: "SIGKILL",
     stdout: "emend r3 · your turn\n",
     stderr: "",
   });
@@ -276,7 +473,7 @@ test("the real status line exits silently when stdout is already closed", async 
     await closed;
   });
   child.stdout.destroy();
-  expect(await closed).toEqual({ code: 0, signal: null });
+  expect(await closed).toEqual({ code: null, signal: "SIGKILL" });
   expect(Buffer.concat(stderr).toString()).toBe("");
   expect(requests.filter((url) => url.startsWith("/api/v1/agent/reviews?key="))).toHaveLength(2);
 }, 30000);
@@ -316,7 +513,12 @@ registerHooks({ load(url, context, next) {
   return next(url, context);
 } });`,
   );
-  expect(await f.invoke(f.directory, ["update"], ["--import", guard])).toEqual({ code, stdout: "", stderr: "" });
+  expect(await f.invoke(f.directory, ["update"], ["--import", guard])).toEqual({
+    code,
+    signal: null,
+    stdout: "",
+    stderr: "",
+  });
 });
 
 test("the real status line exits after flushing even with a lingering handle", async () => {
@@ -338,7 +540,8 @@ registerHooks({ load(url, context, next) {
 } });`,
   );
   expect(await f.invoke(f.directory, ["status", "--line"], ["--import", guard], 12000)).toEqual({
-    code: 0,
+    code: null,
+    signal: "SIGKILL",
     stdout: "emend r3 · your turn\n",
     stderr: "",
   });

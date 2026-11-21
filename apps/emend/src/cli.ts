@@ -1,16 +1,19 @@
 const statusLine = process.argv.length === 4 && process.argv[2] === "status" && process.argv[3] === "--line";
 const statusLineController = statusLine ? new AbortController() : undefined;
 if (statusLineController) {
+  process.on("uncaughtException", endStatusLine);
+  process.on("unhandledRejection", endStatusLine);
   const rawDeadline = process.env.EMEND_STATUS_LINE_DEADLINE_MS ?? "";
   const deadline = /^\d+$/.test(rawDeadline) ? Number(rawDeadline) : NaN;
   setTimeout(
-    () => {
-      statusLineController.abort();
-      // process.exit waits for blocked libuv workers; SIGKILL ends every thread.
-      process.kill(process.pid, "SIGKILL");
-    },
+    endStatusLine,
     Number.isInteger(deadline) && deadline >= 100 && deadline <= 10000 ? deadline : 2000,
   ).unref();
+}
+function endStatusLine() {
+  statusLineController?.abort();
+  // process.exit joins blocked libuv workers; SIGKILL ends every thread.
+  process.kill(process.pid, "SIGKILL");
 }
 let refusal: string | undefined;
 if (
@@ -34,7 +37,7 @@ if (
   }
 }
 if (refusal) {
-  if (statusLine) process.exit(0);
+  if (statusLine) endStatusLine();
   process.stderr.write(refusal);
   process.exitCode = 1;
 } else {
@@ -78,7 +81,7 @@ if (refusal) {
     },
     env: process.env,
   });
-  if (statusLine) process.exit(process.exitCode ?? 0);
+  if (statusLine) endStatusLine();
 }
 // A pending stdout write can keep the event loop alive after an interrupted flush.
 // Serve has already finished its startup and process-group cleanup before returning.

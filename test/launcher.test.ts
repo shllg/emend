@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, onTestFinished, test } from "vitest";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
 let root: string;
@@ -146,6 +146,80 @@ test("the status line launcher exits silently with status 0 for invalid NODE_OPT
   env.NODE_OPTIONS = "--bogus-flag";
   expect(await command(launcher, ["status", "--line"])).toEqual({ status: 0, stdout: "", stderr: "" });
 });
+
+test("the status line launcher exits 0 when opening /dev/null fails", async () => {
+  const launcher = copyLauncher('throw new Error("node should not start");\n');
+  const source = readFileSync(launcher, "utf8");
+  // The shell reports its own failed redirection on the caller's stderr before any redirection can take effect, so only the status is kept.
+  const result = await command("/bin/sh", ["-c", `ulimit -n 2\n${source}`, launcher, "status", "--line"]);
+  expect(result).toMatchObject({ status: 0, stdout: "" });
+}, 30000);
+
+test.each(["SIGTERM", "SIGINT", "SIGHUP"] as const)(
+  "the status line launcher kills and reaps node promptly on %s",
+  async (signal) => {
+    const pidFile = join(root, "stub.pid");
+    const launcher = copyLauncher(`import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+setInterval(() => {}, 1000);
+`);
+    const child = spawn(launcher, ["status", "--line"], {
+      cwd: root,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+      timeout: 10000,
+      killSignal: "SIGKILL",
+    });
+    onTestFinished(async () => {
+      // The process group also catches an orphaned stub when the launcher fails the test.
+      if (child.pid) {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+        }
+      }
+      await closed;
+    });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let stdoutEnded = false;
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stdout.once("end", () => {
+      stdoutEnded = true;
+    });
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", (code, signal) => resolve({ code, signal }));
+    });
+    await expect.poll(() => Number(readFileSync(pidFile, "utf8")), { timeout: 5000 }).toBeGreaterThan(0);
+    const stubPid = Number(readFileSync(pidFile, "utf8"));
+    const started = performance.now();
+    expect(child.kill(signal)).toBe(true);
+    await expect
+      .poll(
+        () => {
+          let stubAlive = true;
+          try {
+            process.kill(stubPid, 0);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+            stubAlive = false;
+          }
+          return { code: child.exitCode, signal: child.signalCode, stdoutEnded, stubAlive };
+        },
+        { timeout: 2000, interval: 10 },
+      )
+      .toEqual({ code: 0, signal: null, stdoutEnded: true, stubAlive: false });
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(await closed).toEqual({ code: 0, signal: null });
+    expect(Buffer.concat(stdout).toString()).toBe("");
+    expect(Buffer.concat(stderr).toString()).toBe("");
+  },
+  20000,
+);
 
 test("the status line launcher prints a fast result without waiting for the deadline", async () => {
   const launcher = copyLauncher('console.log("emend r3 · your turn");\n');

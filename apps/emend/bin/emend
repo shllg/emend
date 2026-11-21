@@ -31,7 +31,10 @@ if [ ! -f "$directory/../dist/emend.mjs" ]; then
 fi
 
 if [ "${status_line:-}" = 1 ]; then
-  node "$directory/../dist/emend.mjs" "$@" || :
+  node "$directory/../dist/emend.mjs" "$@" &
+  child=$!
+  trap 'kill -KILL "$child" 2>/dev/null || :; wait "$child" 2>/dev/null || :; exit 0' HUP INT TERM
+  wait "$child" || :
   exit 0
 fi
 
