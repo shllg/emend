@@ -324,6 +324,58 @@ test("status --line bounds git discovery even when it ignores cancellation", asy
   expect(f.fetcher).not.toHaveBeenCalled();
 });
 
+test("status --line uses a supplied signal without creating its own deadline", async () => {
+  const f = await lineFixture();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  const controller = new AbortController();
+  const started = Promise.withResolvers<void>();
+  let signal: AbortSignal | undefined;
+  vi.spyOn(gitModule, "createGitSession").mockImplementation((options) => {
+    signal = options?.signal;
+    return async () => {
+      started.resolve();
+      return new Promise<Buffer>(() => {}); // Deliberately ignore cancellation.
+    };
+  });
+  let finished = false;
+  const running = run(["status", "--line"], { ...f.io, statusLineSignal: controller.signal }).then((code) => {
+    finished = true;
+    return code;
+  });
+  await Promise.race([
+    started.promise,
+    running.then(() => {
+      throw new Error("status line returned before git discovery");
+    }),
+  ]);
+  expect(signal).toBe(controller.signal);
+  expect(vi.getTimerCount()).toBe(0);
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(finished).toBe(false);
+  controller.abort();
+  expect(await running).toBe(0);
+  expect(signal?.aborted).toBe(true);
+  expect(vi.getTimerCount()).toBe(0);
+  expect(f.stdout).toEqual([]);
+  expect(f.stderr).toEqual([]);
+  expect(f.fetcher).not.toHaveBeenCalled();
+});
+
+test("status --line returns silently without starting git when its supplied signal is already aborted", async () => {
+  const f = await commandFixture();
+  const controller = new AbortController();
+  controller.abort();
+  const createGitSession = vi.spyOn(gitModule, "createGitSession");
+  expect(await run(["status", "--line"], { ...f.io, statusLineSignal: controller.signal })).toBe(0);
+  expect(createGitSession).not.toHaveBeenCalled();
+  expect(f.stdout).toEqual([]);
+  expect(f.stderr).toEqual([]);
+  expect(f.fetcher).not.toHaveBeenCalled();
+});
+
 test("status --line keeps checking the branch after key filtering", async () => {
   const f = await lineFixture();
   f.setResponse(async () =>

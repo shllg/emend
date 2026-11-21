@@ -44,19 +44,20 @@ export function statusLineText(item: AgentReviewItem): string | null {
 export async function statusLineCommand(
   stateDir: string,
   io: Io,
-  options: { deadlineMs?: number } = {},
+  options: { signal?: AbortSignal; deadlineMs?: number } = {},
 ): Promise<void> {
-  const controller = new AbortController();
-  const { signal } = controller;
+  const controller = options.signal ? undefined : new AbortController();
+  const signal = options.signal ?? controller?.signal;
+  if (!signal || signal.aborted) return;
   const deadlineMs = options.deadlineMs ?? 2000;
-  const deadline = performance.now() + deadlineMs;
+  const deadline = controller ? performance.now() + deadlineMs : Infinity;
   const aborted = Promise.withResolvers<void>();
   const onAbort = () => aborted.resolve();
   signal.addEventListener("abort", onAbort, { once: true });
-  const timer = setTimeout(() => controller.abort(), deadlineMs);
+  const timer = controller ? setTimeout(() => controller.abort(), deadlineMs) : undefined;
   const remaining = () => {
     const ms = deadline - performance.now();
-    if (ms <= 0) controller.abort();
+    if (ms <= 0) controller?.abort();
     signal.throwIfAborted();
     return ms;
   };

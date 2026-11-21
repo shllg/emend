@@ -1,4 +1,10 @@
 const statusLine = process.argv.length === 4 && process.argv[2] === "status" && process.argv[3] === "--line";
+const statusLineController = statusLine ? new AbortController() : undefined;
+if (statusLineController)
+  setTimeout(() => {
+    statusLineController.abort();
+    process.exit(0);
+  }, 2000).unref();
 let refusal: string | undefined;
 if (
   statusLine ||
@@ -32,6 +38,7 @@ if (refusal) {
   const serving = process.argv[2] === "serve";
   if (serving) process.stderr.on("error", () => {});
   process.exitCode = await run(process.argv.slice(2), {
+    statusLineSignal: statusLineController?.signal,
     isTTY: process.stdout.isTTY === true,
     stdout: (s) => {
       try {

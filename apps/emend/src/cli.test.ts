@@ -24,7 +24,7 @@ async function entryFixture() {
     LC_ALL: "C",
     EMEND_HOME: state,
   };
-  const invoke = async (cwd: string, args: string[], nodeArgs: string[] = []) => {
+  const invoke = async (cwd: string, args: string[], nodeArgs: string[] = [], timeout?: number) => {
     const stdoutPath = join(directory, "stdout");
     const stderrPath = join(directory, "stderr");
     const stdout = await open(stdoutPath, "w", 0o600);
@@ -35,6 +35,7 @@ async function entryFixture() {
           cwd,
           env,
           stdio: ["ignore", stdout.fd, stderr.fd],
+          timeout,
         });
         child.once("error", reject);
         child.once("close", resolve);
@@ -114,6 +115,40 @@ test.each([false, true])(
     expect(await readdir(f.state)).toEqual([]);
   },
 );
+
+test("the real status line exits silently before a stalled runtime pre-check finishes", async () => {
+  const f = await entryFixture();
+  const repo = join(f.directory, "repo");
+  await mkdir(join(repo, ".git"), { recursive: true });
+  await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/synthetic-feature\n");
+  const guard = join(f.directory, "stalled-precheck.mjs");
+  const marker = join(f.directory, "precheck-stalled");
+  await writeFile(
+    guard,
+    `import fs from "node:fs/promises";
+import { writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+const paths = ${JSON.stringify([repo, join(repo, ".git")])};
+for (const name of ["lstat", "realpath"]) {
+  const original = fs[name];
+  fs[name] = async (...args) => {
+    if (paths.includes(args[0])) {
+      writeFileSync(${JSON.stringify(marker)}, "stalled");
+      await new Promise((resolve) => setTimeout(resolve, 6000));
+    }
+    return original(...args);
+  };
+}
+syncBuiltinESMExports();\n`,
+  );
+  const started = performance.now();
+  const result = await f.invoke(repo, ["status", "--line"], ["--import", guard], 4500);
+  const elapsed = performance.now() - started;
+  expect(result).toEqual({ code: 0, stdout: "", stderr: "" });
+  expect(await readFile(marker, "utf8")).toBe("stalled");
+  expect(elapsed).toBeLessThan(4000);
+  expect(await readdir(f.state)).toEqual([]);
+}, 7000);
 
 test("the real status line exits silently when stdout is already closed", async () => {
   const f = await entryFixture();

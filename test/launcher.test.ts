@@ -91,21 +91,22 @@ test("the executable POSIX launcher follows two symlinks, including a relative t
   expect(result.stderr).toBe("");
 });
 
-test("the launcher gives a single actionable error when the build is missing", async () => {
-  const result = await command(copyLauncher(), ["--version"]);
-  expect(result.status).toBe(1);
+test.each([false, true])("the launcher handles a missing build (status line %s)", async (statusLine) => {
+  const result = await command(copyLauncher(), statusLine ? ["status", "--line"] : ["status"]);
+  expect(result.status).toBe(statusLine ? 0 : 1);
   expect(result.stdout).toBe("");
-  expect(result.stderr).toBe("emend: not built; run pnpm build in the emend checkout\n");
+  expect(result.stderr).toBe(statusLine ? "" : "emend: not built; run pnpm build in the emend checkout\n");
 });
 
-test("the launcher stops after 40 symlink hops", async () => {
+test.each([false, true])("the launcher stops after 40 symlink hops (status line %s)", async (statusLine) => {
   const first = join(root, "loop first");
   const second = join(root, "loop second");
   symlinkSync(second, first);
   symlinkSync(first, second);
   const text = readFileSync(join(repo, "apps/emend/bin/emend"), "utf8");
-  const result = await command("/bin/sh", ["-c", text, first]);
-  expect(result.status).toBe(1);
+  const args = statusLine ? ["status", "--line"] : ["status"];
+  const result = await command("/bin/sh", ["-c", text, first, ...args]);
+  expect(result.status).toBe(statusLine ? 0 : 1);
   expect(result.stdout).toBe("");
-  expect(result.stderr).toBe("emend: too many levels of symlinks\n");
+  expect(result.stderr).toBe(statusLine ? "" : "emend: too many levels of symlinks\n");
 });

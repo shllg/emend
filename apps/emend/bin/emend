@@ -1,5 +1,9 @@
 #!/bin/sh
 set -eu
+if [ "$#" -eq 2 ] && [ "$1" = status ] && [ "$2" = --line ]; then
+  exec 2>/dev/null
+  trap 'exit 0' EXIT
+fi
 
 script="$0"
 hops=0
