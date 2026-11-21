@@ -145,7 +145,7 @@ If no related docs are found, write "No design doc is cited." in the writeup's `
 
 Read [the writing reference](references/writing.md) before you write the writeup. It holds the
 writing rules: sentences, titles and paragraphs, the TL;DR, Why and Example, state diagrams,
-risk and proof, the glossary, pictures and tables.
+change graphs, risk and proof, the glossary, pictures and tables.
 
 Author Markdown in `writeup`, except the plain-text `area`.
 
@@ -165,6 +165,8 @@ Write the opening fields below. The app groups them for the reviewer.
 - `notChecked`: only real gaps, each with what could go wrong. Never empty.
 - `overview`: two bullets in plain language. **Goal** is the end state, starting "After this,".
   **Change** is what the reviewer sees now. They show side by side.
+  A change that crosses two or more parts, or adds a flow, adds a change graph with a legend after
+  them, as the writing reference says.
 - `outOfScope`: what the change leaves out on purpose, as a short list.
   It shows quieter, right under the overview.
 - `whereToLook`: two labelled lines. **Biggest risk** gives one concrete case of what goes wrong,

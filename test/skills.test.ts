@@ -476,6 +476,27 @@ test("the writing reference asks for a state diagram in a topic that changes a s
   );
 });
 
+test("the writing reference draws change graphs with a legend and names the diagram types that render", () => {
+  const section = (read(writingReference).split("## Change graphs\n")[1]?.split("\n## ")[0] ?? "").replace(/\s+/g, " ");
+  for (const rule of [
+    "Draw a change graph when a change crosses two or more parts, or adds a flow.",
+    "Mark parts with `:::added`, `:::changed` or `:::removed`.",
+    "A removed part is dashed as well as red, so it reads without colour.",
+    "Every change graph carries a legend inside the picture",
+    "subgraph Legend",
+    "the changed files and their direct neighbours",
+    "a dependency tool the project already has, on your machine.",
+    "Never install a tool or fetch one",
+    "`flowchart`, `stateDiagram-v2`, `sequenceDiagram`, `erDiagram`, `xychart`, `block` and `timeline`.",
+    "`C4Context` draws, but it keeps its own colours",
+  ]) {
+    expect(section).toContain(rule);
+  }
+  const skill = read("plugin/skills/emend-review/SKILL.md").replace(/\s+/g, " ");
+  expect(skill).toContain("adds a change graph with a legend after them, as the writing reference says.");
+  expect(skill).toContain("state diagrams, change graphs,");
+});
+
 test.each([...names, "emend-theme"])("%s has only safe frontmatter and registered commands", async (name) => {
   const text = read(name === "emend-theme" ? THEME_SKILL_PATH : `plugin/skills/${name}/SKILL.md`);
   expect(safeSkillFrontmatter(text, name)).toBe(true);

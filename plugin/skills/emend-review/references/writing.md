@@ -117,6 +117,56 @@ A bug path from a checked chart, as one item:
 - `ChargedOnce`: an order is charged at most once. Path: Checkout → Charging → Timed out → Charging.
 ```
 
+## Change graphs
+
+This section applies to a review writeup. A document that explains a change follows it loosely.
+Draw a change graph when a change crosses two or more parts, or adds a flow.
+A part is a package, a service, a module or a group of files the reviewer would name.
+
+- Put a Mermaid `flowchart LR` in a `mermaid` code fence in `overview`, after its two bullets.
+  A graph for one topic goes in that topic's `why`, right after the **Fix:** paragraph.
+- Give each part one node, named in the reviewer's words.
+- Mark parts with `:::added`, `:::changed` or `:::removed`.
+  Leave parts the change only reaches unmarked.
+- Draw a removed arrow as `-.->|removed|`.
+- Leave out `classDef` lines for these classes, so emend's light and dark colours apply.
+  A removed part is dashed as well as red, so it reads without colour.
+- Every change graph carries a legend inside the picture: a `Legend` subgraph with one node per
+  class the graph uses, joined by `~~~`.
+- Keep a graph to about 20 arrows. For a bigger change, merge parts into broader ones.
+
+```mermaid
+flowchart LR
+  CLI[Command line] --> Server[Local server]
+  Server --> Cache[Search cache]:::added
+  Server --> Store[Review store]:::changed
+  Server -.->|removed| Poller[Poller]:::removed
+  subgraph Legend
+    direction LR
+    A1[Added]:::added ~~~ C1[Changed]:::changed ~~~ R1[Removed]:::removed
+  end
+```
+
+### Dependency graphs
+
+When the reviewer must judge what a change reaches, add a dependency graph after the change graph.
+Limit it to the changed files and their direct neighbours: the files they import and the files that import them.
+Print it as Mermaid with a dependency tool the project already has, on your machine.
+For example, dependency-cruiser prints a file and its direct neighbours with `--focus` and `--output-type mermaid`.
+Never install a tool or fetch one, for example with `npx`, for this.
+Without such a tool, draw the graph by hand from the changed files' imports, and write under it that it was drawn by hand.
+Mark the changed files with the change classes and add the legend.
+Over about 20 arrows, group files by folder.
+
+### Diagram types
+
+emend draws these Mermaid types in light and dark mode: `flowchart`, `stateDiagram-v2`,
+`sequenceDiagram`, `erDiagram`, `xychart`, `block` and `timeline`.
+The `xychart-beta` and `block-beta` forms draw too.
+`C4Context` draws, but it keeps its own colours, and its arrow labels are faint in dark mode.
+Draw a flowchart instead.
+Other types are not checked, so use one of these.
+
 ## Risk and proof
 
 This section applies to a review writeup. The writeup is a decision brief: the reviewer decides
