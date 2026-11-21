@@ -9,6 +9,24 @@ export const HIGHLIGHT_RENDER_BYTES = 65536;
 
 export type HighlightBudget = { highlightedBytes: number };
 
+export function highlightLanguage(classes: readonly unknown[], loaded: ReadonlySet<string>): string | undefined {
+  const languageClass = classes.find((value) => typeof value === "string" && value.startsWith("language-"));
+  if (typeof languageClass !== "string") return undefined;
+  const language = languageClass.slice(9);
+  return loaded.has(language) || isSpecialLang(language) ? language : undefined;
+}
+
+export function spendHighlightBudget(budget: HighlightBudget, bytes: number): boolean {
+  if (
+    bytes > HIGHLIGHT_FENCE_BYTES ||
+    budget.highlightedBytes + bytes > HIGHLIGHT_RENDER_BYTES ||
+    budget.highlightedBytes >= HIGHLIGHT_RENDER_BYTES
+  )
+    return false;
+  budget.highlightedBytes += bytes;
+  return true;
+}
+
 export function limitHighlighting(languages: string[]): Transformer<HtmlRoot> {
   const loaded = new Set(languages);
   const encoder = new TextEncoder();
@@ -21,22 +39,15 @@ export function limitHighlighting(languages: string[]): Transformer<HtmlRoot> {
       if (code?.type !== "element" || code.tagName !== "code") return;
       const classes = code.properties.className;
       if (!Array.isArray(classes)) return;
-      const languageClass = classes.find((value) => typeof value === "string" && value.startsWith("language-"));
-      if (typeof languageClass !== "string") return;
-      const language = languageClass.slice(9);
-      if (!loaded.has(language) && !isSpecialLang(language)) return;
+      if (highlightLanguage(classes, loaded) === undefined) return;
       const bytes = encoder.encode(hastText(code)).byteLength;
-      if (
-        bytes > HIGHLIGHT_FENCE_BYTES ||
-        budget.highlightedBytes + bytes > HIGHLIGHT_RENDER_BYTES ||
-        budget.highlightedBytes >= HIGHLIGHT_RENDER_BYTES
-      ) {
+      if (!spendHighlightBudget(budget, bytes)) {
         // Without a language Shiki leaves this code untouched. Text and therefore IDs are preserved.
         code.properties.className = classes.filter(
           (value) => typeof value !== "string" || !value.startsWith("language-"),
         );
         if (code.properties.className.length === 0) delete code.properties.className;
-      } else budget.highlightedBytes += bytes;
+      }
     });
   };
 }

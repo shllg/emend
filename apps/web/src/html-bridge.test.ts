@@ -5,6 +5,7 @@ import { ThemeColor } from "@emend/contract";
 import { type Element, Window } from "happy-dom";
 import { expect, test, vi } from "vitest";
 import { docText, placeHtmlSpan } from "../../../packages/core/src/place/html.ts";
+import { highlightHtmlCode } from "../../../packages/core/src/render/html-code.ts";
 
 const corpus: { name: string; old: string; new: string }[] = JSON.parse(
   readFileSync(new URL("../../../packages/core/src/place/corpus/html.json", import.meta.url), "utf8"),
@@ -817,6 +818,33 @@ test("selection normalizes across nodes, skips omitted subtrees, and supplies 32
     await b.window.happyDOM.close();
   }
 });
+test("selection and highlights span coloured tokens without changing the anchor text", async () => {
+  const text = 'const seed: string = "fern"; const count: number = 42;';
+  const originalHtml = `<body><p>Before</p><pre><code class="language-ts">${text}</code></pre><p>After</p></body>`;
+  const b = bridge(await highlightHtmlCode(originalHtml));
+  try {
+    const tokens = [...b.window.document.querySelectorAll("code > span")];
+    const start = tokens.find((token) => token.textContent === "const")?.firstChild;
+    const end = tokens.find((token) => token.textContent.trim() === "42")?.firstChild;
+    if (!start || !end) throw new Error("Missing token text");
+    const range = b.window.document.createRange();
+    range.setStart(start, 1);
+    range.setEnd(end, (end.textContent ?? "").indexOf("42") + 1);
+    const quote = text.slice(1, text.indexOf("42") + 1);
+    const anchor = b.select(range);
+    expect(anchor).toMatchObject({ type: "emend:anchor", quote });
+    expect(placeHtmlSpan(docText(originalHtml), { kind: "html-span", path: "doc.html", ...anchor })).toMatchObject({
+      status: "placed",
+    });
+    b.message({ type: "emend:highlight", anchors: [{ threadId: "one", ...anchor }] });
+    expect(b.highlights.size).toBe(1);
+    expect([...b.highlights.values()][0].range.toString()).toBe(quote);
+  } finally {
+    vi.restoreAllMocks();
+    await b.window.happyDOM.close();
+  }
+});
+
 test("highlight registry methods are called through their prototype", async () => {
   const b = bridge("<body><p>seed</p></body>");
   const shadow = vi.fn(() => {

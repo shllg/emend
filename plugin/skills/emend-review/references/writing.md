@@ -276,6 +276,7 @@ It follows emend's light or dark mode.
   Contents lists the `h2` and `h3` headings.
 - Text: `p`, `ul`, `ol`, `a`, `strong`, `em`, `code`, `pre` with `code`, `blockquote`, `table`,
   `hr`, `kbd` and `dl`.
+- Code: `<pre><code class="language-ts">` shows the code in the same colours as a Markdown fence.
 - TL;DR: `<section class="tldr">` with the "TL;DR" heading first. It shows as the writeup's card.
 - Key facts: `<dl class="facts">`, with one `div` holding a `dt` and a `dd` per fact.
 - Figure: `figure` with an `img` and a `figcaption`.

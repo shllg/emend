@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 import * as core from "../index.ts";
+import { highlightLanguage, spendHighlightBudget } from "./highlight.ts";
 import { sharedHighlighter } from "./highlighter.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { renderWriteup } from "./writeup.ts";
@@ -15,6 +16,30 @@ test("exports the exact highlighting limits", () => {
     HIGHLIGHT_FENCE_BYTES: 16384,
     HIGHLIGHT_RENDER_BYTES: 65536,
   });
+});
+
+test("language selection uses the first language class and accepts special languages", () => {
+  const loaded = new Set(["ts"]);
+  expect(highlightLanguage([null, 1, "note", "language-ts"], loaded)).toBe("ts");
+  expect(highlightLanguage(["language-unknown", "language-ts"], loaded)).toBeUndefined();
+  expect(highlightLanguage(["language-text"], loaded)).toBe("text");
+  expect(highlightLanguage(["language-mermaid"], loaded)).toBeUndefined();
+});
+
+test("highlight budgets accept exact limits and spend nothing on rejected blocks", () => {
+  const budget = { highlightedBytes: 0 };
+  expect(spendHighlightBudget(budget, core.HIGHLIGHT_FENCE_BYTES + 1)).toBe(false);
+  expect(budget.highlightedBytes).toBe(0);
+  expect(spendHighlightBudget(budget, core.HIGHLIGHT_FENCE_BYTES)).toBe(true);
+  expect(budget.highlightedBytes).toBe(core.HIGHLIGHT_FENCE_BYTES);
+  budget.highlightedBytes = core.HIGHLIGHT_RENDER_BYTES - 1;
+  expect(spendHighlightBudget(budget, 2)).toBe(false);
+  expect(budget.highlightedBytes).toBe(core.HIGHLIGHT_RENDER_BYTES - 1);
+  expect(spendHighlightBudget(budget, 1)).toBe(true);
+  expect(budget.highlightedBytes).toBe(core.HIGHLIGHT_RENDER_BYTES);
+  expect(spendHighlightBudget(budget, 0)).toBe(false);
+  expect(spendHighlightBudget(budget, 1)).toBe(false);
+  expect(budget.highlightedBytes).toBe(core.HIGHLIGHT_RENDER_BYTES);
 });
 
 test("a 20000-character single-line TypeScript fence renders", async () => {

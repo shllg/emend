@@ -133,6 +133,22 @@ test.each(["custom", null] as const)("%s look preserves the previous response by
   }
 });
 
+test.each(["emend", "custom", null] as const)("%s look serves code with the existing CSP", async (look) => {
+  const page = '<body><pre><code class="language-ts">const seed: string = "fern";</code></pre></body>';
+  const sha = await f.deps.blobs.put(f.ownerId, Buffer.from(page), "text/html");
+  await setDocLook(look, sha);
+  const response = await request(docUrl);
+  expect(response.status).toBe(200);
+  headers(response);
+  expect(response.headers.get("Content-Security-Policy")).toBe(docCsp);
+  const body = await response.text();
+  if (look === "emend") expect(body).toContain('<span style="color:var(--syn-keyword)">const</span>');
+  else {
+    expect(body).not.toContain("<span");
+    expect(body).toBe(injectBridge(page));
+  }
+});
+
 test.each([
   { query: "?theme=dark", theme: "dark" },
   { query: "?theme=light", theme: "light" },

@@ -1,5 +1,5 @@
 import { FilePath } from "@emend/contract";
-import { SAMPLE_HTML, SAMPLE_HTML_PATH, stripHtmlLook } from "@emend/core";
+import { highlightHtmlCode, SAMPLE_HTML, SAMPLE_HTML_PATH, stripHtmlLook } from "@emend/core";
 import { and, eq } from "drizzle-orm";
 import type { Context, Hono } from "hono";
 import { docAssets, files, revisions } from "../../db/schema.ts";
@@ -21,7 +21,7 @@ async function htmlDocResponse(
   if (look === "emend") {
     const query = c.req.query("theme");
     const theme = colorScheme === "light" ? "light" : query === "dark" || query === "light" ? query : undefined;
-    html = injectLook(stripHtmlLook(html), await pubStylesheet(deps.config.webRoot), theme);
+    html = injectLook(await highlightHtmlCode(stripHtmlLook(html)), await pubStylesheet(deps.config.webRoot), theme);
   }
   c.header("Content-Type", "text/html; charset=utf-8");
   c.header("Content-Security-Policy", HTML_DOC_CSP);
