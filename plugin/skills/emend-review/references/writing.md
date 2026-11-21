@@ -123,8 +123,8 @@ This section applies to a review writeup. A document that explains a change foll
 Draw a change graph when a change crosses two or more parts, or adds a flow.
 A part is a package, a service, a module or a group of files the reviewer would name.
 
-- Put a Mermaid `flowchart LR` in a `mermaid` code fence in `overview`, after its two bullets.
-  A graph for one topic goes in that topic's `why`, right after the **Fix:** paragraph.
+- Put a Mermaid `flowchart LR` in a `mermaid` code fence in a topic's `why`, right after the **Fix:** paragraph. Use the topic the graph explains, or the first topic for the whole change.
+- Keep the graph out of `overview`: a third block there stops Goal and Change showing side by side.
 - Give each part one node, named in the reviewer's words.
 - Mark parts with `:::added`, `:::changed` or `:::removed`.
   Leave parts the change only reaches unmarked.
@@ -152,9 +152,13 @@ flowchart LR
 When the reviewer must judge what a change reaches, add a dependency graph after the change graph.
 Limit it to the changed files and their direct neighbours: the files they import and the files that import them.
 Print it as Mermaid with a dependency tool the project already has, on your machine.
-For example, dependency-cruiser prints a file and its direct neighbours with `--focus` and `--output-type mermaid`.
+Run such a tool only on your own work, in a project you already build and test.
+Run it without the project's config, and never through a package script.
+For example, dependency-cruiser prints a file and its direct neighbours with `--no-config`, `--focus` and `--output-type mermaid`.
 Never install a tool or fetch one, for example with `npx`, for this.
-Without such a tool, draw the graph by hand from the changed files' imports, and write under it that it was drawn by hand.
+For code you did not write, or without such a tool, draw the graph by hand.
+Read the changed files' imports, and search the project for the files that import them.
+Write under a hand-drawn graph that it was drawn by hand.
 Mark the changed files with the change classes and add the legend.
 Over about 20 arrows, group files by folder.
 

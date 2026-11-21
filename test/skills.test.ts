@@ -480,20 +480,29 @@ test("the writing reference draws change graphs with a legend and names the diag
   const section = (read(writingReference).split("## Change graphs\n")[1]?.split("\n## ")[0] ?? "").replace(/\s+/g, " ");
   for (const rule of [
     "Draw a change graph when a change crosses two or more parts, or adds a flow.",
+    "in a topic's `why`, right after the **Fix:** paragraph.",
+    "Keep the graph out of `overview`",
     "Mark parts with `:::added`, `:::changed` or `:::removed`.",
     "A removed part is dashed as well as red, so it reads without colour.",
     "Every change graph carries a legend inside the picture",
     "subgraph Legend",
     "the changed files and their direct neighbours",
     "a dependency tool the project already has, on your machine.",
+    "Run such a tool only on your own work, in a project you already build and test.",
+    "Run it without the project's config, and never through a package script.",
+    "`--no-config`",
     "Never install a tool or fetch one",
+    "For code you did not write, or without such a tool, draw the graph by hand.",
+    "search the project for the files that import them.",
     "`flowchart`, `stateDiagram-v2`, `sequenceDiagram`, `erDiagram`, `xychart`, `block` and `timeline`.",
     "`C4Context` draws, but it keeps its own colours",
   ]) {
     expect(section).toContain(rule);
   }
+  expect(section).not.toContain("in `overview`, after its two bullets");
   const skill = read("plugin/skills/emend-review/SKILL.md").replace(/\s+/g, " ");
-  expect(skill).toContain("adds a change graph with a legend after them, as the writing reference says.");
+  expect(skill).toContain("shows a change graph with a legend in a topic's `why`, as the writing reference says.");
+  expect(skill).not.toContain("adds a change graph with a legend after them");
   expect(skill).toContain("state diagrams, change graphs,");
 });
 
