@@ -8,6 +8,7 @@ import { ERROR_STATUS, type ErrorCode } from "@emend/contract";
 import { getRequestListener } from "@hono/node-server";
 import { writeSecretFile } from "../state/files.ts";
 import { type AppDeps, createApp } from "./app.ts";
+import { closeCodeColourRenderer } from "./content/code-colours.ts";
 import { ReviewEvents } from "./events.ts";
 import { errorBody } from "./http/errors.ts";
 import { headersForPath } from "./http/headers.ts";
@@ -135,6 +136,7 @@ export async function startServer(
             await stopServer(server);
           } finally {
             await closeCommentRenderer();
+            await closeCodeColourRenderer();
             await state.db.close();
             await removeDiscovery(discovery, record);
           }

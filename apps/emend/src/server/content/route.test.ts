@@ -4,14 +4,16 @@ import { type FileHandle, mkdir, open, rename, symlink, truncate, utimes, writeF
 import { type ClientRequest, createServer, request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { LIMITS, PublishResponse, RevisionView } from "@emend/contract";
-import { applyHtmlLook, htmlLook, parseDocHtml, stripHtmlLook } from "@emend/core";
+import { applyHtmlLook, docText, htmlLook, parseDocHtml, stripHtmlLook } from "@emend/core";
 import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { devices, files, reviews, revisions } from "../../db/schema.ts";
 import { HTML_DOC_CSP } from "../http/headers.ts";
 import { mailboxFixture } from "../mailbox/test-support.ts";
+import { executeWork } from "../publish/work.ts";
 import { nodeRequestHandler } from "../serve.ts";
 import { BRIDGE_SOURCE } from "./bridge.ts";
+import { clearCodeColourCache } from "./code-colours.ts";
 import { injectBridge, injectLook } from "./inject.ts";
 import { FALLBACK_PUB_CSS } from "./look.ts";
 
@@ -30,6 +32,7 @@ const source =
 const bigCss = "/* synthetic */\n".padEnd(200 * 1024, " ");
 const bigSha = createHash("sha256").update(bigCss).digest("hex");
 beforeEach(async () => {
+  clearCodeColourCache();
   f = await mailboxFixture();
   const entries = [
     ["docs/a #é.html", "doc", source],
@@ -91,6 +94,7 @@ beforeEach(async () => {
   secondUrl = second.contentUrl;
 });
 afterEach(async () => {
+  clearCodeColourCache();
   vi.restoreAllMocks();
   await f.cleanup();
 });
@@ -131,6 +135,72 @@ test.each(["custom", null] as const)("%s look preserves the previous response by
     headers(response);
     expect(await response.text()).toBe(injectBridge(source));
   }
+});
+
+test.each(["emend", "custom", null] as const)("%s look serves code with the existing CSP", async (look) => {
+  const execute = vi.fn(executeWork);
+  f.deps.publishExecutor = execute;
+  const page = '<body><pre><code class="language-ts">const seed: string = "fern";</code></pre></body>';
+  const sha = await f.deps.blobs.put(f.ownerId, Buffer.from(page), "text/html");
+  await setDocLook(look, sha);
+  const response = await request(docUrl);
+  expect(response.status).toBe(200);
+  headers(response);
+  expect(response.headers.get("Content-Security-Policy")).toBe(docCsp);
+  const body = await response.text();
+  if (look === "emend") {
+    expect(body).toContain('<span style="color:var(--syn-keyword)">const</span>');
+    expect(execute).toHaveBeenCalledExactlyOnceWith({
+      kind: "code-colours",
+      page,
+    });
+  } else {
+    expect(body).not.toContain("<span");
+    expect(body).toBe(injectBridge(page));
+    expect(execute).not.toHaveBeenCalled();
+  }
+});
+
+test("an emend-look doc with two stored BOMs keeps code offsets after decoding", async () => {
+  const stored = '\uFEFF\uFEFF<pre><code class="language-ts">const seed = 1;</code></pre>';
+  const sha = await f.deps.blobs.put(f.ownerId, Buffer.from(stored, "utf8"), "text/html");
+  await setDocLook("emend", sha);
+  const execute = vi.fn(executeWork);
+  f.deps.publishExecutor = execute;
+  const response = await request(docUrl);
+  expect(response.status).toBe(200);
+  headers(response);
+  const body = await response.text();
+  const codeStart = '<code class="language-ts">';
+  expect(body).toContain(`${codeStart}<span style=`);
+  expect(execute).toHaveBeenCalledExactlyOnceWith({ kind: "code-colours", page: stored.slice(1) });
+  const result = await execute.mock.results[0]?.value;
+  if (result?.kind !== "code-colours") throw new Error("Missing code colours");
+  expect(result.colours).toHaveLength(1);
+  expect(body.slice(body.indexOf(codeStart) + codeStart.length, body.lastIndexOf("<script>"))).toBe(
+    `${result.colours[0]?.markup}</code></pre>`,
+  );
+  expect(docText(body)).toBe(docText(stored.slice(1)));
+});
+
+test("two GETs of one emend-look doc compute colours once across themes", async () => {
+  const page = '<body><pre><code class="language-ts">const seed = 1;</code></pre></body>';
+  const sha = await f.deps.blobs.put(f.ownerId, Buffer.from(page), "text/html");
+  await setDocLook("emend", sha);
+  const execute = vi.fn(executeWork);
+  f.deps.publishExecutor = execute;
+  for (const theme of ["light", "dark"]) {
+    const response = await request(`${docUrl}?theme=${theme}`);
+    expect(response.status).toBe(200);
+    headers(response);
+    const body = await response.text();
+    expect(body).toContain(`<html data-theme="${theme}">`);
+    expect(body).toContain('<span style="color:var(--syn-keyword)">const</span>');
+  }
+  expect(execute).toHaveBeenCalledExactlyOnceWith({
+    kind: "code-colours",
+    page,
+  });
 });
 
 test.each([

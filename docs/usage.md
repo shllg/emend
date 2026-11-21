@@ -328,6 +328,10 @@ dark mode, also on custom pages. The page's own scripts never run.
 `<pre><code class="language-mermaid">` works too.
 Escape `<` as `&lt;` and `&` as `&amp;` in the source, because emend reads the `pre`'s text.
 
+In emend's look, `<pre><code class="language-ts">` shows its code in the same colours as a
+Markdown doc, in light and dark mode. A block without a language, or with one emend does not colour,
+stays plain.
+
 Diagrams colour the classes `blue`, `orange`, `purple`, `yellow`, `teal`, `tan` and `pink` as group
 fills in light and dark. They mark states with `breaks` (red), `mayBreak` (orange), `bugPath` (a blue
 border) and `repeats` (a dashed purple border) in both modes. These are the names the statechart

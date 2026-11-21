@@ -21,7 +21,9 @@ import {
   docText,
   downloadDiffHunks,
   type FileSides,
+  type HtmlCodeColour,
   type HtmlLook,
+  htmlCodeColours,
   htmlHeadingsFromTree,
   htmlLookFromTree,
   htmlPartHashes,
@@ -96,6 +98,7 @@ export type Work =
     }
   | { kind: "resection"; path: string; bytes: ArrayBuffer }
   | { kind: "comment-md"; bodies: string[]; repoUrl?: string }
+  | { kind: "code-colours"; page: string }
   | { kind: "changed"; previous: { format: "writeup" | "doc" | "ids"; bytes: ArrayBuffer }[]; next: ArrayBuffer[] }
   | {
       kind: "place";
@@ -139,6 +142,7 @@ export type WorkResult =
   | ({ kind: "doc" | "source" } & RenderedBytes)
   | { kind: "changed"; bytes: ArrayBuffer }
   | { kind: "comment-md"; html: (string | null)[] }
+  | { kind: "code-colours"; colours: HtmlCodeColour[] }
   | { kind: "place"; placements: { id: string; placement: Placement }[] };
 export type RenderedBytes = {
   bytes: ArrayBuffer;
@@ -301,6 +305,7 @@ export const executeWork: Executor = async (work) => {
       selfDependent: effects.docPathUsed,
     };
   }
+  if (work.kind === "code-colours") return { kind: "code-colours", colours: await htmlCodeColours(work.page) };
   if (work.kind === "comment-md") {
     // One failing comment gives null for that comment alone.
     const html: (string | null)[] = [];

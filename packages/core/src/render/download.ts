@@ -16,7 +16,7 @@ import rehypeStringify from "rehype-stringify";
 import { unified } from "unified";
 import { type HtmlLookTheme, htmlLookThemeVars, stripHtmlLook } from "../html-look-file.ts";
 import { isLockfile } from "../lockfiles.ts";
-import { parseDocHtml } from "../place/html.ts";
+import { HTML_ELEMENT_LIMIT, parseDocHtml } from "../place/html.ts";
 import type { DownloadLook } from "../theme/download.ts";
 import { resolveTheme } from "../theme/theme.ts";
 import type { HtmlElement as Element, HtmlRoot as Root } from "./blocks.ts";
@@ -92,7 +92,6 @@ const STYLESHEET_LIMIT = 64;
 const CSS_WORK_BYTES = 64 * 1024 * 1024;
 const CSS_PAUSE_BYTES = 1024 * 1024;
 const REFERENCE_PAUSE_COUNT = 1000;
-const HTML_ELEMENT_LIMIT = 200_000;
 const BASE64_CHUNK_BYTES = 3 * 1024 * 1024;
 
 function syntaxStyles(base: ThemeBase): string {

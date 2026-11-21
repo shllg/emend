@@ -7,15 +7,21 @@ const omitted = new Set(["script", "style", "template", "noscript"]);
 
 // Bound parse5's actual open-element stack, including the document's html/head/body elements.
 export const HTML_NESTING_LIMIT = 512;
+export const HTML_ELEMENT_LIMIT = 200_000;
 class HtmlNestingLimitError extends Error {}
 
 /** Shared by placement and doc metadata. A failed or over-nested parse has no usable tree. */
-export function parseDocHtml(html: string, elementLimit = Infinity): DefaultTreeAdapterTypes.Document | null {
+export function parseDocHtml(
+  html: string,
+  elementLimit = Infinity,
+  sourceLocations = false,
+): DefaultTreeAdapterTypes.Document | null {
   try {
     let openElements = 0;
     let elements = 0;
     return parse(html, {
       scriptingEnabled: true,
+      sourceCodeLocationInfo: sourceLocations,
       treeAdapter: {
         ...defaultTreeAdapter,
         createElement(tagName, namespaceURI, attrs) {

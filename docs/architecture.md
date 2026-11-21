@@ -98,6 +98,9 @@ in its sandboxed Mermaid frame.
 The app relays scrubbed SVG text without inserting it into its DOM. The content frame shows each
 diagram as a data-URL image in a closed shadow root and keeps the original source nodes for
 comments. Custom pages use the same path. Downloads and `emend look` keep diagrams as source.
+For a page in emend's look, the content route colours `pre > code.language-*` blocks with the
+server's Shiki highlighter. It replaces only the text between the `code` tags with styled spans that
+hold the same text.
 
 ## Attached machines and the phone
 
