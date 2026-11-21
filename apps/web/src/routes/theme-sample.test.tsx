@@ -405,6 +405,11 @@ test.each([
   ["agent-approved", '<span className="dark:group-hover:text-(--agent-approved)/75" />'],
   ["agent-working", '<span className="[&:nth-child(2)]:shadow-(--agent-working)/50" />'],
   ["agent-approved", '<span className="sm:leading-(--agent-approved)" />'],
+  ["agent-working", '<span className="bg-(color:--agent-working)" />'],
+  ["agent-approved", '<span className="text-(color:--agent-approved)/50" />'],
+  ["agent-working", '<span className="hover:bg-(color:--agent-working)/50" />'],
+  ["agent-approved", '<span className="dark:group-hover:text-(color:--agent-approved)/75" />'],
+  ["agent-working", '<span className="[&:nth-child(2)]:shadow-(length:--agent-working)/50" />'],
   ["agent-approved", "color: var(--agent-approved)"],
   ["agent-working", "color: var(\n  --agent-working, red)"],
   ["agent-working", 'const token = "agent-working";'],
@@ -448,6 +453,7 @@ test.each([
 test("the guard requires an exact token or a mapped Tailwind utility", () => {
   const source = `
     <span className="bg-agent-working-extra not-bg-agent-working bg-unmapped bg-(--agent-working-extra)" />
+    <span className="hover:bg-(color:--agent-working-extra)/50" />
     color: var(--agent-working-extra);
     const token = "agent-working-extra";
     --agent-working: red;

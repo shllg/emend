@@ -149,7 +149,8 @@ requests while stopping return 202 without starting another shutdown. Capabiliti
 `GET /api/v1/sample` requires a credential with scope `read` and returns
 `SampleView = { revision: RevisionView, fileTexts: Record<UUID, { old: string, new: string }> }`.
 Only GET (and its HEAD equivalent) is supported. The fixed synthetic content is rendered lazily
-once per process. It is never stored, never enters the inbox, and has no mutation endpoints.
+and a successful render is cached for the life of the process; a failed render is retried on the
+next request. It is never stored, never enters the inbox, and has no mutation endpoints.
 The browser displays it read-only at `/settings/sample`, using the non-UUID review id `theme-sample`.
 
 `/content/sample/sample.html` serves the one synthetic HTML doc without reading cookies. It uses
