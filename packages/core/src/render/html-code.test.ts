@@ -1,9 +1,10 @@
+import { LIMITS } from "@emend/contract";
 import { type DefaultTreeAdapterTypes, defaultTreeAdapter } from "parse5";
 import { afterEach, expect, test, vi } from "vitest";
-import { docText, HTML_NESTING_LIMIT, nodeText, parseDocHtml } from "../place/html.ts";
+import { docText, HTML_ELEMENT_LIMIT, HTML_NESTING_LIMIT, nodeText, parseDocHtml } from "../place/html.ts";
 import { HIGHLIGHT_FENCE_BYTES, HIGHLIGHT_RENDER_BYTES } from "./highlight.ts";
 import * as highlighterModule from "./highlighter.ts";
-import { highlightHtmlCode } from "./html-code.ts";
+import { applyHtmlCodeColours, type HtmlCodeColour, highlightHtmlCode, htmlCodeColours } from "./html-code.ts";
 import { renderMarkdown } from "./markdown.ts";
 
 afterEach(() => vi.restoreAllMocks());
@@ -49,6 +50,10 @@ test.each([
   ["element child", block("const <b>seed</b> = 1;")],
   ["comment child", block("const seed = 1;<!-- note -->")],
   ["missing code end tag", '<pre><code class="language-ts">const seed = 1;</pre>'],
+  ["reconstructed unclosed code", '<pre><code class="language-ts">before</pre><p>middle</p><pre>after</code></pre>'],
+  ["misnested code", '<pre><b><code class="language-ts">xx</b>const y = 2;</code></pre>'],
+  ["ignored end tag", '<pre><code class="language-ts">a</span>b</code></pre>'],
+  ["merged body attributes", '<pre><code class="language-ts">a<body data-x="1">b</code></pre>'],
   ["template contents", `<template>${block("const seed = 1;")}</template>`],
   ["script contents", `<script>${block("const seed = 1;")}</script>`],
   ["style contents", `<style>${block("const seed = 1;")}</style>`],
@@ -61,14 +66,58 @@ test.each([
     `${"<div>".repeat(HTML_NESTING_LIMIT + 1)}${block("const seed = 1;")}${"</div>".repeat(HTML_NESTING_LIMIT + 1)}`,
   ],
 ])("leaves %s byte-for-byte unchanged", async (_name, input) => {
-  expect(await highlightHtmlCode(input)).toBe(input);
+  const output = await highlightHtmlCode(input);
+  expect(output).toBe(input);
+  expect(docText(output)).toBe(docText(input));
 });
 
-test("docs without a language marker skip highlighter loading", async () => {
+test.each(["<p>Plain synthetic doc</p>", "<!-- language-ts --><pre><code>const seed = 1;</code></pre>"])(
+  "docs without a candidate block skip highlighter loading: %s",
+  async (input) => {
+    const highlighter = vi.spyOn(highlighterModule, "sharedHighlighter");
+    expect(await highlightHtmlCode(input)).toBe(input);
+    expect(highlighter).not.toHaveBeenCalled();
+  },
+);
+
+test("character references in a language class still colour the block", async () => {
+  const input = '<pre><code class="language&#45;ts">const seed = 1;</code></pre>';
+  const output = await highlightHtmlCode(input);
+  expect(tokenStyles(output).length).toBeGreaterThan(0);
+  expect(output).toContain('class="language&#45;ts"');
+  expect(docText(output)).toBe(docText(input));
+});
+
+test.each(["x", "é"])("oversized docs stay unchanged with %s bytes", async (letter) => {
   const highlighter = vi.spyOn(highlighterModule, "sharedHighlighter");
-  const input = "<p>Plain synthetic doc</p>";
+  const bytes = new TextEncoder().encode(letter).byteLength;
+  const input = block("const seed = 1;") + letter.repeat(Math.floor(LIMITS.markdownDocBytes / bytes) + 1);
+  expect(new TextEncoder().encode(input).byteLength).toBeGreaterThan(LIMITS.markdownDocBytes);
+  if (bytes > 1) expect(input.length).toBeLessThan(LIMITS.markdownDocBytes);
   expect(await highlightHtmlCode(input)).toBe(input);
   expect(highlighter).not.toHaveBeenCalled();
+});
+
+test("docs exceeding the parsed element limit stay unchanged", async () => {
+  const highlighter = vi.spyOn(highlighterModule, "sharedHighlighter");
+  const formatting = Array.from({ length: 100 }, (_, index) => `<b data-i="${index}">`).join("");
+  const input = `${block("const seed = 1;")}<p>${formatting}x</p>${"<p>x</p>".repeat(Math.ceil(HTML_ELEMENT_LIMIT / 100))}`;
+  expect(new TextEncoder().encode(input).byteLength).toBeLessThan(LIMITS.markdownDocBytes);
+  expect(await highlightHtmlCode(input)).toBe(input);
+  expect(highlighter).not.toHaveBeenCalled();
+});
+
+test("applying colours skips overlapping and out-of-range splices", () => {
+  const colours: readonly HtmlCodeColour[] = Object.freeze([
+    { start: 7, end: 9, markup: "Y" },
+    { start: -1, end: 1, markup: "negative" },
+    { start: 1, end: 3, markup: "X" },
+    { start: 2, end: 5, markup: "overlap" },
+    { start: 3, end: 11, markup: "past end" },
+    { start: 4, end: 3, markup: "reversed" },
+    { start: 11, end: 12, markup: "outside" },
+  ]);
+  expect(applyHtmlCodeColours("abcdefghij", colours)).toBe("aXdefgYj");
 });
 
 test.each(["", "\uFEFF"])("only code contents change with BOM %j and CRLF", async (bom) => {
@@ -171,6 +220,11 @@ test("highlighter failures return the original doc", async () => {
   vi.spyOn(highlighterModule, "sharedHighlighter").mockRejectedValueOnce(new Error("Synthetic failure"));
   const input = block("const seed = 1;");
   expect(await highlightHtmlCode(input)).toBe(input);
+});
+
+test("colour computation failures resolve to no splices", async () => {
+  vi.spyOn(highlighterModule, "sharedHighlighter").mockRejectedValueOnce(new Error("Synthetic failure"));
+  await expect(htmlCodeColours(block("const seed = 1;"))).resolves.toEqual([]);
 });
 
 test("a changed token text leaves the block unchanged", async () => {

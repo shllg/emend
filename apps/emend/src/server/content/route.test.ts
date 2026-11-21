@@ -4,6 +4,7 @@ import { type FileHandle, mkdir, open, rename, symlink, truncate, utimes, writeF
 import { type ClientRequest, createServer, request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { LIMITS, PublishResponse, RevisionView } from "@emend/contract";
+import * as core from "@emend/core";
 import { applyHtmlLook, htmlLook, parseDocHtml, stripHtmlLook } from "@emend/core";
 import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -134,6 +135,7 @@ test.each(["custom", null] as const)("%s look preserves the previous response by
 });
 
 test.each(["emend", "custom", null] as const)("%s look serves code with the existing CSP", async (look) => {
+  const compute = vi.spyOn(core, "htmlCodeColours");
   const page = '<body><pre><code class="language-ts">const seed: string = "fern";</code></pre></body>';
   const sha = await f.deps.blobs.put(f.ownerId, Buffer.from(page), "text/html");
   await setDocLook(look, sha);
@@ -142,11 +144,30 @@ test.each(["emend", "custom", null] as const)("%s look serves code with the exis
   headers(response);
   expect(response.headers.get("Content-Security-Policy")).toBe(docCsp);
   const body = await response.text();
-  if (look === "emend") expect(body).toContain('<span style="color:var(--syn-keyword)">const</span>');
-  else {
+  if (look === "emend") {
+    expect(body).toContain('<span style="color:var(--syn-keyword)">const</span>');
+    expect(compute).toHaveBeenCalledExactlyOnceWith(page);
+  } else {
     expect(body).not.toContain("<span");
     expect(body).toBe(injectBridge(page));
+    expect(compute).not.toHaveBeenCalled();
   }
+});
+
+test("two GETs of one emend-look doc compute colours once across themes", async () => {
+  const page = '<body><pre><code class="language-ts">const seed = 1;</code></pre></body>';
+  const sha = await f.deps.blobs.put(f.ownerId, Buffer.from(page), "text/html");
+  await setDocLook("emend", sha);
+  const compute = vi.spyOn(core, "htmlCodeColours");
+  for (const theme of ["light", "dark"]) {
+    const response = await request(`${docUrl}?theme=${theme}`);
+    expect(response.status).toBe(200);
+    headers(response);
+    const body = await response.text();
+    expect(body).toContain(`<html data-theme="${theme}">`);
+    expect(body).toContain('<span style="color:var(--syn-keyword)">const</span>');
+  }
+  expect(compute).toHaveBeenCalledExactlyOnceWith(page);
 });
 
 test.each([

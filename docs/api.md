@@ -1122,14 +1122,17 @@ root has no `data-theme="light"`. An explicit light or dark root uses that `colo
 A doc in emend's look also gets code colours, the same as in a Markdown doc. The route colours an
 HTML-namespace `code` that is a direct child of an HTML-namespace `pre` without the `mermaid`
 class token. The `code`'s first class token that starts with `language-` must name a language the
-Markdown renderer colours. Its children must be text only, and both its tags must appear in the
-source. Markdown's limits apply per doc: at most 16,384 UTF-8 bytes per block and 65,536 in all,
-and lines over 400 characters stay plain. The route replaces only the bytes between that `code`'s
-start and end tags. It writes the same text, escaped, in `span` elements whose only attribute is the
-`style` Shiki gives that token in a Markdown doc. With emend's syntax theme the colours are the
-`--syn-*` variables, so they follow the mode and an applied theme. Every other byte stays as stored, and so does the text that quotes
-and placement read. Any other block stays plain. Custom and legacy looks, Downloads and `emend look`
-keep code plain.
+Markdown renderer colours. Both its tags must appear in the source, and the source between them
+must be its own text nodes and nothing else: no tag, end tag, comment or other markup.
+Markdown's limits apply per doc: at most 16,384 UTF-8 bytes per block and 65,536 in all, and lines
+over 400 characters stay plain. A doc over 1,048,576 UTF-8 bytes, or one that parses into more than
+200,000 elements, stays plain. The route replaces only the bytes between that `code`'s start and
+end tags. It writes the same text, escaped, in `span` elements whose only attribute is the `style`
+Shiki gives that token in a Markdown doc. With emend's syntax theme the colours are the `--syn-*`
+variables, so they follow the mode and an applied theme. Every other byte stays as stored, and so
+does the text that quotes and placement read. Any other block stays plain. The server keeps the
+colours of the 16 docs it served last, so reloading one of them does not compute them again. Custom
+and legacy looks, Downloads and `emend look` keep code plain.
 
 Asset and error responses under `/content/` send:
 

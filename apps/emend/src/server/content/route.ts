@@ -1,5 +1,5 @@
 import { FilePath } from "@emend/contract";
-import { highlightHtmlCode, SAMPLE_HTML, SAMPLE_HTML_PATH, stripHtmlLook } from "@emend/core";
+import { applyHtmlCodeColours, SAMPLE_HTML, SAMPLE_HTML_PATH, stripHtmlLook } from "@emend/core";
 import { and, eq } from "drizzle-orm";
 import type { Context, Hono } from "hono";
 import { docAssets, files, revisions } from "../../db/schema.ts";
@@ -7,6 +7,7 @@ import type { AppDeps } from "../app.ts";
 import type { AppEnv } from "../auth/principal.ts";
 import { ApiError } from "../http/errors.ts";
 import { HTML_DOC_CSP } from "../http/headers.ts";
+import { cachedCodeColours } from "./code-colours.ts";
 import { injectBridge, injectLook } from "./inject.ts";
 import { pubStylesheet } from "./look.ts";
 
@@ -14,6 +15,7 @@ import { pubStylesheet } from "./look.ts";
 async function htmlDocResponse(
   c: Context<AppEnv>,
   deps: AppDeps,
+  key: string,
   html: string,
   look: string | null,
   colorScheme: string | null,
@@ -21,7 +23,12 @@ async function htmlDocResponse(
   if (look === "emend") {
     const query = c.req.query("theme");
     const theme = colorScheme === "light" ? "light" : query === "dark" || query === "light" ? query : undefined;
-    html = injectLook(await highlightHtmlCode(stripHtmlLook(html)), await pubStylesheet(deps.config.webRoot), theme);
+    const page = stripHtmlLook(html);
+    html = injectLook(
+      applyHtmlCodeColours(page, await cachedCodeColours(key, page)),
+      await pubStylesheet(deps.config.webRoot),
+      theme,
+    );
   }
   c.header("Content-Type", "text/html; charset=utf-8");
   c.header("Content-Security-Policy", HTML_DOC_CSP);
@@ -32,7 +39,7 @@ export function contentRoutes(app: Hono<AppEnv>, deps: AppDeps) {
   app.get("/content/:docKey/*", async (c) => {
     if (c.req.param("docKey") === "sample") {
       if (new URL(c.req.url).pathname !== `/content/sample/${SAMPLE_HTML_PATH}`) throw new ApiError("not_found");
-      return htmlDocResponse(c, deps, SAMPLE_HTML, "emend", null);
+      return htmlDocResponse(c, deps, "sample", SAMPLE_HTML, "emend", null);
     }
     // Parse the raw path once: encoded slashes must not create new path segments.
     const match = /^\/content\/([A-Za-z0-9_-]{43})([0-9a-f]{32})\/(.+)$/.exec(c.req.path);
@@ -82,6 +89,8 @@ export function contentRoutes(app: Hono<AppEnv>, deps: AppDeps) {
         const bytes = await deps.blobs.get(revision.ownerId, file.newBlob, q);
         if (!bytes) throw new ApiError("not_found");
         return {
+          ownerId: revision.ownerId,
+          sha: file.newBlob,
           bytes,
           mediaType: file.mediaType,
           look: file.look,
@@ -94,7 +103,14 @@ export function contentRoutes(app: Hono<AppEnv>, deps: AppDeps) {
     const type = result.mediaType;
     const contentType = /^(?:text\/|application\/json$|image\/svg\+xml$)/.test(type) ? `${type}; charset=utf-8` : type;
     if (result.isDoc)
-      return htmlDocResponse(c, deps, new TextDecoder().decode(result.bytes), result.look, result.colorScheme);
+      return htmlDocResponse(
+        c,
+        deps,
+        `${result.ownerId}:${result.sha}`,
+        new TextDecoder().decode(result.bytes),
+        result.look,
+        result.colorScheme,
+      );
     const read = await deps.blobs.open(result.ownerId, result.sha, c.req.raw.signal);
     if (!read) throw new ApiError("not_found");
     let body: ReadableStream<Uint8Array> | null = null;
