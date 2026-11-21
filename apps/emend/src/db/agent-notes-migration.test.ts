@@ -62,6 +62,7 @@ test.each([false, true])(
                   .replace(", `additions` integer, `deletions` integer", "")
                   .replace(", `look` text", "")
                   .replace(", `color_scheme` text", "")
+                  .replace(", `parts` text", "")
               : ddl,
           ]),
         ).toEqual(before);
