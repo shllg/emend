@@ -471,14 +471,14 @@
     > dd
     > .em-reading-block
     > .em-prose
-    > ul:first-child
+    > :is(ul, ol):first-child
     > li:first-child
     > strong:first-child,
   .em-writeup-fact[data-hide-label]
     > dd
     > .em-reading-block
     > .em-prose
-    > ul:first-child
+    > :is(ul, ol):first-child
     > li:first-child
     > p:first-child
     > strong:first-child {

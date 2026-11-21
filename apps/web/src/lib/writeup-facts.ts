@@ -10,17 +10,39 @@ export function usesOpeningCard(writeup: RenderedWriteup): boolean {
 export type FactPart = { text: string; agent?: true; target?: string };
 
 export function labelledFact(blocks: RenderedBlock[], label: "Biggest risk" | "Look yourself" | "Goal" | "Change") {
-  const prefix = `${label}:`;
+  const normalizedLabel = label.toLowerCase();
+  const collapse = (text: string) => text.replace(/\s+/gu, " ").trim();
   for (const block of blocks) {
-    const text = block.text.replace(/\s+/gu, " ").trim();
-    if (!text.toLowerCase().startsWith(prefix.toLowerCase())) continue;
-    // A second label separates facts; a soft break can just wrap one fact.
-    if (/\s(?:Biggest risk|Look yourself|Check first|Goal|Change):/u.test(text.slice(prefix.length))) continue;
+    if (block.kind !== "item" && block.kind !== "paragraph") continue;
+    const html = block.html;
+    if (
+      (html.match(/<(?:ul|ol)(?=[\s>])/gu)?.length ?? 0) > 1 ||
+      (html.match(/<li(?=[\s>])/gu)?.length ?? 0) > 1 ||
+      (html.match(/<p(?=[\s>])/gu)?.length ?? 0) > 1 ||
+      /<(?:pre|blockquote|table|details)(?=[\s>])/u.test(html)
+    )
+      continue;
     // Inspect the server HTML as a string only; the original block remains the rendering boundary.
-    const leading = block.html.match(
-      /^\s*(?:<ul(?:\s[^>]*)?>\s*<li(?:\s[^>]*)?>\s*)?(?:<p(?:\s[^>]*)?>\s*)?<strong>([^<]*)<\/strong>/u,
+    const leading = html.match(
+      /^\s*(?:<(?:ul|ol)(?:\s[^>]*)?>\s*<li(?:\s[^>]*)?>\s*)?(?:<p(?:\s[^>]*)?>\s*)?<strong(?:\s[^>]*)?>([\s\S]*?)<\/strong>(:)?/u,
     );
-    return { blocks: [block], hideLabel: leading?.[1] === text.slice(0, prefix.length) };
+    if (!leading) continue;
+    const content = collapse(leading[1] ?? "").toLowerCase();
+    const hideLabel = content === `${normalizedLabel}:`;
+    if (!hideLabel && !(content === normalizedLabel && leading[2] === ":")) continue;
+    const labels = [...html.matchAll(/<strong(?:\s[^>]*)?>([\s\S]*?)<\/strong>(:)?/gu)].filter(
+      (run) => collapse(run[1] ?? "").endsWith(":") || run[2] === ":",
+    );
+    if (labels.length !== 1) continue;
+    // Trim wrapper whitespace before checking continuation lines, including loose list items.
+    const laterLines = block.text
+      .trim()
+      .split(/\r\n?|\n|\u2028|\u2029/u)
+      .slice(1);
+    if (laterLines.some((line) => /^(?:Biggest risk|Look yourself|Check first|Goal|Change):/iu.test(line.trim())))
+      continue;
+    if (/<br(?:\s[^>]*)?>\s*(?:Biggest risk|Look yourself|Check first|Goal|Change):/iu.test(html)) continue;
+    return { blocks: [block], hideLabel };
   }
 }
 

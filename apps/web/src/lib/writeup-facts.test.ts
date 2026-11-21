@@ -51,174 +51,143 @@ test("only area or Why it matters opts a writeup into the opening card", () => {
   expect(usesOpeningCard({ sections: [section("whyItMatters", "More plants survive.")] })).toBe(true);
 });
 
+async function renderedFactBlocks(markdown: string, key: "overview" | "whereToLook" = "whereToLook") {
+  const writeup = RenderedWriteup.parse(
+    await renderWriteup({ overview: "", tldr: "", decisions: "", topics: {}, [key]: markdown }, []),
+  );
+  return writeup.sections.find((section) => section.key === key)?.blocks ?? [];
+}
+
 test.each(["Biggest risk", "Look yourself", "Goal", "Change"] as const)(
-  "label lift finds the first %s block, preserving its identity and HTML",
-  (label) => {
-    const first = {
-      ...block("overview", `\n  ${label}:\n  Plants.  \n`),
-      html: `<p><strong>${label}:</strong> Plants.</p>`,
-    };
-    const later = block("overview", `${label}: Later.`);
-    const result = labelledFact([block("overview", "Other text."), first, later], label);
-    expect(result).toEqual({ blocks: [first], hideLabel: true });
-    expect(result?.blocks[0]).toBe(first);
+  "label lift finds the first eligible %s block without replacing it",
+  async (label) => {
+    const blocks = await renderedFactBlocks(`Other text.\n\n**${label}:** First.\n\n**${label}:** Later.`);
+    expect(blocks).toHaveLength(3);
+    const result = labelledFact(blocks, label);
+    expect(result).toEqual({ blocks: [blocks[1]], hideLabel: true });
+    expect(result?.blocks[0]).toBe(blocks[1]);
   },
 );
 
-test("label lift matches case-insensitively with collapsed whitespace, but not old Check first lines", () => {
-  const risk = {
-    ...block("whereToLook", "  bIgGeSt\n  rIsK: Dry soil."),
-    html: "<p><strong>bIgGeSt rIsK:</strong> Dry soil.</p>",
-  };
-  expect(labelledFact([risk], "Biggest risk")).toEqual({ blocks: [risk], hideLabel: true });
-  expect(labelledFact([], "Goal")).toBeUndefined();
-  expect(labelledFact([block("overview", "A Goal: in passing.")], "Goal")).toBeUndefined();
-  expect(labelledFact([block("overview", "Goalkeeper: plants.")], "Goal")).toBeUndefined();
-  for (const label of ["Biggest risk", "Look yourself"] as const)
-    expect(labelledFact([block("whereToLook", "Check first: Water the seeds.")], label)).toBeUndefined();
+test.each([
+  ["list item", "- **Biggest risk:** A.", "Biggest risk", "item", true],
+  ["ordered list item", "1. **Biggest risk:** A.", "Biggest risk", "item", true],
+  ["paragraph", "**Biggest risk:** A.", "Biggest risk", "paragraph", true],
+  ["wrapped paragraph", "**Biggest risk:** Flooding the\nseed bed.", "Biggest risk", "paragraph", true],
+  ["wrapped list item", "- **Biggest risk:** Flooding the\n  seed bed.", "Biggest risk", "item", true],
+  ["wrapped Goal paragraph", "**Goal:** Protect the\nseed bed.", "Goal", "paragraph", true],
+  ["wrapped Goal item", "- **Goal:** Protect the\n  seed bed.", "Goal", "item", true],
+  ["hard break in a fact", "**Biggest risk:** Flooding the  \nseed bed.", "Biggest risk", "paragraph", true],
+  ["raw break in a fact", "**Goal:** Protect the<br>seed bed.", "Goal", "paragraph", true],
+  ["wrapped bold label", "**Biggest\nrisk:** A.", "Biggest risk", "paragraph", true],
+  ["Title casing", "**Biggest Risk:** A.", "Biggest risk", "paragraph", true],
+  ["lower casing", "**biggest risk:** A.", "Biggest risk", "paragraph", true],
+  ["upper casing", "**BIGGEST RISK:** A.", "Biggest risk", "paragraph", true],
+  ["colon outside bold", "**Goal**: A.", "Goal", "paragraph", false],
+  ["inline code mentioning a label", "**Goal:** Preserve the `Change:` header.", "Goal", "paragraph", true],
+  ["plain text mentioning a label", "**Goal:** Preserve the Change: header.", "Goal", "paragraph", true],
+  ["lowercase change in a sentence", "**Goal:** Make one change: water the seeds.", "Goal", "paragraph", true],
+  ["bold emphasis without a colon", "**Goal:** Keep the **seed bed** dry.", "Goal", "paragraph", true],
+] as const)("label lift accepts %s", async (_name, markdown, label, kind, hideLabel) => {
+  const blocks = await renderedFactBlocks(markdown, label === "Goal" ? "overview" : "whereToLook");
+  expect(blocks).toHaveLength(1);
+  expect(blocks[0]?.kind).toBe(kind);
+  const result = labelledFact(blocks, label);
+  expect(result).toEqual({ blocks, hideLabel });
+  expect(result?.blocks[0]).toBe(blocks[0]);
+});
+
+test("label lift accepts the paragraph wrapper and surrounding whitespace of a loose list item", async () => {
+  const blocks = await renderedFactBlocks("- **Goal:** A.\n\n- Another item.", "overview");
+  expect(blocks).toHaveLength(2);
+  expect(blocks[0]?.html).toContain("<p><strong>Goal:</strong>");
+  expect(labelledFact(blocks, "Goal")).toEqual({ blocks: [blocks[0]], hideLabel: true });
 });
 
 test.each([
-  ["whereToLook", "Biggest risk", "Look yourself"],
-  ["overview", "Goal", "Change"],
-] as const)("label lift leaves both labelled lines of a %s paragraph together", async (key, first, second) => {
-  const writeup = RenderedWriteup.parse(
-    await renderWriteup(
-      { overview: "", tldr: "", decisions: "", topics: {}, [key]: `**${first}:** First.\n**${second}:** Second.` },
-      [],
-    ),
-  );
-  const blocks = writeup.sections.find((section) => section.key === key)?.blocks ?? [];
-  expect(blocks).toHaveLength(1);
-  expect(blocks[0]?.text).toBe(`${first}: First.\n${second}: Second.`);
-  expect(labelledFact(blocks, first)).toBeUndefined();
-  expect(labelledFact(blocks, second)).toBeUndefined();
-});
-
-test.each(["", "- "])("label lift keeps single-line paragraphs and list items (prefix=%j)", async (prefix) => {
-  const writeup = RenderedWriteup.parse(
-    await renderWriteup(
-      {
-        overview: `${prefix}**Goal:** Plants.\n\n${prefix}**Change:** Water.`,
-        whereToLook: `${prefix}**Biggest risk:** Flooding.\n\n${prefix}**Look yourself:** The seed bed.`,
-        tldr: "",
-        decisions: "",
-        topics: {},
-      },
-      [],
-    ),
-  );
-  for (const [key, labels] of [
-    ["overview", ["Goal", "Change"]],
-    ["whereToLook", ["Biggest risk", "Look yourself"]],
-  ] as const) {
-    const blocks = writeup.sections.find((section) => section.key === key)?.blocks ?? [];
-    expect(blocks).toHaveLength(2);
-    for (const [index, label] of labels.entries()) {
-      expect(blocks[index]?.kind).toBe(prefix ? "item" : "paragraph");
-      expect(labelledFact(blocks, label)).toEqual({ blocks: [blocks[index]], hideLabel: true });
-    }
-  }
-});
-
-test.each(["", "- "])("label lift keeps wrapped paragraphs and list items (prefix=%j)", async (prefix) => {
-  const continuation = prefix ? "  " : "";
-  const writeup = RenderedWriteup.parse(
-    await renderWriteup(
-      {
-        overview: `${prefix}**Goal:** Protect the\n${continuation}seed bed.`,
-        whereToLook: `${prefix}**Biggest risk:** Flooding the\n${continuation}seed bed.`,
-        tldr: "",
-        decisions: "",
-        topics: {},
-      },
-      [],
-    ),
-  );
-  for (const [key, label] of [
-    ["overview", "Goal"],
-    ["whereToLook", "Biggest risk"],
-  ] as const) {
-    const blocks = writeup.sections.find((section) => section.key === key)?.blocks ?? [];
+  ["soft", "\n", "\n", false],
+  ["hard", "  \n", "\n", true],
+  ["raw", "<br>", "", true],
+] as const)(
+  "label lift preserves a fact across a rendered %s break",
+  async (_name, sourceBreak, textBreak, hasBreak) => {
+    const blocks = await renderedFactBlocks(`**Goal:** A.${sourceBreak}B.`, "overview");
     expect(blocks).toHaveLength(1);
-    expect(blocks[0]?.kind).toBe(prefix ? "item" : "paragraph");
-    expect(blocks[0]?.text).toContain("\nseed bed.");
-    expect(labelledFact(blocks, label)).toEqual({ blocks, hideLabel: true });
-  }
-});
+    expect(blocks[0]?.text).toBe(`Goal: A.${textBreak}B.`);
+    expect(blocks[0]?.html.includes("<br>")).toBe(hasBreak);
+    expect(labelledFact(blocks, "Goal")).toEqual({ blocks, hideLabel: true });
+  },
+);
 
-test("label lift leaves two labels on one source line together", async () => {
-  const writeup = RenderedWriteup.parse(
-    await renderWriteup(
-      {
-        overview: "",
-        whereToLook: "**Biggest risk:** A. **Look yourself:** B.",
-        tldr: "",
-        decisions: "",
-        topics: {},
-      },
-      [],
-    ),
-  );
-  const blocks = writeup.sections.find((section) => section.key === "whereToLook")?.blocks ?? [];
+test.each([
+  ["exact casing", "**Biggest risk:** A.\n**Look yourself:** B."],
+  ["Title casing", "**Biggest Risk:** A.\n**Look Yourself:** B."],
+  ["lower casing", "**biggest risk:** A.\n**look yourself:** B."],
+  ["upper casing", "**BIGGEST RISK:** A.\n**LOOK YOURSELF:** B."],
+  ["same line", "**Biggest risk:** A. **Look yourself:** B."],
+  ["hard break", "**Biggest risk:** A.  \n**Look yourself:** B."],
+  ["raw break", "**Biggest risk:** A.<br>**Look yourself:** B."],
+  ["second colon outside bold", "**Biggest risk:** A. **Look yourself**: B."],
+  ["unknown second bold label", "**Biggest risk:** A. **Impact:** B."],
+])("label lift leaves two bold label runs together: %s", async (_name, markdown) => {
+  const blocks = await renderedFactBlocks(markdown);
   expect(blocks).toHaveLength(1);
-  expect(blocks[0]?.text).toBe("Biggest risk: A. Look yourself: B.");
   expect(labelledFact(blocks, "Biggest risk")).toBeUndefined();
   expect(labelledFact(blocks, "Look yourself")).toBeUndefined();
 });
 
 test.each(["Biggest risk", "Look yourself", "Check first", "Goal", "Change"])(
-  "label lift rejects a second known label: %s",
-  (label) => {
-    expect(labelledFact([block("overview", `Goal: Plants. ${label}: Water.`)], "Goal")).toBeUndefined();
+  "label lift refuses a plain second label at the start of a later line: %s",
+  async (label) => {
+    for (const later of [label, label.toLowerCase(), label.toUpperCase()]) {
+      const blocks = await renderedFactBlocks(`**Biggest risk:** A.\n${later}: B.`);
+      expect(blocks).toHaveLength(1);
+      expect(labelledFact(blocks, "Biggest risk")).toBeUndefined();
+    }
+  },
+);
+
+test.each(["Look yourself", "look yourself"])(
+  "label lift refuses a plain second label after a raw break: %s",
+  async (label) => {
+    const blocks = await renderedFactBlocks(`**Biggest risk:** A.<br>${label}: B.`);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.text).toBe(`Biggest risk: A.${label}: B.`);
+    expect(labelledFact(blocks, "Biggest risk")).toBeUndefined();
   },
 );
 
 test.each([
-  "Goal: Make a change: water.",
-  "Goal: Exchange: water.",
-  "Goal: Change without a colon.",
-  "Goal: Plants.Change: water.",
-  "Goal:Change:water",
-])("label lift requires a case-sensitive label, colon and preceding whitespace: %s", (text) => {
-  const goal = block("overview", text);
-  expect(labelledFact([goal], "Goal")).toEqual({ blocks: [goal], hideLabel: false });
-});
-
-test("a lowercase change: inside a Goal sentence is still one fact", async () => {
-  const writeup = RenderedWriteup.parse(
-    await renderWriteup(
-      { overview: "**Goal:** Make one change: water the seeds.", tldr: "", decisions: "", topics: {} },
-      [],
-    ),
-  );
-  const blocks = writeup.sections.find((section) => section.key === "overview")?.blocks ?? [];
+  ["nested sub-list", "- **Biggest risk:** A.\n  - B.", "item"],
+  ["second paragraph in an item", "- **Biggest risk:** A.\n\n  B.", "item"],
+  ["fenced code", "```text\nBiggest risk: A.\n```", "code"],
+  ["quote", "> **Biggest risk:** A.", "quote"],
+  ["nested code", "- **Biggest risk:** A.\n\n  ```text\n  B.\n  ```", "item"],
+  ["nested quote", "- **Biggest risk:** A.\n  > B.", "item"],
+  ["nested table", "- **Biggest risk:** A.<table><tr><td>B.</td></tr></table>", "item"],
+  ["nested details", "- **Biggest risk:** A.<details><summary>B.</summary>C.</details>", "item"],
+  ["plain label", "Biggest risk: A.", "paragraph"],
+  ["plain item label", "- Biggest risk: A.", "item"],
+  ["old Check first label", "**Check first:** A.", "paragraph"],
+  ["text before bold label", "Read **Biggest risk:** A.", "paragraph"],
+  ["label inside emphasis", "***Biggest risk:*** A.", "paragraph"],
+  ["whitespace before the outside colon", "**Biggest risk** : A.", "paragraph"],
+] as const)("label lift refuses %s", async (_name, markdown, kind) => {
+  const blocks = await renderedFactBlocks(markdown);
   expect(blocks).toHaveLength(1);
-  expect(labelledFact(blocks, "Goal")).toEqual({ blocks, hideLabel: true });
+  expect(blocks[0]?.kind).toBe(kind);
+  expect(labelledFact(blocks, "Biggest risk")).toBeUndefined();
 });
 
-test.each(["\n", "\r\n", "\r", "\u2028", "\u2029"])(
-  "label lift rejects a second label after line break %j",
-  (separator) => {
-    const multiline = block("overview", `Goal: Plants.${separator}Change: Water.`);
-    expect(labelledFact([multiline], "Goal")).toBeUndefined();
-  },
-);
+test("mixed-case Goal and change lines stay together in Overview", async () => {
+  const blocks = await renderedFactBlocks("**Goal:** A.\n**change:** B.", "overview");
+  expect(blocks).toHaveLength(1);
+  expect(labelledFact(blocks, "Goal")).toBeUndefined();
+  expect(labelledFact(blocks, "Change")).toBeUndefined();
+});
 
-test.each([
-  ["<p><strong>Goal:</strong> Plants.</p>", true],
-  ["<strong>Goal:</strong> Plants.", true],
-  ['<ul class="list"><li class="item"><strong>Goal:</strong> Plants.</li></ul>', true],
-  ["<ul>\n<li>\n<p><strong>Goal:</strong> Plants.</p></li></ul>", true],
-  ["<ul><li><strong>Goal</strong>: Plants.</li></ul>", false],
-  ["<p><strong>GOAL:</strong> Plants.</p>", false],
-  ["<p><strong>Goal: Plants.</strong></p>", false],
-  ["<p>Goal: <strong>Plants.</strong></p>", false],
-  ["<p><em><strong>Goal:</strong></em> Plants.</p>", false],
-  ["<blockquote><p><strong>Goal:</strong> Plants.</p></blockquote>", false],
-])("label hiding only accepts the exact leading strong shape: %s", (html, hideLabel) => {
-  const goal = { ...block("overview", "Goal: Plants."), html };
-  expect(labelledFact([goal], "Goal")).toEqual({ blocks: [goal], hideLabel });
+test("label lift leaves an empty section empty", async () => {
+  expect(labelledFact(await renderedFactBlocks(""), "Biggest risk")).toBeUndefined();
 });
 
 test("Topics lists High then Medium in ranked order, caps each level and counts Low", () => {

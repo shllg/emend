@@ -1346,15 +1346,45 @@ test("soft-broken labelled paragraphs stay in Overview and Where to look below F
   }
 });
 
+test("Title-cased bold labels sharing one paragraph stay in Where to look below Facts", async () => {
+  const writeup = RenderedWriteup.parse(
+    await renderWriteup(
+      {
+        area: "Garden",
+        tldr: "Healthy plants.",
+        overview: "",
+        whereToLook: "**Biggest Risk:** A.\n**Look Yourself:** B.",
+        decisions: "",
+        topics: {},
+      },
+      [],
+    ),
+  );
+  const blocks = writeup.sections.find((section) => section.key === "whereToLook")?.blocks;
+  expect(blocks).toHaveLength(1);
+  const { container } = mount(<Writeup {...props} writeup={writeup} />);
+  expect(container.querySelector('[data-fact="risk"], [data-fact="look"]')).toBeNull();
+  const sections = [...container.querySelectorAll("[data-reading-section]")].map((group) =>
+    group.getAttribute("data-reading-section"),
+  );
+  expect(sections.indexOf("facts")).toBeGreaterThan(-1);
+  expect(sections.indexOf("whereToLook")).toBeGreaterThan(sections.indexOf("facts"));
+  const prose = container.querySelectorAll('[data-reading-section="whereToLook"] .em-prose');
+  expect(prose).toHaveLength(1);
+  expect(prose[0]?.getAttribute("data-block-id")).toBe(blocks?.[0]?.id);
+  expect(prose[0]?.textContent).toBe("Biggest Risk: A.\nLook Yourself: B.");
+});
+
 test("lifted rows preserve server sanitization and topic markup stays isolated text", async () => {
   const hostile = [
     '<script>alert(1)</script><img src=x onerror=alert(1) srcset="x 1x">',
     '<span onclick="alert(1)" style="color:red" srcdoc="unsafe">raw</span>',
     "<svg onload=alert(1)></svg>",
-    "<details open ontoggle=alert(1)><summary>More</summary>Extra</details>",
     "[bad](javascript:alert%281%29) [x](JAVASCRIPT:alert(1))",
     "[http](http://example.com) [https](https://example.com) [mail](mailto:review@example.com)",
   ].join(" ");
+  // Nested details belong in the source-based rows; labelled facts leave block structures below.
+  const nestedHostile = `${hostile} <details open ontoggle=alert(1)><summary>More</summary>Extra</details>`;
   const diagram = 'graph TD\n  A-->B\n  click A "javascript:alert(1)"';
   const topics = [{ ...topic, title: "<img src=x onerror=alert(1)>", attention: "critical" as const }];
   const writeup = RenderedWriteup.parse(
@@ -1366,9 +1396,9 @@ test("lifted rows preserve server sanitization and topic markup stays isolated t
         decisions: "",
         context: "A small garden.",
         whereToLook: `- **Biggest risk:** ${hostile}\n- **Look yourself:** ${hostile}`,
-        checked: `- First ${hostile}\n- Second ${hostile}\n\n\`\`\`mermaid\n${diagram}\n\`\`\``,
-        notChecked: `- ${hostile}`,
-        outOfScope: `- ${hostile}`,
+        checked: `- First ${nestedHostile}\n- Second ${nestedHostile}\n\n\`\`\`mermaid\n${diagram}\n\`\`\``,
+        notChecked: `- ${nestedHostile}`,
+        outOfScope: `- ${nestedHostile}`,
         topics: {},
       },
       topics,
