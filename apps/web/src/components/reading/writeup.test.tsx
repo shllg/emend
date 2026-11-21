@@ -1377,12 +1377,6 @@ test("lifted rows preserve server sanitization and topic markup stays isolated t
   const blocks = new Map(
     writeup.sections.flatMap((section) => section.blocks.map((block) => [block.id, block] as const)),
   );
-  const normalizeHtml = (html: string) => {
-    // Normalize both sanitized fragments with the same test DOM serializer.
-    const template = document.createElement("template");
-    template.innerHTML = html;
-    return template.innerHTML;
-  };
   const { container } = mount(<Writeup {...props} topics={topics} writeup={writeup} />);
   for (const key of ["risk", "look", "proof", "assurance", "goal", "change", "gaps", "outOfScope"]) {
     const row = container.querySelector(`[data-fact="${key}"]`);
@@ -1393,7 +1387,11 @@ test("lifted rows preserve server sanitization and topic markup stays isolated t
       const block = blocks.get(element.dataset.blockId ?? "");
       if (!block) throw new Error(`Missing server block for ${key}`);
       expect(block.kind).not.toBe("diagram");
-      expect(normalizeHtml(element.innerHTML)).toBe(normalizeHtml(block.html));
+      const parsed = new DOMParser().parseFromString(block.html, "text/html").body;
+      expect(element.childNodes).toHaveLength(parsed.childNodes.length);
+      for (const [index, child] of element.childNodes.entries()) {
+        expect(child.isEqualNode(parsed.childNodes.item(index))).toBe(true);
+      }
     }
     expect(row.querySelector("script, img[src]")).toBeNull();
     expect(row.querySelector('[href^="javascript:"]')).toBeNull();
