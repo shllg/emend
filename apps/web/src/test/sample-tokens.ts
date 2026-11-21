@@ -1,7 +1,6 @@
 import { globSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { type SampleView, THEME_TOKENS } from "@emend/contract";
-import { DEFAULT_COLLAPSED_CONTEXT_THRESHOLD, parseDiffFromFile } from "@pierre/diffs";
 import { SAMPLE_HTML } from "../../../../packages/core/src/sample/content.ts";
 
 const web = resolve(import.meta.dirname, "../..");
@@ -119,24 +118,7 @@ function selectorMatches(root: ParentNode, selector: string): boolean {
   }
 }
 
-function sampleHasSeparator(sample: SampleView): boolean {
-  return sample.revision.files.some((file) => {
-    const texts = sample.fileTexts[file.id];
-    if (file.role !== "diff" || !texts) return false;
-    const diff = parseDiffFromFile(
-      file.hasOld ? { name: file.oldPath ?? file.path, contents: texts.old } : null,
-      file.hasNew ? { name: file.path, contents: texts.new } : null,
-    );
-    const last = diff.hunks.at(-1);
-    const collapsedAfter = last ? diff.additionLines.length - last.additionLineIndex - last.additionCount : 0;
-    // FileDiff keeps expandUnchanged false; Pierre expands tiny context gaps by default.
-    return (
-      diff.hunks.some((hunk) => hunk.collapsedBefore > DEFAULT_COLLAPSED_CONTEXT_THRESHOLD) ||
-      collapsedAfter > DEFAULT_COLLAPSED_CONTEXT_THRESHOLD
-    );
-  });
-}
-
+/** Collect sample tokens, counting separator colors only when a diff shadow root renders a separator. */
 export function collectSampleTokens(root: Document, sample: SampleView): Set<string> {
   const definitions = new Map<string, Set<string>>();
   for (const source of sources)
@@ -201,7 +183,9 @@ export function collectSampleTokens(root: Document, sample: SampleView): Set<str
   const additions = texts.some((file) => file.new && file.old !== file.new);
   const deletions = texts.some((file) => file.old && file.old !== file.new);
   if (root.querySelector(".em-diff-host") && changed && additions && deletions) {
-    const separator = sampleHasSeparator(sample);
+    const separator = [...root.querySelectorAll("diffs-container")].some((element) =>
+      element.shadowRoot?.querySelector("[data-separator]"),
+    );
     for (const rule of rules(read("src/components/diff/shadow.ts")))
       if (separator || !rule.selector.includes("[data-separator")) collectValue(rule.body);
     collectValue(read("src/components/diff/theme.ts"));
