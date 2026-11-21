@@ -38,7 +38,7 @@ import { ownerHead } from "./media-head.ts";
 import { validateNoteRanges } from "./notes.ts";
 import { renderRevision } from "./render.ts";
 import { revisionTransition } from "./transitions.ts";
-import { type Executor, packIds, type SharedSides, type Work, type WorkLast } from "./work.ts";
+import { type Executor, packIds, previousHtmlIds, type SharedSides, type Work, type WorkLast } from "./work.ts";
 
 type Deps = { db: Db; blobs: BlobStore; baseUrl: string; executor?: Executor; signal?: AbortSignal };
 type FileRow = typeof files.$inferSelect;
@@ -464,11 +464,11 @@ async function computePublish(
           previousBlobs.push({ format: "doc", bytes: await read(file.renderedBlob) });
         if (file.role === "doc" && file.mediaType === "text/html") {
           const prefix = `doc-${await blockHash(file.path)}-`;
-          const previousIds =
-            file.parts !== null
-              ? file.parts.map((hash) => `${prefix}${hash}`)
-              : (prepared.htmlParts.get(file.path) ?? []);
-          previousBlobs.push({ format: "ids", bytes: packIds(previousIds) });
+          const previousIds = file.parts !== null ? file.parts.map((hash) => `${prefix}${hash}`) : undefined;
+          previousBlobs.push({
+            format: "ids",
+            bytes: packIds(previousHtmlIds([[file.path, previousIds]], prepared.htmlParts)),
+          });
         }
       }
       // Rendering survives retries. Copy only the packed IDs before transferring them;

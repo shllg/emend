@@ -1230,9 +1230,9 @@ Labels live in closed shadow roots and never enter quotes or headings. Diagram m
 the visible diagram host. Both looks show marks with a fixed palette from the last applied
 `emend:theme` mode, defaulting to light (also for custom pages and light-only docs). Light uses
 line `#8b5cf6`, label background `#f5f3ff` and text `#6d28d9`; dark uses line `#a78bfa`,
-background `rgba(139, 92, 246, 0.16)` and text `#c4b5fd`. The line is an inline important
-declaration the doc's CSS cannot override. In-frame marks are drawn inside agent content, so a
-doc can still show look-alike text; marks are a reading aid, not proof.
+background `rgba(139, 92, 246, 0.16)` and text `#c4b5fd`. The line and label use inline important
+styles with a fixed palette. A doc's own CSS or markup can still hide marks or show look-alike
+ones, so marks are a reading aid, not proof.
 
 HTML diagrams use `<pre class="mermaid">` in both emend's look and custom pages. Only
 HTML-namespace `pre` elements qualify. A `pre` qualifies with the exact `mermaid` class token

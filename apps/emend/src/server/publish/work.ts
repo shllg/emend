@@ -149,6 +149,14 @@ const parse = (bytes: ArrayBuffer, format: "writeup" | "doc"): Block[] => {
 export function packIds(ids: string[]): ArrayBuffer {
   return new TextEncoder().encode(ids.join("\n")).buffer;
 }
+export function previousHtmlIds(
+  previous: Iterable<[path: string, ids: string[] | undefined]>,
+  current: ReadonlyMap<string, string[]>,
+): string[] {
+  const seen: string[] = [];
+  for (const [path, ids] of previous) for (const id of ids ?? current.get(path) ?? []) seen.push(id);
+  return seen;
+}
 export function serializeRendered(value: RenderedWriteup | Block[], pathDependent = false): RenderedBytes {
   const blocks = Array.isArray(value) ? value : value.sections.flatMap((s) => s.blocks);
   return {

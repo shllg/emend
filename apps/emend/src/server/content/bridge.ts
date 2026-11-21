@@ -498,7 +498,6 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   let themeMode = "light";
   function applyChanged() {
     for (const { target, value, priority } of marked) {
-      elementCall("removeAttribute", target, "data-emend-changed");
       const style = styleOf(target);
       if (value) styleCall("setProperty", style, "box-shadow", value, priority);
       else styleCall("removeProperty", style, "box-shadow");
@@ -520,13 +519,10 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       marked.push({ target, value: styleCall("getPropertyValue", targetStyle, "box-shadow"),
         priority: styleCall("getPropertyPriority", targetStyle, "box-shadow") });
       styleCall("setProperty", targetStyle, "box-shadow", "-3px 0 0 0 " + line, "important");
-      // Bridge state only; mark styles are inline, with no attribute selector.
-      elementCall("setAttribute", target, "data-emend-changed", String(mark.revision));
       const continues = previous && previous.index === mark.index - 1 && previous.revision === mark.revision;
       previous = mark;
       if (continues) continue;
       const host = createElement("div");
-      elementCall("setAttribute", host, "data-emend-changed-label", "");
       const hostStyle = styleOf(host);
       for (const [name, value] of [["all", "initial"], ["display", "block"], ["margin", "0 0 6px"]])
         styleCall("setProperty", hostStyle, name, value, "important");

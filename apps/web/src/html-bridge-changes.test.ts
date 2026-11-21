@@ -69,13 +69,26 @@ function bridge(html: string) {
     window.document.dispatchEvent(new window.Event("mouseup"));
     return post.mock.calls.findLast(([data]) => data.type === "emend:anchor")?.[0];
   };
-  const marked = () => Array.from(window.document.querySelectorAll<HTMLElement>("[data-emend-changed]"));
-  const labels = () => Array.from(window.document.querySelectorAll<HTMLDivElement>("[data-emend-changed-label]"));
+  const marked = () =>
+    Array.from(window.document.querySelectorAll<HTMLElement>("[style]")).filter(
+      (element) =>
+        element instanceof window.HTMLElement &&
+        element.style.getPropertyPriority("box-shadow") === "important" &&
+        element.style.getPropertyValue("box-shadow").startsWith("-3px 0 0 0"),
+    );
   const labelSpan = (host: Element) => {
     const index = shadows.mock.instances.indexOf(host);
     const shadow: ShadowRoot | undefined = shadows.mock.results[index]?.value;
     return shadow?.querySelector<HTMLSpanElement>("span");
   };
+  const labels = () =>
+    shadows.mock.instances.filter(
+      (host): host is HTMLDivElement =>
+        host instanceof window.HTMLDivElement &&
+        host.ownerDocument === window.document &&
+        host.isConnected &&
+        !!labelSpan(host),
+    );
   const labelText = (host: Element) => labelSpan(host)?.textContent;
   return { window, post, message, select, marked, labels, labelSpan, labelText, shadows, replaceSync };
 }
@@ -200,7 +213,6 @@ test.each(["emend", "custom"])("%s pages mark changed and added paragraphs with 
     ],
   });
   expect(b.marked().map(ownText)).toEqual(["Changed", "Added"]);
-  expect(b.marked().map((element) => element.getAttribute("data-emend-changed"))).toEqual(["2", "2"]);
   expect(b.labels().map(b.labelText)).toEqual(["Changed in rev 2", "Changed in rev 2"]);
   for (const host of b.labels()) {
     expect(host.shadowRoot).toBeNull();
@@ -213,11 +225,11 @@ test.each(["emend", "custom"])("%s pages mark changed and added paragraphs with 
   expect(b.replaceSync).not.toHaveBeenCalled();
 });
 
-test("doc CSS cannot override the fixed inline line or label styles", () => {
+test("doc CSS does not change the inline line, palette or label styles", () => {
   const b = bridge(`<html data-theme="dark"><head><style>
     :root { --changed-line: transparent; --changed-bg: transparent; --changed-fg: transparent; }
-    [data-emend-changed] { box-shadow: none !important; }
-    [data-emend-changed-label] { display: none !important; }
+    p { box-shadow: none !important; }
+    p > div { display: none !important; }
     </style></head><body><p>Changed</p></body></html>`);
   b.message({ type: "emend:changed", parts: 1, marks: [{ index: 0, revision: 2 }] });
   expect(b.marked().map(ownText)).toEqual(["Changed"]);

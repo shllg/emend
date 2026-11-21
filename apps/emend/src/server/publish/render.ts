@@ -16,6 +16,20 @@ import { IMAGE_HEAD_BYTES, type ImageSize } from "./image-size.ts";
 import { checkPublishSignal } from "./lifecycle.ts";
 import type { DocMetadata, Executor, RenderedBytes } from "./work.ts";
 
+export function chargeHtmlParts(state: { count: number; exhausted: boolean }, own: DocMetadata): string[] | undefined {
+  const parts = own.parts;
+  if (parts === undefined) return;
+  // Cache plus stored docs retain at most htmlPartsPerRevision hashes; only the current
+  // worker result (at most htmlPartsPerDoc) is extra.
+  if (state.exhausted || state.count + parts.length > LIMITS.htmlPartsPerRevision) {
+    state.exhausted = true;
+    delete own.parts;
+    return;
+  }
+  state.count += parts.length;
+  return parts;
+}
+
 export async function renderRevision(
   input: PublishRequest,
   execute: Executor,
@@ -48,8 +62,7 @@ export async function renderRevision(
   const failedMetadata = new Set<string>();
   const unrendered: string[] = [];
   let metadataBytes = 0;
-  let htmlPartCount = 0;
-  let htmlPartsExhausted = false;
+  const htmlPartBudget = { count: 0, exhausted: false };
   for (const file of input.files) {
     checkPublishSignal(signal);
     if (file.role !== "doc") continue;
@@ -79,14 +92,7 @@ export async function renderRevision(
       metadataCache.set(key, own);
     }
     if (format === "html" && failedMetadata.has(key)) unrendered.push(file.path);
-    let parts = format === "html" ? own.parts : undefined;
-    if (parts !== undefined) {
-      // Charge each path, including cached aliases; after the cut, later HTML docs keep no parts.
-      if (htmlPartsExhausted || htmlPartCount + parts.length > LIMITS.htmlPartsPerRevision) {
-        htmlPartsExhausted = true;
-        parts = undefined;
-      } else htmlPartCount += parts.length;
-    }
+    const parts = format === "html" ? chargeHtmlParts(htmlPartBudget, own) : undefined;
     const doc = {
       title:
         cleanDocTitle(file.title ?? "") || own.title || cleanDocTitle(file.path.split("/").at(-1) ?? "") || "Document",

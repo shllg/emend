@@ -5,6 +5,7 @@ import {
   importPublishInput,
   importRowCount,
   indexImportBundle,
+  isRenderedHtmlDoc,
   LIMITS,
   PublishRequest,
   writeupMarkdown,
@@ -24,7 +25,7 @@ import { fileMediaType } from "../publish/media.ts";
 import { memoizedHeads, ownerHead } from "../publish/media-head.ts";
 import { validateNoteRanges } from "../publish/notes.ts";
 import { renderRevision } from "../publish/render.ts";
-import { type Executor, packIds, type Work, type WorkResult } from "../publish/work.ts";
+import { type Executor, packIds, previousHtmlIds, type Work, type WorkResult } from "../publish/work.ts";
 import { derivedRowBytes } from "./bytes.ts";
 import { checkImportSignal } from "./lifecycle.ts";
 import { type ImportPlacement, importPlacements } from "./placements.ts";
@@ -149,7 +150,9 @@ export async function prepareImport(
       }
     }
     let previous:
-      | Pick<Awaited<ReturnType<typeof renderRevision>>, "renderedBlob" | "docBlobs" | "htmlParts">
+      | (Pick<Awaited<ReturnType<typeof renderRevision>>, "renderedBlob" | "docBlobs"> & {
+          htmlParts: Map<string, string[] | undefined>;
+        })
       | undefined;
     const writeupSources = new Map<string, Extract<WorkResult, { kind: "writeup-source" }>>();
     const checkedSources = new Set<string>();
@@ -234,7 +237,7 @@ export async function prepareImport(
         const previousBlobs: Extract<Work, { kind: "changed" }>["previous"] = [];
         previousBlobs.push({ format: "writeup", bytes: await read(previous.renderedBlob) });
         for (const hash of previous.docBlobs.values()) previousBlobs.push({ format: "doc", bytes: await read(hash) });
-        previousBlobs.push({ format: "ids", bytes: packIds([...previous.htmlParts.values()].flat()) });
+        previousBlobs.push({ format: "ids", bytes: packIds(previousHtmlIds(previous.htmlParts, result.htmlParts)) });
         const changed = await execute({
           kind: "changed",
           previous: previousBlobs,
@@ -252,7 +255,14 @@ export async function prepareImport(
           if (++changedLines % 500 === 0) await yieldToLoop("import-prepare-changed");
         }
       }
-      previous = { renderedBlob: result.renderedBlob, docBlobs: result.docBlobs, htmlParts: result.htmlParts };
+      previous = {
+        renderedBlob: result.renderedBlob,
+        docBlobs: result.docBlobs,
+        // Keep paths without parts too, so their next comparison uses the same fallback as publish.
+        htmlParts: new Map(
+          input.files.filter(isRenderedHtmlDoc).map((file) => [file.path, result.htmlParts.get(file.path)]),
+        ),
+      };
       for (const placement of await place(rows, result, read, execute, signal)) {
         addDerivedBytes(derivedRowBytes(placementTable, { ...placement, ownerId }));
         placements.push(placement);

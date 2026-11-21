@@ -6,9 +6,25 @@ import { changedBlocks, reviews, revisions } from "../../db/schema.ts";
 import { testDb } from "../../db/test-support.ts";
 import { insertChangedBlocks } from "./changed.ts";
 import { workerExecutor } from "./executor.ts";
-import { packIds, serializeRendered } from "./work.ts";
+import { packIds, previousHtmlIds, serializeRendered } from "./work.ts";
 
 const block = (id: string): Block => ({ id, section: "overview", kind: "paragraph", html: "x", text: "x" });
+test("previous HTML IDs fall back only for existing paths with missing parts", () => {
+  const previous = new Map<string, string[] | undefined>([
+    ["known.html", ["doc-aaaaaaaa-11111111"]],
+    ["empty.html", []],
+    ["missing.html", undefined],
+    ["removed.html", undefined],
+  ]);
+  const current = new Map([
+    ["known.html", ["doc-aaaaaaaa-22222222"]],
+    ["empty.html", ["doc-bbbbbbbb-22222222"]],
+    ["missing.html", ["doc-cccccccc-22222222"]],
+    ["added.html", ["doc-dddddddd-22222222"]],
+  ]);
+  expect(previousHtmlIds(previous, current)).toEqual(["doc-aaaaaaaa-11111111", "doc-cccccccc-22222222"]);
+});
+
 test("changed IDs exclude previous writeup and doc IDs, deduplicate new IDs and transfer only packed bytes", async () => {
   const execute = workerExecutor();
   try {

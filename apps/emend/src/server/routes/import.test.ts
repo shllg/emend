@@ -1350,10 +1350,11 @@ test("import skips first-revision change work and stores exactly the second revi
   expect(rows).toEqual(expected);
 });
 test.each([
-  { name: "changed", next: "<p>Changed</p><p>Stable</p>", text: "Changed" },
-  { name: "added", next: "<p>Original</p><p>Stable</p><p>Added</p>", text: "Added" },
-  { name: "unchanged", next: "<p>Original</p><p>Stable</p>", text: null },
-])("import derives HTML parts and $name marks from consecutive renderings", async ({ next, text }) => {
+  { name: "changed", next: "<p>Changed</p><p>Stable</p>", text: "Changed", failedMetadata: false },
+  { name: "added", next: "<p>Original</p><p>Stable</p><p>Added</p>", text: "Added", failedMetadata: false },
+  { name: "unchanged", next: "<p>Original</p><p>Stable</p>", text: null, failedMetadata: false },
+  { name: "previous metadata failed", next: "<p>Changed</p><p>Stable</p>", text: null, failedMetadata: true },
+])("import derives HTML parts and marks from consecutive renderings: $name", async ({ next, text, failedMetadata }) => {
   const input = ImportBundle.parse(await bundle(f));
   const file = required(input.files[0]);
   const sources = ["<p>Original</p><p>Stable</p>", next];
@@ -1365,11 +1366,20 @@ test.each([
       newBlob: await f.deps.blobs.put(f.ownerId, Buffer.from(required(sources[index])), "text/html"),
     })),
   );
+  if (failedMetadata) {
+    const execute = required(f.deps.publishExecutor);
+    let calls = 0;
+    f.deps.publishExecutor = async (work) => {
+      if (work.kind === "doc-metadata" && work.format === "html" && ++calls === 1)
+        throw new Error("synthetic metadata failure");
+      return execute(work);
+    };
+  }
   expect((await f.importRequest("/import", input)).status).toBe(201);
   const rows = await f.db.read((q) => q.select().from(tables.files).where(eq(tables.files.ownerId, f.ownerId)));
   for (const [index, revision] of input.revisions.entries())
     expect(rows.find((row) => row.revisionId === revision.id)?.parts).toEqual(
-      await core.htmlPartHashes(core.parseDocHtml(required(sources[index]))),
+      failedMetadata && index === 0 ? null : await core.htmlPartHashes(core.parseDocHtml(required(sources[index]))),
     );
   const changed = await f.db.read((q) =>
     q
