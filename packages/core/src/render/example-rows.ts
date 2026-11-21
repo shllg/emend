@@ -76,7 +76,7 @@ export function exampleRows() {
         content = content.slice(1);
         for (let child = content[0]; child; child = content[0]) {
           if (child.type === "text") {
-            const whitespace = /^\s+/.exec(child.value)?.[0];
+            const whitespace = /^[ \t\r\n\f]+/.exec(child.value)?.[0];
             if (!whitespace) break;
             prefix.push({ ...child, value: whitespace });
             if (whitespace.length < child.value.length) {

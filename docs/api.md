@@ -233,9 +233,9 @@ Paragraphs containing media spans keep their media markup. Text and block ids st
 
 A top-level quote whose first child is a paragraph that starts with a GitHub alert marker
 becomes a callout in the writeup, Markdown docs and comment HTML. The marker is `[!NOTE]`,
-`[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` or `[!CAUTION]`, in any case, alone on its line, and text
-or an element other than a line break must follow it in the quote. The `blockquote` gets
-`emend-callout emend-callout-<type>`, and the marker's own text goes in
+`[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` or `[!CAUTION]`, in any case, alone on its line, and
+non-whitespace text or an element other than a line break must follow it in the quote. The
+`blockquote` gets `emend-callout emend-callout-<type>`, and the marker's own text goes in
 `span.emend-callout-marker`. A line break that ends the marker line gets
 `emend-callout-marker-break`, and a first paragraph that holds only the marker gets
 `emend-callout-marker-line`. The app hides these and draws the type's label; the label is not

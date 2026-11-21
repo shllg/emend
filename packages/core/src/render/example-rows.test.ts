@@ -83,6 +83,27 @@ test.each([
   expect(withClass(html, "emend-example-line")).toHaveLength(0);
 });
 
+test("a no-break space after a callout marker stays inside the first example row", async () => {
+  const [block] = await renderExample("> [!NOTE]\n> \u00a0Before: seed\n> After: plant");
+  const paragraph = withClass(block?.html ?? "", "emend-example-rows")[0];
+  if (paragraph?.tagName !== "p") throw new Error("Missing example paragraph");
+  const rows = paragraph.children.filter(
+    (child) =>
+      child.type === "element" &&
+      Array.isArray(child.properties.className) &&
+      child.properties.className.includes("emend-example-row"),
+  );
+  expect(rows).toHaveLength(2);
+  const first = rows[0];
+  if (!first) throw new Error("Missing first example row");
+  expect(paragraph.children.slice(0, paragraph.children.indexOf(first))).toMatchObject([
+    { type: "element", tagName: "span", properties: { className: ["emend-callout-marker"] } },
+    { type: "text", value: expect.stringMatching(/^[ \t\r\n\f]+$/) },
+  ]);
+  expect(hastText(first)).toBe("\u00a0Before: seed");
+  expect(block?.text.match(/\u00a0/g)).toHaveLength(1);
+});
+
 test("a callout introduction stays outside its marker's prefix", async () => {
   const md = "> [!NOTE]\n> An intro.\n> Before: seed\n> After: plant";
   const blocks = await renderExample(md);
