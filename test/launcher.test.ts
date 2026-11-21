@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import {
   closeSync,
   copyFileSync,
@@ -20,6 +20,11 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, onTestFinished, test } from "vitest";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
+const hasZsh =
+  spawnSync("/bin/sh", ["-c", "command -v zsh"], {
+    env: { PATH: [dirname(process.execPath), "/usr/bin", "/bin"].join(delimiter) },
+    stdio: "ignore",
+  }).status === 0;
 let root: string;
 let checkout: string;
 let target: string;
@@ -169,73 +174,83 @@ test("the status line launcher stays silent when its stderr redirect cannot be o
   });
 });
 
-test("the status line launcher exits 0 without starting node on a signal before node starts", async () => {
-  const marker = join(root, "stub.started");
-  const launcher = copyLauncher(`import { writeFileSync } from "node:fs";
+test.each(["/bin/sh", ...(hasZsh ? ["zsh --emulate sh"] : [])])(
+  "the status line launcher never signals its process group on a signal before node starts (%s)",
+  async (shell) => {
+    const marker = join(root, "stub.started");
+    const siblingPidFile = join(root, "sibling.pid");
+    const statusFile = join(root, "launcher.status");
+    const stdoutFile = join(root, "launcher.stdout");
+    const stderrFile = join(root, "launcher.stderr");
+    const launcher = copyLauncher(`import { writeFileSync } from "node:fs";
 writeFileSync(${JSON.stringify(marker)}, "started");
 `);
-  const source = readFileSync(launcher, "utf8");
-  const interrupted = source.replace(
-    '  node "$directory/../dist/emend.mjs" "$@" &',
-    () => '  kill -TERM $$; node "$directory/../dist/emend.mjs" "$@" &',
-  );
-  expect(interrupted).not.toBe(source);
-  expect(await command("/bin/sh", ["-c", interrupted, launcher, "status", "--line"])).toEqual({
-    status: 0,
-    stdout: "",
-    stderr: "",
-  });
-  expect(existsSync(marker)).toBe(false);
-});
-
-test("the status line launcher kills and reaps node on a signal right after node starts", async () => {
-  const launcher = copyLauncher("setInterval(() => {}, 1000);\n");
-  const source = readFileSync(launcher, "utf8");
-  const interrupted = source.replace(
-    '  node "$directory/../dist/emend.mjs" "$@" &',
-    () => '  node "$directory/../dist/emend.mjs" "$@" & kill -TERM $$',
-  );
-  expect(interrupted).not.toBe(source);
-  const started = performance.now();
-  const child = spawn("/bin/sh", ["-c", interrupted, launcher, "status", "--line"], {
-    cwd: root,
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
-    detached: true,
-    timeout: 10000,
-    killSignal: "SIGKILL",
-  });
-  onTestFinished(async () => {
-    // The process group also catches an orphaned stub when the launcher fails the test.
-    if (child.pid) {
-      try {
-        process.kill(-child.pid, "SIGKILL");
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    const source = readFileSync(launcher, "utf8");
+    const interrupted = source.replace(
+      '  node "$directory/../dist/emend.mjs" "$@" &',
+      () => '  kill -TERM $$; node "$directory/../dist/emend.mjs" "$@" &',
+    );
+    expect(interrupted).not.toBe(source);
+    // Capture the launcher's output separately from the wrapper's signal diagnostic.
+    const wrapper = `sleep 30 &
+printf '%s\\n' "$!" > "$3"
+if [ "$7" = /bin/sh ]; then
+  /bin/sh -c "$1" "$2" status --line >"$5" 2>"$6"
+else
+  zsh --emulate sh -c "$1" "$2" status --line >"$5" 2>"$6"
+fi
+printf '%s\\n' "$?" > "$4"
+exit 0
+`;
+    const child = spawn(
+      "/bin/sh",
+      [
+        "-c",
+        wrapper,
+        "emend-signal-wrapper",
+        interrupted,
+        launcher,
+        siblingPidFile,
+        statusFile,
+        stdoutFile,
+        stderrFile,
+        shell,
+      ],
+      {
+        cwd: root,
+        env,
+        stdio: "ignore",
+        detached: true,
+        timeout: 10000,
+        killSignal: "SIGKILL",
+      },
+    );
+    onTestFinished(async () => {
+      // The process group also catches an orphaned sibling when the wrapper has exited.
+      if (child.pid) {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+        }
       }
-    }
-    await closed;
-  });
-  const stdout: Buffer[] = [];
-  const stderr: Buffer[] = [];
-  let stdoutEnded = false;
-  child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-  child.stdout.once("end", () => {
-    stdoutEnded = true;
-  });
-  child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
-  const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
-    child.once("error", reject);
-    child.once("close", (code, signal) => resolve({ code, signal }));
-  });
-  await expect
-    .poll(() => ({ code: child.exitCode, signal: child.signalCode, stdoutEnded }), { timeout: 1000, interval: 10 })
-    .toEqual({ code: 0, signal: null, stdoutEnded: true });
-  expect(performance.now() - started).toBeLessThan(1000);
-  expect(await closed).toEqual({ code: 0, signal: null });
-  expect(Buffer.concat(stdout).toString()).toBe("");
-  expect(Buffer.concat(stderr).toString()).toBe("");
-}, 20000);
+      await closed;
+    });
+    const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", (code, signal) => resolve({ code, signal }));
+    });
+    expect(await closed).toEqual({ code: 0, signal: null });
+    expect(readFileSync(statusFile, "utf8")).toBe("143\n");
+    expect(readFileSync(stdoutFile, "utf8")).toBe("");
+    expect(readFileSync(stderrFile, "utf8")).toBe("");
+    expect(existsSync(marker)).toBe(false);
+    const siblingPid = Number(readFileSync(siblingPidFile, "utf8"));
+    expect(siblingPid).toBeGreaterThan(0);
+    expect(() => process.kill(siblingPid, 0)).not.toThrow();
+  },
+  20000,
+);
 
 test.each(["SIGTERM", "SIGINT", "SIGHUP"] as const)(
   "the status line launcher kills and reaps node promptly on %s",
