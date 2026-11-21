@@ -12,7 +12,6 @@ export type FactPart = { text: string; agent?: true; target?: string };
 export function labelledFact(blocks: RenderedBlock[], label: "Biggest risk" | "Look yourself" | "Goal" | "Change") {
   const normalizedLabel = label.toLowerCase();
   const collapse = (text: string) => text.replace(/\s+/gu, " ").trim();
-  const stripTags = (html: string) => html.replace(/<[^>]*>/gu, "");
   for (const block of blocks) {
     if (block.kind !== "item" && block.kind !== "paragraph") continue;
     const html = block.html;
@@ -28,11 +27,11 @@ export function labelledFact(blocks: RenderedBlock[], label: "Biggest risk" | "L
       /^\s*(?:<(?:ul|ol)(?:\s[^>]*)?>\s*<li(?:\s[^>]*)?>\s*)?(?:<p(?:\s[^>]*)?>\s*)?<strong(?:\s[^>]*)?>([\s\S]*?)<\/strong>(:)?/u,
     );
     if (!leading) continue;
-    const content = collapse(stripTags(leading[1] ?? "")).toLowerCase();
+    const content = collapse(leading[1] ?? "").toLowerCase();
     const hideLabel = content === `${normalizedLabel}:`;
     if (!hideLabel && !(content === normalizedLabel && leading[2] === ":")) continue;
     const labels = [...html.matchAll(/<strong(?:\s[^>]*)?>([\s\S]*?)<\/strong>(:)?/gu)].filter(
-      (run) => collapse(stripTags(run[1] ?? "")).endsWith(":") || run[2] === ":",
+      (run) => collapse(run[1] ?? "").endsWith(":") || run[2] === ":",
     );
     if (labels.length !== 1) continue;
     // Trim wrapper whitespace before checking continuation lines, including loose list items.
@@ -42,12 +41,7 @@ export function labelledFact(blocks: RenderedBlock[], label: "Biggest risk" | "L
       .slice(1);
     if (laterLines.some((line) => /^(?:Biggest risk|Look yourself|Check first|Goal|Change):/iu.test(line.trim())))
       continue;
-    const htmlLines = stripTags(html.replace(/<br(?:\s[^>]*)?>/giu, "\n"))
-      .trim()
-      .split(/\r\n?|\n|\u2028|\u2029/u)
-      .slice(1);
-    if (htmlLines.some((line) => /^(?:Biggest risk|Look yourself|Check first|Goal|Change):/iu.test(line.trim())))
-      continue;
+    if (/<br(?:\s[^>]*)?>\s*(?:Biggest risk|Look yourself|Check first|Goal|Change):/iu.test(html)) continue;
     return { blocks: [block], hideLabel };
   }
 }

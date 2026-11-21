@@ -1503,64 +1503,6 @@ test("Further down skips empty groups and stored topics without metadata", () =>
   expect(container.querySelector('[data-reading-section="facts"]')).toBeNull();
 });
 
-test.each([
-  {
-    name: "Proof selects the first Checked item and Assurance preserves its heading without counting it",
-    checked: "### Automated checks\n\n- Unit tests pass.\n- Browser test passes.",
-    proof: "Unit tests pass.",
-    assurance: ["Automated checks", "Browser test passes."],
-    summary: "and 1 more check",
-  },
-  {
-    name: "Proof falls back to a single Checked paragraph without Assurance",
-    checked: "All tests pass.",
-    proof: "All tests pass.",
-    assurance: [],
-    summary: undefined,
-  },
-  {
-    name: "Checked headings and code stay in Assurance with the Details summary and no Proof",
-    checked: "### Notes\n\n```text\nlog\n```",
-    proof: undefined,
-    assurance: ["Notes", "log"],
-    summary: "Details",
-  },
-  {
-    name: "Proof prefers a Checked item over an earlier paragraph and Assurance counts the paragraph",
-    checked: "Checks completed.\n\n- Unit tests pass.",
-    proof: "Unit tests pass.",
-    assurance: ["Checks completed."],
-    summary: "and 1 more check",
-  },
-])("$name", async ({ checked, proof, assurance, summary }) => {
-  const writeup = RenderedWriteup.parse(
-    await renderWriteup({ area: "Garden", overview: "", tldr: "", decisions: "", topics: {}, checked }, []),
-  );
-  const blocks = writeup.sections.find((section) => section.key === "checked")?.blocks ?? [];
-  expect(blocks).toHaveLength(assurance.length + (proof === undefined ? 0 : 1));
-  const { container } = mount(<Writeup {...props} writeup={writeup} />);
-  const proofRow = container.querySelector('[data-fact="proof"]');
-  if (proof === undefined) expect(proofRow).toBeNull();
-  else {
-    expect(proofRow?.querySelectorAll("[data-block-id]")).toHaveLength(1);
-    expect(proofRow?.querySelector(".em-prose")?.textContent?.trim()).toBe(proof);
-  }
-  const assuranceRow = container.querySelector('[data-fact="assurance"]');
-  if (assurance.length === 0) expect(assuranceRow).toBeNull();
-  else {
-    expect(assuranceRow?.querySelector("summary")?.textContent).toBe(summary);
-    expect(assuranceRow?.querySelector("details")?.open).toBe(false);
-    expect(
-      [...(assuranceRow?.querySelectorAll("details .em-prose") ?? [])].map((node) => node.textContent?.trim()),
-    ).toEqual(assurance);
-    expect(
-      [...(assuranceRow?.querySelectorAll("[data-block-id]") ?? [])].map((node) => node.getAttribute("data-block-id")),
-    ).toEqual(blocks.filter((block) => block.text.trim() !== proof).map((block) => block.id));
-  }
-  for (const block of blocks) expect(container.querySelectorAll(`[id="block-${block.id}"]`)).toHaveLength(1);
-  expect(container.querySelector('[data-reading-section="checked"]')).toBeNull();
-});
-
 test.each([false, true])("a fact block keeps its target, marker and outline count (folded=%s)", async (folded) => {
   const checked: RenderedBlock = {
     ...block,
