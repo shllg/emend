@@ -118,7 +118,9 @@ since I looked, and what is its PR state?
 - A comment is lost, or silently lands on the wrong text or line.
 - Content written by an agent, or text from a repo under review, runs as script with the
   reviewer's session.
-- An approval covers content the reviewer has not seen.
+- An approval covers content that was hidden from the reviewer, or that changed after they saw it.
+  Approving accepts the shown revision's decisions and risk on its evidence; it does not claim that
+  every line was read.
 - A review is reachable by anyone but its owner and the devices they paired.
 - An existing hunk-review-skill workflow breaks.
 
