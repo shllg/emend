@@ -51,7 +51,8 @@ to it. Any change here needs `emend-security-reviewer`.
   The bridge validates every key and value and ignores the whole message on any invalid entry; it
   sets only `data-theme` on the root and one constructed stylesheet in layer `emend`.
 - Diagrams: after ready, the bridge sends `emend:diagrams` with only the text of HTML
-  `pre.mermaid` elements (at most 50, each up to 50,000 characters, 1,000,000 in all), a mode and a
+  `pre.mermaid` elements and of HTML `pre` elements whose only element child is a
+  `code.language-mermaid` (at most 50, each up to 50,000 characters, 1,000,000 in all), a mode and a
   width each. An applied theme, a colour-scheme change, and the end or cancel of a transition or
   animation on an element that holds a diagram check the modes again; only a changed mode sends a
   new request.
