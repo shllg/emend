@@ -191,13 +191,13 @@ writeFileSync(${JSON.stringify(marker)}, "started");
       () => '  kill -TERM $$; node "$directory/../dist/emend.mjs" "$@" &',
     );
     expect(interrupted).not.toBe(source);
-    // Capture the launcher's output separately from the wrapper's signal diagnostic.
+    // Subshell redirections keep the wrapper's own signal notice on its ignored stderr.
     const wrapper = `sleep 30 &
 printf '%s\\n' "$!" > "$3"
 if [ "$7" = /bin/sh ]; then
-  /bin/sh -c "$1" "$2" status --line >"$5" 2>"$6"
+  ( exec /bin/sh -c "$1" "$2" status --line ) >"$5" 2>"$6"
 else
-  zsh --emulate sh -c "$1" "$2" status --line >"$5" 2>"$6"
+  ( exec zsh --emulate sh -c "$1" "$2" status --line ) >"$5" 2>"$6"
 fi
 printf '%s\\n' "$?" > "$4"
 exit 0
