@@ -574,7 +574,6 @@ test("review guidance lists the opening fields in display order", () => {
     "tldr",
     "whyItMatters",
     "area",
-    "review",
     "checked",
     "notChecked",
     "overview",
@@ -591,15 +590,91 @@ test("review guidance always names new or changed dependencies in whereToLook", 
   const text = read("plugin/skills/emend-review/SKILL.md");
   const whereToLook = text.split("- `whereToLook`:")[1]?.split("\n- ")[0]?.replace(/\s+/g, " ");
   expect(whereToLook).toContain(
-    "Name the highest risk and the topic and file to inspect first. A new or changed dependency is always one of them.",
+    "**Biggest risk** gives one concrete case of what goes wrong, and for whom. **Look yourself** names at most three spots, each with why no test settles it. A new or changed dependency is always one of them.",
   );
+});
+
+test("review guidance writes a decision brief with no verdict", () => {
+  const text = read("plugin/skills/emend-review/SKILL.md");
+  const writing = text.split("## Write for the reviewer\n")[1]?.split("\n## ")[0] ?? "";
+  expect(writing).not.toContain("- `review`:");
+  expect(writing).toContain("Write no `review` verdict.");
+  expect(text.replace(/\s+/g, " ")).toContain(
+    'Show what you claim, as the writing reference says under "Pictures" and "Tables": a screenshot for a visible change, a table for a config, schema, number or query-plan change.',
+  );
+  expect(text.replace(/\s+/g, " ")).toContain(
+    "`checked`: the proof, at most five items, strongest first, each saying what it showed. No process items, such as running the gate or reading the diff. Never empty.",
+  );
+  expect(text.replace(/\s+/g, " ")).toContain(
+    "`notChecked`: only real gaps, each with what could go wrong. Never empty.",
+  );
+  expect(text.replace(/\s+/g, " ")).toContain('**Goal** is the end state, starting "After this,".');
+
+  const skills = join(repo, "plugin", "skills");
+  for (const path of readdirSync(skills, { recursive: true, encoding: "utf8" })) {
+    if (!path.endsWith(".md") || !statSync(join(skills, path)).isFile()) continue;
+    const guidance = read(join("plugin", "skills", path));
+    expect(guidance, path).not.toContain("Check first");
+    expect(guidance, path).not.toContain("Read everything");
+  }
+
+  const blocks = [...read("plugin/skills/emend-review/references/manifest.md").matchAll(/```json\n([\s\S]*?)\n```/g)];
+  expect(blocks).toHaveLength(1);
+  const example = JSON.parse(blocks[0]?.[1] ?? "");
+  expect(example.writeup).not.toHaveProperty("review");
+  expect(example.writeup.whereToLook).toContain("**Look yourself:**");
+  expect(example.writeup.overview).toContain("**Goal:** After this,");
+
+  const reference = read(writingReference);
+  for (const heading of [
+    "## Risk and proof",
+    "### No verdict",
+    "### Checked and Not checked",
+    "### Decisions",
+    "## Pictures",
+    "## Tables",
+  ]) {
+    expect(reference).toContain(heading);
+  }
+  expect(reference).not.toContain("## Review verdict and risk");
+
+  const checked = reference.split("### Checked and Not checked\n")[1]?.split("\n### ")[0]?.replace(/\s+/g, " ");
+  expect(checked).toContain("at most five items, strongest first");
+  expect(checked).toContain("Each item says what it showed");
+  expect(checked).toContain("Leave out process, such as running the gate");
+  expect(checked).toContain("`notChecked` holds only real gaps, each with what could go wrong");
+  expect(checked).toContain("A data migration shows row counts and sums before and after, plus a few sample rows.");
+
+  const whereToLook = reference.split("### Where to look\n")[1]?.split("\n### ")[0]?.replace(/\s+/g, " ");
+  expect(whereToLook).toContain("**Biggest risk:** one concrete case of what goes wrong, and for whom.");
+  expect(whereToLook).toContain("**Look yourself:** at most three spots, each with why no test settles it.");
+
+  const noVerdict = reference.split("### No verdict\n")[1]?.split("\n### ")[0]?.replace(/\s+/g, " ");
+  expect(noVerdict).toContain("Leave `review` out of the writeup.");
+
+  const decisions = reference.split("### Decisions\n")[1]?.split("\n### ")[0]?.replace(/\s+/g, " ");
+  expect(decisions).toContain("only if the reviewer might decide, or judge the risk, differently because of it");
+  expect(decisions).toContain("**Needs you:**");
+  expect(decisions).toContain('"Chose X over Y because Z. Would change if W."');
+  expect(decisions).toContain("**Trail:**");
+
+  const titles = reference.split("## Titles and paragraphs\n")[1]?.split("\n## ")[0]?.replace(/\s+/g, " ");
+  expect(titles).toContain("A document follows these rules loosely: a TL;DR first, short sections, the point first.");
+
+  const pictures = reference.split("## Pictures\n")[1]?.split("\n## ")[0]?.replace(/\s+/g, " ");
+  expect(pictures).toContain("A review writeup follows the two rules below; a document follows them loosely.");
+  expect(pictures).toContain("A single shot, or an After-only shot when there is no Before, is fine.");
+
+  const tables = reference.split("## Tables\n")[1]?.split("\n## ")[0]?.replace(/\s+/g, " ");
+  expect(tables).toContain("This section applies to a review writeup. A document follows it loosely.");
 });
 
 test("feedback guidance keeps Where to look current when edits are allowed", () => {
   const text = read("plugin/skills/emend-feedback/SKILL.md").replace(/\s+/g, " ");
   expect(text).toContain(
-    "Keep the TL;DR, Where to look, glossary, decisions and drift current when edits are allowed;",
+    "Keep the TL;DR, Where to look, Checked and Not checked, glossary, decisions and drift current when edits are allowed;",
   );
+  expect(text).toContain("Leave out `review`, also when an earlier revision had one: the reviewer gives the verdict.");
 });
 
 test("the complete example is the synthetic manifest fixture, with no stripped or invented fields", () => {
