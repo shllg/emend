@@ -170,11 +170,12 @@ Write replies and writeup text as [the writing reference](../emend-review/refere
 says. Give a short summary in the conversation too, grouped by outcome. If a request says "explain
 it in the writeup", revise the owning topic's `why`, `example` or `body`, not only the reply. In
 `explain` mode, propose that text in the reply without editing files. Keep the TL;DR, Where to look,
-glossary, decisions and drift current when edits are allowed; preserve `decisions: null` when the
-original intent is unavailable.
+Checked and Not checked, glossary, decisions and drift current when edits are allowed; preserve
+`decisions: null` when the original intent is unavailable. Leave out `review`, also when an
+earlier revision had one: the reviewer gives the verdict.
 
 After a Go, an instruction stating what the change should do becomes the latest stated intent.
-Use it to reassess how the change runs, decisions and drift in the writeup.
+Use it to reassess the decisions and drift in the writeup.
 An empty instruction or one that only limits scope leaves the earlier intent standing.
 
 ## Publish the next revision and wait

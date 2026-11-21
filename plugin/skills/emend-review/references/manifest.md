@@ -146,9 +146,10 @@ Without `main`, the app opens a nonempty writeup, then the first doc in manifest
 An explicit visible URL tab wins; a main doc opens Docs scrolled to that document.
 
 `decisions: null` means the decisions section was not written because the original request is
-unavailable. When that request is known first-hand, replace null with Markdown describing how
-the change runs, assumptions, drift, and independent review findings. A docs-only review omits
-both `base` and `head`, includes only doc entries, and needs `--key` for its first publication.
+unavailable. When that request is known first-hand, replace null with Markdown: the Needs you,
+Decided for you, drift and Trail lines the writing reference describes under "Decisions". A
+docs-only review omits both `base` and `head`, includes only doc entries, and needs `--key` for its
+first publication.
 A code review on a detached HEAD also needs `--key` for its first publication.
 `--key` is only for a first publish; later revisions use `--review <review-id>`.
 Pick a key unique to this review, such as the doc's name and today's date
@@ -185,12 +186,7 @@ Use these constraints when writing the manifest:
 - `writeup.area` names the part of the project in one to three words, at most 60 characters.
   Use plain text, never Markdown, control characters or line breaks.
   Leave it out to use the deepest folder the changed files share.
-- `writeup.review` is `{ "level", "topics"?, "reason" }`. `level` is `skim`, `topics` or
-  `everything`. `topics` lists declared topic slugs, only with level `topics`. `reason` is one
-  short sentence.
-- Publish refuses a verdict that contradicts the topics. A `critical` topic needs `everything`.
-  `skim` needs every topic at attention `skim` and every changed file in a declared topic.
-  `topics` must name every topic at attention `review`.
+- Leave out `writeup.review`. The reviewer gives the verdict.
 - `writeup.checked` and `writeup.notChecked` are Markdown and never blank.
 - `title` is at most 200 characters; `summary` is at most 2000.
 - `links` is optional: at most 8 entries of `url`, `label` and `kind`. `url` is an `https:` URL
@@ -238,7 +234,7 @@ Fix those fields and publish again.
   "topics": [
     {
       "slug": "retry-budget",
-      "title": "Retry budget",
+      "title": "Failed requests stop after three tries",
       "importance": 10,
       "attention": "review",
       "summary": "Requests stop retrying after three attempts.",
@@ -269,12 +265,11 @@ Fix those fields and publish again.
     "tldr": "Requests that kept failing retried without end and held the request loop. Each request now stops after three attempts, as the retry PRD asks.",
     "whyItMatters": "A failed service can no longer hold the request loop forever. Other requests can keep moving.",
     "area": "requests › retries",
-    "review": { "level": "topics", "topics": ["retry-budget"], "reason": "Every request passes the new retry loop." },
-    "checked": "- Unit tests for one, two and three failed attempts pass.\n- The full test suite passes.",
-    "notChecked": "- A real network that drops requests.",
-    "overview": "- **Goal:** Failed requests must stop retrying.\n- **Change:** Each request gets three attempts.",
+    "checked": "- A test that fails every attempt stops after the third and returns the error.\n- A test whose third attempt succeeds returns that answer.",
+    "notChecked": "- A real network that drops requests: a slow server could reach the cap sooner.",
+    "overview": "- **Goal:** After this, a failing request stops after three attempts and frees the request loop.\n- **Change:** Each request gets three attempts.",
     "outOfScope": "- The wait between attempts.",
-    "whereToLook": "- **Biggest risk:** An early stop could discard the final attempt.\n- **Check first:** Read `src/retry.ts` in Retry budget.",
+    "whereToLook": "- **Biggest risk:** A service that recovers on its fourth attempt now fails the request, and the user sees an error.\n- **Look yourself:** `src/retry.ts`, ref A: whether the first call counts as an attempt is a product call no test settles.",
     "context": "- The request loop and its PRD change.\n- No new dependency.\n- The retry budget follows `docs/adr/2026-07-01-retries.md`.",
     "decisions": null,
     "glossary": [{ "term": "Retry budget", "definition": "The total number of attempts allowed for one request." }],

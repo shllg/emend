@@ -11,6 +11,17 @@ Put the effect before the mechanism, explain unfamiliar terms, and cite paths yo
 Answer first, then give the reason and relevant validation.
 Use one fact per sentence and short sentences of 20 words or fewer.
 
+## Titles and paragraphs
+
+This section applies to a review writeup.
+
+- A topic title names the effect and the stake: "Failed requests stop after three tries", not
+  "Retry changes".
+- The first sentence of each paragraph carries its point.
+- Keep a paragraph to two or three sentences.
+
+A document follows these rules loosely: a TL;DR first, short sections, the point first.
+
 ## TL;DR
 
 Open with two or three short sentences on what this work is and why it matters for the project.
@@ -64,7 +75,7 @@ A document that explains a change or a proposal gives the same why and a grounde
 This section applies to a review writeup.
 When a topic changes how something moves between states, show those states as a diagram in that topic.
 A lifecycle, a protocol, retries and a hand-off are such changes.
-Other topics need no diagram.
+Other topics need a diagram only when it shows what you claim, as "Pictures" says.
 
 - Put a Mermaid `stateDiagram-v2` in a `mermaid` code fence in the topic's `why`, right after the **Fix:** paragraph.
   The `why` shows open; `body` starts folded under Details.
@@ -106,10 +117,11 @@ A bug path from a checked chart, as one item:
 - `ChargedOnce`: an order is charged at most once. Path: Checkout → Charging → Timed out → Charging.
 ```
 
-## Review verdict and risk
+## Risk and proof
 
-This section applies to a review writeup. It tells the reviewer how deep to read, and why.
-The reviewer decides. Your verdict is advice, and Checked and Not checked are its evidence.
+This section applies to a review writeup. The writeup is a decision brief: the reviewer decides
+from it whether the change passes. Rate the risk, show the proof, and leave the verdict to the
+reviewer.
 
 ### Risk, in plain words
 
@@ -143,20 +155,44 @@ Without a named step, the undo is a revert.
 When a revert is not enough, end the topic's `why` with a paragraph of its own that starts with **Undo:**.
 A feature flag does not undo writes already made.
 
-### The verdict
+### No verdict
 
-`review` holds the verdict: one of three levels and one short sentence, `reason`, that says why.
+Leave `review` out of the writeup. The reviewer gives the verdict, not you.
+A choice the reviewer must make opens `decisions` under a **Needs you:** label.
 
-- `skim` shows as "Skim, then merge.": every topic is Low risk, the undo is a revert or a revert
-  plus one named repair, and the checks cover the changed behavior.
-- `topics` shows as "Read topics" with their titles: one or two topics carry Medium risk or need a
-  repair. List their slugs in `topics`. With more than two such topics, read everything.
-- `everything` shows as "Read everything.": any High topic. Every data migration lands here.
+### Where to look
 
-`checked` lists what you actually ran or verified: commands, tests, manual checks.
-`notChecked` lists what you did not run or verify. Neither is ever empty.
-If you ran nothing, say so in `checked`.
-When in doubt, pick the deeper level and say why in `reason`. Never round down.
+`whereToLook` holds two labelled lines:
+
+- **Biggest risk:** one concrete case of what goes wrong, and for whom.
+  "The retry loop changed" names an area. "A request that fails three times shows the user an
+  empty list, with no error" is a case.
+- **Look yourself:** at most three spots, each with why no test settles it.
+  "`src/retry.ts`, where the loop counts attempts: the tests fake the clock" is one spot.
+
+### Checked and Not checked
+
+`checked` holds the proof: at most five items, strongest first. Each item says what it showed:
+"A test that fails the third attempt failed before the fix and passes now."
+Leave out process, such as running the gate, the linter or the type check, or reading the diff.
+`notChecked` holds only real gaps, each with what could go wrong.
+Neither is ever empty. If you ran nothing, say so in `checked`.
+
+The higher the risk, the stronger the proof. A data migration shows row counts and sums before
+and after, plus a few sample rows.
+
+### Decisions
+
+Keep a line in `decisions` only if the reviewer might decide, or judge the risk, differently
+because of it. Write it in this order:
+
+- **Needs you:** each choice the reviewer must make. Leave the label out when there is none.
+- **Decided for you:** one line per choice nobody asked for, in the form "Chose X over Y
+  because Z. Would change if W."
+- Drift: each departure from the user's latest stated intent, marked as drift, with the short
+  request it departs from quoted.
+- **Trail:** process facts in a short list, such as the independent review findings and whether
+  they were fixed, disputed or remain open, or that no independent review ran.
 
 ### Data migrations
 
@@ -164,55 +200,45 @@ A data migration always states, in its topic:
 
 - what data changes, and roughly how much;
 - whether it can be reversed, and how;
-- how it was tried: a dry run, or a copy of the data;
+- how it was tried: a dry run or a copy of the data, with row counts and sums before and after,
+  and a few sample rows;
 - what to watch after the deploy.
 
 ### Worked examples
 
-These cases are synthetic. Three cases per level: the first shows the topics, the verdict and
-its evidence; the other two are short.
+These cases are synthetic. Each shows a topic, the brief's lines and its proof.
 
-**Low: skim, then merge.** A change renames `fetchUser` to `loadUser` in eight files.
+**Low.** A change renames `fetchUser` to `loadUser` in eight files.
 
-- Topic "Rename the user loader": Low. The undo is a revert.
-- `review`: `{ "level": "skim", "reason": "A rename that the type checker and the tests cover." }`
-- `checked`: the full test suite and the type check pass.
-- `notChecked`: no manual run of the app.
+- Topic "User pages keep loading after the loader rename": Low. The undo is a revert.
+- **Biggest risk:** a call the type checker cannot see, such as a lookup by string, still asks
+  for `fetchUser`, and that page fails to load.
+- `checked`: a search finds no `fetchUser` outside the changelog.
+- `notChecked`: plugins outside this repository; one that calls `fetchUser` breaks on upgrade.
 
-Two more Low cases:
+**Medium.** A change caps request retries at three.
 
-- A typo fix in three error messages. The undo is a revert.
-- A cache key gains a version prefix, so old entries expire. The undo: revert, then clear the cache.
+- Topic "Failed requests stop after three tries": Medium, because every request passes the loop.
+  The undo is a revert.
+- **Biggest risk:** a request that fails a third time shows the user an empty list, with no
+  error.
+- **Look yourself:** `src/retry.ts`, where the loop counts attempts: the tests fake the clock, so
+  they cannot show real pauses.
+- `checked`: tests for one, two and three failed attempts; the third shows the error message.
+- `notChecked`: a real network that drops requests; a slow server could reach the cap sooner.
 
-**Medium: read topics.** A change caps request retries at three and rewords a settings label.
+**High.** A data migration moves invoice amounts from decimals to whole cents.
 
-- Topic "Retry budget": Medium, because every request passes the loop. The undo is a revert.
-- Topic "Settings label": Low. The undo is a revert.
-- `review`: `{ "level": "topics", "topics": ["retry-budget"], "reason": "Every request passes the new retry loop." }`
-- `checked`: unit tests for one, two and three failed attempts.
-- `notChecked`: a real network that drops requests.
-
-Two more Medium cases, each read as its own topic:
-
-- The inbox shows 50 rows per page instead of 20. Every user sees it. The undo is a revert.
-- A search field is renamed, and every search reads it. The undo: revert, then rerun the index
-  build.
-
-**High: read everything.** A data migration moves invoice amounts from decimals to whole cents.
-
-- Topic "Cents migration": High, because it rewrites stored money. Its `why` ends with
-  "**Undo:** Cannot be undone: drops column `amount_decimal`."
+- Topic "Stored invoice amounts become whole cents": High, because it rewrites stored money. Its
+  `why` ends with "**Undo:** Cannot be undone: drops column `amount_decimal`."
 - The topic states the migration facts: it rewrites about 1.2 million invoice rows. Only the
-  backup taken before the deploy reverses it. A dry run on a copy of last week's data matched every
-  total to the cent. After the deploy, watch the nightly totals report and failed invoice creation.
-- `review`: `{ "level": "everything", "reason": "A data migration rewrites every stored invoice amount." }`
-- `checked`: the dry run on the copy and the full test suite.
-- `notChecked`: the migration's run time on the live table under load.
-
-Two more High cases, each read everything:
-
-- Login skips the second factor on a remembered device. A mistake is a security hole.
-- The billing job moves from the end to the start of the month. A mistake charges customers twice.
+  backup taken before the deploy reverses it. After the deploy, watch the nightly totals report
+  and failed invoice creation.
+- `checked`: a dry run on a copy of last week's data. Before: 1,204,311 rows summing to
+  48,113,902.17. After: the same rows, summing to 4,811,390,217 cents. Five sample rows match to
+  the cent.
+- `notChecked`: the run time on the live table under load; a long lock could block new invoices.
+- `decisions`: "**Needs you:** run it in the nightly window, or now with a short lock?"
 
 ## Glossary
 
@@ -225,18 +251,23 @@ It shows the definition when the reader points at it.
 Add an alias for another form the text uses, such as an abbreviation.
 A document keeps its glossary as a list under a "Glossary" heading, one term per item.
 
-## Screenshots
+## Pictures
 
-A review writeup or a document can show images, such as before and after screenshots of a UI change.
-A change the user can see needs Before and After screenshots at the same viewport.
-Capture them with a headless browser.
+Show what you claim. A review writeup or a document can show images.
+
+- A change the user can see needs a screenshot. Show Before and After at the same viewport.
+  A single shot, or an After-only shot when there is no Before, is fine.
+- A change without a UI gets a picture too, such as a terminal transcript in a code block, or a
+  table as "Tables" says.
+
+Capture screenshots with a headless browser.
 Each project picks its own capture tool: use one the project or the user already provides.
 Never add a dependency or download a browser to capture.
 Capture Before from the base commit in a separate worktree or from an existing build.
 Never stash, reset or check out over the working tree to reach it.
 Capture with synthetic data, and crop to the change.
 Never show secrets, personal data, private hostnames, URLs or paths, or real customer or client content.
-If you cannot capture a shot, or a screen cannot avoid such data, skip it and say why under Where to look (`whereToLook`).
+If you cannot capture a shot, or a screen cannot avoid such data, skip it and say why under Not checked (`notChecked`).
 
 In a review writeup:
 
@@ -255,6 +286,16 @@ In a review writeup:
 In a Markdown document, put the image beside it and reference it with a relative path,
 `![Alt](shots/before.png)`. PNG, JPEG, GIF, WebP and AVIF show; remote image URLs do not.
 A Before and After pair shows the same way.
+
+## Tables
+
+Show these changes as a table:
+
+- A config change: one row per key path, with Before and After.
+- A schema change: the columns, with their type and what changed.
+- Numbers: Before, After and the change.
+
+Show a query plan as its steps, one per line.
 
 ## HTML pages
 

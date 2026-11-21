@@ -32,14 +32,15 @@ reading belongs in `doc`. The same path can appear once in each role when both v
 File extensions do not decide roles. Name each meaningful changed file and its topic; unassigned
 changes fall into Other changes. Never declare the reserved topic slug `other` yourself.
 
-Group the change by what the reader must decide. Give each topic a stable `slug`, short `title`,
-one-sentence `summary`, and `importance` from 0 to 99. The reserved Other changes topic uses 100.
+Group the change by what the reader must decide. Give each topic a stable `slug`, a short
+`title` that names the effect and the stake, a one-sentence `summary`, and `importance` from 0
+to 99. The reserved Other changes topic uses 100.
 Lower importance sorts first. Lead with
 security boundaries, irreversible effects, removals and uncertain behavior. Mechanical changes
 belong later, regardless of file size or alphabetic order.
 
 Rate each topic's risk, sensitivity and undo with the rubric in
-[the writing reference](references/writing.md), "Review verdict and risk". It holds the plain
+[the writing reference](references/writing.md), "Risk and proof". It holds the plain
 risk words, the budget of one High topic, and the migration rule.
 
 - `attention` is the risk: `skim` is Low, `review` is Medium and `critical` is High. It never
@@ -143,9 +144,13 @@ If no related docs are found, write "No design doc is cited." in the writeup's `
 ## Write for the reviewer
 
 Read [the writing reference](references/writing.md) before you write the writeup. It holds the
-writing rules: sentences, the TL;DR, Why and Example, state diagrams, the glossary and screenshots.
+writing rules: sentences, titles and paragraphs, the TL;DR, Why and Example, state diagrams,
+risk and proof, the glossary, pictures and tables.
 
 Author Markdown in `writeup`, except the plain-text `area`.
+
+The writeup is a decision brief: the reviewer decides from it whether the change passes.
+Write no `review` verdict. The reviewer gives it.
 
 Write the opening fields below. The app groups them for the reviewer.
 
@@ -155,28 +160,25 @@ Write the opening fields below. The app groups them for the reviewer.
 - `area`: one to three words naming the part of the project, such as `cli › serve`.
   Use plain text, at most 60 characters. The breadcrumb shows it after the project.
   Leave it out and the app shows the deepest folder the changed files share.
-- `review`: your verdict, as the writing reference says under "Review verdict and risk".
-  `level` is `skim`, `topics` or `everything`. Only `topics` takes `topics`, the slugs to read.
-  `reason` is one short sentence. It shows in Facts, right under the TL;DR card.
-- `checked`: what you actually ran or verified, as a short list. Never empty.
-- `notChecked`: what you did not run or verify, as a short list. Never empty.
-- `overview`: two bullets, **Goal** (the problem) and **Change** (what the reviewer sees now), in plain language.
-  They show side by side.
+- `checked`: the proof, at most five items, strongest first, each saying what it showed.
+  No process items, such as running the gate or reading the diff. Never empty.
+- `notChecked`: only real gaps, each with what could go wrong. Never empty.
+- `overview`: two bullets in plain language. **Goal** is the end state, starting "After this,".
+  **Change** is what the reviewer sees now. They show side by side.
 - `outOfScope`: what the change leaves out on purpose, as a short list.
   It shows quieter, right under the overview.
-- `whereToLook`: two bullets, **Biggest risk** and **Check first**.
-  Name the highest risk and the topic and file to inspect first.
+- `whereToLook`: two labelled lines. **Biggest risk** gives one concrete case of what goes wrong,
+  and for whom. **Look yourself** names at most three spots, each with why no test settles it.
   A new or changed dependency is always one of them.
   It guides the review and does not summarize the change. Keep these current after fixes.
 - `context`: side information as a short list.
   Include the commit count and scope, renamed files, dependencies, unchanged areas and cited docs.
   It shows muted, below the guide.
 - `decisions`: write this only when the user's request is available in this conversation and
-  you are not a sub-agent. Describe how the change runs, assumptions nobody asked for, and drift
-  from the user's latest stated intent. Mark drift clearly and quote the short request it departs
-  from. Include any independent review findings and whether they were fixed, disputed or remain
-  open; say when no independent review ran. With no first-hand intent, set this field to `null`:
-  the decisions section is **not written**. Never reconstruct intent from commits or the diff.
+  you are not a sub-agent. Write it as the writing reference says under "Decisions": **Needs
+  you** first, then **Decided for you**, drift with the request quoted, and a short **Trail**.
+  With no first-hand intent, set this field to `null`: the decisions section is **not
+  written**. Never reconstruct intent from commits or the diff.
 - `glossary`: the glossary, as the writing reference says.
 - `topics[slug]`: `why` and `example` as the writing reference says; `body` gives the decisions,
   trade-offs and checks. A request to explain something in the writeup belongs here.
