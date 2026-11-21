@@ -37,6 +37,7 @@ Put the marker alone on the quote's first line:
 - `[!NOTE]` shows a note and `[!WARNING]` a warning.
 - `[!TIP]` and `[!IMPORTANT]` show as notes, `[!CAUTION]` as a warning, each with its own label.
 - A quote without a marker stays a plain quote.
+- A callout holds text, lists and code. A quote with a Mermaid diagram stays a plain quote, so put the diagram outside it.
 - An HTML page uses `<aside class="note">` or `<aside class="warning">` instead.
 
 ## No filler

@@ -1,36 +1,82 @@
 import { describe, expect, test } from "vitest";
+import { makeSpan, placeSpan } from "../place/span.ts";
+import { blockText } from "./blocks.ts";
+import { blockHash } from "./hash.ts";
 import { renderCommentHtml, renderDoc, renderMarkdown } from "./markdown.ts";
+import { normalizeText } from "./normalize.ts";
+import { renderWriteup } from "./writeup.ts";
 
 describe("GitHub alert callouts", () => {
-  test("a note stays one quote block with its title and body in the block text", async () => {
+  test("a note stays one quote block with the original marker and body text", async () => {
+    const oldHtml = "<blockquote>\n<p>[!NOTE]\nBody text</p>\n</blockquote>";
     const blocks = await renderMarkdown("> [!NOTE]\n> Body text", "overview");
     expect(blocks).toHaveLength(1);
     expect(blocks[0]?.kind).toBe("quote");
     expect(blocks[0]?.html).toContain('class="emend-callout emend-callout-note"');
-    expect(blocks[0]?.html).toContain('<p class="emend-callout-title">Note</p>');
-    expect(blocks[0]?.html).toContain("<p>Body text</p>");
-    expect(blocks[0]?.html).not.toContain("[!NOTE]");
-    expect(blocks[0]?.text).toContain("Note");
-    expect(blocks[0]?.text).toContain("Body text");
+    expect(blocks[0]?.html).toContain('<span class="emend-callout-marker">[!NOTE]</span>\nBody text</p>');
+    expect(blocks[0]?.html).not.toContain("emend-callout-title");
+    expect(blocks[0]?.text).toBe("\n[!NOTE]\nBody text\n");
+    expect(blocks[0]?.text).toBe(blockText(oldHtml));
   });
 
   test.each([
-    ["WARNING", "warning", "Warning"],
-    ["warning", "warning", "Warning"],
-    ["TIP", "tip", "Tip"],
-    ["IMPORTANT", "important", "Important"],
-    ["CAUTION", "caution", "Caution"],
-  ])("%s has its own class and label", async (marker, type, label) => {
+    ["WARNING", "warning"],
+    ["warning", "warning"],
+    ["TIP", "tip"],
+    ["IMPORTANT", "important"],
+    ["CAUTION", "caution"],
+    ["nOtE", "note"],
+  ])("%s has its own class and preserves the marker's case", async (marker, type) => {
     const [block] = await renderMarkdown(`> [!${marker}]\n> Body`, "overview");
     expect(block?.html).toContain(`class="emend-callout emend-callout-${type}"`);
-    expect(block?.html).toContain(`<p class="emend-callout-title">${label}</p>`);
-    expect(block?.html).not.toContain(`[!${marker}]`);
+    expect(block?.html).toContain(`<span class="emend-callout-marker">[!${marker}]</span>`);
+    expect(block?.html).not.toContain("emend-callout-title");
   });
 
-  test("a marker in its own paragraph leaves no empty paragraph or doubled separator", async () => {
+  test.each([
+    ["> [!NOTE]\n> Body text", "\n[!NOTE]\nBody text\n"],
+    ["> [!NOTE]\n>\n> Body", "\n[!NOTE]\nBody\n"],
+    ["> [!warning]\n> Body", "\n[!warning]\nBody\n"],
+  ])("keeps the original block text and id: %s", async (markdown, oldText) => {
+    const section = "overview";
+    const [block] = await renderMarkdown(markdown, section);
+    expect(block?.text).toBe(oldText);
+    expect(block?.id).toBe(`${section}-${await blockHash(normalizeText(oldText))}`);
+  });
+
+  test("a selection anchored to the old quote still places at the same block id", async () => {
+    const section = "overview";
+    const oldText = "\n[!NOTE]\nBody text\n";
+    const oldBlock = {
+      id: `${section}-${await blockHash(normalizeText(oldText))}`,
+      section,
+      kind: "quote" as const,
+      html: "<blockquote>\n<p>[!NOTE]\nBody text</p>\n</blockquote>",
+      text: oldText,
+    };
+    const start = normalizeText(oldText).indexOf("Body text");
+    const end = start + "Body text".length;
+    const target = { kind: "writeup-span" as const, ...makeSpan(oldBlock, start, end) };
+    expect(target).toEqual({
+      kind: "writeup-span",
+      blockId: oldBlock.id,
+      quote: "Body text",
+      prefix: "[!NOTE] ",
+      suffix: "",
+    });
+    const blocks = await renderMarkdown("> [!NOTE]\n> Body text", section);
+    expect(placeSpan(blocks, target)).toEqual({
+      status: "placed",
+      location: { kind: "writeup-span", blockId: oldBlock.id, start, end },
+    });
+  });
+
+  test("a marker in its own paragraph keeps that paragraph and its separators", async () => {
     const [block] = await renderMarkdown("> [!NOTE]\n>\n> Body", "overview");
     expect(block?.html).toBe(
-      '<blockquote class="emend-callout emend-callout-note"><p class="emend-callout-title">Note</p>\n<p>Body</p>\n</blockquote>',
+      '<blockquote class="emend-callout emend-callout-note">\n' +
+        '<p class="emend-callout-marker-line"><span class="emend-callout-marker">[!NOTE]</span></p>\n' +
+        "<p>Body</p>\n</blockquote>",
     );
   });
 
@@ -67,8 +113,29 @@ describe("GitHub alert callouts", () => {
   ])("accepts whitespace or a hard break after the marker: %s", async (markdown) => {
     const [block] = await renderMarkdown(markdown, "overview");
     expect(block?.html).toContain('class="emend-callout emend-callout-note"');
+    expect(block?.html).toContain('<span class="emend-callout-marker">[!NOTE]</span>');
     expect(block?.text).toContain("Body");
-    expect(block?.html).not.toMatch(/\[!NOTE\]|<br/);
+    expect(block?.html).not.toContain("emend-callout-title");
+  });
+
+  test("preserves whitespace and a hard break after the marker", async () => {
+    const [block] = await renderMarkdown("<blockquote><p>[!note] \t<br>Body</p></blockquote>", "overview");
+    expect(block?.html).toBe(
+      '<blockquote class="emend-callout emend-callout-note">' +
+        '<p><span class="emend-callout-marker">[!note]</span> \t<br>Body</p></blockquote>',
+    );
+  });
+
+  test("a marker-only paragraph keeps its author classes, whitespace and breaks", async () => {
+    const [block] = await renderMarkdown(
+      '<blockquote><p class="marker">[!NOTE] \t<br>\n</p><p>Body</p></blockquote>',
+      "overview",
+    );
+    expect(block?.html).toBe(
+      '<blockquote class="emend-callout emend-callout-note">' +
+        '<p class="user-content-marker emend-callout-marker-line">' +
+        '<span class="emend-callout-marker">[!NOTE]</span> \t<br>\n</p><p>Body</p></blockquote>',
+    );
   });
 
   test.each([
@@ -99,13 +166,14 @@ describe("GitHub alert callouts", () => {
     }
   });
 
-  test("author classes cannot forge a callout or its title", async () => {
+  test("author classes cannot forge a callout or its marker", async () => {
     const [block] = await renderMarkdown(
-      '<blockquote class="emend-callout"><p class="emend-callout-title">Fake</p></blockquote>',
+      '<blockquote class="emend-callout"><p><span class="emend-callout-marker">[!NOTE]</span> Fake</p></blockquote>',
       "overview",
     );
     expect(block?.html).toBe(
-      '<blockquote class="user-content-emend-callout"><p class="user-content-emend-callout-title">Fake</p></blockquote>',
+      '<blockquote class="user-content-emend-callout">' +
+        '<p><span class="user-content-emend-callout-marker">[!NOTE]</span> Fake</p></blockquote>',
     );
   });
 
@@ -114,12 +182,50 @@ describe("GitHub alert callouts", () => {
     expect(block?.html).toContain('class="user-content-note emend-callout emend-callout-note"');
   });
 
-  test("comments consume the marker's line break", async () => {
+  test("comments keep the marker and its line break", async () => {
     const html = await renderCommentHtml("> [!NOTE]\n> Body");
     expect(html).toContain('class="emend-callout emend-callout-note"');
-    expect(html).toContain('<p class="emend-callout-title">Note</p>');
-    expect(html).toContain("Body</p>");
-    expect(html).not.toMatch(/<br|\[!NOTE\]/);
+    expect(html).toContain('<span class="emend-callout-marker">[!NOTE]</span><br>\nBody</p>');
+    expect(html).not.toContain("emend-callout-title");
+  });
+
+  test("a quote with a Mermaid diagram stays plain across every text piece", async () => {
+    const click = '  click A "javascript:alert(1)"';
+    const blocks = await renderDoc(
+      `> [!NOTE]\n> intro\n>\n> \`\`\`mermaid\n> flowchart LR\n>   A --> B\n> ${click}\n> \`\`\`\n>\n> outro`,
+      "guide.md",
+    );
+    expect(blocks.map((block) => block.kind)).toEqual(["quote", "diagram", "quote"]);
+    for (const block of blocks) expect(block.html).not.toMatch(/emend-callout|<script|javascript:/i);
+    expect(blocks[1]?.source).toContain(click);
+    expect(blocks[1]?.html).toBe("");
+    expect(blocks[0]?.html).toContain("<p>[!NOTE]\nintro</p>");
+    expect(blocks[0]?.text).toContain("[!NOTE]");
+    expect(blocks[2]?.text).toContain("outro");
+  });
+
+  test("glossary definitions stay sanitized list items without callout markup", async () => {
+    const rendered = await renderWriteup(
+      {
+        overview: "",
+        tldr: "",
+        decisions: "",
+        topics: {},
+        glossary: [
+          { term: "Note", definition: '> [!NOTE] <img src=x onerror="alert(1)"> <script>alert(1)</script> body' },
+          {
+            term: "Warning",
+            definition: '\n> [!WARNING]\n> <img src=x onerror="alert(1)"> <script>alert(1)</script> body',
+          },
+        ],
+      },
+      [],
+    );
+    const blocks = rendered.sections.find((section) => section.key === "glossary")?.blocks ?? [];
+    expect(blocks.map((block) => block.kind)).toEqual(["item", "item"]);
+    for (const block of blocks) expect(block.html).not.toMatch(/emend-callout|onerror|<script/i);
+    expect(blocks[0]?.text).toContain("[!NOTE]");
+    expect(blocks[1]?.text).toContain("[!WARNING]");
   });
 
   test("an ordinary Markdown doc keeps its headings, list, code and plain quote", async () => {

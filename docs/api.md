@@ -231,6 +231,15 @@ Introductory lines get `emend-example-line`; unlabelled lines after a label cont
 Whitespace after a label stays in its value. Only separators before labelled lines stay between rows.
 Paragraphs containing media spans keep their media markup. Text and block ids stay unchanged.
 
+A top-level quote whose first paragraph starts with a GitHub alert marker becomes a callout in
+the writeup, Markdown docs and comment HTML. The marker is `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`,
+`[!WARNING]` or `[!CAUTION]`, in any case, alone on its line, with content after it. The
+`blockquote` gets `emend-callout emend-callout-<type>`, and the marker's own text goes in
+`span.emend-callout-marker`. A first paragraph that holds only the marker also gets
+`emend-callout-marker-line`. The app hides the marker and draws the type's label; the label is
+not text. A quote inside another element, or one that holds a Mermaid diagram, stays a plain
+quote. Text and block ids stay unchanged.
+
 ### Downloads
 
 `GET /api/v1/reviews/:id/revisions/:seq/download` requires a reviewer session with `read` scope.
