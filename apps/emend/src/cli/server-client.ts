@@ -131,15 +131,26 @@ export async function probeServer(
   }
 }
 
+export async function discoverCapabilities(
+  stateDir: string,
+  timeoutMs: number,
+  expectedUrl?: string,
+): Promise<{ url: string; capabilities: Capabilities } | null> {
+  const record = await serverRecord(stateDir, expectedUrl);
+  if (!record) return null;
+  const result = await probeServer(record, timeoutMs);
+  return result.kind === "verified" && result.capabilities
+    ? { url: record.url, capabilities: result.capabilities }
+    : null;
+}
+
 export async function discover(
   stateDir: string,
   timeoutMs: number,
   expectedUrl?: string,
 ): Promise<{ url: string } | null> {
-  const record = await serverRecord(stateDir, expectedUrl);
-  if (!record) return null;
-  const result = await probeServer(record, timeoutMs);
-  return result.kind === "verified" && result.capabilities ? { url: record.url } : null;
+  const result = await discoverCapabilities(stateDir, timeoutMs, expectedUrl);
+  return result ? { url: result.url } : null;
 }
 
 export async function ensureServer(

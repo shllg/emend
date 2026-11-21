@@ -3,14 +3,17 @@ import { and, asc, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import type { Principal } from "../../server/auth/principal.ts";
 import type { Db } from "../client.ts";
-import { reviews, revisions } from "../schema.ts";
+import { reviews, revisions, sends } from "../schema.ts";
 
 /**
  * The agent's own list: the owner's reviews that began on the token's instance, newest first.
  * It selects no comment, writeup or doc column, and a token without an instance sees nothing.
  * Each row names the newest revision and the approved one (revision number and head), so an agent
  * can tell which commit an approval covers. With `query.head`, only reviews whose approved or newest
- * revision has exactly that head remain, before the row limit applies. It reads and writes nothing else.
+ * revision has exactly that head remain. `query.key` matches the stored review key exactly; both
+ * filters apply before the row limit. On an open review, a live Send on the newest revision makes
+ * it the agent's turn, otherwise the reviewer's; closed reviews and those without a revision have
+ * no turn. It reads no content and writes nothing.
  */
 export async function listAgentReviews(
   db: Db,
@@ -30,8 +33,10 @@ export async function listAgentReviews(
         branch: reviews.branch,
         state: reviews.state,
         updatedAt: reviews.updatedAt,
+        newestId: newest.id,
         newestSeq: newest.seq,
         newestHead: newest.head,
+        newestSent: sql<boolean>`exists (select 1 from ${sends} s where s.owner_id = ${reviews.ownerId} and s.review_id = ${reviews.id} and s.revision_id = ${newest.id} and s.set_aside_at is null)`,
         approvedSeq: approved.seq,
         approvedHead: approved.head,
       })
@@ -60,6 +65,7 @@ export async function listAgentReviews(
           eq(reviews.ownerId, principal.ownerId),
           eq(reviews.originInstanceId, instanceId),
           isNull(reviews.binnedAt),
+          query.key === undefined ? undefined : eq(reviews.reviewKey, query.key),
           query.head === undefined ? undefined : or(eq(approved.head, query.head), eq(newest.head, query.head)),
         ),
       )
@@ -73,6 +79,7 @@ export async function listAgentReviews(
       title: row.title,
       branch: row.branch,
       state: row.state,
+      turn: row.state !== "open" || row.newestId === null ? null : row.newestSent ? "agent" : "reviewer",
       newest: row.newestSeq === null ? null : { revision: row.newestSeq, head: row.newestHead },
       approved: row.approvedSeq === null ? null : { revision: row.approvedSeq, head: row.approvedHead },
       updatedAt: new Date(row.updatedAt).toISOString(),

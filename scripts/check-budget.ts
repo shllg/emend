@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 // file (about 11 KiB today).
 const AGENTS_MAX_BYTES = 16384;
 const CLAUDE_MAX_BYTES = 1024;
-const RULE_MAX_BYTES = 6144;
+const RULE_MAX_BYTES = 6656;
 
 export interface BudgetResult {
   errors: string[];

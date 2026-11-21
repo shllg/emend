@@ -107,7 +107,7 @@ a machine token reaches only reviews from its own instance.
 | DELETE | `/api/v1/groups/:id` | Reviewer | Delete a group, returning its items to their normal lists (204). |
 | PUT | `/api/v1/reviews/:id/group` | Reviewer | Move a review or pub into a group, or remove it (204). |
 | PUT | `/api/v1/reviews/:id/pin` | Reviewer | Pin or unpin a review or pub (204). |
-| GET | `/api/v1/agent/reviews` | Agent | List the token's own instance's reviews, newest first, as `AgentReviewList`; `?head=<sha>` keeps those whose approved or newest revision has that head. |
+| GET | `/api/v1/agent/reviews` | Agent | List the token's own instance's reviews, newest first, as `AgentReviewList`; `?head=<sha>` keeps those whose approved or newest revision has that head; `?key=<key>` keeps the review with that stored review key. |
 | GET | `/api/v1/reviews/:id` | Reviewer | Read a review. |
 | GET | `/api/v1/reviews/:id/revisions/:seq` | Reviewer | Read one revision. |
 | GET | `/api/v1/reviews/:id/revisions/:seq/download` | Reviewer | Download one offline HTML file, or a ZIP with docs selected by repeated `doc` parameters. Optional `comments=1` adds sent comments and replies; an HTML pub with comments downloads as a ZIP. Optional `diff=1` adds the code diff after the writeup. Optional `theme=dark`, `theme=light` or `theme=<name>` sets the look of files emend draws. |
@@ -1504,11 +1504,16 @@ Every query is owner-scoped. Missing/foreign reviews return `404 unknown_review`
 invalid sequences of an owned review return `404 not_found`. Agent tokens receive `403 forbidden`.
 
 `GET /api/v1/agent/reviews` returns `AgentReviewList = { items: AgentReviewItem[] }` with
-`AgentReviewItem = { id, title, branch, state: ReviewState, newest, approved, updatedAt, url }`.
+`AgentReviewItem = { id, title, branch, state: ReviewState, turn, newest, approved, updatedAt, url }`.
 `branch` is the review's stored branch, `null` when the publish named none. `newest` is
 `{ revision, head }` for the review's newest revision (highest `seq`), or `null` for a review that
 has no revision. `approved` is `null` while no revision is approved, else `{ revision, head }` of the
-revision the approval points at. `head` is the revision's stored head, unchanged: a full commit
+revision the approval points at. On an open review, `turn` is `agent` when a Send that is not set
+aside was made on the newest revision, else `reviewer`. It is `null` when the review is approved
+or settled, or has no revision. This matches the inbox's Answered group: a Send on the newest
+revision passes the turn to the agent; a new revision passes it back. The schema defaults a
+missing `turn` to `null`, so clients can read lists from older servers or hubs.
+`head` is the revision's stored head, unchanged: a full commit
 id (40 or 64 lowercase hex characters), `"worktree"` or `null`. It needs the agent `publish`
 scope and lists only the principal owner's reviews whose origin is the token's own instance, so a
 machine token never sees another instance's or another owner's reviews. Items run newest
@@ -1518,13 +1523,21 @@ stored `state` (`open`, `approved` or `settled`). `updatedAt` is an ISO 8601 UTC
 the review's address on this server. The list carries no comment bodies,
 writeup text, doc content, tokens or other ids. A reviewer session receives `403 forbidden`.
 
-The optional query `?head=<sha>` (`AgentReviewQuery = { head?: commit }`) keeps only reviews whose
+The optional query `?head=<sha>` (`AgentReviewQuery = { head?: commit, key?: sha256 }`) keeps only reviews whose
 approved revision's head equals `<sha>` or whose newest revision's head equals `<sha>`. The match
 is exact and case-sensitive on the stored value; an older, superseded revision's head does not
 match. `<sha>` is a full object id of exactly 40 or 64 lowercase hex characters: no prefix and no
 `worktree`. The filter is applied together with the owner and origin-instance conditions, before the
 ordering and the 100-row cap, so the cap counts matches. A malformed or repeated `head` is
 `400 invalid_request`.
+
+`?key=<key>` keeps only reviews whose stored review key equals the value exactly: 64 lowercase
+hex characters, the `reviewKey` the publisher sent. For a code review, `emend publish` derives it
+from the instance, the worktree root and the branch. With both `key` and `head`, both must match.
+The key filter applies with the owner and origin-instance conditions, before the ordering and
+the cap. A malformed or repeated `key` is `400 invalid_request`. Capabilities lists
+`agent-review-key` when the server applies `key`; an older server ignores `key` and returns the
+whole list, so a client checks that feature before it relies on the filter.
 
 `head` and `branch` are the values the publisher sent; the server stores them unverified, and a
 review without code files (docs or a plan only) shows the reviewer no diff of that commit. So
@@ -1550,8 +1563,10 @@ to make a read fit a per-Send or per-revision limit. The limits below apply to t
 | `AgentReviewList.items` | `agentReviews` (100), the agent list query limit |
 | `AgentReviewItem.title` | `titleChars` (200), as in `InboxItem.title` |
 | `AgentReviewItem.branch` | As `InboxItem.branch`: the stored branch or `null` |
+| `AgentReviewItem.turn` | `reviewer`, `agent` or `null`; defaults to `null` when omitted |
 | `AgentReviewItem.newest`, `.approved` | `{ revision, head }`: `revision` a positive integer, `head` a full commit id, `"worktree"` or `null` (as `RevisionView.head`); `newest` is `null` without any revision, `approved` while nothing is approved |
 | `AgentReviewQuery.head` | Optional; exactly 40 or 64 lowercase hex characters, else `400 invalid_request` |
+| `AgentReviewQuery.key` | Optional; exactly 64 lowercase hex characters, else `400 invalid_request` |
 | `AgentReviewItem.updatedAt` | ISO 8601 UTC datetime string (`z.iso.datetime()`) |
 | `AgentReviewItem.url` | HTTP(S) URL of at most `pathChars` (4096) characters |
 | `InboxItem.title` | `titleChars` (200), including publish's nonblank requirement |
@@ -1598,8 +1613,9 @@ entry before dynamically loading the app and its schemas. It sets Zod's `jitless
 object construction (when Zod captures this setting), so validation never probes or compiles
 `Function` under the app CSP. The normal contract index also exports the function.
 
-`Capabilities = { api: 1, version: string, features: string[] }`. The first feature list is
-`["attach", "html-docs", "mcp"]`; clients accept additional feature strings.
+`Capabilities = { api: 1, version: string, features: string[] }`. The current feature list is
+`["attach", "html-docs", "mcp", "review-lifecycle", "review-bin", "review-groups", "review-pins", "agent-review-key"]`,
+plus `server-stop` when the server supports stopping through the API; clients accept additional feature strings.
 
 `PairingPurpose = "device" | "machine"`. `PairingRequest = { purpose? }` defaults to `"device"`.
 `PairingCreated = { url, code, expiresAt }`: the HTTP(S) URL ends in `/pair#<secret>` with no query,

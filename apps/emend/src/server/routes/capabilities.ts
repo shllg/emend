@@ -1,4 +1,5 @@
 import {
+  AGENT_REVIEW_KEY_FEATURE,
   Capabilities,
   REVIEW_BIN_FEATURE,
   REVIEW_GROUPS_FEATURE,
@@ -34,6 +35,7 @@ export function capabilitiesRoutes(app: Hono<AppEnv>, key: string, canStop = fal
           REVIEW_BIN_FEATURE,
           REVIEW_GROUPS_FEATURE,
           REVIEW_PINS_FEATURE,
+          AGENT_REVIEW_KEY_FEATURE,
           ...(canStop ? ["server-stop"] : []),
         ],
       }),

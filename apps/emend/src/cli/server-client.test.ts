@@ -9,7 +9,8 @@ import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { testDb } from "../db/test-support.ts";
 import { startServer } from "../server/serve.ts";
 import { writeSecretFile } from "../state/files.ts";
-import { discover, ensureServer } from "./server-client.ts";
+import { discover, discoverCapabilities, ensureServer } from "./server-client.ts";
+import { provenTestServer } from "./test-support.ts";
 
 const launchEnvs = new Map<string, { confinedEnv: NodeJS.ProcessEnv; suppliedEnvs: NodeJS.ProcessEnv[] }>();
 vi.mock("node:child_process", async (original) => {
@@ -111,28 +112,50 @@ test.each([
   }
 });
 
-test("a wrong proof never reads an endless capabilities body", async () => {
-  const stateDir = await mkdtemp(join(process.env.EMEND_HOME as string, "discovery-proof-"));
+test.each([discover, discoverCapabilities])(
+  "%s never reads an endless capabilities body with a wrong proof",
+  async (lookup) => {
+    const stateDir = await mkdtemp(join(process.env.EMEND_HOME as string, "discovery-proof-"));
+    onTestFinished(() => rm(stateDir, { recursive: true, force: true }));
+    try {
+      await writeFile(
+        join(stateDir, "server.json"),
+        JSON.stringify({
+          pid: process.pid,
+          url: "http://127.0.0.1:3636",
+          key: randomBytes(32).toString("base64url"),
+        }),
+      );
+      const pull = vi.fn();
+      const cancel = vi.fn();
+      const body = new ReadableStream({ pull, cancel }, { highWaterMark: 0 });
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body));
+      expect(await lookup(stateDir, 500)).toBeNull();
+      expect(pull).not.toHaveBeenCalled();
+      expect(cancel).toHaveBeenCalledOnce();
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  },
+);
+
+test("discovery exposes verified capabilities while preserving the original result", async () => {
+  const stateDir = await mkdtemp(join(process.env.EMEND_HOME as string, "discovery-capabilities-"));
   onTestFinished(() => rm(stateDir, { recursive: true, force: true }));
-  try {
-    await writeFile(
-      join(stateDir, "server.json"),
-      JSON.stringify({
-        pid: process.pid,
-        url: "http://127.0.0.1:3636",
-        key: randomBytes(32).toString("base64url"),
-      }),
-    );
-    const pull = vi.fn();
-    const cancel = vi.fn();
-    const body = new ReadableStream({ pull, cancel }, { highWaterMark: 0 });
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body));
-    expect(await discover(stateDir, 500)).toBeNull();
-    expect(pull).not.toHaveBeenCalled();
-    expect(cancel).toHaveBeenCalledOnce();
-  } finally {
-    await rm(stateDir, { recursive: true, force: true });
-  }
+  const proof = provenTestServer(stateDir, ["agent-review-key"]);
+  const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+    const response = proof(String(url), init);
+    if (!response) throw new Error("unexpected discovery request");
+    return response;
+  });
+  expect(await discoverCapabilities(stateDir, 500)).toEqual({
+    url: "http://127.0.0.1:3636",
+    capabilities: { api: 1, version: "0.1.0", features: ["agent-review-key"] },
+  });
+  expect(await discover(stateDir, 500)).toEqual({ url: "http://127.0.0.1:3636" });
+  fetcher.mockClear();
+  expect(await discoverCapabilities(stateDir, 500, "http://127.0.0.1:9999")).toBeNull();
+  expect(fetcher).not.toHaveBeenCalled();
 });
 
 test("ensureServer reuses a live server with valid capabilities", async () => {

@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { realpath, stat } from "node:fs/promises";
-import { homedir } from "node:os";
+import { stat } from "node:fs/promises";
 import { basename, dirname, extname, posix, resolve, sep } from "node:path";
 import {
   docViewOf,
@@ -16,12 +15,13 @@ import {
 import { decodeText, UnchangedFilesError, withOtherChanges } from "@emend/core";
 import { WorkTimeout, workerExecutor } from "../../server/publish/executor.ts";
 import type { Executor } from "../../server/publish/work.ts";
-import { DocRootError, readDocRoots, rootRules, validateDocRoot } from "../config.ts";
+import { readDocRoots } from "../config.ts";
 import { escapeReference } from "../escape.ts";
 import { createGitSession, GitFailed } from "../git.ts";
 import { CliError } from "../http.ts";
 import { collectAssets, docAssetSizeError, docImageWarning, type WalkedSecretPaths } from "./assets.ts";
 import { collectChanges } from "./collect.ts";
+import { codeRoot } from "./context.ts";
 import { docsKey, normalizeRemote, projectKey, reviewKey } from "./key.ts";
 import {
   checkPublishedFolders,
@@ -34,7 +34,7 @@ import {
 } from "./read.ts";
 import { remoteToRepoUrl } from "./repo-url.ts";
 import type { RetainedSources } from "./retained.ts";
-import { gitFolders, worktreeRoot } from "./root.ts";
+import { gitFolders } from "./root.ts";
 import { ShortcutAssets } from "./shortcut-assets.ts";
 import { isSecretPath, readSkipReason } from "./shortcut-walk.ts";
 import { readSide } from "./sides.ts";
@@ -72,23 +72,7 @@ export function shortenRepoName(name: string): string {
 }
 export async function publishContext(cwd: string, stateDir: string) {
   const git = createGitSession();
-  const worktree = await worktreeRoot(cwd);
-  if (worktree) {
-    try {
-      await validateDocRoot(worktree, homedir(), stateDir);
-    } catch (error) {
-      if (error instanceof DocRootError)
-        throw new CliError(
-          `the repository at ${escapeReference(worktree)} ${rootRules[error.reason].publish}, so emend does not publish from it`,
-        );
-      throw error;
-    }
-    const configured = await realpath(
-      (await git(cwd, ["rev-parse", "--show-toplevel"])).toString().replace(/\r?\n$/, ""),
-    );
-    if (configured !== worktree) throw new CliError("the repository's worktree is configured elsewhere");
-  }
-  const root = worktree ?? (await realpath(cwd));
+  const { worktree, root } = await codeRoot(cwd, stateDir, git);
   const gitDirs = worktree ? await gitFolders(worktree, git) : [];
   return { git, worktree, root, gitDirs };
 }

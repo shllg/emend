@@ -101,7 +101,8 @@ sections of the hub and attach pages cover those setups.
 
 [docs/usage.md](https://github.com/shllg/emend/blob/release/docs/usage.md) covers `emend config`,
 publishing docs for review and [themes](https://github.com/shllg/emend/blob/release/docs/usage.md#themes),
-with an example prompt that has your coding agent make one.
+with an example prompt that has your coding agent make one. It also shows how to
+[put the review in Claude Code's status line](https://github.com/shllg/emend/blob/release/docs/usage.md#show-the-review-in-claude-codes-status-line).
 
 ## Development
 

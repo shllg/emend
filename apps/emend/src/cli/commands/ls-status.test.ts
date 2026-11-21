@@ -31,6 +31,7 @@ const item = {
   title: "Synthetic review",
   branch: null,
   state: "open",
+  turn: null,
   newest: null,
   approved: null,
   updatedAt: "2026-01-01T00:10:00.000Z",
@@ -407,12 +408,12 @@ test.each([false, true])("status never prints a token (attached %s)", async (att
 test("status rejects arguments", async () => {
   const f = await commandFixture();
   expect(await run(["status", "--bogus"], f.io)).toBe(2);
-  expect(f.stderr.join("")).toContain("Usage: emend status [--json]");
+  expect(f.stderr.join("")).toContain("Usage: emend status [--json | --line]");
 });
 
 test("--help lists ls and status", async () => {
   const f = await commandFixture();
   expect(await run(["--help"], f.io)).toBe(0);
   expect(f.stdout.join("")).toContain("emend ls [--json]");
-  expect(f.stdout.join("")).toContain("emend status [--json]");
+  expect(f.stdout.join("")).toContain("emend status [--json | --line]");
 });

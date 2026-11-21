@@ -14,6 +14,8 @@ checks catch a copy inside the repo.
 - `publish`, `look`, `wait`, `feedback`, `reply`, `mcp`, `stop`, `service`, `update` and `skills` refuse
   an emend whose Node.js or entry resolves inside a repository that holds the working directory
   (`apps/emend/src/cli.ts`, `runtime-repository.ts`). The refusal comes before `main.ts` loads.
+  `status --line` runs the same check but stays silent: a refusal or a failed check prints nothing
+  and exits 0, because a status line never shows an error.
 - A `.git` folder counts unless it has no `HEAD` (git never accepts one without), so an empty one
   such as a sandbox mount point does not, and one whose `HEAD` cannot be checked does. A `.git`
   file counts when it is one `gitdir:` line; any other `.git` file, a symlinked `.git` or an
