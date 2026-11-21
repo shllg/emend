@@ -488,8 +488,10 @@ test("the writing reference draws change graphs with a legend and names the diag
     "subgraph Legend",
     "the changed files and their direct neighbours",
     "a dependency tool the project already has, on your machine.",
-    "Run such a tool only on your own work, in a project you already build and test.",
-    "Run it without the project's config, and never through a package script.",
+    "Run such a tool only in a working tree whose install, build and tests already ran in this task.",
+    "Every change there that has not run yet must be your own.",
+    "Also run it without the project's config, and never through a package script or `npx`.",
+    "These are extra guards, not the boundary.",
     "`--no-config`",
     "Never install a tool or fetch one",
     "For code you did not write, or without such a tool, draw the graph by hand.",
@@ -500,6 +502,7 @@ test("the writing reference draws change graphs with a legend and names the diag
     expect(section).toContain(rule);
   }
   expect(section).not.toContain("in `overview`, after its two bullets");
+  expect(section).not.toContain("Run such a tool only on your own work");
   const skill = read("plugin/skills/emend-review/SKILL.md").replace(/\s+/g, " ");
   expect(skill).toContain("shows a change graph with a legend in a topic's `why`, as the writing reference says.");
   expect(skill).not.toContain("adds a change graph with a legend after them");
