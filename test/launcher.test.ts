@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import {
   closeSync,
   copyFileSync,
@@ -15,6 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
@@ -57,11 +58,16 @@ beforeEach(() => {
 
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-function copyLauncher() {
+function copyLauncher(source?: string) {
   const launcher = join(checkout, "apps/emend/bin/emend");
   mkdirSync(dirname(launcher), { recursive: true });
   copyFileSync(join(repo, "apps/emend/bin/emend"), launcher);
   expect(lstatSync(launcher).mode & 0o777).toBe(0o755);
+  if (source !== undefined) {
+    const dist = join(checkout, "apps/emend/dist");
+    mkdirSync(dist);
+    writeFileSync(join(dist, "emend.mjs"), source);
+  }
   return launcher;
 }
 
@@ -109,4 +115,49 @@ test.each([false, true])("the launcher stops after 40 symlink hops (status line 
   expect(result.status).toBe(statusLine ? 0 : 1);
   expect(result.stdout).toBe("");
   expect(result.stderr).toBe(statusLine ? "" : "emend: too many levels of symlinks\n");
+});
+
+test("the status line launcher exits silently with status 0 when node kills itself", async () => {
+  const launcher = copyLauncher('process.kill(process.pid, "SIGKILL");\n');
+  expect(await command(launcher, ["status", "--line"])).toEqual({ status: 0, stdout: "", stderr: "" });
+});
+
+test.each([["status"], ["status", "--line", "extra"]])(
+  "the launcher preserves SIGKILL outside exactly status --line (%j)",
+  async (...args) => {
+    const launcher = copyLauncher('process.kill(process.pid, "SIGKILL");\n');
+    env.status_line = "1";
+    await expect(command(launcher, args)).rejects.toThrow("Child terminated by SIGKILL");
+  },
+);
+
+test("the status line launcher exits silently with status 0 when node cannot execute", async () => {
+  const launcher = copyLauncher('throw new Error("node should not start");\n');
+  const path = join(root, "fixture-bin");
+  mkdirSync(path);
+  writeFileSync(join(path, "node"), "#!/nonexistent\n", { mode: 0o755 });
+  for (const name of ["dirname", "basename"]) symlinkSync(`/usr/bin/${name}`, join(path, name));
+  env.PATH = path;
+  expect(await command(launcher, ["status", "--line"])).toEqual({ status: 0, stdout: "", stderr: "" });
+});
+
+test("the status line launcher exits silently with status 0 for invalid NODE_OPTIONS", async () => {
+  const launcher = copyLauncher('throw new Error("node should not start");\n');
+  env.NODE_OPTIONS = "--bogus-flag";
+  expect(await command(launcher, ["status", "--line"])).toEqual({ status: 0, stdout: "", stderr: "" });
+});
+
+test("the status line launcher prints a fast result without waiting for the deadline", async () => {
+  const launcher = copyLauncher('console.log("emend r3 · your turn");\n');
+  const started = performance.now();
+  // Capture pipes so completion also proves stdout is no longer held open.
+  const result = await promisify(execFile)(launcher, ["status", "--line"], {
+    cwd: root,
+    env,
+    timeout: 4000,
+    killSignal: "SIGKILL",
+  });
+  const elapsed = performance.now() - started;
+  expect(result).toEqual({ stdout: "emend r3 · your turn\n", stderr: "" });
+  expect(elapsed).toBeLessThan(1500);
 });

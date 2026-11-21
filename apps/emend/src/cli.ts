@@ -1,10 +1,17 @@
 const statusLine = process.argv.length === 4 && process.argv[2] === "status" && process.argv[3] === "--line";
 const statusLineController = statusLine ? new AbortController() : undefined;
-if (statusLineController)
-  setTimeout(() => {
-    statusLineController.abort();
-    process.exit(0);
-  }, 2000).unref();
+if (statusLineController) {
+  const rawDeadline = process.env.EMEND_STATUS_LINE_DEADLINE_MS ?? "";
+  const deadline = /^\d+$/.test(rawDeadline) ? Number(rawDeadline) : NaN;
+  setTimeout(
+    () => {
+      statusLineController.abort();
+      // process.exit waits for blocked libuv workers; SIGKILL ends every thread.
+      process.kill(process.pid, "SIGKILL");
+    },
+    Number.isInteger(deadline) && deadline >= 100 && deadline <= 10000 ? deadline : 2000,
+  ).unref();
+}
 let refusal: string | undefined;
 if (
   statusLine ||

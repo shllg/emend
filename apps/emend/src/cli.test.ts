@@ -18,7 +18,7 @@ async function entryFixture() {
   const state = join(directory, "state");
   await mkdir(state, { mode: 0o700 });
   const entry = await realpath(fileURLToPath(new URL("./cli.ts", import.meta.url)));
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     PATH: [dirname(process.execPath), "/usr/bin", "/bin"].join(delimiter),
     HOME: directory,
     LC_ALL: "C",
@@ -116,11 +116,13 @@ test.each([false, true])(
   },
 );
 
-test("the real status line exits silently before a stalled runtime pre-check finishes", async () => {
+test("the real status line kills a blocked libuv worker during the runtime pre-check", async () => {
   const f = await entryFixture();
   const repo = join(f.directory, "repo");
   await mkdir(join(repo, ".git"), { recursive: true });
   await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/synthetic-feature\n");
+  const fifo = join(f.directory, "blocked-open");
+  await promisify(execFile)("mkfifo", [fifo], { env: f.env });
   const guard = join(f.directory, "stalled-precheck.mjs");
   const marker = join(f.directory, "precheck-stalled");
   await writeFile(
@@ -134,7 +136,7 @@ for (const name of ["lstat", "realpath"]) {
   fs[name] = async (...args) => {
     if (paths.includes(args[0])) {
       writeFileSync(${JSON.stringify(marker)}, "stalled");
-      await new Promise((resolve) => setTimeout(resolve, 6000));
+      await fs.open(${JSON.stringify(fifo)}, "r");
     }
     return original(...args);
   };
@@ -142,16 +144,38 @@ for (const name of ["lstat", "realpath"]) {
 syncBuiltinESMExports();\n`,
   );
   const started = performance.now();
-  const result = await f.invoke(repo, ["status", "--line"], ["--import", guard], 4500);
+  const child = spawn(process.execPath, ["--import", guard, f.entry, "status", "--line"], {
+    cwd: repo,
+    env: { ...f.env, EMEND_STATUS_LINE_DEADLINE_MS: "500" },
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 4500,
+    killSignal: "SIGKILL",
+  });
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+  child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+  const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code, signal) => resolve({ code, signal }));
+  });
+  onTestFinished(async () => {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    await closed;
+  });
+  const result = await closed;
   const elapsed = performance.now() - started;
-  expect(result).toEqual({ code: 0, stdout: "", stderr: "" });
+  expect(result).toEqual({ code: null, signal: "SIGKILL" });
+  expect(Buffer.concat(stdout).toString()).toBe("");
+  expect(Buffer.concat(stderr).toString()).toBe("");
   expect(await readFile(marker, "utf8")).toBe("stalled");
-  expect(elapsed).toBeLessThan(4000);
+  expect(elapsed).toBeLessThan(3000);
   expect(await readdir(f.state)).toEqual([]);
-}, 7000);
+}, 10000);
 
 test("the real status line exits silently when stdout is already closed", async () => {
   const f = await entryFixture();
+  f.env.EMEND_STATUS_LINE_DEADLINE_MS = "10000";
   const repo = join(f.directory, "repo");
   await mkdir(repo);
   const git = (...args: string[]) =>
@@ -229,7 +253,7 @@ test("the real status line exits silently when stdout is already closed", async 
     writeFile(join(f.state, "agent.token"), `em_${"a".repeat(43)}`, { mode: 0o600 }),
   ]);
   // Prove this fixture reaches the write before testing a real closed pipe.
-  expect(await f.invoke(repo, ["status", "--line"])).toEqual({
+  expect(await f.invoke(repo, ["status", "--line"], [], 12000)).toEqual({
     code: 0,
     stdout: "emend r3 · your turn\n",
     stderr: "",
@@ -238,7 +262,8 @@ test("the real status line exits silently when stdout is already closed", async 
     cwd: repo,
     env: f.env,
     stdio: ["ignore", "pipe", "pipe"],
-    timeout: 5000,
+    timeout: 12000,
+    killSignal: "SIGKILL",
   });
   const stderr: Buffer[] = [];
   child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
@@ -254,7 +279,7 @@ test("the real status line exits silently when stdout is already closed", async 
   expect(await closed).toEqual({ code: 0, signal: null });
   expect(Buffer.concat(stderr).toString()).toBe("");
   expect(requests.filter((url) => url.startsWith("/api/v1/agent/reviews?key="))).toHaveLength(2);
-});
+}, 30000);
 
 test("the CLI prints its version through a symlink without the caller's NODE_OPTIONS preload", async () => {
   const directory = await mkdtemp(join(tmpdir(), "emend-cli-test-"));
@@ -296,6 +321,7 @@ registerHooks({ load(url, context, next) {
 
 test("the real status line exits after flushing even with a lingering handle", async () => {
   const f = await entryFixture();
+  f.env.EMEND_STATUS_LINE_DEADLINE_MS = "10000";
   const guard = join(f.directory, "lingering.mjs");
   const source = `export async function run(argv, io) {
   await io.stdoutAsync("emend r3 · your turn\\n");
@@ -311,9 +337,9 @@ registerHooks({ load(url, context, next) {
   return next(url, context);
 } });`,
   );
-  expect(await f.invoke(f.directory, ["status", "--line"], ["--import", guard])).toEqual({
+  expect(await f.invoke(f.directory, ["status", "--line"], ["--import", guard], 12000)).toEqual({
     code: 0,
     stdout: "emend r3 · your turn\n",
     stderr: "",
   });
-});
+}, 15000);

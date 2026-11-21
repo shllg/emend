@@ -270,6 +270,7 @@ It needs a server or hub that lists `agent-review-key` (this emend version or ne
 It prints nothing when the branch has no review, when no server or hub answers, and on any error.
 It always exits 0. It reads only, never starts a server and never prompts.
 It also prints nothing when the emend it runs is installed inside the repository.
+The command gives up after 2 seconds; `EMEND_STATUS_LINE_DEADLINE_MS` (100 to 10000 milliseconds) changes that.
 
 Paste this prompt into Claude Code:
 
