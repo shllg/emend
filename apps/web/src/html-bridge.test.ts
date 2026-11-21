@@ -821,7 +821,11 @@ test("selection normalizes across nodes, skips omitted subtrees, and supplies 32
 test("selection and highlights span coloured tokens without changing the anchor text", async () => {
   const text = 'const seed: string = "fern"; const count: number = 42;';
   const originalHtml = `<body><p>Before</p><pre><code class="language-ts">${text}</code></pre><p>After</p></body>`;
-  const b = bridge(await highlightHtmlCode(originalHtml));
+  // Warm the grammar; cold scans can exhaust Shiki's per-line limit under load.
+  await highlightHtmlCode(originalHtml);
+  const colouredHtml = await highlightHtmlCode(originalHtml);
+  expect(colouredHtml).toContain("<span style=");
+  const b = bridge(colouredHtml);
   try {
     const tokens = [...b.window.document.querySelectorAll("code > span")];
     const start = tokens.find((token) => token.textContent === "const")?.firstChild;

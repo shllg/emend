@@ -1,6 +1,6 @@
 import { LIMITS } from "@emend/contract";
 import { type DefaultTreeAdapterTypes, defaultTreeAdapter } from "parse5";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, expect, test, vi } from "vitest";
 import { docText, HTML_ELEMENT_LIMIT, HTML_NESTING_LIMIT, nodeText, parseDocHtml } from "../place/html.ts";
 import { HIGHLIGHT_FENCE_BYTES, HIGHLIGHT_RENDER_BYTES } from "./highlight.ts";
 import * as highlighterModule from "./highlighter.ts";
@@ -16,6 +16,15 @@ import { renderMarkdown } from "./markdown.ts";
 afterEach(() => vi.restoreAllMocks());
 
 const block = (text: string, language = "ts") => `<pre><code class="language-${language}">${text}</code></pre>`;
+
+beforeAll(async () => {
+  // Warm the grammars; cold scans can exhaust Shiki's per-line limit under load.
+  await highlightHtmlCode(
+    block('const seed: string = "fern"; // note') +
+      block('const seed = "fern"; // note', "js") +
+      block('&lt;p class="note"&gt;fern&lt;/p&gt;', "html"),
+  );
+});
 
 function elements(html: string, sourceLocations = false): DefaultTreeAdapterTypes.Element[] {
   const tree = parseDocHtml(html, Infinity, sourceLocations);
@@ -38,6 +47,9 @@ function tokenStyles(html: string): [string, string][] {
 
 test("HTML code uses the same token colours and italic comments as Markdown", async () => {
   const text = 'const seed: string = "fern";\nconst count: number = 42; // note\n';
+  // Warm both renderers; cold scans can exhaust Shiki's per-line limit under load.
+  await renderMarkdown(`\`\`\`ts\n${text}\`\`\``, "overview");
+  await highlightHtmlCode(block(text));
   const markdown = await renderMarkdown(`\`\`\`ts\n${text}\`\`\``, "overview");
   const output = await highlightHtmlCode(block(text));
   const tokens = tokenStyles(output);

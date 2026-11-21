@@ -47,9 +47,12 @@ test("writeup work reports doc-base use without inspecting serialized HTML", asy
 test("code colour work returns token spans and source offsets for a TypeScript block", async () => {
   const prefix = '<p>🌱</p><pre><code class="language-ts">';
   const text = 'const seed: string = "fern";';
+  const bytes = new TextEncoder().encode(`${prefix}${text}</code></pre>`).buffer;
+  // Warm the grammar; cold scans can exhaust Shiki's per-line limit under load.
+  await executeWork({ kind: "code-colours", bytes });
   const result = await executeWork({
     kind: "code-colours",
-    bytes: new TextEncoder().encode(`${prefix}${text}</code></pre>`).buffer,
+    bytes,
   });
   expect(result).toEqual({
     kind: "code-colours",

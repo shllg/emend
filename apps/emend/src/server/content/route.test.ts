@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { LIMITS, PublishResponse, RevisionView } from "@emend/contract";
 import { applyHtmlLook, htmlLook, parseDocHtml, stripHtmlLook } from "@emend/core";
 import { and, eq, sql } from "drizzle-orm";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import { devices, files, reviews, revisions } from "../../db/schema.ts";
 import { HTML_DOC_CSP } from "../http/headers.ts";
 import { mailboxFixture } from "../mailbox/test-support.ts";
@@ -31,6 +31,13 @@ const source =
   '<body><p>Synthetic seeds</p><pre class="mermaid" onclick="alert(1)">flowchart LR; A --&gt; B</pre><link rel="stylesheet" href="shared.css"><script src="classic.js"></script><img src="seed.svg"></body>';
 const bigCss = "/* synthetic */\n".padEnd(200 * 1024, " ");
 const bigSha = createHash("sha256").update(bigCss).digest("hex");
+beforeAll(async () => {
+  // Warm the grammar; cold scans can exhaust Shiki's per-line limit under load.
+  await executeWork({
+    kind: "code-colours",
+    bytes: new TextEncoder().encode('<pre><code class="language-ts">const seed = 1;</code></pre>').buffer,
+  });
+});
 beforeEach(async () => {
   clearCodeColourCache();
   f = await mailboxFixture();
