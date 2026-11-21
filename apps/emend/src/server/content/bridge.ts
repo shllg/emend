@@ -41,7 +41,12 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     dom(window.Node.prototype, "insertBefore", parent, fallback, nodeValue("firstChild", parent));
   } catch { /* The doc renders without the fallback. */ }
   const docs = new Set();
-  let headings = [];
+  let headings = [], parts = [];
+  // Kept in parity with LIMITS.htmlPartsPerDoc by the bridge tests
+  const HTML_PARTS_MAX = 10000;
+  const partTags = new Set(["address", "article", "aside", "blockquote", "caption", "dd", "details", "dialog",
+    "div", "dt", "fieldset", "figcaption", "figure", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header",
+    "hgroup", "legend", "li", "main", "nav", "p", "pre", "section", "summary", "td", "th"]);
   // Kept in parity with htmlHeadings, nodeText and cleanDocTitle by the bridge fixture tests.
   function* nodes(root, limit = Infinity) {
     const pending = [[root][Symbol.iterator]()];
@@ -75,18 +80,22 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       .filter(char => !discarded.some(([from, to]) => char.codePointAt(0) >= from && char.codePointAt(0) <= to))
       .join("").replace(/ +/g, " ").trim().toWellFormed().slice(0, maximum).replace(/[\uD800-\uDBFF]$/, "").trim();
   }
-  function collectHeadings() {
-    if (!body()) return [];
+  function withinNestingLimit() {
+    if (!documentElement()) return false;
     const depth = [{ node: documentElement(), level: 1 }];
     const voids = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
     while (depth.length) {
       const { node, level } = depth.pop();
       if (nodeType(node) !== 1) continue;
-      if (level > 512 && !(namespace(node) === "http://www.w3.org/1999/xhtml" && voids.has(localName(node)))) return [];
+      if (level > 512 && !(namespace(node) === "http://www.w3.org/1999/xhtml" && voids.has(localName(node)))) return false;
       const content = localName(node) === "template" && namespace(node) === "http://www.w3.org/1999/xhtml"
         ? read(window.HTMLTemplateElement.prototype, "content", node) : node;
       for (const child of children(content)) depth.push({ node: child, level: level + 1 });
     }
+    return true;
+  }
+  function collectHeadings() {
+    if (!body() || !withinNestingLimit()) return [];
     const found = [];
     for (const node of nodes(body())) {
       if (nodeType(node) !== 1 || namespace(node) !== "http://www.w3.org/1999/xhtml" ||
@@ -95,6 +104,29 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       if (found.length === 1024) break;
     }
     return found;
+  }
+  // Kept in parity with htmlPartTexts by the bridge tests.
+  function collectParts() {
+    if (!body() || !withinNestingLimit()) return [];
+    const found = [];
+    const pending = [{ nodes: children(body())[Symbol.iterator](), part: undefined }];
+    while (pending.length) {
+      const entry = pending[pending.length - 1];
+      const next = entry.nodes.next();
+      if (next.done) { pending.pop(); continue; }
+      const node = next.value;
+      if (nodeType(node) === 3) {
+        if (entry.part && /[^\p{White_Space}]/u.test(textData(node))) entry.part.nonempty = true;
+      } else if (nodeType(node) === 1 && !omitted.has(localName(node))) {
+        let part = entry.part;
+        if (namespace(node) === "http://www.w3.org/1999/xhtml" && partTags.has(localName(node))) {
+          part = { element: node, nonempty: false };
+          found.push(part);
+        }
+        pending.push({ nodes: children(node)[Symbol.iterator](), part });
+      }
+    }
+    return found.filter(part => part.nonempty).slice(0, HTML_PARTS_MAX).map(part => part.element);
   }
   const bounds = element => elementCall("getBoundingClientRect", element);
   const laidOut = element => typeof window.Element.prototype.checkVisibility === "function"
@@ -461,6 +493,74 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   const styleOf = element => read(window.HTMLElement.prototype, "style", element);
   const styleCall = (method, style, ...args) => dom(window.CSSStyleDeclaration.prototype, method, style, ...args);
   const createElement = name => dom(window.Document.prototype, "createElement", document, name);
+  let keptMarks = [], marked = [], changeLabels = [], changedStyle = false;
+  function applyChanged() {
+    for (const target of marked) elementCall("removeAttribute", target, "data-emend-changed");
+    for (const host of changeLabels) {
+      const parent = nodeValue("parentNode", host);
+      if (parent) dom(window.Node.prototype, "removeChild", parent, host);
+    }
+    marked = [];
+    changeLabels = [];
+    if (keptMarks.length && !changedStyle && typeof CSSStyleSheet !== "undefined" && descriptor(window.Document.prototype, "adoptedStyleSheets")) {
+      try {
+        const sheet = new CSSStyleSheet();
+        dom(window.CSSStyleSheet.prototype, "replaceSync", sheet,
+          "[data-emend-changed]{box-shadow:-3px 0 0 0 var(--changed-line,#8b5cf6)!important}");
+        write(window.Document.prototype, "adoptedStyleSheets", document, [...documentValue("adoptedStyleSheets"), sheet]);
+        changedStyle = true;
+      } catch { /* Labels still show without constructed stylesheet support. */ }
+    }
+    let previous;
+    for (const mark of keptMarks) {
+      const element = parts[mark.index];
+      const diagram = diagrams.find(diagram => diagram.pre === element);
+      const target = diagram?.host || element;
+      elementCall("setAttribute", target, "data-emend-changed", String(mark.revision));
+      marked.push(target);
+      const continues = previous && previous.index === mark.index - 1 && previous.revision === mark.revision;
+      previous = mark;
+      if (continues) continue;
+      const host = createElement("div");
+      elementCall("setAttribute", host, "data-emend-changed-label", "");
+      const hostStyle = styleOf(host);
+      for (const [name, value] of [["all", "initial"], ["display", "block"], ["margin", "0 0 6px"]])
+        styleCall("setProperty", hostStyle, name, value, "important");
+      const shadow = elementCall("attachShadow", host, { mode: "closed" });
+      const label = createElement("span");
+      write(window.Element.prototype, "textContent", label, "Changed in rev " + mark.revision);
+      const style = styleOf(label);
+      for (const [name, value] of [["display", "inline-block"],
+          ["font", "500 11.5px/20px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"],
+          ["padding", "0 7px 0 6px"], ["border-radius", "2px"], ["background", "var(--changed-bg, #f5f3ff)"],
+          ["color", "var(--changed-fg, #6d28d9)"], ["white-space", "nowrap"], ["user-select", "none"],
+          ["text-align", "left"], ["letter-spacing", "normal"], ["text-transform", "none"]])
+        styleCall("setProperty", style, name, value, "important");
+      dom(window.Node.prototype, "appendChild", shadow, label);
+      if (diagram?.host) dom(window.Node.prototype, "insertBefore", nodeValue("parentNode", target), host, target);
+      else dom(window.Node.prototype, "insertBefore", target, host, nodeValue("firstChild", target));
+      changeLabels.push(host);
+    }
+  }
+  function changed(data) {
+    const keys = Reflect.ownKeys(data);
+    if (keys.length !== 3 || keys.some(key => !["type", "parts", "marks"].includes(key)) ||
+        !Number.isInteger(data.parts) || data.parts < 0 || data.parts > HTML_PARTS_MAX ||
+        !Array.isArray(data.marks) || data.marks.length > data.parts) return;
+    let previous = -1;
+    for (const mark of data.marks) {
+      if (!mark || typeof mark !== "object" || Array.isArray(mark)) return;
+      const prototype = Object.getPrototypeOf(mark);
+      if (prototype !== null && prototype !== Object.prototype) return;
+      const keys = Reflect.ownKeys(mark);
+      if (keys.length !== 2 || keys.some(key => key !== "index" && key !== "revision") ||
+          !Number.isInteger(mark.index) || mark.index < 0 || mark.index >= data.parts || mark.index <= previous ||
+          !Number.isSafeInteger(mark.revision) || mark.revision < 1) return;
+      previous = mark.index;
+    }
+    keptMarks = data.parts === parts.length ? data.marks : [];
+    holdPosition(applyChanged);
+  }
   function diagramMode(pre) {
     try {
       const parent = nodeValue("parentElement", pre) || documentElement();
@@ -550,6 +650,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
         dom(window.Node.prototype, "removeChild", nodeValue("parentNode", diagram.host), diagram.host);
         diagram.host = diagram.img = undefined;
         updateDiagramSource(diagram);
+        applyChanged();
         return;
       }
       if (!diagram.host) {
@@ -572,6 +673,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       elementCall("setAttribute", diagram.img, "height", String(data.height));
       elementCall("setAttribute", diagram.img, "src", "data:image/svg+xml;charset=utf-8," + encodeURIComponent(data.svg));
       updateDiagramSource(diagram);
+      applyChanged();
     });
   }
   let themeSheet;
@@ -623,6 +725,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
         for (const [name, value] of attributes) elementCall("setAttribute", root, name, value);
       }, changed);
     }
+    else if (event.data.type === "emend:changed") changed(event.data);
     else if (event.data.type === "emend:diagram") placeDiagram(event.data);
     else if (event.data.type === "emend:theme") theme(event.data);
     else if (event.data.type === "emend:goto") goTo(event.data);
@@ -935,7 +1038,13 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   };
   for (const type of ["transitionend", "transitioncancel", "animationend", "animationcancel"])
     listen(document, type, onDiagramMotionEnd, true);
-  const ready = () => { headings = collectHeadings(); post({ type: "emend:ready" }); scanDiagrams(); schedulePosition(); };
+  const ready = () => {
+    headings = collectHeadings();
+    parts = collectParts();
+    post({ type: "emend:ready" });
+    scanDiagrams();
+    schedulePosition();
+  };
   if (documentValue("readyState") === "loading") listen(document, "DOMContentLoaded", ready, { once: true });
   else ready();
 })();`;

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { LIMITS, type PublishRequest } from "@emend/contract";
-import { renderDoc, renderWriteup } from "@emend/core";
+import { blockHash, htmlPartHashes, parseDocHtml, renderDoc, renderWriteup } from "@emend/core";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
@@ -180,6 +180,53 @@ test.each([false, true])("first publish skips changes; revision 2 compares again
   );
   expect((await changes()).every((row) => row.revisionId === second?.id)).toBe(true);
 });
+test.each([
+  { name: "changed paragraph", next: "<p>Changed</p><p>Stable</p>", text: "Changed", legacy: false },
+  { name: "added paragraph", next: "<p>Original</p><p>Stable</p><p>Added</p>", text: "Added", legacy: false },
+  { name: "unchanged page", next: "<p>Original</p><p>Stable</p>", text: null, legacy: false },
+  { name: "previous parts absent", next: "<p>Changed</p><p>Stable</p>", text: null, legacy: true },
+])("HTML publication stores parts and marks only $name", async ({ next, text, legacy }) => {
+  const path = "docs/seed.html";
+  const original = "<p>Original</p><p>Stable</p>";
+  const body = async (source: string): Promise<PublishRequest> => ({
+    ...input(),
+    files: [
+      {
+        path,
+        role: "doc",
+        oldPath: null,
+        oldBlob: null,
+        newBlob: await blobs.put(f.ownerId, Buffer.from(source), "text/html"),
+        flag: null,
+      },
+    ],
+  });
+  const changes = () => f.db.read((q) => q.select().from(changedBlocks).where(eq(changedBlocks.ownerId, f.ownerId)));
+  await publish(await body(original));
+  expect(await changes()).toEqual([]);
+  const firstFile = await f.db.read((q) => q.select().from(files).where(eq(files.ownerId, f.ownerId)).get());
+  expect(firstFile?.parts).toEqual(await htmlPartHashes(parseDocHtml(original)));
+  if (!firstFile) throw new Error("missing HTML doc");
+  if (legacy)
+    await f.db.query((q) =>
+      q
+        .update(files)
+        .set({ parts: null })
+        .where(and(eq(files.ownerId, f.ownerId), eq(files.id, firstFile.id))),
+    );
+  await publish(await body(next));
+  expect((await changes()).map((row) => row.blockId)).toEqual(
+    text ? [`doc-${await blockHash(path)}-${await blockHash(text)}`] : [],
+  );
+  const secondFile = await f.db.read((q) =>
+    q
+      .select()
+      .from(files)
+      .where(and(eq(files.ownerId, f.ownerId), eq(files.path, path))),
+  );
+  expect(secondFile.find((row) => row.id !== firstFile.id)?.parts).toEqual(await htmlPartHashes(parseDocHtml(next)));
+});
+
 test("same key appends a revision, reopens and counts placed and unplaced threads", async () => {
   const first = await publish(input());
   const revision = await f.db.query((q) => q.select().from(revisions).where(eq(revisions.ownerId, f.ownerId)).get());

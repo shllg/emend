@@ -2,6 +2,7 @@ import {
   DocHeading,
   FilePath,
   FileView,
+  HtmlDocChanges,
   HtmlDocPosition,
   HtmlSpanTarget,
   LIMITS,
@@ -97,6 +98,7 @@ export const FrameToParent = span
 export type DocNavigation = Extract<typeof FrameToParent._output, { type: "emend:navigate" }>;
 export const ParentToFrame = empty
   .extend({ type: literal("emend:highlight"), anchors: span.extend({ threadId }).array() })
+  .or(HtmlDocChanges.safeExtend({ type: literal("emend:changed") }))
   .or(diagramResult.extend(diagramAddress))
   .or(diagramFailure.extend(diagramAddress))
   .or(empty.extend({ type: literal("emend:layout"), wide: FileView.shape.hasOld }))

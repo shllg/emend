@@ -220,6 +220,9 @@ export async function importReview(principal: Principal, bundle: ImportBundle, d
                       .get(r.revisionId)
                       ?.[docViewOf(r) === "source" ? "sourceMetadata" : "metadata"].get(r.path)?.headings ?? null)
                   : null,
+              parts: isRenderedHtmlDoc(r)
+                ? (prepared.rendered.get(r.revisionId)?.metadata.get(r.path)?.parts ?? null)
+                : null,
               ...appearance,
               mediaType: fileMediaType(r),
               ...(r.role === "diff" ? prepared.counted.get(r.revisionId)?.get(r.path) : {}),

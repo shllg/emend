@@ -24,7 +24,7 @@ import { fileMediaType } from "../publish/media.ts";
 import { memoizedHeads, ownerHead } from "../publish/media-head.ts";
 import { validateNoteRanges } from "../publish/notes.ts";
 import { renderRevision } from "../publish/render.ts";
-import type { Executor, Work, WorkResult } from "../publish/work.ts";
+import { type Executor, packIds, type Work, type WorkResult } from "../publish/work.ts";
 import { derivedRowBytes } from "./bytes.ts";
 import { checkImportSignal } from "./lifecycle.ts";
 import { type ImportPlacement, importPlacements } from "./placements.ts";
@@ -148,7 +148,9 @@ export async function prepareImport(
         if (++checkedComments % 500 === 0) await yieldToLoop("import-prepare-comments");
       }
     }
-    let previous: { renderedBlob: string; docBlobs: Map<string, string> } | undefined;
+    let previous:
+      | Pick<Awaited<ReturnType<typeof renderRevision>>, "renderedBlob" | "docBlobs" | "htmlParts">
+      | undefined;
     const writeupSources = new Map<string, Extract<WorkResult, { kind: "writeup-source" }>>();
     const checkedSources = new Set<string>();
     let previousSourceHash: string | undefined;
@@ -232,7 +234,12 @@ export async function prepareImport(
         const previousBlobs: Extract<Work, { kind: "changed" }>["previous"] = [];
         previousBlobs.push({ format: "writeup", bytes: await read(previous.renderedBlob) });
         for (const hash of previous.docBlobs.values()) previousBlobs.push({ format: "doc", bytes: await read(hash) });
-        const changed = await execute({ kind: "changed", previous: previousBlobs, next: result.ids });
+        previousBlobs.push({ format: "ids", bytes: packIds([...previous.htmlParts.values()].flat()) });
+        const changed = await execute({
+          kind: "changed",
+          previous: previousBlobs,
+          next: [...result.ids, packIds([...result.htmlParts.values()].flat())],
+        });
         if (changed.kind !== "changed") throw new ApiError("invalid_request");
         const packed = Buffer.from(changed.bytes).toString("utf8");
         let changedLines = 0;
@@ -245,7 +252,7 @@ export async function prepareImport(
           if (++changedLines % 500 === 0) await yieldToLoop("import-prepare-changed");
         }
       }
-      previous = { renderedBlob: result.renderedBlob, docBlobs: result.docBlobs };
+      previous = { renderedBlob: result.renderedBlob, docBlobs: result.docBlobs, htmlParts: result.htmlParts };
       for (const placement of await place(rows, result, read, execute, signal)) {
         addDerivedBytes(derivedRowBytes(placementTable, { ...placement, ownerId }));
         placements.push(placement);

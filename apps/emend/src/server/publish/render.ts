@@ -1,5 +1,6 @@
 import { docViewOf, isRenderedHtmlDoc, LIMITS, type PublishRequest } from "@emend/contract";
 import {
+  blockHash,
   cleanDocTitle,
   type DocLinks,
   decodeText,
@@ -42,6 +43,7 @@ export async function renderRevision(
   const sourceMetadata = new Map<string, DocMetadata>();
   const sourceBlobs = new Map<string, string>();
   const metadata = new Map<string, DocMetadata>();
+  const htmlParts = new Map<string, string[]>();
   const metadataCache = new Map<string, DocMetadata>();
   const failedMetadata = new Set<string>();
   const unrendered: string[] = [];
@@ -63,6 +65,7 @@ export async function renderRevision(
           own = {
             title: result.title,
             headings: result.headings,
+            parts: result.parts,
             look: result.look,
             legacyLook: result.legacyLook,
             colorScheme: result.colorScheme,
@@ -78,6 +81,7 @@ export async function renderRevision(
       title:
         cleanDocTitle(file.title ?? "") || own.title || cleanDocTitle(file.path.split("/").at(-1) ?? "") || "Document",
       headings: own.headings,
+      ...(format === "html" && own.parts !== undefined ? { parts: own.parts } : {}),
       ...(format === "html" && own.look ? { look: own.look } : {}),
       ...(format === "html" && own.legacyLook ? { legacyLook: own.legacyLook } : {}),
       ...(format === "html" && own.colorScheme ? { colorScheme: own.colorScheme } : {}),
@@ -87,6 +91,13 @@ export async function renderRevision(
     onRendered?.(size);
     if (metadataBytes > LIMITS.renderedBytesPerRevision) throw new ApiError("too_large");
     (source ? sourceMetadata : metadata).set(file.path, doc);
+    if (format === "html" && doc.parts !== undefined) {
+      const prefix = `doc-${await blockHash(file.path)}-`;
+      htmlParts.set(
+        file.path,
+        doc.parts.map((hash) => `${prefix}${hash}`),
+      );
+    }
     await yieldToLoop("publish-render");
   }
   const lookupCache = new Map<DocMetadata["headings"], ReadonlyMap<string, string>>();
@@ -353,6 +364,7 @@ export async function renderRevision(
   }
   return {
     ids,
+    htmlParts,
     renderedBlob,
     sourceBlob,
     docBlobs,

@@ -1,7 +1,7 @@
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { FilePath, LIMITS, type ThreadView } from "@emend/contract";
+import { FilePath, type HtmlDocChanges, LIMITS, type ThreadView } from "@emend/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
@@ -49,6 +49,42 @@ function frameByTitle() {
   if (!frame) throw new Error("Missing titled frame");
   return frame;
 }
+
+test.each([false, true])("HTML changes are posted only when supplied and after ready (supplied=%s)", (supplied) => {
+  const changes: HtmlDocChanges = { parts: 3, marks: [{ index: 1, revision: 2 }] };
+  const content = (changes?: HtmlDocChanges) => (
+    <QueryClientProvider client={client}>
+      <HtmlDocFrame
+        reviewId={id}
+        revision={2}
+        changedBlocks={[]}
+        path={path}
+        contentUrl={doc.contentUrl}
+        threads={[]}
+        changes={changes}
+      />
+    </QueryClientProvider>
+  );
+  const view = render(content(supplied ? changes : undefined));
+  const frame = frameByTitle();
+  const post = vi.fn();
+  Object.defineProperty(frame, "contentWindow", { value: { postMessage: post } });
+  fireEvent.load(frame);
+  expect(post).not.toHaveBeenCalled();
+  fireEvent(window, new MessageEvent("message", { source: frame.contentWindow, data: { type: "emend:ready" } }));
+  const messages = () => post.mock.calls.filter(([data]) => data.type === "emend:changed");
+  expect(messages()).toEqual(supplied ? [[{ type: "emend:changed", ...changes }, "*"]] : []);
+  if (!supplied) return;
+  expect(ParentToFrame.parse(messages()[0]?.[0])).toEqual({ type: "emend:changed", ...changes });
+  view.rerender(content({ parts: 3, marks: [{ index: 1, revision: 2 }] }));
+  expect(messages()).toHaveLength(1);
+  view.rerender(content({ parts: 3, marks: [] }));
+  expect(messages()).toHaveLength(2);
+  expect(messages().at(-1)).toEqual([{ type: "emend:changed", parts: 3, marks: [] }, "*"]);
+  fireEvent.load(frame);
+  view.rerender(content(changes));
+  expect(messages()).toHaveLength(2);
+});
 
 test.each(
   (["emend", "custom", undefined] as const).flatMap((look) =>

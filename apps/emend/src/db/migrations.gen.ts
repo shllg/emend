@@ -321,5 +321,13 @@ export const MIGRATIONS: readonly { tag: string; when: number; hash: string; sta
       "CREATE TABLE `review_pins` (\n\t`owner_id` text NOT NULL,\n\t`review_id` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\tPRIMARY KEY(`owner_id`, `review_id`),\n\tFOREIGN KEY (`owner_id`) REFERENCES `owners`(`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`owner_id`,`review_id`) REFERENCES `reviews`(`owner_id`,`id`) ON UPDATE no action ON DELETE no action\n);",
       "CREATE INDEX `review_pins_owner_idx` ON `review_pins` (`owner_id`);"
     ]
+  },
+  {
+    "tag": "0025_married_triton",
+    "when": 1795249974764,
+    "hash": "628a421e090c444c9aa8f8f991f76b6c882fbe4891668f1b625d2d734db48d8e",
+    "statements": [
+      "ALTER TABLE `files` ADD `parts` text;"
+    ]
   }
 ];

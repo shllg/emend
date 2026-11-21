@@ -968,6 +968,18 @@ Both are reviewer-only, as is the revision endpoint below.
 topics: TopicMeta[], files: FileView[], writeup: RenderedWriteup, links: PublishLink[],
 repoUrl: string | null, docs, threads: ThreadView[],
 changedBlocks: { blockId: BlockId, revision: number }[], changedSince?: number }`.
+An HTML doc optionally includes `changes: { parts: number, marks: { index: number, revision: number }[] }`.
+`parts` is the number of parts found by the server, at most `htmlPartsPerDoc` (10000).
+`marks` lists, in part order, the indexes whose IDs occur in `changedBlocks`, with each block's
+revision. Indexes are unique and less than `parts`. Revisions without stored parts omit `changes`.
+Parts are HTML-namespace address, article, aside, blockquote, caption, dd, details, dialog, div,
+dt, fieldset, figcaption, figure, footer, h1–h6, header, hgroup, legend, li, main, nav, p, pre,
+section, summary, td and th elements below body, in element start order. Each part owns text
+whose nearest enclosing part is that element; nested parts' text and text directly in body do
+not count. Script, style, template and noscript subtrees are skipped in every namespace.
+Text is NFC-normalized, Unicode whitespace collapsed and trimmed; empty parts are dropped,
+then only the first 10000 remain. Part hashes use the normalized own text, with duplicate hashes
+suffixed `-2`, `-3`, and so on in occurrence order.
 `links` and `repoUrl` are the revision's publish-level links (see "Links and repoUrl" below);
 both fields are optional in the view, and revisions published before they existed omit them.
 `RenderedWriteup.area?: WriteupArea` is the plain-text area, with whitespace collapsed and trimmed.
@@ -1200,6 +1212,18 @@ After `emend:ready`, the parent sends `{ type: "emend:docs", paths: FilePath[] }
 paths in this revision. Bridge links resolve against the existing document base, decode each
 segment once, and use the same rejection rules as the core resolver. The parent validates the
 destination again before navigating.
+
+After ready and whenever an HTML doc's `changes` differs, the parent sends
+`{ type: "emend:changed", parts: number, marks: { index: number, revision: number }[] }`.
+Absent `changes` sends nothing. The bridge accepts only its parent and exactly these keys;
+`parts` must be an integer from 0 through 10000, and `marks` an array of at most `parts` plain
+objects with exactly `index` and `revision`. Indexes must be integers in `[0, parts)`, strictly
+increasing; revisions must be positive safe integers. An invalid message is ignored whole.
+A count different from the bridge's own part count clears all marks. Otherwise marks replace
+the previous ones, preserving reading position. Each marked part gets a violet left line;
+each run of consecutive parts with the same revision starts with `Changed in rev N`.
+Labels live in closed shadow roots and never enter quotes or headings. Diagram marks follow
+the visible diagram host. Both looks show marks; custom pages use fallback colours.
 
 HTML diagrams use `<pre class="mermaid">` in both emend's look and custom pages. Only
 HTML-namespace `pre` elements qualify. A `pre` qualifies with the exact `mermaid` class token
@@ -1444,6 +1468,9 @@ replies, and stays the same when reading another revision.
 without a Send. It is the exclusive lower bound used by `changedBlocks`.
 `changedBlocks` contains each block once, paired with the newest positive revision sequence in
 which it changed after the reviewer's most recent Send's revision and through the requested revision.
+This includes HTML part IDs `doc-<path hash>-<part hash>`. HTML docs' `changes` projects these
+entries onto their stored parts in index order, carrying each entry's revision. A previous
+revision without stored parts suppresses changes for that doc in the next comparison.
 For example, a block changed in revisions 2 and 3 after a Send on revision 1 appears once with
 `revision: 3` when reading revision 3, and with `revision: 2` when reading revision 2.
 Blocks changed only at or before that Send are absent; before any Send changes start at revision 1.
@@ -2435,6 +2462,7 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `diffContextLines` | 3 lines per side |
 | `titleChars` | 200 characters |
 | `headingsPerDoc` | 1024 h2/h3 entries per doc |
+| `htmlPartsPerDoc` | 10000 nonempty own-text parts per HTML doc |
 | `headingTextChars` | 200 characters per cleaned heading label |
 | `headingIdChars` | 256 characters per declared Markdown heading ID, including its prefix |
 | `headingLookupBytesPerRevision` | 33554432 bytes (32 MiB) across distinct heading lookup maps: UTF-8 name and target ID bytes plus 32 bytes per entry |

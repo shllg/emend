@@ -162,6 +162,7 @@ export function DocView({
         {...props}
         path={openDoc.path}
         contentUrl={openDoc.contentUrl}
+        changes={openDoc.changes}
         look={openDoc.look}
         colorScheme={openDoc.colorScheme}
         images={openDoc.images}

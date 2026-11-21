@@ -6,7 +6,7 @@ import { changedBlocks, reviews, revisions } from "../../db/schema.ts";
 import { testDb } from "../../db/test-support.ts";
 import { insertChangedBlocks } from "./changed.ts";
 import { workerExecutor } from "./executor.ts";
-import { serializeRendered } from "./work.ts";
+import { packIds, serializeRendered } from "./work.ts";
 
 const block = (id: string): Block => ({ id, section: "overview", kind: "paragraph", html: "x", text: "x" });
 test("changed IDs exclude previous writeup and doc IDs, deduplicate new IDs and transfer only packed bytes", async () => {
@@ -16,9 +16,11 @@ test("changed IDs exclude previous writeup and doc IDs, deduplicate new IDs and 
       sections: [{ key: "overview", label: "Overview", topic: null, blocks: [block("overview-aaaaaaaa")] }],
     });
     const doc = serializeRendered([block("doc-aaaaaaaa-aaaaaaaa")]);
+    const html = packIds(["doc-bbbbbbbb-aaaaaaaa", ""]);
     const next = serializeRendered([
       block("overview-aaaaaaaa"),
       block("doc-aaaaaaaa-aaaaaaaa"),
+      block("doc-bbbbbbbb-aaaaaaaa"),
       block("overview-bbbbbbbb"),
       block("overview-bbbbbbbb"),
     ]);
@@ -27,11 +29,13 @@ test("changed IDs exclude previous writeup and doc IDs, deduplicate new IDs and 
       previous: [
         { format: "writeup", bytes: writeup.bytes },
         { format: "doc", bytes: doc.bytes },
+        { format: "ids", bytes: html },
       ],
       next: [next.ids],
     });
     expect(writeup.bytes.byteLength).toBe(0);
     expect(doc.bytes.byteLength).toBe(0);
+    expect(html.byteLength).toBe(0);
     expect(next.ids.byteLength).toBe(0);
     expect(changed.kind).toBe("changed");
     if (changed.kind !== "changed") throw new Error("wrong result");

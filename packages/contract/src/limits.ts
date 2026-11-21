@@ -28,6 +28,7 @@ export const LIMITS = {
   titleChars: 200,
   areaChars: 60,
   headingsPerDoc: 1024,
+  htmlPartsPerDoc: 10000,
   headingTextChars: 200,
   headingIdChars: 256,
   headingLookupBytesPerRevision: 33554432,

@@ -4,6 +4,8 @@ import {
   blockHash,
   HIGHLIGHT_SOURCE_BYTES,
   HIGHLIGHT_SOURCE_REVISION_BYTES,
+  htmlPartHashes,
+  parseDocHtml,
   renderMarkdown,
 } from "@emend/core";
 import { expect, test, vi } from "vitest";
@@ -40,6 +42,28 @@ test("writeup work reports doc-base use without inspecting serialized HTML", asy
     docs: new Map([["target.md", new Map()]]),
   });
   expect(rendered).toMatchObject({ kind: "writeup", pathDependent: true });
+});
+
+test("HTML metadata shares parsing but full part IDs remain path-specific and separate from Markdown IDs", async () => {
+  const source = "<h2>Seeds</h2><p>First</p><p>First</p>";
+  const execute = vi.fn(executeWork);
+  const result = await renderRevision(
+    input(["one.html", "two.html"]),
+    execute,
+    async () => new TextEncoder().encode(source).buffer,
+    async () => new ArrayBuffer(0),
+    async () => "stored",
+  );
+  const hashes = await htmlPartHashes(parseDocHtml(source));
+  const ids = result.ids.flatMap((bytes) => new TextDecoder().decode(bytes).split("\n"));
+  expect(execute.mock.calls.filter(([work]) => work.kind === "doc-metadata")).toHaveLength(1);
+  for (const path of ["one.html", "two.html"]) {
+    expect(result.metadata.get(path)?.parts).toEqual(hashes);
+    const prefix = `doc-${await blockHash(path)}-`;
+    expect(result.htmlParts.get(path)).toEqual(hashes.map((hash) => `${prefix}${hash}`));
+    expect(ids.some((id) => id.startsWith(prefix))).toBe(false);
+  }
+  expect(result.ids).toHaveLength(1);
 });
 
 test("writeup work bounds unlisted paths and retains their full count", async () => {

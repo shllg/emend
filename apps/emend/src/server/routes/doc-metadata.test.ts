@@ -1,5 +1,5 @@
 import { PublishResponse, RevisionView } from "@emend/contract";
-import { applyHtmlLook } from "@emend/core";
+import { applyHtmlLook, htmlPartHashes, parseDocHtml } from "@emend/core";
 import { and, eq } from "drizzle-orm";
 import { expect, test } from "vitest";
 import { files, revisions } from "../../db/schema.ts";
@@ -93,10 +93,12 @@ test("publish records HTML look, leaves other and failed metadata null, and omit
       { path: "deep.html", look: "custom" },
     ]);
     const rows = await f.db.read((q) => q.select().from(files).where(eq(files.ownerId, f.ownerId)).all());
-    for (const { path, look } of sources) {
+    for (const { path, source, look, view } of sources) {
       expect(rows.find((file) => file.path === path)).toMatchObject({
         look,
         colorScheme: path === "styled.html" ? "light" : null,
+        parts:
+          path.endsWith(".html") && !view && path !== "failed.html" ? await htmlPartHashes(parseDocHtml(source)) : null,
       });
     }
     const viewPath = `/reviews/${published.reviewId}/revisions/1`;

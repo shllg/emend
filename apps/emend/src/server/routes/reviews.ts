@@ -1,4 +1,5 @@
 import {
+  type HtmlDocChanges,
   InboxList,
   LIMITS,
   PublishMeta,
@@ -7,6 +8,7 @@ import {
   SourceContent,
   type ThreadView,
 } from "@emend/contract";
+import { blockHash } from "@emend/core";
 import {
   and,
   asc,
@@ -609,6 +611,18 @@ async function revisionView(ownerId: string, q: Queries, deps: AppDeps, reviewId
     .groupBy(changedBlocks.blockId)
     .orderBy(changedBlocks.blockId)
     .all();
+  const changedById = new Map(changed.map(({ blockId, revision }) => [blockId, revision]));
+  const htmlChanges = new Map<string, HtmlDocChanges>();
+  for (const file of fileRows) {
+    if (file.role !== "doc" || file.mediaType !== "text/html" || file.parts === null) continue;
+    const prefix = `doc-${await blockHash(file.path)}-`;
+    const marks: HtmlDocChanges["marks"] = [];
+    for (const [index, hash] of file.parts.entries()) {
+      const revision = changedById.get(`${prefix}${hash}`);
+      if (revision !== undefined && revision !== null) marks.push({ index, revision });
+    }
+    htmlChanges.set(file.path, { parts: file.parts.length, marks });
+  }
   return RevisionView.parse({
     seq,
     base: revision.base,
@@ -652,7 +666,9 @@ async function revisionView(ownerId: string, q: Queries, deps: AppDeps, reviewId
     writeup: rendered,
     // The rendered blob carries the publish-level fields beside its sections; RenderedWriteup strips them.
     ...meta,
-    docs,
+    docs: docs.map((doc) =>
+      doc.kind === "html" && htmlChanges.has(doc.path) ? { ...doc, changes: htmlChanges.get(doc.path) } : doc,
+    ),
     threads: threadRows.map(({ thread, createdOn, placement }) => ({
       id: thread.id,
       target: thread.target,

@@ -1349,6 +1349,45 @@ test("import skips first-revision change work and stores exactly the second revi
   );
   expect(rows).toEqual(expected);
 });
+test.each([
+  { name: "changed", next: "<p>Changed</p><p>Stable</p>", text: "Changed" },
+  { name: "added", next: "<p>Original</p><p>Stable</p><p>Added</p>", text: "Added" },
+  { name: "unchanged", next: "<p>Original</p><p>Stable</p>", text: null },
+])("import derives HTML parts and $name marks from consecutive renderings", async ({ next, text }) => {
+  const input = ImportBundle.parse(await bundle(f));
+  const file = required(input.files[0]);
+  const sources = ["<p>Original</p><p>Stable</p>", next];
+  input.files = await Promise.all(
+    input.revisions.map(async (revision, index) => ({
+      ...file,
+      id: randomUUID(),
+      revisionId: revision.id,
+      newBlob: await f.deps.blobs.put(f.ownerId, Buffer.from(required(sources[index])), "text/html"),
+    })),
+  );
+  expect((await f.importRequest("/import", input)).status).toBe(201);
+  const rows = await f.db.read((q) => q.select().from(tables.files).where(eq(tables.files.ownerId, f.ownerId)));
+  for (const [index, revision] of input.revisions.entries())
+    expect(rows.find((row) => row.revisionId === revision.id)?.parts).toEqual(
+      await core.htmlPartHashes(core.parseDocHtml(required(sources[index]))),
+    );
+  const changed = await f.db.read((q) =>
+    q
+      .select({ revisionId: tables.changedBlocks.revisionId, blockId: tables.changedBlocks.blockId })
+      .from(tables.changedBlocks)
+      .where(eq(tables.changedBlocks.ownerId, f.ownerId)),
+  );
+  expect(changed).toEqual(
+    text
+      ? [
+          {
+            revisionId: required(input.revisions[1]).id,
+            blockId: `doc-${await core.blockHash(file.path)}-${await core.blockHash(text)}`,
+          },
+        ]
+      : [],
+  );
+});
 test("fix2: abort during blob size lookup stops before the next lookup", async () => {
   const input = await bundle(f);
   const abort = new AbortController();
