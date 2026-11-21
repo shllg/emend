@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { statechartClassColors, statechartClassCSS } from "./mermaid-classes.ts";
 
 const groups = ["blue", "orange", "purple", "yellow", "teal", "tan", "pink"];
-const names = [...groups, "breaks", "mayBreak", "bugPath", "repeats"];
+const names = [...groups, "breaks", "mayBreak", "added", "changed", "removed", "bugPath", "repeats"];
 const scopes = ["node", "cluster", "statediagram-cluster"];
 const palettes = [
   { mode: "light", dark: false, surface: "#fdfdfe", text: "#111213" },
@@ -35,7 +35,7 @@ function contrast(a: string, b: string): number {
 test.each(palettes)("every class colours nodes, subgraphs and composite states in $mode", ({ dark, surface, text }) => {
   const colors = statechartClassColors(dark, surface, text);
   const css = statechartClassCSS(dark, surface, text);
-  expect(css.split("\n")).toHaveLength(20);
+  expect(css.split("\n")).toHaveLength(26);
   expect(colors.map((entry) => entry.name)).toEqual(names);
   for (const entry of colors) {
     for (const scope of scopes) {
@@ -88,7 +88,7 @@ test.each([
   const pairs = statechartClassColors(dark, surface, text).filter(
     (entry) => entry.fill !== undefined && entry.text !== undefined,
   );
-  expect(pairs).toHaveLength(9);
+  expect(pairs).toHaveLength(12);
   for (const entry of pairs) {
     if (entry.fill === undefined || entry.text === undefined) throw new Error("Missing class colour pair");
     expect(contrast(entry.fill, entry.text), entry.name).toBeGreaterThanOrEqual(4.5);
@@ -111,6 +111,28 @@ test.each(palettes)("groups preserve borders and marks set only their intended p
       strokeWidth: "1.5px",
     });
   }
+  expect(colors.find((color) => color.name === "added")).toEqual({
+    name: "added",
+    fill: expect.any(String),
+    text: expect.any(String),
+    stroke: dark ? "#53be70" : "#218041",
+    strokeWidth: "1.5px",
+  });
+  expect(colors.find((color) => color.name === "changed")).toEqual({
+    name: "changed",
+    fill: expect.any(String),
+    text: expect.any(String),
+    stroke: dark ? "#f5af2e" : "#ba7419",
+    strokeWidth: "1.5px",
+  });
+  expect(colors.find((color) => color.name === "removed")).toEqual({
+    name: "removed",
+    fill: expect.any(String),
+    text: expect.any(String),
+    stroke: dark ? "#fa695e" : "#d33b36",
+    strokeWidth: "1.5px",
+    dasharray: "5 3",
+  });
   expect(colors.find((color) => color.name === "bugPath")).toEqual({
     name: "bugPath",
     stroke: dark ? "#59aaf8" : "#2b7ec9",
@@ -124,16 +146,42 @@ test.each(palettes)("groups preserve borders and marks set only their intended p
   });
 });
 
+test.each(palettes)("only removed has a dashed change border, so it reads without colour in $mode", (palette) => {
+  const colors = statechartClassColors(palette.dark, palette.surface, palette.text);
+  const rules = statechartClassCSS(palette.dark, palette.surface, palette.text).split("\n");
+  for (const name of ["added", "changed", "removed"]) {
+    expect(colors.find((color) => color.name === name)?.dasharray).toBe(name === "removed" ? "5 3" : undefined);
+    for (const scope of scopes) {
+      const rule = rules.find((rule) => rule.includes(`.${scope}.${name}:not([data-look=handDrawn]) rect`));
+      expect(rule).toBeDefined();
+      if (name === "removed") {
+        expect(rule).toContain("stroke-dasharray: 5 3;");
+      } else {
+        expect(rule).not.toContain("stroke-dasharray:");
+      }
+    }
+  }
+});
+
+test.each(palettes)("change borders meet 3:1 contrast against the default $mode surface", (palette) => {
+  const colors = statechartClassColors(palette.dark, palette.surface, palette.text);
+  for (const name of ["added", "changed", "removed"]) {
+    const stroke = colors.find((color) => color.name === name)?.stroke;
+    if (stroke === undefined) throw new Error(`Missing ${name} stroke`);
+    expect(contrast(stroke, palette.surface), name).toBeGreaterThanOrEqual(3);
+  }
+});
+
 test.each(palettes)("CSS orders group fills before fill marks before border marks in $mode", (palette) => {
   const css = statechartClassCSS(palette.dark, palette.surface, palette.text);
   for (const group of groups) {
-    for (const mark of ["breaks", "mayBreak"]) {
+    for (const mark of ["breaks", "mayBreak", "added", "changed", "removed"]) {
       expect(css.indexOf(`.node.${mark}:not([data-look=handDrawn]) `)).toBeGreaterThan(
         css.lastIndexOf(`.statediagram-cluster.${group}:not([data-look=handDrawn]) `),
       );
     }
   }
-  for (const mark of ["breaks", "mayBreak"]) {
+  for (const mark of ["breaks", "mayBreak", "added", "changed", "removed"]) {
     for (const border of ["bugPath", "repeats"]) {
       expect(css.indexOf(`.node.${border}:not([data-look=handDrawn]) `)).toBeGreaterThan(
         css.lastIndexOf(`.statediagram-cluster.${mark}:not([data-look=handDrawn]) `),

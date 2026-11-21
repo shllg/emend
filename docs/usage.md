@@ -335,6 +335,8 @@ skill writes. The colours apply to states, composite states, flowchart nodes and
 A mark shows over a group fill. A `classDef` for one of these names in the diagram wins over
 emend's colours for that class. A hand-drawn diagram (`look: handDrawn`) keeps Mermaid's sketched
 fills, so give it a `classDef` instead.
+In light and dark, a change graph marks parts with `added` (green), `changed` (amber) and `removed`
+(red with a dashed border, so it reads without colour). A `classDef` for these names wins too.
 
 ![A plan doc with a state diagram and a comment thread](images/doc-desktop.png)
 
