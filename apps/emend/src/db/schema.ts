@@ -293,6 +293,7 @@ export const files = sqliteTable(
     deletions: integer("deletions"),
     title: text("title"),
     headings: text("headings", { mode: "json" }).$type<DocHeading[]>(),
+    parts: text("parts", { mode: "json" }).$type<string[]>(),
     look: text("look", { enum: ["emend", "custom"] }),
     colorScheme: text("color_scheme", { enum: ["light"] }),
     flag: text("flag", { enum: enumValues(FileFlag.options) }),

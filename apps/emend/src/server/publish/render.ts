@@ -1,5 +1,6 @@
 import { docViewOf, isRenderedHtmlDoc, LIMITS, type PublishRequest } from "@emend/contract";
 import {
+  blockHash,
   cleanDocTitle,
   type DocLinks,
   decodeText,
@@ -15,6 +16,29 @@ import { IMAGE_HEAD_BYTES, type ImageSize } from "./image-size.ts";
 import { checkPublishSignal } from "./lifecycle.ts";
 import type { DocMetadata, Executor, RenderedBytes } from "./work.ts";
 
+export type HtmlPartBudget = { count: number; exhausted: boolean; limit: number };
+
+export function chargeHtmlParts(budgets: readonly HtmlPartBudget[], own: DocMetadata): string[] | undefined {
+  const parts = own.parts;
+  if (parts === undefined) return;
+  // Across all retained revisions, cache plus stored docs stay within the operation's budget:
+  // htmlPartsPerRevision for publish, htmlPartsPerImport for import. Only the current worker
+  // result (at most htmlPartsPerDoc) is extra. After exhaustion, later docs are not hashed.
+  let cut = false;
+  for (const budget of budgets) {
+    if (budget.exhausted || budget.count + parts.length > budget.limit) {
+      budget.exhausted = true;
+      cut = true;
+    }
+  }
+  if (cut) {
+    delete own.parts;
+    return;
+  }
+  for (const budget of budgets) budget.count += parts.length;
+  return parts;
+}
+
 export async function renderRevision(
   input: PublishRequest,
   execute: Executor,
@@ -23,7 +47,7 @@ export async function renderRevision(
   put: (bytes: Buffer) => Promise<string>,
   signal?: AbortSignal,
   onRendered?: (bytes: number) => void,
-  options: { refuseUnlistedMedia?: boolean } = {},
+  options: { refuseUnlistedMedia?: boolean; htmlParts?: HtmlPartBudget } = {},
 ) {
   const assets = new Map(input.files.filter((file) => file.role === "asset").map((file) => [file.path, file.newBlob]));
   const mediaByDoc = new Map<string, [string, string][]>();
@@ -42,27 +66,38 @@ export async function renderRevision(
   const sourceMetadata = new Map<string, DocMetadata>();
   const sourceBlobs = new Map<string, string>();
   const metadata = new Map<string, DocMetadata>();
+  const htmlParts = new Map<string, string[]>();
   const metadataCache = new Map<string, DocMetadata>();
   const failedMetadata = new Set<string>();
   const unrendered: string[] = [];
   let metadataBytes = 0;
+  const revisionBudget = { count: 0, exhausted: false, limit: LIMITS.htmlPartsPerRevision };
+  const htmlPartBudgets = [revisionBudget, ...(options.htmlParts ? [options.htmlParts] : [])];
   for (const file of input.files) {
     checkPublishSignal(signal);
     if (file.role !== "doc") continue;
     const source = docViewOf(file) === "source";
     const format = isRenderedHtmlDoc(file) ? "html" : "markdown";
     const media = mediaByDoc.get(file.path);
+    // Exhaustion never resets within this call, so the cache key need not include the parts request.
     const key = JSON.stringify([format, file.newBlob, media]);
     let own = source ? { headings: [] } : metadataCache.get(key);
     if (!own) {
       own = { headings: [] };
       if (file.newBlob && !source)
         try {
-          const result = await execute({ kind: "doc-metadata", format, bytes: await read(file.newBlob), media });
+          const result = await execute({
+            kind: "doc-metadata",
+            format,
+            bytes: await read(file.newBlob),
+            media,
+            parts: format === "html" && !htmlPartBudgets.some((budget) => budget.exhausted),
+          });
           if (result.kind !== "doc-metadata") throw new Error("wrong result");
           own = {
             title: result.title,
             headings: result.headings,
+            parts: result.parts,
             look: result.look,
             legacyLook: result.legacyLook,
             colorScheme: result.colorScheme,
@@ -74,10 +109,12 @@ export async function renderRevision(
       metadataCache.set(key, own);
     }
     if (format === "html" && failedMetadata.has(key)) unrendered.push(file.path);
+    const parts = format === "html" ? chargeHtmlParts(htmlPartBudgets, own) : undefined;
     const doc = {
       title:
         cleanDocTitle(file.title ?? "") || own.title || cleanDocTitle(file.path.split("/").at(-1) ?? "") || "Document",
       headings: own.headings,
+      ...(parts !== undefined ? { parts } : {}),
       ...(format === "html" && own.look ? { look: own.look } : {}),
       ...(format === "html" && own.legacyLook ? { legacyLook: own.legacyLook } : {}),
       ...(format === "html" && own.colorScheme ? { colorScheme: own.colorScheme } : {}),
@@ -87,6 +124,13 @@ export async function renderRevision(
     onRendered?.(size);
     if (metadataBytes > LIMITS.renderedBytesPerRevision) throw new ApiError("too_large");
     (source ? sourceMetadata : metadata).set(file.path, doc);
+    if (format === "html" && doc.parts !== undefined) {
+      const prefix = `doc-${await blockHash(file.path)}-`;
+      htmlParts.set(
+        file.path,
+        doc.parts.map((hash) => `${prefix}${hash}`),
+      );
+    }
     await yieldToLoop("publish-render");
   }
   const lookupCache = new Map<DocMetadata["headings"], ReadonlyMap<string, string>>();
@@ -353,6 +397,7 @@ export async function renderRevision(
   }
   return {
     ids,
+    htmlParts,
     renderedBlob,
     sourceBlob,
     docBlobs,

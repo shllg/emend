@@ -20,6 +20,7 @@ export {
   htmlLookThemeVars,
   stripHtmlLook,
 } from "./html-look-file.ts";
+export { HTML_PART_TAGS, htmlPartHashes, htmlPartTexts } from "./html-parts.ts";
 export { type DocLinks, resolveDocLink } from "./links.ts";
 export { isLockfile } from "./lockfiles.ts";
 export { docText, parseDocHtml, placeHtmlSpan } from "./place/html.ts";

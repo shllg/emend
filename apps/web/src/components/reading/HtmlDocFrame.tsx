@@ -1,4 +1,4 @@
-import type { DocHeading, HtmlSpanTarget } from "@emend/contract";
+import type { DocHeading, HtmlDocChanges, HtmlSpanTarget } from "@emend/contract";
 import { TextSelect } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { claimDraft, useDraftClaim } from "../../lib/composer-owner.ts";
@@ -38,6 +38,7 @@ export function HtmlDocFrame({
   threads,
   topics,
   changedBlocks,
+  changes,
   navigation,
   docNavigation,
   onNavigate,
@@ -52,6 +53,7 @@ export function HtmlDocFrame({
 }: ReaderProps & {
   path: string;
   contentUrl: string;
+  changes?: HtmlDocChanges;
   images?: readonly string[];
   look?: "emend" | "custom";
   colorScheme?: "light";
@@ -263,6 +265,11 @@ export function HtmlDocFrame({
       frame.current?.contentWindow?.postMessage({ type: "emend:highlight", anchors: JSON.parse(anchors) }, "*");
   }, [ready, anchors]);
   const paths = JSON.stringify(docPaths);
+  const changedParts = JSON.stringify(changes);
+  useEffect(() => {
+    if (ready && !gone.current && changedParts !== undefined)
+      post({ type: "emend:changed", ...JSON.parse(changedParts) });
+  }, [ready, changedParts, post]);
   const handledPosition = useRef<{ reading: typeof reading; window: Window | null } | undefined>(undefined);
   useEffect(() => {
     if (ready && !gone.current) post({ type: "emend:docs", paths: JSON.parse(paths) });

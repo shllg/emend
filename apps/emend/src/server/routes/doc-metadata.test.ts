@@ -1,11 +1,27 @@
 import { PublishResponse, RevisionView } from "@emend/contract";
-import { applyHtmlLook } from "@emend/core";
+import { applyHtmlLook, htmlPartHashes, parseDocHtml } from "@emend/core";
 import { and, eq } from "drizzle-orm";
 import { expect, test } from "vitest";
 import { files, revisions } from "../../db/schema.ts";
 import { mailboxFixture } from "../mailbox/test-support.ts";
 import { WorkTimeout } from "../publish/executor.ts";
 import { executeWork } from "../publish/work.ts";
+
+test("HTML metadata hashes parts only when requested", async () => {
+  const source = "<!doctype html><title>Plan</title><h2>Seeds</h2><p>First</p><p>First</p>";
+  const work = {
+    kind: "doc-metadata" as const,
+    format: "html" as const,
+    bytes: new TextEncoder().encode(source).buffer,
+  };
+  const metadata = await executeWork(work);
+  expect(metadata).not.toHaveProperty("parts");
+  expect(await executeWork({ ...work, parts: false })).toEqual(metadata);
+  expect(await executeWork({ ...work, parts: true })).toEqual({
+    ...metadata,
+    parts: await htmlPartHashes(parseDocHtml(source)),
+  });
+});
 
 test("the file look keeps light-only HTML metadata and headings unchanged", async () => {
   const source = "<!doctype html><title>Plan</title><style>p{color:#222}</style><h2>Seeds</h2><p>Plan</p>";
@@ -14,7 +30,7 @@ test("the file look keeps light-only HTML metadata and headings unchanged", asyn
     lightOnly: true,
   });
   const metadata = (text: string) =>
-    executeWork({ kind: "doc-metadata", format: "html", bytes: new TextEncoder().encode(text).buffer });
+    executeWork({ kind: "doc-metadata", format: "html", bytes: new TextEncoder().encode(text).buffer, parts: true });
   const before = await metadata(source);
   expect(before).toMatchObject({
     kind: "doc-metadata",
@@ -33,7 +49,7 @@ test("the file look keeps HTML titles when its stylesheet exceeds the title pref
   expect(Buffer.byteLength(css, "utf8")).toBeGreaterThan(64 * 1024);
   const styled = applyHtmlLook(source, { css, lightOnly: false });
   const metadata = (text: string) =>
-    executeWork({ kind: "doc-metadata", format: "html", bytes: new TextEncoder().encode(text).buffer });
+    executeWork({ kind: "doc-metadata", format: "html", bytes: new TextEncoder().encode(text).buffer, parts: true });
   const before = await metadata(source);
   expect(before).toMatchObject({
     kind: "doc-metadata",
@@ -93,10 +109,12 @@ test("publish records HTML look, leaves other and failed metadata null, and omit
       { path: "deep.html", look: "custom" },
     ]);
     const rows = await f.db.read((q) => q.select().from(files).where(eq(files.ownerId, f.ownerId)).all());
-    for (const { path, look } of sources) {
+    for (const { path, source, look, view } of sources) {
       expect(rows.find((file) => file.path === path)).toMatchObject({
         look,
         colorScheme: path === "styled.html" ? "light" : null,
+        parts:
+          path.endsWith(".html") && !view && path !== "failed.html" ? await htmlPartHashes(parseDocHtml(source)) : null,
       });
     }
     const viewPath = `/reviews/${published.reviewId}/revisions/1`;

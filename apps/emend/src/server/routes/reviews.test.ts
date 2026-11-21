@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import * as contract from "@emend/contract";
+import { blockHash } from "@emend/core";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
@@ -265,6 +266,52 @@ test("revision includes insertion-ordered comments, placements, docs and changes
       .where(and(eq(sends.ownerId, f.ownerId), eq(sends.reviewId, f.reviewId))),
   );
   expect(await (await get(`/${f.reviewId}`)).json()).toMatchObject({ pendingSend: false });
+});
+
+test("HTML revision changes project stored parts onto changed block revisions", async () => {
+  const path = "docs/seed.html";
+  const first = await publishReview(f, { docs: { [path]: "<p>Stable</p><p>Original</p>" } });
+  const read = async (seq: number) => {
+    const response = await get(`/${first.reviewId}/revisions/${seq}`);
+    expect(response.status).toBe(200);
+    return contract.RevisionView.parse(await response.json());
+  };
+  expect((await read(1)).docs).toContainEqual(
+    expect.objectContaining({ path, kind: "html", changes: { parts: 2, marks: [] } }),
+  );
+  await publishReview(f, { docs: { [path]: "<p>Stable</p><p>Changed</p>" } });
+  const view = await read(2);
+  expect(view.docs).toContainEqual(
+    expect.objectContaining({ path, kind: "html", changes: { parts: 2, marks: [{ index: 1, revision: 2 }] } }),
+  );
+  expect(view.changedBlocks).toEqual([
+    { blockId: `doc-${await blockHash(path)}-${await blockHash("Changed")}`, revision: 2 },
+  ]);
+  const stored = await f.db.read((q) =>
+    q
+      .select()
+      .from(files)
+      .where(and(eq(files.ownerId, f.ownerId), eq(files.path, path))),
+  );
+  expect(stored.every((file) => file.parts?.length === 2)).toBe(true);
+  expect((await read(1)).docs[0]).toMatchObject({ changes: { parts: 2, marks: [] } });
+  await publishReview(f, { docs: { [path]: "<p>Stable</p><p>Changed</p><p>Added</p>" } });
+  expect((await read(3)).docs[0]).toMatchObject({
+    changes: {
+      parts: 3,
+      marks: [
+        { index: 1, revision: 2 },
+        { index: 2, revision: 3 },
+      ],
+    },
+  });
+  await f.db.query((q) =>
+    q
+      .update(files)
+      .set({ parts: null })
+      .where(and(eq(files.ownerId, f.ownerId), eq(files.path, path))),
+  );
+  expect((await read(2)).docs[0]).not.toHaveProperty("changes");
 });
 
 test("changed blocks use the newest change after the last Send through the requested revision", async () => {

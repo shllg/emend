@@ -24,6 +24,7 @@ import {
   type HtmlLook,
   htmlHeadingsFromTree,
   htmlLookFromTree,
+  htmlPartHashes,
   inferDocTitle,
   markdownHeadings,
   markdownImageReferences,
@@ -63,7 +64,13 @@ export type Work =
   | { kind: "source"; path: string; source: ArrayBuffer; highlight?: boolean }
   | { kind: "doc-images"; bytes: ArrayBuffer }
   | { kind: "image-sizes"; heads: [string, ArrayBuffer][] }
-  | { kind: "doc-metadata"; format: "html" | "markdown"; bytes: ArrayBuffer; media?: [string, string][] }
+  | {
+      kind: "doc-metadata";
+      format: "html" | "markdown";
+      bytes: ArrayBuffer;
+      media?: [string, string][];
+      parts?: boolean;
+    }
   | { kind: "line-count"; bytes: ArrayBuffer }
   | { kind: "writeup-source"; bytes: ArrayBuffer }
   | { kind: "placement-doc"; format: "html" | "markdown" | "writeup"; bytes: ArrayBuffer }
@@ -89,7 +96,7 @@ export type Work =
     }
   | { kind: "resection"; path: string; bytes: ArrayBuffer }
   | { kind: "comment-md"; bodies: string[]; repoUrl?: string }
-  | { kind: "changed"; previous: { format: "writeup" | "doc"; bytes: ArrayBuffer }[]; next: ArrayBuffer[] }
+  | { kind: "changed"; previous: { format: "writeup" | "doc" | "ids"; bytes: ArrayBuffer }[]; next: ArrayBuffer[] }
   | {
       kind: "place";
       writeup: string | null;
@@ -113,6 +120,7 @@ export type Work =
 export type DocMetadata = {
   title?: string;
   headings: DocHeading[];
+  parts?: string[];
   look?: HtmlLook;
   // Look before emend became the default; only for import rows from exporters that send no look.
   legacyLook?: HtmlLook;
@@ -144,11 +152,22 @@ const parse = (bytes: ArrayBuffer, format: "writeup" | "doc"): Block[] => {
   const value = JSON.parse(decode(bytes));
   return format === "writeup" ? (value as RenderedWriteup).sections.flatMap((s) => s.blocks) : (value as Block[]);
 };
+export function packIds(ids: string[]): ArrayBuffer {
+  return new TextEncoder().encode(ids.join("\n")).buffer;
+}
+export function previousHtmlIds(
+  previous: Iterable<[path: string, ids: string[] | undefined]>,
+  current: ReadonlyMap<string, string[]>,
+): string[] {
+  const seen: string[] = [];
+  for (const [path, ids] of previous) for (const id of ids ?? current.get(path) ?? []) seen.push(id);
+  return seen;
+}
 export function serializeRendered(value: RenderedWriteup | Block[], pathDependent = false): RenderedBytes {
   const blocks = Array.isArray(value) ? value : value.sections.flatMap((s) => s.blocks);
   return {
     bytes: new TextEncoder().encode(JSON.stringify(value)).buffer,
-    ids: new TextEncoder().encode(blocks.map(({ id }) => id).join("\n")).buffer,
+    ids: packIds(blocks.map(({ id }) => id)),
     count: blocks.length,
     pathDependent,
   };
@@ -201,6 +220,7 @@ export const executeWork: Executor = async (work) => {
         kind: "doc-metadata",
         title: await inferDocTitle("html", new TextEncoder().encode(source)),
         headings: htmlHeadingsFromTree(tree),
+        ...(work.parts === true ? { parts: await htmlPartHashes(tree) } : {}),
         ...(tree
           ? {
               look: appearance.look,
@@ -298,7 +318,11 @@ export const executeWork: Executor = async (work) => {
     };
   if (work.kind === "changed") {
     const seen = new Set<string>();
-    for (const blob of work.previous) for (const block of parse(blob.bytes, blob.format)) seen.add(block.id);
+    for (const blob of work.previous) {
+      if (blob.format === "ids") {
+        for (const id of decode(blob.bytes).split("\n")) if (id) seen.add(id);
+      } else for (const block of parse(blob.bytes, blob.format)) seen.add(block.id);
+    }
     const changed: string[] = [];
     for (const packed of work.next)
       for (const id of decode(packed).split("\n"))

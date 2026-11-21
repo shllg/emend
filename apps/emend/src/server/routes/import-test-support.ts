@@ -301,7 +301,12 @@ export async function multibyteCapsBundle(f: ImportFixture) {
     threadId: required(input.threads[i % 1000]).id,
     sendId: required(input.sends[i % 1000]).id,
   }));
-  const changed = blocks;
+  const changed = [
+    ...blocks,
+    ...(await Promise.all(
+      htmlPaths.map(async (path) => ({ id: `doc-${await core.blockHash(path)}-${await core.blockHash("needle")}` })),
+    )),
+  ];
   const generatedRows = 4 + changed.length; // Writeup source/rendering and two doc renderings.
   const withoutPlacements = importRowCount(input) - input.threads.length;
   const lengths: number[] = Array.from({ length: 65 }, (_, i) => (i < 4 ? 50 : 1));

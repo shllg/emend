@@ -9,7 +9,7 @@ import {
   type PublishResponse,
   writeupMarkdown,
 } from "@emend/contract";
-import { composeRenames, decodeText, type PlaceContext } from "@emend/core";
+import { blockHash, composeRenames, decodeText, type PlaceContext } from "@emend/core";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import type { Db, Queries } from "../../db/client.ts";
 import { DuplicateReviewKeyError } from "../../db/repo/reviews.ts";
@@ -38,7 +38,7 @@ import { ownerHead } from "./media-head.ts";
 import { validateNoteRanges } from "./notes.ts";
 import { renderRevision } from "./render.ts";
 import { revisionTransition } from "./transitions.ts";
-import type { Executor, SharedSides, Work, WorkLast } from "./work.ts";
+import { type Executor, packIds, previousHtmlIds, type SharedSides, type Work, type WorkLast } from "./work.ts";
 
 type Deps = { db: Db; blobs: BlobStore; baseUrl: string; executor?: Executor; signal?: AbortSignal };
 type FileRow = typeof files.$inferSelect;
@@ -459,15 +459,24 @@ async function computePublish(
     if (previous) {
       const previousBlobs: Extract<Work, { kind: "changed" }>["previous"] = [];
       if (writeup) previousBlobs.push({ format: "writeup", bytes: await read(writeup.renderedBlob) });
-      for (const file of getFiles(previous.id))
+      for (const file of getFiles(previous.id)) {
         if (file.renderedBlob && file.mediaType === "text/markdown")
           previousBlobs.push({ format: "doc", bytes: await read(file.renderedBlob) });
+        if (file.role === "doc" && file.mediaType === "text/html") {
+          const prefix = `doc-${await blockHash(file.path)}-`;
+          const previousIds = file.parts !== null ? file.parts.map((hash) => `${prefix}${hash}`) : undefined;
+          previousBlobs.push({
+            format: "ids",
+            bytes: packIds(previousHtmlIds([[file.path, previousIds]], prepared.htmlParts)),
+          });
+        }
+      }
       // Rendering survives retries. Copy only the packed IDs before transferring them;
       // previous rendered bytes are read fresh from the current snapshot each attempt.
       const changed = await execute({
         kind: "changed",
         previous: previousBlobs,
-        next: ids.map((bytes) => bytes.slice(0)),
+        next: [...ids.map((bytes) => bytes.slice(0)), packIds([...prepared.htmlParts.values()].flat())],
       });
       if (changed.kind !== "changed") throw new Error("wrong result");
       changedBytes = changed.bytes;
@@ -565,6 +574,7 @@ async function computePublish(
               file.role === "doc"
                 ? ((docViewOf(file) === "source" ? sourceMetadata : metadata).get(file.path)?.headings ?? null)
                 : null,
+            parts: htmlDoc ? (metadata.get(file.path)?.parts ?? null) : null,
             look,
             colorScheme,
             renderedBlob:

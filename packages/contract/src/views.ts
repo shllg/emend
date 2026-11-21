@@ -232,6 +232,20 @@ const contentUrl = z.string().refine((url) => {
     return false;
   }
 }, "expected a percent-encoded content path");
+export const HtmlDocChanges = z
+  .object({
+    parts: z.int().nonnegative().max(LIMITS.htmlPartsPerDoc),
+    marks: z
+      .array(z.object({ index: z.int().nonnegative(), revision: z.int().positive() }))
+      .max(LIMITS.htmlPartsPerDoc),
+  })
+  .refine(
+    ({ parts, marks }) =>
+      marks.every((mark, index) => mark.index < parts && mark.index > (marks[index - 1]?.index ?? -1)),
+    "mark indexes must be within parts and strictly increasing",
+  );
+export type HtmlDocChanges = z.infer<typeof HtmlDocChanges>;
+
 export const RevisionView = z
   .object({
     seq: z.int().positive(),
@@ -271,6 +285,8 @@ export const RevisionView = z
             path: FilePath,
             kind: z.literal("html"),
             contentUrl,
+            // Absent on revisions published before parts were stored.
+            changes: HtmlDocChanges.optional(),
             images: z.array(FilePath).max(LIMITS.filesPerRevision).optional(),
             look: z.enum(["emend", "custom"]).optional(),
             colorScheme: z.enum(["light"]).optional(),

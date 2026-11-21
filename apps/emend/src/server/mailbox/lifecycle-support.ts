@@ -1,5 +1,5 @@
 import type { PublishRequest, WriteupInput } from "@emend/contract";
-import { PublishResponse, WaitResult } from "@emend/contract";
+import { isRenderedHtmlDoc, PublishResponse, WaitResult } from "@emend/contract";
 import { expect } from "vitest";
 import type { mailboxFixture } from "./test-support.ts";
 
@@ -30,7 +30,8 @@ export async function publishReview(
   }
   for (const [path, text] of Object.entries(options.docs ?? {})) {
     const hash = await f.deps.blobs.put(f.ownerId, Buffer.from(text), "text/markdown");
-    files.push({ path, role: "doc", oldPath: null, oldBlob: null, newBlob: hash, flag: null });
+    const file = { path, role: "doc", oldPath: null, oldBlob: null, newBlob: hash, flag: null };
+    files.push({ ...file, ...(isRenderedHtmlDoc(file) ? { assets: [] } : {}) });
   }
   const response = await f.request(
     "/publish",

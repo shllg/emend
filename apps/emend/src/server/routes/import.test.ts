@@ -1349,6 +1349,103 @@ test("import skips first-revision change work and stores exactly the second revi
   );
   expect(rows).toEqual(expected);
 });
+test.each([
+  { name: "changed", next: "<p>Changed</p><p>Stable</p>", text: "Changed", failedMetadata: false },
+  { name: "added", next: "<p>Original</p><p>Stable</p><p>Added</p>", text: "Added", failedMetadata: false },
+  { name: "unchanged", next: "<p>Original</p><p>Stable</p>", text: null, failedMetadata: false },
+  { name: "previous metadata failed", next: "<p>Changed</p><p>Stable</p>", text: null, failedMetadata: true },
+])("import derives HTML parts and marks from consecutive renderings: $name", async ({ next, text, failedMetadata }) => {
+  const input = ImportBundle.parse(await bundle(f));
+  const file = required(input.files[0]);
+  const sources = ["<p>Original</p><p>Stable</p>", next];
+  input.files = await Promise.all(
+    input.revisions.map(async (revision, index) => ({
+      ...file,
+      id: randomUUID(),
+      revisionId: revision.id,
+      newBlob: await f.deps.blobs.put(f.ownerId, Buffer.from(required(sources[index])), "text/html"),
+    })),
+  );
+  if (failedMetadata) {
+    const execute = required(f.deps.publishExecutor);
+    let calls = 0;
+    f.deps.publishExecutor = async (work) => {
+      if (work.kind === "doc-metadata" && work.format === "html" && ++calls === 1)
+        throw new Error("synthetic metadata failure");
+      return execute(work);
+    };
+  }
+  expect((await f.importRequest("/import", input)).status).toBe(201);
+  const rows = await f.db.read((q) => q.select().from(tables.files).where(eq(tables.files.ownerId, f.ownerId)));
+  for (const [index, revision] of input.revisions.entries())
+    expect(rows.find((row) => row.revisionId === revision.id)?.parts).toEqual(
+      failedMetadata && index === 0 ? null : await core.htmlPartHashes(core.parseDocHtml(required(sources[index]))),
+    );
+  const changed = await f.db.read((q) =>
+    q
+      .select({ revisionId: tables.changedBlocks.revisionId, blockId: tables.changedBlocks.blockId })
+      .from(tables.changedBlocks)
+      .where(eq(tables.changedBlocks.ownerId, f.ownerId)),
+  );
+  expect(changed).toEqual(
+    text
+      ? [
+          {
+            revisionId: required(input.revisions[1]).id,
+            blockId: `doc-${await core.blockHash(file.path)}-${await core.blockHash(text)}`,
+          },
+        ]
+      : [],
+  );
+});
+test("import shares the HTML part budget across all revisions it retains", async () => {
+  const input = ImportBundle.parse(await bundle(f));
+  const first = required(input.revisions[0]);
+  const writeup = required(input.writeups[0]);
+  const file = required(input.files[0]);
+  for (let seq = input.revisions.length + 1; seq <= 11; seq++)
+    input.revisions.push({ ...first, id: randomUUID(), seq });
+  input.writeups = input.revisions.map((revision) => ({
+    ...writeup,
+    id: randomUUID(),
+    revisionId: revision.id,
+  }));
+  input.files = input.revisions.flatMap((revision) =>
+    Array.from({ length: 10 }, (_, ord) => ({
+      ...file,
+      id: randomUUID(),
+      revisionId: revision.id,
+      path: `doc-${ord}.html`,
+      ord,
+    })),
+  );
+  // All paths share a tiny source blob; synthetic worker metadata supplies the bounded parts.
+  const parts = Array.from({ length: LIMITS.htmlPartsPerDoc }, (_, index) => index.toString(16).padStart(8, "0"));
+  const execute = required(f.deps.publishExecutor);
+  f.deps.publishExecutor = async (work) => {
+    if (work.kind === "doc-metadata" && work.format === "html") return { kind: "doc-metadata", headings: [], parts };
+    return execute(work);
+  };
+  expect((await f.importRequest("/import", input)).status).toBe(201);
+  for (const [index, stored] of [
+    [9, true],
+    [10, false],
+  ] as const) {
+    const revision = required(input.revisions[index]);
+    const rows = await f.db.read((q) =>
+      q
+        .select({ parts: tables.files.parts })
+        .from(tables.files)
+        .where(and(eq(tables.files.ownerId, f.ownerId), eq(tables.files.revisionId, revision.id))),
+    );
+    expect(rows).toHaveLength(10);
+    for (const row of rows) {
+      if (stored) expect(row.parts).toHaveLength(LIMITS.htmlPartsPerDoc);
+      else expect(row.parts).toBeNull();
+    }
+  }
+});
+
 test("fix2: abort during blob size lookup stops before the next lookup", async () => {
   const input = await bundle(f);
   const abort = new AbortController();
