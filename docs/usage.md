@@ -240,6 +240,8 @@ update time is UTC. Add `--json` for one JSON object with an `items` list. It sh
 newest 100. Each JSON item also carries `branch`, `newest` (`{ revision, head }` of the newest
 revision, `null` without any) and `approved` (`null` while nothing is approved, else `{ revision,
 head }` of the approved revision). `head` is a full commit id, `worktree` or `null`.
+`turn` is `agent` after a Send on the newest revision that has not been set aside, `reviewer`
+otherwise, or `null` for an approved or retired review or one without a revision.
 
 To check which commit an approval covers, run `emend ls --json --head <sha>` with the full commit
 id (40 or 64 lowercase hex characters). It lists only reviews whose approved or newest revision has
@@ -254,7 +256,39 @@ not approved. It reads only, takes no comments and changes nothing.
 the hub name when attached, this machine's instance name, whether the server or hub answers, and
 the `emend` version. Add `--json` for the same fields as JSON, where `address: none` and
 `instance: none` in the human form are `null`. It prints no token, creates no file, and reports a
-server or hub that does not answer instead of failing.
+server or hub that does not answer instead of failing. Use `--line` for the branch's review in
+[Claude Code's status line](#show-the-review-in-claude-codes-status-line).
+
+## Show the review in Claude Code's status line
+
+`emend status --line` prints one short line, such as `emend r3 · your turn`,
+`emend r3 · agent's turn`, `emend r5 · approved` or `emend r5 · retired`.
+It shows the review that `emend publish` made for the current folder's branch on this machine.
+When the server does not report whose turn it is, an open review shows only `emend r3`.
+It needs a server or hub that lists `agent-review-key` (this emend version or newer) and prints nothing otherwise.
+
+It prints nothing when the branch has no review, when no server or hub answers, and on any error.
+It always exits 0. It reads only, never starts a server and never prompts.
+It also prints nothing when the emend it runs is installed inside the repository.
+The command gives up after 2 seconds; `EMEND_STATUS_LINE_DEADLINE_MS` (100 to 10000 milliseconds) changes that.
+
+Paste this prompt into Claude Code:
+
+```text
+Add emend to my Claude Code status line. In my ~/.claude/settings.json, add a statusLine setting of type command that runs emend status --line.
+
+Keep any existing status line by printing both: the existing command's output, a separator, then emend's line. Show me the change before saving it.
+```
+
+Without an existing status line, the setting should look like this:
+
+```json
+{ "statusLine": { "type": "command", "command": "emend status --line" } }
+```
+
+Claude Code runs the command after each assistant message and shows its output below the prompt;
+it passes session data on standard input, which `emend status --line` ignores: it uses the folder
+it runs in.
 
 ## Stop the server
 

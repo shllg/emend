@@ -2,6 +2,7 @@ import { createHash, createHmac } from "node:crypto";
 import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  AGENT_REVIEW_KEY_FEATURE,
   Capabilities,
   ERROR_STATUS,
   ErrorBody,
@@ -890,6 +891,7 @@ test("public capabilities proves a fresh challenge and refuses malformed challen
   const challenge = Buffer.alloc(32, 1).toString("base64url");
   const response = await request("/capabilities", "GET", { "X-Emend-Challenge": challenge });
   expect(response.status).toBe(200);
+  expect(Capabilities.parse(await response.json()).features).toContain(AGENT_REVIEW_KEY_FEATURE);
   expect(response.headers.get("X-Emend-Proof")).toBe(
     createHmac("sha256", Buffer.from(key, "base64url")).update(challenge).digest("base64url"),
   );

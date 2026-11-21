@@ -6,7 +6,10 @@ import { onTestFinished, vi } from "vitest";
 import type { Io } from "../main.ts";
 import { writeSecretFile } from "../state/files.ts";
 
-export function provenTestServer(stateDir: string): (url: string | URL, init?: RequestInit) => Response | undefined {
+export function provenTestServer(
+  stateDir: string,
+  features: string[] = [],
+): (url: string | URL, init?: RequestInit) => Response | undefined {
   const key = Buffer.alloc(32, 3).toString("base64url");
   writeSecretFile(
     join(stateDir, "server.json"),
@@ -16,7 +19,7 @@ export function provenTestServer(stateDir: string): (url: string | URL, init?: R
     if (!String(url).endsWith("/api/v1/capabilities")) return undefined;
     const challenge = new Headers(init?.headers).get("X-Emend-Challenge") ?? "";
     return Response.json(
-      { api: 1, version: "0.1.0", features: [] },
+      { api: 1, version: "0.1.0", features },
       {
         headers: {
           "X-Emend-Proof": createHmac("sha256", Buffer.from(key, "base64url")).update(challenge).digest("base64url"),
@@ -26,7 +29,7 @@ export function provenTestServer(stateDir: string): (url: string | URL, init?: R
   };
 }
 
-export async function commandFixture() {
+export async function commandFixture(features: string[] = []) {
   const dir = await mkdtemp(join(tmpdir(), "emend-handoff-"));
   const configHome = await mkdtemp(join(tmpdir(), "emend-config-"));
   const configDir = join(configHome, "emend");
@@ -37,7 +40,7 @@ export async function commandFixture() {
     await rm(configHome, { recursive: true, force: true });
   });
   writeSecretFile(join(dir, "agent.token"), `em_${"a".repeat(43)}`);
-  const proof = provenTestServer(dir);
+  const proof = provenTestServer(dir, features);
   const stdout: string[] = [];
   const stderr: string[] = [];
   const io: Io = {

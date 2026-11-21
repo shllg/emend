@@ -1,5 +1,11 @@
 #!/bin/sh
 set -eu
+status_line=
+if [ "$#" -eq 2 ] && [ "$1" = status ] && [ "$2" = --line ]; then
+  trap 'exit 0' EXIT
+  exec 2>/dev/null
+  status_line=1
+fi
 
 script="$0"
 hops=0
@@ -22,6 +28,14 @@ done
 if [ ! -f "$directory/../dist/emend.mjs" ]; then
   printf 'emend: not built; run pnpm build in the emend checkout\n' >&2
   exit 1
+fi
+
+if [ "${status_line:-}" = 1 ]; then
+  node "$directory/../dist/emend.mjs" "$@" &
+  child=$!
+  trap 'kill -KILL "$child" 2>/dev/null || :; wait "$child" 2>/dev/null || :; exit 0' HUP INT TERM
+  wait "$child" || :
+  exit 0
 fi
 
 exec node "$directory/../dist/emend.mjs" "$@"

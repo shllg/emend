@@ -1,5 +1,23 @@
+const statusLine = process.argv.length === 4 && process.argv[2] === "status" && process.argv[3] === "--line";
+const statusLineController = statusLine ? new AbortController() : undefined;
+if (statusLineController) {
+  process.on("uncaughtException", endStatusLine);
+  process.on("unhandledRejection", endStatusLine);
+  const rawDeadline = process.env.EMEND_STATUS_LINE_DEADLINE_MS ?? "";
+  const deadline = /^\d+$/.test(rawDeadline) ? Number(rawDeadline) : NaN;
+  setTimeout(
+    endStatusLine,
+    Number.isInteger(deadline) && deadline >= 100 && deadline <= 10000 ? deadline : 2000,
+  ).unref();
+}
+function endStatusLine() {
+  statusLineController?.abort();
+  // process.exit joins blocked libuv workers; SIGKILL ends every thread.
+  process.kill(process.pid, "SIGKILL");
+}
 let refusal: string | undefined;
 if (
+  statusLine ||
   ["publish", "look", "wait", "feedback", "reply", "mcp", "stop", "service", "update", "skills"].includes(
     process.argv[2] ?? "",
   )
@@ -19,16 +37,18 @@ if (
   }
 }
 if (refusal) {
+  if (statusLine) endStatusLine();
   process.stderr.write(refusal);
   process.exitCode = 1;
 } else {
   const { run } = await import("./main.ts");
   // The callback reports failed writes; consume the matching stream error event too.
-  if (["wait", "feedback", "reply", "mcp", "serve"].includes(process.argv[2] ?? ""))
+  if (statusLine || ["wait", "feedback", "reply", "mcp", "serve"].includes(process.argv[2] ?? ""))
     process.stdout.on("error", () => {});
   const serving = process.argv[2] === "serve";
   if (serving) process.stderr.on("error", () => {});
   process.exitCode = await run(process.argv.slice(2), {
+    statusLineSignal: statusLineController?.signal,
     isTTY: process.stdout.isTTY === true,
     stdout: (s) => {
       try {
@@ -61,6 +81,7 @@ if (refusal) {
     },
     env: process.env,
   });
+  if (statusLine) endStatusLine();
 }
 // A pending stdout write can keep the event loop alive after an interrupted flush.
 // Serve has already finished its startup and process-group cleanup before returning.

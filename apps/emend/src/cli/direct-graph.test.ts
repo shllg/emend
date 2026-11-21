@@ -84,6 +84,14 @@ const tableBindings = new Map<
     },
   ],
   [
+    "db/repo/agent-reviews.ts",
+    {
+      reason: "Reads whether a live Send exists on the newest revision to report the turn; never writes Sends.",
+      tables: ["sends"],
+      updates: {},
+    },
+  ],
+  [
     "server/auth/tokens.ts",
     {
       reason: "Reads devices to validate credentials; reached code never writes devices.",

@@ -8,6 +8,8 @@ import { VERSION } from "./version.ts";
 
 export interface Io {
   isTTY?: boolean;
+  // Shared status-line cancellation from the deadline started at process entry.
+  statusLineSignal?: AbortSignal;
   stdout: (s: string) => void;
   stdoutAsync?: (s: string) => Promise<void>;
   stdin?: AsyncIterable<Uint8Array | string>;
@@ -19,6 +21,15 @@ export interface Io {
   update?: UpdateOptions;
 }
 export async function run(argv: string[], io: Io): Promise<number> {
+  if (argv.length === 2 && argv[0] === "status" && argv[1] === "--line") {
+    try {
+      const { statusLineCommand } = await import("./cli/commands/status.ts");
+      await statusLineCommand(defaultStateDir(io.env), io, { signal: io.statusLineSignal });
+    } catch {
+      // State-folder resolution and loading the status line must also stay silent.
+    }
+    return 0;
+  }
   if (argv.length === 1 && ["--help", "-h"].includes(argv[0] ?? "")) {
     io.stdout(`Usage:
   emend                         Open the review inbox
@@ -35,7 +46,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   emend feedback <review> [--save <folder>]
   emend reply <comment> --status <outcome> (--body <text> | --body-file <path | ->)
   emend ls [--json] [--head <sha>]
-  emend status [--json]
+  emend status [--json | --line]
   emend mcp
   emend service install [serve options] | uninstall | status
   emend update                   Update emend and restart its service
