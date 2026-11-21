@@ -12,11 +12,10 @@ export type FactPart = { text: string; agent?: true; target?: string };
 export function labelledFact(blocks: RenderedBlock[], label: "Biggest risk" | "Look yourself" | "Goal" | "Change") {
   const prefix = `${label}:`;
   for (const block of blocks) {
-    const trimmed = block.text.trim();
-    // Soft breaks survive in block.text; keep a paragraph with multiple facts in its section.
-    if (/[\r\n\u2028\u2029]/u.test(trimmed)) continue;
-    const text = trimmed.replace(/\s+/gu, " ");
+    const text = block.text.replace(/\s+/gu, " ").trim();
     if (!text.toLowerCase().startsWith(prefix.toLowerCase())) continue;
+    // A second label separates facts; a soft break can just wrap one fact.
+    if (/\s(?:Biggest risk|Look yourself|Check first|Goal|Change):/u.test(text.slice(prefix.length))) continue;
     // Inspect the server HTML as a string only; the original block remains the rendering boundary.
     const leading = block.html.match(
       /^\s*(?:<ul(?:\s[^>]*)?>\s*<li(?:\s[^>]*)?>\s*)?(?:<p(?:\s[^>]*)?>\s*)?<strong>([^<]*)<\/strong>/u,

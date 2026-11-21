@@ -55,7 +55,7 @@ test.each(["Biggest risk", "Look yourself", "Goal", "Change"] as const)(
   "label lift finds the first %s block, preserving its identity and HTML",
   (label) => {
     const first = {
-      ...block("overview", `\n  ${label}:  Plants.  \n`),
+      ...block("overview", `\n  ${label}:\n  Plants.  \n`),
       html: `<p><strong>${label}:</strong> Plants.</p>`,
     };
     const later = block("overview", `${label}: Later.`);
@@ -67,7 +67,7 @@ test.each(["Biggest risk", "Look yourself", "Goal", "Change"] as const)(
 
 test("label lift matches case-insensitively with collapsed whitespace, but not old Check first lines", () => {
   const risk = {
-    ...block("whereToLook", "  bIgGeSt\t  rIsK: Dry soil."),
+    ...block("whereToLook", "  bIgGeSt\n  rIsK: Dry soil."),
     html: "<p><strong>bIgGeSt rIsK:</strong> Dry soil.</p>",
   };
   expect(labelledFact([risk], "Biggest risk")).toEqual({ blocks: [risk], hideLabel: true });
@@ -121,10 +121,89 @@ test.each(["", "- "])("label lift keeps single-line paragraphs and list items (p
   }
 });
 
-test.each(["\n", "\r\n", "\r", "\u2028", "\u2029"])("label lift rejects an internal line break %j", (separator) => {
-  const multiline = block("overview", `Goal: Plants.${separator}Change: Water.`);
-  expect(labelledFact([multiline], "Goal")).toBeUndefined();
+test.each(["", "- "])("label lift keeps wrapped paragraphs and list items (prefix=%j)", async (prefix) => {
+  const continuation = prefix ? "  " : "";
+  const writeup = RenderedWriteup.parse(
+    await renderWriteup(
+      {
+        overview: `${prefix}**Goal:** Protect the\n${continuation}seed bed.`,
+        whereToLook: `${prefix}**Biggest risk:** Flooding the\n${continuation}seed bed.`,
+        tldr: "",
+        decisions: "",
+        topics: {},
+      },
+      [],
+    ),
+  );
+  for (const [key, label] of [
+    ["overview", "Goal"],
+    ["whereToLook", "Biggest risk"],
+  ] as const) {
+    const blocks = writeup.sections.find((section) => section.key === key)?.blocks ?? [];
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.kind).toBe(prefix ? "item" : "paragraph");
+    expect(blocks[0]?.text).toContain("\nseed bed.");
+    expect(labelledFact(blocks, label)).toEqual({ blocks, hideLabel: true });
+  }
 });
+
+test("label lift leaves two labels on one source line together", async () => {
+  const writeup = RenderedWriteup.parse(
+    await renderWriteup(
+      {
+        overview: "",
+        whereToLook: "**Biggest risk:** A. **Look yourself:** B.",
+        tldr: "",
+        decisions: "",
+        topics: {},
+      },
+      [],
+    ),
+  );
+  const blocks = writeup.sections.find((section) => section.key === "whereToLook")?.blocks ?? [];
+  expect(blocks).toHaveLength(1);
+  expect(blocks[0]?.text).toBe("Biggest risk: A. Look yourself: B.");
+  expect(labelledFact(blocks, "Biggest risk")).toBeUndefined();
+  expect(labelledFact(blocks, "Look yourself")).toBeUndefined();
+});
+
+test.each(["Biggest risk", "Look yourself", "Check first", "Goal", "Change"])(
+  "label lift rejects a second known label: %s",
+  (label) => {
+    expect(labelledFact([block("overview", `Goal: Plants. ${label}: Water.`)], "Goal")).toBeUndefined();
+  },
+);
+
+test.each([
+  "Goal: Make a change: water.",
+  "Goal: Exchange: water.",
+  "Goal: Change without a colon.",
+  "Goal: Plants.Change: water.",
+  "Goal:Change:water",
+])("label lift requires a case-sensitive label, colon and preceding whitespace: %s", (text) => {
+  const goal = block("overview", text);
+  expect(labelledFact([goal], "Goal")).toEqual({ blocks: [goal], hideLabel: false });
+});
+
+test("a lowercase change: inside a Goal sentence is still one fact", async () => {
+  const writeup = RenderedWriteup.parse(
+    await renderWriteup(
+      { overview: "**Goal:** Make one change: water the seeds.", tldr: "", decisions: "", topics: {} },
+      [],
+    ),
+  );
+  const blocks = writeup.sections.find((section) => section.key === "overview")?.blocks ?? [];
+  expect(blocks).toHaveLength(1);
+  expect(labelledFact(blocks, "Goal")).toEqual({ blocks, hideLabel: true });
+});
+
+test.each(["\n", "\r\n", "\r", "\u2028", "\u2029"])(
+  "label lift rejects a second label after line break %j",
+  (separator) => {
+    const multiline = block("overview", `Goal: Plants.${separator}Change: Water.`);
+    expect(labelledFact([multiline], "Goal")).toBeUndefined();
+  },
+);
 
 test.each([
   ["<p><strong>Goal:</strong> Plants.</p>", true],
