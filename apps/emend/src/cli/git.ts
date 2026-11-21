@@ -78,7 +78,7 @@ function gitExecutable() {
   executable ??= findExecutable("git");
   return executable;
 }
-async function execute(cwd: string, args: string[], listing = false): Promise<Buffer> {
+async function execute(cwd: string, args: string[], listing = false, signal?: AbortSignal): Promise<Buffer> {
   const binary = await gitExecutable();
   return new Promise((resolve, reject) =>
     execFile(
@@ -88,6 +88,7 @@ async function execute(cwd: string, args: string[], listing = false): Promise<Bu
         cwd,
         encoding: "buffer",
         timeout: 10000,
+        signal,
         maxBuffer: listing ? 64 * 1024 * 1024 : LIMITS.publishJsonBytes,
         env: {
           PATH: binary.path,
@@ -112,14 +113,14 @@ async function execute(cwd: string, args: string[], listing = false): Promise<Bu
   );
 }
 /** Cache only within one publish, never across later invocations on a changed repository. */
-export function createGitSession(): GitRunner {
+export function createGitSession({ signal }: { signal?: AbortSignal } = {}): GitRunner {
   const versions = new Map<string, Promise<Buffer>>();
   const formats = new Map<string, Promise<string>>();
   return async (cwd, call) => {
     if (!allowed(call)) throw new GitNotAllowed();
     let version = versions.get(cwd);
     if (!version) {
-      version = execute(cwd, [...fences, "--version"]).then((bytes) => {
+      version = execute(cwd, [...fences, "--version"], false, signal).then((bytes) => {
         const match = /^git version (\d+)\.(\d+)/.exec(bytes.toString());
         if (!match || Number(match[1]) < 2 || (Number(match[1]) === 2 && Number(match[2]) < 44))
           throw new CliError("git 2.44 or newer is required");
@@ -132,7 +133,7 @@ export function createGitSession(): GitRunner {
     let format = formats.get(cwd);
     if (!format) {
       // These bootstrap lookups cannot inspect attributes or worktree bytes.
-      format = execute(cwd, [...fences, "rev-parse", "--show-object-format"]).then((bytes) => {
+      format = execute(cwd, [...fences, "rev-parse", "--show-object-format"], false, signal).then((bytes) => {
         const value = bytes.toString().trim();
         if (value !== "sha1" && value !== "sha256") throw new CliError("unsupported git object format");
         return value;
@@ -147,7 +148,7 @@ export function createGitSession(): GitRunner {
     const args = [`--attr-source=${emptyTree}`, ...fences, call[0], ...call.slice(1)];
     if (call[0] === "diff-tree")
       args.push("--no-abbrev", "--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty", "--");
-    const result = await execute(cwd, args, call[0] === "ls-tree" || call[0] === "ls-files");
+    const result = await execute(cwd, args, call[0] === "ls-tree" || call[0] === "ls-files", signal);
     if (call[0] === "rev-parse" && call[1] === "--show-toplevel") {
       // Discovery may start in a subdirectory; subsequent calls use its worktree root.
       const root = result.toString().replace(/\r?\n$/, "");

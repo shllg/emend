@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { type AgentReviewItem, AgentReviewList, LIMITS } from "@emend/contract";
+import { AGENT_REVIEW_KEY_FEATURE, type AgentReviewItem, AgentReviewList, LIMITS } from "@emend/contract";
 import type { Io } from "../../main.ts";
 import { VERSION } from "../../version.ts";
 import { escapeReference } from "../escape.ts";
@@ -9,7 +9,7 @@ import { apiRequest, CliUsageError, printTerminalJson, sandboxHint } from "../ht
 import { codeRoot } from "../publish/context.ts";
 import { reviewKey } from "../publish/key.ts";
 import { readRegular } from "../publish/read.ts";
-import { discover } from "../server-client.ts";
+import { discover, discoverCapabilities } from "../server-client.ts";
 import {
   attachedTarget,
   type HttpTarget,
@@ -41,37 +41,65 @@ export function statusLineText(item: AgentReviewItem): string | null {
   return revision;
 }
 
-async function statusLine(stateDir: string, io: Io): Promise<void> {
-  try {
-    const signal = AbortSignal.timeout(2000);
-    const git = createGitSession();
+export async function statusLineCommand(
+  stateDir: string,
+  io: Io,
+  options: { deadlineMs?: number } = {},
+): Promise<void> {
+  const controller = new AbortController();
+  const { signal } = controller;
+  const deadlineMs = options.deadlineMs ?? 2000;
+  const deadline = performance.now() + deadlineMs;
+  const aborted = Promise.withResolvers<void>();
+  const onAbort = () => aborted.resolve();
+  signal.addEventListener("abort", onAbort, { once: true });
+  const timer = setTimeout(() => controller.abort(), deadlineMs);
+  const remaining = () => {
+    const ms = deadline - performance.now();
+    if (ms <= 0) controller.abort();
+    signal.throwIfAborted();
+    return ms;
+  };
+  const lookup = async () => {
+    const git = createGitSession({ signal });
     const { worktree, root } = await codeRoot(process.cwd(), stateDir, git);
     if (!worktree) return;
+    remaining();
     const branch = (await git(root, ["rev-parse", "--abbrev-ref", "HEAD"])).toString().trim();
     if (!branch || branch === "HEAD") return;
+    remaining();
     const instance = JSON.parse(
       (await readRegular(join(stateDir, "instance.json"), LIMITS.publicJsonBytes)).toString(),
     );
     if (typeof instance.id !== "string" || !/^[a-f0-9-]{36}$/i.test(instance.id)) return;
     const key = reviewKey(instance.id, root, branch);
-    signal.throwIfAborted();
+    remaining();
     const pair = await readAttachmentPair(stateDir);
+    remaining();
     let target: HttpTarget;
     if (pair) {
       target = attachedTarget(pair);
-      await hubCapabilities(target.url, signal, stateDir);
+      const capabilities = await hubCapabilities(target.url, signal, stateDir);
+      if (!capabilities.features.includes(AGENT_REVIEW_KEY_FEATURE)) return;
     } else {
-      const server = await discover(stateDir, 1000);
-      if (!server) return;
+      const server = await discoverCapabilities(stateDir, Math.min(1000, remaining()));
+      if (!server?.capabilities.features.includes(AGENT_REVIEW_KEY_FEATURE)) return;
+      remaining();
       target = await localTarget(stateDir, server.url);
     }
+    remaining();
     const result = AgentReviewList.safeParse(
       await apiRequest(stateDir, target, `/agent/reviews?key=${key}`, {
         method: "GET",
         signal,
         timeoutMs: 1500,
         ...(target.via === "local"
-          ? { verifyLocal: async () => (await discover(stateDir, 1000, target.url)) !== null }
+          ? {
+              verifyLocal: async () => {
+                const server = await discoverCapabilities(stateDir, Math.min(1000, remaining()), target.url);
+                return server?.capabilities.features.includes(AGENT_REVIEW_KEY_FEATURE) === true;
+              },
+            }
           : {}),
       }),
     );
@@ -79,10 +107,17 @@ async function statusLine(stateDir: string, io: Io): Promise<void> {
     const item = result.data.items.find((item) => item.branch === branch);
     if (!item) return;
     const line = statusLineText(item);
-    signal.throwIfAborted();
-    if (line !== null) io.stdout(`${line}\n`);
+    remaining();
+    if (line !== null) await (io.stdoutAsync ?? io.stdout)(`${line}\n`);
+  };
+  try {
+    // A stalled step may ignore the signal; it must not keep the command waiting.
+    await Promise.race([lookup(), aborted.promise]);
   } catch {
     // A status line stays silent on every error, including a failed stdout write.
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", onAbort);
   }
 }
 
@@ -90,7 +125,7 @@ async function statusLine(stateDir: string, io: Io): Promise<void> {
 export async function statusCommand(stateDir: string, args: string[], io: Io) {
   if (args.length > 1 || (args.length === 1 && args[0] !== "--json" && args[0] !== "--line"))
     throw new CliUsageError("Usage: emend status [--json | --line].");
-  if (args[0] === "--line") return statusLine(stateDir, io);
+  if (args[0] === "--line") return statusLineCommand(stateDir, io);
   // A missing state folder is reported, never created: a sandbox may hide the real one.
   const missing = await stat(stateDir).then(
     () => false,

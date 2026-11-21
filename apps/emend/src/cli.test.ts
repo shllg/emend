@@ -1,8 +1,12 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
+import { createHmac } from "node:crypto";
 import { access, mkdir, mkdtemp, open, readdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+import { AGENT_REVIEW_KEY_FEATURE } from "@emend/contract";
 import { expect, onTestFinished, test } from "vitest";
 import { escapeReference } from "./cli/escape.ts";
 
@@ -40,7 +44,7 @@ async function entryFixture() {
       await Promise.all([stdout.close(), stderr.close()]);
     }
   };
-  return { directory, state, entry, invoke };
+  return { directory, state, entry, env, invoke };
 }
 
 test.each([
@@ -63,7 +67,7 @@ test.each([
   expect(await readdir(f.state)).toEqual([]);
 });
 
-test("a refused entry never loads main.ts", async () => {
+test.each([false, true])("a refused entry never loads main.ts (status line %s)", async (statusLine) => {
   const f = await entryFixture();
   const guard = join(f.directory, "guard.mjs");
   await writeFile(
@@ -74,10 +78,13 @@ registerHooks({ resolve(specifier, context, next) {
   return next(specifier, context);
 } });\n`,
   );
-  expect(await f.invoke(dirname(dirname(f.entry)), ["stop"], ["--import", guard])).toEqual({
-    code: 1,
+  const args = statusLine ? ["status", "--line"] : ["stop"];
+  expect(await f.invoke(dirname(dirname(f.entry)), args, ["--import", guard])).toEqual({
+    code: statusLine ? 0 : 1,
     stdout: "",
-    stderr: `emend: this emend runs from inside the current repository (${escapeReference(f.entry)}); run emend from an install outside the repository.\n`,
+    stderr: statusLine
+      ? ""
+      : `emend: this emend runs from inside the current repository (${escapeReference(f.entry)}); run emend from an install outside the repository.\n`,
   });
   expect(await readdir(f.state)).toEqual([]);
 });
@@ -92,17 +99,126 @@ test("the real feedback entry allows a working directory outside any repository"
   });
 });
 
-test("the real entry fails closed on an invalid repository entry before touching state", async () => {
+test.each([false, true])(
+  "the real entry fails closed on an invalid repository entry (status line %s)",
+  async (statusLine) => {
+    const f = await entryFixture();
+    const repo = join(f.directory, "repo");
+    await mkdir(repo);
+    await writeFile(join(repo, ".git"), "not a repository\n");
+    expect(await f.invoke(repo, statusLine ? ["status", "--line"] : ["feedback", syntheticId])).toEqual({
+      code: statusLine ? 0 : 1,
+      stdout: "",
+      stderr: statusLine ? "" : "emend: could not check where this emend runs; nothing was changed.\n",
+    });
+    expect(await readdir(f.state)).toEqual([]);
+  },
+);
+
+test("the real status line exits silently when stdout is already closed", async () => {
   const f = await entryFixture();
   const repo = join(f.directory, "repo");
   await mkdir(repo);
-  await writeFile(join(repo, ".git"), "not a repository\n");
-  expect(await f.invoke(repo, ["feedback", syntheticId])).toEqual({
-    code: 1,
-    stdout: "",
-    stderr: "emend: could not check where this emend runs; nothing was changed.\n",
+  const git = (...args: string[]) =>
+    promisify(execFile)(
+      "git",
+      [
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "commit.gpgSign=false",
+        "-c",
+        "user.name=Synthetic",
+        "-c",
+        "user.email=synthetic@example.test",
+        ...args,
+      ],
+      { cwd: repo, env: { ...f.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } },
+    );
+  await git("init", "-b", "synthetic-feature");
+  await git("commit", "--allow-empty", "-m", "synthetic base");
+  const key = Buffer.alloc(32, 3).toString("base64url");
+  const requests: string[] = [];
+  const server = createServer((request, response) => {
+    requests.push(request.url ?? "");
+    response.setHeader("Content-Type", "application/json");
+    if (request.url === "/api/v1/capabilities") {
+      const challenge = request.headers["x-emend-challenge"];
+      if (typeof challenge === "string")
+        response.setHeader(
+          "X-Emend-Proof",
+          createHmac("sha256", Buffer.from(key, "base64url")).update(challenge).digest("base64url"),
+        );
+      response.end(JSON.stringify({ api: 1, version: "0.1.0", features: [AGENT_REVIEW_KEY_FEATURE] }));
+    } else if (request.url?.startsWith("/api/v1/agent/reviews?key=")) {
+      response.end(
+        JSON.stringify({
+          items: [
+            {
+              id: syntheticId,
+              title: "Synthetic review",
+              branch: "synthetic-feature",
+              state: "open",
+              turn: "reviewer",
+              newest: { revision: 3, head: null },
+              approved: null,
+              updatedAt: "2026-01-01T00:00:00.000Z",
+              url: `http://127.0.0.1:3636/r/${syntheticId}`,
+            },
+          ],
+        }),
+      );
+    } else {
+      response.writeHead(404).end();
+    }
   });
-  expect(await readdir(f.state)).toEqual([]);
+  onTestFinished(async () => {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("missing fixture server address");
+  await Promise.all([
+    writeFile(
+      join(f.state, "server.json"),
+      JSON.stringify({ url: `http://127.0.0.1:${address.port}`, pid: process.pid, key }),
+      { mode: 0o600 },
+    ),
+    writeFile(join(f.state, "instance.json"), JSON.stringify({ id: syntheticId, name: "Synthetic machine" }), {
+      mode: 0o600,
+    }),
+    writeFile(join(f.state, "agent.token"), `em_${"a".repeat(43)}`, { mode: 0o600 }),
+  ]);
+  // Prove this fixture reaches the write before testing a real closed pipe.
+  expect(await f.invoke(repo, ["status", "--line"])).toEqual({
+    code: 0,
+    stdout: "emend r3 · your turn\n",
+    stderr: "",
+  });
+  const child = spawn(process.execPath, [f.entry, "status", "--line"], {
+    cwd: repo,
+    env: f.env,
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 5000,
+  });
+  const stderr: Buffer[] = [];
+  child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+  const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code, signal) => resolve({ code, signal }));
+  });
+  onTestFinished(async () => {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    await closed;
+  });
+  child.stdout.destroy();
+  expect(await closed).toEqual({ code: 0, signal: null });
+  expect(Buffer.concat(stderr).toString()).toBe("");
+  expect(requests.filter((url) => url.startsWith("/api/v1/agent/reviews?key="))).toHaveLength(2);
 });
 
 test("the CLI prints its version through a symlink without the caller's NODE_OPTIONS preload", async () => {
@@ -141,4 +257,28 @@ registerHooks({ load(url, context, next) {
 } });`,
   );
   expect(await f.invoke(f.directory, ["update"], ["--import", guard])).toEqual({ code, stdout: "", stderr: "" });
+});
+
+test("the real status line exits after flushing even with a lingering handle", async () => {
+  const f = await entryFixture();
+  const guard = join(f.directory, "lingering.mjs");
+  const source = `export async function run(argv, io) {
+  await io.stdoutAsync("emend r3 · your turn\\n");
+  setTimeout(() => process.exit(99), 100);
+  return 0;
+}`;
+  await writeFile(
+    guard,
+    `import { registerHooks } from "node:module";
+registerHooks({ load(url, context, next) {
+  if (url.endsWith("/main.ts")) return { format: "module", shortCircuit: true,
+    source: ${JSON.stringify(source)} };
+  return next(url, context);
+} });`,
+  );
+  expect(await f.invoke(f.directory, ["status", "--line"], ["--import", guard])).toEqual({
+    code: 0,
+    stdout: "emend r3 · your turn\n",
+    stderr: "",
+  });
 });

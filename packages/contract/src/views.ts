@@ -12,6 +12,8 @@ import { ApprovedActiveHours, ApprovedActiveLimit } from "./settings.ts";
 import { BlockId, Target } from "./target.ts";
 import { CommentBody, Outcome, ThreadState } from "./thread.ts";
 
+export const AGENT_REVIEW_KEY_FEATURE = "agent-review-key";
+
 /** A full commit object id: 40 (SHA-1) or 64 (SHA-256) lowercase hex characters. */
 const commit = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 /** What a revision was published against: a commit, `worktree` (uncommitted state) or nothing. */

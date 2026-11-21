@@ -19,6 +19,15 @@ export interface Io {
   update?: UpdateOptions;
 }
 export async function run(argv: string[], io: Io): Promise<number> {
+  if (argv.length === 2 && argv[0] === "status" && argv[1] === "--line") {
+    try {
+      const { statusLineCommand } = await import("./cli/commands/status.ts");
+      await statusLineCommand(defaultStateDir(io.env), io);
+    } catch {
+      // State-folder resolution and loading the status line must also stay silent.
+    }
+    return 0;
+  }
   if (argv.length === 1 && ["--help", "-h"].includes(argv[0] ?? "")) {
     io.stdout(`Usage:
   emend                         Open the review inbox

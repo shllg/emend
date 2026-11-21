@@ -1480,8 +1480,9 @@ ordering and the 100-row cap, so the cap counts matches. A malformed or repeated
 hex characters, the `reviewKey` the publisher sent. For a code review, `emend publish` derives it
 from the instance, the worktree root and the branch. With both `key` and `head`, both must match.
 The key filter applies with the owner and origin-instance conditions, before the ordering and
-the cap. A malformed or repeated `key` is `400 invalid_request`. An older server ignores `key`,
-so a client should still check `branch`.
+the cap. A malformed or repeated `key` is `400 invalid_request`. Capabilities lists
+`agent-review-key` when the server applies `key`; an older server ignores `key` and returns the
+whole list, so a client checks that feature before it relies on the filter.
 
 `head` and `branch` are the values the publisher sent; the server stores them unverified, and a
 review without code files (docs or a plan only) shows the reviewer no diff of that commit. So
@@ -1557,8 +1558,9 @@ entry before dynamically loading the app and its schemas. It sets Zod's `jitless
 object construction (when Zod captures this setting), so validation never probes or compiles
 `Function` under the app CSP. The normal contract index also exports the function.
 
-`Capabilities = { api: 1, version: string, features: string[] }`. The first feature list is
-`["attach", "html-docs", "mcp"]`; clients accept additional feature strings.
+`Capabilities = { api: 1, version: string, features: string[] }`. The current feature list is
+`["attach", "html-docs", "mcp", "review-lifecycle", "review-bin", "review-groups", "review-pins", "agent-review-key"]`,
+plus `server-stop` when the server supports stopping through the API; clients accept additional feature strings.
 
 `PairingPurpose = "device" | "machine"`. `PairingRequest = { purpose? }` defaults to `"device"`.
 `PairingCreated = { url, code, expiresAt }`: the HTTP(S) URL ends in `/pair#<secret>` with no query,

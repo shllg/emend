@@ -1,5 +1,9 @@
-import { execFile } from "node:child_process";
-import { beforeEach, expect, test, vi } from "vitest";
+import { type ChildProcess, type ExecFileOptionsWithBufferEncoding, execFile } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { createGitSession, type GitCall, GitFailed, GitNotAllowed, git } from "./git.ts";
 
 vi.mock("node:child_process", () => ({ execFile: vi.fn() }));
@@ -114,3 +118,52 @@ test.each<GitCall>([
   if (call[0] === "cat-file") await expect(result).rejects.toBeInstanceOf(GitFailed);
   else await expect(result).rejects.toThrow("the repository lists too many files");
 });
+
+test.each(["already aborted", "bootstrap", "format", "listing"])(
+  "a git session cancels real children with an %s signal",
+  async (phase) => {
+    const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+    const repo = await mkdtemp(join(tmpdir(), "emend-git-abort-"));
+    const children: ChildProcess[] = [];
+    const closed: Promise<void>[] = [];
+    onTestFinished(async () => {
+      for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      await Promise.all(closed);
+      await rm(repo, { recursive: true, force: true });
+    });
+    await promisify(actual.execFile)("git", ["-c", "core.hooksPath=/dev/null", "init", "-b", "main"], {
+      cwd: repo,
+      env: { PATH: process.env.PATH, HOME: repo, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
+    });
+    const controller = new AbortController();
+    if (phase === "already aborted") controller.abort();
+    vi.mocked(execFile).mockImplementation(((
+      file: string,
+      args: string[],
+      options: ExecFileOptionsWithBufferEncoding,
+      callback: (error: Error | null, stdout: Buffer) => void,
+    ) => {
+      const child = actual.execFile(file, args, options, callback);
+      children.push(child);
+      closed.push(new Promise<void>((resolve) => child.once("close", () => resolve())));
+      if (
+        (phase === "bootstrap" && args.includes("--version")) ||
+        (phase === "format" && args.includes("--show-object-format")) ||
+        (phase === "listing" && args.includes("ls-files"))
+      )
+        child.once("spawn", () => controller.abort());
+      return child;
+    }) as typeof execFile);
+    const pending = createGitSession({ signal: controller.signal })(repo, [
+      "ls-files",
+      "--others",
+      "--exclude-standard",
+      "-z",
+    ]);
+    await expect(pending).rejects.toMatchObject({ exitCode: "ABORT_ERR" });
+    await Promise.all(closed);
+    expect(children.length).toBeGreaterThan(0);
+    expect(children.every((child) => child.exitCode !== null || child.signalCode !== null)).toBe(true);
+    expect(controller.signal.aborted).toBe(true);
+  },
+);

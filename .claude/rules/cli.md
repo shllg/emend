@@ -70,7 +70,9 @@ The CLI runs in repos under review: treat them as hostile.
 - stdout is a contract: `emend publish --manifest` prints one JSON line; `emend publish <path>...`
   prints the review URL alone, escaped, or that JSON line with `--json`; `emend wait` and
   `emend feedback` print one JSON object with `kind` `go`, `approve`, `closed` or `pending` and
-  exit 0. Any error prints one line on stderr, nothing on stdout, and exits 1.
+  exit 0. Any error prints one line on stderr, nothing on stdout, and exits 1. `emend status --line`
+  is the exception: it prints its one line or nothing, never writes stderr, and exits 0 on every
+  error.
 - Tokens come from the state directory (`agent.token`, `admin.token`, `hub.token`). Never print a
   token, and never send it anywhere but the server it belongs to.
 - When the hub is down, or the server or the hub rejects the token, print one line on stderr and

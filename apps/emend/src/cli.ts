@@ -1,5 +1,7 @@
+const statusLine = process.argv.length === 4 && process.argv[2] === "status" && process.argv[3] === "--line";
 let refusal: string | undefined;
 if (
+  statusLine ||
   ["publish", "look", "wait", "feedback", "reply", "mcp", "stop", "service", "update", "skills"].includes(
     process.argv[2] ?? "",
   )
@@ -19,12 +21,13 @@ if (
   }
 }
 if (refusal) {
+  if (statusLine) process.exit(0);
   process.stderr.write(refusal);
   process.exitCode = 1;
 } else {
   const { run } = await import("./main.ts");
   // The callback reports failed writes; consume the matching stream error event too.
-  if (["wait", "feedback", "reply", "mcp", "serve"].includes(process.argv[2] ?? ""))
+  if (statusLine || ["wait", "feedback", "reply", "mcp", "serve"].includes(process.argv[2] ?? ""))
     process.stdout.on("error", () => {});
   const serving = process.argv[2] === "serve";
   if (serving) process.stderr.on("error", () => {});
@@ -61,6 +64,7 @@ if (refusal) {
     },
     env: process.env,
   });
+  if (statusLine) process.exit(process.exitCode ?? 0);
 }
 // A pending stdout write can keep the event loop alive after an interrupted flush.
 // Serve has already finished its startup and process-group cleanup before returning.

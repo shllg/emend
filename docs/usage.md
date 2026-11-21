@@ -264,10 +264,12 @@ server or hub that does not answer instead of failing. Use `--line` for the bran
 `emend status --line` prints one short line, such as `emend r3 · your turn`,
 `emend r3 · agent's turn`, `emend r5 · approved` or `emend r5 · retired`.
 It shows the review that `emend publish` made for the current folder's branch on this machine.
-With an older server that does not report whose turn it is, an open review shows only `emend r3`.
+When the server does not report whose turn it is, an open review shows only `emend r3`.
+It needs a server or hub that lists `agent-review-key` (this emend version or newer) and prints nothing otherwise.
 
 It prints nothing when the branch has no review, when no server or hub answers, and on any error.
 It always exits 0. It reads only, never starts a server and never prompts.
+It also prints nothing when the emend it runs is installed inside the repository.
 
 Paste this prompt into Claude Code:
 
