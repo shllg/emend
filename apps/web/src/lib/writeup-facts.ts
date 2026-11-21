@@ -1,4 +1,4 @@
-import type { RenderedWriteup, RevisionView, TopicMeta } from "@emend/contract";
+import type { RenderedBlock, RenderedWriteup, RevisionView, TopicMeta } from "@emend/contract";
 import { WRITEUP_SECTION_NAMES } from "../components/diff/targets.ts";
 import { plural } from "./count.ts";
 import { rankedTopics } from "./topics.ts";
@@ -7,28 +7,45 @@ export function usesOpeningCard(writeup: RenderedWriteup): boolean {
   return writeup.area !== undefined || writeup.sections.some((section) => section.key === "whyItMatters");
 }
 
-export type FactPart = { text: string; agent?: true };
+export type FactPart = { text: string; agent?: true; target?: string };
+
+export function labelledFact(blocks: RenderedBlock[], label: "Biggest risk" | "Look yourself" | "Goal" | "Change") {
+  const prefix = `${label}:`;
+  for (const block of blocks) {
+    const text = block.text.replace(/\s+/gu, " ").trim();
+    if (!text.toLowerCase().startsWith(prefix.toLowerCase())) continue;
+    // Inspect the server HTML as a string only; the original block remains the rendering boundary.
+    const leading = block.html.match(
+      /^\s*(?:<ul(?:\s[^>]*)?>\s*<li(?:\s[^>]*)?>\s*)?(?:<p(?:\s[^>]*)?>\s*)?<strong>([^<]*)<\/strong>/u,
+    );
+    return { blocks: [block], hideLabel: leading?.[1] === text.slice(0, prefix.length) };
+  }
+}
 
 function agentPart(text: string): FactPart {
   return { text: text.replace(/[\p{Cc}\u2028\u2029]/gu, " ").replace(/\p{Bidi_Control}/gu, ""), agent: true };
 }
 
-export function riskFact(topics: TopicMeta[]): FactPart[] | undefined {
+export function topicsFact(topics: TopicMeta[]): FactPart[] | undefined {
+  const ranked = rankedTopics(topics).map(({ topic }) => topic);
+  const parts: FactPart[] = [];
   for (const [attention, label] of [
     ["critical", "High"],
     ["review", "Medium"],
-    ["skim", "Low"],
   ] as const) {
-    const matching = topics.filter((topic) => topic.attention === attention);
+    const matching = ranked.filter((topic) => topic.attention === attention);
     if (!matching.length) continue;
-    const parts: FactPart[] = [{ text: `${label}: ` }];
+    if (parts.length) parts.push({ text: "; " });
+    parts.push({ text: `${label}: ` });
     for (const [index, topic] of matching.slice(0, 3).entries()) {
       if (index) parts.push({ text: ", " });
       parts.push(agentPart(topic.title));
     }
     if (matching.length > 3) parts.push({ text: ` and ${matching.length - 3} more` });
-    return parts;
   }
+  const low = ranked.filter((topic) => topic.attention === "skim").length;
+  if (low) parts.push({ text: `${parts.length ? "; and " : ""}${low} Low` });
+  return parts.length ? parts : undefined;
 }
 
 function undoText(text: string): string | undefined {
@@ -70,51 +87,6 @@ export function undoFact(writeup: RenderedWriteup, topics: TopicMeta[]): FactPar
   return hardest.parts;
 }
 
-function minutesText(minutes: number): string {
-  if (minutes < 60) return `${minutes} min`;
-  const rounded = Math.round(minutes / 5) * 5;
-  const remainder = rounded % 60;
-  return `${Math.floor(rounded / 60)} h${remainder ? ` ${remainder} min` : ""}`;
-}
-
-export function readFact(
-  writeup: RenderedWriteup,
-  docs: RevisionView["docs"],
-  files: RevisionView["files"],
-): string | undefined {
-  const words = (text: string) => text.match(/\S+/gu)?.length ?? 0;
-  const docWords = docs.reduce((sum, doc) => {
-    if (doc.kind === "markdown") return sum + doc.blocks.reduce((sum, block) => sum + words(block.text), 0);
-    if (doc.kind === "source")
-      return sum + doc.lines.reduce((sum, line) => sum + words(line.map((token) => token.text).join("")), 0);
-    return sum;
-  }, 0);
-  const wordCount =
-    writeup.sections.reduce(
-      (sum, section) => sum + section.blocks.reduce((sum, block) => sum + words(block.text), 0),
-      0,
-    ) + docWords;
-  const lines = files.reduce(
-    (sum, file) => sum + (file.role === "diff" && file.counts ? file.counts.additions + file.counts.deletions : 0),
-    0,
-  );
-  const uncounted = files.filter((file) => file.role === "diff" && !file.counts).length;
-  const skipped =
-    (docs.some((doc) => doc.kind === "html") ? "; HTML docs not counted" : "") +
-    (uncounted ? `; ${uncounted} diff ${plural(uncounted, "file")} not counted` : "");
-  if (!wordCount && !lines) return skipped ? `Not estimated${skipped}` : undefined;
-  // Eight changed lines a minute is the common ceiling of about 500 lines an hour for careful review.
-  const rawMinutes = wordCount / 200 + lines / 8;
-  if (rawMinutes < 1) return `Under 1 min${skipped}`;
-  const proseMinutes = Math.ceil(wordCount / 200);
-  const diffMinutes = Math.ceil(lines / 8);
-  const parts = [
-    ...(wordCount ? [`${docWords ? "writeup and docs" : "writeup"} ${minutesText(proseMinutes)}`] : []),
-    ...(lines ? [`diff ${minutesText(diffMinutes)} (${lines} ${plural(lines, "line")})`] : []),
-  ];
-  return `About ${minutesText(proseMinutes + diffMinutes)}: ${parts.join(", ")}${skipped}`;
-}
-
 export function sinceFact({
   writeup,
   topics,
@@ -138,14 +110,20 @@ export function sinceFact({
   const seenTopics = new Set<string>();
   const names: FactPart[][] = [];
   for (const section of writeup.sections) {
-    if (!section.blocks.some((block) => changed.has(block.id))) continue;
+    if (section.key === "review") continue;
+    const firstChanged = section.blocks.find((block) => changed.has(block.id));
+    if (!firstChanged) continue;
     if (section.topic) {
       if (!seenTopics.has(section.topic))
-        names.push([{ text: "topic “" }, agentPart(titles.get(section.topic) ?? section.topic), { text: "”" }]);
+        names.push([
+          { text: "topic “" },
+          { ...agentPart(titles.get(section.topic) ?? section.topic), target: `topic-${section.topic}` },
+          { text: "”" },
+        ]);
       seenTopics.add(section.topic);
     } else {
       const name = WRITEUP_SECTION_NAMES[section.key as keyof typeof WRITEUP_SECTION_NAMES];
-      if (name) names.push([{ text: name }]);
+      if (name) names.push([{ text: name, target: `block-${firstChanged.id}` }]);
     }
   }
   for (const doc of docs) {
@@ -160,7 +138,6 @@ export function sinceFact({
     return parts;
   }
   if (names.length) {
-    parts.push({ text: "new or changed text in " });
     for (const [index, name] of names.entries()) {
       if (index) parts.push({ text: index === names.length - 1 ? " and " : ", " });
       parts.push(...name);

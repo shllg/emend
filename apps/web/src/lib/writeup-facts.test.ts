@@ -1,7 +1,7 @@
 import { type FileView, type RenderedBlock, RenderedWriteup, type RevisionView, type TopicMeta } from "@emend/contract";
 import { expect, test } from "vitest";
 import { renderWriteup } from "../../../../packages/core/src/render/writeup.ts";
-import { type FactPart, readFact, riskFact, sinceFact, undoFact, usesOpeningCard } from "./writeup-facts.ts";
+import { type FactPart, labelledFact, sinceFact, topicsFact, undoFact, usesOpeningCard } from "./writeup-facts.ts";
 
 const factText = (parts: FactPart[] | undefined) => parts?.map((part) => part.text).join("");
 
@@ -51,19 +51,76 @@ test("only area or Why it matters opts a writeup into the opening card", () => {
   expect(usesOpeningCard({ sections: [section("whyItMatters", "More plants survive.")] })).toBe(true);
 });
 
-test("Risk uses the highest attention, preserves rank order and caps names at three", () => {
-  expect(factText(riskFact([]))).toBeUndefined();
-  expect(factText(riskFact([topic("unknown")]))).toBeUndefined();
-  expect(factText(riskFact([topic("first", "skim")]))).toBe("Low: first");
-  expect(factText(riskFact([topic("low", "skim"), topic("medium", "review")]))).toBe("Medium: medium");
+test.each(["Biggest risk", "Look yourself", "Goal", "Change"] as const)(
+  "label lift finds the first %s block, preserving its identity and HTML",
+  (label) => {
+    const first = {
+      ...block("overview", `  ${label}:\n  Plants.  `),
+      html: `<p><strong>${label}:</strong> Plants.</p>`,
+    };
+    const later = block("overview", `${label}: Later.`);
+    const result = labelledFact([block("overview", "Other text."), first, later], label);
+    expect(result).toEqual({ blocks: [first], hideLabel: true });
+    expect(result?.blocks[0]).toBe(first);
+  },
+);
+
+test("label lift matches case-insensitively with collapsed whitespace, but not old Check first lines", () => {
+  const risk = {
+    ...block("whereToLook", "  bIgGeSt\n  rIsK: Dry soil."),
+    html: "<p><strong>bIgGeSt rIsK:</strong> Dry soil.</p>",
+  };
+  expect(labelledFact([risk], "Biggest risk")).toEqual({ blocks: [risk], hideLabel: true });
+  expect(labelledFact([], "Goal")).toBeUndefined();
+  expect(labelledFact([block("overview", "A Goal: in passing.")], "Goal")).toBeUndefined();
+  expect(labelledFact([block("overview", "Goalkeeper: plants.")], "Goal")).toBeUndefined();
+  for (const label of ["Biggest risk", "Look yourself"] as const)
+    expect(labelledFact([block("whereToLook", "Check first: Water the seeds.")], label)).toBeUndefined();
+});
+
+test.each([
+  ["<p><strong>Goal:</strong> Plants.</p>", true],
+  ["<strong>Goal:</strong> Plants.", true],
+  ['<ul class="list"><li class="item"><strong>Goal:</strong> Plants.</li></ul>', true],
+  ["<ul>\n<li>\n<p><strong>Goal:</strong> Plants.</p></li></ul>", true],
+  ["<ul><li><strong>Goal</strong>: Plants.</li></ul>", false],
+  ["<p><strong>GOAL:</strong> Plants.</p>", false],
+  ["<p><strong>Goal: Plants.</strong></p>", false],
+  ["<p>Goal: <strong>Plants.</strong></p>", false],
+  ["<p><em><strong>Goal:</strong></em> Plants.</p>", false],
+  ["<blockquote><p><strong>Goal:</strong> Plants.</p></blockquote>", false],
+])("label hiding only accepts the exact leading strong shape: %s", (html, hideLabel) => {
+  const goal = { ...block("overview", "Goal: Plants."), html };
+  expect(labelledFact([goal], "Goal")).toEqual({ blocks: [goal], hideLabel });
+});
+
+test("Topics lists High then Medium in ranked order, caps each level and counts Low", () => {
   const topics = [
+    topic("low", "skim"),
     topic("medium", "review"),
     ...["third", "first", "second", "fourth", "fifth"].map((slug) => topic(slug, "critical")),
+    ...["next", "last", "extra"].map((slug) => topic(slug, "review")),
+    topic("another-low", "skim"),
   ];
-  expect(factText(riskFact(topics))).toBe("High: third, first, second and 2 more");
-  expect(factText(riskFact([topic("<img src=x onerror=alert(1)>", "critical")]))).toBe(
-    "High: <img src=x onerror=alert(1)>",
+  expect(factText(topicsFact(topics))).toBe(
+    "High: third, first, second and 2 more; Medium: medium, next, last and 1 more; and 2 Low",
   );
+  expect(factText(topicsFact([topic("first", "skim"), topic("second", "skim")]))).toBe("2 Low");
+  expect(factText(topicsFact([topic("medium", "review"), topic("low", "skim")]))).toBe("Medium: medium; and 1 Low");
+  expect(factText(topicsFact([topic("high", "critical"), topic("medium", "review")]))).toBe(
+    "High: high; Medium: medium",
+  );
+  expect(topicsFact([])).toBeUndefined();
+  expect(topicsFact([topic("unknown")])).toBeUndefined();
+  expect(topicsFact([topic("other", "skim")])).toBeUndefined();
+});
+
+test("Topics keeps hostile titles literal and isolates them after cleaning control and bidi characters", () => {
+  const title = "<img src=x onerror=alert(1)>\u0000\u2069\u202eSeed";
+  expect(topicsFact([{ ...topic("seed", "critical"), title }])).toEqual([
+    { text: "High: " },
+    { text: "<img src=x onerror=alert(1)> Seed", agent: true },
+  ]);
 });
 
 test("Undo chooses the hardest ranked topic, with stable ties and one-way fallback", () => {
@@ -186,92 +243,6 @@ test.each([
   );
 });
 
-test("Read counts every writeup and Markdown doc block and only counted diff files", () => {
-  const writeup = { sections: [section("tldr", "word ".repeat(400))] };
-  const docs: RevisionView["docs"] = [
-    { kind: "markdown", path: "design.md", blocks: [block("doc-12345678", "word\n\t".repeat(400))] },
-    { kind: "html", path: "preview.html", contentUrl: "/content/preview" },
-    { kind: "source", path: "source.ts", language: "text", lines: [] },
-  ];
-  const files: FileView[] = [
-    { ...file, counts: { additions: 40, deletions: 24 } },
-    { ...file, role: "doc", counts: { additions: 500, deletions: 500 } },
-    file,
-  ];
-  expect(readFact(writeup, docs, files)).toBe(
-    "About 12 min: writeup and docs 4 min, diff 8 min (64 lines); HTML docs not counted; 1 diff file not counted",
-  );
-  expect(readFact(writeup, [], [])).toBe("About 2 min: writeup 2 min");
-  expect(readFact(empty, [], [files[0] as FileView])).toBe("About 8 min: diff 8 min (64 lines)");
-});
-
-test("Read omits empty content, handles under a minute and rounds hours to five minutes", () => {
-  expect(readFact(empty, [], [{ ...file, role: "doc" }])).toBeUndefined();
-  expect(readFact({ sections: [section("tldr", " \n ")] }, [], [])).toBeUndefined();
-  expect(readFact({ sections: [section("tldr", "One word")] }, [], [])).toBe("Under 1 min");
-  expect(readFact(empty, [], [{ ...file, counts: { additions: 7, deletions: 0 } }])).toBe("Under 1 min");
-  expect(readFact(empty, [], [{ ...file, counts: { additions: 8, deletions: 0 } }])).toBe(
-    "About 1 min: diff 1 min (8 lines)",
-  );
-  expect(readFact(empty, [], [{ ...file, counts: { additions: 480, deletions: 0 } }])).toBe(
-    "About 1 h: diff 1 h (480 lines)",
-  );
-  expect(readFact(empty, [], [{ ...file, counts: { additions: 664, deletions: 0 } }])).toBe(
-    "About 1 h 25 min: diff 1 h 25 min (664 lines)",
-  );
-});
-
-test("Read counts source words across lines without inserting spaces between tokens", () => {
-  const source: RevisionView["docs"][number] = {
-    kind: "source",
-    path: "source.ts",
-    language: "ts",
-    lines: Array.from({ length: 200 }, () => [{ text: "seed" }, { text: "ling" }]),
-  };
-  expect(readFact({ sections: [section("tldr", "word ".repeat(200))] }, [source], [])).toBe(
-    "About 2 min: writeup and docs 2 min",
-  );
-  expect(readFact(empty, [source], [])).toBe("About 1 min: writeup and docs 1 min");
-});
-
-test("Read notes skipped HTML docs once, including under a minute and diff-only estimates", () => {
-  const docs: RevisionView["docs"] = [
-    { kind: "html", path: "preview.html", contentUrl: "/content/preview" },
-    { kind: "html", path: "other.html", contentUrl: "/content/other" },
-  ];
-  expect(readFact({ sections: [section("tldr", "word ".repeat(200))] }, docs, [])).toBe(
-    "About 1 min: writeup 1 min; HTML docs not counted",
-  );
-  expect(readFact({ sections: [section("tldr", "Summary")] }, docs, [])).toBe("Under 1 min; HTML docs not counted");
-  expect(readFact(empty, docs, [{ ...file, counts: { additions: 8, deletions: 0 } }])).toBe(
-    "About 1 min: diff 1 min (8 lines); HTML docs not counted",
-  );
-  expect(readFact(empty, docs, [])).toBe("Not estimated; HTML docs not counted");
-});
-
-test("Read omits an empty revision without HTML docs", () => {
-  expect(readFact({ ...empty, area: "Garden" }, [], [])).toBeUndefined();
-});
-
-test.each([1, 2])("Read notes %i uncounted diff files on every estimate form, after any HTML note", (count) => {
-  const files = Array.from({ length: count }, (_, index) => ({ ...file, path: `src/file-${index}.ts` }));
-  const note = `; ${count} diff ${count === 1 ? "file" : "files"} not counted`;
-  for (const docs of [[], [{ kind: "html" as const, path: "preview.html", contentUrl: "/content/preview" }]]) {
-    const skipped = `${docs.length ? "; HTML docs not counted" : ""}${note}`;
-    expect(readFact(empty, docs, files)).toBe(`Not estimated${skipped}`);
-    expect(readFact({ sections: [section("tldr", "Summary")] }, docs, files)).toBe(`Under 1 min${skipped}`);
-    expect(readFact({ sections: [section("tldr", "word ".repeat(200))] }, docs, files)).toBe(
-      `About 1 min: writeup 1 min${skipped}`,
-    );
-    expect(readFact(empty, docs, [...files, { ...file, counts: { additions: 8, deletions: 0 } }])).toBe(
-      `About 1 min: diff 1 min (8 lines)${skipped}`,
-    );
-    expect(readFact(empty, docs, [...files, { ...file, counts: { additions: 664, deletions: 0 } }])).toBe(
-      `About 1 h 25 min: diff 1 h 25 min (664 lines)${skipped}`,
-    );
-  }
-});
-
 const since = {
   writeup: {
     sections: [
@@ -304,7 +275,7 @@ test("Since respects the baseline and names changed sections, each topic once, d
     revision: 3,
   }));
   expect(factText(sinceFact({ ...since, changedBlocks }))).toBe(
-    "Since revision 2: new or changed text in TL;DR, topic “Retry budget” and docs/design.md.",
+    "Since revision 2: TL;DR, topic “Retry budget” and docs/design.md.",
   );
   changedBlocks.push({ blockId: "whyItMatters-12345678", revision: 3 });
   expect(
@@ -319,7 +290,7 @@ test("Since respects the baseline and names changed sections, each topic once, d
       }),
     ),
   ).toBe(
-    "Since revision 2: new or changed text in TL;DR, Why it matters, topic “Retry budget” and docs/design.md; 1 file you viewed changed.",
+    "Since revision 2: TL;DR, Why it matters, topic “Retry budget” and docs/design.md; 1 file you viewed changed.",
   );
   expect(
     factText(
@@ -334,7 +305,7 @@ test("Since respects the baseline and names changed sections, each topic once, d
         ],
       }),
     ),
-  ).toBe("Since revision 2: new or changed text in docs/design.md.");
+  ).toBe("Since revision 2: docs/design.md.");
 });
 
 test("Since uses bare section labels, including Checked", () => {
@@ -353,7 +324,41 @@ test("Since uses bare section labels, including Checked", () => {
         ),
       }),
     ),
-  ).toBe("Since revision 2: new or changed text in TL;DR, Checked and topic “Retry budget”.");
+  ).toBe("Since revision 2: TL;DR, Checked and topic “Retry budget”.");
+});
+
+test("Since links the first changed block in each section and each topic once, never review or doc paths", () => {
+  const checked = section("checked", "Unchanged first check.");
+  const changed = { ...block("checked", "Changed second check."), id: "checked-87654321" };
+  checked.blocks.push(changed, { ...block("checked", "Later check."), id: "checked-11111111" });
+  const verdict = section("review", "Read everything.");
+  const parts = sinceFact({
+    ...since,
+    writeup: { sections: [...since.writeup.sections, checked, verdict] },
+    changedBlocks: [
+      "checked-11111111",
+      changed.id,
+      "review-12345678",
+      "t-retry-body-12345678",
+      "t-retry-why-12345678",
+      "doc-12345678-12345678",
+    ].map((blockId) => ({ blockId, revision: 3 })),
+  });
+  expect(factText(parts)).toBe("Since revision 2: topic “Retry budget”, Checked and docs/design.md.");
+  expect(parts?.filter((part) => part.target)).toEqual([
+    { text: "Retry budget", agent: true, target: "topic-retry" },
+    { text: "Checked", target: `block-${changed.id}` },
+  ]);
+  expect(parts?.find((part) => part.text === "docs/design.md")).toEqual({ text: "docs/design.md", agent: true });
+  expect(
+    factText(
+      sinceFact({
+        ...since,
+        writeup: { sections: [verdict] },
+        changedBlocks: [{ blockId: verdict.blocks[0]?.id ?? "", revision: 3 }],
+      }),
+    ),
+  ).toBe("Since revision 2: no new text in the writeup or Markdown docs. Removed text is not tracked.");
 });
 
 test("Since separates new text from stale viewed files and can show only stale files", () => {
@@ -364,7 +369,7 @@ test("Since separates new text from stale viewed files and can show only stale f
     { ...file, path: "src/unviewed.ts" },
   ];
   expect(factText(sinceFact({ ...since, files, changedBlocks: [{ blockId: "tldr-12345678", revision: 3 }] }))).toBe(
-    "Since revision 2: new or changed text in TL;DR; 2 files you viewed changed.",
+    "Since revision 2: TL;DR; 2 files you viewed changed.",
   );
   expect(factText(sinceFact({ ...since, files }))).toBe("Since revision 2: 2 files you viewed changed.");
 });
@@ -375,7 +380,7 @@ test("Since stops counting a revision-1 Viewed mark after a Send on revision 2",
     "Since revision 1: 1 file you viewed changed.",
   );
   expect(factText(sinceFact({ ...since, files, changedBlocks: [{ blockId: "tldr-12345678", revision: 3 }] }))).toBe(
-    "Since revision 2: new or changed text in TL;DR.",
+    "Since revision 2: TL;DR.",
   );
 });
 
@@ -402,7 +407,7 @@ test("Since names docs with identical titles by their isolated paths", () => {
     docs,
     changedBlocks: ["doc-12345678-12345678", "doc-87654321-12345678"].map((blockId) => ({ blockId, revision: 3 })),
   });
-  expect(factText(parts)).toBe("Since revision 2: new or changed text in docs/design.md and docs/other.md.");
+  expect(factText(parts)).toBe("Since revision 2: docs/design.md and docs/other.md.");
   expect(parts?.filter((part) => part.agent)).toEqual([
     { text: "docs/design.md", agent: true },
     { text: "docs/other.md", agent: true },
@@ -415,7 +420,7 @@ test.each([
 ])("agent fact parts strip %s while preserving isolated text", (_label, controls) => {
   const title = `Docs${controls}`;
   const topics = [{ ...topic("retry", "critical"), title }];
-  expect(riskFact(topics)).toEqual([{ text: "High: " }, { text: "Docs", agent: true }]);
+  expect(topicsFact(topics)).toEqual([{ text: "High: " }, { text: "Docs", agent: true }]);
   expect(undoFact({ sections: [section("t-retry-why", `Undo: Restore state${controls}`, "retry")] }, topics)).toEqual([
     { text: "Restore state", agent: true },
     { text: " (" },
@@ -431,9 +436,8 @@ test.each([
     }),
   ).toEqual([
     { text: "Since revision 2: " },
-    { text: "new or changed text in " },
     { text: "topic “" },
-    { text: "Docs", agent: true },
+    { text: "Docs", agent: true, target: "topic-retry" },
     { text: "”" },
     { text: " and " },
     { text: "docs/design.md", agent: true },
@@ -445,7 +449,7 @@ test.each(["\u2029", "\u0085", "\u001c", "\u001d", "\u001e", "\u2028", "\n", "\t
   "agent fact parts replace separator or control %j before stripping bidi controls",
   (separator) => {
     const topics = [{ ...topic("retry", "critical"), title: `Retry${separator}\u2069\u202e12` }];
-    expect(riskFact(topics)).toEqual([{ text: "High: " }, { text: "Retry 12", agent: true }]);
+    expect(topicsFact(topics)).toEqual([{ text: "High: " }, { text: "Retry 12", agent: true }]);
     expect(undoFact(empty, [{ ...(topics[0] as TopicMeta), door: "one-way" }])).toEqual([
       { text: "A revert is not enough" },
       { text: " (" },
@@ -454,6 +458,6 @@ test.each(["\u2029", "\u0085", "\u001c", "\u001d", "\u001e", "\u2028", "\n", "\t
     ]);
     expect(
       factText(sinceFact({ ...since, topics, changedBlocks: [{ blockId: "t-retry-why-12345678", revision: 3 }] })),
-    ).toBe("Since revision 2: new or changed text in topic “Retry 12”.");
+    ).toBe("Since revision 2: topic “Retry 12”.");
   },
 );
