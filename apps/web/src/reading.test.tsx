@@ -543,6 +543,54 @@ test("an open Markdown doc renders its blocks under the doc bar", () => {
   expect(screen.getByText("seed")).toBeTruthy();
   expect(screen.getByRole("heading", { name: "plan.md" })).toBeTruthy();
   expect(container.querySelector("iframe")).toBeNull();
+  expect(container.querySelector(".em-doc-tldr")).toBeNull();
+});
+test("a Markdown doc wraps only its TL;DR heading and body in a writeup card", () => {
+  const blocks: RenderedBlock[] = [
+    { ...block, id: "overview-11111111", kind: "heading", html: "<h1>Plan</h1>", text: "Plan" },
+    {
+      ...block,
+      id: "overview-22222222",
+      kind: "heading",
+      html: '<h2 id="heading-abc">TL;DR</h2>',
+      text: "TL;DR",
+    },
+    { ...block, id: "overview-33333333", html: "<p>Short summary.</p>", text: "Short summary." },
+    {
+      ...block,
+      id: "overview-44444444",
+      kind: "heading",
+      html: '<h2 id="heading-def">Details</h2>',
+      text: "Details",
+    },
+    { ...block, id: "overview-55555555", html: "<p>Full explanation.</p>", text: "Full explanation." },
+  ];
+  const doc = { path: "plan.md", kind: "markdown" as const, blocks };
+  const { container } = mount(
+    <DocView
+      reviewId={id}
+      revision={2}
+      docs={[doc]}
+      openDoc={doc}
+      search={{ tab: "docs", doc: doc.path }}
+      targeted={false}
+      onOpenDoc={() => {}}
+      changedBlocks={[]}
+      threads={[]}
+    />,
+  );
+  const card = required(container.querySelector<HTMLElement>(".em-doc-tldr.em-writeup-card"));
+  expect(within(card).getByRole("heading", { name: "TL;DR", level: 2 })).toBeTruthy();
+  expect(within(card).getByText("Short summary.")).toBeTruthy();
+  expect([...card.querySelectorAll("[data-block-id]")].map((node) => node.getAttribute("data-block-id"))).toEqual([
+    "overview-22222222",
+    "overview-33333333",
+  ]);
+  for (const text of ["Plan", "Details", "Full explanation."])
+    expect(screen.getByText(text).closest(".em-doc-tldr")).toBeNull();
+  expect([...container.querySelectorAll("[data-block-id]")].map((node) => node.getAttribute("data-block-id"))).toEqual(
+    blocks.map((block) => block.id),
+  );
 });
 test.each([
   ["writeup", "reply"],

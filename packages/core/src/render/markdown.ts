@@ -10,6 +10,7 @@ import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import type { DocLinks } from "../links.ts";
 import { type Block, blocksFromTree, type HtmlRoot, renderData, visitElements } from "./blocks.ts";
+import { markCallouts } from "./callouts.ts";
 import { exampleRows } from "./example-rows.ts";
 import { blockHash } from "./hash.ts";
 import { HIGHLIGHT_LINE_CHARS, type HighlightBudget, limitHighlighting } from "./highlight.ts";
@@ -75,7 +76,7 @@ function sanitizedTreePipeline(lineBreaks = false) {
 }
 
 function sanitizedPipeline(lineBreaks = false) {
-  return sanitizedTreePipeline(lineBreaks).use(linkIssueRefs).use(hardenLinks);
+  return sanitizedTreePipeline(lineBreaks).use(linkIssueRefs).use(hardenLinks).use(markCallouts);
 }
 
 const imageReferenceProcessor = sanitizedTreePipeline();
