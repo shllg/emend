@@ -9,7 +9,6 @@ const FAILED_ENTRIES = 2000;
 
 export const codeColourTiming = { renderMs: 5000, failedMs: 10 * 60 * 1000, deadlineMs: 3000, maxQueue: 16 };
 
-const encoder = new TextEncoder();
 const cache = new Map<string, { colours: HtmlCodeColour[]; bytes: number }>();
 let cacheBytes = 0;
 const failed = new Map<string, number>();
@@ -81,7 +80,7 @@ async function renderOne(run: Executor, page: string): Promise<HtmlCodeColour[] 
   try {
     // The worker has its own timeout; this also bounds an executor that never answers.
     const result = await Promise.race([
-      run({ kind: "code-colours", bytes: encoder.encode(page).buffer }),
+      run({ kind: "code-colours", page }),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error("Code colour render timed out")), codeColourTiming.renderMs + 500);
       }),

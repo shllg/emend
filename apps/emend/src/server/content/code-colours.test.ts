@@ -24,12 +24,12 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-test("colours come from the executor and the job receives the page as UTF-8 bytes", async () => {
+test("colours come from the executor and the job receives the page unchanged", async () => {
   const deps = { publishExecutor: executor() };
   expect(await codeColours(deps, "owner:doc", page)).toBe(colours);
   expect(deps.publishExecutor).toHaveBeenCalledExactlyOnceWith({
     kind: "code-colours",
-    bytes: new TextEncoder().encode(page).buffer,
+    page,
   });
   expect(await codeColours(deps, "owner:doc", page)).toBe(colours);
   expect(deps.publishExecutor).toHaveBeenCalledOnce();

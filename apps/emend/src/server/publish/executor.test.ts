@@ -1,4 +1,4 @@
-import type { Worker } from "node:worker_threads";
+import { Worker } from "node:worker_threads";
 import type { PublishRequest } from "@emend/contract";
 import { expect, test, vi } from "vitest";
 import { WorkTimeout, workerExecutor } from "./executor.ts";
@@ -160,18 +160,20 @@ test("line counts treat CRLF as one delimiter and lone CR as content, with no ph
   }
 });
 
-test("code colours render in the worker and transfer the page bytes", async () => {
+test("code colours render in the worker without transferring buffers", async () => {
   const execute = workerExecutor();
+  const postMessage = vi.spyOn(Worker.prototype, "postMessage");
   try {
-    const bytes = new TextEncoder().encode('<pre><code class="language-ts">const seed = 1;</code></pre>').buffer;
-    const result = await execute({ kind: "code-colours", bytes });
-    expect(bytes.byteLength).toBe(0);
+    const page = '<pre><code class="language-ts">const seed = 1;</code></pre>';
+    const result = await execute({ kind: "code-colours", page });
+    expect(postMessage).toHaveBeenCalledExactlyOnceWith({ kind: "code-colours", page }, []);
     expect(result.kind).toBe("code-colours");
     if (result.kind !== "code-colours") throw new Error("Missing code colours");
     expect(result.colours).toHaveLength(1);
     expect(result.colours[0]?.markup).toContain('<span style="color:var(--syn-keyword)">const</span>');
   } finally {
     await execute.close();
+    postMessage.mockRestore();
   }
 });
 

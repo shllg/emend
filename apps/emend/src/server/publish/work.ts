@@ -98,7 +98,7 @@ export type Work =
     }
   | { kind: "resection"; path: string; bytes: ArrayBuffer }
   | { kind: "comment-md"; bodies: string[]; repoUrl?: string }
-  | { kind: "code-colours"; bytes: ArrayBuffer }
+  | { kind: "code-colours"; page: string }
   | { kind: "changed"; previous: { format: "writeup" | "doc" | "ids"; bytes: ArrayBuffer }[]; next: ArrayBuffer[] }
   | {
       kind: "place";
@@ -305,7 +305,7 @@ export const executeWork: Executor = async (work) => {
       selfDependent: effects.docPathUsed,
     };
   }
-  if (work.kind === "code-colours") return { kind: "code-colours", colours: await htmlCodeColours(decode(work.bytes)) };
+  if (work.kind === "code-colours") return { kind: "code-colours", colours: await htmlCodeColours(work.page) };
   if (work.kind === "comment-md") {
     // One failing comment gives null for that comment alone.
     const html: (string | null)[] = [];

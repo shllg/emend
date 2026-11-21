@@ -4,7 +4,7 @@ import { type FileHandle, mkdir, open, rename, symlink, truncate, utimes, writeF
 import { type ClientRequest, createServer, request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { LIMITS, PublishResponse, RevisionView } from "@emend/contract";
-import { applyHtmlLook, htmlLook, parseDocHtml, stripHtmlLook } from "@emend/core";
+import { applyHtmlLook, docText, htmlLook, parseDocHtml, stripHtmlLook } from "@emend/core";
 import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import { devices, files, reviews, revisions } from "../../db/schema.ts";
@@ -35,7 +35,7 @@ beforeAll(async () => {
   // Warm the grammar; cold scans can exhaust Shiki's per-line limit under load.
   await executeWork({
     kind: "code-colours",
-    bytes: new TextEncoder().encode('<pre><code class="language-ts">const seed = 1;</code></pre>').buffer,
+    page: '<pre><code class="language-ts">const seed = 1;</code></pre>',
   });
 });
 beforeEach(async () => {
@@ -159,13 +159,35 @@ test.each(["emend", "custom", null] as const)("%s look serves code with the exis
     expect(body).toContain('<span style="color:var(--syn-keyword)">const</span>');
     expect(execute).toHaveBeenCalledExactlyOnceWith({
       kind: "code-colours",
-      bytes: new TextEncoder().encode(page).buffer,
+      page,
     });
   } else {
     expect(body).not.toContain("<span");
     expect(body).toBe(injectBridge(page));
     expect(execute).not.toHaveBeenCalled();
   }
+});
+
+test("an emend-look doc with two stored BOMs keeps code offsets after decoding", async () => {
+  const stored = '\uFEFF\uFEFF<pre><code class="language-ts">const seed = 1;</code></pre>';
+  const sha = await f.deps.blobs.put(f.ownerId, Buffer.from(stored, "utf8"), "text/html");
+  await setDocLook("emend", sha);
+  const execute = vi.fn(executeWork);
+  f.deps.publishExecutor = execute;
+  const response = await request(docUrl);
+  expect(response.status).toBe(200);
+  headers(response);
+  const body = await response.text();
+  const codeStart = '<code class="language-ts">';
+  expect(body).toContain(`${codeStart}<span style=`);
+  expect(execute).toHaveBeenCalledExactlyOnceWith({ kind: "code-colours", page: stored.slice(1) });
+  const result = await execute.mock.results[0]?.value;
+  if (result?.kind !== "code-colours") throw new Error("Missing code colours");
+  expect(result.colours).toHaveLength(1);
+  expect(body.slice(body.indexOf(codeStart) + codeStart.length, body.lastIndexOf("<script>"))).toBe(
+    `${result.colours[0]?.markup}</code></pre>`,
+  );
+  expect(docText(body)).toBe(docText(stored.slice(1)));
 });
 
 test("two GETs of one emend-look doc compute colours once across themes", async () => {
@@ -184,7 +206,7 @@ test("two GETs of one emend-look doc compute colours once across themes", async 
   }
   expect(execute).toHaveBeenCalledExactlyOnceWith({
     kind: "code-colours",
-    bytes: new TextEncoder().encode(page).buffer,
+    page,
   });
 });
 

@@ -1,5 +1,6 @@
 import { LIMITS, type PublishRequest } from "@emend/contract";
 import {
+  applyHtmlCodeColours,
   type Block,
   blockHash,
   HIGHLIGHT_SOURCE_BYTES,
@@ -47,12 +48,12 @@ test("writeup work reports doc-base use without inspecting serialized HTML", asy
 test("code colour work returns token spans and source offsets for a TypeScript block", async () => {
   const prefix = '<p>🌱</p><pre><code class="language-ts">';
   const text = 'const seed: string = "fern";';
-  const bytes = new TextEncoder().encode(`${prefix}${text}</code></pre>`).buffer;
+  const page = `${prefix}${text}</code></pre>`;
   // Warm the grammar; cold scans can exhaust Shiki's per-line limit under load.
-  await executeWork({ kind: "code-colours", bytes });
+  await executeWork({ kind: "code-colours", page });
   const result = await executeWork({
     kind: "code-colours",
-    bytes,
+    page,
   });
   expect(result).toEqual({
     kind: "code-colours",
@@ -64,6 +65,19 @@ test("code colour work returns token spans and source offsets for a TypeScript b
       },
     ],
   });
+});
+
+test("code colour work preserves offsets in a page with a leading BOM", async () => {
+  const prefix = '\uFEFF<pre><code class="language-ts">';
+  const suffix = "</code></pre>";
+  const page = `${prefix}const seed = 1;${suffix}`;
+  const result = await executeWork({ kind: "code-colours", page });
+  if (result.kind !== "code-colours") throw new Error("Missing code colours");
+  expect(result.colours).toHaveLength(1);
+  expect(result.colours[0]?.markup).toContain('<span style="color:var(--syn-keyword)">const</span>');
+  const output = applyHtmlCodeColours(page, result.colours);
+  expect(output.slice(0, output.indexOf(">", output.indexOf("<code")) + 1)).toBe(prefix);
+  expect(output.slice(output.indexOf("</code>"))).toBe(suffix);
 });
 
 test("HTML metadata shares parsing but full part IDs remain path-specific and separate from Markdown IDs", async () => {
