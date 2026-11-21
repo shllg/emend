@@ -129,16 +129,19 @@ export function Writeup({
       lift(risk, "risk", "Biggest risk", "whereToLook");
       computed(risk, "undo", "Undo", undoFact({ sections: writeup.sections }, topics));
       const checked = blocksFor("checked");
-      rows(risk, "proof", "Proof", checked.slice(0, 1));
+      const proof =
+        checked.find((block) => block.kind === "item") ?? checked.find((block) => block.kind === "paragraph");
+      rows(risk, "proof", "Proof", proof ? [proof] : []);
       rows(risk, "gaps", "Gaps", blocksFor("notChecked"));
       lift(risk, "look", "Look yourself", "whereToLook");
-      if (checked.length > 1) {
-        const count = checked.length - 1;
+      const assurance = checked.filter((block) => block !== proof);
+      if (assurance.length) {
+        const count = assurance.filter((block) => block.kind === "item" || block.kind === "paragraph").length;
         risk.push({
           key: "assurance",
           label: "Assurance",
-          blocks: checked.slice(1),
-          fold: { key: "checked-more", summary: `and ${count} more ${plural(count, "check")}` },
+          blocks: assurance,
+          fold: { key: "checked-more", summary: count > 0 ? `and ${count} more ${plural(count, "check")}` : "Details" },
         });
       }
       lift(frame, "goal", "Goal", "overview");

@@ -105,6 +105,50 @@ test("label lift accepts the paragraph wrapper and surrounding whitespace of a l
 });
 
 test.each([
+  ["whereToLook", "Biggest risk", "risk", "- **Biggest risk:** A."],
+  ["overview", "Change", "change", "**Change:** B."],
+] as const)("label lift reads %s bold label text through glossary markup", async (key, label, term, markdown) => {
+  const writeup = RenderedWriteup.parse(
+    await renderWriteup(
+      {
+        overview: "",
+        tldr: "",
+        decisions: "",
+        topics: {},
+        [key]: markdown,
+        glossary: [{ term, definition: "A synthetic definition." }],
+      },
+      [],
+    ),
+  );
+  const blocks = writeup.sections.find((section) => section.key === key)?.blocks ?? [];
+  expect(blocks).toHaveLength(1);
+  expect(blocks[0]?.html).toContain('class="emend-term" data-emend-term="0"');
+  expect(labelledFact(blocks, label)).toEqual({ blocks, hideLabel: true });
+});
+
+test("label lift refuses a plain second label with glossary markup after a raw break", async () => {
+  const writeup = RenderedWriteup.parse(
+    await renderWriteup(
+      {
+        overview: "",
+        tldr: "",
+        decisions: "",
+        topics: {},
+        whereToLook: "**Biggest risk:** A.<br>Look yourself: B.",
+        glossary: [{ term: "yourself", definition: "The reviewer." }],
+      },
+      [],
+    ),
+  );
+  const blocks = writeup.sections.find((section) => section.key === "whereToLook")?.blocks ?? [];
+  expect(blocks).toHaveLength(1);
+  expect(blocks[0]?.text).toBe("Biggest risk: A.Look yourself: B.");
+  expect(blocks[0]?.html).toContain('<br>Look <span class="emend-term" data-emend-term="0">yourself</span>: B.');
+  expect(labelledFact(blocks, "Biggest risk")).toBeUndefined();
+});
+
+test.each([
   ["soft", "\n", "\n", false],
   ["hard", "  \n", "\n", true],
   ["raw", "<br>", "", true],
