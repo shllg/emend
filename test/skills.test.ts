@@ -599,6 +599,9 @@ test("review guidance writes a decision brief with no verdict", () => {
   const writing = text.split("## Write for the reviewer\n")[1]?.split("\n## ")[0] ?? "";
   expect(writing).not.toContain("- `review`:");
   expect(writing).toContain("Write no `review` verdict.");
+  expect(text.replace(/\s+/g, " ")).toContain(
+    'Show what you claim, as the writing reference says under "Pictures" and "Tables": a screenshot for a visible change, a table for a config, schema, number or query-plan change.',
+  );
 
   const skills = join(repo, "plugin", "skills");
   for (const path of readdirSync(skills, { recursive: true, encoding: "utf8" })) {

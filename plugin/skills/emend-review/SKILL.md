@@ -183,6 +183,8 @@ Write the opening fields below. The app groups them for the reviewer.
 - `topics[slug]`: `why` and `example` as the writing reference says; `body` gives the decisions,
   trade-offs and checks. A request to explain something in the writeup belongs here.
   A topic that changes a state flow shows a state diagram in its `why`, as the writing reference says.
+  Show what you claim, as the writing reference says under "Pictures" and "Tables": a screenshot
+  for a visible change, a table for a config, schema, number or query-plan change.
 
 The app adds Risk, Undo, Read and Since to Facts from the topics, diff and earlier revisions.
 Write nothing for them.
