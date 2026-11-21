@@ -254,6 +254,7 @@ A document keeps its glossary as a list under a "Glossary" heading, one term per
 ## Pictures
 
 Show what you claim. A review writeup or a document can show images.
+A review writeup follows the two rules below; a document follows them loosely.
 
 - A change the user can see needs a screenshot. Show Before and After at the same viewport.
   A single shot, or an After-only shot when there is no Before, is fine.
@@ -288,6 +289,8 @@ In a Markdown document, put the image beside it and reference it with a relative
 A Before and After pair shows the same way.
 
 ## Tables
+
+This section applies to a review writeup. A document follows it loosely.
 
 Show these changes as a table:
 
