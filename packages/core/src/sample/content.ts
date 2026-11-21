@@ -71,6 +71,12 @@ A **parcel** has *one destination*, a [tracking guide](https://example.com/guide
 
 > A readable label helps each parcel reach its destination.
 
+> [!NOTE]
+> Labels print in the parcel's own language.
+
+> [!WARNING]
+> A damp label can smear before delivery.
+
 ---
 
 \`\`\`typescript

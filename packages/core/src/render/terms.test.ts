@@ -219,6 +219,15 @@ test("skips headings, code, links, generated issue links, media and diagrams", a
   expect(rendered).toContain('class="emend-media-caption">Budget');
 });
 
+test("a callout marks the first visible glossary mention instead of its hidden marker", async () => {
+  const source = "> [!NOTE]\n> A note about parcels.";
+  const rendered = await html(source, [{ term: "note" }]);
+  expect(rendered).toContain('<span class="emend-callout-marker">[!NOTE]</span>');
+  expect(rendered).toContain(`A ${mark("note")} about parcels.`);
+  expect(rendered.match(/data-emend-term=/g)).toHaveLength(1);
+  expect(rendered.replace(mark("note"), "note")).toBe(await html(source, []));
+});
+
 test("docs, comments and metadata never gain marks", async () => {
   expect(JSON.stringify(await renderDoc("Budget", "guide.md"))).not.toContain("emend-term");
   expect(await renderCommentHtml("Budget")).not.toContain("emend-term");

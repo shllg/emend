@@ -158,6 +158,43 @@
     border-left: 2px solid var(--border-2);
     color: var(--fg-reading);
   }
+  /* GitHub alert quotes from the server pipeline; note, tip and important share the note colours. */
+  .em-prose blockquote.emend-callout {
+    padding: var(--space-3) var(--space-4);
+    border-left: 3px solid var(--info-fg);
+    border-radius: var(--space-2);
+    background: var(--bg-sunken);
+    color: var(--fg-reading);
+  }
+  .em-prose blockquote:is(.emend-callout-warning, .emend-callout-caution) {
+    border-left-color: var(--warning-fg);
+    background: var(--warning-bg);
+  }
+  /* The label is drawn, not text, so a callout keeps the block text and id of its quote. */
+  .em-prose blockquote.emend-callout::before {
+    content: "Note";
+    display: block;
+    margin: 0 0 var(--space-1);
+    font: 600 12px / 1.4 var(--font-sans);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--info-fg);
+  }
+  .em-prose blockquote.emend-callout-tip::before {
+    content: "Tip";
+  }
+  .em-prose blockquote.emend-callout-important::before {
+    content: "Important";
+  }
+  .em-prose blockquote.emend-callout-warning::before {
+    content: "Warning";
+  }
+  .em-prose blockquote.emend-callout-caution::before {
+    content: "Caution";
+  }
+  .em-prose blockquote:is(.emend-callout-warning, .emend-callout-caution)::before {
+    color: var(--warning-fg);
+  }
   /* Wide tables scroll inside the block instead of widening the pane. */
   .em-prose table {
     display: block;
@@ -292,6 +329,15 @@
   }
   .em-prose > :last-child {
     margin-bottom: 0;
+  }
+  .em-prose .emend-callout > :last-child {
+    margin-bottom: 0;
+  }
+  /* The marker stays in the text for comment anchors; only its display is hidden. */
+  .em-prose .emend-callout .emend-callout-marker,
+  .em-prose .emend-callout br.emend-callout-marker-break,
+  .em-prose .emend-callout > p.emend-callout-marker-line {
+    display: none;
   }
   mark.em-mark {
     background: var(--mark-bg);

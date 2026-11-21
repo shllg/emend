@@ -37,6 +37,8 @@ export type ReaderGroup = {
   heading?: ReactNode;
   labelledBy?: string;
   blocks: RenderedBlock[];
+  /** The Markdown doc's TL;DR section, including its heading and excluding the next section. */
+  tldr?: { start: number; end: number };
   path?: string;
   content?: ReactNode;
   topic?: TopicMeta;
@@ -318,7 +320,17 @@ export function BlockReader({
           discussion={group.topic && target?.kind === "topic" && target.slug === group.topic.slug && composer}
         >
           {group.content}
-          {renderBlocks(group.blocks, group.path, group.presentation === "decisions")}
+          {group.tldr ? (
+            <>
+              {renderBlocks(group.blocks.slice(0, group.tldr.start), group.path)}
+              <div className="em-writeup-card em-doc-tldr">
+                {renderBlocks(group.blocks.slice(group.tldr.start, group.tldr.end), group.path)}
+              </div>
+              {renderBlocks(group.blocks.slice(group.tldr.end), group.path)}
+            </>
+          ) : (
+            renderBlocks(group.blocks, group.path, group.presentation === "decisions")
+          )}
           {group.facts && (
             <dl className="em-writeup-facts">
               {group.facts.map((fact) => (

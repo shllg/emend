@@ -402,6 +402,20 @@
     border-radius: 12px;
     padding: 16px 20px;
   }
+  /* A Markdown doc's TL;DR section: its heading reads as the card's kicker. */
+  .em-reading-block + .em-doc-tldr {
+    margin-top: var(--space-6);
+  }
+  .em-doc-tldr + .em-reading-block {
+    margin-top: var(--reading-block-gap);
+  }
+  .em-doc-tldr > .em-reading-block:first-child > .em-prose > h2:first-child {
+    margin: 0 0 8px;
+    font: 600 12px / 1.4 var(--font-sans);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-3);
+  }
   .em-writeup-matters {
     margin-top: 16px;
     border-top: 1px solid var(--border-1);

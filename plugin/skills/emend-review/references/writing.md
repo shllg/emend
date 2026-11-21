@@ -21,6 +21,24 @@ The reader reads it first, often straight from other work.
   State what changes for the user, with the before state when it helps.
   `whyItMatters` says what the change gives the product or prepares for, in one or two sentences.
 - A document opens with it, under a "TL;DR" heading right after the title.
+  In a Markdown document, a `## TL;DR` section shows as the writeup's card.
+
+## Callouts
+
+This section applies to a Markdown document, a review writeup and a feedback reply.
+A quote that starts with a GitHub alert marker shows as a callout.
+Put the marker alone on the quote's first line:
+
+```markdown
+> [!NOTE]
+> Search results stay in the cache for five minutes.
+```
+
+- `[!NOTE]` shows a note and `[!WARNING]` a warning.
+- `[!TIP]` and `[!IMPORTANT]` show as notes, `[!CAUTION]` as a warning, each with its own label.
+- A quote without a marker stays a plain quote.
+- A callout holds text, lists and code. A quote with a Mermaid diagram stays a plain quote, so put the diagram outside it.
+- An HTML page uses `<aside class="note">` or `<aside class="warning">` instead.
 
 ## No filler
 

@@ -62,6 +62,38 @@ export function exampleRows() {
         return;
       }
       if (containsMedia(node)) return;
+      const prefix: Children = [];
+      let content = node.children;
+      const marker = content[0];
+      if (
+        marker?.type === "element" &&
+        marker.tagName === "span" &&
+        Array.isArray(marker.properties.className) &&
+        marker.properties.className.includes("emend-callout-marker")
+      ) {
+        // Keep the hidden marker and its separators outside the visible example rows.
+        prefix.push(marker);
+        content = content.slice(1);
+        for (let child = content[0]; child; child = content[0]) {
+          if (child.type === "text") {
+            const whitespace = /^[ \t\r\n\f]+/.exec(child.value)?.[0];
+            if (!whitespace) break;
+            prefix.push({ ...child, value: whitespace });
+            if (whitespace.length < child.value.length) {
+              content[0] = { ...child, value: child.value.slice(whitespace.length) };
+              break;
+            }
+          } else if (
+            child.type === "element" &&
+            child.tagName === "br" &&
+            Array.isArray(child.properties.className) &&
+            child.properties.className.includes("emend-callout-marker-break")
+          ) {
+            prefix.push(child);
+          } else break;
+          content.shift();
+        }
+      }
       const lines: { children: Children; before: Children }[] = [];
       let line = { children: [] as Children, before: [] as Children };
       lines.push(line);
@@ -73,7 +105,7 @@ export function exampleRows() {
         }
         line.before.push(separator);
       };
-      for (const child of node.children) {
+      for (const child of content) {
         if (child.type === "element" && child.tagName === "br") separate(child);
         else if (child.type === "text") {
           for (const [index, value] of child.value.split("\n").entries()) {
@@ -86,7 +118,7 @@ export function exampleRows() {
       if (!rows.some(Boolean)) return;
       const classes = Array.isArray(node.properties.className) ? node.properties.className : [];
       node.properties.className = [...classes, "emend-example-rows"];
-      const children: Children = [];
+      const children: Children = [...prefix];
       let current: Row | undefined;
       const flush = () => {
         if (!current) return;

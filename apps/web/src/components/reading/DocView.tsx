@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { docFilename, docTitle } from "../../lib/doc-navigation.ts";
+import { docTldrRange } from "../../lib/doc-tldr.ts";
 import { docKey, docView, threadOnDoc } from "../../lib/doc-view.ts";
 import type { DocNavigation, HtmlPosition } from "../../lib/frame-messages.ts";
 import { useLayout } from "../../lib/layout.ts";
@@ -188,6 +189,7 @@ export function DocView({
               labelledBy: headingId,
               path: openDoc.path,
               blocks: openDoc.kind === "markdown" ? openDoc.blocks : [],
+              tldr: openDoc.kind === "markdown" ? docTldrRange(openDoc.blocks) : undefined,
               content,
             },
           ]
