@@ -116,7 +116,8 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       if (next.done) { pending.pop(); continue; }
       const node = next.value;
       if (nodeType(node) === 3) {
-        if (entry.part && /[^\p{White_Space}]/u.test(textData(node))) entry.part.nonempty = true;
+        // Mirror normalizeText's collapse plus trim: trim also strips U+FEFF; its other chars are White_Space.
+        if (entry.part && /[^\p{White_Space}\uFEFF]/u.test(textData(node))) entry.part.nonempty = true;
       } else if (nodeType(node) === 1 && !omitted.has(localName(node))) {
         let part = entry.part;
         if (namespace(node) === "http://www.w3.org/1999/xhtml" && partTags.has(localName(node))) {
@@ -493,31 +494,34 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   const styleOf = element => read(window.HTMLElement.prototype, "style", element);
   const styleCall = (method, style, ...args) => dom(window.CSSStyleDeclaration.prototype, method, style, ...args);
   const createElement = name => dom(window.Document.prototype, "createElement", document, name);
-  let keptMarks = [], marked = [], changeLabels = [], changedStyle = false;
+  let keptMarks = [], marked = [], changeLabels = [];
+  let themeMode = "light";
   function applyChanged() {
-    for (const target of marked) elementCall("removeAttribute", target, "data-emend-changed");
+    for (const { target, value, priority } of marked) {
+      elementCall("removeAttribute", target, "data-emend-changed");
+      const style = styleOf(target);
+      if (value) styleCall("setProperty", style, "box-shadow", value, priority);
+      else styleCall("removeProperty", style, "box-shadow");
+    }
     for (const host of changeLabels) {
       const parent = nodeValue("parentNode", host);
       if (parent) dom(window.Node.prototype, "removeChild", parent, host);
     }
     marked = [];
     changeLabels = [];
-    if (keptMarks.length && !changedStyle && typeof CSSStyleSheet !== "undefined" && descriptor(window.Document.prototype, "adoptedStyleSheets")) {
-      try {
-        const sheet = new CSSStyleSheet();
-        dom(window.CSSStyleSheet.prototype, "replaceSync", sheet,
-          "[data-emend-changed]{box-shadow:-3px 0 0 0 var(--changed-line,#8b5cf6)!important}");
-        write(window.Document.prototype, "adoptedStyleSheets", document, [...documentValue("adoptedStyleSheets"), sheet]);
-        changedStyle = true;
-      } catch { /* Labels still show without constructed stylesheet support. */ }
-    }
+    const [line, background, color] = themeMode === "dark"
+      ? ["#a78bfa", "rgba(139, 92, 246, 0.16)", "#c4b5fd"] : ["#8b5cf6", "#f5f3ff", "#6d28d9"];
     let previous;
     for (const mark of keptMarks) {
       const element = parts[mark.index];
       const diagram = diagrams.find(diagram => diagram.pre === element);
       const target = diagram?.host || element;
+      const targetStyle = styleOf(target);
+      marked.push({ target, value: styleCall("getPropertyValue", targetStyle, "box-shadow"),
+        priority: styleCall("getPropertyPriority", targetStyle, "box-shadow") });
+      styleCall("setProperty", targetStyle, "box-shadow", "-3px 0 0 0 " + line, "important");
+      // Bridge state only; mark styles are inline, with no attribute selector.
       elementCall("setAttribute", target, "data-emend-changed", String(mark.revision));
-      marked.push(target);
       const continues = previous && previous.index === mark.index - 1 && previous.revision === mark.revision;
       previous = mark;
       if (continues) continue;
@@ -532,8 +536,8 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       const style = styleOf(label);
       for (const [name, value] of [["display", "inline-block"],
           ["font", "500 11.5px/20px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"],
-          ["padding", "0 7px 0 6px"], ["border-radius", "2px"], ["background", "var(--changed-bg, #f5f3ff)"],
-          ["color", "var(--changed-fg, #6d28d9)"], ["white-space", "nowrap"], ["user-select", "none"],
+          ["padding", "0 7px 0 6px"], ["border-radius", "2px"], ["background", background],
+          ["color", color], ["white-space", "nowrap"], ["user-select", "none"],
           ["text-align", "left"], ["letter-spacing", "normal"], ["text-transform", "none"]])
         styleCall("setProperty", style, name, value, "important");
       dom(window.Node.prototype, "appendChild", shadow, label);
@@ -704,6 +708,10 @@ export const BRIDGE_SOURCE = String.raw`(() => {
         const css = entries.map(([name, value]) => "--" + name + ":" + (color(value) ? value : "var(--" + value + ")") + ";").join("");
         dom(window.CSSStyleSheet.prototype, "replaceSync", themeSheet, css ? "@layer emend{:root:root:root{" + css + "}}" : "");
       } catch { /* The mode still applies without constructed stylesheet support. */ }
+    }
+    if (themeMode !== data.mode) {
+      themeMode = data.mode;
+      if (keptMarks.length) applyChanged();
     }
     checkDiagramModes();
   }

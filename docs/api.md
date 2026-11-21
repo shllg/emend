@@ -980,6 +980,10 @@ not count. Script, style, template and noscript subtrees are skipped in every na
 Text is NFC-normalized, Unicode whitespace collapsed and trimmed; empty parts are dropped,
 then only the first 10000 remain. Part hashes use the normalized own text, with duplicate hashes
 suffixed `-2`, `-3`, and so on in occurrence order.
+Across a revision, at most `htmlPartsPerRevision` (100000) parts are stored, counted per path
+even when paths share a blob. In manifest order, the first HTML doc that would exceed the cap
+and every later HTML doc store no parts. They still render and are served, but show no marks;
+their null parts also suppress marks in the next revision's comparison.
 `links` and `repoUrl` are the revision's publish-level links (see "Links and repoUrl" below);
 both fields are optional in the view, and revisions published before they existed omit them.
 `RenderedWriteup.area?: WriteupArea` is the plain-text area, with whitespace collapsed and trimmed.
@@ -1223,7 +1227,12 @@ A count different from the bridge's own part count clears all marks. Otherwise m
 the previous ones, preserving reading position. Each marked part gets a violet left line;
 each run of consecutive parts with the same revision starts with `Changed in rev N`.
 Labels live in closed shadow roots and never enter quotes or headings. Diagram marks follow
-the visible diagram host. Both looks show marks; custom pages use fallback colours.
+the visible diagram host. Both looks show marks with a fixed palette from the last applied
+`emend:theme` mode, defaulting to light (also for custom pages and light-only docs). Light uses
+line `#8b5cf6`, label background `#f5f3ff` and text `#6d28d9`; dark uses line `#a78bfa`,
+background `rgba(139, 92, 246, 0.16)` and text `#c4b5fd`. The line is an inline important
+declaration the doc's CSS cannot override. In-frame marks are drawn inside agent content, so a
+doc can still show look-alike text; marks are a reading aid, not proof.
 
 HTML diagrams use `<pre class="mermaid">` in both emend's look and custom pages. Only
 HTML-namespace `pre` elements qualify. A `pre` qualifies with the exact `mermaid` class token
@@ -2463,6 +2472,7 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `titleChars` | 200 characters |
 | `headingsPerDoc` | 1024 h2/h3 entries per doc |
 | `htmlPartsPerDoc` | 10000 nonempty own-text parts per HTML doc |
+| `htmlPartsPerRevision` | 100000 HTML parts across doc paths; the first doc that would exceed this and every later HTML doc store no parts |
 | `headingTextChars` | 200 characters per cleaned heading label |
 | `headingIdChars` | 256 characters per declared Markdown heading ID, including its prefix |
 | `headingLookupBytesPerRevision` | 33554432 bytes (32 MiB) across distinct heading lookup maps: UTF-8 name and target ID bytes plus 32 bytes per entry |

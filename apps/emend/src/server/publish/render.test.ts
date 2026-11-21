@@ -66,6 +66,83 @@ test("HTML metadata shares parsing but full part IDs remain path-specific and se
   expect(result.ids).toHaveLength(1);
 });
 
+test("the HTML part cap omits the first over-budget doc and every later HTML doc", async () => {
+  const paths = ["one.html", "two.html", "over.html", "later.html"];
+  const counts = [60000, 30000, 20000, 1];
+  const request = input(paths);
+  const sizes = new Map<string, number>();
+  for (const [index, file] of request.files.entries()) {
+    file.newBlob = index.toString(16).padStart(64, "0");
+    sizes.set(file.newBlob, counts[index] ?? 0);
+  }
+  // Synthetic metadata exercises the revision budget without parsing large documents.
+  const execute = vi.fn(async (work: Parameters<typeof executeWork>[0]) => {
+    if (work.kind === "doc-metadata")
+      return {
+        kind: "doc-metadata" as const,
+        title: "Synthetic doc",
+        headings: [],
+        parts: Array.from({ length: Number(new TextDecoder().decode(work.bytes)) }, (_, index) =>
+          index.toString(16).padStart(8, "0"),
+        ),
+      };
+    if (work.kind === "writeup") return { kind: "writeup" as const, ...serializeRendered({ sections: [] }) };
+    throw new Error("unexpected work");
+  });
+  const onRendered = vi.fn();
+  const result = await renderRevision(
+    request,
+    execute,
+    async (hash) => new TextEncoder().encode(String(sizes.get(hash))).buffer,
+    async () => new ArrayBuffer(0),
+    async () => "stored",
+    undefined,
+    onRendered,
+  );
+  for (const [index, path] of paths.slice(0, 2).entries()) {
+    expect(result.metadata.get(path)?.parts).toHaveLength(counts[index] ?? 0);
+    expect(result.htmlParts.get(path)).toHaveLength(counts[index] ?? 0);
+  }
+  for (const path of paths.slice(2)) {
+    expect(result.metadata.get(path)).toEqual({ title: "Synthetic doc", headings: [] });
+    expect(result.htmlParts.has(path)).toBe(false);
+  }
+  const total = [...result.htmlParts.values()].reduce((sum, parts) => sum + parts.length, 0);
+  expect(total).toBe(90000);
+  expect(total).toBeLessThanOrEqual(LIMITS.htmlPartsPerRevision);
+  expect(onRendered.mock.calls.slice(0, paths.length).map(([size]) => size)).toEqual(
+    paths.map((path) => Buffer.byteLength(JSON.stringify(result.metadata.get(path) ?? null))),
+  );
+  expect(result.unrendered).toEqual([]);
+});
+
+test("the HTML part cap counts shared blobs per path and allows exactly the limit", async () => {
+  const parts = Array.from({ length: LIMITS.htmlPartsPerDoc }, (_, index) => index.toString(16).padStart(8, "0"));
+  const allowed = LIMITS.htmlPartsPerRevision / parts.length;
+  const paths = Array.from({ length: allowed + 2 }, (_, index) => `doc-${index}.html`);
+  const execute = vi.fn(async (work: Parameters<typeof executeWork>[0]) => {
+    if (work.kind === "doc-metadata") return { kind: "doc-metadata" as const, headings: [], parts };
+    if (work.kind === "writeup") return { kind: "writeup" as const, ...serializeRendered({ sections: [] }) };
+    throw new Error("unexpected work");
+  });
+  const result = await renderRevision(
+    input(paths),
+    execute,
+    async () => new ArrayBuffer(0),
+    async () => new ArrayBuffer(0),
+    async () => "stored",
+  );
+  expect(execute.mock.calls.filter(([work]) => work.kind === "doc-metadata")).toHaveLength(1);
+  expect([...result.htmlParts.keys()]).toEqual(paths.slice(0, allowed));
+  for (const path of paths.slice(0, allowed)) {
+    expect(result.metadata.get(path)?.parts).toBe(parts);
+    expect(result.htmlParts.get(path)).toHaveLength(parts.length);
+  }
+  for (const path of paths.slice(allowed)) expect(result.metadata.get(path)).not.toHaveProperty("parts");
+  expect([...result.htmlParts.values()].reduce((sum, ids) => sum + ids.length, 0)).toBe(LIMITS.htmlPartsPerRevision);
+  expect(result.unrendered).toEqual([]);
+});
+
 test("writeup work bounds unlisted paths and retains their full count", async () => {
   const paths = Array.from({ length: 25 }, (_, i) => `media/${i}.png`);
   const result = await executeWork({

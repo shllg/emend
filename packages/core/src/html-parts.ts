@@ -4,7 +4,7 @@ import { htmlPart } from "./place/html.ts";
 import { blockHash } from "./render/hash.ts";
 import { normalizeText } from "./render/normalize.ts";
 
-const partTags = new Set([
+export const HTML_PART_TAGS: readonly string[] = [
   "address",
   "article",
   "aside",
@@ -37,7 +37,8 @@ const partTags = new Set([
   "summary",
   "td",
   "th",
-]);
+];
+const partTags = new Set(HTML_PART_TAGS);
 const omitted = new Set(["script", "style", "template", "noscript"]);
 
 // The bridge's collectParts is kept in parity by the bridge tests.

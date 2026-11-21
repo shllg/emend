@@ -48,6 +48,8 @@ export async function renderRevision(
   const failedMetadata = new Set<string>();
   const unrendered: string[] = [];
   let metadataBytes = 0;
+  let htmlPartCount = 0;
+  let htmlPartsExhausted = false;
   for (const file of input.files) {
     checkPublishSignal(signal);
     if (file.role !== "doc") continue;
@@ -77,11 +79,19 @@ export async function renderRevision(
       metadataCache.set(key, own);
     }
     if (format === "html" && failedMetadata.has(key)) unrendered.push(file.path);
+    let parts = format === "html" ? own.parts : undefined;
+    if (parts !== undefined) {
+      // Charge each path, including cached aliases; after the cut, later HTML docs keep no parts.
+      if (htmlPartsExhausted || htmlPartCount + parts.length > LIMITS.htmlPartsPerRevision) {
+        htmlPartsExhausted = true;
+        parts = undefined;
+      } else htmlPartCount += parts.length;
+    }
     const doc = {
       title:
         cleanDocTitle(file.title ?? "") || own.title || cleanDocTitle(file.path.split("/").at(-1) ?? "") || "Document",
       headings: own.headings,
-      ...(format === "html" && own.parts !== undefined ? { parts: own.parts } : {}),
+      ...(parts !== undefined ? { parts } : {}),
       ...(format === "html" && own.look ? { look: own.look } : {}),
       ...(format === "html" && own.legacyLook ? { legacyLook: own.legacyLook } : {}),
       ...(format === "html" && own.colorScheme ? { colorScheme: own.colorScheme } : {}),

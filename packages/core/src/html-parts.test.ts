@@ -12,6 +12,8 @@ test.each([
   ["Body text <span>inline body text</span><p>Part</p>", ["Part"]],
   ["<section><p>First</p>Own text after the child</section>", ["Own text after the child", "First"]],
   ["<div>\n\t \u0085\u00a0\u2003</div><p>Cafe\u0301\n seed</p>", ["Café seed"]],
+  ["<p>&#xfeff;</p><p>Changed</p>", ["Changed"]],
+  ["<p> &#xfeff; </p><p>&#xfeff;Lead</p>", ["Lead"]],
   ["<table><caption>Caption</caption><tr><th>Head</th><td>Cell</td></tr></table>", ["Caption", "Head", "Cell"]],
 ] as const)("HTML parts use normalized own text in element start order: %s", (source, expected) => {
   expect(htmlPartTexts(parseDocHtml(source))).toEqual(expected);

@@ -2,9 +2,17 @@
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { LIMITS } from "@emend/contract";
-import { type Element, type HTMLDivElement, type Node, Window } from "happy-dom";
+import {
+  type Element,
+  type HTMLDivElement,
+  type HTMLElement,
+  type HTMLSpanElement,
+  type Node,
+  type ShadowRoot,
+  Window,
+} from "happy-dom";
 import { afterEach, expect, test, vi } from "vitest";
-import { htmlPartTexts } from "../../../packages/core/src/html-parts.ts";
+import { HTML_PART_TAGS, htmlPartTexts } from "../../../packages/core/src/html-parts.ts";
 import { parseDocHtml } from "../../../packages/core/src/place/html.ts";
 import { normalizeText } from "../../../packages/core/src/render/normalize.ts";
 
@@ -32,6 +40,9 @@ function bridge(html: string) {
   vi.spyOn(window.Node.prototype, "textContent", "get").mockImplementation(function (this: Element) {
     return textContent.call(this);
   });
+  // happy-dom lacks assignedSlot; browsers return null for an unslotted element.
+  if (!Object.getOwnPropertyDescriptor(window.Element.prototype, "assignedSlot"))
+    Object.defineProperty(window.Element.prototype, "assignedSlot", { configurable: true, get: () => null });
   const post = vi.fn();
   const parent = { postMessage: post };
   Object.defineProperty(window, "parent", { value: parent });
@@ -58,49 +69,18 @@ function bridge(html: string) {
     window.document.dispatchEvent(new window.Event("mouseup"));
     return post.mock.calls.findLast(([data]) => data.type === "emend:anchor")?.[0];
   };
-  const marked = () => Array.from(window.document.querySelectorAll("[data-emend-changed]"));
+  const marked = () => Array.from(window.document.querySelectorAll<HTMLElement>("[data-emend-changed]"));
   const labels = () => Array.from(window.document.querySelectorAll<HTMLDivElement>("[data-emend-changed-label]"));
-  const labelText = (host: Element) => {
+  const labelSpan = (host: Element) => {
     const index = shadows.mock.instances.indexOf(host);
-    return shadows.mock.results[index]?.value.textContent;
+    const shadow: ShadowRoot | undefined = shadows.mock.results[index]?.value;
+    return shadow?.querySelector<HTMLSpanElement>("span");
   };
-  return { window, post, message, select, marked, labels, labelText, shadows, replaceSync };
+  const labelText = (host: Element) => labelSpan(host)?.textContent;
+  return { window, post, message, select, marked, labels, labelSpan, labelText, shadows, replaceSync };
 }
 
-const partTags = new Set([
-  "address",
-  "article",
-  "aside",
-  "blockquote",
-  "caption",
-  "dd",
-  "details",
-  "dialog",
-  "div",
-  "dt",
-  "fieldset",
-  "figcaption",
-  "figure",
-  "footer",
-  "h1",
-  "h2",
-  "h3",
-  "h4",
-  "h5",
-  "h6",
-  "header",
-  "hgroup",
-  "legend",
-  "li",
-  "main",
-  "nav",
-  "p",
-  "pre",
-  "section",
-  "summary",
-  "td",
-  "th",
-]);
+const partTags = new Set(HTML_PART_TAGS);
 function ownText(element: Element): string {
   const text: string[] = [];
   const visit = (node: Node) => {
@@ -116,6 +96,22 @@ function ownText(element: Element): string {
   return normalizeText(text.join(""));
 }
 
+function expectMarkColors(b: ReturnType<typeof bridge>, colors: { line: string; background: string; text: string }) {
+  const expected = b.window.document.createElement("span").style;
+  expected.setProperty("box-shadow", `-3px 0 0 0 ${colors.line}`);
+  expected.setProperty("background", colors.background);
+  expected.setProperty("color", colors.text);
+  for (const target of b.marked()) {
+    expect(target.style.getPropertyValue("box-shadow")).toBe(expected.getPropertyValue("box-shadow"));
+    expect(target.style.getPropertyPriority("box-shadow")).toBe("important");
+  }
+  for (const host of b.labels()) {
+    const label = b.labelSpan(host);
+    expect(label?.style.getPropertyValue("background")).toBe(expected.getPropertyValue("background"));
+    expect(label?.style.getPropertyValue("color")).toBe(expected.getPropertyValue("color"));
+  }
+}
+
 test.each([
   ...corpus.flatMap((entry) => [
     { name: `${entry.name} old`, html: entry.old },
@@ -124,12 +120,64 @@ test.each([
   { name: "nested own text", html: "<ul><li><p>First</p></li><li>Own<ul><li>Nested</li></ul> tail</li></ul>" },
   { name: "inline and body text", html: "Dropped<span>too</span><div>A <b>bold</b> bit</div><p> </p>" },
   { name: "parent starts first", html: "<section><p>Child</p>Parent tail</section><p>Cafe\u0301\u0085seed</p>" },
+  { name: "FEFF-only part", html: "<p>&#xfeff;</p><p>Changed</p>" },
+  { name: "FEFF with whitespace and leading FEFF", html: "<p> &#xfeff; </p><p>&#xfeff;Lead</p>" },
   { name: "table parts", html: "<table><caption>Caption</caption><tr><th>Head</th><td>Cell</td></tr></table>" },
   // SVG scripts stay in core tests: happy-dom drops following SVG nodes when script evaluation is disabled.
   { name: "foreign content", html: "<div>Own<svg><text> SVG</text></svg></div>" },
 ])("bridge parts match core: $name", ({ html }) => {
   const b = bridge(html);
   const expected = htmlPartTexts(parseDocHtml(html));
+  b.message({
+    type: "emend:changed",
+    parts: expected.length,
+    marks: expected.map((_, index) => ({ index, revision: 2 })),
+  });
+  expect(b.marked().map(ownText)).toEqual(expected);
+});
+
+test("changed paragraphs around a heading both receive marks", () => {
+  const b = bridge("<p>Changed before</p><h2>Heading</h2><p>Changed after</p>");
+  b.message({
+    type: "emend:changed",
+    parts: 3,
+    marks: [
+      { index: 0, revision: 2 },
+      { index: 2, revision: 2 },
+    ],
+  });
+  expect(b.marked().map(ownText)).toEqual(["Changed before", "Changed after"]);
+  expect(b.labels().map(b.labelText)).toEqual(["Changed in rev 2", "Changed in rev 2"]);
+});
+
+test("every core part tag is marked in order, including inline text in a part", () => {
+  const html =
+    HTML_PART_TAGS.map((tag) => {
+      const element = `<${tag}>Part ${tag}</${tag}>`;
+      switch (tag) {
+        case "li":
+          return `<ul>${element}</ul>`;
+        case "dt":
+        case "dd":
+          return `<dl>${element}</dl>`;
+        case "td":
+        case "th":
+          return `<table><tbody><tr>${element}</tr></tbody></table>`;
+        case "caption":
+          return `<table>${element}</table>`;
+        case "legend":
+          return `<fieldset>${element}</fieldset>`;
+        case "summary":
+          return `<details>${element}</details>`;
+        case "figcaption":
+          return `<figure>${element}</figure>`;
+        default:
+          return element;
+      }
+    }).join("") + "<p>With <span>inline</span> <b>bold</b> <a>link</a></p>";
+  const expected = htmlPartTexts(parseDocHtml(html));
+  expect(expected).toEqual([...HTML_PART_TAGS.map((tag) => `Part ${tag}`), "With inline bold link"]);
+  const b = bridge(html);
   b.message({
     type: "emend:changed",
     parts: expected.length,
@@ -161,9 +209,78 @@ test.each(["emend", "custom"])("%s pages mark changed and added paragraphs with 
     expect(host.style.getPropertyPriority("display")).toBe("important");
   }
   expect(b.shadows.mock.calls.every(([options]) => options.mode === "closed")).toBe(true);
-  expect(b.replaceSync).toHaveBeenCalledExactlyOnceWith(
-    "[data-emend-changed]{box-shadow:-3px 0 0 0 var(--changed-line,#8b5cf6)!important}",
-  );
+  expectMarkColors(b, { line: "#8b5cf6", background: "#f5f3ff", text: "#6d28d9" });
+  expect(b.replaceSync).not.toHaveBeenCalled();
+});
+
+test("doc CSS cannot override the fixed inline line or label styles", () => {
+  const b = bridge(`<html data-theme="dark"><head><style>
+    :root { --changed-line: transparent; --changed-bg: transparent; --changed-fg: transparent; }
+    [data-emend-changed] { box-shadow: none !important; }
+    [data-emend-changed-label] { display: none !important; }
+    </style></head><body><p>Changed</p></body></html>`);
+  b.message({ type: "emend:changed", parts: 1, marks: [{ index: 0, revision: 2 }] });
+  expect(b.marked().map(ownText)).toEqual(["Changed"]);
+  expect(b.labels().map(b.labelText)).toEqual(["Changed in rev 2"]);
+  expectMarkColors(b, { line: "#8b5cf6", background: "#f5f3ff", text: "#6d28d9" });
+  for (const host of b.labels()) {
+    expect(host.style.getPropertyValue("all")).toBe("initial");
+    expect(host.style.getPropertyPriority("all")).toBe("important");
+    expect(host.style.getPropertyValue("display")).toBe("block");
+    expect(host.style.getPropertyPriority("display")).toBe("important");
+    expect(host.style.getPropertyPriority("margin")).toBe("important");
+    expect(host.shadowRoot).toBeNull();
+  }
+  expect(b.window.document.adoptedStyleSheets).toEqual([]);
+});
+
+test.each(["", "important"])("clearing reapplied marks restores inline box-shadow (priority: %s)", (priority) => {
+  const b = bridge(`<p style="box-shadow: 1px 2px 3px 4px #123456${priority ? " !important" : ""}">One</p><p>Two</p>`);
+  const paragraphs = Array.from(b.window.document.querySelectorAll<HTMLElement>("p"));
+  const before = paragraphs.map((element) => ({
+    value: element.style.getPropertyValue("box-shadow"),
+    priority: element.style.getPropertyPriority("box-shadow"),
+  }));
+  expect(before[0]?.value).not.toBe("");
+  expect(before[0]?.priority).toBe(priority);
+  for (const revision of [2, 3]) {
+    b.message({ type: "emend:changed", parts: 2, marks: [0, 1].map((index) => ({ index, revision })) });
+    expect(b.marked()).toEqual(paragraphs);
+    expectMarkColors(b, { line: "#8b5cf6", background: "#f5f3ff", text: "#6d28d9" });
+  }
+  b.message({ type: "emend:changed", parts: 2, marks: [] });
+  expect(b.marked()).toEqual([]);
+  expect(b.labels()).toEqual([]);
+  expect(
+    paragraphs.map((element) => ({
+      value: element.style.getPropertyValue("box-shadow"),
+      priority: element.style.getPropertyPriority("box-shadow"),
+    })),
+  ).toEqual(before);
+  expect(paragraphs[1]?.getAttribute("style") ?? "").not.toContain("box-shadow");
+});
+
+test.each([false, true])("marks follow valid theme messages (theme first: %s)", (themeFirst) => {
+  const b = bridge("<p>Changed</p>");
+  const dark = { type: "emend:theme", mode: "dark", scales: {}, tokens: {} };
+  if (themeFirst) b.message(dark);
+  b.message({ type: "emend:changed", parts: 1, marks: [{ index: 0, revision: 2 }] });
+  expect(b.marked()).toHaveLength(1);
+  expect(b.labels().map(b.labelText)).toEqual(["Changed in rev 2"]);
+  if (!themeFirst) {
+    expectMarkColors(b, { line: "#8b5cf6", background: "#f5f3ff", text: "#6d28d9" });
+    b.message(dark);
+  }
+  expectMarkColors(b, { line: "#a78bfa", background: "rgba(139, 92, 246, 0.16)", text: "#c4b5fd" });
+  const darkLabel = b.labels()[0];
+  b.message({ ...dark, mode: "light", tokens: { bad: "url(x)" } });
+  b.message({ ...dark, mode: "light" }, {});
+  expect(b.labels()).toEqual([darkLabel]);
+  expectMarkColors(b, { line: "#a78bfa", background: "rgba(139, 92, 246, 0.16)", text: "#c4b5fd" });
+  b.message({ ...dark, mode: "light" });
+  expectMarkColors(b, { line: "#8b5cf6", background: "#f5f3ff", text: "#6d28d9" });
+  expect(b.labels().map(b.labelText)).toEqual(["Changed in rev 2"]);
+  expect(darkLabel?.parentNode).toBeNull();
 });
 
 test("consecutive marks share a label only within the same revision", () => {
@@ -197,7 +314,7 @@ test("new messages replace marks, empty marks and count mismatches clear them", 
   b.message({ type: "emend:changed", parts: 3, marks: [{ index: 2, revision: 3 }] });
   expect(b.marked()).toEqual([]);
   expect(b.labels()).toEqual([]);
-  expect(b.window.document.adoptedStyleSheets).toHaveLength(1);
+  expect(b.window.document.adoptedStyleSheets).toHaveLength(0);
 });
 
 test("invalid messages and non-parent sources leave the previous marks untouched", () => {
