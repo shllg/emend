@@ -1163,11 +1163,55 @@ test("the new opening lifts commentable facts into Risk and Frame in order, with
   ).toEqual([
     ["TL;DR", `/r/${reviewId}?tab=writeup&rev=3#block-${firstBlock("tldr").id}`],
     ["Context", `/r/${reviewId}?tab=writeup&rev=3#block-${firstBlock("context").id}`],
-    [topic.title, `/r/${reviewId}?tab=writeup&rev=3#topic-seed`],
+    [topic.title, `/r/${reviewId}?tab=writeup&rev=3#block-${firstBlock("t-seed-why").id}`],
   ]);
   expect(container.querySelector('[data-fact="since"] dd')?.textContent).toBe(
     "Since revision 2: TL;DR, Context and topic “Plant a seed”.",
   );
+});
+
+test.each([true, false])("Changed links to a topic's changed body block (metadata=%s)", async (metadata) => {
+  const writeup = RenderedWriteup.parse(
+    await renderWriteup(
+      {
+        area: "Garden",
+        overview: "",
+        tldr: "Healthy plants.",
+        decisions: "",
+        topics: { seed: { why: "The soil dries.", body: "Water daily." } },
+      },
+      [topic],
+    ),
+  );
+  const body = writeup.sections.find((section) => section.key === "t-seed-body")?.blocks[0];
+  if (!body) throw new Error("Missing topic body");
+  const { container } = mount(
+    <Writeup
+      {...props}
+      revision={3}
+      changedSince={2}
+      changedBlocks={[{ blockId: body.id, revision: 3 }]}
+      topics={metadata ? [topic] : []}
+      writeup={writeup}
+    />,
+  );
+  const links = container.querySelectorAll('[data-fact="since"] a');
+  expect(links).toHaveLength(1);
+  expect(links[0]?.textContent).toBe(metadata ? topic.title : topic.slug);
+  expect(links[0]?.getAttribute("href")).toBe(`/r/${reviewId}#block-${body.id}`);
+  const target = container.querySelector<HTMLElement>(`#block-${body.id}`);
+  if (!target) throw new Error("Missing changed body target");
+  if (metadata) {
+    const details = target.closest("details.em-writeup-details");
+    expect(details).not.toBeNull();
+    expect(details?.querySelector("summary")?.textContent).toContain("Details");
+    expect(details?.hasAttribute("open")).toBe(false);
+    act(() => revealReadingTarget(target));
+    expect(details?.hasAttribute("open")).toBe(true);
+  } else {
+    expect(container.querySelector("#topic-seed")).toBeNull();
+    expect(target.closest("[data-reading-section]")?.getAttribute("data-reading-section")).toBe("t-seed-body");
+  }
 });
 
 test.each(["Read everything.", "Read topic “Plant a seed”."])(
@@ -1266,33 +1310,131 @@ test("partly lifted sections keep leftovers once, with the overview pair and old
     expect(container.querySelectorAll(`[id="block-${block.id}"]`)).toHaveLength(1);
 });
 
+test("soft-broken labelled paragraphs stay in Overview and Where to look below Facts", async () => {
+  const writeup = RenderedWriteup.parse(
+    await renderWriteup(
+      {
+        area: "Garden",
+        tldr: "Healthy plants.",
+        overview: "**Goal:** Healthy plants.\n**Change:** More water.",
+        whereToLook: "**Biggest risk:** Flooding.\n**Look yourself:** The seed bed.",
+        decisions: "",
+        topics: {},
+      },
+      [],
+    ),
+  );
+  const { container } = mount(<Writeup {...props} writeup={writeup} />);
+  expect(
+    container.querySelector('[data-fact="risk"], [data-fact="look"], [data-fact="goal"], [data-fact="change"]'),
+  ).toBeNull();
+  expect(
+    [...container.querySelectorAll("[data-reading-section]")].map((group) =>
+      group.getAttribute("data-reading-section"),
+    ),
+  ).toEqual(["tldr", "facts", "overview", "whereToLook", "decisions"]);
+  for (const [key, text] of [
+    ["overview", "Goal: Healthy plants.\nChange: More water."],
+    ["whereToLook", "Biggest risk: Flooding.\nLook yourself: The seed bed."],
+  ]) {
+    const blocks = writeup.sections.find((section) => section.key === key)?.blocks;
+    expect(blocks).toHaveLength(1);
+    expect(blocks?.[0]?.text).toBe(text);
+    const rendered = container.querySelector(`[data-reading-section="${key}"] .em-prose`);
+    expect(rendered?.textContent).toBe(text);
+    expect(rendered?.getAttribute("data-block-id")).toBe(blocks?.[0]?.id);
+  }
+});
+
 test("lifted rows preserve server sanitization and topic markup stays isolated text", async () => {
-  const hostile =
-    '<script>alert(1)</script><img src=x onerror=alert(1)><span onclick="alert(1)">raw</span> [bad](javascript:alert%281%29)';
+  const hostile = [
+    '<script>alert(1)</script><img src=x onerror=alert(1) srcset="x 1x">',
+    '<span onclick="alert(1)" style="color:red" srcdoc="unsafe">raw</span>',
+    "<svg onload=alert(1)></svg>",
+    "<details open ontoggle=alert(1)><summary>More</summary>Extra</details>",
+    "[bad](javascript:alert%281%29) [x](JAVASCRIPT:alert(1))",
+    "[http](http://example.com) [https](https://example.com) [mail](mailto:review@example.com)",
+  ].join(" ");
+  const diagram = 'graph TD\n  A-->B\n  click A "javascript:alert(1)"';
   const topics = [{ ...topic, title: "<img src=x onerror=alert(1)>", attention: "critical" as const }];
   const writeup = RenderedWriteup.parse(
     await renderWriteup(
       {
         area: "Garden",
         tldr: "Plants.",
-        overview: "",
+        overview: `- **Goal:** ${hostile}\n- **Change:** ${hostile}`,
         decisions: "",
+        context: "A small garden.",
         whereToLook: `- **Biggest risk:** ${hostile}\n- **Look yourself:** ${hostile}`,
-        checked: `- First ${hostile}\n- Second ${hostile}`,
+        checked: `- First ${hostile}\n- Second ${hostile}\n\n\`\`\`mermaid\n${diagram}\n\`\`\``,
+        notChecked: `- ${hostile}`,
+        outOfScope: `- ${hostile}`,
         topics: {},
       },
       topics,
     ),
   );
+  const blocks = new Map(
+    writeup.sections.flatMap((section) => section.blocks.map((block) => [block.id, block] as const)),
+  );
+  const normalizeHtml = (html: string) => {
+    // Normalize both sanitized fragments with the same test DOM serializer.
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    return template.innerHTML;
+  };
   const { container } = mount(<Writeup {...props} topics={topics} writeup={writeup} />);
-  for (const key of ["risk", "look", "proof", "assurance"]) {
+  for (const key of ["risk", "look", "proof", "assurance", "goal", "change", "gaps", "outOfScope"]) {
     const row = container.querySelector(`[data-fact="${key}"]`);
-    expect(row).not.toBeNull();
-    expect(row?.querySelectorAll("script, [onerror], [onclick], img[src]")).toHaveLength(0);
-    expect(row?.querySelector('[href^="javascript:"]')).toBeNull();
-    expect(row?.textContent).toContain("bad");
+    if (!row) throw new Error(`Missing ${key} row`);
+    const prose = row.querySelectorAll<HTMLElement>(".em-prose");
+    expect(prose.length).toBeGreaterThan(0);
+    for (const element of prose) {
+      const block = blocks.get(element.dataset.blockId ?? "");
+      if (!block) throw new Error(`Missing server block for ${key}`);
+      expect(block.kind).not.toBe("diagram");
+      expect(normalizeHtml(element.innerHTML)).toBe(normalizeHtml(block.html));
+    }
+    expect(row.querySelector("script, img[src]")).toBeNull();
+    expect(row.querySelector('[href^="javascript:"]')).toBeNull();
+    expect(row.textContent).toContain("bad");
   }
-  const title = container.querySelector('[data-fact="topics"] bdi');
+  const facts = container.querySelector('[data-reading-section="facts"]');
+  if (!facts) throw new Error("Missing opening facts");
+  const diagramBlock = [...blocks.values()].find((block) => block.kind === "diagram");
+  if (!diagramBlock) throw new Error("Missing server diagram");
+  expect(diagramBlock.html).toBe("");
+  expect(diagramBlock.source).toBe(diagram);
+  const renderedDiagram = facts.querySelector(`[data-block-id="${diagramBlock.id}"]`);
+  expect(renderedDiagram?.closest("[data-fact]")?.getAttribute("data-fact")).toBe("assurance");
+  expect(renderedDiagram?.querySelector(".em-prose")).toBeNull();
+  expect(renderedDiagram?.querySelector("pre")?.textContent).toBe(diagram);
+  const frame = renderedDiagram?.querySelector("iframe");
+  expect(frame?.getAttribute("src")).toBe("/mermaid-frame.html");
+  expect(frame?.getAttribute("sandbox")).toBe("allow-scripts");
+  expect(frame?.hasAttribute("srcdoc")).toBe(false);
+  expect(facts.querySelectorAll("iframe")).toHaveLength(1);
+  const opening = container.querySelectorAll('[data-reading-section="tldr"], [data-reading-section="facts"]');
+  for (const group of opening) {
+    for (const element of [group, ...group.querySelectorAll("*")]) {
+      for (const attribute of element.attributes) {
+        // Mermaid's trusted frame owns its numeric height; authored markup has no style exception.
+        if (element === frame && attribute.name === "style") {
+          expect(frame.style.length).toBe(1);
+          expect(frame.style.item(0)).toBe("height");
+          expect(frame.style.height).toBe("160px");
+          continue;
+        }
+        expect(attribute.name).not.toMatch(/^on|^(?:style|srcset|srcdoc)$/i);
+      }
+    }
+  }
+  for (const anchor of facts.querySelectorAll("[data-fact] [href]")) {
+    const href = anchor.getAttribute("href") ?? "";
+    if (href.startsWith("/r/") || href.startsWith("#")) continue;
+    expect(["http:", "https:", "mailto:"]).toContain(new URL(href).protocol);
+  }
+  const title = facts.querySelector('[data-fact="topics"] bdi');
   expect(title?.textContent).toBe(topics[0]?.title);
   expect(title?.children).toHaveLength(0);
 });
@@ -1585,7 +1727,7 @@ test("PDI and RLO in agent text are removed while emend's fact text stays outsid
     for (const [index, part] of parts.entries()) {
       const outer = key === "since" ? part.parentElement : part;
       expect(outer?.parentElement).toBe(fact);
-      if (key === "since") expect(outer?.getAttribute("href")).toBe(`/r/${reviewId}#topic-seed`);
+      if (key === "since") expect(outer?.getAttribute("href")).toBe(`/r/${reviewId}#block-${why.id}`);
       expect(outer?.nextSibling?.textContent).toBe(following[index]);
       if (outer?.nextSibling) expect(outer.nextSibling.nodeType).toBe(Node.TEXT_NODE);
     }

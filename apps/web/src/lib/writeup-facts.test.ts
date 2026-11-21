@@ -55,7 +55,7 @@ test.each(["Biggest risk", "Look yourself", "Goal", "Change"] as const)(
   "label lift finds the first %s block, preserving its identity and HTML",
   (label) => {
     const first = {
-      ...block("overview", `  ${label}:\n  Plants.  `),
+      ...block("overview", `\n  ${label}:  Plants.  \n`),
       html: `<p><strong>${label}:</strong> Plants.</p>`,
     };
     const later = block("overview", `${label}: Later.`);
@@ -67,7 +67,7 @@ test.each(["Biggest risk", "Look yourself", "Goal", "Change"] as const)(
 
 test("label lift matches case-insensitively with collapsed whitespace, but not old Check first lines", () => {
   const risk = {
-    ...block("whereToLook", "  bIgGeSt\n  rIsK: Dry soil."),
+    ...block("whereToLook", "  bIgGeSt\t  rIsK: Dry soil."),
     html: "<p><strong>bIgGeSt rIsK:</strong> Dry soil.</p>",
   };
   expect(labelledFact([risk], "Biggest risk")).toEqual({ blocks: [risk], hideLabel: true });
@@ -76,6 +76,54 @@ test("label lift matches case-insensitively with collapsed whitespace, but not o
   expect(labelledFact([block("overview", "Goalkeeper: plants.")], "Goal")).toBeUndefined();
   for (const label of ["Biggest risk", "Look yourself"] as const)
     expect(labelledFact([block("whereToLook", "Check first: Water the seeds.")], label)).toBeUndefined();
+});
+
+test.each([
+  ["whereToLook", "Biggest risk", "Look yourself"],
+  ["overview", "Goal", "Change"],
+] as const)("label lift leaves both labelled lines of a %s paragraph together", async (key, first, second) => {
+  const writeup = RenderedWriteup.parse(
+    await renderWriteup(
+      { overview: "", tldr: "", decisions: "", topics: {}, [key]: `**${first}:** First.\n**${second}:** Second.` },
+      [],
+    ),
+  );
+  const blocks = writeup.sections.find((section) => section.key === key)?.blocks ?? [];
+  expect(blocks).toHaveLength(1);
+  expect(blocks[0]?.text).toBe(`${first}: First.\n${second}: Second.`);
+  expect(labelledFact(blocks, first)).toBeUndefined();
+  expect(labelledFact(blocks, second)).toBeUndefined();
+});
+
+test.each(["", "- "])("label lift keeps single-line paragraphs and list items (prefix=%j)", async (prefix) => {
+  const writeup = RenderedWriteup.parse(
+    await renderWriteup(
+      {
+        overview: `${prefix}**Goal:** Plants.\n\n${prefix}**Change:** Water.`,
+        whereToLook: `${prefix}**Biggest risk:** Flooding.\n\n${prefix}**Look yourself:** The seed bed.`,
+        tldr: "",
+        decisions: "",
+        topics: {},
+      },
+      [],
+    ),
+  );
+  for (const [key, labels] of [
+    ["overview", ["Goal", "Change"]],
+    ["whereToLook", ["Biggest risk", "Look yourself"]],
+  ] as const) {
+    const blocks = writeup.sections.find((section) => section.key === key)?.blocks ?? [];
+    expect(blocks).toHaveLength(2);
+    for (const [index, label] of labels.entries()) {
+      expect(blocks[index]?.kind).toBe(prefix ? "item" : "paragraph");
+      expect(labelledFact(blocks, label)).toEqual({ blocks: [blocks[index]], hideLabel: true });
+    }
+  }
+});
+
+test.each(["\n", "\r\n", "\r", "\u2028", "\u2029"])("label lift rejects an internal line break %j", (separator) => {
+  const multiline = block("overview", `Goal: Plants.${separator}Change: Water.`);
+  expect(labelledFact([multiline], "Goal")).toBeUndefined();
 });
 
 test.each([
@@ -346,7 +394,7 @@ test("Since links the first changed block in each section and each topic once, n
   });
   expect(factText(parts)).toBe("Since revision 2: topic “Retry budget”, Checked and docs/design.md.");
   expect(parts?.filter((part) => part.target)).toEqual([
-    { text: "Retry budget", agent: true, target: "topic-retry" },
+    { text: "Retry budget", agent: true, target: "block-t-retry-why-12345678" },
     { text: "Checked", target: `block-${changed.id}` },
   ]);
   expect(parts?.find((part) => part.text === "docs/design.md")).toEqual({ text: "docs/design.md", agent: true });
@@ -359,6 +407,23 @@ test("Since links the first changed block in each section and each topic once, n
       }),
     ),
   ).toBe("Since revision 2: no new text in the writeup or Markdown docs. Removed text is not tracked.");
+});
+
+test.each([true, false])("Since links a body-only topic change even without metadata (metadata=%s)", (metadata) => {
+  const body = section("t-retry-body", "Unchanged details.", "retry");
+  const firstChanged = { ...block(body.key, "Changed details."), id: "t-retry-body-87654321" };
+  const lastChanged = { ...block(body.key, "Later changed details."), id: "t-retry-body-11111111" };
+  body.blocks.push(firstChanged, lastChanged);
+  const parts = sinceFact({
+    ...since,
+    topics: metadata ? since.topics : [],
+    writeup: { sections: [section("t-retry-why", "Unchanged reason.", "retry"), body] },
+    changedBlocks: [lastChanged, firstChanged].map((block) => ({ blockId: block.id, revision: 3 })),
+  });
+  expect(factText(parts)).toBe(`Since revision 2: topic “${metadata ? "Retry budget" : "retry"}”.`);
+  expect(parts?.filter((part) => part.target)).toEqual([
+    { text: metadata ? "Retry budget" : "retry", agent: true, target: `block-${firstChanged.id}` },
+  ]);
 });
 
 test("Since separates new text from stale viewed files and can show only stale files", () => {
@@ -437,7 +502,7 @@ test.each([
   ).toEqual([
     { text: "Since revision 2: " },
     { text: "topic “" },
-    { text: "Docs", agent: true, target: "topic-retry" },
+    { text: "Docs", agent: true, target: "block-t-retry-why-12345678" },
     { text: "”" },
     { text: " and " },
     { text: "docs/design.md", agent: true },

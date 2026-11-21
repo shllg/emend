@@ -12,7 +12,10 @@ export type FactPart = { text: string; agent?: true; target?: string };
 export function labelledFact(blocks: RenderedBlock[], label: "Biggest risk" | "Look yourself" | "Goal" | "Change") {
   const prefix = `${label}:`;
   for (const block of blocks) {
-    const text = block.text.replace(/\s+/gu, " ").trim();
+    const trimmed = block.text.trim();
+    // Soft breaks survive in block.text; keep a paragraph with multiple facts in its section.
+    if (/[\r\n\u2028\u2029]/u.test(trimmed)) continue;
+    const text = trimmed.replace(/\s+/gu, " ");
     if (!text.toLowerCase().startsWith(prefix.toLowerCase())) continue;
     // Inspect the server HTML as a string only; the original block remains the rendering boundary.
     const leading = block.html.match(
@@ -117,7 +120,7 @@ export function sinceFact({
       if (!seenTopics.has(section.topic))
         names.push([
           { text: "topic “" },
-          { ...agentPart(titles.get(section.topic) ?? section.topic), target: `topic-${section.topic}` },
+          { ...agentPart(titles.get(section.topic) ?? section.topic), target: `block-${firstChanged.id}` },
           { text: "”" },
         ]);
       seenTopics.add(section.topic);
