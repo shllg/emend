@@ -262,6 +262,7 @@ It follows emend's light or dark mode.
 - Key facts: `<dl class="facts">`, with one `div` holding a `dt` and a `dd` per fact.
 - Figure: `figure` with an `img` and a `figcaption`.
 - Diagram: `<pre class="mermaid">` holding Mermaid source.
+  `<pre><code class="language-mermaid">`, the form a Markdown fence becomes, works too.
   Escape `<` as `&lt;` and `&` as `&amp;` in the source, because emend reads the `pre`'s text.
   emend draws it with its own Mermaid, in light and dark mode, also on a custom page.
   Opened on its own outside emend, the page shows the source.

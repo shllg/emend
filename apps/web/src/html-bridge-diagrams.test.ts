@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
-import { type Element, type ShadowRoot, Window } from "happy-dom";
+import { type Element, type Node, type ShadowRoot, Window } from "happy-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import {
   DIAGRAM_COUNT_MAX,
@@ -14,6 +14,13 @@ import {
 } from "./lib/frame-messages.ts";
 
 const bridgeSource = readFileSync(new URL("../../emend/src/server/content/bridge.ts", import.meta.url), "utf8");
+const diagramMarkups = [
+  { markup: "pre.mermaid", preClass: "mermaid", codeClass: "" },
+  { markup: "pre > code.language-mermaid", preClass: "", codeClass: "language-mermaid" },
+];
+const diagramDisplays = diagramMarkups.flatMap((markup) =>
+  ["", "display: inline", "display: grid !important"].map((style) => ({ ...markup, style })),
+);
 const windows: Window[] = [];
 afterEach(async () => {
   for (const window of windows.splice(0)) await window.happyDOM.close();
@@ -29,11 +36,21 @@ function bridge(html: string, prepare?: (window: Window) => void) {
   window.document.write(html);
   if (!Object.getOwnPropertyDescriptor(window.Element.prototype, "assignedSlot"))
     Object.defineProperty(window.Element.prototype, "assignedSlot", { configurable: true, get: () => null });
-  // Browsers implement element textContent on Node; happy-dom overrides it on Element.
-  const textContent = Object.getOwnPropertyDescriptor(window.Element.prototype, "textContent")?.get;
-  if (!textContent) throw new Error("Missing textContent getter");
-  vi.spyOn(window.Node.prototype, "textContent", "get").mockImplementation(function (this: Element) {
-    return textContent.call(this);
+  // Native textContent lives on Node and never reads child instance properties; happy-dom does both differently.
+  const nodeType = Object.getOwnPropertyDescriptor(window.Node.prototype, "nodeType")?.get;
+  const childNodes = Object.getOwnPropertyDescriptor(window.Node.prototype, "childNodes")?.get;
+  const textData = Object.getOwnPropertyDescriptor(window.CharacterData.prototype, "data")?.get;
+  if (!nodeType || !childNodes || !textData) throw new Error("Missing node getters");
+  const textContent = (node: Node): string => {
+    const type = nodeType.call(node);
+    if (type === 3) return textData.call(node);
+    if (type !== 1) return "";
+    let text = "";
+    for (const child of childNodes.call(node)) text += textContent(child);
+    return text;
+  };
+  vi.spyOn(window.Node.prototype, "textContent", "get").mockImplementation(function (this: Node) {
+    return textContent(this);
   });
   const post = vi.fn();
   const parent = { postMessage: post };
@@ -156,6 +173,63 @@ test("scan uses exact HTML pre class tokens, light DOM, source text and document
   expect(b.post.mock.calls.slice(0, 2).map(([data]) => data.type)).toEqual(["emend:ready", "emend:diagrams"]);
 });
 
+test("scan accepts exact Mermaid fences, light DOM, source text and document order", () => {
+  const b = bridge(
+    `<body>
+    <pre><code class="language-mermaid">flowchart LR\n A --&gt; B</code></pre>
+    <pre class="x"> \t\n\f<!-- before --><code class="hljs\tlanguage-mermaid\nother">graph <span>TD</span></code><!-- after -->\t </pre>
+    <pre class="mermaid"><code class="language-mermaid">both</code></pre>
+    <pre><code class="language-mermaidx">no</code></pre>
+    <pre><code class="lang-mermaid">no</code></pre>
+    <pre><code class="mermaid">no</code></pre>
+    <pre><code class="hljs\u00a0language-mermaid">no</code></pre>
+    <pre><span><code class="language-mermaid">no</code></span></pre>
+    <pre><code class="language-mermaid">a</code><code>b</code></pre>
+    <pre>no<code class="language-mermaid">no</code></pre>
+    <pre><code class="language-mermaid">no</code>\u00a0</pre>
+    <pre id="foreign"></pre>
+    <template><pre><code class="language-mermaid">no</code></pre></template>
+    <noscript><pre><code class="language-mermaid">no</code></pre></noscript>
+    <script><pre><code class="language-mermaid">no</code></pre></script>
+    <style><pre><code class="language-mermaid">no</code></pre></style>
+    <pre><code class="language-mermaid">   </code></pre>
+    <pre><code class="language-mermaid">${"x".repeat(50001)}</code></pre>
+    <pre id="outer" class="mermaid">outer</pre>
+    <pre><code class="language-mermaid">last</code></pre>
+    </body>`,
+    (window) => {
+      window.document.querySelector("pre.x")?.append(window.document.createTextNode("\r"));
+      const foreign = window.document.createElementNS("http://www.w3.org/2000/svg", "code");
+      foreign.setAttribute("class", "language-mermaid");
+      foreign.textContent = "foreign";
+      window.document.querySelector("#foreign")?.append(foreign);
+      const nested = window.document.createElement("pre");
+      const code = window.document.createElement("code");
+      code.className = "language-mermaid";
+      code.textContent = "nested";
+      nested.append(code);
+      window.document.querySelector("#outer")?.append(nested);
+      const shadow = window.document.createElement("div");
+      window.document.body.append(shadow);
+      shadow.attachShadow({ mode: "open" }).append(nested.cloneNode(true));
+    },
+  );
+  expect(b.jobs()).toEqual([
+    {
+      type: "emend:diagrams",
+      request: 1,
+      diagrams: [
+        { source: "flowchart LR\n A --> B", mode: "light", width: 1 },
+        { source: " \t\n\fgraph TD\t \r", mode: "light", width: 1 },
+        { source: "both", mode: "light", width: 1 },
+        { source: "outernested", mode: "light", width: 1 },
+        { source: "last", mode: "light", width: 1 },
+      ],
+    },
+  ]);
+  expect(b.post.mock.calls.slice(0, 2).map(([data]) => data.type)).toEqual(["emend:ready", "emend:diagrams"]);
+});
+
 test.each([
   { count: 51, length: 1, kept: 50 },
   { count: 21, length: 50000, kept: 20 },
@@ -172,35 +246,40 @@ test("empty scans send nothing", () => {
   expect(bridge('<pre class="mermaid"> \n </pre>').jobs()).toEqual([]);
 });
 
-test("modes use parent colour, sRGB luminance ignoring alpha, and only changes request another draw", () => {
-  const b = bridge('<div style="color: rgb(255, 255, 255)"><pre class="mermaid">graph LR</pre></div>');
-  expect(b.pixels.color).toBe("rgb(255, 255, 255)");
-  const theme = { type: "emend:theme", mode: "dark", scales: {}, tokens: {} };
-  b.pixels.rgb = [255, 255, 255, 128];
-  b.message({ ...theme, mode: "invalid" });
-  b.message({ ...theme, tokens: { bad: "url(x)" } });
-  expect(b.jobs()).toHaveLength(1);
-  b.message(theme);
-  expect(b.jobs()[1]).toMatchObject({ request: 2, diagrams: [{ mode: "dark" }] });
-  b.message(b.result);
-  expect(b.shadows).toHaveLength(0); // A reply to the first mode is now stale.
-  b.message(theme);
-  expect(b.jobs()).toHaveLength(2);
-  b.pixels.rgb = [0, 255, 0, 255];
-  b.media.dispatchEvent(new b.window.Event("change"));
-  expect(b.jobs()).toHaveLength(2);
-  b.pixels.rgb = [255, 0, 0, 255];
-  b.media.dispatchEvent(new b.window.Event("change"));
-  expect(b.jobs()).toHaveLength(2);
-  b.pixels.rgb = [0, 0, 255, 255];
-  b.media.dispatchEvent(new b.window.Event("change"));
-  expect(b.jobs()[2]).toMatchObject({ request: 3, diagrams: [{ mode: "light" }] });
-  b.pixels.rgb = [255, 255, 255, 255];
-  b.message(theme);
-  b.pixels.fail = true;
-  b.message(theme);
-  expect(b.jobs().at(-1)).toMatchObject({ request: 5, diagrams: [{ mode: "light" }] });
-});
+test.each(diagramMarkups)(
+  "modes use parent colour, sRGB luminance ignoring alpha, and only changes request another draw: $markup",
+  ({ preClass, codeClass }) => {
+    const b = bridge(
+      `<div style="color: rgb(255, 255, 255)"><pre class="${preClass}" style="color: rgb(0, 0, 255)"><code class="${codeClass}">graph LR</code></pre></div>`,
+    );
+    expect(b.pixels.color).toBe("rgb(255, 255, 255)");
+    const theme = { type: "emend:theme", mode: "dark", scales: {}, tokens: {} };
+    b.pixels.rgb = [255, 255, 255, 128];
+    b.message({ ...theme, mode: "invalid" });
+    b.message({ ...theme, tokens: { bad: "url(x)" } });
+    expect(b.jobs()).toHaveLength(1);
+    b.message(theme);
+    expect(b.jobs()[1]).toMatchObject({ request: 2, diagrams: [{ mode: "dark" }] });
+    b.message(b.result);
+    expect(b.shadows).toHaveLength(0); // A reply to the first mode is now stale.
+    b.message(theme);
+    expect(b.jobs()).toHaveLength(2);
+    b.pixels.rgb = [0, 255, 0, 255];
+    b.media.dispatchEvent(new b.window.Event("change"));
+    expect(b.jobs()).toHaveLength(2);
+    b.pixels.rgb = [255, 0, 0, 255];
+    b.media.dispatchEvent(new b.window.Event("change"));
+    expect(b.jobs()).toHaveLength(2);
+    b.pixels.rgb = [0, 0, 255, 255];
+    b.media.dispatchEvent(new b.window.Event("change"));
+    expect(b.jobs()[2]).toMatchObject({ request: 3, diagrams: [{ mode: "light" }] });
+    b.pixels.rgb = [255, 255, 255, 255];
+    b.message(theme);
+    b.pixels.fail = true;
+    b.message(theme);
+    expect(b.jobs().at(-1)).toMatchObject({ request: 5, diagrams: [{ mode: "light" }] });
+  },
+);
 
 test.each(
   ["theme", "colour scheme"].flatMap((trigger) =>
@@ -256,11 +335,11 @@ test.each([0, 720.6, 10001])("redraws measure the placed host's width %s", (widt
   expect(b.jobs()[2].diagrams[0].width).toBe(Math.max(1, Math.min(10000, Math.round(width))));
 });
 
-test.each(["", "display: inline", "display: grid !important"])(
-  "placement preserves text, earlier highlights and original display %s",
-  (style) => {
+test.each(diagramDisplays)(
+  "placement preserves text, earlier highlights and original display $style: $markup",
+  ({ preClass, codeClass, style }) => {
     const b = bridge(
-      `<body><h2>Heading</h2><pre class="mermaid" style="${style}"><code>graph LR</code></pre><p>After</p></body>`,
+      `<body><h2>Heading</h2><pre class="${preClass}" style="${style}"><code class="${codeClass}">graph LR</code></pre><p>After</p></body>`,
     );
     const pre = b.window.document.querySelector("pre");
     if (!pre) throw new Error("Missing pre");
@@ -302,10 +381,12 @@ test.each(["", "display: inline", "display: grid !important"])(
   },
 );
 
-test.each(["", "display: inline", "display: grid !important"])(
-  "highlights reveal placed source with original display %s and hide it again",
-  (style) => {
-    const b = bridge(`<body><pre class="mermaid" style="${style}"><code>graph LR</code></pre><p>After</p></body>`);
+test.each(diagramDisplays)(
+  "highlights reveal placed source with original display $style and hide it again: $markup",
+  ({ preClass, codeClass, style }) => {
+    const b = bridge(
+      `<body><pre class="${preClass}" style="${style}"><code class="${codeClass}">graph LR</code></pre><p>After</p></body>`,
+    );
     const pre = b.window.document.querySelector("pre");
     if (!pre) throw new Error("Missing pre");
     const original = [pre.style.getPropertyValue("display"), pre.style.getPropertyPriority("display")];
@@ -435,45 +516,68 @@ test("foreign, stale and malformed answers leave the document intact", () => {
   expect(b.window.document.querySelector("pre")?.style.display).toBe("");
 });
 
-test("hostile attributes stay on source nodes and clobbered instance members are never called", () => {
-  const clobbered = vi.fn(() => {
-    throw new Error("Clobbered");
-  });
-  const b = bridge(
-    `<body><script>alert(1)</script><img onerror="alert(1)"><a href="javascript:alert(1)">link</a>
-    <svg onload="alert(1)"></svg><pre class="mermaid" onclick="alert(1)">graph LR</pre></body>`,
-    (window) => {
-      const pre = window.document.querySelector("pre");
-      if (!pre) throw new Error("Missing pre");
-      // Native CSSOM never calls an element's JS getAttribute; happy-dom does. Detach its backing style.
-      const nativeStyle = Object.getOwnPropertyDescriptor(window.HTMLElement.prototype, "style")?.get;
-      if (!nativeStyle) throw new Error("Missing style getter");
-      const style = window.document.createElement("div").style;
-      vi.spyOn(window.HTMLElement.prototype, "style", "get").mockImplementation(function (this: Element) {
-        return this === pre ? style : nativeStyle.call(this);
-      });
-      for (const name of ["getAttribute", "getBoundingClientRect", "textContent", "parentElement", "style"])
-        Object.defineProperty(pre, name, { configurable: true, get: clobbered });
-      Object.defineProperty(window.document, "createElement", { configurable: true, value: clobbered });
-    },
-  );
-  // Window methods were captured before later named-property interference.
-  Object.defineProperty(b.window, "getComputedStyle", { value: clobbered });
-  b.media.dispatchEvent(new b.window.Event("change"));
-  b.message(b.result);
-  const host = b.window.document.querySelector("[data-emend-diagram]");
-  expect(host?.getAttributeNames()).toEqual(["data-emend-diagram"]);
-  expect(b.shadows[0]?.querySelector("img")?.getAttributeNames().sort()).toEqual([
-    "alt",
-    "height",
-    "src",
-    "style",
-    "width",
-  ]);
-  expect(clobbered).not.toHaveBeenCalled();
-  const pre = b.window.document.querySelector("pre");
-  if (pre)
-    for (const name of ["getAttribute", "getBoundingClientRect", "textContent", "parentElement", "style"])
-      Reflect.deleteProperty(pre, name);
-  Reflect.deleteProperty(b.window.document, "createElement");
-});
+test.each(diagramMarkups)(
+  "hostile attributes stay on source nodes and clobbered instance members are never called: $markup",
+  ({ preClass, codeClass }) => {
+    const clobbered = vi.fn(() => {
+      throw new Error("Clobbered");
+    });
+    const members = [
+      "getAttribute",
+      "getBoundingClientRect",
+      "textContent",
+      "parentElement",
+      "style",
+      "localName",
+      "namespaceURI",
+      "className",
+      "childNodes",
+      "nodeType",
+    ];
+    const source = 'graph LR\n A --> B\n click A "javascript:alert(1)"';
+    let sourceNodes: Element[] = [];
+    const b = bridge(
+      `<body><script>alert(1)</script><img onerror="alert(1)"><a href="javascript:alert(1)">link</a>
+    <svg onload="alert(1)"></svg><pre class="${preClass}" onclick="alert(1)"><code class="${codeClass}" onclick="alert(1)">${source.replaceAll(">", "&gt;")}</code></pre></body>`,
+      (window) => {
+        const pre = window.document.querySelector("pre");
+        if (!pre) throw new Error("Missing pre");
+        sourceNodes = [pre, ...pre.querySelectorAll("code")];
+        // Native CSSOM never calls an element's JS getAttribute; happy-dom does. Detach its backing style.
+        const nativeStyle = Object.getOwnPropertyDescriptor(window.HTMLElement.prototype, "style")?.get;
+        if (!nativeStyle) throw new Error("Missing style getter");
+        const styles = new Map(sourceNodes.map((node) => [node, window.document.createElement("div").style]));
+        vi.spyOn(window.HTMLElement.prototype, "style", "get").mockImplementation(function (this: Element) {
+          return styles.get(this) ?? nativeStyle.call(this);
+        });
+        for (const node of sourceNodes)
+          for (const name of members) Object.defineProperty(node, name, { configurable: true, get: clobbered });
+        Object.defineProperty(window.document, "createElement", { configurable: true, value: clobbered });
+      },
+    );
+    try {
+      // Window methods were captured before later named-property interference.
+      Object.defineProperty(b.window, "getComputedStyle", { value: clobbered });
+      b.media.dispatchEvent(new b.window.Event("change"));
+      b.message(b.result);
+      expect(b.jobs()).toEqual([
+        { type: "emend:diagrams", request: 1, diagrams: [{ source, mode: "light", width: 1 }] },
+      ]);
+      expect(clobbered).not.toHaveBeenCalled();
+    } finally {
+      for (const node of sourceNodes) for (const name of members) Reflect.deleteProperty(node, name);
+      Reflect.deleteProperty(b.window.document, "createElement");
+    }
+    expect(sourceNodes.map((node) => node.getAttribute("onclick"))).toEqual(["alert(1)", "alert(1)"]);
+    expect(sourceNodes.map((node) => node.textContent)).toEqual([source, source]);
+    const host = b.window.document.querySelector("[data-emend-diagram]");
+    expect(host?.getAttributeNames()).toEqual(["data-emend-diagram"]);
+    expect(b.shadows[0]?.querySelector("img")?.getAttributeNames().sort()).toEqual([
+      "alt",
+      "height",
+      "src",
+      "style",
+      "width",
+    ]);
+  },
+);

@@ -1201,12 +1201,16 @@ paths in this revision. Bridge links resolve against the existing document base,
 segment once, and use the same rejection rules as the core resolver. The parent validates the
 destination again before navigating.
 
-HTML diagrams use `<pre class="mermaid">` in both emend's look and custom pages. Only an
-HTML-namespace `pre` with the exact `mermaid` class token (split on ASCII whitespace) qualifies.
+HTML diagrams use `<pre class="mermaid">` in both emend's look and custom pages. Only
+HTML-namespace `pre` elements qualify. A `pre` qualifies with the exact `mermaid` class token
+(split on ASCII whitespace). It also qualifies when its only element child is an HTML-namespace
+`code` with the exact `language-mermaid` class token, split on ASCII whitespace. The `pre`'s other
+child nodes must be ASCII-whitespace text or comments. This is the form a Markdown fence becomes.
 The bridge walks light DOM in document order, skipping script, style, template and noscript
 subtrees, and any `pre` inside an earlier diagram `pre`. Nested `code` contributes text;
-`div.mermaid` and `code.language-mermaid` alone do not qualify. Source is the `pre`'s unchanged
-`textContent`, read through `Node.prototype`. Markup inside the `pre` is not part of the source,
+`div.mermaid` and `code.language-mermaid` outside such a `pre` do not qualify.
+Source is the `pre`'s unchanged `textContent`, read through `Node.prototype`.
+Markup inside the `pre` is not part of the source,
 so authors escape `<` as `&lt;` and `&` as `&amp;`. Empty-after-trimming sources and sources over
 50,000 characters stay as text. The scan keeps at most 50 diagrams and stops before the sum of
 source lengths would exceed 1,000,000.

@@ -486,12 +486,25 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       source, mode, width: Math.max(1, Math.min(DIAGRAM_DIMENSION_MAX, Math.round(bounds(host || pre).width) || 1))
     })) });
   }
+  function diagramPre(pre) {
+    if (nodeType(pre) !== 1 || namespace(pre) !== "http://www.w3.org/1999/xhtml" || localName(pre) !== "pre") return false;
+    if ((elementCall("getAttribute", pre, "class") || "").split(/[\t\n\f\r ]+/).includes("mermaid")) return true;
+    let code = false;
+    for (const child of children(pre)) {
+      const type = nodeType(child);
+      if (type === 1) {
+        if (code || namespace(child) !== "http://www.w3.org/1999/xhtml" || localName(child) !== "code" ||
+            !(elementCall("getAttribute", child, "class") || "").split(/[\t\n\f\r ]+/).includes("language-mermaid")) return false;
+        code = true;
+      } else if (type !== 8 && (type !== 3 || /[^\t\n\f\r ]/.test(textData(child)))) return false;
+    }
+    return code;
+  }
   function scanDiagrams() {
     if (!body()) return;
     let total = 0, earlier;
     for (const pre of nodes(body())) {
-      if (nodeType(pre) !== 1 || namespace(pre) !== "http://www.w3.org/1999/xhtml" || localName(pre) !== "pre" ||
-          !(elementCall("getAttribute", pre, "class") || "").split(/[\t\n\f\r ]+/).includes("mermaid")) continue;
+      if (!diagramPre(pre)) continue;
       if (earlier && dom(window.Node.prototype, "contains", earlier, pre)) continue;
       earlier = pre;
       const source = nodeValue("textContent", pre);
