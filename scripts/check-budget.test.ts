@@ -126,10 +126,10 @@ test("a CLAUDE.md over 1024 bytes fails", () => {
   assert.match(errors[0], /CLAUDE\.md is \d+ bytes/);
 });
 
-test("a rule over 6144 bytes fails", () => {
-  const { errors } = checkBudget(makeTree({ rule: `${VALID_RULE}${"x".repeat(6200)}\n` }));
+test("a rule over 6656 bytes fails", () => {
+  const { errors } = checkBudget(makeTree({ rule: `${VALID_RULE}${"x".repeat(6700)}\n` }));
   assert.equal(errors.length, 1);
-  assert.match(errors[0], /cli\.md is \d+ bytes; the limit is 6144/);
+  assert.match(errors[0], /cli\.md is \d+ bytes; the limit is 6656/);
 });
 
 test("a rule with unterminated frontmatter fails", () => {
