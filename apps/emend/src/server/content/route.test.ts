@@ -4,15 +4,16 @@ import { type FileHandle, mkdir, open, rename, symlink, truncate, utimes, writeF
 import { type ClientRequest, createServer, request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { LIMITS, PublishResponse, RevisionView } from "@emend/contract";
-import * as core from "@emend/core";
 import { applyHtmlLook, htmlLook, parseDocHtml, stripHtmlLook } from "@emend/core";
 import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { devices, files, reviews, revisions } from "../../db/schema.ts";
 import { HTML_DOC_CSP } from "../http/headers.ts";
 import { mailboxFixture } from "../mailbox/test-support.ts";
+import { executeWork } from "../publish/work.ts";
 import { nodeRequestHandler } from "../serve.ts";
 import { BRIDGE_SOURCE } from "./bridge.ts";
+import { clearCodeColourCache } from "./code-colours.ts";
 import { injectBridge, injectLook } from "./inject.ts";
 import { FALLBACK_PUB_CSS } from "./look.ts";
 
@@ -31,6 +32,7 @@ const source =
 const bigCss = "/* synthetic */\n".padEnd(200 * 1024, " ");
 const bigSha = createHash("sha256").update(bigCss).digest("hex");
 beforeEach(async () => {
+  clearCodeColourCache();
   f = await mailboxFixture();
   const entries = [
     ["docs/a #é.html", "doc", source],
@@ -92,6 +94,7 @@ beforeEach(async () => {
   secondUrl = second.contentUrl;
 });
 afterEach(async () => {
+  clearCodeColourCache();
   vi.restoreAllMocks();
   await f.cleanup();
 });
@@ -135,7 +138,8 @@ test.each(["custom", null] as const)("%s look preserves the previous response by
 });
 
 test.each(["emend", "custom", null] as const)("%s look serves code with the existing CSP", async (look) => {
-  const compute = vi.spyOn(core, "htmlCodeColours");
+  const execute = vi.fn(executeWork);
+  f.deps.publishExecutor = execute;
   const page = '<body><pre><code class="language-ts">const seed: string = "fern";</code></pre></body>';
   const sha = await f.deps.blobs.put(f.ownerId, Buffer.from(page), "text/html");
   await setDocLook(look, sha);
@@ -146,11 +150,14 @@ test.each(["emend", "custom", null] as const)("%s look serves code with the exis
   const body = await response.text();
   if (look === "emend") {
     expect(body).toContain('<span style="color:var(--syn-keyword)">const</span>');
-    expect(compute).toHaveBeenCalledExactlyOnceWith(page);
+    expect(execute).toHaveBeenCalledExactlyOnceWith({
+      kind: "code-colours",
+      bytes: new TextEncoder().encode(page).buffer,
+    });
   } else {
     expect(body).not.toContain("<span");
     expect(body).toBe(injectBridge(page));
-    expect(compute).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
   }
 });
 
@@ -158,7 +165,8 @@ test("two GETs of one emend-look doc compute colours once across themes", async 
   const page = '<body><pre><code class="language-ts">const seed = 1;</code></pre></body>';
   const sha = await f.deps.blobs.put(f.ownerId, Buffer.from(page), "text/html");
   await setDocLook("emend", sha);
-  const compute = vi.spyOn(core, "htmlCodeColours");
+  const execute = vi.fn(executeWork);
+  f.deps.publishExecutor = execute;
   for (const theme of ["light", "dark"]) {
     const response = await request(`${docUrl}?theme=${theme}`);
     expect(response.status).toBe(200);
@@ -167,7 +175,10 @@ test("two GETs of one emend-look doc compute colours once across themes", async 
     expect(body).toContain(`<html data-theme="${theme}">`);
     expect(body).toContain('<span style="color:var(--syn-keyword)">const</span>');
   }
-  expect(compute).toHaveBeenCalledExactlyOnceWith(page);
+  expect(execute).toHaveBeenCalledExactlyOnceWith({
+    kind: "code-colours",
+    bytes: new TextEncoder().encode(page).buffer,
+  });
 });
 
 test.each([

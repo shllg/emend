@@ -160,6 +160,21 @@ test("line counts treat CRLF as one delimiter and lone CR as content, with no ph
   }
 });
 
+test("code colours render in the worker and transfer the page bytes", async () => {
+  const execute = workerExecutor();
+  try {
+    const bytes = new TextEncoder().encode('<pre><code class="language-ts">const seed = 1;</code></pre>').buffer;
+    const result = await execute({ kind: "code-colours", bytes });
+    expect(bytes.byteLength).toBe(0);
+    expect(result.kind).toBe("code-colours");
+    if (result.kind !== "code-colours") throw new Error("Missing code colours");
+    expect(result.colours).toHaveLength(1);
+    expect(result.colours[0]?.markup).toContain('<span style="color:var(--syn-keyword)">const</span>');
+  } finally {
+    await execute.close();
+  }
+});
+
 test("comment Markdown renders in the worker, in order, with repoUrl links", async () => {
   const execute = workerExecutor();
   try {

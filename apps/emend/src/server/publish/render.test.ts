@@ -44,6 +44,25 @@ test("writeup work reports doc-base use without inspecting serialized HTML", asy
   expect(rendered).toMatchObject({ kind: "writeup", pathDependent: true });
 });
 
+test("code colour work returns token spans and source offsets for a TypeScript block", async () => {
+  const prefix = '<p>🌱</p><pre><code class="language-ts">';
+  const text = 'const seed: string = "fern";';
+  const result = await executeWork({
+    kind: "code-colours",
+    bytes: new TextEncoder().encode(`${prefix}${text}</code></pre>`).buffer,
+  });
+  expect(result).toEqual({
+    kind: "code-colours",
+    colours: [
+      {
+        start: prefix.length,
+        end: prefix.length + text.length,
+        markup: expect.stringContaining('<span style="color:var(--syn-keyword)">const</span>'),
+      },
+    ],
+  });
+});
+
 test("HTML metadata shares parsing but full part IDs remain path-specific and separate from Markdown IDs", async () => {
   const source = "<h2>Seeds</h2><p>First</p><p>First</p>";
   const execute = vi.fn(executeWork);

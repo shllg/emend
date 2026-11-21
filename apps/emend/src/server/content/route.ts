@@ -7,7 +7,7 @@ import type { AppDeps } from "../app.ts";
 import type { AppEnv } from "../auth/principal.ts";
 import { ApiError } from "../http/errors.ts";
 import { HTML_DOC_CSP } from "../http/headers.ts";
-import { cachedCodeColours } from "./code-colours.ts";
+import { codeColours } from "./code-colours.ts";
 import { injectBridge, injectLook } from "./inject.ts";
 import { pubStylesheet } from "./look.ts";
 
@@ -25,7 +25,7 @@ async function htmlDocResponse(
     const theme = colorScheme === "light" ? "light" : query === "dark" || query === "light" ? query : undefined;
     const page = stripHtmlLook(html);
     html = injectLook(
-      applyHtmlCodeColours(page, await cachedCodeColours(key, page)),
+      applyHtmlCodeColours(page, await codeColours(deps, key, page)),
       await pubStylesheet(deps.config.webRoot),
       theme,
     );

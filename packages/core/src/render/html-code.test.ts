@@ -4,7 +4,13 @@ import { afterEach, expect, test, vi } from "vitest";
 import { docText, HTML_ELEMENT_LIMIT, HTML_NESTING_LIMIT, nodeText, parseDocHtml } from "../place/html.ts";
 import { HIGHLIGHT_FENCE_BYTES, HIGHLIGHT_RENDER_BYTES } from "./highlight.ts";
 import * as highlighterModule from "./highlighter.ts";
-import { applyHtmlCodeColours, type HtmlCodeColour, highlightHtmlCode, htmlCodeColours } from "./html-code.ts";
+import {
+  applyHtmlCodeColours,
+  type HtmlCodeColour,
+  highlightHtmlCode,
+  htmlCodeCandidate,
+  htmlCodeColours,
+} from "./html-code.ts";
 import { renderMarkdown } from "./markdown.ts";
 
 afterEach(() => vi.restoreAllMocks());
@@ -60,6 +66,8 @@ test.each([
   ["noscript contents", `<noscript>${block("const seed = 1;")}</noscript>`],
   ["no language marker", "<!doctype html><p>Plain synthetic doc</p>"],
   ["empty code", block("")],
+  ["decimal carriage return", block("a&#13;b")],
+  ["hexadecimal carriage return", block("a&#xD;b")],
   ["unescaped script", block("const seed = 1;<script>alert(1)</script>")],
   [
     "excessive nesting",
@@ -71,10 +79,25 @@ test.each([
   expect(docText(output)).toBe(docText(input));
 });
 
+test.each([
+  ["<p>Plain synthetic doc</p>", false],
+  ["<codex>const seed = 1;</codex>", false],
+  ["<CODE>", true],
+  ["<code\n", true],
+  ["<code/>", true],
+] as const)("candidate detection for %j returns %s", (input, candidate) => {
+  expect(htmlCodeCandidate(input)).toBe(candidate);
+});
+
+test("candidate detection rejects a doc over the character cap", () => {
+  expect(htmlCodeCandidate(`${"x".repeat(LIMITS.markdownDocBytes)}<code>`)).toBe(false);
+});
+
 test.each(["<p>Plain synthetic doc</p>", "<!-- language-ts --><pre><code>const seed = 1;</code></pre>"])(
   "docs without a candidate block skip highlighter loading: %s",
   async (input) => {
     const highlighter = vi.spyOn(highlighterModule, "sharedHighlighter");
+    expect(await htmlCodeColours(input)).toEqual([]);
     expect(await highlightHtmlCode(input)).toBe(input);
     expect(highlighter).not.toHaveBeenCalled();
   },
@@ -222,9 +245,9 @@ test("highlighter failures return the original doc", async () => {
   expect(await highlightHtmlCode(input)).toBe(input);
 });
 
-test("colour computation failures resolve to no splices", async () => {
+test("colour computation rejects highlighter failures", async () => {
   vi.spyOn(highlighterModule, "sharedHighlighter").mockRejectedValueOnce(new Error("Synthetic failure"));
-  await expect(htmlCodeColours(block("const seed = 1;"))).resolves.toEqual([]);
+  await expect(htmlCodeColours(block("const seed = 1;"))).rejects.toThrow("Synthetic failure");
 });
 
 test("a changed token text leaves the block unchanged", async () => {

@@ -65,7 +65,13 @@ export {
 } from "./render/download-threads.ts";
 export { blockHash } from "./render/hash.ts";
 export { HIGHLIGHT_FENCE_BYTES, HIGHLIGHT_LINE_CHARS, HIGHLIGHT_RENDER_BYTES } from "./render/highlight.ts";
-export { applyHtmlCodeColours, type HtmlCodeColour, highlightHtmlCode, htmlCodeColours } from "./render/html-code.ts";
+export {
+  applyHtmlCodeColours,
+  type HtmlCodeColour,
+  highlightHtmlCode,
+  htmlCodeCandidate,
+  htmlCodeColours,
+} from "./render/html-code.ts";
 export {
   markdownImageReferences,
   type RenderEffects,

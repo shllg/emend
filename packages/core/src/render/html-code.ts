@@ -44,78 +44,77 @@ function tokenTree(code: HtmlElement): HtmlRoot {
   return { type: "root", children };
 }
 
+export function htmlCodeCandidate(html: string): boolean {
+  return html.length <= LIMITS.markdownDocBytes && /<code[\t\n\f\r />]/i.test(html);
+}
+
 export async function htmlCodeColours(html: string): Promise<HtmlCodeColour[]> {
-  try {
-    if (html.length > LIMITS.markdownDocBytes) return [];
-    const encoder = new TextEncoder();
-    if (encoder.encode(html).byteLength > LIMITS.markdownDocBytes) return [];
-    const tree = parseDocHtml(html, HTML_ELEMENT_LIMIT, true);
-    if (!tree) return [];
-    const candidates: { start: number; end: number; text: string; classes: string[]; bytes: number }[] = [];
-    for (const root of tree.childNodes) {
-      for (const node of docNodes(root)) {
-        if (
-          !defaultTreeAdapter.isElementNode(node) ||
-          node.tagName !== "code" ||
-          node.namespaceURI !== parse5Html.NS.HTML
-        )
-          continue;
-        const pre = node.parentNode;
-        if (
-          !pre ||
-          !defaultTreeAdapter.isElementNode(pre) ||
-          pre.tagName !== "pre" ||
-          pre.namespaceURI !== parse5Html.NS.HTML ||
-          classTokens(pre).includes("mermaid")
-        )
-          continue;
-        const classes = classTokens(node);
-        if (!classes.some((token) => token.startsWith("language-")) || node.childNodes.length === 0) continue;
-        const texts = node.childNodes.filter(defaultTreeAdapter.isTextNode);
-        if (texts.length !== node.childNodes.length) continue;
-        const { startTag, endTag } = node.sourceCodeLocation ?? {};
-        if (!startTag || !endTag) continue;
-        let offset = startTag.endOffset;
-        const contiguous = texts.every((child) => {
-          const location = child.sourceCodeLocation;
-          if (!location || location.startOffset !== offset) return false;
-          offset = location.endOffset;
-          return true;
-        });
-        if (!contiguous || offset !== endTag.startOffset) continue;
-        if (/<[A-Za-z!/?]/.test(html.slice(startTag.endOffset, endTag.startOffset))) continue;
-        const text = texts.map((child) => child.value).join("");
-        const bytes = encoder.encode(text).byteLength;
-        if (!text || bytes > HIGHLIGHT_FENCE_BYTES) continue;
-        candidates.push({ start: startTag.endOffset, end: endTag.startOffset, text, classes, bytes });
-      }
-    }
-    if (candidates.length === 0) return [];
-    const highlighter = await sharedHighlighter();
-    const loaded = new Set(highlighter.getLoadedLanguages());
-    const budget: HighlightBudget = { highlightedBytes: 0 };
-    const colours: HtmlCodeColour[] = [];
-    for (const { start, end, text, classes, bytes } of candidates) {
-      const lang = highlightLanguage(classes, loaded);
-      if (lang === undefined || !spendHighlightBudget(budget, bytes)) continue;
-      const highlighted = highlighter.codeToHast(text, {
-        lang,
-        theme: "emend",
-        tokenizeMaxLineLength: HIGHLIGHT_LINE_CHARS,
+  if (!htmlCodeCandidate(html)) return [];
+  const encoder = new TextEncoder();
+  if (encoder.encode(html).byteLength > LIMITS.markdownDocBytes) return [];
+  const tree = parseDocHtml(html, HTML_ELEMENT_LIMIT, true);
+  if (!tree) return [];
+  const candidates: { start: number; end: number; text: string; classes: string[]; bytes: number }[] = [];
+  for (const root of tree.childNodes) {
+    for (const node of docNodes(root)) {
+      if (
+        !defaultTreeAdapter.isElementNode(node) ||
+        node.tagName !== "code" ||
+        node.namespaceURI !== parse5Html.NS.HTML
+      )
+        continue;
+      const pre = node.parentNode;
+      if (
+        !pre ||
+        !defaultTreeAdapter.isElementNode(pre) ||
+        pre.tagName !== "pre" ||
+        pre.namespaceURI !== parse5Html.NS.HTML ||
+        classTokens(pre).includes("mermaid")
+      )
+        continue;
+      const classes = classTokens(node);
+      if (!classes.some((token) => token.startsWith("language-")) || node.childNodes.length === 0) continue;
+      const texts = node.childNodes.filter(defaultTreeAdapter.isTextNode);
+      if (texts.length !== node.childNodes.length) continue;
+      const { startTag, endTag } = node.sourceCodeLocation ?? {};
+      if (!startTag || !endTag) continue;
+      let offset = startTag.endOffset;
+      const contiguous = texts.every((child) => {
+        const location = child.sourceCodeLocation;
+        if (!location || location.startOffset !== offset) return false;
+        offset = location.endOffset;
+        return true;
       });
-      const highlightedPre = highlighted.children.find((child) => child.type === "element" && child.tagName === "pre");
-      if (highlightedPre?.type !== "element") continue;
-      const code = highlightedPre.children.find((child) => child.type === "element" && child.tagName === "code");
-      if (code?.type !== "element") continue;
-      const tokens = tokenTree(code);
-      if (hastText(tokens) !== text) continue;
-      colours.push({ start, end, markup: hastToHtml(tokens) });
+      if (!contiguous || offset !== endTag.startOffset) continue;
+      if (/<[A-Za-z!/?]/.test(html.slice(startTag.endOffset, endTag.startOffset))) continue;
+      const text = texts.map((child) => child.value).join("");
+      const bytes = encoder.encode(text).byteLength;
+      if (!text || text.includes("\r") || bytes > HIGHLIGHT_FENCE_BYTES) continue;
+      candidates.push({ start: startTag.endOffset, end: endTag.startOffset, text, classes, bytes });
     }
-    return colours;
-  } catch {
-    // A highlighting failure leaves the doc plain instead of failing to load.
-    return [];
   }
+  if (candidates.length === 0) return [];
+  const highlighter = await sharedHighlighter();
+  const loaded = new Set(highlighter.getLoadedLanguages());
+  const budget: HighlightBudget = { highlightedBytes: 0 };
+  const colours: HtmlCodeColour[] = [];
+  for (const { start, end, text, classes, bytes } of candidates) {
+    const lang = highlightLanguage(classes, loaded);
+    if (lang === undefined || !spendHighlightBudget(budget, bytes)) continue;
+    const highlighted = highlighter.codeToHast(text, {
+      lang,
+      theme: "emend",
+      tokenizeMaxLineLength: HIGHLIGHT_LINE_CHARS,
+    });
+    const highlightedPre = highlighted.children.find((child) => child.type === "element" && child.tagName === "pre");
+    if (highlightedPre?.type !== "element") continue;
+    const code = highlightedPre.children.find((child) => child.type === "element" && child.tagName === "code");
+    if (code?.type !== "element") continue;
+    const tokens = tokenTree(code);
+    if (hastText(tokens) !== text) continue;
+    colours.push({ start, end, markup: hastToHtml(tokens) });
+  }
+  return colours;
 }
 
 export function applyHtmlCodeColours(html: string, colours: readonly HtmlCodeColour[]): string {
@@ -132,5 +131,10 @@ export function applyHtmlCodeColours(html: string, colours: readonly HtmlCodeCol
 }
 
 export async function highlightHtmlCode(html: string): Promise<string> {
-  return applyHtmlCodeColours(html, await htmlCodeColours(html));
+  try {
+    return applyHtmlCodeColours(html, await htmlCodeColours(html));
+  } catch {
+    // A highlighting failure leaves the doc plain.
+    return html;
+  }
 }
