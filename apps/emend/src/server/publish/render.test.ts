@@ -49,8 +49,6 @@ test("code colour work returns token spans and source offsets for a TypeScript b
   const prefix = '<p>🌱</p><pre><code class="language-ts">';
   const text = 'const seed: string = "fern";';
   const page = `${prefix}${text}</code></pre>`;
-  // Warm the grammar; cold scans can exhaust Shiki's per-line limit under load.
-  await executeWork({ kind: "code-colours", page });
   const result = await executeWork({
     kind: "code-colours",
     page,

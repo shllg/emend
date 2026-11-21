@@ -68,7 +68,6 @@ export { HIGHLIGHT_FENCE_BYTES, HIGHLIGHT_LINE_CHARS, HIGHLIGHT_RENDER_BYTES } f
 export {
   applyHtmlCodeColours,
   type HtmlCodeColour,
-  highlightHtmlCode,
   htmlCodeCandidate,
   htmlCodeColours,
 } from "./render/html-code.ts";

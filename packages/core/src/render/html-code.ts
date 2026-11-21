@@ -105,6 +105,8 @@ export async function htmlCodeColours(html: string): Promise<HtmlCodeColour[]> {
       lang,
       theme: "emend",
       tokenizeMaxLineLength: HIGHLIGHT_LINE_CHARS,
+      // The colour worker's job timeout bounds work; per-line limits truncate colours on cold or busy workers.
+      tokenizeTimeLimit: 0,
     });
     const highlightedPre = highlighted.children.find((child) => child.type === "element" && child.tagName === "pre");
     if (highlightedPre?.type !== "element") continue;
