@@ -8,12 +8,14 @@ export function WriteupDetails({
   revision,
   sectionKey,
   changedIn,
+  summary = "Details",
   children,
 }: {
   reviewId: string;
   revision: number;
   sectionKey: string;
   changedIn?: number;
+  summary?: string;
   children: ReactNode;
 }) {
   const readOnly = useReadOnlyReview();
@@ -52,7 +54,7 @@ export function WriteupDetails({
       }}
     >
       <summary>
-        Details
+        {summary}
         {!open && changedIn !== undefined && <ChangedMarker revision={changedIn} className="ml-2 align-middle" />}
       </summary>
       {children}

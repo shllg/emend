@@ -31,6 +31,14 @@ export type ReaderProps = {
   activeThreadId?: string;
   threadJump?: ThreadJump;
 };
+export type ReaderFact = {
+  key: string;
+  label: string;
+  blocks?: RenderedBlock[];
+  content?: ReactNode;
+  hideLabel?: boolean;
+  fold?: { key: string; summary: string };
+};
 export type ReaderGroup = {
   key: string;
   id?: string;
@@ -48,7 +56,7 @@ export type ReaderGroup = {
   action?: ReactNode;
   meta?: ReactNode;
   files?: ReactNode;
-  facts?: { key: string; label: string; blocks?: RenderedBlock[]; content?: ReactNode }[];
+  factGroups?: { key: string; label: string; facts: ReaderFact[] }[];
   subsections?: {
     key: string;
     heading: string;
@@ -60,7 +68,7 @@ export function groupBlocks(group: ReaderGroup) {
   return [
     ...group.blocks,
     ...(group.subsections?.flatMap((section) => section.blocks) ?? []),
-    ...(group.facts?.flatMap((fact) => fact.blocks ?? []) ?? []),
+    ...(group.factGroups?.flatMap((factGroup) => factGroup.facts.flatMap((fact) => fact.blocks ?? [])) ?? []),
   ];
 }
 export function BlockReader({
@@ -331,19 +339,39 @@ export function BlockReader({
           ) : (
             renderBlocks(group.blocks, group.path, group.presentation === "decisions")
           )}
-          {group.facts && (
-            <dl className="em-writeup-facts">
-              {group.facts.map((fact) => (
-                <div key={fact.key} className="em-writeup-fact" data-fact={fact.key}>
-                  <dt>{fact.label}</dt>
-                  <dd>
-                    {fact.content}
-                    {renderBlocks(fact.blocks ?? [], group.path)}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          )}
+          {group.factGroups?.map((factGroup) => (
+            <div key={factGroup.key} className="em-writeup-fact-group" data-fact-group={factGroup.key}>
+              <h3 className="em-writeup-kicker">{factGroup.label}</h3>
+              <dl className="em-writeup-facts">
+                {factGroup.facts.map((fact) => (
+                  <div
+                    key={fact.key}
+                    className="em-writeup-fact"
+                    data-fact={fact.key}
+                    data-hide-label={fact.hideLabel ? "" : undefined}
+                  >
+                    <dt>{fact.label}</dt>
+                    <dd>
+                      {fact.content}
+                      {fact.fold ? (
+                        <WriteupDetails
+                          reviewId={reviewId}
+                          revision={revision}
+                          sectionKey={fact.fold.key}
+                          summary={fact.fold.summary}
+                          changedIn={latestChange(fact.blocks ?? [])}
+                        >
+                          {renderBlocks(fact.blocks ?? [], group.path)}
+                        </WriteupDetails>
+                      ) : (
+                        renderBlocks(fact.blocks ?? [], group.path)
+                      )}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          ))}
           {group.subsections?.map((section) =>
             section.kind === "body" ? (
               <WriteupDetails

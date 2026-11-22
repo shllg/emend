@@ -1,7 +1,7 @@
 import { type FileView, type RenderedBlock, RenderedWriteup, type RevisionView, type TopicMeta } from "@emend/contract";
 import { expect, test } from "vitest";
 import { renderWriteup } from "../../../../packages/core/src/render/writeup.ts";
-import { type FactPart, readFact, riskFact, sinceFact, undoFact, usesOpeningCard } from "./writeup-facts.ts";
+import { type FactPart, labelledFact, sinceFact, topicsFact, undoFact, usesOpeningCard } from "./writeup-facts.ts";
 
 const factText = (parts: FactPart[] | undefined) => parts?.map((part) => part.text).join("");
 
@@ -51,19 +51,172 @@ test("only area or Why it matters opts a writeup into the opening card", () => {
   expect(usesOpeningCard({ sections: [section("whyItMatters", "More plants survive.")] })).toBe(true);
 });
 
-test("Risk uses the highest attention, preserves rank order and caps names at three", () => {
-  expect(factText(riskFact([]))).toBeUndefined();
-  expect(factText(riskFact([topic("unknown")]))).toBeUndefined();
-  expect(factText(riskFact([topic("first", "skim")]))).toBe("Low: first");
-  expect(factText(riskFact([topic("low", "skim"), topic("medium", "review")]))).toBe("Medium: medium");
+async function renderedFactBlocks(markdown: string, key: "overview" | "whereToLook" = "whereToLook") {
+  const writeup = RenderedWriteup.parse(
+    await renderWriteup({ overview: "", tldr: "", decisions: "", topics: {}, [key]: markdown }, []),
+  );
+  return writeup.sections.find((section) => section.key === key)?.blocks ?? [];
+}
+
+test.each(["Biggest risk", "Look yourself", "Goal", "Change"] as const)(
+  "label lift finds the first eligible %s block without replacing it",
+  async (label) => {
+    const blocks = await renderedFactBlocks(`Other text.\n\n**${label}:** First.\n\n**${label}:** Later.`);
+    expect(blocks).toHaveLength(3);
+    const result = labelledFact(blocks, label);
+    expect(result).toEqual({ blocks: [blocks[1]], hideLabel: true });
+    expect(result?.blocks[0]).toBe(blocks[1]);
+  },
+);
+
+test.each([
+  ["list item", "- **Biggest risk:** A.", "Biggest risk", "item", true],
+  ["ordered list item", "1. **Biggest risk:** A.", "Biggest risk", "item", true],
+  ["paragraph", "**Biggest risk:** A.", "Biggest risk", "paragraph", true],
+  ["wrapped paragraph", "**Biggest risk:** Flooding the\nseed bed.", "Biggest risk", "paragraph", true],
+  ["wrapped list item", "- **Biggest risk:** Flooding the\n  seed bed.", "Biggest risk", "item", true],
+  ["wrapped Goal paragraph", "**Goal:** Protect the\nseed bed.", "Goal", "paragraph", true],
+  ["wrapped Goal item", "- **Goal:** Protect the\n  seed bed.", "Goal", "item", true],
+  ["hard break in a fact", "**Biggest risk:** Flooding the  \nseed bed.", "Biggest risk", "paragraph", true],
+  ["raw break in a fact", "**Goal:** Protect the<br>seed bed.", "Goal", "paragraph", true],
+  ["wrapped bold label", "**Biggest\nrisk:** A.", "Biggest risk", "paragraph", true],
+  ["Title casing", "**Biggest Risk:** A.", "Biggest risk", "paragraph", true],
+  ["lower casing", "**biggest risk:** A.", "Biggest risk", "paragraph", true],
+  ["upper casing", "**BIGGEST RISK:** A.", "Biggest risk", "paragraph", true],
+  ["colon outside bold", "**Goal**: A.", "Goal", "paragraph", false],
+  ["inline code mentioning a label", "**Goal:** Preserve the `Change:` header.", "Goal", "paragraph", true],
+  ["plain text mentioning a label", "**Goal:** Preserve the Change: header.", "Goal", "paragraph", true],
+  ["lowercase change in a sentence", "**Goal:** Make one change: water the seeds.", "Goal", "paragraph", true],
+  ["bold emphasis without a colon", "**Goal:** Keep the **seed bed** dry.", "Goal", "paragraph", true],
+] as const)("label lift accepts %s", async (_name, markdown, label, kind, hideLabel) => {
+  const blocks = await renderedFactBlocks(markdown, label === "Goal" ? "overview" : "whereToLook");
+  expect(blocks).toHaveLength(1);
+  expect(blocks[0]?.kind).toBe(kind);
+  const result = labelledFact(blocks, label);
+  expect(result).toEqual({ blocks, hideLabel });
+  expect(result?.blocks[0]).toBe(blocks[0]);
+});
+
+test("label lift accepts the paragraph wrapper and surrounding whitespace of a loose list item", async () => {
+  const blocks = await renderedFactBlocks("- **Goal:** A.\n\n- Another item.", "overview");
+  expect(blocks).toHaveLength(2);
+  expect(blocks[0]?.html).toContain("<p><strong>Goal:</strong>");
+  expect(labelledFact(blocks, "Goal")).toEqual({ blocks: [blocks[0]], hideLabel: true });
+});
+
+test.each([
+  ["soft", "\n", "\n", false],
+  ["hard", "  \n", "\n", true],
+  ["raw", "<br>", "", true],
+] as const)(
+  "label lift preserves a fact across a rendered %s break",
+  async (_name, sourceBreak, textBreak, hasBreak) => {
+    const blocks = await renderedFactBlocks(`**Goal:** A.${sourceBreak}B.`, "overview");
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.text).toBe(`Goal: A.${textBreak}B.`);
+    expect(blocks[0]?.html.includes("<br>")).toBe(hasBreak);
+    expect(labelledFact(blocks, "Goal")).toEqual({ blocks, hideLabel: true });
+  },
+);
+
+test.each([
+  ["exact casing", "**Biggest risk:** A.\n**Look yourself:** B."],
+  ["Title casing", "**Biggest Risk:** A.\n**Look Yourself:** B."],
+  ["lower casing", "**biggest risk:** A.\n**look yourself:** B."],
+  ["upper casing", "**BIGGEST RISK:** A.\n**LOOK YOURSELF:** B."],
+  ["same line", "**Biggest risk:** A. **Look yourself:** B."],
+  ["hard break", "**Biggest risk:** A.  \n**Look yourself:** B."],
+  ["raw break", "**Biggest risk:** A.<br>**Look yourself:** B."],
+  ["second colon outside bold", "**Biggest risk:** A. **Look yourself**: B."],
+  ["unknown second bold label", "**Biggest risk:** A. **Impact:** B."],
+])("label lift leaves two bold label runs together: %s", async (_name, markdown) => {
+  const blocks = await renderedFactBlocks(markdown);
+  expect(blocks).toHaveLength(1);
+  expect(labelledFact(blocks, "Biggest risk")).toBeUndefined();
+  expect(labelledFact(blocks, "Look yourself")).toBeUndefined();
+});
+
+test.each(["Biggest risk", "Look yourself", "Check first", "Goal", "Change"])(
+  "label lift refuses a plain second label at the start of a later line: %s",
+  async (label) => {
+    for (const later of [label, label.toLowerCase(), label.toUpperCase()]) {
+      const blocks = await renderedFactBlocks(`**Biggest risk:** A.\n${later}: B.`);
+      expect(blocks).toHaveLength(1);
+      expect(labelledFact(blocks, "Biggest risk")).toBeUndefined();
+    }
+  },
+);
+
+test.each(["Look yourself", "look yourself"])(
+  "label lift refuses a plain second label after a raw break: %s",
+  async (label) => {
+    const blocks = await renderedFactBlocks(`**Biggest risk:** A.<br>${label}: B.`);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.text).toBe(`Biggest risk: A.${label}: B.`);
+    expect(labelledFact(blocks, "Biggest risk")).toBeUndefined();
+  },
+);
+
+test.each([
+  ["nested sub-list", "- **Biggest risk:** A.\n  - B.", "item"],
+  ["second paragraph in an item", "- **Biggest risk:** A.\n\n  B.", "item"],
+  ["fenced code", "```text\nBiggest risk: A.\n```", "code"],
+  ["quote", "> **Biggest risk:** A.", "quote"],
+  ["nested code", "- **Biggest risk:** A.\n\n  ```text\n  B.\n  ```", "item"],
+  ["nested quote", "- **Biggest risk:** A.\n  > B.", "item"],
+  ["nested table", "- **Biggest risk:** A.<table><tr><td>B.</td></tr></table>", "item"],
+  ["nested details", "- **Biggest risk:** A.<details><summary>B.</summary>C.</details>", "item"],
+  ["plain label", "Biggest risk: A.", "paragraph"],
+  ["plain item label", "- Biggest risk: A.", "item"],
+  ["old Check first label", "**Check first:** A.", "paragraph"],
+  ["text before bold label", "Read **Biggest risk:** A.", "paragraph"],
+  ["label inside emphasis", "***Biggest risk:*** A.", "paragraph"],
+  ["whitespace before the outside colon", "**Biggest risk** : A.", "paragraph"],
+] as const)("label lift refuses %s", async (_name, markdown, kind) => {
+  const blocks = await renderedFactBlocks(markdown);
+  expect(blocks).toHaveLength(1);
+  expect(blocks[0]?.kind).toBe(kind);
+  expect(labelledFact(blocks, "Biggest risk")).toBeUndefined();
+});
+
+test("mixed-case Goal and change lines stay together in Overview", async () => {
+  const blocks = await renderedFactBlocks("**Goal:** A.\n**change:** B.", "overview");
+  expect(blocks).toHaveLength(1);
+  expect(labelledFact(blocks, "Goal")).toBeUndefined();
+  expect(labelledFact(blocks, "Change")).toBeUndefined();
+});
+
+test("label lift leaves an empty section empty", async () => {
+  expect(labelledFact(await renderedFactBlocks(""), "Biggest risk")).toBeUndefined();
+});
+
+test("Topics lists High then Medium in ranked order, caps each level and counts Low", () => {
   const topics = [
+    topic("low", "skim"),
     topic("medium", "review"),
     ...["third", "first", "second", "fourth", "fifth"].map((slug) => topic(slug, "critical")),
+    ...["next", "last", "extra"].map((slug) => topic(slug, "review")),
+    topic("another-low", "skim"),
   ];
-  expect(factText(riskFact(topics))).toBe("High: third, first, second and 2 more");
-  expect(factText(riskFact([topic("<img src=x onerror=alert(1)>", "critical")]))).toBe(
-    "High: <img src=x onerror=alert(1)>",
+  expect(factText(topicsFact(topics))).toBe(
+    "High: third, first, second and 2 more; Medium: medium, next, last and 1 more; and 2 Low",
   );
+  expect(factText(topicsFact([topic("first", "skim"), topic("second", "skim")]))).toBe("2 Low");
+  expect(factText(topicsFact([topic("medium", "review"), topic("low", "skim")]))).toBe("Medium: medium; and 1 Low");
+  expect(factText(topicsFact([topic("high", "critical"), topic("medium", "review")]))).toBe(
+    "High: high; Medium: medium",
+  );
+  expect(topicsFact([])).toBeUndefined();
+  expect(topicsFact([topic("unknown")])).toBeUndefined();
+  expect(topicsFact([topic("other", "skim")])).toBeUndefined();
+});
+
+test("Topics keeps hostile titles literal and isolates them after cleaning control and bidi characters", () => {
+  const title = "<img src=x onerror=alert(1)>\u0000\u2069\u202eSeed";
+  expect(topicsFact([{ ...topic("seed", "critical"), title }])).toEqual([
+    { text: "High: " },
+    { text: "<img src=x onerror=alert(1)> Seed", agent: true },
+  ]);
 });
 
 test("Undo chooses the hardest ranked topic, with stable ties and one-way fallback", () => {
@@ -186,92 +339,6 @@ test.each([
   );
 });
 
-test("Read counts every writeup and Markdown doc block and only counted diff files", () => {
-  const writeup = { sections: [section("tldr", "word ".repeat(400))] };
-  const docs: RevisionView["docs"] = [
-    { kind: "markdown", path: "design.md", blocks: [block("doc-12345678", "word\n\t".repeat(400))] },
-    { kind: "html", path: "preview.html", contentUrl: "/content/preview" },
-    { kind: "source", path: "source.ts", language: "text", lines: [] },
-  ];
-  const files: FileView[] = [
-    { ...file, counts: { additions: 40, deletions: 24 } },
-    { ...file, role: "doc", counts: { additions: 500, deletions: 500 } },
-    file,
-  ];
-  expect(readFact(writeup, docs, files)).toBe(
-    "About 12 min: writeup and docs 4 min, diff 8 min (64 lines); HTML docs not counted; 1 diff file not counted",
-  );
-  expect(readFact(writeup, [], [])).toBe("About 2 min: writeup 2 min");
-  expect(readFact(empty, [], [files[0] as FileView])).toBe("About 8 min: diff 8 min (64 lines)");
-});
-
-test("Read omits empty content, handles under a minute and rounds hours to five minutes", () => {
-  expect(readFact(empty, [], [{ ...file, role: "doc" }])).toBeUndefined();
-  expect(readFact({ sections: [section("tldr", " \n ")] }, [], [])).toBeUndefined();
-  expect(readFact({ sections: [section("tldr", "One word")] }, [], [])).toBe("Under 1 min");
-  expect(readFact(empty, [], [{ ...file, counts: { additions: 7, deletions: 0 } }])).toBe("Under 1 min");
-  expect(readFact(empty, [], [{ ...file, counts: { additions: 8, deletions: 0 } }])).toBe(
-    "About 1 min: diff 1 min (8 lines)",
-  );
-  expect(readFact(empty, [], [{ ...file, counts: { additions: 480, deletions: 0 } }])).toBe(
-    "About 1 h: diff 1 h (480 lines)",
-  );
-  expect(readFact(empty, [], [{ ...file, counts: { additions: 664, deletions: 0 } }])).toBe(
-    "About 1 h 25 min: diff 1 h 25 min (664 lines)",
-  );
-});
-
-test("Read counts source words across lines without inserting spaces between tokens", () => {
-  const source: RevisionView["docs"][number] = {
-    kind: "source",
-    path: "source.ts",
-    language: "ts",
-    lines: Array.from({ length: 200 }, () => [{ text: "seed" }, { text: "ling" }]),
-  };
-  expect(readFact({ sections: [section("tldr", "word ".repeat(200))] }, [source], [])).toBe(
-    "About 2 min: writeup and docs 2 min",
-  );
-  expect(readFact(empty, [source], [])).toBe("About 1 min: writeup and docs 1 min");
-});
-
-test("Read notes skipped HTML docs once, including under a minute and diff-only estimates", () => {
-  const docs: RevisionView["docs"] = [
-    { kind: "html", path: "preview.html", contentUrl: "/content/preview" },
-    { kind: "html", path: "other.html", contentUrl: "/content/other" },
-  ];
-  expect(readFact({ sections: [section("tldr", "word ".repeat(200))] }, docs, [])).toBe(
-    "About 1 min: writeup 1 min; HTML docs not counted",
-  );
-  expect(readFact({ sections: [section("tldr", "Summary")] }, docs, [])).toBe("Under 1 min; HTML docs not counted");
-  expect(readFact(empty, docs, [{ ...file, counts: { additions: 8, deletions: 0 } }])).toBe(
-    "About 1 min: diff 1 min (8 lines); HTML docs not counted",
-  );
-  expect(readFact(empty, docs, [])).toBe("Not estimated; HTML docs not counted");
-});
-
-test("Read omits an empty revision without HTML docs", () => {
-  expect(readFact({ ...empty, area: "Garden" }, [], [])).toBeUndefined();
-});
-
-test.each([1, 2])("Read notes %i uncounted diff files on every estimate form, after any HTML note", (count) => {
-  const files = Array.from({ length: count }, (_, index) => ({ ...file, path: `src/file-${index}.ts` }));
-  const note = `; ${count} diff ${count === 1 ? "file" : "files"} not counted`;
-  for (const docs of [[], [{ kind: "html" as const, path: "preview.html", contentUrl: "/content/preview" }]]) {
-    const skipped = `${docs.length ? "; HTML docs not counted" : ""}${note}`;
-    expect(readFact(empty, docs, files)).toBe(`Not estimated${skipped}`);
-    expect(readFact({ sections: [section("tldr", "Summary")] }, docs, files)).toBe(`Under 1 min${skipped}`);
-    expect(readFact({ sections: [section("tldr", "word ".repeat(200))] }, docs, files)).toBe(
-      `About 1 min: writeup 1 min${skipped}`,
-    );
-    expect(readFact(empty, docs, [...files, { ...file, counts: { additions: 8, deletions: 0 } }])).toBe(
-      `About 1 min: diff 1 min (8 lines)${skipped}`,
-    );
-    expect(readFact(empty, docs, [...files, { ...file, counts: { additions: 664, deletions: 0 } }])).toBe(
-      `About 1 h 25 min: diff 1 h 25 min (664 lines)${skipped}`,
-    );
-  }
-});
-
 const since = {
   writeup: {
     sections: [
@@ -304,7 +371,7 @@ test("Since respects the baseline and names changed sections, each topic once, d
     revision: 3,
   }));
   expect(factText(sinceFact({ ...since, changedBlocks }))).toBe(
-    "Since revision 2: new or changed text in TL;DR, topic “Retry budget” and docs/design.md.",
+    "Since revision 2: TL;DR, topic “Retry budget” and docs/design.md.",
   );
   changedBlocks.push({ blockId: "whyItMatters-12345678", revision: 3 });
   expect(
@@ -319,7 +386,7 @@ test("Since respects the baseline and names changed sections, each topic once, d
       }),
     ),
   ).toBe(
-    "Since revision 2: new or changed text in TL;DR, Why it matters, topic “Retry budget” and docs/design.md; 1 file you viewed changed.",
+    "Since revision 2: TL;DR, Why it matters, topic “Retry budget” and docs/design.md; 1 file you viewed changed.",
   );
   expect(
     factText(
@@ -334,7 +401,7 @@ test("Since respects the baseline and names changed sections, each topic once, d
         ],
       }),
     ),
-  ).toBe("Since revision 2: new or changed text in docs/design.md.");
+  ).toBe("Since revision 2: docs/design.md.");
 });
 
 test("Since uses bare section labels, including Checked", () => {
@@ -353,7 +420,58 @@ test("Since uses bare section labels, including Checked", () => {
         ),
       }),
     ),
-  ).toBe("Since revision 2: new or changed text in TL;DR, Checked and topic “Retry budget”.");
+  ).toBe("Since revision 2: TL;DR, Checked and topic “Retry budget”.");
+});
+
+test("Since links the first changed block in each section and each topic once, never review or doc paths", () => {
+  const checked = section("checked", "Unchanged first check.");
+  const changed = { ...block("checked", "Changed second check."), id: "checked-87654321" };
+  checked.blocks.push(changed, { ...block("checked", "Later check."), id: "checked-11111111" });
+  const verdict = section("review", "Read everything.");
+  const parts = sinceFact({
+    ...since,
+    writeup: { sections: [...since.writeup.sections, checked, verdict] },
+    changedBlocks: [
+      "checked-11111111",
+      changed.id,
+      "review-12345678",
+      "t-retry-body-12345678",
+      "t-retry-why-12345678",
+      "doc-12345678-12345678",
+    ].map((blockId) => ({ blockId, revision: 3 })),
+  });
+  expect(factText(parts)).toBe("Since revision 2: topic “Retry budget”, Checked and docs/design.md.");
+  expect(parts?.filter((part) => part.target)).toEqual([
+    { text: "Retry budget", agent: true, target: "block-t-retry-why-12345678" },
+    { text: "Checked", target: `block-${changed.id}` },
+  ]);
+  expect(parts?.find((part) => part.text === "docs/design.md")).toEqual({ text: "docs/design.md", agent: true });
+  expect(
+    factText(
+      sinceFact({
+        ...since,
+        writeup: { sections: [verdict] },
+        changedBlocks: [{ blockId: verdict.blocks[0]?.id ?? "", revision: 3 }],
+      }),
+    ),
+  ).toBe("Since revision 2: no new text in the writeup or Markdown docs. Removed text is not tracked.");
+});
+
+test.each([true, false])("Since links a body-only topic change even without metadata (metadata=%s)", (metadata) => {
+  const body = section("t-retry-body", "Unchanged details.", "retry");
+  const firstChanged = { ...block(body.key, "Changed details."), id: "t-retry-body-87654321" };
+  const lastChanged = { ...block(body.key, "Later changed details."), id: "t-retry-body-11111111" };
+  body.blocks.push(firstChanged, lastChanged);
+  const parts = sinceFact({
+    ...since,
+    topics: metadata ? since.topics : [],
+    writeup: { sections: [section("t-retry-why", "Unchanged reason.", "retry"), body] },
+    changedBlocks: [lastChanged, firstChanged].map((block) => ({ blockId: block.id, revision: 3 })),
+  });
+  expect(factText(parts)).toBe(`Since revision 2: topic “${metadata ? "Retry budget" : "retry"}”.`);
+  expect(parts?.filter((part) => part.target)).toEqual([
+    { text: metadata ? "Retry budget" : "retry", agent: true, target: `block-${firstChanged.id}` },
+  ]);
 });
 
 test("Since separates new text from stale viewed files and can show only stale files", () => {
@@ -364,7 +482,7 @@ test("Since separates new text from stale viewed files and can show only stale f
     { ...file, path: "src/unviewed.ts" },
   ];
   expect(factText(sinceFact({ ...since, files, changedBlocks: [{ blockId: "tldr-12345678", revision: 3 }] }))).toBe(
-    "Since revision 2: new or changed text in TL;DR; 2 files you viewed changed.",
+    "Since revision 2: TL;DR; 2 files you viewed changed.",
   );
   expect(factText(sinceFact({ ...since, files }))).toBe("Since revision 2: 2 files you viewed changed.");
 });
@@ -375,7 +493,7 @@ test("Since stops counting a revision-1 Viewed mark after a Send on revision 2",
     "Since revision 1: 1 file you viewed changed.",
   );
   expect(factText(sinceFact({ ...since, files, changedBlocks: [{ blockId: "tldr-12345678", revision: 3 }] }))).toBe(
-    "Since revision 2: new or changed text in TL;DR.",
+    "Since revision 2: TL;DR.",
   );
 });
 
@@ -402,7 +520,7 @@ test("Since names docs with identical titles by their isolated paths", () => {
     docs,
     changedBlocks: ["doc-12345678-12345678", "doc-87654321-12345678"].map((blockId) => ({ blockId, revision: 3 })),
   });
-  expect(factText(parts)).toBe("Since revision 2: new or changed text in docs/design.md and docs/other.md.");
+  expect(factText(parts)).toBe("Since revision 2: docs/design.md and docs/other.md.");
   expect(parts?.filter((part) => part.agent)).toEqual([
     { text: "docs/design.md", agent: true },
     { text: "docs/other.md", agent: true },
@@ -415,7 +533,7 @@ test.each([
 ])("agent fact parts strip %s while preserving isolated text", (_label, controls) => {
   const title = `Docs${controls}`;
   const topics = [{ ...topic("retry", "critical"), title }];
-  expect(riskFact(topics)).toEqual([{ text: "High: " }, { text: "Docs", agent: true }]);
+  expect(topicsFact(topics)).toEqual([{ text: "High: " }, { text: "Docs", agent: true }]);
   expect(undoFact({ sections: [section("t-retry-why", `Undo: Restore state${controls}`, "retry")] }, topics)).toEqual([
     { text: "Restore state", agent: true },
     { text: " (" },
@@ -431,9 +549,8 @@ test.each([
     }),
   ).toEqual([
     { text: "Since revision 2: " },
-    { text: "new or changed text in " },
     { text: "topic “" },
-    { text: "Docs", agent: true },
+    { text: "Docs", agent: true, target: "block-t-retry-why-12345678" },
     { text: "”" },
     { text: " and " },
     { text: "docs/design.md", agent: true },
@@ -445,7 +562,7 @@ test.each(["\u2029", "\u0085", "\u001c", "\u001d", "\u001e", "\u2028", "\n", "\t
   "agent fact parts replace separator or control %j before stripping bidi controls",
   (separator) => {
     const topics = [{ ...topic("retry", "critical"), title: `Retry${separator}\u2069\u202e12` }];
-    expect(riskFact(topics)).toEqual([{ text: "High: " }, { text: "Retry 12", agent: true }]);
+    expect(topicsFact(topics)).toEqual([{ text: "High: " }, { text: "Retry 12", agent: true }]);
     expect(undoFact(empty, [{ ...(topics[0] as TopicMeta), door: "one-way" }])).toEqual([
       { text: "A revert is not enough" },
       { text: " (" },
@@ -454,6 +571,6 @@ test.each(["\u2029", "\u0085", "\u001c", "\u001d", "\u001e", "\u2028", "\n", "\t
     ]);
     expect(
       factText(sinceFact({ ...since, topics, changedBlocks: [{ blockId: "t-retry-why-12345678", revision: 3 }] })),
-    ).toBe("Since revision 2: new or changed text in topic “Retry 12”.");
+    ).toBe("Since revision 2: topic “Retry 12”.");
   },
 );

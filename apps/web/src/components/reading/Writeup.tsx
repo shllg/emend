@@ -1,14 +1,21 @@
 import type { RenderedWriteup, RevisionView } from "@emend/contract";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef } from "react";
 import { type CodeFocus, sameCodeFocus } from "../../lib/code-focus.ts";
 import { plural } from "../../lib/count.ts";
 import { diffGroups } from "../../lib/diff-groups.ts";
 import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { rankedTopics } from "../../lib/topics.ts";
-import { readFact, riskFact, sinceFact, undoFact, usesOpeningCard } from "../../lib/writeup-facts.ts";
+import {
+  type FactPart,
+  labelledFact,
+  sinceFact,
+  topicsFact,
+  undoFact,
+  usesOpeningCard,
+} from "../../lib/writeup-facts.ts";
 import type { ReviewSearch } from "../../router.tsx";
-import { BlockReader, type ReaderGroup, type ReaderProps } from "./BlockReader.tsx";
+import { BlockReader, type ReaderFact, type ReaderGroup, type ReaderProps } from "./BlockReader.tsx";
 import { GlossaryTerms } from "./GlossaryTerms.tsx";
 import { undoSentence } from "./TopicChips.tsx";
 import { TopicsMap } from "./TopicsMap.tsx";
@@ -58,13 +65,6 @@ export function Writeup({
     },
     [readOnly, phone, search.tab, search.rev, props.reviewId],
   );
-  const read = useMemo(
-    () =>
-      usesOpeningCard({ sections: writeup.sections, area: writeup.area })
-        ? readFact({ sections: writeup.sections }, docs, files)
-        : undefined,
-    [writeup.sections, writeup.area, docs, files],
-  );
   const groups = useMemo(() => {
     const ranked = rankedTopics(topics);
     const bySlug = new Map(ranked.map((entry) => [entry.topic.slug, entry]));
@@ -87,6 +87,23 @@ export function Writeup({
     }
     const groups: ReaderGroup[] = [];
     const newLayout = usesOpeningCard({ sections: writeup.sections, area: writeup.area });
+    const lifted = new Set<string>();
+    const risk: ReaderFact[] = [];
+    const frame: ReaderFact[] = [];
+    const computed = (facts: ReaderFact[], key: string, label: string, parts: FactPart[] | undefined) => {
+      if (!parts) return;
+      facts.push({
+        key,
+        label,
+        content: parts.map((part, index) => {
+          const text = part.agent ? <bdi>{part.text}</bdi> : part.text;
+          return (
+            // biome-ignore lint/suspicious/noArrayIndexKey: fact parts are text, rebuilt together in order.
+            <Fragment key={index}>{part.target ? <a href={link(part.target)}>{text}</a> : text}</Fragment>
+          );
+        }),
+      });
+    };
     if (newLayout) {
       const tldr = writeup.sections.find((section) => section.key === "tldr");
       const matters = writeup.sections.find((section) => section.key === "whyItMatters");
@@ -99,66 +116,54 @@ export function Writeup({
           ? [{ key: "whyItMatters", heading: "Why it matters", kind: "matters", blocks: matters.blocks }]
           : [],
       });
-      const facts: NonNullable<ReaderGroup["facts"]> = [];
-      for (const [key, label] of [
-        ["review", "Review"],
-        ["checked", "Checked"],
-        ["notChecked", "Not checked"],
-      ] as const) {
-        const blocks = writeup.sections.find((section) => section.key === key)?.blocks;
-        if (blocks?.some((block) => block.text.trim())) facts.push({ key, label, blocks });
+      const blocksFor = (key: string) => writeup.sections.find((section) => section.key === key)?.blocks ?? [];
+      const lift = (facts: ReaderFact[], key: string, label: Parameters<typeof labelledFact>[1], section: string) => {
+        const fact = labelledFact(blocksFor(section), label);
+        if (!fact) return;
+        for (const block of fact.blocks) lifted.add(block.id);
+        facts.push({ key, label, ...fact });
+      };
+      const rows = (facts: ReaderFact[], key: string, label: string, blocks: ReaderFact["blocks"]) => {
+        if (blocks?.length) facts.push({ key, label, blocks });
+      };
+      lift(risk, "risk", "Biggest risk", "whereToLook");
+      computed(risk, "undo", "Undo", undoFact({ sections: writeup.sections }, topics));
+      const checked = blocksFor("checked");
+      rows(risk, "proof", "Proof", checked.slice(0, 1));
+      rows(risk, "gaps", "Gaps", blocksFor("notChecked"));
+      lift(risk, "look", "Look yourself", "whereToLook");
+      if (checked.length > 1) {
+        const count = checked.length - 1;
+        risk.push({
+          key: "assurance",
+          label: "Assurance",
+          blocks: checked.slice(1),
+          fold: { key: "checked-more", summary: `and ${count} more ${plural(count, "check")}` },
+        });
       }
-      const computed = [
-        ["risk", "Risk", riskFact(topics)],
-        ["undo", "Undo", undoFact({ sections: writeup.sections }, topics)],
-        ["read", "Read", read],
-        [
-          "since",
-          "Since",
-          sinceFact({
-            writeup: { sections: writeup.sections },
-            topics,
-            docs,
-            files,
-            revision: props.revision,
-            changedSince,
-            changedBlocks: props.changedBlocks,
-          }),
-        ],
-      ] as const;
-      for (const [key, label, content] of computed) {
-        if (content !== undefined)
-          facts.push({
-            key,
-            label,
-            content:
-              typeof content === "string"
-                ? content
-                : content.map((part, index) =>
-                    part.agent ? (
-                      // biome-ignore lint/suspicious/noArrayIndexKey: fact parts are text, rebuilt together in order.
-                      <bdi key={index}>{part.text}</bdi>
-                    ) : (
-                      part.text
-                    ),
-                  ),
-          });
-      }
-      if (facts.length) groups.push({ key: "facts", heading: "Facts", presentation: "facts", blocks: [], facts });
+      lift(frame, "goal", "Goal", "overview");
+      lift(frame, "change", "Change", "overview");
+      const outOfScope = blocksFor("outOfScope");
+      rows(frame, "outOfScope", "Out of scope", outOfScope);
+      for (const block of outOfScope) lifted.add(block.id);
+      computed(frame, "topics", "Topics", topicsFact(topics));
     }
     for (const section of writeup.sections) {
-      if (newLayout && ["tldr", "whyItMatters", "review", "checked", "notChecked"].includes(section.key)) continue;
+      if (section.key === "review") continue;
+      if (newLayout && ["tldr", "whyItMatters", "checked", "notChecked"].includes(section.key)) continue;
+      const blocks = section.blocks.filter((block) => !lifted.has(block.id));
+      if (section.blocks.length && !blocks.length) continue;
       const entry = section.topic ? bySlug.get(section.topic) : undefined;
       if (!entry) {
         groups.push({
           key: section.key,
           heading: section.key === "decisions" ? "Decisions & drift" : section.label,
-          blocks: section.blocks,
+          blocks,
           presentation:
             newLayout &&
             section.key === "overview" &&
-            section.blocks.length === 2 &&
-            section.blocks.every((block) => block.kind === "item")
+            blocks.length === 2 &&
+            blocks.every((block) => block.kind === "item")
               ? "pair"
               : section.key === "tldr" ||
                   section.key === "decisions" ||
@@ -280,6 +285,45 @@ export function Writeup({
       const heading = kind === "why" ? "Why" : kind === "example" ? "Example" : "Details";
       group.subsections?.push({ key: section.key, heading, kind, blocks: section.blocks });
     }
+    if (newLayout) {
+      const furtherDown = groups.slice(1).flatMap((group) => {
+        const first = group.blocks[0];
+        // A stored topic without metadata still renders, but does not become an introductory section.
+        return first && !group.topic && !group.key.startsWith("t-") ? [{ group, first }] : [];
+      });
+      if (furtherDown.length) {
+        frame.push({
+          key: "furtherDown",
+          label: "Further down",
+          content: furtherDown.map(({ group, first }, index) => (
+            <Fragment key={group.key}>
+              {index > 0 && " · "}
+              <a href={link(`block-${first.id}`)}>{group.heading}</a>
+            </Fragment>
+          )),
+        });
+      }
+      computed(
+        frame,
+        "since",
+        "Changed",
+        sinceFact({
+          writeup: { sections: writeup.sections },
+          topics,
+          docs,
+          files,
+          revision: props.revision,
+          changedSince,
+          changedBlocks: props.changedBlocks,
+        }),
+      );
+      const factGroups = [
+        { key: "risk", label: "Risk", facts: risk },
+        { key: "frame", label: "Frame", facts: frame },
+      ].filter((group) => group.facts.length);
+      if (factGroups.length)
+        groups.splice(1, 0, { key: "facts", heading: "Facts", presentation: "facts", blocks: [], factGroups });
+    }
     if (ranked.length) {
       const written = new Set(groups.flatMap((group) => (group.id ? [group.id] : [])));
       const afterIntro =
@@ -288,7 +332,6 @@ export function Writeup({
             "overview",
             "tldr",
             "facts",
-            "review",
             "checked",
             "notChecked",
             "outOfScope",
@@ -324,7 +367,6 @@ export function Writeup({
     topics,
     files,
     docs,
-    read,
     changedSince,
     code,
     link,
