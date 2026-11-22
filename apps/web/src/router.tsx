@@ -3,6 +3,7 @@ import { createRootRoute, createRoute, createRouter, Link, Outlet, type RouterHi
 import { cancelThreadActionFocus } from "./lib/thread-action-focus.ts";
 import { DevicesPage } from "./routes/devices.tsx";
 import { InboxPage } from "./routes/inbox.tsx";
+import { IntegrationsPage } from "./routes/integrations.tsx";
 import { PairPage } from "./routes/pair.tsx";
 import { PairDevicePage } from "./routes/pair-device.tsx";
 import { ReviewPage } from "./routes/review.tsx";
@@ -58,10 +59,23 @@ const pair = createRoute({ getParentRoute: () => root, path: "/pair", component:
 const devices = createRoute({ getParentRoute: () => root, path: "/devices", component: DevicesPage });
 const settings = createRoute({ getParentRoute: () => root, path: "/settings", component: SettingsPage });
 const sample = createRoute({ getParentRoute: () => root, path: "/settings/sample", component: ThemeSamplePage });
+const integrations = createRoute({
+  getParentRoute: () => root,
+  path: "/settings/integrations",
+  component: IntegrationsPage,
+});
 const pairDevice = createRoute({ getParentRoute: () => devices, path: "pair", component: PairDevicePage });
 export const createWebRouter = (history?: RouterHistory) => {
   const router = createRouter({
-    routeTree: root.addChildren([inbox, review, pair, devices.addChildren([pairDevice]), settings, sample]),
+    routeTree: root.addChildren([
+      inbox,
+      review,
+      pair,
+      devices.addChildren([pairDevice]),
+      settings,
+      sample,
+      integrations,
+    ]),
     history,
     search: { strict: true },
   });

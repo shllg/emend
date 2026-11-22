@@ -408,6 +408,15 @@ export function SettingsPage() {
           {settings.isError && <p role="alert">Could not load settings. Try again.</p>}
           {settings.data && <InboxSettings settings={settings.data} />}
           {settings.data && <ShortcutSettings keys={settings.data.keys} />}
+          <section aria-labelledby="integrations-settings" className="mt-10">
+            <h2 id="integrations-settings" className="mb-2 text-16 font-semibold">
+              Integrations
+            </h2>
+            <p className="text-14 text-fg-3">Optional add-ons, such as the status line, with prompts to set them up.</p>
+            <p className="mt-2">
+              <Link to="/settings/integrations">Open integrations</Link>
+            </p>
+          </section>
           <BinSettings />
         </div>
       </main>
