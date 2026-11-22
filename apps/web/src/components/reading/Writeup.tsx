@@ -1,6 +1,6 @@
 import type { RenderedWriteup, RevisionView } from "@emend/contract";
 import { ChevronLeft, ChevronRight, CircleAlert, CircleCheck } from "lucide-react";
-import { Fragment, useCallback, useEffect, useMemo, useRef } from "react";
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef } from "react";
 import { type CodeFocus, sameCodeFocus } from "../../lib/code-focus.ts";
 import { plural } from "../../lib/count.ts";
 import { diffGroups } from "../../lib/diff-groups.ts";
@@ -17,6 +17,7 @@ import {
   usesOpeningCard,
 } from "../../lib/writeup-facts.ts";
 import type { ReviewSearch } from "../../router.tsx";
+import { WRITEUP_SECTION_NAMES } from "../diff/targets.ts";
 import { ThreadCard } from "../threads/ThreadCard.tsx";
 import { BlockReader, groupBlocks, type ReaderFact, type ReaderGroup, type ReaderProps } from "./BlockReader.tsx";
 import { GlossaryTerms } from "./GlossaryTerms.tsx";
@@ -153,6 +154,7 @@ export function Writeup({
     }
     for (const section of writeup.sections) {
       if (HIDDEN_WRITEUP_SECTIONS.has(section.key)) continue;
+      if (section.key === "newInRevision" && (props.revision < 2 || writeup.newInRevision !== undefined)) continue;
       if (section.key === "needsYou" && writeup.needsYou !== undefined) continue;
       if (newLayout && ["tldr", "whyItMatters", "checked", "notChecked"].includes(section.key)) continue;
       const blocks = section.blocks.filter((block) => !lifted.has(block.id));
@@ -326,6 +328,53 @@ export function Writeup({
         needs,
       });
     }
+    const newsSection = writeup.sections.find((section) => section.key === "newInRevision");
+    const newsItems = writeup.newInRevision;
+    const showNews = props.revision >= 2 && newsItems !== undefined && newsSection !== undefined;
+    if (showNews) {
+      const blocksById = new Map(newsSection.blocks.map((block) => [block.id, block]));
+      const changed = new Set(props.changedBlocks.map((block) => block.blockId));
+      const news = newsItems.map((item, index) => {
+        let href: string | undefined;
+        let label: ReactNode;
+        if (item.topic !== undefined) {
+          const topic = bySlug.get(item.topic)?.topic;
+          if (topic) {
+            const keys = new Set([`t-${topic.slug}-why`, `t-${topic.slug}-example`, `t-${topic.slug}-body`]);
+            const firstChanged = writeup.sections
+              .filter((section) => keys.has(section.key))
+              .flatMap((section) => section.blocks)
+              .find((block) => changed.has(block.id));
+            href = firstChanged ? link(`block-${firstChanged.id}`) : topicHref(topic.slug);
+            label = <bdi>{topic.title}</bdi>;
+          }
+        } else if (item.section !== undefined) {
+          const blocks = writeup.sections.find((section) => section.key === item.section)?.blocks ?? [];
+          const target = blocks.find((block) => changed.has(block.id)) ?? blocks[0];
+          if (target) href = link(`block-${target.id}`);
+          label = WRITEUP_SECTION_NAMES[item.section];
+        }
+        return {
+          key: String(index),
+          blocks: item.blockIds.flatMap((id) => {
+            const block = blocksById.get(id);
+            return block ? [block] : [];
+          }),
+          jump: href ? (
+            <a className="em-needs-topic" href={href}>
+              <span aria-hidden="true">→</span> {label}
+            </a>
+          ) : undefined,
+        };
+      });
+      groups.splice(groups.findIndex((group) => group.key === "tldr") + 1, 0, {
+        key: "newInRevision",
+        heading: "New in this revision",
+        presentation: "newInRevision",
+        blocks: [],
+        news,
+      });
+    }
     if (newLayout) {
       const furtherDown = groups.slice(1).flatMap((group) => {
         const first = group.blocks[0];
@@ -344,32 +393,37 @@ export function Writeup({
           )),
         });
       }
-      computed(
-        frame,
-        "since",
-        "Changed",
-        sinceFact({
-          writeup: { sections: writeup.sections },
-          topics,
-          docs,
-          files,
-          revision: props.revision,
-          changedSince,
-          changedBlocks: props.changedBlocks,
-        }),
-      );
+      if (!showNews)
+        computed(
+          frame,
+          "since",
+          "Changed",
+          sinceFact({
+            writeup: { sections: writeup.sections },
+            topics,
+            docs,
+            files,
+            revision: props.revision,
+            changedSince,
+            changedBlocks: props.changedBlocks,
+          }),
+        );
       const factGroups = [
         { key: "risk", label: "Risk", facts: risk },
         { key: "frame", label: "Frame", facts: frame },
       ].filter((group) => group.facts.length);
       if (factGroups.length)
-        groups.splice(groups[1]?.key === "needsYou" ? 2 : 1, 0, {
-          key: "facts",
-          heading: "Facts",
-          presentation: "facts",
-          blocks: [],
-          factGroups,
-        });
+        groups.splice(
+          groups.findLastIndex((group) => ["tldr", "newInRevision", "needsYou"].includes(group.key)) + 1,
+          0,
+          {
+            key: "facts",
+            heading: "Facts",
+            presentation: "facts",
+            blocks: [],
+            factGroups,
+          },
+        );
     }
     if (ranked.length) {
       const afterIntro =
@@ -377,6 +431,7 @@ export function Writeup({
           [
             "overview",
             "tldr",
+            "newInRevision",
             "needsYou",
             "facts",
             "checked",
@@ -429,6 +484,7 @@ export function Writeup({
   }, [
     writeup.sections,
     writeup.area,
+    writeup.newInRevision,
     writeup.needsYou,
     topics,
     files,

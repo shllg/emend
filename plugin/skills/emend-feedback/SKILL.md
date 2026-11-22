@@ -180,6 +180,12 @@ An empty instruction or one that only limits scope leaves the earlier intent sta
 
 ## Publish the next revision and wait
 
+Write `writeup.newInRevision` fresh for every new revision: one line per change since the
+previous revision, at most 12; the app shows four and folds the rest. Each line names a reviewer
+comment and what became of it, a code change, or a corrected fact. Give it the `topic` slug or
+writeup `section` it changed so it jumps there. Put process news (a rebase, a rerun gate, a review
+round) in the Trail under `decisions`. Never carry lines from an earlier revision.
+
 A doc's `source` must be inside the repository's worktree or inside a folder the user listed in
 `docRoots` in emend's global configuration.
 When publish prints `source is outside the allowed doc roots`, stop and ask the user to run `emend config add docRoots <folder>` for that folder, or to move the doc into the repository. Never run `emend config` or edit emend's configuration yourself.

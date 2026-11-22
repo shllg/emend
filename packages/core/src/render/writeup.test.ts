@@ -648,3 +648,82 @@ test.each([
     expect(blocks).toMatchObject([{ kind: "diagram", html: "", source: "graph TD; A-->B; click A callback" }]);
   expect(rendered.needsYou?.[0]?.blockIds).toEqual(blocks.map((block) => block.id));
 });
+
+test.each([false, true])("renders newInRevision items after the opening in new layout=%s", async (newLayout) => {
+  const input: WriteupInput = {
+    ...writeup,
+    ...(newLayout
+      ? {
+          whyItMatters: "Readers can find books.",
+          review: { level: "everything" as const, reason: "Check the search limit." },
+          checked: "Search tests.",
+        }
+      : {}),
+    needsYou: [{ kind: "answer", text: "Choose the shelf." }],
+    newInRevision: [
+      { text: "Raised the **search limit**.", topic: "search" },
+      { section: "checked", text: "Checked the shorter list." },
+    ],
+  };
+  const rendered = await renderWriteup(input, topics);
+  const index = rendered.sections.findIndex((section) => section.key === "newInRevision");
+  expect(rendered.sections[index - 1]?.key).toBe(newLayout ? "whyItMatters" : "tldr");
+  expect(rendered.sections[index + 1]?.key).toBe("needsYou");
+  expect(rendered.sections[index + 2]?.key).toBe(newLayout ? "review" : "decisions");
+  expect(rendered.sections[0]?.key).toBe(newLayout ? "tldr" : "overview");
+  const section = rendered.sections[index];
+  expect(section).toMatchObject({ key: "newInRevision", label: "New in this revision", topic: null });
+  expect(section?.blocks).toHaveLength(2);
+  expect(section?.blocks[0]?.html).toContain("<strong>search limit</strong>");
+  expect(rendered.newInRevision).toEqual([
+    { topic: "search", blockIds: [section?.blocks[0]?.id] },
+    { section: "checked", blockIds: [section?.blocks[1]?.id] },
+  ]);
+  for (const block of section?.blocks ?? []) expect(BlockId.parse(block.id)).toMatch(/^newInRevision-/);
+});
+
+test("omits empty and missing newInRevision without rendering a section", async () => {
+  const absent = await renderWriteup(writeup, topics);
+  const empty = await renderWriteup({ ...writeup, newInRevision: [] }, topics);
+  expect(absent).not.toHaveProperty("newInRevision");
+  expect(empty).not.toHaveProperty("newInRevision");
+  expect(empty.sections).toEqual(absent.sections);
+  expect(empty.sections.some((section) => section.key === "newInRevision")).toBe(false);
+});
+
+test("newInRevision repeats get unique ids and glossary marks through the Markdown pipeline", async () => {
+  const rendered = await renderWriteup(
+    {
+      ...writeup,
+      glossary: [{ term: "Budget", definition: "Attempts allowed." }],
+      newInRevision: Array.from({ length: 3 }, () => ({
+        text: "Budget budget.",
+      })),
+    },
+    topics,
+  );
+  const blocks = rendered.sections.find((section) => section.key === "newInRevision")?.blocks ?? [];
+  expect(blocks).toHaveLength(3);
+  expect(blocks.map((block) => block.id)).toEqual([blocks[0]?.id, `${blocks[0]?.id}-2`, `${blocks[0]?.id}-3`]);
+  expect(rendered.newInRevision?.map((item) => item.blockIds)).toEqual(blocks.map((block) => [block.id]));
+  for (const block of blocks) expect(block.html).toContain('data-emend-term="0"');
+});
+
+test.each([
+  "Before <script>bad()</script> after",
+  "Before <img src=x onerror=bad()> after",
+  "[Unsafe link](javascript:bad())",
+  '<div onclick="bad()" style="position:fixed" id="raw" class="injected" data-foo="x">Raw HTML</div>',
+  'Before <svg onload="bad()"><circle /></svg> after',
+  '<pre><code class="language-mermaid">graph TD; A--&gt;B; click A callback</code></pre>',
+])("sanitizes hostile newInRevision text %j", async (text) => {
+  const rendered = await renderWriteup({ ...writeup, newInRevision: [{ text }] }, []);
+  const blocks = rendered.sections.find((section) => section.key === "newInRevision")?.blocks ?? [];
+  expect(blocks.length).toBeGreaterThan(0);
+  expect(blocks.map((block) => block.html).join("")).not.toMatch(
+    /<(script|style|iframe|object|embed|form|svg)|\s(on\w+|style|data-[\w-]+)=|javascript:|data:|vbscript:/i,
+  );
+  if (text.includes("language-mermaid"))
+    expect(blocks).toMatchObject([{ kind: "diagram", html: "", source: "graph TD; A-->B; click A callback" }]);
+  expect(rendered.newInRevision?.[0]?.blockIds).toEqual(blocks.map((block) => block.id));
+});

@@ -3,6 +3,8 @@ import {
   GlossaryEntry,
   LIMITS,
   NeedsYouItem,
+  NewInRevisionItem,
+  NewInRevisionSection,
   normalizeGlossaryForm,
   OTHER_TOPIC,
   PublishManifest,
@@ -580,6 +582,102 @@ describe("needsYou", () => {
         expect.objectContaining({
           path: ["writeup", "needsYou", 0, "topic"],
           message: "needsYou topic is not declared",
+        }),
+      );
+    }
+  });
+});
+
+describe("newInRevision", () => {
+  const items = [
+    { text: "Raised the **retry limit**.", topic: "routing" },
+    { section: "checked", text: "Checked the shorter wait." },
+  ] as const;
+
+  test("preserves two items and an empty list and counts item text as Markdown", () => {
+    expect(
+      PublishManifest.parse({ ...manifest, writeup: { ...manifest.writeup, newInRevision: items } }).writeup
+        .newInRevision,
+    ).toEqual(items);
+    expect(WriteupInput.parse({ ...manifest.writeup, newInRevision: [] }).newInRevision).toEqual([]);
+    const input = { overview: "", tldr: "", decisions: "", topics: {}, newInRevision: [...items] };
+    expect(writeupMarkdown(input).filter((text) => text?.trim())).toEqual(items.map((item) => item.text));
+    const full = {
+      ...input,
+      overview: "x".repeat(LIMITS.writeupSectionBytes),
+      tldr: "x".repeat(LIMITS.writeupSectionBytes),
+    };
+    expect(WriteupInput.safeParse({ ...full, newInRevision: [] }).success).toBe(true);
+    expect(WriteupInput.safeParse(full).success).toBe(false);
+  });
+
+  test("refuses a thirteenth item with the limit message", () => {
+    const result = PublishManifest.safeParse({
+      ...manifest,
+      writeup: { ...manifest.writeup, newInRevision: Array.from({ length: 13 }, () => items[0]) },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues).toContainEqual(
+      expect.objectContaining({ path: ["writeup", "newInRevision"], message: "at most 12 newInRevision items" }),
+    );
+    expect(
+      WriteupInput.safeParse({ ...manifest.writeup, newInRevision: Array.from({ length: 12 }, () => items[0]) })
+        .success,
+    ).toBe(true);
+  });
+
+  test.each(["\r", "\n", "\u2028", "\u2029"])("refuses line break %j", (breakChar) => {
+    const result = NewInRevisionItem.safeParse({ ...items[0], text: `First${breakChar}second` });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues).toContainEqual(
+      expect.objectContaining({ path: ["text"], message: "newInRevision text must be one line" }),
+    );
+  });
+
+  test.each(["", " \t ", "\ud800", "x".repeat(301)])("refuses invalid text %j", (text) => {
+    expect(NewInRevisionItem.safeParse({ ...items[0], text }).success).toBe(false);
+  });
+
+  test.each(NewInRevisionSection.options)("accepts section %s and the exact text limit", (section) => {
+    expect(NewInRevisionItem.parse({ section, text: "x".repeat(300) }).section).toBe(section);
+  });
+
+  test("refuses both destinations at section and unknown sections", () => {
+    const result = NewInRevisionItem.safeParse({ ...items[0], section: "checked" });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues).toContainEqual(
+      expect.objectContaining({
+        path: ["section"],
+        message: "a newInRevision item names a topic or a section, not both",
+      }),
+    );
+    for (const section of ["newInRevision", "needsYou", "review", "t-routing-why", "missing"])
+      expect(NewInRevisionItem.safeParse({ text: "Updated the checks.", section }).success).toBe(false);
+    expect(NewInRevisionItem.parse({ text: "Updated the checks." })).toEqual({ text: "Updated the checks." });
+  });
+
+  test("refuses undeclared topics in both publish schemas", () => {
+    const writeup = { ...manifest.writeup, newInRevision: [{ ...items[0], topic: "missing" }] };
+    const results = [
+      PublishManifest.safeParse({ ...manifest, writeup }),
+      PublishRequest.safeParse({
+        reviewKey: "a".repeat(64),
+        repo: null,
+        branch: null,
+        title: manifest.title,
+        base: null,
+        head: null,
+        topics: manifest.topics,
+        files: [],
+        writeup,
+      }),
+    ];
+    for (const result of results) {
+      expect(result.success).toBe(false);
+      expect(result.error?.issues).toContainEqual(
+        expect.objectContaining({
+          path: ["writeup", "newInRevision", 0, "topic"],
+          message: "newInRevision topic is not declared",
         }),
       );
     }

@@ -2,6 +2,7 @@ import {
   type GlossaryTerm,
   LIMITS,
   type NeedsYouKind,
+  type NewInRevisionSection,
   normalizeGlossaryForm,
   type PublishLinks,
   type ReviewVerdict,
@@ -19,6 +20,7 @@ export type RenderedWriteup = {
   sections: { key: string; label: string; topic: string | null; blocks: Block[] }[];
   terms?: GlossaryTerm[];
   area?: string;
+  newInRevision?: { topic?: string; section?: NewInRevisionSection; blockIds: string[] }[];
   needsYou?: { kind: NeedsYouKind; topic?: string; blockIds: string[] }[];
   /** Publish-level links and the repo base, kept beside the sections in the stored blob. */
   links?: PublishLinks;
@@ -64,15 +66,22 @@ export async function renderWriteup(
   const entries = Array.isArray(writeup.glossary) ? writeup.glossary : undefined;
   const terms: GlossaryTerm[] = [];
   const matcher = entries ? termMatcher(entries) : undefined;
-  const needsYou: NonNullable<RenderedWriteup["needsYou"]> = [];
-  const appendNeedsYou = async () => {
-    if (!writeup.needsYou?.length) return;
+  let newInRevision: NonNullable<RenderedWriteup["newInRevision"]> = [];
+  let needsYou: NonNullable<RenderedWriteup["needsYou"]> = [];
+  const appendItems = async <T extends { text: string }, M>(
+    key: string,
+    label: string,
+    items: T[] | undefined,
+    metadata: (item: T, blockIds: string[]) => M,
+  ): Promise<M[]> => {
+    if (!items?.length) return [];
     const blocks: Block[] = [];
+    const result: M[] = [];
     const occurrences = new Map<string, number>();
-    for (const item of writeup.needsYou) {
+    for (const item of items) {
       const rendered = await renderMarkdownWithBudget(
         item.text,
-        "needsYou",
+        key,
         highlightBudget,
         meta.repoUrl,
         meta.media,
@@ -83,19 +92,38 @@ export async function renderWriteup(
         matcher,
       );
       for (const block of rendered) {
-        const base = block.id.slice(0, "needsYou-".length + 8);
+        const base = block.id.slice(0, key.length + 1 + 8);
         const count = (occurrences.get(base) ?? 0) + 1;
         occurrences.set(base, count);
         block.id = count === 1 ? base : `${base}-${count}`;
         blocks.push(block);
       }
-      needsYou.push({
-        kind: item.kind,
-        ...(item.topic !== undefined ? { topic: item.topic } : {}),
-        blockIds: rendered.map((block) => block.id),
-      });
+      result.push(
+        metadata(
+          item,
+          rendered.map((block) => block.id),
+        ),
+      );
     }
-    sections.push({ key: "needsYou", label: "Needs you", topic: null, blocks });
+    sections.push({ key, label, topic: null, blocks });
+    return result;
+  };
+  const appendOpeningItems = async () => {
+    newInRevision = await appendItems(
+      "newInRevision",
+      "New in this revision",
+      writeup.newInRevision,
+      (item, blockIds) => ({
+        ...(item.topic !== undefined ? { topic: item.topic } : {}),
+        ...(item.section !== undefined ? { section: item.section } : {}),
+        blockIds,
+      }),
+    );
+    needsYou = await appendItems("needsYou", "Needs you", writeup.needsYou, (item, blockIds) => ({
+      kind: item.kind,
+      ...(item.topic !== undefined ? { topic: item.topic } : {}),
+      blockIds,
+    }));
   };
   const append = async (key: string, label: string, markdown: string | undefined, topic: string | null = null) => {
     if (markdown === undefined) return;
@@ -130,7 +158,7 @@ export async function renderWriteup(
   ) {
     await append("tldr", "TL;DR", writeup.tldr);
     await append("whyItMatters", "Why it matters", writeup.whyItMatters);
-    await appendNeedsYou();
+    await appendOpeningItems();
     await append("review", "Review", writeup.review ? reviewMarkdown(writeup.review, topics) : undefined);
     await append("checked", "Checked", writeup.checked);
     await append("notChecked", "Not checked", writeup.notChecked);
@@ -142,7 +170,7 @@ export async function renderWriteup(
     // Keep old manifests unchanged, including imports that re-render their source.
     await append("overview", "Overview", writeup.overview);
     await append("tldr", "TL;DR", writeup.tldr);
-    await appendNeedsYou();
+    await appendOpeningItems();
   }
   await append("decisions", "Decisions and drift", writeup.decisions ?? unwrittenDecisions);
   if (entries) {
@@ -202,6 +230,7 @@ export async function renderWriteup(
   }
   return {
     sections,
+    ...(newInRevision.length ? { newInRevision } : {}),
     ...(writeup.needsYou !== undefined ? { needsYou } : {}),
     ...(writeup.area !== undefined ? { area: writeup.area.replace(/\s+/gu, " ").trim() } : {}),
     ...(terms.length ? { terms } : {}),

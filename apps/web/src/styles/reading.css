@@ -402,6 +402,38 @@
     border-radius: 12px;
     padding: 16px 20px;
   }
+  .em-writeup-news {
+    --reading-inset: 23px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    border-left: 3px solid var(--fg-link);
+  }
+  .em-revision-news {
+    --reading-inset: 41px;
+    list-style: disc;
+    margin: 0;
+    padding-inline-start: 18px;
+    color: var(--fg-reading);
+  }
+  .em-revision-news > li {
+    min-width: 0;
+  }
+  .em-revision-news > li + li {
+    margin-top: 12px;
+  }
+  .em-writeup-news .em-revision-news > li::marker {
+    color: var(--fg-3);
+  }
+  .em-revision-news .em-reading-block {
+    --reading-block-gap: 0px;
+    margin-top: 0;
+  }
+  .em-revision-news .em-prose :is(p, ul, ol, li) {
+    margin-block: 0;
+  }
+  .em-writeup-news .em-writeup-details {
+    margin-top: 16px;
+  }
   .em-writeup-needs {
     --reading-inset: 23px;
     border-left: 3px solid var(--ochre-400);
@@ -433,6 +465,9 @@
   }
   .em-needs-topic:hover {
     text-decoration: underline;
+  }
+  .em-writeup-news .em-needs-topic {
+    max-width: 100%;
   }
   /* A Markdown doc's TL;DR section: its heading reads as the card's kicker. */
   .em-reading-block + .em-doc-tldr {

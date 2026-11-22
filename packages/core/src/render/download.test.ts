@@ -3750,3 +3750,44 @@ test("downloads Needs you with each kind before its blocks and supports missing 
     );
   }
 });
+
+test("downloads New in this revision as an h2 with the lines in order, with or without metadata", async () => {
+  const blocks: RenderedBlock[] = ["Fixed seed spacing.", "Corrected the planting date."].map((line, index) => ({
+    id: `newInRevision-0123abc${index}`,
+    section: "newInRevision",
+    kind: "paragraph",
+    html: `<p>${line}</p>`,
+    text: line,
+  }));
+  for (const metadata of [false, true]) {
+    const html = await buildWriteupDownload({
+      title: "Synthetic review",
+      details,
+      resolveMedia: async () => null,
+      topics: [{ slug: "seed", title: "Seeds", summary: "Plant seeds.", importance: 10 }],
+      writeup: {
+        sections: [
+          { key: "tldr", label: "TL;DR", topic: null, blocks: [] },
+          { key: "newInRevision", label: "New in this revision", topic: null, blocks },
+          { key: "needsYou", label: "Needs you", topic: null, blocks: [] },
+        ],
+        ...(metadata ? { newInRevision: blocks.map((block) => ({ blockIds: [block.id] })) } : {}),
+      },
+    });
+    const nodes = parsed(html);
+    expect(nodes.filter((node) => node.tagName === "h2").map((node) => hastText(node))).toEqual([
+      "TL;DR",
+      "New in this revision",
+      "Needs you",
+      "Topics",
+    ]);
+    const section = nodes.find(
+      (node) => node.tagName === "section" && hastText(node).startsWith("New in this revision"),
+    );
+    expect(section).toBeDefined();
+    expect(section?.children.filter((node) => node.type === "element").map((node) => hastText(node))).toEqual([
+      "New in this revision",
+      ...blocks.map((block) => block.text),
+    ]);
+  }
+});

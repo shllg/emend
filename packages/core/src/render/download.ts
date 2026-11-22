@@ -940,6 +940,7 @@ export async function buildWriteupDownload(
         "overview",
         "tldr",
         "whyItMatters",
+        "newInRevision",
         "needsYou",
         "review",
         "checked",

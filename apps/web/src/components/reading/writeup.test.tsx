@@ -6,6 +6,7 @@ import {
   RenderedWriteup,
   type ThreadView,
   type TopicMeta,
+  type WriteupInput,
 } from "@emend/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -2366,4 +2367,244 @@ test("a Needs you section without metadata keeps its generic blocks, and missing
   );
   expect(next.container.querySelectorAll(".em-writeup-needs [data-block-id]")).toHaveLength(1);
   expect(next.container.querySelector(`#block-${need.id}`)).not.toBeNull();
+});
+
+async function newsWriteup(
+  items: NonNullable<WriteupInput["newInRevision"]> = [
+    { text: "Corrected seed spacing.", topic: "seed" },
+    { text: "Added a dry-soil check.", section: "checked" },
+    { text: "Corrected the planting date." },
+  ],
+) {
+  return RenderedWriteup.parse(
+    await renderWriteup(
+      {
+        overview: "- **Goal:** Healthy plants.\n- **Change:** More water.",
+        tldr: "Keep the garden growing.",
+        whyItMatters: "More plants survive.",
+        newInRevision: items,
+        needsYou: [{ kind: "answer", text: "When should the seeds arrive?" }],
+        checked: "Wet soil check.\n\nDry soil check.",
+        decisions: "Keep the soil.",
+        topics: {
+          seed: { why: "The soil dries.\n\nSpace the seeds.", example: "Plant two rows.", body: "Water daily." },
+        },
+      },
+      [topic],
+    ),
+  );
+}
+
+function newsSection(writeup: RenderedWriteup, key: string) {
+  const section = writeup.sections.find((section) => section.key === key);
+  if (!section) throw new Error(`Missing synthetic section ${key}`);
+  return section;
+}
+
+test.each([false, true])(
+  "revision news follows TL;DR before Needs you and Facts, with changed targets=%s",
+  async (changed) => {
+    const writeup = await newsWriteup();
+    const why = newsSection(writeup, "t-seed-why").blocks;
+    const example = newsSection(writeup, "t-seed-example").blocks;
+    const checked = newsSection(writeup, "checked").blocks;
+    const changedBlocks = [example[0], why[1], checked[1]].flatMap((block) =>
+      block ? [{ blockId: block.id, revision: 2 }] : [],
+    );
+    const { container } = mount(
+      <Writeup
+        {...props}
+        writeup={writeup}
+        topics={[topic]}
+        changedSince={1}
+        changedBlocks={changed ? changedBlocks : []}
+        search={{ tab: "writeup", rev: 2 }}
+      />,
+    );
+    const order = [...container.querySelectorAll("[data-reading-section]")].map((group) =>
+      group.getAttribute("data-reading-section"),
+    );
+    expect(order.slice(0, 4)).toEqual(["tldr", "newInRevision", "needsYou", "facts"]);
+    const card = container.querySelector<HTMLElement>(".em-writeup-news");
+    if (!card) throw new Error("Missing revision news card");
+    expect(within(card).getByRole("heading", { name: "New in this revision" })).toBeTruthy();
+    expect(card.classList.contains("em-writeup-card")).toBe(true);
+    const links = within(card).getAllByRole("link");
+    expect(links).toHaveLength(2);
+    expect(links[0]?.getAttribute("href")).toBe(
+      `/r/${reviewId}?tab=writeup&rev=2#${changed ? `block-${why[1]?.id}` : "topic-seed"}`,
+    );
+    expect(links[0]?.querySelector("bdi")?.textContent).toBe(topic.title);
+    expect(links[0]?.querySelector('[aria-hidden="true"]')?.textContent).toBe("→");
+    expect(links[1]?.getAttribute("href")).toBe(
+      `/r/${reviewId}?tab=writeup&rev=2#block-${checked[changed ? 1 : 0]?.id}`,
+    );
+    expect(links[1]?.textContent).toContain("Checked");
+    expect(within(card).getByText("Corrected the planting date.").closest("li")?.querySelector("a")).toBeNull();
+    expect(container.querySelector('[data-fact="since"]')).toBeNull();
+  },
+);
+
+test.each(["first", "absent", "empty", "missing-section"] as const)(
+  "revision news stays absent for %s and keeps the Since fact",
+  async (scenario) => {
+    const rendered = await newsWriteup();
+    const writeup =
+      scenario === "first"
+        ? rendered
+        : {
+            ...rendered,
+            newInRevision: scenario === "missing-section" ? rendered.newInRevision : undefined,
+            sections: rendered.sections.filter((section) => section.key !== "newInRevision"),
+          };
+    if (scenario === "empty") {
+      const empty = await newsWriteup([]);
+      expect(empty).not.toHaveProperty("newInRevision");
+      writeup.sections = empty.sections;
+    }
+    const { container } = mount(
+      <Writeup
+        {...props}
+        revision={scenario === "first" ? 1 : 2}
+        changedSince={1}
+        changedBlocks={[{ blockId: newsSection(writeup, "tldr").blocks[0]?.id ?? "", revision: 2 }]}
+        writeup={writeup}
+        topics={[topic]}
+      />,
+    );
+    expect(container.querySelector('[data-reading-section="newInRevision"]')).toBeNull();
+    const since = container.querySelector('[data-fact="since"]');
+    if (scenario === "first") expect(since).toBeNull();
+    else expect(since?.textContent).toContain("Since revision 1:");
+  },
+);
+
+test("revision news folds after four lines and suppresses only its own changed markers", async () => {
+  const writeup = await newsWriteup(
+    Array.from({ length: 5 }, (_, index) => ({ text: `Updated planting row ${index + 1}.` })),
+  );
+  const news = newsSection(writeup, "newInRevision");
+  const tldr = newsSection(writeup, "tldr");
+  const { container } = mount(
+    <Writeup
+      {...props}
+      writeup={writeup}
+      changedBlocks={[...news.blocks, ...tldr.blocks].map((block) => ({ blockId: block.id, revision: 2 }))}
+    />,
+  );
+  const card = container.querySelector<HTMLElement>(".em-writeup-news");
+  if (!card) throw new Error("Missing revision news card");
+  const visible = card.querySelector(".em-revision-news");
+  expect(visible?.children).toHaveLength(4);
+  expect(visible?.textContent).not.toContain("Updated planting row 5.");
+  const fold = card.querySelector("details");
+  expect(fold?.open).toBe(false);
+  expect(fold?.querySelector("summary")?.textContent).toBe("and 1 more");
+  expect(fold?.querySelector(".em-revision-news")?.children).toHaveLength(1);
+  expect(fold?.textContent).toContain("Updated planting row 5.");
+  expect(card.textContent).not.toContain("Changed in rev");
+  expect(card.querySelector(".em-reading-block__change")).toBeNull();
+  expect(container.querySelector('[data-reading-section="tldr"]')?.textContent).toContain("Changed in rev 2");
+  const summary = fold?.querySelector("summary");
+  if (!summary) throw new Error("Missing revision news fold");
+  fireEvent.click(summary);
+  await waitFor(() => expect(fold?.open).toBe(true));
+});
+
+test("revision news without metadata stays a generic section, with the Since fact", async () => {
+  const rendered = await newsWriteup();
+  const { newInRevision: _metadata, ...writeup } = rendered;
+  const { container } = mount(<Writeup {...props} writeup={writeup} changedSince={1} />);
+  expect(container.querySelector(".em-writeup-news")).toBeNull();
+  const generic = container.querySelector('[data-reading-section="newInRevision"]');
+  expect(generic?.textContent).toContain("Corrected seed spacing.");
+  expect(generic?.querySelectorAll("[data-block-id]")).toHaveLength(3);
+  expect(container.querySelector('[data-fact="since"]')?.textContent).toContain("Since revision 1:");
+});
+
+test("a revision news thread stays on its block and counts in the outline", async () => {
+  const writeup = await newsWriteup();
+  const news = newsSection(writeup, "newInRevision").blocks[0];
+  if (!news) throw new Error("Missing revision news block");
+  const target = { kind: "writeup-span" as const, ...blockAnchor(news) };
+  const thread: ThreadView = {
+    id: reviewId,
+    createdOn: 2,
+    state: "open",
+    target,
+    placement: {
+      status: "placed",
+      location: { kind: "writeup-span", blockId: news.id, start: 0, end: news.text.length },
+    },
+    comments: [{ id: reviewId, author: "user", body: "The spacing is clearer.", sent: false, sentOn: null }],
+  };
+  const { container } = mount(<Writeup {...props} writeup={writeup} threads={[thread]} />);
+  expect(screen.queryByRole("region", { name: "Comments on hidden text" })).toBeNull();
+  const outline = screen.getByRole("navigation", { name: "Writeup outline" });
+  expect(within(outline).getByRole("button", { name: /New in this revision/ }).textContent).toContain("1 comment");
+  const wrapper = container.querySelector(`#block-${news.id}`)?.closest<HTMLElement>(".em-reading-block");
+  if (!wrapper) throw new Error("Missing commentable news block");
+  expect(wrapper.closest(".em-writeup-news")).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
+  expect(screen.getByText("The spacing is clearer.")).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("dialog", { name: "Comment thread" }), { key: "Escape" });
+  fireEvent.click(within(wrapper).getByRole("button", { name: "Comment on block" }));
+  fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "Keep this spacing." } });
+  fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+  expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body).target).toEqual(target);
+});
+
+test.each(["writeup", "diff", "empty", "unknown"] as const)(
+  "revision news handles %s topic targets and isolates hostile titles",
+  async (destination) => {
+    const hostile = { ...topic, title: "<img src=x onerror=alert(1)>" };
+    const writeup = RenderedWriteup.parse(
+      await renderWriteup(
+        {
+          overview: "",
+          tldr: "Keep the garden growing.",
+          decisions: "",
+          topics: destination === "writeup" ? { seed: { why: "Space the seeds." } } : {},
+          newInRevision: [
+            { text: "Corrected seed spacing.", topic: destination === "unknown" ? "unknown" : topic.slug },
+          ],
+        },
+        [hostile],
+      ),
+    );
+    const { container } = mount(
+      <Writeup
+        {...props}
+        phone
+        writeup={writeup}
+        topics={[hostile]}
+        files={destination === "empty" ? [] : [file]}
+        search={{ tab: "writeup", rev: 2 }}
+      />,
+    );
+    const jump = container.querySelector(".em-writeup-news .em-needs-topic");
+    if (destination === "writeup" || destination === "diff") {
+      expect(jump?.getAttribute("href")).toBe(
+        destination === "diff"
+          ? `/r/${reviewId}?tab=diff&rev=2#diff-topic-seed`
+          : `/r/${reviewId}?tab=writeup&rev=2#topic-seed`,
+      );
+      expect(jump?.querySelector("bdi")?.textContent).toBe(hostile.title);
+      expect(jump?.querySelector("img")).toBeNull();
+    } else expect(jump).toBeNull();
+  },
+);
+
+test("revision news skips missing block ids and empty or missing section targets", async () => {
+  const writeup = await newsWriteup([
+    { text: "Corrected the terms.", section: "glossary" },
+    { text: "Removed the old context.", section: "context" },
+  ]);
+  writeup.sections.push({ key: "glossary", label: "Glossary", topic: null, blocks: [] });
+  writeup.newInRevision?.[0]?.blockIds.unshift("newInRevision-ffffffff");
+  const { container } = mount(<Writeup {...props} writeup={writeup} />);
+  const card = container.querySelector(".em-writeup-news");
+  expect(card?.querySelectorAll("[data-block-id]")).toHaveLength(2);
+  expect(card?.querySelector("a")).toBeNull();
 });

@@ -132,6 +132,38 @@ export const WriteupArea = z
   );
 export type WriteupArea = z.infer<typeof WriteupArea>;
 
+export const NewInRevisionSection = z.enum([
+  "overview",
+  "tldr",
+  "whyItMatters",
+  "checked",
+  "notChecked",
+  "outOfScope",
+  "whereToLook",
+  "context",
+  "decisions",
+  "glossary",
+]);
+export type NewInRevisionSection = z.infer<typeof NewInRevisionSection>;
+
+export const NewInRevisionItem = z
+  .object({
+    text: z
+      .string()
+      .min(1)
+      .max(LIMITS.newInRevisionChars)
+      .refine((text) => /\S/.test(text), "newInRevision text must not be blank")
+      .refine((text) => text.isWellFormed(), "newInRevision text must be well-formed UTF-16")
+      .refine((text) => !/[\r\n\u2028\u2029]/u.test(text), "newInRevision text must be one line"),
+    topic: TopicSlug.optional(),
+    section: NewInRevisionSection.optional(),
+  })
+  .refine((item) => item.topic === undefined || item.section === undefined, {
+    path: ["section"],
+    message: "a newInRevision item names a topic or a section, not both",
+  });
+export type NewInRevisionItem = z.infer<typeof NewInRevisionItem>;
+
 export const NeedsYouKind = z.enum(["decide", "accept", "confirm-drift", "answer"]);
 export type NeedsYouKind = z.infer<typeof NeedsYouKind>;
 
@@ -152,6 +184,7 @@ const writeupInput = z.object({
   overview: markdown,
   tldr: markdown,
   whyItMatters: nonBlankMarkdown.optional(),
+  newInRevision: z.array(NewInRevisionItem).max(LIMITS.newInRevisionItems, "at most 12 newInRevision items").optional(),
   needsYou: z
     .array(NeedsYouItem)
     .max(LIMITS.needsYouItems, `at most ${LIMITS.needsYouItems} needsYou items`)
@@ -184,6 +217,7 @@ export function writeupMarkdown(writeup: WriteupInput): (string | null | undefin
     writeup.overview,
     writeup.tldr,
     ...(writeup.whyItMatters !== undefined ? [writeup.whyItMatters] : []),
+    ...(writeup.newInRevision ?? []).map((item) => item.text),
     ...(writeup.needsYou ?? []).map((item) => item.text),
     writeup.review?.reason,
     writeup.checked,
@@ -290,6 +324,15 @@ export const PublishManifest = z
           code: "custom",
           path: ["writeup", "review", "topics", index],
           message: "review topic is not declared",
+        });
+      }
+    }
+    for (const [index, item] of (manifest.writeup.newInRevision ?? []).entries()) {
+      if (item.topic !== undefined && !topics.has(item.topic)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["writeup", "newInRevision", index, "topic"],
+          message: "newInRevision topic is not declared",
         });
       }
     }

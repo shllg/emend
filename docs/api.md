@@ -1010,6 +1010,15 @@ suppress marks in the next comparison.
 both fields are optional in the view, and revisions published before they existed omit them.
 `RenderedWriteup.area?: WriteupArea` is the plain-text area, with whitespace collapsed and trimmed.
 An invalid stored area is omitted.
+`RenderedWriteup.newInRevision?` holds 1–12 entries `{ topic?: TopicSlug, section?: NewInRevisionSection, blockIds: BlockId[] }`.
+Each entry lists its rendered blocks in order; every id must have the `newInRevision-` prefix.
+An empty input list is the same as an absent one: no section and no metadata. Invalid stored
+metadata, including an empty list, is omitted without refusing the revision. From revision 2,
+the app shows a "New in this revision" card after TL;DR and before Needs you and Facts: four
+lines show, with the rest under "and N more". While the card shows, the Changed (Since) fact is
+omitted. A topic jump uses its first changed writeup block, or its topic group (else diff topic);
+a section jump uses its first changed block, or its first block. Changed means since the
+reviewer's last Send, through this revision. Missing targets have no jump.
 `RenderedWriteup.needsYou?` holds at most 4 entries `{ kind: NeedsYouKind, topic?: TopicSlug, blockIds: BlockId[] }`.
 Each entry lists its rendered blocks in order; every id must belong to the `needsYou` section.
 An empty input list stays `[]` with no section; an absent field stays absent. An invalid stored
@@ -1023,7 +1032,7 @@ names the entry's first glossary block. Old revisions, empty lists and Markdown 
 Base/head are nullable full commit hashes; head also permits `worktree`.
 `main` is `"writeup" | FilePath | null`: the manifest's main page, or null when omitted.
 `writeupEmpty` is a boolean computed at publish from the source Markdown, before rendering:
-true only when overview, tldr, whyItMatters, every needsYou item's text, the review verdict's reason, checked, notChecked, outOfScope,
+true only when overview, tldr, whyItMatters, every newInRevision and needsYou item's text, the review verdict's reason, checked, notChecked, outOfScope,
 whereToLook, context, decisions, glossary, and every topic's why, example and body are missing or
 whitespace only. The plain-text area does not make a writeup non-empty. Both fields are stored
 on the revision; revisions predating these fields read as `main: null`, `writeupEmpty: false` and keep opening on Writeup.
@@ -1050,7 +1059,7 @@ Both are absent without a mark. Marks follow the current path, including for ren
 
 `RenderedBlock = { id: BlockId, section, kind, html, text, source? }` mirrors core's `Block`.
 Kinds are `heading | paragraph | item | code | table | quote | diagram`; diagram source is optional.
-`RenderedWriteup = { area?: WriteupArea, needsYou?: { kind: NeedsYouKind, topic?: TopicSlug, blockIds: BlockId[] }[], terms?: GlossaryTerm[], sections: { key, label, topic: string | null, blocks: RenderedBlock[] }[] }`
+`RenderedWriteup = { area?: WriteupArea, newInRevision?: { topic?: TopicSlug, section?: NewInRevisionSection, blockIds: BlockId[] }[], needsYou?: { kind: NeedsYouKind, topic?: TopicSlug, blockIds: BlockId[] }[], terms?: GlossaryTerm[], sections: { key, label, topic: string | null, blocks: RenderedBlock[] }[] }`
 mirrors core's rendered writeup. These are server-rendered blocks, never browser-rendered Markdown.
 Markdown docs are `{ path, kind: "markdown", blocks: RenderedBlock[] }` (empty if unrendered).
 HTML docs are `{ path, kind: "html", contentUrl, look?: "emend" | "custom", colorScheme?: "light", images?: FilePath[] }`.
@@ -1611,10 +1620,11 @@ to make a read fit a per-Send or per-revision limit. The limits below apply to t
 | `RevisionView.topics` | `topicsPerReview + 1` (201): up to 200 declared topics plus the reserved Other changes entry, as in publish |
 | `RevisionView.files`, `RevisionView.docs` | Each at most `filesPerRevision` (10000), the publish file limit |
 | `FileView.order` | Zero through `filesPerRevision - 1` (9999), the publisher's zero-based file-array index |
-| `RenderedWriteup.sections` | At most `12 + 3 * topicsPerReview` (612): twelve fixed sections and Why/Example/Details for each writeup topic |
+| `RenderedWriteup.sections` | At most `13 + 3 * topicsPerReview` (613): thirteen fixed sections and Why/Example/Details for each writeup topic |
+| `RenderedWriteup.newInRevision` | Optional array of 1–`newInRevisionItems` (12) entries; each has optional `TopicSlug` and `NewInRevisionSection`, and at most `blocksPerRevision` validated `newInRevision-` block IDs. Invalid stored values are omitted |
 | `RenderedWriteup.needsYou` | Optional array of at most `needsYouItems` (4) entries; each has a `NeedsYouKind`, optional `TopicSlug`, and at most `blocksPerRevision` validated `needsYou-` block IDs. Invalid stored values are omitted |
 | `RenderedWriteup.terms` | Optional array of at most `glossaryTerms` (50) entries: `term` 1–`glossaryTermChars` (100) characters, plain-text `definition` 0–`glossaryDefinitionChars` (2000) characters, and a validated `blockId: BlockId` |
-| `RenderedWriteup.sections[].key`, `RenderedBlock.section` | Renderer-generated keys: overview, tldr, whyItMatters, needsYou, review, checked, notChecked, outOfScope, whereToLook, context, decisions, glossary or `t-<TopicSlug>-why/example/body`; block sections also allow `doc-<hash8>`. TopicSlug permits 1–64 characters, so the longest topic section key is 74 characters |
+| `RenderedWriteup.sections[].key`, `RenderedBlock.section` | Renderer-generated keys: overview, tldr, whyItMatters, newInRevision, needsYou, review, checked, notChecked, outOfScope, whereToLook, context, decisions, glossary or `t-<TopicSlug>-why/example/body`; block sections also allow `doc-<hash8>`. TopicSlug permits 1–64 characters, so the longest topic section key is 74 characters |
 | `RenderedWriteup.sections[].label` | `titleChars + " — Example".length` (210), the longest renderer suffix appended to a topic title |
 | Section `blocks` and Markdown doc `blocks` | Each at most `blocksPerRevision` (100000); the same limit also applies to all writeup blocks combined and to writeup plus doc blocks combined |
 | `RenderedBlock.html`, `text`, `source` | Each bounded by `renderedBytesPerRevision` (268435456) UTF-8 bytes, the stored renderer output budget; source is optional |
@@ -1891,7 +1901,7 @@ There are at most `topicsPerReview` declared topics plus the optional generated 
 topic (importance 100, last); at most `filesPerRevision` files. Base and head are null together.
 `PublishFile = { path, oldPath: FilePath | null, role, status?, topic?, title?, view?: DocView, oldBlob: sha256 | null,
 newBlob: sha256 | null, flag: FileFlag | null, parent?: FilePath, assets?: FilePath[], notes?: AgentNote[] }`. Paths and topic slugs are
-unique within their namespaces (diffs; rendered docs and assets; source docs); file, writeup, needsYou and review-verdict topics must be declared.
+unique within their namespaces (diffs; rendered docs and assets; source docs); file, writeup, newInRevision, needsYou and review-verdict topics must be declared.
 `assets` is required for rendered HTML docs (including an empty array), optional for rendered Markdown
 docs, and absent on other files, including source-view docs. Lists contain no duplicates, and each
 path names a request asset inside the doc's folder. Markdown lists allow only png, jpg, jpeg, gif,
@@ -2037,11 +2047,28 @@ text. There are at most `topicsPerReview` declared topics and writeup topic keys
 blast-radius scopes and notes obey `summaryChars`, `blastScopeChars` and `blastNoteChars`.
 Markdown strings are preserved exactly; the schema does not render or sanitize them.
 
-`WriteupInput = { overview, tldr, whyItMatters?, needsYou?: NeedsYouItem[], area?, review?, checked?, notChecked?, outOfScope?, whereToLook?, context?, decisions: string | null, glossary?, topics }`.
-Sections are Markdown strings, except `needsYou?: NeedsYouItem[]`, `area?: WriteupArea`, `glossary?: string | GlossaryEntry[]` and `review?: ReviewVerdict`;
+`WriteupInput = { overview, tldr, whyItMatters?, newInRevision?: NewInRevisionItem[], needsYou?: NeedsYouItem[], area?, review?, checked?, notChecked?, outOfScope?, whereToLook?, context?, decisions: string | null, glossary?, topics }`.
+Sections are Markdown strings, except `newInRevision?: NewInRevisionItem[]`, `needsYou?: NeedsYouItem[]`, `area?: WriteupArea`, `glossary?: string | GlossaryEntry[]` and `review?: ReviewVerdict`;
 `topics` maps slugs to `{ why, example?, body? }`, also Markdown. Decisions is
 required, with `null` representing no decisions section.
 `whyItMatters` is nonblank Markdown: what the change gives the product or prepares for.
+`newInRevision` is optional and additive under `/api/v1`, holding at most `newInRevisionItems` (12) items.
+`NewInRevisionSection = "overview" | "tldr" | "whyItMatters" | "checked" | "notChecked" | "outOfScope" | "whereToLook" | "context" | "decisions" | "glossary"`.
+`NewInRevisionItem = { text: string, topic?: TopicSlug, section?: NewInRevisionSection }`: text is nonblank,
+well-formed UTF-16 Markdown of 1–`newInRevisionChars` (300) characters on one line. Blank text is
+refused with `newInRevision text must not be blank`; malformed UTF-16 with
+`newInRevision text must be well-formed UTF-16`; CR, LF, U+2028 and U+2029 with
+`newInRevision text must be one line`. Naming both topic and section is refused at `section`
+with `a newInRevision item names a topic or a section, not both`. A topic must be declared;
+both publish schemas report `newInRevision topic is not declared` at `writeup.newInRevision.<index>.topic`.
+A thirteenth item is refused with `at most 12 newInRevision items`; the CLI reports
+`invalid publish manifest: writeup.newInRevision (at most 12 items)`.
+For an invalid section the CLI reports `writeup.newInRevision.<index>.section (overview, tldr, whyItMatters, checked, notChecked, outOfScope, whereToLook, context, decisions or glossary)`.
+For an invalid topic slug it reports `writeup.newInRevision.<index>.topic (topic slug: lowercase letters, digits and -, at most 64)`;
+for an undeclared topic, `writeup.newInRevision.<index>.topic (newInRevision topic is not declared)`.
+These forms follow `invalid publish manifest: `. The endpoint refuses an invalid list with
+`400 invalid_request` before storing a revision. An empty list gives no section or metadata.
+The app shows the card only from revision 2; a first publish leaves the field out.
 `needsYou` is optional and holds at most `needsYouItems` (4) items.
 `NeedsYouKind = "decide" | "accept" | "confirm-drift" | "answer"`.
 `NeedsYouItem = { kind: NeedsYouKind, text: string, topic?: TopicSlug }`: text is nonblank,
@@ -2077,13 +2104,16 @@ Not checked, Overview, Out of scope, Where to look, Context, Decisions and drift
 topics; absent optional fields emit no section.
 Without them, the existing order stays Overview, TL;DR, Decisions and drift, Glossary, then topics,
 including when an import re-renders stored source.
-A nonempty `needsYou` list adds a Needs you section after Why it matters in the new order,
-or after TL;DR in the old order. It does not select the new layout by itself. Each item's text
-renders separately through the same sanitizer, with unique block IDs across the list.
+Nonempty `newInRevision` and `needsYou` lists add New in this revision and Needs you sections,
+in that order: after Why it matters and before Review in the new order, or after TL;DR and
+before Decisions in the old order. Neither field selects the new layout by itself. Each item's
+text renders separately through the same sanitizer, link hardener and Shiki pipeline, with
+unique block IDs across its list (`-2`, `-3` suffixes for repeats). The download includes New in
+this revision as an h2 followed by the items' blocks in order.
 Every Markdown string is limited to `writeupSectionBytes` UTF-8 bytes; the sum of all present
 `overview`, `tldr`, `whyItMatters`, `outOfScope`, `whereToLook`, `context`, `decisions`, `glossary`, `why`, `example`
 and `body` strings, including every list glossary term, definition and alias, is limited to
-`writeupBytes`. Each `needsYou` item's `text`, the verdict's `reason`, `checked` and `notChecked` count toward both limits too.
+`writeupBytes`. Each `newInRevision` and `needsYou` item's `text`, the verdict's `reason`, `checked` and `notChecked` count toward both limits too.
 These limits measure UTF-8 bytes, not character count. Parsed `topics` has a null
 prototype: an absent `topics["constructor"]` is `undefined`, while an explicitly declared
 `constructor` topic remains accessible and serializes normally.
@@ -2597,6 +2627,8 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `agentNotesPerFile` | 8 notes |
 | `agentNotesPerRevision` | 64 notes |
 | `areaChars` | 60 characters of plain text in a writeup area |
+| `newInRevisionItems` | 12 items per writeup |
+| `newInRevisionChars` | 300 characters per item, on one line |
 | `needsYouItems` | 4 items per writeup |
 | `needsYouChars` | 300 characters per item, on one line |
 | `pathChars` | 4096 characters per path or source; also per publish URL or block id |
@@ -2638,7 +2670,7 @@ that exceed the remaining budget are listed as oversized without uploading their
 - Blob hashes are lowercase 64-character hex SHA-256 digests, addressed per owner.
 - Block ids are `<section>-<hash8>`. `hash8` is the first eight lowercase hex characters of SHA-256
   over block text normalized to NFC, whitespace runs collapsed to one space, and trimmed. Repeats
-  within a section append `-2`, `-3`, and so on. Section keys are `overview`, `tldr`, `whyItMatters`, `needsYou`, `review`,
+  within a section append `-2`, `-3`, and so on. Section keys are `overview`, `tldr`, `whyItMatters`, `newInRevision`, `needsYou`, `review`,
   `checked`, `notChecked`, `outOfScope`, `whereToLook`, `context`, `decisions`, `glossary`,
   `t-<slug>-why`, `t-<slug>-example`, `t-<slug>-body`, and
   `doc-<hash8 of the doc path>`. The complete block id is bounded by `pathChars`.

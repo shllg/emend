@@ -13,16 +13,19 @@ function expectedForm(issue: ManifestIssue): string {
   if (issue.path.length === 1 && field === "head") return "a full commit hash or worktree";
   const review = issue.path[0] === "writeup" && issue.path[1] === "review";
   if (review && field === "level") return "skim, topics or everything";
+  const newInRevision = issue.path[0] === "writeup" && issue.path[1] === "newInRevision";
+  if (newInRevision && typeof issue.path[2] === "number" && field === "section")
+    return "overview, tldr, whyItMatters, checked, notChecked, outOfScope, whereToLook, context, decisions or glossary";
   const needsYou = issue.path[0] === "writeup" && issue.path[1] === "needsYou";
   if (needsYou && typeof issue.path[2] === "number" && field === "kind")
     return "decide, accept, confirm-drift or answer";
-  if (needsYou && issue.path.length === 2 && issue.code === "too_big" && issue.origin === "array")
+  if ((needsYou || newInRevision) && issue.path.length === 2 && issue.code === "too_big" && issue.origin === "array")
     return `at most ${issue.maximum} items`;
   const topic = issue.path[0] === "topics" && typeof issue.path[1] === "number";
   if (
     (topic && field === "slug") ||
     (review && issue.path[2] === "topics" && typeof field === "number") ||
-    (needsYou && typeof issue.path[2] === "number" && field === "topic") ||
+    ((needsYou || newInRevision) && typeof issue.path[2] === "number" && field === "topic") ||
     (issue.path[0] === "files" && field === "topic") ||
     (issue.code === "invalid_key" && issue.path[0] === "writeup" && issue.path[1] === "topics")
   )

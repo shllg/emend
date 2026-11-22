@@ -156,6 +156,14 @@ Pick a key unique to this review, such as the doc's name and today's date
 (`offline-sync-plan-2026-11-02`). A key names one review: publishing with a key that is already in use adds
 a revision to that review.
 
+`newInRevision` is an optional list of `{ "text": "<one line>", "topic": "<slug>" }`
+or `{ "text": "<one line>", "section": "<section>" }`.
+Use at most 12 items, each nonblank Markdown on one line of at most 300 characters. Give an item
+an optional `topic` or `section`, not both; a topic must be declared. The section is `overview`,
+`tldr`, `whyItMatters`, `checked`, `notChecked`, `outOfScope`, `whereToLook`, `context`, `decisions`
+or `glossary`. A first publish leaves it out; emend-feedback writes it fresh for later revisions.
+From revision 2, the card follows TL;DR, shows four lines and folds the rest. An empty list gives no card.
+
 `needsYou` is an optional list of `{ "kind": "decide" | "accept" | "confirm-drift" | "answer", "text": "<one line>", "topic": "<slug>" }`.
 Each text is nonblank Markdown, at most 300 characters on one line. The topic is optional and must be declared.
 Use at most 4 items; publish refuses a fifth. `[]` says nothing needs a decision.

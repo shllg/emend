@@ -606,6 +606,7 @@ test("review guidance lists the opening fields in display order", () => {
   expect([...writing.matchAll(/^- `([^`]+)`:/gm)].map((match) => match[1])).toEqual([
     "tldr",
     "whyItMatters",
+    "newInRevision",
     "needsYou",
     "area",
     "checked",
@@ -1156,4 +1157,39 @@ test.each(["docs/api.md", "docs/usage.md"])("%s explains Markdown image discover
   expect(text).toContain("warns once");
   expect(text).toContain("published without images: image discovery failed or timed out");
   expect(text).toContain("some images left out: too many image references");
+});
+
+test("revision news guidance writes only fresh changes and keeps process in the Trail", () => {
+  const review = read("plugin/skills/emend-review/SKILL.md").replace(/\s+/g, " ");
+  expect(review).toContain(
+    "`newInRevision`: leave it out on a first publish; emend-feedback writes it for each later revision.",
+  );
+  const feedback = read("plugin/skills/emend-feedback/SKILL.md")
+    .split("## Publish the next revision and wait\n")[1]
+    ?.split("\n## ")[0]
+    ?.replace(/\s+/g, " ");
+  for (const rule of [
+    "Write `writeup.newInRevision` fresh for every new revision",
+    "one line per change since the previous revision",
+    "at most 12",
+    "the app shows four and folds the rest",
+    "a reviewer comment and what became of it, a code change, or a corrected fact",
+    "the `topic` slug or writeup `section` it changed",
+    "Put process news (a rebase, a rerun gate, a review round) in the Trail under `decisions`",
+    "Never carry lines from an earlier revision",
+  ])
+    expect(feedback).toContain(rule);
+  const manifest = read("plugin/skills/emend-review/references/manifest.md")
+    .split("`newInRevision` is an optional list")[1]
+    ?.split("`needsYou`")[0]
+    ?.replace(/\s+/g, " ");
+  for (const rule of [
+    '"text": "<one line>"',
+    "at most 12 items",
+    "one line of at most 300 characters",
+    "`topic` or `section`, not both",
+    "a topic must be declared",
+    "A first publish leaves it out; emend-feedback writes it fresh for later revisions",
+  ])
+    expect(manifest).toContain(rule);
 });
