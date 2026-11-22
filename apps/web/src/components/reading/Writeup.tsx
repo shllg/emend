@@ -1,6 +1,7 @@
 import type { RenderedWriteup, RevisionView } from "@emend/contract";
 import { ChevronLeft, ChevronRight, CircleAlert, CircleCheck } from "lucide-react";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { type CodeFocus, sameCodeFocus } from "../../lib/code-focus.ts";
 import { plural } from "../../lib/count.ts";
 import { diffGroups } from "../../lib/diff-groups.ts";
@@ -8,22 +9,17 @@ import { HIDDEN_COMMENTS_GROUP, HIDDEN_WRITEUP_SECTIONS } from "../../lib/hidden
 import { needsYouLabels, needsYouStatus } from "../../lib/needs-you.ts";
 import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { rankedTopics } from "../../lib/topics.ts";
-import {
-  type FactPart,
-  labelledFact,
-  sinceFact,
-  topicsFact,
-  undoFact,
-  usesOpeningCard,
-} from "../../lib/writeup-facts.ts";
+import { type FactPart, labelledFact, sinceFact, undoFact, usesOpeningCard } from "../../lib/writeup-facts.ts";
 import type { ReviewSearch } from "../../router.tsx";
 import { WRITEUP_SECTION_NAMES } from "../diff/targets.ts";
 import { ThreadCard } from "../threads/ThreadCard.tsx";
 import { BlockReader, groupBlocks, type ReaderFact, type ReaderGroup, type ReaderProps } from "./BlockReader.tsx";
+import { DepthMarker } from "./DepthMarker.tsx";
 import { GlossaryTerms } from "./GlossaryTerms.tsx";
 import { undoSentence } from "./TopicChips.tsx";
 import { TopicsMap } from "./TopicsMap.tsx";
 import { useCurrentTopic } from "./useCurrentTopic.ts";
+import { depthLayers, useDepthLayer } from "./useDepthLayer.ts";
 import { WriteupOutline } from "./WriteupOutline.tsx";
 
 const emptyTopics: RevisionView["topics"] = [];
@@ -39,6 +35,7 @@ export function Writeup({
   search = {},
   phone = false,
   visible = true,
+  depthSlot,
   onCurrentTopic,
   onNote,
   code,
@@ -52,6 +49,7 @@ export function Writeup({
   search?: ReviewSearch;
   phone?: boolean;
   visible?: boolean;
+  depthSlot?: HTMLElement | null;
   onCurrentTopic?: (slug: string | undefined) => void;
   onNote?: (id: string) => void;
   code?: { current?: CodeFocus; onOpen: (focus: CodeFocus, opener: HTMLElement) => void };
@@ -113,6 +111,7 @@ export function Writeup({
       const matters = writeup.sections.find((section) => section.key === "whyItMatters");
       groups.push({
         key: "tldr",
+        layer: "decide",
         heading: "TL;DR",
         presentation: "tldr",
         blocks: tldr?.blocks ?? [],
@@ -150,7 +149,6 @@ export function Writeup({
       const outOfScope = blocksFor("outOfScope");
       rows(frame, "outOfScope", "Out of scope", outOfScope);
       for (const block of outOfScope) lifted.add(block.id);
-      computed(frame, "topics", "Topics", topicsFact(topics));
     }
     for (const section of writeup.sections) {
       if (HIDDEN_WRITEUP_SECTIONS.has(section.key)) continue;
@@ -163,6 +161,15 @@ export function Writeup({
       if (!entry) {
         groups.push({
           key: section.key,
+          layer:
+            ["tldr", "newInRevision", "needsYou", "whereToLook"].includes(section.key) ||
+            (!newLayout && section.key === "overview")
+              ? "decide"
+              : ["decisions", "context", "glossary"].includes(section.key)
+                ? "trail"
+                : /^t-.+-(?:why|example|body)$/u.test(section.key)
+                  ? "topics"
+                  : "frame",
           heading: section.key === "decisions" ? "Decisions & drift" : section.label,
           blocks,
           presentation:
@@ -197,6 +204,7 @@ export function Writeup({
         group = {
           key: section.key,
           id: `topic-${topic.slug}`,
+          layer: "topics",
           topic,
           rank,
           commentCount: commentCounts.get(topic.slug) ?? 0,
@@ -322,6 +330,7 @@ export function Writeup({
       });
       groups.splice(groups.findIndex((group) => group.key === "tldr") + 1, 0, {
         key: "needsYou",
+        layer: "decide",
         heading: "Needs you",
         presentation: "needsYou",
         blocks: [],
@@ -401,6 +410,7 @@ export function Writeup({
       if (showNews)
         groups.splice(groups.findIndex((group) => group.key === "tldr") + 1, 0, {
           key: "newInRevision",
+          layer: "decide",
           heading: "New in this revision",
           presentation: "newInRevision",
           blocks: [],
@@ -408,10 +418,51 @@ export function Writeup({
         });
     }
     if (newLayout) {
-      const furtherDown = groups.slice(1).flatMap((group) => {
+      groups.push(
+        {
+          key: "risk",
+          heading: "Risk",
+          layer: "decide",
+          presentation: "facts",
+          blocks: [],
+          factGroups: [{ key: "risk", label: "Risk", facts: risk }],
+        },
+        {
+          key: "frame",
+          heading: "Frame",
+          layer: "frame",
+          presentation: "facts",
+          blocks: [],
+          factGroups: [{ key: "frame", label: "Frame", facts: frame }],
+        },
+      );
+    }
+    if (ranked.length) {
+      groups.push({
+        key: "topics-map",
+        heading: "Topics",
+        layer: "frame",
+        blocks: [],
+        content: <TopicsMap topics={ranked} href={topicHref} />,
+      });
+    }
+    // Stable sorting retains the section order within each layer. The inserted facts
+    // bracket the opening, and the index always closes Frame.
+    const withinLayer = (group: ReaderGroup) => {
+      if (group.layer === "decide") return group.key === "whereToLook" ? 2 : group.key === "risk" ? 1 : 0;
+      if (group.layer === "frame") return group.key === "frame" ? -1 : group.key === "topics-map" ? 1 : 0;
+      if (group.layer === "topics") return group.rank ?? ranked.length + 1;
+      return ["decisions", "context", "glossary", HIDDEN_COMMENTS_GROUP].indexOf(group.key);
+    };
+    groups.sort(
+      (a, b) =>
+        depthLayers.indexOf(a.layer ?? "frame") - depthLayers.indexOf(b.layer ?? "frame") ||
+        withinLayer(a) - withinLayer(b),
+    );
+    if (newLayout) {
+      const furtherDown = groups.slice(groups.findIndex((group) => group.key === "topics-map") + 1).flatMap((group) => {
         const first = group.blocks[0];
-        // A stored topic without metadata still renders, but does not become an introductory section.
-        return first && !group.topic && !group.key.startsWith("t-") ? [{ group, first }] : [];
+        return first && group.layer === "trail" && group.key !== HIDDEN_COMMENTS_GROUP ? [{ group, first }] : [];
       });
       if (furtherDown.length) {
         frame.push({
@@ -440,47 +491,6 @@ export function Writeup({
           omitWriteup: showNews,
         }),
       );
-      const factGroups = [
-        { key: "risk", label: "Risk", facts: risk },
-        { key: "frame", label: "Frame", facts: frame },
-      ].filter((group) => group.facts.length);
-      if (factGroups.length)
-        groups.splice(
-          groups.findLastIndex((group) => ["tldr", "newInRevision", "needsYou"].includes(group.key)) + 1,
-          0,
-          {
-            key: "facts",
-            heading: "Facts",
-            presentation: "facts",
-            blocks: [],
-            factGroups,
-          },
-        );
-    }
-    if (ranked.length) {
-      const afterIntro =
-        groups.findLastIndex((group) =>
-          [
-            "overview",
-            "tldr",
-            "newInRevision",
-            "needsYou",
-            "facts",
-            "checked",
-            "notChecked",
-            "outOfScope",
-            "whereToLook",
-            "context",
-            "decisions",
-            "glossary",
-          ].includes(group.key),
-        ) + 1;
-      groups.splice(afterIntro, 0, {
-        key: "topics-map",
-        heading: "Topics",
-        blocks: [],
-        content: <TopicsMap topics={ranked} fileCount={fileCount} href={topicHref} />,
-      });
     }
     const shownBlocks = new Set(groups.flatMap((group) => groupBlocks(group).map((block) => block.id)));
     const hiddenThreads = props.threads.filter(
@@ -492,6 +502,7 @@ export function Writeup({
     if (hiddenThreads.length) {
       groups.push({
         key: HIDDEN_COMMENTS_GROUP,
+        layer: "trail",
         heading: "Comments on hidden text",
         blocks: [],
         content: (
@@ -512,7 +523,9 @@ export function Writeup({
         ),
       });
     }
-    return groups;
+    return groups.filter(
+      (group) => group.presentation !== "facts" || group.factGroups?.some((part) => part.facts.length),
+    );
   }, [
     writeup.sections,
     writeup.area,
@@ -529,6 +542,8 @@ export function Writeup({
     props.revision,
     props.changedBlocks,
   ]);
+  const layout = useMemo(() => groups.map((group) => `${group.key}:${group.layer ?? ""}`).join("|"), [groups]);
+  const depth = useDepthLayer(root, visible && !!depthSlot, layout);
   const outline = !phone && groups.filter((group) => group.key !== "topics-map").length >= 2;
   const status = needsYouStatus(writeup.needsYou);
   const openNeeds = (writeup.needsYou?.length ?? 0) > 0;
@@ -537,7 +552,10 @@ export function Writeup({
   useCurrentTopic(root, onCurrentTopic, writeup.sections, visible && !outline);
   return (
     <>
-      <div ref={root} className={outline ? "em-outline-layout" : "contents"}>
+      {depthSlot &&
+        groups.some((group) => group.layer) &&
+        createPortal(<DepthMarker current={depth.current} present={depth.present} compact={phone} />, depthSlot)}
+      <div ref={root} className={outline ? "em-outline-layout" : "min-w-0"}>
         {outline && (
           <WriteupOutline
             root={root}

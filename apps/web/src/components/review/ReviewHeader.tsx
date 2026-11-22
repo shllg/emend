@@ -105,6 +105,7 @@ export function ReviewHeader({
   onRevisionChange,
   onCommentReview,
   onDownload,
+  depthSlot,
 }: {
   review: ReviewView;
   revision?: RevisionView;
@@ -116,6 +117,7 @@ export function ReviewHeader({
   onRevisionChange: (seq: number) => void;
   onCommentReview?: () => void;
   onDownload?: () => void;
+  depthSlot?: (element: HTMLDivElement | null) => void;
 }) {
   const theme = useDownloadTheme();
   const agent = agentStatusOf(review);
@@ -291,6 +293,7 @@ export function ReviewHeader({
       )}
       {statusBadges}
       {relatedReviews && <> {relatedReviews}</>}
+      {depthSlot && <div ref={depthSlot} className="em-depth-slot" />}
     </div>
   ) : (
     // The font shorthand includes line-height; override it to leave room for wrapped chips.

@@ -1,4 +1,139 @@
 @layer components {
+  .em-depth-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 28px 0;
+    color: var(--fg-3);
+    font: var(--type-meta);
+    text-align: center;
+  }
+  .em-depth-divider::before,
+  .em-depth-divider::after {
+    content: "";
+    flex: 1;
+    border-top: 1px solid var(--border-1);
+  }
+  .em-review-tabs {
+    container: review-tabs / inline-size;
+  }
+  .em-depth-slot {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    margin-left: auto;
+  }
+  .em-depth-slot:empty {
+    display: none;
+  }
+  .em-review-tabs > .em-depth-slot {
+    padding: 0 12px;
+    border-bottom: 1px solid var(--border-1);
+  }
+  .em-depth-marker {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    color: var(--fg-3);
+    font: var(--type-meta);
+    font-size: 12px;
+  }
+  .em-depth-marker > .em-depth-step {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .em-depth-marker > [data-present="false"] {
+    opacity: 0.4;
+  }
+  .em-depth-marker > [aria-current="step"] {
+    color: var(--fg-1);
+    font-weight: 600;
+  }
+  .em-depth-segment {
+    display: none;
+    width: 3px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--border-2);
+  }
+  [aria-current="step"] > .em-depth-segment {
+    display: block;
+    background: var(--accent);
+  }
+  .em-depth-marker[data-compact] {
+    display: grid;
+    grid-template-columns: repeat(4, 12px) 44px;
+    gap: 4px;
+  }
+  .em-depth-marker[data-compact] > .em-depth-step {
+    display: contents;
+  }
+  .em-depth-marker[data-compact] .em-depth-segment {
+    display: block;
+    grid-row: 1;
+    width: 12px;
+  }
+  .em-depth-marker[data-compact] [data-filled="true"] > .em-depth-segment {
+    background: var(--accent);
+  }
+  .em-depth-marker[data-compact] [data-present="false"] > .em-depth-segment {
+    opacity: 0.4;
+  }
+  .em-depth-marker[data-compact] [aria-current="step"] > .em-depth-label {
+    grid-area: 1 / 5;
+    margin-left: 4px;
+  }
+  .em-depth-marker[data-compact] li:not([aria-current="step"]) > .em-depth-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+  @container review-tabs (max-width: 900px) {
+    .em-depth-marker {
+      display: grid;
+      grid-template-columns: repeat(4, 12px) 44px;
+      gap: 4px;
+    }
+    .em-depth-marker > .em-depth-step {
+      display: contents;
+    }
+    .em-depth-marker .em-depth-segment {
+      display: block;
+      grid-row: 1;
+      width: 12px;
+    }
+    .em-depth-marker [data-filled="true"] > .em-depth-segment {
+      background: var(--accent);
+    }
+    .em-depth-marker [data-present="false"] > .em-depth-segment {
+      opacity: 0.4;
+    }
+    .em-depth-marker [aria-current="step"] > .em-depth-label {
+      grid-area: 1 / 5;
+      margin-left: 4px;
+    }
+    .em-depth-marker li:not([aria-current="step"]) > .em-depth-label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border-width: 0;
+    }
+  }
   .em-term-card {
     position: fixed;
     z-index: var(--z-tooltip);

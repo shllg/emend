@@ -114,6 +114,7 @@ function Reading({
   returning,
   headingTarget,
   visit,
+  depthSlot,
 }: {
   reviewId: string;
   revision: RevisionView;
@@ -142,6 +143,7 @@ function Reading({
   returning: boolean;
   headingTarget?: string;
   visit: unknown;
+  depthSlot?: HTMLElement | null;
 }) {
   useReadingPosition({
     storageKey: readingPositionKey(
@@ -203,6 +205,7 @@ function Reading({
     );
   return (
     <Writeup
+      depthSlot={depthSlot}
       {...props}
       writeup={revision.writeup}
       docs={revision.docs}
@@ -242,15 +245,16 @@ function readingIntent(search: ReviewSearch, hash: string, seq: number) {
     }
   }
   const reply = headingId === undefined && search.tab === "comments" && !!search.thread;
+  const elementId = reply ? `thread-${search.thread}` : appElementId(hash) ? hash : "";
   return {
     navigation: JSON.stringify([seq, search.tab, search.doc, search.thread, search.view, hash]),
-    elementId: reply ? `thread-${search.thread}` : appElementId(hash) ? hash : "",
+    elementId,
     headingId,
     reply,
     threadId:
       headingId !== undefined ? undefined : (search.thread ?? (hash.startsWith("thread-") ? hash.slice(7) : undefined)),
     routeThread: true,
-    block: "center" as ScrollLogicalPosition,
+    block: (elementId.startsWith("topic-") ? "start" : "center") as ScrollLogicalPosition,
   };
 }
 type PendingReadingIntent = ReturnType<typeof readingIntent> & {
@@ -394,6 +398,7 @@ function LoadedReview({
   const codeOpener = useRef<HTMLElement>(null);
   const codePane = useRef<HTMLDivElement>(null);
   const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
+  const [depthSlot, setDepthSlot] = useState<HTMLElement | null>(null);
   const diffChrome = useMemo(() => ({ toolbarSlot }), [toolbarSlot]);
   const codeMode =
     hasDiff && tab === "writeup" && readingTab === "writeup"
@@ -941,6 +946,7 @@ function LoadedReview({
               docsCount={revision?.docs.length ?? 0}
               idBase={readingId}
               toolbarSlot={setToolbarSlot}
+              depthSlot={layout !== "phone" ? setDepthSlot : undefined}
             />
           }
           sendBar={
@@ -998,6 +1004,7 @@ function LoadedReview({
                   ready={ready}
                   phone={layout === "phone"}
                   titleRef={titleRef}
+                  depthSlot={layout === "phone" && tab === "writeup" ? setDepthSlot : undefined}
                   onRevisionChange={setRevision}
                   onCommentReview={commentOnReview}
                   onDownload={onDownload}
@@ -1054,6 +1061,7 @@ function LoadedReview({
                       />
                     ) : (
                       <Reading
+                        depthSlot={depthSlot}
                         key={`${seq}:${readingTab}`}
                         reviewId={review.id}
                         revision={revision}

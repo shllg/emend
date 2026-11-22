@@ -103,6 +103,123 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+test.each([false, true])("the full opening progresses through all four layers (phone=%s)", async (phone) => {
+  const topics: TopicMeta[] = [
+    { ...topic, attention: "skim" },
+    { ...second, attention: "critical" },
+  ];
+  const writeup = RenderedWriteup.parse(
+    await renderWriteup(
+      {
+        area: "Garden",
+        tldr: "Healthy plants.",
+        whyItMatters: "More plants survive.",
+        newInRevision: [{ text: "Added watering instructions." }],
+        needsYou: [{ kind: "decide", text: "Choose a seed." }],
+        overview: "- **Goal:** Healthy plants.\n- **Change:** More water.\n- Keep the soil loose.",
+        checked: "Seeds grow.",
+        whereToLook: "- **Biggest risk:** Flooding.\n- **Look yourself:** Water the seeds.\n- Inspect the soil.",
+        context: "A small garden.",
+        decisions: "Keep the soil.",
+        glossary: "- **Seed:** A new plant.",
+        topics: { seed: { why: "Plant seeds." }, water: { why: "Water daily." } },
+      },
+      topics,
+    ),
+  );
+  const { container } = mount(<Writeup {...props} topics={topics} writeup={writeup} phone={phone} />);
+  const groups = [...container.querySelectorAll<HTMLElement>("[data-reading-section]")];
+  expect(groups.map((group) => [group.dataset.readingSection, group.dataset.depthLayer])).toEqual([
+    ["tldr", "decide"],
+    ["newInRevision", "decide"],
+    ["needsYou", "decide"],
+    ["risk", "decide"],
+    ["whereToLook", "decide"],
+    ["frame", "frame"],
+    ["overview", "frame"],
+    ["topics-map", "frame"],
+    ["t-seed-why", "topics"],
+    ["t-water-why", "topics"],
+    ["decisions", "trail"],
+    ["context", "trail"],
+    ["glossary", "trail"],
+  ]);
+  expect(container.querySelector('[data-fact="furtherDown"] dd')?.textContent).toBe(
+    "Decisions & drift · Context · Glossary",
+  );
+  expect(container.querySelector('[data-fact="topics"]')).toBeNull();
+  const divider = screen.getByText("Above: what you approve. Below: detail.");
+  expect(container.querySelectorAll(".em-depth-divider")).toHaveLength(1);
+  expect(divider.previousElementSibling?.getAttribute("data-reading-section")).toBe("topics-map");
+  expect(divider.nextElementSibling?.id).toBe("topic-seed");
+  expect(divider.hasAttribute("data-reading-section")).toBe(false);
+  expect(screen.queryByRole("list", { name: "Writeup depth" })).toBeNull();
+});
+
+test("the old layout keeps its introduction, then index and ranked topics, then trail", () => {
+  const { container } = mount(
+    <Writeup
+      {...props}
+      topics={[topic, second]}
+      writeup={{
+        sections: [
+          plain("overview", "Overview"),
+          plain("tldr", "TL;DR"),
+          plain("decisions", "Decisions"),
+          plain("glossary", "Glossary"),
+          section("water", "why"),
+          section("seed", "why"),
+        ],
+      }}
+    />,
+  );
+  expect(
+    [...container.querySelectorAll<HTMLElement>("[data-reading-section]")].map((group) => group.dataset.readingSection),
+  ).toEqual(["overview", "tldr", "topics-map", "t-seed-why", "t-water-why", "decisions", "glossary"]);
+});
+
+test("legacy news and needs sections remain in Decide ahead of Risk", async () => {
+  const writeup = await newsWriteup();
+  const { container } = mount(
+    <Writeup {...props} topics={[topic]} writeup={{ ...writeup, newInRevision: undefined, needsYou: undefined }} />,
+  );
+  expect(
+    [...container.querySelectorAll<HTMLElement>('[data-depth-layer="decide"]')].map(
+      (group) => group.dataset.readingSection,
+    ),
+  ).toEqual(["tldr", "newInRevision", "needsYou", "risk"]);
+});
+
+test("the divider is absent when nothing follows Frame and for Markdown documents", () => {
+  const view = mount(<Writeup {...props} topics={[topic]} writeup={{ sections: [plain("overview", "Overview")] }} />);
+  expect(view.container.querySelector('[data-reading-section="topics-map"]')).not.toBeNull();
+  expect(view.container.querySelector(".em-depth-divider")).toBeNull();
+  view.unmount();
+  const doc = { path: "garden.md", kind: "markdown" as const, blocks: [block] };
+  const rendered = mount(
+    <DocView {...props} docs={[doc]} openDoc={doc} search={{ tab: "docs" }} targeted={false} onOpenDoc={() => {}} />,
+  );
+  expect(rendered.container.querySelector("[data-depth-layer], .em-depth-divider")).toBeNull();
+});
+
+test.each([false, true])("the marker renders into the provided header slot (phone=%s)", (phone) => {
+  const slot = document.createElement("div");
+  document.body.append(slot);
+  try {
+    const view = mount(
+      <Writeup {...props} phone={phone} depthSlot={slot} writeup={{ sections: [plain("overview", "Overview")] }} />,
+    );
+    const marker = within(slot).getByRole("list", { name: "Writeup depth" });
+    expect(marker.querySelector('[aria-current="step"]')?.textContent).toBe("Decide");
+    expect(marker.hasAttribute("data-compact")).toBe(phone);
+    expect(view.container.querySelector(".em-depth-marker")).toBeNull();
+    view.unmount();
+    expect(slot.childElementCount).toBe(0);
+  } finally {
+    slot.remove();
+  }
+});
+
 function topicReader(threads: ThreadView[] = [], value = topic, overview = false) {
   return mount(
     <Writeup
@@ -294,28 +411,28 @@ test("new writeups show the opening hierarchy before topics", async () => {
     ),
   ).toEqual([
     "tldr",
+    "overview",
+    "whereToLook",
     "checked",
     "notChecked",
-    "overview",
     "outOfScope",
-    "whereToLook",
-    "context",
-    "decisions",
-    "glossary",
     "topics-map",
     "t-seed-why",
+    "decisions",
+    "context",
+    "glossary",
   ]);
   expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
     "TL;DR",
+    "Overview",
+    "Where to look",
     "Checked",
     "Not checked",
-    "Overview",
     "Out of scope",
-    "Where to look",
-    "Context",
-    "Decisions & drift",
     "Topics",
     "Topic 1: Plant a seed",
+    "Decisions & drift",
+    "Context",
   ]);
   for (const [key, classes] of [
     ["tldr", ["em-writeup-card"]],
@@ -339,7 +456,7 @@ test("new writeups show the opening hierarchy before topics", async () => {
 });
 
 test.each(["checked", "notChecked", "context"] as const)(
-  "the topics map follows %s even without decisions or glossary",
+  "the topics index separates the frame and trail for %s",
   (key) => {
     const sections: RenderedWriteup["sections"] = [
       { key, label: "Intro", topic: null, blocks: [] },
@@ -350,7 +467,7 @@ test.each(["checked", "notChecked", "context"] as const)(
       [...container.querySelectorAll("[data-reading-section]")].map((group) =>
         group.getAttribute("data-reading-section"),
       ),
-    ).toEqual([key, "topics-map", "t-seed-why"]);
+    ).toEqual(key === "context" ? ["topics-map", "t-seed-why", key] : [key, "topics-map", "t-seed-why"]);
   },
 );
 
@@ -372,7 +489,16 @@ test.each([
     { ...section("missing", "why"), label: "Unknown topic — Why" },
   ];
   const { container } = mount(<Writeup {...props} topics={[other, topic, second]} writeup={{ sections }} />);
-  const introKeys = [...(overview ? ["overview"] : []), ...(tldr ? ["tldr"] : []), "decisions", "glossary"];
+  const introKeys = [
+    ...(overview ? ["overview"] : []),
+    ...(tldr ? ["tldr"] : []),
+    "topics-map",
+    "t-seed-why",
+    "t-water-body",
+    "t-missing-why",
+    "decisions",
+    "glossary",
+  ];
   expect(
     [...container.querySelectorAll("[data-reading-section]")]
       .slice(0, introKeys.length)
@@ -387,11 +513,11 @@ test.each([
   expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
     ...(overview ? ["Overview"] : []),
     ...(tldr ? ["TL;DR"] : []),
-    "Decisions & drift",
     "Topics",
     "Topic 1: Plant a seed",
     "Topic 2: Water the garden",
     "Unknown topic — Why",
+    "Decisions & drift",
   ]);
   expect(container.querySelectorAll("section#topic-seed")).toHaveLength(1);
   const seed = screen.getByRole("region", { name: "Topic 1: Plant a seed" });
@@ -415,7 +541,12 @@ test.each([false, true])("topics map ranks, metadata and link destinations (phon
       {...props}
       phone={phone}
       search={{ tab: "writeup", rev: 2, thread: reviewId }}
-      topics={[topic, other, second, plainTopic]}
+      topics={[
+        { ...topic, attention: "skim" },
+        other,
+        { ...second, attention: "critical" },
+        { ...plainTopic, attention: "review" },
+      ]}
       files={[
         file,
         { ...file, topic: "water" },
@@ -428,12 +559,17 @@ test.each([false, true])("topics map ranks, metadata and link destinations (phon
   const map = within(screen.getByRole("region", { name: "Topics" }));
   const rows = map.getAllByRole("listitem");
   expect(rows.map((row) => row.querySelector("[aria-hidden]")?.textContent)).toEqual(["01", "02", "03"]);
-  expect(map.getByText("Undo: a revert is not enough").className).not.toContain("text-warning-fg");
-  expect(map.getByText("Undo: a revert").className).not.toContain("text-warning-fg");
-  expect(map.getByText("garden")).toBeTruthy();
-  expect(map.getByText("1 file")).toBeTruthy();
-  expect(map.getByText("2 files")).toBeTruthy();
-  expect(map.queryByText("0 files")).toBeNull();
+  expect(rows.map((row) => row.querySelector("[data-attention]")?.textContent)).toEqual([
+    "Low risk",
+    "High risk",
+    "Medium risk",
+  ]);
+  expect(rows.map((row) => row.querySelector("p")?.textContent)).toEqual([
+    topic.summary,
+    second.summary,
+    plainTopic.summary,
+  ]);
+  expect(map.queryByText(/Undo:|Blast radius:|The seed bed|\d+ files?/)).toBeNull();
   expect(map.getByRole("link", { name: topic.title }).getAttribute("href")).toBe(
     `/r/${reviewId}?tab=writeup&rev=2#topic-seed`,
   );
@@ -666,7 +802,7 @@ test.each([
     expect(undo?.previousElementSibling?.className).toBe("em-topic-summary");
     expect(undo?.nextElementSibling?.className).toBe("em-topic-blast");
     const map = within(screen.getByRole("region", { name: "Topics" }));
-    expect(map.getByText(expected).classList.contains("text-warning-fg")).toBe(false);
+    expect(map.queryByText(expected)).toBeNull();
   } else {
     expect(container.textContent).not.toContain("Undo:");
   }
@@ -715,7 +851,10 @@ test("front matter cards, lead Why, Example panels and folded Details keep the o
   expect(details?.open).toBe(true);
   expect(details?.querySelector("[data-block-id]")?.textContent).toBe("A detail.");
   expect(details?.querySelector(".em-topic-file-chips")).toBeNull();
-  const ids = writeup.sections.flatMap((section) => section.blocks.map((block) => block.id));
+  const ids = ["overview", "tldr", "t-seed-why", "t-seed-example", "t-seed-body", "decisions", "glossary"].flatMap(
+    (key) =>
+      writeup.sections.flatMap((section) => (section.key === key ? section.blocks.map((block) => block.id) : [])),
+  );
   expect(
     [...container.querySelectorAll("[data-block-id]")].map((element) => element.getAttribute("data-block-id")),
   ).toEqual(ids);
@@ -1095,16 +1234,19 @@ test("the new opening lifts commentable facts into Risk and Frame in order, with
     [...container.querySelectorAll("[data-reading-section]")].map((group) =>
       group.getAttribute("data-reading-section"),
     ),
-  ).toEqual(["tldr", "facts", "context", "decisions", "glossary", "topics-map", "t-seed-why"]);
+  ).toEqual(["tldr", "risk", "frame", "topics-map", "t-seed-why", "decisions", "context", "glossary"]);
   const card = container.querySelector<HTMLElement>('[data-reading-section="tldr"]');
   expect(card?.classList.contains("em-writeup-card")).toBe(true);
   expect(card && within(card).getByRole("heading", { level: 3, name: "Why it matters" })).toBeTruthy();
   expect(card?.querySelector(".em-writeup-matters")?.textContent).toContain("More plants survive.");
-  expect(screen.getByRole("heading", { level: 2, name: "Facts" }).className).toBe("sr-only");
-  expect([...container.querySelectorAll("[data-fact-group] h3")].map((caption) => caption.textContent)).toEqual([
-    "Risk",
-    "Frame",
-  ]);
+  expect(container.querySelectorAll("[data-fact-group] h3")).toHaveLength(0);
+  for (const name of ["Risk", "Frame"]) {
+    const headings = screen.getAllByRole("heading", { name });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]?.tagName).toBe("H2");
+    expect(headings[0]?.className).toBe("em-writeup-kicker");
+  }
+  expect(container.querySelector('[data-fact="topics"]')).toBeNull();
   for (const [group, labels, keys] of [
     [
       "risk",
@@ -1113,12 +1255,12 @@ test("the new opening lifts commentable facts into Risk and Frame in order, with
     ],
     [
       "frame",
-      ["Goal", "Change", "Out of scope", "Topics", "Further down", "Changed"],
-      ["goal", "change", "outOfScope", "topics", "furtherDown", "since"],
+      ["Goal", "Change", "Out of scope", "Further down", "Changed"],
+      ["goal", "change", "outOfScope", "furtherDown", "since"],
     ],
   ] as const) {
     const wrapper = container.querySelector(`[data-fact-group="${group}"]`);
-    expect(wrapper?.querySelector("h3")?.className).toBe("em-writeup-kicker");
+    expect(wrapper?.querySelector("h3")).toBeNull();
     expect([...(wrapper?.querySelectorAll("dt") ?? [])].map((label) => label.textContent)).toEqual(labels);
     expect([...(wrapper?.querySelectorAll("[data-fact]") ?? [])].map((row) => row.getAttribute("data-fact"))).toEqual(
       keys,
@@ -1149,13 +1291,13 @@ test("the new opening lifts commentable facts into Risk and Frame in order, with
     ]),
   ).toEqual(
     [
-      ["context", "Context"],
       ["decisions", "Decisions & drift"],
+      ["context", "Context"],
       ["glossary", "Glossary"],
     ].map(([key, label]) => [label, `/r/${reviewId}?tab=writeup&rev=3#block-${firstBlock(key ?? "").id}`]),
   );
   expect(container.querySelector('[data-fact="furtherDown"] dd')?.textContent).toBe(
-    "Context · Decisions & drift · Glossary",
+    "Decisions & drift · Context · Glossary",
   );
   expect(
     [...container.querySelectorAll('[data-fact="since"] a')].map((link) => [
@@ -1237,7 +1379,7 @@ test.each(["Read everything.", "Read topic “Plant a seed”."])(
         }}
       />,
     );
-    expect(container.querySelector('[data-reading-section="review"], [data-reading-section="facts"]')).toBeNull();
+    expect(container.querySelector('[data-reading-section="review"], [data-fact-group]')).toBeNull();
     expect(container.querySelector(`#block-${review.id}`)).toBeNull();
     expect(container.textContent).not.toContain(verdict);
     expect(screen.queryByRole("heading", { name: "Review" })).toBeNull();
@@ -1344,6 +1486,8 @@ test.each([false, true])("changed comments on hidden writeup text link to their 
     </ReadOnlyReview>,
   );
   const hiddenComments = screen.getByRole("region", { name: "Comments on hidden text" });
+  expect(hiddenComments.getAttribute("data-depth-layer")).toBe("trail");
+  expect([...document.querySelectorAll("[data-reading-section]")].at(-1)).toBe(hiddenComments);
   const card = within(hiddenComments).getByRole("article");
   const href = within(card).getByRole("link", { name: "Changed in revision 3" }).getAttribute("href");
   expect(card.id).toBe(`thread-${thread.id}`);
@@ -1369,15 +1513,12 @@ test("an opening without labelled lines keeps its available rows and the unlifte
     ),
   );
   const { container } = mount(<Writeup {...props} writeup={writeup} />);
-  expect([...container.querySelectorAll("[data-fact] dt")].map((label) => label.textContent)).toEqual([
-    "Proof",
-    "Further down",
-  ]);
+  expect([...container.querySelectorAll("[data-fact] dt")].map((label) => label.textContent)).toEqual(["Proof"]);
   expect(
     [...container.querySelectorAll("[data-reading-section]")].map((group) =>
       group.getAttribute("data-reading-section"),
     ),
-  ).toEqual(["tldr", "facts", "overview", "whereToLook", "decisions"]);
+  ).toEqual(["tldr", "risk", "whereToLook", "overview", "decisions"]);
   expect(container.querySelector('[data-reading-section="overview"]')?.classList.contains("em-writeup-pair")).toBe(
     true,
   );
@@ -1386,10 +1527,7 @@ test("an opening without labelled lines keeps its available rows and the unlifte
     true,
   );
   expect(container.querySelector('[data-fact="assurance"]')).toBeNull();
-  expect([...container.querySelectorAll('[data-fact="furtherDown"] a')].map((link) => link.textContent)).toEqual([
-    "Overview",
-    "Where to look",
-  ]);
+  expect(container.querySelector('[data-fact="furtherDown"]')).toBeNull();
 });
 
 test("partly lifted sections keep leftovers once, with the overview pair and old Check first callout", async () => {
@@ -1421,7 +1559,7 @@ test("partly lifted sections keep leftovers once, with the overview pair and old
     expect(container.querySelectorAll(`[id="block-${block.id}"]`)).toHaveLength(1);
 });
 
-test("soft-broken labelled paragraphs stay in Overview and Where to look below Facts", async () => {
+test("soft-broken labelled paragraphs stay in their sections across Decide and Frame", async () => {
   const writeup = RenderedWriteup.parse(
     await renderWriteup(
       {
@@ -1443,7 +1581,7 @@ test("soft-broken labelled paragraphs stay in Overview and Where to look below F
     [...container.querySelectorAll("[data-reading-section]")].map((group) =>
       group.getAttribute("data-reading-section"),
     ),
-  ).toEqual(["tldr", "facts", "overview", "whereToLook", "decisions"]);
+  ).toEqual(["tldr", "whereToLook", "overview", "decisions"]);
   for (const [key, text] of [
     ["overview", "Goal: Healthy plants.\nChange: More water."],
     ["whereToLook", "Biggest risk: Flooding.\nLook yourself: The seed bed."],
@@ -1457,7 +1595,7 @@ test("soft-broken labelled paragraphs stay in Overview and Where to look below F
   }
 });
 
-test("Title-cased bold labels sharing one paragraph stay in Where to look below Facts", async () => {
+test("Title-cased bold labels sharing one paragraph stay in Where to look in Decide", async () => {
   const writeup = RenderedWriteup.parse(
     await renderWriteup(
       {
@@ -1478,8 +1616,10 @@ test("Title-cased bold labels sharing one paragraph stay in Where to look below 
   const sections = [...container.querySelectorAll("[data-reading-section]")].map((group) =>
     group.getAttribute("data-reading-section"),
   );
-  expect(sections.indexOf("facts")).toBeGreaterThan(-1);
-  expect(sections.indexOf("whereToLook")).toBeGreaterThan(sections.indexOf("facts"));
+  expect(sections.indexOf("whereToLook")).toBeGreaterThan(sections.indexOf("tldr"));
+  expect(container.querySelector('[data-reading-section="whereToLook"]')?.getAttribute("data-depth-layer")).toBe(
+    "decide",
+  );
   const prose = container.querySelectorAll('[data-reading-section="whereToLook"] .em-prose');
   expect(prose).toHaveLength(1);
   expect(prose[0]?.getAttribute("data-block-id")).toBe(blocks?.[0]?.id);
@@ -1538,7 +1678,7 @@ test("lifted rows preserve server sanitization and topic markup stays isolated t
     expect(row.querySelector('[href^="javascript:"]')).toBeNull();
     expect(row.textContent).toContain("bad");
   }
-  const facts = container.querySelector('[data-reading-section="facts"]');
+  const facts = container.querySelector('[data-reading-section="risk"]');
   if (!facts) throw new Error("Missing opening facts");
   const diagramBlock = [...blocks.values()].find((block) => block.kind === "diagram");
   if (!diagramBlock) throw new Error("Missing server diagram");
@@ -1553,7 +1693,9 @@ test("lifted rows preserve server sanitization and topic markup stays isolated t
   expect(frame?.getAttribute("sandbox")).toBe("allow-scripts");
   expect(frame?.hasAttribute("srcdoc")).toBe(false);
   expect(facts.querySelectorAll("iframe")).toHaveLength(1);
-  const opening = container.querySelectorAll('[data-reading-section="tldr"], [data-reading-section="facts"]');
+  const opening = container.querySelectorAll(
+    '[data-reading-section="tldr"], [data-reading-section="risk"], [data-reading-section="frame"]',
+  );
   for (const group of opening) {
     for (const element of [group, ...group.querySelectorAll("*")]) {
       for (const attribute of element.attributes) {
@@ -1568,12 +1710,12 @@ test("lifted rows preserve server sanitization and topic markup stays isolated t
       }
     }
   }
-  for (const anchor of facts.querySelectorAll("[data-fact] [href]")) {
+  for (const anchor of container.querySelectorAll("[data-fact] [href]")) {
     const href = anchor.getAttribute("href") ?? "";
     if (href.startsWith("/r/") || href.startsWith("#")) continue;
     expect(["http:", "https:", "mailto:"]).toContain(new URL(href).protocol);
   }
-  const title = facts.querySelector('[data-fact="topics"] bdi');
+  const title = container.querySelector('[data-reading-section="topics-map"] span[dir="auto"]');
   expect(title?.textContent).toBe(topics[0]?.title);
   expect(title?.children).toHaveLength(0);
 });
@@ -1597,7 +1739,7 @@ test.each([
 test("an area-only empty writeup still has a TL;DR card and omits empty Facts", () => {
   const { container } = mount(<Writeup {...props} writeup={{ area: "Garden", sections: [] }} />);
   expect(screen.getByRole("heading", { name: "TL;DR", level: 2 })).toBeTruthy();
-  expect(container.querySelector('[data-reading-section="facts"]')).toBeNull();
+  expect(container.querySelector("[data-fact-group]")).toBeNull();
 });
 
 test("Further down skips empty groups and stored topics without metadata", () => {
@@ -1611,7 +1753,54 @@ test("Further down skips empty groups and stored topics without metadata", () =>
     />,
   );
   expect(container.querySelector('[data-reading-section="t-seed-why"]')).not.toBeNull();
-  expect(container.querySelector('[data-reading-section="facts"]')).toBeNull();
+  expect(container.querySelector("[data-fact-group]")).toBeNull();
+});
+
+test("stored topic sections without metadata follow ranked topics in section order, outside Further down", () => {
+  const stored = (slug: string, suffix: "why" | "example" | "body") => {
+    const value = section(slug, suffix);
+    return { ...value, blocks: [{ ...block, id: `${value.key}-12345678`, section: value.key }] };
+  };
+  const { container } = mount(
+    <Writeup
+      {...props}
+      topics={[topic, second]}
+      writeup={{
+        area: "Garden",
+        sections: [
+          stored("missing", "body"),
+          plain("overview", "Overview"),
+          section("water", "why"),
+          stored("lost", "example"),
+          {
+            ...plain("decisions", "Decisions"),
+            blocks: [{ ...block, id: "decisions-12345678", section: "decisions" }],
+          },
+          section("seed", "why"),
+          stored("missing", "why"),
+        ],
+      }}
+    />,
+  );
+  expect(
+    [...container.querySelectorAll<HTMLElement>("[data-reading-section]")].map((group) => [
+      group.dataset.readingSection,
+      group.dataset.depthLayer,
+    ]),
+  ).toEqual([
+    ["tldr", "decide"],
+    ["risk", "decide"],
+    ["frame", "frame"],
+    ["overview", "frame"],
+    ["topics-map", "frame"],
+    ["t-seed-why", "topics"],
+    ["t-water-why", "topics"],
+    ["t-missing-body", "topics"],
+    ["t-lost-example", "topics"],
+    ["t-missing-why", "topics"],
+    ["decisions", "trail"],
+  ]);
+  expect(container.querySelector('[data-fact="furtherDown"] dd')?.textContent).toBe("Decisions & drift");
 });
 
 test.each([false, true])("a fact block keeps its target, marker and outline count (folded=%s)", async (folded) => {
@@ -1657,11 +1846,11 @@ test.each([false, true])("a fact block keeps its target, marker and outline coun
       }}
     />,
   );
-  const facts = container.querySelector<HTMLElement>('[data-reading-section="facts"]');
+  const facts = container.querySelector<HTMLElement>('[data-reading-section="risk"]');
   if (!facts) throw new Error("Missing Facts");
   expect(facts.querySelector(".em-reading-block__change")).not.toBeNull();
   const outline = screen.getByRole("navigation", { name: "Writeup outline" });
-  expect(within(outline).getByRole("button", { name: /Facts/ }).textContent).toContain("1 comment");
+  expect(within(outline).getByRole("button", { name: /Risk/ }).textContent).toContain("1 comment");
   const row = facts.querySelector<HTMLElement>(`[data-fact="${folded ? "assurance" : "proof"}"]`);
   if (!row) throw new Error("Missing check row");
   if (folded) {
@@ -1810,15 +1999,14 @@ test("computed facts isolate literal titles, undo text and doc paths even when h
       writeup={{ area: "Garden", sections: [{ ...section("seed", "why"), blocks: [why] }] }}
     />,
   );
-  const facts = container.querySelector('[data-reading-section="facts"]');
+  const facts = container;
   expect(facts?.querySelectorAll("img, script")).toHaveLength(0);
-  expect(facts?.querySelector('[data-fact="topics"] dd')?.textContent).toBe(`High: ${hostile}`);
+  expect(facts.querySelector('[data-fact="topics"]')).toBeNull();
   expect(facts?.querySelector('[data-fact="undo"] dd')?.textContent).toBe(`${hostile} (${hostile})`);
   expect(facts?.querySelector('[data-fact="since"] dd')?.textContent).toBe(
     `Since revision 2: topic “${hostile}” and ${path}.`,
   );
-  expect([...(facts?.querySelectorAll("bdi") ?? [])].map((part) => part.textContent)).toEqual([
-    hostile,
+  expect([...(facts?.querySelectorAll("[data-fact] bdi") ?? [])].map((part) => part.textContent)).toEqual([
     hostile,
     hostile,
     hostile,
@@ -1850,12 +2038,6 @@ test("PDI and RLO in agent text are removed while emend's fact text stays outsid
     />,
   );
   for (const [key, expected, following, text] of [
-    [
-      "topics",
-      ["Docs", second.title, "Third"],
-      [", ", ", ", " and 2 more"],
-      `High: Docs, ${second.title}, Third and 2 more`,
-    ],
     ["undo", ["Restore state", "Docs"], [" (", ")"], "Restore state (Docs)"],
     ["since", ["Docs"], ["”"], "Since revision 2: topic “Docs”."],
   ] as const) {
@@ -2215,7 +2397,7 @@ test.each([false, true])(
     );
     const at = order.indexOf("tldr");
     expect(order.slice(at, at + (newLayout ? 3 : 2))).toEqual(
-      newLayout ? ["tldr", "needsYou", "facts"] : ["tldr", "needsYou"],
+      newLayout ? ["tldr", "needsYou", "risk"] : ["tldr", "needsYou"],
     );
     const card = container.querySelector<HTMLElement>('[data-reading-section="needsYou"]');
     if (!card) throw new Error("Missing Needs you card");
@@ -2424,7 +2606,7 @@ test.each([false, true])(
     const order = [...container.querySelectorAll("[data-reading-section]")].map((group) =>
       group.getAttribute("data-reading-section"),
     );
-    expect(order.slice(0, 4)).toEqual(["tldr", "newInRevision", "needsYou", "facts"]);
+    expect(order.slice(0, 4)).toEqual(["tldr", "newInRevision", "needsYou", "risk"]);
     const card = container.querySelector<HTMLElement>(".em-writeup-news");
     if (!card) throw new Error("Missing revision news card");
     expect(within(card).getByRole("heading", { name: "New in this revision" })).toBeTruthy();

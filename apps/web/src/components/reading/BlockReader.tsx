@@ -1,6 +1,6 @@
 import type { NeedsYouKind, RenderedBlock, RevisionView, Target, TopicMeta } from "@emend/contract";
 import { TextSelect } from "lucide-react";
-import { type ReactNode, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { claimDraft } from "../../lib/composer-owner.ts";
 import { draftKey } from "../../lib/drafts.ts";
 import { useLayout } from "../../lib/layout.ts";
@@ -41,6 +41,7 @@ export type ReaderFact = {
 };
 export type ReaderGroup = {
   key: string;
+  layer?: "decide" | "frame" | "topics" | "trail";
   id?: string;
   heading?: ReactNode;
   labelledBy?: string;
@@ -342,111 +343,121 @@ export function BlockReader({
       ))}
     </ul>
   );
+  const detailStart = groups.findIndex((group) => group.layer === "topics" || group.layer === "trail");
+  const divide =
+    detailStart > 0 &&
+    groups.slice(0, detailStart).some((group) => group.layer === "decide" || group.layer === "frame");
   return (
     <div ref={root} tabIndex={-1} className="em-reading-column pt-4 pb-8 md:pt-7 md:pb-[72px]">
       {lead}
       {groups.map((group, index) => (
-        <ReadingGroup
-          key={`${reviewId}:${revision}:${group.key}`}
-          group={group}
-          headingId={`${headingBase}-${index}`}
-          changedIn={group.presentation === "newInRevision" ? undefined : latestChange(groupBlocks(group))}
-          onCommentTopic={(slug, from) => openComposer({ kind: "topic", slug }, from)}
-          discussion={group.topic && target?.kind === "topic" && target.slug === group.topic.slug && composer}
-        >
-          {group.content}
-          {group.news && (
-            <>
-              {renderNews(group.news.slice(0, 4), group.path)}
-              {group.news.length > 4 && (
-                <WriteupDetails
-                  reviewId={reviewId}
-                  revision={revision}
-                  sectionKey="newInRevision-more"
-                  summary={`and ${group.news.length - 4} more`}
-                >
-                  {renderNews(group.news.slice(4), group.path)}
-                </WriteupDetails>
-              )}
-            </>
+        <Fragment key={`${reviewId}:${revision}:${group.key}`}>
+          {divide && index === detailStart && (
+            <p className="em-depth-divider">Above: what you approve. Below: detail.</p>
           )}
-          {group.needs && (
-            <dl className="em-writeup-facts em-needs-you">
-              {group.needs.map(({ key, kind, label, blocks, jump }) => (
-                <div key={key} className="em-writeup-fact" data-needs-kind={kind}>
-                  <dt>{label}</dt>
-                  <dd>
-                    {renderBlocks(blocks, group.path)}
-                    {jump}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          )}
-          {group.tldr ? (
-            <>
-              {renderBlocks(group.blocks.slice(0, group.tldr.start), group.path)}
-              <div className="em-writeup-card em-doc-tldr">
-                {renderBlocks(group.blocks.slice(group.tldr.start, group.tldr.end), group.path)}
-              </div>
-              {renderBlocks(group.blocks.slice(group.tldr.end), group.path)}
-            </>
-          ) : (
-            renderBlocks(group.blocks, group.path, group.presentation)
-          )}
-          {group.factGroups?.map((factGroup) => (
-            <div key={factGroup.key} className="em-writeup-fact-group" data-fact-group={factGroup.key}>
-              <h3 className="em-writeup-kicker">{factGroup.label}</h3>
-              <dl className="em-writeup-facts">
-                {factGroup.facts.map((fact) => (
-                  <div
-                    key={fact.key}
-                    className="em-writeup-fact"
-                    data-fact={fact.key}
-                    data-hide-label={fact.hideLabel ? "" : undefined}
+          <ReadingGroup
+            group={group}
+            headingId={`${headingBase}-${index}`}
+            changedIn={group.presentation === "newInRevision" ? undefined : latestChange(groupBlocks(group))}
+            onCommentTopic={(slug, from) => openComposer({ kind: "topic", slug }, from)}
+            discussion={group.topic && target?.kind === "topic" && target.slug === group.topic.slug && composer}
+          >
+            {group.content}
+            {group.news && (
+              <>
+                {renderNews(group.news.slice(0, 4), group.path)}
+                {group.news.length > 4 && (
+                  <WriteupDetails
+                    reviewId={reviewId}
+                    revision={revision}
+                    sectionKey="newInRevision-more"
+                    summary={`and ${group.news.length - 4} more`}
                   >
-                    <dt>{fact.label}</dt>
+                    {renderNews(group.news.slice(4), group.path)}
+                  </WriteupDetails>
+                )}
+              </>
+            )}
+            {group.needs && (
+              <dl className="em-writeup-facts em-needs-you">
+                {group.needs.map(({ key, kind, label, blocks, jump }) => (
+                  <div key={key} className="em-writeup-fact" data-needs-kind={kind}>
+                    <dt>{label}</dt>
                     <dd>
-                      {fact.content}
-                      {fact.fold ? (
-                        <WriteupDetails
-                          reviewId={reviewId}
-                          revision={revision}
-                          sectionKey={fact.fold.key}
-                          summary={fact.fold.summary}
-                          changedIn={latestChange(fact.blocks ?? [])}
-                        >
-                          {renderBlocks(fact.blocks ?? [], group.path)}
-                        </WriteupDetails>
-                      ) : (
-                        renderBlocks(fact.blocks ?? [], group.path)
-                      )}
+                      {renderBlocks(blocks, group.path)}
+                      {jump}
                     </dd>
                   </div>
                 ))}
               </dl>
-            </div>
-          ))}
-          {group.subsections?.map((section) =>
-            section.kind === "body" ? (
-              <WriteupDetails
-                key={section.key}
-                reviewId={reviewId}
-                revision={revision}
-                sectionKey={section.key}
-                changedIn={latestChange(section.blocks)}
-              >
-                {renderBlocks(section.blocks, group.path)}
-              </WriteupDetails>
+            )}
+            {group.tldr ? (
+              <>
+                {renderBlocks(group.blocks.slice(0, group.tldr.start), group.path)}
+                <div className="em-writeup-card em-doc-tldr">
+                  {renderBlocks(group.blocks.slice(group.tldr.start, group.tldr.end), group.path)}
+                </div>
+                {renderBlocks(group.blocks.slice(group.tldr.end), group.path)}
+              </>
             ) : (
-              <div key={section.key} className={`em-writeup-${section.kind}`}>
-                <h3 className={section.kind === "why" ? "sr-only" : "em-writeup-kicker"}>{section.heading}</h3>
-                {renderBlocks(section.blocks, group.path)}
+              renderBlocks(group.blocks, group.path, group.presentation)
+            )}
+            {group.factGroups?.map((factGroup) => (
+              <div key={factGroup.key} className="em-writeup-fact-group" data-fact-group={factGroup.key}>
+                {group.factGroups && group.factGroups.length > 1 && (
+                  <h3 className="em-writeup-kicker">{factGroup.label}</h3>
+                )}
+                <dl className="em-writeup-facts">
+                  {factGroup.facts.map((fact) => (
+                    <div
+                      key={fact.key}
+                      className="em-writeup-fact"
+                      data-fact={fact.key}
+                      data-hide-label={fact.hideLabel ? "" : undefined}
+                    >
+                      <dt>{fact.label}</dt>
+                      <dd>
+                        {fact.content}
+                        {fact.fold ? (
+                          <WriteupDetails
+                            reviewId={reviewId}
+                            revision={revision}
+                            sectionKey={fact.fold.key}
+                            summary={fact.fold.summary}
+                            changedIn={latestChange(fact.blocks ?? [])}
+                          >
+                            {renderBlocks(fact.blocks ?? [], group.path)}
+                          </WriteupDetails>
+                        ) : (
+                          renderBlocks(fact.blocks ?? [], group.path)
+                        )}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
               </div>
-            ),
-          )}
-          {group.files}
-        </ReadingGroup>
+            ))}
+            {group.subsections?.map((section) =>
+              section.kind === "body" ? (
+                <WriteupDetails
+                  key={section.key}
+                  reviewId={reviewId}
+                  revision={revision}
+                  sectionKey={section.key}
+                  changedIn={latestChange(section.blocks)}
+                >
+                  {renderBlocks(section.blocks, group.path)}
+                </WriteupDetails>
+              ) : (
+                <div key={section.key} className={`em-writeup-${section.kind}`}>
+                  <h3 className={section.kind === "why" ? "sr-only" : "em-writeup-kicker"}>{section.heading}</h3>
+                  {renderBlocks(section.blocks, group.path)}
+                </div>
+              ),
+            )}
+            {group.files}
+          </ReadingGroup>
+        </Fragment>
       ))}
       <ReadingThreads
         state={readingThreads}

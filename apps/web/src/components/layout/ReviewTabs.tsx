@@ -4,6 +4,7 @@ import { useShortcut } from "../../lib/use-shortcut.tsx";
 import type { ReviewSearch } from "../../router.tsx";
 import { formatThreadCounts, type ThreadCounts } from "../status/ThreadStateBadge.tsx";
 import { Tabs } from "../ui/Tabs.tsx";
+import { cn } from "../ui/utils.ts";
 
 export interface ReviewTabsProps {
   id: string;
@@ -28,10 +29,12 @@ export function ReviewTabs({
   docsCount,
   idBase,
   toolbarSlot,
+  depthSlot,
 }: ReviewTabsProps & {
   docsCount: number;
   idBase: string;
   toolbarSlot?: (element: HTMLDivElement | null) => void;
+  depthSlot?: (element: HTMLDivElement | null) => void;
 }) {
   const navigate = useNavigate();
   const showDiff = usePaneMode() === "tabs" && hasDiff;
@@ -61,7 +64,12 @@ export function ReviewTabs({
   useShortcut("tab.comments", () => changeTab("comments"));
   useShortcut("tab.diff", () => changeTab("diff"), { enabled: showDiff });
   return (
-    <div className="em-review-tabs sticky top-0 z-(--z-sticky) flex shrink-0 flex-wrap items-stretch bg-surface">
+    <div
+      className={cn(
+        "em-review-tabs sticky top-0 z-(--z-sticky) flex shrink-0 items-stretch bg-surface",
+        value === "writeup" && depthSlot ? "flex-nowrap" : "flex-wrap",
+      )}
+    >
       <Tabs
         idBase={idBase}
         label="Reading tabs"
@@ -83,6 +91,7 @@ export function ReviewTabs({
         onChange={changeTab}
       />
       {value === "diff" && toolbarSlot && <div ref={toolbarSlot} className="em-tab-tools" />}
+      {value === "writeup" && depthSlot && <div ref={depthSlot} className="em-depth-slot" />}
     </div>
   );
 }
