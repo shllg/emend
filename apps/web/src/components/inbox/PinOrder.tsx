@@ -10,18 +10,20 @@ export interface PinMoves {
   down?: () => void;
 }
 interface PinOrderContextValue {
-  state: { draggingId: string | null };
+  state: { rows: InboxItem[] };
   actions: { movesFor: (reviewId: string) => PinMoves | undefined; drop: (reviewId: string, slot: number) => void };
   meta: { draggable: boolean };
 }
 const PinOrderContext = createContext<PinOrderContextValue | null>(null);
+const PinListContext = createContext<
+  (Omit<PinOrderContextValue, "state"> & { state: { draggingId: string | null } }) | null
+>(null);
 
-/** Only the shown Pinned list owns moves; copies in other sections do not participate. */
-export function PinOrder({ rows, children }: { rows: InboxItem[]; children: ReactNode }) {
+/** Menus and the list share actions derived from the currently shown Pinned rows. */
+export function PinOrderProvider({ rows, children }: { rows: InboxItem[]; children: ReactNode }) {
   const mutation = usePlacePin();
   const toast = useToast();
   const draggable = useLayout() !== "phone";
-  const list = useRef<HTMLUListElement>(null);
   const [announcement, setAnnouncement] = useState({ serial: 0, text: "" });
   const move = async (reviewId: string, place: ReviewPinPlaceRequest) => {
     const order = placePin(
@@ -46,9 +48,8 @@ export function PinOrder({ rows, children }: { rows: InboxItem[]; children: Reac
     const anchor = rows[slot] ?? rows.at(-1);
     if (anchor) void move(reviewId, slot === rows.length ? { after: anchor.id } : { before: anchor.id });
   };
-  const { drag, handlers } = usePinDrag(list, draggable, drop);
   const value: PinOrderContextValue = {
-    state: { draggingId: drag?.reviewId ?? null },
+    state: { rows },
     actions: {
       drop,
       movesFor: (reviewId) => {
@@ -66,8 +67,24 @@ export function PinOrder({ rows, children }: { rows: InboxItem[]; children: Reac
   };
   return (
     <PinOrderContext value={value}>
+      {children}
+      <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+        <span key={announcement.serial}>{announcement.text}</span>
+      </div>
+    </PinOrderContext>
+  );
+}
+
+/** Only rows rendered inside this list participate in ordering and dragging. */
+export function PinOrderList({ children }: { children: ReactNode }) {
+  const order = usePinOrder();
+  const list = useRef<HTMLUListElement>(null);
+  if (!order) throw new Error("PinOrderList requires PinOrderProvider");
+  const { drag, handlers } = usePinDrag(list, order.meta.draggable, order.actions.drop);
+  return (
+    <PinListContext value={{ state: { draggingId: drag?.reviewId ?? null }, actions: order.actions, meta: order.meta }}>
       <div className="relative">
-        <ul ref={list} {...handlers} className={draggable ? "select-none" : undefined}>
+        <ul ref={list} {...handlers} className={order.meta.draggable ? "select-none" : undefined}>
           {children}
         </ul>
         {drag?.place && (
@@ -79,13 +96,14 @@ export function PinOrder({ rows, children }: { rows: InboxItem[]; children: Reac
           />
         )}
       </div>
-      <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
-        <span key={announcement.serial}>{announcement.text}</span>
-      </div>
-    </PinOrderContext>
+    </PinListContext>
   );
 }
 
 export function usePinOrder() {
   return use(PinOrderContext);
+}
+
+export function usePinList() {
+  return use(PinListContext);
 }

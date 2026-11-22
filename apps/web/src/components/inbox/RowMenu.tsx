@@ -22,11 +22,11 @@ import { useLayout } from "../../lib/layout.ts";
 import { ResumeDialog, showsHandOver } from "../send/HandOver.tsx";
 import { ReviewActionDialogs, useReviewActions } from "../send/ReviewActions.tsx";
 import { AnchoredMenu, type MenuItem } from "../ui/Menu.tsx";
-import type { PinMoves } from "./PinOrder.tsx";
+import { usePinOrder } from "./PinOrder.tsx";
 
 export interface RowMenuRequest {
   reviewId: string;
-  moves?: PinMoves;
+  inPinnedList?: boolean;
   via: "keyboard" | "pointer";
   anchor: { x: number; y: number; width: number; height: number };
   side?: "bottom" | "right";
@@ -126,11 +126,11 @@ export function useRowMenu(): ((request: RowMenuRequest) => void) | null {
 }
 
 /** Handlers for the row's focusable element; moved rows keep the browser menu. */
-export function useRowMenuTrigger(review: InboxItem, options?: { side?: "bottom" | "right"; moves?: PinMoves }) {
+export function useRowMenuTrigger(review: InboxItem, options?: { side?: "bottom" | "right"; inPinnedList?: boolean }) {
   const open = useRowMenu();
   if (!open || review.movedTo) return undefined;
   const show = (row: HTMLElement, anchor: RowMenuRequest["anchor"], via: RowMenuRequest["via"]) =>
-    open({ reviewId: review.id, row, anchor, via, side: options?.side, moves: options?.moves });
+    open({ reviewId: review.id, row, anchor, via, side: options?.side, inPinnedList: options?.inPinnedList });
   return {
     onContextMenu(event: MouseEvent<HTMLElement>) {
       event.preventDefault();
@@ -165,6 +165,8 @@ function RowActions({
   const navigate = useNavigate();
   const { reviewId } = useParams({ strict: false });
   const phone = useLayout() === "phone";
+  const pinOrder = usePinOrder();
+  const moves = request.inPinnedList ? pinOrder?.actions.movesFor(item.id) : undefined;
   const [resumeOpen, setResumeOpen] = useState(false);
   const sending = useSyncExternalStore(subscribeDrafts, () => isReviewSending(item.id));
   const canResume =
@@ -199,8 +201,8 @@ function RowActions({
     if (!("label" in item) || item.label !== "Unpin") return [item];
     return [
       item,
-      ...(request.moves?.up ? [{ label: "Move up", icon: ArrowUp, onSelect: request.moves.up }] : []),
-      ...(request.moves?.down ? [{ label: "Move down", icon: ArrowDown, onSelect: request.moves.down }] : []),
+      ...(moves?.up ? [{ label: "Move up", icon: ArrowUp, onSelect: moves.up }] : []),
+      ...(moves?.down ? [{ label: "Move down", icon: ArrowDown, onSelect: moves.down }] : []),
     ];
   });
   const returnFocus = {

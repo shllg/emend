@@ -24,11 +24,34 @@ interface DropPlace {
 
 function dropPlace(list: HTMLUListElement, x: number, y: number): DropPlace | null {
   const box = list.getBoundingClientRect();
-  if (x < box.left || x > box.right || y < box.top || y > box.bottom) return null;
+  const visible = {
+    left: Math.max(box.left, 0),
+    right: Math.min(box.right, window.innerWidth),
+    top: Math.max(box.top, 0),
+    bottom: Math.min(box.bottom, window.innerHeight),
+  };
+  for (let ancestor = list.parentElement; ancestor; ancestor = ancestor.parentElement) {
+    const style = getComputedStyle(ancestor);
+    if ((style.overflowX || "visible") === "visible" && (style.overflowY || "visible") === "visible") continue;
+    const clip = ancestor.getBoundingClientRect();
+    visible.left = Math.max(visible.left, clip.left);
+    visible.right = Math.min(visible.right, clip.right);
+    visible.top = Math.max(visible.top, clip.top);
+    visible.bottom = Math.min(visible.bottom, clip.bottom);
+  }
+  if (
+    visible.left >= visible.right ||
+    visible.top >= visible.bottom ||
+    x < visible.left ||
+    x > visible.right ||
+    y < visible.top ||
+    y > visible.bottom
+  )
+    return null;
   const rows = Array.from(list.children, (row) => row.getBoundingClientRect());
   const slot = rows.findIndex((row) => y < row.top + row.height / 2);
-  if (slot >= 0) return { slot, top: (rows[slot]?.top ?? box.top) - box.top };
-  return { slot: rows.length, top: (rows.at(-1)?.bottom ?? box.bottom) - box.top };
+  const edge = slot >= 0 ? (rows[slot]?.top ?? box.top) : (rows.at(-1)?.bottom ?? box.bottom);
+  return { slot: slot >= 0 ? slot : rows.length, top: Math.max(visible.top, Math.min(edge, visible.bottom)) - box.top };
 }
 
 /** Mouse ordering is separate from the row's touch swipe. The list delegates to its row links. */

@@ -10,7 +10,7 @@ import { StateBadge } from "../status/StateBadge.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { cn } from "../ui/utils.ts";
-import { usePinOrder } from "./PinOrder.tsx";
+import { usePinList } from "./PinOrder.tsx";
 import { useRowMenu, useRowMenuTrigger } from "./RowMenu.tsx";
 
 /** Approved and Done reviews need no work: dim them until the reviewer points at or focuses one. */
@@ -44,10 +44,9 @@ export function ReviewRow({
   keyShortcuts?: string;
 }) {
   const openMenu = useRowMenu();
-  const pinOrder = usePinOrder();
-  const moves = pinOrder?.actions.movesFor(review.id);
+  const pinOrder = usePinList();
   const pinDragging = pinOrder?.state.draggingId === review.id;
-  const menuTrigger = useRowMenuTrigger(review, { moves });
+  const menuTrigger = useRowMenuTrigger(review, { inPinnedList: !!pinOrder });
   const swipe = useRowSwipe(!!openMenu && !review.movedTo);
   const link = swipe.content;
   const attention = needsAttention(review);
@@ -230,7 +229,7 @@ export function ReviewRow({
               if (!link.current) return;
               openMenu({
                 reviewId: review.id,
-                moves,
+                inPinnedList: !!pinOrder,
                 via: "pointer",
                 anchor: event.currentTarget.getBoundingClientRect(),
                 align: "end",

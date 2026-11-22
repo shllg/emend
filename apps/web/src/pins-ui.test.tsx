@@ -475,7 +475,11 @@ const placeWrites = () =>
 const pinnedRegion = () => screen.getByRole("region", { name: "Pinned" });
 const pinLinks = () => within(pinnedRegion()).getAllByRole("link");
 const shownPins = () => pinLinks().map((link) => link.getAttribute("data-inbox-row"));
-const pinStatus = () => within(pinnedRegion()).getByRole("status");
+const pinStatus = () => {
+  const inbox = pinnedRegion().closest<HTMLElement>("[data-row-menu-surface]");
+  if (!inbox) throw new Error("Missing inbox");
+  return within(inbox).getByRole("status");
+};
 async function pinMenu(row: HTMLElement, key = "ContextMenu") {
   act(() => row.focus());
   fireEvent.keyDown(row, { key, shiftKey: key === "F10" });
@@ -522,6 +526,54 @@ test("a single pin has neither move", async () => {
   const menu = within(await pinMenu(pinLinks()[0] as HTMLElement));
   expect(menu.queryByRole("menuitem", { name: "Move up" })).toBeNull();
   expect(menu.queryByRole("menuitem", { name: "Move down" })).toBeNull();
+});
+
+test("an open pin menu follows the order from a fresh inbox response", async () => {
+  orderedPins();
+  mount();
+  await screen.findByRole("region", { name: "Pinned" });
+  const row = within(pinnedRegion()).getByRole("link", { name: /Item 2/ });
+  const menu = within(await pinMenu(row));
+  expect(menu.getByRole("menuitem", { name: "Move down" })).toBeTruthy();
+  items = items.map((row) => ({ ...row, pinOrder: [id(3), id(1), id(2)].indexOf(row.id) + 1 }));
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["inbox"] });
+  });
+  await waitFor(() => {
+    expect(shownPins()).toEqual([3, 1, 2].map(id));
+    expect(menu.queryByRole("menuitem", { name: "Move down" })).toBeNull();
+  });
+  expect(menu.getByRole("menuitem", { name: "Move up" })).toBeTruthy();
+  expect(placeWrites()).toHaveLength(0);
+});
+
+test("choosing a move in an open menu uses the fresh neighbour and announces the current place", async () => {
+  orderedPins();
+  mount();
+  await screen.findByRole("region", { name: "Pinned" });
+  const row = within(pinnedRegion()).getByRole("link", { name: /Item 2/ });
+  const menu = within(await pinMenu(row));
+  items = items.map((row) => ({ ...row, pinOrder: [id(3), id(2), id(1)].indexOf(row.id) + 1 }));
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["inbox"] });
+  });
+  await waitFor(() => expect(shownPins()).toEqual([3, 2, 1].map(id)));
+  fireEvent.click(menu.getByRole("menuitem", { name: "Move up" }));
+  await expectMove(2, { before: id(3) }, [2, 3, 1], "Moved to place 1 of 3");
+  await waitFor(() => expect(document.activeElement).toBe(row));
+});
+
+test("an open pin menu loses its moves when the row is no longer shown in Pinned", async () => {
+  orderedPins();
+  mount();
+  await screen.findByRole("region", { name: "Pinned" });
+  const menu = within(await pinMenu(within(pinnedRegion()).getByRole("link", { name: /Item 2/ })));
+  fireEvent.change(screen.getByRole("textbox", { name: "Filter reviews" }), { target: { value: "Item 1" } });
+  expect(shownPins()).toEqual([id(1)]);
+  expect(menu.getByRole("menuitem", { name: "Unpin" })).toBeTruthy();
+  expect(menu.queryByRole("menuitem", { name: "Move up" })).toBeNull();
+  expect(menu.queryByRole("menuitem", { name: "Move down" })).toBeNull();
+  expect(placeWrites()).toHaveLength(0);
 });
 
 test.each([
@@ -723,6 +775,9 @@ function pointer(target: HTMLElement, type: string, patch: PointerEventInit = {}
 }
 function pinRects() {
   const list = within(pinnedRegion()).getByRole("list");
+  // happy-dom has no layout; give the containing surfaces a viewport-sized box.
+  for (let ancestor = list.parentElement; ancestor; ancestor = ancestor.parentElement)
+    vi.spyOn(ancestor, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 1280, 800));
   vi.spyOn(list, "getBoundingClientRect").mockReturnValue(new DOMRect(20, 100, 300, 180));
   for (const [index, row] of within(list).getAllByRole("listitem").entries()) {
     const rect = new DOMRect(20, 100 + index * 60, 300, 60);
@@ -730,6 +785,57 @@ function pinRects() {
     vi.spyOn(within(row).getByRole("link"), "getBoundingClientRect").mockReturnValue(rect);
   }
 }
+
+test("a scrolled Pinned list rejects drops above its scroller and still accepts visible drops", async () => {
+  orderedPins();
+  mount(`/r/${id(1)}`);
+  await screen.findByRole("region", { name: "Pinned" });
+  pinRects();
+  const scroller = pinnedRegion().parentElement;
+  if (!scroller) throw new Error("Missing inbox scroller");
+  scroller.style.overflowY = "auto";
+  scroller.scrollTop = 80;
+  vi.mocked(scroller.getBoundingClientRect).mockReturnValue(new DOMRect(20, 180, 300, 400));
+  const row = within(pinnedRegion()).getByRole("link", { name: /Item 3/ });
+  pointer(row, "pointerdown");
+  pointer(row, "pointermove", { clientY: 185 });
+  const line = pinnedRegion().querySelector<HTMLElement>("[data-pin-drop-slot]");
+  expect(line?.dataset.pinDropSlot).toBe("1");
+  expect(line?.style.top).toBe("80px");
+  pointer(row, "pointermove", { clientY: 110 });
+  expect(pinnedRegion().querySelector("[data-pin-drop-slot]")).toBeNull();
+  pointer(row, "pointerup", { clientY: 110 });
+  expect(shownPins()).toEqual([1, 2, 3].map(id));
+  expect(placeWrites()).toHaveLength(0);
+  pointer(row, "pointerdown");
+  pointer(row, "pointermove", { clientY: 185 });
+  expect(pinnedRegion().querySelector("[data-pin-drop-slot]")?.getAttribute("data-pin-drop-slot")).toBe("1");
+  pointer(row, "pointerup", { clientY: 185 });
+  await expectMove(3, { before: id(2) }, [1, 3, 2], "Moved to place 2 of 3");
+});
+
+test.each(["ancestor", "viewport"])("the %s also clips the Pinned drop area", async (clip) => {
+  orderedPins();
+  mount();
+  await screen.findByRole("region", { name: "Pinned" });
+  pinRects();
+  if (clip === "ancestor") {
+    const scroller = pinnedRegion().parentElement;
+    const main = pinnedRegion().closest("main");
+    if (!scroller || !main) throw new Error("Missing inbox containers");
+    scroller.style.overflowY = "auto";
+    main.style.overflowX = "hidden";
+    vi.mocked(main.getBoundingClientRect).mockReturnValue(new DOMRect(60, 100, 260, 180));
+  } else vi.stubGlobal("innerWidth", 90);
+  const row = within(pinnedRegion()).getByRole("link", { name: /Item 3/ });
+  const point = { clientX: clip === "ancestor" ? 40 : 100, clientY: 110 };
+  pointer(row, "pointerdown", { clientX: 80 });
+  pointer(row, "pointermove", point);
+  expect(pinnedRegion().querySelector("[data-pin-drop-slot]")).toBeNull();
+  pointer(row, "pointerup", point);
+  expect(placeWrites()).toHaveLength(0);
+  expect(shownPins()).toEqual([1, 2, 3].map(id));
+});
 
 test.each(["page", "pane", "tablet sheet"])(
   "mouse drag puts the third pin first in the %s without navigating",
