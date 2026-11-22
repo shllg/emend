@@ -214,11 +214,14 @@ author-written width and height are always dropped. A paragraph holding only
 such images also has the class `emend-media-row`.
 A paragraph with exactly two media spans gets `emend-media-row emend-media-pair` when their trimmed
 alts match `^before\b` and `^after\b`, case-insensitively, in that order.
+A paragraph with exactly three media spans whose trimmed alts match `^before\b`, `^after\b` and
+`^diff\b`, case-insensitively, in that order, is a pair too. It also gets `emend-media-pair-diff`,
+and its third span also gets `emend-media-diff`.
 Only whitespace may precede or separate the images.
-An optional effect follows the second image after a newline in leading text whitespace or a `br`.
+An optional effect follows the last image after a newline in leading text whitespace or a `br`.
 Its content, including inline elements, goes in one `span.emend-media-effect` through the paragraph's end.
 The span starts at the first non-whitespace content; preceding whitespace and breaks stay outside it.
-Other text before the images or on the second image's line prevents a pair.
+Other text before the images or on the last image's line prevents a pair.
 The effect wrapper changes neither text nor block ids. Author classes keep the `user-content-`
 prefix, so they never match the generated classes. A block's id covers each image's alt text, path
 and SHA-256, so a re-shot image at the same path shows as changed. Markdown docs render their listed

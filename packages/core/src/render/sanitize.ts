@@ -221,22 +221,16 @@ const isWhitespace = (node: HtmlNode) => node.type === "text" && node.value.trim
 /** Recognize ordered screenshot pairs without changing any text used by anchors. */
 function wrapMediaPair(paragraph: HtmlElement): boolean {
   const indices = paragraph.children.flatMap((child, index) => (isMediaSpan(child) ? [index] : []));
-  const [before, after] = indices;
-  if (indices.length !== 2 || before === undefined || after === undefined) return false;
-  for (const [index, pattern] of [
-    [before, /^before\b/i],
-    [after, /^after\b/i],
-  ] as const) {
+  const last = indices.at(-1);
+  if ((indices.length !== 2 && indices.length !== 3) || last === undefined) return false;
+  const patterns = [/^before\b/i, /^after\b/i, /^diff\b/i];
+  for (const [position, index] of indices.entries()) {
     const wrapper = paragraph.children[index];
     const image = wrapper?.type === "element" ? wrapper.children[0] : undefined;
-    if (image?.type !== "element" || !pattern.test(String(image.properties.alt ?? "").trim())) return false;
+    if (image?.type !== "element" || !patterns[position]?.test(String(image.properties.alt ?? "").trim())) return false;
+    if (!paragraph.children.slice((indices[position - 1] ?? -1) + 1, index).every(isWhitespace)) return false;
   }
-  if (
-    !paragraph.children.slice(0, before).every(isWhitespace) ||
-    !paragraph.children.slice(before + 1, after).every(isWhitespace)
-  )
-    return false;
-  const tail = paragraph.children.slice(after + 1);
+  const tail = paragraph.children.slice(last + 1);
   if (tail.every(isWhitespace)) return true;
   let lineBreak = false;
   for (const [index, child] of tail.entries()) {
@@ -249,7 +243,7 @@ function wrapMediaPair(paragraph: HtmlElement): boolean {
     if (isWhitespace(child)) continue;
     if (!lineBreak) return false;
     const effect = tail.slice(index);
-    const prefix = paragraph.children.slice(0, after + 1 + index);
+    const prefix = paragraph.children.slice(0, last + 1 + index);
     if (child.type === "text" && leading) {
       prefix.push({ type: "text", value: leading });
       effect[0] = { type: "text", value: child.value.slice(leading.length) };
@@ -295,8 +289,18 @@ function wrapMedia(
     const rest = node.children.filter((child) => !isMediaSpan(child));
     const pair = wrapMediaPair(node);
     if (pair || (spans.length > 0 && rest.every(isWhitespace))) {
+      const diff = pair && spans.length === 3 ? spans[2] : undefined;
+      if (diff?.type === "element") {
+        const classes = Array.isArray(diff.properties.className) ? diff.properties.className : [];
+        diff.properties.className = [...classes, "emend-media-diff"];
+      }
       const classes = Array.isArray(node.properties.className) ? node.properties.className : [];
-      node.properties.className = [...classes, "emend-media-row", ...(pair ? ["emend-media-pair"] : [])];
+      node.properties.className = [
+        ...classes,
+        "emend-media-row",
+        ...(pair ? ["emend-media-pair"] : []),
+        ...(diff ? ["emend-media-pair-diff"] : []),
+      ];
     }
   }
 }

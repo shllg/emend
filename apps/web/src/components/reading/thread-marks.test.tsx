@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import type { RenderedBlock, ThreadView } from "@emend/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { type Element as HappyElement, PropertySymbol } from "happy-dom";
 import { type ReactNode, StrictMode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { claimDraft } from "../../lib/composer-owner.ts";
@@ -23,6 +24,26 @@ const block: RenderedBlock = {
   text: "Plant a seed today.",
   html: '<p>Plant a <strong>seed</strong> <a href="https://example.com">today.</a></p>',
 };
+const diffPair: RenderedBlock = {
+  ...block,
+  text: "Before After Diff More room for seeds.",
+  html: `<p class="emend-media-row emend-media-pair emend-media-pair-diff"><span class="emend-media"><img src="/api/v1/media/${"a".repeat(64)}" alt="Before"><span class="emend-media-caption">Before</span></span> <span class="emend-media"><img src="/api/v1/media/${"b".repeat(64)}" alt="After"><span class="emend-media-caption">After</span></span> <span class="emend-media emend-media-diff"><img src="/api/v1/media/${"c".repeat(64)}" alt="Diff"><span class="emend-media-caption">Diff</span></span>\n<span class="emend-media-effect">More room for seeds.</span></p>`,
+};
+function mountPairStyles() {
+  // Load the production hide rules directly without needing the app stylesheet bundle.
+  const css = readFileSync(resolve(import.meta.dirname, "../../styles/prose.css"), "utf8");
+  const modes = css.match(/\.em-prose\[data-pair-mode="before"\][^{]+\{[^}]+\}/)?.[0];
+  if (!modes) throw new Error("Missing screenshot mode styles");
+  render(<style>{modes}</style>);
+}
+function mediaDisplay(element: HTMLElement) {
+  // happy-dom misses ancestor attribute changes in cached descendant-selector matches.
+  // Clear its caches so each mode checks the production CSS against the current DOM.
+  const cache = (element as unknown as HappyElement)[PropertySymbol.cache];
+  cache.matches.clear();
+  cache.computedStyle = null;
+  return getComputedStyle(element).display;
+}
 const thread: ThreadView = {
   id: "11111111-1111-4111-8111-111111111111",
   createdOn: 1,
@@ -321,6 +342,65 @@ test("a thread jump to the After caption switches a Before-only pair to Side by 
   expect(prose.getAttribute("data-pair-mode")).toBe("side");
   expect(screen.getByRole("button", { name: "Side by side" }).getAttribute("aria-pressed")).toBe("true");
 });
+
+for (const support of ["with highlights", "without Highlight", "without Intl.Segmenter"]) {
+  test.each([
+    { initial: "Before", mode: "before", quote: "Diff", hidden: true },
+    { initial: "Before", mode: "before", quote: "Diff More room for seeds.", hidden: true },
+    { initial: "Before", mode: "before", quote: "After", hidden: true },
+    { initial: "Diff", mode: "diff", quote: "Diff", hidden: false },
+    { initial: "Diff", mode: "diff", quote: "Diff More room for seeds.", hidden: false },
+    { initial: "Diff", mode: "diff", quote: "After", hidden: true },
+  ])(
+    `a thread jump to "$quote" switches a diff pair from $initial to Side by side (${support})`,
+    ({ initial, mode, quote, hidden }) => {
+      if (support === "without Highlight") vi.stubGlobal("Highlight", undefined);
+      if (support === "without Intl.Segmenter") {
+        const intl = Object.create(Object.getPrototypeOf(Intl), Object.getOwnPropertyDescriptors(Intl));
+        delete intl.Segmenter;
+        vi.stubGlobal("Intl", intl);
+      }
+      mountPairStyles();
+      const start = diffPair.text.indexOf(quote);
+      const end = start + quote.length;
+      const item: ThreadView = {
+        ...thread,
+        target: {
+          kind: "writeup-span",
+          blockId: diffPair.id,
+          quote,
+          prefix: diffPair.text.slice(0, start),
+          suffix: diffPair.text.slice(end),
+        },
+        placement: { status: "placed", location: { kind: "writeup-span", blockId: diffPair.id, start, end } },
+      };
+      const view = mount([item], [{ key: "overview", blocks: [diffPair] }]);
+      const prose = view.container.querySelector("[data-block-id]") as HTMLElement;
+      const diff = prose.querySelector<HTMLElement>(".emend-media-diff");
+      const target = prose.querySelector(`img[alt="${quote === "After" ? "After" : "Diff"}"]`)?.parentElement;
+      if (!diff || !target) throw new Error("Missing pair image");
+      if (support === "with highlights") expect(highlights.get("emend-comment")?.size).toBe(1);
+      else expect(highlights.size).toBe(0);
+      fireEvent.click(screen.getByRole("button", { name: initial }));
+      expect(prose.getAttribute("data-pair-mode")).toBe(mode);
+      expect(mediaDisplay(target) === "none").toBe(hidden);
+      const modesAtScroll: (string | null)[] = [];
+      const hiddenAtScroll: boolean[] = [];
+      vi.spyOn(prose, "scrollIntoView").mockImplementation(() => {
+        modesAtScroll.push(prose.getAttribute("data-pair-mode"));
+        hiddenAtScroll.push(mediaDisplay(diff) === "none" || mediaDisplay(target) === "none");
+      });
+      view.update([item], item.id);
+      expect(modesAtScroll).toEqual(["side"]);
+      expect(hiddenAtScroll).toEqual([false]);
+      expect(within(dialog()).getByRole("article").id).toBe(`thread-${item.id}`);
+      expect(prose.getAttribute("data-pair-mode")).toBe("side");
+      expect(mediaDisplay(diff)).not.toBe("none");
+      expect(mediaDisplay(target)).not.toBe("none");
+      expect(screen.getByRole("button", { name: "Side by side" }).getAttribute("aria-pressed")).toBe("true");
+    },
+  );
+}
 
 test.each([
   ["Before", "before", "after"],
