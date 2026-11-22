@@ -433,7 +433,9 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     if (!quote || quote.length > 2000) return;
     post({ type: "emend:anchor", quote, prefix: value.text.slice(Math.max(0, start - 32), start), suffix: value.text.slice(end, end + 32) });
   }
+  let lastAnchors;
   function highlight(anchors) {
+    lastAnchors = anchors;
     ranges.clear();
     const supported = typeof CSS !== "undefined" && CSS.highlights && typeof Highlight !== "undefined";
     if (supported) dom(window.HighlightRegistry.prototype, "delete", CSS.highlights, "emend-quotes");
@@ -494,6 +496,63 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   const styleOf = element => read(window.HTMLElement.prototype, "style", element);
   const styleCall = (method, style, ...args) => dom(window.CSSStyleDeclaration.prototype, method, style, ...args);
   const createElement = name => dom(window.Document.prototype, "createElement", document, name);
+  const issueLinks = new WeakMap();
+  let repoLinked = false;
+  function linkIssues(data) {
+    if (repoLinked || Object.keys(data).length !== 2 || typeof data.url !== "string") return;
+    // Kept in parity with RepoUrl (packages/contract/src/links.ts) by the bridge tests.
+    if (data.url.length > 2048 || /[\s\p{Cc}\p{Cf}]/u.test(data.url) || !/^https:\/\//i.test(data.url)) return;
+    try {
+      const url = new window.URL(data.url);
+      if (url.protocol !== "https:" || !url.hostname || url.username || url.password || url.search || url.hash ||
+          url.host !== url.host.toLowerCase()) return;
+      const [authority = "", ...path] = data.url.slice("https://".length).split("/");
+      if (!/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::\d{1,5})?$/.test(authority) || path.length !== 2 ||
+          !path.every(part => /^[A-Za-z0-9._-]+$/.test(part) && part !== "." && part !== "..") ||
+          url.pathname !== "/" + path.join("/")) return;
+    } catch { return; }
+    repoLinked = true;
+    const skipped = new Set([...omitted, "a", "code", "pre", "kbd", "samp", "textarea", "title", "button", "select", "option"]);
+    const textNodes = [];
+    const pending = body() ? [[body()][Symbol.iterator]()] : [];
+    let visits = 100000, links = 0;
+    // Collect before replacing: childNodes is live, so mutations must not revisit new text nodes.
+    while (pending.length && visits) {
+      const next = pending[pending.length - 1].next();
+      if (next.done) { pending.pop(); continue; }
+      visits--;
+      const node = next.value;
+      if (nodeType(node) === 3) textNodes.push(node);
+      else if (nodeType(node) === 1 && namespace(node) === "http://www.w3.org/1999/xhtml" && !skipped.has(localName(node)))
+        pending.push(children(node)[Symbol.iterator]());
+    }
+    for (const node of textNodes) {
+      if (links === 10000) break;
+      const value = textData(node);
+      let fragment, offset = 0;
+      // Kept in parity with linkIssueRefs (packages/core/src/render/issue-refs.ts) by the bridge tests.
+      for (const match of value.matchAll(/(?<![\w&/#])#([1-9]\d{0,6})(?!\w)/g)) {
+        if (!fragment) fragment = dom(window.Document.prototype, "createDocumentFragment", document);
+        if (match.index > offset) dom(window.Node.prototype, "appendChild", fragment,
+          dom(window.Document.prototype, "createTextNode", document, value.slice(offset, match.index)));
+        const link = createElement("a");
+        elementCall("setAttribute", link, "href", new window.URL(data.url + "/issues/" + match[1]).href);
+        elementCall("setAttribute", link, "rel", "noopener noreferrer nofollow");
+        elementCall("setAttribute", link, "target", "_blank");
+        dom(window.Node.prototype, "appendChild", link,
+          dom(window.Document.prototype, "createTextNode", document, match[0]));
+        dom(window.Node.prototype, "appendChild", fragment, link);
+        issueLinks.set(link, Number(match[1]));
+        offset = match.index + match[0].length;
+        if (++links === 10000) break;
+      }
+      if (!fragment) continue;
+      if (offset < value.length) dom(window.Node.prototype, "appendChild", fragment,
+        dom(window.Document.prototype, "createTextNode", document, value.slice(offset)));
+      dom(window.Node.prototype, "replaceChild", nodeValue("parentNode", node), fragment, node);
+    }
+    if (lastAnchors) highlight(lastAnchors);
+  }
   let keptMarks = [], marked = [], changeLabels = [];
   let themeMode = "light";
   function applyChanged() {
@@ -733,6 +792,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     else if (event.data.type === "emend:diagram") placeDiagram(event.data);
     else if (event.data.type === "emend:theme") theme(event.data);
     else if (event.data.type === "emend:goto") goTo(event.data);
+    else if (event.data.type === "emend:repo") linkIssues(event.data);
     else if (event.data.type === "emend:docs" && Array.isArray(event.data.paths)) {
       docs.clear();
       for (const path of event.data.paths) if (typeof path === "string") docs.add(path);
@@ -981,9 +1041,16 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     return { type: "emend:image", images, index };
   }
   listen(document, "click", event => {
-    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (event.defaultPrevented || event.button !== 0) return;
     const path = dom(window.Event.prototype, "composedPath", event);
     const link = path.find(node => node instanceof window.Element && linkHref(node) !== null);
+    const issue = link && issueLinks.get(link);
+    if (issue !== undefined) {
+      dom(window.Event.prototype, "preventDefault", event);
+      post({ type: "emend:issue", number: issue });
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     if (!link) {
       const gallery = imageGallery(path.find(node => node instanceof window.Element));
       if (gallery) {
@@ -1028,6 +1095,15 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       }
       post({ type: "emend:navigate", ...destination });
     } catch { /* Malformed URLs keep their normal link behavior. */ }
+  }, true);
+  listen(document, "auxclick", event => {
+    if (event.defaultPrevented || event.button !== 1) return;
+    const path = dom(window.Event.prototype, "composedPath", event);
+    const link = path.find(node => node instanceof window.Element && linkHref(node) !== null);
+    const issue = link && issueLinks.get(link);
+    if (issue === undefined) return;
+    dom(window.Event.prototype, "preventDefault", event);
+    post({ type: "emend:issue", number: issue });
   }, true);
   listen(window, "scroll", onScroll, { passive: true });
   listen(window, "resize", schedulePosition, { passive: true });

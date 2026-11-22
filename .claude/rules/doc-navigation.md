@@ -64,6 +64,9 @@ to it. Any change here needs `emend-security-reviewer`.
   image while a quote's range touches it.
 - The bridge never changes `location`, handles links to a fragment of the same doc itself, and
   calls DOM methods from their prototypes, so doc markup cannot replace them.
+- `emend:repo` carries only a checked repo URL to a ready frame. The bridge wraps `#123` text in
+  its own links, never in code, pre, a or non-HTML elements; a click posts `emend:issue` with only
+  the number. The parent opens only its own `repoUrl` with that number, never a URL from the frame.
 - Titles and Contents labels pass `cleanDocTitle` on the server and render as isolated text
   (`dir="auto"`). The filename always shows.
 - Position memory holds only the app's own block, thread and HTML-doc frame ids or declared

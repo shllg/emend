@@ -159,11 +159,11 @@ test.each(["remote", "local", "linked"])(
           key: createHash("sha256").update(identity).digest("hex"),
           name: kind === "remote" ? "remote-project" : basename(f.root),
         });
-        const repoUrl = code && kind === "remote" ? "https://example.test/org/remote-project" : undefined;
+        const repoUrl = kind === "remote" ? "https://example.test/org/remote-project" : undefined;
         expect(result.request.repoUrl).toBe(repoUrl);
         const explicit = await collect("Synthetic project");
         expect(explicit.request.repo).toEqual({ key: projectKey("Synthetic project"), name: "Synthetic project" });
-        expect(explicit.request.repoUrl).toBe(repoUrl);
+        expect(explicit.request.repoUrl).toBe(code ? repoUrl : undefined);
       }
     } finally {
       await f.cleanup();
@@ -193,11 +193,15 @@ test("a pub uses its working directory's repository even when its doc is in an e
     // A sandbox may place a .git marker above the temporary folders.
     const noRepo = vi.spyOn(roots, "worktreeRoot").mockResolvedValue(null);
     try {
-      expect((await collect(docs)).request.repo).toBeNull();
-      expect((await collect(docs, "Synthetic project")).request.repo).toEqual({
+      const outside = (await collect(docs)).request;
+      expect(outside.repo).toBeNull();
+      expect(outside.repoUrl).toBeUndefined();
+      const explicit = (await collect(docs, "Synthetic project")).request;
+      expect(explicit.repo).toEqual({
         key: projectKey("Synthetic project"),
         name: "Synthetic project",
       });
+      expect(explicit.repoUrl).toBeUndefined();
     } finally {
       noRepo.mockRestore();
     }

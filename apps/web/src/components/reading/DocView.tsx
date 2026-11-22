@@ -33,6 +33,7 @@ import { SourceView } from "./SourceView.tsx";
 
 export function DocView({
   docs,
+  repoUrl,
   openDoc,
   search,
   targeted,
@@ -52,6 +53,7 @@ export function DocView({
   headingTarget?: string;
   visit?: unknown;
   docs: RevisionView["docs"];
+  repoUrl?: string | null;
   openDoc?: RevisionView["docs"][number];
   search: ReviewSearch;
   targeted: boolean;
@@ -163,6 +165,7 @@ export function DocView({
         {...props}
         path={openDoc.path}
         contentUrl={openDoc.contentUrl}
+        repoUrl={repoUrl}
         changes={openDoc.changes}
         look={openDoc.look}
         colorScheme={openDoc.colorScheme}
