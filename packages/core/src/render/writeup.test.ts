@@ -228,39 +228,45 @@ test.each(["outOfScope", "whereToLook", "context"] as const)(
   },
 );
 
-test.each(["whyItMatters", "review", "checked", "notChecked", "outOfScope", "whereToLook", "context"] as const)(
-  "sanitizes hostile Markdown in %s",
-  async (field) => {
-    const source = "graph TD; A-->B; click A callback";
-    const markdown = [
-      "<script>bad()</script>",
-      "Before <img src=x onerror=alert(1)> after",
-      "[Unsafe link](javascript:bad())",
-      '<div onclick="bad()" style="position:fixed" id="raw" class="injected" data-foo="x">Raw HTML</div>',
-      '<svg onload="bad()"><circle /></svg>',
-      `\`\`\`mermaid\n${source}\n\`\`\``,
-    ].join("\n\n");
-    const change =
-      field === "review" ? { review: { level: "everything" as const, reason: markdown } } : { [field]: markdown };
-    const rendered = await renderWriteup({ ...writeup, ...change }, []);
-    const blocks = rendered.sections.find((section) => section.key === field)?.blocks ?? [];
-    const html = blocks.map((block) => block.html).join("");
-    expect(html).toContain("Raw HTML");
-    expect(html).toContain("Unsafe link");
-    expect(html).toContain('id="user-content-raw"');
-    expect(html).toContain("user-content-injected");
-    expect(html).not.toMatch(
-      /<(script|style|iframe|object|embed|form|svg)|\s(on\w+|style|data-[\w-]+)=|javascript:|data:|vbscript:/i,
-    );
-    expect(blocks.filter((block) => block.kind === "diagram")).toEqual([
-      expect.objectContaining({ kind: "diagram", source, text: source, html: "" }),
-    ]);
-    for (const block of blocks) {
-      expect(block.section).toBe(field);
-      expect(BlockId.parse(block.id)).toMatch(new RegExp(`^${field}-`));
-    }
-  },
-);
+test.each([
+  "whyItMatters",
+  "review",
+  "checked",
+  "notChecked",
+  "outOfScope",
+  "whereToLook",
+  "context",
+  "deviations",
+] as const)("sanitizes hostile Markdown in %s", async (field) => {
+  const source = "graph TD; A-->B; click A callback";
+  const markdown = [
+    "<script>bad()</script>",
+    "Before <img src=x onerror=alert(1)> after",
+    "[Unsafe link](javascript:bad())",
+    '<div onclick="bad()" style="position:fixed" id="raw" class="injected" data-foo="x">Raw HTML</div>',
+    '<svg onload="bad()"><circle /></svg>',
+    `\`\`\`mermaid\n${source}\n\`\`\``,
+  ].join("\n\n");
+  const change =
+    field === "review" ? { review: { level: "everything" as const, reason: markdown } } : { [field]: markdown };
+  const rendered = await renderWriteup({ ...writeup, ...change }, []);
+  const blocks = rendered.sections.find((section) => section.key === field)?.blocks ?? [];
+  const html = blocks.map((block) => block.html).join("");
+  expect(html).toContain("Raw HTML");
+  expect(html).toContain("Unsafe link");
+  expect(html).toContain('id="user-content-raw"');
+  expect(html).toContain("user-content-injected");
+  expect(html).not.toMatch(
+    /<(script|style|iframe|object|embed|form|svg)|\s(on\w+|style|data-[\w-]+)=|javascript:|data:|vbscript:/i,
+  );
+  expect(blocks.filter((block) => block.kind === "diagram")).toEqual([
+    expect.objectContaining({ kind: "diagram", source, text: source, html: "" }),
+  ]);
+  for (const block of blocks) {
+    expect(block.section).toBe(field);
+    expect(BlockId.parse(block.id)).toMatch(new RegExp(`^${field}-`));
+  }
+});
 
 test("sanitizes raw glossary HTML through the same pipeline", async () => {
   const rendered = await renderWriteup(
@@ -974,5 +980,35 @@ test.each([false, true])(
     }
     expect(rendered.needsYou).toEqual([{ kind: "answer", blockIds: [] }]);
     expect(rendered.sections.find((section) => section.key === "needsYou")?.blocks).toEqual([]);
+  },
+);
+
+test.each([false, true])(
+  "deviations render just before decisions without switching layouts (new layout: %s)",
+  async (opening) => {
+    const rendered = await renderWriteup(
+      {
+        overview: "Overview.",
+        tldr: "Summary.",
+        decisions: "No drift.",
+        topics: {},
+        deviations: "None.",
+        ...(opening ? { context: "Synthetic context." } : {}),
+      },
+      [],
+    );
+    expect(rendered.sections.map(({ key }) => key)).toEqual(
+      opening
+        ? ["tldr", "overview", "context", "deviations", "decisions"]
+        : ["overview", "tldr", "deviations", "decisions"],
+    );
+    const section = rendered.sections.find(({ key }) => key === "deviations");
+    expect(section).toMatchObject({
+      key: "deviations",
+      label: "Deviations from the approved intent",
+      topic: null,
+      blocks: [{ text: "None.", html: "<p>None.</p>" }],
+    });
+    expect(section?.blocks[0]?.id).toMatch(/^deviations-[0-9a-f]{8}$/);
   },
 );

@@ -487,6 +487,23 @@ async function computePublish(
         checkPublishSignal(deps.signal);
         const review = await findReview(ownerId, instanceId, input, q);
         if (!review) throw new Error("Missing review");
+        if (input.intentReview !== undefined) {
+          const intent = await q
+            .select({ id: reviews.id })
+            .from(reviews)
+            .where(
+              and(
+                eq(reviews.ownerId, ownerId),
+                eq(reviews.originInstanceId, instanceId),
+                eq(reviews.id, input.intentReview),
+                isNull(reviews.binnedAt),
+                isNull(reviews.movedToUrl),
+              ),
+            )
+            .get();
+          if (!intent) throw new ApiError("unknown_intent_review");
+          if (intent.id === review.id) throw new ApiError("invalid_request", "own_intent_review");
+        }
         const newest = await q
           .select()
           .from(revisions)
@@ -645,6 +662,7 @@ async function computePublish(
             snoozedAt: null,
             snoozedUntil: null,
             title: input.title,
+            intentReviewId: input.intentReview ?? null,
             branch: input.branch,
             project: input.repo?.name ?? review.project,
             updatedAt: Date.now(),

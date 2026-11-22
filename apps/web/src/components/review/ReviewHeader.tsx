@@ -1,7 +1,16 @@
-import { type PublishLink, type ReviewView, type RevisionView, reviewDownloadPath } from "@emend/contract";
+import {
+  type PublishLink,
+  type RelatedReview,
+  type ReviewView,
+  type RevisionView,
+  reviewDownloadPath,
+} from "@emend/contract";
+import { Link } from "@tanstack/react-router";
 import {
   ChevronDown,
   CircleDot,
+  Code2,
+  Compass,
   ExternalLink,
   FileDown,
   FileText,
@@ -61,6 +70,29 @@ function LinkChip({ link }: { link: ReturnType<typeof safeLinks>[number] }) {
       {/* An agent writes the label, so the real host stays visible; the host gives way first. */}
       <span className="min-w-0 shrink-[3] truncate text-11 text-fg-3">{link.host}</span>
     </a>
+  );
+}
+
+function RelatedReviewChip({ entry }: { entry: RelatedReview }) {
+  const label = entry.role === "intent" ? "Intent review" : "Code review";
+  const name = `${label}: ${entry.title}${entry.state === "approved" ? " (approved)" : ""}`;
+  return (
+    <Link
+      to="/r/$reviewId"
+      params={{ reviewId: entry.id }}
+      title={name}
+      aria-label={name}
+      className="inline-flex max-w-full items-center gap-1 rounded-sm border border-line-1 px-1.5 py-0.75 text-fg-2 no-underline hover:bg-hover hover:text-fg-1"
+    >
+      <Icon icon={entry.role === "intent" ? Compass : Code2} size={12} />
+      <span className="min-w-0 shrink-[0.2] truncate">
+        {label}
+        {entry.state === "approved" && <span className="text-fg-3"> · approved</span>}
+      </span>
+      <span dir="auto" className="min-w-0 shrink-[3] truncate text-11 text-fg-3">
+        {entry.title}
+      </span>
+    </Link>
   );
 }
 
@@ -233,6 +265,18 @@ export function ReviewHeader({
       )}
     </>
   );
+  const relatedReviews = review.related.length > 0 && (
+    <ul
+      aria-label="Related reviews"
+      className="m-0 inline-flex min-w-0 max-w-full list-none flex-wrap items-center gap-1.5 p-0 align-middle text-12 leading-[1.2]"
+    >
+      {review.related.map((entry) => (
+        <li key={`${entry.role}:${entry.id}`} className="min-w-0 max-w-full">
+          <RelatedReviewChip entry={entry} />
+        </li>
+      ))}
+    </ul>
+  );
   const contextRow = phone ? (
     <div className="flex flex-wrap items-center gap-2 text-fg-3 [font:var(--type-meta)]">
       <span className="inline-flex min-w-0 items-center gap-1.5 wrap-anywhere">
@@ -248,6 +292,7 @@ export function ReviewHeader({
         </>
       )}
       {statusBadges}
+      {relatedReviews && <> {relatedReviews}</>}
     </div>
   ) : (
     // The font shorthand includes line-height; override it to leave room for wrapped chips.
@@ -273,6 +318,7 @@ export function ReviewHeader({
         </>
       )}
       {statusBadges}
+      {relatedReviews && <> {relatedReviews}</>}
       {linksMenu && <> {linksMenu}</>}
     </div>
   );

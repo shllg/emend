@@ -187,6 +187,7 @@ export async function renderWriteup(
     await append("tldr", "TL;DR", writeup.tldr);
     await appendOpeningItems();
   }
+  await append("deviations", "Deviations from the approved intent", writeup.deviations);
   await append("decisions", "Decisions and drift", writeup.decisions ?? unwrittenDecisions);
   if (entries) {
     const glossaryBlocks: Block[] = [];

@@ -49,6 +49,7 @@ const base: ReviewView = {
   pickedUpAt: null,
   kind: "review",
   importedAt: null,
+  related: [],
   revisions: [{ seq: 3, createdAt: "2026-01-01T00:00:00.000Z" }],
 };
 /** How the fake server answers a review GET. */

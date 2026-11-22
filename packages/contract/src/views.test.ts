@@ -59,6 +59,7 @@ test("review views validate their states, limits, rendered blocks and doc varian
   expect(contract.InboxItem.safeParse(withoutPickedUp).success).toBe(false);
   expect(contract.InboxItem.parse(item).project).toBeNull();
   expect(contract.ReviewView.parse({ ...item, revisions: [] }).project).toBeNull();
+  expect(contract.ReviewView.parse({ ...item, revisions: [] }).related).toEqual([]);
   // Four blocks of 200 plus up to 50 pins missing from those blocks.
   expect(
     contract.InboxList.safeParse({
@@ -244,4 +245,45 @@ test("rendered newInRevision preserves valid lists and drops invalid stored valu
       newInRevision: [item],
     }).newInRevision,
   ).toEqual([item]);
+});
+
+test("related reviews default to an empty list and cap code reviews plus one intent review", () => {
+  expect(contract.LIMITS.relatedReviews).toBe(8);
+  const schema = contract.ReviewView.shape.related;
+  expect(schema.parse(undefined)).toEqual([]);
+  const entry = {
+    id: "22222222-2222-4222-8222-222222222222",
+    role: "intent",
+    title: "Synthetic intent",
+    state: "approved",
+  };
+  expect(contract.RelatedReview.parse(entry)).toEqual(entry);
+  expect(schema.parse([entry, { ...entry, role: "code", state: "open" }])).toHaveLength(2);
+  expect(schema.safeParse(Array.from({ length: 9 }, () => entry)).success).toBe(true);
+  expect(schema.safeParse(Array.from({ length: 10 }, () => entry)).success).toBe(false);
+  for (const patch of [
+    { id: "bad" },
+    { role: "other" },
+    { state: "unknown" },
+    { title: " " },
+    { title: "x".repeat(201) },
+  ])
+    expect(contract.RelatedReview.safeParse({ ...entry, ...patch }).success).toBe(false);
+});
+
+test("deviations are a revision section and a rendered section with stable block ids", () => {
+  expect(contract.NewInRevisionSection.parse("deviations")).toBe("deviations");
+  const block = {
+    id: "deviations-12345678",
+    section: "deviations",
+    kind: "paragraph",
+    html: "<p>None.</p>",
+    text: "None.",
+  };
+  expect(contract.BlockId.parse(block.id)).toBe(block.id);
+  expect(
+    contract.RenderedWriteup.parse({
+      sections: [{ key: "deviations", label: "Deviations from the approved intent", topic: null, blocks: [block] }],
+    }).sections[0]?.blocks,
+  ).toEqual([block]);
 });

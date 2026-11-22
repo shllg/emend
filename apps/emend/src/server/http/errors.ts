@@ -9,6 +9,7 @@ const MESSAGES: Record<ErrorCode, string> = {
   bad_origin: "The origin is not allowed.",
   not_found: "The resource was not found.",
   unknown_review: "The review was not found.",
+  unknown_intent_review: "The intent review was not found.",
   invalid_request: "The request is invalid.",
   invalid_target: "The target is invalid.",
   empty_send: "There is no feedback to send.",
@@ -29,6 +30,7 @@ const MESSAGES: Record<ErrorCode, string> = {
   rate_limited: "Code entry is temporarily locked.",
 };
 const DETAILS = {
+  own_intent_review: { code: "invalid_request", message: "a review cannot be its own intent review" },
   group_exists: { code: "invalid_state", message: "A group with this name exists." },
   group_limit: { code: "invalid_state", message: "You have the most groups allowed. Delete one first." },
   pin_limit: {

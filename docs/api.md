@@ -977,8 +977,10 @@ Pinned is ordered by `pinOrder`, then pin time, then id ascending.
 Pins made before `pinOrder` existed have 0 and keep oldest first above later pins.
 A grouped review's `list` and `activeUntil` follow the single-review rule below
 (approval window alone, no caps); clients place it by `groupId`.
-`GET /api/v1/reviews/:id` returns `ReviewView = InboxItem & { revisions: { seq, createdAt }[], importedAt: string | null }`,
-with revisions ascending by sequence. It places an approved review by the effective approval
+`GET /api/v1/reviews/:id` returns `ReviewView = InboxItem & { revisions: { seq, createdAt }[], importedAt: string | null, related: RelatedReview[] }`,
+with revisions ascending by sequence. `related` defaults to `[]` for older servers; each
+`RelatedReview` has `{ id: UUID, role: "intent" | "code", title, state }`, with the same title and
+state schemas as `InboxItem`. See "Intent reviews" below. It places an approved review by the effective approval
 window alone, without Active's caps.
 Both are reviewer-only, as is the revision endpoint below.
 
@@ -1043,7 +1045,7 @@ Base/head are nullable full commit hashes; head also permits `worktree`.
 `main` is `"writeup" | FilePath | null`: the manifest's main page, or null when omitted.
 `writeupEmpty` is a boolean computed at publish from the source Markdown, before rendering:
 true only when overview, tldr, whyItMatters, every newInRevision and needsYou item's text, the review verdict's reason, checked, notChecked, outOfScope,
-whereToLook, context, decisions, glossary, and every topic's why, example and body are missing or
+whereToLook, context, deviations, decisions, glossary, and every topic's why, example and body are missing or
 whitespace only. The plain-text area does not make a writeup non-empty. Both fields are stored
 on the revision; revisions predating these fields read as `main: null`, `writeupEmpty: false` and keep opening on Writeup.
 Without an explicit visible `tab` in the URL, the app opens the main page when set; otherwise
@@ -1642,7 +1644,7 @@ to make a read fit a per-Send or per-revision limit. The limits below apply to t
 | `RenderedWriteup.newInRevision` | Optional array of 1–`newInRevisionItems` (12) entries; each has optional `TopicSlug`, `NewInRevisionSection` and destination `blockId: BlockId` (neither `newInRevision-` nor `doc-`), and at most `blocksPerRevision` validated `newInRevision-` block IDs. Invalid stored values are omitted |
 | `RenderedWriteup.needsYou` | Optional array of at most `needsYouItems` (4) entries; each has a `NeedsYouKind`, optional `TopicSlug`, and at most `blocksPerRevision` validated `needsYou-` block IDs. Invalid stored values are omitted |
 | `RenderedWriteup.terms` | Optional array of at most `glossaryTerms` (50) entries: `term` 1–`glossaryTermChars` (100) characters, plain-text `definition` 0–`glossaryDefinitionChars` (2000) characters, and a validated `blockId: BlockId` |
-| `RenderedWriteup.sections[].key`, `RenderedBlock.section` | Renderer-generated keys: overview, tldr, whyItMatters, newInRevision, needsYou, review, checked, notChecked, outOfScope, whereToLook, context, decisions, glossary or `t-<TopicSlug>-why/example/body`; block sections also allow `doc-<hash8>`. TopicSlug permits 1–64 characters, so the longest topic section key is 74 characters |
+| `RenderedWriteup.sections[].key`, `RenderedBlock.section` | Renderer-generated keys: overview, tldr, whyItMatters, newInRevision, needsYou, review, checked, notChecked, outOfScope, whereToLook, context, deviations, decisions, glossary or `t-<TopicSlug>-why/example/body`; block sections also allow `doc-<hash8>`. TopicSlug permits 1–64 characters, so the longest topic section key is 74 characters |
 | `RenderedWriteup.sections[].label` | `titleChars + " — Example".length` (210), the longest renderer suffix appended to a topic title |
 | Section `blocks` and Markdown doc `blocks` | Each at most `blocksPerRevision` (100000); the same limit also applies to all writeup blocks combined and to writeup plus doc blocks combined |
 | `RenderedBlock.html`, `text`, `source` | Each bounded by `renderedBytesPerRevision` (268435456) UTF-8 bytes, the stored renderer output budget; source is optional |
@@ -1822,7 +1824,7 @@ Unknown keys, including owner ids, moved-to URLs, content keys, media types, `pl
 
 | Bundle field | Row fields |
 | --- | --- |
-| `review` | `id, originInstanceId, reviewKey: Sha256, repo: {key: Sha256, name} or null, project?: string or null, branch, title, state, approvedRevision: UUID or null, createdAt, updatedAt` |
+| `review` | `id, originInstanceId, reviewKey: Sha256, repo: {key: Sha256, name} or null, project?: string or null, branch, title, state, approvedRevision: UUID or null, intentReviewId?: UUID or null, createdAt, updatedAt` |
 | `revisions` | `id, reviewId, seq, base, head, main, writeupEmpty, createdAt` |
 | `topics` | `id, revisionId` plus `TopicMeta` (optional door and blastRadius) |
 | `files` | `id, revisionId, path, oldPath, role, status, topicSlug, ord, oldBlob, newBlob, renderedBlob, flag, parentDocId, title?, view?: DocView, look?: "emend" \| "custom" \| null, colorScheme?: "light" \| null`; nullable sides, status, topic, flag, parent |
@@ -1838,7 +1840,7 @@ Unknown keys, including owner ids, moved-to URLs, content keys, media types, `pl
 The hub keeps it when non-null; null or absent values fall back to `review.repo.name`, except `.git`, or null.
 This value is stored on the copied review; a copy whose stored project is null links no repository row.
 
-All ids are unique across the bundle and all references stay within it. The hub computes each
+All ids are unique across the bundle and all references except `review.intentReviewId` stay within it. The hub computes each
 thread’s creation placement from its target, refusing an unplaceable original target with
 `400 invalid_request`, then carries it through every later revision as publish does. Changed
 blocks are computed from consecutive hub renderings, with fresh row ids. Asset parent ids must name an HTML doc in the same revision.
@@ -1906,7 +1908,7 @@ and sign-out; loopback HTTP on the same server receives cookies without `Secure`
 ### Manifest and topics
 
 `PublishRequest = { reviewId?, reviewKey, repo: { key, name } | null, branch: string | null,
-title, base: commit | null, head: commit | "worktree" | null, main?, topics, writeup, links?, repoUrl?,
+title, base: commit | null, head: commit | "worktree" | null, main?, topics, writeup, links?, repoUrl?, intentReview?,
 files }`.
 The CLI sends `repo` for pubs too: the repository holding the working directory, or the
 `--project` name. A publish with a non-null `repo` sets the review's project to `repo.name`;
@@ -1971,7 +1973,7 @@ Other placement failures return 400 `invalid_request` with "The comments could n
 These failures never leave a partial revision.
 
 `PublishManifest = { version: 1, title, base?, head?, main?, topics: TopicMeta[], files, media?, writeup,
-links?, repoUrl? }`. `links` and `repoUrl` are described under "Links and repoUrl" at the end of
+links?, intentReview?, repoUrl? }`. `links` and `repoUrl` are described under "Links and repoUrl" at the end of
 this section.
 
 `main?: "writeup" | FilePath` declares the opening page. A path must name a file of this
@@ -2065,13 +2067,13 @@ text. There are at most `topicsPerReview` declared topics and writeup topic keys
 blast-radius scopes and notes obey `summaryChars`, `blastScopeChars` and `blastNoteChars`.
 Markdown strings are preserved exactly; the schema does not render or sanitize them.
 
-`WriteupInput = { overview, tldr, whyItMatters?, newInRevision?: NewInRevisionItem[], needsYou?: NeedsYouItem[], area?, review?, checked?, notChecked?, outOfScope?, whereToLook?, context?, decisions: string | null, glossary?, topics }`.
+`WriteupInput = { overview, tldr, whyItMatters?, newInRevision?: NewInRevisionItem[], needsYou?: NeedsYouItem[], area?, review?, checked?, notChecked?, outOfScope?, whereToLook?, context?, deviations?, decisions: string | null, glossary?, topics }`.
 Sections are Markdown strings, except `newInRevision?: NewInRevisionItem[]`, `needsYou?: NeedsYouItem[]`, `area?: WriteupArea`, `glossary?: string | GlossaryEntry[]` and `review?: ReviewVerdict`;
 `topics` maps slugs to `{ why, example?, body? }`, also Markdown. Decisions is
 required, with `null` representing no decisions section.
 `whyItMatters` is nonblank Markdown: what the change gives the product or prepares for.
 `newInRevision` is optional and additive under `/api/v1`, holding at most `newInRevisionItems` (12) items.
-`NewInRevisionSection = "overview" | "tldr" | "whyItMatters" | "checked" | "notChecked" | "outOfScope" | "whereToLook" | "context" | "decisions" | "glossary"`.
+`NewInRevisionSection = "overview" | "tldr" | "whyItMatters" | "checked" | "notChecked" | "outOfScope" | "whereToLook" | "context" | "deviations" | "decisions" | "glossary"`.
 `NewInRevisionItem = { text: string, topic?: TopicSlug, section?: NewInRevisionSection, quote?: string }`: text is nonblank,
 well-formed UTF-16 Markdown of 1–`newInRevisionChars` (300) characters on one line. Blank text is
 refused with `newInRevision text must not be blank`; malformed UTF-16 with
@@ -2100,7 +2102,7 @@ section fallback (and no jump for an unmatched quote alone). Quotes are matching
 rendered Markdown, and do not contribute to `writeupEmpty` or the Markdown byte sums.
 A thirteenth item is refused with `at most 12 newInRevision items`; the CLI reports
 `invalid publish manifest: writeup.newInRevision (at most 12 items)`.
-For an invalid section the CLI reports `writeup.newInRevision.<index>.section (overview, tldr, whyItMatters, checked, notChecked, outOfScope, whereToLook, context, decisions or glossary)`.
+For an invalid section the CLI reports `writeup.newInRevision.<index>.section (overview, tldr, whyItMatters, checked, notChecked, outOfScope, whereToLook, context, deviations, decisions or glossary)`.
 For an invalid topic slug it reports `writeup.newInRevision.<index>.topic (topic slug: lowercase letters, digits and -, at most 64)`;
 for an undeclared topic, `writeup.newInRevision.<index>.topic (newInRevision topic is not declared)`.
 These forms follow `invalid publish manifest: `. The endpoint refuses an invalid list with
@@ -2149,7 +2151,7 @@ unique block IDs across its list (`-2`, `-3` suffixes for repeats). The download
 this revision as an h2 followed by the items' blocks in order, only from revision 2. Like the
 app, the writeup download skips this section on revision 1.
 Every Markdown string is limited to `writeupSectionBytes` UTF-8 bytes; the sum of all present
-`overview`, `tldr`, `whyItMatters`, `outOfScope`, `whereToLook`, `context`, `decisions`, `glossary`, `why`, `example`
+`overview`, `tldr`, `whyItMatters`, `outOfScope`, `whereToLook`, `context`, `deviations`, `decisions`, `glossary`, `why`, `example`
 and `body` strings, including every list glossary term, definition and alias, is limited to
 `writeupBytes`. Each `newInRevision` and `needsYou` item's `text`, the verdict's `reason`, `checked` and `notChecked` count toward both limits too.
 These limits measure UTF-8 bytes, not character count. Parsed `topics` has a null
@@ -2204,6 +2206,32 @@ changes. Every absolute `http:` or `https:` link in rendered Markdown carries `t
 `rel="noopener noreferrer nofollow"`, including an absolute link back to the same emend review. Clients
 open `links` the same way, after checking again that each URL is https, and show each link's host
 (punycode for a non-ASCII host) beside its label, with the full URL as the title.
+
+#### Intent reviews
+
+A manifest and a `PublishRequest` may set `intentReview`: the id of the review that holds the
+approved intent for this change. It and `writeup.deviations` come together; either one alone is
+refused (`400 invalid_request`), and so is a request whose `reviewId` equals its `intentReview`.
+
+The server accepts only a review of the same owner and the same origin instance as the publishing
+token, not in the bin and not moved. Anything else is `404 unknown_intent_review`, so a missing and
+a foreign id look the same. A code review found by its key that names itself is `400 invalid_request`.
+Each publish sets the review's intent review to the request's value, or clears it when the request
+has none. The relation belongs to the review, not to one revision.
+
+`GET /api/v1/reviews/:id` returns `related`: the intent review this review names (role `intent`),
+then the reviews that name this one (role `code`), newest update first, at most `relatedReviews` (8).
+Id ascending breaks ties. Each entry has `id`, `role`, `title` and `state`. Reviews in the bin, moved
+reviews and ids that name no review of this owner are left out. The relation is never checked
+against approval; the app shows the state.
+
+`writeup.deviations` is nonblank Markdown and renders as the section "Deviations from the approved
+intent", right before "Decisions and drift", through the same sanitize pipeline as every writeup
+section. It does not select the new layout by itself.
+
+An import bundle carries `review.intentReviewId`, an optional nullable UUID. An id that names no
+review on the receiving server resolves to nothing until that review arrives. Attach copies it the
+same way; an absent field imports as null.
 
 ### Targets and placement
 
@@ -2626,6 +2654,7 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `pins` | 50 pinned reviews and pubs per owner, the bin included, moved reviews excluded |
 | `groupNameChars` | 80 characters per trimmed group name |
 | `agentReviews` | 100 reviews returned in the agent list |
+| `relatedReviews` | 8 code reviews related to one intent review |
 | `binItems` | 200 reviews returned in the bin list |
 | `importRevisions` | 1000 revisions per import |
 | `importThreads` | 1000 threads per import |
@@ -2712,7 +2741,7 @@ that exceed the remaining budget are listed as oversized without uploading their
 - Block ids are `<section>-<hash8>`. `hash8` is the first eight lowercase hex characters of SHA-256
   over block text normalized to NFC, whitespace runs collapsed to one space, and trimmed. Repeats
   within a section append `-2`, `-3`, and so on. Section keys are `overview`, `tldr`, `whyItMatters`, `newInRevision`, `needsYou`, `review`,
-  `checked`, `notChecked`, `outOfScope`, `whereToLook`, `context`, `decisions`, `glossary`,
+  `checked`, `notChecked`, `outOfScope`, `whereToLook`, `context`, `deviations`, `decisions`, `glossary`,
   `t-<slug>-why`, `t-<slug>-example`, `t-<slug>-body`, and
   `doc-<hash8 of the doc path>`. The complete block id is bounded by `pathChars`.
 - Bearer tokens are `em_`, reviewer session secrets `ems_`, and pairing secrets `emp_`, followed
@@ -2749,6 +2778,7 @@ escaped line on stderr.
 | `bad_origin` | 403 | A non-GET/HEAD request has a disallowed Origin, or carries a session cookie without Origin. |
 | `not_found` | 404 | Any id other than a review id is missing or belongs to another owner. |
 | `unknown_review` | 404 | The review id is missing, belongs to another owner, or belongs to another instance for a machine token; identical in all three cases. |
+| `unknown_intent_review` | 404 | The intent review was not found. |
 | `invalid_request` | 400 | The request is malformed or violates its contract schema. |
 | `invalid_target` | 400 | The comment target cannot be placed on the named revision. |
 | `empty_send` | 400 | A Go has no unsent comments and no instruction. |

@@ -141,6 +141,7 @@ export const NewInRevisionSection = z.enum([
   "outOfScope",
   "whereToLook",
   "context",
+  "deviations",
   "decisions",
   "glossary",
 ]);
@@ -205,6 +206,7 @@ const writeupInput = z.object({
   outOfScope: markdown.optional(),
   whereToLook: markdown.optional(),
   context: markdown.optional(),
+  deviations: nonBlankMarkdown.optional(),
   decisions: markdown.nullable(),
   glossary: z.union([markdown, Glossary]).optional(),
   topics: z
@@ -234,6 +236,7 @@ export function writeupMarkdown(writeup: WriteupInput): (string | null | undefin
     writeup.outOfScope,
     writeup.whereToLook,
     writeup.context,
+    writeup.deviations,
     writeup.decisions,
     ...(Array.isArray(writeup.glossary)
       ? writeup.glossary.flatMap((entry) => [entry.term, entry.definition, ...(entry.aliases ?? [])])
@@ -297,11 +300,21 @@ export const PublishManifest = z
       .optional(),
     writeup: WriteupInput,
     links: PublishLinks.optional(),
+    intentReview: z.uuid().optional(),
     // null opts out of the address the CLI derives from the remote. A string that is not
     // https://host/owner/name is dropped, and the CLI derives one instead.
     repoUrl: RepoUrl.nullable().optional().catch(undefined),
   })
   .superRefine((manifest, ctx) => {
+    if (manifest.intentReview !== undefined && manifest.writeup.deviations === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["writeup", "deviations"],
+        message: "deviations is required with intentReview",
+      });
+    } else if (manifest.writeup.deviations !== undefined && manifest.intentReview === undefined) {
+      ctx.addIssue({ code: "custom", path: ["intentReview"], message: "intentReview is required with deviations" });
+    }
     validateAgentNotes(manifest.files, ctx);
     if (
       manifest.main !== undefined &&

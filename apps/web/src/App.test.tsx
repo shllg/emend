@@ -3463,7 +3463,12 @@ test.each([
 
 test("a cached review with a failed refetch takes heading focus once while its next fetch is pending", async () => {
   withInbox([item, secondItem]);
-  const cachedReview = { ...secondItem, importedAt: null, revisions: [{ seq: 1, createdAt: item.updatedAt }] };
+  const cachedReview = {
+    ...secondItem,
+    importedAt: null,
+    related: [],
+    revisions: [{ seq: 1, createdAt: item.updatedAt }],
+  };
   const query = reviewQuery(secondItem.id);
   client.setQueryData(query.queryKey, cachedReview);
   let attempts = 0;

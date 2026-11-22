@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
@@ -174,4 +175,31 @@ test.each([
   if (exported.kind !== "bundle") throw new Error("missing bundle");
   expect(exported.bundle.review.binnedAt).toBe(expected);
   expect(JSON.parse(exported.json).review.binnedAt).toBe(expected);
+});
+
+test("attach carries the stored intent review id even before the intent review is copied", async () => {
+  const fixture = await directFixture();
+  const { result } = await fixture.publish();
+  const server = await fixture.reviewer();
+  const intentReviewId = randomUUID();
+  await server.db.query((q) =>
+    q
+      .update(reviews)
+      .set({ intentReviewId })
+      .where(and(eq(reviews.ownerId, server.ownerId), eq(reviews.id, result.reviewId))),
+  );
+  const exported = await server.db.transaction((q) =>
+    snapshot(
+      q,
+      server.ownerId,
+      server.instance.id,
+      result.reviewId,
+      `https://hub.example/r/${result.reviewId}`,
+      Date.now(),
+      false,
+    ),
+  );
+  if (exported.kind !== "bundle") throw new Error("missing bundle");
+  expect(exported.bundle.review.intentReviewId).toBe(intentReviewId);
+  expect(JSON.parse(exported.json).review.intentReviewId).toBe(intentReviewId);
 });

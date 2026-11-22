@@ -184,9 +184,13 @@ export async function prepareImport(
           throw new ApiError("invalid_request");
         }
       }
-      const parsed = PublishRequest.safeParse(importPublishInput(bundle, revision.id, source.source, source));
+      // The worker already validated the full WriteupInput, including deviations and its byte budget.
+      // Historical deviations need no current relation: later publishes may have cleared or changed it.
+      const { deviations, ...writeupInput } = source.source;
+      const parsed = PublishRequest.safeParse(importPublishInput(bundle, revision.id, writeupInput, source));
       if (!parsed.success) throw new ApiError("invalid_request");
       const input = parsed.data;
+      if (deviations !== undefined) input.writeup.deviations = deviations;
       const sources = new Set(
         input.files.flatMap((f) => [f.oldBlob, f.newBlob]).filter((s): s is string => s !== null),
       );

@@ -10,6 +10,7 @@ test("maps every error code to its specified HTTP status", () => {
     bad_origin: 403,
     not_found: 404,
     unknown_review: 404,
+    unknown_intent_review: 404,
     invalid_request: 400,
     invalid_target: 400,
     empty_send: 400,

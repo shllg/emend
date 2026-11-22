@@ -57,9 +57,22 @@ export const PublishRequest = z
     writeup: WriteupInput,
     links: PublishLinks.optional(),
     repoUrl: RepoUrl.optional(),
+    intentReview: z.uuid().optional(),
     files: z.array(PublishFile).max(LIMITS.filesPerRevision),
   })
   .superRefine((request, ctx) => {
+    if (request.intentReview !== undefined && request.writeup.deviations === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["writeup", "deviations"],
+        message: "deviations is required with intentReview",
+      });
+    } else if (request.writeup.deviations !== undefined && request.intentReview === undefined) {
+      ctx.addIssue({ code: "custom", path: ["intentReview"], message: "intentReview is required with deviations" });
+    }
+    if (request.reviewId !== undefined && request.reviewId === request.intentReview) {
+      ctx.addIssue({ code: "custom", path: ["intentReview"], message: "a review cannot be its own intent review" });
+    }
     validateAgentNotes(request.files, ctx);
     if (
       request.main !== undefined &&

@@ -949,6 +949,7 @@ export async function buildWriteupDownload(
         "outOfScope",
         "whereToLook",
         "context",
+        "deviations",
         "decisions",
         "glossary",
       ];

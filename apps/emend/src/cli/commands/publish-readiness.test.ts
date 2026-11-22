@@ -67,7 +67,7 @@ test.each([
         newInRevision: [{ section: "received-section", text: "Raised the retry limit." }],
       },
     },
-    "writeup.newInRevision.0.section (overview, tldr, whyItMatters, checked, notChecked, outOfScope, whereToLook, context, decisions or glossary)",
+    "writeup.newInRevision.0.section (overview, tldr, whyItMatters, checked, notChecked, outOfScope, whereToLook, context, deviations, decisions or glossary)",
   ],
   [
     {

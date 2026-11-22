@@ -9,6 +9,7 @@ export const LIMITS = {
   pins: 50,
   groupNameChars: 80,
   agentReviews: 100,
+  relatedReviews: 8,
   binItems: 200,
   importRevisions: 1000,
   importThreads: 1000,

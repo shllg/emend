@@ -7,6 +7,7 @@ import {
   importRowCount,
   indexImportBundle,
   LIMITS,
+  ReviewView,
   RevisionView,
   type WriteupInput,
 } from "@emend/contract";
@@ -2461,4 +2462,80 @@ test("import preserves area and whyItMatters when it re-renders stored writeup s
       source.whyItMatters,
     );
   }
+});
+
+test("import keeps an unresolved intent id and resolves both directions once its review arrives", async () => {
+  const intent = ImportBundle.parse(await bundle(f));
+  intent.review.title = "Synthetic imported intent";
+  const code = ImportBundle.parse(await bundle(f));
+  code.review.reviewKey = "d".repeat(64);
+  code.review.title = "Synthetic imported code";
+  code.review.intentReviewId = intent.review.id;
+  // One old revision predates the relation; the later one includes deviations.
+  const source = await f.deps.blobs.put(
+    f.ownerId,
+    Buffer.from(
+      JSON.stringify({ overview: "Synthetic code", tldr: "", decisions: null, topics: {}, deviations: "None." }),
+    ),
+    "application/json",
+  );
+  required(code.writeups[1]).sourceBlob = source;
+  const related = async (id: string) =>
+    ReviewView.parse(await (await f.request(`/reviews/${id}`, "GET")).json()).related;
+  expect((await f.importRequest("/import", code)).status).toBe(201);
+  expect(await related(code.review.id)).toEqual([]);
+  expect(
+    await f.db.read((q) =>
+      q
+        .select({ intentReviewId: tables.reviews.intentReviewId })
+        .from(tables.reviews)
+        .where(and(eq(tables.reviews.ownerId, f.ownerId), eq(tables.reviews.id, code.review.id)))
+        .get(),
+    ),
+  ).toEqual({ intentReviewId: intent.review.id });
+  const rendered = RevisionView.parse(await (await f.request(`/reviews/${code.review.id}/revisions/2`, "GET")).json());
+  expect(rendered.writeup.sections.find(({ key }) => key === "deviations")?.blocks[0]?.text).toBe("None.");
+  expect((await f.importRequest("/import", intent)).status).toBe(201);
+  expect(await related(code.review.id)).toEqual([
+    { id: intent.review.id, role: "intent", title: intent.review.title, state: "open" },
+  ]);
+  expect(await related(intent.review.id)).toEqual([
+    { id: code.review.id, role: "code", title: code.review.title, state: "open" },
+  ]);
+  expect(
+    await f.db.read((q) =>
+      q
+        .select({ intentReviewId: tables.reviews.intentReviewId })
+        .from(tables.reviews)
+        .where(and(eq(tables.reviews.ownerId, f.ownerId), eq(tables.reviews.id, intent.review.id)))
+        .get(),
+    ),
+  ).toEqual({ intentReviewId: null });
+});
+
+test("import preserves historical deviations after a later publish cleared the intent relation", async () => {
+  const input = ImportBundle.parse(await bundle(f));
+  input.review.intentReviewId = null;
+  const source = await f.deps.blobs.put(
+    f.ownerId,
+    Buffer.from(
+      JSON.stringify({
+        overview: "Synthetic history",
+        tldr: "",
+        decisions: null,
+        topics: {},
+        deviations: "The retry cap moved to the request loop.",
+      }),
+    ),
+    "application/json",
+  );
+  required(input.writeups[0]).sourceBlob = source;
+  expect((await f.importRequest("/import", input)).status).toBe(201);
+  expect(ReviewView.parse(await (await f.request(`/reviews/${input.review.id}`, "GET")).json()).related).toEqual([]);
+  const old = RevisionView.parse(await (await f.request(`/reviews/${input.review.id}/revisions/1`, "GET")).json());
+  expect(old.writeup.sections.find(({ key }) => key === "deviations")?.blocks[0]?.text).toBe(
+    "The retry cap moved to the request loop.",
+  );
+  const latest = RevisionView.parse(await (await f.request(`/reviews/${input.review.id}/revisions/2`, "GET")).json());
+  expect(latest.writeup.sections.some(({ key }) => key === "deviations")).toBe(false);
 });
