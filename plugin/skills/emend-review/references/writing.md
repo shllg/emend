@@ -338,7 +338,7 @@ In a review writeup:
   `![Before](media/before.png) ![After](media/after.png) ![Diff](media/diff.png)`.
   emend then adds a Diff control that shows that image alone.
   Make the diff from the two shots on your machine, with an image diff tool the project or the
-  user already provides. Never add a dependency to the repo under review for it.
+  user already provides. Never add a dependency to the repo under review or download a tool for it.
   Without such a tool, leave the Diff image out.
 - Every image path in the writeup must be listed under `media`.
 - Publish refuses an image path that is not listed, such as a typo in the file name.

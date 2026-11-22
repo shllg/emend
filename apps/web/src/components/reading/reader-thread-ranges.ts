@@ -161,6 +161,12 @@ export function visibleReadingArea(root: HTMLElement) {
 export function revealThread(entry: ReaderThread, root: HTMLElement) {
   // A range has no scrollIntoView. Reveal its block first, then adjust the scroller to the actual line.
   revealReadingTarget(entry.element);
+  // The passage's own element lets a screenshot pair show the image that holds it.
+  const container = entry.range?.commonAncestorContainer;
+  const passage = container instanceof Element ? container : container?.parentElement;
+  if (passage instanceof HTMLElement && passage !== entry.element && entry.element.contains(passage)) {
+    revealReadingTarget(passage);
+  }
   entry.element.scrollIntoView({ block: "nearest" });
   const rect = passageRect(entry);
   const area = visibleReadingArea(root);

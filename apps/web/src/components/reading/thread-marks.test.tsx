@@ -323,6 +323,60 @@ test("a thread jump to the After caption switches a Before-only pair to Side by 
 });
 
 test.each([
+  ["Side by side", "side"],
+  ["Before", "before"],
+])("a thread jump to the Diff caption switches a pair from %s to Diff", (label, initial) => {
+  const pair: RenderedBlock = {
+    ...block,
+    text: "Before After Diff",
+    html: `<p class="emend-media-row emend-media-pair emend-media-pair-diff"><span class="emend-media"><img src="/api/v1/media/${"a".repeat(64)}" alt="Before"><span class="emend-media-caption">Before</span></span> <span class="emend-media"><img src="/api/v1/media/${"b".repeat(64)}" alt="After"><span class="emend-media-caption">After</span></span> <span class="emend-media emend-media-diff"><img src="/api/v1/media/${"c".repeat(64)}" alt="Diff"><span class="emend-media-caption">Diff</span></span></p>`,
+  };
+  const diff: ThreadView = {
+    ...thread,
+    target: { kind: "writeup-span", blockId: pair.id, quote: "Diff", prefix: "Before After ", suffix: "" },
+    placement: { status: "placed", location: { kind: "writeup-span", blockId: pair.id, start: 13, end: 17 } },
+  };
+  const view = mount([diff], [{ key: "overview", blocks: [pair] }]);
+  const prose = view.container.querySelector("[data-block-id]") as HTMLElement;
+  fireEvent.click(screen.getByRole("button", { name: label }));
+  expect(prose.getAttribute("data-pair-mode")).toBe(initial);
+  const modesAtScroll: (string | null)[] = [];
+  vi.spyOn(prose, "scrollIntoView").mockImplementation(() => {
+    modesAtScroll.push(prose.getAttribute("data-pair-mode"));
+  });
+  view.update([diff], diff.id);
+  expect(modesAtScroll).toEqual(["diff"]);
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${diff.id}`);
+  expect(prose.getAttribute("data-pair-mode")).toBe("diff");
+  expect(screen.getByRole("button", { name: "Diff" }).getAttribute("aria-pressed")).toBe("true");
+});
+test("a thread jump to the After caption switches a diff pair from Before to Side by side", () => {
+  const pair: RenderedBlock = {
+    ...block,
+    text: "Before After Diff",
+    html: `<p class="emend-media-row emend-media-pair emend-media-pair-diff"><span class="emend-media"><img src="/api/v1/media/${"a".repeat(64)}" alt="Before"><span class="emend-media-caption">Before</span></span> <span class="emend-media"><img src="/api/v1/media/${"b".repeat(64)}" alt="After"><span class="emend-media-caption">After</span></span> <span class="emend-media emend-media-diff"><img src="/api/v1/media/${"c".repeat(64)}" alt="Diff"><span class="emend-media-caption">Diff</span></span></p>`,
+  };
+  const after: ThreadView = {
+    ...thread,
+    target: { kind: "writeup-span", blockId: pair.id, quote: "After", prefix: "Before ", suffix: " Diff" },
+    placement: { status: "placed", location: { kind: "writeup-span", blockId: pair.id, start: 7, end: 12 } },
+  };
+  const view = mount([after], [{ key: "overview", blocks: [pair] }]);
+  const prose = view.container.querySelector("[data-block-id]") as HTMLElement;
+  fireEvent.click(screen.getByRole("button", { name: "Before" }));
+  expect(prose.getAttribute("data-pair-mode")).toBe("before");
+  const modesAtScroll: (string | null)[] = [];
+  vi.spyOn(prose, "scrollIntoView").mockImplementation(() => {
+    modesAtScroll.push(prose.getAttribute("data-pair-mode"));
+  });
+  view.update([after], after.id);
+  expect(modesAtScroll).toEqual(["side"]);
+  expect(within(dialog()).getByRole("article").id).toBe(`thread-${after.id}`);
+  expect(prose.getAttribute("data-pair-mode")).toBe("side");
+  expect(screen.getByRole("button", { name: "Side by side" }).getAttribute("aria-pressed")).toBe("true");
+});
+
+test.each([
   ["Before", "before", "after"],
   ["Side by side", "side", "side"],
 ])("revealing the After image synchronously updates a pair in %s mode", (label, initial, expected) => {
