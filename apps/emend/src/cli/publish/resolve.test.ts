@@ -420,3 +420,33 @@ test("manifest media shared by Markdown docs publishes one parentless asset row"
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("resolve carries the manifest's intent review and deviations into the request", async () => {
+  const dir = await fs.realpath(await mkdtemp(join(tmpdir(), "emend-intent-resolve-")));
+  try {
+    const root = join(dir, "repo");
+    await mkdir(join(root, ".git"), { recursive: true });
+    await writeFile(join(root, "plan.md"), "# Synthetic plan");
+    const input = PublishManifest.parse({
+      ...manifest(),
+      intentReview: "22222222-2222-4222-8222-222222222222",
+      writeup: { ...manifest().writeup, deviations: "None." },
+    });
+    const resolved = await resolvePublish(
+      input,
+      { manifest: "synthetic", key: "code" },
+      join(dir, "state"),
+      join(dir, "config", "emend"),
+      "instance",
+      root,
+      () => {},
+    );
+    expect(resolved.request).toMatchObject({ intentReview: input.intentReview, writeup: { deviations: "None." } });
+    expect(resolved.forInstance("other-instance")).toMatchObject({
+      intentReview: input.intentReview,
+      writeup: { deviations: "None." },
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

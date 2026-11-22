@@ -30,6 +30,7 @@ export const WRITEUP_SECTION_NAMES = {
   outOfScope: "Out of scope",
   whereToLook: "Where to look",
   context: "Context",
+  deviations: "Deviations",
   decisions: "Decisions",
   glossary: "Glossary",
 };

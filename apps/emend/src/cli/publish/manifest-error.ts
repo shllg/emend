@@ -15,7 +15,7 @@ function expectedForm(issue: ManifestIssue): string {
   if (review && field === "level") return "skim, topics or everything";
   const newInRevision = issue.path[0] === "writeup" && issue.path[1] === "newInRevision";
   if (newInRevision && typeof issue.path[2] === "number" && field === "section")
-    return "overview, tldr, whyItMatters, checked, notChecked, outOfScope, whereToLook, context, decisions or glossary";
+    return "overview, tldr, whyItMatters, checked, notChecked, outOfScope, whereToLook, context, deviations, decisions or glossary";
   const needsYou = issue.path[0] === "writeup" && issue.path[1] === "needsYou";
   if (needsYou && typeof issue.path[2] === "number" && field === "kind")
     return "decide, accept, confirm-drift or answer";

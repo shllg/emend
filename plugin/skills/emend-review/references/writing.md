@@ -55,7 +55,7 @@ Put the marker alone on the quote's first line:
 
 Leave out a fact, a field or a line that has nothing real to say.
 Never write "None", "N/A" or a sentence that only repeats its label.
-Checked and Not checked are the exception. They are never empty.
+Checked, Not checked and Deviations are the exception. They are never empty.
 
 ## Why and Example
 
@@ -306,6 +306,31 @@ These cases are synthetic. Each shows a topic, the brief's lines and its proof.
   the cent.
 - `notChecked`: the run time on the live table under load; a long lock could block new invoices.
 - `needsYou`: `[{ "kind": "decide", "text": "Run it in the nightly window, or now with a short lock?" }]`
+
+## Intent reviews
+
+This section applies to an intent review: the short review a larger change gets before any code.
+Keep it short enough to read in two minutes.
+
+- `tldr`: what the change does, and the issue or plan task it serves.
+- `whyItMatters`: why the change is worth doing.
+- `overview`: **Goal** is the end state. **Change** is the approach: the parts you will touch, and how.
+- One topic per part you will change, with the risk you expect in `attention`, as "Risk and proof"
+  rates it. Its `why` says what will change there and why. An Example is not needed.
+- `needsYou`: the decisions you expect to need, as `decide` items, at most four. `[]` when you expect
+  none. Write `decisions` as usual.
+- `whereToLook`: **Biggest risk** is the case most likely to go wrong.
+- `checked`: what you read or tried to plan the change. `notChecked`: what only the code will show.
+
+### Deviations
+
+This section applies to a code review whose manifest names its intent review in `intentReview`.
+`writeup.deviations` shows as "Deviations from the approved intent".
+
+- One item per departure from the approved intent: what the intent said, what the code does, and why.
+- Name the topic that holds the deviation.
+- A deviation the reviewer must accept also goes into `needsYou` as a `confirm-drift` item.
+- When the code follows the intent, write "None." It is never empty.
 
 ## Glossary
 

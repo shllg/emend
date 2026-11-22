@@ -55,6 +55,7 @@ describe("publish manifest", () => {
         outOfScope: "Excluded",
         whereToLook: "Guide",
         context: "Context",
+        deviations: "None.",
         decisions: null,
         topics: { routing: { why: "Why", example: "Example", body: "Details" }, fallback: { why: "Fallback" } },
       }),
@@ -67,6 +68,7 @@ describe("publish manifest", () => {
       "Excluded",
       "Guide",
       "Context",
+      "None.",
       null,
       undefined,
       "Why",
@@ -731,4 +733,20 @@ describe("newInRevision", () => {
       );
     }
   });
+});
+
+test("PublishManifest pairs intentReview with nonblank deviations", () => {
+  const intentReview = "22222222-2222-4222-8222-222222222222";
+  const paired = { ...manifest, intentReview, writeup: { ...manifest.writeup, deviations: "None." } };
+  expect(PublishManifest.parse(paired)).toEqual(paired);
+  for (const [input, path, message] of [
+    [{ ...manifest, intentReview }, ["writeup", "deviations"], "deviations is required with intentReview"],
+    [{ ...manifest, writeup: paired.writeup }, ["intentReview"], "intentReview is required with deviations"],
+  ] as const) {
+    const result = PublishManifest.safeParse(input);
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues).toContainEqual(expect.objectContaining({ path, message }));
+  }
+  for (const deviations of ["", " \n\t", null])
+    expect(PublishManifest.safeParse({ ...paired, writeup: { ...paired.writeup, deviations } }).success).toBe(false);
 });

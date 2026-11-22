@@ -337,5 +337,14 @@ export const MIGRATIONS: readonly { tag: string; when: number; hash: string; sta
     "statements": [
       "ALTER TABLE `review_pins` ADD `position` integer DEFAULT 0 NOT NULL;"
     ]
+  },
+  {
+    "tag": "0027_intent_review",
+    "when": 1795373016479,
+    "hash": "39071f43366bde42d201b9737430f76cfd2b39f19e97e678da04df1515a23ed7",
+    "statements": [
+      "ALTER TABLE `reviews` ADD `intent_review_id` text;",
+      "CREATE INDEX `reviews_owner_intent_idx` ON `reviews` (`owner_id`,`intent_review_id`);"
+    ]
   }
 ];

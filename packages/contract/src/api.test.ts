@@ -49,6 +49,7 @@ test("exports the v1 API, limits, file vocabulary and reserved fallback", () => 
     commentBodyChars: 20000,
     instructionChars: 4000,
     quoteChars: 2000,
+    relatedReviews: 8,
     prefixSuffixChars: 32,
     diffContextLines: 3,
     titleChars: 200,

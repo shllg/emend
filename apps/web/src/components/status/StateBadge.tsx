@@ -23,6 +23,10 @@ const states = {
   },
 };
 
+export function stateLabel(state: ReviewState): string {
+  return states[state].label;
+}
+
 export function StateBadge({
   state,
   revision,

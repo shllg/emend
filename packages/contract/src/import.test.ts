@@ -82,6 +82,22 @@ test("bundle strips authority and capability fields while preserving row identit
   expect(result).toEqual(expected);
 });
 
+test("bundle intent review can name another review but never itself", () => {
+  const input = bundle();
+  const intentReviewId = randomUUID();
+  expect(ImportBundle.parse({ ...input, review: { ...input.review, intentReviewId } }).review.intentReviewId).toBe(
+    intentReviewId,
+  );
+  const result = ImportBundle.safeParse({
+    ...input,
+    review: { ...input.review, intentReviewId: input.review.id },
+  });
+  expect(result.success).toBe(false);
+  expect(result.error?.issues).toEqual([
+    { code: "custom", message: "a review cannot be its own intent review", path: [] },
+  ]);
+});
+
 test("bundle project is optional, nullable and bounded without adding import rows", () => {
   const input = ImportBundle.parse(bundle());
   expect(input.review).not.toHaveProperty("project");

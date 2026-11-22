@@ -7,6 +7,18 @@ import { refreshQueries } from "./query-refresh.ts";
 import { requestThemeSync } from "./theme.ts";
 
 const PublishedRevisions = createContext<ReadonlyMap<string, number>>(new Map());
+// These events change a review's state, update time or bin state, which another review's related list shows and orders by.
+const relatedReviewEvents = new Set<ReviewEvent["type"]>([
+  "publish",
+  "send",
+  "claimed",
+  "unsnooze",
+  "retire",
+  "reopen",
+  "bin",
+  "restore",
+  "delete",
+]);
 
 export function ReviewEventsProvider({ children, enabled = true }: { children: ReactNode; enabled?: boolean }) {
   const client = useQueryClient();
@@ -37,7 +49,8 @@ export function ReviewEventsProvider({ children, enabled = true }: { children: R
         setPublished((previous) =>
           event.revision > (previous.get(reviewId) ?? 0) ? new Map(previous).set(reviewId, event.revision) : previous,
         );
-      const keys = event.type === "viewed" ? [] : [["inbox"], ["review", reviewId]];
+      const reviewKey = relatedReviewEvents.has(event.type) ? ["review"] : ["review", reviewId];
+      const keys = event.type === "viewed" ? [] : [["inbox"], reviewKey];
       if (["bin", "restore", "delete"].includes(event.type)) keys.push(["bin"]);
       if (["thread", "send", "claimed", "confirmed", "viewed", "retire"].includes(event.type))
         keys.push(["revision", reviewId]);

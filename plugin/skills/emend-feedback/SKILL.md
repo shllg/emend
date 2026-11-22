@@ -195,6 +195,8 @@ When publish prints `source is outside the allowed doc roots`, stop and ask the 
 After changes, check the affected behavior and update the manifest's files and writeup. For
 code changes, use `head: "worktree"` unless the changes already belong to the chosen commit.
 Keep the review id and stable topic slugs. Update `review.json` in the same private folder.
+Keep `intentReview`, and update `writeup.deviations` when the code's departures from the
+approved intent change.
 If the earlier `review.json` is gone, ask the user for it or write a fresh manifest from the current change.
 Copy a manifest the user supplies into the verified private folder.
 Never publish one from a folder that failed the check or from inside the worktree.

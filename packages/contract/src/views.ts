@@ -66,6 +66,13 @@ export const InboxItem = z.object({
   kind: z.enum(["review", "publish"]),
 });
 export type InboxItem = z.infer<typeof InboxItem>;
+export const RelatedReview = z.object({
+  id: z.uuid(),
+  role: z.enum(["intent", "code"]),
+  title: InboxItem.shape.title,
+  state: InboxItem.shape.state,
+});
+export type RelatedReview = z.infer<typeof RelatedReview>;
 export const InboxList = z.object({
   groups: z.array(InboxListGroup).max(LIMITS.groups).default([]),
   approvedActiveHours: ApprovedActiveHours,
@@ -108,6 +115,10 @@ export type AgentReviewList = z.infer<typeof AgentReviewList>;
 export const AgentReviewQuery = z.object({ head: commit.optional(), key: Sha256.optional() });
 export type AgentReviewQuery = z.infer<typeof AgentReviewQuery>;
 export const ReviewView = InboxItem.extend({
+  related: z
+    .array(RelatedReview)
+    .max(LIMITS.relatedReviews + 1)
+    .default([]),
   importedAt: z.iso.datetime().nullable().default(null),
   revisions: z.array(z.object({ seq: z.int().positive(), createdAt: z.iso.datetime() })),
 });
@@ -137,6 +148,7 @@ const sectionKey = z.union([
     "outOfScope",
     "whereToLook",
     "context",
+    "deviations",
     "decisions",
     "glossary",
   ]),

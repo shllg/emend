@@ -27,6 +27,7 @@ const ImportRows = z.object({
     title: PublishRequest.shape.title,
     state: z.enum(["open", "approved", "settled"]),
     approvedRevision: id.nullable(),
+    intentReviewId: id.nullable().optional(),
     binnedAt: time.nullable().optional(),
     ...dates,
   }),
@@ -124,6 +125,7 @@ const BundleRows = ImportRows.extend({
 export type ImportBundle = z.infer<typeof BundleRows>;
 export const ImportBundle = BundleRows.superRefine((bundle, ctx) => {
   const issue = (message: string) => ctx.addIssue({ code: "custom", message });
+  if (bundle.review.intentReviewId === bundle.review.id) issue("a review cannot be its own intent review");
   const all = [
     bundle.review,
     ...bundle.revisions,

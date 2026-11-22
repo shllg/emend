@@ -321,3 +321,34 @@ test("Markdown doc images count as files, without spending the writeup media cou
     }).success,
   ).toBe(true);
 });
+
+test("PublishRequest pairs intentReview with nonblank deviations", () => {
+  const intentReview = "22222222-2222-4222-8222-222222222222";
+  const paired = { ...request, intentReview, writeup: { ...request.writeup, deviations: "None." } };
+  expect(PublishRequest.parse(paired)).toEqual(paired);
+  for (const [input, path, message] of [
+    [{ ...request, intentReview }, ["writeup", "deviations"], "deviations is required with intentReview"],
+    [{ ...request, writeup: paired.writeup }, ["intentReview"], "intentReview is required with deviations"],
+  ] as const) {
+    const result = PublishRequest.safeParse(input);
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues).toContainEqual(expect.objectContaining({ path, message }));
+  }
+  for (const deviations of ["", " \n\t", null])
+    expect(PublishRequest.safeParse({ ...paired, writeup: { ...paired.writeup, deviations } }).success).toBe(false);
+});
+
+test("a publish request cannot name itself as its intent review", () => {
+  const reviewId = "22222222-2222-4222-8222-222222222222";
+  const result = PublishRequest.safeParse({
+    ...request,
+    reviewId,
+    intentReview: reviewId,
+    writeup: { ...request.writeup, deviations: "None." },
+  });
+  expect(result.success).toBe(false);
+  if (!result.success)
+    expect(result.error.issues).toContainEqual(
+      expect.objectContaining({ path: ["intentReview"], message: "a review cannot be its own intent review" }),
+    );
+});

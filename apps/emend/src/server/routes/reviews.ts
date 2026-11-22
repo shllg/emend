@@ -720,8 +720,51 @@ export function reviewRoutes(app: Hono<AppEnv>, deps: AppDeps) {
         .where(and(eq(revisions.ownerId, ownerId), eq(revisions.reviewId, reviewId)))
         .orderBy(revisions.seq)
         .all();
+      const review = await q
+        .select({ intentReviewId: reviews.intentReviewId, originInstanceId: reviews.originInstanceId })
+        .from(reviews)
+        .where(and(eq(reviews.ownerId, ownerId), eq(reviews.id, reviewId)))
+        .get();
+      if (!review) throw new ApiError("unknown_review");
+      const relatedFields = { id: reviews.id, title: reviews.title, state: reviews.state };
+      const intent = review.intentReviewId
+        ? await q
+            .select(relatedFields)
+            .from(reviews)
+            .where(
+              and(
+                eq(reviews.ownerId, ownerId),
+                eq(reviews.id, review.intentReviewId),
+                eq(reviews.originInstanceId, review.originInstanceId),
+                isNull(reviews.binnedAt),
+                isNull(reviews.movedToUrl),
+                ne(reviews.id, reviewId),
+              ),
+            )
+            .get()
+        : undefined;
+      const code = await q
+        .select(relatedFields)
+        .from(reviews)
+        .where(
+          and(
+            eq(reviews.ownerId, ownerId),
+            eq(reviews.intentReviewId, reviewId),
+            eq(reviews.originInstanceId, review.originInstanceId),
+            isNull(reviews.binnedAt),
+            isNull(reviews.movedToUrl),
+            ne(reviews.id, reviewId),
+          ),
+        )
+        .orderBy(desc(reviews.updatedAt), asc(reviews.id))
+        .limit(LIMITS.relatedReviews)
+        .all();
       return ReviewView.parse({
         ...item,
+        related: [
+          ...(intent ? [{ ...intent, role: "intent" }] : []),
+          ...code.map((entry) => ({ ...entry, role: "code" })),
+        ],
         revisions: rows.map((row) => ({ seq: row.seq, createdAt: new Date(row.createdAt).toISOString() })),
       });
     });

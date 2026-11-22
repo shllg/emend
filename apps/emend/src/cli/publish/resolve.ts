@@ -539,6 +539,7 @@ async function resolveWithWorker(
     topics,
     writeup: manifest.writeup,
     links: manifest.links,
+    ...(manifest.intentReview !== undefined ? { intentReview: manifest.intentReview } : {}),
     // The manifest's own repoUrl wins only when it is valid, and null opts out of the derived one.
     // The schema drops an invalid string, which falls back to the derived value.
     repoUrl: manifest.repoUrl === null ? undefined : (manifest.repoUrl ?? repoUrl),

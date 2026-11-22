@@ -161,6 +161,7 @@ export async function importReview(principal: Principal, bundle: ImportBundle, d
         );
         await q.insert(t.reviews).values({
           ...bundle.review,
+          intentReviewId: bundle.review.intentReviewId ?? null,
           ownerId,
           repoId,
           project,

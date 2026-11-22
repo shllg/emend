@@ -199,6 +199,7 @@ describe("UTF-8 writeup budgets", () => {
     "outOfScope",
     "whereToLook",
     "context",
+    "deviations",
     "decisions",
     "glossary",
     "why",
@@ -233,7 +234,7 @@ describe("UTF-8 writeup budgets", () => {
     };
     expect(new TextEncoder().encode(section).byteLength * 8).toBe(2097152);
     expect(WriteupInput.parse(writeup)).toEqual(writeup);
-    for (const field of ["outOfScope", "whereToLook", "context"]) {
+    for (const field of ["outOfScope", "whereToLook", "context", "deviations"]) {
       const result = WriteupInput.safeParse({ ...writeup, [field]: "x" });
       expect(result.success).toBe(false);
       if (!result.success)

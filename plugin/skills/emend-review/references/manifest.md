@@ -171,6 +171,18 @@ Each text is nonblank Markdown, at most 300 characters on one line. The topic is
 Use at most 4 items; publish refuses a fifth. `[]` says nothing needs a decision.
 Write it with `decisions` from first-hand intent; with `decisions: null`, leave it out.
 
+A code review that carries out an approved intent review adds two fields to the example below.
+The id is synthetic:
+
+```json
+{
+  "intentReview": "22222222-2222-4222-8222-222222222222",
+  "writeup": {
+    "deviations": "- The intent capped retries in the client; the cap sits in the request loop, so every caller shares it."
+  }
+}
+```
+
 Screenshots and other images for the writeup go in `media`, a list next to `files`.
 Each entry is `{ "path": "media/before.png", "source": ".shots/before.png" }`.
 
@@ -208,6 +220,12 @@ Use these constraints when writing the manifest:
   without a user name or password, at most 2048 characters. `label` has 1 to 60 characters.
   `kind` is `pr`, `issue` or `other`. Leave `links` out when there are none. An invalid link
   fails the publish; fix it and publish again.
+- `intentReview` is optional: the id of the approved intent review this code review carries out,
+  as its publish printed it. It needs `writeup.deviations`, and `writeup.deviations` needs it.
+  Publish refuses an id that names none of your reviews from this machine, or one in the bin, with
+  "The intent review was not found." Check the id and publish again.
+- `writeup.deviations` is nonblank Markdown: each deviation from the intent review, or "None.".
+  It shows as "Deviations from the approved intent", right before Decisions.
 - For a code review, emend takes the repository's web address from its `origin` remote, which
   links `#123`. Set `repoUrl` only when that remote is not where the issues live. It must be
   exactly `https://host/owner/name`, with no trailing slash, path, query or fragment; an invalid

@@ -150,6 +150,7 @@ export async function snapshot(
       ...dates(review),
       repo: repo ?? null,
       project: review.project,
+      intentReviewId: review.intentReviewId,
       binnedAt: review.binnedAt === null ? null : iso(review.binnedAt),
     },
     revisions: revisionRows.map((r) => ({ ...r, createdAt: iso(r.createdAt) })),

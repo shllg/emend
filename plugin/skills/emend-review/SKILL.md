@@ -58,6 +58,24 @@ other topic 99. Keep a test file in its feature topic only when it holds somethi
 should look at: an edge case, a tricky setup, a changed expectation, or a removed or weakened
 assertion. Then add a note on those lines that says why.
 
+## Start a larger change with an intent review
+
+Before you write code for a change above Low risk, publish a short intent review and wait for it.
+A change is above Low risk when any of its topics would be Medium or High, as
+"Risk and proof" in [the writing reference](references/writing.md) rates them.
+The reviewer approves the what and the how first, then reviews the code against them.
+
+- Skip it for a Low-risk change, when the code already exists, or when the user says so.
+  Leave `intentReview` and `deviations` out then.
+- The intent review is a docs-only review: no `base` and no `head`, and `--key` for its first
+  publish. Write it as the writing reference says under "Intent reviews".
+- Wait for the reviewer as usual. Their comments change the intent review. Start the code only
+  after they approve it.
+- The code review's manifest sets `intentReview` to the approved intent review's id and writes
+  `writeup.deviations`. Publish refuses one without the other.
+- emend shows the link in both reviews' headers. The intent review needs no new revision.
+- Keep both fields on every later revision of the code review.
+
 ## Collect the docs the change rests on
 
 Without `base` and `head`, skip Git commands and take the task's supported docs as `doc` entries only.
@@ -179,6 +197,9 @@ Write the opening fields below. The app groups them for the reviewer.
 - `context`: side information as a short list.
   Include the commit count and scope, renamed files, dependencies, unchanged areas and cited docs.
   It shows muted, below the guide.
+- `deviations`: only in a code review whose manifest sets `intentReview`. List each departure from
+  the approved intent review, as the writing reference says under "Deviations". Write "None." when
+  the code follows it. Never empty.
 - `decisions`: write this only when the user's request is available in this conversation and
   you are not a sub-agent. Write it as the writing reference says under "Decisions":
   **Decided for you**, drift with the request quoted, and a short **Trail**.

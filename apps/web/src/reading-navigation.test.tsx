@@ -99,6 +99,7 @@ const review: ReviewView = {
   pickedUpAt: null,
   kind: "review",
   importedAt: null,
+  related: [],
   revisions: [{ seq: 1, createdAt: "2026-01-01T00:00:00.000Z" }],
 };
 const revision: RevisionView = {

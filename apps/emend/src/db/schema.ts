@@ -107,6 +107,8 @@ export const reviews = sqliteTable(
     state: text("state", { enum: ["open", "approved", "settled"] })
       .notNull()
       .default("open"),
+    // The review that holds the intent this code review carries out.
+    intentReviewId: text("intent_review_id"),
     approvedRevision: text("approved_revision"),
     approvedAt: integer("approved_at"),
     movedToUrl: text("moved_to_url"),
@@ -125,6 +127,7 @@ export const reviews = sqliteTable(
   (t): SQLiteTableExtraConfigValue[] => [
     ...owned("reviews", t),
     index("reviews_owner_state_updated_idx").on(t.ownerId, t.state, t.updatedAt),
+    index("reviews_owner_intent_idx").on(t.ownerId, t.intentReviewId),
     enumCheck("reviews_released_reason_check", t.releasedReason, ["snoozed", "retired"]),
     unique("reviews_owner_origin_key_unique").on(t.ownerId, t.originInstanceId, t.reviewKey),
     foreignKey({ columns: [t.ownerId, t.repoId], foreignColumns: [repos.ownerId, repos.id] }),
