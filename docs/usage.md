@@ -306,10 +306,12 @@ section between Snoozed and Done. Rename or delete a group from the group's ⋯ 
 Deleting a group puts its items back in Active, Snoozed or Done.
 
 Choose “Pin” in a review's or doc's ⋯ menu, or “Pin or unpin the review” in the command palette
-(Shift+P), to keep it in Pinned at the top of the inbox. The oldest pin sits on top.
+(Shift+P), to keep it in Pinned at the top of the inbox. A new pin joins at the bottom of Pinned.
+Drag a pinned row with the mouse to move it, or choose “Move up” or “Move down” in its row menu
+(right-click, Shift+F10 or the menu key, or a left swipe and ⋯ on a touch screen).
+With a filter set, a row moves past the next shown pinned row. The order shows on every device.
 A pinned item that would be in Active shows only in Pinned. One in Snoozed, a group or Done
 shows in both, with a pin mark in its own section. “Unpin” takes it out of Pinned.
-Pins show on every device.
 
 Right-click an inbox row to open the same actions as the review's ⋯ menu for that row.
 On a focused row, press Shift+F10 or the menu key. On a touch screen, swipe left and tap ⋯.

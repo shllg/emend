@@ -1,6 +1,7 @@
 import type { InboxItem } from "@emend/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
+import { ArrowDown, ArrowUp } from "lucide-react";
 import {
   createContext,
   type KeyboardEvent,
@@ -20,10 +21,12 @@ import { isReviewSending, subscribeDrafts } from "../../lib/drafts.ts";
 import { useLayout } from "../../lib/layout.ts";
 import { ResumeDialog, showsHandOver } from "../send/HandOver.tsx";
 import { ReviewActionDialogs, useReviewActions } from "../send/ReviewActions.tsx";
-import { AnchoredMenu } from "../ui/Menu.tsx";
+import { AnchoredMenu, type MenuItem } from "../ui/Menu.tsx";
+import type { PinMoves } from "./PinOrder.tsx";
 
 export interface RowMenuRequest {
   reviewId: string;
+  moves?: PinMoves;
   via: "keyboard" | "pointer";
   anchor: { x: number; y: number; width: number; height: number };
   side?: "bottom" | "right";
@@ -123,11 +126,11 @@ export function useRowMenu(): ((request: RowMenuRequest) => void) | null {
 }
 
 /** Handlers for the row's focusable element; moved rows keep the browser menu. */
-export function useRowMenuTrigger(review: InboxItem, options?: { side?: "bottom" | "right" }) {
+export function useRowMenuTrigger(review: InboxItem, options?: { side?: "bottom" | "right"; moves?: PinMoves }) {
   const open = useRowMenu();
   if (!open || review.movedTo) return undefined;
   const show = (row: HTMLElement, anchor: RowMenuRequest["anchor"], via: RowMenuRequest["via"]) =>
-    open({ reviewId: review.id, row, anchor, via, side: options?.side });
+    open({ reviewId: review.id, row, anchor, via, side: options?.side, moves: options?.moves });
   return {
     onContextMenu(event: MouseEvent<HTMLElement>) {
       event.preventDefault();
@@ -192,6 +195,14 @@ function RowActions({
     unsentCount: item.unsentCount,
     howToResume: phone ? undefined : { disabled: !canResume || sending, onSelect: () => setResumeOpen(true) },
   });
+  const items = actions.items.flatMap<MenuItem>((item) => {
+    if (!("label" in item) || item.label !== "Unpin") return [item];
+    return [
+      item,
+      ...(request.moves?.up ? [{ label: "Move up", icon: ArrowUp, onSelect: request.moves.up }] : []),
+      ...(request.moves?.down ? [{ label: "Move down", icon: ArrowDown, onSelect: request.moves.down }] : []),
+    ];
+  });
   const returnFocus = {
     get current() {
       return rowToFocus(request);
@@ -207,7 +218,7 @@ function RowActions({
         side={request.side}
         align={request.align}
         size={phone ? "lg" : "md"}
-        items={actions.items}
+        items={items}
         focusFirstItem={request.via === "keyboard"}
         returnFocus={() => returnFocus.current}
       />

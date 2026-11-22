@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight, PanelLeftClose, Search } from "lucide-react"
 import { useEffect, useRef, useState } from "react";
 import { inboxQuery, serverNow } from "../api/queries.ts";
 import { GroupActions } from "../components/inbox/GroupActions.tsx";
+import { PinOrder } from "../components/inbox/PinOrder.tsx";
 import { needsAttention, ReviewRow } from "../components/inbox/ReviewRow.tsx";
 import { RowMenuProvider } from "../components/inbox/RowMenu.tsx";
 import { AppFrame } from "../components/layout/AppFrame.tsx";
@@ -298,6 +299,23 @@ export function Inbox({
               );
               const headingClass =
                 "m-0 flex items-center gap-2 px-2.5 pt-3 pb-1 text-13 font-semibold leading-(--lh-snug) tracking-(--tracking-label) text-fg-2 uppercase";
+              const rowList = rows.map((review) => {
+                const command =
+                  jumpCommands[numberedRows.findIndex((entry) => entry.key === key && entry.row.id === review.id)];
+                const binding = command ? keys[command] : null;
+                return (
+                  <ReviewRow
+                    key={review.id}
+                    review={review}
+                    pinned={list !== "pinned" && review.pinnedAt !== null}
+                    now={now}
+                    onOpen={onOpen}
+                    highlight={highlighted.has(review.id)}
+                    jump={jumpBadge(binding)}
+                    keyShortcuts={binding === null ? undefined : ariaKeyShortcuts(binding)}
+                  />
+                );
+              });
               return (
                 <section key={key} aria-label={title}>
                   <Heading className={headingClass}>
@@ -329,29 +347,9 @@ export function Inbox({
                     </p>
                   )}
                   {expanded && nothingActive && <p className="px-2.5 py-2 text-13 text-fg-3">No active reviews.</p>}
-                  {expanded && rows.length > 0 && (
-                    <ul>
-                      {rows.map((review) => {
-                        const command =
-                          jumpCommands[
-                            numberedRows.findIndex((entry) => entry.key === key && entry.row.id === review.id)
-                          ];
-                        const binding = command ? keys[command] : null;
-                        return (
-                          <ReviewRow
-                            key={review.id}
-                            review={review}
-                            pinned={list !== "pinned" && review.pinnedAt !== null}
-                            now={now}
-                            onOpen={onOpen}
-                            highlight={highlighted.has(review.id)}
-                            jump={jumpBadge(binding)}
-                            keyShortcuts={binding === null ? undefined : ariaKeyShortcuts(binding)}
-                          />
-                        );
-                      })}
-                    </ul>
-                  )}
+                  {expanded &&
+                    rows.length > 0 &&
+                    (list === "pinned" ? <PinOrder rows={rows}>{rowList}</PinOrder> : <ul>{rowList}</ul>)}
                 </section>
               );
             })}

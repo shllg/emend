@@ -1,4 +1,24 @@
 @layer components {
+  .em-pin-grip {
+    display: none;
+  }
+  @media (any-hover: hover) and (any-pointer: fine) {
+    .em-pin-grip {
+      display: block;
+      opacity: 0;
+    }
+    [data-pin-dragging] > .em-pin-grip,
+    [data-pin-row]:hover > .em-pin-grip {
+      opacity: 1;
+    }
+  }
+  body.em-pin-dragging,
+  body.em-pin-dragging * {
+    /* biome-ignore lint/complexity/noImportantStyles: A captured drag overrides controls beneath the pointer. */
+    cursor: grabbing !important;
+    /* biome-ignore lint/complexity/noImportantStyles: Suppress selection throughout the captured drag. */
+    user-select: none !important;
+  }
   .em-code-panel {
     flex: 0 0 clamp(380px, 50%, 880px);
     border-left: 1px solid var(--border-1);

@@ -1,6 +1,6 @@
 import type { InboxItem } from "@emend/contract";
 import { Link } from "@tanstack/react-router";
-import { Ellipsis, MessageSquare, Pencil, Pin } from "lucide-react";
+import { Ellipsis, GripVertical, MessageSquare, Pencil, Pin } from "lucide-react";
 import { plural } from "../../lib/count.ts";
 import { relativeTime, wakeHasPassed, wakeTime } from "../../lib/time.ts";
 import { useRowSwipe } from "../../lib/use-row-swipe.ts";
@@ -10,6 +10,7 @@ import { StateBadge } from "../status/StateBadge.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { cn } from "../ui/utils.ts";
+import { usePinOrder } from "./PinOrder.tsx";
 import { useRowMenu, useRowMenuTrigger } from "./RowMenu.tsx";
 
 /** Approved and Done reviews need no work: dim them until the reviewer points at or focuses one. */
@@ -43,7 +44,10 @@ export function ReviewRow({
   keyShortcuts?: string;
 }) {
   const openMenu = useRowMenu();
-  const menuTrigger = useRowMenuTrigger(review);
+  const pinOrder = usePinOrder();
+  const moves = pinOrder?.actions.movesFor(review.id);
+  const pinDragging = pinOrder?.state.draggingId === review.id;
+  const menuTrigger = useRowMenuTrigger(review, { moves });
   const swipe = useRowSwipe(!!openMenu && !review.movedTo);
   const link = swipe.content;
   const attention = needsAttention(review);
@@ -153,7 +157,16 @@ export function ReviewRow({
     highlight && "em-inbox-new",
   );
   return (
-    <li ref={swipe.row} className={cn("relative", (swipe.dragging || swipe.offset !== 0) && "overflow-hidden")}>
+    <li
+      ref={swipe.row}
+      data-pin-row={pinOrder ? review.id : undefined}
+      data-pin-dragging={pinDragging || undefined}
+      className={cn(
+        "relative",
+        (swipe.dragging || swipe.offset !== 0) && "overflow-hidden",
+        pinDragging && "opacity-50",
+      )}
+    >
       {review.movedTo ? (
         <div className={cn(className, "opacity-50")} aria-disabled="true">
           {contents}
@@ -161,6 +174,7 @@ export function ReviewRow({
       ) : (
         <Link
           ref={link}
+          draggable={pinOrder ? false : undefined}
           {...menuTrigger}
           {...swipe.handlers}
           data-inbox-row={review.id}
@@ -193,6 +207,11 @@ export function ReviewRow({
           {contents}
         </Link>
       )}
+      {pinOrder?.meta.draggable && !review.movedTo && (
+        <span aria-hidden="true" className="em-pin-grip pointer-events-none absolute top-2 left-0 text-fg-3">
+          <Icon icon={GripVertical} size={8} />
+        </span>
+      )}
       {(swipe.dragging || swipe.offset < 0) && openMenu && !review.movedTo && (
         <div
           ref={swipe.actions}
@@ -211,6 +230,7 @@ export function ReviewRow({
               if (!link.current) return;
               openMenu({
                 reviewId: review.id,
+                moves,
                 via: "pointer",
                 anchor: event.currentTarget.getBoundingClientRect(),
                 align: "end",

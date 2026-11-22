@@ -85,7 +85,9 @@ export function inboxSections(
     if (list === "pinned")
       rows.sort(
         (a, b) =>
-          Date.parse(a.pinnedAt ?? "") - Date.parse(b.pinnedAt ?? "") || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+          (a.pinOrder ?? 0) - (b.pinOrder ?? 0) ||
+          Date.parse(a.pinnedAt ?? "") - Date.parse(b.pinnedAt ?? "") ||
+          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
       );
     if (list === "done")
       rows.sort(
