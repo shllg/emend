@@ -2185,3 +2185,26 @@ test("a sent script-only comment survives as escaped text", async () => {
   expect(html).toContain('<p class="em-comment-text">&#x3C;script>alert(1)&#x3C;/script></p>');
   expect(html).not.toContain("<script");
 });
+
+test("writeup downloads use the requested revision sequence to hide first-revision news", async () => {
+  const input = {
+    writeup: { ...blank, tldr: "A synthetic garden.", newInRevision: [{ text: "Corrected seed spacing." }] },
+  };
+  const first = await publish(input);
+  const second = await publish({ ...input, reviewId: first.reviewId });
+  expect(second.revision).toBe(2);
+  expect(second.reviewId).toBe(first.reviewId);
+  for (const seq of [1, 2]) {
+    const response = await get(first.reviewId, seq);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("A synthetic garden.");
+    if (seq === 1) {
+      expect(html).not.toContain("New in this revision");
+      expect(html).not.toContain("Corrected seed spacing.");
+    } else {
+      expect(html).toContain("<h2>New in this revision</h2>");
+      expect(html).toContain("Corrected seed spacing.");
+    }
+  }
+});

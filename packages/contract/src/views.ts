@@ -167,6 +167,7 @@ export const RenderedWriteup = z
         z.object({
           topic: TopicSlug.optional(),
           section: NewInRevisionSection.optional(),
+          blockId: BlockId.refine((id) => !id.startsWith("newInRevision-") && !id.startsWith("doc-")).optional(),
           blockIds: z.array(BlockId.refine((id) => id.startsWith("newInRevision-"))).max(LIMITS.blocksPerRevision),
         }),
       )

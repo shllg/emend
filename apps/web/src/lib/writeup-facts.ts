@@ -119,6 +119,7 @@ export function sinceFact({
   revision,
   changedSince,
   changedBlocks,
+  omitWriteup = false,
 }: {
   writeup: RenderedWriteup;
   topics: TopicMeta[];
@@ -127,13 +128,14 @@ export function sinceFact({
   revision: number;
   changedSince?: number;
   changedBlocks: RevisionView["changedBlocks"];
+  omitWriteup?: boolean;
 }): FactPart[] | undefined {
   if (revision < 2 || changedSince === undefined || revision <= changedSince) return;
   const changed = new Set(changedBlocks.map((block) => block.blockId));
   const titles = new Map(topics.map((topic) => [topic.slug, topic.title]));
   const seenTopics = new Set<string>();
   const names: FactPart[][] = [];
-  for (const section of writeup.sections) {
+  for (const section of omitWriteup ? [] : writeup.sections) {
     if (section.key === "review") continue;
     const firstChanged = section.blocks.find((block) => changed.has(block.id));
     if (!firstChanged) continue;
@@ -158,6 +160,7 @@ export function sinceFact({
   ).length;
   const parts: FactPart[] = [{ text: `Since revision ${changedSince}: ` }];
   if (!names.length && !stale) {
+    if (omitWriteup) return;
     parts.push({ text: "no new text in the writeup or Markdown docs. Removed text is not tracked." });
     return parts;
   }

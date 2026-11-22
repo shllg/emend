@@ -656,6 +656,47 @@ describe("newInRevision", () => {
     expect(NewInRevisionItem.parse({ text: "Updated the checks." })).toEqual({ text: "Updated the checks." });
   });
 
+  test.each([{}, { topic: "routing" }, { section: "checked" }] as const)(
+    "accepts a quote with destination %j",
+    (destination) => {
+      const item = { text: "Raised the retry limit.", quote: "Retry budget", ...destination };
+      expect(NewInRevisionItem.parse(item)).toEqual(item);
+      expect(
+        PublishManifest.parse({ ...manifest, writeup: { ...manifest.writeup, newInRevision: [item] } }).writeup
+          .newInRevision,
+      ).toEqual([item]);
+      expect(
+        NewInRevisionItem.parse({ ...item, quote: "x".repeat(LIMITS.newInRevisionQuoteChars) }).quote,
+      ).toHaveLength(120);
+    },
+  );
+
+  test.each([
+    ["", "newInRevision quote must not be blank"],
+    [" \t ", "newInRevision quote must not be blank"],
+    ["\ud800", "newInRevision quote must be well-formed UTF-16"],
+    ...["\r", "\n", "\u2028", "\u2029"].map((lineBreak) => [
+      `First${lineBreak}second`,
+      "newInRevision quote must be one line",
+    ]),
+  ])("refuses invalid quote %j", (quote, message) => {
+    const result = NewInRevisionItem.safeParse({ ...items[0], quote });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues).toContainEqual(expect.objectContaining({ path: ["quote"], message }));
+  });
+
+  test("bounds quotes and preserves topic/section exclusivity with a quote", () => {
+    expect(NewInRevisionItem.safeParse({ ...items[0], quote: "x".repeat(121) }).success).toBe(false);
+    const result = NewInRevisionItem.safeParse({ ...items[0], section: "checked", quote: "Retry budget" });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues).toContainEqual(
+      expect.objectContaining({
+        path: ["section"],
+        message: "a newInRevision item names a topic or a section, not both",
+      }),
+    );
+  });
+
   test("refuses undeclared topics in both publish schemas", () => {
     const writeup = { ...manifest.writeup, newInRevision: [{ ...items[0], topic: "missing" }] };
     const results = [

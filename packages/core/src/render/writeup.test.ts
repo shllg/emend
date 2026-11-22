@@ -717,7 +717,7 @@ test.each([
   'Before <svg onload="bad()"><circle /></svg> after',
   '<pre><code class="language-mermaid">graph TD; A--&gt;B; click A callback</code></pre>',
 ])("sanitizes hostile newInRevision text %j", async (text) => {
-  const rendered = await renderWriteup({ ...writeup, newInRevision: [{ text }] }, []);
+  const rendered = await renderWriteup({ ...writeup, newInRevision: [{ text, quote: text }] }, []);
   const blocks = rendered.sections.find((section) => section.key === "newInRevision")?.blocks ?? [];
   expect(blocks.length).toBeGreaterThan(0);
   expect(blocks.map((block) => block.html).join("")).not.toMatch(
@@ -726,4 +726,118 @@ test.each([
   if (text.includes("language-mermaid"))
     expect(blocks).toMatchObject([{ kind: "diagram", html: "", source: "graph TD; A-->B; click A callback" }]);
   expect(rendered.newInRevision?.[0]?.blockIds).toEqual(blocks.map((block) => block.id));
+  expect(rendered.newInRevision?.[0]).not.toHaveProperty("quote");
 });
+
+test("revision quotes resolve different blocks in one topic after all sections render", async () => {
+  const rendered = await renderWriteup(
+    {
+      overview: "",
+      tldr: "",
+      decisions: "",
+      topics: {
+        search: {
+          why: "First **search limit**.\n\nSecond _retry budget_.",
+          example: "Use `max_count` café.",
+          body: "A final detail.",
+        },
+      },
+      newInRevision: [
+        { text: "Raised the search limit.", topic: "search", quote: "search limit" },
+        { text: "Adjusted the retry budget.", topic: "search", quote: "retry budget" },
+        { text: "Corrected the example.", topic: "search", quote: "`max_count`   cafe\u0301" },
+        { text: "Explained the detail.", quote: "final detail" },
+      ],
+    },
+    topics,
+  );
+  const blocks = rendered.sections.filter((section) => section.topic === "search").flatMap((section) => section.blocks);
+  expect(rendered.newInRevision?.map((item) => item.blockId)).toEqual(blocks.map((block) => block.id));
+  expect(new Set(rendered.newInRevision?.map((item) => item.blockId)).size).toBe(4);
+  for (const item of rendered.newInRevision ?? []) expect(item).not.toHaveProperty("quote");
+});
+
+test("revision quote scopes, case and first match follow section order", async () => {
+  const rendered = await renderWriteup(
+    {
+      overview: "Shared **search limit**.",
+      tldr: "Shared search limit.",
+      decisions: "",
+      topics: { search: { why: "Only here.", body: "Shared search limit." }, labels: { why: "Outside topic words." } },
+      newInRevision: [
+        { text: "Updated the scope.", section: "tldr", quote: "**search limit**" },
+        { text: "Updated the opening.", quote: "search limit" },
+        { text: "Updated the detail.", topic: "search", quote: "search limit" },
+        { text: "Unmatched outside topic.", topic: "search", quote: "Outside topic words" },
+        { text: "Unmatched outside section.", section: "tldr", quote: "Only here" },
+        { text: "Unmatched case.", quote: "SEARCH LIMIT" },
+        { text: "Unmatched words.", quote: "Missing words" },
+      ],
+    },
+    topics,
+  );
+  const id = (key: string) => rendered.sections.find((section) => section.key === key)?.blocks[0]?.id;
+  expect(rendered.newInRevision?.slice(0, 3).map((item) => item.blockId)).toEqual([
+    id("tldr"),
+    id("overview"),
+    id("t-search-body"),
+  ]);
+  for (const item of rendered.newInRevision?.slice(3) ?? []) expect(item).not.toHaveProperty("blockId");
+});
+
+test("revision quotes never match review, needsYou or their own news", async () => {
+  const rendered = await renderWriteup(
+    {
+      overview: "",
+      tldr: "",
+      decisions: "",
+      topics: {},
+      review: { level: "everything", reason: "Hidden verdict words." },
+      needsYou: [{ kind: "answer", text: "Decision question words." }],
+      newInRevision: [
+        { text: "Own news words.", quote: "Own news words" },
+        { text: "Changed the review.", quote: "Hidden verdict words" },
+        { text: "Changed the question.", quote: "Decision question words" },
+      ],
+    },
+    [],
+  );
+  expect(rendered.newInRevision).toHaveLength(3);
+  for (const item of rendered.newInRevision ?? []) expect(item).not.toHaveProperty("blockId");
+});
+
+test.each([false, true])(
+  "drops empty revision lines without changing needsYou (has visible line=%s)",
+  async (visible) => {
+    const rendered = await renderWriteup(
+      {
+        overview: "",
+        tldr: "",
+        decisions: "",
+        topics: {},
+        checked: "A real check.",
+        newInRevision: [
+          { text: "<!-- Corrected date. -->", quote: "real check" },
+          ...(visible ? [{ text: "Added a check.", quote: "real check" }] : []),
+        ],
+        needsYou: [{ kind: "answer", text: "<!-- Still awaiting an answer. -->" }],
+      },
+      [],
+    );
+    const news = rendered.sections.find((section) => section.key === "newInRevision");
+    if (visible) {
+      expect(news?.blocks.map((block) => block.text)).toEqual(["Added a check."]);
+      expect(rendered.newInRevision).toEqual([
+        {
+          blockIds: [news?.blocks[0]?.id],
+          blockId: rendered.sections.find((section) => section.key === "checked")?.blocks[0]?.id,
+        },
+      ]);
+    } else {
+      expect(news).toBeUndefined();
+      expect(rendered).not.toHaveProperty("newInRevision");
+    }
+    expect(rendered.needsYou).toEqual([{ kind: "answer", blockIds: [] }]);
+    expect(rendered.sections.find((section) => section.key === "needsYou")?.blocks).toEqual([]);
+  },
+);

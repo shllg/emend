@@ -157,6 +157,14 @@ export const NewInRevisionItem = z
       .refine((text) => !/[\r\n\u2028\u2029]/u.test(text), "newInRevision text must be one line"),
     topic: TopicSlug.optional(),
     section: NewInRevisionSection.optional(),
+    quote: z
+      .string()
+      .min(1)
+      .max(LIMITS.newInRevisionQuoteChars)
+      .refine((quote) => /\S/.test(quote), "newInRevision quote must not be blank")
+      .refine((quote) => quote.isWellFormed(), "newInRevision quote must be well-formed UTF-16")
+      .refine((quote) => !/[\r\n\u2028\u2029]/u.test(quote), "newInRevision quote must be one line")
+      .optional(),
   })
   .refine((item) => item.topic === undefined || item.section === undefined, {
     path: ["section"],

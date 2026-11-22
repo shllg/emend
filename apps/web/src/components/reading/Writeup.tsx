@@ -330,11 +330,29 @@ export function Writeup({
     }
     const newsSection = writeup.sections.find((section) => section.key === "newInRevision");
     const newsItems = writeup.newInRevision;
-    const showNews = props.revision >= 2 && newsItems !== undefined && newsSection !== undefined;
-    if (showNews) {
+    let showNews = false;
+    if (props.revision >= 2 && newsItems !== undefined && newsSection !== undefined) {
       const blocksById = new Map(newsSection.blocks.map((block) => [block.id, block]));
       const changed = new Set(props.changedBlocks.map((block) => block.blockId));
-      const news = newsItems.map((item, index) => {
+      const shown = new Set(
+        [
+          ...groups.flatMap(groupBlocks),
+          ...risk.flatMap((fact) => fact.blocks ?? []),
+          ...frame.flatMap((fact) => fact.blocks ?? []),
+        ].map((block) => block.id),
+      );
+      const placesByBlock = new Map(
+        writeup.sections.flatMap((section) =>
+          section.blocks.filter((block) => shown.has(block.id)).map((block) => [block.id, section] as const),
+        ),
+      );
+      const news = newsItems.flatMap((item, index) => {
+        const blocks = item.blockIds.flatMap((id) => {
+          const block = blocksById.get(id);
+          return block ? [block] : [];
+        });
+        if (!blocks.length) return [];
+        const place = item.blockId !== undefined ? placesByBlock.get(item.blockId) : undefined;
         let href: string | undefined;
         let label: ReactNode;
         if (item.topic !== undefined) {
@@ -354,26 +372,40 @@ export function Writeup({
           if (target) href = link(`block-${target.id}`);
           label = WRITEUP_SECTION_NAMES[item.section];
         }
-        return {
-          key: String(index),
-          blocks: item.blockIds.flatMap((id) => {
-            const block = blocksById.get(id);
-            return block ? [block] : [];
-          }),
-          jump: href ? (
-            <a className="em-needs-topic" href={href}>
-              <span aria-hidden="true">→</span> {label}
-            </a>
-          ) : undefined,
-        };
+        if (place) {
+          href = link(`block-${item.blockId}`);
+          if (item.topic === undefined && item.section === undefined) {
+            const slug = /^t-(.+)-(?:why|example|body)$/.exec(place.key)?.[1];
+            const topic = slug ? bySlug.get(slug)?.topic : undefined;
+            label = topic ? (
+              <bdi>{topic.title}</bdi>
+            ) : (
+              WRITEUP_SECTION_NAMES[place.key as keyof typeof WRITEUP_SECTION_NAMES]
+            );
+          }
+        }
+        return [
+          {
+            key: String(index),
+            blocks,
+            jump:
+              href && label !== undefined ? (
+                <a className="em-needs-topic" href={href}>
+                  <span aria-hidden="true">→</span> {label}
+                </a>
+              ) : undefined,
+          },
+        ];
       });
-      groups.splice(groups.findIndex((group) => group.key === "tldr") + 1, 0, {
-        key: "newInRevision",
-        heading: "New in this revision",
-        presentation: "newInRevision",
-        blocks: [],
-        news,
-      });
+      showNews = news.length > 0;
+      if (showNews)
+        groups.splice(groups.findIndex((group) => group.key === "tldr") + 1, 0, {
+          key: "newInRevision",
+          heading: "New in this revision",
+          presentation: "newInRevision",
+          blocks: [],
+          news,
+        });
     }
     if (newLayout) {
       const furtherDown = groups.slice(1).flatMap((group) => {
@@ -393,21 +425,21 @@ export function Writeup({
           )),
         });
       }
-      if (!showNews)
-        computed(
-          frame,
-          "since",
-          "Changed",
-          sinceFact({
-            writeup: { sections: writeup.sections },
-            topics,
-            docs,
-            files,
-            revision: props.revision,
-            changedSince,
-            changedBlocks: props.changedBlocks,
-          }),
-        );
+      computed(
+        frame,
+        "since",
+        "Changed",
+        sinceFact({
+          writeup: { sections: writeup.sections },
+          topics,
+          docs,
+          files,
+          revision: props.revision,
+          changedSince,
+          changedBlocks: props.changedBlocks,
+          omitWriteup: showNews,
+        }),
+      );
       const factGroups = [
         { key: "risk", label: "Risk", facts: risk },
         { key: "frame", label: "Frame", facts: frame },

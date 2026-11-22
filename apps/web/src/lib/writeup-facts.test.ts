@@ -574,3 +574,25 @@ test.each(["\u2029", "\u0085", "\u001c", "\u001d", "\u001e", "\u2028", "\n", "\t
     ).toBe("Since revision 2: topic “Retry 12”.");
   },
 );
+
+test.each([
+  [false, false, undefined],
+  [true, false, "Since revision 2: docs/design.md."],
+  [false, true, "Since revision 2: 1 file you viewed changed."],
+  [true, true, "Since revision 2: docs/design.md; 1 file you viewed changed."],
+] as const)(
+  "Since can omit writeup changes while keeping docs=%s and files=%s",
+  (docChanged, fileChanged, expected) => {
+    const input = {
+      ...since,
+      omitWriteup: true,
+      changedBlocks: ["tldr-12345678", "t-retry-why-12345678", ...(docChanged ? ["doc-12345678-12345678"] : [])].map(
+        (blockId) => ({ blockId, revision: 3 }),
+      ),
+      files: [{ ...file, viewed: "stale" as const, viewedOn: fileChanged ? 2 : 1 }],
+    };
+    expect(factText(sinceFact(input))).toBe(expected);
+    for (const baseline of [{ revision: 1 }, { revision: 2 }, { changedSince: undefined }])
+      expect(sinceFact({ ...input, ...baseline })).toBeUndefined();
+  },
+);

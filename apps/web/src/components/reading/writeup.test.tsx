@@ -2608,3 +2608,128 @@ test("revision news skips missing block ids and empty or missing section targets
   expect(card?.querySelectorAll("[data-block-id]")).toHaveLength(2);
   expect(card?.querySelector("a")).toBeNull();
 });
+
+test("revision quotes choose separate blocks in one topic and label quote-only destinations", async () => {
+  const writeup = await newsWriteup([
+    { text: "Explained dry soil.", topic: "seed", quote: "soil dries" },
+    { text: "Corrected the spacing.", topic: "seed", quote: "Space the seeds" },
+    { text: "Added watering details.", quote: "Water daily" },
+    { text: "Added the dry soil check.", quote: "Dry soil check" },
+  ]);
+  const why = newsSection(writeup, "t-seed-why").blocks;
+  const body = newsSection(writeup, "t-seed-body").blocks[0];
+  const checked = newsSection(writeup, "checked").blocks[1];
+  const { container } = mount(
+    <Writeup
+      {...props}
+      writeup={writeup}
+      topics={[topic]}
+      search={{ tab: "writeup", rev: 2 }}
+      changedBlocks={why.map((block) => ({ blockId: block.id, revision: 2 }))}
+    />,
+  );
+  const links = [...container.querySelectorAll(".em-writeup-news .em-needs-topic")];
+  expect(links.map((link) => link.getAttribute("href"))).toEqual(
+    [why[0], why[1], body, checked].map((block) => `/r/${reviewId}?tab=writeup&rev=2#block-${block?.id}`),
+  );
+  expect(links.slice(0, 3).map((link) => link.querySelector("bdi")?.textContent)).toEqual([
+    topic.title,
+    topic.title,
+    topic.title,
+  ]);
+  expect(links[3]?.textContent).toBe("→ Checked");
+  for (const link of links) {
+    const id = link.getAttribute("href")?.split("#")[1];
+    expect(container.querySelector(`[id="${id}"]`)).not.toBeNull();
+  }
+});
+
+test.each(["missing", "hidden"] as const)("revision block jumps fall back for a %s block", async (destination) => {
+  const writeup = await newsWriteup([
+    { text: "Updated the seed topic.", topic: "seed" },
+    { text: "Updated the checks.", section: "checked" },
+    { text: "Updated a fact." },
+  ]);
+  const blockId = destination === "missing" ? "overview-ffffffff" : "review-0123abcd";
+  writeup.sections.push({
+    key: "review",
+    label: "Review",
+    topic: null,
+    blocks: [{ ...block, id: "review-0123abcd", section: "review" }],
+  });
+  for (const item of writeup.newInRevision ?? []) item.blockId = blockId;
+  const checked = newsSection(writeup, "checked").blocks[0];
+  const { container } = mount(<Writeup {...props} writeup={writeup} topics={[topic]} />);
+  const links = [...container.querySelectorAll(".em-writeup-news .em-needs-topic")];
+  expect(links.map((link) => link.getAttribute("href"))).toEqual([
+    `/r/${reviewId}#topic-seed`,
+    `/r/${reviewId}#block-${checked?.id}`,
+  ]);
+});
+
+test("a quote-only jump keeps a hostile topic title inside bdi", async () => {
+  const writeup = await newsWriteup([{ text: "Corrected seed spacing.", quote: "Space the seeds" }]);
+  const title = "<img src=x onerror=alert(1)>";
+  const { container } = mount(<Writeup {...props} writeup={writeup} topics={[{ ...topic, title }]} />);
+  const jump = container.querySelector(".em-writeup-news .em-needs-topic");
+  expect(jump?.querySelector("bdi")?.textContent).toBe(title);
+  expect(jump?.querySelector("img")).toBeNull();
+});
+
+test.each([false, true])("stored empty revision items are ignored (has visible item=%s)", async (visible) => {
+  const writeup = await newsWriteup([{ text: "Added a dry soil check." }]);
+  const news = newsSection(writeup, "newInRevision");
+  const existing = writeup.newInRevision?.[0];
+  if (!existing) throw new Error("Missing synthetic news item");
+  writeup.newInRevision = [{ blockIds: [] }, { blockIds: ["newInRevision-ffffffff"] }, ...(visible ? [existing] : [])];
+  if (!visible) news.blocks = [];
+  const tldr = newsSection(writeup, "tldr").blocks[0];
+  const { container } = mount(
+    <Writeup
+      {...props}
+      writeup={writeup}
+      changedSince={1}
+      changedBlocks={tldr ? [{ blockId: tldr.id, revision: 2 }] : []}
+    />,
+  );
+  const card = container.querySelector(".em-writeup-news");
+  if (visible) {
+    expect(card?.querySelectorAll(".em-revision-news > li")).toHaveLength(1);
+    expect(card?.textContent).toContain("Added a dry soil check.");
+    expect(container.querySelector('[data-fact="since"]')).toBeNull();
+  } else {
+    expect(card).toBeNull();
+    expect(container.querySelector('[data-reading-section="newInRevision"]')).toBeNull();
+    expect(container.querySelector('[data-fact="since"] dd')?.textContent).toBe("Since revision 1: TL;DR.");
+  }
+});
+
+test.each([
+  ["file", "Since revision 1: 1 file you viewed changed."],
+  ["doc", "Since revision 1: docs/garden.md."],
+  ["both", "Since revision 1: docs/garden.md; 1 file you viewed changed."],
+  ["neither", undefined],
+] as const)("revision news keeps computed change facts for %s", async (change, expected) => {
+  const writeup = await newsWriteup();
+  const docBlock: RenderedBlock = { ...block, id: "doc-12345678-12345678", section: "doc-12345678" };
+  const docChanged = change === "doc" || change === "both";
+  const fileChanged = change === "file" || change === "both";
+  const { container } = mount(
+    <Writeup
+      {...props}
+      writeup={writeup}
+      topics={[topic]}
+      changedSince={1}
+      docs={[{ kind: "markdown", path: "docs/garden.md", blocks: [docBlock] }]}
+      files={[{ ...file, viewed: fileChanged ? "stale" : "viewed", viewedOn: 1 }]}
+      changedBlocks={[
+        ...writeup.sections.flatMap((section) => section.blocks.map((block) => ({ blockId: block.id, revision: 2 }))),
+        ...(docChanged ? [{ blockId: docBlock.id, revision: 2 }] : []),
+      ]}
+    />,
+  );
+  expect(container.querySelector(".em-writeup-news")).not.toBeNull();
+  const since = container.querySelector('[data-fact="since"] dd');
+  if (expected === undefined) expect(since).toBeNull();
+  else expect(since?.textContent).toBe(expected);
+});

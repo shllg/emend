@@ -55,6 +55,7 @@ test("exports the v1 API, limits, file vocabulary and reserved fallback", () => 
     areaChars: 60,
     newInRevisionItems: 12,
     newInRevisionChars: 300,
+    newInRevisionQuoteChars: 120,
     needsYouItems: 4,
     needsYouChars: 300,
     headingsPerDoc: 1024,

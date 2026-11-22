@@ -207,7 +207,12 @@ test("rendered needsYou preserves valid and empty lists and drops invalid stored
 
 test("rendered newInRevision preserves valid lists and drops invalid stored values", () => {
   const item = { topic: "routing", blockIds: ["newInRevision-0123abcd", "newInRevision-0123abcd-2"] };
-  for (const newInRevision of [[item], [{ section: "checked", blockIds: item.blockIds }], [{ blockIds: [] }]]) {
+  for (const newInRevision of [
+    [item],
+    [{ ...item, blockId: "t-routing-body-0123abcd" }],
+    [{ section: "checked", blockId: "checked-0123abcd", blockIds: item.blockIds }],
+    [{ blockId: "overview-0123abcd", blockIds: [] }],
+  ]) {
     expect(contract.RenderedWriteup.parse({ sections: [], newInRevision }).newInRevision).toEqual(newInRevision);
   }
   expect(contract.RenderedWriteup.parse({ sections: [] })).not.toHaveProperty("newInRevision");
@@ -219,6 +224,9 @@ test("rendered newInRevision preserves valid lists and drops invalid stored valu
     [{ ...item, topic: "Bad slug" }],
     [{ ...item, blockIds: ["overview-0123abcd"] }],
     [{ ...item, blockIds: ["bad"] }],
+    [{ ...item, blockId: "bad" }],
+    [{ ...item, blockId: "newInRevision-0123abcd" }],
+    [{ ...item, blockId: "doc-0123abcd-0123abcd" }],
     Array.from({ length: 13 }, () => item),
   ]) {
     expect(contract.RenderedWriteup.parse({ sections: [], newInRevision }).newInRevision).toBeUndefined();

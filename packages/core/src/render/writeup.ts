@@ -2,6 +2,7 @@ import {
   type GlossaryTerm,
   LIMITS,
   type NeedsYouKind,
+  type NewInRevisionItem,
   type NewInRevisionSection,
   normalizeGlossaryForm,
   type PublishLinks,
@@ -20,7 +21,7 @@ export type RenderedWriteup = {
   sections: { key: string; label: string; topic: string | null; blocks: Block[] }[];
   terms?: GlossaryTerm[];
   area?: string;
-  newInRevision?: { topic?: string; section?: NewInRevisionSection; blockIds: string[] }[];
+  newInRevision?: { topic?: string; section?: NewInRevisionSection; blockId?: string; blockIds: string[] }[];
   needsYou?: { kind: NeedsYouKind; topic?: string; blockIds: string[] }[];
   /** Publish-level links and the repo base, kept beside the sections in the stored blob. */
   links?: PublishLinks;
@@ -66,7 +67,7 @@ export async function renderWriteup(
   const entries = Array.isArray(writeup.glossary) ? writeup.glossary : undefined;
   const terms: GlossaryTerm[] = [];
   const matcher = entries ? termMatcher(entries) : undefined;
-  let newInRevision: NonNullable<RenderedWriteup["newInRevision"]> = [];
+  let newsItems: { item: NewInRevisionItem; blockIds: string[] }[] = [];
   let needsYou: NonNullable<RenderedWriteup["needsYou"]> = [];
   const appendItems = async <T extends { text: string }, M>(
     key: string,
@@ -91,6 +92,7 @@ export async function renderWriteup(
         meta.mediaSizes,
         matcher,
       );
+      if (key === "newInRevision" && !rendered.length) continue;
       for (const block of rendered) {
         const base = block.id.slice(0, key.length + 1 + 8);
         const count = (occurrences.get(base) ?? 0) + 1;
@@ -105,20 +107,14 @@ export async function renderWriteup(
         ),
       );
     }
-    sections.push({ key, label, topic: null, blocks });
+    if (result.length) sections.push({ key, label, topic: null, blocks });
     return result;
   };
   const appendOpeningItems = async () => {
-    newInRevision = await appendItems(
-      "newInRevision",
-      "New in this revision",
-      writeup.newInRevision,
-      (item, blockIds) => ({
-        ...(item.topic !== undefined ? { topic: item.topic } : {}),
-        ...(item.section !== undefined ? { section: item.section } : {}),
-        blockIds,
-      }),
-    );
+    newsItems = await appendItems("newInRevision", "New in this revision", writeup.newInRevision, (item, blockIds) => ({
+      item,
+      blockIds,
+    }));
     needsYou = await appendItems("needsYou", "Needs you", writeup.needsYou, (item, blockIds) => ({
       kind: item.kind,
       ...(item.topic !== undefined ? { topic: item.topic } : {}),
@@ -228,6 +224,33 @@ export async function renderWriteup(
     await append(`t-${topic.slug}-example`, `${topic.title} — Example`, content.example, topic.slug);
     await append(`t-${topic.slug}-body`, `${topic.title} — Details`, content.body, topic.slug);
   }
+  const normalizeQuote = (text: string) =>
+    text
+      .normalize("NFC")
+      .replace(/[*_`]/g, "")
+      .replace(/[\p{White_Space}]+/gu, " ")
+      .trim();
+  const newInRevision = newsItems.map(({ item, blockIds }) => {
+    let blockId: string | undefined;
+    if (item.quote !== undefined) {
+      const quote = normalizeQuote(item.quote);
+      const candidates = sections.filter((section) => {
+        if (["newInRevision", "needsYou", "review"].includes(section.key)) return false;
+        if (item.topic !== undefined)
+          return [`t-${item.topic}-why`, `t-${item.topic}-example`, `t-${item.topic}-body`].includes(section.key);
+        return item.section === undefined || section.key === item.section;
+      });
+      blockId = candidates
+        .flatMap((section) => section.blocks)
+        .find((block) => normalizeQuote(block.text).includes(quote))?.id;
+    }
+    return {
+      ...(item.topic !== undefined ? { topic: item.topic } : {}),
+      ...(item.section !== undefined ? { section: item.section } : {}),
+      ...(blockId !== undefined ? { blockId } : {}),
+      blockIds,
+    };
+  });
   return {
     sections,
     ...(newInRevision.length ? { newInRevision } : {}),
