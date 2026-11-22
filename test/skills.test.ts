@@ -615,6 +615,7 @@ test("review guidance lists the opening fields in display order", () => {
     "outOfScope",
     "whereToLook",
     "context",
+    "deviations",
     "decisions",
     "glossary",
     "topics[slug]",
@@ -654,8 +655,8 @@ test("review guidance writes a decision brief with no verdict", () => {
   }
 
   const blocks = [...read("plugin/skills/emend-review/references/manifest.md").matchAll(/```json\n([\s\S]*?)\n```/g)];
-  expect(blocks).toHaveLength(1);
-  const example = JSON.parse(blocks[0]?.[1] ?? "");
+  expect(blocks).toHaveLength(2);
+  const example = JSON.parse(blocks[1]?.[1] ?? "");
   expect(example.writeup).not.toHaveProperty("review");
   expect(example.writeup.whereToLook).toContain("**Look yourself:**");
   expect(example.writeup.overview).toContain("**Goal:** After this,");
@@ -729,8 +730,8 @@ test("feedback guidance keeps Where to look current when edits are allowed", () 
 
 test("the complete example is the synthetic manifest fixture, with no stripped or invented fields", () => {
   const blocks = [...read("plugin/skills/emend-review/references/manifest.md").matchAll(/```json\n([\s\S]*?)\n```/g)];
-  expect(blocks).toHaveLength(1);
-  const example = JSON.parse(blocks[0]?.[1] ?? "");
+  expect(blocks).toHaveLength(2);
+  const example = JSON.parse(blocks[1]?.[1] ?? "");
   expect(example).toEqual(json("sync/fixtures/manifest.json"));
   expect(PublishManifest.parse(example)).toEqual(example);
   expect(
@@ -1196,4 +1197,29 @@ test("revision news guidance writes only fresh changes and keeps process in the 
     expect(guidance).toContain(
       "To land on one block, add `quote` with a few words copied from its text without Markdown marks; an unmatched quote falls back to the line's topic or section if named, otherwise the line has no jump.",
     );
+});
+
+test("review guidance says when an intent review is needed and how to write one", () => {
+  const review = read("plugin/skills/emend-review/SKILL.md").replace(/\s+/g, " ");
+  expect(review).toContain(
+    "Before you write code for a change above Low risk, publish a short intent review and wait for it.",
+  );
+  expect(review).toContain("Skip it for a Low-risk change, when the code already exists, or when the user says so.");
+  expect(review).toContain("Publish refuses one without the other.");
+  const writing = read(writingReference);
+  expect(writing).toContain("## Intent reviews");
+  expect(writing).toContain("### Deviations");
+  expect(writing).toContain('When the code follows the intent, write "None." It is never empty.');
+  expect(writing).toContain("Checked, Not checked and Deviations are the exception. They are never empty.");
+  const manifest = read("plugin/skills/emend-review/references/manifest.md");
+  expect(manifest).toContain("`intentReview`");
+  expect(manifest).toContain("`writeup.deviations`");
+  const examples = [...manifest.matchAll(/```json\n([\s\S]*?)\n```/g)];
+  const complete = JSON.parse(examples[1]?.[1] ?? "");
+  const intent = JSON.parse(examples[0]?.[1] ?? "");
+  const paired = { ...complete, ...intent, writeup: { ...complete.writeup, ...intent.writeup } };
+  expect(PublishManifest.parse(paired)).toEqual(paired);
+  expect(read("plugin/skills/emend-feedback/SKILL.md")).toContain(
+    "Keep `intentReview`, and update `writeup.deviations`",
+  );
 });
