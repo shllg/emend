@@ -6,13 +6,12 @@ import {
   NewInRevisionItem,
   NewInRevisionSection,
   normalizeGlossaryForm,
-  OTHER_TOPIC,
   PublishManifest,
   PublishRequest,
   ReviewVerdict,
-  reviewVerdictIssues,
   WriteupArea,
   WriteupInput,
+  writeupIsEmpty,
   writeupMarkdown,
 } from "./index.ts";
 
@@ -62,7 +61,6 @@ describe("publish manifest", () => {
     ).toEqual([
       "Overview",
       "Summary",
-      "A small change",
       "Unit tests",
       "Browser behavior",
       "Excluded",
@@ -77,7 +75,21 @@ describe("publish manifest", () => {
       "Fallback",
       undefined,
       undefined,
+      "A small change",
     ]);
+  });
+
+  test("a verdict-only writeup is empty but its reason still counts as Markdown", () => {
+    const writeup: WriteupInput = {
+      overview: " \n",
+      tldr: "\t",
+      decisions: " ",
+      topics: {},
+      review: { level: "skim", reason: "Synthetic reason." },
+    };
+    expect(writeupIsEmpty(writeup)).toBe(true);
+    expect(writeupIsEmpty({ ...writeup, tldr: "Synthetic summary." })).toBe(false);
+    expect(writeupMarkdown(writeup)).toContain("Synthetic reason.");
   });
 
   test.each(["critical", "review", "skim"])("preserves optional attention %s without changing order", (attention) => {
@@ -223,57 +235,13 @@ describe("review verdicts", () => {
     expect(PublishManifest.parse(input)).toEqual(input);
   });
 
-  test("the verdict helper refuses skim when Other changes has no attention", () => {
-    expect(reviewVerdictIssues({ level: "skim", reason: "Synthetic reason." }, [{ slug: OTHER_TOPIC.slug }])).toEqual([
-      {
-        path: ["writeup", "review", "level"],
-        message: "level skim needs every changed file in a declared topic",
-      },
-    ]);
-  });
-
-  test("the verdict helper reports both skim conflicts only once", () => {
-    expect(
-      reviewVerdictIssues({ level: "skim", reason: "Synthetic reason." }, [
-        { slug: OTHER_TOPIC.slug },
-        { slug: OTHER_TOPIC.slug, attention: "review" },
-        { slug: "routing", attention: "review" },
-        { slug: "lookup" },
-      ]),
-    ).toEqual([
-      {
-        path: ["writeup", "review", "level"],
-        message: "level skim needs every changed file in a declared topic",
-      },
-      {
-        path: ["writeup", "review", "level"],
-        message: "level skim needs every topic at attention skim",
-      },
-    ]);
-  });
-
-  const criticalIssue = {
-    code: "custom",
-    path: ["writeup", "review", "level"],
-    message: "a critical topic needs level everything",
-  };
-  const skimIssue = {
-    code: "custom",
-    path: ["writeup", "review", "level"],
-    message: "level skim needs every topic at attention skim",
-  };
-  const topicsIssue = {
-    code: "custom",
-    path: ["writeup", "review", "topics"],
-    message: "level topics must name every topic at attention review",
-  };
   test.each([
-    ["skim", "critical", [criticalIssue, skimIssue]],
-    ["topics", "critical", [criticalIssue]],
-    ["skim", "review", [skimIssue]],
-    ["skim", undefined, [skimIssue]],
-    ["topics", "review", [topicsIssue]],
-  ] as const)("refuses level %s with conflicting %s topics once per rule", (level, attention, issues) => {
+    ["skim", "critical"],
+    ["topics", "critical"],
+    ["skim", "review"],
+    ["skim", undefined],
+    ["topics", "review"],
+  ] as const)("accepts level %s with conflicting %s topics", (level, attention) => {
     const result = PublishManifest.safeParse({
       ...manifest,
       topics: [
@@ -286,8 +254,18 @@ describe("review verdicts", () => {
         review: { level, ...(level === "topics" ? { topics: [topic.slug] } : {}), reason: "Synthetic reason." },
       },
     });
-    expect(result.success).toBe(false);
-    if (!result.success) expect(result.error.issues).toEqual(issues.map((issue) => expect.objectContaining(issue)));
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts an undeclared verdict topic", () => {
+    const input = {
+      ...manifest,
+      writeup: {
+        ...manifest.writeup,
+        review: { level: "topics", topics: ["missing"], reason: "Synthetic reason." },
+      },
+    };
+    expect(PublishManifest.parse(input)).toEqual(input);
   });
 
   test.each([
@@ -295,7 +273,6 @@ describe("review verdicts", () => {
     [{ level: "skim", topics: [topic.slug] }, ["topics"], "only the topics level names topics"],
     [{ level: "everything", topics: [topic.slug] }, ["topics"], "only the topics level names topics"],
     [{ level: "topics", topics: [topic.slug, topic.slug] }, ["topics", 1], "duplicate topic slug"],
-    [{ level: "topics", topics: ["missing"] }, ["topics", 0], "review topic is not declared"],
   ] as const)("refuses invalid review topics: %j", (review, path, message) => {
     const result = PublishManifest.safeParse({
       ...manifest,

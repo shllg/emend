@@ -121,8 +121,7 @@ test.each([
         review: { level: "topics", topics: ["Received"], reason: "Synthetic reason." },
       },
     },
-    "writeup.review.topics.0 (topic slug: lowercase letters, digits and -, at most 64); " +
-      "writeup.review.topics.0 (review topic is not declared)",
+    "writeup.review.topics.0 (topic slug: lowercase letters, digits and -, at most 64)",
   ],
   [
     { topics: [{ ...topic, blastRadius: { scope: "received scope", note: "Synthetic" } }] },

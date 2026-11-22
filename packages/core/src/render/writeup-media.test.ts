@@ -130,6 +130,7 @@ test.each([false, true])("collects every section and deduplicates across them (g
     overview: image("overview"),
     tldr: image("tldr"),
     whyItMatters: image("whyItMatters"),
+    // The verdict is accepted but never rendered, so its media is not collected.
     review: { level: "skim", reason: image("review") },
     checked: image("checked"),
     notChecked: image("notChecked"),
@@ -149,7 +150,6 @@ test.each([false, true])("collects every section and deduplicates across them (g
     [
       "tldr",
       "whyItMatters",
-      "review",
       "checked",
       "notChecked",
       "overview",

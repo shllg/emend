@@ -1210,6 +1210,23 @@ test("the new opening lifts commentable facts into Risk and Frame in order, with
       topics,
     ),
   );
+  // Older revisions stored a verdict immediately before the checks.
+  const checkedIndex = writeup.sections.findIndex((section) => section.key === "checked");
+  if (checkedIndex === -1) throw new Error("Missing checked section");
+  writeup.sections.splice(checkedIndex, 0, {
+    key: "review",
+    label: "Review",
+    topic: null,
+    blocks: [
+      {
+        ...block,
+        id: "review-12345678",
+        section: "review",
+        text: "Read topic “Plant a seed”. Check the seed bed.",
+        html: "<p><strong>Read topic “Plant a seed”.</strong> Check the seed bed.</p>",
+      },
+    ],
+  });
   const firstBlock = (key: string) => {
     const first = writeup.sections.find((section) => section.key === key)?.blocks[0];
     if (!first) throw new Error(`Missing ${key}`);

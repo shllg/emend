@@ -209,7 +209,7 @@ test("renders the ranked Topics list and written Why Example and Details section
 });
 
 test.each([
-  ["review", "Review"],
+  ["whyItMatters", "Why it matters"],
   ["checked", "Checked"],
   ["notChecked", "Not checked"],
 ] as const)("the Topics list follows the %s intro section", async (key, label) => {
@@ -233,6 +233,44 @@ test.each([
     "Topics",
     "Shelf search",
   ]);
+});
+
+test("omits stored verdict sections and places Topics after Checked", async () => {
+  const marker = "StoredVerdictMarker";
+  const html = await buildWriteupDownload({
+    title: "Synthetic review",
+    details,
+    topics: [{ slug: "search", title: "Shelf search", summary: "Find books.", importance: 10 }],
+    resolveMedia: async () => null,
+    writeup: {
+      sections: [
+        { key: "tldr", label: "TL;DR", topic: null, blocks: [] },
+        {
+          key: "review",
+          label: "Review",
+          topic: null,
+          blocks: [
+            {
+              id: "review-12345678",
+              section: "review",
+              kind: "paragraph",
+              text: `Read everything. ${marker}`,
+              html: `<p><strong>Read everything.</strong> ${marker} <script>alert(1)</script><img src=x onerror=alert(1)></p>`,
+            },
+          ],
+        },
+        { key: "checked", label: "Checked", topic: null, blocks: [] },
+        { key: "t-search-why", label: "Shelf search — Why", topic: "search", blocks: [] },
+      ],
+    },
+  });
+  expect(
+    parsed(html)
+      .filter((el) => el.tagName === "h2")
+      .map((node) => hastText(node)),
+  ).toEqual(["TL;DR", "Checked", "Topics", "Shelf search"]);
+  expect(html).not.toContain(marker);
+  expect(html).not.toContain("Read everything.");
 });
 
 test.each([undefined, "dark", "light"] as const)("drops active hostile block HTML with theme=%s", async (theme) => {

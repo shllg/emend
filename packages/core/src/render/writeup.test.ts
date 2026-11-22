@@ -1,4 +1,4 @@
-import { BlockId, type ReviewVerdict, type WriteupInput } from "@emend/contract";
+import { BlockId, type WriteupInput } from "@emend/contract";
 import { fromHtml } from "hast-util-from-html";
 import { expect, test, vi } from "vitest";
 import { blockText, visitElements } from "./blocks.ts";
@@ -95,7 +95,7 @@ test("old manifests keep their overview-first output", async () => {
   ]);
 });
 
-test("new writeups start with the summary, verdict, checks, overview, scope, guide and context", async () => {
+test("new writeups start with the summary, checks, overview, scope, guide and context", async () => {
   const rendered = await renderWriteup(
     {
       ...writeup,
@@ -111,7 +111,6 @@ test("new writeups start with the summary, verdict, checks, overview, scope, gui
   const legacy = await renderWriteup(writeup, topics);
   expect(rendered.sections.map(({ key, label }) => [key, label])).toEqual([
     ["tldr", "TL;DR"],
-    ["review", "Review"],
     ["checked", "Checked"],
     ["notChecked", "Not checked"],
     ["overview", "Overview"],
@@ -121,8 +120,8 @@ test("new writeups start with the summary, verdict, checks, overview, scope, gui
     ...legacy.sections.slice(2).map(({ key, label }) => [key, label]),
   ]);
   expect(rendered.sections[0]).toEqual(legacy.sections[1]);
-  expect(rendered.sections[4]).toEqual(legacy.sections[0]);
-  expect(rendered.sections.slice(8)).toEqual(legacy.sections.slice(2));
+  expect(rendered.sections[3]).toEqual(legacy.sections[0]);
+  expect(rendered.sections.slice(7)).toEqual(legacy.sections.slice(2));
 });
 
 test.each(["review", "checked", "notChecked"] as const)("%s alone selects the new section order", async (field) => {
@@ -131,91 +130,52 @@ test.each(["review", "checked", "notChecked"] as const)("%s alone selects the ne
       ? { review: { level: "skim" as const, reason: "Synthetic reason." } }
       : { [field]: "Synthetic check." };
   const rendered = await renderWriteup({ overview: "", tldr: "", decisions: "", topics: {}, ...change }, []);
-  expect(rendered.sections.map((section) => section.key)).toEqual(["tldr", field, "overview", "decisions"]);
-});
-
-const verdictCases: [ReviewVerdict, string][] = [
-  [{ level: "skim", reason: "Small change." }, "Skim, then merge."],
-  [{ level: "everything", reason: "Broad change." }, "Read everything."],
-  [{ level: "topics", topics: ["search"], reason: "Search changed." }, "Read topic “Shelf search”."],
-  [
-    { level: "topics", topics: ["labels", "search"], reason: "Names and search changed." },
-    "Read topics “Clear labels” and “Shelf search”.",
-  ],
-  [
-    { level: "topics", topics: ["labels", "search", "sorting"], reason: "The library changed." },
-    "Read topics “Clear labels”, “Shelf search” and “Stable sorting”.",
-  ],
-  [{ level: "topics", topics: ["missing-topic"], reason: "Fallback." }, "Read topic “missing-topic”."],
-];
-test.each(verdictCases)("renders the verdict %j as one paragraph", async (review, verdict) => {
-  const rendered = await renderWriteup({ ...writeup, review }, topics);
-  const section = rendered.sections.find((section) => section.key === "review");
-  expect(section).toMatchObject({ label: "Review", topic: null });
-  expect(section?.blocks).toEqual([
-    expect.objectContaining({
-      kind: "paragraph",
-      text: `${verdict} ${review.reason}`,
-      html: `<p><strong>${verdict}</strong> ${review.reason}</p>`,
-    }),
+  expect(rendered.sections.map((section) => section.key)).toEqual([
+    "tldr",
+    ...(field === "review" ? [] : [field]),
+    "overview",
+    "decisions",
   ]);
 });
 
-test("verdict reasons keep their Markdown after the generated verdict", async () => {
-  const rendered = await renderWriteup(
-    { ...writeup, review: { level: "skim", reason: "The **small** change has a [guide](https://example.com)." } },
-    [],
-  );
-  const html = rendered.sections.find((section) => section.key === "review")?.blocks[0]?.html;
-  expect(html).toContain("<strong>Skim, then merge.</strong> The <strong>small</strong> change");
-  expect(html).toContain('href="https://example.com"');
-  expect(html).toContain('rel="noopener noreferrer nofollow"');
-});
-
-test.each([
-  "[x](javascript:alert(1))",
-  "[guide](https://example.com)",
-  "*stars* _underscores_ `code` **strong**",
-  "<img src=x onerror=alert(1)>",
-  "<script>alert(1)</script>",
-  "&lt;script&gt; &#x3C;b&#x3E;",
-  "  Shelf\n\t search  ",
-  "  Shelf\u2028search\u2029results  ",
-  "a\\b",
-  "www.example.com",
-  "someone@example.com",
-])("verdict topic title stays literal on one line: %j", async (title) => {
-  const rendered = await renderWriteup(
-    { ...writeup, review: { level: "topics", topics: ["search"], reason: "Check this topic." } },
-    [{ slug: "search", title, importance: 10, summary: "Synthetic topic." }],
-  );
-  const blocks = rendered.sections.find((section) => section.key === "review")?.blocks ?? [];
-  const verdict = `Read topic “${title.replace(/\s+/g, " ").trim()}”.`;
-  expect(blocks).toHaveLength(1);
-  expect(blocks[0]?.text).toBe(`${verdict} Check this topic.`);
-  const html = blocks[0]?.html ?? "";
-  expect(html).not.toContain("\n");
-  const autolink =
-    title === "[guide](https://example.com)"
-      ? /^https:\/\/example\.com/
-      : title === "www.example.com"
-        ? /^https?:\/\/www\.example\.com/
-        : title === "someone@example.com"
-          ? /^mailto:someone@example\.com/
-          : undefined;
-  if (autolink) expect(html).not.toMatch(/javascript:/i);
-  const tags: string[] = [];
-  visitElements(fromHtml(html, { fragment: true }), (element) => {
-    tags.push(element.tagName);
-    if (autolink && element.tagName === "a") {
-      expect(element.properties.href).toMatch(autolink);
-      expect(element.properties.rel).toEqual(["noopener", "noreferrer", "nofollow"]);
-    } else {
-      expect(element.properties).toEqual({});
+test.each(["skim", "topics", "everything"] as const)(
+  "never renders a %s verdict or its hostile reason",
+  async (level) => {
+    const marker = "HiddenVerdictMarker";
+    const reason = `${marker} <script>alert(1)</script> <img src=x onerror=alert(1)> [x](javascript:alert(1))`;
+    const rendered = await renderWriteup(
+      {
+        overview: "Synthetic overview.",
+        tldr: "Synthetic summary.",
+        whyItMatters: "Readers can find books.",
+        review: { level, ...(level === "topics" ? { topics: ["search"] } : {}), reason },
+        checked: "Search tests.",
+        notChecked: "Browser behavior.",
+        decisions: "Keep the search interface.",
+        topics: { search: { why: "Find books." } },
+      },
+      topics,
+    );
+    expect(rendered.sections.map((section) => section.key)).toEqual([
+      "tldr",
+      "whyItMatters",
+      "checked",
+      "notChecked",
+      "overview",
+      "decisions",
+      "t-search-why",
+    ]);
+    expect(rendered.sections.some((section) => section.key === "review")).toBe(false);
+    const blocks = rendered.sections.flatMap((section) => section.blocks);
+    expect(blocks.length).toBeGreaterThan(0);
+    for (const block of blocks) {
+      expect(block.text).not.toContain(marker);
+      expect(block.html).not.toContain(marker);
+      expect(block.text).not.toContain(reason);
+      expect(block.html).not.toContain(reason);
     }
-  });
-  expect(tags).toEqual(autolink ? ["p", "strong", "a"] : ["p", "strong"]);
-});
+  },
+);
 
 test.each(["outOfScope", "whereToLook", "context"] as const)(
   "a present %s selects the new order, including an empty string, and omits absent fields",
@@ -228,45 +188,37 @@ test.each(["outOfScope", "whereToLook", "context"] as const)(
   },
 );
 
-test.each([
-  "whyItMatters",
-  "review",
-  "checked",
-  "notChecked",
-  "outOfScope",
-  "whereToLook",
-  "context",
-  "deviations",
-] as const)("sanitizes hostile Markdown in %s", async (field) => {
-  const source = "graph TD; A-->B; click A callback";
-  const markdown = [
-    "<script>bad()</script>",
-    "Before <img src=x onerror=alert(1)> after",
-    "[Unsafe link](javascript:bad())",
-    '<div onclick="bad()" style="position:fixed" id="raw" class="injected" data-foo="x">Raw HTML</div>',
-    '<svg onload="bad()"><circle /></svg>',
-    `\`\`\`mermaid\n${source}\n\`\`\``,
-  ].join("\n\n");
-  const change =
-    field === "review" ? { review: { level: "everything" as const, reason: markdown } } : { [field]: markdown };
-  const rendered = await renderWriteup({ ...writeup, ...change }, []);
-  const blocks = rendered.sections.find((section) => section.key === field)?.blocks ?? [];
-  const html = blocks.map((block) => block.html).join("");
-  expect(html).toContain("Raw HTML");
-  expect(html).toContain("Unsafe link");
-  expect(html).toContain('id="user-content-raw"');
-  expect(html).toContain("user-content-injected");
-  expect(html).not.toMatch(
-    /<(script|style|iframe|object|embed|form|svg)|\s(on\w+|style|data-[\w-]+)=|javascript:|data:|vbscript:/i,
-  );
-  expect(blocks.filter((block) => block.kind === "diagram")).toEqual([
-    expect.objectContaining({ kind: "diagram", source, text: source, html: "" }),
-  ]);
-  for (const block of blocks) {
-    expect(block.section).toBe(field);
-    expect(BlockId.parse(block.id)).toMatch(new RegExp(`^${field}-`));
-  }
-});
+test.each(["whyItMatters", "checked", "notChecked", "outOfScope", "whereToLook", "context", "deviations"] as const)(
+  "sanitizes hostile Markdown in %s",
+  async (field) => {
+    const source = "graph TD; A-->B; click A callback";
+    const markdown = [
+      "<script>bad()</script>",
+      "Before <img src=x onerror=alert(1)> after",
+      "[Unsafe link](javascript:bad())",
+      '<div onclick="bad()" style="position:fixed" id="raw" class="injected" data-foo="x">Raw HTML</div>',
+      '<svg onload="bad()"><circle /></svg>',
+      `\`\`\`mermaid\n${source}\n\`\`\``,
+    ].join("\n\n");
+    const rendered = await renderWriteup({ ...writeup, [field]: markdown }, []);
+    const blocks = rendered.sections.find((section) => section.key === field)?.blocks ?? [];
+    const html = blocks.map((block) => block.html).join("");
+    expect(html).toContain("Raw HTML");
+    expect(html).toContain("Unsafe link");
+    expect(html).toContain('id="user-content-raw"');
+    expect(html).toContain("user-content-injected");
+    expect(html).not.toMatch(
+      /<(script|style|iframe|object|embed|form|svg)|\s(on\w+|style|data-[\w-]+)=|javascript:|data:|vbscript:/i,
+    );
+    expect(blocks.filter((block) => block.kind === "diagram")).toEqual([
+      expect.objectContaining({ kind: "diagram", source, text: source, html: "" }),
+    ]);
+    for (const block of blocks) {
+      expect(block.section).toBe(field);
+      expect(BlockId.parse(block.id)).toMatch(new RegExp(`^${field}-`));
+    }
+  },
+);
 
 test("sanitizes raw glossary HTML through the same pipeline", async () => {
   const rendered = await renderWriteup(
@@ -330,7 +282,7 @@ test("list glossary marks reset in every section without changing block text or 
   const plain = await renderWriteup(source, topics);
   const marked = await renderWriteup({ ...source, glossary: [{ term: "Budget", definition: "Attempts." }] }, topics);
   const sections = marked.sections.filter((section) => section.key !== "glossary");
-  expect(sections).toHaveLength(12);
+  expect(sections).toHaveLength(11);
   for (const [index, section] of sections.entries()) {
     expect(section.blocks.map(({ id, text }) => ({ id, text }))).toEqual(
       plain.sections[index]?.blocks.map(({ id, text }) => ({ id, text })),
@@ -675,7 +627,7 @@ test.each([false, true])("renders newInRevision items after the opening in new l
   const index = rendered.sections.findIndex((section) => section.key === "newInRevision");
   expect(rendered.sections[index - 1]?.key).toBe(newLayout ? "whyItMatters" : "tldr");
   expect(rendered.sections[index + 1]?.key).toBe("needsYou");
-  expect(rendered.sections[index + 2]?.key).toBe(newLayout ? "review" : "decisions");
+  expect(rendered.sections[index + 2]?.key).toBe(newLayout ? "checked" : "decisions");
   expect(rendered.sections[0]?.key).toBe(newLayout ? "tldr" : "overview");
   const section = rendered.sections[index];
   expect(section).toMatchObject({ key: "newInRevision", label: "New in this revision", topic: null });
@@ -926,7 +878,7 @@ test("revision quote scopes, case and first match follow section order", async (
   for (const item of rendered.newInRevision?.slice(3) ?? []) expect(item).not.toHaveProperty("blockId");
 });
 
-test("revision quotes never match review, needsYou or their own news", async () => {
+test("revision quotes find no verdict block and never match needsYou or their own news", async () => {
   const rendered = await renderWriteup(
     {
       overview: "",
@@ -945,6 +897,11 @@ test("revision quotes never match review, needsYou or their own news", async () 
   );
   expect(rendered.newInRevision).toHaveLength(3);
   for (const item of rendered.newInRevision ?? []) expect(item).not.toHaveProperty("blockId");
+  expect(rendered.sections.some((section) => section.key === "review")).toBe(false);
+  for (const block of rendered.sections.flatMap((section) => section.blocks)) {
+    expect(block.text).not.toContain("Hidden verdict words");
+    expect(block.html).not.toContain("Hidden verdict words");
+  }
 });
 
 test.each([false, true])(

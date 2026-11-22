@@ -51,48 +51,35 @@ test("publish accepts a verdict naming a declared topic", () => {
   };
   expect(PublishRequest.parse(input)).toEqual(input);
 });
-test("publish refuses an undeclared verdict topic", () => {
-  const result = PublishRequest.safeParse({
+test("publish accepts an undeclared verdict topic", () => {
+  const input = {
     ...request,
     writeup: {
       ...request.writeup,
       review: { level: "topics", topics: ["missing"], reason: "Inspect the changed lookup." },
     },
-  });
-  expect(result.success).toBe(false);
-  if (!result.success)
-    expect(result.error.issues).toContainEqual(
-      expect.objectContaining({ code: "custom", path: [], message: "review topic is not declared" }),
-    );
+  };
+  expect(PublishRequest.parse(input)).toEqual(input);
 });
 
-const criticalVerdictIssue = {
-  code: "custom",
-  path: ["writeup", "review", "level"],
-  message: "a critical topic needs level everything",
-};
-const skimVerdictIssue = {
-  code: "custom",
-  path: ["writeup", "review", "level"],
-  message: "level skim needs every topic at attention skim",
-};
-const unassignedVerdictIssue = {
-  code: "custom",
-  path: ["writeup", "review", "level"],
-  message: "level skim needs every changed file in a declared topic",
-};
-const topicsVerdictIssue = {
-  code: "custom",
-  path: ["writeup", "review", "topics"],
-  message: "level topics must name every topic at attention review",
-};
 test.each([
-  ["skim", "critical", [criticalVerdictIssue, skimVerdictIssue]],
-  ["topics", "critical", [criticalVerdictIssue]],
-  ["skim", "review", [skimVerdictIssue]],
-  ["skim", undefined, [skimVerdictIssue]],
-  ["topics", "review", [topicsVerdictIssue]],
-] as const)("publish refuses level %s with conflicting %s topics once per rule", (level, attention, issues) => {
+  { level: "unknown", reason: "Synthetic reason." },
+  { level: "topics", reason: "Synthetic reason." },
+  { level: "skim", topics: ["routing"], reason: "Synthetic reason." },
+  { level: "everything", topics: ["routing"], reason: "Synthetic reason." },
+  { level: "topics", topics: ["routing", "routing"], reason: "Synthetic reason." },
+  { level: "skim", reason: " \n\t " },
+])("publish still refuses an invalid verdict shape: %j", (review) => {
+  expect(PublishRequest.safeParse({ ...request, writeup: { ...request.writeup, review } }).success).toBe(false);
+});
+
+test.each([
+  ["skim", "critical"],
+  ["topics", "critical"],
+  ["skim", "review"],
+  ["skim", undefined],
+  ["topics", "review"],
+] as const)("publish accepts level %s with conflicting %s topics", (level, attention) => {
   const topic = { slug: "routing", title: "Routing", importance: 20, summary: "Simplify route lookup." };
   const result = PublishRequest.safeParse({
     ...request,
@@ -106,8 +93,7 @@ test.each([
       review: { level, ...(level === "topics" ? { topics: [topic.slug] } : {}), reason: "Synthetic reason." },
     },
   });
-  expect(result.success).toBe(false);
-  if (!result.success) expect(result.error.issues).toEqual(issues.map((issue) => expect.objectContaining(issue)));
+  expect(result.success).toBe(true);
 });
 
 test.each([
@@ -135,16 +121,16 @@ test.each([
 });
 
 test.each([
-  ["skim", undefined, [unassignedVerdictIssue]],
-  ["skim", "skim", []],
-  ["skim", "review", [unassignedVerdictIssue]],
-  ["skim", "critical", [criticalVerdictIssue, unassignedVerdictIssue]],
-  ["topics", "critical", [criticalVerdictIssue]],
-  ["topics", undefined, []],
-  ["topics", "skim", []],
-  ["everything", undefined, []],
-  ["everything", "critical", []],
-] as const)("publish checks level %s against Other changes with attention %s", (level, attention, issues) => {
+  ["skim", undefined],
+  ["skim", "skim"],
+  ["skim", "review"],
+  ["skim", "critical"],
+  ["topics", "critical"],
+  ["topics", undefined],
+  ["topics", "skim"],
+  ["everything", undefined],
+  ["everything", "critical"],
+] as const)("publish accepts level %s with Other changes at attention %s", (level, attention) => {
   const input = {
     ...request,
     topics: [
@@ -156,16 +142,10 @@ test.each([
       review: { level, ...(level === "topics" ? { topics: ["routing"] } : {}), reason: "Inspect the changes." },
     },
   };
-  if (issues.length === 0) {
-    expect(PublishRequest.parse(input)).toEqual(input);
-  } else {
-    const result = PublishRequest.safeParse(input);
-    expect(result.success).toBe(false);
-    if (!result.success) expect(result.error.issues).toEqual(issues.map((issue) => expect.objectContaining(issue)));
-  }
+  expect(PublishRequest.parse(input)).toEqual(input);
 });
 
-test("a topics verdict must name Other changes at attention review", () => {
+test("a topics verdict can omit Other changes at attention review", () => {
   const input = {
     ...request,
     topics: [
@@ -174,10 +154,6 @@ test("a topics verdict must name Other changes at attention review", () => {
     ],
     writeup: { ...request.writeup, review: { level: "topics", topics: ["routing"], reason: "Check route lookup." } },
   };
-  const result = PublishRequest.safeParse(input);
-  expect(result.success).toBe(false);
-  if (!result.success) expect(result.error.issues).toEqual([expect.objectContaining(topicsVerdictIssue)]);
-  input.writeup.review.topics.push(OTHER_TOPIC.slug);
   expect(PublishRequest.parse(input)).toEqual(input);
 });
 
