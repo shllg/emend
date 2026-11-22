@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef } from "react";
 import { type CodeFocus, sameCodeFocus } from "../../lib/code-focus.ts";
 import { plural } from "../../lib/count.ts";
 import { diffGroups } from "../../lib/diff-groups.ts";
+import { HIDDEN_COMMENTS_GROUP, HIDDEN_WRITEUP_SECTIONS } from "../../lib/hidden-writeup.ts";
 import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { rankedTopics } from "../../lib/topics.ts";
 import {
@@ -150,7 +151,7 @@ export function Writeup({
       computed(frame, "topics", "Topics", topicsFact(topics));
     }
     for (const section of writeup.sections) {
-      if (section.key === "review") continue;
+      if (HIDDEN_WRITEUP_SECTIONS.has(section.key)) continue;
       if (newLayout && ["tldr", "whyItMatters", "checked", "notChecked"].includes(section.key)) continue;
       const blocks = section.blocks.filter((block) => !lifted.has(block.id));
       if (section.blocks.length && !blocks.length) continue;
@@ -370,7 +371,7 @@ export function Writeup({
     );
     if (hiddenThreads.length) {
       groups.push({
-        key: "hidden-comments",
+        key: HIDDEN_COMMENTS_GROUP,
         heading: "Comments on hidden text",
         blocks: [],
         content: (

@@ -26,6 +26,7 @@ import {
   saveDraft,
   subscribeDrafts,
 } from "../../lib/drafts.ts";
+import { hidesWriteupBlock } from "../../lib/hidden-writeup.ts";
 import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { useThreadActionFocus } from "../../lib/thread-action-focus.ts";
 import { useThreadJump } from "../../lib/thread-jump.ts";
@@ -177,14 +178,18 @@ export function ThreadCard({
         {showChanged && (
           <a
             href={
-              readOnly
-                ? `#block-${location.blockId}`
-                : blockLink(
-                    reviewId,
-                    revision,
-                    location.blockId,
-                    location.kind === "doc-span" ? location.path : undefined,
-                  )
+              location.kind === "writeup-span" && hidesWriteupBlock(location.blockId)
+                ? readOnly
+                  ? `#thread-${thread.id}`
+                  : `/r/${encodeURIComponent(reviewId)}?rev=${revision}&tab=writeup#thread-${encodeURIComponent(thread.id)}`
+                : readOnly
+                  ? `#block-${location.blockId}`
+                  : blockLink(
+                      reviewId,
+                      revision,
+                      location.blockId,
+                      location.kind === "doc-span" ? location.path : undefined,
+                    )
             }
           >
             <ChangedMarker revision={changed.revision} />
