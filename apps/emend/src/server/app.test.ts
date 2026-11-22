@@ -223,6 +223,7 @@ test("content requests ignore session cookies when checking for a missing Origin
 
 test("every documented API endpoint enforces its scope even before its handler exists", async () => {
   expect(ENDPOINTS).toContainEqual({ method: "PUT", path: "/api/v1/reviews/:id/pin", scope: "send" });
+  expect(ENDPOINTS).toContainEqual({ method: "PUT", path: "/api/v1/reviews/:id/pin/place", scope: "send" });
   const cookie = await login();
   for (const endpoint of ENDPOINTS) {
     const path = endpoint.path.replace(/:[^/]+/g, "missing");

@@ -36,6 +36,7 @@ const DETAILS = {
     message: "You have the most pins allowed, pins in the bin included. Unpin one first.",
   },
   bin_changed: { code: "invalid_state", message: "The bin changed. Check it and try again." },
+  pin_changed: { code: "invalid_state", message: "The pins changed. Check them and try again." },
   import_aborted: { code: "invalid_request", message: "The import was cancelled." },
   import_busy: { code: "rate_limited", message: "The server is busy importing; try again." },
   waiting_takes: { code: "rate_limited", message: "Too many waiting takes." },

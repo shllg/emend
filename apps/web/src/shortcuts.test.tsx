@@ -40,6 +40,7 @@ const items: InboxItem[] = ids.map((id, index) => ({
   list: "active",
   groupId: null,
   pinnedAt: null,
+  pinOrder: null,
   snoozed: false,
   snoozedUntil: null,
   activeUntil: null,

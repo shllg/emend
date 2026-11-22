@@ -178,13 +178,14 @@ export const reviewGroupMembers = sqliteTable(
   ],
 );
 
-/** A pinned review or pub; its time orders the Pinned section. */
+/** A pinned review or pub; position, then pin time, then review id order the Pinned section. */
 export const reviewPins = sqliteTable(
   "review_pins",
   {
     ownerId: ownerId(),
     reviewId: text("review_id").notNull(),
     createdAt: createdAt(),
+    position: integer("position").notNull().default(0),
   },
   (t) => [
     primaryKey({ columns: [t.ownerId, t.reviewId] }),

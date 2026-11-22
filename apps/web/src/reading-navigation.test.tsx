@@ -91,6 +91,7 @@ const review: ReviewView = {
   list: "active",
   groupId: null,
   pinnedAt: null,
+  pinOrder: null,
   snoozed: false,
   snoozedUntil: null,
   activeUntil: null,
