@@ -757,7 +757,7 @@ test("revision quotes resolve different blocks in one topic after all sections r
   for (const item of rendered.newInRevision ?? []) expect(item).not.toHaveProperty("quote");
 });
 
-test("revision quotes prefer literal identifiers across the whole scope before stripping marks", async () => {
+test("bare and Markdown code quotes preserve identifiers across the whole scope", async () => {
   const rendered = await renderWriteup(
     {
       overview: "",
@@ -766,50 +766,131 @@ test("revision quotes prefer literal identifiers across the whole scope before s
       topics: { search: { why: "Use maxcount café.", example: "Use `max_count` café." } },
       newInRevision: [
         { text: "Corrected the identifier.", topic: "search", quote: "max_count" },
+        { text: "Corrected the code identifier.", topic: "search", quote: "`max_count`" },
         { text: "Clarified the example.", topic: "search", quote: "max_count   cafe\u0301" },
+        { text: "Clarified the code example.", topic: "search", quote: "`max_count`   cafe\u0301" },
       ],
     },
     topics,
   );
   const blocks = rendered.sections.filter((section) => section.topic === "search").flatMap((section) => section.blocks);
   expect(blocks.map((block) => block.text)).toEqual(["Use maxcount café.", "Use max_count café."]);
-  expect(rendered.newInRevision?.map((item) => item.blockId)).toEqual([blocks[1]?.id, blocks[1]?.id]);
+  expect(rendered.newInRevision?.map((item) => item.blockId)).toEqual([
+    blocks[1]?.id,
+    blocks[1]?.id,
+    blocks[1]?.id,
+    blocks[1]?.id,
+  ]);
 });
 
-test("revision quotes fall back to stripping Markdown marks when the plain pass has no match", async () => {
+test("revision quotes read Markdown emphasis only when the plain pass has no match", async () => {
   const rendered = await renderWriteup(
     {
-      overview: "Fix: the loop.",
-      tldr: "**Fix:** the loop again.",
+      overview: "Fix: the loop stops here.",
+      tldr: "**Fix:** the loop stops again.",
       decisions: "",
       topics: {},
-      newInRevision: [{ text: "Fixed the loop.", quote: "**Fix:** the loop" }],
+      newInRevision: [{ text: "Fixed the loop.", quote: "**Fix:** the loop stops" }],
     },
     [],
   );
   const block = rendered.sections.find((section) => section.key === "overview")?.blocks[0];
-  expect(block?.text).toBe("Fix: the loop.");
+  expect(block?.text).toBe("Fix: the loop stops here.");
   expect(rendered.newInRevision?.[0]?.blockId).toBe(block?.id);
 });
 
-test.each(["", " \t ", "**", "_", "`", " *\t_ ` ", "\u0085*\u00a0_\ufeff`"])(
-  "stored revision quote %j never matches an empty normalized string",
-  async (quote) => {
-    const rendered = await renderWriteup(
-      {
-        overview: "First eligible block.",
-        tldr: "",
-        decisions: "",
-        topics: {},
-        newInRevision: [{ text: "Updated the opening.", quote }],
-      },
-      [],
-    );
-    expect(rendered.sections.find((section) => section.key === "overview")?.blocks).toHaveLength(1);
-    expect(rendered.newInRevision).toHaveLength(1);
-    expect(rendered.newInRevision?.[0]).not.toHaveProperty("blockId");
-  },
-);
+test("revision quotes prefer literal marks in a later block to an earlier Markdown match", async () => {
+  const rendered = await renderWriteup(
+    {
+      overview: "Fix: the loop stops here.",
+      tldr: "`**Fix:** the loop stops` here.",
+      decisions: "",
+      topics: {},
+      newInRevision: [{ text: "Clarified the literal example.", quote: "**Fix:** the loop stops" }],
+    },
+    [],
+  );
+  const block = rendered.sections.find((section) => section.key === "tldr")?.blocks[0];
+  expect(block?.text).toBe("**Fix:** the loop stops here.");
+  expect(rendered.newInRevision?.[0]?.blockId).toBe(block?.id);
+});
+
+test.each([
+  "[the retry PRD](https://example.test/prd)",
+  "[the retry PRD](javascript:bad())",
+  "the ~~retry~~ **PRD**",
+  "the <!-- ignored -->retry `PRD`",
+  "the retry\\\nPRD",
+])("revision quote %j uses only Markdown text, inline code and breaks", async (quote) => {
+  const rendered = await renderWriteup(
+    {
+      overview: "See the retry PRD for details.",
+      tldr: "",
+      decisions: "",
+      topics: {},
+      newInRevision: [{ text: "Updated the reference.", quote }],
+    },
+    [],
+  );
+  const block = rendered.sections.find((section) => section.key === "overview")?.blocks[0];
+  expect(block?.text).toBe("See the retry PRD for details.");
+  expect(rendered.newInRevision?.[0]?.blockId).toBe(block?.id);
+  expect(rendered.newInRevision?.[0]).not.toHaveProperty("quote");
+  expect(rendered.sections.find((section) => section.key === "newInRevision")?.blocks[0]?.html).toBe(
+    "<p>Updated the reference.</p>",
+  );
+});
+
+test.each([
+  "",
+  " \t ",
+  "**",
+  "_",
+  "`",
+  " *\t_ ` ",
+  "\u0085*\u00a0_\ufeff`",
+  "<!-- note -->",
+  "<script>bad()</script>",
+  "<img src=x onerror=bad()>",
+  '<div onclick="bad()">First eligible block.</div>',
+  '<pre><code class="language-mermaid">graph TD; A--&gt;B; click A callback</code></pre>',
+])("unmatched stored revision quote %j has no block destination", async (quote) => {
+  const rendered = await renderWriteup(
+    {
+      overview: "First eligible block.",
+      tldr: "",
+      decisions: "",
+      topics: {},
+      newInRevision: [{ text: "Updated the opening.", quote }],
+    },
+    [],
+  );
+  expect(rendered.sections.find((section) => section.key === "overview")?.blocks).toHaveLength(1);
+  expect(rendered.newInRevision).toHaveLength(1);
+  expect(rendered.newInRevision?.[0]).not.toHaveProperty("blockId");
+});
+
+test("stored revision quotes match inline HTML text without rendering the HTML", async () => {
+  const rendered = await renderWriteup(
+    {
+      overview: "First eligible block.",
+      tldr: "",
+      decisions: "",
+      topics: {},
+      newInRevision: [
+        { text: "Updated the opening.", quote: '<svg onload="bad()"><text>First eligible block.</text></svg>' },
+      ],
+    },
+    [],
+  );
+  const block = rendered.sections.find((section) => section.key === "overview")?.blocks[0];
+  expect(block?.text).toBe("First eligible block.");
+  expect(rendered.newInRevision).toHaveLength(1);
+  expect(rendered.newInRevision?.[0]?.blockId).toBe(block?.id);
+  expect(rendered.newInRevision?.[0]).not.toHaveProperty("quote");
+  for (const section of rendered.sections)
+    expect(section.blocks.map((block) => block.html).join("")).not.toMatch(/svg|onload|bad\(/i);
+});
 
 test("revision quote scopes, case and first match follow section order", async () => {
   const rendered = await renderWriteup(

@@ -2081,12 +2081,15 @@ After rendering all sections, the renderer searches only `t-<slug>-why`, `-examp
 for a topic, only the named section for a section, or every writeup section except
 `newInRevision`, `needsYou` and `review` for a quote alone. Matching makes two passes over the
 same scope and section order. The first normalizes both quote and block text to NFC, collapses
-whitespace runs to one space and trims the ends, preserving all other characters. Only if that
-finds no match, the second pass also strips `*`, `_` and backtick characters before collapsing
-whitespace and trimming. Each pass skips an empty normalized quote; the first block whose
-normalized text contains the normalized quote wins, case-sensitively. No match emits no `blockId`,
-leaving the usual topic or section fallback (and no jump for an unmatched quote alone). Quotes
-are matching hints, not rendered Markdown, and do not contribute to `writeupEmpty` or the Markdown byte sums.
+whitespace runs to one space and trims the ends, preserving all other characters. Both passes
+compare block text as rendered, without removing literal `*`, `_` or backtick characters.
+Only if the first pass finds no match, the second reads the quote as Markdown with GFM: it joins
+text and inline-code values in document order, uses a space for a hard line break and ignores
+HTML nodes, then applies the same NFC and whitespace normalization to that plain text.
+Each pass skips an empty normalized quote; the first block whose normalized text contains the
+normalized quote wins, case-sensitively. No match emits no `blockId`, leaving the usual topic or
+section fallback (and no jump for an unmatched quote alone). Quotes are matching hints, not
+rendered Markdown, and do not contribute to `writeupEmpty` or the Markdown byte sums.
 A thirteenth item is refused with `at most 12 newInRevision items`; the CLI reports
 `invalid publish manifest: writeup.newInRevision (at most 12 items)`.
 For an invalid section the CLI reports `writeup.newInRevision.<index>.section (overview, tldr, whyItMatters, checked, notChecked, outOfScope, whereToLook, context, decisions or glossary)`.

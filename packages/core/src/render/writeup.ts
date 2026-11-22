@@ -10,6 +10,9 @@ import {
   type TopicMeta,
   type WriteupInput,
 } from "@emend/contract";
+import remarkGfm from "remark-gfm";
+import remarkParse from "remark-parse";
+import { unified } from "unified";
 import type { DocLinks } from "../links.ts";
 import type { Block } from "./blocks.ts";
 import { type RenderEffects, renderMarkdownWithBudget } from "./markdown.ts";
@@ -32,6 +35,22 @@ const unwrittenDecisions =
   "Decisions and drift: not written. Only the session where the change was asked for can tell what drifted from it.";
 
 const escapeMarkdown = (text: string) => text.replace(/[!-/:-@[-`{-~]/g, "\\$&");
+
+const quoteParser = unified().use(remarkParse).use(remarkGfm);
+
+function normalizeMarkdownQuote(quote: string): string {
+  const tree = quoteParser.parse(quote);
+  const parts: string[] = [];
+  const pending: (typeof tree | (typeof tree.children)[number])[] = [tree];
+  while (pending.length) {
+    const node = pending.pop();
+    if (!node) break;
+    if (node.type === "text" || node.type === "inlineCode") parts.push(node.value);
+    else if (node.type === "break") parts.push(" ");
+    else if ("children" in node) pending.push(...node.children.toReversed());
+  }
+  return normalizeText(parts.join(""));
+}
 
 function reviewMarkdown(review: ReviewVerdict, topics: TopicMeta[]): string {
   let verdict = review.level === "skim" ? "Skim, then merge." : "Read everything.";
@@ -224,12 +243,6 @@ export async function renderWriteup(
     await append(`t-${topic.slug}-example`, `${topic.title} — Example`, content.example, topic.slug);
     await append(`t-${topic.slug}-body`, `${topic.title} — Details`, content.body, topic.slug);
   }
-  const normalizeQuote = (text: string) =>
-    text
-      .normalize("NFC")
-      .replace(/[*_`]/g, "")
-      .replace(/[\p{White_Space}]+/gu, " ")
-      .trim();
   const newInRevision = newsItems.map(({ item, blockIds }) => {
     let blockId: string | undefined;
     if (item.quote !== undefined) {
@@ -241,10 +254,10 @@ export async function renderWriteup(
           return item.section === undefined || section.key === item.section;
         })
         .flatMap((section) => section.blocks);
-      for (const normalize of [normalizeText, normalizeQuote]) {
+      for (const normalize of [normalizeText, normalizeMarkdownQuote]) {
         const quote = normalize(item.quote);
         if (!quote) continue;
-        blockId = candidates.find((block) => normalize(block.text).includes(quote))?.id;
+        blockId = candidates.find((block) => normalizeText(block.text).includes(quote))?.id;
         if (blockId !== undefined) break;
       }
     }
