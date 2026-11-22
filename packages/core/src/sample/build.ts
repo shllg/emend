@@ -92,6 +92,8 @@ export async function buildSampleView(): Promise<SampleView> {
     });
   const anchors = [
     ...writeup.sections
+      // The reader never shows the verdict section.
+      .filter((section) => section.key !== "review")
       .flatMap((section) => section.blocks)
       .filter((block) => block.kind === "paragraph")
       .slice(0, 4)

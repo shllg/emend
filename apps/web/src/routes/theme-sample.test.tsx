@@ -384,6 +384,10 @@ test("every theme token is carried by a rendered emend element", async () => {
       ),
     ).toBe(true),
   );
+  // Pick a topic: the current diff topic carries topic-line, and Happy DOM reports no scroll position.
+  const outline = screen.getByRole("navigation", { name: "Writeup outline" });
+  fireEvent.click(within(outline).getByRole("button", { name: /Deliver a parcel/ }));
+  await waitFor(() => expect(document.querySelector('.em-topic[aria-current="true"]')).not.toBeNull());
   const used = collectSampleTokens(document, sample);
   const noElement = new Set<string>(TOKENS_NO_ELEMENT_USES);
   expect(
