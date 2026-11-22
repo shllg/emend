@@ -366,7 +366,7 @@ export function usePlacePin() {
       });
     },
     onSettled: (_data, error, { reviewId }) => {
-      // Announce acceptance (or the error) without waiting for a possibly slow refetch.
+      // Settle promptly; the pin list waits for placements and this refetch before announcing the saved place.
       void client.invalidateQueries({
         queryKey: ["inbox"],
         // An earlier success must not undo the next queued move's optimistic order.

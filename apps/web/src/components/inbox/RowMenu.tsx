@@ -166,7 +166,14 @@ function RowActions({
   const { reviewId } = useParams({ strict: false });
   const phone = useLayout() === "phone";
   const pinOrder = usePinOrder();
-  const moves = request.inPinnedList ? pinOrder?.actions.movesFor(item.id) : undefined;
+  const [menuMoves, setMenuMoves] = useState(() => ({
+    request,
+    moves: request.inPinnedList ? pinOrder?.actions.movesFor(item.id) : undefined,
+  }));
+  // Keep each focused move's identity until the next menu request; its neighbour stays live.
+  if (menuMoves.request !== request)
+    setMenuMoves({ request, moves: request.inPinnedList ? pinOrder?.actions.movesFor(item.id) : undefined });
+  const { moves } = menuMoves;
   const [resumeOpen, setResumeOpen] = useState(false);
   const sending = useSyncExternalStore(subscribeDrafts, () => isReviewSending(item.id));
   const canResume =
@@ -198,11 +205,15 @@ function RowActions({
     howToResume: phone ? undefined : { disabled: !canResume || sending, onSelect: () => setResumeOpen(true) },
   });
   const items = actions.items.flatMap<MenuItem>((item) => {
-    if (!("label" in item) || item.label !== "Unpin") return [item];
+    if (!("label" in item) || (item.label !== "Unpin" && item.label !== "Pin")) return [item];
     return [
       item,
-      ...(moves?.up ? [{ label: "Move up", icon: ArrowUp, onSelect: moves.up }] : []),
-      ...(moves?.down ? [{ label: "Move down", icon: ArrowDown, onSelect: moves.down }] : []),
+      ...(moves?.up
+        ? [{ label: "Move up", icon: ArrowUp, onSelect: () => pinOrder?.actions.move(request.reviewId, "up") }]
+        : []),
+      ...(moves?.down
+        ? [{ label: "Move down", icon: ArrowDown, onSelect: () => pinOrder?.actions.move(request.reviewId, "down") }]
+        : []),
     ];
   });
   const returnFocus = {

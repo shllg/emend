@@ -280,7 +280,10 @@ export function Inbox({
             </Button>
           </div>
         )}
-        <PinOrderProvider rows={sections.find((section) => section.list === "pinned" && section.expanded)?.rows ?? []}>
+        <PinOrderProvider
+          rows={sections.find((section) => section.list === "pinned" && section.expanded)?.rows ?? []}
+          source={query.data}
+        >
           <RowMenuProvider>
             {query.data &&
               sections.map(({ key, list, title, count, rows, nothingActive, expanded, group, empty, unloaded }) => {

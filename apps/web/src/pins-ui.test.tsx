@@ -528,23 +528,55 @@ test("a single pin has neither move", async () => {
   expect(menu.queryByRole("menuitem", { name: "Move down" })).toBeNull();
 });
 
-test("an open pin menu follows the order from a fresh inbox response", async () => {
+test("an open pin menu keeps its moves until reopened after a fresh inbox response", async () => {
   orderedPins();
   mount();
   await screen.findByRole("region", { name: "Pinned" });
   const row = within(pinnedRegion()).getByRole("link", { name: /Item 2/ });
   const menu = within(await pinMenu(row));
+  expect(menu.getByRole("menuitem", { name: "Move up" })).toBeTruthy();
   expect(menu.getByRole("menuitem", { name: "Move down" })).toBeTruthy();
-  items = items.map((row) => ({ ...row, pinOrder: [id(3), id(1), id(2)].indexOf(row.id) + 1 }));
+  items = items.map((row) => ({ ...row, pinOrder: [id(2), id(1), id(3)].indexOf(row.id) + 1 }));
   await act(async () => {
     await client.invalidateQueries({ queryKey: ["inbox"] });
   });
-  await waitFor(() => {
-    expect(shownPins()).toEqual([3, 1, 2].map(id));
-    expect(menu.queryByRole("menuitem", { name: "Move down" })).toBeNull();
-  });
+  await waitFor(() => expect(shownPins()).toEqual([2, 1, 3].map(id)));
   expect(menu.getByRole("menuitem", { name: "Move up" })).toBeTruthy();
+  expect(menu.getByRole("menuitem", { name: "Move down" })).toBeTruthy();
+  fireEvent.click(menu.getByRole("menuitem", { name: "Move up" }));
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
   expect(placeWrites()).toHaveLength(0);
+  expect(shownPins()).toEqual([2, 1, 3].map(id));
+  const reopened = within(await pinMenu(row));
+  expect(reopened.queryByRole("menuitem", { name: "Move up" })).toBeNull();
+  expect(reopened.getByRole("menuitem", { name: "Move down" })).toBeTruthy();
+});
+
+test("a focused Move up keeps its identity when a fresh inbox response puts the pin first", async () => {
+  orderedPins();
+  mount();
+  await screen.findByRole("region", { name: "Pinned" });
+  const row = within(pinnedRegion()).getByRole("link", { name: /Item 2/ });
+  const menu = within(await pinMenu(row, "F10"));
+  const moveUp = menu.getByRole("menuitem", { name: "Move up" });
+  const menuItems = menu.getAllByRole("menuitem").filter((item) => !item.hasAttribute("data-disabled"));
+  await waitFor(() => expect(document.activeElement).toBe(menuItems[0]));
+  for (const item of menuItems.slice(1, menuItems.indexOf(moveUp) + 1)) {
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "ArrowDown" });
+    await waitFor(() => expect(document.activeElement).toBe(item));
+  }
+  expect(document.activeElement).toBe(moveUp);
+  items = items.map((row) => ({ ...row, pinOrder: [id(2), id(1), id(3)].indexOf(row.id) + 1 }));
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["inbox"] });
+  });
+  await waitFor(() => expect(shownPins()).toEqual([2, 1, 3].map(id)));
+  expect(document.activeElement).toBe(moveUp);
+  expect(document.activeElement?.textContent).toBe("Move up");
+  fireEvent.keyDown(moveUp, { key: "Enter" });
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  expect(placeWrites()).toHaveLength(0);
+  expect(shownPins()).toEqual([2, 1, 3].map(id));
 });
 
 test("choosing a move in an open menu uses the fresh neighbour and announces the current place", async () => {
@@ -563,17 +595,44 @@ test("choosing a move in an open menu uses the fresh neighbour and announces the
   await waitFor(() => expect(document.activeElement).toBe(row));
 });
 
-test("an open pin menu loses its moves when the row is no longer shown in Pinned", async () => {
+test.each(["up", "down"])(
+  "an open pin menu keeps its moves but Move %s does nothing when the filter hides the pin",
+  async (direction) => {
+    orderedPins();
+    mount();
+    await screen.findByRole("region", { name: "Pinned" });
+    const menu = within(await pinMenu(within(pinnedRegion()).getByRole("link", { name: /Item 2/ })));
+    fireEvent.change(screen.getByRole("textbox", { name: "Filter reviews" }), { target: { value: "Item 1" } });
+    expect(shownPins()).toEqual([id(1)]);
+    expect(menu.getByRole("menuitem", { name: "Unpin" })).toBeTruthy();
+    expect(menu.getByRole("menuitem", { name: "Move up" })).toBeTruthy();
+    expect(menu.getByRole("menuitem", { name: "Move down" })).toBeTruthy();
+    fireEvent.click(menu.getByRole("menuitem", { name: `Move ${direction}` }));
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(placeWrites()).toHaveLength(0);
+    expect(shownPins()).toEqual([id(1)]);
+    expect(pinStatus().textContent).toBe("");
+    fireEvent.change(screen.getByRole("textbox", { name: "Filter reviews" }), { target: { value: "" } });
+    expect(shownPins()).toEqual([1, 2, 3].map(id));
+  },
+);
+
+test("an open pin menu keeps its moves but sends no placement after the row is unpinned elsewhere", async () => {
   orderedPins();
   mount();
   await screen.findByRole("region", { name: "Pinned" });
   const menu = within(await pinMenu(within(pinnedRegion()).getByRole("link", { name: /Item 2/ })));
-  fireEvent.change(screen.getByRole("textbox", { name: "Filter reviews" }), { target: { value: "Item 1" } });
-  expect(shownPins()).toEqual([id(1)]);
-  expect(menu.getByRole("menuitem", { name: "Unpin" })).toBeTruthy();
-  expect(menu.queryByRole("menuitem", { name: "Move up" })).toBeNull();
-  expect(menu.queryByRole("menuitem", { name: "Move down" })).toBeNull();
+  items = items.map((row) => (row.id === id(2) ? { ...row, pinnedAt: null, pinOrder: null } : row));
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["inbox"] });
+  });
+  await waitFor(() => expect(shownPins()).toEqual([1, 3].map(id)));
+  expect(menu.getByRole("menuitem", { name: "Move up" })).toBeTruthy();
+  expect(menu.getByRole("menuitem", { name: "Move down" })).toBeTruthy();
+  fireEvent.click(menu.getByRole("menuitem", { name: "Move down" }));
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
   expect(placeWrites()).toHaveLength(0);
+  expect(shownPins()).toEqual([1, 3].map(id));
 });
 
 test.each([
@@ -624,6 +683,52 @@ test("Move up reorders immediately, keeps the row mounted and focused, and annou
   await expectMove(3, { before: id(2) }, [1, 3, 2], "Moved to place 2 of 3");
 });
 
+test("a move announces the server's current place only after the inbox refetch", async () => {
+  orderedPins();
+  mount();
+  await screen.findByRole("region", { name: "Pinned" });
+  await ready();
+  const refetch = Promise.withResolvers<void>();
+  const fallback = fetchMock.getMockImplementation();
+  fetchMock.mockImplementation(async (input, init) => {
+    if (String(input) === "/api/v1/reviews") await refetch.promise;
+    if (!fallback) throw new Error("fetch mock has no default implementation");
+    return fallback(input, init);
+  });
+  items = items.map((row) => ({ ...row, pinOrder: [id(2), id(1), id(3)].indexOf(row.id) + 1 }));
+  expect(shownPins()).toEqual([1, 2, 3].map(id));
+  await movePin(within(pinnedRegion()).getByRole("link", { name: /Item 3/ }), "up");
+  await waitFor(() => {
+    expect(client.isMutating({ mutationKey: ["pin-place"] })).toBe(0);
+    expect(client.isFetching({ queryKey: ["inbox"] })).toBe(1);
+  });
+  expect(placeWrites()[0]?.[1]?.body).toBe(JSON.stringify({ before: id(2) }));
+  expect(shownPins()).toEqual([1, 3, 2].map(id));
+  expect(pinStatus().textContent).toBe("");
+  await act(async () => refetch.resolve());
+  await expectMove(3, { before: id(2) }, [3, 2, 1], "Moved to place 1 of 3");
+});
+
+test("an accepted move makes no announcement if its pin is hidden when the refetch finishes", async () => {
+  orderedPins();
+  const response = Promise.withResolvers<Response | undefined>();
+  placeResponse = response.promise;
+  mount();
+  await screen.findByRole("region", { name: "Pinned" });
+  await movePin(within(pinnedRegion()).getByRole("link", { name: /Item 3/ }), "up");
+  fireEvent.change(screen.getByRole("textbox", { name: "Filter reviews" }), { target: { value: "Item 1" } });
+  await act(async () => response.resolve(undefined));
+  await waitFor(() => {
+    expect(client.isMutating({ mutationKey: ["pin-place"] })).toBe(0);
+    expect(client.isFetching({ queryKey: ["inbox"] })).toBe(0);
+  });
+  expect(shownPins()).toEqual([id(1)]);
+  expect(pinStatus().textContent).toBe("");
+  fireEvent.change(screen.getByRole("textbox", { name: "Filter reviews" }), { target: { value: "" } });
+  expect(shownPins()).toEqual([1, 3, 2].map(id));
+  expect(pinStatus().textContent).toBe("");
+});
+
 test("Move down places after the next pin and repeated announcements replace the live text node", async () => {
   orderedPins();
   mount();
@@ -653,6 +758,7 @@ test("quick moves are optimistic together and reach the server one at a time, in
   placeResponse = second.promise;
   await act(async () => first.resolve(undefined));
   await waitFor(() => expect(placeWrites()).toHaveLength(2));
+  expect(pinStatus().textContent).toBe("");
   expect(placeWrites().map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
     { before: id(2) },
     { before: id(1) },
@@ -668,6 +774,26 @@ test("quick moves are optimistic together and reach the server one at a time, in
   expect(fetchMock.mock.calls.filter(([path]) => path === "/api/v1/reviews")).toHaveLength(inboxReads);
   await act(async () => second.resolve(undefined));
   await expectMove(3, { before: id(1) }, [3, 1, 2], "Moved to place 1 of 3");
+});
+
+test("queued moves of different pins announce only the latest accepted move", async () => {
+  orderedPins();
+  const first = Promise.withResolvers<Response | undefined>();
+  const second = Promise.withResolvers<Response | undefined>();
+  placeResponse = first.promise;
+  mount();
+  await screen.findByRole("region", { name: "Pinned" });
+  await movePin(within(pinnedRegion()).getByRole("link", { name: /Item 3/ }), "up");
+  await waitFor(() => expect(shownPins()).toEqual([1, 3, 2].map(id)));
+  await movePin(within(pinnedRegion()).getByRole("link", { name: /Item 1/ }), "down");
+  await waitFor(() => expect(shownPins()).toEqual([3, 1, 2].map(id)));
+  expect(placeWrites()).toHaveLength(1);
+  placeResponse = second.promise;
+  await act(async () => first.resolve(undefined));
+  await waitFor(() => expect(placeWrites()).toHaveLength(2));
+  expect(pinStatus().textContent).toBe("");
+  await act(async () => second.resolve(undefined));
+  await expectMove(1, { after: id(3) }, [3, 1, 2], "Moved to place 2 of 3");
 });
 
 test("a new pin joins below the reordered pins", async () => {
@@ -860,12 +986,9 @@ test.each(["page", "pane", "tablet sheet"])(
     expect(fireEvent.dragStart(row)).toBe(false);
     pointer(row, "pointerup", { clientY: 110 });
     expect(fireEvent.click(row, { detail: 1 })).toBe(false);
-    await waitFor(() => expect(client.isMutating()).toBe(0));
-    expect(placeWrites()[0]?.[1]?.body).toBe(JSON.stringify({ before: id(1) }));
+    await expectMove(3, { before: id(1) }, [3, 1, 2], "Moved to place 1 of 3");
     if (surface === "tablet sheet") expect(screen.getByRole("dialog", { name: "Inbox" })).toBeTruthy();
-    expect(shownPins()).toEqual([3, 1, 2].map(id));
     expect(pinLinks()[0]).toBe(row);
-    expect(pinStatus().textContent).toBe("Moved to place 1 of 3");
     expect(document.body.classList.contains("em-pin-dragging")).toBe(false);
     expect(history.location.pathname).toBe(surface === "page" ? "/" : `/r/${id(1)}`);
   },
