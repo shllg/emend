@@ -117,7 +117,9 @@ export function ReadingGroup({
         id={headingId}
         className={
           group.presentation === "facts"
-            ? "sr-only"
+            ? group.factGroups?.length === 1
+              ? "em-writeup-kicker"
+              : "sr-only"
             : group.topic
               ? "em-topic-title"
               : group.presentation && group.presentation !== "glossary" && group.presentation !== "pair"
@@ -153,6 +155,7 @@ export function ReadingGroup({
       ref={root}
       id={group.id}
       data-reading-section={group.key}
+      data-depth-layer={group.layer}
       aria-labelledby={group.labelledBy ?? headingId}
       className={`em-reading-group${group.topic ? " em-topic-section" : ""}${group.presentation ? presentationClasses[group.presentation] : ""}`}
     >

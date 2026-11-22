@@ -3462,6 +3462,42 @@ test("R1.1 existing topic hashes still scroll to their section", async () => {
   await waitFor(() => expect(scroll.mock.instances).toContain(section));
 });
 
+test("phone topic links align the section start while block links stay centered", async () => {
+  width = 390;
+  const blockId = "t-seed-body-12345678";
+  currentRevision.writeup.sections.unshift({
+    key: "overview",
+    label: "Overview",
+    topic: null,
+    blocks: [
+      {
+        id: "overview-12345678",
+        section: "overview",
+        kind: "paragraph",
+        text: "Read detail",
+        html: `<p><a href="/r/${id}?tab=writeup&amp;rev=1#block-${blockId}">Read detail</a></p>`,
+      },
+    ],
+  });
+  const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+  mount();
+  const heading = await screen.findByRole("heading", { name: "Topic 1: Plant a seed" });
+  const section = heading.closest("section");
+  fireEvent.click(screen.getByRole("link", { name: "Plant a seed" }));
+  await waitFor(() => {
+    const index = scroll.mock.instances.indexOf(section);
+    expect(index).toBeGreaterThanOrEqual(0);
+    expect(scroll.mock.calls[index]).toEqual([{ block: "start" }]);
+  });
+  scroll.mockClear();
+  fireEvent.click(screen.getByRole("link", { name: "Read detail" }));
+  await waitFor(() => {
+    const index = scroll.mock.instances.indexOf(document.getElementById(`block-${blockId}`));
+    expect(index).toBeGreaterThanOrEqual(0);
+    expect(scroll.mock.calls[index]).toEqual([{ block: "center" }]);
+  });
+});
+
 test("R2.1 Alt-click leaves the doc link to the browser", async () => {
   navigationDocs();
   const open = vi.spyOn(window, "open").mockReturnValue(null);

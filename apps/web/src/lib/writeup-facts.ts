@@ -50,28 +50,6 @@ function agentPart(text: string): FactPart {
   return { text: text.replace(/[\p{Cc}\u2028\u2029]/gu, " ").replace(/\p{Bidi_Control}/gu, ""), agent: true };
 }
 
-export function topicsFact(topics: TopicMeta[]): FactPart[] | undefined {
-  const ranked = rankedTopics(topics).map(({ topic }) => topic);
-  const parts: FactPart[] = [];
-  for (const [attention, label] of [
-    ["critical", "High"],
-    ["review", "Medium"],
-  ] as const) {
-    const matching = ranked.filter((topic) => topic.attention === attention);
-    if (!matching.length) continue;
-    if (parts.length) parts.push({ text: "; " });
-    parts.push({ text: `${label}: ` });
-    for (const [index, topic] of matching.slice(0, 3).entries()) {
-      if (index) parts.push({ text: ", " });
-      parts.push(agentPart(topic.title));
-    }
-    if (matching.length > 3) parts.push({ text: ` and ${matching.length - 3} more` });
-  }
-  const low = ranked.filter((topic) => topic.attention === "skim").length;
-  if (low) parts.push({ text: `${parts.length ? "; and " : ""}${low} Low` });
-  return parts.length ? parts : undefined;
-}
-
 function undoText(text: string): string | undefined {
   const normalized = text.replace(/\s+/gu, " ").trim();
   for (let index = normalized.indexOf("Undo:"); index !== -1; index = normalized.indexOf("Undo:", index + 5)) {

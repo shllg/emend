@@ -69,9 +69,9 @@ beforeEach(() => {
   positions = new Map([
     ["overview", 26],
     ["tldr", 400],
-    ["decisions", 800],
-    ["glossary", 1200],
-    ["t-seed-why", 1600],
+    ["t-seed-why", 800],
+    ["decisions", 1200],
+    ["glossary", 1600],
   ]);
   let frameId = 0;
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -512,9 +512,9 @@ test("outline has one row per section, topic ranks and placed thread counts", ()
   expect(outline.getAllByRole("button").map((row) => row.textContent)).toEqual([
     "Overview2 comments",
     "TL;DR",
+    "01Plant a seed1 comment",
     "Decisions & drift",
     "Glossary",
-    "01Plant a seed1 comment",
   ]);
   expect(outline.getByRole("button", { name: "Overview 2 comments" }).getAttribute("aria-current")).toBe("location");
   expect(screen.getAllByRole("heading", { name: "Topic 1: Plant a seed" })).toHaveLength(1);
@@ -578,7 +578,7 @@ test("one header observer follows the current section without measuring every sc
   const observer = observers.at(-1);
   expect(observers).toHaveLength(1);
   expect(observer?.options?.root).toBe(screen.getByTestId("scroll"));
-  expect(observer?.elements.map((node) => node.tagName)).toEqual(["H2", "H2", "H2", "SUMMARY", "H2"]);
+  expect(observer?.elements.map((node) => node.tagName)).toEqual(["H2", "H2", "H2", "H2", "SUMMARY"]);
   const outline = within(screen.getByRole("navigation", { name: "Writeup outline" }));
   positions.set("t-seed-why", -10);
   act(() => observer?.callback());
@@ -792,16 +792,16 @@ test("at the bottom, a short final section is current without rect reads on ever
   const pane = screen.getByTestId("scroll");
   positions.set("overview", -700);
   positions.set("tldr", -500);
-  positions.set("decisions", -300);
-  positions.set("glossary", -100);
-  positions.set("t-seed-why", 450);
+  positions.set("t-seed-why", -300);
+  positions.set("decisions", -100);
+  positions.set("glossary", 450);
   act(() => observers.at(-1)?.callback());
   const outline = within(screen.getByRole("navigation", { name: "Writeup outline" }));
-  expect(outline.getByRole("button", { name: "Glossary" }).getAttribute("aria-current")).toBe("location");
+  expect(outline.getByRole("button", { name: "Decisions & drift" }).getAttribute("aria-current")).toBe("location");
   pane.scrollTop = 1400;
   fireEvent.scroll(pane);
   flushFrames();
-  expect(outline.getByRole("button", { name: "Plant a seed" }).getAttribute("aria-current")).toBe("location");
+  expect(outline.getByRole("button", { name: "Glossary" }).getAttribute("aria-current")).toBe("location");
   const bounds = vi.mocked(HTMLElement.prototype.getBoundingClientRect);
   bounds.mockClear();
   fireEvent.scroll(pane);
@@ -810,7 +810,7 @@ test("at the bottom, a short final section is current without rect reads on ever
   pane.scrollTop = 1200;
   fireEvent.scroll(pane);
   flushFrames();
-  expect(outline.getByRole("button", { name: "Glossary" }).getAttribute("aria-current")).toBe("location");
+  expect(outline.getByRole("button", { name: "Decisions & drift" }).getAttribute("aria-current")).toBe("location");
 });
 
 test("a phone reply draft survives resizing into a desktop popover", async () => {
@@ -917,9 +917,9 @@ test("a writeup that fits the pane keeps its first section current on scroll", (
   vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(600);
   positions.set("overview", 26);
   positions.set("tldr", 140);
-  positions.set("decisions", 240);
-  positions.set("glossary", 340);
-  positions.set("t-seed-why", 450);
+  positions.set("t-seed-why", 240);
+  positions.set("decisions", 340);
+  positions.set("glossary", 450);
   mount();
   const outline = within(screen.getByRole("navigation", { name: "Writeup outline" }));
   const overview = outline.getByRole("button", { name: "Overview 1 comment" });

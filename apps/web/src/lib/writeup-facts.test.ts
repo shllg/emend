@@ -1,7 +1,7 @@
 import { type FileView, type RenderedBlock, RenderedWriteup, type RevisionView, type TopicMeta } from "@emend/contract";
 import { expect, test } from "vitest";
 import { renderWriteup } from "../../../../packages/core/src/render/writeup.ts";
-import { type FactPart, labelledFact, sinceFact, topicsFact, undoFact, usesOpeningCard } from "./writeup-facts.ts";
+import { type FactPart, labelledFact, sinceFact, undoFact, usesOpeningCard } from "./writeup-facts.ts";
 
 const factText = (parts: FactPart[] | undefined) => parts?.map((part) => part.text).join("");
 
@@ -188,35 +188,6 @@ test("mixed-case Goal and change lines stay together in Overview", async () => {
 
 test("label lift leaves an empty section empty", async () => {
   expect(labelledFact(await renderedFactBlocks(""), "Biggest risk")).toBeUndefined();
-});
-
-test("Topics lists High then Medium in ranked order, caps each level and counts Low", () => {
-  const topics = [
-    topic("low", "skim"),
-    topic("medium", "review"),
-    ...["third", "first", "second", "fourth", "fifth"].map((slug) => topic(slug, "critical")),
-    ...["next", "last", "extra"].map((slug) => topic(slug, "review")),
-    topic("another-low", "skim"),
-  ];
-  expect(factText(topicsFact(topics))).toBe(
-    "High: third, first, second and 2 more; Medium: medium, next, last and 1 more; and 2 Low",
-  );
-  expect(factText(topicsFact([topic("first", "skim"), topic("second", "skim")]))).toBe("2 Low");
-  expect(factText(topicsFact([topic("medium", "review"), topic("low", "skim")]))).toBe("Medium: medium; and 1 Low");
-  expect(factText(topicsFact([topic("high", "critical"), topic("medium", "review")]))).toBe(
-    "High: high; Medium: medium",
-  );
-  expect(topicsFact([])).toBeUndefined();
-  expect(topicsFact([topic("unknown")])).toBeUndefined();
-  expect(topicsFact([topic("other", "skim")])).toBeUndefined();
-});
-
-test("Topics keeps hostile titles literal and isolates them after cleaning control and bidi characters", () => {
-  const title = "<img src=x onerror=alert(1)>\u0000\u2069\u202eSeed";
-  expect(topicsFact([{ ...topic("seed", "critical"), title }])).toEqual([
-    { text: "High: " },
-    { text: "<img src=x onerror=alert(1)> Seed", agent: true },
-  ]);
 });
 
 test("Undo chooses the hardest ranked topic, with stable ties and one-way fallback", () => {
@@ -533,7 +504,6 @@ test.each([
 ])("agent fact parts strip %s while preserving isolated text", (_label, controls) => {
   const title = `Docs${controls}`;
   const topics = [{ ...topic("retry", "critical"), title }];
-  expect(topicsFact(topics)).toEqual([{ text: "High: " }, { text: "Docs", agent: true }]);
   expect(undoFact({ sections: [section("t-retry-why", `Undo: Restore state${controls}`, "retry")] }, topics)).toEqual([
     { text: "Restore state", agent: true },
     { text: " (" },
@@ -562,7 +532,6 @@ test.each(["\u2029", "\u0085", "\u001c", "\u001d", "\u001e", "\u2028", "\n", "\t
   "agent fact parts replace separator or control %j before stripping bidi controls",
   (separator) => {
     const topics = [{ ...topic("retry", "critical"), title: `Retry${separator}\u2069\u202e12` }];
-    expect(topicsFact(topics)).toEqual([{ text: "High: " }, { text: "Retry 12", agent: true }]);
     expect(undoFact(empty, [{ ...(topics[0] as TopicMeta), door: "one-way" }])).toEqual([
       { text: "A revert is not enough" },
       { text: " (" },
