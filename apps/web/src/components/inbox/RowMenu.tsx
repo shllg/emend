@@ -1,6 +1,7 @@
 import type { InboxItem } from "@emend/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
+import { ArrowDown, ArrowUp } from "lucide-react";
 import {
   createContext,
   type KeyboardEvent,
@@ -20,10 +21,12 @@ import { isReviewSending, subscribeDrafts } from "../../lib/drafts.ts";
 import { useLayout } from "../../lib/layout.ts";
 import { ResumeDialog, showsHandOver } from "../send/HandOver.tsx";
 import { ReviewActionDialogs, useReviewActions } from "../send/ReviewActions.tsx";
-import { AnchoredMenu } from "../ui/Menu.tsx";
+import { AnchoredMenu, type MenuItem } from "../ui/Menu.tsx";
+import { usePinOrder } from "./PinOrder.tsx";
 
 export interface RowMenuRequest {
   reviewId: string;
+  inPinnedList?: boolean;
   via: "keyboard" | "pointer";
   anchor: { x: number; y: number; width: number; height: number };
   side?: "bottom" | "right";
@@ -123,11 +126,11 @@ export function useRowMenu(): ((request: RowMenuRequest) => void) | null {
 }
 
 /** Handlers for the row's focusable element; moved rows keep the browser menu. */
-export function useRowMenuTrigger(review: InboxItem, options?: { side?: "bottom" | "right" }) {
+export function useRowMenuTrigger(review: InboxItem, options?: { side?: "bottom" | "right"; inPinnedList?: boolean }) {
   const open = useRowMenu();
   if (!open || review.movedTo) return undefined;
   const show = (row: HTMLElement, anchor: RowMenuRequest["anchor"], via: RowMenuRequest["via"]) =>
-    open({ reviewId: review.id, row, anchor, via, side: options?.side });
+    open({ reviewId: review.id, row, anchor, via, side: options?.side, inPinnedList: options?.inPinnedList });
   return {
     onContextMenu(event: MouseEvent<HTMLElement>) {
       event.preventDefault();
@@ -162,6 +165,15 @@ function RowActions({
   const navigate = useNavigate();
   const { reviewId } = useParams({ strict: false });
   const phone = useLayout() === "phone";
+  const pinOrder = usePinOrder();
+  const [menuMoves, setMenuMoves] = useState(() => ({
+    request,
+    moves: request.inPinnedList ? pinOrder?.actions.movesFor(item.id) : undefined,
+  }));
+  // Keep each focused move's identity until the next menu request; its neighbour stays live.
+  if (menuMoves.request !== request)
+    setMenuMoves({ request, moves: request.inPinnedList ? pinOrder?.actions.movesFor(item.id) : undefined });
+  const { moves } = menuMoves;
   const [resumeOpen, setResumeOpen] = useState(false);
   const sending = useSyncExternalStore(subscribeDrafts, () => isReviewSending(item.id));
   const canResume =
@@ -192,6 +204,18 @@ function RowActions({
     unsentCount: item.unsentCount,
     howToResume: phone ? undefined : { disabled: !canResume || sending, onSelect: () => setResumeOpen(true) },
   });
+  const items = actions.items.flatMap<MenuItem>((item) => {
+    if (!("label" in item) || (item.label !== "Unpin" && item.label !== "Pin")) return [item];
+    return [
+      item,
+      ...(moves?.up
+        ? [{ label: "Move up", icon: ArrowUp, onSelect: () => pinOrder?.actions.move(request.reviewId, "up") }]
+        : []),
+      ...(moves?.down
+        ? [{ label: "Move down", icon: ArrowDown, onSelect: () => pinOrder?.actions.move(request.reviewId, "down") }]
+        : []),
+    ];
+  });
   const returnFocus = {
     get current() {
       return rowToFocus(request);
@@ -207,7 +231,7 @@ function RowActions({
         side={request.side}
         align={request.align}
         size={phone ? "lg" : "md"}
-        items={actions.items}
+        items={items}
         focusFirstItem={request.via === "keyboard"}
         returnFocus={() => returnFocus.current}
       />

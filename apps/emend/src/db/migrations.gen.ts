@@ -329,5 +329,13 @@ export const MIGRATIONS: readonly { tag: string; when: number; hash: string; sta
     "statements": [
       "ALTER TABLE `files` ADD `parts` text;"
     ]
+  },
+  {
+    "tag": "0026_dazzling_mephisto",
+    "when": 1795297575795,
+    "hash": "1dd9dd96cc1f53a1af38236a34c4153a0a092306e3a443c9aa340bbb794d1fd3",
+    "statements": [
+      "ALTER TABLE `review_pins` ADD `position` integer DEFAULT 0 NOT NULL;"
+    ]
   }
 ];

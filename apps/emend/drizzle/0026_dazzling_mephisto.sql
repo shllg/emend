@@ -1,0 +1,1 @@
+ALTER TABLE `review_pins` ADD `position` integer DEFAULT 0 NOT NULL;

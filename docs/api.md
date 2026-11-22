@@ -107,6 +107,7 @@ a machine token reaches only reviews from its own instance.
 | DELETE | `/api/v1/groups/:id` | Reviewer | Delete a group, returning its items to their normal lists (204). |
 | PUT | `/api/v1/reviews/:id/group` | Reviewer | Move a review or pub into a group, or remove it (204). |
 | PUT | `/api/v1/reviews/:id/pin` | Reviewer | Pin or unpin a review or pub (204). |
+| PUT | `/api/v1/reviews/:id/pin/place` | Reviewer | Move a pin directly before or after another pin (204). |
 | GET | `/api/v1/agent/reviews` | Agent | List the token's own instance's reviews, newest first, as `AgentReviewList`; `?head=<sha>` keeps those whose approved or newest revision has that head; `?key=<key>` keeps the review with that stored review key. |
 | GET | `/api/v1/reviews/:id` | Reviewer | Read a review. |
 | GET | `/api/v1/reviews/:id/revisions/:seq` | Reviewer | Read one revision. |
@@ -884,10 +885,12 @@ retired review; clients label it "Retired".
 state: ReviewState, newestRevision, unsentCount, openThreads, agentWaiting, pendingSend,
 updatedAt, movedTo: string | null, list: "active" | "snoozed" | "done", snoozed: boolean,
 snoozedUntil: string | null, activeUntil: string | null, releasedAt: string | null, pickedUpAt: string | null,
-kind: "review" | "publish", groupId: string | null, pinnedAt: string | null }`.
+kind: "review" | "publish", groupId: string | null, pinnedAt: string | null, pinOrder: number | null }`.
 `groupId` is the inbox group UUID, null when ungrouped (the default when omitted).
 `pinnedAt` is when the reviewer pinned it, as an ISO 8601 UTC string, null when unpinned or moved
-(the default when omitted). `repo` is the repository key, and
+(the default when omitted).
+`pinOrder` is the pin's place key, a nonnegative integer, null when unpinned or moved (the default when omitted).
+`repo` is the repository key, and
 `movedTo` is the review's destination URL. `list` places the review: `done` for `settled`, and for
 `approved` once the effective `approvedActiveHours` have passed since approval or it does not fit
 Active's approval cap or total cap; an approved review is `active` until then if it has a place.
@@ -967,7 +970,8 @@ has at most `pins` (50) live pins.
 The approval cap still applies: a pinned approval without an Active place is in Done.
 Moved reviews show as unpinned. The response carries each review once, at most 850 rows in all.
 Clients show a pinned review in Pinned, and also in its own section unless that section is Active.
-Pinned is oldest pin first (pin time, then id ascending).
+Pinned is ordered by `pinOrder`, then pin time, then id ascending.
+Pins made before `pinOrder` existed have 0 and keep oldest first above later pins.
 A grouped review's `list` and `activeUntil` follow the single-review rule below
 (approval window alone, no caps); clients place it by `groupId`.
 `GET /api/v1/reviews/:id` returns `ReviewView = InboxItem & { revisions: { seq, createdAt }[], importedAt: string | null }`,
@@ -1636,7 +1640,7 @@ object construction (when Zod captures this setting), so validation never probes
 `Function` under the app CSP. The normal contract index also exports the function.
 
 `Capabilities = { api: 1, version: string, features: string[] }`. The current feature list is
-`["attach", "html-docs", "mcp", "review-lifecycle", "review-bin", "review-groups", "review-pins", "agent-review-key"]`,
+`["attach", "html-docs", "mcp", "review-lifecycle", "review-bin", "review-groups", "review-pins", "review-pin-order", "agent-review-key"]`,
 plus `server-stop` when the server supports stopping through the API; clients accept additional feature strings.
 
 `PairingPurpose = "device" | "machine"`. `PairingRequest = { purpose? }` defaults to `"device"`.
@@ -2290,9 +2294,12 @@ Capabilities lists `review-groups` (`REVIEW_GROUPS_FEATURE`).
 bearer, or a reviewer token sent as a bearer, is refused before any lookup. Pins belong to the
 reviewer's owner on this server and are shared across that owner's devices.
 The body `ReviewPinRequest = { pinned: boolean }` is strict (unknown fields give
-`400 invalid_request`); success returns 204. `pinned: true` pins a review or pub at the bottom
-of Pinned; pinning a pinned review keeps its pin time. `pinned: false` removes the pin;
-unpinning an unpinned review is a 204 no-op.
+`400 invalid_request`); success returns 204.
+`pinned: true` gives a new pin the next `pinOrder` after every pin the owner has, bin and moved
+pins included, so it joins at the bottom of Pinned.
+Pinning a pinned review keeps its pin time and `pinOrder`.
+`pinned: false` removes the pin.
+Unpinning an unpinned review is a 204 no-op.
 
 A missing or foreign review is `404 unknown_review`; a malformed path UUID is 404.
 A binned review is `409 review_in_bin`. Pin and unpin of a moved review are `409 review_moved`.
@@ -2301,14 +2308,34 @@ with the message "You have the most pins allowed, pins in the bin included. Unpi
 Each write runs in one transaction and emits a `pins` event `{ reviewId }` after commit;
 owner-wide streams and that review's streams receive it.
 
+`PUT /reviews/:id/pin/place` uses `/api/v1` and scope `send`, reviewer-only.
+An agent or admin bearer, or a reviewer token sent as a bearer, is refused before any lookup.
+The body `ReviewPinPlaceRequest = { before: string } | { after: string }` is strict and names a review UUID.
+Both keys, neither key, an extra key or a non-UUID value give `400 invalid_request`.
+It moves the pin directly before or after that other pin and renumbers the owner's pins 1..n in the new order.
+Bin and moved pins are included and keep their relative places.
+An anchor equal to the review itself is a 204 no-op with nothing written.
+Success returns 204.
+A malformed path UUID is `404 not_found`.
+A missing or foreign review is `404 unknown_review`.
+A binned review is `409 review_in_bin`.
+A moved review is `409 review_moved`.
+A missing or foreign anchor gives `404 not_found`, with the same response for both.
+A review that is not pinned, or an owned anchor that is unpinned, binned or moved, gives `409 invalid_state`
+with the message "The pins changed. Check them and try again.".
+Each move runs in one transaction and emits a `pins` event `{ reviewId }` after commit.
+A move changes neither `pinnedAt` nor anything on the review, including its state and `updatedAt`.
+
 A pin changes nothing on the review: no state, snooze, approval or `updatedAt` change.
 It survives new revisions, snooze, retire, approve, reopen, a move to a group and the bin.
-A binned review is in no list; restore brings it back pinned with its old pin time.
-A moved review shows `pinnedAt: null` in the list and single-review view and is in no Pinned section.
+A binned review is in no list.
+Restore brings it back pinned with its old pin time and `pinOrder`.
+A moved review shows `pinnedAt: null` and `pinOrder: null` in the list and single-review view and is in no Pinned section.
 It keeps its pin row but does not count toward `pins`.
 A hard delete removes the pin. Attach/import copies no pins.
 The agent list (`GET /api/v1/agent/reviews`), CLI, MCP and skills do not show pins.
 Capabilities lists `review-pins` (`REVIEW_PINS_FEATURE`).
+Capabilities lists `review-pin-order` (`REVIEW_PIN_ORDER_FEATURE`).
 
 ### Sends, replies and waiting
 

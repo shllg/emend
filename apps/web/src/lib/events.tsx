@@ -24,7 +24,12 @@ export function ReviewEventsProvider({ children, enabled = true }: { children: R
         return;
       }
       if (event.type === "groups" || event.type === "pins") {
-        refreshQueries(client, [["inbox"], event.reviewId ? ["review", event.reviewId] : ["review"]]);
+        const reviewKey = event.reviewId ? ["review", event.reviewId] : ["review"];
+        if (event.type === "pins" && client.isMutating({ mutationKey: ["pin-place"] })) {
+          // The final queued move refetches; an earlier move's event must not erase its optimism.
+          void client.invalidateQueries({ queryKey: ["inbox"], refetchType: "none" });
+          refreshQueries(client, [reviewKey]);
+        } else refreshQueries(client, [["inbox"], reviewKey]);
         return;
       }
       const { reviewId } = event;

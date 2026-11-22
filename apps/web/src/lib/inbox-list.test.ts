@@ -312,6 +312,24 @@ test("palette keeps moved matches and returns nothing for blank queries", () => 
 });
 
 const pinnedAt = "2026-11-04T09:00:00.000Z";
+test("Pinned sorts by pinOrder, pin time and id; legacy zero and null orders precede later pins", () => {
+  const legacyOld = item(5, { pinnedAt: "2026-11-03T09:00:00.000Z", pinOrder: 0 });
+  const legacyNew = item(4, { pinnedAt, pinOrder: 0 });
+  const legacyNull = item(6, { pinnedAt, pinOrder: null });
+  const first = item(3, { pinnedAt, pinOrder: 1 });
+  const earlier = item(7, { pinnedAt: "2026-11-02T09:00:00.000Z", pinOrder: 2 });
+  const lowId = item(1, { pinnedAt, pinOrder: 2 });
+  const highId = item(2, { pinnedAt, pinOrder: 2 });
+  const rows = [highId, first, legacyNew, lowId, earlier, legacyNull, legacyOld];
+  const expected = [legacyOld, legacyNew, legacyNull, first, earlier, lowId, highId];
+  const sections = inboxSections(rows, now);
+  expect(sections[0]?.rows).toEqual(expected);
+  expect(inboxSequence(sections)).toEqual(expected);
+  expect(jumpRows(sections, 10).map(({ row }) => row)).toEqual(expected);
+  expect(matchInboxItems(rows, now, "Item").map(({ item }) => item)).toEqual(expected);
+  expect(rows).toEqual([highId, first, legacyNew, lowId, earlier, legacyNull, legacyOld]);
+});
+
 test("Pinned comes first, ordered by oldest pin then id, and takes pinned Active items out of Active", () => {
   const oldest = item(3, { pinnedAt: "2026-11-03T09:00:00.000Z" });
   const first = item(1, { pinnedAt });

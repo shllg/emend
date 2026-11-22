@@ -90,6 +90,7 @@ export const ENDPOINTS = [
   { method: "DELETE", path: "/api/v1/groups/:id", scope: "send" },
   { method: "PUT", path: "/api/v1/reviews/:id/group", scope: "send" },
   { method: "PUT", path: "/api/v1/reviews/:id/pin", scope: "send" },
+  { method: "PUT", path: "/api/v1/reviews/:id/pin/place", scope: "send" },
   { method: "GET", path: "/api/v1/reviews", scope: "read" },
   { method: "GET", path: "/api/v1/reviews/:id", scope: "read" },
   { method: "GET", path: "/api/v1/reviews/:id/revisions/:seq", scope: "read" },

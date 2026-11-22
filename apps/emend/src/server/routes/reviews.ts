@@ -103,6 +103,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
         review: reviews,
         groupId: reviewGroupMembers.groupId,
         pinnedAt: reviewPins.createdAt,
+        pinOrder: reviewPins.position,
         origin: { id: instances.id, name: instances.name },
         repo: repos.key,
         repoName: repos.name,
@@ -313,7 +314,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
     )
     .groupBy(agentWaiters.reviewId);
   const waitingIds = new Set(directWaits.map((row) => row.reviewId));
-  const items = rows.map(({ review, origin, repo, repoName, newestRevision, groupId, pinnedAt }) => {
+  const items = rows.map(({ review, origin, repo, repoName, newestRevision, groupId, pinnedAt, pinOrder }) => {
     const snoozed = review.state === "open" && snoozeInEffect(review, now);
     const activeUntil =
       approvedActiveHours > 0 &&
@@ -326,6 +327,7 @@ async function inbox(ownerId: string, q: Queries, deps: AppDeps, file: FileSetti
       id: review.id,
       groupId,
       pinnedAt: pinnedAt === null || review.movedToUrl !== null ? null : new Date(pinnedAt).toISOString(),
+      pinOrder: pinnedAt === null || review.movedToUrl !== null ? null : pinOrder,
       title: review.title,
       origin,
       repo,

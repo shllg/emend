@@ -57,6 +57,7 @@ export const InboxItem = z.object({
   list: ReviewList,
   groupId: z.uuid().nullable().default(null),
   pinnedAt: z.iso.datetime().nullable().default(null),
+  pinOrder: z.int().nonnegative().nullable().default(null),
   snoozed: z.boolean(),
   snoozedUntil: z.iso.datetime().nullable(),
   activeUntil: z.iso.datetime().nullable(),

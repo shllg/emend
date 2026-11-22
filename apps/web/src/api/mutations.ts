@@ -3,7 +3,9 @@ import {
   APPROVED_ACTIVE_LIMIT,
   InboxGroup,
   type InboxItem,
+  placePin,
   type RetireRequest,
+  type ReviewPinPlaceRequest,
   type ReviewView,
   type RevisionView,
   type SettingsView,
@@ -21,6 +23,7 @@ import {
   subscribeDrafts,
   trackReviewDraftSave,
 } from "../lib/drafts.ts";
+import { inboxSections } from "../lib/inbox-list.ts";
 import { refreshQueries } from "../lib/query-refresh.ts";
 import { useReadOnlyReview } from "../lib/read-only-review.ts";
 import { viewedState } from "../lib/viewed-state.ts";
@@ -336,5 +339,40 @@ export function usePinReview(reviewId: string) {
         client.invalidateQueries({ queryKey: ["inbox"] }),
         client.invalidateQueries({ queryKey: ["review", reviewId] }),
       ]),
+  });
+}
+
+export function usePlacePin() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationKey: ["pin-place"],
+    scope: { id: "pin-place" },
+    mutationFn: ({ reviewId, place }: { reviewId: string; place: ReviewPinPlaceRequest }) =>
+      change(`/api/v1/reviews/${encodeURIComponent(reviewId)}/pin/place`, "PUT", place),
+    onMutate: async ({ reviewId, place }) => {
+      await client.cancelQueries({ queryKey: ["inbox"] });
+      client.setQueriesData<InboxData>({ queryKey: ["inbox"] }, (data) => {
+        if (!data) return data;
+        const pins = inboxSections(data.items, serverNow(data)).find((section) => section.list === "pinned");
+        const order = placePin(pins?.rows.map((row) => row.id) ?? [], reviewId, place);
+        if (!order) return data;
+        const positions = new Map(order.map((id, index) => [id, index + 1]));
+        return {
+          ...data,
+          items: data.items.map((item) =>
+            positions.has(item.id) ? { ...item, pinOrder: positions.get(item.id) ?? null } : item,
+          ),
+        };
+      });
+    },
+    onSettled: (_data, error, { reviewId }) => {
+      // Settle promptly; the pin list waits for placements and this refetch before announcing the saved place.
+      void client.invalidateQueries({
+        queryKey: ["inbox"],
+        // An earlier success must not undo the next queued move's optimistic order.
+        refetchType: !error && client.isMutating({ mutationKey: ["pin-place"] }) > 1 ? "none" : "active",
+      });
+      void client.invalidateQueries({ queryKey: ["review", reviewId] });
+    },
   });
 }
