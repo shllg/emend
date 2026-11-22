@@ -499,21 +499,24 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   const issueLinks = new WeakMap();
   let repoLinked = false;
   function linkIssues(data) {
-    if (repoLinked || Object.keys(data).length !== 2 || typeof data.url !== "string" || data.url.length > 2048) return;
-    // Same host, segment and URL rules as RepoUrl; a URL parser also checks ports and IPv4 hosts.
-    const match = /^https:\/\/([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::\d{1,5})?)\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)$(?![\s\S])/.exec(data.url);
-    if (!match || [match[2], match[3]].some(part => part === "." || part === "..")) return;
+    if (repoLinked || Object.keys(data).length !== 2 || typeof data.url !== "string") return;
+    // Kept in parity with RepoUrl (packages/contract/src/links.ts) by the bridge tests.
+    if (data.url.length > 2048 || /[\s\p{Cc}\p{Cf}]/u.test(data.url) || !/^https:\/\//i.test(data.url)) return;
     try {
       const url = new window.URL(data.url);
       if (url.protocol !== "https:" || !url.hostname || url.username || url.password || url.search || url.hash ||
-          url.pathname !== "/" + match[2] + "/" + match[3]) return;
+          url.host !== url.host.toLowerCase()) return;
+      const [authority = "", ...path] = data.url.slice("https://".length).split("/");
+      if (!/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::\d{1,5})?$/.test(authority) || path.length !== 2 ||
+          !path.every(part => /^[A-Za-z0-9._-]+$/.test(part) && part !== "." && part !== "..") ||
+          url.pathname !== "/" + path.join("/")) return;
     } catch { return; }
     repoLinked = true;
     const skipped = new Set([...omitted, "a", "code", "pre", "kbd", "samp", "textarea", "title", "button", "select", "option"]);
     const textNodes = [];
     const pending = body() ? [[body()][Symbol.iterator]()] : [];
     let visits = 100000, links = 0;
-    // Collect before splitting: childNodes is live, so mutations must not revisit new text nodes.
+    // Collect before replacing: childNodes is live, so mutations must not revisit new text nodes.
     while (pending.length && visits) {
       const next = pending[pending.length - 1].next();
       if (next.done) { pending.pop(); continue; }
@@ -525,20 +528,28 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     }
     for (const node of textNodes) {
       if (links === 10000) break;
-      let remaining = node, offset = 0;
-      for (const match of textData(node).matchAll(/(?<![\w&/#])#([1-9]\d{0,6})(?!\w)/g)) {
-        const text = dom(window.Text.prototype, "splitText", remaining, match.index - offset);
-        remaining = dom(window.Text.prototype, "splitText", text, match[0].length);
+      const value = textData(node);
+      let fragment, offset = 0;
+      // Kept in parity with linkIssueRefs (packages/core/src/render/issue-refs.ts) by the bridge tests.
+      for (const match of value.matchAll(/(?<![\w&/#])#([1-9]\d{0,6})(?!\w)/g)) {
+        if (!fragment) fragment = dom(window.Document.prototype, "createDocumentFragment", document);
+        if (match.index > offset) dom(window.Node.prototype, "appendChild", fragment,
+          dom(window.Document.prototype, "createTextNode", document, value.slice(offset, match.index)));
         const link = createElement("a");
-        elementCall("setAttribute", link, "href", data.url + "/issues/" + match[1]);
+        elementCall("setAttribute", link, "href", new window.URL(data.url + "/issues/" + match[1]).href);
         elementCall("setAttribute", link, "rel", "noopener noreferrer nofollow");
         elementCall("setAttribute", link, "target", "_blank");
-        dom(window.Node.prototype, "insertBefore", nodeValue("parentNode", text), link, text);
-        dom(window.Node.prototype, "appendChild", link, text);
+        dom(window.Node.prototype, "appendChild", link,
+          dom(window.Document.prototype, "createTextNode", document, match[0]));
+        dom(window.Node.prototype, "appendChild", fragment, link);
         issueLinks.set(link, Number(match[1]));
         offset = match.index + match[0].length;
         if (++links === 10000) break;
       }
+      if (!fragment) continue;
+      if (offset < value.length) dom(window.Node.prototype, "appendChild", fragment,
+        dom(window.Document.prototype, "createTextNode", document, value.slice(offset)));
+      dom(window.Node.prototype, "replaceChild", nodeValue("parentNode", node), fragment, node);
     }
     if (lastAnchors) highlight(lastAnchors);
   }
@@ -1030,7 +1041,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     return { type: "emend:image", images, index };
   }
   listen(document, "click", event => {
-    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (event.defaultPrevented || event.button !== 0) return;
     const path = dom(window.Event.prototype, "composedPath", event);
     const link = path.find(node => node instanceof window.Element && linkHref(node) !== null);
     const issue = link && issueLinks.get(link);
@@ -1039,6 +1050,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       post({ type: "emend:issue", number: issue });
       return;
     }
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     if (!link) {
       const gallery = imageGallery(path.find(node => node instanceof window.Element));
       if (gallery) {
@@ -1083,6 +1095,15 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       }
       post({ type: "emend:navigate", ...destination });
     } catch { /* Malformed URLs keep their normal link behavior. */ }
+  }, true);
+  listen(document, "auxclick", event => {
+    if (event.defaultPrevented || event.button !== 1) return;
+    const path = dom(window.Event.prototype, "composedPath", event);
+    const link = path.find(node => node instanceof window.Element && linkHref(node) !== null);
+    const issue = link && issueLinks.get(link);
+    if (issue === undefined) return;
+    dom(window.Event.prototype, "preventDefault", event);
+    post({ type: "emend:issue", number: issue });
   }, true);
   listen(window, "scroll", onScroll, { passive: true });
   listen(window, "resize", schedulePosition, { passive: true });

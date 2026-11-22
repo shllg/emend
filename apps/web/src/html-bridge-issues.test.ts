@@ -4,6 +4,8 @@ import { runInNewContext } from "node:vm";
 import { RepoUrl } from "@emend/contract";
 import { type Range, Window } from "happy-dom";
 import { afterEach, expect, test, vi } from "vitest";
+import type { HtmlRoot } from "../../../packages/core/src/render/blocks.ts";
+import { linkIssueRefs } from "../../../packages/core/src/render/issue-refs.ts";
 
 const windows: Window[] = [];
 afterEach(async () => {
@@ -62,24 +64,26 @@ function bridge(html: string) {
 
 const repoUrl = "https://github.com/o/r";
 
-test.each([repoUrl, "https://git.example.test:8443/Owner.name/repo_name-1"])(
-  "the bridge links issue text with the checked repository URL %s without changing text",
-  (url) => {
-    expect(RepoUrl.safeParse(url).success).toBe(true);
-    const b = bridge("<body><p>See #12, #1 and #9999999.</p></body>");
-    const before = b.window.document.body.textContent;
-    b.message({ type: "emend:repo", url });
-    const links = [...b.window.document.querySelectorAll("a")];
-    expect(links.map((link) => link.textContent)).toEqual(["#12", "#1", "#9999999"]);
-    for (const [index, number] of [12, 1, 9999999].entries()) {
-      const link = required(links[index]);
-      expect(link.getAttribute("href")).toBe(`${url}/issues/${number}`);
-      expect(link.getAttribute("rel")).toBe("noopener noreferrer nofollow");
-      expect(link.getAttribute("target")).toBe("_blank");
-    }
-    expect(b.window.document.body.textContent).toBe(before);
-  },
-);
+test.each([
+  repoUrl,
+  "https://git.example.test:8443/Owner.name/repo_name-1",
+  "HTTPS://github.com/o/r",
+  "Https://git.example.test:443/Owner.name/repo_name-1",
+])("the bridge links issue text with the checked repository URL %s without changing text", (url) => {
+  expect(RepoUrl.safeParse(url).success).toBe(true);
+  const b = bridge("<body><p>See #12, #1 and #9999999.</p></body>");
+  const before = b.window.document.body.textContent;
+  b.message({ type: "emend:repo", url });
+  const links = [...b.window.document.querySelectorAll("a")];
+  expect(links.map((link) => link.textContent)).toEqual(["#12", "#1", "#9999999"]);
+  for (const [index, number] of [12, 1, 9999999].entries()) {
+    const link = required(links[index]);
+    expect(link.getAttribute("href")).toBe(new URL(`${url}/issues/${number}`).href);
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer nofollow");
+    expect(link.getAttribute("target")).toBe("_blank");
+  }
+  expect(b.window.document.body.textContent).toBe(before);
+});
 
 test.each([
   "a",
@@ -138,32 +142,134 @@ test("issue linking uses the core reference boundaries within each text node", (
   expect(b.window.document.body.textContent).toBe(before);
 });
 
+const referenceSamples = [
+  "page#12",
+  "a&#12",
+  "x/#12",
+  "#012",
+  "#12345678",
+  "#12a",
+  "##12",
+  "#0",
+  "#",
+  "#1",
+  "#12",
+  "#123",
+  "#1234",
+  "#12345",
+  "#123456",
+  "#1234567",
+  "#9999999",
+  "#10000000",
+  "#1#2",
+  "(#12), [#34]; #56!",
+  "\"#12\" '#34' —#56.",
+  "é#12",
+  "#12é",
+  "漢#12",
+  "#12字",
+  "_#12 #12_",
+  "#12\n#34\t#56",
+  "Before #12 and #34 after.",
+];
+
+test.each(referenceSamples)("bridge reference links match core for %s", (value) => {
+  const transform = linkIssueRefs();
+  const tree: HtmlRoot = { type: "root", children: [{ type: "text", value }] };
+  const file = { data: { repoUrl } } as unknown as Parameters<typeof transform>[1];
+  transform(tree, file, () => {});
+  const expected = tree.children.flatMap((node) =>
+    node.type === "element" && node.tagName === "a"
+      ? [
+          {
+            text: node.children.map((child) => (child.type === "text" ? child.value : "")).join(""),
+            href: node.properties.href,
+          },
+        ]
+      : [],
+  );
+  const b = bridge("<body><p></p></body>");
+  required(b.window.document.querySelector("p")).textContent = value;
+  b.message({ type: "emend:repo", url: repoUrl });
+  expect(
+    [...b.window.document.querySelectorAll("a")].map((link) => ({
+      text: link.textContent,
+      href: link.getAttribute("href"),
+    })),
+  ).toEqual(expected);
+  expect(b.window.document.body.textContent).toBe(value);
+});
+
 test("without a repository message issue references stay plain text", () => {
   const b = bridge("<body><p>#12</p></body>");
   expect(b.window.document.querySelector("a")).toBeNull();
 });
 
-test.each([
+const repoUrlCandidates = [
+  repoUrl,
+  "https://git.example.test:8443/Owner.name/repo_name-1",
+  "https://git.example.test:443/o/r",
+  "https://git.example.test:0/o/r",
+  "https://git.example.test:65535/o/r",
+  "https://git-host.example.test/owner-name/repo-name",
+  "https://example.test/owner_name/repo_name",
+  "https://example.test/owner.name/repo.name",
+  "https://example.test/.owner/_repo",
+  "HTTPS://github.com/o/r",
+  "Https://git.example.test:443/Owner.name/repo_name-1",
+  `https://example.test/o/${"r".repeat(2048 - "https://example.test/o/".length)}`,
   "javascript:alert(1)",
   "http://github.com/o/r",
   "https://GitHub.com/o/r",
+  "HTTPS://GitHub.com/o/r",
   "https://github.com/o/r/x",
+  "https://github.com/o/r/",
+  "https://github.com/o",
+  "https://github.com//r",
   "https://github.com/o/r?x",
+  "https://github.com/o/r?",
   "https://github.com/o/r#x",
+  "https://github.com/o/r#",
   "https://user:pw@github.com/o/r",
+  "https://user@github.com/o/r",
+  "https:///o/r",
+  "https://github.com/./r",
   "https://github.com/../r",
   "https://github.com/o/.",
+  "https://github.com/o/..",
+  "https://github.com/%6f/r",
+  "https://github.com/o/r%2fmore",
+  "https://git_host.example.test/o/r",
+  "https://-host.example.test/o/r",
+  "https://example.test./o/r",
+  "https://github.com:123456/o/r",
   "https://github.com:99999/o/r",
+  " https://github.com/o/r",
+  "https://github.com/o/r ",
+  "https://github.com/o/r\t",
   "https://github.com/o/r\n",
+  "https://github.com/o/r\u0000",
+  "https://github.com/o/r\u0085",
+  "https://github.com/o/r\u200b",
+  "https://github.com/o/r\u200d",
+  `https://example.test/o/${"r".repeat(2049 - "https://example.test/o/".length)}`,
   12,
   null,
-])("an invalid repository URL %s is ignored without consuming the first valid message", (url) => {
+];
+
+test.each(repoUrlCandidates)("bridge repository URL acceptance matches RepoUrl for %s", (url) => {
   const b = bridge("<body><p>#12</p></body>");
-  expect(RepoUrl.safeParse(url).success).toBe(false);
+  const checked = RepoUrl.safeParse(url);
   b.message({ type: "emend:repo", url });
-  expect(b.window.document.querySelector("a")).toBeNull();
-  b.message({ type: "emend:repo", url: repoUrl });
-  expect(b.window.document.querySelector("a")?.getAttribute("href")).toBe(`${repoUrl}/issues/12`);
+  const links = [...b.window.document.querySelectorAll("a")];
+  expect(links).toHaveLength(checked.success ? 1 : 0);
+  if (checked.success) {
+    expect(required(links[0]).getAttribute("href")).toBe(new URL(`${checked.data}/issues/12`).href);
+  } else {
+    b.message({ type: "emend:repo", url: repoUrl });
+    expect(b.window.document.querySelector("a")?.getAttribute("href")).toBe(`${repoUrl}/issues/12`);
+  }
+  expect(b.window.document.body.textContent).toBe("#12");
 });
 
 test("only the first valid repository message from the parent links text", () => {
@@ -201,6 +307,61 @@ test("only bridge-created issue links post a number and prevent default navigati
   expect(b.post.mock.calls.filter(([data]) => data.type === "emend:issue")).toEqual([]);
 });
 
+const issueClicks = [
+  { name: "Ctrl click", type: "click", init: { button: 0, ctrlKey: true } },
+  { name: "Meta click", type: "click", init: { button: 0, metaKey: true } },
+  { name: "Shift click", type: "click", init: { button: 0, shiftKey: true } },
+  { name: "Alt click", type: "click", init: { button: 0, altKey: true } },
+  { name: "middle click", type: "auxclick", init: { button: 1 } },
+];
+
+test.each(issueClicks)("$name on a bridge issue link posts once and prevents default", ({ type, init }) => {
+  const b = bridge("<body><p>#12</p></body>");
+  b.message({ type: "emend:repo", url: repoUrl });
+  b.post.mockClear();
+  const event = new b.window.MouseEvent(type, { bubbles: true, cancelable: true, ...init });
+  required(b.window.document.querySelector("a")).dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+  expect(b.post.mock.calls).toEqual([[{ type: "emend:issue", number: 12 }, "*"]]);
+});
+
+test.each(issueClicks)("$name on an authored link is not handled by the bridge", ({ type, init }) => {
+  const b = bridge(`<body><a href="${repoUrl}/issues/12">Authored link</a></body>`);
+  b.message({ type: "emend:repo", url: repoUrl });
+  b.post.mockClear();
+  const link = required(b.window.document.querySelector("a"));
+  let prevented: boolean | undefined;
+  link.addEventListener(type, (event) => {
+    prevented = event.defaultPrevented;
+    event.preventDefault();
+  });
+  link.dispatchEvent(new b.window.MouseEvent(type, { bubbles: true, cancelable: true, ...init }));
+  expect(prevented).toBe(false);
+  expect(b.post).not.toHaveBeenCalled();
+});
+
+test("a right-button auxclick is ignored on bridge and authored links", () => {
+  const b = bridge(`<body><p>#12</p><a href="${repoUrl}/issues/12">Authored link</a></body>`);
+  b.message({ type: "emend:repo", url: repoUrl });
+  b.post.mockClear();
+  for (const link of b.window.document.querySelectorAll("a")) {
+    const event = new b.window.MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 2 });
+    link.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+  }
+  expect(b.post).not.toHaveBeenCalled();
+});
+
+test.each(issueClicks)("an already prevented $name does not post an issue", ({ type, init }) => {
+  const b = bridge("<body><p>#12</p></body>");
+  b.message({ type: "emend:repo", url: repoUrl });
+  b.post.mockClear();
+  const event = new b.window.MouseEvent(type, { bubbles: true, cancelable: true, ...init });
+  event.preventDefault();
+  required(b.window.document.querySelector("a")).dispatchEvent(event);
+  expect(b.post).not.toHaveBeenCalled();
+});
+
 test("linking rebuilds earlier highlights around the same quote", () => {
   const b = bridge("<body><p>See #12 and #34 today.</p></body>");
   const quote = "#12 and #34";
@@ -214,11 +375,54 @@ test("linking rebuilds earlier highlights around the same quote", () => {
   expect(b.window.document.querySelectorAll("a")).toHaveLength(2);
 });
 
+test("a megabyte text node with 10000 references is replaced once without splitting", () => {
+  const value = `${"x".repeat(100)} #12 `.repeat(10000);
+  expect(value.length).toBeGreaterThanOrEqual(1024 * 1024);
+  const b = bridge(`<body><p>${value}</p></body>`);
+  const paragraph = required(b.window.document.querySelector("p"));
+  expect(paragraph.childNodes).toHaveLength(1);
+  const original = required(paragraph.firstChild);
+  const before = b.window.document.body.textContent;
+  const split = vi.spyOn(b.window.Text.prototype, "splitText");
+  const replace = vi.spyOn(b.window.Node.prototype, "replaceChild");
+  const observer = new b.window.MutationObserver(() => {});
+  observer.observe(b.window.document.body, { subtree: true, childList: true });
+  b.message({ type: "emend:repo", url: repoUrl });
+  const records = observer.takeRecords();
+  observer.disconnect();
+  expect(split).not.toHaveBeenCalled();
+  expect(replace).toHaveBeenCalledExactlyOnceWith(expect.any(b.window.DocumentFragment), original);
+  expect(replace.mock.contexts).toEqual([paragraph]);
+  // happy-dom reports each fragment insertion separately; browsers report one replacement record.
+  // Check the single replacement call above and every observed addition/removal without coalescing records.
+  expect(records.length).toBeGreaterThan(0);
+  expect(records.every((record) => record.type === "childList" && record.target === paragraph)).toBe(true);
+  expect(records.flatMap((record) => [...record.removedNodes])).toEqual([original]);
+  expect(records.flatMap((record) => [...record.addedNodes])).toEqual([...paragraph.childNodes]);
+  expect(paragraph.querySelectorAll("a")).toHaveLength(10000);
+  expect(b.window.document.body.textContent).toBe(before);
+});
+
 test("issue linking stops at the link cap and preserves remaining text", () => {
   const b = bridge(`<body><p>${"#12 ".repeat(10001)}</p></body>`);
   const before = b.window.document.body.textContent;
   b.message({ type: "emend:repo", url: repoUrl });
   expect(b.window.document.querySelectorAll("a")).toHaveLength(10000);
+  expect(b.window.document.body.textContent).toBe(before);
+});
+
+test("the link cap is shared across text nodes and leaves the remaining suffix plain", () => {
+  const b = bridge(`<body><p>${"#12 ".repeat(9999)}</p><p>#34 #56 tail</p><p>#78</p></body>`);
+  const before = b.window.document.body.textContent;
+  b.message({ type: "emend:repo", url: repoUrl });
+  const paragraphs = b.window.document.querySelectorAll("p");
+  expect(required(paragraphs[0]).querySelectorAll("a")).toHaveLength(9999);
+  const second = required(paragraphs[1]);
+  expect(second.querySelectorAll("a")).toHaveLength(1);
+  expect(second.querySelector("a")?.textContent).toBe("#34");
+  expect(second.lastChild?.nodeType).toBe(b.window.Node.TEXT_NODE);
+  expect(second.lastChild?.textContent).toBe(" #56 tail");
+  expect(required(paragraphs[2]).querySelector("a")).toBeNull();
   expect(b.window.document.body.textContent).toBe(before);
 });
 

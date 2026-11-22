@@ -1264,7 +1264,8 @@ destination again before navigating.
 After ready, before highlights, the parent sends `{ type: "emend:repo", url: RepoUrl }` when a
 repository URL is available. The bridge validates it and accepts only the first valid message;
 it links `#123` text, skipping existing links, code and preformatted text, form controls,
-script/style/template/noscript, non-HTML elements and shadow roots. A click sends
+script/style/template/noscript, non-HTML elements and shadow roots. A click on a bridge link,
+including a modified click or a middle click, sends
 `{ type: "emend:issue", number }` with only an integer from 1 through 9999999. The parent opens
 its own `repoUrl/issues/<number>` in a new tab with `noopener,noreferrer`.
 
