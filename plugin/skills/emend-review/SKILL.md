@@ -157,6 +157,10 @@ Write the opening fields below. The app groups them for the reviewer.
 - `tldr`: the TL;DR, as the writing reference says.
 - `whyItMatters`: what the change gives the product, or what it prepares for, in one or two sentences.
   It shows inside the TL;DR card.
+- `needsYou`: at most four items `{ "kind": "decide" | "accept" | "confirm-drift" | "answer", "text": "<one line>", "topic": "<slug>" }`.
+  The topic is optional. The card sits under the TL;DR; the status line counts the items.
+  `[]` says nothing needs a decision. Write it only when you write `decisions` from first-hand intent.
+  With `decisions: null`, leave `needsYou` out. See "Needs you" in the writing reference.
 - `area`: one to three words naming the part of the project, such as `cli › serve`.
   Use plain text, at most 60 characters. The breadcrumb shows it after the project.
   Leave it out and the app shows the deepest folder the changed files share.
@@ -175,8 +179,8 @@ Write the opening fields below. The app groups them for the reviewer.
   Include the commit count and scope, renamed files, dependencies, unchanged areas and cited docs.
   It shows muted, below the guide.
 - `decisions`: write this only when the user's request is available in this conversation and
-  you are not a sub-agent. Write it as the writing reference says under "Decisions": **Needs
-  you** first, then **Decided for you**, drift with the request quoted, and a short **Trail**.
+  you are not a sub-agent. Write it as the writing reference says under "Decisions":
+  **Decided for you**, drift with the request quoted, and a short **Trail**.
   With no first-hand intent, set this field to `null`: the decisions section is **not
   written**. Never reconstruct intent from commits or the diff.
 - `glossary`: the glossary, as the writing reference says.
@@ -312,8 +316,8 @@ started would deliver the reviewer's Send to no one. Return to the caller instea
 If you set `decisions` to `null`, add one line for a caller that has the user's request, with
 this command filled in:
 `emend publish --manifest "<review-folder>/review.json" --review <review-id>`.
-The caller may then write `decisions` into that `review.json` from the user's request in its own
-conversation, as the `decisions` bullet in "Write for the reviewer" says, never from your report,
+The caller may then write `decisions` and `needsYou` into that `review.json` from the user's
+request in its own conversation, as the opening bullets in "Write for the reviewer" say, never from your report,
 commits or the diff. It changes nothing else in that file or the worktree, and runs the command
 right away in the directory you ran `emend publish` in.
 

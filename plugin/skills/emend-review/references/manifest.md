@@ -146,7 +146,7 @@ Without `main`, the app opens a nonempty writeup, then the first doc in manifest
 An explicit visible URL tab wins; a main doc opens Docs scrolled to that document.
 
 `decisions: null` means the decisions section was not written because the original request is
-unavailable. When that request is known first-hand, replace null with Markdown: the Needs you,
+unavailable. When that request is known first-hand, replace null with Markdown: the
 Decided for you, drift and Trail lines the writing reference describes under "Decisions". A
 docs-only review omits both `base` and `head`, includes only doc entries, and needs `--key` for its
 first publication.
@@ -155,6 +155,11 @@ A code review on a detached HEAD also needs `--key` for its first publication.
 Pick a key unique to this review, such as the doc's name and today's date
 (`offline-sync-plan-2026-11-02`). A key names one review: publishing with a key that is already in use adds
 a revision to that review.
+
+`needsYou` is an optional list of `{ "kind": "decide" | "accept" | "confirm-drift" | "answer", "text": "<one line>", "topic": "<slug>" }`.
+Each text is nonblank Markdown, at most 300 characters on one line. The topic is optional and must be declared.
+Use at most 4 items; publish refuses a fifth. `[]` says nothing needs a decision.
+Write it with `decisions` from first-hand intent; with `decisions: null`, leave it out.
 
 Screenshots and other images for the writeup go in `media`, a list next to `files`.
 Each entry is `{ "path": "media/before.png", "source": ".shots/before.png" }`.

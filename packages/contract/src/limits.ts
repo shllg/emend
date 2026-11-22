@@ -27,6 +27,8 @@ export const LIMITS = {
   diffContextLines: 3,
   titleChars: 200,
   areaChars: 60,
+  needsYouItems: 4,
+  needsYouChars: 300,
   headingsPerDoc: 1024,
   htmlPartsPerDoc: 10000,
   htmlPartsPerRevision: 100000,

@@ -2186,3 +2186,184 @@ test("pair controls preserve the prose element and switch only the trusted pair"
   expect(screen.queryByRole("group", { name: "Compare screenshots" })).toBeNull();
   expect(container.querySelectorAll("img")).toHaveLength(2);
 });
+
+test.each([false, true])(
+  "Needs you follows TL;DR with commentable lines and topic links (new layout=%s)",
+  async (newLayout) => {
+    const writeup = RenderedWriteup.parse(
+      await renderWriteup(
+        {
+          overview: "- **Goal:** Healthy plants.\n- **Change:** More water.",
+          tldr: "Keep the garden growing.",
+          ...(newLayout ? { whyItMatters: "More plants survive." } : {}),
+          needsYou: [
+            { kind: "decide", text: "Choose the **seed**.", topic: topic.slug },
+            { kind: "accept", text: "Accept the longer wait." },
+          ],
+          decisions: "Keep the soil.",
+          topics: { seed: { why: "The soil dries.", body: "Water daily." } },
+        },
+        [topic],
+      ),
+    );
+    const { container } = mount(
+      <Writeup {...props} writeup={writeup} topics={[topic]} search={{ tab: "writeup", rev: 2 }} />,
+    );
+    const order = [...container.querySelectorAll("[data-reading-section]")].map((group) =>
+      group.getAttribute("data-reading-section"),
+    );
+    const at = order.indexOf("tldr");
+    expect(order.slice(at, at + (newLayout ? 3 : 2))).toEqual(
+      newLayout ? ["tldr", "needsYou", "facts"] : ["tldr", "needsYou"],
+    );
+    const card = container.querySelector<HTMLElement>('[data-reading-section="needsYou"]');
+    if (!card) throw new Error("Missing Needs you card");
+    expect(card.classList.contains("em-writeup-card")).toBe(true);
+    expect(within(card).getByRole("heading", { name: "Needs you" })).toBeTruthy();
+    expect([...card.querySelectorAll("dt")].map((label) => label.textContent)).toEqual(["Decide", "Accept"]);
+    expect([...card.querySelectorAll("[data-needs-kind]")].map((row) => row.getAttribute("data-needs-kind"))).toEqual([
+      "decide",
+      "accept",
+    ]);
+    expect(card.querySelector("strong")?.textContent).toBe("seed");
+    expect(within(card).getByText("Accept the longer wait.")).toBeTruthy();
+    expect(within(card).getAllByRole("button", { name: "Comment on block" })).toHaveLength(2);
+    const jump = within(card).getByRole("link", { name: topic.title });
+    expect(jump.getAttribute("href")).toBe(`/r/${reviewId}?tab=writeup&rev=2#topic-seed`);
+    expect(jump.querySelector("bdi")?.textContent).toBe(topic.title);
+    expect(container.querySelector("#topic-seed")).not.toBeNull();
+    const status = container.querySelector(".em-needs-status");
+    expect(status?.getAttribute("data-state")).toBe("open");
+    expect(status?.nextElementSibling?.getAttribute("data-reading-section")).toBe(order[0]);
+    expect(screen.getByRole("link", { name: "2 decisions" }).getAttribute("href")).toBe(
+      `/r/${reviewId}?tab=writeup&rev=2#block-${writeup.needsYou?.[0]?.blockIds[0]}`,
+    );
+  },
+);
+
+test.each([false, true])("Needs you distinguishes absent from empty (present=%s)", async (present) => {
+  const writeup = RenderedWriteup.parse(
+    await renderWriteup(
+      {
+        overview: "",
+        tldr: "Keep the garden growing.",
+        decisions: "",
+        topics: {},
+        ...(present ? { needsYou: [] } : {}),
+      },
+      [],
+    ),
+  );
+  const { container } = mount(<Writeup {...props} writeup={writeup} />);
+  expect(container.querySelector('[data-reading-section="needsYou"]')).toBeNull();
+  const status = container.querySelector(".em-needs-status");
+  if (present) {
+    expect(status?.textContent).toBe("Nothing needs a decision. Approve on the proof.");
+    expect(status?.getAttribute("data-state")).toBe("clear");
+    expect(status?.querySelector("a")).toBeNull();
+  } else expect(status).toBeNull();
+});
+
+test("a Needs you thread stays on its block, counts in the outline and accepts a comment", async () => {
+  const writeup = RenderedWriteup.parse(
+    await renderWriteup(
+      {
+        overview: "",
+        tldr: "Keep the garden growing.",
+        decisions: "",
+        topics: {},
+        needsYou: [{ kind: "answer", text: "When should the seeds arrive?" }],
+      },
+      [],
+    ),
+  );
+  const need = writeup.sections.find((section) => section.key === "needsYou")?.blocks[0];
+  if (!need) throw new Error("Missing Needs you block");
+  const target = { kind: "writeup-span" as const, ...blockAnchor(need) };
+  const thread: ThreadView = {
+    id: reviewId,
+    createdOn: 1,
+    state: "open",
+    target,
+    placement: {
+      status: "placed",
+      location: { kind: "writeup-span", blockId: need.id, start: 0, end: need.text.length },
+    },
+    comments: [{ id: reviewId, author: "user", body: "The seeds arrive tomorrow.", sent: false, sentOn: null }],
+  };
+  const { container } = mount(<Writeup {...props} writeup={writeup} threads={[thread]} />);
+  expect(screen.getByRole("link", { name: "1 decision" }).getAttribute("href")).toBe(`/r/${reviewId}#block-${need.id}`);
+  expect(screen.queryByRole("region", { name: "Comments on hidden text" })).toBeNull();
+  const outline = screen.getByRole("navigation", { name: "Writeup outline" });
+  expect(within(outline).getByRole("button", { name: /Needs you/ }).textContent).toContain("1 comment");
+  const wrapper = container.querySelector(`#block-${need.id}`)?.closest<HTMLElement>(".em-reading-block");
+  if (!wrapper) throw new Error("Missing commentable Needs you block");
+  fireEvent.click(screen.getByRole("button", { name: "1 comment" }));
+  expect(screen.getByText("The seeds arrive tomorrow.")).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("dialog", { name: "Comment thread" }), { key: "Escape" });
+  fireEvent.click(within(wrapper).getByRole("button", { name: "Comment on block" }));
+  fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "Use the morning delivery." } });
+  fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+  expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body).target).toEqual(target);
+});
+
+test.each(["diff", "empty", "unknown"] as const)(
+  "Needs you topic jumps handle %s destinations on a phone",
+  async (destination) => {
+    const hostileTitle = "<img src=x onerror=alert(1)>";
+    const topics = [{ ...topic, title: hostileTitle }];
+    const writeup = RenderedWriteup.parse(
+      await renderWriteup(
+        {
+          overview: "",
+          tldr: "Keep the garden growing.",
+          decisions: "",
+          topics: {},
+          needsYou: [
+            {
+              kind: "confirm-drift",
+              text: "Use the later planting date?",
+              topic: destination === "unknown" ? "unknown" : topic.slug,
+            },
+          ],
+        },
+        topics,
+      ),
+    );
+    const { container } = mount(
+      <Writeup
+        {...props}
+        phone
+        search={{ tab: "writeup", rev: 2 }}
+        writeup={writeup}
+        topics={topics}
+        files={destination === "empty" ? [] : [file]}
+      />,
+    );
+    const jump = container.querySelector(".em-needs-topic");
+    expect(screen.getByText("Confirm drift")).toBeTruthy();
+    if (destination === "diff") {
+      expect(jump?.getAttribute("href")).toBe(`/r/${reviewId}?tab=diff&rev=2#diff-topic-seed`);
+      expect(jump?.querySelector("bdi")?.textContent).toBe(hostileTitle);
+      expect(jump?.querySelector("img")).toBeNull();
+    } else expect(jump).toBeNull();
+  },
+);
+
+test("a Needs you section without metadata keeps its generic blocks, and missing ids are skipped", () => {
+  const need: RenderedBlock = { ...block, id: "needsYou-0123abcd", section: "needsYou" };
+  const writeup: RenderedWriteup = { sections: [{ key: "needsYou", label: "Needs you", topic: null, blocks: [need] }] };
+  const first = mount(<Writeup {...props} writeup={writeup} />);
+  expect(first.container.querySelector(`#block-${need.id}`)).not.toBeNull();
+  expect(first.container.querySelector(".em-needs-status, .em-writeup-needs")).toBeNull();
+  first.unmount();
+  const next = mount(
+    <Writeup
+      {...props}
+      writeup={{ ...writeup, needsYou: [{ kind: "answer", blockIds: ["needsYou-ffffffff", need.id] }] }}
+    />,
+  );
+  expect(next.container.querySelectorAll(".em-writeup-needs [data-block-id]")).toHaveLength(1);
+  expect(next.container.querySelector(`#block-${need.id}`)).not.toBeNull();
+});

@@ -1,10 +1,11 @@
 import type { RenderedWriteup, RevisionView } from "@emend/contract";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, CircleAlert, CircleCheck } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef } from "react";
 import { type CodeFocus, sameCodeFocus } from "../../lib/code-focus.ts";
 import { plural } from "../../lib/count.ts";
 import { diffGroups } from "../../lib/diff-groups.ts";
 import { HIDDEN_COMMENTS_GROUP, HIDDEN_WRITEUP_SECTIONS } from "../../lib/hidden-writeup.ts";
+import { needsYouLabels, needsYouStatus } from "../../lib/needs-you.ts";
 import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { rankedTopics } from "../../lib/topics.ts";
 import {
@@ -152,6 +153,7 @@ export function Writeup({
     }
     for (const section of writeup.sections) {
       if (HIDDEN_WRITEUP_SECTIONS.has(section.key)) continue;
+      if (section.key === "needsYou" && writeup.needsYou !== undefined) continue;
       if (newLayout && ["tldr", "whyItMatters", "checked", "notChecked"].includes(section.key)) continue;
       const blocks = section.blocks.filter((block) => !lifted.has(block.id));
       if (section.blocks.length && !blocks.length) continue;
@@ -287,6 +289,43 @@ export function Writeup({
       const heading = kind === "why" ? "Why" : kind === "example" ? "Example" : "Details";
       group.subsections?.push({ key: section.key, heading, kind, blocks: section.blocks });
     }
+    const written = new Set(groups.flatMap((group) => (group.id ? [group.id] : [])));
+    const topicHref = (slug: string) =>
+      written.has(`topic-${slug}`)
+        ? link(`topic-${slug}`)
+        : fileCount(slug) > 0
+          ? link(`diff-topic-${slug}`, true)
+          : undefined;
+    const needsSection = writeup.sections.find((section) => section.key === "needsYou");
+    if (writeup.needsYou !== undefined && needsSection) {
+      const blocksById = new Map(needsSection.blocks.map((block) => [block.id, block]));
+      const needs = writeup.needsYou.map((item, index) => {
+        const topic = item.topic ? bySlug.get(item.topic)?.topic : undefined;
+        const href = topic ? topicHref(topic.slug) : undefined;
+        return {
+          key: String(index),
+          kind: item.kind,
+          label: needsYouLabels[item.kind],
+          blocks: item.blockIds.flatMap((id) => {
+            const block = blocksById.get(id);
+            return block ? [block] : [];
+          }),
+          jump:
+            topic && href ? (
+              <a className="em-needs-topic" href={href}>
+                <span aria-hidden="true">→</span> <bdi>{topic.title}</bdi>
+              </a>
+            ) : undefined,
+        };
+      });
+      groups.splice(groups.findIndex((group) => group.key === "tldr") + 1, 0, {
+        key: "needsYou",
+        heading: "Needs you",
+        presentation: "needsYou",
+        blocks: [],
+        needs,
+      });
+    }
     if (newLayout) {
       const furtherDown = groups.slice(1).flatMap((group) => {
         const first = group.blocks[0];
@@ -324,15 +363,21 @@ export function Writeup({
         { key: "frame", label: "Frame", facts: frame },
       ].filter((group) => group.facts.length);
       if (factGroups.length)
-        groups.splice(1, 0, { key: "facts", heading: "Facts", presentation: "facts", blocks: [], factGroups });
+        groups.splice(groups[1]?.key === "needsYou" ? 2 : 1, 0, {
+          key: "facts",
+          heading: "Facts",
+          presentation: "facts",
+          blocks: [],
+          factGroups,
+        });
     }
     if (ranked.length) {
-      const written = new Set(groups.flatMap((group) => (group.id ? [group.id] : [])));
       const afterIntro =
         groups.findLastIndex((group) =>
           [
             "overview",
             "tldr",
+            "needsYou",
             "facts",
             "checked",
             "notChecked",
@@ -347,19 +392,7 @@ export function Writeup({
         key: "topics-map",
         heading: "Topics",
         blocks: [],
-        content: (
-          <TopicsMap
-            topics={ranked}
-            fileCount={fileCount}
-            href={(slug) =>
-              written.has(`topic-${slug}`)
-                ? link(`topic-${slug}`)
-                : fileCount(slug) > 0
-                  ? link(`diff-topic-${slug}`, true)
-                  : undefined
-            }
-          />
-        ),
+        content: <TopicsMap topics={ranked} fileCount={fileCount} href={topicHref} />,
       });
     }
     const shownBlocks = new Set(groups.flatMap((group) => groupBlocks(group).map((block) => block.id)));
@@ -396,6 +429,7 @@ export function Writeup({
   }, [
     writeup.sections,
     writeup.area,
+    writeup.needsYou,
     topics,
     files,
     docs,
@@ -408,6 +442,10 @@ export function Writeup({
     props.changedBlocks,
   ]);
   const outline = !phone && groups.filter((group) => group.key !== "topics-map").length >= 2;
+  const status = needsYouStatus(writeup.needsYou);
+  const openNeeds = (writeup.needsYou?.length ?? 0) > 0;
+  const firstNeedBlock = writeup.needsYou?.[0]?.blockIds[0];
+  const NeedsIcon = openNeeds ? CircleAlert : CircleCheck;
   useCurrentTopic(root, onCurrentTopic, writeup.sections, visible && !outline);
   return (
     <>
@@ -421,7 +459,21 @@ export function Writeup({
             onCurrentTopic={onCurrentTopic}
           />
         )}
-        <BlockReader {...props} topics={topics} groups={groups} files={files} onNote={onNote} />
+        <BlockReader
+          {...props}
+          topics={topics}
+          groups={groups}
+          files={files}
+          onNote={onNote}
+          lead={
+            status !== undefined && (
+              <p className="em-needs-status" data-state={openNeeds ? "open" : "clear"}>
+                <NeedsIcon size={14} aria-hidden="true" />
+                {openNeeds && firstNeedBlock ? <a href={link(`block-${firstNeedBlock}`)}>{status}</a> : status}
+              </p>
+            )
+          }
+        />
       </div>
       <GlossaryTerms root={root} terms={writeup.terms} href={(blockId) => link(`block-${blockId}`)} />
     </>

@@ -402,6 +402,38 @@
     border-radius: 12px;
     padding: 16px 20px;
   }
+  .em-writeup-needs {
+    --reading-inset: 23px;
+    border-left: 3px solid var(--ochre-400);
+  }
+  .em-needs-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 12px;
+    color: var(--fg-3);
+    font: 400 13px / 1.4 var(--font-sans);
+  }
+  .em-needs-status svg {
+    flex-shrink: 0;
+  }
+  .em-needs-status[data-state="open"] svg {
+    color: var(--ochre-400);
+  }
+  .em-needs-status a:hover {
+    color: var(--fg-link);
+    text-decoration: underline;
+  }
+  .em-needs-topic {
+    display: block;
+    width: fit-content;
+    margin-top: 4px;
+    color: var(--fg-link);
+    font: 400 13px / 1.4 var(--font-sans);
+  }
+  .em-needs-topic:hover {
+    text-decoration: underline;
+  }
   /* A Markdown doc's TL;DR section: its heading reads as the card's kicker. */
   .em-reading-block + .em-doc-tldr {
     margin-top: var(--space-6);
@@ -450,6 +482,12 @@
     min-width: 0;
     overflow-wrap: anywhere;
     color: var(--fg-reading);
+  }
+  .em-needs-you dt {
+    color: var(--fg-reading-strong);
+  }
+  .em-needs-you dd {
+    --reading-inset: calc(23px + var(--facts-label-width) + var(--facts-gap));
   }
   .em-writeup-fact .em-writeup-details {
     margin-top: 0;
@@ -512,6 +550,9 @@
     }
     .em-writeup-fact dd {
       --reading-inset: 0px;
+    }
+    .em-needs-you dd {
+      --reading-inset: 23px;
     }
     .em-writeup-pair > .em-reading-block:last-child {
       --reading-comment-offset: 32px;
