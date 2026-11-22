@@ -76,7 +76,7 @@ function LinkChip({ link }: { link: ReturnType<typeof safeLinks>[number] }) {
 
 function RelatedReviewChip({ entry }: { entry: RelatedReview }) {
   const label = entry.role === "intent" ? "Intent review" : "Code review";
-  const name = `${label}${entry.state === "approved" ? ", approved" : ""}: ${entry.title}`;
+  const name = `${label}, ${entry.state}: ${entry.title}`;
   return (
     <Link
       to="/r/$reviewId"

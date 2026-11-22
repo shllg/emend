@@ -1366,7 +1366,7 @@ test.each([false, true])(
     expect(within(list).getAllByRole("listitem")).toHaveLength(2);
     for (const entry of related) {
       const label = entry.role === "intent" ? "Intent review" : "Code review";
-      const name = `${label}${entry.state === "approved" ? ", approved" : ""}: ${entry.title}`;
+      const name = `${label}, ${entry.state}: ${entry.title}`;
       const link = within(list).getByRole("link", { name });
       expect(link.getAttribute("href")).toBe(`/r/${entry.id}`);
       expect(link.getAttribute("title")).toBe(name);
@@ -1404,8 +1404,8 @@ test.each([false, true])("related titles cannot imitate the approved marker (pho
     },
   });
   const list = screen.getByRole("list", { name: "Related reviews" });
-  const open = within(list).getByRole("link", { name: `Intent review: ${title}` });
-  expect(open.getAttribute("title")).toBe(`Intent review: ${title}`);
+  const open = within(list).getByRole("link", { name: `Intent review, open: ${title}` });
+  expect(open.getAttribute("title")).toBe(`Intent review, open: ${title}`);
   expect(open.querySelector("svg.lucide-circle-check")).toBeNull();
   expect(within(open).queryByText("approved")).toBeNull();
 
@@ -1419,6 +1419,25 @@ test.each([false, true])("related titles cannot imitate the approved marker (pho
   expect(icon?.getAttribute("height")).toBe("12");
   expect(marker.previousElementSibling?.textContent).toBe("Intent review");
   expect(marker.nextElementSibling).toBe(within(approved).getByText(title));
+});
+
+test.each([
+  ["open", "Intent review, open: approved: Plan"],
+  ["approved", "Intent review, approved: approved: Plan"],
+  ["settled", "Intent review, settled: approved: Plan"],
+] as const)("related chips name the server state even when the title claims approval (%s)", (state, name) => {
+  mount({
+    metadata: {
+      ...review,
+      related: [{ id: "33333333-3333-4333-8333-333333333333", role: "intent", title: "approved: Plan", state }],
+    },
+  });
+  const list = screen.getByRole("list", { name: "Related reviews" });
+  const link = within(list).getByRole("link", { name });
+  expect(link.getAttribute("title")).toBe(name);
+  expect(within(link).getByText("approved: Plan").getAttribute("dir")).toBe("auto");
+  expect(link.querySelector("svg.lucide-circle-check") !== null).toBe(state === "approved");
+  expect(within(link).queryByText("approved") !== null).toBe(state === "approved");
 });
 
 test.each([false, true])("related review titles remain literal text (phone: %s)", (phone) => {

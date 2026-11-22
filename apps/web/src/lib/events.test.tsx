@@ -62,8 +62,7 @@ test("all valid events refresh inbox and their review; comment, delivery and ret
       await tick();
       expect(invalidate.mock.calls.map(([options]) => options?.queryKey)).toEqual([
         ["inbox"],
-        ["review", reviewId],
-        ...(type === "publish" ? [["review"]] : []),
+        ["publish", "send", "retire"].includes(type) ? ["review"] : ["review", reviewId],
         ...(["thread", "send", "claimed", "confirmed", "retire"].includes(type) ? [["revision", reviewId]] : []),
       ]);
     }
@@ -148,11 +147,7 @@ test("two tabs share one stream, parse forwarded events, and refresh the followe
   await tick();
   for (const tab of [leader, follower]) {
     expect(tab.view.getByLabelText(id).textContent).toBe("3");
-    expect(tab.invalidate.mock.calls.map(([options]) => options?.queryKey)).toEqual([
-      ["inbox"],
-      ["review", id],
-      ["review"],
-    ]);
+    expect(tab.invalidate.mock.calls.map(([options]) => options?.queryKey)).toEqual([["inbox"], ["review"]]);
     tab.invalidate.mockClear();
   }
   act(() => source().open());
@@ -303,7 +298,7 @@ function observe(client: QueryClient, key: string[], updatedAt: number) {
   return { fetcher, stop };
 }
 
-test.each([true, false])("publish refreshes reviews with no cached relation (active: %s)", async (active) => {
+test.each([true, false])("restore refreshes reviews with no cached relation (active: %s)", async (active) => {
   const { client } = await mount();
   const intentKey = ["review", other];
   const intent = observe(client, intentKey, Date.now());
@@ -311,36 +306,55 @@ test.each([true, false])("publish refreshes reviews with no cached relation (act
   client.setQueryData(["review", id], { related: [] });
   if (!active) intent.stop();
 
-  act(() => source().emit("publish", { reviewId: id, revision: 2 }));
+  act(() => source().emit("restore", { reviewId: id, revision: 2 }));
   await tick();
   expect(intent.fetcher).toHaveBeenCalledTimes(active ? 1 : 0);
   expect(client.getQueryState(intentKey)?.isInvalidated).toBe(!active);
   intent.stop();
 });
 
-test.each([true, false])(
-  "bin refreshes a cached review only when it lists the binned review (related: %s)",
-  async (related) => {
+test.each(["publish", "send", "retire", "reopen", "bin", "restore", "delete"])(
+  "%s refreshes every review view once without also invalidating the event's review key",
+  async (type) => {
     const { client, invalidate } = await mount();
-    const codeKey = ["review", other];
-    const code = observe(client, codeKey, Date.now());
-    client.setQueryData(codeKey, {
-      related: [{ id, role: "intent", title: "Synthetic intent", state: "open" }],
-    });
-    const reviewId = related ? id : "33333333-3333-4333-8333-333333333333";
+    const current = observe(client, ["review", id], Date.now());
+    const otherReview = observe(client, ["review", other], Date.now());
 
-    act(() => source().emit("bin", { reviewId, revision: 1 }));
+    act(() => source().emit(type, { reviewId: id, revision: 1, sendId: other }));
     await tick();
-    expect(code.fetcher).toHaveBeenCalledTimes(related ? 1 : 0);
+    expect(current.fetcher).toHaveBeenCalledOnce();
+    expect(otherReview.fetcher).toHaveBeenCalledOnce();
     expect(invalidate.mock.calls.map(([options]) => options?.queryKey)).toEqual([
       ["inbox"],
-      ["review", reviewId],
-      ...(related ? [codeKey] : []),
-      ["bin"],
+      ["review"],
+      ...(["bin", "restore", "delete"].includes(type) ? [["bin"]] : []),
+      ...(["send", "retire"].includes(type) ? [["revision", id]] : []),
     ]);
-    code.stop();
+    current.stop();
+    otherReview.stop();
   },
 );
+
+test("a thread event refreshes only its own review even when another cached view lists it", async () => {
+  const { client, invalidate } = await mount();
+  const current = observe(client, ["review", id], Date.now());
+  const otherReview = observe(client, ["review", other], Date.now());
+  client.setQueryData(["review", other], {
+    related: [{ id, role: "intent", title: "Synthetic intent", state: "open" }],
+  });
+
+  act(() => source().emit("thread", { reviewId: id, revision: 1, threadId: other }));
+  await tick();
+  expect(current.fetcher).toHaveBeenCalledOnce();
+  expect(otherReview.fetcher).not.toHaveBeenCalled();
+  expect(invalidate.mock.calls.map(([options]) => options?.queryKey)).toEqual([
+    ["inbox"],
+    ["review", id],
+    ["revision", id],
+  ]);
+  current.stop();
+  otherReview.stop();
+});
 
 test("an open refetches only data older than receipt, including data refreshed within the batch window", async () => {
   const { client } = await mount();
