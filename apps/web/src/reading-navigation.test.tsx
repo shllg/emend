@@ -1773,6 +1773,48 @@ test.each([1280, 390])("Show in place opens a writeup thread and reveals its pas
   expect(scroll.mock.instances).not.toContain(within(dialog).getByRole("article"));
   expect(!!screen.queryByRole("textbox", { name: "Reply" })).toBe(pixels === 390);
 });
+test.each([1280, 390])(
+  "Show in place lands on a comment whose verdict block the writeup hides at %s px",
+  async (pixels) => {
+    width = pixels;
+    currentRevision.writeup.sections.push({
+      key: "review",
+      label: "Review",
+      topic: null,
+      blocks: [
+        {
+          id: "review-12345678",
+          section: "review",
+          kind: "paragraph",
+          text: "Read everything.",
+          html: "<p>Read everything.</p>",
+        },
+      ],
+    });
+    currentRevision.threads = [
+      {
+        ...placedWriteupThread(),
+        target: { kind: "writeup-span", blockId: "review-12345678", quote: "Read everything.", prefix: "", suffix: "" },
+        placement: {
+          status: "placed",
+          location: { kind: "writeup-span", blockId: "review-12345678", start: 0, end: 16 },
+        },
+      },
+    ];
+    const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+    const { history } = mount("?tab=comments&rev=1");
+    fireEvent.click(await screen.findByRole("link", { name: "Show in place" }));
+    await screen.findByRole("heading", { name: "Topic 1: Plant a seed", hidden: pixels === 390 });
+    expect(searchParams(history).get("tab")).toBe("writeup");
+    expect(history.location.hash).toBe(`#thread-${id}`);
+    const hiddenComments = await screen.findByRole("region", { name: "Comments on hidden text" });
+    const card = document.getElementById(`thread-${id}`);
+    expect(card).not.toBeNull();
+    await waitFor(() => expect(scroll.mock.instances).toContain(card));
+    expect(hiddenComments.contains(card)).toBe(true);
+    expect(card?.closest("[hidden]")).toBeNull();
+  },
+);
 test.each([1280, 390].flatMap((pixels) => (["title", "summary"] as const).map((part) => ({ pixels, part }))))(
   "Show in place reaches a written topic's $part passage at $pixels px",
   async ({ pixels, part }) => {

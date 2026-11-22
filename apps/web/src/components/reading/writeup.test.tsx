@@ -1242,6 +1242,61 @@ test.each(["Read everything.", "Read topic “Plant a seed”."])(
   },
 );
 
+test.each(["sent", "resolved"] as const)("comments on hidden writeup text stay visible (state=%s)", (state) => {
+  const review: RenderedBlock = {
+    ...block,
+    id: "review-12345678",
+    section: "review",
+    text: "Read everything.",
+    html: "<p>Read everything.</p>",
+  };
+  const writeup: RenderedWriteup = {
+    sections: [
+      { ...plain("overview", "Overview"), blocks: [block] },
+      { key: "review", label: "Review", topic: null, blocks: [review] },
+    ],
+  };
+  const verdictThread: ThreadView = {
+    id: reviewId,
+    createdOn: 1,
+    state,
+    target: { kind: "writeup-span", ...blockAnchor(review) },
+    placement: {
+      status: "placed",
+      location: { kind: "writeup-span", blockId: review.id, start: 0, end: 16 },
+    },
+    comments: [{ id: reviewId, author: "user", body: "A synthetic verdict question", sent: true, sentOn: 1 }],
+  };
+  const overviewId = "22222222-2222-4222-8222-222222222222";
+  const overviewThread: ThreadView = {
+    id: overviewId,
+    createdOn: 1,
+    state: "sent",
+    target: { kind: "writeup-span", ...blockAnchor(block) },
+    placement: {
+      status: "placed",
+      location: { kind: "writeup-span", blockId: block.id, start: 0, end: blockAnchor(block).quote.length },
+    },
+    comments: [{ id: overviewId, author: "user", body: "A synthetic overview question", sent: true, sentOn: 1 }],
+  };
+  const { container, unmount } = mount(
+    <Writeup {...props} writeup={writeup} threads={[verdictThread, overviewThread]} />,
+  );
+  const hiddenComments = screen.getByRole("region", { name: "Comments on hidden text" });
+  expect(hiddenComments.closest("[hidden]")).toBeNull();
+  const cards = within(hiddenComments).getAllByRole("article");
+  expect(cards).toHaveLength(1);
+  expect(cards[0]?.id).toBe(`thread-${verdictThread.id}`);
+  expect(within(hiddenComments).getByText("The writeup no longer shows the text this comment is on.")).toBeTruthy();
+  expect(within(hiddenComments).getByText("A synthetic verdict question")).toBeTruthy();
+  expect(hiddenComments.querySelector(`#thread-${overviewThread.id}`)).toBeNull();
+  expect(container.querySelector("#block-review-12345678")).toBeNull();
+
+  unmount();
+  mount(<Writeup {...props} writeup={writeup} threads={[overviewThread]} />);
+  expect(screen.queryByRole("region", { name: "Comments on hidden text" })).toBeNull();
+});
+
 test("an opening without labelled lines keeps its available rows and the unlifted sections below", async () => {
   const writeup = RenderedWriteup.parse(
     await renderWriteup(

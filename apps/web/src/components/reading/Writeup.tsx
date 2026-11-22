@@ -15,7 +15,8 @@ import {
   usesOpeningCard,
 } from "../../lib/writeup-facts.ts";
 import type { ReviewSearch } from "../../router.tsx";
-import { BlockReader, type ReaderFact, type ReaderGroup, type ReaderProps } from "./BlockReader.tsx";
+import { ThreadCard } from "../threads/ThreadCard.tsx";
+import { BlockReader, groupBlocks, type ReaderFact, type ReaderGroup, type ReaderProps } from "./BlockReader.tsx";
 import { GlossaryTerms } from "./GlossaryTerms.tsx";
 import { undoSentence } from "./TopicChips.tsx";
 import { TopicsMap } from "./TopicsMap.tsx";
@@ -360,6 +361,36 @@ export function Writeup({
         ),
       });
     }
+    const shownBlocks = new Set(groups.flatMap((group) => groupBlocks(group).map((block) => block.id)));
+    const hiddenThreads = props.threads.filter(
+      (thread) =>
+        thread.placement.status === "placed" &&
+        thread.placement.location.kind === "writeup-span" &&
+        !shownBlocks.has(thread.placement.location.blockId),
+    );
+    if (hiddenThreads.length) {
+      groups.push({
+        key: "hidden-comments",
+        heading: "Comments on hidden text",
+        blocks: [],
+        content: (
+          <div className="space-y-3">
+            {hiddenThreads.map((thread) => (
+              <ThreadCard
+                key={thread.id}
+                surface="reading"
+                reviewId={props.reviewId}
+                revision={props.revision}
+                thread={thread}
+                changedBlocks={props.changedBlocks}
+                topics={topics}
+                note="The writeup no longer shows the text this comment is on."
+              />
+            ))}
+          </div>
+        ),
+      });
+    }
     return groups;
   }, [
     writeup.sections,
@@ -371,6 +402,7 @@ export function Writeup({
     code,
     link,
     props.threads,
+    props.reviewId,
     props.revision,
     props.changedBlocks,
   ]);

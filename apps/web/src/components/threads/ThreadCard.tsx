@@ -5,6 +5,7 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  EyeOff,
   Pencil,
   Reply,
   RotateCcw,
@@ -51,6 +52,7 @@ export type ThreadProps = {
   changedBlocks: RevisionView["changedBlocks"];
   topics?: TopicMeta[];
   showInPlace?: string;
+  note?: string;
 };
 export function blockLink(reviewId: string, revision: number, blockId: string, doc?: string) {
   return `/r/${encodeURIComponent(reviewId)}?rev=${revision}&tab=${doc ? `docs&doc=${encodeURIComponent(doc)}` : "writeup"}#block-${encodeURIComponent(blockId)}`;
@@ -112,6 +114,7 @@ export function ThreadCard({
   changedBlocks,
   topics,
   showInPlace,
+  note,
   surface = "reading",
   replyInFooter = false,
 }: ThreadProps) {
@@ -205,6 +208,12 @@ export function ThreadCard({
           />
         )}
       </header>
+      {note && (
+        <div className="flex items-start gap-2 border-b border-line-1 bg-warning-bg px-3 py-2 text-warning-fg [font:var(--type-meta)]">
+          <Icon icon={EyeOff} size={14} className="mt-px" />
+          <span>{note}</span>
+        </div>
+      )}
       {collapsed && quote && <div className="em-card__body">{quote}</div>}
       {!collapsed && (
         <>
